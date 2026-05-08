@@ -1,0 +1,10 @@
+moraware_id,esfn_label
+JobField_101,Material_1_Color
+JobField_102,Material_1_Thickness
+JobField_103,Total_Square_Footage
+JobField_104,Edge_Profile
+Activity_55,Template_Date
+Activity_56,Fabrication_Start
+Activity_57,Install_Date
+JobStatus_1,Lead
+JobStatus_2,Active Job

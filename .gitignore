@@ -1,0 +1,30 @@
+# Dependencies & build artifacts
+node_modules/
+dist/
+**/dist/
+.cache/
+
+# OS / tooling
+.DS_Store
+
+# Secrets & local overrides (never commit)
+.env
+.env.local
+**/.env.local
+.env.*
+!.env.example
+!**/.env.example
+!.env.local.example
+!**/.env.local.example
+
+# Pipeline / Moraware dumps (often large; may contain operational data — keep local only)
+out*.json
+debug/
+
+# .NET build artifacts
+**/bin/
+**/obj/
+
+# Local/vendor SDK binaries
+tools/moraware-sdk-trace/lib/*.dll
+!tools/moraware-sdk-trace/lib/.gitkeep
