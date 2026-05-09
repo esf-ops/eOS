@@ -2,6 +2,7 @@ import express from "express";
 import { APPLICATION_ROLES, EOS_HEAD_SLUGS, isApplicationRole, isKnownHeadSlug } from "../auth/eosGovernanceConstants.js";
 import { logAction } from "../auth/auditLog.js";
 import { requireAuth, requireRole } from "../auth/authMiddleware.js";
+import { requireHeadAccess } from "../auth/headAccessMiddleware.js";
 
 const parseJson = express.json();
 
@@ -220,7 +221,12 @@ const USER_MANAGEMENT_SCHEMA_TABLES = {
 
 export function attachAdvancedSystemAdminUserRoutes(app, ctx) {
   const sbFn = ctx.supabaseServerClient;
-  const adminGuard = [requireAuth(), requireRole(["admin"])];
+  /** Head gate + role: admin bypass inside `requireHeadAccess` prevents lockout; non-admins never reach these routes. */
+  const adminGuard = [
+    requireAuth(),
+    requireHeadAccess("system_admin", { getSupabase: sbFn }),
+    requireRole(["admin"])
+  ];
 
   /** Ping extension tables — empty table still counts as healthy. */
   app.get("/api/admin/user-management/schema-health", ...adminGuard, async (_req, res) => {

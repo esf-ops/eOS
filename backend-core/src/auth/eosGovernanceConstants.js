@@ -28,6 +28,31 @@ export function isKnownHeadSlug(slug) {
   return _headSet.has(String(slug ?? "").trim());
 }
 
+/**
+ * Dealer/partner-safe heads only (`user_kind === dealer_partner`).
+ * Add `quote_history` here once it exists in `EOS_HEAD_SLUGS`.
+ */
+export const DEALER_SAFE_HEAD_SLUGS = Object.freeze(["partner_quote", "dealer_resources", "quote"]);
+
+/** Subset of `EOS_HEAD_SLUGS` — extend `DEALER_SAFE_HEAD_SLUGS` when new dealer-only heads ship. */
+export const DEALER_SAFE_HEAD_SLUG_SET = new Set(DEALER_SAFE_HEAD_SLUGS.filter((s) => _headSet.has(s)));
+
+export function isDealerSafeHeadSlug(slug) {
+  return DEALER_SAFE_HEAD_SLUG_SET.has(String(slug ?? "").trim());
+}
+
+/** Internal ESF heads (documentation / tooling); enforcement for dealers is `isDealerSafeHeadSlug`. */
+export const INTERNAL_HEAD_SLUGS_FOR_REFERENCE = Object.freeze([
+  "executive",
+  "brain_health",
+  "system_admin",
+  "production",
+  "finance",
+  "reports",
+  "hr",
+  "safety"
+]);
+
 /** Application roles stored on `user_profiles.role` (ASCII lowercase). */
 export const APPLICATION_ROLES = Object.freeze([
   "admin",

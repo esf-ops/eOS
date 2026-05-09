@@ -9,6 +9,7 @@ import { createClient } from "@supabase/supabase-js";
 import cors from "cors";
 
 import { ALLOWED_ROLES, requireAuth, requireRole } from "./auth/authMiddleware.js";
+import { requireHeadAccess } from "./auth/headAccessMiddleware.js";
 import { isApplicationRole } from "./auth/eosGovernanceConstants.js";
 import { logAction, logLoginEvent } from "./auth/auditLog.js";
 import {
@@ -54,6 +55,10 @@ function supabaseServerClient() {
   const key = requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
   return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 }
+
+const headAccessExecutive = requireHeadAccess("executive", { getSupabase: supabaseServerClient });
+const headAccessBrainHealth = requireHeadAccess("brain_health", { getSupabase: supabaseServerClient });
+const headAccessSystemAdmin = requireHeadAccess("system_admin", { getSupabase: supabaseServerClient });
 
 function cronSecretOrNull() {
   const s = String(process.env.EOS_CRON_SECRET ?? "").trim();
@@ -396,7 +401,12 @@ app.get("/api/brain/sync-plan", (_req, res) => {
 });
 
 // Executive Head: read-only aggregates (admin/executive only)
-app.get("/api/executive/summary", requireAuth(), requireRole(["admin", "executive"]), async (req, res) => {
+app.get(
+  "/api/executive/summary",
+  requireAuth(),
+  requireRole(["admin", "executive"]),
+  headAccessExecutive,
+  async (req, res) => {
   try {
     const year = String(req.query.year ?? "").trim() || "2026";
     const supabase = supabaseServerClient();
@@ -450,6 +460,7 @@ app.get(
   "/api/executive/salesperson-performance",
   requireAuth(),
   requireRole(["admin", "executive"]),
+  headAccessExecutive,
   async (req, res) => {
     try {
       const year = String(req.query.year ?? "").trim() || "2026";
@@ -490,7 +501,12 @@ app.get(
   }
 );
 
-app.get("/api/executive/account-performance", requireAuth(), requireRole(["admin", "executive"]), async (req, res) => {
+app.get(
+  "/api/executive/account-performance",
+  requireAuth(),
+  requireRole(["admin", "executive"]),
+  headAccessExecutive,
+  async (req, res) => {
   try {
     const year = String(req.query.year ?? "").trim() || "2026";
     const limit = clamp(toInt(req.query.limit, 25), 1, 200);
@@ -534,7 +550,12 @@ app.get("/api/executive/account-performance", requireAuth(), requireRole(["admin
   }
 });
 
-app.get("/api/executive/production-flow", requireAuth(), requireRole(["admin", "executive"]), async (req, res) => {
+app.get(
+  "/api/executive/production-flow",
+  requireAuth(),
+  requireRole(["admin", "executive"]),
+  headAccessExecutive,
+  async (req, res) => {
   try {
     const year = String(req.query.year ?? "").trim() || "2026";
     const supabase = supabaseServerClient();
@@ -612,7 +633,12 @@ app.get("/api/executive/production-flow", requireAuth(), requireRole(["admin", "
   }
 });
 
-app.get("/api/executive/titan-signals", requireAuth(), requireRole(["admin", "executive"]), async (req, res) => {
+app.get(
+  "/api/executive/titan-signals",
+  requireAuth(),
+  requireRole(["admin", "executive"]),
+  headAccessExecutive,
+  async (req, res) => {
   try {
     const year = String(req.query.year ?? "").trim() || "2026";
     const supabase = supabaseServerClient();
@@ -684,7 +710,12 @@ app.get("/api/executive/titan-signals", requireAuth(), requireRole(["admin", "ex
   }
 });
 
-app.get("/api/executive/field-trends", requireAuth(), requireRole(["admin", "executive"]), async (req, res) => {
+app.get(
+  "/api/executive/field-trends",
+  requireAuth(),
+  requireRole(["admin", "executive"]),
+  headAccessExecutive,
+  async (req, res) => {
   try {
     const year = String(req.query.year ?? "").trim() || "2026";
     const supabase = supabaseServerClient();
@@ -753,7 +784,12 @@ app.get("/api/executive/field-trends", requireAuth(), requireRole(["admin", "exe
   }
 });
 
-app.get("/api/executive/monthly-trend", requireAuth(), requireRole(["admin", "executive"]), async (req, res) => {
+app.get(
+  "/api/executive/monthly-trend",
+  requireAuth(),
+  requireRole(["admin", "executive"]),
+  headAccessExecutive,
+  async (req, res) => {
   try {
     const year = String(req.query.year ?? "").trim() || "2026";
     const supabase = supabaseServerClient();
@@ -769,7 +805,12 @@ app.get("/api/executive/debug", requireAuth(), requireRole(["admin", "executive"
 });
 
 /** Titan / Saw “today” list (Brain activity signals — not machine telemetry). */
-app.get("/api/titans/today", requireAuth(), requireRole(["admin", "executive"]), async (req, res) => {
+app.get(
+  "/api/titans/today",
+  requireAuth(),
+  requireRole(["admin", "executive"]),
+  headAccessExecutive,
+  async (req, res) => {
   try {
     const q = parseTitansTodayQuery(req);
     if (q.dateInvalid) {
@@ -795,7 +836,12 @@ app.get("/api/me", requireAuth(), (req, res) => {
   res.json({ ok: true, user: req.user });
 });
 
-app.get("/api/admin/users", requireAuth(), requireRole(["admin", "executive"]), async (_req, res) => {
+app.get(
+  "/api/admin/users",
+  requireAuth(),
+  requireRole(["admin", "executive"]),
+  headAccessSystemAdmin,
+  async (_req, res) => {
   try {
     const supabase = supabaseServerClient();
     const { data, error } = await supabase
@@ -871,7 +917,12 @@ app.post("/api/auth/log-login", requireAuth(), express.json(), async (req, res) 
   }
 });
 
-app.get("/api/brain/sync-runs", requireAuth(), requireRole(["admin", "executive"]), async (req, res) => {
+app.get(
+  "/api/brain/sync-runs",
+  requireAuth(),
+  requireRole(["admin", "executive"]),
+  headAccessBrainHealth,
+  async (req, res) => {
   try {
     const limit = clamp(toInt(req.query.limit, 10), 1, 100);
     const supabase = supabaseServerClient();
@@ -888,7 +939,12 @@ app.get("/api/brain/sync-runs", requireAuth(), requireRole(["admin", "executive"
   }
 });
 
-app.get("/api/brain/failed-jobs", requireAuth(), requireRole(["admin", "executive"]), async (req, res) => {
+app.get(
+  "/api/brain/failed-jobs",
+  requireAuth(),
+  requireRole(["admin", "executive"]),
+  headAccessBrainHealth,
+  async (req, res) => {
   try {
     const limit = clamp(toInt(req.query.limit, 50), 1, 500);
     const supabase = supabaseServerClient();
@@ -1022,10 +1078,12 @@ app.post("/api/internal/sync/retry-failed", (req, res) => {
 app.get("/api/brain/sync-health", async (_req, res) => {
   const allowPublic = String(process.env.EOS_ALLOW_PUBLIC_SYNC_HEALTH ?? "").trim() === "1";
   if (!allowPublic) {
-    // Auth gate for production: admin/executive only
+    // Auth gate for production: admin/executive + brain_health head assignment
     const auth = requireAuth();
     const role = requireRole(["admin", "executive"]);
-    return auth(_req, res, () => role(_req, res, async () => runSyncHealth(_req, res)));
+    return auth(_req, res, () =>
+      role(_req, res, () => headAccessBrainHealth(_req, res, () => void runSyncHealth(_req, res)))
+    );
   }
   return runSyncHealth(_req, res);
 });

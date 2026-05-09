@@ -83,9 +83,14 @@
 ## Backend permission enforcement rules
 
 1. **Middleware:** `requireAuth()` + `requireRole([...])` on every protected route.
-2. **Resource scope:** For dealer routes, add **dealer_id / account_id** check from `user_profiles` (or linked table) — **must match** row being read/written.
-3. **No service-role leakage to clients** — browser never sees service role key; only `backend-core` uses it.
-4. **Auditing:** Sensitive mutations log to `eos_action_log` (existing pattern).
+2. **Head access:** `requireHeadAccess(headSlug, { getSupabase })` (see `backend-core/src/auth/headAccessMiddleware.js`) enforces **`user_head_access`**-backed grants (with the same **explicit-rows vs role-default** resolution as `/api/me/heads` via `resolveHeadAccessContext` in `backend-core/src/me/launcherHeads.js`). **Roles stay broad categories; assigned heads narrow who may call each head’s APIs.** The Home launcher only reflects these grants — **it is not the security boundary.**
+3. **Admin bypass:** Users with `role === "admin"` pass `requireHeadAccess` while active so incomplete head rows cannot lock operators out of recovery surfaces. **Non-admin** users still require the head in their resolved actionable grant.
+4. **Dealer clamp:** `user_kind === dealer_partner` may only satisfy `requireHeadAccess` for slugs in **`DEALER_SAFE_HEAD_SLUG_SET`** (`eosGovernanceConstants.js`) — internal heads always return **403** even if URLs are guessed.
+5. **Resource scope:** For dealer routes, add **dealer_id / account_id** check from `user_profiles` (or linked table) — **must match** row being read/written.
+6. **No service-role leakage to clients** — browser never sees service role key; only `backend-core` uses it.
+7. **Auditing:** Sensitive mutations log to `eos_action_log` (existing pattern).
+
+**Gradual rollout:** Selected read routes use `requireHeadAccess` today (Executive read APIs + Titans today, Brain sync read surfaces, System Admin read APIs). Mutation routes keep existing `requireRole` gates until reviewed head-by-head.
 
 ---
 

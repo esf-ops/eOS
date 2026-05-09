@@ -2,6 +2,8 @@
 
 **Goal**: One branded **`eos.elitestonefabrication.com`** entry where authenticated users launch only the heads they are entitled to touch. Frontend route hiding alone is insufficient — **every head’s backend surface must independently enforce RBAC.**
 
+**Launcher vs backend:** Home card visibility is **UX only** (driven by `GET /api/me/heads`). **Real enforcement** is `requireHeadAccess(headSlug)` on API routes (see `backend-core/src/auth/headAccessMiddleware.js` + `resolveHeadAccessContext` shared with the launcher resolver). Admins bypass head checks to avoid lockout; dealers are clamped to dealer-safe slugs; other users need **`user_head_access`** (or role defaults when no rows exist).
+
 ---
 
 ## 1. Canonical entry experience
@@ -76,6 +78,8 @@ High-level resolver:
    - other roles → `brain_health` + small role-aware hints *(superseded when admins populate head access rows)*  
 
 6. Clamp **partner** users (`user_kind === 'dealer_partner'`) → never surface internal-heavy heads regardless of rogue DB rows (**defense-in-depth**, not substitute for hardened per-head endpoints).
+
+7. **API parity:** Routes protected with `requireHeadAccess` use the **same** actionable grant set as this endpoint so URL guessing cannot bypass the launcher.
 
 Typical payload:
 

@@ -1,4 +1,4 @@
-import { EOS_HEAD_SLUGS, isKnownHeadSlug } from "../auth/eosGovernanceConstants.js";
+import { DEALER_SAFE_HEAD_SLUG_SET, EOS_HEAD_SLUGS, isKnownHeadSlug } from "../auth/eosGovernanceConstants.js";
 
 /**
  * Canonical launcher cards — slugs MUST align with `user_head_access.head_slug`
@@ -110,11 +110,8 @@ export const HEAD_LAUNCHER_CATALOG = [
 
 const ALL_KNOWN = new Set(EOS_HEAD_SLUGS);
 
-/**
- * Dealer-visible heads (`quote_history` etc. extend here later).
- * Internal ESF launcher rows must never be returned for `dealer_partner` users — even mis-configured `user_head_access`.
- */
-export const DEALER_VISIBLE_SLUGS = new Set(["partner_quote", "dealer_resources", "quote"]);
+/** @deprecated Use `DEALER_SAFE_HEAD_SLUG_SET` from `eosGovernanceConstants.js` — kept for launcher callers. */
+export const DEALER_VISIBLE_SLUGS = DEALER_SAFE_HEAD_SLUG_SET;
 
 function sanitizeSlugSet(slugs) {
   const out = new Set();
@@ -177,6 +174,113 @@ function defaultSlugSet(role, userKind) {
 
 function isAdminRole(role) {
   return String(role ?? "").trim() === "admin";
+}
+
+/**
+ * Shared resolver for `/api/me/heads` and `requireHeadAccess` — same grants as launcher actionable set.
+ *
+ * @param {ReturnType<import("@supabase/supabase-js").createClient>} supabase
+ * @param {{ id: string, email?: string, role?: string, isActive?: boolean }} reqUser
+ * @returns {Promise<{
+ *   ok: false,
+ *   error: string
+ * } | {
+ *   ok: true,
+ *   active: false,
+ *   id: string,
+ *   email: string,
+ *   role: string,
+ *   userKind: string,
+ *   dealer: boolean,
+ *   isAdminRole: boolean,
+ *   actionableGrantSet: Set<string>,
+ *   explicitDbGrantSet: Set<string>,
+ *   usedExplicitAssigns: boolean,
+ *   explicitDealerSubset: Set<string>
+ * } | {
+ *   ok: true,
+ *   active: true,
+ *   id: string,
+ *   email: string,
+ *   role: string,
+ *   userKind: string,
+ *   dealer: boolean,
+ *   isAdminRole: boolean,
+ *   actionableGrantSet: Set<string>,
+ *   explicitDbGrantSet: Set<string>,
+ *   usedExplicitAssigns: boolean,
+ *   explicitDealerSubset: Set<string>
+ * }>}
+ */
+export async function resolveHeadAccessContext(supabase, reqUser) {
+  const id = pickStr(reqUser?.id);
+  const email = pickStr(reqUser?.email);
+  const role = pickStr(reqUser?.role ?? "viewer");
+  const active = reqUser?.isActive !== false;
+
+  if (!id) {
+    return { ok: false, error: "missing_user" };
+  }
+
+  if (!active) {
+    return {
+      ok: true,
+      active: false,
+      id,
+      email,
+      role,
+      userKind: "internal",
+      dealer: false,
+      isAdminRole: false,
+      actionableGrantSet: new Set(),
+      explicitDbGrantSet: new Set(),
+      usedExplicitAssigns: false,
+      explicitDealerSubset: new Set()
+    };
+  }
+
+  const { data: prof, error: pe } = await supabase.from("user_profiles").select("user_kind").eq("id", id).maybeSingle();
+
+  const userKind = pe ? "internal" : pickStr(prof?.user_kind || "internal") || "internal";
+  const dealer = userKind === "dealer_partner";
+
+  /** @type {Set<string>} */
+  let explicitDbGrantSet = new Set();
+  try {
+    const { data: rows } = await supabase.from("user_head_access").select("head_slug").eq("user_id", id);
+    explicitDbGrantSet = sanitizeSlugSet((rows ?? []).map((r) => r.head_slug));
+  } catch {
+    explicitDbGrantSet = new Set();
+  }
+
+  const explicitDealerSubset = intersectDealerSlugs(explicitDbGrantSet);
+
+  const usedExplicitAssigns = explicitDbGrantSet.size > 0;
+
+  /** @type {Set<string>} */
+  let actionableGrantSet;
+  if (!dealer) {
+    actionableGrantSet = usedExplicitAssigns ? new Set(explicitDbGrantSet) : defaultSlugSet(role, userKind);
+  } else if (usedExplicitAssigns) {
+    actionableGrantSet = new Set(explicitDealerSubset);
+  } else {
+    actionableGrantSet = intersectDealerSlugs(defaultSlugSet(role, userKind));
+  }
+
+  return {
+    ok: true,
+    active: true,
+    id,
+    email,
+    role,
+    userKind,
+    dealer,
+    isAdminRole: isAdminRole(role),
+    actionableGrantSet,
+    explicitDbGrantSet,
+    usedExplicitAssigns,
+    explicitDealerSubset
+  };
 }
 
 /** @typedef {{ slug: string, label: string, description: string, href: string, category: string, enabled: boolean, visibilityReason: 'assigned' | 'role_default' | 'admin_roadmap' }} LauncherHeadRow */
@@ -252,63 +356,43 @@ function headsForDealerPortfolio(openGrantSet, usedExplicitAssigns, explicitDeal
  * @param {{ id: string, email?: string, role?: string, isActive?: boolean }} reqUser — from attachUser (`req.user`)
  */
 export async function buildMeHeadsPayload(supabase, reqUser) {
-  const id = pickStr(reqUser?.id);
-  const email = pickStr(reqUser?.email);
-  const role = pickStr(reqUser?.role ?? "viewer");
-  const active = reqUser?.isActive !== false;
+  const ctx = await resolveHeadAccessContext(supabase, reqUser);
 
-  if (!id) {
+  if (!ctx.ok) {
     return {
       ok: false,
-      error: "missing_user",
+      error: ctx.error,
       heads: [],
       user: null
     };
   }
 
-  if (!active) {
+  if (!ctx.active) {
     return {
       ok: true,
       inactive: true,
       user: {
-        id,
-        email,
-        role,
+        id: ctx.id,
+        email: ctx.email,
+        role: ctx.role,
         userKind: "internal"
       },
       heads: []
     };
   }
 
-  const { data: prof, error: pe } = await supabase.from("user_profiles").select("user_kind").eq("id", id).maybeSingle();
-
-  const userKind = pe ? "internal" : pickStr(prof?.user_kind || "internal") || "internal";
-  const dealer = userKind === "dealer_partner";
-
-  /** @type {Set<string>} */
-  let explicitDbGrantSet = new Set();
-  try {
-    const { data: rows } = await supabase.from("user_head_access").select("head_slug").eq("user_id", id);
-    explicitDbGrantSet = sanitizeSlugSet((rows ?? []).map((r) => r.head_slug));
-  } catch {
-    explicitDbGrantSet = new Set();
-  }
-
-  /** Dealer-only assigns after clamping junk internal slugs away from payloads. */
-  const explicitDealerSubset = intersectDealerSlugs(explicitDbGrantSet);
-
-  const usedExplicitAssigns = explicitDbGrantSet.size > 0;
-
-  /** Slugs treated as actionable / launcher-enabled (differs per cohort). Replaces defaults when DB rows exist. */
-  /** @type {Set<string>} */
-  let actionableGrantSet;
-  if (!dealer) {
-    actionableGrantSet = usedExplicitAssigns ? new Set(explicitDbGrantSet) : defaultSlugSet(role, userKind);
-  } else if (usedExplicitAssigns) {
-    actionableGrantSet = new Set(explicitDealerSubset);
-  } else {
-    actionableGrantSet = intersectDealerSlugs(defaultSlugSet(role, userKind));
-  }
+  const {
+    id,
+    email,
+    role,
+    userKind,
+    dealer,
+    isAdminRole: adminRole,
+    actionableGrantSet,
+    explicitDbGrantSet,
+    usedExplicitAssigns,
+    explicitDealerSubset
+  } = ctx;
 
   /** Dealer attempted internal-only assigns — no dealer-visible slug survived clamping → empty launcher (secure). */
   if (usedExplicitAssigns && dealer && explicitDbGrantSet.size > 0 && explicitDealerSubset.size === 0) {
@@ -323,8 +407,6 @@ export async function buildMeHeadsPayload(supabase, reqUser) {
       heads: []
     };
   }
-
-  const adminRole = isAdminRole(role);
 
   /** @type {LauncherHeadRow[]} */
   let heads;

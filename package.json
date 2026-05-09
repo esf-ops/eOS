@@ -21,6 +21,7 @@
     "eos:sync:nightly:operational": "MORAWARE_SYNC_MODE=global MORAWARE_SYNC_START_DATE=2026-01-01 MORAWARE_INGEST_ALL_MATCHING_JOBS=1 MORAWARE_INGEST_OPERATIONAL=1 MORAWARE_MAX_SEARCH_PAGES=400 node backend-core/src/scripts/syncMoraware.js",
     "eos:sync:retry-failed": "node backend-core/src/scripts/retryFailedMorawareJobs.js",
     "eos:auth:test-login": "node backend-core/src/scripts/testAuthLogin.js",
+    "eos:test:head-access": "node backend-core/src/scripts/testHeadAccess.js",
     "eos:audit:coverage": "node backend-core/src/scripts/auditBrainCoverage.js",
     "eos:audit:operational": "node backend-core/src/scripts/auditOperationalCoverage.js",
     "eos:audit:brain-deep": "node backend-core/src/scripts/auditMorawareBrainCoverageDeep.js",
@@ -35,7 +36,7 @@
     "eos:build:system-admin": "npm run build --prefix app-system-admin",
     "eos:build:home": "npm run build --prefix app-home",
     "eos:build:all-heads": "npm run eos:build:brain-health && npm run eos:build:executive && npm run eos:build:system-admin && npm run eos:build:home",
-    "eos:check:local": "node --check backend-core/src/server.js && npm run eos:build:all-heads",
+    "eos:check:local": "node --check backend-core/src/server.js && npm run eos:test:head-access && npm run eos:build:all-heads",
     "lint": "node --check src/index.js && node --check src/morawareClient.js && node --check src/morawareDiscovery.js && node --check src/morawareJobFormsSdk.js && node --check src/firehose.js && node --check src/normalize.js && node --check src/router.js && node --check src/heads/debug.js"
   },
   "dependencies": {
