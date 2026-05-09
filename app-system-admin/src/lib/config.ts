@@ -1,20 +1,21 @@
 function requiredEnv(name: string): string {
-  const v = (import.meta as any).env?.[name];
+  const v = (import.meta as unknown as { env?: Record<string, string> }).env?.[name];
   const s = String(v ?? "").trim();
   if (!s) throw new Error(`Missing required env var: ${name}`);
   return s;
 }
 
+/** Match app-executive: no trailing slash; strip trailing `/api` so paths like `/api/me` resolve correctly. */
 function normalizedBackendBaseUrl(): string {
-  const raw = String((import.meta as any).env?.VITE_BACKEND_URL ?? "http://localhost:3001")
+  const raw = String(
+    (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_BACKEND_URL ?? "http://localhost:3001"
+  )
     .trim()
     .replace(/\/+$/, "")
     .replace(/\/api$/i, "");
-  /** Empty `VITE_BACKEND_URL=` in .env would otherwise make fetch() same-origin to Vite, not backend-core. */
   return raw || "http://localhost:3001";
 }
 
-/** No trailing slash; trailing `/api` stripped — avoids `…/api` + `/api/me` → `…/api/api/me`. */
 export const config = {
   supabaseUrl: requiredEnv("VITE_SUPABASE_URL"),
   supabaseAnonKey: requiredEnv("VITE_SUPABASE_ANON_KEY"),
@@ -22,5 +23,5 @@ export const config = {
 };
 
 if (import.meta.env.DEV) {
-  console.info(`[app-executive] VITE_BACKEND_URL → Brain API base: ${config.backendBaseUrl}`);
+  console.info(`[app-system-admin] VITE_BACKEND_URL → API base: ${config.backendBaseUrl}`);
 }

@@ -94,6 +94,106 @@ export type MonthlyTrendResponse = {
   months: MonthlyTrendMonth[];
 };
 
+export type TitansTodayJob = {
+  jobId: string;
+  jobName: string;
+  account: string;
+  materialColor: string | null;
+  squareFootage: number | null;
+  status: string;
+  /** Brain-side Moraware activity grouping — heuristic, not a validated physical shop map. */
+  activityGroupKey?: string;
+  activityGroupLabel?: string;
+  rawActivityType: string | null;
+  rawActivityStatus: string | null;
+  lastPhaseUpdate: string | null;
+  signals: {
+    hasSlabSignal: boolean;
+    hasChangeSignal: boolean;
+    hasRemakeSignal: boolean;
+    hasCustomerServiceSignal: boolean;
+    hasRepairSignal: boolean;
+  };
+};
+
+export type TitansSyncFreshness = {
+  lastBrainSyncAt?: string | null;
+  ageSeconds?: number | null;
+  freshnessLabel?: string | null;
+};
+
+export type TitansPace = {
+  completedJobCount?: number | null;
+  completedSqft?: number | null;
+  averageMinutesBetweenCompletions?: number | null;
+  longestGapMinutes?: number | null;
+  firstCompletionAt?: string | null;
+  lastCompletionAt?: string | null;
+  completedSqftPerHour?: number | null;
+};
+
+export type TitansShopBreakdown = {
+  shopKey?: string;
+  shopName?: string;
+  activeJobs?: number;
+  completedToday?: number;
+  heldOrNeedsReview?: number;
+  totalSqftToday?: number;
+  averageMinutesBetweenCompletions?: number | null;
+  jobs?: TitansTodayJob[];
+};
+
+/** Present only when `GET /api/titans/today?debug=1` — no secrets, no raw_xml. */
+export type TitansTodayDebug = {
+  selectedDate?: string;
+  candidateActivityCount?: number;
+  candidateJobCount?: number;
+  filterKeywordsUsed?: Array<{ slug: string; regexSource: string; regexFlags: string }>;
+  rawActivityTypesSeen?: string[];
+  rawStatusesSeen?: string[];
+  activityGroupCounts?: Record<string, number>;
+  timestampFieldsUsed?: string[];
+  omittedReasonCounts?: Record<string, number>;
+  brainSyncRowUsed?: {
+    id?: string | null;
+    mode?: string | null;
+    status?: string | null;
+    finished_at?: string | null;
+    started_at?: string | null;
+    ingest_operational?: boolean;
+  } | null;
+  syncFreshnessPickReason?: string;
+  sampleCandidates?: Array<{
+    jobId: string;
+    activityType: string;
+    activityStatus: string;
+    phaseName?: string | null;
+    startDate?: string | null;
+    keywordSlugsMatched: string[];
+  }>;
+};
+
+export type TitansTodayResponse = {
+  ok: boolean;
+  label?: string;
+  source?: string;
+  lastUpdated?: string;
+  localDate?: string;
+  activeTitanJobs?: number;
+  completedToday?: number;
+  heldOrNeedsReview?: number;
+  totalSqftToday?: number;
+  averageCompletionPace?: number | null;
+  syncFreshness?: TitansSyncFreshness;
+  recommendedSyncCadence?: string;
+  pace?: TitansPace;
+  shops?: TitansShopBreakdown[];
+  jobs?: TitansTodayJob[];
+  emptyStateMessage?: string | null;
+  notes?: string[];
+  debug?: TitansTodayDebug;
+};
+
 export type SyncHealth = {
   ok?: boolean;
   latestSyncRun: Record<string, unknown> | null;

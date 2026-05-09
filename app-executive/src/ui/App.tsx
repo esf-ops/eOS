@@ -24,6 +24,7 @@ import type {
   TitanSignals
 } from "../lib/types";
 import MonthlyTrendPanel from "./MonthlyTrendPanel";
+import TitansFlowingWidget from "./TitansFlowingWidget";
 
 const LOGO_URL =
   "https://www.elitestonefabrication.com/wp-content/uploads/2021/09/cropped-ESF-Horizontal-Logo-500x150-px_09_09.png";
@@ -239,6 +240,7 @@ export default function App() {
   const [syncRunsLoadError, setSyncRunsLoadError] = useState("");
   const [failedJobsLoadError, setFailedJobsLoadError] = useState("");
   const [devExecTrace, setDevExecTrace] = useState<{ n: number; reason: string }>({ n: 0, reason: "—" });
+  const [titansRefreshTick, setTitansRefreshTick] = useState(0);
 
   const tokenRef = useRef("");
   const allowedRef = useRef(false);
@@ -818,7 +820,10 @@ export default function App() {
 
   function refreshNow() {
     const t = session?.access_token || sessionToken;
-    if (t) loadAllRef.current(t, { manual: true, reason: "manual_refresh" }).catch(() => {});
+    if (t) {
+      setTitansRefreshTick((x) => x + 1);
+      loadAllRef.current(t, { manual: true, reason: "manual_refresh" }).catch(() => {});
+    }
   }
 
   if (!sessionToken && !loadingUser) {
@@ -1338,6 +1343,13 @@ export default function App() {
             {operatingSummaryCards()}
           </section>
 
+          <TitansFlowingWidget
+            token={tokenForLoad}
+            recordApi={recordApi}
+            refreshTick={titansRefreshTick}
+            userRole={me?.user.role ?? ""}
+          />
+
           <section className="section-exec">
             <div className="card-surface" style={{ marginBottom: "1.25rem" }}>
               <h2 className="section-title">Monthly trend</h2>
@@ -1668,6 +1680,11 @@ export default function App() {
           <p className="section-desc">
             Moraware is the source of truth. eOS explains the work and shows where the Titans may be helped or blocked.
             Monitor Brain sync fidelity below for executive confidence in these indicators.
+          </p>
+          <p className="field-micro" style={{ marginTop: "-0.25rem", marginBottom: "1rem", maxWidth: "62ch" }}>
+            For live Titan/Saw pulse views in Executive Overview, reliability follows recent operational sync cadence —
+            ideally every 5–15 minutes during production hours via your existing sync jobs (scheduler change not implied
+            here).
           </p>
           <div className="card-surface" style={{ marginBottom: "1rem" }}>
             <h3 style={{ margin: "0 0 0.5rem", fontSize: "1rem" }}>Sync health</h3>

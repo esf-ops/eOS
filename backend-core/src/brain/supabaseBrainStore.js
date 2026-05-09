@@ -1,5 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 
+import { computeNormalizedLabelForBrainFieldRow } from "./brainFieldNormalizedLabel.js";
+
 let _loggedDisabled = false;
 let _client = null;
 
@@ -162,7 +164,7 @@ export async function upsertBrainFields(job) {
         form_id: formId || null,
         field_id: String(fld?.fieldId ?? ""),
         label: String(fld?.label ?? ""),
-        normalized_label: String(fld?.normalizedLabel ?? ""),
+        normalized_label: computeNormalizedLabelForBrainFieldRow(fld),
         value: String(fld?.value ?? ""),
         numeric_value: toNumberOrNull(fld?.numericValue),
         field_value_id: String(fld?.fieldValueId ?? ""),

@@ -1,17 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 
-export const ALLOWED_ROLES = [
-  "admin",
-  "executive",
-  "sales",
-  "production",
-  "shop_tv",
-  "installer",
-  "accounting",
-  "purchasing",
-  "customer_service",
-  "viewer"
-];
+import { APPLICATION_ROLES } from "./eosGovernanceConstants.js";
+
+export const ALLOWED_ROLES = APPLICATION_ROLES;
 
 function requiredEnv(name) {
   const v = String(process.env[name] ?? "").trim();
@@ -34,7 +25,7 @@ export function getBearerToken(req) {
 async function loadUserProfileOrNull(supabase, userId) {
   const { data, error } = await supabase
     .from("user_profiles")
-    .select("id,email,full_name,role,department,is_active")
+    .select("id,email,full_name,role,department,is_active,user_kind,last_login_at")
     .eq("id", userId)
     .limit(1);
   if (error) throw new Error(error.message);

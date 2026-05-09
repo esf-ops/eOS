@@ -9,7 +9,14 @@ import { createClient } from "@supabase/supabase-js";
 import cors from "cors";
 
 import { ALLOWED_ROLES, requireAuth, requireRole } from "./auth/authMiddleware.js";
+import { isApplicationRole } from "./auth/eosGovernanceConstants.js";
 import { logAction, logLoginEvent } from "./auth/auditLog.js";
+import {
+  attachAdvancedSystemAdminUserRoutes,
+  enrichUserProfileRowsForAdminList
+} from "./admin/systemAdminUserManagement.js";
+import { buildMeHeadsPayload } from "./me/launcherHeads.js";
+import { buildTitansTodayPayload, parseTitansTodayQuery } from "./titans/titansToday.js";
 
 function requiredEnv(name) {
   const v = String(process.env[name] ?? "").trim();
@@ -280,7 +287,16 @@ async function loadSqFtFieldsForYear(supabase, year) {
       .from("brain_fields")
       .select("job_id,form_id,value,numeric_value,normalized_label")
       .in("job_id", chunk)
-      .ilike("normalized_label", "%sq ft%");
+      .or(
+        [
+          "normalized_label.ilike.%sq ft%",
+          "normalized_label.ilike.%sqft%",
+          "normalized_label.ilike.%worksheet_sqft%",
+          "normalized_label.ilike.%sq_ft%",
+          "normalized_label.ilike.%square_foot%",
+          "normalized_label.ilike.%square_footage%"
+        ].join(",")
+      );
     if (error) throw new Error(error.message);
 
     const formIds = [...new Set((fields ?? []).map((f) => String(f.form_id ?? "")).filter(Boolean))];
@@ -314,23 +330,16 @@ async function loadSqFtFieldsForYear(supabase, year) {
 
 const app = express();
 
-/** Local Vite dev ports for Brain Health Head, Executive Head, and incidental port drift. */
-const defaultAllowedOrigins = [
-  "http://localhost:5173",
-  "http://localhost:5174",
-  "http://localhost:5175",
-  "http://localhost:5176",
-  "http://localhost:5177",
-  "http://localhost:5178",
-  "http://localhost:5179",
-  "http://127.0.0.1:5173",
-  "http://127.0.0.1:5174",
-  "http://127.0.0.1:5175",
-  "http://127.0.0.1:5176",
-  "http://127.0.0.1:5177",
-  "http://127.0.0.1:5178",
-  "http://127.0.0.1:5179"
-];
+/** Local Vite dev ports (5173–5179) + common drift; localhost and 127.0.0.1. */
+const defaultAllowedOrigins = (() => {
+  const out = [];
+  for (const host of ["http://localhost", "http://127.0.0.1"]) {
+    for (let p = 5173; p <= 5189; p++) {
+      out.push(`${host}:${p}`);
+    }
+  }
+  return out;
+})();
 
 /**
  * Staging/production browser origins allowed to call this API with cookies + Authorization headers.
@@ -343,7 +352,7 @@ const defaultAllowedOrigins = [
  */
 const envOriginAdditions = String(process.env.EOS_ALLOWED_ORIGINS ?? "")
   .split(",")
-  .map((s) => s.trim())
+  .map((s) => s.trim().replace(/\/+$/, ""))
   .filter(Boolean);
 
 const allowedOrigins = [...new Set([...defaultAllowedOrigins, ...envOriginAdditions])];
@@ -703,7 +712,9 @@ app.get("/api/executive/field-trends", requireAuth(), requireRole(["admin", "exe
         "normalized_label.ilike.%sink%",
         "normalized_label.ilike.%faucet%",
         "normalized_label.ilike.%backsplash%",
-        "normalized_label.ilike.%full height%"
+        "normalized_label.ilike.%full height%",
+        "normalized_label.ilike.%full_height%",
+        "normalized_label.ilike.%fhbs%"
       ].join(",");
 
       const { data, error } = await supabase
@@ -757,6 +768,25 @@ app.get("/api/executive/debug", requireAuth(), requireRole(["admin", "executive"
   res.json({ ok: true, message: "executive routes active" });
 });
 
+/** Titan / Saw “today” list (Brain activity signals — not machine telemetry). */
+app.get("/api/titans/today", requireAuth(), requireRole(["admin", "executive"]), async (req, res) => {
+  try {
+    const q = parseTitansTodayQuery(req);
+    if (q.dateInvalid) {
+      return res.status(400).json({ ok: false, error: "Invalid date parameter (use date=YYYY-MM-DD)" });
+    }
+    const supabase = supabaseServerClient();
+    const payload = await buildTitansTodayPayload(supabase, {
+      localDateYmd: q.localDateYmd,
+      limit: q.limit,
+      debug: q.debugRequested
+    });
+    res.json(payload);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
 app.get("/api/auth/roles", (_req, res) => {
   res.json({ ok: true, roles: ALLOWED_ROLES });
 });
@@ -770,12 +800,18 @@ app.get("/api/admin/users", requireAuth(), requireRole(["admin", "executive"]), 
     const supabase = supabaseServerClient();
     const { data, error } = await supabase
       .from("user_profiles")
-      .select("id,email,full_name,role,department,is_active,created_at,updated_at")
+      .select("id,email,full_name,role,department,is_active,user_kind,last_login_at,created_at,updated_at")
       .order("role", { ascending: true })
       .order("full_name", { ascending: true })
       .order("email", { ascending: true });
     if (error) throw new Error(error.message);
-    res.json({ ok: true, rows: data ?? [] });
+    let rows = data ?? [];
+    try {
+      rows = await enrichUserProfileRowsForAdminList(supabase, rows);
+    } catch (e) {
+      console.warn("GET /api/admin/users enrich skipped:", String(e?.message || e));
+    }
+    res.json({ ok: true, rows });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
@@ -790,7 +826,7 @@ app.post("/api/admin/users/:userId/role", requireAuth(), requireRole(["admin"]),
     const isActive =
       req.body?.is_active == null ? null : Boolean(req.body.is_active);
 
-    if (role && !ALLOWED_ROLES.includes(role)) {
+    if (role && !isApplicationRole(role)) {
       return res.status(400).json({ ok: false, error: `Invalid role: ${role}` });
     }
 
@@ -803,7 +839,7 @@ app.post("/api/admin/users/:userId/role", requireAuth(), requireRole(["admin"]),
       .from("user_profiles")
       .update(patch)
       .eq("id", userId)
-      .select("id,email,full_name,role,department,is_active")
+      .select("id,email,full_name,role,department,is_active,user_kind,last_login_at")
       .limit(1);
     if (error) throw new Error(error.message);
 
@@ -823,6 +859,8 @@ app.post("/api/admin/users/:userId/role", requireAuth(), requireRole(["admin"]),
     res.status(500).json({ ok: false, error: String(e?.message || e) });
   }
 });
+
+attachAdvancedSystemAdminUserRoutes(app, { supabaseServerClient });
 
 app.post("/api/auth/log-login", requireAuth(), express.json(), async (req, res) => {
   try {
@@ -1171,6 +1209,21 @@ app.get("/api/brain/fields/sqft", async (req, res) => {
   }
 });
 
+/** Launcher: allowed heads derived from `user_head_access`, profile + role defaults (additive; see docs). */
+app.get("/api/me/heads", requireAuth(), async (req, res) => {
+  try {
+    const supabase = supabaseServerClient();
+    const payload = await buildMeHeadsPayload(supabase, req.user);
+    res.json(payload);
+  } catch (error) {
+    console.error("GET /api/me/heads failed", error);
+    res.status(500).json({
+      ok: false,
+      error: "Failed to load available heads"
+    });
+  }
+});
+
 const port = toInt(process.env.PORT, 3001);
 app.listen(port, () => {
   console.log(`backend-core server listening on http://localhost:${port}`);
@@ -1180,7 +1233,17 @@ app.listen(port, () => {
   console.log("- GET /api/debug/cors");
   console.log("- GET /api/auth/roles");
   console.log("- GET /api/me");
+  console.log("- GET /api/me/heads");
   console.log("- GET /api/admin/users");
+  console.log("- GET /api/admin/reference");
+  console.log("- GET /api/admin/user-management/schema-health");
+  console.log("- POST /api/admin/users/invite");
+  console.log("- GET /api/admin/users/:userId");
+  console.log("- POST /api/admin/users/:userId/profile");
+  console.log("- POST /api/admin/users/:userId/head-access");
+  console.log("- POST /api/admin/users/:userId/dealer-access");
+  console.log("- POST /api/admin/users/:userId/pricing-group");
+  console.log("- POST /api/admin/users/:userId/send-password-reset");
   console.log("- POST /api/admin/users/:userId/role");
   console.log("- POST /api/auth/log-login");
   console.log("- GET /api/brain/sync-runs");
@@ -1197,6 +1260,7 @@ app.listen(port, () => {
   console.log("- GET /api/executive/field-trends");
   console.log("- GET /api/executive/monthly-trend");
   console.log("- GET /api/executive/debug");
+  console.log("- GET /api/titans/today");
   console.log("- POST /api/internal/sync/recent");
   console.log("- POST /api/internal/sync/nightly");
   console.log("- POST /api/internal/sync/nightly-operational");

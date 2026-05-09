@@ -1,7 +1,7 @@
 import { config } from "./config";
 
 export function joinBackendUrl(path: string) {
-  const base = config.backendBaseUrl.replace(/\/+$/, "");
+  const base = config.backendBaseUrl.replace(/\/+$/, "").replace(/\/api$/i, "");
   const p = path.startsWith("/") ? path : `/${path}`;
   return `${base}${p}`;
 }
@@ -9,11 +9,19 @@ export function joinBackendUrl(path: string) {
 export class ApiError extends Error {
   status: number;
   body: unknown;
-  constructor(message: string, status: number, body: unknown) {
+  /** Resolved request URL (for network failures and debugging). */
+  attemptedUrl?: string;
+  constructor(message: string, status: number, body: unknown, attemptedUrl?: string) {
     super(message);
     this.status = status;
     this.body = body;
+    this.attemptedUrl = attemptedUrl;
   }
+}
+
+function networkFailureMessage(joinErr: string, attemptedUrl: string) {
+  const base = config.backendBaseUrl;
+  return `Backend is not reachable at ${base}. Attempted ${attemptedUrl}. (${joinErr}) Confirm backend-core is running (e.g. npm run eos:server) and this browser origin is allowed by CORS (GET ${base}/api/debug/cors).`;
 }
 
 type ApiFetchOptions = {
@@ -38,12 +46,13 @@ export async function apiFetch(path: string, options: ApiFetchOptions) {
     body = typeof options.body === "string" ? options.body : JSON.stringify(options.body);
   }
 
+  const attemptedUrl = joinBackendUrl(path);
   let res: Response;
   try {
-    res = await fetch(joinBackendUrl(path), { method, headers, body });
+    res = await fetch(attemptedUrl, { method, headers, body });
   } catch (e: unknown) {
     const msg = String((e as Error)?.message || e);
-    throw new ApiError(`Network error: ${msg}`, 0, null);
+    throw new ApiError(networkFailureMessage(msg, attemptedUrl), 0, { cause: msg }, attemptedUrl);
   }
 
   const text = await res.text();

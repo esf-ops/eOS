@@ -87,9 +87,20 @@ export default function App() {
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string>("");
   const [toast, setToast] = useState<{ kind: "info" | "error"; text: string } | null>(null);
   const [selectedRun, setSelectedRun] = useState<any | null>(null);
+  const [titansPulse, setTitansPulse] = useState<{
+    syncFreshness?: { lastBrainSyncAt?: string | null; freshnessLabel?: string | null; ageSeconds?: number | null };
+    recommendedSyncCadence?: string;
+  } | null>(null);
 
   const role = me?.user?.role || "";
   const allowed = role === "admin" || role === "executive";
+
+  const latestOperationalSyncCandidate = useMemo(() => {
+    for (const r of syncRuns) {
+      if (r?.ingest_operational === true || /operational/i.test(String(r?.mode ?? ""))) return r;
+    }
+    return syncRuns[0] ?? null;
+  }, [syncRuns]);
 
   const badge = useMemo(() => (health ? healthColor(health) : { label: "unknown", color: "#94a3b8" }), [health]);
   const healthExplain = useMemo(() => computeHealthExplanation(health), [health]);
@@ -99,6 +110,7 @@ export default function App() {
     setHealth(null);
     setSyncRuns([]);
     setFailedJobs([]);
+    setTitansPulse(null);
     setDataError("");
     setActionMsg("");
     setApiDebug({});
@@ -163,6 +175,20 @@ export default function App() {
       setFailedJobs(Array.isArray(fj) ? fj : []);
       recordApi("/api/brain/failed-jobs", { status: 200, ok: true, count: Array.isArray(fj) ? fj.length : null });
 
+      recordApi("/api/titans/today?limit=1 (pulse probe)", { status: "starting" });
+      try {
+        const pulseYmd = new Date().toLocaleDateString("en-CA");
+        const pulse: any = await apiFetch(`/api/titans/today?date=${pulseYmd}&limit=1`, { token });
+        setTitansPulse({
+          syncFreshness: pulse?.syncFreshness,
+          recommendedSyncCadence: pulse?.recommendedSyncCadence
+        });
+        recordApi("/api/titans/today?limit=1 (pulse probe)", { status: 200, ok: true });
+      } catch (_e: unknown) {
+        setTitansPulse(null);
+        recordApi("/api/titans/today?limit=1 (pulse probe)", { status: "skipped", reason: "pulse_unavailable" });
+      }
+
       setLastRefreshedAt(new Date().toISOString());
     } catch (e: any) {
       if (e instanceof ApiError) {
@@ -226,12 +252,25 @@ export default function App() {
       setSession(s);
       const token = s?.access_token || "";
       setSessionToken(token);
-      clearDataState();
+
       if (evt === "SIGNED_OUT" || !token) {
+        clearDataState();
         setLoadingUser(false);
         return;
       }
-      if (evt === "SIGNED_IN" || evt === "TOKEN_REFRESHED" || evt === "USER_UPDATED") {
+
+      /** Supabase rotates JWTs silently — syncing token only avoids dashboard flashes (Executive parity). */
+      if (evt === "TOKEN_REFRESHED") {
+        return;
+      }
+
+      /** Hydration replay — `/api/me` bootstrap already driven by `getSession()` above. */
+      if (evt === "INITIAL_SESSION") {
+        return;
+      }
+
+      clearDataState();
+      if (evt === "SIGNED_IN" || evt === "USER_UPDATED") {
         loadAll(token).catch(() => {});
       }
     });
@@ -504,6 +543,59 @@ export default function App() {
               ) : null}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <div style={{ height: 16 }} />
+
+      <div className="card">
+        <div className="title">Titan Pulse Freshness</div>
+        <div className="muted" style={{ maxWidth: 720 }}>
+          Live Titan accuracy in Executive Overview follows <b>Moraware activity signals</b> buffered in the Brain — polling
+          the API only exposes what ingest already captured. Operational sync refreshes Brain data; nightly full sync fills
+          history and retries backlog.
+        </div>
+        <div style={{ height: 10 }} />
+        {titansPulse?.syncFreshness ? (
+          <div className="hstack" style={{ flexWrap: "wrap", gap: 8 }}>
+            <span className="pill">
+              Freshness:&nbsp;<b>{titansPulse.syncFreshness.freshnessLabel ?? "Unknown"}</b>
+            </span>
+            <span className="pill">
+              Latest Brain sync (Titan Pulse):{" "}
+              <b>{fmt(titansPulse.syncFreshness.lastBrainSyncAt) || "—"}</b>
+            </span>
+            {typeof titansPulse.syncFreshness.ageSeconds === "number" &&
+            Number.isFinite(titansPulse.syncFreshness.ageSeconds) ? (
+              <span className="pill">
+                Brain data age:&nbsp;<b>{titansPulse.syncFreshness.ageSeconds}s</b>
+              </span>
+            ) : null}
+          </div>
+        ) : (
+          <div className="muted">Titan Pulse slice unavailable (Executive API error or insufficient role).</div>
+        )}
+        <div style={{ height: 10 }} />
+        <div className="muted">
+          <b>Operational sync cue (runs list heuristic):</b>{" "}
+          {latestOperationalSyncCandidate ? (
+            <>
+              mode&nbsp;<code>{String(latestOperationalSyncCandidate.mode ?? "—")}</code>, finished&nbsp;
+              {fmt(latestOperationalSyncCandidate.finished_at)}, ingest_operational:&nbsp;
+              <code>{String(latestOperationalSyncCandidate.ingest_operational ?? "?")}</code>
+            </>
+          ) : (
+            "No sync rows loaded."
+          )}
+        </div>
+        <div style={{ height: 10 }} />
+        <div className="muted">
+          <b>Recommended cadence (documented expectation):</b>{" "}
+          {titansPulse?.recommendedSyncCadence ??
+            "For live Titan review, run recent operational sync every 5–15 minutes during production hours."}
+        </div>
+        <div style={{ marginTop: 10, fontWeight: 600 }}>
+          Live Titan accuracy depends on recent operational sync cadence.
         </div>
       </div>
 
