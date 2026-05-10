@@ -27,6 +27,7 @@
     "eos:audit:brain-deep": "node backend-core/src/scripts/auditMorawareBrainCoverageDeep.js",
     "eos:audit:field-labels": "node backend-core/src/scripts/auditBrainFieldLabels.js",
     "eos:audit:titans-today": "node backend-core/src/scripts/auditTitanTodayReadiness.js",
+    "eos:audit:moraware-ui-coverage": "node backend-core/src/scripts/auditMorawareUICoverageMatrix.js",
     "eos:titans:test": "node backend-core/src/scripts/testTitansTodayEndpoint.js",
     "eos:backfill:field-labels:dry": "DRY_RUN=1 node backend-core/src/scripts/backfillBrainFieldNormalizedLabels.js",
     "eos:backfill:field-labels": "DRY_RUN=0 node backend-core/src/scripts/backfillBrainFieldNormalizedLabels.js",
