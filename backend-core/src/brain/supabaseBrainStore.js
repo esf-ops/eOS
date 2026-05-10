@@ -1,5 +1,11 @@
 import { createClient } from "@supabase/supabase-js";
 
+import {
+  analyzeJobNotesScope,
+  extractJobSiteAddressFromOperationalJobNode,
+  mergeActivityFieldsForBrainInsert
+} from "../../../src/morawareOperational.js";
+
 import { computeNormalizedLabelForBrainFieldRow } from "./brainFieldNormalizedLabel.js";
 
 let _loggedDisabled = false;
@@ -68,6 +74,12 @@ function toNumberOrNull(v) {
   if (v === null || v === undefined || v === "") return null;
   const n = typeof v === "number" ? v : Number(String(v));
   return Number.isFinite(n) ? n : null;
+}
+
+function textOrNull(v) {
+  if (v == null) return null;
+  const s = String(v).trim();
+  return s === "" ? null : s;
 }
 
 function toIntOrNull(v) {
@@ -353,7 +365,8 @@ export async function replaceJobOperational(jobId, operational) {
     supabase.from("brain_job_phases").delete().eq("job_id", jid),
     supabase.from("brain_job_activities").delete().eq("job_id", jid),
     supabase.from("brain_job_contacts").delete().eq("job_id", jid),
-    supabase.from("brain_job_operational_summary").delete().eq("job_id", jid)
+    supabase.from("brain_job_operational_summary").delete().eq("job_id", jid),
+    supabase.from("brain_job_addresses").delete().eq("job_id", jid)
   ]);
   for (const d of dels) {
     if (d.error) throw new Error(`Supabase delete operational rows failed: ${d.error.message}`);
@@ -366,6 +379,7 @@ export async function replaceJobOperational(jobId, operational) {
       job_id: jid,
       phase_name: String(p?.phaseName ?? ""),
       phase_id: String(p?.phaseId ?? ""),
+      phase_seq_num: toIntOrNull(p?.phaseSeqNum),
       raw_json: p?.raw ?? p ?? null,
       synced_at: nowIso
     }));
@@ -389,20 +403,29 @@ export async function replaceJobOperational(jobId, operational) {
   }
 
   if (activities.length) {
-    const rows = activities.map((a) => ({
-      job_id: jid,
-      activity_index: toIntOrNull(a?.activityIndex),
-      activity_type: String(a?.activityType ?? ""),
-      activity_status: String(a?.activityStatus ?? ""),
-      phase_name: String(a?.phaseName ?? ""),
-      start_date: parseDateOrNull(a?.startDate),
-      sched_time: String(a?.schedTime ?? ""),
-      duration: String(a?.duration ?? ""),
-      description: String(a?.description ?? ""),
-      notes: String(a?.notes ?? ""),
-      raw_json: a?.raw ?? a ?? null,
-      synced_at: nowIso
-    }));
+    const rows = activities.map((a) => {
+      const m = mergeActivityFieldsForBrainInsert(a);
+      return {
+        job_id: jid,
+        activity_index: toIntOrNull(a?.activityIndex),
+        activity_type: String(a?.activityType ?? a?.activityTypeName ?? m.activityTypeName ?? ""),
+        activity_type_id: textOrNull(m.activityTypeId),
+        activity_type_name: textOrNull(m.activityTypeName),
+        activity_status: String(a?.activityStatus ?? a?.activityStatusName ?? m.activityStatusName ?? ""),
+        status_id: textOrNull(m.activityStatusId),
+        status_name: textOrNull(m.activityStatusName),
+        phase_name: String(a?.phaseName ?? m.phaseName ?? ""),
+        phase_id: textOrNull(m.phaseId),
+        phase_seq_num: toIntOrNull(m.phaseSeqNum),
+        start_date: parseDateOrNull(a?.startDate),
+        sched_time: String(a?.schedTime ?? ""),
+        duration: String(a?.duration ?? ""),
+        description: String(a?.description ?? ""),
+        notes: String(a?.notes ?? ""),
+        raw_json: a?.raw ?? a ?? null,
+        synced_at: nowIso
+      };
+    });
 
     const chunkSize = 1000;
     for (let i = 0; i < rows.length; i += chunkSize) {
@@ -440,13 +463,56 @@ export async function replaceJobOperational(jobId, operational) {
     if (up.error) throw new Error(`Supabase upsert brain_job_operational_summary failed: ${up.error.message}`);
   }
 
+  const addr = extractJobSiteAddressFromOperationalJobNode(operational?.raw?.job);
+  if (addr) {
+    const insAddr = await supabase.from("brain_job_addresses").upsert(
+      {
+        job_id: jid,
+        address_line1: addr.address_line1 || null,
+        city: addr.city || null,
+        state: addr.state || null,
+        zip: addr.zip || null,
+        contact_name: addr.contact_name || null,
+        email: addr.email || null,
+        cell: addr.cell || null,
+        notes: addr.notes || null,
+        raw_json: addr.raw_json ?? null,
+        synced_at: nowIso
+      },
+      { onConflict: "job_id" }
+    );
+    if (insAddr.error) throw new Error(`Supabase upsert brain_job_addresses failed: ${insAddr.error.message}`);
+  }
+
+  const rawNotes = String(operational?.raw?.job?.notes?._text ?? operational?.raw?.job?.notes ?? "").trim();
+  const scope = analyzeJobNotesScope(rawNotes, {});
+  const insScope = await supabase.from("brain_job_notes_scope_signals").upsert(
+    {
+      job_id: jid,
+      has_scope_like_lines: Boolean(scope?.has_scope_like_lines),
+      detected_sqft_line_count: Number(scope?.detected_sqft_line_count ?? 0) || 0,
+      detected_phase_label_count: Number(scope?.detected_phase_label_count ?? 0) || 0,
+      raw_notes: rawNotes.length > 100_000 ? rawNotes.slice(0, 100_000) : rawNotes || null,
+      parsed_signals: {
+        detected_phase_labels: scope?.detected_phase_labels ?? [],
+        non_authoritative: true,
+        source: "analyzeJobNotesScope"
+      },
+      synced_at: nowIso
+    },
+    { onConflict: "job_id" }
+  );
+  if (insScope.error) throw new Error(`Supabase upsert brain_job_notes_scope_signals failed: ${insScope.error.message}`);
+
   return {
     skipped: false,
     count: {
       phases: phases.length,
       contacts: contacts.length,
       activities: activities.length,
-      summary: summary ? 1 : 0
+      summary: summary ? 1 : 0,
+      addresses: addr ? 1 : 0,
+      notes_scope_signals: 1
     }
   };
 }

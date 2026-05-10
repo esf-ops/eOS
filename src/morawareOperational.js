@@ -4,6 +4,13 @@ function asArray(value) {
   return [value];
 }
 
+/** Unwrap fast-xml-parser / Moraware nodes that repeat as a single-element array. */
+function unwrapFirst(value) {
+  if (value == null) return null;
+  if (Array.isArray(value)) return value.length ? unwrapFirst(value[0]) : null;
+  return value;
+}
+
 function getText(value) {
   if (value == null) return "";
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
@@ -84,11 +91,14 @@ function extractSlabNumbers(text) {
 }
 
 function pickActivityType(act) {
-  return getText(act?.activityType?.name) || getText(act?.activityType) || getText(act?.type?.name) || getText(act?.type);
+  const typeNode = unwrapFirst(act?.activityType);
+  const altType = unwrapFirst(act?.type);
+  return getText(typeNode?.name) || getText(typeNode) || getText(altType?.name) || getText(altType);
 }
 
 function pickActivityStatus(act) {
-  return getText(act?.status?.name) || getText(act?.status);
+  const st = unwrapFirst(act?.status);
+  return getText(st?.name) || getText(st);
 }
 
 function pickPhaseName(act) {
@@ -102,6 +112,199 @@ function pickPhaseName(act) {
 
 function pickActivityNotes(act) {
   return getText(act?.notes) || getText(act?.note) || getText(act?.comment);
+}
+
+function pickActivityDescription(act) {
+  return getText(act?.description);
+}
+
+function parsePhaseSeqNumFromNode(p) {
+  if (!p || typeof p !== "object") return null;
+  const raw = getAttr(p, "seqNum") || getText(p?.seqNum);
+  const n = Number.parseInt(String(raw ?? "").trim(), 10);
+  return Number.isFinite(n) ? n : null;
+}
+
+function extractActivityTypeMeta(act) {
+  const node = unwrapFirst(act?.activityType);
+  if (node && typeof node === "object") {
+    return {
+      activityTypeId: getAttr(node, "id"),
+      activityTypeName: getText(node?.name) || pickActivityType(act)
+    };
+  }
+  return { activityTypeId: "", activityTypeName: pickActivityType(act) };
+}
+
+function extractActivityStatusMeta(act) {
+  const node = unwrapFirst(act?.status);
+  if (node && typeof node === "object") {
+    return {
+      activityStatusId: getAttr(node, "id"),
+      activityStatusName: getText(node?.name) || pickActivityStatus(act)
+    };
+  }
+  return { activityStatusId: "", activityStatusName: pickActivityStatus(act) };
+}
+
+function jobPhaseRowsFromActivity(act) {
+  const jp = act?.jobPhases;
+  if (jp && typeof jp === "object" && !Array.isArray(jp)) {
+    return asArray(jp.jobPhase);
+  }
+  return asArray(act?.jobPhase);
+}
+
+/** Phase row attached to a single activity (Moraware nests jobPhases on the activity). */
+function extractActivityPhaseMeta(act) {
+  const rows = jobPhaseRowsFromActivity(act);
+  const first = unwrapFirst(rows[0]);
+  if (!first) {
+    return {
+      phaseId: "",
+      phaseName: pickPhaseName(act),
+      phaseSeqNum: null
+    };
+  }
+  return {
+    phaseId: getAttr(first, "id") || String(first?.id ?? "").trim(),
+    phaseName: getText(first?.name) || pickPhaseName(act),
+    phaseSeqNum: parsePhaseSeqNumFromNode(first)
+  };
+}
+
+function pickNonemptyString(...candidates) {
+  for (const c of candidates) {
+    if (c == null) continue;
+    const s = String(c).trim();
+    if (s !== "") return s;
+  }
+  return "";
+}
+
+function coercePhaseSeqNum(value) {
+  if (value == null || String(value).trim() === "") return undefined;
+  const n = Number.parseInt(String(value).trim(), 10);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+/**
+ * Collapse normalized activity + optional `raw` Moraware node for Supabase row mapping.
+ * Handles normalized rows where `activityType` / `status` are plain strings but ids live on `raw`.
+ */
+export function mergeActivityFieldsForBrainInsert(activity) {
+  const a = activity ?? {};
+  const raw = a.raw && typeof a.raw === "object" && !Array.isArray(a.raw) ? a.raw : null;
+
+  const typeNorm = extractActivityTypeMeta(a);
+  const statNorm = extractActivityStatusMeta(a);
+  const phaseNorm = extractActivityPhaseMeta(a);
+  const typeRaw = raw ? extractActivityTypeMeta(raw) : typeNorm;
+  const statRaw = raw ? extractActivityStatusMeta(raw) : statNorm;
+  const phaseRaw = raw ? extractActivityPhaseMeta(raw) : phaseNorm;
+
+  const activityTypeId = pickNonemptyString(a.activityTypeId, typeRaw.activityTypeId, typeNorm.activityTypeId);
+  const activityTypeName = pickNonemptyString(
+    a.activityTypeName,
+    a.activityType,
+    typeNorm.activityTypeName,
+    typeRaw.activityTypeName
+  );
+  const activityStatusId = pickNonemptyString(a.activityStatusId, statRaw.activityStatusId, statNorm.activityStatusId);
+  const activityStatusName = pickNonemptyString(
+    a.activityStatusName,
+    a.activityStatus,
+    statNorm.activityStatusName,
+    statRaw.activityStatusName
+  );
+  const phaseId = pickNonemptyString(a.phaseId, phaseRaw.phaseId, phaseNorm.phaseId);
+  const phaseName = pickNonemptyString(a.phaseName, phaseNorm.phaseName, phaseRaw.phaseName);
+  const phaseSeqNum = coercePhaseSeqNum(a.phaseSeqNum) ?? phaseRaw.phaseSeqNum ?? phaseNorm.phaseSeqNum ?? null;
+
+  return {
+    activityTypeId,
+    activityTypeName,
+    activityStatusId,
+    activityStatusName,
+    phaseId,
+    phaseName,
+    phaseSeqNum
+  };
+}
+
+/**
+ * Non-authoritative heuristics on free-form job notes (signals only — not worksheet Sq.Ft. truth).
+ * @param {string} notesText
+ * @param {{ includeRawSnippets?: boolean }} [options]
+ */
+export function analyzeJobNotesScope(notesText, options = {}) {
+  const includeRawSnippets = Boolean(options?.includeRawSnippets);
+  const text = String(notesText ?? "");
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+
+  const isSqftLine = (l) => {
+    const s = String(l ?? "");
+    return (
+      /\d+\s*sf\b/i.test(s) ||
+      /\d+\s*sq\s*\.?\s*ft\b/i.test(s) ||
+      /\d+\s*sqft\b/i.test(s) ||
+      /\d+\s*sq\s*'/i.test(s) ||
+      /\d+\s*sq\s*ft\b/i.test(s)
+    );
+  };
+
+  const hasPhaseLabel = (l) => /\bPHASE\s*\d+\b/i.test(String(l ?? ""));
+  const hasScopeLikeLines = lines.some((l) => isSqftLine(l) || hasPhaseLabel(l)) || /\bPHASE\s*\d+\b/i.test(text);
+
+  const sqftLines = lines.filter(isSqftLine);
+  const phaseMatches = text.match(/\bPHASE\s*\d+\b/gi) || [];
+  const detected_phase_labels = [...new Set(phaseMatches.map((m) => m.toUpperCase()))];
+
+  const out = {
+    has_scope_like_lines: Boolean(hasScopeLikeLines),
+    detected_sqft_line_count: sqftLines.length,
+    detected_phase_label_count: detected_phase_labels.length,
+    detected_phase_labels,
+    recommended_future_parser:
+      "Parse job notes into scope lines cautiously; always preserve original notes in raw_json / brain_jobs.notes. Do not replace worksheet Sq.Ft."
+  };
+  if (includeRawSnippets) {
+    out.examples_if_raw_snippets_enabled = lines.slice(0, 12);
+  }
+  return out;
+}
+
+/**
+ * Proven Moraware site / ship-to style address object under operational `job.address`.
+ * Returns null when absent.
+ */
+export function extractJobSiteAddressFromOperationalJobNode(jobNode) {
+  if (!jobNode || typeof jobNode !== "object") return null;
+  const addr = jobNode.address;
+  if (!addr || typeof addr !== "object") return null;
+
+  const address_line1 = getText(addr.addressLine1) || getText(addr.line1) || getText(addr.street);
+  const city = getText(addr.city);
+  const state = getText(addr.state);
+  const zip = getText(addr.zip) || getText(addr.postalCode);
+  const contact_name = getText(addr.contactName) || getText(addr.contact);
+  const email = getText(addr.email);
+  const cell = getText(addr.cell) || getText(addr.phone);
+  const notes = getText(addr.notes);
+
+  if (!address_line1 && !city && !state && !zip && !contact_name && !email && !cell && !notes) return null;
+
+  return {
+    address_line1,
+    city,
+    state,
+    zip,
+    contact_name,
+    email,
+    cell,
+    notes,
+    raw_json: addr
+  };
 }
 
 function getJobNode(parsedResponse) {
@@ -131,6 +334,7 @@ export function normalizeJobOperational(jobId, parsedResponse) {
     jobId: jid,
     phaseName: getText(p?.name) || getText(p?.phaseName),
     phaseId: getAttr(p, "id") || getText(p?.id),
+    phaseSeqNum: parsePhaseSeqNumFromNode(p),
     raw: p ?? null
   }));
 
@@ -144,19 +348,30 @@ export function normalizeJobOperational(jobId, parsedResponse) {
     raw: c ?? null
   }));
 
-  const activities = activitiesRaw.map((a, idx) => ({
-    jobId: jid,
-    activityIndex: idx,
-    activityType: pickActivityType(a),
-    activityStatus: pickActivityStatus(a),
-    phaseName: pickPhaseName(a),
-    startDate: normalizeDateToYmd(getText(a?.startDate)),
-    schedTime: getText(a?.schedTime),
-    duration: getText(a?.duration),
-    description: getText(a?.description),
-    notes: pickActivityNotes(a),
-    raw: a ?? null
-  }));
+  const activities = activitiesRaw.map((a, idx) => {
+    const typeM = extractActivityTypeMeta(a);
+    const statM = extractActivityStatusMeta(a);
+    const phM = extractActivityPhaseMeta(a);
+    return {
+      jobId: jid,
+      activityIndex: idx,
+      activityType: typeM.activityTypeName || pickActivityType(a),
+      activityStatus: statM.activityStatusName || pickActivityStatus(a),
+      phaseName: phM.phaseName || pickPhaseName(a),
+      startDate: normalizeDateToYmd(getText(a?.startDate)),
+      schedTime: getText(a?.schedTime),
+      duration: getText(a?.duration),
+      description: pickActivityDescription(a),
+      notes: pickActivityNotes(a),
+      activityTypeId: typeM.activityTypeId,
+      activityTypeName: typeM.activityTypeName,
+      activityStatusId: statM.activityStatusId,
+      activityStatusName: statM.activityStatusName,
+      phaseId: phM.phaseId,
+      phaseSeqNum: phM.phaseSeqNum,
+      raw: a ?? null
+    };
+  });
 
   return {
     jobId: jid,
