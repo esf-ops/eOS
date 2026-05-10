@@ -7,6 +7,7 @@
  */
 
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 import axios from "axios";
@@ -1343,7 +1344,7 @@ function extractProcessIdsFromParsed(parsed) {
   return [...out];
 }
 
-async function discoverProcesses(ctx) {
+async function discoverProcesses(ctx, sendOptions = {}) {
   const probes = [];
   const processIds = new Set();
 
@@ -1401,7 +1402,8 @@ async function discoverProcesses(ctx) {
 
   for (const pd of probeDefs) {
     const res = await sendMorawareCommand(ctx, pd.commandName, pd.innerXml, {
-      probeName: pd.id
+      probeName: pd.id,
+      ...sendOptions
     });
     const ids = extractProcessIdsFromParsed(res.parsed || {});
     ids.forEach((id) => processIds.add(id));
@@ -1421,7 +1423,7 @@ async function discoverProcesses(ctx) {
   return { probes, processIds: [...processIds] };
 }
 
-function buildJobQueryByProcessInnerXml(processId, firstRecord, pageSize, processFilterVariantId) {
+export function buildJobQueryByProcessInnerXml(processId, firstRecord, pageSize, processFilterVariantId) {
   const pid = String(processId ?? "").trim();
   const filter =
     processFilterVariantId === "processText"
@@ -1446,6 +1448,185 @@ function buildJobQueryByProcessInnerXml(processId, firstRecord, pageSize, proces
     `  <pagingSpec xmlns="" firstRecord="${firstRecord}" pageSize="${pageSize}" calculateTotalRecords="false"/>\n` +
     `</jobQuery>`
   );
+}
+
+/**
+ * Collect job rows using the same process-scoped `jobQuery` paging as `global-sync` (see `runMorawareDiscovery`).
+ * Read-only; pass `{ quiet: true, skipProbeArtifacts: true }` (defaults) to avoid console/file spam.
+ *
+ * Honors: `MORAWARE_PROCESS_IDS`, `MORAWARE_MAX_PROCESSES`, `MORAWARE_MAX_SEARCH_PAGES`,
+ * `MORAWARE_SEARCH_PAGE_SIZE` (fallback `MORAWARE_PAGE_SIZE`), and optional `MORAWARE_SYNC_START_DATE`,
+ * `MORAWARE_SYNC_END_DATE`, `MORAWARE_SYNC_YEAR` filters on `creationDate` from list rows.
+ */
+export async function collectGlobalSyncStyleJobListSample(client, options = {}) {
+  const {
+    collectCap = 120,
+    maxProcesses: maxProcessesOpt,
+    maxPages: maxPagesOpt,
+    pageSize: pageSizeOpt,
+    quiet = true,
+    skipProbeArtifacts = true,
+    runDir: runDirOpt
+  } = options;
+
+  const maxProcesses = maxProcessesOpt ?? toNumberOr(process.env.MORAWARE_MAX_PROCESSES, 10);
+  const maxPages = maxPagesOpt ?? toNumberOr(process.env.MORAWARE_MAX_SEARCH_PAGES, 50);
+  const pageSize =
+    pageSizeOpt ??
+    toNumberOr(process.env.MORAWARE_SEARCH_PAGE_SIZE ?? process.env.MORAWARE_PAGE_SIZE, 100);
+
+  await client.ensureSession();
+  const sessionId = client.sessionId;
+  const runDir =
+    runDirOpt ||
+    path.join(os.tmpdir(), "eos-moraware-expanded-sampling", `p${process.pid}-${Date.now()}`);
+  await mkdirp(runDir);
+
+  const ctx = {
+    sessionId,
+    apiUrl: client.baseUrl,
+    timeoutMs: client.timeoutMs,
+    runDir,
+    latestDir: runDir,
+    probeIndex: 0,
+    probes: [],
+    successfulProbeNames: [],
+    failedProbeNames: [],
+    noDataProbeNames: [],
+    partialProbeNames: []
+  };
+
+  const sendOpts = { quiet, skipProbeArtifacts };
+
+  const processOverride = parseCsvIdList(process.env.MORAWARE_PROCESS_IDS);
+  let processesSource = "discoverProcesses";
+  let processesUsed = [];
+  if (processOverride.length) {
+    processesUsed = processOverride.slice(0, maxProcesses);
+    processesSource = "MORAWARE_PROCESS_IDS";
+  } else {
+    const pd = await discoverProcesses(ctx, sendOpts);
+    processesUsed = (pd.processIds || []).slice(0, maxProcesses);
+  }
+
+  const diagnostics = {
+    processesSource,
+    processesUsed: [...processesUsed],
+    maxProcesses,
+    maxPages,
+    pageSize,
+    processCount: processesUsed.length
+  };
+
+  if (!processesUsed.length) {
+    return {
+      jobs: [],
+      rawJobsCollected: 0,
+      diagnostics: { ...diagnostics, reason: "no_process_ids" },
+      pagesLog: []
+    };
+  }
+
+  const jobIds = new Set();
+  const collected = [];
+  const pagesLog = [];
+  const variants = ["processIdAttr", "processText"];
+
+  for (const processId of processesUsed) {
+    for (let pageIdx = 0; pageIdx < maxPages; pageIdx += 1) {
+      let pageOk = false;
+      let pageJobs = [];
+      for (const variantId of variants) {
+        const inner = buildJobQueryByProcessInnerXml(processId, pageIdx * pageSize, pageSize, variantId);
+        const res = await sendMorawareCommand(ctx, "jobQuery", inner, {
+          probeName: `EXPANDED-SAMPLE-${processId}-${variantId}-p${pageIdx}`,
+          ...sendOpts
+        });
+        pageJobs = asArray(res.parsed?.MorawareResponse?.jobQuery?.job);
+        pagesLog.push({
+          processId,
+          variantId,
+          page: pageIdx,
+          firstRecord: pageIdx * pageSize,
+          probeStatus: res.probeStatus,
+          httpStatus: res.httpStatus,
+          jobCount: pageJobs.length
+        });
+        if (
+          res.httpStatus >= 200 &&
+          res.httpStatus < 300 &&
+          !res.parsed?.parseError &&
+          !hasBlockingMorawareError(res.apiErrors || [])
+        ) {
+          pageOk = true;
+          break;
+        }
+      }
+      if (!pageOk) break;
+
+      for (const j of pageJobs) {
+        const id = String(j?._attributes?.id ?? j?.id ?? "").trim();
+        if (!id || jobIds.has(id)) continue;
+        jobIds.add(id);
+        collected.push(j);
+        if (collected.length >= collectCap) break;
+      }
+      if (collected.length >= collectCap) break;
+      if (pageJobs.length < pageSize) break;
+    }
+    if (collected.length >= collectCap) break;
+  }
+
+  diagnostics.rawJobsCollectedBeforeDateFilter = collected.length;
+
+  const syncYear = String(process.env.MORAWARE_SYNC_YEAR ?? "").trim();
+  const syncStartDateRaw = String(process.env.MORAWARE_SYNC_START_DATE ?? "").trim();
+  const syncEndDateRaw = String(process.env.MORAWARE_SYNC_END_DATE ?? "").trim();
+  const syncStartMs = syncStartDateRaw ? parseIsoDateToMsOrNull(syncStartDateRaw) : null;
+  const syncEndMs = syncEndDateRaw ? parseIsoDateToMsOrNull(syncEndDateRaw) : null;
+  const dateFilterEnabled = Boolean(syncStartMs != null || syncEndMs != null || syncYear);
+
+  let filtered = collected;
+  let rejectedByDate = 0;
+  if (dateFilterEnabled) {
+    const out = [];
+    for (const j of collected) {
+      const creationDateRaw = getText(j?.creationDate);
+      const creationMs = parseIsoDateToMsOrNull(creationDateRaw);
+      let accepted = true;
+      if (!creationMs) {
+        accepted = false;
+      } else {
+        if (syncStartMs != null && creationMs < syncStartMs) accepted = false;
+        if (accepted && syncEndMs != null && creationMs > syncEndMs) accepted = false;
+        if (accepted && syncYear) {
+          const y = new Date(creationMs).getUTCFullYear();
+          if (String(y) !== syncYear) accepted = false;
+        }
+      }
+      if (accepted) out.push(j);
+      else rejectedByDate += 1;
+    }
+    filtered = out;
+  }
+
+  diagnostics.dateFilterEnabled = dateFilterEnabled;
+  diagnostics.syncStartDateRaw = syncStartDateRaw || null;
+  diagnostics.syncEndDateRaw = syncEndDateRaw || null;
+  diagnostics.syncYear = syncYear || null;
+  diagnostics.rejectedByDateFilter = rejectedByDate;
+  diagnostics.matchedAfterDateFilter = filtered.length;
+  if (dateFilterEnabled && collected.length > 0 && filtered.length === 0) {
+    diagnostics.hint =
+      "All jobs from process pages were rejected by MORAWARE_SYNC_* date/year filters. Unset or widen them for discovery sampling, or set MORAWARE_DISCOVERY_JOB_ID / EOS_DISCOVERY_JOB_ID.";
+  }
+
+  return {
+    jobs: filtered,
+    rawJobsCollected: collected.length,
+    diagnostics,
+    pagesLog
+  };
 }
 
 function evaluateJobDetailProbe(parsed, httpStatus, apiErrors, targetJobId) {
@@ -1546,14 +1727,21 @@ export async function sendMorawareCommand(ctx, commandName, innerXml, options = 
   const probeName = options.probeName || `${commandName}-${idx}`;
   const requestId = `${probeName}#${idx}`;
   const safe = safeFilePart(probeName);
+  const quiet = Boolean(options.quiet);
+  const skipProbeArtifacts = Boolean(options.skipProbeArtifacts);
 
-  await mkdirp(ctx.runDir);
+  let reqPath = "";
+  let resPath = "";
+  if (!skipProbeArtifacts) {
+    await mkdirp(ctx.runDir);
+    reqPath = path.join(ctx.runDir, `probe-${idx}-${safe}-request.xml`);
+    resPath = path.join(ctx.runDir, `probe-${idx}-${safe}-response.xml`);
+    await fs.writeFile(reqPath, envelope, "utf8");
+  }
 
-  const reqPath = path.join(ctx.runDir, `probe-${idx}-${safe}-request.xml`);
-  const resPath = path.join(ctx.runDir, `probe-${idx}-${safe}-response.xml`);
-  await fs.writeFile(reqPath, envelope, "utf8");
-
-  console.log(`[requestId=${requestId}] REQUEST (session redacted):\n${redactSessionId(envelope)}`);
+  if (!quiet) {
+    console.log(`[requestId=${requestId}] REQUEST (session redacted):\n${redactSessionId(envelope)}`);
+  }
 
   let rawXml = "";
   let httpStatus = 0;
@@ -1576,7 +1764,9 @@ export async function sendMorawareCommand(ctx, commandName, innerXml, options = 
     if (err?.response?.data && typeof err.response.data === "string") rawXml = err.response.data;
   }
 
-  await fs.writeFile(resPath, rawXml, "utf8");
+  if (!skipProbeArtifacts) {
+    await fs.writeFile(resPath, rawXml, "utf8");
+  }
 
   if (options.logRawResponseToConsole) {
     console.log(`[requestId=${requestId}] RESPONSE RAW:\n${rawXml}`);
@@ -1591,7 +1781,9 @@ export async function sendMorawareCommand(ctx, commandName, innerXml, options = 
     parsed = { parseError: parseErr, rawSnippet: rawXml.slice(0, 500) };
   }
 
-  console.log(`[requestId=${requestId}] RESPONSE JSON:\n${JSON.stringify(parsed, null, 2)}`);
+  if (!quiet) {
+    console.log(`[requestId=${requestId}] RESPONSE JSON:\n${JSON.stringify(parsed, null, 2)}`);
+  }
 
   const apiErrors = parsed && typeof parsed === "object" ? extractMorawareErrors(parsed) : [];
 
@@ -1636,8 +1828,8 @@ export async function sendMorawareCommand(ctx, commandName, innerXml, options = 
     parseError: parseErr,
     extractedFieldCount,
     leafCount,
-    requestPath: reqPath,
-    responsePath: resPath
+    requestPath: skipProbeArtifacts ? "(not written)" : reqPath,
+    responsePath: skipProbeArtifacts ? "(not written)" : resPath
   };
   ctx.probes.push(record);
   if (probeStatus === "success") ctx.successfulProbeNames.push(probeName);

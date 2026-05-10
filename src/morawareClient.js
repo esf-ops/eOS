@@ -99,6 +99,11 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+/** When `MORAWARE_DISCOVERY_QUIET_LOGS=1`, suppress verbose Moraware response logging (default off — unchanged for sync). */
+function morawareDiscoveryQuietLogs() {
+  return String(process.env.MORAWARE_DISCOVERY_QUIET_LOGS ?? "").trim() === "1";
+}
+
 async function withRetries(fn, { retries, minDelayMs, maxDelayMs }) {
   let attempt = 0;
   // eslint-disable-next-line no-constant-condition
@@ -468,7 +473,7 @@ export class MorawareClient {
     if (!this.sessionId || this.sessionId === "null" || this.sessionId.trim().length === 0) {
       throw new Error("Failed to capture a valid Moraware Session ID.");
     }
-    console.log("Login Success. Session ID retrieved.");
+    if (!morawareDiscoveryQuietLogs()) console.log("Login Success. Session ID retrieved.");
     return this.sessionId;
   }
 
@@ -495,27 +500,27 @@ export class MorawareClient {
     }
 
     const data = parseXmlToObject(text);
-    console.log("FULL SERVER RESPONSE:", data);
+    if (!morawareDiscoveryQuietLogs()) console.log("FULL SERVER RESPONSE:", data);
     return { rawXml: text, data };
   }
 
   async morawareCommandWithBody(xmlBody) {
-    console.log("SENDING XML:", xmlBody);
+    if (!morawareDiscoveryQuietLogs()) console.log("SENDING XML:", xmlBody);
 
     const text = await withRetries(
       () => httpPostXml({ url: this.baseUrl, xmlBody: xmlBody, timeoutMs: this.timeoutMs }),
       { retries: this.retries, minDelayMs: this.minRetryDelayMs, maxDelayMs: this.maxRetryDelayMs }
     );
 
-    console.log("RAW XML RESPONSE:", text);
+    if (!morawareDiscoveryQuietLogs()) console.log("RAW XML RESPONSE:", text);
 
     if (!this._loggedXmlSnippet) {
       this._loggedXmlSnippet = true;
-      console.log(`Moraware raw XML (first 200 chars): ${text.slice(0, 200)}`);
+      if (!morawareDiscoveryQuietLogs()) console.log(`Moraware raw XML (first 200 chars): ${text.slice(0, 200)}`);
     }
 
     const data = parseXmlToObject(text);
-    console.log("FULL SERVER RESPONSE:", data);
+    if (!morawareDiscoveryQuietLogs()) console.log("FULL SERVER RESPONSE:", data);
     return { rawXml: text, data };
   }
 
@@ -584,7 +589,7 @@ export class MorawareClient {
       const firstJob = jobs[0];
       if (!_isEmptyObject(firstJob) && !this._loggedFirstJobKeys) {
         this._loggedFirstJobKeys = true;
-        console.log("Keys found in raw job:", Object.keys(firstJob));
+        if (!morawareDiscoveryQuietLogs()) console.log("Keys found in raw job:", Object.keys(firstJob));
       }
 
       for (const j of jobs) allJobs.push(j);

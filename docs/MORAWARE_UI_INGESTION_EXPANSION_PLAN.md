@@ -99,6 +99,18 @@ SlabSmith/inventory, Monday/CRM, payroll/time, AI takeoff providers, SMS/emailâ€
 
 ---
 
+## Next live discovery step
+
+Run **read-only** expanded API discovery against a Moraware tenant (credentials via existing env only):
+
+- **Script:** `backend-core/src/scripts/discoverMorawareExpandedCoverage.js`
+- **Command:** `npm run eos:discover:moraware-expanded`
+- **Report:** `debug/moraware/latest/moraware-expanded-discovery.json` and `.txt` (gitignored `debug/` tree â€” do not commit sensitive runs)
+
+See **`docs/MORAWARE_EXPANDED_DISCOVERY_RESULTS.md`** for env flags, existing API inventory (Part A), and how to interpret categories without exposing secrets.
+
+---
+
 ## Related
 
 - `docs/MORAWARE_UI_COVERAGE_MAP.md`
