@@ -8,7 +8,30 @@ namespace MorawareSdkTrace;
 
 internal static class Program
 {
-    private static void Main()
+    private static int Main(string[] args)
+    {
+        var mode = Environment.GetEnvironmentVariable("MORAWARE_SDK_TRACE_MODE") ?? "forms";
+        if (string.Equals(mode, "full-surface", StringComparison.OrdinalIgnoreCase))
+        {
+            return SdkFullSurfaceReport.Run();
+        }
+
+        if (string.Equals(mode, "activity-read-probe", StringComparison.OrdinalIgnoreCase))
+        {
+            return SdkActivityReadReport.Run();
+        }
+
+        if (string.Equals(mode, "assignment", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(mode, "surface", StringComparison.OrdinalIgnoreCase))
+        {
+            return SdkAssignmentReport.Run();
+        }
+
+        RunFormsTraceMode();
+        return Environment.ExitCode;
+    }
+
+    private static void RunFormsTraceMode()
     {
         var url = Environment.GetEnvironmentVariable("MORAWARE_URL") ?? string.Empty;
         var user = Environment.GetEnvironmentVariable("MORAWARE_USERNAME") ?? string.Empty;
