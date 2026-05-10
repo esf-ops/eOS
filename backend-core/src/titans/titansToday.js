@@ -64,6 +64,46 @@ export function combinedActivityText(row) {
   return [row.activity_type, row.activity_status, row.phase_name, row.description, row.notes].map((x) => String(x ?? "")).join(" | ");
 }
 
+/** Prefer operational expansion names when present. */
+export function activityTypeDisplay(row) {
+  const v = row.activity_type_name ?? row.activity_type;
+  return v != null ? String(v).trim() : "";
+}
+
+export function statusDisplay(row) {
+  const v = row.status_name ?? row.activity_status;
+  return v != null ? String(v).trim() : "";
+}
+
+/** Saw or Polish activity types from Brain text fields (confirmed ops expansion + legacy). */
+export function isSawPolishActivity(row) {
+  const t = activityTypeDisplay(row).toLowerCase();
+  if (!t) return false;
+  return /\bsaw\b/i.test(t) || /\bpolish\b/i.test(t);
+}
+
+/**
+ * Interim checklist state from Moraware Brain fields only.
+ * @returns {"complete"|"needs_review"|"machine_unresolved"}
+ */
+export function computeSawPolishChecklistState(row) {
+  const statusText = statusDisplay(row);
+  const hasStatus = statusText.length > 0;
+  const sd = row.start_date != null ? String(row.start_date).trim() : "";
+  const hasStart = /^\d{4}-\d{2}-\d{2}/.test(sd);
+  const st = row.sched_time != null ? String(row.sched_time).trim() : "";
+  const hasSchedTime = st.length > 0;
+
+  if (/complete/i.test(statusText)) {
+    return "complete";
+  }
+  if (!hasStatus || !hasStart || !hasSchedTime) {
+    return "needs_review";
+  }
+  /** Moraware schedule/status present but Brain has no assigned_machine / Machines row yet — interim honesty. */
+  return "machine_unresolved";
+}
+
 /**
  * Moraware-linked **activity grouping** — not validated as physical cells until Eric's paper list sign-off.
  */
@@ -318,6 +358,149 @@ async function batchMaterialColors(supabase, jobIds) {
   return out;
 }
 
+async function batchCityByJob(supabase, jobIds) {
+  /** @type {Map<string, string>} */
+  const out = new Map();
+  if (!jobIds.length) return out;
+  try {
+    for (const part of chunkIds(jobIds, 150)) {
+      const { data, error } = await supabase.from("brain_job_addresses").select("job_id,city").in("job_id", part);
+      if (error) continue;
+      for (const r of data ?? []) {
+        const jid = String(r.job_id);
+        if (out.has(jid)) continue;
+        const c = r.city != null ? String(r.city).trim() : "";
+        if (c) out.set(jid, c.slice(0, 120));
+      }
+    }
+  } catch {
+    /* brain_job_addresses optional */
+  }
+  return out;
+}
+
+/**
+ * Interim Saw/Polish completion checklist — Brain Moraware fields only (no assigned_machine).
+ * @param {import("@supabase/supabase-js").SupabaseClient} supabase
+ */
+async function buildSawPolishChecklistPayload(supabase, activities, localDateYmd, debug) {
+  const label = "Saw/Polish completion signals";
+  const machineAssignmentNote =
+    "Machine row assignment is still being validated from Moraware JobActivity.Assignees. This view uses Moraware activity and status fields from the Brain until calendar-row assignment is confirmed.";
+  const base = {
+    label,
+    machineAssignmentStatus: "unresolved",
+    machineAssignmentNote,
+    date: localDateYmd,
+    sourceFieldsUsed: [
+      "activity_type_name → activity_type",
+      "status_name → activity_status",
+      "phase_name",
+      "start_date",
+      "sched_time",
+      "duration",
+      "notes",
+      "description"
+    ],
+    jobs: [],
+    stats: {
+      totalSawPolish: 0,
+      complete: 0,
+      needsReview: 0,
+      machineUnresolved: 0,
+      missingStatus: 0,
+      missingScheduledTime: 0,
+      missingMachineAssignment: 0
+    }
+  };
+
+  const sp = (activities ?? []).filter(isSawPolishActivity);
+  base.stats.totalSawPolish = sp.length;
+  base.stats.missingMachineAssignment = sp.length;
+
+  if (!sp.length) {
+    return base;
+  }
+
+  const jobIds = [...new Set(sp.map((r) => String(r.job_id)))];
+  /** @type {Map<string, object>} */
+  const jobsMap = new Map();
+  for (const part of chunkIds(jobIds, 200)) {
+    const { data, error } = await supabase
+      .from("brain_jobs")
+      .select("job_id,job_name,account_name,worksheet_sqft,job_status")
+      .in("job_id", part);
+    if (error) throw new Error(error.message);
+    for (const j of data ?? []) jobsMap.set(String(j.job_id), j);
+  }
+
+  const cityByJob = await batchCityByJob(supabase, jobIds);
+
+  for (const row of sp) {
+    const jid = String(row.job_id);
+    const job = jobsMap.get(jid) ?? {};
+    const checklistState = computeSawPolishChecklistState(row);
+    const st = statusDisplay(row);
+    if (!st) base.stats.missingStatus += 1;
+    const schedT = row.sched_time != null ? String(row.sched_time).trim() : "";
+    if (!schedT) base.stats.missingScheduledTime += 1;
+
+    if (checklistState === "complete") base.stats.complete += 1;
+    else if (checklistState === "needs_review") base.stats.needsReview += 1;
+    else base.stats.machineUnresolved += 1;
+
+    const notesFull = row.notes != null ? String(row.notes) : "";
+    const descFull = row.description != null ? String(row.description) : "";
+
+    base.jobs.push({
+      activityRowId: row.id != null ? String(row.id) : null,
+      jobId: jid,
+      jobName: String(job?.job_name ?? "").trim() || "(unknown job)",
+      account: String(job?.account_name ?? "").trim() || "",
+      city: cityByJob.get(jid) ?? null,
+      activityType: activityTypeDisplay(row) || String(row.activity_type ?? "").trim(),
+      status: st || String(row.activity_status ?? "").trim(),
+      phaseName: row.phase_name != null ? String(row.phase_name).trim() : null,
+      scheduledDate: row.start_date != null ? String(row.start_date).slice(0, 10) : null,
+      scheduledTime: row.sched_time != null ? String(row.sched_time).trim() : null,
+      duration: row.duration != null ? String(row.duration).trim() : null,
+      notesPreview: notesFull ? notesFull.slice(0, 120) : null,
+      hasNotes: Boolean(notesFull.trim()),
+      descriptionPreview: descFull ? descFull.slice(0, 120) : null,
+      hasDescription: Boolean(descFull.trim()),
+      checklistState,
+      machineColumnLabel: "Resolving",
+      machineAssignmentUnresolved: true
+    });
+  }
+
+  const stateOrder = { needs_review: 0, machine_unresolved: 1, complete: 2 };
+  base.jobs.sort((a, b) => {
+    const da = stateOrder[a.checklistState] ?? 9;
+    const db = stateOrder[b.checklistState] ?? 9;
+    if (da !== db) return da - db;
+    return String(a.scheduledTime ?? "").localeCompare(String(b.scheduledTime ?? ""));
+  });
+
+  if (debug) {
+    base.developerDebug = {
+      machineAssignmentStatus: "unresolved",
+      sourceFieldsUsed: base.sourceFieldsUsed,
+      totalSawPolishRows: sp.length,
+      missingStatusCount: base.stats.missingStatus,
+      missingScheduledTimeCount: base.stats.missingScheduledTime,
+      missingMachineAssignmentCount: base.stats.missingMachineAssignment,
+      checklistStateCounts: {
+        complete: base.stats.complete,
+        needs_review: base.stats.needsReview,
+        machine_unresolved: base.stats.machineUnresolved
+      }
+    };
+  }
+
+  return base;
+}
+
 async function batchSqftFallback(supabase, jobIdsNeeding) {
   /** @type {Map<string, number>} */
   const out = new Map();
@@ -368,13 +551,15 @@ export async function buildTitansTodayPayload(supabase, opts) {
   const activities = await fetchAllRows((from, to) =>
     supabase
       .from("brain_job_activities")
-        .select(
-          "id,job_id,activity_index,activity_type,activity_status,phase_name,start_date,sched_time,description,notes,raw_json,synced_at"
-        )
+      .select(
+        "id,job_id,activity_index,activity_type,activity_type_name,activity_status,status_name,phase_name,start_date,sched_time,duration,description,notes,raw_json,synced_at"
+      )
       .eq("start_date", localDateYmd)
       .order("id", { ascending: true })
       .range(from, to)
   );
+
+  const sawPolishChecklist = await buildSawPolishChecklistPayload(supabase, activities, localDateYmd, debug);
 
   const titanActs = activities.filter(isTitanLikeActivity);
 
@@ -395,11 +580,14 @@ export async function buildTitansTodayPayload(supabase, opts) {
       pace: buildPaceFromCompletedJobs([]),
       shops: rollupShopBuckets([]),
       jobs: [],
+      sawPolishChecklist,
       emptyStateMessage:
-        "No Titan/Saw activity signals were found in the eOS Brain for today. Run operational sync or validate Moraware activity mappings.",
+        activities.length === 0
+          ? "No activities were found in the eOS Brain for this calendar date. Run operational sync or pick another day."
+          : "No Titan/Saw keyword activity signals for this date. Saw/Polish completion signals may still appear below if applicable.",
       notes: [
         "Uses Moraware activity signals from the eOS Brain.",
-        "Not direct machine telemetry.",
+        "Moraware status “Complete” is the crossed-off / done signal for an activity row (not equipment sensors).",
         "Activity ‘shops’ are Moraware-derived groups — validate with Eric's paper Titan list.",
         `Server local calendar date: ${localDateYmd}.`
       ]
@@ -566,11 +754,12 @@ export async function buildTitansTodayPayload(supabase, opts) {
     pace,
     shops,
     jobs: limitedJobs,
+    sawPolishChecklist,
     emptyStateMessage: null,
     notes: [
       "Uses Moraware activity signals from the eOS Brain.",
-      "Not direct machine telemetry.",
-      "Average time between completion signals derives from Brain/Moraware timestamps — not machine cycle time.",
+      "Moraware status “Complete” is the crossed-off / done signal for an activity row (not equipment sensors).",
+      "Average time between completion signals derives from Brain/Moraware timestamps — not shop cycle timers.",
       "Activity shop cards are heuristic groups pending validation vs Eric's Titan paper list.",
       `Metrics cover all Titan/Saw-like jobs for ${localDateYmd}; the jobs array is limited to ${limit} (most recent first).`,
       `Leadership status enum: ${LEADERSHIP_STATUSES.join("; ")}.`

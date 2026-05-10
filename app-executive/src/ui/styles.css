@@ -990,6 +990,157 @@ a {
 .titans-notes-list li {
   margin-bottom: 0.25rem;
 }
+
+/* Saw/Polish interim checklist (Executive Titans widget) */
+.titans-sawpolish {
+  padding: 0.85rem 1.35rem 0.25rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, transparent 100%);
+}
+.titans-sawpolish-title {
+  margin: 0 0 0.35rem;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #f8fafc;
+}
+.titans-sawpolish-sub {
+  margin: 0 0 0.5rem;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: #cbd5e1;
+}
+.titans-sawpolish-meta {
+  margin: 0 0 0.85rem;
+  font-size: 0.68rem;
+  line-height: 1.45;
+  color: #94a3b8;
+}
+.titans-sp-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  margin-bottom: 0.85rem;
+}
+.titans-sp-stat {
+  display: flex;
+  flex-direction: column;
+  min-width: 6.5rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.18);
+}
+.titans-sp-stat-val {
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #f1f5f9;
+  letter-spacing: -0.02em;
+}
+.titans-sp-stat-val--done {
+  color: #86efac;
+}
+.titans-sp-stat-val--review {
+  color: #fcd34d;
+}
+.titans-sp-stat-fresh {
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+.titans-sp-stat-lbl {
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #94a3b8;
+  margin-top: 0.12rem;
+}
+.titans-sp-devpanel {
+  margin-bottom: 0.75rem;
+  padding: 0.55rem 0.65rem;
+  font-size: 0.68rem;
+  line-height: 1.45;
+  color: #a8b0c0;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px dashed rgba(148, 163, 184, 0.35);
+  border-radius: var(--radius-sm);
+}
+.titans-sp-devmono {
+  margin-top: 0.35rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.62rem;
+  color: #cbd5e1;
+  word-break: break-word;
+}
+.titans-sp-table-wrap {
+  padding-left: 0;
+  padding-right: 0;
+}
+.titans-sp-table tbody tr {
+  cursor: default;
+}
+.titans-sp-table tbody tr.titans-sp-row--complete td {
+  color: #94a3b8;
+  text-decoration: line-through;
+  text-decoration-color: rgba(148, 163, 184, 0.65);
+}
+.titans-sp-table tbody tr.titans-sp-row--complete .titans-sp-badge,
+.titans-sp-table tbody tr.titans-sp-row--complete .titans-sp-machine {
+  text-decoration: none;
+  color: #86efac;
+}
+.titans-sp-job {
+  font-weight: 600;
+  color: #f1f5f9;
+}
+.titans-sp-job-sub {
+  font-size: 0.68rem;
+  font-weight: 400;
+  color: #94a3b8;
+  margin-top: 0.08rem;
+}
+.titans-sp-time {
+  font-variant-numeric: tabular-nums;
+  color: #e2e8f0;
+}
+.titans-sp-machine {
+  font-size: 0.72rem;
+  color: #cbd5e1;
+  border-bottom: 1px dotted rgba(148, 163, 184, 0.5);
+  cursor: help;
+}
+.titans-sp-empty {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+}
+.titans-sp-badge {
+  display: inline-block;
+  padding: 0.18rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  border: 1px solid transparent;
+}
+.titans-sp-badge--complete {
+  background: rgba(22, 101, 52, 0.35);
+  border-color: rgba(74, 222, 128, 0.45);
+  color: #bbf7d0;
+}
+.titans-sp-badge--review {
+  background: rgba(180, 83, 9, 0.35);
+  border-color: rgba(251, 191, 36, 0.45);
+  color: #fde68a;
+}
+.titans-sp-badge--pending {
+  background: rgba(30, 58, 138, 0.35);
+  border-color: rgba(129, 140, 248, 0.45);
+  color: #c7d2fe;
+}
+.titans-sp-badge--neutral {
+  background: rgba(51, 65, 85, 0.45);
+  color: #e2e8f0;
+}
+
 .titans-metrics {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));

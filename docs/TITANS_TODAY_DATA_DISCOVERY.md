@@ -150,6 +150,22 @@ Moraware statuses in Brain are **free-text** (e.g. “Auto-Schedule”, “Compl
 
 **Per-job (additive):** `activityGroupKey`, `activityGroupLabel` — string bucket from `classifyActivityGroupKey`; always label as Moraware-derived **activity group**, not audited shop geometry.
 
+### Interim Saw/Polish completion checklist (`sawPolishChecklist`)
+
+Additive payload block built from **`brain_job_activities`** for the selected **`start_date`** (same `date=` query param as the rest of `/api/titans/today`). **Filter:** activity type text contains **Saw** or **Polish** (uses `activity_type_name` with fallback to legacy `activity_type`). **States:** `complete` when Moraware status contains “Complete”; `needs_review` when status or schedule fields (`start_date` pattern + `sched_time`) are missing; **`machine_unresolved`** labels rows that have schedule/status but **no validated machine-row assignment** in Brain yet (honest interim — not a physical Titan/Saber/Robot cell).
+
+| Field | Meaning |
+| --- | --- |
+| `machineAssignmentStatus` | Currently **`unresolved`** — calendar row / assignee mapping from Moraware is not confirmed in eOS. |
+| `machineAssignmentNote` | Explains validation against **`JobActivity.Assignees`** / Brain paths; UI must **not** claim Titan vs Saber vs Robot rows until `assigned_machine` (or equivalent) is sourced and verified. |
+| `jobs[]` | Per activity row: job header, type/status (expanded names with legacy fallback), phase, schedule, duration, note/description previews, **`checklistState`**. |
+| `stats` | Counts: total Saw/Polish rows, complete, needs review, machine-unresolved bucket, missing status / missing sched time / missing machine assignment (assignment count is “all rows” until Brain exposes assignees). |
+| `developerDebug` | Present only with **`?debug=1`** — source fields, row counts, checklist state counts (for Eric validation / engineering). |
+
+**Future step:** populate **`assigned_machine`** (or normalized assignee names) from validated Moraware **`JobActivity.Assignees`** / XML include once tenant probes confirm the API path — **no Supabase schema change** until product signs off (see `docs/MORAWARE_MACHINES_CALENDAR_DISCOVERY.md`).
+
+---
+
 **Additive executive/pulse fields (v1.1):**
 
 | Field | Meaning |

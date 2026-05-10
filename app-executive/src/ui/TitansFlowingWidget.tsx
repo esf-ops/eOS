@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch, ApiError, joinBackendUrl } from "../lib/api";
 import { config } from "../lib/config";
-import type { TitansTodayJob, TitansTodayResponse } from "../lib/types";
+import type { SawPolishChecklistJob, TitansTodayJob, TitansTodayResponse } from "../lib/types";
 import { nf } from "./exec/execFormat";
 
 const OVERVIEW_PREVIEW_ROWS = 13;
@@ -116,6 +116,32 @@ const STATUS_URGENCY: Record<string, number> = {
   "Ready for Next Phase": 5,
   "Cut Complete": 6
 };
+
+function sawPolishChecklistBadgeClass(state: SawPolishChecklistJob["checklistState"]) {
+  switch (state) {
+    case "complete":
+      return "titans-sp-badge titans-sp-badge--complete";
+    case "needs_review":
+      return "titans-sp-badge titans-sp-badge--review";
+    case "machine_unresolved":
+      return "titans-sp-badge titans-sp-badge--pending";
+    default:
+      return "titans-sp-badge titans-sp-badge--neutral";
+  }
+}
+
+function sawPolishChecklistLabel(state: SawPolishChecklistJob["checklistState"]) {
+  switch (state) {
+    case "complete":
+      return "Complete";
+    case "needs_review":
+      return "Needs review";
+    case "machine_unresolved":
+      return "Scheduled";
+    default:
+      return state;
+  }
+}
 
 function statusBadgeClass(status: string) {
   switch (status) {
@@ -483,8 +509,8 @@ export default function TitansFlowingWidget({ token, recordApi, refreshTick, use
 
         <div className="titans-honesty-note">
           <strong>{futureSkipped ? "Titan/Saw activity signals" : data?.label ?? "Titan/Saw activity signals"}</strong> — These
-          are Moraware/eOS Brain activity signals and should be validated against Eric&apos;s paper list before being treated
-          as final machine telemetry.
+          are Moraware/eOS Brain activity and status fields. Validate against Eric&apos;s paper list; they are not equipment
+          sensors.
           {data?.notes?.length ? (
             <ul className="titans-notes-list">
               {data.notes.map((n, i) => (
@@ -510,6 +536,131 @@ export default function TitansFlowingWidget({ token, recordApi, refreshTick, use
           </div>
         ) : (
           <>
+            {data?.sawPolishChecklist ? (
+              <section className="titans-sawpolish" aria-labelledby="titans-sawpolish-heading">
+                <h3 id="titans-sawpolish-heading" className="titans-sawpolish-title">
+                  {data.sawPolishChecklist.label ?? "Saw/Polish completion signals"}
+                </h3>
+                <p className="titans-sawpolish-sub">
+                  Based on Moraware activity and status updates in the Brain.{" "}
+                  <strong>Machine row assignment is still being validated.</strong> When Moraware status reads{" "}
+                  <em>Complete</em>, treat that as crossed off here — same idea as Eric&apos;s paper list (Moraware{" "}
+                  <em>Complete</em> = crossed off).
+                </p>
+                <p className="titans-sawpolish-meta">{data.sawPolishChecklist.machineAssignmentNote}</p>
+                <div className="titans-sp-metrics">
+                  <div className="titans-sp-stat">
+                    <span className="titans-sp-stat-val">{nf(data.sawPolishChecklist.stats?.totalSawPolish ?? 0)}</span>
+                    <span className="titans-sp-stat-lbl">Saw/Polish activities</span>
+                  </div>
+                  <div className="titans-sp-stat">
+                    <span className="titans-sp-stat-val titans-sp-stat-val--done">
+                      {nf(data.sawPolishChecklist.stats?.complete ?? 0)}
+                    </span>
+                    <span className="titans-sp-stat-lbl">Complete (Moraware status)</span>
+                  </div>
+                  <div className="titans-sp-stat">
+                    <span className="titans-sp-stat-val">
+                      {nf(
+                        (data.sawPolishChecklist.stats?.needsReview ?? 0) +
+                          (data.sawPolishChecklist.stats?.machineUnresolved ?? 0)
+                      )}
+                    </span>
+                    <span className="titans-sp-stat-lbl">Not complete / scheduled</span>
+                  </div>
+                  <div className="titans-sp-stat">
+                    <span className="titans-sp-stat-val titans-sp-stat-val--review">
+                      {nf(data.sawPolishChecklist.stats?.needsReview ?? 0)}
+                    </span>
+                    <span className="titans-sp-stat-lbl">Needs review</span>
+                  </div>
+                  <div className="titans-sp-stat">
+                    <span className="titans-sp-stat-val titans-sp-stat-fresh">
+                      {data?.syncFreshness?.lastBrainSyncAt
+                        ? formatIsoAgeLabel(data.syncFreshness.lastBrainSyncAt)
+                        : "—"}
+                    </span>
+                    <span className="titans-sp-stat-lbl">Brain sync age</span>
+                  </div>
+                </div>
+
+                {canMappingToggle && showMappingDetails && data.sawPolishChecklist.developerDebug ? (
+                  <div className="titans-sp-devpanel">
+                    <strong>Developer</strong> · machineAssignmentStatus={data.sawPolishChecklist.developerDebug.machineAssignmentStatus ?? "—"}{" "}
+                    · rows={nf(data.sawPolishChecklist.developerDebug.totalSawPolishRows ?? 0)} · missingStatus=
+                    {nf(data.sawPolishChecklist.developerDebug.missingStatusCount ?? 0)} · missingSchedTime=
+                    {nf(data.sawPolishChecklist.developerDebug.missingScheduledTimeCount ?? 0)} · missingMachine=
+                    {nf(data.sawPolishChecklist.developerDebug.missingMachineAssignmentCount ?? 0)}
+                    <div className="titans-sp-devmono">
+                      fields: {(data.sawPolishChecklist.developerDebug.sourceFieldsUsed ?? []).join(", ")}
+                    </div>
+                  </div>
+                ) : null}
+
+                {(data.sawPolishChecklist.jobs ?? []).length ? (
+                  <div className="titans-table-wrap titans-sp-table-wrap">
+                    <table className="titans-table titans-sp-table">
+                      <thead>
+                        <tr>
+                          <th>Job</th>
+                          <th>Activity</th>
+                          <th>Status</th>
+                          <th>Scheduled</th>
+                          <th>Duration</th>
+                          <th>Phase</th>
+                          <th>Checklist state</th>
+                          <th>Machine</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(data.sawPolishChecklist.jobs ?? []).map((row) => (
+                          <tr
+                            key={`${row.jobId}-${row.activityRowId ?? row.scheduledTime}`}
+                            className={
+                              row.checklistState === "complete" ? "titans-sp-row titans-sp-row--complete" : "titans-sp-row"
+                            }
+                          >
+                            <td className="titans-ellipsis" title={`${row.jobName} (${row.jobId})`}>
+                              <div className="titans-sp-job">{row.jobName}</div>
+                              <div className="titans-sp-job-sub">
+                                {row.account || "—"}
+                                {row.city ? ` · ${row.city}` : ""}
+                              </div>
+                            </td>
+                            <td className="titans-ellipsis titans-muted" title={row.activityType}>
+                              {row.activityType || "—"}
+                            </td>
+                            <td className="titans-ellipsis">{row.status || "—"}</td>
+                            <td className="titans-nowrap titans-sp-sched">
+                              {row.scheduledDate ?? "—"}{" "}
+                              {row.scheduledTime ? <span className="titans-sp-time">{row.scheduledTime}</span> : null}
+                            </td>
+                            <td>{row.duration ?? "—"}</td>
+                            <td className="titans-ellipsis titans-muted">{row.phaseName ?? "—"}</td>
+                            <td>
+                              <span className={sawPolishChecklistBadgeClass(row.checklistState)}>
+                                {sawPolishChecklistLabel(row.checklistState)}
+                              </span>
+                            </td>
+                            <td>
+                              <span
+                                className="titans-sp-machine"
+                                title="Moraware SDK exposes JobActivity.Assignees, but eOS has not confirmed the API path in Brain yet."
+                              >
+                                {row.machineColumnLabel ?? "Resolving"}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="titans-muted titans-sp-empty">No Saw/Polish activities on this date in Brain.</p>
+                )}
+              </section>
+            ) : null}
+
             <div className="titans-metrics titans-metrics--compact">
               <div className="titans-metric">
                 <div className="titans-metric-val">{nf(data?.activeTitanJobs ?? 0)}</div>

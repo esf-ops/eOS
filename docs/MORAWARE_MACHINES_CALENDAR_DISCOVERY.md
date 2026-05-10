@@ -18,6 +18,16 @@ The grid shows **jobs scheduled across machine rows** by date/time. Eric **cross
 
 ## 2. Why this matters for Eric’s checklist
 
+### Interim Executive dashboard state (current)
+
+The **Executive Titans** widget ships an interim **Saw/Polish completion signals** section fed by **`GET /api/titans/today`** (`sawPolishChecklist`). It reflects **Moraware activity type, status, schedule, duration, phase, notes** from the Brain — Eric-style **crossed off when Moraware status reads Complete**. **Machine row assignment** (which Titan/Saber/Robot column on the Machines calendar) remains **unresolved** until **`assigned_machine`** / **`JobActivity.Assignees`** is confirmed end-to-end; the UI labels the machine column **“Resolving”** and does **not** assert physical row placement.
+
+**Confirmed checklist behavior:** filter Saw/Polish by type text; treat **Complete** in status as the done signal; flag incomplete schedule/status hygiene as **needs review**.
+
+**Future step:** wire **`assigned_machine`** (or assignee name list) after XML/SDK probes validate the populate path — see §3b–3e below.
+
+---
+
 Titans Flowing / shop heads need a **checklist-shaped** answer:
 
 - Which jobs are **on each machine** for a given day?  

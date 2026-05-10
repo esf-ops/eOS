@@ -173,6 +173,54 @@ export type TitansTodayDebug = {
   }>;
 };
 
+export type SawPolishChecklistJob = {
+  activityRowId?: string | null;
+  jobId: string;
+  jobName: string;
+  account: string;
+  city?: string | null;
+  activityType: string;
+  status: string;
+  phaseName?: string | null;
+  scheduledDate?: string | null;
+  scheduledTime?: string | null;
+  duration?: string | null;
+  notesPreview?: string | null;
+  hasNotes?: boolean;
+  descriptionPreview?: string | null;
+  hasDescription?: boolean;
+  checklistState: "complete" | "needs_review" | "machine_unresolved";
+  machineColumnLabel?: string;
+  machineAssignmentUnresolved?: boolean;
+};
+
+export type SawPolishChecklist = {
+  label: string;
+  machineAssignmentStatus: string;
+  machineAssignmentNote: string;
+  date?: string;
+  sourceFieldsUsed?: string[];
+  jobs: SawPolishChecklistJob[];
+  stats?: {
+    totalSawPolish: number;
+    complete: number;
+    needsReview: number;
+    machineUnresolved: number;
+    missingStatus: number;
+    missingScheduledTime: number;
+    missingMachineAssignment: number;
+  };
+  developerDebug?: {
+    machineAssignmentStatus?: string;
+    sourceFieldsUsed?: string[];
+    totalSawPolishRows?: number;
+    missingStatusCount?: number;
+    missingScheduledTimeCount?: number;
+    missingMachineAssignmentCount?: number;
+    checklistStateCounts?: Record<string, number>;
+  };
+};
+
 export type TitansTodayResponse = {
   ok: boolean;
   label?: string;
@@ -189,6 +237,7 @@ export type TitansTodayResponse = {
   pace?: TitansPace;
   shops?: TitansShopBreakdown[];
   jobs?: TitansTodayJob[];
+  sawPolishChecklist?: SawPolishChecklist;
   emptyStateMessage?: string | null;
   notes?: string[];
   debug?: TitansTodayDebug;
