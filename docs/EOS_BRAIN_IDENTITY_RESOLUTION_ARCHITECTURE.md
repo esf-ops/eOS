@@ -158,6 +158,17 @@ Each connector: **upsert `eos_source_records`**, **emit `eos_identity_suggestion
 
 ---
 
+## Admin readiness visibility
+
+System Admin exposes **readiness only** for the Identity Resolution foundation:
+
+- **GET `/api/admin/identity-resolution/schema-health`** — reports whether the five proposal tables exist and lists any missing names.
+- **GET `/api/admin/identity-resolution/summary`** — when the schema is installed, returns non-mutating row counts (entities, source records, **active links** = rows with `eos_entity_links.link_status = 'active'`, **needs-review suggestions** = rows with `eos_identity_suggestions.suggestion_status = 'needs_review'`, audit events) plus lightweight resolver module metadata.
+
+These endpoints require admin role and **system_admin** head access, mirroring other admin APIs. They **do not** create, update, delete, or approve identity links. The System Admin UI section labeled foundation/readiness shows the same information so operators can see whether `eos_identity_resolution.sql` has been applied before deeper workflows land. **Human review workflows** (suggestion queues, approve/reject, source matching) are planned later and remain separate from Sales Account Mapping Admin behavior.
+
+---
+
 ## Implementation stance (this repo)
 
 - **Architecture + additive SQL** live in-repo; **do not auto-run** migrations.

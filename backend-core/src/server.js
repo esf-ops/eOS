@@ -17,6 +17,7 @@ import {
   enrichUserProfileRowsForAdminList
 } from "./admin/systemAdminUserManagement.js";
 import { attachSalesAccountMappingAdminRoutes } from "./admin/salesAccountMappingAdmin.js";
+import { attachIdentityResolutionAdminRoutes } from "./admin/identityResolutionAdmin.js";
 import { buildMeHeadsPayload } from "./me/launcherHeads.js";
 import { buildTitansTodayPayload, parseTitansTodayQuery } from "./titans/titansToday.js";
 import { attachSalesHeadRoutes } from "./sales/salesHead.js";
@@ -924,6 +925,13 @@ attachSalesAccountMappingAdminRoutes(app, {
   getSupabase: supabaseServerClient
 });
 
+attachIdentityResolutionAdminRoutes(app, {
+  requireAuth,
+  requireRole,
+  requireHeadAccess,
+  getSupabase: supabaseServerClient
+});
+
 app.post("/api/auth/log-login", requireAuth(), express.json(), async (req, res) => {
   try {
     await logLoginEvent({ user: req.user, eventType: "login", metadata: req.body ?? null, req });
@@ -1326,6 +1334,8 @@ app.listen(port, () => {
   console.log("- POST /api/admin/sales-account-mapping/mark-unmapped");
   console.log("- POST /api/admin/sales-account-mapping/assign-house");
   console.log("- GET /api/admin/sales-account-mapping/audit-history");
+  console.log("- GET /api/admin/identity-resolution/schema-health");
+  console.log("- GET /api/admin/identity-resolution/summary");
   console.log("- GET /api/admin/reference");
   console.log("- GET /api/admin/user-management/schema-health");
   console.log("- POST /api/admin/users/invite");

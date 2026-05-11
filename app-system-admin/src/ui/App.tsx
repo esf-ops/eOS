@@ -4,6 +4,7 @@ import { ApiError, apiFetch } from "../lib/api";
 import { fetchSchemaHealth, SCHEMA_HEALTH_PATH, type SchemaHealthResp } from "../lib/schemaHealth";
 import { supabase } from "../lib/supabase";
 import SalesAccountMappingAdmin from "./SalesAccountMappingAdmin";
+import IdentityResolutionReadiness from "./IdentityResolutionReadiness";
 
 /** Visible near credential actions — admins never observe other users’ secrets. */
 const PASSWORD_GOVERNANCE_NOTE =
@@ -199,7 +200,7 @@ export default function App() {
   const [rows, setRows] = useState<AdminRow[]>([]);
   const [listError, setListError] = useState("");
   const [toast, setToast] = useState<{ kind: "info" | "error"; text: string } | null>(null);
-  const [activeView, setActiveView] = useState<"users" | "sales_mapping">("users");
+  const [activeView, setActiveView] = useState<"users" | "sales_mapping" | "identity_resolution">("users");
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<UserDetailResp | null>(null);
@@ -523,6 +524,17 @@ export default function App() {
           </button>
           <button
             type="button"
+            className={`btn ${activeView === "identity_resolution" ? "btn-primary" : ""}`}
+            onClick={() => {
+              setSelectedId(null);
+              setDetail(null);
+              setActiveView("identity_resolution");
+            }}
+          >
+            Identity Resolution
+          </button>
+          <button
+            type="button"
             className="btn"
             onClick={() => {
               void supabase.auth.signOut();
@@ -548,6 +560,8 @@ export default function App() {
           <div className="panel">
             {activeView === "sales_mapping" ? (
               <SalesAccountMappingAdmin token={sessionToken} />
+            ) : activeView === "identity_resolution" ? (
+              <IdentityResolutionReadiness token={sessionToken} />
             ) : (
               <>
             <h2 style={{ marginTop: 0 }}>People & access</h2>

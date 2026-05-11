@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS public.eos_entity_links (
   approved boolean DEFAULT false,
   approved_by uuid NULL,
   approved_at timestamptz NULL,
-  active boolean DEFAULT true,
+  link_status text DEFAULT 'active',
   effective_start_date date,
   effective_end_date date,
   notes text,
@@ -77,12 +77,12 @@ CREATE INDEX IF NOT EXISTS idx_eos_entity_links_source_record_id ON public.eos_e
 CREATE INDEX IF NOT EXISTS idx_eos_entity_links_entity_type ON public.eos_entity_links (entity_type);
 CREATE INDEX IF NOT EXISTS idx_eos_entity_links_status ON public.eos_entity_links (status);
 CREATE INDEX IF NOT EXISTS idx_eos_entity_links_approved ON public.eos_entity_links (approved);
-CREATE INDEX IF NOT EXISTS idx_eos_entity_links_active ON public.eos_entity_links (active);
+CREATE INDEX IF NOT EXISTS idx_eos_entity_links_link_status ON public.eos_entity_links (link_status);
 
 -- Optional (review before enabling): one active approved link per source row + entity type
 -- CREATE UNIQUE INDEX IF NOT EXISTS uq_eos_entity_links_one_active_approved_per_source
 --   ON public.eos_entity_links (source_record_id, entity_type)
---   WHERE active = true AND approved = true;
+--   WHERE link_status = 'active' AND approved = true;
 
 -- 4) eos_identity_suggestions — batch/job output prior to human decision
 CREATE TABLE IF NOT EXISTS public.eos_identity_suggestions (
@@ -96,7 +96,7 @@ CREATE TABLE IF NOT EXISTS public.eos_identity_suggestions (
   confidence_label text,
   rationale text,
   alternate_matches jsonb,
-  status text DEFAULT 'needs_review',
+  suggestion_status text DEFAULT 'needs_review',
   reviewed_by uuid NULL,
   reviewed_at timestamptz NULL,
   raw_suggestion jsonb,
@@ -105,7 +105,7 @@ CREATE TABLE IF NOT EXISTS public.eos_identity_suggestions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_eos_identity_suggestions_entity_type ON public.eos_identity_suggestions (entity_type);
-CREATE INDEX IF NOT EXISTS idx_eos_identity_suggestions_status ON public.eos_identity_suggestions (status);
+CREATE INDEX IF NOT EXISTS idx_eos_identity_suggestions_suggestion_status ON public.eos_identity_suggestions (suggestion_status);
 CREATE INDEX IF NOT EXISTS idx_eos_identity_suggestions_confidence_label ON public.eos_identity_suggestions (confidence_label);
 
 -- 5) eos_identity_audit_log — append-style governance trail

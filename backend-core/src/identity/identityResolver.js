@@ -93,11 +93,13 @@ export async function resolveApprovedEntityLink(supabase, params) {
 
     const { data: links, error: linkErr } = await supabase
       .from("eos_entity_links")
-      .select("id,eos_entity_id,status,approved,active,match_type,confidence,effective_start_date,effective_end_date")
+      .select(
+        "id,eos_entity_id,status,approved,link_status,match_type,confidence,effective_start_date,effective_end_date"
+      )
       .eq("source_record_id", sourceRecordPk)
       .eq("entity_type", entityType)
       .eq("approved", true)
-      .eq("active", true)
+      .eq("link_status", "active")
       .limit(1);
     if (linkErr) throw linkErr;
     return { ok: true, link: links?.[0] ?? null };
@@ -136,7 +138,7 @@ export async function listUnmappedSourceRecords(supabase, filters = {}) {
  * @returns {string}
  */
 export function classifyMappingStatus(record) {
-  const status = String(record?.status ?? "").trim();
+  const status = String(record?.suggestion_status ?? record?.status ?? "").trim();
   if (status) return status;
   if (record?.approved === true) return "approved";
   if (record?.approved === false) return "needs_review";
