@@ -21,12 +21,24 @@ const REQUIRED_TABLES = Object.freeze([
 const DEFAULT_BRANCHES = Object.freeze(["Lisbon", "Dyersville", "Iowa City", "Unmapped"]);
 const HOUSE_OPTIONS = Object.freeze(["House Account - Lisbon", "House Account - Dyersville", "Direct", "Unmapped"]);
 
-function repoRootFromHere() {
-  const __filename = fileURLToPath(import.meta.url);
-  const __dirname = path.dirname(__filename);
-  // backend-core/src/admin/*.js -> repo root
-  return path.resolve(__dirname, "../..");
-}
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+// backend-core/src/admin/salesAccountMappingAdmin.js -> repo root
+const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
+const SUGGESTIONS_JSON_REPO = path.join(
+  REPO_ROOT,
+  "debug",
+  "sales",
+  "latest",
+  "sales-account-crosswalk-suggestions.json"
+);
+const SUGGESTIONS_JSON_CWD = path.join(
+  process.cwd(),
+  "debug",
+  "sales",
+  "latest",
+  "sales-account-crosswalk-suggestions.json"
+);
 
 function normalizeSpaces(s) {
   return String(s ?? "")
@@ -83,14 +95,30 @@ function mustBeAdminRepOrHouseOrUnmapped(rep) {
 }
 
 async function readLatestSuggestionsJson() {
-  const repoRoot = repoRootFromHere();
-  const p = path.join(repoRoot, "debug/sales/latest/sales-account-crosswalk-suggestions.json");
-  const raw = await fs.readFile(p, "utf8");
+  const pathsChecked = [SUGGESTIONS_JSON_REPO, SUGGESTIONS_JSON_CWD];
+  let picked = null;
+  for (const p of pathsChecked) {
+    try {
+      await fs.access(p);
+      picked = p;
+      break;
+    } catch {
+      // keep checking
+    }
+  }
+  if (!picked) {
+    const err = new Error("Suggestions file not found");
+    // @ts-ignore attach debug fields
+    err.pathsChecked = pathsChecked;
+    throw err;
+  }
+
+  const raw = await fs.readFile(picked, "utf8");
   const json = JSON.parse(raw);
   if (!json || typeof json !== "object" || !Array.isArray(json.suggestions)) {
     throw new Error("Invalid suggestions JSON shape (expected { suggestions: [...] }).");
   }
-  return { path: p, payload: json };
+  return { path: picked, payload: json };
 }
 
 function buildSuggestionRow(s) {
@@ -347,11 +375,13 @@ export function attachSalesAccountMappingAdminRoutes(app, { requireAuth, require
         });
       } catch (e) {
         const msg = String(e?.message || e);
-        if (msg.toLowerCase().includes("enoent")) {
+        const pathsChecked = Array.isArray(e?.pathsChecked) ? e.pathsChecked : [SUGGESTIONS_JSON_REPO, SUGGESTIONS_JSON_CWD];
+        if (msg === "Suggestions file not found" || msg.toLowerCase().includes("enoent")) {
           return res.status(404).json({
             ok: false,
-            error: "Suggestions file not found. Run `npm run eos:sales:crosswalk-suggestions` first.",
-            hintPath: "debug/sales/latest/sales-account-crosswalk-suggestions.json"
+            error: "Suggestions file not found",
+            pathsChecked,
+            command: "npm run eos:sales:crosswalk-suggestions"
           });
         }
         res.status(500).json({ ok: false, error: msg });

@@ -156,6 +156,12 @@ function readXlsxAsTable(wb, sheetName) {
   return { headerRow, objects, headerRowIndex: bestIdx };
 }
 
+function chunk(arr, size) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
 function isMissingRelationError(error) {
   const msg = String(error?.message || "");
   const code = String(error?.code || "");
@@ -204,10 +210,20 @@ async function main() {
     probes: {},
     counts: {
       mondayMasterRows: 0,
-      mondayWouldUpsertMaster: 0,
-      morawareWouldInsertAuditRows: 0,
-      suggestionsWouldInsertAliases: 0,
-      suggestionsWouldSkipApprovedAliases: 0,
+      // dry-run intent
+      wouldInsertOrUpsertMaster: 0,
+      wouldInsertAuditRows: 0,
+      wouldInsertAliases: 0,
+      wouldUpdateAliases: 0,
+      wouldSkipApprovedAliases: 0,
+      wouldSkipDuplicateAliases: 0,
+      // write-mode actuals
+      masterInsertedOrUpserted: 0,
+      morawareAuditInserted: 0,
+      aliasesInserted: 0,
+      aliasesUpdated: 0,
+      aliasesSkippedApproved: 0,
+      aliasesSkippedDuplicate: 0,
       errors: 0
     },
     warnings: []
@@ -253,7 +269,7 @@ async function main() {
     masterUpserts.push(rec);
   }
 
-  report.counts.mondayWouldUpsertMaster = masterUpserts.length;
+  report.counts.wouldInsertOrUpsertMaster = masterUpserts.length;
 
   // Parse Moraware report for audit insert.
   const csvText = await fs.readFile(morawareCsvPath, "utf8");
@@ -293,7 +309,7 @@ async function main() {
       };
     });
 
-  report.counts.morawareWouldInsertAuditRows = morawareAuditRows.length;
+  report.counts.wouldInsertAuditRows = morawareAuditRows.length;
 
   // Load suggestions JSON (produced by buildSalesAccountCrosswalkSuggestions).
   let suggestionsPayload = null;
@@ -318,6 +334,7 @@ async function main() {
         branch: s.monday_branch || null,
         match_type: s.match_type,
         confidence: s.confidence,
+        // Only exact-ish suggestions may carry approved=true; fuzzy/manual/no-match default false.
         approved: Boolean(s.approved) && s.match_type !== "fuzzy_suggested",
         notes: "Imported suggestion (review before approving).",
         raw_suggestion: s
@@ -325,21 +342,29 @@ async function main() {
     }
   }
 
-  report.counts.suggestionsWouldInsertAliases = aliasInserts.length;
+  report.counts.wouldInsertAliases = aliasInserts.length;
 
   // Dry run output regardless of write mode.
   const outJsonPath = path.join(debugDir, writeEnabled ? "sales-attribution-import-write.json" : "sales-attribution-import-dry-run.json");
   const outTxtPath = path.join(debugDir, writeEnabled ? "sales-attribution-import-write.txt" : "sales-attribution-import-dry-run.txt");
 
   if (!writeEnabled) {
+    // Predict alias write decisions without touching Supabase.
+    // We cannot know what would be skipped/updated without reading DB, so keep counts at 0 unless overwriteApproved is off and row is "approved".
+    for (const r of aliasInserts) {
+      if (r.approved && !overwriteApproved) report.counts.wouldSkipApprovedAliases += 1;
+    }
     const txt = [
       "Sales Attribution Import (DRY RUN)",
       `Generated: ${report.generatedAt}`,
       "",
       "Would process:",
-      `- Monday master rows: ${report.counts.mondayMasterRows} (upserts prepared: ${report.counts.mondayWouldUpsertMaster})`,
-      `- Moraware audit rows: ${report.counts.morawareWouldInsertAuditRows}`,
-      `- Alias suggestion rows: ${report.counts.suggestionsWouldInsertAliases}`,
+      `- Monday master rows: ${report.counts.mondayMasterRows} (prepared: ${report.counts.wouldInsertOrUpsertMaster})`,
+      `- Moraware audit rows: ${report.counts.wouldInsertAuditRows}`,
+      `- Alias suggestion rows: ${report.counts.wouldInsertAliases}`,
+      "",
+      "Dry-run alias expectations (DB not queried in dry-run):",
+      `- wouldSkipApprovedAliases (if DB already has approved): ${report.counts.wouldSkipApprovedAliases}`,
       "",
       "Write mode:",
       "- Disabled (set SALES_ATTRIBUTION_IMPORT_WRITE=1 to enable writes)",
@@ -384,53 +409,201 @@ async function main() {
 
   if (withId.length) {
     const { error } = await supabase.from("sales_account_master").upsert(withId, { onConflict: "source,source_account_id" });
-    if (error) throw error;
+    if (error) {
+      report.counts.errors += 1;
+      throw error;
+    }
+    report.counts.masterInsertedOrUpserted += withId.length;
   }
 
   if (withoutId.length) {
     // Best-effort: insert; if duplicates exist, they'll error (manual cleanup needed).
     // We intentionally avoid clever overwrites without stable IDs.
     const { error } = await supabase.from("sales_account_master").insert(withoutId);
-    if (error) report.warnings.push(`Insert sales_account_master (rows without source_account_id) had error: ${String(error.message || error)}`);
+    if (error) {
+      report.counts.errors += 1;
+      report.warnings.push(`Insert sales_account_master (rows without source_account_id) had error: ${String(error.message || error)}`);
+    } else {
+      report.counts.masterInsertedOrUpserted += withoutId.length;
+    }
   }
 
   // Insert Moraware audit rows (append-only).
   // Idempotency: since we don't have a stable unique key for report rows, we only insert when explicitly allowed.
   // This table is audit/append; duplicates are acceptable but not ideal. Keep small for now.
   const { error: auditErr } = await supabase.from("sales_moraware_report_audit").insert(morawareAuditRows);
-  if (auditErr) report.warnings.push(`Insert sales_moraware_report_audit error: ${String(auditErr.message || auditErr)}`);
-
-  // Insert alias suggestions.
-  // If overwriteApproved not enabled, skip insertion of any row that is marked approved=true AND an approved alias already exists for that normalized_moraware_name.
-  let existingApproved = new Set();
-  if (!overwriteApproved) {
-    const { data, error } = await supabase
-      .from("sales_account_aliases")
-      .select("normalized_moraware_name")
-      .eq("approved", true);
-    if (error) report.warnings.push(`Select existing approved aliases failed: ${String(error.message || error)}`);
-    else {
-      existingApproved = new Set((data ?? []).map((r) => String(r.normalized_moraware_name ?? "")).filter(Boolean));
-    }
+  if (auditErr) {
+    report.counts.errors += 1;
+    report.warnings.push(`Insert sales_moraware_report_audit error: ${String(auditErr.message || auditErr)}`);
+  } else {
+    report.counts.morawareAuditInserted = morawareAuditRows.length;
   }
 
-  const aliasToInsert = [];
+  // ---- Alias suggestions (idempotent) ----
+  // Policy:
+  // - For each normalized_moraware_name, look for existing alias rows
+  // - If an approved alias exists and overwriteApproved != 1: skip (do not insert or update)
+  // - Else if an unapproved alias exists: update it (avoid duplicates)
+  // - Else: insert
+
+  // De-dupe by normalized key (keep first; if any row is approved, prefer approved suggestion).
+  const byNormInput = new Map();
   for (const r of aliasInserts) {
-    if (r.approved && existingApproved.has(String(r.normalized_moraware_name ?? ""))) {
-      report.counts.suggestionsWouldSkipApprovedAliases += 1;
+    const norm = String(r.normalized_moraware_name ?? "").trim();
+    if (!norm) continue;
+    const prev = byNormInput.get(norm);
+    if (!prev) {
+      byNormInput.set(norm, r);
       continue;
     }
-    // Always insert as unapproved unless explicitly approved in suggestion.
-    aliasToInsert.push(r);
+    if (prev.approved !== true && r.approved === true) {
+      byNormInput.set(norm, r);
+    }
   }
 
-  if (aliasToInsert.length) {
-    const { error } = await supabase.from("sales_account_aliases").insert(aliasToInsert);
-    if (error) report.warnings.push(`Insert sales_account_aliases error: ${String(error.message || error)}`);
+  const dedupedAliasInputs = [...byNormInput.values()];
+  const normKeys = [...byNormInput.keys()];
+  const inputDupesSkipped = Math.max(0, aliasInserts.length - dedupedAliasInputs.length);
+  report.counts.wouldSkipDuplicateAliases += inputDupesSkipped;
+  /** @type {Map<string, any[]>} */
+  const existingByNorm = new Map();
+
+  for (const batch of chunk(normKeys, 500)) {
+    const { data, error } = await supabase
+      .from("sales_account_aliases")
+      .select("id,approved,normalized_moraware_name,moraware_account_name,monday_account_name,assigned_salesperson,branch,match_type,confidence,updated_at,created_at")
+      .in("normalized_moraware_name", batch);
+    if (error) {
+      report.counts.errors += 1;
+      report.warnings.push(`Select existing aliases failed: ${String(error.message || error)}`);
+      continue;
+    }
+    for (const row of data ?? []) {
+      const k = String(row.normalized_moraware_name ?? "").trim();
+      if (!k) continue;
+      if (!existingByNorm.has(k)) existingByNorm.set(k, []);
+      existingByNorm.get(k).push(row);
+    }
+  }
+
+  const inserts = [];
+  const updates = [];
+
+  for (const r of dedupedAliasInputs) {
+    const norm = String(r.normalized_moraware_name ?? "").trim();
+    if (!norm) continue;
+
+    const existing = existingByNorm.get(norm) ?? [];
+    const existingApproved = existing.find((x) => x.approved === true) ?? null;
+
+    // Extra safety: for approved suggestions, confirm via direct query (avoids any edge case around IN filters).
+    if (r.approved === true && !overwriteApproved && !existingApproved) {
+      const { data, error } = await supabase
+        .from("sales_account_aliases")
+        .select("id,approved,normalized_moraware_name,monday_account_name,assigned_salesperson,branch,match_type,confidence")
+        .eq("normalized_moraware_name", norm)
+        .eq("approved", true)
+        .limit(1);
+      if (!error && data?.[0]) {
+        existingByNorm.set(norm, [...existing, data[0]]);
+      }
+    }
+
+    const existingApproved2 = (existingByNorm.get(norm) ?? existing).find((x) => x.approved === true) ?? null;
+
+    if (existingApproved2 && !overwriteApproved) {
+      report.counts.aliasesSkippedApproved += 1;
+      report.warnings.push(
+        `Skip approved alias (normalized_moraware_name=${norm}): moraware="${String(r.moraware_account_name ?? "")}" existing monday="${String(existingApproved2.monday_account_name ?? "")}" owner="${String(existingApproved2.assigned_salesperson ?? "")}" branch="${String(existingApproved2.branch ?? "")}"`
+      );
+      continue;
+    }
+
+    const existingUnapproved = existing
+      .filter((x) => x.approved !== true)
+      .sort((a, b) => String(b.updated_at ?? b.created_at ?? "").localeCompare(String(a.updated_at ?? a.created_at ?? "")))[0];
+
+    if (existingUnapproved) {
+      updates.push({
+        id: existingUnapproved.id,
+        patch: {
+          // Keep as unapproved unless explicitly approved and overwriteApproved enabled.
+          monday_account_name: r.monday_account_name,
+          normalized_monday_name: r.normalized_monday_name,
+          assigned_salesperson: r.assigned_salesperson,
+          branch: r.branch,
+          match_type: r.match_type,
+          confidence: r.confidence,
+          approved: overwriteApproved ? Boolean(r.approved) : false,
+          notes: r.notes,
+          raw_suggestion: r.raw_suggestion,
+          updated_at: new Date().toISOString()
+        }
+      });
+      continue;
+    }
+
+    inserts.push(r);
+  }
+
+  // Execute updates individually (safer + clear counts).
+  for (const u of updates) {
+    const { error } = await supabase.from("sales_account_aliases").update(u.patch).eq("id", u.id);
+    if (error) {
+      report.counts.errors += 1;
+      report.warnings.push(`Update sales_account_aliases id=${u.id} error: ${String(error.message || error)}`);
+    } else {
+      report.counts.aliasesUpdated += 1;
+    }
+  }
+
+  // These are duplicates in the *input suggestions* (same normalized key), not DB conflicts.
+  report.counts.aliasesSkippedDuplicate += inputDupesSkipped;
+
+  if (inserts.length) {
+    const { error } = await supabase.from("sales_account_aliases").insert(inserts);
+    if (error) {
+      const msg = String(error.message || error);
+      // If any unexpected duplicate slipped through, count as skipped duplicate (not an error) when safe.
+      if (msg.toLowerCase().includes("duplicate key") && msg.toLowerCase().includes("uq_sales_account_aliases_approved_norm_moraware")) {
+        report.counts.aliasesSkippedDuplicate += 1;
+        report.warnings.push(`Insert sales_account_aliases skipped duplicate approved alias constraint (unexpected): ${msg}`);
+      } else {
+        report.counts.errors += 1;
+        report.warnings.push(`Insert sales_account_aliases error: ${msg}`);
+      }
+    } else {
+      report.counts.aliasesInserted += inserts.length;
+    }
   }
 
   await fs.writeFile(outJsonPath, JSON.stringify(report, null, 2));
-  await fs.writeFile(outTxtPath, `Write mode completed (see JSON for counts/warnings).\n`);
+  const txt = [
+    "Sales Attribution Import (WRITE MODE)",
+    `Generated: ${report.generatedAt}`,
+    "",
+    "Master:",
+    `- prepared: ${report.counts.wouldInsertOrUpsertMaster}`,
+    `- insertedOrUpserted: ${report.counts.masterInsertedOrUpserted}`,
+    "",
+    "Moraware audit:",
+    `- prepared: ${report.counts.wouldInsertAuditRows}`,
+    `- inserted: ${report.counts.morawareAuditInserted}`,
+    "",
+    "Aliases:",
+    `- prepared: ${report.counts.wouldInsertAliases}`,
+    `- inserted: ${report.counts.aliasesInserted}`,
+    `- updated: ${report.counts.aliasesUpdated}`,
+    `- skippedApproved: ${report.counts.aliasesSkippedApproved}`,
+    `- skippedDuplicate: ${report.counts.aliasesSkippedDuplicate}`,
+    "",
+    `Errors: ${report.counts.errors}`,
+    "",
+    ...(report.warnings.length ? ["Warnings:", ...report.warnings.slice(0, 60).map((w) => `- ${w}`), report.warnings.length > 60 ? "- (more in JSON)" : "", ""] : [])
+  ]
+    .filter((x) => x !== "")
+    .join("\n");
+  await fs.writeFile(outTxtPath, txt + "\n");
   console.log(`Wrote ${outJsonPath}`);
   console.log(`Wrote ${outTxtPath}`);
 }
