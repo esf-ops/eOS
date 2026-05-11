@@ -26,7 +26,13 @@ export const HEAD_LAUNCHER_CATALOG = [
     category: "Administration",
     href: "/system-admin"
   },
-  { slug: "sales", label: "Sales", description: "Sales workflows and dashboards.", category: "Revenue", href: "/sales" },
+  {
+    slug: "sales",
+    label: "Sales Head",
+    description: "Sales performance, account growth, and sales flow into the Titans.",
+    category: "Revenue",
+    href: "/sales"
+  },
   { slug: "quote", label: "Quote", description: "Quote tools and estimating.", category: "Revenue", href: "/quote" },
   {
     slug: "production",

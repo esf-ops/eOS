@@ -128,6 +128,22 @@ The **XML include probe** did **not** expose **`Assignees`** on HTTP payloads (*
 2. **Moraware support / official API docs** clarifying where Machines view stores assignment (see `docs/MORAWARE_SUPPORT_QUESTION_ACTIVITY_ASSIGNMENT.md`).  
 3. Only if validated: a **controlled** calendar HTML read (discovery already notes login/session risk — **not preferred** for production).
 
+### 3f. WSDL / API endpoint discovery
+
+Moraware may expose **SOAP WSDL** endpoints (classic `*.asmx?WSDL`) or **newer HTTP APIs** that require an **API key** in headers. A quick browser hit on one Moraware URL returned JSON such as `{"message":"api-key header is required"}` — useful evidence that a protected surface exists, but **browsers cannot attach custom headers** from the address bar, so eOS ships a **read-only CLI probe**.
+
+**Script:** `npm run eos:discover:moraware-wsdl` → `backend-core/src/scripts/discoverMorawareWsdl.js`
+
+**Outputs:** `debug/moraware/latest/moraware-wsdl-discovery.{json,txt}` (no credentials, no API key values).
+
+**What it does (only):** `GET` and `OPTIONS` against a **fixed candidate list** derived from **`MORAWARE_API_URL`** (and optional **`MORAWARE_WEB_BASE_URL`**) — WSDL query variants, `JobTrackerAPI(5).asmx?WSDL`, and a small set of plausible REST-style paths. Tries **header name variants** when **`MORAWARE_API_KEY`** is set: `api-key`, `x-api-key`, `X-API-Key`, `Authorization: Bearer` (key **never** logged or written). Classifies responses, scans for **`JobActivity` / `Assignees` / `AssigneeName`** / calendar-related tokens, and suggests a **recommended_next_step**.
+
+**TLS:** Certificate validation stays **on** by default. **`MORAWARE_DISCOVERY_ALLOW_INSECURE_TLS=1`** disables verification **inside this script only** for lab/staging discovery — **not** for production sync.
+
+**Optional:** `MORAWARE_WSDL_EXTRA_URLS` (comma-separated) for manual URL/path candidates; `MORAWARE_WSDL_DISCOVERY_INCLUDE_BODY_SNIPPETS=1` for short redacted snippets around hits.
+
+If WSDL or a REST schema exposes **`JobActivity.Assignees`** / **`AssigneeName`**, the next implementation step is a **correct read-only** SOAP or HTTP request and then normalizing **`assigned_machine`** in Brain (design-only until validated).
+
 ## 4. What remains unknown
 
 - **Saved view definition** — Whether Moraware exposes view `146` (filters, columns, colors) through the **same XML API** eOS uses for `jobQuery` / `jobActivityQuery` is **not proven** in-repo. The UI URL is a **web app** concern until a supported command is documented for your tenant.  

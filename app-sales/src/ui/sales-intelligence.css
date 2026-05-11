@@ -1,0 +1,345 @@
+/* Sales Head — Performance Intelligence (light eOS internal dashboard) */
+.pi-dashboard {
+  --pi-bg: #f1f5f9;
+  --pi-panel: #ffffff;
+  --pi-panel2: #f8fafc;
+  --pi-border: #e2e8f0;
+  --pi-text: #0f172a;
+  --pi-muted: #64748b;
+  --pi-navy: #0f172a;
+  --pi-growth: #047857;
+  --pi-decline: #b91c1c;
+  --pi-warn-bg: #fffbeb;
+  --pi-warn-border: #fcd34d;
+  --pi-link: #0369a1;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.pi-dashboard a {
+  color: var(--pi-link);
+}
+
+.pi-muted {
+  color: var(--pi-muted);
+}
+
+.pi-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: #fff;
+  border-bottom: 1px solid var(--pi-border);
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
+  padding: 0.65rem 1.25rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: flex-end;
+}
+
+.pi-topbar label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--pi-muted);
+  font-weight: 600;
+}
+
+.pi-topbar select,
+.pi-topbar input[type="text"],
+.pi-topbar input[type="date"],
+.pi-topbar input[type="number"] {
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  color: var(--pi-text);
+  border-radius: 8px;
+  padding: 0.4rem 0.55rem;
+  font-size: 0.875rem;
+  min-width: 120px;
+}
+
+.pi-topbar select:focus,
+.pi-topbar input:focus {
+  outline: 2px solid rgba(6, 95, 70, 0.25);
+  border-color: #065f46;
+}
+
+.pi-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  padding: 0.5rem 1.25rem 0;
+  border-bottom: 1px solid var(--pi-border);
+  background: var(--pi-bg);
+}
+
+.pi-tab {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--pi-muted);
+  padding: 0.5rem 0.85rem;
+  cursor: pointer;
+  border-radius: 8px 8px 0 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.pi-tab:hover {
+  color: var(--pi-text);
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.pi-tab[data-on="true"] {
+  background: var(--pi-panel);
+  color: var(--pi-navy);
+  border: 1px solid var(--pi-border);
+  border-bottom-color: #fff;
+  margin-bottom: -1px;
+}
+
+.pi-main {
+  padding: 1rem 1.25rem 2.5rem;
+  max-width: 1680px;
+  margin: 0 auto;
+  width: 100%;
+  flex: 1;
+}
+
+.pi-h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--pi-navy);
+}
+
+.pi-sub {
+  margin: 0 0 1rem;
+  color: var(--pi-muted);
+  font-size: 0.875rem;
+  max-width: 80ch;
+}
+
+.pi-grid-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.pi-card {
+  background: var(--pi-panel);
+  border: 1px solid var(--pi-border);
+  border-radius: 10px;
+  padding: 1rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.pi-card-title {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--pi-muted);
+  margin: 0 0 0.35rem;
+  font-weight: 600;
+}
+
+.pi-card-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--pi-navy);
+}
+
+.pi-card-note {
+  margin: 0.35rem 0 0;
+  font-size: 0.75rem;
+  color: var(--pi-muted);
+}
+
+.pi-section {
+  margin-top: 1.5rem;
+}
+
+.pi-section h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--pi-navy);
+}
+
+.pi-table-wrap {
+  overflow: auto;
+  border: 1px solid var(--pi-border);
+  border-radius: 10px;
+  background: var(--pi-panel);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.pi-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.pi-table th,
+.pi-table td {
+  padding: 0.5rem 0.65rem;
+  text-align: left;
+  border-bottom: 1px solid var(--pi-border);
+}
+
+.pi-table th {
+  background: var(--pi-panel2);
+  color: var(--pi-muted);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pi-table tr:last-child td {
+  border-bottom: none;
+}
+
+.pi-table tbody tr:hover td {
+  background: #f8fafc;
+}
+
+.pi-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.pi-pos {
+  color: var(--pi-growth);
+  font-weight: 600;
+}
+
+.pi-neg {
+  color: var(--pi-decline);
+  font-weight: 600;
+}
+
+.pi-badge {
+  display: inline-block;
+  font-size: 0.65rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 6px;
+  margin-left: 0.35rem;
+  vertical-align: middle;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.pi-badge--active {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.pi-badge--house {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.pi-badge--fallback {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.pi-badge--unknown {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.pi-banner {
+  padding: 0.75rem 1rem;
+  border-radius: 10px;
+  margin-bottom: 1rem;
+  font-size: 0.85rem;
+  border: 1px solid var(--pi-border);
+  background: var(--pi-warn-bg);
+  border-color: var(--pi-warn-border);
+  color: #78350f;
+  white-space: pre-wrap;
+}
+
+.pi-banner--error {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #991b1b;
+}
+
+.pi-btn {
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  color: var(--pi-text);
+  padding: 0.45rem 0.85rem;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pi-btn:hover {
+  border-color: #94a3b8;
+  background: #f8fafc;
+}
+
+.pi-btn-primary {
+  background: #065f46;
+  border-color: #065f46;
+  color: #fff;
+}
+
+.pi-btn-primary:hover {
+  background: #047857;
+  border-color: #047857;
+  color: #fff;
+}
+
+.pi-toggle[data-on="true"] {
+  background: #ecfdf5;
+  border-color: #6ee7b7;
+  color: #065f46;
+}
+
+.pi-chart {
+  height: 280px;
+  margin-top: 0.5rem;
+}
+
+.pi-input-inline {
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  color: var(--pi-text);
+  border-radius: 8px;
+  padding: 0.4rem 0.55rem;
+  font-size: 0.875rem;
+}
+
+.pi-input-inline:focus {
+  outline: 2px solid rgba(6, 95, 70, 0.25);
+  border-color: #065f46;
+}
+
+.pi-two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+@media (max-width: 960px) {
+  .pi-two-col {
+    grid-template-columns: 1fr;
+  }
+}

@@ -31,6 +31,7 @@
     "eos:audit:moraware-ui-coverage": "node backend-core/src/scripts/auditMorawareUICoverageMatrix.js",
     "eos:discover:moraware-expanded": "node backend-core/src/scripts/discoverMorawareExpandedCoverage.js",
     "eos:discover:moraware-machines": "node backend-core/src/scripts/discoverMorawareMachinesCalendar.js",
+    "eos:discover:moraware-wsdl": "node backend-core/src/scripts/discoverMorawareWsdl.js",
     "eos:probe:moraware-assignee-xml": "node backend-core/src/scripts/probeMorawareAssigneeXml.js",
     "eos:analyze:moraware-sdk-activity": "node backend-core/src/scripts/analyzeMorawareSdkActivityMethods.js",
     "eos:probe:moraware-sdk-activity-read": "node backend-core/src/scripts/emitMorawareSdkActivityReadProbe.js",
@@ -44,7 +45,12 @@
     "eos:build:executive": "npm run build --prefix app-executive",
     "eos:build:system-admin": "npm run build --prefix app-system-admin",
     "eos:build:home": "npm run build --prefix app-home",
-    "eos:build:all-heads": "npm run eos:build:brain-health && npm run eos:build:executive && npm run eos:build:system-admin && npm run eos:build:home",
+    "eos:build:sales": "npm run build --prefix app-sales",
+    "eos:build:all-heads": "npm run eos:build:brain-health && npm run eos:build:executive && npm run eos:build:system-admin && npm run eos:build:sales && npm run eos:build:home",
+    "eos:analyze:sales-inputs": "node backend-core/src/scripts/analyzeSalesAccountAttributionInputs.js",
+    "eos:sales:crosswalk-suggestions": "node backend-core/src/scripts/buildSalesAccountCrosswalkSuggestions.js",
+    "eos:sales:reconcile-sqft": "node backend-core/src/scripts/reconcileSalesSqftReportToBrain.js",
+    "eos:sales:attribution-dry-run": "node backend-core/src/scripts/importSalesAttributionData.js",
     "eos:check:local": "node --check backend-core/src/server.js && npm run eos:test:head-access && npm run eos:build:all-heads",
     "lint": "node --check src/index.js && node --check src/morawareClient.js && node --check src/morawareDiscovery.js && node --check src/morawareJobFormsSdk.js && node --check src/firehose.js && node --check src/normalize.js && node --check src/router.js && node --check src/heads/debug.js"
   },
@@ -54,6 +60,7 @@
     "cors": "^2.8.5",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "fast-xml-parser": "^5.7.3"
+    "fast-xml-parser": "^5.7.3",
+    "xlsx": "^0.18.5"
   }
 }

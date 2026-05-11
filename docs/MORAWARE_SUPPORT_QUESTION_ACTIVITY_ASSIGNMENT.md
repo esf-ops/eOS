@@ -54,6 +54,18 @@ Thank you.
 
 ---
 
+**WSDL / HTTP API discovery (eOS)**  
+We added a **read-only** endpoint probe (`npm run eos:discover:moraware-wsdl` → `debug/moraware/latest/moraware-wsdl-discovery.{json,txt}`) that exercises likely **WSDL and REST** candidates with **`GET` / `OPTIONS`** and optional **API key header variants** (never logged). **Paste a short summary** from `moraware-wsdl-discovery.txt` into this thread when contacting support (whether any WSDL was found, whether responses required an API key, header names hinted in CORS, and any **Assignee** / **JobActivity** term hits).
+
+**Additional questions for Moraware (after running discovery):**
+
+1. Which **WSDL or HTTP API** endpoint should integrators use to retrieve **`JobActivity.Assignees`** (or equivalent) for a tenant?  
+2. When the server responds with **“api-key header is required,”** which **header name** and **auth scheme** are officially supported (`api-key`, `x-api-key`, `Authorization: Bearer`, other)?  
+3. Is **`JobActivity.Assignees` / `Assignee.AssigneeName`** the **same source** the **Machines** calendar uses for the **Assigned To** row label?  
+4. Can **`Assignees`** be retrieved through the **XML/HTTP API** used by non-Windows clients, or is **Windows + JobTrackerAPI5.dll** required for populated assignees on some tenants?
+
+---
+
 **Internal references**
 
 - Discovery: `docs/MORAWARE_MACHINES_CALENDAR_DISCOVERY.md`  

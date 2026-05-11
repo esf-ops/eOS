@@ -18,6 +18,7 @@ import {
 } from "./admin/systemAdminUserManagement.js";
 import { buildMeHeadsPayload } from "./me/launcherHeads.js";
 import { buildTitansTodayPayload, parseTitansTodayQuery } from "./titans/titansToday.js";
+import { attachSalesHeadRoutes } from "./sales/salesHead.js";
 
 function requiredEnv(name) {
   const v = String(process.env[name] ?? "").trim();
@@ -836,6 +837,13 @@ app.get("/api/me", requireAuth(), (req, res) => {
   res.json({ ok: true, user: req.user });
 });
 
+attachSalesHeadRoutes(app, {
+  requireAuth,
+  requireRole,
+  requireHeadAccess,
+  getSupabase: supabaseServerClient
+});
+
 app.get(
   "/api/admin/users",
   requireAuth(),
@@ -1292,6 +1300,14 @@ app.listen(port, () => {
   console.log("- GET /api/auth/roles");
   console.log("- GET /api/me");
   console.log("- GET /api/me/heads");
+  console.log("- GET /api/sales/summary");
+  console.log("- GET /api/sales/salesperson-performance");
+  console.log("- GET /api/sales/account-performance");
+  console.log("- GET /api/sales/trend");
+  console.log("- GET /api/sales/jobs");
+  console.log("- GET /api/sales/filters");
+  console.log("- GET /api/sales/performance-intelligence");
+  console.log("- GET /api/sales/debug");
   console.log("- GET /api/admin/users");
   console.log("- GET /api/admin/reference");
   console.log("- GET /api/admin/user-management/schema-health");

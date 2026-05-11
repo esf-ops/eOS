@@ -24,6 +24,7 @@ function assert(cond, msg) {
 }
 
 assert(isKnownHeadSlug("executive"), "executive is a known head slug");
+assert(isKnownHeadSlug("sales"), "sales is a known head slug");
 assert(isKnownHeadSlug("brain_health"), "brain_health is a known head slug");
 assert(isKnownHeadSlug("system_admin"), "system_admin is a known head slug");
 assert(isDealerSafeHeadSlug("partner_quote"), "partner_quote is dealer-safe");

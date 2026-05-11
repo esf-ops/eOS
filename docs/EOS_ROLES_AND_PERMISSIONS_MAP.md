@@ -64,6 +64,8 @@
 
 *(✓ = primary audience; “optional” = executive/policy choice or read-only slice.)*
 
+Sales Head **`/api/sales/*`** also accepts **`finance`** and **`marketing`** application roles alongside **`sales`** (see `SALES_API_ROLES` in `backend-core/src/sales/salesHead.js`) — they still **must** resolve the **`sales`** head slug in `resolveHeadAccessContext` (`requireHeadAccess`); assign via `user_head_access` defaults or explicit grants.
+
 ---
 
 ## Actions by role (patterns)
@@ -90,7 +92,7 @@
 6. **No service-role leakage to clients** — browser never sees service role key; only `backend-core` uses it.
 7. **Auditing:** Sensitive mutations log to `eos_action_log` (existing pattern).
 
-**Gradual rollout:** Selected read routes use `requireHeadAccess` today (Executive read APIs + Titans today, Brain sync read surfaces, System Admin read APIs). Mutation routes keep existing `requireRole` gates until reviewed head-by-head.
+**Gradual rollout:** Selected read routes use `requireHeadAccess` today (Executive read APIs + Titans today, Brain sync read surfaces, System Admin read APIs, **Sales Head `/api/sales/*`** guarded with `sales` slug + roles `admin|executive|sales|finance|marketing`). Mutation routes keep existing `requireRole` gates until reviewed head-by-head.
 
 ---
 

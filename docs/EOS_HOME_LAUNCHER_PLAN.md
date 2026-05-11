@@ -40,7 +40,7 @@ Each launcher row aligns with **`user_head_access.head_slug`** and `EOS_HEAD_SLU
 | Executive | `executive` | `/executive` → existing `app-executive` |
 | Brain Health | `brain_health` | `/brain-health` |
 | System Admin | `system_admin` | `/system-admin` |
-| Sales | `sales` | `/sales` |
+| Sales Head | `sales` | `/sales` → `app-sales` (default dev: `http://localhost:5178`, override `VITE_SALES_URL`) |
 | Quote | `quote` | `/quote` |
 | Production | `production` | `/production` |
 | Shop Floor TV | `shop_tv` | `/shop-tv` |
