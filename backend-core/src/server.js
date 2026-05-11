@@ -16,6 +16,7 @@ import {
   attachAdvancedSystemAdminUserRoutes,
   enrichUserProfileRowsForAdminList
 } from "./admin/systemAdminUserManagement.js";
+import { attachSalesAccountMappingAdminRoutes } from "./admin/salesAccountMappingAdmin.js";
 import { buildMeHeadsPayload } from "./me/launcherHeads.js";
 import { buildTitansTodayPayload, parseTitansTodayQuery } from "./titans/titansToday.js";
 import { attachSalesHeadRoutes } from "./sales/salesHead.js";
@@ -916,6 +917,13 @@ app.post("/api/admin/users/:userId/role", requireAuth(), requireRole(["admin"]),
 
 attachAdvancedSystemAdminUserRoutes(app, { supabaseServerClient });
 
+attachSalesAccountMappingAdminRoutes(app, {
+  requireAuth,
+  requireRole,
+  requireHeadAccess,
+  getSupabase: supabaseServerClient
+});
+
 app.post("/api/auth/log-login", requireAuth(), express.json(), async (req, res) => {
   try {
     await logLoginEvent({ user: req.user, eventType: "login", metadata: req.body ?? null, req });
@@ -1309,6 +1317,15 @@ app.listen(port, () => {
   console.log("- GET /api/sales/performance-intelligence");
   console.log("- GET /api/sales/debug");
   console.log("- GET /api/admin/users");
+  console.log("- GET /api/admin/sales-account-mapping/schema-health");
+  console.log("- GET /api/admin/sales-account-mapping/suggestions");
+  console.log("- GET /api/admin/sales-account-mapping/master-accounts");
+  console.log("- GET /api/admin/sales-account-mapping/reps-branches");
+  console.log("- POST /api/admin/sales-account-mapping/approve");
+  console.log("- POST /api/admin/sales-account-mapping/reject");
+  console.log("- POST /api/admin/sales-account-mapping/mark-unmapped");
+  console.log("- POST /api/admin/sales-account-mapping/assign-house");
+  console.log("- GET /api/admin/sales-account-mapping/audit-history");
   console.log("- GET /api/admin/reference");
   console.log("- GET /api/admin/user-management/schema-health");
   console.log("- POST /api/admin/users/invite");

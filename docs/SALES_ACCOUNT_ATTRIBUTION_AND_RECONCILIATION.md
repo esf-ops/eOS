@@ -135,6 +135,35 @@ Sales backend now supports:
 - Falling back gracefully when they do not exist
 - Debug payload includes mapping source and basic coverage hints
 
+## Sales Account Mapping Admin v1 (System Admin)
+Admins can review and persist mappings at:
+
+- Backend routes: `/api/admin/sales-account-mapping/*`
+- UI: **System Admin → Sales Account Mapping**
+
+### Schema health behavior
+If the attribution schema is not installed, the UI shows:
+- “Sales attribution schema is not installed yet.”
+- Missing tables list
+- Path: `backend-core/supabase/sales_account_attribution.sql`
+
+The app must **not crash** when tables are missing; it will keep operating in read-only/suggestions mode.
+
+### Review/approval workflow
+The mapping admin reads:
+- Latest suggestions from `debug/sales/latest/sales-account-crosswalk-suggestions.json`
+- Existing alias decisions from Supabase (when installed)
+
+Actions:
+- **Approve mapping**: writes an approved alias row; may create/update an approved `current_owner` assignment when a master id exists.
+- **Reject**: records a deliberate “rejected” decision (does not delete anything).
+- **Mark unmapped**: records an “intentional_unmapped” decision so the account stops appearing as unresolved noise.
+- **Assign house/direct**: records an approved alias with a non-rep owner (House Account / Direct / Unmapped).
+
+Safety:
+- Fuzzy suggestions are **never auto-approved**; approval requires explicit click.
+- Changing an existing approved mapping requires **notes/reason**.
+
 ## Commands
 Run locally:
 

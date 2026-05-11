@@ -3,6 +3,7 @@ import type { Session } from "@supabase/supabase-js";
 import { ApiError, apiFetch } from "../lib/api";
 import { fetchSchemaHealth, SCHEMA_HEALTH_PATH, type SchemaHealthResp } from "../lib/schemaHealth";
 import { supabase } from "../lib/supabase";
+import SalesAccountMappingAdmin from "./SalesAccountMappingAdmin";
 
 /** Visible near credential actions — admins never observe other users’ secrets. */
 const PASSWORD_GOVERNANCE_NOTE =
@@ -198,6 +199,7 @@ export default function App() {
   const [rows, setRows] = useState<AdminRow[]>([]);
   const [listError, setListError] = useState("");
   const [toast, setToast] = useState<{ kind: "info" | "error"; text: string } | null>(null);
+  const [activeView, setActiveView] = useState<"users" | "sales_mapping">("users");
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<UserDetailResp | null>(null);
@@ -503,6 +505,24 @@ export default function App() {
           {!isAdmin ? <span style={{ color: "#f97316" }}>{listError}</span> : null}
           <button
             type="button"
+            className={`btn ${activeView === "users" ? "btn-primary" : ""}`}
+            onClick={() => setActiveView("users")}
+          >
+            Users
+          </button>
+          <button
+            type="button"
+            className={`btn ${activeView === "sales_mapping" ? "btn-primary" : ""}`}
+            onClick={() => {
+              setSelectedId(null);
+              setDetail(null);
+              setActiveView("sales_mapping");
+            }}
+          >
+            Sales Account Mapping
+          </button>
+          <button
+            type="button"
             className="btn"
             onClick={() => {
               void supabase.auth.signOut();
@@ -526,6 +546,10 @@ export default function App() {
       ) : (
         <div className="layout">
           <div className="panel">
+            {activeView === "sales_mapping" ? (
+              <SalesAccountMappingAdmin token={sessionToken} />
+            ) : (
+              <>
             <h2 style={{ marginTop: 0 }}>People & access</h2>
             <p className="muted">Invite, deactivate, routing heads, and dealer assignments—all audited server-side.</p>
 
@@ -819,8 +843,11 @@ export default function App() {
                 {inviteBusy ? "Sending…" : "Send invite"}
               </button>
             </div>
+              </>
+            )}
           </div>
 
+          {activeView === "users" ? (
           <aside className="drawer">
             {!selectedId ? (
               <p className="muted">Select a user from the roster for actions and summaries.</p>
@@ -930,6 +957,7 @@ export default function App() {
               </>
             )}
           </aside>
+          ) : null}
         </div>
       )}
       {toast ? <div className={`toast ${toast.kind === "error" ? "error" : ""}`}>{toast.text}</div> : null}

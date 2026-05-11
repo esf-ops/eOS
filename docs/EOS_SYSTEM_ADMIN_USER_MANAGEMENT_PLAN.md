@@ -8,6 +8,15 @@ Production Supabase deployments should apply migrations in order: **`auth_schema
 
 ## Part A — Current state
 
+## Part A.1 — Sales Account Mapping Admin (additive)
+System Admin also hosts **Sales Account Mapping Admin v1**, used to review and approve Moraware-to-Monday account mappings before Sales Head attribution is considered trustworthy.
+
+- **Backend**: `/api/admin/sales-account-mapping/*` (admin-only, requires System Admin head access)
+- **UI**: System Admin → “Sales Account Mapping”
+- **Schema**: `backend-core/supabase/sales_account_attribution.sql` (additive; manual apply)
+
+If the attribution schema is not installed, the UI must show a “schema not installed” message and continue operating without crashing.
+
 ### 1. Auth / user tables (today)
 
 | Object | Purpose |
