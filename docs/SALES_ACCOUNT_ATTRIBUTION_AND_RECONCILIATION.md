@@ -8,6 +8,10 @@ Sales Head currently shows useful production Sq.Ft. totals, but **sales attribut
 
 The main issue is **account naming mismatch**: high-volume Moraware `Account Name` values frequently do not match Monday `Name` values exactly.
 
+## Broader pattern: eOS Identity Resolution
+
+Sales attribution is the **first implementation** of the broader **eOS Brain Identity Resolution** pattern: preserve raw source evidence, generate match suggestions, require human approval for uncertain links, and keep audit history so mappings can change without rewriting upstream systems. See `docs/EOS_BRAIN_IDENTITY_RESOLUTION_ARCHITECTURE.md` and the additive schema proposal `backend-core/supabase/eos_identity_resolution.sql`.
+
 ## Key business rules
 - **Active real sales reps (only):**
   - Casey Schenke
