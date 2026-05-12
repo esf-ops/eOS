@@ -8,6 +8,12 @@
 import express from "express";
 
 import { logAction } from "../auth/auditLog.js";
+import {
+  mergeRowOrganizationId,
+  organizationScopeOrFilter,
+  resolveOrganizationContext,
+  tableHasOrganizationId
+} from "../organizations/organizationContext.js";
 import { isPublicQuoteSource } from "./quoteSourceConfig.js";
 import { listSalesDirectoryUsers } from "./salesDirectoryUsers.js";
 import { buildLeadAssignmentRow } from "./quoteTerritoryAssignment.js";
@@ -117,6 +123,29 @@ function applyHeaderFilters(qb, f) {
   return q;
 }
 
+/**
+ * @param {import("@supabase/supabase-js").SupabaseClient} db
+ * @param {import("express").Request} req
+ */
+async function loadPipelineOrganizationScope(db, req) {
+  const orgCtx = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
+  const orgId = orgCtx.organizationId;
+  const hasQuoteHeadersOrg = orgId ? await tableHasOrganizationId(db, "quote_headers") : false;
+  if (orgCtx.warnings?.length) {
+    console.warn("[quote-pipeline] organization_context warnings:", orgCtx.warnings.join("; "));
+  }
+  if (orgId && !hasQuoteHeadersOrg) {
+    console.warn("[quote-pipeline] TODO: quote_headers.organization_id missing — pipeline not org-scoped until migration.");
+  }
+  return { orgCtx, orgId, hasQuoteHeadersOrg };
+}
+
+function applyQuoteHeaderOrgScope(qb, orgId, hasQuoteHeadersOrg) {
+  if (!orgId || !hasQuoteHeadersOrg) return qb;
+  const filt = organizationScopeOrFilter(orgId);
+  return filt ? qb.or(filt) : qb;
+}
+
 async function fetchOptional(db, run) {
   try {
     const { data, error } = await run(db);
@@ -151,8 +180,10 @@ export function attachQuotePipelineRoutes(app, { requireAuth, requireRole, requi
   app.get("/api/quotes/pipeline/summary", ...stack, async (req, res) => {
     try {
       const db = supabaseGetter();
+      const { orgId, hasQuoteHeadersOrg } = await loadPipelineOrganizationScope(db, req);
       const f = parseFilters(req);
       let qb = db.from("quote_headers").select("id,quote_source,quote_status,grand_total,created_at,sales_rep,branch");
+      qb = applyQuoteHeaderOrgScope(qb, orgId, hasQuoteHeadersOrg);
       qb = applyHeaderFilters(qb, f);
       const { data: rows, error } = await qb.limit(5000);
       if (error) {
@@ -216,6 +247,7 @@ export function attachQuotePipelineRoutes(app, { requireAuth, requireRole, requi
   app.get("/api/quotes/pipeline", ...stack, async (req, res) => {
     try {
       const db = supabaseGetter();
+      const { orgId, hasQuoteHeadersOrg } = await loadPipelineOrganizationScope(db, req);
       const f = parseFilters(req);
       let qb = db
         .from("quote_headers")
@@ -223,6 +255,7 @@ export function attachQuotePipelineRoutes(app, { requireAuth, requireRole, requi
           "id,quote_number,quote_source,quote_status,customer_name,customer_email,customer_phone,project_address,city,state,zip,sales_rep,branch,grand_total,estimated_sqft,created_at,monday_item_id,monday_board_id"
         )
         .order("created_at", { ascending: false });
+      qb = applyQuoteHeaderOrgScope(qb, orgId, hasQuoteHeadersOrg);
       qb = applyHeaderFilters(qb, f);
       const { data: rows, error } = await qb.limit(f.limit);
       if (error) {
@@ -275,6 +308,7 @@ export function attachQuotePipelineRoutes(app, { requireAuth, requireRole, requi
       const id = String(req.params.id || "").trim();
       if (!isUuid(id)) return res.status(400).json({ ok: false, error: "invalid id" });
       const db = supabaseGetter();
+      const { orgId, hasQuoteHeadersOrg } = await loadPipelineOrganizationScope(db, req);
       const { data: h, error: hErr } = await db.from("quote_headers").select("*").eq("id", id).limit(1);
       if (hErr) {
         if (isMissingRelationError(hErr)) {
@@ -284,6 +318,14 @@ export function attachQuotePipelineRoutes(app, { requireAuth, requireRole, requi
       }
       const header = h?.[0];
       if (!header) return res.status(404).json({ ok: false, error: "quote not found" });
+      if (
+        hasQuoteHeadersOrg &&
+        orgId &&
+        header.organization_id != null &&
+        String(header.organization_id) !== String(orgId)
+      ) {
+        return res.status(404).json({ ok: false, error: "quote not found" });
+      }
       if (!canViewQuoteRow(req.user, header)) {
         return res.status(403).json({ ok: false, error: "You do not have access to this quote." });
       }
@@ -357,10 +399,19 @@ export function attachQuotePipelineRoutes(app, { requireAuth, requireRole, requi
       const id = String(req.params.id || "").trim();
       if (!isUuid(id)) return res.status(400).json({ ok: false, error: "invalid id" });
       const db = supabaseGetter();
+      const { orgId, hasQuoteHeadersOrg } = await loadPipelineOrganizationScope(db, req);
       const { data: h, error: hErr } = await db.from("quote_headers").select("*").eq("id", id).limit(1);
       if (hErr) throw hErr;
       const header = h?.[0];
       if (!header) return res.status(404).json({ ok: false, error: "quote not found" });
+      if (
+        hasQuoteHeadersOrg &&
+        orgId &&
+        header.organization_id != null &&
+        String(header.organization_id) !== String(orgId)
+      ) {
+        return res.status(404).json({ ok: false, error: "quote not found" });
+      }
       if (!canViewQuoteRow(req.user, header)) {
         return res.status(403).json({ ok: false, error: "You do not have access to this quote." });
       }
@@ -475,10 +526,19 @@ export function attachQuotePipelineRoutes(app, { requireAuth, requireRole, requi
         return res.status(400).json({ ok: false, error: `Invalid status. Allowed: ${[...ALLOWED_STATUS_PATCH].join(", ")}` });
       }
       const db = supabaseGetter();
+      const { orgId, hasQuoteHeadersOrg } = await loadPipelineOrganizationScope(db, req);
       const { data: h, error: hErr } = await db.from("quote_headers").select("*").eq("id", id).limit(1);
       if (hErr) throw hErr;
       const header = h?.[0];
       if (!header) return res.status(404).json({ ok: false, error: "quote not found" });
+      if (
+        hasQuoteHeadersOrg &&
+        orgId &&
+        header.organization_id != null &&
+        String(header.organization_id) !== String(orgId)
+      ) {
+        return res.status(404).json({ ok: false, error: "quote not found" });
+      }
       if (!canViewQuoteRow(req.user, header)) {
         return res.status(403).json({ ok: false, error: "You do not have access to this quote." });
       }
@@ -539,10 +599,19 @@ export function attachQuotePipelineRoutes(app, { requireAuth, requireRole, requi
       const assignedSalesRepUserId = isUuid(assignedUserRaw) ? assignedUserRaw : "";
 
       const db = supabaseGetter();
+      const { orgId, hasQuoteHeadersOrg } = await loadPipelineOrganizationScope(db, req);
       const { data: h, error: hErr } = await db.from("quote_headers").select("*").eq("id", id).limit(1);
       if (hErr) throw hErr;
       const header = h?.[0];
       if (!header) return res.status(404).json({ ok: false, error: "quote not found" });
+      if (
+        hasQuoteHeadersOrg &&
+        orgId &&
+        header.organization_id != null &&
+        String(header.organization_id) !== String(orgId)
+      ) {
+        return res.status(404).json({ ok: false, error: "quote not found" });
+      }
       if (!canViewQuoteRow(req.user, header)) {
         return res.status(403).json({ ok: false, error: "You do not have access to this quote." });
       }
@@ -573,7 +642,13 @@ export function attachQuotePipelineRoutes(app, { requireAuth, requireRole, requi
         metadata: assignmentMeta
       };
       try {
-        await db.from("quote_lead_assignments").insert(buildLeadAssignmentRow({ quoteId: id, assignmentResult }));
+        const hasLeadOrg = await tableHasOrganizationId(db, "quote_lead_assignments");
+        const leadRow = mergeRowOrganizationId(
+          buildLeadAssignmentRow({ quoteId: id, assignmentResult }),
+          orgId,
+          hasLeadOrg && Boolean(orgId)
+        );
+        await db.from("quote_lead_assignments").insert(leadRow);
       } catch {
         /* optional */
       }

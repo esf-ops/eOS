@@ -342,7 +342,7 @@ export default function SalesIntelligenceView({ token, me, legacyFilterQuery, on
       <div className="pi-main">
         <h1 className="pi-h1">Elite Stone Fabrication · Sales Performance Intelligence</h1>
         <p className="pi-sub">
-          Moraware records the work. eOS explains the work. The heads move the work. · Worksheet Sq.Ft. only until Quote Platform unlocks
+          Moraware records the work. eliteOS explains the work. The heads move the work. · Worksheet Sq.Ft. only until Quote Platform unlocks
           revenue.
         </p>
 

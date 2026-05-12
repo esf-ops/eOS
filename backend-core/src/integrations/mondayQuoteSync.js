@@ -17,6 +17,44 @@
  */
 
 import { getMondayBoardEnvKeyForQuoteSource, isPublicQuoteSource } from "../quotes/quoteSourceConfig.js";
+import { tableHasOrganizationId } from "../organizations/organizationContext.js";
+
+/**
+ * Optional per-tenant Monday board env var names (values still read from process.env).
+ * @param {import("@supabase/supabase-js").SupabaseClient|null|undefined} db
+ * @param {string|null|undefined} organizationId
+ * @param {string} quoteSource
+ */
+async function resolveMondayBoardEnvKeyName(db, organizationId, quoteSource) {
+  const fallback = getMondayBoardEnvKeyForQuoteSource(quoteSource || "partner_portal");
+  if (!db?.from || !organizationId) return fallback;
+  try {
+    const { data, error } = await db
+      .from("organization_integration_configs")
+      .select("config,is_enabled")
+      .eq("organization_id", organizationId)
+      .eq("integration_key", "monday")
+      .limit(1);
+    if (error || !data?.length) return fallback;
+    const cfg = data[0].config && typeof data[0].config === "object" ? data[0].config : {};
+    const src = String(quoteSource || "").trim();
+    if (isPublicQuoteSource(src) && cfg.public_quotes_board_env_key) {
+      return String(cfg.public_quotes_board_env_key).trim() || fallback;
+    }
+    if (src === "internal_quote" && cfg.internal_quotes_board_env_key) {
+      return String(cfg.internal_quotes_board_env_key).trim() || fallback;
+    }
+    if ((src.includes("partner") || src === "partner_portal" || src === "partner_quote") && cfg.partner_quotes_board_env_key) {
+      return String(cfg.partner_quotes_board_env_key).trim() || fallback;
+    }
+    if (cfg.legacy_quotes_board_env_key) {
+      return String(cfg.legacy_quotes_board_env_key).trim() || fallback;
+    }
+  } catch {
+    /* table missing */
+  }
+  return fallback;
+}
 
 const MONDAY_API_URL = "https://api.monday.com/v2";
 
@@ -262,13 +300,13 @@ async function patchQuoteHeaderMondayIds(db, quoteId, boardId, itemId) {
 }
 
 /**
- * @param {{ quoteId: string, action: string, db: import("@supabase/supabase-js").SupabaseClient, payload?: Record<string, unknown>, quoteSource?: string }} params
+ * @param {{ quoteId: string, action: string, db: import("@supabase/supabase-js").SupabaseClient, payload?: Record<string, unknown>, quoteSource?: string, organizationId?: string|null }} params
  * @returns {Promise<{ ok: boolean, skipped?: boolean, status?: string, reason?: string, monday_item_id?: string|null, monday_board_id?: string|null, warning?: string|null }>}
  */
 export async function syncQuoteToMonday(params) {
   const token = String(process.env.MONDAY_API_TOKEN ?? "").trim();
   const quoteSource = String(params.quoteSource || params.payload?.quote_source || "").trim();
-  const envKeyName = getMondayBoardEnvKeyForQuoteSource(quoteSource || "partner_portal");
+  const envKeyName = await resolveMondayBoardEnvKeyName(params.db, params.organizationId, quoteSource);
   let boardId = String(process.env[envKeyName] ?? "").trim();
   if (!boardId) boardId = String(process.env.MONDAY_QUOTES_BOARD_ID ?? "").trim();
 
@@ -286,7 +324,8 @@ export async function syncQuoteToMonday(params) {
       responsePayload: null,
       status: "skipped_missing_config",
       errorMessage: null,
-      db
+      db,
+      organizationId: params.organizationId ?? null
     });
     return { ok: true, skipped: true, status: "skipped_missing_config" };
   }
@@ -340,7 +379,8 @@ export async function syncQuoteToMonday(params) {
       responsePayload: { data: json?.data ?? null },
       status: "success",
       errorMessage: null,
-      db
+      db,
+      organizationId: params.organizationId ?? null
     });
 
     return {
@@ -396,7 +436,8 @@ export async function syncQuoteToMonday(params) {
         },
         status: "success_partial_columns",
         errorMessage: null,
-        db
+        db,
+        organizationId: params.organizationId ?? null
       });
 
       return {
@@ -423,7 +464,8 @@ export async function syncQuoteToMonday(params) {
       responsePayload: { error: combinedErr.slice(0, 500) },
       status: "failed",
       errorMessage: combinedErr,
-      db
+      db,
+      organizationId: params.organizationId ?? null
     });
 
     return {
@@ -439,7 +481,7 @@ export async function syncQuoteToMonday(params) {
 }
 
 /**
- * @param {{ quoteId: string, action: string, mondayBoardId?: string|null, mondayItemId?: string|null, requestPayload?: unknown, responsePayload?: unknown, status: string, errorMessage?: string|null, db: import("@supabase/supabase-js").SupabaseClient }} params
+ * @param {{ quoteId: string, action: string, mondayBoardId?: string|null, mondayItemId?: string|null, requestPayload?: unknown, responsePayload?: unknown, status: string, errorMessage?: string|null, db: import("@supabase/supabase-js").SupabaseClient, organizationId?: string|null }} params
  */
 export async function writeMondaySyncLog(params) {
   const db = params.db;
@@ -455,6 +497,10 @@ export async function writeMondaySyncLog(params) {
       status: params.status,
       error_message: params.errorMessage ?? null
     };
+    const orgId = params.organizationId ? String(params.organizationId).trim() : "";
+    if (orgId && (await tableHasOrganizationId(db, "quote_monday_sync_log"))) {
+      row.organization_id = orgId;
+    }
     const { error } = await db.from("quote_monday_sync_log").insert(row);
     if (error) throw error;
     return { ok: true };

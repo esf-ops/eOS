@@ -219,7 +219,7 @@ export default function App() {
     <div className="sales-shell">
       <header className="sales-header">
         <div className="sales-brand">
-          <h1>eOS Sales Head</h1>
+          <h1>eliteOS Sales Head</h1>
           <p className="sales-motto">Performance intelligence · worksheet Sq.Ft. · Moraware records the work</p>
           <p className="sales-meta">
             {me?.user?.email ?? session.user.email} · role {me?.user?.role ?? "—"}

@@ -232,7 +232,7 @@ export default function App() {
           <div className="brand-row">
             <img src={EOS_LOGO_URL} alt="Elite Stone Fabrication" />
             <div className="brand-text">
-              <h1>eOS Home</h1>
+              <h1>eliteOS Home</h1>
               <div className="tag">Keep the Titans running well.</div>
             </div>
           </div>
@@ -253,12 +253,12 @@ export default function App() {
             <div className="brand-row" style={{ marginBottom: 16 }}>
               <img src={EOS_LOGO_URL} alt="" style={{ height: 48 }} />
               <div className="brand-text">
-                <h1>eOS</h1>
+                <h1>eliteOS</h1>
               </div>
             </div>
             <p className="motto">Keep the Titans running well.</p>
             <p className="subtitle">
-              Moraware records the work. eOS explains the work. The heads move the work.
+              Moraware records the work. eliteOS explains the work. The heads move the work.
             </p>
             <form onSubmit={(e) => void submitLogin(e)}>
               <div className="field">
@@ -333,9 +333,9 @@ export default function App() {
                 ) : (
                   <>
                     <p style={{ margin: "0 0 8px", fontWeight: 600, color: "#0f172a" }}>
-                      No eOS heads are assigned to your account yet.
+                      No eliteOS heads are assigned to your account yet.
                     </p>
-                    <p style={{ margin: 0 }}>Contact your eOS admin.</p>
+                    <p style={{ margin: 0 }}>Contact your eliteOS admin.</p>
                   </>
                 )}
               </div>

@@ -835,7 +835,7 @@ export default function App() {
             Executive Head
           </h2>
           <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", marginBottom: 16 }}>
-            Sign in with your eOS credentials.
+            Sign in with your eliteOS credentials.
           </p>
           {authError ? <div className="banner-alert">{authError}</div> : null}
           <form onSubmit={doLogin} style={{ display: "grid", gap: 10 }}>
@@ -857,7 +857,7 @@ export default function App() {
             </button>
           </form>
           <p style={{ marginTop: 18, fontSize: "0.8125rem", color: "var(--text-muted)" }}>
-            Moraware records the work. eOS explains the work. The heads move the work.
+            Moraware records the work. eliteOS explains the work. The heads move the work.
           </p>
         </div>
       </div>
@@ -933,7 +933,7 @@ export default function App() {
           <div className="op-metric">{summary ? nf(summary.totalSqft, { maximumFractionDigits: 0 }) : "—"}</div>
           <div className="op-meta">Worksheet Sq.Ft. · {summary ? nf(summary.totalJobs) : "—"} jobs</div>
           <p className="field-micro" style={{ marginTop: 10, marginBottom: 0 }}>
-            Worksheet Sq.Ft. comes from Moraware worksheet fields synced into the eOS Brain.
+            Worksheet Sq.Ft. comes from Moraware worksheet fields synced into the eliteOS Brain.
           </p>
           <dl className="mini-stat-grid" style={{ marginTop: 12 }}>
             <dt>Top salesperson</dt>
@@ -1174,7 +1174,7 @@ export default function App() {
               Every department’s work either feeds, protects, accelerates, or blocks the Titans.
             </p>
             <p className="exec-tagline">
-              Moraware records the work. eOS explains the work. The heads move the work.
+              Moraware records the work. eliteOS explains the work. The heads move the work.
             </p>
           </div>
         </div>
@@ -1391,7 +1391,7 @@ export default function App() {
           <h2 className="section-title">Sales performance</h2>
           <p className="section-desc">Sort columns; filters above stay live for this cohort.</p>
           <p className="field-micro" style={{ marginBottom: "0.85rem" }}>
-            Worksheet Sq.Ft. comes from Moraware worksheet fields synced into the eOS Brain.
+            Worksheet Sq.Ft. comes from Moraware worksheet fields synced into the eliteOS Brain.
           </p>
           <div className="conc-hint">
             Top three reps comprise {nf(concentration.top3pct, { maximumFractionDigits: 1 })}% of total worksheet Sq.Ft.
@@ -1678,7 +1678,7 @@ export default function App() {
         <section className="section-exec">
           <h2 className="section-title">Brain Trust</h2>
           <p className="section-desc">
-            Moraware is the source of truth. eOS explains the work and shows where the Titans may be helped or blocked.
+            Moraware is the source of truth. eliteOS explains the work and shows where the Titans may be helped or blocked.
             Monitor Brain sync fidelity below for executive confidence in these indicators.
           </p>
           <p className="field-micro" style={{ marginTop: "-0.25rem", marginBottom: "1rem", maxWidth: "62ch" }}>

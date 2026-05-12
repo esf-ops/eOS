@@ -3,16 +3,22 @@
  * Safe when tables are missing (returns empty metrics).
  */
 
+import { tableHasOrganizationId } from "../organizations/organizationContext.js";
 function isMissingRelationError(error) {
   const msg = String(error?.message || "");
   const code = String(error?.code || "");
   return code === "42P01" || msg.toLowerCase().includes("does not exist") || msg.toLowerCase().includes("relation");
 }
 
-async function safeQuoteHeadersQuery(db, buildQuery) {
+async function safeQuoteHeadersQuery(db, buildQuery, organizationScope) {
   if (!db?.from) return { ok: false, rows: [], missing: true };
   try {
-    const q = buildQuery(db.from("quote_headers"));
+    let base = db.from("quote_headers");
+    if (organizationScope?.organizationId && organizationScope?.hasOrganizationIdColumn) {
+      const filt = `organization_id.eq.${organizationScope.organizationId},organization_id.is.null`;
+      base = base.or(filt);
+    }
+    const q = buildQuery(base);
     const { data, error } = await q;
     if (error) throw error;
     return { ok: true, rows: data ?? [] };
@@ -32,13 +38,13 @@ function sumField(rows, field) {
 }
 
 /**
- * @param {{ startDate?: string, endDate?: string, db: import("@supabase/supabase-js").SupabaseClient }} params
+ * @param {{ startDate?: string, endDate?: string, db: import("@supabase/supabase-js").SupabaseClient, organizationScope?: { organizationId?: string|null, hasOrganizationIdColumn?: boolean } }} params
  */
 export async function getQuotePipelineSummary(params) {
   const db = params.db;
   const startMs = params.startDate ? new Date(params.startDate).getTime() : 0;
   const endMs = params.endDate ? new Date(params.endDate).getTime() : Date.now();
-  const { rows, missing } = await safeQuoteHeadersQuery(db, (q) => q.select("quote_status, grand_total, created_at"));
+  const { rows, missing } = await safeQuoteHeadersQuery(db, (q) => q.select("quote_status, grand_total, created_at"), params.organizationScope);
   if (missing) {
     return {
       ok: true,
@@ -66,13 +72,13 @@ export async function getQuotePipelineSummary(params) {
 }
 
 /**
- * @param {{ startDate?: string, endDate?: string, db: import("@supabase/supabase-js").SupabaseClient }} params
+ * @param {{ startDate?: string, endDate?: string, db: import("@supabase/supabase-js").SupabaseClient, organizationScope?: { organizationId?: string|null, hasOrganizationIdColumn?: boolean } }} params
  */
 export async function getQuoteMetricsBySalesRep(params) {
   const db = params.db;
   const startMs = params.startDate ? new Date(params.startDate).getTime() : 0;
   const endMs = params.endDate ? new Date(params.endDate).getTime() : Date.now();
-  const { rows, missing } = await safeQuoteHeadersQuery(db, (q) => q.select("sales_rep, grand_total, created_at"));
+  const { rows, missing } = await safeQuoteHeadersQuery(db, (q) => q.select("sales_rep, grand_total, created_at"), params.organizationScope);
   if (missing) return { ok: true, installed: false, quote_value_by_sales_rep: {} };
   const filtered = rows.filter((r) => inDateRange(r, startMs, endMs));
   const map = {};
@@ -84,13 +90,13 @@ export async function getQuoteMetricsBySalesRep(params) {
 }
 
 /**
- * @param {{ startDate?: string, endDate?: string, db: import("@supabase/supabase-js").SupabaseClient }} params
+ * @param {{ startDate?: string, endDate?: string, db: import("@supabase/supabase-js").SupabaseClient, organizationScope?: { organizationId?: string|null, hasOrganizationIdColumn?: boolean } }} params
  */
 export async function getQuoteMetricsByBranch(params) {
   const db = params.db;
   const startMs = params.startDate ? new Date(params.startDate).getTime() : 0;
   const endMs = params.endDate ? new Date(params.endDate).getTime() : Date.now();
-  const { rows, missing } = await safeQuoteHeadersQuery(db, (q) => q.select("branch, grand_total, created_at"));
+  const { rows, missing } = await safeQuoteHeadersQuery(db, (q) => q.select("branch, grand_total, created_at"), params.organizationScope);
   if (missing) return { ok: true, installed: false, quote_value_by_branch: {} };
   const filtered = rows.filter((r) => inDateRange(r, startMs, endMs));
   const map = {};
@@ -102,14 +108,16 @@ export async function getQuoteMetricsByBranch(params) {
 }
 
 /**
- * @param {{ startDate?: string, endDate?: string, db: import("@supabase/supabase-js").SupabaseClient }} params
+ * @param {{ startDate?: string, endDate?: string, db: import("@supabase/supabase-js").SupabaseClient, organizationScope?: { organizationId?: string|null, hasOrganizationIdColumn?: boolean } }} params
  */
 export async function getQuoteMetricsByPartner(params) {
   const db = params.db;
   const startMs = params.startDate ? new Date(params.startDate).getTime() : 0;
   const endMs = params.endDate ? new Date(params.endDate).getTime() : Date.now();
-  const { rows, missing } = await safeQuoteHeadersQuery(db, (q) =>
-    q.select("partner_account_id, grand_total, created_at")
+  const { rows, missing } = await safeQuoteHeadersQuery(
+    db,
+    (q) => q.select("partner_account_id, grand_total, created_at"),
+    params.organizationScope
   );
   if (missing) return { ok: true, installed: false, quote_value_by_partner: {} };
   const filtered = rows.filter((r) => inDateRange(r, startMs, endMs));
@@ -147,7 +155,7 @@ export function calculateBidCloseRatio(params) {
 }
 
 /**
- * @param {{ startDate?: string, endDate?: string, db: import("@supabase/supabase-js").SupabaseClient }} params
+ * @param {{ startDate?: string, endDate?: string, db: import("@supabase/supabase-js").SupabaseClient, organizationScope?: { organizationId?: string|null, hasOrganizationIdColumn?: boolean } }} params
  */
 export async function getForecastValueRollup(params) {
   const db = params.db;
@@ -155,7 +163,13 @@ export async function getForecastValueRollup(params) {
   try {
     const startMs = params.startDate ? new Date(params.startDate).getTime() : 0;
     const endMs = params.endDate ? new Date(params.endDate).getTime() : Date.now();
-    const { data, error } = await db.from("quote_forecast_events").select("forecast_value, event_at");
+    let q = db.from("quote_forecast_events").select("forecast_value, event_at");
+    const orgId = params.organizationScope?.organizationId;
+    if (orgId) {
+      const hasFc = await tableHasOrganizationId(db, "quote_forecast_events");
+      if (hasFc) q = q.or(`organization_id.eq.${orgId},organization_id.is.null`);
+    }
+    const { data, error } = await q;
     if (error) throw error;
     const rows = (data || []).filter((r) => {
       const t = new Date(r.event_at || 0).getTime();

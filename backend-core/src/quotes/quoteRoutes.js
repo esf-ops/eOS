@@ -1,6 +1,11 @@
 import express from "express";
 
 import { buildMondayQuotePayload, syncQuoteToMonday } from "../integrations/mondayQuoteSync.js";
+import {
+  mergeRowOrganizationId,
+  resolveOrganizationContext,
+  tableHasOrganizationId
+} from "../organizations/organizationContext.js";
 import { calculateQuote, computePublicConsumerEstimatesByGroup } from "./quoteCalculator.js";
 import { attachQuotePricingAdminApi } from "./quotePricingAdminApi.js";
 import { attachQuotePipelineRoutes } from "./quotePipelineApi.js";
@@ -74,8 +79,25 @@ async function persistQuoteSubmission(db, opts) {
     snapshotToStore,
     estimatesByGroup,
     assignment,
-    publicResponsePayload
+    publicResponsePayload,
+    organizationContext
   } = opts;
+
+  const orgId = organizationContext?.organizationId ? String(organizationContext.organizationId) : null;
+  const orgTables = new Set();
+  if (orgId) {
+    for (const t of [
+      "quote_headers",
+      "quote_line_items",
+      "quote_rooms",
+      "quote_forecast_events",
+      "quote_lead_assignments",
+      "quote_submission_payloads",
+      "quote_monday_sync_log"
+    ]) {
+      if (await tableHasOrganizationId(db, t)) orgTables.add(t);
+    }
+  }
 
   const isPublicConsumer = quoteSource === "public_consumer";
   const primaryRetail =
@@ -115,7 +137,9 @@ async function persistQuoteSubmission(db, opts) {
     created_by: userEmail
   };
 
-  const { data: ins, error: hErr } = await db.from("quote_headers").insert(headerRow).select("id").limit(1);
+  const headerRowIns = mergeRowOrganizationId(headerRow, orgId, orgTables.has("quote_headers"));
+
+  const { data: ins, error: hErr } = await db.from("quote_headers").insert(headerRowIns).select("id").limit(1);
   if (hErr) throw hErr;
   const quoteId = ins?.[0]?.id;
   if (!quoteId) throw new Error("Quote insert returned no id");
@@ -134,7 +158,8 @@ async function persistQuoteSubmission(db, opts) {
         unit_price: ln.unit_price ?? 0,
         line_subtotal: ln.line_subtotal ?? 0,
         sort_order: ln.sort_order ?? idx
-      }));
+      }))
+      .map((r) => mergeRowOrganizationId(r, orgId, orgTables.has("quote_line_items")));
   if (lineRows.length) {
     const { error: lErr } = await db.from("quote_line_items").insert(lineRows);
     if (lErr && !isMissingRelationError(lErr)) throw lErr;
@@ -154,7 +179,7 @@ async function persistQuoteSubmission(db, opts) {
     measurement_source: r.measurementSource || null,
     sort_order: idx,
     metadata: typeof r.metadata === "object" ? r.metadata : {}
-  }));
+  })).map((r) => mergeRowOrganizationId(r, orgId, orgTables.has("quote_rooms")));
   if (roomRows.length) {
     const { error: rErr } = await db.from("quote_rooms").insert(roomRows);
     if (rErr && !isMissingRelationError(rErr)) throw rErr;
@@ -176,21 +201,32 @@ async function persistQuoteSubmission(db, opts) {
     created_by: userEmail
   });
 
-  await db.from("quote_forecast_events").insert({
-    quote_id: quoteId,
-    event_type: isPublicConsumer ? "public_lead_submitted" : "quote_submitted",
-    sales_rep: headerRow.sales_rep,
-    branch: headerRow.branch,
-    partner_account_id: headerRow.partner_account_id,
-    quote_value: headerRow.grand_total,
-    probability_percent: null,
-    forecast_value: headerRow.grand_total,
-    metadata: { quote_source: quoteSource }
-  });
+  await db.from("quote_forecast_events").insert(
+    mergeRowOrganizationId(
+      {
+        quote_id: quoteId,
+        event_type: isPublicConsumer ? "public_lead_submitted" : "quote_submitted",
+        sales_rep: headerRow.sales_rep,
+        branch: headerRow.branch,
+        partner_account_id: headerRow.partner_account_id,
+        quote_value: headerRow.grand_total,
+        probability_percent: null,
+        forecast_value: headerRow.grand_total,
+        metadata: { quote_source: quoteSource }
+      },
+      orgId,
+      orgTables.has("quote_forecast_events")
+    )
+  );
 
   if (isPublicConsumer && assignment) {
     try {
-      await db.from("quote_lead_assignments").insert(buildLeadAssignmentRow({ quoteId, assignmentResult: assignment }));
+      const leadRow = buildLeadAssignmentRow({
+        quoteId,
+        assignmentResult: assignment,
+        organizationId: orgTables.has("quote_lead_assignments") ? orgId : null
+      });
+      await db.from("quote_lead_assignments").insert(leadRow);
     } catch {
       /* optional table */
     }
@@ -198,13 +234,19 @@ async function persistQuoteSubmission(db, opts) {
 
   if (isPublicConsumer) {
     try {
-      await db.from("quote_submission_payloads").insert({
-        quote_id: quoteId,
-        quote_source: "public_consumer",
-        submitted_payload: body,
-        normalized_payload: { areas: body.areas, addOns: body.addOns, engine: body.engine },
-        public_response_payload: publicResponsePayload || null
-      });
+      await db.from("quote_submission_payloads").insert(
+        mergeRowOrganizationId(
+          {
+            quote_id: quoteId,
+            quote_source: "public_consumer",
+            submitted_payload: body,
+            normalized_payload: { areas: body.areas, addOns: body.addOns, engine: body.engine },
+            public_response_payload: publicResponsePayload || null
+          },
+          orgId,
+          orgTables.has("quote_submission_payloads")
+        )
+      );
     } catch {
       /* optional table */
     }
@@ -224,7 +266,8 @@ async function persistQuoteSubmission(db, opts) {
     action: "submit",
     db,
     payload: monPayload,
-    quoteSource
+    quoteSource,
+    organizationId: orgId
   });
 
   return { quoteId, headerRow, mondaySync };
@@ -266,6 +309,7 @@ export function attachQuoteRoutes(app, { requireAuth, requireRole, requireHeadAc
     try {
       const db = supabaseGetter();
       const body = req.body && typeof req.body === "object" ? req.body : {};
+      const organizationContext = await resolveOrganizationContext({ req, supabase: db, mode: "public" });
       const pricingContext = { db };
       const multi = await computePublicConsumerEstimatesByGroup(body, pricingContext);
       const calc = await calculateQuote({ ...body, quoteSource: "public_retail", materialGroup: "Group Promo" }, pricingContext);
@@ -278,6 +322,7 @@ export function attachQuoteRoutes(app, { requireAuth, requireRole, requireHeadAc
         county: body.county,
         state: body.state,
         branch: body.branch,
+        organizationId: organizationContext.organizationId,
         db
       });
 
@@ -305,7 +350,8 @@ export function attachQuoteRoutes(app, { requireAuth, requireRole, requireHeadAc
           snapshotToStore,
           estimatesByGroup: multi.estimates_by_group,
           assignment,
-          publicResponsePayload
+          publicResponsePayload,
+          organizationContext
         });
         quoteId = saved.quoteId;
         mondaySync = saved.mondaySync;
@@ -388,6 +434,7 @@ export function attachQuoteRoutes(app, { requireAuth, requireRole, requireHeadAc
     try {
       const db = supabaseGetter();
       const body = req.body && typeof req.body === "object" ? req.body : {};
+      const organizationContext = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
       const pricingContext = { db };
       const calc = await calculateQuote(body, pricingContext);
       const quoteNumber = String(body.quote_number || "").trim() || generateQuoteNumber();
@@ -405,7 +452,8 @@ export function attachQuoteRoutes(app, { requireAuth, requireRole, requireHeadAc
           snapshotToStore: calc.snapshot,
           estimatesByGroup: null,
           assignment: null,
-          publicResponsePayload: null
+          publicResponsePayload: null,
+          organizationContext
         });
         res.json({ ok: true, quoteId, quoteNumber, totals: calc.totals, snapshot: calc.snapshot });
       } catch (e) {

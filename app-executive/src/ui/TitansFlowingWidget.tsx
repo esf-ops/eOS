@@ -393,7 +393,7 @@ export default function TitansFlowingWidget({ token, recordApi, refreshTick, use
                 <span className="titans-historical-label">Historical Review</span>
               )}
               <span className="titans-brain-pill">
-                {isTodayView ? "Live from eOS Brain" : "Historical from eOS Brain"}
+                {isTodayView ? "Live from eliteOS Brain" : "Historical from eliteOS Brain"}
               </span>
             </div>
             <h2 id="titans-heading" className="titans-title">
@@ -509,7 +509,7 @@ export default function TitansFlowingWidget({ token, recordApi, refreshTick, use
 
         <div className="titans-honesty-note">
           <strong>{futureSkipped ? "Titan/Saw activity signals" : data?.label ?? "Titan/Saw activity signals"}</strong> — These
-          are Moraware/eOS Brain activity and status fields. Validate against Eric&apos;s paper list; they are not equipment
+          are Moraware/eliteOS Brain activity and status fields. Validate against Eric&apos;s paper list; they are not equipment
           sensors.
           {data?.notes?.length ? (
             <ul className="titans-notes-list">
@@ -645,7 +645,7 @@ export default function TitansFlowingWidget({ token, recordApi, refreshTick, use
                             <td>
                               <span
                                 className="titans-sp-machine"
-                                title="Moraware SDK exposes JobActivity.Assignees, but eOS has not confirmed the API path in Brain yet."
+                                title="Moraware SDK exposes JobActivity.Assignees, but eliteOS has not confirmed the API path in Brain yet."
                               >
                                 {row.machineColumnLabel ?? "Resolving"}
                               </span>

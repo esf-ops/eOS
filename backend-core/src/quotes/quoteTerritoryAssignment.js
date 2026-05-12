@@ -23,9 +23,9 @@ function unassigned(reason) {
 }
 
 /**
- * @param {{ zip?: string, city?: string, county?: string, state?: string, branch?: string, db?: { from: Function } }} params
+ * @param {{ zip?: string, city?: string, county?: string, state?: string, branch?: string, organizationId?: string|null, db?: { from: Function } }} params
  */
-export async function assignSalesRepForPublicQuote({ zip, city, county, state, branch, db }) {
+export async function assignSalesRepForPublicQuote({ zip, city, county, state, branch, organizationId, db }) {
   if (!db || typeof db.from !== "function") {
     return unassigned("no_db");
   }
@@ -36,6 +36,12 @@ export async function assignSalesRepForPublicQuote({ zip, city, county, state, b
     rows = Array.isArray(data) ? data : [];
   } catch {
     return unassigned("table_missing_or_error");
+  }
+  if (!rows.length) return unassigned("no_territories");
+
+  const orgId = organizationId ? String(organizationId).trim() : "";
+  if (orgId) {
+    rows = rows.filter((r) => r.organization_id == null || String(r.organization_id) === orgId);
   }
   if (!rows.length) return unassigned("no_territories");
 
@@ -51,7 +57,14 @@ export async function assignSalesRepForPublicQuote({ zip, city, county, state, b
     if (!c.value) continue;
     const matches = rows.filter((r) => norm(r.match_type) === c.type && norm(r.match_value) === c.value);
     if (!matches.length) continue;
-    matches.sort((a, b) => (Number(a.priority) || 100) - (Number(b.priority) || 100));
+    matches.sort((a, b) => {
+      if (orgId) {
+        const as = a.organization_id != null && String(a.organization_id) === orgId ? 0 : 1;
+        const bs = b.organization_id != null && String(b.organization_id) === orgId ? 0 : 1;
+        if (as !== bs) return as - bs;
+      }
+      return (Number(a.priority) || 100) - (Number(b.priority) || 100);
+    });
     const pick = matches[0];
     const territoryMeta = pick.metadata && typeof pick.metadata === "object" && !Array.isArray(pick.metadata) ? { ...pick.metadata } : {};
     return {
@@ -73,11 +86,11 @@ export async function assignSalesRepForPublicQuote({ zip, city, county, state, b
 }
 
 /**
- * @param {{ quoteId: string, assignmentResult: Record<string, unknown> }} params
+ * @param {{ quoteId: string, assignmentResult: Record<string, unknown>, organizationId?: string|null }} params
  */
-export function buildLeadAssignmentRow({ quoteId, assignmentResult }) {
+export function buildLeadAssignmentRow({ quoteId, assignmentResult, organizationId }) {
   const a = assignmentResult || {};
-  return {
+  const row = {
     quote_id: quoteId,
     assignment_source: String(a.assignment_source || "unassigned"),
     assigned_sales_rep: a.assigned_sales_rep ?? null,
@@ -87,4 +100,6 @@ export function buildLeadAssignmentRow({ quoteId, assignmentResult }) {
     confidence: String(a.confidence || "none"),
     metadata: typeof a.metadata === "object" && a.metadata ? a.metadata : {}
   };
+  if (organizationId) row.organization_id = organizationId;
+  return row;
 }

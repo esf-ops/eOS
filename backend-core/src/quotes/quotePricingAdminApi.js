@@ -4,6 +4,13 @@
  */
 import express from "express";
 
+import {
+  getDefaultOrganization,
+  mergeRowOrganizationId,
+  organizationScopeOrFilter,
+  resolveOrganizationContext,
+  tableHasOrganizationId
+} from "../organizations/organizationContext.js";
 import { listSalesDirectoryUsers } from "./salesDirectoryUsers.js";
 import {
   getForecastValueRollup,
@@ -166,12 +173,17 @@ async function endActiveAssignmentsForPartner(db, partnerId) {
   if (error) throw error;
 }
 
-async function clearOtherPublicDefaults(db, exceptId) {
-  const { error } = await db
+async function clearOtherPublicDefaults(db, exceptId, orgId, hasStructureOrgCol) {
+  let q = db
     .from("quote_pricing_structures")
     .update({ is_public_default: false, updated_at: new Date().toISOString() })
     .eq("is_public_default", true)
     .neq("id", exceptId);
+  if (hasStructureOrgCol && orgId) {
+    const filt = organizationScopeOrFilter(orgId);
+    if (filt) q = q.or(filt);
+  }
+  const { error } = await q;
   if (error) throw error;
 }
 
@@ -198,10 +210,17 @@ export function attachQuotePricingAdminApi(app, { requireAuth, requireRole, requ
     }
   });
 
-  app.get("/api/admin/quote-pricing-structures", ...adminStack, async (_req, res) => {
+  app.get("/api/admin/quote-pricing-structures", ...adminStack, async (req, res) => {
     try {
       const db = supabaseGetter();
-      const { data, error } = await db.from("quote_pricing_structures").select("*").order("code");
+      const { organizationId: orgId } = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
+      let q = db.from("quote_pricing_structures").select("*").order("code");
+      if (orgId) {
+        const has = await tableHasOrganizationId(db, "quote_pricing_structures");
+        const filt = has ? organizationScopeOrFilter(orgId) : null;
+        if (filt) q = q.or(filt);
+      }
+      const { data, error } = await q;
       if (error) {
         if (isMissingRelationError(error)) {
           return res.status(503).json({ ok: false, installed: false, rows: [], message: "Quote platform tables not installed." });
@@ -220,6 +239,8 @@ export function attachQuotePricingAdminApi(app, { requireAuth, requireRole, requ
       const id = String(req.params.id || "").trim();
       if (!isUuid(id)) return res.status(400).json({ ok: false, error: "invalid id" });
       const db = supabaseGetter();
+      const { organizationId: orgId } = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
+      const hasStructOrg = await tableHasOrganizationId(db, "quote_pricing_structures");
       const { data, error } = await db.from("quote_pricing_structures").select("*").eq("id", id).limit(1);
       if (error) {
         if (isMissingRelationError(error)) {
@@ -229,6 +250,9 @@ export function attachQuotePricingAdminApi(app, { requireAuth, requireRole, requ
       }
       const row = data?.[0];
       if (!row) return res.status(404).json({ ok: false, error: "pricing structure not found" });
+      if (hasStructOrg && orgId && row.organization_id != null && String(row.organization_id) !== String(orgId)) {
+        return res.status(404).json({ ok: false, error: "pricing structure not found" });
+      }
       const [withCount] = await attachActiveRuleCounts(db, [row]);
       const { data: partnerRows, error: pErr } = await db
         .from("quote_partner_pricing_assignments")
@@ -255,6 +279,8 @@ export function attachQuotePricingAdminApi(app, { requireAuth, requireRole, requ
   app.post("/api/admin/quote-pricing-structures", ...adminStack, jsonParser, async (req, res) => {
     try {
       const db = supabaseGetter();
+      const { organizationId: orgId } = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
+      const hasStructOrg = await tableHasOrganizationId(db, "quote_pricing_structures");
       const b = req.body || {};
       const pricing_mode = String(b.pricing_mode || "custom").trim();
       const retail_markup_percent =
@@ -263,16 +289,20 @@ export function attachQuotePricingAdminApi(app, { requireAuth, requireRole, requ
           : pricing_mode === "public_retail"
             ? 25
             : 0;
-      const row = {
-        name: String(b.name || "").trim() || "Unnamed",
-        code: String(b.code || "").trim() || `STRUCT-${Date.now()}`,
-        description: b.description != null ? String(b.description) : null,
-        pricing_mode,
-        retail_markup_percent,
-        is_public_default: Boolean(b.is_public_default),
-        is_active: b.is_active !== false,
-        metadata: typeof b.metadata === "object" && b.metadata ? b.metadata : {}
-      };
+      const row = mergeRowOrganizationId(
+        {
+          name: String(b.name || "").trim() || "Unnamed",
+          code: String(b.code || "").trim() || `STRUCT-${Date.now()}`,
+          description: b.description != null ? String(b.description) : null,
+          pricing_mode,
+          retail_markup_percent,
+          is_public_default: Boolean(b.is_public_default),
+          is_active: b.is_active !== false,
+          metadata: typeof b.metadata === "object" && b.metadata ? b.metadata : {}
+        },
+        orgId,
+        hasStructOrg && Boolean(orgId)
+      );
       const chk = publicRetailMarkupErrorIfInvalid(row);
       if (!chk.ok) return res.status(400).json({ ok: false, error: chk.error });
       const { data, error } = await db.from("quote_pricing_structures").insert(row).select("*").limit(1);
@@ -286,7 +316,9 @@ export function attachQuotePricingAdminApi(app, { requireAuth, requireRole, requ
         throw error;
       }
       const inserted = data?.[0];
-      if (inserted?.is_public_default) await clearOtherPublicDefaults(db, inserted.id);
+      if (inserted?.is_public_default) {
+        await clearOtherPublicDefaults(db, inserted.id, orgId, hasStructOrg);
+      }
       res.json({ ok: true, row: inserted ?? null });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
@@ -298,6 +330,8 @@ export function attachQuotePricingAdminApi(app, { requireAuth, requireRole, requ
       const id = String(req.params.id || "").trim();
       if (!isUuid(id)) return res.status(400).json({ ok: false, error: "invalid id" });
       const db = supabaseGetter();
+      const { organizationId: orgId } = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
+      const hasStructOrg = await tableHasOrganizationId(db, "quote_pricing_structures");
       const { data: existingRows, error: exErr } = await db.from("quote_pricing_structures").select("*").eq("id", id).limit(1);
       if (exErr) {
         if (isMissingRelationError(exErr)) {
@@ -307,6 +341,14 @@ export function attachQuotePricingAdminApi(app, { requireAuth, requireRole, requ
       }
       const existing = existingRows?.[0];
       if (!existing) return res.status(404).json({ ok: false, error: "pricing structure not found" });
+      if (
+        hasStructOrg &&
+        orgId &&
+        existing.organization_id != null &&
+        String(existing.organization_id) !== String(orgId)
+      ) {
+        return res.status(404).json({ ok: false, error: "pricing structure not found" });
+      }
       const b = req.body || {};
       const patch = { updated_at: new Date().toISOString() };
       if (b.name != null) patch.name = String(b.name).trim() || existing.name;
@@ -328,7 +370,7 @@ export function attachQuotePricingAdminApi(app, { requireAuth, requireRole, requ
         throw error;
       }
       const updated = data?.[0];
-      if (updated?.is_public_default) await clearOtherPublicDefaults(db, id);
+      if (updated?.is_public_default) await clearOtherPublicDefaults(db, id, orgId, hasStructOrg);
       const [withCount] = await attachActiveRuleCounts(db, [updated]);
       res.json({ ok: true, row: withCount });
     } catch (e) {
@@ -339,6 +381,7 @@ export function attachQuotePricingAdminApi(app, { requireAuth, requireRole, requ
   app.get("/api/admin/quote-pricing-rules", ...adminStack, async (req, res) => {
     try {
       const db = supabaseGetter();
+      const { organizationId: orgId } = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
       const sid = String(req.query.pricing_structure_id || "").trim();
       const category = String(req.query.category || "").trim();
       const itemCode = String(req.query.item_code || "").trim();
@@ -347,6 +390,11 @@ export function attachQuotePricingAdminApi(app, { requireAuth, requireRole, requ
       const limit = Math.min(500, Math.max(1, Number.parseInt(String(req.query.limit || "200"), 10) || 200));
 
       let q = db.from("quote_pricing_rules").select("*");
+      if (!sid && orgId) {
+        const has = await tableHasOrganizationId(db, "quote_pricing_rules");
+        const filt = has ? organizationScopeOrFilter(orgId) : null;
+        if (filt) q = q.or(filt);
+      }
       if (sid) {
         if (!isUuid(sid)) return res.status(400).json({ ok: false, error: "invalid pricing_structure_id" });
         q = q.eq("pricing_structure_id", sid);
@@ -399,23 +447,29 @@ export function attachQuotePricingAdminApi(app, { requireAuth, requireRole, requ
   app.post("/api/admin/quote-pricing-rules", ...adminStack, jsonParser, async (req, res) => {
     try {
       const db = supabaseGetter();
+      const { organizationId: orgId } = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
+      const hasRulesOrg = await tableHasOrganizationId(db, "quote_pricing_rules");
       const b = req.body || {};
       const sid = String(b.pricing_structure_id || "").trim();
       if (!isUuid(sid)) return res.status(400).json({ ok: false, error: "pricing_structure_id must be a valid uuid" });
-      const row = {
-        pricing_structure_id: sid,
-        category: String(b.category || "").trim() || "custom",
-        item_code: String(b.item_code || "").trim() || "item",
-        item_name: String(b.item_name || "").trim() || "Item",
-        unit_type: String(b.unit_type || "").trim() || "each",
-        base_cost: b.base_cost != null && b.base_cost !== "" ? Number(b.base_cost) : null,
-        price: b.price != null && b.price !== "" ? Number(b.price) : null,
-        markup_percent: b.markup_percent != null && b.markup_percent !== "" ? Number(b.markup_percent) : null,
-        min_charge: b.min_charge != null && b.min_charge !== "" ? Number(b.min_charge) : null,
-        is_active: b.is_active !== false,
-        metadata: typeof b.metadata === "object" && b.metadata ? b.metadata : {},
-        updated_at: new Date().toISOString()
-      };
+      const row = mergeRowOrganizationId(
+        {
+          pricing_structure_id: sid,
+          category: String(b.category || "").trim() || "custom",
+          item_code: String(b.item_code || "").trim() || "item",
+          item_name: String(b.item_name || "").trim() || "Item",
+          unit_type: String(b.unit_type || "").trim() || "each",
+          base_cost: b.base_cost != null && b.base_cost !== "" ? Number(b.base_cost) : null,
+          price: b.price != null && b.price !== "" ? Number(b.price) : null,
+          markup_percent: b.markup_percent != null && b.markup_percent !== "" ? Number(b.markup_percent) : null,
+          min_charge: b.min_charge != null && b.min_charge !== "" ? Number(b.min_charge) : null,
+          is_active: b.is_active !== false,
+          metadata: typeof b.metadata === "object" && b.metadata ? b.metadata : {},
+          updated_at: new Date().toISOString()
+        },
+        orgId,
+        hasRulesOrg && Boolean(orgId)
+      );
       const { data, error } = await db.from("quote_pricing_rules").insert(row).select("*").limit(1);
       if (error) {
         if (isMissingRelationError(error)) {
@@ -466,10 +520,17 @@ export function attachQuotePricingAdminApi(app, { requireAuth, requireRole, requ
     }
   });
 
-  app.get("/api/admin/quote-partners", ...adminStack, async (_req, res) => {
+  app.get("/api/admin/quote-partners", ...adminStack, async (req, res) => {
     try {
       const db = supabaseGetter();
-      const { data, error } = await db.from("quote_partner_accounts").select("*").order("account_name");
+      const { organizationId: orgId } = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
+      let q = db.from("quote_partner_accounts").select("*").order("account_name");
+      if (orgId) {
+        const has = await tableHasOrganizationId(db, "quote_partner_accounts");
+        const filt = has ? organizationScopeOrFilter(orgId) : null;
+        if (filt) q = q.or(filt);
+      }
+      const { data, error } = await q;
       if (error) {
         if (isMissingRelationError(error)) {
           return res.status(503).json({ ok: false, installed: false, rows: [], message: "Quote platform tables not installed." });
@@ -488,6 +549,8 @@ export function attachQuotePricingAdminApi(app, { requireAuth, requireRole, requ
       const id = String(req.params.id || "").trim();
       if (!isUuid(id)) return res.status(400).json({ ok: false, error: "invalid id" });
       const db = supabaseGetter();
+      const { organizationId: orgId } = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
+      const hasPartnerOrg = await tableHasOrganizationId(db, "quote_partner_accounts");
       const { data, error } = await db.from("quote_partner_accounts").select("*").eq("id", id).limit(1);
       if (error) {
         if (isMissingRelationError(error)) {
@@ -497,6 +560,9 @@ export function attachQuotePricingAdminApi(app, { requireAuth, requireRole, requ
       }
       const row = data?.[0];
       if (!row) return res.status(404).json({ ok: false, error: "partner not found" });
+      if (hasPartnerOrg && orgId && row.organization_id != null && String(row.organization_id) !== String(orgId)) {
+        return res.status(404).json({ ok: false, error: "partner not found" });
+      }
       const [withAsn] = await attachCurrentAssignmentsToPartners(db, [row]);
       res.json({ ok: true, installed: true, row: withAsn });
     } catch (e) {
@@ -507,17 +573,23 @@ export function attachQuotePricingAdminApi(app, { requireAuth, requireRole, requ
   app.post("/api/admin/quote-partners", ...adminStack, jsonParser, async (req, res) => {
     try {
       const db = supabaseGetter();
+      const { organizationId: orgId } = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
+      const hasPartnerOrg = await tableHasOrganizationId(db, "quote_partner_accounts");
       const b = req.body || {};
-      const row = {
-        account_name: String(b.account_name || "").trim() || "Unnamed partner",
-        account_type: String(b.account_type || "dealer").trim() || "dealer",
-        monday_account_id: b.monday_account_id != null ? String(b.monday_account_id).trim() || null : null,
-        moraware_account_id: b.moraware_account_id != null ? String(b.moraware_account_id).trim() || null : null,
-        default_sales_rep: b.default_sales_rep != null ? String(b.default_sales_rep).trim() || null : null,
-        default_branch: b.default_branch != null ? String(b.default_branch).trim() || null : null,
-        is_active: b.is_active !== false,
-        metadata: typeof b.metadata === "object" && b.metadata ? b.metadata : {}
-      };
+      const row = mergeRowOrganizationId(
+        {
+          account_name: String(b.account_name || "").trim() || "Unnamed partner",
+          account_type: String(b.account_type || "dealer").trim() || "dealer",
+          monday_account_id: b.monday_account_id != null ? String(b.monday_account_id).trim() || null : null,
+          moraware_account_id: b.moraware_account_id != null ? String(b.moraware_account_id).trim() || null : null,
+          default_sales_rep: b.default_sales_rep != null ? String(b.default_sales_rep).trim() || null : null,
+          default_branch: b.default_branch != null ? String(b.default_branch).trim() || null : null,
+          is_active: b.is_active !== false,
+          metadata: typeof b.metadata === "object" && b.metadata ? b.metadata : {}
+        },
+        orgId,
+        hasPartnerOrg && Boolean(orgId)
+      );
       const { data, error } = await db.from("quote_partner_accounts").insert(row).select("*").limit(1);
       if (error) {
         if (isMissingRelationError(error)) {
@@ -536,6 +608,20 @@ export function attachQuotePricingAdminApi(app, { requireAuth, requireRole, requ
       const id = String(req.params.id || "").trim();
       if (!isUuid(id)) return res.status(400).json({ ok: false, error: "invalid id" });
       const db = supabaseGetter();
+      const { organizationId: orgId } = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
+      const hasPartnerOrg = await tableHasOrganizationId(db, "quote_partner_accounts");
+      const { data: existingRows, error: exErr } = await db.from("quote_partner_accounts").select("*").eq("id", id).limit(1);
+      if (exErr) {
+        if (isMissingRelationError(exErr)) {
+          return res.status(503).json({ ok: false, installed: false, message: "Quote platform tables not installed." });
+        }
+        throw exErr;
+      }
+      const existing = existingRows?.[0];
+      if (!existing) return res.status(404).json({ ok: false, error: "partner not found" });
+      if (hasPartnerOrg && orgId && existing.organization_id != null && String(existing.organization_id) !== String(orgId)) {
+        return res.status(404).json({ ok: false, error: "partner not found" });
+      }
       const b = req.body || {};
       const patch = { updated_at: new Date().toISOString() };
       if (b.account_name != null) patch.account_name = String(b.account_name).trim();
@@ -623,18 +709,21 @@ export function attachQuotePricingAdminApi(app, { requireAuth, requireRole, requ
       await endActiveAssignmentsForPartner(db, partnerId);
 
       const nowIso = new Date().toISOString();
-      const { data, error } = await db
-        .from("quote_partner_pricing_assignments")
-        .insert({
+      const { organizationId: orgId } = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
+      const hasAsnOrg = await tableHasOrganizationId(db, "quote_partner_pricing_assignments");
+      const insertRow = mergeRowOrganizationId(
+        {
           partner_account_id: partnerId,
           pricing_structure_id,
           assigned_by: userEmail,
           is_active: true,
           starts_at: nowIso,
           metadata: typeof req.body?.metadata === "object" && req.body.metadata ? req.body.metadata : {}
-        })
-        .select("*")
-        .limit(1);
+        },
+        orgId,
+        hasAsnOrg && Boolean(orgId)
+      );
+      const { data, error } = await db.from("quote_partner_pricing_assignments").insert(insertRow).select("*").limit(1);
       if (error) {
         if (isMissingRelationError(error)) {
           return res.status(503).json({ ok: false, installed: false, message: "Quote platform tables not installed." });
@@ -660,12 +749,19 @@ export function attachQuotePricingAdminApi(app, { requireAuth, requireRole, requ
   app.get("/api/admin/quotes", ...adminStack, async (req, res) => {
     try {
       const db = supabaseGetter();
+      const { organizationId: orgId } = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
       const limit = Math.min(100, Math.max(1, Number.parseInt(String(req.query.limit || "50"), 10) || 50));
-      const { data, error } = await db
+      let q = db
         .from("quote_headers")
         .select("id,quote_number,quote_status,quote_source,customer_name,grand_total,sales_rep,branch,created_at")
         .order("created_at", { ascending: false })
         .limit(limit);
+      if (orgId) {
+        const has = await tableHasOrganizationId(db, "quote_headers");
+        const filt = has ? organizationScopeOrFilter(orgId) : null;
+        if (filt) q = q.or(filt);
+      }
+      const { data, error } = await q;
       if (error) {
         if (isMissingRelationError(error)) {
           return res.status(503).json({ ok: false, installed: false, rows: [], message: "Quote platform tables not installed." });
@@ -683,6 +779,8 @@ export function attachQuotePricingAdminApi(app, { requireAuth, requireRole, requ
       const db = supabaseGetter();
       const id = String(req.params.id || "").trim();
       if (!id) return res.status(400).json({ ok: false, error: "id required" });
+      const { organizationId: orgId } = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
+      const hasHeaderOrg = await tableHasOrganizationId(db, "quote_headers");
       const { data: h, error: hErr } = await db.from("quote_headers").select("*").eq("id", id).limit(1);
       if (hErr) {
         if (isMissingRelationError(hErr)) {
@@ -691,11 +789,15 @@ export function attachQuotePricingAdminApi(app, { requireAuth, requireRole, requ
         throw hErr;
       }
       if (!h?.length) return res.status(404).json({ ok: false, error: "quote not found" });
+      const header = h[0];
+      if (hasHeaderOrg && orgId && header.organization_id != null && String(header.organization_id) !== String(orgId)) {
+        return res.status(404).json({ ok: false, error: "quote not found" });
+      }
       const [{ data: lines }, { data: rooms }] = await Promise.all([
         db.from("quote_line_items").select("*").eq("quote_id", id).order("sort_order"),
         db.from("quote_rooms").select("*").eq("quote_id", id).order("sort_order")
       ]);
-      res.json({ ok: true, installed: true, quote: h[0], line_items: lines ?? [], rooms: rooms ?? [] });
+      res.json({ ok: true, installed: true, quote: header, line_items: lines ?? [], rooms: rooms ?? [] });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
     }
@@ -704,23 +806,33 @@ export function attachQuotePricingAdminApi(app, { requireAuth, requireRole, requ
   app.get("/api/admin/quote-analytics/summary", ...adminStack, async (req, res) => {
     try {
       const db = supabaseGetter();
+      const { organizationId: orgId } = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
+      const hasHeaderOrg = orgId ? await tableHasOrganizationId(db, "quote_headers") : false;
+      const organizationScope = { organizationId: orgId, hasOrganizationIdColumn: hasHeaderOrg };
       const startDate = String(req.query.startDate || "").trim() || undefined;
       const endDate = String(req.query.endDate || "").trim() || undefined;
-      const pipeline = await getQuotePipelineSummary({ startDate, endDate, db });
-      const byRep = await getQuoteMetricsBySalesRep({ startDate, endDate, db });
-      const byBranch = await getQuoteMetricsByBranch({ startDate, endDate, db });
-      const byPartner = await getQuoteMetricsByPartner({ startDate, endDate, db });
-      const forecast = await getForecastValueRollup({ startDate, endDate, db });
+      const pipeline = await getQuotePipelineSummary({ startDate, endDate, db, organizationScope });
+      const byRep = await getQuoteMetricsBySalesRep({ startDate, endDate, db, organizationScope });
+      const byBranch = await getQuoteMetricsByBranch({ startDate, endDate, db, organizationScope });
+      const byPartner = await getQuoteMetricsByPartner({ startDate, endDate, db, organizationScope });
+      const forecast = await getForecastValueRollup({ startDate, endDate, db, organizationScope });
       res.json({ ok: true, pipeline, byRep, byBranch, byPartner, forecast });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
     }
   });
 
-  app.get("/api/admin/quote-source-configs", ...adminStack, async (_req, res) => {
+  app.get("/api/admin/quote-source-configs", ...adminStack, async (req, res) => {
     try {
       const db = supabaseGetter();
-      const { data, error } = await db.from("quote_source_configs").select("*").order("quote_source");
+      const { organizationId: orgId } = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
+      let q = db.from("quote_source_configs").select("*").order("quote_source");
+      if (orgId) {
+        const has = await tableHasOrganizationId(db, "quote_source_configs");
+        const filt = has ? organizationScopeOrFilter(orgId) : null;
+        if (filt) q = q.or(filt);
+      }
+      const { data, error } = await q;
       if (error) {
         if (isMissingRelationError(error)) {
           return res.status(503).json({ ok: false, installed: false, rows: [], message: "quote_source_configs not installed." });
@@ -736,7 +848,10 @@ export function attachQuotePricingAdminApi(app, { requireAuth, requireRole, requ
   app.post("/api/admin/quote-source-configs", ...adminStack, jsonParser, async (req, res) => {
     try {
       const db = supabaseGetter();
-      const row = req.body && typeof req.body === "object" ? req.body : {};
+      const { organizationId: orgId } = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
+      const hasCfgOrg = await tableHasOrganizationId(db, "quote_source_configs");
+      const raw = req.body && typeof req.body === "object" ? req.body : {};
+      const row = mergeRowOrganizationId(raw, orgId, hasCfgOrg && Boolean(orgId));
       const { data, error } = await db.from("quote_source_configs").insert(row).select("*").limit(1);
       if (error) {
         if (isMissingRelationError(error)) {
@@ -774,7 +889,13 @@ export function attachQuotePricingAdminApi(app, { requireAuth, requireRole, requ
   app.get("/api/admin/quote-sales-territories", ...adminStack, async (req, res) => {
     try {
       const db = supabaseGetter();
+      const { organizationId: orgId } = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
       let q = db.from("quote_sales_territories").select("*").order("priority", { ascending: true });
+      if (orgId) {
+        const has = await tableHasOrganizationId(db, "quote_sales_territories");
+        const filt = has ? organizationScopeOrFilter(orgId) : null;
+        if (filt) q = q.or(filt);
+      }
       if (String(req.query.activeOnly || "") === "1") {
         q = q.eq("is_active", true);
       }
@@ -794,9 +915,12 @@ export function attachQuotePricingAdminApi(app, { requireAuth, requireRole, requ
   app.post("/api/admin/quote-sales-territories", ...adminStack, jsonParser, async (req, res) => {
     try {
       const db = supabaseGetter();
+      const { organizationId: orgId } = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
+      const hasTerrOrg = await tableHasOrganizationId(db, "quote_sales_territories");
       const chk = validateTerritoryBody(req.body, {});
       if (!chk.ok) return res.status(400).json({ ok: false, error: chk.error });
-      const { data, error } = await db.from("quote_sales_territories").insert(chk.row).select("*").limit(1);
+      const insertRow = mergeRowOrganizationId(chk.row, orgId, hasTerrOrg && Boolean(orgId));
+      const { data, error } = await db.from("quote_sales_territories").insert(insertRow).select("*").limit(1);
       if (error) {
         if (isMissingRelationError(error)) {
           return res.status(503).json({ ok: false, installed: false, message: "quote_sales_territories not installed." });
@@ -814,6 +938,8 @@ export function attachQuotePricingAdminApi(app, { requireAuth, requireRole, requ
       const id = String(req.params.id || "").trim();
       if (!isUuid(id)) return res.status(400).json({ ok: false, error: "invalid id" });
       const db = supabaseGetter();
+      const { organizationId: orgId } = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
+      const hasTerrOrg = await tableHasOrganizationId(db, "quote_sales_territories");
       const { data: existingRows, error: exErr } = await db.from("quote_sales_territories").select("*").eq("id", id).limit(1);
       if (exErr) {
         if (isMissingRelationError(exErr)) {
@@ -823,6 +949,9 @@ export function attachQuotePricingAdminApi(app, { requireAuth, requireRole, requ
       }
       const existing = existingRows?.[0];
       if (!existing) return res.status(404).json({ ok: false, error: "not found" });
+      if (hasTerrOrg && orgId && existing.organization_id != null && String(existing.organization_id) !== String(orgId)) {
+        return res.status(404).json({ ok: false, error: "not found" });
+      }
       const raw = req.body || {};
       const body = { ...raw };
       if (raw.metadata !== undefined) {
@@ -848,7 +977,24 @@ export function attachQuotePricingAdminApi(app, { requireAuth, requireRole, requ
     }
   });
 
+  app.get("/api/admin/saas-foundation-status", ...adminStack, async (req, res) => {
+    try {
+      const db = supabaseGetter();
+      const orgCtx = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
+      const defaultOrg = await getDefaultOrganization(db);
+      res.json({
+        ok: true,
+        current_organization_display_name: orgCtx.displayName || defaultOrg?.display_name || "Elite Stone Fabrication",
+        current_organization_key: orgCtx.organizationKey || defaultOrg?.organization_key || null,
+        saas_foundation_installed: Boolean(defaultOrg?.id),
+        warnings: orgCtx.warnings || []
+      });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
   console.log(
-    "[quote-pricing-admin] mounted sales-users, quote-pricing-structures*, quote-pricing-rules*, quote-partners*, pricing-assignment, quotes*, quote-analytics/summary, quote-source-configs*, quote-sales-territories*"
+    "[quote-pricing-admin] mounted sales-users, quote-pricing-structures*, quote-pricing-rules*, quote-partners*, pricing-assignment, quotes*, quote-analytics/summary, quote-source-configs*, quote-sales-territories*, saas-foundation-status"
   );
 }

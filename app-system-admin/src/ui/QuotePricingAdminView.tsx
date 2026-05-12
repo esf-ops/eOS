@@ -14,7 +14,7 @@ export default function QuotePricingAdminView({ token }: { token: string }) {
           Sales territories
         </button>
       </div>
-      {tab === "overview" ? <QuotePricingAdminPlaceholder /> : <QuoteTerritoriesAdmin token={token} />}
+      {tab === "overview" ? <QuotePricingAdminPlaceholder token={token} /> : <QuoteTerritoriesAdmin token={token} />}
     </div>
   );
 }

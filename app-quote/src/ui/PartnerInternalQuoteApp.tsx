@@ -524,7 +524,7 @@ export default function PartnerInternalQuoteApp() {
       }
 
       if (!sessionToken) {
-        setSubmitMsg("Sign in to save a partner/internal quote to eOS. Below is a preview of the data we would send — nothing is stored yet.");
+        setSubmitMsg("Sign in to save a partner/internal quote to eliteOS. Below is a preview of the data we would send — nothing is stored yet.");
         setSubmitPreview(JSON.stringify({ ...payload, _demo: true }, null, 2));
         return;
       }
@@ -654,7 +654,7 @@ export default function PartnerInternalQuoteApp() {
           { id: "manual_sqft" as const, title: "I know my square footage", sub: "Fastest if you already have countertop and backsplash sf." },
           { id: "rapid_linear" as const, title: "I know my cabinet runs", sub: "Wall cabinets in linear feet + optional island." },
           { id: "room_by_room" as const, title: "Room-by-room / advanced", sub: "Multiple rooms, materials, and add-ons like the ESF prototype." },
-          { id: "upload_plans" as const, title: "Upload plans / AI takeoff", sub: "Coming soon — upload drawings and let eOS prepare measurements for review." },
+          { id: "upload_plans" as const, title: "Upload plans / AI takeoff", sub: "Coming soon — upload drawings and let eliteOS prepare measurements for review." },
           { id: "visualize" as const, title: "Visualize", sub: "Coming soon — build a simple kitchen layout tied directly to your quote." }
         ] as const
       ).map((c) => ({ ...c, disabled: c.id === "upload_plans" || c.id === "visualize" })),
@@ -682,7 +682,7 @@ export default function PartnerInternalQuoteApp() {
         <p className="status-strip-main">
           {liveApi ? (
             <>
-              <span className="pill pill-live">Live API</span> Signed in — calculations use eOS when available.
+              <span className="pill pill-live">Live API</span> Signed in — calculations use eliteOS when available.
             </>
           ) : (
             <>
@@ -692,8 +692,8 @@ export default function PartnerInternalQuoteApp() {
         </p>
         <p className="status-strip-sub">
           {liveApi
-            ? "Live quote saving and tracking use your configured eOS Brain / Supabase project."
-            : "This preview can calculate sample quotes locally. Live quote saving and tracking will connect to eOS Brain / Supabase when production is configured."}
+            ? "Live quote saving and tracking use your configured eliteOS Brain / Supabase project."
+            : "This preview can calculate sample quotes locally. Live quote saving and tracking will connect to eliteOS Brain / Supabase when production is configured."}
         </p>
         <p className="status-strip-meta" aria-label="Backend base URL">
           {backendHint}
@@ -705,7 +705,7 @@ export default function PartnerInternalQuoteApp() {
           <section className="card prototype-scope-banner">
             <h2>Combined quote prototype</h2>
             <p className="muted" style={{ marginTop: 0 }}>
-              This head is a <strong>measurement and pricing lab</strong> for eOS. Production will split into{" "}
+              This head is a <strong>measurement and pricing lab</strong> for eliteOS. Production will split into{" "}
               <strong>public consumer</strong>, <strong>internal</strong>, and <strong>partner</strong> apps — one shared
               quote brain, different UX and permissions. See{" "}
               <code>docs/quote-platform/three-head-quote-architecture.md</code> and{" "}
@@ -749,7 +749,7 @@ export default function PartnerInternalQuoteApp() {
             <section className="card">
               <h2>Demo mode active</h2>
               <p className="muted">
-                This preview can calculate sample quotes locally. Live quote saving and tracking will connect to eOS
+                This preview can calculate sample quotes locally. Live quote saving and tracking will connect to eliteOS
                 Brain / Supabase when production is configured.
               </p>
             </section>
@@ -1771,7 +1771,7 @@ export default function PartnerInternalQuoteApp() {
 
           <section className="card">
             <h2>Save quote</h2>
-            {submitMsg ? <p>{submitMsg}</p> : <p className="muted">Submit saves to eOS when you’re signed in and quote tables are installed.</p>}
+            {submitMsg ? <p>{submitMsg}</p> : <p className="muted">Submit saves to eliteOS when you’re signed in and quote tables are installed.</p>}
             {submitPreview ? <pre className="preview">{submitPreview}</pre> : null}
           </section>
 
@@ -1782,7 +1782,7 @@ export default function PartnerInternalQuoteApp() {
                 Measurement UX from the <strong>ESF Quoting Tool v1.01</strong> prototype is being ported into structured,
                 testable modules — not replaced by a single sqft shortcut long term.
               </li>
-              <li>Pricing is moving into Supabase and the eOS Brain — structures and rules replace static HTML spreadsheets.</li>
+              <li>Pricing is moving into Supabase and the eliteOS Brain — structures and rules replace static HTML spreadsheets.</li>
               <li>
                 <strong>Public retail</strong> protects dealers with at least <strong>25%+</strong> markup on the economics
                 the calculator uses.
@@ -1906,7 +1906,7 @@ export default function PartnerInternalQuoteApp() {
         </aside>
       </div>
 
-      <footer className="footer">eOS Quote · Elite Stone Fabrication · {new Date().getFullYear()}</footer>
+      <footer className="footer">eliteOS Quote · Elite Stone Fabrication · {new Date().getFullYear()}</footer>
     </div>
   );
 }

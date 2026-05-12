@@ -463,7 +463,7 @@ export default function App() {
       <div className="shell">
         <div className="topbar">
           <div>
-            <strong>eOS · System Admin</strong>
+            <strong>eliteOS · System Admin</strong>
             <div className="muted">Governance & user access foundation</div>
           </div>
         </div>
@@ -503,7 +503,7 @@ export default function App() {
     <div className="shell">
       <div className="topbar">
         <div>
-          <strong>eOS · System Admin</strong>
+          <strong>eliteOS · System Admin</strong>
           <div className="muted">{me?.user?.email} · session active</div>
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>

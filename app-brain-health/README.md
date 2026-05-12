@@ -1,6 +1,6 @@
 ## app-brain-health
 
-Protected eOS Head: **Brain Health / Sync Admin**.
+Protected eliteOS Head: **Brain Health / Sync Admin**.
 
 ### Setup
 
