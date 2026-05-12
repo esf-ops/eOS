@@ -18,6 +18,7 @@ import {
 } from "./admin/systemAdminUserManagement.js";
 import { attachSalesAccountMappingAdminRoutes } from "./admin/salesAccountMappingAdmin.js";
 import { attachIdentityResolutionAdminRoutes } from "./admin/identityResolutionAdmin.js";
+import { attachQuoteRoutes } from "./quotes/quoteRoutes.js";
 import { buildMeHeadsPayload } from "./me/launcherHeads.js";
 import { buildTitansTodayPayload, parseTitansTodayQuery } from "./titans/titansToday.js";
 import { attachSalesHeadRoutes } from "./sales/salesHead.js";
@@ -932,6 +933,13 @@ attachIdentityResolutionAdminRoutes(app, {
   getSupabase: supabaseServerClient
 });
 
+attachQuoteRoutes(app, {
+  requireAuth,
+  requireRole,
+  requireHeadAccess,
+  getSupabase: supabaseServerClient
+});
+
 app.post("/api/auth/log-login", requireAuth(), express.json(), async (req, res) => {
   try {
     await logLoginEvent({ user: req.user, eventType: "login", metadata: req.body ?? null, req });
@@ -1336,6 +1344,15 @@ app.listen(port, () => {
   console.log("- GET /api/admin/sales-account-mapping/audit-history");
   console.log("- GET /api/admin/identity-resolution/schema-health");
   console.log("- GET /api/admin/identity-resolution/summary");
+  console.log("- POST /api/quote/calculate");
+  console.log("- POST /api/quote/submit");
+  console.log("- GET /api/admin/quote-pricing-structures");
+  console.log("- POST /api/admin/quote-pricing-structures");
+  console.log("- GET /api/admin/quote-partners");
+  console.log("- POST /api/admin/quote-partners/:id/pricing-assignment");
+  console.log("- GET /api/admin/quotes");
+  console.log("- GET /api/admin/quotes/:id");
+  console.log("- GET /api/admin/quote-analytics/summary");
   console.log("- GET /api/admin/reference");
   console.log("- GET /api/admin/user-management/schema-health");
   console.log("- POST /api/admin/users/invite");
