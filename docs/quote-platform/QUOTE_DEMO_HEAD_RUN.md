@@ -43,6 +43,8 @@ VITE_SUPABASE_ANON_KEY=YOUR_ANON_KEY
 
 **Public consumer (no sign-in):** when the backend is running, **Public retail** mode in `app-quote` calls `POST /api/public-quote/calculate` and can submit leads via `POST /api/public-quote/submit-measurements` (see `docs/quote-platform/three-head-quote-architecture.md`). Apply `backend-core/supabase/eos_quote_public_internal_partner_foundation.sql` for territory and payload audit tables.
 
+**Monday.com (optional):** to create a board item on each successful public submit, configure `MONDAY_API_TOKEN` and `MONDAY_PUBLIC_QUOTES_BOARD_ID` on the server. See **`docs/quote-platform/monday-public-quotes-setup.md`** for column mapping env vars and the `inspectMondayBoardColumns.js` helper.
+
 ## Production build
 
 ```bash

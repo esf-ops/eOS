@@ -219,7 +219,7 @@ async function persistQuoteSubmission(db, opts) {
         : null
     }
   );
-  await syncQuoteToMonday({
+  const mondaySync = await syncQuoteToMonday({
     quoteId,
     action: "submit",
     db,
@@ -227,7 +227,7 @@ async function persistQuoteSubmission(db, opts) {
     quoteSource
   });
 
-  return { quoteId, headerRow };
+  return { quoteId, headerRow, mondaySync };
 }
 
 /**
@@ -293,6 +293,7 @@ export function attachQuoteRoutes(app, { requireAuth, requireRole, requireHeadAc
       };
 
       let quoteId;
+      let mondaySync = null;
       try {
         const saved = await persistQuoteSubmission(db, {
           body,
@@ -307,6 +308,7 @@ export function attachQuoteRoutes(app, { requireAuth, requireRole, requireHeadAc
           publicResponsePayload
         });
         quoteId = saved.quoteId;
+        mondaySync = saved.mondaySync;
       } catch (e) {
         if (isMissingRelationError(e)) {
           return res.status(503).json({
@@ -318,6 +320,11 @@ export function attachQuoteRoutes(app, { requireAuth, requireRole, requireHeadAc
         throw e;
       }
 
+      const warningsOut = [...(multi.warnings || [])];
+      if (mondaySync?.warning) {
+        warningsOut.push(mondaySync.warning);
+      }
+
       res.json({
         ok: true,
         quote_source: "public_consumer",
@@ -327,7 +334,10 @@ export function attachQuoteRoutes(app, { requireAuth, requireRole, requireHeadAc
         branch_display: assignment.branch || "Elite team",
         sales_rep: assignment.assigned_sales_rep || null,
         estimates_by_group: multi.estimates_by_group,
-        warnings: multi.warnings || []
+        warnings: warningsOut,
+        monday_item_id: mondaySync?.monday_item_id || null,
+        monday_board_id: mondaySync?.monday_board_id || null,
+        monday_sync_status: mondaySync?.status || null
       });
     } catch (e) {
       if (isMissingRelationError(e)) {

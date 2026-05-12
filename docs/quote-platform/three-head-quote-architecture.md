@@ -45,7 +45,7 @@ This document is the **product and platform contract** before Cloudflare/Vercel 
 |--------|------|
 | **`quoteCalculator.js`** | Authoritative calculation from inputs + resolved pricing structure and rules; builds immutable snapshots. |
 | **`quoteAnalytics.js`** | Read models over `quote_headers` / events for pipeline and KPIs. |
-| **`mondayQuoteSync.js`** | **Server-side only** staging/logging; live Monday GraphQL only when env is present and code path is explicitly enabled. Board selection by **quote source**. |
+| **`mondayQuoteSync.js`** | **Server-side only** — builds payload, writes `quote_monday_sync_log`, and optionally **creates a Monday item** via GraphQL when `MONDAY_API_TOKEN` and the board ID env for the quote source are set. See **`docs/quote-platform/monday-public-quotes-setup.md`**. |
 | **`quotePricingAdminApi.js`** | Admin CRUD for structures, rules, partners, assignments; extends toward source configs and territories. |
 | **Future: AI takeoff services** | Ingest plans → measurement candidates → review workflow; writes `quote_measurement_sources` / takeoff tables. |
 | **Future: Visualize / layout services** | Layout tied to quote scope; `quote_visual_layouts` and related tables. |
