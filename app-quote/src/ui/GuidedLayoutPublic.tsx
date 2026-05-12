@@ -49,7 +49,7 @@ export default function GuidedLayoutPublic({
   const preview = computeGuidedSimpleAreas(guidedPreset, guidedSimpleForm);
   return (
     <div className="guided-layout">
-      <h3 className="wizard-step-sub">Pick the shape that looks closest to your kitchen</h3>
+      <h3 className="wizard-step-sub">Which layout is closest to your kitchen?</h3>
       <div className="preset-card-grid">
         {PRESETS.map((c) => (
           <button
