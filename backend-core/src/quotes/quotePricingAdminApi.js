@@ -4,6 +4,7 @@
  */
 import express from "express";
 
+import { listSalesDirectoryUsers } from "./salesDirectoryUsers.js";
 import {
   getForecastValueRollup,
   getQuoteMetricsByBranch,
@@ -42,7 +43,16 @@ function validateTerritoryBody(body, partial = {}) {
       : partial.assigned_sales_rep_email ?? null,
     priority: b.priority != null && b.priority !== "" ? Number(b.priority) : partial.priority ?? 100,
     is_active: b.is_active !== undefined ? Boolean(b.is_active) : partial.is_active !== undefined ? partial.is_active : true,
-    metadata: typeof b.metadata === "object" && b.metadata ? b.metadata : partial.metadata && typeof partial.metadata === "object" ? partial.metadata : {}
+    metadata: (() => {
+      const base =
+        partial.metadata && typeof partial.metadata === "object" && !Array.isArray(partial.metadata) ? { ...partial.metadata } : {};
+      if (b.metadata !== undefined) {
+        const incoming =
+          b.metadata && typeof b.metadata === "object" && !Array.isArray(b.metadata) ? { ...b.metadata } : {};
+        return { ...base, ...incoming };
+      }
+      return Object.keys(base).length ? base : {};
+    })()
   };
   if (!Number.isFinite(row.priority)) row.priority = 100;
   return { ok: true, row };
@@ -173,6 +183,20 @@ export function attachQuotePricingAdminApi(app, { requireAuth, requireRole, requ
   const headAccessSystemAdmin = requireHeadAccess("system_admin", { getSupabase });
   const supabaseGetter = () => getSupabase();
   const adminStack = [requireAuth(), requireRole(["admin"]), headAccessSystemAdmin];
+
+  /**
+   * Active sales-eligible users for assignment dropdowns (territories admin, future partner owner).
+   * Internal quote tooling should call this same route. Not public.
+   */
+  app.get("/api/admin/sales-users", ...adminStack, async (req, res) => {
+    try {
+      const db = supabaseGetter();
+      const users = await listSalesDirectoryUsers(db, { warn: (o) => console.warn(o) });
+      res.json({ ok: true, users });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
 
   app.get("/api/admin/quote-pricing-structures", ...adminStack, async (_req, res) => {
     try {
@@ -799,7 +823,14 @@ export function attachQuotePricingAdminApi(app, { requireAuth, requireRole, requ
       }
       const existing = existingRows?.[0];
       if (!existing) return res.status(404).json({ ok: false, error: "not found" });
-      const merged = { ...existing, ...(req.body || {}) };
+      const raw = req.body || {};
+      const body = { ...raw };
+      if (raw.metadata !== undefined) {
+        const em = existing.metadata && typeof existing.metadata === "object" && !Array.isArray(existing.metadata) ? { ...existing.metadata } : {};
+        const bm = raw.metadata && typeof raw.metadata === "object" && !Array.isArray(raw.metadata) ? { ...raw.metadata } : {};
+        body.metadata = { ...em, ...bm };
+      }
+      const merged = { ...existing, ...body };
       const chk = validateTerritoryBody(merged, existing);
       if (!chk.ok) return res.status(400).json({ ok: false, error: chk.error });
       const patch = { ...chk.row, updated_at: new Date().toISOString() };
@@ -818,6 +849,6 @@ export function attachQuotePricingAdminApi(app, { requireAuth, requireRole, requ
   });
 
   console.log(
-    "[quote-pricing-admin] mounted quote-pricing-structures*, quote-pricing-rules*, quote-partners*, pricing-assignment, quotes*, quote-analytics/summary, quote-source-configs*, quote-sales-territories*"
+    "[quote-pricing-admin] mounted sales-users, quote-pricing-structures*, quote-pricing-rules*, quote-partners*, pricing-assignment, quotes*, quote-analytics/summary, quote-source-configs*, quote-sales-territories*"
   );
 }

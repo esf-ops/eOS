@@ -18,6 +18,13 @@ type PipelineRow = Record<string, unknown> & {
   monday_sync?: { status?: string; created_at?: string } | null;
 };
 
+type SalesUser = {
+  user_id: string;
+  full_name: string;
+  email: string;
+  branch?: string | null;
+};
+
 type Metrics = {
   total_open_quote_value?: number;
   new_quotes_today?: number;
@@ -30,6 +37,29 @@ type Metrics = {
 };
 
 const STATUS_OPTIONS = ["", "lead_submitted", "reviewing", "contacted", "quoted", "won", "lost", "archived", "draft", "submitted"];
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isUuid(s: string) {
+  return UUID_RE.test(String(s || "").trim());
+}
+
+function deriveRepPickFromQuote(quote: Record<string, unknown> | null | undefined, users: SalesUser[]): string {
+  if (!quote) return "__manual__";
+  const la = (quote.lead_assignments as Array<Record<string, unknown>>) || [];
+  if (!la.length) return "__manual__";
+  const latest = la[0];
+  const meta = latest?.metadata && typeof latest.metadata === "object" ? (latest.metadata as Record<string, unknown>) : {};
+  const uid = String(meta.assigned_sales_rep_user_id ?? "").trim();
+  if (uid && isUuid(uid) && users.some((u) => u.user_id === uid)) return uid;
+  const em = String(latest.assigned_sales_rep_email ?? "").trim().toLowerCase();
+  if (em) {
+    const hit = users.find((u) => u.email.toLowerCase() === em);
+    if (hit) return hit.user_id;
+  }
+  return "__manual__";
+}
 
 function money(n: unknown) {
   const x = Number(n);
@@ -63,9 +93,11 @@ export default function QuotePipelinePanel({ token }: { token: string }) {
   const [timeline, setTimeline] = useState<Record<string, unknown> | null>(null);
   const [detailBusy, setDetailBusy] = useState(false);
   const [statusPick, setStatusPick] = useState("reviewing");
+  const [salesUsers, setSalesUsers] = useState<SalesUser[]>([]);
   const [assignRep, setAssignRep] = useState("");
   const [assignEmail, setAssignEmail] = useState("");
   const [assignBranch, setAssignBranch] = useState("");
+  const [assignRepPick, setAssignRepPick] = useState("__manual__");
   const [actionMsg, setActionMsg] = useState<string | null>(null);
 
   const queryString = useMemo(() => {
@@ -106,6 +138,21 @@ export default function QuotePipelinePanel({ token }: { token: string }) {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const su = (await apiFetch("/api/quotes/pipeline/sales-users", { token })) as { users?: SalesUser[] };
+        if (!cancelled) setSalesUsers(su.users ?? []);
+      } catch {
+        if (!cancelled) setSalesUsers([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
   const openDetail = useCallback(
     async (id: string) => {
       setSelectedId(id);
@@ -114,23 +161,38 @@ export default function QuotePipelinePanel({ token }: { token: string }) {
       setDetailBusy(true);
       setActionMsg(null);
       try {
+        let users = salesUsers;
+        if (!users.length) {
+          try {
+            const su = (await apiFetch("/api/quotes/pipeline/sales-users", { token })) as { users?: SalesUser[] };
+            users = su.users ?? [];
+            setSalesUsers(users);
+          } catch {
+            users = [];
+          }
+        }
         const [d, t] = await Promise.all([
           apiFetch(`/api/quotes/pipeline/${id}`, { token }) as Promise<{ quote?: Record<string, unknown> }>,
           apiFetch(`/api/quotes/pipeline/${id}/timeline`, { token }) as Promise<Record<string, unknown>>
         ]);
-        setDetail(d.quote ?? null);
+        const quote = d.quote ?? null;
+        setDetail(quote);
         setTimeline(t);
-        const h = d.quote?.header as Record<string, unknown> | undefined;
+        const h = quote?.header as Record<string, unknown> | undefined;
         setStatusPick(String(h?.quote_status || "reviewing"));
         setAssignRep(String(h?.sales_rep || ""));
         setAssignBranch(String(h?.branch || ""));
+        const la = (quote?.lead_assignments as Array<Record<string, unknown>>) || [];
+        const latest = la[0];
+        setAssignEmail(String(latest?.assigned_sales_rep_email ?? "").trim());
+        setAssignRepPick(deriveRepPickFromQuote(quote, users));
       } catch (e: unknown) {
         setActionMsg(e instanceof ApiError ? e.message : String(e));
       } finally {
         setDetailBusy(false);
       }
     },
-    [token]
+    [token, salesUsers]
   );
 
   const patchStatus = async () => {
@@ -154,15 +216,19 @@ export default function QuotePipelinePanel({ token }: { token: string }) {
     if (!selectedId) return;
     setActionMsg(null);
     try {
+      const body: Record<string, unknown> = {
+        sales_rep: assignRep.trim(),
+        sales_rep_email: assignEmail.trim(),
+        branch: assignBranch.trim(),
+        assignment_source: assignRepPick !== "__manual__" && isUuid(assignRepPick) ? "user_profile" : "manual"
+      };
+      if (assignRepPick !== "__manual__" && isUuid(assignRepPick)) {
+        body.assigned_sales_rep_user_id = assignRepPick;
+      }
       await apiFetch(`/api/quotes/pipeline/${selectedId}/assign`, {
         token,
         method: "PATCH",
-        body: {
-          sales_rep: assignRep.trim(),
-          sales_rep_email: assignEmail.trim(),
-          branch: assignBranch.trim(),
-          assignment_source: "manual"
-        }
+        body
       });
       setActionMsg("Assignment saved.");
       await load();
@@ -349,12 +415,48 @@ export default function QuotePipelinePanel({ token }: { token: string }) {
               </div>
               <div className="qp-actions">
                 <label>
+                  Salesperson (directory)
+                  <select
+                    value={assignRepPick}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setAssignRepPick(v);
+                      if (v === "__manual__") return;
+                      const u = salesUsers.find((x) => x.user_id === v);
+                      if (u) {
+                        setAssignRep(u.full_name);
+                        setAssignEmail(u.email);
+                        if (u.branch) setAssignBranch(String(u.branch));
+                      }
+                    }}
+                  >
+                    <option value="__manual__">Unmatched / manual</option>
+                    {salesUsers.map((u) => (
+                      <option key={u.user_id} value={u.user_id}>
+                        {u.full_name} ({u.email})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
                   Sales rep
-                  <input value={assignRep} onChange={(e) => setAssignRep(e.target.value)} />
+                  <input
+                    value={assignRep}
+                    onChange={(e) => {
+                      setAssignRep(e.target.value);
+                      setAssignRepPick("__manual__");
+                    }}
+                  />
                 </label>
                 <label>
                   Rep email
-                  <input value={assignEmail} onChange={(e) => setAssignEmail(e.target.value)} />
+                  <input
+                    value={assignEmail}
+                    onChange={(e) => {
+                      setAssignEmail(e.target.value);
+                      setAssignRepPick("__manual__");
+                    }}
+                  />
                 </label>
                 <label>
                   Branch

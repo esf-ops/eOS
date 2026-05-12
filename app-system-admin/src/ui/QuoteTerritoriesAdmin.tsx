@@ -11,15 +11,44 @@ type Territory = Record<string, unknown> & {
   assigned_sales_rep_email?: string | null;
   priority?: number;
   is_active?: boolean;
+  metadata?: Record<string, unknown> | null;
+};
+
+type SalesUser = {
+  user_id: string;
+  full_name: string;
+  email: string;
+  branch?: string | null;
 };
 
 const MATCH_TYPES = ["zip", "city", "county", "state", "branch", "manual"];
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isUuid(s: string) {
+  return UUID_RE.test(String(s || "").trim());
+}
+
+function deriveRepPick(r: Territory, users: SalesUser[]): string {
+  const md = r.metadata && typeof r.metadata === "object" ? r.metadata : {};
+  const uid = String(md.assigned_sales_rep_user_id ?? "").trim();
+  if (uid && isUuid(uid) && users.some((u) => u.user_id === uid)) return uid;
+  const em = String(r.assigned_sales_rep_email ?? "").trim().toLowerCase();
+  if (em) {
+    const hit = users.find((u) => u.email.toLowerCase() === em);
+    if (hit) return hit.user_id;
+  }
+  return "__manual__";
+}
+
 export default function QuoteTerritoriesAdmin({ token }: { token: string }) {
   const [rows, setRows] = useState<Territory[]>([]);
+  const [salesUsers, setSalesUsers] = useState<SalesUser[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingRow, setEditingRow] = useState<Territory | null>(null);
 
   const emptyForm = {
     territory_name: "",
@@ -28,6 +57,7 @@ export default function QuoteTerritoriesAdmin({ token }: { token: string }) {
     branch: "",
     assigned_sales_rep: "",
     assigned_sales_rep_email: "",
+    repPick: "__manual__" as string,
     priority: "100",
     is_active: true
   };
@@ -37,8 +67,12 @@ export default function QuoteTerritoriesAdmin({ token }: { token: string }) {
     setBusy(true);
     setError(null);
     try {
-      const j = (await apiFetch("/api/admin/quote-sales-territories", { token })) as { rows?: Territory[] };
-      setRows(j.rows ?? []);
+      const [terr, su] = await Promise.all([
+        apiFetch("/api/admin/quote-sales-territories", { token }) as Promise<{ rows?: Territory[] }>,
+        apiFetch("/api/admin/sales-users", { token }) as Promise<{ ok?: boolean; users?: SalesUser[] }>
+      ]);
+      setRows(terr.rows ?? []);
+      setSalesUsers(su.users ?? []);
     } catch (e: unknown) {
       setError(e instanceof ApiError ? e.message : String(e));
     } finally {
@@ -52,6 +86,7 @@ export default function QuoteTerritoriesAdmin({ token }: { token: string }) {
 
   const startEdit = (r: Territory) => {
     setEditingId(r.id);
+    setEditingRow(r);
     setForm({
       territory_name: String(r.territory_name || ""),
       match_type: String(r.match_type || "zip"),
@@ -59,6 +94,7 @@ export default function QuoteTerritoriesAdmin({ token }: { token: string }) {
       branch: String(r.branch ?? ""),
       assigned_sales_rep: String(r.assigned_sales_rep ?? ""),
       assigned_sales_rep_email: String(r.assigned_sales_rep_email ?? ""),
+      repPick: deriveRepPick(r, salesUsers),
       priority: String(r.priority ?? 100),
       is_active: r.is_active !== false
     });
@@ -66,6 +102,7 @@ export default function QuoteTerritoriesAdmin({ token }: { token: string }) {
 
   const cancelEdit = () => {
     setEditingId(null);
+    setEditingRow(null);
     setForm(emptyForm);
   };
 
@@ -73,6 +110,17 @@ export default function QuoteTerritoriesAdmin({ token }: { token: string }) {
     setBusy(true);
     setError(null);
     try {
+      const prevMeta =
+        editingRow?.metadata && typeof editingRow.metadata === "object" && !Array.isArray(editingRow.metadata)
+          ? { ...editingRow.metadata }
+          : {};
+      const meta: Record<string, unknown> = { ...prevMeta };
+      if (form.repPick !== "__manual__" && isUuid(form.repPick)) {
+        meta.assigned_sales_rep_user_id = form.repPick;
+      } else {
+        delete meta.assigned_sales_rep_user_id;
+      }
+
       const body = {
         territory_name: form.territory_name.trim(),
         match_type: form.match_type,
@@ -81,7 +129,8 @@ export default function QuoteTerritoriesAdmin({ token }: { token: string }) {
         assigned_sales_rep: form.assigned_sales_rep.trim() || null,
         assigned_sales_rep_email: form.assigned_sales_rep_email.trim() || null,
         priority: Number.parseInt(form.priority, 10) || 100,
-        is_active: form.is_active
+        is_active: form.is_active,
+        metadata: meta
       };
       if (editingId) {
         await apiFetch(`/api/admin/quote-sales-territories/${editingId}`, { token, method: "PATCH", body });
@@ -141,12 +190,48 @@ export default function QuoteTerritoriesAdmin({ token }: { token: string }) {
             <input value={form.branch} onChange={(e) => setForm((f) => ({ ...f, branch: e.target.value }))} />
           </label>
           <label>
-            Salesperson
-            <input value={form.assigned_sales_rep} onChange={(e) => setForm((f) => ({ ...f, assigned_sales_rep: e.target.value }))} />
+            Salesperson (directory)
+            <select
+              value={form.repPick}
+              onChange={(e) => {
+                const v = e.target.value;
+                setForm((f) => {
+                  if (v === "__manual__") {
+                    return { ...f, repPick: "__manual__" };
+                  }
+                  const u = salesUsers.find((x) => x.user_id === v);
+                  if (!u) return { ...f, repPick: v };
+                  return {
+                    ...f,
+                    repPick: v,
+                    assigned_sales_rep: u.full_name,
+                    assigned_sales_rep_email: u.email,
+                    branch: u.branch ? String(u.branch) : f.branch
+                  };
+                });
+              }}
+            >
+              <option value="__manual__">Unmatched / manual</option>
+              {salesUsers.map((u) => (
+                <option key={u.user_id} value={u.user_id}>
+                  {u.full_name} ({u.email})
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Salesperson name
+            <input
+              value={form.assigned_sales_rep}
+              onChange={(e) => setForm((f) => ({ ...f, assigned_sales_rep: e.target.value, repPick: "__manual__" }))}
+            />
           </label>
           <label>
             Salesperson email
-            <input value={form.assigned_sales_rep_email} onChange={(e) => setForm((f) => ({ ...f, assigned_sales_rep_email: e.target.value }))} />
+            <input
+              value={form.assigned_sales_rep_email}
+              onChange={(e) => setForm((f) => ({ ...f, assigned_sales_rep_email: e.target.value, repPick: "__manual__" }))}
+            />
           </label>
           <label>
             Priority (lower first)

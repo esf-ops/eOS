@@ -53,6 +53,7 @@ export async function assignSalesRepForPublicQuote({ zip, city, county, state, b
     if (!matches.length) continue;
     matches.sort((a, b) => (Number(a.priority) || 100) - (Number(b.priority) || 100));
     const pick = matches[0];
+    const territoryMeta = pick.metadata && typeof pick.metadata === "object" && !Array.isArray(pick.metadata) ? { ...pick.metadata } : {};
     return {
       assigned_sales_rep: pick.assigned_sales_rep || null,
       assigned_sales_rep_email: pick.assigned_sales_rep_email || null,
@@ -60,7 +61,12 @@ export async function assignSalesRepForPublicQuote({ zip, city, county, state, b
       assignment_source: `territory_${c.type}`,
       matched_territory_id: pick.id,
       confidence: "rule_match",
-      metadata: { match_type: c.type, match_value: c.value, territory_name: pick.territory_name }
+      metadata: {
+        match_type: c.type,
+        match_value: c.value,
+        territory_name: pick.territory_name,
+        ...territoryMeta
+      }
     };
   }
   return unassigned("no_rule_match");

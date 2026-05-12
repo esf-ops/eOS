@@ -9,6 +9,7 @@ import express from "express";
 
 import { logAction } from "../auth/auditLog.js";
 import { isPublicQuoteSource } from "./quoteSourceConfig.js";
+import { listSalesDirectoryUsers } from "./salesDirectoryUsers.js";
 import { buildLeadAssignmentRow } from "./quoteTerritoryAssignment.js";
 
 const jsonParser = express.json({ limit: "2mb" });
@@ -135,6 +136,17 @@ export function attachQuotePipelineRoutes(app, { requireAuth, requireRole, requi
   const headAccessSales = requireHeadAccess("sales", { getSupabase });
   const stack = [requireAuth(), requireRole([...PIPELINE_ROLES]), headAccessSales];
   const supabaseGetter = () => getSupabase();
+
+  /** Same directory as GET /api/admin/sales-users; gated by pipeline auth (not public). */
+  app.get("/api/quotes/pipeline/sales-users", ...stack, async (_req, res) => {
+    try {
+      const db = supabaseGetter();
+      const users = await listSalesDirectoryUsers(db, { warn: (o) => console.warn(o) });
+      res.json({ ok: true, users });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
 
   app.get("/api/quotes/pipeline/summary", ...stack, async (req, res) => {
     try {
@@ -523,6 +535,8 @@ export function attachQuotePipelineRoutes(app, { requireAuth, requireRole, requi
       const salesRepEmail = String(b.sales_rep_email || "").trim();
       const branch = String(b.branch || "").trim();
       const assignmentSource = String(b.assignment_source || "manual").trim() || "manual";
+      const assignedUserRaw = String(b.assigned_sales_rep_user_id ?? "").trim();
+      const assignedSalesRepUserId = isUuid(assignedUserRaw) ? assignedUserRaw : "";
 
       const db = supabaseGetter();
       const { data: h, error: hErr } = await db.from("quote_headers").select("*").eq("id", id).limit(1);
@@ -546,6 +560,9 @@ export function attachQuotePipelineRoutes(app, { requireAuth, requireRole, requi
       if (uErr) throw uErr;
       const updated = upd?.[0];
 
+      const assignmentMeta = { by: String(req.user?.email || req.user?.id || "") };
+      if (assignedSalesRepUserId) assignmentMeta.assigned_sales_rep_user_id = assignedSalesRepUserId;
+
       const assignmentResult = {
         assignment_source: assignmentSource,
         assigned_sales_rep: salesRep || null,
@@ -553,7 +570,7 @@ export function attachQuotePipelineRoutes(app, { requireAuth, requireRole, requi
         branch: branch || null,
         matched_territory_id: null,
         confidence: "manual",
-        metadata: { by: String(req.user?.email || "") }
+        metadata: assignmentMeta
       };
       try {
         await db.from("quote_lead_assignments").insert(buildLeadAssignmentRow({ quoteId: id, assignmentResult }));
@@ -582,6 +599,6 @@ export function attachQuotePipelineRoutes(app, { requireAuth, requireRole, requi
   });
 
   console.log(
-    "[quote-pipeline] mounted GET /api/quotes/pipeline/summary, GET /api/quotes/pipeline, GET /api/quotes/pipeline/:id, GET /api/quotes/pipeline/:id/timeline, PATCH status, PATCH assign (auth + sales head)"
+    "[quote-pipeline] mounted GET /api/quotes/pipeline/sales-users, GET /api/quotes/pipeline/summary, GET /api/quotes/pipeline, GET /api/quotes/pipeline/:id, GET /api/quotes/pipeline/:id/timeline, PATCH status, PATCH assign (auth + sales head)"
   );
 }
