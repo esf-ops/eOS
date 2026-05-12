@@ -53,6 +53,7 @@
     "eos:build:system-admin": "npm run build --prefix app-system-admin",
     "eos:build:home": "npm run build --prefix app-home",
     "eos:build:sales": "npm run build --prefix app-sales",
+    "eos:build:quote": "npm run build --prefix app-quote",
     "eos:build:all-heads": "npm run eos:build:brain-health && npm run eos:build:executive && npm run eos:build:system-admin && npm run eos:build:sales && npm run eos:build:home",
     "eos:analyze:sales-inputs": "node backend-core/src/scripts/analyzeSalesAccountAttributionInputs.js",
     "eos:sales:crosswalk-suggestions": "node backend-core/src/scripts/buildSalesAccountCrosswalkSuggestions.js",

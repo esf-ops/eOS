@@ -26,6 +26,7 @@ function sanitizePublicCalculateResponse(calcResult) {
   delete snap.inputSummary;
   delete snap.measurement_source;
   delete snap.quoteInputMode;
+  delete snap.lineItems;
   return {
     ok: true,
     display: "public_retail_safe",

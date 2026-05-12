@@ -22,14 +22,16 @@ const HEAD_URL_DEFAULTS: Record<string, string> = {
   executive: "http://localhost:5175",
   brain_health: "http://localhost:5174",
   system_admin: "http://localhost:5176",
-  sales: "http://localhost:5178"
+  sales: "http://localhost:5178",
+  quote: "http://localhost:5179"
 };
 
 const HEAD_ENV_KEYS: Record<string, string> = {
   executive: "VITE_EXECUTIVE_URL",
   brain_health: "VITE_BRAIN_HEALTH_URL",
   system_admin: "VITE_SYSTEM_ADMIN_URL",
-  sales: "VITE_SALES_URL"
+  sales: "VITE_SALES_URL",
+  quote: "VITE_QUOTE_URL"
 };
 
 /** Returns absolute URL when we know where the head runs; otherwise null → “Coming soon”. */
