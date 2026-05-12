@@ -16,6 +16,38 @@ const jsonParser = express.json({ limit: "2mb" });
 
 const MIN_PUBLIC_RETAIL_MARKUP = 25;
 
+const TERRITORY_MATCH_TYPES = new Set(["zip", "city", "county", "state", "branch", "manual"]);
+
+function validateTerritoryBody(body, partial = {}) {
+  const b = body && typeof body === "object" ? body : {};
+  const match_type = String(b.match_type ?? partial.match_type ?? "zip").trim();
+  if (!TERRITORY_MATCH_TYPES.has(match_type)) {
+    return { ok: false, error: `match_type must be one of: ${[...TERRITORY_MATCH_TYPES].join(", ")}` };
+  }
+  const match_value = String(b.match_value ?? partial.match_value ?? "").trim();
+  if (!match_value) return { ok: false, error: "match_value is required" };
+  const territory_name = String(b.territory_name ?? partial.territory_name ?? "").trim() || "Territory";
+  const row = {
+    territory_name,
+    match_type,
+    match_value,
+    branch: b.branch !== undefined ? (b.branch === null ? null : String(b.branch).trim()) : partial.branch ?? null,
+    assigned_sales_rep:
+      b.assigned_sales_rep !== undefined ?
+        b.assigned_sales_rep === null ? null : String(b.assigned_sales_rep).trim()
+      : partial.assigned_sales_rep ?? null,
+    assigned_sales_rep_email:
+      b.assigned_sales_rep_email !== undefined ?
+        b.assigned_sales_rep_email === null ? null : String(b.assigned_sales_rep_email).trim()
+      : partial.assigned_sales_rep_email ?? null,
+    priority: b.priority != null && b.priority !== "" ? Number(b.priority) : partial.priority ?? 100,
+    is_active: b.is_active !== undefined ? Boolean(b.is_active) : partial.is_active !== undefined ? partial.is_active : true,
+    metadata: typeof b.metadata === "object" && b.metadata ? b.metadata : partial.metadata && typeof partial.metadata === "object" ? partial.metadata : {}
+  };
+  if (!Number.isFinite(row.priority)) row.priority = 100;
+  return { ok: true, row };
+}
+
 function isMissingRelationError(error) {
   const msg = String(error?.message || "");
   const code = String(error?.code || "");
@@ -738,8 +770,9 @@ export function attachQuotePricingAdminApi(app, { requireAuth, requireRole, requ
   app.post("/api/admin/quote-sales-territories", ...adminStack, jsonParser, async (req, res) => {
     try {
       const db = supabaseGetter();
-      const row = req.body && typeof req.body === "object" ? req.body : {};
-      const { data, error } = await db.from("quote_sales_territories").insert(row).select("*").limit(1);
+      const chk = validateTerritoryBody(req.body, {});
+      if (!chk.ok) return res.status(400).json({ ok: false, error: chk.error });
+      const { data, error } = await db.from("quote_sales_territories").insert(chk.row).select("*").limit(1);
       if (error) {
         if (isMissingRelationError(error)) {
           return res.status(503).json({ ok: false, installed: false, message: "quote_sales_territories not installed." });
@@ -757,8 +790,19 @@ export function attachQuotePricingAdminApi(app, { requireAuth, requireRole, requ
       const id = String(req.params.id || "").trim();
       if (!isUuid(id)) return res.status(400).json({ ok: false, error: "invalid id" });
       const db = supabaseGetter();
-      const patch = { ...(req.body || {}), updated_at: new Date().toISOString() };
-      delete patch.id;
+      const { data: existingRows, error: exErr } = await db.from("quote_sales_territories").select("*").eq("id", id).limit(1);
+      if (exErr) {
+        if (isMissingRelationError(exErr)) {
+          return res.status(503).json({ ok: false, installed: false, message: "quote_sales_territories not installed." });
+        }
+        throw exErr;
+      }
+      const existing = existingRows?.[0];
+      if (!existing) return res.status(404).json({ ok: false, error: "not found" });
+      const merged = { ...existing, ...(req.body || {}) };
+      const chk = validateTerritoryBody(merged, existing);
+      if (!chk.ok) return res.status(400).json({ ok: false, error: chk.error });
+      const patch = { ...chk.row, updated_at: new Date().toISOString() };
       const { data, error } = await db.from("quote_sales_territories").update(patch).eq("id", id).select("*").limit(1);
       if (error) {
         if (isMissingRelationError(error)) {

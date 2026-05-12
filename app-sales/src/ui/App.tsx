@@ -5,6 +5,7 @@ import { config } from "../lib/config";
 import { supabase } from "../lib/supabase";
 import type { FiltersResponse, MeResp } from "../lib/types";
 import SalesIntelligenceView from "./SalesIntelligenceView";
+import QuotePipelinePanel from "./QuotePipelinePanel";
 import "./sales-intelligence.css";
 
 type FilterState = {
@@ -44,6 +45,7 @@ function buildLegacyFilterQuery(f: FilterState): string {
 
 export default function App() {
   const [advFiltersOpen, setAdvFiltersOpen] = useState(false);
+  const [salesTab, setSalesTab] = useState<"intelligence" | "quote_pipeline">("intelligence");
 
   const [session, setSession] = useState<Session | null>(null);
   const [email, setEmail] = useState("");
@@ -224,6 +226,18 @@ export default function App() {
           </p>
         </div>
         <div className="sales-header-actions">
+          <div className="sales-tabbar" style={{ marginRight: 8 }}>
+            <button
+              type="button"
+              className={`btn ${salesTab === "intelligence" ? "tab-on" : ""}`}
+              onClick={() => setSalesTab("intelligence")}
+            >
+              Performance intelligence
+            </button>
+            <button type="button" className={`btn ${salesTab === "quote_pipeline" ? "tab-on" : ""}`} onClick={() => setSalesTab("quote_pipeline")}>
+              Quote pipeline
+            </button>
+          </div>
           <a className="btn" href={config.homeUrl}>
             Back to Home
           </a>
@@ -253,6 +267,10 @@ export default function App() {
           ) : null}
 
           <div className="sales-main" style={{ paddingTop: loadError && !accessForbidden ? "0.5rem" : undefined }}>
+            {salesTab === "quote_pipeline" ? (
+              <QuotePipelinePanel token={token} />
+            ) : (
+              <>
             <button
               type="button"
               className="btn"
@@ -344,9 +362,10 @@ export default function App() {
                 </div>
               </div>
             ) : null}
+            <SalesIntelligenceView token={token} me={me} legacyFilterQuery={legacyFilterQuery} onLoadError={onPiLoadError} />
+              </>
+            )}
           </div>
-
-          <SalesIntelligenceView token={token} me={me} legacyFilterQuery={legacyFilterQuery} onLoadError={onPiLoadError} />
         </>
       )}
     </div>

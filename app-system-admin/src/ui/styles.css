@@ -314,3 +314,167 @@ table.simple tbody tr:hover {
   color: rgba(226, 232, 240, 0.95);
   word-break: break-word;
 }
+
+.subnav-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.territories-admin .territory-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.territories-admin .card-like {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 18px;
+  background: rgba(15, 23, 42, 0.5);
+}
+
+.territories-admin .check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.quote-pipeline .qp-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.quote-pipeline .qp-metric {
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.quote-pipeline .qp-metric strong {
+  display: block;
+  font-size: 1rem;
+  margin-top: 4px;
+}
+
+.quote-pipeline .qp-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+  align-items: end;
+  margin-bottom: 12px;
+}
+
+.quote-pipeline .qp-filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.quote-pipeline .qp-filters input,
+.quote-pipeline .qp-filters select {
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
+.quote-pipeline .qp-layout {
+  display: grid;
+  grid-template-columns: 1.2fr 0.85fr;
+  gap: 14px;
+  align-items: start;
+}
+
+@media (max-width: 1000px) {
+  .quote-pipeline .qp-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.quote-pipeline .qp-table-wrap {
+  overflow: auto;
+  max-height: 65vh;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+}
+
+.quote-pipeline .qp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.quote-pipeline .qp-table th,
+.quote-pipeline .qp-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  text-align: left;
+}
+
+.quote-pipeline .qp-row-active td {
+  background: rgba(6, 95, 70, 0.25);
+}
+
+.quote-pipeline .btn-link {
+  background: none;
+  border: none;
+  color: #38bdf8;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+  font: inherit;
+}
+
+.quote-pipeline .qp-drawer {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 12px 14px;
+  max-height: 65vh;
+  overflow: auto;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.quote-pipeline .qp-dl {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 6px 10px;
+  font-size: 13px;
+}
+
+.quote-pipeline .qp-dl dt {
+  color: rgba(226, 232, 240, 0.55);
+}
+
+.quote-pipeline .qp-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-end;
+  margin: 10px 0;
+}
+
+.quote-pipeline .qp-pre {
+  font-size: 11px;
+  max-height: 200px;
+  overflow: auto;
+  background: #020617;
+  color: #e2e8f0;
+  padding: 8px;
+  border-radius: 8px;
+}
+
+.quote-pipeline .qp-timeline {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 12px;
+}

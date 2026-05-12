@@ -3,6 +3,7 @@ import express from "express";
 import { buildMondayQuotePayload, syncQuoteToMonday } from "../integrations/mondayQuoteSync.js";
 import { calculateQuote, computePublicConsumerEstimatesByGroup } from "./quoteCalculator.js";
 import { attachQuotePricingAdminApi } from "./quotePricingAdminApi.js";
+import { attachQuotePipelineRoutes } from "./quotePipelineApi.js";
 import { assignSalesRepForPublicQuote, buildLeadAssignmentRow } from "./quoteTerritoryAssignment.js";
 
 const jsonParser = express.json({ limit: "2mb" });
@@ -419,9 +420,10 @@ export function attachQuoteRoutes(app, { requireAuth, requireRole, requireHeadAc
     }
   });
 
+  attachQuotePipelineRoutes(app, { requireAuth, requireRole, requireHeadAccess, getSupabase });
   attachQuotePricingAdminApi(app, { requireAuth, requireRole, requireHeadAccess, getSupabase });
 
   console.log(
-    "[quotes] mounted POST /api/public-quote/calculate, POST /api/public-quote/submit-measurements, POST /api/internal-quote/submit (501), POST /api/partner-quote/submit (501), POST /api/quote/calculate, POST /api/quote/submit; admin quote APIs via quotePricingAdminApi.js"
+    "[quotes] mounted POST /api/public-quote/calculate, POST /api/public-quote/submit-measurements, POST /api/internal-quote/submit (501), POST /api/partner-quote/submit (501), POST /api/quote/calculate, POST /api/quote/submit; quote pipeline GET/PATCH /api/quotes/pipeline*; admin quote APIs via quotePricingAdminApi.js"
   );
 }

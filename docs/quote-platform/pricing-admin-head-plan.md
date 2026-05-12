@@ -108,10 +108,29 @@ All under `requireAuth` + `admin` role + `system_admin` head. JSON errors: `{ ok
 | POST | `/api/admin/quote-sales-territories` |
 | PATCH | `/api/admin/quote-sales-territories/:id` |
 
-## 9. Optional UI stub
+## 9. System Admin — Quote pricing & territories UI
 
-System Admin app includes a **“Quote pricing (preview)”** nav entry that opens a placeholder panel pointing to this document and listing the endpoints above. Full grids ship in a later iteration. **Quote source configs** and **territories** should appear as simple tables in a follow-up UI pass.
+The System Admin app includes:
+
+- **Quote pricing** — “Overview & APIs” tab (placeholder + endpoint list + coverage checklist) and **Sales territories** tab (CRUD against `/api/admin/quote-sales-territories`). Territory rows validate `match_type` ∈ `zip | city | county | state | branch | manual` and require `match_value` on create/update.
+- **Quote pipeline** — separate top-level nav entry; see **`docs/quote-platform/quote-pipeline-head-plan.md`** (shared `quote_headers` list, detail, status, assignment).
+
+Full spreadsheet grids for pricing rules, partners, and catalog items remain a later iteration.
 
 ## 10. Quote Catalog Admin (future)
 
 The Pricing Admin Head evolves into a **Quote Catalog Admin**: programs and SKUs as data (`quote_programs`, `quote_catalog_items`, …), with **per–pricing-structure** prices in `quote_catalog_pricing_rules`. Public channels only receive **public-safe** catalog projections (no protected wholesale fields). See **`quote-catalog-admin-architecture.md`** and the additive SQL **`backend-core/supabase/eos_quote_catalog_schema.sql`**.
+
+## 11. Admin coverage checklist (variables by quoting tool)
+
+| Area | Admin API | UI today |
+|------|-----------|----------|
+| Material group $/sf & tiers | `quote_pricing_rules` + structures | Overview placeholder; grid **next** |
+| Color → group mappings | rules `category = material_color` (convention) | **Next** |
+| Vanity / shower programs | rules + future catalog tables | **Next** |
+| Sinks, faucets, outlets, cutouts, backsplash, tear-out, trip/install fees | `quote_pricing_rules` categories | **Next** |
+| Partner-specific structures | `quote_partner_pricing_assignments` | Partner assignment POST wired; rich UI **next** |
+| Public retail markup | `quote_pricing_structures` (`pricing_mode = public_retail`, ≥ 25%) | Enforced server-side + copy in Overview |
+| **Sales territories** | `GET/POST/PATCH /api/admin/quote-sales-territories` | **Territories tab** (list, add, edit, activate/deactivate) |
+| **Quote source configs** | `GET/POST/PATCH /api/admin/quote-source-configs` | API-only until a small table UI is added |
+| Catalog / program SKUs | `eos_quote_catalog_schema.sql` (optional) | **Future** Catalog Admin head |

@@ -31,6 +31,24 @@ export default function QuotePricingAdminPlaceholder() {
           Prefer soft-deactivate (<code>is_active: false</code>) instead of deleting rules or structures.
         </p>
       </div>
+
+      <div className="drawer-section">
+        <h4>Pricing Admin coverage (wired vs next)</h4>
+        <ul className="muted" style={{ lineHeight: 1.65 }}>
+          <li>
+            <strong>Wired — read/write APIs:</strong> quote_pricing_structures, quote_pricing_rules, quote_partner_accounts,
+            quote_partner_pricing_assignments, quote_source_configs, quote_sales_territories; quote analytics summary.
+          </li>
+          <li>
+            <strong>Next — UI:</strong> spreadsheet-style editors for rules, partner assignment flows, catalog/program SKUs
+            (when quote catalog tables are populated), vanity/shower/sink/faucet/outlet rows as dedicated grids.
+          </li>
+          <li>
+            <strong>Public retail protection:</strong> Admin UI should keep structures at or above 25% markup — the backend rejects
+            lower values for <code>pricing_mode = public_retail</code>.
+          </li>
+        </ul>
+      </div>
     </div>
   );
 }

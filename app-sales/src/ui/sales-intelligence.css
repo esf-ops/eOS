@@ -343,3 +343,139 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Quote Pipeline (Sales Head) */
+.quote-pipeline .qp-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+.quote-pipeline .qp-metric {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 0.65rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+}
+.quote-pipeline .qp-metric strong {
+  font-size: 1.05rem;
+}
+.quote-pipeline .qp-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.65rem;
+  align-items: end;
+  margin-bottom: 1rem;
+}
+.quote-pipeline .qp-filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+}
+.quote-pipeline .qp-filters input,
+.quote-pipeline .qp-filters select {
+  padding: 0.35rem 0.45rem;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+}
+.quote-pipeline .qp-layout {
+  display: grid;
+  grid-template-columns: 1.2fr 0.9fr;
+  gap: 1rem;
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .quote-pipeline .qp-layout {
+    grid-template-columns: 1fr;
+  }
+}
+.quote-pipeline .qp-table-wrap {
+  overflow: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+  max-height: 70vh;
+}
+.quote-pipeline .qp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+.quote-pipeline .qp-table th,
+.quote-pipeline .qp-table td {
+  padding: 0.45rem 0.5rem;
+  border-bottom: 1px solid #f1f5f9;
+  text-align: left;
+}
+.quote-pipeline .qp-row-active td {
+  background: #ecfdf5;
+}
+.quote-pipeline .btn-link {
+  background: none;
+  border: none;
+  color: #0369a1;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+  font: inherit;
+}
+.quote-pipeline .qp-drawer {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 0.75rem 1rem;
+  background: #fff;
+  max-height: 70vh;
+  overflow: auto;
+}
+.quote-pipeline .qp-dl {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+}
+.quote-pipeline .qp-dl dt {
+  color: #64748b;
+}
+.quote-pipeline .qp-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: flex-end;
+  margin: 0.75rem 0;
+}
+.quote-pipeline .qp-actions label {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.78rem;
+  gap: 0.2rem;
+}
+.quote-pipeline .qp-pre {
+  font-size: 0.72rem;
+  max-height: 220px;
+  overflow: auto;
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 0.5rem;
+  border-radius: 8px;
+}
+.quote-pipeline .qp-timeline {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.82rem;
+}
+.sales-tabbar {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+.sales-tabbar .btn.tab-on {
+  background: #065f46;
+  color: #fff;
+  border-color: #065f46;
+}
+
