@@ -608,6 +608,117 @@ select:focus {
   margin-top: 32px;
 }
 
+/* Quote method picker */
+.quote-method-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.quote-method-card {
+  text-align: left;
+  padding: 14px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: #fafbfc;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.quote-method-card:hover:not(.disabled) {
+  border-color: var(--border-strong);
+  background: #fff;
+}
+
+.quote-method-card.on {
+  border-color: var(--elite-red);
+  background: var(--elite-red-soft);
+  box-shadow: 0 0 0 1px rgba(185, 28, 28, 0.15);
+}
+
+.quote-method-card.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.qmc-title {
+  font-weight: 700;
+  font-size: 0.92rem;
+  color: var(--text);
+}
+
+.qmc-sub {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.qmc-badge {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+}
+
+.room-builder-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.room-card-lite {
+  margin-bottom: 14px;
+}
+
+.room-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.room-card-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.room-panel {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.piece-row {
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px dashed var(--border);
+}
+
+.room-summary-bar {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.math-check .mini-lines {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.86rem;
+  color: var(--text);
+}
+
+.math-check .mini-lines li {
+  margin-bottom: 4px;
+}
+
 .row {
   display: flex;
   align-items: center;

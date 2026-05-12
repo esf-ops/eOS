@@ -1,10 +1,29 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { apiPostJson, ApiError } from "../lib/api";
 import { config, EOS_LOGO_URL } from "../lib/config";
-import { demoCalculate, TIER_RATES, type DemoCalculateResult } from "../lib/demoFallback";
+import type { DemoCalculateResult } from "../lib/demoFallback";
+import { round2, STANDARD_BACKSPLASH_HEIGHT_IN } from "../lib/measurementEngine";
+import {
+  calculateAllRoomDrafts,
+  createDefaultRoom,
+  roomsNeedLocalVanityMath,
+  runLocalPrototypeQuote,
+  serializeRoomsForApi,
+  syntheticRoomForWorkflow
+} from "../lib/prototypeQuoteMath";
+import type { GuidedPiece, MathCheckSnapshot, QuoteWorkflowMethod, RoomDraft } from "../lib/quoteTypes";
 import { getSupabase } from "../lib/supabase";
+import RoomScopeBuilder from "./RoomScopeBuilder";
 
-const MATERIAL_GROUPS = Object.keys(TIER_RATES);
+const MATERIAL_GROUPS = [
+  "Group Promo",
+  "Group A",
+  "Group B",
+  "Group C",
+  "Group D",
+  "Group E",
+  "Group F"
+];
 
 type QuoteMode = "public" | "partner";
 
@@ -31,6 +50,35 @@ function num(v: string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+function workflowLabel(wf: QuoteWorkflowMethod): string {
+  const labels: Record<QuoteWorkflowMethod, string> = {
+    manual_sqft: "Manual Sq Ft",
+    rapid_linear: "Rapid Linear Foot",
+    guided_shape: "Guided Shape",
+    room_by_room: "Room-by-room / advanced",
+    upload_plans: "Upload plans / AI takeoff",
+    visualize: "Visualize"
+  };
+  return labels[wf];
+}
+
+function localRunToDemo(r: ReturnType<typeof runLocalPrototypeQuote>): DemoCalculateResult {
+  return {
+    usedFallback: true,
+    fallbackLabel: r.fallbackLabel,
+    materialGroup: r.materialGroup,
+    estimated_sqft: r.estimated_sqft,
+    retail: r.retail,
+    wholesale: r.wholesale,
+    profit: r.profit,
+    lineItems: r.lineItems,
+    addOnsSummary: r.addOnsSummary,
+    warnings: r.warnings,
+    confidence: r.confidence,
+    reviewNeeded: r.reviewNeeded
+  };
+}
+
 export default function App() {
   const supabase = getSupabase();
   const [sessionToken, setSessionToken] = useState<string | null>(null);
@@ -40,15 +88,24 @@ export default function App() {
   const [authError, setAuthError] = useState<string | null>(null);
 
   const [quoteMode, setQuoteMode] = useState<QuoteMode>("public");
+  const [quoteWorkflow, setQuoteWorkflow] = useState<QuoteWorkflowMethod>("guided_shape");
+  const [materialGroup, setMaterialGroup] = useState("Group Promo");
+  const [roomDrafts, setRoomDrafts] = useState<RoomDraft[]>(() => [createDefaultRoom("Group Promo")]);
+
+  const [manualCt, setManualCt] = useState("45");
+  const [manualBs, setManualBs] = useState("12");
+  const [linearWall, setLinearWall] = useState("20");
+  const [linearSplashIn, setLinearSplashIn] = useState(String(STANDARD_BACKSPLASH_HEIGHT_IN));
+  const [linearIslandL, setLinearIslandL] = useState("0");
+  const [linearIslandW, setLinearIslandW] = useState("0");
+  const [guidedProjectPieces, setGuidedProjectPieces] = useState<GuidedPiece[]>(() => createDefaultRoom("Group Promo").guidedPieces);
+
   const [customerName, setCustomerName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [projectType, setProjectType] = useState("Kitchen");
   const [branch, setBranch] = useState("Dyersville");
   const [salesRep, setSalesRep] = useState("");
-  const [materialGroup, setMaterialGroup] = useState("Group Promo");
-  const [ct, setCt] = useState("45");
-  const [bs, setBs] = useState("12");
   const [sink, setSink] = useState("1");
   const [bar, setBar] = useState("0");
   const [cook, setCook] = useState("1");
@@ -56,19 +113,18 @@ export default function App() {
   const [ss, setSs] = useState("0");
   const [blanco, setBlanco] = useState("0");
   const [tearYes, setTearYes] = useState(false);
-  const [useRooms, setUseRooms] = useState(false);
-  const [roomName, setRoomName] = useState("Kitchen");
-  const [roomCt, setRoomCt] = useState("45");
-  const [roomBs, setRoomBs] = useState("12");
-  const [roomGroup, setRoomGroup] = useState("Group Promo");
   const [partnerRetailPct, setPartnerRetailPct] = useState("20");
+  const [partnerRetailMethod, setPartnerRetailMethod] = useState("Markup Percent");
 
   const [calcBusy, setCalcBusy] = useState(false);
   const [calcError, setCalcError] = useState<string | null>(null);
+  const [vanityLocalNote, setVanityLocalNote] = useState<string | null>(null);
   const [usedFallback, setUsedFallback] = useState(false);
   const [demoResult, setDemoResult] = useState<DemoCalculateResult | null>(null);
   const [apiPublic, setApiPublic] = useState<ApiPublicResult | null>(null);
   const [apiPartner, setApiPartner] = useState<ApiPartnerResult | null>(null);
+  const [localMathCheck, setLocalMathCheck] = useState<MathCheckSnapshot | null>(null);
+  const [localMatrix, setLocalMatrix] = useState<ReturnType<typeof runLocalPrototypeQuote>["allGroupMatrix"] | null>(null);
 
   const [submitBusy, setSubmitBusy] = useState(false);
   const [submitMsg, setSubmitMsg] = useState<string | null>(null);
@@ -78,11 +134,23 @@ export default function App() {
   const lastCalcLive = !usedFallback && (apiPublic != null || apiPartner != null);
 
   useEffect(() => {
+    if (quoteMode === "public") {
+      setQuoteWorkflow("guided_shape");
+    } else {
+      setQuoteWorkflow("room_by_room");
+      setRoomDrafts((prev) => (prev.length ? prev : [createDefaultRoom("Group Promo")]));
+    }
+  }, [quoteMode]);
+
+  useEffect(() => {
     setDemoResult(null);
     setApiPublic(null);
     setApiPartner(null);
     setUsedFallback(false);
     setCalcError(null);
+    setLocalMathCheck(null);
+    setLocalMatrix(null);
+    setVanityLocalNote(null);
   }, [quoteMode]);
 
   const signIn = useCallback(async () => {
@@ -114,8 +182,8 @@ export default function App() {
     setSessionToken(null);
   }, [supabase]);
 
-  const buildAddOns = useCallback(() => {
-    const o: Record<string, number> = {
+  const buildGlobalAddOns = useCallback(() => {
+    return {
       "qty-sink": num(sink),
       "qty-bar": num(bar),
       "qty-cook": num(cook),
@@ -124,34 +192,63 @@ export default function App() {
       "qty-blanco": num(blanco),
       tearout: tearYes ? 1 : 0
     };
-    return o;
   }, [sink, bar, cook, outlet, ss, blanco, tearYes]);
 
+  const buildRoomDraftsForCalculate = useCallback((): RoomDraft[] => {
+    if (quoteWorkflow === "room_by_room") return roomDrafts;
+    if (quoteWorkflow === "upload_plans" || quoteWorkflow === "visualize") return [];
+    return [
+      syntheticRoomForWorkflow(
+        quoteWorkflow,
+        materialGroup,
+        { counter: num(manualCt), splash: num(manualBs) },
+        {
+          wallFt: num(linearWall),
+          splashIn: num(linearSplashIn),
+          islandL: num(linearIslandL),
+          islandW: num(linearIslandW)
+        },
+        guidedProjectPieces
+      )
+    ];
+  }, [
+    quoteWorkflow,
+    roomDrafts,
+    materialGroup,
+    manualCt,
+    manualBs,
+    linearWall,
+    linearSplashIn,
+    linearIslandL,
+    linearIslandW,
+    guidedProjectPieces
+  ]);
+
   const buildCalcPayload = useCallback(() => {
-    const addOns = buildAddOns();
-    const rooms = useRooms
-      ? [
-          {
-            name: roomName.trim() || "Room 1",
-            room_name: roomName.trim() || "Room 1",
-            materialGroup: roomGroup,
-            group: roomGroup,
-            countertopSqft: num(roomCt),
-            backsplashSqft: num(roomBs)
-          }
-        ]
-      : [];
+    const drafts = buildRoomDraftsForCalculate();
+    const apiRooms = serializeRoomsForApi(drafts);
+    const addOns = quoteWorkflow === "room_by_room" ? {} : buildGlobalAddOns();
+    let countertopSqft = 0;
+    let backsplashSqft = 0;
+    for (const row of apiRooms) {
+      countertopSqft += Number(row.countertopSqft) || 0;
+      backsplashSqft += Number(row.backsplashSqft) || 0;
+    }
+    if (!apiRooms.length) {
+      const { totals } = calculateAllRoomDrafts(drafts, projectType);
+      countertopSqft = totals.counter;
+      backsplashSqft = round2(totals.splash + totals.fhb);
+    }
+    const engine = apiRooms.length >= 1 ? "rooms" : "legacy";
     return {
       quoteSource: quoteMode === "public" ? "public_retail" : "partner_portal",
       materialGroup,
-      areas: {
-        countertopSqft: num(ct),
-        backsplashSqft: num(bs)
-      },
+      areas: { countertopSqft, backsplashSqft },
       addOns,
-      engine: useRooms ? "rooms" : "legacy",
-      rooms,
+      engine,
+      rooms: apiRooms,
       retailMarkupPercent: num(partnerRetailPct),
+      retailMethod: partnerRetailMethod,
       customer_name: customerName.trim() || undefined,
       customer_email: email.trim() || undefined,
       customer_phone: phone.trim() || undefined,
@@ -160,17 +257,13 @@ export default function App() {
       sales_rep: salesRep.trim() || undefined
     };
   }, [
+    buildRoomDraftsForCalculate,
+    quoteWorkflow,
+    buildGlobalAddOns,
     quoteMode,
     materialGroup,
-    ct,
-    bs,
-    buildAddOns,
-    useRooms,
-    roomName,
-    roomGroup,
-    roomCt,
-    roomBs,
     partnerRetailPct,
+    partnerRetailMethod,
     customerName,
     email,
     phone,
@@ -179,36 +272,35 @@ export default function App() {
     salesRep
   ]);
 
-  const runFallback = useCallback(() => {
+  const runLocalFromDrafts = useCallback(() => {
+    const drafts = buildRoomDraftsForCalculate();
+    const wf = workflowLabel(quoteWorkflow);
+    const lr = runLocalPrototypeQuote({
+      quoteMode,
+      partnerRetailPercent: num(partnerRetailPct),
+      partnerRetailMethod,
+      materialGroupTop: materialGroup,
+      roomDrafts: drafts,
+      globalAddOns: buildGlobalAddOns(),
+      applyGlobalAddOns: quoteWorkflow !== "room_by_room",
+      workflowLabel: wf,
+      projectType
+    });
     setUsedFallback(true);
     setApiPublic(null);
     setApiPartner(null);
-    setDemoResult(
-      demoCalculate({
-        mode: quoteMode,
-        materialGroup,
-        countertopSqft: num(ct),
-        backsplashSqft: num(bs),
-        addOns: buildAddOns(),
-        useRooms,
-        rooms: useRooms
-          ? [{ name: roomName.trim() || "Room 1", materialGroup: roomGroup, countertopSqft: num(roomCt), backsplashSqft: num(roomBs) }]
-          : [],
-        partnerRetailPercent: num(partnerRetailPct)
-      })
-    );
+    setDemoResult(localRunToDemo(lr));
+    setLocalMathCheck(lr.mathCheck);
+    setLocalMatrix(lr.allGroupMatrix);
   }, [
+    buildRoomDraftsForCalculate,
+    quoteWorkflow,
     quoteMode,
+    partnerRetailPct,
+    partnerRetailMethod,
     materialGroup,
-    ct,
-    bs,
-    buildAddOns,
-    useRooms,
-    roomName,
-    roomGroup,
-    roomCt,
-    roomBs,
-    partnerRetailPct
+    buildGlobalAddOns,
+    projectType
   ]);
 
   const handleCalculate = useCallback(async () => {
@@ -218,13 +310,33 @@ export default function App() {
     setApiPublic(null);
     setApiPartner(null);
     setUsedFallback(false);
-    const payload = buildCalcPayload();
+    setLocalMathCheck(null);
+    setLocalMatrix(null);
+    setVanityLocalNote(null);
 
-    if (!sessionToken) {
-      runFallback();
+    if (quoteWorkflow === "upload_plans" || quoteWorkflow === "visualize") {
+      setCalcError("This measurement path is coming soon — pick another option to calculate.");
       setCalcBusy(false);
       return;
     }
+
+    const drafts = buildRoomDraftsForCalculate();
+    const needsVanityLocal = roomsNeedLocalVanityMath(drafts);
+
+    if (!sessionToken) {
+      runLocalFromDrafts();
+      setCalcBusy(false);
+      return;
+    }
+
+    if (needsVanityLocal) {
+      setVanityLocalNote("Vanity program pricing uses local prototype math until the live API mirrors the full room engine.");
+      runLocalFromDrafts();
+      setCalcBusy(false);
+      return;
+    }
+
+    const payload = buildCalcPayload();
 
     try {
       const raw = (await apiPostJson("/api/quote/calculate", sessionToken, payload)) as Record<string, unknown>;
@@ -240,18 +352,18 @@ export default function App() {
         setCalcBusy(false);
         return;
       }
-      runFallback();
+      runLocalFromDrafts();
     } catch (e: unknown) {
       if (e instanceof ApiError) {
         const body = e.body as Record<string, unknown> | null;
         const installed = body && body.installed === false;
         if (e.status === 503 || installed || e.status === 0 || e.status >= 500) {
-          runFallback();
+          runLocalFromDrafts();
           setCalcBusy(false);
           return;
         }
         if (e.status === 401) {
-          runFallback();
+          runLocalFromDrafts();
           setCalcBusy(false);
           return;
         }
@@ -259,10 +371,10 @@ export default function App() {
         setCalcBusy(false);
         return;
       }
-      runFallback();
+      runLocalFromDrafts();
     }
     setCalcBusy(false);
-  }, [sessionToken, buildCalcPayload, runFallback]);
+  }, [sessionToken, buildCalcPayload, buildRoomDraftsForCalculate, runLocalFromDrafts, quoteWorkflow]);
 
   const buildSubmitPayload = useCallback(() => {
     return {
@@ -332,6 +444,21 @@ export default function App() {
   const partRetail = apiPartner?.totals?.retail ?? demoResult?.retail;
   const partSqft = apiPartner?.totals?.estimated_sqft ?? demoResult?.estimated_sqft;
 
+  const methodCards = useMemo(
+    () =>
+      (
+        [
+          { id: "guided_shape" as const, title: "Help me lay it out", sub: "Guided shapes & presets — great when you have rough dimensions." },
+          { id: "manual_sqft" as const, title: "I know my square footage", sub: "Fastest if you already have countertop and backsplash sf." },
+          { id: "rapid_linear" as const, title: "I know my cabinet runs", sub: "Wall cabinets in linear feet + optional island." },
+          { id: "room_by_room" as const, title: "Room-by-room / advanced", sub: "Multiple rooms, materials, and add-ons like the ESF prototype." },
+          { id: "upload_plans" as const, title: "Upload plans / AI takeoff", sub: "Coming soon — attach drawings for automated takeoff." },
+          { id: "visualize" as const, title: "Visualize", sub: "Coming soon — layout visualization tied to quote data." }
+        ] as const
+      ).map((c) => ({ ...c, disabled: c.id === "upload_plans" || c.id === "visualize" })),
+    []
+  );
+
   return (
     <div className="page">
       <header className="hero">
@@ -339,7 +466,7 @@ export default function App() {
           <img className="logo" src={EOS_LOGO_URL} alt="Elite Stone Fabrication" />
           <div className="hero-titles">
             <h1 className="title">Quote</h1>
-            <p className="subtitle">Estimate countertops and add-ons — preview experience for leadership</p>
+            <p className="subtitle">Measurement-first quoting — preview aligned to the ESF v1.01 prototype</p>
           </div>
         </div>
         <div className="hero-badges">
@@ -447,6 +574,30 @@ export default function App() {
           </section>
 
           <section className="card">
+            <h2>How would you like to measure your project?</h2>
+            <p className="muted">
+              {quoteMode === "public"
+                ? "Default is the guided layout path — plain language, presets, and examples. Switch anytime."
+                : "Default is room-by-room scope builder (ESF prototype parity)."}
+            </p>
+            <div className="quote-method-grid">
+              {methodCards.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  disabled={c.disabled}
+                  className={`quote-method-card ${quoteWorkflow === c.id ? "on" : ""} ${c.disabled ? "disabled" : ""}`}
+                  onClick={() => !c.disabled && setQuoteWorkflow(c.id)}
+                >
+                  <span className="qmc-title">{c.title}</span>
+                  <span className="qmc-sub">{c.sub}</span>
+                  {c.disabled ? <span className="qmc-badge">Soon</span> : null}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="card">
             <h2>Customer &amp; project</h2>
             <div className="grid3">
               <label>
@@ -477,97 +628,226 @@ export default function App() {
           </section>
 
           <section className="card">
-            <h2>Materials &amp; add-ons</h2>
-            <label className="check">
-              <input type="checkbox" checked={useRooms} onChange={(e) => setUseRooms(e.target.checked)} />
-              Use one room (name + separate square feet)
-            </label>
-
-            {!useRooms ? (
-              <div className="grid3">
-                <label>
-                  Material group
-                  <select value={materialGroup} onChange={(e) => setMaterialGroup(e.target.value)}>
-                    {MATERIAL_GROUPS.map((g) => (
-                      <option key={g} value={g}>
-                        {g}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Countertop sq ft
-                  <input value={ct} onChange={(e) => setCt(e.target.value)} inputMode="decimal" />
-                </label>
-                <label>
-                  Backsplash sq ft
-                  <input value={bs} onChange={(e) => setBs(e.target.value)} inputMode="decimal" />
-                </label>
-              </div>
-            ) : (
-              <div className="grid3">
-                <label>
-                  Room name
-                  <input value={roomName} onChange={(e) => setRoomName(e.target.value)} />
-                </label>
-                <label>
-                  Material group
-                  <select value={roomGroup} onChange={(e) => setRoomGroup(e.target.value)}>
-                    {MATERIAL_GROUPS.map((g) => (
-                      <option key={g} value={g}>
-                        {g}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Countertop sq ft
-                  <input value={roomCt} onChange={(e) => setRoomCt(e.target.value)} />
-                </label>
-                <label>
-                  Backsplash sq ft
-                  <input value={roomBs} onChange={(e) => setRoomBs(e.target.value)} />
-                </label>
-              </div>
-            )}
-
-            <h3 className="h3">Add-ons</h3>
-            <div className="grid3">
+            <h2>Scope &amp; materials</h2>
+            <div className="grid3" style={{ marginBottom: 14 }}>
               <label>
-                Kitchen sink cutouts
-                <input value={sink} onChange={(e) => setSink(e.target.value)} />
-              </label>
-              <label>
-                Vanity / bar sink cutouts
-                <input value={bar} onChange={(e) => setBar(e.target.value)} />
-              </label>
-              <label>
-                Cooktop cutouts
-                <input value={cook} onChange={(e) => setCook(e.target.value)} />
-              </label>
-              <label>
-                Electrical outlet cutouts
-                <input value={outlet} onChange={(e) => setOutlet(e.target.value)} />
-              </label>
-              <label>
-                ESF stainless sink
-                <input value={ss} onChange={(e) => setSs(e.target.value)} />
-              </label>
-              <label>
-                Stock Blanco sink
-                <input value={blanco} onChange={(e) => setBlanco(e.target.value)} />
+                Primary material group (single-flow &amp; defaults)
+                <select value={materialGroup} onChange={(e) => setMaterialGroup(e.target.value)}>
+                  {MATERIAL_GROUPS.map((g) => (
+                    <option key={g} value={g}>
+                      {g}
+                    </option>
+                  ))}
+                </select>
               </label>
             </div>
-            <label className="check">
-              <input type="checkbox" checked={tearYes} onChange={(e) => setTearYes(e.target.checked)} />
-              Tear-out needed
-            </label>
+
+            {quoteWorkflow === "room_by_room" ? (
+              <RoomScopeBuilder rooms={roomDrafts} onRoomsChange={setRoomDrafts} materialGroups={MATERIAL_GROUPS} />
+            ) : null}
+
+            {quoteWorkflow === "manual_sqft" ? (
+              <div className="grid3">
+                <label>
+                  Countertop sq ft
+                  <input value={manualCt} onChange={(e) => setManualCt(e.target.value)} inputMode="decimal" />
+                </label>
+                <label>
+                  Backsplash sq ft
+                  <input value={manualBs} onChange={(e) => setManualBs(e.target.value)} inputMode="decimal" />
+                </label>
+              </div>
+            ) : null}
+
+            {quoteWorkflow === "rapid_linear" ? (
+              <div className="grid3">
+                <p className="muted small" style={{ gridColumn: "1 / -1" }}>
+                  Wall cabinets in linear feet; depth fixed at 25.5″ (2.125 ft). Backsplash height in inches. Island in feet.
+                </p>
+                <label>
+                  Wall cabinets LF
+                  <input value={linearWall} onChange={(e) => setLinearWall(e.target.value)} />
+                </label>
+                <label>
+                  Backsplash height (in)
+                  <input value={linearSplashIn} onChange={(e) => setLinearSplashIn(e.target.value)} />
+                </label>
+                <label>
+                  Island length (ft)
+                  <input value={linearIslandL} onChange={(e) => setLinearIslandL(e.target.value)} />
+                </label>
+                <label>
+                  Island width (ft)
+                  <input value={linearIslandW} onChange={(e) => setLinearIslandW(e.target.value)} />
+                </label>
+              </div>
+            ) : null}
+
+            {quoteWorkflow === "guided_shape" ? (
+              <div>
+                <p className="muted small">Enter lengths in inches. Add splash or full-height pieces as needed.</p>
+                {guidedProjectPieces.map((p) => (
+                  <div key={p.id} className="piece-row grid3">
+                    <label>
+                      Label
+                      <input
+                        value={p.name}
+                        onChange={(e) =>
+                          setGuidedProjectPieces((prev) => prev.map((x) => (x.id === p.id ? { ...x, name: e.target.value } : x)))
+                        }
+                      />
+                    </label>
+                    <label>
+                      Type
+                      <select
+                        value={p.pieceType}
+                        onChange={(e) =>
+                          setGuidedProjectPieces((prev) =>
+                            prev.map((x) =>
+                              x.id === p.id ? { ...x, pieceType: e.target.value as GuidedPiece["pieceType"] } : x
+                            )
+                          )
+                        }
+                      >
+                        <option value="counter">Counter</option>
+                        <option value="splash">Backsplash</option>
+                        <option value="fhb">Full height</option>
+                      </select>
+                    </label>
+                    <label>
+                      Shape
+                      <select
+                        value={p.shape}
+                        onChange={(e) =>
+                          setGuidedProjectPieces((prev) =>
+                            prev.map((x) => (x.id === p.id ? { ...x, shape: e.target.value as GuidedPiece["shape"] } : x))
+                          )
+                        }
+                      >
+                        <option value="rect">Rectangle</option>
+                        <option value="tri">Triangle</option>
+                      </select>
+                    </label>
+                    <label>
+                      Length (in)
+                      <input
+                        type="number"
+                        value={p.lengthIn || ""}
+                        onChange={(e) =>
+                          setGuidedProjectPieces((prev) =>
+                            prev.map((x) => (x.id === p.id ? { ...x, lengthIn: Number(e.target.value) || 0 } : x))
+                          )
+                        }
+                      />
+                    </label>
+                    <label>
+                      Depth / height (in)
+                      <input
+                        type="number"
+                        value={p.depthIn || ""}
+                        onChange={(e) =>
+                          setGuidedProjectPieces((prev) =>
+                            prev.map((x) => (x.id === p.id ? { ...x, depthIn: Number(e.target.value) || 0 } : x))
+                          )
+                        }
+                      />
+                    </label>
+                    <div style={{ display: "flex", alignItems: "flex-end" }}>
+                      <button
+                        type="button"
+                        className="btn secondary"
+                        onClick={() => setGuidedProjectPieces((prev) => prev.filter((x) => x.id !== p.id))}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                <div className="mode-row">
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    onClick={() =>
+                      setGuidedProjectPieces((prev) => [
+                        ...prev,
+                        {
+                          id: `gp-${Math.random().toString(36).slice(2, 9)}`,
+                          pieceType: "counter",
+                          name: "Section",
+                          lengthIn: 0,
+                          depthIn: 25.5,
+                          shape: "rect"
+                        }
+                      ])
+                    }
+                  >
+                    + Add piece
+                  </button>
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    onClick={() => setGuidedProjectPieces(createDefaultRoom(materialGroup).guidedPieces)}
+                  >
+                    L-shape preset
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {quoteWorkflow !== "room_by_room" ? (
+              <>
+                <h3 className="h3">Global add-ons (non — room-by-room)</h3>
+                <div className="grid3">
+                  <label>
+                    Kitchen sink cutouts
+                    <input value={sink} onChange={(e) => setSink(e.target.value)} />
+                  </label>
+                  <label>
+                    Vanity / bar sink cutouts
+                    <input value={bar} onChange={(e) => setBar(e.target.value)} />
+                  </label>
+                  <label>
+                    Cooktop cutouts
+                    <input value={cook} onChange={(e) => setCook(e.target.value)} />
+                  </label>
+                  <label>
+                    Electrical outlet cutouts
+                    <input value={outlet} onChange={(e) => setOutlet(e.target.value)} />
+                  </label>
+                  <label>
+                    ESF stainless sink
+                    <input value={ss} onChange={(e) => setSs(e.target.value)} />
+                  </label>
+                  <label>
+                    Stock Blanco sink
+                    <input value={blanco} onChange={(e) => setBlanco(e.target.value)} />
+                  </label>
+                </div>
+                <label className="check">
+                  <input type="checkbox" checked={tearYes} onChange={(e) => setTearYes(e.target.checked)} />
+                  Tear-out needed
+                </label>
+              </>
+            ) : (
+              <p className="muted small">Add-ons are per room in the room builder above.</p>
+            )}
 
             {quoteMode === "partner" ? (
-              <label>
-                Display markup % (partner retail view)
-                <input value={partnerRetailPct} onChange={(e) => setPartnerRetailPct(e.target.value)} style={{ maxWidth: 140 }} />
-              </label>
+              <div className="grid3" style={{ marginTop: 12 }}>
+                <label>
+                  Partner retail method
+                  <select value={partnerRetailMethod} onChange={(e) => setPartnerRetailMethod(e.target.value)}>
+                    <option>Markup Percent</option>
+                    <option>Margin Percent</option>
+                    <option>Flat Dollar Add</option>
+                    <option>Pass Through</option>
+                  </select>
+                </label>
+                <label>
+                  Display markup % (partner retail view)
+                  <input value={partnerRetailPct} onChange={(e) => setPartnerRetailPct(e.target.value)} style={{ maxWidth: 140 }} />
+                </label>
+              </div>
             ) : null}
           </section>
 
@@ -586,6 +866,8 @@ export default function App() {
             </p>
           ) : null}
 
+          {vanityLocalNote ? <div className="fallback-banner">{vanityLocalNote}</div> : null}
+
           {usedFallback ? (
             <div className="fallback-banner" role="status">
               {demoResult?.fallbackLabel ?? "Demo calculation fallback — backend not connected."}
@@ -593,6 +875,106 @@ export default function App() {
           ) : null}
 
           {calcError ? <p className="error">{calcError}</p> : null}
+
+          {quoteMode === "partner" && localMathCheck ? (
+            <section className="card math-check">
+              <h2>Math check (internal demo)</h2>
+              <p className="muted small">Partner / internal only — mirrors prototype measurement + tier logic for review.</p>
+              <ul className="kv">
+                <li>
+                  <span>Workflow</span>
+                  <strong>{localMathCheck.workflowLabel}</strong>
+                </li>
+                <li>
+                  <span>Qualifying countertop sf (vanity tier)</span>
+                  <strong>{localMathCheck.qualifyingSf.toFixed(2)}</strong>
+                </li>
+                <li>
+                  <span>Vanity tier</span>
+                  <strong>{localMathCheck.vanityTierLabel}</strong>
+                </li>
+                <li>
+                  <span>Countertop sf (totals)</span>
+                  <strong>{localMathCheck.countertopSf.toFixed(2)}</strong>
+                </li>
+                <li>
+                  <span>Backsplash sf</span>
+                  <strong>{localMathCheck.backsplashSf.toFixed(2)}</strong>
+                </li>
+                <li>
+                  <span>Full-height sf</span>
+                  <strong>{localMathCheck.fullHeightSf.toFixed(2)}</strong>
+                </li>
+                <li>
+                  <span>Total scope sf</span>
+                  <strong>{localMathCheck.totalScopeSf.toFixed(2)}</strong>
+                </li>
+                <li>
+                  <span>Reference group rate</span>
+                  <strong>
+                    {localMathCheck.primaryGroup} @ ${localMathCheck.groupRatePerSf}/sf
+                  </strong>
+                </li>
+                <li>
+                  <span>Wholesale (demo)</span>
+                  <strong>${localMathCheck.wholesale.toFixed(2)}</strong>
+                </li>
+                <li>
+                  <span>Retail / public display</span>
+                  <strong>${localMathCheck.retailOrPublic.toFixed(2)}</strong>
+                </li>
+                {localMathCheck.partnerProfit != null ? (
+                  <li>
+                    <span>Partner profit (display)</span>
+                    <strong>${localMathCheck.partnerProfit.toFixed(2)}</strong>
+                  </li>
+                ) : null}
+              </ul>
+              {localMathCheck.measurementLines.length ? (
+                <div style={{ marginTop: 12 }}>
+                  <p className="section-lead">Measurement lines</p>
+                  <ul className="mini-lines">
+                    {localMathCheck.measurementLines.map((ln, i) => (
+                      <li key={i}>{ln}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {localMatrix?.length ? (
+                <div style={{ marginTop: 14 }} className="lines">
+                  <strong>All-group matrix (wholesale → retail @ 20% for demo)</strong>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Group</th>
+                        <th>Wholesale</th>
+                        <th>Retail</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {localMatrix.map((row) => (
+                        <tr key={row.group}>
+                          <td>{row.group}</td>
+                          <td>${row.wholesale.toFixed(2)}</td>
+                          <td>${row.retail.toFixed(2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
+              {localMathCheck.warnings.length ? (
+                <div className="warn-box" style={{ marginTop: 12 }}>
+                  <strong>Warnings</strong>
+                  <ul>
+                    {localMathCheck.warnings.map((w, i) => (
+                      <li key={i}>{w}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </section>
+          ) : null}
 
           <section className="card">
             <p className="section-lead">Full breakdown</p>
@@ -780,6 +1162,10 @@ export default function App() {
           <section className="card notes">
             <h2>What this proves</h2>
             <ul>
+              <li>
+                Measurement UX from the <strong>ESF Quoting Tool v1.01</strong> prototype is being ported into structured,
+                testable modules — not replaced by a single sqft shortcut long term.
+              </li>
               <li>Pricing is moving into Supabase and the eOS Brain — structures and rules replace static HTML spreadsheets.</li>
               <li>
                 <strong>Public retail</strong> protects dealers with at least <strong>25%+</strong> markup on the economics
@@ -855,7 +1241,7 @@ export default function App() {
             <div className="summary-card">
               <h2>Your estimate</h2>
               <p className="muted" style={{ margin: 0 }}>
-                Enter details on the left, then tap <strong>Calculate</strong> to see your summary here.
+                Choose how to measure, enter details, then tap <strong>Calculate</strong>.
               </p>
             </div>
           )}

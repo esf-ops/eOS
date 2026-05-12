@@ -2,6 +2,8 @@
 
 New Vite app: **`app-quote`** (port **5179**). This is a **meeting demo**, not the final public homeowner wizard. The UI is a **light, customer-facing style** with clear “Preview · Not production” and **Demo mode active** messaging when Supabase sign-in is not configured.
 
+**Measurement direction:** The demo now includes a **quote method** picker (manual sq ft, rapid linear, guided shape, room-by-room) aligned to **`docs/reference/quote-prototype/ESF Quoting Tool - v1.01.html`**, with shared math in `app-quote/src/lib/measurementEngine.ts` and `prototypeQuoteMath.ts`. See **`docs/quote-platform/quote-engine-parity-audit.md`** for gaps vs the full prototype.
+
 ## Quick start
 
 ```bash
