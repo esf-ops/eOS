@@ -21,8 +21,17 @@ import { getMondayBoardEnvKeyForQuoteSource, isPublicQuoteSource } from "../quot
 const MONDAY_API_URL = "https://api.monday.com/v2";
 
 const CREATE_ITEM_MUTATION = `
-mutation ($boardId: ID!, $itemName: String!, $columnValues: String!) {
+mutation ($boardId: ID!, $itemName: String!, $columnValues: JSON!) {
   create_item(board_id: $boardId, item_name: $itemName, column_values: $columnValues) {
+    id
+  }
+}
+`;
+
+/** Retry without column_values when Monday rejects encoded columns (still JSON!-free path). */
+const CREATE_ITEM_NAME_ONLY_MUTATION = `
+mutation ($boardId: ID!, $itemName: String!) {
+  create_item(board_id: $boardId, item_name: $itemName) {
     id
   }
 }
@@ -210,6 +219,32 @@ function safeMondayErrorMessage(err) {
   return s;
 }
 
+/**
+ * Dev-safe diagnostics when create_item fails (never logs MONDAY_API_TOKEN).
+ * @param {{
+ *   boardIdPresent: boolean,
+ *   itemName: string,
+ *   columnIds: string[],
+ *   columnValuesVar: unknown,
+ *   columnValuesJson: string
+ * }} ctx
+ */
+function logMondayCreateItemDiagnostics(ctx) {
+  const preview = String(ctx.columnValuesJson || "").slice(0, 500);
+  console.warn("[monday:create_item] diagnostics", {
+    board_id_configured: ctx.boardIdPresent,
+    item_name: ctx.itemName,
+    column_ids: ctx.columnIds,
+    typeof_columnValues: typeof ctx.columnValuesVar,
+    column_values_json_preview: preview
+  });
+}
+
+function extractCreateItemId(json) {
+  const itemIdRaw = json?.data?.create_item?.id;
+  return itemIdRaw != null ? String(itemIdRaw) : null;
+}
+
 async function patchQuoteHeaderMondayIds(db, quoteId, boardId, itemId) {
   if (!db?.from || !quoteId) return;
   try {
@@ -263,8 +298,9 @@ export async function syncQuoteToMonday(params) {
   const estimateSummary = isPublicQuoteSource(quoteSource) ? buildPublicEstimateSummaryCompact(summaryRows) : "";
 
   const columnValuesObj = isPublicQuoteSource(quoteSource) ? buildMondayPublicColumnValues(payload, estimateSummary) : {};
-
-  const columnValuesString = JSON.stringify(columnValuesObj);
+  const columnValuesJson = JSON.stringify(columnValuesObj);
+  const columnIds = Object.keys(columnValuesObj);
+  const boardIdPresent = Boolean(String(boardId || "").trim());
 
   const requestPayload = {
     boardId,
@@ -272,18 +308,23 @@ export async function syncQuoteToMonday(params) {
     quote_source: quoteSource || null,
     item_name: itemName,
     column_values: columnValuesObj,
+    column_values_json: columnValuesJson,
     graphql: "create_item"
   };
 
+  const columnValuesVar = columnValuesJson;
+
+  let json = null;
+  let itemId = null;
+  let firstError = null;
+
   try {
-    const json = await mondayGraphql(token, CREATE_ITEM_MUTATION, {
+    json = await mondayGraphql(token, CREATE_ITEM_MUTATION, {
       boardId: String(boardId),
       itemName,
-      columnValues: columnValuesString
+      columnValues: columnValuesVar
     });
-
-    const itemIdRaw = json?.data?.create_item?.id;
-    const itemId = itemIdRaw != null ? String(itemIdRaw) : null;
+    itemId = extractCreateItemId(json);
     if (!itemId) {
       throw new Error("Monday create_item returned no id");
     }
@@ -311,16 +352,77 @@ export async function syncQuoteToMonday(params) {
       warning: null
     };
   } catch (e) {
-    const errMsg = safeMondayErrorMessage(e);
+    firstError = safeMondayErrorMessage(e);
+    logMondayCreateItemDiagnostics({
+      boardIdPresent,
+      itemName,
+      columnIds,
+      columnValuesVar,
+      columnValuesJson
+    });
+
+    let retryJson = null;
+    let retryItemId = null;
+    let secondError = null;
+    try {
+      retryJson = await mondayGraphql(token, CREATE_ITEM_NAME_ONLY_MUTATION, {
+        boardId: String(boardId),
+        itemName
+      });
+      retryItemId = extractCreateItemId(retryJson);
+      if (!retryItemId) {
+        throw new Error("Monday create_item (name-only) returned no id");
+      }
+    } catch (e2) {
+      secondError = safeMondayErrorMessage(e2);
+    }
+
+    if (retryItemId) {
+      await patchQuoteHeaderMondayIds(db, params.quoteId, boardId, retryItemId);
+
+      const partialWarning =
+        "Your Monday item was created with the quote title only; some columns could not be filled automatically. Elite can update the board.";
+
+      await writeMondaySyncLog({
+        quoteId: params.quoteId,
+        action: params.action || "sync",
+        mondayBoardId: String(boardId),
+        mondayItemId: retryItemId,
+        requestPayload: { ...requestPayload, retry: "create_item_name_only" },
+        responsePayload: {
+          data: retryJson?.data ?? null,
+          columns_attempt_error: firstError.slice(0, 2000),
+          note: "success_partial_columns — item created without column_values after first attempt failed"
+        },
+        status: "success_partial_columns",
+        errorMessage: null,
+        db
+      });
+
+      return {
+        ok: true,
+        skipped: false,
+        status: "success_partial_columns",
+        monday_item_id: retryItemId,
+        monday_board_id: String(boardId),
+        warning: partialWarning
+      };
+    }
+
+    const combinedErr = [firstError, secondError ? `name_only_retry: ${secondError}` : "name_only_retry: (no message)"]
+      .filter(Boolean)
+      .join(" | ")
+      .slice(0, 4000);
+
     await writeMondaySyncLog({
       quoteId: params.quoteId,
       action: params.action || "sync",
       mondayBoardId: String(boardId),
       mondayItemId: null,
       requestPayload,
-      responsePayload: { error: errMsg.slice(0, 500) },
+      responsePayload: { error: combinedErr.slice(0, 500) },
       status: "failed",
-      errorMessage: errMsg,
+      errorMessage: combinedErr,
       db
     });
 

@@ -75,11 +75,23 @@ If `MONDAY_API_TOKEN` or the resolved board ID is missing:
 - `quote_monday_sync_log` gets a row with `status = skipped_missing_config`.
 - `quote_headers.monday_*` is not updated from Monday.
 
+## Column values encoding (`create_item`)
+
+The GraphQL variable `column_values` is typed **`JSON!`**. The server passes **`JSON.stringify(columnValuesObject)`** as the variable value (a JSON-encoded string), which Monday’s API expects for this field.
+
+If that attempt fails, the server logs **dev-only diagnostics** (board configured, item name, column IDs, `typeof columnValues`, first 500 chars of the JSON string — **never** the API token) and **retries once** with `create_item(board_id, item_name)` only (no `column_values`).
+
 ## Behavior when Monday succeeds
 
 - `quote_monday_sync_log`: `status = success`, `monday_board_id`, `monday_item_id` set when the log insert succeeds.
 - `quote_headers`: `monday_board_id` and `monday_item_id` updated when those columns exist.
 - Public JSON may include `monday_item_id`, `monday_board_id`, `monday_sync_status` for optional UI.
+
+## Partial success (column mapping rejected, name-only retry worked)
+
+- `quote_monday_sync_log`: `status = success_partial_columns`, with `monday_item_id` / `monday_board_id` set.
+- `quote_headers` updated with the new item id.
+- The public submit response includes a **warning** that the Monday item was created without populated columns; Elite can fix the board row.
 
 ## Behavior when Monday fails (API error, bad column value, etc.)
 
