@@ -67,3 +67,7 @@
 - SQL: `backend-core/supabase/eos_saas_foundation.sql`
 - Backend helper: `backend-core/src/organizations/organizationContext.js`
 - Quote notes: `docs/quote-platform/quote-saas-readiness-notes.md`
+
+## Related roadmap
+
+See `docs/eliteos/eliteOS-master-head-map.md` for the full eliteOS head roadmap and priority order.

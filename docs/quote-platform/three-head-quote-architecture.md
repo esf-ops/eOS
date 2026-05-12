@@ -117,3 +117,7 @@ Existing / planned (names align with `eos_quote_platform.sql` and follow-on migr
 - **Path separation:** Public consumer origin must not ship partner/internal bundles; until three Vite apps exist, **`app-quote` remains a labeled combined prototype** (see `quote-heads-split-plan.md`).
 
 **Do not deploy** the public origin until public routes are verified safe and penetration-tested for information disclosure.
+
+## Related eliteOS roadmap
+
+Quote Platform is one vertical slice of the broader eliteOS head roadmap. See `docs/eliteos/eliteOS-master-head-map.md`.
