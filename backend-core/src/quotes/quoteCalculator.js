@@ -552,3 +552,78 @@ function buildLineItems(detail, input, totals) {
   }
   return lines;
 }
+
+/** Display order for multi-tier public consumer estimates. */
+export const PUBLIC_CONSUMER_MATERIAL_GROUPS = Object.freeze(Object.keys(PROTOTYPE_TIER_PRICE_PER_SQFT));
+
+/**
+ * Public-safe per-group estimates: countertop / backsplash / add-ons / total per tier.
+ * Does not return wholesale numbers.
+ * @param {Record<string, unknown>} rawInput
+ * @param {{ db?: unknown, rules?: unknown[], structure?: Record<string,unknown> } | Record<string, unknown>} pricingContext
+ */
+export async function computePublicConsumerEstimatesByGroup(rawInput, pricingContext = {}) {
+  const warnings = [];
+  const input = normalizePrototypeQuoteInput({ ...rawInput, quoteSource: "public_retail" });
+  if (input.engine === "rooms" && input.rooms?.length) {
+    warnings.push(
+      "Per-group public comparison for room-by-room engine is not supported yet — use legacy areas for public consumer."
+    );
+    return { ok: true, quote_source: "public_consumer", estimates_by_group: [], warnings, appliedRetailMarkupPercent: null };
+  }
+
+  let resolved = pricingContext;
+  if (!resolved?.rules) {
+    resolved = await resolvePricingStructure({
+      quoteSource: "public_retail",
+      partnerAccountId: null,
+      requestedPricingStructureId: null,
+      db: pricingContext?.db
+    });
+  }
+  const rules = Array.isArray(resolved.rules) ? resolved.rules : prototypeMirrorRules();
+  const m = Number(resolved.effectiveRetailMarkupPercent ?? resolved.structure?.retail_markup_percent ?? MIN_PUBLIC_RETAIL_MARKUP);
+
+  const fromRules = [
+    ...new Set(
+      rules.filter((r) => String(r.category) === "material_group").map((r) => String(r.item_name || "").trim())
+    )
+  ].filter(Boolean);
+  const ordered = fromRules.length
+    ? PUBLIC_CONSUMER_MATERIAL_GROUPS.filter((g) => fromRules.includes(g)).concat(
+        fromRules.filter((g) => !PUBLIC_CONSUMER_MATERIAL_GROUPS.includes(g))
+      )
+    : [...PUBLIC_CONSUMER_MATERIAL_GROUPS];
+
+  const estimates = [];
+  let appliedRetailMarkupPercent = m;
+  for (const group of ordered) {
+    const leg = legacyWholesale({ ...input, materialGroup: group }, rules);
+    const ctW = round2(leg.areas.countertopSqft * leg.rate);
+    const bsW = round2(leg.areas.backsplashSqft * leg.rate);
+    const addW = round2((leg.addOnPart?.total || 0) + (leg.vanityPart?.total || 0));
+    const totalW = round2(leg.wholesale);
+    const prot = applyRetailProtection({
+      wholesale: totalW,
+      retailMarkupPercent: m,
+      pricingMode: "public_retail"
+    });
+    appliedRetailMarkupPercent = prot.appliedMarkupPercent;
+    const mult = totalW > 0 ? prot.retail / totalW : 1;
+    estimates.push({
+      group,
+      countertop: round2(ctW * mult),
+      backsplash: round2(bsW * mult),
+      addons: round2(addW * mult),
+      total: round2(prot.retail)
+    });
+  }
+
+  return {
+    ok: true,
+    quote_source: "public_consumer",
+    estimates_by_group: estimates,
+    warnings,
+    appliedRetailMarkupPercent
+  };
+}

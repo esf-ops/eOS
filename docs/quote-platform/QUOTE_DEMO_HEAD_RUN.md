@@ -41,6 +41,8 @@ VITE_SUPABASE_ANON_KEY=YOUR_ANON_KEY
 - **Without Supabase:** the app shows **Demo mode active** and **Calculate** uses the **gentle labeled prototype fallback** (“Demo calculation fallback — backend not connected.”) with the same tier/add-on rates as `quoteCalculator.js` and **25%+ public retail protection** (no wholesale shown in **Public retail** mode).
 - **With Supabase sign-in:** `POST /api/quote/calculate` and `POST /api/quote/submit` run against the backend when `npm run eos:server` is up and quote tables exist.
 
+**Public consumer (no sign-in):** when the backend is running, **Public retail** mode in `app-quote` calls `POST /api/public-quote/calculate` and can submit leads via `POST /api/public-quote/submit-measurements` (see `docs/quote-platform/three-head-quote-architecture.md`). Apply `backend-core/supabase/eos_quote_public_internal_partner_foundation.sql` for territory and payload audit tables.
+
 ## Production build
 
 ```bash

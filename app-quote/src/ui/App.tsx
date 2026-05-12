@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { apiPostJson, ApiError } from "../lib/api";
+import { apiPostJson, apiPostJsonPublic, ApiError } from "../lib/api";
 import { config, EOS_LOGO_URL } from "../lib/config";
 import type { DemoCalculateResult } from "../lib/demoFallback";
 import { round2, STANDARD_BACKSPLASH_HEIGHT_IN } from "../lib/measurementEngine";
@@ -391,14 +391,42 @@ export default function App() {
     const drafts = buildRoomDraftsForCalculate();
     const needsVanityLocal = roomsNeedLocalVanityMath(drafts);
 
-    if (!sessionToken) {
+    if (needsVanityLocal) {
+      setVanityLocalNote("Vanity program pricing uses local prototype math until the live API mirrors the full room engine.");
       runLocalFromDrafts();
       setCalcBusy(false);
       return;
     }
 
-    if (needsVanityLocal) {
-      setVanityLocalNote("Vanity program pricing uses local prototype math until the live API mirrors the full room engine.");
+    if (quoteMode === "public") {
+      try {
+        const raw = (await apiPostJsonPublic("/api/public-quote/calculate", buildCalcPayload())) as Record<string, unknown>;
+        if (raw && raw.ok === true) {
+          const totals = raw.totals as { retail_planning?: number; estimated_sqft?: number } | undefined;
+          setApiPublic({
+            ok: true,
+            display: "public_retail_safe",
+            totals: {
+              retail: Number(totals?.retail_planning ?? 0),
+              estimated_sqft: Number(totals?.estimated_sqft ?? 0)
+            },
+            snapshot: { estimates_by_group: raw.estimates_by_group },
+            warnings: (raw.warnings as string[]) || []
+          });
+          setUsedFallback(false);
+          commitComparisonFromDrafts(drafts);
+          setCalcBusy(false);
+          return;
+        }
+      } catch {
+        /* fall back to browser demo */
+      }
+      runLocalFromDrafts();
+      setCalcBusy(false);
+      return;
+    }
+
+    if (!sessionToken) {
       runLocalFromDrafts();
       setCalcBusy(false);
       return;
@@ -444,7 +472,7 @@ export default function App() {
       runLocalFromDrafts();
     }
     setCalcBusy(false);
-  }, [sessionToken, buildCalcPayload, buildRoomDraftsForCalculate, runLocalFromDrafts, quoteWorkflow, commitComparisonFromDrafts]);
+  }, [sessionToken, buildCalcPayload, buildRoomDraftsForCalculate, runLocalFromDrafts, quoteWorkflow, commitComparisonFromDrafts, quoteMode]);
 
   const buildSubmitPayload = useCallback(() => {
     return {
@@ -465,8 +493,38 @@ export default function App() {
     const payload = buildSubmitPayload();
 
     try {
+      if (quoteMode === "public") {
+        try {
+          const raw = (await apiPostJsonPublic("/api/public-quote/submit-measurements", payload)) as Record<string, unknown>;
+          setSubmitMsg(
+            String(
+              raw.message ||
+                (raw.quote_number ? `Lead saved. Reference: ${String(raw.quote_number)}` : "Measurements received.")
+            )
+          );
+          setSubmitPreview(JSON.stringify(raw, null, 2));
+        } catch (e: unknown) {
+          if (e instanceof ApiError) {
+            const body = e.body as Record<string, unknown> | string | null;
+            let parsed: Record<string, unknown> | null = null;
+            if (body && typeof body === "object") parsed = body as Record<string, unknown>;
+            const installed = parsed?.installed === false;
+            if (e.status === 503 || installed) {
+              setSubmitMsg("Backend quote tables are not installed in this environment yet. Preview of the payload below.");
+              setSubmitPreview(JSON.stringify({ request: payload, error: body }, null, 2));
+            } else {
+              setSubmitMsg(e.message);
+              setSubmitPreview(JSON.stringify({ request: payload, error: body ?? e.message }, null, 2));
+            }
+          } else {
+            setSubmitMsg(String(e));
+          }
+        }
+        return;
+      }
+
       if (!sessionToken) {
-        setSubmitMsg("Sign in to save a quote to eOS. Below is a preview of the data we would send — nothing is stored yet.");
+        setSubmitMsg("Sign in to save a partner/internal quote to eOS. Below is a preview of the data we would send — nothing is stored yet.");
         setSubmitPreview(JSON.stringify({ ...payload, _demo: true }, null, 2));
         return;
       }
@@ -498,7 +556,7 @@ export default function App() {
     } finally {
       setSubmitBusy(false);
     }
-  }, [sessionToken, buildSubmitPayload]);
+  }, [sessionToken, buildSubmitPayload, quoteMode]);
 
   const backendHint = config.backendBaseUrl;
 
@@ -507,7 +565,14 @@ export default function App() {
 
   const pubRetail = apiPublic?.totals?.retail ?? demoResult?.retail;
   const pubSqft = apiPublic?.totals?.estimated_sqft ?? demoResult?.estimated_sqft;
-  const pubMaterial = quoteMode === "public" && apiPublic ? materialGroup : demoResult?.materialGroup ?? materialGroup;
+  const pubMaterial =
+    quoteMode === "public"
+      ? apiPublic
+        ? "All material tiers (live)"
+        : demoResult
+          ? "All material tiers (demo)"
+          : "All material tiers"
+      : demoResult?.materialGroup ?? materialGroup;
 
   const partWholesale = apiPartner?.totals?.wholesale ?? demoResult?.wholesale;
   const partRetail = apiPartner?.totals?.retail ?? demoResult?.retail;
@@ -637,6 +702,16 @@ export default function App() {
 
       <div className="layout">
         <div className="main-col">
+          <section className="card prototype-scope-banner">
+            <h2>Combined quote prototype</h2>
+            <p className="muted" style={{ marginTop: 0 }}>
+              This head is a <strong>measurement and pricing lab</strong> for eOS. Production will split into{" "}
+              <strong>public consumer</strong>, <strong>internal</strong>, and <strong>partner</strong> apps — one shared
+              quote brain, different UX and permissions. See{" "}
+              <code>docs/quote-platform/three-head-quote-architecture.md</code> and{" "}
+              <code>docs/quote-platform/quote-heads-split-plan.md</code>.
+            </p>
+          </section>
           {supabase ? (
             <section className="card">
               <h2>Account</h2>
@@ -766,18 +841,25 @@ export default function App() {
           </section>
 
           <section className="card">
-            <h2>Scope &amp; materials</h2>
+            <h2>Scope and materials</h2>
             <div className="grid3" style={{ marginBottom: 14 }}>
-              <label>
-                Primary material group (single-flow &amp; defaults)
-                <select value={materialGroup} onChange={(e) => setMaterialGroup(e.target.value)}>
-                  {MATERIAL_GROUPS.map((g) => (
-                    <option key={g} value={g}>
-                      {g}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {quoteMode === "partner" ? (
+                <label>
+                  Primary material group (single-flow and defaults)
+                  <select value={materialGroup} onChange={(e) => setMaterialGroup(e.target.value)}>
+                    {MATERIAL_GROUPS.map((g) => (
+                      <option key={g} value={g}>
+                        {g}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : (
+                <div className="callout" style={{ gridColumn: "1 / -1", margin: 0 }}>
+                  <strong>Public retail:</strong> estimates run for <strong>every material tier</strong> (Promo through F) after
+                  you calculate — you do not need to pick a price group first.
+                </div>
+              )}
             </div>
 
             {quoteWorkflow === "room_by_room" ? (
@@ -1278,10 +1360,15 @@ export default function App() {
               {calcBusy ? "Calculating…" : "Calculate"}
             </button>
             <button type="button" className="btn secondary big" disabled={submitBusy} onClick={() => void handleSubmit()}>
-              {submitBusy ? "Working…" : "Submit quote"}
+              {submitBusy ? "Working…" : quoteMode === "public" ? "Submit measurements" : "Submit quote"}
             </button>
           </div>
-          {!sessionToken ? (
+          {!sessionToken && quoteMode === "public" ? (
+            <p className="muted small" style={{ marginTop: 0 }}>
+              <strong>Submit measurements</strong> sends a public-safe lead to the backend when it is running (no sign-in
+              required). Use <strong>Calculate</strong> to refresh estimates first.
+            </p>
+          ) : !sessionToken ? (
             <p className="muted small" style={{ marginTop: 0 }}>
               <strong>Submit quote</strong> is a preview until you sign in and production storage is configured — use{" "}
               <strong>Calculate</strong> for the main demo.

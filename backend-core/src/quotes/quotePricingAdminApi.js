@@ -661,7 +661,119 @@ export function attachQuotePricingAdminApi(app, { requireAuth, requireRole, requ
     }
   });
 
+  app.get("/api/admin/quote-source-configs", ...adminStack, async (_req, res) => {
+    try {
+      const db = supabaseGetter();
+      const { data, error } = await db.from("quote_source_configs").select("*").order("quote_source");
+      if (error) {
+        if (isMissingRelationError(error)) {
+          return res.status(503).json({ ok: false, installed: false, rows: [], message: "quote_source_configs not installed." });
+        }
+        throw error;
+      }
+      res.json({ ok: true, installed: true, rows: data ?? [] });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  app.post("/api/admin/quote-source-configs", ...adminStack, jsonParser, async (req, res) => {
+    try {
+      const db = supabaseGetter();
+      const row = req.body && typeof req.body === "object" ? req.body : {};
+      const { data, error } = await db.from("quote_source_configs").insert(row).select("*").limit(1);
+      if (error) {
+        if (isMissingRelationError(error)) {
+          return res.status(503).json({ ok: false, installed: false, message: "quote_source_configs not installed." });
+        }
+        throw error;
+      }
+      res.json({ ok: true, row: data?.[0] });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  app.patch("/api/admin/quote-source-configs/:id", ...adminStack, jsonParser, async (req, res) => {
+    try {
+      const id = String(req.params.id || "").trim();
+      if (!isUuid(id)) return res.status(400).json({ ok: false, error: "invalid id" });
+      const db = supabaseGetter();
+      const patch = { ...(req.body || {}), updated_at: new Date().toISOString() };
+      delete patch.id;
+      const { data, error } = await db.from("quote_source_configs").update(patch).eq("id", id).select("*").limit(1);
+      if (error) {
+        if (isMissingRelationError(error)) {
+          return res.status(503).json({ ok: false, installed: false, message: "quote_source_configs not installed." });
+        }
+        throw error;
+      }
+      if (!data?.length) return res.status(404).json({ ok: false, error: "not found" });
+      res.json({ ok: true, row: data[0] });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  app.get("/api/admin/quote-sales-territories", ...adminStack, async (req, res) => {
+    try {
+      const db = supabaseGetter();
+      let q = db.from("quote_sales_territories").select("*").order("priority", { ascending: true });
+      if (String(req.query.activeOnly || "") === "1") {
+        q = q.eq("is_active", true);
+      }
+      const { data, error } = await q;
+      if (error) {
+        if (isMissingRelationError(error)) {
+          return res.status(503).json({ ok: false, installed: false, rows: [], message: "quote_sales_territories not installed." });
+        }
+        throw error;
+      }
+      res.json({ ok: true, installed: true, rows: data ?? [] });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  app.post("/api/admin/quote-sales-territories", ...adminStack, jsonParser, async (req, res) => {
+    try {
+      const db = supabaseGetter();
+      const row = req.body && typeof req.body === "object" ? req.body : {};
+      const { data, error } = await db.from("quote_sales_territories").insert(row).select("*").limit(1);
+      if (error) {
+        if (isMissingRelationError(error)) {
+          return res.status(503).json({ ok: false, installed: false, message: "quote_sales_territories not installed." });
+        }
+        throw error;
+      }
+      res.json({ ok: true, row: data?.[0] });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  app.patch("/api/admin/quote-sales-territories/:id", ...adminStack, jsonParser, async (req, res) => {
+    try {
+      const id = String(req.params.id || "").trim();
+      if (!isUuid(id)) return res.status(400).json({ ok: false, error: "invalid id" });
+      const db = supabaseGetter();
+      const patch = { ...(req.body || {}), updated_at: new Date().toISOString() };
+      delete patch.id;
+      const { data, error } = await db.from("quote_sales_territories").update(patch).eq("id", id).select("*").limit(1);
+      if (error) {
+        if (isMissingRelationError(error)) {
+          return res.status(503).json({ ok: false, installed: false, message: "quote_sales_territories not installed." });
+        }
+        throw error;
+      }
+      if (!data?.length) return res.status(404).json({ ok: false, error: "not found" });
+      res.json({ ok: true, row: data[0] });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
   console.log(
-    "[quote-pricing-admin] mounted GET/PATCH quote-pricing-structures*, quote-pricing-rules*, quote-partners*, pricing-assignment, quotes*, quote-analytics/summary"
+    "[quote-pricing-admin] mounted quote-pricing-structures*, quote-pricing-rules*, quote-partners*, pricing-assignment, quotes*, quote-analytics/summary, quote-source-configs*, quote-sales-territories*"
   );
 }

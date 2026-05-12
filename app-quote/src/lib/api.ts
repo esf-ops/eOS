@@ -16,6 +16,31 @@ export class ApiError extends Error {
   }
 }
 
+/** POST JSON without auth — for public quote endpoints only. */
+export async function apiPostJsonPublic(path: string, body: unknown): Promise<unknown> {
+  const url = joinBackendUrl(path);
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  const text = await res.text();
+  let json: unknown = null;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    // ignore
+  }
+  if (!res.ok) {
+    const msg =
+      typeof json === "object" && json && "error" in json
+        ? String((json as { error?: string }).error)
+        : text.slice(0, 200);
+    throw new ApiError(msg || `HTTP ${res.status}`, res.status, json ?? text);
+  }
+  return json;
+}
+
 export async function apiPostJson(path: string, token: string, body: unknown): Promise<unknown> {
   const t = String(token || "").trim();
   if (!t) throw new ApiError("Sign in required for live API", 401, null);

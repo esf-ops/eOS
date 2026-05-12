@@ -80,10 +80,38 @@ All under `requireAuth` + `admin` role + `system_admin` head. JSON errors: `{ ok
 | GET | `/api/admin/quote-analytics/summary` |
 | GET | `/api/admin/quotes`, `/api/admin/quotes/:id` |
 
-## 8. Optional UI stub
+## 8. Quote source config and sales territories (foundation)
 
-System Admin app includes a **“Quote pricing (preview)”** nav entry that opens a placeholder panel pointing to this document and listing the endpoints above. Full grids ship in a later iteration.
+**Tables:** `quote_source_configs`, `quote_sales_territories` (see `backend-core/supabase/eos_quote_public_internal_partner_foundation.sql`).
 
-## 9. Quote Catalog Admin (future)
+**Admin capabilities (backend):**
+
+- List / create / update **quote source configs** — maps `public_consumer` | `internal_quote` | `partner_quote` to Monday board env key names, `requires_auth`, `public_safe`, default pricing structure code.
+- List / create / update **sales territories** — match type (`zip`, `city`, `county`, `state`, `branch`, `manual`) + `match_value` → assigned rep / branch / email; `priority` for ordering.
+
+**Catalog visibility (future columns or `metadata` on catalog items):**
+
+- `public_visible`, `partner_visible`, `internal_only`, `requires_review` — until columns exist, store in `metadata` JSON and enforce in list APIs for each head.
+
+**Monday board configuration:** Board IDs remain **env-only** (no tokens in DB). `monday_board_env_key` on `quote_source_configs` documents which env var to read at runtime.
+
+**Public retail rule:** Admin cannot persist `public_retail` with markup below **25%** — enforced in DB (`eos_quote_platform.sql`) and in `quotePricingAdminApi.js` + `quoteCalculator.js`.
+
+### Admin API additions
+
+| Method | Path |
+|--------|------|
+| GET | `/api/admin/quote-source-configs` |
+| POST | `/api/admin/quote-source-configs` |
+| PATCH | `/api/admin/quote-source-configs/:id` |
+| GET | `/api/admin/quote-sales-territories` |
+| POST | `/api/admin/quote-sales-territories` |
+| PATCH | `/api/admin/quote-sales-territories/:id` |
+
+## 9. Optional UI stub
+
+System Admin app includes a **“Quote pricing (preview)”** nav entry that opens a placeholder panel pointing to this document and listing the endpoints above. Full grids ship in a later iteration. **Quote source configs** and **territories** should appear as simple tables in a follow-up UI pass.
+
+## 10. Quote Catalog Admin (future)
 
 The Pricing Admin Head evolves into a **Quote Catalog Admin**: programs and SKUs as data (`quote_programs`, `quote_catalog_items`, …), with **per–pricing-structure** prices in `quote_catalog_pricing_rules`. Public channels only receive **public-safe** catalog projections (no protected wholesale fields). See **`quote-catalog-admin-architecture.md`** and the additive SQL **`backend-core/supabase/eos_quote_catalog_schema.sql`**.
