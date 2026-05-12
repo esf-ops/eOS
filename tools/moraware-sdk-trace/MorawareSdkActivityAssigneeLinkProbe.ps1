@@ -453,27 +453,270 @@ function New-SanitizedActivityPropertyDigest {
         }
         public_properties_sample = @($props.ToArray())
         search_blob_joined       = ([string]::Join(" ", @($searchBlob.ToArray())))
+        search_blob_note         = "diagnostic_only_not_used_for_trusted_hits"
     }
 }
 
-function Test-HitKnownResourceTokens {
-    param([string]$Text, [int[]]$KnownIds, [string[]]$NameNeedles)
-    $hits = New-Object System.Collections.Generic.List[string]
-    if ([string]::IsNullOrEmpty($Text)) { return @($hits.ToArray()) }
+function Test-PropertyExcludedFromResourceHit {
+    param([string]$PropName, [type]$PropType)
+    if ([string]::IsNullOrEmpty($PropName)) { return $true }
+    $pl = $PropName.ToLowerInvariant()
+    foreach ($ex in @("jobid", "jobactivityid", "jobactivitytypeid", "jobactivitystatusid", "parentjobactivityid")) {
+        if ($pl -eq $ex) { return $true }
+    }
+    foreach ($ex2 in @("jobactivitytypename", "activitytypename", "activitytype", "jobactivitytype")) {
+        if ($pl -eq $ex2) { return $true }
+    }
+    if ($PropType -eq [DateTime]) { return $true }
+    try {
+        if ([DateTime].IsAssignableFrom($PropType)) { return $true }
+    } catch { }
+    $tn = $PropType.FullName
+    if (-not [string]::IsNullOrEmpty($tn) -and $tn.IndexOf("System.DateTime", [StringComparison]::OrdinalIgnoreCase) -ge 0) { return $true }
+    if ($pl -match "(time|date|duration)($|_)") { return $true }
+    if ($pl -match "^scheduled") { return $true }
+    if ($pl -match "^(start|end)(time|date)") { return $true }
+    return $false
+}
+
+function Test-IsAssignmentOrResourceFieldName {
+    param([string]$PropName)
+    if ([string]::IsNullOrEmpty($PropName)) { return $false }
+    if (Test-PropertyExcludedFromResourceHit $PropName ([int32])) { return $false }
+    return $PropName -match "(?i)(Assignee|Assigned|Assignment|Resource|Machine|WorkCenter|Station|Calendar|ScheduleResource)"
+}
+
+function Get-Int64ExactIfIntegralScalar {
+    param($Value)
+    if ($null -eq $Value) { return $null }
+    if ($Value -is [bool]) { return $null }
+    if ($Value -is [byte] -or $Value -is [sbyte] -or $Value -is [int16] -or $Value -is [uint16] -or $Value -is [int32] -or $Value -is [uint32] -or $Value -is [int64] -or $Value -is [uint64]) {
+        return [int64]$Value
+    }
+    if ($Value -is [decimal]) {
+        $d = [decimal]$Value
+        if ($d -ne [decimal]::Floor($d)) { return $null }
+        try { return [int64]$d } catch { return $null }
+    }
+    if ($Value -is [double] -or $Value -is [float]) {
+        $df = [double]$Value
+        if ([double]::IsNaN($df)) { return $null }
+        $r = [math]::Round($df, 0)
+        if ([math]::Abs($df - $r) -gt 0.0000001) { return $null }
+        try { return [int64]$r } catch { return $null }
+    }
+    if ($Value -is [string]) {
+        $t = [string]$Value
+        if ([string]::IsNullOrWhiteSpace($t)) { return $null }
+        $iv = 0
+        if ([int64]::TryParse($t.Trim(), [ref]$iv)) { return $iv }
+        return $null
+    }
+    if ($Value.GetType().IsEnum) {
+        try {
+            $u = [System.Convert]::ChangeType($Value, [int64])
+            return [int64]$u
+        } catch {
+            try { return [int64][int32]$Value } catch { return $null }
+        }
+    }
+    return $null
+}
+
+function New-TrustedHitRow {
+    param([string]$FieldName, [string]$FieldType, [string]$Preview, [int]$MatchedId, [string]$MatchedName, [string]$Reason)
+    return [ordered]@{
+        field_name             = $FieldName
+        field_type             = $FieldType
+        field_value_preview    = $Preview
+        matched_assignee_id    = ([string]$MatchedId)
+        matched_assignee_name  = $MatchedName
+        match_reason           = $Reason
+    }
+}
+
+function Get-TrustedResourceHitsFromActivity {
+    param($Activity, [int[]]$KnownIds, [hashtable]$CatalogIdToName, [string[]]$NameNeedles)
+    $hits = New-Object System.Collections.Generic.List[object]
+    if ($null -eq $Activity) { return @($hits.ToArray()) }
+    $knownSet = @{}
+    foreach ($k in $KnownIds) { if ($k -gt 0) { $knownSet[[string][int64]$k] = $true } }
+    foreach ($p in $Activity.GetType().GetProperties([System.Reflection.BindingFlags]"Public,Instance")) {
+        if (-not $p.CanRead) { continue }
+        if (Test-BlockedPreviewName $p.Name) { continue }
+        if (Test-PropertyExcludedFromResourceHit $p.Name $p.PropertyType) { continue }
+        if (-not (Test-IsAssignmentOrResourceFieldName $p.Name)) { continue }
+        $val = $null
+        try { $val = $p.GetValue($Activity, $null) } catch { continue }
+        if ($null -eq $val) { continue }
+        $iv = Get-Int64ExactIfIntegralScalar $val
+        if ($null -ne $iv -and $knownSet.ContainsKey([string]$iv)) {
+            $mn = ""
+            $sk = [string][int64]$iv
+            if ($CatalogIdToName.ContainsKey($sk)) { $mn = [string]$CatalogIdToName[$sk] }
+            $pv = Format-Scalar $val
+            if ($pv.Length -gt 120) { $pv = $pv.Substring(0, 120) }
+            [void]$hits.Add((New-TrustedHitRow $p.Name $p.PropertyType.FullName $pv ([int]$iv) $mn "exact_numeric_on_assignment_field"))
+            continue
+        }
+        if ($val -is [string]) {
+            $sv = [string]$val
+            if ([string]::IsNullOrWhiteSpace($sv)) { continue }
+            foreach ($nid in $KnownIds) {
+                if ($nid -le 0) { continue }
+                $ids = [string]$nid
+                if ($sv.Trim() -eq $ids) {
+                    $mn2 = ""
+                    $sk2 = [string]$nid
+                    if ($CatalogIdToName.ContainsKey($sk2)) { $mn2 = [string]$CatalogIdToName[$sk2] }
+                    $pv2 = $sv
+                    if ($pv2.Length -gt 120) { $pv2 = $pv2.Substring(0, 120) }
+                    [void]$hits.Add((New-TrustedHitRow $p.Name $p.PropertyType.FullName $pv2 $nid $mn2 "exact_string_id_on_assignment_field"))
+                }
+            }
+                foreach ($nd in $NameNeedles) {
+                    if ([string]::IsNullOrWhiteSpace($nd)) { continue }
+                    if ($sv.IndexOf($nd, [StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
+                    $matchedId = 0
+                    $matchedNm = ""
+                    foreach ($kidStr in $CatalogIdToName.Keys) {
+                        $cn = [string]$CatalogIdToName[$kidStr]
+                        if ([string]::IsNullOrWhiteSpace($cn)) { continue }
+                        if ($cn.IndexOf($nd, [StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
+                        $ik = 0
+                        if (-not [int32]::TryParse([string]$kidStr, [ref]$ik)) { continue }
+                        $matchedId = $ik
+                        $matchedNm = $cn
+                        break
+                    }
+                $pvs = $sv
+                if ($pvs.Length -gt 120) { $pvs = $pvs.Substring(0, 120) }
+                if ($matchedId -gt 0) {
+                    [void]$hits.Add((New-TrustedHitRow $p.Name $p.PropertyType.FullName $pvs $matchedId $matchedNm "name_needle_on_assignment_field_string"))
+                }
+            }
+        }
+    }
+    $asg = Get-AssigneesCollectionInspection $Activity 50
+    $ri = 0
+    foreach ($rw in $asg["rows"]) {
+        if ($null -eq $rw) { continue }
+        $rawId = $rw["assignee_id"]
+        $iv2 = 0
+        if (-not [int32]::TryParse([string]$rawId, [ref]$iv2)) { continue }
+        if ($iv2 -le 0) { continue }
+        if (-not $knownSet.ContainsKey([string][int64]$iv2)) { continue }
+        $mn3 = [string]$rw["assignee_name"]
+        if ([string]::IsNullOrWhiteSpace($mn3) -and $CatalogIdToName.ContainsKey([string]$iv2)) { $mn3 = [string]$CatalogIdToName[[string]$iv2] }
+        $pv3 = "id=" + [string]$rawId + " name=" + $mn3
+        if ($pv3.Length -gt 120) { $pv3 = $pv3.Substring(0, 120) }
+        $fname = "Assignees[" + ([string]$ri) + "]"
+        if ($null -ne $asg["assignees_property_name"]) {
+            $fname = [string]$asg["assignees_property_name"] + "[" + ([string]$ri) + "]"
+        }
+        [void]$hits.Add((New-TrustedHitRow $fname "row" $pv3 $iv2 $mn3 "assignee_collection_row_id_match"))
+        $ri++
+    }
+    return @($hits.ToArray())
+}
+
+function Get-UntrustedSubstringGhostHits {
+    param([string]$Blob, [int[]]$KnownIds, [string[]]$NameNeedles, [hashtable]$TrustedIdSet)
+    $out = New-Object System.Collections.Generic.List[object]
+    if ([string]::IsNullOrEmpty($Blob)) { return @($out.ToArray()) }
     foreach ($nid in $KnownIds) {
         if ($nid -le 0) { continue }
         $s = [string]$nid
-        if ($Text.IndexOf($s, [StringComparison]::Ordinal) -ge 0) {
-            [void]$hits.Add("id:" + $s)
-        }
+        if ($Blob.IndexOf($s, [StringComparison]::Ordinal) -lt 0) { continue }
+        if ($TrustedIdSet.ContainsKey([string]$nid)) { continue }
+        [void]$out.Add([ordered]@{
+            field_name          = "(joined_blob_substring)"
+            field_type          = "n/a"
+            field_value_preview = "id_fragment:" + $s
+            matched_assignee_id   = $s
+            matched_assignee_name = ""
+            match_reason          = "substring_collision_not_field_exact"
+        })
     }
     foreach ($nd in $NameNeedles) {
         if ([string]::IsNullOrWhiteSpace($nd)) { continue }
-        if ($Text.IndexOf($nd, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
-            [void]$hits.Add("name:" + $nd)
+        if ($Blob.IndexOf($nd, [StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
+        [void]$out.Add([ordered]@{
+            field_name          = "(joined_blob_substring)"
+            field_type          = "n/a"
+            field_value_preview = "name_fragment:" + $nd
+            matched_assignee_id   = ""
+            matched_assignee_name = ""
+            match_reason          = "substring_name_on_non_assignment_context"
+        })
+    }
+    return @($out.ToArray())
+}
+
+function Get-TypeNameFieldGhostHits {
+    param($Activity, [string[]]$NameNeedles)
+    $out = New-Object System.Collections.Generic.List[object]
+    if ($null -eq $Activity) { return @($out.ToArray()) }
+    foreach ($pn in @("JobActivityTypeName", "ActivityTypeName", "JobActivityType", "ActivityType")) {
+        $p = $Activity.GetType().GetProperty($pn, [System.Reflection.BindingFlags]"Public,Instance")
+        if (-not $p -or -not $p.CanRead) { continue }
+        $val = $null
+        try { $val = $p.GetValue($Activity, $null) } catch { continue }
+        if ($null -eq $val) { continue }
+        $sv = Format-Scalar $val
+        if ([string]::IsNullOrWhiteSpace($sv)) { continue }
+        foreach ($nd in $NameNeedles) {
+            if ($sv.IndexOf($nd, [StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
+            $pv = $sv
+            if ($pv.Length -gt 120) { $pv = $pv.Substring(0, 120) }
+            [void]$out.Add([ordered]@{
+                field_name             = $pn
+                field_type             = $p.PropertyType.FullName
+                field_value_preview    = $pv
+                matched_assignee_id    = ""
+                matched_assignee_name  = ""
+                match_reason           = "activity_type_field_name_hit_not_assignment"
+            })
         }
     }
-    return @($hits.ToArray())
+    return @($out.ToArray())
+}
+
+function Test-MaterialRequiresInventoryEdition {
+    param([string]$Message)
+    if ([string]::IsNullOrWhiteSpace($Message)) { return $false }
+    return $Message.IndexOf("This operation requires Moraware JobTracker Inventory Edition", [StringComparison]::OrdinalIgnoreCase) -ge 0
+}
+
+function New-TrustedIdSetFromHits {
+    param($TrustedHitsArray)
+    $h = @{}
+    foreach ($hrow in $TrustedHitsArray) {
+        if ($null -eq $hrow) { continue }
+        $mid = [string]$hrow["matched_assignee_id"]
+        if ([string]::IsNullOrWhiteSpace($mid)) { continue }
+        $iv = 0
+        if ([int32]::TryParse($mid, [ref]$iv)) {
+            if ($iv -gt 0) { $h[[string]$iv] = $true }
+        }
+    }
+    return $h
+}
+
+function Format-HitRowsCompactForCsv {
+    param($HitsArr)
+    if ($null -eq $HitsArr) { return "" }
+    $arr = Convert-ToObjectArray $HitsArr
+    if ($arr.Length -eq 0) { return "" }
+    $parts = New-Object System.Collections.ArrayList
+    foreach ($h in $arr) {
+        if ($null -eq $h) { continue }
+        $pv = ""
+        if ($null -ne $h["field_value_preview"]) { $pv = [string]$h["field_value_preview"] }
+        if ($pv.Length -gt 40) { $pv = $pv.Substring(0, 40) }
+        [void]$parts.Add([string]$h["field_name"] + ";" + [string]$h["match_reason"] + ";" + [string]$h["matched_assignee_id"] + ";" + $pv)
+    }
+    return [string]::Join("|", @($parts.ToArray()))
 }
 
 function Escape-CsvField {
@@ -546,14 +789,16 @@ $report = [ordered]@{
     }
     activities_tested = (New-Object System.Collections.Generic.List[object])
     aggregate = @{
-        activities_tested_n          = 0
-        get_job_activity_ok_n        = 0
-        get_job_activity_fail_n      = 0
-        assignees_populated_any      = $false
-        known_resource_hit_any       = $false
-        series_calls_attempted       = 0
-        series_calls_ok              = 0
-        material_per_activity_ok_any = $false
+        activities_tested_n                      = 0
+        get_job_activity_ok_n                  = 0
+        get_job_activity_fail_n                = 0
+        assignees_populated_any                = $false
+        trusted_resource_hit_any               = $false
+        untrusted_text_hit_any                 = $false
+        material_inventory_edition_required_any = $false
+        series_calls_attempted                 = 0
+        series_calls_ok                        = 0
+        material_per_activity_ok_any           = $false
     }
     candidate_assignment_fields = (New-Object System.Collections.Generic.List[string])
     recommended_next_step         = ""
@@ -633,30 +878,34 @@ try {
     $connected = $true
 
     $catalogIds = New-Object System.Collections.Generic.List[int]
+    $catalogIdToName = @{}
     try {
         $allAssignees = Invoke-ConnMethod $conn "GetAssignees" ([object[]]@()) ([type[]]@())
         $arrA = Convert-ToObjectArray $allAssignees
         foreach ($ag in $arrA) {
             if ($null -eq $ag) { continue }
             $nm = Format-Scalar (Get-PropValue $ag @("Name", "AssigneeName", "DisplayName", "FullName", "Title"))
-            $hitN = $false
-            foreach ($nd in $nameNeedles) {
-                if (-not [string]::IsNullOrWhiteSpace($nm) -and $nm.IndexOf($nd, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
-                    $hitN = $true
-                    break
-                }
-            }
-            if (-not $hitN) { continue }
             $rawId = Get-PropValue $ag @("AssigneeId", "AssigneeID", "Id", "ResourceId", "EmployeeId", "UserId")
             $iv = 0
             if ($null -ne $rawId -and [int32]::TryParse([string]$rawId, [ref]$iv)) {
-                if ($iv -gt 0) { [void]$catalogIds.Add($iv) }
+                if ($iv -gt 0) {
+                    $catalogIdToName[[string]$iv] = $nm
+                    $hitN = $false
+                    foreach ($nd in $nameNeedles) {
+                        if (-not [string]::IsNullOrWhiteSpace($nm) -and $nm.IndexOf($nd, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                            $hitN = $true
+                            break
+                        }
+                    }
+                    if ($hitN) { [void]$catalogIds.Add($iv) }
+                }
             }
         }
     } catch {
         $report["get_assignees_warning"] = $_.Exception.Message
     }
     $report["known_resource_hints"]["assignee_ids_from_catalog"] = @($catalogIds.ToArray())
+    $report["known_resource_hints"]["assignee_catalog_id_count"] = $catalogIdToName.Count
     $knownIdUnion = New-Object System.Collections.Generic.List[int]
     foreach ($x in $staticHintIds) { [void]$knownIdUnion.Add($x) }
     foreach ($x in $catalogIds) { if (-not $knownIdUnion.Contains($x)) { [void]$knownIdUnion.Add($x) } }
@@ -693,14 +942,16 @@ try {
     foreach ($aid in $targetIds) {
         $report["aggregate"]["activities_tested_n"] = [int]$report["aggregate"]["activities_tested_n"] + 1
         $one = [ordered]@{
-            activity_id                = ([string][int32]$aid)
-            bulk_snapshot              = $null
-            get_job_activity           = [ordered]@{ ok = $false; error = $null; digest = $null }
-            comparison                 = $null
-            series_probe               = [ordered]@{ attempted = $false; series_id = $null; ok = $false; error = $null; signature_used = $null }
-            material_per_activity      = [ordered]@{ attempted = $false; ok = $false; error = $null; row_count = 0 }
-            known_resource_hits_detail = @()
-            known_resource_hits_bulk     = @()
+            activity_id                      = ([string][int32]$aid)
+            bulk_snapshot                    = $null
+            get_job_activity                 = [ordered]@{ ok = $false; error = $null; digest = $null }
+            comparison                       = $null
+            series_probe                     = [ordered]@{ attempted = $false; series_id = $null; ok = $false; error = $null; signature_used = $null }
+            material_per_activity            = [ordered]@{ attempted = $false; ok = $false; error = $null; row_count = 0; material_unavailable_requires_inventory_edition = $false }
+            trusted_resource_hits_detail     = @()
+            untrusted_text_hits_detail       = @()
+            trusted_resource_hits_bulk       = @()
+            untrusted_text_hits_bulk         = @()
         }
 
         $bulkObj = $null
@@ -709,6 +960,23 @@ try {
         }
         if ($null -ne $bulkObj) {
             $one["bulk_snapshot"] = New-ActivityLightSnapshot $bulkObj
+            $trustedBulk = Get-TrustedResourceHitsFromActivity $bulkObj $knownIdArr $catalogIdToName $nameNeedles
+            $one["trusted_resource_hits_bulk"] = @($trustedBulk)
+            if ($trustedBulk.Length -gt 0) {
+                $report["aggregate"]["trusted_resource_hit_any"] = $true
+            }
+            $bulkDig = New-SanitizedActivityPropertyDigest $bulkObj 50 15
+            $blobBulk = [string]$bulkDig["search_blob_joined"]
+            $tsBulk = New-TrustedIdSetFromHits $trustedBulk
+            $uSubB = Get-UntrustedSubstringGhostHits $blobBulk $knownIdArr $nameNeedles $tsBulk
+            $uTypB = Get-TypeNameFieldGhostHits $bulkObj $nameNeedles
+            $uMergeB = New-Object System.Collections.ArrayList
+            foreach ($ub in $uSubB) { if ($null -ne $ub) { [void]$uMergeB.Add($ub) } }
+            foreach ($ub in $uTypB) { if ($null -ne $ub) { [void]$uMergeB.Add($ub) } }
+            $one["untrusted_text_hits_bulk"] = @($uMergeB.ToArray())
+            if ($uMergeB.Count -gt 0) {
+                $report["aggregate"]["untrusted_text_hit_any"] = $true
+            }
         }
 
         try {
@@ -717,7 +985,6 @@ try {
             $report["aggregate"]["get_job_activity_ok_n"] = [int]$report["aggregate"]["get_job_activity_ok_n"] + 1
             $dig = New-SanitizedActivityPropertyDigest $detail 60 25
             $one["get_job_activity"]["digest"] = $dig
-            $blobD = [string]$dig["search_blob_joined"]
             foreach ($pr in $dig["public_properties_sample"]) {
                 if ($null -eq $pr) { continue }
                 $pn = [string]$pr["name"]
@@ -728,18 +995,25 @@ try {
                     }
                 }
             }
-            $asgRows = $dig["assignees_inspection"]["rows"]
-            foreach ($r in $asgRows) {
-                if ($null -eq $r) { continue }
-                $blobD = $blobD + " " + [string]$r["assignee_id"] + " " + [string]$r["assignee_name"]
-            }
-            $hitsD2 = Test-HitKnownResourceTokens $blobD $knownIdArr $nameNeedles
-            $one["known_resource_hits_detail"] = @($hitsD2)
             if ($dig["assignees_inspection"]["assignees_populated"]) {
                 $report["aggregate"]["assignees_populated_any"] = $true
             }
-            if ($hitsD2.Length -gt 0) {
-                $report["aggregate"]["known_resource_hit_any"] = $true
+
+            $trustedDet = Get-TrustedResourceHitsFromActivity $detail $knownIdArr $catalogIdToName $nameNeedles
+            $one["trusted_resource_hits_detail"] = @($trustedDet)
+            if ($trustedDet.Length -gt 0) {
+                $report["aggregate"]["trusted_resource_hit_any"] = $true
+            }
+            $tsDet = New-TrustedIdSetFromHits $trustedDet
+            $blobDet = [string]$dig["search_blob_joined"]
+            $uSubD = Get-UntrustedSubstringGhostHits $blobDet $knownIdArr $nameNeedles $tsDet
+            $uTypD = Get-TypeNameFieldGhostHits $detail $nameNeedles
+            $uMergeD = New-Object System.Collections.ArrayList
+            foreach ($ud in $uSubD) { if ($null -ne $ud) { [void]$uMergeD.Add($ud) } }
+            foreach ($ud in $uTypD) { if ($null -ne $ud) { [void]$uMergeD.Add($ud) } }
+            $one["untrusted_text_hits_detail"] = @($uMergeD.ToArray())
+            if ($uMergeD.Count -gt 0) {
+                $report["aggregate"]["untrusted_text_hit_any"] = $true
             }
 
             $sidRaw = Get-PropValue $detail @("JobActivitySeriesId", "ActivitySeriesId", "SeriesId", "JobActivitySeriesID", "JobActivitySeriesId")
@@ -783,6 +1057,10 @@ try {
                 $em2 = $_.Exception.Message
                 if ($_.Exception.InnerException) { $em2 = $_.Exception.InnerException.Message }
                 $one["material_per_activity"]["error"] = $em2
+                if (Test-MaterialRequiresInventoryEdition $em2) {
+                    $one["material_per_activity"]["material_unavailable_requires_inventory_edition"] = $true
+                    $report["aggregate"]["material_inventory_edition_required_any"] = $true
+                }
             }
         }
         catch {
@@ -807,12 +1085,6 @@ try {
             $one["comparison"] = $cmp
         }
 
-        if ($null -ne $bulkObj) {
-            $bs = New-ActivityLightSnapshot $bulkObj
-            $blobB = (Get-ActivityPickerLabel $bulkObj) + " " + $bs["scheduled_time"] + " " + $bs["scheduled_duration"]
-            $one["known_resource_hits_bulk"] = @(Test-HitKnownResourceTokens $blobB $knownIdArr $nameNeedles)
-        }
-
         [void]$report["activities_tested"].Add($one)
     }
 
@@ -820,17 +1092,20 @@ try {
         $report["classification"] = "ok"
     }
 
-    if ($report["aggregate"]["assignees_populated_any"] -and $report["aggregate"]["known_resource_hit_any"]) {
-        $report["recommended_next_step"] = "Assignees populated with catalog/name hits: correlate activity_id to assignee_id in integration; confirm schedule APIs if calendar linkage needed."
+    if ($report["aggregate"]["assignees_populated_any"] -and $report["aggregate"]["trusted_resource_hit_any"]) {
+        $report["recommended_next_step"] = "Assignees populated with trusted resource id/name hits on assignment fields: wire activity_id to matched_assignee_id from trusted rows; validate schedule linkage separately."
     }
     elseif ($report["aggregate"]["assignees_populated_any"]) {
-        $report["recommended_next_step"] = "Assignees populated but no Titan/Saber/Robot/Polish name hits in scalar blob: inspect nested objects or additional Get* overloads (series/material already probed)."
+        $report["recommended_next_step"] = "Assignees populated but no trusted catalog id hits on assignment fields: inspect nested DTOs or series/material payloads; ignore untrusted substring matches in joined blobs."
     }
-    elseif ($report["aggregate"]["known_resource_hit_any"]) {
-        $report["recommended_next_step"] = "Hits found in text fields without Assignees collection population: map fields exposing resource ids; avoid relying on Assignees alone."
+    elseif ($report["aggregate"]["trusted_resource_hit_any"]) {
+        $report["recommended_next_step"] = "Trusted hits on assignment scalars without populated Assignees collection: prefer explicit id fields found in trusted_resource_hits_*."
+    }
+    elseif ($report["aggregate"]["untrusted_text_hit_any"]) {
+        $report["recommended_next_step"] = "Only untrusted substring/type-label collisions detected: do not infer resource assignment from joined_blob or JobActivityTypeName; probe JobActivitySeries or other Connection methods."
     }
     else {
-        $report["recommended_next_step"] = "No assignee rows and no string hits: probe JobActivitySeries payload fields, material rows, or assignment-related Connection methods listed in connection_methods_name_match."
+        $report["recommended_next_step"] = "No trusted hits: probe JobActivitySeries payload fields, inventory-enabled material APIs, or assignment-related Connection methods listed in connection_methods_name_match."
     }
 }
 catch {
@@ -880,7 +1155,9 @@ finally {
     [void]$txt.Add(("get_job_activity_ok: {0}" -f $report["aggregate"]["get_job_activity_ok_n"]))
     [void]$txt.Add(("get_job_activity_fail: {0}" -f $report["aggregate"]["get_job_activity_fail_n"]))
     [void]$txt.Add(("assignees_populated_any: {0}" -f $report["aggregate"]["assignees_populated_any"]))
-    [void]$txt.Add(("known_resource_hit_any: {0}" -f $report["aggregate"]["known_resource_hit_any"]))
+    [void]$txt.Add(("trusted_resource_hit_any: {0}" -f $report["aggregate"]["trusted_resource_hit_any"]))
+    [void]$txt.Add(("untrusted_text_hit_any: {0}" -f $report["aggregate"]["untrusted_text_hit_any"]))
+    [void]$txt.Add(("material_inventory_edition_required_any: {0}" -f $report["aggregate"]["material_inventory_edition_required_any"]))
     [void]$txt.Add("activity_pick_strategy: " + (Format-Scalar $report["inputs"]["activity_pick_strategy"]))
     $stBulk = ""
     $stDet = ""
@@ -925,6 +1202,29 @@ finally {
         [void]$txt.Add(("  activity_id={0} bulk_sched={1} bulk_dur={2} detail_sched={3} detail_dur={4}" -f $idb, $stdb, $sddb, $stdd, $sddd))
         $ti++
     }
+    [void]$txt.Add("Trusted resource hits (detail, up to 10 activities, first 3 hits each):")
+    $tj = 0
+    foreach ($x in $actsArr) {
+        if ($tj -ge 10) { break }
+        if ($null -eq $x) { continue }
+        $th = $x["trusted_resource_hits_detail"]
+        if ($null -eq $th) { $tj++; continue }
+        $thArr = Convert-ToObjectArray $th
+        [void]$txt.Add(("  activity_id={0}" -f $x["activity_id"]))
+        if ($thArr.Length -eq 0) {
+            [void]$txt.Add("    (no trusted hits)")
+        }
+        else {
+            $hk = 0
+            foreach ($hr in $thArr) {
+                if ($hk -ge 3) { break }
+                if ($null -eq $hr) { continue }
+                [void]$txt.Add(("    field={0} reason={1} matched_id={2} preview={3}" -f $hr["field_name"], $hr["match_reason"], $hr["matched_assignee_id"], $hr["field_value_preview"]))
+                $hk++
+            }
+        }
+        $tj++
+    }
     [void]$txt.Add("candidate_assignment_fields (name:type):")
     foreach ($cf in $report["candidate_assignment_fields"]) {
         [void]$txt.Add("  " + $cf)
@@ -949,7 +1249,7 @@ finally {
 
     try {
         $csvLines = New-Object System.Collections.Generic.List[string]
-        [void]$csvLines.Add("activity_id,get_job_activity_ok,assignees_count_bulk,assignees_count_detail,assignees_populated_detail,known_hits_detail,known_hits_bulk,scheduled_time_detail,scheduled_duration_detail,comparison_assignees,gja_error")
+        [void]$csvLines.Add("activity_id,get_job_activity_ok,assignees_count_bulk,assignees_count_detail,assignees_populated_detail,trusted_hits_detail_n,untrusted_hits_detail_n,trusted_hits_bulk_n,untrusted_hits_bulk_n,trusted_hits_detail_compact,untrusted_hits_detail_compact,trusted_hits_bulk_compact,untrusted_hits_bulk_compact,scheduled_time_detail,scheduled_duration_detail,comparison_assignees,gja_error,material_requires_inventory_edition,material_error_preview")
         foreach ($row in $actsArr) {
             if ($null -eq $row) { continue }
             $acid = Format-Scalar $row["activity_id"]
@@ -959,9 +1259,17 @@ finally {
             $apop = ""
             $std = ""
             $sdd = ""
-            $khD = ""
-            $khB = ""
             $cmpA = ""
+            $tDetN = 0
+            $uDetN = 0
+            $tBulkN = 0
+            $uBulkN = 0
+            $tDetC = ""
+            $uDetC = ""
+            $tBulkC = ""
+            $uBulkC = ""
+            $matInv = "false"
+            $matErr = ""
             if ($null -ne $row["bulk_snapshot"]) {
                 $acb = Format-Scalar $row["bulk_snapshot"]["assignees_count"]
             }
@@ -971,22 +1279,55 @@ finally {
                 $std = Format-Scalar $row["get_job_activity"]["digest"]["scheduled_time"]
                 $sdd = Format-Scalar $row["get_job_activity"]["digest"]["scheduled_duration"]
             }
-            if ($null -ne $row["known_resource_hits_detail"]) { $khD = $row["known_resource_hits_detail"] -join "|" }
-            if ($null -ne $row["known_resource_hits_bulk"]) { $khB = $row["known_resource_hits_bulk"] -join "|" }
+            if ($null -ne $row["trusted_resource_hits_detail"]) {
+                $ta = Convert-ToObjectArray $row["trusted_resource_hits_detail"]
+                $tDetN = $ta.Length
+                $tDetC = Format-HitRowsCompactForCsv $row["trusted_resource_hits_detail"]
+            }
+            if ($null -ne $row["untrusted_text_hits_detail"]) {
+                $ua = Convert-ToObjectArray $row["untrusted_text_hits_detail"]
+                $uDetN = $ua.Length
+                $uDetC = Format-HitRowsCompactForCsv $row["untrusted_text_hits_detail"]
+            }
+            if ($null -ne $row["trusted_resource_hits_bulk"]) {
+                $tb = Convert-ToObjectArray $row["trusted_resource_hits_bulk"]
+                $tBulkN = $tb.Length
+                $tBulkC = Format-HitRowsCompactForCsv $row["trusted_resource_hits_bulk"]
+            }
+            if ($null -ne $row["untrusted_text_hits_bulk"]) {
+                $ub = Convert-ToObjectArray $row["untrusted_text_hits_bulk"]
+                $uBulkN = $ub.Length
+                $uBulkC = Format-HitRowsCompactForCsv $row["untrusted_text_hits_bulk"]
+            }
             if ($null -ne $row["comparison"]) { $cmpA = Format-Scalar $row["comparison"]["assignees_count_bulk_vs_detail"] }
             $err = Format-Scalar $row["get_job_activity"]["error"]
+            if ($null -ne $row["material_per_activity"]) {
+                if ($row["material_per_activity"]["material_unavailable_requires_inventory_edition"] -eq $true) {
+                    $matInv = "true"
+                }
+                $matErr = Format-Scalar $row["material_per_activity"]["error"]
+                if ($matErr.Length -gt 120) { $matErr = $matErr.Substring(0, 120) }
+            }
             $ln = @(
                 (Escape-CsvField $acid)
                 (Escape-CsvField $ok)
                 (Escape-CsvField $acb)
                 (Escape-CsvField $acd)
                 (Escape-CsvField $apop)
-                (Escape-CsvField $khD)
-                (Escape-CsvField $khB)
+                (Escape-CsvField $tDetN)
+                (Escape-CsvField $uDetN)
+                (Escape-CsvField $tBulkN)
+                (Escape-CsvField $uBulkN)
+                (Escape-CsvField $tDetC)
+                (Escape-CsvField $uDetC)
+                (Escape-CsvField $tBulkC)
+                (Escape-CsvField $uBulkC)
                 (Escape-CsvField $std)
                 (Escape-CsvField $sdd)
                 (Escape-CsvField $cmpA)
                 (Escape-CsvField $err)
+                (Escape-CsvField $matInv)
+                (Escape-CsvField $matErr)
             ) -join ","
             [void]$csvLines.Add($ln)
         }
