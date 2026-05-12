@@ -4,13 +4,25 @@ import { config, EOS_LOGO_URL } from "../lib/config";
 import type { DemoCalculateResult } from "../lib/demoFallback";
 import { round2, STANDARD_BACKSPLASH_HEIGHT_IN } from "../lib/measurementEngine";
 import {
+  CONFIDENCE_COPY,
+  computeGuidedSimpleAreas,
+  defaultGuidedSimpleForm,
+  type GuidedLayoutPreset,
+  type GuidedSimpleForm
+} from "../lib/guidedHomeowner";
+import {
+  aggregateComparisonScope,
+  buildMaterialGroupComparison,
   calculateAllRoomDrafts,
   createDefaultRoom,
+  createManualScopeRoom,
   roomsNeedLocalVanityMath,
   runLocalPrototypeQuote,
   serializeRoomsForApi,
+  sumGlobalAddOns,
   syntheticRoomForWorkflow
 } from "../lib/prototypeQuoteMath";
+import type { MaterialGroupComparisonRow } from "../lib/prototypeQuoteMath";
 import type { GuidedPiece, MathCheckSnapshot, QuoteWorkflowMethod, RoomDraft } from "../lib/quoteTypes";
 import { getSupabase } from "../lib/supabase";
 import RoomScopeBuilder from "./RoomScopeBuilder";
@@ -23,6 +35,15 @@ const MATERIAL_GROUPS = [
   "Group D",
   "Group E",
   "Group F"
+];
+
+const GUIDED_PRESET_CARDS: Array<{ id: GuidedLayoutPreset; title: string }> = [
+  { id: "straight", title: "Straight run" },
+  { id: "l_shape", title: "L-shape" },
+  { id: "u_shape", title: "U-shape" },
+  { id: "galley", title: "Galley" },
+  { id: "island", title: "Island only" },
+  { id: "not_sure", title: "I'm not sure" }
 ];
 
 type QuoteMode = "public" | "partner";
@@ -99,6 +120,10 @@ export default function App() {
   const [linearIslandL, setLinearIslandL] = useState("0");
   const [linearIslandW, setLinearIslandW] = useState("0");
   const [guidedProjectPieces, setGuidedProjectPieces] = useState<GuidedPiece[]>(() => createDefaultRoom("Group Promo").guidedPieces);
+  const [guidedPreset, setGuidedPreset] = useState<GuidedLayoutPreset | null>(null);
+  const [guidedSimpleForm, setGuidedSimpleForm] = useState<GuidedSimpleForm>(() => defaultGuidedSimpleForm());
+  const [guidedUseAdvanced, setGuidedUseAdvanced] = useState(false);
+  const [guidedAdvancedOpen, setGuidedAdvancedOpen] = useState(false);
 
   const [customerName, setCustomerName] = useState("");
   const [phone, setPhone] = useState("");
@@ -125,6 +150,8 @@ export default function App() {
   const [apiPartner, setApiPartner] = useState<ApiPartnerResult | null>(null);
   const [localMathCheck, setLocalMathCheck] = useState<MathCheckSnapshot | null>(null);
   const [localMatrix, setLocalMatrix] = useState<ReturnType<typeof runLocalPrototypeQuote>["allGroupMatrix"] | null>(null);
+  const [comparisonRows, setComparisonRows] = useState<MaterialGroupComparisonRow[] | null>(null);
+  const [comparisonMixedNote, setComparisonMixedNote] = useState<string | null>(null);
 
   const [submitBusy, setSubmitBusy] = useState(false);
   const [submitMsg, setSubmitMsg] = useState<string | null>(null);
@@ -143,6 +170,10 @@ export default function App() {
   }, [quoteMode]);
 
   useEffect(() => {
+    setGuidedAdvancedOpen(quoteMode === "partner");
+  }, [quoteMode]);
+
+  useEffect(() => {
     setDemoResult(null);
     setApiPublic(null);
     setApiPartner(null);
@@ -150,6 +181,8 @@ export default function App() {
     setCalcError(null);
     setLocalMathCheck(null);
     setLocalMatrix(null);
+    setComparisonRows(null);
+    setComparisonMixedNote(null);
     setVanityLocalNote(null);
   }, [quoteMode]);
 
@@ -197,6 +230,10 @@ export default function App() {
   const buildRoomDraftsForCalculate = useCallback((): RoomDraft[] => {
     if (quoteWorkflow === "room_by_room") return roomDrafts;
     if (quoteWorkflow === "upload_plans" || quoteWorkflow === "visualize") return [];
+    if (quoteWorkflow === "guided_shape" && !guidedUseAdvanced) {
+      const areas = computeGuidedSimpleAreas(guidedPreset, guidedSimpleForm);
+      return [createManualScopeRoom(materialGroup, areas.counter, areas.splash)];
+    }
     return [
       syntheticRoomForWorkflow(
         quoteWorkflow,
@@ -221,8 +258,35 @@ export default function App() {
     linearSplashIn,
     linearIslandL,
     linearIslandW,
-    guidedProjectPieces
+    guidedProjectPieces,
+    guidedUseAdvanced,
+    guidedPreset,
+    guidedSimpleForm
   ]);
+
+  const commitComparisonFromDrafts = useCallback(
+    (drafts: RoomDraft[]) => {
+      if (!drafts.length || quoteWorkflow === "upload_plans" || quoteWorkflow === "visualize") {
+        setComparisonRows(null);
+        setComparisonMixedNote(null);
+        return;
+      }
+      const ag = aggregateComparisonScope(drafts, projectType);
+      const globalAddon = quoteWorkflow === "room_by_room" ? 0 : sumGlobalAddOns(buildGlobalAddOns()).total;
+      const addonForTable = round2(ag.addonDollars + globalAddon);
+      setComparisonRows(
+        buildMaterialGroupComparison({
+          countertopSqft: ag.countertopSqft,
+          backsplashSqft: ag.backsplashSqft,
+          addonDollars: addonForTable,
+          partnerRetailPercent: num(partnerRetailPct),
+          partnerRetailMethod
+        })
+      );
+      setComparisonMixedNote(ag.mixedGroupNote);
+    },
+    [quoteWorkflow, projectType, buildGlobalAddOns, partnerRetailPct, partnerRetailMethod]
+  );
 
   const buildCalcPayload = useCallback(() => {
     const drafts = buildRoomDraftsForCalculate();
@@ -292,6 +356,7 @@ export default function App() {
     setDemoResult(localRunToDemo(lr));
     setLocalMathCheck(lr.mathCheck);
     setLocalMatrix(lr.allGroupMatrix);
+    commitComparisonFromDrafts(drafts);
   }, [
     buildRoomDraftsForCalculate,
     quoteWorkflow,
@@ -300,7 +365,8 @@ export default function App() {
     partnerRetailMethod,
     materialGroup,
     buildGlobalAddOns,
-    projectType
+    projectType,
+    commitComparisonFromDrafts
   ]);
 
   const handleCalculate = useCallback(async () => {
@@ -312,6 +378,8 @@ export default function App() {
     setUsedFallback(false);
     setLocalMathCheck(null);
     setLocalMatrix(null);
+    setComparisonRows(null);
+    setComparisonMixedNote(null);
     setVanityLocalNote(null);
 
     if (quoteWorkflow === "upload_plans" || quoteWorkflow === "visualize") {
@@ -343,12 +411,14 @@ export default function App() {
       if (raw.display === "public_retail_safe") {
         setApiPublic(raw as ApiPublicResult);
         setUsedFallback(false);
+        commitComparisonFromDrafts(drafts);
         setCalcBusy(false);
         return;
       }
       if (raw.ok === true) {
         setApiPartner(raw as ApiPartnerResult);
         setUsedFallback(false);
+        commitComparisonFromDrafts(drafts);
         setCalcBusy(false);
         return;
       }
@@ -374,7 +444,7 @@ export default function App() {
       runLocalFromDrafts();
     }
     setCalcBusy(false);
-  }, [sessionToken, buildCalcPayload, buildRoomDraftsForCalculate, runLocalFromDrafts, quoteWorkflow]);
+  }, [sessionToken, buildCalcPayload, buildRoomDraftsForCalculate, runLocalFromDrafts, quoteWorkflow, commitComparisonFromDrafts]);
 
   const buildSubmitPayload = useCallback(() => {
     return {
@@ -434,7 +504,6 @@ export default function App() {
 
   const hasPublicSummary = quoteMode === "public" && (apiPublic != null || demoResult != null);
   const hasPartnerSummary = quoteMode === "partner" && (apiPartner?.totals != null || demoResult != null);
-  const showSummary = hasPublicSummary || hasPartnerSummary;
 
   const pubRetail = apiPublic?.totals?.retail ?? demoResult?.retail;
   const pubSqft = apiPublic?.totals?.estimated_sqft ?? demoResult?.estimated_sqft;
@@ -443,6 +512,74 @@ export default function App() {
   const partWholesale = apiPartner?.totals?.wholesale ?? demoResult?.wholesale;
   const partRetail = apiPartner?.totals?.retail ?? demoResult?.retail;
   const partSqft = apiPartner?.totals?.estimated_sqft ?? demoResult?.estimated_sqft;
+  const partProfit =
+    partRetail != null && partWholesale != null ? round2(Number(partRetail) - Number(partWholesale)) : null;
+
+  const hasCalcResult = hasPublicSummary || hasPartnerSummary;
+
+  const scopePreview = useMemo(() => {
+    const drafts = buildRoomDraftsForCalculate();
+    if (!drafts.length) {
+      return {
+        empty: true as const,
+        method: workflowLabel(quoteWorkflow),
+        totalSf: 0,
+        counterSf: 0,
+        splashSf: 0,
+        fhbSf: 0
+      };
+    }
+    const { totals } = calculateAllRoomDrafts(drafts, projectType);
+    const totalSf = round2(totals.counter + totals.splash + totals.fhb);
+    return {
+      empty: false as const,
+      method: workflowLabel(quoteWorkflow),
+      totalSf,
+      counterSf: totals.counter,
+      splashSf: totals.splash,
+      fhbSf: totals.fhb
+    };
+  }, [buildRoomDraftsForCalculate, quoteWorkflow, projectType]);
+
+  const guidedPreview = useMemo(() => {
+    if (quoteWorkflow !== "guided_shape") return null;
+    if (guidedUseAdvanced) {
+      const d: RoomDraft[] = [
+        syntheticRoomForWorkflow(
+          "guided_shape",
+          materialGroup,
+          { counter: 0, splash: 0 },
+          { wallFt: 0, splashIn: STANDARD_BACKSPLASH_HEIGHT_IN, islandL: 0, islandW: 0 },
+          guidedProjectPieces
+        )
+      ];
+      const { rooms } = calculateAllRoomDrafts(d, projectType);
+      const m = rooms[0];
+      return {
+        counter: m.counter,
+        splash: m.splash,
+        total: m.totalSf,
+        lines: m.details,
+        confidence: CONFIDENCE_COPY
+      };
+    }
+    const a = computeGuidedSimpleAreas(guidedPreset, guidedSimpleForm);
+    return {
+      counter: a.counter,
+      splash: a.splash,
+      total: round2(a.counter + a.splash + a.fhb),
+      lines: a.lines,
+      confidence: CONFIDENCE_COPY
+    };
+  }, [
+    quoteWorkflow,
+    guidedUseAdvanced,
+    guidedPreset,
+    guidedSimpleForm,
+    materialGroup,
+    guidedProjectPieces,
+    projectType
+  ]);
 
   const methodCards = useMemo(
     () =>
@@ -452,8 +589,8 @@ export default function App() {
           { id: "manual_sqft" as const, title: "I know my square footage", sub: "Fastest if you already have countertop and backsplash sf." },
           { id: "rapid_linear" as const, title: "I know my cabinet runs", sub: "Wall cabinets in linear feet + optional island." },
           { id: "room_by_room" as const, title: "Room-by-room / advanced", sub: "Multiple rooms, materials, and add-ons like the ESF prototype." },
-          { id: "upload_plans" as const, title: "Upload plans / AI takeoff", sub: "Coming soon — attach drawings for automated takeoff." },
-          { id: "visualize" as const, title: "Visualize", sub: "Coming soon — layout visualization tied to quote data." }
+          { id: "upload_plans" as const, title: "Upload plans / AI takeoff", sub: "Coming soon — upload drawings and let eOS prepare measurements for review." },
+          { id: "visualize" as const, title: "Visualize", sub: "Coming soon — build a simple kitchen layout tied directly to your quote." }
         ] as const
       ).map((c) => ({ ...c, disabled: c.id === "upload_plans" || c.id === "visualize" })),
     []
@@ -466,7 +603,8 @@ export default function App() {
           <img className="logo" src={EOS_LOGO_URL} alt="Elite Stone Fabrication" />
           <div className="hero-titles">
             <h1 className="title">Quote</h1>
-            <p className="subtitle">Measurement-first quoting — preview aligned to the ESF v1.01 prototype</p>
+            <p className="subtitle">Measurement-first countertop quoting</p>
+            <p className="hero-tagline">A preview of Elite's public, partner, and internal quoting platform.</p>
           </div>
         </div>
         <div className="hero-badges">
@@ -684,113 +822,397 @@ export default function App() {
             ) : null}
 
             {quoteWorkflow === "guided_shape" ? (
-              <div>
-                <p className="muted small">Enter lengths in inches. Add splash or full-height pieces as needed.</p>
-                {guidedProjectPieces.map((p) => (
-                  <div key={p.id} className="piece-row grid3">
-                    <label>
-                      Label
-                      <input
-                        value={p.name}
-                        onChange={(e) =>
-                          setGuidedProjectPieces((prev) => prev.map((x) => (x.id === p.id ? { ...x, name: e.target.value } : x)))
-                        }
-                      />
-                    </label>
-                    <label>
-                      Type
-                      <select
-                        value={p.pieceType}
-                        onChange={(e) =>
-                          setGuidedProjectPieces((prev) =>
-                            prev.map((x) =>
-                              x.id === p.id ? { ...x, pieceType: e.target.value as GuidedPiece["pieceType"] } : x
-                            )
-                          )
-                        }
-                      >
-                        <option value="counter">Counter</option>
-                        <option value="splash">Backsplash</option>
-                        <option value="fhb">Full height</option>
-                      </select>
-                    </label>
-                    <label>
-                      Shape
-                      <select
-                        value={p.shape}
-                        onChange={(e) =>
-                          setGuidedProjectPieces((prev) =>
-                            prev.map((x) => (x.id === p.id ? { ...x, shape: e.target.value as GuidedPiece["shape"] } : x))
-                          )
-                        }
-                      >
-                        <option value="rect">Rectangle</option>
-                        <option value="tri">Triangle</option>
-                      </select>
-                    </label>
-                    <label>
-                      Length (in)
-                      <input
-                        type="number"
-                        value={p.lengthIn || ""}
-                        onChange={(e) =>
-                          setGuidedProjectPieces((prev) =>
-                            prev.map((x) => (x.id === p.id ? { ...x, lengthIn: Number(e.target.value) || 0 } : x))
-                          )
-                        }
-                      />
-                    </label>
-                    <label>
-                      Depth / height (in)
-                      <input
-                        type="number"
-                        value={p.depthIn || ""}
-                        onChange={(e) =>
-                          setGuidedProjectPieces((prev) =>
-                            prev.map((x) => (x.id === p.id ? { ...x, depthIn: Number(e.target.value) || 0 } : x))
-                          )
-                        }
-                      />
-                    </label>
-                    <div style={{ display: "flex", alignItems: "flex-end" }}>
-                      <button
-                        type="button"
-                        className="btn secondary"
-                        onClick={() => setGuidedProjectPieces((prev) => prev.filter((x) => x.id !== p.id))}
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </div>
-                ))}
-                <div className="mode-row">
-                  <button
-                    type="button"
-                    className="btn secondary"
-                    onClick={() =>
-                      setGuidedProjectPieces((prev) => [
-                        ...prev,
-                        {
-                          id: `gp-${Math.random().toString(36).slice(2, 9)}`,
-                          pieceType: "counter",
-                          name: "Section",
-                          lengthIn: 0,
-                          depthIn: 25.5,
-                          shape: "rect"
-                        }
-                      ])
-                    }
-                  >
-                    + Add piece
-                  </button>
-                  <button
-                    type="button"
-                    className="btn secondary"
-                    onClick={() => setGuidedProjectPieces(createDefaultRoom(materialGroup).guidedPieces)}
-                  >
-                    L-shape preset
-                  </button>
+              <div className="guided-layout">
+                <p className="muted small">
+                  Start with a simple layout. Use the advanced section only if you want to model each piece like the full ESF
+                  prototype.
+                </p>
+
+                <h3 className="h3 guided-preset-heading">Pick the shape that looks closest to your project</h3>
+                <div className="preset-card-grid">
+                  {GUIDED_PRESET_CARDS.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      className={`preset-shape-card ${guidedPreset === c.id ? "on" : ""}`}
+                      onClick={() => setGuidedPreset(c.id)}
+                    >
+                      {c.title}
+                    </button>
+                  ))}
                 </div>
+
+                {guidedPreset === "not_sure" ? (
+                  <p className="callout guided-not-sure">
+                    No problem. Enter your best guess or use the square-foot option. Elite can help verify it later.
+                  </p>
+                ) : null}
+
+                {guidedPreset && guidedPreset !== "not_sure" ? (
+                  <div className="guided-simple-fields">
+                    {guidedPreset === "straight" ? (
+                      <div className="grid3">
+                        <label>
+                          Main counter length (ft)
+                          <input
+                            value={guidedSimpleForm.mainRunFt}
+                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, mainRunFt: e.target.value }))}
+                            inputMode="decimal"
+                          />
+                        </label>
+                        <label>
+                          Backsplash height (in)
+                          <input
+                            value={guidedSimpleForm.splashHeightIn}
+                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, splashHeightIn: e.target.value }))}
+                            inputMode="decimal"
+                          />
+                        </label>
+                        <label>
+                          Counter depth (in)
+                          <input
+                            value={guidedSimpleForm.counterDepthIn}
+                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, counterDepthIn: e.target.value }))}
+                            inputMode="decimal"
+                          />
+                        </label>
+                      </div>
+                    ) : null}
+
+                    {guidedPreset === "l_shape" ? (
+                      <div className="grid3">
+                        <label>
+                          Long wall length (ft)
+                          <input
+                            value={guidedSimpleForm.longWallFt}
+                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, longWallFt: e.target.value }))}
+                            inputMode="decimal"
+                          />
+                        </label>
+                        <label>
+                          Short wall length (ft)
+                          <input
+                            value={guidedSimpleForm.shortWallFt}
+                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, shortWallFt: e.target.value }))}
+                            inputMode="decimal"
+                          />
+                        </label>
+                        <label>
+                          Backsplash height (in)
+                          <input
+                            value={guidedSimpleForm.splashHeightIn}
+                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, splashHeightIn: e.target.value }))}
+                            inputMode="decimal"
+                          />
+                        </label>
+                        <label>
+                          Counter depth (in)
+                          <input
+                            value={guidedSimpleForm.counterDepthIn}
+                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, counterDepthIn: e.target.value }))}
+                            inputMode="decimal"
+                          />
+                        </label>
+                      </div>
+                    ) : null}
+
+                    {guidedPreset === "u_shape" ? (
+                      <div className="grid3">
+                        <label>
+                          Back wall length (ft)
+                          <input
+                            value={guidedSimpleForm.backWallFt}
+                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, backWallFt: e.target.value }))}
+                            inputMode="decimal"
+                          />
+                        </label>
+                        <label>
+                          Left side length (ft)
+                          <input
+                            value={guidedSimpleForm.leftWallFt}
+                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, leftWallFt: e.target.value }))}
+                            inputMode="decimal"
+                          />
+                        </label>
+                        <label>
+                          Right side length (ft)
+                          <input
+                            value={guidedSimpleForm.rightWallFt}
+                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, rightWallFt: e.target.value }))}
+                            inputMode="decimal"
+                          />
+                        </label>
+                        <label>
+                          Backsplash height (in)
+                          <input
+                            value={guidedSimpleForm.splashHeightIn}
+                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, splashHeightIn: e.target.value }))}
+                            inputMode="decimal"
+                          />
+                        </label>
+                        <label>
+                          Counter depth (in)
+                          <input
+                            value={guidedSimpleForm.counterDepthIn}
+                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, counterDepthIn: e.target.value }))}
+                            inputMode="decimal"
+                          />
+                        </label>
+                      </div>
+                    ) : null}
+
+                    {guidedPreset === "galley" ? (
+                      <div className="grid3">
+                        <label>
+                          Side 1 length (ft)
+                          <input
+                            value={guidedSimpleForm.side1Ft}
+                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, side1Ft: e.target.value }))}
+                            inputMode="decimal"
+                          />
+                        </label>
+                        <label>
+                          Side 2 length (ft)
+                          <input
+                            value={guidedSimpleForm.side2Ft}
+                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, side2Ft: e.target.value }))}
+                            inputMode="decimal"
+                          />
+                        </label>
+                        <label>
+                          Backsplash height (in)
+                          <input
+                            value={guidedSimpleForm.splashHeightIn}
+                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, splashHeightIn: e.target.value }))}
+                            inputMode="decimal"
+                          />
+                        </label>
+                        <label>
+                          Counter depth (in)
+                          <input
+                            value={guidedSimpleForm.counterDepthIn}
+                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, counterDepthIn: e.target.value }))}
+                            inputMode="decimal"
+                          />
+                        </label>
+                      </div>
+                    ) : null}
+
+                    {guidedPreset === "island" ? (
+                      <div className="grid3">
+                        <label>
+                          Island length (ft)
+                          <input
+                            value={guidedSimpleForm.islandLengthFt}
+                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, islandLengthFt: e.target.value }))}
+                            inputMode="decimal"
+                          />
+                        </label>
+                        <label>
+                          Island width (ft)
+                          <input
+                            value={guidedSimpleForm.islandWidthFt}
+                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, islandWidthFt: e.target.value }))}
+                            inputMode="decimal"
+                          />
+                        </label>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {guidedPreview ? (
+                  <div className="measure-preview-card">
+                    <h4 className="measure-preview-title">Measurement preview</h4>
+                    <div className="measure-preview-metrics">
+                      <div>
+                        <span className="muted small">Estimated countertop sq ft</span>
+                        <strong>{guidedPreview.counter.toFixed(2)}</strong>
+                      </div>
+                      <div>
+                        <span className="muted small">Estimated backsplash sq ft</span>
+                        <strong>{guidedPreview.splash.toFixed(2)}</strong>
+                      </div>
+                      <div>
+                        <span className="muted small">Estimated total sq ft</span>
+                        <strong>{guidedPreview.total.toFixed(2)}</strong>
+                      </div>
+                    </div>
+                    {guidedPreview.lines.length ? (
+                      <ul className="measure-preview-lines">
+                        {guidedPreview.lines.map((ln, i) => (
+                          <li key={i}>{ln}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="muted small">Enter dimensions to see a plain-language summary of how we estimated area.</p>
+                    )}
+                    <p className="confidence-label">{guidedPreview.confidence}</p>
+                  </div>
+                ) : null}
+
+                <label className="check guided-advanced-toggle">
+                  <input
+                    type="checkbox"
+                    checked={guidedUseAdvanced}
+                    onChange={(e) => setGuidedUseAdvanced(e.target.checked)}
+                  />
+                  Use piece-by-piece measurements for this quote instead of the simple layout above
+                </label>
+
+                <details
+                  className="advanced-pieces-details"
+                  open={guidedAdvancedOpen}
+                  onToggle={(e) => setGuidedAdvancedOpen((e.target as HTMLDetailsElement).open)}
+                >
+                  <summary>Advanced: edit individual pieces</summary>
+                  <p className="muted small">
+                    Add counter, backsplash, or full-height pieces. Rectangle and triangle shapes are supported.
+                  </p>
+                  {guidedProjectPieces.map((p) => (
+                    <div key={p.id} className="piece-row grid3">
+                      <label>
+                        Label
+                        <input
+                          value={p.name}
+                          onChange={(e) =>
+                            setGuidedProjectPieces((prev) => prev.map((x) => (x.id === p.id ? { ...x, name: e.target.value } : x)))
+                          }
+                        />
+                      </label>
+                      <label>
+                        Type
+                        <select
+                          value={p.pieceType}
+                          onChange={(e) =>
+                            setGuidedProjectPieces((prev) =>
+                              prev.map((x) =>
+                                x.id === p.id ? { ...x, pieceType: e.target.value as GuidedPiece["pieceType"] } : x
+                              )
+                            )
+                          }
+                        >
+                          <option value="counter">Counter</option>
+                          <option value="splash">Backsplash</option>
+                          <option value="fhb">Full height</option>
+                        </select>
+                      </label>
+                      <label>
+                        Shape
+                        <select
+                          value={p.shape}
+                          onChange={(e) =>
+                            setGuidedProjectPieces((prev) =>
+                              prev.map((x) => (x.id === p.id ? { ...x, shape: e.target.value as GuidedPiece["shape"] } : x))
+                            )
+                          }
+                        >
+                          <option value="rect">Rectangle</option>
+                          <option value="tri">Triangle</option>
+                        </select>
+                      </label>
+                      <label>
+                        Length (in)
+                        <input
+                          type="number"
+                          value={p.lengthIn || ""}
+                          onChange={(e) =>
+                            setGuidedProjectPieces((prev) =>
+                              prev.map((x) => (x.id === p.id ? { ...x, lengthIn: Number(e.target.value) || 0 } : x))
+                            )
+                          }
+                        />
+                      </label>
+                      <label>
+                        Depth / height (in)
+                        <input
+                          type="number"
+                          value={p.depthIn || ""}
+                          onChange={(e) =>
+                            setGuidedProjectPieces((prev) =>
+                              prev.map((x) => (x.id === p.id ? { ...x, depthIn: Number(e.target.value) || 0 } : x))
+                            )
+                          }
+                        />
+                      </label>
+                      <div className="piece-row-actions">
+                        <button
+                          type="button"
+                          className="btn secondary"
+                          onClick={() => setGuidedProjectPieces((prev) => prev.filter((x) => x.id !== p.id))}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  <div className="mode-row piece-add-row">
+                    <button
+                      type="button"
+                      className="btn secondary"
+                      onClick={() =>
+                        setGuidedProjectPieces((prev) => [
+                          ...prev,
+                          {
+                            id: `gp-${Math.random().toString(36).slice(2, 9)}`,
+                            pieceType: "counter",
+                            name: "Counter section",
+                            lengthIn: 0,
+                            depthIn: 25.5,
+                            shape: "rect"
+                          }
+                        ])
+                      }
+                    >
+                      + Add counter piece
+                    </button>
+                    <button
+                      type="button"
+                      className="btn secondary"
+                      onClick={() =>
+                        setGuidedProjectPieces((prev) => [
+                          ...prev,
+                          {
+                            id: `gp-${Math.random().toString(36).slice(2, 9)}`,
+                            pieceType: "splash",
+                            name: "Backsplash section",
+                            lengthIn: 0,
+                            depthIn: STANDARD_BACKSPLASH_HEIGHT_IN,
+                            shape: "rect"
+                          }
+                        ])
+                      }
+                    >
+                      + Add splash piece
+                    </button>
+                    <button
+                      type="button"
+                      className="btn secondary"
+                      onClick={() =>
+                        setGuidedProjectPieces((prev) => [
+                          ...prev,
+                          {
+                            id: `gp-${Math.random().toString(36).slice(2, 9)}`,
+                            pieceType: "fhb",
+                            name: "Full-height section",
+                            lengthIn: 0,
+                            depthIn: 96,
+                            shape: "rect"
+                          }
+                        ])
+                      }
+                    >
+                      + Add full-height backsplash piece
+                    </button>
+                    <button
+                      type="button"
+                      className="btn secondary"
+                      onClick={() => setGuidedProjectPieces(createDefaultRoom(materialGroup).guidedPieces)}
+                    >
+                      L-shape preset (pieces)
+                    </button>
+                  </div>
+                </details>
               </div>
             ) : null}
 
@@ -875,6 +1297,94 @@ export default function App() {
           ) : null}
 
           {calcError ? <p className="error">{calcError}</p> : null}
+
+          {hasCalcResult && comparisonRows?.length ? (
+            <section className="card group-compare-card">
+              <h2>Compare material groups</h2>
+              <p className="muted group-compare-lead">
+                Use this to compare how material group selection changes the project estimate.
+              </p>
+              {comparisonMixedNote ? <div className="fallback-banner">{comparisonMixedNote}</div> : null}
+              {quoteMode === "partner" ? (
+                <div className="internal-banner">
+                  <strong>Internal demo detail — not public-facing.</strong> Rates and wholesale-style economics below are for
+                  staff discussion only.
+                </div>
+              ) : (
+                <p className="callout group-compare-public-note">
+                  Public retail estimates include 25%+ dealer protection. Totals below are homeowner-safe planning numbers — not
+                  wholesale or internal rate detail.
+                </p>
+              )}
+              <div className="table-scroll">
+                {quoteMode === "public" ? (
+                  <table className="group-compare-table">
+                    <thead>
+                      <tr>
+                        <th>Group</th>
+                        <th>Countertops</th>
+                        <th>Backsplash</th>
+                        <th>Add-ons</th>
+                        <th>Estimated total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {comparisonRows.map((row) => {
+                        const pubCt = round2(row.countertopWholesale * 1.25);
+                        const pubBs = round2(row.backsplashWholesale * 1.25);
+                        const pubAdd = round2(row.addonCost * 1.25);
+                        return (
+                          <tr key={row.group} className={row.group === materialGroup ? "row-active" : undefined}>
+                            <td>{row.group}</td>
+                            <td>${pubCt.toFixed(2)}</td>
+                            <td>${pubBs.toFixed(2)}</td>
+                            <td>${pubAdd.toFixed(2)}</td>
+                            <td>${row.publicSafeTotal.toFixed(2)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                ) : (
+                  <table className="group-compare-table group-compare-table-partner">
+                    <thead>
+                      <tr>
+                        <th>Group</th>
+                        <th>Rate ($/sf)</th>
+                        <th>Ct sf</th>
+                        <th>Ct cost</th>
+                        <th>Bs sf</th>
+                        <th>Bs cost</th>
+                        <th>Add-ons</th>
+                        <th>Wholesale total</th>
+                        <th>Retail / protected</th>
+                        <th>Display profit</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {comparisonRows.map((row) => {
+                        const profit = round2(row.partnerRetailTotal - row.wholesaleTotal);
+                        return (
+                          <tr key={row.group} className={row.group === materialGroup ? "row-active" : undefined}>
+                            <td>{row.group}</td>
+                            <td>${row.rate.toFixed(2)}</td>
+                            <td>{row.countertopSqft.toFixed(2)}</td>
+                            <td>${row.countertopWholesale.toFixed(2)}</td>
+                            <td>{row.backsplashSqft.toFixed(2)}</td>
+                            <td>${row.backsplashWholesale.toFixed(2)}</td>
+                            <td>${row.addonCost.toFixed(2)}</td>
+                            <td>${row.wholesaleTotal.toFixed(2)}</td>
+                            <td>${row.partnerRetailTotal.toFixed(2)}</td>
+                            <td>${profit.toFixed(2)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </section>
+          ) : null}
 
           {quoteMode === "partner" && localMathCheck ? (
             <section className="card math-check">
@@ -990,6 +1500,10 @@ export default function App() {
                 {apiPublic ? (
                   <ul className="kv">
                     <li>
+                      <span>Quote path</span>
+                      <strong>{workflowLabel(quoteWorkflow)}</strong>
+                    </li>
+                    <li>
                       <span>Estimated retail quote</span>
                       <strong>${Number(apiPublic.totals?.retail ?? 0).toFixed(2)}</strong>
                     </li>
@@ -1004,6 +1518,10 @@ export default function App() {
                   </ul>
                 ) : demoResult ? (
                   <ul className="kv">
+                    <li>
+                      <span>Quote path</span>
+                      <strong>{workflowLabel(quoteWorkflow)}</strong>
+                    </li>
                     <li>
                       <span>Estimated retail quote</span>
                       <strong>${demoResult.retail.toFixed(2)}</strong>
@@ -1027,11 +1545,18 @@ export default function App() {
                 <p className="callout" style={{ marginTop: 16 }}>
                   Public retail pricing includes at least <strong>25% protection</strong> over dealer/partner pricing.
                 </p>
+                <p className="muted small" style={{ marginTop: 12 }}>
+                  This is a planning estimate. Final quote may change after material selection, field template, and site review.
+                </p>
               </>
             ) : (
               <>
                 {apiPartner?.totals ? (
                   <ul className="kv">
+                    <li>
+                      <span>Quote path</span>
+                      <strong>{workflowLabel(quoteWorkflow)}</strong>
+                    </li>
                     <li>
                       <span>Wholesale estimate</span>
                       <strong>${Number(apiPartner.totals.wholesale ?? 0).toFixed(2)}</strong>
@@ -1047,6 +1572,10 @@ export default function App() {
                     <li>
                       <span>Estimated sq ft</span>
                       <strong>{Number(apiPartner.totals.estimated_sqft ?? 0).toFixed(2)}</strong>
+                    </li>
+                    <li>
+                      <span>Material group</span>
+                      <strong>{materialGroup}</strong>
                     </li>
                   </ul>
                 ) : demoResult ? (
@@ -1186,7 +1715,7 @@ export default function App() {
         </div>
 
         <aside className="side-col">
-          {showSummary ? (
+          {hasCalcResult ? (
             <div className="summary-card">
               {quoteMode === "public" && pubRetail != null ? (
                 <>
@@ -1194,6 +1723,10 @@ export default function App() {
                   <p className="summary-kicker">Estimated retail quote</p>
                   <p className="summary-hero-value">${Number(pubRetail).toFixed(2)}</p>
                   <div className="summary-rows">
+                    <div className="summary-row">
+                      <span>Quote path</span>
+                      <strong>{workflowLabel(quoteWorkflow)}</strong>
+                    </div>
                     <div className="summary-row">
                       <span>Estimated sq ft</span>
                       <strong>{Number(pubSqft ?? 0).toFixed(2)}</strong>
@@ -1204,6 +1737,10 @@ export default function App() {
                     </div>
                   </div>
                   <div className="protection-badge">25%+ dealer protection applied</div>
+                  <p className="summary-foot disclaimer">
+                    This is a planning estimate. Final quote may change after material selection, field template, and site
+                    review.
+                  </p>
                   <p className="summary-foot">
                     Public retail pricing includes at least 25% protection over dealer/partner pricing.
                   </p>
@@ -1213,9 +1750,18 @@ export default function App() {
               {quoteMode === "partner" && partRetail != null ? (
                 <>
                   <h2>Your estimate</h2>
-                  <p className="summary-kicker">Estimated quote total</p>
+                  <p className="summary-kicker">Retail / protected (display)</p>
                   <p className="summary-hero-value">${Number(partRetail).toFixed(2)}</p>
+                  {partWholesale != null ? (
+                    <p className="summary-secondary muted small">
+                      Wholesale estimate: <strong>${Number(partWholesale).toFixed(2)}</strong>
+                    </p>
+                  ) : null}
                   <div className="summary-rows">
+                    <div className="summary-row">
+                      <span>Quote path</span>
+                      <strong>{workflowLabel(quoteWorkflow)}</strong>
+                    </div>
                     {partWholesale != null ? (
                       <div className="summary-row">
                         <span>Wholesale estimate</span>
@@ -1226,22 +1772,47 @@ export default function App() {
                       <span>Retail / protected (display)</span>
                       <strong>${Number(partRetail).toFixed(2)}</strong>
                     </div>
+                    {partProfit != null ? (
+                      <div className="summary-row">
+                        <span>Profit / protection (display)</span>
+                        <strong>${partProfit.toFixed(2)}</strong>
+                      </div>
+                    ) : null}
                     <div className="summary-row">
                       <span>Estimated sq ft</span>
                       <strong>{Number(partSqft ?? 0).toFixed(2)}</strong>
                     </div>
+                    <div className="summary-row">
+                      <span>Material group</span>
+                      <strong>{materialGroup}</strong>
+                    </div>
                   </div>
                   <div className="internal-badge">Internal / demo — not public-facing</div>
                   <p className="summary-foot">Shown for staff discussion; not homeowner-facing.</p>
+                  <p className="summary-foot muted small">Use the math check panel below for line-level verification.</p>
                   {lastCalcLive ? <p className="summary-foot">Live API response</p> : null}
                 </>
               ) : null}
             </div>
           ) : (
-            <div className="summary-card">
-              <h2>Your estimate</h2>
-              <p className="muted" style={{ margin: 0 }}>
-                Choose how to measure, enter details, then tap <strong>Calculate</strong>.
+            <div className="summary-card summary-card-precalc">
+              <h2>Estimate preview</h2>
+              <div className="summary-rows">
+                <div className="summary-row">
+                  <span>Quote path</span>
+                  <strong>{scopePreview.method}</strong>
+                </div>
+                <div className="summary-row">
+                  <span>Measured sq ft (estimate)</span>
+                  <strong>{scopePreview.totalSf.toFixed(2)}</strong>
+                </div>
+                <div className="summary-row">
+                  <span>Material group</span>
+                  <strong>{materialGroup}</strong>
+                </div>
+              </div>
+              <p className="summary-cta muted">
+                Tap <strong>Calculate</strong> to price this scope.
               </p>
             </div>
           )}

@@ -142,6 +142,64 @@ For any case with **public** mode:
 - Calculate with live API or fallback.
 - Confirm **no** fields labeled wholesale, partner line economics, or matrix wholesale column appears.
 - **Partner / internal** mode: **Math check** panel visible; public mode: **Math check hidden**.
+- **Material group comparison:** In **Public retail**, the comparison table must **not** show rate, wholesale, or margin columns (only protected-style dollars). In **Partner / internal**, those columns are allowed.
+
+---
+
+## 9. Material group comparison matrix (fixed scope + add-ons)
+
+**Purpose:** Validate `buildMaterialGroupComparison` — same countertop sf and backsplash sf priced at each tier’s **$/sf**, with **global add-ons applied once per group row** (not multiplied by tier).
+
+**Inputs (manual measurement path)**
+
+- Countertop sq ft: **45**
+- Backsplash sq ft: **12**
+- Kitchen sink cutouts: **1** ($200)
+- Cooktop cutouts: **1** ($150)
+- No tear-out.
+
+**Tier rates** (`PROTOTYPE_TIERS` in `prototypeQuoteMath.ts`)
+
+| Group       | $/sf |
+|------------|-----:|
+| Group Promo | 45 |
+| Group A     | 57 |
+| Group B     | 65 |
+| Group C     | 75 |
+| Group D     | 85 |
+| Group E     | 100 |
+| Group F     | 115 |
+
+**Add-on bucket (same for every group row)**
+
+- `add_on_cost = 200 + 150 = 350.00`
+
+**Per group (wholesale-style, before public protection)**
+
+For each tier with rate \(r\):
+
+\[
+\text{countertop\_cost} = 45 \times r,\quad
+\text{backsplash\_cost} = 12 \times r,\quad
+\text{total} = \text{countertop\_cost} + \text{backsplash\_cost} + 350
+\]
+
+**Example — Group Promo**
+
+- Countertop: `45 × 45 = 2025.00`
+- Backsplash: `12 × 45 = 540.00`
+- Add-ons: `350.00`
+- **Wholesale total:** `2915.00`
+
+**Public retail row (UI)**
+
+- Each public column uses **≥ 25% dealer protection** on the underlying economics. In the demo matrix, **estimated total** = `wholesale_total × 1.25` (e.g. Promo → `2915 × 1.25 = 3643.75`). Counter / splash / add-on columns in the public table are the same protection factor applied to each wholesale component so they sum to that total.
+
+**Checks**
+
+- **Public retail total** ≥ wholesale total × **1.25** for every group row.
+- **Public retail UI** must not show wholesale, rate, or internal margin.
+- **Partner / internal** comparison table may show wholesale totals, rate, and retail/protected totals.
 
 ---
 

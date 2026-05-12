@@ -4,6 +4,20 @@ New Vite app: **`app-quote`** (port **5179**). This is a **meeting demo**, not t
 
 **Measurement direction:** The demo now includes a **quote method** picker (manual sq ft, rapid linear, guided shape, room-by-room) aligned to **`docs/reference/quote-prototype/ESF Quoting Tool - v1.01.html`**, with shared math in `app-quote/src/lib/measurementEngine.ts` and `prototypeQuoteMath.ts`. See **`docs/quote-platform/quote-engine-parity-audit.md`** for gaps vs the full prototype.
 
+### Guided “Help me lay it out” (homeowner path)
+
+- Default flow uses **plain-language layout presets** (straight run, L-shape, U-shape, galley, island only, “I’m not sure”) with **feet** for runs and **inches** for splash height and counter depth (`app-quote/src/lib/guidedHomeowner.ts`).
+- A live **measurement preview** shows estimated countertop sf, backsplash sf, total sf, plain-English formula lines, and confidence copy.
+- The **piece-by-piece editor** from the ESF prototype remains available under **“Advanced: edit individual pieces”** (a `<details>` block). It is **collapsed by default in Public retail** and **expanded by default in Partner / internal demo** so staff can jump straight to parity testing.
+- Optional checkbox: **“Use piece-by-piece measurements for this quote instead of the simple layout above.”** When checked, **Calculate** uses guided pieces; when unchecked, the simple preset math feeds a single manual-scope room into the same engine.
+
+### Compare material groups (after Calculate)
+
+- After a successful **Calculate** (local fallback or live API), the app shows **Compare material groups**: totals for **Group Promo** through **Group F** with **countertop cost**, **backsplash cost**, **add-ons once per row**, and **total**, using `buildMaterialGroupComparison` in `prototypeQuoteMath.ts`.
+- **Mixed material groups (room-by-room):** if non-vanity rooms use different primary groups, a banner explains that the matrix uses **total measured scope** across groups; per-room mixed comparison is deferred.
+- **Public retail:** the table shows **homeowner-safe dollar estimates** only (counter / splash / add-ons / estimated total with **≥ 25% protection**). It does **not** show wholesale, internal rates, or margin.
+- **Partner / internal:** the table adds **rate**, wholesale-style line costs, wholesale total, retail/protected total, and display profit; it is labeled **internal demo — not public-facing.** The **Math check** panel remains **partner-only** and hidden in public mode.
+
 ## Quick start
 
 ```bash

@@ -313,6 +313,90 @@ export function buildAllGroupMatrix(totals: RoomEngineTotals) {
   });
 }
 
+const MIN_PUBLIC_PROTECTION = 1.25;
+
+export type MaterialGroupComparisonRow = {
+  group: string;
+  rate: number;
+  countertopSqft: number;
+  backsplashSqft: number;
+  countertopWholesale: number;
+  backsplashWholesale: number;
+  addonCost: number;
+  wholesaleTotal: number;
+  partnerRetailTotal: number;
+  publicSafeTotal: number;
+};
+
+/**
+ * Per-group breakdown: stone $/sf × sqft per tier + same add-on $ once per group.
+ * Public-safe total applies 25%+ protection on the combined wholesale for display.
+ */
+export function buildMaterialGroupComparison(params: {
+  countertopSqft: number;
+  backsplashSqft: number;
+  addonDollars: number;
+  partnerRetailPercent: number;
+  partnerRetailMethod: string;
+}): MaterialGroupComparisonRow[] {
+  const ct = Number(params.countertopSqft) || 0;
+  const bs = Number(params.backsplashSqft) || 0;
+  const add = round2(Number(params.addonDollars) || 0);
+  return PROTOTYPE_TIERS.map((t) => {
+    const cc = round2(ct * t.p);
+    const bc = round2(bs * t.p);
+    const wholesale = round2(cc + bc + add);
+    const pr = calculateRetailFromWholesaleSettings(
+      wholesale,
+      params.partnerRetailMethod || "Markup Percent",
+      params.partnerRetailPercent,
+      0
+    );
+    return {
+      group: t.n,
+      rate: t.p,
+      countertopSqft: ct,
+      backsplashSqft: bs,
+      countertopWholesale: cc,
+      backsplashWholesale: bc,
+      addonCost: add,
+      wholesaleTotal: wholesale,
+      partnerRetailTotal: pr.retail,
+      publicSafeTotal: round2(wholesale * MIN_PUBLIC_PROTECTION)
+    };
+  });
+}
+
+export function aggregateComparisonScope(
+  drafts: RoomDraft[],
+  projectType: string
+): {
+  countertopSqft: number;
+  backsplashSqft: number;
+  addonDollars: number;
+  mixedGroupNote: string | null;
+} {
+  if (!drafts.length) {
+    return { countertopSqft: 0, backsplashSqft: 0, addonDollars: 0, mixedGroupNote: null };
+  }
+  const { rooms, totals } = calculateAllRoomDrafts(drafts, projectType);
+  const groups = new Set<string>();
+  for (const r of rooms) {
+    if (r.type === "Vanity") continue;
+    if (r.counter + r.splash + r.fhb <= 0) continue;
+    groups.add(r.group);
+  }
+  const mixed = groups.size > 1;
+  return {
+    countertopSqft: totals.priceableCounter,
+    backsplashSqft: totals.priceableSplash,
+    addonDollars: round2(totals.fixed),
+    mixedGroupNote: mixed
+      ? "Group comparison uses total measured scope. Per-room mixed group comparison is a future enhancement."
+      : null
+  };
+}
+
 export function sumGlobalAddOns(add: Record<string, number>): { total: number; lines: DemoLineItem[]; summary: string[] } {
   const lines: DemoLineItem[] = [];
   const summary: string[] = [];
@@ -550,6 +634,18 @@ export function createDefaultRoom(materialGroup: string): RoomDraft {
       bowl: 0
     }
   };
+}
+
+export function createManualScopeRoom(materialGroup: string, counter: number, splash: number): RoomDraft {
+  const r = createDefaultRoom(materialGroup);
+  r.name = "Project";
+  r.roomType = "Kitchen";
+  r.calcMode = "Manual Sq Ft";
+  r.direct = { counter: round2(counter), splash: round2(splash) };
+  r.guidedPieces = [];
+  r.fhbMode = "Off";
+  r.fhbPieces = [];
+  return r;
 }
 
 export function createVanityRoom(materialGroup: string): RoomDraft {
