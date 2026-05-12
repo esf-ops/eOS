@@ -1,6 +1,6 @@
 # Quote heads split plan (Vite apps + shared modules)
 
-**Goal:** Replace the single **`app-quote`** “everything demo” with **three production heads** plus **Pricing Admin** (already largely **System Admin** + `quotePricingAdminApi.js`). **`app-quote`** remains a **combined prototype / component lab** until each head is GA.
+**Goal:** Replace the single **`app-quote`** “everything demo” with **three production heads** plus **Pricing Admin** (already largely **System Admin** + `quotePricingAdminApi.js`). The **`app-quote`** Vite shell now ships a **homeowner-first public flow** by default; the older combined partner/internal lab UI remains in source as `PartnerInternalQuoteApp.tsx` for staff reuse until separate heads are GA.
 
 ---
 

@@ -203,6 +203,39 @@ For each tier with rate \(r\):
 
 ---
 
+## Backend vs local fallback parity test
+
+**Goal:** When the browser cannot reach `POST /api/public-quote/calculate`, `app-quote` uses `computePublicConsumerEstimatesLocal` (`publicConsumerParity.ts`). That path must match **`computePublicConsumerEstimatesByGroup`** in `backend-core/src/quotes/quoteCalculator.js` for the same inputs when the server uses the **prototype mirror rules** (no DB, or DB miss → prototype fallback).
+
+**Standard inputs**
+
+- `areas.countertopSqft = 45`, `areas.backsplashSqft = 12`
+- `addOns`: `qty-sink = 1`, `qty-cook = 1`, `tearout = 0`
+- `engine = legacy`, `rooms = []`, `quoteSource = public_retail`
+
+**Expected `estimates_by_group` (prototype mirror)** — seven rows (Group Promo through Group F). **Group Promo** example (run `node backend-core/src/scripts/checkQuotePublicParity.js` to regenerate):
+
+| Field        | Value (rounded cents) |
+|-------------|------------------------:|
+| countertop | 2531.25 |
+| backsplash | 675.00 |
+| addons     | 437.50 |
+| total      | 3643.75 |
+
+The **add-ons** column is the **protected retail share** of wholesale add-ons (`200 + 150 = 350` at prototype prices), scaled by the same factor as stone so the row parts sum to the protected total — **not** the raw `$350` wholesale figure.
+
+**If live backend differs:** When Supabase returns active `quote_pricing_rules` with different cutout unit prices, live `estimates_by_group` may differ from the prototype script above. In that case the UI should still prefer the **server** numbers when the request succeeds; the local fallback only mirrors **prototype** economics.
+
+**Manual curl (optional)**
+
+```bash
+curl -sS -X POST "http://localhost:3001/api/public-quote/calculate" \
+  -H "content-type: application/json" \
+  -d '{"quoteSource":"public_retail","materialGroup":"Group Promo","areas":{"countertopSqft":45,"backsplashSqft":12},"addOns":{"qty-sink":1,"qty-cook":1,"tearout":0},"engine":"legacy","rooms":[]}' | jq .
+```
+
+---
+
 ## Running checks
 
 ```bash

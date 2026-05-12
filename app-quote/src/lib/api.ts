@@ -21,6 +21,7 @@ export async function apiPostJsonPublic(path: string, body: unknown): Promise<un
   const url = joinBackendUrl(path);
   const res = await fetch(url, {
     method: "POST",
+    credentials: "omit",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body)
   });
@@ -37,6 +38,13 @@ export async function apiPostJsonPublic(path: string, body: unknown): Promise<un
         ? String((json as { error?: string }).error)
         : text.slice(0, 200);
     throw new ApiError(msg || `HTTP ${res.status}`, res.status, json ?? text);
+  }
+  if (json == null && text.trim()) {
+    throw new ApiError("Server returned a non-JSON response", res.status, text.slice(0, 200));
+  }
+  if (typeof json === "object" && json && (json as { ok?: boolean }).ok === false) {
+    const msg = String((json as { error?: string; message?: string }).error || (json as { message?: string }).message || "Request failed");
+    throw new ApiError(msg, res.status, json);
   }
   return json;
 }
