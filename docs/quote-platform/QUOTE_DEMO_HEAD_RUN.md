@@ -1,6 +1,6 @@
 # Quote Demo Head — run locally
 
-New Vite app: **`app-quote`** (port **5179**). This is a **meeting demo**, not the final public homeowner wizard.
+New Vite app: **`app-quote`** (port **5179**). This is a **meeting demo**, not the final public homeowner wizard. The UI is a **light, customer-facing style** with clear “Preview · Not production” and **Demo mode active** messaging when Supabase sign-in is not configured.
 
 ## Quick start
 
@@ -22,10 +22,10 @@ VITE_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
 VITE_SUPABASE_ANON_KEY=YOUR_ANON_KEY
 ```
 
-- **Without Supabase:** Calculate always uses the **labeled prototype fallback** (same tier/add-on rates as `quoteCalculator.js`, 25% public markup).
+- **Without Supabase:** the app shows **Demo mode active** and **Calculate** uses the **gentle labeled prototype fallback** (“Demo calculation fallback — backend not connected.”) with the same tier/add-on rates as `quoteCalculator.js` and **25%+ public retail protection** (no wholesale shown in **Public retail** mode).
 - **With Supabase sign-in:** `POST /api/quote/calculate` and `POST /api/quote/submit` run against the backend when `npm run eos:server` is up and quote tables exist.
 
-## Production build (not part of `eos:check:local`)
+## Production build
 
 ```bash
 npm run eos:build:quote
@@ -33,7 +33,7 @@ npm run eos:build:quote
 npm run build --prefix app-quote
 ```
 
-Root `package.json` includes **`eos:build:quote`** so CI and local workflows can opt in without changing `eos:build:all-heads`.
+Root `package.json` includes **`eos:build:quote`** so CI and local workflows can opt in without changing `eos:build:all-heads`. For a quick check before a demo, run `npm run build --prefix app-quote` (also used in release prep alongside `npm run eos:check:local`).
 
 ## Launcher (eOS Home)
 
