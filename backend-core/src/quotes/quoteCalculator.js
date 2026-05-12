@@ -35,15 +35,31 @@ export const PROTOTYPE_ADDON_UNIT_PRICES = Object.freeze({
 
 export const PROTOTYPE_VANITY_TIER_THRESHOLD_SQFT = 35;
 
+/** Future: how quote measurements were produced (AI, layout, manual, …). */
+export const QUOTE_INPUT_MODES = Object.freeze([
+  "simple_public_preset",
+  "manual_dimensions",
+  "room_builder",
+  "visual_layout",
+  "ai_takeoff_from_plans",
+  "staff_adjusted",
+  "final_template"
+]);
+
 /**
  * Normalize loose client / prototype JSON into a canonical calculation input.
  * @param {Record<string, unknown>} input
  */
 export function normalizePrototypeQuoteInput(input) {
   const src = input && typeof input === "object" ? input : {};
+  const rawMode = String(src.quoteInputMode || src.quote_input_mode || "").trim();
+  const quoteSource = String(src.quoteSource || src.quote_source || "partner_portal");
+  const defaultMode = quoteSource === "public_retail" ? "simple_public_preset" : "manual_dimensions";
+  const quoteInputMode = QUOTE_INPUT_MODES.includes(rawMode) ? rawMode : defaultMode;
   return {
     engine: String(src.engine || src.calculationEngine || "legacy"),
-    quoteSource: String(src.quoteSource || src.quote_source || "partner_portal"),
+    quoteSource,
+    quoteInputMode,
     estimateMode: String(src.estimateMode || src.estimate_mode || "Partner Wholesale Estimate"),
     materialGroup: String(src.materialGroup || src.selectedGroup || "Group Promo"),
     areas: {
@@ -165,6 +181,33 @@ export function applyPartnerRetailDisplay(wholesale, settings = {}) {
 }
 
 /**
+ * Build measurement provenance for snapshots and audit (AI takeoff / visual layout ready).
+ * @param {ReturnType<typeof normalizePrototypeQuoteInput>} input
+ */
+export function buildMeasurementSourceSummary(input) {
+  const rooms = Array.isArray(input.rooms) ? input.rooms : [];
+  return {
+    quote_input_mode: input.quoteInputMode,
+    engine: input.engine,
+    legacy_areas:
+      input.engine !== "rooms"
+        ? {
+            countertopSqft: input.areas.countertopSqft,
+            backsplashSqft: input.areas.backsplashSqft
+          }
+        : null,
+    rooms: rooms.map((r, idx) => ({
+      index: idx,
+      room_name: String(r.name || r.room_name || r.room || `Room ${idx + 1}`),
+      measurement_source: r.measurementSource ?? r.measurement_source ?? null,
+      takeoff_result_id: r.takeoffResultId ?? r.takeoff_result_id ?? null,
+      visual_layout_id: r.visualLayoutId ?? r.visual_layout_id ?? null,
+      takeoff_job_id: r.takeoffJobId ?? r.takeoff_job_id ?? null
+    }))
+  };
+}
+
+/**
  * Build immutable snapshot blob for `quote_headers.calculation_snapshot` / audit.
  */
 export function buildCalculationSnapshot(input, resolved, totals, extras = {}) {
@@ -172,11 +215,13 @@ export function buildCalculationSnapshot(input, resolved, totals, extras = {}) {
     version: 1,
     timestamp: new Date().toISOString(),
     quoteSource: input.quoteSource,
+    quoteInputMode: input.quoteInputMode,
     estimateMode: input.estimateMode,
     pricingStructure: resolved?.structure
       ? { id: resolved.structure.id, code: resolved.structure.code, name: resolved.structure.name, pricing_mode: resolved.structure.pricing_mode }
       : { code: resolved?.fallbackCode || "PROTOTYPE", name: "Prototype mirror", pricing_mode: resolved?.fallbackMode || "partner" },
     retailMarkupPercent: resolved?.effectiveRetailMarkupPercent ?? null,
+    measurement_source: extras.measurement_source ?? buildMeasurementSourceSummary(input),
     inputSummary: {
       engine: input.engine,
       materialGroup: input.materialGroup,

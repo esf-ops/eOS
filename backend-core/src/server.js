@@ -1346,10 +1346,13 @@ app.listen(port, () => {
   console.log("- GET /api/admin/identity-resolution/summary");
   console.log("- POST /api/quote/calculate");
   console.log("- POST /api/quote/submit");
-  console.log("- GET /api/admin/quote-pricing-structures");
+  console.log("- GET/PATCH /api/admin/quote-pricing-structures (+/:id)");
   console.log("- POST /api/admin/quote-pricing-structures");
-  console.log("- GET /api/admin/quote-partners");
-  console.log("- POST /api/admin/quote-partners/:id/pricing-assignment");
+  console.log("- GET/PATCH /api/admin/quote-pricing-rules (+/:id)");
+  console.log("- POST /api/admin/quote-pricing-rules");
+  console.log("- GET/PATCH /api/admin/quote-partners (+/:id)");
+  console.log("- POST /api/admin/quote-partners");
+  console.log("- GET/POST /api/admin/quote-partners/:id/pricing-assignment");
   console.log("- GET /api/admin/quotes");
   console.log("- GET /api/admin/quotes/:id");
   console.log("- GET /api/admin/quote-analytics/summary");

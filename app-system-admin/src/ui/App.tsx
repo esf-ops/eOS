@@ -5,6 +5,7 @@ import { fetchSchemaHealth, SCHEMA_HEALTH_PATH, type SchemaHealthResp } from "..
 import { supabase } from "../lib/supabase";
 import SalesAccountMappingAdmin from "./SalesAccountMappingAdmin";
 import IdentityResolutionReadiness from "./IdentityResolutionReadiness";
+import QuotePricingAdminPlaceholder from "./QuotePricingAdminPlaceholder";
 
 /** Visible near credential actions — admins never observe other users’ secrets. */
 const PASSWORD_GOVERNANCE_NOTE =
@@ -200,7 +201,7 @@ export default function App() {
   const [rows, setRows] = useState<AdminRow[]>([]);
   const [listError, setListError] = useState("");
   const [toast, setToast] = useState<{ kind: "info" | "error"; text: string } | null>(null);
-  const [activeView, setActiveView] = useState<"users" | "sales_mapping" | "identity_resolution">("users");
+  const [activeView, setActiveView] = useState<"users" | "sales_mapping" | "identity_resolution" | "quote_pricing">("users");
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<UserDetailResp | null>(null);
@@ -535,6 +536,17 @@ export default function App() {
           </button>
           <button
             type="button"
+            className={`btn ${activeView === "quote_pricing" ? "btn-primary" : ""}`}
+            onClick={() => {
+              setSelectedId(null);
+              setDetail(null);
+              setActiveView("quote_pricing");
+            }}
+          >
+            Quote pricing
+          </button>
+          <button
+            type="button"
             className="btn"
             onClick={() => {
               void supabase.auth.signOut();
@@ -562,6 +574,8 @@ export default function App() {
               <SalesAccountMappingAdmin token={sessionToken} />
             ) : activeView === "identity_resolution" ? (
               <IdentityResolutionReadiness token={sessionToken} />
+            ) : activeView === "quote_pricing" ? (
+              <QuotePricingAdminPlaceholder />
             ) : (
               <>
             <h2 style={{ marginTop: 0 }}>People & access</h2>

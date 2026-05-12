@@ -1,14 +1,8 @@
 import express from "express";
 
 import { buildMondayQuotePayload, syncQuoteToMonday } from "../integrations/mondayQuoteSync.js";
-import {
-  getForecastValueRollup,
-  getQuoteMetricsByBranch,
-  getQuoteMetricsByPartner,
-  getQuoteMetricsBySalesRep,
-  getQuotePipelineSummary
-} from "./quoteAnalytics.js";
 import { calculateQuote } from "./quoteCalculator.js";
+import { attachQuotePricingAdminApi } from "./quotePricingAdminApi.js";
 
 const jsonParser = express.json({ limit: "2mb" });
 
@@ -30,6 +24,8 @@ function generateQuoteNumber() {
 function sanitizePublicCalculateResponse(calcResult) {
   const snap = calcResult.snapshot && typeof calcResult.snapshot === "object" ? { ...calcResult.snapshot } : {};
   delete snap.inputSummary;
+  delete snap.measurement_source;
+  delete snap.quoteInputMode;
   return {
     ok: true,
     display: "public_retail_safe",
@@ -47,7 +43,6 @@ function sanitizePublicCalculateResponse(calcResult) {
  * @param {{ requireAuth: Function, requireRole: Function, requireHeadAccess: Function, getSupabase: () => import("@supabase/supabase-js").SupabaseClient }} deps
  */
 export function attachQuoteRoutes(app, { requireAuth, requireRole, requireHeadAccess, getSupabase }) {
-  const headAccessSystemAdmin = requireHeadAccess("system_admin", { getSupabase });
   const supabaseGetter = () => getSupabase();
 
   app.post("/api/quote/calculate", requireAuth(), jsonParser, async (req, res) => {
@@ -202,200 +197,9 @@ export function attachQuoteRoutes(app, { requireAuth, requireRole, requireHeadAc
     }
   });
 
-  app.get(
-    "/api/admin/quote-pricing-structures",
-    requireAuth(),
-    requireRole(["admin"]),
-    headAccessSystemAdmin,
-    async (_req, res) => {
-      try {
-        const db = supabaseGetter();
-        const { data, error } = await db.from("quote_pricing_structures").select("*").order("code");
-        if (error) {
-          if (isMissingRelationError(error)) {
-            return res.status(503).json({ ok: false, installed: false, rows: [], message: "Quote platform tables not installed." });
-          }
-          throw error;
-        }
-        res.json({ ok: true, installed: true, rows: data ?? [] });
-      } catch (e) {
-        res.status(500).json({ ok: false, error: String(e?.message || e) });
-      }
-    }
-  );
-
-  app.post(
-    "/api/admin/quote-pricing-structures",
-    requireAuth(),
-    requireRole(["admin"]),
-    headAccessSystemAdmin,
-    jsonParser,
-    async (req, res) => {
-      try {
-        const db = supabaseGetter();
-        const b = req.body || {};
-        const row = {
-          name: String(b.name || "").trim() || "Unnamed",
-          code: String(b.code || "").trim() || `STRUCT-${Date.now()}`,
-          description: b.description || null,
-          pricing_mode: String(b.pricing_mode || "custom"),
-          retail_markup_percent: Number(b.retail_markup_percent) || 25,
-          is_public_default: Boolean(b.is_public_default),
-          is_active: b.is_active !== false
-        };
-        const { data, error } = await db.from("quote_pricing_structures").insert(row).select("*").limit(1);
-        if (error) {
-          if (isMissingRelationError(error)) {
-            return res.status(503).json({ ok: false, installed: false, message: "Quote platform tables not installed." });
-          }
-          throw error;
-        }
-        res.json({ ok: true, row: data?.[0] ?? null });
-      } catch (e) {
-        res.status(500).json({ ok: false, error: String(e?.message || e) });
-      }
-    }
-  );
-
-  app.get(
-    "/api/admin/quote-partners",
-    requireAuth(),
-    requireRole(["admin"]),
-    headAccessSystemAdmin,
-    async (_req, res) => {
-      try {
-        const db = supabaseGetter();
-        const { data, error } = await db.from("quote_partner_accounts").select("*").order("account_name");
-        if (error) {
-          if (isMissingRelationError(error)) {
-            return res.status(503).json({ ok: false, installed: false, rows: [], message: "Quote platform tables not installed." });
-          }
-          throw error;
-        }
-        res.json({ ok: true, installed: true, rows: data ?? [] });
-      } catch (e) {
-        res.status(500).json({ ok: false, error: String(e?.message || e) });
-      }
-    }
-  );
-
-  app.post(
-    "/api/admin/quote-partners/:id/pricing-assignment",
-    requireAuth(),
-    requireRole(["admin"]),
-    headAccessSystemAdmin,
-    jsonParser,
-    async (req, res) => {
-      try {
-        const db = supabaseGetter();
-        const partnerId = String(req.params.id || "").trim();
-        const pricing_structure_id = String(req.body?.pricing_structure_id || "").trim();
-        if (!partnerId || !pricing_structure_id) {
-          return res.status(400).json({ ok: false, error: "partner id and pricing_structure_id required" });
-        }
-        const userEmail = String(req.user?.email || req.user?.id || "admin");
-        const { data, error } = await db
-          .from("quote_partner_pricing_assignments")
-          .insert({
-            partner_account_id: partnerId,
-            pricing_structure_id,
-            assigned_by: userEmail,
-            is_active: true
-          })
-          .select("*")
-          .limit(1);
-        if (error) {
-          if (isMissingRelationError(error)) {
-            return res.status(503).json({ ok: false, installed: false, message: "Quote platform tables not installed." });
-          }
-          throw error;
-        }
-        res.json({ ok: true, assignment: data?.[0] ?? null });
-      } catch (e) {
-        res.status(500).json({ ok: false, error: String(e?.message || e) });
-      }
-    }
-  );
-
-  app.get(
-    "/api/admin/quotes",
-    requireAuth(),
-    requireRole(["admin"]),
-    headAccessSystemAdmin,
-    async (req, res) => {
-      try {
-        const db = supabaseGetter();
-        const limit = Math.min(100, Math.max(1, Number.parseInt(String(req.query.limit || "50"), 10) || 50));
-        const { data, error } = await db
-          .from("quote_headers")
-          .select("id,quote_number,quote_status,quote_source,customer_name,grand_total,sales_rep,branch,created_at")
-          .order("created_at", { ascending: false })
-          .limit(limit);
-        if (error) {
-          if (isMissingRelationError(error)) {
-            return res.status(503).json({ ok: false, installed: false, rows: [], message: "Quote platform tables not installed." });
-          }
-          throw error;
-        }
-        res.json({ ok: true, installed: true, rows: data ?? [] });
-      } catch (e) {
-        res.status(500).json({ ok: false, error: String(e?.message || e) });
-      }
-    }
-  );
-
-  app.get(
-    "/api/admin/quotes/:id",
-    requireAuth(),
-    requireRole(["admin"]),
-    headAccessSystemAdmin,
-    async (req, res) => {
-      try {
-        const db = supabaseGetter();
-        const id = String(req.params.id || "").trim();
-        if (!id) return res.status(400).json({ ok: false, error: "id required" });
-        const { data: h, error: hErr } = await db.from("quote_headers").select("*").eq("id", id).limit(1);
-        if (hErr) {
-          if (isMissingRelationError(hErr)) {
-            return res.status(503).json({ ok: false, installed: false, message: "Quote platform tables not installed." });
-          }
-          throw hErr;
-        }
-        if (!h?.length) return res.status(404).json({ ok: false, error: "quote not found" });
-        const [{ data: lines }, { data: rooms }] = await Promise.all([
-          db.from("quote_line_items").select("*").eq("quote_id", id).order("sort_order"),
-          db.from("quote_rooms").select("*").eq("quote_id", id).order("sort_order")
-        ]);
-        res.json({ ok: true, installed: true, quote: h[0], line_items: lines ?? [], rooms: rooms ?? [] });
-      } catch (e) {
-        res.status(500).json({ ok: false, error: String(e?.message || e) });
-      }
-    }
-  );
-
-  app.get(
-    "/api/admin/quote-analytics/summary",
-    requireAuth(),
-    requireRole(["admin"]),
-    headAccessSystemAdmin,
-    async (req, res) => {
-      try {
-        const db = supabaseGetter();
-        const startDate = String(req.query.startDate || "").trim() || undefined;
-        const endDate = String(req.query.endDate || "").trim() || undefined;
-        const pipeline = await getQuotePipelineSummary({ startDate, endDate, db });
-        const byRep = await getQuoteMetricsBySalesRep({ startDate, endDate, db });
-        const byBranch = await getQuoteMetricsByBranch({ startDate, endDate, db });
-        const byPartner = await getQuoteMetricsByPartner({ startDate, endDate, db });
-        const forecast = await getForecastValueRollup({ startDate, endDate, db });
-        res.json({ ok: true, pipeline, byRep, byBranch, byPartner, forecast });
-      } catch (e) {
-        res.status(500).json({ ok: false, error: String(e?.message || e) });
-      }
-    }
-  );
+  attachQuotePricingAdminApi(app, { requireAuth, requireRole, requireHeadAccess, getSupabase });
 
   console.log(
-    "[quotes] mounted POST /api/quote/calculate, POST /api/quote/submit, admin quote/* routes, GET /api/admin/quote-analytics/summary"
+    "[quotes] mounted POST /api/quote/calculate, POST /api/quote/submit; admin quote APIs via quotePricingAdminApi.js"
   );
 }
