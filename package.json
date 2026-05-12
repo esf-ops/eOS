@@ -38,6 +38,7 @@
     "eos:probe:moraware-sdk-activity-read-winframework": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/moraware-sdk-trace/MorawareSdkActivityReadProbe.ps1",
     "eos:probe:moraware-sdk-job-identifiers-winframework": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/moraware-sdk-trace/MorawareSdkJobIdentifierProbe.ps1",
     "eos:probe:moraware-sdk-job-details-winframework": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/moraware-sdk-trace/MorawareSdkBatchJobDetailProbe.ps1",
+    "eos:probe:moraware-sdk-assignees-winframework": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/moraware-sdk-trace/MorawareSdkAssigneeCatalogProbe.ps1",
     "eos:inspect:moraware-sdk-assignment": "node backend-core/src/scripts/emitMorawareSdkAssignmentSurfaceReport.js",
     "eos:inspect:moraware-sdk-full": "node backend-core/src/scripts/emitMorawareSdkFullSurfaceReport.js",
     "eos:titans:test": "node backend-core/src/scripts/testTitansTodayEndpoint.js",
