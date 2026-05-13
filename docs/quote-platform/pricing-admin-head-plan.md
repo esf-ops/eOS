@@ -8,14 +8,16 @@ Give Elite **system administrators** a dedicated surface to manage quote economi
 
 **See also:** `docs/quote-platform/ai-takeoff-and-visualize-plan.md` and `backend-core/supabase/eos_quote_takeoff_visual_foundation.sql` (AI takeoff jobs, visual layouts, measurement source history).
 
-Backend foundation lives in `backend-core/src/quotes/quotePricingAdminApi.js` (mounted from `quoteRoutes.js`). Apply optional listing indexes from `backend-core/supabase/eos_quote_platform_admin_additions.sql` when convenient.
+Backend **system-admin** quote economics APIs live in `backend-core/src/quotes/quotePricingAdminApi.js` (mounted from `quoteRoutes.js`). The separate **Pricing Admin head** adds **`/api/pricing-admin/*`** in `pricingAdminHeadApi.js` plus foundation tables in `eliteos_pricing_admin_foundation.sql` and resolver fallbacks in `pricingConfigResolver.js`. Apply optional listing indexes from `backend-core/supabase/eos_quote_platform_admin_additions.sql` when convenient.
+
+**UI:** `app-pricing-admin/` (Vite) is the dedicated head shell; `app-system-admin` may still embed links or placeholders until navigation is unified.
 
 ## 2. User roles
 
 | Role | Access |
 |------|--------|
-| **System admin** (`admin` role + `system_admin` head) | Full CRUD on structures, rules, partners, assignments; quote list; analytics summary. |
-| **Executive / non–system-admin** | No access to these routes (same pattern as other admin-only quote APIs). |
+| **System admin** (`admin` role + `system_admin` head) | Full CRUD on legacy structures/rules via `quotePricingAdminApi.js` (partners, territories, etc.). |
+| **Pricing Admin head** (`pricing_admin` head + `admin` **or** `finance` **or** `executive` role on API stack) | **`/api/pricing-admin/*`** foundation tables + `config-preview`. `admin` still bypasses missing head rows per `requireHeadAccess` middleware. |
 | **Dealer / partner users** | No access; protected pricing must not appear in public or partner-safe heads without an explicit future product decision. |
 
 ## 3. Screens (future UI)

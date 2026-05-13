@@ -27,6 +27,13 @@ export const HEAD_LAUNCHER_CATALOG = [
     href: "/system-admin"
   },
   {
+    slug: "pricing_admin",
+    label: "Pricing Admin",
+    description: "Material tiers, add-ons, and quote pricing policy (authorized staff only).",
+    category: "Administration",
+    href: "/pricing-admin"
+  },
+  {
     slug: "sales",
     label: "Sales Head",
     description: "Sales performance, account growth, and sales flow into the Titans.",
@@ -157,12 +164,13 @@ function defaultSlugSet(role, userKind) {
   const base = new Set(["brain_health"]);
   const roleHints = {
     sales: ["sales", "quote", "reports"],
+    accounting: ["finance", "reports", "pricing_admin"],
     production: ["production", "shop_tv", "reports"],
     shop_tv: ["shop_tv"],
     installer: ["install"],
     purchasing: ["purchasing"],
     accounting: ["finance", "reports"],
-    finance: ["finance", "reports"],
+    finance: ["finance", "reports", "pricing_admin"],
     dealer_admin: ["partner_quote", "dealer_resources", "quote"],
     dealer_user: ["partner_quote", "dealer_resources", "quote"],
     viewer: [],

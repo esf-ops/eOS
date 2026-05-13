@@ -93,7 +93,24 @@ Example: Group Promo Direct **70** $/sf, markup **25%** → planning rate **87.5
 5. Wire **calculator** to prefer DB rules for all categories (including vanity upgrades) and add tests against seeded UUIDs in CI if feasible.
 6. Implement **public retail** wizard using server-side `calculateQuote` only.
 
-## 10. Row counts (seed v1)
+## 10. Pricing Admin foundation (parallel schema)
+
+Manual apply: `backend-core/supabase/eliteos_pricing_admin_foundation.sql` (additive; **not** auto-run).
+
+| Table | Role |
+|-------|------|
+| `quote_price_groups` | Material tier definitions (`promo` … `group_f`) |
+| `quote_price_group_rates` | Direct / wholesale (and future partner/public) $/sf per group |
+| `quote_pricing_policy_rules` | JSON policy keys (`public_consumer_markup_percent`, rounding, internal UX flags, …) — **not** the legacy line-catalog `quote_pricing_rules` table |
+| `quote_addon_catalog` | Named add-ons / services with `addon_code` |
+| `quote_material_color_mappings` | Optional color → group mapping (scaffold) |
+| `quote_pricing_audit_log` | Append-only audit for Pricing Admin mutations |
+
+**Resolver:** `backend-core/src/quotes/pricingConfigResolver.js` merges DB rows with **`quoteCalculator.js`** fallbacks. Public/Internal quote heads are **unchanged** until an explicit cutover ties math to the resolver.
+
+**Stock Blanco discrepancy:** `PROTOTYPE_ADDON_UNIT_PRICES["qty-blanco"]` in `quoteCalculator.js` is **450**; Pricing Admin seed uses **495** pending finance alignment — do not treat as silent drift; pick one before calculator reads catalog prices.
+
+## 11. Row counts (seed v1)
 
 Derived from the generator (single structure × counts below; **×6** structures):
 

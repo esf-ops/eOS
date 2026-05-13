@@ -87,10 +87,11 @@ Status is **conceptual** unless a separate tracker says otherwise. Use the label
 ### Quote / Revenue
 
 - Public Consumer Quote Tool (**`app-quote`** — deployed public hostname above)  
-- Internal Quoting / **Internal Estimate** Tool (**`app-internal-estimate`** — separate staff head; auth required)
+- Internal Quoting / **Internal Estimate** Tool (**`app-internal-estimate`** — separate staff head; auth required)  
+- **Pricing Admin** Tool (**`app-pricing-admin`** — separate head; `pricing_admin` head access + admin/finance/executive role gate on `/api/pricing-admin/*`; distinct from legacy System Admin quote structure APIs)
 - Partner Quoting Tool  
 - Quote Pipeline / Quote Leads Head  
-- Pricing Admin / Quote Catalog Admin Head  
+- Quote Catalog Admin (normalized catalog programs — future; see `quote-catalog-admin-architecture.md`)  
 - Quote Source Configuration Head  
 - Sales Territory Admin Head  
 - Partner Pricing Assignment Head  

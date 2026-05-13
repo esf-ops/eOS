@@ -6,6 +6,7 @@ export const EOS_HEAD_SLUGS = Object.freeze([
   "executive",
   "brain_health",
   "system_admin",
+  "pricing_admin",
   "sales",
   "quote",
   "production",

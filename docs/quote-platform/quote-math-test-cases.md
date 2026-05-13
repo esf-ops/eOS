@@ -9,6 +9,7 @@ These cases validate **local demo math** (`app-quote/src/lib/prototypeQuoteMath.
 - Vanity tier threshold: **35 sq ft** qualifying countertop sf (non-vanity rooms).
 - **Partner / demo wholesale** in this doc uses prototype **$45/sf …** tiers (`PROTOTYPE_TIERS`).
 - **Public consumer (live API + `computePublicConsumerEstimatesByGroup`)** uses **ESF Direct $/sf** (`ESF_DIRECT_PRICE_PER_SQFT` / `ESF_DIRECT_TIER_RATES`) × planning markup (default **25%**), not prototype partner $/sf × 1.25 — see §9 and `quoteCalculator.js`.
+- **Pricing Admin / `pricingConfigResolver.js`:** foundation pass adds DB-backed config + fallbacks; **canonical public totals** (e.g. Promo exact **5425**, display **5430**) remain defined by `quoteCalculator.js` until an explicit resolver cutover is recorded and tested here.
 
 > **Note:** Room-engine wholesale in the prototype is  
 > `(counter + splash + fhb) * tier.p + roomExtras` per room, then summed.  

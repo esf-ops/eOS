@@ -54,14 +54,14 @@
     "eos:build:home": "npm run build --prefix app-home",
     "eos:build:sales": "npm run build --prefix app-sales",
     "eos:build:quote": "npm run build --prefix app-quote",
-    "eos:build:internal-estimate": "npm run build --prefix app-internal-estimate",
+    "eos:build:pricing-admin": "npm run build --prefix app-pricing-admin",
     "eos:build:all-heads": "npm run eos:build:brain-health && npm run eos:build:executive && npm run eos:build:system-admin && npm run eos:build:sales && npm run eos:build:home",
     "eos:analyze:sales-inputs": "node backend-core/src/scripts/analyzeSalesAccountAttributionInputs.js",
     "eos:sales:crosswalk-suggestions": "node backend-core/src/scripts/buildSalesAccountCrosswalkSuggestions.js",
     "eos:sales:reconcile-sqft": "node backend-core/src/scripts/reconcileSalesSqftReportToBrain.js",
     "eos:sales:attribution-dry-run": "node backend-core/src/scripts/importSalesAttributionData.js",
     "eos:sales:demote-auto-approved": "node backend-core/src/scripts/demoteAutoApprovedSalesAliases.js",
-    "eos:check:local": "node --check backend-core/src/server.js && node --check backend-core/api/index.js && npm run eos:test:head-access && npm run eos:build:all-heads && npm run build --prefix app-quote && npm run build --prefix app-internal-estimate",
+    "eos:check:local": "node --check backend-core/src/server.js && node --check backend-core/api/index.js && npm run eos:test:head-access && npm run eos:build:all-heads && npm run build --prefix app-quote && npm run build --prefix app-internal-estimate && npm run build --prefix app-pricing-admin",
     "lint": "node --check src/index.js && node --check src/morawareClient.js && node --check src/morawareDiscovery.js && node --check src/morawareJobFormsSdk.js && node --check src/firehose.js && node --check src/normalize.js && node --check src/router.js && node --check src/heads/debug.js"
   },
   "dependencies": {

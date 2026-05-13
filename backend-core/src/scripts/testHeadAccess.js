@@ -27,10 +27,12 @@ assert(isKnownHeadSlug("executive"), "executive is a known head slug");
 assert(isKnownHeadSlug("sales"), "sales is a known head slug");
 assert(isKnownHeadSlug("brain_health"), "brain_health is a known head slug");
 assert(isKnownHeadSlug("system_admin"), "system_admin is a known head slug");
+assert(isKnownHeadSlug("pricing_admin"), "pricing_admin is a known head slug");
 assert(isDealerSafeHeadSlug("partner_quote"), "partner_quote is dealer-safe");
 assert(isDealerSafeHeadSlug("quote"), "quote is dealer-safe");
 assert(!isDealerSafeHeadSlug("executive"), "executive must not be dealer-safe");
 assert(!isDealerSafeHeadSlug("brain_health"), "brain_health must not be dealer-safe");
+assert(!isDealerSafeHeadSlug("pricing_admin"), "pricing_admin must not be dealer-safe");
 assert(DEALER_SAFE_HEAD_SLUG_SET.size >= 3, "dealer-safe set should list partner-facing heads");
 
 console.log("testHeadAccess: constant checks OK.");
