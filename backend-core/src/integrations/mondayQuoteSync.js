@@ -32,6 +32,7 @@
 
 import { getMondayBoardEnvKeyForQuoteSource, isPublicQuoteSource } from "../quotes/quoteSourceConfig.js";
 import { tableHasOrganizationId } from "../organizations/organizationContext.js";
+import { roundPublicEstimateToNearestTen } from "../quotes/quoteCalculator.js";
 
 /**
  * Optional per-tenant Monday board env var names (values still read from process.env).
@@ -156,9 +157,9 @@ export function buildPublicEstimateSummaryCompact(rows) {
   return rows
     .map((row) => {
       const label = abbreviateGroupLabel(row.group);
-      const t = Number(row.total);
-      const n = Number.isFinite(t) ? t : 0;
-      const money = `$${Math.round(n).toLocaleString("en-US")}`;
+      const display = Number(row.total_display);
+      const dollars = Number.isFinite(display) ? display : roundPublicEstimateToNearestTen(Number(row.total));
+      const money = `$${Math.round(dollars).toLocaleString("en-US")}`;
       return `${label} ${money}`;
     })
     .join(" | ");
@@ -240,7 +241,11 @@ export function isValidEmailForMonday(em) {
 function formatMondayNumberString(value, mode) {
   const n = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(n)) return null;
-  if (mode === "money") return n.toFixed(2);
+  if (mode === "money") {
+    const r = Math.round(n * 100) / 100;
+    if (Number.isInteger(r) || Math.abs(r - Math.round(r)) < 1e-6) return String(Math.round(r));
+    return r.toFixed(2);
+  }
   return String(Math.round(n));
 }
 

@@ -2,14 +2,35 @@
  * eliteOS Quote Calculator — testable core (no Express).
  *
  * Rules:
- * - Public retail (`pricing_mode === public_retail`) enforces minimum 25% markup over wholesale.
- * - Partner/wholesale economics use DB `quote_pricing_rules` when provided; otherwise prototype mirror constants.
+ * - Partner economics use DB `quote_pricing_rules` when provided; otherwise prototype mirror constants
+ *   (`PROTOTYPE_TIER_PRICE_PER_SQFT` = legacy prototype $/sf, not used for public consumer material).
+ * - Public consumer (`pricing_mode === public_retail`): material $/sf uses ESF **Direct** tiers
+ *   (`ESF_DIRECT_PRICE_PER_SQFT`), add-ons/vanities use rule/prototype unit prices as Direct; homeowner total =
+ *   Direct subtotal × `(1 + effectiveRetailMarkupPercent/100)` (minimum **25%**, from structure / `resolvePricingStructure`).
  * - Callers must not trust client-supplied totals; use returned numbers only.
  */
 
 const MIN_PUBLIC_RETAIL_MARKUP = 25;
 
-/** Prototype v1.01 tier $/sf (Group Promo → Group F) — seed into DB in production. */
+/** 25% public planning markup on top of Direct unit economics (material $/sf, add-ons, vanities). */
+const PUBLIC_PLANNING_MARKUP_MULTIPLIER = 1.25;
+
+/**
+ * ESF Direct $/sqft by material tier (internal ESF economics).
+ * Public consumer estimates use ESF Direct pricing plus a 25% public planning markup.
+ * @see computePublicConsumerEstimatesByGroup, legacyDirectPublic, sumRoomsPublicPlanning
+ */
+export const ESF_DIRECT_PRICE_PER_SQFT = Object.freeze({
+  "Group Promo": 70,
+  "Group A": 77,
+  "Group B": 85,
+  "Group C": 95,
+  "Group D": 105,
+  "Group E": 120,
+  "Group F": 135
+});
+
+/** Prototype v1.01 tier $/sf (Group Promo → Group F) — partner/seed mirror; not public consumer material rates. */
 export const PROTOTYPE_TIER_PRICE_PER_SQFT = Object.freeze({
   "Group Promo": 45,
   "Group A": 57,
@@ -97,6 +118,105 @@ function rulePriceForMaterialGroup(groupName, rules) {
 }
 
 /**
+ * ESF Direct $/sqft for a material group (public consumer material base before × 1.25).
+ * @param {string} groupName
+ * @returns {number}
+ */
+export function directPricePerSqftForGroup(groupName) {
+  const g = String(groupName || "Group Promo").trim();
+  return ESF_DIRECT_PRICE_PER_SQFT[g] ?? ESF_DIRECT_PRICE_PER_SQFT["Group Promo"];
+}
+
+/**
+ * Legacy-area public planning: Direct material $/sf + Direct add-ons/vanities (from rules), then × 1.25 at total via applyRetailProtection.
+ * Public consumer estimates use ESF Direct pricing plus a 25% public planning markup.
+ * @param {Record<string, unknown>} input
+ * @param {ReadonlyArray<Record<string, unknown>>} rules
+ */
+function legacyDirectPublic(input, rules, markupMult = PUBLIC_PLANNING_MARKUP_MULTIPLIER) {
+  const g = String(input.materialGroup || "Group Promo");
+  const directRate = directPricePerSqftForGroup(g);
+  const mult = Number(markupMult) > 0 ? Number(markupMult) : PUBLIC_PLANNING_MARKUP_MULTIPLIER;
+  const ct = Number(input.areas?.countertopSqft) || 0;
+  const bs = Number(input.areas?.backsplashSqft) || 0;
+  const baseMat = ct * directRate + bs * directRate;
+  const addOnPart = calculateAddOns({ addOns: input.addOns || {} }, rules);
+  const vanityPart = calculateVanities(input, rules);
+  const directTotal = baseMat + addOnPart.total + vanityPart.total;
+  return {
+    directTotal,
+    /** ESF Direct subtotal before public planning % (stored as `totals.wholesale` for snapshots). */
+    wholesale: directTotal,
+    materialGroup: g,
+    directRatePerSqft: directRate,
+    /** Public planning $/sf for homeowner-facing line items (Direct × markup multiplier). */
+    rate: round2(directRate * mult),
+    areas: { countertopSqft: ct, backsplashSqft: bs },
+    addOnPart,
+    vanityPart
+  };
+}
+
+/**
+ * Room-engine public planning: per-room Direct $/sf, global add-ons at Direct units; total × 1.25 applied in calculateQuote.
+ * Public consumer estimates use ESF Direct pricing plus a 25% public planning markup.
+ * @param {Record<string, unknown>} input
+ * @param {ReadonlyArray<Record<string, unknown>>} rules
+ */
+function sumRoomsPublicPlanning(input, rules, markupMult = PUBLIC_PLANNING_MARKUP_MULTIPLIER) {
+  const mult = Number(markupMult) > 0 ? Number(markupMult) : PUBLIC_PLANNING_MARKUP_MULTIPLIER;
+  let counter = 0;
+  let splash = 0;
+  let directMaterial = 0;
+  const roomLines = [];
+  for (const room of input.rooms || []) {
+    const g = String(room.materialGroup || room.group || input.materialGroup || "Group Promo");
+    const directR = directPricePerSqftForGroup(g);
+    const publicR = round2(directR * mult);
+    let roomCounter = 0;
+    let roomSplash = 0;
+    if (Array.isArray(room.pieces)) {
+      for (const piece of room.pieces) {
+        const { sf } = calculateRoomAreas(piece);
+        const t = String(piece.type || "counter");
+        if (t === "splash") roomSplash += sf;
+        else roomCounter += sf;
+      }
+    } else {
+      roomCounter = Number(room.countertopSqft) || 0;
+      roomSplash = Number(room.backsplashSqft) || 0;
+    }
+    const sf = roomCounter + roomSplash;
+    const dSub = sf * directR;
+    const pSub = sf * publicR;
+    directMaterial += dSub;
+    counter += roomCounter;
+    splash += roomSplash;
+    roomLines.push({
+      room: room.name || "Room",
+      group: g,
+      rate: publicR,
+      directRate: directR,
+      roomCounter,
+      roomSplash,
+      subtotal: round2(pSub),
+      directSubtotal: round2(dSub)
+    });
+  }
+  const addOnPart = calculateAddOns({ addOns: input.addOns || {} }, rules);
+  const directTotal = directMaterial + addOnPart.total;
+  return {
+    counter,
+    splash,
+    roomLines,
+    addOnPart,
+    directTotal,
+    /** ESF Direct subtotal before public planning % (stored as `totals.wholesale` for snapshots). */
+    wholesale: directTotal
+  };
+}
+
+/**
  * @param {Record<string, unknown>} input
  * @param {ReadonlyArray<Record<string, unknown>>} rules
  */
@@ -148,7 +268,8 @@ export function calculateVanities(input, rules) {
 }
 
 /**
- * Apply minimum public retail markup over wholesale partner economics.
+ * For `public_retail`, `wholesale` is the ESF Direct subtotal; retail = that × (1 + effectiveMarkup/100), min 25%.
+ * For other modes, `wholesale` is partner wholesale economics.
  * @param {{ wholesale: number, retailMarkupPercent?: number, pricingMode?: string }} params
  */
 export function applyRetailProtection({ wholesale, retailMarkupPercent = 0, pricingMode = "" }) {
@@ -418,10 +539,27 @@ export async function calculateQuote(rawInput, pricingContext = {}) {
   }
   const rules = Array.isArray(resolved.rules) ? resolved.rules : prototypeMirrorRules();
   const mode = String(resolved.structure?.pricing_mode || "partner");
+  /** For public_retail line items: `1 + effectiveRetailMarkupPercent/100` (matches `applyRetailProtection`). */
+  const publicMarkupMult =
+    mode === "public_retail"
+      ? 1 +
+        Number(resolved.effectiveRetailMarkupPercent ?? resolved.structure?.retail_markup_percent ?? MIN_PUBLIC_RETAIL_MARKUP) /
+          100
+      : 1;
 
   let wholesale = 0;
   let detail = {};
-  if (input.engine === "rooms" && input.rooms.length) {
+  if (mode === "public_retail") {
+    if (input.engine === "rooms" && input.rooms.length) {
+      const agg = sumRoomsPublicPlanning(input, rules, publicMarkupMult);
+      wholesale = round2(agg.directTotal);
+      detail = { kind: "rooms", ...agg, isPublicPlanning: true };
+    } else {
+      const leg = legacyDirectPublic(input, rules, publicMarkupMult);
+      wholesale = round2(leg.directTotal);
+      detail = { kind: "legacy", ...leg, isPublicPlanning: true };
+    }
+  } else if (input.engine === "rooms" && input.rooms.length) {
     const agg = sumRoomsWholesale(input, rules);
     wholesale = agg.wholesale;
     detail = { kind: "rooms", ...agg };
@@ -454,7 +592,7 @@ export async function calculateQuote(rawInput, pricingContext = {}) {
     estimated_sqft: round2((detail.counter || input.areas.countertopSqft) + (detail.splash || input.areas.backsplashSqft))
   };
 
-  const lineItems = buildLineItems(detail, input, totals);
+  const lineItems = buildLineItems(detail, input, totals, mode, publicMarkupMult);
 
   const snapshot = buildCalculationSnapshot(input, resolved, totals, { warnings });
   snapshot.lineItems = lineItems;
@@ -478,7 +616,41 @@ function round2(n) {
   return Math.round(Number(n) * 100) / 100;
 }
 
-function buildLineItems(detail, input, totals) {
+/**
+ * Public-facing estimate dollars: round UP to the nearest $10 (whole dollars, no cents in homeowner UI).
+ * @param {number|unknown} value
+ * @returns {number}
+ */
+export function roundPublicEstimateToNearestTen(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.ceil(n / 10) * 10;
+}
+
+/**
+ * Adds `*_display` fields for homeowner presentation. Exact `countertop` / `total` etc. unchanged.
+ * @param {ReadonlyArray<Record<string, unknown>>|null|undefined} estimatesByGroup
+ * @returns {Record<string, unknown>[]}
+ */
+export function enrichPublicConsumerEstimatesForDisplay(estimatesByGroup) {
+  if (!Array.isArray(estimatesByGroup)) return [];
+  return estimatesByGroup.map((r) => {
+    const countertop = Number(r.countertop) || 0;
+    const backsplash = Number(r.backsplash) || 0;
+    const addons = Number(r.addons) || 0;
+    const total = Number(r.total) || 0;
+    return {
+      ...r,
+      countertop_display: roundPublicEstimateToNearestTen(countertop),
+      backsplash_display: roundPublicEstimateToNearestTen(backsplash),
+      addons_display: roundPublicEstimateToNearestTen(addons),
+      total_display: roundPublicEstimateToNearestTen(total)
+    };
+  });
+}
+
+function buildLineItems(detail, input, totals, pricingMode = "", publicMult = 1) {
+  const pubMult = pricingMode === "public_retail" ? publicMult : 1;
   const lines = [];
   if (detail.kind === "legacy") {
     const ct = detail.areas.countertopSqft;
@@ -505,8 +677,8 @@ function buildLineItems(detail, input, totals) {
         item_name: ln.item_name,
         quantity: ln.quantity,
         unit_type: "each",
-        unit_price: ln.unit_price,
-        line_subtotal: ln.line_subtotal
+        unit_price: round2(ln.unit_price * pubMult),
+        line_subtotal: round2(ln.line_subtotal * pubMult)
       });
     }
     for (const ln of detail.vanityPart?.lines || []) {
@@ -517,8 +689,8 @@ function buildLineItems(detail, input, totals) {
         item_name: ln.item_name,
         quantity: ln.quantity,
         unit_type: "each",
-        unit_price: ln.unit_price,
-        line_subtotal: ln.line_subtotal
+        unit_price: round2(ln.unit_price * pubMult),
+        line_subtotal: round2(ln.line_subtotal * pubMult)
       });
     }
   } else if (detail.kind === "rooms") {
@@ -545,20 +717,21 @@ function buildLineItems(detail, input, totals) {
         item_name: ln.item_name,
         quantity: ln.quantity,
         unit_type: "each",
-        unit_price: ln.unit_price,
-        line_subtotal: ln.line_subtotal
+        unit_price: round2(ln.unit_price * pubMult),
+        line_subtotal: round2(ln.line_subtotal * pubMult)
       });
     }
   }
   return lines;
 }
 
-/** Display order for multi-tier public consumer estimates. */
-export const PUBLIC_CONSUMER_MATERIAL_GROUPS = Object.freeze(Object.keys(PROTOTYPE_TIER_PRICE_PER_SQFT));
+/** Display order for multi-tier public consumer estimates (ESF Direct tier names). */
+export const PUBLIC_CONSUMER_MATERIAL_GROUPS = Object.freeze(Object.keys(ESF_DIRECT_PRICE_PER_SQFT));
 
 /**
  * Public-safe per-group estimates: countertop / backsplash / add-ons / total per tier.
- * Does not return wholesale numbers.
+ * Public consumer estimates use ESF Direct pricing plus a 25% public planning markup (or structure's `retail_markup_percent` when higher).
+ * Does not return internal ESF Direct-only totals to the client.
  * @param {Record<string, unknown>} rawInput
  * @param {{ db?: unknown, rules?: unknown[], structure?: Record<string,unknown> } | Record<string, unknown>} pricingContext
  */
@@ -597,33 +770,49 @@ export async function computePublicConsumerEstimatesByGroup(rawInput, pricingCon
 
   const estimates = [];
   let appliedRetailMarkupPercent = m;
+  const rateMult = 1 + m / 100;
   for (const group of ordered) {
-    const leg = legacyWholesale({ ...input, materialGroup: group }, rules);
-    const ctW = round2(leg.areas.countertopSqft * leg.rate);
-    const bsW = round2(leg.areas.backsplashSqft * leg.rate);
-    const addW = round2((leg.addOnPart?.total || 0) + (leg.vanityPart?.total || 0));
-    const totalW = round2(leg.wholesale);
-    const prot = applyRetailProtection({
-      wholesale: totalW,
-      retailMarkupPercent: m,
-      pricingMode: "public_retail"
-    });
-    appliedRetailMarkupPercent = prot.appliedMarkupPercent;
-    const mult = totalW > 0 ? prot.retail / totalW : 1;
-    estimates.push({
-      group,
-      countertop: round2(ctW * mult),
-      backsplash: round2(bsW * mult),
-      addons: round2(addW * mult),
-      total: round2(prot.retail)
-    });
+    const directR = directPricePerSqftForGroup(group);
+    const publicR = round2(directR * rateMult);
+    const ct = Number(input.areas?.countertopSqft) || 0;
+    const bs = Number(input.areas?.backsplashSqft) || 0;
+    const countertop = round2(ct * publicR);
+    const backsplash = round2(bs * publicR);
+    const addOnPart = calculateAddOns({ addOns: input.addOns || {} }, rules);
+    const vanityPart = calculateVanities(input, rules);
+    const addDirect = (addOnPart.total || 0) + (vanityPart.total || 0);
+    const addons = round2(addDirect * rateMult);
+    const total = round2(countertop + backsplash + addons);
+    estimates.push({ group, countertop, backsplash, addons, total });
   }
 
   return {
     ok: true,
     quote_source: "public_consumer",
-    estimates_by_group: estimates,
+    estimates_by_group: enrichPublicConsumerEstimatesForDisplay(estimates),
     warnings,
     appliedRetailMarkupPercent
   };
+}
+
+/**
+ * Dev/sanity checks for public planning math (Direct × markup). Throws if expectations drift.
+ * Public consumer estimates use ESF Direct pricing plus a 25% public planning markup.
+ */
+export function verifyPublicPlanningPricingSanity() {
+  const rateMult = 1.25;
+  const aCt = round2(10 * 77 * rateMult);
+  if (aCt !== 962.5) throw new Error(`sanity A: expected countertop 962.5, got ${aCt}`);
+  const sinkOnly = round2(200 * rateMult);
+  if (sinkOnly !== 250) throw new Error(`sanity B: expected addons 250, got ${sinkOnly}`);
+  const promoR = 70 * rateMult;
+  const cTotal = round2(45 * promoR + 12 * promoR + (200 + 150) * rateMult);
+  if (cTotal !== 5425) throw new Error(`sanity C: expected 5425, got ${cTotal}`);
+  const enriched = enrichPublicConsumerEstimatesForDisplay([
+    { group: "Group Promo", countertop: 3937.5, backsplash: 1050, addons: 437.5, total: 5425 }
+  ]);
+  if (enriched[0]?.total_display !== 5430) {
+    throw new Error(`sanity display: expected Promo total_display 5430, got ${enriched[0]?.total_display}`);
+  }
+  return { ok: true };
 }

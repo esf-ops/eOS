@@ -4,25 +4,20 @@
  */
 
 import { round2 } from "./measurementEngine";
-import { PROTOTYPE_TIERS, sumGlobalAddOns } from "./prototypeQuoteMath";
+import {
+  enrichPublicConsumerEstimatesForDisplayLocal,
+  type PublicEstimateRow
+} from "./publicEstimateDisplay";
+import { ESF_DIRECT_TIER_RATES, sumGlobalAddOns } from "./prototypeQuoteMath";
 
-const MIN_PUBLIC_RETAIL_MARKUP = 25;
+export type { PublicEstimateRow } from "./publicEstimateDisplay";
 
-export type PublicEstimateRow = {
-  group: string;
-  countertop: number;
-  backsplash: number;
-  addons: number;
-  total: number;
-};
-
-function tierRateForGroup(name: string): number {
-  const g = String(name || "Group Promo").trim();
-  return PROTOTYPE_TIERS.find((t) => t.n === g)?.p ?? PROTOTYPE_TIERS[0].p;
-}
+/** Local fallback assumes 25% public planning markup (matches default `public_retail` structure). */
+const PUBLIC_PLANNING_MARKUP_MULT = 1.25;
 
 /**
- * Same economics as `legacyWholesale` + `applyRetailProtection` for public_retail in quoteCalculator.js.
+ * Same economics as `computePublicConsumerEstimatesByGroup` in quoteCalculator.js (prototype / no-DB path, 25% markup).
+ * Public consumer estimates use ESF Direct pricing plus a 25% public planning markup.
  */
 export function computePublicConsumerEstimatesLocal(params: {
   countertopSqft: number;
@@ -32,25 +27,18 @@ export function computePublicConsumerEstimatesLocal(params: {
   const ct = Number(params.countertopSqft) || 0;
   const bs = Number(params.backsplashSqft) || 0;
   const addOnTotal = sumGlobalAddOns(params.addOns).total;
-  const m = MIN_PUBLIC_RETAIL_MARKUP;
+  const rateMult = PUBLIC_PLANNING_MARKUP_MULT;
   const out: PublicEstimateRow[] = [];
 
-  for (const tier of PROTOTYPE_TIERS) {
+  for (const tier of ESF_DIRECT_TIER_RATES) {
     const group = tier.n;
-    const rate = tierRateForGroup(group);
-    const ctW = round2(ct * rate);
-    const bsW = round2(bs * rate);
-    const addW = round2(addOnTotal);
-    const totalW = round2(ctW + bsW + addW);
-    const retail = round2(totalW * (1 + m / 100));
-    const mult = totalW > 0 ? retail / totalW : 1;
-    out.push({
-      group,
-      countertop: round2(ctW * mult),
-      backsplash: round2(bsW * mult),
-      addons: round2(addW * mult),
-      total: retail
-    });
+    const directR = tier.directPerSqft;
+    const publicR = round2(directR * rateMult);
+    const countertop = round2(ct * publicR);
+    const backsplash = round2(bs * publicR);
+    const addons = round2(addOnTotal * rateMult);
+    const total = round2(countertop + backsplash + addons);
+    out.push({ group, countertop, backsplash, addons, total });
   }
-  return out;
+  return enrichPublicConsumerEstimatesForDisplayLocal(out);
 }

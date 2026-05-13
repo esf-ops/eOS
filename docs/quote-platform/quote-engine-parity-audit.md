@@ -124,7 +124,7 @@ This document is **Phase 1**: map what exists, what is missing, and how to conve
 | **Customer Retail Quote** | Applies `calculateRetailFromWholesale` to wholesale totals for display. |
 | **Partner / internal** | Wholesale economics + partner markup settings. |
 | **Wholesale → retail** | Markup %, margin %, flat dollar add (`calculateRetailFromWholesale`). |
-| **Public retail protection** | eOS rule: **≥ 25%** over wholesale for `public_retail` (`quoteCalculator.js` `MIN_PUBLIC_RETAIL_MARKUP`); prototype framing aligns in copy. |
+| **Public consumer planning** | `public_retail`: material uses **`ESF_DIRECT_PRICE_PER_SQFT`**; add-ons at Direct units; total = Direct subtotal × `(1 + markup%)` with **≥ 25%** floor (`MIN_PUBLIC_RETAIL_MARKUP`); not “prototype partner $/sf + protection”. |
 
 ---
 

@@ -6,7 +6,7 @@ import {
   resolveOrganizationContext,
   tableHasOrganizationId
 } from "../organizations/organizationContext.js";
-import { calculateQuote, computePublicConsumerEstimatesByGroup } from "./quoteCalculator.js";
+import { calculateQuote, computePublicConsumerEstimatesByGroup, roundPublicEstimateToNearestTen } from "./quoteCalculator.js";
 import { attachQuotePricingAdminApi } from "./quotePricingAdminApi.js";
 import { attachQuotePipelineRoutes } from "./quotePipelineApi.js";
 import { assignSalesRepForPublicQuote, buildLeadAssignmentRow } from "./quoteTerritoryAssignment.js";
@@ -51,13 +51,22 @@ function sanitizePublicCalculateResponse(calcResult) {
 }
 
 function buildPublicConsumerSnapshot(estimatesByGroup, calc, warnings) {
+  const rows = Array.isArray(estimatesByGroup) ? estimatesByGroup : [];
+  const promo = rows.find((r) => String(r.group || "").trim() === "Group Promo");
+  const exact = promo != null && promo.total != null ? Number(promo.total) : null;
+  const display =
+    promo != null
+      ? Number(promo.total_display ?? (exact != null ? roundPublicEstimateToNearestTen(exact) : NaN))
+      : null;
   return {
     version: 1,
     public_safe: true,
     quote_source: "public_consumer",
-    estimates_by_group: estimatesByGroup || [],
+    estimates_by_group: rows,
     totals: {
-      retail_planning: estimatesByGroup?.[0]?.total ?? calc?.totals?.retail ?? null,
+      retail_planning_promo_exact: Number.isFinite(exact) ? exact : null,
+      retail_planning_promo_display: Number.isFinite(display) ? display : null,
+      retail_planning: Number.isFinite(display) ? display : Number.isFinite(exact) ? exact : calc?.totals?.retail ?? null,
       estimated_sqft: calc?.totals?.estimated_sqft ?? null
     },
     warnings: [...(warnings || []), ...(calc?.warnings || [])]
@@ -100,10 +109,19 @@ async function persistQuoteSubmission(db, opts) {
   }
 
   const isPublicConsumer = quoteSource === "public_consumer";
+  const promoRow = (estimatesByGroup || []).find((r) => String(r.group || "").trim() === "Group Promo");
   const primaryRetail =
-    isPublicConsumer && Array.isArray(estimatesByGroup) && estimatesByGroup.length
-      ? Number(estimatesByGroup[0].total)
-      : Number(calc.totals.retail);
+    isPublicConsumer && promoRow
+      ? Number(
+          promoRow.total_display ??
+            roundPublicEstimateToNearestTen(Number(promoRow.total) || 0)
+        )
+      : isPublicConsumer && Array.isArray(estimatesByGroup) && estimatesByGroup.length
+        ? Number(
+            estimatesByGroup[0].total_display ??
+              roundPublicEstimateToNearestTen(Number(estimatesByGroup[0].total) || 0)
+          )
+        : Number(calc.totals.retail);
 
   const headerRow = {
     quote_number: quoteNumber,
@@ -257,7 +275,12 @@ async function persistQuoteSubmission(db, opts) {
     snapshotToStore,
     {
       estimates_by_group_summary: isPublicConsumer
-        ? (estimatesByGroup || []).map((r) => ({ group: r.group, total: r.total }))
+        ? (estimatesByGroup || []).map((r) => ({
+            group: r.group,
+            total: r.total,
+            total_display:
+              r.total_display != null ? r.total_display : roundPublicEstimateToNearestTen(Number(r.total) || 0)
+          }))
         : null
     }
   );
@@ -288,12 +311,14 @@ export function attachQuoteRoutes(app, { requireAuth, requireRole, requireHeadAc
       const input = body;
       const ctSf = Number(input.areas?.countertopSqft ?? input.countertopSqft ?? 0) || 0;
       const bsSf = Number(input.areas?.backsplashSqft ?? input.backsplashSqft ?? 0) || 0;
-      const retail = multi.estimates_by_group?.[0]?.total ?? 0;
+      const promo = multi.estimates_by_group?.find((r) => String(r.group || "").trim() === "Group Promo");
       res.json({
         ok: true,
         quote_source: "public_consumer",
         totals: {
-          retail_planning: retail,
+          retail_planning: promo ? Number(promo.total_display ?? promo.total) : 0,
+          retail_planning_promo_exact: promo?.total ?? null,
+          retail_planning_promo_display: promo?.total_display ?? null,
           estimated_sqft: round2(ctSf + bsSf)
         },
         estimates_by_group: multi.estimates_by_group,

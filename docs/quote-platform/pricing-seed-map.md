@@ -56,13 +56,14 @@ node backend-core/src/scripts/generateQuotePrototypePricingSeed.js
 | `designer_partner` | `designer` | 0 | `false` |
 | `internal_house` | `internal` | 0 | `false` |
 
-## 6. Public retail — minimum 25% markup
+## 6. Public consumer — ESF Direct + planning markup
 
-- **`quote_pricing_structures`** for `public_retail` sets `retail_markup_percent = 25` (and satisfies the schema check `>= 25`).
-- **`quoteCalculator.js`** computes line **wholesale** from rule unit prices, then for `pricing_mode === 'public_retail'` applies `applyRetailProtection()` so **retail total = wholesale total × (1 + effectiveMarkup/100)**`, with a floor of 25%.
-- **Seed rule rows are identical** across all six structures for unit prices (prototype baseline). We **do not** store per-line prices pre-multiplied by 1.25 for public retail, because that would **double-apply** markup on top of the calculator’s total-level protection.
+- **`quote_pricing_structures`** for `public_retail` sets `retail_markup_percent` (minimum **25%** in schema / resolver).
+- **`quoteCalculator.js` — public consumer paths** use **`ESF_DIRECT_PRICE_PER_SQFT`** for material $/sqft (not the prototype partner tier mirror). Add-on and vanity line units still come from `quote_pricing_rules` / prototype mirror and are treated as **Direct** unit prices.
+- Homeowner-facing totals: **Direct subtotal × `(1 + effectiveRetailMarkupPercent/100)`** (same as `applyRetailProtection` for `public_retail`). Per-component: countertop = ct × Direct$/sf × factor; backsplash = bs × Direct$/sf × factor; add-ons = Σ(Direct unit × qty) × factor. This is **not** “wholesale + markup” and is **not** labeled to homeowners as wholesale or internal tier names.
+- **Seed `material_group` rule prices** remain the prototype partner mirror for **partner** structures; public material math uses the **Direct** table in code so changing seed partner tiers does not silently change public consumer stone rates.
 
-Example: Group Promo prototype $/sf **45** → wholesale uses **45** for every structure; public retail **display total** is wholesale × **1.25** (e.g. **56.25** $/sf equivalent on a single-SF quote with no other lines).
+Example: Group Promo Direct **70** $/sf, markup **25%** → planning rate **87.50** $/sf for homeowner-facing stone lines.
 
 ## 7. Eric / admin review checklist
 

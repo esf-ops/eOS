@@ -1727,6 +1727,106 @@ select:focus {
   margin-top: 16px !important;
 }
 
+/* Single-card public planning estimate (replaces multi-tier grid) */
+.public-planning-estimate {
+  margin-top: 18px;
+  max-width: 36rem;
+}
+
+.public-planning-estimate__title {
+  margin: 0 0 8px;
+  font-size: 1.2rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.public-planning-estimate__helper {
+  margin: 0 0 14px;
+  font-size: 0.92rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.public-planning-estimate__card {
+  background: linear-gradient(180deg, #ffffff 0%, #fafbfc 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 4px 0 2px;
+  box-shadow: var(--shadow);
+}
+
+.public-planning-estimate__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+}
+
+.public-planning-estimate__table tbody tr {
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.public-planning-estimate__table tbody tr:last-child {
+  border-bottom: none;
+}
+
+.public-planning-estimate__level {
+  text-align: left;
+  font-weight: 600;
+  padding: 12px 16px 12px 18px;
+  vertical-align: middle;
+  color: var(--text);
+}
+
+.public-planning-estimate__level-name {
+  display: inline-block;
+  margin-left: 4px;
+}
+
+.public-planning-estimate__row--promo .public-planning-estimate__level {
+  background: linear-gradient(90deg, rgba(185, 28, 28, 0.06) 0%, transparent 100%);
+}
+
+.public-planning-estimate__badge {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 2px 8px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--elite-red);
+  background: rgba(185, 28, 28, 0.1);
+  border-radius: 999px;
+  vertical-align: middle;
+}
+
+.public-planning-estimate__amount {
+  text-align: right;
+  padding: 12px 18px 12px 16px;
+  font-weight: 800;
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--elite-red);
+  white-space: nowrap;
+}
+
+.public-planning-estimate__footer {
+  margin: 14px 0 0;
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.success-estimates .public-planning-estimate {
+  margin-top: 8px;
+  max-width: none;
+}
+
+.success-estimates .public-planning-estimate__title {
+  font-size: 1.05rem;
+}
+
 .preview-estimate-note--offline {
   border: 1px solid #fecaca;
   background: linear-gradient(180deg, #fff7ed 0%, #fffbeb 100%);

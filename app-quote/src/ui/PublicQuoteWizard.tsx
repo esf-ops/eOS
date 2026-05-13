@@ -11,6 +11,12 @@ import {
   syntheticRoomForWorkflow
 } from "../lib/prototypeQuoteMath";
 import { computePublicConsumerEstimatesLocal, type PublicEstimateRow } from "../lib/publicConsumerParity";
+import {
+  abbreviatePublicMaterialLevelLabel,
+  enrichPublicConsumerEstimatesForDisplayLocal,
+  formatPublicEstimateDollars,
+  roundPublicEstimateToNearestTen
+} from "../lib/publicEstimateDisplay";
 import { buildPublicLegacyCalculateBody, publicLegacyCalculatePayloadIssues } from "../lib/publicLegacyCalculatePayload";
 import type { GuidedPiece, QuoteWorkflowMethod } from "../lib/quoteTypes";
 import { round2, STANDARD_BACKSPLASH_HEIGHT_IN, STANDARD_COUNTER_DEPTH_IN } from "../lib/measurementEngine";
@@ -47,8 +53,45 @@ function projectTypeFromCategory(c: MeasureCategory): string {
   return "Other";
 }
 
-function formatMoney(n: number) {
-  return `$${n.toFixed(2)}`;
+function normalizePublicEstimateRows(rows: PublicEstimateRow[]): PublicEstimateRow[] {
+  if (!rows.length) return rows;
+  if (rows[0].total_display != null) return rows;
+  return enrichPublicConsumerEstimatesForDisplayLocal(rows);
+}
+
+function PublicPlanningEstimateCard({ rows, variant = "full" }: { rows: PublicEstimateRow[]; variant?: "full" | "compact" }) {
+  const safe = normalizePublicEstimateRows(rows);
+  return (
+    <div className="public-planning-estimate">
+      <h3 className="public-planning-estimate__title">Your planning estimate</h3>
+      {variant === "full" ? (
+        <p className="public-planning-estimate__helper">
+          Based on the measurements you provided, your project may fall into one of these material levels.
+        </p>
+      ) : null}
+      <div className="public-planning-estimate__card">
+        <table className="public-planning-estimate__table">
+          <tbody>
+            {safe.map((row) => {
+              const isPromo = /^group\s*promo$/i.test(row.group);
+              const label = abbreviatePublicMaterialLevelLabel(row.group);
+              const displayTotal = row.total_display ?? roundPublicEstimateToNearestTen(row.total);
+              return (
+                <tr key={row.group} className={isPromo ? "public-planning-estimate__row--promo" : undefined}>
+                  <th scope="row" className="public-planning-estimate__level">
+                    {isPromo ? <span className="public-planning-estimate__badge">Starting at</span> : null}
+                    <span className="public-planning-estimate__level-name">{label}</span>
+                  </th>
+                  <td className="public-planning-estimate__amount">{formatPublicEstimateDollars(displayTotal)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="public-planning-estimate__footer">Elite will review your details before final pricing.</p>
+    </div>
+  );
 }
 
 function friendlySubmitError(e: unknown): string {
@@ -176,39 +219,6 @@ function CookAreaOptionCards({ name, value, onChange }: { name: string; value: C
           <span className="detail-option-card-label">{o.label}</span>
         </label>
       ))}
-    </div>
-  );
-}
-
-function EstimateTierCards({ rows, variant = "full" }: { rows: PublicEstimateRow[]; variant?: "full" | "compact" }) {
-  return (
-    <div className="estimate-display">
-      {variant === "full" ? <p className="estimate-display-intro">{PUBLIC_WIZARD.estimateIntro}</p> : null}
-      <div className="estimate-tier-grid">
-        {rows.map((row) => (
-          <article key={row.group} className="estimate-tier-card">
-            <h4 className="estimate-tier-name">{row.group}</h4>
-            <dl className="estimate-tier-lines">
-              <div className="estimate-tier-line">
-                <dt>{PUBLIC_WIZARD.tierCountertops}</dt>
-                <dd>{formatMoney(row.countertop)}</dd>
-              </div>
-              <div className="estimate-tier-line">
-                <dt>{PUBLIC_WIZARD.tierBacksplash}</dt>
-                <dd>{formatMoney(row.backsplash)}</dd>
-              </div>
-              <div className="estimate-tier-line">
-                <dt>{PUBLIC_WIZARD.tierExtras}</dt>
-                <dd>{formatMoney(row.addons)}</dd>
-              </div>
-              <div className="estimate-tier-line estimate-tier-total">
-                <dt>{PUBLIC_WIZARD.tierTotal}</dt>
-                <dd>{formatMoney(row.total)}</dd>
-              </div>
-            </dl>
-          </article>
-        ))}
-      </div>
     </div>
   );
 }
@@ -854,9 +864,11 @@ export default function PublicQuoteWizard() {
                 {calcError}
               </p>
             ) : null}
-            {groupEstimates?.length ? <EstimateTierCards rows={groupEstimates} /> : null}
+            {groupEstimates?.length ? <PublicPlanningEstimateCard rows={groupEstimates} /> : null}
             {groupEstimates?.length ? (
-              <p className="muted small block-top estimate-footnote">Final numbers may change after material selection and an in-person review.</p>
+              <p className="muted small block-top estimate-footnote">
+                Planning ranges are rounded for readability; Elite confirms exact scope and options with you.
+              </p>
             ) : null}
             <div className="wizard-nav">
               <button type="button" className="btn secondary big" onClick={() => setStep(4)}>
@@ -911,8 +923,7 @@ export default function PublicQuoteWizard() {
                 })()}
                 {submitSuccess.estimates_by_group?.length ? (
                   <div className="success-estimates block-top">
-                    <p className="success-estimates-lead">Your planning totals (same as above)</p>
-                    <EstimateTierCards rows={submitSuccess.estimates_by_group} variant="compact" />
+                    <PublicPlanningEstimateCard rows={submitSuccess.estimates_by_group} variant="compact" />
                   </div>
                 ) : null}
                 <p className="success-outro">{PUBLIC_WIZARD.submitFollowUp}</p>

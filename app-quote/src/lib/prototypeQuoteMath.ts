@@ -18,6 +18,18 @@ import {
 
 export const VANITY_TIER_THRESHOLD_SQFT = 35;
 
+/** ESF Direct $/sqft by tier — public consumer planning uses this × (1 + planning markup %). */
+export const ESF_DIRECT_TIER_RATES: ReadonlyArray<{ n: string; directPerSqft: number }> = [
+  { n: "Group Promo", directPerSqft: 70 },
+  { n: "Group A", directPerSqft: 77 },
+  { n: "Group B", directPerSqft: 85 },
+  { n: "Group C", directPerSqft: 95 },
+  { n: "Group D", directPerSqft: 105 },
+  { n: "Group E", directPerSqft: 120 },
+  { n: "Group F", directPerSqft: 135 }
+];
+
+/** Prototype v1.01 tier $/sf (partner / dealer economics mirror — not public consumer material rates). */
 export const PROTOTYPE_TIERS: ReadonlyArray<{ n: string; p: number }> = [
   { n: "Group Promo", p: 45 },
   { n: "Group A", p: 57 },
