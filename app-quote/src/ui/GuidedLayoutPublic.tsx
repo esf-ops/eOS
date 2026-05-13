@@ -3,21 +3,72 @@ import { STANDARD_BACKSPLASH_HEIGHT_IN } from "../lib/measurementEngine";
 import {
   CONFIDENCE_COPY,
   computeGuidedSimpleAreas,
-  defaultGuidedSimpleForm,
   type GuidedLayoutPreset,
   type GuidedSimpleForm
 } from "../lib/guidedHomeowner";
 import type { GuidedPiece } from "../lib/quoteTypes";
 import { createDefaultRoom } from "../lib/prototypeQuoteMath";
 
-const PRESETS: Array<{ id: GuidedLayoutPreset; title: string }> = [
-  { id: "straight", title: "Straight run" },
-  { id: "l_shape", title: "L-shape" },
-  { id: "u_shape", title: "U-shape" },
-  { id: "galley", title: "Galley" },
-  { id: "island", title: "Island only" },
-  { id: "not_sure", title: "I'm not sure" }
+const PRESETS: Array<{ id: GuidedLayoutPreset; title: string; description: string }> = [
+  { id: "straight", title: "Straight run", description: "One straight countertop run." },
+  { id: "l_shape", title: "L-shape", description: "Two countertop runs that meet in a corner." },
+  { id: "u_shape", title: "U-shape", description: "Three sides of countertops around the kitchen." },
+  { id: "galley", title: "Galley", description: "Two straight runs across from each other." },
+  { id: "island", title: "Island only", description: "A standalone island or single separate piece." },
+  { id: "not_sure", title: "I'm not sure", description: "That's okay. Give us your best guess and Elite will review it." }
 ];
+
+function LayoutShapeVisual({ preset }: { preset: GuidedLayoutPreset }) {
+  const stroke = "rgba(30, 41, 59, 0.55)";
+  const fill = "rgba(185, 28, 28, 0.12)";
+  const w = 88;
+  const h = 56;
+  const s = 3;
+  switch (preset) {
+    case "straight":
+      return (
+        <svg className="layout-shape-svg" viewBox={`0 0 ${w} ${h}`} width={w} height={h} aria-hidden>
+          <rect x="8" y="22" width="72" height="14" rx="2" fill={fill} stroke={stroke} strokeWidth={s} />
+        </svg>
+      );
+    case "l_shape":
+      return (
+        <svg className="layout-shape-svg" viewBox={`0 0 ${w} ${h}`} width={w} height={h} aria-hidden>
+          <path d="M 12 14 L 12 44 L 76 44 L 76 30 L 28 30 L 28 14 Z" fill={fill} stroke={stroke} strokeWidth={s} strokeLinejoin="round" />
+        </svg>
+      );
+    case "u_shape":
+      return (
+        <svg className="layout-shape-svg" viewBox={`0 0 ${w} ${h}`} width={w} height={h} aria-hidden>
+          <path d="M 10 18 L 10 46 L 78 46 L 78 18 L 64 18 L 64 34 L 24 34 L 24 18 Z" fill={fill} stroke={stroke} strokeWidth={s} strokeLinejoin="round" />
+        </svg>
+      );
+    case "galley":
+      return (
+        <svg className="layout-shape-svg" viewBox={`0 0 ${w} ${h}`} width={w} height={h} aria-hidden>
+          <rect x="10" y="10" width="68" height="10" rx="2" fill={fill} stroke={stroke} strokeWidth={s} />
+          <rect x="10" y="36" width="68" height="10" rx="2" fill={fill} stroke={stroke} strokeWidth={s} />
+        </svg>
+      );
+    case "island":
+      return (
+        <svg className="layout-shape-svg" viewBox={`0 0 ${w} ${h}`} width={w} height={h} aria-hidden>
+          <rect x="22" y="16" width="44" height="26" rx="4" fill={fill} stroke={stroke} strokeWidth={s} />
+        </svg>
+      );
+    case "not_sure":
+    default:
+      return (
+        <svg className="layout-shape-svg layout-shape-svg--unsure" viewBox={`0 0 ${w} ${h}`} width={w} height={h} aria-hidden>
+          <rect x="12" y="14" width="28" height="12" rx="2" fill={fill} stroke={stroke} strokeWidth={s} opacity={0.7} />
+          <rect x="48" y="32" width="28" height="12" rx="2" fill={fill} stroke={stroke} strokeWidth={s} opacity={0.7} />
+          <text x="44" y="26" textAnchor="middle" fontSize="22" fill="rgba(30,41,59,0.35)" fontWeight="700" fontFamily="system-ui,sans-serif">
+            ?
+          </text>
+        </svg>
+      );
+  }
+}
 
 type Props = {
   materialGroup: string;
@@ -25,6 +76,8 @@ type Props = {
   setGuidedPreset: (p: GuidedLayoutPreset | null) => void;
   guidedSimpleForm: GuidedSimpleForm;
   setGuidedSimpleForm: React.Dispatch<React.SetStateAction<GuidedSimpleForm>>;
+  /** Form values used for preview (may reflect backsplash choice from a later step). */
+  formForPreview: GuidedSimpleForm;
   guidedUseAdvanced: boolean;
   setGuidedUseAdvanced: (v: boolean) => void;
   guidedAdvancedOpen: boolean;
@@ -39,6 +92,7 @@ export default function GuidedLayoutPublic({
   setGuidedPreset,
   guidedSimpleForm,
   setGuidedSimpleForm,
+  formForPreview,
   guidedUseAdvanced,
   setGuidedUseAdvanced,
   guidedAdvancedOpen,
@@ -46,25 +100,32 @@ export default function GuidedLayoutPublic({
   guidedProjectPieces,
   setGuidedProjectPieces
 }: Props) {
-  const preview = computeGuidedSimpleAreas(guidedPreset, guidedSimpleForm);
+  const preview = computeGuidedSimpleAreas(guidedPreset, formForPreview);
+  const presetMeta = guidedPreset ? PRESETS.find((p) => p.id === guidedPreset) : null;
+
   return (
     <div className="guided-layout">
-      <h3 className="wizard-step-sub">Which layout is closest to your kitchen?</h3>
-      <div className="preset-card-grid">
+      <h3 className="wizard-step-sub">Which kitchen shape looks closest?</h3>
+      <p className="muted small guided-layout-tip">Tip: 10 feet = 120 inches.</p>
+      <div className="preset-visual-grid">
         {PRESETS.map((c) => (
           <button
             key={c.id}
             type="button"
-            className={`preset-shape-card ${guidedPreset === c.id ? "on" : ""}`}
+            className={`preset-visual-card ${guidedPreset === c.id ? "on" : ""}`}
             onClick={() => setGuidedPreset(c.id)}
           >
-            {c.title}
+            <span className="preset-visual-card__diagram" aria-hidden>
+              <LayoutShapeVisual preset={c.id} />
+            </span>
+            <span className="preset-visual-card__title">{c.title}</span>
+            <span className="preset-visual-card__desc">{c.description}</span>
           </button>
         ))}
       </div>
       {guidedPreset === "not_sure" ? (
         <p className="callout guided-not-sure">
-          No problem. Use your best guess — Elite will verify before final pricing.
+          No problem — use your best guess. Elite will review everything before final pricing.
         </p>
       ) : null}
       {guidedPreset && guidedPreset !== "not_sure" ? (
@@ -72,23 +133,15 @@ export default function GuidedLayoutPublic({
           {guidedPreset === "straight" ? (
             <div className="grid3">
               <label>
-                Main counter length (feet)
+                Main run length (inches)
                 <input
-                  value={guidedSimpleForm.mainRunFt}
-                  onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, mainRunFt: e.target.value }))}
+                  value={guidedSimpleForm.mainRunIn}
+                  onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, mainRunIn: e.target.value }))}
                   inputMode="decimal"
                 />
               </label>
               <label>
-                Backsplash height (inches)
-                <input
-                  value={guidedSimpleForm.splashHeightIn}
-                  onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, splashHeightIn: e.target.value }))}
-                  inputMode="decimal"
-                />
-              </label>
-              <label>
-                Counter depth (inches)
+                Countertop depth (inches)
                 <input
                   value={guidedSimpleForm.counterDepthIn}
                   onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, counterDepthIn: e.target.value }))}
@@ -100,31 +153,23 @@ export default function GuidedLayoutPublic({
           {guidedPreset === "l_shape" ? (
             <div className="grid3">
               <label>
-                Long wall (feet)
+                Long run length (inches)
                 <input
-                  value={guidedSimpleForm.longWallFt}
-                  onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, longWallFt: e.target.value }))}
+                  value={guidedSimpleForm.longWallIn}
+                  onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, longWallIn: e.target.value }))}
                   inputMode="decimal"
                 />
               </label>
               <label>
-                Short wall (feet)
+                Second run length (inches)
                 <input
-                  value={guidedSimpleForm.shortWallFt}
-                  onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, shortWallFt: e.target.value }))}
+                  value={guidedSimpleForm.shortWallIn}
+                  onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, shortWallIn: e.target.value }))}
                   inputMode="decimal"
                 />
               </label>
               <label>
-                Backsplash height (inches)
-                <input
-                  value={guidedSimpleForm.splashHeightIn}
-                  onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, splashHeightIn: e.target.value }))}
-                  inputMode="decimal"
-                />
-              </label>
-              <label>
-                Counter depth (inches)
+                Countertop depth (inches)
                 <input
                   value={guidedSimpleForm.counterDepthIn}
                   onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, counterDepthIn: e.target.value }))}
@@ -136,39 +181,31 @@ export default function GuidedLayoutPublic({
           {guidedPreset === "u_shape" ? (
             <div className="grid3">
               <label>
-                Back wall (feet)
+                Back run length (inches)
                 <input
-                  value={guidedSimpleForm.backWallFt}
-                  onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, backWallFt: e.target.value }))}
+                  value={guidedSimpleForm.backWallIn}
+                  onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, backWallIn: e.target.value }))}
                   inputMode="decimal"
                 />
               </label>
               <label>
-                Left side (feet)
+                Left run length (inches)
                 <input
-                  value={guidedSimpleForm.leftWallFt}
-                  onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, leftWallFt: e.target.value }))}
+                  value={guidedSimpleForm.leftWallIn}
+                  onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, leftWallIn: e.target.value }))}
                   inputMode="decimal"
                 />
               </label>
               <label>
-                Right side (feet)
+                Right run length (inches)
                 <input
-                  value={guidedSimpleForm.rightWallFt}
-                  onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, rightWallFt: e.target.value }))}
+                  value={guidedSimpleForm.rightWallIn}
+                  onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, rightWallIn: e.target.value }))}
                   inputMode="decimal"
                 />
               </label>
               <label>
-                Backsplash height (inches)
-                <input
-                  value={guidedSimpleForm.splashHeightIn}
-                  onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, splashHeightIn: e.target.value }))}
-                  inputMode="decimal"
-                />
-              </label>
-              <label>
-                Counter depth (inches)
+                Countertop depth (inches)
                 <input
                   value={guidedSimpleForm.counterDepthIn}
                   onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, counterDepthIn: e.target.value }))}
@@ -180,31 +217,23 @@ export default function GuidedLayoutPublic({
           {guidedPreset === "galley" ? (
             <div className="grid3">
               <label>
-                Side 1 (feet)
+                First run length (inches)
                 <input
-                  value={guidedSimpleForm.side1Ft}
-                  onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, side1Ft: e.target.value }))}
+                  value={guidedSimpleForm.side1In}
+                  onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, side1In: e.target.value }))}
                   inputMode="decimal"
                 />
               </label>
               <label>
-                Side 2 (feet)
+                Opposite run length (inches)
                 <input
-                  value={guidedSimpleForm.side2Ft}
-                  onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, side2Ft: e.target.value }))}
+                  value={guidedSimpleForm.side2In}
+                  onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, side2In: e.target.value }))}
                   inputMode="decimal"
                 />
               </label>
               <label>
-                Backsplash height (inches)
-                <input
-                  value={guidedSimpleForm.splashHeightIn}
-                  onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, splashHeightIn: e.target.value }))}
-                  inputMode="decimal"
-                />
-              </label>
-              <label>
-                Counter depth (inches)
+                Countertop depth (inches)
                 <input
                   value={guidedSimpleForm.counterDepthIn}
                   onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, counterDepthIn: e.target.value }))}
@@ -216,18 +245,18 @@ export default function GuidedLayoutPublic({
           {guidedPreset === "island" ? (
             <div className="grid3">
               <label>
-                Island length (feet)
+                Island length (inches)
                 <input
-                  value={guidedSimpleForm.islandLengthFt}
-                  onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, islandLengthFt: e.target.value }))}
+                  value={guidedSimpleForm.islandLengthIn}
+                  onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, islandLengthIn: e.target.value }))}
                   inputMode="decimal"
                 />
               </label>
               <label>
-                Island width (feet)
+                Island depth (inches)
                 <input
-                  value={guidedSimpleForm.islandWidthFt}
-                  onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, islandWidthFt: e.target.value }))}
+                  value={guidedSimpleForm.islandWidthIn}
+                  onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, islandWidthIn: e.target.value }))}
                   inputMode="decimal"
                 />
               </label>
@@ -235,36 +264,46 @@ export default function GuidedLayoutPublic({
           ) : null}
         </div>
       ) : null}
-      <div className="measure-preview-card">
-        <h4 className="measure-preview-title">Size preview</h4>
-        <div className="measure-preview-metrics">
-          <div>
-            <span className="muted small">Countertops (sq ft)</span>
-            <strong>{preview.counter.toFixed(2)}</strong>
+
+      {guidedPreset && guidedPreset !== "not_sure" ? (
+        <div className="layout-live-preview-card">
+          <div className="layout-live-preview-card__header">
+            <span className="layout-live-preview-card__shape" aria-hidden>
+              <LayoutShapeVisual preset={guidedPreset} />
+            </span>
+            <div>
+              <h4 className="layout-live-preview-card__title">Your kitchen shape</h4>
+              <p className="layout-live-preview-card__subtitle muted small">{presetMeta?.title ?? ""}</p>
+            </div>
           </div>
-          <div>
-            <span className="muted small">Backsplash (sq ft)</span>
-            <strong>{preview.splash.toFixed(2)}</strong>
+          {preview.lines.length ? (
+            <ul className="layout-live-preview-runs">
+              {preview.lines.map((ln, i) => (
+                <li key={i}>{ln}</li>
+              ))}
+            </ul>
+          ) : null}
+          <div className="measure-preview-metrics layout-live-preview-metrics">
+            <div>
+              <span className="muted small">Estimated countertops (sq ft)</span>
+              <strong>{preview.counter.toFixed(2)}</strong>
+            </div>
+            <div>
+              <span className="muted small">Estimated backsplash (sq ft)</span>
+              <strong>{preview.splash.toFixed(2)}</strong>
+            </div>
+            <div>
+              <span className="muted small">Estimated total surface (sq ft)</span>
+              <strong>{(preview.counter + preview.splash).toFixed(2)}</strong>
+            </div>
           </div>
-          <div>
-            <span className="muted small">Total (sq ft)</span>
-            <strong>{(preview.counter + preview.splash).toFixed(2)}</strong>
-          </div>
+          <p className="layout-live-preview-disclaimer">{CONFIDENCE_COPY}</p>
         </div>
-        {preview.lines.length ? (
-          <ul className="measure-preview-lines">
-            {preview.lines.map((ln, i) => (
-              <li key={i}>{ln}</li>
-            ))}
-          </ul>
-        ) : (
-          <p className="muted small">Choose a layout and enter sizes to see a simple preview.</p>
-        )}
-        <p className="confidence-label">{CONFIDENCE_COPY}</p>
-      </div>
+      ) : null}
+
       <label className="check guided-advanced-toggle">
         <input type="checkbox" checked={guidedUseAdvanced} onChange={(e) => setGuidedUseAdvanced(e.target.checked)} />
-        Use piece-by-piece measurements instead of the simple layout above
+        Enter piece-by-piece measurements instead of the simple layout above
       </label>
       <details
         className="advanced-pieces-details"
@@ -383,11 +422,7 @@ export default function GuidedLayoutPublic({
           >
             + Backsplash piece
           </button>
-          <button
-            type="button"
-            className="btn secondary"
-            onClick={() => setGuidedProjectPieces(createDefaultRoom(materialGroup).guidedPieces)}
-          >
+          <button type="button" className="btn secondary" onClick={() => setGuidedProjectPieces(createDefaultRoom(materialGroup).guidedPieces)}>
             Reset to L-shape pieces
           </button>
         </div>

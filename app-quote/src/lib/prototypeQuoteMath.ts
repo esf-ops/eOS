@@ -178,7 +178,13 @@ export function measureRoomDraft(room: RoomDraft, qualifyingSf: number): Measure
     if (counter) details.push(`Manual countertop: ${counter.toFixed(2)} sf`);
     if (splash) details.push(`Manual backsplash: ${splash.toFixed(2)} sf`);
   } else if (mode === "Rapid Linear Foot") {
-    const r = rapidLinearAreas(room.linear.wallFt, room.linear.splashIn, room.linear.islandL, room.linear.islandW);
+    const r = rapidLinearAreas(
+      room.linear.wallFt,
+      room.linear.splashIn,
+      room.linear.islandL,
+      room.linear.islandW,
+      room.linear.counterDepthIn
+    );
     counter = r.counter;
     splash = r.splash;
     details.push(...r.lines);
@@ -662,7 +668,7 @@ export function syntheticRoomForWorkflow(
   wf: QuoteWorkflowMethod,
   materialGroup: string,
   manual: { counter: number; splash: number },
-  linear: { wallFt: number; splashIn: number; islandL: number; islandW: number },
+  linear: { wallFt: number; splashIn: number; islandL: number; islandW: number; counterDepthIn?: number },
   guidedPieces: GuidedPiece[]
 ): RoomDraft {
   const base = createDefaultRoom(materialGroup);
@@ -714,7 +720,13 @@ export function serializeRoomsForApi(rooms: RoomDraft[]): Array<Record<string, u
       ct = r.direct.counter;
       bs = r.direct.splash;
     } else if (r.calcMode === "Rapid Linear Foot") {
-      const a = rapidLinearAreas(r.linear.wallFt, r.linear.splashIn, r.linear.islandL, r.linear.islandW);
+      const a = rapidLinearAreas(
+        r.linear.wallFt,
+        r.linear.splashIn,
+        r.linear.islandL,
+        r.linear.islandW,
+        r.linear.counterDepthIn
+      );
       ct = a.counter;
       bs = a.splash;
     }

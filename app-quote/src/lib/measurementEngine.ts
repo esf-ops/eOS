@@ -23,14 +23,21 @@ export function sfFromGuidedPiece(lengthIn: number, depthIn: number, shape: Guid
   return round2(sf);
 }
 
-export function rapidLinearAreas(wallFt: number, splashIn: number, islandL: number, islandW: number) {
+export function rapidLinearAreas(
+  wallFt: number,
+  splashIn: number,
+  islandL: number,
+  islandW: number,
+  counterDepthIn: number = STANDARD_COUNTER_DEPTH_IN
+) {
+  const depthFt = counterDepthIn > 0 && Number.isFinite(counterDepthIn) ? counterDepthIn / 12 : LINEAR_COUNTER_DEPTH_FT;
   const lines: string[] = [];
   let counter = 0;
   let splash = 0;
   if (wallFt > 0) {
-    const wallSf = wallFt * LINEAR_COUNTER_DEPTH_FT;
+    const wallSf = wallFt * depthFt;
     counter += wallSf;
-    lines.push(`Wall perimeter (${wallFt} LF @ 25.5″ depth): ${round2(wallSf).toFixed(2)} sf`);
+    lines.push(`Wall perimeter (${wallFt} LF @ ${round2(counterDepthIn || STANDARD_COUNTER_DEPTH_IN)}″ depth): ${round2(wallSf).toFixed(2)} sf`);
     if (splashIn > 0) {
       const sp = wallFt * (splashIn / 12);
       splash += sp;
@@ -70,7 +77,11 @@ export function qualifyingSfFromRoomDrafts(rooms: RoomDraft[]): number {
     if (room.calcMode === "Manual Sq Ft") {
       sf += Number(room.direct.counter) || 0;
     } else if (room.calcMode === "Rapid Linear Foot") {
-      sf += (Number(room.linear.wallFt) || 0) * LINEAR_COUNTER_DEPTH_FT;
+      const depthIn =
+        room.linear.counterDepthIn != null && room.linear.counterDepthIn > 0
+          ? room.linear.counterDepthIn
+          : STANDARD_COUNTER_DEPTH_IN;
+      sf += (Number(room.linear.wallFt) || 0) * (depthIn / 12);
       sf += (Number(room.linear.islandL) || 0) * (Number(room.linear.islandW) || 0);
     } else {
       for (const p of room.guidedPieces) {
@@ -91,7 +102,13 @@ export function measurementSummaryForRoom(room: RoomDraft, mode: RoomCalcMode): 
     return { lines };
   }
   if (mode === "Rapid Linear Foot") {
-    const r = rapidLinearAreas(room.linear.wallFt, room.linear.splashIn, room.linear.islandL, room.linear.islandW);
+    const r = rapidLinearAreas(
+      room.linear.wallFt,
+      room.linear.splashIn,
+      room.linear.islandL,
+      room.linear.islandW,
+      room.linear.counterDepthIn
+    );
     return { lines: r.lines };
   }
   const g = sumGuidedPiecesByType(room.guidedPieces);

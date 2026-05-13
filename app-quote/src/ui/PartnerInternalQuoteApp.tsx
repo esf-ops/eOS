@@ -893,11 +893,11 @@ export default function PartnerInternalQuoteApp() {
                   <input value={linearSplashIn} onChange={(e) => setLinearSplashIn(e.target.value)} />
                 </label>
                 <label>
-                  Island length (ft)
+                  Island length (in)
                   <input value={linearIslandL} onChange={(e) => setLinearIslandL(e.target.value)} />
                 </label>
                 <label>
-                  Island width (ft)
+                  Island width (in)
                   <input value={linearIslandW} onChange={(e) => setLinearIslandW(e.target.value)} />
                 </label>
               </div>
@@ -935,10 +935,10 @@ export default function PartnerInternalQuoteApp() {
                     {guidedPreset === "straight" ? (
                       <div className="grid3">
                         <label>
-                          Main counter length (ft)
+                          Main counter length (in)
                           <input
-                            value={guidedSimpleForm.mainRunFt}
-                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, mainRunFt: e.target.value }))}
+                            value={guidedSimpleForm.mainRunIn}
+                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, mainRunIn: e.target.value }))}
                             inputMode="decimal"
                           />
                         </label>
@@ -964,18 +964,18 @@ export default function PartnerInternalQuoteApp() {
                     {guidedPreset === "l_shape" ? (
                       <div className="grid3">
                         <label>
-                          Long wall length (ft)
+                          Long wall length (in)
                           <input
-                            value={guidedSimpleForm.longWallFt}
-                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, longWallFt: e.target.value }))}
+                            value={guidedSimpleForm.longWallIn}
+                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, longWallIn: e.target.value }))}
                             inputMode="decimal"
                           />
                         </label>
                         <label>
-                          Short wall length (ft)
+                          Short wall length (in)
                           <input
-                            value={guidedSimpleForm.shortWallFt}
-                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, shortWallFt: e.target.value }))}
+                            value={guidedSimpleForm.shortWallIn}
+                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, shortWallIn: e.target.value }))}
                             inputMode="decimal"
                           />
                         </label>
@@ -1001,26 +1001,26 @@ export default function PartnerInternalQuoteApp() {
                     {guidedPreset === "u_shape" ? (
                       <div className="grid3">
                         <label>
-                          Back wall length (ft)
+                          Back wall length (in)
                           <input
-                            value={guidedSimpleForm.backWallFt}
-                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, backWallFt: e.target.value }))}
+                            value={guidedSimpleForm.backWallIn}
+                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, backWallIn: e.target.value }))}
                             inputMode="decimal"
                           />
                         </label>
                         <label>
-                          Left side length (ft)
+                          Left side length (in)
                           <input
-                            value={guidedSimpleForm.leftWallFt}
-                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, leftWallFt: e.target.value }))}
+                            value={guidedSimpleForm.leftWallIn}
+                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, leftWallIn: e.target.value }))}
                             inputMode="decimal"
                           />
                         </label>
                         <label>
-                          Right side length (ft)
+                          Right side length (in)
                           <input
-                            value={guidedSimpleForm.rightWallFt}
-                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, rightWallFt: e.target.value }))}
+                            value={guidedSimpleForm.rightWallIn}
+                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, rightWallIn: e.target.value }))}
                             inputMode="decimal"
                           />
                         </label>
@@ -1046,18 +1046,18 @@ export default function PartnerInternalQuoteApp() {
                     {guidedPreset === "galley" ? (
                       <div className="grid3">
                         <label>
-                          Side 1 length (ft)
+                          Side 1 length (in)
                           <input
-                            value={guidedSimpleForm.side1Ft}
-                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, side1Ft: e.target.value }))}
+                            value={guidedSimpleForm.side1In}
+                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, side1In: e.target.value }))}
                             inputMode="decimal"
                           />
                         </label>
                         <label>
-                          Side 2 length (ft)
+                          Side 2 length (in)
                           <input
-                            value={guidedSimpleForm.side2Ft}
-                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, side2Ft: e.target.value }))}
+                            value={guidedSimpleForm.side2In}
+                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, side2In: e.target.value }))}
                             inputMode="decimal"
                           />
                         </label>
@@ -1083,18 +1083,18 @@ export default function PartnerInternalQuoteApp() {
                     {guidedPreset === "island" ? (
                       <div className="grid3">
                         <label>
-                          Island length (ft)
+                          Island length (in)
                           <input
-                            value={guidedSimpleForm.islandLengthFt}
-                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, islandLengthFt: e.target.value }))}
+                            value={guidedSimpleForm.islandLengthIn}
+                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, islandLengthIn: e.target.value }))}
                             inputMode="decimal"
                           />
                         </label>
                         <label>
-                          Island width (ft)
+                          Island width (in)
                           <input
-                            value={guidedSimpleForm.islandWidthFt}
-                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, islandWidthFt: e.target.value }))}
+                            value={guidedSimpleForm.islandWidthIn}
+                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, islandWidthIn: e.target.value }))}
                             inputMode="decimal"
                           />
                         </label>

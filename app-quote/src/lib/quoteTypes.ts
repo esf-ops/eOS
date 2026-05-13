@@ -33,7 +33,7 @@ export type RoomDraft = {
   roomType: string;
   materialGroup: string;
   calcMode: RoomCalcMode;
-  linear: { wallFt: number; splashIn: number; islandL: number; islandW: number };
+  linear: { wallFt: number; splashIn: number; islandL: number; islandW: number; counterDepthIn?: number };
   direct: { counter: number; splash: number };
   guidedPieces: GuidedPiece[];
   fhbMode: FhbMode;

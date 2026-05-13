@@ -12,7 +12,7 @@ import {
 } from "../lib/prototypeQuoteMath";
 import { computePublicConsumerEstimatesLocal, type PublicEstimateRow } from "../lib/publicConsumerParity";
 import type { GuidedPiece, QuoteWorkflowMethod } from "../lib/quoteTypes";
-import { round2, STANDARD_BACKSPLASH_HEIGHT_IN } from "../lib/measurementEngine";
+import { round2, STANDARD_BACKSPLASH_HEIGHT_IN, STANDARD_COUNTER_DEPTH_IN } from "../lib/measurementEngine";
 import GuidedLayoutPublic from "./GuidedLayoutPublic";
 import { PUBLIC_WIZARD } from "./publicQuoteCopy";
 
@@ -28,7 +28,10 @@ const STEP_TRACK = [
 ] as const;
 
 type MeasureCategory = "kitchen" | "bath" | "bar" | "unsure_scope";
-type SizeMethod = "sqft" | "cabinet_length" | "layout" | "unsure_size";
+type SizeMethod = "sqft" | "cabinet_length" | "layout" | "upload";
+type TriYes = "yes" | "no" | "unsure";
+type CookStyle = "cooktop" | "freestanding" | "unsure";
+type BacksplashIncl = "yes" | "no" | "unsure";
 type CalcReachability = "live" | "preview_server" | "preview_offline";
 
 function num(v: string): number {
@@ -77,19 +80,19 @@ function EstimateTierCards({ rows, variant = "full" }: { rows: PublicEstimateRow
             <h4 className="estimate-tier-name">{row.group}</h4>
             <dl className="estimate-tier-lines">
               <div className="estimate-tier-line">
-                <dt>Countertops</dt>
+                <dt>{PUBLIC_WIZARD.tierCountertops}</dt>
                 <dd>{formatMoney(row.countertop)}</dd>
               </div>
               <div className="estimate-tier-line">
-                <dt>Backsplash</dt>
+                <dt>{PUBLIC_WIZARD.tierBacksplash}</dt>
                 <dd>{formatMoney(row.backsplash)}</dd>
               </div>
               <div className="estimate-tier-line">
-                <dt>Add-ons</dt>
+                <dt>{PUBLIC_WIZARD.tierExtras}</dt>
                 <dd>{formatMoney(row.addons)}</dd>
               </div>
               <div className="estimate-tier-line estimate-tier-total">
-                <dt>Estimated total</dt>
+                <dt>{PUBLIC_WIZARD.tierTotal}</dt>
                 <dd>{formatMoney(row.total)}</dd>
               </div>
             </dl>
@@ -116,10 +119,10 @@ export default function PublicQuoteWizard() {
 
   const [manualCt, setManualCt] = useState("45");
   const [manualBs, setManualBs] = useState("12");
-  const [linearWall, setLinearWall] = useState("20");
-  const [linearSplashIn, setLinearSplashIn] = useState(String(STANDARD_BACKSPLASH_HEIGHT_IN));
-  const [linearIslandL, setLinearIslandL] = useState("0");
-  const [linearIslandW, setLinearIslandW] = useState("0");
+  const [linearWallIn, setLinearWallIn] = useState("240");
+  const [linearIslandLIn, setLinearIslandLIn] = useState("0");
+  const [linearIslandWIn, setLinearIslandWIn] = useState("0");
+  const [linearCounterDepthIn, setLinearCounterDepthIn] = useState(String(STANDARD_COUNTER_DEPTH_IN));
 
   const [guidedProjectPieces, setGuidedProjectPieces] = useState<GuidedPiece[]>(() => createDefaultRoom(MATERIAL_GROUP).guidedPieces);
   const [guidedPreset, setGuidedPreset] = useState<GuidedLayoutPreset | null>("straight");
@@ -127,14 +130,11 @@ export default function PublicQuoteWizard() {
   const [guidedUseAdvanced, setGuidedUseAdvanced] = useState(false);
   const [guidedAdvancedOpen, setGuidedAdvancedOpen] = useState(false);
 
-  const [sink, setSink] = useState("1");
-  const [bar, setBar] = useState("0");
-  const [cook, setCook] = useState("1");
-  const [outlet, setOutlet] = useState("0");
-  const [ss, setSs] = useState("0");
-  const [blanco, setBlanco] = useState("0");
-  const [tearYes, setTearYes] = useState(false);
-  const [includeBacksplash, setIncludeBacksplash] = useState(true);
+  const [sinkAnswer, setSinkAnswer] = useState<TriYes>("yes");
+  const [cookAnswer, setCookAnswer] = useState<CookStyle>("cooktop");
+  const [backsplashChoice, setBacksplashChoice] = useState<BacksplashIncl>("yes");
+  const [tearAnswer, setTearAnswer] = useState<TriYes>("no");
+  const [specialtyTags, setSpecialtyTags] = useState<string[]>([]);
 
   const [calcBusy, setCalcBusy] = useState(false);
   const [calcError, setCalcError] = useState<string | null>(null);
@@ -161,42 +161,50 @@ export default function PublicQuoteWizard() {
   }, [sizeMethod]);
 
   const guidedFormEffective = useMemo(() => {
-    if (includeBacksplash) return guidedSimpleForm;
-    return { ...guidedSimpleForm, splashHeightIn: "0" };
-  }, [guidedSimpleForm, includeBacksplash]);
+    const sh =
+      backsplashChoice === "no"
+        ? "0"
+        : backsplashChoice === "yes"
+          ? String(STANDARD_BACKSPLASH_HEIGHT_IN)
+          : guidedSimpleForm.splashHeightIn || String(STANDARD_BACKSPLASH_HEIGHT_IN);
+    return { ...guidedSimpleForm, splashHeightIn: sh };
+  }, [guidedSimpleForm, backsplashChoice]);
 
   const buildGlobalAddOns = useCallback(() => {
     return {
-      "qty-sink": num(sink),
-      "qty-bar": num(bar),
-      "qty-cook": num(cook),
-      "qty-outlet": num(outlet),
-      "qty-ss": num(ss),
-      "qty-blanco": num(blanco),
-      tearout: tearYes ? 1 : 0
+      "qty-sink": sinkAnswer === "yes" ? 1 : 0,
+      "qty-bar": 0,
+      "qty-cook": cookAnswer === "cooktop" ? 1 : 0,
+      "qty-outlet": 0,
+      "qty-ss": 0,
+      "qty-blanco": 0,
+      tearout: tearAnswer === "yes" ? 1 : 0
     };
-  }, [sink, bar, cook, outlet, ss, blanco, tearYes]);
+  }, [sinkAnswer, cookAnswer, tearAnswer]);
 
   const buildRoomDraftsForCalculate = useCallback(() => {
     if (quoteWorkflow === "guided_shape" && !guidedUseAdvanced) {
       const areas = computeGuidedSimpleAreas(guidedPreset, guidedFormEffective);
       const counter = areas.counter;
-      const splash = includeBacksplash ? areas.splash : 0;
+      const splash = areas.splash;
       return [createManualScopeRoom(MATERIAL_GROUP, counter, splash)];
     }
+    const manualSplash =
+      backsplashChoice === "no" ? 0 : quoteWorkflow === "manual_sqft" ? num(manualBs) : 0;
     return [
       syntheticRoomForWorkflow(
         quoteWorkflow,
         MATERIAL_GROUP,
         {
           counter: num(manualCt),
-          splash: includeBacksplash ? num(manualBs) : 0
+          splash: manualSplash
         },
         {
-          wallFt: num(linearWall),
-          splashIn: includeBacksplash ? num(linearSplashIn) : 0,
-          islandL: num(linearIslandL),
-          islandW: num(linearIslandW)
+          wallFt: num(linearWallIn) / 12,
+          splashIn: backsplashChoice === "no" ? 0 : STANDARD_BACKSPLASH_HEIGHT_IN,
+          islandL: num(linearIslandLIn) / 12,
+          islandW: num(linearIslandWIn) / 12,
+          counterDepthIn: num(linearCounterDepthIn) || STANDARD_COUNTER_DEPTH_IN
         },
         guidedProjectPieces
       )
@@ -205,15 +213,15 @@ export default function PublicQuoteWizard() {
     quoteWorkflow,
     manualCt,
     manualBs,
-    linearWall,
-    linearSplashIn,
-    linearIslandL,
-    linearIslandW,
+    linearWallIn,
+    linearIslandLIn,
+    linearIslandWIn,
+    linearCounterDepthIn,
     guidedProjectPieces,
     guidedUseAdvanced,
     guidedPreset,
     guidedFormEffective,
-    includeBacksplash
+    backsplashChoice
   ]);
 
   const buildCalcPayload = useCallback(() => {
@@ -346,7 +354,7 @@ export default function PublicQuoteWizard() {
 
   const canNextFrom1 = customerName.trim() && phone.trim() && email.trim() && projectAddress.trim() && city.trim() && stateUs.trim() && zip.trim();
   const canNextFrom2 = measureCategory != null;
-  const canNextFrom3 = sizeMethod != null && (sizeMethod !== "layout" || guidedPreset != null);
+  const canNextFrom3 = sizeMethod != null && sizeMethod !== "upload" && (sizeMethod !== "layout" || guidedPreset != null);
   const canNextFrom4 = true;
 
   const calcStatusNote = useMemo(() => {
@@ -361,6 +369,43 @@ export default function PublicQuoteWizard() {
   }, [groupEstimates?.length, usedFallback, calcReachability]);
 
   const safeCalcWarnings = useMemo(() => sanitizeHomeownerWarnings(calcWarnings), [calcWarnings]);
+
+  const plannerReviewNotes = useMemo(() => {
+    const out: string[] = [];
+    if (sinkAnswer === "unsure") {
+      out.push("You were not sure about a kitchen sink opening — Elite will confirm what is needed.");
+    }
+    if (cookAnswer === "unsure") {
+      out.push("You were not sure about a cooktop vs a freestanding stove — Elite will confirm what is needed.");
+    }
+    if (backsplashChoice === "unsure") {
+      out.push("You were not sure about backsplash coverage — Elite will confirm your planning amount with you.");
+    }
+    if (tearAnswer === "unsure") {
+      out.push("You were not sure whether existing countertops need removal — Elite will confirm on site.");
+    }
+    const specMap: Record<string, string> = {
+      full_height: "You mentioned interest in a full-height backsplash.",
+      waterfall: "You mentioned a waterfall edge.",
+      extra_sink: "You mentioned an extra sink or a second sink area.",
+      bar: "You mentioned a bar or beverage area.",
+      other: "You noted other details for Elite to review."
+    };
+    for (const id of specialtyTags) {
+      const line = specMap[id];
+      if (line) out.push(line);
+    }
+    return out;
+  }, [sinkAnswer, cookAnswer, backsplashChoice, tearAnswer, specialtyTags]);
+
+  const displayWarnings = useMemo(
+    () => [...plannerReviewNotes.map((w) => `${PUBLIC_WIZARD.plannerReviewPrefix} ${w}`), ...safeCalcWarnings],
+    [plannerReviewNotes, safeCalcWarnings]
+  );
+
+  const toggleSpecialtyTag = useCallback((id: string) => {
+    setSpecialtyTags((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }, []);
 
   return (
     <div className="page public-wizard">
@@ -468,55 +513,93 @@ export default function PublicQuoteWizard() {
             <p className="wizard-kicker">{PUBLIC_WIZARD.stepOf(3)}</p>
             <h2 className="wizard-step-title">{PUBLIC_WIZARD.step3Title}</h2>
             <p className="wizard-lead">{PUBLIC_WIZARD.step3Lead}</p>
-            <div className="big-choice-grid">
-              {(
-                [
-                  { id: "sqft" as const, title: "I know my square footage", sub: "Rough countertop and backsplash size" },
-                  { id: "cabinet_length" as const, title: "I know cabinet wall lengths", sub: "Wall run in feet, optional island" },
-                  { id: "layout" as const, title: "Help me with a simple layout", sub: "Straight, L, U, galley, or island" },
-                  { id: "unsure_size" as const, title: "I'm not sure", sub: "Your best guess in square feet is fine" }
-                ] as const
-              ).map((c) => (
-                <button key={c.id} type="button" className={`big-choice-card ${sizeMethod === c.id ? "on" : ""}`} onClick={() => setSizeMethod(c.id)}>
-                  <span className="bcc-title">{c.title}</span>
-                  <span className="bcc-sub">{c.sub}</span>
-                </button>
-              ))}
+            <div className="big-choice-grid big-choice-grid--size-methods">
+              <button
+                type="button"
+                className={`big-choice-card big-choice-card--stack ${sizeMethod === "sqft" ? "on" : ""}`}
+                onClick={() => setSizeMethod("sqft")}
+              >
+                <span className="bcc-title">{PUBLIC_WIZARD.sizeMethodSqftTitle}</span>
+                <span className="bcc-desc">{PUBLIC_WIZARD.sizeMethodSqftDesc}</span>
+              </button>
+              <button
+                type="button"
+                className={`big-choice-card big-choice-card--stack ${sizeMethod === "cabinet_length" ? "on" : ""}`}
+                onClick={() => setSizeMethod("cabinet_length")}
+              >
+                <span className="bcc-title">{PUBLIC_WIZARD.sizeMethodCabinetTitle}</span>
+                <span className="bcc-desc">{PUBLIC_WIZARD.sizeMethodCabinetDesc}</span>
+              </button>
+              <button
+                type="button"
+                className={`big-choice-card big-choice-card--stack ${sizeMethod === "layout" ? "on" : ""}`}
+                onClick={() => setSizeMethod("layout")}
+              >
+                <span className="bcc-title">{PUBLIC_WIZARD.sizeMethodLayoutTitle}</span>
+                <span className="bcc-desc">{PUBLIC_WIZARD.sizeMethodLayoutDesc}</span>
+              </button>
+              <button
+                type="button"
+                className={`big-choice-card big-choice-card--stack big-choice-card--beta ${sizeMethod === "upload" ? "on" : ""}`}
+                onClick={() => setSizeMethod("upload")}
+              >
+                <span className="bcc-badge">Coming soon</span>
+                <span className="bcc-title">{PUBLIC_WIZARD.sizeMethodUploadTitle}</span>
+                <span className="bcc-desc">{PUBLIC_WIZARD.sizeMethodUploadDesc}</span>
+              </button>
             </div>
 
-            {sizeMethod === "sqft" || sizeMethod === "unsure_size" ? (
+            {sizeMethod === "upload" ? (
+              <div className="upload-coming-panel block-top" role="status">
+                <h3 className="upload-coming-panel__title">{PUBLIC_WIZARD.uploadComingTitle}</h3>
+                <p className="upload-coming-panel__body">{PUBLIC_WIZARD.uploadComingBody}</p>
+              </div>
+            ) : null}
+
+            {sizeMethod === "sqft" ? (
               <div className="grid2 block-top">
                 <label>
-                  Countertops (sq ft)
+                  Countertop square footage (sq ft)
                   <input value={manualCt} onChange={(e) => setManualCt(e.target.value)} inputMode="decimal" placeholder="e.g. 45" />
                 </label>
                 <label>
-                  Backsplash (sq ft)
-                  <input value={manualBs} onChange={(e) => setManualBs(e.target.value)} inputMode="decimal" placeholder="e.g. 12" />
+                  Backsplash square footage (sq ft)
+                  <input
+                    value={manualBs}
+                    onChange={(e) => setManualBs(e.target.value)}
+                    inputMode="decimal"
+                    placeholder="e.g. 12"
+                    disabled={backsplashChoice === "no"}
+                  />
                 </label>
-                <p className="muted small full-row">Standard counter depth is assumed unless you use the layout helper.</p>
+                <p className="muted small full-row">
+                  You will confirm backsplash and other details on the next step. If you are not sure yet, your best guess is fine.
+                </p>
               </div>
             ) : null}
 
             {sizeMethod === "cabinet_length" ? (
               <div className="grid2 block-top">
                 <label>
-                  Cabinet wall length (feet)
-                  <input value={linearWall} onChange={(e) => setLinearWall(e.target.value)} inputMode="decimal" />
+                  Main run length (inches)
+                  <input value={linearWallIn} onChange={(e) => setLinearWallIn(e.target.value)} inputMode="decimal" />
                 </label>
                 <label>
-                  Backsplash height (inches)
-                  <input value={linearSplashIn} onChange={(e) => setLinearSplashIn(e.target.value)} inputMode="decimal" />
+                  Island length (inches, optional)
+                  <input value={linearIslandLIn} onChange={(e) => setLinearIslandLIn(e.target.value)} inputMode="decimal" />
                 </label>
                 <label>
-                  Island length (feet, optional)
-                  <input value={linearIslandL} onChange={(e) => setLinearIslandL(e.target.value)} inputMode="decimal" />
+                  Island depth (inches, optional)
+                  <input value={linearIslandWIn} onChange={(e) => setLinearIslandWIn(e.target.value)} inputMode="decimal" />
                 </label>
                 <label>
-                  Island width (feet, optional)
-                  <input value={linearIslandW} onChange={(e) => setLinearIslandW(e.target.value)} inputMode="decimal" />
+                  Countertop depth (inches)
+                  <input value={linearCounterDepthIn} onChange={(e) => setLinearCounterDepthIn(e.target.value)} inputMode="decimal" />
                 </label>
-                <p className="muted small full-row">Wall runs use a standard counter depth unless Elite notes otherwise later.</p>
+                <p className="muted small full-row">{PUBLIC_WIZARD.inchTipCabinet}</p>
+                <p className="muted small full-row">
+                  Backsplash height for estimating uses your answer on the next step (often 4 inches when you want a short backsplash).
+                </p>
               </div>
             ) : null}
 
@@ -528,6 +611,7 @@ export default function PublicQuoteWizard() {
                   setGuidedPreset={setGuidedPreset}
                   guidedSimpleForm={guidedSimpleForm}
                   setGuidedSimpleForm={setGuidedSimpleForm}
+                  formForPreview={guidedFormEffective}
                   guidedUseAdvanced={guidedUseAdvanced}
                   setGuidedUseAdvanced={setGuidedUseAdvanced}
                   guidedAdvancedOpen={guidedAdvancedOpen}
@@ -554,40 +638,105 @@ export default function PublicQuoteWizard() {
             <p className="wizard-kicker">{PUBLIC_WIZARD.stepOf(4)}</p>
             <h2 className="wizard-step-title">{PUBLIC_WIZARD.step4Title}</h2>
             <p className="wizard-lead">{PUBLIC_WIZARD.step4Lead}</p>
-            <div className="grid2">
-              <label>
-                Kitchen sink openings
-                <input value={sink} onChange={(e) => setSink(e.target.value)} inputMode="numeric" />
-              </label>
-              <label>
-                Cooktop openings
-                <input value={cook} onChange={(e) => setCook(e.target.value)} inputMode="numeric" />
-              </label>
-              <label>
-                Vanity or bar sink openings
-                <input value={bar} onChange={(e) => setBar(e.target.value)} inputMode="numeric" />
-              </label>
-              <label>
-                Outlet openings
-                <input value={outlet} onChange={(e) => setOutlet(e.target.value)} inputMode="numeric" />
-              </label>
-              <label>
-                ESF stainless kitchen sink (qty)
-                <input value={ss} onChange={(e) => setSs(e.target.value)} inputMode="numeric" />
-              </label>
-              <label>
-                Stock Blanco sink (qty)
-                <input value={blanco} onChange={(e) => setBlanco(e.target.value)} inputMode="numeric" />
-              </label>
-            </div>
-            <label className="check block-top">
-              <input type="checkbox" checked={includeBacksplash} onChange={(e) => setIncludeBacksplash(e.target.checked)} />
-              Include backsplash in this estimate
-            </label>
-            <label className="check">
-              <input type="checkbox" checked={tearYes} onChange={(e) => setTearYes(e.target.checked)} />
-              Existing tops may need tear-out
-            </label>
+
+            <fieldset className="wizard-question">
+              <legend>Do you have a kitchen sink that we will need to make an opening for?</legend>
+              <div className="wizard-option-row">
+                <label className="wizard-radio">
+                  <input type="radio" name="sinkAnswer" checked={sinkAnswer === "yes"} onChange={() => setSinkAnswer("yes")} />
+                  Yes
+                </label>
+                <label className="wizard-radio">
+                  <input type="radio" name="sinkAnswer" checked={sinkAnswer === "no"} onChange={() => setSinkAnswer("no")} />
+                  No
+                </label>
+                <label className="wizard-radio">
+                  <input type="radio" name="sinkAnswer" checked={sinkAnswer === "unsure"} onChange={() => setSinkAnswer("unsure")} />
+                  Not sure
+                </label>
+              </div>
+            </fieldset>
+
+            <fieldset className="wizard-question">
+              <legend>Do you have a cooktop in the countertop, or do you use a freestanding stove/oven?</legend>
+              <div className="wizard-option-row wizard-option-row--stack">
+                <label className="wizard-radio">
+                  <input type="radio" name="cookAnswer" checked={cookAnswer === "cooktop"} onChange={() => setCookAnswer("cooktop")} />
+                  Cooktop in the countertop
+                </label>
+                <label className="wizard-radio">
+                  <input type="radio" name="cookAnswer" checked={cookAnswer === "freestanding"} onChange={() => setCookAnswer("freestanding")} />
+                  Freestanding stove/oven
+                </label>
+                <label className="wizard-radio">
+                  <input type="radio" name="cookAnswer" checked={cookAnswer === "unsure"} onChange={() => setCookAnswer("unsure")} />
+                  Not sure
+                </label>
+              </div>
+            </fieldset>
+
+            <fieldset className="wizard-question">
+              <legend>We often see 4 inch backsplash with countertop projects. Would you like us to include that in your estimate?</legend>
+              <div className="wizard-option-row wizard-option-row--stack">
+                <label className="wizard-radio">
+                  <input type="radio" name="backsplashChoice" checked={backsplashChoice === "yes"} onChange={() => setBacksplashChoice("yes")} />
+                  Yes, include 4 inch backsplash
+                </label>
+                <label className="wizard-radio">
+                  <input type="radio" name="backsplashChoice" checked={backsplashChoice === "no"} onChange={() => setBacksplashChoice("no")} />
+                  No backsplash
+                </label>
+                <label className="wizard-radio">
+                  <input type="radio" name="backsplashChoice" checked={backsplashChoice === "unsure"} onChange={() => setBacksplashChoice("unsure")} />
+                  Not sure
+                </label>
+              </div>
+            </fieldset>
+
+            <fieldset className="wizard-question">
+              <legend>Will Elite need to remove your existing countertops?</legend>
+              <div className="wizard-option-row">
+                <label className="wizard-radio">
+                  <input type="radio" name="tearAnswer" checked={tearAnswer === "yes"} onChange={() => setTearAnswer("yes")} />
+                  Yes
+                </label>
+                <label className="wizard-radio">
+                  <input type="radio" name="tearAnswer" checked={tearAnswer === "no"} onChange={() => setTearAnswer("no")} />
+                  No
+                </label>
+                <label className="wizard-radio">
+                  <input type="radio" name="tearAnswer" checked={tearAnswer === "unsure"} onChange={() => setTearAnswer("unsure")} />
+                  Not sure
+                </label>
+              </div>
+            </fieldset>
+
+            <fieldset className="wizard-question">
+              <legend>Are there any special details we should know about? (optional)</legend>
+              <p className="muted small wizard-question-hint">Tap any that apply — you can skip this.</p>
+              <div className="specialty-chip-row">
+                {(
+                  [
+                    { id: "full_height", label: "Full-height backsplash" },
+                    { id: "waterfall", label: "Waterfall side" },
+                    { id: "extra_sink", label: "Extra sink" },
+                    { id: "bar", label: "Bar / beverage area" },
+                    { id: "other", label: "Other / not sure" }
+                  ] as const
+                ).map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    className={`specialty-chip ${specialtyTags.includes(opt.id) ? "on" : ""}`}
+                    onClick={() => toggleSpecialtyTag(opt.id)}
+                    aria-pressed={specialtyTags.includes(opt.id)}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+
             <div className="wizard-nav">
               <button type="button" className="btn secondary big" onClick={() => setStep(3)}>
                 Back
@@ -607,9 +756,9 @@ export default function PublicQuoteWizard() {
             {groupEstimates?.length ? (
               <>
                 {calcStatusNote}
-                {safeCalcWarnings.length ? (
+                {displayWarnings.length ? (
                   <ul className="wizard-warn-list">
-                    {safeCalcWarnings.map((w, i) => (
+                    {displayWarnings.map((w, i) => (
                       <li key={i}>{w}</li>
                     ))}
                   </ul>

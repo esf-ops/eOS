@@ -1,6 +1,6 @@
 /**
- * Homeowner-friendly guided layout presets (feet + inches).
- * Converts to countertop/backsplash square feet consistent with measurementEngine (inches for rectangles).
+ * Homeowner-friendly guided layout presets (run lengths in inches).
+ * Converts to countertop/backsplash square feet consistent with measurementEngine.
  */
 
 import { round2, STANDARD_BACKSPLASH_HEIGHT_IN, STANDARD_COUNTER_DEPTH_IN } from "./measurementEngine";
@@ -14,33 +14,33 @@ export type GuidedLayoutPreset =
   | "not_sure";
 
 export type GuidedSimpleForm = {
-  /** Straight run — main counter length (ft) */
-  mainRunFt: string;
-  longWallFt: string;
-  shortWallFt: string;
-  backWallFt: string;
-  leftWallFt: string;
-  rightWallFt: string;
-  side1Ft: string;
-  side2Ft: string;
-  islandLengthFt: string;
-  islandWidthFt: string;
+  /** Straight run — main counter length (in) */
+  mainRunIn: string;
+  longWallIn: string;
+  shortWallIn: string;
+  backWallIn: string;
+  leftWallIn: string;
+  rightWallIn: string;
+  side1In: string;
+  side2In: string;
+  islandLengthIn: string;
+  islandWidthIn: string;
   splashHeightIn: string;
   counterDepthIn: string;
 };
 
 export function defaultGuidedSimpleForm(): GuidedSimpleForm {
   return {
-    mainRunFt: "12",
-    longWallFt: "12",
-    shortWallFt: "8",
-    backWallFt: "10",
-    leftWallFt: "8",
-    rightWallFt: "8",
-    side1Ft: "10",
-    side2Ft: "10",
-    islandLengthFt: "6",
-    islandWidthFt: "3.5",
+    mainRunIn: "144",
+    longWallIn: "144",
+    shortWallIn: "96",
+    backWallIn: "120",
+    leftWallIn: "96",
+    rightWallIn: "96",
+    side1In: "120",
+    side2In: "120",
+    islandLengthIn: "72",
+    islandWidthIn: "42",
     splashHeightIn: String(STANDARD_BACKSPLASH_HEIGHT_IN),
     counterDepthIn: String(STANDARD_COUNTER_DEPTH_IN)
   };
@@ -51,17 +51,15 @@ function n(v: string): number {
   return Number.isFinite(x) ? x : 0;
 }
 
-/** Rectangle counter segment: length in feet, depth in inches → sf */
-function counterSegSqftFromFeet(lengthFt: number, depthIn: number): number {
-  if (lengthFt <= 0 || depthIn <= 0) return 0;
-  const lengthIn = lengthFt * 12;
+/** Rectangle counter segment: length and depth in inches → sq ft */
+function counterSegSqftFromInches(lengthIn: number, depthIn: number): number {
+  if (lengthIn <= 0 || depthIn <= 0) return 0;
   return round2((lengthIn * depthIn) / 144);
 }
 
-/** Splash along same length (ft), height in inches */
-function splashSegSqftFromFeet(runFt: number, splashHeightIn: number): number {
-  if (runFt <= 0 || splashHeightIn <= 0) return 0;
-  const runIn = runFt * 12;
+/** Backsplash along a run (inches of wall × inches tall) → sq ft */
+function splashSegSqftFromInches(runIn: number, splashHeightIn: number): number {
+  if (runIn <= 0 || splashHeightIn <= 0) return 0;
   return round2((runIn * splashHeightIn) / 144);
 }
 
@@ -80,45 +78,52 @@ export function computeGuidedSimpleAreas(
   }
 
   if (preset === "straight") {
-    const ft = n(form.mainRunFt);
-    counter = counterSegSqftFromFeet(ft, d);
-    splash = splashSegSqftFromFeet(ft, sh);
-    if (ft > 0) lines.push(`Countertop: ${ft} ft run × ${d} in deep`);
-    if (ft > 0 && sh > 0) lines.push(`Backsplash: ${ft} ft run × ${sh} in tall`);
+    const run = n(form.mainRunIn);
+    counter = counterSegSqftFromInches(run, d);
+    splash = splashSegSqftFromInches(run, sh);
+    if (run > 0) lines.push(`Main countertop run: about ${fmtIn(run)} long.`);
+    if (run > 0 && sh > 0) lines.push(`Backsplash along that run at about ${fmtIn(sh)} tall.`);
   } else if (preset === "l_shape") {
-    const a = n(form.longWallFt);
-    const b = n(form.shortWallFt);
-    counter = counterSegSqftFromFeet(a, d) + counterSegSqftFromFeet(b, d);
-    splash = splashSegSqftFromFeet(a + b, sh);
-    if (a || b) lines.push(`Countertop: long leg ${a} ft + short leg ${b} ft × ${d} in deep`);
-    if ((a || b) && sh > 0) lines.push(`Backsplash: (${a} + ${b}) ft along walls × ${sh} in tall`);
+    const a = n(form.longWallIn);
+    const b = n(form.shortWallIn);
+    counter = counterSegSqftFromInches(a, d) + counterSegSqftFromInches(b, d);
+    splash = splashSegSqftFromInches(a + b, sh);
+    if (a || b) lines.push(`Long run about ${fmtIn(a)}, shorter run about ${fmtIn(b)}.`);
+    if ((a || b) && sh > 0) lines.push(`Backsplash follows both walls.`);
   } else if (preset === "u_shape") {
-    const back = n(form.backWallFt);
-    const left = n(form.leftWallFt);
-    const right = n(form.rightWallFt);
-    counter = counterSegSqftFromFeet(back, d) + counterSegSqftFromFeet(left, d) + counterSegSqftFromFeet(right, d);
-    splash = splashSegSqftFromFeet(back + left + right, sh);
+    const back = n(form.backWallIn);
+    const left = n(form.leftWallIn);
+    const right = n(form.rightWallIn);
+    counter =
+      counterSegSqftFromInches(back, d) + counterSegSqftFromInches(left, d) + counterSegSqftFromInches(right, d);
+    splash = splashSegSqftFromInches(back + left + right, sh);
     if (back || left || right) {
-      lines.push(`Countertop: back ${back} ft + sides ${left} ft & ${right} ft × ${d} in deep`);
+      lines.push(`Back wall about ${fmtIn(back)}, sides about ${fmtIn(left)} and ${fmtIn(right)}.`);
     }
-    if ((back || left || right) && sh > 0) lines.push(`Backsplash: wall runs × ${sh} in tall`);
+    if ((back || left || right) && sh > 0) lines.push(`Backsplash along the U-shaped runs.`);
   } else if (preset === "galley") {
-    const s1 = n(form.side1Ft);
-    const s2 = n(form.side2Ft);
-    counter = counterSegSqftFromFeet(s1, d) + counterSegSqftFromFeet(s2, d);
-    splash = splashSegSqftFromFeet(s1 + s2, sh);
-    if (s1 || s2) lines.push(`Countertop: both sides ${s1} ft + ${s2} ft × ${d} in deep`);
-    if ((s1 || s2) && sh > 0) lines.push(`Backsplash: both runs × ${sh} in tall`);
+    const s1 = n(form.side1In);
+    const s2 = n(form.side2In);
+    counter = counterSegSqftFromInches(s1, d) + counterSegSqftFromInches(s2, d);
+    splash = splashSegSqftFromInches(s1 + s2, sh);
+    if (s1 || s2) lines.push(`Two facing runs: about ${fmtIn(s1)} and ${fmtIn(s2)}.`);
+    if ((s1 || s2) && sh > 0) lines.push(`Backsplash on both sides.`);
   } else if (preset === "island") {
-    const L = n(form.islandLengthFt);
-    const W = n(form.islandWidthFt);
+    const L = n(form.islandLengthIn);
+    const W = n(form.islandWidthIn);
     if (L > 0 && W > 0) {
-      counter = round2(L * W);
-      lines.push(`Island countertop: ${L} ft × ${W} ft (${counter.toFixed(2)} sq ft)`);
+      counter = counterSegSqftFromInches(L, W);
+      lines.push(`Island surface about ${fmtIn(L)} by ${fmtIn(W)}.`);
     }
   }
 
   return { counter: round2(counter), splash: round2(splash), fhb: 0, lines };
 }
 
-export const CONFIDENCE_COPY = "Good starting estimate — final quote confirmed after review/template.";
+function fmtIn(v: number): string {
+  if (!Number.isFinite(v) || v <= 0) return "—";
+  return `${v} in`;
+}
+
+export const CONFIDENCE_COPY =
+  "This is a planning estimate. Final measurements are confirmed after review and template.";
