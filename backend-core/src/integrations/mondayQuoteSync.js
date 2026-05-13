@@ -9,16 +9,18 @@
  *
  * Public column mapping (optional — values are Monday column IDs). If **none** of the
  * `MONDAY_PUBLIC_COL_*` vars below are set, the server creates **item name only** (no column_values).
+ * When mapping is set, public sync sends **group A** on `create_item`, then **groups B–F** via
+ * `change_multiple_column_values` (see docs/quote-platform/monday-public-quotes-setup.md).
  *
  * Safe mappings (see docs/quote-platform/monday-public-quotes-setup.md):
  * - MONDAY_PUBLIC_COL_CITY, MONDAY_PUBLIC_COL_STATE — text
  * - MONDAY_PUBLIC_COL_QUOTE_ID (or legacy MONDAY_PUBLIC_COL_QUOTE_NUMBER) — text
  * - MONDAY_PUBLIC_COL_ESTIMATE_SUMMARY — long_text (plain string)
- * - MONDAY_PUBLIC_COL_QUOTE_VALUE — numbers (`{ number }`)
- * - MONDAY_PUBLIC_COL_ESTIMATED_SQFT — numbers (`{ number }`)
+ * - MONDAY_PUBLIC_COL_QUOTE_VALUE — numbers column (numeric string, e.g. `"1234.56"`)
+ * - MONDAY_PUBLIC_COL_ESTIMATED_SQFT — numbers column (numeric string)
  * - MONDAY_PUBLIC_COL_CREATED_DATE — date (`{ date: "YYYY-MM-DD" }`)
  * - MONDAY_PUBLIC_COL_STATUS — status (`{ label }`); MONDAY_PUBLIC_STATUS_LABEL (default: Lead submitted)
- * - MONDAY_PUBLIC_COL_EMAIL — email (`{ email, text }`) when email present
+ * - MONDAY_PUBLIC_COL_EMAIL — email (`{ email, text }`) when valid-looking email
  * - MONDAY_PUBLIC_COL_PHONE — phone (`{ phone, countryShortName: "US" }`) when 10-digit US local after normalize
  * - MONDAY_PUBLIC_COL_CUSTOMER_NAME, MONDAY_PUBLIC_COL_ZIP, MONDAY_PUBLIC_COL_SOURCE — text (legacy)
  *
@@ -82,6 +84,14 @@ mutation ($boardId: ID!, $itemName: String!, $columnValues: JSON!) {
 const CREATE_ITEM_NAME_ONLY_MUTATION = `
 mutation ($boardId: ID!, $itemName: String!) {
   create_item(board_id: $boardId, item_name: $itemName) {
+    id
+  }
+}
+`;
+
+const CHANGE_MULTIPLE_COLUMN_VALUES_MUTATION = `
+mutation ($boardId: ID!, $itemId: ID!, $columnValues: JSON!) {
+  change_multiple_column_values(board_id: $boardId, item_id: $itemId, column_values: $columnValues) {
     id
   }
 }
@@ -218,17 +228,56 @@ function recordSkipped(skippedColumns, reason, detail) {
 }
 
 /**
- * Build Monday `column_values` object (keys = column IDs, values = Monday-native shapes).
- * @param {{ payload: Record<string, unknown>, estimateSummary: string }} input
- * @returns {{ columnValues: Record<string, unknown>, attemptedColumnIds: string[], skippedColumns: Array<{ reason: string, detail?: string|null }> }}
+ * @param {string} em
+ * @returns {boolean}
  */
-export function buildMondayPublicColumnValues(input) {
+export function isValidEmailForMonday(em) {
+  const t = String(em || "").trim();
+  if (!t || t.length > 254) return false;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t);
+}
+
+function formatMondayNumberString(value, mode) {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return null;
+  if (mode === "money") return n.toFixed(2);
+  return String(Math.round(n));
+}
+
+/**
+ * Public Monday column_values split for resilient create + incremental updates.
+ * Group A: safest text + numeric strings (create_item first).
+ * Groups B–F: long_text, date, status, email, phone (applied after item exists).
+ *
+ * @param {{ payload: Record<string, unknown>, estimateSummary: string }} input
+ * @returns {{
+ *   groupA: Record<string, unknown>,
+ *   groupB: Record<string, unknown>,
+ *   groupC: Record<string, unknown>,
+ *   groupD: Record<string, unknown>,
+ *   groupE: Record<string, unknown>,
+ *   groupF: Record<string, unknown>,
+ *   skippedColumns: Array<{ reason: string, detail?: string|null }>
+ * }}
+ */
+export function buildMondayPublicColumnGroups(input) {
   const payload = input?.payload && typeof input.payload === "object" ? input.payload : {};
   const estimateSummary = String(input?.estimateSummary ?? "");
   const skippedColumns = [];
-  const o = {};
+  /** @type {Record<string, unknown>} */
+  const groupA = {};
+  /** @type {Record<string, unknown>} */
+  const groupB = {};
+  /** @type {Record<string, unknown>} */
+  const groupC = {};
+  /** @type {Record<string, unknown>} */
+  const groupD = {};
+  /** @type {Record<string, unknown>} */
+  const groupE = {};
+  /** @type {Record<string, unknown>} */
+  const groupF = {};
 
-  const setText = (envName, value) => {
+  const setTextIn = (target, envName, value) => {
     const id = envCol(envName);
     if (!id) {
       recordSkipped(skippedColumns, "no_column_id", envName);
@@ -243,28 +292,29 @@ export function buildMondayPublicColumnValues(input) {
       recordSkipped(skippedColumns, "empty_value", envName);
       return;
     }
-    o[id] = s;
+    target[id] = s;
   };
 
-  const setNumber = (envName, value) => {
+  const setNumberStringIn = (target, envName, value, mode) => {
     const id = envCol(envName);
     if (!id) {
       recordSkipped(skippedColumns, "no_column_id", envName);
       return;
     }
-    const n = typeof value === "number" ? value : Number(value);
-    if (!Number.isFinite(n)) {
+    const s = formatMondayNumberString(value, mode);
+    if (s == null) {
       recordSkipped(skippedColumns, "invalid_number", envName);
       return;
     }
-    o[id] = { number: n };
+    target[id] = s;
   };
 
-  setText("MONDAY_PUBLIC_COL_CITY", payload.city);
-  setText("MONDAY_PUBLIC_COL_STATE", payload.state);
-  setText("MONDAY_PUBLIC_COL_CUSTOMER_NAME", payload.customer_name);
-  setText("MONDAY_PUBLIC_COL_ZIP", payload.zip);
-  setText("MONDAY_PUBLIC_COL_SOURCE", payload.quote_source);
+  // --- Group A (safest first payload on create_item) ---
+  setTextIn(groupA, "MONDAY_PUBLIC_COL_CITY", payload.city);
+  setTextIn(groupA, "MONDAY_PUBLIC_COL_STATE", payload.state);
+  setTextIn(groupA, "MONDAY_PUBLIC_COL_CUSTOMER_NAME", payload.customer_name);
+  setTextIn(groupA, "MONDAY_PUBLIC_COL_ZIP", payload.zip);
+  setTextIn(groupA, "MONDAY_PUBLIC_COL_SOURCE", payload.quote_source);
 
   const quoteIdCol = envCol("MONDAY_PUBLIC_COL_QUOTE_ID");
   if (quoteIdCol) {
@@ -272,61 +322,83 @@ export function buildMondayPublicColumnValues(input) {
     const internal =
       payload.quote_id != null ? String(payload.quote_id).trim() : payload.id != null ? String(payload.id).trim() : "";
     const v = qn || internal;
-    if (v) o[quoteIdCol] = v;
+    if (v) groupA[quoteIdCol] = v;
     else recordSkipped(skippedColumns, "empty_value", "MONDAY_PUBLIC_COL_QUOTE_ID");
   }
 
-  setText("MONDAY_PUBLIC_COL_QUOTE_NUMBER", payload.quote_number);
+  setTextIn(groupA, "MONDAY_PUBLIC_COL_QUOTE_NUMBER", payload.quote_number);
+  setNumberStringIn(groupA, "MONDAY_PUBLIC_COL_QUOTE_VALUE", payload.quote_total, "money");
+  setNumberStringIn(groupA, "MONDAY_PUBLIC_COL_ESTIMATED_SQFT", payload.estimated_square_footage, "integer");
 
+  // --- Group B: long_text estimate summary ---
   if (estimateSummary.trim()) {
-    setText("MONDAY_PUBLIC_COL_ESTIMATE_SUMMARY", estimateSummary.trim());
+    setTextIn(groupB, "MONDAY_PUBLIC_COL_ESTIMATE_SUMMARY", estimateSummary.trim());
   }
 
-  setNumber("MONDAY_PUBLIC_COL_QUOTE_VALUE", payload.quote_total);
-  setNumber("MONDAY_PUBLIC_COL_ESTIMATED_SQFT", payload.estimated_square_footage);
-
-  const emailCol = envCol("MONDAY_PUBLIC_COL_EMAIL");
-  if (emailCol) {
-    const em = String(payload.customer_email || "").trim();
-    if (em) o[emailCol] = { email: em, text: em };
-    else recordSkipped(skippedColumns, "missing_email", "MONDAY_PUBLIC_COL_EMAIL");
-  }
-
-  const phoneCol = envCol("MONDAY_PUBLIC_COL_PHONE");
-  if (phoneCol) {
-    const phone10 = normalizeMondayUsPhone10(payload.customer_phone);
-    if (phone10) o[phoneCol] = { phone: phone10, countryShortName: "US" };
-    else recordSkipped(skippedColumns, "invalid_or_missing_phone", "MONDAY_PUBLIC_COL_PHONE");
-  }
-
-  const statusCol = envCol("MONDAY_PUBLIC_COL_STATUS");
-  if (statusCol) {
-    const label = String(process.env.MONDAY_PUBLIC_STATUS_LABEL || "Lead submitted").trim() || "Lead submitted";
-    o[statusCol] = { label };
-  }
-
+  // --- Group C: date ---
   const dateCol = envCol("MONDAY_PUBLIC_COL_CREATED_DATE");
   if (dateCol) {
     const raw = payload.created_date ? new Date(String(payload.created_date)) : new Date();
     const iso = Number.isFinite(raw.getTime()) ? raw.toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
-    o[dateCol] = { date: iso };
+    groupC[dateCol] = { date: iso };
+  }
+
+  // --- Group D: status ---
+  const statusCol = envCol("MONDAY_PUBLIC_COL_STATUS");
+  if (statusCol) {
+    const label = String(process.env.MONDAY_PUBLIC_STATUS_LABEL || "Lead submitted").trim() || "Lead submitted";
+    groupD[statusCol] = { label };
+  }
+
+  // --- Group E: email ---
+  const emailCol = envCol("MONDAY_PUBLIC_COL_EMAIL");
+  if (emailCol) {
+    const em = String(payload.customer_email || "").trim();
+    if (em && isValidEmailForMonday(em)) groupE[emailCol] = { email: em, text: em };
+    else recordSkipped(skippedColumns, em ? "invalid_email" : "missing_email", "MONDAY_PUBLIC_COL_EMAIL");
+  }
+
+  // --- Group F: phone ---
+  const phoneCol = envCol("MONDAY_PUBLIC_COL_PHONE");
+  if (phoneCol) {
+    const phone10 = normalizeMondayUsPhone10(payload.customer_phone);
+    if (phone10) groupF[phoneCol] = { phone: phone10, countryShortName: "US" };
+    else recordSkipped(skippedColumns, "invalid_or_missing_phone", "MONDAY_PUBLIC_COL_PHONE");
   }
 
   if (envCol("MONDAY_PUBLIC_COL_SALES_REP")) {
     recordSkipped(skippedColumns, "skipped_unimplemented_people_column", "MONDAY_PUBLIC_COL_SALES_REP");
-    // TODO: People column requires Monday user IDs — map sales_rep to person IDs before sending.
   }
   if (envCol("MONDAY_PUBLIC_COL_BRANCH")) {
     recordSkipped(skippedColumns, "skipped_unimplemented_dropdown_column", "MONDAY_PUBLIC_COL_BRANCH");
-    // TODO: Dropdown requires exact label match to Monday board options for Branch Location.
   }
   if (envCol("MONDAY_PUBLIC_COL_ADDRESS")) {
     recordSkipped(skippedColumns, "skipped_unimplemented_location_column", "MONDAY_PUBLIC_COL_ADDRESS");
-    // TODO: Location column requires validated Monday location JSON payload (address / lat / lng per Monday spec).
   }
 
-  const attemptedColumnIds = Object.keys(o);
-  return { columnValues: o, attemptedColumnIds, skippedColumns };
+  return { groupA, groupB, groupC, groupD, groupE, groupF, skippedColumns };
+}
+
+function mergeMondayPublicGroups(g) {
+  return {
+    ...g.groupA,
+    ...g.groupB,
+    ...g.groupC,
+    ...g.groupD,
+    ...g.groupE,
+    ...g.groupF
+  };
+}
+
+/**
+ * Build full Monday `column_values` object (all groups). Prefer `buildMondayPublicColumnGroups` for incremental sync.
+ * @param {{ payload: Record<string, unknown>, estimateSummary: string }} input
+ * @returns {{ columnValues: Record<string, unknown>, attemptedColumnIds: string[], skippedColumns: Array<{ reason: string, detail?: string|null }> }}
+ */
+export function buildMondayPublicColumnValues(input) {
+  const g = buildMondayPublicColumnGroups(input);
+  const columnValues = mergeMondayPublicGroups(g);
+  return { columnValues, attemptedColumnIds: Object.keys(columnValues), skippedColumns: g.skippedColumns };
 }
 
 /**
@@ -415,6 +487,195 @@ async function patchQuoteHeaderMondayIds(db, quoteId, boardId, itemId) {
   }
 }
 
+const OPTIONAL_PUBLIC_GROUP_ORDER = /** @type {const} */ (["B", "C", "D", "E", "F"]);
+
+/**
+ * Public quotes: `create_item` with group A only, then `change_multiple_column_values` per optional group.
+ * @param {{
+ *   token: string,
+ *   boardId: string,
+ *   itemName: string,
+ *   groups: ReturnType<typeof buildMondayPublicColumnGroups>,
+ *   skippedCols: Array<{ reason: string, detail?: string|null }>,
+ *   requestPayload: Record<string, unknown>,
+ *   db: import("@supabase/supabase-js").SupabaseClient,
+ *   quoteId: string,
+ *   organizationId?: string|null,
+ *   action?: string
+ * }} p
+ */
+async function executePublicIncrementalMondaySync(p) {
+  const { token, boardId, itemName, groups, skippedCols, requestPayload, db, quoteId, organizationId, action } = p;
+  const groupA = groups.groupA;
+  const aKeys = Object.keys(groupA);
+  /** @type {string[]} */
+  const appliedColumnIds = [];
+  /** @type {string[]} */
+  const failedColumnIds = [];
+  /** @type {string[]} */
+  const failedColumnGroups = [];
+  /** @type {Record<string, string>} */
+  const groupErrors = {};
+
+  let itemId = null;
+  let createdWithColumns = false;
+  /** @type {string|null} */
+  let createFirstColumnValuesJson = null;
+  let bulkGroupAFailed = false;
+
+  if (aKeys.length > 0) {
+    const aJson = JSON.stringify(groupA);
+    createFirstColumnValuesJson = aJson;
+    try {
+      const json = await mondayGraphql(token, CREATE_ITEM_MUTATION, {
+        boardId: String(boardId),
+        itemName,
+        columnValues: aJson
+      });
+      itemId = extractCreateItemId(json);
+      if (!itemId) throw new Error("Monday create_item returned no id");
+      createdWithColumns = true;
+      appliedColumnIds.push(...aKeys);
+    } catch (e) {
+      bulkGroupAFailed = true;
+      const err = safeMondayErrorMessage(e);
+      groupErrors.create_item_group_A = err;
+      logMondayCreateItemDiagnostics({
+        boardIdPresent: Boolean(String(boardId || "").trim()),
+        itemName,
+        columnIds: aKeys,
+        columnValuesVar: aJson,
+        typeof_columnValues: typeof aJson,
+        columnValuesJson: aJson,
+        skipped_columns: skippedCols
+      });
+
+      const nameJson = await mondayGraphql(token, CREATE_ITEM_NAME_ONLY_MUTATION, {
+        boardId: String(boardId),
+        itemName
+      });
+      itemId = extractCreateItemId(nameJson);
+      if (!itemId) throw new Error("Monday create_item (name-only) returned no id");
+
+      const perColErrors = [];
+      for (const colId of aKeys) {
+        const single = { [colId]: groupA[colId] };
+        try {
+          await mondayGraphql(token, CHANGE_MULTIPLE_COLUMN_VALUES_MUTATION, {
+            boardId: String(boardId),
+            itemId: String(itemId),
+            columnValues: JSON.stringify(single)
+          });
+          appliedColumnIds.push(colId);
+        } catch (e2) {
+          const msg = safeMondayErrorMessage(e2);
+          failedColumnIds.push(colId);
+          perColErrors.push(`${colId}: ${msg}`);
+        }
+      }
+      if (perColErrors.length) {
+        groupErrors.group_A_incremental = perColErrors.join(" | ").slice(0, 2000);
+        failedColumnGroups.push("A");
+      } else if (bulkGroupAFailed) {
+        failedColumnGroups.push("A");
+      }
+    }
+  } else {
+    const nameJson = await mondayGraphql(token, CREATE_ITEM_NAME_ONLY_MUTATION, {
+      boardId: String(boardId),
+      itemName
+    });
+    itemId = extractCreateItemId(nameJson);
+    if (!itemId) throw new Error("Monday create_item (name-only) returned no id");
+    createdWithColumns = false;
+  }
+
+  await patchQuoteHeaderMondayIds(db, quoteId, boardId, itemId);
+
+  const optionalMap = {
+    B: groups.groupB,
+    C: groups.groupC,
+    D: groups.groupD,
+    E: groups.groupE,
+    F: groups.groupF
+  };
+
+  for (const gKey of OPTIONAL_PUBLIC_GROUP_ORDER) {
+    const obj = optionalMap[gKey];
+    const keys = Object.keys(obj);
+    if (!keys.length) continue;
+    try {
+      await mondayGraphql(token, CHANGE_MULTIPLE_COLUMN_VALUES_MUTATION, {
+        boardId: String(boardId),
+        itemId: String(itemId),
+        columnValues: JSON.stringify(obj)
+      });
+      appliedColumnIds.push(...keys);
+    } catch (e) {
+      const msg = safeMondayErrorMessage(e);
+      groupErrors[`group_${gKey}`] = msg;
+      failedColumnGroups.push(gKey);
+      failedColumnIds.push(...keys);
+    }
+  }
+
+  const hadIncrementalFailures = failedColumnIds.length > 0;
+  const hadBulkAFailure = bulkGroupAFailed;
+  const status =
+    hadIncrementalFailures || hadBulkAFailure ? "success_partial_columns" : "success";
+
+  const errorMessage =
+    status === "success_partial_columns"
+      ? Object.entries(groupErrors)
+          .map(([k, v]) => `${k}: ${v}`)
+          .join(" | ")
+          .slice(0, 4000)
+      : null;
+
+  const partialWarning =
+    "Your Monday item was created with the quote title only; some columns could not be filled automatically. Elite can update the board.";
+
+  const responsePayload = {
+    monday_item_id: itemId,
+    created_with_columns: createdWithColumns,
+    applied_column_ids: [...new Set(appliedColumnIds)],
+    failed_column_ids: [...new Set(failedColumnIds)],
+    failed_column_groups: [...new Set(failedColumnGroups)],
+    skipped_columns: skippedCols,
+    group_errors: groupErrors,
+    note:
+      status === "success_partial_columns"
+        ? "Some column groups failed; item retained. Status columns require MONDAY_PUBLIC_STATUS_LABEL to match an existing label on the board (add the label in Monday if sync fails for group D)."
+        : undefined
+  };
+
+  await writeMondaySyncLog({
+    quoteId,
+    action: action || "sync",
+    mondayBoardId: String(boardId),
+    mondayItemId: itemId,
+    requestPayload: {
+      ...requestPayload,
+      create_first_column_values_json: createFirstColumnValuesJson,
+      graphql: "create_item_group_A_then_change_multiple_optional"
+    },
+    responsePayload,
+    status,
+    errorMessage,
+    db,
+    organizationId: organizationId ?? null
+  });
+
+  return {
+    ok: true,
+    skipped: false,
+    status,
+    monday_item_id: itemId,
+    monday_board_id: String(boardId),
+    warning: status === "success_partial_columns" ? partialWarning : null
+  };
+}
+
 /**
  * @param {{ quoteId: string, action: string, db: import("@supabase/supabase-js").SupabaseClient, payload?: Record<string, unknown>, quoteSource?: string, organizationId?: string|null }} params
  * @returns {Promise<{ ok: boolean, skipped?: boolean, status?: string, reason?: string, monday_item_id?: string|null, monday_board_id?: string|null, warning?: string|null }>}
@@ -453,12 +714,11 @@ export async function syncQuoteToMonday(params) {
   const estimateSummary = isPublicQuoteSource(quoteSource) ? buildPublicEstimateSummaryCompact(summaryRows) : "";
 
   const isPublic = isPublicQuoteSource(quoteSource);
-  const buildResult = isPublic
-    ? buildMondayPublicColumnValues({ payload, estimateSummary })
-    : { columnValues: {}, attemptedColumnIds: [], skippedColumns: [] };
-  const columnValuesObj = buildResult.columnValues;
-  const columnIds = buildResult.attemptedColumnIds;
-  const skippedCols = buildResult.skippedColumns;
+  const groups = isPublic ? buildMondayPublicColumnGroups({ payload, estimateSummary }) : null;
+  const columnValuesObj = isPublic && groups ? mergeMondayPublicGroups(groups) : {};
+  const columnIds = Object.keys(columnValuesObj);
+  const skippedCols = isPublic && groups ? groups.skippedColumns : [];
+
   const columnValuesJson = JSON.stringify(columnValuesObj);
 
   const mappingEnvConfigured = publicMondayColumnMappingConfigured();
@@ -477,7 +737,18 @@ export async function syncQuoteToMonday(params) {
     attempted_column_ids: columnIds,
     skipped_columns: skippedCols,
     column_mapping_env_configured: mappingEnvConfigured,
-    graphql: hasColumnPayload ? "create_item" : "create_item_name_only"
+    graphql: hasColumnPayload ? "create_item_group_A_then_change_multiple_optional" : "create_item_name_only",
+    column_groups:
+      isPublic && groups
+        ? {
+            A: Object.keys(groups.groupA),
+            B: Object.keys(groups.groupB),
+            C: Object.keys(groups.groupC),
+            D: Object.keys(groups.groupD),
+            E: Object.keys(groups.groupE),
+            F: Object.keys(groups.groupF)
+          }
+        : undefined
   };
 
   let json = null;
@@ -498,7 +769,17 @@ export async function syncQuoteToMonday(params) {
       mondayBoardId: String(boardId),
       mondayItemId: id,
       requestPayload,
-      responsePayload: { data: nameJson?.data ?? null, ...extraResponse },
+      responsePayload: {
+        monday_item_id: id,
+        created_with_columns: false,
+        applied_column_ids: [],
+        failed_column_ids: [],
+        failed_column_groups: [],
+        skipped_columns: skippedCols,
+        group_errors: {},
+        data: nameJson?.data ?? null,
+        ...extraResponse
+      },
       status,
       errorMessage: null,
       db,
@@ -521,10 +802,25 @@ export async function syncQuoteToMonday(params) {
       });
     }
 
+    if (isPublic && hasColumnPayload && groups) {
+      return await executePublicIncrementalMondaySync({
+        token,
+        boardId,
+        itemName,
+        groups,
+        skippedCols,
+        requestPayload,
+        db,
+        quoteId: params.quoteId,
+        organizationId: params.organizationId,
+        action: params.action
+      });
+    }
+
     json = await mondayGraphql(token, CREATE_ITEM_MUTATION, {
       boardId: String(boardId),
       itemName,
-      columnValues: columnValuesJson
+      columnValues: "{}"
     });
     itemId = extractCreateItemId(json);
     if (!itemId) {
@@ -539,7 +835,16 @@ export async function syncQuoteToMonday(params) {
       mondayBoardId: String(boardId),
       mondayItemId: itemId,
       requestPayload,
-      responsePayload: { data: json?.data ?? null },
+      responsePayload: {
+        data: json?.data ?? null,
+        monday_item_id: itemId,
+        created_with_columns: false,
+        applied_column_ids: [],
+        failed_column_ids: [],
+        failed_column_groups: [],
+        skipped_columns: skippedCols,
+        group_errors: {}
+      },
       status: "success",
       errorMessage: null,
       db,
