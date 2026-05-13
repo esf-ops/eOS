@@ -11,6 +11,7 @@ import {
   syntheticRoomForWorkflow
 } from "../lib/prototypeQuoteMath";
 import { computePublicConsumerEstimatesLocal, type PublicEstimateRow } from "../lib/publicConsumerParity";
+import { buildPublicLegacyCalculateBody, publicLegacyCalculatePayloadIssues } from "../lib/publicLegacyCalculatePayload";
 import type { GuidedPiece, QuoteWorkflowMethod } from "../lib/quoteTypes";
 import { round2, STANDARD_BACKSPLASH_HEIGHT_IN, STANDARD_COUNTER_DEPTH_IN } from "../lib/measurementEngine";
 import GuidedLayoutPublic from "./GuidedLayoutPublic";
@@ -348,16 +349,15 @@ export default function PublicQuoteWizard() {
       countertopSqft = totals.counter;
       backsplashSqft = round2(totals.splash + totals.fhb);
     }
-    const engine = apiRooms.length >= 1 ? "rooms" : "legacy";
-    return {
-      quoteSource: "public_retail",
+
+    const body = buildPublicLegacyCalculateBody({
       materialGroup: MATERIAL_GROUP,
-      areas: { countertopSqft, backsplashSqft },
+      countertopSqft,
+      backsplashSqft,
       addOns,
-      engine,
-      rooms: apiRooms,
       retailMarkupPercent: 25,
       retailMethod: "Markup Percent",
+      tearOut: tearAnswer === "yes",
       customer_name: customerName.trim() || undefined,
       customer_email: email.trim() || undefined,
       customer_phone: phone.trim() || undefined,
@@ -366,8 +366,29 @@ export default function PublicQuoteWizard() {
       city: city.trim() || undefined,
       state: stateUs.trim() || undefined,
       zip: zip.trim() || undefined
-    };
-  }, [buildRoomDraftsForCalculate, buildGlobalAddOns, customerName, email, phone, projectType, projectAddress, city, stateUs, zip]);
+    });
+
+    if (import.meta.env.DEV) {
+      const issues = publicLegacyCalculatePayloadIssues(body as Record<string, unknown>);
+      if (issues.length) {
+        console.warn("[PublicQuoteWizard] calculate/submit payload:", issues);
+      }
+    }
+
+    return body;
+  }, [
+    buildRoomDraftsForCalculate,
+    buildGlobalAddOns,
+    customerName,
+    email,
+    phone,
+    projectType,
+    projectAddress,
+    city,
+    stateUs,
+    zip,
+    tearAnswer
+  ]);
 
   const applyLocalFallbackEstimates = useCallback(() => {
     const drafts = buildRoomDraftsForCalculate();
