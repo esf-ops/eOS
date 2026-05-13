@@ -1,0 +1,16 @@
+---
+description: Five-question security checklist for routes, data access, and integrations
+alwaysApply: true
+---
+
+# Security audit checklist (Cursor)
+
+Before merging sensitive changes (new routes, queries, cross-org reads, integration writes, exports):
+
+1. **Organization scope:** Does this path respect **`organization_id`** (and org context helpers) wherever tenant data is involved?
+2. **Server-side auth:** Are permissions enforced in **backend** code (or RLS), not only hidden in the UI?
+3. **Secrets exposure:** Could this leak **service role keys**, **Monday tokens**, **Moraware creds**, or other secrets into the **browser**, **client logs**, or **public API responses**?
+4. **Cross-tenant leakage:** Could this expose another org’s **quotes**, **pricing**, **users**, **integration mappings**, or **sync payloads**?
+5. **Traceability:** Does this **write** or irreversible action warrant an **audit row**, **sync log**, or structured **error log** for operators?
+
+If any answer is “no” or “uncertain,” stop and fix or document an explicit exception in `docs/eliteos/FEATURE_DECISIONS.md`.

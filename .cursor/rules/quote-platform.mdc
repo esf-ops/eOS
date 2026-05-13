@@ -1,0 +1,20 @@
+---
+description: Public quote tool, pricing, Monday sync, and calculate/submit contracts
+globs:
+  - "backend-core/src/quotes/**"
+  - "app-quote/**"
+  - "docs/quote-platform/**"
+  - "docs/eliteos/**"
+alwaysApply: false
+---
+
+# Quote platform (Cursor)
+
+- **Public calculate contract:** `POST /api/public-quote/calculate` and public submit rely on a **legacy aggregate payload** for tier estimates: `areas.countertopSqft`, `areas.backsplashSqft`, `addOns`, `engine: "legacy"`. If the UI uses guided layout or cabinet lengths, **collapse to those fields** before calling the API so `estimates_by_group` stays correct.
+- **Public pricing math:** Material tiers use **ESF Direct $/sqft** (Promo 70 … F 135) × **(1 + planning markup %)** (default **25%**). Add-ons use **Direct unit prices** × the same factor—not a separate wholesale tier for public consumer stone.
+- **Public display:** Homeowner-facing totals use **round up to nearest $10** and **whole dollars (no cents)** for headline amounts. Preserve exact internal numbers where the API already exposes them (`total` vs `total_display`) unless product changes rounding rules.
+- **Monday Quote Amount:** Use **Group Promo** rounded public total only—not Group F, not average of tiers.
+- **Monday Estimate Summary:** May include **all tiers**; use rounded, compact, homeowner-safe wording.
+- **Monday resilience:** Sync must **not** block successful public submit; preserve item on partial column failure; log diagnostics—see `mondayQuoteSync.js` and `docs/quote-platform/monday-public-quotes-setup.md`.
+- **Copy:** Public UI must **not** say Direct, Wholesale, dealer protection, or internal margin terms.
+- **Regression bar:** Do **not** break **`/api/public-quote/calculate`** or **`/api/public-quote/submit-measurements`** without coordinated frontend + tests + doc updates.

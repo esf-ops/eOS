@@ -1,0 +1,15 @@
+---
+description: eliteOS platform architecture, SaaS awareness, and shared Brain pattern
+alwaysApply: true
+---
+
+# eliteOS architecture (Cursor)
+
+- **Product name:** Use **eliteOS** in user-facing copy, docs aimed at founders/customers, and new UI strings. Legacy repo identifiers (`eos`, `eOS`, `EOS_*`) may exist until a deliberate rename—do not churn unrelated identifiers without a ticket.
+- **Shared Brain:** New heads and features should call **`backend-core`** (or successor API), not introduce parallel sources of truth for the same business entities.
+- **No silent tenant coupling:** Avoid hardcoded fabricator-specific IDs, branch names, or shop-only assumptions in shared logic. Prefer org-scoped config (`organization_id`, `organization_integration_configs`, pricing structures).
+- **New tenant-owned data:** Prefer **`organization_id`** on new tables/rows or document a narrow exception in `docs/eliteos/FEATURE_DECISIONS.md`.
+- **Secrets:** Never put Supabase **service role**, Monday tokens, Moraware credentials, or partner API secrets in frontend code or client env bundles exposed to the browser.
+- **Permissions:** Enforce authorization in **backend** code (or Supabase RLS where used)—**never** rely on UI-only hiding for security.
+- **Living docs:** After meaningful architecture, SaaS, integration, security, deployment, or pricing-flow changes, update **`docs/eliteos/SYSTEM_BLUEPRINT.md`** or **`docs/eliteos/FEATURE_DECISIONS.md`**.
+- **Head inventory:** See **`docs/eliteos/eliteOS-master-head-map.md`** before adding a new head.

@@ -1,6 +1,6 @@
-# eOS (Elite Operating System)
+Shared brain for **Elite Stone Fabrication** (eliteOS): Moraware ingestion, Supabase “Brain” persistence, a **backend API** (`backend-core`), and **web heads** for sync health, executive reporting, and public quote.
 
-Shared brain for **Elite Stone Fabrication**: Moraware ingestion, Supabase “Brain” persistence, a **backend API** (`backend-core`), and **web heads** for sync health and executive reporting.
+**Living documentation (eliteOS):** [System blueprint](docs/eliteos/SYSTEM_BLUEPRINT.md) · [Feature decisions](docs/eliteos/FEATURE_DECISIONS.md) · [Head map](docs/eliteos/eliteOS-master-head-map.md)
 
 > **Do not commit secrets.** Keep `.env`, `.env.local`, and `debug/` dumps local only. Copy from `/.env.example`, `backend-core/.env.example`, and each app’s `.env.local.example`. See [docs/EOS_ENV_VARS.md](docs/EOS_ENV_VARS.md) and [docs/EOS_REPO_SECRET_AUDIT.md](docs/EOS_REPO_SECRET_AUDIT.md).
 
