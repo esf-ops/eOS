@@ -77,12 +77,21 @@ export function normalizePrototypeQuoteInput(input) {
   const quoteSource = String(src.quoteSource || src.quote_source || "partner_portal");
   const defaultMode = quoteSource === "public_retail" ? "simple_public_preset" : "manual_dimensions";
   const quoteInputMode = QUOTE_INPUT_MODES.includes(rawMode) ? rawMode : defaultMode;
+  const basisRaw = String(src.internalMaterialBasis ?? src.internal_material_basis ?? "wholesale").toLowerCase();
+  const internalMaterialBasis = basisRaw === "direct" ? "direct" : "wholesale";
+  const customPassthroughItems = Array.isArray(src.customPassthroughItems)
+    ? src.customPassthroughItems
+    : Array.isArray(src.custom_pass_through_items)
+      ? src.custom_pass_through_items
+      : [];
   return {
     engine: String(src.engine || src.calculationEngine || "legacy"),
     quoteSource,
     quoteInputMode,
     estimateMode: String(src.estimateMode || src.estimate_mode || "Partner Wholesale Estimate"),
     materialGroup: String(src.materialGroup || src.selectedGroup || "Group Promo"),
+    internalMaterialBasis,
+    customPassthroughItems,
     areas: {
       countertopSqft: Number(src.areas?.countertopSqft ?? src.countertopSqft ?? 0) || 0,
       backsplashSqft: Number(src.areas?.backsplashSqft ?? src.backsplashSqft ?? 0) || 0
@@ -115,6 +124,19 @@ function rulePriceForMaterialGroup(groupName, rules) {
   );
   if (fromRules != null && Number(fromRules.price) >= 0) return Number(fromRules.price);
   return PROTOTYPE_TIER_PRICE_PER_SQFT[g] ?? PROTOTYPE_TIER_PRICE_PER_SQFT["Group Promo"];
+}
+
+/**
+ * Internal quotes: material $/sf follows Direct vs Wholesale basis (no public 25% here).
+ * @param {ReturnType<typeof normalizePrototypeQuoteInput>} input
+ * @param {string} groupName
+ * @param {ReadonlyArray<Record<string, unknown>>} rules
+ */
+function materialRateForQuote(input, groupName, rules) {
+  if (String(input.quoteSource) === "internal_quote" && input.internalMaterialBasis === "direct") {
+    return directPricePerSqftForGroup(groupName);
+  }
+  return rulePriceForMaterialGroup(groupName, rules);
 }
 
 /**
@@ -346,6 +368,8 @@ export function buildCalculationSnapshot(input, resolved, totals, extras = {}) {
     inputSummary: {
       engine: input.engine,
       materialGroup: input.materialGroup,
+      internalMaterialBasis: input.internalMaterialBasis ?? null,
+      customPassthroughCount: Array.isArray(input.customPassthroughItems) ? input.customPassthroughItems.length : 0,
       areas: input.areas,
       roomCount: Array.isArray(input.rooms) ? input.rooms.length : 0
     },
@@ -361,7 +385,7 @@ function sumRoomsWholesale(input, rules) {
   const roomLines = [];
   for (const room of input.rooms || []) {
     const g = String(room.materialGroup || room.group || input.materialGroup || "Group Promo");
-    const rate = rulePriceForMaterialGroup(g, rules);
+    const rate = materialRateForQuote(input, g, rules);
     let roomCounter = 0;
     let roomSplash = 0;
     if (Array.isArray(room.pieces)) {
@@ -386,7 +410,7 @@ function sumRoomsWholesale(input, rules) {
 
 function legacyWholesale(input, rules) {
   const g = String(input.materialGroup || "Group Promo");
-  const rate = rulePriceForMaterialGroup(g, rules);
+  const rate = materialRateForQuote(input, g, rules);
   const ct = Number(input.areas?.countertopSqft) || 0;
   const bs = Number(input.areas?.backsplashSqft) || 0;
   const base = ct * rate + bs * rate;
@@ -585,6 +609,38 @@ export async function calculateQuote(rawInput, pricingContext = {}) {
     retail = retailMeta.retail;
   }
 
+  /** Internal/partner custom lines: entered $ is final for this mode (no public 25%). */
+  let customPassTotal = 0;
+  /** @type {Array<Record<string, unknown>>} */
+  const customPassLines = [];
+  if (mode !== "public_retail") {
+    for (const row of input.customPassthroughItems || []) {
+      const desc = String(row.description ?? row.name ?? "").trim();
+      const q = Number(row.qty ?? row.quantity ?? 1) || 0;
+      const p = Number(row.price ?? row.unit_price ?? 0) || 0;
+      if (!desc || q <= 0 || p <= 0) continue;
+      const sub = round2(q * p);
+      customPassTotal += sub;
+      customPassLines.push({
+        line_type: "custom_pass",
+        category: "custom_addon",
+        item_code: "CUSTOM",
+        item_name: desc,
+        room_name: null,
+        quantity: q,
+        unit_type: "each",
+        unit_price: p,
+        line_subtotal: sub
+      });
+    }
+    customPassTotal = round2(customPassTotal);
+  }
+
+  if (customPassTotal > 0) {
+    wholesale = round2(wholesale + customPassTotal);
+    retail = round2(retail + customPassTotal);
+  }
+
   const totals = {
     wholesale: round2(wholesale),
     retail: round2(retail),
@@ -592,7 +648,7 @@ export async function calculateQuote(rawInput, pricingContext = {}) {
     estimated_sqft: round2((detail.counter || input.areas.countertopSqft) + (detail.splash || input.areas.backsplashSqft))
   };
 
-  const lineItems = buildLineItems(detail, input, totals, mode, publicMarkupMult);
+  const lineItems = [...buildLineItems(detail, input, totals, mode, publicMarkupMult), ...customPassLines];
 
   const snapshot = buildCalculationSnapshot(input, resolved, totals, { warnings });
   snapshot.lineItems = lineItems;

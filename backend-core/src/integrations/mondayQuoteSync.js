@@ -118,6 +118,8 @@ export function buildMondayQuotePayload(quote, snapshot, extras = {}) {
     sales_rep: q.sales_rep ?? null,
     branch: q.branch ?? null,
     project_type: q.project_type ?? null,
+    project_name: q.project_name ?? null,
+    prepared_by: q.prepared_by ?? null,
     project_address: [q.project_address, q.city, q.state, q.zip].filter(Boolean).join(", ") || null,
     city: q.city ?? null,
     state: q.state ?? null,
@@ -127,6 +129,8 @@ export function buildMondayQuotePayload(quote, snapshot, extras = {}) {
     estimated_square_footage: q.estimated_sqft ?? snap.totals?.estimated_sqft ?? null,
     material_group: q.estimated_material_group ?? snap.inputSummary?.materialGroup ?? null,
     estimates_by_group_summary: ex.estimates_by_group_summary ?? null,
+    internal_estimate_summary: ex.internal_estimate_summary ?? null,
+    pricing_mode_label: ex.pricing_mode_label ?? null,
     forecast_value: snap.totals?.forecast_value ?? null,
     quote_url: "https://heads.elitestonefabrication.com/quote/TODO",
     created_date: q.created_at ?? null,
@@ -182,9 +186,27 @@ function buildMondayItemNameForSource(quoteSource, payload) {
   if (isPublicQuoteSource(quoteSource)) {
     return buildPublicMondayItemName(payload);
   }
+  if (String(quoteSource || "").trim() === "internal_quote") {
+    return buildInternalMondayItemName(payload);
+  }
   const qn = String(payload.quote_number || "").trim() || "Quote";
   const cn = String(payload.customer_name || "").trim() || "Customer";
   return `${qn} - ${cn}`;
+}
+
+/**
+ * Internal quotes board item name: prefer customer + city/state; fall back to project name.
+ * @param {Record<string, unknown>} payload
+ */
+export function buildInternalMondayItemName(payload) {
+  const qn = String(payload.quote_number || "").trim() || "Quote";
+  const customer = String(payload.customer_name || "").trim();
+  const project = String(payload.project_name || "").trim();
+  const cn = customer || project || "Customer";
+  const city = String(payload.city || "").trim();
+  const st = String(payload.state || "").trim();
+  const loc = city && st ? `${city}, ${st}` : city || st || "";
+  return loc ? `${qn} - ${cn} - ${loc}` : `${qn} - ${cn}`;
 }
 
 /** Env vars that count as "public Monday column mapping is configured". */
@@ -379,6 +401,143 @@ export function buildMondayPublicColumnGroups(input) {
   }
   if (envCol("MONDAY_PUBLIC_COL_ADDRESS")) {
     recordSkipped(skippedColumns, "skipped_unimplemented_location_column", "MONDAY_PUBLIC_COL_ADDRESS");
+  }
+
+  return { groupA, groupB, groupC, groupD, groupE, groupF, skippedColumns };
+}
+
+function mergeMondayInternalGroups(g) {
+  return {
+    ...g.groupA,
+    ...g.groupB,
+    ...g.groupC,
+    ...g.groupD,
+    ...g.groupE,
+    ...g.groupF
+  };
+}
+
+/** Env vars that count as "internal Monday column mapping is configured". */
+const INTERNAL_MONDAY_COLUMN_MAPPING_ENV_NAMES = [
+  "MONDAY_INTERNAL_COL_STATUS",
+  "MONDAY_INTERNAL_COL_QUOTE_VALUE",
+  "MONDAY_INTERNAL_COL_CREATED_DATE",
+  "MONDAY_INTERNAL_COL_CITY",
+  "MONDAY_INTERNAL_COL_STATE",
+  "MONDAY_INTERNAL_COL_ESTIMATED_SQFT",
+  "MONDAY_INTERNAL_COL_ESTIMATE_SUMMARY",
+  "MONDAY_INTERNAL_COL_QUOTE_ID",
+  "MONDAY_INTERNAL_COL_CUSTOMER",
+  "MONDAY_INTERNAL_COL_PROJECT",
+  "MONDAY_INTERNAL_COL_SALES_REP_TEXT",
+  "MONDAY_INTERNAL_COL_BRANCH_TEXT",
+  "MONDAY_INTERNAL_COL_ENTERED_BY",
+  "MONDAY_INTERNAL_COL_PRICING_MODE"
+];
+
+export function internalMondayColumnMappingConfigured() {
+  return INTERNAL_MONDAY_COLUMN_MAPPING_ENV_NAMES.some((k) => String(process.env[k] || "").trim().length > 0);
+}
+
+/**
+ * Internal quotes board: text + numbers + date + status only (see docs/quote-platform/monday-internal-quotes-setup.md).
+ * @param {{ payload: Record<string, unknown>, estimateSummary: string }} input
+ */
+export function buildMondayInternalColumnGroups(input) {
+  const payload = input?.payload && typeof input.payload === "object" ? input.payload : {};
+  const estimateSummary = String(input?.estimateSummary ?? "");
+  const skippedColumns = [];
+  /** @type {Record<string, unknown>} */
+  const groupA = {};
+  /** @type {Record<string, unknown>} */
+  const groupB = {};
+  /** @type {Record<string, unknown>} */
+  const groupC = {};
+  /** @type {Record<string, unknown>} */
+  const groupD = {};
+  /** @type {Record<string, unknown>} */
+  const groupE = {};
+  /** @type {Record<string, unknown>} */
+  const groupF = {};
+
+  const setTextIn = (target, envName, value) => {
+    const id = envCol(envName);
+    if (!id) {
+      recordSkipped(skippedColumns, "no_column_id", envName);
+      return;
+    }
+    if (value === null || value === undefined) {
+      recordSkipped(skippedColumns, "empty_value", envName);
+      return;
+    }
+    const s = String(value).trim();
+    if (!s) {
+      recordSkipped(skippedColumns, "empty_value", envName);
+      return;
+    }
+    target[id] = s;
+  };
+
+  const setNumberStringIn = (target, envName, value, mode) => {
+    const id = envCol(envName);
+    if (!id) {
+      recordSkipped(skippedColumns, "no_column_id", envName);
+      return;
+    }
+    const s = formatMondayNumberString(value, mode);
+    if (s == null) {
+      recordSkipped(skippedColumns, "invalid_number", envName);
+      return;
+    }
+    target[id] = s;
+  };
+
+  setTextIn(groupA, "MONDAY_INTERNAL_COL_CITY", payload.city);
+  setTextIn(groupA, "MONDAY_INTERNAL_COL_STATE", payload.state);
+  setTextIn(groupA, "MONDAY_INTERNAL_COL_CUSTOMER", payload.customer_name);
+  setTextIn(groupA, "MONDAY_INTERNAL_COL_PROJECT", payload.project_name);
+
+  const quoteIdCol = envCol("MONDAY_INTERNAL_COL_QUOTE_ID");
+  if (quoteIdCol) {
+    const qn = String(payload.quote_number || "").trim();
+    const internal =
+      payload.quote_id != null ? String(payload.quote_id).trim() : payload.id != null ? String(payload.id).trim() : "";
+    const v = qn || internal;
+    if (v) groupA[quoteIdCol] = v;
+    else recordSkipped(skippedColumns, "empty_value", "MONDAY_INTERNAL_COL_QUOTE_ID");
+  }
+
+  setNumberStringIn(groupA, "MONDAY_INTERNAL_COL_QUOTE_VALUE", payload.quote_total, "money");
+  setNumberStringIn(groupA, "MONDAY_INTERNAL_COL_ESTIMATED_SQFT", payload.estimated_square_footage, "integer");
+
+  if (estimateSummary.trim()) {
+    setTextIn(groupB, "MONDAY_INTERNAL_COL_ESTIMATE_SUMMARY", estimateSummary.trim());
+  }
+
+  const dateCol = envCol("MONDAY_INTERNAL_COL_CREATED_DATE");
+  if (dateCol) {
+    const raw = payload.created_date ? new Date(String(payload.created_date)) : new Date();
+    const iso = Number.isFinite(raw.getTime()) ? raw.toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
+    groupC[dateCol] = { date: iso };
+  }
+
+  const statusCol = envCol("MONDAY_INTERNAL_COL_STATUS");
+  if (statusCol) {
+    const label =
+      String(payload.quote_status || process.env.MONDAY_INTERNAL_STATUS_LABEL || "draft").trim() || "draft";
+    groupD[statusCol] = { label };
+  }
+
+  setTextIn(groupE, "MONDAY_INTERNAL_COL_SALES_REP_TEXT", payload.sales_rep);
+  setTextIn(groupE, "MONDAY_INTERNAL_COL_BRANCH_TEXT", payload.branch);
+  setTextIn(groupF, "MONDAY_INTERNAL_COL_ENTERED_BY", payload.prepared_by);
+  setTextIn(groupF, "MONDAY_INTERNAL_COL_PRICING_MODE", payload.pricing_mode_label);
+
+  if (envCol("MONDAY_INTERNAL_COL_SALES_REP")) {
+    recordSkipped(skippedColumns, "skipped_unimplemented_people_column", "MONDAY_INTERNAL_COL_SALES_REP");
+  }
+  if (envCol("MONDAY_INTERNAL_COL_BRANCH")) {
+    recordSkipped(skippedColumns, "skipped_unimplemented_dropdown_column", "MONDAY_INTERNAL_COL_BRANCH");
   }
 
   return { groupA, groupB, groupC, groupD, groupE, groupF, skippedColumns };
@@ -716,7 +875,13 @@ export async function syncQuoteToMonday(params) {
   const itemName = buildMondayItemNameForSource(quoteSource, payload);
 
   const summaryRows = Array.isArray(payload.estimates_by_group_summary) ? payload.estimates_by_group_summary : [];
-  const estimateSummary = isPublicQuoteSource(quoteSource) ? buildPublicEstimateSummaryCompact(summaryRows) : "";
+  const isInternalQuote = quoteSource === "internal_quote";
+  const internalSummary = String(payload.internal_estimate_summary || "").trim();
+  const estimateSummary = isPublicQuoteSource(quoteSource)
+    ? buildPublicEstimateSummaryCompact(summaryRows)
+    : isInternalQuote
+      ? internalSummary
+      : "";
 
   const isPublic = isPublicQuoteSource(quoteSource);
   const groups = isPublic ? buildMondayPublicColumnGroups({ payload, estimateSummary }) : null;
@@ -815,6 +980,51 @@ export async function syncQuoteToMonday(params) {
         groups,
         skippedCols,
         requestPayload,
+        db,
+        quoteId: params.quoteId,
+        organizationId: params.organizationId,
+        action: params.action
+      });
+    }
+
+    if (isInternalQuote && internalMondayColumnMappingConfigured()) {
+      const intGroups = buildMondayInternalColumnGroups({ payload, estimateSummary });
+      const mergedInt = mergeMondayInternalGroups(intGroups);
+      const intColumnIds = Object.keys(mergedInt);
+      const intRequestPayload = {
+        boardId,
+        envKeyName,
+        quote_source: quoteSource || null,
+        item_name: itemName,
+        column_values: mergedInt,
+        column_values_json: JSON.stringify(mergedInt),
+        attempted_column_ids: intColumnIds,
+        skipped_columns: intGroups.skippedColumns,
+        column_mapping_env_configured: true,
+        graphql:
+          intColumnIds.length > 0
+            ? "create_item_group_A_then_change_multiple_optional"
+            : "create_item_name_only",
+        column_groups: {
+          A: Object.keys(intGroups.groupA),
+          B: Object.keys(intGroups.groupB),
+          C: Object.keys(intGroups.groupC),
+          D: Object.keys(intGroups.groupD),
+          E: Object.keys(intGroups.groupE),
+          F: Object.keys(intGroups.groupF)
+        },
+        monday_kind: "internal_incremental"
+      };
+      if (intColumnIds.length === 0) {
+        return await createNameOnlyAndFinish("success", { note: "internal_name_only_no_resolved_columns" });
+      }
+      return await executePublicIncrementalMondaySync({
+        token,
+        boardId,
+        itemName,
+        groups: intGroups,
+        skippedCols: intGroups.skippedColumns,
+        requestPayload: intRequestPayload,
         db,
         quoteId: params.quoteId,
         organizationId: params.organizationId,
