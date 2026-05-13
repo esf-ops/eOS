@@ -48,6 +48,7 @@
 |---------|-----|
 | **Public Quote Head** | https://quote.eliteosfab.com |
 | **Public Quote (Vercel fallback)** | https://eliteos-quote.vercel.app |
+| **Internal Estimate Head** | Separate Vite app: `app-internal-estimate/` — **production hostname TBD** (must not be served from the public quote origin; staff auth required). |
 | **Brain / API** | https://backend-core-six.vercel.app |
 | **Future API hostname** | `api.eliteosfab.com` — **if/when** DNS and Vercel project wiring are configured |
 
@@ -97,6 +98,13 @@ The homeowner-facing wizard supports (or will support):
 - **Room / guided UI** may exist in the head, but **before calculate/submit** the client must **collapse** guided or cabinet flows into those **legacy aggregate fields** so the Brain returns correct `estimates_by_group`.
 - **Public estimate copy** must **not** expose internal pricing vocabulary (no Direct/Wholesale/dealer/protected jargon to homeowners).
 
+### Internal Quote Tool (staff)
+
+- **Frontend:** **`app-internal-estimate/`** — internal-only UI (Direct/Wholesale, library, internal Monday copy). Not bundled with **`app-quote`**.
+- **Persistence:** authenticated **`/api/internal-quotes/*`** routes (requires **Quote** head access) save `quote_source: internal_quote` into **`quote_headers`** with org scoping when `organization_id` exists.
+- **Monday:** optional **separate** internal board via **`MONDAY_INTERNAL_QUOTES_BOARD_ID`** and **`MONDAY_INTERNAL_COL_*`** — does not reuse public column IDs (`docs/quote-platform/monday-internal-quotes-setup.md`).
+- **Economics:** internal calculator supports **Direct vs Wholesale** material $/sf; **custom add-on lines** are passthrough (no public 25% homeowner markup). Public consumer paths stay on **Direct + planning markup** only.
+
 Further detail: [`../quote-platform/three-head-quote-architecture.md`](../quote-platform/three-head-quote-architecture.md) and related files under `docs/quote-platform/`.
 
 ---
@@ -114,7 +122,7 @@ Further detail: [`../quote-platform/three-head-quote-architecture.md`](../quote-
 | **Monday Quote Amount** | Uses **Group Promo** row **only**, aligned to **rounded** public Promo total (`grand_total` / forecast / Monday numeric column). |
 | **Monday Estimate Summary** | May list **all tiers**; use **rounded** whole-dollar amounts, compact string. |
 
-Implementation references: `backend-core/src/quotes/quoteCalculator.js`, `backend-core/src/quotes/quoteRoutes.js`, `app-quote` public wizard and `publicEstimateDisplay.ts`.
+Implementation references: `backend-core/src/quotes/quoteCalculator.js`, `backend-core/src/quotes/quoteRoutes.js`, `app-quote` public wizard and `publicEstimateDisplay.ts`; internal UI in `app-internal-estimate/`.
 
 ---
 
@@ -171,7 +179,7 @@ See also: `docs/EOS_REPO_SECRET_AUDIT.md`, `.cursor/rules/security-audit.mdc`.
 2. **Checks** — See §13.  
 3. **Commit** — Clear message; no secrets.  
 4. **Push** — GitHub.  
-5. **Vercel** — Auto (or manual) redeploy for affected projects (`app-quote`, `backend-core`, etc.).  
+5. **Vercel** — Auto (or manual) redeploy for affected projects (`app-quote`, `app-internal-estimate`, `backend-core`, etc.).  
 6. **Cloudflare** — DNS points `quote.eliteosfab.com` (and future `api.*`) to the right targets.  
 7. **Smoke test** — Hosted calculate, submit, Supabase row, Monday item/columns when integration-sensitive.
 
@@ -182,6 +190,7 @@ See also: `docs/EOS_REPO_SECRET_AUDIT.md`, `.cursor/rules/security-audit.mdc`.
 | When | Command / action |
 |------|------------------|
 | **`app-quote` changed** | `npm run build --prefix app-quote` |
+| **`app-internal-estimate` changed** | `npm install --prefix app-internal-estimate` (first clone) then `npm run build --prefix app-internal-estimate` |
 | **Backend JS touched** | `node --check <path-to-changed-file.js>` |
 | **Repo-wide sanity** | `npm run eos:check:local` |
 | **After deploy** (sensitive) | Hosted smoke: public calculate + submit + verify Supabase + Monday |

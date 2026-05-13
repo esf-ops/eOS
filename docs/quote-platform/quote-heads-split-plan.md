@@ -1,57 +1,36 @@
 # Quote heads split plan (Vite apps + shared modules)
 
-**Goal:** Replace the single **`app-quote`** “everything demo” with **three production heads** plus **Pricing Admin** (already largely **System Admin** + `quotePricingAdminApi.js`). The **`app-quote`** Vite shell now ships a **homeowner-first public flow** by default; the older combined partner/internal lab UI remains in source as `PartnerInternalQuoteApp.tsx` for staff reuse until separate heads are GA.
+**Goal:** eliteOS treats **Public Quote** and **Internal Estimate** as **separate heads** (separate deployable surfaces). They share measurement/pricing **logic** via imports from `app-quote/src/lib` (and Brain APIs), but **must not** ship combined “public + internal” UX in the public bundle.
 
----
+**Today (repo):**
 
-## Target applications
-
-| App | npm / package dir | Primary users | Auth |
-|-----|-------------------|---------------|------|
-| **`app-public-quote`** | `app-public-quote/` | Homeowners | Optional anon; submit lead without staff login |
-| **`app-internal-quote`** | `app-internal-quote/` | Elite staff | Supabase auth + staff roles |
-| **`app-partner-quote`** | `app-partner-quote/` | Partners | Supabase auth + partner account linkage |
-| **Pricing / catalog admin** | `app-system-admin/` (current) | Admins | Existing admin + head access |
+| Head | Package | Users | Auth | APIs |
+|------|-----------|-------|------|------|
+| **Public Quote Head** | `app-quote/` | Homeowners / retail web | None (public) | `POST /api/public-quote/calculate`, `POST /api/public-quote/submit-measurements` |
+| **Internal Estimate Head** | `app-internal-estimate/` | Elite staff | Supabase session + Brain **`requireAuth` + `requireHeadAccess`** on internal routes | `POST /api/internal-quotes/calculate`, `POST /api/internal-quotes/save`, `GET /api/internal-quotes`, `GET /api/internal-quotes/:id`, `PATCH /api/internal-quotes/:id`, `POST /api/internal-quotes/:id/duplicate` |
 
 **Rule:** Do **not** copy `quoteCalculator.js` into any frontend. All heads call **`backend-core`** APIs.
+
+**Decision:** Public Quote Head and Internal Estimate Head are separate heads. Internal Estimate requires login and **must not** be exposed through the public quote app (`app-quote` ships **public-only** UI; internal lab files were removed from `app-quote`).
 
 ---
 
 ## Shared components and modules
 
-Suggested shared package (future monorepo path — can start as copy-paste from `app-quote/src/lib`):
+`app-internal-estimate` uses Vite `resolve.alias` to `@quote-lib/*` and `@quote-ui/*` pointing at `app-quote/src/lib` and selected `app-quote/src/ui` (e.g. `RoomScopeBuilder`). This avoids duplicating pure math/types until a dedicated shared package exists.
 
-- **Measurement / types:** `measurementEngine`-style inputs, room draft types (or JSON schema shared from backend).
-- **UI primitives:** cards, summary strip, method picker patterns — **not** business constants for prices.
-- **API client:** thin wrappers for `/api/public-quote/*`, `/api/quote/*`, `/api/internal-quote/*`, `/api/partner-quote/*`, `/api/admin/quote-*`.
-
-**Never share:** service keys, Monday tokens, wholesale-only response shaping in public bundle.
-
----
-
-## Migration from `app-quote`
-
-| Keep in lab (`app-quote`) | Move to **public** head | Move to **internal** head | Move to **partner** head |
-|---------------------------|---------------------------|----------------------------|--------------------------|
-| Guided homeowner presets | ✓ (simplified further) | — | ✓ (full parity optional) |
-| Measurement preview copy | ✓ | partial | ✓ |
-| Room-by-room builder | optional / link out | ✓ primary | ✓ |
-| Math check / wholesale matrix | **remove** | ✓ | ✓ (partner-safe) |
-| Material group **selector** before measure | **remove** | ✓ fast pick | ✓ (from assignment + override rules) |
-| Partner retail % playground | — | ✓ internal | ✓ controlled |
+**Never share into public bundles:** service keys, Monday tokens, wholesale-only response shaping, or internal-only controls.
 
 ---
 
 ## Backend routes per head
 
-| Head | Calculate | Submit |
-|------|-----------|--------|
-| **Public** | `POST /api/public-quote/calculate` (no auth) | `POST /api/public-quote/submit-measurements` (no auth for v1; rate-limit + CAPTCHA TBD) |
-| **Internal** | `POST /api/quote/calculate` (auth) or dedicated internal calculate later | `POST /api/internal-quote/submit` (auth) — scaffold → full |
-| **Partner** | `POST /api/quote/calculate` (auth) | `POST /api/partner-quote/submit` (auth) — scaffold → full |
-| **Admin** | `POST /api/admin/quote-test-calculate` (future) | N/A |
+| Head | Calculate | Persist / library |
+|------|-----------|-------------------|
+| **Public** | `POST /api/public-quote/calculate` (no auth) | `POST /api/public-quote/submit-measurements` (no auth v1; rate-limit + CAPTCHA TBD) |
+| **Internal** | `POST /api/internal-quotes/calculate` (auth + head access) | `POST /api/internal-quotes/save`, list/get/patch/duplicate on `/api/internal-quotes*` |
 
-Legacy **`POST /api/quote/submit`** remains for existing demos; new heads should prefer **source-specific** routes.
+Legacy **`POST /api/quote/submit`** may remain for older demos; new heads should prefer **source-specific** routes.
 
 ---
 
@@ -59,29 +38,15 @@ Legacy **`POST /api/quote/submit`** remains for existing demos; new heads should
 
 | Quote source | Env key for board ID |
 |--------------|----------------------|
-| `public_consumer` | `MONDAY_PUBLIC_QUOTES_BOARD_ID` |
-| `internal_quote` | `MONDAY_INTERNAL_QUOTES_BOARD_ID` |
-| `partner_quote` | `MONDAY_PARTNER_QUOTES_BOARD_ID` |
-| Legacy / fallback | `MONDAY_QUOTES_BOARD_ID` |
+| `public_consumer` | `MONDAY_PUBLIC_QUOTES_BOARD_ID` (and public column envs) |
+| `internal_quote` | `MONDAY_INTERNAL_QUOTES_BOARD_ID` and **`MONDAY_INTERNAL_COL_*`** only |
 
-Sync is **logged** in `quote_monday_sync_log` with `skipped_missing_config` when vars or token are absent.
+Sync is **logged** in `quote_monday_sync_log` with `skipped_missing_config` when vars or token are absent. Internal sync **must not** read public Monday column IDs for internal-sourced rows.
 
 ---
 
-## Supabase writes per head (high level)
+## Phasing
 
-| Head | Typical writes |
-|------|----------------|
-| **Public** | `quote_headers` (lead), `quote_line_items` / `quote_rooms` as needed, `quote_forecast_events`, `quote_submission_payloads`, `quote_lead_assignments`, `quote_monday_sync_log` |
-| **Internal / Partner** | Full quote graph + audit + forecast + Monday log |
-
----
-
-## Phasing (recommended)
-
-1. **Done / in progress:** Backend public calculate + submit-measurements; source config + territory tables; Monday board selection by source; docs.
-2. **Next:** Scaffold Vite **`app-public-quote`** (minimal shell + public API only).
-3. **Then:** Split internal/partner from `app-quote` by copying scope builder + math panels into gated heads.
-4. **Ongoing:** Pricing admin routes + System Admin UI pages for territories and quote source config.
-
-**Today’s decision:** Optional **`app-public-quote`** / **`app-internal-quote`** / **`app-partner-quote`** folders are **not required** to merge this architecture PR; **`app-quote`** carries clarifying copy until those apps exist.
+1. **Done:** Backend public + internal APIs; internal Monday routing with `MONDAY_INTERNAL_*`; public Monday unchanged for public submissions.
+2. **Done:** `app-internal-estimate` scaffold; internal UI removed from `app-quote` source tree.
+3. **Future:** Dedicated `@eliteos/quote-shared` package; optional **`app-partner-quote`** head; Pricing Admin surfaces in System Admin.

@@ -64,7 +64,16 @@ export function sumGuidedPiecesByType(pieces: GuidedPiece[]) {
     lines.push(`${p.name} (${shapeLbl}): ${p.lengthIn}" × ${p.depthIn}" = ${sf.toFixed(2)} sf`);
     if (p.pieceType === "splash") splash += sf;
     else if (p.pieceType === "fhb") fhb += sf;
-    else counter += sf;
+    else {
+      counter += sf;
+      if (p.pieceType === "counter" && p.addSplash && p.lengthIn > 0) {
+        const spSf = round2((p.lengthIn * STANDARD_BACKSPLASH_HEIGHT_IN) / 144);
+        if (spSf > 0) {
+          splash += spSf;
+          lines.push(`4″ splash on ${p.name}: ${spSf.toFixed(2)} sf (length × 4″ / 144)`);
+        }
+      }
+    }
   }
   return { counter: round2(counter), splash: round2(splash), fhb: round2(fhb), lines };
 }

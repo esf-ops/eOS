@@ -632,8 +632,24 @@ export function createDefaultRoom(materialGroup: string): RoomDraft {
     linear: { wallFt: 0, splashIn: STANDARD_BACKSPLASH_HEIGHT_IN, islandL: 0, islandW: 0 },
     direct: { counter: 0, splash: 0 },
     guidedPieces: [
-      { id: newId(), pieceType: "counter", name: "Main Wall Run", lengthIn: 0, depthIn: STANDARD_COUNTER_DEPTH_IN, shape: "rect" },
-      { id: newId(), pieceType: "counter", name: "Short Return", lengthIn: 0, depthIn: STANDARD_COUNTER_DEPTH_IN, shape: "rect" }
+      {
+        id: newId(),
+        pieceType: "counter",
+        name: "Main Wall Run",
+        lengthIn: 0,
+        depthIn: STANDARD_COUNTER_DEPTH_IN,
+        shape: "rect",
+        addSplash: true
+      },
+      {
+        id: newId(),
+        pieceType: "counter",
+        name: "Short Return",
+        lengthIn: 0,
+        depthIn: STANDARD_COUNTER_DEPTH_IN,
+        shape: "rect",
+        addSplash: false
+      }
     ],
     fhbMode: "Off",
     fhbDirectSf: 0,
@@ -712,15 +728,25 @@ export function serializeRoomsForApi(rooms: RoomDraft[]): Array<Record<string, u
     if (r.roomType === "Vanity") continue;
     const g = r.materialGroup || "Group Promo";
     if (r.calcMode === "Guided Shape" && r.guidedPieces.length) {
-      const pieces = r.guidedPieces
-        .filter((p) => p.lengthIn > 0 && p.depthIn > 0)
-        .map((p) => ({
+      const pieces: Array<Record<string, unknown>> = [];
+      for (const p of r.guidedPieces.filter((x) => x.lengthIn > 0 && x.depthIn > 0)) {
+        pieces.push({
           type: p.pieceType === "fhb" ? "splash" : p.pieceType,
           lengthIn: p.lengthIn,
           depthIn: p.depthIn,
           shape: p.shape,
           name: p.name
-        }));
+        });
+        if (p.pieceType === "counter" && p.addSplash && p.lengthIn > 0) {
+          pieces.push({
+            type: "splash",
+            lengthIn: p.lengthIn,
+            depthIn: STANDARD_BACKSPLASH_HEIGHT_IN,
+            shape: "rect" as const,
+            name: `${p.name} — 4″ splash`
+          });
+        }
+      }
       if (pieces.length) {
         out.push({ name: r.name, materialGroup: g, pieces });
         continue;

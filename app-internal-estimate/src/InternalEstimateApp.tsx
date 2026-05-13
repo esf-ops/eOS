@@ -1,15 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { apiPostJson, apiPostJsonPublic, ApiError } from "../lib/api";
-import { config, EOS_LOGO_URL } from "../lib/config";
-import type { DemoCalculateResult } from "../lib/demoFallback";
-import { round2, STANDARD_BACKSPLASH_HEIGHT_IN } from "../lib/measurementEngine";
+import { apiGetJson, apiPatchJson, apiPostJson, ApiError } from "@quote-lib/api";
+import { config, EOS_LOGO_URL } from "@quote-lib/config";
+import type { DemoCalculateResult } from "@quote-lib/demoFallback";
+import { round2, STANDARD_BACKSPLASH_HEIGHT_IN } from "@quote-lib/measurementEngine";
 import {
   CONFIDENCE_COPY,
   computeGuidedSimpleAreas,
   defaultGuidedSimpleForm,
   type GuidedLayoutPreset,
   type GuidedSimpleForm
-} from "../lib/guidedHomeowner";
+} from "@quote-lib/guidedHomeowner";
 import {
   aggregateComparisonScope,
   buildMaterialGroupComparison,
@@ -21,11 +21,12 @@ import {
   serializeRoomsForApi,
   sumGlobalAddOns,
   syntheticRoomForWorkflow
-} from "../lib/prototypeQuoteMath";
-import type { MaterialGroupComparisonRow } from "../lib/prototypeQuoteMath";
-import type { GuidedPiece, MathCheckSnapshot, QuoteWorkflowMethod, RoomDraft } from "../lib/quoteTypes";
-import { getSupabase } from "../lib/supabase";
-import RoomScopeBuilder from "./RoomScopeBuilder";
+} from "@quote-lib/prototypeQuoteMath";
+import type { MaterialGroupComparisonRow } from "@quote-lib/prototypeQuoteMath";
+import type { GuidedPiece, MathCheckSnapshot, QuoteWorkflowMethod, RoomDraft } from "@quote-lib/quoteTypes";
+import { getSupabase } from "@quote-lib/supabase";
+import RoomScopeBuilder from "@quote-ui/RoomScopeBuilder";
+import InternalGuidedShapePreview from "./InternalGuidedShapePreview";
 
 const MATERIAL_GROUPS = [
   "Group Promo",
@@ -46,7 +47,10 @@ const GUIDED_PRESET_CARDS: Array<{ id: GuidedLayoutPreset; title: string }> = [
   { id: "not_sure", title: "I'm not sure" }
 ];
 
-type QuoteMode = "public" | "partner";
+const INTERNAL_SALES_REPS = ["Casey", "Thera", "MJ", "House", "Direct"] as const;
+const INTERNAL_BRANCHES = ["Dyersville", "Lisbon", "Iowa City"] as const;
+
+type CustomPassRow = { id: string; description: string; price: string; qty: string };
 
 type ApiPartnerResult = {
   ok?: boolean;
@@ -55,14 +59,6 @@ type ApiPartnerResult = {
     lineItems?: Array<Record<string, unknown>>;
     pricingStructure?: Record<string, unknown>;
   };
-  warnings?: string[];
-};
-
-type ApiPublicResult = {
-  ok?: boolean;
-  display?: string;
-  totals?: { retail?: number; estimated_sqft?: number };
-  snapshot?: Record<string, unknown>;
   warnings?: string[];
 };
 
@@ -100,7 +96,7 @@ function localRunToDemo(r: ReturnType<typeof runLocalPrototypeQuote>): DemoCalcu
   };
 }
 
-export default function PartnerInternalQuoteApp() {
+export default function InternalEstimateApp() {
   const supabase = getSupabase();
   const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [authEmail, setAuthEmail] = useState("");
@@ -108,8 +104,7 @@ export default function PartnerInternalQuoteApp() {
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  const [quoteMode, setQuoteMode] = useState<QuoteMode>("public");
-  const [quoteWorkflow, setQuoteWorkflow] = useState<QuoteWorkflowMethod>("guided_shape");
+  const [quoteWorkflow, setQuoteWorkflow] = useState<QuoteWorkflowMethod>("manual_sqft");
   const [materialGroup, setMaterialGroup] = useState("Group Promo");
   const [roomDrafts, setRoomDrafts] = useState<RoomDraft[]>(() => [createDefaultRoom("Group Promo")]);
 
@@ -131,6 +126,15 @@ export default function PartnerInternalQuoteApp() {
   const [projectType, setProjectType] = useState("Kitchen");
   const [branch, setBranch] = useState("Dyersville");
   const [salesRep, setSalesRep] = useState("");
+  const [projectName, setProjectName] = useState("");
+  const [city, setCity] = useState("");
+  const [state, setState] = useState("");
+  const [enteredBy, setEnteredBy] = useState("");
+  const [internalPricingMode, setInternalPricingMode] = useState<"direct" | "wholesale">("wholesale");
+  const [customItems, setCustomItems] = useState<CustomPassRow[]>([]);
+  const [quoteLibrary, setQuoteLibrary] = useState<Array<Record<string, unknown>>>([]);
+  const [libraryBusy, setLibraryBusy] = useState(false);
+  const [libraryError, setLibraryError] = useState<string | null>(null);
   const [sink, setSink] = useState("1");
   const [bar, setBar] = useState("0");
   const [cook, setCook] = useState("1");
@@ -146,7 +150,6 @@ export default function PartnerInternalQuoteApp() {
   const [vanityLocalNote, setVanityLocalNote] = useState<string | null>(null);
   const [usedFallback, setUsedFallback] = useState(false);
   const [demoResult, setDemoResult] = useState<DemoCalculateResult | null>(null);
-  const [apiPublic, setApiPublic] = useState<ApiPublicResult | null>(null);
   const [apiPartner, setApiPartner] = useState<ApiPartnerResult | null>(null);
   const [localMathCheck, setLocalMathCheck] = useState<MathCheckSnapshot | null>(null);
   const [localMatrix, setLocalMatrix] = useState<ReturnType<typeof runLocalPrototypeQuote>["allGroupMatrix"] | null>(null);
@@ -158,33 +161,22 @@ export default function PartnerInternalQuoteApp() {
   const [submitPreview, setSubmitPreview] = useState<string | null>(null);
 
   const liveApi = Boolean(sessionToken);
-  const lastCalcLive = !usedFallback && (apiPublic != null || apiPartner != null);
+  const lastCalcLive = !usedFallback && apiPartner != null;
 
   useEffect(() => {
-    if (quoteMode === "public") {
-      setQuoteWorkflow("guided_shape");
-    } else {
-      setQuoteWorkflow("room_by_room");
-      setRoomDrafts((prev) => (prev.length ? prev : [createDefaultRoom("Group Promo")]));
+    setQuoteWorkflow("manual_sqft");
+    setRoomDrafts((prev) => (prev.length ? prev : [createDefaultRoom("Group Promo")]));
+  }, []);
+
+  useEffect(() => {
+    setGuidedAdvancedOpen(true);
+  }, []);
+
+  useEffect(() => {
+    if (quoteWorkflow === "rapid_linear") {
+      setQuoteWorkflow("manual_sqft");
     }
-  }, [quoteMode]);
-
-  useEffect(() => {
-    setGuidedAdvancedOpen(quoteMode === "partner");
-  }, [quoteMode]);
-
-  useEffect(() => {
-    setDemoResult(null);
-    setApiPublic(null);
-    setApiPartner(null);
-    setUsedFallback(false);
-    setCalcError(null);
-    setLocalMathCheck(null);
-    setLocalMatrix(null);
-    setComparisonRows(null);
-    setComparisonMixedNote(null);
-    setVanityLocalNote(null);
-  }, [quoteMode]);
+  }, [quoteWorkflow]);
 
   const signIn = useCallback(async () => {
     setAuthError(null);
@@ -304,9 +296,19 @@ export default function PartnerInternalQuoteApp() {
       backsplashSqft = round2(totals.splash + totals.fhb);
     }
     const engine = apiRooms.length >= 1 ? "rooms" : "legacy";
+    const customPassthroughItems = customItems
+      .map((row) => ({
+        description: row.description.trim(),
+        price: num(row.price),
+        qty: num(row.qty) || 1
+      }))
+      .filter((row) => row.description.length > 0 && row.price > 0);
     return {
-      quoteSource: quoteMode === "public" ? "public_retail" : "partner_portal",
+      quoteSource: "internal_quote",
       materialGroup,
+      internalMaterialBasis: internalPricingMode,
+      customPassthroughItems,
+      quote_workflow: quoteWorkflow,
       areas: { countertopSqft, backsplashSqft },
       addOns,
       engine,
@@ -317,14 +319,17 @@ export default function PartnerInternalQuoteApp() {
       customer_email: email.trim() || undefined,
       customer_phone: phone.trim() || undefined,
       project_type: projectType.trim() || undefined,
+      project_name: projectName.trim() || undefined,
+      city: city.trim() || undefined,
+      state: state.trim() || undefined,
       branch: branch.trim() || undefined,
-      sales_rep: salesRep.trim() || undefined
+      sales_rep: salesRep.trim() || undefined,
+      entered_by: enteredBy.trim() || undefined
     };
   }, [
     buildRoomDraftsForCalculate,
     quoteWorkflow,
     buildGlobalAddOns,
-    quoteMode,
     materialGroup,
     partnerRetailPct,
     partnerRetailMethod,
@@ -333,14 +338,20 @@ export default function PartnerInternalQuoteApp() {
     phone,
     projectType,
     branch,
-    salesRep
+    salesRep,
+    customItems,
+    internalPricingMode,
+    projectName,
+    city,
+    state,
+    enteredBy
   ]);
 
   const runLocalFromDrafts = useCallback(() => {
     const drafts = buildRoomDraftsForCalculate();
     const wf = workflowLabel(quoteWorkflow);
     const lr = runLocalPrototypeQuote({
-      quoteMode,
+      quoteMode: "partner",
       partnerRetailPercent: num(partnerRetailPct),
       partnerRetailMethod,
       materialGroupTop: materialGroup,
@@ -351,7 +362,6 @@ export default function PartnerInternalQuoteApp() {
       projectType
     });
     setUsedFallback(true);
-    setApiPublic(null);
     setApiPartner(null);
     setDemoResult(localRunToDemo(lr));
     setLocalMathCheck(lr.mathCheck);
@@ -360,7 +370,6 @@ export default function PartnerInternalQuoteApp() {
   }, [
     buildRoomDraftsForCalculate,
     quoteWorkflow,
-    quoteMode,
     partnerRetailPct,
     partnerRetailMethod,
     materialGroup,
@@ -373,7 +382,6 @@ export default function PartnerInternalQuoteApp() {
     setCalcBusy(true);
     setCalcError(null);
     setDemoResult(null);
-    setApiPublic(null);
     setApiPartner(null);
     setUsedFallback(false);
     setLocalMathCheck(null);
@@ -398,34 +406,6 @@ export default function PartnerInternalQuoteApp() {
       return;
     }
 
-    if (quoteMode === "public") {
-      try {
-        const raw = (await apiPostJsonPublic("/api/public-quote/calculate", buildCalcPayload())) as Record<string, unknown>;
-        if (raw && raw.ok === true) {
-          const totals = raw.totals as { retail_planning?: number; estimated_sqft?: number } | undefined;
-          setApiPublic({
-            ok: true,
-            display: "public_retail_safe",
-            totals: {
-              retail: Number(totals?.retail_planning ?? 0),
-              estimated_sqft: Number(totals?.estimated_sqft ?? 0)
-            },
-            snapshot: { estimates_by_group: raw.estimates_by_group },
-            warnings: (raw.warnings as string[]) || []
-          });
-          setUsedFallback(false);
-          commitComparisonFromDrafts(drafts);
-          setCalcBusy(false);
-          return;
-        }
-      } catch {
-        /* fall back to browser demo */
-      }
-      runLocalFromDrafts();
-      setCalcBusy(false);
-      return;
-    }
-
     if (!sessionToken) {
       runLocalFromDrafts();
       setCalcBusy(false);
@@ -435,14 +415,7 @@ export default function PartnerInternalQuoteApp() {
     const payload = buildCalcPayload();
 
     try {
-      const raw = (await apiPostJson("/api/quote/calculate", sessionToken, payload)) as Record<string, unknown>;
-      if (raw.display === "public_retail_safe") {
-        setApiPublic(raw as ApiPublicResult);
-        setUsedFallback(false);
-        commitComparisonFromDrafts(drafts);
-        setCalcBusy(false);
-        return;
-      }
+      const raw = (await apiPostJson("/api/internal-quotes/calculate", sessionToken, payload)) as Record<string, unknown>;
       if (raw.ok === true) {
         setApiPartner(raw as ApiPartnerResult);
         setUsedFallback(false);
@@ -472,7 +445,7 @@ export default function PartnerInternalQuoteApp() {
       runLocalFromDrafts();
     }
     setCalcBusy(false);
-  }, [sessionToken, buildCalcPayload, buildRoomDraftsForCalculate, runLocalFromDrafts, quoteWorkflow, commitComparisonFromDrafts, quoteMode]);
+  }, [sessionToken, buildCalcPayload, buildRoomDraftsForCalculate, runLocalFromDrafts, quoteWorkflow, commitComparisonFromDrafts]);
 
   const buildSubmitPayload = useCallback(() => {
     return {
@@ -481,10 +454,36 @@ export default function PartnerInternalQuoteApp() {
       customer_email: email.trim() || null,
       customer_phone: phone.trim() || null,
       project_type: projectType.trim() || null,
+      project_name: projectName.trim() || null,
+      city: city.trim() || null,
+      state: state.trim() || null,
       branch: branch.trim() || null,
-      sales_rep: salesRep.trim() || null
+      sales_rep: salesRep.trim() || null,
+      entered_by: enteredBy.trim() || null,
+      quote_status: "testing_review"
     };
-  }, [buildCalcPayload, customerName, email, phone, projectType, branch, salesRep]);
+  }, [buildCalcPayload, customerName, email, phone, projectType, projectName, city, state, branch, salesRep, enteredBy]);
+
+  const refreshLibrary = useCallback(async () => {
+    if (!sessionToken) {
+      setQuoteLibrary([]);
+      return;
+    }
+    setLibraryBusy(true);
+    setLibraryError(null);
+    try {
+      const raw = (await apiGetJson("/api/internal-quotes", sessionToken)) as { quotes?: unknown[] };
+      setQuoteLibrary(Array.isArray(raw.quotes) ? (raw.quotes as Array<Record<string, unknown>>) : []);
+    } catch (e: unknown) {
+      setLibraryError(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setLibraryBusy(false);
+    }
+  }, [sessionToken]);
+
+  useEffect(() => {
+    void refreshLibrary();
+  }, [refreshLibrary]);
 
   const handleSubmit = useCallback(async () => {
     setSubmitBusy(true);
@@ -493,46 +492,21 @@ export default function PartnerInternalQuoteApp() {
     const payload = buildSubmitPayload();
 
     try {
-      if (quoteMode === "public") {
-        try {
-          const raw = (await apiPostJsonPublic("/api/public-quote/submit-measurements", payload)) as Record<string, unknown>;
-          setSubmitMsg(
-            String(
-              raw.message ||
-                (raw.quote_number ? `Lead saved. Reference: ${String(raw.quote_number)}` : "Measurements received.")
-            )
-          );
-          setSubmitPreview(JSON.stringify(raw, null, 2));
-        } catch (e: unknown) {
-          if (e instanceof ApiError) {
-            const body = e.body as Record<string, unknown> | string | null;
-            let parsed: Record<string, unknown> | null = null;
-            if (body && typeof body === "object") parsed = body as Record<string, unknown>;
-            const installed = parsed?.installed === false;
-            if (e.status === 503 || installed) {
-              setSubmitMsg("Backend quote tables are not installed in this environment yet. Preview of the payload below.");
-              setSubmitPreview(JSON.stringify({ request: payload, error: body }, null, 2));
-            } else {
-              setSubmitMsg(e.message);
-              setSubmitPreview(JSON.stringify({ request: payload, error: body ?? e.message }, null, 2));
-            }
-          } else {
-            setSubmitMsg(String(e));
-          }
-        }
-        return;
-      }
-
       if (!sessionToken) {
-        setSubmitMsg("Sign in to save a partner/internal quote to eliteOS. Below is a preview of the data we would send — nothing is stored yet.");
+        setSubmitMsg("Sign in to save an internal quote to eliteOS. Below is a preview of the data we would send — nothing is stored yet.");
         setSubmitPreview(JSON.stringify({ ...payload, _demo: true }, null, 2));
         return;
       }
 
-      const raw = (await apiPostJson("/api/quote/submit", sessionToken, payload)) as Record<string, unknown>;
+      const raw = (await apiPostJson("/api/internal-quotes/save", sessionToken, payload)) as Record<string, unknown>;
       if (raw.ok === true) {
-        setSubmitMsg(`Saved. Quote # ${String(raw.quoteNumber ?? "")}`);
+        const qn = String(raw.quote_number ?? raw.quoteNumber ?? "");
+        setSubmitMsg(qn ? `Saved to quote library. Reference: ${qn}` : "Saved to quote library.");
         setSubmitPreview(JSON.stringify(raw, null, 2));
+        if (Array.isArray(raw.warnings) && raw.warnings.length) {
+          setSubmitMsg((prev) => `${prev} ${(raw.warnings as string[]).join(" ")}`);
+        }
+        void refreshLibrary();
       } else {
         setSubmitMsg(String(raw.error || "Something went wrong"));
         setSubmitPreview(JSON.stringify(raw, null, 2));
@@ -556,23 +530,10 @@ export default function PartnerInternalQuoteApp() {
     } finally {
       setSubmitBusy(false);
     }
-  }, [sessionToken, buildSubmitPayload, quoteMode]);
+  }, [sessionToken, buildSubmitPayload, refreshLibrary]);
 
   const backendHint = config.backendBaseUrl;
-
-  const hasPublicSummary = quoteMode === "public" && (apiPublic != null || demoResult != null);
-  const hasPartnerSummary = quoteMode === "partner" && (apiPartner?.totals != null || demoResult != null);
-
-  const pubRetail = apiPublic?.totals?.retail ?? demoResult?.retail;
-  const pubSqft = apiPublic?.totals?.estimated_sqft ?? demoResult?.estimated_sqft;
-  const pubMaterial =
-    quoteMode === "public"
-      ? apiPublic
-        ? "All material tiers (live)"
-        : demoResult
-          ? "All material tiers (demo)"
-          : "All material tiers"
-      : demoResult?.materialGroup ?? materialGroup;
+  const hasInternalSummary = apiPartner?.totals != null || demoResult != null;
 
   const partWholesale = apiPartner?.totals?.wholesale ?? demoResult?.wholesale;
   const partRetail = apiPartner?.totals?.retail ?? demoResult?.retail;
@@ -580,7 +541,7 @@ export default function PartnerInternalQuoteApp() {
   const partProfit =
     partRetail != null && partWholesale != null ? round2(Number(partRetail) - Number(partWholesale)) : null;
 
-  const hasCalcResult = hasPublicSummary || hasPartnerSummary;
+  const hasCalcResult = hasInternalSummary;
 
   const scopePreview = useMemo(() => {
     const drafts = buildRoomDraftsForCalculate();
@@ -646,20 +607,18 @@ export default function PartnerInternalQuoteApp() {
     projectType
   ]);
 
-  const methodCards = useMemo(
-    () =>
-      (
-        [
-          { id: "guided_shape" as const, title: "Help me lay it out", sub: "Guided shapes & presets — great when you have rough dimensions." },
-          { id: "manual_sqft" as const, title: "I know my square footage", sub: "Fastest if you already have countertop and backsplash sf." },
-          { id: "rapid_linear" as const, title: "I know my cabinet runs", sub: "Wall cabinets in linear feet + optional island." },
-          { id: "room_by_room" as const, title: "Room-by-room / advanced", sub: "Multiple rooms, materials, and add-ons like the ESF prototype." },
-          { id: "upload_plans" as const, title: "Upload plans / AI takeoff", sub: "Coming soon — upload drawings and let eliteOS prepare measurements for review." },
-          { id: "visualize" as const, title: "Visualize", sub: "Coming soon — build a simple kitchen layout tied directly to your quote." }
-        ] as const
-      ).map((c) => ({ ...c, disabled: c.id === "upload_plans" || c.id === "visualize" })),
-    []
-  );
+  const methodCards = useMemo(() => {
+    const all = [
+      { id: "guided_shape" as const, title: "Help me lay it out", sub: "Guided shapes & presets — great when you have rough dimensions." },
+      { id: "manual_sqft" as const, title: "I know my square footage", sub: "Fastest if you already have countertop and backsplash sf." },
+      { id: "rapid_linear" as const, title: "I know my cabinet runs", sub: "Wall cabinets in linear feet + optional island." },
+      { id: "room_by_room" as const, title: "Room-by-room / advanced", sub: "Multiple rooms, materials, and add-ons like the ESF prototype." },
+      { id: "upload_plans" as const, title: "Upload plans / AI takeoff", sub: "Coming soon — upload drawings and let eliteOS prepare measurements for review." },
+      { id: "visualize" as const, title: "Visualize", sub: "Coming soon — build a simple kitchen layout tied directly to your quote." }
+    ] as const;
+    const filtered = all.filter((c) => c.id !== "rapid_linear");
+    return filtered.map((c) => ({ ...c, disabled: c.id === "upload_plans" || c.id === "visualize" }));
+  }, []);
 
   return (
     <div className="page">
@@ -667,13 +626,15 @@ export default function PartnerInternalQuoteApp() {
         <div className="hero-brand">
           <img className="logo" src={EOS_LOGO_URL} alt="Elite Stone Fabrication" />
           <div className="hero-titles">
-            <h1 className="title">Quote</h1>
-            <p className="subtitle">Measurement-first countertop quoting</p>
-            <p className="hero-tagline">A preview of Elite's public, partner, and internal quoting platform.</p>
+            <h1 className="title">Internal estimate</h1>
+            <p className="subtitle">Staff-only measurement and pricing</p>
+            <p className="hero-tagline">
+              eliteOS Internal Estimate Head — Direct / Wholesale economics, not for homeowner-facing use.
+            </p>
           </div>
         </div>
         <div className="hero-badges">
-          <span className="badge badge-demo">Meeting demo</span>
+          <span className="badge badge-demo">Staff tool</span>
           <span className="badge badge-preview">Preview · Not production</span>
         </div>
       </header>
@@ -703,19 +664,17 @@ export default function PartnerInternalQuoteApp() {
       <div className="layout">
         <div className="main-col">
           <section className="card prototype-scope-banner">
-            <h2>Combined quote prototype</h2>
+            <h2>Internal Estimate Head</h2>
             <p className="muted" style={{ marginTop: 0 }}>
-              This head is a <strong>measurement and pricing lab</strong> for eliteOS. Production will split into{" "}
-              <strong>public consumer</strong>, <strong>internal</strong>, and <strong>partner</strong> apps — one shared
-              quote brain, different UX and permissions. See{" "}
-              <code>docs/quote-platform/three-head-quote-architecture.md</code> and{" "}
+              This app is separate from the <strong>public quote</strong> at <code>quote.eliteosfab.com</code>. It uses{" "}
+              <code>/api/internal-quotes/*</code> with Supabase auth and quote-head access on the backend. See{" "}
               <code>docs/quote-platform/quote-heads-split-plan.md</code>.
             </p>
           </section>
           {supabase ? (
             <section className="card">
               <h2>Account</h2>
-              <p className="muted">Optional — sign in to run calculations against the live API and save quotes.</p>
+              <p className="muted">Sign in to run live internal calculations and save quotes to the internal library.</p>
               {sessionToken ? (
                 <div className="row">
                   <span className="pill pill-live">Signed in</span>
@@ -755,43 +714,91 @@ export default function PartnerInternalQuoteApp() {
             </section>
           )}
 
+          {sessionToken ? (
+            <section className="card">
+              <h2>Internal quote library</h2>
+              <p className="muted small">
+                eliteOS Brain — <code>quote_source: internal_quote</code>. Reps/branches are short-term hardcoded; later
+                admin-configurable.
+              </p>
+              {libraryError ? <p className="error">{libraryError}</p> : null}
+              {libraryBusy ? <p className="muted">Loading…</p> : null}
+              <div style={{ overflowX: "auto", marginTop: 10 }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: "left", padding: "6px 8px" }}>Quote #</th>
+                      <th style={{ textAlign: "left", padding: "6px 8px" }}>Customer</th>
+                      <th style={{ textAlign: "left", padding: "6px 8px" }}>Project</th>
+                      <th style={{ textAlign: "left", padding: "6px 8px" }}>Branch</th>
+                      <th style={{ textAlign: "left", padding: "6px 8px" }}>Rep</th>
+                      <th style={{ textAlign: "left", padding: "6px 8px" }}>Status</th>
+                      <th style={{ textAlign: "right", padding: "6px 8px" }}>Total</th>
+                      <th style={{ padding: "6px 8px" }} />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {quoteLibrary.map((q) => (
+                      <tr key={String(q.id)}>
+                        <td style={{ padding: "6px 8px" }}>{String(q.quote_number ?? "")}</td>
+                        <td style={{ padding: "6px 8px" }}>{String(q.customer_name ?? "")}</td>
+                        <td style={{ padding: "6px 8px" }}>{String(q.project_name ?? "")}</td>
+                        <td style={{ padding: "6px 8px" }}>{String(q.branch ?? "")}</td>
+                        <td style={{ padding: "6px 8px" }}>{String(q.sales_rep ?? "")}</td>
+                        <td style={{ padding: "6px 8px" }}>{String(q.quote_status ?? "")}</td>
+                        <td style={{ padding: "6px 8px", textAlign: "right" }}>
+                          {q.grand_total != null ? `$${Number(q.grand_total).toFixed(2)}` : ""}
+                        </td>
+                        <td style={{ padding: "6px 8px" }}>
+                          <button
+                            type="button"
+                            className="btn secondary"
+                            onClick={() => {
+                              void (async () => {
+                                try {
+                                  const raw = (await apiGetJson(`/api/internal-quotes/${String(q.id)}`, sessionToken)) as Record<
+                                    string,
+                                    unknown
+                                  >;
+                                  setSubmitMsg(`Opened quote ${String(q.quote_number ?? "")} — snapshot in preview.`);
+                                  setSubmitPreview(JSON.stringify(raw, null, 2));
+                                } catch (e: unknown) {
+                                  setSubmitMsg(e instanceof ApiError ? e.message : String(e));
+                                }
+                              })();
+                            }}
+                          >
+                            Open
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {!libraryBusy && quoteLibrary.length === 0 ? (
+                <p className="muted small" style={{ marginTop: 8 }}>
+                  No saved internal quotes yet.
+                </p>
+              ) : null}
+              <button type="button" className="btn secondary" style={{ marginTop: 10 }} onClick={() => void refreshLibrary()}>
+                Refresh list
+              </button>
+            </section>
+          ) : null}
+
           <section className="card">
-            <h2>How would you like to quote?</h2>
-            <div className="mode-row">
-              <button
-                type="button"
-                className={`btn big ${quoteMode === "public" ? "mode-on" : "mode-off"}`}
-                onClick={() => setQuoteMode("public")}
-              >
-                Public retail
-              </button>
-              <button
-                type="button"
-                className={`btn big ${quoteMode === "partner" ? "mode-on" : "mode-off"}`}
-                onClick={() => setQuoteMode("partner")}
-              >
-                Partner / internal demo
-              </button>
-            </div>
-            {quoteMode === "public" ? (
-              <p className="callout">
-                Public retail pricing includes at least <strong>25% protection</strong> over dealer/partner pricing. This
-                view shows homeowner-safe totals only.
-              </p>
-            ) : (
-              <p className="callout internal">
-                <strong>Partner / internal demo</strong> — wholesale-style detail may appear for discussion. Not for
-                external homeowner-facing use.
-              </p>
-            )}
+            <p className="callout internal">
+              <strong>Internal only</strong> — Direct / Wholesale material pricing for ESF staff. Monday sync uses{" "}
+              <code>MONDAY_INTERNAL_*</code> configuration only; do not use public board settings here.
+            </p>
           </section>
 
           <section className="card">
             <h2>How would you like to measure your project?</h2>
             <p className="muted">
-              {quoteMode === "public"
-                ? "Default is the guided layout path — plain language, presets, and examples. Switch anytime."
-                : "Default is room-by-room scope builder (ESF prototype parity)."}
+              Default is manual square footage for preliminary estimates. Guided shape is available as a secondary path; rapid
+              linear foot is not offered in this head.
             </p>
             <div className="quote-method-grid">
               {methodCards.map((c) => (
@@ -818,6 +825,22 @@ export default function PartnerInternalQuoteApp() {
                 <input value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Jane Homeowner" />
               </label>
               <label>
+                Project name
+                <input value={projectName} onChange={(e) => setProjectName(e.target.value)} placeholder="Smith kitchen" />
+              </label>
+              <label>
+                Project type
+                <input value={projectType} onChange={(e) => setProjectType(e.target.value)} />
+              </label>
+              <label>
+                City
+                <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="Dyersville" />
+              </label>
+              <label>
+                State
+                <input value={state} onChange={(e) => setState(e.target.value)} placeholder="IA" />
+              </label>
+              <label>
                 Phone
                 <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="563-555-0100" />
               </label>
@@ -826,16 +849,29 @@ export default function PartnerInternalQuoteApp() {
                 <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="jane@example.com" />
               </label>
               <label>
-                Project type
-                <input value={projectType} onChange={(e) => setProjectType(e.target.value)} />
+                Entered by
+                <input value={enteredBy} onChange={(e) => setEnteredBy(e.target.value)} placeholder="Staff name" />
               </label>
               <label>
                 Branch
-                <input value={branch} onChange={(e) => setBranch(e.target.value)} />
+                <select value={branch} onChange={(e) => setBranch(e.target.value)}>
+                  {INTERNAL_BRANCHES.map((b) => (
+                    <option key={b} value={b}>
+                      {b}
+                    </option>
+                  ))}
+                </select>
               </label>
               <label>
                 Sales rep
-                <input value={salesRep} onChange={(e) => setSalesRep(e.target.value)} />
+                <select value={salesRep} onChange={(e) => setSalesRep(e.target.value)}>
+                  <option value="">—</option>
+                  {INTERNAL_SALES_REPS.map((r) => (
+                    <option key={r} value={r}>
+                      {r}
+                    </option>
+                  ))}
+                </select>
               </label>
             </div>
           </section>
@@ -843,23 +879,26 @@ export default function PartnerInternalQuoteApp() {
           <section className="card">
             <h2>Scope and materials</h2>
             <div className="grid3" style={{ marginBottom: 14 }}>
-              {quoteMode === "partner" ? (
-                <label>
-                  Primary material group (single-flow and defaults)
-                  <select value={materialGroup} onChange={(e) => setMaterialGroup(e.target.value)}>
-                    {MATERIAL_GROUPS.map((g) => (
-                      <option key={g} value={g}>
-                        {g}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : (
-                <div className="callout" style={{ gridColumn: "1 / -1", margin: 0 }}>
-                  <strong>Public retail:</strong> estimates run for <strong>every material tier</strong> (Promo through F) after
-                  you calculate — you do not need to pick a price group first.
-                </div>
-              )}
+              <label>
+                Internal material pricing
+                <select
+                  value={internalPricingMode}
+                  onChange={(e) => setInternalPricingMode(e.target.value === "direct" ? "direct" : "wholesale")}
+                >
+                  <option value="wholesale">Wholesale (prototype tiers)</option>
+                  <option value="direct">Direct (ESF Direct $/sf)</option>
+                </select>
+              </label>
+              <label>
+                Primary material group (single-flow and defaults)
+                <select value={materialGroup} onChange={(e) => setMaterialGroup(e.target.value)}>
+                  {MATERIAL_GROUPS.map((g) => (
+                    <option key={g} value={g}>
+                      {g}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
 
             {quoteWorkflow === "room_by_room" ? (
@@ -1133,6 +1172,15 @@ export default function PartnerInternalQuoteApp() {
                   </div>
                 ) : null}
 
+                {guidedPreview && quoteWorkflow === "guided_shape" && guidedUseAdvanced ? (
+                  <InternalGuidedShapePreview
+                    pieces={guidedProjectPieces}
+                    pieceCount={guidedProjectPieces.filter((x) => x.lengthIn > 0 && x.depthIn > 0).length}
+                    counterSqft={guidedPreview.counter}
+                    splashSqft={guidedPreview.splash}
+                  />
+                ) : null}
+
                 <label className="check guided-advanced-toggle">
                   <input
                     type="checkbox"
@@ -1217,6 +1265,22 @@ export default function PartnerInternalQuoteApp() {
                           }
                         />
                       </label>
+                      {p.pieceType === "counter" ? (
+                        <label className="check" style={{ alignSelf: "end" }}>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(p.addSplash)}
+                            onChange={(e) =>
+                              setGuidedProjectPieces((prev) =>
+                                prev.map((x) => (x.id === p.id ? { ...x, addSplash: e.target.checked } : x))
+                              )
+                            }
+                          />
+                          Add 4″ splash for this piece
+                        </label>
+                      ) : (
+                        <span />
+                      )}
                       <div className="piece-row-actions">
                         <button
                           type="button"
@@ -1241,7 +1305,8 @@ export default function PartnerInternalQuoteApp() {
                             name: "Counter section",
                             lengthIn: 0,
                             depthIn: 25.5,
-                            shape: "rect"
+                            shape: "rect",
+                            addSplash: false
                           }
                         ])
                       }
@@ -1331,28 +1396,72 @@ export default function PartnerInternalQuoteApp() {
                   <input type="checkbox" checked={tearYes} onChange={(e) => setTearYes(e.target.checked)} />
                   Tear-out needed
                 </label>
+                <div style={{ marginTop: 16 }}>
+                  <h3 className="h3">Custom add-ons</h3>
+                  <p className="muted small">
+                    Non-standard sinks, fixtures, or misc. — price is the final internal line amount for the selected
+                    Direct/Wholesale mode (no public 25% homeowner markup).
+                  </p>
+                  {customItems.map((row) => (
+                    <div key={row.id} className="grid3" style={{ marginBottom: 8 }}>
+                      <label>
+                        Description
+                        <input
+                          value={row.description}
+                          onChange={(e) =>
+                            setCustomItems((prev) => prev.map((x) => (x.id === row.id ? { ...x, description: e.target.value } : x)))
+                          }
+                          placeholder="Custom Blanco sink"
+                        />
+                      </label>
+                      <label>
+                        Price ($)
+                        <input value={row.price} onChange={(e) => setCustomItems((prev) => prev.map((x) => (x.id === row.id ? { ...x, price: e.target.value } : x)))} inputMode="decimal" />
+                      </label>
+                      <label>
+                        Qty
+                        <input value={row.qty} onChange={(e) => setCustomItems((prev) => prev.map((x) => (x.id === row.id ? { ...x, qty: e.target.value } : x)))} inputMode="numeric" />
+                      </label>
+                      <div style={{ gridColumn: "1 / -1" }}>
+                        <button type="button" className="btn secondary" onClick={() => setCustomItems((prev) => prev.filter((x) => x.id !== row.id))}>
+                          Remove custom item
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    onClick={() =>
+                      setCustomItems((prev) => [
+                        ...prev,
+                        { id: `ci-${Math.random().toString(36).slice(2, 9)}`, description: "", price: "", qty: "1" }
+                      ])
+                    }
+                  >
+                    + Add custom item
+                  </button>
+                </div>
               </>
             ) : (
               <p className="muted small">Add-ons are per room in the room builder above.</p>
             )}
 
-            {quoteMode === "partner" ? (
-              <div className="grid3" style={{ marginTop: 12 }}>
-                <label>
-                  Partner retail method
-                  <select value={partnerRetailMethod} onChange={(e) => setPartnerRetailMethod(e.target.value)}>
-                    <option>Markup Percent</option>
-                    <option>Margin Percent</option>
-                    <option>Flat Dollar Add</option>
-                    <option>Pass Through</option>
-                  </select>
-                </label>
-                <label>
-                  Display markup % (partner retail view)
-                  <input value={partnerRetailPct} onChange={(e) => setPartnerRetailPct(e.target.value)} style={{ maxWidth: 140 }} />
-                </label>
-              </div>
-            ) : null}
+            <div className="grid3" style={{ marginTop: 12 }}>
+              <label>
+                Partner retail method
+                <select value={partnerRetailMethod} onChange={(e) => setPartnerRetailMethod(e.target.value)}>
+                  <option>Markup Percent</option>
+                  <option>Margin Percent</option>
+                  <option>Flat Dollar Add</option>
+                  <option>Pass Through</option>
+                </select>
+              </label>
+              <label>
+                Display markup % (partner retail view)
+                <input value={partnerRetailPct} onChange={(e) => setPartnerRetailPct(e.target.value)} style={{ maxWidth: 140 }} />
+              </label>
+            </div>
           </section>
 
           <div className="actions">
@@ -1360,18 +1469,13 @@ export default function PartnerInternalQuoteApp() {
               {calcBusy ? "Calculating…" : "Calculate"}
             </button>
             <button type="button" className="btn secondary big" disabled={submitBusy} onClick={() => void handleSubmit()}>
-              {submitBusy ? "Working…" : quoteMode === "public" ? "Submit measurements" : "Submit quote"}
+              {submitBusy ? "Working…" : "Save quote"}
             </button>
           </div>
-          {!sessionToken && quoteMode === "public" ? (
+          {!sessionToken ? (
             <p className="muted small" style={{ marginTop: 0 }}>
-              <strong>Submit measurements</strong> sends a public-safe lead to the backend when it is running (no sign-in
-              required). Use <strong>Calculate</strong> to refresh estimates first.
-            </p>
-          ) : !sessionToken ? (
-            <p className="muted small" style={{ marginTop: 0 }}>
-              <strong>Submit quote</strong> is a preview until you sign in and production storage is configured — use{" "}
-              <strong>Calculate</strong> for the main demo.
+              <strong>Save quote</strong> requires sign-in and backend quote storage. Use <strong>Calculate</strong> for local
+              demo pricing when offline.
             </p>
           ) : null}
 
@@ -1392,88 +1496,51 @@ export default function PartnerInternalQuoteApp() {
                 Use this to compare how material group selection changes the project estimate.
               </p>
               {comparisonMixedNote ? <div className="fallback-banner">{comparisonMixedNote}</div> : null}
-              {quoteMode === "partner" ? (
-                <div className="internal-banner">
-                  <strong>Internal demo detail — not public-facing.</strong> Rates and wholesale-style economics below are for
-                  staff discussion only.
-                </div>
-              ) : (
-                <p className="callout group-compare-public-note">
-                  Public retail estimates include 25%+ dealer protection. Totals below are homeowner-safe planning numbers — not
-                  wholesale or internal rate detail.
-                </p>
-              )}
+              <div className="internal-banner">
+                <strong>Internal detail — not public-facing.</strong> Rates and wholesale-style economics below are for staff
+                discussion only.
+              </div>
               <div className="table-scroll">
-                {quoteMode === "public" ? (
-                  <table className="group-compare-table">
-                    <thead>
-                      <tr>
-                        <th>Group</th>
-                        <th>Countertops</th>
-                        <th>Backsplash</th>
-                        <th>Add-ons</th>
-                        <th>Estimated total</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {comparisonRows.map((row) => {
-                        const pubCt = round2(row.countertopWholesale * 1.25);
-                        const pubBs = round2(row.backsplashWholesale * 1.25);
-                        const pubAdd = round2(row.addonCost * 1.25);
-                        return (
-                          <tr key={row.group} className={row.group === materialGroup ? "row-active" : undefined}>
-                            <td>{row.group}</td>
-                            <td>${pubCt.toFixed(2)}</td>
-                            <td>${pubBs.toFixed(2)}</td>
-                            <td>${pubAdd.toFixed(2)}</td>
-                            <td>${row.publicSafeTotal.toFixed(2)}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                ) : (
-                  <table className="group-compare-table group-compare-table-partner">
-                    <thead>
-                      <tr>
-                        <th>Group</th>
-                        <th>Rate ($/sf)</th>
-                        <th>Ct sf</th>
-                        <th>Ct cost</th>
-                        <th>Bs sf</th>
-                        <th>Bs cost</th>
-                        <th>Add-ons</th>
-                        <th>Wholesale total</th>
-                        <th>Retail / protected</th>
-                        <th>Display profit</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {comparisonRows.map((row) => {
-                        const profit = round2(row.partnerRetailTotal - row.wholesaleTotal);
-                        return (
-                          <tr key={row.group} className={row.group === materialGroup ? "row-active" : undefined}>
-                            <td>{row.group}</td>
-                            <td>${row.rate.toFixed(2)}</td>
-                            <td>{row.countertopSqft.toFixed(2)}</td>
-                            <td>${row.countertopWholesale.toFixed(2)}</td>
-                            <td>{row.backsplashSqft.toFixed(2)}</td>
-                            <td>${row.backsplashWholesale.toFixed(2)}</td>
-                            <td>${row.addonCost.toFixed(2)}</td>
-                            <td>${row.wholesaleTotal.toFixed(2)}</td>
-                            <td>${row.partnerRetailTotal.toFixed(2)}</td>
-                            <td>${profit.toFixed(2)}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                )}
+                <table className="group-compare-table group-compare-table-partner">
+                  <thead>
+                    <tr>
+                      <th>Group</th>
+                      <th>Rate ($/sf)</th>
+                      <th>Ct sf</th>
+                      <th>Ct cost</th>
+                      <th>Bs sf</th>
+                      <th>Bs cost</th>
+                      <th>Add-ons</th>
+                      <th>Wholesale total</th>
+                      <th>Retail / protected</th>
+                      <th>Display profit</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {comparisonRows.map((row) => {
+                      const profit = round2(row.partnerRetailTotal - row.wholesaleTotal);
+                      return (
+                        <tr key={row.group} className={row.group === materialGroup ? "row-active" : undefined}>
+                          <td>{row.group}</td>
+                          <td>${row.rate.toFixed(2)}</td>
+                          <td>{row.countertopSqft.toFixed(2)}</td>
+                          <td>${row.countertopWholesale.toFixed(2)}</td>
+                          <td>{row.backsplashSqft.toFixed(2)}</td>
+                          <td>${row.backsplashWholesale.toFixed(2)}</td>
+                          <td>${row.addonCost.toFixed(2)}</td>
+                          <td>${row.wholesaleTotal.toFixed(2)}</td>
+                          <td>${row.partnerRetailTotal.toFixed(2)}</td>
+                          <td>${profit.toFixed(2)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             </section>
           ) : null}
 
-          {quoteMode === "partner" && localMathCheck ? (
+          {localMathCheck ? (
             <section className="card math-check">
               <h2>Math check (internal demo)</h2>
               <p className="muted small">Partner / internal only — mirrors prototype measurement + tier logic for review.</p>
@@ -1575,193 +1642,136 @@ export default function PartnerInternalQuoteApp() {
 
           <section className="card">
             <p className="section-lead">Full breakdown</p>
-            <h2>{quoteMode === "public" ? "Your estimate" : "Internal detail"}</h2>
-            {quoteMode === "partner" ? (
-              <div className="internal-banner">
-                <strong>Internal demo detail — not public-facing.</strong> Wholesale and line economics below are for staff
-                discussion only.
-              </div>
-            ) : null}
-            {quoteMode === "public" ? (
-              <>
-                {apiPublic ? (
-                  <ul className="kv">
-                    <li>
-                      <span>Quote path</span>
-                      <strong>{workflowLabel(quoteWorkflow)}</strong>
-                    </li>
-                    <li>
-                      <span>Estimated retail quote</span>
-                      <strong>${Number(apiPublic.totals?.retail ?? 0).toFixed(2)}</strong>
-                    </li>
-                    <li>
-                      <span>Estimated sq ft</span>
-                      <strong>{Number(apiPublic.totals?.estimated_sqft ?? 0).toFixed(2)}</strong>
-                    </li>
-                    <li>
-                      <span>Material group</span>
-                      <strong>{materialGroup}</strong>
-                    </li>
+            <h2>Internal detail</h2>
+            <div className="internal-banner">
+              <strong>Internal only — not public-facing.</strong> Wholesale and line economics below are for staff discussion
+              only.
+            </div>
+            <>
+              {apiPartner?.totals ? (
+                <ul className="kv">
+                  <li>
+                    <span>Quote path</span>
+                    <strong>{workflowLabel(quoteWorkflow)}</strong>
+                  </li>
+                  <li>
+                    <span>Wholesale estimate</span>
+                    <strong>${Number(apiPartner.totals.wholesale ?? 0).toFixed(2)}</strong>
+                  </li>
+                  <li>
+                    <span>Retail (display)</span>
+                    <strong>${Number(apiPartner.totals.retail ?? 0).toFixed(2)}</strong>
+                  </li>
+                  <li>
+                    <span>Display profit</span>
+                    <strong>${Number(apiPartner.totals.profit ?? 0).toFixed(2)}</strong>
+                  </li>
+                  <li>
+                    <span>Estimated sq ft</span>
+                    <strong>{Number(apiPartner.totals.estimated_sqft ?? 0).toFixed(2)}</strong>
+                  </li>
+                  <li>
+                    <span>Material group</span>
+                    <strong>{materialGroup}</strong>
+                  </li>
+                </ul>
+              ) : demoResult ? (
+                <ul className="kv">
+                  <li>
+                    <span>Quote path</span>
+                    <strong>{workflowLabel(quoteWorkflow)}</strong>
+                  </li>
+                  <li>
+                    <span>Wholesale estimate</span>
+                    <strong>${(demoResult.wholesale ?? 0).toFixed(2)}</strong>
+                  </li>
+                  <li>
+                    <span>Retail (display)</span>
+                    <strong>${demoResult.retail.toFixed(2)}</strong>
+                  </li>
+                  <li>
+                    <span>Display profit</span>
+                    <strong>${(demoResult.profit ?? 0).toFixed(2)}</strong>
+                  </li>
+                  <li>
+                    <span>Estimated sq ft</span>
+                    <strong>{demoResult.estimated_sqft.toFixed(2)}</strong>
+                  </li>
+                  <li>
+                    <span>Material group</span>
+                    <strong>{demoResult.materialGroup}</strong>
+                  </li>
+                </ul>
+              ) : (
+                <p className="muted">Tap <strong>Calculate</strong> to see your estimate.</p>
+              )}
+              {(apiPartner?.warnings?.length ?? 0) + (demoResult?.warnings?.length ?? 0) > 0 ? (
+                <div className="warn-box">
+                  <strong>Heads up</strong>
+                  <ul>
+                    {(apiPartner?.warnings ?? demoResult?.warnings ?? []).map((w, i) => (
+                      <li key={i}>{w}</li>
+                    ))}
                   </ul>
-                ) : demoResult ? (
-                  <ul className="kv">
-                    <li>
-                      <span>Quote path</span>
-                      <strong>{workflowLabel(quoteWorkflow)}</strong>
-                    </li>
-                    <li>
-                      <span>Estimated retail quote</span>
-                      <strong>${demoResult.retail.toFixed(2)}</strong>
-                    </li>
-                    <li>
-                      <span>Estimated sq ft</span>
-                      <strong>{demoResult.estimated_sqft.toFixed(2)}</strong>
-                    </li>
-                    <li>
-                      <span>Material group</span>
-                      <strong>{demoResult.materialGroup}</strong>
-                    </li>
-                    <li>
-                      <span>Add-ons included</span>
-                      <strong>{demoResult.addOnsSummary.join(" · ")}</strong>
-                    </li>
-                  </ul>
-                ) : (
-                  <p className="muted">Tap <strong>Calculate</strong> to see your estimate.</p>
-                )}
-                <p className="callout" style={{ marginTop: 16 }}>
-                  Public retail pricing includes at least <strong>25% protection</strong> over dealer/partner pricing.
-                </p>
-                <p className="muted small" style={{ marginTop: 12 }}>
-                  This is a planning estimate. Final quote may change after material selection, field template, and site review.
-                </p>
-              </>
-            ) : (
-              <>
-                {apiPartner?.totals ? (
-                  <ul className="kv">
-                    <li>
-                      <span>Quote path</span>
-                      <strong>{workflowLabel(quoteWorkflow)}</strong>
-                    </li>
-                    <li>
-                      <span>Wholesale estimate</span>
-                      <strong>${Number(apiPartner.totals.wholesale ?? 0).toFixed(2)}</strong>
-                    </li>
-                    <li>
-                      <span>Retail (display)</span>
-                      <strong>${Number(apiPartner.totals.retail ?? 0).toFixed(2)}</strong>
-                    </li>
-                    <li>
-                      <span>Display profit</span>
-                      <strong>${Number(apiPartner.totals.profit ?? 0).toFixed(2)}</strong>
-                    </li>
-                    <li>
-                      <span>Estimated sq ft</span>
-                      <strong>{Number(apiPartner.totals.estimated_sqft ?? 0).toFixed(2)}</strong>
-                    </li>
-                    <li>
-                      <span>Material group</span>
-                      <strong>{materialGroup}</strong>
-                    </li>
-                  </ul>
-                ) : demoResult ? (
-                  <ul className="kv">
-                    <li>
-                      <span>Wholesale estimate</span>
-                      <strong>${(demoResult.wholesale ?? 0).toFixed(2)}</strong>
-                    </li>
-                    <li>
-                      <span>Retail (display)</span>
-                      <strong>${demoResult.retail.toFixed(2)}</strong>
-                    </li>
-                    <li>
-                      <span>Display profit</span>
-                      <strong>${(demoResult.profit ?? 0).toFixed(2)}</strong>
-                    </li>
-                    <li>
-                      <span>Estimated sq ft</span>
-                      <strong>{demoResult.estimated_sqft.toFixed(2)}</strong>
-                    </li>
-                    <li>
-                      <span>Material group</span>
-                      <strong>{demoResult.materialGroup}</strong>
-                    </li>
-                  </ul>
-                ) : (
-                  <p className="muted">Tap <strong>Calculate</strong> to see your estimate.</p>
-                )}
-                {(apiPartner?.warnings?.length ?? 0) + (demoResult?.warnings?.length ?? 0) > 0 ? (
-                  <div className="warn-box">
-                    <strong>Heads up</strong>
-                    <ul>
-                      {(apiPartner?.warnings ?? demoResult?.warnings ?? []).map((w, i) => (
-                        <li key={i}>{w}</li>
+                </div>
+              ) : null}
+              {apiPartner?.snapshot?.lineItems && Array.isArray(apiPartner.snapshot.lineItems) ? (
+                <div className="lines">
+                  <strong>Line items</strong>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Item</th>
+                        <th>Qty</th>
+                        <th>$/unit</th>
+                        <th>Subtotal</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {apiPartner.snapshot.lineItems.map((ln, i) => (
+                        <tr key={i}>
+                          <td>{String(ln.item_name ?? "")}</td>
+                          <td>{String(ln.quantity ?? "")}</td>
+                          <td>${Number(ln.unit_price ?? 0).toFixed(2)}</td>
+                          <td>${Number(ln.line_subtotal ?? 0).toFixed(2)}</td>
+                        </tr>
                       ))}
-                    </ul>
-                  </div>
-                ) : null}
-                {apiPartner?.snapshot?.lineItems && Array.isArray(apiPartner.snapshot.lineItems) ? (
-                  <div className="lines">
-                    <strong>Line items</strong>
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Item</th>
-                          <th>Qty</th>
-                          <th>$/unit</th>
-                          <th>Subtotal</th>
+                    </tbody>
+                  </table>
+                </div>
+              ) : demoResult?.lineItems.length ? (
+                <div className="lines">
+                  <strong>Line items (demo)</strong>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Item</th>
+                        <th>Qty</th>
+                        <th>$/unit</th>
+                        <th>Subtotal</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {demoResult.lineItems.map((ln, i) => (
+                        <tr key={i}>
+                          <td>{ln.item_name}</td>
+                          <td>{ln.quantity}</td>
+                          <td>${ln.unit_price.toFixed(2)}</td>
+                          <td>${ln.line_subtotal.toFixed(2)}</td>
                         </tr>
-                      </thead>
-                      <tbody>
-                        {apiPartner.snapshot.lineItems.map((ln, i) => (
-                          <tr key={i}>
-                            <td>{String(ln.item_name ?? "")}</td>
-                            <td>{String(ln.quantity ?? "")}</td>
-                            <td>${Number(ln.unit_price ?? 0).toFixed(2)}</td>
-                            <td>${Number(ln.line_subtotal ?? 0).toFixed(2)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : demoResult?.lineItems.length ? (
-                  <div className="lines">
-                    <strong>Line items (demo)</strong>
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Item</th>
-                          <th>Qty</th>
-                          <th>$/unit</th>
-                          <th>Subtotal</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {demoResult.lineItems.map((ln, i) => (
-                          <tr key={i}>
-                            <td>{ln.item_name}</td>
-                            <td>{ln.quantity}</td>
-                            <td>${ln.unit_price.toFixed(2)}</td>
-                            <td>${ln.line_subtotal.toFixed(2)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : null}
-                <p className="muted small">
-                  Partner view uses the same engine as the partner portal; display markup is for illustration only.
-                </p>
-              </>
-            )}
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
+              <p className="muted small">
+                Internal calculate uses <code>/api/internal-quotes/calculate</code>; display markup settings are for illustration
+                only.
+              </p>
+            </>
             <p style={{ marginTop: 14 }}>
               <strong>Confidence:</strong>{" "}
-              {apiPublic
-                ? "Live calculation (public-safe)."
-                : apiPartner
-                  ? "Live calculation — review notes above."
-                  : demoResult?.confidence ?? "—"}
+              {apiPartner ? "Live calculation — review notes above." : demoResult?.confidence ?? "—"}
             </p>
             <p>
               <strong>Review suggested:</strong>{" "}
@@ -1776,25 +1786,22 @@ export default function PartnerInternalQuoteApp() {
           </section>
 
           <section className="card notes">
-            <h2>What this proves</h2>
+            <h2>What this head proves</h2>
             <ul>
               <li>
-                Measurement UX from the <strong>ESF Quoting Tool v1.01</strong> prototype is being ported into structured,
-                testable modules — not replaced by a single sqft shortcut long term.
-              </li>
-              <li>Pricing is moving into Supabase and the eliteOS Brain — structures and rules replace static HTML spreadsheets.</li>
-              <li>
-                <strong>Public retail</strong> protects dealers with at least <strong>25%+</strong> markup on the economics
-                the calculator uses.
-              </li>
-              <li>Partners can be assigned pricing structures in System Admin (quote pricing APIs).</li>
-              <li>Monday.com quote tracking is <strong>staged</strong> — sync logs first, live API when configured.</li>
-              <li>
-                Quotes feed <strong>forecast</strong>, bid/close ratio, total quote value, salesperson, branch, and partner
-                analytics.
+                Internal preliminary quotes can use the same measurement modules as the public tool while keeping **Direct /
+                Wholesale** economics and the **quote library** on a **separate authenticated head**.
               </li>
               <li>
-                Future <strong>AI Takeoff</strong> and <strong>Visualize</strong> are already planned in the data model (see{" "}
+                Saves and Monday for <code>quote_source: internal_quote</code> use <strong>internal</strong> API routes and{" "}
+                <code>MONDAY_INTERNAL_*</code> only — not the public consumer board configuration.
+              </li>
+              <li>
+                The **public** quote site (<code>app-quote</code>) stays homeowner-safe: no internal mode, no wholesale matrix
+                in that bundle.
+              </li>
+              <li>
+                Future <strong>AI Takeoff</strong> and <strong>Visualize</strong> remain planned in the shared data model (see{" "}
                 <code>docs/quote-platform/ai-takeoff-and-visualize-plan.md</code>).
               </li>
             </ul>
@@ -1804,37 +1811,7 @@ export default function PartnerInternalQuoteApp() {
         <aside className="side-col">
           {hasCalcResult ? (
             <div className="summary-card">
-              {quoteMode === "public" && pubRetail != null ? (
-                <>
-                  <h2>Your estimate</h2>
-                  <p className="summary-kicker">Estimated retail quote</p>
-                  <p className="summary-hero-value">${Number(pubRetail).toFixed(2)}</p>
-                  <div className="summary-rows">
-                    <div className="summary-row">
-                      <span>Quote path</span>
-                      <strong>{workflowLabel(quoteWorkflow)}</strong>
-                    </div>
-                    <div className="summary-row">
-                      <span>Estimated sq ft</span>
-                      <strong>{Number(pubSqft ?? 0).toFixed(2)}</strong>
-                    </div>
-                    <div className="summary-row">
-                      <span>Material group</span>
-                      <strong>{pubMaterial}</strong>
-                    </div>
-                  </div>
-                  <div className="protection-badge">25%+ dealer protection applied</div>
-                  <p className="summary-foot disclaimer">
-                    This is a planning estimate. Final quote may change after material selection, field template, and site
-                    review.
-                  </p>
-                  <p className="summary-foot">
-                    Public retail pricing includes at least 25% protection over dealer/partner pricing.
-                  </p>
-                  {lastCalcLive ? <p className="summary-foot">Live API response</p> : null}
-                </>
-              ) : null}
-              {quoteMode === "partner" && partRetail != null ? (
+              {partRetail != null ? (
                 <>
                   <h2>Your estimate</h2>
                   <p className="summary-kicker">Retail / protected (display)</p>
@@ -1876,7 +1853,7 @@ export default function PartnerInternalQuoteApp() {
                   </div>
                   <div className="internal-badge">Internal / demo — not public-facing</div>
                   <p className="summary-foot">Shown for staff discussion; not homeowner-facing.</p>
-                  <p className="summary-foot muted small">Use the math check panel below for line-level verification.</p>
+                  <p className="summary-foot muted small">Use the math check panel for line-level verification.</p>
                   {lastCalcLive ? <p className="summary-foot">Live API response</p> : null}
                 </>
               ) : null}
@@ -1906,7 +1883,7 @@ export default function PartnerInternalQuoteApp() {
         </aside>
       </div>
 
-      <footer className="footer">eliteOS Quote · Elite Stone Fabrication · {new Date().getFullYear()}</footer>
+      <footer className="footer">eliteOS Internal Estimate · Elite Stone Fabrication · {new Date().getFullYear()}</footer>
     </div>
   );
 }

@@ -21,6 +21,8 @@ export type GuidedPiece = {
   lengthIn: number;
   depthIn: number;
   shape: PieceShape;
+  /** When true on a counter piece, add 4″ backsplash sf = length × 4 / 144 (internal quoting). */
+  addSplash?: boolean;
 };
 
 export type FhbMode = "Off" | "Manual Sq Ft" | "Guided Shape";

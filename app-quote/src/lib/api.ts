@@ -77,3 +77,57 @@ export async function apiPostJson(path: string, token: string, body: unknown): P
   }
   return json;
 }
+
+export async function apiGetJson(path: string, token: string): Promise<unknown> {
+  const t = String(token || "").trim();
+  if (!t) throw new ApiError("Sign in required for live API", 401, null);
+  const url = joinBackendUrl(path);
+  const res = await fetch(url, {
+    method: "GET",
+    headers: { authorization: `Bearer ${t}` }
+  });
+  const text = await res.text();
+  let json: unknown = null;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    // ignore
+  }
+  if (!res.ok) {
+    const msg =
+      typeof json === "object" && json && "error" in json
+        ? String((json as { error?: string }).error)
+        : text.slice(0, 200);
+    throw new ApiError(msg || `HTTP ${res.status}`, res.status, json ?? text);
+  }
+  return json;
+}
+
+export async function apiPatchJson(path: string, token: string, body: unknown): Promise<unknown> {
+  const t = String(token || "").trim();
+  if (!t) throw new ApiError("Sign in required for live API", 401, null);
+  const url = joinBackendUrl(path);
+  const res = await fetch(url, {
+    method: "PATCH",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${t}`
+    },
+    body: JSON.stringify(body)
+  });
+  const text = await res.text();
+  let json: unknown = null;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    // ignore
+  }
+  if (!res.ok) {
+    const msg =
+      typeof json === "object" && json && "error" in json
+        ? String((json as { error?: string }).error)
+        : text.slice(0, 200);
+    throw new ApiError(msg || `HTTP ${res.status}`, res.status, json ?? text);
+  }
+  return json;
+}

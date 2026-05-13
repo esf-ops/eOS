@@ -86,8 +86,8 @@ Status is **conceptual** unless a separate tracker says otherwise. Use the label
 
 ### Quote / Revenue
 
-- Public Consumer Quote Tool  
-- Internal Quoting Tool  
+- Public Consumer Quote Tool (**`app-quote`** — deployed public hostname above)  
+- Internal Quoting / **Internal Estimate** Tool (**`app-internal-estimate`** — separate staff head; auth required)
 - Partner Quoting Tool  
 - Quote Pipeline / Quote Leads Head  
 - Pricing Admin / Quote Catalog Admin Head  
