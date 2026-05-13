@@ -7,7 +7,9 @@ When `POST /api/public-quote/submit-measurements` persists a lead, the backend c
 | Variable | Purpose |
 |----------|---------|
 | `MONDAY_API_TOKEN` | Monday API token (server only — **never** expose to the browser). |
-| `MONDAY_PUBLIC_QUOTES_BOARD_ID` | Numeric board ID for **public consumer** quotes (`quote_source` `public_consumer`). |
+| `MONDAY_PUBLIC_QUOTES_BOARD_ID` | Numeric board ID for **public consumer** quotes (`quote_source` values treated as public in `quoteSourceConfig.js`). |
+
+**Example board (Retail Online Quotes):** board ID `18412881229`.
 
 ## Optional fallback
 
@@ -17,43 +19,74 @@ When `POST /api/public-quote/submit-measurements` persists a lead, the backend c
 
 Partner / internal boards use `MONDAY_PARTNER_QUOTES_BOARD_ID` / `MONDAY_INTERNAL_QUOTES_BOARD_ID` via `quoteSourceConfig.js` when those flows call the same sync helper.
 
-## Optional column mapping (public board)
+## Public column mapping — safe env vars (Vercel / backend-core)
 
-Each value is the **column ID** from Monday (not the column title). If unset, that field is omitted from `column_values`; the item is still created with the generated **item name**.
+Each value is the **column ID** from Monday (not the column title). Values are built by `buildMondayPublicColumnValues()` and sent as `column_values` on `create_item` (GraphQL variable type `JSON!`, value is `JSON.stringify(columnValuesObject)`).
 
-| Env var | Typical Monday column type |
-|---------|-----------------------------|
-| `MONDAY_PUBLIC_COL_QUOTE_NUMBER` | Text |
-| `MONDAY_PUBLIC_COL_CUSTOMER_NAME` | Text |
-| `MONDAY_PUBLIC_COL_PHONE` | Text or Phone |
-| `MONDAY_PUBLIC_COL_EMAIL` | Email or Text |
-| `MONDAY_PUBLIC_COL_CITY` | Text |
-| `MONDAY_PUBLIC_COL_STATE` | Text |
-| `MONDAY_PUBLIC_COL_ZIP` | Text |
-| `MONDAY_PUBLIC_COL_SALES_REP` | Text |
-| `MONDAY_PUBLIC_COL_BRANCH` | Text |
-| `MONDAY_PUBLIC_COL_QUOTE_VALUE` | Text or Numbers (if Numbers fails, use Text) |
-| `MONDAY_PUBLIC_COL_STATUS` | Status (value sent as `{ "label": "…" }`; see below) |
-| `MONDAY_PUBLIC_COL_SOURCE` | Text |
-| `MONDAY_PUBLIC_COL_ESTIMATE_SUMMARY` | Long text — compact tier totals, e.g. `Promo $1,200 \| A $1,400 \| …` |
-| `MONDAY_PUBLIC_COL_CREATED_DATE` | Date |
+If **none** of the `MONDAY_PUBLIC_COL_*` env vars listed below are set, the server **does not** send `column_values`: it creates the item **name-only** and logs `status = success` with a note in `request_payload` / `response_payload` (`name_only_no_mapping_env`).
+
+Copy/paste set for **Retail Online Quotes** (safe columns only):
+
+```bash
+MONDAY_PUBLIC_QUOTES_BOARD_ID=18412881229
+
+MONDAY_PUBLIC_COL_STATUS=color_mm39jp91
+MONDAY_PUBLIC_COL_QUOTE_VALUE=numeric_mm39fhfy
+MONDAY_PUBLIC_COL_CREATED_DATE=date_mm39q48r
+MONDAY_PUBLIC_COL_PHONE=phone_mm391jen
+MONDAY_PUBLIC_COL_EMAIL=email_mm39hq7c
+MONDAY_PUBLIC_COL_CITY=text_mm392cgc
+MONDAY_PUBLIC_COL_STATE=text_mm391gbx
+MONDAY_PUBLIC_COL_ESTIMATED_SQFT=numeric_mm396hdp
+MONDAY_PUBLIC_COL_ESTIMATE_SUMMARY=long_text_mm395fcz
+MONDAY_PUBLIC_COL_QUOTE_ID=text_mm39m9cp
+
+MONDAY_PUBLIC_STATUS_LABEL=Lead submitted
+```
+
+| Env var | Monday type | Payload / format |
+|---------|----------------|------------------|
+| `MONDAY_PUBLIC_COL_CITY` | text | Plain string from `city` |
+| `MONDAY_PUBLIC_COL_STATE` | text | Plain string from `state` |
+| `MONDAY_PUBLIC_COL_QUOTE_ID` | text | `quote_number`, else internal `quote_id` |
+| `MONDAY_PUBLIC_COL_QUOTE_NUMBER` | text (legacy) | `quote_number` only |
+| `MONDAY_PUBLIC_COL_ESTIMATE_SUMMARY` | long_text | Compact tier line from `buildPublicEstimateSummaryCompact` |
+| `MONDAY_PUBLIC_COL_QUOTE_VALUE` | numbers | `{ "number": <grand_total> }` |
+| `MONDAY_PUBLIC_COL_ESTIMATED_SQFT` | numbers | `{ "number": <estimated sq ft> }` |
+| `MONDAY_PUBLIC_COL_CREATED_DATE` | date | `{ "date": "YYYY-MM-DD" }` |
+| `MONDAY_PUBLIC_COL_STATUS` | status | `{ "label": "<MONDAY_PUBLIC_STATUS_LABEL>" }` |
+| `MONDAY_PUBLIC_COL_EMAIL` | email | `{ "email": "…", "text": "…" }` — only if email present |
+| `MONDAY_PUBLIC_COL_PHONE` | phone | `{ "phone": "<10 digits>", "countryShortName": "US" }` — only if phone normalizes to 10 US digits |
+| `MONDAY_PUBLIC_COL_CUSTOMER_NAME` | text | Legacy optional |
+| `MONDAY_PUBLIC_COL_ZIP` | text | Optional |
+| `MONDAY_PUBLIC_COL_SOURCE` | text | `quote_source` |
 
 | Env var | Purpose |
 |---------|---------|
-| `MONDAY_PUBLIC_STATUS_LABEL` | Label string for the Status column when `MONDAY_PUBLIC_COL_STATUS` is set. Default: `Lead submitted`. Must match an existing label on that status column. |
+| `MONDAY_PUBLIC_STATUS_LABEL` | Status label when `MONDAY_PUBLIC_COL_STATUS` is set. Default: `Lead submitted`. **Must match** an existing label on that status column in Monday. |
+
+### Intentionally skipped (until a follow-up mapping pass)
+
+Do **not** set these yet unless you add the corresponding implementation in `mondayQuoteSync.js` (they are detected and recorded in `skipped_columns` only as diagnostics when the env var exists):
+
+| Env var (examples) | Why skipped |
+|--------------------|-------------|
+| `MONDAY_PUBLIC_COL_SALES_REP` | **People** column needs Monday user IDs, not display names. |
+| `MONDAY_PUBLIC_COL_ADDRESS` | **Location** column needs a validated Monday location JSON payload. |
+| `MONDAY_PUBLIC_COL_BRANCH` | **Dropdown** must match an existing option label on the board. |
 
 ## Finding board ID and column IDs
 
-1. Open the board in Monday.com; the board ID often appears in the URL: `…/boards/1234567890`.
+1. Open the board in Monday.com; the board ID appears in the URL: `…/boards/18412881229`.
 2. Run the inspect helper (tokens only in your shell, never committed):
 
 ```bash
 export MONDAY_API_TOKEN="…"
-export MONDAY_PUBLIC_QUOTES_BOARD_ID="1234567890"
+export MONDAY_PUBLIC_QUOTES_BOARD_ID="18412881229"
 node backend-core/src/scripts/inspectMondayBoardColumns.js
 ```
 
-3. Copy the **first column** (`id` tab-separated) for each field you want to map into `MONDAY_PUBLIC_COL_*`.
+3. Copy the **column `id`** for each field into the matching `MONDAY_PUBLIC_COL_*` env var.
 
 ## Item name (all successful creates)
 
@@ -65,7 +98,21 @@ Public consumer items use:
 
 ## Estimate summary column
 
-When estimates exist on the submission, `MONDAY_PUBLIC_COL_ESTIMATE_SUMMARY` receives a single line of **homeowner-safe** planning totals per material tier (Promo through Group F), e.g. `Promo $1,200 | A $1,400 | B $1,500`. This is **not** wholesale detail.
+When estimates exist on the submission, `MONDAY_PUBLIC_COL_ESTIMATE_SUMMARY` receives a single line of **homeowner-safe** planning totals per material tier, e.g. `Promo $1,200 | A $1,400 | B $1,500`. This is **not** wholesale detail.
+
+## `buildMondayPublicColumnValues`
+
+Exported helper (used by `syncQuoteToMonday`):
+
+```js
+buildMondayPublicColumnValues({ payload, estimateSummary })
+```
+
+Returns:
+
+- `columnValues` — object keyed by Monday column id
+- `attemptedColumnIds` — `Object.keys(columnValues)`
+- `skippedColumns` — `{ reason, detail }[]` (missing data, unimplemented env-only columns, etc.)
 
 ## Behavior when config is missing
 
@@ -77,26 +124,31 @@ If `MONDAY_API_TOKEN` or the resolved board ID is missing:
 
 ## Column values encoding (`create_item`)
 
-The GraphQL variable `column_values` is typed **`JSON!`**. The server passes **`JSON.stringify(columnValuesObject)`** as the variable value (a JSON-encoded string), which Monday’s API expects for this field.
+The GraphQL variable `columnValues` is typed **`JSON!`**. The server passes **`JSON.stringify(columnValuesObject)`** as the variable value (a JSON string), which Monday’s API accepts for this field.
 
-If that attempt fails, the server logs **dev-only diagnostics** (board configured, item name, column IDs, `typeof columnValues`, first 500 chars of the JSON string — **never** the API token) and **retries once** with `create_item(board_id, item_name)` only (no `column_values`).
+## No column env vars configured (public)
 
-## Behavior when Monday succeeds
+- Creates **item name only** (no `column_values` mutation argument).
+- Logs `status = success` with `response_payload.note` / `request_payload.graphql` describing name-only path.
+- Does **not** attempt a failing empty column mutation.
+
+## Full column attempt → Monday rejects values
+
+1. **Diagnostics** (console, never token): `attempted_column_ids`, `typeof_columnValues` (`string`), JSON preview, `skipped_columns`.
+2. **Retry** once: `create_item(board_id, item_name)` only (name-only).
+3. If retry succeeds: `quote_monday_sync_log` **`status = success_partial_columns`**, `monday_item_id` set, `error_message` contains the **original Monday error** (trimmed), `response_payload` includes `monday_column_values_error`, `attempted_column_ids`, `typeof_columnValues`, `skipped_columns`.  
+   There is no separate `metadata` column on `quote_monday_sync_log`; use **`response_payload`** (jsonb) for this detail.
+
+## Behavior when Monday succeeds (columns)
 
 - `quote_monday_sync_log`: `status = success`, `monday_board_id`, `monday_item_id` set when the log insert succeeds.
 - `quote_headers`: `monday_board_id` and `monday_item_id` updated when those columns exist.
 - Public JSON may include `monday_item_id`, `monday_board_id`, `monday_sync_status` for optional UI.
 
-## Partial success (column mapping rejected, name-only retry worked)
-
-- `quote_monday_sync_log`: `status = success_partial_columns`, with `monday_item_id` / `monday_board_id` set.
-- `quote_headers` updated with the new item id.
-- The public submit response includes a **warning** that the Monday item was created without populated columns; Elite can fix the board row.
-
-## Behavior when Monday fails (API error, bad column value, etc.)
+## Behavior when Monday fails completely (API error, name-only retry fails)
 
 - `quote_monday_sync_log`: `status = failed`, `error_message` contains a trimmed safe message (length-capped).
-- The HTTP response for submit remains **success** (`ok: true`); a string is appended to `warnings` so the client can show a gentle message.
+- The HTTP response for submit remains **success** (`ok: true`); a string may be appended to `warnings` so the client can show a gentle message.
 - The quote row in Supabase is unchanged by the failure (already inserted before sync).
 
 ## Related

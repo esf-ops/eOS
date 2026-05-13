@@ -7,13 +7,25 @@
  * - MONDAY_QUOTES_BOARD_ID (legacy fallback when source-specific board unset)
  * - MONDAY_INTERNAL_QUOTES_BOARD_ID / MONDAY_PARTNER_QUOTES_BOARD_ID (other sources)
  *
- * Public column mapping (optional — omit to skip that column on the Monday item):
- * - MONDAY_PUBLIC_COL_QUOTE_NUMBER, MONDAY_PUBLIC_COL_CUSTOMER_NAME, MONDAY_PUBLIC_COL_PHONE,
- *   MONDAY_PUBLIC_COL_EMAIL, MONDAY_PUBLIC_COL_CITY, MONDAY_PUBLIC_COL_STATE, MONDAY_PUBLIC_COL_ZIP,
- *   MONDAY_PUBLIC_COL_SALES_REP, MONDAY_PUBLIC_COL_BRANCH, MONDAY_PUBLIC_COL_QUOTE_VALUE,
- *   MONDAY_PUBLIC_COL_STATUS, MONDAY_PUBLIC_COL_SOURCE, MONDAY_PUBLIC_COL_ESTIMATE_SUMMARY,
- *   MONDAY_PUBLIC_COL_CREATED_DATE
- * - MONDAY_PUBLIC_STATUS_LABEL — label text for status-type columns (default: "Lead submitted")
+ * Public column mapping (optional — values are Monday column IDs). If **none** of the
+ * `MONDAY_PUBLIC_COL_*` vars below are set, the server creates **item name only** (no column_values).
+ *
+ * Safe mappings (see docs/quote-platform/monday-public-quotes-setup.md):
+ * - MONDAY_PUBLIC_COL_CITY, MONDAY_PUBLIC_COL_STATE — text
+ * - MONDAY_PUBLIC_COL_QUOTE_ID (or legacy MONDAY_PUBLIC_COL_QUOTE_NUMBER) — text
+ * - MONDAY_PUBLIC_COL_ESTIMATE_SUMMARY — long_text (plain string)
+ * - MONDAY_PUBLIC_COL_QUOTE_VALUE — numbers (`{ number }`)
+ * - MONDAY_PUBLIC_COL_ESTIMATED_SQFT — numbers (`{ number }`)
+ * - MONDAY_PUBLIC_COL_CREATED_DATE — date (`{ date: "YYYY-MM-DD" }`)
+ * - MONDAY_PUBLIC_COL_STATUS — status (`{ label }`); MONDAY_PUBLIC_STATUS_LABEL (default: Lead submitted)
+ * - MONDAY_PUBLIC_COL_EMAIL — email (`{ email, text }`) when email present
+ * - MONDAY_PUBLIC_COL_PHONE — phone (`{ phone, countryShortName: "US" }`) when 10-digit US local after normalize
+ * - MONDAY_PUBLIC_COL_CUSTOMER_NAME, MONDAY_PUBLIC_COL_ZIP, MONDAY_PUBLIC_COL_SOURCE — text (legacy)
+ *
+ * Intentionally not populated yet (need separate validation / IDs / label matching):
+ * - MONDAY_PUBLIC_COL_SALES_REP — people column needs Monday user IDs
+ * - MONDAY_PUBLIC_COL_ADDRESS — location column needs Monday location payload format validation
+ * - MONDAY_PUBLIC_COL_BRANCH — dropdown requires matching configured labels
  */
 
 import { getMondayBoardEnvKeyForQuoteSource, isPublicQuoteSource } from "../quotes/quoteSourceConfig.js";
@@ -99,6 +111,7 @@ export function buildMondayQuotePayload(quote, snapshot, extras = {}) {
     city: q.city ?? null,
     state: q.state ?? null,
     zip: q.zip ?? null,
+    quote_id: q.id ?? null,
     quote_total: q.grand_total ?? null,
     estimated_square_footage: q.estimated_sqft ?? snap.totals?.estimated_sqft ?? null,
     material_group: q.estimated_material_group ?? snap.inputSummary?.materialGroup ?? null,
@@ -163,57 +176,157 @@ function buildMondayItemNameForSource(quoteSource, payload) {
   return `${qn} - ${cn}`;
 }
 
+/** Env vars that count as "public Monday column mapping is configured". */
+const PUBLIC_MONDAY_COLUMN_MAPPING_ENV_NAMES = [
+  "MONDAY_PUBLIC_COL_STATUS",
+  "MONDAY_PUBLIC_COL_QUOTE_VALUE",
+  "MONDAY_PUBLIC_COL_CREATED_DATE",
+  "MONDAY_PUBLIC_COL_PHONE",
+  "MONDAY_PUBLIC_COL_EMAIL",
+  "MONDAY_PUBLIC_COL_CITY",
+  "MONDAY_PUBLIC_COL_STATE",
+  "MONDAY_PUBLIC_COL_ZIP",
+  "MONDAY_PUBLIC_COL_ESTIMATED_SQFT",
+  "MONDAY_PUBLIC_COL_ESTIMATE_SUMMARY",
+  "MONDAY_PUBLIC_COL_QUOTE_ID",
+  "MONDAY_PUBLIC_COL_QUOTE_NUMBER",
+  "MONDAY_PUBLIC_COL_CUSTOMER_NAME",
+  "MONDAY_PUBLIC_COL_SOURCE"
+];
+
+export function publicMondayColumnMappingConfigured() {
+  return PUBLIC_MONDAY_COLUMN_MAPPING_ENV_NAMES.some((k) => String(process.env[k] || "").trim().length > 0);
+}
+
+function envCol(envName) {
+  return String(process.env[envName] || "").trim();
+}
+
 /**
- * Build Monday `column_values` inner object (keys = column IDs, values = Monday-native shapes).
- * Missing env vars for a column → that column is omitted (graceful).
- * @param {Record<string, unknown>} payload — from buildMondayQuotePayload
- * @param {string} estimateSummary
+ * @param {unknown} raw
+ * @returns {string|null} 10-digit US local part, or null
  */
-export function buildMondayPublicColumnValues(payload, estimateSummary) {
+export function normalizeMondayUsPhone10(raw) {
+  const d = String(raw ?? "").replace(/\D/g, "");
+  if (d.length === 11 && d.startsWith("1")) return d.slice(1);
+  if (d.length === 10) return d;
+  return null;
+}
+
+function recordSkipped(skippedColumns, reason, detail) {
+  skippedColumns.push({ reason, detail: detail ?? null });
+}
+
+/**
+ * Build Monday `column_values` object (keys = column IDs, values = Monday-native shapes).
+ * @param {{ payload: Record<string, unknown>, estimateSummary: string }} input
+ * @returns {{ columnValues: Record<string, unknown>, attemptedColumnIds: string[], skippedColumns: Array<{ reason: string, detail?: string|null }> }}
+ */
+export function buildMondayPublicColumnValues(input) {
+  const payload = input?.payload && typeof input.payload === "object" ? input.payload : {};
+  const estimateSummary = String(input?.estimateSummary ?? "");
+  const skippedColumns = [];
   const o = {};
-  const col = (envName) => String(process.env[envName] || "").trim();
 
   const setText = (envName, value) => {
-    const id = col(envName);
-    if (!id || value === null || value === undefined) return;
+    const id = envCol(envName);
+    if (!id) {
+      recordSkipped(skippedColumns, "no_column_id", envName);
+      return;
+    }
+    if (value === null || value === undefined) {
+      recordSkipped(skippedColumns, "empty_value", envName);
+      return;
+    }
     const s = String(value).trim();
-    if (!s) return;
+    if (!s) {
+      recordSkipped(skippedColumns, "empty_value", envName);
+      return;
+    }
     o[id] = s;
   };
 
-  setText("MONDAY_PUBLIC_COL_QUOTE_NUMBER", payload.quote_number);
-  setText("MONDAY_PUBLIC_COL_CUSTOMER_NAME", payload.customer_name);
-  setText("MONDAY_PUBLIC_COL_PHONE", payload.customer_phone);
-  setText("MONDAY_PUBLIC_COL_EMAIL", payload.customer_email);
+  const setNumber = (envName, value) => {
+    const id = envCol(envName);
+    if (!id) {
+      recordSkipped(skippedColumns, "no_column_id", envName);
+      return;
+    }
+    const n = typeof value === "number" ? value : Number(value);
+    if (!Number.isFinite(n)) {
+      recordSkipped(skippedColumns, "invalid_number", envName);
+      return;
+    }
+    o[id] = { number: n };
+  };
+
   setText("MONDAY_PUBLIC_COL_CITY", payload.city);
   setText("MONDAY_PUBLIC_COL_STATE", payload.state);
+  setText("MONDAY_PUBLIC_COL_CUSTOMER_NAME", payload.customer_name);
   setText("MONDAY_PUBLIC_COL_ZIP", payload.zip);
-  setText("MONDAY_PUBLIC_COL_SALES_REP", payload.sales_rep);
-  setText("MONDAY_PUBLIC_COL_BRANCH", payload.branch);
   setText("MONDAY_PUBLIC_COL_SOURCE", payload.quote_source);
 
-  if (payload.quote_total != null && payload.quote_total !== "") {
-    setText("MONDAY_PUBLIC_COL_QUOTE_VALUE", String(payload.quote_total));
+  const quoteIdCol = envCol("MONDAY_PUBLIC_COL_QUOTE_ID");
+  if (quoteIdCol) {
+    const qn = String(payload.quote_number || "").trim();
+    const internal =
+      payload.quote_id != null ? String(payload.quote_id).trim() : payload.id != null ? String(payload.id).trim() : "";
+    const v = qn || internal;
+    if (v) o[quoteIdCol] = v;
+    else recordSkipped(skippedColumns, "empty_value", "MONDAY_PUBLIC_COL_QUOTE_ID");
   }
 
-  if (estimateSummary && estimateSummary.trim()) {
+  setText("MONDAY_PUBLIC_COL_QUOTE_NUMBER", payload.quote_number);
+
+  if (estimateSummary.trim()) {
     setText("MONDAY_PUBLIC_COL_ESTIMATE_SUMMARY", estimateSummary.trim());
   }
 
-  const statusCol = col("MONDAY_PUBLIC_COL_STATUS");
+  setNumber("MONDAY_PUBLIC_COL_QUOTE_VALUE", payload.quote_total);
+  setNumber("MONDAY_PUBLIC_COL_ESTIMATED_SQFT", payload.estimated_square_footage);
+
+  const emailCol = envCol("MONDAY_PUBLIC_COL_EMAIL");
+  if (emailCol) {
+    const em = String(payload.customer_email || "").trim();
+    if (em) o[emailCol] = { email: em, text: em };
+    else recordSkipped(skippedColumns, "missing_email", "MONDAY_PUBLIC_COL_EMAIL");
+  }
+
+  const phoneCol = envCol("MONDAY_PUBLIC_COL_PHONE");
+  if (phoneCol) {
+    const phone10 = normalizeMondayUsPhone10(payload.customer_phone);
+    if (phone10) o[phoneCol] = { phone: phone10, countryShortName: "US" };
+    else recordSkipped(skippedColumns, "invalid_or_missing_phone", "MONDAY_PUBLIC_COL_PHONE");
+  }
+
+  const statusCol = envCol("MONDAY_PUBLIC_COL_STATUS");
   if (statusCol) {
     const label = String(process.env.MONDAY_PUBLIC_STATUS_LABEL || "Lead submitted").trim() || "Lead submitted";
     o[statusCol] = { label };
   }
 
-  const dateCol = col("MONDAY_PUBLIC_COL_CREATED_DATE");
+  const dateCol = envCol("MONDAY_PUBLIC_COL_CREATED_DATE");
   if (dateCol) {
     const raw = payload.created_date ? new Date(String(payload.created_date)) : new Date();
     const iso = Number.isFinite(raw.getTime()) ? raw.toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
     o[dateCol] = { date: iso };
   }
 
-  return o;
+  if (envCol("MONDAY_PUBLIC_COL_SALES_REP")) {
+    recordSkipped(skippedColumns, "skipped_unimplemented_people_column", "MONDAY_PUBLIC_COL_SALES_REP");
+    // TODO: People column requires Monday user IDs — map sales_rep to person IDs before sending.
+  }
+  if (envCol("MONDAY_PUBLIC_COL_BRANCH")) {
+    recordSkipped(skippedColumns, "skipped_unimplemented_dropdown_column", "MONDAY_PUBLIC_COL_BRANCH");
+    // TODO: Dropdown requires exact label match to Monday board options for Branch Location.
+  }
+  if (envCol("MONDAY_PUBLIC_COL_ADDRESS")) {
+    recordSkipped(skippedColumns, "skipped_unimplemented_location_column", "MONDAY_PUBLIC_COL_ADDRESS");
+    // TODO: Location column requires validated Monday location JSON payload (address / lat / lng per Monday spec).
+  }
+
+  const attemptedColumnIds = Object.keys(o);
+  return { columnValues: o, attemptedColumnIds, skippedColumns };
 }
 
 /**
@@ -264,7 +377,9 @@ function safeMondayErrorMessage(err) {
  *   itemName: string,
  *   columnIds: string[],
  *   columnValuesVar: unknown,
- *   columnValuesJson: string
+ *   typeof_columnValues: string,
+ *   columnValuesJson: string,
+ *   skipped_columns?: Array<{ reason: string, detail?: string|null }>
  * }} ctx
  */
 function logMondayCreateItemDiagnostics(ctx) {
@@ -272,9 +387,10 @@ function logMondayCreateItemDiagnostics(ctx) {
   console.warn("[monday:create_item] diagnostics", {
     board_id_configured: ctx.boardIdPresent,
     item_name: ctx.itemName,
-    column_ids: ctx.columnIds,
-    typeof_columnValues: typeof ctx.columnValuesVar,
-    column_values_json_preview: preview
+    attempted_column_ids: ctx.columnIds,
+    typeof_columnValues: ctx.typeof_columnValues,
+    column_values_json_preview: preview,
+    skipped_columns: ctx.skipped_columns ?? []
   });
 }
 
@@ -336,9 +452,19 @@ export async function syncQuoteToMonday(params) {
   const summaryRows = Array.isArray(payload.estimates_by_group_summary) ? payload.estimates_by_group_summary : [];
   const estimateSummary = isPublicQuoteSource(quoteSource) ? buildPublicEstimateSummaryCompact(summaryRows) : "";
 
-  const columnValuesObj = isPublicQuoteSource(quoteSource) ? buildMondayPublicColumnValues(payload, estimateSummary) : {};
+  const isPublic = isPublicQuoteSource(quoteSource);
+  const buildResult = isPublic
+    ? buildMondayPublicColumnValues({ payload, estimateSummary })
+    : { columnValues: {}, attemptedColumnIds: [], skippedColumns: [] };
+  const columnValuesObj = buildResult.columnValues;
+  const columnIds = buildResult.attemptedColumnIds;
+  const skippedCols = buildResult.skippedColumns;
   const columnValuesJson = JSON.stringify(columnValuesObj);
-  const columnIds = Object.keys(columnValuesObj);
+
+  const mappingEnvConfigured = publicMondayColumnMappingConfigured();
+  const hasColumnPayload =
+    isPublic && mappingEnvConfigured && Object.keys(columnValuesObj).length > 0;
+
   const boardIdPresent = Boolean(String(boardId || "").trim());
 
   const requestPayload = {
@@ -348,20 +474,57 @@ export async function syncQuoteToMonday(params) {
     item_name: itemName,
     column_values: columnValuesObj,
     column_values_json: columnValuesJson,
-    graphql: "create_item"
+    attempted_column_ids: columnIds,
+    skipped_columns: skippedCols,
+    column_mapping_env_configured: mappingEnvConfigured,
+    graphql: hasColumnPayload ? "create_item" : "create_item_name_only"
   };
-
-  const columnValuesVar = columnValuesJson;
 
   let json = null;
   let itemId = null;
   let firstError = null;
 
+  async function createNameOnlyAndFinish(status, extraResponse = {}) {
+    const nameJson = await mondayGraphql(token, CREATE_ITEM_NAME_ONLY_MUTATION, {
+      boardId: String(boardId),
+      itemName
+    });
+    const id = extractCreateItemId(nameJson);
+    if (!id) throw new Error("Monday create_item (name-only) returned no id");
+    await patchQuoteHeaderMondayIds(db, params.quoteId, boardId, id);
+    await writeMondaySyncLog({
+      quoteId: params.quoteId,
+      action: params.action || "sync",
+      mondayBoardId: String(boardId),
+      mondayItemId: id,
+      requestPayload,
+      responsePayload: { data: nameJson?.data ?? null, ...extraResponse },
+      status,
+      errorMessage: null,
+      db,
+      organizationId: params.organizationId ?? null
+    });
+    return {
+      ok: true,
+      skipped: false,
+      status,
+      monday_item_id: id,
+      monday_board_id: String(boardId),
+      warning: null
+    };
+  }
+
   try {
+    if (isPublic && !hasColumnPayload) {
+      return await createNameOnlyAndFinish("success", {
+        note: mappingEnvConfigured ? "name_only_empty_column_values" : "name_only_no_mapping_env"
+      });
+    }
+
     json = await mondayGraphql(token, CREATE_ITEM_MUTATION, {
       boardId: String(boardId),
       itemName,
-      columnValues: columnValuesVar
+      columnValues: columnValuesJson
     });
     itemId = extractCreateItemId(json);
     if (!itemId) {
@@ -397,8 +560,10 @@ export async function syncQuoteToMonday(params) {
       boardIdPresent,
       itemName,
       columnIds,
-      columnValuesVar,
-      columnValuesJson
+      columnValuesVar: columnValuesJson,
+      typeof_columnValues: typeof columnValuesJson,
+      columnValuesJson,
+      skipped_columns: skippedCols
     });
 
     let retryJson = null;
@@ -431,11 +596,14 @@ export async function syncQuoteToMonday(params) {
         requestPayload: { ...requestPayload, retry: "create_item_name_only" },
         responsePayload: {
           data: retryJson?.data ?? null,
-          columns_attempt_error: firstError.slice(0, 2000),
+          monday_column_values_error: firstError.slice(0, 2000),
+          attempted_column_ids: columnIds,
+          typeof_columnValues: typeof columnValuesJson,
+          skipped_columns: skippedCols,
           note: "success_partial_columns — item created without column_values after first attempt failed"
         },
         status: "success_partial_columns",
-        errorMessage: null,
+        errorMessage: firstError.slice(0, 4000),
         db,
         organizationId: params.organizationId ?? null
       });
@@ -461,7 +629,12 @@ export async function syncQuoteToMonday(params) {
       mondayBoardId: String(boardId),
       mondayItemId: null,
       requestPayload,
-      responsePayload: { error: combinedErr.slice(0, 500) },
+      responsePayload: {
+        error: combinedErr.slice(0, 500),
+        attempted_column_ids: columnIds,
+        typeof_columnValues: typeof columnValuesJson,
+        skipped_columns: skippedCols
+      },
       status: "failed",
       errorMessage: combinedErr,
       db,
