@@ -2,7 +2,7 @@ import "dotenv/config";
 
 import { spawn } from "node:child_process";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import express from "express";
 import { createClient } from "@supabase/supabase-js";
@@ -354,17 +354,29 @@ const defaultAllowedOrigins = (() => {
  * Staging/production browser origins allowed to call this API with cookies + Authorization headers.
  * Comma-separated full origins (scheme + host, no trailing path). Leave unset for localhost-only defaults.
  *
+ * Use `ALLOWED_ORIGINS` or `EOS_ALLOWED_ORIGINS` (both merged; same comma-separated format).
+ *
  * Examples (staging on Vercel + separate executive app):
  *   EOS_ALLOWED_ORIGINS=https://YOUR-BRAIN-HEALTH-STAGING.vercel.app,https://YOUR-EXECUTIVE-STAGING.vercel.app
  * Production launcher / heads later:
  *   EOS_ALLOWED_ORIGINS=https://eos.elitestonefabrication.com,https://heads.elitestonefabrication.com
  */
-const envOriginAdditions = String(process.env.EOS_ALLOWED_ORIGINS ?? "")
-  .split(",")
-  .map((s) => s.trim().replace(/\/+$/, ""))
-  .filter(Boolean);
+function parseCommaSeparatedOrigins(raw) {
+  return String(raw ?? "")
+    .split(",")
+    .map((s) => s.trim().replace(/\/+$/, ""))
+    .filter(Boolean);
+}
 
-const allowedOrigins = [...new Set([...defaultAllowedOrigins, ...envOriginAdditions])];
+const envOriginAdditions = [
+  ...parseCommaSeparatedOrigins(process.env.ALLOWED_ORIGINS),
+  ...parseCommaSeparatedOrigins(process.env.EOS_ALLOWED_ORIGINS)
+];
+
+/** Always allow hosted public quote app + common local Vite port (also covered by default range). */
+const fixedEliteOsOrigins = ["https://eliteos-quote.vercel.app", "http://localhost:5179"];
+
+const allowedOrigins = [...new Set([...defaultAllowedOrigins, ...fixedEliteOsOrigins, ...envOriginAdditions])];
 
 /** CORS first: browsers need reflected Origin before any guarded route responds. */
 app.use(
@@ -376,7 +388,7 @@ app.use(
       return callback(null, false);
     },
     credentials: true,
-    allowedHeaders: ["Content-Type", "Authorization", "x-eos-cron-secret"],
+    allowedHeaders: ["Content-Type", "Authorization", "x-eos-cron-secret", "x-organization-key"],
     methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"]
   })
 );
@@ -391,7 +403,23 @@ app.get("/api/debug/cors", (req, res) => {
 });
 
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, service: "backend-core", brain: "moraware" });
+  const supabaseUrlPresent = Boolean(String(process.env.SUPABASE_URL ?? "").trim());
+  const supabaseServerKeyPresent = Boolean(String(process.env.SUPABASE_SERVICE_ROLE_KEY ?? "").trim());
+  const mondayTokenPresent = Boolean(String(process.env.MONDAY_API_TOKEN ?? "").trim());
+  const mondayPublicBoardPresent = Boolean(
+    String(process.env.MONDAY_PUBLIC_QUOTES_BOARD_ID ?? "").trim() ||
+      String(process.env.MONDAY_QUOTES_BOARD_ID ?? "").trim()
+  );
+  const environment = String(process.env.VERCEL_ENV ?? process.env.NODE_ENV ?? "development").trim() || "development";
+  res.json({
+    ok: true,
+    app: "eliteOS Brain API",
+    environment,
+    supabaseUrlPresent,
+    supabaseServerKeyPresent,
+    mondayTokenPresent,
+    mondayPublicBoardPresent
+  });
 });
 
 app.get("/api/brain/sync-plan", (_req, res) => {
@@ -1314,77 +1342,93 @@ app.get("/api/me/heads", requireAuth(), async (req, res) => {
   }
 });
 
-const port = toInt(process.env.PORT, 3001);
-app.listen(port, () => {
-  console.log(`backend-core server listening on http://localhost:${port}`);
-  console.log(`Allowed CORS origins: ${JSON.stringify(allowedOrigins)}`);
-  console.log("Available routes:");
-  console.log("- GET /api/health");
-  console.log("- GET /api/debug/cors");
-  console.log("- GET /api/auth/roles");
-  console.log("- GET /api/me");
-  console.log("- GET /api/me/heads");
-  console.log("- GET /api/sales/summary");
-  console.log("- GET /api/sales/salesperson-performance");
-  console.log("- GET /api/sales/account-performance");
-  console.log("- GET /api/sales/trend");
-  console.log("- GET /api/sales/jobs");
-  console.log("- GET /api/sales/filters");
-  console.log("- GET /api/sales/performance-intelligence");
-  console.log("- GET /api/sales/debug");
-  console.log("- GET /api/admin/users");
-  console.log("- GET /api/admin/sales-account-mapping/schema-health");
-  console.log("- GET /api/admin/sales-account-mapping/suggestions");
-  console.log("- GET /api/admin/sales-account-mapping/master-accounts");
-  console.log("- GET /api/admin/sales-account-mapping/reps-branches");
-  console.log("- POST /api/admin/sales-account-mapping/approve");
-  console.log("- POST /api/admin/sales-account-mapping/reject");
-  console.log("- POST /api/admin/sales-account-mapping/mark-unmapped");
-  console.log("- POST /api/admin/sales-account-mapping/assign-house");
-  console.log("- GET /api/admin/sales-account-mapping/audit-history");
-  console.log("- GET /api/admin/identity-resolution/schema-health");
-  console.log("- GET /api/admin/identity-resolution/summary");
-  console.log("- POST /api/quote/calculate");
-  console.log("- POST /api/quote/submit");
-  console.log("- GET/PATCH /api/admin/quote-pricing-structures (+/:id)");
-  console.log("- POST /api/admin/quote-pricing-structures");
-  console.log("- GET/PATCH /api/admin/quote-pricing-rules (+/:id)");
-  console.log("- POST /api/admin/quote-pricing-rules");
-  console.log("- GET/PATCH /api/admin/quote-partners (+/:id)");
-  console.log("- POST /api/admin/quote-partners");
-  console.log("- GET/POST /api/admin/quote-partners/:id/pricing-assignment");
-  console.log("- GET /api/admin/quotes");
-  console.log("- GET /api/admin/quotes/:id");
-  console.log("- GET /api/admin/quote-analytics/summary");
-  console.log("- GET /api/admin/reference");
-  console.log("- GET /api/admin/user-management/schema-health");
-  console.log("- POST /api/admin/users/invite");
-  console.log("- GET /api/admin/users/:userId");
-  console.log("- POST /api/admin/users/:userId/profile");
-  console.log("- POST /api/admin/users/:userId/head-access");
-  console.log("- POST /api/admin/users/:userId/dealer-access");
-  console.log("- POST /api/admin/users/:userId/pricing-group");
-  console.log("- POST /api/admin/users/:userId/send-password-reset");
-  console.log("- POST /api/admin/users/:userId/role");
-  console.log("- POST /api/auth/log-login");
-  console.log("- GET /api/brain/sync-runs");
-  console.log("- GET /api/brain/failed-jobs");
-  console.log("- POST /api/admin/sync/recent");
-  console.log("- POST /api/admin/sync/retry-failed");
-  console.log("- GET /api/brain/sync-health");
-  console.log("- GET /api/brain/sync-plan");
-  console.log("- GET /api/executive/summary");
-  console.log("- GET /api/executive/salesperson-performance");
-  console.log("- GET /api/executive/account-performance");
-  console.log("- GET /api/executive/production-flow");
-  console.log("- GET /api/executive/titan-signals");
-  console.log("- GET /api/executive/field-trends");
-  console.log("- GET /api/executive/monthly-trend");
-  console.log("- GET /api/executive/debug");
-  console.log("- GET /api/titans/today");
-  console.log("- POST /api/internal/sync/recent");
-  console.log("- POST /api/internal/sync/nightly");
-  console.log("- POST /api/internal/sync/nightly-operational");
-  console.log("- POST /api/internal/sync/retry-failed");
-});
+function shouldStartLocalHttpServer() {
+  if (String(process.env.EOS_SERVER_SKIP_LISTEN ?? "").trim() === "1") return false;
+  try {
+    const entry = process.argv[1];
+    if (!entry) return false;
+    return pathToFileURL(path.resolve(entry)).href === import.meta.url;
+  } catch {
+    return false;
+  }
+}
+
+/** Exported for Vercel (`api/index.js`) and tests. Default export lives in `api/index.js` to avoid double Express detection. */
+export { app };
+
+if (shouldStartLocalHttpServer()) {
+  const port = toInt(process.env.PORT, 3001);
+  app.listen(port, () => {
+    console.log(`backend-core server listening on http://localhost:${port}`);
+    console.log(`Allowed CORS origins: ${JSON.stringify(allowedOrigins)}`);
+    console.log("Available routes:");
+    console.log("- GET /api/health");
+    console.log("- GET /api/debug/cors");
+    console.log("- GET /api/auth/roles");
+    console.log("- GET /api/me");
+    console.log("- GET /api/me/heads");
+    console.log("- GET /api/sales/summary");
+    console.log("- GET /api/sales/salesperson-performance");
+    console.log("- GET /api/sales/account-performance");
+    console.log("- GET /api/sales/trend");
+    console.log("- GET /api/sales/jobs");
+    console.log("- GET /api/sales/filters");
+    console.log("- GET /api/sales/performance-intelligence");
+    console.log("- GET /api/sales/debug");
+    console.log("- GET /api/admin/users");
+    console.log("- GET /api/admin/sales-account-mapping/schema-health");
+    console.log("- GET /api/admin/sales-account-mapping/suggestions");
+    console.log("- GET /api/admin/sales-account-mapping/master-accounts");
+    console.log("- GET /api/admin/sales-account-mapping/reps-branches");
+    console.log("- POST /api/admin/sales-account-mapping/approve");
+    console.log("- POST /api/admin/sales-account-mapping/reject");
+    console.log("- POST /api/admin/sales-account-mapping/mark-unmapped");
+    console.log("- POST /api/admin/sales-account-mapping/assign-house");
+    console.log("- GET /api/admin/sales-account-mapping/audit-history");
+    console.log("- GET /api/admin/identity-resolution/schema-health");
+    console.log("- GET /api/admin/identity-resolution/summary");
+    console.log("- POST /api/quote/calculate");
+    console.log("- POST /api/quote/submit");
+    console.log("- GET/PATCH /api/admin/quote-pricing-structures (+/:id)");
+    console.log("- POST /api/admin/quote-pricing-structures");
+    console.log("- GET/PATCH /api/admin/quote-pricing-rules (+/:id)");
+    console.log("- POST /api/admin/quote-pricing-rules");
+    console.log("- GET/PATCH /api/admin/quote-partners (+/:id)");
+    console.log("- POST /api/admin/quote-partners");
+    console.log("- GET/POST /api/admin/quote-partners/:id/pricing-assignment");
+    console.log("- GET /api/admin/quotes");
+    console.log("- GET /api/admin/quotes/:id");
+    console.log("- GET /api/admin/quote-analytics/summary");
+    console.log("- GET /api/admin/reference");
+    console.log("- GET /api/admin/user-management/schema-health");
+    console.log("- POST /api/admin/users/invite");
+    console.log("- GET /api/admin/users/:userId");
+    console.log("- POST /api/admin/users/:userId/profile");
+    console.log("- POST /api/admin/users/:userId/head-access");
+    console.log("- POST /api/admin/users/:userId/dealer-access");
+    console.log("- POST /api/admin/users/:userId/pricing-group");
+    console.log("- POST /api/admin/users/:userId/send-password-reset");
+    console.log("- POST /api/admin/users/:userId/role");
+    console.log("- POST /api/auth/log-login");
+    console.log("- GET /api/brain/sync-runs");
+    console.log("- GET /api/brain/failed-jobs");
+    console.log("- POST /api/admin/sync/recent");
+    console.log("- POST /api/admin/sync/retry-failed");
+    console.log("- GET /api/brain/sync-health");
+    console.log("- GET /api/brain/sync-plan");
+    console.log("- GET /api/executive/summary");
+    console.log("- GET /api/executive/salesperson-performance");
+    console.log("- GET /api/executive/account-performance");
+    console.log("- GET /api/executive/production-flow");
+    console.log("- GET /api/executive/titan-signals");
+    console.log("- GET /api/executive/field-trends");
+    console.log("- GET /api/executive/monthly-trend");
+    console.log("- GET /api/executive/debug");
+    console.log("- GET /api/titans/today");
+    console.log("- POST /api/internal/sync/recent");
+    console.log("- POST /api/internal/sync/nightly");
+    console.log("- POST /api/internal/sync/nightly-operational");
+    console.log("- POST /api/internal/sync/retry-failed");
+  });
+}
 

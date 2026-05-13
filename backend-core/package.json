@@ -1,0 +1,23 @@
+{
+  "name": "backend-core",
+  "private": true,
+  "type": "module",
+  "version": "1.0.0",
+  "description": "eliteOS Brain API (Express) — Vercel + local dev",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=18.18"
+  },
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.105.3",
+    "axios": "^1.16.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "fast-xml-parser": "^5.7.3",
+    "xlsx": "^0.18.5"
+  }
+}

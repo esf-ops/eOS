@@ -60,7 +60,7 @@
     "eos:sales:reconcile-sqft": "node backend-core/src/scripts/reconcileSalesSqftReportToBrain.js",
     "eos:sales:attribution-dry-run": "node backend-core/src/scripts/importSalesAttributionData.js",
     "eos:sales:demote-auto-approved": "node backend-core/src/scripts/demoteAutoApprovedSalesAliases.js",
-    "eos:check:local": "node --check backend-core/src/server.js && npm run eos:test:head-access && npm run eos:build:all-heads",
+    "eos:check:local": "node --check backend-core/src/server.js && node --check backend-core/api/index.js && npm run eos:test:head-access && npm run eos:build:all-heads",
     "lint": "node --check src/index.js && node --check src/morawareClient.js && node --check src/morawareDiscovery.js && node --check src/morawareJobFormsSdk.js && node --check src/firehose.js && node --check src/normalize.js && node --check src/router.js && node --check src/heads/debug.js"
   },
   "dependencies": {
