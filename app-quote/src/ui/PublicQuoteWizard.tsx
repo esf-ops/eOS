@@ -70,6 +70,115 @@ function sanitizeHomeownerWarnings(warnings: string[]): string[] {
   });
 }
 
+function branchDisplayIsGeneric(branch: string | undefined): boolean {
+  const t = String(branch ?? "").trim();
+  if (!t) return true;
+  if (/^elite[\s_-]*team$/i.test(t)) return true;
+  if (/^unknown$/i.test(t)) return true;
+  return false;
+}
+
+function DetailQuestionCard({
+  category,
+  question,
+  children
+}: {
+  category: string;
+  question?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="detail-question-card">
+      <p className="detail-question-card__category">{category}</p>
+      {question ? <h3 className="detail-question-card__question">{question}</h3> : null}
+      {children}
+    </div>
+  );
+}
+
+function TriYesSegments({ name, value, onChange }: { name: string; value: TriYes; onChange: (v: TriYes) => void }) {
+  const opts: { id: TriYes; label: string }[] = [
+    { id: "yes", label: "Yes" },
+    { id: "no", label: "No" },
+    { id: "unsure", label: "Not sure" }
+  ];
+  return (
+    <div className="detail-segment-group">
+      {opts.map((o) => (
+        <label key={o.id} className={`detail-segment ${value === o.id ? "detail-segment--selected" : ""}`}>
+          <input
+            type="radio"
+            name={name}
+            value={o.id}
+            checked={value === o.id}
+            onChange={() => onChange(o.id)}
+            className="detail-segment-input"
+          />
+          <span className="detail-segment-label">{o.label}</span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
+function BacksplashSegments({
+  name,
+  value,
+  onChange
+}: {
+  name: string;
+  value: BacksplashIncl;
+  onChange: (v: BacksplashIncl) => void;
+}) {
+  const opts: { id: BacksplashIncl; label: string }[] = [
+    { id: "yes", label: "Yes, include it" },
+    { id: "no", label: "No backsplash" },
+    { id: "unsure", label: "Not sure" }
+  ];
+  return (
+    <div className="detail-segment-group detail-segment-group--backsplash">
+      {opts.map((o) => (
+        <label key={o.id} className={`detail-segment ${value === o.id ? "detail-segment--selected" : ""}`}>
+          <input
+            type="radio"
+            name={name}
+            value={o.id}
+            checked={value === o.id}
+            onChange={() => onChange(o.id)}
+            className="detail-segment-input"
+          />
+          <span className="detail-segment-label">{o.label}</span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
+function CookAreaOptionCards({ name, value, onChange }: { name: string; value: CookStyle; onChange: (v: CookStyle) => void }) {
+  const opts: { id: CookStyle; label: string }[] = [
+    { id: "cooktop", label: "Cooktop in the countertop" },
+    { id: "freestanding", label: "Freestanding stove/oven" },
+    { id: "unsure", label: "Not sure" }
+  ];
+  return (
+    <div className="detail-option-stack">
+      {opts.map((o) => (
+        <label key={o.id} className={`detail-option-card ${value === o.id ? "detail-option-card--selected" : ""}`}>
+          <input
+            type="radio"
+            name={name}
+            value={o.id}
+            checked={value === o.id}
+            onChange={() => onChange(o.id)}
+            className="detail-segment-input"
+          />
+          <span className="detail-option-card-label">{o.label}</span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
 function EstimateTierCards({ rows, variant = "full" }: { rows: PublicEstimateRow[]; variant?: "full" | "compact" }) {
   return (
     <div className="estimate-display">
@@ -362,10 +471,14 @@ export default function PublicQuoteWizard() {
     if (!usedFallback && calcReachability === "live") {
       return <p className="live-estimate-note">{PUBLIC_WIZARD.liveEstimate}</p>;
     }
+    const browserOffline = typeof navigator !== "undefined" && !navigator.onLine;
     if (calcReachability === "preview_offline") {
-      return <p className="preview-estimate-note preview-estimate-note--offline">{PUBLIC_WIZARD.previewOffline}</p>;
+      const msg = browserOffline ? PUBLIC_WIZARD.previewOfflineBrowser : PUBLIC_WIZARD.previewLiveUnavailable;
+      return (
+        <p className={`preview-estimate-note ${browserOffline ? "preview-estimate-note--offline" : ""}`}>{msg}</p>
+      );
     }
-    return <p className="preview-estimate-note">{PUBLIC_WIZARD.previewEstimate}</p>;
+    return <p className="preview-estimate-note">{PUBLIC_WIZARD.previewLiveUnavailable}</p>;
   }, [groupEstimates?.length, usedFallback, calcReachability]);
 
   const safeCalcWarnings = useMemo(() => sanitizeHomeownerWarnings(calcWarnings), [calcWarnings]);
@@ -639,103 +752,48 @@ export default function PublicQuoteWizard() {
             <h2 className="wizard-step-title">{PUBLIC_WIZARD.step4Title}</h2>
             <p className="wizard-lead">{PUBLIC_WIZARD.step4Lead}</p>
 
-            <fieldset className="wizard-question">
-              <legend>Do you have a kitchen sink that we will need to make an opening for?</legend>
-              <div className="wizard-option-row">
-                <label className="wizard-radio">
-                  <input type="radio" name="sinkAnswer" checked={sinkAnswer === "yes"} onChange={() => setSinkAnswer("yes")} />
-                  Yes
-                </label>
-                <label className="wizard-radio">
-                  <input type="radio" name="sinkAnswer" checked={sinkAnswer === "no"} onChange={() => setSinkAnswer("no")} />
-                  No
-                </label>
-                <label className="wizard-radio">
-                  <input type="radio" name="sinkAnswer" checked={sinkAnswer === "unsure"} onChange={() => setSinkAnswer("unsure")} />
-                  Not sure
-                </label>
-              </div>
-            </fieldset>
+            <div className="step4-details">
+              <DetailQuestionCard category="Kitchen sink" question="Will your countertop need a sink opening?">
+                <TriYesSegments name="sinkAnswer" value={sinkAnswer} onChange={setSinkAnswer} />
+              </DetailQuestionCard>
 
-            <fieldset className="wizard-question">
-              <legend>Do you have a cooktop in the countertop, or do you use a freestanding stove/oven?</legend>
-              <div className="wizard-option-row wizard-option-row--stack">
-                <label className="wizard-radio">
-                  <input type="radio" name="cookAnswer" checked={cookAnswer === "cooktop"} onChange={() => setCookAnswer("cooktop")} />
-                  Cooktop in the countertop
-                </label>
-                <label className="wizard-radio">
-                  <input type="radio" name="cookAnswer" checked={cookAnswer === "freestanding"} onChange={() => setCookAnswer("freestanding")} />
-                  Freestanding stove/oven
-                </label>
-                <label className="wizard-radio">
-                  <input type="radio" name="cookAnswer" checked={cookAnswer === "unsure"} onChange={() => setCookAnswer("unsure")} />
-                  Not sure
-                </label>
-              </div>
-            </fieldset>
+              <DetailQuestionCard category="Cooking area" question="Which one do you have?">
+                <CookAreaOptionCards name="cookAnswer" value={cookAnswer} onChange={setCookAnswer} />
+              </DetailQuestionCard>
 
-            <fieldset className="wizard-question">
-              <legend>We often see 4 inch backsplash with countertop projects. Would you like us to include that in your estimate?</legend>
-              <div className="wizard-option-row wizard-option-row--stack">
-                <label className="wizard-radio">
-                  <input type="radio" name="backsplashChoice" checked={backsplashChoice === "yes"} onChange={() => setBacksplashChoice("yes")} />
-                  Yes, include 4 inch backsplash
-                </label>
-                <label className="wizard-radio">
-                  <input type="radio" name="backsplashChoice" checked={backsplashChoice === "no"} onChange={() => setBacksplashChoice("no")} />
-                  No backsplash
-                </label>
-                <label className="wizard-radio">
-                  <input type="radio" name="backsplashChoice" checked={backsplashChoice === "unsure"} onChange={() => setBacksplashChoice("unsure")} />
-                  Not sure
-                </label>
-              </div>
-            </fieldset>
+              <DetailQuestionCard category="Backsplash" question="Should we include standard 4 inch backsplash?">
+                <BacksplashSegments name="backsplashChoice" value={backsplashChoice} onChange={setBacksplashChoice} />
+              </DetailQuestionCard>
 
-            <fieldset className="wizard-question">
-              <legend>Will Elite need to remove your existing countertops?</legend>
-              <div className="wizard-option-row">
-                <label className="wizard-radio">
-                  <input type="radio" name="tearAnswer" checked={tearAnswer === "yes"} onChange={() => setTearAnswer("yes")} />
-                  Yes
-                </label>
-                <label className="wizard-radio">
-                  <input type="radio" name="tearAnswer" checked={tearAnswer === "no"} onChange={() => setTearAnswer("no")} />
-                  No
-                </label>
-                <label className="wizard-radio">
-                  <input type="radio" name="tearAnswer" checked={tearAnswer === "unsure"} onChange={() => setTearAnswer("unsure")} />
-                  Not sure
-                </label>
-              </div>
-            </fieldset>
+              <DetailQuestionCard category="Removal" question="Do you need us to remove old countertops?">
+                <TriYesSegments name="tearAnswer" value={tearAnswer} onChange={setTearAnswer} />
+              </DetailQuestionCard>
 
-            <fieldset className="wizard-question">
-              <legend>Are there any special details we should know about? (optional)</legend>
-              <p className="muted small wizard-question-hint">Tap any that apply — you can skip this.</p>
-              <div className="specialty-chip-row">
-                {(
-                  [
-                    { id: "full_height", label: "Full-height backsplash" },
-                    { id: "waterfall", label: "Waterfall side" },
-                    { id: "extra_sink", label: "Extra sink" },
-                    { id: "bar", label: "Bar / beverage area" },
-                    { id: "other", label: "Other / not sure" }
-                  ] as const
-                ).map((opt) => (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    className={`specialty-chip ${specialtyTags.includes(opt.id) ? "on" : ""}`}
-                    onClick={() => toggleSpecialtyTag(opt.id)}
-                    aria-pressed={specialtyTags.includes(opt.id)}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </fieldset>
+              <DetailQuestionCard category="Anything else we should know?">
+                <p className="detail-question-card__hint muted small">Tap any that apply. You can skip this.</p>
+                <div className="specialty-chip-row">
+                  {(
+                    [
+                      { id: "full_height", label: "Full-height backsplash" },
+                      { id: "waterfall", label: "Waterfall side" },
+                      { id: "extra_sink", label: "Extra sink" },
+                      { id: "bar", label: "Bar / beverage area" },
+                      { id: "other", label: "Other / not sure" }
+                    ] as const
+                  ).map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      className={`specialty-chip ${specialtyTags.includes(opt.id) ? "on" : ""}`}
+                      onClick={() => toggleSpecialtyTag(opt.id)}
+                      aria-pressed={specialtyTags.includes(opt.id)}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </DetailQuestionCard>
+            </div>
 
             <div className="wizard-nav">
               <button type="button" className="btn secondary big" onClick={() => setStep(3)}>
@@ -815,13 +873,21 @@ export default function PublicQuoteWizard() {
                     <span className="success-ref-value">{submitSuccess.quote_number}</span>
                   </p>
                 ) : null}
-                {(submitSuccess.branch_display || submitSuccess.sales_rep) && (
-                  <div className="success-team">
-                    <h4 className="success-team-heading">{PUBLIC_WIZARD.eliteContactHeading}</h4>
-                    {submitSuccess.branch_display ? <p className="success-team-line">{PUBLIC_WIZARD.eliteBranch(submitSuccess.branch_display)}</p> : null}
-                    {submitSuccess.sales_rep ? <p className="success-team-line">{PUBLIC_WIZARD.eliteMember(submitSuccess.sales_rep)}</p> : null}
-                  </div>
-                )}
+                {(() => {
+                  const branchRaw = submitSuccess.branch_display?.trim() ?? "";
+                  const repRaw = submitSuccess.sales_rep?.trim() ?? "";
+                  const branchOk = branchRaw.length > 0 && !branchDisplayIsGeneric(branchRaw);
+                  if (!branchOk && !repRaw) {
+                    return <p className="success-team-fallback">{PUBLIC_WIZARD.successTeamGeneric}</p>;
+                  }
+                  return (
+                    <div className="success-team">
+                      <h4 className="success-team-heading">{PUBLIC_WIZARD.eliteContactHeading}</h4>
+                      {branchOk ? <p className="success-team-line">{PUBLIC_WIZARD.eliteTeamLine(branchRaw)}</p> : null}
+                      {repRaw ? <p className="success-team-line">{PUBLIC_WIZARD.eliteMemberLine(repRaw)}</p> : null}
+                    </div>
+                  );
+                })()}
                 {submitSuccess.estimates_by_group?.length ? (
                   <div className="success-estimates block-top">
                     <p className="success-estimates-lead">Your planning totals (same as above)</p>

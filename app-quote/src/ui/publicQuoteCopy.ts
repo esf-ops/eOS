@@ -34,15 +34,19 @@ export const PUBLIC_WIZARD = {
   tierTotal: "Estimated total",
 
   liveEstimate: "Live estimate ready.",
-  previewEstimate: "Planning preview on this device. Connect to the internet and tap Calculate again for a live estimate.",
-  previewOffline: "Could not reach the quote server. Please try again or call Elite. Below is a planning preview so you can still compare levels.",
+  /** Shown when live calculate failed but the browser still reports online. */
+  previewLiveUnavailable: "We couldn't refresh the live estimate just now. You can still review the planning estimate below.",
+  /** Shown when `navigator.onLine` is false after a failed live calculate. */
+  previewOfflineBrowser: "You appear to be offline. We're showing a planning preview until you reconnect.",
 
   submitThanks: "Thanks — we received your measurements.",
   submitFollowUp: "Elite will review your details and follow up with you.",
   referenceLabel: "Reference",
   eliteContactHeading: "Your Elite team",
-  eliteBranch: (branch: string) => `Local branch: ${branch}`,
-  eliteMember: (name: string) => `Team member: ${name}`,
+  /** When API does not return a specific branch label. */
+  successTeamGeneric: "Your Elite team will review this request.",
+  eliteTeamLine: (branch: string) => `Elite team: ${branch}`,
+  eliteMemberLine: (name: string) => `Team member: ${name}`,
 
   errorSubmitGeneric: "We could not save your measurements. Please try again or call Elite.",
   errorSubmitUnreachable: "Could not reach the quote server. Please try again or call Elite.",
