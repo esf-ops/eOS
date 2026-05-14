@@ -898,7 +898,8 @@ export default function App() {
                 {PASSWORD_GOVERNANCE_NOTE}
               </p>
               <div className="muted" style={{ marginBottom: 10 }}>
-                Sends a Supabase invite email (no credential fields for invitees appear here).
+                Sends a Supabase invite email (no credential fields for invitees appear here). The user will be routed to
+                eliteOS Home (<code>www.eliteosfab.com</code>) to finish setup—not localhost.
               </div>
               <div className="field" style={{ marginBottom: 6 }}>
                 <label>Email</label>
@@ -975,7 +976,7 @@ export default function App() {
                     const picked = Object.entries(inviteHeadPick)
                       .filter(([, on]) => on)
                       .map(([slug]) => slug);
-                    await apiFetch(`${USER_MGMT_API}/users/invite`, {
+                    const inviteRes = (await apiFetch(`${USER_MGMT_API}/users/invite`, {
                       token: t,
                       method: "POST",
                       body: {
@@ -987,8 +988,13 @@ export default function App() {
                         organization_id: inviteOrganizationId.trim() || undefined,
                         ...(picked.length ? { initial_heads: picked } : {})
                       }
-                    });
-                    pushToast("info", `Invite dispatched for ${inviteEmail.trim()}`);
+                    })) as { setup_hint?: string };
+                    pushToast(
+                      "info",
+                      typeof inviteRes?.setup_hint === "string" && inviteRes.setup_hint.trim()
+                        ? inviteRes.setup_hint.trim()
+                        : "Invite sent. The user will be routed to eliteOS Home to finish setup."
+                    );
                     setInviteEmail("");
                     setInviteName("");
                     setInviteRole("");

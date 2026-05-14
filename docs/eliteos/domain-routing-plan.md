@@ -14,7 +14,8 @@
 | 2 | **app-quote** (eliteOS Public Quote Head) | `app-quote/` | `https://quote.eliteosfab.com` |
 | 3 | **app-internal-estimate** (eliteOS Internal Estimate Head) | `app-internal-estimate/` | `https://internal.eliteosfab.com` **or** `https://estimate.eliteosfab.com` (pick one CNAME; both can exist if product wants aliases) |
 | 4 | **app-pricing-admin** (eliteOS Pricing Admin Head) | `app-pricing-admin/` | `https://pricing.eliteosfab.com` |
-| 5 | **backend-core** (eliteOS Brain API) | `backend-core/` | **`https://api.eliteosfab.com`** (future); today often a `*.vercel.app` API URL |
+| 5 | **app-system-admin** (eliteOS System Admin Head) | `app-system-admin/` | `https://system.eliteosfab.com` |
+| 6 | **backend-core** (eliteOS Brain API) | `backend-core/` | **`https://api.eliteosfab.com`** (future); today often a `*.vercel.app` API URL |
 
 For each project, set **Vercel → Settings → Domains** to the row above. Use **Vercel’s exact DNS target** shown in the UI (do not guess CNAME targets).
 
@@ -28,6 +29,7 @@ For each project, set **Vercel → Settings → Domains** to the row above. Use 
 | `quote` | CNAME | Vercel target for **app-quote** |
 | `internal` or `estimate` | CNAME | Vercel target for **app-internal-estimate** |
 | `pricing` | CNAME | Vercel target for **app-pricing-admin** |
+| `system` | CNAME | Vercel target for **app-system-admin** |
 | `api` | CNAME | Vercel target for **backend-core** (when ready) |
 
 **Apex `eliteosfab.com`:** Redirect to `https://www.eliteosfab.com` (301) at Cloudflare or Vercel, consistent with Supabase **Site URL** below.
@@ -39,9 +41,10 @@ For each project, set **Vercel → Settings → Domains** to the row above. Use 
 ## 3. Supabase Auth (Dashboard → Authentication → URL configuration)
 
 - **Site URL:** `https://www.eliteosfab.com`
-- **Redirect URLs (examples; add exact preview URLs as needed):**
+- **Redirect URLs (required patterns; add exact preview URLs as needed):**
   - `https://www.eliteosfab.com/**`
   - `https://eliteosfab.com/**`
+  - `https://system.eliteosfab.com/**`
   - `https://internal.eliteosfab.com/**`
   - `https://estimate.eliteosfab.com/**`
   - `https://pricing.eliteosfab.com/**`
@@ -56,6 +59,25 @@ For each project, set **Vercel → Settings → Domains** to the row above. Use 
   - `http://localhost:5180/**` — **app-internal-estimate** (eliteOS Internal Estimate Head)
   - `http://localhost:5182/**` — **app-pricing-admin** (eliteOS Pricing Admin Head)
 
+**Invite / magic-link completion:** System Admin sends invites via **`backend-core`** (`inviteUserByEmail`). Set on **backend-core Vercel**:
+
+- **`SUPABASE_INVITE_REDIRECT_URL`** = `https://www.eliteosfab.com/auth/callback`  
+  (Must appear in the Supabase redirect allowlist above.)
+
+Fallbacks in code (if unset): `ELITEOS_HOME_URL` / `HEAD_URL_HOME` / legacy invite envs, then **`https://www.eliteosfab.com/auth/callback`**. Localhost values from `SITE_URL` are **ignored** for invite/recovery redirects so production emails do not point at `http://localhost:3000`.
+
+**app-home SPA routing:** `app-home/vercel.json` rewrites unknown paths to `index.html` so **`/auth/callback`** is not a Vercel 404. After deploy, invite links land in **eliteOS Home**, which parses Supabase tokens (hash or PKCE query), optional **set password** step, then the launcher.
+
+### 3.1 Manual test — System Admin invite (after env + redeploy)
+
+1. Supabase **Site URL** = `https://www.eliteosfab.com`.
+2. Redirect allowlist includes `https://www.eliteosfab.com/**`.
+3. **backend-core** env has `SUPABASE_INVITE_REDIRECT_URL=https://www.eliteosfab.com/auth/callback`.
+4. Redeploy **backend-core**; redeploy **app-home** if `app-home` changed.
+5. Send a **new** invite from System Admin.
+6. Invite email should **not** mention localhost; **Accept** should open **www** (not 404).
+7. Complete password (or skip), confirm **launcher** and **assigned heads**.
+
 ---
 
 ## 4. eliteOS Brain / API CORS (`backend-core` Vercel env)
@@ -67,6 +89,7 @@ Set **`EOS_ALLOWED_ORIGINS`** and/or **`ALLOWED_ORIGINS`** (comma-separated, **n
 - `https://quote.eliteosfab.com`
 - `https://internal.eliteosfab.com` and/or `https://estimate.eliteosfab.com`
 - `https://pricing.eliteosfab.com`
+- `https://system.eliteosfab.com`
 - Each active **`https://*.vercel.app`** preview origin used by the heads above
 
 `backend-core` also resolves **deployment URLs** for the launcher from **`HEAD_URL_*`** (see `backend-core/.env.example`).
@@ -85,6 +108,7 @@ Canonical keys live in `backend-core/src/me/headDeploymentUrls.js`. Minimum set 
 | `HEAD_URL_EXECUTIVE` | eliteOS Executive Head |
 | `HEAD_URL_BRAIN_HEALTH` | eliteOS Brain Health Head |
 | `HEAD_URL_SYSTEM_ADMIN` | eliteOS System Admin Head |
+| `HEAD_URL_HOME` | eliteOS Home / Launcher (`app-home`); also used as invite redirect fallback when building `…/auth/callback` |
 | `HEAD_URL_SALES` | eliteOS Sales Head |
 
 **app-home** may use **`VITE_HEAD_URL_*`** and **`VITE_BACKEND_URL`** as SPA fallbacks; production should prefer URLs returned by **`GET /api/me/heads`**.

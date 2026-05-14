@@ -1,8 +1,25 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { ApiError, apiFetch } from "../lib/api";
 import { EOS_LOGO_URL, resolveHeadLaunchUrl } from "../lib/config";
 import { supabase } from "../lib/supabase";
+
+function readOAuthErrorFromBrowser(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const qs = new URLSearchParams(window.location.search);
+    const qerr = (qs.get("error_description") || qs.get("error") || "").trim();
+    if (qerr) return decodeURIComponent(qerr.replace(/\+/g, " "));
+    const rawHash = (window.location.hash || "").replace(/^#/, "").trim();
+    if (!rawHash) return null;
+    const hp = new URLSearchParams(rawHash);
+    const herr = (hp.get("error_description") || hp.get("error") || "").trim();
+    if (herr) return decodeURIComponent(herr.replace(/\+/g, " "));
+  } catch {
+    return null;
+  }
+  return null;
+}
 
 type MeUser = {
   id: string;
@@ -121,6 +138,22 @@ export default function App() {
   const [loadingData, setLoadingData] = useState(false);
   const [refreshBusy, setRefreshBusy] = useState(false);
 
+  const bootUrlRef = useRef<{ path: string; hash: string; search: string } | null>(null);
+  if (bootUrlRef.current === null && typeof window !== "undefined") {
+    bootUrlRef.current = {
+      path: window.location.pathname,
+      hash: window.location.hash,
+      search: window.location.search
+    };
+  }
+
+  const [urlFlowError, setUrlFlowError] = useState("");
+  const [invitePasswordGate, setInvitePasswordGate] = useState(false);
+  const [invitePw, setInvitePw] = useState("");
+  const [invitePw2, setInvitePw2] = useState("");
+  const [invitePwBusy, setInvitePwBusy] = useState(false);
+  const [invitePwErr, setInvitePwErr] = useState("");
+
   const hydrate = useCallback(async (token: string) => {
     const t = String(token ?? "").trim();
     if (!t) return;
@@ -141,6 +174,48 @@ export default function App() {
       setLoadingData(false);
     }
   }, []);
+
+  useLayoutEffect(() => {
+    const err = readOAuthErrorFromBrowser();
+    if (!err) return;
+    setUrlFlowError(err);
+    window.history.replaceState({}, document.title, window.location.pathname);
+  }, []);
+
+  useEffect(() => {
+    const snap = bootUrlRef.current;
+    if (!snap || urlFlowError) return;
+    const expectsEmailLink =
+      /^\/auth\/callback\/?$/i.test(snap.path) ||
+      /access_token=/.test(snap.hash) ||
+      /\bcode=/.test(snap.search);
+    if (!expectsEmailLink) return;
+    const timer = window.setTimeout(async () => {
+      const { data } = await supabase.auth.getSession();
+      if (!data.session) {
+        setUrlFlowError(
+          "This invite link is expired or invalid. Please ask your admin to send a new invite."
+        );
+        window.history.replaceState({}, document.title, "/");
+      }
+    }, 5000);
+    return () => window.clearTimeout(timer);
+  }, [urlFlowError]);
+
+  useEffect(() => {
+    const token = String(session?.access_token ?? "").trim();
+    if (!token || urlFlowError) return;
+    const snap = bootUrlRef.current;
+    if (!snap) return;
+    const cameFromEmailLink =
+      /^\/auth\/callback\/?$/i.test(snap.path) ||
+      /access_token=/.test(snap.hash) ||
+      /\bcode=/.test(snap.search);
+    if (!cameFromEmailLink) return;
+    setInvitePasswordGate(true);
+    window.history.replaceState({}, document.title, "/");
+    bootUrlRef.current = { path: "/", hash: "", search: "" };
+  }, [session, urlFlowError]);
 
   const reloadAccess = useCallback(async () => {
     const t = String(accessToken ?? "").trim();
@@ -179,6 +254,10 @@ export default function App() {
         setMe(null);
         setHeadsPayload(null);
         setLoadError("");
+        setInvitePasswordGate(false);
+        setInvitePw("");
+        setInvitePw2("");
+        setInvitePwErr("");
         return;
       }
 
@@ -217,7 +296,44 @@ export default function App() {
   }
 
   async function signOutClick() {
+    setInvitePasswordGate(false);
+    setInvitePw("");
+    setInvitePw2("");
+    setInvitePwErr("");
+    setUrlFlowError("");
     await supabase.auth.signOut();
+  }
+
+  async function submitInvitePassword(ev: React.FormEvent) {
+    ev.preventDefault();
+    setInvitePwErr("");
+    if (invitePw.length < 8) {
+      setInvitePwErr("Use at least 8 characters.");
+      return;
+    }
+    if (invitePw !== invitePw2) {
+      setInvitePwErr("Passwords do not match.");
+      return;
+    }
+    setInvitePwBusy(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password: invitePw });
+      if (error) throw error;
+      setInvitePasswordGate(false);
+      setInvitePw("");
+      setInvitePw2("");
+    } catch (e: unknown) {
+      setInvitePwErr(String((e as Error)?.message ?? e));
+    } finally {
+      setInvitePwBusy(false);
+    }
+  }
+
+  function skipInvitePassword() {
+    setInvitePasswordGate(false);
+    setInvitePw("");
+    setInvitePw2("");
+    setInvitePwErr("");
   }
 
   const assignableHeads = useMemo(() => {
@@ -274,6 +390,11 @@ export default function App() {
       <main className="main">
         {!showShell ? (
           <div className="login-panel">
+            {urlFlowError ? (
+              <div className="banner banner-error" style={{ marginBottom: 16 }}>
+                {urlFlowError}
+              </div>
+            ) : null}
             <div className="brand-row" style={{ marginBottom: 16 }}>
               <img src={EOS_LOGO_URL} alt="" style={{ height: 48 }} />
               <div className="brand-text">
@@ -317,6 +438,45 @@ export default function App() {
               Authentication uses Supabase (anon key only). No Moraware credentials or service role keys are used in this
               app.
             </p>
+          </div>
+        ) : invitePasswordGate ? (
+          <div className="login-panel" style={{ maxWidth: 440 }}>
+            <h2 style={{ marginTop: 0 }}>Finish your eliteOS account</h2>
+            <p className="subtitle" style={{ marginBottom: 16 }}>
+              You signed in from an invite or reset link. Set a password you can use with email sign-in, or continue to the
+              launcher and set it later in Supabase Account settings.
+            </p>
+            <form onSubmit={(e) => void submitInvitePassword(e)}>
+              <div className="field">
+                <label htmlFor="invite-pw">New password</label>
+                <input
+                  id="invite-pw"
+                  type="password"
+                  autoComplete="new-password"
+                  value={invitePw}
+                  onChange={(e) => setInvitePw(e.target.value)}
+                  minLength={8}
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="invite-pw2">Confirm password</label>
+                <input
+                  id="invite-pw2"
+                  type="password"
+                  autoComplete="new-password"
+                  value={invitePw2}
+                  onChange={(e) => setInvitePw2(e.target.value)}
+                  minLength={8}
+                />
+              </div>
+              {invitePwErr ? <div className="banner banner-error" style={{ marginBottom: 12 }}>{invitePwErr}</div> : null}
+              <button type="submit" className="btn btn-primary" disabled={invitePwBusy}>
+                {invitePwBusy ? "Saving…" : "Save password & continue"}
+              </button>
+            </form>
+            <button type="button" className="btn btn-ghost" style={{ marginTop: 12 }} onClick={skipInvitePassword}>
+              Skip for now — go to launcher
+            </button>
           </div>
         ) : (
           <>

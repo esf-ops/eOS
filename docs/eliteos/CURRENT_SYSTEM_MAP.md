@@ -195,7 +195,8 @@ Scripts under `backend-core/supabase/` define install order and intent; **produc
 - **Invite:** **`heads` / `initial_heads`** only applied when explicitly sent—omission **does not** replace head access with an empty set (defaults remain until assigned).
 - **Head labels:** UI uses **`head_catalog`** from **`GET .../reference`** for friendlier names (e.g. internal estimate alias for `quote`).
 - **`estimator` role:** in **code** list + **SQL file** for DB check constraint—**may require manual SQL** in Supabase.
-- **Gaps:** Docs and **manual test scripts** may lag; confirm **invite email** delivery and **first-login head visibility** for a fresh user; **no SSO handoff** yet.
+- **Invite emails:** **`backend-core`** passes **`redirectTo`** from **`SUPABASE_INVITE_REDIRECT_URL`** (default `https://www.eliteosfab.com/auth/callback`) so links are **not** tied to localhost `SITE_URL`. Invited users finish setup in **eliteOS Home** (`app-home` + `vercel.json` SPA rewrite for `/auth/callback`).
+- **Manual invite test:** see **`docs/eliteos/domain-routing-plan.md` §3.1**.
 
 ---
 

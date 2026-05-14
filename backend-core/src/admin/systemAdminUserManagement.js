@@ -11,6 +11,56 @@ function pickStr(v) {
   return v != null ? String(v).trim() : "";
 }
 
+const DEFAULT_ELITEOS_INVITE_CALLBACK = "https://www.eliteosfab.com/auth/callback";
+
+function isLocalhostRedirectUrl(url) {
+  try {
+    const h = new URL(url).hostname.toLowerCase();
+    return h === "localhost" || h === "127.0.0.1" || h === "[::1]";
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * URL embedded in Supabase invite / recovery emails (`redirectTo`).
+ * Prefer `SUPABASE_INVITE_REDIRECT_URL`; never fall back to localhost unless that var is set explicitly.
+ */
+function resolveAuthEmailRedirectTo() {
+  const explicit = pickStr(process.env.SUPABASE_INVITE_REDIRECT_URL);
+  if (explicit) return explicit.replace(/\/+$/, "");
+
+  const originCandidates = [
+    pickStr(process.env.ELITEOS_HOME_URL),
+    pickStr(process.env.HEAD_URL_HOME),
+    pickStr(process.env.EOS_ADMIN_INVITE_REDIRECT_URL),
+    pickStr(process.env.SUPABASE_AUTH_REDIRECT),
+    pickStr(process.env.SITE_URL)
+  ];
+
+  for (const raw of originCandidates) {
+    if (!raw) continue;
+    let base = raw.replace(/\/+$/, "");
+    if (!/\/auth\/callback$/i.test(base)) {
+      base = `${base}/auth/callback`;
+    }
+    if (!isLocalhostRedirectUrl(base)) return base;
+  }
+
+  return DEFAULT_ELITEOS_INVITE_CALLBACK;
+}
+
+/** Password recovery emails — optional dedicated env, else same as invite callback. */
+function resolvePasswordRecoveryRedirectTo() {
+  const pw = pickStr(process.env.EOS_ADMIN_PASSWORD_RECOVERY_REDIRECT_URL);
+  if (pw) {
+    let base = pw.replace(/\/+$/, "");
+    if (!/\/auth\/callback$/i.test(base)) base = `${base}/auth/callback`;
+    return base;
+  }
+  return resolveAuthEmailRedirectTo();
+}
+
 async function enrichUserProfilesList(supabase, rows) {
   if (!Array.isArray(rows) || rows.length === 0) return rows;
   const ids = rows.map((r) => String(r.id));
@@ -368,16 +418,10 @@ export function attachAdvancedSystemAdminUserRoutes(app, ctx) {
       const emailLower = emailRaw.toLowerCase();
       if (!emailLower) return res.status(400).json({ ok: false, error: "email required" });
 
-      const redirectCandidate = pickStr(
-        process.env.EOS_ADMIN_INVITE_REDIRECT_URL ||
-          process.env.SUPABASE_AUTH_REDIRECT ||
-          process.env.SITE_URL ||
-          ""
-      );
-      const redirectTo = redirectCandidate || undefined;
+      const redirectTo = resolveAuthEmailRedirectTo();
 
       const fullNameInvite = req.body?.full_name != null ? pickStr(req.body.full_name) || null : null;
-      const inviteOptions = redirectTo ? { redirectTo } : {};
+      const inviteOptions = { redirectTo };
       if (fullNameInvite) inviteOptions.data = { full_name: fullNameInvite };
 
       const inviteResp = await sb.auth.admin.inviteUserByEmail(emailLower, inviteOptions);
@@ -444,7 +488,13 @@ export function attachAdvancedSystemAdminUserRoutes(app, ctx) {
         req
       });
 
-      res.json({ ok: true, user_id: uid, email: emailLower, heads: appliedHeads });
+      res.json({
+        ok: true,
+        user_id: uid,
+        email: emailLower,
+        heads: appliedHeads,
+        setup_hint: "Invite sent. The user will be routed to eliteOS Home to finish setup."
+      });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
     }
@@ -659,17 +709,9 @@ export function attachAdvancedSystemAdminUserRoutes(app, ctx) {
       const email = pickStr(profile?.email);
       if (!email) return res.status(404).json({ ok: false, error: "Email not found on profile" });
 
-      const redirectCandidate = pickStr(
-        process.env.EOS_ADMIN_PASSWORD_RECOVERY_REDIRECT_URL ||
-          process.env.SUPABASE_AUTH_REDIRECT ||
-          process.env.SITE_URL ||
-          ""
-      );
+      const redirectTo = resolvePasswordRecoveryRedirectTo();
 
-      const linkParams =
-        redirectCandidate ?
-          { type: "recovery", email, options: { redirectTo: redirectCandidate } }
-        : { type: "recovery", email };
+      const linkParams = { type: "recovery", email, options: { redirectTo } };
 
       const generated = await sb.auth.admin.generateLink(linkParams);
 

@@ -46,7 +46,8 @@
 
 | Surface | URL |
 |---------|-----|
-| **Home / Launcher Head (`app-home`)** | **`https://www.eliteosfab.com`** — **eliteOS Home**; central Supabase sign-in and **eliteOS Launcher** (calls `GET /api/me`, `GET /api/me/heads`). |
+| **Home / Launcher Head (`app-home`)** | **`https://www.eliteosfab.com`** — **eliteOS Home**; central Supabase sign-in and **eliteOS Launcher** (calls `GET /api/me`, `GET /api/me/heads`). **Invite / recovery links** from System Admin should use **`SUPABASE_INVITE_REDIRECT_URL`** (e.g. `https://www.eliteosfab.com/auth/callback`) so magic links complete here—not on localhost. |
+| **System Admin Head (`app-system-admin`)** | **`https://system.eliteosfab.com`** — user management; invites are sent **server-side** from **backend-core** with `redirectTo` pointing at **eliteOS Home**. |
 | **Public Quote Head (`app-quote`)** | **`https://quote.eliteosfab.com`** — **eliteOS Public Quote Head** |
 | **Public Quote (Vercel fallback)** | https://eliteos-quote.vercel.app |
 | **Internal Estimate Head (`app-internal-estimate`)** | **`https://internal.eliteosfab.com`** or **`https://estimate.eliteosfab.com`**; until DNS cutover, set **`HEAD_URL_INTERNAL_ESTIMATE`**. **eliteOS Internal Estimate Head** — staff auth required. |
