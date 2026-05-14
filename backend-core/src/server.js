@@ -10,12 +10,8 @@ import cors from "cors";
 
 import { ALLOWED_ROLES, requireAuth, requireRole } from "./auth/authMiddleware.js";
 import { requireHeadAccess } from "./auth/headAccessMiddleware.js";
-import { isApplicationRole } from "./auth/eosGovernanceConstants.js";
 import { logAction, logLoginEvent } from "./auth/auditLog.js";
-import {
-  attachAdvancedSystemAdminUserRoutes,
-  enrichUserProfileRowsForAdminList
-} from "./admin/systemAdminUserManagement.js";
+import { attachAdvancedSystemAdminUserRoutes } from "./admin/systemAdminUserManagement.js";
 import { attachSalesAccountMappingAdminRoutes } from "./admin/salesAccountMappingAdmin.js";
 import { attachIdentityResolutionAdminRoutes } from "./admin/identityResolutionAdmin.js";
 import { attachQuoteRoutes } from "./quotes/quoteRoutes.js";
@@ -888,76 +884,6 @@ attachSalesHeadRoutes(app, {
   getSupabase: supabaseServerClient
 });
 
-app.get(
-  "/api/admin/users",
-  requireAuth(),
-  requireRole(["admin", "executive"]),
-  headAccessSystemAdmin,
-  async (_req, res) => {
-  try {
-    const supabase = supabaseServerClient();
-    const { data, error } = await supabase
-      .from("user_profiles")
-      .select("id,email,full_name,role,department,is_active,user_kind,last_login_at,created_at,updated_at")
-      .order("role", { ascending: true })
-      .order("full_name", { ascending: true })
-      .order("email", { ascending: true });
-    if (error) throw new Error(error.message);
-    let rows = data ?? [];
-    try {
-      rows = await enrichUserProfileRowsForAdminList(supabase, rows);
-    } catch (e) {
-      console.warn("GET /api/admin/users enrich skipped:", String(e?.message || e));
-    }
-    res.json({ ok: true, rows });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: String(e?.message || e) });
-  }
-});
-
-app.post("/api/admin/users/:userId/role", requireAuth(), requireRole(["admin"]), express.json(), async (req, res) => {
-  try {
-    const userId = String(req.params.userId ?? "").trim();
-    if (!userId) return res.status(400).json({ ok: false, error: "userId required" });
-
-    const role = req.body?.role != null ? String(req.body.role).trim() : "";
-    const isActive =
-      req.body?.is_active == null ? null : Boolean(req.body.is_active);
-
-    if (role && !isApplicationRole(role)) {
-      return res.status(400).json({ ok: false, error: `Invalid role: ${role}` });
-    }
-
-    const patch = { updated_at: new Date().toISOString() };
-    if (role) patch.role = role;
-    if (isActive != null) patch.is_active = isActive;
-
-    const supabase = supabaseServerClient();
-    const { data, error } = await supabase
-      .from("user_profiles")
-      .update(patch)
-      .eq("id", userId)
-      .select("id,email,full_name,role,department,is_active,user_kind,last_login_at")
-      .limit(1);
-    if (error) throw new Error(error.message);
-
-    await logAction({
-      user: req.user,
-      head: "admin",
-      actionType: "update_user_role",
-      entityType: "user_profile",
-      entityId: userId,
-      jobId: null,
-      metadata: { role: role || null, is_active: isActive },
-      req
-    });
-
-    res.json({ ok: true, user: data?.[0] ?? null });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: String(e?.message || e) });
-  }
-});
-
 attachAdvancedSystemAdminUserRoutes(app, { supabaseServerClient });
 
 attachSalesAccountMappingAdminRoutes(app, {
@@ -1388,7 +1314,7 @@ if (shouldStartLocalHttpServer()) {
     console.log("- GET /api/sales/filters");
     console.log("- GET /api/sales/performance-intelligence");
     console.log("- GET /api/sales/debug");
-    console.log("- GET /api/admin/users");
+    console.log("- GET /api/admin/users  (alias: GET /api/system-admin/users)");
     console.log("- GET /api/admin/sales-account-mapping/schema-health");
     console.log("- GET /api/admin/sales-account-mapping/suggestions");
     console.log("- GET /api/admin/sales-account-mapping/master-accounts");
@@ -1413,15 +1339,15 @@ if (shouldStartLocalHttpServer()) {
     console.log("- GET /api/admin/quotes/:id");
     console.log("- GET /api/admin/quote-analytics/summary");
     console.log("- GET /api/admin/reference");
-    console.log("- GET /api/admin/user-management/schema-health");
-    console.log("- POST /api/admin/users/invite");
-    console.log("- GET /api/admin/users/:userId");
-    console.log("- POST /api/admin/users/:userId/profile");
-    console.log("- POST /api/admin/users/:userId/head-access");
-    console.log("- POST /api/admin/users/:userId/dealer-access");
-    console.log("- POST /api/admin/users/:userId/pricing-group");
-    console.log("- POST /api/admin/users/:userId/send-password-reset");
-    console.log("- POST /api/admin/users/:userId/role");
+    console.log("- GET /api/admin/user-management/schema-health  (alias: /api/system-admin/...)");
+    console.log("- POST /api/admin/users/invite  (alias: POST /api/system-admin/users/invite)");
+    console.log("- GET /api/admin/users/:userId  (alias: GET /api/system-admin/users/:userId)");
+    console.log("- POST /api/admin/users/:userId/profile  (alias: …/system-admin/…)");
+    console.log("- POST /api/admin/users/:userId/head-access  (alias: …/system-admin/…)");
+    console.log("- POST /api/admin/users/:userId/dealer-access  (alias: …/system-admin/…)");
+    console.log("- POST /api/admin/users/:userId/pricing-group  (alias: …/system-admin/…)");
+    console.log("- POST /api/admin/users/:userId/send-password-reset  (alias: …/system-admin/…)");
+    console.log("- POST /api/admin/users/:userId/role  (alias: …/system-admin/…)");
     console.log("- POST /api/auth/log-login");
     console.log("- GET /api/brain/sync-runs");
     console.log("- GET /api/brain/failed-jobs");

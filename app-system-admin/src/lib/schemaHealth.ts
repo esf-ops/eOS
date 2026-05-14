@@ -1,7 +1,7 @@
 import { config } from "./config";
 
-/** Must match backend route in `systemAdminUserManagement.js`. */
-export const SCHEMA_HEALTH_PATH = "/api/admin/user-management/schema-health";
+/** Mounted at `/api/admin/...` and `/api/system-admin/...` in `systemAdminUserManagement.js`. */
+export const SCHEMA_HEALTH_PATH = "/api/system-admin/user-management/schema-health";
 
 export type SchemaHealthResp = {
   ok?: boolean;

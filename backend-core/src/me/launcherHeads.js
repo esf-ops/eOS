@@ -183,12 +183,12 @@ function defaultSlugSet(role, userKind) {
   const base = new Set(["brain_health"]);
   const roleHints = {
     sales: ["sales", "quote", "reports"],
+    estimator: ["quote", "reports"],
     accounting: ["finance", "reports", "pricing_admin"],
     production: ["production", "shop_tv", "reports"],
     shop_tv: ["shop_tv"],
     installer: ["install"],
     purchasing: ["purchasing"],
-    accounting: ["finance", "reports"],
     finance: ["finance", "reports", "pricing_admin"],
     dealer_admin: ["partner_quote", "dealer_resources", "quote"],
     dealer_user: ["partner_quote", "dealer_resources", "quote"],

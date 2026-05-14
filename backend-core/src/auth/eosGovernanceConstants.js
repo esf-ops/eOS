@@ -72,7 +72,8 @@ export const APPLICATION_ROLES = Object.freeze([
   "dealer_admin",
   "dealer_user",
   "viewer",
-  "finance"
+  "finance",
+  "estimator"
 ]);
 
 const _roleSet = new Set(APPLICATION_ROLES);

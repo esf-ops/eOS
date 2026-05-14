@@ -8,9 +8,33 @@ import IdentityResolutionReadiness from "./IdentityResolutionReadiness";
 import QuotePricingAdminView from "./QuotePricingAdminView";
 import QuotePipelinePanel from "./QuotePipelinePanel";
 
+/** User-management router is mounted here and under `/api/admin` (same handlers). */
+const USER_MGMT_API = "/api/system-admin";
+
 /** Visible near credential actions — admins never observe other users’ secrets. */
 const PASSWORD_GOVERNANCE_NOTE =
   "Passwords are managed by Supabase Auth. Admins can invite users or send reset links, but cannot view passwords.";
+
+type HeadCatalogEntry = {
+  slug: string;
+  title: string;
+  description?: string | null;
+  ui_alias?: string | null;
+};
+
+function privilegedApplicationRole(role: unknown): boolean {
+  const r = String(role ?? "").trim().toLowerCase();
+  return r === "admin" || r === "super_admin";
+}
+
+function headDisplayLabel(slug: string, catalog: HeadCatalogEntry[] | undefined): string {
+  const row = catalog?.find((x) => x.slug === slug);
+  const title = String(row?.title ?? "").trim();
+  const alias = row?.ui_alias ? String(row.ui_alias).replace(/_/g, " ") : "";
+  if (title && alias) return `${title} (${alias})`;
+  if (title) return title;
+  return slug;
+}
 
 type MeResp = {
   ok: boolean;
@@ -39,6 +63,7 @@ type AdminRow = Record<string, unknown> & {
   last_login_at?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
+  organization_id?: string | null;
   allowed_heads_list?: string[];
   dealer_access?: DealerAccessBrief[];
 };
@@ -46,6 +71,7 @@ type AdminRow = Record<string, unknown> & {
 type ReferenceResp = {
   ok: boolean;
   heads: string[];
+  head_catalog?: HeadCatalogEntry[];
   roles: string[];
   dealers: { id: string; account_name: string }[];
   pricing_groups: { id: string; code: string; label: string | null }[];
@@ -101,6 +127,16 @@ function UserSnapshot({ profile, detail }: { profile: AdminRow; detail: UserDeta
         <dd>{String(profile.role ?? "—")}</dd>
         <dt>Department</dt>
         <dd>{String(profile.department ?? "—")}</dd>
+        <dt>Organization</dt>
+        <dd>
+          {profile.organization_id ? (
+            <code style={{ fontSize: 12 }} title={String(profile.organization_id)}>
+              {String(profile.organization_id)}
+            </code>
+          ) : (
+            "—"
+          )}
+        </dd>
         <dt>User kind</dt>
         <dd>
           {(dbKind || normKind || "internal").trim()}
@@ -222,6 +258,9 @@ export default function App() {
   const [inviteName, setInviteName] = useState("");
   const [inviteRole, setInviteRole] = useState("");
   const [inviteKind, setInviteKind] = useState<string>("internal");
+  const [inviteDepartment, setInviteDepartment] = useState("");
+  const [inviteOrganizationId, setInviteOrganizationId] = useState("");
+  const [inviteHeadPick, setInviteHeadPick] = useState<Record<string, boolean>>({});
   const [inviteBusy, setInviteBusy] = useState(false);
 
   function pushToast(kind: "info" | "error", text: string) {
@@ -229,14 +268,14 @@ export default function App() {
     window.setTimeout(() => setToast(null), 4500);
   }
 
-  const isAdmin = String(me?.user?.role ?? "") === "admin";
+  const canOperate = privilegedApplicationRole(me?.user?.role);
 
   const loadCore = useCallback(
     async (token: string) => {
       setListError("");
       const m = (await apiFetch("/api/me", { token })) as MeResp;
       setMe(m);
-      if (m.user.role !== "admin") {
+      if (!privilegedApplicationRole(m.user.role)) {
         setRows([]);
         setReference(null);
         setSchemaHealthResult(null);
@@ -244,7 +283,7 @@ export default function App() {
         setSchemaHealthDevMeta(null);
         setSelectedId(null);
         setDetail(null);
-        setListError("This head requires admin role.");
+        setListError("This head requires admin or super_admin role.");
         return;
       }
 
@@ -252,7 +291,7 @@ export default function App() {
       setSchemaHealthProbeError(null);
       if (import.meta.env.DEV) setSchemaHealthDevMeta(null);
 
-      const ref = (await apiFetch("/api/admin/reference", { token })) as ReferenceResp;
+      const ref = (await apiFetch(`${USER_MGMT_API}/reference`, { token })) as ReferenceResp;
       setReference(ref);
 
       const probe = await fetchSchemaHealth(token);
@@ -284,7 +323,7 @@ export default function App() {
           });
         }
       }
-      const roster = (await apiFetch("/api/admin/users", { token })) as { ok?: boolean; rows?: AdminRow[] };
+      const roster = (await apiFetch(`${USER_MGMT_API}/users`, { token })) as { ok?: boolean; rows?: AdminRow[] };
       setRows(Array.isArray(roster.rows) ? roster.rows : []);
     },
     [setMe]
@@ -331,12 +370,12 @@ export default function App() {
   useEffect(() => {
     async function loadDetail() {
       const token = String(sessionToken ?? "").trim();
-      if (!token || !isAdmin || !selectedId) {
+      if (!token || !canOperate || !selectedId) {
         setDetail(null);
         return;
       }
       try {
-        const d = (await apiFetch(`/api/admin/users/${encodeURIComponent(selectedId)}`, {
+        const d = (await apiFetch(`${USER_MGMT_API}/users/${encodeURIComponent(selectedId)}`, {
           token
         })) as UserDetailResp;
         setDetail(d);
@@ -345,7 +384,7 @@ export default function App() {
       }
     }
     void loadDetail();
-  }, [selectedId, sessionToken, isAdmin]);
+  }, [selectedId, sessionToken, canOperate]);
 
   const departments = useMemo(() => {
     const ds = [...new Set(rows.map((r) => String(r.department ?? "").trim()).filter(Boolean))];
@@ -361,13 +400,25 @@ export default function App() {
     let admins = 0;
     for (const r of rows) {
       if (r.is_active !== false) active++;
-      if (String(r.role ?? "").trim().toLowerCase() === "admin") admins++;
+      const rl = String(r.role ?? "").trim().toLowerCase();
+      if (rl === "admin" || rl === "super_admin") admins++;
       const kind = String(r.user_kind_normalized ?? "internal");
       if (kind === "dealer_partner") dealer++;
       else internal++;
     }
     return { total, active, internal, dealer, admins };
   }, [rows]);
+
+  const referenceHeadsKey = useMemo(() => (reference?.heads ?? []).join("|"), [reference?.heads]);
+
+  useEffect(() => {
+    const h = reference?.heads ?? [];
+    setInviteHeadPick((prev) => {
+      const next: Record<string, boolean> = {};
+      for (const slug of h) next[slug] = prev[slug] === true;
+      return next;
+    });
+  }, [referenceHeadsKey]);
 
   const schemaTablesHealthy = useMemo(() => {
     const t = schemaHealthResult?.tables;
@@ -450,7 +501,7 @@ export default function App() {
     try {
       await loadCore(t);
       if (selectedId) {
-        const d = (await apiFetch(`/api/admin/users/${encodeURIComponent(selectedId)}`, { token: t })) as UserDetailResp;
+        const d = (await apiFetch(`${USER_MGMT_API}/users/${encodeURIComponent(selectedId)}`, { token: t })) as UserDetailResp;
         setDetail(d);
       }
     } catch (e: unknown) {
@@ -507,7 +558,7 @@ export default function App() {
           <div className="muted">{me?.user?.email} · session active</div>
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          {!isAdmin ? <span style={{ color: "#f97316" }}>{listError}</span> : null}
+          {!canOperate ? <span style={{ color: "#f97316" }}>{listError}</span> : null}
           <button
             type="button"
             className={`btn ${activeView === "users" ? "btn-primary" : ""}`}
@@ -576,10 +627,10 @@ export default function App() {
         </div>
       </div>
 
-      {!isAdmin ? (
+      {!canOperate ? (
         <div className="panel">
           <h2 style={{ marginTop: 0 }}>Access denied</h2>
-          <p className="muted">Only admins can operate this management head.</p>
+          <p className="muted">Only admin or super_admin roles can operate this management head.</p>
         </div>
       ) : (
         <div className="layout">
@@ -688,9 +739,9 @@ export default function App() {
                 <div className="stat-value">{rosterStats.dealer}</div>
                 <div className="stat-label">Dealer users</div>
               </div>
-              <div className="stat-card">
+                <div className="stat-card">
                 <div className="stat-value">{rosterStats.admins}</div>
-                <div className="stat-label">Admins</div>
+                <div className="stat-label">Admin / super_admin</div>
               </div>
             </div>
 
@@ -743,7 +794,7 @@ export default function App() {
                   <option value="">Any head</option>
                   {(reference?.heads ?? []).map((h) => (
                     <option key={h} value={h}>
-                      {h}
+                      {headDisplayLabel(h, reference?.head_catalog)}
                     </option>
                   ))}
                 </select>
@@ -781,36 +832,58 @@ export default function App() {
               filters.
             </p>
 
-            {listError && isAdmin ? <p style={{ color: "#fdba74" }}>{listError}</p> : null}
+            {listError && canOperate ? <p style={{ color: "#fdba74" }}>{listError}</p> : null}
 
             <div className="table-scroll">
               <table className="simple">
                 <thead>
                   <tr>
-                    <th>Email</th>
                     <th>Name</th>
+                    <th>Email</th>
                     <th>Role</th>
                     <th>Dept</th>
+                    <th>Organization</th>
+                    <th>Heads</th>
                     <th>Kind</th>
                     <th>Dealer</th>
                     <th>Pricing</th>
                     <th>Status</th>
+                    <th>Created</th>
                     <th>Last login</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredRows.map((r) => (
                     <tr key={String(r.id)} style={{ cursor: "pointer", background: r.id === selectedId ? "rgba(59,130,246,.12)" : "" }} onClick={() => setSelectedId(String(r.id))}>
-                      <td>{String(r.email ?? "")}</td>
                       <td>{String(r.full_name ?? "")}</td>
+                      <td>{String(r.email ?? "")}</td>
                       <td>{String(r.role ?? "")}</td>
                       <td>{String(r.department ?? "—")}</td>
+                      <td>
+                        {r.organization_id ? (
+                          <code style={{ fontSize: 11 }} title={String(r.organization_id)}>
+                            {String(r.organization_id).slice(0, 8)}…
+                          </code>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td style={{ maxWidth: 200, fontSize: 12 }} className="muted">
+                        {(() => {
+                          const hl = [...new Set(r.allowed_heads_list ?? [])].sort((a, b) => a.localeCompare(b));
+                          if (!hl.length) return "—";
+                          const shown = hl.slice(0, 6);
+                          const tail = hl.length > 6 ? ` +${hl.length - 6}` : "";
+                          return `${shown.join(", ")}${tail}`;
+                        })()}
+                      </td>
                       <td>{String(r.user_kind_normalized ?? "internal")}</td>
                       <td>{String(r.dealer_account_name_primary ?? "—")}</td>
                       <td>{String(r.pricing_group_summary ?? "—")}</td>
                       <td>
                         <span className={`pill ${r.is_active !== false ? "pill-good" : "pill-bad"}`}>{r.is_active !== false ? "active" : "inactive"}</span>
                       </td>
+                      <td>{fmt(r.created_at)}</td>
                       <td>{fmt(r.last_login_at)}</td>
                     </tr>
                   ))}
@@ -853,6 +926,43 @@ export default function App() {
                   <option value="dealer_partner">dealer_partner</option>
                 </select>
               </div>
+              <div className="field" style={{ marginBottom: 6 }}>
+                <label>Department (optional)</label>
+                <input value={inviteDepartment} onChange={(e) => setInviteDepartment(e.target.value)} placeholder="e.g. Sales" />
+              </div>
+              <div className="field" style={{ marginBottom: 6 }}>
+                <label>Organization ID (optional UUID)</label>
+                <input
+                  value={inviteOrganizationId}
+                  onChange={(e) => setInviteOrganizationId(e.target.value)}
+                  placeholder="00000000-0000-0000-0000-000000000000"
+                  autoComplete="off"
+                />
+              </div>
+              <div className="field" style={{ marginBottom: 10 }}>
+                <label>Initial head access</label>
+                <div className="head-grid" style={{ marginTop: 6 }}>
+                  {(reference?.heads ?? []).map((slug) => (
+                    <label key={slug} style={{ fontSize: 12 }}>
+                      <input
+                        type="checkbox"
+                        checked={inviteHeadPick[slug] === true}
+                        onChange={(e) =>
+                          setInviteHeadPick((s) => ({
+                            ...s,
+                            [slug]: e.target.checked
+                          }))
+                        }
+                      />{" "}
+                      {headDisplayLabel(slug, reference?.head_catalog)}
+                    </label>
+                  ))}
+                </div>
+                <small className="muted">
+                  If you leave every head unchecked, eliteOS leaves <code>user_head_access</code> empty so launcher defaults
+                  (role + user kind) apply until you assign heads here.
+                </small>
+              </div>
               <button
                 type="button"
                 className="btn btn-primary"
@@ -862,20 +972,28 @@ export default function App() {
                   if (!t) return;
                   setInviteBusy(true);
                   try {
-                    await apiFetch("/api/admin/users/invite", {
+                    const picked = Object.entries(inviteHeadPick)
+                      .filter(([, on]) => on)
+                      .map(([slug]) => slug);
+                    await apiFetch(`${USER_MGMT_API}/users/invite`, {
                       token: t,
                       method: "POST",
                       body: {
                         email: inviteEmail.trim(),
                         full_name: inviteName.trim() || undefined,
                         role: inviteRole || undefined,
-                        user_kind: inviteKind
+                        user_kind: inviteKind,
+                        department: inviteDepartment.trim() || undefined,
+                        organization_id: inviteOrganizationId.trim() || undefined,
+                        ...(picked.length ? { initial_heads: picked } : {})
                       }
                     });
                     pushToast("info", `Invite dispatched for ${inviteEmail.trim()}`);
                     setInviteEmail("");
                     setInviteName("");
                     setInviteRole("");
+                    setInviteDepartment("");
+                    setInviteOrganizationId("");
                     await refreshAll();
                   } catch (e: unknown) {
                     pushToast("error", e instanceof ApiError ? e.message : String(e));
@@ -916,6 +1034,7 @@ export default function App() {
                   <h4>Assign allowed heads</h4>
                   <HeadSelector
                     heads={reference?.heads ?? []}
+                    headCatalog={reference?.head_catalog}
                     selected={Array.isArray(profileDrawer?.allowed_heads_list) ? profileDrawer?.allowed_heads_list : []}
                     userId={selectedId}
                     token={sessionToken}
@@ -950,7 +1069,7 @@ export default function App() {
                         window.confirm(`Send Supabase recovery email for ${String(profileDrawer.email ?? "this account")}?`)
                       ) {
                         try {
-                          await apiFetch(`/api/admin/users/${encodeURIComponent(selectedId)}/send-password-reset`, {
+                          await apiFetch(`${USER_MGMT_API}/users/${encodeURIComponent(selectedId)}/send-password-reset`, {
                             token: t,
                             method: "POST",
                             body: {}
@@ -1022,6 +1141,7 @@ function ProfileForm({
 }) {
   const [role, setRole] = useState(String(profile.role ?? ""));
   const [department, setDepartment] = useState(String(profile.department ?? ""));
+  const [organizationId, setOrganizationId] = useState(String(profile.organization_id ?? ""));
   const [fullName, setFullName] = useState(String(profile.full_name ?? ""));
   const [isActive, setIsActive] = useState(profile.is_active !== false);
 
@@ -1035,18 +1155,20 @@ function ProfileForm({
   useEffect(() => {
     setRole(String(profile.role ?? ""));
     setDepartment(String(profile.department ?? ""));
+    setOrganizationId(String(profile.organization_id ?? ""));
     setFullName(String(profile.full_name ?? ""));
     setIsActive(profile.is_active !== false);
   }, [profile]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    await apiFetch(`/api/admin/users/${encodeURIComponent(profile.id)}/profile`, {
+    await apiFetch(`${USER_MGMT_API}/users/${encodeURIComponent(profile.id)}/profile`, {
       token,
       method: "POST",
       body: {
         role,
         department: department.trim() || null,
+        organization_id: organizationId.trim() || null,
         full_name: fullName.trim(),
         is_active: isActive
       }
@@ -1075,6 +1197,10 @@ function ProfileForm({
         <label>Department</label>
         <input value={department} onChange={(e) => setDepartment(e.target.value)} />
       </div>
+      <div className="field">
+        <label>Organization ID (UUID or empty)</label>
+        <input value={organizationId} onChange={(e) => setOrganizationId(e.target.value)} placeholder="Clear field to unset" />
+      </div>
       <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center" }}>
         <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
         Active
@@ -1088,12 +1214,14 @@ function ProfileForm({
 
 function HeadSelector({
   heads,
+  headCatalog,
   selected,
   userId,
   token,
   onSaved
 }: {
   heads: string[];
+  headCatalog?: HeadCatalogEntry[];
   selected: string[];
   userId: string;
   token: string;
@@ -1121,7 +1249,7 @@ function HeadSelector({
 
   async function save() {
     const picked = Object.entries(state).filter(([, ok]) => ok).map(([h]) => h);
-    await apiFetch(`/api/admin/users/${encodeURIComponent(userId)}/head-access`, {
+    await apiFetch(`${USER_MGMT_API}/users/${encodeURIComponent(userId)}/head-access`, {
       token,
       method: "POST",
       body: { heads: picked }
@@ -1139,7 +1267,7 @@ function HeadSelector({
               checked={state[h] === true}
               onChange={(e) => setState((s) => ({ ...s, [h]: e.target.checked }))}
             />{" "}
-            {h}
+            {headDisplayLabel(h, headCatalog)}
           </label>
         ))}
       </div>
@@ -1168,7 +1296,7 @@ function DealerForm({
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!dealerId) return;
-    await apiFetch(`/api/admin/users/${encodeURIComponent(userId)}/dealer-access`, {
+    await apiFetch(`${USER_MGMT_API}/users/${encodeURIComponent(userId)}/dealer-access`, {
       token,
       method: "POST",
       body: {
@@ -1228,7 +1356,7 @@ function PricingForm({
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!dealerId) return;
-    await apiFetch(`/api/admin/users/${encodeURIComponent(userId)}/pricing-group`, {
+    await apiFetch(`${USER_MGMT_API}/users/${encodeURIComponent(userId)}/pricing-group`, {
       token,
       method: "POST",
       body: {

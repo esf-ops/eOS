@@ -1,5 +1,6 @@
 import express from "express";
 import { APPLICATION_ROLES, EOS_HEAD_SLUGS, isApplicationRole, isKnownHeadSlug } from "../auth/eosGovernanceConstants.js";
+import { HEAD_LAUNCHER_CATALOG } from "../me/launcherHeads.js";
 import { logAction } from "../auth/auditLog.js";
 import { requireAuth, requireRole } from "../auth/authMiddleware.js";
 import { requireHeadAccess } from "../auth/headAccessMiddleware.js";
@@ -141,11 +142,25 @@ async function loadSummaries(sb, userId) {
 
 async function fetchUserDetailEnriched(sb, userId) {
   const uid = pickStr(userId);
-  const { data: profRows, error: pe } = await sb
+  const first = await sb
     .from("user_profiles")
-    .select("id,email,full_name,role,department,is_active,user_kind,last_login_at,created_at,updated_at")
+    .select("id,email,full_name,role,department,is_active,user_kind,last_login_at,created_at,updated_at,organization_id")
     .eq("id", uid)
     .limit(1);
+  let profRows;
+  let pe;
+  if (first.error && String(first.error.message ?? "").includes("organization_id")) {
+    const second = await sb
+      .from("user_profiles")
+      .select("id,email,full_name,role,department,is_active,user_kind,last_login_at,created_at,updated_at")
+      .eq("id", uid)
+      .limit(1);
+    profRows = second.data;
+    pe = second.error;
+  } else {
+    profRows = first.data;
+    pe = first.error;
+  }
   if (pe) throw new Error(pe.message);
   const profile = profRows?.[0] ?? null;
   if (!profile) return null;
@@ -206,10 +221,26 @@ function parseUuidOrEmpty(v) {
   return re.test(s) ? s : "";
 }
 
-/**
- * @param {import("express").Application} app
- * @param {{ supabaseServerClient: () => import("@supabase/supabase-js").SupabaseClient }} ctx
- */
+function normalizeUiHeadSlug(s) {
+  const raw = pickStr(s);
+  if (!raw) return "";
+  if (raw.toLowerCase() === "internal_estimate") return "quote";
+  return raw;
+}
+
+async function replaceUserHeadAccess(sb, userId, rawHeadList) {
+  const list = Array.isArray(rawHeadList) ? rawHeadList : [];
+  const slugs = [...new Set(list.map((x) => normalizeUiHeadSlug(x)).filter(Boolean))].filter((s) => isKnownHeadSlug(s));
+  const { error: delErr } = await sb.from("user_head_access").delete().eq("user_id", userId);
+  if (delErr) throw new Error(delErr.message);
+  if (slugs.length) {
+    const rows = slugs.map((head_slug) => ({ user_id: userId, head_slug }));
+    const { error: insErr } = await sb.from("user_head_access").insert(rows);
+    if (insErr) throw new Error(insErr.message);
+  }
+  return slugs;
+}
+
 const USER_MANAGEMENT_SCHEMA_TABLES = {
   user_profiles: "user_profiles",
   dealer_accounts: "dealer_accounts",
@@ -219,17 +250,25 @@ const USER_MANAGEMENT_SCHEMA_TABLES = {
   dealer_user_settings: "dealer_user_settings"
 };
 
+/**
+ * eliteOS System Admin Head — user invites, roles, and `user_head_access`.
+ * Mounted at `/api/admin` and `/api/system-admin` (identical behavior).
+ *
+ * @param {import("express").Application} app
+ * @param {{ supabaseServerClient: () => import("@supabase/supabase-js").SupabaseClient }} ctx
+ */
 export function attachAdvancedSystemAdminUserRoutes(app, ctx) {
   const sbFn = ctx.supabaseServerClient;
-  /** Head gate + role: admin bypass inside `requireHeadAccess` prevents lockout; non-admins never reach these routes. */
   const adminGuard = [
     requireAuth(),
     requireHeadAccess("system_admin", { getSupabase: sbFn }),
-    requireRole(["admin"])
+    requireRole(["admin", "super_admin"])
   ];
 
+  const r = express.Router();
+
   /** Ping extension tables — empty table still counts as healthy. */
-  app.get("/api/admin/user-management/schema-health", ...adminGuard, async (_req, res) => {
+  r.get("/user-management/schema-health", ...adminGuard, async (_req, res) => {
     try {
       const sb = sbFn();
       const tables = {};
@@ -254,7 +293,7 @@ export function attachAdvancedSystemAdminUserRoutes(app, ctx) {
   });
 
   /** Heads, roles, and master data used by System Admin UI. */
-  app.get("/api/admin/reference", ...adminGuard, async (_req, res) => {
+  r.get("/reference", ...adminGuard, async (_req, res) => {
     try {
       const sb = sbFn();
       let dealers = [];
@@ -274,6 +313,12 @@ export function attachAdvancedSystemAdminUserRoutes(app, ctx) {
       res.json({
         ok: true,
         heads: [...EOS_HEAD_SLUGS],
+        head_catalog: HEAD_LAUNCHER_CATALOG.map((row) => ({
+          slug: row.slug,
+          title: row.label,
+          description: row.description,
+          ui_alias: row.slug === "quote" ? "internal_estimate" : null
+        })),
         roles: [...APPLICATION_ROLES],
         dealers,
         pricing_groups: pricingGroups
@@ -283,7 +328,40 @@ export function attachAdvancedSystemAdminUserRoutes(app, ctx) {
     }
   });
 
-  app.post("/api/admin/users/invite", ...adminGuard, parseJson, async (req, res) => {
+  r.get("/users", ...adminGuard, async (_req, res) => {
+    try {
+      const supabase = sbFn();
+      const first = await supabase
+        .from("user_profiles")
+        .select("id,email,full_name,role,department,is_active,user_kind,last_login_at,created_at,updated_at,organization_id")
+        .order("role", { ascending: true })
+        .order("full_name", { ascending: true })
+        .order("email", { ascending: true });
+      let rows = first.data ?? [];
+      let err = first.error;
+      if (err && String(err.message ?? "").includes("organization_id")) {
+        const second = await supabase
+          .from("user_profiles")
+          .select("id,email,full_name,role,department,is_active,user_kind,last_login_at,created_at,updated_at")
+          .order("role", { ascending: true })
+          .order("full_name", { ascending: true })
+          .order("email", { ascending: true });
+        rows = second.data ?? [];
+        err = second.error;
+      }
+      if (err) throw new Error(err.message);
+      try {
+        rows = await enrichUserProfileRowsForAdminList(supabase, rows);
+      } catch (e) {
+        console.warn("GET /api/*/users enrich skipped:", String(e?.message || e));
+      }
+      res.json({ ok: true, rows });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  r.post("/users/invite", ...adminGuard, parseJson, async (req, res) => {
     try {
       const sb = sbFn();
       const emailRaw = pickStr(req.body?.email);
@@ -331,10 +409,24 @@ export function attachAdvancedSystemAdminUserRoutes(app, ctx) {
         updated_at: iso
       };
 
+      const orgCandidate = parseUuidOrEmpty(req.body?.organization_id);
+      if (orgCandidate) profRow.organization_id = orgCandidate;
+
       if (!existingProf?.id) profRow.created_at = iso;
 
       const { error: pu } = await sb.from("user_profiles").upsert(profRow, { onConflict: "id" });
       if (pu) throw new Error(pu.message);
+
+      let appliedHeads = null;
+      const body = req.body ?? {};
+      if (Object.prototype.hasOwnProperty.call(body, "heads") || Object.prototype.hasOwnProperty.call(body, "initial_heads")) {
+        const raw = body.heads ?? body.initial_heads;
+        try {
+          appliedHeads = await replaceUserHeadAccess(sb, uid, raw);
+        } catch (he) {
+          return res.status(400).json({ ok: false, error: String(he?.message || he), user_id: uid });
+        }
+      }
 
       await logAction({
         user: req.user,
@@ -346,18 +438,19 @@ export function attachAdvancedSystemAdminUserRoutes(app, ctx) {
         metadata: {
           email: emailLower,
           role,
-          user_kind: userKind
+          user_kind: userKind,
+          heads: appliedHeads
         },
         req
       });
 
-      res.json({ ok: true, user_id: uid, email: emailLower });
+      res.json({ ok: true, user_id: uid, email: emailLower, heads: appliedHeads });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
     }
   });
 
-  app.get("/api/admin/users/:userId", ...adminGuard, async (req, res) => {
+  r.get("/users/:userId", ...adminGuard, async (req, res) => {
     try {
       const userId = pickStr(req.params.userId);
       if (!userId) return res.status(400).json({ ok: false, error: "userId required" });
@@ -370,7 +463,7 @@ export function attachAdvancedSystemAdminUserRoutes(app, ctx) {
     }
   });
 
-  app.post("/api/admin/users/:userId/profile", ...adminGuard, parseJson, async (req, res) => {
+  r.post("/users/:userId/profile", ...adminGuard, parseJson, async (req, res) => {
     try {
       const userId = pickStr(req.params.userId);
       if (!userId) return res.status(400).json({ ok: false, error: "userId required" });
@@ -393,14 +486,32 @@ export function attachAdvancedSystemAdminUserRoutes(app, ctx) {
         }
         patch.user_kind = k;
       }
+      if (body.organization_id !== undefined) {
+        const o = pickStr(body.organization_id);
+        patch.organization_id = o ? parseUuidOrEmpty(o) || null : null;
+      }
 
       const sb = sbFn();
-      const { data, error } = await sb
+      let data;
+      let error;
+      const upd = await sb
         .from("user_profiles")
         .update(patch)
         .eq("id", userId)
-        .select("id,email,full_name,role,department,is_active,user_kind,last_login_at,created_at,updated_at")
+        .select("id,email,full_name,role,department,is_active,user_kind,last_login_at,created_at,updated_at,organization_id")
         .limit(1);
+      data = upd.data;
+      error = upd.error;
+      if (error && String(error.message ?? "").includes("organization_id")) {
+        const upd2 = await sb
+          .from("user_profiles")
+          .update(patch)
+          .eq("id", userId)
+          .select("id,email,full_name,role,department,is_active,user_kind,last_login_at,created_at,updated_at")
+          .limit(1);
+        data = upd2.data;
+        error = upd2.error;
+      }
       if (error) throw new Error(error.message);
       if (!data?.[0]) return res.status(404).json({ ok: false, error: "User not found" });
 
@@ -421,27 +532,13 @@ export function attachAdvancedSystemAdminUserRoutes(app, ctx) {
     }
   });
 
-  app.post("/api/admin/users/:userId/head-access", ...adminGuard, parseJson, async (req, res) => {
+  r.post("/users/:userId/head-access", ...adminGuard, parseJson, async (req, res) => {
     try {
       const userId = pickStr(req.params.userId);
       if (!userId) return res.status(400).json({ ok: false, error: "userId required" });
       const raw = req.body?.heads ?? req.body?.allowed_heads ?? [];
-      const list = Array.isArray(raw) ? raw : [];
-      const slugs = [...new Set(list.map((x) => pickStr(x)).filter(Boolean))];
-
-      for (const s of slugs) {
-        if (!isKnownHeadSlug(s)) return res.status(400).json({ ok: false, error: `Unknown head slug: ${s}` });
-      }
-
       const sb = sbFn();
-      const { error: delErr } = await sb.from("user_head_access").delete().eq("user_id", userId);
-      if (delErr) throw new Error(delErr.message);
-
-      if (slugs.length) {
-        const rows = slugs.map((head_slug) => ({ user_id: userId, head_slug }));
-        const { error: insErr } = await sb.from("user_head_access").insert(rows);
-        if (insErr) throw new Error(insErr.message);
-      }
+      const slugs = await replaceUserHeadAccess(sb, userId, raw);
 
       await logAction({
         user: req.user,
@@ -460,7 +557,7 @@ export function attachAdvancedSystemAdminUserRoutes(app, ctx) {
     }
   });
 
-  app.post("/api/admin/users/:userId/dealer-access", ...adminGuard, parseJson, async (req, res) => {
+  r.post("/users/:userId/dealer-access", ...adminGuard, parseJson, async (req, res) => {
     try {
       const userId = pickStr(req.params.userId);
       if (!userId) return res.status(400).json({ ok: false, error: "userId required" });
@@ -510,7 +607,7 @@ export function attachAdvancedSystemAdminUserRoutes(app, ctx) {
     }
   });
 
-  app.post("/api/admin/users/:userId/pricing-group", ...adminGuard, parseJson, async (req, res) => {
+  r.post("/users/:userId/pricing-group", ...adminGuard, parseJson, async (req, res) => {
     try {
       const userId = pickStr(req.params.userId);
       if (!userId) return res.status(400).json({ ok: false, error: "userId required" });
@@ -552,7 +649,7 @@ export function attachAdvancedSystemAdminUserRoutes(app, ctx) {
     }
   });
 
-  app.post("/api/admin/users/:userId/send-password-reset", ...adminGuard, parseJson, async (req, res) => {
+  r.post("/users/:userId/send-password-reset", ...adminGuard, parseJson, async (req, res) => {
     try {
       const userId = pickStr(req.params.userId);
       if (!userId) return res.status(400).json({ ok: false, error: "userId required" });
@@ -597,4 +694,154 @@ export function attachAdvancedSystemAdminUserRoutes(app, ctx) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
     }
   });
+
+  r.get("/heads", ...adminGuard, async (_req, res) => {
+    res.json({
+      ok: true,
+      heads: [...EOS_HEAD_SLUGS],
+      head_catalog: HEAD_LAUNCHER_CATALOG.map((row) => ({
+        slug: row.slug,
+        title: row.label,
+        description: row.description,
+        ui_alias: row.slug === "quote" ? "internal_estimate" : null
+      }))
+    });
+  });
+
+  r.post("/users/:userId/role", ...adminGuard, parseJson, async (req, res) => {
+    try {
+      const userId = pickStr(req.params.userId);
+      if (!userId) return res.status(400).json({ ok: false, error: "userId required" });
+
+      const role = req.body?.role != null ? String(req.body.role).trim() : "";
+      const isActive = req.body?.is_active == null ? null : Boolean(req.body.is_active);
+
+      if (role && !isApplicationRole(role)) {
+        return res.status(400).json({ ok: false, error: `Invalid role: ${role}` });
+      }
+
+      const patch = { updated_at: new Date().toISOString() };
+      if (role) patch.role = role;
+      if (isActive != null) patch.is_active = isActive;
+
+      const supabase = sbFn();
+      const { data, error } = await supabase
+        .from("user_profiles")
+        .update(patch)
+        .eq("id", userId)
+        .select("id,email,full_name,role,department,is_active,user_kind,last_login_at")
+        .limit(1);
+      if (error) throw new Error(error.message);
+
+      await logAction({
+        user: req.user,
+        head: "system_admin",
+        actionType: "update_user_role",
+        entityType: "user_profile",
+        entityId: userId,
+        jobId: null,
+        metadata: { role: role || null, is_active: isActive },
+        req
+      });
+
+      res.json({ ok: true, user: data?.[0] ?? null });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  r.patch("/users/:userId", ...adminGuard, parseJson, async (req, res) => {
+    try {
+      const userId = pickStr(req.params.userId);
+      if (!userId) return res.status(400).json({ ok: false, error: "userId required" });
+
+      const patch = { updated_at: new Date().toISOString() };
+      const body = req.body ?? {};
+
+      if (body.full_name !== undefined) patch.full_name = pickStr(body.full_name) || null;
+      if (body.role !== undefined) {
+        const r0 = pickStr(body.role);
+        if (!isApplicationRole(r0)) return res.status(400).json({ ok: false, error: `Invalid role: ${r0}` });
+        patch.role = r0;
+      }
+      if (body.department !== undefined) patch.department = pickStr(body.department) || null;
+      if (body.is_active !== undefined) patch.is_active = Boolean(body.is_active);
+      if (body.user_kind !== undefined) {
+        const k = pickStr(body.user_kind);
+        if (k !== "internal" && k !== "dealer_partner") {
+          return res.status(400).json({ ok: false, error: "user_kind must be internal or dealer_partner" });
+        }
+        patch.user_kind = k;
+      }
+      if (body.organization_id !== undefined) {
+        const o = pickStr(body.organization_id);
+        patch.organization_id = o ? parseUuidOrEmpty(o) || null : null;
+      }
+
+      const sb = sbFn();
+      let data;
+      let error;
+      const upd = await sb
+        .from("user_profiles")
+        .update(patch)
+        .eq("id", userId)
+        .select("id,email,full_name,role,department,is_active,user_kind,last_login_at,created_at,updated_at,organization_id")
+        .limit(1);
+      data = upd.data;
+      error = upd.error;
+      if (error && String(error.message ?? "").includes("organization_id")) {
+        const upd2 = await sb
+          .from("user_profiles")
+          .update(patch)
+          .eq("id", userId)
+          .select("id,email,full_name,role,department,is_active,user_kind,last_login_at,created_at,updated_at")
+          .limit(1);
+        data = upd2.data;
+        error = upd2.error;
+      }
+      if (error) throw new Error(error.message);
+      if (!data?.[0]) return res.status(404).json({ ok: false, error: "User not found" });
+
+      await logAction({
+        user: req.user,
+        head: "system_admin",
+        actionType: "update_user_profile",
+        entityType: "user_profile",
+        entityId: userId,
+        jobId: null,
+        metadata: { fields: Object.keys(patch).filter((k) => k !== "updated_at"), via: "PATCH" },
+        req
+      });
+
+      res.json({ ok: true, profile: data[0] });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  r.put("/users/:userId/heads", ...adminGuard, parseJson, async (req, res) => {
+    try {
+      const userId = pickStr(req.params.userId);
+      if (!userId) return res.status(400).json({ ok: false, error: "userId required" });
+      const raw = req.body?.heads ?? req.body?.allowed_heads ?? [];
+      const sb = sbFn();
+      const slugs = await replaceUserHeadAccess(sb, userId, raw);
+      await logAction({
+        user: req.user,
+        head: "system_admin",
+        actionType: "update_user_head_access",
+        entityType: "user_profile",
+        entityId: userId,
+        jobId: null,
+        metadata: { head_count: slugs.length, heads: slugs, via: "PUT" },
+        req
+      });
+      res.json({ ok: true, heads: slugs });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  app.use("/api/admin", r);
+  app.use("/api/system-admin", r);
 }
