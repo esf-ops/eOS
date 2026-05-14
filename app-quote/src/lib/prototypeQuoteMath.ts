@@ -670,14 +670,26 @@ export function createDefaultRoom(materialGroup: string): RoomDraft {
   };
 }
 
-export function createManualScopeRoom(materialGroup: string, counter: number, splash: number): RoomDraft {
+export function createManualScopeRoom(
+  materialGroup: string,
+  counter: number,
+  splash: number,
+  fhbSf?: number
+): RoomDraft {
   const r = createDefaultRoom(materialGroup);
   r.name = "Project";
   r.roomType = "Kitchen";
   r.calcMode = "Manual Sq Ft";
   r.direct = { counter: round2(counter), splash: round2(splash) };
   r.guidedPieces = [];
-  r.fhbMode = "Off";
+  const fh = Number(fhbSf) || 0;
+  if (fh > 0) {
+    r.fhbMode = "Manual Sq Ft";
+    r.fhbDirectSf = round2(fh);
+  } else {
+    r.fhbMode = "Off";
+    r.fhbDirectSf = 0;
+  }
   r.fhbPieces = [];
   return r;
 }
