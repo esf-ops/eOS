@@ -1348,6 +1348,10 @@ if (shouldStartLocalHttpServer()) {
     console.log("- POST /api/admin/users/:userId/dealer-access  (alias: …/system-admin/…)");
     console.log("- POST /api/admin/users/:userId/pricing-group  (alias: …/system-admin/…)");
     console.log("- POST /api/admin/users/:userId/send-password-reset  (alias: …/system-admin/…)");
+    console.log("- POST /api/admin/users/:userId/resend-invite  (alias: …/system-admin/…)");
+    console.log("- PATCH /api/admin/users/:userId/deactivate  (alias: …/system-admin/…)");
+    console.log("- PATCH /api/admin/users/:userId/reactivate  (alias: …/system-admin/…)");
+    console.log("- DELETE /api/admin/users/:userId  (alias: …/system-admin/…)");
     console.log("- POST /api/admin/users/:userId/role  (alias: …/system-admin/…)");
     console.log("- POST /api/auth/log-login");
     console.log("- GET /api/brain/sync-runs");

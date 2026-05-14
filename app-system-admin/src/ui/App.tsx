@@ -11,6 +11,22 @@ import QuotePipelinePanel from "./QuotePipelinePanel";
 /** User-management router is mounted here and under `/api/admin` (same handlers). */
 const USER_MGMT_API = "/api/system-admin";
 
+const PRICING_ADMIN_URL = String(
+  (import.meta as unknown as { env?: Record<string, string | undefined> }).env?.VITE_HEAD_URL_PRICING_ADMIN ??
+    "https://pricing.eliteosfab.com"
+)
+  .trim()
+  .replace(/\/+$/, "");
+
+type MainNavView =
+  | "people"
+  | "organizations"
+  | "invite_users"
+  | "audit"
+  | "diagnostics"
+  | "sales_mapping"
+  | "identity_resolution";
+
 /** Visible near credential actions — admins never observe other users’ secrets. */
 const PASSWORD_GOVERNANCE_NOTE =
   "Passwords are managed by Supabase Auth. Admins can invite users or send reset links, but cannot view passwords.";
@@ -84,6 +100,14 @@ type UserDetailResp = Record<string, unknown> & {
   dealer_account_access?: DealerAccess[];
   login_summary?: { recent: LoginRow[]; total: number };
   action_summary?: { recent: ActionRow[]; total: number };
+  auth_summary?: {
+    present?: boolean;
+    email_confirmed_at?: string | null;
+    last_sign_in_at?: string | null;
+    invited_at?: string | null;
+    confirmation_sent_at?: string | null;
+    auth_error?: string | null;
+  };
 };
 
 type DealerAccess = Record<string, unknown> & {
@@ -114,6 +138,7 @@ function UserSnapshot({ profile, detail }: { profile: AdminRow; detail: UserDeta
   const dbKind = String(profile.user_kind ?? "").trim();
   const heads = [...new Set(profile.allowed_heads_list ?? [])].sort((a, b) => a.localeCompare(b));
   const dealers = detail?.dealer_account_access ?? [];
+  const auth = detail?.auth_summary;
 
   return (
     <div className="drawer-section">
@@ -152,6 +177,37 @@ function UserSnapshot({ profile, detail }: { profile: AdminRow; detail: UserDeta
             {profile.is_active !== false ? "active" : "inactive"}
           </span>
         </dd>
+        {auth?.present ? (
+          <>
+            <dt>Auth (Supabase)</dt>
+            <dd className="muted" style={{ fontSize: 12 }}>
+              {auth.email_confirmed_at ? (
+                <>Email confirmed {fmt(auth.email_confirmed_at)}</>
+              ) : (
+                <>Email not confirmed — use <strong>Resend invite</strong> for setup links.</>
+              )}
+              {auth.last_sign_in_at ? (
+                <>
+                  <br />
+                  Last auth sign-in {fmt(auth.last_sign_in_at)}
+                </>
+              ) : null}
+              {auth.invited_at ? (
+                <>
+                  <br />
+                  Invited {fmt(auth.invited_at)}
+                </>
+              ) : null}
+            </dd>
+          </>
+        ) : auth?.auth_error ? (
+          <>
+            <dt>Auth (Supabase)</dt>
+            <dd className="muted" style={{ fontSize: 12 }}>
+              Could not load auth flags ({auth.auth_error}). Actions below still call the Brain.
+            </dd>
+          </>
+        ) : null}
         <dt>Last login</dt>
         <dd>{fmt(profile.last_login_at)}</dd>
         <dt>Created</dt>
@@ -215,6 +271,217 @@ function UserSnapshot({ profile, detail }: { profile: AdminRow; detail: UserDeta
   );
 }
 
+function UserLifecycleActions({
+  detail,
+  selectedId,
+  token,
+  actorUserId,
+  onRefresh,
+  onUserDeleted,
+  pushToast
+}: {
+  detail: UserDetailResp | null;
+  selectedId: string;
+  token: string;
+  actorUserId: string;
+  onRefresh: () => void | Promise<void>;
+  onUserDeleted?: () => void;
+  pushToast: (kind: "info" | "error", text: string) => void;
+}) {
+  const profile = detail?.profile as AdminRow | undefined;
+  const auth = detail?.auth_summary;
+  const confirmed = Boolean(auth?.email_confirmed_at);
+  const inactive = profile?.is_active === false;
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const suggestInvite = auth?.present ? !confirmed : false;
+
+  async function run(label: string, fn: () => Promise<void>) {
+    setBusy(label);
+    try {
+      await fn();
+      await onRefresh();
+    } catch (e: unknown) {
+      pushToast("error", e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="drawer-section lifecycle-card">
+      <h4>Account actions</h4>
+      <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+        {suggestInvite
+          ? "This account has not confirmed email in Supabase yet — resend the invite instead of a password reset."
+          : confirmed
+            ? "Confirmed user — password reset sends a recovery link to eliteOS Home."
+            : "Auth metadata unavailable — use the actions that match your situation."}
+      </p>
+      <div className="lifecycle-actions">
+        {suggestInvite || !auth?.present ? (
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={busy !== null}
+            onClick={() =>
+              void run("resend", async () => {
+                const j = (await apiFetch(`${USER_MGMT_API}/users/${encodeURIComponent(selectedId)}/resend-invite`, {
+                  token,
+                  method: "POST",
+                  body: {}
+                })) as { code?: string; message?: string };
+                pushToast("info", j?.message ?? "Invite sent.");
+              })
+            }
+          >
+            {busy === "resend" ? "Sending…" : "Resend invite"}
+          </button>
+        ) : null}
+        {confirmed ? (
+          <button
+            type="button"
+            className="btn"
+            disabled={busy !== null}
+            onClick={() => {
+              if (!window.confirm(`Send password reset for ${String(profile?.email ?? "this user")}?`)) return;
+              void run("reset", async () => {
+                const j = (await apiFetch(`${USER_MGMT_API}/users/${encodeURIComponent(selectedId)}/send-password-reset`, {
+                  token,
+                  method: "POST",
+                  body: {}
+                })) as { code?: string; message?: string };
+                pushToast("info", j?.message ?? "Password reset sent.");
+              });
+            }}
+          >
+            {busy === "reset" ? "Sending…" : "Send password reset"}
+          </button>
+        ) : null}
+        {!inactive ? (
+          <button
+            type="button"
+            className="btn btn-warn"
+            disabled={busy !== null || actorUserId === selectedId}
+            onClick={() => {
+              if (actorUserId === selectedId) {
+                pushToast("error", "You cannot deactivate your own account here.");
+                return;
+              }
+              if (!window.confirm(`Deactivate ${String(profile?.email ?? "this user")}? They will lose launcher access.`))
+                return;
+              void run("deact", async () => {
+                const j = (await apiFetch(`${USER_MGMT_API}/users/${encodeURIComponent(selectedId)}/deactivate`, {
+                  token,
+                  method: "PATCH",
+                  body: {}
+                })) as { code?: string; message?: string };
+                pushToast("info", j?.message ?? "User deactivated.");
+              });
+            }}
+          >
+            {busy === "deact" ? "Updating…" : "Deactivate"}
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={busy !== null}
+            onClick={() =>
+              void run("react", async () => {
+                const j = (await apiFetch(`${USER_MGMT_API}/users/${encodeURIComponent(selectedId)}/reactivate`, {
+                  token,
+                  method: "PATCH",
+                  body: {}
+                })) as { code?: string; message?: string };
+                pushToast("info", j?.message ?? "User reactivated.");
+              })
+            }
+          >
+            {busy === "react" ? "Updating…" : "Reactivate"}
+          </button>
+        )}
+        <button
+          type="button"
+          className="btn btn-danger-ghost"
+          disabled={busy !== null || actorUserId === selectedId}
+          onClick={() => {
+            setDeleteConfirm("");
+            setDeleteOpen(true);
+          }}
+        >
+          Delete test user…
+        </button>
+      </div>
+      {actorUserId === selectedId ? (
+        <p className="safety-callout" style={{ marginTop: 10 }}>
+          You cannot delete or deactivate your own account from this drawer.
+        </p>
+      ) : null}
+      <p className="safety-callout" style={{ marginTop: 10 }}>
+        {PASSWORD_GOVERNANCE_NOTE} Prefer <strong>deactivate</strong> for real users. Hard delete removes Auth + profile
+        only when safe.
+      </p>
+
+      {deleteOpen ? (
+        <div
+          className="modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setDeleteOpen(false);
+          }}
+        >
+          <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
+            <h4 style={{ marginTop: 0 }}>Delete user permanently</h4>
+            <p className="muted" style={{ fontSize: 13 }}>
+              Type <code>DELETE</code> or the user&apos;s email <code>{String(profile?.email ?? "")}</code> to confirm.
+              Blocked if the user has quote or audit rows, or is the last admin.
+            </p>
+            <div className="field">
+              <label htmlFor="del-confirm">Confirmation</label>
+              <input
+                id="del-confirm"
+                value={deleteConfirm}
+                onChange={(e) => setDeleteConfirm(e.target.value)}
+                autoComplete="off"
+                placeholder="DELETE or email"
+              />
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+              <button type="button" className="btn" onClick={() => setDeleteOpen(false)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger"
+                disabled={busy !== null}
+                onClick={() =>
+                  void run("delete", async () => {
+                    const j = (await apiFetch(`${USER_MGMT_API}/users/${encodeURIComponent(selectedId)}`, {
+                      token,
+                      method: "DELETE",
+                      body: { confirm: deleteConfirm.trim() }
+                    })) as { code?: string; message?: string };
+                    pushToast("info", j?.message ?? "User deleted.");
+                    setDeleteOpen(false);
+                    setDeleteConfirm("");
+                    onUserDeleted?.();
+                  })
+                }
+              >
+                {busy === "delete" ? "Deleting…" : "Delete permanently"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export default function App() {
   const [sessionToken, setSessionToken] = useState("");
   const [session, setSession] = useState<Session | null>(null);
@@ -238,9 +505,8 @@ export default function App() {
   const [rows, setRows] = useState<AdminRow[]>([]);
   const [listError, setListError] = useState("");
   const [toast, setToast] = useState<{ kind: "info" | "error"; text: string } | null>(null);
-  const [activeView, setActiveView] = useState<
-    "users" | "sales_mapping" | "identity_resolution" | "quote_pricing" | "quote_pipeline"
-  >("users");
+  const [activeView, setActiveView] = useState<MainNavView>("people");
+  const [diagnosticsTab, setDiagnosticsTab] = useState<"overview" | "quote_pipeline" | "legacy_pricing">("overview");
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<UserDetailResp | null>(null);
@@ -552,64 +818,63 @@ export default function App() {
 
   return (
     <div className="shell">
-      <div className="topbar">
-        <div>
-          <strong>eliteOS System Admin Head</strong>
-          <div className="muted">{me?.user?.email} · session active</div>
+      <div className="topbar topbar-admin">
+        <div className="topbar-brand">
+          <strong>eliteOS System Admin</strong>
+          <div className="muted">{me?.user?.email ?? ""} · session active</div>
         </div>
-        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          {!canOperate ? <span style={{ color: "#f97316" }}>{listError}</span> : null}
+        <nav className="main-nav-pills" aria-label="System admin">
+          {(
+            [
+              ["people", "People & access"],
+              ["organizations", "Organizations"],
+              ["invite_users", "Invite users"],
+              ["audit", "Audit"],
+              ["diagnostics", "Diagnostics"]
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              className={`nav-pill ${activeView === id ? "nav-pill-active" : ""}`}
+              onClick={() => {
+                if (id === "diagnostics") setDiagnosticsTab("overview");
+                setActiveView(id);
+                if (id !== "people") {
+                  setSelectedId(null);
+                  setDetail(null);
+                }
+              }}
+            >
+              {label}
+            </button>
+          ))}
+          <span className="nav-pill-sep" aria-hidden="true" />
           <button
             type="button"
-            className={`btn ${activeView === "users" ? "btn-primary" : ""}`}
-            onClick={() => setActiveView("users")}
-          >
-            Users
-          </button>
-          <button
-            type="button"
-            className={`btn ${activeView === "sales_mapping" ? "btn-primary" : ""}`}
+            className={`nav-pill ${activeView === "sales_mapping" ? "nav-pill-active" : ""}`}
             onClick={() => {
               setSelectedId(null);
               setDetail(null);
               setActiveView("sales_mapping");
             }}
           >
-            Sales Account Mapping
+            Sales mapping
           </button>
           <button
             type="button"
-            className={`btn ${activeView === "identity_resolution" ? "btn-primary" : ""}`}
+            className={`nav-pill ${activeView === "identity_resolution" ? "nav-pill-active" : ""}`}
             onClick={() => {
               setSelectedId(null);
               setDetail(null);
               setActiveView("identity_resolution");
             }}
           >
-            Identity Resolution
+            Identity resolution
           </button>
-          <button
-            type="button"
-            className={`btn ${activeView === "quote_pipeline" ? "btn-primary" : ""}`}
-            onClick={() => {
-              setSelectedId(null);
-              setDetail(null);
-              setActiveView("quote_pipeline");
-            }}
-          >
-            Quote pipeline
-          </button>
-          <button
-            type="button"
-            className={`btn ${activeView === "quote_pricing" ? "btn-primary" : ""}`}
-            onClick={() => {
-              setSelectedId(null);
-              setDetail(null);
-              setActiveView("quote_pricing");
-            }}
-          >
-            Quote pricing
-          </button>
+        </nav>
+        <div className="topbar-tail">
+          {!canOperate ? <span className="topbar-warn">{listError}</span> : null}
           <button
             type="button"
             className="btn"
@@ -633,96 +898,23 @@ export default function App() {
           <p className="muted">Only admin or super_admin roles can operate this management head.</p>
         </div>
       ) : (
-        <div className="layout">
+      <div className={`layout ${activeView === "people" ? "layout-with-drawer" : ""}`}>
           <div className="panel">
-            {activeView === "quote_pipeline" ? (
-              <QuotePipelinePanel token={sessionToken} />
-            ) : activeView === "sales_mapping" ? (
+            {activeView === "sales_mapping" ? (
               <SalesAccountMappingAdmin token={sessionToken} />
             ) : activeView === "identity_resolution" ? (
               <IdentityResolutionReadiness token={sessionToken} />
-            ) : activeView === "quote_pricing" ? (
-              <QuotePricingAdminView token={sessionToken} />
-            ) : (
+            ) : activeView === "people" ? (
               <>
-            <h2 style={{ marginTop: 0 }}>People & access</h2>
-            <p className="muted">Invite, deactivate, routing heads, and dealer assignments—all audited server-side.</p>
+                <h2 style={{ marginTop: 0 }}>People &amp; access</h2>
+                <p className="muted">
+                  Roster, roles, head access, and dealer assignments. Select a user to open the detail drawer for
+                  lifecycle actions, audit snippets, and assignments.
+                </p>
 
-            <div
-              className={`schema-card ${
-                schemaHealthProbeError ? "api-issue"
-                : schemaProbePending ? ""
-                : schemaTablesHealthy ? "healthy"
-                : "setup"
-              }`}
-              style={
-                schemaProbePending && !schemaHealthProbeError ?
-                  { borderColor: "rgba(255,255,255,0.08)" }
-                : undefined
-              }
-            >
-              <strong>User Management Schema</strong>
-              {schemaProbePending ? (
-                <div className="muted" style={{ marginTop: 6 }}>
-                  Checking extension tables…
-                </div>
-              ) : schemaHealthProbeError ? (
-                <div style={{ marginTop: 8 }}>
-                  <div style={{ color: "#93c5fd" }}>Schema health could not be checked. Backend/API issue.</div>
-                  <div className="muted" style={{ marginTop: 8, fontSize: 13 }}>
-                    Confirm <code>VITE_BACKEND_URL</code> points at backend-core (no trailing <code>/api</code>),
-                    redeploy/restart the API, then reload. Details are not interpreted as missing SQL migrations.
-                  </div>
-                  {import.meta.env.DEV ? (
-                    <div className="muted" style={{ marginTop: 8, fontSize: 12, wordBreak: "break-word" }}>
-                      {schemaHealthProbeError}
-                    </div>
-                  ) : null}
-                </div>
-              ) : schemaTablesHealthy ? (
-                <div className="muted" style={{ marginTop: 6 }}>
-                  Healthy — User Management Schema reachable.
-                </div>
-              ) : (
-                <div style={{ marginTop: 8 }}>
-                  <div style={{ color: "#fcd34d" }}>Setup required</div>
-                  <div className="muted" style={{ marginTop: 4 }}>
-                    Run <code style={{ fontSize: 12 }}>backend-core/supabase/user_management_schema.sql</code> on your
-                    Supabase project (admin SQL).
-                  </div>
-                  {schemaHealthResult?.missing?.length ? (
-                    <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>
-                      Missing or unreachable tables:{" "}
-                      <span style={{ color: "#fed7aa" }}>{schemaHealthResult.missing.join(", ")}</span>
-                    </div>
-                  ) : null}
-                </div>
-              )}
-            </div>
+                {listError && canOperate ? <p style={{ color: "#fdba74" }}>{listError}</p> : null}
 
-            {import.meta.env.DEV && schemaHealthDevMeta ? (
-              <details className="dev-debug">
-                <summary>
-                  Schema health (dev) — {schemaHealthDevMeta.httpStatus != null ? `HTTP ${schemaHealthDevMeta.httpStatus}` : "no status"}{" "}
-                  · path {schemaHealthDevMeta.path}
-                </summary>
-                <pre>
-                  {JSON.stringify(
-                    {
-                      path: schemaHealthDevMeta.path,
-                      url: schemaHealthDevMeta.url,
-                      httpStatus: schemaHealthDevMeta.httpStatus,
-                      detail: schemaHealthDevMeta.detail ?? null,
-                      ...(schemaHealthResult ? { tables: schemaHealthResult.tables, missing: schemaHealthResult.missing } : {})
-                    },
-                    null,
-                    2
-                  )}
-                </pre>
-              </details>
-            ) : null}
-
-            <div className="stat-grid">
+                <div className="stat-grid">
               <div className="stat-card">
                 <div className="stat-value">{rosterStats.total}</div>
                 <div className="stat-label">Total users</div>
@@ -832,8 +1024,6 @@ export default function App() {
               filters.
             </p>
 
-            {listError && canOperate ? <p style={{ color: "#fdba74" }}>{listError}</p> : null}
-
             <div className="table-scroll">
               <table className="simple">
                 <thead>
@@ -891,8 +1081,16 @@ export default function App() {
               </table>
               {filteredRows.length === 0 ? <div className="muted" style={{ padding: 12 }}>No users match filters.</div> : null}
             </div>
+              </>
+            ) : activeView === "invite_users" ? (
+              <>
+                <h2 style={{ marginTop: 0 }}>Invite users</h2>
+                <p className="muted">
+                  Sends a Supabase invite email (no credential fields appear here). Production redirects use eliteOS Home
+                  at <code>www.eliteosfab.com/auth/callback</code> — not localhost unless explicitly configured.
+                </p>
 
-            <div className="invite-panel">
+                <div className="invite-panel">
               <strong>Invite user</strong>
               <p className="safety-callout" style={{ marginTop: 8 }}>
                 {PASSWORD_GOVERNANCE_NOTE}
@@ -1012,10 +1210,189 @@ export default function App() {
               </button>
             </div>
               </>
-            )}
+            ) : activeView === "organizations" ? (
+              <>
+                <h2 style={{ marginTop: 0 }}>Organizations</h2>
+                <p className="muted">
+                  Organization membership is stored on each user profile as a UUID. Broader org directory and bulk tools
+                  will grow here over time.
+                </p>
+                <div className="admin-card">
+                  <p style={{ margin: 0 }}>
+                    Use <strong>People &amp; access</strong> to see organization IDs on the roster or edit a user in the
+                    drawer. Use <strong>Invite users</strong> to attach an optional organization when someone is first
+                    created.
+                  </p>
+                </div>
+              </>
+            ) : activeView === "audit" ? (
+              <>
+                <h2 style={{ marginTop: 0 }}>Audit / activity</h2>
+                <p className="muted">
+                  Authenticated actions are written to <code>eos_action_log</code>; launcher sign-ins to{" "}
+                  <code>eos_login_log</code>. This head does not replace Supabase observability — it surfaces slices per
+                  user.
+                </p>
+                <div className="admin-card">
+                  <p style={{ margin: 0 }}>
+                    Open <strong>People &amp; access</strong>, select a user, then use the drawer for recent login events
+                    and audited actions. Full exports remain a database-console concern.
+                  </p>
+                </div>
+              </>
+            ) : activeView === "diagnostics" ? (
+              <>
+                <h2 style={{ marginTop: 0 }}>Admin tools / diagnostics</h2>
+                <p className="muted">
+                  Schema checks and legacy quote tooling. Quote workflow will move to the dedicated Quote Library head;
+                  pricing belongs in Pricing Admin.
+                </p>
+                <div className="subnav-tabs">
+                  <button
+                    type="button"
+                    className={`btn ${diagnosticsTab === "overview" ? "btn-primary" : ""}`}
+                    onClick={() => setDiagnosticsTab("overview")}
+                  >
+                    Overview
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn ${diagnosticsTab === "quote_pipeline" ? "btn-primary" : ""}`}
+                    onClick={() => setDiagnosticsTab("quote_pipeline")}
+                  >
+                    Quote pipeline diagnostics
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn ${diagnosticsTab === "legacy_pricing" ? "btn-primary" : ""}`}
+                    onClick={() => setDiagnosticsTab("legacy_pricing")}
+                  >
+                    Legacy quote pricing
+                  </button>
+                </div>
+                {diagnosticsTab === "overview" ? (
+                  <>
+                    <div
+                      className={`schema-card ${
+                        schemaHealthProbeError ? "api-issue"
+                        : schemaProbePending ? ""
+                        : schemaTablesHealthy ? "healthy"
+                        : "setup"
+                      }`}
+                      style={
+                        schemaProbePending && !schemaHealthProbeError ?
+                          { borderColor: "rgba(255,255,255,0.08)" }
+                        : undefined
+                      }
+                    >
+                      <strong>User Management Schema</strong>
+                      {schemaProbePending ? (
+                        <div className="muted" style={{ marginTop: 6 }}>
+                          Checking extension tables…
+                        </div>
+                      ) : schemaHealthProbeError ? (
+                        <div style={{ marginTop: 8 }}>
+                          <div style={{ color: "#93c5fd" }}>Schema health could not be checked. Backend/API issue.</div>
+                          <div className="muted" style={{ marginTop: 8, fontSize: 13 }}>
+                            Confirm <code>VITE_BACKEND_URL</code> points at backend-core (no trailing <code>/api</code>),
+                            redeploy/restart the API, then reload. Details are not interpreted as missing SQL migrations.
+                          </div>
+                          {import.meta.env.DEV ? (
+                            <div className="muted" style={{ marginTop: 8, fontSize: 12, wordBreak: "break-word" }}>
+                              {schemaHealthProbeError}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : schemaTablesHealthy ? (
+                        <div className="muted" style={{ marginTop: 6 }}>
+                          Healthy — User Management Schema reachable.
+                        </div>
+                      ) : (
+                        <div style={{ marginTop: 8 }}>
+                          <div style={{ color: "#fcd34d" }}>Setup required</div>
+                          <div className="muted" style={{ marginTop: 4 }}>
+                            Run <code style={{ fontSize: 12 }}>backend-core/supabase/user_management_schema.sql</code> on
+                            your Supabase project (admin SQL).
+                          </div>
+                          {schemaHealthResult?.missing?.length ? (
+                            <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>
+                              Missing or unreachable tables:{" "}
+                              <span style={{ color: "#fed7aa" }}>{schemaHealthResult.missing.join(", ")}</span>
+                            </div>
+                          ) : null}
+                        </div>
+                      )}
+                    </div>
+
+                    {import.meta.env.DEV && schemaHealthDevMeta ? (
+                      <details className="dev-debug">
+                        <summary>
+                          Schema health (dev) —{" "}
+                          {schemaHealthDevMeta.httpStatus != null ? `HTTP ${schemaHealthDevMeta.httpStatus}` : "no status"}{" "}
+                          · path {schemaHealthDevMeta.path}
+                        </summary>
+                        <pre>
+                          {JSON.stringify(
+                            {
+                              path: schemaHealthDevMeta.path,
+                              url: schemaHealthDevMeta.url,
+                              httpStatus: schemaHealthDevMeta.httpStatus,
+                              detail: schemaHealthDevMeta.detail ?? null,
+                              ...(schemaHealthResult ?
+                                { tables: schemaHealthResult.tables, missing: schemaHealthResult.missing }
+                              : {})
+                            },
+                            null,
+                            2
+                          )}
+                        </pre>
+                      </details>
+                    ) : null}
+
+                    <div className="admin-card">
+                      <h3 style={{ marginTop: 0 }}>Pricing Admin head</h3>
+                      <p className="muted" style={{ marginTop: 6 }}>
+                        Pricing configuration belongs in the eliteOS Pricing Admin Head — not in System Admin long term.
+                      </p>
+                      <a className="admin-card-link" href={PRICING_ADMIN_URL} target="_blank" rel="noreferrer">
+                        Open Pricing Admin →
+                      </a>
+                    </div>
+
+                    <div className="admin-card">
+                      <h3 style={{ marginTop: 0 }}>Quote Library (planned)</h3>
+                      <p className="muted" style={{ marginTop: 6 }}>
+                        The future Quote Library head will own quote search, filter, and sort, account grouping, status
+                        workflow, and sold-job handoff documentation. Pipeline diagnostics here are temporary.
+                      </p>
+                    </div>
+                  </>
+                ) : diagnosticsTab === "quote_pipeline" ? (
+                  <>
+                    <p className="safety-callout">
+                      Quote workflow will move to the dedicated eliteOS <strong>Quote Library</strong> head. This view
+                      remains for engineering diagnostics only.
+                    </p>
+                    <QuotePipelinePanel token={sessionToken} />
+                  </>
+                ) : (
+                  <>
+                    <p className="safety-callout">
+                      Pricing configuration belongs in the{" "}
+                      <a className="admin-card-link" href={PRICING_ADMIN_URL} target="_blank" rel="noreferrer">
+                        eliteOS Pricing Admin Head
+                      </a>
+                      . The screen below is a legacy diagnostic tied to backend admin routes — prefer Pricing Admin for
+                      real changes.
+                    </p>
+                    <QuotePricingAdminView token={sessionToken} />
+                  </>
+                )}
+              </>
+            ) : null}
           </div>
 
-          {activeView === "users" ? (
+          {activeView === "people" ? (
           <aside className="drawer">
             {!selectedId ? (
               <p className="muted">Select a user from the roster for actions and summaries.</p>
@@ -1025,6 +1402,19 @@ export default function App() {
               <>
                 <h3 style={{ marginTop: 0 }}>{String(profileDrawer.full_name || profileDrawer.email || selectedId)}</h3>
                 <UserSnapshot profile={profileDrawer} detail={detail} />
+
+                <UserLifecycleActions
+                  detail={detail}
+                  selectedId={selectedId}
+                  token={sessionToken}
+                  actorUserId={String(me?.user?.id ?? "")}
+                  onRefresh={() => void refreshAll()}
+                  onUserDeleted={() => {
+                    setSelectedId(null);
+                    setDetail(null);
+                  }}
+                  pushToast={pushToast}
+                />
 
                 <div className="drawer-section">
                   <h4>Edit profile</h4>
@@ -1062,36 +1452,6 @@ export default function App() {
                     token={sessionToken}
                     onDone={() => void refreshAll()}
                   />
-                </div>
-
-                <div className="drawer-section">
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={async () => {
-                      const t = sessionToken.trim();
-                      if (!t || !selectedId) return;
-                      if (
-                        window.confirm(`Send Supabase recovery email for ${String(profileDrawer.email ?? "this account")}?`)
-                      ) {
-                        try {
-                          await apiFetch(`${USER_MGMT_API}/users/${encodeURIComponent(selectedId)}/send-password-reset`, {
-                            token: t,
-                            method: "POST",
-                            body: {}
-                          });
-                          pushToast("info", "Password reset dispatched (recovery link emailed by Supabase).");
-                        } catch (e: unknown) {
-                          pushToast("error", e instanceof ApiError ? e.message : String(e));
-                        }
-                      }
-                    }}
-                  >
-                    Send password reset email
-                  </button>
-                  <p className="safety-callout" style={{ marginTop: 12 }}>
-                    {PASSWORD_GOVERNANCE_NOTE}
-                  </p>
                 </div>
 
                 <div className="drawer-section">
@@ -1149,7 +1509,6 @@ function ProfileForm({
   const [department, setDepartment] = useState(String(profile.department ?? ""));
   const [organizationId, setOrganizationId] = useState(String(profile.organization_id ?? ""));
   const [fullName, setFullName] = useState(String(profile.full_name ?? ""));
-  const [isActive, setIsActive] = useState(profile.is_active !== false);
 
   const roleOptions = useMemo(() => {
     const r = String(profile.role ?? "").trim();
@@ -1163,7 +1522,6 @@ function ProfileForm({
     setDepartment(String(profile.department ?? ""));
     setOrganizationId(String(profile.organization_id ?? ""));
     setFullName(String(profile.full_name ?? ""));
-    setIsActive(profile.is_active !== false);
   }, [profile]);
 
   async function submit(e: React.FormEvent) {
@@ -1175,8 +1533,7 @@ function ProfileForm({
         role,
         department: department.trim() || null,
         organization_id: organizationId.trim() || null,
-        full_name: fullName.trim(),
-        is_active: isActive
+        full_name: fullName.trim()
       }
     });
     onDone();
@@ -1207,10 +1564,9 @@ function ProfileForm({
         <label>Organization ID (UUID or empty)</label>
         <input value={organizationId} onChange={(e) => setOrganizationId(e.target.value)} placeholder="Clear field to unset" />
       </div>
-      <label style={{ fontSize: 13, display: "flex", gap: 8, alignItems: "center" }}>
-        <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
-        Active
-      </label>
+      <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+        Active / inactive status is managed under <strong>Account actions</strong> (deactivate or reactivate) so changes stay aligned with admin audit rules.
+      </p>
       <button type="submit" className="btn btn-primary" style={{ marginTop: 10 }}>
         Save profile
       </button>

@@ -254,13 +254,15 @@ async function fetchUserDetailEnriched(sb, userId) {
   const summaries = await loadSummaries(sb, uid);
   const enrichedList = await enrichUserProfilesList(sb, [profile]);
   const enriched = enrichedList?.[0] ?? profile;
+  const auth_summary = await fetchAuthUserSummary(sb, uid);
 
   return {
     profile: enriched,
     head_access_rows: heads,
     dealer_account_access: dealerAccess,
     login_summary: summaries.login,
-    action_summary: summaries.actions
+    action_summary: summaries.actions,
+    auth_summary
   };
 }
 
@@ -289,6 +291,102 @@ async function replaceUserHeadAccess(sb, userId, rawHeadList) {
     if (insErr) throw new Error(insErr.message);
   }
   return slugs;
+}
+
+/** Supabase Auth admin — best-effort flags for System Admin UI. */
+async function fetchAuthUserSummary(sb, userId) {
+  const uid = pickStr(userId);
+  if (!uid) {
+    return {
+      present: false,
+      email_confirmed_at: null,
+      last_sign_in_at: null,
+      invited_at: null,
+      confirmation_sent_at: null
+    };
+  }
+  try {
+    const { data, error } = await sb.auth.admin.getUserById(uid);
+    if (error || !data?.user) {
+      return {
+        present: false,
+        email_confirmed_at: null,
+        last_sign_in_at: null,
+        invited_at: null,
+        confirmation_sent_at: null,
+        auth_error: error?.message ? String(error.message) : null
+      };
+    }
+    const u = data.user;
+    return {
+      present: true,
+      email_confirmed_at: u.email_confirmed_at ?? null,
+      last_sign_in_at: u.last_sign_in_at ?? null,
+      invited_at: u.invited_at ?? null,
+      confirmation_sent_at: u.confirmation_sent_at ?? null
+    };
+  } catch (e) {
+    return {
+      present: false,
+      email_confirmed_at: null,
+      last_sign_in_at: null,
+      invited_at: null,
+      confirmation_sent_at: null,
+      auth_error: String(e?.message || e)
+    };
+  }
+}
+
+/**
+ * True if user has quote rows or audit rows — hard delete blocked.
+ * `created_by` on quote_headers is text (may hold auth user id).
+ */
+async function userHasDataBlockingHardDelete(sb, userId) {
+  const uid = pickStr(userId);
+  if (!uid) return true;
+  try {
+    const { count: qc } = await sb
+      .from("quote_headers")
+      .select("id", { count: "exact", head: true })
+      .eq("created_by", uid);
+    if ((qc ?? 0) > 0) return true;
+  } catch (_) {
+    /* table missing — do not allow destructive delete */
+    return true;
+  }
+  try {
+    const { count: ac } = await sb.from("eos_action_log").select("id", { count: "exact", head: true }).eq("user_id", uid);
+    if ((ac ?? 0) > 0) return true;
+  } catch (_) {
+    /* if log table missing, allow delete */
+  }
+  return false;
+}
+
+async function countOtherPrivilegedAdmins(sb, excludeUserId) {
+  const ex = pickStr(excludeUserId);
+  try {
+    const { data, error } = await sb.from("user_profiles").select("id").in("role", ["admin", "super_admin"]);
+    if (error) return null;
+    return (data ?? []).filter((r) => String(r.id) !== ex).length;
+  } catch {
+    return null;
+  }
+}
+
+async function countOtherActivePrivilegedAdmins(sb, excludeUserId) {
+  const ex = pickStr(excludeUserId);
+  try {
+    const { data, error } = await sb
+      .from("user_profiles")
+      .select("id")
+      .in("role", ["admin", "super_admin"])
+      .eq("is_active", true);
+    if (error) return null;
+    return (data ?? []).filter((r) => String(r.id) !== ex).length;
+  } catch {
+    return null;
+  }
 }
 
 const USER_MANAGEMENT_SCHEMA_TABLES = {
@@ -709,16 +807,23 @@ export function attachAdvancedSystemAdminUserRoutes(app, ctx) {
       const email = pickStr(profile?.email);
       if (!email) return res.status(404).json({ ok: false, error: "Email not found on profile" });
 
-      const redirectTo = resolvePasswordRecoveryRedirectTo();
-
-      const linkParams = { type: "recovery", email, options: { redirectTo } };
-
-      const generated = await sb.auth.admin.generateLink(linkParams);
-
-      if (generated?.error) {
-        return res.status(400).json({ ok: false, error: generated.error.message });
+      const auth = await fetchAuthUserSummary(sb, userId);
+      if (auth.present && !auth.email_confirmed_at) {
+        return res.status(400).json({
+          ok: false,
+          code: "use_resend_invite_instead",
+          message: "This account has not confirmed email yet. Use “Resend invite” instead of password reset."
+        });
       }
-      // Recovery link / OTP exist only server-side — never echoed to JSON clients.
+
+      const redirectTo = resolvePasswordRecoveryRedirectTo();
+      const rp = await sb.auth.resetPasswordForEmail(email, { redirectTo });
+      if (rp?.error) {
+        const generated = await sb.auth.admin.generateLink({ type: "recovery", email, options: { redirectTo } });
+        if (generated?.error) {
+          return res.status(400).json({ ok: false, error: generated.error.message });
+        }
+      }
 
       await logAction({
         user: req.user,
@@ -731,7 +836,209 @@ export function attachAdvancedSystemAdminUserRoutes(app, ctx) {
         req
       });
 
-      res.json({ ok: true, dispatched: true });
+      res.json({ ok: true, code: "password_reset_sent", message: "Password recovery email dispatched (if enabled in Supabase)." });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  r.post("/users/:userId/resend-invite", ...adminGuard, parseJson, async (req, res) => {
+    try {
+      const userId = pickStr(req.params.userId);
+      if (!userId) return res.status(400).json({ ok: false, error: "userId required" });
+      const sb = sbFn();
+      const { data: profile, error: pe } = await sb.from("user_profiles").select("email,full_name").eq("id", userId).maybeSingle();
+      if (pe) throw new Error(pe.message);
+      const email = pickStr(profile?.email);
+      if (!email) return res.status(404).json({ ok: false, error: "Email not found on profile" });
+
+      const redirectTo = resolveAuthEmailRedirectTo();
+      const fullName = profile?.full_name != null ? pickStr(profile.full_name) || null : null;
+      const inviteOptions = { redirectTo };
+      if (fullName) inviteOptions.data = { full_name: fullName };
+
+      const inviteResp = await sb.auth.admin.inviteUserByEmail(email.toLowerCase(), inviteOptions);
+      if (inviteResp?.error) {
+        return res.status(400).json({ ok: false, error: inviteResp.error.message });
+      }
+
+      await logAction({
+        user: req.user,
+        head: "system_admin",
+        actionType: "resend_invite",
+        entityType: "user_profile",
+        entityId: userId,
+        jobId: null,
+        metadata: { email },
+        req
+      });
+
+      res.json({
+        ok: true,
+        code: "invite_sent",
+        message: "Invite email sent. User completes setup at eliteOS Home."
+      });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  r.patch("/users/:userId/deactivate", ...adminGuard, parseJson, async (req, res) => {
+    try {
+      const userId = pickStr(req.params.userId);
+      if (!userId) return res.status(400).json({ ok: false, error: "userId required" });
+      const actorId = pickStr(req.user?.id);
+      if (actorId && actorId === userId) {
+        return res.status(400).json({ ok: false, code: "blocked_self_deactivate", message: "You cannot deactivate your own account." });
+      }
+      const sb = sbFn();
+      const { data: targetProf, error: te } = await sb
+        .from("user_profiles")
+        .select("role,is_active")
+        .eq("id", userId)
+        .maybeSingle();
+      if (te) throw new Error(te.message);
+      const tr = pickStr(targetProf?.role).toLowerCase();
+      if (targetProf?.is_active !== false && (tr === "admin" || tr === "super_admin")) {
+        const others = await countOtherActivePrivilegedAdmins(sb, userId);
+        if (others === 0) {
+          return res.status(400).json({
+            ok: false,
+            code: "blocked_last_admin",
+            message: "Cannot deactivate the last active admin or super_admin."
+          });
+        }
+      }
+
+      const { data, error } = await sb
+        .from("user_profiles")
+        .update({ is_active: false, updated_at: new Date().toISOString() })
+        .eq("id", userId)
+        .select("id,email,is_active")
+        .limit(1);
+      if (error) throw new Error(error.message);
+      if (!data?.[0]) return res.status(404).json({ ok: false, error: "User not found" });
+      await logAction({
+        user: req.user,
+        head: "system_admin",
+        actionType: "deactivate_user",
+        entityType: "user_profile",
+        entityId: userId,
+        jobId: null,
+        metadata: {},
+        req
+      });
+      res.json({ ok: true, code: "user_deactivated", profile: data[0] });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  r.patch("/users/:userId/reactivate", ...adminGuard, parseJson, async (req, res) => {
+    try {
+      const userId = pickStr(req.params.userId);
+      if (!userId) return res.status(400).json({ ok: false, error: "userId required" });
+      const sb = sbFn();
+      const { data, error } = await sb
+        .from("user_profiles")
+        .update({ is_active: true, updated_at: new Date().toISOString() })
+        .eq("id", userId)
+        .select("id,email,is_active")
+        .limit(1);
+      if (error) throw new Error(error.message);
+      if (!data?.[0]) return res.status(404).json({ ok: false, error: "User not found" });
+      await logAction({
+        user: req.user,
+        head: "system_admin",
+        actionType: "reactivate_user",
+        entityType: "user_profile",
+        entityId: userId,
+        jobId: null,
+        metadata: {},
+        req
+      });
+      res.json({ ok: true, code: "user_reactivated", profile: data[0] });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  r.delete("/users/:userId", ...adminGuard, parseJson, async (req, res) => {
+    try {
+      const userId = pickStr(req.params.userId);
+      if (!userId) return res.status(400).json({ ok: false, error: "userId required" });
+      const actorId = pickStr(req.user?.id);
+      if (actorId && actorId === userId) {
+        return res.status(400).json({ ok: false, code: "blocked_self_delete", message: "You cannot delete your own account." });
+      }
+
+      const confirm = pickStr(req.body?.confirm);
+      const sb = sbFn();
+      const { data: profile, error: pe } = await sb.from("user_profiles").select("id,email,role").eq("id", userId).maybeSingle();
+      if (pe) throw new Error(pe.message);
+      if (!profile?.id) return res.status(404).json({ ok: false, error: "User not found" });
+
+      const emailExpect = pickStr(profile.email);
+      if (confirm !== "DELETE" && confirm.toLowerCase() !== emailExpect.toLowerCase()) {
+        return res.status(400).json({
+          ok: false,
+          code: "confirmation_required",
+          message: 'Send JSON body { "confirm": "DELETE" } or { "confirm": "<user email>" } to confirm hard delete.'
+        });
+      }
+
+      const role = pickStr(profile.role).toLowerCase();
+      if (role === "admin" || role === "super_admin") {
+        const others = await countOtherPrivilegedAdmins(sb, userId);
+        if (others === 0) {
+          return res.status(400).json({
+            ok: false,
+            code: "blocked_last_admin",
+            message: "Cannot delete the only admin or super_admin profile."
+          });
+        }
+      }
+
+      const blocked = await userHasDataBlockingHardDelete(sb, userId);
+      if (blocked) {
+        return res.status(400).json({
+          ok: false,
+          code: "blocked_has_quote_history",
+          message: "User has quote or audit history. Deactivate instead, or contact engineering for data migration."
+        });
+      }
+
+      await sb.from("user_head_access").delete().eq("user_id", userId);
+      await sb.from("user_account_access").delete().eq("user_id", userId);
+      try {
+        await sb.from("dealer_user_settings").delete().eq("user_id", userId);
+      } catch (_) {
+        /* optional table */
+      }
+
+      const { error: delProf } = await sb.from("user_profiles").delete().eq("id", userId);
+      if (delProf) throw new Error(delProf.message);
+
+      const delAuth = await sb.auth.admin.deleteUser(userId);
+      if (delAuth?.error) {
+        return res.status(500).json({
+          ok: false,
+          error: `Profile removed but auth user delete failed: ${delAuth.error.message}. Re-invite may require manual Auth cleanup.`
+        });
+      }
+
+      await logAction({
+        user: req.user,
+        head: "system_admin",
+        actionType: "hard_delete_user",
+        entityType: "user_profile",
+        entityId: userId,
+        jobId: null,
+        metadata: { email: emailExpect },
+        req
+      });
+
+      res.json({ ok: true, code: "user_deleted", message: "User removed from profiles, access tables, and Supabase Auth." });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
     }

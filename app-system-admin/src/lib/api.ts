@@ -50,8 +50,9 @@ export async function apiFetch(path: string, options: ApiFetchOptions) {
   if (res.status === 401) throw new ApiError("Session expired. Please sign in again.", 401, json ?? text);
   if (res.status === 403) throw new ApiError("Forbidden.", 403, json ?? text);
   if (!res.ok) {
-    const jo = json as { error?: string } | null;
-    const msg = jo?.error ? `${jo.error}` : `HTTP ${res.status}`;
+    const jo = json as { error?: string; message?: string } | null;
+    const piece = jo?.message ?? jo?.error;
+    const msg = piece != null && String(piece).trim() ? String(piece) : `HTTP ${res.status}`;
     throw new ApiError(msg, res.status, json ?? text);
   }
 
