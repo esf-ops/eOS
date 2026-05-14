@@ -11,6 +11,10 @@ export type GuidedLayoutPreset =
   | "u_shape"
   | "galley"
   | "island"
+  /** Splash-only run (no countertop sf). */
+  | "backsplash_piece"
+  /** Vertical waterfall face (full-height material sf). */
+  | "waterfall"
   | "not_sure";
 
 export type GuidedSimpleForm = {
@@ -25,6 +29,10 @@ export type GuidedSimpleForm = {
   side2In: string;
   islandLengthIn: string;
   islandWidthIn: string;
+  /** Waterfall edge length (in) — same field as main run when preset is waterfall. */
+  waterfallEdgeIn: string;
+  /** Vertical drop height for waterfall (in). */
+  waterfallDropIn: string;
   splashHeightIn: string;
   counterDepthIn: string;
 };
@@ -41,6 +49,28 @@ export function defaultGuidedSimpleForm(): GuidedSimpleForm {
     side2In: "120",
     islandLengthIn: "72",
     islandWidthIn: "42",
+    waterfallEdgeIn: "96",
+    waterfallDropIn: "36",
+    splashHeightIn: String(STANDARD_BACKSPLASH_HEIGHT_IN),
+    counterDepthIn: String(STANDARD_COUNTER_DEPTH_IN)
+  };
+}
+
+/** Empty dimensions for Internal Estimate — avoids implying a shape before the estimator picks a preset. */
+export function emptyGuidedSimpleForm(): GuidedSimpleForm {
+  return {
+    mainRunIn: "",
+    longWallIn: "",
+    shortWallIn: "",
+    backWallIn: "",
+    leftWallIn: "",
+    rightWallIn: "",
+    side1In: "",
+    side2In: "",
+    islandLengthIn: "",
+    islandWidthIn: "",
+    waterfallEdgeIn: "",
+    waterfallDropIn: "",
     splashHeightIn: String(STANDARD_BACKSPLASH_HEIGHT_IN),
     counterDepthIn: String(STANDARD_COUNTER_DEPTH_IN)
   };
@@ -72,6 +102,7 @@ export function computeGuidedSimpleAreas(
   const lines: string[] = [];
   let counter = 0;
   let splash = 0;
+  let fhb = 0;
 
   if (!preset || preset === "not_sure") {
     return { counter: 0, splash: 0, fhb: 0, lines };
@@ -115,9 +146,22 @@ export function computeGuidedSimpleAreas(
       counter = counterSegSqftFromInches(L, W);
       lines.push(`Island surface about ${fmtIn(L)} by ${fmtIn(W)}.`);
     }
+  } else if (preset === "backsplash_piece") {
+    const run = n(form.mainRunIn);
+    counter = 0;
+    splash = splashSegSqftFromInches(run, sh);
+    if (run > 0) lines.push(`Backsplash run about ${fmtIn(run)}.`);
+    if (run > 0 && sh > 0) lines.push(`Splash height about ${fmtIn(sh)}.`);
+  } else if (preset === "waterfall") {
+    const edge = n(form.waterfallEdgeIn) || n(form.mainRunIn);
+    const drop = n(form.waterfallDropIn);
+    if (edge > 0 && drop > 0) {
+      fhb = round2((edge * drop) / 144);
+      lines.push(`Waterfall face about ${fmtIn(edge)} wide × ${fmtIn(drop)} tall (full-height material sf).`);
+    }
   }
 
-  return { counter: round2(counter), splash: round2(splash), fhb: 0, lines };
+  return { counter: round2(counter), splash: round2(splash), fhb: round2(fhb), lines };
 }
 
 function fmtIn(v: number): string {

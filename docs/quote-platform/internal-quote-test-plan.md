@@ -34,6 +34,13 @@ Elite Stone Fabrication internal sales and estimating staff with **Quote** head 
 
 - Moraware job custom field **Entered by** for CNC/programming contact — map via **Moraware Admin / Integration Mapping Head** per org (`docs/eliteos/SYSTEM_BLUEPRINT.md`).
 
+## 2026-05-11 — Phase 1 Internal Estimate UX (hybrid workspace)
+
+- **Section pills** scroll to Job Info → Rooms/Areas → Materials → Add-ons → Review → Output → Save.
+- **`job_info` + `project_address`:** new saves include `job_info` in `internal_ui` when the client posts `job_info`; header `project_address` when posted on save body.
+- **Tear-out:** UI uses **Tear Out** custom line preset ($750 default) instead of checkbox; `addOns.tearout` is **not** incremented (avoid double-charging if both were used).
+- **Hydration:** restores `project_address` and `internal_ui.job_info` when present.
+
 ## 2026-05-11 — Room model + catalog smoke checks
 
 - **`GET /api/internal-quotes/material-colors`** (signed in, quote head): returns `colors[]` + `warnings[]`; empty DB should still return fallback colors with a warning.

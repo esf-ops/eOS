@@ -128,7 +128,8 @@ export function attachInternalQuoteRoutes(app, deps) {
           preparedByLegacy: body.preparedBy ?? null,
           city: body.city ?? null,
           state: body.state ?? null,
-          project_name: body.project_name ?? null
+          project_name: body.project_name ?? null,
+          job_info: body.job_info && typeof body.job_info === "object" ? body.job_info : null
         }
       };
       const internalEstimateSummary = buildInternalEstimateSummary(calc, body);

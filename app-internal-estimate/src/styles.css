@@ -202,6 +202,33 @@ body {
   top: 16px;
 }
 
+.ie-workflow-nav {
+  margin-bottom: 18px;
+  padding: 16px 18px;
+}
+
+.ie-workflow-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ie-pill {
+  border: 1px solid var(--border-strong);
+  background: #f8fafc;
+  color: var(--text);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ie-pill:hover {
+  border-color: var(--elite-red);
+  color: var(--elite-red);
+}
+
 .card {
   background: var(--card);
   border: 1px solid var(--border);

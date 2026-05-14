@@ -9,6 +9,8 @@ type Props = {
   materialGroups: string[];
   /** Optional Elite Program catalog from eliteOS Brain (search + filter). */
   eliteProgramColors?: EliteProgramColorRow[];
+  /** Internal Estimate Head: hide rapid linear path (spec — not offered in this head). */
+  hideRapidLinear?: boolean;
 };
 
 function updateRoom(rooms: RoomDraft[], id: string, patch: Partial<RoomDraft>): RoomDraft[] {
@@ -87,9 +89,16 @@ function renderMiniVisual(room: RoomDraft): React.ReactNode {
   );
 }
 
-export default function RoomScopeBuilder({ rooms, onRoomsChange, materialGroups, eliteProgramColors }: Props) {
+export default function RoomScopeBuilder({
+  rooms,
+  onRoomsChange,
+  materialGroups,
+  eliteProgramColors,
+  hideRapidLinear = false
+}: Props) {
   const [colorQ, setColorQ] = React.useState<Record<string, string>>({});
   const [groupFilter, setGroupFilter] = React.useState<Record<string, string>>({});
+  const [pieceOverridesOpen, setPieceOverridesOpen] = React.useState<Record<string, boolean>>({});
   const addRoom = () => onRoomsChange([...rooms, createDefaultRoom(rooms[0]?.materialGroup || "Group Promo")]);
   const removeRoom = (id: string) => onRoomsChange(rooms.filter((r) => r.id !== id));
 
@@ -172,7 +181,7 @@ export default function RoomScopeBuilder({ rooms, onRoomsChange, materialGroups,
         return (
           <div key={room.id} className="room-card-lite card">
             <div className="room-card-head">
-              <h3 className="room-card-title">Room / area</h3>
+              <h3 className="room-card-title">Room / Area</h3>
               {rooms.length > 1 ? (
                 <button type="button" className="btn secondary" onClick={() => removeRoom(room.id)}>
                   Remove
@@ -201,9 +210,9 @@ export default function RoomScopeBuilder({ rooms, onRoomsChange, materialGroups,
                   ))}
                 </select>
               </label>
-              <label>
-                Material group
-                <select
+                <label>
+                  Price group (required for this room)
+                  <select
                   value={room.materialGroup}
                   onChange={(e) => onRoomsChange(updateRoom(rooms, room.id, { materialGroup: e.target.value }))}
                 >
@@ -219,11 +228,11 @@ export default function RoomScopeBuilder({ rooms, onRoomsChange, materialGroups,
             {eliteProgramColors && eliteProgramColors.length ? (
               <div className="grid3" style={{ marginTop: 10 }}>
                 <label style={{ gridColumn: "1 / -1" }}>
-                  Elite Program color (searchable)
+                  Room color (optional — use &quot;Color TBD&quot; in notes if needed)
                   <input
                     value={colorQ[room.id] ?? ""}
                     onChange={(e) => setColorQ((m) => ({ ...m, [room.id]: e.target.value }))}
-                    placeholder="Filter by color, supplier, or material type"
+                    placeholder="Type to filter catalog, then pick a row below"
                   />
                 </label>
                 <label>
@@ -241,7 +250,7 @@ export default function RoomScopeBuilder({ rooms, onRoomsChange, materialGroups,
                   </select>
                 </label>
                 <label>
-                  Select color
+                  Pick catalog color (optional)
                   <select
                     value={room.materialCatalogId || ""}
                     onChange={(e) => {
@@ -270,7 +279,7 @@ export default function RoomScopeBuilder({ rooms, onRoomsChange, materialGroups,
                       );
                     }}
                   >
-                    <option value="">— None (group only) —</option>
+                    <option value="">— Color TBD / group only —</option>
                     {eliteProgramColors
                       .filter((c) => {
                         const q = (colorQ[room.id] || "").toLowerCase().trim();
@@ -294,7 +303,8 @@ export default function RoomScopeBuilder({ rooms, onRoomsChange, materialGroups,
                   </select>
                 </label>
                 <p className="muted small" style={{ gridColumn: "1 / -1", marginTop: 0 }}>
-                  Pieces inherit this room material unless overridden on an individual piece.
+                  <strong>Room material</strong> applies to countertop and backsplash pieces in this room. Backsplash inherits the
+                  room color unless you set a piece override (advanced).
                 </p>
               </div>
             ) : null}
@@ -405,7 +415,7 @@ export default function RoomScopeBuilder({ rooms, onRoomsChange, materialGroups,
                       }
                     >
                       <option>Guided Shape</option>
-                      <option>Rapid Linear Foot</option>
+                      {hideRapidLinear ? null : <option>Rapid Linear Foot</option>}
                       <option>Manual Sq Ft</option>
                     </select>
                   </label>
@@ -461,6 +471,16 @@ export default function RoomScopeBuilder({ rooms, onRoomsChange, materialGroups,
                         + Island piece
                       </button>
                     </div>
+                    <label className="check" style={{ gridColumn: "1 / -1", marginTop: 8 }}>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(pieceOverridesOpen[room.id])}
+                        onChange={(e) =>
+                          setPieceOverridesOpen((m) => ({ ...m, [room.id]: e.target.checked }))
+                        }
+                      />
+                      Piece-level material overrides (advanced — off by default)
+                    </label>
                     {room.guidedPieces.map((p) => (
                       <div key={p.id} className="piece-row grid3">
                         <label>
@@ -509,39 +529,43 @@ export default function RoomScopeBuilder({ rooms, onRoomsChange, materialGroups,
                             onChange={(e) => setPiece(room.id, p.id, { depthIn: Number(e.target.value) || 0 }, "guided")}
                           />
                         </label>
-                        <label className="check" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <input
-                            type="checkbox"
-                            checked={Boolean(p.materialOverride)}
-                            onChange={(e) =>
-                              setPiece(room.id, p.id, { materialOverride: e.target.checked, materialGroup: room.materialGroup }, "guided")
-                            }
-                          />
-                          Override material for this piece
-                        </label>
-                        {p.materialOverride ? (
+                        {pieceOverridesOpen[room.id] ? (
                           <>
-                            <label>
-                              Piece material group
-                              <select
-                                value={p.materialGroup || room.materialGroup}
-                                onChange={(e) => setPiece(room.id, p.id, { materialGroup: e.target.value }, "guided")}
-                              >
-                                {materialGroups.map((g) => (
-                                  <option key={g} value={g}>
-                                    {g}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                            <label>
-                              Piece color label
+                            <label className="check" style={{ display: "flex", alignItems: "center", gap: 8 }}>
                               <input
-                                value={p.materialColor || ""}
-                                onChange={(e) => setPiece(room.id, p.id, { materialColor: e.target.value }, "guided")}
-                                placeholder="Optional — display on estimate"
+                                type="checkbox"
+                                checked={Boolean(p.materialOverride)}
+                                onChange={(e) =>
+                                  setPiece(room.id, p.id, { materialOverride: e.target.checked, materialGroup: room.materialGroup }, "guided")
+                                }
                               />
+                              Override material for this piece
                             </label>
+                            {p.materialOverride ? (
+                              <>
+                                <label>
+                                  Piece material group
+                                  <select
+                                    value={p.materialGroup || room.materialGroup}
+                                    onChange={(e) => setPiece(room.id, p.id, { materialGroup: e.target.value }, "guided")}
+                                  >
+                                    {materialGroups.map((g) => (
+                                      <option key={g} value={g}>
+                                        {g}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                                <label>
+                                  Piece color label
+                                  <input
+                                    value={p.materialColor || ""}
+                                    onChange={(e) => setPiece(room.id, p.id, { materialColor: e.target.value }, "guided")}
+                                    placeholder="Optional — display on estimate"
+                                  />
+                                </label>
+                              </>
+                            ) : null}
                           </>
                         ) : null}
                         <div style={{ display: "flex", alignItems: "flex-end" }}>
@@ -558,7 +582,7 @@ export default function RoomScopeBuilder({ rooms, onRoomsChange, materialGroups,
                   </div>
                 ) : null}
 
-                {room.calcMode === "Rapid Linear Foot" ? (
+                {room.calcMode === "Rapid Linear Foot" && !hideRapidLinear ? (
                   <div className="room-panel grid3">
                     <p className="muted small" style={{ gridColumn: "1 / -1" }}>
                       Wall cabinets in linear feet. Counter depth assumed 25.5″ (2.125 ft). Island in feet × feet.

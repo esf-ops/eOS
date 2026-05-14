@@ -6,7 +6,7 @@ import { round2, STANDARD_BACKSPLASH_HEIGHT_IN } from "@quote-lib/measurementEng
 import {
   CONFIDENCE_COPY,
   computeGuidedSimpleAreas,
-  defaultGuidedSimpleForm,
+  emptyGuidedSimpleForm,
   type GuidedLayoutPreset,
   type GuidedSimpleForm
 } from "@quote-lib/guidedHomeowner";
@@ -39,17 +39,28 @@ const MATERIAL_GROUPS = [
   "Group F"
 ];
 
-const GUIDED_PRESET_CARDS: Array<{ id: GuidedLayoutPreset; title: string }> = [
-  { id: "straight", title: "Straight run" },
+const INTERNAL_GUIDED_PRESETS: Array<{ id: GuidedLayoutPreset; title: string; hint?: string }> = [
+  { id: "straight", title: "Rectangle" },
   { id: "l_shape", title: "L-shape" },
   { id: "u_shape", title: "U-shape" },
-  { id: "galley", title: "Galley" },
-  { id: "island", title: "Island only" },
-  { id: "not_sure", title: "I'm not sure" }
+  { id: "island", title: "Island" },
+  { id: "backsplash_piece", title: "Backsplash piece" },
+  { id: "waterfall", title: "Waterfall" },
+  { id: "not_sure", title: "Not sure yet", hint: "Switch to manual sq ft or add dimensions when you can." }
 ];
 
 const INTERNAL_SALES_REPS = ["Casey", "Thera", "MJ", "House", "Direct"] as const;
-const INTERNAL_BRANCHES = ["Dyersville", "Lisbon", "Iowa City"] as const;
+const INTERNAL_BRANCHES = ["Dyersville", "Iowa City", "Lisbon"] as const;
+
+const WORKFLOW_SECTIONS = [
+  { id: "sec-job", label: "Job Info" },
+  { id: "sec-rooms", label: "Rooms / Areas" },
+  { id: "sec-materials", label: "Materials & Colors" },
+  { id: "sec-addons", label: "Add-ons & Custom" },
+  { id: "sec-review", label: "Review" },
+  { id: "sec-output", label: "Output" },
+  { id: "sec-save", label: "Save / Library" }
+] as const;
 
 type CustomPassRow = { id: string; description: string; price: string; qty: string };
 
@@ -75,6 +86,24 @@ type CustomLineRow = {
   internalNote: string;
   roomName: string;
 };
+
+const CUSTOM_LINE_PRESETS: Array<{
+  key: string;
+  name: string;
+  description: string;
+  category: CustomLineRow["category"];
+  unitPrice: string;
+  customerFacing: boolean;
+}> = [
+  { key: "tear", name: "Tear Out", description: "Flat demo line — same $750 intent as the legacy tear-out add-on.", category: "Labor", unitPrice: "750", customerFacing: true },
+  { key: "trip", name: "Trip Charge", description: "Travel / trip", category: "Fee", unitPrice: "75", customerFacing: true },
+  { key: "mat", name: "Additional Material Cost", description: "Extra material allowance", category: "Other", unitPrice: "0", customerFacing: true },
+  { key: "sink", name: "Custom Sink / Faucet / Fixture", description: "Fixture package", category: "Plumbing fixture", unitPrice: "0", customerFacing: true },
+  { key: "labor", name: "Labor / Install Fee", description: "Install or labor line", category: "Labor", unitPrice: "0", customerFacing: true },
+  { key: "disc", name: "Discount / Credit", description: "Uses negative unit price (required for this category).", category: "Discount/Credit", unitPrice: "-100", customerFacing: true },
+  { key: "other", name: "Other", description: "Miscellaneous", category: "Other", unitPrice: "0", customerFacing: true },
+  { key: "internal_fee", name: "Internal-only fee", description: "Uncheck customer-facing so this stays internal in snapshots.", category: "Fee", unitPrice: "0", customerFacing: false }
+];
 
 function newInternalRowId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `id-${Math.random().toString(36).slice(2, 11)}`;
@@ -133,7 +162,7 @@ export default function InternalEstimateApp() {
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  const [quoteWorkflow, setQuoteWorkflow] = useState<QuoteWorkflowMethod>("manual_sqft");
+  const [quoteWorkflow, setQuoteWorkflow] = useState<QuoteWorkflowMethod>("guided_shape");
   const [materialGroup, setMaterialGroup] = useState("Group Promo");
   const [roomDrafts, setRoomDrafts] = useState<RoomDraft[]>(() => [createDefaultRoom("Group Promo")]);
 
@@ -145,10 +174,13 @@ export default function InternalEstimateApp() {
   const [linearIslandW, setLinearIslandW] = useState("0");
   const [guidedProjectPieces, setGuidedProjectPieces] = useState<GuidedPiece[]>(() => createDefaultRoom("Group Promo").guidedPieces);
   const [guidedPreset, setGuidedPreset] = useState<GuidedLayoutPreset | null>(null);
-  const [guidedSimpleForm, setGuidedSimpleForm] = useState<GuidedSimpleForm>(() => defaultGuidedSimpleForm());
+  const [guidedSimpleForm, setGuidedSimpleForm] = useState<GuidedSimpleForm>(() => emptyGuidedSimpleForm());
   const [guidedUseAdvanced, setGuidedUseAdvanced] = useState(false);
   const [guidedAdvancedOpen, setGuidedAdvancedOpen] = useState(false);
 
+  const [accountName, setAccountName] = useState("Direct");
+  const [accountPhone, setAccountPhone] = useState("");
+  const [accountEmail, setAccountEmail] = useState("");
   const [customerName, setCustomerName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
@@ -156,9 +188,12 @@ export default function InternalEstimateApp() {
   const [branch, setBranch] = useState("Dyersville");
   const [salesRep, setSalesRep] = useState("");
   const [projectName, setProjectName] = useState("");
+  const [projectAddress, setProjectAddress] = useState("");
   const [city, setCity] = useState("");
   const [state, setState] = useState("");
   const [enteredBy, setEnteredBy] = useState("");
+  const [colorTbd, setColorTbd] = useState(false);
+  const [bsMaterialOverrideOpen, setBsMaterialOverrideOpen] = useState(false);
   const [internalPricingMode, setInternalPricingMode] = useState<"direct" | "wholesale">("wholesale");
   const [customItems, setCustomItems] = useState<CustomPassRow[]>([]);
   const [customLineRows, setCustomLineRows] = useState<CustomLineRow[]>([]);
@@ -171,6 +206,7 @@ export default function InternalEstimateApp() {
   const [loadedFromLibrary, setLoadedFromLibrary] = useState(false);
   const [hydrationGaps, setHydrationGaps] = useState<string[]>([]);
   const [lastSavedQuoteNumber, setLastSavedQuoteNumber] = useState<string | null>(null);
+  const [lastSavedQuoteId, setLastSavedQuoteId] = useState<string | null>(null);
   const [quoteLibrary, setQuoteLibrary] = useState<Array<Record<string, unknown>>>([]);
   const [libraryBusy, setLibraryBusy] = useState(false);
   const [libraryError, setLibraryError] = useState<string | null>(null);
@@ -180,7 +216,6 @@ export default function InternalEstimateApp() {
   const [outlet, setOutlet] = useState("0");
   const [ss, setSs] = useState("0");
   const [blanco, setBlanco] = useState("0");
-  const [tearYes, setTearYes] = useState(false);
   const [partnerRetailPct, setPartnerRetailPct] = useState("20");
   const [partnerRetailMethod, setPartnerRetailMethod] = useState("Markup Percent");
 
@@ -203,12 +238,12 @@ export default function InternalEstimateApp() {
   const lastCalcLive = !usedFallback && apiPartner != null;
 
   useEffect(() => {
-    setQuoteWorkflow("manual_sqft");
+    setQuoteWorkflow("guided_shape");
     setRoomDrafts((prev) => (prev.length ? prev : [createDefaultRoom("Group Promo")]));
   }, []);
 
   useEffect(() => {
-    setGuidedAdvancedOpen(true);
+    setGuidedAdvancedOpen(false);
   }, []);
 
   useEffect(() => {
@@ -254,16 +289,16 @@ export default function InternalEstimateApp() {
       "qty-outlet": num(outlet),
       "qty-ss": num(ss),
       "qty-blanco": num(blanco),
-      tearout: tearYes ? 1 : 0
+      tearout: 0
     };
-  }, [sink, bar, cook, outlet, ss, blanco, tearYes]);
+  }, [sink, bar, cook, outlet, ss, blanco]);
 
   const buildRoomDraftsForCalculate = useCallback((): RoomDraft[] => {
     if (quoteWorkflow === "room_by_room") return roomDrafts;
     if (quoteWorkflow === "upload_plans" || quoteWorkflow === "visualize") return [];
     if (quoteWorkflow === "guided_shape" && !guidedUseAdvanced) {
       const areas = computeGuidedSimpleAreas(guidedPreset, guidedSimpleForm);
-      return [createManualScopeRoom(materialGroup, areas.counter, areas.splash)];
+      return [createManualScopeRoom(materialGroup, areas.counter, areas.splash, areas.fhb)];
     }
     return [
       syntheticRoomForWorkflow(
@@ -378,13 +413,21 @@ export default function InternalEstimateApp() {
       totalSfReady = round2(totals.counter + totals.splash + totals.fhb);
     }
     const missing: string[] = [];
+    if (!accountName.trim()) missing.push("Account (enter a name or keep Direct)");
+    if (!salesRep.trim()) missing.push("Salesperson");
     if (!customerName.trim()) missing.push("Customer name");
-    if (!projectName.trim()) missing.push("Project name");
-    if (!city.trim() && !state.trim()) missing.push("City or state");
-    if (totalSfReady <= 0) missing.push("Measurements / scope square footage");
-    if (!materialGroup && !quoteDefaultCatalogId) missing.push("Material group or default Elite Program color");
+    if (!projectName.trim()) missing.push("Elite job name");
+    if (!city.trim() && !state.trim() && !projectAddress.trim()) missing.push("Project address or city/state");
+    if (totalSfReady <= 0) missing.push("Room / area measurements (square footage)");
+    const readinessWarnings: string[] = [];
+    if (colorTbd) {
+      readinessWarnings.push("Color marked TBD — confirm before Sent/Sold when you have a selection.");
+    } else if (!quoteDefaultCatalogId && quoteWorkflow !== "room_by_room") {
+      readinessWarnings.push("No default catalog color — room colors or TBD is fine for internal drafts.");
+    }
     const readiness = {
       missing,
+      warnings: readinessWarnings,
       score: Math.max(0, Math.min(100, 100 - missing.length * 14)),
       readyForReview: missing.length === 0
     };
@@ -415,11 +458,17 @@ export default function InternalEstimateApp() {
       customer_phone: phone.trim() || undefined,
       project_type: projectType.trim() || undefined,
       project_name: projectName.trim() || undefined,
+      project_address: projectAddress.trim() || undefined,
       city: city.trim() || undefined,
       state: state.trim() || undefined,
       branch: branch.trim() || undefined,
       sales_rep: salesRep.trim() || undefined,
-      entered_by: enteredBy.trim() || undefined
+      entered_by: enteredBy.trim() || undefined,
+      job_info: {
+        account: accountName.trim() || null,
+        account_contact_phone: accountPhone.trim() || null,
+        account_contact_email: accountEmail.trim() || null
+      }
     };
   }, [
     buildRoomDraftsForCalculate,
@@ -443,9 +492,14 @@ export default function InternalEstimateApp() {
     fixtureSpecsNote,
     internalPricingMode,
     projectName,
+    projectAddress,
     city,
     state,
-    enteredBy
+    enteredBy,
+    accountName,
+    accountPhone,
+    accountEmail,
+    colorTbd
   ]);
 
   const runLocalFromDrafts = useCallback(() => {
@@ -556,6 +610,7 @@ export default function InternalEstimateApp() {
       customer_phone: phone.trim() || null,
       project_type: projectType.trim() || null,
       project_name: projectName.trim() || null,
+      project_address: projectAddress.trim() || null,
       city: city.trim() || null,
       state: state.trim() || null,
       branch: branch.trim() || null,
@@ -563,7 +618,7 @@ export default function InternalEstimateApp() {
       entered_by: enteredBy.trim() || null,
       quote_status: "testing_review"
     };
-  }, [buildCalcPayload, customerName, email, phone, projectType, projectName, city, state, branch, salesRep, enteredBy]);
+  }, [buildCalcPayload, customerName, email, phone, projectType, projectName, projectAddress, city, state, branch, salesRep, enteredBy]);
 
   const refreshLibrary = useCallback(async () => {
     if (!sessionToken) {
@@ -602,7 +657,9 @@ export default function InternalEstimateApp() {
       const raw = (await apiPostJson("/api/internal-quotes/save", sessionToken, payload)) as Record<string, unknown>;
       if (raw.ok === true) {
         const qn = String(raw.quote_number ?? raw.quoteNumber ?? "");
+        const qid = String(raw.quoteId ?? raw.quote_id ?? "");
         setLastSavedQuoteNumber(qn || null);
+        setLastSavedQuoteId(qid && qid !== "undefined" ? qid : null);
         setSubmitMsg(
           qn
             ? `Saved to eliteOS Quote Library. Reference: ${qn}.`
@@ -675,14 +732,49 @@ export default function InternalEstimateApp() {
 
   const readinessSnapshot = useMemo(() => {
     const missing: string[] = [];
+    if (!accountName.trim()) missing.push("Account (enter a name or keep Direct)");
+    if (!salesRep.trim()) missing.push("Salesperson");
     if (!customerName.trim()) missing.push("Customer name");
-    if (!projectName.trim()) missing.push("Project name");
-    if (!city.trim() && !state.trim()) missing.push("City or state");
-    if (scopePreview.empty || scopePreview.totalSf <= 0) missing.push("Measurements / scope square footage");
-    if (!materialGroup && !quoteDefaultCatalogId) missing.push("Material group or default Elite Program color");
+    if (!projectName.trim()) missing.push("Elite job name");
+    if (!city.trim() && !state.trim() && !projectAddress.trim()) missing.push("Project address or city/state");
+    if (scopePreview.empty || scopePreview.totalSf <= 0) missing.push("Room / area measurements (square footage)");
+    const warnings: string[] = [];
+    if (colorTbd) {
+      warnings.push("Color marked TBD — confirm before Sent/Sold when you have a selection.");
+    } else if (!quoteDefaultCatalogId && quoteWorkflow !== "room_by_room") {
+      warnings.push("No default catalog color — room colors or TBD is fine for internal drafts.");
+    }
     const score = Math.max(0, Math.min(100, 100 - missing.length * 14));
-    return { missing, score, readyForReview: missing.length === 0 };
-  }, [customerName, projectName, city, state, scopePreview, materialGroup, quoteDefaultCatalogId]);
+    return { missing, warnings, score, readyForReview: missing.length === 0 };
+  }, [
+    accountName,
+    salesRep,
+    customerName,
+    projectName,
+    projectAddress,
+    city,
+    state,
+    scopePreview,
+    colorTbd,
+    quoteDefaultCatalogId,
+    quoteWorkflow
+  ]);
+
+  const customLinePreviewTotals = useMemo(() => {
+    let sum = 0;
+    for (const r of customLineRows) {
+      const q = num(r.qty) || 1;
+      const p = num(r.unitPrice);
+      if (!r.name.trim() || q <= 0) continue;
+      if (r.category === "Discount/Credit") {
+        if (p < 0) sum += q * p;
+        continue;
+      }
+      if (p === 0) continue;
+      sum += q * p;
+    }
+    return round2(sum);
+  }, [customLineRows]);
 
   const guidedPreview = useMemo(() => {
     if (quoteWorkflow !== "guided_shape") return null;
@@ -701,6 +793,7 @@ export default function InternalEstimateApp() {
       return {
         counter: m.counter,
         splash: m.splash,
+        fhb: m.fhb,
         total: m.totalSf,
         lines: m.details,
         confidence: CONFIDENCE_COPY
@@ -710,6 +803,7 @@ export default function InternalEstimateApp() {
     return {
       counter: a.counter,
       splash: a.splash,
+      fhb: a.fhb,
       total: round2(a.counter + a.splash + a.fhb),
       lines: a.lines,
       confidence: CONFIDENCE_COPY
@@ -726,15 +820,13 @@ export default function InternalEstimateApp() {
 
   const methodCards = useMemo(() => {
     const all = [
-      { id: "guided_shape" as const, title: "Help me lay it out", sub: "Guided shapes & presets — great when you have rough dimensions." },
-      { id: "manual_sqft" as const, title: "I know my square footage", sub: "Fastest if you already have countertop and backsplash sf." },
-      { id: "rapid_linear" as const, title: "I know my cabinet runs", sub: "Wall cabinets in linear feet + optional island." },
+      { id: "guided_shape" as const, title: "Guided shape (default)", sub: "Pick a preset, then enter dimensions — best for most jobs." },
+      { id: "manual_sqft" as const, title: "Manual sq ft", sub: "When you already have countertop and backsplash square footage." },
       { id: "room_by_room" as const, title: "Room-by-room / advanced", sub: "Multiple rooms, materials, and add-ons like the ESF prototype." },
       { id: "upload_plans" as const, title: "Upload plans / AI takeoff", sub: "Coming soon — upload drawings and let eliteOS prepare measurements for review." },
       { id: "visualize" as const, title: "Visualize", sub: "Coming soon — build a simple kitchen layout tied directly to your quote." }
     ] as const;
-    const filtered = all.filter((c) => c.id !== "rapid_linear");
-    return filtered.map((c) => ({ ...c, disabled: c.id === "upload_plans" || c.id === "visualize" }));
+    return all.map((c) => ({ ...c, disabled: c.id === "upload_plans" || c.id === "visualize" }));
   }, []);
 
   const quoteLibraryUrl = useMemo(() => {
@@ -751,6 +843,13 @@ export default function InternalEstimateApp() {
   }, []);
 
   const hydrationRanRef = useRef(false);
+  useEffect(() => {
+    if (!supabase || !sessionToken) return;
+    void supabase.auth.getSession().then(({ data }) => {
+      const em = data.session?.user?.email;
+      if (em) setEnteredBy((prev) => (prev.trim() ? prev : em));
+    });
+  }, [sessionToken, supabase]);
   useEffect(() => {
     hydrationRanRef.current = false;
   }, [urlQuoteId]);
@@ -799,6 +898,7 @@ export default function InternalEstimateApp() {
         setEmail(String(q.customer_email ?? ""));
         setPhone(String(q.customer_phone ?? ""));
         setProjectName(String(q.project_name ?? ""));
+        setProjectAddress(String(q.project_address ?? ""));
         setCity(String(q.city ?? ""));
         setState(String(q.state ?? ""));
         if (q.branch) setBranch(String(q.branch));
@@ -807,6 +907,13 @@ export default function InternalEstimateApp() {
         if (q.project_type) setProjectType(String(q.project_type));
         const snap = (q.calculation_snapshot as Record<string, unknown>) || {};
         const iu = (snap.internal_ui as Record<string, unknown>) || {};
+        const ji = iu.job_info;
+        if (ji && typeof ji === "object") {
+          const j = ji as Record<string, unknown>;
+          if (j.account != null && String(j.account).trim()) setAccountName(String(j.account));
+          if (j.account_contact_phone != null) setAccountPhone(String(j.account_contact_phone));
+          if (j.account_contact_email != null) setAccountEmail(String(j.account_contact_email));
+        }
         const wf = String(iu.quote_workflow || "");
         if (wf && ["manual_sqft", "guided_shape", "room_by_room", "upload_plans", "visualize"].includes(wf)) {
           setQuoteWorkflow(wf as QuoteWorkflowMethod);
@@ -868,8 +975,8 @@ export default function InternalEstimateApp() {
         <div className="hero-brand">
           <img className="logo" src={EOS_LOGO_URL} alt="Elite Stone Fabrication" />
           <div className="hero-titles">
-            <h1 className="title">Internal estimate</h1>
-            <p className="subtitle">Staff-only measurement and pricing</p>
+            <h1 className="title">eliteOS Internal Estimate Head</h1>
+            <p className="subtitle">Staff-only workspace — build internal quotes with guided measurements and live pricing.</p>
             <p className="hero-tagline">
               eliteOS Internal Estimate Head — Direct / Wholesale economics, not for homeowner-facing use.
             </p>
@@ -936,6 +1043,24 @@ export default function InternalEstimateApp() {
           {backendHint}
         </p>
       </div>
+
+      <nav className="ie-workflow-nav card" aria-label="Estimate workflow sections">
+        <p className="muted small" style={{ margin: "0 0 10px" }}>
+          Jump to a section — work in any order; this is not a locked wizard.
+        </p>
+        <div className="ie-workflow-pills">
+          {WORKFLOW_SECTIONS.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              className="ie-pill"
+              onClick={() => document.getElementById(s.id)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      </nav>
 
       <div className="layout">
         <div className="main-col">
@@ -1070,13 +1195,89 @@ export default function InternalEstimateApp() {
             </p>
           </section>
 
-          <section className="card">
-            <h2>How would you like to measure your project?</h2>
+          <section id="sec-job" className="card">
+            <h2>1 · Job Info</h2>
+            <p className="muted small">Account and job context (not homeowner-facing copy).</p>
+            <div className="grid3">
+              <label>
+                Account <span className="muted">(required — use Direct if no dealer)</span>
+                <input value={accountName} onChange={(e) => setAccountName(e.target.value)} placeholder="Direct or account name" />
+              </label>
+              <label>
+                Account contact phone
+                <input value={accountPhone} onChange={(e) => setAccountPhone(e.target.value)} placeholder="Optional" />
+              </label>
+              <label>
+                Account contact email
+                <input value={accountEmail} onChange={(e) => setAccountEmail(e.target.value)} placeholder="Optional" />
+              </label>
+              <label>
+                Customer
+                <input value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Customer or site name" />
+              </label>
+              <label>
+                Customer phone
+                <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Optional" />
+              </label>
+              <label>
+                Customer email
+                <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Optional" />
+              </label>
+              <label>
+                Elite job name
+                <input value={projectName} onChange={(e) => setProjectName(e.target.value)} placeholder="e.g. Smith kitchen" />
+              </label>
+              <label>
+                Project address
+                <input value={projectAddress} onChange={(e) => setProjectAddress(e.target.value)} placeholder="Street, city, or full address" />
+              </label>
+              <label>
+                City
+                <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="Dyersville" />
+              </label>
+              <label>
+                State
+                <input value={state} onChange={(e) => setState(e.target.value)} placeholder="IA" />
+              </label>
+              <label>
+                Project type
+                <input value={projectType} onChange={(e) => setProjectType(e.target.value)} />
+              </label>
+              <label>
+                Branch
+                <select value={branch} onChange={(e) => setBranch(e.target.value)}>
+                  {INTERNAL_BRANCHES.map((b) => (
+                    <option key={b} value={b}>
+                      {b}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Salesperson <span className="muted">(required)</span>
+                <select value={salesRep} onChange={(e) => setSalesRep(e.target.value)}>
+                  <option value="">— Select —</option>
+                  {INTERNAL_SALES_REPS.map((r) => (
+                    <option key={r} value={r}>
+                      {r}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Entered by
+                <input value={enteredBy} onChange={(e) => setEnteredBy(e.target.value)} placeholder="Defaults from sign-in when empty" />
+              </label>
+            </div>
+          </section>
+
+          <section id="sec-rooms" className="card">
+            <h2>2 · Room / Area, scope, and materials</h2>
             <p className="muted">
-              Default is manual square footage for preliminary estimates. Guided shape is available as a secondary path; rapid
-              linear foot is not offered in this head.
+              <strong>Guided shape</strong> is the default path. Use <strong>Manual sq ft</strong> when you already have totals, or{" "}
+              <strong>Room-by-room</strong> for multiple rooms. Rapid linear is not used in this head.
             </p>
-            <div className="quote-method-grid">
+            <div className="quote-method-grid" style={{ marginBottom: 18 }}>
               {methodCards.map((c) => (
                 <button
                   key={c.id}
@@ -1091,69 +1292,12 @@ export default function InternalEstimateApp() {
                 </button>
               ))}
             </div>
-          </section>
-
-          <section className="card">
-            <h2>Customer &amp; project</h2>
-            <div className="grid3">
-              <label>
-                Customer name
-                <input value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Jane Homeowner" />
-              </label>
-              <label>
-                Project name
-                <input value={projectName} onChange={(e) => setProjectName(e.target.value)} placeholder="Smith kitchen" />
-              </label>
-              <label>
-                Project type
-                <input value={projectType} onChange={(e) => setProjectType(e.target.value)} />
-              </label>
-              <label>
-                City
-                <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="Dyersville" />
-              </label>
-              <label>
-                State
-                <input value={state} onChange={(e) => setState(e.target.value)} placeholder="IA" />
-              </label>
-              <label>
-                Phone
-                <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="563-555-0100" />
-              </label>
-              <label>
-                Email
-                <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="jane@example.com" />
-              </label>
-              <label>
-                Entered by
-                <input value={enteredBy} onChange={(e) => setEnteredBy(e.target.value)} placeholder="Staff name" />
-              </label>
-              <label>
-                Branch
-                <select value={branch} onChange={(e) => setBranch(e.target.value)}>
-                  {INTERNAL_BRANCHES.map((b) => (
-                    <option key={b} value={b}>
-                      {b}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Sales rep
-                <select value={salesRep} onChange={(e) => setSalesRep(e.target.value)}>
-                  <option value="">—</option>
-                  {INTERNAL_SALES_REPS.map((r) => (
-                    <option key={r} value={r}>
-                      {r}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-          </section>
-
-          <section className="card">
-            <h2>Scope and materials</h2>
+            <h3 className="h3" id="sec-materials">
+              Materials &amp; colors
+            </h3>
+            <p className="muted small">
+              Price group is required for single-flow quotes. Exact catalog color is optional — check Color TBD if you are not picking one yet.
+            </p>
             <div className="grid3" style={{ marginBottom: 14 }}>
               <label>
                 Internal material pricing
@@ -1189,6 +1333,17 @@ export default function InternalEstimateApp() {
                   </select>
                 </label>
               ) : null}
+              <label className="check" style={{ gridColumn: "1 / -1" }}>
+                <input
+                  type="checkbox"
+                  checked={colorTbd}
+                  onChange={(e) => {
+                    setColorTbd(e.target.checked);
+                    if (e.target.checked) setQuoteDefaultCatalogId("");
+                  }}
+                />
+                Color TBD (no default catalog color for this draft)
+              </label>
             </div>
             {colorCatalogWarnings.length ? (
               <p className="muted small" style={{ marginTop: 8 }}>
@@ -1196,8 +1351,31 @@ export default function InternalEstimateApp() {
               </p>
             ) : null}
 
+            <details
+              style={{ marginBottom: 14 }}
+              open={bsMaterialOverrideOpen}
+              onToggle={(e) => setBsMaterialOverrideOpen((e.target as HTMLDetailsElement).open)}
+            >
+              <summary>Backsplash material override (optional)</summary>
+              <p className="muted small" style={{ marginTop: 8 }}>
+                Backsplash usually inherits the room material. In <strong>Room-by-room</strong> mode, turn on piece-level overrides on
+                backsplash pieces in the builder when a wall needs a different group/color.
+              </p>
+            </details>
+
+            <h3 className="h3">Measurements — Room / Area</h3>
+            <p className="muted small">
+              Pick a workflow at the top of this card, then fill dimensions below.
+            </p>
+
             {quoteWorkflow === "room_by_room" ? (
-              <RoomScopeBuilder rooms={roomDrafts} onRoomsChange={setRoomDrafts} materialGroups={MATERIAL_GROUPS} eliteProgramColors={eliteColors} />
+              <RoomScopeBuilder
+                rooms={roomDrafts}
+                onRoomsChange={setRoomDrafts}
+                materialGroups={MATERIAL_GROUPS}
+                eliteProgramColors={eliteColors}
+                hideRapidLinear
+              />
             ) : null}
 
             {quoteWorkflow === "manual_sqft" ? (
@@ -1213,30 +1391,6 @@ export default function InternalEstimateApp() {
               </div>
             ) : null}
 
-            {quoteWorkflow === "rapid_linear" ? (
-              <div className="grid3">
-                <p className="muted small" style={{ gridColumn: "1 / -1" }}>
-                  Wall cabinets in linear feet; depth fixed at 25.5″ (2.125 ft). Backsplash height in inches. Island in feet.
-                </p>
-                <label>
-                  Wall cabinets LF
-                  <input value={linearWall} onChange={(e) => setLinearWall(e.target.value)} />
-                </label>
-                <label>
-                  Backsplash height (in)
-                  <input value={linearSplashIn} onChange={(e) => setLinearSplashIn(e.target.value)} />
-                </label>
-                <label>
-                  Island length (in)
-                  <input value={linearIslandL} onChange={(e) => setLinearIslandL(e.target.value)} />
-                </label>
-                <label>
-                  Island width (in)
-                  <input value={linearIslandW} onChange={(e) => setLinearIslandW(e.target.value)} />
-                </label>
-              </div>
-            ) : null}
-
             {quoteWorkflow === "guided_shape" ? (
               <div className="guided-layout">
                 <p className="muted small">
@@ -1246,7 +1400,7 @@ export default function InternalEstimateApp() {
 
                 <h3 className="h3 guided-preset-heading">Pick the shape that looks closest to your project</h3>
                 <div className="preset-card-grid">
-                  {GUIDED_PRESET_CARDS.map((c) => (
+                  {INTERNAL_GUIDED_PRESETS.map((c) => (
                     <button
                       key={c.id}
                       type="button"
@@ -1254,6 +1408,7 @@ export default function InternalEstimateApp() {
                       onClick={() => setGuidedPreset(c.id)}
                     >
                       {c.title}
+                      {c.hint && guidedPreset === c.id ? <span className="muted small" style={{ display: "block", marginTop: 4 }}>{c.hint}</span> : null}
                     </button>
                   ))}
                 </div>
@@ -1298,7 +1453,7 @@ export default function InternalEstimateApp() {
                     {guidedPreset === "l_shape" ? (
                       <div className="grid3">
                         <label>
-                          Long wall length (in)
+                          Long wall (in)
                           <input
                             value={guidedSimpleForm.longWallIn}
                             onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, longWallIn: e.target.value }))}
@@ -1306,7 +1461,7 @@ export default function InternalEstimateApp() {
                           />
                         </label>
                         <label>
-                          Short wall length (in)
+                          Return (in)
                           <input
                             value={guidedSimpleForm.shortWallIn}
                             onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, shortWallIn: e.target.value }))}
@@ -1335,15 +1490,7 @@ export default function InternalEstimateApp() {
                     {guidedPreset === "u_shape" ? (
                       <div className="grid3">
                         <label>
-                          Back wall length (in)
-                          <input
-                            value={guidedSimpleForm.backWallIn}
-                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, backWallIn: e.target.value }))}
-                            inputMode="decimal"
-                          />
-                        </label>
-                        <label>
-                          Left side length (in)
+                          Left run (in)
                           <input
                             value={guidedSimpleForm.leftWallIn}
                             onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, leftWallIn: e.target.value }))}
@@ -1351,7 +1498,15 @@ export default function InternalEstimateApp() {
                           />
                         </label>
                         <label>
-                          Right side length (in)
+                          Back run (in)
+                          <input
+                            value={guidedSimpleForm.backWallIn}
+                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, backWallIn: e.target.value }))}
+                            inputMode="decimal"
+                          />
+                        </label>
+                        <label>
+                          Right run (in)
                           <input
                             value={guidedSimpleForm.rightWallIn}
                             onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, rightWallIn: e.target.value }))}
@@ -1434,6 +1589,48 @@ export default function InternalEstimateApp() {
                         </label>
                       </div>
                     ) : null}
+
+                    {guidedPreset === "backsplash_piece" ? (
+                      <div className="grid3">
+                        <label>
+                          Backsplash run length (in)
+                          <input
+                            value={guidedSimpleForm.mainRunIn}
+                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, mainRunIn: e.target.value }))}
+                            inputMode="decimal"
+                          />
+                        </label>
+                        <label>
+                          Backsplash height (in)
+                          <input
+                            value={guidedSimpleForm.splashHeightIn}
+                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, splashHeightIn: e.target.value }))}
+                            inputMode="decimal"
+                          />
+                        </label>
+                      </div>
+                    ) : null}
+
+                    {guidedPreset === "waterfall" ? (
+                      <div className="grid3">
+                        <label>
+                          Waterfall edge length (in)
+                          <input
+                            value={guidedSimpleForm.waterfallEdgeIn}
+                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, waterfallEdgeIn: e.target.value }))}
+                            inputMode="decimal"
+                          />
+                        </label>
+                        <label>
+                          Drop height (in)
+                          <input
+                            value={guidedSimpleForm.waterfallDropIn}
+                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, waterfallDropIn: e.target.value }))}
+                            inputMode="decimal"
+                          />
+                        </label>
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
 
@@ -1449,6 +1646,12 @@ export default function InternalEstimateApp() {
                         <span className="muted small">Estimated backsplash sq ft</span>
                         <strong>{guidedPreview.splash.toFixed(2)}</strong>
                       </div>
+                      {"fhb" in guidedPreview && guidedPreview.fhb > 0 ? (
+                        <div>
+                          <span className="muted small">Full-height / waterfall (material sf)</span>
+                          <strong>{guidedPreview.fhb.toFixed(2)}</strong>
+                        </div>
+                      ) : null}
                       <div>
                         <span className="muted small">Estimated total sq ft</span>
                         <strong>{guidedPreview.total.toFixed(2)}</strong>
@@ -1658,6 +1861,13 @@ export default function InternalEstimateApp() {
               </div>
             ) : null}
 
+          </section>
+
+          <section id="sec-addons" className="card">
+            <h2>3 · Add-ons &amp; custom items</h2>
+            <p className="muted small">
+              Cutouts use catalog rates. Use <strong>Tear Out</strong> and other presets below instead of a legacy tear-out toggle.
+            </p>
             {quoteWorkflow !== "room_by_room" ? (
               <>
                 <h3 className="h3">Global add-ons (non — room-by-room)</h3>
@@ -1687,10 +1897,6 @@ export default function InternalEstimateApp() {
                     <input value={blanco} onChange={(e) => setBlanco(e.target.value)} />
                   </label>
                 </div>
-                <label className="check">
-                  <input type="checkbox" checked={tearYes} onChange={(e) => setTearYes(e.target.checked)} />
-                  Tear-out needed
-                </label>
                 <div style={{ marginTop: 16 }}>
                   <h3 className="h3">Custom add-ons</h3>
                   <p className="muted small">
@@ -1757,16 +1963,46 @@ export default function InternalEstimateApp() {
                 <input value={partnerRetailPct} onChange={(e) => setPartnerRetailPct(e.target.value)} style={{ maxWidth: 140 }} />
               </label>
             </div>
-          </section>
 
-            <section className="card">
-              <h2>Job-specific custom line items</h2>
-              <p className="muted small">
+            <h3 className="h3">Structured custom line items</h3>
+            <div className="mode-row" style={{ flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+              {CUSTOM_LINE_PRESETS.map((p) => (
+                <button
+                  key={p.key}
+                  type="button"
+                  className="btn secondary"
+                  onClick={() =>
+                    setCustomLineRows((prev) => [
+                      ...prev,
+                      {
+                        id: newInternalRowId(),
+                        name: p.name,
+                        description: p.description,
+                        category: p.category,
+                        qty: "1",
+                        unitPrice: p.unitPrice,
+                        customerFacing: p.customerFacing,
+                        internalNote: "",
+                        roomName: ""
+                      }
+                    ])
+                  }
+                >
+                  + {p.name}
+                </button>
+              ))}
+            </div>
+            <p className="muted small">
                 Structured lines are validated on the server (discounts require negative unit price). They roll into totals, snapshots,
                 Quote Library, and handoff docs.
               </p>
               {customLineRows.map((row) => (
                 <div key={row.id} className="grid3" style={{ marginBottom: 10, borderBottom: "1px solid var(--border)", paddingBottom: 10 }}>
+                  {!row.customerFacing ? (
+                    <p className="muted small" style={{ gridColumn: "1 / -1", margin: 0 }}>
+                      <span className="pill pill-demo">Internal-only</span> Not marked customer-facing for snapshots.
+                    </p>
+                  ) : null}
                   <label>
                     Item name
                     <input
@@ -1898,15 +2134,25 @@ export default function InternalEstimateApp() {
               </div>
             </section>
 
-            <section className="card">
-              <h2>Review readiness</h2>
+            <section id="sec-review" className="card">
+              <h2>5 · Review &amp; readiness</h2>
               <p className="muted small">
-                Readiness score feeds future handoff documents — not Monday source of truth.
+                Readiness feeds snapshots — it does not block Calculate or Save in this build.
               </p>
               <p>
                 <strong>Score:</strong> {readinessSnapshot.score}% ·{" "}
                 <strong>{readinessSnapshot.readyForReview ? "Ready for ESF review" : "Needs info"}</strong>
               </p>
+              {readinessSnapshot.warnings.length ? (
+                <div className="warn-box" style={{ marginTop: 10 }}>
+                  <strong>Notes</strong>
+                  <ul>
+                    {readinessSnapshot.warnings.map((w) => (
+                      <li key={w}>{w}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
               {readinessSnapshot.missing.length ? (
                 <ul className="muted small">
                   {readinessSnapshot.missing.map((m) => (
@@ -1918,10 +2164,16 @@ export default function InternalEstimateApp() {
               )}
             </section>
 
-            <div id="estimate-print" className="internal-print-sheet card">
-              <h2>Internal estimate (print)</h2>
+            <div id="sec-output" className="internal-print-sheet card">
+              <h2>Internal worksheet (print)</h2>
+              <p className="muted small">
+                Customer-facing estimate PDF and handoff previews are planned via Quote Library — this block is the internal worksheet only.
+              </p>
               <p>
-                <strong>Customer:</strong> {customerName || "—"} · <strong>Project:</strong> {projectName || "—"} · {city}, {state}
+                <strong>Account:</strong> {accountName || "—"} · <strong>Project address:</strong> {projectAddress || "—"}
+              </p>
+              <p>
+                <strong>Customer:</strong> {customerName || "—"} · <strong>Elite job:</strong> {projectName || "—"} · {city}, {state}
               </p>
               <p>
                 <strong>Branch:</strong> {branch} · <strong>Rep:</strong> {salesRep || "—"} · <strong>Entered by:</strong> {enteredBy || "—"}
@@ -2284,12 +2536,17 @@ export default function InternalEstimateApp() {
             </p>
           </section>
 
-          <section className="card">
-            <h2>Save quote</h2>
+          <section id="sec-save" className="card">
+            <h2>7 · Save / Quote Library</h2>
             {submitMsg ? <p>{submitMsg}</p> : <p className="muted">Submit saves to eliteOS when you’re signed in and quote tables are installed.</p>}
             {lastSavedQuoteNumber ? (
               <p style={{ marginTop: 8 }}>
-                <a className="btn secondary" href={`${quoteLibraryUrl}/`} target="_blank" rel="noreferrer">
+                <a
+                  className="btn secondary"
+                  href={lastSavedQuoteId ? `${quoteLibraryUrl}/?quoteId=${encodeURIComponent(lastSavedQuoteId)}` : `${quoteLibraryUrl}/`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
                   View in Quote Library
                 </a>
                 <span className="muted small" style={{ marginLeft: 12 }}>
@@ -2328,7 +2585,7 @@ export default function InternalEstimateApp() {
             <div className="summary-card">
               {partRetail != null ? (
                 <>
-                  <h2>Your estimate</h2>
+                  <h2>Estimator summary</h2>
                   <p className="summary-kicker">Retail / protected (display)</p>
                   <p className="summary-hero-value">${Number(partRetail).toFixed(2)}</p>
                   {partWholesale != null ? (
@@ -2358,12 +2615,37 @@ export default function InternalEstimateApp() {
                       </div>
                     ) : null}
                     <div className="summary-row">
-                      <span>Estimated sq ft</span>
+                      <span>Estimated sq ft (engine)</span>
                       <strong>{Number(partSqft ?? 0).toFixed(2)}</strong>
                     </div>
                     <div className="summary-row">
-                      <span>Material group</span>
-                      <strong>{materialGroup}</strong>
+                      <span>Countertop sf (scope)</span>
+                      <strong>{scopePreview.counterSf.toFixed(2)}</strong>
+                    </div>
+                    <div className="summary-row">
+                      <span>Backsplash + FHB sf (scope)</span>
+                      <strong>{(scopePreview.splashSf + scopePreview.fhbSf).toFixed(2)}</strong>
+                    </div>
+                    <div className="summary-row">
+                      <span>Material / color</span>
+                      <strong>
+                        {materialGroup}
+                        {quoteDefaultCatalogId && eliteColors.find((c) => c.id === quoteDefaultCatalogId)
+                          ? ` · ${eliteColors.find((c) => c.id === quoteDefaultCatalogId)?.colorName ?? ""}`
+                          : colorTbd
+                            ? " · Color TBD"
+                            : ""}
+                      </strong>
+                    </div>
+                    <div className="summary-row">
+                      <span>Custom lines (entered)</span>
+                      <strong>${customLinePreviewTotals.toFixed(2)}</strong>
+                    </div>
+                    <div className="summary-row">
+                      <span>Readiness</span>
+                      <strong>
+                        {readinessSnapshot.score}% — {readinessSnapshot.readyForReview ? "complete" : "missing items"}
+                      </strong>
                     </div>
                     {apiPartner?.snapshot?.material_breakdown?.length ? (
                       <div className="summary-row" style={{ flexDirection: "column", alignItems: "stretch", gap: 6 }}>
@@ -2383,6 +2665,20 @@ export default function InternalEstimateApp() {
                   <p className="summary-foot">Shown for staff discussion; not homeowner-facing.</p>
                   <p className="summary-foot muted small">Use the math check panel for line-level verification.</p>
                   {lastCalcLive ? <p className="summary-foot">Live API response</p> : null}
+                  <div className="summary-actions" style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+                    <button type="button" className="btn primary" disabled={calcBusy} onClick={() => void handleCalculate()}>
+                      {calcBusy ? "Calculating…" : "Calculate"}
+                    </button>
+                    <button type="button" className="btn secondary" disabled={submitBusy} onClick={() => void handleSubmit()}>
+                      {submitBusy ? "Saving…" : "Save to Quote Library"}
+                    </button>
+                    <button type="button" className="btn secondary" onClick={() => window.print()}>
+                      Print / export
+                    </button>
+                    <a className="btn secondary" href={`${quoteLibraryUrl}/`} target="_blank" rel="noreferrer">
+                      Quote Library
+                    </a>
+                  </div>
                 </>
               ) : null}
             </div>
@@ -2399,8 +2695,19 @@ export default function InternalEstimateApp() {
                   <strong>{scopePreview.totalSf.toFixed(2)}</strong>
                 </div>
                 <div className="summary-row">
-                  <span>Material group</span>
-                  <strong>{materialGroup}</strong>
+                  <span>Countertop sf</span>
+                  <strong>{scopePreview.counterSf.toFixed(2)}</strong>
+                </div>
+                <div className="summary-row">
+                  <span>Backsplash + FHB sf</span>
+                  <strong>{(scopePreview.splashSf + scopePreview.fhbSf).toFixed(2)}</strong>
+                </div>
+                <div className="summary-row">
+                  <span>Material / color</span>
+                  <strong>
+                    {materialGroup}
+                    {colorTbd ? " · Color TBD" : ""}
+                  </strong>
                 </div>
               </div>
               <p className="summary-cta muted">
