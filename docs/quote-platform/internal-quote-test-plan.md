@@ -50,3 +50,12 @@ Elite Stone Fabrication internal sales and estimating staff with **Quote** head 
 - **Save**: `internal_ui` contains `estimate_rooms`, `custom_line_items`, `quote_default_material`, `readiness`, `file_checklist` on new saves.
 - **Quote Library** detail: material breakdown list renders when snapshot has `material_breakdown`.
 
+## 2026-05-11 — Internal Direct / Wholesale math parity (legacy internal HTML tool)
+
+- **Parity rule:** total = **measured material $** at the selected basis (**wholesale** tier `p` mirror vs **direct** ESF Direct $/sf) **+** room fixed add-ons **+** structured custom lines. **No** markup percent on top; **no** partner retail method for internal quotes.
+- **Payload:** Internal Estimate client sends **`internalMaterialBasis`** and optional **`customerEstimateDisplayGroups`**; it does **not** send `retailMarkupPercent` / `retailMethod`. Backend `normalizePrototypeQuoteInput` still forces **0% / Pass Through** for `internal_quote` if a generic client sends markup fields.
+- **Live UX:** sticky summary + math check use **`runLocalPrototypeQuote({ quoteMode: "internal", ... })`** on every relevant edit (no per-keystroke API).
+- **Print:** “Internal — all price groups” table = full tier comparison (material columns + full total). “Customer estimate — selected…” = **only** checked groups.
+- **Automated checks:** `node backend-core/src/scripts/verifyInternalEstimateMath.mjs` (10 sf Promo wholesale vs direct; Group A + $750; counter+backsplash; evil `retailMarkupPercent: 99` ignored).
+- **Manual:** toggle Wholesale ↔ Direct and confirm hero total jumps between wholesale vs Direct totals with **no** extra 20%; add Tear Out and confirm +$750 immediately on sticky total; check only Group A + Group C and confirm print customer block has two rows only.
+

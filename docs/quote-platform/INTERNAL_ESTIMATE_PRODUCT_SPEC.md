@@ -397,6 +397,14 @@ Separate clearly where helpful:
 - Estimator chooses whether comparison groups appear on **customer estimate / PDF**.  
 - **Default: off** (clean customer doc).
 
+### Shipped math behavior (Direct / Wholesale parity, 2026)
+
+- **Internal Estimate Direct / Wholesale math uses fixed rate books only.** **Wholesale** mode uses prototype wholesale group $/sf (partner seed mirror). **Direct / Retail** mode uses **ESF Direct** $/sf per group (same table as public consumer *before* the public planning markup).  
+- **No** partner retail markup, **no** public consumer markup, and **no** extra retail markup percentage is applied on top for `quote_source: internal_quote`. Totals are **sf × selected rate + room fixed add-ons + structured custom lines** (and vanities where applicable), matching the legacy internal HTML tool concept (`p` vs `directP`, no `%` layer).  
+- The **sticky summary** and **math check** panel use the same **live local preview** as you type; **Calculate** (when signed in) remains the **backend line-item** source of truth and refreshes snapshot fields such as `material_breakdown`.  
+- **Customer-facing group display:** checkboxes send `customerEstimateDisplayGroups` (stored on save as `internal_ui.customer_estimate_display_groups`). The **internal print worksheet** lists **all** tiers for staff; the **“Customer estimate — selected price group comparisons”** block on print shows **only** checked groups. **Quote Library PDF** reuse of that list is still **planned** (gap documented in test plan).  
+- Automated regression: `node backend-core/src/scripts/verifyInternalEstimateMath.mjs`.
+
 ---
 
 ## 11. Add-ons, cutouts, and custom line items
@@ -492,7 +500,8 @@ A **sticky right-hand summary** should always be visible on desktop layouts (mob
 
 ### Summary contents
 
-- Grand total  
+- Grand total (**live preview** from the same internal rate-book model as Calculate; updates as dimensions, add-ons, custom lines, pricing mode, and primary group change)  
+- When **Calculate** has run against the API, show **backend total** for confidence (line-level snapshot)  
 - Countertop sf / backsplash sf / total sf  
 - Selected material / color summary (including TBD states)  
 - Material breakdown (by room / piece / group as appropriate)  

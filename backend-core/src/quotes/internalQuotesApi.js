@@ -129,7 +129,12 @@ export function attachInternalQuoteRoutes(app, deps) {
           city: body.city ?? null,
           state: body.state ?? null,
           project_name: body.project_name ?? null,
-          job_info: body.job_info && typeof body.job_info === "object" ? body.job_info : null
+          job_info: body.job_info && typeof body.job_info === "object" ? body.job_info : null,
+          customer_estimate_display_groups: Array.isArray(body.customerEstimateDisplayGroups)
+            ? body.customerEstimateDisplayGroups
+            : Array.isArray(body.customer_estimate_display_groups)
+              ? body.customer_estimate_display_groups
+              : []
         }
       };
       const internalEstimateSummary = buildInternalEstimateSummary(calc, body);

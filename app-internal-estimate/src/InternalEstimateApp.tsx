@@ -4,6 +4,8 @@ import { config, EOS_LOGO_URL } from "@quote-lib/config";
 import type { DemoCalculateResult } from "@quote-lib/demoFallback";
 import { round2 } from "@quote-lib/measurementEngine";
 import {
+  aggregateComparisonScope,
+  buildInternalEstimateGroupComparison,
   calculateAllRoomDrafts,
   createEstimatorRoom,
   hydrateRoomDraftsFromEstimateRooms,
@@ -11,7 +13,7 @@ import {
   runLocalPrototypeQuote,
   serializeRoomsForApi
 } from "@quote-lib/prototypeQuoteMath";
-import type { EliteProgramColorRow, MathCheckSnapshot, QuoteWorkflowMethod, RoomDraft } from "@quote-lib/quoteTypes";
+import type { EliteProgramColorRow, QuoteWorkflowMethod, RoomDraft } from "@quote-lib/quoteTypes";
 import { getSupabase } from "./lib/supabase";
 import RoomScopeBuilder from "@quote-ui/RoomScopeBuilder";
 
@@ -26,9 +28,6 @@ const MATERIAL_GROUPS = [
 ];
 
 const INTERNAL_ESTIMATE_WORKFLOW: QuoteWorkflowMethod = "room_by_room";
-const INTERNAL_RETAIL_MARKUP_PCT = 20;
-const INTERNAL_RETAIL_METHOD = "Markup Percent";
-
 const EMPTY_GLOBAL_ADDONS = {
   "qty-sink": 0,
   "qty-bar": 0,
@@ -132,7 +131,7 @@ function localRunToDemo(r: ReturnType<typeof runLocalPrototypeQuote>): DemoCalcu
     estimated_sqft: r.estimated_sqft,
     retail: r.retail,
     wholesale: r.wholesale,
-    profit: r.profit,
+    profit: r.profit ?? 0,
     lineItems: r.lineItems,
     addOnsSummary: r.addOnsSummary,
     warnings: r.warnings,
@@ -167,6 +166,9 @@ export default function InternalEstimateApp() {
   const [enteredBy, setEnteredBy] = useState("");
   const [colorTbd, setColorTbd] = useState(false);
   const [internalPricingMode, setInternalPricingMode] = useState<"direct" | "wholesale">("wholesale");
+  const [customerDisplayGroups, setCustomerDisplayGroups] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(MATERIAL_GROUPS.map((g) => [g, false]))
+  );
   const [customLineRows, setCustomLineRows] = useState<CustomLineRow[]>([]);
   const [eliteColors, setEliteColors] = useState<EliteProgramColorRow[]>([]);
   const [colorCatalogWarnings, setColorCatalogWarnings] = useState<string[]>([]);
@@ -185,8 +187,6 @@ export default function InternalEstimateApp() {
   const [usedFallback, setUsedFallback] = useState(false);
   const [demoResult, setDemoResult] = useState<DemoCalculateResult | null>(null);
   const [apiPartner, setApiPartner] = useState<ApiPartnerResult | null>(null);
-  const [localMathCheck, setLocalMathCheck] = useState<MathCheckSnapshot | null>(null);
-  const [localMatrix, setLocalMatrix] = useState<ReturnType<typeof runLocalPrototypeQuote>["allGroupMatrix"] | null>(null);
 
   const [submitBusy, setSubmitBusy] = useState(false);
   const [submitMsg, setSubmitMsg] = useState<string | null>(null);
@@ -317,8 +317,7 @@ export default function InternalEstimateApp() {
       addOns,
       engine,
       rooms: apiRooms,
-      retailMarkupPercent: INTERNAL_RETAIL_MARKUP_PCT,
-      retailMethod: INTERNAL_RETAIL_METHOD,
+      customerEstimateDisplayGroups: MATERIAL_GROUPS.filter((g) => customerDisplayGroups[g]),
       customer_name: customerName.trim() || undefined,
       customer_email: email.trim() || undefined,
       customer_phone: phone.trim() || undefined,
@@ -360,29 +359,46 @@ export default function InternalEstimateApp() {
     accountName,
     accountPhone,
     accountEmail,
-    colorTbd
+    colorTbd,
+    customerDisplayGroups
   ]);
 
   const runLocalFromDrafts = useCallback(() => {
     const drafts = buildRoomDraftsForCalculate();
     const wf = workflowLabel(INTERNAL_ESTIMATE_WORKFLOW);
+    let customLineSum = 0;
+    for (const r of customLineRows) {
+      const q = num(r.qty) || 1;
+      const p = num(r.unitPrice);
+      if (!r.name.trim() || q <= 0) continue;
+      if (r.category === "Discount/Credit") {
+        if (p < 0) customLineSum += q * p;
+        continue;
+      }
+      if (p === 0) continue;
+      customLineSum += q * p;
+    }
     const lr = runLocalPrototypeQuote({
-      quoteMode: "partner",
-      partnerRetailPercent: INTERNAL_RETAIL_MARKUP_PCT,
-      partnerRetailMethod: INTERNAL_RETAIL_METHOD,
+      quoteMode: "internal",
+      internalMaterialBasis: internalPricingMode,
       materialGroupTop: topMaterialGroup,
       roomDrafts: drafts,
       globalAddOns: EMPTY_GLOBAL_ADDONS,
       applyGlobalAddOns: false,
       workflowLabel: wf,
-      projectType
+      projectType,
+      customLineItemsTotal: round2(customLineSum)
     });
     setUsedFallback(true);
     setApiPartner(null);
     setDemoResult(localRunToDemo(lr));
-    setLocalMathCheck(lr.mathCheck);
-    setLocalMatrix(lr.allGroupMatrix);
-  }, [buildRoomDraftsForCalculate, topMaterialGroup, projectType]);
+  }, [
+    buildRoomDraftsForCalculate,
+    topMaterialGroup,
+    projectType,
+    internalPricingMode,
+    customLineRows
+  ]);
 
   const handleCalculate = useCallback(async () => {
     setCalcBusy(true);
@@ -390,8 +406,6 @@ export default function InternalEstimateApp() {
     setDemoResult(null);
     setApiPartner(null);
     setUsedFallback(false);
-    setLocalMathCheck(null);
-    setLocalMatrix(null);
     setVanityLocalNote(null);
 
     const drafts = buildRoomDraftsForCalculate();
@@ -515,17 +529,6 @@ export default function InternalEstimateApp() {
     }
   }, [sessionToken, buildSubmitPayload]);
 
-  const backendHint = config.backendBaseUrl;
-  const hasInternalSummary = apiPartner?.totals != null || demoResult != null;
-
-  const partWholesale = apiPartner?.totals?.wholesale ?? demoResult?.wholesale;
-  const partRetail = apiPartner?.totals?.retail ?? demoResult?.retail;
-  const partSqft = apiPartner?.totals?.estimated_sqft ?? demoResult?.estimated_sqft;
-  const partProfit =
-    partRetail != null && partWholesale != null ? round2(Number(partRetail) - Number(partWholesale)) : null;
-
-  const hasCalcResult = hasInternalSummary;
-
   const scopePreview = useMemo(() => {
     const drafts = buildRoomDraftsForCalculate();
     if (!drafts.length) {
@@ -581,6 +584,49 @@ export default function InternalEstimateApp() {
     }
     return round2(sum);
   }, [customLineRows]);
+
+  const liveEstimate = useMemo(() => {
+    const drafts = buildRoomDraftsForCalculate();
+    const wf = workflowLabel(INTERNAL_ESTIMATE_WORKFLOW);
+    return runLocalPrototypeQuote({
+      quoteMode: "internal",
+      internalMaterialBasis: internalPricingMode,
+      materialGroupTop: topMaterialGroup,
+      roomDrafts: drafts,
+      globalAddOns: EMPTY_GLOBAL_ADDONS,
+      applyGlobalAddOns: false,
+      workflowLabel: wf,
+      projectType,
+      customLineItemsTotal: customLinePreviewTotals
+    });
+  }, [
+    buildRoomDraftsForCalculate,
+    internalPricingMode,
+    topMaterialGroup,
+    projectType,
+    customLinePreviewTotals
+  ]);
+
+  const internalGroupComparison = useMemo(() => {
+    const ag = aggregateComparisonScope(roomDrafts, projectType);
+    return buildInternalEstimateGroupComparison({
+      countertopSqft: ag.countertopSqft,
+      backsplashSqft: ag.backsplashSqft,
+      roomFixedDollars: ag.addonDollars,
+      customLineDollars: customLinePreviewTotals,
+      basis: internalPricingMode
+    });
+  }, [roomDrafts, projectType, customLinePreviewTotals, internalPricingMode]);
+
+  const backendHint = config.backendBaseUrl;
+  const partRetail = liveEstimate.retail;
+  const partSqft = liveEstimate.estimated_sqft;
+  const serverRetailVerified = !usedFallback && apiPartner?.totals?.retail != null ? Number(apiPartner.totals.retail) : null;
+
+  const customerEstimateComparisonRows = useMemo(
+    () => internalGroupComparison.filter((row) => customerDisplayGroups[row.group]),
+    [internalGroupComparison, customerDisplayGroups]
+  );
 
   const quoteLibraryUrl = useMemo(() => {
     const raw = String(import.meta.env.VITE_HEAD_URL_QUOTE_LIBRARY ?? "").trim();
@@ -702,6 +748,14 @@ export default function InternalEstimateApp() {
               };
             })
           );
+        }
+        const cedg = iu.customer_estimate_display_groups ?? iu.customerEstimateDisplayGroups;
+        if (Array.isArray(cedg) && cedg.length) {
+          setCustomerDisplayGroups(() => {
+            const next: Record<string, boolean> = {};
+            for (const g of MATERIAL_GROUPS) next[g] = cedg.includes(g);
+            return next;
+          });
         }
         const isp = snap.inputSummary as Record<string, unknown> | undefined;
         if (isp?.materialGroup) {
@@ -950,6 +1004,24 @@ export default function InternalEstimateApp() {
             </p>
             <p className="muted small">Sink and fixture cutouts are set per room in the room builder.</p>
 
+            <h3 className="h3">Show price group options on customer estimate</h3>
+            <p className="muted small" style={{ marginTop: 4 }}>
+              Internal worksheet below can list every tier. For the customer-facing estimate printout, pick which groups appear in the
+              comparison tables (default: none — check the groups you want).
+            </p>
+            <div className="mode-row" style={{ flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
+              {MATERIAL_GROUPS.map((g) => (
+                <label key={g} className="check" style={{ minWidth: 120 }}>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(customerDisplayGroups[g])}
+                    onChange={(e) => setCustomerDisplayGroups((prev) => ({ ...prev, [g]: e.target.checked }))}
+                  />
+                  {g}
+                </label>
+              ))}
+            </div>
+
             <h3 className="h3">Structured custom line items</h3>
             <div className="mode-row" style={{ flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
               {CUSTOM_LINE_PRESETS.map((p) => (
@@ -1194,9 +1266,83 @@ export default function InternalEstimateApp() {
                   </table>
                 </>
               ) : null}
+              <h3 className="h3" style={{ marginTop: 20 }}>
+                Internal — all price groups ({internalPricingMode === "wholesale" ? "wholesale $/sf" : "ESF Direct $/sf"}, no markup %)
+              </h3>
+              <p className="muted small">
+                Material columns use countertop sf and backsplash + FHB sf at each tier rate. Full total adds room fixed add-ons and
+                structured custom lines (same for every group row).
+              </p>
+              <table className="print-table">
+                <thead>
+                  <tr>
+                    <th>Group</th>
+                    <th>Rate $/sf</th>
+                    <th>Countertop material $</th>
+                    <th>Backsplash + FHB material $</th>
+                    <th>Material total $</th>
+                    <th>Full estimate $</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {internalGroupComparison.map((row) => (
+                    <tr key={row.group}>
+                      <td>{row.group}</td>
+                      <td>{row.ratePerSqft.toFixed(2)}</td>
+                      <td>${row.materialCounter.toFixed(2)}</td>
+                      <td>${row.materialSplashFhb.toFixed(2)}</td>
+                      <td>${row.materialTotal.toFixed(2)}</td>
+                      <td>${row.fullTotal.toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              <div className="ie-customer-estimate-print" style={{ marginTop: 24 }}>
+                <h3 className="h3">Customer estimate — selected price group comparisons</h3>
+                <p className="muted small">
+                  Groups checked under &quot;Show price group options on customer estimate&quot; appear here. Quote Library PDF handoff
+                  will reuse this list when that path ships.
+                </p>
+                {customerEstimateComparisonRows.length ? (
+                  <table className="print-table">
+                    <thead>
+                      <tr>
+                        <th>Group</th>
+                        <th>Rate $/sf</th>
+                        <th>Countertop material $</th>
+                        <th>Backsplash + FHB material $</th>
+                        <th>Material total $</th>
+                        <th>Full estimate $</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {customerEstimateComparisonRows.map((row) => (
+                        <tr key={row.group}>
+                          <td>{row.group}</td>
+                          <td>{row.ratePerSqft.toFixed(2)}</td>
+                          <td>${row.materialCounter.toFixed(2)}</td>
+                          <td>${row.materialSplashFhb.toFixed(2)}</td>
+                          <td>${row.materialTotal.toFixed(2)}</td>
+                          <td>${row.fullTotal.toFixed(2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <p className="muted small">No groups selected for customer-facing comparison (internal worksheet still shows all tiers above).</p>
+                )}
+              </div>
+
               <p style={{ marginTop: 16 }}>
-                <strong>Total (retail display):</strong> {partRetail != null ? `$${Number(partRetail).toFixed(2)}` : "—"} ·{" "}
-                <strong>Wholesale:</strong> {partWholesale != null ? `$${Number(partWholesale).toFixed(2)}` : "—"}
+                <strong>Estimate total (live preview, {internalPricingMode === "wholesale" ? "wholesale" : "ESF Direct"} book):</strong>{" "}
+                {partRetail != null ? `$${Number(partRetail).toFixed(2)}` : "—"}
+                {lastCalcLive && apiPartner?.totals?.retail != null ? (
+                  <>
+                    {" "}
+                    · <strong>Last Calculate (backend):</strong> ${Number(apiPartner.totals.retail).toFixed(2)}
+                  </>
+                ) : null}
               </p>
               <p className="muted small">Elite Stone Fabrication — internal estimate. Not a homeowner contract.</p>
             </div>
@@ -1229,112 +1375,111 @@ export default function InternalEstimateApp() {
 
           {calcError ? <p className="error">{calcError}</p> : null}
 
-          {localMathCheck ? (
-            <section className="card math-check">
-              <h2>Math check (internal demo)</h2>
-              <p className="muted small">Measurement and tier cross-check for staff review.</p>
-              <ul className="kv">
-                <li>
-                  <span>Workflow</span>
-                  <strong>{localMathCheck.workflowLabel}</strong>
-                </li>
-                <li>
-                  <span>Qualifying countertop sf (vanity tier)</span>
-                  <strong>{localMathCheck.qualifyingSf.toFixed(2)}</strong>
-                </li>
-                <li>
-                  <span>Vanity tier</span>
-                  <strong>{localMathCheck.vanityTierLabel}</strong>
-                </li>
-                <li>
-                  <span>Countertop sf (totals)</span>
-                  <strong>{localMathCheck.countertopSf.toFixed(2)}</strong>
-                </li>
-                <li>
-                  <span>Backsplash sf</span>
-                  <strong>{localMathCheck.backsplashSf.toFixed(2)}</strong>
-                </li>
-                <li>
-                  <span>Full-height sf</span>
-                  <strong>{localMathCheck.fullHeightSf.toFixed(2)}</strong>
-                </li>
-                <li>
-                  <span>Total scope sf</span>
-                  <strong>{localMathCheck.totalScopeSf.toFixed(2)}</strong>
-                </li>
-                <li>
-                  <span>Reference group rate</span>
-                  <strong>
-                    {localMathCheck.primaryGroup} @ ${localMathCheck.groupRatePerSf}/sf
-                  </strong>
-                </li>
-                <li>
-                  <span>Wholesale (demo)</span>
-                  <strong>${localMathCheck.wholesale.toFixed(2)}</strong>
-                </li>
-                <li>
-                  <span>Retail / public display</span>
-                  <strong>${localMathCheck.retailOrPublic.toFixed(2)}</strong>
-                </li>
-                {localMathCheck.partnerProfit != null ? (
-                  <li>
-                    <span>Partner profit (display)</span>
-                    <strong>${localMathCheck.partnerProfit.toFixed(2)}</strong>
-                  </li>
-                ) : null}
-              </ul>
-              {localMathCheck.measurementLines.length ? (
-                <div style={{ marginTop: 12 }}>
-                  <p className="section-lead">Measurement lines</p>
-                  <ul className="mini-lines">
-                    {localMathCheck.measurementLines.map((ln, i) => (
-                      <li key={i}>{ln}</li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
-              {localMatrix?.length ? (
-                <div style={{ marginTop: 14 }} className="lines">
-                  <strong>All-group matrix (wholesale → display retail)</strong>
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Group</th>
-                        <th>Wholesale</th>
-                        <th>Retail</th>
+          <section className="card math-check">
+            <h2>Math check (live preview)</h2>
+            <p className="muted small">
+              Updates as you edit rooms, add-ons, custom lines, and pricing mode. Uses prototype rate books (wholesale or ESF Direct
+              $/sf) with no markup percent — same model as the Calculate fallback. Backend response refines line items when connected.
+            </p>
+            <ul className="kv">
+              <li>
+                <span>Workflow</span>
+                <strong>{liveEstimate.mathCheck.workflowLabel}</strong>
+              </li>
+              <li>
+                <span>Qualifying countertop sf (vanity tier)</span>
+                <strong>{liveEstimate.mathCheck.qualifyingSf.toFixed(2)}</strong>
+              </li>
+              <li>
+                <span>Vanity tier</span>
+                <strong>{liveEstimate.mathCheck.vanityTierLabel}</strong>
+              </li>
+              <li>
+                <span>Countertop sf (totals)</span>
+                <strong>{liveEstimate.mathCheck.countertopSf.toFixed(2)}</strong>
+              </li>
+              <li>
+                <span>Backsplash sf</span>
+                <strong>{liveEstimate.mathCheck.backsplashSf.toFixed(2)}</strong>
+              </li>
+              <li>
+                <span>Full-height sf</span>
+                <strong>{liveEstimate.mathCheck.fullHeightSf.toFixed(2)}</strong>
+              </li>
+              <li>
+                <span>Total scope sf</span>
+                <strong>{liveEstimate.mathCheck.totalScopeSf.toFixed(2)}</strong>
+              </li>
+              <li>
+                <span>Primary group rate ({internalPricingMode === "wholesale" ? "wholesale book" : "ESF Direct"})</span>
+                <strong>
+                  {liveEstimate.mathCheck.primaryGroup} @ ${liveEstimate.mathCheck.groupRatePerSf}/sf
+                </strong>
+              </li>
+              <li>
+                <span>Estimate total (selected basis + extras)</span>
+                <strong>${liveEstimate.mathCheck.wholesale.toFixed(2)}</strong>
+              </li>
+              <li>
+                <span>No partner / public markup</span>
+                <strong>Same total (${liveEstimate.mathCheck.retailOrPublic.toFixed(2)})</strong>
+              </li>
+            </ul>
+            {liveEstimate.mathCheck.measurementLines.length ? (
+              <div style={{ marginTop: 12 }}>
+                <p className="section-lead">Measurement lines</p>
+                <ul className="mini-lines">
+                  {liveEstimate.mathCheck.measurementLines.map((ln, i) => (
+                    <li key={i}>{ln}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {liveEstimate.allGroupMatrix?.length ? (
+              <div style={{ marginTop: 14 }} className="lines">
+                <strong>All-group totals at current scope ({internalPricingMode === "wholesale" ? "wholesale $/sf" : "ESF Direct $/sf"})</strong>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Group</th>
+                      <th>Counter $</th>
+                      <th>Backsplash / FHB $</th>
+                      <th>Room fixed add-ons $</th>
+                      <th>Tier total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {liveEstimate.allGroupMatrix.map((row) => (
+                      <tr key={row.group}>
+                        <td>{row.group}</td>
+                        <td>${row.counter.toFixed(2)}</td>
+                        <td>${row.backsplash.toFixed(2)}</td>
+                        <td>${row.fixed.toFixed(2)}</td>
+                        <td>${row.wholesale.toFixed(2)}</td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {localMatrix.map((row) => (
-                        <tr key={row.group}>
-                          <td>{row.group}</td>
-                          <td>${row.wholesale.toFixed(2)}</td>
-                          <td>${row.retail.toFixed(2)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : null}
-              {localMathCheck.warnings.length ? (
-                <div className="warn-box" style={{ marginTop: 12 }}>
-                  <strong>Warnings</strong>
-                  <ul>
-                    {localMathCheck.warnings.map((w, i) => (
-                      <li key={i}>{w}</li>
                     ))}
-                  </ul>
-                </div>
-              ) : null}
-            </section>
-          ) : null}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+            {liveEstimate.mathCheck.warnings.length ? (
+              <div className="warn-box" style={{ marginTop: 12 }}>
+                <strong>Warnings</strong>
+                <ul>
+                  {liveEstimate.mathCheck.warnings.map((w, i) => (
+                    <li key={i}>{w}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </section>
 
           <section className="card">
             <p className="section-lead">Full breakdown</p>
             <h2>Internal detail</h2>
             <div className="internal-banner">
-              <strong>Internal only — not public-facing.</strong> Wholesale and line economics below are for staff discussion
-              only.
+              <strong>Internal only — not public-facing.</strong> Totals use wholesale or ESF Direct rate books only (no partner or
+              public markup percent).
             </div>
             <>
               {apiPartner?.totals ? (
@@ -1344,16 +1489,12 @@ export default function InternalEstimateApp() {
                     <strong>{workflowLabel(INTERNAL_ESTIMATE_WORKFLOW)}</strong>
                   </li>
                   <li>
-                    <span>Wholesale estimate</span>
+                    <span>Estimate total (internal rate book)</span>
+                    <strong>${Number(apiPartner.totals.retail ?? apiPartner.totals.wholesale ?? 0).toFixed(2)}</strong>
+                  </li>
+                  <li>
+                    <span>Wholesale subtotal (same basis for internal_quote)</span>
                     <strong>${Number(apiPartner.totals.wholesale ?? 0).toFixed(2)}</strong>
-                  </li>
-                  <li>
-                    <span>Retail (display)</span>
-                    <strong>${Number(apiPartner.totals.retail ?? 0).toFixed(2)}</strong>
-                  </li>
-                  <li>
-                    <span>Display profit</span>
-                    <strong>${Number(apiPartner.totals.profit ?? 0).toFixed(2)}</strong>
                   </li>
                   <li>
                     <span>Estimated sq ft</span>
@@ -1371,16 +1512,12 @@ export default function InternalEstimateApp() {
                     <strong>{workflowLabel(INTERNAL_ESTIMATE_WORKFLOW)}</strong>
                   </li>
                   <li>
-                    <span>Wholesale estimate</span>
-                    <strong>${(demoResult.wholesale ?? 0).toFixed(2)}</strong>
-                  </li>
-                  <li>
-                    <span>Retail (display)</span>
+                    <span>Estimate total (local preview)</span>
                     <strong>${demoResult.retail.toFixed(2)}</strong>
                   </li>
                   <li>
-                    <span>Display profit</span>
-                    <strong>${(demoResult.profit ?? 0).toFixed(2)}</strong>
+                    <span>Wholesale field (demo payload)</span>
+                    <strong>${(demoResult.wholesale ?? 0).toFixed(2)}</strong>
                   </li>
                   <li>
                     <span>Estimated sq ft</span>
@@ -1392,7 +1529,10 @@ export default function InternalEstimateApp() {
                   </li>
                 </ul>
               ) : (
-                <p className="muted">Tap <strong>Calculate</strong> to see your estimate.</p>
+                <p className="muted">
+                  Live preview totals appear in the sticky summary and math check. Tap <strong>Calculate</strong> for backend line
+                  items when signed in.
+                </p>
               )}
               {(apiPartner?.warnings?.length ?? 0) + (demoResult?.warnings?.length ?? 0) > 0 ? (
                 <div className="warn-box">
@@ -1499,150 +1639,102 @@ export default function InternalEstimateApp() {
         </main>
 
         <aside className="ie-aside side-col">
-          {hasCalcResult ? (
-            <div className="summary-card">
-              {partRetail != null ? (
-                <>
-                  <h2>Estimator summary</h2>
-                  <div className="summary-rows" style={{ marginBottom: 8 }}>
-                    <div className="summary-row">
-                      <span>Pricing mode</span>
-                      <strong>{internalPricingMode === "wholesale" ? "Wholesale" : "Direct / Retail"}</strong>
-                    </div>
-                  </div>
-                  <p className="summary-kicker">Retail / protected (display)</p>
-                  <p className="summary-hero-value">${Number(partRetail).toFixed(2)}</p>
-                  {partWholesale != null ? (
-                    <p className="summary-secondary muted small">
-                      Wholesale estimate: <strong>${Number(partWholesale).toFixed(2)}</strong>
-                    </p>
-                  ) : null}
-                  <div className="summary-rows">
-                    {partWholesale != null ? (
-                      <div className="summary-row">
-                        <span>Wholesale estimate</span>
-                        <strong>${Number(partWholesale).toFixed(2)}</strong>
-                      </div>
-                    ) : null}
-                    <div className="summary-row">
-                      <span>Retail / protected (display)</span>
-                      <strong>${Number(partRetail).toFixed(2)}</strong>
-                    </div>
-                    {partProfit != null ? (
-                      <div className="summary-row">
-                        <span>Profit / protection (display)</span>
-                        <strong>${partProfit.toFixed(2)}</strong>
-                      </div>
-                    ) : null}
-                    <div className="summary-row">
-                      <span>Estimated sq ft (engine)</span>
-                      <strong>{Number(partSqft ?? 0).toFixed(2)}</strong>
-                    </div>
-                    <div className="summary-row">
-                      <span>Countertop sf (scope)</span>
-                      <strong>{scopePreview.counterSf.toFixed(2)}</strong>
-                    </div>
-                    <div className="summary-row">
-                      <span>Backsplash + FHB sf (scope)</span>
-                      <strong>{(scopePreview.splashSf + scopePreview.fhbSf).toFixed(2)}</strong>
-                    </div>
-                    <div className="summary-row">
-                      <span>Total sf (scope)</span>
-                      <strong>{scopePreview.totalSf.toFixed(2)}</strong>
-                    </div>
-                    <div className="summary-row">
-                      <span>Primary price group</span>
-                      <strong>
-                        {topMaterialGroup}
-                        {quoteDefaultCatalogId && eliteColors.find((c) => c.id === quoteDefaultCatalogId)
-                          ? ` · ${eliteColors.find((c) => c.id === quoteDefaultCatalogId)?.colorName ?? ""}`
-                          : colorTbd
-                            ? " · Color TBD"
-                            : " · per room"}
-                      </strong>
-                    </div>
-                    <div className="summary-row">
-                      <span>Custom lines (entered)</span>
-                      <strong>${customLinePreviewTotals.toFixed(2)}</strong>
-                    </div>
-                    <div className="summary-row">
-                      <span>Readiness</span>
-                      <strong>
-                        {readinessSnapshot.score}% — {readinessSnapshot.readyForReview ? "complete" : "missing items"}
-                      </strong>
-                    </div>
-                    {apiPartner?.snapshot?.material_breakdown?.length ? (
-                      <div className="summary-row" style={{ flexDirection: "column", alignItems: "stretch", gap: 6 }}>
-                        <span>Material / color mix</span>
-                        <ul className="muted small" style={{ margin: 0, paddingLeft: 16 }}>
-                          {(apiPartner.snapshot.material_breakdown as Record<string, unknown>[]).slice(0, 8).map((ln, i) => (
-                            <li key={i}>
-                              {String(ln.room ?? "")} · {String(ln.materialGroup ?? "")}
-                              {ln.materialColor ? ` · ${String(ln.materialColor)}` : ""} — {Number(ln.sqft ?? 0).toFixed(1)} sf
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    ) : null}
-                  </div>
-                  <div className="internal-badge">Internal — not customer-facing</div>
-                  <p className="summary-foot">Shown for staff discussion; not homeowner-facing.</p>
-                  <p className="summary-foot muted small">Use the math check panel for line-level verification.</p>
-                  {lastCalcLive ? <p className="summary-foot">Live API response</p> : null}
-                  <div className="summary-actions" style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
-                    <button type="button" className="btn primary" disabled={calcBusy} onClick={() => void handleCalculate()}>
-                      {calcBusy ? "Calculating…" : "Calculate"}
-                    </button>
-                    <button type="button" className="btn secondary" disabled={submitBusy} onClick={() => void handleSubmit()}>
-                      {submitBusy ? "Saving…" : "Save to Quote Library"}
-                    </button>
-                    <button type="button" className="btn secondary" onClick={() => window.print()}>
-                      Print / export
-                    </button>
-                    <a className="btn secondary" href={`${quoteLibraryUrl}/`} target="_blank" rel="noreferrer">
-                      Open Quote Library
-                    </a>
-                  </div>
-                </>
+          <div className="summary-card">
+            <h2>Estimator summary</h2>
+            <div className="summary-rows" style={{ marginBottom: 8 }}>
+              <div className="summary-row">
+                <span>Pricing mode</span>
+                <strong>{internalPricingMode === "wholesale" ? "Wholesale" : "Direct / Retail"}</strong>
+              </div>
+            </div>
+            <p className="summary-kicker">Estimate total (rate book, no markup %)</p>
+            <p className="summary-hero-value">{partRetail != null ? `$${Number(partRetail).toFixed(2)}` : "—"}</p>
+            {lastCalcLive && serverRetailVerified != null ? (
+              <p className="summary-secondary muted small">
+                Last Calculate (backend): <strong>${serverRetailVerified.toFixed(2)}</strong>
+              </p>
+            ) : (
+              <p className="summary-secondary muted small">Live preview — tap Calculate to refresh from eliteOS when signed in.</p>
+            )}
+            <div className="summary-rows">
+              <div className="summary-row">
+                <span>Estimated sq ft (engine)</span>
+                <strong>{Number(partSqft ?? 0).toFixed(2)}</strong>
+              </div>
+              <div className="summary-row">
+                <span>Countertop sf (scope)</span>
+                <strong>{scopePreview.counterSf.toFixed(2)}</strong>
+              </div>
+              <div className="summary-row">
+                <span>Backsplash + FHB sf (scope)</span>
+                <strong>{(scopePreview.splashSf + scopePreview.fhbSf).toFixed(2)}</strong>
+              </div>
+              <div className="summary-row">
+                <span>Total sf (scope)</span>
+                <strong>{scopePreview.totalSf.toFixed(2)}</strong>
+              </div>
+              <div className="summary-row">
+                <span>Primary price group</span>
+                <strong>
+                  {topMaterialGroup}
+                  {quoteDefaultCatalogId && eliteColors.find((c) => c.id === quoteDefaultCatalogId)
+                    ? ` · ${eliteColors.find((c) => c.id === quoteDefaultCatalogId)?.colorName ?? ""}`
+                    : colorTbd
+                      ? " · Color TBD"
+                      : " · per room"}
+                </strong>
+              </div>
+              <div className="summary-row">
+                <span>Custom lines (entered)</span>
+                <strong>${customLinePreviewTotals.toFixed(2)}</strong>
+              </div>
+              <div className="summary-row">
+                <span>Customer comparison groups</span>
+                <strong>
+                  {customerEstimateComparisonRows.length
+                    ? customerEstimateComparisonRows.map((r) => r.group).join(", ")
+                    : "None selected"}
+                </strong>
+              </div>
+              <div className="summary-row">
+                <span>Readiness</span>
+                <strong>
+                  {readinessSnapshot.score}% — {readinessSnapshot.readyForReview ? "complete" : "missing items"}
+                </strong>
+              </div>
+              {apiPartner?.snapshot?.material_breakdown?.length ? (
+                <div className="summary-row" style={{ flexDirection: "column", alignItems: "stretch", gap: 6 }}>
+                  <span>Material / color mix (last Calculate)</span>
+                  <ul className="muted small" style={{ margin: 0, paddingLeft: 16 }}>
+                    {(apiPartner.snapshot.material_breakdown as Record<string, unknown>[]).slice(0, 8).map((ln, i) => (
+                      <li key={i}>
+                        {String(ln.room ?? "")} · {String(ln.materialGroup ?? "")}
+                        {ln.materialColor ? ` · ${String(ln.materialColor)}` : ""} — {Number(ln.sqft ?? 0).toFixed(1)} sf
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               ) : null}
             </div>
-          ) : (
-            <div className="summary-card summary-card-precalc">
-              <h2>Estimate preview</h2>
-              <div className="summary-rows">
-                <div className="summary-row">
-                  <span>Pricing mode</span>
-                  <strong>{internalPricingMode === "wholesale" ? "Wholesale" : "Direct / Retail"}</strong>
-                </div>
-                <div className="summary-row">
-                  <span>Quote path</span>
-                  <strong>{scopePreview.method}</strong>
-                </div>
-                <div className="summary-row">
-                  <span>Measured sq ft (estimate)</span>
-                  <strong>{scopePreview.totalSf.toFixed(2)}</strong>
-                </div>
-                <div className="summary-row">
-                  <span>Countertop sf</span>
-                  <strong>{scopePreview.counterSf.toFixed(2)}</strong>
-                </div>
-                <div className="summary-row">
-                  <span>Backsplash + FHB sf</span>
-                  <strong>{(scopePreview.splashSf + scopePreview.fhbSf).toFixed(2)}</strong>
-                </div>
-                <div className="summary-row">
-                  <span>Primary price group</span>
-                  <strong>
-                    {topMaterialGroup}
-                    {colorTbd ? " · Color TBD" : ""}
-                  </strong>
-                </div>
-              </div>
-              <p className="summary-cta muted">
-                Tap <strong>Calculate</strong> to price this scope.
-              </p>
+            <div className="internal-badge">Internal — not customer-facing</div>
+            <p className="summary-foot">Sticky total follows your edits; Calculate confirms backend line items.</p>
+            <p className="summary-foot muted small">Use the math check panel for tier and measurement detail.</p>
+            {lastCalcLive ? <p className="summary-foot">Live API response</p> : null}
+            <div className="summary-actions" style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+              <button type="button" className="btn primary" disabled={calcBusy} onClick={() => void handleCalculate()}>
+                {calcBusy ? "Calculating…" : "Calculate"}
+              </button>
+              <button type="button" className="btn secondary" disabled={submitBusy} onClick={() => void handleSubmit()}>
+                {submitBusy ? "Saving…" : "Save to Quote Library"}
+              </button>
+              <button type="button" className="btn secondary" onClick={() => window.print()}>
+                Print / export
+              </button>
+              <a className="btn secondary" href={`${quoteLibraryUrl}/`} target="_blank" rel="noreferrer">
+                Open Quote Library
+              </a>
             </div>
-          )}
+          </div>
         </aside>
       </div>
 
