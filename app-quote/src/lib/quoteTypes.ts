@@ -23,6 +23,21 @@ export type GuidedPiece = {
   shape: PieceShape;
   /** When true on a counter piece, add 4″ backsplash sf = length × 4 / 144 (internal quoting). */
   addSplash?: boolean;
+  /** When true, use piece-level material group / color instead of the room default. */
+  materialOverride?: boolean;
+  materialGroup?: string;
+  materialColor?: string;
+  materialSupplier?: string;
+  materialType?: string;
+};
+
+export type EliteProgramColorRow = {
+  id: string;
+  colorName: string;
+  supplier?: string | null;
+  materialType?: string | null;
+  priceGroupCode: string;
+  priceGroupLabel: string;
 };
 
 export type FhbMode = "Off" | "Manual Sq Ft" | "Guided Shape";
@@ -34,6 +49,11 @@ export type RoomDraft = {
   name: string;
   roomType: string;
   materialGroup: string;
+  /** Selected Elite Program color display name (informational + snapshot). */
+  materialColor?: string;
+  materialSupplier?: string;
+  materialType?: string;
+  materialCatalogId?: string | null;
   calcMode: RoomCalcMode;
   linear: { wallFt: number; splashIn: number; islandL: number; islandW: number; counterDepthIn?: number };
   direct: { counter: number; splash: number };

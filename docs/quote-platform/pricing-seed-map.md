@@ -37,7 +37,7 @@ node backend-core/src/scripts/generateQuotePrototypePricingSeed.js
 | Prototype constant / key | Supabase table | `category` | Notes |
 |--------------------------|----------------|------------|--------|
 | `config.tiers[].n` / `.p` | `quote_pricing_rules` | `material_group` | `item_name` must match calculator input (e.g. `Group Promo`). `item_code` is normalized `group_promo`, … `group_f`. `price` = prototype `p`. `unit_type` = `per_sqft` (matches `quoteCalculator.js` / prototype mirror, not literal `sqft`). |
-| `config.materials[]` | `quote_pricing_rules` | `material_color` | `item_code` = slug(`supplier_material_colorName`). `price` = NULL; **group** lives in `metadata.group` for color → tier mapping. |
+| `config.materials[]` | `quote_pricing_rules` | `material_color` | `item_code` = slug(`supplier_material_colorName`). `price` = NULL; **group** lives in `metadata.group` for color → tier mapping. Internal Estimate reads active rows via **`GET /api/internal-quotes/material-colors`** (fallback list if DB empty). |
 | `config.vanityPricing` keys | `quote_pricing_rules` | `vanity` | `item_code` = prototype key (`25_S`, …). `base_cost` = `t1`, `price` = `t2` for `calculateVanities()`. Metadata duplicates tiers for admin / future parity. |
 | `config.vanitySinkOptions` | `quote_pricing_rules` | `vanity_sink_upgrade` | `item_code` = `vanity_sink_upgrade_{value}`. Calculator does not consume this category yet; seed preserves prototype. |
 | `config.addOns[]` (cutouts) | `quote_pricing_rules` | `cutout` | Matches prototype mirror rows used by `calculateAddOns()` (category ≠ `material_group`, `item_code` matches `qty-*`). |

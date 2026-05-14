@@ -14,6 +14,7 @@ import {
   tableHasOrganizationId
 } from "../organizations/organizationContext.js";
 import { calculateQuote } from "./quoteCalculator.js";
+import { fetchEliteProgramMaterialColors } from "./materialColorsCatalog.js";
 import { generateQuoteNumber, isMissingRelationError, persistQuoteSubmission } from "./quotePersist.js";
 
 const jsonParser = express.json({ limit: "2mb" });
@@ -118,6 +119,11 @@ export function attachInternalQuoteRoutes(app, deps) {
           quote_workflow: body.quote_workflow ?? null,
           internal_material_basis: body.internalMaterialBasis ?? body.internal_material_basis ?? null,
           custom_passthrough_items: body.customPassthroughItems ?? body.custom_pass_through_items ?? [],
+          custom_line_items: body.customLineItems ?? body.custom_line_items ?? [],
+          quote_default_material: body.quoteDefaultMaterial ?? body.quote_default_material ?? null,
+          estimate_rooms: body.rooms ?? null,
+          readiness: body.readiness ?? null,
+          file_checklist: body.fileChecklist ?? body.file_checklist ?? null,
           entered_by: body.entered_by ?? body.prepared_by ?? null,
           preparedByLegacy: body.preparedBy ?? null,
           city: body.city ?? null,
@@ -183,6 +189,16 @@ export function attachInternalQuoteRoutes(app, deps) {
       }
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  app.get("/api/internal-quotes/material-colors", ...stack, async (req, res) => {
+    try {
+      const db = getSupabase();
+      const result = await fetchEliteProgramMaterialColors(db);
+      res.json({ ok: true, colors: result.colors, warnings: result.warnings || [] });
+    } catch (e) {
+      res.status(500).json({ ok: false, colors: [], warnings: [String(e?.message || e)], error: String(e?.message || e) });
     }
   });
 
@@ -383,5 +399,5 @@ export function attachInternalQuoteRoutes(app, deps) {
     }
   });
 
-  console.log("[quotes] mounted /api/internal-quotes/* (calculate, save, list, get, patch, duplicate)");
+  console.log("[quotes] mounted /api/internal-quotes/* (calculate, save, list, material-colors, get, patch, duplicate)");
 }

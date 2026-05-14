@@ -8,7 +8,7 @@ import {
   mergeRowOrganizationId,
   tableHasOrganizationId
 } from "../organizations/organizationContext.js";
-import { roundPublicEstimateToNearestTen } from "./quoteCalculator.js";
+import { calculateRoomAreas, roundPublicEstimateToNearestTen } from "./quoteCalculator.js";
 import { buildLeadAssignmentRow } from "./quoteTerritoryAssignment.js";
 
 export function isMissingRelationError(error) {
@@ -108,7 +108,18 @@ export async function persistQuoteSubmission(db, opts) {
     tax_total: 0,
     grand_total: round2(primaryRetail),
     estimated_sqft: calc.totals.estimated_sqft,
-    estimated_material_group: isPublicConsumer ? "ALL_GROUPS" : body.materialGroup || body.material_group || null,
+    estimated_material_group: isPublicConsumer
+      ? "ALL_GROUPS"
+      : (() => {
+          const mb = calc.snapshot?.material_breakdown;
+          if (Array.isArray(mb) && mb.length) {
+            const gs = new Set(mb.map((m) => String(m.materialGroup || "").trim()).filter(Boolean));
+            if (gs.size > 1) return "MULTI_GROUP";
+            const one = mb[0]?.materialGroup;
+            if (one) return String(one);
+          }
+          return body.materialGroup || body.material_group || null;
+        })(),
     calculation_snapshot: snapshotToStore,
     created_by: userEmail
   };
@@ -142,20 +153,42 @@ export async function persistQuoteSubmission(db, opts) {
   }
 
   const rooms = Array.isArray(body.rooms) ? body.rooms : [];
-  const roomRows = rooms.map((r, idx) => ({
-    quote_id: quoteId,
-    room_name: r.name || r.room_name || `Room ${idx + 1}`,
-    room_type: r.type || r.room_type || null,
-    material_name: r.materialName || null,
-    material_supplier: r.materialSupplier || null,
-    material_group: r.materialGroup || r.group || null,
-    countertop_sqft: r.countertopSqft || r.roomCounter || 0,
-    backsplash_sqft: r.backsplashSqft || r.roomSplash || 0,
-    total_sqft: (Number(r.countertopSqft) || 0) + (Number(r.backsplashSqft) || 0),
-    measurement_source: r.measurementSource || null,
-    sort_order: idx,
-    metadata: typeof r.metadata === "object" ? r.metadata : {}
-  })).map((r) => mergeRowOrganizationId(r, orgId, orgTables.has("quote_rooms")));
+  const roomRows = rooms.map((r, idx) => {
+    let ct = Number(r.countertopSqft ?? r.roomCounter ?? 0) || 0;
+    let bs = Number(r.backsplashSqft ?? r.roomSplash ?? 0) || 0;
+    if (Array.isArray(r.pieces) && r.pieces.length) {
+      ct = 0;
+      bs = 0;
+      for (const p of r.pieces) {
+        const { sf } = calculateRoomAreas(p);
+        const t = String(p.type || "counter");
+        if (t === "splash") bs += sf;
+        else ct += sf;
+      }
+      ct = round2(ct);
+      bs = round2(bs);
+    }
+    const totalSq = round2(ct + bs);
+    return {
+      quote_id: quoteId,
+      room_name: r.name || r.room_name || `Room ${idx + 1}`,
+      room_type: r.type || r.room_type || null,
+      material_name: r.materialColor || r.materialName || null,
+      material_supplier: r.materialSupplier || null,
+      material_group: r.materialGroup || r.group || null,
+      countertop_sqft: ct,
+      backsplash_sqft: bs,
+      total_sqft: totalSq,
+      measurement_source: r.measurementSource || null,
+      sort_order: idx,
+      metadata: {
+        ...(typeof r.metadata === "object" && r.metadata ? r.metadata : {}),
+        pieces: Array.isArray(r.pieces) ? r.pieces : undefined,
+        material_color: r.materialColor || null,
+        material_type: r.materialType || null
+      }
+    };
+  }).map((r) => mergeRowOrganizationId(r, orgId, orgTables.has("quote_rooms")));
   if (roomRows.length) {
     const { error: rErr } = await db.from("quote_rooms").insert(roomRows);
     if (rErr && !isMissingRelationError(rErr)) throw rErr;

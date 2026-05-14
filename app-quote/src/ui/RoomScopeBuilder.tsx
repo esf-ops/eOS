@@ -1,5 +1,5 @@
 import React from "react";
-import type { GuidedPiece, RoomCalcMode, RoomDraft } from "../lib/quoteTypes";
+import type { EliteProgramColorRow, GuidedPiece, RoomCalcMode, RoomDraft } from "../lib/quoteTypes";
 import { ADDON_CATALOG, VANITY_PRICING, createDefaultRoom, newId } from "../lib/prototypeQuoteMath";
 import { sfFromGuidedPiece } from "../lib/measurementEngine";
 
@@ -7,6 +7,8 @@ type Props = {
   rooms: RoomDraft[];
   onRoomsChange: (next: RoomDraft[]) => void;
   materialGroups: string[];
+  /** Optional Elite Program catalog from eliteOS Brain (search + filter). */
+  eliteProgramColors?: EliteProgramColorRow[];
 };
 
 function updateRoom(rooms: RoomDraft[], id: string, patch: Partial<RoomDraft>): RoomDraft[] {
@@ -85,7 +87,9 @@ function renderMiniVisual(room: RoomDraft): React.ReactNode {
   );
 }
 
-export default function RoomScopeBuilder({ rooms, onRoomsChange, materialGroups }: Props) {
+export default function RoomScopeBuilder({ rooms, onRoomsChange, materialGroups, eliteProgramColors }: Props) {
+  const [colorQ, setColorQ] = React.useState<Record<string, string>>({});
+  const [groupFilter, setGroupFilter] = React.useState<Record<string, string>>({});
   const addRoom = () => onRoomsChange([...rooms, createDefaultRoom(rooms[0]?.materialGroup || "Group Promo")]);
   const removeRoom = (id: string) => onRoomsChange(rooms.filter((r) => r.id !== id));
 
@@ -211,6 +215,89 @@ export default function RoomScopeBuilder({ rooms, onRoomsChange, materialGroups 
                 </select>
               </label>
             </div>
+
+            {eliteProgramColors && eliteProgramColors.length ? (
+              <div className="grid3" style={{ marginTop: 10 }}>
+                <label style={{ gridColumn: "1 / -1" }}>
+                  Elite Program color (searchable)
+                  <input
+                    value={colorQ[room.id] ?? ""}
+                    onChange={(e) => setColorQ((m) => ({ ...m, [room.id]: e.target.value }))}
+                    placeholder="Filter by color, supplier, or material type"
+                  />
+                </label>
+                <label>
+                  Price group filter
+                  <select
+                    value={groupFilter[room.id] ?? "__all__"}
+                    onChange={(e) => setGroupFilter((m) => ({ ...m, [room.id]: e.target.value }))}
+                  >
+                    <option value="__all__">All groups</option>
+                    {materialGroups.map((g) => (
+                      <option key={g} value={g}>
+                        {g}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Select color
+                  <select
+                    value={room.materialCatalogId || ""}
+                    onChange={(e) => {
+                      const id = e.target.value;
+                      if (!id) {
+                        onRoomsChange(
+                          updateRoom(rooms, room.id, {
+                            materialCatalogId: null,
+                            materialColor: undefined,
+                            materialSupplier: undefined,
+                            materialType: undefined
+                          })
+                        );
+                        return;
+                      }
+                      const c = eliteProgramColors.find((x) => x.id === id);
+                      if (!c) return;
+                      onRoomsChange(
+                        updateRoom(rooms, room.id, {
+                          materialGroup: c.priceGroupLabel,
+                          materialColor: c.colorName,
+                          materialSupplier: c.supplier ?? undefined,
+                          materialType: c.materialType ?? undefined,
+                          materialCatalogId: c.id
+                        })
+                      );
+                    }}
+                  >
+                    <option value="">— None (group only) —</option>
+                    {eliteProgramColors
+                      .filter((c) => {
+                        const q = (colorQ[room.id] || "").toLowerCase().trim();
+                        const gf = groupFilter[room.id];
+                        if (gf && gf !== "__all__" && c.priceGroupLabel !== gf) return false;
+                        if (!q) return true;
+                        return (
+                          c.colorName.toLowerCase().includes(q) ||
+                          (c.supplier || "").toLowerCase().includes(q) ||
+                          (c.materialType || "").toLowerCase().includes(q) ||
+                          c.priceGroupLabel.toLowerCase().includes(q)
+                        );
+                      })
+                      .slice(0, 500)
+                      .map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.priceGroupLabel} · {c.colorName}
+                          {c.supplier ? ` (${c.supplier})` : ""}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                <p className="muted small" style={{ gridColumn: "1 / -1", marginTop: 0 }}>
+                  Pieces inherit this room material unless overridden on an individual piece.
+                </p>
+              </div>
+            ) : null}
 
             {room.roomType === "Vanity" ? (
               <div className="room-vanity-block">
@@ -422,6 +509,41 @@ export default function RoomScopeBuilder({ rooms, onRoomsChange, materialGroups 
                             onChange={(e) => setPiece(room.id, p.id, { depthIn: Number(e.target.value) || 0 }, "guided")}
                           />
                         </label>
+                        <label className="check" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(p.materialOverride)}
+                            onChange={(e) =>
+                              setPiece(room.id, p.id, { materialOverride: e.target.checked, materialGroup: room.materialGroup }, "guided")
+                            }
+                          />
+                          Override material for this piece
+                        </label>
+                        {p.materialOverride ? (
+                          <>
+                            <label>
+                              Piece material group
+                              <select
+                                value={p.materialGroup || room.materialGroup}
+                                onChange={(e) => setPiece(room.id, p.id, { materialGroup: e.target.value }, "guided")}
+                              >
+                                {materialGroups.map((g) => (
+                                  <option key={g} value={g}>
+                                    {g}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <label>
+                              Piece color label
+                              <input
+                                value={p.materialColor || ""}
+                                onChange={(e) => setPiece(room.id, p.id, { materialColor: e.target.value }, "guided")}
+                                placeholder="Optional — display on estimate"
+                              />
+                            </label>
+                          </>
+                        ) : null}
                         <div style={{ display: "flex", alignItems: "flex-end" }}>
                           <button type="button" className="btn secondary" onClick={() => removePiece(room.id, p.id, "guided")}>
                             Remove piece

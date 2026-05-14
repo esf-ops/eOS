@@ -2,7 +2,7 @@
 
 ## 1. Purpose
 
-Give Elite **system administrators** a dedicated surface to manage quote economics **without editing code or raw SQL**: pricing structures, per-structure rules (material groups, color→group mappings, vanities, add-ons, tear-out), and which **partner account** uses which structure. This complements the **public** quote path, which must only ever see **sanitized** calculator output (see `POST /api/quote/calculate` public retail behavior).
+Give Elite **system administrators** a dedicated surface to manage quote economics **without editing code or raw SQL**: pricing structures, per-structure rules (material groups, color→group mappings, vanities, add-ons, tear-out), and which **partner account** uses which structure. This complements the **public** quote path, which must only ever see **sanitized** calculator output (see `POST /api/quote/calculate` public retail behavior). **Long-term ownership:** the **Elite Program material/color catalog** (including `material_color` rules and/or `quote_material_color_mappings`) is maintained here; **Internal Estimate** consumes it read-only via Brain APIs (`GET /api/internal-quotes/material-colors` today).
 
 **Future direction — Quote Catalog Admin:** programs, catalog items, options, media, and visibility will live in normalized tables so Elite can add shower, vanity, fees, hardware, and other **programs without code changes**. See **`docs/quote-platform/quote-catalog-admin-architecture.md`** and **`backend-core/supabase/eos_quote_catalog_schema.sql`** (additive; apply manually).
 

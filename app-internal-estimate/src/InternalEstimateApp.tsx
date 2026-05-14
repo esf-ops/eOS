@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { apiGetJson, apiPatchJson, apiPostJson, ApiError } from "@quote-lib/api";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { apiGetJson, apiPostJson, ApiError } from "@quote-lib/api";
 import { config, EOS_LOGO_URL } from "@quote-lib/config";
 import type { DemoCalculateResult } from "@quote-lib/demoFallback";
 import { round2, STANDARD_BACKSPLASH_HEIGHT_IN } from "@quote-lib/measurementEngine";
@@ -16,6 +16,7 @@ import {
   calculateAllRoomDrafts,
   createDefaultRoom,
   createManualScopeRoom,
+  hydrateRoomDraftsFromEstimateRooms,
   roomsNeedLocalVanityMath,
   runLocalPrototypeQuote,
   serializeRoomsForApi,
@@ -23,7 +24,7 @@ import {
   syntheticRoomForWorkflow
 } from "@quote-lib/prototypeQuoteMath";
 import type { MaterialGroupComparisonRow } from "@quote-lib/prototypeQuoteMath";
-import type { GuidedPiece, MathCheckSnapshot, QuoteWorkflowMethod, RoomDraft } from "@quote-lib/quoteTypes";
+import type { EliteProgramColorRow, GuidedPiece, MathCheckSnapshot, QuoteWorkflowMethod, RoomDraft } from "@quote-lib/quoteTypes";
 import { getSupabase } from "./lib/supabase";
 import RoomScopeBuilder from "@quote-ui/RoomScopeBuilder";
 import InternalGuidedShapePreview from "./InternalGuidedShapePreview";
@@ -52,12 +53,40 @@ const INTERNAL_BRANCHES = ["Dyersville", "Lisbon", "Iowa City"] as const;
 
 type CustomPassRow = { id: string; description: string; price: string; qty: string };
 
+const CUSTOM_LINE_CATEGORIES = [
+  "Sink",
+  "Faucet",
+  "Plumbing fixture",
+  "Accessory",
+  "Labor",
+  "Fee",
+  "Discount/Credit",
+  "Other"
+] as const;
+
+type CustomLineRow = {
+  id: string;
+  name: string;
+  description: string;
+  category: (typeof CUSTOM_LINE_CATEGORIES)[number];
+  qty: string;
+  unitPrice: string;
+  customerFacing: boolean;
+  internalNote: string;
+  roomName: string;
+};
+
+function newInternalRowId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `id-${Math.random().toString(36).slice(2, 11)}`;
+}
+
 type ApiPartnerResult = {
   ok?: boolean;
   totals?: { wholesale?: number; retail?: number; profit?: number; estimated_sqft?: number };
   snapshot?: {
     lineItems?: Array<Record<string, unknown>>;
     pricingStructure?: Record<string, unknown>;
+    material_breakdown?: Array<Record<string, unknown>>;
   };
   warnings?: string[];
 };
@@ -132,6 +161,16 @@ export default function InternalEstimateApp() {
   const [enteredBy, setEnteredBy] = useState("");
   const [internalPricingMode, setInternalPricingMode] = useState<"direct" | "wholesale">("wholesale");
   const [customItems, setCustomItems] = useState<CustomPassRow[]>([]);
+  const [customLineRows, setCustomLineRows] = useState<CustomLineRow[]>([]);
+  const [eliteColors, setEliteColors] = useState<EliteProgramColorRow[]>([]);
+  const [colorCatalogWarnings, setColorCatalogWarnings] = useState<string[]>([]);
+  const [quoteDefaultCatalogId, setQuoteDefaultCatalogId] = useState("");
+  const [cabinetPlansNote, setCabinetPlansNote] = useState("");
+  const [sitePhotosNote, setSitePhotosNote] = useState("");
+  const [fixtureSpecsNote, setFixtureSpecsNote] = useState("");
+  const [loadedFromLibrary, setLoadedFromLibrary] = useState(false);
+  const [hydrationGaps, setHydrationGaps] = useState<string[]>([]);
+  const [lastSavedQuoteNumber, setLastSavedQuoteNumber] = useState<string | null>(null);
   const [quoteLibrary, setQuoteLibrary] = useState<Array<Record<string, unknown>>>([]);
   const [libraryBusy, setLibraryBusy] = useState(false);
   const [libraryError, setLibraryError] = useState<string | null>(null);
@@ -303,11 +342,67 @@ export default function InternalEstimateApp() {
         qty: num(row.qty) || 1
       }))
       .filter((row) => row.description.length > 0 && row.price > 0);
+    const customLineItems = customLineRows
+      .map((row) => ({
+        name: row.name.trim(),
+        description: row.description.trim(),
+        category: row.category,
+        quantity: num(row.qty) || 1,
+        unitPrice: num(row.unitPrice),
+        customerFacing: row.customerFacing,
+        internalNote: row.internalNote.trim(),
+        roomName: row.roomName.trim()
+      }))
+      .filter((row) => {
+        if (!row.name || row.quantity <= 0) return false;
+        if (row.category === "Discount/Credit") return row.unitPrice < 0;
+        return row.unitPrice !== 0;
+      });
+    let quoteDefaultMaterial: Record<string, unknown> | null = null;
+    if (quoteDefaultCatalogId) {
+      const c = eliteColors.find((x) => x.id === quoteDefaultCatalogId);
+      if (c) {
+        quoteDefaultMaterial = {
+          materialGroup: c.priceGroupLabel,
+          materialColor: c.colorName,
+          materialSupplier: c.supplier ?? undefined,
+          materialType: c.materialType ?? undefined,
+          catalogColorId: c.id
+        };
+      }
+    }
+    const draftsForReady = buildRoomDraftsForCalculate();
+    let totalSfReady = 0;
+    if (draftsForReady.length) {
+      const { totals } = calculateAllRoomDrafts(draftsForReady, projectType);
+      totalSfReady = round2(totals.counter + totals.splash + totals.fhb);
+    }
+    const missing: string[] = [];
+    if (!customerName.trim()) missing.push("Customer name");
+    if (!projectName.trim()) missing.push("Project name");
+    if (!city.trim() && !state.trim()) missing.push("City or state");
+    if (totalSfReady <= 0) missing.push("Measurements / scope square footage");
+    if (!materialGroup && !quoteDefaultCatalogId) missing.push("Material group or default Elite Program color");
+    const readiness = {
+      missing,
+      score: Math.max(0, Math.min(100, 100 - missing.length * 14)),
+      readyForReview: missing.length === 0
+    };
+    const fileChecklist = {
+      cabinet_plans: cabinetPlansNote.trim() || null,
+      site_photos: sitePhotosNote.trim() || null,
+      fixture_specs: fixtureSpecsNote.trim() || null,
+      note: "File upload/storage will be added later — list required files here for ESF review."
+    };
     return {
       quoteSource: "internal_quote",
       materialGroup,
       internalMaterialBasis: internalPricingMode,
       customPassthroughItems,
+      customLineItems,
+      quoteDefaultMaterial,
+      readiness,
+      fileChecklist,
       quote_workflow: quoteWorkflow,
       areas: { countertopSqft, backsplashSqft },
       addOns,
@@ -340,6 +435,12 @@ export default function InternalEstimateApp() {
     branch,
     salesRep,
     customItems,
+    customLineRows,
+    eliteColors,
+    quoteDefaultCatalogId,
+    cabinetPlansNote,
+    sitePhotosNote,
+    fixtureSpecsNote,
     internalPricingMode,
     projectName,
     city,
@@ -501,8 +602,13 @@ export default function InternalEstimateApp() {
       const raw = (await apiPostJson("/api/internal-quotes/save", sessionToken, payload)) as Record<string, unknown>;
       if (raw.ok === true) {
         const qn = String(raw.quote_number ?? raw.quoteNumber ?? "");
-        setSubmitMsg(qn ? `Saved to quote library. Reference: ${qn}` : "Saved to quote library.");
-        setSubmitPreview(JSON.stringify(raw, null, 2));
+        setLastSavedQuoteNumber(qn || null);
+        setSubmitMsg(
+          qn
+            ? `Saved to eliteOS Quote Library. Reference: ${qn}.`
+            : "Saved to eliteOS Quote Library."
+        );
+        setSubmitPreview(null);
         if (Array.isArray(raw.warnings) && raw.warnings.length) {
           setSubmitMsg((prev) => `${prev} ${(raw.warnings as string[]).join(" ")}`);
         }
@@ -566,6 +672,17 @@ export default function InternalEstimateApp() {
       fhbSf: totals.fhb
     };
   }, [buildRoomDraftsForCalculate, quoteWorkflow, projectType]);
+
+  const readinessSnapshot = useMemo(() => {
+    const missing: string[] = [];
+    if (!customerName.trim()) missing.push("Customer name");
+    if (!projectName.trim()) missing.push("Project name");
+    if (!city.trim() && !state.trim()) missing.push("City or state");
+    if (scopePreview.empty || scopePreview.totalSf <= 0) missing.push("Measurements / scope square footage");
+    if (!materialGroup && !quoteDefaultCatalogId) missing.push("Material group or default Elite Program color");
+    const score = Math.max(0, Math.min(100, 100 - missing.length * 14));
+    return { missing, score, readyForReview: missing.length === 0 };
+  }, [customerName, projectName, city, state, scopePreview, materialGroup, quoteDefaultCatalogId]);
 
   const guidedPreview = useMemo(() => {
     if (quoteWorkflow !== "guided_shape") return null;
@@ -633,6 +750,118 @@ export default function InternalEstimateApp() {
     }
   }, []);
 
+  const hydrationRanRef = useRef(false);
+  useEffect(() => {
+    hydrationRanRef.current = false;
+  }, [urlQuoteId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!sessionToken) {
+        setEliteColors([]);
+        setColorCatalogWarnings([]);
+        return;
+      }
+      try {
+        const raw = (await apiGetJson("/api/internal-quotes/material-colors", sessionToken)) as {
+          ok?: boolean;
+          colors?: EliteProgramColorRow[];
+          warnings?: string[];
+        };
+        if (cancelled) return;
+        setEliteColors(Array.isArray(raw.colors) ? raw.colors : []);
+        setColorCatalogWarnings(Array.isArray(raw.warnings) ? raw.warnings : []);
+      } catch {
+        if (!cancelled) {
+          setEliteColors([]);
+          setColorCatalogWarnings(["Could not load Elite Program colors — pick material group manually."]);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionToken]);
+
+  useEffect(() => {
+    if (!sessionToken || !urlQuoteId || hydrationRanRef.current) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const raw = (await apiGetJson(`/api/internal-quotes/${urlQuoteId}`, sessionToken)) as Record<string, unknown>;
+        if (cancelled || raw.ok !== true) return;
+        const q = raw.quote as Record<string, unknown> | undefined;
+        if (!q) return;
+        hydrationRanRef.current = true;
+        const gaps: string[] = [];
+        setCustomerName(String(q.customer_name ?? ""));
+        setEmail(String(q.customer_email ?? ""));
+        setPhone(String(q.customer_phone ?? ""));
+        setProjectName(String(q.project_name ?? ""));
+        setCity(String(q.city ?? ""));
+        setState(String(q.state ?? ""));
+        if (q.branch) setBranch(String(q.branch));
+        if (q.sales_rep) setSalesRep(String(q.sales_rep));
+        if (q.entered_by) setEnteredBy(String(q.entered_by));
+        if (q.project_type) setProjectType(String(q.project_type));
+        const snap = (q.calculation_snapshot as Record<string, unknown>) || {};
+        const iu = (snap.internal_ui as Record<string, unknown>) || {};
+        const wf = String(iu.quote_workflow || "");
+        if (wf && ["manual_sqft", "guided_shape", "room_by_room", "upload_plans", "visualize"].includes(wf)) {
+          setQuoteWorkflow(wf as QuoteWorkflowMethod);
+        } else {
+          gaps.push("Measurement workflow (defaults kept)");
+        }
+        const imb = String(iu.internal_material_basis || "");
+        if (imb === "direct" || imb === "wholesale") setInternalPricingMode(imb);
+        const roomsPayload = iu.estimate_rooms;
+        if (Array.isArray(roomsPayload) && roomsPayload.length) {
+          setRoomDrafts(hydrateRoomDraftsFromEstimateRooms(roomsPayload));
+        } else {
+          gaps.push("Room model (estimate_rooms missing on older saves — re-enter rooms if needed)");
+        }
+        const qdm = iu.quote_default_material;
+        if (qdm && typeof qdm === "object") {
+          const cid = (qdm as { catalogColorId?: string }).catalogColorId;
+          if (cid) setQuoteDefaultCatalogId(String(cid));
+        }
+        const cls = iu.custom_line_items;
+        if (Array.isArray(cls) && cls.length) {
+          setCustomLineRows(
+            cls.map((r) => {
+              const row = r as Record<string, unknown>;
+              const c = String(row.category || "Other");
+              const cat = (CUSTOM_LINE_CATEGORIES as readonly string[]).includes(c)
+                ? (c as (typeof CUSTOM_LINE_CATEGORIES)[number])
+                : "Other";
+              return {
+                id: newInternalRowId(),
+                name: String(row.name ?? ""),
+                description: String(row.description ?? ""),
+                category: cat,
+                qty: String(row.quantity ?? 1),
+                unitPrice: String(row.unitPrice ?? row.unit_price ?? 0),
+                customerFacing: Boolean(row.customerFacing ?? true),
+                internalNote: String(row.internalNote ?? ""),
+                roomName: String(row.roomName ?? "")
+              };
+            })
+          );
+        }
+        const isp = snap.inputSummary as Record<string, unknown> | undefined;
+        if (isp?.materialGroup) setMaterialGroup(String(isp.materialGroup));
+        setLoadedFromLibrary(true);
+        setHydrationGaps(gaps);
+      } catch (e) {
+        if (!cancelled) setHydrationGaps([`Could not load quote: ${e instanceof ApiError ? e.message : String(e)}`]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionToken, urlQuoteId]);
+
   return (
     <div className="page">
       <header className="hero">
@@ -664,10 +893,25 @@ export default function InternalEstimateApp() {
           </div>
         </div>
         {urlQuoteId ? (
-          <p className="muted" style={{ marginTop: 12, marginBottom: 0 }}>
-            <strong>quoteId in URL:</strong> {urlQuoteId}. Internal Estimate quoteId hydration is not complete yet — use Quote Library for
-            read-only detail or continue in this workspace manually.
-          </p>
+          <div style={{ marginTop: 12 }}>
+            {loadedFromLibrary ? (
+              <p className="ok" style={{ marginBottom: 8 }}>
+                Loaded from Quote Library (quoteId in URL). Review fields below — save currently creates a <strong>new</strong> saved
+                estimate with a new reference number.
+              </p>
+            ) : (
+              <p className="muted" style={{ marginBottom: 8 }}>
+                <strong>quoteId in URL:</strong> {urlQuoteId}. Loading quote…
+              </p>
+            )}
+            {hydrationGaps.length ? (
+              <ul className="muted small" style={{ marginTop: 0 }}>
+                {hydrationGaps.map((g) => (
+                  <li key={g}>{g}</li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
         ) : null}
       </div>
 
@@ -931,10 +1175,29 @@ export default function InternalEstimateApp() {
                   ))}
                 </select>
               </label>
+              {eliteColors.length ? (
+                <label>
+                  Optional quote default Elite Program color
+                  <select value={quoteDefaultCatalogId} onChange={(e) => setQuoteDefaultCatalogId(e.target.value)}>
+                    <option value="">— None —</option>
+                    {eliteColors.slice(0, 800).map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.priceGroupLabel} · {c.colorName}
+                        {c.supplier ? ` (${c.supplier})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
             </div>
+            {colorCatalogWarnings.length ? (
+              <p className="muted small" style={{ marginTop: 8 }}>
+                {colorCatalogWarnings.join(" ")}
+              </p>
+            ) : null}
 
             {quoteWorkflow === "room_by_room" ? (
-              <RoomScopeBuilder rooms={roomDrafts} onRoomsChange={setRoomDrafts} materialGroups={MATERIAL_GROUPS} />
+              <RoomScopeBuilder rooms={roomDrafts} onRoomsChange={setRoomDrafts} materialGroups={MATERIAL_GROUPS} eliteProgramColors={eliteColors} />
             ) : null}
 
             {quoteWorkflow === "manual_sqft" ? (
@@ -1496,7 +1759,217 @@ export default function InternalEstimateApp() {
             </div>
           </section>
 
+            <section className="card">
+              <h2>Job-specific custom line items</h2>
+              <p className="muted small">
+                Structured lines are validated on the server (discounts require negative unit price). They roll into totals, snapshots,
+                Quote Library, and handoff docs.
+              </p>
+              {customLineRows.map((row) => (
+                <div key={row.id} className="grid3" style={{ marginBottom: 10, borderBottom: "1px solid var(--border)", paddingBottom: 10 }}>
+                  <label>
+                    Item name
+                    <input
+                      value={row.name}
+                      onChange={(e) =>
+                        setCustomLineRows((prev) => prev.map((x) => (x.id === row.id ? { ...x, name: e.target.value } : x)))
+                      }
+                    />
+                  </label>
+                  <label>
+                    Category
+                    <select
+                      value={row.category}
+                      onChange={(e) =>
+                        setCustomLineRows((prev) =>
+                          prev.map((x) => (x.id === row.id ? { ...x, category: e.target.value as CustomLineRow["category"] } : x))
+                        )
+                      }
+                    >
+                      {CUSTOM_LINE_CATEGORIES.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Qty
+                    <input
+                      value={row.qty}
+                      onChange={(e) => setCustomLineRows((prev) => prev.map((x) => (x.id === row.id ? { ...x, qty: e.target.value } : x)))}
+                      inputMode="decimal"
+                    />
+                  </label>
+                  <label>
+                    Unit price ($)
+                    <input
+                      value={row.unitPrice}
+                      onChange={(e) =>
+                        setCustomLineRows((prev) => prev.map((x) => (x.id === row.id ? { ...x, unitPrice: e.target.value } : x)))
+                      }
+                      inputMode="decimal"
+                    />
+                  </label>
+                  <label>
+                    Room (optional)
+                    <input
+                      value={row.roomName}
+                      onChange={(e) =>
+                        setCustomLineRows((prev) => prev.map((x) => (x.id === row.id ? { ...x, roomName: e.target.value } : x)))
+                      }
+                    />
+                  </label>
+                  <label className="check">
+                    <input
+                      type="checkbox"
+                      checked={row.customerFacing}
+                      onChange={(e) =>
+                        setCustomLineRows((prev) => prev.map((x) => (x.id === row.id ? { ...x, customerFacing: e.target.checked } : x)))
+                      }
+                    />
+                    Customer-facing
+                  </label>
+                  <label style={{ gridColumn: "1 / -1" }}>
+                    Description / note
+                    <input
+                      value={row.description}
+                      onChange={(e) =>
+                        setCustomLineRows((prev) => prev.map((x) => (x.id === row.id ? { ...x, description: e.target.value } : x)))
+                      }
+                    />
+                  </label>
+                  <label style={{ gridColumn: "1 / -1" }}>
+                    Internal note
+                    <input
+                      value={row.internalNote}
+                      onChange={(e) =>
+                        setCustomLineRows((prev) => prev.map((x) => (x.id === row.id ? { ...x, internalNote: e.target.value } : x)))
+                      }
+                    />
+                  </label>
+                  <button type="button" className="btn secondary" onClick={() => setCustomLineRows((prev) => prev.filter((x) => x.id !== row.id))}>
+                    Remove line
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={() =>
+                  setCustomLineRows((prev) => [
+                    ...prev,
+                    {
+                      id: newInternalRowId(),
+                      name: "",
+                      description: "",
+                      category: "Other",
+                      qty: "1",
+                      unitPrice: "0",
+                      customerFacing: true,
+                      internalNote: "",
+                      roomName: ""
+                    }
+                  ])
+                }
+              >
+                + Add custom line item
+              </button>
+            </section>
+
+            <section className="card">
+              <h2>Drawing / file checklist</h2>
+              <p className="muted small">
+                File upload/storage will be added later — list filenames or links your team should expect for ESF review.
+              </p>
+              <div className="grid3">
+                <label>
+                  Cabinet plans / drawings
+                  <input value={cabinetPlansNote} onChange={(e) => setCabinetPlansNote(e.target.value)} placeholder="e.g. Smith-kitchen.pdf" />
+                </label>
+                <label>
+                  Site photos
+                  <input value={sitePhotosNote} onChange={(e) => setSitePhotosNote(e.target.value)} placeholder="List or describe" />
+                </label>
+                <label>
+                  Sink / faucet / appliance specs
+                  <input value={fixtureSpecsNote} onChange={(e) => setFixtureSpecsNote(e.target.value)} placeholder="Model numbers, etc." />
+                </label>
+              </div>
+            </section>
+
+            <section className="card">
+              <h2>Review readiness</h2>
+              <p className="muted small">
+                Readiness score feeds future handoff documents — not Monday source of truth.
+              </p>
+              <p>
+                <strong>Score:</strong> {readinessSnapshot.score}% ·{" "}
+                <strong>{readinessSnapshot.readyForReview ? "Ready for ESF review" : "Needs info"}</strong>
+              </p>
+              {readinessSnapshot.missing.length ? (
+                <ul className="muted small">
+                  {readinessSnapshot.missing.map((m) => (
+                    <li key={m}>{m}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="ok small">Core fields look complete — still verify sinks, edges, and site readiness before sold handoff.</p>
+              )}
+            </section>
+
+            <div id="estimate-print" className="internal-print-sheet card">
+              <h2>Internal estimate (print)</h2>
+              <p>
+                <strong>Customer:</strong> {customerName || "—"} · <strong>Project:</strong> {projectName || "—"} · {city}, {state}
+              </p>
+              <p>
+                <strong>Branch:</strong> {branch} · <strong>Rep:</strong> {salesRep || "—"} · <strong>Entered by:</strong> {enteredBy || "—"}
+              </p>
+              <p>
+                <strong>Pricing mode:</strong> {internalPricingMode === "direct" ? "Direct" : "Wholesale"} · <strong>Path:</strong>{" "}
+                {workflowLabel(quoteWorkflow)}
+              </p>
+              {apiPartner?.snapshot?.material_breakdown?.length ? (
+                <>
+                  <h3 className="h3">Material / color breakdown</h3>
+                  <table className="print-table">
+                    <thead>
+                      <tr>
+                        <th>Room</th>
+                        <th>Piece</th>
+                        <th>Group</th>
+                        <th>Color</th>
+                        <th>Sf</th>
+                        <th>Wholesale $</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(apiPartner.snapshot.material_breakdown as Record<string, unknown>[]).map((ln, i) => (
+                        <tr key={i}>
+                          <td>{String(ln.room ?? "")}</td>
+                          <td>{String(ln.piece ?? "")}</td>
+                          <td>{String(ln.materialGroup ?? "")}</td>
+                          <td>{String(ln.materialColor ?? "")}</td>
+                          <td>{Number(ln.sqft ?? 0).toFixed(2)}</td>
+                          <td>${Number(ln.wholesaleSubtotal ?? 0).toFixed(2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
+              ) : null}
+              <p style={{ marginTop: 16 }}>
+                <strong>Total (retail display):</strong> {partRetail != null ? `$${Number(partRetail).toFixed(2)}` : "—"} ·{" "}
+                <strong>Wholesale:</strong> {partWholesale != null ? `$${Number(partWholesale).toFixed(2)}` : "—"}
+              </p>
+              <p className="muted small">Elite Stone Fabrication — internal estimate. Not a homeowner contract.</p>
+            </div>
+
           <div className="actions">
+            <button type="button" className="btn secondary big" onClick={() => window.print()}>
+              Print estimate
+            </button>
             <button type="button" className="btn primary big" disabled={calcBusy} onClick={() => void handleCalculate()}>
               {calcBusy ? "Calculating…" : "Calculate"}
             </button>
@@ -1814,6 +2287,16 @@ export default function InternalEstimateApp() {
           <section className="card">
             <h2>Save quote</h2>
             {submitMsg ? <p>{submitMsg}</p> : <p className="muted">Submit saves to eliteOS when you’re signed in and quote tables are installed.</p>}
+            {lastSavedQuoteNumber ? (
+              <p style={{ marginTop: 8 }}>
+                <a className="btn secondary" href={`${quoteLibraryUrl}/`} target="_blank" rel="noreferrer">
+                  View in Quote Library
+                </a>
+                <span className="muted small" style={{ marginLeft: 12 }}>
+                  Saved as <strong>{lastSavedQuoteNumber}</strong> — search by quote # or customer in the library.
+                </span>
+              </p>
+            ) : null}
             {submitPreview ? <pre className="preview">{submitPreview}</pre> : null}
           </section>
 
@@ -1882,6 +2365,19 @@ export default function InternalEstimateApp() {
                       <span>Material group</span>
                       <strong>{materialGroup}</strong>
                     </div>
+                    {apiPartner?.snapshot?.material_breakdown?.length ? (
+                      <div className="summary-row" style={{ flexDirection: "column", alignItems: "stretch", gap: 6 }}>
+                        <span>Material / color mix</span>
+                        <ul className="muted small" style={{ margin: 0, paddingLeft: 16 }}>
+                          {(apiPartner.snapshot.material_breakdown as Record<string, unknown>[]).slice(0, 8).map((ln, i) => (
+                            <li key={i}>
+                              {String(ln.room ?? "")} · {String(ln.materialGroup ?? "")}
+                              {ln.materialColor ? ` · ${String(ln.materialColor)}` : ""} — {Number(ln.sqft ?? 0).toFixed(1)} sf
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
                   </div>
                   <div className="internal-badge">Internal / demo — not public-facing</div>
                   <p className="summary-foot">Shown for staff discussion; not homeowner-facing.</p>

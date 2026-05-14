@@ -33,3 +33,13 @@ Elite Stone Fabrication internal sales and estimating staff with **Quote** head 
 ## TODO (future)
 
 - Moraware job custom field **Entered by** for CNC/programming contact — map via **Moraware Admin / Integration Mapping Head** per org (`docs/eliteos/SYSTEM_BLUEPRINT.md`).
+
+## 2026-05-11 — Room model + catalog smoke checks
+
+- **`GET /api/internal-quotes/material-colors`** (signed in, quote head): returns `colors[]` + `warnings[]`; empty DB should still return fallback colors with a warning.
+- **Room-by-room** with two rooms, different material groups on pieces: calculate totals match expectation; snapshot includes `material_breakdown`.
+- **Custom line items**: non-discount positive unit price; **Discount/Credit** with negative unit price; invalid rows skipped with calculator `warnings` when applicable.
+- **`?quoteId=`** hydration: customer + `estimate_rooms` restore; gaps list when older snapshot lacks `estimate_rooms`.
+- **Save**: `internal_ui` contains `estimate_rooms`, `custom_line_items`, `quote_default_material`, `readiness`, `file_checklist` on new saves.
+- **Quote Library** detail: material breakdown list renders when snapshot has `material_breakdown`.
+

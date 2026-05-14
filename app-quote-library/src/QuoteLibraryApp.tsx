@@ -795,8 +795,8 @@ export default function QuoteLibraryApp() {
                   ) : null}
                 </div>
                 <p className="muted" style={{ marginTop: 12, fontSize: "0.8125rem" }}>
-                  Open in Internal Estimate — full form hydration from <code>quoteId</code> is still being completed. Use this library for read-only
-                  detail and handoffs.
+                  Open in Internal Estimate loads customer, workflow, rooms, custom lines, and checklist fields when stored on the quote
+                  snapshot. Save from Internal Estimate still creates a new quote row today unless a revision endpoint is used.
                 </p>
                 <div className="workflow-hint">
                   <strong>After Mark sold:</strong> use <em>Generate Moraware Entry Doc</em> and <em>Generate QuickBooks Entry Doc</em> below.
@@ -856,9 +856,31 @@ export default function QuoteLibraryApp() {
                 <p className="muted">
                   Add-ons / custom:{" "}
                   {Array.isArray(iu.custom_passthrough_items) && (iu.custom_passthrough_items as unknown[]).length
-                    ? `${(iu.custom_passthrough_items as unknown[]).length} item(s)`
+                    ? `${(iu.custom_passthrough_items as unknown[]).length} passthrough item(s)`
                     : "—"}
+                  {Array.isArray(iu.custom_line_items) && (iu.custom_line_items as unknown[]).length ? (
+                    <>
+                      {" "}
+                      · Structured custom lines: {(iu.custom_line_items as unknown[]).length}
+                    </>
+                  ) : null}
                 </p>
+                {Array.isArray(snap.material_breakdown) && (snap.material_breakdown as unknown[]).length ? (
+                  <div style={{ marginTop: 10 }}>
+                    <h4 className="h3" style={{ margin: "0 0 6px" }}>
+                      Material / color breakdown
+                    </h4>
+                    <ul className="muted" style={{ fontSize: "0.8125rem", paddingLeft: 18, margin: 0 }}>
+                      {(snap.material_breakdown as Record<string, unknown>[]).slice(0, 24).map((ln, idx) => (
+                        <li key={idx}>
+                          {str(ln.room)} — {str(ln.piece)} · {str(ln.materialGroup)}
+                          {ln.materialColor ? ` · ${str(ln.materialColor)}` : ""} — {Number(ln.sqft ?? 0).toLocaleString()} sf · $
+                          {Number(ln.wholesaleSubtotal ?? 0).toFixed(2)}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
                 <p className="muted">
                   Rooms: {(detail.rooms as unknown[] | undefined)?.length ?? 0} · Line items: {(detail.line_items as unknown[] | undefined)?.length ?? 0}
                 </p>

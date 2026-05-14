@@ -33,6 +33,11 @@ function warningsFrom(header, snapshot) {
 export function buildMorawareEntryDocPayload(header, snapshot, rooms, lineItems) {
   const snap = snapshot && typeof snapshot === "object" ? snapshot : {};
   const iu = snap.internal_ui && typeof snap.internal_ui === "object" ? snap.internal_ui : {};
+  const materialBreakdown = Array.isArray(snap.material_breakdown) ? snap.material_breakdown : [];
+  const estimateRooms = Array.isArray(iu.estimate_rooms) ? iu.estimate_rooms : [];
+  const customLineItems = Array.isArray(iu.custom_line_items) ? iu.custom_line_items : [];
+  const readiness = snap.readiness && typeof snap.readiness === "object" ? snap.readiness : null;
+  const fileChecklist = snap.file_checklist && typeof snap.file_checklist === "object" ? snap.file_checklist : null;
   return {
     doc_version: 1,
     doc_type: "moraware_entry",
@@ -64,8 +69,11 @@ export function buildMorawareEntryDocPayload(header, snapshot, rooms, lineItems)
         name: str(r.room_name),
         countertop_sqft: n(r.countertop_sqft),
         backsplash_sqft: n(r.backsplash_sqft),
-        material_group: str(r.material_group)
-      }))
+        material_group: str(r.material_group),
+        material_name: str(r.material_name)
+      })),
+      estimate_room_model: estimateRooms.slice(0, 40),
+      material_color_breakdown: materialBreakdown.slice(0, 80)
     },
     materials_and_addons: {
       estimated_material_group: str(header?.estimated_material_group),
@@ -74,8 +82,11 @@ export function buildMorawareEntryDocPayload(header, snapshot, rooms, lineItems)
       cutouts: str(iu?.cutouts),
       backsplash: str(iu?.backsplash),
       tear_out: str(iu?.tear_out),
-      custom_items: Array.isArray(iu?.custom_passthrough_items) ? iu.custom_passthrough_items : []
+      custom_items: Array.isArray(iu?.custom_passthrough_items) ? iu.custom_passthrough_items : [],
+      custom_line_items: customLineItems
     },
+    readiness,
+    file_references: fileChecklist,
     line_items_summary: (lineItems || []).slice(0, 80).map((ln) => ({
       name: str(ln.item_name),
       category: str(ln.category),
@@ -94,6 +105,9 @@ export function buildMorawareEntryDocPayload(header, snapshot, rooms, lineItems)
  */
 export function buildQuickBooksEntryDocPayload(header, snapshot, lineItems) {
   const snap = snapshot && typeof snapshot === "object" ? snapshot : {};
+  const iu = snap.internal_ui && typeof snap.internal_ui === "object" ? snap.internal_ui : {};
+  const materialBreakdown = Array.isArray(snap.material_breakdown) ? snap.material_breakdown : [];
+  const customLineItems = Array.isArray(iu.custom_line_items) ? iu.custom_line_items : [];
   return {
     doc_version: 1,
     doc_type: "quickbooks_entry",
@@ -114,7 +128,14 @@ export function buildQuickBooksEntryDocPayload(header, snapshot, lineItems) {
       subtotal: n(header?.subtotal),
       markup_total: n(header?.markup_total),
       tax_total: n(header?.tax_total),
-      tax_terms_placeholder: "Tax/terms — confirm with finance when posting."
+      tax_terms_placeholder: "Tax/terms — confirm with finance when posting.",
+      material_color_breakdown: materialBreakdown.slice(0, 120),
+      custom_line_items: customLineItems
+    },
+    operations: {
+      branch: str(header?.branch),
+      sales_rep: str(header?.sales_rep),
+      entered_by: str(header?.prepared_by)
     },
     line_items_summary: (lineItems || []).slice(0, 120).map((ln) => ({
       name: str(ln.item_name),

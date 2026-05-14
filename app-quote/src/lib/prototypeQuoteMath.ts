@@ -4,7 +4,7 @@
  */
 
 import type { DemoLineItem } from "./demoFallback";
-import type { GuidedPiece, MathCheckSnapshot, MeasuredRoom, RoomDraft, RoomEngineTotals } from "./quoteTypes";
+import type { GuidedPiece, MathCheckSnapshot, MeasuredRoom, PieceShape, RoomDraft, RoomEngineTotals } from "./quoteTypes";
 import type { QuoteWorkflowMethod } from "./quoteTypes";
 import {
   qualifyingSfFromRoomDrafts,
@@ -730,25 +730,48 @@ export function serializeRoomsForApi(rooms: RoomDraft[]): Array<Record<string, u
     if (r.calcMode === "Guided Shape" && r.guidedPieces.length) {
       const pieces: Array<Record<string, unknown>> = [];
       for (const p of r.guidedPieces.filter((x) => x.lengthIn > 0 && x.depthIn > 0)) {
-        pieces.push({
+        const row: Record<string, unknown> = {
           type: p.pieceType === "fhb" ? "splash" : p.pieceType,
           lengthIn: p.lengthIn,
           depthIn: p.depthIn,
           shape: p.shape,
           name: p.name
-        });
+        };
+        if (p.materialOverride) {
+          row.materialOverride = true;
+          if (p.materialGroup) row.materialGroup = p.materialGroup;
+          if (p.materialColor) row.materialColor = p.materialColor;
+          if (p.materialSupplier) row.materialSupplier = p.materialSupplier;
+          if (p.materialType) row.materialType = p.materialType;
+        }
+        pieces.push(row);
         if (p.pieceType === "counter" && p.addSplash && p.lengthIn > 0) {
-          pieces.push({
+          const splashRow: Record<string, unknown> = {
             type: "splash",
             lengthIn: p.lengthIn,
             depthIn: STANDARD_BACKSPLASH_HEIGHT_IN,
             shape: "rect" as const,
             name: `${p.name} — 4″ splash`
-          });
+          };
+          if (p.materialOverride) {
+            splashRow.materialOverride = true;
+            if (p.materialGroup) splashRow.materialGroup = p.materialGroup;
+            if (p.materialColor) splashRow.materialColor = p.materialColor;
+            if (p.materialSupplier) splashRow.materialSupplier = p.materialSupplier;
+            if (p.materialType) splashRow.materialType = p.materialType;
+          }
+          pieces.push(splashRow);
         }
       }
       if (pieces.length) {
-        out.push({ name: r.name, materialGroup: g, pieces });
+        out.push({
+          name: r.name,
+          materialGroup: g,
+          materialColor: r.materialColor,
+          materialSupplier: r.materialSupplier,
+          materialType: r.materialType,
+          pieces
+        });
         continue;
       }
     }
@@ -777,9 +800,77 @@ export function serializeRoomsForApi(rooms: RoomDraft[]): Array<Record<string, u
     out.push({
       name: r.name,
       materialGroup: g,
+      materialColor: r.materialColor,
+      materialSupplier: r.materialSupplier,
+      materialType: r.materialType,
       countertopSqft: ct,
       backsplashSqft: round2(bs + fhb)
     });
   }
   return out;
+}
+
+/** Rebuild room drafts from an eliteOS `estimate_rooms` / API rooms array (hydration). */
+export function hydrateRoomDraftsFromEstimateRooms(rows: unknown[]): RoomDraft[] {
+  if (!Array.isArray(rows) || rows.length === 0) return [createDefaultRoom("Group Promo")];
+  const out: RoomDraft[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+    const r = row as Record<string, unknown>;
+    const mg = String(r.materialGroup || r.group || "Group Promo");
+    if (String(r.roomType || r.room_type || "") === "Vanity") {
+      const vr = createVanityRoom(mg);
+      vr.name = String(r.name || r.room_name || "Vanity");
+      vr.notes = r.notes != null ? String(r.notes) : "";
+      out.push(vr);
+      continue;
+    }
+    const base = createDefaultRoom(mg);
+    base.name = String(r.name || r.room_name || "Room");
+    base.roomType = String(r.roomType || r.room_type || "Kitchen");
+    base.materialGroup = mg;
+    if (r.materialColor != null) base.materialColor = String(r.materialColor);
+    if (r.materialSupplier != null) base.materialSupplier = String(r.materialSupplier);
+    if (r.materialType != null) base.materialType = String(r.materialType);
+    if (r.materialCatalogId != null) base.materialCatalogId = String(r.materialCatalogId);
+    if (r.notes != null) base.notes = String(r.notes);
+    const pieces = r.pieces;
+    if (Array.isArray(pieces) && pieces.length) {
+      base.calcMode = "Guided Shape";
+      base.guidedPieces = pieces
+        .filter((p) => p && typeof p === "object")
+        .map((p) => {
+          const x = p as Record<string, unknown>;
+          const tRaw = String(x.type || "counter").toLowerCase();
+          const pieceType: GuidedPiece["pieceType"] =
+            tRaw === "splash" ? "splash" : tRaw === "fhb" ? "fhb" : "counter";
+          const sh = String(x.shape || "rect").toLowerCase() === "tri" ? "tri" : "rect";
+          const nameStr = String(x.name || "Piece");
+          return {
+            id: newId(),
+            pieceType,
+            name: nameStr,
+            lengthIn: Number(x.lengthIn ?? x.l ?? 0) || 0,
+            depthIn: Number(x.depthIn ?? x.d ?? 0) || 0,
+            shape: sh as PieceShape,
+            addSplash: false,
+            materialOverride: Boolean(x.materialOverride ?? x.material_override),
+            materialGroup: x.materialGroup != null ? String(x.materialGroup) : undefined,
+            materialColor: x.materialColor != null ? String(x.materialColor) : undefined,
+            materialSupplier: x.materialSupplier != null ? String(x.materialSupplier) : undefined,
+            materialType: x.materialType != null ? String(x.materialType) : undefined
+          } satisfies GuidedPiece;
+        });
+      base.direct = { counter: 0, splash: 0 };
+    } else {
+      base.calcMode = "Manual Sq Ft";
+      base.guidedPieces = [];
+      base.direct = {
+        counter: Number(r.countertopSqft ?? r.roomCounter ?? 0) || 0,
+        splash: Number(r.backsplashSqft ?? r.roomSplash ?? 0) || 0
+      };
+    }
+    out.push(base);
+  }
+  return out.length ? out : [createDefaultRoom("Group Promo")];
 }

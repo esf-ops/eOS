@@ -84,6 +84,13 @@ export function normalizePrototypeQuoteInput(input) {
     : Array.isArray(src.custom_pass_through_items)
       ? src.custom_pass_through_items
       : [];
+  const customLineItems = normalizeCustomLineItems(src);
+  const quoteDefaultMaterial =
+    src.quoteDefaultMaterial && typeof src.quoteDefaultMaterial === "object"
+      ? { ...src.quoteDefaultMaterial }
+      : src.quote_default_material && typeof src.quote_default_material === "object"
+        ? { ...src.quote_default_material }
+        : null;
   return {
     engine: String(src.engine || src.calculationEngine || "legacy"),
     quoteSource,
@@ -92,6 +99,8 @@ export function normalizePrototypeQuoteInput(input) {
     materialGroup: String(src.materialGroup || src.selectedGroup || "Group Promo"),
     internalMaterialBasis,
     customPassthroughItems,
+    customLineItems,
+    quoteDefaultMaterial,
     areas: {
       countertopSqft: Number(src.areas?.countertopSqft ?? src.countertopSqft ?? 0) || 0,
       backsplashSqft: Number(src.areas?.backsplashSqft ?? src.backsplashSqft ?? 0) || 0
@@ -103,6 +112,51 @@ export function normalizePrototypeQuoteInput(input) {
     retailFlatAdd: Number(src.retailFlatAdd ?? src.markup?.flatAdd ?? 0) || 0,
     metadata: typeof src.metadata === "object" && src.metadata ? { ...src.metadata } : {}
   };
+}
+
+const CUSTOM_LINE_ITEM_CATEGORIES = new Set([
+  "Sink",
+  "Faucet",
+  "Plumbing fixture",
+  "Accessory",
+  "Labor",
+  "Fee",
+  "Discount/Credit",
+  "Other"
+]);
+
+/**
+ * Structured job-specific line items (internal estimates). Re-validated in `calculateQuote`.
+ * @param {Record<string, unknown>} src
+ * @returns {Array<Record<string, unknown>>}
+ */
+export function normalizeCustomLineItems(src) {
+  const raw = Array.isArray(src.customLineItems)
+    ? src.customLineItems
+    : Array.isArray(src.custom_line_items)
+      ? src.custom_line_items
+      : [];
+  const out = [];
+  for (const row of raw) {
+    if (!row || typeof row !== "object") continue;
+    const name = String(row.name ?? row.item_name ?? "").trim();
+    if (!name) continue;
+    let cat = String(row.category ?? "Other").trim() || "Other";
+    if (!CUSTOM_LINE_ITEM_CATEGORIES.has(cat)) cat = "Other";
+    const qty = Number(row.quantity ?? row.qty ?? 1) || 0;
+    const unitPrice = Number(row.unitPrice ?? row.unit_price ?? 0) || 0;
+    out.push({
+      name,
+      description: row.description != null ? String(row.description) : "",
+      category: cat,
+      quantity: qty,
+      unitPrice,
+      customerFacing: Boolean(row.customerFacing ?? row.customer_facing ?? true),
+      internalNote: row.internalNote != null ? String(row.internalNote) : row.internal_note != null ? String(row.internal_note) : "",
+      roomName: row.roomName != null ? String(row.roomName) : row.room_name != null ? String(row.room_name) : ""
+    });
+  }
+  return out;
 }
 
 /**
@@ -180,49 +234,124 @@ function legacyDirectPublic(input, rules, markupMult = PUBLIC_PLANNING_MARKUP_MU
 }
 
 /**
- * Room-engine public planning: per-room Direct $/sf, global add-ons at Direct units; total × 1.25 applied in calculateQuote.
+ * Resolve material group / color labels for a piece (room + optional piece override + quote default).
+ * @param {Record<string, unknown>|null|undefined} room
+ * @param {Record<string, unknown>|null|undefined} piece
+ * @param {ReturnType<typeof normalizePrototypeQuoteInput>} input
+ */
+function resolveMaterialForPiece(room, piece, input) {
+  const qd = input.quoteDefaultMaterial && typeof input.quoteDefaultMaterial === "object" ? input.quoteDefaultMaterial : null;
+  const baseGroup = String(
+    room?.materialGroup || room?.group || qd?.materialGroup || qd?.material_group || input.materialGroup || "Group Promo"
+  ).trim();
+  const baseColor =
+    room?.materialColor ?? room?.material_color ?? qd?.materialColor ?? qd?.material_color ?? qd?.materialName ?? null;
+  const baseSupplier = room?.materialSupplier ?? room?.material_supplier ?? qd?.materialSupplier ?? qd?.material_supplier ?? null;
+  const baseType = room?.materialType ?? room?.material_type ?? qd?.materialType ?? qd?.material_type ?? null;
+  const ov = Boolean(piece?.materialOverride ?? piece?.material_override);
+  if (ov && piece && typeof piece === "object") {
+    return {
+      group: String(piece.materialGroup || piece.group || baseGroup).trim(),
+      color: piece.materialColor ?? piece.material_color ?? baseColor,
+      supplier: piece.materialSupplier ?? piece.material_supplier ?? baseSupplier,
+      materialType: piece.materialType ?? piece.material_type ?? baseType
+    };
+  }
+  return {
+    group: baseGroup,
+    color: baseColor,
+    supplier: baseSupplier,
+    materialType: baseType
+  };
+}
+
+/**
+ * @param {ReturnType<typeof normalizePrototypeQuoteInput>} input
+ */
+function enumerateRoomMaterialSfRows(input) {
+  /** @type {Array<{ roomName: string, pieceLabel: string, group: string, color: unknown, supplier: unknown, materialType: unknown, sf: number, isSplash: boolean }>} */
+  const rows = [];
+  let counter = 0;
+  let splash = 0;
+  for (const room of input.rooms || []) {
+    const roomName = String(room.name || room.room_name || "Room").trim() || "Room";
+    if (Array.isArray(room.pieces) && room.pieces.length) {
+      for (const piece of room.pieces) {
+        const { sf } = calculateRoomAreas(piece);
+        const t = String(piece.type || "counter");
+        const isSplash = t === "splash";
+        if (isSplash) splash += sf;
+        else counter += sf;
+        const mat = resolveMaterialForPiece(room, piece, input);
+        rows.push({
+          roomName,
+          pieceLabel: String(piece.name || piece.label || (isSplash ? "Backsplash" : "Counter")).trim() || "Piece",
+          ...mat,
+          sf: round2(sf),
+          isSplash
+        });
+      }
+    } else {
+      const mat = resolveMaterialForPiece(room, null, input);
+      const ct = Number(room.countertopSqft) || 0;
+      const bs = Number(room.backsplashSqft) || 0;
+      counter += ct;
+      splash += bs;
+      if (ct > 0) rows.push({ roomName, pieceLabel: "Countertop", ...mat, sf: round2(ct), isSplash: false });
+      if (bs > 0) rows.push({ roomName, pieceLabel: "Backsplash", ...mat, sf: round2(bs), isSplash: true });
+    }
+  }
+  return { rows, counter, splash };
+}
+
+/**
+ * Room-engine public planning: per-piece Direct $/sf, global add-ons at Direct units; total × 1.25 applied in calculateQuote.
  * Public consumer estimates use ESF Direct pricing plus a 25% public planning markup.
- * @param {Record<string, unknown>} input
+ * @param {ReturnType<typeof normalizePrototypeQuoteInput>} input
  * @param {ReadonlyArray<Record<string, unknown>>} rules
  */
 function sumRoomsPublicPlanning(input, rules, markupMult = PUBLIC_PLANNING_MARKUP_MULTIPLIER) {
   const mult = Number(markupMult) > 0 ? Number(markupMult) : PUBLIC_PLANNING_MARKUP_MULTIPLIER;
-  let counter = 0;
-  let splash = 0;
+  const { rows, counter, splash } = enumerateRoomMaterialSfRows(input);
   let directMaterial = 0;
   const roomLines = [];
-  for (const room of input.rooms || []) {
-    const g = String(room.materialGroup || room.group || input.materialGroup || "Group Promo");
+  /** @type {Array<Record<string, unknown>>} */
+  const materialBreakdown = [];
+  let order = 0;
+  for (const row of rows) {
+    const g = row.group;
     const directR = directPricePerSqftForGroup(g);
     const publicR = round2(directR * mult);
-    let roomCounter = 0;
-    let roomSplash = 0;
-    if (Array.isArray(room.pieces)) {
-      for (const piece of room.pieces) {
-        const { sf } = calculateRoomAreas(piece);
-        const t = String(piece.type || "counter");
-        if (t === "splash") roomSplash += sf;
-        else roomCounter += sf;
-      }
-    } else {
-      roomCounter = Number(room.countertopSqft) || 0;
-      roomSplash = Number(room.backsplashSqft) || 0;
-    }
-    const sf = roomCounter + roomSplash;
-    const dSub = sf * directR;
-    const pSub = sf * publicR;
+    const dSub = row.sf * directR;
+    const pSub = row.sf * publicR;
     directMaterial += dSub;
-    counter += roomCounter;
-    splash += roomSplash;
     roomLines.push({
-      room: room.name || "Room",
+      room: row.roomName,
+      pieceLabel: row.pieceLabel,
       group: g,
+      materialColor: row.color,
+      materialSupplier: row.supplier,
+      materialType: row.materialType,
       rate: publicR,
       directRate: directR,
-      roomCounter,
-      roomSplash,
+      roomCounter: row.isSplash ? 0 : row.sf,
+      roomSplash: row.isSplash ? row.sf : 0,
       subtotal: round2(pSub),
-      directSubtotal: round2(dSub)
+      directSubtotal: round2(dSub),
+      sort_order: order++
+    });
+    materialBreakdown.push({
+      room: row.roomName,
+      piece: row.pieceLabel,
+      materialGroup: g,
+      materialColor: row.color,
+      supplier: row.supplier,
+      materialType: row.materialType,
+      sqft: row.sf,
+      ratePerSqftPublic: publicR,
+      ratePerSqftDirect: directR,
+      wholesaleSubtotal: round2(dSub),
+      retailSubtotal: round2(pSub)
     });
   }
   const addOnPart = calculateAddOns({ addOns: input.addOns || {} }, rules);
@@ -231,6 +360,7 @@ function sumRoomsPublicPlanning(input, rules, markupMult = PUBLIC_PLANNING_MARKU
     counter,
     splash,
     roomLines,
+    materialBreakdown,
     addOnPart,
     directTotal,
     /** ESF Direct subtotal before public planning % (stored as `totals.wholesale` for snapshots). */
@@ -370,42 +500,64 @@ export function buildCalculationSnapshot(input, resolved, totals, extras = {}) {
       materialGroup: input.materialGroup,
       internalMaterialBasis: input.internalMaterialBasis ?? null,
       customPassthroughCount: Array.isArray(input.customPassthroughItems) ? input.customPassthroughItems.length : 0,
+      customLineItemCount: Array.isArray(input.customLineItems) ? input.customLineItems.length : 0,
       areas: input.areas,
       roomCount: Array.isArray(input.rooms) ? input.rooms.length : 0
     },
     totals,
     warnings: extras.warnings || [],
+    material_breakdown: extras.material_breakdown || [],
+    custom_line_items: extras.custom_line_items || [],
+    estimate_rooms: extras.estimate_rooms || [],
     ruleCount: Array.isArray(resolved?.rules) ? resolved.rules.length : 0
   };
 }
 
 function sumRoomsWholesale(input, rules) {
-  let counter = 0;
-  let splash = 0;
+  const { rows, counter, splash } = enumerateRoomMaterialSfRows(input);
   const roomLines = [];
-  for (const room of input.rooms || []) {
-    const g = String(room.materialGroup || room.group || input.materialGroup || "Group Promo");
-    const rate = materialRateForQuote(input, g, rules);
-    let roomCounter = 0;
-    let roomSplash = 0;
-    if (Array.isArray(room.pieces)) {
-      for (const piece of room.pieces) {
-        const { sf } = calculateRoomAreas(piece);
-        const t = String(piece.type || "counter");
-        if (t === "splash") roomSplash += sf;
-        else roomCounter += sf;
-      }
-    } else {
-      roomCounter = Number(room.countertopSqft) || 0;
-      roomSplash = Number(room.backsplashSqft) || 0;
-    }
-    const sub = (roomCounter + roomSplash) * rate;
-    counter += roomCounter;
-    splash += roomSplash;
-    roomLines.push({ room: room.name || "Room", group: g, rate, roomCounter, roomSplash, subtotal: sub });
+  /** @type {Array<Record<string, unknown>>} */
+  const materialBreakdown = [];
+  let materialDollars = 0;
+  let order = 0;
+  for (const row of rows) {
+    const rate = materialRateForQuote(input, row.group, rules);
+    const sub = round2(row.sf * rate);
+    materialDollars += sub;
+    roomLines.push({
+      room: row.roomName,
+      pieceLabel: row.pieceLabel,
+      group: row.group,
+      materialColor: row.color,
+      materialSupplier: row.supplier,
+      materialType: row.materialType,
+      rate,
+      roomCounter: row.isSplash ? 0 : row.sf,
+      roomSplash: row.isSplash ? row.sf : 0,
+      subtotal: sub,
+      sort_order: order++
+    });
+    materialBreakdown.push({
+      room: row.roomName,
+      piece: row.pieceLabel,
+      materialGroup: row.group,
+      materialColor: row.color,
+      supplier: row.supplier,
+      materialType: row.materialType,
+      sqft: row.sf,
+      ratePerSqft: rate,
+      wholesaleSubtotal: sub
+    });
   }
   const addOnPart = calculateAddOns({ addOns: input.addOns || {} }, rules);
-  return { counter, splash, roomLines, addOnPart, wholesale: roomLines.reduce((s, r) => s + r.subtotal, 0) + addOnPart.total };
+  return {
+    counter,
+    splash,
+    roomLines,
+    materialBreakdown,
+    addOnPart,
+    wholesale: round2(materialDollars + addOnPart.total)
+  };
 }
 
 function legacyWholesale(input, rules) {
@@ -613,6 +765,8 @@ export async function calculateQuote(rawInput, pricingContext = {}) {
   let customPassTotal = 0;
   /** @type {Array<Record<string, unknown>>} */
   const customPassLines = [];
+  /** @type {Array<Record<string, unknown>>} */
+  const validatedCustomLineItems = [];
   if (mode !== "public_retail") {
     for (const row of input.customPassthroughItems || []) {
       const desc = String(row.description ?? row.name ?? "").trim();
@@ -633,10 +787,51 @@ export async function calculateQuote(rawInput, pricingContext = {}) {
         line_subtotal: sub
       });
     }
+    for (const row of input.customLineItems || []) {
+      const name = String(row.name || "").trim();
+      const cat = String(row.category || "Other").trim() || "Other";
+      const q = Number(row.quantity || 0) || 0;
+      const p = Number(row.unitPrice || 0) || 0;
+      const isDisc = cat === "Discount/Credit";
+      if (!name || q <= 0) continue;
+      if (!isDisc && p === 0) continue;
+      if (isDisc && p >= 0) {
+        warnings.push(`Custom line "${name}": Discount/Credit requires a negative unit price. Skipped.`);
+        continue;
+      }
+      if (!isDisc && p < 0) {
+        warnings.push(`Custom line "${name}": negative unit price is only allowed for Discount/Credit. Skipped.`);
+        continue;
+      }
+      const sub = round2(q * p);
+      customPassTotal += sub;
+      validatedCustomLineItems.push({
+        name,
+        description: row.description,
+        category: cat,
+        quantity: q,
+        unitPrice: p,
+        line_total: sub,
+        customerFacing: row.customerFacing,
+        internalNote: row.internalNote,
+        roomName: row.roomName
+      });
+      customPassLines.push({
+        line_type: "custom_line_item",
+        category: `custom_${String(cat).replace(/[^\w]+/g, "_").toLowerCase()}`,
+        item_code: "CUSTOM_LINE",
+        item_name: name,
+        room_name: row.roomName || null,
+        quantity: q,
+        unit_type: "each",
+        unit_price: p,
+        line_subtotal: sub
+      });
+    }
     customPassTotal = round2(customPassTotal);
   }
 
-  if (customPassTotal > 0) {
+  if (customPassTotal !== 0) {
     wholesale = round2(wholesale + customPassTotal);
     retail = round2(retail + customPassTotal);
   }
@@ -650,8 +845,17 @@ export async function calculateQuote(rawInput, pricingContext = {}) {
 
   const lineItems = [...buildLineItems(detail, input, totals, mode, publicMarkupMult), ...customPassLines];
 
-  const snapshot = buildCalculationSnapshot(input, resolved, totals, { warnings });
+  const materialBreakdown = detail.kind === "rooms" && Array.isArray(detail.materialBreakdown) ? detail.materialBreakdown : [];
+  const snapshot = buildCalculationSnapshot(input, resolved, totals, {
+    warnings,
+    material_breakdown: materialBreakdown,
+    custom_line_items: validatedCustomLineItems,
+    estimate_rooms: input.rooms || []
+  });
   snapshot.lineItems = lineItems;
+  if (rawInput.readiness && typeof rawInput.readiness === "object") snapshot.readiness = rawInput.readiness;
+  if (rawInput.fileChecklist && typeof rawInput.fileChecklist === "object") snapshot.file_checklist = rawInput.fileChecklist;
+  if (rawInput.file_checklist && typeof rawInput.file_checklist === "object") snapshot.file_checklist = rawInput.file_checklist;
 
   return {
     ok: true,
@@ -752,17 +956,19 @@ function buildLineItems(detail, input, totals, pricingMode = "", publicMult = 1)
   } else if (detail.kind === "rooms") {
     let order = 0;
     for (const r of detail.roomLines || []) {
+      const piece = r.pieceLabel ? ` — ${r.pieceLabel}` : "";
+      const color = r.materialColor ? ` — ${r.materialColor}` : "";
       lines.push({
         line_type: "material",
         category: "material_group",
         item_code: String(r.group || "").replace(/\s+/g, "_").toUpperCase(),
-        item_name: String(r.room || "Room"),
+        item_name: `${String(r.room || "Room")}${piece}${color} (${String(r.group || "")})`,
         room_name: String(r.room || ""),
         quantity: round2((r.roomCounter || 0) + (r.roomSplash || 0)),
         unit_type: "per_sqft",
         unit_price: r.rate,
         line_subtotal: round2(r.subtotal),
-        sort_order: order++
+        sort_order: r.sort_order != null ? r.sort_order : order++
       });
     }
     for (const ln of detail.addOnPart?.lines || []) {
