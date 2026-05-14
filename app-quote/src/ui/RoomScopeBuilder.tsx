@@ -1,7 +1,7 @@
 import React from "react";
 import type { EliteProgramColorRow, GuidedPiece, RoomCalcMode, RoomDraft } from "../lib/quoteTypes";
-import { ADDON_CATALOG, VANITY_PRICING, createDefaultRoom, newId } from "../lib/prototypeQuoteMath";
-import { sfFromGuidedPiece } from "../lib/measurementEngine";
+import { ADDON_CATALOG, VANITY_PRICING, createEstimatorRoom, newId } from "../lib/prototypeQuoteMath";
+import { sfFromGuidedPiece, STANDARD_BACKSPLASH_HEIGHT_IN } from "../lib/measurementEngine";
 
 type Props = {
   rooms: RoomDraft[];
@@ -99,7 +99,7 @@ export default function RoomScopeBuilder({
   const [colorQ, setColorQ] = React.useState<Record<string, string>>({});
   const [groupFilter, setGroupFilter] = React.useState<Record<string, string>>({});
   const [pieceOverridesOpen, setPieceOverridesOpen] = React.useState<Record<string, boolean>>({});
-  const addRoom = () => onRoomsChange([...rooms, createDefaultRoom(rooms[0]?.materialGroup || "Group Promo")]);
+  const addRoom = () => onRoomsChange([...rooms, createEstimatorRoom(rooms[0]?.materialGroup || "Group Promo")]);
   const removeRoom = (id: string) => onRoomsChange(rooms.filter((r) => r.id !== id));
 
   const setPiece = (roomId: string, pieceId: string, patch: Partial<GuidedPiece>, list: "guided" | "fhb") => {
@@ -142,10 +142,24 @@ export default function RoomScopeBuilder({
     );
   };
 
-  const applyPreset = (roomId: string, preset: "L-Shape" | "U-Shape" | "Galley") => {
+  type RoomLayoutPreset = "Rectangle" | "L-Shape" | "U-Shape" | "Galley" | "Island" | "Backsplash" | "Waterfall";
+
+  const applyPreset = (roomId: string, preset: RoomLayoutPreset) => {
     const depth = 25.5;
     let pieces: GuidedPiece[] = [];
-    if (preset === "L-Shape") {
+    if (preset === "Rectangle") {
+      pieces = [
+        {
+          id: newId(),
+          pieceType: "counter",
+          name: "Main run",
+          lengthIn: 0,
+          depthIn: depth,
+          shape: "rect",
+          addSplash: true
+        }
+      ];
+    } else if (preset === "L-Shape") {
       pieces = [
         { id: newId(), pieceType: "counter", name: "Main Wall Run", lengthIn: 0, depthIn: depth, shape: "rect" },
         { id: newId(), pieceType: "counter", name: "Short Return", lengthIn: 0, depthIn: depth, shape: "rect" }
@@ -156,11 +170,26 @@ export default function RoomScopeBuilder({
         { id: newId(), pieceType: "counter", name: "Back Run", lengthIn: 0, depthIn: depth, shape: "rect" },
         { id: newId(), pieceType: "counter", name: "Right Run", lengthIn: 0, depthIn: depth, shape: "rect" }
       ];
-    } else {
+    } else if (preset === "Galley") {
       pieces = [
         { id: newId(), pieceType: "counter", name: "Left Wall", lengthIn: 0, depthIn: depth, shape: "rect" },
         { id: newId(), pieceType: "counter", name: "Right Wall", lengthIn: 0, depthIn: depth, shape: "rect" }
       ];
+    } else if (preset === "Island") {
+      pieces = [{ id: newId(), pieceType: "counter", name: "Island", lengthIn: 0, depthIn: 36, shape: "rect" }];
+    } else if (preset === "Backsplash") {
+      pieces = [
+        {
+          id: newId(),
+          pieceType: "splash",
+          name: "Backsplash run",
+          lengthIn: 0,
+          depthIn: STANDARD_BACKSPLASH_HEIGHT_IN,
+          shape: "rect"
+        }
+      ];
+    } else {
+      pieces = [{ id: newId(), pieceType: "fhb", name: "Waterfall edge", lengthIn: 0, depthIn: 96, shape: "rect" }];
     }
     onRoomsChange(rooms.map((r) => (r.id === roomId ? { ...r, guidedPieces: pieces, calcMode: "Guided Shape" } : r)));
   };
@@ -408,16 +437,35 @@ export default function RoomScopeBuilder({
                 <div className="grid3" style={{ marginTop: 12 }}>
                   <label>
                     Measurement method
-                    <select
-                      value={room.calcMode}
-                      onChange={(e) =>
-                        onRoomsChange(updateRoom(rooms, room.id, { calcMode: e.target.value as RoomCalcMode }))
-                      }
-                    >
-                      <option>Guided Shape</option>
-                      {hideRapidLinear ? null : <option>Rapid Linear Foot</option>}
-                      <option>Manual Sq Ft</option>
-                    </select>
+                    {hideRapidLinear ? (
+                      <div className="ie-measure-toggle" role="group" aria-label="Measurement method">
+                        <button
+                          type="button"
+                          className={`ie-measure-toggle-btn ${room.calcMode === "Guided Shape" ? "on" : ""}`}
+                          onClick={() => onRoomsChange(updateRoom(rooms, room.id, { calcMode: "Guided Shape" }))}
+                        >
+                          Guided Shape
+                        </button>
+                        <button
+                          type="button"
+                          className={`ie-measure-toggle-btn ${room.calcMode === "Manual Sq Ft" ? "on" : ""}`}
+                          onClick={() => onRoomsChange(updateRoom(rooms, room.id, { calcMode: "Manual Sq Ft" }))}
+                        >
+                          Manual Sq Ft
+                        </button>
+                      </div>
+                    ) : (
+                      <select
+                        value={room.calcMode}
+                        onChange={(e) =>
+                          onRoomsChange(updateRoom(rooms, room.id, { calcMode: e.target.value as RoomCalcMode }))
+                        }
+                      >
+                        <option>Guided Shape</option>
+                        <option>Rapid Linear Foot</option>
+                        <option>Manual Sq Ft</option>
+                      </select>
+                    )}
                   </label>
                   <label>
                     Raised bar?
@@ -444,31 +492,27 @@ export default function RoomScopeBuilder({
                 {room.calcMode === "Guided Shape" ? (
                   <div className="room-panel">
                     <p className="muted small">Presets load example counter pieces — enter lengths in inches (depth defaults to 25.5″).</p>
-                    <div className="mode-row" style={{ marginBottom: 10 }}>
+                    <div className="mode-row room-preset-row" style={{ marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+                      <button type="button" className="btn secondary" onClick={() => applyPreset(room.id, "Rectangle")}>
+                        Rectangle
+                      </button>
                       <button type="button" className="btn secondary" onClick={() => applyPreset(room.id, "L-Shape")}>
-                        L-Shape
+                        L-shape
                       </button>
                       <button type="button" className="btn secondary" onClick={() => applyPreset(room.id, "U-Shape")}>
-                        U-Shape
+                        U-shape
                       </button>
                       <button type="button" className="btn secondary" onClick={() => applyPreset(room.id, "Galley")}>
                         Galley
                       </button>
-                      <button
-                        type="button"
-                        className="btn secondary"
-                        onClick={() =>
-                          onRoomsChange(
-                            updateRoom(rooms, room.id, {
-                              guidedPieces: [
-                                ...room.guidedPieces,
-                                { id: newId(), pieceType: "counter", name: "Island", lengthIn: 0, depthIn: 36, shape: "rect" }
-                              ]
-                            })
-                          )
-                        }
-                      >
-                        + Island piece
+                      <button type="button" className="btn secondary" onClick={() => applyPreset(room.id, "Island")}>
+                        Island
+                      </button>
+                      <button type="button" className="btn secondary" onClick={() => applyPreset(room.id, "Backsplash")}>
+                        Backsplash
+                      </button>
+                      <button type="button" className="btn secondary" onClick={() => applyPreset(room.id, "Waterfall")}>
+                        Waterfall
                       </button>
                     </div>
                     <label className="check" style={{ gridColumn: "1 / -1", marginTop: 8 }}>

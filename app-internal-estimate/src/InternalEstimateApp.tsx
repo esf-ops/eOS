@@ -2,32 +2,18 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { apiGetJson, apiPostJson, ApiError } from "@quote-lib/api";
 import { config, EOS_LOGO_URL } from "@quote-lib/config";
 import type { DemoCalculateResult } from "@quote-lib/demoFallback";
-import { round2, STANDARD_BACKSPLASH_HEIGHT_IN } from "@quote-lib/measurementEngine";
+import { round2 } from "@quote-lib/measurementEngine";
 import {
-  CONFIDENCE_COPY,
-  computeGuidedSimpleAreas,
-  emptyGuidedSimpleForm,
-  type GuidedLayoutPreset,
-  type GuidedSimpleForm
-} from "@quote-lib/guidedHomeowner";
-import {
-  aggregateComparisonScope,
-  buildMaterialGroupComparison,
   calculateAllRoomDrafts,
-  createDefaultRoom,
-  createManualScopeRoom,
+  createEstimatorRoom,
   hydrateRoomDraftsFromEstimateRooms,
   roomsNeedLocalVanityMath,
   runLocalPrototypeQuote,
-  serializeRoomsForApi,
-  sumGlobalAddOns,
-  syntheticRoomForWorkflow
+  serializeRoomsForApi
 } from "@quote-lib/prototypeQuoteMath";
-import type { MaterialGroupComparisonRow } from "@quote-lib/prototypeQuoteMath";
-import type { EliteProgramColorRow, GuidedPiece, MathCheckSnapshot, QuoteWorkflowMethod, RoomDraft } from "@quote-lib/quoteTypes";
+import type { EliteProgramColorRow, MathCheckSnapshot, QuoteWorkflowMethod, RoomDraft } from "@quote-lib/quoteTypes";
 import { getSupabase } from "./lib/supabase";
 import RoomScopeBuilder from "@quote-ui/RoomScopeBuilder";
-import InternalGuidedShapePreview from "./InternalGuidedShapePreview";
 
 const MATERIAL_GROUPS = [
   "Group Promo",
@@ -39,15 +25,19 @@ const MATERIAL_GROUPS = [
   "Group F"
 ];
 
-const INTERNAL_GUIDED_PRESETS: Array<{ id: GuidedLayoutPreset; title: string; hint?: string }> = [
-  { id: "straight", title: "Rectangle" },
-  { id: "l_shape", title: "L-shape" },
-  { id: "u_shape", title: "U-shape" },
-  { id: "island", title: "Island" },
-  { id: "backsplash_piece", title: "Backsplash piece" },
-  { id: "waterfall", title: "Waterfall" },
-  { id: "not_sure", title: "Not sure yet", hint: "Switch to manual sq ft or add dimensions when you can." }
-];
+const INTERNAL_ESTIMATE_WORKFLOW: QuoteWorkflowMethod = "room_by_room";
+const INTERNAL_RETAIL_MARKUP_PCT = 20;
+const INTERNAL_RETAIL_METHOD = "Markup Percent";
+
+const EMPTY_GLOBAL_ADDONS = {
+  "qty-sink": 0,
+  "qty-bar": 0,
+  "qty-cook": 0,
+  "qty-outlet": 0,
+  "qty-ss": 0,
+  "qty-blanco": 0,
+  tearout: 0
+};
 
 const INTERNAL_SALES_REPS = ["Casey", "Thera", "MJ", "House", "Direct"] as const;
 const INTERNAL_BRANCHES = ["Dyersville", "Iowa City", "Lisbon"] as const;
@@ -55,14 +45,11 @@ const INTERNAL_BRANCHES = ["Dyersville", "Iowa City", "Lisbon"] as const;
 const WORKFLOW_SECTIONS = [
   { id: "sec-job", label: "Job Info" },
   { id: "sec-rooms", label: "Rooms / Areas" },
-  { id: "sec-materials", label: "Materials & Colors" },
-  { id: "sec-addons", label: "Add-ons & Custom" },
+  { id: "sec-addons", label: "Add-ons & Custom Items" },
   { id: "sec-review", label: "Review" },
   { id: "sec-output", label: "Output" },
-  { id: "sec-save", label: "Save / Library" }
+  { id: "sec-save", label: "Save" }
 ] as const;
-
-type CustomPassRow = { id: string; description: string; price: string; qty: string };
 
 const CUSTOM_LINE_CATEGORIES = [
   "Sink",
@@ -95,7 +82,7 @@ const CUSTOM_LINE_PRESETS: Array<{
   unitPrice: string;
   customerFacing: boolean;
 }> = [
-  { key: "tear", name: "Tear Out", description: "Flat demo line — same $750 intent as the legacy tear-out add-on.", category: "Labor", unitPrice: "750", customerFacing: true },
+  { key: "tear", name: "Tear Out", description: "Removal / tear-out labor line.", category: "Labor", unitPrice: "750", customerFacing: true },
   { key: "trip", name: "Trip Charge", description: "Travel / trip", category: "Fee", unitPrice: "75", customerFacing: true },
   { key: "mat", name: "Additional Material Cost", description: "Extra material allowance", category: "Other", unitPrice: "0", customerFacing: true },
   { key: "sink", name: "Custom Sink / Faucet / Fixture", description: "Fixture package", category: "Plumbing fixture", unitPrice: "0", customerFacing: true },
@@ -162,21 +149,7 @@ export default function InternalEstimateApp() {
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  const [quoteWorkflow, setQuoteWorkflow] = useState<QuoteWorkflowMethod>("guided_shape");
-  const [materialGroup, setMaterialGroup] = useState("Group Promo");
-  const [roomDrafts, setRoomDrafts] = useState<RoomDraft[]>(() => [createDefaultRoom("Group Promo")]);
-
-  const [manualCt, setManualCt] = useState("45");
-  const [manualBs, setManualBs] = useState("12");
-  const [linearWall, setLinearWall] = useState("20");
-  const [linearSplashIn, setLinearSplashIn] = useState(String(STANDARD_BACKSPLASH_HEIGHT_IN));
-  const [linearIslandL, setLinearIslandL] = useState("0");
-  const [linearIslandW, setLinearIslandW] = useState("0");
-  const [guidedProjectPieces, setGuidedProjectPieces] = useState<GuidedPiece[]>(() => createDefaultRoom("Group Promo").guidedPieces);
-  const [guidedPreset, setGuidedPreset] = useState<GuidedLayoutPreset | null>(null);
-  const [guidedSimpleForm, setGuidedSimpleForm] = useState<GuidedSimpleForm>(() => emptyGuidedSimpleForm());
-  const [guidedUseAdvanced, setGuidedUseAdvanced] = useState(false);
-  const [guidedAdvancedOpen, setGuidedAdvancedOpen] = useState(false);
+  const [roomDrafts, setRoomDrafts] = useState<RoomDraft[]>(() => [createEstimatorRoom("Group Promo")]);
 
   const [accountName, setAccountName] = useState("Direct");
   const [accountPhone, setAccountPhone] = useState("");
@@ -190,12 +163,10 @@ export default function InternalEstimateApp() {
   const [projectName, setProjectName] = useState("");
   const [projectAddress, setProjectAddress] = useState("");
   const [city, setCity] = useState("");
-  const [state, setState] = useState("");
+  const [state, setState] = useState("IA");
   const [enteredBy, setEnteredBy] = useState("");
   const [colorTbd, setColorTbd] = useState(false);
-  const [bsMaterialOverrideOpen, setBsMaterialOverrideOpen] = useState(false);
   const [internalPricingMode, setInternalPricingMode] = useState<"direct" | "wholesale">("wholesale");
-  const [customItems, setCustomItems] = useState<CustomPassRow[]>([]);
   const [customLineRows, setCustomLineRows] = useState<CustomLineRow[]>([]);
   const [eliteColors, setEliteColors] = useState<EliteProgramColorRow[]>([]);
   const [colorCatalogWarnings, setColorCatalogWarnings] = useState<string[]>([]);
@@ -207,17 +178,6 @@ export default function InternalEstimateApp() {
   const [hydrationGaps, setHydrationGaps] = useState<string[]>([]);
   const [lastSavedQuoteNumber, setLastSavedQuoteNumber] = useState<string | null>(null);
   const [lastSavedQuoteId, setLastSavedQuoteId] = useState<string | null>(null);
-  const [quoteLibrary, setQuoteLibrary] = useState<Array<Record<string, unknown>>>([]);
-  const [libraryBusy, setLibraryBusy] = useState(false);
-  const [libraryError, setLibraryError] = useState<string | null>(null);
-  const [sink, setSink] = useState("1");
-  const [bar, setBar] = useState("0");
-  const [cook, setCook] = useState("1");
-  const [outlet, setOutlet] = useState("0");
-  const [ss, setSs] = useState("0");
-  const [blanco, setBlanco] = useState("0");
-  const [partnerRetailPct, setPartnerRetailPct] = useState("20");
-  const [partnerRetailMethod, setPartnerRetailMethod] = useState("Markup Percent");
 
   const [calcBusy, setCalcBusy] = useState(false);
   const [calcError, setCalcError] = useState<string | null>(null);
@@ -227,8 +187,6 @@ export default function InternalEstimateApp() {
   const [apiPartner, setApiPartner] = useState<ApiPartnerResult | null>(null);
   const [localMathCheck, setLocalMathCheck] = useState<MathCheckSnapshot | null>(null);
   const [localMatrix, setLocalMatrix] = useState<ReturnType<typeof runLocalPrototypeQuote>["allGroupMatrix"] | null>(null);
-  const [comparisonRows, setComparisonRows] = useState<MaterialGroupComparisonRow[] | null>(null);
-  const [comparisonMixedNote, setComparisonMixedNote] = useState<string | null>(null);
 
   const [submitBusy, setSubmitBusy] = useState(false);
   const [submitMsg, setSubmitMsg] = useState<string | null>(null);
@@ -237,25 +195,10 @@ export default function InternalEstimateApp() {
   const liveApi = Boolean(sessionToken);
   const lastCalcLive = !usedFallback && apiPartner != null;
 
-  useEffect(() => {
-    setQuoteWorkflow("guided_shape");
-    setRoomDrafts((prev) => (prev.length ? prev : [createDefaultRoom("Group Promo")]));
-  }, []);
-
-  useEffect(() => {
-    setGuidedAdvancedOpen(false);
-  }, []);
-
-  useEffect(() => {
-    if (quoteWorkflow === "rapid_linear") {
-      setQuoteWorkflow("manual_sqft");
-    }
-  }, [quoteWorkflow]);
-
   const signIn = useCallback(async () => {
     setAuthError(null);
     if (!supabase) {
-      setAuthError("Demo only — add Supabase URL and anon key to your environment to enable sign-in.");
+      setAuthError("Sign-in is not configured in this build.");
       return;
     }
     setAuthBusy(true);
@@ -281,83 +224,14 @@ export default function InternalEstimateApp() {
     setSessionToken(null);
   }, [supabase]);
 
-  const buildGlobalAddOns = useCallback(() => {
-    return {
-      "qty-sink": num(sink),
-      "qty-bar": num(bar),
-      "qty-cook": num(cook),
-      "qty-outlet": num(outlet),
-      "qty-ss": num(ss),
-      "qty-blanco": num(blanco),
-      tearout: 0
-    };
-  }, [sink, bar, cook, outlet, ss, blanco]);
+  const topMaterialGroup = useMemo(() => roomDrafts[0]?.materialGroup ?? "Group Promo", [roomDrafts]);
 
-  const buildRoomDraftsForCalculate = useCallback((): RoomDraft[] => {
-    if (quoteWorkflow === "room_by_room") return roomDrafts;
-    if (quoteWorkflow === "upload_plans" || quoteWorkflow === "visualize") return [];
-    if (quoteWorkflow === "guided_shape" && !guidedUseAdvanced) {
-      const areas = computeGuidedSimpleAreas(guidedPreset, guidedSimpleForm);
-      return [createManualScopeRoom(materialGroup, areas.counter, areas.splash, areas.fhb)];
-    }
-    return [
-      syntheticRoomForWorkflow(
-        quoteWorkflow,
-        materialGroup,
-        { counter: num(manualCt), splash: num(manualBs) },
-        {
-          wallFt: num(linearWall),
-          splashIn: num(linearSplashIn),
-          islandL: num(linearIslandL),
-          islandW: num(linearIslandW)
-        },
-        guidedProjectPieces
-      )
-    ];
-  }, [
-    quoteWorkflow,
-    roomDrafts,
-    materialGroup,
-    manualCt,
-    manualBs,
-    linearWall,
-    linearSplashIn,
-    linearIslandL,
-    linearIslandW,
-    guidedProjectPieces,
-    guidedUseAdvanced,
-    guidedPreset,
-    guidedSimpleForm
-  ]);
-
-  const commitComparisonFromDrafts = useCallback(
-    (drafts: RoomDraft[]) => {
-      if (!drafts.length || quoteWorkflow === "upload_plans" || quoteWorkflow === "visualize") {
-        setComparisonRows(null);
-        setComparisonMixedNote(null);
-        return;
-      }
-      const ag = aggregateComparisonScope(drafts, projectType);
-      const globalAddon = quoteWorkflow === "room_by_room" ? 0 : sumGlobalAddOns(buildGlobalAddOns()).total;
-      const addonForTable = round2(ag.addonDollars + globalAddon);
-      setComparisonRows(
-        buildMaterialGroupComparison({
-          countertopSqft: ag.countertopSqft,
-          backsplashSqft: ag.backsplashSqft,
-          addonDollars: addonForTable,
-          partnerRetailPercent: num(partnerRetailPct),
-          partnerRetailMethod
-        })
-      );
-      setComparisonMixedNote(ag.mixedGroupNote);
-    },
-    [quoteWorkflow, projectType, buildGlobalAddOns, partnerRetailPct, partnerRetailMethod]
-  );
+  const buildRoomDraftsForCalculate = useCallback((): RoomDraft[] => roomDrafts, [roomDrafts]);
 
   const buildCalcPayload = useCallback(() => {
     const drafts = buildRoomDraftsForCalculate();
     const apiRooms = serializeRoomsForApi(drafts);
-    const addOns = quoteWorkflow === "room_by_room" ? {} : buildGlobalAddOns();
+    const addOns: Record<string, number | string> = {};
     let countertopSqft = 0;
     let backsplashSqft = 0;
     for (const row of apiRooms) {
@@ -370,13 +244,7 @@ export default function InternalEstimateApp() {
       backsplashSqft = round2(totals.splash + totals.fhb);
     }
     const engine = apiRooms.length >= 1 ? "rooms" : "legacy";
-    const customPassthroughItems = customItems
-      .map((row) => ({
-        description: row.description.trim(),
-        price: num(row.price),
-        qty: num(row.qty) || 1
-      }))
-      .filter((row) => row.description.length > 0 && row.price > 0);
+    const customPassthroughItems: Array<{ description: string; price: number; qty: number }> = [];
     const customLineItems = customLineRows
       .map((row) => ({
         name: row.name.trim(),
@@ -422,8 +290,6 @@ export default function InternalEstimateApp() {
     const readinessWarnings: string[] = [];
     if (colorTbd) {
       readinessWarnings.push("Color marked TBD — confirm before Sent/Sold when you have a selection.");
-    } else if (!quoteDefaultCatalogId && quoteWorkflow !== "room_by_room") {
-      readinessWarnings.push("No default catalog color — room colors or TBD is fine for internal drafts.");
     }
     const readiness = {
       missing,
@@ -439,20 +305,20 @@ export default function InternalEstimateApp() {
     };
     return {
       quoteSource: "internal_quote",
-      materialGroup,
+      materialGroup: topMaterialGroup,
       internalMaterialBasis: internalPricingMode,
       customPassthroughItems,
       customLineItems,
       quoteDefaultMaterial,
       readiness,
       fileChecklist,
-      quote_workflow: quoteWorkflow,
+      quote_workflow: INTERNAL_ESTIMATE_WORKFLOW,
       areas: { countertopSqft, backsplashSqft },
       addOns,
       engine,
       rooms: apiRooms,
-      retailMarkupPercent: num(partnerRetailPct),
-      retailMethod: partnerRetailMethod,
+      retailMarkupPercent: INTERNAL_RETAIL_MARKUP_PCT,
+      retailMethod: INTERNAL_RETAIL_METHOD,
       customer_name: customerName.trim() || undefined,
       customer_email: email.trim() || undefined,
       customer_phone: phone.trim() || undefined,
@@ -472,18 +338,13 @@ export default function InternalEstimateApp() {
     };
   }, [
     buildRoomDraftsForCalculate,
-    quoteWorkflow,
-    buildGlobalAddOns,
-    materialGroup,
-    partnerRetailPct,
-    partnerRetailMethod,
+    topMaterialGroup,
     customerName,
     email,
     phone,
     projectType,
     branch,
     salesRep,
-    customItems,
     customLineRows,
     eliteColors,
     quoteDefaultCatalogId,
@@ -504,15 +365,15 @@ export default function InternalEstimateApp() {
 
   const runLocalFromDrafts = useCallback(() => {
     const drafts = buildRoomDraftsForCalculate();
-    const wf = workflowLabel(quoteWorkflow);
+    const wf = workflowLabel(INTERNAL_ESTIMATE_WORKFLOW);
     const lr = runLocalPrototypeQuote({
       quoteMode: "partner",
-      partnerRetailPercent: num(partnerRetailPct),
-      partnerRetailMethod,
-      materialGroupTop: materialGroup,
+      partnerRetailPercent: INTERNAL_RETAIL_MARKUP_PCT,
+      partnerRetailMethod: INTERNAL_RETAIL_METHOD,
+      materialGroupTop: topMaterialGroup,
       roomDrafts: drafts,
-      globalAddOns: buildGlobalAddOns(),
-      applyGlobalAddOns: quoteWorkflow !== "room_by_room",
+      globalAddOns: EMPTY_GLOBAL_ADDONS,
+      applyGlobalAddOns: false,
       workflowLabel: wf,
       projectType
     });
@@ -521,17 +382,7 @@ export default function InternalEstimateApp() {
     setDemoResult(localRunToDemo(lr));
     setLocalMathCheck(lr.mathCheck);
     setLocalMatrix(lr.allGroupMatrix);
-    commitComparisonFromDrafts(drafts);
-  }, [
-    buildRoomDraftsForCalculate,
-    quoteWorkflow,
-    partnerRetailPct,
-    partnerRetailMethod,
-    materialGroup,
-    buildGlobalAddOns,
-    projectType,
-    commitComparisonFromDrafts
-  ]);
+  }, [buildRoomDraftsForCalculate, topMaterialGroup, projectType]);
 
   const handleCalculate = useCallback(async () => {
     setCalcBusy(true);
@@ -541,15 +392,7 @@ export default function InternalEstimateApp() {
     setUsedFallback(false);
     setLocalMathCheck(null);
     setLocalMatrix(null);
-    setComparisonRows(null);
-    setComparisonMixedNote(null);
     setVanityLocalNote(null);
-
-    if (quoteWorkflow === "upload_plans" || quoteWorkflow === "visualize") {
-      setCalcError("This measurement path is coming soon — pick another option to calculate.");
-      setCalcBusy(false);
-      return;
-    }
 
     const drafts = buildRoomDraftsForCalculate();
     const needsVanityLocal = roomsNeedLocalVanityMath(drafts);
@@ -574,7 +417,6 @@ export default function InternalEstimateApp() {
       if (raw.ok === true) {
         setApiPartner(raw as ApiPartnerResult);
         setUsedFallback(false);
-        commitComparisonFromDrafts(drafts);
         setCalcBusy(false);
         return;
       }
@@ -600,7 +442,7 @@ export default function InternalEstimateApp() {
       runLocalFromDrafts();
     }
     setCalcBusy(false);
-  }, [sessionToken, buildCalcPayload, buildRoomDraftsForCalculate, runLocalFromDrafts, quoteWorkflow, commitComparisonFromDrafts]);
+  }, [sessionToken, buildCalcPayload, buildRoomDraftsForCalculate, runLocalFromDrafts]);
 
   const buildSubmitPayload = useCallback(() => {
     return {
@@ -619,27 +461,6 @@ export default function InternalEstimateApp() {
       quote_status: "testing_review"
     };
   }, [buildCalcPayload, customerName, email, phone, projectType, projectName, projectAddress, city, state, branch, salesRep, enteredBy]);
-
-  const refreshLibrary = useCallback(async () => {
-    if (!sessionToken) {
-      setQuoteLibrary([]);
-      return;
-    }
-    setLibraryBusy(true);
-    setLibraryError(null);
-    try {
-      const raw = (await apiGetJson("/api/internal-quotes", sessionToken)) as { quotes?: unknown[] };
-      setQuoteLibrary(Array.isArray(raw.quotes) ? (raw.quotes as Array<Record<string, unknown>>) : []);
-    } catch (e: unknown) {
-      setLibraryError(e instanceof ApiError ? e.message : String(e));
-    } finally {
-      setLibraryBusy(false);
-    }
-  }, [sessionToken]);
-
-  useEffect(() => {
-    void refreshLibrary();
-  }, [refreshLibrary]);
 
   const handleSubmit = useCallback(async () => {
     setSubmitBusy(true);
@@ -669,7 +490,6 @@ export default function InternalEstimateApp() {
         if (Array.isArray(raw.warnings) && raw.warnings.length) {
           setSubmitMsg((prev) => `${prev} ${(raw.warnings as string[]).join(" ")}`);
         }
-        void refreshLibrary();
       } else {
         setSubmitMsg(String(raw.error || "Something went wrong"));
         setSubmitPreview(JSON.stringify(raw, null, 2));
@@ -693,7 +513,7 @@ export default function InternalEstimateApp() {
     } finally {
       setSubmitBusy(false);
     }
-  }, [sessionToken, buildSubmitPayload, refreshLibrary]);
+  }, [sessionToken, buildSubmitPayload]);
 
   const backendHint = config.backendBaseUrl;
   const hasInternalSummary = apiPartner?.totals != null || demoResult != null;
@@ -711,7 +531,7 @@ export default function InternalEstimateApp() {
     if (!drafts.length) {
       return {
         empty: true as const,
-        method: workflowLabel(quoteWorkflow),
+        method: workflowLabel(INTERNAL_ESTIMATE_WORKFLOW),
         totalSf: 0,
         counterSf: 0,
         splashSf: 0,
@@ -722,13 +542,13 @@ export default function InternalEstimateApp() {
     const totalSf = round2(totals.counter + totals.splash + totals.fhb);
     return {
       empty: false as const,
-      method: workflowLabel(quoteWorkflow),
+      method: workflowLabel(INTERNAL_ESTIMATE_WORKFLOW),
       totalSf,
       counterSf: totals.counter,
       splashSf: totals.splash,
       fhbSf: totals.fhb
     };
-  }, [buildRoomDraftsForCalculate, quoteWorkflow, projectType]);
+  }, [buildRoomDraftsForCalculate, projectType]);
 
   const readinessSnapshot = useMemo(() => {
     const missing: string[] = [];
@@ -741,24 +561,10 @@ export default function InternalEstimateApp() {
     const warnings: string[] = [];
     if (colorTbd) {
       warnings.push("Color marked TBD — confirm before Sent/Sold when you have a selection.");
-    } else if (!quoteDefaultCatalogId && quoteWorkflow !== "room_by_room") {
-      warnings.push("No default catalog color — room colors or TBD is fine for internal drafts.");
     }
     const score = Math.max(0, Math.min(100, 100 - missing.length * 14));
     return { missing, warnings, score, readyForReview: missing.length === 0 };
-  }, [
-    accountName,
-    salesRep,
-    customerName,
-    projectName,
-    projectAddress,
-    city,
-    state,
-    scopePreview,
-    colorTbd,
-    quoteDefaultCatalogId,
-    quoteWorkflow
-  ]);
+  }, [accountName, salesRep, customerName, projectName, projectAddress, city, state, scopePreview, colorTbd]);
 
   const customLinePreviewTotals = useMemo(() => {
     let sum = 0;
@@ -775,59 +581,6 @@ export default function InternalEstimateApp() {
     }
     return round2(sum);
   }, [customLineRows]);
-
-  const guidedPreview = useMemo(() => {
-    if (quoteWorkflow !== "guided_shape") return null;
-    if (guidedUseAdvanced) {
-      const d: RoomDraft[] = [
-        syntheticRoomForWorkflow(
-          "guided_shape",
-          materialGroup,
-          { counter: 0, splash: 0 },
-          { wallFt: 0, splashIn: STANDARD_BACKSPLASH_HEIGHT_IN, islandL: 0, islandW: 0 },
-          guidedProjectPieces
-        )
-      ];
-      const { rooms } = calculateAllRoomDrafts(d, projectType);
-      const m = rooms[0];
-      return {
-        counter: m.counter,
-        splash: m.splash,
-        fhb: m.fhb,
-        total: m.totalSf,
-        lines: m.details,
-        confidence: CONFIDENCE_COPY
-      };
-    }
-    const a = computeGuidedSimpleAreas(guidedPreset, guidedSimpleForm);
-    return {
-      counter: a.counter,
-      splash: a.splash,
-      fhb: a.fhb,
-      total: round2(a.counter + a.splash + a.fhb),
-      lines: a.lines,
-      confidence: CONFIDENCE_COPY
-    };
-  }, [
-    quoteWorkflow,
-    guidedUseAdvanced,
-    guidedPreset,
-    guidedSimpleForm,
-    materialGroup,
-    guidedProjectPieces,
-    projectType
-  ]);
-
-  const methodCards = useMemo(() => {
-    const all = [
-      { id: "guided_shape" as const, title: "Guided shape (default)", sub: "Pick a preset, then enter dimensions — best for most jobs." },
-      { id: "manual_sqft" as const, title: "Manual sq ft", sub: "When you already have countertop and backsplash square footage." },
-      { id: "room_by_room" as const, title: "Room-by-room / advanced", sub: "Multiple rooms, materials, and add-ons like the ESF prototype." },
-      { id: "upload_plans" as const, title: "Upload plans / AI takeoff", sub: "Coming soon — upload drawings and let eliteOS prepare measurements for review." },
-      { id: "visualize" as const, title: "Visualize", sub: "Coming soon — build a simple kitchen layout tied directly to your quote." }
-    ] as const;
-    return all.map((c) => ({ ...c, disabled: c.id === "upload_plans" || c.id === "visualize" }));
-  }, []);
 
   const quoteLibraryUrl = useMemo(() => {
     const raw = String(import.meta.env.VITE_HEAD_URL_QUOTE_LIBRARY ?? "").trim();
@@ -914,12 +667,6 @@ export default function InternalEstimateApp() {
           if (j.account_contact_phone != null) setAccountPhone(String(j.account_contact_phone));
           if (j.account_contact_email != null) setAccountEmail(String(j.account_contact_email));
         }
-        const wf = String(iu.quote_workflow || "");
-        if (wf && ["manual_sqft", "guided_shape", "room_by_room", "upload_plans", "visualize"].includes(wf)) {
-          setQuoteWorkflow(wf as QuoteWorkflowMethod);
-        } else {
-          gaps.push("Measurement workflow (defaults kept)");
-        }
         const imb = String(iu.internal_material_basis || "");
         if (imb === "direct" || imb === "wholesale") setInternalPricingMode(imb);
         const roomsPayload = iu.estimate_rooms;
@@ -957,7 +704,13 @@ export default function InternalEstimateApp() {
           );
         }
         const isp = snap.inputSummary as Record<string, unknown> | undefined;
-        if (isp?.materialGroup) setMaterialGroup(String(isp.materialGroup));
+        if (isp?.materialGroup) {
+          const g = String(isp.materialGroup);
+          setRoomDrafts((prev) => {
+            if (!prev.length) return [createEstimatorRoom(g)];
+            return prev.map((r, i) => (i === 0 ? { ...r, materialGroup: g } : r));
+          });
+        }
         setLoadedFromLibrary(true);
         setHydrationGaps(gaps);
       } catch (e) {
@@ -970,270 +723,168 @@ export default function InternalEstimateApp() {
   }, [sessionToken, urlQuoteId]);
 
   return (
-    <div className="page">
-      <header className="hero">
-        <div className="hero-brand">
-          <img className="logo" src={EOS_LOGO_URL} alt="Elite Stone Fabrication" />
-          <div className="hero-titles">
-            <h1 className="title">eliteOS Internal Estimate Head</h1>
-            <p className="subtitle">Staff-only workspace — build internal quotes with guided measurements and live pricing.</p>
-            <p className="hero-tagline">
-              eliteOS Internal Estimate Head — Direct / Wholesale economics, not for homeowner-facing use.
-            </p>
+    <div className="page page-internal-estimate">
+      <header className="ie-header-compact">
+        <div className="ie-header-row">
+          <div className="ie-header-brand">
+            <img className="ie-logo-sm" src={EOS_LOGO_URL} alt="Elite Stone Fabrication" />
+            <div>
+              <h1 className="ie-header-title">eliteOS Internal Estimate Head</h1>
+              <p className="ie-header-sub">Staff estimating workspace</p>
+            </div>
           </div>
-        </div>
-        <div className="hero-badges">
-          <span className="badge badge-demo">Staff tool</span>
-          <span className="badge badge-preview">Preview · Not production</span>
+          <div className="ie-header-actions">
+            <a className="btn secondary btn-sm" href={`${quoteLibraryUrl}/`} target="_blank" rel="noreferrer">
+              Open Quote Library
+            </a>
+            {supabase ? (
+              sessionToken ? (
+                <>
+                  <span className="pill pill-live">Signed in</span>
+                  <button type="button" className="btn secondary btn-sm" onClick={() => void signOut()}>
+                    Sign out
+                  </button>
+                </>
+              ) : (
+                <span className="muted small">Sign in to save to Quote Library</span>
+              )
+            ) : null}
+          </div>
         </div>
       </header>
 
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between" }}>
-          <div>
-            <a className="btn secondary" href={`${quoteLibraryUrl}/`} target="_blank" rel="noreferrer">
-              Open Quote Library
-            </a>
-            <span className="muted" style={{ marginLeft: 12 }}>
-              Search quotes by account, status, and handoff (new tab).
-            </span>
-          </div>
-        </div>
-        {urlQuoteId ? (
-          <div style={{ marginTop: 12 }}>
-            {loadedFromLibrary ? (
-              <p className="ok" style={{ marginBottom: 8 }}>
-                Loaded from Quote Library (quoteId in URL). Review fields below — save currently creates a <strong>new</strong> saved
-                estimate with a new reference number.
-              </p>
-            ) : (
-              <p className="muted" style={{ marginBottom: 8 }}>
-                <strong>quoteId in URL:</strong> {urlQuoteId}. Loading quote…
-              </p>
-            )}
-            {hydrationGaps.length ? (
-              <ul className="muted small" style={{ marginTop: 0 }}>
-                {hydrationGaps.map((g) => (
-                  <li key={g}>{g}</li>
-                ))}
-              </ul>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
-
-      <div className="status-strip">
-        <p className="status-strip-main">
-          {liveApi ? (
-            <>
-              <span className="pill pill-live">Live API</span> Signed in — calculations use eliteOS when available.
-            </>
+      {urlQuoteId ? (
+        <div className="card ie-card-tight ie-url-banner">
+          {loadedFromLibrary ? (
+            <p className="ok" style={{ margin: 0 }}>
+              Loaded from Quote Library. Review fields — saving creates a <strong>new</strong> estimate reference.
+            </p>
           ) : (
-            <>
-              <span className="pill pill-demo">Demo mode active</span> Sample quotes run in your browser until you sign in.
-            </>
+            <p className="muted" style={{ margin: 0 }}>
+              Loading quote…
+            </p>
           )}
-        </p>
-        <p className="status-strip-sub">
-          {liveApi
-            ? "Live quote saving and tracking use your configured eliteOS Brain / Supabase project."
-            : "This preview can calculate sample quotes locally. Live quote saving and tracking will connect to eliteOS Brain / Supabase when production is configured."}
-        </p>
-        <p className="status-strip-meta" aria-label="Backend base URL">
-          {backendHint}
-        </p>
-      </div>
+          {hydrationGaps.length ? (
+            <ul className="muted small" style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+              {hydrationGaps.map((g) => (
+                <li key={g}>{g}</li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
 
-      <nav className="ie-workflow-nav card" aria-label="Estimate workflow sections">
-        <p className="muted small" style={{ margin: "0 0 10px" }}>
-          Jump to a section — work in any order; this is not a locked wizard.
-        </p>
-        <div className="ie-workflow-pills">
+      <div className="ie-app-shell">
+        <nav className="ie-rail" aria-label="Estimate workflow">
           {WORKFLOW_SECTIONS.map((s) => (
             <button
               key={s.id}
               type="button"
-              className="ie-pill"
+              className="ie-rail-link"
               onClick={() => document.getElementById(s.id)?.scrollIntoView({ behavior: "smooth", block: "start" })}
             >
               {s.label}
             </button>
           ))}
-        </div>
-      </nav>
+        </nav>
 
-      <div className="layout">
-        <div className="main-col">
-          <section className="card prototype-scope-banner">
-            <h2>eliteOS Internal Estimate Head</h2>
-            <p className="muted" style={{ marginTop: 0 }}>
-              This app is separate from the <strong>public quote</strong> at <code>quote.eliteosfab.com</code>. It uses{" "}
-              <code>/api/internal-quotes/*</code> with Supabase auth and quote-head access on the backend. See{" "}
-              <code>docs/quote-platform/quote-heads-split-plan.md</code>.
-            </p>
-          </section>
-          {supabase ? (
-            <section className="card">
-              <h2>Account</h2>
-              <p className="muted">Sign in to run live internal calculations and save quotes to the internal library.</p>
-              {sessionToken ? (
-                <div className="row">
-                  <span className="pill pill-live">Signed in</span>
-                  <button type="button" className="btn secondary" onClick={() => void signOut()}>
-                    Sign out
-                  </button>
-                </div>
-              ) : (
-                <div className="grid2">
-                  <label>
-                    Email
-                    <input value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} autoComplete="username" />
-                  </label>
-                  <label>
-                    Password
-                    <input
-                      type="password"
-                      value={authPassword}
-                      onChange={(e) => setAuthPassword(e.target.value)}
-                      autoComplete="current-password"
-                    />
-                  </label>
-                  <button type="button" className="btn primary" disabled={authBusy} onClick={() => void signIn()}>
-                    {authBusy ? "Signing in…" : "Sign in"}
-                  </button>
-                </div>
-              )}
-              {authError ? <p className="error">{authError}</p> : null}
-            </section>
-          ) : (
-            <section className="card">
-              <h2>Demo mode active</h2>
-              <p className="muted">
-                This preview can calculate sample quotes locally. Live quote saving and tracking will connect to eliteOS
-                Brain / Supabase when production is configured.
-              </p>
-            </section>
-          )}
-
-          {sessionToken ? (
-            <section className="card">
-              <h2>Internal quote library</h2>
-              <p className="muted small">
-                eliteOS Brain — <code>quote_source: internal_quote</code>. Reps/branches are short-term hardcoded; later
-                admin-configurable.
-              </p>
-              {libraryError ? <p className="error">{libraryError}</p> : null}
-              {libraryBusy ? <p className="muted">Loading…</p> : null}
-              <div style={{ overflowX: "auto", marginTop: 10 }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-                  <thead>
-                    <tr>
-                      <th style={{ textAlign: "left", padding: "6px 8px" }}>Quote #</th>
-                      <th style={{ textAlign: "left", padding: "6px 8px" }}>Customer</th>
-                      <th style={{ textAlign: "left", padding: "6px 8px" }}>Project</th>
-                      <th style={{ textAlign: "left", padding: "6px 8px" }}>Branch</th>
-                      <th style={{ textAlign: "left", padding: "6px 8px" }}>Rep</th>
-                      <th style={{ textAlign: "left", padding: "6px 8px" }}>Status</th>
-                      <th style={{ textAlign: "right", padding: "6px 8px" }}>Total</th>
-                      <th style={{ padding: "6px 8px" }} />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {quoteLibrary.map((q) => (
-                      <tr key={String(q.id)}>
-                        <td style={{ padding: "6px 8px" }}>{String(q.quote_number ?? "")}</td>
-                        <td style={{ padding: "6px 8px" }}>{String(q.customer_name ?? "")}</td>
-                        <td style={{ padding: "6px 8px" }}>{String(q.project_name ?? "")}</td>
-                        <td style={{ padding: "6px 8px" }}>{String(q.branch ?? "")}</td>
-                        <td style={{ padding: "6px 8px" }}>{String(q.sales_rep ?? "")}</td>
-                        <td style={{ padding: "6px 8px" }}>{String(q.quote_status ?? "")}</td>
-                        <td style={{ padding: "6px 8px", textAlign: "right" }}>
-                          {q.grand_total != null ? `$${Number(q.grand_total).toFixed(2)}` : ""}
-                        </td>
-                        <td style={{ padding: "6px 8px" }}>
-                          <button
-                            type="button"
-                            className="btn secondary"
-                            onClick={() => {
-                              void (async () => {
-                                try {
-                                  const raw = (await apiGetJson(`/api/internal-quotes/${String(q.id)}`, sessionToken)) as Record<
-                                    string,
-                                    unknown
-                                  >;
-                                  setSubmitMsg(`Opened quote ${String(q.quote_number ?? "")} — snapshot in preview.`);
-                                  setSubmitPreview(JSON.stringify(raw, null, 2));
-                                } catch (e: unknown) {
-                                  setSubmitMsg(e instanceof ApiError ? e.message : String(e));
-                                }
-                              })();
-                            }}
-                          >
-                            Open
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+        <main className="ie-main">
+          {supabase && !sessionToken ? (
+            <div className="card ie-card-tight ie-signin-row">
+              <div className="ie-signin-fields">
+                <label>
+                  Email
+                  <input value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} autoComplete="username" />
+                </label>
+                <label>
+                  Password
+                  <input
+                    type="password"
+                    value={authPassword}
+                    onChange={(e) => setAuthPassword(e.target.value)}
+                    autoComplete="current-password"
+                  />
+                </label>
+                <button type="button" className="btn primary" disabled={authBusy} onClick={() => void signIn()}>
+                  {authBusy ? "Signing in…" : "Sign in"}
+                </button>
               </div>
-              {!libraryBusy && quoteLibrary.length === 0 ? (
-                <p className="muted small" style={{ marginTop: 8 }}>
-                  No saved internal quotes yet.
-                </p>
-              ) : null}
-              <button type="button" className="btn secondary" style={{ marginTop: 10 }} onClick={() => void refreshLibrary()}>
-                Refresh list
-              </button>
-            </section>
+              {authError ? <p className="error" style={{ margin: "8px 0 0" }}>{authError}</p> : null}
+            </div>
           ) : null}
 
-          <section className="card">
-            <p className="callout internal">
-              <strong>Internal only</strong> — Direct / Wholesale material pricing for ESF staff. Monday sync uses{" "}
-              <code>MONDAY_INTERNAL_*</code> configuration only; do not use public board settings here.
+          <div className="card ie-card-tight ie-live-strip">
+            <p style={{ margin: 0, fontWeight: 600, fontSize: "0.92rem" }}>
+              {liveApi ? (
+                <>
+                  <span className="pill pill-live">Live</span> Signed in — calculations use eliteOS when available.
+                </>
+              ) : (
+                <>
+                  <span className="pill pill-demo">Offline sample</span> Calculate runs locally until you sign in.
+                </>
+              )}
             </p>
-          </section>
+          </div>
+
+          <div className="card ie-card-tight ie-pricing-bar">
+            <span className="ie-pricing-label">Pricing mode</span>
+            <div className="ie-pricing-toggle" role="group" aria-label="Pricing mode">
+              <button
+                type="button"
+                className={internalPricingMode === "wholesale" ? "on" : ""}
+                onClick={() => setInternalPricingMode("wholesale")}
+              >
+                Wholesale
+              </button>
+              <button
+                type="button"
+                className={internalPricingMode === "direct" ? "on" : ""}
+                onClick={() => setInternalPricingMode("direct")}
+              >
+                Direct / Retail
+              </button>
+            </div>
+          </div>
 
           <section id="sec-job" className="card">
-            <h2>1 · Job Info</h2>
-            <p className="muted small">Account and job context (not homeowner-facing copy).</p>
-            <div className="grid3">
+            <h2 className="ie-section-title">Job Info</h2>
+            <div className="grid3 ie-job-grid">
               <label>
-                Account <span className="muted">(required — use Direct if no dealer)</span>
-                <input value={accountName} onChange={(e) => setAccountName(e.target.value)} placeholder="Direct or account name" />
+                Account
+                <input value={accountName} onChange={(e) => setAccountName(e.target.value)} placeholder="Direct" />
               </label>
               <label>
                 Account contact phone
-                <input value={accountPhone} onChange={(e) => setAccountPhone(e.target.value)} placeholder="Optional" />
+                <input value={accountPhone} onChange={(e) => setAccountPhone(e.target.value)} placeholder="Phone" />
               </label>
               <label>
                 Account contact email
-                <input value={accountEmail} onChange={(e) => setAccountEmail(e.target.value)} placeholder="Optional" />
+                <input value={accountEmail} onChange={(e) => setAccountEmail(e.target.value)} placeholder="Email" />
               </label>
               <label>
                 Customer
-                <input value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Customer or site name" />
+                <input value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Customer or site" />
               </label>
               <label>
                 Customer phone
-                <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Optional" />
+                <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone" />
               </label>
               <label>
                 Customer email
-                <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Optional" />
+                <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" />
               </label>
               <label>
                 Elite job name
-                <input value={projectName} onChange={(e) => setProjectName(e.target.value)} placeholder="e.g. Smith kitchen" />
+                <input value={projectName} onChange={(e) => setProjectName(e.target.value)} placeholder="Job name" />
               </label>
               <label>
                 Project address
-                <input value={projectAddress} onChange={(e) => setProjectAddress(e.target.value)} placeholder="Street, city, or full address" />
+                <input value={projectAddress} onChange={(e) => setProjectAddress(e.target.value)} placeholder="Street address" />
               </label>
               <label>
                 City
-                <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="Dyersville" />
+                <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="City" />
               </label>
               <label>
                 State
@@ -1255,7 +906,7 @@ export default function InternalEstimateApp() {
               </label>
               <label>
                 Salesperson <span className="muted">(required)</span>
-                <select value={salesRep} onChange={(e) => setSalesRep(e.target.value)}>
+                <select value={salesRep} onChange={(e) => setSalesRep(e.target.value)} required>
                   <option value="">— Select —</option>
                   {INTERNAL_SALES_REPS.map((r) => (
                     <option key={r} value={r}>
@@ -1266,703 +917,38 @@ export default function InternalEstimateApp() {
               </label>
               <label>
                 Entered by
-                <input value={enteredBy} onChange={(e) => setEnteredBy(e.target.value)} placeholder="Defaults from sign-in when empty" />
+                <input value={enteredBy} onChange={(e) => setEnteredBy(e.target.value)} placeholder="Defaults from sign-in" />
               </label>
             </div>
           </section>
 
           <section id="sec-rooms" className="card">
-            <h2>2 · Room / Area, scope, and materials</h2>
-            <p className="muted">
-              <strong>Guided shape</strong> is the default path. Use <strong>Manual sq ft</strong> when you already have totals, or{" "}
-              <strong>Room-by-room</strong> for multiple rooms. Rapid linear is not used in this head.
-            </p>
-            <div className="quote-method-grid" style={{ marginBottom: 18 }}>
-              {methodCards.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  disabled={c.disabled}
-                  className={`quote-method-card ${quoteWorkflow === c.id ? "on" : ""} ${c.disabled ? "disabled" : ""}`}
-                  onClick={() => !c.disabled && setQuoteWorkflow(c.id)}
-                >
-                  <span className="qmc-title">{c.title}</span>
-                  <span className="qmc-sub">{c.sub}</span>
-                  {c.disabled ? <span className="qmc-badge">Soon</span> : null}
-                </button>
-              ))}
-            </div>
-            <h3 className="h3" id="sec-materials">
-              Materials &amp; colors
-            </h3>
+            <h2 className="ie-section-title">Rooms / Areas</h2>
             <p className="muted small">
-              Price group is required for single-flow quotes. Exact catalog color is optional — check Color TBD if you are not picking one yet.
+              Build each room: guided dimensions or manual sq ft, price group, optional catalog color or Color TBD in the picker.
             </p>
-            <div className="grid3" style={{ marginBottom: 14 }}>
-              <label>
-                Internal material pricing
-                <select
-                  value={internalPricingMode}
-                  onChange={(e) => setInternalPricingMode(e.target.value === "direct" ? "direct" : "wholesale")}
-                >
-                  <option value="wholesale">Wholesale (prototype tiers)</option>
-                  <option value="direct">Direct (ESF Direct $/sf)</option>
-                </select>
-              </label>
-              <label>
-                Primary material group (single-flow and defaults)
-                <select value={materialGroup} onChange={(e) => setMaterialGroup(e.target.value)}>
-                  {MATERIAL_GROUPS.map((g) => (
-                    <option key={g} value={g}>
-                      {g}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {eliteColors.length ? (
-                <label>
-                  Optional quote default Elite Program color
-                  <select value={quoteDefaultCatalogId} onChange={(e) => setQuoteDefaultCatalogId(e.target.value)}>
-                    <option value="">— None —</option>
-                    {eliteColors.slice(0, 800).map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.priceGroupLabel} · {c.colorName}
-                        {c.supplier ? ` (${c.supplier})` : ""}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : null}
-              <label className="check" style={{ gridColumn: "1 / -1" }}>
-                <input
-                  type="checkbox"
-                  checked={colorTbd}
-                  onChange={(e) => {
-                    setColorTbd(e.target.checked);
-                    if (e.target.checked) setQuoteDefaultCatalogId("");
-                  }}
-                />
-                Color TBD (no default catalog color for this draft)
-              </label>
-            </div>
-            {colorCatalogWarnings.length ? (
-              <p className="muted small" style={{ marginTop: 8 }}>
-                {colorCatalogWarnings.join(" ")}
-              </p>
-            ) : null}
-
-            <details
-              style={{ marginBottom: 14 }}
-              open={bsMaterialOverrideOpen}
-              onToggle={(e) => setBsMaterialOverrideOpen((e.target as HTMLDetailsElement).open)}
-            >
-              <summary>Backsplash material override (optional)</summary>
-              <p className="muted small" style={{ marginTop: 8 }}>
-                Backsplash usually inherits the room material. In <strong>Room-by-room</strong> mode, turn on piece-level overrides on
-                backsplash pieces in the builder when a wall needs a different group/color.
+            <details className="ie-future-tools">
+              <summary>Future tools</summary>
+              <p className="muted small" style={{ margin: "8px 0 0" }}>
+                Upload plans / AI takeoff and Visualize are on the roadmap — not in this workspace yet.
               </p>
             </details>
-
-            <h3 className="h3">Measurements — Room / Area</h3>
-            <p className="muted small">
-              Pick a workflow at the top of this card, then fill dimensions below.
-            </p>
-
-            {quoteWorkflow === "room_by_room" ? (
-              <RoomScopeBuilder
-                rooms={roomDrafts}
-                onRoomsChange={setRoomDrafts}
-                materialGroups={MATERIAL_GROUPS}
-                eliteProgramColors={eliteColors}
-                hideRapidLinear
-              />
-            ) : null}
-
-            {quoteWorkflow === "manual_sqft" ? (
-              <div className="grid3">
-                <label>
-                  Countertop sq ft
-                  <input value={manualCt} onChange={(e) => setManualCt(e.target.value)} inputMode="decimal" />
-                </label>
-                <label>
-                  Backsplash sq ft
-                  <input value={manualBs} onChange={(e) => setManualBs(e.target.value)} inputMode="decimal" />
-                </label>
-              </div>
-            ) : null}
-
-            {quoteWorkflow === "guided_shape" ? (
-              <div className="guided-layout">
-                <p className="muted small">
-                  Start with a simple layout. Use the advanced section only if you want to model each piece like the full ESF
-                  prototype.
-                </p>
-
-                <h3 className="h3 guided-preset-heading">Pick the shape that looks closest to your project</h3>
-                <div className="preset-card-grid">
-                  {INTERNAL_GUIDED_PRESETS.map((c) => (
-                    <button
-                      key={c.id}
-                      type="button"
-                      className={`preset-shape-card ${guidedPreset === c.id ? "on" : ""}`}
-                      onClick={() => setGuidedPreset(c.id)}
-                    >
-                      {c.title}
-                      {c.hint && guidedPreset === c.id ? <span className="muted small" style={{ display: "block", marginTop: 4 }}>{c.hint}</span> : null}
-                    </button>
-                  ))}
-                </div>
-
-                {guidedPreset === "not_sure" ? (
-                  <p className="callout guided-not-sure">
-                    No problem. Enter your best guess or use the square-foot option. Elite can help verify it later.
-                  </p>
-                ) : null}
-
-                {guidedPreset && guidedPreset !== "not_sure" ? (
-                  <div className="guided-simple-fields">
-                    {guidedPreset === "straight" ? (
-                      <div className="grid3">
-                        <label>
-                          Main counter length (in)
-                          <input
-                            value={guidedSimpleForm.mainRunIn}
-                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, mainRunIn: e.target.value }))}
-                            inputMode="decimal"
-                          />
-                        </label>
-                        <label>
-                          Backsplash height (in)
-                          <input
-                            value={guidedSimpleForm.splashHeightIn}
-                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, splashHeightIn: e.target.value }))}
-                            inputMode="decimal"
-                          />
-                        </label>
-                        <label>
-                          Counter depth (in)
-                          <input
-                            value={guidedSimpleForm.counterDepthIn}
-                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, counterDepthIn: e.target.value }))}
-                            inputMode="decimal"
-                          />
-                        </label>
-                      </div>
-                    ) : null}
-
-                    {guidedPreset === "l_shape" ? (
-                      <div className="grid3">
-                        <label>
-                          Long wall (in)
-                          <input
-                            value={guidedSimpleForm.longWallIn}
-                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, longWallIn: e.target.value }))}
-                            inputMode="decimal"
-                          />
-                        </label>
-                        <label>
-                          Return (in)
-                          <input
-                            value={guidedSimpleForm.shortWallIn}
-                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, shortWallIn: e.target.value }))}
-                            inputMode="decimal"
-                          />
-                        </label>
-                        <label>
-                          Backsplash height (in)
-                          <input
-                            value={guidedSimpleForm.splashHeightIn}
-                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, splashHeightIn: e.target.value }))}
-                            inputMode="decimal"
-                          />
-                        </label>
-                        <label>
-                          Counter depth (in)
-                          <input
-                            value={guidedSimpleForm.counterDepthIn}
-                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, counterDepthIn: e.target.value }))}
-                            inputMode="decimal"
-                          />
-                        </label>
-                      </div>
-                    ) : null}
-
-                    {guidedPreset === "u_shape" ? (
-                      <div className="grid3">
-                        <label>
-                          Left run (in)
-                          <input
-                            value={guidedSimpleForm.leftWallIn}
-                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, leftWallIn: e.target.value }))}
-                            inputMode="decimal"
-                          />
-                        </label>
-                        <label>
-                          Back run (in)
-                          <input
-                            value={guidedSimpleForm.backWallIn}
-                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, backWallIn: e.target.value }))}
-                            inputMode="decimal"
-                          />
-                        </label>
-                        <label>
-                          Right run (in)
-                          <input
-                            value={guidedSimpleForm.rightWallIn}
-                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, rightWallIn: e.target.value }))}
-                            inputMode="decimal"
-                          />
-                        </label>
-                        <label>
-                          Backsplash height (in)
-                          <input
-                            value={guidedSimpleForm.splashHeightIn}
-                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, splashHeightIn: e.target.value }))}
-                            inputMode="decimal"
-                          />
-                        </label>
-                        <label>
-                          Counter depth (in)
-                          <input
-                            value={guidedSimpleForm.counterDepthIn}
-                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, counterDepthIn: e.target.value }))}
-                            inputMode="decimal"
-                          />
-                        </label>
-                      </div>
-                    ) : null}
-
-                    {guidedPreset === "galley" ? (
-                      <div className="grid3">
-                        <label>
-                          Side 1 length (in)
-                          <input
-                            value={guidedSimpleForm.side1In}
-                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, side1In: e.target.value }))}
-                            inputMode="decimal"
-                          />
-                        </label>
-                        <label>
-                          Side 2 length (in)
-                          <input
-                            value={guidedSimpleForm.side2In}
-                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, side2In: e.target.value }))}
-                            inputMode="decimal"
-                          />
-                        </label>
-                        <label>
-                          Backsplash height (in)
-                          <input
-                            value={guidedSimpleForm.splashHeightIn}
-                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, splashHeightIn: e.target.value }))}
-                            inputMode="decimal"
-                          />
-                        </label>
-                        <label>
-                          Counter depth (in)
-                          <input
-                            value={guidedSimpleForm.counterDepthIn}
-                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, counterDepthIn: e.target.value }))}
-                            inputMode="decimal"
-                          />
-                        </label>
-                      </div>
-                    ) : null}
-
-                    {guidedPreset === "island" ? (
-                      <div className="grid3">
-                        <label>
-                          Island length (in)
-                          <input
-                            value={guidedSimpleForm.islandLengthIn}
-                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, islandLengthIn: e.target.value }))}
-                            inputMode="decimal"
-                          />
-                        </label>
-                        <label>
-                          Island width (in)
-                          <input
-                            value={guidedSimpleForm.islandWidthIn}
-                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, islandWidthIn: e.target.value }))}
-                            inputMode="decimal"
-                          />
-                        </label>
-                      </div>
-                    ) : null}
-
-                    {guidedPreset === "backsplash_piece" ? (
-                      <div className="grid3">
-                        <label>
-                          Backsplash run length (in)
-                          <input
-                            value={guidedSimpleForm.mainRunIn}
-                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, mainRunIn: e.target.value }))}
-                            inputMode="decimal"
-                          />
-                        </label>
-                        <label>
-                          Backsplash height (in)
-                          <input
-                            value={guidedSimpleForm.splashHeightIn}
-                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, splashHeightIn: e.target.value }))}
-                            inputMode="decimal"
-                          />
-                        </label>
-                      </div>
-                    ) : null}
-
-                    {guidedPreset === "waterfall" ? (
-                      <div className="grid3">
-                        <label>
-                          Waterfall edge length (in)
-                          <input
-                            value={guidedSimpleForm.waterfallEdgeIn}
-                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, waterfallEdgeIn: e.target.value }))}
-                            inputMode="decimal"
-                          />
-                        </label>
-                        <label>
-                          Drop height (in)
-                          <input
-                            value={guidedSimpleForm.waterfallDropIn}
-                            onChange={(e) => setGuidedSimpleForm((f) => ({ ...f, waterfallDropIn: e.target.value }))}
-                            inputMode="decimal"
-                          />
-                        </label>
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-
-                {guidedPreview ? (
-                  <div className="measure-preview-card">
-                    <h4 className="measure-preview-title">Measurement preview</h4>
-                    <div className="measure-preview-metrics">
-                      <div>
-                        <span className="muted small">Estimated countertop sq ft</span>
-                        <strong>{guidedPreview.counter.toFixed(2)}</strong>
-                      </div>
-                      <div>
-                        <span className="muted small">Estimated backsplash sq ft</span>
-                        <strong>{guidedPreview.splash.toFixed(2)}</strong>
-                      </div>
-                      {"fhb" in guidedPreview && guidedPreview.fhb > 0 ? (
-                        <div>
-                          <span className="muted small">Full-height / waterfall (material sf)</span>
-                          <strong>{guidedPreview.fhb.toFixed(2)}</strong>
-                        </div>
-                      ) : null}
-                      <div>
-                        <span className="muted small">Estimated total sq ft</span>
-                        <strong>{guidedPreview.total.toFixed(2)}</strong>
-                      </div>
-                    </div>
-                    {guidedPreview.lines.length ? (
-                      <ul className="measure-preview-lines">
-                        {guidedPreview.lines.map((ln, i) => (
-                          <li key={i}>{ln}</li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="muted small">Enter dimensions to see a plain-language summary of how we estimated area.</p>
-                    )}
-                    <p className="confidence-label">{guidedPreview.confidence}</p>
-                  </div>
-                ) : null}
-
-                {guidedPreview && quoteWorkflow === "guided_shape" && guidedUseAdvanced ? (
-                  <InternalGuidedShapePreview
-                    pieces={guidedProjectPieces}
-                    pieceCount={guidedProjectPieces.filter((x) => x.lengthIn > 0 && x.depthIn > 0).length}
-                    counterSqft={guidedPreview.counter}
-                    splashSqft={guidedPreview.splash}
-                  />
-                ) : null}
-
-                <label className="check guided-advanced-toggle">
-                  <input
-                    type="checkbox"
-                    checked={guidedUseAdvanced}
-                    onChange={(e) => setGuidedUseAdvanced(e.target.checked)}
-                  />
-                  Use piece-by-piece measurements for this quote instead of the simple layout above
-                </label>
-
-                <details
-                  className="advanced-pieces-details"
-                  open={guidedAdvancedOpen}
-                  onToggle={(e) => setGuidedAdvancedOpen((e.target as HTMLDetailsElement).open)}
-                >
-                  <summary>Advanced: edit individual pieces</summary>
-                  <p className="muted small">
-                    Add counter, backsplash, or full-height pieces. Rectangle and triangle shapes are supported.
-                  </p>
-                  {guidedProjectPieces.map((p) => (
-                    <div key={p.id} className="piece-row grid3">
-                      <label>
-                        Label
-                        <input
-                          value={p.name}
-                          onChange={(e) =>
-                            setGuidedProjectPieces((prev) => prev.map((x) => (x.id === p.id ? { ...x, name: e.target.value } : x)))
-                          }
-                        />
-                      </label>
-                      <label>
-                        Type
-                        <select
-                          value={p.pieceType}
-                          onChange={(e) =>
-                            setGuidedProjectPieces((prev) =>
-                              prev.map((x) =>
-                                x.id === p.id ? { ...x, pieceType: e.target.value as GuidedPiece["pieceType"] } : x
-                              )
-                            )
-                          }
-                        >
-                          <option value="counter">Counter</option>
-                          <option value="splash">Backsplash</option>
-                          <option value="fhb">Full height</option>
-                        </select>
-                      </label>
-                      <label>
-                        Shape
-                        <select
-                          value={p.shape}
-                          onChange={(e) =>
-                            setGuidedProjectPieces((prev) =>
-                              prev.map((x) => (x.id === p.id ? { ...x, shape: e.target.value as GuidedPiece["shape"] } : x))
-                            )
-                          }
-                        >
-                          <option value="rect">Rectangle</option>
-                          <option value="tri">Triangle</option>
-                        </select>
-                      </label>
-                      <label>
-                        Length (in)
-                        <input
-                          type="number"
-                          value={p.lengthIn || ""}
-                          onChange={(e) =>
-                            setGuidedProjectPieces((prev) =>
-                              prev.map((x) => (x.id === p.id ? { ...x, lengthIn: Number(e.target.value) || 0 } : x))
-                            )
-                          }
-                        />
-                      </label>
-                      <label>
-                        Depth / height (in)
-                        <input
-                          type="number"
-                          value={p.depthIn || ""}
-                          onChange={(e) =>
-                            setGuidedProjectPieces((prev) =>
-                              prev.map((x) => (x.id === p.id ? { ...x, depthIn: Number(e.target.value) || 0 } : x))
-                            )
-                          }
-                        />
-                      </label>
-                      {p.pieceType === "counter" ? (
-                        <label className="check" style={{ alignSelf: "end" }}>
-                          <input
-                            type="checkbox"
-                            checked={Boolean(p.addSplash)}
-                            onChange={(e) =>
-                              setGuidedProjectPieces((prev) =>
-                                prev.map((x) => (x.id === p.id ? { ...x, addSplash: e.target.checked } : x))
-                              )
-                            }
-                          />
-                          Add 4″ splash for this piece
-                        </label>
-                      ) : (
-                        <span />
-                      )}
-                      <div className="piece-row-actions">
-                        <button
-                          type="button"
-                          className="btn secondary"
-                          onClick={() => setGuidedProjectPieces((prev) => prev.filter((x) => x.id !== p.id))}
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                  <div className="mode-row piece-add-row">
-                    <button
-                      type="button"
-                      className="btn secondary"
-                      onClick={() =>
-                        setGuidedProjectPieces((prev) => [
-                          ...prev,
-                          {
-                            id: `gp-${Math.random().toString(36).slice(2, 9)}`,
-                            pieceType: "counter",
-                            name: "Counter section",
-                            lengthIn: 0,
-                            depthIn: 25.5,
-                            shape: "rect",
-                            addSplash: false
-                          }
-                        ])
-                      }
-                    >
-                      + Add counter piece
-                    </button>
-                    <button
-                      type="button"
-                      className="btn secondary"
-                      onClick={() =>
-                        setGuidedProjectPieces((prev) => [
-                          ...prev,
-                          {
-                            id: `gp-${Math.random().toString(36).slice(2, 9)}`,
-                            pieceType: "splash",
-                            name: "Backsplash section",
-                            lengthIn: 0,
-                            depthIn: STANDARD_BACKSPLASH_HEIGHT_IN,
-                            shape: "rect"
-                          }
-                        ])
-                      }
-                    >
-                      + Add splash piece
-                    </button>
-                    <button
-                      type="button"
-                      className="btn secondary"
-                      onClick={() =>
-                        setGuidedProjectPieces((prev) => [
-                          ...prev,
-                          {
-                            id: `gp-${Math.random().toString(36).slice(2, 9)}`,
-                            pieceType: "fhb",
-                            name: "Full-height section",
-                            lengthIn: 0,
-                            depthIn: 96,
-                            shape: "rect"
-                          }
-                        ])
-                      }
-                    >
-                      + Add full-height backsplash piece
-                    </button>
-                    <button
-                      type="button"
-                      className="btn secondary"
-                      onClick={() => setGuidedProjectPieces(createDefaultRoom(materialGroup).guidedPieces)}
-                    >
-                      L-shape preset (pieces)
-                    </button>
-                  </div>
-                </details>
-              </div>
-            ) : null}
-
+            <RoomScopeBuilder
+              rooms={roomDrafts}
+              onRoomsChange={setRoomDrafts}
+              materialGroups={MATERIAL_GROUPS}
+              eliteProgramColors={eliteColors}
+              hideRapidLinear
+            />
           </section>
 
           <section id="sec-addons" className="card">
-            <h2>3 · Add-ons &amp; custom items</h2>
+            <h2 className="ie-section-title">Add-ons &amp; Custom Items</h2>
             <p className="muted small">
-              Cutouts use catalog rates. Use <strong>Tear Out</strong> and other presets below instead of a legacy tear-out toggle.
+              Use presets or add custom lines. <strong>Customer-facing</strong> items appear on the estimate; <strong>internal-only</strong>{" "}
+              lines count toward the total but stay out of customer-facing output.
             </p>
-            {quoteWorkflow !== "room_by_room" ? (
-              <>
-                <h3 className="h3">Global add-ons (non — room-by-room)</h3>
-                <div className="grid3">
-                  <label>
-                    Kitchen sink cutouts
-                    <input value={sink} onChange={(e) => setSink(e.target.value)} />
-                  </label>
-                  <label>
-                    Vanity / bar sink cutouts
-                    <input value={bar} onChange={(e) => setBar(e.target.value)} />
-                  </label>
-                  <label>
-                    Cooktop cutouts
-                    <input value={cook} onChange={(e) => setCook(e.target.value)} />
-                  </label>
-                  <label>
-                    Electrical outlet cutouts
-                    <input value={outlet} onChange={(e) => setOutlet(e.target.value)} />
-                  </label>
-                  <label>
-                    ESF stainless sink
-                    <input value={ss} onChange={(e) => setSs(e.target.value)} />
-                  </label>
-                  <label>
-                    Stock Blanco sink
-                    <input value={blanco} onChange={(e) => setBlanco(e.target.value)} />
-                  </label>
-                </div>
-                <div style={{ marginTop: 16 }}>
-                  <h3 className="h3">Custom add-ons</h3>
-                  <p className="muted small">
-                    Non-standard sinks, fixtures, or misc. — price is the final internal line amount for the selected
-                    Direct/Wholesale mode (no public 25% homeowner markup).
-                  </p>
-                  {customItems.map((row) => (
-                    <div key={row.id} className="grid3" style={{ marginBottom: 8 }}>
-                      <label>
-                        Description
-                        <input
-                          value={row.description}
-                          onChange={(e) =>
-                            setCustomItems((prev) => prev.map((x) => (x.id === row.id ? { ...x, description: e.target.value } : x)))
-                          }
-                          placeholder="Custom Blanco sink"
-                        />
-                      </label>
-                      <label>
-                        Price ($)
-                        <input value={row.price} onChange={(e) => setCustomItems((prev) => prev.map((x) => (x.id === row.id ? { ...x, price: e.target.value } : x)))} inputMode="decimal" />
-                      </label>
-                      <label>
-                        Qty
-                        <input value={row.qty} onChange={(e) => setCustomItems((prev) => prev.map((x) => (x.id === row.id ? { ...x, qty: e.target.value } : x)))} inputMode="numeric" />
-                      </label>
-                      <div style={{ gridColumn: "1 / -1" }}>
-                        <button type="button" className="btn secondary" onClick={() => setCustomItems((prev) => prev.filter((x) => x.id !== row.id))}>
-                          Remove custom item
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                  <button
-                    type="button"
-                    className="btn secondary"
-                    onClick={() =>
-                      setCustomItems((prev) => [
-                        ...prev,
-                        { id: `ci-${Math.random().toString(36).slice(2, 9)}`, description: "", price: "", qty: "1" }
-                      ])
-                    }
-                  >
-                    + Add custom item
-                  </button>
-                </div>
-              </>
-            ) : (
-              <p className="muted small">Add-ons are per room in the room builder above.</p>
-            )}
-
-            <div className="grid3" style={{ marginTop: 12 }}>
-              <label>
-                Partner retail method
-                <select value={partnerRetailMethod} onChange={(e) => setPartnerRetailMethod(e.target.value)}>
-                  <option>Markup Percent</option>
-                  <option>Margin Percent</option>
-                  <option>Flat Dollar Add</option>
-                  <option>Pass Through</option>
-                </select>
-              </label>
-              <label>
-                Display markup % (partner retail view)
-                <input value={partnerRetailPct} onChange={(e) => setPartnerRetailPct(e.target.value)} style={{ maxWidth: 140 }} />
-              </label>
-            </div>
+            <p className="muted small">Sink and fixture cutouts are set per room in the room builder.</p>
 
             <h3 className="h3">Structured custom line items</h3>
             <div className="mode-row" style={{ flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
@@ -1992,10 +978,7 @@ export default function InternalEstimateApp() {
                 </button>
               ))}
             </div>
-            <p className="muted small">
-                Structured lines are validated on the server (discounts require negative unit price). They roll into totals, snapshots,
-                Quote Library, and handoff docs.
-              </p>
+            <p className="muted small">Discount lines need a negative unit price.</p>
               {customLineRows.map((row) => (
                 <div key={row.id} className="grid3" style={{ marginBottom: 10, borderBottom: "1px solid var(--border)", paddingBottom: 10 }}>
                   {!row.customerFacing ? (
@@ -2135,7 +1118,7 @@ export default function InternalEstimateApp() {
             </section>
 
             <section id="sec-review" className="card">
-              <h2>5 · Review &amp; readiness</h2>
+              <h2 className="ie-section-title">Review</h2>
               <p className="muted small">
                 Readiness feeds snapshots — it does not block Calculate or Save in this build.
               </p>
@@ -2179,8 +1162,8 @@ export default function InternalEstimateApp() {
                 <strong>Branch:</strong> {branch} · <strong>Rep:</strong> {salesRep || "—"} · <strong>Entered by:</strong> {enteredBy || "—"}
               </p>
               <p>
-                <strong>Pricing mode:</strong> {internalPricingMode === "direct" ? "Direct" : "Wholesale"} · <strong>Path:</strong>{" "}
-                {workflowLabel(quoteWorkflow)}
+                <strong>Pricing mode:</strong> {internalPricingMode === "wholesale" ? "Wholesale" : "Direct / Retail"} ·{" "}
+                <strong>Workflow:</strong> {workflowLabel(INTERNAL_ESTIMATE_WORKFLOW)}
               </p>
               {apiPartner?.snapshot?.material_breakdown?.length ? (
                 <>
@@ -2246,61 +1229,10 @@ export default function InternalEstimateApp() {
 
           {calcError ? <p className="error">{calcError}</p> : null}
 
-          {hasCalcResult && comparisonRows?.length ? (
-            <section className="card group-compare-card">
-              <h2>Compare material groups</h2>
-              <p className="muted group-compare-lead">
-                Use this to compare how material group selection changes the project estimate.
-              </p>
-              {comparisonMixedNote ? <div className="fallback-banner">{comparisonMixedNote}</div> : null}
-              <div className="internal-banner">
-                <strong>Internal detail — not public-facing.</strong> Rates and wholesale-style economics below are for staff
-                discussion only.
-              </div>
-              <div className="table-scroll">
-                <table className="group-compare-table group-compare-table-partner">
-                  <thead>
-                    <tr>
-                      <th>Group</th>
-                      <th>Rate ($/sf)</th>
-                      <th>Ct sf</th>
-                      <th>Ct cost</th>
-                      <th>Bs sf</th>
-                      <th>Bs cost</th>
-                      <th>Add-ons</th>
-                      <th>Wholesale total</th>
-                      <th>Retail / protected</th>
-                      <th>Display profit</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {comparisonRows.map((row) => {
-                      const profit = round2(row.partnerRetailTotal - row.wholesaleTotal);
-                      return (
-                        <tr key={row.group} className={row.group === materialGroup ? "row-active" : undefined}>
-                          <td>{row.group}</td>
-                          <td>${row.rate.toFixed(2)}</td>
-                          <td>{row.countertopSqft.toFixed(2)}</td>
-                          <td>${row.countertopWholesale.toFixed(2)}</td>
-                          <td>{row.backsplashSqft.toFixed(2)}</td>
-                          <td>${row.backsplashWholesale.toFixed(2)}</td>
-                          <td>${row.addonCost.toFixed(2)}</td>
-                          <td>${row.wholesaleTotal.toFixed(2)}</td>
-                          <td>${row.partnerRetailTotal.toFixed(2)}</td>
-                          <td>${profit.toFixed(2)}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          ) : null}
-
           {localMathCheck ? (
             <section className="card math-check">
               <h2>Math check (internal demo)</h2>
-              <p className="muted small">Partner / internal only — mirrors prototype measurement + tier logic for review.</p>
+              <p className="muted small">Measurement and tier cross-check for staff review.</p>
               <ul className="kv">
                 <li>
                   <span>Workflow</span>
@@ -2363,7 +1295,7 @@ export default function InternalEstimateApp() {
               ) : null}
               {localMatrix?.length ? (
                 <div style={{ marginTop: 14 }} className="lines">
-                  <strong>All-group matrix (wholesale → retail @ 20% for demo)</strong>
+                  <strong>All-group matrix (wholesale → display retail)</strong>
                   <table>
                     <thead>
                       <tr>
@@ -2409,7 +1341,7 @@ export default function InternalEstimateApp() {
                 <ul className="kv">
                   <li>
                     <span>Quote path</span>
-                    <strong>{workflowLabel(quoteWorkflow)}</strong>
+                    <strong>{workflowLabel(INTERNAL_ESTIMATE_WORKFLOW)}</strong>
                   </li>
                   <li>
                     <span>Wholesale estimate</span>
@@ -2429,14 +1361,14 @@ export default function InternalEstimateApp() {
                   </li>
                   <li>
                     <span>Material group</span>
-                    <strong>{materialGroup}</strong>
+                    <strong>{topMaterialGroup}</strong>
                   </li>
                 </ul>
               ) : demoResult ? (
                 <ul className="kv">
                   <li>
                     <span>Quote path</span>
-                    <strong>{workflowLabel(quoteWorkflow)}</strong>
+                    <strong>{workflowLabel(INTERNAL_ESTIMATE_WORKFLOW)}</strong>
                   </li>
                   <li>
                     <span>Wholesale estimate</span>
@@ -2521,10 +1453,7 @@ export default function InternalEstimateApp() {
                   </table>
                 </div>
               ) : null}
-              <p className="muted small">
-                Internal calculate uses <code>/api/internal-quotes/calculate</code>; display markup settings are for illustration
-                only.
-              </p>
+              <p className="muted small">Totals reflect your pricing mode and room scope.</p>
             </>
             <p style={{ marginTop: 14 }}>
               <strong>Confidence:</strong>{" "}
@@ -2537,7 +1466,7 @@ export default function InternalEstimateApp() {
           </section>
 
           <section id="sec-save" className="card">
-            <h2>7 · Save / Quote Library</h2>
+            <h2 className="ie-section-title">Save</h2>
             {submitMsg ? <p>{submitMsg}</p> : <p className="muted">Submit saves to eliteOS when you’re signed in and quote tables are installed.</p>}
             {lastSavedQuoteNumber ? (
               <p style={{ marginTop: 8 }}>
@@ -2557,35 +1486,30 @@ export default function InternalEstimateApp() {
             {submitPreview ? <pre className="preview">{submitPreview}</pre> : null}
           </section>
 
-          <section className="card notes">
-            <h2>What this head proves</h2>
-            <ul>
-              <li>
-                Internal preliminary quotes can use the same measurement modules as the public tool while keeping **Direct /
-                Wholesale** economics and the **quote library** on a **separate authenticated head**.
-              </li>
-              <li>
-                Saves and Monday for <code>quote_source: internal_quote</code> use <strong>internal</strong> API routes and{" "}
-                <code>MONDAY_INTERNAL_*</code> only — not the public consumer board configuration.
-              </li>
-              <li>
-                The **public** quote site (<code>app-quote</code>) stays homeowner-safe: no internal mode, no wholesale matrix
-                in that bundle.
-              </li>
-              <li>
-                Future <strong>AI Takeoff</strong> and <strong>Visualize</strong> remain planned in the shared data model (see{" "}
-                <code>docs/quote-platform/ai-takeoff-and-visualize-plan.md</code>).
-              </li>
-            </ul>
-          </section>
-        </div>
+          <details className="card ie-diagnostics">
+            <summary>Diagnostics</summary>
+            <p className="muted small" style={{ marginTop: 6 }}>
+              Backend base URL for this session (troubleshooting).
+            </p>
+            <p className="muted small mono" style={{ wordBreak: "break-all", marginTop: 6 }}>
+              {backendHint}
+            </p>
+          </details>
 
-        <aside className="side-col">
+        </main>
+
+        <aside className="ie-aside side-col">
           {hasCalcResult ? (
             <div className="summary-card">
               {partRetail != null ? (
                 <>
                   <h2>Estimator summary</h2>
+                  <div className="summary-rows" style={{ marginBottom: 8 }}>
+                    <div className="summary-row">
+                      <span>Pricing mode</span>
+                      <strong>{internalPricingMode === "wholesale" ? "Wholesale" : "Direct / Retail"}</strong>
+                    </div>
+                  </div>
                   <p className="summary-kicker">Retail / protected (display)</p>
                   <p className="summary-hero-value">${Number(partRetail).toFixed(2)}</p>
                   {partWholesale != null ? (
@@ -2594,10 +1518,6 @@ export default function InternalEstimateApp() {
                     </p>
                   ) : null}
                   <div className="summary-rows">
-                    <div className="summary-row">
-                      <span>Quote path</span>
-                      <strong>{workflowLabel(quoteWorkflow)}</strong>
-                    </div>
                     {partWholesale != null ? (
                       <div className="summary-row">
                         <span>Wholesale estimate</span>
@@ -2627,14 +1547,18 @@ export default function InternalEstimateApp() {
                       <strong>{(scopePreview.splashSf + scopePreview.fhbSf).toFixed(2)}</strong>
                     </div>
                     <div className="summary-row">
-                      <span>Material / color</span>
+                      <span>Total sf (scope)</span>
+                      <strong>{scopePreview.totalSf.toFixed(2)}</strong>
+                    </div>
+                    <div className="summary-row">
+                      <span>Primary price group</span>
                       <strong>
-                        {materialGroup}
+                        {topMaterialGroup}
                         {quoteDefaultCatalogId && eliteColors.find((c) => c.id === quoteDefaultCatalogId)
                           ? ` · ${eliteColors.find((c) => c.id === quoteDefaultCatalogId)?.colorName ?? ""}`
                           : colorTbd
                             ? " · Color TBD"
-                            : ""}
+                            : " · per room"}
                       </strong>
                     </div>
                     <div className="summary-row">
@@ -2661,7 +1585,7 @@ export default function InternalEstimateApp() {
                       </div>
                     ) : null}
                   </div>
-                  <div className="internal-badge">Internal / demo — not public-facing</div>
+                  <div className="internal-badge">Internal — not customer-facing</div>
                   <p className="summary-foot">Shown for staff discussion; not homeowner-facing.</p>
                   <p className="summary-foot muted small">Use the math check panel for line-level verification.</p>
                   {lastCalcLive ? <p className="summary-foot">Live API response</p> : null}
@@ -2676,7 +1600,7 @@ export default function InternalEstimateApp() {
                       Print / export
                     </button>
                     <a className="btn secondary" href={`${quoteLibraryUrl}/`} target="_blank" rel="noreferrer">
-                      Quote Library
+                      Open Quote Library
                     </a>
                   </div>
                 </>
@@ -2686,6 +1610,10 @@ export default function InternalEstimateApp() {
             <div className="summary-card summary-card-precalc">
               <h2>Estimate preview</h2>
               <div className="summary-rows">
+                <div className="summary-row">
+                  <span>Pricing mode</span>
+                  <strong>{internalPricingMode === "wholesale" ? "Wholesale" : "Direct / Retail"}</strong>
+                </div>
                 <div className="summary-row">
                   <span>Quote path</span>
                   <strong>{scopePreview.method}</strong>
@@ -2703,9 +1631,9 @@ export default function InternalEstimateApp() {
                   <strong>{(scopePreview.splashSf + scopePreview.fhbSf).toFixed(2)}</strong>
                 </div>
                 <div className="summary-row">
-                  <span>Material / color</span>
+                  <span>Primary price group</span>
                   <strong>
-                    {materialGroup}
+                    {topMaterialGroup}
                     {colorTbd ? " · Color TBD" : ""}
                   </strong>
                 </div>

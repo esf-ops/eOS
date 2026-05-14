@@ -33,9 +33,259 @@ body {
 }
 
 .page {
-  max-width: 1180px;
+  max-width: 1320px;
   margin: 0 auto;
-  padding: 20px 20px 56px;
+  padding: 16px 16px 48px;
+}
+
+/* Internal Estimate — compact workspace */
+.page-internal-estimate .ie-section-title {
+  margin: 0 0 14px;
+  font-size: 1.05rem;
+}
+
+.ie-header-compact {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  padding: 12px 16px;
+  margin-bottom: 12px;
+}
+
+.ie-header-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ie-header-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.ie-logo-sm {
+  width: 120px;
+  max-width: 28vw;
+  height: auto;
+  flex-shrink: 0;
+}
+
+.ie-header-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.ie-header-sub {
+  margin: 2px 0 0;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.ie-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-sm {
+  padding: 7px 12px;
+  font-size: 0.82rem;
+}
+
+.ie-card-tight {
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+
+.ie-url-banner {
+  margin-bottom: 12px;
+}
+
+.ie-app-shell {
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr) 300px;
+  gap: 18px;
+  align-items: start;
+}
+
+.ie-rail {
+  position: sticky;
+  top: 12px;
+  align-self: start;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 10px 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+}
+
+.ie-rail-link {
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 8px 8px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.ie-rail-link:hover {
+  background: var(--elite-red-soft);
+  color: var(--elite-red);
+}
+
+.ie-main {
+  min-width: 0;
+}
+
+.ie-aside.side-col {
+  position: sticky;
+  top: 12px;
+}
+
+.ie-signin-row .ie-signin-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+.ie-signin-row .ie-signin-fields label {
+  flex: 1 1 160px;
+  min-width: 140px;
+}
+
+.ie-live-strip {
+  margin-bottom: 10px;
+}
+
+.ie-pricing-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.ie-pricing-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.ie-pricing-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  overflow: hidden;
+  background: #f1f5f9;
+}
+
+.ie-pricing-toggle button {
+  border: none;
+  background: transparent;
+  padding: 7px 14px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+
+.ie-pricing-toggle button.on {
+  background: var(--card);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+.ie-pricing-toggle button:hover:not(.on) {
+  color: var(--text);
+}
+
+.ie-future-tools {
+  margin: 0 0 14px;
+  font-size: 0.85rem;
+}
+
+.ie-diagnostics summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.ie-job-grid input,
+.ie-job-grid select {
+  padding: 9px 11px;
+  font-size: 0.9rem;
+}
+
+/* Room builder — measurement toggle (internal head) */
+.ie-measure-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.ie-measure-toggle-btn {
+  border: none;
+  background: #f8fafc;
+  padding: 8px 12px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+
+.ie-measure-toggle-btn.on {
+  background: var(--elite-red-soft);
+  color: var(--elite-red);
+}
+
+@media (max-width: 1020px) {
+  .ie-app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .ie-rail {
+    position: relative;
+    top: auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    padding: 8px 10px;
+  }
+
+  .ie-rail-link {
+    flex: 1 1 auto;
+    text-align: center;
+    font-size: 0.72rem;
+    padding: 6px 8px;
+  }
+
+  .ie-aside.side-col {
+    position: relative;
+    top: auto;
+    order: 3;
+  }
+
+  .ie-main {
+    order: 2;
+  }
 }
 
 /* Hero */

@@ -622,6 +622,24 @@ export function emptyGuidedPiece(pieceType: GuidedPiece["pieceType"], name: stri
   return { id: newId(), pieceType, name, lengthIn: 0, depthIn, shape: "rect" };
 }
 
+/** Single guided “main run” starter for Internal Estimate Head — avoids a bulky default L-shape. */
+export function createEstimatorRoom(materialGroup: string): RoomDraft {
+  const r = createDefaultRoom(materialGroup);
+  r.name = "Room / Area";
+  r.guidedPieces = [
+    {
+      id: newId(),
+      pieceType: "counter",
+      name: "Main run",
+      lengthIn: 0,
+      depthIn: STANDARD_COUNTER_DEPTH_IN,
+      shape: "rect",
+      addSplash: true
+    }
+  ];
+  return r;
+}
+
 export function createDefaultRoom(materialGroup: string): RoomDraft {
   return {
     id: newId(),
