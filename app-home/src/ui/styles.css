@@ -251,6 +251,39 @@ body {
   margin: 0;
 }
 
+.head-card .role-note {
+  font-size: 0.75rem;
+  color: #64748b;
+  margin: 8px 0 0;
+  line-height: 1.45;
+}
+
+.head-card .url-line {
+  font-size: 0.72rem;
+  color: #64748b;
+  word-break: break-all;
+  margin: 8px 0 0;
+  line-height: 1.35;
+}
+
+.head-card .slug-line {
+  font-size: 0.72rem;
+  color: #94a3b8;
+  margin: 6px 0 0;
+}
+
+.head-card .slug-line code {
+  font-size: 0.85em;
+  background: rgba(15, 23, 42, 0.05);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.mono-inline {
+  font-size: 0.85em;
+  word-break: break-all;
+}
+
 .pill-stack {
   display: flex;
   flex-wrap: wrap;

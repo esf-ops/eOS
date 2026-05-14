@@ -25,10 +25,22 @@ export function getBearerToken(req) {
 async function loadUserProfileOrNull(supabase, userId) {
   const { data, error } = await supabase
     .from("user_profiles")
-    .select("id,email,full_name,role,department,is_active,user_kind,last_login_at")
+    .select("id,email,full_name,role,department,is_active,user_kind,last_login_at,organization_id")
     .eq("id", userId)
     .limit(1);
-  if (error) throw new Error(error.message);
+  if (error) {
+    const msg = String(error.message ?? "");
+    if (msg.includes("organization_id")) {
+      const { data: retry, error: e2 } = await supabase
+        .from("user_profiles")
+        .select("id,email,full_name,role,department,is_active,user_kind,last_login_at")
+        .eq("id", userId)
+        .limit(1);
+      if (e2) throw new Error(e2.message);
+      return retry?.[0] ?? null;
+    }
+    throw new Error(error.message);
+  }
   return data?.[0] ?? null;
 }
 
@@ -103,12 +115,18 @@ async function loadOrBootstrapProfile(supabase, authUser) {
 }
 
 function attachUser(req, authUser, profile) {
+  const fullName = profile?.full_name || "";
+  const organizationId = profile?.organization_id != null ? String(profile.organization_id).trim() : "";
+  const userKind = String(profile?.user_kind ?? "internal").trim() || "internal";
   req.user = {
     id: authUser.id,
     email: profile?.email || authUser.email || "",
     role: profile?.role || "viewer",
-    fullName: profile?.full_name || "",
+    fullName,
+    full_name: fullName,
     department: profile?.department || "",
+    organization_id: organizationId || null,
+    user_kind: userKind,
     isActive: profile?.is_active !== false
   };
 }
@@ -163,7 +181,7 @@ export function requireRole(allowedRoles) {
   return function requireRoleMiddleware(req, res, next) {
     const role = String(req.user?.role ?? "");
     if (!role) return res.status(401).json({ ok: false, error: "Missing auth user" });
-    if (role === "admin") return next();
+    if (role === "admin" || role === "super_admin") return next();
     if (allow.includes(role)) return next();
     return res.status(403).json({ ok: false, error: "Forbidden" });
   };

@@ -1,6 +1,6 @@
 /**
  * Sales attribution & classification for Sales Head (Brain job rows).
- * Moraware remains source of truth for raw `salesperson_name`; eOS adds normalized attribution for dashboards.
+ * Moraware remains source of truth for raw `salesperson_name`; eliteOS adds normalized attribution for dashboards.
  *
  * Edit ACCOUNT_EXACT_OVERRIDES / ACCOUNT_SUBSTRING_OVERRIDES / SKOGMAN_ACCOUNT_RULE below as business rules evolve.
  */
@@ -21,7 +21,7 @@ export const ACCOUNT_RULES_DOCUMENTATION = Object.freeze([
   "Aceno → Lisbon / House Account - Lisbon (exact account name)",
   "Cambrian Granite & Stone → Dyersville / House Account - Dyersville (exact account name)",
   "All accounts whose name contains “Skogman” → Dyersville / Casey Schenke (substring rule)",
-  "Moraware remains the source of truth for production square footage. eOS classification rules are used only to normalize branch/location and salesperson attribution. Unmatched accounts remain in totals and are marked as Moraware fallback."
+  "Moraware remains the source of truth for production square footage. eliteOS classification rules are used only to normalize branch/location and salesperson attribution. Unmatched accounts remain in totals and are marked as Moraware fallback."
 ]);
 
 function isMissingRelationError(error) {

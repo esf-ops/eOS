@@ -360,6 +360,9 @@ const defaultAllowedOrigins = (() => {
  *   EOS_ALLOWED_ORIGINS=https://YOUR-BRAIN-HEALTH-STAGING.vercel.app,https://YOUR-EXECUTIVE-STAGING.vercel.app
  * Production launcher / heads later:
  *   EOS_ALLOWED_ORIGINS=https://eos.elitestonefabrication.com,https://heads.elitestonefabrication.com
+ *
+ * eliteOSfab production + preview (no trailing slashes). Also set `ALLOWED_ORIGINS` / `EOS_ALLOWED_ORIGINS`
+ * for each Vercel preview URL (e.g. https://app-home-*.vercel.app).
  */
 function parseCommaSeparatedOrigins(raw) {
   return String(raw ?? "")
@@ -374,7 +377,17 @@ const envOriginAdditions = [
 ];
 
 /** Always allow hosted public quote app + common local Vite port (also covered by default range). */
-const fixedEliteOsOrigins = ["https://eliteos-quote.vercel.app", "http://localhost:5179"];
+const fixedEliteOsOrigins = [
+  "https://eliteos-quote.vercel.app",
+  "http://localhost:5179",
+  "https://www.eliteosfab.com",
+  "https://eliteosfab.com",
+  "https://quote.eliteosfab.com",
+  "https://internal.eliteosfab.com",
+  "https://estimate.eliteosfab.com",
+  "https://pricing.eliteosfab.com",
+  "http://localhost:5177"
+];
 
 const allowedOrigins = [...new Set([...defaultAllowedOrigins, ...fixedEliteOsOrigins, ...envOriginAdditions])];
 
@@ -1337,7 +1350,7 @@ app.get("/api/me/heads", requireAuth(), async (req, res) => {
     console.error("GET /api/me/heads failed", error);
     res.status(500).json({
       ok: false,
-      error: "Failed to load available heads"
+      error: "eliteOS Launcher could not load available heads. Try again or contact an administrator."
     });
   }
 });

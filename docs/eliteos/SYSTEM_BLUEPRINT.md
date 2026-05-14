@@ -29,8 +29,8 @@
 
 | Layer | Role |
 |-------|------|
-| **Heads / frontends** | Vite + React apps (`app-*`). Each head is a product slice; must not duplicate “Brain” business logic as the source of truth. |
-| **Brain / API** | `backend-core` — Express (or serverless entry), quote routes, integrations, org context, permission checks. |
+| **Heads / frontends** | Vite + React apps (`app-*`). Each head is a product slice; must not duplicate **eliteOS Brain** business logic as the source of truth. |
+| **eliteOS Brain / API** | `backend-core` — Express (or serverless entry), quote routes, integrations, org context, permission checks. |
 | **Supabase** | Database, Auth (anon + user JWT for heads), Row Level Security where enabled; **organization-scoped** data for SaaS. |
 | **Monday.com** | Optional CRM sync for public (and other) quotes; **server-side only** token. |
 | **Moraware** (future) | Read-oriented integration; credentials and mappings stay **server-side**; dedicated **Moraware Admin / Integration Mapping Head** planned. |
@@ -38,7 +38,7 @@
 | **Vercel** | Hosting for heads and Brain/API deployments. |
 | **GitHub + Cursor** | Source control; AI-assisted development with project rules under `.cursor/rules/`. |
 
-**Data flow (conceptual):** Head → Brain API (with auth where required) → Supabase (+ external APIs such as Monday from Brain only).
+**Data flow (conceptual):** Head → **eliteOS Brain** API (with auth where required) → Supabase (+ external APIs such as Monday from the Brain only).
 
 ---
 
@@ -46,11 +46,12 @@
 
 | Surface | URL |
 |---------|-----|
-| **Public Quote Head** | https://quote.eliteosfab.com |
+| **Home / Launcher Head (`app-home`)** | **`https://www.eliteosfab.com`** — **eliteOS Home**; central Supabase sign-in and **eliteOS Launcher** (calls `GET /api/me`, `GET /api/me/heads`). |
+| **Public Quote Head (`app-quote`)** | **`https://quote.eliteosfab.com`** — **eliteOS Public Quote Head** |
 | **Public Quote (Vercel fallback)** | https://eliteos-quote.vercel.app |
-| **Internal Estimate Head** | Separate Vite app: `app-internal-estimate/` — **production hostname TBD** (must not be served from the public quote origin; staff auth required). |
-| **Pricing Admin Head** | Separate Vite app: `app-pricing-admin/` — **production hostname TBD**; requires login + `pricing_admin` head access (or admin bypass per middleware). APIs: `/api/pricing-admin/*`. |
-| **Brain / API** | https://backend-core-six.vercel.app |
+| **Internal Estimate Head (`app-internal-estimate`)** | **`https://internal.eliteosfab.com`** or **`https://estimate.eliteosfab.com`**; until DNS cutover, set **`HEAD_URL_INTERNAL_ESTIMATE`**. **eliteOS Internal Estimate Head** — staff auth required. |
+| **Pricing Admin Head (`app-pricing-admin`)** | **`https://pricing.eliteosfab.com`**; **`HEAD_URL_PRICING_ADMIN`**. **eliteOS Pricing Admin Head** — login + `pricing_admin` head access and route-level role gates on `/api/pricing-admin/*`. |
+| **eliteOS Brain / API** | https://backend-core-six.vercel.app |
 | **Future API hostname** | `api.eliteosfab.com` — **if/when** DNS and Vercel project wiring are configured |
 
 Always confirm live URLs in deployment dashboards if anything drifts.
@@ -63,7 +64,7 @@ Always confirm live URLs in deployment dashboards if anything drifts.
 
 **Expectations for new heads:**
 
-- Connect to the **shared Brain** (no siloed “mini backends” without an explicit decision).
+- Connect to the **eliteOS Brain** (no siloed “mini backends” without an explicit decision).
 - Respect **roles** and server-side authorization (UI visibility ≠ permission).
 - Be **organization-aware** where data is tenant-owned (`organization_id` or documented exception).
 

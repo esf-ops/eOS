@@ -664,7 +664,7 @@ export default function InternalEstimateApp() {
       <div className="layout">
         <div className="main-col">
           <section className="card prototype-scope-banner">
-            <h2>Internal Estimate Head</h2>
+            <h2>eliteOS Internal Estimate Head</h2>
             <p className="muted" style={{ marginTop: 0 }}>
               This app is separate from the <strong>public quote</strong> at <code>quote.eliteosfab.com</code>. It uses{" "}
               <code>/api/internal-quotes/*</code> with Supabase auth and quote-head access on the backend. See{" "}
@@ -1883,7 +1883,7 @@ export default function InternalEstimateApp() {
         </aside>
       </div>
 
-      <footer className="footer">eliteOS Internal Estimate · Elite Stone Fabrication · {new Date().getFullYear()}</footer>
+      <footer className="footer">eliteOS Internal Estimate Head · Elite Stone Fabrication · {new Date().getFullYear()}</footer>
     </div>
   );
 }

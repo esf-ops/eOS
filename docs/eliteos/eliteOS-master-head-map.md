@@ -71,7 +71,7 @@ Status is **conceptual** unless a separate tracker says otherwise. Use the label
 
 ### Platform / Admin
 
-- Home / Launcher Head  
+- **Home / Launcher Head** — **`app-home/`**; production **`https://www.eliteosfab.com`**; Supabase sign-in + **`GET /api/me`** / **`GET /api/me/heads`** to render allowed head cards (Brain is source of truth for assignments; admin / executive / `super_admin` see full catalog in the launcher response).
 - System Admin Head  
 - User Management Head  
 - Role / Permissions / Head Access Head  

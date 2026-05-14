@@ -1,4 +1,5 @@
 import { DEALER_SAFE_HEAD_SLUG_SET, EOS_HEAD_SLUGS, isKnownHeadSlug } from "../auth/eosGovernanceConstants.js";
+import { inferHeadDeploymentStatus, resolveHeadDeploymentUrl } from "./headDeploymentUrls.js";
 
 /**
  * Canonical launcher cards — slugs MUST align with `user_head_access.head_slug`
@@ -7,119 +8,137 @@ import { DEALER_SAFE_HEAD_SLUG_SET, EOS_HEAD_SLUGS, isKnownHeadSlug } from "../a
 export const HEAD_LAUNCHER_CATALOG = [
   {
     slug: "executive",
-    label: "Executive",
+    label: "eliteOS Executive Head",
     description: "Analytics, trends, and operating summary — Titans Flowing widget for Today.",
     category: "Leadership",
     href: "/executive"
   },
   {
     slug: "brain_health",
-    label: "Brain Health",
-    description: "Sync health, ingest signals, operational cadence cues.",
+    label: "eliteOS Brain Health Head",
+    description: "Sync health, ingest signals, and operational cadence for the eliteOS Brain.",
     category: "Operations",
     href: "/brain-health"
   },
   {
     slug: "system_admin",
-    label: "System Admin",
-    description: "User governance, head access assignments, auditing.",
+    label: "eliteOS System Admin Head",
+    description: "User governance, head access assignments, and auditing.",
     category: "Administration",
     href: "/system-admin"
   },
   {
     slug: "pricing_admin",
-    label: "Pricing Admin",
+    label: "eliteOS Pricing Admin Head",
     description: "Material tiers, add-ons, and quote pricing policy (authorized staff only).",
     category: "Administration",
-    href: "/pricing-admin"
+    href: "/pricing-admin",
+    roleNote: "eliteOS Brain APIs still require pricing_admin head access and route-level role checks."
   },
   {
     slug: "sales",
-    label: "Sales Head",
+    label: "eliteOS Sales Head",
     description: "Sales performance, account growth, and sales flow into the Titans.",
     category: "Revenue",
     href: "/sales"
   },
-  { slug: "quote", label: "Quote", description: "Quote tools and estimating.", category: "Revenue", href: "/quote" },
+  {
+    slug: "quote",
+    label: "eliteOS Internal Estimate Head",
+    description: "Internal quoting and the eliteOS Quote Library (authenticated staff).",
+    category: "Revenue",
+    href: "/quote",
+    roleNote: "This head uses the Internal Estimate app; eliteOS Brain APIs enforce head access separately from this launcher."
+  },
   {
     slug: "production",
-    label: "Production",
+    label: "eliteOS Production Head",
     description: "Production pacing and throughput views.",
     category: "Operations",
     href: "/production"
   },
   {
     slug: "shop_tv",
-    label: "Shop Floor TV",
+    label: "eliteOS Shop Floor TV Head",
     description: "Live floor-facing boards (operational tempo).",
     category: "Operations",
     href: "/shop-tv"
   },
   {
     slug: "install",
-    label: "Install",
+    label: "eliteOS Install Head",
     description: "Install scheduling and install-day boards.",
     category: "Field",
     href: "/install"
   },
   {
     slug: "purchasing",
-    label: "Purchasing",
-    description: "Procurement head (future).",
+    label: "eliteOS Purchasing Head",
+    description: "Procurement workflows (future).",
     category: "Finance & supply",
     href: "/purchasing"
   },
   {
     slug: "customer_service",
-    label: "Customer Service",
+    label: "eliteOS Customer Service Head",
     description: "Service queue and CX workflows.",
     category: "Service",
     href: "/customer-service"
   },
-  { slug: "hr", label: "HR", description: "People operations.", category: "People", href: "/hr" },
+  { slug: "hr", label: "eliteOS HR Head", description: "People operations.", category: "People", href: "/hr" },
   {
     slug: "safety",
-    label: "Safety",
+    label: "eliteOS Safety Head",
     description: "Compliance and safety programs.",
     category: "People",
     href: "/safety"
   },
   {
     slug: "marketing",
-    label: "Marketing",
+    label: "eliteOS Marketing Head",
     description: "Positioning and campaign assets.",
     category: "Commercial",
     href: "/marketing"
   },
   {
     slug: "finance",
-    label: "Finance",
+    label: "eliteOS Finance Head",
     description: "Financial reporting tie-ins.",
     category: "Finance & supply",
     href: "/finance"
   },
   {
     slug: "reports",
-    label: "Reports",
+    label: "eliteOS Reports Head",
     description: "Curated BI and exports.",
     category: "Insights",
     href: "/reports"
   },
   {
     slug: "partner_quote",
-    label: "Partner Quote",
+    label: "eliteOS Partner Quote Head",
     description: "Dealer quoting (Partner Quoting Platform).",
     category: "Partner",
     href: "/partner-quote"
   },
   {
     slug: "dealer_resources",
-    label: "Dealer Resources",
-    description: "Partner/dealer-facing resources.",
+    label: "eliteOS Dealer Resources Head",
+    description: "Partner- and dealer-facing resources.",
     category: "Partner",
     href: "/dealer-resources"
   }
 ];
+
+/** Convenience launcher row — not an `EOS_HEAD_SLUGS` head (no `user_head_access` / `requireHeadAccess`). */
+export const PUBLIC_QUOTE_LAUNCHER_ROW = Object.freeze({
+  slug: "public_quote",
+  label: "eliteOS Public Quote Head",
+  description: "Customer-facing quote experience (no login required at destination).",
+  category: "Revenue",
+  href: "/quote/public",
+  roleNote: "Public eliteOS head — link only; destination does not use this session."
+});
 
 const ALL_KNOWN = new Set(EOS_HEAD_SLUGS);
 
@@ -190,6 +209,59 @@ function isAdminRole(role) {
   return String(role ?? "").trim() === "admin";
 }
 
+/** Admin / executive / super_admin: launcher shows the full head catalog (URLs still env-driven). */
+function hasLauncherFullCatalogRole(role) {
+  const r = String(role ?? "").trim().toLowerCase();
+  return r === "admin" || r === "executive" || r === "super_admin";
+}
+
+/**
+ * @param {typeof HEAD_LAUNCHER_CATALOG[number]} row
+ * @param {boolean} enabled
+ * @param {'assigned' | 'role_default' | 'admin_roadmap' | 'full_catalog'} visibilityReason
+ */
+function enrichLauncherHead(row, enabled, visibilityReason) {
+  const urlRaw = resolveHeadDeploymentUrl(row.slug);
+  const url = urlRaw || null;
+  const status = inferHeadDeploymentStatus(urlRaw);
+  const is_available = Boolean(enabled && urlRaw);
+  return {
+    slug: row.slug,
+    title: row.label,
+    label: row.label,
+    description: row.description,
+    href: row.href,
+    category: row.category,
+    enabled,
+    visibilityReason,
+    url,
+    status,
+    is_available,
+    role_note: row.roleNote ? String(row.roleNote) : null
+  };
+}
+
+function enrichPublicQuoteHead() {
+  const row = PUBLIC_QUOTE_LAUNCHER_ROW;
+  const urlRaw = resolveHeadDeploymentUrl(row.slug);
+  const url = urlRaw || null;
+  const status = inferHeadDeploymentStatus(urlRaw);
+  return {
+    slug: row.slug,
+    title: row.label,
+    label: row.label,
+    description: row.description,
+    href: row.href,
+    category: row.category,
+    enabled: true,
+    visibilityReason: /** @type {const} */ ("role_default"),
+    url,
+    status,
+    is_available: Boolean(urlRaw),
+    role_note: row.roleNote ? String(row.roleNote) : null
+  };
+}
+
 /**
  * Shared resolver for `/api/me/heads` and `requireHeadAccess` — same grants as launcher actionable set.
  *
@@ -207,6 +279,7 @@ function isAdminRole(role) {
  *   userKind: string,
  *   dealer: boolean,
  *   isAdminRole: boolean,
+ *   launcherFullCatalog: boolean,
  *   actionableGrantSet: Set<string>,
  *   explicitDbGrantSet: Set<string>,
  *   usedExplicitAssigns: boolean,
@@ -220,6 +293,7 @@ function isAdminRole(role) {
  *   userKind: string,
  *   dealer: boolean,
  *   isAdminRole: boolean,
+ *   launcherFullCatalog: boolean,
  *   actionableGrantSet: Set<string>,
  *   explicitDbGrantSet: Set<string>,
  *   usedExplicitAssigns: boolean,
@@ -246,6 +320,7 @@ export async function resolveHeadAccessContext(supabase, reqUser) {
       userKind: "internal",
       dealer: false,
       isAdminRole: false,
+      launcherFullCatalog: false,
       actionableGrantSet: new Set(),
       explicitDbGrantSet: new Set(),
       usedExplicitAssigns: false,
@@ -290,6 +365,7 @@ export async function resolveHeadAccessContext(supabase, reqUser) {
     userKind,
     dealer,
     isAdminRole: isAdminRole(role),
+    launcherFullCatalog: hasLauncherFullCatalogRole(role),
     actionableGrantSet,
     explicitDbGrantSet,
     usedExplicitAssigns,
@@ -297,51 +373,27 @@ export async function resolveHeadAccessContext(supabase, reqUser) {
   };
 }
 
-/** @typedef {{ slug: string, label: string, description: string, href: string, category: string, enabled: boolean, visibilityReason: 'assigned' | 'role_default' | 'admin_roadmap' }} LauncherHeadRow */
+/** @typedef {{ slug: string, title: string, label: string, description: string, href: string, category: string, enabled: boolean, visibilityReason: 'assigned' | 'role_default' | 'admin_roadmap' | 'full_catalog', url: string | null, status: 'live' | 'testing' | 'planned', is_available: boolean, role_note: string | null }} LauncherHeadRowApi */
 
-/** @returns {LauncherHeadRow[]} */
-function headsForAdmin(openGrantSet, usedExplicitAssigns, explicitDbGrantSet) {
-  return HEAD_LAUNCHER_CATALOG.map((row) => {
-    const slug = row.slug;
-    const enabled = openGrantSet.has(slug);
-    /** @type {'assigned' | 'role_default' | 'admin_roadmap'} */
-    let visibilityReason = "admin_roadmap";
-    if (enabled) {
-      visibilityReason =
-        usedExplicitAssigns ?
-          explicitDbGrantSet.has(slug) ? "assigned"
-          : /** explicit rows exist but this slug cleared via mismatch — uncommon */ "role_default"
-        : "role_default";
-    }
-    return {
-      slug,
-      label: row.label,
-      description: row.description,
-      href: row.href,
-      category: row.category,
-      enabled,
-      visibilityReason
-    };
-  });
+/** @returns {LauncherHeadRowApi[]} */
+function headsForLauncherFullCatalog() {
+  return HEAD_LAUNCHER_CATALOG.map((row) => enrichLauncherHead(row, true, "full_catalog"));
 }
 
-/** Internal non-admin (and executives, etc.) — launcher rows strictly match access; no roadmap cards. */
-/** @returns {LauncherHeadRow[]} */
+/** @returns {LauncherHeadRowApi[]} */
 function headsForInternalNonRoadmap(openGrantSet, usedExplicitAssigns) {
-  return HEAD_LAUNCHER_CATALOG.filter((row) => openGrantSet.has(row.slug)).map((row) => ({
-    slug: row.slug,
-    label: row.label,
-    description: row.description,
-    href: row.href,
-    category: row.category,
-    enabled: true,
-    visibilityReason: /** when rows exist everything shown is attributable to assignments */
+  return HEAD_LAUNCHER_CATALOG.filter((row) => openGrantSet.has(row.slug)).map((row) =>
+    enrichLauncherHead(
+      row,
+      true,
+      /** when rows exist everything shown is attributable to assignments */
       usedExplicitAssigns ? "assigned" : "role_default"
-  }));
+    )
+  );
 }
 
 /** Dealer / partner portfolio — curated slugs only, no internals, no roadmap. */
-/** @returns {LauncherHeadRow[]} */
+/** @returns {LauncherHeadRowApi[]} */
 function headsForDealerPortfolio(openGrantSet, usedExplicitAssigns, explicitDealerSubsetForVisibility) {
   const slugOrder = HEAD_LAUNCHER_CATALOG.map((r) => r.slug).filter((s) => DEALER_VISIBLE_SLUGS.has(s));
   const visible =
@@ -352,17 +404,15 @@ function headsForDealerPortfolio(openGrantSet, usedExplicitAssigns, explicitDeal
   return visible.map((slug) => {
     const row = HEAD_LAUNCHER_CATALOG.find((c) => c.slug === slug);
     if (!row) throw new Error(`launcher catalog missing dealer slug "${slug}"`);
-    const r = row;
-    return {
-      slug: r.slug,
-      label: r.label,
-      description: r.description,
-      href: r.href,
-      category: r.category,
-      enabled: openGrantSet.has(slug),
-      visibilityReason: usedExplicitAssigns ? "assigned" : "role_default"
-    };
+    return enrichLauncherHead(row, openGrantSet.has(slug), usedExplicitAssigns ? "assigned" : "role_default");
   });
+}
+
+function appendPublicQuoteIfMissing(heads) {
+  const out = [...heads];
+  if (out.some((h) => h.slug === PUBLIC_QUOTE_LAUNCHER_ROW.slug)) return out;
+  out.push(enrichPublicQuoteHead());
+  return out;
 }
 
 /**
@@ -389,7 +439,10 @@ export async function buildMeHeadsPayload(supabase, reqUser) {
         id: ctx.id,
         email: ctx.email,
         role: ctx.role,
-        userKind: "internal"
+        userKind: "internal",
+        full_name: pickStr(reqUser?.full_name || reqUser?.fullName),
+        department: pickStr(reqUser?.department),
+        organization_id: reqUser?.organization_id ?? null
       },
       heads: []
     };
@@ -401,46 +454,48 @@ export async function buildMeHeadsPayload(supabase, reqUser) {
     role,
     userKind,
     dealer,
-    isAdminRole: adminRole,
+    launcherFullCatalog,
     actionableGrantSet,
     explicitDbGrantSet,
     usedExplicitAssigns,
     explicitDealerSubset
   } = ctx;
 
-  /** Dealer attempted internal-only assigns — no dealer-visible slug survived clamping → empty launcher (secure). */
+  const profileUser = {
+    id,
+    email,
+    role,
+    userKind,
+    full_name: pickStr(reqUser?.full_name || reqUser?.fullName),
+    department: pickStr(reqUser?.department),
+    organization_id: reqUser?.organization_id ?? null
+  };
+
+  /** Dealer attempted internal-only assigns — no dealer-visible slug survived clamping → secure empty catalog (public quote may still attach). */
   if (usedExplicitAssigns && dealer && explicitDbGrantSet.size > 0 && explicitDealerSubset.size === 0) {
     return {
       ok: true,
-      user: {
-        id,
-        email,
-        role,
-        userKind
-      },
-      heads: []
+      user: profileUser,
+      heads: appendPublicQuoteIfMissing([])
     };
   }
 
-  /** @type {LauncherHeadRow[]} */
+  /** @type {LauncherHeadRowApi[]} */
   let heads;
 
-  if (adminRole && !dealer) {
-    heads = headsForAdmin(actionableGrantSet, usedExplicitAssigns, explicitDbGrantSet);
+  if (launcherFullCatalog && !dealer) {
+    heads = headsForLauncherFullCatalog();
   } else if (dealer) {
     heads = headsForDealerPortfolio(actionableGrantSet, usedExplicitAssigns, explicitDealerSubset);
   } else {
     heads = headsForInternalNonRoadmap(actionableGrantSet, usedExplicitAssigns);
   }
 
+  heads = appendPublicQuoteIfMissing(heads);
+
   return {
     ok: true,
-    user: {
-      id,
-      email,
-      role,
-      userKind
-    },
+    user: profileUser,
     heads
   };
 }

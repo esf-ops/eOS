@@ -785,7 +785,7 @@ export async function salesPerformanceIntelligenceHandler(req, supabaseGetter) {
     title: "Classification Rules & Data Quality",
     appliedAccountRules: [...ACCOUNT_RULES_DOCUMENTATION],
     disclaimer:
-      "Moraware remains the source of truth for production square footage. eOS classification rules are used only to normalize branch/location and salesperson attribution. Unmatched accounts remain in totals and are marked as Moraware fallback.",
+      "Moraware remains the source of truth for production square footage. eliteOS classification rules are used only to normalize branch/location and salesperson attribution. Unmatched accounts remain in totals and are marked as Moraware fallback.",
     methodTable: quality.methodRows,
     mappedVolumePct: quality.mappedVolumePct,
     unmappedVolumePct: quality.unmappedVolumePct,

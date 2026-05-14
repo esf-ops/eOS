@@ -338,7 +338,7 @@ export default function App() {
     return (
       <div className="container">
         <div className="card" style={{ maxWidth: 520, margin: "64px auto" }}>
-          <div className="title">eliteOS Brain Health</div>
+          <div className="title">eliteOS Brain Health Head</div>
           <div className="muted">Sign in with your eliteOS account.</div>
           <div style={{ height: 12 }} />
           {authError ? <div className="error">{authError}</div> : null}
@@ -371,7 +371,7 @@ export default function App() {
         <div className="card">
           <div className="hstack" style={{ justifyContent: "space-between" }}>
             <div>
-              <div className="title">eliteOS Brain Health</div>
+              <div className="title">eliteOS Brain Health Head</div>
               <div className="muted">
                 Signed in as <b>{me.user.email}</b> ({me.user.role})
               </div>
@@ -391,7 +391,7 @@ export default function App() {
     <div className="container">
       <div className="hstack" style={{ justifyContent: "space-between" }}>
         <div>
-          <div className="title">eliteOS Brain Health / Sync Admin</div>
+          <div className="title">eliteOS Brain Health Head / Sync Admin</div>
           <div className="muted">
             Moraware records the work. eliteOS explains the work. The heads move the work.
           </div>

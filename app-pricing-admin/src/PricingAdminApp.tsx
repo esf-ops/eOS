@@ -94,7 +94,7 @@ export default function PricingAdminApp() {
       if (pct && pct.percent != null) setMarkupPct(String(pct.percent));
     } catch (e: unknown) {
       if (e instanceof ApiError && e.status === 403) {
-        setErr("Forbidden — need admin, finance, or executive role and Pricing Admin head access.");
+        setErr("Forbidden — need admin, finance, or executive role and eliteOS Pricing Admin Head access.");
       } else {
         setErr(e instanceof ApiError ? e.message : String(e));
       }
@@ -197,7 +197,7 @@ export default function PricingAdminApp() {
     <div className="page">
       <header className="hero">
         <img src={EOS_LOGO_URL} alt="Elite Stone Fabrication" style={{ maxWidth: 220, marginBottom: 12 }} />
-        <h1>Pricing Admin</h1>
+        <h1>eliteOS Pricing Admin Head</h1>
         <p className="sub">
           Authorized staff only — material tiers, add-ons, and policy rules. Backend: <code>/api/pricing-admin/*</code>
         </p>

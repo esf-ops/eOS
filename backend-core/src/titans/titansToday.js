@@ -567,7 +567,7 @@ export async function buildTitansTodayPayload(supabase, opts) {
     const emptyPayload = {
       ok: true,
       label: "Titan/Saw activity signals",
-      source: "eOS Brain",
+      source: "eliteOS Brain",
       lastUpdated: new Date().toISOString(),
       localDate: localDateYmd,
       activeTitanJobs: 0,
@@ -583,10 +583,10 @@ export async function buildTitansTodayPayload(supabase, opts) {
       sawPolishChecklist,
       emptyStateMessage:
         activities.length === 0
-          ? "No activities were found in the eOS Brain for this calendar date. Run operational sync or pick another day."
+          ? "No activities were found in the eliteOS Brain for this calendar date. Run operational sync or pick another day."
           : "No Titan/Saw keyword activity signals for this date. Saw/Polish completion signals may still appear below if applicable.",
       notes: [
-        "Uses Moraware activity signals from the eOS Brain.",
+        "Uses Moraware activity signals from the eliteOS Brain.",
         "Moraware status “Complete” is the crossed-off / done signal for an activity row (not equipment sensors).",
         "Activity ‘shops’ are Moraware-derived groups — validate with Eric's paper Titan list.",
         `Server local calendar date: ${localDateYmd}.`
@@ -741,7 +741,7 @@ export async function buildTitansTodayPayload(supabase, opts) {
   const fullPayload = {
     ok: true,
     label: "Titan/Saw activity signals",
-    source: "eOS Brain",
+    source: "eliteOS Brain",
     lastUpdated: new Date().toISOString(),
     localDate: localDateYmd,
     activeTitanJobs,
@@ -757,7 +757,7 @@ export async function buildTitansTodayPayload(supabase, opts) {
     sawPolishChecklist,
     emptyStateMessage: null,
     notes: [
-      "Uses Moraware activity signals from the eOS Brain.",
+      "Uses Moraware activity signals from the eliteOS Brain.",
       "Moraware status “Complete” is the crossed-off / done signal for an activity row (not equipment sensors).",
       "Average time between completion signals derives from Brain/Moraware timestamps — not shop cycle timers.",
       "Activity shop cards are heuristic groups pending validation vs Eric's Titan paper list.",

@@ -50,3 +50,5 @@ Sync is **logged** in `quote_monday_sync_log` with `skipped_missing_config` when
 1. **Done:** Backend public + internal APIs; internal Monday routing with `MONDAY_INTERNAL_*`; public Monday unchanged for public submissions.
 2. **Done:** `app-internal-estimate` scaffold; internal UI removed from `app-quote` source tree.
 3. **Future:** Dedicated `@eliteos/quote-shared` package; optional **`app-partner-quote`** head; Pricing Admin surfaces in System Admin.
+
+**Launcher:** Staff discover **Public Quote** vs **Internal Estimate** URLs from **`app-home`** after sign-in; deployment URLs are configured on the Brain (`HEAD_URL_*`) and mirrored as optional Vite fallbacks (`VITE_HEAD_URL_*`). See `docs/eliteos/domain-routing-plan.md`.

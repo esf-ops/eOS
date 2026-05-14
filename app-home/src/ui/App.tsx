@@ -9,28 +9,38 @@ type MeUser = {
   email: string;
   role: string;
   fullName?: string;
+  full_name?: string;
   department?: string;
+  organization_id?: string | null;
+  user_kind?: string;
   isActive?: boolean;
 };
 
 type MeResp = { ok: boolean; user: MeUser };
 
-type HeadVisibilityReason = "assigned" | "role_default" | "admin_roadmap";
+type HeadVisibilityReason = "assigned" | "role_default" | "admin_roadmap" | "full_catalog";
+
+type HeadStatus = "live" | "testing" | "planned";
 
 type HeadCard = {
   slug: string;
+  title?: string;
   label: string;
   description: string;
   href: string;
   category: string;
   enabled: boolean;
   visibilityReason?: HeadVisibilityReason;
+  url?: string | null;
+  status?: HeadStatus;
+  is_available?: boolean;
+  role_note?: string | null;
 };
 
 type HeadsResp = {
   ok: boolean;
   inactive?: boolean;
-  user?: { id: string; email: string; role: string; userKind?: string };
+  user?: { id: string; email: string; role: string; userKind?: string; full_name?: string; organization_id?: string | null };
   heads: HeadCard[];
 };
 
@@ -56,7 +66,7 @@ const SECTION_ORDER: SectionTitle[] = [
 ];
 
 const SECURITY_NOTE =
-  "Access shown here reflects your assignments; each head’s APIs still enforce permissions on every request.";
+  "This eliteOS Launcher reflects your assignments; each head’s eliteOS Brain APIs still enforce permissions on every request.";
 
 function mapBackendCategory(category: string): Exclude<SectionTitle, "Coming Soon"> {
   const c = String(category ?? "").trim().toLowerCase();
@@ -69,22 +79,33 @@ function mapBackendCategory(category: string): Exclude<SectionTitle, "Coming Soo
   return "Operations";
 }
 
+function pickLaunchUrl(head: HeadCard): string | null {
+  const fromApi = String(head.url ?? "").trim();
+  if (fromApi) return fromApi.replace(/\/+$/, "");
+  return resolveHeadLaunchUrl(head.slug);
+}
+
 function launcherSection(head: HeadCard): SectionTitle {
-  const url = resolveHeadLaunchUrl(head.slug);
-  if ((!head.enabled && head.visibilityReason === "admin_roadmap") || (head.enabled && !url)) return "Coming Soon";
+  const url = pickLaunchUrl(head);
+  const roadmapish =
+    head.visibilityReason === "admin_roadmap" || head.visibilityReason === "full_catalog";
+  if ((!head.enabled && roadmapish) || (head.enabled && !url)) return "Coming Soon";
   return mapBackendCategory(head.category);
 }
 
-function resolveStatusPills(head: HeadCard): string[] {
-  const url = resolveHeadLaunchUrl(head.slug);
-  const roadmap = head.visibilityReason === "admin_roadmap";
-  if (!head.enabled) {
-    if (roadmap) return ["Coming soon"];
-    return ["Not assigned"];
-  }
-  /** Launch URL not wired in env defaults — surfaced as roadmap-style copy consistent with Exec/BH/System Admin rollout. */
-  if (!url) return ["Coming soon"];
-  return [];
+function titleCaseStatus(s: string): string {
+  const t = String(s ?? "").trim().toLowerCase();
+  if (!t) return "";
+  return t.slice(0, 1).toUpperCase() + t.slice(1);
+}
+
+function resolveStatusBadges(head: HeadCard): string[] {
+  const url = pickLaunchUrl(head);
+  const badges: string[] = [];
+  if (!head.enabled) badges.push("Not assigned");
+  if (head.status) badges.push(titleCaseStatus(head.status));
+  else if (head.enabled && !url) badges.push("No URL configured");
+  return badges;
 }
 
 export default function App() {
@@ -161,12 +182,10 @@ export default function App() {
         return;
       }
 
-      /** Token rotation keeps `access_token` current for API calls — no launcher refetch. */
       if (evt === "TOKEN_REFRESHED") {
         return;
       }
 
-      /** `getSession()` already hydrates — avoid duplicate fetches from this emission. */
       if (evt === "INITIAL_SESSION") {
         return;
       }
@@ -201,9 +220,9 @@ export default function App() {
     await supabase.auth.signOut();
   }
 
-  const enabledCount = useMemo(() => {
+  const assignableHeads = useMemo(() => {
     const hs = headsPayload?.heads ?? [];
-    return hs.filter((h) => h.enabled).length;
+    return hs.filter((h) => h.slug !== "public_quote" && h.enabled);
   }, [headsPayload]);
 
   const grouped = useMemo(() => {
@@ -220,10 +239,15 @@ export default function App() {
 
   const showShell = Boolean(session?.access_token);
   const u = me?.user;
-  const isAdminUser = String(u?.role ?? "").trim().toLowerCase() === "admin";
+  const headsUser = headsPayload?.user;
+  const roleLc = String(u?.role ?? "").trim().toLowerCase();
+  const isAdminLike = roleLc === "admin" || roleLc === "super_admin";
   const displayName =
-    String(u?.fullName ?? "").trim() || String(u?.email ?? session?.user?.email ?? "").trim() || "Signed in user";
+    String(u?.full_name ?? u?.fullName ?? "").trim() ||
+    String(u?.email ?? session?.user?.email ?? "").trim() ||
+    "Signed in user";
   const displayEmail = String(u?.email ?? session?.user?.email ?? "").trim();
+  const displayOrg = String(u?.organization_id ?? headsUser?.organization_id ?? "").trim();
 
   return (
     <div className="shell">
@@ -233,7 +257,7 @@ export default function App() {
             <img src={EOS_LOGO_URL} alt="Elite Stone Fabrication" />
             <div className="brand-text">
               <h1>eliteOS Home</h1>
-              <div className="tag">Keep the Titans running well.</div>
+              <div className="tag">Elite Stone Fabrication — eliteOS Launcher</div>
             </div>
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
@@ -254,6 +278,7 @@ export default function App() {
               <img src={EOS_LOGO_URL} alt="" style={{ height: 48 }} />
               <div className="brand-text">
                 <h1>eliteOS</h1>
+                <div className="tag">Elite Stone · eliteOS</div>
               </div>
             </div>
             <p className="motto">Keep the Titans running well.</p>
@@ -309,6 +334,12 @@ export default function App() {
                   · role <strong>{u.role}</strong>
                 </>
               ) : null}
+              {displayOrg ? (
+                <>
+                  {" "}
+                  · organization <span className="mono-inline">{displayOrg}</span>
+                </>
+              ) : null}
             </div>
 
             <p className="muted-note" style={{ marginTop: 0 }}>
@@ -323,19 +354,17 @@ export default function App() {
 
             {loadingData && !headsPayload ? <p className="muted-note">Loading your access…</p> : null}
 
-            {(headsPayload?.heads ?? []).length === 0 && headsPayload && !loadingData ? (
+            {assignableHeads.length === 0 && headsPayload && !loadingData ? (
               <div className="empty-box" style={{ marginBottom: 24 }}>
-                {isAdminUser ? (
+                {isAdminLike ? (
                   <>
                     <p style={{ margin: "0 0 8px", fontWeight: 600, color: "#0f172a" }}>No heads are assigned yet.</p>
                     <p style={{ margin: 0 }}>Open System Admin to assign access.</p>
                   </>
                 ) : (
                   <>
-                    <p style={{ margin: "0 0 8px", fontWeight: 600, color: "#0f172a" }}>
-                      No eliteOS heads are assigned to your account yet.
-                    </p>
-                    <p style={{ margin: 0 }}>Contact your eliteOS admin.</p>
+                    <p style={{ margin: "0 0 8px", fontWeight: 600, color: "#0f172a" }}>No heads assigned yet. Contact an admin.</p>
+                    <p style={{ margin: 0 }}>If you expected access, ask your eliteOS administrator to grant the right heads.</p>
                   </>
                 )}
               </div>
@@ -348,10 +377,11 @@ export default function App() {
                   <h2 className="section-title">{section}</h2>
                   <div className="card-grid">
                     {items.map((h) => {
-                      const url = resolveHeadLaunchUrl(h.slug);
+                      const url = pickLaunchUrl(h);
                       const canNavigate = Boolean(h.enabled && url);
                       const inactiveClass = !canNavigate ? " disabled" : "";
-                      const pills = resolveStatusPills(h);
+                      const pills = resolveStatusBadges(h);
+                      const cardTitle = String(h.title ?? h.label ?? "").trim() || h.label;
 
                       function openHead() {
                         if (!canNavigate || !url) return;
@@ -361,8 +391,17 @@ export default function App() {
                       return (
                         <article key={h.slug} className={`head-card${inactiveClass}`}>
                           <div className="cat">{h.category}</div>
-                          <h3>{h.label}</h3>
+                          <h3>{cardTitle}</h3>
                           <p className="desc">{h.description}</p>
+                          {h.role_note ? <p className="role-note">{h.role_note}</p> : null}
+                          {url ? (
+                            <p className="url-line" title={url}>
+                              {url}
+                            </p>
+                          ) : null}
+                          <div className="slug-line">
+                            Head slug: <code>{h.slug}</code>
+                          </div>
                           {pills.length ? (
                             <div className="pill-stack">
                               {pills.map((t, pi) => (
@@ -376,7 +415,7 @@ export default function App() {
                             <button type="button" className="btn btn-open action-row" onClick={openHead}>
                               Open head
                             </button>
-                          : /** Avoid duplicate “Open head” noise in exports/prints when there is nothing to launch */ null}
+                          : null}
                           {!canNavigate ?
                             <div className="action-placeholder muted-note" aria-hidden="true">
                               —
@@ -393,7 +432,7 @@ export default function App() {
         )}
       </main>
 
-      <footer className="footer-bar">Keep the Titans running well.</footer>
+      <footer className="footer-bar">eliteOS Home · Elite Stone Fabrication · Keep the Titans running well.</footer>
     </div>
   );
 }

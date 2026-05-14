@@ -1,4 +1,4 @@
-# Quote Demo Head — run locally
+# eliteOS Public Quote Head — run locally
 
 New Vite app: **`app-quote`** (port **5179**). This is a **meeting demo**, not the final public homeowner wizard. The UI is a **light, customer-facing style** with clear “Preview · Not production” and **Demo mode active** messaging when Supabase sign-in is not configured.
 
@@ -55,9 +55,9 @@ npm run build --prefix app-quote
 
 Root `package.json` includes **`eos:build:quote`** so CI and local workflows can opt in without changing `eos:build:all-heads`. For a quick check before a demo, run `npm run build --prefix app-quote` (also used in release prep alongside `npm run eos:check:local`).
 
-## Launcher (eOS Home)
+## Launcher (eliteOS Home)
 
-If `VITE_QUOTE_URL` is unset, Home defaults the Quote card to **http://localhost:5179** (see `app-home/src/lib/config.ts`).
+If `VITE_QUOTE_URL` or `VITE_HEAD_URL_PUBLIC_QUOTE` is unset, eliteOS Home defaults the Public Quote card to **http://localhost:5179** (see `app-home/src/lib/config.ts`).
 
 ## Related docs
 

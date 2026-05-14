@@ -1,6 +1,6 @@
-# eOS Home / Launcher — architecture plan
+# eliteOS Home / eliteOS Launcher — architecture plan
 
-**Goal**: One branded **`eos.elitestonefabrication.com`** entry where authenticated users launch only the heads they are entitled to touch. Frontend route hiding alone is insufficient — **every head’s backend surface must independently enforce RBAC.**
+**Goal**: One branded **`https://www.eliteosfab.com`** (eliteOS Home) entry where authenticated users launch only the heads they are entitled to touch. Frontend route hiding alone is insufficient — **every head’s backend surface must independently enforce RBAC.** (Legacy hostname notes may still mention `eos.*` in older runbooks; user-facing product name is **eliteOS**.)
 
 **Launcher vs backend:** Home card visibility is **UX only** (driven by `GET /api/me/heads`). **Real enforcement** is `requireHeadAccess(headSlug)` on API routes (see `backend-core/src/auth/headAccessMiddleware.js` + `resolveHeadAccessContext` shared with the launcher resolver). Admins bypass head checks to avoid lockout; dealers are clamped to dealer-safe slugs; other users need **`user_head_access`** (or role defaults when no rows exist).
 
@@ -13,7 +13,7 @@
 Visual language (conceptual):
 
 - **ESF** logo tile
-- **eOS** product name — *Elite Operating System*
+- **eliteOS** product name — *Elite Stone Fabrication operating layer*
 - **Motto**: *Keep the Titans running well.*
 - **Supabase Auth** email/password (+ future SSO/passkeys per project settings)
 
@@ -37,23 +37,23 @@ Each launcher row aligns with **`user_head_access.head_slug`** and `EOS_HEAD_SLU
 
 | Display | slug | SPA href hint (`href` fields are routing hints until router ships) |
 |---------|------|-----|
-| Executive | `executive` | `/executive` → existing `app-executive` |
-| Brain Health | `brain_health` | `/brain-health` |
-| System Admin | `system_admin` | `/system-admin` |
-| Sales Head | `sales` | `/sales` → `app-sales` (default dev: `http://localhost:5178`, override `VITE_SALES_URL`) |
-| Quote | `quote` | `/quote` |
-| Production | `production` | `/production` |
-| Shop Floor TV | `shop_tv` | `/shop-tv` |
-| Install | `install` | `/install` |
-| Purchasing | `purchasing` | `/purchasing` |
-| Customer Service | `customer_service` | `/customer-service` |
-| HR | `hr` | `/hr` |
-| Safety | `safety` | `/safety` |
-| Marketing | `marketing` | `/marketing` |
-| Finance | `finance` | `/finance` |
-| Reports | `reports` | `/reports` |
-| Partner Quote | `partner_quote` | `/partner-quote` |
-| Dealer Resources | `dealer_resources` | `/dealer-resources` |
+| eliteOS Executive Head | `executive` | `/executive` → existing `app-executive` |
+| eliteOS Brain Health Head | `brain_health` | `/brain-health` |
+| eliteOS System Admin Head | `system_admin` | `/system-admin` |
+| eliteOS Sales Head | `sales` | `/sales` → `app-sales` (default dev: `http://localhost:5178`, override `VITE_SALES_URL` / `VITE_HEAD_URL_SALES`) |
+| eliteOS Internal Estimate Head | `quote` | `/quote` → `app-internal-estimate` |
+| eliteOS Production Head | `production` | `/production` |
+| eliteOS Shop Floor TV Head | `shop_tv` | `/shop-tv` |
+| eliteOS Install Head | `install` | `/install` |
+| eliteOS Purchasing Head | `purchasing` | `/purchasing` |
+| eliteOS Customer Service Head | `customer_service` | `/customer-service` |
+| eliteOS HR Head | `hr` | `/hr` |
+| eliteOS Safety Head | `safety` | `/safety` |
+| eliteOS Marketing Head | `marketing` | `/marketing` |
+| eliteOS Finance Head | `finance` | `/finance` |
+| eliteOS Reports Head | `reports` | `/reports` |
+| eliteOS Partner Quote Head | `partner_quote` | `/partner-quote` |
+| eliteOS Dealer Resources Head | `dealer_resources` | `/dealer-resources` |
 
 Clicking launches either:
 
@@ -90,7 +90,7 @@ Typical payload:
   "heads": [
     {
       "slug": "executive",
-      "label": "Executive",
+      "label": "eliteOS Executive Head",
       "description": "…",
       "href": "/executive",
       "category": "Leadership",

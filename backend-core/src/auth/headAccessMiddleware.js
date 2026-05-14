@@ -36,8 +36,9 @@ export function requireHeadAccess(headSlug, options = {}) {
         return res.status(403).json(HEAD_ACCESS_DENIED);
       }
 
-      /** Admin bypass prevents accidental lockout; explicit head assignment still controls non-admin users. */
-      if (String(u.role ?? "").trim() === "admin") {
+      /** Admin / super_admin bypass prevents accidental lockout; explicit head assignment still controls other users. */
+      const r = String(u.role ?? "").trim();
+      if (r === "admin" || r === "super_admin") {
         return next();
       }
 

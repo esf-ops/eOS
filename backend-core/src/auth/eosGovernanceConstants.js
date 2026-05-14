@@ -57,6 +57,7 @@ export const INTERNAL_HEAD_SLUGS_FOR_REFERENCE = Object.freeze([
 /** Application roles stored on `user_profiles.role` (ASCII lowercase). */
 export const APPLICATION_ROLES = Object.freeze([
   "admin",
+  "super_admin",
   "executive",
   "sales",
   "production",
