@@ -6,6 +6,7 @@
 const SLUG_TO_ENV_KEYS = Object.freeze({
   public_quote: ["HEAD_URL_PUBLIC_QUOTE"],
   quote: ["HEAD_URL_INTERNAL_ESTIMATE", "HEAD_URL_QUOTE"],
+  quote_library: ["HEAD_URL_QUOTE_LIBRARY"],
   pricing_admin: ["HEAD_URL_PRICING_ADMIN"],
   sales: ["HEAD_URL_SALES"],
   system_admin: ["HEAD_URL_SYSTEM_ADMIN"],

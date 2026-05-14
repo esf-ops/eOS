@@ -1,0 +1,820 @@
+/**
+ * eliteOS Quote Library Head — read/update quotes across shared `quote_headers` (no silo).
+ * @see docs/quote-platform/quote-library-head-plan.md
+ */
+
+import express from "express";
+
+import { logAction } from "../auth/auditLog.js";
+import {
+  mergeRowOrganizationId,
+  organizationScopeOrFilter,
+  resolveOrganizationContext,
+  tableHasOrganizationId
+} from "../organizations/organizationContext.js";
+import { isMissingRelationError, generateQuoteNumber } from "./quotePersist.js";
+import { buildMorawareEntryDocPayload, buildQuickBooksEntryDocPayload } from "./quoteLibraryHandoffPayloads.js";
+
+const jsonParser = express.json({ limit: "2mb" });
+
+const INTERNAL_STATUSES = new Set(["draft", "testing_review", "sent", "revised", "sold", "lost", "archived", "submitted"]);
+const PUBLIC_STATUSES = new Set(["lead_submitted", "reviewing", "contacted", "quoted", "won", "lost", "archived"]);
+
+function isUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || "").trim());
+}
+
+function pickStr(v) {
+  return v != null ? String(v).trim() : "";
+}
+
+function deriveAccountName(row) {
+  const r = row && typeof row === "object" ? row : {};
+  const explicit = pickStr(r.account_name);
+  if (explicit) return explicit;
+  const snap = r.calculation_snapshot && typeof r.calculation_snapshot === "object" ? r.calculation_snapshot : {};
+  const iu = snap.internal_ui && typeof snap.internal_ui === "object" ? snap.internal_ui : {};
+  return (
+    pickStr(r.customer_name) ||
+    pickStr(r.project_name) ||
+    pickStr(iu.account) ||
+    "—"
+  );
+}
+
+function displayStatus(raw) {
+  const s = String(raw ?? "").trim();
+  const map = {
+    lead_submitted: "Lead submitted",
+    testing_review: "Testing review",
+    reviewing: "Reviewing",
+    contacted: "Contacted",
+    quoted: "Quoted",
+    won: "Sold",
+    sold: "Sold",
+    lost: "Lost",
+    archived: "Archived",
+    draft: "Draft",
+    sent: "Sent",
+    revised: "Revised",
+    submitted: "Submitted"
+  };
+  return map[s] || s || "—";
+}
+
+function isAllowedStatus(s) {
+  return INTERNAL_STATUSES.has(s) || PUBLIC_STATUSES.has(s);
+}
+
+function soldStatusForSource(quoteSource) {
+  return quoteSource === "public_consumer" ? "won" : "sold";
+}
+
+function handoffRollupFromRows(rows) {
+  let moraware = "none";
+  let quickbooks = "none";
+  for (const r of rows || []) {
+    const t = pickStr(r.doc_type);
+    const st = pickStr(r.status) || "generated";
+    if (t === "moraware_entry") moraware = st;
+    if (t === "quickbooks_entry") quickbooks = st;
+  }
+  if (moraware !== "none" || quickbooks !== "none") return "in_progress";
+  return "none";
+}
+
+async function safeSelect(db, fn) {
+  try {
+    const r = await fn();
+    if (r && r.error) return { data: null, error: r.error };
+    return r;
+  } catch (e) {
+    return { data: null, error: e, skipped: true };
+  }
+}
+
+async function loadOrgScope(db, req) {
+  const orgCtx = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
+  const orgId = orgCtx.organizationId;
+  const hasQuoteHeadersOrg = orgId ? await tableHasOrganizationId(db, "quote_headers") : false;
+  return { orgCtx, orgId, hasQuoteHeadersOrg };
+}
+
+function applyQuoteHeaderOrgScope(qb, orgId, hasQuoteHeadersOrg) {
+  if (!orgId || !hasQuoteHeadersOrg) return qb;
+  const filt = organizationScopeOrFilter(orgId);
+  return filt ? qb.or(filt) : qb;
+}
+
+function mapListRow(r, handoffDocsByQuote) {
+  const hid = String(r.id);
+  const docs = handoffDocsByQuote.get(hid) || [];
+  const morDoc = docs.find((d) => d.doc_type === "moraware_entry");
+  const qbDoc = docs.find((d) => d.doc_type === "quickbooks_entry");
+  return {
+    id: r.id,
+    quote_number: r.quote_number,
+    account_name: deriveAccountName(r),
+    customer_name: r.customer_name,
+    customer_email: r.customer_email,
+    customer_phone: r.customer_phone,
+    project_name: r.project_name,
+    project_address: r.project_address,
+    city: r.city,
+    state: r.state,
+    zip: r.zip,
+    quote_source: r.quote_source,
+    quote_status: r.quote_status,
+    pricing_mode: r.calculation_snapshot?.internal_ui?.internal_material_basis ?? null,
+    sales_rep: r.sales_rep,
+    branch: r.branch,
+    grand_total: r.grand_total,
+    estimated_sqft: r.estimated_sqft,
+    created_at: r.created_at,
+    updated_at: r.updated_at,
+    latest_monday_sync_status: r._monday_status ?? null,
+    handoff_status: handoffRollupFromRows(docs),
+    moraware_doc_status: morDoc?.status ?? "none",
+    quickbooks_doc_status: qbDoc?.status ?? "none"
+  };
+}
+
+async function fetchMondayLatestMap(db, quoteIds) {
+  const map = new Map();
+  if (!quoteIds.length) return map;
+  const { data, error } = await safeSelect(db, () =>
+    db.from("quote_monday_sync_log").select("quote_id,status,created_at").in("quote_id", quoteIds).order("created_at", { ascending: false })
+  );
+  if (error || !data) return map;
+  for (const row of data) {
+    const qid = String(row.quote_id);
+    if (!map.has(qid)) map.set(qid, row.status);
+  }
+  return map;
+}
+
+async function fetchHandoffDocsByQuote(db, quoteIds) {
+  const map = new Map();
+  if (!quoteIds.length) return map;
+  const { data, error } = await safeSelect(db, () =>
+    db.from("quote_handoff_documents").select("quote_id,doc_type,status,generated_at").in("quote_id", quoteIds)
+  );
+  if (error || !data) return map;
+  for (const row of data) {
+    const qid = String(row.quote_id);
+    if (!map.has(qid)) map.set(qid, []);
+    map.get(qid).push(row);
+  }
+  return map;
+}
+
+/**
+ * @param {import("express").Express} app
+ * @param {{ requireAuth: Function, requireHeadAccess: Function, getSupabase: () => import("@supabase/supabase-js").SupabaseClient }} deps
+ */
+export function attachQuoteLibraryRoutes(app, deps) {
+  const { requireAuth, requireHeadAccess, getSupabase } = deps;
+  const stack = [requireAuth(), requireHeadAccess("quote_library", { getSupabase })];
+
+  app.get("/api/quote-library/quotes", ...stack, async (req, res) => {
+    try {
+      const db = getSupabase();
+      const { orgId, hasQuoteHeadersOrg } = await loadOrgScope(db, req);
+
+      const limit = Math.min(500, Math.max(1, Number.parseInt(String(req.query.limit || "80"), 10) || 80));
+      const offset = Math.max(0, Number.parseInt(String(req.query.offset || "0"), 10) || 0);
+
+      const selectCols =
+        "id,quote_number,quote_source,quote_status,customer_name,customer_email,customer_phone,project_name,project_address,city,state,zip,sales_rep,branch,grand_total,estimated_sqft,created_at,updated_at,calculation_snapshot,prepared_by";
+
+      let qb = db.from("quote_headers").select(selectCols);
+      qb = applyQuoteHeaderOrgScope(qb, orgId, hasQuoteHeadersOrg);
+
+      const view = pickStr(req.query.view);
+      if (view === "internal_estimates") qb = qb.eq("quote_source", "internal_quote");
+      else if (view === "public_leads") qb = qb.eq("quote_source", "public_consumer");
+      else if (view === "sold_jobs" || view === "needs_handoff") {
+        qb = qb.or("quote_status.eq.sold,quote_status.eq.won");
+      }
+
+      const my = pickStr(req.query.my);
+      if (my === "1" || my === "true") {
+        const email = pickStr(req.user?.email);
+        const name = pickStr(req.user?.full_name);
+        if (email || name) {
+          const parts = [];
+          if (email) parts.push(`sales_rep.ilike.%${email.slice(0, 48)}%`);
+          if (name) parts.push(`sales_rep.ilike.%${name.slice(0, 48)}%`);
+          if (parts.length) qb = qb.or(parts.join(","));
+        }
+      }
+
+      const search = pickStr(req.query.search);
+      if (search) {
+        const s = search.replace(/%/g, "").slice(0, 80);
+        const pat = `%${s}%`;
+        qb = qb.or(
+          `customer_name.ilike.${pat},project_name.ilike.${pat},quote_number.ilike.${pat},city.ilike.${pat},sales_rep.ilike.${pat}`
+        );
+      }
+
+      const account = pickStr(req.query.account);
+      if (account) {
+        const a = account.replace(/%/g, "").slice(0, 80);
+        const pat = `%${a}%`;
+        qb = qb.or(`customer_name.ilike.${pat},project_name.ilike.${pat},quote_number.ilike.${pat}`);
+      }
+
+      const status = pickStr(req.query.status);
+      if (status) qb = qb.eq("quote_status", status);
+
+      const branch = pickStr(req.query.branch);
+      if (branch) qb = qb.ilike("branch", `%${branch.slice(0, 40)}%`);
+
+      const salesRep = pickStr(req.query.sales_rep);
+      if (salesRep) qb = qb.ilike("sales_rep", `%${salesRep.slice(0, 40)}%`);
+
+      const quoteSource = pickStr(req.query.quote_source);
+      if (quoteSource) qb = qb.eq("quote_source", quoteSource);
+
+      const pricingMode = pickStr(req.query.pricing_mode);
+      if (pricingMode) {
+        try {
+          qb = qb.filter("calculation_snapshot->internal_ui->>internal_material_basis", "eq", pricingMode);
+        } catch {
+          /* ignore if PostgREST filter unsupported */
+        }
+      }
+
+      const cf = pickStr(req.query.created_from);
+      if (cf) qb = qb.gte("created_at", cf);
+      const ct = pickStr(req.query.created_to);
+      if (ct) qb = qb.lte("created_at", ct);
+      const uf = pickStr(req.query.updated_from);
+      if (uf) qb = qb.gte("updated_at", uf);
+      const ut = pickStr(req.query.updated_to);
+      if (ut) qb = qb.lte("updated_at", ut);
+
+      const minV = pickStr(req.query.min_value);
+      if (minV && Number.isFinite(Number(minV))) qb = qb.gte("grand_total", Number(minV));
+      const maxV = pickStr(req.query.max_value);
+      if (maxV && Number.isFinite(Number(maxV))) qb = qb.lte("grand_total", Number(maxV));
+
+      const sortRaw = pickStr(req.query.sort) || "updated_at";
+      const dir = pickStr(req.query.direction).toLowerCase() === "asc";
+      const sortCol =
+        sortRaw === "account"
+          ? "customer_name"
+          : ["created_at", "updated_at", "grand_total", "quote_status", "sales_rep", "branch", "customer_name"].includes(sortRaw)
+            ? sortRaw
+            : "updated_at";
+      qb = qb.order(sortCol, { ascending: dir });
+      qb = qb.range(offset, offset + limit - 1);
+
+      const { data: rows, error } = await qb;
+      if (error) {
+        if (isMissingRelationError(error)) {
+          return res.status(503).json({ ok: false, installed: false, rows: [], warnings: ["quote_headers missing"] });
+        }
+        throw error;
+      }
+
+      const ids = (rows || []).map((r) => r.id);
+      const monMap = await fetchMondayLatestMap(db, ids);
+      const handoffMap = await fetchHandoffDocsByQuote(db, ids);
+
+      let mapped = (rows || []).map((r) => {
+        const copy = { ...r, _monday_status: monMap.get(String(r.id)) };
+        return mapListRow(copy, handoffMap);
+      });
+
+      const hs = pickStr(req.query.handoff_status);
+      if (hs) mapped = mapped.filter((r) => r.handoff_status === hs || r.moraware_doc_status === hs || r.quickbooks_doc_status === hs);
+
+      if (view === "needs_handoff") {
+        mapped = mapped.filter(
+          (r) =>
+            (r.quote_status === "sold" || r.quote_status === "won") &&
+            (r.moraware_doc_status === "none" || r.quickbooks_doc_status === "none")
+        );
+      }
+
+      res.json({ ok: true, rows: mapped, limit, offset });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  app.get("/api/quote-library/metrics", ...stack, async (req, res) => {
+    try {
+      const db = getSupabase();
+      const { orgId, hasQuoteHeadersOrg } = await loadOrgScope(db, req);
+      let qb = db.from("quote_headers").select("id,quote_status,quote_source,grand_total,created_at,updated_at");
+      qb = applyQuoteHeaderOrgScope(qb, orgId, hasQuoteHeadersOrg);
+      const { data: rows, error } = await qb.limit(2000);
+      if (error) {
+        if (isMissingRelationError(error)) return res.json({ ok: true, installed: false, metrics: {} });
+        throw error;
+      }
+      const now = Date.now();
+      const weekAgo = now - 7 * 86400000;
+      const monthStart = new Date();
+      monthStart.setDate(1);
+      monthStart.setHours(0, 0, 0, 0);
+      let openValue = 0;
+      let openCount = 0;
+      let newWeek = 0;
+      let publicLeads = 0;
+      let internalEst = 0;
+      let soldMonth = 0;
+      let needsMw = 0;
+      let needsQb = 0;
+      for (const r of rows || []) {
+        const st = String(r.quote_status || "");
+        const src = String(r.quote_source || "");
+        const gt = Number(r.grand_total) || 0;
+        const cr = r.created_at ? new Date(r.created_at).getTime() : 0;
+        if (["draft", "testing_review", "sent", "revised", "lead_submitted", "reviewing", "contacted", "quoted", "submitted"].includes(st)) {
+          openValue += gt;
+          openCount += 1;
+        }
+        if (cr >= weekAgo) newWeek += 1;
+        if (src === "public_consumer") publicLeads += 1;
+        if (src === "internal_quote") internalEst += 1;
+        if ((st === "sold" || st === "won") && r.updated_at && new Date(r.updated_at) >= monthStart) soldMonth += 1;
+      }
+      const ids = (rows || []).map((r) => r.id).filter(Boolean);
+      const handoffMap = await fetchHandoffDocsByQuote(db, ids);
+      for (const r of rows || []) {
+        const st = String(r.quote_status || "");
+        if (st !== "sold" && st !== "won") continue;
+        const docs = handoffMap.get(String(r.id)) || [];
+        const mor = docs.find((d) => d.doc_type === "moraware_entry");
+        const qbdoc = docs.find((d) => d.doc_type === "quickbooks_entry");
+        if (!mor) needsMw += 1;
+        if (!qbdoc) needsQb += 1;
+      }
+      res.json({
+        ok: true,
+        total_row_sample: (rows || []).length,
+        metrics: {
+          total_open_quote_value: Math.round(openValue * 100) / 100,
+          open_quotes: openCount,
+          new_this_week: newWeek,
+          public_leads: publicLeads,
+          internal_estimates: internalEst,
+          sold_this_month: soldMonth,
+          needs_moraware_entry_doc: needsMw,
+          needs_quickbooks_entry_doc: needsQb
+        }
+      });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  app.get("/api/quote-library/accounts", ...stack, async (req, res) => {
+    try {
+      const db = getSupabase();
+      const { orgId, hasQuoteHeadersOrg } = await loadOrgScope(db, req);
+      let qb = db
+        .from("quote_headers")
+        .select(
+          "id,quote_number,quote_source,quote_status,customer_name,project_name,branch,sales_rep,grand_total,created_at,updated_at,calculation_snapshot"
+        )
+        .order("updated_at", { ascending: false })
+        .limit(1500);
+      qb = applyQuoteHeaderOrgScope(qb, orgId, hasQuoteHeadersOrg);
+      const search = pickStr(req.query.search);
+      const { data: rows, error } = await qb;
+      if (error) {
+        if (isMissingRelationError(error)) return res.json({ ok: true, installed: false, groups: [] });
+        throw error;
+      }
+      return finishAccounts(res, rows || [], search);
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  function finishAccounts(res, rows, search) {
+    const map = new Map();
+    for (const r of rows) {
+      const key = deriveAccountName(r);
+      if (search && !key.toLowerCase().includes(search.toLowerCase())) continue;
+      if (!map.has(key)) {
+        map.set(key, {
+          account_key: key,
+          quote_count: 0,
+          open_value: 0,
+          last_quote_at: null
+        });
+      }
+      const g = map.get(key);
+      g.quote_count += 1;
+      const st = String(r.quote_status || "");
+      if (!["sold", "won", "lost", "archived"].includes(st)) {
+        g.open_value += Number(r.grand_total) || 0;
+      }
+      const u = r.updated_at || r.created_at;
+      if (!g.last_quote_at || (u && u > g.last_quote_at)) g.last_quote_at = u;
+    }
+    res.json({ ok: true, groups: [...map.values()].sort((a, b) => String(b.last_quote_at).localeCompare(String(a.last_quote_at))) });
+  }
+
+  async function loadQuoteDetail(db, id, orgId, hasQuoteHeadersOrg) {
+    const warnings = [];
+    let qb = db.from("quote_headers").select("*").eq("id", id).limit(1);
+    qb = applyQuoteHeaderOrgScope(qb, orgId, hasQuoteHeadersOrg);
+    const { data: hrows, error: hErr } = await qb;
+    if (hErr) {
+      if (isMissingRelationError(hErr)) return { ok: false, installed: false };
+      throw hErr;
+    }
+    const header = hrows?.[0];
+    if (!header) return { ok: false, notFound: true };
+
+    const payloadRes = await safeSelect(db, () =>
+      db
+        .from("quote_submission_payloads")
+        .select("submitted_payload, normalized_payload, quote_source, created_at")
+        .eq("quote_id", id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+    );
+    if (payloadRes.error || payloadRes.skipped) warnings.push("quote_submission_payloads unavailable");
+    const payloadRow = payloadRes.data?.[0] ?? null;
+
+    const lines = await safeSelect(db, () => db.from("quote_line_items").select("*").eq("quote_id", id));
+    if (lines.error || lines.skipped) warnings.push("quote_line_items unavailable");
+
+    const rooms = await safeSelect(db, () => db.from("quote_rooms").select("*").eq("quote_id", id).order("sort_order", { ascending: true }));
+    if (rooms.error || rooms.skipped) warnings.push("quote_rooms unavailable");
+
+    const forecast = await safeSelect(db, () => db.from("quote_forecast_events").select("*").eq("quote_id", id).order("event_at", { ascending: false }).limit(50));
+    if (forecast.error || forecast.skipped) warnings.push("quote_forecast_events unavailable");
+
+    const lead = await safeSelect(db, () => db.from("quote_lead_assignments").select("*").eq("quote_id", id).limit(1));
+    if (lead.error || lead.skipped) warnings.push("quote_lead_assignments unavailable");
+
+    const monday = await safeSelect(db, () =>
+      db.from("quote_monday_sync_log").select("*").eq("quote_id", id).order("created_at", { ascending: false }).limit(40)
+    );
+    if (monday.error || monday.skipped) warnings.push("quote_monday_sync_log unavailable");
+
+    const statusHist = await safeSelect(db, () =>
+      db.from("quote_status_history").select("*").eq("quote_id", id).order("changed_at", { ascending: false }).limit(80)
+    );
+    if (statusHist.error || statusHist.skipped) warnings.push("quote_status_history unavailable");
+
+    const handoff = await safeSelect(db, () =>
+      db.from("quote_handoff_documents").select("*").eq("quote_id", id).order("generated_at", { ascending: false })
+    );
+    if (handoff.error || handoff.skipped) warnings.push("quote_handoff_documents unavailable — apply eliteos_quote_library_foundation.sql");
+
+    const timeline = [];
+    for (const ev of statusHist.data || []) {
+      timeline.push({
+        type: "status",
+        at: ev.changed_at || ev.created_at,
+        old_status: ev.old_status,
+        new_status: ev.new_status,
+        by: ev.changed_by
+      });
+    }
+    for (const ev of monday.data || []) {
+      timeline.push({ type: "monday", at: ev.created_at, status: ev.status, action: ev.action });
+    }
+    timeline.sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
+
+    return {
+      ok: true,
+      header: { ...header, account_name: deriveAccountName(header), quote_status_display: displayStatus(header.quote_status) },
+      submitted_payload: payloadRow?.submitted_payload ?? null,
+      normalized_payload: payloadRow?.normalized_payload ?? null,
+      calculation_snapshot: header.calculation_snapshot,
+      line_items: lines.data ?? [],
+      rooms: rooms.data ?? [],
+      forecast_events: forecast.data ?? [],
+      lead_assignment: lead.data?.[0] ?? null,
+      monday_sync_log: monday.data ?? [],
+      status_timeline: timeline,
+      handoff_documents: handoff.data ?? [],
+      warnings
+    };
+  }
+
+  app.get("/api/quote-library/quotes/:id", ...stack, async (req, res) => {
+    try {
+      const id = pickStr(req.params.id);
+      if (!isUuid(id)) return res.status(400).json({ ok: false, error: "Invalid id" });
+      const db = getSupabase();
+      const { orgId, hasQuoteHeadersOrg } = await loadOrgScope(db, req);
+      const detail = await loadQuoteDetail(db, id, orgId, hasQuoteHeadersOrg);
+      if (detail.notFound) return res.status(404).json({ ok: false, error: "Not found" });
+      if (detail.installed === false) return res.status(503).json({ ok: false, installed: false });
+      res.json(detail);
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  app.get("/api/quote-library/quotes/:id/timeline", ...stack, async (req, res) => {
+    try {
+      const id = pickStr(req.params.id);
+      if (!isUuid(id)) return res.status(400).json({ ok: false, error: "Invalid id" });
+      const db = getSupabase();
+      const { orgId, hasQuoteHeadersOrg } = await loadOrgScope(db, req);
+      const detail = await loadQuoteDetail(db, id, orgId, hasQuoteHeadersOrg);
+      if (detail.notFound) return res.status(404).json({ ok: false, error: "Not found" });
+      res.json({ ok: true, timeline: detail.status_timeline || [], warnings: detail.warnings || [] });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  app.patch("/api/quote-library/quotes/:id", ...stack, jsonParser, async (req, res) => {
+    try {
+      const id = pickStr(req.params.id);
+      if (!isUuid(id)) return res.status(400).json({ ok: false, error: "Invalid id" });
+      const db = getSupabase();
+      const { orgId, hasQuoteHeadersOrg } = await loadOrgScope(db, req);
+      let qb = db.from("quote_headers").select("id").eq("id", id).limit(1);
+      qb = applyQuoteHeaderOrgScope(qb, orgId, hasQuoteHeadersOrg);
+      const { data: ex, error: e0 } = await qb;
+      if (e0) throw e0;
+      if (!ex?.[0]) return res.status(404).json({ ok: false, error: "Not found" });
+
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const patch = {};
+      for (const k of ["customer_name", "project_name", "branch", "sales_rep", "project_address", "city", "state", "zip", "customer_email", "customer_phone"]) {
+        if (body[k] !== undefined) patch[k] = body[k];
+      }
+      if (Object.keys(patch).length === 0) return res.status(400).json({ ok: false, error: "No allowed fields" });
+      patch.updated_at = new Date().toISOString();
+      const { error: uErr } = await db.from("quote_headers").update(patch).eq("id", id);
+      if (uErr) throw uErr;
+      try {
+        await logAction({
+          user: req.user,
+          head: "quote_library",
+          actionType: "quote_library_patch",
+          entityType: "quote_header",
+          entityId: id,
+          metadata: { fields: Object.keys(patch) },
+          req
+        });
+      } catch {
+        /* optional */
+      }
+      res.json({ ok: true, id });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  app.patch("/api/quote-library/quotes/:id/status", ...stack, jsonParser, async (req, res) => {
+    try {
+      const id = pickStr(req.params.id);
+      if (!isUuid(id)) return res.status(400).json({ ok: false, error: "Invalid id" });
+      const next = pickStr(req.body?.status);
+      if (!isAllowedStatus(next)) return res.status(400).json({ ok: false, error: "Invalid status" });
+      const db = getSupabase();
+      const { orgId, hasQuoteHeadersOrg } = await loadOrgScope(db, req);
+      let qb = db.from("quote_headers").select("id,quote_status,quote_source").eq("id", id).limit(1);
+      qb = applyQuoteHeaderOrgScope(qb, orgId, hasQuoteHeadersOrg);
+      const { data: rows, error: e0 } = await qb;
+      if (e0) throw e0;
+      const cur = rows?.[0];
+      if (!cur) return res.status(404).json({ ok: false, error: "Not found" });
+      const old = cur.quote_status;
+      const { error: uErr } = await db
+        .from("quote_headers")
+        .update({ quote_status: next, updated_at: new Date().toISOString() })
+        .eq("id", id);
+      if (uErr) throw uErr;
+      const userRef = pickStr(req.user?.email) || pickStr(req.user?.id);
+      const hist = await safeSelect(db, () =>
+        db.from("quote_status_history").insert({
+          quote_id: id,
+          old_status: old,
+          new_status: next,
+          changed_by: userRef,
+          metadata: { source: "quote_library", note: pickStr(req.body?.note) || null }
+        })
+      );
+      try {
+        await logAction({
+          user: req.user,
+          head: "quote_library",
+          actionType: "quote_status_change",
+          entityType: "quote_header",
+          entityId: id,
+          metadata: { old_status: old, new_status: next },
+          req
+        });
+      } catch {
+        /* optional */
+      }
+      res.json({
+        ok: true,
+        id,
+        quote_status: next,
+        warnings: hist.error ? ["quote_status_history insert skipped"] : []
+      });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  app.patch("/api/quote-library/quotes/:id/assign", ...stack, jsonParser, async (req, res) => {
+    try {
+      const id = pickStr(req.params.id);
+      if (!isUuid(id)) return res.status(400).json({ ok: false, error: "Invalid id" });
+      const db = getSupabase();
+      const { orgId, hasQuoteHeadersOrg } = await loadOrgScope(db, req);
+      let qb = db.from("quote_headers").select("id").eq("id", id).limit(1);
+      qb = applyQuoteHeaderOrgScope(qb, orgId, hasQuoteHeadersOrg);
+      const { data: ex } = await qb;
+      if (!ex?.[0]) return res.status(404).json({ ok: false, error: "Not found" });
+      const patch = {
+        updated_at: new Date().toISOString()
+      };
+      if (req.body?.sales_rep !== undefined) patch.sales_rep = req.body.sales_rep;
+      if (req.body?.branch !== undefined) patch.branch = req.body.branch;
+      const { error: uErr } = await db.from("quote_headers").update(patch).eq("id", id);
+      if (uErr) throw uErr;
+      res.json({ ok: true, id });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  app.post("/api/quote-library/quotes/:id/duplicate", ...stack, async (req, res) => {
+    try {
+      const id = pickStr(req.params.id);
+      if (!isUuid(id)) return res.status(400).json({ ok: false, error: "Invalid id" });
+      const db = getSupabase();
+      const { orgId, hasQuoteHeadersOrg } = await loadOrgScope(db, req);
+      let qb = db.from("quote_headers").select("*").eq("id", id).limit(1);
+      qb = applyQuoteHeaderOrgScope(qb, orgId, hasQuoteHeadersOrg);
+      const { data: srcRows, error: sErr } = await qb;
+      if (sErr) throw sErr;
+      const src = srcRows?.[0];
+      if (!src) return res.status(404).json({ ok: false, error: "Not found" });
+      const quoteNumber = generateQuoteNumber();
+      const userEmail = pickStr(req.user?.email || req.user?.id);
+      const snap = src.calculation_snapshot && typeof src.calculation_snapshot === "object" ? { ...src.calculation_snapshot } : {};
+      snap.internal_ui = { ...(snap.internal_ui || {}), duplicated_from_quote_id: id, duplicated_via: "quote_library" };
+      const orgTables = new Set();
+      if (orgId && (await tableHasOrganizationId(db, "quote_headers"))) orgTables.add("quote_headers");
+      const source = src.quote_source === "public_consumer" ? "internal_quote" : src.quote_source;
+      const insRow = {
+        quote_number: quoteNumber,
+        quote_source: source,
+        quote_status: source === "internal_quote" ? "draft" : "draft",
+        partner_account_id: src.partner_account_id,
+        pricing_structure_id: src.pricing_structure_id,
+        customer_name: src.customer_name,
+        customer_email: src.customer_email,
+        customer_phone: src.customer_phone,
+        project_name: src.project_name ? `${src.project_name} (copy)` : "Copy",
+        project_address: src.project_address,
+        city: src.city,
+        state: src.state,
+        zip: src.zip,
+        sales_rep: src.sales_rep,
+        branch: src.branch,
+        project_type: src.project_type,
+        estimate_confidence: src.estimate_confidence,
+        prepared_by: src.prepared_by,
+        valid_days: src.valid_days ?? 30,
+        notes_length: src.notes_length,
+        subtotal: src.subtotal,
+        markup_total: src.markup_total,
+        discount_total: src.discount_total,
+        tax_total: src.tax_total,
+        grand_total: src.grand_total,
+        estimated_sqft: src.estimated_sqft,
+        estimated_material_group: src.estimated_material_group,
+        calculation_snapshot: snap,
+        created_by: userEmail
+      };
+      const merged = mergeRowOrganizationId(insRow, orgId, orgTables.has("quote_headers"));
+      const { data: ins, error: hErr } = await db.from("quote_headers").insert(merged).select("id").limit(1);
+      if (hErr) throw hErr;
+      res.json({ ok: true, quoteId: ins?.[0]?.id, quote_number: quoteNumber });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  app.post("/api/quote-library/quotes/:id/mark-sold", ...stack, jsonParser, async (req, res) => {
+    try {
+      const id = pickStr(req.params.id);
+      if (!isUuid(id)) return res.status(400).json({ ok: false, error: "Invalid id" });
+      const db = getSupabase();
+      const { orgId, hasQuoteHeadersOrg } = await loadOrgScope(db, req);
+      let qb = db.from("quote_headers").select("id,quote_source,quote_status").eq("id", id).limit(1);
+      qb = applyQuoteHeaderOrgScope(qb, orgId, hasQuoteHeadersOrg);
+      const { data: rows, error: e0 } = await qb;
+      if (e0) throw e0;
+      const cur = rows?.[0];
+      if (!cur) return res.status(404).json({ ok: false, error: "Not found" });
+      const next = soldStatusForSource(cur.quote_source);
+      const old = cur.quote_status;
+      const { error: uErr } = await db
+        .from("quote_headers")
+        .update({ quote_status: next, updated_at: new Date().toISOString() })
+        .eq("id", id);
+      if (uErr) throw uErr;
+      const userRef = pickStr(req.user?.email) || pickStr(req.user?.id);
+      await safeSelect(db, () =>
+        db.from("quote_status_history").insert({
+          quote_id: id,
+          old_status: old,
+          new_status: next,
+          changed_by: userRef,
+          metadata: { source: "quote_library_mark_sold" }
+        })
+      );
+      try {
+        await logAction({
+          user: req.user,
+          head: "quote_library",
+          actionType: "quote_mark_sold",
+          entityType: "quote_header",
+          entityId: id,
+          metadata: { new_status: next },
+          req
+        });
+      } catch {
+        /* optional */
+      }
+      res.json({ ok: true, id, quote_status: next });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  async function insertHandoffDoc(db, orgId, req, quoteId, docType, payload) {
+    const orgTables = new Set();
+    if (orgId && (await tableHasOrganizationId(db, "quote_handoff_documents"))) orgTables.add("quote_handoff_documents");
+    if (orgId && (await tableHasOrganizationId(db, "quote_handoff_documents"))) orgTables.add("quote_handoff_documents");
+    const row = mergeRowOrganizationId(
+      {
+        quote_id: quoteId,
+        doc_type: docType,
+        status: "generated",
+        payload,
+        generated_by: pickStr(req.user?.id) || null,
+        generated_at: new Date().toISOString()
+      },
+      orgId,
+      orgTables.has("quote_handoff_documents")
+    );
+    const { data, error } = await db.from("quote_handoff_documents").insert(row).select("id").limit(1);
+    if (error) throw error;
+    return data?.[0]?.id;
+  }
+
+  app.post("/api/quote-library/quotes/:id/generate-moraware-entry-doc", ...stack, async (req, res) => {
+    try {
+      const id = pickStr(req.params.id);
+      if (!isUuid(id)) return res.status(400).json({ ok: false, error: "Invalid id" });
+      const db = getSupabase();
+      const { orgId, hasQuoteHeadersOrg } = await loadOrgScope(db, req);
+      const detail = await loadQuoteDetail(db, id, orgId, hasQuoteHeadersOrg);
+      if (detail.notFound) return res.status(404).json({ ok: false, error: "Not found" });
+      const payload = buildMorawareEntryDocPayload(detail.header, detail.calculation_snapshot, detail.rooms, detail.line_items);
+      const docId = await insertHandoffDoc(db, orgId, req, id, "moraware_entry", payload);
+      res.json({ ok: true, doc_id: docId, payload });
+    } catch (e) {
+      if (isMissingRelationError(e)) {
+        return res.status(503).json({ ok: false, installed: false, message: "Apply eliteos_quote_library_foundation.sql for quote_handoff_documents." });
+      }
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  app.post("/api/quote-library/quotes/:id/generate-quickbooks-entry-doc", ...stack, async (req, res) => {
+    try {
+      const id = pickStr(req.params.id);
+      if (!isUuid(id)) return res.status(400).json({ ok: false, error: "Invalid id" });
+      const db = getSupabase();
+      const { orgId, hasQuoteHeadersOrg } = await loadOrgScope(db, req);
+      const detail = await loadQuoteDetail(db, id, orgId, hasQuoteHeadersOrg);
+      if (detail.notFound) return res.status(404).json({ ok: false, error: "Not found" });
+      const payload = buildQuickBooksEntryDocPayload(detail.header, detail.calculation_snapshot, detail.line_items);
+      const docId = await insertHandoffDoc(db, orgId, req, id, "quickbooks_entry", payload);
+      res.json({ ok: true, doc_id: docId, payload });
+    } catch (e) {
+      if (isMissingRelationError(e)) {
+        return res.status(503).json({ ok: false, installed: false, message: "Apply eliteos_quote_library_foundation.sql for quote_handoff_documents." });
+      }
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  console.log("[quote-library] mounted /api/quote-library/*");
+}

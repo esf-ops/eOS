@@ -72,7 +72,7 @@ Status is **conceptual** unless a separate tracker says otherwise. Use the label
 ### Platform / Admin
 
 - **Home / Launcher Head** — **`app-home/`**; production **`https://www.eliteosfab.com`**; Supabase sign-in + **`GET /api/me`** / **`GET /api/me/heads`** to render allowed head cards (Brain is source of truth for assignments; admin / executive / `super_admin` see full catalog in the launcher response).
-- **System Admin Head** — **`app-system-admin/`**; **`https://system.eliteosfab.com`**; identity and access governance (users, roles, `user_head_access`, invites, lifecycle actions, diagnostics). **Quote Library** (future) will own primary quote search/workflow; **Pricing Admin** owns pricing configuration (`FEATURE_DECISIONS.md` §13).  
+- **System Admin Head** — **`app-system-admin/`**; **`https://system.eliteosfab.com`**; identity and access governance (users, roles, `user_head_access`, invites, lifecycle actions, diagnostics). **Quote Library** owns primary quote search/workflow (separate head below); **Pricing Admin** owns pricing configuration (`FEATURE_DECISIONS.md` §13).  
 - User Management Head  
 - Role / Permissions / Head Access Head  
 - Brain Health / Sync Admin Head  
@@ -89,7 +89,7 @@ Status is **conceptual** unless a separate tracker says otherwise. Use the label
 - Public Consumer Quote Tool (**`app-quote`** — deployed public hostname above)  
 - Internal Quoting / **Internal Estimate** Tool (**`app-internal-estimate`** — separate staff head; auth required)  
 - **Pricing Admin** Tool (**`app-pricing-admin`** — separate head; `pricing_admin` head access + admin/finance/executive role gate on `/api/pricing-admin/*`; distinct from legacy System Admin quote structure APIs)
-- **Quote Library / CRM-style quote head** (future — search, filter, account grouping, status workflow, sold-job handoff docs; absorbs primary quote pipeline UX away from System Admin diagnostics)  
+- **Quote Library Head** (**`app-quote-library/`** — **`https://quotes.eliteosfab.com`**; plural hostname; `quote_library` head slug; Brain routes `/api/quote-library/*`; account grouping, status workflow, Moraware/QB **entry doc** generation — **no** Moraware/QB writeback automation in v1)  
 - Partner Quoting Tool  
 - Quote Pipeline / Quote Leads Head  
 - Quote Catalog Admin (normalized catalog programs — future; see `quote-catalog-admin-architecture.md`)  

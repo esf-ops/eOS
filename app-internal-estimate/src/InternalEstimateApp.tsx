@@ -620,6 +620,19 @@ export default function InternalEstimateApp() {
     return filtered.map((c) => ({ ...c, disabled: c.id === "upload_plans" || c.id === "visualize" }));
   }, []);
 
+  const quoteLibraryUrl = useMemo(() => {
+    const raw = String(import.meta.env.VITE_HEAD_URL_QUOTE_LIBRARY ?? "").trim();
+    return raw.replace(/\/+$/, "") || "https://quotes.eliteosfab.com";
+  }, []);
+
+  const [urlQuoteId, setUrlQuoteId] = useState<string | null>(null);
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search).get("quoteId");
+    if (q && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(q)) {
+      setUrlQuoteId(q);
+    }
+  }, []);
+
   return (
     <div className="page">
       <header className="hero">
@@ -638,6 +651,25 @@ export default function InternalEstimateApp() {
           <span className="badge badge-preview">Preview · Not production</span>
         </div>
       </header>
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between" }}>
+          <div>
+            <a className="btn secondary" href={`${quoteLibraryUrl}/`} target="_blank" rel="noreferrer">
+              Open Quote Library
+            </a>
+            <span className="muted" style={{ marginLeft: 12 }}>
+              Search quotes by account, status, and handoff (new tab).
+            </span>
+          </div>
+        </div>
+        {urlQuoteId ? (
+          <p className="muted" style={{ marginTop: 12, marginBottom: 0 }}>
+            <strong>quoteId in URL:</strong> {urlQuoteId}. Internal Estimate quoteId hydration is not complete yet — use Quote Library for
+            read-only detail or continue in this workspace manually.
+          </p>
+        ) : null}
+      </div>
 
       <div className="status-strip">
         <p className="status-strip-main">

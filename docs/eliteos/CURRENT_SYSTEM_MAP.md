@@ -228,22 +228,24 @@ Scripts under `backend-core/supabase/` define install order and intent; **produc
 
 **Vercel:** Each head and `backend-core` is a **separate project** with monorepo **root directory** set to the matching folder (`domain-routing-plan.md` §1). **Exact project slugs** should match the Vercel dashboard (TODO if renamed).
 
-**Cloudflare:** **CNAME** per hostname (`www`, `quote`, `internal` or `estimate`, `pricing`, `system`, future `api`) to the **Vercel-supplied target**; **apex** `eliteosfab.com` **301 → `https://www.eliteosfab.com`**.
+**Cloudflare:** **CNAME** per hostname (`www`, `quote`, `quotes`, `internal` or `estimate`, `pricing`, `system`, future `api`) to the **Vercel-supplied target**; **apex** `eliteosfab.com` **301 → `https://www.eliteosfab.com`**.
 
 **Brain CORS (`EOS_ALLOWED_ORIGINS` / `ALLOWED_ORIGINS`):** comma-separated, **no trailing slashes**. Baseline production checklist (from routing plan + blueprint):
 
 - `https://www.eliteosfab.com`
 - `https://eliteosfab.com`
 - `https://quote.eliteosfab.com`
+- `https://quotes.eliteosfab.com`
 - `https://internal.eliteosfab.com` and/or `https://estimate.eliteosfab.com`
 - `https://pricing.eliteosfab.com`
 - `https://system.eliteosfab.com`
 - **`https://eliteos-quote.vercel.app`** (public quote fallback)
+- **`https://eliteos-quotes.vercel.app`** (Quote Library Vercel preview fallback)
 - **Each active `https://*.vercel.app`** preview origin used during staging
 
-**Supabase Auth redirect URLs:** Site URL **`https://www.eliteosfab.com`**; redirect patterns include `www`, apex, internal/estimate, pricing, quote, and localhost ports per `domain-routing-plan.md` §3.
+**Supabase Auth redirect URLs:** Site URL **`https://www.eliteosfab.com`**; redirect patterns include `www`, apex, internal/estimate, pricing, quote, **quotes**, and localhost ports per `domain-routing-plan.md` §3.
 
-**Head URL env vars (Brain):** `HEAD_URL_PUBLIC_QUOTE`, `HEAD_URL_INTERNAL_ESTIMATE` (alias `HEAD_URL_QUOTE`), `HEAD_URL_PRICING_ADMIN`, `HEAD_URL_EXECUTIVE`, `HEAD_URL_BRAIN_HEALTH`, `HEAD_URL_SYSTEM_ADMIN`, `HEAD_URL_SALES` (`headDeploymentUrls.js`).
+**Head URL env vars (Brain):** `HEAD_URL_PUBLIC_QUOTE`, `HEAD_URL_INTERNAL_ESTIMATE` (alias `HEAD_URL_QUOTE`), **`HEAD_URL_QUOTE_LIBRARY`**, `HEAD_URL_PRICING_ADMIN`, `HEAD_URL_EXECUTIVE`, `HEAD_URL_BRAIN_HEALTH`, `HEAD_URL_SYSTEM_ADMIN`, `HEAD_URL_SALES` (`headDeploymentUrls.js`).
 
 ---
 
@@ -261,7 +263,7 @@ Scripts under `backend-core/supabase/` define install order and intent; **produc
 
 - **Session handoff** across subdomains.
 - Internal Estimate UI polish for a **2–4 week** test window.
-- Quote Library **search / filter / open / duplicate**.
+- Quote Library **deep filters**, **partner-scoped accounts**, and **Internal Estimate quoteId hydration**.
 - Pricing Admin UI depth + **audit** readability.
 
 ### Priority 3 — architecture cutovers

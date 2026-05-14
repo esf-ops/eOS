@@ -14,8 +14,9 @@
 | 2 | **app-quote** (eliteOS Public Quote Head) | `app-quote/` | `https://quote.eliteosfab.com` |
 | 3 | **app-internal-estimate** (eliteOS Internal Estimate Head) | `app-internal-estimate/` | `https://internal.eliteosfab.com` **or** `https://estimate.eliteosfab.com` (pick one CNAME; both can exist if product wants aliases) |
 | 4 | **app-pricing-admin** (eliteOS Pricing Admin Head) | `app-pricing-admin/` | `https://pricing.eliteosfab.com` |
-| 5 | **app-system-admin** (eliteOS System Admin Head) | `app-system-admin/` | `https://system.eliteosfab.com` |
-| 6 | **backend-core** (eliteOS Brain API) | `backend-core/` | **`https://api.eliteosfab.com`** (future); today often a `*.vercel.app` API URL |
+| 5 | **app-quote-library** (eliteOS Quote Library Head) | `app-quote-library/` | `https://quotes.eliteosfab.com` (suggested Vercel project **eliteos-quotes**; preview: `https://eliteos-quotes.vercel.app`) |
+| 6 | **app-system-admin** (eliteOS System Admin Head) | `app-system-admin/` | `https://system.eliteosfab.com` |
+| 7 | **backend-core** (eliteOS Brain API) | `backend-core/` | **`https://api.eliteosfab.com`** (future); today often a `*.vercel.app` API URL |
 
 For each project, set **Vercel → Settings → Domains** to the row above. Use **Vercel’s exact DNS target** shown in the UI (do not guess CNAME targets).
 
@@ -29,6 +30,7 @@ For each project, set **Vercel → Settings → Domains** to the row above. Use 
 | `quote` | CNAME | Vercel target for **app-quote** |
 | `internal` or `estimate` | CNAME | Vercel target for **app-internal-estimate** |
 | `pricing` | CNAME | Vercel target for **app-pricing-admin** |
+| `quotes` | CNAME | Vercel target for **app-quote-library** (Quote Library; plural — not `quote-library`) |
 | `system` | CNAME | Vercel target for **app-system-admin** |
 | `api` | CNAME | Vercel target for **backend-core** (when ready) |
 
@@ -48,6 +50,7 @@ For each project, set **Vercel → Settings → Domains** to the row above. Use 
   - `https://internal.eliteosfab.com/**`
   - `https://estimate.eliteosfab.com/**`
   - `https://pricing.eliteosfab.com/**`
+  - `https://quotes.eliteosfab.com/**`
   - `https://quote.eliteosfab.com/**`
   - `http://localhost:5173/**` (default Vite; only if used)
   - `http://localhost:5174/**` — **app-brain-health** (eliteOS Brain Health Head)
@@ -58,6 +61,7 @@ For each project, set **Vercel → Settings → Domains** to the row above. Use 
   - `http://localhost:5179/**` — **app-quote** (eliteOS Public Quote Head)
   - `http://localhost:5180/**` — **app-internal-estimate** (eliteOS Internal Estimate Head)
   - `http://localhost:5182/**` — **app-pricing-admin** (eliteOS Pricing Admin Head)
+  - `http://localhost:5183/**` — **app-quote-library** (eliteOS Quote Library Head)
 
 **Invite / magic-link completion:** System Admin sends invites via **`backend-core`** (`inviteUserByEmail`). Set on **backend-core Vercel**:
 
@@ -89,6 +93,7 @@ Set **`EOS_ALLOWED_ORIGINS`** and/or **`ALLOWED_ORIGINS`** (comma-separated, **n
 - `https://quote.eliteosfab.com`
 - `https://internal.eliteosfab.com` and/or `https://estimate.eliteosfab.com`
 - `https://pricing.eliteosfab.com`
+- `https://quotes.eliteosfab.com`
 - `https://system.eliteosfab.com`
 - Each active **`https://*.vercel.app`** preview origin used by the heads above
 
@@ -104,6 +109,7 @@ Canonical keys live in `backend-core/src/me/headDeploymentUrls.js`. Minimum set 
 |---------|------------------|
 | `HEAD_URL_PUBLIC_QUOTE` | eliteOS Public Quote Head (`app-quote`) |
 | `HEAD_URL_INTERNAL_ESTIMATE` | eliteOS Internal Estimate Head (`app-internal-estimate`); legacy alias `HEAD_URL_QUOTE` |
+| `HEAD_URL_QUOTE_LIBRARY` | eliteOS Quote Library Head (`app-quote-library`); production **`https://quotes.eliteosfab.com`** |
 | `HEAD_URL_PRICING_ADMIN` | eliteOS Pricing Admin Head (`app-pricing-admin`) |
 | `HEAD_URL_EXECUTIVE` | eliteOS Executive Head |
 | `HEAD_URL_BRAIN_HEALTH` | eliteOS Brain Health Head |

@@ -3,6 +3,7 @@ import express from "express";
 import { resolveOrganizationContext } from "../organizations/organizationContext.js";
 import { calculateQuote, computePublicConsumerEstimatesByGroup, roundPublicEstimateToNearestTen } from "./quoteCalculator.js";
 import { attachInternalQuoteRoutes } from "./internalQuotesApi.js";
+import { attachQuoteLibraryRoutes } from "./quoteLibraryApi.js";
 import { attachPricingAdminHeadApi } from "./pricingAdminHeadApi.js";
 import { attachQuotePricingAdminApi } from "./quotePricingAdminApi.js";
 import { attachQuotePipelineRoutes } from "./quotePipelineApi.js";
@@ -265,10 +266,11 @@ export function attachQuoteRoutes(app, { requireAuth, requireRole, requireHeadAc
 
   attachQuotePipelineRoutes(app, { requireAuth, requireRole, requireHeadAccess, getSupabase });
   attachInternalQuoteRoutes(app, { requireAuth, requireHeadAccess, getSupabase });
+  attachQuoteLibraryRoutes(app, { requireAuth, requireHeadAccess, getSupabase });
   attachQuotePricingAdminApi(app, { requireAuth, requireRole, requireHeadAccess, getSupabase });
   attachPricingAdminHeadApi(app, { requireAuth, requireRole, requireHeadAccess, getSupabase });
 
   console.log(
-    "[quotes] mounted POST /api/public-quote/calculate, POST /api/public-quote/submit-measurements, POST /api/internal-quote/submit (501), POST /api/partner-quote/submit (501), POST /api/quote/calculate, POST /api/quote/submit, /api/internal-quotes/*; quote pipeline GET/PATCH /api/quotes/pipeline*; admin quote APIs via quotePricingAdminApi.js; Pricing Admin head via pricingAdminHeadApi.js"
+    "[quotes] mounted POST /api/public-quote/calculate, POST /api/public-quote/submit-measurements, POST /api/internal-quote/submit (501), POST /api/partner-quote/submit (501), POST /api/quote/calculate, POST /api/quote/submit, /api/internal-quotes/*, /api/quote-library/*; quote pipeline GET/PATCH /api/quotes/pipeline*; admin quote APIs via quotePricingAdminApi.js; Pricing Admin head via pricingAdminHeadApi.js"
   );
 }

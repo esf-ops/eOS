@@ -382,6 +382,8 @@ const fixedEliteOsOrigins = [
   "https://internal.eliteosfab.com",
   "https://estimate.eliteosfab.com",
   "https://pricing.eliteosfab.com",
+  "https://quotes.eliteosfab.com",
+  "https://eliteos-quotes.vercel.app",
   "https://system.eliteosfab.com",
   "http://localhost:5177"
 ];

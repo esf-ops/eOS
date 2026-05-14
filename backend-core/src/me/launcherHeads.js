@@ -45,10 +45,18 @@ export const HEAD_LAUNCHER_CATALOG = [
   {
     slug: "quote",
     label: "eliteOS Internal Estimate Head",
-    description: "Internal quoting and the eliteOS Quote Library (authenticated staff).",
+    description: "Create and revise internal estimates (measurement + pricing workspace).",
     category: "Revenue",
     href: "/quote",
     roleNote: "This head uses the Internal Estimate app; eliteOS Brain APIs enforce head access separately from this launcher."
+  },
+  {
+    slug: "quote_library",
+    label: "eliteOS Quote Library Head",
+    description: "Search, filter, manage, and move quotes from estimate to sold job.",
+    category: "Revenue",
+    href: "/quote-library",
+    roleNote: "Account-centered quote operations and handoff docs; distinct from Public Quote and Internal Estimate."
   },
   {
     slug: "production",
@@ -182,8 +190,8 @@ function defaultSlugSet(role, userKind) {
 
   const base = new Set(["brain_health"]);
   const roleHints = {
-    sales: ["sales", "quote", "reports"],
-    estimator: ["quote", "reports"],
+    sales: ["sales", "quote", "quote_library", "reports"],
+    estimator: ["quote", "quote_library", "reports"],
     accounting: ["finance", "reports", "pricing_admin"],
     production: ["production", "shop_tv", "reports"],
     shop_tv: ["shop_tv"],
