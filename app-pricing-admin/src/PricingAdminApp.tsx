@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { apiGetJson, apiPatchJson, ApiError } from "@quote-lib/api";
 import { config, EOS_LOGO_URL } from "@quote-lib/config";
-import { getSupabase } from "@quote-lib/supabase";
+import { getSupabase } from "./lib/supabase";
 
 type Tab = "dashboard" | "groups" | "addons" | "rules" | "audit" | "planned";
 

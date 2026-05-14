@@ -24,7 +24,7 @@ import {
 } from "@quote-lib/prototypeQuoteMath";
 import type { MaterialGroupComparisonRow } from "@quote-lib/prototypeQuoteMath";
 import type { GuidedPiece, MathCheckSnapshot, QuoteWorkflowMethod, RoomDraft } from "@quote-lib/quoteTypes";
-import { getSupabase } from "@quote-lib/supabase";
+import { getSupabase } from "./lib/supabase";
 import RoomScopeBuilder from "@quote-ui/RoomScopeBuilder";
 import InternalGuidedShapePreview from "./InternalGuidedShapePreview";
 
