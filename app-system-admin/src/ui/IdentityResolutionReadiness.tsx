@@ -85,8 +85,7 @@ export default function IdentityResolutionReadiness({ token }: { token: string }
       ) : null}
 
       <div
-        className={`schema-card ${installed ? "healthy" : schema ? "setup" : ""}`}
-        style={!schema && !err ? { borderColor: "rgba(255,255,255,0.08)" } : undefined}
+        className={`schema-card ${installed ? "healthy" : schema ? "setup" : ""}${!schema && !err ? " schema-card-pending" : ""}`}
       >
         <strong>Identity Resolution schema</strong>
         {!schema && !err ? (
@@ -95,14 +94,14 @@ export default function IdentityResolutionReadiness({ token }: { token: string }
           </div>
         ) : schema && !installed ? (
           <div style={{ marginTop: 8 }}>
-            <div style={{ color: "#fcd34d" }}>Not installed</div>
+            <div className="schema-lead schema-lead--warn">Not installed</div>
             <p className="muted" style={{ marginTop: 6 }}>
               {schema.message ?? "Identity Resolution schema has not been applied yet."}
             </p>
             {missing.length ? (
               <div className="muted" style={{ marginTop: 8, fontSize: 13 }}>
                 Missing tables:{" "}
-                <span style={{ color: "#fed7aa" }}>{missing.join(", ")}</span>
+                <span className="schema-missing-list">{missing.join(", ")}</span>
               </div>
             ) : null}
           </div>
@@ -139,7 +138,7 @@ export default function IdentityResolutionReadiness({ token }: { token: string }
       ) : null}
 
       {installed && summary && !summary.counts && summary.message ? (
-        <p className="muted" style={{ marginTop: 12, color: "#fdba74" }}>
+        <p className="muted inline-warn-text" style={{ marginTop: 12 }}>
           {summary.message}
         </p>
       ) : null}

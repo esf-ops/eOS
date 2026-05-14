@@ -778,13 +778,14 @@ export default function App() {
   if (!session) {
     return (
       <div className="shell">
-        <div className="topbar">
-          <div>
+        <div className="topbar topbar-admin">
+          <div className="topbar-brand">
             <strong>eliteOS System Admin Head</strong>
             <div className="muted">Governance & user access foundation</div>
           </div>
         </div>
-        <div className="panel" style={{ maxWidth: 420 }}>
+        <div className="sign-in-layout">
+          <div className="sign-in-panel">
           <h2 style={{ marginTop: 0 }}>Sign in</h2>
           <form onSubmit={submitLogin}>
             <div className="field">
@@ -804,11 +805,12 @@ export default function App() {
             <button type="submit" disabled={loginBusy || !email || !password} className="btn btn-primary">
               {loginBusy ? "Signing in…" : "Sign in"}
             </button>
-            {authError ? <p style={{ color: "#f97316" }}>{authError}</p> : null}
+            {authError ? <p className="form-error">{authError}</p> : null}
           </form>
           <p className="muted" style={{ marginTop: 16 }}>
             Passwords flow through Supabase only; admins never manage other accounts’ plaintext secrets from this UI.
           </p>
+          </div>
         </div>
       </div>
     );
@@ -820,7 +822,7 @@ export default function App() {
     <div className="shell">
       <div className="topbar topbar-admin">
         <div className="topbar-brand">
-          <strong>eliteOS System Admin</strong>
+          <strong>eliteOS System Admin Head</strong>
           <div className="muted">{me?.user?.email ?? ""} · session active</div>
         </div>
         <nav className="main-nav-pills" aria-label="System admin">
@@ -912,7 +914,7 @@ export default function App() {
                   lifecycle actions, audit snippets, and assignments.
                 </p>
 
-                {listError && canOperate ? <p style={{ color: "#fdba74" }}>{listError}</p> : null}
+                {listError && canOperate ? <p className="inline-warn-text">{listError}</p> : null}
 
                 <div className="stat-grid">
               <div className="stat-card">
@@ -1044,7 +1046,11 @@ export default function App() {
                 </thead>
                 <tbody>
                   {filteredRows.map((r) => (
-                    <tr key={String(r.id)} style={{ cursor: "pointer", background: r.id === selectedId ? "rgba(59,130,246,.12)" : "" }} onClick={() => setSelectedId(String(r.id))}>
+                    <tr
+                      key={String(r.id)}
+                      className={r.id === selectedId ? "simple-row-selected" : ""}
+                      onClick={() => setSelectedId(String(r.id))}
+                    >
                       <td>{String(r.full_name ?? "")}</td>
                       <td>{String(r.email ?? "")}</td>
                       <td>{String(r.role ?? "")}</td>
@@ -1278,12 +1284,7 @@ export default function App() {
                         : schemaProbePending ? ""
                         : schemaTablesHealthy ? "healthy"
                         : "setup"
-                      }`}
-                      style={
-                        schemaProbePending && !schemaHealthProbeError ?
-                          { borderColor: "rgba(255,255,255,0.08)" }
-                        : undefined
-                      }
+                      }${schemaProbePending && !schemaHealthProbeError ? " schema-card-pending" : ""}`}
                     >
                       <strong>User Management Schema</strong>
                       {schemaProbePending ? (
@@ -1292,7 +1293,7 @@ export default function App() {
                         </div>
                       ) : schemaHealthProbeError ? (
                         <div style={{ marginTop: 8 }}>
-                          <div style={{ color: "#93c5fd" }}>Schema health could not be checked. Backend/API issue.</div>
+                          <div className="schema-lead schema-lead--info">Schema health could not be checked. Backend/API issue.</div>
                           <div className="muted" style={{ marginTop: 8, fontSize: 13 }}>
                             Confirm <code>VITE_BACKEND_URL</code> points at backend-core (no trailing <code>/api</code>),
                             redeploy/restart the API, then reload. Details are not interpreted as missing SQL migrations.
@@ -1309,7 +1310,7 @@ export default function App() {
                         </div>
                       ) : (
                         <div style={{ marginTop: 8 }}>
-                          <div style={{ color: "#fcd34d" }}>Setup required</div>
+                          <div className="schema-lead schema-lead--warn">Setup required</div>
                           <div className="muted" style={{ marginTop: 4 }}>
                             Run <code style={{ fontSize: 12 }}>backend-core/supabase/user_management_schema.sql</code> on
                             your Supabase project (admin SQL).
@@ -1317,7 +1318,7 @@ export default function App() {
                           {schemaHealthResult?.missing?.length ? (
                             <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>
                               Missing or unreachable tables:{" "}
-                              <span style={{ color: "#fed7aa" }}>{schemaHealthResult.missing.join(", ")}</span>
+                              <span className="schema-missing-list">{schemaHealthResult.missing.join(", ")}</span>
                             </div>
                           ) : null}
                         </div>
