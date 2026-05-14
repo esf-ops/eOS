@@ -75,6 +75,16 @@ export function tierRateForGroup(name: string): number {
   return PROTOTYPE_TIERS.find((t) => t.n === g)?.p ?? PROTOTYPE_TIERS[0].p;
 }
 
+/** ESF Direct $/sf for internal estimate “Direct / Retail” mode (matches backend `ESF_DIRECT_PRICE_PER_SQFT`). */
+export function directRateForGroup(name: string): number {
+  const g = String(name || "Group Promo").trim();
+  return ESF_DIRECT_TIER_RATES.find((t) => t.n === g)?.directPerSqft ?? ESF_DIRECT_TIER_RATES[0].directPerSqft;
+}
+
+export function materialRateForInternalBasis(group: string, basis: "wholesale" | "direct"): number {
+  return basis === "direct" ? directRateForGroup(group) : tierRateForGroup(group);
+}
+
 export function calculateRetailFromWholesaleSettings(
   wholesale: number,
   method: string,
@@ -109,9 +119,13 @@ function sumRoomAddons(room: RoomDraft): { extras: number; addons: MeasuredRoom[
   return { extras, addons, lines };
 }
 
-export function measureRoomDraft(room: RoomDraft, qualifyingSf: number): MeasuredRoom {
+export function measureRoomDraft(
+  room: RoomDraft,
+  qualifyingSf: number,
+  materialBasis: "wholesale" | "direct" = "wholesale"
+): MeasuredRoom {
   const group = String(room.materialGroup || "Group Promo").trim();
-  const rate = tierRateForGroup(group);
+  const rate = materialRateForInternalBasis(group, materialBasis);
   const details: string[] = [];
   const notes: string[] = [];
   const name = room.name.trim() || room.roomType || "Room";
@@ -270,9 +284,13 @@ export function measureRoomDraft(room: RoomDraft, qualifyingSf: number): Measure
   };
 }
 
-export function calculateAllRoomDrafts(rooms: RoomDraft[], projectType: string): { rooms: MeasuredRoom[]; totals: RoomEngineTotals } {
+export function calculateAllRoomDrafts(
+  rooms: RoomDraft[],
+  projectType: string,
+  materialBasis: "wholesale" | "direct" = "wholesale"
+): { rooms: MeasuredRoom[]; totals: RoomEngineTotals } {
   const qualifyingSf = qualifyingSfFromRoomDrafts(rooms);
-  const measured = rooms.map((r) => measureRoomDraft(r, qualifyingSf));
+  const measured = rooms.map((r) => measureRoomDraft(r, qualifyingSf, materialBasis));
   if (projectType.trim().toLowerCase() === "remodel") {
     for (const m of measured) {
       m.notes.push(
@@ -327,6 +345,67 @@ export function buildAllGroupMatrix(totals: RoomEngineTotals) {
       wholesale,
       retail: retail.retail,
       profit: retail.profit
+    };
+  });
+}
+
+/** Internal estimate: each tier at wholesale or direct $/sf — no partner markup row. */
+export function buildInternalGroupMatrix(totals: RoomEngineTotals, materialBasis: "wholesale" | "direct") {
+  return PROTOTYPE_TIERS.map((t) => {
+    const rate = materialRateForInternalBasis(t.n, materialBasis);
+    const c = totals.priceableCounter * rate;
+    const b = totals.priceableSplash * rate;
+    const wholesale = round2(c + b + totals.fixed);
+    return {
+      group: t.n,
+      counter: round2(c),
+      backsplash: round2(b),
+      fixed: totals.fixed,
+      wholesale,
+      retail: wholesale,
+      profit: 0
+    };
+  });
+}
+
+export type InternalEstimateGroupComparisonRow = {
+  group: string;
+  ratePerSqft: number;
+  materialCounter: number;
+  materialSplashFhb: number;
+  materialTotal: number;
+  fullTotal: number;
+};
+
+/**
+ * Per-group comparison for internal estimates: material (counter + splash/FHB at tier rate) and full (material + fixed add-ons + custom lines).
+ * Uses wholesale prototype $/sf or ESF Direct $/sf depending on `basis` — no markup percent.
+ */
+export function buildInternalEstimateGroupComparison(params: {
+  countertopSqft: number;
+  backsplashSqft: number;
+  roomFixedDollars: number;
+  customLineDollars: number;
+  basis: "wholesale" | "direct";
+}): InternalEstimateGroupComparisonRow[] {
+  const ct = Number(params.countertopSqft) || 0;
+  const bs = Number(params.backsplashSqft) || 0;
+  const roomFix = round2(Number(params.roomFixedDollars) || 0);
+  const custom = round2(Number(params.customLineDollars) || 0);
+  const fullExtra = round2(roomFix + custom);
+  return PROTOTYPE_TIERS.map((t) => {
+    const rate = materialRateForInternalBasis(t.n, params.basis);
+    const materialCounter = round2(ct * rate);
+    const materialSplashFhb = round2(bs * rate);
+    const materialTotal = round2(materialCounter + materialSplashFhb);
+    const fullTotal = round2(materialTotal + fullExtra);
+    return {
+      group: t.n,
+      ratePerSqft: rate,
+      materialCounter,
+      materialSplashFhb,
+      materialTotal,
+      fullTotal
     };
   });
 }
@@ -479,9 +558,10 @@ export type LocalQuoteRun = {
 };
 
 export function runLocalPrototypeQuote(params: {
-  quoteMode: "public" | "partner";
-  partnerRetailPercent: number;
-  partnerRetailMethod: string;
+  quoteMode: "public" | "partner" | "internal";
+  partnerRetailPercent?: number;
+  partnerRetailMethod?: string;
+  internalMaterialBasis?: "wholesale" | "direct";
   materialGroupTop: string;
   roomDrafts: RoomDraft[];
   globalAddOns: Record<string, number>;
@@ -489,8 +569,12 @@ export function runLocalPrototypeQuote(params: {
   applyGlobalAddOns: boolean;
   workflowLabel: string;
   projectType: string;
+  /** Internal estimate: sum of structured custom line $ (after validation rules). */
+  customLineItemsTotal?: number;
 }): LocalQuoteRun {
-  const { rooms: measured, totals } = calculateAllRoomDrafts(params.roomDrafts, params.projectType);
+  const basis = params.internalMaterialBasis ?? "wholesale";
+  const roomBasis: "wholesale" | "direct" = params.quoteMode === "internal" ? basis : "wholesale";
+  const { rooms: measured, totals } = calculateAllRoomDrafts(params.roomDrafts, params.projectType, roomBasis);
   const warnings: string[] = [];
   for (const m of measured) warnings.push(...m.notes);
 
@@ -527,6 +611,8 @@ export function runLocalPrototypeQuote(params: {
   const globalPart = params.applyGlobalAddOns ? sumGlobalAddOns(params.globalAddOns) : { total: 0, lines: [], summary: [] };
   let wholesale = measured.reduce((s, r) => s + r.selected, 0) + globalPart.total;
   wholesale = round2(wholesale);
+  const customExtra = params.quoteMode === "internal" ? round2(Number(params.customLineItemsTotal) || 0) : 0;
+  if (customExtra !== 0) wholesale = round2(wholesale + customExtra);
 
   const lineItems = [...materialLines, ...globalPart.lines];
   const estimated_sqft = round2(
@@ -541,7 +627,8 @@ export function runLocalPrototypeQuote(params: {
   }
 
   const primaryGroup = params.materialGroupTop || measured[0]?.group || "Group Promo";
-  const groupRate = tierRateForGroup(primaryGroup);
+  const groupRate =
+    params.quoteMode === "internal" ? materialRateForInternalBasis(primaryGroup, basis) : tierRateForGroup(primaryGroup);
 
   const tier1 = totals.qualifyingSf >= VANITY_TIER_THRESHOLD_SQFT;
   const vanityTierLabel =
@@ -552,7 +639,10 @@ export function runLocalPrototypeQuote(params: {
   let retail: number;
   let profit: number | undefined;
   const pubMin = 25;
-  if (params.quoteMode === "public") {
+  if (params.quoteMode === "internal") {
+    retail = wholesale;
+    profit = undefined;
+  } else if (params.quoteMode === "public") {
     retail = round2(wholesale * (1 + pubMin / 100));
   } else {
     const p = Number(params.partnerRetailPercent) || 20;
@@ -594,21 +684,24 @@ export function runLocalPrototypeQuote(params: {
   const reviewNeeded = warnings.length > 0 || estimated_sqft <= 0;
   const confidence = reviewNeeded ? "Review needed — confirm measurements" : "High for demo purposes";
 
+  const allGroupMatrix =
+    params.quoteMode === "internal" ? buildInternalGroupMatrix(totals, basis) : buildAllGroupMatrix(totals);
+
   return {
     usedFallback: true,
     fallbackLabel: "Demo calculation fallback — backend not connected.",
     materialGroup: primaryGroup,
     estimated_sqft,
     retail,
-    wholesale: params.quoteMode === "partner" ? wholesale : undefined,
-    profit,
+    wholesale: params.quoteMode === "partner" || params.quoteMode === "internal" ? wholesale : undefined,
+    profit: params.quoteMode === "internal" ? undefined : profit,
     lineItems,
     addOnsSummary: summaryFinal,
     warnings,
     confidence,
     reviewNeeded,
     mathCheck,
-    allGroupMatrix: buildAllGroupMatrix(totals),
+    allGroupMatrix,
     totals,
     measuredRooms: measured
   };

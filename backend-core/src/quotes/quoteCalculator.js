@@ -107,8 +107,14 @@ export function normalizePrototypeQuoteInput(input) {
     },
     addOns: typeof src.addOns === "object" && src.addOns ? { ...src.addOns } : {},
     rooms: Array.isArray(src.rooms) ? src.rooms : [],
-    retailMarkupPercent: Number(src.retailMarkupPercent ?? src.markup?.percent ?? 20) || 0,
-    retailMethod: String(src.retailMethod || src.markup?.method || "Markup Percent"),
+    retailMarkupPercent:
+      String(src.quoteSource || src.quote_source || "") === "internal_quote"
+        ? 0
+        : Number(src.retailMarkupPercent ?? src.markup?.percent ?? 20) || 0,
+    retailMethod:
+      String(src.quoteSource || src.quote_source || "") === "internal_quote"
+        ? "Pass Through"
+        : String(src.retailMethod || src.markup?.method || "Markup Percent"),
     retailFlatAdd: Number(src.retailFlatAdd ?? src.markup?.flatAdd ?? 0) || 0,
     metadata: typeof src.metadata === "object" && src.metadata ? { ...src.metadata } : {}
   };
@@ -752,6 +758,17 @@ export async function calculateQuote(rawInput, pricingContext = {}) {
     retailMeta = applyRetailProtection({ wholesale, retailMarkupPercent: m, pricingMode: "public_retail" });
     retail = retailMeta.retail;
     if (retailMeta.enforcedMin) warnings.push(`Retail markup raised to minimum ${MIN_PUBLIC_RETAIL_MARKUP}% for public_retail.`);
+  } else if (String(input.quoteSource) === "internal_quote") {
+    retailMeta = {
+      wholesale,
+      retail: wholesale,
+      profit: 0,
+      appliedMarkupPercent: 0,
+      method: "Internal rate book",
+      percent: 0,
+      flatAdd: 0
+    };
+    retail = wholesale;
   } else {
     retailMeta = applyPartnerRetailDisplay(wholesale, {
       method: input.retailMethod,
@@ -853,6 +870,13 @@ export async function calculateQuote(rawInput, pricingContext = {}) {
     estimate_rooms: input.rooms || []
   });
   snapshot.lineItems = lineItems;
+  if (String(input.quoteSource) === "internal_quote") {
+    snapshot.internal_estimate_math = {
+      version: 1,
+      internal_material_basis: input.internalMaterialBasis,
+      no_partner_or_public_markup_percent: true
+    };
+  }
   if (rawInput.readiness && typeof rawInput.readiness === "object") snapshot.readiness = rawInput.readiness;
   if (rawInput.fileChecklist && typeof rawInput.fileChecklist === "object") snapshot.file_checklist = rawInput.fileChecklist;
   if (rawInput.file_checklist && typeof rawInput.file_checklist === "object") snapshot.file_checklist = rawInput.file_checklist;
