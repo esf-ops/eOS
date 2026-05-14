@@ -5,6 +5,8 @@
 **Brain routes:** `/api/quote-library/*` (`quoteLibraryApi.js`)  
 **Head slug:** `quote_library` (`EOS_HEAD_SLUGS`, `user_head_access`, `requireHeadAccess`)
 
+**Stage 1 (live):** Quote Library at **`quotes.eliteosfab.com`** lists real quotes from the Brain; UI polish pass focuses on **readable labels**, **command-center layout**, **workflow prompts** (Mark sold → generate handoff docs), and **Internal Estimate** deep links (`VITE_HEAD_URL_INTERNAL_ESTIMATE` optional in `app-quote-library`).
+
 ## Product split
 
 - **Internal Estimate Head** (`internal.eliteosfab.com`) — creates and revises estimates; uses `/api/internal-quotes/*`.

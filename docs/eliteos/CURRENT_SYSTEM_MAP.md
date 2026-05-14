@@ -263,7 +263,7 @@ Scripts under `backend-core/supabase/` define install order and intent; **produc
 
 - **Session handoff** across subdomains.
 - Internal Estimate UI polish for a **2–4 week** test window.
-- Quote Library **deep filters**, **partner-scoped accounts**, and **Internal Estimate quoteId hydration**.
+- Quote Library **readability / workflow UI** on **`quotes.eliteosfab.com`** (command-center layout, human labels, confirmations); remaining: **deep filters**, **partner-scoped accounts**, **Internal Estimate quoteId hydration**.
 - Pricing Admin UI depth + **audit** readability.
 
 ### Priority 3 — architecture cutovers
