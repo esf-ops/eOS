@@ -368,6 +368,210 @@ export function buildInternalGroupMatrix(totals: RoomEngineTotals, materialBasis
   });
 }
 
+export type SelectedMaterialScopeLine = {
+  roomName: string;
+  label: string;
+  colorLabel?: string;
+  countertopSf: number;
+  backsplashSf: number;
+  fhbSf: number;
+};
+
+export type SelectedMaterialGroupBlock = {
+  group: string;
+  colorLabel?: string;
+  lines: SelectedMaterialScopeLine[];
+  countertopSf: number;
+  backsplashSf: number;
+  fhbSf: number;
+  materialSubtotal: number;
+  /** Omitted on customer-facing output when `includeRates` is false. */
+  ratePerSqft?: number;
+};
+
+export type SelectedMaterialBreakdown = {
+  groups: SelectedMaterialGroupBlock[];
+  totals: {
+    countertopSf: number;
+    backsplashSf: number;
+    fhbSf: number;
+    materialSubtotal: number;
+  };
+};
+
+function resolveMaterialGroupForPiece(room: RoomDraft, piece?: GuidedPiece): string {
+  if (piece?.materialOverride && piece.materialGroup?.trim()) return piece.materialGroup.trim();
+  return String(room.materialGroup || "Group Promo").trim();
+}
+
+function colorLabelForPiece(room: RoomDraft, piece?: GuidedPiece): string | undefined {
+  const c = piece?.materialOverride ? piece.materialColor : room.materialColor;
+  return c?.trim() || undefined;
+}
+
+/**
+ * Piece/room-level sf rows for selected-material display — mirrors backend `enumerateRoomMaterialSfRows` grouping.
+ * Uses the same $/sf tables as internal estimate math (`materialRateForInternalBasis`); does not apply room fixed add-ons.
+ */
+export function buildSelectedMaterialBreakdown(
+  rooms: RoomDraft[],
+  materialBasis: "wholesale" | "direct",
+  options?: { includeRates?: boolean }
+): SelectedMaterialBreakdown {
+  const includeRates = options?.includeRates === true;
+  type RawRow = SelectedMaterialScopeLine & { group: string };
+  const raw: RawRow[] = [];
+
+  for (const room of rooms) {
+    const roomName = room.name.trim() || room.roomType || "Room";
+
+    if (room.roomType === "Vanity") {
+      continue;
+    }
+
+    if (room.calcMode === "Guided Shape" && room.guidedPieces.some((p) => p.lengthIn > 0 && p.depthIn > 0)) {
+      for (const p of room.guidedPieces) {
+        const sf = sfFromGuidedPiece(p.lengthIn, p.depthIn, p.shape);
+        if (sf <= 0) continue;
+        const g = resolveMaterialGroupForPiece(room, p);
+        const colorLabel = colorLabelForPiece(room, p);
+        const label = p.name?.trim() || (p.pieceType === "splash" ? "Backsplash" : p.pieceType === "fhb" ? "Full height" : "Countertop");
+        if (p.pieceType === "splash") {
+          raw.push({ roomName, label, group: g, colorLabel, countertopSf: 0, backsplashSf: sf, fhbSf: 0 });
+        } else if (p.pieceType === "fhb") {
+          raw.push({ roomName, label, group: g, colorLabel, countertopSf: 0, backsplashSf: 0, fhbSf: sf });
+        } else {
+          raw.push({ roomName, label, group: g, colorLabel, countertopSf: sf, backsplashSf: 0, fhbSf: 0 });
+          if (p.pieceType === "counter" && p.addSplash && p.lengthIn > 0) {
+            const spSf = round2((p.lengthIn * STANDARD_BACKSPLASH_HEIGHT_IN) / 144);
+            if (spSf > 0) {
+              raw.push({
+                roomName,
+                label: `${label} — 4″ backsplash`,
+                group: g,
+                colorLabel,
+                countertopSf: 0,
+                backsplashSf: spSf,
+                fhbSf: 0
+              });
+            }
+          }
+        }
+      }
+      if (room.fhbMode === "Guided Shape") {
+        for (const p of room.fhbPieces) {
+          const sf = sfFromGuidedPiece(p.lengthIn, p.depthIn, p.shape);
+          if (sf <= 0) continue;
+          const g = resolveMaterialGroupForPiece(room, p);
+          raw.push({
+            roomName,
+            label: p.name?.trim() || "Full height backsplash",
+            group: g,
+            colorLabel: colorLabelForPiece(room, p),
+            countertopSf: 0,
+            backsplashSf: 0,
+            fhbSf: sf
+          });
+        }
+      } else if (room.fhbMode === "Manual Sq Ft" && (Number(room.fhbDirectSf) || 0) > 0) {
+        const g = String(room.materialGroup || "Group Promo").trim();
+        raw.push({
+          roomName,
+          label: "Full height backsplash",
+          group: g,
+          colorLabel: room.materialColor?.trim() || undefined,
+          countertopSf: 0,
+          backsplashSf: 0,
+          fhbSf: round2(Number(room.fhbDirectSf) || 0)
+        });
+      }
+      continue;
+    }
+
+    let ct = 0;
+    let bs = 0;
+    let fhb = 0;
+    if (room.calcMode === "Manual Sq Ft") {
+      ct = Number(room.direct.counter) || 0;
+      bs = Number(room.direct.splash) || 0;
+    } else if (room.calcMode === "Rapid Linear Foot") {
+      const a = rapidLinearAreas(
+        room.linear.wallFt,
+        room.linear.splashIn,
+        room.linear.islandL,
+        room.linear.islandW,
+        room.linear.counterDepthIn
+      );
+      ct = a.counter;
+      bs = a.splash;
+    }
+    if (room.fhbMode === "Manual Sq Ft") fhb += Number(room.fhbDirectSf) || 0;
+    if (room.fhbMode === "Guided Shape") {
+      const fh = sumGuidedPiecesByType(room.fhbPieces);
+      fhb += fh.fhb + fh.counter;
+    }
+
+    const g = String(room.materialGroup || "Group Promo").trim();
+    const colorLabel = room.materialColor?.trim() || undefined;
+    if (ct > 0) raw.push({ roomName, label: "Countertop", group: g, colorLabel, countertopSf: round2(ct), backsplashSf: 0, fhbSf: 0 });
+    if (bs > 0) raw.push({ roomName, label: "Backsplash", group: g, colorLabel, countertopSf: 0, backsplashSf: round2(bs), fhbSf: 0 });
+    if (fhb > 0) raw.push({ roomName, label: "Full height backsplash", group: g, colorLabel, countertopSf: 0, backsplashSf: 0, fhbSf: round2(fhb) });
+  }
+
+  const groupMap = new Map<string, SelectedMaterialGroupBlock>();
+  for (const row of raw) {
+    const g = row.group;
+    let block = groupMap.get(g);
+    if (!block) {
+      block = {
+        group: g,
+        lines: [],
+        countertopSf: 0,
+        backsplashSf: 0,
+        fhbSf: 0,
+        materialSubtotal: 0
+      };
+      groupMap.set(g, block);
+    }
+    block.lines.push({
+      roomName: row.roomName,
+      label: row.label,
+      colorLabel: row.colorLabel,
+      countertopSf: row.countertopSf,
+      backsplashSf: row.backsplashSf,
+      fhbSf: row.fhbSf
+    });
+    block.countertopSf = round2(block.countertopSf + row.countertopSf);
+    block.backsplashSf = round2(block.backsplashSf + row.backsplashSf);
+    block.fhbSf = round2(block.fhbSf + row.fhbSf);
+    if (row.colorLabel && !block.colorLabel) block.colorLabel = row.colorLabel;
+  }
+
+  let materialSubtotal = 0;
+  const groups: SelectedMaterialGroupBlock[] = [];
+  for (const block of groupMap.values()) {
+    const rate = materialRateForInternalBasis(block.group, materialBasis);
+    const sfTotal = block.countertopSf + block.backsplashSf + block.fhbSf;
+    block.materialSubtotal = round2(sfTotal * rate);
+    if (includeRates) block.ratePerSqft = rate;
+    materialSubtotal += block.materialSubtotal;
+    groups.push(block);
+  }
+  groups.sort((a, b) => a.group.localeCompare(b.group));
+
+  const totals = groups.reduce(
+    (t, g) => {
+      t.countertopSf = round2(t.countertopSf + g.countertopSf);
+      t.backsplashSf = round2(t.backsplashSf + g.backsplashSf);
+      t.fhbSf = round2(t.fhbSf + g.fhbSf);
+      return t;
+    },
+    { countertopSf: 0, backsplashSf: 0, fhbSf: 0, materialSubtotal: round2(materialSubtotal) }
+  );
+
+  return { groups, totals };
+}
+
 export type InternalEstimateGroupComparisonRow = {
   group: string;
   ratePerSqft: number;

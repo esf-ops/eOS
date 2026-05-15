@@ -6,6 +6,7 @@ import { round2 } from "@quote-lib/measurementEngine";
 import {
   aggregateComparisonScope,
   buildInternalEstimateGroupComparison,
+  buildSelectedMaterialBreakdown,
   calculateAllRoomDrafts,
   createEstimatorRoom,
   hydrateRoomDraftsFromEstimateRooms,
@@ -737,7 +738,40 @@ export default function InternalEstimateApp() {
   }, [colorTbd, quoteDefaultCatalogId, eliteColors]);
 
   const estimateTotalExact = partRetail ?? 0;
-  const materialSubtotalExact = round2(Math.max(0, estimateTotalExact - customLinePreviewTotals));
+
+  const selectedMaterialBreakdown = useMemo(
+    () => buildSelectedMaterialBreakdown(roomDrafts, internalPricingMode),
+    [roomDrafts, internalPricingMode]
+  );
+
+  const visibleRoomAddons = useMemo(
+    () =>
+      liveEstimate.measuredRooms.flatMap((r) =>
+        r.addons.map((a) => ({
+          label: a.label,
+          total: a.total,
+          roomName: r.name
+        }))
+      ),
+    [liveEstimate.measuredRooms]
+  );
+
+  const internalOnlyAdjustDollars = useMemo(() => {
+    let visibleCustom = 0;
+    for (const r of customLineRows) {
+      if (!r.customerFacing || !r.name.trim()) continue;
+      const q = num(r.qty) || 1;
+      const p = num(r.unitPrice);
+      if (q <= 0) continue;
+      if (r.category === "Discount/Credit") {
+        if (p < 0) visibleCustom += q * p;
+        continue;
+      }
+      if (p === 0) continue;
+      visibleCustom += q * p;
+    }
+    return round2(customLinePreviewTotals - visibleCustom);
+  }, [customLineRows, customLinePreviewTotals]);
 
   const quoteLibraryUrl = useMemo(() => {
     const raw = String(import.meta.env.VITE_HEAD_URL_QUOTE_LIBRARY ?? "").trim();
@@ -1876,15 +1910,15 @@ export default function InternalEstimateApp() {
         branch={branch}
         salesRep={salesRep}
         preparedBy={enteredBy}
+        quoteNumber={lastSavedQuoteNumber}
         primaryGroup={topMaterialGroup}
         primaryColorLabel={primaryColorLabel}
         colorTbd={colorTbd}
         measuredRooms={liveEstimate.measuredRooms}
-        counterSf={scopePreview.counterSf}
-        splashFhbSf={round2(scopePreview.splashSf + scopePreview.fhbSf)}
-        totalSf={scopePreview.totalSf}
+        selectedBreakdown={selectedMaterialBreakdown}
         visibleLineItems={visibleCustomerLines}
-        materialSubtotalExact={materialSubtotalExact}
+        visibleRoomAddons={visibleRoomAddons}
+        internalOnlyAdjustDollars={internalOnlyAdjustDollars}
         estimateTotalExact={estimateTotalExact}
         comparisonRows={customerEstimateComparisonRows}
         estimateDate={new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}

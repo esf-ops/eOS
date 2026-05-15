@@ -59,3 +59,10 @@ Elite Stone Fabrication internal sales and estimating staff with **Quote** head 
 - **Automated checks:** `node backend-core/src/scripts/verifyInternalEstimateMath.mjs` (10 sf Promo wholesale vs direct; Group A + $750; counter+backsplash; evil `retailMarkupPercent: 99` ignored).
 - **Manual:** toggle Wholesale ↔ Direct and confirm hero total jumps between wholesale vs Direct totals with **no** extra 20%; add Tear Out and confirm +$750 immediately on sticky total; check only Group A + Group C and confirm print customer block has two rows only.
 
+## 2026-05-15 — Customer print: selected material breakdown + compact layout
+
+- **Mixed groups:** Kitchen perimeter Group Promo + island Group F (piece override or separate rooms) → customer print **Selected material breakdown** lists each group with room/piece sf lines; Estimate detail shows **per-group material lines**, not one collapsed “selected group” row.
+- **Optional comparison:** section titled **Optional all-group comparison**; only checked groups; copy clarifies all-scope alternate pricing.
+- **One page:** typical 1–2 room kitchen with 0–3 comparison groups should fit one letter page (compact grid project overview, tight margins).
+- **Internal-only custom lines:** included in total; note on print when present; not listed as separate customer lines.
+

@@ -1,6 +1,6 @@
 import React from "react";
 import { EOS_LOGO_URL } from "@quote-lib/config";
-import type { InternalEstimateGroupComparisonRow } from "@quote-lib/prototypeQuoteMath";
+import type { InternalEstimateGroupComparisonRow, SelectedMaterialBreakdown } from "@quote-lib/prototypeQuoteMath";
 import type { MeasuredRoom } from "@quote-lib/quoteTypes";
 
 export function roundCustomerDisplay(amount: number): number {
@@ -18,6 +18,12 @@ export type CustomerLineItem = {
   roomName: string;
 };
 
+export type CustomerRoomAddonLine = {
+  label: string;
+  total: number;
+  roomName: string;
+};
+
 export type CustomerEstimatePrintProps = {
   accountName: string;
   customerName: string;
@@ -28,174 +34,231 @@ export type CustomerEstimatePrintProps = {
   branch: string;
   salesRep: string;
   preparedBy: string;
+  quoteNumber?: string | null;
   primaryGroup: string;
   primaryColorLabel: string;
   colorTbd: boolean;
   measuredRooms: MeasuredRoom[];
-  counterSf: number;
-  splashFhbSf: number;
-  totalSf: number;
+  selectedBreakdown: SelectedMaterialBreakdown;
   visibleLineItems: CustomerLineItem[];
-  materialSubtotalExact: number;
+  visibleRoomAddons: CustomerRoomAddonLine[];
+  /** Internal-only custom $ still in estimate total but not listed as lines. */
+  internalOnlyAdjustDollars: number;
   estimateTotalExact: number;
   comparisonRows: InternalEstimateGroupComparisonRow[];
   estimateDate: string;
 };
 
-export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps) {
-  const materialRounded = roundCustomerDisplay(props.materialSubtotalExact);
-  const finalRounded = roundCustomerDisplay(props.estimateTotalExact);
+function formatSf(n: number): string {
+  return Number(n).toFixed(2);
+}
 
+export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps) {
+  const finalRounded = roundCustomerDisplay(props.estimateTotalExact);
   const addrLine = [props.projectAddress, props.city, props.state].filter(Boolean).join(", ");
+  const { selectedBreakdown: bd } = props;
+
+  const vanityRooms = props.measuredRooms.filter((r) => r.type === "Vanity" && r.selected > 0);
+  const scopeRooms = props.measuredRooms.filter((r) => r.type !== "Vanity");
 
   return (
     <div className="customer-estimate-print" aria-hidden="true">
-      <header className="cep-header">
+      <header className="cep-header cep-header-compact">
         <img className="cep-logo" src={EOS_LOGO_URL} alt="Elite Stone Fabrication" />
         <div className="cep-header-text">
           <h1 className="cep-title">Stone Countertop Estimate</h1>
-          <p className="cep-date">Date: {props.estimateDate}</p>
+          <p className="cep-date">
+            {props.estimateDate}
+            {props.quoteNumber ? ` · Ref. ${props.quoteNumber}` : ""}
+          </p>
         </div>
       </header>
 
-      <section className="cep-block">
-        <h2 className="cep-h2">Project</h2>
-        <table className="cep-meta">
-          <tbody>
-            <tr>
-              <th scope="row">Account</th>
-              <td>{props.accountName || "—"}</td>
-            </tr>
-            <tr>
-              <th scope="row">Customer</th>
-              <td>{props.customerName || "—"}</td>
-            </tr>
-            <tr>
-              <th scope="row">Job name</th>
-              <td>{props.projectName || "—"}</td>
-            </tr>
-            <tr>
-              <th scope="row">Project address</th>
-              <td>{addrLine || "—"}</td>
-            </tr>
-            <tr>
-              <th scope="row">Branch</th>
-              <td>{props.branch || "—"}</td>
-            </tr>
-            <tr>
-              <th scope="row">Salesperson</th>
-              <td>{props.salesRep || "—"}</td>
-            </tr>
-            <tr>
-              <th scope="row">Prepared by</th>
-              <td>{props.preparedBy || "—"}</td>
-            </tr>
-          </tbody>
-        </table>
+      <section className="cep-block cep-block-tight">
+        <h2 className="cep-h2">Project overview</h2>
+        <div className="cep-project-grid">
+          <div>
+            <span className="cep-k">Account</span>
+            <span className="cep-v">{props.accountName || "—"}</span>
+          </div>
+          <div>
+            <span className="cep-k">Customer</span>
+            <span className="cep-v">{props.customerName || "—"}</span>
+          </div>
+          <div>
+            <span className="cep-k">Job name</span>
+            <span className="cep-v">{props.projectName || "—"}</span>
+          </div>
+          <div className="cep-span-2">
+            <span className="cep-k">Project address</span>
+            <span className="cep-v">{addrLine || "—"}</span>
+          </div>
+          <div>
+            <span className="cep-k">Branch</span>
+            <span className="cep-v">{props.branch || "—"}</span>
+          </div>
+          <div>
+            <span className="cep-k">Salesperson</span>
+            <span className="cep-v">{props.salesRep || "—"}</span>
+          </div>
+          <div>
+            <span className="cep-k">Prepared by</span>
+            <span className="cep-v">{props.preparedBy || "—"}</span>
+          </div>
+        </div>
       </section>
 
-      <section className="cep-block">
-        <h2 className="cep-h2">Scope summary</h2>
-        <p className="cep-lead">
-          Primary material: <strong>{props.primaryGroup}</strong>
-          {props.colorTbd ? (
-            <> · <em>Color selection TBD</em></>
-          ) : props.primaryColorLabel ? (
-            <> · {props.primaryColorLabel}</>
-          ) : null}
-        </p>
-        <table className="cep-table">
-          <thead>
-            <tr>
-              <th>Room / area</th>
-              <th>Material group</th>
-              <th>Countertop sf</th>
-              <th>Backsplash + FHB sf</th>
-              <th>Total sf</th>
-            </tr>
-          </thead>
-          <tbody>
-            {props.measuredRooms.length ? (
-              props.measuredRooms.map((r) => (
+      {scopeRooms.length > 0 ? (
+        <section className="cep-block cep-block-tight">
+          <h2 className="cep-h2">Scope summary</h2>
+          <table className="cep-table cep-table-compact">
+            <thead>
+              <tr>
+                <th>Room / area</th>
+                <th>Group</th>
+                <th>Counter sf</th>
+                <th>Backsplash + FHB sf</th>
+              </tr>
+            </thead>
+            <tbody>
+              {scopeRooms.map((r) => (
                 <tr key={r.id}>
                   <td>{r.name}</td>
                   <td>{r.group}</td>
-                  <td>{r.type === "Vanity" ? "—" : r.counter.toFixed(2)}</td>
-                  <td>{r.type === "Vanity" ? "—" : (r.splash + r.fhb).toFixed(2)}</td>
-                  <td>{r.type === "Vanity" ? "Vanity program" : r.totalSf.toFixed(2)}</td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan={5}>Measurements entered on estimate</td>
-              </tr>
-            )}
-          </tbody>
-          <tfoot>
-            <tr>
-              <th colSpan={2} scope="row">
-                Totals
-              </th>
-              <td>{props.counterSf.toFixed(2)}</td>
-              <td>{props.splashFhbSf.toFixed(2)}</td>
-              <td>{props.totalSf.toFixed(2)}</td>
-            </tr>
-          </tfoot>
-        </table>
-        {props.measuredRooms.some((r) => r.details.length) ? (
-          <div className="cep-measure-notes">
-            <p className="cep-h3">Dimensions &amp; notes</p>
-            <ul>
-              {props.measuredRooms.flatMap((r) =>
-                r.details.map((d, i) => (
-                  <li key={`${r.id}-${i}`}>
-                    <strong>{r.name}:</strong> {d}
-                  </li>
-                ))
-              )}
-            </ul>
-          </div>
-        ) : null}
-      </section>
-
-      {(props.visibleLineItems.length > 0 || materialRounded > 0) && (
-        <section className="cep-block">
-          <h2 className="cep-h2">Estimate detail</h2>
-          <table className="cep-table cep-table-amounts">
-            <tbody>
-              <tr>
-                <td>Countertop &amp; backsplash material (selected group)</td>
-                <td className="cep-amt">${materialRounded.toLocaleString()}</td>
-              </tr>
-              {props.visibleLineItems.map((ln) => (
-                <tr key={`${ln.name}-${ln.roomName}-${ln.lineTotal}`}>
-                  <td>
-                    {ln.name}
-                    {ln.description ? ` — ${ln.description}` : ""}
-                    {ln.roomName ? ` (${ln.roomName})` : ""}
-                    {ln.qty !== 1 ? ` × ${ln.qty}` : ""}
-                  </td>
-                  <td className="cep-amt">${roundCustomerDisplay(ln.lineTotal).toLocaleString()}</td>
+                  <td>{formatSf(r.counter)}</td>
+                  <td>{formatSf(r.splash + r.fhb)}</td>
                 </tr>
               ))}
             </tbody>
+            <tfoot>
+              <tr>
+                <th colSpan={2}>Totals</th>
+                <td>{formatSf(bd.totals.countertopSf)}</td>
+                <td>{formatSf(bd.totals.backsplashSf + bd.totals.fhbSf)}</td>
+              </tr>
+            </tfoot>
           </table>
-          <p className="cep-round-note">Section amounts rounded up to the nearest $10 for customer display.</p>
         </section>
-      )}
+      ) : null}
+
+      <section className="cep-block cep-block-tight cep-breakdown">
+        <h2 className="cep-h2">Selected material breakdown</h2>
+        <p className="cep-lead cep-lead-tight">
+          Actual scope priced by the material group selected for each room or piece
+          {props.colorTbd ? " (some colors TBD)" : ""}.
+        </p>
+
+        {bd.groups.map((block) => (
+          <div key={block.group} className="cep-group-block">
+            <h3 className="cep-h3">
+              {block.group}
+              {block.colorLabel ? ` · ${block.colorLabel}` : ""}
+            </h3>
+            <ul className="cep-scope-lines">
+              {block.lines.map((ln, i) => (
+                <li key={`${block.group}-${ln.roomName}-${ln.label}-${i}`}>
+                  <strong>{ln.roomName}</strong> — {ln.label}:
+                  {ln.countertopSf > 0 ? ` ${formatSf(ln.countertopSf)} countertop sf` : ""}
+                  {ln.backsplashSf > 0 ? ` ${formatSf(ln.backsplashSf)} backsplash sf` : ""}
+                  {ln.fhbSf > 0 ? ` ${formatSf(ln.fhbSf)} full-height sf` : ""}
+                  {ln.colorLabel && ln.colorLabel !== block.colorLabel ? ` (${ln.colorLabel})` : ""}
+                </li>
+              ))}
+            </ul>
+            <p className="cep-group-totals">
+              Subtotal — Counter: {formatSf(block.countertopSf)} sf · Backsplash/FHB:{" "}
+              {formatSf(block.backsplashSf + block.fhbSf)} sf · Material: $
+              {roundCustomerDisplay(block.materialSubtotal).toLocaleString()}
+            </p>
+          </div>
+        ))}
+
+        {vanityRooms.map((v) => (
+          <div key={v.id} className="cep-group-block">
+            <h3 className="cep-h3">{v.group} · Vanity program</h3>
+            <ul className="cep-scope-lines">
+              <li>
+                <strong>{v.name}</strong> — vanity program (flat): ${roundCustomerDisplay(v.selected).toLocaleString()}
+              </li>
+            </ul>
+          </div>
+        ))}
+
+        <p className="cep-group-totals cep-grand-material">
+          Scope totals — Counter {formatSf(bd.totals.countertopSf)} sf · Backsplash/FHB{" "}
+          {formatSf(bd.totals.backsplashSf + bd.totals.fhbSf)} sf
+        </p>
+      </section>
+
+      <section className="cep-block cep-block-tight">
+        <h2 className="cep-h2">Estimate detail</h2>
+        <table className="cep-table cep-table-compact cep-table-amounts">
+          <tbody>
+            {bd.groups.map((block) => (
+              <tr key={`mat-${block.group}`}>
+                <td>
+                  {block.group} material
+                  {block.lines.length === 1
+                    ? ` (${block.lines[0].roomName} — ${block.lines[0].label})`
+                    : ` (${block.lines.length} scope lines)`}
+                </td>
+                <td className="cep-amt">${roundCustomerDisplay(block.materialSubtotal).toLocaleString()}</td>
+              </tr>
+            ))}
+            {vanityRooms.map((v) => (
+              <tr key={`van-${v.id}`}>
+                <td>
+                  {v.group} vanity — {v.name}
+                </td>
+                <td className="cep-amt">${roundCustomerDisplay(v.selected).toLocaleString()}</td>
+              </tr>
+            ))}
+            {props.visibleRoomAddons.map((a) => (
+              <tr key={`${a.roomName}-${a.label}`}>
+                <td>
+                  {a.label}
+                  {a.roomName ? ` (${a.roomName})` : ""}
+                </td>
+                <td className="cep-amt">${roundCustomerDisplay(a.total).toLocaleString()}</td>
+              </tr>
+            ))}
+            {props.visibleLineItems.map((ln) => (
+              <tr key={`${ln.name}-${ln.roomName}-${ln.lineTotal}`}>
+                <td>
+                  {ln.name}
+                  {ln.description ? ` — ${ln.description}` : ""}
+                  {ln.roomName ? ` (${ln.roomName})` : ""}
+                  {ln.qty !== 1 ? ` × ${ln.qty}` : ""}
+                </td>
+                <td className="cep-amt">${roundCustomerDisplay(ln.lineTotal).toLocaleString()}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {props.internalOnlyAdjustDollars !== 0 ? (
+          <p className="cep-round-note">
+            Internal-only adjustments are included in the project total but are not shown as separate lines on this
+            estimate.
+          </p>
+        ) : null}
+        <p className="cep-round-note">Displayed line amounts round up to the nearest $10.</p>
+      </section>
 
       {props.comparisonRows.length > 0 ? (
-        <section className="cep-block">
-          <h2 className="cep-h2">Material group options</h2>
-          <p className="cep-lead">Alternate price groups for your review (same scope; material rates vary by group).</p>
-          <table className="cep-table cep-table-amounts">
+        <section className="cep-block cep-block-tight cep-comparison">
+          <h2 className="cep-h2">Optional all-group comparison</h2>
+          <p className="cep-lead cep-lead-tight">
+            What if all quoted countertop and backsplash material were priced at this group? This is not your selected
+            mixed-material quote.
+          </p>
+          <table className="cep-table cep-table-compact cep-table-amounts">
             <thead>
               <tr>
                 <th>Group</th>
-                <th>Countertop material</th>
-                <th>Backsplash material</th>
-                <th>Material subtotal</th>
-                <th>Estimated total</th>
+                <th>Counter</th>
+                <th>Backsplash</th>
+                <th>Material</th>
+                <th>Est. total</th>
               </tr>
             </thead>
             <tbody>
@@ -213,40 +276,31 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
         </section>
       ) : null}
 
-      <section className="cep-block cep-total-block">
-        <p className="cep-total-label">Estimated project total</p>
-        <p className="cep-total-value">${finalRounded.toLocaleString()}</p>
-        <p className="cep-round-note">Final total rounded up to the nearest $10. This is an estimate, not a binding contract.</p>
+      <section className="cep-total-band">
+        <span className="cep-total-band-label">Estimated project total</span>
+        <span className="cep-total-band-value">${finalRounded.toLocaleString()}</span>
+        <span className="cep-total-band-note">Rounded up to nearest $10 · Estimate only</span>
       </section>
 
-      <section className="cep-block cep-terms">
-        <h2 className="cep-h2">Terms &amp; conditions</h2>
-        <ul>
-          <li>Estimate is valid for 30 days from the date shown unless otherwise noted.</li>
+      <section className="cep-block cep-block-tight cep-terms">
+        <h2 className="cep-h2">Terms</h2>
+        <ul className="cep-terms-list">
+          <li>Valid 30 days from date shown unless otherwise noted.</li>
           <li>Final pricing may change after field measure, material selection, and plan review.</li>
-          <li>Payment terms and schedule will be confirmed in your signed agreement.</li>
-          <li>Elite Stone Fabrication is not responsible for delays caused by site readiness or third-party trades.</li>
+          <li>Payment terms confirmed in signed agreement.</li>
         </ul>
       </section>
 
-      <section className="cep-block cep-signature">
+      <section className="cep-signature cep-signature-compact">
         <div className="cep-sig-line">
-          <span>Customer signature</span>
-          <span className="cep-sig-blank" />
-          <span>Date</span>
-          <span className="cep-sig-blank cep-sig-date" />
-        </div>
-        <div className="cep-sig-line">
-          <span>Elite Stone Fabrication</span>
+          <span>Customer</span>
           <span className="cep-sig-blank" />
           <span>Date</span>
           <span className="cep-sig-blank cep-sig-date" />
         </div>
       </section>
 
-      <footer className="cep-footer">
-        Elite Stone Fabrication · eliteOS · Thank you for the opportunity to quote your project.
-      </footer>
+      <footer className="cep-footer">Elite Stone Fabrication · Thank you for the opportunity to quote your project.</footer>
     </div>
   );
 }
