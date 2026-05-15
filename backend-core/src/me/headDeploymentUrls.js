@@ -26,6 +26,12 @@ const SLUG_TO_ENV_KEYS = Object.freeze({
   dealer_resources: ["HEAD_URL_DEALER_RESOURCES"]
 });
 
+/** Env keys whose URLs become Browser `Origin` values allowed by backend-core CORS (scheme + host [+ port]). */
+const HEAD_URL_ENV_KEYS_FOR_CORS = Object.freeze([
+  "HEAD_URL_HOME",
+  ...Array.from(new Set(Object.values(SLUG_TO_ENV_KEYS).flat()))
+]);
+
 function isProductionBrain() {
   return String(process.env.NODE_ENV ?? "").toLowerCase() === "production";
 }
@@ -116,4 +122,27 @@ export function inferHeadDeploymentStatus(url) {
   } catch {
     return "planned";
   }
+}
+
+/**
+ * Absolute origins derived from `HEAD_URL_*` env (same URLs Brain advertises via `/api/me/heads`).
+ * Keeps CORS aligned with configured head deployments without duplicating hosts in `EOS_ALLOWED_ORIGINS`.
+ *
+ * @returns {string[]}
+ */
+export function collectHeadEnvOriginsForCors() {
+  const out = [];
+  for (const key of HEAD_URL_ENV_KEYS_FOR_CORS) {
+    const raw = String(process.env[key] ?? "").trim().replace(/\/+$/, "");
+    if (!raw) continue;
+    const sanitized = sanitizeLauncherHeadUrl(raw);
+    if (!sanitized) continue;
+    try {
+      const u = new URL(sanitized);
+      out.push(`${u.protocol}//${u.hostname}${u.port ? `:${u.port}` : ""}`);
+    } catch {
+      /* skip malformed */
+    }
+  }
+  return out;
 }
