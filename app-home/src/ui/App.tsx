@@ -62,9 +62,42 @@ type HeadsResp = {
 };
 
 const SECURITY_NOTE =
-  "Launcher visibility does not grant Brain permissions — APIs enforce authentication and head access on every request.";
+  "What you see here reflects your access assignments. The Brain still enforces sign-in and permissions on every request.";
+
+/** User-facing launcher titles only — internal API slugs and governance keys are unchanged. */
+const LAUNCHER_TOOL_TITLE_BY_SLUG: Record<string, string> = {
+  quote: "Estimating Tool",
+  quote_library: "Quote Library",
+  pricing_admin: "Pricing Admin",
+  system_admin: "System Admin",
+  public_quote: "Public Quote Tool",
+  executive: "Executive Dashboard",
+  brain_health: "System Health",
+  sales: "Sales Dashboard",
+  production: "Production Dashboard",
+  shop_tv: "Shop Floor TV",
+  install: "Install",
+  purchasing: "Purchasing",
+  customer_service: "Customer Service",
+  hr: "HR",
+  safety: "Safety",
+  marketing: "Marketing",
+  finance: "Finance",
+  reports: "Reports",
+  partner_quote: "Partner Quote Tool",
+  dealer_resources: "Dealer Resources"
+};
+
+function launcherCardTitle(h: HeadCard): string {
+  const mapped = LAUNCHER_TOOL_TITLE_BY_SLUG[h.slug];
+  if (mapped) return mapped;
+  const fallback = String(h.title ?? h.label ?? "").trim();
+  return fallback || h.slug;
+}
 
 const AVAILABLE_SORT_PRIORITY = ["quote", "quote_library", "pricing_admin", "system_admin", "public_quote"];
+
+type LauncherSection = "Available Tools" | "Coming Soon Tools";
 
 function pickLaunchUrl(head: HeadCard): string | null {
   const fromApi = String(head.url ?? "").trim().replace(/\/+$/, "");
@@ -133,11 +166,11 @@ function sortAvailableHeads(a: HeadCard, b: HeadCard): number {
   const pa = ia === -1 ? 999 : ia;
   const pb = ib === -1 ? 999 : ib;
   if (pa !== pb) return pa - pb;
-  return String(a.label ?? "").localeCompare(String(b.label ?? ""));
+  return launcherCardTitle(a).localeCompare(launcherCardTitle(b));
 }
 
 function sortRoadmapHeads(a: HeadCard, b: HeadCard): number {
-  return String(a.label ?? "").localeCompare(String(b.label ?? ""));
+  return launcherCardTitle(a).localeCompare(launcherCardTitle(b));
 }
 
 export default function App() {
@@ -366,9 +399,9 @@ export default function App() {
     available.sort(sortAvailableHeads);
     roadmap.sort(sortRoadmapHeads);
     return [
-      { section: "Available heads" as const, items: available },
-      { section: "Coming soon / roadmap" as const, items: roadmap }
-    ];
+      { section: "Available Tools" as const, items: available },
+      { section: "Coming Soon Tools" as const, items: roadmap }
+    ] satisfies Array<{ section: LauncherSection; items: HeadCard[] }>;
   }, [headsPayload]);
 
   const showShell = Boolean(session?.access_token);
@@ -423,7 +456,7 @@ export default function App() {
             </div>
             <p className="motto">Keep the Titans running well.</p>
             <p className="subtitle">
-              Moraware records the work. eliteOS explains the work. The heads move the work.
+              Moraware records the work. eliteOS explains the work. Your tools move the work.
             </p>
             <form onSubmit={(e) => void submitLogin(e)}>
               <div className="field">
@@ -494,7 +527,7 @@ export default function App() {
               </button>
             </form>
             <button type="button" className="btn btn-ghost" style={{ marginTop: 12 }} onClick={skipInvitePassword}>
-              Skip for now — go to launcher
+              Skip for now — open launcher
             </button>
           </div>
         ) : (
@@ -520,14 +553,17 @@ export default function App() {
                   ) : null}
                   {showTechnicalDetails && headsPayload?.heads?.length ? (
                     <div className="tech-details">
-                      <div className="tech-details-caption">Technical reference (head slug → resolved launch URL)</div>
+                      <div className="tech-details-caption">Technical reference (internal slug → launch URL)</div>
                       <ul className="tech-details-list">
                         {headsPayload.heads.map((h) => (
                           <li key={`tech-${h.slug}`}>
-                            <code className="tech-slug">{h.slug}</code>
-                            {h.slug === "quote" ?
-                              <span className="tech-gloss"> Internal Estimate access</span>
-                            : null}
+                            <div className="tech-tool-line">
+                              <span className="tech-tool-label">{launcherCardTitle(h)}</span>
+                              <code className="tech-slug">{h.slug}</code>
+                              {h.slug === "quote" ?
+                                <span className="tech-gloss"> Internal Estimate access key</span>
+                              : null}
+                            </div>
                             <span className="tech-url">{pickLaunchUrl(h) ?? "—"}</span>
                             {h.role_note ?
                               <span className="tech-role-note">{h.role_note}</span>
@@ -544,22 +580,24 @@ export default function App() {
             {loadError ? <div className="banner banner-error">{loadError}</div> : null}
 
             {headsPayload?.inactive ? (
-              <div className="banner banner-warn">This account is inactive. You cannot launch heads until an admin re-enables access.</div>
+              <div className="banner banner-warn">
+                This account is inactive. You cannot open tools until an admin re-enables access.
+              </div>
             ) : null}
 
-            {loadingData && !headsPayload ? <p className="muted-note">Loading your access…</p> : null}
+            {loadingData && !headsPayload ? <p className="muted-note">Loading your tools…</p> : null}
 
             {assignableHeads.length === 0 && headsPayload && !loadingData ? (
               <div className="empty-box launcher-empty">
                 {isAdminLike ? (
                   <>
-                    <p className="empty-title">No heads are assigned yet.</p>
-                    <p className="empty-sub">Use System Admin to assign head access.</p>
+                    <p className="empty-title">No tools are assigned yet.</p>
+                    <p className="empty-sub">Use System Admin to assign tool access.</p>
                   </>
                 ) : (
                   <>
-                    <p className="empty-title">No heads assigned yet.</p>
-                    <p className="empty-sub">Ask your eliteOS administrator for the heads you need.</p>
+                    <p className="empty-title">No tools assigned yet.</p>
+                    <p className="empty-sub">Ask your eliteOS administrator for the tools you need.</p>
                   </>
                 )}
               </div>
@@ -567,13 +605,16 @@ export default function App() {
 
             {grouped.map(({ section, items }) => {
               if (!items.length) return null;
-              const roadmapSection = section === "Coming soon / roadmap";
+              const roadmapSection = section === "Coming Soon Tools";
               return (
-                <section key={section} className="launcher-section">
+                <section
+                  key={section}
+                  className={`launcher-section${roadmapSection ? " launcher-section-roadmap" : " launcher-section-available"}`}
+                >
                   <h2 className="section-kicker">{section}</h2>
                   {roadmapSection ?
                     <p className="section-lede muted-note">
-                      Modules on the roadmap stay read-only here until a production-safe launch URL is configured on the Brain.
+                      Planned tools stay informational here until a production launch link is configured on the Brain.
                     </p>
                   :
                     <p className="section-lede muted-note">
@@ -586,9 +627,9 @@ export default function App() {
                       const canNavigate = Boolean(h.enabled && url && !roadmapSection);
                       const inactiveClass = !canNavigate ? " is-muted" : "";
                       const pills = resolveCardBadges(h, roadmapSection);
-                      const cardTitle = String(h.title ?? h.label ?? "").trim() || h.label;
+                      const cardTitle = launcherCardTitle(h);
                       const showUrl = shouldShowUrlOnCard(url);
-                      const openLabel = h.slug === "public_quote" ? "Open public site" : "Open";
+                      const openLabel = h.slug === "public_quote" ? "Open public site" : "Open tool";
 
                       function openHead() {
                         if (!canNavigate || !url) return;
@@ -621,11 +662,11 @@ export default function App() {
                           : null}
                           {!canNavigate && !roadmapSection ?
                             <p className="card-foot muted-note">
-                              {url ? "Ask your admin for access to launch this head." : null}
+                              {url ? "Ask your admin for access to open this tool." : null}
                             </p>
                           : null}
                           {roadmapSection ?
-                            <p className="card-foot muted-note">Roadmap — not launchable yet.</p>
+                            <p className="card-foot muted-note">On the roadmap — not available to open yet.</p>
                           : null}
                         </article>
                       );
