@@ -33,7 +33,8 @@ function statusPillClass(raw: unknown): string {
   if (s === "sold" || s === "won") return "pill pill-status-won";
   if (s === "lost") return "pill pill-status-lost";
   if (s === "lead_submitted" || s === "reviewing" || s === "contacted" || s === "quoted") return "pill pill-status-lead";
-  if (s === "draft" || s === "sent" || s === "revised" || s === "testing_review" || s === "submitted") return "pill pill-status-active";
+  if (s === "draft" || s === "sent" || s === "revised" || s === "follow_up" || s === "testing_review" || s === "submitted")
+    return "pill pill-status-active";
   if (s === "archived") return "pill pill-status-neutral";
   return "pill pill-status-neutral";
 }
@@ -126,6 +127,8 @@ export default function QuoteLibraryApp() {
 
   const [detailId, setDetailId] = useState<string | null>(null);
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
+  const [revisions, setRevisions] = useState<Record<string, unknown>[]>([]);
+  const [showArchived, setShowArchived] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
 
   const internalBase = useMemo(() => internalEstimateUrl(), []);
@@ -141,8 +144,9 @@ export default function QuoteLibraryApp() {
     if (createdFrom) n += 1;
     if (createdTo) n += 1;
     if (handoffStatus) n += 1;
+    if (showArchived) n += 1;
     return n;
-  }, [search, accountQ, status, quoteSource, branch, salesRep, createdFrom, createdTo, handoffStatus]);
+  }, [search, accountQ, status, quoteSource, branch, salesRep, createdFrom, createdTo, handoffStatus, showArchived]);
 
   const clearFilters = useCallback(() => {
     setSearch("");
@@ -154,6 +158,7 @@ export default function QuoteLibraryApp() {
     setCreatedFrom("");
     setCreatedTo("");
     setHandoffStatus("");
+    setShowArchived(false);
   }, []);
 
   const signIn = useCallback(async () => {
@@ -226,6 +231,7 @@ export default function QuoteLibraryApp() {
       if (createdFrom) params.set("created_from", createdFrom);
       if (createdTo) params.set("created_to", createdTo);
       if (handoffStatus) params.set("handoff_status", handoffStatus);
+      if (showArchived) params.set("include_archived", "1");
       if (tab === "my") params.set("my", "1");
       if (tab === "internal") params.set("view", "internal_estimates");
       if (tab === "public") params.set("view", "public_leads");
@@ -257,7 +263,8 @@ export default function QuoteLibraryApp() {
     createdTo,
     handoffStatus,
     sort,
-    direction
+    direction,
+    showArchived
   ]);
 
   useEffect(() => {
@@ -272,6 +279,7 @@ export default function QuoteLibraryApp() {
   useEffect(() => {
     if (!sessionToken || !detailId) {
       setDetail(null);
+      setRevisions([]);
       return;
     }
     let cancelled = false;
@@ -279,6 +287,17 @@ export default function QuoteLibraryApp() {
       try {
         const d = (await apiGet(`/api/quote-library/quotes/${detailId}`, sessionToken)) as Record<string, unknown>;
         if (!cancelled) setDetail(d);
+        try {
+          const rev = (await apiGet(`/api/quote-library/quotes/${detailId}/revisions`, sessionToken)) as Record<
+            string,
+            unknown
+          >;
+          if (!cancelled && rev.ok === true && Array.isArray(rev.revisions)) {
+            setRevisions(rev.revisions as Record<string, unknown>[]);
+          } else if (!cancelled) setRevisions([]);
+        } catch {
+          if (!cancelled) setRevisions([]);
+        }
       } catch (e: unknown) {
         if (!cancelled) setErr(String((e as Error)?.message || e));
       }
@@ -290,12 +309,18 @@ export default function QuoteLibraryApp() {
 
   const metricCards = useMemo(() => {
     const m = metrics || {};
+    const iq = (m.internal_quote_periods || {}) as Record<string, { total_quote_value?: number; quote_count?: number }>;
+    const periods = (m.periods || {}) as Record<string, { total_quote_value?: number; quote_count?: number }>;
+    const yoy = (m.yoy_compare_ytd || {}) as Record<string, number>;
     return [
-      { key: "open", label: "Total open quote value", val: formatMoneyWhole(m.total_open_quote_value) },
+      { key: "open", label: "Open pipeline value (latest rev)", val: formatMoneyWhole(m.total_open_quote_value) },
       { key: "oc", label: "Open quotes", val: str(m.open_quotes ?? "—") },
-      { key: "nw", label: "New this week", val: str(m.new_this_week ?? "—") },
-      { key: "pl", label: "Public leads", val: str(m.public_leads ?? "—") },
-      { key: "ie", label: "Internal estimates", val: str(m.internal_estimates ?? "—") },
+      { key: "nw", label: "New rows this week", val: str(m.new_this_week ?? "—") },
+      { key: "iytd", label: "Internal · YTD value", val: formatMoneyWhole(iq.ytd?.total_quote_value) },
+      { key: "iytdc", label: "Internal · YTD count", val: str(iq.ytd?.quote_count ?? "—") },
+      { key: "iwk", label: "Internal · week value", val: formatMoneyWhole(iq.week?.total_quote_value) },
+      { key: "allwk", label: "All sources · week value", val: formatMoneyWhole(periods.week?.total_quote_value) },
+      { key: "yoy", label: "YoY · Δ YTD value", val: formatMoneyWhole(yoy.delta_value) },
       { key: "sm", label: "Sold this month", val: str(m.sold_this_month ?? "—") },
       { key: "mw", label: "Needs Moraware entry doc", val: str(m.needs_moraware_entry_doc ?? "—") },
       { key: "qb", label: "Needs QuickBooks entry doc", val: str(m.needs_quickbooks_entry_doc ?? "—") }
@@ -502,6 +527,10 @@ export default function QuoteLibraryApp() {
                   <option value="in_progress">In progress</option>
                 </select>
               </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 22 }}>
+                <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
+                Show archived
+              </label>
               <label>
                 Sort by
                 <select value={sort} onChange={(e) => setSort(e.target.value)}>
@@ -617,7 +646,7 @@ export default function QuoteLibraryApp() {
                         return (
                           <tr key={str(r.id)} className="clickable" onClick={() => setDetailId(str(r.id))}>
                             <td className="col-num">
-                              <span className="quote-num">{str(r.quote_number)}</span>
+                              <span className="quote-num">{str(r.quote_number_revision_summary || r.quote_number)}</span>
                             </td>
                             <td className="account-cell">
                               <div className="primary">{ac.primary}</div>
@@ -713,6 +742,32 @@ export default function QuoteLibraryApp() {
                 </dl>
               </div>
 
+              {str(header.quote_source) === "internal_quote" && revisions.length ? (
+                <div className="drawer-section">
+                  <h3>Revision history</h3>
+                  <ul className="muted small" style={{ paddingLeft: 18 }}>
+                    {revisions.map((rev) => (
+                      <li key={str(rev.id)} style={{ marginBottom: 8 }}>
+                        <strong>{str(rev.quote_number)}</strong>
+                        {rev.revision_label ? <> · {str(rev.revision_label)}</> : null}
+                        {rev.is_current_revision ? <> · latest</> : null}
+                        {" · "}
+                        {formatMoneyStandard(rev.grand_total)}{" "}
+                        <button
+                          type="button"
+                          className="btn ghost btn-xs"
+                          onClick={() =>
+                            window.open(`${internalBase}/?quoteId=${encodeURIComponent(str(rev.id))}`, "_blank", "noopener,noreferrer")
+                          }
+                        >
+                          Internal Estimate
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
               <div className="drawer-section">
                 <h3>Workflow</h3>
                 <div className="workflow-grid">
@@ -762,9 +817,13 @@ export default function QuoteLibraryApp() {
                     type="button"
                     className="btn secondary"
                     onClick={() => {
-                      if (!window.confirm("Archive this quote?")) return;
+                      if (!window.confirm("Soft-archive this quote? It will be hidden from default totals until Show archived is enabled.")) {
+                        return;
+                      }
                       void runAction("Archived", async () => {
-                        await apiPatch(`/api/quote-library/quotes/${detailId}/status`, sessionToken!, { status: "archived" });
+                        await apiPost(`/api/quote-library/quotes/${detailId}/archive`, sessionToken!, {
+                          confirm: true
+                        });
                       });
                     }}
                   >

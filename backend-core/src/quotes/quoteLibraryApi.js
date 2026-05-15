@@ -12,12 +12,23 @@ import {
   resolveOrganizationContext,
   tableHasOrganizationId
 } from "../organizations/organizationContext.js";
+import * as esf from "./quoteEsfNumber.js";
 import { isMissingRelationError, generateQuoteNumber } from "./quotePersist.js";
 import { buildMorawareEntryDocPayload, buildQuickBooksEntryDocPayload } from "./quoteLibraryHandoffPayloads.js";
 
 const jsonParser = express.json({ limit: "2mb" });
 
-const INTERNAL_STATUSES = new Set(["draft", "testing_review", "sent", "revised", "sold", "lost", "archived", "submitted"]);
+const INTERNAL_STATUSES = new Set([
+  "draft",
+  "testing_review",
+  "sent",
+  "follow_up",
+  "revised",
+  "sold",
+  "lost",
+  "archived",
+  "submitted"
+]);
 const PUBLIC_STATUSES = new Set(["lead_submitted", "reviewing", "contacted", "quoted", "won", "lost", "archived"]);
 
 function isUuid(value) {
@@ -56,6 +67,7 @@ function displayStatus(raw) {
     archived: "Archived",
     draft: "Draft",
     sent: "Sent",
+    follow_up: "Follow up",
     revised: "Revised",
     submitted: "Submitted"
   };
@@ -111,9 +123,18 @@ function mapListRow(r, handoffDocsByQuote) {
   const docs = handoffDocsByQuote.get(hid) || [];
   const morDoc = docs.find((d) => d.doc_type === "moraware_entry");
   const qbDoc = docs.find((d) => d.doc_type === "quickbooks_entry");
+  const revLab = pickStr(r.revision_label);
+  const qn = pickStr(r.quote_number);
+  const revSummary = revLab && qn ? `${qn} · ${revLab}` : qn || revLab;
   return {
     id: r.id,
     quote_number: r.quote_number,
+    revision_number: r.revision_number ?? null,
+    revision_label: r.revision_label ?? null,
+    quote_number_revision_summary: revSummary || null,
+    quote_family_root_id: r.quote_family_root_id ?? null,
+    is_current_revision: r.is_current_revision ?? null,
+    archived_at: r.archived_at ?? null,
     account_name: deriveAccountName(r),
     customer_name: r.customer_name,
     customer_email: r.customer_email,
@@ -168,6 +189,31 @@ async function fetchHandoffDocsByQuote(db, quoteIds) {
   return map;
 }
 
+function aggregateQuoteMetrics(rows, startMs, endMs) {
+  let total = 0;
+  let n = 0;
+  /** @type {Record<string, { count: number, value: number }>} */
+  const statusBreakdown = {};
+  for (const r of rows || []) {
+    const u = r.updated_at ? new Date(r.updated_at).getTime() : 0;
+    if (u < startMs || u > endMs) continue;
+    const gt = Number(r.grand_total) || 0;
+    total += gt;
+    n += 1;
+    const st = String(r.quote_status || "unknown");
+    if (!statusBreakdown[st]) statusBreakdown[st] = { count: 0, value: 0 };
+    statusBreakdown[st].count += 1;
+    statusBreakdown[st].value += gt;
+  }
+  const roundedTotal = Math.round(total * 100) / 100;
+  return {
+    total_quote_value: roundedTotal,
+    quote_count: n,
+    avg_quote_value: n ? Math.round((total / n) * 100) / 100 : 0,
+    status_breakdown: statusBreakdown
+  };
+}
+
 /**
  * @param {import("express").Express} app
  * @param {{ requireAuth: Function, requireHeadAccess: Function, getSupabase: () => import("@supabase/supabase-js").SupabaseClient }} deps
@@ -185,10 +231,31 @@ export function attachQuoteLibraryRoutes(app, deps) {
       const offset = Math.max(0, Number.parseInt(String(req.query.offset || "0"), 10) || 0);
 
       const selectCols =
-        "id,quote_number,quote_source,quote_status,customer_name,customer_email,customer_phone,project_name,project_address,city,state,zip,sales_rep,branch,grand_total,estimated_sqft,created_at,updated_at,calculation_snapshot,prepared_by";
+        "id,quote_number,revision_number,revision_label,quote_family_root_id,is_current_revision,archived_at,quote_source,quote_status,customer_name,customer_email,customer_phone,project_name,project_address,city,state,zip,sales_rep,branch,grand_total,estimated_sqft,created_at,updated_at,calculation_snapshot,prepared_by";
 
       let qb = db.from("quote_headers").select(selectCols);
       qb = applyQuoteHeaderOrgScope(qb, orgId, hasQuoteHeadersOrg);
+
+      const includeArchived =
+        pickStr(req.query.include_archived) === "1" ||
+        pickStr(req.query.show_archived).toLowerCase() === "true";
+      if (!includeArchived) {
+        try {
+          qb = qb.is("archived_at", null);
+        } catch {
+          /* schema without archived_at */
+        }
+      }
+
+      const latestRaw = pickStr(req.query.latest_revision_only);
+      const latestOnly = latestRaw !== "0" && latestRaw !== "false";
+      if (latestOnly) {
+        try {
+          qb = qb.or("is_current_revision.eq.true,is_current_revision.is.null");
+        } catch {
+          /* ignore */
+        }
+      }
 
       const view = pickStr(req.query.view);
       if (view === "internal_estimates") qb = qb.eq("quote_source", "internal_quote");
@@ -214,7 +281,7 @@ export function attachQuoteLibraryRoutes(app, deps) {
         const s = search.replace(/%/g, "").slice(0, 80);
         const pat = `%${s}%`;
         qb = qb.or(
-          `customer_name.ilike.${pat},project_name.ilike.${pat},quote_number.ilike.${pat},city.ilike.${pat},sales_rep.ilike.${pat}`
+          `customer_name.ilike.${pat},project_name.ilike.${pat},project_address.ilike.${pat},quote_number.ilike.${pat},city.ilike.${pat},sales_rep.ilike.${pat}`
         );
       }
 
@@ -309,42 +376,87 @@ export function attachQuoteLibraryRoutes(app, deps) {
     try {
       const db = getSupabase();
       const { orgId, hasQuoteHeadersOrg } = await loadOrgScope(db, req);
-      let qb = db.from("quote_headers").select("id,quote_status,quote_source,grand_total,created_at,updated_at");
+      const scopeSource = pickStr(req.query.quote_source);
+
+      let qb = db
+        .from("quote_headers")
+        .select(
+          "id,quote_status,quote_source,grand_total,created_at,updated_at,is_current_revision,archived_at"
+        );
       qb = applyQuoteHeaderOrgScope(qb, orgId, hasQuoteHeadersOrg);
-      const { data: rows, error } = await qb.limit(2000);
+      try {
+        qb = qb.is("archived_at", null);
+      } catch {
+        /* ignore */
+      }
+      try {
+        qb = qb.or("is_current_revision.eq.true,is_current_revision.is.null");
+      } catch {
+        /* ignore */
+      }
+      if (scopeSource) qb = qb.eq("quote_source", scopeSource);
+
+      const { data: rows, error } = await qb.limit(6000);
       if (error) {
         if (isMissingRelationError(error)) return res.json({ ok: true, installed: false, metrics: {} });
         throw error;
       }
-      const now = Date.now();
-      const weekAgo = now - 7 * 86400000;
-      const monthStart = new Date();
-      monthStart.setDate(1);
-      monthStart.setHours(0, 0, 0, 0);
+
+      const OPEN_STATUSES = new Set([
+        "draft",
+        "testing_review",
+        "sent",
+        "follow_up",
+        "revised",
+        "lead_submitted",
+        "reviewing",
+        "contacted",
+        "quoted",
+        "submitted"
+      ]);
+
+      const now = new Date();
+      const nowMs = now.getTime();
+      const weekStartMs = nowMs - 7 * 86400000;
+      const monthStartMs = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+      const quarterMonth = Math.floor(now.getMonth() / 3) * 3;
+      const quarterStartMs = new Date(now.getFullYear(), quarterMonth, 1).getTime();
+      const ytdStartMs = new Date(now.getFullYear(), 0, 1).getTime();
+      const priorYtdStartMs = new Date(now.getFullYear() - 1, 0, 1).getTime();
+      const priorYtdEndMs = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
+
+      const weekAgg = aggregateQuoteMetrics(rows, weekStartMs, nowMs);
+      const monthAgg = aggregateQuoteMetrics(rows, monthStartMs, nowMs);
+      const quarterAgg = aggregateQuoteMetrics(rows, quarterStartMs, nowMs);
+      const ytdAgg = aggregateQuoteMetrics(rows, ytdStartMs, nowMs);
+      const yoyPriorAgg = aggregateQuoteMetrics(rows, priorYtdStartMs, priorYtdEndMs);
+
       let openValue = 0;
       let openCount = 0;
       let newWeek = 0;
       let publicLeads = 0;
       let internalEst = 0;
       let soldMonth = 0;
-      let needsMw = 0;
-      let needsQb = 0;
+      const monthStartForSold = new Date(now.getFullYear(), now.getMonth(), 1);
       for (const r of rows || []) {
         const st = String(r.quote_status || "");
         const src = String(r.quote_source || "");
         const gt = Number(r.grand_total) || 0;
         const cr = r.created_at ? new Date(r.created_at).getTime() : 0;
-        if (["draft", "testing_review", "sent", "revised", "lead_submitted", "reviewing", "contacted", "quoted", "submitted"].includes(st)) {
+        if (OPEN_STATUSES.has(st)) {
           openValue += gt;
           openCount += 1;
         }
-        if (cr >= weekAgo) newWeek += 1;
+        if (cr >= weekStartMs) newWeek += 1;
         if (src === "public_consumer") publicLeads += 1;
         if (src === "internal_quote") internalEst += 1;
-        if ((st === "sold" || st === "won") && r.updated_at && new Date(r.updated_at) >= monthStart) soldMonth += 1;
+        if ((st === "sold" || st === "won") && r.updated_at && new Date(r.updated_at) >= monthStartForSold) soldMonth += 1;
       }
+
       const ids = (rows || []).map((r) => r.id).filter(Boolean);
       const handoffMap = await fetchHandoffDocsByQuote(db, ids);
+      let needsMw = 0;
+      let needsQb = 0;
       for (const r of rows || []) {
         const st = String(r.quote_status || "");
         if (st !== "sold" && st !== "won") continue;
@@ -354,9 +466,14 @@ export function attachQuoteLibraryRoutes(app, deps) {
         if (!mor) needsMw += 1;
         if (!qbdoc) needsQb += 1;
       }
+
+      const internalRows = (rows || []).filter((r) => String(r.quote_source || "") === "internal_quote");
+
       res.json({
         ok: true,
         total_row_sample: (rows || []).length,
+        metrics_note:
+          "Headline cards use latest revision rows only (is_current_revision) and exclude archived quotes. Period buckets filter by updated_at.",
         metrics: {
           total_open_quote_value: Math.round(openValue * 100) / 100,
           open_quotes: openCount,
@@ -365,7 +482,30 @@ export function attachQuoteLibraryRoutes(app, deps) {
           internal_estimates: internalEst,
           sold_this_month: soldMonth,
           needs_moraware_entry_doc: needsMw,
-          needs_quickbooks_entry_doc: needsQb
+          needs_quickbooks_entry_doc: needsQb,
+          scoped_quote_source: scopeSource || null,
+          periods: {
+            week: weekAgg,
+            month: monthAgg,
+            quarter: quarterAgg,
+            ytd: ytdAgg,
+            yoy_prior_ytd: {
+              ...yoyPriorAgg,
+              note: `Prior-year window ${new Date(priorYtdStartMs).toISOString().slice(0, 10)} → ${new Date(priorYtdEndMs).toISOString().slice(0, 10)} (calendar-aligned stub)`
+            }
+          },
+          internal_quote_periods: {
+            week: aggregateQuoteMetrics(internalRows, weekStartMs, nowMs),
+            month: aggregateQuoteMetrics(internalRows, monthStartMs, nowMs),
+            quarter: aggregateQuoteMetrics(internalRows, quarterStartMs, nowMs),
+            ytd: aggregateQuoteMetrics(internalRows, ytdStartMs, nowMs),
+            yoy_prior_ytd: aggregateQuoteMetrics(internalRows, priorYtdStartMs, priorYtdEndMs)
+          },
+          yoy_compare_ytd: {
+            current_ytd_value: ytdAgg.total_quote_value,
+            prior_ytd_value: yoyPriorAgg.total_quote_value,
+            delta_value: Math.round((ytdAgg.total_quote_value - yoyPriorAgg.total_quote_value) * 100) / 100
+          }
         }
       });
     } catch (e) {
@@ -385,6 +525,16 @@ export function attachQuoteLibraryRoutes(app, deps) {
         .order("updated_at", { ascending: false })
         .limit(1500);
       qb = applyQuoteHeaderOrgScope(qb, orgId, hasQuoteHeadersOrg);
+      try {
+        qb = qb.is("archived_at", null);
+      } catch {
+        /* ignore */
+      }
+      try {
+        qb = qb.or("is_current_revision.eq.true,is_current_revision.is.null");
+      } catch {
+        /* ignore */
+      }
       const search = pickStr(req.query.search);
       const { data: rows, error } = await qb;
       if (error) {
@@ -504,6 +654,53 @@ export function attachQuoteLibraryRoutes(app, deps) {
     };
   }
 
+  app.get("/api/quote-library/quotes/:id/revisions", ...stack, async (req, res) => {
+    try {
+      const id = pickStr(req.params.id);
+      if (!isUuid(id)) return res.status(400).json({ ok: false, error: "Invalid id" });
+      const db = getSupabase();
+      const { orgId, hasQuoteHeadersOrg } = await loadOrgScope(db, req);
+      let qb0 = db.from("quote_headers").select("id,quote_source,quote_family_root_id").eq("id", id).limit(1);
+      qb0 = applyQuoteHeaderOrgScope(qb0, orgId, hasQuoteHeadersOrg);
+      const { data: seedRows, error: seedErr } = await qb0;
+      if (seedErr) throw seedErr;
+      const seed = seedRows?.[0];
+      if (!seed) return res.status(404).json({ ok: false, error: "Not found" });
+      if (String(seed.quote_source || "") !== "internal_quote") {
+        return res.status(400).json({ ok: false, error: "Revision history is only available for internal estimates." });
+      }
+      const root = String(seed.quote_family_root_id || seed.id);
+      let qb = db
+        .from("quote_headers")
+        .select(
+          "id,quote_number,revision_number,revision_label,is_current_revision,grand_total,quote_status,created_at,updated_at,quote_family_root_id"
+        )
+        .eq("quote_source", "internal_quote")
+        .or(`id.eq.${root},quote_family_root_id.eq.${root}`)
+        .order("revision_number", { ascending: true });
+      qb = applyQuoteHeaderOrgScope(qb, orgId, hasQuoteHeadersOrg);
+      const { data, error } = await qb;
+      if (error) throw error;
+      res.json({
+        ok: true,
+        quote_family_root_id: root,
+        revisions: (data || []).map((r) => ({
+          id: r.id,
+          quote_number: r.quote_number,
+          revision_number: r.revision_number,
+          revision_label: r.revision_label,
+          is_current_revision: r.is_current_revision,
+          grand_total: r.grand_total,
+          quote_status: r.quote_status,
+          created_at: r.created_at,
+          updated_at: r.updated_at
+        }))
+      });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
   app.get("/api/quote-library/quotes/:id", ...stack, async (req, res) => {
     try {
       const id = pickStr(req.params.id);
@@ -528,6 +725,68 @@ export function attachQuoteLibraryRoutes(app, deps) {
       const detail = await loadQuoteDetail(db, id, orgId, hasQuoteHeadersOrg);
       if (detail.notFound) return res.status(404).json({ ok: false, error: "Not found" });
       res.json({ ok: true, timeline: detail.status_timeline || [], warnings: detail.warnings || [] });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  app.post("/api/quote-library/quotes/:id/archive", ...stack, jsonParser, async (req, res) => {
+    try {
+      const id = pickStr(req.params.id);
+      if (!isUuid(id)) return res.status(400).json({ ok: false, error: "Invalid id" });
+      const confirm = Boolean(req.body?.confirm);
+      if (!confirm) return res.status(400).json({ ok: false, error: "confirm: true required" });
+      const force = Boolean(req.body?.force);
+      const db = getSupabase();
+      const { orgId, hasQuoteHeadersOrg } = await loadOrgScope(db, req);
+      let qb = db.from("quote_headers").select("id,quote_status,quote_source").eq("id", id).limit(1);
+      qb = applyQuoteHeaderOrgScope(qb, orgId, hasQuoteHeadersOrg);
+      const { data: rows, error: e0 } = await qb;
+      if (e0) throw e0;
+      const cur = rows?.[0];
+      if (!cur) return res.status(404).json({ ok: false, error: "Not found" });
+      const st = String(cur.quote_status || "");
+      if ((st === "sold" || st === "won") && !force) {
+        return res.status(409).json({
+          ok: false,
+          error: "Quote is marked sold/won. Pass force:true after confirming this archive is intentional.",
+          quote_status: st
+        });
+      }
+      const userRef = pickStr(req.user?.email) || pickStr(req.user?.id);
+      const { error: uErr } = await db
+        .from("quote_headers")
+        .update({
+          archived_at: new Date().toISOString(),
+          archived_by: userRef,
+          quote_status: "archived",
+          updated_at: new Date().toISOString()
+        })
+        .eq("id", id);
+      if (uErr) throw uErr;
+      await safeSelect(db, () =>
+        db.from("quote_status_history").insert({
+          quote_id: id,
+          old_status: st,
+          new_status: "archived",
+          changed_by: userRef,
+          metadata: { source: "quote_library_archive", force }
+        })
+      );
+      try {
+        await logAction({
+          user: req.user,
+          head: "quote_library",
+          actionType: "quote_archive",
+          entityType: "quote_header",
+          entityId: id,
+          metadata: { force },
+          req
+        });
+      } catch {
+        /* optional */
+      }
+      res.json({ ok: true, id, archived: true });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
     }
@@ -662,13 +921,54 @@ export function attachQuoteLibraryRoutes(app, deps) {
       if (sErr) throw sErr;
       const src = srcRows?.[0];
       if (!src) return res.status(404).json({ ok: false, error: "Not found" });
-      const quoteNumber = generateQuoteNumber();
+      const source = src.quote_source === "public_consumer" ? "internal_quote" : src.quote_source;
+
+      let quoteNumber;
+      /** @type {Record<string, unknown>|null} */
+      let revExtras = null;
+      if (source === "internal_quote") {
+        const orgKey = esf.organizationKeyForQuotes(orgId);
+        const bp = esf.branchPrefixFromBranchLabel(String(src.branch ?? ""));
+        try {
+          const seq = await esf.allocateEsfSequence(db, orgKey, bp);
+          const quote_number_base = esf.formatEsfQuoteNumberBase(bp, seq);
+          quoteNumber = esf.quoteNumberForRevision(quote_number_base, 1);
+          revExtras = {
+            revision_number: 1,
+            revision_label: "R1",
+            quote_number_base,
+            quote_family_root_id: null,
+            is_current_revision: true,
+            revised_from_quote_id: id,
+            monday_item_id: null,
+            monday_board_id: null,
+            archived_at: null,
+            archived_by: null
+          };
+        } catch {
+          quoteNumber = generateQuoteNumber();
+          revExtras = {
+            revision_number: 1,
+            revision_label: "R1",
+            quote_number_base: null,
+            quote_family_root_id: null,
+            is_current_revision: true,
+            revised_from_quote_id: id,
+            monday_item_id: null,
+            monday_board_id: null,
+            archived_at: null,
+            archived_by: null
+          };
+        }
+      } else {
+        quoteNumber = generateQuoteNumber();
+      }
+
       const userEmail = pickStr(req.user?.email || req.user?.id);
       const snap = src.calculation_snapshot && typeof src.calculation_snapshot === "object" ? { ...src.calculation_snapshot } : {};
       snap.internal_ui = { ...(snap.internal_ui || {}), duplicated_from_quote_id: id, duplicated_via: "quote_library" };
       const orgTables = new Set();
       if (orgId && (await tableHasOrganizationId(db, "quote_headers"))) orgTables.add("quote_headers");
-      const source = src.quote_source === "public_consumer" ? "internal_quote" : src.quote_source;
       const insRow = {
         quote_number: quoteNumber,
         quote_source: source,
@@ -698,12 +998,21 @@ export function attachQuoteLibraryRoutes(app, deps) {
         estimated_sqft: src.estimated_sqft,
         estimated_material_group: src.estimated_material_group,
         calculation_snapshot: snap,
-        created_by: userEmail
+        created_by: userEmail,
+        ...(revExtras || {})
       };
       const merged = mergeRowOrganizationId(insRow, orgId, orgTables.has("quote_headers"));
       const { data: ins, error: hErr } = await db.from("quote_headers").insert(merged).select("id").limit(1);
       if (hErr) throw hErr;
-      res.json({ ok: true, quoteId: ins?.[0]?.id, quote_number: quoteNumber });
+      const newId = ins?.[0]?.id;
+      if (newId && revExtras) {
+        await db
+          .from("quote_headers")
+          .update({ quote_family_root_id: newId, updated_at: new Date().toISOString() })
+          .eq("id", newId)
+          .eq("quote_source", "internal_quote");
+      }
+      res.json({ ok: true, quoteId: newId, quote_number: quoteNumber });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
     }

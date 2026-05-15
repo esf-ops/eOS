@@ -27,6 +27,12 @@ If **none** of the variables below are set, sync still creates the **item name**
 | `MONDAY_INTERNAL_COL_BRANCH_TEXT` | text | |
 | `MONDAY_INTERNAL_COL_ENTERED_BY` | text | Maps from `prepared_by` / Entered by |
 | `MONDAY_INTERNAL_COL_PRICING_MODE` | text | `Direct` or `Wholesale` |
+| `MONDAY_INTERNAL_COL_REVISION` | text | `revision_label` (e.g. `R2`) |
+| `MONDAY_INTERNAL_COL_LAST_REVISED` | date | Mirrors `quote_headers.updated_at` on sync |
+
+Set **`HEAD_URL_INTERNAL_ESTIMATE`** (or legacy **`HEAD_URL_QUOTE`**) so the API can attach an **internal-estimate deep link** (`/?quoteId=…`) onto the GraphQL payload for optional future Monday text columns.
+
+When a quote row already has a **`monday_item_id`**, Internal Estimate **updates** (`action: update`) attempt **`change_multiple_column_values`** on the existing pulse instead of creating duplicates.
 
 ## Intentionally skipped (for now)
 

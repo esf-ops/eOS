@@ -569,17 +569,17 @@ Three modes for the first finished version:
 
 ### New estimate
 
-- **Save** creates a **new** Quote Library record (today’s foundation behavior).
+- **Save quote** (`save_mode: create` or omit `quote_id`) allocates an **`ESF-{DYER|IC|LIS}-{NNNNNN}`** number when `eliteos_internal_quote_phase2.sql` + RPC are applied (fallback legacy `Q-YYMMDD-*` if allocation fails).
 
 ### Opened from Quote Library (`?quoteId=`)
 
-Estimator must explicitly choose **before save**:
+Estimator chooses **Save action** before submit:
 
-1. **Update existing quote** (in-place revision—**product requires clear confirmation**).  
-2. **Save as new revision** (same job family, new `-R#` suffix rules).  
-3. **Save as new quote / duplicate** (new ESF number).
+1. **Update existing** (`save_mode: update_existing`) — same `quote_headers` row and stable quote # / base; replaces rooms/lines and writes a new calculation audit row; Monday pulse columns update when `monday_item_id` exists.  
+2. **Save revision** (`save_mode: save_revision`) — **new row**, same `quote_family_root_id`, increments **`revision_number`**, display `#` becomes **`{base}-R{n}`**; prior revision rows stay immutable snapshots (`is_current_revision=false`).  
+3. **Save as new quote** (`save_mode: save_as_new_quote`) — **new ESF family** and sequence; optional lineage via `revised_from_quote_id`.
 
-The UI must show **plain-English consequences** (“This will overwrite the saved total on quote ESF-DYER-000014” vs “This will create ESF-DYER-000014-R2”).
+Historical revisions (`is_current_revision=false`) load **read-only** for update/revision saves; use **Save as new quote** or open the latest revision from Quote Library.
 
 ### Hydration completeness
 
@@ -595,7 +595,7 @@ The UI must show **plain-English consequences** (“This will overwrite the save
 
 **Never** leave the loaded quote as **raw JSON only**. If something cannot hydrate yet, show a **clear checklist** of missing fields.
 
-**Known today:** full three-way save choice + in-place update are **not** complete—tracked as Phase 2 (§22–§23).
+**Phase 2 shipped:** three-way save choice, ESF numbering, revision rows, Quote Library latest-revision filtering, soft archive, and expanded metrics buckets — see `FEATURE_DECISIONS.md` §18.
 
 ---
 

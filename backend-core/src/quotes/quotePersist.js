@@ -32,6 +32,119 @@ function round2(n) {
 
 /**
  * @param {import("@supabase/supabase-js").SupabaseClient} db
+ * @param {string|null} orgId
+ */
+async function collectQuoteOrgTables(db, orgId) {
+  const orgTables = new Set();
+  if (orgId) {
+    for (const t of [
+      "quote_headers",
+      "quote_line_items",
+      "quote_rooms",
+      "quote_forecast_events",
+      "quote_lead_assignments",
+      "quote_submission_payloads",
+      "quote_monday_sync_log"
+    ]) {
+      if (await tableHasOrganizationId(db, t)) orgTables.add(t);
+    }
+  }
+  return orgTables;
+}
+
+/**
+ * Replace persisted rooms + priced line items for an existing quote (internal/partner paths).
+ * @param {import("@supabase/supabase-js").SupabaseClient} db
+ * @param {{
+ *   quoteId: string,
+ *   body: Record<string, unknown>,
+ *   calc: Record<string, unknown>,
+ *   organizationContext?: import("../organizations/organizationContext.js").OrganizationContext|null,
+ *   quoteSource?: string
+ * }} opts
+ */
+export async function replaceQuoteLinesAndRooms(db, opts) {
+  const quoteId = String(opts.quoteId || "").trim();
+  if (!quoteId) throw new Error("replaceQuoteLinesAndRooms: missing quoteId");
+  const body = opts.body && typeof opts.body === "object" ? opts.body : {};
+  const calc = opts.calc;
+  const quoteSource = String(opts.quoteSource || "internal_quote");
+  const orgId = opts.organizationContext?.organizationId ? String(opts.organizationContext.organizationId) : null;
+  const orgTables = await collectQuoteOrgTables(db, orgId);
+  const isPublicConsumer = quoteSource === "public_consumer";
+
+  const { error: dLi } = await db.from("quote_line_items").delete().eq("quote_id", quoteId);
+  if (dLi && !isMissingRelationError(dLi)) throw dLi;
+
+  const { error: dRm } = await db.from("quote_rooms").delete().eq("quote_id", quoteId);
+  if (dRm && !isMissingRelationError(dRm)) throw dRm;
+
+  const lineRows = isPublicConsumer
+    ? []
+    : (calc.lineItems || []).map((ln, idx) => ({
+        quote_id: quoteId,
+        line_type: ln.line_type || "line",
+        category: ln.category || "custom",
+        item_code: ln.item_code || null,
+        item_name: ln.item_name || "Item",
+        room_name: ln.room_name || null,
+        quantity: ln.quantity ?? 1,
+        unit_type: ln.unit_type || "each",
+        unit_price: ln.unit_price ?? 0,
+        line_subtotal: ln.line_subtotal ?? 0,
+        sort_order: ln.sort_order ?? idx
+      }))
+      .map((r) => mergeRowOrganizationId(r, orgId, orgTables.has("quote_line_items")));
+  if (lineRows.length) {
+    const { error: lErr } = await db.from("quote_line_items").insert(lineRows);
+    if (lErr && !isMissingRelationError(lErr)) throw lErr;
+  }
+
+  const rooms = Array.isArray(body.rooms) ? body.rooms : [];
+  const roomRows = rooms.map((r, idx) => {
+    let ct = Number(r.countertopSqft ?? r.roomCounter ?? 0) || 0;
+    let bs = Number(r.backsplashSqft ?? r.roomSplash ?? 0) || 0;
+    if (Array.isArray(r.pieces) && r.pieces.length) {
+      ct = 0;
+      bs = 0;
+      for (const p of r.pieces) {
+        const { sf } = calculateRoomAreas(p);
+        const t = String(p.type || "counter");
+        if (t === "splash") bs += sf;
+        else ct += sf;
+      }
+      ct = round2(ct);
+      bs = round2(bs);
+    }
+    const totalSq = round2(ct + bs);
+    return {
+      quote_id: quoteId,
+      room_name: r.name || r.room_name || `Room ${idx + 1}`,
+      room_type: r.type || r.room_type || null,
+      material_name: r.materialColor || r.materialName || null,
+      material_supplier: r.materialSupplier || null,
+      material_group: r.materialGroup || r.group || null,
+      countertop_sqft: ct,
+      backsplash_sqft: bs,
+      total_sqft: totalSq,
+      measurement_source: r.measurementSource || null,
+      sort_order: idx,
+      metadata: {
+        ...(typeof r.metadata === "object" && r.metadata ? r.metadata : {}),
+        pieces: Array.isArray(r.pieces) ? r.pieces : undefined,
+        material_color: r.materialColor || null,
+        material_type: r.materialType || null
+      }
+    };
+  }).map((r) => mergeRowOrganizationId(r, orgId, orgTables.has("quote_rooms")));
+  if (roomRows.length) {
+    const { error: rErr } = await db.from("quote_rooms").insert(roomRows);
+    if (rErr && !isMissingRelationError(rErr)) throw rErr;
+  }
+}
+
+/**
+ * @param {import("@supabase/supabase-js").SupabaseClient} db
  * @param {object} opts
  */
 export async function persistQuoteSubmission(db, opts) {
@@ -48,24 +161,13 @@ export async function persistQuoteSubmission(db, opts) {
     publicResponsePayload,
     organizationContext,
     internalEstimateSummary = null,
-    pricingModeLabel = null
+    pricingModeLabel = null,
+    headerExtras = null,
+    skipMondaySync = false
   } = opts;
 
   const orgId = organizationContext?.organizationId ? String(organizationContext.organizationId) : null;
-  const orgTables = new Set();
-  if (orgId) {
-    for (const t of [
-      "quote_headers",
-      "quote_line_items",
-      "quote_rooms",
-      "quote_forecast_events",
-      "quote_lead_assignments",
-      "quote_submission_payloads",
-      "quote_monday_sync_log"
-    ]) {
-      if (await tableHasOrganizationId(db, t)) orgTables.add(t);
-    }
-  }
+  const orgTables = await collectQuoteOrgTables(db, orgId);
 
   const isPublicConsumer = quoteSource === "public_consumer";
   const promoRow = (estimatesByGroup || []).find((r) => String(r.group || "").trim() === "Group Promo");
@@ -124,7 +226,10 @@ export async function persistQuoteSubmission(db, opts) {
     created_by: userEmail
   };
 
-  const headerRowIns = mergeRowOrganizationId(headerRow, orgId, orgTables.has("quote_headers"));
+  const headerMerged =
+    headerExtras && typeof headerExtras === "object" ? { ...headerRow, ...headerExtras } : headerRow;
+
+  const headerRowIns = mergeRowOrganizationId(headerMerged, orgId, orgTables.has("quote_headers"));
 
   const { data: ins, error: hErr } = await db.from("quote_headers").insert(headerRowIns).select("id").limit(1);
   if (hErr) throw hErr;
@@ -204,7 +309,7 @@ export async function persistQuoteSubmission(db, opts) {
 
   await db.from("quote_calculation_audit").insert({
     quote_id: quoteId,
-    pricing_structure_id: headerRow.pricing_structure_id,
+    pricing_structure_id: headerMerged.pricing_structure_id,
     input_payload: body,
     output_payload: isPublicConsumer ? { public_safe: true, estimates_by_group: estimatesByGroup } : calc,
     created_by: userEmail
@@ -220,12 +325,12 @@ export async function persistQuoteSubmission(db, opts) {
       {
         quote_id: quoteId,
         event_type: isPublicConsumer ? "public_lead_submitted" : "quote_submitted",
-        sales_rep: headerRow.sales_rep,
-        branch: headerRow.branch,
-        partner_account_id: headerRow.partner_account_id,
-        quote_value: headerRow.grand_total,
+        sales_rep: headerMerged.sales_rep,
+        branch: headerMerged.branch,
+        partner_account_id: headerMerged.partner_account_id,
+        quote_value: headerMerged.grand_total,
         probability_percent: null,
-        forecast_value: headerRow.grand_total,
+        forecast_value: headerMerged.grand_total,
         metadata: forecastMeta
       },
       orgId,
@@ -267,7 +372,7 @@ export async function persistQuoteSubmission(db, opts) {
   }
 
   const monPayload = buildMondayQuotePayload(
-    { ...headerRow, id: quoteId },
+    { ...headerMerged, id: quoteId },
     snapshotToStore,
     {
       estimates_by_group_summary: isPublicConsumer
@@ -282,14 +387,17 @@ export async function persistQuoteSubmission(db, opts) {
       pricing_mode_label: pricingModeLabel
     }
   );
-  const mondaySync = await syncQuoteToMonday({
-    quoteId,
-    action: "submit",
-    db,
-    payload: monPayload,
-    quoteSource,
-    organizationId: orgId
-  });
+  let mondaySync = { ok: true, skipped: true, status: "skipped" };
+  if (!skipMondaySync) {
+    mondaySync = await syncQuoteToMonday({
+      quoteId,
+      action: "submit",
+      db,
+      payload: monPayload,
+      quoteSource,
+      organizationId: orgId
+    });
+  }
 
-  return { quoteId, headerRow, mondaySync };
+  return { quoteId, headerRow: headerMerged, mondaySync };
 }

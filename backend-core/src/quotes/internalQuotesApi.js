@@ -15,7 +15,10 @@ import {
 } from "../organizations/organizationContext.js";
 import { calculateQuote } from "./quoteCalculator.js";
 import { fetchEliteProgramMaterialColors } from "./materialColorsCatalog.js";
-import { generateQuoteNumber, isMissingRelationError, persistQuoteSubmission } from "./quotePersist.js";
+import * as esf from "./quoteEsfNumber.js";
+import { processInternalQuoteSave } from "./internalQuoteSave.js";
+import { generateQuoteNumber, isMissingRelationError } from "./quotePersist.js";
+
 
 const jsonParser = express.json({ limit: "2mb" });
 
@@ -23,6 +26,7 @@ const INTERNAL_STATUSES = new Set([
   "draft",
   "testing_review",
   "sent",
+  "follow_up",
   "revised",
   "sold",
   "lost",
@@ -64,6 +68,12 @@ function listRow(r) {
   return {
     id: r.id,
     quote_number: r.quote_number,
+    revision_number: r.revision_number ?? null,
+    revision_label: r.revision_label ?? null,
+    quote_number_base: r.quote_number_base ?? null,
+    quote_family_root_id: r.quote_family_root_id ?? null,
+    is_current_revision: r.is_current_revision ?? null,
+    archived_at: r.archived_at ?? null,
     customer_name: r.customer_name,
     project_name: r.project_name,
     city: r.city,
@@ -108,10 +118,7 @@ export function attachInternalQuoteRoutes(app, deps) {
       const body = req.body && typeof req.body === "object" ? req.body : {};
       const organizationContext = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
       const calc = await calculateQuote({ ...body, quoteSource: "internal_quote" }, { db });
-      const quoteNumber = String(body.quote_number || "").trim() || generateQuoteNumber();
       const userEmail = String(req.user?.email || req.user?.id || "unknown");
-      const rawStatus = String(body.quote_status || "testing_review").trim();
-      const quoteStatus = INTERNAL_STATUSES.has(rawStatus) ? rawStatus : "testing_review";
       const snapshotToStore = {
         ...calc.snapshot,
         internal_ui_version: 1,
@@ -149,34 +156,38 @@ export function attachInternalQuoteRoutes(app, deps) {
       }
 
       try {
-        const { quoteId, mondaySync } = await persistQuoteSubmission(db, {
-          body: {
-            ...body,
-            entered_by: body.entered_by || body.prepared_by || body.preparedBy,
-            prepared_by: body.entered_by || body.prepared_by || body.preparedBy,
-            customer_name: body.customer_name,
-            project_name: body.project_name,
-            city: body.city,
-            state: body.state
-          },
+        const result = await processInternalQuoteSave({
+          db,
+          body,
           calc,
-          userEmail,
-          quoteNumber,
-          quoteSource: "internal_quote",
-          quoteStatus,
-          snapshotToStore,
-          estimatesByGroup: null,
-          assignment: null,
-          publicResponsePayload: null,
           organizationContext,
+          userEmail,
+          snapshotToStore,
           internalEstimateSummary,
-          pricingModeLabel: pMode
+          pricingModeLabel: pMode,
+          internalStatuses: INTERNAL_STATUSES
         });
+        if (!result.ok) {
+          return res.status(result.httpStatus || 400).json({ ok: false, error: result.error });
+        }
+        const quoteId = result.quoteId;
+        const quoteNumber = result.quote_number;
+        const mondaySync = {
+          status: result.monday_sync_status,
+          monday_item_id: result.monday_item_id,
+          warning: null
+        };
         if (mondaySync?.warning) warnings.push(mondaySync.warning);
         res.json({
           ok: true,
           quoteId,
+          quote_id: quoteId,
           quote_number: quoteNumber,
+          revision_number: result.revision_number ?? null,
+          revision_label: result.revision_label ?? null,
+          quote_family_root_id: result.quote_family_root_id ?? null,
+          quote_number_base: result.quote_number_base ?? null,
+          save_mode: result.save_mode ?? null,
           totals: calc.totals,
           snapshot: snapshotToStore,
           monday_sync_status: mondaySync?.status ?? null,
@@ -215,7 +226,7 @@ export function attachInternalQuoteRoutes(app, deps) {
       let qb = db
         .from("quote_headers")
         .select(
-          "id,quote_number,quote_source,quote_status,customer_name,project_name,city,state,sales_rep,branch,prepared_by,grand_total,estimated_sqft,created_at,updated_at,monday_item_id,monday_board_id"
+          "id,quote_number,revision_number,revision_label,quote_number_base,quote_family_root_id,is_current_revision,archived_at,quote_source,quote_status,customer_name,project_name,city,state,sales_rep,branch,prepared_by,grand_total,estimated_sqft,created_at,updated_at,monday_item_id,monday_board_id"
         )
         .eq("quote_source", "internal_quote")
         .order("updated_at", { ascending: false })
@@ -281,11 +292,13 @@ export function attachInternalQuoteRoutes(app, deps) {
           calculation_snapshot: row.calculation_snapshot,
           customer_email: row.customer_email,
           customer_phone: row.customer_phone,
+          project_address: row.project_address,
           project_type: row.project_type,
           zip: row.zip,
           subtotal: row.subtotal,
           markup_total: row.markup_total,
-          grand_total: row.grand_total
+          grand_total: row.grand_total,
+          revision_note: row.revision_note ?? null
         }
       });
     } catch (e) {
@@ -353,7 +366,41 @@ export function attachInternalQuoteRoutes(app, deps) {
       if (sErr) throw sErr;
       const src = srcRows?.[0];
       if (!src) return res.status(404).json({ ok: false, error: "Not found" });
-      const quoteNumber = generateQuoteNumber();
+      const orgKey = esf.organizationKeyForQuotes(orgId);
+      const bp = esf.branchPrefixFromBranchLabel(String(src.branch ?? ""));
+      let quoteNumber;
+      /** @type {Record<string, unknown>} */
+      let revExtras = {
+        revision_number: 1,
+        revision_label: "R1",
+        quote_number_base: null,
+        quote_family_root_id: null,
+        is_current_revision: true,
+        revised_from_quote_id: id,
+        monday_item_id: null,
+        monday_board_id: null,
+        archived_at: null,
+        archived_by: null
+      };
+      try {
+        const seq = await esf.allocateEsfSequence(db, orgKey, bp);
+        revExtras.quote_number_base = esf.formatEsfQuoteNumberBase(bp, seq);
+        quoteNumber = esf.quoteNumberForRevision(String(revExtras.quote_number_base), 1);
+      } catch {
+        quoteNumber = generateQuoteNumber();
+        revExtras = {
+          revision_number: 1,
+          revision_label: "R1",
+          quote_number_base: null,
+          quote_family_root_id: null,
+          is_current_revision: true,
+          revised_from_quote_id: id,
+          monday_item_id: null,
+          monday_board_id: null,
+          archived_at: null,
+          archived_by: null
+        };
+      }
       const userEmail = String(req.user?.email || req.user?.id || "unknown");
       const snap = src.calculation_snapshot && typeof src.calculation_snapshot === "object" ? { ...src.calculation_snapshot } : {};
       snap.internal_ui = { ...(snap.internal_ui || {}), duplicated_from_quote_id: id };
@@ -390,12 +437,20 @@ export function attachInternalQuoteRoutes(app, deps) {
         estimated_sqft: src.estimated_sqft,
         estimated_material_group: src.estimated_material_group,
         calculation_snapshot: snap,
-        created_by: userEmail
+        created_by: userEmail,
+        ...revExtras
       };
       const merged = mergeRowOrganizationId(insRow, orgId, orgTables.has("quote_headers"));
       const { data: ins, error: hErr } = await db.from("quote_headers").insert(merged).select("id").limit(1);
       if (hErr) throw hErr;
       const newId = ins?.[0]?.id;
+      if (newId) {
+        await db
+          .from("quote_headers")
+          .update({ quote_family_root_id: newId, updated_at: new Date().toISOString() })
+          .eq("id", newId)
+          .eq("quote_source", "internal_quote");
+      }
       res.json({ ok: true, quoteId: newId, quote_number: quoteNumber });
     } catch (e) {
       if (isMissingRelationError(e)) {

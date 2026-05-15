@@ -109,6 +109,8 @@ export function buildMondayQuotePayload(quote, snapshot, extras = {}) {
   const ex = extras && typeof extras === "object" ? extras : {};
   return {
     quote_number: q.quote_number ?? null,
+    revision_label: q.revision_label ?? ex.revision_label ?? null,
+    quote_family_root_id: q.quote_family_root_id ?? ex.quote_family_root_id ?? null,
     quote_status: q.quote_status ?? null,
     quote_source: q.quote_source ?? null,
     customer_name: q.customer_name ?? null,
@@ -422,6 +424,8 @@ const INTERNAL_MONDAY_COLUMN_MAPPING_ENV_NAMES = [
   "MONDAY_INTERNAL_COL_STATUS",
   "MONDAY_INTERNAL_COL_QUOTE_VALUE",
   "MONDAY_INTERNAL_COL_CREATED_DATE",
+  "MONDAY_INTERNAL_COL_LAST_REVISED",
+  "MONDAY_INTERNAL_COL_REVISION",
   "MONDAY_INTERNAL_COL_CITY",
   "MONDAY_INTERNAL_COL_STATE",
   "MONDAY_INTERNAL_COL_ESTIMATED_SQFT",
@@ -520,6 +524,15 @@ export function buildMondayInternalColumnGroups(input) {
     const iso = Number.isFinite(raw.getTime()) ? raw.toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
     groupC[dateCol] = { date: iso };
   }
+
+  const lastRevCol = envCol("MONDAY_INTERNAL_COL_LAST_REVISED");
+  if (lastRevCol) {
+    const raw = payload.last_revised_at ? new Date(String(payload.last_revised_at)) : new Date();
+    const iso = Number.isFinite(raw.getTime()) ? raw.toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
+    groupC[lastRevCol] = { date: iso };
+  }
+
+  setTextIn(groupF, "MONDAY_INTERNAL_COL_REVISION", payload.revision_label);
 
   const statusCol = envCol("MONDAY_INTERNAL_COL_STATUS");
   if (statusCol) {
@@ -871,11 +884,19 @@ export async function syncQuoteToMonday(params) {
     return { ok: true, skipped: true, status: "skipped_missing_config" };
   }
 
-  const payload = params.payload && typeof params.payload === "object" ? params.payload : {};
+  const isInternalQuote = quoteSource === "internal_quote";
+  const payload = params.payload && typeof params.payload === "object" ? { ...params.payload } : {};
+  if (isInternalQuote && params.quoteId) {
+    const base = String(process.env.HEAD_URL_INTERNAL_ESTIMATE || process.env.HEAD_URL_QUOTE || "")
+      .trim()
+      .replace(/\/+$/, "");
+    if (base) {
+      payload.internal_estimate_deep_link = `${base}/?quoteId=${encodeURIComponent(String(params.quoteId))}`;
+    }
+  }
   const itemName = buildMondayItemNameForSource(quoteSource, payload);
 
   const summaryRows = Array.isArray(payload.estimates_by_group_summary) ? payload.estimates_by_group_summary : [];
-  const isInternalQuote = quoteSource === "internal_quote";
   const internalSummary = String(payload.internal_estimate_summary || "").trim();
   const estimateSummary = isPublicQuoteSource(quoteSource)
     ? buildPublicEstimateSummaryCompact(summaryRows)
@@ -988,6 +1009,16 @@ export async function syncQuoteToMonday(params) {
     }
 
     if (isInternalQuote && internalMondayColumnMappingConfigured()) {
+      /** @type {string|null} */
+      let headerMondayItemId = null;
+      if (db?.from && params.quoteId) {
+        try {
+          const { data } = await db.from("quote_headers").select("monday_item_id").eq("id", params.quoteId).maybeSingle();
+          headerMondayItemId = String(data?.monday_item_id || "").trim() || null;
+        } catch {
+          /* ignore */
+        }
+      }
       const intGroups = buildMondayInternalColumnGroups({ payload, estimateSummary });
       const mergedInt = mergeMondayInternalGroups(intGroups);
       const intColumnIds = Object.keys(mergedInt);
@@ -1017,6 +1048,64 @@ export async function syncQuoteToMonday(params) {
       };
       if (intColumnIds.length === 0) {
         return await createNameOnlyAndFinish("success", { note: "internal_name_only_no_resolved_columns" });
+      }
+      const wantsUpdateExisting = Boolean(headerMondayItemId) && String(params.action || "").toLowerCase() === "update";
+      if (wantsUpdateExisting) {
+        try {
+          await mondayGraphql(token, CHANGE_MULTIPLE_COLUMN_VALUES_MUTATION, {
+            boardId: String(boardId),
+            itemId: String(headerMondayItemId),
+            columnValues: JSON.stringify(mergedInt)
+          });
+          await writeMondaySyncLog({
+            quoteId: params.quoteId,
+            action: params.action || "sync",
+            mondayBoardId: String(boardId),
+            mondayItemId: headerMondayItemId,
+            requestPayload: {
+              ...intRequestPayload,
+              graphql: "change_multiple_column_values_existing_internal_item"
+            },
+            responsePayload: {
+              updated_columns: intColumnIds,
+              updated_via_existing_pulse: true
+            },
+            status: "success_updated_columns",
+            errorMessage: null,
+            db,
+            organizationId: params.organizationId ?? null
+          });
+          return {
+            ok: true,
+            skipped: false,
+            status: "success_updated_columns",
+            monday_item_id: headerMondayItemId,
+            monday_board_id: String(boardId),
+            warning: null
+          };
+        } catch (e) {
+          const msg = safeMondayErrorMessage(e);
+          await writeMondaySyncLog({
+            quoteId: params.quoteId,
+            action: params.action || "sync",
+            mondayBoardId: String(boardId),
+            mondayItemId: headerMondayItemId,
+            requestPayload: intRequestPayload,
+            responsePayload: null,
+            status: "failed_internal_column_update",
+            errorMessage: msg,
+            db,
+            organizationId: params.organizationId ?? null
+          });
+          return {
+            ok: true,
+            skipped: false,
+            status: "failed_internal_column_update",
+            monday_item_id: headerMondayItemId,
+            monday_board_id: String(boardId),
+            warning: msg.slice(0, 400)
+          };
+        }
       }
       return await executePublicIncrementalMondaySync({
         token,

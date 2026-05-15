@@ -196,6 +196,13 @@ export default function InternalEstimateApp() {
   const [lastSavedQuoteNumber, setLastSavedQuoteNumber] = useState<string | null>(null);
   const [lastSavedQuoteId, setLastSavedQuoteId] = useState<string | null>(null);
 
+  const [quoteWorkflowStatus, setQuoteWorkflowStatus] = useState("testing_review");
+  const [revisionNoteDraft, setRevisionNoteDraft] = useState("");
+  type InternalSaveIntent = "create" | "update_existing" | "save_revision" | "save_as_new_quote";
+  const [saveIntent, setSaveIntent] = useState<InternalSaveIntent>("create");
+  const [hydratedIsCurrentRevision, setHydratedIsCurrentRevision] = useState<boolean | null>(null);
+  const [hydratedDisplayRevision, setHydratedDisplayRevision] = useState<string | null>(null);
+
   const [calcBusy, setCalcBusy] = useState(false);
   const [calcError, setCalcError] = useState<string | null>(null);
   const [vanityLocalNote, setVanityLocalNote] = useState<string | null>(null);
@@ -548,7 +555,7 @@ export default function InternalEstimateApp() {
   }, [sessionToken, buildCalcPayload, buildRoomDraftsForCalculate, runLocalFromDrafts, ensureAccessToken]);
 
   const buildSubmitPayload = useCallback(() => {
-    return {
+    const base = {
       ...buildCalcPayload(),
       customer_name: customerName.trim() || null,
       customer_email: email.trim() || null,
@@ -561,9 +568,43 @@ export default function InternalEstimateApp() {
       branch: branch.trim() || null,
       sales_rep: salesRep.trim() || null,
       entered_by: enteredBy.trim() || null,
-      quote_status: "testing_review"
+      quote_status: quoteWorkflowStatus.trim() || "testing_review"
     };
-  }, [buildCalcPayload, customerName, email, phone, projectType, projectName, projectAddress, city, state, branch, salesRep, enteredBy]);
+    if (urlQuoteId) {
+      return {
+        ...base,
+        quote_id: urlQuoteId,
+        save_mode: saveIntent,
+        revision_note: revisionNoteDraft.trim() || null
+      };
+    }
+    return { ...base, save_mode: "create" as const };
+  }, [
+    buildCalcPayload,
+    customerName,
+    email,
+    phone,
+    projectType,
+    projectName,
+    projectAddress,
+    city,
+    state,
+    branch,
+    salesRep,
+    enteredBy,
+    quoteWorkflowStatus,
+    urlQuoteId,
+    saveIntent,
+    revisionNoteDraft
+  ]);
+
+  const savePrimaryLabel = useMemo(() => {
+    if (!urlQuoteId) return "Save quote";
+    if (saveIntent === "update_existing") return "Update quote";
+    if (saveIntent === "save_revision") return "Save revision";
+    if (saveIntent === "save_as_new_quote") return "Save as new quote";
+    return "Save quote";
+  }, [urlQuoteId, saveIntent]);
 
   const handleSubmit = useCallback(async () => {
     setSubmitBusy(true);
@@ -574,6 +615,17 @@ export default function InternalEstimateApp() {
     try {
       if (!sessionToken) {
         setSubmitMsg("Sign in to save an internal quote to eliteOS. Nothing is stored until you are signed in.");
+        return;
+      }
+
+      if (
+        urlQuoteId &&
+        hydratedIsCurrentRevision === false &&
+        (saveIntent === "update_existing" || saveIntent === "save_revision")
+      ) {
+        setSubmitMsg(
+          "This is a historical revision (read-only for update/revision). Open the latest revision from Quote Library, or use Save as new quote."
+        );
         return;
       }
 
@@ -590,11 +642,20 @@ export default function InternalEstimateApp() {
       if (raw.ok === true) {
         const qn = String(raw.quote_number ?? raw.quoteNumber ?? "");
         const qid = String(raw.quoteId ?? raw.quote_id ?? "");
+        const sm = String(raw.save_mode ?? raw.saveMode ?? "");
         setLastSavedQuoteNumber(qn || null);
         setLastSavedQuoteId(qid && qid !== "undefined" ? qid : null);
+        if (qid && sm && sm !== "update_existing") {
+          setUrlQuoteId(qid);
+          const u = new URL(window.location.href);
+          u.searchParams.set("quoteId", qid);
+          window.history.replaceState({}, "", `${u.pathname}?${u.searchParams.toString()}${u.hash}`);
+          setSaveIntent("update_existing");
+          setHydratedIsCurrentRevision(true);
+        }
         setSubmitMsg(
           qn
-            ? `Saved to eliteOS Quote Library. Reference: ${qn}.`
+            ? `Saved to eliteOS Quote Library. Reference: ${qn}${sm ? ` (${sm.replace(/_/g, " ")})` : ""}.`
             : "Saved to eliteOS Quote Library."
         );
         setSubmitDiagnostic(null);
@@ -629,7 +690,7 @@ export default function InternalEstimateApp() {
     } finally {
       setSubmitBusy(false);
     }
-  }, [sessionToken, buildSubmitPayload, ensureAccessToken]);
+  }, [sessionToken, buildSubmitPayload, ensureAccessToken, urlQuoteId, hydratedIsCurrentRevision, saveIntent]);
 
   const scopePreview = useMemo(() => {
     const drafts = buildRoomDraftsForCalculate();
@@ -863,6 +924,16 @@ export default function InternalEstimateApp() {
     }
   }, []);
 
+  useEffect(() => {
+    if (!urlQuoteId) {
+      setHydratedIsCurrentRevision(null);
+      setHydratedDisplayRevision(null);
+      setSaveIntent("create");
+      setQuoteWorkflowStatus("testing_review");
+      setRevisionNoteDraft("");
+    }
+  }, [urlQuoteId]);
+
   const hydrationRanRef = useRef(false);
   useEffect(() => {
     if (!supabase || !sessionToken) return;
@@ -987,6 +1058,19 @@ export default function InternalEstimateApp() {
             return prev.map((r, i) => (i === 0 ? { ...r, materialGroup: g } : r));
           });
         }
+        const qs = String(q.quote_status || "testing_review");
+        setQuoteWorkflowStatus(qs);
+        const ic = q.is_current_revision !== false;
+        setHydratedIsCurrentRevision(ic);
+        const rlab = q.revision_label != null ? String(q.revision_label) : "";
+        const qnDisp = String(q.quote_number || "");
+        setHydratedDisplayRevision(
+          qnDisp ? `${qnDisp}${rlab ? ` · ${rlab}` : ""}${ic ? "" : " · historical revision"}` : null
+        );
+        setRevisionNoteDraft(String(q.revision_note ?? ""));
+        setSaveIntent(ic ? "update_existing" : "save_as_new_quote");
+        setLastSavedQuoteId(urlQuoteId);
+        setLastSavedQuoteNumber(qnDisp || null);
         setLoadedFromLibrary(true);
         setHydrationGaps(gaps);
       } catch (e) {
@@ -1034,7 +1118,15 @@ export default function InternalEstimateApp() {
         <div className="card ie-card-tight ie-url-banner">
           {loadedFromLibrary ? (
             <p className="ok" style={{ margin: 0 }}>
-              Loaded from Quote Library. Review fields — saving creates a <strong>new</strong> estimate reference.
+              Loaded saved estimate
+              {hydratedDisplayRevision ? (
+                <>
+                  {" "}
+                  (<strong>{hydratedDisplayRevision}</strong>)
+                </>
+              ) : null}
+              . Pick the Save action in the Save section — Update edits this reference; Save revision freezes the prior snapshot;
+              Save as new quote starts a new ESF family.
             </p>
           ) : (
             <p className="muted" style={{ margin: 0 }}>
@@ -1655,7 +1747,7 @@ export default function InternalEstimateApp() {
               {calcBusy ? "Calculating…" : "Calculate"}
             </button>
             <button type="button" className="btn secondary big" disabled={submitBusy} onClick={() => void handleSubmit()}>
-              {submitBusy ? "Working…" : "Save quote"}
+              {submitBusy ? "Working…" : savePrimaryLabel}
             </button>
           </div>
           {!sessionToken ? (
@@ -1919,6 +2011,39 @@ export default function InternalEstimateApp() {
           <section id="sec-save" className="card">
             <h2 className="ie-section-title">Save</h2>
             {submitMsg ? <p>{submitMsg}</p> : <p className="muted">Submit saves to eliteOS when you’re signed in and quote tables are installed.</p>}
+            {urlQuoteId ? (
+              <div className="grid2" style={{ marginTop: 12, gap: 12 }}>
+                <label>
+                  Save action
+                  <select
+                    value={saveIntent}
+                    onChange={(e) => setSaveIntent(e.target.value as InternalSaveIntent)}
+                    disabled={hydratedIsCurrentRevision === false}
+                  >
+                    <option value="update_existing">Update existing (same revision)</option>
+                    <option value="save_revision">Save new revision (R2, R3…)</option>
+                    <option value="save_as_new_quote">Save as new quote (new ESF #)</option>
+                  </select>
+                </label>
+                <label>
+                  Quote status (persisted)
+                  <input
+                    value={quoteWorkflowStatus}
+                    onChange={(e) => setQuoteWorkflowStatus(e.target.value)}
+                    placeholder="draft, sent, follow_up…"
+                  />
+                </label>
+                <label style={{ gridColumn: "1 / -1" }}>
+                  Revision note (optional)
+                  <input value={revisionNoteDraft} onChange={(e) => setRevisionNoteDraft(e.target.value)} placeholder="Visible on quote row metadata" />
+                </label>
+              </div>
+            ) : null}
+            {!urlQuoteId ? (
+              <p className="muted small" style={{ marginTop: 10 }}>
+                New estimate — Save quote allocates an ESF quote number when migrations are applied (fallback legacy number otherwise).
+              </p>
+            ) : null}
             {lastSavedQuoteNumber ? (
               <p style={{ marginTop: 8 }}>
                 <a
@@ -2144,7 +2269,7 @@ export default function InternalEstimateApp() {
             Print estimate
           </button>
           <button type="button" className="btn secondary btn-sm" disabled={submitBusy} onClick={() => void handleSubmit()}>
-            {submitBusy ? "Saving…" : "Save quote"}
+            {submitBusy ? "Saving…" : savePrimaryLabel}
           </button>
         </div>
       </nav>
