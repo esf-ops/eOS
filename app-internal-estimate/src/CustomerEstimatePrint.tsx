@@ -13,6 +13,35 @@ export function roundCustomerDisplay(amount: number): number {
   return Math.ceil(n / 10) * 10;
 }
 
+/**
+ * Split a customer-facing rounded total across positive exact weights using proportional $10 buckets
+ * + largest remainder so displayed amounts sum exactly to `targetDisplay` (always a multiple of $10).
+ */
+function allocateCustomerDisplayTens(exacts: number[], targetDisplay: number): number[] {
+  const n = exacts.length;
+  if (n === 0) return [];
+  const cleaned = exacts.map((x) => (Number.isFinite(x) && x > 0 ? x : 0));
+  const sumExact = cleaned.reduce((a, b) => a + b, 0);
+  const target = Math.max(0, Math.round(targetDisplay));
+  if (sumExact <= 0 || target <= 0) return cleaned.map(() => 0);
+
+  const units = Math.round(target / 10);
+  if (units <= 0) return cleaned.map(() => 0);
+
+  const rawUnits = cleaned.map((e) => (e / sumExact) * units);
+  const floorUnits = rawUnits.map((r) => Math.floor(r));
+  const assigned = floorUnits.reduce((a, b) => a + b, 0);
+  let deficit = units - assigned;
+  const order = rawUnits
+    .map((r, i) => ({ i, rem: r - floorUnits[i] }))
+    .sort((a, b) => b.rem - a.rem);
+  const out = floorUnits.map((f) => f * 10);
+  for (let k = 0; k < deficit; k++) {
+    out[order[k].i] += 10;
+  }
+  return out;
+}
+
 export type CustomerLineItem = {
   name: string;
   description: string;
@@ -112,6 +141,19 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
   const backsplashMaterialExact = bd.totals.backsplashMaterial;
   const addonsExact = props.visibleRoomAddons.reduce((s, a) => s + (Number(a.total) || 0), 0);
   const hasAddons = props.visibleRoomAddons.length > 0 && addonsExact !== 0;
+
+  const summaryCounterDisplay = roundCustomerDisplay(countertopMaterialExact);
+  const summaryBacksplashDisplay = roundCustomerDisplay(backsplashMaterialExact);
+
+  const stoneCtExacts = bd.groups.map((g) => g.countertopMaterial);
+  const stoneBsExacts = bd.groups.map((g) => g.backsplashMaterial);
+  const vanityCtExacts = vanityRooms.map((v) => Number(v.selected) || 0);
+
+  const ctDisplayParts = allocateCustomerDisplayTens([...stoneCtExacts, ...vanityCtExacts], summaryCounterDisplay);
+  const bsDisplayParts = allocateCustomerDisplayTens(stoneBsExacts, summaryBacksplashDisplay);
+
+  const stoneGroupMaterialDisplay = bd.groups.map((_, i) => (ctDisplayParts[i] ?? 0) + (bsDisplayParts[i] ?? 0));
+  const vanityMaterialDisplayParts = vanityRooms.map((_, j) => ctDisplayParts[bd.groups.length + j] ?? 0);
   return (
     <div className="customer-estimate-print" aria-hidden="true">
       <header className="cep-header">
@@ -278,13 +320,15 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
       <section className="cep-section cep-breakdown cep-section-compact">
         <h2 className="cep-h2">Quoted material breakdown</h2>
         <p className="cep-muted">
-          Square footage by selected price group and room. Dollar totals for this estimate appear in <strong>Estimate summary</strong>{" "}
-          above — not repeated here to avoid rounding confusion.
+          Square footage by selected price group and room. Group material estimates below allocate the{" "}
+          <strong>Countertop material</strong> and <strong>Backsplash material</strong> lines from{" "}
+          <strong>Estimate summary</strong> so rounded amounts sum cleanly — your project total remains in Estimate summary.
           {props.colorTbd ? " Some colors TBD." : ""}
         </p>
 
-        {bd.groups.map((block) => {
+        {bd.groups.map((block, blockIdx) => {
           const roomRows = aggregateLinesByRoom(block.lines);
+          const groupMaterialDisplay = stoneGroupMaterialDisplay[blockIdx] ?? 0;
           return (
             <div key={block.group} className="cep-material-group">
               <h3 className="cep-h3">
@@ -310,12 +354,16 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
                 </tbody>
                 <tfoot>
                   <tr className="cep-material-scope-foot">
-                    <td colSpan={3}>
+                    <td colSpan={2}>
                       <strong>Scope in this group</strong>
                       <span className="cep-muted-inline">
                         {" "}
                         · {formatSf(block.countertopSf)} counter sf · {formatSf(block.backsplashSf + block.fhbSf)} backsplash / full-height sf
                       </span>
+                    </td>
+                    <td className="cep-num cep-material-group-amt">
+                      <span className="cep-group-material-label">Estimated group material amount</span>
+                      <span className="cep-group-material-value">{formatMoney(groupMaterialDisplay)}</span>
                     </td>
                   </tr>
                 </tfoot>
@@ -324,13 +372,18 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
           );
         })}
 
-        {vanityRooms.map((v) => (
+        {vanityRooms.map((v, vIdx) => (
           <div key={v.id} className="cep-material-group">
             <h3 className="cep-h3">{v.group} · Vanity program</h3>
             <p className="cep-muted">
-              <strong>{v.name}</strong> — vanity program pricing is included in <strong>Countertop material</strong> in the estimate summary
-              above (no separate dollar line here).
+              <strong>{v.name}</strong> — vanity program pricing rolls into <strong>Countertop material</strong> in Estimate summary.
             </p>
+            {(vanityMaterialDisplayParts[vIdx] ?? 0) > 0 ? (
+              <p className="cep-vanity-group-amt">
+                <span className="cep-group-material-label">Estimated group material amount</span>{" "}
+                <span className="cep-group-material-value">{formatMoney(vanityMaterialDisplayParts[vIdx] ?? 0)}</span>
+              </p>
+            ) : null}
           </div>
         ))}
       </section>

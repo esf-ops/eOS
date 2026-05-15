@@ -429,6 +429,10 @@ export type SelectedMaterialGroupBlock = {
   countertopSf: number;
   backsplashSf: number;
   fhbSf: number;
+  /** Scoped stone $ from countertop sf × tier rate (exact; same basis as `totals.countertopMaterial`). */
+  countertopMaterial: number;
+  /** Scoped stone $ from backsplash + FHB sf × tier rate (exact; same basis as `totals.backsplashMaterial`). */
+  backsplashMaterial: number;
   materialSubtotal: number;
   /** Omitted on customer-facing output when `includeRates` is false. */
   ratePerSqft?: number;
@@ -586,6 +590,8 @@ export function buildSelectedMaterialBreakdown(
         countertopSf: 0,
         backsplashSf: 0,
         fhbSf: 0,
+        countertopMaterial: 0,
+        backsplashMaterial: 0,
         materialSubtotal: 0
       };
       groupMap.set(g, block);
@@ -612,6 +618,8 @@ export function buildSelectedMaterialBreakdown(
     const rate = materialRateForInternalBasis(block.group, materialBasis);
     const ctDollars = round2(block.countertopSf * rate);
     const bsDollars = round2((block.backsplashSf + block.fhbSf) * rate);
+    block.countertopMaterial = ctDollars;
+    block.backsplashMaterial = bsDollars;
     block.materialSubtotal = round2(ctDollars + bsDollars);
     countertopMaterial += ctDollars;
     backsplashMaterial += bsDollars;
