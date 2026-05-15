@@ -15,6 +15,7 @@ import { attachAdvancedSystemAdminUserRoutes } from "./admin/systemAdminUserMana
 import { attachSalesAccountMappingAdminRoutes } from "./admin/salesAccountMappingAdmin.js";
 import { attachIdentityResolutionAdminRoutes } from "./admin/identityResolutionAdmin.js";
 import { attachQuoteRoutes } from "./quotes/quoteRoutes.js";
+import { collectHeadEnvOriginsForCors } from "./me/headDeploymentUrls.js";
 import { buildMeHeadsPayload } from "./me/launcherHeads.js";
 import { buildTitansTodayPayload, parseTitansTodayQuery } from "./titans/titansToday.js";
 import { attachSalesHeadRoutes } from "./sales/salesHead.js";
@@ -350,15 +351,16 @@ const defaultAllowedOrigins = (() => {
  * Staging/production browser origins allowed to call this API with cookies + Authorization headers.
  * Comma-separated full origins (scheme + host, no trailing path). Leave unset for localhost-only defaults.
  *
- * Use `ALLOWED_ORIGINS` or `EOS_ALLOWED_ORIGINS` (both merged; same comma-separated format).
+ * Use `ALLOWED_ORIGINS`, `EOS_ALLOWED_ORIGINS`, or `CORS_ALLOWED_ORIGINS` (all merged; same comma-separated format).
  *
  * Examples (staging on Vercel + separate executive app):
  *   EOS_ALLOWED_ORIGINS=https://YOUR-BRAIN-HEALTH-STAGING.vercel.app,https://YOUR-EXECUTIVE-STAGING.vercel.app
  * Production launcher / heads later:
  *   EOS_ALLOWED_ORIGINS=https://eos.elitestonefabrication.com,https://heads.elitestonefabrication.com
  *
- * eliteOSfab production + preview (no trailing slashes). Also set `ALLOWED_ORIGINS` / `EOS_ALLOWED_ORIGINS`
- * for each Vercel preview URL (e.g. https://app-home-*.vercel.app).
+ * eliteOSfab production + preview (no trailing slashes). `HEAD_URL_*` values configured on Brain are merged into CORS.
+ * Also set `ALLOWED_ORIGINS` / `EOS_ALLOWED_ORIGINS` / `CORS_ALLOWED_ORIGINS` for each Vercel preview URL
+ * (e.g. https://app-home-xxxx.vercel.app).
  */
 function parseCommaSeparatedOrigins(raw) {
   return String(raw ?? "")
@@ -367,9 +369,47 @@ function parseCommaSeparatedOrigins(raw) {
     .filter(Boolean);
 }
 
+/** Normalize Browser `Origin` values for comparisons (lowercase scheme/host; drops trailing slash). */
+function normalizeBrowserOrigin(raw) {
+  const s = String(raw ?? "").trim().replace(/\/+$/, "");
+  if (!s) return "";
+  try {
+    const u = new URL(s);
+    return `${u.protocol.toLowerCase()}//${u.hostname.toLowerCase()}${u.port ? `:${u.port}` : ""}`;
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * When enabled, allows `https://*.eliteosfab.com` (and apex) by validating the request Origin hostname —
+ * still reflects the exact Origin string via `cors` (never `*`).
+ *
+ * Default: on when `VERCEL_ENV=production`. Disable with `EOS_TRUST_ELITEOSFAB_SUBDOMAIN_ORIGINS=0`.
+ */
+function eliteOsFabSubdomainCorsTrustEnabled() {
+  const raw = String(process.env.EOS_TRUST_ELITEOSFAB_SUBDOMAIN_ORIGINS ?? "").trim().toLowerCase();
+  if (raw === "0" || raw === "false" || raw === "no") return false;
+  if (raw === "1" || raw === "true" || raw === "yes") return true;
+  return String(process.env.VERCEL_ENV ?? "").trim() === "production";
+}
+
+/** @param {string} normalizedOrigin output of normalizeBrowserOrigin */
+function isTrustedEliteOsFabHttpsOrigin(normalizedOrigin) {
+  try {
+    const u = new URL(normalizedOrigin);
+    if (u.protocol !== "https:") return false;
+    const h = u.hostname.toLowerCase();
+    return h === "eliteosfab.com" || h.endsWith(".eliteosfab.com");
+  } catch {
+    return false;
+  }
+}
+
 const envOriginAdditions = [
   ...parseCommaSeparatedOrigins(process.env.ALLOWED_ORIGINS),
-  ...parseCommaSeparatedOrigins(process.env.EOS_ALLOWED_ORIGINS)
+  ...parseCommaSeparatedOrigins(process.env.EOS_ALLOWED_ORIGINS),
+  ...parseCommaSeparatedOrigins(process.env.CORS_ALLOWED_ORIGINS)
 ];
 
 /** Always allow hosted public quote app + common local Vite port (also covered by default range). */
@@ -388,14 +428,70 @@ const fixedEliteOsOrigins = [
   "http://localhost:5177"
 ];
 
-const allowedOrigins = [...new Set([...defaultAllowedOrigins, ...fixedEliteOsOrigins, ...envOriginAdditions])];
+const allowedOrigins = [
+  ...new Set(
+    [...defaultAllowedOrigins, ...fixedEliteOsOrigins, ...envOriginAdditions, ...collectHeadEnvOriginsForCors()]
+      .map(normalizeBrowserOrigin)
+      .filter(Boolean)
+  )
+];
 
-/** CORS first: browsers need reflected Origin before any guarded route responds. */
+const allowedOriginSet = new Set(allowedOrigins);
+
+/** Dedupe `Vary` field names (case-insensitive) when layering with `cors` + CDN behaviors. */
+function appendVaryHeaderField(res, fieldName) {
+  const name = String(fieldName ?? "").trim();
+  if (!name) return;
+  const existingRaw = res.getHeader("Vary");
+  if (existingRaw == null || existingRaw === "") {
+    res.setHeader("Vary", name);
+    return;
+  }
+  const existingStr = Array.isArray(existingRaw) ? existingRaw.join(", ") : String(existingRaw);
+  const parts = existingStr
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const seen = new Set(parts.map((p) => p.toLowerCase()));
+  if (seen.has(name.toLowerCase())) return;
+  res.setHeader("Vary", `${existingStr}, ${name}`);
+}
+
+/**
+ * Shared caches must not reuse `/api/*` responses (or preflight) across Browser origins —
+ * otherwise stale `Access-Control-Allow-Origin` can pair with the wrong client Origin.
+ *
+ * Skips `/api/public-quote*` so public quote tooling/CDN behavior stays unchanged.
+ */
+function shouldApplyApiNoStoreHeaders(req) {
+  const p = req.path || "";
+  if (!p.startsWith("/api")) return false;
+  if (p.startsWith("/api/public-quote")) return false;
+  return true;
+}
+
+function applyApiNoStoreHeaders(req, res, next) {
+  if (!shouldApplyApiNoStoreHeaders(req)) return next();
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+  appendVaryHeaderField(res, "Origin");
+  appendVaryHeaderField(res, "Access-Control-Request-Method");
+  appendVaryHeaderField(res, "Access-Control-Request-Headers");
+  next();
+}
+
+app.use(applyApiNoStoreHeaders);
+
+/** CORS: reflected `Origin` + `credentials` for allowed Browser clients (`cors` runs after cache/Vary so OPTIONS matches). */
 app.use(
   cors({
     origin(origin, callback) {
       if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) return callback(null, true);
+      const norm = normalizeBrowserOrigin(origin);
+      if (!norm) return callback(null, false);
+      if (allowedOriginSet.has(norm)) return callback(null, true);
+      if (eliteOsFabSubdomainCorsTrustEnabled() && isTrustedEliteOsFabHttpsOrigin(norm)) return callback(null, true);
       // Do not throw; missing CORS headers should not become a server 500.
       return callback(null, false);
     },
@@ -407,9 +503,12 @@ app.use(
 
 app.get("/api/debug/cors", (req, res) => {
   const origin = req.headers.origin;
+  const originStr = origin != null && String(origin).trim() !== "" ? String(origin) : null;
   res.json({
     ok: true,
-    origin: origin != null && String(origin).trim() !== "" ? String(origin) : null,
+    origin: originStr,
+    normalizedOrigin: originStr ? normalizeBrowserOrigin(originStr) : null,
+    eliteOsFabSubdomainTrust: eliteOsFabSubdomainCorsTrustEnabled(),
     allowedOrigins
   });
 });

@@ -624,7 +624,11 @@ export default function App() {
       if (evt === "TOKEN_REFRESHED") return;
       /** `getSession()` above runs the initial roster load; skip duplicate startup work. */
       if (evt === "INITIAL_SESSION") return;
-      if (mounted) void loadCore(sess.access_token).catch(() => {});
+      if (mounted)
+        void loadCore(sess.access_token).catch((e: unknown) => {
+          setMe(null);
+          setListError(String((e as Error)?.message ?? e));
+        });
     });
 
     return () => {
