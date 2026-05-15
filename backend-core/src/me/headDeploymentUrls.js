@@ -26,6 +26,61 @@ const SLUG_TO_ENV_KEYS = Object.freeze({
   dealer_resources: ["HEAD_URL_DEALER_RESOURCES"]
 });
 
+function isProductionBrain() {
+  return String(process.env.NODE_ENV ?? "").toLowerCase() === "production";
+}
+
+/**
+ * URLs that must never be advertised as launcher targets when Brain runs in production
+ * (localhost, loopback, typical LAN/private hosts).
+ *
+ * @param {string} url
+ * @returns {boolean}
+ */
+export function isUnsafeLauncherHeadUrl(url) {
+  const raw = String(url ?? "").trim();
+  if (!raw) return false;
+  try {
+    const parsed = new URL(raw);
+    const host = parsed.hostname.toLowerCase();
+
+    if (host === "localhost" || host.endsWith(".localhost")) return true;
+    if (host === "127.0.0.1" || host === "0.0.0.0") return true;
+    if (host === "[::1]" || host === "::1") return true;
+
+    if (host.startsWith("169.254.")) return true;
+
+    if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
+    if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
+
+    const m172 = /^172\.(\d{1,3})\./.exec(host);
+    if (m172) {
+      const seg = Number(m172[1]);
+      if (!Number.isNaN(seg) && seg >= 16 && seg <= 31) return true;
+    }
+
+    if (host.endsWith(".local")) return true;
+
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Strips unsafe launcher URLs when NODE_ENV=production so `/api/me/heads` never returns dev/loopback targets.
+ *
+ * @param {string} url
+ * @returns {string}
+ */
+export function sanitizeLauncherHeadUrl(url) {
+  const trimmed = String(url ?? "").trim().replace(/\/+$/, "");
+  if (!trimmed) return "";
+  if (!isProductionBrain()) return trimmed;
+  if (isUnsafeLauncherHeadUrl(trimmed)) return "";
+  return trimmed;
+}
+
 function firstTrimmedEnv(keys) {
   for (const k of keys) {
     const v = String(process.env[k] ?? "").trim();
@@ -42,7 +97,8 @@ export function resolveHeadDeploymentUrl(slug) {
   const s = String(slug ?? "").trim();
   const keys = SLUG_TO_ENV_KEYS[s];
   if (!keys) return "";
-  return firstTrimmedEnv(keys);
+  const raw = firstTrimmedEnv(keys);
+  return sanitizeLauncherHeadUrl(raw);
 }
 
 /**

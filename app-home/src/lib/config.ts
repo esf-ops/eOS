@@ -7,13 +7,36 @@ function requiredEnv(name: string): string {
 
 const env = import.meta.env;
 
-/** True for typical local Vite / loopback hosts — never show these as launcher targets in production builds. */
-export function isLocalhostLaunchUrl(url: string): boolean {
+/**
+ * Same rules as `backend-core/src/me/headDeploymentUrls.js` — production Home must never surface dev targets.
+ */
+export function isUnsafeLauncherHeadUrl(url: string): boolean {
+  const raw = String(url ?? "").trim();
+  if (!raw) return false;
   try {
-    const h = new URL(String(url).trim()).hostname.toLowerCase();
-    return h === "localhost" || h === "127.0.0.1" || h === "[::1]";
-  } catch {
+    const parsed = new URL(raw);
+    const host = parsed.hostname.toLowerCase();
+
+    if (host === "localhost" || host.endsWith(".localhost")) return true;
+    if (host === "127.0.0.1" || host === "0.0.0.0") return true;
+    if (host === "[::1]" || host === "::1") return true;
+
+    if (host.startsWith("169.254.")) return true;
+
+    if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
+    if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
+
+    const m172 = /^172\.(\d{1,3})\./.exec(host);
+    if (m172) {
+      const seg = Number(m172[1]);
+      if (!Number.isNaN(seg) && seg >= 16 && seg <= 31) return true;
+    }
+
+    if (host.endsWith(".local")) return true;
+
     return false;
+  } catch {
+    return true;
   }
 }
 
@@ -78,7 +101,7 @@ export function resolveHeadLaunchUrl(slug: string): string | null {
   const legacyKey = HEAD_LEGACY_ENV_KEYS[s];
   const fromEnv = envPick(primaryKey) || envPick(legacyKey);
   if (fromEnv) {
-    if (!import.meta.env.DEV && isLocalhostLaunchUrl(fromEnv)) return null;
+    if (!import.meta.env.DEV && isUnsafeLauncherHeadUrl(fromEnv)) return null;
     return fromEnv;
   }
   if (!import.meta.env.DEV) return null;

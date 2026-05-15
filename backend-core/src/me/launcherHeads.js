@@ -233,7 +233,7 @@ function enrichLauncherHead(row, enabled, visibilityReason) {
   const urlRaw = resolveHeadDeploymentUrl(row.slug);
   const url = urlRaw || null;
   const status = inferHeadDeploymentStatus(urlRaw);
-  const is_available = Boolean(enabled && urlRaw);
+  const is_available = Boolean(enabled && url);
   return {
     slug: row.slug,
     title: row.label,
@@ -266,7 +266,7 @@ function enrichPublicQuoteHead() {
     visibilityReason: /** @type {const} */ ("role_default"),
     url,
     status,
-    is_available: Boolean(urlRaw),
+    is_available: Boolean(url),
     role_note: row.roleNote ? String(row.roleNote) : null
   };
 }
