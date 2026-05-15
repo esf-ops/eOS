@@ -1,4 +1,7 @@
-import { createEliteosBrowserSupabaseClient } from "../../../shared/eliteos-supabase/eliteosBrowserSupabaseClient";
+import { createClient } from "@supabase/supabase-js";
+import { buildEliteosSupabaseAuthOptions } from "../../../shared/eliteos-supabase/eliteosSupabaseAuthOptions";
 import { config } from "./config";
 
-export const supabase = createEliteosBrowserSupabaseClient(config.supabaseUrl, config.supabaseAnonKey);
+export const supabase = createClient(config.supabaseUrl, config.supabaseAnonKey, {
+  auth: buildEliteosSupabaseAuthOptions(config.supabaseUrl)
+});
