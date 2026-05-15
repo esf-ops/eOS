@@ -38,7 +38,7 @@ Elite Stone Fabrication internal sales and estimating staff with **Quote** head 
 
 - **Section pills** scroll to Job Info → Rooms/Areas → Materials → Add-ons → Review → Output → Save.
 - **`job_info` + `project_address`:** new saves include `job_info` in `internal_ui` when the client posts `job_info`; header `project_address` when posted on save body.
-- **Tear-out:** UI uses **Tear Out** custom line preset ($750 default) instead of checkbox; `addOns.tearout` is **not** incremented (avoid double-charging if both were used).
+- **Tear-out:** Room-level **Tear Out Needed** checkbox feeds live extras and merged **`addOns.tearout`** on calculate/save. Do **not** also add a duplicate **$750 custom line** for the same tear-out (double charge).
 - **Hydration:** restores `project_address` and `internal_ui.job_info` when present.
 
 ## 2026-05-11 — Room model + catalog smoke checks
@@ -56,7 +56,7 @@ Elite Stone Fabrication internal sales and estimating staff with **Quote** head 
 - **Payload:** Internal Estimate client sends **`internalMaterialBasis`** and optional **`customerEstimateDisplayGroups`**; it does **not** send `retailMarkupPercent` / `retailMethod`. Backend `normalizePrototypeQuoteInput` still forces **0% / Pass Through** for `internal_quote` if a generic client sends markup fields.
 - **Live UX:** sticky summary + math check use **`runLocalPrototypeQuote({ quoteMode: "internal", ... })`** on every relevant edit (no per-keystroke API).
 - **Print:** “Internal — all price groups” table = full tier comparison (material columns + full total). “Customer estimate — selected…” = **only** checked groups.
-- **Automated checks:** `node backend-core/src/scripts/verifyInternalEstimateMath.mjs` (10 sf Promo wholesale vs direct; Group A + $750; counter+backsplash; evil `retailMarkupPercent: 99` ignored).
+- **Automated checks:** `node backend-core/src/scripts/verifyInternalEstimateMath.mjs` (legacy cases + **rooms/pieces**: mixed Promo + Group F, backsplash tier override, counter+splash same group, trip charge `customLineItems`, wholesale vs direct, evil `retailMarkupPercent` on rooms engine).
 - **Manual:** toggle Wholesale ↔ Direct and confirm hero total jumps between wholesale vs Direct totals with **no** extra 20%; add Tear Out and confirm +$750 immediately on sticky total; check only Group A + Group C and confirm print customer block has two rows only.
 
 ## 2026-05-15 — Customer print: selected material breakdown + compact layout
@@ -65,6 +65,18 @@ Elite Stone Fabrication internal sales and estimating staff with **Quote** head 
 - **Optional comparison:** section titled **Optional all-group comparison**; only checked groups; copy clarifies all-scope alternate pricing.
 - **One page:** typical 1–2 room kitchen with 0–3 comparison groups should fit one letter page (compact grid project overview, tight margins).
 - **Internal-only custom lines:** included in project total; **not** listed or noted on customer print (staff worksheet only).
+
+## 2026-05-15 — Live summary ↔ customer print mixed-material parity
+
+- **`measureRoomDraft` scoped stone `$`** uses **`buildSelectedMaterialBreakdown([room])`** so **piece-level material overrides** inside one room price like customer **Quoted Material Breakdown** (no collapse onto room default tier only).
+- **Sticky estimator summary** shows countertop material, backsplash material, room add-ons/fixtures, structured custom lines, internal-only adjustments (if any), then estimate total — aligned with print rollups.
+- **Backend Calculate** with **`engine: "rooms"`** + **`pieces`** — unchanged; **`verifyInternalEstimateMath.mjs`** adds mixed-piece, backsplash override, trip charge, direct wholesale toggle, evil markup (rooms engine).
+- **Optional tier comparison** remains hypothetical full-scope sf × tier; **estimator comparison only** note shown when rooms differ by tier or piece overrides exist.
+
+## 2026-05-15 — Calculate/save `addOns` merged from rooms
+
+- **Parity rule:** Live preview keeps **`applyGlobalAddOns: false`** and puts room extras in **`measureRoomDraft`**. **Calculate** and **Save** send **`addOns`** built by **`mergeRoomDraftsIntoGlobalAddOns`** (catalog qty sums + **`tearout`** per room checkbox + **`qty-outlet`** when FHB scope sf &gt; 0) so **`calculateAddOns`** matches live room fixed charges alongside **`engine: "rooms"`**.
+- **Automated helper:** `npx --yes tsx scripts/verify-internal-estimate-mixed-material-parity.ts` (scoped stone vs breakdown, tier override case, custom line rollup, merge smoke).
 
 ## 2026-05-15 — Customer print layout polish
 

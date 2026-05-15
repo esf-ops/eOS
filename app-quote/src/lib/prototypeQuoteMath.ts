@@ -119,6 +119,49 @@ function sumRoomAddons(room: RoomDraft): { extras: number; addons: MeasuredRoom[
   return { extras, addons, lines };
 }
 
+/** Full-height backsplash sf used for FHB outlet charges — mirrors `measureRoomDraft` (non-vanity). */
+function totalFhbScopeSfForOutletCharges(room: RoomDraft): number {
+  if (room.roomType === "Vanity") return 0;
+  let fhb = 0;
+  if (room.calcMode === "Guided Shape") {
+    const g = sumGuidedPiecesByType(room.guidedPieces);
+    fhb += g.fhb;
+  }
+  if (room.fhbMode === "Manual Sq Ft") fhb += Number(room.fhbDirectSf) || 0;
+  if (room.fhbMode === "Guided Shape") {
+    const fh = sumGuidedPiecesByType(room.fhbPieces);
+    fhb += fh.fhb + fh.counter;
+  }
+  return fhb;
+}
+
+/**
+ * Aggregate per-room catalog add-ons + tear + FHB electrical outlets into backend `addOns`
+ * (`PROTOTYPE_ADDON_UNIT_PRICES` / `calculateAddOns`). Keeps internal calculate/save payloads aligned
+ * with live `measureRoomDraft` room extras when `applyGlobalAddOns` is false in the preview runner.
+ */
+export function mergeRoomDraftsIntoGlobalAddOns(rooms: RoomDraft[]): Record<string, number> {
+  const acc: Record<string, number> = {};
+  for (const room of rooms) {
+    if (room.roomType === "Vanity") continue;
+    for (const spec of ADDON_CATALOG) {
+      const qty = Math.max(0, Math.floor(Number(room.addons[spec.id]) || 0));
+      if (!qty) continue;
+      acc[spec.id] = (acc[spec.id] || 0) + qty;
+    }
+    if (room.tear) {
+      acc.tearout = (acc.tearout || 0) + 1;
+    }
+    if (totalFhbScopeSfForOutletCharges(room) > 0) {
+      const out = Math.max(0, Math.floor(room.fhbOutlets) || 0);
+      if (out > 0) {
+        acc["qty-outlet"] = (acc["qty-outlet"] || 0) + out;
+      }
+    }
+  }
+  return acc;
+}
+
 export function measureRoomDraft(
   room: RoomDraft,
   qualifyingSf: number,
@@ -255,7 +298,9 @@ export function measureRoomDraft(
   extras += add.extras;
   details.push(...add.lines);
 
-  selected = round2((counter + splash + fhb) * rate + extras);
+  /** Scoped material $ matches customer Quoted Material Breakdown (piece-level groups). */
+  const scopedMaterialDollars = buildSelectedMaterialBreakdown([room], materialBasis).totals.materialSubtotal;
+  selected = round2(scopedMaterialDollars + extras);
   priceableCounter = counter;
   priceableSplash = splash + fhb;
   fixedTotal = extras;
@@ -411,6 +456,14 @@ function resolveMaterialGroupForPiece(room: RoomDraft, piece?: GuidedPiece): str
 function colorLabelForPiece(room: RoomDraft, piece?: GuidedPiece): string | undefined {
   const c = piece?.materialOverride ? piece.materialColor : room.materialColor;
   return c?.trim() || undefined;
+}
+
+/**
+ * Internal estimate: scoped stone material $ only (same basis as customer Quoted Material Breakdown).
+ * Excludes room fixed add-ons, vanities, and structured custom lines.
+ */
+export function internalEstimateScopedMaterialSubtotal(rooms: RoomDraft[], basis: "wholesale" | "direct"): number {
+  return buildSelectedMaterialBreakdown(rooms, basis).totals.materialSubtotal;
 }
 
 /**
@@ -698,18 +751,30 @@ export function aggregateComparisonScope(
   }
   const { rooms, totals } = calculateAllRoomDrafts(drafts, projectType);
   const groups = new Set<string>();
+  let pieceOverride = false;
+  for (const r of drafts) {
+    if (r.roomType === "Vanity") continue;
+    if (r.calcMode === "Guided Shape") {
+      for (const p of r.guidedPieces) {
+        if (p.materialOverride && String(p.materialGroup || "").trim()) pieceOverride = true;
+      }
+      for (const p of r.fhbPieces) {
+        if (p.materialOverride && String(p.materialGroup || "").trim()) pieceOverride = true;
+      }
+    }
+  }
   for (const r of rooms) {
     if (r.type === "Vanity") continue;
     if (r.counter + r.splash + r.fhb <= 0) continue;
     groups.add(r.group);
   }
-  const mixed = groups.size > 1;
+  const mixed = groups.size > 1 || pieceOverride;
   return {
     countertopSqft: totals.priceableCounter,
     backsplashSqft: totals.priceableSplash,
     addonDollars: round2(totals.fixed),
     mixedGroupNote: mixed
-      ? "Group comparison uses total measured scope. Per-room mixed group comparison is a future enhancement."
+      ? "Estimator comparison only — comparison rows price all countertop sf and backsplash + FHB sf at one tier each; your selected estimate uses mixed piece/room groups (aligned with live summary and backend calculate)."
       : null
   };
 }

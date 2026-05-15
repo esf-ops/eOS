@@ -10,6 +10,7 @@ import {
   calculateAllRoomDrafts,
   createEstimatorRoom,
   hydrateRoomDraftsFromEstimateRooms,
+  mergeRoomDraftsIntoGlobalAddOns,
   roomsNeedLocalVanityMath,
   runLocalPrototypeQuote,
   serializeRoomsForApi
@@ -268,7 +269,7 @@ export default function InternalEstimateApp() {
   const buildCalcPayload = useCallback(() => {
     const drafts = buildRoomDraftsForCalculate();
     const apiRooms = serializeRoomsForApi(drafts);
-    const addOns: Record<string, number | string> = {};
+    const addOns: Record<string, number | string> = mergeRoomDraftsIntoGlobalAddOns(drafts);
     let countertopSqft = 0;
     let backsplashSqft = 0;
     for (const row of apiRooms) {
@@ -676,16 +677,17 @@ export default function InternalEstimateApp() {
     customLinePreviewTotals
   ]);
 
+  const comparisonScopeMeta = useMemo(() => aggregateComparisonScope(roomDrafts, projectType), [roomDrafts, projectType]);
+
   const internalGroupComparison = useMemo(() => {
-    const ag = aggregateComparisonScope(roomDrafts, projectType);
     return buildInternalEstimateGroupComparison({
-      countertopSqft: ag.countertopSqft,
-      backsplashSqft: ag.backsplashSqft,
-      roomFixedDollars: ag.addonDollars,
+      countertopSqft: comparisonScopeMeta.countertopSqft,
+      backsplashSqft: comparisonScopeMeta.backsplashSqft,
+      roomFixedDollars: comparisonScopeMeta.addonDollars,
       customLineDollars: customLinePreviewTotals,
       basis: internalPricingMode
     });
-  }, [roomDrafts, projectType, customLinePreviewTotals, internalPricingMode]);
+  }, [comparisonScopeMeta, customLinePreviewTotals, internalPricingMode]);
 
   const backendHint = config.backendBaseUrl;
   const partRetail = liveEstimate.retail;
@@ -772,6 +774,29 @@ export default function InternalEstimateApp() {
     }
     return round2(customLinePreviewTotals - visibleCustom);
   }, [customLineRows, customLinePreviewTotals]);
+
+  /** Matches customer print Quoted Material Breakdown + vanity + room extras + custom lines — same basis as live total. */
+  const stickyLiveRollup = useMemo(() => {
+    const bd = selectedMaterialBreakdown;
+    let vanityFlat = 0;
+    let roomExtras = 0;
+    for (const r of liveEstimate.measuredRooms) {
+      if (r.type === "Vanity") vanityFlat += Number(r.selected) || 0;
+      roomExtras += Number(r.extras) || 0;
+    }
+    const countertopMaterial = round2(bd.totals.countertopMaterial + vanityFlat);
+    const backsplashMaterial = bd.totals.backsplashMaterial;
+    const roomAddOnsFixtures = round2(roomExtras);
+    const recomputed = round2(bd.totals.materialSubtotal + vanityFlat + roomExtras + customLinePreviewTotals);
+    return {
+      countertopMaterial,
+      backsplashMaterial,
+      roomAddOnsFixtures,
+      structuredCustomLines: customLinePreviewTotals,
+      recomputed,
+      rollupMismatch: Math.abs(recomputed - (Number(partRetail) || 0)) > 0.03
+    };
+  }, [selectedMaterialBreakdown, liveEstimate.measuredRooms, customLinePreviewTotals, partRetail]);
 
   const quoteLibraryUrl = useMemo(() => {
     const raw = String(import.meta.env.VITE_HEAD_URL_QUOTE_LIBRARY ?? "").trim();
@@ -1175,6 +1200,11 @@ export default function InternalEstimateApp() {
                 </label>
               ))}
             </div>
+            {comparisonScopeMeta.mixedGroupNote ? (
+              <p className="muted small" style={{ marginTop: -10, marginBottom: 16 }}>
+                {comparisonScopeMeta.mixedGroupNote}
+              </p>
+            ) : null}
 
             <h3 className="h3">Structured custom line items</h3>
             <div className="mode-row" style={{ flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
@@ -1425,8 +1455,9 @@ export default function InternalEstimateApp() {
                 Internal — all price groups ({internalPricingMode === "wholesale" ? "wholesale $/sf" : "ESF Direct $/sf"}, no markup %)
               </h3>
               <p className="muted small">
-                Material columns use countertop sf and backsplash + FHB sf at each tier rate. Full total adds room fixed add-ons and
-                structured custom lines (same for every group row).
+                Estimator comparison only — material columns use countertop sf and backsplash + FHB sf at each tier rate. Full total adds
+                room fixed add-ons and structured custom lines (same for every group row). Your selected mixed-material quote follows
+                Quoted Material Breakdown / backend calculate.
               </p>
               <table className="print-table">
                 <thead>
@@ -1456,8 +1487,9 @@ export default function InternalEstimateApp() {
               <div className="ie-customer-estimate-print" style={{ marginTop: 24 }}>
                 <h3 className="h3">Customer estimate — selected price group comparisons</h3>
                 <p className="muted small">
-                  Groups checked under &quot;Show price group options on customer estimate&quot; appear here. Quote Library PDF handoff
-                  will reuse this list when that path ships.
+                  Estimator comparison only — each row applies one tier to all countertop sf and backsplash + FHB sf; it is not a second
+                  mixed-material quote. Groups checked under &quot;Show price group options on customer estimate&quot; appear here. Quote
+                  Library PDF handoff will reuse this list when that path ships.
                 </p>
                 {customerEstimateComparisonRows.length ? (
                   <table className="print-table">
@@ -1808,7 +1840,38 @@ export default function InternalEstimateApp() {
                 <span>Pricing mode</span>
                 <strong>{internalPricingMode === "wholesale" ? "Wholesale" : "Direct / Retail"}</strong>
               </div>
+              <div className="summary-row">
+                <span>Countertop material</span>
+                <strong>${stickyLiveRollup.countertopMaterial.toFixed(2)}</strong>
+              </div>
+              <div className="summary-row">
+                <span>Backsplash material</span>
+                <strong>${stickyLiveRollup.backsplashMaterial.toFixed(2)}</strong>
+              </div>
+              <div className="summary-row">
+                <span>Room add-ons / fixtures</span>
+                <strong>${stickyLiveRollup.roomAddOnsFixtures.toFixed(2)}</strong>
+              </div>
+              <div className="summary-row">
+                <span>Structured custom lines</span>
+                <strong>${stickyLiveRollup.structuredCustomLines.toFixed(2)}</strong>
+              </div>
+              {internalOnlyAdjustDollars !== 0 ? (
+                <div className="summary-row">
+                  <span>Internal-only adjustments</span>
+                  <strong>${internalOnlyAdjustDollars.toFixed(2)}</strong>
+                </div>
+              ) : null}
             </div>
+            <p className="muted small" style={{ margin: "0 0 8px" }}>
+              Live totals use the same mixed piece/room groups as <strong>Quoted Material Breakdown</strong> / customer print.
+              {stickyLiveRollup.rollupMismatch ? (
+                <>
+                  {" "}
+                  <span style={{ color: "#b45309" }}>Roll-up sanity check differs from engine total — report this quote.</span>
+                </>
+              ) : null}
+            </p>
             <p className="summary-kicker">Estimate total (rate book, no markup %)</p>
             <p className="summary-hero-value">{partRetail != null ? `$${Number(partRetail).toFixed(2)}` : "—"}</p>
             {lastCalcLive && serverRetailVerified != null ? (
@@ -1845,10 +1908,6 @@ export default function InternalEstimateApp() {
                       ? " · Color TBD"
                       : " · per room"}
                 </strong>
-              </div>
-              <div className="summary-row">
-                <span>Custom lines (entered)</span>
-                <strong>${customLinePreviewTotals.toFixed(2)}</strong>
               </div>
               <div className="summary-row">
                 <span>Customer comparison groups</span>
