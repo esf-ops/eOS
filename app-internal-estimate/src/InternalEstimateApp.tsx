@@ -14,6 +14,9 @@ import {
   serializeRoomsForApi
 } from "@quote-lib/prototypeQuoteMath";
 import type { EliteProgramColorRow, QuoteWorkflowMethod, RoomDraft } from "@quote-lib/quoteTypes";
+import CustomerEstimatePrint, { type CustomerLineItem } from "./CustomerEstimatePrint";
+import { resolveAccessToken } from "./lib/authSession";
+import { friendlyApiErrorMessage } from "./lib/saveErrorMessage";
 import { getSupabase } from "./lib/supabase";
 import RoomScopeBuilder from "@quote-ui/RoomScopeBuilder";
 
@@ -190,9 +193,9 @@ export default function InternalEstimateApp() {
 
   const [submitBusy, setSubmitBusy] = useState(false);
   const [submitMsg, setSubmitMsg] = useState<string | null>(null);
-  const [submitPreview, setSubmitPreview] = useState<string | null>(null);
+  const [submitDiagnostic, setSubmitDiagnostic] = useState<string | null>(null);
+  const [backendCalcOk, setBackendCalcOk] = useState<boolean | null>(null);
 
-  const liveApi = Boolean(sessionToken);
   const lastCalcLive = !usedFallback && apiPartner != null;
 
   const signIn = useCallback(async () => {
@@ -211,6 +214,7 @@ export default function InternalEstimateApp() {
       const tok = data.session?.access_token;
       if (!tok) throw new Error("No access token returned");
       setSessionToken(tok);
+      setBackendCalcOk(null);
       setAuthPassword("");
     } catch (e: unknown) {
       setAuthError(String((e as Error)?.message || e));
@@ -222,7 +226,39 @@ export default function InternalEstimateApp() {
   const signOut = useCallback(async () => {
     if (supabase) await supabase.auth.signOut();
     setSessionToken(null);
+    setBackendCalcOk(null);
   }, [supabase]);
+
+  useEffect(() => {
+    if (!supabase) return;
+    let alive = true;
+
+    void supabase.auth.getSession().then(({ data }) => {
+      if (!alive) return;
+      const tok = data.session?.access_token ?? "";
+      setSessionToken(tok || null);
+    });
+
+    const { data: sub } = supabase.auth.onAuthStateChange((_evt, sess) => {
+      if (!alive) return;
+      const tok = sess?.access_token ?? "";
+      setSessionToken(tok || null);
+    });
+
+    return () => {
+      alive = false;
+      sub.subscription.unsubscribe();
+    };
+  }, [supabase]);
+
+  const ensureAccessToken = useCallback(async (): Promise<string | null> => {
+    if (!supabase) return null;
+    return resolveAccessToken(supabase);
+  }, [supabase]);
+
+  const printCustomerEstimate = useCallback(() => {
+    window.print();
+  }, []);
 
   const topMaterialGroup = useMemo(() => roomDrafts[0]?.materialGroup ?? "Group Promo", [roomDrafts]);
 
@@ -420,43 +456,62 @@ export default function InternalEstimateApp() {
 
     if (!sessionToken) {
       runLocalFromDrafts();
+      setBackendCalcOk(false);
       setCalcBusy(false);
       return;
     }
 
+    const token = await ensureAccessToken();
+    if (!token) {
+      setCalcError("Your session expired. Please sign out and sign back in, then try Calculate again.");
+      runLocalFromDrafts();
+      setBackendCalcOk(false);
+      setCalcBusy(false);
+      return;
+    }
+    if (token !== sessionToken) setSessionToken(token);
+
     const payload = buildCalcPayload();
 
     try {
-      const raw = (await apiPostJson("/api/internal-quotes/calculate", sessionToken, payload)) as Record<string, unknown>;
+      const raw = (await apiPostJson("/api/internal-quotes/calculate", token, payload)) as Record<string, unknown>;
       if (raw.ok === true) {
         setApiPartner(raw as ApiPartnerResult);
         setUsedFallback(false);
+        setBackendCalcOk(true);
+        setCalcError(null);
         setCalcBusy(false);
         return;
       }
       runLocalFromDrafts();
+      setBackendCalcOk(false);
     } catch (e: unknown) {
       if (e instanceof ApiError) {
         const body = e.body as Record<string, unknown> | null;
         const installed = body && body.installed === false;
         if (e.status === 503 || installed || e.status === 0 || e.status >= 500) {
           runLocalFromDrafts();
+          setBackendCalcOk(false);
           setCalcBusy(false);
           return;
         }
         if (e.status === 401) {
+          const info = friendlyApiErrorMessage(e, "POST /api/internal-quotes/calculate", "calculate");
+          setCalcError(info.userMessage);
           runLocalFromDrafts();
+          setBackendCalcOk(false);
           setCalcBusy(false);
           return;
         }
-        setCalcError(e.message);
+        setCalcError(friendlyApiErrorMessage(e, "POST /api/internal-quotes/calculate", "calculate").userMessage);
         setCalcBusy(false);
         return;
       }
       runLocalFromDrafts();
+      setBackendCalcOk(false);
     }
     setCalcBusy(false);
-  }, [sessionToken, buildCalcPayload, buildRoomDraftsForCalculate, runLocalFromDrafts]);
+  }, [sessionToken, buildCalcPayload, buildRoomDraftsForCalculate, runLocalFromDrafts, ensureAccessToken]);
 
   const buildSubmitPayload = useCallback(() => {
     return {
@@ -479,17 +534,25 @@ export default function InternalEstimateApp() {
   const handleSubmit = useCallback(async () => {
     setSubmitBusy(true);
     setSubmitMsg(null);
-    setSubmitPreview(null);
+    setSubmitDiagnostic(null);
     const payload = buildSubmitPayload();
 
     try {
       if (!sessionToken) {
-        setSubmitMsg("Sign in to save an internal quote to eliteOS. Below is a preview of the data we would send — nothing is stored yet.");
-        setSubmitPreview(JSON.stringify({ ...payload, _demo: true }, null, 2));
+        setSubmitMsg("Sign in to save an internal quote to eliteOS. Nothing is stored until you are signed in.");
         return;
       }
 
-      const raw = (await apiPostJson("/api/internal-quotes/save", sessionToken, payload)) as Record<string, unknown>;
+      const token = await ensureAccessToken();
+      if (!token) {
+        setSubmitMsg(
+          "Your session expired. Please sign in again before saving. If you still see this after signing in, sign out and sign back in."
+        );
+        return;
+      }
+      if (token !== sessionToken) setSessionToken(token);
+
+      const raw = (await apiPostJson("/api/internal-quotes/save", token, payload)) as Record<string, unknown>;
       if (raw.ok === true) {
         const qn = String(raw.quote_number ?? raw.quoteNumber ?? "");
         const qid = String(raw.quoteId ?? raw.quote_id ?? "");
@@ -500,13 +563,14 @@ export default function InternalEstimateApp() {
             ? `Saved to eliteOS Quote Library. Reference: ${qn}.`
             : "Saved to eliteOS Quote Library."
         );
-        setSubmitPreview(null);
+        setSubmitDiagnostic(null);
+        setBackendCalcOk(true);
         if (Array.isArray(raw.warnings) && raw.warnings.length) {
           setSubmitMsg((prev) => `${prev} ${(raw.warnings as string[]).join(" ")}`);
         }
       } else {
-        setSubmitMsg(String(raw.error || "Something went wrong"));
-        setSubmitPreview(JSON.stringify(raw, null, 2));
+        setSubmitMsg(String(raw.error || "Something went wrong while saving."));
+        setSubmitDiagnostic(JSON.stringify({ route: "POST /api/internal-quotes/save", response: raw }, null, 2));
       }
     } catch (e: unknown) {
       if (e instanceof ApiError) {
@@ -514,20 +578,24 @@ export default function InternalEstimateApp() {
         let parsed: Record<string, unknown> | null = null;
         if (body && typeof body === "object") parsed = body as Record<string, unknown>;
         const installed = parsed?.installed === false;
+        const info = friendlyApiErrorMessage(e, "POST /api/internal-quotes/save", "save");
         if (e.status === 503 || installed) {
-          setSubmitMsg("Quote storage isn’t set up in this environment yet. Here’s a preview of what we would save.");
-          setSubmitPreview(JSON.stringify({ request: payload, error: body }, null, 2));
+          setSubmitMsg("Quote storage isn’t set up in this environment yet. Contact support if this persists.");
+          setSubmitDiagnostic(JSON.stringify({ route: info.diagnostic, error: body }, null, 2));
           return;
         }
-        setSubmitMsg(e.message);
-        setSubmitPreview(JSON.stringify({ request: payload, error: body ?? e.message }, null, 2));
+        setSubmitMsg(info.userMessage);
+        setSubmitDiagnostic(
+          JSON.stringify({ route: info.diagnostic ?? "POST /api/internal-quotes/save", error: body ?? e.message }, null, 2)
+        );
         return;
       }
-      setSubmitMsg(String(e));
+      setSubmitMsg("Save failed unexpectedly. Please try again.");
+      setSubmitDiagnostic(String(e));
     } finally {
       setSubmitBusy(false);
     }
-  }, [sessionToken, buildSubmitPayload]);
+  }, [sessionToken, buildSubmitPayload, ensureAccessToken]);
 
   const scopePreview = useMemo(() => {
     const drafts = buildRoomDraftsForCalculate();
@@ -627,6 +695,49 @@ export default function InternalEstimateApp() {
     () => internalGroupComparison.filter((row) => customerDisplayGroups[row.group]),
     [internalGroupComparison, customerDisplayGroups]
   );
+
+  const visibleCustomerLines = useMemo((): CustomerLineItem[] => {
+    const out: CustomerLineItem[] = [];
+    for (const r of customLineRows) {
+      if (!r.customerFacing || !r.name.trim()) continue;
+      const q = num(r.qty) || 1;
+      const p = num(r.unitPrice);
+      if (q <= 0) continue;
+      if (r.category === "Discount/Credit") {
+        if (p >= 0) continue;
+        out.push({
+          name: r.name.trim(),
+          description: r.description.trim(),
+          qty: q,
+          unitPrice: p,
+          lineTotal: round2(q * p),
+          roomName: r.roomName.trim()
+        });
+        continue;
+      }
+      if (p === 0) continue;
+      out.push({
+        name: r.name.trim(),
+        description: r.description.trim(),
+        qty: q,
+        unitPrice: p,
+        lineTotal: round2(q * p),
+        roomName: r.roomName.trim()
+      });
+    }
+    return out;
+  }, [customLineRows]);
+
+  const primaryColorLabel = useMemo(() => {
+    if (colorTbd) return "";
+    if (quoteDefaultCatalogId) {
+      return eliteColors.find((c) => c.id === quoteDefaultCatalogId)?.colorName ?? "";
+    }
+    return "";
+  }, [colorTbd, quoteDefaultCatalogId, eliteColors]);
+
+  const estimateTotalExact = partRetail ?? 0;
+  const materialSubtotalExact = round2(Math.max(0, estimateTotalExact - customLinePreviewTotals));
 
   const quoteLibraryUrl = useMemo(() => {
     const raw = String(import.meta.env.VITE_HEAD_URL_QUOTE_LIBRARY ?? "").trim();
@@ -778,6 +889,7 @@ export default function InternalEstimateApp() {
 
   return (
     <div className="page page-internal-estimate">
+      <div className="ie-no-print">
       <header className="ie-header-compact">
         <div className="ie-header-row">
           <div className="ie-header-brand">
@@ -868,17 +980,25 @@ export default function InternalEstimateApp() {
           ) : null}
 
           <div className="card ie-card-tight ie-live-strip">
-            <p style={{ margin: 0, fontWeight: 600, fontSize: "0.92rem" }}>
-              {liveApi ? (
-                <>
-                  <span className="pill pill-live">Live</span> Signed in — calculations use eliteOS when available.
-                </>
-              ) : (
-                <>
-                  <span className="pill pill-demo">Offline sample</span> Calculate runs locally until you sign in.
-                </>
-              )}
-            </p>
+            {!sessionToken ? (
+              <p className="ie-connection-preview" style={{ margin: 0 }}>
+                <span className="pill pill-demo">Preview</span> Sign in to save to Quote Library. Totals update live while you
+                type; Calculate validates with eliteOS when signed in.
+              </p>
+            ) : backendCalcOk === true ? (
+              <p className="ie-connection-ok" style={{ margin: 0 }}>
+                Live backend calculation connected.
+              </p>
+            ) : backendCalcOk === false && usedFallback ? (
+              <p className="ie-connection-warn" style={{ margin: 0 }}>
+                Live preview for totals — backend calculate did not connect. Tap Calculate to retry, or sign out and back in if
+                save fails.
+              </p>
+            ) : (
+              <p className="ie-connection-preview" style={{ margin: 0 }}>
+                Signed in — live preview while typing; tap Calculate to validate with eliteOS before save.
+              </p>
+            )}
           </div>
 
           <div className="card ie-card-tight ie-pricing-bar">
@@ -1220,9 +1340,10 @@ export default function InternalEstimateApp() {
             </section>
 
             <div id="sec-output" className="internal-print-sheet card">
-              <h2>Internal worksheet (print)</h2>
+              <h2>Internal worksheet (staff)</h2>
               <p className="muted small">
-                Customer-facing estimate PDF and handoff previews are planned via Quote Library — this block is the internal worksheet only.
+                On-screen staff reference only. Use <strong>Print customer estimate</strong> for homeowner PDF — it excludes
+                internal tiers, math check, and diagnostics.
               </p>
               <p>
                 <strong>Account:</strong> {accountName || "—"} · <strong>Project address:</strong> {projectAddress || "—"}
@@ -1348,8 +1469,8 @@ export default function InternalEstimateApp() {
             </div>
 
           <div className="actions">
-            <button type="button" className="btn secondary big" onClick={() => window.print()}>
-              Print estimate
+            <button type="button" className="btn secondary big" onClick={printCustomerEstimate}>
+              Print customer estimate
             </button>
             <button type="button" className="btn primary big" disabled={calcBusy} onClick={() => void handleCalculate()}>
               {calcBusy ? "Calculating…" : "Calculate"}
@@ -1367,10 +1488,10 @@ export default function InternalEstimateApp() {
 
           {vanityLocalNote ? <div className="fallback-banner">{vanityLocalNote}</div> : null}
 
-          {usedFallback ? (
-            <div className="fallback-banner" role="status">
-              {demoResult?.fallbackLabel ?? "Demo calculation fallback — backend not connected."}
-            </div>
+          {usedFallback && sessionToken && backendCalcOk === false ? (
+            <p className="muted small" style={{ margin: "0 0 12px" }}>
+              Calculate used local preview math — save still requires a verified session and backend when available.
+            </p>
           ) : null}
 
           {calcError ? <p className="error">{calcError}</p> : null}
@@ -1623,7 +1744,6 @@ export default function InternalEstimateApp() {
                 </span>
               </p>
             ) : null}
-            {submitPreview ? <pre className="preview">{submitPreview}</pre> : null}
           </section>
 
           <details className="card ie-diagnostics">
@@ -1634,6 +1754,11 @@ export default function InternalEstimateApp() {
             <p className="muted small mono" style={{ wordBreak: "break-all", marginTop: 6 }}>
               {backendHint}
             </p>
+            {submitDiagnostic ? (
+              <pre className="preview" style={{ marginTop: 10 }}>
+                {submitDiagnostic}
+              </pre>
+            ) : null}
           </details>
 
         </main>
@@ -1727,8 +1852,8 @@ export default function InternalEstimateApp() {
               <button type="button" className="btn secondary" disabled={submitBusy} onClick={() => void handleSubmit()}>
                 {submitBusy ? "Saving…" : "Save to Quote Library"}
               </button>
-              <button type="button" className="btn secondary" onClick={() => window.print()}>
-                Print / export
+              <button type="button" className="btn secondary" onClick={printCustomerEstimate}>
+                Print customer estimate
               </button>
               <a className="btn secondary" href={`${quoteLibraryUrl}/`} target="_blank" rel="noreferrer">
                 Open Quote Library
@@ -1739,6 +1864,31 @@ export default function InternalEstimateApp() {
       </div>
 
       <footer className="footer">eliteOS Internal Estimate Head · Elite Stone Fabrication · {new Date().getFullYear()}</footer>
+      </div>
+
+      <CustomerEstimatePrint
+        accountName={accountName}
+        customerName={customerName}
+        projectName={projectName}
+        projectAddress={projectAddress}
+        city={city}
+        state={state}
+        branch={branch}
+        salesRep={salesRep}
+        preparedBy={enteredBy}
+        primaryGroup={topMaterialGroup}
+        primaryColorLabel={primaryColorLabel}
+        colorTbd={colorTbd}
+        measuredRooms={liveEstimate.measuredRooms}
+        counterSf={scopePreview.counterSf}
+        splashFhbSf={round2(scopePreview.splashSf + scopePreview.fhbSf)}
+        totalSf={scopePreview.totalSf}
+        visibleLineItems={visibleCustomerLines}
+        materialSubtotalExact={materialSubtotalExact}
+        estimateTotalExact={estimateTotalExact}
+        comparisonRows={customerEstimateComparisonRows}
+        estimateDate={new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}
+      />
     </div>
   );
 }
