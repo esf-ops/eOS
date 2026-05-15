@@ -396,6 +396,10 @@ export type SelectedMaterialBreakdown = {
     backsplashSf: number;
     fhbSf: number;
     materialSubtotal: number;
+    /** Countertop sf × group rate (display rollup; no math engine change). */
+    countertopMaterial: number;
+    /** Backsplash + full-height sf × group rate (display rollup). */
+    backsplashMaterial: number;
   };
 };
 
@@ -548,11 +552,16 @@ export function buildSelectedMaterialBreakdown(
   }
 
   let materialSubtotal = 0;
+  let countertopMaterial = 0;
+  let backsplashMaterial = 0;
   const groups: SelectedMaterialGroupBlock[] = [];
   for (const block of groupMap.values()) {
     const rate = materialRateForInternalBasis(block.group, materialBasis);
-    const sfTotal = block.countertopSf + block.backsplashSf + block.fhbSf;
-    block.materialSubtotal = round2(sfTotal * rate);
+    const ctDollars = round2(block.countertopSf * rate);
+    const bsDollars = round2((block.backsplashSf + block.fhbSf) * rate);
+    block.materialSubtotal = round2(ctDollars + bsDollars);
+    countertopMaterial += ctDollars;
+    backsplashMaterial += bsDollars;
     if (includeRates) block.ratePerSqft = rate;
     materialSubtotal += block.materialSubtotal;
     groups.push(block);
@@ -566,7 +575,14 @@ export function buildSelectedMaterialBreakdown(
       t.fhbSf = round2(t.fhbSf + g.fhbSf);
       return t;
     },
-    { countertopSf: 0, backsplashSf: 0, fhbSf: 0, materialSubtotal: round2(materialSubtotal) }
+    {
+      countertopSf: 0,
+      backsplashSf: 0,
+      fhbSf: 0,
+      materialSubtotal: round2(materialSubtotal),
+      countertopMaterial: round2(countertopMaterial),
+      backsplashMaterial: round2(backsplashMaterial)
+    }
   );
 
   return { groups, totals };

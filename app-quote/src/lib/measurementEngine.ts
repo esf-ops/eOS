@@ -23,6 +23,41 @@ export function sfFromGuidedPiece(lengthIn: number, depthIn: number, shape: Guid
   return round2(sf);
 }
 
+/** True when depth looks unset or still at the standard countertop default (25.5″). */
+export function isCountertopDefaultDepth(depthIn: number): boolean {
+  const d = Number(depthIn) || 0;
+  return d === 0 || d === STANDARD_COUNTER_DEPTH_IN;
+}
+
+/** True when depth can be auto-set to backsplash default (blank, 0, 4″, or countertop default). */
+export function isBacksplashAutoDepth(depthIn: number): boolean {
+  const d = Number(depthIn) || 0;
+  return d === 0 || d === STANDARD_BACKSPLASH_HEIGHT_IN || d === STANDARD_COUNTER_DEPTH_IN;
+}
+
+/** True when switching away from backsplash and depth can default to countertop (blank, 0, or 4″). */
+export function isCountertopAutoDepthFromSplash(depthIn: number): boolean {
+  const d = Number(depthIn) || 0;
+  return d === 0 || d === STANDARD_BACKSPLASH_HEIGHT_IN;
+}
+
+/** Depth patch when guided piece type changes — preserves intentional custom depths. */
+export function depthPatchForGuidedPieceTypeChange(
+  prevType: GuidedPiece["pieceType"],
+  nextType: GuidedPiece["pieceType"],
+  currentDepthIn: number
+): { depthIn: number } | null {
+  if (nextType === "splash" && prevType !== "splash") {
+    if (isBacksplashAutoDepth(currentDepthIn)) return { depthIn: STANDARD_BACKSPLASH_HEIGHT_IN };
+    return null;
+  }
+  if (prevType === "splash" && nextType === "counter") {
+    if (isCountertopAutoDepthFromSplash(currentDepthIn)) return { depthIn: STANDARD_COUNTER_DEPTH_IN };
+    return null;
+  }
+  return null;
+}
+
 export function rapidLinearAreas(
   wallFt: number,
   splashIn: number,

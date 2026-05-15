@@ -1,7 +1,12 @@
 import React from "react";
 import type { EliteProgramColorRow, GuidedPiece, RoomCalcMode, RoomDraft } from "../lib/quoteTypes";
 import { ADDON_CATALOG, VANITY_PRICING, createEstimatorRoom, newId } from "../lib/prototypeQuoteMath";
-import { sfFromGuidedPiece, STANDARD_BACKSPLASH_HEIGHT_IN } from "../lib/measurementEngine";
+import {
+  depthPatchForGuidedPieceTypeChange,
+  sfFromGuidedPiece,
+  STANDARD_BACKSPLASH_HEIGHT_IN,
+  STANDARD_COUNTER_DEPTH_IN
+} from "../lib/measurementEngine";
 
 type Props = {
   rooms: RoomDraft[];
@@ -538,9 +543,11 @@ export default function RoomScopeBuilder({
                           Type
                           <select
                             value={p.pieceType}
-                            onChange={(e) =>
-                              setPiece(room.id, p.id, { pieceType: e.target.value as GuidedPiece["pieceType"] }, "guided")
-                            }
+                            onChange={(e) => {
+                              const nextType = e.target.value as GuidedPiece["pieceType"];
+                              const depthPatch = depthPatchForGuidedPieceTypeChange(p.pieceType, nextType, p.depthIn);
+                              setPiece(room.id, p.id, { pieceType: nextType, ...depthPatch }, "guided");
+                            }}
                           >
                             <option value="counter">Counter</option>
                             <option value="splash">Backsplash</option>
@@ -566,10 +573,15 @@ export default function RoomScopeBuilder({
                           />
                         </label>
                         <label>
-                          Depth / height (in)
+                          {p.pieceType === "splash" ? "Height (in)" : "Depth / height (in)"}
                           <input
                             type="number"
                             value={p.depthIn || ""}
+                            placeholder={
+                              p.pieceType === "splash"
+                                ? String(STANDARD_BACKSPLASH_HEIGHT_IN)
+                                : String(STANDARD_COUNTER_DEPTH_IN)
+                            }
                             onChange={(e) => setPiece(room.id, p.id, { depthIn: Number(e.target.value) || 0 }, "guided")}
                           />
                         </label>

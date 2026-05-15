@@ -61,6 +61,11 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
   const vanityRooms = props.measuredRooms.filter((r) => r.type === "Vanity" && r.selected > 0);
   const scopeRooms = props.measuredRooms.filter((r) => r.type !== "Vanity");
 
+  const vanityMaterialExact = vanityRooms.reduce((s, v) => s + (Number(v.selected) || 0), 0);
+  const countertopMaterialExact = bd.totals.countertopMaterial + vanityMaterialExact;
+  const backsplashMaterialExact = bd.totals.backsplashMaterial;
+  const addonsExact = props.visibleRoomAddons.reduce((s, a) => s + (Number(a.total) || 0), 0);
+
   return (
     <div className="customer-estimate-print" aria-hidden="true">
       <header className="cep-header cep-header-compact">
@@ -190,40 +195,29 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
         </p>
       </section>
 
-      <section className="cep-block cep-block-tight">
-        <h2 className="cep-h2">Estimate detail</h2>
-        <table className="cep-table cep-table-compact cep-table-amounts">
+      <section className="cep-block cep-block-tight cep-estimate-summary">
+        <h2 className="cep-h2">Estimate summary</h2>
+        <p className="cep-lead cep-lead-tight">
+          Selected countertop and backsplash material, room add-ons, and custom items for this quote.
+        </p>
+        <table className="cep-table cep-table-compact cep-table-amounts cep-summary-table">
           <tbody>
-            {bd.groups.map((block) => (
-              <tr key={`mat-${block.group}`}>
-                <td>
-                  {block.group} material
-                  {block.lines.length === 1
-                    ? ` (${block.lines[0].roomName} — ${block.lines[0].label})`
-                    : ` (${block.lines.length} scope lines)`}
-                </td>
-                <td className="cep-amt">${roundCustomerDisplay(block.materialSubtotal).toLocaleString()}</td>
+            <tr className="cep-summary-row">
+              <td>Countertop material</td>
+              <td className="cep-amt">${roundCustomerDisplay(countertopMaterialExact).toLocaleString()}</td>
+            </tr>
+            <tr className="cep-summary-row">
+              <td>Backsplash material</td>
+              <td className="cep-amt">${roundCustomerDisplay(backsplashMaterialExact).toLocaleString()}</td>
+            </tr>
+            {addonsExact > 0 ? (
+              <tr className="cep-summary-row">
+                <td>Room add-ons / cutouts / sinks</td>
+                <td className="cep-amt">${roundCustomerDisplay(addonsExact).toLocaleString()}</td>
               </tr>
-            ))}
-            {vanityRooms.map((v) => (
-              <tr key={`van-${v.id}`}>
-                <td>
-                  {v.group} vanity — {v.name}
-                </td>
-                <td className="cep-amt">${roundCustomerDisplay(v.selected).toLocaleString()}</td>
-              </tr>
-            ))}
-            {props.visibleRoomAddons.map((a) => (
-              <tr key={`${a.roomName}-${a.label}`}>
-                <td>
-                  {a.label}
-                  {a.roomName ? ` (${a.roomName})` : ""}
-                </td>
-                <td className="cep-amt">${roundCustomerDisplay(a.total).toLocaleString()}</td>
-              </tr>
-            ))}
+            ) : null}
             {props.visibleLineItems.map((ln) => (
-              <tr key={`${ln.name}-${ln.roomName}-${ln.lineTotal}`}>
+              <tr key={`${ln.name}-${ln.roomName}-${ln.lineTotal}`} className="cep-summary-row">
                 <td>
                   {ln.name}
                   {ln.description ? ` — ${ln.description}` : ""}
@@ -233,15 +227,17 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
                 <td className="cep-amt">${roundCustomerDisplay(ln.lineTotal).toLocaleString()}</td>
               </tr>
             ))}
+            <tr className="cep-summary-total-row">
+              <td>
+                <strong>Estimated project total</strong>
+              </td>
+              <td className="cep-amt">
+                <strong>${finalRounded.toLocaleString()}</strong>
+              </td>
+            </tr>
           </tbody>
         </table>
-        {props.internalOnlyAdjustDollars !== 0 ? (
-          <p className="cep-round-note">
-            Internal-only adjustments are included in the project total but are not shown as separate lines on this
-            estimate.
-          </p>
-        ) : null}
-        <p className="cep-round-note">Displayed line amounts round up to the nearest $10.</p>
+        <p className="cep-round-note">Displayed amounts round up to the nearest $10.</p>
       </section>
 
       {props.comparisonRows.length > 0 ? (

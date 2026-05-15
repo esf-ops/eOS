@@ -61,8 +61,15 @@ Elite Stone Fabrication internal sales and estimating staff with **Quote** head 
 
 ## 2026-05-15 — Customer print: selected material breakdown + compact layout
 
-- **Mixed groups:** Kitchen perimeter Group Promo + island Group F (piece override or separate rooms) → customer print **Selected material breakdown** lists each group with room/piece sf lines; Estimate detail shows **per-group material lines**, not one collapsed “selected group” row.
+- **Mixed groups:** Kitchen perimeter Group Promo + island Group F (piece override or separate rooms) → customer print **Selected material breakdown** lists each group with room/piece sf lines; **Estimate summary** rolls up countertop $ + backsplash $ + add-ons + visible custom lines.
 - **Optional comparison:** section titled **Optional all-group comparison**; only checked groups; copy clarifies all-scope alternate pricing.
 - **One page:** typical 1–2 room kitchen with 0–3 comparison groups should fit one letter page (compact grid project overview, tight margins).
-- **Internal-only custom lines:** included in total; note on print when present; not listed as separate customer lines.
+- **Internal-only custom lines:** included in project total; **not** listed or noted on customer print (staff worksheet only).
+
+## 2026-05-15 — Backsplash depth default + estimate summary rollup
+
+- **Backsplash type:** Add guided piece → change Type to **Backsplash** → depth/height becomes **4″** when prior value was blank, 0, or 25.5″; user can set 6″, 8″, etc. and other edits do not reset it.
+- **Counter type:** Change Backsplash back to **Counter** → depth defaults to **25.5″** only when blank, 0, or 4″ (preserves custom depths).
+- **Customer print summary:** **Estimate summary** shows Countertop material + Backsplash material + room add-ons + named customer custom lines = estimated project total (rounded $10). **Selected material breakdown** above stays per-group sf detail.
+- **Mixed groups:** Kitchen perimeter Group Promo + backsplash Group Promo + island Group F → breakdown shows Promo counter + Promo backsplash sf and Group F counter sf separately.
 

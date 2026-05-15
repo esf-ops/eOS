@@ -2486,6 +2486,21 @@ select:focus {
   letter-spacing: 0.04em;
 }
 
+.cep-estimate-summary {
+  break-inside: avoid;
+}
+
+.cep-summary-table .cep-summary-row td {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.cep-summary-total-row td {
+  border-top: 2px solid var(--border-strong);
+  padding-top: 8px;
+  font-size: 1.02rem;
+}
+
 .cep-table-amounts .cep-amt {
   text-align: right;
   font-weight: 700;

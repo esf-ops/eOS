@@ -349,6 +349,7 @@ Waterfalls are **two parts**:
 
 - **Default height:** 4 inches.  
 - Estimator may set **shorter or taller**.  
+- Guided **Type → Backsplash** sets depth/height to **4″** when the field was blank, 0, or still at the countertop default (25.5″); custom heights (e.g. 6″, 8″) are preserved. Switching back to **Counter** defaults to **25.5″** only when depth was blank, 0, or 4″.  
 - Backsplash sf = **length × backsplash height** (plus any explicit backsplash pieces when modeled separately).
 
 ### Backsplash material
@@ -402,7 +403,7 @@ Separate clearly where helpful:
 - **Internal Estimate Direct / Wholesale math uses fixed rate books only.** **Wholesale** mode uses prototype wholesale group $/sf (partner seed mirror). **Direct / Retail** mode uses **ESF Direct** $/sf per group (same table as public consumer *before* the public planning markup).  
 - **No** partner retail markup, **no** public consumer markup, and **no** extra retail markup percentage is applied on top for `quote_source: internal_quote`. Totals are **sf × selected rate + room fixed add-ons + structured custom lines** (and vanities where applicable), matching the legacy internal HTML tool concept (`p` vs `directP`, no `%` layer).  
 - The **sticky summary** and **math check** panel use the same **live local preview** as you type; **Calculate** (when signed in) remains the **backend line-item** source of truth and refreshes snapshot fields such as `material_breakdown`.  
-- **Customer-facing group display:** checkboxes send `customerEstimateDisplayGroups` (stored on save as `internal_ui.customer_estimate_display_groups`). **Print customer estimate** is a separate layout (not the app shell): it must include a **Selected material breakdown** when rooms/pieces use different price groups (e.g. perimeter Group Promo + island Group F), plus an **Optional all-group comparison** section only for estimator-checked groups (all-scope “what if” pricing, not the selected quote). Rates per sf are omitted on customer print by default; internal worksheet may show rates. **Quote Library PDF** reuse is still **planned**.  
+- **Customer-facing group display:** checkboxes send `customerEstimateDisplayGroups` (stored on save as `internal_ui.customer_estimate_display_groups`). **Print customer estimate** is a separate layout (not the app shell): **Selected material breakdown** (per-group sf by room/piece when mixed groups), then **Estimate summary** (countertop material + backsplash material + room add-ons + named customer custom lines = estimated project total, each line rounded up to $10). **Optional all-group comparison** only for estimator-checked groups (all-scope “what if” pricing, not the selected quote). Internal-only custom adjustments may be in the total but are **not** listed or noted on the customer print. Rates per sf are omitted on customer print by default. **Quote Library PDF** reuse is still **planned**.  
 - Automated regression: `node backend-core/src/scripts/verifyInternalEstimateMath.mjs`.
 
 ---
@@ -529,8 +530,8 @@ Three modes for the first finished version:
 ### 2) Customer Estimate
 
 - Clean **ESF / eliteOS** branded proposal.  
-- Room / area summary, pieces/dimensions, sf, material/color (or TBD), visible add-ons and **customer-facing** custom lines, section subtotals, final total, terms, signature block.  
-- **No** raw JSON, **no** developer keys, **no** internal-only lines as separate visible lines (absorbed per rules).
+- Room / area summary, pieces/dimensions, sf, material/color (or TBD), **Estimate summary** (countertop $ + backsplash $ + add-ons + customer custom lines), final total, terms, signature block.  
+- **No** raw JSON, **no** developer keys, **no** internal-only lines or staff notes on the customer print (may still affect total on the internal worksheet).
 
 ### 3) Sold-job handoff previews
 
