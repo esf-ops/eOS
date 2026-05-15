@@ -216,10 +216,12 @@ Kitchen · Kitchen Perimeter · Kitchen Island · Master Vanity · Guest Bath Va
 
 ### Visual editor — phases
 
-**Phase A (first useful):**
+**Phase A (first useful)** — **Shipped in Internal Estimate as Visual Layout Canvas v1 (local-only layout):**
 
-- Rotate pieces **90°**.
-- **Drag** pieces on a simple canvas for communication and review.
+- Estimators see **room boards** with **guided pieces** (counter / backsplash / full-height), **FHB guided pieces** when enabled, and **Vanity** rooms as cards.
+- Each piece shows **label**, **entered dimensions**, **effective material tier** (piece override vs room default), **color / Color TBD**, and **approximate** footprint on the board.
+- **Drag** and **90° rotate** adjust **visual-only** positions stored in **frontend React state** — they **do not** change calculator dimensions, sticky totals, Calculate/Save payloads, or customer PDF output.
+- Banner copy: **visual verification only — pricing uses entered dimensions.**
 
 **Phase B (best-in-class near term):**
 
@@ -792,7 +794,7 @@ Three explicit save paths · ESF branch numbering · revision suffix rules · li
 Internal Worksheet · Customer Estimate · Sold handoff previews · customer rounding · print layout.
 
 **Phase 4 — Visual layout editor**  
-Rotate · drag · labels/callouts · later snap/scale/grouping.
+Rotate · drag · labels/callouts · later snap/scale/grouping. **Canvas v1 (verification-only boards)** ships ahead of full Phase B CAD-like tooling.
 
 **Phase 5 — Pricing Admin catalog improvements**  
 Material color CRUD · standard add-ons · preset defaults · active/inactive · future effective dates.

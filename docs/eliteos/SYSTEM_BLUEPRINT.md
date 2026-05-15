@@ -104,7 +104,7 @@ The homeowner-facing wizard supports (or will support):
 
 ### Internal Quote Tool (staff)
 
-- **Frontend:** **`app-internal-estimate/`** — internal-only UI (Direct/Wholesale, library, internal Monday copy). Not bundled with **`app-quote`**.
+- **Frontend:** **`app-internal-estimate/`** — internal-only UI (Direct/Wholesale, library, internal Monday copy, **Visual Layout Canvas v1** for drag/rotate **verification only** — not pricing geometry). Not bundled with **`app-quote`**.
 - **Pricing Admin (head):** `app-pricing-admin/` + **`/api/pricing-admin/*`** — foundation tables in `eliteos_pricing_admin_foundation.sql` (`quote_price_groups`, `quote_price_group_rates`, `quote_pricing_policy_rules`, `quote_addon_catalog`, …). **`pricingConfigResolver.js`** loads DB config when installed and **falls back** to `quoteCalculator.js` constants until parity is proven — **no forced cutover** in this pass.
 - **Persistence:** authenticated **`/api/internal-quotes/*`** routes (requires **Quote** head access) save `quote_source: internal_quote` into **`quote_headers`** with org scoping when `organization_id` exists.
 - **Monday:** optional **separate** internal board via **`MONDAY_INTERNAL_QUOTES_BOARD_ID`** and **`MONDAY_INTERNAL_COL_*`** — does not reuse public column IDs (`docs/quote-platform/monday-internal-quotes-setup.md`).

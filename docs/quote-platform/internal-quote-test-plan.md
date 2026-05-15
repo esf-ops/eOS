@@ -92,3 +92,10 @@ Elite Stone Fabrication internal sales and estimating staff with **Quote** head 
 - **Customer print summary:** **Estimate summary** shows Countertop material + Backsplash material + room add-ons + named customer custom lines = estimated project total (rounded $10). **Selected material breakdown** above stays per-group sf detail.
 - **Mixed groups:** Kitchen perimeter Group Promo + backsplash Group Promo + island Group F → breakdown shows Promo counter + Promo backsplash sf and Group F counter sf separately.
 
+## 2026-05-15 — Visual Layout Canvas v1 (verification only)
+
+- **Placement:** Internal Estimate section **Visual Layout Canvas** (nav pill **Visual layout**) between **Rooms / Areas** and **Add-ons**.
+- **Scope:** Renders **Guided Shape** pieces (`guidedPieces` + `fhbPieces` when FHB mode is Guided Shape) and **Vanity** rooms; Manual Sq Ft / Rapid Linear rooms show the canvas yellow helper until guided dimensions exist.
+- **Interactions:** **Drag** and **Rotate 90°** update **React-only** layout map keyed by stable piece ids (`g:{roomId}:{pieceId}`, `f:…`, `v:{roomId}`). Totals and **`serializeRoomsForApi`** payloads **exclude** this map — sticky hero / Calculate / Save unchanged by canvas gestures.
+- **Regression sniff:** Mix material tiers on two counters → **Mixed tier** badge + tier-colored borders; toggle Wholesale/Direct → canvas unchanged except labels mirror room defaults / overrides.
+- **Print:** Customer PDF unchanged — canvas is not printed.
