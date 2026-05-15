@@ -1160,8 +1160,8 @@ export default function InternalEstimateApp() {
 
             <h3 className="h3">Show price group options on customer estimate</h3>
             <p className="muted small" style={{ marginTop: 4 }}>
-              Internal worksheet below can list every tier. For the customer-facing estimate printout, pick which groups appear in the
-              comparison tables (default: none — check the groups you want).
+              Choose only the alternate groups you want shown to the customer. Internal worksheet below can list every tier; customer
+              print includes comparisons only for checked groups (default: none).
             </p>
             <div className="mode-row" style={{ flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
               {MATERIAL_GROUPS.map((g) => (

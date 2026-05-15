@@ -2288,8 +2288,18 @@ select:focus {
 }
 
 .cep-section {
-  margin-bottom: 10px;
+  margin-bottom: 8px;
   page-break-inside: avoid;
+}
+
+.cep-section-compact {
+  margin-bottom: 6px;
+}
+
+.cep-muted-inline {
+  font-weight: 500;
+  color: #64748b;
+  font-size: 0.66rem;
 }
 
 .cep-h2 {
@@ -2363,7 +2373,7 @@ select:focus {
 }
 
 .cep-material-group {
-  margin-bottom: 8px;
+  margin-bottom: 5px;
 }
 
 .cep-material-group:last-of-type {
@@ -2738,7 +2748,11 @@ select:focus {
   }
 
   .cep-section {
-    margin-bottom: 7px;
+    margin-bottom: 5px;
+  }
+
+  .cep-section-compact {
+    margin-bottom: 4px;
   }
 
   .cep-h2 {

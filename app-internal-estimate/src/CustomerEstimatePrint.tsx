@@ -1,6 +1,10 @@
 import React from "react";
 import { EOS_LOGO_URL } from "@quote-lib/config";
-import type { InternalEstimateGroupComparisonRow, SelectedMaterialBreakdown } from "@quote-lib/prototypeQuoteMath";
+import type {
+  InternalEstimateGroupComparisonRow,
+  SelectedMaterialBreakdown,
+  SelectedMaterialScopeLine
+} from "@quote-lib/prototypeQuoteMath";
 import type { MeasuredRoom } from "@quote-lib/quoteTypes";
 
 export function roundCustomerDisplay(amount: number): number {
@@ -55,6 +59,29 @@ function formatSf(n: number): string {
 
 function formatMoney(amount: number): string {
   return `$${roundCustomerDisplay(amount).toLocaleString()}`;
+}
+
+type RoomMaterialRow = {
+  roomName: string;
+  countertopSf: number;
+  backsplashSf: number;
+};
+
+/** Roll piece-level scope lines up to one row per room for customer print. */
+function aggregateLinesByRoom(lines: SelectedMaterialScopeLine[]): RoomMaterialRow[] {
+  const byRoom = new Map<string, RoomMaterialRow>();
+  for (const ln of lines) {
+    const key = ln.roomName.trim() || "Room";
+    const row = byRoom.get(key) ?? { roomName: key, countertopSf: 0, backsplashSf: 0 };
+    row.countertopSf += ln.countertopSf;
+    row.backsplashSf += ln.backsplashSf + ln.fhbSf;
+    byRoom.set(key, row);
+  }
+  return [...byRoom.values()].map((r) => ({
+    roomName: r.roomName,
+    countertopSf: Math.round(r.countertopSf * 100) / 100,
+    backsplashSf: Math.round(r.backsplashSf * 100) / 100
+  }));
 }
 
 const BRANCH_LOCATIONS = [
@@ -170,100 +197,6 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
         </section>
       ) : null}
 
-      <section className="cep-section cep-breakdown">
-        <h2 className="cep-h2">Selected material breakdown</h2>
-        <p className="cep-muted">
-          Quoted scope by material group{props.colorTbd ? " · some colors TBD" : ""}.
-        </p>
-
-        {bd.groups.map((block) => (
-          <div key={block.group} className="cep-material-group">
-            <h3 className="cep-h3">
-              {block.group}
-              {block.colorLabel ? ` · ${block.colorLabel}` : ""}
-            </h3>
-            <table className="cep-table cep-table-compact cep-table-scope">
-              <thead>
-                <tr>
-                  <th>Room / area</th>
-                  <th>Scope</th>
-                  <th className="cep-num">Counter sf</th>
-                  <th className="cep-num">Backsplash sf</th>
-                </tr>
-              </thead>
-              <tbody>
-                {block.lines.map((ln, i) => (
-                  <tr key={`${block.group}-${ln.roomName}-${ln.label}-${i}`}>
-                    <td>{ln.roomName}</td>
-                    <td>
-                      {ln.label}
-                      {ln.colorLabel && ln.colorLabel !== block.colorLabel ? ` (${ln.colorLabel})` : ""}
-                      {ln.fhbSf > 0 ? " · full-height" : ""}
-                    </td>
-                    <td className="cep-num">{ln.countertopSf > 0 ? formatSf(ln.countertopSf) : "—"}</td>
-                    <td className="cep-num">
-                      {ln.backsplashSf + ln.fhbSf > 0 ? formatSf(ln.backsplashSf + ln.fhbSf) : "—"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr>
-                  <th colSpan={2}>Group subtotal</th>
-                  <td className="cep-num">{formatSf(block.countertopSf)} sf</td>
-                  <td className="cep-num">{formatSf(block.backsplashSf + block.fhbSf)} sf</td>
-                </tr>
-                <tr className="cep-material-dollar-row">
-                  <td colSpan={3}>Material subtotal</td>
-                  <td className="cep-num cep-amt">{formatMoney(block.materialSubtotal)}</td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-        ))}
-
-        {vanityRooms.map((v) => (
-          <div key={v.id} className="cep-material-group">
-            <h3 className="cep-h3">{v.group} · Vanity program</h3>
-            <p className="cep-muted">
-              <strong>{v.name}</strong> — program total {formatMoney(v.selected)}
-            </p>
-          </div>
-        ))}
-
-        <p className="cep-scope-grand">
-          Total scope — {formatSf(bd.totals.countertopSf)} counter sf ·{" "}
-          {formatSf(bd.totals.backsplashSf + bd.totals.fhbSf)} backsplash / full-height sf
-        </p>
-      </section>
-
-      {hasAddons ? (
-        <section className="cep-section">
-          <h2 className="cep-h2">Add-ons / fixtures</h2>
-          <table className="cep-table cep-table-compact cep-table-amounts">
-            <tbody>
-              {props.visibleRoomAddons.map((a) => (
-                <tr key={`${a.roomName}-${a.label}`}>
-                  <td>
-                    {a.label}
-                    {a.roomName ? <span className="cep-addon-room"> · {a.roomName}</span> : null}
-                  </td>
-                  <td className="cep-amt">{formatMoney(a.total)}</td>
-                </tr>
-              ))}
-              <tr className="cep-subtotal-row">
-                <td>
-                  <strong>Add-ons / fixtures subtotal</strong>
-                </td>
-                <td className="cep-amt">
-                  <strong>{formatMoney(addonsExact)}</strong>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </section>
-      ) : null}
-
       <section className="cep-section cep-estimate-summary">
         <h2 className="cep-h2">Estimate summary</h2>
         <table className="cep-table cep-table-compact cep-table-amounts cep-summary-table">
@@ -304,6 +237,94 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
           </tbody>
         </table>
         <p className="cep-muted cep-round-note">Displayed amounts round up to the nearest $10. Estimate only — not a contract.</p>
+      </section>
+
+      {hasAddons ? (
+        <section className="cep-section cep-section-compact">
+          <h2 className="cep-h2">Add-ons / fixtures</h2>
+          <table className="cep-table cep-table-compact cep-table-amounts">
+            <tbody>
+              {props.visibleRoomAddons.map((a) => (
+                <tr key={`${a.roomName}-${a.label}`}>
+                  <td>
+                    {a.label}
+                    {a.roomName ? <span className="cep-addon-room"> · {a.roomName}</span> : null}
+                  </td>
+                  <td className="cep-amt">{formatMoney(a.total)}</td>
+                </tr>
+              ))}
+              <tr className="cep-subtotal-row">
+                <td>
+                  <strong>Subtotal</strong>
+                </td>
+                <td className="cep-amt">
+                  <strong>{formatMoney(addonsExact)}</strong>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+      ) : null}
+
+      <section className="cep-section cep-breakdown cep-section-compact">
+        <h2 className="cep-h2">Quoted material breakdown</h2>
+        <p className="cep-muted">
+          Square footage and material subtotal by price group and room
+          {props.colorTbd ? " · some colors TBD" : ""}.
+        </p>
+
+        {bd.groups.map((block) => {
+          const roomRows = aggregateLinesByRoom(block.lines);
+          return (
+            <div key={block.group} className="cep-material-group">
+              <h3 className="cep-h3">
+                {block.group}
+                {block.colorLabel ? ` · ${block.colorLabel}` : ""}
+              </h3>
+              <table className="cep-table cep-table-compact cep-table-scope">
+                <thead>
+                  <tr>
+                    <th>Room / area</th>
+                    <th className="cep-num">Counter sf</th>
+                    <th className="cep-num">Backsplash sf</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {roomRows.map((row) => (
+                    <tr key={`${block.group}-${row.roomName}`}>
+                      <td>{row.roomName}</td>
+                      <td className="cep-num">{row.countertopSf > 0 ? formatSf(row.countertopSf) : "—"}</td>
+                      <td className="cep-num">{row.backsplashSf > 0 ? formatSf(row.backsplashSf) : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="cep-material-dollar-row">
+                    <td>
+                      <strong>Material subtotal</strong>
+                      <span className="cep-muted-inline">
+                        {" "}
+                        · {formatSf(block.countertopSf)} counter sf · {formatSf(block.backsplashSf + block.fhbSf)} backsplash sf
+                      </span>
+                    </td>
+                    <td colSpan={2} className="cep-num cep-amt">
+                      {formatMoney(block.materialSubtotal)}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          );
+        })}
+
+        {vanityRooms.map((v) => (
+          <div key={v.id} className="cep-material-group">
+            <h3 className="cep-h3">{v.group} · Vanity program</h3>
+            <p className="cep-muted">
+              <strong>{v.name}</strong> — {formatMoney(v.selected)}
+            </p>
+          </div>
+        ))}
       </section>
 
       {props.comparisonRows.length > 0 ? (
