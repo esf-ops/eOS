@@ -18,5 +18,5 @@
       "@quote-lib/*": ["../app-quote/src/lib/*"]
     }
   },
-  "include": ["src"]
+  "include": ["src", "../shared/eliteos-supabase/**/*.ts"]
 }

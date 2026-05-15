@@ -40,6 +40,15 @@
 
 **Data flow (conceptual):** Head → **eliteOS Brain** API (with auth where required) → Supabase (+ external APIs such as Monday from the Brain only).
 
+### Browser auth session across staff heads
+
+- **eliteOS Home** and staff heads (`app-home`, `app-system-admin`, `app-internal-estimate`, `app-quote-library`, `app-pricing-admin`) use the **same Supabase project** and a **shared cookie-backed session storage** (`Domain=.eliteosfab.com`, `Path=/`, `Secure`, `SameSite=Lax`) implemented in `shared/eliteos-supabase/`. **localStorage** is origin-isolated per subdomain, which caused a **second login** when navigating from Home to another head; cookies scoped to the parent domain fix handoff on HTTPS production hosts.
+- **Logout** in any of those apps clears the shared cookies (and removes legacy per-origin `localStorage` keys when present).
+- **Authorization is unchanged:** every protected Brain route still requires a valid **user JWT** and **head access**; launcher cards are UX only.
+- **Public Quote** (`app-quote`) is **not** switched to this shared cookie pattern — it remains public and does not gain a sign-in requirement.
+
+Optional Vite env: **`VITE_ELITEOS_AUTH_COOKIE_DOMAIN`** — set to `false` to force default per-origin storage on a host; set to another parent domain when staging does not use `*.eliteosfab.com`.
+
 ---
 
 ## 4. Current deployed URLs

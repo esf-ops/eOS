@@ -1,10 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+import { createEliteosBrowserSupabaseClient } from "../../../shared/eliteos-supabase/eliteosBrowserSupabaseClient";
 import { config } from "./config";
 
-export const supabase = createClient(config.supabaseUrl, config.supabaseAnonKey, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true
-  }
-});
+export const supabase = createEliteosBrowserSupabaseClient(config.supabaseUrl, config.supabaseAnonKey);

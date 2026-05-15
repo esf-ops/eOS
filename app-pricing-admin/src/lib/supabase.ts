@@ -1,4 +1,5 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { createEliteosBrowserSupabaseClient } from "../../../shared/eliteos-supabase/eliteosBrowserSupabaseClient";
 
 let _client: SupabaseClient | null = null;
 
@@ -12,7 +13,7 @@ export function getSupabase(): SupabaseClient | null {
   const anonKey = env("VITE_SUPABASE_ANON_KEY");
   if (!url || !anonKey) return null;
   if (!_client) {
-    _client = createClient(url, anonKey);
+    _client = createEliteosBrowserSupabaseClient(url, anonKey);
   }
   return _client;
 }
