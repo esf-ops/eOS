@@ -193,6 +193,26 @@ export default function QuoteLibraryApp() {
     setDetailId(null);
   }, [supabase]);
 
+  /** Restore JWT from shared cookie storage (same pattern as Internal Estimate / Home). */
+  useEffect(() => {
+    if (!supabase) return;
+    let alive = true;
+    void supabase.auth.getSession().then(({ data }) => {
+      if (!alive) return;
+      const tok = data.session?.access_token ?? "";
+      setSessionToken(tok || null);
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((_evt, sess) => {
+      if (!alive) return;
+      const tok = sess?.access_token ?? "";
+      setSessionToken(tok || null);
+    });
+    return () => {
+      alive = false;
+      sub.subscription.unsubscribe();
+    };
+  }, [supabase]);
+
   const loadMetrics = useCallback(async () => {
     if (!sessionToken) return;
     try {

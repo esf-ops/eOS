@@ -237,6 +237,7 @@ export async function processInternalQuoteSave(params) {
       revision_number: 1,
       revision_label: "R1",
       quote_family_root_id: quoteId,
+      is_current_revision: true,
       monday_sync_status: mondaySync?.status ?? null,
       monday_item_id: mondaySync?.monday_item_id ?? null,
       save_mode: revisedFromId ? "save_as_new_quote" : "create"
@@ -360,6 +361,7 @@ export async function processInternalQuoteSave(params) {
       revision_number: row.revision_number,
       revision_label: row.revision_label,
       quote_family_root_id: row.quote_family_root_id || row.id,
+      is_current_revision: row.is_current_revision !== false,
       monday_sync_status: mondaySync?.status ?? null,
       monday_item_id: mondaySync?.monday_item_id ?? row.monday_item_id,
       save_mode: "update_existing"
@@ -459,6 +461,7 @@ export async function processInternalQuoteSave(params) {
       revision_number: nextRev,
       revision_label: headerExtras.revision_label,
       quote_family_root_id: root,
+      is_current_revision: true,
       monday_sync_status: mondaySync?.status ?? null,
       monday_item_id: mondaySync?.monday_item_id ?? null,
       save_mode: "save_revision"

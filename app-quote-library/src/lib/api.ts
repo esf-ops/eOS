@@ -33,7 +33,7 @@ export async function apiFetch(path: string, token: string, init: RequestInit = 
   if (!headers.has("Content-Type") && init.body && typeof init.body === "string") {
     headers.set("Content-Type", "application/json");
   }
-  const res = await fetch(url, { ...init, headers });
+  const res = await fetch(url, { ...init, headers, cache: "no-store" });
   const body = await parseJson(res);
   if (!res.ok) {
     const msg =

@@ -188,6 +188,8 @@ export function attachInternalQuoteRoutes(app, deps) {
           revision_label: result.revision_label ?? null,
           quote_family_root_id: result.quote_family_root_id ?? null,
           quote_number_base: result.quote_number_base ?? null,
+          is_current_revision:
+            result.is_current_revision !== undefined ? result.is_current_revision : null,
           save_mode: result.save_mode ?? null,
           totals: calc.totals,
           snapshot: snapshotToStore,

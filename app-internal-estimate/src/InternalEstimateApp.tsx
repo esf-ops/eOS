@@ -222,6 +222,9 @@ export default function InternalEstimateApp() {
     }
   }, [urlQuoteId]);
 
+  /** Must sit before save/hydration callbacks that clear it after Save Revision / new quote id. */
+  const hydrationRanRef = useRef(false);
+
   const [calcBusy, setCalcBusy] = useState(false);
   const [calcError, setCalcError] = useState<string | null>(null);
   const [vanityLocalNote, setVanityLocalNote] = useState<string | null>(null);
@@ -662,19 +665,36 @@ export default function InternalEstimateApp() {
         const qn = String(raw.quote_number ?? raw.quoteNumber ?? "");
         const qid = String(raw.quoteId ?? raw.quote_id ?? "");
         const sm = String(raw.save_mode ?? raw.saveMode ?? "");
+        const revLab = String(raw.revision_label ?? raw.revisionLabel ?? "").trim();
+        const isCurrent =
+          raw.is_current_revision === false
+            ? false
+            : raw.is_current_revision === true
+              ? true
+              : true;
         setLastSavedQuoteNumber(qn || null);
         setLastSavedQuoteId(qid && qid !== "undefined" ? qid : null);
         if (qid && sm && sm !== "update_existing") {
+          hydrationRanRef.current = false;
           setUrlQuoteId(qid);
           const u = new URL(window.location.href);
           u.searchParams.set("quoteId", qid);
           window.history.replaceState({}, "", `${u.pathname}?${u.searchParams.toString()}${u.hash}`);
           setSaveIntent("update_existing");
           setHydratedIsCurrentRevision(true);
+          setLoadedFromLibrary(true);
+        } else if (sm === "update_existing") {
+          setHydratedIsCurrentRevision(isCurrent);
         }
+        if (qn) {
+          const hist = !isCurrent ? " · historical revision" : "";
+          setHydratedDisplayRevision(`${qn}${revLab ? ` · ${revLab}` : ""}${hist}`);
+        }
+        const modeHuman = sm ? sm.replace(/_/g, " ") : "";
+        const revNote = sm === "save_revision" && revLab ? ` New ${revLab} is now the active revision.` : "";
         setSubmitMsg(
           qn
-            ? `Saved to eliteOS Quote Library. Reference: ${qn}${sm ? ` (${sm.replace(/_/g, " ")})` : ""}.`
+            ? `Saved to eliteOS Quote Library. Reference: ${qn}${modeHuman ? ` (${modeHuman})` : ""}.${revNote}`
             : "Saved to eliteOS Quote Library."
         );
         setSubmitDiagnostic(null);
@@ -935,7 +955,6 @@ export default function InternalEstimateApp() {
     return raw.replace(/\/+$/, "") || "https://quotes.eliteosfab.com";
   }, []);
 
-  const hydrationRanRef = useRef(false);
   useEffect(() => {
     if (!supabase || !sessionToken) return;
     void supabase.auth.getSession().then(({ data }) => {
@@ -943,6 +962,7 @@ export default function InternalEstimateApp() {
       if (em) setEnteredBy((prev) => (prev.trim() ? prev : em));
     });
   }, [sessionToken, supabase]);
+
   useEffect(() => {
     hydrationRanRef.current = false;
   }, [urlQuoteId]);
