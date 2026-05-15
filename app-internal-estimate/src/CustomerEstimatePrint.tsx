@@ -87,7 +87,7 @@ function aggregateLinesByRoom(lines: SelectedMaterialScopeLine[]): RoomMaterialR
 const BRANCH_LOCATIONS = [
   {
     city: "Lisbon, IA",
-    lines: ["200 Kraiberg Blvd", "Lisbon, IA 52253", "319-455-4200"]
+    lines: ["200 Kraiburg Blvd", "Lisbon, IA 52253", "319-455-4200"]
   },
   {
     city: "Iowa City, IA",
@@ -370,26 +370,18 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
           </ul>
         </div>
 
-        <div className="cep-sig-row">
-          <div className="cep-sig-block">
-            <div className="cep-sig-line">
-              <span className="cep-sig-label">Customer signature</span>
-              <span className="cep-sig-blank" />
-            </div>
-            <div className="cep-sig-line">
-              <span className="cep-sig-label">Date</span>
-              <span className="cep-sig-blank cep-sig-date" />
-            </div>
+        <div className="cep-signature-block">
+          <div className="cep-sig-line-inline">
+            <span className="cep-sig-role">Customer signature</span>
+            <span className="cep-sig-under cep-sig-under-main" aria-hidden="true" />
+            <span className="cep-sig-role cep-sig-role-date">Date</span>
+            <span className="cep-sig-under cep-sig-under-date" aria-hidden="true" />
           </div>
-          <div className="cep-sig-block">
-            <div className="cep-sig-line">
-              <span className="cep-sig-label">Elite Stone representative</span>
-              <span className="cep-sig-blank" />
-            </div>
-            <div className="cep-sig-line">
-              <span className="cep-sig-label">Date</span>
-              <span className="cep-sig-blank cep-sig-date" />
-            </div>
+          <div className="cep-sig-line-inline">
+            <span className="cep-sig-role">Elite Stone representative</span>
+            <span className="cep-sig-under cep-sig-under-main" aria-hidden="true" />
+            <span className="cep-sig-role cep-sig-role-date">Date</span>
+            <span className="cep-sig-under cep-sig-under-date" aria-hidden="true" />
           </div>
         </div>
 
