@@ -47,6 +47,10 @@ COMMENT ON FUNCTION public.quote_allocate_esf_sequence(text, text) IS
 GRANT EXECUTE ON FUNCTION public.quote_allocate_esf_sequence(text, text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.quote_allocate_esf_sequence(text, text) TO authenticated;
 
+-- Optional security tightening (recommended before GA): if ESF sequences are allocated **only** via Brain (service role),
+-- revoke client-callable RPC from JWT-capable roles to prevent sequence burning:
+-- REVOKE EXECUTE ON FUNCTION public.quote_allocate_esf_sequence(text, text) FROM authenticated;
+
 -- ---------------------------------------------------------------------------
 -- quote_headers extensions
 -- ---------------------------------------------------------------------------

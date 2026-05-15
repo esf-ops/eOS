@@ -16,6 +16,7 @@ import {
 import { calculateQuote } from "./quoteCalculator.js";
 import { fetchEliteProgramMaterialColors } from "./materialColorsCatalog.js";
 import * as esf from "./quoteEsfNumber.js";
+import { validateInternalQuotePatchContext } from "./internalQuotePatchPolicy.js";
 import { processInternalQuoteSave } from "./internalQuoteSave.js";
 import { generateQuoteNumber, isMissingRelationError } from "./quotePersist.js";
 
@@ -312,13 +313,20 @@ export function attachInternalQuoteRoutes(app, deps) {
       if (!isUuid(id)) return res.status(400).json({ ok: false, error: "Invalid id" });
       const db = getSupabase();
       const { orgId, hasQuoteHeadersOrg } = await loadInternalOrgScope(db, req);
-      let qb = db.from("quote_headers").select("id,quote_status,calculation_snapshot").eq("id", id).eq("quote_source", "internal_quote").limit(1);
+      let qb = db
+        .from("quote_headers")
+        .select("id,quote_status,is_current_revision,archived_at")
+        .eq("id", id)
+        .eq("quote_source", "internal_quote")
+        .limit(1);
       qb = applyQuoteHeaderOrgScope(qb, orgId, hasQuoteHeadersOrg);
       const { data: existing, error: exErr } = await qb;
       if (exErr) throw exErr;
       const row = existing?.[0];
       if (!row) return res.status(404).json({ ok: false, error: "Not found" });
       const patch = req.body && typeof req.body === "object" ? req.body : {};
+      const gate = validateInternalQuotePatchContext(patch, row);
+      if (!gate.ok) return res.status(gate.httpStatus).json({ ok: false, error: gate.error });
       /** @type {Record<string, unknown>} */
       const updates = { updated_at: new Date().toISOString() };
       const ns = String(patch.quote_status || "").trim();
@@ -330,9 +338,6 @@ export function attachInternalQuoteRoutes(app, deps) {
       if (patch.state != null) updates.state = patch.state;
       if (patch.sales_rep != null) updates.sales_rep = patch.sales_rep;
       if (patch.branch != null) updates.branch = patch.branch;
-      if (patch.calculation_snapshot != null && typeof patch.calculation_snapshot === "object") {
-        updates.calculation_snapshot = patch.calculation_snapshot;
-      }
       const { error: uErr } = await db.from("quote_headers").update(updates).eq("id", id).eq("quote_source", "internal_quote");
       if (uErr) throw uErr;
       try {

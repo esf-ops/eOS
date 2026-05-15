@@ -99,3 +99,20 @@ Elite Stone Fabrication internal sales and estimating staff with **Quote** head 
 - **Interactions:** **Drag** and **Rotate 90°** update **React-only** layout map keyed by stable piece ids (`g:{roomId}:{pieceId}`, `f:…`, `v:{roomId}`). Totals and **`serializeRoomsForApi`** payloads **exclude** this map — sticky hero / Calculate / Save unchanged by canvas gestures.
 - **Regression sniff:** Mix material tiers on two counters → **Mixed tier** badge + tier-colored borders; toggle Wholesale/Direct → canvas unchanged except labels mirror room defaults / overrides.
 - **Print:** Customer PDF unchanged — canvas is not printed.
+
+## 2026-05-15 — Phase 2 hardening (durable quotes, ESF, revisions, immutability)
+
+- **Migration (manual):** apply `backend-core/supabase/eliteos_internal_quote_phase2.sql` in Supabase (SQL editor or runner). **Do not** skip on prod until reviewed — adds `quote_esf_sequences`, revision/archive columns, backfills legacy internal quotes. Optional after deploy: `REVOKE EXECUTE ON FUNCTION public.quote_allocate_esf_sequence(text, text) FROM authenticated;` if sequences are **only** ever allocated via Brain service role (see comment tail of migration file).
+- **Quote number:** stable base **`ESF-{BRANCH_PREFIX}-{NNNNNN}`** (branch derived from branch label); **`quote_number`** adds **`-R{n}`** when `revision_number > 1`; **`quote_number_base`** shared across the family.
+- **`save_mode` (POST `/api/internal-quotes/save`):**
+  - **`create`** — new family row (`revision_number` 1).
+  - **`update_existing`** — updates **current** revision row **in place**; **`calculateQuote`** recomputes; **`calculation_snapshot`** replaced server-side; refuses archived or **historical** (`is_current_revision = false`) rows.
+  - **`save_revision`** — marks prior family rows **not current**, inserts **new** row with next revision; **prior rows’ snapshots never mutated**.
+  - **`save_as_new_quote`** — new ESF family seeded from an existing row (per implementation).
+- **Quote Library:** default list + **`GET /api/quote-library/metrics`** use **latest revision only** (`is_current_revision` true or null) and **exclude archived** unless query flags request archived. Period buckets filter by **`updated_at`** (see API `metrics_note`).
+- **Monday internal:** updates existing pulse when `monday_item_id` present on **`update_existing`** / revision flows; optional **`MONDAY_INTERNAL_COL_REVISION`**, **`MONDAY_INTERNAL_COL_LAST_REVISED`** when configured.
+- **PATCH `/api/internal-quotes/:id`:** metadata only (`quote_status`, `prepared_by`, customer/project location fields). **`calculation_snapshot` forbidden** (400). Archived + **historical revision** rows cannot PATCH — use save pipeline from **latest** revision.
+- **Snapshot immutability:** treat stored **`calculation_snapshot`** as the **historical pricing record** for that row; changes flow through **save** so calculator + line items + audit (`quote_calculation_audit`) stay aligned.
+- **Attachments / full file uploads:** still **future** — not part of Phase 2 persistence contract.
+
+---

@@ -1,5 +1,13 @@
 /**
  * Internal Estimate durable save modes (Phase 2): create, update_existing, save_revision, save_as_new_quote.
+ *
+ * **Pricing snapshot (`quote_headers.calculation_snapshot`):**
+ * - Each row stores one **server-authored** snapshot at insert/update via **`calculateQuote`** plus curated **`internal_ui`** fields merged in `internalQuotesApi` before save.
+ * - **`update_existing`** replaces the **current** revision’s snapshot with a **fresh** recalculation from the posted body (never accepts a raw client snapshot blob).
+ * - **`save_revision`** creates a **new** row; **prior revision rows are never rewritten** — their snapshots remain frozen historical records.
+ * - **`PATCH /api/internal-quotes/:id`** is **metadata-only** (status, prepared_by, light header fields); see `internalQuotePatchPolicy.js` — **never** `calculation_snapshot`.
+ *
+ * Historical revisions (`is_current_revision = false`) cannot be updated via `update_existing` or revision saves from the UI/API guardrails here.
  */
 
 import { buildMondayQuotePayload, syncQuoteToMonday } from "../integrations/mondayQuoteSync.js";

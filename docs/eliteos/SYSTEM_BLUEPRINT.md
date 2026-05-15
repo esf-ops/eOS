@@ -120,6 +120,7 @@ The homeowner-facing wizard supports (or will support):
 - **Monday:** optional **separate** internal board via **`MONDAY_INTERNAL_QUOTES_BOARD_ID`** and **`MONDAY_INTERNAL_COL_*`** — does not reuse public column IDs (`docs/quote-platform/monday-internal-quotes-setup.md`).
 - **Economics:** internal calculator supports **Direct vs Wholesale** material $/sf; **custom add-on lines** are passthrough (no public 25% homeowner markup). Public consumer paths stay on **Direct + planning markup** only.
 - **Snapshots:** saved quotes must retain the pricing inputs used at calculation/save time (`calculation_snapshot`, line items) so later Pricing Admin edits do not rewrite history.
+- **Phase 2 durability:** internal saves use **`save_mode`** (`create`, `update_existing`, `save_revision`, `save_as_new_quote`), ESF numbering (`backend-core/supabase/eliteos_internal_quote_phase2.sql`), and revision columns on **`quote_headers`**. **`calculation_snapshot` is never client-PATCHable** — only replaced via **`POST /api/internal-quotes/save`** recalculation on the **current** revision; historical revision rows stay frozen.
 
 ---
 

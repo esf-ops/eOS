@@ -488,6 +488,8 @@ export function buildMeasurementSourceSummary(input) {
 
 /**
  * Build immutable snapshot blob for `quote_headers.calculation_snapshot` / audit.
+ * Consumers merge workspace-only fields (e.g. `internal_ui`) at save boundaries in `internalQuotesApi`;
+ * existing rows must not accept arbitrary snapshot replacements via PATCH — only via save pipeline recalculation.
  */
 export function buildCalculationSnapshot(input, resolved, totals, extras = {}) {
   return {

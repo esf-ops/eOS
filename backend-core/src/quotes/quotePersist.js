@@ -222,6 +222,7 @@ export async function persistQuoteSubmission(db, opts) {
           }
           return body.materialGroup || body.material_group || null;
         })(),
+    /** Server-authored pricing artifact — merged from `calculateQuote` snapshot + caller `snapshotToStore` (internal UI); never trust raw client snapshots on PATCH. */
     calculation_snapshot: snapshotToStore,
     created_by: userEmail
   };
