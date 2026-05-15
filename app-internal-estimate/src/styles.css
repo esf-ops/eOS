@@ -3127,6 +3127,529 @@ select:focus {
   }
 }
 
+/* --- Visual Layout Canvas (Internal Estimate — verification only; not pricing source of truth) --- */
+.page-internal-estimate .card.ie-visual-section {
+  padding: 18px 22px;
+  margin-bottom: 16px;
+}
+
+.page-internal-estimate .ie-visual-summary-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.page-internal-estimate .ie-visual-summary-text {
+  flex: 1;
+  min-width: 200px;
+}
+
+.page-internal-estimate .ie-visual-heading {
+  margin-bottom: 6px !important;
+}
+
+.page-internal-estimate .ie-visual-meta {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.page-internal-estimate .ie-visual-sep {
+  color: #cbd5e1;
+}
+
+.page-internal-estimate .ie-visual-reminder {
+  color: #64748b;
+  font-weight: 500;
+}
+
+.page-internal-estimate .ie-visual-summary-actions {
+  flex-shrink: 0;
+}
+
+.page-internal-estimate .ie-visual-expand-note {
+  margin: 10px 0 12px;
+}
+
+.page-internal-estimate .ie-visual-collapse-footer {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+/* Main-column workflow tail — compact rhythm after Visual Layout (Rooms / Add-ons unchanged) */
+.page-internal-estimate .ie-workflow-tail > .card {
+  padding: 16px 18px;
+  margin-bottom: 13px;
+}
+
+.page-internal-estimate .ie-workflow-tail > .card h2.ie-section-title {
+  margin-bottom: 10px;
+}
+
+.page-internal-estimate .ie-workflow-tail .ie-internal-detail > h2 {
+  margin: 0 0 10px;
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.page-internal-estimate .ie-workflow-tail .ie-internal-detail .section-lead {
+  margin-bottom: 8px;
+}
+
+.page-internal-estimate .ie-workflow-tail details.card.ie-details-worksheet:not([open]),
+.page-internal-estimate .ie-workflow-tail details.card.math-check:not([open]) {
+  padding-top: 11px;
+  padding-bottom: 11px;
+}
+
+.page-internal-estimate .ie-workflow-tail details.card[open] {
+  padding-bottom: 15px;
+}
+
+.page-internal-estimate .ie-workflow-tail > .actions {
+  margin: 2px 0 8px;
+  gap: 10px;
+}
+
+.page-internal-estimate .ie-workflow-tail > p.muted.small {
+  margin-top: 6px;
+  margin-bottom: 8px;
+}
+
+.page-internal-estimate .ie-workflow-tail > .fallback-banner {
+  margin-bottom: 10px;
+}
+
+.page-internal-estimate .ie-workflow-tail > .error {
+  margin-bottom: 8px;
+}
+
+.page-internal-estimate .ie-aside .ie-summary-audit summary {
+  font-size: 0.84rem;
+}
+
+.page-internal-estimate .ie-aside .ie-summary-audit:not([open]) {
+  margin-top: 10px;
+}
+
+.vlc-scope .vlc-root {
+  margin-top: 12px;
+}
+
+.vlc-scope .vlc-root-empty {
+  padding: 28px 20px;
+  text-align: center;
+  background: #fafbfc;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+
+.vlc-scope .vlc-empty-title {
+  margin: 0 0 8px;
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--text-secondary);
+}
+
+.vlc-scope .vlc-empty-hint {
+  margin: 0 0 12px;
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+}
+
+.vlc-scope .vlc-disclaimer {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #64748b;
+}
+
+.vlc-scope .vlc-banner {
+  background: var(--info-bg);
+  border: 1px solid #bfdbfe;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 0.84rem;
+  line-height: 1.45;
+  margin-bottom: 14px;
+  color: #1e3a8a;
+}
+
+.vlc-scope .vlc-empty-board-msg {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: var(--radius-sm);
+  font-size: 0.84rem;
+  color: #78350f;
+}
+
+.vlc-scope .vlc-room-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr));
+  gap: 16px;
+}
+
+.vlc-scope .vlc-room-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.vlc-scope .vlc-room-head-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, #fafbfc 0%, #fff 100%);
+}
+
+.vlc-scope .vlc-room-head {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.vlc-scope .vlc-room-arrange {
+  flex-shrink: 0;
+  margin-top: 2px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #475569;
+  background: #fff;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 5px 10px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.vlc-scope .vlc-room-arrange:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+.vlc-scope .vlc-room-title {
+  margin: 0 0 4px;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.vlc-scope .vlc-room-meta {
+  display: block;
+  font-size: 0.78rem;
+}
+
+.vlc-scope .vlc-room-board {
+  position: relative;
+  /* height set inline from content; avoids excess blank vertical space */
+  max-height: min(440px, 50vh);
+  overflow: auto;
+  padding: 12px;
+  background-color: #f8fafc;
+  background-image: linear-gradient(to right, rgba(148, 163, 184, 0.12) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(148, 163, 184, 0.12) 1px, transparent 1px);
+  background-size: 20px 20px;
+  background-position: -1px -1px;
+}
+
+/* Layout slab — outer hit box / clamp bounds */
+.vlc-scope .vlc-slab {
+  position: absolute;
+  overflow: visible;
+  touch-action: none;
+  user-select: none;
+  cursor: grab;
+  z-index: 1;
+  box-sizing: border-box;
+}
+
+.vlc-scope .vlc-slab:active {
+  cursor: grabbing;
+  z-index: 8;
+}
+
+.vlc-scope .vlc-slab-selected {
+  z-index: 9;
+}
+
+.vlc-scope .vlc-slab-spin,
+.vlc-scope .vlc-slab-inner {
+  width: 100%;
+  height: 100%;
+  transform-origin: center center;
+  box-sizing: border-box;
+}
+
+.vlc-scope .vlc-slab-inner > div[class*="vlc-slab-cat"] {
+  width: 100%;
+  height: 100%;
+}
+
+.vlc-scope .vlc-slab-face {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px 8px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 4px;
+  border-radius: 6px;
+  border-style: solid;
+  border-width: 1px;
+  border-color: var(--vlc-face-edge, #cbd5e1);
+  border-left-width: 4px;
+  border-left-style: solid;
+  overflow: hidden;
+}
+
+/* Compact / micro labels wrap instead of clipping to “S…” */
+.vlc-scope .vlc-slab-compact .vlc-slab-face {
+  overflow: visible;
+  padding: 6px 8px 6px 11px;
+}
+
+.vlc-scope .vlc-slab-stone {
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.95) 0%, rgba(248, 250, 252, 0.92) 42%, rgba(226, 232, 240, 0.55) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65), 0 2px 8px rgba(15, 23, 42, 0.07);
+}
+
+.vlc-scope .vlc-slab-cat-countertop .vlc-slab-face {
+  border-left-color: #b91c1c;
+}
+
+.vlc-scope .vlc-slab-cat-island .vlc-slab-face {
+  border-left-color: #d97706;
+}
+
+.vlc-scope .vlc-slab-cat-backsplash .vlc-slab-face {
+  border-left-color: #2563eb;
+}
+
+.vlc-scope .vlc-slab-cat-fhb .vlc-slab-face {
+  border-left-color: #7c3aed;
+}
+
+.vlc-scope .vlc-slab-cat-vanity .vlc-slab-face {
+  border-left-color: #0d9488;
+}
+
+.vlc-scope .vlc-slab-cat-fireplace .vlc-slab-face {
+  border-left-color: #c2410c;
+}
+
+.vlc-scope .vlc-slab-cat-bar .vlc-slab-face {
+  border-left-color: #ca8a04;
+}
+
+.vlc-scope .vlc-slab-cat-other .vlc-slab-face {
+  border-left-color: #64748b;
+}
+
+.vlc-scope .vlc-slab-selected .vlc-slab-face {
+  box-shadow: inset 0 0 0 2px rgba(37, 99, 235, 0.35), 0 4px 18px rgba(15, 23, 42, 0.12);
+}
+
+.vlc-scope .vlc-slab-incomplete .vlc-slab-face {
+  border-style: dashed;
+  opacity: 0.94;
+}
+
+.vlc-scope .vlc-slab-title {
+  font-weight: 700;
+  font-size: 0.72rem;
+  line-height: 1.2;
+  color: #0f172a;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.vlc-scope .vlc-slab-chip {
+  align-self: flex-start;
+  flex-shrink: 0;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #475569;
+  background: rgba(255, 255, 255, 0.75);
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  padding: 2px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.vlc-scope .vlc-slab-micro {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: flex-start;
+  justify-content: center;
+  text-align: left;
+}
+
+.vlc-scope .vlc-slab-micro-tier {
+  font-size: 0.56rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #64748b;
+  text-transform: uppercase;
+}
+
+.vlc-scope .vlc-slab-micro-name {
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #0f172a;
+  word-break: break-word;
+}
+
+.vlc-scope .vlc-draggable:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+/* Inspector strip below each board */
+.vlc-scope .vlc-inspector {
+  padding: 12px 14px;
+  border-top: 1px solid var(--border);
+  background: #fafbfc;
+}
+
+.vlc-scope .vlc-inspector-empty {
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  background: #fafbfc;
+  line-height: 1.45;
+}
+
+.vlc-scope .vlc-kbd-hint {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 0.72rem;
+  color: #64748b;
+}
+
+.vlc-scope .vlc-inspector-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 8px 14px;
+}
+
+.vlc-scope .vlc-inspector-main {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+@media (min-width: 760px) {
+  .vlc-scope .vlc-inspector-main {
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+  }
+
+  .vlc-scope .vlc-inspector-main .vlc-inspector-grid {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .vlc-scope .vlc-inspector-main .vlc-inspector-actions {
+    flex-shrink: 0;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    min-width: 112px;
+  }
+}
+
+.vlc-scope .vlc-inspector-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.vlc-scope .vlc-inspector-span {
+  grid-column: 1 / -1;
+}
+
+.vlc-scope .vlc-inspector-k {
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #94a3b8;
+}
+
+.vlc-scope .vlc-inspector-v {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #1e293b;
+  word-break: break-word;
+}
+
+.vlc-scope .vlc-inspector-warn {
+  color: #b45309;
+}
+
+.vlc-scope .vlc-mixed-inline {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 0.62rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #92400e;
+  background: #fef3c7;
+  padding: 1px 8px;
+  border-radius: 999px;
+  vertical-align: middle;
+}
+
+.vlc-scope .vlc-inspector-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.vlc-scope .vlc-inspector-btn {
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 600;
+  line-height: 1.2;
+  padding: 4px 9px;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: #fff;
+  color: #475569;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.vlc-scope .vlc-inspector-btn:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
 @media (min-width: 1024px) {
   .side-col .summary-card {
     position: sticky;

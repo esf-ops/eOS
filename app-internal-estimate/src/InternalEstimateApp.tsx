@@ -17,6 +17,11 @@ import {
 } from "@quote-lib/prototypeQuoteMath";
 import type { EliteProgramColorRow, QuoteWorkflowMethod, RoomDraft } from "@quote-lib/quoteTypes";
 import CustomerEstimatePrint, { type CustomerLineItem } from "./CustomerEstimatePrint";
+import VisualLayoutCanvas, {
+  type VisualLayoutEntry,
+  visualCanvasSummaryStats,
+  visualLayoutKeysForRooms
+} from "./VisualLayoutCanvas";
 import { resolveAccessToken } from "./lib/authSession";
 import { friendlyApiErrorMessage } from "./lib/saveErrorMessage";
 import { getSupabase } from "./lib/supabase";
@@ -49,6 +54,7 @@ const INTERNAL_BRANCHES = ["Dyersville", "Iowa City", "Lisbon"] as const;
 const WORKFLOW_SECTIONS = [
   { id: "sec-job", label: "Job Info" },
   { id: "sec-rooms", label: "Rooms / Areas" },
+  { id: "sec-visual", label: "Visual layout" },
   { id: "sec-addons", label: "Add-ons & Custom Items" },
   { id: "sec-review", label: "Review" },
   { id: "sec-output", label: "Output" },
@@ -154,6 +160,10 @@ export default function InternalEstimateApp() {
   const [authError, setAuthError] = useState<string | null>(null);
 
   const [roomDrafts, setRoomDrafts] = useState<RoomDraft[]>(() => [createEstimatorRoom("Group Promo")]);
+  /** Drag/rotate positions only — never sent to calculator or pricing (see Visual Layout Canvas banner). */
+  const [visualLayoutByPieceKey, setVisualLayoutByPieceKey] = useState<Record<string, VisualLayoutEntry>>({});
+  /** Visual canvas expanded UI — default collapsed so quick quotes stay simple. */
+  const [visualCanvasExpanded, setVisualCanvasExpanded] = useState(false);
 
   const [accountName, setAccountName] = useState("Direct");
   const [accountPhone, setAccountPhone] = useState("");
@@ -262,9 +272,31 @@ export default function InternalEstimateApp() {
     window.print();
   }, []);
 
+  const scrollToWorkflowSection = useCallback((id: string) => {
+    if (id === "sec-visual") setVisualCanvasExpanded(true);
+    requestAnimationFrame(() => {
+      document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }, []);
+
   const topMaterialGroup = useMemo(() => roomDrafts[0]?.materialGroup ?? "Group Promo", [roomDrafts]);
 
   const buildRoomDraftsForCalculate = useCallback((): RoomDraft[] => roomDrafts, [roomDrafts]);
+
+  useEffect(() => {
+    const valid = visualLayoutKeysForRooms(roomDrafts);
+    setVisualLayoutByPieceKey((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const k of Object.keys(next)) {
+        if (!valid.has(k)) {
+          delete next[k];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [roomDrafts]);
 
   const buildCalcPayload = useCallback(() => {
     const drafts = buildRoomDraftsForCalculate();
@@ -679,6 +711,8 @@ export default function InternalEstimateApp() {
 
   const comparisonScopeMeta = useMemo(() => aggregateComparisonScope(roomDrafts, projectType), [roomDrafts, projectType]);
 
+  const visualCanvasSummary = useMemo(() => visualCanvasSummaryStats(roomDrafts), [roomDrafts]);
+
   const internalGroupComparison = useMemo(() => {
     return buildInternalEstimateGroupComparison({
       countertopSqft: comparisonScopeMeta.countertopSqft,
@@ -1024,7 +1058,7 @@ export default function InternalEstimateApp() {
               key={s.id}
               type="button"
               className="ie-rail-link"
-              onClick={() => document.getElementById(s.id)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+              onClick={() => scrollToWorkflowSection(s.id)}
             >
               {s.label}
             </button>
@@ -1181,7 +1215,8 @@ export default function InternalEstimateApp() {
             <details className="ie-future-tools">
               <summary>Future tools</summary>
               <p className="muted small" style={{ margin: "8px 0 0" }}>
-                Upload plans / AI takeoff and Visualize are on the roadmap — not in this workspace yet.
+                Plan upload / AI takeoff and heavier visualize tooling remain roadmap items (spec Phase B+: snapping, scale, annotations).
+                Use the <strong>Visual Layout Canvas</strong> section below for quick drag-and-rotate verification — it does not change pricing math.
               </p>
             </details>
             <RoomScopeBuilder
@@ -1191,6 +1226,49 @@ export default function InternalEstimateApp() {
               eliteProgramColors={eliteColors}
               hideRapidLinear
             />
+          </section>
+
+          <section id="sec-visual" className="card ie-visual-section">
+            <div className="ie-visual-summary-row">
+              <div className="ie-visual-summary-text">
+                <h2 className="ie-section-title ie-visual-heading">Visual layout verification</h2>
+                <p className="muted small ie-visual-meta">
+                  <strong>{visualCanvasSummary.roomCount}</strong> room{visualCanvasSummary.roomCount === 1 ? "" : "s"} ·{" "}
+                  <strong>{visualCanvasSummary.pieceCount}</strong> piece{visualCanvasSummary.pieceCount === 1 ? "" : "s"} · Mix{" "}
+                  <strong>{visualCanvasSummary.tierSummary}</strong>
+                  <span className="ie-visual-sep"> · </span>
+                  <span className="ie-visual-reminder">Visual only — pricing uses room fields.</span>
+                </p>
+              </div>
+              <div className="ie-visual-summary-actions">
+                <button
+                  type="button"
+                  className="btn secondary btn-sm"
+                  onClick={() => setVisualCanvasExpanded((v) => !v)}
+                  aria-expanded={visualCanvasExpanded}
+                >
+                  {visualCanvasExpanded ? "Collapse canvas" : "Open layout canvas"}
+                </button>
+              </div>
+            </div>
+            {visualCanvasExpanded ? (
+              <>
+                <p className="muted small ie-visual-expand-note">
+                  Optional verification board — drag, rotate, and auto-arrange do not change Calculate, Save, or customer print totals.
+                </p>
+                <VisualLayoutCanvas
+                  rooms={roomDrafts}
+                  layoutByPieceKey={visualLayoutByPieceKey}
+                  setLayoutByPieceKey={setVisualLayoutByPieceKey}
+                  estimateColorTbd={colorTbd}
+                />
+                <div className="ie-visual-collapse-footer">
+                  <button type="button" className="btn secondary btn-sm" onClick={() => setVisualCanvasExpanded(false)}>
+                    Collapse canvas
+                  </button>
+                </div>
+              </>
+            ) : null}
           </section>
 
           <section id="sec-addons" className="card">
@@ -1391,6 +1469,7 @@ export default function InternalEstimateApp() {
               </div>
             </section>
 
+            <div className="ie-workflow-tail">
             <section id="sec-review" className="card">
               <h2 className="ie-section-title">Review</h2>
               <p className="muted small">
@@ -1564,7 +1643,7 @@ export default function InternalEstimateApp() {
 
           <div className="actions">
             <p className="muted small" style={{ flex: "1 1 220px", margin: 0 }}>
-              <strong>Calculate</strong>, <strong>Print</strong>, and <strong>Save</strong> stay pinned at the bottom of the screen while you edit.
+              Same actions as the <strong>pinned bar below</strong> — use whichever is closer while you scroll.
             </p>
             <button type="button" className="btn secondary big" onClick={printCustomerEstimate}>
               Print customer estimate
@@ -1704,7 +1783,7 @@ export default function InternalEstimateApp() {
             ) : null}
           </details>
 
-          <section className="card">
+          <section className="card ie-internal-detail">
             <p className="section-lead">Full breakdown</p>
             <h2>Internal detail</h2>
             <div className="internal-banner">
@@ -1834,6 +1913,8 @@ export default function InternalEstimateApp() {
               {demoResult?.reviewNeeded === false ? "No" : demoResult ? "Yes" : "—"}
             </p>
           </section>
+
+            </div>
 
           <section id="sec-save" className="card">
             <h2 className="ie-section-title">Save</h2>
