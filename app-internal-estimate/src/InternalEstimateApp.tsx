@@ -203,6 +203,25 @@ export default function InternalEstimateApp() {
   const [hydratedIsCurrentRevision, setHydratedIsCurrentRevision] = useState<boolean | null>(null);
   const [hydratedDisplayRevision, setHydratedDisplayRevision] = useState<string | null>(null);
 
+  /** `?quoteId=` hydration — must be declared before `buildSubmitPayload` / save hooks (TDZ if referenced earlier). */
+  const [urlQuoteId, setUrlQuoteId] = useState<string | null>(null);
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search).get("quoteId");
+    if (q && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(q)) {
+      setUrlQuoteId(q);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!urlQuoteId) {
+      setHydratedIsCurrentRevision(null);
+      setHydratedDisplayRevision(null);
+      setSaveIntent("create");
+      setQuoteWorkflowStatus("testing_review");
+      setRevisionNoteDraft("");
+    }
+  }, [urlQuoteId]);
+
   const [calcBusy, setCalcBusy] = useState(false);
   const [calcError, setCalcError] = useState<string | null>(null);
   const [vanityLocalNote, setVanityLocalNote] = useState<string | null>(null);
@@ -915,24 +934,6 @@ export default function InternalEstimateApp() {
     const raw = String(import.meta.env.VITE_HEAD_URL_QUOTE_LIBRARY ?? "").trim();
     return raw.replace(/\/+$/, "") || "https://quotes.eliteosfab.com";
   }, []);
-
-  const [urlQuoteId, setUrlQuoteId] = useState<string | null>(null);
-  useEffect(() => {
-    const q = new URLSearchParams(window.location.search).get("quoteId");
-    if (q && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(q)) {
-      setUrlQuoteId(q);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!urlQuoteId) {
-      setHydratedIsCurrentRevision(null);
-      setHydratedDisplayRevision(null);
-      setSaveIntent("create");
-      setQuoteWorkflowStatus("testing_review");
-      setRevisionNoteDraft("");
-    }
-  }, [urlQuoteId]);
 
   const hydrationRanRef = useRef(false);
   useEffect(() => {
