@@ -438,7 +438,52 @@ const allowedOrigins = [
 
 const allowedOriginSet = new Set(allowedOrigins);
 
-/** CORS first: browsers need reflected Origin before any guarded route responds. */
+/** Dedupe `Vary` field names (case-insensitive) when layering with `cors` + CDN behaviors. */
+function appendVaryHeaderField(res, fieldName) {
+  const name = String(fieldName ?? "").trim();
+  if (!name) return;
+  const existingRaw = res.getHeader("Vary");
+  if (existingRaw == null || existingRaw === "") {
+    res.setHeader("Vary", name);
+    return;
+  }
+  const existingStr = Array.isArray(existingRaw) ? existingRaw.join(", ") : String(existingRaw);
+  const parts = existingStr
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const seen = new Set(parts.map((p) => p.toLowerCase()));
+  if (seen.has(name.toLowerCase())) return;
+  res.setHeader("Vary", `${existingStr}, ${name}`);
+}
+
+/**
+ * Shared caches must not reuse `/api/*` responses (or preflight) across Browser origins —
+ * otherwise stale `Access-Control-Allow-Origin` can pair with the wrong client Origin.
+ *
+ * Skips `/api/public-quote*` so public quote tooling/CDN behavior stays unchanged.
+ */
+function shouldApplyApiNoStoreHeaders(req) {
+  const p = req.path || "";
+  if (!p.startsWith("/api")) return false;
+  if (p.startsWith("/api/public-quote")) return false;
+  return true;
+}
+
+function applyApiNoStoreHeaders(req, res, next) {
+  if (!shouldApplyApiNoStoreHeaders(req)) return next();
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+  appendVaryHeaderField(res, "Origin");
+  appendVaryHeaderField(res, "Access-Control-Request-Method");
+  appendVaryHeaderField(res, "Access-Control-Request-Headers");
+  next();
+}
+
+app.use(applyApiNoStoreHeaders);
+
+/** CORS: reflected `Origin` + `credentials` for allowed Browser clients (`cors` runs after cache/Vary so OPTIONS matches). */
 app.use(
   cors({
     origin(origin, callback) {

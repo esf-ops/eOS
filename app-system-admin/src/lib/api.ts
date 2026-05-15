@@ -15,6 +15,8 @@ type ApiFetchOptions = {
   method?: string;
   body?: unknown;
   headers?: Record<string, string>;
+  /** Default `no-store` avoids cached Brain responses tied to another Origin/session. */
+  cache?: RequestCache;
 };
 
 export async function apiFetch(path: string, options: ApiFetchOptions) {
@@ -36,7 +38,8 @@ export async function apiFetch(path: string, options: ApiFetchOptions) {
   const res = await fetch(`${config.backendBaseUrl}${path}`, {
     method,
     headers,
-    body
+    body,
+    cache: options.cache ?? "no-store"
   });
 
   const text = await res.text();

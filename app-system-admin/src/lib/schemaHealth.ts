@@ -33,7 +33,8 @@ export async function fetchSchemaHealth(accessToken: string): Promise<SchemaHeal
       headers: {
         authorization: `Bearer ${token}`,
         accept: "application/json"
-      }
+      },
+      cache: "no-store"
     });
 
     if (import.meta.env.DEV) {
