@@ -1506,6 +1506,9 @@ export default function InternalEstimateApp() {
             <button type="button" className="btn secondary big" onClick={printCustomerEstimate}>
               Print customer estimate
             </button>
+            <p className="ie-print-hint">
+              For the cleanest PDF, turn off browser &ldquo;Headers and footers&rdquo; in the print dialog.
+            </p>
             <button type="button" className="btn primary big" disabled={calcBusy} onClick={() => void handleCalculate()}>
               {calcBusy ? "Calculating…" : "Calculate"}
             </button>
@@ -1889,6 +1892,9 @@ export default function InternalEstimateApp() {
               <button type="button" className="btn secondary" onClick={printCustomerEstimate}>
                 Print customer estimate
               </button>
+              <p className="ie-print-hint">
+                For the cleanest PDF, turn off browser &ldquo;Headers and footers&rdquo; in the print dialog.
+              </p>
               <a className="btn secondary" href={`${quoteLibraryUrl}/`} target="_blank" rel="noreferrer">
                 Open Quote Library
               </a>

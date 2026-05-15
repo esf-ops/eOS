@@ -66,6 +66,13 @@ Elite Stone Fabrication internal sales and estimating staff with **Quote** head 
 - **One page:** typical 1–2 room kitchen with 0–3 comparison groups should fit one letter page (compact grid project overview, tight margins).
 - **Internal-only custom lines:** included in project total; **not** listed or noted on customer print (staff worksheet only).
 
+## 2026-05-15 — Customer print layout polish
+
+- **Header:** ESF logo + **Elite Stone Fabrication Estimate**; date under title; quote ref in project overview.
+- **Add-ons:** **Add-ons / fixtures** section lists each customer-facing add-on by name with subtotal.
+- **Footer:** Terms box, customer + ESF signature lines, three branch contacts, website.
+- **Print dialog:** On-screen note to disable browser “Headers and footers” for cleaner PDF (browser-controlled).
+
 ## 2026-05-15 — Backsplash depth default + estimate summary rollup
 
 - **Backsplash type:** Add guided piece → change Type to **Backsplash** → depth/height becomes **4″** when prior value was blank, 0, or 25.5″; user can set 6″, 8″, etc. and other edits do not reset it.
