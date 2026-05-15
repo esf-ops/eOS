@@ -775,6 +775,12 @@ export default function InternalEstimateApp() {
     return round2(customLinePreviewTotals - visibleCustom);
   }, [customLineRows, customLinePreviewTotals]);
 
+  /** Customer-facing structured custom lines only (included in estimate total; listed by name on PDF). */
+  const customerFacingCustomLinesDollars = useMemo(
+    () => round2(customLinePreviewTotals - internalOnlyAdjustDollars),
+    [customLinePreviewTotals, internalOnlyAdjustDollars]
+  );
+
   /** Matches customer print Quoted Material Breakdown + vanity + room extras + custom lines — same basis as live total. */
   const stickyLiveRollup = useMemo(() => {
     const bd = selectedMaterialBreakdown;
@@ -797,6 +803,18 @@ export default function InternalEstimateApp() {
       rollupMismatch: Math.abs(recomputed - (Number(partRetail) || 0)) > 0.03
     };
   }, [selectedMaterialBreakdown, liveEstimate.measuredRooms, customLinePreviewTotals, partRetail]);
+
+  const estimatorSidebarNote = useMemo(() => {
+    const parts: string[] = [];
+    if (stickyLiveRollup.rollupMismatch) parts.push("Roll-up differs from engine total — report this quote.");
+    if (comparisonScopeMeta.mixedGroupNote) parts.push("Tier comparisons are estimator-only on mixed-material scope.");
+    if (internalOnlyAdjustDollars !== 0) {
+      parts.push(
+        "Internal-only adjustments are included in this estimate total and in the customer PDF total; the PDF lists them only as “Additional adjustments,” not by item name."
+      );
+    }
+    return parts.length ? parts.join(" ") : null;
+  }, [stickyLiveRollup.rollupMismatch, comparisonScopeMeta.mixedGroupNote, internalOnlyAdjustDollars]);
 
   const quoteLibraryUrl = useMemo(() => {
     const raw = String(import.meta.env.VITE_HEAD_URL_QUOTE_LIBRARY ?? "").trim();
@@ -1403,10 +1421,20 @@ export default function InternalEstimateApp() {
               )}
             </section>
 
-            <div id="sec-output" className="internal-print-sheet card">
-              <h2>Internal worksheet (staff)</h2>
-              <p className="muted small">
-                On-screen staff reference only. Use <strong>Print customer estimate</strong> for homeowner PDF — it excludes
+            <details id="sec-output" className="internal-print-sheet card ie-details-worksheet">
+              <summary className="ie-details-summary-worksheet">
+                <span>Internal worksheet (staff)</span>
+                <span className="ie-details-summary-meta muted small">
+                  {partRetail != null
+                    ? `Live total ~ $${Number(partRetail).toFixed(2)} (${internalPricingMode === "wholesale" ? "wholesale" : "Direct / Retail"} book)`
+                    : "Expand for tier tables & snapshots"}
+                  {lastCalcLive && apiPartner?.totals?.retail != null
+                    ? ` · Backend $${Number(apiPartner.totals.retail).toFixed(2)}`
+                    : ""}
+                </span>
+              </summary>
+              <p className="muted small" style={{ marginTop: 12 }}>
+                On-screen staff reference only. Use <strong>Print customer estimate</strong> (pinned below) for homeowner PDF — it excludes
                 internal tiers, math check, and diagnostics.
               </p>
               <p>
@@ -1532,9 +1560,12 @@ export default function InternalEstimateApp() {
                 ) : null}
               </p>
               <p className="muted small">Elite Stone Fabrication — internal estimate. Not a homeowner contract.</p>
-            </div>
+            </details>
 
           <div className="actions">
+            <p className="muted small" style={{ flex: "1 1 220px", margin: 0 }}>
+              <strong>Calculate</strong>, <strong>Print</strong>, and <strong>Save</strong> stay pinned at the bottom of the screen while you edit.
+            </p>
             <button type="button" className="btn secondary big" onClick={printCustomerEstimate}>
               Print customer estimate
             </button>
@@ -1565,9 +1596,9 @@ export default function InternalEstimateApp() {
 
           {calcError ? <p className="error">{calcError}</p> : null}
 
-          <section className="card math-check">
-            <h2>Math check (live preview)</h2>
-            <p className="muted small">
+          <details className="card math-check">
+            <summary>Math check &amp; tier diagnostics (live preview)</summary>
+            <p className="muted small" style={{ marginTop: 12 }}>
               Updates as you edit rooms, add-ons, custom lines, and pricing mode. Uses prototype rate books (wholesale or ESF Direct
               $/sf) with no markup percent — same model as the Calculate fallback. Backend response refines line items when connected.
             </p>
@@ -1601,9 +1632,18 @@ export default function InternalEstimateApp() {
                 <strong>{liveEstimate.mathCheck.totalScopeSf.toFixed(2)}</strong>
               </li>
               <li>
-                <span>Primary group rate ({internalPricingMode === "wholesale" ? "wholesale book" : "ESF Direct"})</span>
+                <span>
+                  {comparisonScopeMeta.mixedGroupNote
+                    ? `Starting primary tier (${internalPricingMode === "wholesale" ? "wholesale book" : "ESF Direct"}, not blended)`
+                    : `Primary group rate (${internalPricingMode === "wholesale" ? "wholesale book" : "ESF Direct"})`}
+                </span>
                 <strong>
                   {liveEstimate.mathCheck.primaryGroup} @ ${liveEstimate.mathCheck.groupRatePerSf}/sf
+                  {comparisonScopeMeta.mixedGroupNote ? (
+                    <span className="muted small" style={{ display: "block", fontWeight: "normal", marginTop: 6 }}>
+                      Mixed-material jobs price stone by piece in Quoted Material Breakdown; this row is the sheet default tier only.
+                    </span>
+                  ) : null}
                 </strong>
               </li>
               <li>
@@ -1662,7 +1702,7 @@ export default function InternalEstimateApp() {
                 </ul>
               </div>
             ) : null}
-          </section>
+          </details>
 
           <section className="card">
             <p className="section-lead">Full breakdown</p>
@@ -1832,135 +1872,201 @@ export default function InternalEstimateApp() {
 
         </main>
 
-        <aside className="ie-aside side-col">
-          <div className="summary-card">
-            <h2>Estimator summary</h2>
-            <div className="summary-rows" style={{ marginBottom: 8 }}>
-              <div className="summary-row">
-                <span>Pricing mode</span>
-                <strong>{internalPricingMode === "wholesale" ? "Wholesale" : "Direct / Retail"}</strong>
-              </div>
-              <div className="summary-row">
-                <span>Countertop material</span>
-                <strong>${stickyLiveRollup.countertopMaterial.toFixed(2)}</strong>
-              </div>
-              <div className="summary-row">
-                <span>Backsplash material</span>
-                <strong>${stickyLiveRollup.backsplashMaterial.toFixed(2)}</strong>
-              </div>
-              <div className="summary-row">
-                <span>Room add-ons / fixtures</span>
-                <strong>${stickyLiveRollup.roomAddOnsFixtures.toFixed(2)}</strong>
-              </div>
-              <div className="summary-row">
-                <span>Structured custom lines</span>
-                <strong>${stickyLiveRollup.structuredCustomLines.toFixed(2)}</strong>
-              </div>
-              {internalOnlyAdjustDollars !== 0 ? (
-                <div className="summary-row">
-                  <span>Internal-only adjustments</span>
-                  <strong>${internalOnlyAdjustDollars.toFixed(2)}</strong>
+        <aside className="ie-aside side-col" aria-label="Estimator summary">
+          <div className="ie-aside-panel summary-card ie-summary-card-compact">
+            <div className="ie-aside-scroll">
+              <h2>Estimator summary</h2>
+              <div className="summary-rows" style={{ marginBottom: 8 }}>
+                <div className="summary-row" style={{ fontSize: "0.88rem" }}>
+                  <span>Pricing mode</span>
+                  <strong>{internalPricingMode === "wholesale" ? "Wholesale" : "Direct / Retail"}</strong>
                 </div>
-              ) : null}
-            </div>
-            <p className="muted small" style={{ margin: "0 0 8px" }}>
-              Live totals use the same mixed piece/room groups as <strong>Quoted Material Breakdown</strong> / customer print.
-              {stickyLiveRollup.rollupMismatch ? (
-                <>
-                  {" "}
-                  <span style={{ color: "#b45309" }}>Roll-up sanity check differs from engine total — report this quote.</span>
-                </>
-              ) : null}
-            </p>
-            <p className="summary-kicker">Estimate total (rate book, no markup %)</p>
-            <p className="summary-hero-value">{partRetail != null ? `$${Number(partRetail).toFixed(2)}` : "—"}</p>
-            {lastCalcLive && serverRetailVerified != null ? (
-              <p className="summary-secondary muted small">
-                Last Calculate (backend): <strong>${serverRetailVerified.toFixed(2)}</strong>
+              </div>
+              <p className="summary-kicker" style={{ margin: "0 0 2px" }}>
+                Estimate total (rate book, no markup %)
               </p>
-            ) : (
-              <p className="summary-secondary muted small">Live preview — tap Calculate to refresh from eliteOS when signed in.</p>
-            )}
-            <div className="summary-rows">
-              <div className="summary-row">
-                <span>Estimated sq ft (engine)</span>
-                <strong>{Number(partSqft ?? 0).toFixed(2)}</strong>
-              </div>
-              <div className="summary-row">
-                <span>Countertop sf (scope)</span>
-                <strong>{scopePreview.counterSf.toFixed(2)}</strong>
-              </div>
-              <div className="summary-row">
-                <span>Backsplash + FHB sf (scope)</span>
-                <strong>{(scopePreview.splashSf + scopePreview.fhbSf).toFixed(2)}</strong>
-              </div>
-              <div className="summary-row">
-                <span>Total sf (scope)</span>
-                <strong>{scopePreview.totalSf.toFixed(2)}</strong>
-              </div>
-              <div className="summary-row">
-                <span>Primary price group</span>
-                <strong>
-                  {topMaterialGroup}
-                  {quoteDefaultCatalogId && eliteColors.find((c) => c.id === quoteDefaultCatalogId)
-                    ? ` · ${eliteColors.find((c) => c.id === quoteDefaultCatalogId)?.colorName ?? ""}`
-                    : colorTbd
-                      ? " · Color TBD"
-                      : " · per room"}
-                </strong>
-              </div>
-              <div className="summary-row">
-                <span>Customer comparison groups</span>
-                <strong>
-                  {customerEstimateComparisonRows.length
-                    ? customerEstimateComparisonRows.map((r) => r.group).join(", ")
-                    : "None selected"}
-                </strong>
-              </div>
-              <div className="summary-row">
-                <span>Readiness</span>
-                <strong>
-                  {readinessSnapshot.score}% — {readinessSnapshot.readyForReview ? "complete" : "missing items"}
-                </strong>
-              </div>
-              {apiPartner?.snapshot?.material_breakdown?.length ? (
-                <div className="summary-row" style={{ flexDirection: "column", alignItems: "stretch", gap: 6 }}>
-                  <span>Material / color mix (last Calculate)</span>
-                  <ul className="muted small" style={{ margin: 0, paddingLeft: 16 }}>
-                    {(apiPartner.snapshot.material_breakdown as Record<string, unknown>[]).slice(0, 8).map((ln, i) => (
-                      <li key={i}>
-                        {String(ln.room ?? "")} · {String(ln.materialGroup ?? "")}
-                        {ln.materialColor ? ` · ${String(ln.materialColor)}` : ""} — {Number(ln.sqft ?? 0).toFixed(1)} sf
-                      </li>
-                    ))}
-                  </ul>
+              <p className="ie-summary-compact-hero">{partRetail != null ? `$${Number(partRetail).toFixed(2)}` : "—"}</p>
+              {lastCalcLive && serverRetailVerified != null ? (
+                <p className="muted small" style={{ margin: "0 0 8px" }}>
+                  Last Calculate (backend): <strong>${serverRetailVerified.toFixed(2)}</strong>
+                </p>
+              ) : (
+                <p className="muted small" style={{ margin: "0 0 8px" }}>
+                  Live preview — tap Calculate when signed in to verify line items.
+                </p>
+              )}
+              <div className="summary-rows" style={{ gap: 6 }}>
+                <div className="summary-row" style={{ fontSize: "0.82rem" }}>
+                  <span>Countertop material</span>
+                  <strong>${stickyLiveRollup.countertopMaterial.toFixed(2)}</strong>
                 </div>
-              ) : null}
-            </div>
-            <div className="internal-badge">Internal — not customer-facing</div>
-            <p className="summary-foot">Sticky total follows your edits; Calculate confirms backend line items.</p>
-            <p className="summary-foot muted small">Use the math check panel for tier and measurement detail.</p>
-            {lastCalcLive ? <p className="summary-foot">Live API response</p> : null}
-            <div className="summary-actions" style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
-              <button type="button" className="btn primary" disabled={calcBusy} onClick={() => void handleCalculate()}>
-                {calcBusy ? "Calculating…" : "Calculate"}
-              </button>
-              <button type="button" className="btn secondary" disabled={submitBusy} onClick={() => void handleSubmit()}>
-                {submitBusy ? "Saving…" : "Save to Quote Library"}
-              </button>
-              <button type="button" className="btn secondary" onClick={printCustomerEstimate}>
-                Print customer estimate
-              </button>
-              <p className="ie-print-hint">
-                For the cleanest PDF, turn off browser &ldquo;Headers and footers&rdquo; in the print dialog.
+                <div className="summary-row" style={{ fontSize: "0.82rem" }}>
+                  <span>Backsplash material</span>
+                  <strong>${stickyLiveRollup.backsplashMaterial.toFixed(2)}</strong>
+                </div>
+                <div className="summary-row" style={{ fontSize: "0.82rem" }}>
+                  <span>Add-ons / fixtures</span>
+                  <strong>${stickyLiveRollup.roomAddOnsFixtures.toFixed(2)}</strong>
+                </div>
+                {customerFacingCustomLinesDollars !== 0 ? (
+                  <div className="summary-row" style={{ fontSize: "0.82rem" }}>
+                    <span>Customer-facing custom lines</span>
+                    <strong>${customerFacingCustomLinesDollars.toFixed(2)}</strong>
+                  </div>
+                ) : null}
+                {internalOnlyAdjustDollars !== 0 ? (
+                  <>
+                    <div className="summary-row" style={{ fontSize: "0.82rem" }}>
+                      <span>Internal-only adjustments</span>
+                      <strong>${internalOnlyAdjustDollars.toFixed(2)}</strong>
+                    </div>
+                    <p className="muted small" style={{ margin: "0 0 6px", fontSize: "0.72rem", lineHeight: 1.4 }}>
+                      Included in estimate total and customer PDF total; PDF shows as generic <strong>Additional adjustments</strong> only
+                      (no internal line names).
+                    </p>
+                  </>
+                ) : (
+                  <p className="muted small" style={{ margin: "4px 0 0", fontSize: "0.72rem", lineHeight: 1.4 }}>
+                    No internal-only custom lines — customer PDF total matches named lines plus stone/add-ons only.
+                  </p>
+                )}
+              </div>
+              <p className="muted small" style={{ margin: "6px 0 8px", fontSize: "0.72rem", lineHeight: 1.4 }}>
+                <strong>Add-ons / fixtures</strong> are room catalog extras (cutouts, tear-out, etc.). Customer-facing custom lines are the
+                structured items marked customer-facing below.
               </p>
-              <a className="btn secondary" href={`${quoteLibraryUrl}/`} target="_blank" rel="noreferrer">
-                Open Quote Library
-              </a>
+              <div className="ie-summary-inline-bits">
+                <span>
+                  Readiness <strong>{readinessSnapshot.score}%</strong>
+                </span>
+                <span>
+                  {readinessSnapshot.readyForReview ? (
+                    <strong style={{ color: "var(--ok)" }}>Core fields OK</strong>
+                  ) : (
+                    <strong>Missing items</strong>
+                  )}
+                </span>
+              </div>
+              <p className="muted small" style={{ margin: "8px 0 10px" }}>
+                Same mixed piece/room groups as Quoted Material Breakdown / customer print.
+              </p>
+              {estimatorSidebarNote ? (
+                <p className="muted small" style={{ margin: "0 0 10px", lineHeight: 1.45, color: "#92400e", fontWeight: 600 }}>
+                  {estimatorSidebarNote}
+                </p>
+              ) : null}
+              <div className="internal-badge" style={{ marginTop: 0 }}>
+                Internal — not customer-facing
+              </div>
+
+              <details className="ie-summary-audit" style={{ marginTop: 14 }}>
+                <summary>Full breakdown &amp; audit fields</summary>
+                <div style={{ marginTop: 12 }}>
+                  <div className="summary-rows" style={{ marginBottom: 8 }}>
+                    <div className="summary-row">
+                      <span>Structured custom lines (customer + internal)</span>
+                      <strong>${stickyLiveRollup.structuredCustomLines.toFixed(2)}</strong>
+                    </div>
+                    {customerFacingCustomLinesDollars !== 0 ? (
+                      <div className="summary-row">
+                        <span>Customer-facing portion</span>
+                        <strong>${customerFacingCustomLinesDollars.toFixed(2)}</strong>
+                      </div>
+                    ) : null}
+                    {internalOnlyAdjustDollars !== 0 ? (
+                      <div className="summary-row">
+                        <span>Internal-only portion</span>
+                        <strong>${internalOnlyAdjustDollars.toFixed(2)}</strong>
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="summary-rows" style={{ marginBottom: 12 }}>
+                    <div className="summary-row">
+                      <span>Estimated sq ft (engine)</span>
+                      <strong>{Number(partSqft ?? 0).toFixed(2)}</strong>
+                    </div>
+                    <div className="summary-row">
+                      <span>Countertop sf (scope)</span>
+                      <strong>{scopePreview.counterSf.toFixed(2)}</strong>
+                    </div>
+                    <div className="summary-row">
+                      <span>Backsplash + FHB sf</span>
+                      <strong>{(scopePreview.splashSf + scopePreview.fhbSf).toFixed(2)}</strong>
+                    </div>
+                    <div className="summary-row">
+                      <span>Total sf (scope)</span>
+                      <strong>{scopePreview.totalSf.toFixed(2)}</strong>
+                    </div>
+                    <div className="summary-row">
+                      <span>Primary price group</span>
+                      <strong>
+                        {topMaterialGroup}
+                        {quoteDefaultCatalogId && eliteColors.find((c) => c.id === quoteDefaultCatalogId)
+                          ? ` · ${eliteColors.find((c) => c.id === quoteDefaultCatalogId)?.colorName ?? ""}`
+                          : colorTbd
+                            ? " · Color TBD"
+                            : " · per room"}
+                      </strong>
+                    </div>
+                    <div className="summary-row">
+                      <span>Customer comparison groups</span>
+                      <strong>
+                        {customerEstimateComparisonRows.length
+                          ? customerEstimateComparisonRows.map((r) => r.group).join(", ")
+                          : "None selected"}
+                      </strong>
+                    </div>
+                  </div>
+                  {stickyLiveRollup.rollupMismatch ? (
+                    <p className="muted small" style={{ color: "#b45309", marginBottom: 10 }}>
+                      Roll-up sanity check differs from engine total — report this quote.
+                    </p>
+                  ) : null}
+                  <p className="summary-foot" style={{ borderTop: "none", paddingTop: 0, marginTop: 0 }}>
+                    Sticky total follows your edits; Calculate confirms backend line items.
+                  </p>
+                  <p className="summary-foot muted small">Expand Main column math check for tier tables.</p>
+                  {lastCalcLive ? <p className="summary-foot muted small">Live API response</p> : null}
+                  {apiPartner?.snapshot?.material_breakdown?.length ? (
+                    <div style={{ marginTop: 12 }}>
+                      <p className="section-lead" style={{ marginBottom: 6 }}>
+                        Material / color mix (last Calculate)
+                      </p>
+                      <ul className="muted small" style={{ margin: 0, paddingLeft: 16 }}>
+                        {(apiPartner.snapshot.material_breakdown as Record<string, unknown>[]).slice(0, 8).map((ln, i) => (
+                          <li key={i}>
+                            {String(ln.room ?? "")} · {String(ln.materialGroup ?? "")}
+                            {ln.materialColor ? ` · ${String(ln.materialColor)}` : ""} — {Number(ln.sqft ?? 0).toFixed(1)} sf
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                  <div style={{ marginTop: 12 }}>
+                    <a className="btn secondary btn-sm" href={`${quoteLibraryUrl}/`} target="_blank" rel="noreferrer">
+                      Open Quote Library
+                    </a>
+                  </div>
+                </div>
+              </details>
             </div>
           </div>
         </aside>
       </div>
+
+      <nav className="ie-sticky-actions" aria-label="Pinned estimate actions">
+        <div className="ie-sticky-actions-inner">
+          <button type="button" className="btn primary btn-sm" disabled={calcBusy} onClick={() => void handleCalculate()}>
+            {calcBusy ? "Calculating…" : "Calculate"}
+          </button>
+          <button type="button" className="btn secondary btn-sm" onClick={printCustomerEstimate} title="Print customer estimate PDF">
+            Print estimate
+          </button>
+          <button type="button" className="btn secondary btn-sm" disabled={submitBusy} onClick={() => void handleSubmit()}>
+            {submitBusy ? "Saving…" : "Save quote"}
+          </button>
+        </div>
+      </nav>
 
       <footer className="footer">eliteOS Internal Estimate Head · Elite Stone Fabrication · {new Date().getFullYear()}</footer>
       </div>

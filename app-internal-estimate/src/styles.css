@@ -44,6 +44,142 @@ body {
   font-size: 1.05rem;
 }
 
+.page-internal-estimate {
+  padding-bottom: 72px;
+}
+
+@media (max-width: 1020px) {
+  .page-internal-estimate {
+    padding-bottom: 88px;
+  }
+}
+
+.ie-sticky-actions {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 60;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px));
+  background: rgba(255, 255, 255, 0.96);
+  border-top: 1px solid var(--border-strong);
+  box-shadow: 0 -6px 24px rgba(15, 23, 42, 0.08);
+  backdrop-filter: blur(10px);
+}
+
+.ie-sticky-actions .btn {
+  min-width: 0;
+}
+
+.ie-sticky-actions-inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  max-width: min(1320px, 100vw);
+}
+
+.ie-aside-panel {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 24px);
+  min-height: 0;
+}
+
+.ie-aside-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.ie-summary-compact-hero {
+  margin: 0 0 10px;
+  font-size: 1.45rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--text);
+  line-height: 1.15;
+}
+
+.ie-summary-audit summary,
+.ie-details-worksheet summary,
+.card.math-check > summary {
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 0.92rem;
+  color: var(--text);
+  list-style: none;
+}
+
+.ie-summary-audit summary::-webkit-details-marker,
+.ie-details-worksheet summary::-webkit-details-marker,
+.card.math-check > summary::-webkit-details-marker {
+  display: none;
+}
+
+.ie-summary-audit summary::before,
+.ie-details-worksheet summary::before,
+.card.math-check > summary::before {
+  content: "▸ ";
+  display: inline-block;
+  width: 1em;
+  color: var(--text-secondary);
+  font-weight: 700;
+}
+
+.ie-summary-audit[open] summary::before,
+.ie-details-worksheet[open] summary::before,
+.card.math-check[open] > summary::before {
+  content: "▾ ";
+}
+
+.ie-details-summary-worksheet {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+
+.ie-details-summary-meta {
+  font-weight: 500;
+}
+
+.summary-card.ie-summary-card-compact {
+  padding: 14px 14px 12px;
+  margin-bottom: 0;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.summary-card.ie-summary-card-compact h2 {
+  margin-bottom: 8px;
+}
+
+.ie-summary-inline-bits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  margin: 0 0 8px;
+}
+
+.ie-summary-inline-bits strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
 .ie-header-compact {
   background: var(--card);
   border: 1px solid var(--border);
@@ -155,6 +291,10 @@ body {
 .ie-aside.side-col {
   position: sticky;
   top: 12px;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .ie-signin-row .ie-signin-fields {
@@ -281,6 +421,10 @@ body {
     position: relative;
     top: auto;
     order: 3;
+  }
+
+  .ie-aside-panel {
+    max-height: min(440px, 50vh);
   }
 
   .ie-main {
@@ -661,6 +805,12 @@ select:focus {
   flex-wrap: wrap;
   gap: 12px;
   margin: 4px 0 6px;
+  align-items: flex-end;
+}
+
+.page-internal-estimate .actions .ie-print-hint {
+  flex: 1 1 200px;
+  margin: 0;
 }
 
 .fallback-banner {
@@ -2385,9 +2535,11 @@ select:focus {
   font-size: 0.68rem;
 }
 
-.cep-material-dollar-row td {
-  font-weight: 700;
+.cep-material-scope-foot td {
+  font-weight: 600;
+  font-size: 0.68rem;
   background: #f8fafc;
+  border-top: 1px solid #cbd5e1;
 }
 
 .cep-scope-grand {

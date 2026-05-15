@@ -46,7 +46,7 @@ export type CustomerEstimatePrintProps = {
   selectedBreakdown: SelectedMaterialBreakdown;
   visibleLineItems: CustomerLineItem[];
   visibleRoomAddons: CustomerRoomAddonLine[];
-  /** Internal-only custom $ still in estimate total but not listed as lines. */
+  /** Amount included in estimateTotalExact / PDF total but not listed by name; PDF uses generic “Additional adjustments” when non-zero. */
   internalOnlyAdjustDollars: number;
   estimateTotalExact: number;
   comparisonRows: InternalEstimateGroupComparisonRow[];
@@ -226,6 +226,15 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
                 <td className="cep-amt">{formatMoney(ln.lineTotal)}</td>
               </tr>
             ))}
+            {props.internalOnlyAdjustDollars !== 0 ? (
+              <tr>
+                <td>
+                  Additional adjustments{" "}
+                  <span className="cep-muted-inline">(included in project total; detail from your Elite representative)</span>
+                </td>
+                <td className="cep-amt">{formatMoney(props.internalOnlyAdjustDollars)}</td>
+              </tr>
+            ) : null}
             <tr className="cep-summary-total-row">
               <td>
                 <strong>Estimated project total</strong>
@@ -269,8 +278,9 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
       <section className="cep-section cep-breakdown cep-section-compact">
         <h2 className="cep-h2">Quoted material breakdown</h2>
         <p className="cep-muted">
-          Square footage and material subtotal by price group and room
-          {props.colorTbd ? " · some colors TBD" : ""}.
+          Square footage by selected price group and room. Dollar totals for this estimate appear in <strong>Estimate summary</strong>{" "}
+          above — not repeated here to avoid rounding confusion.
+          {props.colorTbd ? " Some colors TBD." : ""}
         </p>
 
         {bd.groups.map((block) => {
@@ -299,16 +309,13 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
                   ))}
                 </tbody>
                 <tfoot>
-                  <tr className="cep-material-dollar-row">
-                    <td>
-                      <strong>Material subtotal</strong>
+                  <tr className="cep-material-scope-foot">
+                    <td colSpan={3}>
+                      <strong>Scope in this group</strong>
                       <span className="cep-muted-inline">
                         {" "}
-                        · {formatSf(block.countertopSf)} counter sf · {formatSf(block.backsplashSf + block.fhbSf)} backsplash sf
+                        · {formatSf(block.countertopSf)} counter sf · {formatSf(block.backsplashSf + block.fhbSf)} backsplash / full-height sf
                       </span>
-                    </td>
-                    <td colSpan={2} className="cep-num cep-amt">
-                      {formatMoney(block.materialSubtotal)}
                     </td>
                   </tr>
                 </tfoot>
@@ -321,7 +328,8 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
           <div key={v.id} className="cep-material-group">
             <h3 className="cep-h3">{v.group} · Vanity program</h3>
             <p className="cep-muted">
-              <strong>{v.name}</strong> — {formatMoney(v.selected)}
+              <strong>{v.name}</strong> — vanity program pricing is included in <strong>Countertop material</strong> in the estimate summary
+              above (no separate dollar line here).
             </p>
           </div>
         ))}
