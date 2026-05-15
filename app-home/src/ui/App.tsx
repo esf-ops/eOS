@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { ApiError, apiFetch } from "../lib/api";
-import { EOS_LOGO_URL, resolveHeadLaunchUrl } from "../lib/config";
+import { EOS_LOGO_URL, isLocalhostLaunchUrl, resolveHeadLaunchUrl } from "../lib/config";
 import { supabase } from "../lib/supabase";
 
 function readOAuthErrorFromBrowser(): string | null {
@@ -61,53 +61,38 @@ type HeadsResp = {
   heads: HeadCard[];
 };
 
-type SectionTitle =
-  | "Leadership"
-  | "Operations"
-  | "Admin"
-  | "Sales / Quote"
-  | "Field"
-  | "People"
-  | "Partner"
-  | "Coming Soon";
-
-const SECTION_ORDER: SectionTitle[] = [
-  "Leadership",
-  "Operations",
-  "Admin",
-  "Sales / Quote",
-  "Field",
-  "People",
-  "Partner",
-  "Coming Soon"
-];
+type LauncherSectionTitle = "Available heads" | "Coming soon / roadmap";
 
 const SECURITY_NOTE =
   "This eliteOS Launcher reflects your assignments; each head’s eliteOS Brain APIs still enforce permissions on every request.";
 
-function mapBackendCategory(category: string): Exclude<SectionTitle, "Coming Soon"> {
-  const c = String(category ?? "").trim().toLowerCase();
-  if (c.includes("leadership")) return "Leadership";
-  if (c.includes("admin")) return "Admin";
-  if (c.includes("revenue") || c.includes("commercial")) return "Sales / Quote";
-  if (c.includes("field")) return "Field";
-  if (c.includes("people")) return "People";
-  if (c.includes("partner")) return "Partner";
-  return "Operations";
-}
-
 function pickLaunchUrl(head: HeadCard): string | null {
-  const fromApi = String(head.url ?? "").trim();
-  if (fromApi) return fromApi.replace(/\/+$/, "");
+  const fromApi = String(head.url ?? "").trim().replace(/\/+$/, "");
+  if (fromApi) {
+    if (import.meta.env.PROD && isLocalhostLaunchUrl(fromApi)) return null;
+    return fromApi;
+  }
   return resolveHeadLaunchUrl(head.slug);
 }
 
-function launcherSection(head: HeadCard): SectionTitle {
-  const url = pickLaunchUrl(head);
-  const roadmapish =
-    head.visibilityReason === "admin_roadmap" || head.visibilityReason === "full_catalog";
-  if ((!head.enabled && roadmapish) || (head.enabled && !url)) return "Coming Soon";
-  return mapBackendCategory(head.category);
+function isEliteosfabProductionUrl(url: string): boolean {
+  try {
+    const h = new URL(String(url).trim()).hostname.toLowerCase();
+    return h === "eliteosfab.com" || h.endsWith(".eliteosfab.com");
+  } catch {
+    return false;
+  }
+}
+
+function effectiveDeploymentStatus(head: HeadCard, launchUrl: string | null): HeadStatus {
+  if (!launchUrl) return head.status ?? "planned";
+  if (isLocalhostLaunchUrl(launchUrl)) return "testing";
+  if (isEliteosfabProductionUrl(launchUrl)) return "live";
+  return head.status ?? "planned";
+}
+
+function headLauncherBucket(head: HeadCard): "available" | "roadmap" {
+  return pickLaunchUrl(head) ? "available" : "roadmap";
 }
 
 function titleCaseStatus(s: string): string {
@@ -118,11 +103,36 @@ function titleCaseStatus(s: string): string {
 
 function resolveStatusBadges(head: HeadCard): string[] {
   const url = pickLaunchUrl(head);
+  const eff = effectiveDeploymentStatus(head, url);
   const badges: string[] = [];
-  if (!head.enabled) badges.push("Not assigned");
-  if (head.status) badges.push(titleCaseStatus(head.status));
-  else if (head.enabled && !url) badges.push("No URL configured");
+  if (!head.enabled && head.slug !== "public_quote") badges.push("Not assigned");
+  if (!url) {
+    badges.push("Coming soon");
+    return badges;
+  }
+  badges.push(titleCaseStatus(eff));
   return badges;
+}
+
+function shouldShowUrlLine(url: string | null, eff: HeadStatus): boolean {
+  if (!url) return false;
+  if (eff === "live") return false;
+  return true;
+}
+
+function slugHelpLine(head: HeadCard): JSX.Element {
+  if (head.slug === "quote") {
+    return (
+      <p className="slug-line">
+        Internal Estimate <span className="slug-muted">access key</span>: <code>quote</code>
+      </p>
+    );
+  }
+  return (
+    <p className="slug-line">
+      Head slug: <code>{head.slug}</code>
+    </p>
+  );
 }
 
 export default function App() {
@@ -343,14 +353,20 @@ export default function App() {
 
   const grouped = useMemo(() => {
     const hs = headsPayload?.heads ?? [];
-    const buckets: Record<string, HeadCard[]> = {};
-    for (const k of SECTION_ORDER) buckets[k] = [];
+    const available: HeadCard[] = [];
+    const roadmap: HeadCard[] = [];
     for (const h of hs) {
-      const sec = launcherSection(h);
-      if (!buckets[sec]) buckets[sec] = [];
-      buckets[sec].push(h);
+      (headLauncherBucket(h) === "available" ? available : roadmap).push(h);
     }
-    return SECTION_ORDER.map((section) => ({ section, items: buckets[section] ?? [] }));
+    const sortFn = (a: HeadCard, b: HeadCard) =>
+      String(a.label ?? "").localeCompare(String(b.label ?? ""));
+    available.sort(sortFn);
+    roadmap.sort(sortFn);
+    const sections: Array<{ section: LauncherSectionTitle; items: HeadCard[] }> = [
+      { section: "Available heads", items: available },
+      { section: "Coming soon / roadmap", items: roadmap }
+    ];
+    return sections;
   }, [headsPayload]);
 
   const showShell = Boolean(session?.access_token);
@@ -532,16 +548,25 @@ export default function App() {
 
             {grouped.map(({ section, items }) => {
               if (!items.length) return null;
+              const roadmapSection = section === "Coming soon / roadmap";
               return (
                 <section key={section}>
                   <h2 className="section-title">{section}</h2>
+                  {roadmapSection ?
+                    <p className="section-blurb muted-note">
+                      Roadmap heads — no production launch URL is configured yet, or the target is not exposed here.
+                    </p>
+                  : null}
                   <div className="card-grid">
                     {items.map((h) => {
                       const url = pickLaunchUrl(h);
+                      const eff = effectiveDeploymentStatus(h, url);
                       const canNavigate = Boolean(h.enabled && url);
+                      const roadmapCard = roadmapSection;
                       const inactiveClass = !canNavigate ? " disabled" : "";
                       const pills = resolveStatusBadges(h);
                       const cardTitle = String(h.title ?? h.label ?? "").trim() || h.label;
+                      const showUrl = shouldShowUrlLine(url, eff);
 
                       function openHead() {
                         if (!canNavigate || !url) return;
@@ -549,36 +574,40 @@ export default function App() {
                       }
 
                       return (
-                        <article key={h.slug} className={`head-card${inactiveClass}`}>
+                        <article
+                          key={h.slug}
+                          className={`head-card${inactiveClass}${roadmapCard ? " head-card-roadmap" : ""}`}
+                        >
                           <div className="cat">{h.category}</div>
                           <h3>{cardTitle}</h3>
                           <p className="desc">{h.description}</p>
                           {h.role_note ? <p className="role-note">{h.role_note}</p> : null}
-                          {url ? (
+                          {showUrl && url ?
                             <p className="url-line" title={url}>
                               {url}
                             </p>
-                          ) : null}
-                          <div className="slug-line">
-                            Head slug: <code>{h.slug}</code>
-                          </div>
+                          : null}
+                          {slugHelpLine(h)}
                           {pills.length ? (
                             <div className="pill-stack">
                               {pills.map((t, pi) => (
-                                <span key={`${h.slug}-${pi}-${t}`} className="pill-soon">
+                                <span
+                                  key={`${h.slug}-${pi}-${t}`}
+                                  className={`pill-soon${t === "Coming soon" ? " pill-coming-soon" : ""}`}
+                                >
                                   {t}
                                 </span>
                               ))}
                             </div>
                           ) : null}
-                          {canNavigate ?
+                          {canNavigate && !roadmapCard ?
                             <button type="button" className="btn btn-open action-row" onClick={openHead}>
                               Open head
                             </button>
                           : null}
-                          {!canNavigate ?
+                          {!canNavigate || roadmapCard ?
                             <div className="action-placeholder muted-note" aria-hidden="true">
-                              —
+                              {roadmapCard ? "Not available yet" : "—"}
                             </div>
                           : null}
                         </article>

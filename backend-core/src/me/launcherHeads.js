@@ -48,7 +48,8 @@ export const HEAD_LAUNCHER_CATALOG = [
     description: "Create and revise internal estimates (measurement + pricing workspace).",
     category: "Revenue",
     href: "/quote",
-    roleNote: "This head uses the Internal Estimate app; eliteOS Brain APIs enforce head access separately from this launcher."
+    roleNote:
+      "Internal Estimate uses Brain head slug `quote` for access checks — distinct from Quote Library (`quote_library`), Public Quote (`public_quote`), and Partner Quote (`partner_quote`). APIs still enforce permissions per request."
   },
   {
     slug: "quote_library",

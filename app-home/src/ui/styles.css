@@ -279,6 +279,31 @@ body {
   border-radius: 4px;
 }
 
+.slug-line .slug-muted {
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+.section-blurb {
+  margin: -6px 0 14px;
+  max-width: 52rem;
+}
+
+.head-card-roadmap {
+  background: rgba(255, 255, 255, 0.55);
+  border-style: dashed;
+  border-color: rgba(100, 116, 139, 0.35);
+}
+
+.head-card-roadmap h3 {
+  color: #475569;
+}
+
+.pill-coming-soon {
+  background: rgba(251, 191, 36, 0.22);
+  color: #92400e;
+}
+
 .mono-inline {
   font-size: 0.85em;
   word-break: break-all;
