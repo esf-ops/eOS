@@ -335,14 +335,14 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
         ))}
       </section>
 
+      {/* Comparisons only when estimator selects customer display groups (InternalEstimateApp → comparisonRows). */}
       {props.comparisonRows.length > 0 ? (
-        <section className="cep-section cep-comparison">
+        <section className="cep-section cep-section-compact cep-comparison cep-comparison-print">
           <h2 className="cep-h2 cep-h2-muted">Optional material group comparisons</h2>
           <p className="cep-muted cep-comparison-note">
-            What if all quoted countertop and backsplash material were priced at this group? Not your selected mixed-material
-            quote.
+            Illustrative only — full scope at one tier; not your selected mixed-material quote.
           </p>
-          <table className="cep-table cep-table-compact cep-table-amounts cep-comparison-table">
+          <table className="cep-table cep-table-compact cep-table-amounts cep-comparison-table cep-comparison-table-print">
             <thead>
               <tr>
                 <th>Group</th>
@@ -368,28 +368,30 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
       ) : null}
 
       <footer className="cep-closing">
-        <div className="cep-terms-box">
-          <h2 className="cep-terms-title">Terms &amp; conditions</h2>
-          <ul className="cep-terms-list">
-            <li>This estimate is valid for 30 days from the date shown unless otherwise noted in writing.</li>
-            <li>Final pricing may change after field measure, material selection, template, and plan review.</li>
-            <li>Payment terms, deposits, and schedule are confirmed in the signed customer agreement.</li>
-            <li>Natural stone and quartz may vary in color, veining, and pattern; samples are representative only.</li>
-          </ul>
-        </div>
-
-        <div className="cep-signature-block">
-          <div className="cep-sig-line-inline">
-            <span className="cep-sig-role">Customer signature</span>
-            <span className="cep-sig-under cep-sig-under-main" aria-hidden="true" />
-            <span className="cep-sig-role cep-sig-role-date">Date</span>
-            <span className="cep-sig-under cep-sig-under-date" aria-hidden="true" />
+        <div className="cep-footer-terms-sig">
+          <div className="cep-terms-box">
+            <h2 className="cep-terms-title">Terms &amp; conditions</h2>
+            <ul className="cep-terms-list">
+              <li>This estimate is valid for 30 days from the date shown unless otherwise noted in writing.</li>
+              <li>Final pricing may change after field measure, material selection, template, and plan review.</li>
+              <li>Payment terms, deposits, and schedule are confirmed in the signed customer agreement.</li>
+              <li>Natural stone and quartz may vary in color, veining, and pattern; samples are representative only.</li>
+            </ul>
           </div>
-          <div className="cep-sig-line-inline">
-            <span className="cep-sig-role">Elite Stone representative</span>
-            <span className="cep-sig-under cep-sig-under-main" aria-hidden="true" />
-            <span className="cep-sig-role cep-sig-role-date">Date</span>
-            <span className="cep-sig-under cep-sig-under-date" aria-hidden="true" />
+
+          <div className="cep-signature-block">
+            <div className="cep-sig-line-inline">
+              <span className="cep-sig-role">Customer signature</span>
+              <span className="cep-sig-under cep-sig-under-main" aria-hidden="true" />
+              <span className="cep-sig-role cep-sig-role-date">Date</span>
+              <span className="cep-sig-under cep-sig-under-date" aria-hidden="true" />
+            </div>
+            <div className="cep-sig-line-inline">
+              <span className="cep-sig-role">Elite Stone representative</span>
+              <span className="cep-sig-under cep-sig-under-main" aria-hidden="true" />
+              <span className="cep-sig-role cep-sig-role-date">Date</span>
+              <span className="cep-sig-under cep-sig-under-date" aria-hidden="true" />
+            </div>
           </div>
         </div>
 
