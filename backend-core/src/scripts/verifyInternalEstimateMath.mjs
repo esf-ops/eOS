@@ -87,4 +87,145 @@ const evil = await calculateQuote(
 );
 assertNear("Markup fields ignored for internal", evil.totals.retail, 10 * wRate);
 
+const roomsKitchenMixed = [
+  {
+    name: "Kitchen",
+    materialGroup: "Group Promo",
+    pieces: [
+      { type: "counter", name: "PromoRun", lengthIn: 120, depthIn: 12, shape: "rect" },
+      {
+        type: "counter",
+        name: "GroupFRun",
+        lengthIn: 120,
+        depthIn: 12,
+        shape: "rect",
+        materialOverride: true,
+        materialGroup: "Group F"
+      }
+    ]
+  }
+];
+
+const mixedPiecesWholesale = await calculateQuote(
+  {
+    quoteSource: "internal_quote",
+    engine: "rooms",
+    internalMaterialBasis: "wholesale",
+    materialGroup: "Group Promo",
+    rooms: roomsKitchenMixed,
+    addOns: {}
+  },
+  {}
+);
+const wF = PROTOTYPE_TIER_PRICE_PER_SQFT["Group F"];
+assertNear("1 mixed pieces one room (Promo + Group F)", mixedPiecesWholesale.totals.retail, 10 * wRate + 10 * wF);
+
+const mixedPiecesDirect = await calculateQuote(
+  {
+    quoteSource: "internal_quote",
+    engine: "rooms",
+    internalMaterialBasis: "direct",
+    materialGroup: "Group Promo",
+    rooms: roomsKitchenMixed,
+    addOns: {}
+  },
+  {}
+);
+const dF = ESF_DIRECT_PRICE_PER_SQFT["Group F"];
+assertNear("1b mixed pieces direct book", mixedPiecesDirect.totals.retail, 10 * dRate + 10 * dF);
+
+const wC = PROTOTYPE_TIER_PRICE_PER_SQFT["Group C"];
+const wE = PROTOTYPE_TIER_PRICE_PER_SQFT["Group E"];
+const splashOverrideRooms = [
+  {
+    name: "Kitchen",
+    materialGroup: "Group C",
+    pieces: [
+      { type: "counter", name: "Perimeter", lengthIn: 240, depthIn: 12, shape: "rect" },
+      {
+        type: "splash",
+        name: "Accent",
+        lengthIn: 120,
+        depthIn: 6,
+        shape: "rect",
+        materialOverride: true,
+        materialGroup: "Group E"
+      }
+    ]
+  }
+];
+const splashOv = await calculateQuote(
+  {
+    quoteSource: "internal_quote",
+    engine: "rooms",
+    internalMaterialBasis: "wholesale",
+    materialGroup: "Group C",
+    rooms: splashOverrideRooms,
+    addOns: {}
+  },
+  {}
+);
+const splashSf = Math.round((120 * 6 * 100) / 144) / 100;
+assertNear("2 backsplash piece override Group E", splashOv.totals.retail, 20 * wC + splashSf * wE);
+
+const splitSameGroup = await calculateQuote(
+  {
+    quoteSource: "internal_quote",
+    engine: "rooms",
+    internalMaterialBasis: "wholesale",
+    materialGroup: "Group C",
+    rooms: [
+      {
+        name: "Kitchen",
+        materialGroup: "Group C",
+        pieces: [
+          { type: "counter", name: "ct", lengthIn: 240, depthIn: 12, shape: "rect" },
+          { type: "splash", name: "bs", lengthIn: 120, depthIn: 8, shape: "rect" }
+        ]
+      }
+    ],
+    addOns: {}
+  },
+  {}
+);
+const bsSf8 = Math.round((120 * 8 * 100) / 144) / 100;
+assertNear("3 counter + backsplash same Group C", splitSameGroup.totals.retail, (20 + bsSf8) * wC);
+
+const tripCharge = await calculateQuote(
+  {
+    quoteSource: "internal_quote",
+    engine: "rooms",
+    internalMaterialBasis: "wholesale",
+    materialGroup: "Group Promo",
+    rooms: [
+      {
+        name: "Kitchen",
+        materialGroup: "Group Promo",
+        pieces: [{ type: "counter", name: "Run", lengthIn: 120, depthIn: 12, shape: "rect" }]
+      }
+    ],
+    addOns: {},
+    customLineItems: [
+      { name: "Trip charge", category: "Fee", quantity: 1, unitPrice: 150, customerFacing: true }
+    ]
+  },
+  {}
+);
+assertNear("4 trip charge custom line +150", tripCharge.totals.retail, 10 * wRate + 150);
+
+const evilRooms = await calculateQuote(
+  {
+    quoteSource: "internal_quote",
+    engine: "rooms",
+    internalMaterialBasis: "wholesale",
+    materialGroup: "Group Promo",
+    retailMarkupPercent: 99,
+    retailMethod: "Markup Percent",
+    rooms: roomsKitchenMixed,
+    addOns: {}
+  },
+  {}
+);
+assertNear("5 evil markup ignored (rooms engine)", evilRooms.totals.retail, 10 * wRate + 10 * wF);
+
 console.log("verifyInternalEstimateMath: ok");
