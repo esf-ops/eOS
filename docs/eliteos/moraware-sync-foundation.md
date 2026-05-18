@@ -236,6 +236,111 @@ MORAWARE_SYNC_IMPORT_FILE=debug/moraware/live-capped/live-capped-moraware-snapsh
 npm run eos:moraware:import-snapshot
 ```
 
+## Date-Bounded 2026 Baseline Snapshot
+
+Sales Dashboard 2026 YTD actuals should use a manual, date-bounded baseline snapshot before any recurring sync is considered. This mode is still read-only against Moraware, writes only ignored local JSON under `debug/moraware/`, and does not import automatically.
+
+Generate the 2026 baseline snapshot:
+
+```bash
+MORAWARE_SNAPSHOT_MODE=baseline_2026 \
+MORAWARE_API_URL=... \
+MORAWARE_USERNAME=... \
+MORAWARE_PASSWORD=... \
+MORAWARE_DEFAULT_ORGANIZATION_ID=89180433-9fab-4024-bec9-a14d870bd0a8 \
+MORAWARE_BASELINE_START_DATE=2026-01-01 \
+MORAWARE_BASELINE_END_DATE=2026-05-18 \
+MORAWARE_BASELINE_MAX_JOBS=5000 \
+MORAWARE_BASELINE_MAX_ACTIVITIES=50000 \
+MORAWARE_BASELINE_MAX_FORMS=50000 \
+MORAWARE_BASELINE_MAX_FILES=10000 \
+MORAWARE_BASELINE_MAX_ASSIGNEES=1000 \
+npm run eos:moraware:generate-live-capped-snapshot
+```
+
+If `MORAWARE_BASELINE_END_DATE` is omitted, the runner uses today's local date. The runner maps the baseline range to `MORAWARE_SYNC_START_DATE`, `MORAWARE_SYNC_END_DATE`, and `MORAWARE_SYNC_YEAR=2026` before discovery so job detail/form ingestion is limited to matching 2026 jobs. `baseline_2026` refuses missing or invalid start dates, start dates before `2026-01-01`, and inverted ranges.
+
+Inspect counts only before import:
+
+```bash
+node -e "const fs=require('fs'); const p='debug/moraware/baseline-2026/baseline-2026-moraware-snapshot.json'; const x=JSON.parse(fs.readFileSync(p,'utf8')); const b=x.batches||{}; console.log(Object.fromEntries(Object.entries(b).map(([k,v])=>[k,Array.isArray(v)?v.length:0]))); console.log({mode:x.mode, range:{start:x.metadata?.baseline_start_date,end:x.metadata?.baseline_end_date}, cap_warnings:x.metadata?.cap_warnings||[], jobs_with_status:(b.jobs||[]).filter(j=>String(j.status_name||j.jobStatus||j.status||'').trim()).length,jobs_with_process:(b.jobs||[]).filter(j=>String(j.process_name||j.processName||j.process||'').trim()).length,jobs_with_sqft:(b.jobs||[]).filter(j=>JSON.stringify(j.raw_payload||{}).match(/sq\\.?\\s*ft/i)).length});"
+```
+
+If `cap_warnings` is non-empty, do not import until the cap is understood. Increase the relevant `MORAWARE_BASELINE_MAX_*` value and regenerate, or document why the cap is intentionally limiting the baseline.
+
+Chunked import command for the 2026 baseline:
+
+```bash
+MORAWARE_IMPORT_CHUNKED=1 \
+MORAWARE_IMPORT_MAX_JOBS_PER_CHUNK=20 \
+MORAWARE_IMPORT_MAX_ACTIVITIES_PER_CHUNK=100 \
+MORAWARE_IMPORT_MAX_FORMS_PER_CHUNK=100 \
+MORAWARE_IMPORT_MAX_FILES_PER_CHUNK=50 \
+MORAWARE_IMPORT_MAX_ASSIGNEES_PER_CHUNK=50 \
+BACKEND_URL=https://backend-core-six.vercel.app \
+MORAWARE_SYNC_IMPORT_SECRET=... \
+MORAWARE_DEFAULT_ORGANIZATION_ID=89180433-9fab-4024-bec9-a14d870bd0a8 \
+MORAWARE_SYNC_IMPORT_FILE=debug/moraware/baseline-2026/baseline-2026-moraware-snapshot.json \
+npm run eos:moraware:import-snapshot
+```
+
+Supabase verification queries after import:
+
+```sql
+select
+  id,
+  status,
+  row_counts,
+  metadata->>'import_group_id' as import_group_id,
+  metadata->'parent_snapshot_counts' as parent_snapshot_counts,
+  started_at,
+  finished_at
+from public.moraware_sync_runs
+order by started_at desc
+limit 10;
+
+select
+  metadata->>'import_group_id' as import_group_id,
+  count(*) as chunks,
+  count(*) filter (where status = 'success') as successful_chunks,
+  sum(coalesce((row_counts->>'jobs')::int, 0)) as jobs_seen,
+  sum(coalesce((row_counts->>'job_forms')::int, 0)) as forms_seen
+from public.moraware_sync_runs
+where metadata->>'import_group_id' = '<IMPORT_GROUP_ID>'
+group by metadata->>'import_group_id';
+
+select
+  count(*) as jobs_2026,
+  min(created_at) as min_created_at,
+  max(created_at) as max_created_at,
+  count(*) filter (where nullif(status_name, '') is not null) as jobs_with_status,
+  count(*) filter (where nullif(process_name, '') is not null) as jobs_with_process
+from public.brain_moraware_jobs
+where sync_run_id in (
+  select id
+  from public.moraware_sync_runs
+  where metadata->>'import_group_id' = '<IMPORT_GROUP_ID>'
+);
+
+select finding_type, severity, count(*) as finding_count
+from public.moraware_data_quality_findings
+where sync_run_id in (
+  select id
+  from public.moraware_sync_runs
+  where metadata->>'import_group_id' = '<IMPORT_GROUP_ID>'
+)
+group by finding_type, severity
+order by finding_count desc;
+```
+
+Sales Head validation after import:
+
+- System Admin Moraware Sync Status shows the latest chunk group as successful and row counts match the inspected baseline counts.
+- Sales Dashboard default YTD view shows 2026 company-wide synced Sq.Ft. actuals without requiring branch/salesperson attribution.
+- QTD, MTD, week/day, and custom date filters operate over the imported 2026 baseline.
+- Branch and salesperson totals remain gated by approved Sales Account Mapping.
+- Blackstone remains unmapped/needs approval unless explicitly approved through Sales Account Mapping.
+
 For 100-job live capped snapshots and larger, use chunked import. Vercel rejects oversized request bodies before backend code runs, which appears as `HTTP 413 Request Entity Too Large` / `FUNCTION_PAYLOAD_TOO_LARGE`. Chunking keeps the protected import endpoint unchanged and sends several smaller payloads instead. Each chunk currently creates its own `moraware_sync_runs` row; all rows are tied together by `metadata.import_group_id`.
 
 Recommended chunk sizes:

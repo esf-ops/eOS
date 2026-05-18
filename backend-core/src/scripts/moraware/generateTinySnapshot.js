@@ -5,9 +5,14 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 const DEFAULT_SOURCE = "debug/moraware/latest/jobs/index.json";
-const SNAPSHOT_MODE = String(process.env.MORAWARE_SNAPSHOT_MODE || "tiny").trim().toLowerCase() === "baseline" ? "baseline" : "tiny";
+const SNAPSHOT_MODE_RAW = String(process.env.MORAWARE_SNAPSHOT_MODE || "tiny")
+  .trim()
+  .toLowerCase();
+const SNAPSHOT_MODE = ["baseline", "baseline_2026"].includes(SNAPSHOT_MODE_RAW) ? SNAPSHOT_MODE_RAW : "tiny";
 const DEFAULT_OUT =
-  SNAPSHOT_MODE === "baseline"
+  SNAPSHOT_MODE === "baseline_2026"
+    ? "debug/moraware/baseline-2026/baseline-2026-moraware-snapshot.json"
+    : SNAPSHOT_MODE === "baseline"
     ? "debug/moraware/baseline-tests/capped-baseline-moraware-snapshot.json"
     : "debug/moraware/import-tests/tiny-real-moraware-snapshot.json";
 
@@ -18,14 +23,36 @@ function toIntEnv(name, fallback) {
 
 const CAPS = Object.freeze({
   accounts:
-    SNAPSHOT_MODE === "baseline"
+    SNAPSHOT_MODE === "baseline_2026"
+      ? toIntEnv("MORAWARE_BASELINE_MAX_ACCOUNTS", toIntEnv("MORAWARE_BASELINE_MAX_JOBS", 5000))
+      : SNAPSHOT_MODE === "baseline"
       ? toIntEnv("MORAWARE_BASELINE_MAX_ACCOUNTS", toIntEnv("MORAWARE_BASELINE_MAX_JOBS", 50))
       : 5,
-  jobs: SNAPSHOT_MODE === "baseline" ? toIntEnv("MORAWARE_BASELINE_MAX_JOBS", 50) : 10,
-  job_activities: SNAPSHOT_MODE === "baseline" ? toIntEnv("MORAWARE_BASELINE_MAX_ACTIVITIES", 250) : 25,
-  job_forms: SNAPSHOT_MODE === "baseline" ? toIntEnv("MORAWARE_BASELINE_MAX_FORMS", 250) : 25,
-  job_files: SNAPSHOT_MODE === "baseline" ? toIntEnv("MORAWARE_BASELINE_MAX_FILES", 250) : 25,
-  assignees: SNAPSHOT_MODE === "baseline" ? toIntEnv("MORAWARE_BASELINE_MAX_ASSIGNEES", 100) : 25
+  jobs: SNAPSHOT_MODE === "baseline_2026" ? toIntEnv("MORAWARE_BASELINE_MAX_JOBS", 5000) : SNAPSHOT_MODE === "baseline" ? toIntEnv("MORAWARE_BASELINE_MAX_JOBS", 50) : 10,
+  job_activities:
+    SNAPSHOT_MODE === "baseline_2026"
+      ? toIntEnv("MORAWARE_BASELINE_MAX_ACTIVITIES", 50000)
+      : SNAPSHOT_MODE === "baseline"
+      ? toIntEnv("MORAWARE_BASELINE_MAX_ACTIVITIES", 250)
+      : 25,
+  job_forms:
+    SNAPSHOT_MODE === "baseline_2026"
+      ? toIntEnv("MORAWARE_BASELINE_MAX_FORMS", 50000)
+      : SNAPSHOT_MODE === "baseline"
+      ? toIntEnv("MORAWARE_BASELINE_MAX_FORMS", 250)
+      : 25,
+  job_files:
+    SNAPSHOT_MODE === "baseline_2026"
+      ? toIntEnv("MORAWARE_BASELINE_MAX_FILES", 10000)
+      : SNAPSHOT_MODE === "baseline"
+      ? toIntEnv("MORAWARE_BASELINE_MAX_FILES", 250)
+      : 25,
+  assignees:
+    SNAPSHOT_MODE === "baseline_2026"
+      ? toIntEnv("MORAWARE_BASELINE_MAX_ASSIGNEES", 1000)
+      : SNAPSHOT_MODE === "baseline"
+      ? toIntEnv("MORAWARE_BASELINE_MAX_ASSIGNEES", 100)
+      : 25
 });
 
 function pickStr(v) {
@@ -122,6 +149,12 @@ function uniqPush(rows, row, keyFn, cap) {
   if (!key) return;
   if (rows.some((r) => keyFn(r) === key)) return;
   rows.push(row);
+}
+
+function capWarnings(batches) {
+  return Object.entries(CAPS)
+    .filter(([key, cap]) => Array.isArray(batches[key]) && batches[key].length >= cap)
+    .map(([key, cap]) => `${key} reached cap ${cap}; snapshot may be truncated. Increase MORAWARE_BASELINE_MAX_* and regenerate before import.`);
 }
 
 async function readJson(filePath) {
@@ -457,7 +490,10 @@ export async function generateSnapshotFile(options = {}) {
       source_file: path.relative(process.cwd(), sourceAbs),
       status_source_file: statusSourceFile || null,
       source_shape: sourceShape,
-      caps: CAPS
+      caps: CAPS,
+      baseline_start_date: process.env.MORAWARE_BASELINE_START_DATE || process.env.MORAWARE_SYNC_START_DATE || null,
+      baseline_end_date: process.env.MORAWARE_BASELINE_END_DATE || process.env.MORAWARE_SYNC_END_DATE || null,
+      cap_warnings: capWarnings(batches)
     },
     batches
   };
@@ -466,15 +502,17 @@ export async function generateSnapshotFile(options = {}) {
   await fs.mkdir(path.dirname(outAbs), { recursive: true });
   await fs.writeFile(outAbs, JSON.stringify(body, null, 2), "utf8");
   const counts = Object.fromEntries(Object.entries(batches).map(([k, v]) => [k, v.length]));
+  const warnings = capWarnings(batches);
   console.log(`${SNAPSHOT_MODE} Moraware snapshot generated:`, {
     source: path.relative(process.cwd(), sourceAbs),
     statusSource: statusSourceFile || "(per-job operational artifacts when present)",
     sourceShape,
     output: path.relative(process.cwd(), outAbs),
     caps: CAPS,
-    counts
+    counts,
+    warnings
   });
-  return { output: outAbs, source: sourceAbs, sourceShape, counts, caps: CAPS, mode: SNAPSHOT_MODE };
+  return { output: outAbs, source: sourceAbs, sourceShape, counts, caps: CAPS, mode: SNAPSHOT_MODE, warnings };
 }
 
 async function main() {
