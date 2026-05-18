@@ -14,6 +14,7 @@ import {
   methodLabelForDisplay
 } from "./salesAttribution.js";
 import { loadSalesAttributionCoverage } from "./salesAttributionCoverage.js";
+import { buildCompanyWideSqftActuals } from "./morawareSqftActuals.js";
 
 /** Roles that may call `/api/sales/*` when also granted head `sales` (admin bypass unchanged). */
 export const SALES_API_ROLES = Object.freeze(["admin", "executive", "sales", "finance", "marketing"]);
@@ -1813,7 +1814,9 @@ export async function salesDashboardFoundationHandler(req, supabaseGetter) {
 
   let jobsQ = supabase
     .from("brain_moraware_jobs")
-    .select("source_job_id,source_account_id,status_name,process_name,salesperson_name,created_at_source,modified_at_source")
+    .select(
+      "source_job_id,source_account_id,account_name,status_name,process_name,salesperson_name,created_at_source,modified_at_source,raw_payload"
+    )
     .eq("organization_id", organizationId)
     .limit(5000);
   const jobsRes = await jobsQ;
@@ -1838,6 +1841,7 @@ export async function salesDashboardFoundationHandler(req, supabaseGetter) {
       if (!oldestJobDate || d < oldestJobDate) oldestJobDate = d;
     }
   }
+  const syncedSqftActuals = buildCompanyWideSqftActuals(jobs, { attributionCoverage });
 
   return {
     status: 200,
@@ -1874,10 +1878,13 @@ export async function salesDashboardFoundationHandler(req, supabaseGetter) {
         process_breakdown: mapToRows(byProcess, "process"),
         salesperson_breakdown: mapToRows(bySalesperson, "salesperson").slice(0, 12)
       },
+      synced_sqft_actuals: syncedSqftActuals,
       attribution_coverage: attributionCoverage,
       quote_pipeline: quotePipeline,
       data_contract: {
         actuals: "Moraware Brain tables provide job/account/activity/status/process actuals.",
+        company_sqft_actuals:
+          "Company-wide synced sqft totals are extracted from Brain-owned Moraware Job Worksheet Sq.Ft. fields and may include all valid synced jobs.",
         forward_pipeline: "Quote Library quote_headers and quote_forecast_events provide future quote/forecast signals when populated.",
         mappings: "Elite 100 color/group/manufacturer/account attribution should remain backend-owned/admin-configurable.",
         account_branch_attribution:
@@ -1886,7 +1893,8 @@ export async function salesDashboardFoundationHandler(req, supabaseGetter) {
         no_frontend_sources: "Frontend reads this backend aggregate only; it never calls Moraware or receives credentials."
       },
       gaps: [
-        "sqft/revenue actuals are not yet normalized in brain_moraware_jobs",
+        "revenue actuals are not yet normalized in brain_moraware_jobs",
+        "branch/salesperson sqft totals remain gated until approved Sales Account Mapping coverage is high",
         "Elite 100 color/group/manufacturer mapping is not yet connected to Moraware foundation rows",
         "account/branch attribution needs approved backend mapping between Moraware account/customer names and sales ownership/location",
         "job_files and assignees may be absent from current live capped imports",

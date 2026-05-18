@@ -168,6 +168,12 @@
   color: var(--pi-muted);
 }
 
+.pi-mini-note {
+  margin-top: 0.2rem;
+  font-size: 0.72rem;
+  color: var(--pi-muted);
+}
+
 .pi-section {
   margin-top: 1.5rem;
 }

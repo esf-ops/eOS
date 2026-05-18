@@ -50,6 +50,31 @@ type SalesDashboardFoundation = {
     warning?: string;
     blackstone_guardrail?: string;
   };
+  synced_sqft_actuals?: {
+    source?: string;
+    extraction_status?: "available" | "pending" | string;
+    total_synced_sqft?: number | null;
+    total_jobs_evaluated?: number | null;
+    jobs_with_sqft?: number | null;
+    jobs_missing_sqft?: number | null;
+    sqft_coverage_pct?: number | null;
+    average_sqft_per_job?: number | null;
+    date_coverage?: { oldest_job_created_at?: string | null; newest_job_created_at?: string | null };
+    monthly_sqft_trend?: Array<{ month: string; total_sqft: number; job_count: number; jobs_with_sqft: number }>;
+    top_raw_accounts_by_sqft?: Array<{
+      account_name: string;
+      source_account_id?: string | null;
+      total_sqft: number;
+      job_count: number;
+      jobs_with_sqft: number;
+      attribution_status: string;
+      canonical_account_name?: string | null;
+      assigned_salesperson?: string | null;
+      branch?: string | null;
+    }>;
+    extraction_sources?: Array<{ source: string; label: string; formTemplateName: string; count: number; confidence: string }>;
+    notes?: string[];
+  };
   quote_pipeline?: {
     quote_headers_count?: number | null;
     quote_headers_error?: string | null;
@@ -75,6 +100,11 @@ function pct(value: unknown) {
   const n = Number(value);
   if (!Number.isFinite(n)) return "—";
   return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(n)}%`;
+}
+
+function sqft(value: unknown) {
+  const n = Number(value ?? 0);
+  return Number.isFinite(n) ? new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(n) : "0";
 }
 
 function age(seconds: unknown) {
@@ -148,6 +178,7 @@ export default function SalesCommandCenterView({ token, onLoadError }: Props) {
 
   const actuals = data?.actuals;
   const coverage = data?.attribution_coverage;
+  const sqftActuals = data?.synced_sqft_actuals;
   const sync = data?.sync_health;
   const group = sync?.latest_group;
   const groupHealthy = Boolean(group) && Number(group.failed_chunks || 0) === 0;
@@ -183,6 +214,23 @@ export default function SalesCommandCenterView({ token, onLoadError }: Props) {
         </div>
 
         <div className="pi-grid-cards">
+          <div className="pi-card">
+            <p className="pi-card-title">Synced sqft actuals</p>
+            <p className="pi-card-value">{sqft(sqftActuals?.total_synced_sqft)}</p>
+            <p className="pi-card-note">Company-wide total from Moraware Job Worksheet Sq.Ft. fields.</p>
+          </div>
+          <div className="pi-card">
+            <p className="pi-card-title">Jobs with sqft</p>
+            <p className="pi-card-value">{pct(sqftActuals?.sqft_coverage_pct)}</p>
+            <p className="pi-card-note">
+              {num(sqftActuals?.jobs_with_sqft)} with sqft · {num(sqftActuals?.jobs_missing_sqft)} missing
+            </p>
+          </div>
+          <div className="pi-card">
+            <p className="pi-card-title">Avg sqft / job</p>
+            <p className="pi-card-value">{sqft(sqftActuals?.average_sqft_per_job)}</p>
+            <p className="pi-card-note">Average across synced jobs with valid sqft.</p>
+          </div>
           <div className="pi-card pi-card-warn">
             <p className="pi-card-title">Approved attribution</p>
             <p className="pi-card-value">{pct(coverage?.approvedAccountCoveragePct)}</p>
@@ -224,6 +272,82 @@ export default function SalesCommandCenterView({ token, onLoadError }: Props) {
             <p className="pi-card-note">Forward pipeline source; forecast events: {num(data?.quote_pipeline?.quote_forecast_events_count)}</p>
           </div>
         </div>
+
+        {sqftActuals?.extraction_status === "pending" ? (
+          <div className="sales-attribution-guardrail">
+            <strong>Sq.Ft. extraction pending</strong>
+            {(sqftActuals.notes || []).map((note) => (
+              <p key={note}>{note}</p>
+            ))}
+          </div>
+        ) : (
+          <section className="pi-section">
+            <h2>Company-Wide Synced Sq.Ft. Actuals</h2>
+            <p className="pi-sub">
+              Real synced actuals from Brain-owned Moraware Job Worksheet fields. These totals are company-wide and do not
+              require approved account attribution.
+            </p>
+            <div className="sales-foundation-grid">
+              <div className="pi-table-wrap">
+                <table className="pi-table">
+                  <thead>
+                    <tr>
+                      <th>Month</th>
+                      <th className="pi-num">Sq.Ft.</th>
+                      <th className="pi-num">Jobs</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(sqftActuals?.monthly_sqft_trend || []).length ? (
+                      (sqftActuals?.monthly_sqft_trend || []).map((row) => (
+                        <tr key={row.month}>
+                          <td>{row.month}</td>
+                          <td className="pi-num">{sqft(row.total_sqft)}</td>
+                          <td className="pi-num">{num(row.jobs_with_sqft || row.job_count)}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={3}>No monthly sqft rows yet.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <div className="pi-table-wrap">
+                <table className="pi-table">
+                  <thead>
+                    <tr>
+                      <th>Raw Account</th>
+                      <th className="pi-num">Sq.Ft.</th>
+                      <th className="pi-num">Jobs</th>
+                      <th>Attribution</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(sqftActuals?.top_raw_accounts_by_sqft || []).length ? (
+                      (sqftActuals?.top_raw_accounts_by_sqft || []).map((row) => (
+                        <tr key={`${row.source_account_id || row.account_name}`}>
+                          <td>
+                            {row.account_name}
+                            {row.canonical_account_name ? <div className="pi-mini-note">{row.canonical_account_name}</div> : null}
+                          </td>
+                          <td className="pi-num">{sqft(row.total_sqft)}</td>
+                          <td className="pi-num">{num(row.jobs_with_sqft || row.job_count)}</td>
+                          <td>{row.attribution_status === "approved_mapping" ? "Approved mapping" : "Raw / needs review"}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={4}>No account sqft rows yet.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+        )}
 
         <div className="sales-attribution-guardrail">
           <strong>Branch revenue/sqft remains preview</strong>
