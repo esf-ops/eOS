@@ -538,6 +538,7 @@ export function attachMorawareSyncRoutes(app, deps) {
       for (const f of findings.data || []) findingSeverityCounts[f.severity] = (findingSeverityCounts[f.severity] || 0) + 1;
       const latestGroupId = pickStr(latestRun?.metadata?.import_group_id) || pickStr(lastSuccessfulRun?.metadata?.import_group_id) || null;
       let latestGroup = null;
+      let latestGroupDataQualityCount = 0;
       if (latestGroupId) {
         let groupQ = db
           .from("moraware_sync_runs")
@@ -562,6 +563,7 @@ export function attachMorawareSyncRoutes(app, deps) {
           const groupFindings = await groupFindingsQ;
           if (groupFindings.error) throw groupFindings.error;
           for (const f of groupFindings.data || []) groupFindingCounts[f.finding_type] = (groupFindingCounts[f.finding_type] || 0) + 1;
+          latestGroupDataQualityCount = groupFindings.data?.length ?? 0;
         }
         const totalRowCounts = groupRows.reduce((acc, row) => addRowCounts(acc, row.row_counts || {}), {});
         latestGroup = {
@@ -594,6 +596,19 @@ export function attachMorawareSyncRoutes(app, deps) {
         resources: await countTable(db, "brain_moraware_resources", organizationId)
       };
       const syncFreshnessSeconds = freshnessMs == null ? null : Math.max(0, Math.round(freshnessMs / 1000));
+      const staleWarning = syncFreshnessSeconds == null || syncFreshnessSeconds > staleWarningSeconds;
+      const openHistoricalDataQualityCount = Math.max(0, (findings.count ?? findings.data?.length ?? 0) - latestGroupDataQualityCount);
+      const failedChunks = Number(latestGroup?.failed_chunks) || 0;
+      const latestGroupHealthStatus =
+        !lastSuccessfulRun
+          ? "no_success"
+          : staleWarning
+            ? "stale"
+            : failedChunks > 0
+              ? "failed_chunks"
+              : latestGroupDataQualityCount > 0
+                ? "needs_review"
+                : "healthy";
       const latestGroupRows = latestGroup?.total_row_counts || {};
       const knownGaps = [
         "activity-level machine/resource assignment is not yet trusted",
@@ -614,7 +629,10 @@ export function attachMorawareSyncRoutes(app, deps) {
         last_sync_age_seconds: syncFreshnessSeconds,
         sync_freshness_seconds: syncFreshnessSeconds,
         stale_warning_threshold_seconds: staleWarningSeconds,
-        stale_warning: syncFreshnessSeconds == null || syncFreshnessSeconds > staleWarningSeconds,
+        stale_warning: staleWarning,
+        latest_group_data_quality_count: latestGroupDataQualityCount,
+        open_historical_data_quality_count: openHistoricalDataQualityCount,
+        latest_group_health_status: latestGroupHealthStatus,
         row_counts: rowCounts,
         recent_error_count: errors.data?.length ?? 0,
         recent_errors: (errors.data || []).map((e) => ({

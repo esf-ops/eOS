@@ -166,6 +166,9 @@ type MorawareSyncStatusResp = {
   last_sync_age_seconds?: number | null;
   stale_warning_threshold_seconds?: number | null;
   stale_warning?: boolean;
+  latest_group_data_quality_count?: number | null;
+  open_historical_data_quality_count?: number | null;
+  latest_group_health_status?: string | null;
   row_counts?: Record<string, number | null>;
   data_quality_counts?: Record<string, number | null>;
   data_quality_severity_counts?: Record<string, number | null>;
@@ -645,10 +648,11 @@ function MorawareSyncStatusCard({
   const group = status?.latest_group;
   const groupRows = group?.total_row_counts || {};
   const rowsSynced = sumCounts(groupRows) || sumCounts(status?.row_counts);
-  const dqWarnings = sumCounts(status?.data_quality_counts);
-  const healthy = Boolean(success) && !status?.stale_warning && dqWarnings === 0 && (group?.failed_chunks ?? 0) === 0;
-  const pillClass = loading ? "pill-neutral" : error ? "pill-bad" : healthy ? "pill-good" : "pill-warn";
-  const pillText = loading ? "Checking" : error ? "Unavailable" : healthy ? "Healthy" : "Needs review";
+  const latestGroupWarnings = Number(status?.latest_group_data_quality_count ?? sumCounts(group?.data_quality_counts));
+  const historicalWarnings = Number(status?.open_historical_data_quality_count ?? sumCounts(status?.data_quality_counts));
+  const latestGroupHealthy = status?.latest_group_health_status === "healthy";
+  const pillClass = loading ? "pill-neutral" : error ? "pill-bad" : latestGroupHealthy ? "pill-good" : "pill-warn";
+  const pillText = loading ? "Checking" : error ? "Unavailable" : latestGroupHealthy ? "Healthy" : "Needs review";
 
   return (
     <div className="admin-card moraware-sync-card">
@@ -694,8 +698,12 @@ function MorawareSyncStatusCard({
               <div className="stat-label">Chunks successful</div>
             </div>
             <div className="stat-card">
-              <div className="stat-value">{fmtNumber(dqWarnings)}</div>
-              <div className="stat-label">Open data quality warnings</div>
+              <div className="stat-value">{fmtNumber(latestGroupWarnings)}</div>
+              <div className="stat-label">Latest group warnings</div>
+            </div>
+            <div className="stat-card stat-card-muted">
+              <div className="stat-value">{fmtNumber(historicalWarnings)}</div>
+              <div className="stat-label">Historical open warnings</div>
             </div>
           </div>
 

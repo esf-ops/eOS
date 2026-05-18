@@ -783,6 +783,14 @@ table.simple tbody tr {
   margin-top: 4px;
 }
 
+.stat-card-muted {
+  background: var(--eos-surface-subtle);
+}
+
+.stat-card-muted .stat-value {
+  color: var(--eos-text-secondary);
+}
+
 .schema-card {
   border-radius: 10px;
   padding: 14px 16px;
