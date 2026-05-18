@@ -590,6 +590,62 @@ table.simple tbody tr {
   color: var(--eos-primary-hover);
 }
 
+.card-heading-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.card-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.moraware-stat-grid {
+  margin-top: 14px;
+}
+
+.moraware-sync-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.moraware-sync-grid h4 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--eos-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.compact-dl {
+  display: grid;
+  grid-template-columns: minmax(90px, auto) 1fr;
+  gap: 6px 12px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.compact-dl dt {
+  color: var(--eos-muted);
+}
+
+.compact-dl dd {
+  margin: 0;
+  color: var(--eos-text);
+}
+
+.mono-break {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  overflow-wrap: anywhere;
+}
+
 .lifecycle-card {
   border-radius: 10px;
   border: 1px solid #bfdbfe;

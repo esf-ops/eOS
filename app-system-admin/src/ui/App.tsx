@@ -134,6 +134,45 @@ type AuditEventsResp = {
   warnings?: string[];
 };
 
+type MorawareRunSummary = {
+  id?: string | null;
+  status?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  duration_ms?: number | null;
+  row_counts?: Record<string, number | null>;
+  data_quality_counts?: Record<string, number | null>;
+  import_group_id?: string | null;
+  chunk_index?: number | null;
+  chunk_count?: number | null;
+};
+
+type MorawareGroupSummary = {
+  import_group_id?: string | null;
+  chunk_count?: number | null;
+  expected_chunk_count?: number | null;
+  successful_chunks?: number | null;
+  failed_chunks?: number | null;
+  total_row_counts?: Record<string, number | null>;
+  data_quality_counts?: Record<string, number | null>;
+};
+
+type MorawareSyncStatusResp = {
+  ok?: boolean;
+  latest_run?: MorawareRunSummary | null;
+  last_successful_run?: MorawareRunSummary | null;
+  latest_import_group_id?: string | null;
+  latest_group?: MorawareGroupSummary | null;
+  last_sync_age_seconds?: number | null;
+  stale_warning_threshold_seconds?: number | null;
+  stale_warning?: boolean;
+  row_counts?: Record<string, number | null>;
+  data_quality_counts?: Record<string, number | null>;
+  data_quality_severity_counts?: Record<string, number | null>;
+  recent_error_count?: number;
+  known_gaps?: string[];
+};
+
 function fmt(dt: unknown) {
   if (!dt) return "—";
   try {
@@ -141,6 +180,24 @@ function fmt(dt: unknown) {
   } catch {
     return String(dt);
   }
+}
+
+function fmtNumber(value: unknown) {
+  const n = Number(value ?? 0);
+  return Number.isFinite(n) ? n.toLocaleString() : "0";
+}
+
+function fmtAge(seconds: unknown) {
+  const n = Number(seconds);
+  if (!Number.isFinite(n) || n < 0) return "No successful sync yet";
+  if (n < 60) return `${Math.round(n)}s ago`;
+  if (n < 3600) return `${Math.round(n / 60)}m ago`;
+  if (n < 86400) return `${Math.round(n / 3600)}h ago`;
+  return `${Math.round(n / 86400)}d ago`;
+}
+
+function sumCounts(counts: Record<string, number | null> | undefined | null) {
+  return Object.values(counts || {}).reduce((sum, v) => sum + (Number(v) || 0), 0);
 }
 
 function fmtReadableDate(dt: unknown, empty = "Not recorded yet") {
@@ -572,6 +629,135 @@ function UserLifecycleActions({
   );
 }
 
+function MorawareSyncStatusCard({
+  status,
+  loading,
+  error,
+  onRefresh
+}: {
+  status: MorawareSyncStatusResp | null;
+  loading: boolean;
+  error: string;
+  onRefresh: () => void;
+}) {
+  const latest = status?.latest_run;
+  const success = status?.last_successful_run;
+  const group = status?.latest_group;
+  const groupRows = group?.total_row_counts || {};
+  const rowsSynced = sumCounts(groupRows) || sumCounts(status?.row_counts);
+  const dqWarnings = sumCounts(status?.data_quality_counts);
+  const healthy = Boolean(success) && !status?.stale_warning && dqWarnings === 0 && (group?.failed_chunks ?? 0) === 0;
+  const pillClass = loading ? "pill-neutral" : error ? "pill-bad" : healthy ? "pill-good" : "pill-warn";
+  const pillText = loading ? "Checking" : error ? "Unavailable" : healthy ? "Healthy" : "Needs review";
+
+  return (
+    <div className="admin-card moraware-sync-card">
+      <div className="card-heading-row">
+        <div>
+          <h3 style={{ marginTop: 0 }}>Moraware Sync Status</h3>
+          <p className="muted" style={{ marginTop: 4 }}>
+            Aggregate sync health only. This panel does not expose customer, job, credential, or raw payload data.
+          </p>
+        </div>
+        <div className="card-heading-actions">
+          <span className={`pill ${pillClass}`}>{pillText}</span>
+          <button type="button" className="btn" onClick={onRefresh} disabled={loading}>
+            {loading ? "Refreshing…" : "Refresh"}
+          </button>
+        </div>
+      </div>
+
+      {loading && !status ? (
+        <p className="muted">Loading Moraware sync health…</p>
+      ) : error ? (
+        <div className="error-card" style={{ marginBottom: 0 }}>
+          <strong>Unable to load Moraware sync health</strong>
+          <p>{error}</p>
+        </div>
+      ) : !status ? (
+        <p className="muted">No Moraware sync status loaded yet.</p>
+      ) : (
+        <>
+          <div className="stat-grid moraware-stat-grid">
+            <div className="stat-card">
+              <div className="stat-value">{fmtAge(status.last_sync_age_seconds)}</div>
+              <div className="stat-label">Last success</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-value">{fmtNumber(rowsSynced)}</div>
+              <div className="stat-label">Rows in latest group</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-value">
+                {group ? `${fmtNumber(group.successful_chunks)}/${fmtNumber(group.expected_chunk_count || group.chunk_count)}` : "—"}
+              </div>
+              <div className="stat-label">Chunks successful</div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-value">{fmtNumber(dqWarnings)}</div>
+              <div className="stat-label">Open data quality warnings</div>
+            </div>
+          </div>
+
+          <div className="moraware-sync-grid">
+            <div>
+              <h4>Latest run</h4>
+              <dl className="compact-dl">
+                <dt>Status</dt>
+                <dd>{titleizeToken(latest?.status, "Unknown")}</dd>
+                <dt>Started</dt>
+                <dd>{fmt(latest?.started_at)}</dd>
+                <dt>Finished</dt>
+                <dd>{fmt(latest?.finished_at)}</dd>
+                <dt>Last success</dt>
+                <dd>{fmt(success?.finished_at)}</dd>
+              </dl>
+            </div>
+            <div>
+              <h4>Latest chunk group</h4>
+              <dl className="compact-dl">
+                <dt>Group ID</dt>
+                <dd className="mono-break">{status.latest_import_group_id || "No chunk group recorded"}</dd>
+                <dt>Chunk count</dt>
+                <dd>{group ? `${fmtNumber(group.chunk_count)} recorded / ${fmtNumber(group.expected_chunk_count || group.chunk_count)} expected` : "—"}</dd>
+                <dt>Failed chunks</dt>
+                <dd>{fmtNumber(group?.failed_chunks)}</dd>
+              </dl>
+            </div>
+          </div>
+
+          <div className="moraware-sync-grid">
+            <div>
+              <h4>Rows synced</h4>
+              <div className="readiness-checks">
+                {Object.entries(groupRows).length ? (
+                  Object.entries(groupRows).map(([key, value]) => (
+                    <span key={key} className="mini-check ok">
+                      {titleizeToken(key)}: {fmtNumber(value)}
+                    </span>
+                  ))
+                ) : (
+                  <span className="mini-check missing">No latest group row counts</span>
+                )}
+              </div>
+            </div>
+            <div>
+              <h4>Known gaps</h4>
+              <div className="readiness-checks">
+                {(status.known_gaps || []).map((gap) => (
+                  <span key={gap} className="mini-check missing">
+                    {gap}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   const [sessionToken, setSessionToken] = useState("");
   const [session, setSession] = useState<Session | null>(null);
@@ -591,6 +777,9 @@ export default function App() {
     httpStatus: number | null;
     detail?: string;
   } | null>(null);
+  const [morawareStatus, setMorawareStatus] = useState<MorawareSyncStatusResp | null>(null);
+  const [morawareStatusLoading, setMorawareStatusLoading] = useState(false);
+  const [morawareStatusError, setMorawareStatusError] = useState("");
   const [reference, setReference] = useState<ReferenceResp | null>(null);
   const [rows, setRows] = useState<AdminRow[]>([]);
   const [listError, setListError] = useState("");
@@ -635,6 +824,20 @@ export default function App() {
 
   const canOperate = privilegedApplicationRole(me?.user?.role);
 
+  const loadMorawareStatus = useCallback(async (token: string) => {
+    setMorawareStatusLoading(true);
+    setMorawareStatusError("");
+    try {
+      const status = (await apiFetch("/api/moraware-sync/status", { token })) as MorawareSyncStatusResp;
+      setMorawareStatus(status);
+    } catch (e: unknown) {
+      setMorawareStatus(null);
+      setMorawareStatusError(e instanceof ApiError ? e.message : String((e as Error)?.message ?? e));
+    } finally {
+      setMorawareStatusLoading(false);
+    }
+  }, []);
+
   const loadCore = useCallback(
     async (token: string) => {
       setListError("");
@@ -646,6 +849,8 @@ export default function App() {
         setSchemaHealthResult(null);
         setSchemaHealthProbeError(null);
         setSchemaHealthDevMeta(null);
+        setMorawareStatus(null);
+        setMorawareStatusError("");
         setSelectedId(null);
         setDetail(null);
         setListError("This head requires admin or super_admin role.");
@@ -690,8 +895,9 @@ export default function App() {
       }
       const roster = (await apiFetch(`${USER_MGMT_API}/users`, { token })) as { ok?: boolean; rows?: AdminRow[] };
       setRows(Array.isArray(roster.rows) ? roster.rows : []);
+      await loadMorawareStatus(token);
     },
-    [setMe]
+    [loadMorawareStatus, setMe]
   );
 
   useEffect(() => {
@@ -716,6 +922,9 @@ export default function App() {
         setSchemaHealthResult(null);
         setSchemaHealthProbeError(null);
         setSchemaHealthDevMeta(null);
+        setMorawareStatus(null);
+        setMorawareStatusError("");
+        setMorawareStatusLoading(false);
         setSelectedId(null);
         return;
       }
@@ -1024,6 +1233,9 @@ export default function App() {
               setSchemaHealthResult(null);
               setSchemaHealthProbeError(null);
               setSchemaHealthDevMeta(null);
+              setMorawareStatus(null);
+              setMorawareStatusError("");
+              setMorawareStatusLoading(false);
             }}
           >
             Sign out
@@ -1622,6 +1834,15 @@ export default function App() {
                         </pre>
                       </details>
                     ) : null}
+
+                    <MorawareSyncStatusCard
+                      status={morawareStatus}
+                      loading={morawareStatusLoading}
+                      error={morawareStatusError}
+                      onRefresh={() => {
+                        if (sessionToken) void loadMorawareStatus(sessionToken);
+                      }}
+                    />
 
                     <div className="admin-card">
                       <h3 style={{ marginTop: 0 }}>Pricing Admin head</h3>

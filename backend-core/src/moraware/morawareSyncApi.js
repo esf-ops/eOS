@@ -1,6 +1,7 @@
 import express from "express";
 
 import { logAction } from "../auth/auditLog.js";
+import { resolveHeadAccessContext } from "../me/launcherHeads.js";
 
 const jsonParser = express.json({ limit: "15mb" });
 const SOURCE_SYSTEM = "moraware";
@@ -322,9 +323,72 @@ async function countTable(db, table, organizationId) {
   return count ?? 0;
 }
 
+function toIntEnv(name, fallback) {
+  const n = Number.parseInt(String(process.env[name] ?? ""), 10);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
+function addRowCounts(a = {}, b = {}) {
+  const keys = new Set([...Object.keys(a || {}), ...Object.keys(b || {})]);
+  const out = {};
+  for (const key of keys) out[key] = (Number(a?.[key]) || 0) + (Number(b?.[key]) || 0);
+  return out;
+}
+
+function summarizeRun(row) {
+  if (!row) return null;
+  const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
+  return {
+    id: row.id,
+    organization_id: row.organization_id,
+    source_system: row.source_system,
+    mode: row.mode,
+    runner: row.runner,
+    status: row.status,
+    started_at: row.started_at,
+    finished_at: row.finished_at,
+    duration_ms: row.duration_ms,
+    row_counts: row.row_counts || {},
+    data_quality_counts: row.data_quality_counts || {},
+    error_message: row.error_message || null,
+    import_group_id: pickStr(metadata.import_group_id) || null,
+    chunk_index: metadata.chunk_index ?? null,
+    chunk_count: metadata.chunk_count ?? null,
+    chunk_counts: metadata.chunk_counts || null,
+    parent_snapshot_counts: metadata.parent_snapshot_counts || null,
+    caps: metadata.caps || null,
+    source_shape: metadata.source_shape || null
+  };
+}
+
+function requireAnyHeadAccess(headSlugs, { getSupabase }) {
+  return async function anyHeadAccessMiddleware(req, res, next) {
+    try {
+      const u = req.user;
+      if (!u?.id) return res.status(401).json({ ok: false, error: "Unauthorized" });
+      if (u.isActive === false) return res.status(403).json({ ok: false, error: "You do not have access to this head." });
+      const role = String(u.role ?? "").trim();
+      if (role === "admin" || role === "super_admin") return next();
+      const ctx = await resolveHeadAccessContext(getSupabase(), u);
+      if (!ctx.ok || !ctx.active) return res.status(403).json({ ok: false, error: "You do not have access to this head." });
+      for (const slug of headSlugs) {
+        if (ctx.actionableGrantSet?.has(slug)) return next();
+      }
+      return res.status(403).json({ ok: false, error: "You do not have access to this head." });
+    } catch (e) {
+      console.error("requireAnyHeadAccess failed", e);
+      return res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  };
+}
+
 export function attachMorawareSyncRoutes(app, deps) {
   const { requireAuth, requireRole, requireHeadAccess, getSupabase } = deps;
-  const healthStack = [requireAuth(), requireRole(["admin", "executive", "super_admin"]), requireHeadAccess("brain_health", { getSupabase })];
+  const healthStack = [
+    requireAuth(),
+    requireRole(["admin", "executive", "super_admin"]),
+    requireAnyHeadAccess(["system_admin", "brain_health"], { getSupabase })
+  ];
 
   app.post("/api/internal/moraware-sync/import", jsonParser, async (req, res) => {
     if (!requireImportSecret(req, res)) return;
@@ -448,6 +512,8 @@ export function attachMorawareSyncRoutes(app, deps) {
     try {
       const db = getSupabase();
       const organizationId = isUuid(req.query.organization_id) ? pickStr(req.query.organization_id) : pickStr(req.user?.organization_id) || null;
+      const staleWarningHours = toIntEnv("MORAWARE_SYNC_STALE_WARNING_HOURS", 24);
+      const staleWarningSeconds = staleWarningHours * 60 * 60;
       let latestQ = db.from("moraware_sync_runs").select("*").order("started_at", { ascending: false }).limit(1);
       let successQ = db.from("moraware_sync_runs").select("*").eq("status", "success").order("finished_at", { ascending: false }).limit(1);
       let errorQ = db.from("moraware_sync_errors").select("*").order("created_at", { ascending: false }).limit(25);
@@ -468,22 +534,100 @@ export function attachMorawareSyncRoutes(app, deps) {
       const freshnessMs = lastSuccessfulRun?.finished_at ? Date.now() - Date.parse(String(lastSuccessfulRun.finished_at)) : null;
       const findingCounts = {};
       for (const f of findings.data || []) findingCounts[f.finding_type] = (findingCounts[f.finding_type] || 0) + 1;
+      const findingSeverityCounts = {};
+      for (const f of findings.data || []) findingSeverityCounts[f.severity] = (findingSeverityCounts[f.severity] || 0) + 1;
+      const latestGroupId = pickStr(latestRun?.metadata?.import_group_id) || pickStr(lastSuccessfulRun?.metadata?.import_group_id) || null;
+      let latestGroup = null;
+      if (latestGroupId) {
+        let groupQ = db
+          .from("moraware_sync_runs")
+          .select("id,status,started_at,finished_at,duration_ms,row_counts,data_quality_counts,metadata")
+          .filter("metadata->>import_group_id", "eq", latestGroupId)
+          .order("started_at", { ascending: true })
+          .limit(100);
+        if (organizationId) groupQ = groupQ.eq("organization_id", organizationId);
+        const group = await groupQ;
+        if (group.error) throw group.error;
+        const groupRows = group.data || [];
+        const syncRunIds = groupRows.map((r) => r.id).filter(Boolean);
+        const groupFindingCounts = {};
+        if (syncRunIds.length) {
+          let groupFindingsQ = db
+            .from("moraware_data_quality_findings")
+            .select("finding_type,severity")
+            .in("sync_run_id", syncRunIds)
+            .is("resolved_at", null)
+            .limit(1000);
+          if (organizationId) groupFindingsQ = groupFindingsQ.eq("organization_id", organizationId);
+          const groupFindings = await groupFindingsQ;
+          if (groupFindings.error) throw groupFindings.error;
+          for (const f of groupFindings.data || []) groupFindingCounts[f.finding_type] = (groupFindingCounts[f.finding_type] || 0) + 1;
+        }
+        const totalRowCounts = groupRows.reduce((acc, row) => addRowCounts(acc, row.row_counts || {}), {});
+        latestGroup = {
+          import_group_id: latestGroupId,
+          chunk_count: groupRows.length,
+          expected_chunk_count: groupRows[0]?.metadata?.chunk_count ?? latestRun?.metadata?.chunk_count ?? null,
+          successful_chunks: groupRows.filter((r) => r.status === "success").length,
+          failed_chunks: groupRows.filter((r) => r.status === "failed").length,
+          started_at: groupRows[0]?.started_at ?? null,
+          finished_at: groupRows[groupRows.length - 1]?.finished_at ?? null,
+          total_row_counts: totalRowCounts,
+          data_quality_counts: groupFindingCounts,
+          chunk_runs: groupRows.map((r) => ({
+            id: r.id,
+            status: r.status,
+            chunk_index: r.metadata?.chunk_index ?? null,
+            chunk_count: r.metadata?.chunk_count ?? null,
+            row_counts: r.row_counts || {},
+            data_quality_counts: r.data_quality_counts || {},
+            started_at: r.started_at,
+            finished_at: r.finished_at,
+            duration_ms: r.duration_ms
+          }))
+        };
+      }
       const rowCounts = {
         accounts: await countTable(db, "brain_moraware_accounts", organizationId),
         jobs: await countTable(db, "brain_moraware_jobs", organizationId),
         activities: await countTable(db, "brain_moraware_job_activities", organizationId),
         resources: await countTable(db, "brain_moraware_resources", organizationId)
       };
+      const syncFreshnessSeconds = freshnessMs == null ? null : Math.max(0, Math.round(freshnessMs / 1000));
+      const latestGroupRows = latestGroup?.total_row_counts || {};
+      const knownGaps = [
+        "activity-level machine/resource assignment is not yet trusted",
+        "material/inventory path is not unlocked",
+        "live Machines calendar rows are not unlocked",
+        "no Moraware writeback"
+      ];
+      if ((Number(latestGroupRows.job_files) || 0) === 0) knownGaps.unshift("file metadata is currently absent from latest import group");
+      if ((Number(rowCounts.resources) || 0) === 0) knownGaps.unshift("assignee/resource catalog is currently absent from Brain rows");
       res.json({
         ok: true,
         source_system: SOURCE_SYSTEM,
         organization_id: organizationId,
-        latest_run: latestRun,
-        last_successful_run: lastSuccessfulRun,
-        sync_freshness_seconds: freshnessMs == null ? null : Math.max(0, Math.round(freshnessMs / 1000)),
+        latest_run: summarizeRun(latestRun),
+        last_successful_run: summarizeRun(lastSuccessfulRun),
+        latest_import_group_id: latestGroupId,
+        latest_group: latestGroup,
+        last_sync_age_seconds: syncFreshnessSeconds,
+        sync_freshness_seconds: syncFreshnessSeconds,
+        stale_warning_threshold_seconds: staleWarningSeconds,
+        stale_warning: syncFreshnessSeconds == null || syncFreshnessSeconds > staleWarningSeconds,
         row_counts: rowCounts,
-        recent_errors: errors.data || [],
+        recent_error_count: errors.data?.length ?? 0,
+        recent_errors: (errors.data || []).map((e) => ({
+          id: e.id,
+          sync_run_id: e.sync_run_id,
+          entity_type: e.entity_type,
+          severity: e.severity,
+          message: e.message,
+          created_at: e.created_at
+        })),
         unresolved_data_quality_counts: findingCounts,
+        data_quality_counts: findingCounts,
+        data_quality_severity_counts: findingSeverityCounts,
         current_data_scope: [
           "accounts/customers",
           "jobs and identifiers",
@@ -493,12 +637,7 @@ export function attachMorawareSyncRoutes(app, deps) {
           "file metadata",
           "assignee/resource catalog"
         ],
-        known_gaps: [
-          "activity-level machine/resource assignment is not yet trusted",
-          "material/inventory path is not unlocked",
-          "live Machines calendar rows are not unlocked",
-          "no Moraware writeback"
-        ]
+        known_gaps: knownGaps
       });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });

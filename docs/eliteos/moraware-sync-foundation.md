@@ -309,6 +309,31 @@ group by sync_run_id, finding_type, severity
 order by finding_count desc;
 ```
 
+## Admin Sync Health Validation
+
+Before recurring scheduling, admins should validate Moraware health from System Admin diagnostics. The card uses the protected `GET /api/moraware-sync/status` endpoint and returns aggregate health only: latest run metadata, latest successful run, chunk group totals, row counts, data-quality counts, stale warning state, and known gaps. It does not return raw customers, jobs, forms, files, credentials, or Moraware payloads.
+
+Access rules:
+
+- Requires authenticated eliteOS session.
+- Requires `admin`, `super_admin`, or approved executive role.
+- Requires access to either `system_admin` or `brain_health`; admins and super admins still have recovery bypass.
+
+Admin checklist after each manual/chunked import:
+
+- Last success is recent and below the stale threshold.
+- Latest chunk group shows all chunks successful.
+- Latest group row counts match the capped import expectation.
+- Data quality warning count is `0` or understood.
+- Known gaps are expected for this phase: file metadata may be absent, assignees/resources may be absent, machine assignment is not trusted, and material inventory is not integrated.
+
+The same aggregate endpoint can be checked directly:
+
+```bash
+curl -H "Authorization: Bearer <SUPABASE_ACCESS_TOKEN>" \
+  https://backend-core-six.vercel.app/api/moraware-sync/status
+```
+
 Schedule recommendation, after one or more successful manual live capped imports:
 
 - Start with a manual live capped run during business hours.
