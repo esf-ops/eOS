@@ -15,8 +15,8 @@ create extension if not exists pgcrypto;
 -- ---------------------------------------------------------------------------
 create table if not exists public.eos_login_log (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid nullable,
-  user_email text nullable,
+  user_id uuid,
+  user_email text,
   event_type text,
   ip_address text,
   user_agent text,
