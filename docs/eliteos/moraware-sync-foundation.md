@@ -274,12 +274,12 @@ Run an import dry-run before posting the 2026 baseline. Dry-run reads the snapsh
 MORAWARE_IMPORT_DRY_RUN=1 \
 MORAWARE_IMPORT_ALLOW_LARGE_BASELINE=1 \
 MORAWARE_IMPORT_CHUNKED=1 \
-MORAWARE_IMPORT_MAX_PAYLOAD_BYTES=3000000 \
-MORAWARE_IMPORT_MAX_JOBS_PER_CHUNK=100 \
-MORAWARE_IMPORT_MAX_ACTIVITIES_PER_CHUNK=5000 \
-MORAWARE_IMPORT_MAX_FORMS_PER_CHUNK=5000 \
-MORAWARE_IMPORT_MAX_FILES_PER_CHUNK=500 \
-MORAWARE_IMPORT_MAX_ASSIGNEES_PER_CHUNK=500 \
+MORAWARE_IMPORT_MAX_PAYLOAD_BYTES=1500000 \
+MORAWARE_IMPORT_MAX_JOBS_PER_CHUNK=50 \
+MORAWARE_IMPORT_MAX_ACTIVITIES_PER_CHUNK=1000 \
+MORAWARE_IMPORT_MAX_FORMS_PER_CHUNK=1000 \
+MORAWARE_IMPORT_MAX_FILES_PER_CHUNK=250 \
+MORAWARE_IMPORT_MAX_ASSIGNEES_PER_CHUNK=250 \
 MORAWARE_DEFAULT_ORGANIZATION_ID=89180433-9fab-4024-bec9-a14d870bd0a8 \
 MORAWARE_SYNC_IMPORT_FILE=debug/moraware/baseline-2026/baseline-2026-moraware-snapshot.json \
 npm run eos:moraware:import-snapshot
@@ -297,18 +297,40 @@ Chunked import command for the 2026 baseline, only after dry-run review:
 ```bash
 MORAWARE_IMPORT_ALLOW_LARGE_BASELINE=1 \
 MORAWARE_IMPORT_CHUNKED=1 \
-MORAWARE_IMPORT_MAX_PAYLOAD_BYTES=3000000 \
-MORAWARE_IMPORT_MAX_JOBS_PER_CHUNK=100 \
-MORAWARE_IMPORT_MAX_ACTIVITIES_PER_CHUNK=5000 \
-MORAWARE_IMPORT_MAX_FORMS_PER_CHUNK=5000 \
-MORAWARE_IMPORT_MAX_FILES_PER_CHUNK=500 \
-MORAWARE_IMPORT_MAX_ASSIGNEES_PER_CHUNK=500 \
+MORAWARE_IMPORT_MAX_PAYLOAD_BYTES=1500000 \
+MORAWARE_IMPORT_MAX_JOBS_PER_CHUNK=50 \
+MORAWARE_IMPORT_MAX_ACTIVITIES_PER_CHUNK=1000 \
+MORAWARE_IMPORT_MAX_FORMS_PER_CHUNK=1000 \
+MORAWARE_IMPORT_MAX_FILES_PER_CHUNK=250 \
+MORAWARE_IMPORT_MAX_ASSIGNEES_PER_CHUNK=250 \
 BACKEND_URL=https://backend-core-six.vercel.app \
 MORAWARE_SYNC_IMPORT_SECRET=... \
 MORAWARE_DEFAULT_ORGANIZATION_ID=89180433-9fab-4024-bec9-a14d870bd0a8 \
 MORAWARE_SYNC_IMPORT_FILE=debug/moraware/baseline-2026/baseline-2026-moraware-snapshot.json \
 npm run eos:moraware:import-snapshot
 ```
+
+If an import fails mid-group, do not start a new group blindly. Use the failed chunk index and `import_group_id` from the importer log. Example for a failure at chunk 19:
+
+```bash
+MORAWARE_IMPORT_RESUME_GROUP_ID=<IMPORT_GROUP_ID> \
+MORAWARE_IMPORT_START_CHUNK_INDEX=19 \
+MORAWARE_IMPORT_ALLOW_LARGE_BASELINE=1 \
+MORAWARE_IMPORT_CHUNKED=1 \
+MORAWARE_IMPORT_MAX_PAYLOAD_BYTES=1500000 \
+MORAWARE_IMPORT_MAX_JOBS_PER_CHUNK=50 \
+MORAWARE_IMPORT_MAX_ACTIVITIES_PER_CHUNK=1000 \
+MORAWARE_IMPORT_MAX_FORMS_PER_CHUNK=1000 \
+MORAWARE_IMPORT_MAX_FILES_PER_CHUNK=250 \
+MORAWARE_IMPORT_MAX_ASSIGNEES_PER_CHUNK=250 \
+BACKEND_URL=https://backend-core-six.vercel.app \
+MORAWARE_SYNC_IMPORT_SECRET=... \
+MORAWARE_DEFAULT_ORGANIZATION_ID=89180433-9fab-4024-bec9-a14d870bd0a8 \
+MORAWARE_SYNC_IMPORT_FILE=debug/moraware/baseline-2026/baseline-2026-moraware-snapshot.json \
+npm run eos:moraware:import-snapshot
+```
+
+The backend treats an import group as complete only when every expected chunk index has a latest successful run and no latest failed chunk. System Admin and Sales Head should show an incomplete/failed latest group as review-needed, not as healthy baseline truth. Sales Head company-wide Sq.Ft. actuals remain visible but include an incomplete import warning until the group is completed.
 
 The 2026 baseline should be manually verified in Supabase, System Admin Moraware Sync Status, and Sales Head YTD filters before any recurring sync is scheduled.
 

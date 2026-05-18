@@ -43,6 +43,11 @@ function intEnv(name, fallback) {
   return Number.isFinite(n) && n >= 0 ? n : fallback;
 }
 
+function positiveIntEnv(name, fallback) {
+  const n = Number.parseInt(String(process.env[name] ?? ""), 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
 function bytesEnv(name, fallback) {
   const n = Number.parseInt(String(process.env[name] ?? ""), 10);
   return Number.isFinite(n) && n > 0 ? n : fallback;
@@ -93,11 +98,11 @@ function hasEnvValue(name) {
 function chunkLimits({ largeBaseline = false } = {}) {
   const defaults = largeBaseline
     ? {
-        jobs: 100,
-        job_activities: 2500,
-        job_forms: 2500,
-        job_files: 500,
-        assignees: 500
+        jobs: 50,
+        job_activities: 1000,
+        job_forms: 1000,
+        job_files: 250,
+        assignees: 250
       }
     : {
         jobs: 20,
@@ -142,6 +147,13 @@ function finalizeChunkPayload(chunkBody, batches, metadata) {
   };
 }
 
+function chunkImportStatus(chunkIndex, chunkCount) {
+  if (chunkCount <= 1) return "single_chunk";
+  if (chunkIndex === 1) return "chunked_started";
+  if (chunkIndex === chunkCount) return "chunked_final_chunk";
+  return "chunked_in_progress";
+}
+
 function estimatePayloadBytes(payload) {
   return Buffer.byteLength(JSON.stringify(payload), "utf8");
 }
@@ -178,6 +190,9 @@ function buildLegacyChunkPayloads(body, options = {}) {
         import_group_id: importGroupId,
         chunk_index: chunkIndex + 1,
         chunk_count: chunkCount,
+        import_status: chunkImportStatus(chunkIndex + 1, chunkCount),
+        import_resumed: Boolean(options.resumeGroupId),
+        resumed_from_chunk_index: options.startChunkIndex || null,
         chunk_counts: chunkCounts,
         parent_snapshot_counts: parentSnapshotCounts
       });
@@ -272,6 +287,9 @@ function buildSizeAwareChunkPayloads(body, options = {}) {
       import_group_id: importGroupId,
       chunk_index: index + 1,
       chunk_count: chunkCount,
+      import_status: chunkImportStatus(index + 1, chunkCount),
+      import_resumed: Boolean(options.resumeGroupId),
+      resumed_from_chunk_index: options.startChunkIndex || null,
       chunk_counts: chunkCounts,
       parent_snapshot_counts: parentSnapshotCounts,
       max_payload_bytes: maxPayloadBytes
@@ -284,6 +302,15 @@ function buildChunkPayloads(body, options = {}) {
   const useSizeAware =
     options.sizeAware || hasEnvValue("MORAWARE_IMPORT_MAX_PAYLOAD_BYTES") || options.largeBaseline;
   return useSizeAware ? buildSizeAwareChunkPayloads(body, options) : buildLegacyChunkPayloads(body, options);
+}
+
+function resolveImportGroupId() {
+  const resumeGroupId = String(process.env.MORAWARE_IMPORT_RESUME_GROUP_ID ?? "").trim();
+  return resumeGroupId || crypto.randomUUID();
+}
+
+function resolveStartChunkIndex() {
+  return positiveIntEnv("MORAWARE_IMPORT_START_CHUNK_INDEX", 1);
 }
 
 function totalRowCount(counts) {
@@ -341,6 +368,9 @@ function summarizeChunkPlan({ chunks, file, fileBytes, counts, limits, largeReas
     source_file_size: humanBytes(fileBytes),
     total_snapshot_counts: counts,
     planned_chunks: chunks.length,
+    resume_group_id: String(process.env.MORAWARE_IMPORT_RESUME_GROUP_ID ?? "").trim() || null,
+    start_chunk_index: resolveStartChunkIndex(),
+    chunks_to_send: chunks.filter((chunk) => Number(chunk.metadata.chunk_index) >= resolveStartChunkIndex()).length,
     largest_estimated_payload_bytes: largestEstimatedBytes,
     largest_estimated_payload_size: humanBytes(largestEstimatedBytes),
     max_payload_bytes: bytesEnv("MORAWARE_IMPORT_MAX_PAYLOAD_BYTES", DEFAULT_MAX_PAYLOAD_BYTES),
@@ -374,7 +404,12 @@ async function postImport({ url, secret, body, label }) {
     parsed = { raw: text };
   }
   if (!res.ok) {
-    throw new Error(`${label} failed: HTTP ${res.status} ${res.statusText} ${JSON.stringify(parsed)}`);
+    const err = new Error(`${label} failed: HTTP ${res.status} ${res.statusText} ${JSON.stringify(parsed)}`);
+    err.status = res.status;
+    err.statusText = res.statusText;
+    err.response = parsed;
+    err.syncRunId = parsed?.sync_run_id || null;
+    throw err;
   }
   return parsed;
 }
@@ -405,8 +440,16 @@ async function main() {
   });
 
   if (chunked) {
+    const importGroupId = resolveImportGroupId();
+    const startChunkIndex = resolveStartChunkIndex();
+    const resumeGroupId = String(process.env.MORAWARE_IMPORT_RESUME_GROUP_ID ?? "").trim();
+    if (startChunkIndex > 1 && !resumeGroupId) {
+      throw new Error("MORAWARE_IMPORT_START_CHUNK_INDEX > 1 requires MORAWARE_IMPORT_RESUME_GROUP_ID so resumed chunks stay in the original import group.");
+    }
     const chunks = buildChunkPayloads(body, {
-      importGroupId: crypto.randomUUID(),
+      importGroupId,
+      resumeGroupId,
+      startChunkIndex,
       largeBaseline: largeReasons.length > 0,
       sizeAware: largeReasons.length > 0 || hasEnvValue("MORAWARE_IMPORT_MAX_PAYLOAD_BYTES")
     });
@@ -426,14 +469,58 @@ async function main() {
 
     const results = [];
     for (const [i, chunk] of chunks.entries()) {
-      const chunkLabel = `Chunk ${i + 1}/${chunks.length}`;
+      const chunkIndex = Number(chunk.metadata.chunk_index) || i + 1;
+      const chunkLabel = `Chunk ${chunkIndex}/${chunks.length}`;
+      if (chunkIndex < startChunkIndex) {
+        console.log(`${chunkLabel} skipped for resume`, {
+          import_group_id: chunk.metadata.import_group_id,
+          start_chunk_index: startChunkIndex
+        });
+        continue;
+      }
       console.log(`${chunkLabel} import starting:`, {
         import_group_id: chunk.metadata.import_group_id,
+        estimated_payload_bytes: chunk.estimated_payload_bytes,
+        estimated_payload_size: humanBytes(chunk.estimated_payload_bytes),
         chunk_counts: chunk.metadata.chunk_counts
       });
-      const parsed = await postImport({ url, secret, body: chunk, label: chunkLabel });
-      results.push(parsed);
-      console.log(`${chunkLabel} import complete:`, JSON.stringify(parsed, null, 2));
+      try {
+        const parsed = await postImport({ url, secret, body: chunk, label: chunkLabel });
+        results.push(parsed);
+        console.log(`${chunkLabel} import complete:`, {
+          sync_run_id: parsed?.sync_run_id || null,
+          status: parsed?.status || null,
+          row_counts: parsed?.row_counts || null,
+          data_quality_findings: parsed?.data_quality_findings ?? null
+        });
+      } catch (e) {
+        console.error(`${chunkLabel} import failed:`, {
+          import_group_id: chunk.metadata.import_group_id,
+          failed_chunk_index: chunkIndex,
+          chunk_count: chunks.length,
+          sync_run_id: e?.syncRunId || e?.response?.sync_run_id || null,
+          chunk_counts: chunk.metadata.chunk_counts,
+          error: String(e?.message || e)
+        });
+        console.error(
+          "Suggested resume command:",
+          [
+            `MORAWARE_IMPORT_RESUME_GROUP_ID=${chunk.metadata.import_group_id}`,
+            `MORAWARE_IMPORT_START_CHUNK_INDEX=${chunkIndex}`,
+            "MORAWARE_IMPORT_ALLOW_LARGE_BASELINE=1",
+            "MORAWARE_IMPORT_CHUNKED=1",
+            `MORAWARE_IMPORT_MAX_PAYLOAD_BYTES=${bytesEnv("MORAWARE_IMPORT_MAX_PAYLOAD_BYTES", DEFAULT_MAX_PAYLOAD_BYTES)}`,
+            `MORAWARE_IMPORT_MAX_JOBS_PER_CHUNK=${chunkLimits({ largeBaseline: largeReasons.length > 0 }).jobs}`,
+            `MORAWARE_IMPORT_MAX_ACTIVITIES_PER_CHUNK=${chunkLimits({ largeBaseline: largeReasons.length > 0 }).job_activities}`,
+            `MORAWARE_IMPORT_MAX_FORMS_PER_CHUNK=${chunkLimits({ largeBaseline: largeReasons.length > 0 }).job_forms}`,
+            `MORAWARE_IMPORT_MAX_FILES_PER_CHUNK=${chunkLimits({ largeBaseline: largeReasons.length > 0 }).job_files}`,
+            `MORAWARE_IMPORT_MAX_ASSIGNEES_PER_CHUNK=${chunkLimits({ largeBaseline: largeReasons.length > 0 }).assignees}`,
+            `MORAWARE_SYNC_IMPORT_FILE=${file}`,
+            "npm run eos:moraware:import-snapshot"
+          ].join(" \\\n")
+        );
+        throw e;
+      }
     }
     console.log(
       "Moraware chunked snapshot import complete:",

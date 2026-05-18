@@ -170,9 +170,15 @@ async function safeInsertError(db, row) {
   }
 }
 
+function dbUpsertChunkSize(table) {
+  if (String(table).includes("job_forms")) return toIntEnv("MORAWARE_SYNC_DB_UPSERT_JOB_FORMS_CHUNK_SIZE", 100);
+  if (String(table).includes("job_activities")) return toIntEnv("MORAWARE_SYNC_DB_UPSERT_JOB_ACTIVITIES_CHUNK_SIZE", 250);
+  return toIntEnv("MORAWARE_SYNC_DB_UPSERT_CHUNK_SIZE", 250);
+}
+
 async function upsertRows(db, table, rows, onConflict) {
   if (!rows.length) return { count: 0 };
-  const chunkSize = 500;
+  const chunkSize = dbUpsertChunkSize(table);
   let count = 0;
   for (let i = 0; i < rows.length; i += chunkSize) {
     const chunk = rows.slice(i, i + chunkSize);
@@ -333,6 +339,45 @@ function addRowCounts(a = {}, b = {}) {
   const out = {};
   for (const key of keys) out[key] = (Number(a?.[key]) || 0) + (Number(b?.[key]) || 0);
   return out;
+}
+
+function summarizeImportGroupRows(groupRows, latestRun) {
+  const expectedChunkCount = Math.max(
+    0,
+    ...groupRows.map((r) => Number(r?.metadata?.chunk_count) || 0),
+    Number(latestRun?.metadata?.chunk_count) || 0
+  ) || null;
+  const byChunkIndex = new Map();
+  for (const row of groupRows) {
+    const idx = Number(row?.metadata?.chunk_index) || null;
+    if (!idx) continue;
+    const prev = byChunkIndex.get(idx);
+    if (!prev || String(row.started_at || "") >= String(prev.started_at || "")) byChunkIndex.set(idx, row);
+  }
+  const latestChunkRows = [...byChunkIndex.entries()].sort((a, b) => a[0] - b[0]);
+  const totalRowCounts = latestChunkRows
+    .filter(([, row]) => row.status === "success")
+    .reduce((acc, [, row]) => addRowCounts(acc, row.row_counts || {}), {});
+  const missingChunkIndices = [];
+  if (expectedChunkCount) {
+    for (let i = 1; i <= expectedChunkCount; i += 1) {
+      if (!byChunkIndex.has(i)) missingChunkIndices.push(i);
+    }
+  }
+  const successfulChunks = latestChunkRows.filter(([, row]) => row.status === "success").length;
+  const failedChunks = latestChunkRows.filter(([, row]) => row.status === "failed").length;
+  const complete = Boolean(expectedChunkCount) && successfulChunks === expectedChunkCount && failedChunks === 0 && missingChunkIndices.length === 0;
+  return {
+    expectedChunkCount,
+    attemptedRuns: groupRows.length,
+    observedChunkCount: latestChunkRows.length,
+    successfulChunks,
+    failedChunks,
+    missingChunkIndices,
+    complete,
+    totalRowCounts,
+    latestChunkRows: latestChunkRows.map(([, row]) => row)
+  };
 }
 
 function summarizeRun(row) {
@@ -545,7 +590,7 @@ export function attachMorawareSyncRoutes(app, deps) {
           .select("id,status,started_at,finished_at,duration_ms,row_counts,data_quality_counts,metadata")
           .filter("metadata->>import_group_id", "eq", latestGroupId)
           .order("started_at", { ascending: true })
-          .limit(100);
+          .limit(1000);
         if (organizationId) groupQ = groupQ.eq("organization_id", organizationId);
         const group = await groupQ;
         if (group.error) throw group.error;
@@ -565,16 +610,19 @@ export function attachMorawareSyncRoutes(app, deps) {
           for (const f of groupFindings.data || []) groupFindingCounts[f.finding_type] = (groupFindingCounts[f.finding_type] || 0) + 1;
           latestGroupDataQualityCount = groupFindings.data?.length ?? 0;
         }
-        const totalRowCounts = groupRows.reduce((acc, row) => addRowCounts(acc, row.row_counts || {}), {});
+        const groupSummary = summarizeImportGroupRows(groupRows, latestRun);
         latestGroup = {
           import_group_id: latestGroupId,
-          chunk_count: groupRows.length,
-          expected_chunk_count: groupRows[0]?.metadata?.chunk_count ?? latestRun?.metadata?.chunk_count ?? null,
-          successful_chunks: groupRows.filter((r) => r.status === "success").length,
-          failed_chunks: groupRows.filter((r) => r.status === "failed").length,
+          chunk_count: groupSummary.observedChunkCount,
+          attempted_runs: groupSummary.attemptedRuns,
+          expected_chunk_count: groupSummary.expectedChunkCount,
+          successful_chunks: groupSummary.successfulChunks,
+          failed_chunks: groupSummary.failedChunks,
+          missing_chunk_indices: groupSummary.missingChunkIndices,
+          complete: groupSummary.complete,
           started_at: groupRows[0]?.started_at ?? null,
           finished_at: groupRows[groupRows.length - 1]?.finished_at ?? null,
-          total_row_counts: totalRowCounts,
+          total_row_counts: groupSummary.totalRowCounts,
           data_quality_counts: groupFindingCounts,
           chunk_runs: groupRows.map((r) => ({
             id: r.id,
@@ -599,6 +647,7 @@ export function attachMorawareSyncRoutes(app, deps) {
       const staleWarning = syncFreshnessSeconds == null || syncFreshnessSeconds > staleWarningSeconds;
       const openHistoricalDataQualityCount = Math.max(0, (findings.count ?? findings.data?.length ?? 0) - latestGroupDataQualityCount);
       const failedChunks = Number(latestGroup?.failed_chunks) || 0;
+      const incompleteGroup = Boolean(latestGroup) && latestGroup.complete === false;
       const latestGroupHealthStatus =
         !lastSuccessfulRun
           ? "no_success"
@@ -606,9 +655,11 @@ export function attachMorawareSyncRoutes(app, deps) {
             ? "stale"
             : failedChunks > 0
               ? "failed_chunks"
-              : latestGroupDataQualityCount > 0
-                ? "needs_review"
-                : "healthy";
+              : incompleteGroup
+                ? "incomplete_group"
+                : latestGroupDataQualityCount > 0
+                  ? "needs_review"
+                  : "healthy";
       const latestGroupRows = latestGroup?.total_row_counts || {};
       const knownGaps = [
         "activity-level machine/resource assignment is not yet trusted",

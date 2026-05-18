@@ -1680,6 +1680,51 @@ async function safeCount(supabase, table, organizationId) {
   }
 }
 
+function addMorawareRowCounts(a = {}, b = {}) {
+  const keys = new Set([...Object.keys(a || {}), ...Object.keys(b || {})]);
+  const out = {};
+  for (const key of keys) out[key] = (Number(a?.[key]) || 0) + (Number(b?.[key]) || 0);
+  return out;
+}
+
+function summarizeMorawareImportGroupRows(groupRows, latestRun) {
+  const expectedChunkCount = Math.max(
+    0,
+    ...groupRows.map((r) => Number(r?.metadata?.chunk_count) || 0),
+    Number(latestRun?.metadata?.chunk_count) || 0
+  ) || null;
+  const byChunkIndex = new Map();
+  for (const row of groupRows) {
+    const idx = Number(row?.metadata?.chunk_index) || null;
+    if (!idx) continue;
+    const prev = byChunkIndex.get(idx);
+    if (!prev || String(row.started_at || "") >= String(prev.started_at || "")) byChunkIndex.set(idx, row);
+  }
+  const latestRows = [...byChunkIndex.entries()].sort((a, b) => a[0] - b[0]);
+  const missingChunkIndices = [];
+  if (expectedChunkCount) {
+    for (let i = 1; i <= expectedChunkCount; i += 1) {
+      if (!byChunkIndex.has(i)) missingChunkIndices.push(i);
+    }
+  }
+  const successfulChunks = latestRows.filter(([, row]) => row.status === "success").length;
+  const failedChunks = latestRows.filter(([, row]) => row.status === "failed").length;
+  const complete = Boolean(expectedChunkCount) && successfulChunks === expectedChunkCount && failedChunks === 0 && missingChunkIndices.length === 0;
+  const totalRowCounts = latestRows
+    .filter(([, row]) => row.status === "success")
+    .reduce((acc, [, row]) => addMorawareRowCounts(acc, row.row_counts || {}), {});
+  return {
+    expectedChunkCount,
+    attemptedRuns: groupRows.length,
+    observedChunkCount: latestRows.length,
+    successfulChunks,
+    failedChunks,
+    missingChunkIndices,
+    complete,
+    totalRowCounts
+  };
+}
+
 function increment(map, key, by = 1) {
   const k = String(key ?? "").trim() || "Unassigned";
   map.set(k, (map.get(k) || 0) + by);
@@ -1711,16 +1756,13 @@ async function loadLatestMorawareGroup(supabase, organizationId) {
       .select("id,status,started_at,finished_at,row_counts,metadata")
       .filter("metadata->>import_group_id", "eq", importGroupId)
       .order("started_at", { ascending: true })
-      .limit(100);
+      .limit(1000);
     if (organizationId) groupQ = groupQ.eq("organization_id", organizationId);
     const group = await groupQ;
     if (group.error) throw group.error;
     groupRows = group.data || [];
   }
-  const totalRowCounts = groupRows.reduce((acc, row) => {
-    for (const [key, value] of Object.entries(row.row_counts || {})) acc[key] = (acc[key] || 0) + (Number(value) || 0);
-    return acc;
-  }, {});
+  const groupSummary = summarizeMorawareImportGroupRows(groupRows, latestRun);
   const lastSuccessAgeSeconds = lastSuccess?.finished_at
     ? Math.max(0, Math.round((Date.now() - Date.parse(String(lastSuccess.finished_at))) / 1000))
     : null;
@@ -1748,11 +1790,14 @@ async function loadLatestMorawareGroup(supabase, organizationId) {
     latest_group: importGroupId
       ? {
           import_group_id: importGroupId,
-          chunk_count: groupRows.length,
-          expected_chunk_count: groupRows[0]?.metadata?.chunk_count ?? latestRun?.metadata?.chunk_count ?? null,
-          successful_chunks: groupRows.filter((r) => r.status === "success").length,
-          failed_chunks: groupRows.filter((r) => r.status === "failed").length,
-          total_row_counts: totalRowCounts
+          chunk_count: groupSummary.observedChunkCount,
+          attempted_runs: groupSummary.attemptedRuns,
+          expected_chunk_count: groupSummary.expectedChunkCount,
+          successful_chunks: groupSummary.successfulChunks,
+          failed_chunks: groupSummary.failedChunks,
+          missing_chunk_indices: groupSummary.missingChunkIndices,
+          complete: groupSummary.complete,
+          total_row_counts: groupSummary.totalRowCounts
         }
       : null,
     last_success_age_seconds: lastSuccessAgeSeconds
@@ -1841,7 +1886,15 @@ export async function salesDashboardFoundationHandler(req, supabaseGetter) {
       if (!oldestJobDate || d < oldestJobDate) oldestJobDate = d;
     }
   }
-  const syncedSqftActuals = buildCompanyWideSqftActuals(jobs, { attributionCoverage, filters: req.query });
+  const syncedSqftActualsBase = buildCompanyWideSqftActuals(jobs, { attributionCoverage, filters: req.query });
+  const latestGroupComplete = syncHealth.latest_group?.complete !== false;
+  const syncedSqftActuals = {
+    ...syncedSqftActualsBase,
+    import_group_trust_status: latestGroupComplete ? "latest_group_complete_or_single_run" : "latest_group_incomplete",
+    import_group_warning: latestGroupComplete
+      ? null
+      : "Latest Moraware import group is incomplete or has a failed latest chunk attempt; treat 2026 baseline actuals as partial until the group is completed successfully."
+  };
 
   return {
     status: 200,
@@ -1893,6 +1946,9 @@ export async function salesDashboardFoundationHandler(req, supabaseGetter) {
         no_frontend_sources: "Frontend reads this backend aggregate only; it never calls Moraware or receives credentials."
       },
       gaps: [
+        ...(latestGroupComplete
+          ? []
+          : ["latest Moraware import group is incomplete; 2026 baseline actuals are partial until resume completes all chunks"]),
         "revenue actuals are not yet normalized in brain_moraware_jobs",
         "branch/salesperson sqft totals remain gated until approved Sales Account Mapping coverage is high",
         "Elite 100 color/group/manufacturer mapping is not yet connected to Moraware foundation rows",
