@@ -55,6 +55,7 @@ export function extractJobStatus(row) {
     raw?.job_status,
     raw?.jobStatus,
     raw?.status,
+    rawJob?._attributes?.jobStatus,
     rawJob?.jobStatus,
     rawJob?.status,
     rawJob?.processStatus
@@ -75,10 +76,31 @@ export function extractJobProcess(row) {
     raw?.process_name,
     raw?.processName,
     raw?.process,
+    rawJob?._attributes?.process,
     rawJob?.process?.name,
     rawJob?.process,
     rawJob?.jobProcess
   );
+}
+
+function mergeStatusFields(base, statusSource) {
+  if (!statusSource || typeof statusSource !== "object") return base;
+  const status = extractJobStatus(statusSource);
+  const process = extractJobProcess(statusSource);
+  if (!status && !process) return base;
+  return {
+    ...base,
+    status_name: firstNonempty(base?.status_name, base?.statusName, base?.job_status, base?.jobStatus, base?.status, status),
+    process_name: firstNonempty(base?.process_name, base?.processName, base?.process, process),
+    raw_payload: {
+      ...(base?.raw_payload && typeof base.raw_payload === "object" ? base.raw_payload : {}),
+      status_source: {
+        has_status: Boolean(status),
+        has_process: Boolean(process),
+        source_record_id: jobIdFrom(statusSource)
+      }
+    }
+  };
 }
 
 function uniqPush(rows, row, keyFn, cap) {
@@ -290,7 +312,36 @@ async function loadJobsFromIndex(indexRows, sourceAbs) {
   return { jobs, operationalByJob };
 }
 
-async function buildSnapshotFromSource(sourceAbs, input) {
+function collectStatusRows(node, rows = []) {
+  if (!node) return rows;
+  if (Array.isArray(node)) {
+    rows.push(...node.filter((r) => r && typeof r === "object" && !Array.isArray(r)));
+    return rows;
+  }
+  if (typeof node !== "object") return rows;
+  if (Array.isArray(node.jobs)) return collectStatusRows(node.jobs, rows);
+  if (Array.isArray(node.rows)) return collectStatusRows(node.rows, rows);
+  if (node.batches?.jobs) return collectStatusRows(node.batches.jobs, rows);
+  rows.push(node);
+  return rows;
+}
+
+async function loadStatusSourceMap() {
+  const statusSourceFile = process.env.MORAWARE_TINY_STATUS_SOURCE_FILE || "";
+  if (!statusSourceFile) return { map: new Map(), sourceFile: "" };
+  const loaded = await readJson(statusSourceFile);
+  const map = new Map();
+  for (const row of collectStatusRows(loaded.json)) {
+    const id = jobIdFrom(row) || firstNonempty(row.id, row.source_record_id);
+    if (!id) continue;
+    const status = extractJobStatus(row);
+    const process = extractJobProcess(row);
+    if (status || process) map.set(id, row);
+  }
+  return { map, sourceFile: path.relative(process.cwd(), loaded.abs) };
+}
+
+async function buildSnapshotFromSource(sourceAbs, input, statusSourceMap = new Map()) {
   const existing = normalizeExistingBatches(input);
   if (existing) {
     return { batches: existing, sourceShape: "existing-import-batches" };
@@ -329,8 +380,10 @@ async function buildSnapshotFromSource(sourceAbs, input) {
 
   for (const entry of jobEntries) {
     if (batches.jobs.length >= CAPS.jobs) break;
-    const job = entry.indexRow ? { ...entry.indexRow, ...(entry.job || {}) } : entry.job || {};
-    const jid = jobIdFrom(job, entry.jobId);
+    const rawJob = entry.indexRow ? { ...entry.indexRow, ...(entry.job || {}) } : entry.job || {};
+    const jid = jobIdFrom(rawJob, entry.jobId);
+    const statusSource = statusSourceMap.get(jid) || operationalByJob.get(jid);
+    const job = mergeStatusFields(rawJob, statusSource);
     const mappedJob = mapJob(job, jid);
     uniqPush(batches.jobs, mappedJob, (r) => r.source_record_id, CAPS.jobs);
     uniqPush(batches.accounts, mapAccountFromJob(job), (r) => r.source_record_id, CAPS.accounts);
@@ -378,7 +431,8 @@ async function main() {
   const sourceFile = process.env.MORAWARE_TINY_SOURCE_FILE || process.env.MORAWARE_SYNC_SOURCE_FILE || DEFAULT_SOURCE;
   const outFile = process.env.MORAWARE_TINY_OUTPUT_FILE || DEFAULT_OUT;
   const { abs: sourceAbs, json } = await readJson(sourceFile);
-  const { batches, sourceShape } = await buildSnapshotFromSource(sourceAbs, json);
+  const { map: statusSourceMap, sourceFile: statusSourceFile } = await loadStatusSourceMap();
+  const { batches, sourceShape } = await buildSnapshotFromSource(sourceAbs, json, statusSourceMap);
   const body = {
     organization_id: process.env.MORAWARE_DEFAULT_ORGANIZATION_ID || undefined,
     mode: "tiny-real-snapshot",
@@ -387,6 +441,7 @@ async function main() {
       generated_by: "backend-core/src/scripts/moraware/generateTinySnapshot.js",
       generated_at: new Date().toISOString(),
       source_file: path.relative(process.cwd(), sourceAbs),
+      status_source_file: statusSourceFile || null,
       source_shape: sourceShape,
       caps: CAPS
     },
@@ -399,6 +454,7 @@ async function main() {
   const counts = Object.fromEntries(Object.entries(batches).map(([k, v]) => [k, v.length]));
   console.log("Tiny Moraware snapshot generated:", {
     source: path.relative(process.cwd(), sourceAbs),
+    statusSource: statusSourceFile || "(per-job operational artifacts when present)",
     sourceShape,
     output: path.relative(process.cwd(), outAbs),
     caps: CAPS,

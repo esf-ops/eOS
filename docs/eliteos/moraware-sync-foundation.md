@@ -88,6 +88,23 @@ MORAWARE_TINY_OUTPUT_FILE=debug/moraware/import-tests/tiny-real-moraware-snapsho
 npm run eos:moraware:generate-tiny-snapshot
 ```
 
+When `jobs/index.json` has blank `jobStatus`, the generator also merges per-job operational artifacts (`debug/moraware/latest/jobs/<jobId>.operational.json`) when present. Those artifacts can carry job-level status at Moraware's raw job attribute path and process on the raw job node. If a Windows SDK job identifier export provides better status/process rows, pass it as a sidecar:
+
+```bash
+MORAWARE_TINY_SOURCE_FILE=debug/moraware/latest/jobs/index.json \
+MORAWARE_TINY_STATUS_SOURCE_FILE=debug/moraware/latest/moraware-sdk-job-identifiers.json \
+MORAWARE_TINY_OUTPUT_FILE=debug/moraware/import-tests/tiny-real-moraware-snapshot.json \
+npm run eos:moraware:generate-tiny-snapshot
+```
+
+If no status-bearing local artifact exists, run the read-only Windows identifier probe first:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/moraware-sdk-trace/MorawareSdkJobIdentifierProbe.ps1
+```
+
+Keep any generated SDK output under `debug/moraware/` and do not commit it.
+
 Default caps for the first run:
 
 - 5 accounts

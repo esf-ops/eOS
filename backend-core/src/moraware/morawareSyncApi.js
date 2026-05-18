@@ -76,6 +76,7 @@ function extractJobStatus(row) {
     raw?.job_status,
     raw?.jobStatus,
     raw?.status,
+    rawJob?._attributes?.jobStatus,
     rawJob?.jobStatus,
     rawJob?.status,
     rawJob?.processStatus
@@ -96,6 +97,7 @@ function extractJobProcess(row) {
     raw?.process_name,
     raw?.processName,
     raw?.process,
+    rawJob?._attributes?.process,
     rawJob?.process?.name,
     rawJob?.process,
     rawJob?.jobProcess
