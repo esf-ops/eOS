@@ -7,6 +7,9 @@ const SOURCE_SYSTEM = "moraware";
 const UNASSIGNED_ORGANIZATION_ID = "00000000-0000-0000-0000-000000000000";
 
 function pickStr(v) {
+  if (v && typeof v === "object" && !Array.isArray(v)) {
+    return firstNonempty(v._text, v["#text"], v.name, v.value, v.label, v.id);
+  }
   return v == null ? "" : String(v).trim();
 }
 
@@ -43,6 +46,60 @@ function firstNonempty(...values) {
     if (s) return s;
   }
   return "";
+}
+
+function rowRaw(row) {
+  return row?.raw_payload && typeof row.raw_payload === "object" ? row.raw_payload : row?.raw;
+}
+
+function rawJobNode(row) {
+  const raw = rowRaw(row);
+  return raw?.job || raw?.jobNode || raw?.MorawareResponse?.jobQuery?.job;
+}
+
+function extractJobStatus(row) {
+  const raw = rowRaw(row);
+  const rawJob = rawJobNode(row);
+  const info = row?.jobInfo && typeof row.jobInfo === "object" ? row.jobInfo : {};
+  return firstNonempty(
+    row?.status_name,
+    row?.statusName,
+    row?.job_status,
+    row?.jobStatus,
+    row?.status,
+    row?.currentStatus,
+    row?.processStatus,
+    info.jobStatus,
+    info.status,
+    info.statusName,
+    raw?.status_name,
+    raw?.job_status,
+    raw?.jobStatus,
+    raw?.status,
+    rawJob?.jobStatus,
+    rawJob?.status,
+    rawJob?.processStatus
+  );
+}
+
+function extractJobProcess(row) {
+  const raw = rowRaw(row);
+  const rawJob = rawJobNode(row);
+  const info = row?.jobInfo && typeof row.jobInfo === "object" ? row.jobInfo : {};
+  return firstNonempty(
+    row?.process_name,
+    row?.processName,
+    row?.process,
+    row?.jobProcess,
+    info.processName,
+    info.process,
+    raw?.process_name,
+    raw?.processName,
+    raw?.process,
+    rawJob?.process?.name,
+    rawJob?.process,
+    rawJob?.jobProcess
+  );
 }
 
 function sourceId(row, fallbackPrefix, index) {
@@ -167,8 +224,8 @@ function normalizeJobs(rows, { organizationId, syncRunId }) {
     account_name: firstNonempty(row.account_name, row.jobInfo?.accountName, rawPayload(row).accountName),
     job_name: firstNonempty(row.job_name, row.name, row.jobInfo?.jobName, rawPayload(row).name),
     job_number: firstNonempty(row.job_number, row.number, row.jobInfo?.jobNumber, rawPayload(row).number),
-    process_name: firstNonempty(row.process_name, row.process, row.jobInfo?.processName, rawPayload(row).process),
-    status_name: firstNonempty(row.status_name, row.job_status, row.status, row.jobInfo?.jobStatus, rawPayload(row).status),
+    process_name: extractJobProcess(row),
+    status_name: extractJobStatus(row),
     salesperson_name: firstNonempty(row.salesperson_name, row.sales_rep, row.jobInfo?.salespersonName),
     created_at_source: toIsoOrNull(row.created_at ?? row.creation_date ?? row.jobInfo?.creationDate),
     modified_at_source: toIsoOrNull(row.modified_at ?? row.source_modified_at ?? row.jobInfo?.modifiedDate),

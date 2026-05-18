@@ -80,13 +80,31 @@ Requires authenticated `admin`, `executive`, or `super_admin` with `brain_health
 
 1. Apply `backend-core/supabase/eliteos_moraware_sync_foundation_v1.sql` in Supabase.
 2. Set backend env vars: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `MORAWARE_SYNC_IMPORT_SECRET`, and optionally `MORAWARE_DEFAULT_ORGANIZATION_ID`.
-3. Create a sanitized JSON import payload on the worker machine. Do not commit it.
-4. Run:
+3. Generate a tiny capped snapshot from a local ignored Moraware export/probe artifact. Do not commit it:
+
+```bash
+MORAWARE_TINY_SOURCE_FILE=debug/moraware/latest/jobs/index.json \
+MORAWARE_TINY_OUTPUT_FILE=debug/moraware/import-tests/tiny-real-moraware-snapshot.json \
+npm run eos:moraware:generate-tiny-snapshot
+```
+
+Default caps for the first run:
+
+- 5 accounts
+- 10 jobs
+- 25 job activities
+- 25 forms/custom field rows
+- 25 file metadata rows
+- 25 assignees/resources
+
+The generator accepts an existing import payload, `jobs/index.json`, a `jobs` array, a single normalized job artifact, or a single operational job artifact. Generated files live under `debug/`, which is git-ignored.
+
+4. Import manually when ready:
 
 ```bash
 BACKEND_URL=https://backend-core-six.vercel.app \
 MORAWARE_SYNC_IMPORT_SECRET=... \
-MORAWARE_SYNC_IMPORT_FILE=debug/moraware/latest/sanitized-import.json \
+MORAWARE_SYNC_IMPORT_FILE=debug/moraware/import-tests/tiny-real-moraware-snapshot.json \
 npm run eos:moraware:import-snapshot
 ```
 

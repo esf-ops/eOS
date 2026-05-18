@@ -17,7 +17,7 @@ dist/
 !.env.local.example
 !**/.env.local.example
 
-# Pipeline / Moraware dumps (often large; may contain operational data — keep local only)
+# Pipeline / Moraware dumps and generated import-test snapshots (often large; may contain operational data — keep local only)
 out*.json
 debug/
 
