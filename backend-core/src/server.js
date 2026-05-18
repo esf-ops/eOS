@@ -975,7 +975,24 @@ app.get("/api/auth/roles", (_req, res) => {
   res.json({ ok: true, roles: ALLOWED_ROLES });
 });
 
-app.get("/api/me", requireAuth(), (req, res) => {
+const authEventThrottle = new Map();
+
+function shouldRecordAuthEvent(userId, eventType, toolSlug, windowMs = 5 * 60 * 1000) {
+  const key = `${String(userId ?? "")}|${String(eventType ?? "")}|${String(toolSlug ?? "")}`;
+  const now = Date.now();
+  const last = authEventThrottle.get(key) || 0;
+  if (now - last < windowMs) return false;
+  authEventThrottle.set(key, now);
+  return true;
+}
+
+async function recordThrottledAuthEvent(req, eventType, toolSlug, metadata) {
+  if (!shouldRecordAuthEvent(req.user?.id, eventType, toolSlug)) return;
+  await logLoginEvent({ user: req.user, eventType, toolSlug, metadata, req });
+}
+
+app.get("/api/me", requireAuth(), async (req, res) => {
+  await recordThrottledAuthEvent(req, "session_seen", "home", { route: "/api/me" });
   res.json({ ok: true, user: req.user });
 });
 
@@ -1011,7 +1028,26 @@ attachQuoteRoutes(app, {
 
 app.post("/api/auth/log-login", requireAuth(), express.json(), async (req, res) => {
   try {
-    await logLoginEvent({ user: req.user, eventType: "login", metadata: req.body ?? null, req });
+    await logLoginEvent({ user: req.user, eventType: "launcher_opened", toolSlug: "home", metadata: req.body ?? null, req });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+app.post("/api/auth/log-event", requireAuth(), express.json(), async (req, res) => {
+  try {
+    const requested = String(req.body?.event_type ?? req.body?.eventType ?? "").trim();
+    const allowed = new Set(["sign_out", "session_seen", "tool_access_loaded"]);
+    const eventType = allowed.has(requested) ? requested : "session_seen";
+    const toolSlug = String(req.body?.tool_slug ?? req.body?.toolSlug ?? "").trim() || null;
+    await logLoginEvent({
+      user: req.user,
+      eventType,
+      toolSlug,
+      metadata: { source: "frontend_event", tool_slug: toolSlug },
+      req
+    });
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e?.message || e) });
@@ -1373,6 +1409,10 @@ app.get("/api/me/heads", requireAuth(), async (req, res) => {
   try {
     const supabase = supabaseServerClient();
     const payload = await buildMeHeadsPayload(supabase, req.user);
+    await recordThrottledAuthEvent(req, "tool_access_loaded", "home", {
+      route: "/api/me/heads",
+      head_count: Array.isArray(payload?.heads) ? payload.heads.length : null
+    });
     res.json(payload);
   } catch (error) {
     console.error("GET /api/me/heads failed", error);

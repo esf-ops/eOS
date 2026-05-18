@@ -11,6 +11,7 @@ import {
   resolveOrganizationContext,
   tableHasOrganizationId
 } from "../organizations/organizationContext.js";
+import { logAction } from "../auth/auditLog.js";
 import { isPricingAdminFoundationInstalled, resolvePricingAdminConfig } from "./pricingConfigResolver.js";
 
 const jsonParser = express.json({ limit: "512kb" });
@@ -37,7 +38,7 @@ function numOrUndef(v) {
  * @param {import("@supabase/supabase-js").SupabaseClient} db
  * @param {Record<string, unknown>} row
  */
-async function insertPricingAudit(db, row) {
+async function insertPricingAudit(db, req, row) {
   try {
     const { error } = await db.from("quote_pricing_audit_log").insert(row);
     if (error && isMissingRelationError(error)) return;
@@ -45,6 +46,18 @@ async function insertPricingAudit(db, row) {
   } catch (e) {
     if (!isMissingRelationError(e)) console.warn("[pricing-admin] audit insert failed", e);
   }
+  await logAction({
+    user: req.user,
+    head: "pricing_admin",
+    actionType: `pricing_${row.action || "change"}`,
+    entityType: row.entity_type,
+    entityId: row.entity_id,
+    outcome: "success",
+    beforeJson: row.before_value ?? null,
+    afterJson: row.after_value ?? null,
+    metadata: { source: "pricing_admin", legacy_audit_table: "quote_pricing_audit_log" },
+    req
+  });
 }
 
 /**
@@ -124,7 +137,7 @@ export function attachPricingAdminHeadApi(app, { requireAuth, requireRole, requi
         }
         throw error;
       }
-      await insertPricingAudit(db, {
+      await insertPricingAudit(db, req, {
         organization_id: orgId,
         actor_user_id: String(req.user?.id || ""),
         action: "create",
@@ -165,7 +178,7 @@ export function attachPricingAdminHeadApi(app, { requireAuth, requireRole, requi
       };
       const { data, error } = await db.from("quote_price_groups").update(patch).eq("id", id).select("*").limit(1);
       if (error) throw error;
-      await insertPricingAudit(db, {
+      await insertPricingAudit(db, req, {
         organization_id: orgId,
         actor_user_id: String(req.user?.id || ""),
         action: "update",
@@ -231,7 +244,7 @@ export function attachPricingAdminHeadApi(app, { requireAuth, requireRole, requi
         if (isMissingRelationError(error)) return res.status(503).json({ ok: false, installed: false });
         throw error;
       }
-      await insertPricingAudit(db, {
+      await insertPricingAudit(db, req, {
         organization_id: orgId,
         actor_user_id: String(req.user?.id || ""),
         action: "create",
@@ -283,7 +296,7 @@ export function attachPricingAdminHeadApi(app, { requireAuth, requireRole, requi
       };
       const { data, error } = await db.from("quote_price_group_rates").update(patch).eq("id", id).select("*").limit(1);
       if (error) throw error;
-      await insertPricingAudit(db, {
+      await insertPricingAudit(db, req, {
         organization_id: orgId,
         actor_user_id: String(req.user?.id || ""),
         action: "update",
@@ -349,7 +362,7 @@ export function attachPricingAdminHeadApi(app, { requireAuth, requireRole, requi
         if (isMissingRelationError(error)) return res.status(503).json({ ok: false, installed: false });
         throw error;
       }
-      await insertPricingAudit(db, {
+      await insertPricingAudit(db, req, {
         organization_id: orgId,
         actor_user_id: String(req.user?.id || ""),
         action: "create",
@@ -395,7 +408,7 @@ export function attachPricingAdminHeadApi(app, { requireAuth, requireRole, requi
       if (patch.base_price != null && patch.base_price < 0) return res.status(400).json({ ok: false, error: "invalid base_price" });
       const { data, error } = await db.from("quote_addon_catalog").update(patch).eq("id", id).select("*").limit(1);
       if (error) throw error;
-      await insertPricingAudit(db, {
+      await insertPricingAudit(db, req, {
         organization_id: orgId,
         actor_user_id: String(req.user?.id || ""),
         action: "update",
@@ -471,7 +484,7 @@ export function attachPricingAdminHeadApi(app, { requireAuth, requireRole, requi
       };
       const { data, error } = await db.from("quote_pricing_policy_rules").update(patch).eq("id", pick.id).select("*").limit(1);
       if (error) throw error;
-      await insertPricingAudit(db, {
+      await insertPricingAudit(db, req, {
         organization_id: orgId,
         actor_user_id: String(req.user?.id || ""),
         action: "update",

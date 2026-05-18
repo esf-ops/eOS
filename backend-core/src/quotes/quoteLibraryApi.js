@@ -681,6 +681,15 @@ export function attachQuoteLibraryRoutes(app, deps) {
       qb = applyQuoteHeaderOrgScope(qb, orgId, hasQuoteHeadersOrg);
       const { data, error } = await qb;
       if (error) throw error;
+      await logAction({
+        user: req.user,
+        head: "quote_library",
+        actionType: "quote_revisions_viewed",
+        entityType: "quote_header",
+        entityId: id,
+        metadata: { quote_family_root_id: root, revision_count: (data || []).length },
+        req
+      });
       res.json({
         ok: true,
         quote_family_root_id: root,
@@ -710,6 +719,16 @@ export function attachQuoteLibraryRoutes(app, deps) {
       const detail = await loadQuoteDetail(db, id, orgId, hasQuoteHeadersOrg);
       if (detail.notFound) return res.status(404).json({ ok: false, error: "Not found" });
       if (detail.installed === false) return res.status(503).json({ ok: false, installed: false });
+      await logAction({
+        user: req.user,
+        head: "quote_library",
+        actionType: "quote_opened",
+        entityType: "quote_header",
+        entityId: id,
+        entityLabel: detail?.header?.quote_number ?? null,
+        metadata: { quote_source: detail?.header?.quote_source ?? null },
+        req
+      });
       res.json(detail);
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });

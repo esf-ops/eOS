@@ -127,6 +127,13 @@ type LoginRow = { created_at?: string; event_type?: string | null };
 
 type ActionRow = { created_at?: string; action_type?: string | null; entity_type?: string | null };
 
+type AuditEventsResp = {
+  ok?: boolean;
+  auth_events?: Array<Record<string, unknown>>;
+  action_events?: Array<Record<string, unknown>>;
+  warnings?: string[];
+};
+
 function fmt(dt: unknown) {
   if (!dt) return "—";
   try {
@@ -611,6 +618,15 @@ export default function App() {
   const [inviteOrganizationId, setInviteOrganizationId] = useState("");
   const [inviteHeadPick, setInviteHeadPick] = useState<Record<string, boolean>>({});
   const [inviteBusy, setInviteBusy] = useState(false);
+  const [auditUserId, setAuditUserId] = useState("");
+  const [auditTool, setAuditTool] = useState("");
+  const [auditAction, setAuditAction] = useState("");
+  const [auditOutcome, setAuditOutcome] = useState("");
+  const [auditFrom, setAuditFrom] = useState("");
+  const [auditTo, setAuditTo] = useState("");
+  const [auditBusy, setAuditBusy] = useState(false);
+  const [auditEvents, setAuditEvents] = useState<AuditEventsResp | null>(null);
+  const [auditError, setAuditError] = useState("");
 
   function pushToast(kind: "info" | "error", text: string) {
     setToast({ kind, text });
@@ -862,6 +878,28 @@ export default function App() {
     }
   }
 
+  async function loadAuditEvents() {
+    const t = String(sessionToken ?? "").trim();
+    if (!t) return;
+    const params = new URLSearchParams();
+    if (auditUserId) params.set("user_id", auditUserId);
+    if (auditTool) params.set("tool_slug", auditTool);
+    if (auditAction.trim()) params.set("action_type", auditAction.trim());
+    if (auditOutcome) params.set("outcome", auditOutcome);
+    if (auditFrom) params.set("date_from", auditFrom);
+    if (auditTo) params.set("date_to", auditTo);
+    setAuditBusy(true);
+    setAuditError("");
+    try {
+      const res = (await apiFetch(`${USER_MGMT_API}/audit-events?${params.toString()}`, { token: t })) as AuditEventsResp;
+      setAuditEvents(res);
+    } catch (e: unknown) {
+      setAuditError(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setAuditBusy(false);
+    }
+  }
+
   if (!session) {
     return (
       <div className="shell">
@@ -967,7 +1005,19 @@ export default function App() {
           <button
             type="button"
             className="btn"
-            onClick={() => {
+            onClick={async () => {
+              const t = String(sessionToken ?? "").trim();
+              if (t) {
+                try {
+                  await apiFetch("/api/auth/log-event", {
+                    token: t,
+                    method: "POST",
+                    body: { event_type: "sign_out", tool_slug: "system_admin" }
+                  });
+                } catch {
+                  /* best-effort audit only */
+                }
+              }
               void supabase.auth.signOut();
               setPassword("");
               setSelectedId(null);
@@ -1369,15 +1419,104 @@ export default function App() {
               <>
                 <h2 style={{ marginTop: 0 }}>Audit / activity</h2>
                 <p className="muted">
-                  Authenticated actions are written to <code>eos_action_log</code>; launcher sign-ins to{" "}
-                  <code>eos_login_log</code>. This head does not replace Supabase observability — it surfaces slices per
-                  user.
+                  Auth/session events are written to <code>eos_login_log</code>; meaningful user actions are written to{" "}
+                  <code>eos_action_log</code>. Exact Supabase password entry is not exposed to Brain, so eliteOS treats
+                  the first authenticated API/session event as the durable sign-in/seen signal.
                 </p>
-                <div className="admin-card">
-                  <p style={{ margin: 0 }}>
-                    Open <strong>People &amp; access</strong>, select a user, then use the drawer for recent login events
-                    and audited actions. Full exports remain a database-console concern.
-                  </p>
+                <div className="filters audit-filters">
+                  <div className="field" style={{ marginBottom: 0, minWidth: 220 }}>
+                    <label>User</label>
+                    <select value={auditUserId} onChange={(e) => setAuditUserId(e.target.value)}>
+                      <option value="">All users</option>
+                      {rows.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {String(r.full_name || r.email || r.id)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="field" style={{ marginBottom: 0 }}>
+                    <label>Tool</label>
+                    <select value={auditTool} onChange={(e) => setAuditTool(e.target.value)}>
+                      <option value="">All tools</option>
+                      {(reference?.heads ?? []).map((h) => (
+                        <option key={h} value={h}>
+                          {headDisplayLabel(h, reference?.head_catalog)}
+                        </option>
+                      ))}
+                      <option value="home">eliteOS Home</option>
+                    </select>
+                  </div>
+                  <div className="field" style={{ marginBottom: 0 }}>
+                    <label>Action type</label>
+                    <input value={auditAction} onChange={(e) => setAuditAction(e.target.value)} placeholder="e.g. user_invite" />
+                  </div>
+                  <div className="field" style={{ marginBottom: 0 }}>
+                    <label>Outcome</label>
+                    <select value={auditOutcome} onChange={(e) => setAuditOutcome(e.target.value)}>
+                      <option value="">Any</option>
+                      <option value="success">Success</option>
+                      <option value="failed">Failed</option>
+                      <option value="blocked">Blocked</option>
+                    </select>
+                  </div>
+                  <div className="field" style={{ marginBottom: 0 }}>
+                    <label>From</label>
+                    <input type="date" value={auditFrom} onChange={(e) => setAuditFrom(e.target.value)} />
+                  </div>
+                  <div className="field" style={{ marginBottom: 0 }}>
+                    <label>To</label>
+                    <input type="date" value={auditTo} onChange={(e) => setAuditTo(e.target.value)} />
+                  </div>
+                  <button type="button" className="btn btn-primary" onClick={() => void loadAuditEvents()} disabled={auditBusy}>
+                    {auditBusy ? "Loading…" : "Load activity"}
+                  </button>
+                </div>
+                {auditError ? (
+                  <div className="error-card">
+                    <strong>Unable to load audit activity</strong>
+                    <p>{auditError}</p>
+                  </div>
+                ) : null}
+                {auditEvents?.warnings?.length ? (
+                  <div className="banner banner-warn">{auditEvents.warnings.join(" ")}</div>
+                ) : null}
+                <div className="audit-grid">
+                  <div className="admin-card">
+                    <h3 style={{ marginTop: 0 }}>Auth / session events</h3>
+                    <p className="muted">Sign-in/session seen, launcher opened, tool access loaded, and sign-out events.</p>
+                    <div className="activity-list">
+                      {(auditEvents?.auth_events ?? []).map((ev, idx) => (
+                        <div className="activity-row" key={`${String(ev.id ?? "")}-${idx}`}>
+                          <strong>{titleizeToken(ev.event_type, "Auth event")}</strong>
+                          <span>{fmt(ev.created_at)}</span>
+                          <span className="muted">
+                            {String(ev.user_email ?? ev.email ?? "unknown user")}
+                            {ev.tool_slug ? ` · ${String(ev.tool_slug)}` : ""}
+                          </span>
+                        </div>
+                      ))}
+                      {auditEvents && !auditEvents.auth_events?.length ? <div className="empty-state">No auth events match these filters.</div> : null}
+                    </div>
+                  </div>
+                  <div className="admin-card">
+                    <h3 style={{ marginTop: 0 }}>Action log</h3>
+                    <p className="muted">Governance and workflow actions recorded server-side.</p>
+                    <div className="activity-list">
+                      {(auditEvents?.action_events ?? []).map((ev, idx) => (
+                        <div className="activity-row" key={`${String(ev.id ?? "")}-${idx}`}>
+                          <strong>{titleizeToken(ev.action_type, "Action")}</strong>
+                          <span>{fmt(ev.created_at)}</span>
+                          <span className="muted">
+                            {String(ev.actor_email ?? ev.user_email ?? "unknown user")}
+                            {ev.tool_slug || ev.head ? ` · ${String(ev.tool_slug ?? ev.head)}` : ""}
+                            {ev.entity_type ? ` · ${String(ev.entity_type)}` : ""}
+                          </span>
+                        </div>
+                      ))}
+                      {auditEvents && !auditEvents.action_events?.length ? <div className="empty-state">No action events match these filters.</div> : null}
+                    </div>
+                  </div>
                 </div>
               </>
             ) : activeView === "diagnostics" ? (

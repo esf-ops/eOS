@@ -70,7 +70,18 @@ Always confirm live URLs in deployment dashboards if anything drifts.
 
 ---
 
-## 5. Head map reference
+## 5. Audit And Activity Foundation
+
+- **Auth/session events:** Brain writes to **`eos_login_log`** via `recordAuthEvent` / `logLoginEvent`. Events include `session_seen` (`GET /api/me`), `launcher_opened` (`POST /api/auth/log-login`), `tool_access_loaded` (`GET /api/me/heads`), and frontend best-effort `sign_out` (`POST /api/auth/log-event`).
+- **Action logs:** Brain writes meaningful actions to **`eos_action_log`** via `recordActionLog` / `logAction` (System Admin lifecycle, Internal Estimate saves/calculations, Quote Library opens/archive/status/revisions, Pricing Admin changes, sync triggers).
+- **Supabase sign-in limitation:** backend-core does not see the raw password submission to Supabase Auth. The durable eliteOS sign-in/seen signal is therefore the first successful authenticated Brain request/session event after Supabase issues a JWT.
+- **Privacy rule:** audit payloads must never store passwords, JWTs, refresh tokens, service role keys, partner tokens, or raw secrets. Metadata is redacted in helper code and written server-side only.
+- **Visibility:** System Admin reads audit activity behind `requireAuth`, `requireHeadAccess("system_admin")`, and admin/super_admin role gates.
+- **Migration:** apply **`backend-core/supabase/eliteos_audit_foundation.sql`** to add organization-aware columns, indexes, and `user_profiles.last_seen_at` while preserving existing `eos_login_log` / `eos_action_log` rows.
+
+---
+
+## 6. Head map reference
 
 - **Canonical head inventory and roadmap:** [`eliteOS-master-head-map.md`](./eliteOS-master-head-map.md)
 

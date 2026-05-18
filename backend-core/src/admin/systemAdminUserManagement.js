@@ -459,6 +459,66 @@ export function attachAdvancedSystemAdminUserRoutes(app, ctx) {
     }
   });
 
+  r.get("/audit-events", ...adminGuard, async (req, res) => {
+    try {
+      const sb = sbFn();
+      const user = pickStr(req.query.user_id || req.query.user);
+      const tool = pickStr(req.query.tool_slug || req.query.tool);
+      const action = pickStr(req.query.action_type || req.query.action);
+      const outcome = pickStr(req.query.outcome);
+      const from = pickStr(req.query.date_from || req.query.from);
+      const to = pickStr(req.query.date_to || req.query.to);
+      const limitRaw = Number.parseInt(pickStr(req.query.limit), 10);
+      const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(limitRaw, 300)) : 100;
+
+      let authQ = sb.from("eos_login_log").select("*").order("created_at", { ascending: false }).limit(limit);
+      if (from) authQ = authQ.gte("created_at", from);
+      if (to) authQ = authQ.lte("created_at", to);
+      if (user) authQ = authQ.eq("user_id", user);
+      if (tool) authQ = authQ.eq("tool_slug", tool);
+
+      let actionQ = sb.from("eos_action_log").select("*").order("created_at", { ascending: false }).limit(limit);
+      if (from) actionQ = actionQ.gte("created_at", from);
+      if (to) actionQ = actionQ.lte("created_at", to);
+      if (user) actionQ = actionQ.or(`actor_user_id.eq.${user},user_id.eq.${user}`);
+      if (tool) actionQ = actionQ.or(`tool_slug.eq.${tool},head.eq.${tool}`);
+      if (action) actionQ = actionQ.eq("action_type", action);
+      if (outcome) actionQ = actionQ.eq("outcome", outcome);
+
+      let [authRes, actionRes] = await Promise.all([authQ, actionQ]);
+      if (authRes.error && String(authRes.error.message ?? "").includes("tool_slug")) {
+        let fallback = sb.from("eos_login_log").select("*").order("created_at", { ascending: false }).limit(limit);
+        if (from) fallback = fallback.gte("created_at", from);
+        if (to) fallback = fallback.lte("created_at", to);
+        if (user) fallback = fallback.eq("user_id", user);
+        authRes = await fallback;
+      }
+      if (actionRes.error && /actor_user_id|tool_slug|outcome/i.test(String(actionRes.error.message ?? ""))) {
+        let fallback = sb.from("eos_action_log").select("*").order("created_at", { ascending: false }).limit(limit);
+        if (from) fallback = fallback.gte("created_at", from);
+        if (to) fallback = fallback.lte("created_at", to);
+        if (user) fallback = fallback.eq("user_id", user);
+        if (tool) fallback = fallback.eq("head", tool);
+        if (action) fallback = fallback.eq("action_type", action);
+        actionRes = await fallback;
+      }
+      const authEvents = authRes.error ? [] : authRes.data ?? [];
+      const actionEvents = actionRes.error ? [] : actionRes.data ?? [];
+
+      res.json({
+        ok: true,
+        auth_events: authEvents,
+        action_events: actionEvents,
+        warnings: [
+          authRes.error ? `Auth events unavailable: ${authRes.error.message}` : null,
+          actionRes.error ? `Action events unavailable: ${actionRes.error.message}` : null
+        ].filter(Boolean)
+      });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
   /** Heads, roles, and master data used by System Admin UI. */
   r.get("/reference", ...adminGuard, async (_req, res) => {
     try {

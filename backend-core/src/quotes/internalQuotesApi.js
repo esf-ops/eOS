@@ -107,6 +107,19 @@ export function attachInternalQuoteRoutes(app, deps) {
       const db = getSupabase();
       const body = req.body && typeof req.body === "object" ? req.body : {};
       const calc = await calculateQuote({ ...body, quoteSource: "internal_quote" }, { db });
+      await logAction({
+        user: req.user,
+        head: "quote",
+        actionType: "internal_quote_calculated",
+        entityType: "quote_calculation",
+        entityId: null,
+        metadata: {
+          engine: body.engine ?? null,
+          estimated_sqft: calc.totals?.estimated_sqft ?? null,
+          internal_material_basis: body.internalMaterialBasis ?? body.internal_material_basis ?? null
+        },
+        req
+      });
       res.json({ ok: true, ...calc });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
@@ -179,6 +192,29 @@ export function attachInternalQuoteRoutes(app, deps) {
           warning: null
         };
         if (mondaySync?.warning) warnings.push(mondaySync.warning);
+        const saveMode = String(result.save_mode ?? "").trim();
+        await logAction({
+          user: req.user,
+          head: "quote",
+          actionType:
+            saveMode === "save_revision"
+              ? "internal_quote_revision_created"
+              : saveMode === "update_existing"
+                ? "internal_quote_updated"
+                : saveMode === "save_as_new_quote"
+                  ? "internal_quote_saved_as_new"
+                  : "internal_quote_created",
+          entityType: "quote_header",
+          entityId: quoteId,
+          entityLabel: quoteNumber,
+          metadata: {
+            save_mode: saveMode || null,
+            quote_number: quoteNumber,
+            revision_number: result.revision_number ?? null,
+            revision_label: result.revision_label ?? null
+          },
+          req
+        });
         res.json({
           ok: true,
           quoteId,

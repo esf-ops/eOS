@@ -344,6 +344,18 @@ export default function App() {
   }
 
   async function signOutClick() {
+    const token = session?.access_token ?? "";
+    if (token) {
+      try {
+        await apiFetch("/api/auth/log-event", {
+          token,
+          method: "POST",
+          body: { event_type: "sign_out", tool_slug: "home" }
+        });
+      } catch {
+        /* best-effort audit only */
+      }
+    }
     setInvitePasswordGate(false);
     setInvitePw("");
     setInvitePw2("");

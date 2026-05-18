@@ -646,6 +646,43 @@ table.simple tbody tr {
   max-width: 760px;
 }
 
+.audit-filters {
+  padding: 14px;
+  border: 1px solid var(--eos-border);
+  border-radius: 12px;
+  background: var(--eos-surface);
+  box-shadow: var(--eos-shadow);
+}
+
+.audit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.activity-list {
+  display: grid;
+  gap: 8px;
+}
+
+.activity-row {
+  display: grid;
+  gap: 2px;
+  border: 1px solid var(--eos-border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--eos-surface-subtle);
+}
+
+.activity-row strong {
+  font-size: 13px;
+}
+
+.activity-row span {
+  font-size: 12px;
+}
+
 .lifecycle-actions {
   display: flex;
   flex-wrap: wrap;
