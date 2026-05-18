@@ -56,10 +56,49 @@ type MasterAccountRow = {
 
 type MasterAccountsResp = { ok: boolean; total: number; rows: MasterAccountRow[]; message?: string };
 
+type CoverageExample = {
+  accountName: string;
+  sourceAccountId?: string | null;
+  normalizedMorawareName?: string | null;
+  jobCount: number;
+  status: string;
+  mondayAccountName?: string | null;
+  assignedSalesperson?: string | null;
+  branch?: string | null;
+  matchType?: string | null;
+};
+
+type CoverageResp = {
+  ok: boolean;
+  coverage?: {
+    totalAccountsSeen: number;
+    approvedMappedAccounts: number;
+    needsReviewUnmappedAccounts: number;
+    rejectedIgnoredAccounts: number;
+    totalJobsSeen: number;
+    approvedMappedJobs: number;
+    needsReviewUnmappedJobs: number;
+    rejectedIgnoredJobs: number;
+    approvedAccountCoveragePct: number | null;
+    approvedJobCoveragePct: number | null;
+    blackstoneUnapprovedAccounts: number;
+    warning: string;
+    blackstone_guardrail: string;
+    examples?: {
+      needsReviewUnmapped?: CoverageExample[];
+      rejectedIgnored?: CoverageExample[];
+      approvedMapped?: CoverageExample[];
+      blackstoneUnapproved?: CoverageExample[];
+    };
+    warnings?: string[];
+  };
+};
+
 const MAP_SCHEMA_HEALTH = "/api/admin/sales-account-mapping/schema-health";
 const MAP_SUGGESTIONS = "/api/admin/sales-account-mapping/suggestions";
 const MAP_REPS_BRANCHES = "/api/admin/sales-account-mapping/reps-branches";
 const MAP_MASTER_ACCOUNTS = "/api/admin/sales-account-mapping/master-accounts";
+const MAP_COVERAGE = "/api/admin/sales-account-mapping/coverage";
 const MAP_APPROVE = "/api/admin/sales-account-mapping/approve";
 const MAP_REJECT = "/api/admin/sales-account-mapping/reject";
 const MAP_UNMAPPED = "/api/admin/sales-account-mapping/mark-unmapped";
@@ -67,6 +106,11 @@ const MAP_ASSIGN_HOUSE = "/api/admin/sales-account-mapping/assign-house";
 
 function nf(n: number) {
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(n);
+}
+
+function pct(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(Number(value))) return "—";
+  return `${nf(Number(value))}%`;
 }
 
 function pillClass(status: string) {
@@ -83,6 +127,8 @@ export default function SalesAccountMappingAdmin({ token }: { token: string }) {
   const [schema, setSchema] = useState<SchemaHealth | null>(null);
   const [schemaErr, setSchemaErr] = useState("");
   const [repsBranches, setRepsBranches] = useState<RepsBranchesResp | null>(null);
+  const [coverage, setCoverage] = useState<CoverageResp["coverage"] | null>(null);
+  const [coverageErr, setCoverageErr] = useState("");
 
   const [rows, setRows] = useState<SuggestionRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -130,6 +176,17 @@ export default function SalesAccountMappingAdmin({ token }: { token: string }) {
       setRepsBranches(data);
     } catch {
       setRepsBranches(null);
+    }
+  }, [token]);
+
+  const loadCoverage = useCallback(async () => {
+    setCoverageErr("");
+    try {
+      const data = (await apiFetch(MAP_COVERAGE, { token })) as CoverageResp;
+      setCoverage(data.coverage ?? null);
+    } catch (e) {
+      setCoverage(null);
+      setCoverageErr(e instanceof ApiError ? e.message : String((e as Error)?.message ?? e));
     }
   }, [token]);
 
@@ -188,8 +245,9 @@ export default function SalesAccountMappingAdmin({ token }: { token: string }) {
   useEffect(() => {
     void loadSchema();
     void loadRepsBranches();
+    void loadCoverage();
     void loadSuggestions();
-  }, [loadSchema, loadRepsBranches, loadSuggestions]);
+  }, [loadSchema, loadRepsBranches, loadCoverage, loadSuggestions]);
 
   useEffect(() => {
     if (!selected) return;
@@ -236,6 +294,7 @@ export default function SalesAccountMappingAdmin({ token }: { token: string }) {
       await apiFetch(MAP_APPROVE, { token, method: "POST", body });
       setSelected(null);
       void loadSchema();
+      void loadCoverage();
       void loadSuggestions();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String((e as Error)?.message ?? e));
@@ -252,6 +311,7 @@ export default function SalesAccountMappingAdmin({ token }: { token: string }) {
         body: { morawareAccountName: selected.morawareAccountName, reason: notes || "Rejected via admin review" }
       });
       setSelected(null);
+      void loadCoverage();
       void loadSuggestions();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String((e as Error)?.message ?? e));
@@ -268,6 +328,7 @@ export default function SalesAccountMappingAdmin({ token }: { token: string }) {
         body: { morawareAccountName: selected.morawareAccountName, reason: notes || "Intentionally unmapped" }
       });
       setSelected(null);
+      void loadCoverage();
       void loadSuggestions();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String((e as Error)?.message ?? e));
@@ -289,6 +350,7 @@ export default function SalesAccountMappingAdmin({ token }: { token: string }) {
         }
       });
       setSelected(null);
+      void loadCoverage();
       void loadSuggestions();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String((e as Error)?.message ?? e));
@@ -299,7 +361,8 @@ export default function SalesAccountMappingAdmin({ token }: { token: string }) {
     <div style={{ padding: "18px 20px" }}>
       <h2 style={{ margin: "0 0 6px" }}>Sales Account Mapping</h2>
       <p className="muted" style={{ marginTop: 0 }}>
-        Review Moraware-to-Monday account matches before Sales Head attribution is trusted.
+        Review Moraware-to-Monday account matches before Sales Head attribution is trusted. Approvals can set or change
+        branch/location and salesperson ownership.
       </p>
 
       {schemaErr ? <div className="banner banner-bad">Schema health error: {schemaErr}</div> : null}
@@ -317,7 +380,37 @@ export default function SalesAccountMappingAdmin({ token }: { token: string }) {
         </div>
       ) : null}
 
+      {coverageErr ? <div className="banner banner-bad">Coverage error: {coverageErr}</div> : null}
+
       <div className="cards" style={{ marginTop: 14 }}>
+        <div className="card">
+          <div className="muted">Approved attribution</div>
+          <div style={{ fontSize: 20, fontWeight: 700 }}>{pct(coverage?.approvedAccountCoveragePct)}</div>
+          <div className="muted" style={{ marginTop: 4 }}>
+            {nf(coverage?.approvedMappedAccounts ?? 0)} / {nf(coverage?.totalAccountsSeen ?? 0)} accounts
+          </div>
+        </div>
+        <div className="card">
+          <div className="muted">Approved job coverage</div>
+          <div style={{ fontSize: 20, fontWeight: 700 }}>{pct(coverage?.approvedJobCoveragePct)}</div>
+          <div className="muted" style={{ marginTop: 4 }}>
+            {nf(coverage?.approvedMappedJobs ?? 0)} / {nf(coverage?.totalJobsSeen ?? 0)} jobs
+          </div>
+        </div>
+        <div className="card">
+          <div className="muted">Needs approval / unmapped</div>
+          <div style={{ fontSize: 20, fontWeight: 700 }}>{nf(coverage?.needsReviewUnmappedAccounts ?? 0)}</div>
+          <div className="muted" style={{ marginTop: 4 }}>
+            {nf(coverage?.needsReviewUnmappedJobs ?? 0)} jobs
+          </div>
+        </div>
+        <div className="card">
+          <div className="muted">Rejected / ignored</div>
+          <div style={{ fontSize: 20, fontWeight: 700 }}>{nf(coverage?.rejectedIgnoredAccounts ?? 0)}</div>
+          <div className="muted" style={{ marginTop: 4 }}>
+            {nf(coverage?.rejectedIgnoredJobs ?? 0)} jobs
+          </div>
+        </div>
         <div className="card">
           <div className="muted">Total shown</div>
           <div style={{ fontSize: 20, fontWeight: 700 }}>{String(rows.length)}</div>
@@ -339,6 +432,54 @@ export default function SalesAccountMappingAdmin({ token }: { token: string }) {
           <div style={{ fontSize: 20, fontWeight: 700 }}>{String(total)}</div>
         </div>
       </div>
+
+      {coverage ? (
+        <div className="banner banner-warn" style={{ marginTop: 14 }}>
+          <strong>Approved mapping coverage controls Sales Head trust.</strong>
+          <div style={{ marginTop: 6 }}>{coverage.warning}</div>
+          <div className="muted" style={{ marginTop: 6 }}>
+            {coverage.blackstone_guardrail}
+          </div>
+        </div>
+      ) : null}
+
+      {coverage?.examples?.needsReviewUnmapped?.length ? (
+        <div className="panel" style={{ marginTop: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+            <div>
+              <strong>Top accounts needing approval</strong>
+              <div className="muted" style={{ marginTop: 4 }}>
+                Brain-derived latest sync coverage; use the review queue below to approve, reject, or mark intentionally unmapped.
+              </div>
+            </div>
+            <button type="button" className="btn" onClick={() => setStatus("needs_review")}>
+              Show needs review
+            </button>
+          </div>
+          <div className="table-scroll" style={{ marginTop: 10 }}>
+            <table className="simple">
+              <thead>
+                <tr>
+                  <th>Account</th>
+                  <th className="num">Jobs</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {coverage.examples.needsReviewUnmapped.slice(0, 8).map((r) => (
+                  <tr key={`${r.normalizedMorawareName || r.accountName}-${r.sourceAccountId || ""}`}>
+                    <td>{r.accountName}</td>
+                    <td className="num">{nf(r.jobCount)}</td>
+                    <td>
+                      <span className="pill pill-warn">{r.status}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
 
       <div className="panel" style={{ marginTop: 14 }}>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>

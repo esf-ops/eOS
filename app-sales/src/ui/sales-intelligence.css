@@ -140,6 +140,11 @@
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
+.pi-card-warn {
+  border-color: var(--pi-warn-border);
+  background: var(--pi-warn-bg);
+}
+
 .pi-card-title {
   font-size: 0.7rem;
   text-transform: uppercase;

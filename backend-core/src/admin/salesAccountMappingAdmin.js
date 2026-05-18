@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import express from "express";
 
 import { ACTIVE_SALES_REPS } from "../sales/salesAttribution.js";
+import { loadSalesAttributionCoverage } from "../sales/salesAttributionCoverage.js";
 import { normalizeAccountNameWithoutLocationPrefix, normalizeAccountName } from "../sales/salesAccountNameNormalizer.js";
 
 const REQUIRED_TABLES = Object.freeze([
@@ -59,6 +60,20 @@ function isMissingRelationError(error) {
   const msg = String(error?.message || "");
   const code = String(error?.code || "");
   return code === "42P01" || msg.toLowerCase().includes("does not exist") || msg.toLowerCase().includes("relation");
+}
+
+function isUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value ?? "").trim());
+}
+
+function resolveAdminOrganizationId(req) {
+  const queryOrg = String(req.query?.organization_id ?? "").trim();
+  if (isUuid(queryOrg)) return queryOrg;
+  const userOrg = String(req.user?.organization_id ?? "").trim();
+  if (isUuid(userOrg)) return userOrg;
+  const defaultOrg = String(process.env.MORAWARE_DEFAULT_ORGANIZATION_ID ?? "").trim();
+  if (isUuid(defaultOrg)) return defaultOrg;
+  return "";
 }
 
 async function tableExists(supabase, table) {
@@ -292,6 +307,23 @@ export function attachSalesAccountMappingAdminRoutes(app, { requireAuth, require
           branches,
           houseOptions: HOUSE_OPTIONS
         });
+      } catch (e) {
+        res.status(500).json({ ok: false, error: String(e?.message || e) });
+      }
+    }
+  );
+
+  app.get(
+    "/api/admin/sales-account-mapping/coverage",
+    requireAuth(),
+    requireRole(["admin"]),
+    headAccessSystemAdmin,
+    async (req, res) => {
+      try {
+        const supabase = supabaseGetter();
+        const organizationId = resolveAdminOrganizationId(req);
+        const coverage = await loadSalesAttributionCoverage(supabase, { organizationId });
+        res.json({ ok: true, organization_id: organizationId || null, coverage });
       } catch (e) {
         res.status(500).json({ ok: false, error: String(e?.message || e) });
       }

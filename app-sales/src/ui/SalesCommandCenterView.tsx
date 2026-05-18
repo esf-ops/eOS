@@ -35,6 +35,21 @@ type SalesDashboardFoundation = {
     process_breakdown?: CountRow[];
     salesperson_breakdown?: CountRow[];
   };
+  attribution_coverage?: {
+    totalAccountsSeen?: number | null;
+    approvedMappedAccounts?: number | null;
+    needsReviewUnmappedAccounts?: number | null;
+    rejectedIgnoredAccounts?: number | null;
+    totalJobsSeen?: number | null;
+    approvedMappedJobs?: number | null;
+    needsReviewUnmappedJobs?: number | null;
+    rejectedIgnoredJobs?: number | null;
+    approvedAccountCoveragePct?: number | null;
+    approvedJobCoveragePct?: number | null;
+    blackstoneUnapprovedAccounts?: number | null;
+    warning?: string;
+    blackstone_guardrail?: string;
+  };
   quote_pipeline?: {
     quote_headers_count?: number | null;
     quote_headers_error?: string | null;
@@ -54,6 +69,12 @@ type Props = {
 function num(value: unknown) {
   const n = Number(value ?? 0);
   return Number.isFinite(n) ? n.toLocaleString() : "0";
+}
+
+function pct(value: unknown) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "—";
+  return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(n)}%`;
 }
 
 function age(seconds: unknown) {
@@ -126,6 +147,7 @@ export default function SalesCommandCenterView({ token, onLoadError }: Props) {
   }, [token, load]);
 
   const actuals = data?.actuals;
+  const coverage = data?.attribution_coverage;
   const sync = data?.sync_health;
   const group = sync?.latest_group;
   const groupHealthy = Boolean(group) && Number(group.failed_chunks || 0) === 0;
@@ -161,6 +183,21 @@ export default function SalesCommandCenterView({ token, onLoadError }: Props) {
         </div>
 
         <div className="pi-grid-cards">
+          <div className="pi-card pi-card-warn">
+            <p className="pi-card-title">Approved attribution</p>
+            <p className="pi-card-value">{pct(coverage?.approvedAccountCoveragePct)}</p>
+            <p className="pi-card-note">
+              {num(coverage?.approvedMappedAccounts)} / {num(coverage?.totalAccountsSeen)} accounts approved ·{" "}
+              {num(coverage?.needsReviewUnmappedAccounts)} need review/unmapped
+            </p>
+          </div>
+          <div className="pi-card pi-card-warn">
+            <p className="pi-card-title">Approved job coverage</p>
+            <p className="pi-card-value">{pct(coverage?.approvedJobCoveragePct)}</p>
+            <p className="pi-card-note">
+              {num(coverage?.approvedMappedJobs)} / {num(coverage?.totalJobsSeen)} jobs covered by approved mappings
+            </p>
+          </div>
           <div className="pi-card">
             <p className="pi-card-title">Moraware jobs</p>
             <p className="pi-card-value">{num(actuals?.jobs_count)}</p>
@@ -186,6 +223,15 @@ export default function SalesCommandCenterView({ token, onLoadError }: Props) {
             <p className="pi-card-value">{num(data?.quote_pipeline?.quote_headers_count)}</p>
             <p className="pi-card-note">Forward pipeline source; forecast events: {num(data?.quote_pipeline?.quote_forecast_events_count)}</p>
           </div>
+        </div>
+
+        <div className="sales-attribution-guardrail">
+          <strong>Branch revenue/sqft remains preview</strong>
+          <p>
+            {coverage?.warning ||
+              "Revenue/sqft by branch remains preview until approved Sales Account Mapping coverage is high."}
+          </p>
+          <p>{coverage?.blackstone_guardrail || "Blackstone remains unmapped unless explicitly approved in Brain mapping."}</p>
         </div>
 
         <div className="sales-foundation-grid">

@@ -13,6 +13,7 @@ import {
   loadApprovedSalesAttributionMappings,
   methodLabelForDisplay
 } from "./salesAttribution.js";
+import { loadSalesAttributionCoverage } from "./salesAttributionCoverage.js";
 
 /** Roles that may call `/api/sales/*` when also granted head `sales` (admin bypass unchanged). */
 export const SALES_API_ROLES = Object.freeze(["admin", "executive", "sales", "finance", "marketing"]);
@@ -1787,7 +1788,17 @@ export async function salesDashboardFoundationHandler(req, supabaseGetter) {
     return { status: 400, body: { ok: false, error: "Sales dashboard requires organization_id context." } };
   }
 
-  const [syncHealth, accountCount, activityCount, resourceCount, rawFormsCount, rawFilesCount, rawAssigneesCount, quotePipeline] =
+  const [
+    syncHealth,
+    accountCount,
+    activityCount,
+    resourceCount,
+    rawFormsCount,
+    rawFilesCount,
+    rawAssigneesCount,
+    quotePipeline,
+    attributionCoverage
+  ] =
     await Promise.all([
       loadLatestMorawareGroup(supabase, organizationId),
       safeCount(supabase, "brain_moraware_accounts", organizationId),
@@ -1796,7 +1807,8 @@ export async function salesDashboardFoundationHandler(req, supabaseGetter) {
       safeCount(supabase, "moraware_raw_job_forms", organizationId),
       safeCount(supabase, "moraware_raw_job_files", organizationId),
       safeCount(supabase, "moraware_raw_assignees", organizationId),
-      safeQuotePipelineSummary(supabase, organizationId)
+      safeQuotePipelineSummary(supabase, organizationId),
+      loadSalesAttributionCoverage(supabase, { organizationId })
     ]);
 
   let jobsQ = supabase
@@ -1862,6 +1874,7 @@ export async function salesDashboardFoundationHandler(req, supabaseGetter) {
         process_breakdown: mapToRows(byProcess, "process"),
         salesperson_breakdown: mapToRows(bySalesperson, "salesperson").slice(0, 12)
       },
+      attribution_coverage: attributionCoverage,
       quote_pipeline: quotePipeline,
       data_contract: {
         actuals: "Moraware Brain tables provide job/account/activity/status/process actuals.",
