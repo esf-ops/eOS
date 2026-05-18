@@ -19,6 +19,7 @@ import { collectHeadEnvOriginsForCors } from "./me/headDeploymentUrls.js";
 import { buildMeHeadsPayload } from "./me/launcherHeads.js";
 import { buildTitansTodayPayload, parseTitansTodayQuery } from "./titans/titansToday.js";
 import { attachSalesHeadRoutes } from "./sales/salesHead.js";
+import { attachMorawareSyncRoutes } from "./moraware/morawareSyncApi.js";
 
 function requiredEnv(name) {
   const v = String(process.env[name] ?? "").trim();
@@ -496,7 +497,7 @@ app.use(
       return callback(null, false);
     },
     credentials: true,
-    allowedHeaders: ["Content-Type", "Authorization", "x-eos-cron-secret", "x-organization-key"],
+    allowedHeaders: ["Content-Type", "Authorization", "x-eos-cron-secret", "x-moraware-sync-secret", "x-organization-key"],
     methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"]
   })
 );
@@ -541,6 +542,13 @@ app.get("/api/brain/sync-plan", (_req, res) => {
     retryFailed: "after every scheduled sync",
     note: "Full syncs should not run every 15 minutes."
   });
+});
+
+attachMorawareSyncRoutes(app, {
+  requireAuth,
+  requireRole,
+  requireHeadAccess,
+  getSupabase: supabaseServerClient
 });
 
 // Executive Head: read-only aggregates (admin/executive only)
@@ -1501,6 +1509,8 @@ if (shouldStartLocalHttpServer()) {
     console.log("- POST /api/admin/sync/retry-failed");
     console.log("- GET /api/brain/sync-health");
     console.log("- GET /api/brain/sync-plan");
+    console.log("- POST /api/internal/moraware-sync/import");
+    console.log("- GET /api/moraware-sync/status");
     console.log("- GET /api/executive/summary");
     console.log("- GET /api/executive/salesperson-performance");
     console.log("- GET /api/executive/account-performance");

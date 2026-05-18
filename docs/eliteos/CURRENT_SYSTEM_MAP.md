@@ -85,6 +85,7 @@ Repo **`app-*`** folders today: **`app-brain-health`**, **`app-executive`**, **`
 | **Executive head** | `/api/executive/summary`, performance, production-flow, titan-signals, field-trends, monthly-trend, `GET /api/executive/debug` | No | **Yes** + `admin`/`executive` + executive head middleware | Read-oriented aggregates. |
 | **Titans** | `GET /api/titans/today` | No | **Yes** + head access wrapper (see server) | Shop/production signal surface. |
 | **Brain health** | `GET /api/brain/sync-runs`, `GET /api/brain/failed-jobs`, `GET /api/brain/sync-health`, `GET /api/brain/sync-plan`, `GET /api/brain/summary`, `GET /api/brain/jobs`, … | Mixed | **`sync-health`**: either public (if `EOS_ALLOW_PUBLIC_SYNC_HEALTH=1`) or **auth + brain_health head**; most others **auth + admin/executive + brain_health** | Operator visibility into Moraware ingestion. |
+| **Moraware Sync Foundation v1** | `POST /api/internal/moraware-sync/import`, `GET /api/moraware-sync/status` | Import: **shared secret**; status: no | Import uses `x-moraware-sync-secret` or `x-eos-cron-secret`; status requires **auth + admin/executive/super_admin + brain_health** | Shared Brain data infrastructure; no browser Moraware credentials; no Moraware writeback. |
 | **Admin-triggered sync** | `POST /api/admin/sync/recent`, `POST /api/admin/sync/retry-failed` | No | **Yes** + `admin`/`executive` | Spawns background node scripts. |
 | **Cron / internal sync** | `POST /api/internal/sync/recent`, `.../nightly`, `.../nightly-operational`, `.../retry-failed` | **Shared secret** (not browser) | **`requireCronSecret`** | Intended for scheduled jobs, not interactive users. |
 | **Quote pipeline** | `GET /api/quotes/pipeline`, `GET /api/quotes/pipeline/:id`, timeline, `PATCH .../status`, `PATCH .../assign`, sales-users, summary | No | **Yes** + head/role stack in `quotePipelineApi.js` | Used from System Admin quote pipeline UI among others. |
@@ -153,7 +154,8 @@ Scripts under `backend-core/supabase/` define install order and intent; **produc
 |------|------------------|-------------|-------|
 | **Sales account mapping** | `sales_account_attribution.sql` + admin APIs | **Yes** when applied | Used from System Admin **Sales Account Mapping** UI. |
 | **Identity resolution** | `eos_identity_resolution.sql` | **Yes** when applied | Readiness UI in System Admin. |
-| **Moraware brain** | `operational_schema.sql`, `moraware_operational_expansion.sql`, job/brain views | **Yes** in active deployments | Feeds executive/sales/brain health; large surface—see audit scripts in root `package.json`. |
+| **Moraware brain (legacy/operational)** | `schema.sql`, `operational_schema.sql`, `moraware_operational_expansion.sql`, job/brain views | **Yes** in active deployments | Existing HTTP/XML sync path feeds executive/sales/brain health; large surface—see audit scripts in root `package.json`. |
+| **Moraware Sync Foundation v1** | `eliteos_moraware_sync_foundation_v1.sql`, `moraware_sync_runs`, raw `moraware_raw_*`, normalized `brain_moraware_*`, `moraware_data_quality_findings` | **New / apply manually** | Shared Brain staging for accounts, jobs, activities, forms/custom fields, file metadata, and assignee/resources. Import endpoint is server-secret protected; Windows worker supported when `JobTrackerAPI5.dll` is required. |
 
 ---
 
@@ -273,6 +275,7 @@ Scripts under `backend-core/supabase/` define install order and intent; **produc
 - Move hardcoded **add-ons / mappings** into Pricing Admin data.
 - Configure **`api.eliteosfab.com`** for Brain.
 - Build **Moraware Admin / Integration Mapping Head** (blueprint prerequisite for SaaS Moraware).
+- Apply **`eliteos_moraware_sync_foundation_v1.sql`**, run a capped manual Moraware import, then verify `GET /api/moraware-sync/status` before scheduling Windows/HTTP workers.
 
 ### Priority 4 — future modules
 

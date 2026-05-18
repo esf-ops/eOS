@@ -33,7 +33,7 @@
 | **eliteOS Brain / API** | `backend-core` — Express (or serverless entry), quote routes, integrations, org context, permission checks. |
 | **Supabase** | Database, Auth (anon + user JWT for heads), Row Level Security where enabled; **organization-scoped** data for SaaS. |
 | **Monday.com** | Optional CRM sync for public (and other) quotes; **server-side only** token. |
-| **Moraware** (future) | Read-oriented integration; credentials and mappings stay **server-side**; dedicated **Moraware Admin / Integration Mapping Head** planned. |
+| **Moraware** | Read-oriented integration; credentials and mappings stay **server-side/worker-side**; synced data lands in Brain staging + normalized tables for many heads. Dedicated **Moraware Admin / Integration Mapping Head** still planned before SaaS-wide mapping reuse. |
 | **Cloudflare** | DNS and domain routing (e.g. public quote hostname). |
 | **Vercel** | Hosting for heads and Brain/API deployments. |
 | **GitHub + Cursor** | Source control; AI-assisted development with project rules under `.cursor/rules/`. |
@@ -169,11 +169,17 @@ Implementation references: `backend-core/src/quotes/quoteCalculator.js`, `backen
 
 **Intent:** Moraware remains a system of record for many shops; eliteOS **reads** (and later selectively writes) through governed integration.
 
+**Foundation v1:** [`moraware-sync-foundation.md`](./moraware-sync-foundation.md) defines the current Brain data infrastructure. The sync/import path captures proven readable Moraware accounts, jobs, activities, forms/custom fields, file metadata, and assignee/resource catalog into Supabase raw + normalized tables. It is **not** Sales-only; it is shared infrastructure for Sales / Accounts, Executive, Production Flow, Shop Floor TV, Job Timeline, Template, Install, Purchasing, Customer Service, Quality / Rework, Data Quality, Brain Health, System Admin, and future Finance / Job Costing.
+
 | Pillar | Meaning |
 |--------|--------|
 | **Credentials** | Allow eliteOS (Brain) to authenticate to Moraware **server-side only**. Never browser. |
 | **Mappings** | Tell eliteOS what Moraware entities **mean** in eliteOS terms (statuses, resources, branches, etc.). |
 | **Moraware Admin / Integration Mapping Head** | **Required** before Moraware-powered features are **SaaS-reusable** across many orgs. |
+
+**Runner rule:** use the existing Node HTTP/XML Moraware path where it works; when `JobTrackerAPI5.dll` is required, run a Windows worker and push batches into `POST /api/internal/moraware-sync/import` using `MORAWARE_SYNC_IMPORT_SECRET`. Do not assume Vercel/Linux can load the Windows DLL.
+
+**Current visibility:** `GET /api/moraware-sync/status` exposes latest run, last success, row counts, recent errors, data quality counts, current scope, and known gaps behind Brain Health auth/head access.
 
 **Future mapping domains (org-scoped):**
 
