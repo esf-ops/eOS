@@ -233,7 +233,7 @@ export function attachQuoteLibraryRoutes(app, deps) {
       const selectCols =
         "id,quote_number,revision_number,revision_label,quote_family_root_id,is_current_revision,archived_at,quote_source,quote_status,customer_name,customer_email,customer_phone,project_name,project_address,city,state,zip,sales_rep,branch,grand_total,estimated_sqft,created_at,updated_at,calculation_snapshot,prepared_by";
 
-      let qb = db.from("quote_headers").select(selectCols);
+      let qb = db.from("quote_headers").select(selectCols, { count: "exact" });
       qb = applyQuoteHeaderOrgScope(qb, orgId, hasQuoteHeadersOrg);
 
       const includeArchived =
@@ -281,7 +281,7 @@ export function attachQuoteLibraryRoutes(app, deps) {
         const s = search.replace(/%/g, "").slice(0, 80);
         const pat = `%${s}%`;
         qb = qb.or(
-          `customer_name.ilike.${pat},project_name.ilike.${pat},project_address.ilike.${pat},quote_number.ilike.${pat},city.ilike.${pat},sales_rep.ilike.${pat}`
+          `customer_name.ilike.${pat},project_name.ilike.${pat},project_address.ilike.${pat},quote_number.ilike.${pat},city.ilike.${pat},state.ilike.${pat},zip.ilike.${pat},sales_rep.ilike.${pat},branch.ilike.${pat},quote_status.ilike.${pat}`
         );
       }
 
@@ -338,10 +338,10 @@ export function attachQuoteLibraryRoutes(app, deps) {
       qb = qb.order(sortCol, { ascending: dir });
       qb = qb.range(offset, offset + limit - 1);
 
-      const { data: rows, error } = await qb;
+      const { data: rows, error, count } = await qb;
       if (error) {
         if (isMissingRelationError(error)) {
-          return res.status(503).json({ ok: false, installed: false, rows: [], warnings: ["quote_headers missing"] });
+          return res.status(503).json({ ok: false, installed: false, rows: [], total_count: 0, warnings: ["quote_headers missing"] });
         }
         throw error;
       }
@@ -366,7 +366,125 @@ export function attachQuoteLibraryRoutes(app, deps) {
         );
       }
 
-      res.json({ ok: true, rows: mapped, limit, offset });
+      const totalCount = Number(count ?? 0);
+      const showingFrom = totalCount > 0 && mapped.length > 0 ? offset + 1 : 0;
+      const showingTo = mapped.length > 0 ? offset + mapped.length : 0;
+      res.json({
+        ok: true,
+        rows: mapped,
+        quotes: mapped,
+        limit,
+        offset,
+        page_size: limit,
+        total_count: totalCount,
+        has_more: offset + limit < totalCount,
+        showing_from: showingFrom,
+        showing_to: showingTo,
+        latest_revision_only: latestOnly,
+        include_archived: includeArchived,
+        warnings:
+          hs || view === "needs_handoff"
+            ? [
+                "Handoff filters are applied after the current page is fetched; narrow by status/date/account for best results until handoff indexes are expanded."
+              ]
+            : []
+      });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  app.post("/api/quote-library/quotes/batch/archive", ...stack, jsonParser, async (req, res) => {
+    try {
+      const rawIds = Array.isArray(req.body?.quote_ids) ? req.body.quote_ids : [];
+      const ids = [...new Set(rawIds.map((x) => pickStr(x)).filter(isUuid))].slice(0, 100);
+      if (!ids.length) return res.status(400).json({ ok: false, error: "quote_ids required" });
+      if (req.body?.confirm !== true) return res.status(400).json({ ok: false, error: "confirm: true required" });
+      const force = req.body?.force === true;
+      const elevated = ["admin", "super_admin"].includes(String(req.user?.role || "").toLowerCase());
+      const db = getSupabase();
+      const { orgId, hasQuoteHeadersOrg } = await loadOrgScope(db, req);
+      let qb = db
+        .from("quote_headers")
+        .select("id,quote_number,quote_status,quote_source,is_current_revision,archived_at")
+        .in("id", ids);
+      qb = applyQuoteHeaderOrgScope(qb, orgId, hasQuoteHeadersOrg);
+      const { data: rows, error } = await qb;
+      if (error) throw error;
+      const byId = new Map((rows || []).map((r) => [String(r.id), r]));
+      const userRef = pickStr(req.user?.email) || pickStr(req.user?.id);
+      const results = [];
+      for (const id of ids) {
+        const cur = byId.get(id);
+        if (!cur) {
+          results.push({ id, status: "failed", reason: "not_found_or_not_authorized" });
+          continue;
+        }
+        if (cur.archived_at) {
+          results.push({ id, quote_number: cur.quote_number, status: "skipped", reason: "already_archived" });
+          continue;
+        }
+        if (cur.is_current_revision === false) {
+          results.push({ id, quote_number: cur.quote_number, status: "skipped", reason: "historical_revision" });
+          continue;
+        }
+        const st = String(cur.quote_status || "");
+        if ((st === "sold" || st === "won") && (!force || !elevated)) {
+          results.push({
+            id,
+            quote_number: cur.quote_number,
+            status: "skipped",
+            reason: "sold_or_won_requires_admin_force"
+          });
+          continue;
+        }
+        const archivedAt = new Date().toISOString();
+        const { error: uErr } = await db
+          .from("quote_headers")
+          .update({
+            archived_at: archivedAt,
+            archived_by: userRef,
+            quote_status: "archived",
+            updated_at: archivedAt
+          })
+          .eq("id", id);
+        if (uErr) {
+          results.push({ id, quote_number: cur.quote_number, status: "failed", reason: uErr.message });
+          continue;
+        }
+        await safeSelect(db, () =>
+          db.from("quote_status_history").insert({
+            quote_id: id,
+            old_status: st,
+            new_status: "archived",
+            changed_by: userRef,
+            metadata: { source: "quote_library_batch_archive", force }
+          })
+        );
+        results.push({ id, quote_number: cur.quote_number, status: "archived" });
+      }
+      await logAction({
+        user: req.user,
+        head: "quote_library",
+        actionType: "quote_batch_archive",
+        entityType: "quote_header",
+        entityId: null,
+        metadata: {
+          requested_count: ids.length,
+          archived_count: results.filter((r) => r.status === "archived").length,
+          skipped_count: results.filter((r) => r.status === "skipped").length,
+          failed_count: results.filter((r) => r.status === "failed").length,
+          force
+        },
+        req
+      });
+      res.json({
+        ok: true,
+        results,
+        archived_count: results.filter((r) => r.status === "archived").length,
+        skipped_count: results.filter((r) => r.status === "skipped").length,
+        failed_count: results.filter((r) => r.status === "failed").length
+      });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
     }

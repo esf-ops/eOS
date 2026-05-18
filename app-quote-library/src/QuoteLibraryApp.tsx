@@ -15,9 +15,30 @@ import { getSupabase } from "./lib/supabase";
 const EOS_LOGO_URL =
   "https://www.elitestonefabrication.com/wp-content/uploads/2021/09/cropped-ESF-Horizontal-Logo-500x150-px_09_09.png";
 
-const QUOTE_PAGE_LIMIT = 120;
+const DEFAULT_PAGE_SIZE = 50;
+const PAGE_SIZE_OPTIONS = [50, 100, 250];
 
 type TabId = "all" | "by_account" | "my" | "internal" | "public" | "sold" | "handoff";
+
+type ListMeta = {
+  limit: number;
+  offset: number;
+  page_size: number;
+  total_count: number | null;
+  has_more: boolean;
+  showing_from: number;
+  showing_to: number;
+};
+
+const EMPTY_LIST_META: ListMeta = {
+  limit: DEFAULT_PAGE_SIZE,
+  offset: 0,
+  page_size: DEFAULT_PAGE_SIZE,
+  total_count: null,
+  has_more: false,
+  showing_from: 0,
+  showing_to: 0
+};
 
 function str(v: unknown): string {
   return v == null ? "" : String(v);
@@ -37,6 +58,11 @@ function statusPillClass(raw: unknown): string {
     return "pill pill-status-active";
   if (s === "archived") return "pill pill-status-neutral";
   return "pill pill-status-neutral";
+}
+
+function canBatchArchiveRow(row: Record<string, unknown>): boolean {
+  const status = str(row.quote_status).toLowerCase();
+  return !row.archived_at && status !== "sold" && status !== "won" && Boolean(str(row.id));
 }
 
 function formatTimelineEntry(ev: Record<string, unknown>): { time: string; body: string } {
@@ -110,6 +136,7 @@ export default function QuoteLibraryApp() {
   const [msg, setMsg] = useState<string | null>(null);
 
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
+  const [listMeta, setListMeta] = useState<ListMeta>(EMPTY_LIST_META);
   const [metrics, setMetrics] = useState<Record<string, unknown> | null>(null);
   const [accountGroups, setAccountGroups] = useState<Record<string, unknown>[]>([]);
 
@@ -124,6 +151,10 @@ export default function QuoteLibraryApp() {
   const [handoffStatus, setHandoffStatus] = useState("");
   const [sort, setSort] = useState("updated_at");
   const [direction, setDirection] = useState<"asc" | "desc">("desc");
+  const [pageOffset, setPageOffset] = useState(0);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [batchBusy, setBatchBusy] = useState(false);
 
   const [detailId, setDetailId] = useState<string | null>(null);
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
@@ -148,6 +179,27 @@ export default function QuoteLibraryApp() {
     return n;
   }, [search, accountQ, status, quoteSource, branch, salesRep, createdFrom, createdTo, handoffStatus, showArchived]);
 
+  const listContextKey = useMemo(
+    () =>
+      JSON.stringify({
+        tab,
+        search,
+        accountQ,
+        status,
+        quoteSource,
+        branch,
+        salesRep,
+        createdFrom,
+        createdTo,
+        handoffStatus,
+        showArchived,
+        sort,
+        direction,
+        pageSize
+      }),
+    [tab, search, accountQ, status, quoteSource, branch, salesRep, createdFrom, createdTo, handoffStatus, showArchived, sort, direction, pageSize]
+  );
+
   const clearFilters = useCallback(() => {
     setSearch("");
     setAccountQ("");
@@ -159,6 +211,8 @@ export default function QuoteLibraryApp() {
     setCreatedTo("");
     setHandoffStatus("");
     setShowArchived(false);
+    setPageOffset(0);
+    setSelectedIds(new Set());
   }, []);
 
   const signIn = useCallback(async () => {
@@ -189,6 +243,8 @@ export default function QuoteLibraryApp() {
     if (supabase) await supabase.auth.signOut();
     setSessionToken(null);
     setRows([]);
+    setListMeta(EMPTY_LIST_META);
+    setSelectedIds(new Set());
     setDetail(null);
     setDetailId(null);
   }, [supabase]);
@@ -238,8 +294,8 @@ export default function QuoteLibraryApp() {
     setErr(null);
     try {
       const params = new URLSearchParams();
-      params.set("limit", String(QUOTE_PAGE_LIMIT));
-      params.set("offset", "0");
+      params.set("limit", String(pageSize));
+      params.set("offset", String(pageOffset));
       params.set("sort", sort);
       params.set("direction", direction);
       if (search.trim()) params.set("search", search.trim());
@@ -258,8 +314,27 @@ export default function QuoteLibraryApp() {
       if (tab === "sold") params.set("view", "sold_jobs");
       if (tab === "handoff") params.set("view", "needs_handoff");
 
-      const res = (await apiGet(`/api/quote-library/quotes?${params}`, sessionToken)) as { rows?: unknown };
-      setRows(Array.isArray(res.rows) ? (res.rows as Record<string, unknown>[]) : []);
+      const res = (await apiGet(`/api/quote-library/quotes?${params}`, sessionToken)) as {
+        rows?: unknown;
+        limit?: unknown;
+        offset?: unknown;
+        page_size?: unknown;
+        total_count?: unknown;
+        has_more?: unknown;
+        showing_from?: unknown;
+        showing_to?: unknown;
+      };
+      const nextRows = Array.isArray(res.rows) ? (res.rows as Record<string, unknown>[]) : [];
+      setRows(nextRows);
+      setListMeta({
+        limit: Number(res.limit ?? pageSize) || pageSize,
+        offset: Number(res.offset ?? pageOffset) || 0,
+        page_size: Number(res.page_size ?? res.limit ?? pageSize) || pageSize,
+        total_count: Number.isFinite(Number(res.total_count)) ? Number(res.total_count) : null,
+        has_more: res.has_more === true,
+        showing_from: Number(res.showing_from ?? (nextRows.length ? pageOffset + 1 : 0)) || 0,
+        showing_to: Number(res.showing_to ?? (nextRows.length ? pageOffset + nextRows.length : 0)) || 0
+      });
     } catch (e: unknown) {
       if (e instanceof ApiError && e.status === 403) {
         setErr("Access denied. Ask an admin to grant the quote_library head, or use an admin profile.");
@@ -267,6 +342,7 @@ export default function QuoteLibraryApp() {
         setErr(String((e as Error)?.message || e));
       }
       setRows([]);
+      setListMeta({ ...EMPTY_LIST_META, limit: pageSize, page_size: pageSize, offset: pageOffset });
     } finally {
       setBusy(false);
     }
@@ -284,12 +360,23 @@ export default function QuoteLibraryApp() {
     handoffStatus,
     sort,
     direction,
-    showArchived
+    showArchived,
+    pageSize,
+    pageOffset
   ]);
 
   useEffect(() => {
     void loadMetrics();
   }, [loadMetrics]);
+
+  useEffect(() => {
+    setPageOffset(0);
+    setSelectedIds(new Set());
+  }, [listContextKey]);
+
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [pageOffset]);
 
   useEffect(() => {
     if (tab === "by_account") void loadAccounts();
@@ -371,6 +458,71 @@ export default function QuoteLibraryApp() {
       setErr(String((e as Error)?.message || e));
     }
   };
+
+  const selectableRows = useMemo(() => rows.filter(canBatchArchiveRow), [rows]);
+  const selectableIds = useMemo(() => selectableRows.map((r) => str(r.id)).filter(Boolean), [selectableRows]);
+  const selectedCount = selectedIds.size;
+  const allVisibleSelected = selectableIds.length > 0 && selectableIds.every((id) => selectedIds.has(id));
+  const visibleSelectionIsPartial = selectableIds.some((id) => selectedIds.has(id)) && !allVisibleSelected;
+  const listCountLabel = useMemo(() => {
+    if (busy) return "Loading…";
+    if (listMeta.total_count != null) {
+      if (listMeta.total_count === 0) return "Showing 0 quotes";
+      return `Showing ${listMeta.showing_from}–${listMeta.showing_to} of ${listMeta.total_count} matching quotes`;
+    }
+    return rows.length === 1 ? "Showing 1 quote" : `Showing ${rows.length} quotes`;
+  }, [busy, listMeta.showing_from, listMeta.showing_to, listMeta.total_count, rows.length]);
+
+  const toggleSelectedId = useCallback((id: string, checked: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
+
+  const toggleSelectVisible = useCallback(
+    (checked: boolean) => {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const id of selectableIds) {
+          if (checked) next.add(id);
+          else next.delete(id);
+        }
+        return next;
+      });
+    },
+    [selectableIds]
+  );
+
+  const archiveSelected = useCallback(async () => {
+    if (!sessionToken || selectedIds.size === 0) return;
+    const ids = Array.from(selectedIds);
+    const ok = window.confirm(
+      `Archive ${ids.length} selected quote${ids.length === 1 ? "" : "s"}? They will be hidden from the default library but can be shown with Show archived.`
+    );
+    if (!ok) return;
+    setBatchBusy(true);
+    setErr(null);
+    setMsg(null);
+    try {
+      const res = (await apiPost("/api/quote-library/quotes/batch/archive", sessionToken, {
+        quote_ids: ids,
+        confirm: true
+      })) as Record<string, unknown>;
+      const archived = Number(res.archived_count ?? 0);
+      const skipped = Number(res.skipped_count ?? 0);
+      const failed = Number(res.failed_count ?? 0);
+      setSelectedIds(new Set());
+      setMsg(`Batch archive complete: ${archived} archived, ${skipped} skipped, ${failed} failed.`);
+      await refreshListAndDetail();
+    } catch (e: unknown) {
+      setErr(String((e as Error)?.message || e));
+    } finally {
+      setBatchBusy(false);
+    }
+  }, [refreshListAndDetail, selectedIds, sessionToken]);
 
   const header = (detail?.header as Record<string, unknown>) || {};
   const mondayBoard = str(header.monday_board_id);
@@ -572,7 +724,16 @@ export default function QuoteLibraryApp() {
               </label>
             </div>
             <div className="filter-toolbar">
-              <button type="button" className="btn primary" disabled={busy} onClick={() => (tab === "by_account" ? void loadAccounts() : void loadRows())}>
+              <button
+                type="button"
+                className="btn primary"
+                disabled={busy}
+                onClick={() => {
+                  setPageOffset(0);
+                  setSelectedIds(new Set());
+                  return tab === "by_account" ? void loadAccounts() : void loadRows();
+                }}
+              >
                 Apply filters
               </button>
               <button type="button" className="btn ghost" disabled={activeFilterCount === 0} onClick={clearFilters}>
@@ -619,9 +780,52 @@ export default function QuoteLibraryApp() {
             <section className="card">
               <div className="card-head">
                 <h2>Quotes</h2>
-                <span className="card-meta">
-                  {busy ? "Loading…" : `Showing ${rows.length} of up to ${QUOTE_PAGE_LIMIT} quotes`}
-                </span>
+                <span className="card-meta">{listCountLabel}</span>
+              </div>
+              <div className="list-toolbar">
+                <div className="pagination-controls">
+                  <button
+                    type="button"
+                    className="btn ghost btn-xs"
+                    disabled={busy || pageOffset <= 0}
+                    onClick={() => setPageOffset(Math.max(0, pageOffset - pageSize))}
+                  >
+                    Previous
+                  </button>
+                  <button
+                    type="button"
+                    className="btn ghost btn-xs"
+                    disabled={busy || !listMeta.has_more}
+                    onClick={() => setPageOffset(pageOffset + pageSize)}
+                  >
+                    Next
+                  </button>
+                  <label className="page-size-control">
+                    Page size
+                    <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value) || DEFAULT_PAGE_SIZE)}>
+                      {PAGE_SIZE_OPTIONS.map((n) => (
+                        <option key={n} value={n}>
+                          {n}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                {selectedCount ? (
+                  <div className="batch-bar">
+                    <strong>
+                      {selectedCount} selected
+                    </strong>
+                    <button type="button" className="btn danger btn-xs" disabled={batchBusy} onClick={() => void archiveSelected()}>
+                      Archive selected
+                    </button>
+                    <button type="button" className="btn ghost btn-xs" disabled={batchBusy} onClick={() => setSelectedIds(new Set())}>
+                      Clear
+                    </button>
+                  </div>
+                ) : (
+                  <span className="muted">Select visible active quotes to archive them in bulk.</span>
+                )}
               </div>
               {!busy && rows.length === 0 && tab === "internal" ? (
                 <div className="empty-state">
@@ -644,6 +848,17 @@ export default function QuoteLibraryApp() {
                   <table className="ql-table data">
                     <thead>
                       <tr>
+                        <th className="col-select">
+                          <input
+                            type="checkbox"
+                            aria-label="Select all visible quotes"
+                            checked={allVisibleSelected}
+                            data-partial={visibleSelectionIsPartial ? "true" : "false"}
+                            disabled={!selectableIds.length}
+                            onChange={(e) => toggleSelectVisible(e.target.checked)}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        </th>
                         <th className="col-num">Quote #</th>
                         <th>Account</th>
                         <th className="hide-sm">Project</th>
@@ -663,8 +878,21 @@ export default function QuoteLibraryApp() {
                       {rows.map((r) => {
                         const ac = displayAccountColumn(r);
                         const handoffLabel = labelHandoffRollup(r.handoff_status, r.moraware_doc_status, r.quickbooks_doc_status);
+                        const rowId = str(r.id);
+                        const selectable = canBatchArchiveRow(r);
                         return (
-                          <tr key={str(r.id)} className="clickable" onClick={() => setDetailId(str(r.id))}>
+                          <tr key={rowId} className="clickable" onClick={() => setDetailId(rowId)}>
+                            <td className="col-select">
+                              <input
+                                type="checkbox"
+                                aria-label={`Select quote ${str(r.quote_number_revision_summary || r.quote_number) || rowId}`}
+                                checked={selectedIds.has(rowId)}
+                                disabled={!selectable}
+                                title={selectable ? "Select for batch archive" : "Archived or sold quotes are not available for batch archive"}
+                                onChange={(e) => toggleSelectedId(rowId, e.target.checked)}
+                                onClick={(e) => e.stopPropagation()}
+                              />
+                            </td>
                             <td className="col-num">
                               <span className="quote-num">{str(r.quote_number_revision_summary || r.quote_number)}</span>
                             </td>
