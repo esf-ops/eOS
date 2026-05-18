@@ -236,6 +236,79 @@ MORAWARE_SYNC_IMPORT_FILE=debug/moraware/live-capped/live-capped-moraware-snapsh
 npm run eos:moraware:import-snapshot
 ```
 
+For 100-job live capped snapshots and larger, use chunked import. Vercel rejects oversized request bodies before backend code runs, which appears as `HTTP 413 Request Entity Too Large` / `FUNCTION_PAYLOAD_TOO_LARGE`. Chunking keeps the protected import endpoint unchanged and sends several smaller payloads instead. Each chunk currently creates its own `moraware_sync_runs` row; all rows are tied together by `metadata.import_group_id`.
+
+Recommended chunk sizes:
+
+- jobs: `20`
+- activities: `100`
+- forms: `100`
+- files: `50`
+- assignees/resources: `50`
+
+Chunked import command:
+
+```bash
+MORAWARE_IMPORT_CHUNKED=1 \
+MORAWARE_IMPORT_MAX_JOBS_PER_CHUNK=20 \
+MORAWARE_IMPORT_MAX_ACTIVITIES_PER_CHUNK=100 \
+MORAWARE_IMPORT_MAX_FORMS_PER_CHUNK=100 \
+MORAWARE_IMPORT_MAX_FILES_PER_CHUNK=50 \
+MORAWARE_IMPORT_MAX_ASSIGNEES_PER_CHUNK=50 \
+BACKEND_URL=https://backend-core-six.vercel.app \
+MORAWARE_SYNC_IMPORT_SECRET=... \
+MORAWARE_DEFAULT_ORGANIZATION_ID=89180433-9fab-4024-bec9-a14d870bd0a8 \
+MORAWARE_SYNC_IMPORT_FILE=debug/moraware/live-capped/live-capped-moraware-snapshot.json \
+npm run eos:moraware:import-snapshot
+```
+
+Verify a chunk group:
+
+```sql
+select
+  id,
+  status,
+  started_at,
+  finished_at,
+  row_counts,
+  metadata->>'import_group_id' as import_group_id,
+  (metadata->>'chunk_index')::int as chunk_index,
+  (metadata->>'chunk_count')::int as chunk_count,
+  metadata->'chunk_counts' as chunk_counts,
+  metadata->'parent_snapshot_counts' as parent_snapshot_counts
+from public.moraware_sync_runs
+where metadata->>'import_group_id' = '<IMPORT_GROUP_ID>'
+order by (metadata->>'chunk_index')::int;
+
+select
+  metadata->>'import_group_id' as import_group_id,
+  count(*) as chunks,
+  count(*) filter (where status = 'success') as successful_chunks,
+  sum(coalesce((row_counts->>'accounts')::int, 0)) as accounts_seen,
+  sum(coalesce((row_counts->>'jobs')::int, 0)) as jobs_seen,
+  sum(coalesce((row_counts->>'job_activities')::int, 0)) as activities_seen,
+  sum(coalesce((row_counts->>'job_forms')::int, 0)) as forms_seen,
+  sum(coalesce((row_counts->>'job_files')::int, 0)) as files_seen,
+  sum(coalesce((row_counts->>'assignees')::int, 0)) as assignees_seen
+from public.moraware_sync_runs
+where metadata->>'import_group_id' = '<IMPORT_GROUP_ID>'
+group by metadata->>'import_group_id';
+
+select
+  sync_run_id,
+  finding_type,
+  severity,
+  count(*) as finding_count
+from public.moraware_data_quality_findings
+where sync_run_id in (
+  select id
+  from public.moraware_sync_runs
+  where metadata->>'import_group_id' = '<IMPORT_GROUP_ID>'
+)
+group by sync_run_id, finding_type, severity
+order by finding_count desc;
+```
+
 Schedule recommendation, after one or more successful manual live capped imports:
 
 - Start with a manual live capped run during business hours.
