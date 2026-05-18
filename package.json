@@ -32,6 +32,7 @@
     "eos:discover:moraware-expanded": "node backend-core/src/scripts/discoverMorawareExpandedCoverage.js",
     "eos:discover:moraware-machines": "node backend-core/src/scripts/discoverMorawareMachinesCalendar.js",
     "eos:discover:moraware-wsdl": "node backend-core/src/scripts/discoverMorawareWsdl.js",
+    "eos:moraware:generate-live-capped-snapshot": "node backend-core/src/scripts/moraware/generateLiveCappedSnapshot.js",
     "eos:moraware:generate-tiny-snapshot": "node backend-core/src/scripts/moraware/generateTinySnapshot.js",
     "eos:moraware:import-snapshot": "node backend-core/src/scripts/moraware/importSnapshotToBrain.js",
     "eos:moraware:verify-tiny-mapping": "node backend-core/src/scripts/moraware/verifyTinySnapshotMapping.mjs",

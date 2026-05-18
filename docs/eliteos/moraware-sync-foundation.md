@@ -193,27 +193,79 @@ group by finding_type, severity
 order by finding_count desc;
 ```
 
-## Windows Task Scheduler
+## Live Capped Snapshot
 
-Suggested first schedule:
+Once manual snapshot imports are validated, the next repeatable runner is the Node HTTP/XML path, not the Windows SDK. The current validated v1 scope (jobs, forms/custom fields, operational activities, status/process from operational artifacts) is available through `src/morawareClient.js` + `src/morawareDiscovery.js`. The Windows `JobTrackerAPI5.dll` worker remains for unresolved SDK-only surfaces such as deeper activity-to-resource/machine assignment.
 
-- Manual baseline sync first.
-- Incremental every 30 minutes during business hours only after modified-date filtering is proven safe.
-- Nightly reconciliation/full-ish sync if safe.
+Generate a live capped snapshot (read-only Moraware; local ignored output only):
 
-Task Scheduler command:
+```bash
+MORAWARE_API_URL=... \
+MORAWARE_USERNAME=... \
+MORAWARE_PASSWORD=... \
+MORAWARE_DEFAULT_ORGANIZATION_ID=... \
+MORAWARE_LIVE_MAX_JOBS=100 \
+MORAWARE_LIVE_MAX_ACTIVITIES=500 \
+MORAWARE_LIVE_MAX_FORMS=500 \
+MORAWARE_LIVE_MAX_FILES=250 \
+MORAWARE_LIVE_MAX_ASSIGNEES=100 \
+npm run eos:moraware:generate-live-capped-snapshot
+```
+
+The runner sets conservative defaults:
+
+- `SUPABASE_WRITE_ENABLED=0` always, so this step cannot write directly to Supabase.
+- `MORAWARE_DISCOVERY_MODE=global-sync`.
+- `MORAWARE_INGEST_OPERATIONAL=1`.
+- `MORAWARE_INGEST_FORMS=1`.
+- `MORAWARE_MAX_JOBS_TO_INGEST=<MORAWARE_LIVE_MAX_JOBS>`.
+- output: `debug/moraware/live-capped/live-capped-moraware-snapshot.json`.
+
+Inspect counts only:
+
+```bash
+node -e "const fs=require('fs'); const p='debug/moraware/live-capped/live-capped-moraware-snapshot.json'; const x=JSON.parse(fs.readFileSync(p,'utf8')); console.log(Object.fromEntries(Object.entries(x.batches||{}).map(([k,v])=>[k,Array.isArray(v)?v.length:0]))); console.log({jobs_with_status:(x.batches.jobs||[]).filter(j=>String(j.status_name||j.jobStatus||j.status||'').trim()).length,jobs_with_process:(x.batches.jobs||[]).filter(j=>String(j.process_name||j.processName||j.process||'').trim()).length});"
+```
+
+Import the live capped snapshot manually:
+
+```bash
+BACKEND_URL=https://backend-core-six.vercel.app \
+MORAWARE_SYNC_IMPORT_SECRET=... \
+MORAWARE_SYNC_IMPORT_FILE=debug/moraware/live-capped/live-capped-moraware-snapshot.json \
+npm run eos:moraware:import-snapshot
+```
+
+Schedule recommendation, after one or more successful manual live capped imports:
+
+- Start with a manual live capped run during business hours.
+- Then schedule a capped 100-job run every 60 minutes during business hours for observation only.
+- Move to every 30 minutes only after `moraware_sync_runs` duration, row counts, and data-quality findings are stable.
+- Keep a nightly reconciliation/full-ish plan separate; do not enable until modified-date/page filtering is proven safe.
+
+Windows Task Scheduler is not required for the validated v1 live capped scope. Use the Windows SDK probes only when targeting SDK-only surfaces such as machine/resource assignment:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "cd C:\eliteOS\eOS; npm run eos:moraware:import-snapshot"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/moraware-sdk-trace/MorawareSdkActivityAssigneeLinkProbe.ps1
+```
+
+## Future Windows Task Scheduler
+
+Do not schedule automatically yet. When scheduling is approved later, prefer scheduling the live capped snapshot plus import as two explicit commands so the ignored JSON artifact remains inspectable between steps.
+
+Example future Task Scheduler command:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "cd C:\eliteOS\eOS; npm run eos:moraware:generate-live-capped-snapshot; $env:MORAWARE_SYNC_IMPORT_FILE='debug/moraware/live-capped/live-capped-moraware-snapshot.json'; npm run eos:moraware:import-snapshot"
 ```
 
 Environment on the Windows machine:
 
 - `BACKEND_URL`
 - `MORAWARE_SYNC_IMPORT_SECRET`
-- `MORAWARE_SYNC_IMPORT_FILE`
 - `MORAWARE_DEFAULT_ORGANIZATION_ID` if the payload omits `organization_id`
-- Moraware credentials only if the same scheduled task also runs the DLL/HTTP read step.
+- `MORAWARE_API_URL`, `MORAWARE_USERNAME`, `MORAWARE_PASSWORD`
+- `MORAWARE_LIVE_MAX_JOBS`, `MORAWARE_LIVE_MAX_ACTIVITIES`, `MORAWARE_LIVE_MAX_FORMS`, `MORAWARE_LIVE_MAX_FILES`, `MORAWARE_LIVE_MAX_ASSIGNEES`
 
 Write worker logs outside the repo or under ignored `debug/moraware/`. Success is HTTP 200 from the import endpoint with `sync_run_id`, row counts, and data quality count. Failure is a non-zero process exit and a failed/error sync run if the backend received the request.
 

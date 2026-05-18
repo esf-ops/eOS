@@ -440,9 +440,9 @@ async function buildSnapshotFromSource(sourceAbs, input, statusSourceMap = new M
   return { batches, sourceShape };
 }
 
-async function main() {
-  const sourceFile = process.env.MORAWARE_TINY_SOURCE_FILE || process.env.MORAWARE_SYNC_SOURCE_FILE || DEFAULT_SOURCE;
-  const outFile = process.env.MORAWARE_TINY_OUTPUT_FILE || DEFAULT_OUT;
+export async function generateSnapshotFile(options = {}) {
+  const sourceFile = options.sourceFile || process.env.MORAWARE_TINY_SOURCE_FILE || process.env.MORAWARE_SYNC_SOURCE_FILE || DEFAULT_SOURCE;
+  const outFile = options.outFile || process.env.MORAWARE_TINY_OUTPUT_FILE || DEFAULT_OUT;
   const { abs: sourceAbs, json } = await readJson(sourceFile);
   const { map: statusSourceMap, sourceFile: statusSourceFile } = await loadStatusSourceMap();
   const { batches, sourceShape } = await buildSnapshotFromSource(sourceAbs, json, statusSourceMap);
@@ -474,6 +474,11 @@ async function main() {
     caps: CAPS,
     counts
   });
+  return { output: outAbs, source: sourceAbs, sourceShape, counts, caps: CAPS, mode: SNAPSHOT_MODE };
+}
+
+async function main() {
+  await generateSnapshotFile();
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
