@@ -26,6 +26,20 @@ function assertSalesRoleExports() {
 }
 assertSalesRoleExports();
 
+function isUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value ?? "").trim());
+}
+
+function resolveSalesOrganizationId(req) {
+  const queryOrg = String(req.query?.organization_id ?? "").trim();
+  if (isUuid(queryOrg)) return queryOrg;
+  const userOrg = String(req.user?.organization_id ?? "").trim();
+  if (isUuid(userOrg)) return userOrg;
+  const defaultOrg = String(process.env.MORAWARE_DEFAULT_ORGANIZATION_ID ?? "").trim();
+  if (isUuid(defaultOrg)) return defaultOrg;
+  return "";
+}
+
 const RANGE_KEYS = new Set([
   "today",
   "yesterday",
@@ -558,7 +572,8 @@ export async function salesPerformanceIntelligenceHandler(req, supabaseGetter) {
   const dataNotes = [
     "Revenue, quote value, close rate, and pipeline will unlock with Quote Platform.",
     "Worksheet Sq.Ft. uses brain_jobs.worksheet_sqft (same as Executive Head).",
-    "Only Casey Schenke, Thera McEnany, and Michael Joseph are active_rep; other Moraware names are fallback unless overridden."
+    "Only approved Sales Account Mapping Admin rows are trusted account/branch attribution.",
+    "Legacy local account rules are attribution preview only and must not be used as production branch truth."
   ];
 
   const executiveSnapshot = {
@@ -782,10 +797,10 @@ export async function salesPerformanceIntelligenceHandler(req, supabaseGetter) {
 
   const quality = aggregateMethodQuality(curE);
   const classificationPanel = {
-    title: "Classification Rules & Data Quality",
+    title: "Attribution Preview & Data Quality",
     appliedAccountRules: [...ACCOUNT_RULES_DOCUMENTATION],
     disclaimer:
-      "Moraware remains the source of truth for production square footage. eliteOS classification rules are used only to normalize branch/location and salesperson attribution. Unmatched accounts remain in totals and are marked as Moraware fallback.",
+      "Moraware remains the source of truth for production square footage. Only approved Sales Account Mapping Admin rows are trusted for account -> branch/location/salesperson attribution; local fallback rules are preview signals only.",
     methodTable: quality.methodRows,
     mappedVolumePct: quality.mappedVolumePct,
     unmappedVolumePct: quality.unmappedVolumePct,
@@ -1651,6 +1666,223 @@ export async function salesDebugHandler(req, supabaseGetter) {
   };
 }
 
+async function safeCount(supabase, table, organizationId) {
+  try {
+    let q = supabase.from(table).select("id", { count: "exact", head: true });
+    if (organizationId) q = q.eq("organization_id", organizationId);
+    const { count, error } = await q;
+    if (error) return { count: null, error: error.message };
+    return { count: count ?? 0, error: null };
+  } catch (e) {
+    return { count: null, error: String(e?.message ?? e) };
+  }
+}
+
+function increment(map, key, by = 1) {
+  const k = String(key ?? "").trim() || "Unassigned";
+  map.set(k, (map.get(k) || 0) + by);
+}
+
+function mapToRows(map, keyName = "name") {
+  return [...map.entries()]
+    .map(([key, count]) => ({ [keyName]: key, count }))
+    .sort((a, b) => b.count - a.count || String(a[keyName]).localeCompare(String(b[keyName])));
+}
+
+async function loadLatestMorawareGroup(supabase, organizationId) {
+  let latestQ = supabase.from("moraware_sync_runs").select("*").order("started_at", { ascending: false }).limit(1);
+  let successQ = supabase.from("moraware_sync_runs").select("*").eq("status", "success").order("finished_at", { ascending: false }).limit(1);
+  if (organizationId) {
+    latestQ = latestQ.eq("organization_id", organizationId);
+    successQ = successQ.eq("organization_id", organizationId);
+  }
+  const [latest, success] = await Promise.all([latestQ, successQ]);
+  if (latest.error) throw latest.error;
+  if (success.error) throw success.error;
+  const latestRun = latest.data?.[0] ?? null;
+  const lastSuccess = success.data?.[0] ?? null;
+  const importGroupId = String(latestRun?.metadata?.import_group_id ?? lastSuccess?.metadata?.import_group_id ?? "").trim();
+  let groupRows = [];
+  if (importGroupId) {
+    let groupQ = supabase
+      .from("moraware_sync_runs")
+      .select("id,status,started_at,finished_at,row_counts,metadata")
+      .filter("metadata->>import_group_id", "eq", importGroupId)
+      .order("started_at", { ascending: true })
+      .limit(100);
+    if (organizationId) groupQ = groupQ.eq("organization_id", organizationId);
+    const group = await groupQ;
+    if (group.error) throw group.error;
+    groupRows = group.data || [];
+  }
+  const totalRowCounts = groupRows.reduce((acc, row) => {
+    for (const [key, value] of Object.entries(row.row_counts || {})) acc[key] = (acc[key] || 0) + (Number(value) || 0);
+    return acc;
+  }, {});
+  const lastSuccessAgeSeconds = lastSuccess?.finished_at
+    ? Math.max(0, Math.round((Date.now() - Date.parse(String(lastSuccess.finished_at))) / 1000))
+    : null;
+  return {
+    latest_run: latestRun
+      ? {
+          id: latestRun.id,
+          status: latestRun.status,
+          started_at: latestRun.started_at,
+          finished_at: latestRun.finished_at,
+          row_counts: latestRun.row_counts || {},
+          import_group_id: String(latestRun?.metadata?.import_group_id ?? "") || null
+        }
+      : null,
+    last_successful_run: lastSuccess
+      ? {
+          id: lastSuccess.id,
+          status: lastSuccess.status,
+          started_at: lastSuccess.started_at,
+          finished_at: lastSuccess.finished_at,
+          row_counts: lastSuccess.row_counts || {},
+          import_group_id: String(lastSuccess?.metadata?.import_group_id ?? "") || null
+        }
+      : null,
+    latest_group: importGroupId
+      ? {
+          import_group_id: importGroupId,
+          chunk_count: groupRows.length,
+          expected_chunk_count: groupRows[0]?.metadata?.chunk_count ?? latestRun?.metadata?.chunk_count ?? null,
+          successful_chunks: groupRows.filter((r) => r.status === "success").length,
+          failed_chunks: groupRows.filter((r) => r.status === "failed").length,
+          total_row_counts: totalRowCounts
+        }
+      : null,
+    last_success_age_seconds: lastSuccessAgeSeconds
+  };
+}
+
+async function safeQuotePipelineSummary(supabase, organizationId) {
+  const quoteCount = await safeCount(supabase, "quote_headers", organizationId);
+  const forecastCount = await safeCount(supabase, "quote_forecast_events", organizationId);
+  let statusRows = [];
+  try {
+    let q = supabase.from("quote_headers").select("quote_status").limit(1000);
+    if (organizationId) q = q.eq("organization_id", organizationId);
+    const { data, error } = await q;
+    if (!error) statusRows = data || [];
+  } catch {
+    statusRows = [];
+  }
+  const byStatus = new Map();
+  for (const row of statusRows) increment(byStatus, row.quote_status);
+  return {
+    quote_headers_count: quoteCount.count,
+    quote_headers_error: quoteCount.error,
+    quote_forecast_events_count: forecastCount.count,
+    quote_forecast_events_error: forecastCount.error,
+    status_breakdown: mapToRows(byStatus, "status")
+  };
+}
+
+export async function salesDashboardFoundationHandler(req, supabaseGetter) {
+  const supabase = supabaseGetter();
+  const organizationId = resolveSalesOrganizationId(req);
+  if (!organizationId) {
+    return { status: 400, body: { ok: false, error: "Sales dashboard requires organization_id context." } };
+  }
+
+  const [syncHealth, accountCount, activityCount, resourceCount, rawFormsCount, rawFilesCount, rawAssigneesCount, quotePipeline] =
+    await Promise.all([
+      loadLatestMorawareGroup(supabase, organizationId),
+      safeCount(supabase, "brain_moraware_accounts", organizationId),
+      safeCount(supabase, "brain_moraware_job_activities", organizationId),
+      safeCount(supabase, "brain_moraware_resources", organizationId),
+      safeCount(supabase, "moraware_raw_job_forms", organizationId),
+      safeCount(supabase, "moraware_raw_job_files", organizationId),
+      safeCount(supabase, "moraware_raw_assignees", organizationId),
+      safeQuotePipelineSummary(supabase, organizationId)
+    ]);
+
+  let jobsQ = supabase
+    .from("brain_moraware_jobs")
+    .select("source_job_id,source_account_id,status_name,process_name,salesperson_name,created_at_source,modified_at_source")
+    .eq("organization_id", organizationId)
+    .limit(5000);
+  const jobsRes = await jobsQ;
+  if (jobsRes.error) return { status: 500, body: { ok: false, error: jobsRes.error.message } };
+
+  const jobs = jobsRes.data || [];
+  const byStatus = new Map();
+  const byProcess = new Map();
+  const bySalesperson = new Map();
+  let newestJobDate = "";
+  let oldestJobDate = "";
+  const accountIds = new Set();
+  for (const job of jobs) {
+    increment(byStatus, job.status_name);
+    increment(byProcess, job.process_name);
+    increment(bySalesperson, job.salesperson_name);
+    const accountId = String(job.source_account_id ?? "").trim();
+    if (accountId) accountIds.add(accountId);
+    const d = String(job.created_at_source ?? "").slice(0, 10);
+    if (d) {
+      if (!newestJobDate || d > newestJobDate) newestJobDate = d;
+      if (!oldestJobDate || d < oldestJobDate) oldestJobDate = d;
+    }
+  }
+
+  return {
+    status: 200,
+    body: {
+      ok: true,
+      organization_id: organizationId,
+      blueprint_preserve: [
+        "ESF Total and Individual Rep tabs",
+        "date, branch, collection, Elite group, search, manufacturer, and color filters",
+        "quick ranges: YTD, Q1, April, last 30, current week, full 2025, all loaded",
+        "company and rep KPI cards",
+        "monthly YoY trend",
+        "Elite 100 mix and group breakdown",
+        "manufacturer mix",
+        "rep summary and coaching insights",
+        "top accounts/producers and accounts needing attention",
+        "top Elite 100 and out-of-collection colors",
+        "rep-specific account detail"
+      ],
+      sync_health: syncHealth,
+      actuals: {
+        source: "brain_moraware_*",
+        jobs_count: jobs.length,
+        accounts_count: accountCount.count,
+        active_account_ids_in_jobs: accountIds.size,
+        job_activities_count: activityCount.count,
+        job_forms_count: rawFormsCount.count,
+        job_files_count: rawFilesCount.count,
+        assignees_count: rawAssigneesCount.count,
+        resources_count: resourceCount.count,
+        oldest_job_created_at: oldestJobDate || null,
+        newest_job_created_at: newestJobDate || null,
+        status_breakdown: mapToRows(byStatus, "status"),
+        process_breakdown: mapToRows(byProcess, "process"),
+        salesperson_breakdown: mapToRows(bySalesperson, "salesperson").slice(0, 12)
+      },
+      quote_pipeline: quotePipeline,
+      data_contract: {
+        actuals: "Moraware Brain tables provide job/account/activity/status/process actuals.",
+        forward_pipeline: "Quote Library quote_headers and quote_forecast_events provide future quote/forecast signals when populated.",
+        mappings: "Elite 100 color/group/manufacturer/account attribution should remain backend-owned/admin-configurable.",
+        account_branch_attribution:
+          "Trusted account -> branch/location/salesperson attribution must come from approved Sales Account Mapping Admin rows, not local fallback rules.",
+        attribution_status: "preview_needs_approved_mapping",
+        no_frontend_sources: "Frontend reads this backend aggregate only; it never calls Moraware or receives credentials."
+      },
+      gaps: [
+        "sqft/revenue actuals are not yet normalized in brain_moraware_jobs",
+        "Elite 100 color/group/manufacturer mapping is not yet connected to Moraware foundation rows",
+        "account/branch attribution needs approved backend mapping between Moraware account/customer names and sales ownership/location",
+        "job_files and assignees may be absent from current live capped imports",
+        "machine/resource assignment and material inventory are intentionally out of scope for this pass"
+      ]
+    }
+  };
+}
+
 /**
  * Register Sales Head read routes. Matches Executive pattern: requireAuth → requireRole (admin bypass) → head access.
  * @param {import("express").Application} app
@@ -1689,6 +1921,13 @@ export function attachSalesHeadRoutes(app, { requireAuth, requireRole, requireHe
   app.get("/api/sales/trend", requireAuth(), requireRole(roleList), headAccessSales, execSales(salesTrendHandler));
   app.get("/api/sales/jobs", requireAuth(), requireRole(roleList), headAccessSales, execSales(salesJobsHandler));
   app.get("/api/sales/filters", requireAuth(), requireRole(roleList), headAccessSales, execSales(salesFiltersHandler));
+  app.get(
+    "/api/sales/dashboard-foundation",
+    requireAuth(),
+    requireRole(roleList),
+    headAccessSales,
+    execSales(salesDashboardFoundationHandler)
+  );
   app.get(
     "/api/sales/performance-intelligence",
     requireAuth(),

@@ -1462,6 +1462,7 @@ if (shouldStartLocalHttpServer()) {
     console.log("- GET /api/sales/trend");
     console.log("- GET /api/sales/jobs");
     console.log("- GET /api/sales/filters");
+    console.log("- GET /api/sales/dashboard-foundation");
     console.log("- GET /api/sales/performance-intelligence");
     console.log("- GET /api/sales/debug");
     console.log("- GET /api/admin/users  (alias: GET /api/system-admin/users)");

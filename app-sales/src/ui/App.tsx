@@ -4,6 +4,7 @@ import { apiFetch } from "../lib/api";
 import { config } from "../lib/config";
 import { supabase } from "../lib/supabase";
 import type { FiltersResponse, MeResp } from "../lib/types";
+import SalesCommandCenterView from "./SalesCommandCenterView";
 import SalesIntelligenceView from "./SalesIntelligenceView";
 import QuotePipelinePanel from "./QuotePipelinePanel";
 import "./sales-intelligence.css";
@@ -45,7 +46,7 @@ function buildLegacyFilterQuery(f: FilterState): string {
 
 export default function App() {
   const [advFiltersOpen, setAdvFiltersOpen] = useState(false);
-  const [salesTab, setSalesTab] = useState<"intelligence" | "quote_pipeline">("intelligence");
+  const [salesTab, setSalesTab] = useState<"command_center" | "intelligence" | "quote_pipeline">("command_center");
 
   const [session, setSession] = useState<Session | null>(null);
   const [email, setEmail] = useState("");
@@ -229,10 +230,17 @@ export default function App() {
           <div className="sales-tabbar" style={{ marginRight: 8 }}>
             <button
               type="button"
+              className={`btn ${salesTab === "command_center" ? "tab-on" : ""}`}
+              onClick={() => setSalesTab("command_center")}
+            >
+              Command center
+            </button>
+            <button
+              type="button"
               className={`btn ${salesTab === "intelligence" ? "tab-on" : ""}`}
               onClick={() => setSalesTab("intelligence")}
             >
-              Performance intelligence
+              Legacy intelligence
             </button>
             <button type="button" className={`btn ${salesTab === "quote_pipeline" ? "tab-on" : ""}`} onClick={() => setSalesTab("quote_pipeline")}>
               Quote pipeline
@@ -267,7 +275,9 @@ export default function App() {
           ) : null}
 
           <div className="sales-main" style={{ paddingTop: loadError && !accessForbidden ? "0.5rem" : undefined }}>
-            {salesTab === "quote_pipeline" ? (
+            {salesTab === "command_center" ? (
+              <SalesCommandCenterView token={token} onLoadError={onPiLoadError} />
+            ) : salesTab === "quote_pipeline" ? (
               <QuotePipelinePanel token={token} />
             ) : (
               <>

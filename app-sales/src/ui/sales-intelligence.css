@@ -167,6 +167,69 @@
   margin-top: 1.5rem;
 }
 
+.sales-sync-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  border: 1px solid var(--pi-warn-border);
+  background: var(--pi-warn-bg);
+  border-radius: 12px;
+  padding: 0.85rem 1rem;
+  margin-bottom: 1rem;
+}
+
+.sales-sync-banner--ok {
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+.sales-sync-banner p {
+  margin: 0.2rem 0 0;
+  color: var(--pi-muted);
+  font-size: 0.85rem;
+}
+
+.sales-attribution-guardrail {
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  border-radius: 12px;
+  padding: 0.85rem 1rem;
+  margin-bottom: 1rem;
+}
+
+.sales-attribution-guardrail p {
+  margin: 0.25rem 0 0;
+  color: var(--pi-muted);
+  font-size: 0.85rem;
+}
+
+.sales-foundation-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1rem;
+}
+
+.sales-placeholder-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.65rem;
+}
+
+.sales-placeholder-card {
+  border: 1px solid var(--pi-border);
+  background: var(--pi-panel);
+  border-radius: 10px;
+  padding: 0.8rem;
+  color: var(--pi-text);
+  font-size: 0.85rem;
+}
+
+.sales-placeholder-card--warn {
+  background: var(--pi-warn-bg);
+  border-color: var(--pi-warn-border);
+}
+
 .pi-section h2 {
   margin: 0 0 0.5rem;
   font-size: 1rem;

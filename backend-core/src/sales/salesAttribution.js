@@ -2,7 +2,8 @@
  * Sales attribution & classification for Sales Head (Brain job rows).
  * Moraware remains source of truth for raw `salesperson_name`; eliteOS adds normalized attribution for dashboards.
  *
- * Edit ACCOUNT_EXACT_OVERRIDES / ACCOUNT_SUBSTRING_OVERRIDES / SKOGMAN_ACCOUNT_RULE below as business rules evolve.
+ * Local ACCOUNT_* rules are legacy preview fallbacks only. Trusted account -> branch/location/salesperson
+ * attribution must come from approved Sales Account Mapping Admin rows.
  */
 
 /** Elite active sales reps — only these are "active_rep" when Moraware matches exactly. */
@@ -17,11 +18,12 @@ export const BRANCH_UNMAPPED = "Unmapped / Moraware only";
 
 /** Human-readable rules list for Classification Rules panel (must match logic below). */
 export const ACCOUNT_RULES_DOCUMENTATION = Object.freeze([
-  "Fox Countertops → Lisbon / House Account - Lisbon (exact account name)",
-  "Aceno → Lisbon / House Account - Lisbon (exact account name)",
-  "Cambrian Granite & Stone → Dyersville / House Account - Dyersville (exact account name)",
-  "All accounts whose name contains “Skogman” → Dyersville / Casey Schenke (substring rule)",
-  "Moraware remains the source of truth for production square footage. eliteOS classification rules are used only to normalize branch/location and salesperson attribution. Unmatched accounts remain in totals and are marked as Moraware fallback."
+  "Legacy preview fallback only: Fox Countertops → Lisbon / House Account - Lisbon (exact account name)",
+  "Legacy preview fallback only: Aceno → Lisbon / House Account - Lisbon (exact account name)",
+  "Legacy preview fallback only: Cambrian Granite & Stone → Dyersville / House Account - Dyersville (exact account name)",
+  "Legacy preview fallback only: accounts whose name contains “Skogman” → Dyersville / Casey Schenke (substring rule)",
+  "Blackstone is explicitly not attributed to Dyersville. It remains Moraware fallback unless Chris approves a Brain mapping later.",
+  "Only approved Sales Account Mapping Admin rows are trusted account/branch attribution. Preview fallback rules must not be treated as production truth."
 ]);
 
 function isMissingRelationError(error) {
@@ -202,6 +204,19 @@ export function classifySalesJob(job, mappings = null) {
     }
   }
 
+  if (acctKey.includes("blackstone")) {
+    return {
+      morawareSalesperson,
+      normalizedSalesperson: morawareSalesperson || "(unknown)",
+      branch: BRANCH_UNMAPPED,
+      salespersonClass: morawareSalesperson ? "fallback_moraware" : "unknown",
+      classificationMethod: "blackstone_guardrail",
+      classificationConfidence: "high",
+      classificationNote:
+        "Blackstone must not be attributed to Dyersville from legacy dashboard data; keep unmapped unless Chris approves a Brain mapping."
+    };
+  }
+
   /** @type {{ branch: string, normalizedSalesperson: string, salespersonClass: string, method: string, confidence: string, note: string }} */
   let hit = null;
 
@@ -211,8 +226,8 @@ export function classifySalesJob(job, mappings = null) {
         branch: rule.branch,
         normalizedSalesperson: rule.normalizedSalesperson,
         salespersonClass: rule.salespersonClass,
-        method: "user_override",
-        confidence: "high",
+        method: "legacy_preview_rule",
+        confidence: "low",
         note: rule.note
       };
       break;
@@ -227,8 +242,8 @@ export function classifySalesJob(job, mappings = null) {
           branch: rule.branch,
           normalizedSalesperson: rule.normalizedSalesperson,
           salespersonClass: rule.salespersonClass,
-          method: "substring_rule",
-          confidence: "high",
+          method: "legacy_preview_rule",
+          confidence: "low",
           note: rule.note
         };
         break;
@@ -244,7 +259,7 @@ export function classifySalesJob(job, mappings = null) {
       salespersonClass: hit.salespersonClass,
       classificationMethod: hit.method,
       classificationConfidence: hit.confidence,
-      classificationNote: hit.note
+      classificationNote: `Attribution preview / needs approved mapping: ${hit.note}`
     };
   }
 
@@ -318,6 +333,7 @@ export function classifySalesJob(job, mappings = null) {
 export function methodLabelForDisplay(method) {
   const m = String(method ?? "");
   if (m === "user_override") return "User override";
+  if (m === "legacy_preview_rule") return "Attribution preview - needs approved mapping";
   if (m === "exact_master_match") return "Exact master match";
   if (m === "substring_rule") return "Substring rule";
   if (m === "prior_dashboard") return "Prior dashboard classification carried forward";
