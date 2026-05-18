@@ -7,17 +7,29 @@ function requiredEnv(name: string): string {
 
 function normalizedBackendBaseUrl(): string {
   const raw = String(import.meta.env.VITE_BACKEND_URL ?? "").trim();
-  if (raw) return raw.replace(/\/+$/, "").replace(/\/api$/i, "");
+  if (raw) {
+    const normalized = raw.replace(/\/+$/, "").replace(/\/api$/i, "");
+    if (!import.meta.env.DEV && /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(:\d+)?$/i.test(normalized)) {
+      throw new Error("VITE_BACKEND_URL cannot point to localhost in production.");
+    }
+    return normalized;
+  }
   /** Dev default: empty → same origin; Vite proxies `/api` to backend (see vite.config.ts). */
   if (import.meta.env.DEV) return "";
-  return "http://localhost:3001";
+  throw new Error("Missing required env var: VITE_BACKEND_URL");
+}
+
+function normalizedHomeUrl(): string {
+  const raw = String(import.meta.env.VITE_HOME_URL ?? "").trim();
+  if (raw) return raw.replace(/\/+$/, "");
+  return import.meta.env.DEV ? "http://localhost:5177" : "https://www.eliteosfab.com";
 }
 
 export const config = {
   supabaseUrl: requiredEnv("VITE_SUPABASE_URL"),
   supabaseAnonKey: requiredEnv("VITE_SUPABASE_ANON_KEY"),
   backendBaseUrl: normalizedBackendBaseUrl(),
-  homeUrl: String(import.meta.env.VITE_HOME_URL ?? "http://localhost:5177").replace(/\/+$/, "")
+  homeUrl: normalizedHomeUrl()
 };
 
 if (import.meta.env.DEV) {

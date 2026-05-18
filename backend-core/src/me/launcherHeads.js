@@ -38,9 +38,10 @@ export const HEAD_LAUNCHER_CATALOG = [
   {
     slug: "sales",
     label: "eliteOS Sales Head",
-    description: "Sales performance, account growth, and sales flow into the Titans.",
+    description: "Sales dashboard preview: sync health, starter KPIs, and attribution-labeled revenue views.",
     category: "Revenue",
-    href: "/sales"
+    href: "/sales",
+    roleNote: "Preview only until approved account attribution mappings and dashboard parity are complete."
   },
   {
     slug: "quote",
