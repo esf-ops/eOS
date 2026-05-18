@@ -1841,7 +1841,7 @@ export async function salesDashboardFoundationHandler(req, supabaseGetter) {
       if (!oldestJobDate || d < oldestJobDate) oldestJobDate = d;
     }
   }
-  const syncedSqftActuals = buildCompanyWideSqftActuals(jobs, { attributionCoverage });
+  const syncedSqftActuals = buildCompanyWideSqftActuals(jobs, { attributionCoverage, filters: req.query });
 
   return {
     status: 200,

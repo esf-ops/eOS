@@ -215,6 +215,58 @@
   font-size: 0.85rem;
 }
 
+.sales-filter-bar {
+  border: 1px solid var(--pi-border);
+  background: var(--pi-panel);
+  border-radius: 12px;
+  padding: 0.9rem;
+  margin-bottom: 1rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.sales-filter-row,
+.sales-filter-grid {
+  display: flex;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+.sales-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
+  margin-top: 0.75rem;
+}
+
+.sales-filter-grid label {
+  display: grid;
+  gap: 0.25rem;
+  color: var(--pi-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.sales-filter-grid input,
+.sales-filter-grid select {
+  border: 1px solid var(--pi-border);
+  border-radius: 8px;
+  padding: 0.45rem 0.55rem;
+  color: var(--pi-text);
+  background: #fff;
+  font: inherit;
+}
+
+.sales-active-range {
+  margin: 0.8rem 0 0;
+}
+
+.sales-filter-warning {
+  margin: 0.6rem 0 0;
+  color: #92400e;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
 .sales-foundation-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));

@@ -60,6 +60,21 @@ type SalesDashboardFoundation = {
     sqft_coverage_pct?: number | null;
     average_sqft_per_job?: number | null;
     date_coverage?: { oldest_job_created_at?: string | null; newest_job_created_at?: string | null };
+    active_filters?: {
+      datePreset?: string;
+      startDate?: string;
+      endDate?: string;
+      timeGrain?: string;
+      account?: string;
+      branch?: string;
+      salesperson?: string;
+      status?: string;
+      process?: string;
+      attributionStatus?: string;
+      sortBy?: string;
+      sortDirection?: string;
+    };
+    grouped_sqft_trend?: Array<{ period: string; total_sqft: number; job_count: number; jobs_with_sqft: number }>;
     monthly_sqft_trend?: Array<{ month: string; total_sqft: number; job_count: number; jobs_with_sqft: number }>;
     top_raw_accounts_by_sqft?: Array<{
       account_name: string;
@@ -73,6 +88,7 @@ type SalesDashboardFoundation = {
       branch?: string | null;
     }>;
     extraction_sources?: Array<{ source: string; label: string; formTemplateName: string; count: number; confidence: string }>;
+    gated_filter_warning?: string | null;
     notes?: string[];
   };
   quote_pipeline?: {
@@ -121,6 +137,12 @@ function date(value: unknown) {
   return String(value).slice(0, 10);
 }
 
+function localYmd(d = new Date()) {
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
 function Table({ title, rows, labelKey }: { title: string; rows: CountRow[]; labelKey: string }) {
   return (
     <section className="pi-section">
@@ -156,12 +178,37 @@ function Table({ title, rows, labelKey }: { title: string; rows: CountRow[]; lab
 export default function SalesCommandCenterView({ token, onLoadError }: Props) {
   const [busy, setBusy] = useState(false);
   const [data, setData] = useState<SalesDashboardFoundation | null>(null);
+  const [datePreset, setDatePreset] = useState("ytd");
+  const [timeGrain, setTimeGrain] = useState("month");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [accountFilter, setAccountFilter] = useState("");
+  const [branchFilter, setBranchFilter] = useState("");
+  const [salespersonFilter, setSalespersonFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [processFilter, setProcessFilter] = useState("");
+  const [attributionStatus, setAttributionStatus] = useState("all");
+  const [sortBy, setSortBy] = useState("sqft");
+  const [sortDirection, setSortDirection] = useState("desc");
 
   const load = useCallback(async () => {
     setBusy(true);
     onLoadError("");
     try {
-      const json = (await apiFetch("/api/sales/dashboard-foundation", { token })) as SalesDashboardFoundation;
+      const p = new URLSearchParams();
+      p.set("datePreset", datePreset);
+      p.set("timeGrain", timeGrain);
+      p.set("sortBy", sortBy);
+      p.set("sortDirection", sortDirection);
+      p.set("attributionStatus", attributionStatus);
+      if (startDate.trim()) p.set("startDate", startDate.trim());
+      if (endDate.trim()) p.set("endDate", endDate.trim());
+      if (accountFilter.trim()) p.set("account", accountFilter.trim());
+      if (branchFilter.trim()) p.set("branch", branchFilter.trim());
+      if (salespersonFilter.trim()) p.set("salesperson", salespersonFilter.trim());
+      if (statusFilter.trim()) p.set("status", statusFilter.trim());
+      if (processFilter.trim()) p.set("process", processFilter.trim());
+      const json = (await apiFetch(`/api/sales/dashboard-foundation?${p.toString()}`, { token })) as SalesDashboardFoundation;
       setData(json);
     } catch (e: unknown) {
       const message = e instanceof ApiError ? e.message : String((e as Error)?.message ?? e);
@@ -170,7 +217,22 @@ export default function SalesCommandCenterView({ token, onLoadError }: Props) {
     } finally {
       setBusy(false);
     }
-  }, [token, onLoadError]);
+  }, [
+    token,
+    onLoadError,
+    datePreset,
+    timeGrain,
+    sortBy,
+    sortDirection,
+    attributionStatus,
+    startDate,
+    endDate,
+    accountFilter,
+    branchFilter,
+    salespersonFilter,
+    statusFilter,
+    processFilter
+  ]);
 
   useEffect(() => {
     if (token.trim()) void load();
@@ -182,6 +244,32 @@ export default function SalesCommandCenterView({ token, onLoadError }: Props) {
   const sync = data?.sync_health;
   const group = sync?.latest_group;
   const groupHealthy = Boolean(group) && Number(group.failed_chunks || 0) === 0;
+  const activeFilters = sqftActuals?.active_filters;
+  const trendRows = sqftActuals?.grouped_sqft_trend || [];
+  const rangeLabel =
+    activeFilters?.startDate && activeFilters?.endDate ? `${activeFilters.startDate} to ${activeFilters.endDate}` : "YTD";
+
+  function quickPreset(nextPreset: string, nextGrain: string) {
+    setDatePreset(nextPreset);
+    setTimeGrain(nextGrain);
+    setStartDate("");
+    setEndDate("");
+  }
+
+  function clearFilters() {
+    setDatePreset("ytd");
+    setTimeGrain("month");
+    setStartDate("");
+    setEndDate("");
+    setAccountFilter("");
+    setBranchFilter("");
+    setSalespersonFilter("");
+    setStatusFilter("");
+    setProcessFilter("");
+    setAttributionStatus("all");
+    setSortBy("sqft");
+    setSortDirection("desc");
+  }
 
   return (
     <div className="pi-dashboard">
@@ -213,11 +301,129 @@ export default function SalesCommandCenterView({ token, onLoadError }: Props) {
           </p>
         </div>
 
+        <section className="sales-filter-bar" aria-label="Sales actuals filters">
+          <div className="sales-filter-row">
+            <button type="button" className={datePreset === "ytd" ? "btn btn-primary" : "btn"} onClick={() => quickPreset("ytd", "month")}>
+              YTD
+            </button>
+            <button type="button" className={datePreset === "quarter" ? "btn btn-primary" : "btn"} onClick={() => quickPreset("quarter", "month")}>
+              QTD
+            </button>
+            <button type="button" className={datePreset === "month" ? "btn btn-primary" : "btn"} onClick={() => quickPreset("month", "week")}>
+              MTD
+            </button>
+            <button type="button" className={datePreset === "week" ? "btn btn-primary" : "btn"} onClick={() => quickPreset("week", "day")}>
+              This Week
+            </button>
+            <button type="button" className={datePreset === "day" ? "btn btn-primary" : "btn"} onClick={() => quickPreset("day", "day")}>
+              Today
+            </button>
+            <button
+              type="button"
+              className={datePreset === "custom" ? "btn btn-primary" : "btn"}
+              onClick={() => {
+                setDatePreset("custom");
+                setTimeGrain("day");
+                setStartDate((v) => v || localYmd());
+                setEndDate((v) => v || localYmd());
+              }}
+            >
+              Custom
+            </button>
+            <button type="button" className="btn" onClick={clearFilters}>
+              Clear
+            </button>
+          </div>
+          <div className="sales-filter-grid">
+            <label>
+              Time grain
+              <select value={timeGrain} onChange={(e) => setTimeGrain(e.target.value)}>
+                <option value="quarter">Quarter</option>
+                <option value="month">Month</option>
+                <option value="week">Week</option>
+                <option value="day">Day</option>
+              </select>
+            </label>
+            <label>
+              Start
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => {
+                  setDatePreset("custom");
+                  setStartDate(e.target.value);
+                }}
+              />
+            </label>
+            <label>
+              End
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => {
+                  setDatePreset("custom");
+                  setEndDate(e.target.value);
+                }}
+              />
+            </label>
+            <label>
+              Account
+              <input value={accountFilter} onChange={(e) => setAccountFilter(e.target.value)} placeholder="Raw or mapped account" />
+            </label>
+            <label>
+              Branch
+              <input value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)} placeholder="Approved mappings only" />
+            </label>
+            <label>
+              Salesperson
+              <input value={salespersonFilter} onChange={(e) => setSalespersonFilter(e.target.value)} placeholder="Approved mappings only" />
+            </label>
+            <label>
+              Status
+              <input value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} placeholder="Moraware status" />
+            </label>
+            <label>
+              Process
+              <input value={processFilter} onChange={(e) => setProcessFilter(e.target.value)} placeholder="Moraware process" />
+            </label>
+            <label>
+              Attribution
+              <select value={attributionStatus} onChange={(e) => setAttributionStatus(e.target.value)}>
+                <option value="all">All</option>
+                <option value="approved">Approved mapping</option>
+                <option value="needs_review">Needs review</option>
+                <option value="unmapped">Unmapped / ignored</option>
+              </select>
+            </label>
+            <label>
+              Sort accounts by
+              <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+                <option value="sqft">Sq.Ft.</option>
+                <option value="jobs">Jobs</option>
+                <option value="account">Account</option>
+                <option value="date">Date</option>
+                <option value="attribution_status">Attribution</option>
+              </select>
+            </label>
+            <label>
+              Direction
+              <select value={sortDirection} onChange={(e) => setSortDirection(e.target.value)}>
+                <option value="desc">Desc</option>
+                <option value="asc">Asc</option>
+              </select>
+            </label>
+          </div>
+          <p className="pi-sub sales-active-range">
+            Active range: <strong>{rangeLabel}</strong> · Grouped by {activeFilters?.timeGrain || timeGrain}
+          </p>
+          {sqftActuals?.gated_filter_warning ? <p className="sales-filter-warning">{sqftActuals.gated_filter_warning}</p> : null}
+        </section>
+
         <div className="pi-grid-cards">
           <div className="pi-card">
             <p className="pi-card-title">Synced sqft actuals</p>
             <p className="pi-card-value">{sqft(sqftActuals?.total_synced_sqft)}</p>
-            <p className="pi-card-note">Company-wide total from Moraware Job Worksheet Sq.Ft. fields.</p>
+            <p className="pi-card-note">Company-wide total from filtered Moraware Job Worksheet Sq.Ft. fields.</p>
           </div>
           <div className="pi-card">
             <p className="pi-card-title">Jobs with sqft</p>
@@ -292,16 +498,16 @@ export default function SalesCommandCenterView({ token, onLoadError }: Props) {
                 <table className="pi-table">
                   <thead>
                     <tr>
-                      <th>Month</th>
+                      <th>Period</th>
                       <th className="pi-num">Sq.Ft.</th>
                       <th className="pi-num">Jobs</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {(sqftActuals?.monthly_sqft_trend || []).length ? (
-                      (sqftActuals?.monthly_sqft_trend || []).map((row) => (
-                        <tr key={row.month}>
-                          <td>{row.month}</td>
+                    {trendRows.length ? (
+                      trendRows.map((row) => (
+                        <tr key={row.period}>
+                          <td>{row.period}</td>
                           <td className="pi-num">{sqft(row.total_sqft)}</td>
                           <td className="pi-num">{num(row.jobs_with_sqft || row.job_count)}</td>
                         </tr>
