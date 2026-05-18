@@ -119,6 +119,24 @@ async function enrichUserProfilesList(supabase, rows) {
     accMap = new Map();
   }
 
+  const authById = new Map();
+  await Promise.all(
+    ids.map(async (uid) => {
+      try {
+        authById.set(uid, await fetchAuthUserSummary(supabase, uid));
+      } catch (e) {
+        authById.set(uid, {
+          present: false,
+          email_confirmed_at: null,
+          last_sign_in_at: null,
+          invited_at: null,
+          confirmation_sent_at: null,
+          auth_error: String(e?.message || e)
+        });
+      }
+    })
+  );
+
   return rows.map((row) => {
     const uid = String(row.id);
     const accesses = accMap.get(uid) ?? [];
@@ -139,7 +157,8 @@ async function enrichUserProfilesList(supabase, rows) {
       allowed_heads_list: headsMap.get(uid) ?? [],
       dealer_access: accesses,
       dealer_account_name_primary: dealerPrimary,
-      pricing_group_summary: pricingLabelPrimary
+      pricing_group_summary: pricingLabelPrimary,
+      auth_summary: authById.get(uid) ?? null
     };
   });
 }

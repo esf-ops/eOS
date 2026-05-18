@@ -82,6 +82,7 @@ type AdminRow = Record<string, unknown> & {
   organization_id?: string | null;
   allowed_heads_list?: string[];
   dealer_access?: DealerAccessBrief[];
+  auth_summary?: UserAuthSummary | null;
 };
 
 type ReferenceResp = {
@@ -100,14 +101,16 @@ type UserDetailResp = Record<string, unknown> & {
   dealer_account_access?: DealerAccess[];
   login_summary?: { recent: LoginRow[]; total: number };
   action_summary?: { recent: ActionRow[]; total: number };
-  auth_summary?: {
-    present?: boolean;
-    email_confirmed_at?: string | null;
-    last_sign_in_at?: string | null;
-    invited_at?: string | null;
-    confirmation_sent_at?: string | null;
-    auth_error?: string | null;
-  };
+  auth_summary?: UserAuthSummary;
+};
+
+type UserAuthSummary = {
+  present?: boolean;
+  email_confirmed_at?: string | null;
+  last_sign_in_at?: string | null;
+  invited_at?: string | null;
+  confirmation_sent_at?: string | null;
+  auth_error?: string | null;
 };
 
 type DealerAccess = Record<string, unknown> & {
@@ -133,23 +136,86 @@ function fmt(dt: unknown) {
   }
 }
 
+function fmtReadableDate(dt: unknown, empty = "Not recorded yet") {
+  if (!dt) return empty;
+  return fmt(dt);
+}
+
+function titleizeToken(value: unknown, fallback = "Not assigned") {
+  const s = String(value ?? "").trim();
+  if (!s) return fallback;
+  return s
+    .replace(/_/g, " ")
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function setupStatus(profile: Pick<AdminRow, "role" | "allowed_heads_list" | "is_active"> | undefined, auth?: UserAuthSummary | null) {
+  const hasProfile = Boolean(profile);
+  const confirmed = Boolean(auth?.email_confirmed_at);
+  const roleAssigned = Boolean(String(profile?.role ?? "").trim());
+  const toolsAssigned = Boolean(profile?.allowed_heads_list?.length);
+  const active = profile?.is_active !== false;
+  const complete = hasProfile && confirmed && roleAssigned && toolsAssigned && active;
+  const waitingOnUser = hasProfile && !confirmed && auth?.present !== false;
+  return {
+    complete,
+    waitingOnUser,
+    confirmed,
+    roleAssigned,
+    toolsAssigned,
+    active,
+    label: complete ? "Ready" : waitingOnUser ? "Invite pending" : "Needs setup",
+    pillClass: complete ? "pill-good" : waitingOnUser ? "pill-warn" : "pill-neutral"
+  };
+}
+
+function inviteStatusLabel(auth?: UserAuthSummary | null) {
+  if (auth?.auth_error) return "Auth status unavailable";
+  if (!auth?.present) return "No Auth user";
+  if (auth.email_confirmed_at) return "Accepted";
+  if (auth.invited_at || auth.confirmation_sent_at) return "Invite pending";
+  return "Not confirmed";
+}
+
+function lastSignInText(row: AdminRow, auth?: UserAuthSummary | null) {
+  return fmtReadableDate(auth?.last_sign_in_at ?? row.last_login_at, "No sign-in recorded");
+}
+
 function UserSnapshot({ profile, detail }: { profile: AdminRow; detail: UserDetailResp | null }) {
   const normKind = String(profile.user_kind_normalized ?? "").trim();
   const dbKind = String(profile.user_kind ?? "").trim();
   const heads = [...new Set(profile.allowed_heads_list ?? [])].sort((a, b) => a.localeCompare(b));
   const dealers = detail?.dealer_account_access ?? [];
-  const auth = detail?.auth_summary;
+  const auth = detail?.auth_summary ?? profile.auth_summary;
+  const readiness = setupStatus(profile, auth);
 
   return (
     <div className="drawer-section">
       <h4>Overview</h4>
+      <div className="readiness-panel">
+        <div>
+          <div className="readiness-title">Beta setup readiness</div>
+          <div className="muted">Profile, Auth, role, tools, and active-account checks.</div>
+        </div>
+        <span className={`pill ${readiness.pillClass}`}>{readiness.label}</span>
+        <div className="readiness-checks">
+          <span className={`mini-check ${profile ? "ok" : "missing"}`}>Profile</span>
+          <span className={`mini-check ${readiness.confirmed ? "ok" : "missing"}`}>Email confirmed</span>
+          <span className={`mini-check ${readiness.roleAssigned ? "ok" : "missing"}`}>Role</span>
+          <span className={`mini-check ${readiness.toolsAssigned ? "ok" : "missing"}`}>Tools</span>
+          <span className={`mini-check ${readiness.active ? "ok" : "missing"}`}>Active</span>
+        </div>
+      </div>
       <dl className="detail-dl">
         <dt>Email</dt>
         <dd>{String(profile.email ?? "—")}</dd>
         <dt>Full name</dt>
         <dd>{String(profile.full_name ?? "—")}</dd>
         <dt>Role</dt>
-        <dd>{String(profile.role ?? "—")}</dd>
+        <dd>{titleizeToken(profile.role)}</dd>
         <dt>Department</dt>
         <dd>{String(profile.department ?? "—")}</dd>
         <dt>Organization</dt>
@@ -171,27 +237,21 @@ function UserSnapshot({ profile, detail }: { profile: AdminRow; detail: UserDeta
             </span>
           ) : null}
         </dd>
-        <dt>Status</dt>
+        <dt>Account status</dt>
         <dd>
           <span className={`pill ${profile.is_active !== false ? "pill-good" : "pill-bad"}`}>
-            {profile.is_active !== false ? "active" : "inactive"}
+            {profile.is_active !== false ? "Active" : "Inactive"}
           </span>
         </dd>
         {auth?.present ? (
           <>
-            <dt>Auth (Supabase)</dt>
+            <dt>Invite status</dt>
             <dd className="muted" style={{ fontSize: 12 }}>
               {auth.email_confirmed_at ? (
-                <>Email confirmed {fmt(auth.email_confirmed_at)}</>
+                <>Accepted · email confirmed {fmt(auth.email_confirmed_at)}</>
               ) : (
-                <>Email not confirmed — use <strong>Resend invite</strong> for setup links.</>
+                <>Invite pending — use <strong>Resend invite</strong> if the setup link expired.</>
               )}
-              {auth.last_sign_in_at ? (
-                <>
-                  <br />
-                  Last auth sign-in {fmt(auth.last_sign_in_at)}
-                </>
-              ) : null}
               {auth.invited_at ? (
                 <>
                   <br />
@@ -202,20 +262,43 @@ function UserSnapshot({ profile, detail }: { profile: AdminRow; detail: UserDeta
           </>
         ) : auth?.auth_error ? (
           <>
-            <dt>Auth (Supabase)</dt>
+            <dt>Invite status</dt>
             <dd className="muted" style={{ fontSize: 12 }}>
               Could not load auth flags ({auth.auth_error}). Actions below still call the Brain.
             </dd>
           </>
         ) : null}
-        <dt>Last login</dt>
-        <dd>{fmt(profile.last_login_at)}</dd>
+        <dt>Setup</dt>
+        <dd>
+          <span className={`pill ${readiness.pillClass}`}>{readiness.label}</span>
+        </dd>
+        <dt>Last sign-in</dt>
+        <dd>
+          {lastSignInText(profile, auth)}
+          {!auth?.last_sign_in_at && !profile.last_login_at ? (
+            <div className="muted" style={{ fontSize: 11, marginTop: 3 }}>
+              Sign-in tracking appears after the next recorded launcher/API login event.
+            </div>
+          ) : null}
+        </dd>
         <dt>Created</dt>
         <dd>{fmt(profile.created_at)}</dd>
         <dt>Updated</dt>
         <dd>{fmt(profile.updated_at)}</dd>
-        <dt>Allowed heads</dt>
-        <dd>{heads.length ? heads.join(", ") : "—"}</dd>
+        <dt>Assigned tools</dt>
+        <dd>
+          {heads.length ? (
+            <div className="tool-chip-row">
+              {heads.map((h) => (
+                <span className="tool-chip" key={h}>
+                  {headDisplayLabel(h, undefined)}
+                </span>
+              ))}
+            </div>
+          ) : (
+            "No tools assigned"
+          )}
+        </dd>
         <dt>Dealer / account access</dt>
         <dd>
           {!dealers.length ? (
@@ -918,7 +1001,15 @@ export default function App() {
                   lifecycle actions, audit snippets, and assignments.
                 </p>
 
-                {listError && canOperate ? <p className="inline-warn-text">{listError}</p> : null}
+                {listError && canOperate ? (
+                  <div className="error-card">
+                    <strong>Unable to load users</strong>
+                    <p>{listError}</p>
+                    <button type="button" className="btn" onClick={() => void refreshAll()}>
+                      Retry
+                    </button>
+                  </div>
+                ) : null}
 
                 <div className="stat-grid">
               <div className="stat-card">
@@ -1034,62 +1125,86 @@ export default function App() {
               <table className="simple">
                 <thead>
                   <tr>
-                    <th>Name</th>
+                    <th>User</th>
                     <th>Email</th>
                     <th>Role</th>
-                    <th>Dept</th>
-                    <th>Organization</th>
-                    <th>Heads</th>
+                    <th>Invite status</th>
+                    <th>Setup</th>
+                    <th>Assigned tools</th>
                     <th>Kind</th>
-                    <th>Dealer</th>
-                    <th>Pricing</th>
-                    <th>Status</th>
-                    <th>Created</th>
-                    <th>Last login</th>
+                    <th>Account status</th>
+                    <th>Last sign-in</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredRows.map((r) => (
-                    <tr
-                      key={String(r.id)}
-                      className={r.id === selectedId ? "simple-row-selected" : ""}
-                      onClick={() => setSelectedId(String(r.id))}
-                    >
-                      <td>{String(r.full_name ?? "")}</td>
-                      <td>{String(r.email ?? "")}</td>
-                      <td>{String(r.role ?? "")}</td>
-                      <td>{String(r.department ?? "—")}</td>
-                      <td>
-                        {r.organization_id ? (
-                          <code style={{ fontSize: 11 }} title={String(r.organization_id)}>
-                            {String(r.organization_id).slice(0, 8)}…
-                          </code>
-                        ) : (
-                          "—"
-                        )}
-                      </td>
-                      <td style={{ maxWidth: 200, fontSize: 12 }} className="muted">
-                        {(() => {
-                          const hl = [...new Set(r.allowed_heads_list ?? [])].sort((a, b) => a.localeCompare(b));
-                          if (!hl.length) return "—";
-                          const shown = hl.slice(0, 6);
-                          const tail = hl.length > 6 ? ` +${hl.length - 6}` : "";
-                          return `${shown.join(", ")}${tail}`;
-                        })()}
-                      </td>
-                      <td>{String(r.user_kind_normalized ?? "internal")}</td>
-                      <td>{String(r.dealer_account_name_primary ?? "—")}</td>
-                      <td>{String(r.pricing_group_summary ?? "—")}</td>
-                      <td>
-                        <span className={`pill ${r.is_active !== false ? "pill-good" : "pill-bad"}`}>{r.is_active !== false ? "active" : "inactive"}</span>
-                      </td>
-                      <td>{fmt(r.created_at)}</td>
-                      <td>{fmt(r.last_login_at)}</td>
-                    </tr>
-                  ))}
+                  {filteredRows.map((r) => {
+                    const auth = r.auth_summary;
+                    const setup = setupStatus(r, auth);
+                    const hl = [...new Set(r.allowed_heads_list ?? [])].sort((a, b) => a.localeCompare(b));
+                    const shown = hl.slice(0, 3);
+                    const tail = hl.length > 3 ? `+${hl.length - 3}` : "";
+                    return (
+                      <tr
+                        key={String(r.id)}
+                        className={r.id === selectedId ? "simple-row-selected" : ""}
+                        onClick={() => setSelectedId(String(r.id))}
+                      >
+                        <td className="user-cell">
+                          <strong>{String(r.full_name || r.email || "Unnamed user")}</strong>
+                          <span>
+                            {String(r.department || "No department")}
+                            {r.organization_id ? ` · org ${String(r.organization_id).slice(0, 8)}...` : ""}
+                          </span>
+                        </td>
+                        <td>{String(r.email ?? "")}</td>
+                        <td>
+                          <span className="role-badge">{titleizeToken(r.role)}</span>
+                        </td>
+                        <td>
+                          <span className={`pill ${auth?.email_confirmed_at ? "pill-good" : auth?.present ? "pill-warn" : "pill-neutral"}`}>
+                            {inviteStatusLabel(auth)}
+                          </span>
+                        </td>
+                        <td>
+                          <span className={`pill ${setup.pillClass}`}>{setup.label}</span>
+                        </td>
+                        <td className="tools-cell">
+                          {hl.length ? (
+                            <div className="tool-chip-row compact">
+                              {shown.map((h) => (
+                                <span className="tool-chip" key={h}>
+                                  {titleizeToken(h)}
+                                </span>
+                              ))}
+                              {tail ? <span className="tool-chip muted-chip">{tail}</span> : null}
+                            </div>
+                          ) : (
+                            <span className="muted">No tools assigned</span>
+                          )}
+                        </td>
+                        <td>{titleizeToken(r.user_kind_normalized ?? "internal")}</td>
+                        <td>
+                          <span className={`pill ${r.is_active !== false ? "pill-good" : "pill-bad"}`}>
+                            {r.is_active !== false ? "Active" : "Inactive"}
+                          </span>
+                        </td>
+                        <td>
+                          {lastSignInText(r, auth)}
+                          {!auth?.last_sign_in_at && !r.last_login_at ? (
+                            <div className="muted table-helper">No tracked session yet</div>
+                          ) : null}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
-              {filteredRows.length === 0 ? <div className="muted" style={{ padding: 12 }}>No users match filters.</div> : null}
+              {filteredRows.length === 0 ? (
+                <div className="empty-state">
+                  <strong>No users match these filters.</strong>
+                  <p>Clear filters or reload the roster to confirm there are no matching accounts.</p>
+                </div>
+              ) : null}
             </div>
               </>
             ) : activeView === "invite_users" ? (
@@ -1099,6 +1214,20 @@ export default function App() {
                   Sends a Supabase invite email (no credential fields appear here). Production redirects use eliteOS Home
                   at <code>www.eliteosfab.com/auth/callback</code> — not localhost unless explicitly configured.
                 </p>
+                <div className="readiness-panel invite-readiness">
+                  <div>
+                    <div className="readiness-title">Beta invite checklist</div>
+                    <div className="muted">Create the profile, choose a role, assign tools intentionally, then send the setup link.</div>
+                  </div>
+                  <div className="readiness-checks">
+                    <span className={`mini-check ${inviteEmail.trim() ? "ok" : "missing"}`}>Email</span>
+                    <span className={`mini-check ${(inviteRole || "viewer").trim() ? "ok" : "missing"}`}>Role</span>
+                    <span className={`mini-check ${Object.values(inviteHeadPick).some(Boolean) ? "ok" : "missing"}`}>
+                      Tools optional
+                    </span>
+                    <span className="mini-check ok">Home callback</span>
+                  </div>
+                </div>
 
                 <div className="invite-panel">
               <strong>Invite user</strong>
@@ -1149,7 +1278,7 @@ export default function App() {
                 />
               </div>
               <div className="field" style={{ marginBottom: 10 }}>
-                <label>Initial head access</label>
+                <label>Initial tool access</label>
                 <div className="head-grid" style={{ marginTop: 6 }}>
                   {(reference?.heads ?? []).map((slug) => (
                     <label key={slug} style={{ fontSize: 12 }}>
@@ -1168,8 +1297,9 @@ export default function App() {
                   ))}
                 </div>
                 <small className="muted">
-                  If you leave every head unchecked, eliteOS leaves <code>user_head_access</code> empty so launcher defaults
-                  (role + user kind) apply until you assign heads here.
+                  Assign only the tools this beta user should test. If every tool is unchecked, eliteOS leaves{" "}
+                  <code>user_head_access</code> empty so launcher defaults (role + user kind) apply until you assign tools
+                  here.
                 </small>
               </div>
               <button
@@ -1254,8 +1384,8 @@ export default function App() {
               <>
                 <h2 style={{ marginTop: 0 }}>Admin tools / diagnostics</h2>
                 <p className="muted">
-                  Schema checks and legacy quote tooling. Quote workflow will move to the dedicated Quote Library head;
-                  pricing belongs in Pricing Admin.
+                  Schema checks and legacy admin diagnostics. Quote workflow belongs in Quote Library; pricing belongs in
+                  Pricing Admin.
                 </p>
                 <div className="subnav-tabs">
                   <button
@@ -1365,10 +1495,10 @@ export default function App() {
                     </div>
 
                     <div className="admin-card">
-                      <h3 style={{ marginTop: 0 }}>Quote Library (planned)</h3>
+                      <h3 style={{ marginTop: 0 }}>Quote Library boundary</h3>
                       <p className="muted" style={{ marginTop: 6 }}>
-                        The future Quote Library head will own quote search, filter, and sort, account grouping, status
-                        workflow, and sold-job handoff documentation. Pipeline diagnostics here are temporary.
+                        Quote Library owns quote search, filters, status workflow, revision history, and sold-job handoff
+                        documentation. Pipeline diagnostics here are temporary.
                       </p>
                     </div>
                   </>
