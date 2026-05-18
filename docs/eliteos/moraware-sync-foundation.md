@@ -268,21 +268,49 @@ node -e "const fs=require('fs'); const p='debug/moraware/baseline-2026/baseline-
 
 If `cap_warnings` is non-empty, do not import until the cap is understood. Increase the relevant `MORAWARE_BASELINE_MAX_*` value and regenerate, or document why the cap is intentionally limiting the baseline.
 
-Chunked import command for the 2026 baseline:
+Run an import dry-run before posting the 2026 baseline. Dry-run reads the snapshot, builds the same chunk plan the importer would use, prints the `import_group_id`, total row counts, planned chunk count, largest estimated payload size, and per-chunk row counts, then exits without sending HTTP requests. Large baseline snapshots fail closed unless `MORAWARE_IMPORT_ALLOW_LARGE_BASELINE=1` is set.
 
 ```bash
+MORAWARE_IMPORT_DRY_RUN=1 \
+MORAWARE_IMPORT_ALLOW_LARGE_BASELINE=1 \
 MORAWARE_IMPORT_CHUNKED=1 \
-MORAWARE_IMPORT_MAX_JOBS_PER_CHUNK=20 \
-MORAWARE_IMPORT_MAX_ACTIVITIES_PER_CHUNK=100 \
-MORAWARE_IMPORT_MAX_FORMS_PER_CHUNK=100 \
-MORAWARE_IMPORT_MAX_FILES_PER_CHUNK=50 \
-MORAWARE_IMPORT_MAX_ASSIGNEES_PER_CHUNK=50 \
+MORAWARE_IMPORT_MAX_PAYLOAD_BYTES=3000000 \
+MORAWARE_IMPORT_MAX_JOBS_PER_CHUNK=100 \
+MORAWARE_IMPORT_MAX_ACTIVITIES_PER_CHUNK=5000 \
+MORAWARE_IMPORT_MAX_FORMS_PER_CHUNK=5000 \
+MORAWARE_IMPORT_MAX_FILES_PER_CHUNK=500 \
+MORAWARE_IMPORT_MAX_ASSIGNEES_PER_CHUNK=500 \
+MORAWARE_DEFAULT_ORGANIZATION_ID=89180433-9fab-4024-bec9-a14d870bd0a8 \
+MORAWARE_SYNC_IMPORT_FILE=debug/moraware/baseline-2026/baseline-2026-moraware-snapshot.json \
+npm run eos:moraware:import-snapshot
+```
+
+Review the dry-run output before import:
+
+- `planned_chunks` is understandable and not accidentally thousands of chunks.
+- `largest_estimated_payload_size` is below the configured `MORAWARE_IMPORT_MAX_PAYLOAD_BYTES`.
+- Per-chunk row counts look balanced; very large single-row chunks require investigation.
+- `total_snapshot_counts` matches the count-only inspection.
+
+Chunked import command for the 2026 baseline, only after dry-run review:
+
+```bash
+MORAWARE_IMPORT_ALLOW_LARGE_BASELINE=1 \
+MORAWARE_IMPORT_CHUNKED=1 \
+MORAWARE_IMPORT_MAX_PAYLOAD_BYTES=3000000 \
+MORAWARE_IMPORT_MAX_JOBS_PER_CHUNK=100 \
+MORAWARE_IMPORT_MAX_ACTIVITIES_PER_CHUNK=5000 \
+MORAWARE_IMPORT_MAX_FORMS_PER_CHUNK=5000 \
+MORAWARE_IMPORT_MAX_FILES_PER_CHUNK=500 \
+MORAWARE_IMPORT_MAX_ASSIGNEES_PER_CHUNK=500 \
 BACKEND_URL=https://backend-core-six.vercel.app \
 MORAWARE_SYNC_IMPORT_SECRET=... \
 MORAWARE_DEFAULT_ORGANIZATION_ID=89180433-9fab-4024-bec9-a14d870bd0a8 \
 MORAWARE_SYNC_IMPORT_FILE=debug/moraware/baseline-2026/baseline-2026-moraware-snapshot.json \
 npm run eos:moraware:import-snapshot
 ```
+
+The 2026 baseline should be manually verified in Supabase, System Admin Moraware Sync Status, and Sales Head YTD filters before any recurring sync is scheduled.
 
 Supabase verification queries after import:
 
