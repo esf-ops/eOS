@@ -222,6 +222,14 @@ export async function loadSalesAttributionCoverage(supabase, { organizationId = 
       branch: alias?.branch ?? null,
       matchType: alias?.match_type ?? null
     };
+    const reviewRow = {
+      ...example,
+      approved: alias?.approved ?? false,
+      confidence: alias?.confidence ?? null,
+      notes: alias?.notes ?? null,
+      aliasId: alias?.id ?? null,
+      reviewStatus: status
+    };
 
     if (status === "approved_mapped") {
       counts.approvedMappedAccounts += 1;
@@ -241,6 +249,9 @@ export async function loadSalesAttributionCoverage(supabase, { organizationId = 
       counts.blackstoneUnapprovedAccounts += 1;
       examples.blackstoneUnapproved.push(example);
     }
+
+    if (!examples.reviewRows) examples.reviewRows = [];
+    examples.reviewRows.push(reviewRow);
   }
 
   for (const list of Object.values(examples)) {
@@ -264,6 +275,7 @@ export async function loadSalesAttributionCoverage(supabase, { organizationId = 
       approvedMapped: examples.approvedMapped.slice(0, 10),
       blackstoneUnapproved: examples.blackstoneUnapproved.slice(0, 10)
     },
+    reviewRows: (examples.reviewRows || []).slice(0, 5000),
     warnings
   };
 }

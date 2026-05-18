@@ -136,6 +136,18 @@ async function readLatestSuggestionsJson() {
   return { path: picked, payload: json };
 }
 
+async function tryReadLatestSuggestionsJson() {
+  try {
+    return await readLatestSuggestionsJson();
+  } catch (e) {
+    const msg = String(e?.message || e);
+    if (msg === "Suggestions file not found" || msg.toLowerCase().includes("enoent")) {
+      return { path: null, payload: { suggestions: [], generatedAt: null }, missing: true };
+    }
+    throw e;
+  }
+}
+
 function buildSuggestionRow(s) {
   const morawareAccountName = String(s.moraware_account_name ?? "");
   const normalizedMorawareName =
@@ -178,6 +190,87 @@ function computeReviewStatus({ suggestion, existingAlias }) {
   return "needs_review";
 }
 
+function reviewStatusFromCoverageStatus(status, row) {
+  const s = String(status ?? "");
+  const mt = String(row?.matchType ?? "").toLowerCase();
+  if (s === "approved_mapped") return "approved";
+  if (s === "rejected_ignored" && mt === "intentional_unmapped") return "unmapped";
+  if (s === "rejected_ignored") return "rejected";
+  return "needs_review";
+}
+
+function buildBrainCoverageSuggestionRow(row) {
+  const morawareAccountName = String(row.accountName ?? "");
+  const normalizedMorawareName =
+    String(row.normalizedMorawareName ?? "") || normalizeAccountNameWithoutLocationPrefix(morawareAccountName);
+  const approved = row.reviewStatus === "approved_mapped";
+  const existingApprovedAlias =
+    approved || row.reviewStatus === "rejected_ignored"
+      ? {
+          id: row.aliasId ?? null,
+          approved: row.approved === true,
+          moraware_account_name: morawareAccountName,
+          normalized_moraware_name: normalizedMorawareName,
+          monday_account_name: row.mondayAccountName ?? null,
+          assigned_salesperson: row.assignedSalesperson ?? null,
+          branch: row.branch ?? null,
+          match_type: row.matchType ?? null,
+          confidence: row.confidence ?? null,
+          notes: row.notes ?? null
+        }
+      : null;
+
+  return {
+    morawareAccountName,
+    sourceAccountId: row.sourceAccountId ?? null,
+    normalizedMorawareName,
+    reportTotalSqft: 0,
+    reportJobCount: Number(row.jobCount ?? 0) || 0,
+    morawareJobSalespeople: "",
+    suggestedMondayAccountName: row.mondayAccountName ?? null,
+    suggestedSalesperson: row.assignedSalesperson ?? null,
+    suggestedBranch: row.branch ?? null,
+    matchType: row.matchType ?? "brain_latest_sync",
+    confidence: row.confidence ?? "none",
+    approvedSuggested: approved,
+    rationale: "Brain-derived latest Moraware sync account coverage.",
+    alternateMatches: [],
+    manualRuleHits: [],
+    existingApprovedAlias,
+    currentAssignment: null,
+    reviewStatus: reviewStatusFromCoverageStatus(row.reviewStatus, row),
+    source: "brain_latest_sync"
+  };
+}
+
+function mergeSuggestionEnrichment(rows, suggestions) {
+  const byNorm = new Map();
+  for (const s of suggestions) {
+    const r = buildSuggestionRow(s);
+    const k = String(r.normalizedMorawareName ?? "").trim();
+    if (k && !byNorm.has(k)) byNorm.set(k, r);
+  }
+  if (!byNorm.size) return rows;
+  return rows.map((row) => {
+    const hit = byNorm.get(row.normalizedMorawareName);
+    if (!hit) return row;
+    return {
+      ...row,
+      reportTotalSqft: hit.reportTotalSqft || row.reportTotalSqft,
+      morawareJobSalespeople: hit.morawareJobSalespeople || row.morawareJobSalespeople,
+      suggestedMondayAccountName: row.suggestedMondayAccountName || hit.suggestedMondayAccountName,
+      suggestedSalesperson: row.suggestedSalesperson || hit.suggestedSalesperson,
+      suggestedBranch: row.suggestedBranch || hit.suggestedBranch,
+      matchType: row.matchType === "brain_latest_sync" ? hit.matchType || row.matchType : row.matchType,
+      confidence: row.confidence === "none" ? hit.confidence || row.confidence : row.confidence,
+      rationale: hit.rationale || row.rationale,
+      alternateMatches: hit.alternateMatches || [],
+      manualRuleHits: hit.manualRuleHits || [],
+      source: "brain_latest_sync_with_optional_suggestion"
+    };
+  });
+}
+
 function applyFilters(rows, q) {
   const status = String(q.status ?? "all").trim();
   const search = String(q.search ?? "").trim().toLowerCase();
@@ -205,6 +298,7 @@ function applyFilters(rows, q) {
     if (search) {
       const blob = [
         r.morawareAccountName,
+        r.sourceAccountId,
         r.suggestedMondayAccountName,
         r.suggestedSalesperson,
         r.suggestedBranch,
@@ -230,8 +324,9 @@ function sortRows(rows, sortBy, sortDir) {
     if (key === "matchType") return String(a.matchType).localeCompare(String(b.matchType)) * dir;
     if (key === "salesperson") return String(a.suggestedSalesperson ?? "").localeCompare(String(b.suggestedSalesperson ?? "")) * dir;
     if (key === "branch") return String(a.suggestedBranch ?? "").localeCompare(String(b.suggestedBranch ?? "")) * dir;
+    if (key === "jobs") return (a.reportJobCount - b.reportJobCount) * dir;
     // sqft default
-    return (a.reportTotalSqft - b.reportTotalSqft) * dir;
+    return ((a.reportTotalSqft || a.reportJobCount) - (b.reportTotalSqft || b.reportJobCount)) * dir;
   };
   return rows.slice().sort(cmp);
 }
@@ -344,52 +439,12 @@ export function attachSalesAccountMappingAdminRoutes(app, { requireAuth, require
         const sortBy = String(req.query.sortBy ?? "sqft");
         const sortDir = String(req.query.sortDir ?? "desc");
 
-        const { path: suggestionsPath, payload } = await readLatestSuggestionsJson();
-        let rows = payload.suggestions.map(buildSuggestionRow);
-
-        // Merge in approved/rejected/unmapped decisions from Supabase when table exists.
         const supabase = supabaseGetter();
-        const aliasExists = await tableExists(supabase, "sales_account_aliases");
-        if (aliasExists.exists) {
-          const normKeys = rows.map((r) => r.normalizedMorawareName).filter(Boolean);
-          if (normKeys.length) {
-            // Pull any alias rows (approved or explicit decisions) for these keys.
-            const { data, error } = await supabase
-              .from("sales_account_aliases")
-              .select(
-                "id,approved,moraware_account_name,normalized_moraware_name,monday_account_name,normalized_monday_name,assigned_salesperson,branch,match_type,confidence,notes,updated_at,created_at,raw_suggestion,sales_account_master_id"
-              )
-              .in("normalized_moraware_name", normKeys);
-            if (!error && data?.length) {
-              const byNorm = new Map();
-              for (const a of data) {
-                const k = String(a.normalized_moraware_name ?? "").trim();
-                if (!k) continue;
-                // Prefer approved rows, then most recently updated.
-                const prev = byNorm.get(k);
-                if (!prev) {
-                  byNorm.set(k, a);
-                  continue;
-                }
-                const prevApproved = prev.approved === true;
-                const curApproved = a.approved === true;
-                if (curApproved && !prevApproved) {
-                  byNorm.set(k, a);
-                  continue;
-                }
-                const pu = String(prev.updated_at ?? prev.created_at ?? "");
-                const cu = String(a.updated_at ?? a.created_at ?? "");
-                if (cu > pu) byNorm.set(k, a);
-              }
-              for (const r of rows) {
-                r.existingApprovedAlias = byNorm.get(r.normalizedMorawareName) || null;
-                r.reviewStatus = computeReviewStatus({ suggestion: r, existingAlias: r.existingApprovedAlias });
-              }
-            }
-          }
-        } else {
-          for (const r of rows) r.reviewStatus = computeReviewStatus({ suggestion: r, existingAlias: null });
-        }
+        const organizationId = resolveAdminOrganizationId(req);
+        const coverage = await loadSalesAttributionCoverage(supabase, { organizationId });
+        const suggestions = await tryReadLatestSuggestionsJson();
+        let rows = (coverage.reviewRows ?? []).map(buildBrainCoverageSuggestionRow);
+        rows = mergeSuggestionEnrichment(rows, suggestions.payload?.suggestions ?? []);
 
         rows = applyFilters(rows, req.query);
         rows = sortRows(rows, sortBy, sortDir);
@@ -399,24 +454,20 @@ export function attachSalesAccountMappingAdminRoutes(app, { requireAuth, require
 
         res.json({
           ok: true,
-          source: { suggestionsPath, generatedAt: payload.generatedAt ?? null },
+          source: {
+            primary: "brain_latest_moraware_sync_coverage",
+            optionalSuggestionsPath: suggestions.path,
+            optionalSuggestionsMissing: Boolean(suggestions.missing),
+            generatedAt: suggestions.payload?.generatedAt ?? null,
+            latestImportGroupId: coverage.latest_import_group_id ?? null
+          },
           total,
           limit,
           offset,
           rows: page
         });
       } catch (e) {
-        const msg = String(e?.message || e);
-        const pathsChecked = Array.isArray(e?.pathsChecked) ? e.pathsChecked : [SUGGESTIONS_JSON_REPO, SUGGESTIONS_JSON_CWD];
-        if (msg === "Suggestions file not found" || msg.toLowerCase().includes("enoent")) {
-          return res.status(404).json({
-            ok: false,
-            error: "Suggestions file not found",
-            pathsChecked,
-            command: "npm run eos:sales:crosswalk-suggestions"
-          });
-        }
-        res.status(500).json({ ok: false, error: msg });
+        res.status(500).json({ ok: false, error: String(e?.message || e) });
       }
     }
   );

@@ -11,6 +11,7 @@ type SchemaHealth = {
 
 type SuggestionRow = {
   morawareAccountName: string;
+  sourceAccountId?: string | null;
   normalizedMorawareName: string;
   reportTotalSqft: number;
   reportJobCount: number;
@@ -26,6 +27,7 @@ type SuggestionRow = {
   existingApprovedAlias: any | null;
   currentAssignment: any | null;
   reviewStatus: "approved" | "rejected" | "needs_review" | "unmatched" | "fuzzy" | "unmapped" | "no_match";
+  source?: string;
 };
 
 type SuggestionsResp = {
@@ -34,7 +36,13 @@ type SuggestionsResp = {
   limit: number;
   offset: number;
   rows: SuggestionRow[];
-  source?: { suggestionsPath?: string; generatedAt?: string | null };
+  source?: {
+    primary?: string;
+    optionalSuggestionsPath?: string | null;
+    optionalSuggestionsMissing?: boolean;
+    generatedAt?: string | null;
+    latestImportGroupId?: string | null;
+  };
 };
 
 type RepsBranchesResp = {
@@ -142,7 +150,7 @@ export default function SalesAccountMappingAdmin({ token }: { token: string }) {
   const [confidence, setConfidence] = useState("");
   const [salesperson, setSalesperson] = useState("");
   const [branch, setBranch] = useState("");
-  const [sortBy, setSortBy] = useState("sqft");
+  const [sortBy, setSortBy] = useState("jobs");
   const [sortDir, setSortDir] = useState("desc");
 
   const [selected, setSelected] = useState<SuggestionRow | null>(null);
@@ -361,8 +369,9 @@ export default function SalesAccountMappingAdmin({ token }: { token: string }) {
     <div style={{ padding: "18px 20px" }}>
       <h2 style={{ margin: "0 0 6px" }}>Sales Account Mapping</h2>
       <p className="muted" style={{ marginTop: 0 }}>
-        Review Moraware-to-Monday account matches before Sales Head attribution is trusted. Approvals can set or change
-        branch/location and salesperson ownership.
+        Review Brain-derived Moraware accounts before Sales Head attribution is trusted. Optional suggestion files may enrich
+        matches, but the production review queue comes from latest sync coverage. Approvals can set or change branch/location
+        and salesperson ownership.
       </p>
 
       {schemaErr ? <div className="banner banner-bad">Schema health error: {schemaErr}</div> : null}
@@ -420,15 +429,15 @@ export default function SalesAccountMappingAdmin({ token }: { token: string }) {
           <div style={{ fontSize: 20, fontWeight: 700 }}>{String(derivedSummary.needsReviewCount)}</div>
         </div>
         <div className="card">
-          <div className="muted">Approved Sq.Ft. (shown)</div>
+          <div className="muted">Approved Sq.Ft. (if enriched)</div>
           <div style={{ fontSize: 20, fontWeight: 700 }}>{nf(derivedSummary.approvedSqft)}</div>
         </div>
         <div className="card">
-          <div className="muted">Unmatched Sq.Ft. (shown)</div>
+          <div className="muted">Unmatched Sq.Ft. (if enriched)</div>
           <div style={{ fontSize: 20, fontWeight: 700 }}>{nf(derivedSummary.unmatchedSqft)}</div>
         </div>
         <div className="card">
-          <div className="muted">Source suggestions total</div>
+          <div className="muted">Review queue total</div>
           <div style={{ fontSize: 20, fontWeight: 700 }}>{String(total)}</div>
         </div>
       </div>
@@ -485,7 +494,7 @@ export default function SalesAccountMappingAdmin({ token }: { token: string }) {
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <div className="field" style={{ minWidth: 220 }}>
             <label>Search</label>
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Moraware or Monday…" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Moraware, source ID, or Monday…" />
           </div>
           <div className="field">
             <label>Status</label>
@@ -543,7 +552,8 @@ export default function SalesAccountMappingAdmin({ token }: { token: string }) {
             <label>Sort</label>
             <div style={{ display: "flex", gap: 8 }}>
               <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
-                <option value="sqft">Sq.Ft.</option>
+                <option value="jobs">Jobs</option>
+                <option value="sqft">Sq.Ft. (if enriched)</option>
                 <option value="account">Account</option>
                 <option value="confidence">Confidence</option>
                 <option value="matchType">Match type</option>
@@ -569,8 +579,9 @@ export default function SalesAccountMappingAdmin({ token }: { token: string }) {
           <thead>
             <tr>
               <th>Moraware account</th>
-              <th className="num">Report Sq.Ft.</th>
+              <th>Source ID</th>
               <th className="num">Jobs</th>
+              <th className="num">Sq.Ft.</th>
               <th>Suggested Monday</th>
               <th>Suggested owner</th>
               <th>Branch</th>
@@ -591,8 +602,9 @@ export default function SalesAccountMappingAdmin({ token }: { token: string }) {
                     </div>
                   ) : null}
                 </td>
-                <td className="num">{nf(r.reportTotalSqft)}</td>
+                <td>{r.sourceAccountId || <span className="muted">—</span>}</td>
                 <td className="num">{String(r.reportJobCount)}</td>
+                <td className="num">{r.reportTotalSqft ? nf(r.reportTotalSqft) : <span className="muted">—</span>}</td>
                 <td style={{ maxWidth: 260 }}>{r.suggestedMondayAccountName || <span className="muted">—</span>}</td>
                 <td>{r.suggestedSalesperson || <span className="muted">—</span>}</td>
                 <td>{r.suggestedBranch || <span className="muted">—</span>}</td>
@@ -610,7 +622,7 @@ export default function SalesAccountMappingAdmin({ token }: { token: string }) {
             ))}
             {!rows.length ? (
               <tr>
-                <td colSpan={10} className="muted">
+                <td colSpan={11} className="muted">
                   {busy ? "Loading…" : "No rows."}
                 </td>
               </tr>
@@ -632,7 +644,9 @@ export default function SalesAccountMappingAdmin({ token }: { token: string }) {
             <h4>Moraware account</h4>
             <div style={{ fontWeight: 700 }}>{selected.morawareAccountName}</div>
             <div className="muted" style={{ marginTop: 6 }}>
-              Report: {nf(selected.reportTotalSqft)} sf · {selected.reportJobCount} jobs
+              Latest Brain coverage: {selected.reportJobCount} jobs
+              {selected.reportTotalSqft ? ` · ${nf(selected.reportTotalSqft)} sf from optional enrichment` : ""}
+              {selected.sourceAccountId ? ` · source account ${selected.sourceAccountId}` : ""}
             </div>
             {selected.morawareJobSalespeople ? (
               <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
