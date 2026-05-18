@@ -5,14 +5,27 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 const DEFAULT_SOURCE = "debug/moraware/latest/jobs/index.json";
-const DEFAULT_OUT = "debug/moraware/import-tests/tiny-real-moraware-snapshot.json";
+const SNAPSHOT_MODE = String(process.env.MORAWARE_SNAPSHOT_MODE || "tiny").trim().toLowerCase() === "baseline" ? "baseline" : "tiny";
+const DEFAULT_OUT =
+  SNAPSHOT_MODE === "baseline"
+    ? "debug/moraware/baseline-tests/capped-baseline-moraware-snapshot.json"
+    : "debug/moraware/import-tests/tiny-real-moraware-snapshot.json";
+
+function toIntEnv(name, fallback) {
+  const n = Number.parseInt(String(process.env[name] ?? ""), 10);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
 const CAPS = Object.freeze({
-  accounts: 5,
-  jobs: 10,
-  job_activities: 25,
-  job_forms: 25,
-  job_files: 25,
-  assignees: 25
+  accounts:
+    SNAPSHOT_MODE === "baseline"
+      ? toIntEnv("MORAWARE_BASELINE_MAX_ACCOUNTS", toIntEnv("MORAWARE_BASELINE_MAX_JOBS", 50))
+      : 5,
+  jobs: SNAPSHOT_MODE === "baseline" ? toIntEnv("MORAWARE_BASELINE_MAX_JOBS", 50) : 10,
+  job_activities: SNAPSHOT_MODE === "baseline" ? toIntEnv("MORAWARE_BASELINE_MAX_ACTIVITIES", 250) : 25,
+  job_forms: SNAPSHOT_MODE === "baseline" ? toIntEnv("MORAWARE_BASELINE_MAX_FORMS", 250) : 25,
+  job_files: SNAPSHOT_MODE === "baseline" ? toIntEnv("MORAWARE_BASELINE_MAX_FILES", 250) : 25,
+  assignees: SNAPSHOT_MODE === "baseline" ? toIntEnv("MORAWARE_BASELINE_MAX_ASSIGNEES", 100) : 25
 });
 
 function pickStr(v) {
@@ -435,11 +448,12 @@ async function main() {
   const { batches, sourceShape } = await buildSnapshotFromSource(sourceAbs, json, statusSourceMap);
   const body = {
     organization_id: process.env.MORAWARE_DEFAULT_ORGANIZATION_ID || undefined,
-    mode: "tiny-real-snapshot",
+    mode: `${SNAPSHOT_MODE}-real-snapshot`,
     runner: "local-generator",
     metadata: {
       generated_by: "backend-core/src/scripts/moraware/generateTinySnapshot.js",
       generated_at: new Date().toISOString(),
+      snapshot_mode: SNAPSHOT_MODE,
       source_file: path.relative(process.cwd(), sourceAbs),
       status_source_file: statusSourceFile || null,
       source_shape: sourceShape,
@@ -452,7 +466,7 @@ async function main() {
   await fs.mkdir(path.dirname(outAbs), { recursive: true });
   await fs.writeFile(outAbs, JSON.stringify(body, null, 2), "utf8");
   const counts = Object.fromEntries(Object.entries(batches).map(([k, v]) => [k, v.length]));
-  console.log("Tiny Moraware snapshot generated:", {
+  console.log(`${SNAPSHOT_MODE} Moraware snapshot generated:`, {
     source: path.relative(process.cwd(), sourceAbs),
     statusSource: statusSourceFile || "(per-job operational artifacts when present)",
     sourceShape,

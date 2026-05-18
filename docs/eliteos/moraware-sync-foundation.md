@@ -125,6 +125,74 @@ MORAWARE_SYNC_IMPORT_FILE=debug/moraware/import-tests/tiny-real-moraware-snapsho
 npm run eos:moraware:import-snapshot
 ```
 
+## Small Capped Baseline
+
+After the tiny import validates org scope, status/process mapping, and sync logging, generate a larger but still capped baseline snapshot. This does **not** run a live Moraware sync and does **not** schedule anything; it only converts local ignored Moraware artifacts into an import payload.
+
+Generate:
+
+```bash
+MORAWARE_SNAPSHOT_MODE=baseline \
+MORAWARE_TINY_SOURCE_FILE=debug/moraware/latest/jobs/index.json \
+MORAWARE_TINY_OUTPUT_FILE=debug/moraware/baseline-tests/capped-baseline-moraware-snapshot.json \
+MORAWARE_BASELINE_MAX_JOBS=50 \
+MORAWARE_BASELINE_MAX_ACTIVITIES=250 \
+MORAWARE_BASELINE_MAX_FORMS=250 \
+MORAWARE_BASELINE_MAX_FILES=250 \
+MORAWARE_BASELINE_MAX_ASSIGNEES=100 \
+npm run eos:moraware:generate-tiny-snapshot
+```
+
+Default baseline caps:
+
+- 50 jobs
+- related accounts, capped to `MORAWARE_BASELINE_MAX_ACCOUNTS` if set, otherwise the job cap
+- 250 job activities
+- 250 forms/custom field rows
+- 250 file metadata rows
+- 100 assignees/resources
+
+Counts-only inspection (do not print records):
+
+```bash
+node -e "const fs=require('fs'); const p='debug/moraware/baseline-tests/capped-baseline-moraware-snapshot.json'; const x=JSON.parse(fs.readFileSync(p,'utf8')); console.log(Object.fromEntries(Object.entries(x.batches||{}).map(([k,v])=>[k,Array.isArray(v)?v.length:0]))); console.log({jobs_with_status:(x.batches.jobs||[]).filter(j=>String(j.status_name||j.jobStatus||j.status||'').trim()).length,jobs_with_process:(x.batches.jobs||[]).filter(j=>String(j.process_name||j.processName||j.process||'').trim()).length});"
+```
+
+Import manually:
+
+```bash
+BACKEND_URL=https://backend-core-six.vercel.app \
+MORAWARE_SYNC_IMPORT_SECRET=... \
+MORAWARE_SYNC_IMPORT_FILE=debug/moraware/baseline-tests/capped-baseline-moraware-snapshot.json \
+npm run eos:moraware:import-snapshot
+```
+
+Supabase verification queries:
+
+```sql
+select id, organization_id, status, row_counts, data_quality_counts, started_at, finished_at
+from public.moraware_sync_runs
+order by started_at desc
+limit 5;
+
+select count(*) as normalized_jobs
+from public.brain_moraware_jobs
+where sync_run_id = '<SYNC_RUN_ID>';
+
+select
+  count(*) filter (where nullif(status_name, '') is not null) as jobs_with_status,
+  count(*) filter (where nullif(status_name, '') is null) as jobs_missing_status,
+  count(*) filter (where nullif(process_name, '') is not null) as jobs_with_process
+from public.brain_moraware_jobs
+where sync_run_id = '<SYNC_RUN_ID>';
+
+select finding_type, severity, count(*) as finding_count
+from public.moraware_data_quality_findings
+where sync_run_id = '<SYNC_RUN_ID>'
+group by finding_type, severity
+order by finding_count desc;
+```
+
 ## Windows Task Scheduler
 
 Suggested first schedule:
