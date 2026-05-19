@@ -76,6 +76,64 @@ Status:
 
 Requires authenticated `admin`, `executive`, or `super_admin` with `brain_health` access. Returns latest run, last successful run, freshness, row counts, recent errors, unresolved data quality counts, current data scope, and known gaps.
 
+## Operations Integration Switchboard — Moraware Admin v1
+
+Moraware is the **first adapter** on the eliteOS Operations Integration Switchboard pattern:
+
+`External system → raw mirror → organization-scoped mappings → normalized facts → prepared rollups → fast heads`
+
+Future organizations may use software other than Moraware; adapter-specific logic stays in Moraware modules and env config, not in Sales Head page loads.
+
+### Admin APIs (System Admin)
+
+Auth: `admin` role + `system_admin` head access. All routes are **organization-scoped** (`organization_id` query, user profile, or `MORAWARE_DEFAULT_ORGANIZATION_ID`).
+
+| Route | Purpose |
+|-------|---------|
+| `GET /api/admin/moraware/health` | Sync health, latest vs latest-**complete** import group, prepared-facts freshness, warnings |
+| `GET /api/admin/moraware/prepared-facts` | `sales_moraware_job_facts` / rollups source group + freshness |
+| `GET /api/admin/moraware/data-quality` | Unresolved findings, status/process breakdowns, Sales mapping coverage, Blackstone guardrail |
+| `GET /api/admin/moraware/jobs` | Paginated mirror explorer (summary columns only) |
+| `GET /api/admin/moraware/accounts` | Paginated accounts |
+| `GET /api/admin/moraware/activities` | Paginated activities |
+| `GET /api/admin/moraware/resources` | Paginated resources |
+| `GET /api/admin/moraware/forms-fields` | Paginated form rows; optional `include_field_preview=1` (max 10, no full raw dump) |
+| `GET /api/admin/moraware/schema-health` | Required table existence/counts |
+
+UI: **System Admin → Moraware** (tabs: Sync Health, Mirror Explorer, Field Discovery, Mapping Queues, Prepared Facts, Data Quality).
+
+### Prepared facts (Sales performance)
+
+Sales Head must **not** scan `brain_moraware_jobs.raw_payload` on each dashboard load. After a **complete** import group lands, rebuild:
+
+`POST /api/sales/admin/rebuild-moraware-facts` (`admin` + `sales` head)
+
+This populates `sales_moraware_job_facts` and `sales_moraware_account_rollups` (Job Worksheet Sq.Ft. extraction, etc.).
+
+### Scheduled sync v1 (checklist only — not implemented in Moraware Admin)
+
+Moraware Admin v1 does **not** add a new live sync runner or UI trigger. Operators use existing paths:
+
+- **Chunked Brain import (baseline / worker):** `POST /api/internal/moraware-sync/import` (`x-moraware-sync-secret`)
+- **Legacy cron spawn (already in repo):** `POST /api/internal/sync/nightly` or `.../recent` (`x-eos-cron-secret`) → `syncMoraware.js`
+
+Optional future wrapper: `POST /api/internal/moraware-sync/run-scheduled` — only if it reuses the patterns above with org caps and no overlap.
+
+Checklist (also returned by `GET /api/admin/moraware/health` → `scheduled_sync`):
+
+- Reuse `EOS_CRON_SECRET` or `MORAWARE_SYNC_RUN_SECRET` — no new unauthenticated endpoints
+- Small caps / recent window only — no `baseline_2026`, no all-time sync
+- No-overlap lock per organization
+- Post batches to existing `POST /api/internal/moraware-sync/import`
+- Rebuild prepared facts after successful complete group
+- No Moraware writeback
+
+### Organization scoping (Moraware Admin v1)
+
+All Moraware foundation v1 mirror tables (`brain_moraware_*`, `moraware_sync_runs`, prepared facts) include **`organization_id`**. Admin APIs filter with `.eq("organization_id", …)` after `resolveMorawareOrganizationId` (`MORAWARE_DEFAULT_ORGANIZATION_ID` or authenticated org). No schema migration was added for org columns in this pass.
+
+**Exception policy:** If a future legacy table lacks `organization_id`, do not invent a migration in a read-only admin pass — document the exception in this file and keep the route **admin-only** with backend permission checks (not UI-only hiding).
+
 ## Manual Run
 
 1. Apply `backend-core/supabase/eliteos_moraware_sync_foundation_v1.sql` in Supabase.

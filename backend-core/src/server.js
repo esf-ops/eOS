@@ -12,6 +12,7 @@ import { ALLOWED_ROLES, requireAuth, requireRole } from "./auth/authMiddleware.j
 import { requireHeadAccess } from "./auth/headAccessMiddleware.js";
 import { logAction, logLoginEvent } from "./auth/auditLog.js";
 import { attachAdvancedSystemAdminUserRoutes } from "./admin/systemAdminUserManagement.js";
+import { attachMorawareAdminRoutes } from "./admin/morawareAdmin.js";
 import { attachSalesAccountMappingAdminRoutes } from "./admin/salesAccountMappingAdmin.js";
 import { attachIdentityResolutionAdminRoutes } from "./admin/identityResolutionAdmin.js";
 import { attachQuoteRoutes } from "./quotes/quoteRoutes.js";
@@ -1020,6 +1021,13 @@ attachSalesAccountMappingAdminRoutes(app, {
   getSupabase: supabaseServerClient
 });
 
+attachMorawareAdminRoutes(app, {
+  requireAuth,
+  requireRole,
+  requireHeadAccess,
+  getSupabase: supabaseServerClient
+});
+
 attachIdentityResolutionAdminRoutes(app, {
   requireAuth,
   requireRole,
@@ -1512,6 +1520,7 @@ if (shouldStartLocalHttpServer()) {
     console.log("- GET /api/brain/sync-plan");
     console.log("- POST /api/internal/moraware-sync/import");
     console.log("- GET /api/moraware-sync/status");
+    console.log("- GET /api/admin/moraware/health (and mirror explorer, data-quality, prepared-facts)");
     console.log("- GET /api/executive/summary");
     console.log("- GET /api/executive/salesperson-performance");
     console.log("- GET /api/executive/account-performance");

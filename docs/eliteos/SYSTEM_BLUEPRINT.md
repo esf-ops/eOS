@@ -33,7 +33,7 @@
 | **eliteOS Brain / API** | `backend-core` — Express (or serverless entry), quote routes, integrations, org context, permission checks. |
 | **Supabase** | Database, Auth (anon + user JWT for heads), Row Level Security where enabled; **organization-scoped** data for SaaS. |
 | **Monday.com** | Optional CRM sync for public (and other) quotes; **server-side only** token. |
-| **Moraware** | Read-oriented integration; credentials and mappings stay **server-side/worker-side**; synced data lands in Brain staging + normalized tables for many heads. Dedicated **Moraware Admin / Integration Mapping Head** still planned before SaaS-wide mapping reuse. |
+| **Moraware** | Read-oriented integration; credentials and mappings stay **server-side/worker-side**; synced data lands in Brain staging + normalized tables for many heads. **Moraware Admin v1** lives in **System Admin** (`GET /api/admin/moraware/*`) as the first **Operations Integration Switchboard** adapter; a dedicated head may follow for SaaS-wide mapping reuse. |
 | **Cloudflare** | DNS and domain routing (e.g. public quote hostname). |
 | **Vercel** | Hosting for heads and Brain/API deployments. |
 | **GitHub + Cursor** | Source control; AI-assisted development with project rules under `.cursor/rules/`. |
@@ -176,7 +176,7 @@ Implementation references: `backend-core/src/quotes/quoteCalculator.js`, `backen
 |--------|--------|
 | **Credentials** | Allow eliteOS (Brain) to authenticate to Moraware **server-side only**. Never browser. |
 | **Mappings** | Tell eliteOS what Moraware entities **mean** in eliteOS terms (statuses, resources, branches, etc.). |
-| **Moraware Admin / Integration Mapping Head** | **Required** before Moraware-powered features are **SaaS-reusable** across many orgs. |
+| **Moraware Admin / Integration Mapping** | **v1** in System Admin (health, mirror explorer, data quality, prepared-facts freshness). **SaaS-reusable** cross-org mapping UI remains required before treating Moraware-powered features as fully productized for arbitrary fabricators. |
 
 **Runner rule:** use the existing Node HTTP/XML Moraware path where it works; when `JobTrackerAPI5.dll` is required, run a Windows worker and push batches into `POST /api/internal/moraware-sync/import` using `MORAWARE_SYNC_IMPORT_SECRET`. Do not assume Vercel/Linux can load the Windows DLL.
 
