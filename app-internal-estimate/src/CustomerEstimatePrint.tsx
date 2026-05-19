@@ -1,6 +1,7 @@
 import React from "react";
 import { EOS_LOGO_URL } from "@quote-lib/config";
 import type {
+  CustomerRoomAreaCostBreakdown,
   InternalEstimateGroupComparisonRow,
   SelectedMaterialBreakdown,
   SelectedMaterialScopeLine
@@ -81,6 +82,7 @@ export type CustomerEstimatePrintProps = {
    */
   internalMaterialFoldDollars: number;
   estimateTotalExact: number;
+  roomAreaBreakdown: CustomerRoomAreaCostBreakdown | null;
   comparisonRows: InternalEstimateGroupComparisonRow[];
   estimateDate: string;
 };
@@ -158,6 +160,19 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
 
   const stoneGroupMaterialDisplay = bd.groups.map((_, i) => (ctDisplayParts[i] ?? 0) + (bsDisplayParts[i] ?? 0));
   const vanityMaterialDisplayParts = vanityRooms.map((_, j) => ctDisplayParts[bd.groups.length + j] ?? 0);
+
+  const roomBd = props.roomAreaBreakdown;
+  const roomRows = roomBd?.rooms ?? [];
+  const roomBreakdownWeights = roomRows.map((r) => r.roomTotalExact);
+  const unassignedExact = roomBd?.unassignedCustomerCustomExact ?? 0;
+  const roomBreakdownWeightAll =
+    unassignedExact > 0 ? [...roomBreakdownWeights, unassignedExact] : roomBreakdownWeights;
+  const roomBreakdownDisplayParts = allocateCustomerDisplayTens(roomBreakdownWeightAll, finalRounded);
+  const roomBreakdownDisplays = roomRows.map((_, i) => roomBreakdownDisplayParts[i] ?? 0);
+  const unassignedDisplay =
+    unassignedExact > 0 ? roomBreakdownDisplayParts[roomBreakdownDisplayParts.length - 1] ?? 0 : 0;
+  const showRoomBreakdown = roomRows.length > 0;
+
   return (
     <div className="customer-estimate-print" aria-hidden="true">
       <header className="cep-header">
@@ -285,6 +300,98 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
         <p className="cep-muted cep-round-note">Displayed amounts round up to the nearest $10. Estimate only — not a contract.</p>
       </section>
 
+      {showRoomBreakdown ? (
+        <section className="cep-section cep-room-breakdown cep-section-compact">
+          <h2 className="cep-h2">Room / area cost breakdown</h2>
+          <p className="cep-muted cep-room-breakdown-lead">
+            Estimated cost by room or area so you can compare scope — for example, kitchen now and bath later. Amounts
+            round to the nearest $10 and reconcile with <strong>Estimated project total</strong> above. Use tax and
+            material selections are included in each area&apos;s material amount (not shown as separate tax lines).
+          </p>
+          <table className="cep-table cep-table-compact cep-table-amounts cep-room-breakdown-table">
+            <thead>
+              <tr>
+                <th>Room / area</th>
+                <th className="cep-num">Total sf</th>
+                <th className="cep-num">Material</th>
+                <th className="cep-num">Add-ons</th>
+                <th className="cep-num">Area total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {roomRows.map((row, idx) => {
+                const addonExact = row.addons.reduce((s, a) => s + a.amountExact, 0);
+                const customExact = row.customerCustomLines.reduce((s, c) => s + c.amountExact, 0);
+                const materialExact = round2(row.materialAmountExact + customExact);
+                const addonDisplay =
+                  addonExact > 0
+                    ? allocateCustomerDisplayTens(
+                        row.addons.map((a) => a.amountExact),
+                        roundCustomerDisplay(addonExact)
+                      )
+                    : [];
+                return (
+                  <React.Fragment key={row.roomId}>
+                    <tr className="cep-room-breakdown-main-row">
+                      <td>
+                        <strong>{row.displayName}</strong>
+                        {row.isVanity ? (
+                          <span className="cep-muted-inline"> · Vanity</span>
+                        ) : (
+                          <span className="cep-muted-inline">
+                            {" "}
+                            · {row.materialGroup}
+                            {row.colorLabel ? ` · ${row.colorLabel}` : props.colorTbd ? " · Color TBD" : ""}
+                          </span>
+                        )}
+                      </td>
+                      <td className="cep-num">{formatSf(row.totalSqft)}</td>
+                      <td className="cep-num cep-amt">{formatMoney(materialExact)}</td>
+                      <td className="cep-num cep-amt">{addonExact > 0 ? formatMoney(addonExact) : "—"}</td>
+                      <td className="cep-num cep-amt">
+                        <strong>{`$${(roomBreakdownDisplays[idx] ?? 0).toLocaleString()}`}</strong>
+                      </td>
+                    </tr>
+                    {row.addons.length > 0 ? (
+                      <tr className="cep-room-breakdown-detail-row">
+                        <td colSpan={5}>
+                          <ul className="cep-room-addon-list">
+                            {row.addons.map((a, ai) => (
+                              <li key={`${row.roomId}-${a.label}`}>
+                                {a.label}
+                                {addonDisplay[ai] != null && addonDisplay[ai] > 0
+                                  ? ` — $${addonDisplay[ai].toLocaleString()}`
+                                  : null}
+                              </li>
+                            ))}
+                          </ul>
+                        </td>
+                      </tr>
+                    ) : null}
+                    {row.customerCustomLines.map((c) => (
+                      <tr key={`${row.roomId}-${c.name}`} className="cep-room-breakdown-detail-row">
+                        <td colSpan={4} className="cep-room-custom-line">
+                          {c.name}
+                        </td>
+                        <td className="cep-num cep-amt">{formatMoney(c.amountExact)}</td>
+                      </tr>
+                    ))}
+                  </React.Fragment>
+                );
+              })}
+            </tbody>
+            {unassignedExact > 0 ? (
+              <tfoot>
+                <tr>
+                  <td colSpan={4}>Other project items (see Estimate summary)</td>
+                  <td className="cep-num cep-amt">{`$${unassignedDisplay.toLocaleString()}`}</td>
+                </tr>
+              </tfoot>
+            ) : null}
+          </table>
+        </section>
+      ) : null}
+
       {hasAddons ? (
         <section className="cep-section cep-section-compact">
           <h2 className="cep-h2">Add-ons / fixtures</h2>
@@ -315,9 +422,9 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
       <section className="cep-section cep-breakdown cep-section-compact">
         <h2 className="cep-h2">Quoted material breakdown</h2>
         <p className="cep-muted">
-          Square footage by selected price group and room. Group material estimates below allocate the{" "}
-          <strong>Countertop material</strong> and <strong>Backsplash material</strong> lines from{" "}
-          <strong>Estimate summary</strong> so rounded amounts sum cleanly — your project total remains in Estimate summary.
+          Square footage by selected price group and room — scope reference, not a second project total. Dollar
+          authority for scope decisions is <strong>Room / area cost breakdown</strong> and{" "}
+          <strong>Estimate summary</strong> above.
           {props.colorTbd ? " Some colors TBD." : ""}
         </p>
 

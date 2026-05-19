@@ -158,7 +158,9 @@ export function attachInternalQuoteRoutes(app, deps) {
               : [],
           estimate_room_drafts: body.estimateRoomDrafts ?? body.estimate_room_drafts ?? null,
           color_tbd: Boolean(body.colorTbd ?? body.color_tbd),
-          use_tax_percent: Math.max(0, Number(body.useTaxPercent ?? body.use_tax_percent ?? 0) || 0)
+          use_tax_percent: Math.max(0, Number(body.useTaxPercent ?? body.use_tax_percent ?? 0) || 0),
+          customer_room_area_breakdown:
+            body.customerRoomAreaBreakdown ?? body.customer_room_area_breakdown ?? null
         }
       };
       const internalEstimateSummary = buildInternalEstimateSummary(calc, body);

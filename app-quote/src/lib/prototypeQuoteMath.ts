@@ -726,6 +726,204 @@ export type InternalEstimateGroupComparisonRow = {
   fullTotal: number;
 };
 
+/** Stable DOM id for scrolling to a room editor card in Internal Estimate. */
+export function roomEditorDomId(roomId: string): string {
+  return `room-card-${String(roomId || "").trim() || "unknown"}`;
+}
+
+export type CustomerRoomAreaCostAddon = {
+  label: string;
+  amountExact: number;
+};
+
+export type CustomerRoomAreaCostCustomLine = {
+  name: string;
+  amountExact: number;
+};
+
+export type CustomerRoomAreaCostRow = {
+  roomId: string;
+  roomName: string;
+  displayName: string;
+  materialGroup: string;
+  colorLabel?: string;
+  isVanity: boolean;
+  totalSqft: number;
+  countertopSf: number;
+  backsplashFhbSf: number;
+  /** Stone + backsplash + use tax on countertop for this area (excludes room add-ons). */
+  materialAmountExact: number;
+  addons: CustomerRoomAreaCostAddon[];
+  customerCustomLines: CustomerRoomAreaCostCustomLine[];
+  roomTotalExact: number;
+};
+
+export type CustomerRoomAreaCostBreakdown = {
+  version: 1;
+  rooms: CustomerRoomAreaCostRow[];
+  /** Customer-facing custom lines with no room attribution (shown in Estimate summary only). */
+  unassignedCustomerCustomExact: number;
+  /** Sum of roomTotalExact + unassigned customer custom — should match project estimate total. */
+  projectTotalExact: number;
+};
+
+export type CustomerRoomAreaCustomLineInput = {
+  name: string;
+  quantity: number;
+  unitPrice: number;
+  customerFacing: boolean;
+  roomName: string;
+  category: string;
+};
+
+function normalizeRoomMatchKey(name: string): string {
+  return String(name ?? "")
+    .trim()
+    .toLowerCase();
+}
+
+function customLineAmountFromInput(row: CustomerRoomAreaCustomLineInput): number {
+  const q = Number(row.quantity) || 0;
+  const p = Number(row.unitPrice) || 0;
+  if (!String(row.name ?? "").trim() || q <= 0) return 0;
+  if (row.category === "Discount/Credit") {
+    if (p < 0) return round2(q * p);
+    return 0;
+  }
+  if (p === 0) return 0;
+  return round2(q * p);
+}
+
+function findRoomIndexForCustomLine(roomKeys: Array<{ id: string; key: string }>, roomName: string): number {
+  const target = normalizeRoomMatchKey(roomName);
+  if (!target) return -1;
+  return roomKeys.findIndex((r) => r.key === target);
+}
+
+function distributeAmountByWeights(pool: number, weights: number[]): number[] {
+  const p = Number(pool) || 0;
+  if (p === 0) return weights.map(() => 0);
+  const cleaned = weights.map((w) => (Number(w) > 0 ? Number(w) : 0));
+  const total = cleaned.reduce((a, b) => a + b, 0);
+  if (total <= 0) return cleaned.map(() => round2(p / Math.max(1, cleaned.length)));
+  return cleaned.map((w) => round2(p * (w / total)));
+}
+
+/**
+ * Customer-facing per-room/area cost breakdown for Internal Estimate print.
+ * Reconciles to project estimate total; internal-only custom $ is absorbed into room material (by room or proportional).
+ */
+export function buildCustomerRoomAreaCostBreakdown(params: {
+  roomDrafts: RoomDraft[];
+  measuredRooms: MeasuredRoom[];
+  materialBasis: "wholesale" | "direct";
+  useTaxPercent?: number;
+  customLines?: CustomerRoomAreaCustomLineInput[];
+  projectColorTbd?: boolean;
+}): CustomerRoomAreaCostBreakdown {
+  const basis = params.materialBasis;
+  const useTaxPercent = Math.max(0, Number(params.useTaxPercent) || 0);
+  const customLines = params.customLines ?? [];
+  const draftById = new Map(params.roomDrafts.map((d) => [d.id, d]));
+
+  const rows: CustomerRoomAreaCostRow[] = [];
+  const roomKeys: Array<{ id: string; key: string }> = [];
+
+  for (let i = 0; i < params.measuredRooms.length; i++) {
+    const m = params.measuredRooms[i];
+    const draft = draftById.get(m.id) ?? params.roomDrafts[i];
+    const displayName = String(m.name || draft?.name || "").trim() || `Room ${i + 1}`;
+    const key = normalizeRoomMatchKey(displayName);
+    roomKeys.push({ id: m.id, key });
+
+    const isVanity = m.type === "Vanity";
+    const countertopSf = round2(Number(m.counter) || 0);
+    const backsplashFhbSf = round2((Number(m.splash) || 0) + (Number(m.fhb) || 0));
+    const totalSqft = round2(Number(m.totalSf) || countertopSf + backsplashFhbSf);
+
+    let materialAmountExact = 0;
+    if (isVanity) {
+      materialAmountExact = round2(Number(m.selected) || 0);
+    } else if (draft) {
+      materialAmountExact = buildSelectedMaterialBreakdown([draft], basis, { useTaxPercent }).totals.materialSubtotal;
+    }
+
+    const addons: CustomerRoomAreaCostAddon[] = (m.addons ?? []).map((a) => ({
+      label: String(a.label || "Add-on"),
+      amountExact: round2(Number(a.total) || 0)
+    }));
+
+    rows.push({
+      roomId: m.id,
+      roomName: displayName,
+      displayName,
+      materialGroup: String(m.group || draft?.materialGroup || "Group Promo"),
+      colorLabel:
+        params.projectColorTbd || !draft?.materialColor?.trim() ? undefined : String(draft.materialColor).trim(),
+      isVanity,
+      totalSqft,
+      countertopSf,
+      backsplashFhbSf,
+      materialAmountExact,
+      addons,
+      customerCustomLines: [],
+      roomTotalExact: 0
+    });
+  }
+
+  let unassignedCustomerCustomExact = 0;
+  const internalUnassignedPool = { amount: 0 };
+
+  for (const line of customLines) {
+    const amt = customLineAmountFromInput(line);
+    if (amt === 0) continue;
+    const idx = findRoomIndexForCustomLine(roomKeys, line.roomName);
+    if (!line.customerFacing) {
+      if (idx >= 0) {
+        rows[idx].materialAmountExact = round2(rows[idx].materialAmountExact + amt);
+      } else {
+        internalUnassignedPool.amount = round2(internalUnassignedPool.amount + amt);
+      }
+      continue;
+    }
+    if (idx >= 0) {
+      rows[idx].customerCustomLines.push({ name: String(line.name).trim(), amountExact: amt });
+    } else {
+      unassignedCustomerCustomExact = round2(unassignedCustomerCustomExact + amt);
+    }
+  }
+
+  if (internalUnassignedPool.amount !== 0) {
+    const weights = rows.map((r) => Math.max(0, r.materialAmountExact));
+    const parts = distributeAmountByWeights(internalUnassignedPool.amount, weights);
+    for (let i = 0; i < rows.length; i++) {
+      rows[i].materialAmountExact = round2(rows[i].materialAmountExact + (parts[i] ?? 0));
+    }
+  }
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const m = params.measuredRooms[i];
+    const addonSum = row.addons.reduce((s, a) => s + a.amountExact, 0);
+    const extrasAll = round2(Number(m?.extras) || 0);
+    const otherExtras = round2(Math.max(0, extrasAll - addonSum));
+    row.materialAmountExact = round2(row.materialAmountExact + otherExtras);
+    const customSum = row.customerCustomLines.reduce((s, c) => s + c.amountExact, 0);
+    row.roomTotalExact = round2(row.materialAmountExact + addonSum + customSum);
+  }
+
+  const projectTotalExact = round2(
+    rows.reduce((s, r) => s + r.roomTotalExact, 0) + unassignedCustomerCustomExact
+  );
+
+  return {
+    version: 1,
+    rooms: rows,
+    unassignedCustomerCustomExact,
+    projectTotalExact
+  };
+}
+
 /**
  * Per-group comparison for internal estimates: material (counter + splash/FHB at tier rate) and full (material + fixed add-ons + custom lines).
  * Uses wholesale prototype $/sf or ESF Direct $/sf depending on `basis` — no markup percent.
@@ -1482,4 +1680,25 @@ export function hydrateRoomDraftsFromEstimateRooms(rows: unknown[]): RoomDraft[]
     out.push(base);
   }
   return out.length ? out : [createDefaultRoom("Group Promo")];
+}
+
+/** Persist customer room/area breakdown on save for stable reprints. */
+export function serializeCustomerRoomAreaBreakdown(
+  breakdown: CustomerRoomAreaCostBreakdown
+): CustomerRoomAreaCostBreakdown {
+  return JSON.parse(JSON.stringify(breakdown)) as CustomerRoomAreaCostBreakdown;
+}
+
+/** Use saved breakdown when present; otherwise rebuild from current room math. */
+export function hydrateCustomerRoomAreaBreakdown(
+  saved: unknown,
+  rebuild: () => CustomerRoomAreaCostBreakdown
+): CustomerRoomAreaCostBreakdown {
+  if (saved && typeof saved === "object") {
+    const o = saved as CustomerRoomAreaCostBreakdown;
+    if (o.version === 1 && Array.isArray(o.rooms) && o.rooms.length) {
+      return serializeCustomerRoomAreaBreakdown(o);
+    }
+  }
+  return rebuild();
 }

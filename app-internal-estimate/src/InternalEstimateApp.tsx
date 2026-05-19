@@ -5,14 +5,17 @@ import type { DemoCalculateResult } from "@quote-lib/demoFallback";
 import { round2 } from "@quote-lib/measurementEngine";
 import {
   aggregateComparisonScope,
+  buildCustomerRoomAreaCostBreakdown,
   buildInternalEstimateGroupComparison,
   buildSelectedMaterialBreakdown,
   calculateAllRoomDrafts,
   createEstimatorRoom,
   hydrateRoomDraftsFromInternalUi,
   mergeRoomDraftsIntoGlobalAddOns,
+  roomEditorDomId,
   roomsNeedLocalVanityMath,
   runLocalPrototypeQuote,
+  serializeCustomerRoomAreaBreakdown,
   serializeRoomDraftsForInternalUi,
   serializeRoomsForApi
 } from "@quote-lib/prototypeQuoteMath";
@@ -165,6 +168,8 @@ export default function InternalEstimateApp() {
   const [visualLayoutByPieceKey, setVisualLayoutByPieceKey] = useState<Record<string, VisualLayoutEntry>>({});
   /** Visual canvas expanded UI — default collapsed so quick quotes stay simple. */
   const [visualCanvasExpanded, setVisualCanvasExpanded] = useState(false);
+  const [roomsSubnavOpen, setRoomsSubnavOpen] = useState(true);
+  const [activeRoomNavId, setActiveRoomNavId] = useState<string | null>(null);
 
   const [accountName, setAccountName] = useState("Direct");
   const [accountPhone, setAccountPhone] = useState("");
@@ -311,6 +316,28 @@ export default function InternalEstimateApp() {
     });
   }, []);
 
+  const scrollToRoomCard = useCallback(
+    (roomId: string) => {
+      setActiveRoomNavId(roomId);
+      scrollToWorkflowSection("sec-rooms");
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          document.getElementById(roomEditorDomId(roomId))?.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+      });
+    },
+    [scrollToWorkflowSection]
+  );
+
+  const roomNavLabels = useMemo(
+    () =>
+      roomDrafts.map((r, i) => ({
+        id: r.id,
+        label: String(r.name || "").trim() || `Room ${i + 1}`
+      })),
+    [roomDrafts]
+  );
+
   const topMaterialGroup = useMemo(() => roomDrafts[0]?.materialGroup ?? "Group Promo", [roomDrafts]);
 
   const buildRoomDraftsForCalculate = useCallback((): RoomDraft[] => roomDrafts, [roomDrafts]);
@@ -421,6 +448,26 @@ export default function InternalEstimateApp() {
       rooms: apiRooms,
       customerEstimateDisplayGroups: MATERIAL_GROUPS.filter((g) => customerDisplayGroups[g]),
       estimateRoomDrafts: serializeRoomDraftsForInternalUi(drafts),
+      customerRoomAreaBreakdown: serializeCustomerRoomAreaBreakdown(
+        buildCustomerRoomAreaCostBreakdown({
+          roomDrafts: drafts,
+          measuredRooms: calculateAllRoomDrafts(drafts, projectType, internalPricingMode, Math.max(0, Number(useTaxPercent) || 0))
+            .rooms,
+          materialBasis: internalPricingMode,
+          useTaxPercent: Math.max(0, Number(useTaxPercent) || 0),
+          customLines: customLineRows
+            .filter((r) => r.name.trim())
+            .map((r) => ({
+              name: r.name.trim(),
+              quantity: num(r.qty) || 1,
+              unitPrice: num(r.unitPrice),
+              customerFacing: r.customerFacing,
+              roomName: r.roomName.trim(),
+              category: r.category
+            })),
+          projectColorTbd: colorTbd
+        })
+      ),
       colorTbd,
       useTaxPercent: Math.max(0, Number(useTaxPercent) || 0),
       customer_name: customerName.trim() || undefined,
@@ -909,6 +956,41 @@ export default function InternalEstimateApp() {
     [liveEstimate.measuredRooms]
   );
 
+  const customLinesForRoomBreakdown = useMemo(
+    () =>
+      customLineRows
+        .filter((r) => r.name.trim())
+        .map((r) => ({
+          name: r.name.trim(),
+          quantity: num(r.qty) || 1,
+          unitPrice: num(r.unitPrice),
+          customerFacing: r.customerFacing,
+          roomName: r.roomName.trim(),
+          category: r.category
+        })),
+    [customLineRows]
+  );
+
+  const liveRoomAreaBreakdown = useMemo(
+    () =>
+      buildCustomerRoomAreaCostBreakdown({
+        roomDrafts,
+        measuredRooms: liveEstimate.measuredRooms,
+        materialBasis: internalPricingMode,
+        useTaxPercent: Math.max(0, Number(useTaxPercent) || 0),
+        customLines: customLinesForRoomBreakdown,
+        projectColorTbd: colorTbd
+      }),
+    [
+      roomDrafts,
+      liveEstimate.measuredRooms,
+      internalPricingMode,
+      useTaxPercent,
+      customLinesForRoomBreakdown,
+      colorTbd
+    ]
+  );
+
   const internalOnlyAdjustDollars = useMemo(() => {
     let visibleCustom = 0;
     for (const r of customLineRows) {
@@ -1198,14 +1280,42 @@ export default function InternalEstimateApp() {
       <div className="ie-app-shell">
         <nav className="ie-rail" aria-label="Estimate workflow">
           {WORKFLOW_SECTIONS.map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              className="ie-rail-link"
-              onClick={() => scrollToWorkflowSection(s.id)}
-            >
-              {s.label}
-            </button>
+            <React.Fragment key={s.id}>
+              <button
+                type="button"
+                className="ie-rail-link"
+                onClick={() => scrollToWorkflowSection(s.id)}
+              >
+                {s.label}
+              </button>
+              {s.id === "sec-rooms" && roomNavLabels.length > 0 ? (
+                <div className="ie-rail-room-block">
+                  <button
+                    type="button"
+                    className="ie-rail-room-toggle"
+                    aria-expanded={roomsSubnavOpen}
+                    onClick={() => setRoomsSubnavOpen((v) => !v)}
+                  >
+                    {roomsSubnavOpen ? "▾" : "▸"} Areas ({roomNavLabels.length})
+                  </button>
+                  {roomsSubnavOpen ? (
+                    <ul className="ie-rail-room-list" role="list">
+                      {roomNavLabels.map((r) => (
+                        <li key={r.id}>
+                          <button
+                            type="button"
+                            className={`ie-rail-room-link${activeRoomNavId === r.id ? " ie-rail-room-link-active" : ""}`}
+                            onClick={() => scrollToRoomCard(r.id)}
+                          >
+                            {r.label}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              ) : null}
+            </React.Fragment>
           ))}
         </nav>
 
@@ -2391,6 +2501,7 @@ export default function InternalEstimateApp() {
         visibleRoomAddons={visibleRoomAddons}
         internalMaterialFoldDollars={internalOnlyAdjustDollars}
         estimateTotalExact={estimateTotalExact}
+        roomAreaBreakdown={liveRoomAreaBreakdown}
         comparisonRows={customerEstimateComparisonRows}
         estimateDate={new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}
       />

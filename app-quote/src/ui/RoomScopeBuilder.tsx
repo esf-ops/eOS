@@ -1,6 +1,6 @@
 import React from "react";
 import type { EliteProgramColorRow, GuidedLayoutPreset, GuidedPiece, RoomCalcMode, RoomDraft } from "../lib/quoteTypes";
-import { ADDON_CATALOG, VANITY_PRICING, createEstimatorRoom, newId } from "../lib/prototypeQuoteMath";
+import { ADDON_CATALOG, VANITY_PRICING, createEstimatorRoom, newId, roomEditorDomId } from "../lib/prototypeQuoteMath";
 import {
   depthPatchForGuidedPieceTypeChange,
   sfFromGuidedPiece,
@@ -217,7 +217,7 @@ export default function RoomScopeBuilder({
       {rooms.map((room) => {
         const prev = roomTotalsPreview(room);
         return (
-          <div key={room.id} className="room-card-lite card">
+          <div key={room.id} id={roomEditorDomId(room.id)} className="room-card-lite card">
             <div className="room-card-head">
               <h3 className="room-card-title">Room / Area</h3>
               {rooms.length > 1 ? (
