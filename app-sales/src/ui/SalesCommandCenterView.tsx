@@ -89,6 +89,12 @@ type SalesDashboardFoundation = {
     }>;
     extraction_sources?: Array<{ source: string; label: string; formTemplateName: string; count: number; confidence: string }>;
     gated_filter_warning?: string | null;
+    rows_scanned?: number | null;
+    query_page_count?: number | null;
+    source_group_complete?: boolean | null;
+    source_import_group_id?: string | null;
+    source_sync_run_count?: number | null;
+    scoped_to_latest_complete_group?: boolean | null;
     notes?: string[];
   };
   quote_pipeline?: {
@@ -123,6 +129,11 @@ function sqft(value: unknown) {
   return Number.isFinite(n) ? new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(n) : "0";
 }
 
+function compact(value: unknown) {
+  const n = Number(value ?? 0);
+  return Number.isFinite(n) ? new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(n) : "0";
+}
+
 function age(seconds: unknown) {
   const n = Number(seconds);
   if (!Number.isFinite(n) || n < 0) return "No successful sync yet";
@@ -135,6 +146,18 @@ function age(seconds: unknown) {
 function date(value: unknown) {
   if (!value) return "—";
   return String(value).slice(0, 10);
+}
+
+function attributionLabel(value: unknown) {
+  const s = String(value ?? "").trim();
+  if (s === "approved_mapping") return "Approved";
+  if (s === "needs_review") return "Needs review";
+  if (s === "rejected" || s === "ignored") return "Ignored";
+  return "Needs review";
+}
+
+function attributionClass(value: unknown) {
+  return String(value ?? "") === "approved_mapping" ? "sales-status-pill sales-status-pill--ok" : "sales-status-pill sales-status-pill--warn";
 }
 
 function localYmd(d = new Date()) {
@@ -246,6 +269,17 @@ export default function SalesCommandCenterView({ token, onLoadError }: Props) {
   const groupHealthy = Boolean(group) && Number(group.failed_chunks || 0) === 0;
   const activeFilters = sqftActuals?.active_filters;
   const trendRows = sqftActuals?.grouped_sqft_trend || [];
+  const maxTrendSqft = Math.max(1, ...trendRows.map((row) => Number(row.total_sqft) || 0));
+  const topAccounts = sqftActuals?.top_raw_accounts_by_sqft || [];
+  const needsReviewAccounts = topAccounts.filter((row) => row.attribution_status !== "approved_mapping").length;
+  const quotePipelineCount = Number(data?.quote_pipeline?.quote_forecast_events_count ?? 0) || Number(data?.quote_pipeline?.quote_headers_count ?? 0);
+  const gatedSections = [
+    "Rep leaderboard",
+    "Branch comparison",
+    "Elite 100 mix",
+    "Manufacturer / color mix",
+    "Account attention list"
+  ];
   const rangeLabel =
     activeFilters?.startDate && activeFilters?.endDate ? `${activeFilters.startDate} to ${activeFilters.endDate}` : "YTD";
 
@@ -419,65 +453,45 @@ export default function SalesCommandCenterView({ token, onLoadError }: Props) {
           {sqftActuals?.gated_filter_warning ? <p className="sales-filter-warning">{sqftActuals.gated_filter_warning}</p> : null}
         </section>
 
-        <div className="pi-grid-cards">
-          <div className="pi-card">
-            <p className="pi-card-title">Synced sqft actuals</p>
-            <p className="pi-card-value">{sqft(sqftActuals?.total_synced_sqft)}</p>
-            <p className="pi-card-note">Company-wide total from filtered Moraware Job Worksheet Sq.Ft. fields.</p>
-          </div>
-          <div className="pi-card">
-            <p className="pi-card-title">Jobs with sqft</p>
-            <p className="pi-card-value">{pct(sqftActuals?.sqft_coverage_pct)}</p>
-            <p className="pi-card-note">
-              {num(sqftActuals?.jobs_with_sqft)} with sqft · {num(sqftActuals?.jobs_missing_sqft)} missing
+        <section className="sales-command-hero" aria-label="Sales command center summary">
+          <div className="sales-command-hero__main">
+            <p className="pi-card-title">YTD Synced Sq.Ft.</p>
+            <p className="sales-command-hero__value">{sqft(sqftActuals?.total_synced_sqft)}</p>
+            <p>
+              {num(sqftActuals?.rows_scanned ?? actuals?.jobs_count)} Moraware jobs scanned from the latest complete baseline group ·{" "}
+              {num(sqftActuals?.query_page_count)} query pages
             </p>
           </div>
-          <div className="pi-card">
-            <p className="pi-card-title">Avg sqft / job</p>
-            <p className="pi-card-value">{sqft(sqftActuals?.average_sqft_per_job)}</p>
-            <p className="pi-card-note">Average across synced jobs with valid sqft.</p>
+          <div className="sales-command-kpis">
+            <div className="sales-command-kpi">
+              <span>Jobs With Sq.Ft.</span>
+              <strong>{num(sqftActuals?.jobs_with_sqft)}</strong>
+              <small>{pct(sqftActuals?.sqft_coverage_pct)} coverage</small>
+            </div>
+            <div className="sales-command-kpi">
+              <span>Avg Sq.Ft. / Job</span>
+              <strong>{sqft(sqftActuals?.average_sqft_per_job)}</strong>
+              <small>{num(sqftActuals?.jobs_missing_sqft)} missing sqft</small>
+            </div>
+            <div className="sales-command-kpi sales-command-kpi--warn">
+              <span>Approved Attribution</span>
+              <strong>{pct(coverage?.approvedAccountCoveragePct)}</strong>
+              <small>{num(coverage?.approvedMappedAccounts)} of {num(coverage?.totalAccountsSeen)} accounts</small>
+            </div>
+            <div className="sales-command-kpi sales-command-kpi--warn">
+              <span>Approved Job Coverage</span>
+              <strong>{pct(coverage?.approvedJobCoveragePct)}</strong>
+              <small>{num(coverage?.approvedMappedJobs)} of {num(coverage?.totalJobsSeen)} jobs</small>
+            </div>
+            <div className="sales-command-kpi">
+              <span>Quote Pipeline</span>
+              <strong>{num(quotePipelineCount)}</strong>
+              <small>
+                {num(data?.quote_pipeline?.quote_headers_count)} quotes · {num(data?.quote_pipeline?.quote_forecast_events_count)} forecast events
+              </small>
+            </div>
           </div>
-          <div className="pi-card pi-card-warn">
-            <p className="pi-card-title">Approved attribution</p>
-            <p className="pi-card-value">{pct(coverage?.approvedAccountCoveragePct)}</p>
-            <p className="pi-card-note">
-              {num(coverage?.approvedMappedAccounts)} / {num(coverage?.totalAccountsSeen)} accounts approved ·{" "}
-              {num(coverage?.needsReviewUnmappedAccounts)} need review/unmapped
-            </p>
-          </div>
-          <div className="pi-card pi-card-warn">
-            <p className="pi-card-title">Approved job coverage</p>
-            <p className="pi-card-value">{pct(coverage?.approvedJobCoveragePct)}</p>
-            <p className="pi-card-note">
-              {num(coverage?.approvedMappedJobs)} / {num(coverage?.totalJobsSeen)} jobs covered by approved mappings
-            </p>
-          </div>
-          <div className="pi-card">
-            <p className="pi-card-title">Moraware jobs</p>
-            <p className="pi-card-value">{num(actuals?.jobs_count)}</p>
-            <p className="pi-card-note">Synced rows in `brain_moraware_jobs`.</p>
-          </div>
-          <div className="pi-card">
-            <p className="pi-card-title">Accounts</p>
-            <p className="pi-card-value">{num(actuals?.accounts_count)}</p>
-            <p className="pi-card-note">{num(actuals?.active_account_ids_in_jobs)} account IDs referenced by jobs.</p>
-          </div>
-          <div className="pi-card">
-            <p className="pi-card-title">Activities</p>
-            <p className="pi-card-value">{num(actuals?.job_activities_count)}</p>
-            <p className="pi-card-note">Read-only Moraware operational activity rows.</p>
-          </div>
-          <div className="pi-card">
-            <p className="pi-card-title">Forms</p>
-            <p className="pi-card-value">{num(actuals?.job_forms_count)}</p>
-            <p className="pi-card-note">Raw form payload rows available for future metric extraction.</p>
-          </div>
-          <div className="pi-card">
-            <p className="pi-card-title">Quote Library</p>
-            <p className="pi-card-value">{num(data?.quote_pipeline?.quote_headers_count)}</p>
-            <p className="pi-card-note">Forward pipeline source; forecast events: {num(data?.quote_pipeline?.quote_forecast_events_count)}</p>
-          </div>
-        </div>
+        </section>
 
         {sqftActuals?.extraction_status === "pending" ? (
           <div className="sales-attribution-guardrail">
@@ -487,101 +501,167 @@ export default function SalesCommandCenterView({ token, onLoadError }: Props) {
             ))}
           </div>
         ) : (
-          <section className="pi-section">
-            <h2>Company-Wide Synced Sq.Ft. Actuals</h2>
-            <p className="pi-sub">
-              Real synced actuals from Brain-owned Moraware Job Worksheet fields. These totals are company-wide and do not
-              require approved account attribution.
-            </p>
-            <div className="sales-foundation-grid">
-              <div className="pi-table-wrap">
-                <table className="pi-table">
-                  <thead>
-                    <tr>
-                      <th>Period</th>
-                      <th className="pi-num">Sq.Ft.</th>
-                      <th className="pi-num">Jobs</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {trendRows.length ? (
-                      trendRows.map((row) => (
-                        <tr key={row.period}>
-                          <td>{row.period}</td>
-                          <td className="pi-num">{sqft(row.total_sqft)}</td>
-                          <td className="pi-num">{num(row.jobs_with_sqft || row.job_count)}</td>
-                        </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan={3}>No monthly sqft rows yet.</td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
+          <>
+            <section className="pi-section sales-command-panel">
+            <div className="sales-section-heading">
+              <div>
+                <h2>Company-Wide Synced Sq.Ft. Trend</h2>
+                <p className="pi-sub">
+                  Real synced actuals from Brain-owned Moraware Job Worksheet fields. These totals are company-wide and do not
+                  require approved account attribution.
+                </p>
               </div>
-              <div className="pi-table-wrap">
-                <table className="pi-table">
-                  <thead>
-                    <tr>
-                      <th>Raw Account</th>
-                      <th className="pi-num">Sq.Ft.</th>
-                      <th className="pi-num">Jobs</th>
-                      <th>Attribution</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(sqftActuals?.top_raw_accounts_by_sqft || []).length ? (
-                      (sqftActuals?.top_raw_accounts_by_sqft || []).map((row) => (
-                        <tr key={`${row.source_account_id || row.account_name}`}>
-                          <td>
-                            {row.account_name}
-                            {row.canonical_account_name ? <div className="pi-mini-note">{row.canonical_account_name}</div> : null}
-                          </td>
-                          <td className="pi-num">{sqft(row.total_sqft)}</td>
-                          <td className="pi-num">{num(row.jobs_with_sqft || row.job_count)}</td>
-                          <td>{row.attribution_status === "approved_mapping" ? "Approved mapping" : "Raw / needs review"}</td>
-                        </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan={4}>No account sqft rows yet.</td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+              <span className="sales-status-pill sales-status-pill--ok">
+                {activeFilters?.timeGrain || timeGrain} grain
+              </span>
             </div>
-          </section>
+            <div className="sales-trend-bars">
+              {trendRows.length ? (
+                trendRows.map((row) => (
+                  <div className="sales-trend-row" key={row.period}>
+                    <div className="sales-trend-label">
+                      <strong>{row.period}</strong>
+                      <span>{num(row.jobs_with_sqft || row.job_count)} jobs</span>
+                    </div>
+                    <div className="sales-trend-track">
+                      <span style={{ width: `${Math.max(4, (Number(row.total_sqft || 0) / maxTrendSqft) * 100)}%` }} />
+                    </div>
+                    <div className="sales-trend-value">{sqft(row.total_sqft)}</div>
+                  </div>
+                ))
+              ) : (
+                <p className="pi-sub">No Sq.Ft. trend rows for the active filter set.</p>
+              )}
+            </div>
+            </section>
+
+            <section className="pi-section sales-command-panel">
+            <div className="sales-section-heading">
+              <div>
+                <h2>Top Raw Accounts By Sq.Ft.</h2>
+                <p className="pi-sub">
+                  Raw Moraware account rollups from the filtered baseline. Needs-review accounts should be approved in System Admin
+                  before branch or salesperson reporting is trusted.
+                </p>
+              </div>
+              <a className="pi-btn" href="https://system.eliteosfab.com" target="_blank" rel="noreferrer">
+                Open Sales Mapping Admin
+              </a>
+            </div>
+            {needsReviewAccounts > 0 ? (
+              <p className="sales-filter-warning">{needsReviewAccounts} top account rows still need mapping review.</p>
+            ) : null}
+            <div className="pi-table-wrap">
+              <table className="pi-table">
+                <thead>
+                  <tr>
+                    <th>Raw Account</th>
+                    <th className="pi-num">Sq.Ft.</th>
+                    <th className="pi-num">Jobs</th>
+                    <th>Attribution</th>
+                    <th>Approved Owner</th>
+                    <th>Branch</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {topAccounts.length ? (
+                    topAccounts.map((row) => (
+                      <tr className={row.attribution_status === "approved_mapping" ? "" : "sales-row-needs-review"} key={`${row.source_account_id || row.account_name}`}>
+                        <td>
+                          {row.account_name}
+                          {row.canonical_account_name ? <div className="pi-mini-note">Mapped to {row.canonical_account_name}</div> : null}
+                        </td>
+                        <td className="pi-num">{sqft(row.total_sqft)}</td>
+                        <td className="pi-num">{num(row.jobs_with_sqft || row.job_count)}</td>
+                        <td>
+                          <span className={attributionClass(row.attribution_status)}>{attributionLabel(row.attribution_status)}</span>
+                        </td>
+                        <td>{row.assigned_salesperson || "Needs approval"}</td>
+                        <td>{row.branch || "Unmapped"}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={6}>No account Sq.Ft. rows for the active filter set.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            </section>
+          </>
         )}
 
-        <div className="sales-attribution-guardrail">
-          <strong>Branch revenue/sqft remains preview</strong>
-          <p>
-            {coverage?.warning ||
-              "Revenue/sqft by branch remains preview until approved Sales Account Mapping coverage is high."}
+        <section className="pi-section sales-command-panel sales-trust-panel">
+          <div className="sales-section-heading">
+            <div>
+              <h2>Attribution Coverage / Trust</h2>
+              <p className="pi-sub">
+                Company-wide totals can use all valid Sq.Ft. rows. Branch and rep totals stay gated until approved mappings cover
+                the underlying accounts and jobs.
+              </p>
+            </div>
+            <span className="sales-status-pill sales-status-pill--warn">Branch / rep totals gated</span>
+          </div>
+          <div className="sales-trust-grid">
+            <div>
+              <span>Approved accounts</span>
+              <strong>{num(coverage?.approvedMappedAccounts)}</strong>
+              <small>{pct(coverage?.approvedAccountCoveragePct)} of seen accounts</small>
+            </div>
+            <div>
+              <span>Unmapped / needs review</span>
+              <strong>{num(coverage?.needsReviewUnmappedAccounts)}</strong>
+              <small>{num(coverage?.rejectedIgnoredAccounts)} rejected / ignored</small>
+            </div>
+            <div>
+              <span>Approved job coverage</span>
+              <strong>{pct(coverage?.approvedJobCoveragePct)}</strong>
+              <small>{num(coverage?.approvedMappedJobs)} approved mapped jobs</small>
+            </div>
+            <div>
+              <span>Blackstone guardrail</span>
+              <strong>Protected</strong>
+              <small>{coverage?.blackstone_guardrail || "Blackstone does not default to Dyersville."}</small>
+            </div>
+          </div>
+          <p className="sales-filter-warning">
+            {coverage?.warning || "Branch and salesperson Sq.Ft. totals remain preview until approved mapping coverage is high."}
           </p>
-          <p>{coverage?.blackstone_guardrail || "Blackstone remains unmapped unless explicitly approved in Brain mapping."}</p>
-        </div>
+        </section>
 
         <div className="sales-foundation-grid">
           <Table title="Jobs by Status" rows={actuals?.status_breakdown || []} labelKey="status" />
           <Table title="Jobs by Process" rows={actuals?.process_breakdown || []} labelKey="process" />
         </div>
 
+        <section className="pi-section sales-command-panel">
+          <h2>Operational Baseline Coverage</h2>
+          <div className="sales-ops-grid">
+            <div><span>Jobs</span><strong>{compact(actuals?.jobs_count)}</strong></div>
+            <div><span>Activities</span><strong>{compact(actuals?.job_activities_count)}</strong></div>
+            <div><span>Form Fields</span><strong>{compact(actuals?.job_forms_count)}</strong></div>
+            <div><span>Accounts</span><strong>{compact(actuals?.accounts_count)}</strong></div>
+          </div>
+          <p className="pi-sub">
+            Current Moraware job date coverage: {date(actuals?.oldest_job_created_at)} to {date(actuals?.newest_job_created_at)}.
+          </p>
+        </section>
+
         <section className="pi-section">
-          <h2>Blueprint Sections Preserved For Buildout</h2>
+          <h2>Gated Command Center Sections</h2>
           <div className="sales-placeholder-grid">
-            {(data?.blueprint_preserve || []).map((item) => (
-              <div key={item} className="sales-placeholder-card">
-                {item}
+            {gatedSections.map((item) => (
+              <div key={item} className="sales-placeholder-card sales-placeholder-card--locked">
+                <strong>{item}</strong>
+                <span>Requires approved attribution and/or additional normalized Brain dimensions.</span>
               </div>
             ))}
           </div>
         </section>
 
         <section className="pi-section">
-          <h2>Data Gaps Before Full Dashboard Parity</h2>
+          <h2>Remaining Data Gaps</h2>
           <div className="sales-placeholder-grid">
             {(data?.gaps || []).map((item) => (
               <div key={item} className="sales-placeholder-card sales-placeholder-card--warn">
@@ -590,10 +670,6 @@ export default function SalesCommandCenterView({ token, onLoadError }: Props) {
             ))}
           </div>
         </section>
-
-        <p className="pi-sub">
-          Current Moraware job date coverage: {date(actuals?.oldest_job_created_at)} to {date(actuals?.newest_job_created_at)}.
-        </p>
       </main>
     </div>
   );
