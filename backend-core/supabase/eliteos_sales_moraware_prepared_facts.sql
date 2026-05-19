@@ -36,6 +36,9 @@ create index if not exists idx_sales_moraware_job_facts_group
 create index if not exists idx_sales_moraware_job_facts_created_month
   on public.sales_moraware_job_facts(organization_id, import_group_id, report_month_created);
 
+create index if not exists idx_sales_moraware_job_facts_created_at
+  on public.sales_moraware_job_facts(organization_id, import_group_id, created_at_source);
+
 create index if not exists idx_sales_moraware_job_facts_account
   on public.sales_moraware_job_facts(organization_id, import_group_id, source_account_id);
 

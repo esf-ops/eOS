@@ -1927,7 +1927,7 @@ async function fetchLatestPreparedSalesJobFacts(supabase, organizationId, syncHe
       const { data, error } = await supabase
         .from("sales_moraware_job_facts")
         .select(
-          "sync_run_id,source_job_id,source_account_id,account_name,status_name,process_name,created_at_source,modified_at_source,scheduled_at_source,completed_at_source,install_at_source,worksheet_sqft,sqft_found,report_month_created,report_month_completed,report_month_install"
+          "sync_run_id,source_job_id,source_account_id,account_name,status_name,process_name,salesperson_name,created_at_source,modified_at_source,scheduled_at_source,completed_at_source,install_at_source,worksheet_sqft,sqft_found,report_month_created,report_month_completed,report_month_install"
         )
         .eq("organization_id", organizationId)
         .eq("import_group_id", importGroupId)
@@ -2464,50 +2464,98 @@ async function safeQuotePipelineSummary(supabase, organizationId) {
   };
 }
 
+function morawareCountFromLatestGroup(syncHealth, key) {
+  const rows = syncHealth?.latest_group?.total_row_counts || {};
+  const n = Number(rows?.[key]);
+  return { count: Number.isFinite(n) ? n : 0, error: null, source: "latest_import_group_row_counts" };
+}
+
 export async function salesDashboardFoundationHandler(req, supabaseGetter) {
   const requestStartedAt = Date.now();
+  const authProfilePermissionMs = 0;
   const supabase = supabaseGetter();
   const organizationId = resolveSalesOrganizationId(req);
   if (!organizationId) {
     return { status: 400, body: { ok: false, error: "Sales dashboard requires organization_id context." } };
   }
 
-  const [
-    syncHealth,
-    accountCount,
-    activityCount,
-    resourceCount,
-    rawFormsCount,
-    rawFilesCount,
-    rawAssigneesCount,
-    quotePipeline
-  ] =
-    await Promise.all([
-      loadLatestMorawareGroup(supabase, organizationId),
-      safeCount(supabase, "brain_moraware_accounts", organizationId),
-      safeCount(supabase, "brain_moraware_job_activities", organizationId),
-      safeCount(supabase, "brain_moraware_resources", organizationId),
-      safeCount(supabase, "moraware_raw_job_forms", organizationId),
-      safeCount(supabase, "moraware_raw_job_files", organizationId),
-      safeCount(supabase, "moraware_raw_assignees", organizationId),
-      safeQuotePipelineSummary(supabase, organizationId)
-    ]);
+  const syncStartedAt = Date.now();
+  const syncHealth = await loadLatestMorawareGroup(supabase, organizationId);
+  const syncHealthComputeMs = elapsedMs(syncStartedAt);
 
-  const attributionStartedAt = Date.now();
-  const attributionCoverage = await loadCompactSalesAttributionCoverage(supabase, { organizationId, syncHealth });
-  const attributionComputeMs = elapsedMs(attributionStartedAt);
+  const quotePipelinePromise = (async () => {
+    const startedAt = Date.now();
+    const value = await safeQuotePipelineSummary(supabase, organizationId);
+    return { value, computeMs: elapsedMs(startedAt) };
+  })();
+
+  const attributionPromise = (async () => {
+    const startedAt = Date.now();
+    try {
+      const value = await loadCompactSalesAttributionCoverage(supabase, { organizationId, syncHealth });
+      return { ok: true, value, computeMs: elapsedMs(startedAt) };
+    } catch (e) {
+      return { ok: false, error: e, computeMs: elapsedMs(startedAt) };
+    }
+  })();
+
+  const factsPromise = (async () => {
+    const startedAt = Date.now();
+    try {
+      const value = await fetchLatestPreparedSalesJobFacts(supabase, organizationId, syncHealth);
+      return { ok: true, value, computeMs: elapsedMs(startedAt) };
+    } catch (e) {
+      return { ok: false, error: e, computeMs: elapsedMs(startedAt) };
+    }
+  })();
+
   let jobs = [];
   let jobReadDiagnostics;
   let preparedFacts;
-  try {
-    preparedFacts = await fetchLatestPreparedSalesJobFacts(supabase, organizationId, syncHealth);
+  let factsFetchComputeMs = null;
+  let attributionComputeMs = null;
+  let attributionCoverage;
+
+  const [attributionResult, factsResult] = await Promise.all([attributionPromise, factsPromise]);
+  attributionComputeMs = attributionResult.computeMs;
+  factsFetchComputeMs = factsResult.computeMs;
+
+  if (attributionResult.ok) {
+    attributionCoverage = attributionResult.value;
+  } else {
+    const coverageError = attributionResult.error;
+    attributionCoverage = {
+      source: "sales_moraware_account_rollups_plus_sales_account_aliases",
+      latest_import_group_id: syncHealth.latest_group?.import_group_id ?? null,
+      totalAccountsSeen: 0,
+      approvedMappedAccounts: 0,
+      needsReviewUnmappedAccounts: 0,
+      rejectedIgnoredAccounts: 0,
+      totalJobsSeen: 0,
+      approvedMappedJobs: 0,
+      needsReviewUnmappedJobs: 0,
+      rejectedIgnoredJobs: 0,
+      approvedAccountCoveragePct: null,
+      approvedJobCoveragePct: null,
+      blackstoneUnapprovedAccounts: 0,
+      warning: "Attribution coverage unavailable.",
+      blackstone_guardrail:
+        "Blackstone remains unmapped/Moraware fallback unless an approved Sales Account Mapping row explicitly maps it.",
+      reviewRows: [],
+      diagnostics: { warning: String(coverageError?.message ?? coverageError) },
+      warnings: [String(coverageError?.message ?? coverageError)]
+    };
+  }
+
+  if (factsResult.ok) {
+    preparedFacts = factsResult.value;
     jobs = preparedFacts.rows;
     jobReadDiagnostics = preparedFacts.diagnostics;
-  } catch (e) {
+  } else {
     preparedFacts = {
       rows: [],
       available: false,
-      warning: String(e?.message ?? e),
+      warning: String(factsResult.error?.message ?? factsResult.error),
       diagnostics: {
         rows_scanned: 0,
         query_page_count: 0,
@@ -2521,6 +2569,20 @@ export async function salesDashboardFoundationHandler(req, supabaseGetter) {
     jobs = [];
     jobReadDiagnostics = preparedFacts.diagnostics;
   }
+
+  const quotePipelineResult = await quotePipelinePromise;
+  const quotePipeline = quotePipelineResult.value;
+  const quotePipelineComputeMs = quotePipelineResult.computeMs;
+
+  const latestGroupRows = syncHealth.latest_group?.total_row_counts || {};
+  const accountCount = morawareCountFromLatestGroup(syncHealth, "accounts");
+  const activityCount = morawareCountFromLatestGroup(syncHealth, "job_activities");
+  const resourceCount = morawareCountFromLatestGroup(syncHealth, "resources");
+  const rawFormsCount = morawareCountFromLatestGroup(syncHealth, "job_forms");
+  const rawFilesCount = morawareCountFromLatestGroup(syncHealth, "job_files");
+  const rawAssigneesCount = morawareCountFromLatestGroup(syncHealth, "assignees");
+
+  const statusProcessStartedAt = Date.now();
   const byStatus = new Map();
   const byProcess = new Map();
   const bySalesperson = new Map();
@@ -2539,6 +2601,8 @@ export async function salesDashboardFoundationHandler(req, supabaseGetter) {
       if (!oldestJobDate || d < oldestJobDate) oldestJobDate = d;
     }
   }
+  const statusProcessComputeMs = elapsedMs(statusProcessStartedAt);
+
   const actualsStartedAt = Date.now();
   const syncedSqftActualsBase = preparedFacts.available
     ? buildCompanyWideSqftActuals(jobs, { attributionCoverage, filters: req.query })
@@ -2580,6 +2644,7 @@ export async function salesDashboardFoundationHandler(req, supabaseGetter) {
     reconciliationComputeMs = elapsedMs(reconciliationStartedAt);
   }
   const latestGroupComplete = syncHealth.latest_group?.complete !== false;
+  const responseBuildStartedAt = Date.now();
   const syncedSqftActuals = {
     ...syncedSqftActualsBase,
     rows_scanned: jobReadDiagnostics.rows_scanned,
@@ -2589,6 +2654,7 @@ export async function salesDashboardFoundationHandler(req, supabaseGetter) {
     source_sync_run_count: jobReadDiagnostics.source_sync_run_count,
     scoped_to_latest_complete_group: jobReadDiagnostics.scoped_to_latest_complete_group,
     used_precomputed_rollup: jobReadDiagnostics.used_precomputed_rollup,
+    used_facts_fallback: false,
     prepared_rollup_warning: preparedFacts.warning ?? null,
     actuals_compute_ms: actualsComputeMs,
     attribution_compute_ms: attributionComputeMs,
@@ -2604,26 +2670,16 @@ export async function salesDashboardFoundationHandler(req, supabaseGetter) {
       ? null
       : "Latest Moraware import group is incomplete or has a failed latest chunk attempt; treat 2026 baseline actuals as partial until the group is completed successfully."
   };
-  const latestGroupRows = syncHealth.latest_group?.total_row_counts || {};
+  const blueprintStaticPayloadComputeMs = 0;
+  const responseBuildComputeMs = elapsedMs(responseBuildStartedAt);
+  const totalHandlerComputeMs = elapsedMs(requestStartedAt);
 
   return {
     status: 200,
     body: {
       ok: true,
       organization_id: organizationId,
-      blueprint_preserve: [
-        "ESF Total and Individual Rep tabs",
-        "date, branch, collection, Elite group, search, manufacturer, and color filters",
-        "quick ranges: YTD, Q1, April, last 30, current week, full 2025, all loaded",
-        "company and rep KPI cards",
-        "monthly YoY trend",
-        "Elite 100 mix and group breakdown",
-        "manufacturer mix",
-        "rep summary and coaching insights",
-        "top accounts/producers and accounts needing attention",
-        "top Elite 100 and out-of-collection colors",
-        "rep-specific account detail"
-      ],
+      blueprint_preserve: [],
       sync_health: publicSyncHealth(syncHealth),
       actuals: {
         source: "brain_moraware_*",
@@ -2668,15 +2724,24 @@ export async function salesDashboardFoundationHandler(req, supabaseGetter) {
         "machine/resource assignment and material inventory are intentionally out of scope for this pass"
       ],
       performance_diagnostics: {
-        request_compute_ms: elapsedMs(requestStartedAt),
+        auth_profile_permission_compute_ms: authProfilePermissionMs,
+        sync_health_compute_ms: syncHealthComputeMs,
+        facts_fetch_compute_ms: factsFetchComputeMs,
         actuals_compute_ms: actualsComputeMs,
         attribution_compute_ms: attributionComputeMs,
+        quote_pipeline_compute_ms: quotePipelineComputeMs,
+        status_process_compute_ms: statusProcessComputeMs,
+        blueprint_static_payload_compute_ms: blueprintStaticPayloadComputeMs,
+        response_build_compute_ms: responseBuildComputeMs,
+        total_handler_compute_ms: totalHandlerComputeMs,
+        request_compute_ms: totalHandlerComputeMs,
         attribution_used_account_rollups: Boolean(attributionCoverage?.diagnostics?.attribution_used_account_rollups),
         attribution_account_rollups_count: attributionCoverage?.diagnostics?.attribution_account_rollups_count ?? null,
         attribution_mapping_rows_count: attributionCoverage?.diagnostics?.attribution_mapping_rows_count ?? null,
         used_precomputed_summary: Boolean(attributionCoverage?.diagnostics?.used_precomputed_summary),
         reconciliation_compute_ms: reconciliationComputeMs,
         used_precomputed_rollup: Boolean(jobReadDiagnostics.used_precomputed_rollup),
+        used_facts_fallback: false,
         reconciliation_status: reconciliationStatus
       }
     }

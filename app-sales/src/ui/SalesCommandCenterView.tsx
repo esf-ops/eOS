@@ -291,7 +291,6 @@ export default function SalesCommandCenterView({ token, onLoadError }: Props) {
     } catch (e: unknown) {
       const message = e instanceof ApiError ? e.message : String((e as Error)?.message ?? e);
       onLoadError(message);
-      setData(null);
     } finally {
       setBusy(false);
     }
