@@ -10,8 +10,11 @@ import {
   listMorawareFormsFields,
   listMorawareJobs,
   listMorawareResources,
+  loadLatestCompleteImportGroup,
   loadPreparedFactsSummary,
-  loadMorawareSyncOverview,
+  loadLatestSuccessfulImportGroup,
+  morawareApiDiagnostics,
+  parseCountMode,
   resolveMorawareOrganizationId
 } from "../moraware/morawareSyncHealth.js";
 
@@ -66,6 +69,28 @@ function requireOrganization(res, organizationId) {
   return true;
 }
 
+async function loadPreparedFactsForOrg(db, organizationId, countMode) {
+  const t0 = Date.now();
+  const { import_group: latestGroup } = await loadLatestSuccessfulImportGroup(db, organizationId);
+  const latestComplete =
+    latestGroup?.complete === true
+      ? latestGroup
+      : await loadLatestCompleteImportGroup(db, organizationId, { maxGroupsToCheck: 10 });
+  const prepared = await loadPreparedFactsSummary(db, organizationId, latestComplete, { countMode });
+  return {
+    organization_id: organizationId,
+    latest_complete_import_group: latestComplete,
+    ...prepared,
+    diagnostics: morawareApiDiagnostics("GET /api/admin/moraware/prepared-facts", {
+      total_compute_ms: Date.now() - t0,
+      query_compute_ms: Date.now() - t0,
+      used_exact_count: countMode === "exact",
+      count_mode: countMode,
+      count_status: countMode === "exact" ? "exact" : "estimated"
+    })
+  };
+}
+
 /**
  * @param {import("express").Express} app
  * @param {{ requireAuth: Function, requireRole: Function, requireHeadAccess: Function, getSupabase: () => import("@supabase/supabase-js").SupabaseClient }} deps
@@ -75,6 +100,7 @@ export function attachMorawareAdminRoutes(app, deps) {
   const stack = [requireAuth(), requireRole(["admin"]), requireHeadAccess("system_admin", { getSupabase })];
 
   app.get("/api/admin/moraware/schema-health", ...stack, async (req, res) => {
+    const t0 = Date.now();
     try {
       const db = getSupabase();
       const tables = {};
@@ -83,7 +109,17 @@ export function attachMorawareAdminRoutes(app, deps) {
         const count = exists.exists ? await tableCount(db, table) : { ok: false, missing: true };
         tables[table] = { exists: exists.exists, count: count.ok ? count.count : null, error: count.error || exists.error || null };
       }
-      res.json({ ok: true, adapter: "moraware", tables });
+      res.json({
+        ok: true,
+        adapter: "moraware",
+        tables,
+        diagnostics: morawareApiDiagnostics("GET /api/admin/moraware/schema-health", {
+          total_compute_ms: Date.now() - t0,
+          used_exact_count: true,
+          count_mode: "exact",
+          count_status: "exact"
+        })
+      });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
     }
@@ -94,7 +130,8 @@ export function attachMorawareAdminRoutes(app, deps) {
       const db = getSupabase();
       const organizationId = resolveMorawareOrganizationId(req);
       if (!requireOrganization(res, organizationId)) return;
-      const health = await buildMorawareAdminHealth(db, organizationId);
+      const countMode = parseCountMode(req.query?.count_mode, "estimated");
+      const health = await buildMorawareAdminHealth(db, organizationId, { countMode });
       res.json(health);
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
@@ -106,9 +143,9 @@ export function attachMorawareAdminRoutes(app, deps) {
       const db = getSupabase();
       const organizationId = resolveMorawareOrganizationId(req);
       if (!requireOrganization(res, organizationId)) return;
-      const overview = await loadMorawareSyncOverview(db, organizationId);
-      const prepared = await loadPreparedFactsSummary(db, organizationId, overview.latest_complete_import_group);
-      res.json({ ok: true, organization_id: organizationId, ...prepared });
+      const countMode = parseCountMode(req.query?.count_mode, "estimated");
+      const prepared = await loadPreparedFactsForOrg(db, organizationId, countMode);
+      res.json({ ok: true, ...prepared });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
     }
