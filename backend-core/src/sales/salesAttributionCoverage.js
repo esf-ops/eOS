@@ -1,4 +1,5 @@
 import { normalizeAccountNameWithoutLocationPrefix } from "./salesAccountNameNormalizer.js";
+import { extractSqftFromMorawareJob } from "./morawareSqftActuals.js";
 
 const PAGE_SIZE = 1000;
 
@@ -39,11 +40,67 @@ async function fetchAll(queryFactory) {
   return rows;
 }
 
+function chunkArray(values, size) {
+  const out = [];
+  for (let i = 0; i < values.length; i += size) out.push(values.slice(i, i + size));
+  return out;
+}
+
+async function fetchAllByRunIds(queryFactory, runIds) {
+  if (!runIds.length) return fetchAll(() => queryFactory(null));
+  const rows = [];
+  for (const runIdChunk of chunkArray(runIds, 40)) {
+    rows.push(...(await fetchAll(() => queryFactory(runIdChunk))));
+  }
+  return rows;
+}
+
+function addRowCounts(a = {}, b = {}) {
+  const keys = new Set([...Object.keys(a || {}), ...Object.keys(b || {})]);
+  const out = {};
+  for (const key of keys) out[key] = (Number(a?.[key]) || 0) + (Number(b?.[key]) || 0);
+  return out;
+}
+
+function summarizeImportGroupRows(groupRows, latestRun) {
+  const expectedChunkCount = Math.max(
+    0,
+    ...groupRows.map((r) => Number(r?.metadata?.chunk_count) || 0),
+    Number(latestRun?.metadata?.chunk_count) || 0
+  ) || null;
+  const byChunkIndex = new Map();
+  for (const row of groupRows) {
+    const idx = Number(row?.metadata?.chunk_index) || null;
+    if (!idx) continue;
+    const prev = byChunkIndex.get(idx);
+    if (!prev || String(row.started_at || "") >= String(prev.started_at || "")) byChunkIndex.set(idx, row);
+  }
+  const latestRows = [...byChunkIndex.entries()].sort((a, b) => a[0] - b[0]);
+  const missingChunkIndices = [];
+  if (expectedChunkCount) {
+    for (let i = 1; i <= expectedChunkCount; i += 1) {
+      if (!byChunkIndex.has(i)) missingChunkIndices.push(i);
+    }
+  }
+  const successfulRows = latestRows.filter(([, row]) => row.status === "success").map(([, row]) => row);
+  const failedChunks = latestRows.filter(([, row]) => row.status === "failed").length;
+  const complete = Boolean(expectedChunkCount) && successfulRows.length === expectedChunkCount && failedChunks === 0 && missingChunkIndices.length === 0;
+  return {
+    complete,
+    expectedChunkCount,
+    successfulChunks: successfulRows.length,
+    failedChunks,
+    missingChunkIndices,
+    runIds: successfulRows.map((row) => String(row.id)).filter(Boolean),
+    totalRowCounts: successfulRows.reduce((acc, row) => addRowCounts(acc, row.row_counts || {}), {})
+  };
+}
+
 async function latestSuccessfulSyncRunIds(supabase, organizationId) {
   try {
     let q = supabase
       .from("moraware_sync_runs")
-      .select("id,metadata,finished_at,started_at")
+      .select("id,metadata,finished_at,started_at,status,row_counts")
       .eq("status", "success")
       .order("finished_at", { ascending: false })
       .limit(1);
@@ -56,14 +113,22 @@ async function latestSuccessfulSyncRunIds(supabase, organizationId) {
 
     let groupQ = supabase
       .from("moraware_sync_runs")
-      .select("id")
+      .select("id,status,started_at,finished_at,row_counts,metadata")
       .filter("metadata->>import_group_id", "eq", importGroupId)
-      .eq("status", "success")
-      .limit(100);
+      .limit(1000);
     if (organizationId) groupQ = groupQ.eq("organization_id", organizationId);
     const group = await groupQ;
     if (group.error) throw group.error;
-    return { importGroupId, runIds: (group.data ?? []).map((r) => String(r.id)).filter(Boolean) };
+    const summary = summarizeImportGroupRows(group.data ?? [], latest);
+    if (!summary.complete) {
+      return {
+        importGroupId,
+        runIds: [],
+        groupComplete: false,
+        warning: `Latest Moraware import group ${importGroupId} is incomplete; refusing to use partial group for mapping coverage.`
+      };
+    }
+    return { importGroupId, runIds: summary.runIds, groupComplete: true, groupSummary: summary };
   } catch (e) {
     if (isMissingRelationError(e)) return { importGroupId: null, runIds: [], warning: "moraware_sync_runs table missing" };
     return { importGroupId: null, runIds: [], warning: String(e?.message ?? e) };
@@ -121,34 +186,39 @@ export async function loadSalesAttributionCoverage(supabase, { organizationId = 
 
   let accounts = [];
   let jobs = [];
-  try {
-    accounts = await fetchAll(() => {
-      let q = supabase
-        .from("brain_moraware_accounts")
-        .select("source_account_id,account_name,sync_run_id,last_seen_at,updated_at")
-        .order("account_name", { ascending: true });
-      if (organizationId) q = q.eq("organization_id", organizationId);
-      if (runIds.length) q = q.in("sync_run_id", runIds);
-      return q;
-    });
-  } catch (e) {
-    if (isMissingRelationError(e)) warnings.push("brain_moraware_accounts table missing");
-    else throw e;
-  }
+  if (latest.importGroupId && latest.groupComplete === false) {
+    accounts = [];
+    jobs = [];
+  } else {
+    try {
+      accounts = await fetchAllByRunIds((runIdChunk) => {
+        let q = supabase
+          .from("brain_moraware_accounts")
+          .select("source_account_id,account_name,sync_run_id,last_seen_at,updated_at")
+          .order("account_name", { ascending: true });
+        if (organizationId) q = q.eq("organization_id", organizationId);
+        if (runIdChunk?.length) q = q.in("sync_run_id", runIdChunk);
+        return q;
+      }, runIds);
+    } catch (e) {
+      if (isMissingRelationError(e)) warnings.push("brain_moraware_accounts table missing");
+      else throw e;
+    }
 
-  try {
-    jobs = await fetchAll(() => {
-      let q = supabase
-        .from("brain_moraware_jobs")
-        .select("source_job_id,source_account_id,account_name,sync_run_id")
-        .order("source_account_id", { ascending: true });
-      if (organizationId) q = q.eq("organization_id", organizationId);
-      if (runIds.length) q = q.in("sync_run_id", runIds);
-      return q;
-    });
-  } catch (e) {
-    if (isMissingRelationError(e)) warnings.push("brain_moraware_jobs table missing");
-    else throw e;
+    try {
+      jobs = await fetchAllByRunIds((runIdChunk) => {
+        let q = supabase
+          .from("brain_moraware_jobs")
+          .select("source_job_id,source_account_id,account_name,sync_run_id,raw_payload")
+          .order("source_account_id", { ascending: true });
+        if (organizationId) q = q.eq("organization_id", organizationId);
+        if (runIdChunk?.length) q = q.in("sync_run_id", runIdChunk);
+        return q;
+      }, runIds);
+    } catch (e) {
+      if (isMissingRelationError(e)) warnings.push("brain_moraware_jobs table missing");
+      else throw e;
+    }
   }
 
   let aliases = [];
@@ -175,7 +245,9 @@ export async function loadSalesAttributionCoverage(supabase, { organizationId = 
       sourceAccountId: String(row.source_account_id ?? "").trim(),
       accountName: displayAccountName(row),
       normalizedMorawareName: normalizeAccountNameWithoutLocationPrefix(row.account_name),
-      jobCount: 0
+      jobCount: 0,
+      jobsWithSqft: 0,
+      totalSqft: 0
     });
   }
   for (const job of jobs) {
@@ -187,9 +259,16 @@ export async function loadSalesAttributionCoverage(supabase, { organizationId = 
         sourceAccountId: String(job.source_account_id ?? "").trim(),
         accountName: displayAccountName(job),
         normalizedMorawareName: normalizeAccountNameWithoutLocationPrefix(job.account_name),
-        jobCount: 0
+        jobCount: 0,
+        jobsWithSqft: 0,
+        totalSqft: 0
       };
     slot.jobCount += 1;
+    const extracted = extractSqftFromMorawareJob(job);
+    if (extracted.hasSqft) {
+      slot.jobsWithSqft += 1;
+      slot.totalSqft += extracted.totalSqft;
+    }
     accountsByKey.set(key, slot);
   }
 
@@ -202,6 +281,12 @@ export async function loadSalesAttributionCoverage(supabase, { organizationId = 
     approvedMappedJobs: 0,
     needsReviewUnmappedJobs: 0,
     rejectedIgnoredJobs: 0,
+    totalSqftSeen: 0,
+    approvedMappedSqft: 0,
+    needsReviewUnmappedSqft: 0,
+    rejectedIgnoredSqft: 0,
+    jobsWithSqft: 0,
+    jobsMissingSqft: 0,
     blackstoneUnapprovedAccounts: 0
   };
   const examples = { needsReviewUnmapped: [], rejectedIgnored: [], approvedMapped: [], blackstoneUnapproved: [] };
@@ -211,11 +296,18 @@ export async function loadSalesAttributionCoverage(supabase, { organizationId = 
     const alias = aliasesByNorm.get(account.normalizedMorawareName) || null;
     const status = statusForAlias(alias);
     const jobCount = Number(account.jobCount) || 0;
+    const jobsWithSqft = Number(account.jobsWithSqft) || 0;
+    const totalSqft = Math.round((Number(account.totalSqft) || 0) * 100) / 100;
+    counts.totalSqftSeen += totalSqft;
+    counts.jobsWithSqft += jobsWithSqft;
     const example = {
       accountName: account.accountName,
       sourceAccountId: account.sourceAccountId || null,
       normalizedMorawareName: account.normalizedMorawareName || null,
       jobCount,
+      jobsWithSqft,
+      jobsMissingSqft: Math.max(0, jobCount - jobsWithSqft),
+      totalSqft,
       status,
       mondayAccountName: alias?.monday_account_name ?? null,
       assignedSalesperson: alias?.assigned_salesperson ?? null,
@@ -234,14 +326,17 @@ export async function loadSalesAttributionCoverage(supabase, { organizationId = 
     if (status === "approved_mapped") {
       counts.approvedMappedAccounts += 1;
       counts.approvedMappedJobs += jobCount;
+      counts.approvedMappedSqft += totalSqft;
       examples.approvedMapped.push(example);
     } else if (status === "rejected_ignored") {
       counts.rejectedIgnoredAccounts += 1;
       counts.rejectedIgnoredJobs += jobCount;
+      counts.rejectedIgnoredSqft += totalSqft;
       examples.rejectedIgnored.push(example);
     } else {
       counts.needsReviewUnmappedAccounts += 1;
       counts.needsReviewUnmappedJobs += jobCount;
+      counts.needsReviewUnmappedSqft += totalSqft;
       examples.needsReviewUnmapped.push(example);
     }
 
@@ -255,16 +350,20 @@ export async function loadSalesAttributionCoverage(supabase, { organizationId = 
   }
 
   for (const list of Object.values(examples)) {
-    list.sort((a, b) => b.jobCount - a.jobCount || String(a.accountName).localeCompare(String(b.accountName)));
+    list.sort((a, b) => (Number(b.totalSqft) || 0) - (Number(a.totalSqft) || 0) || b.jobCount - a.jobCount || String(a.accountName).localeCompare(String(b.accountName)));
   }
+  counts.jobsMissingSqft = Math.max(0, counts.totalJobsSeen - counts.jobsWithSqft);
 
   return {
     source: "brain_moraware_latest_successful_sync_plus_sales_account_aliases",
     latest_import_group_id: latest.importGroupId,
+    latest_group_complete: latest.groupComplete ?? null,
     latest_sync_run_ids: runIds,
     ...counts,
     approvedAccountCoveragePct: pct(counts.approvedMappedAccounts, counts.totalAccountsSeen),
     approvedJobCoveragePct: pct(counts.approvedMappedJobs, counts.totalJobsSeen),
+    approvedSqftCoveragePct: pct(counts.approvedMappedSqft, counts.totalSqftSeen),
+    sqft_source: "Brain-derived Moraware Job Worksheet Sq.Ft. fields",
     warning:
       "Revenue/sqft by branch remains preview until approved Sales Account Mapping coverage is high; local fallback rules do not count as trusted coverage.",
     blackstone_guardrail:

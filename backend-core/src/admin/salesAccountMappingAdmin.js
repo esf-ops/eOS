@@ -224,8 +224,11 @@ function buildBrainCoverageSuggestionRow(row) {
     morawareAccountName,
     sourceAccountId: row.sourceAccountId ?? null,
     normalizedMorawareName,
-    reportTotalSqft: 0,
+    reportTotalSqft: Number(row.totalSqft ?? 0) || 0,
     reportJobCount: Number(row.jobCount ?? 0) || 0,
+    jobsWithSqft: Number(row.jobsWithSqft ?? 0) || 0,
+    jobsMissingSqft: Number(row.jobsMissingSqft ?? 0) || 0,
+    sqftSource: row.sqftSource ?? "Brain-derived Moraware Job Worksheet Sq.Ft. fields",
     morawareJobSalespeople: "",
     suggestedMondayAccountName: row.mondayAccountName ?? null,
     suggestedSalesperson: row.assignedSalesperson ?? null,
@@ -256,7 +259,7 @@ function mergeSuggestionEnrichment(rows, suggestions) {
     if (!hit) return row;
     return {
       ...row,
-      reportTotalSqft: hit.reportTotalSqft || row.reportTotalSqft,
+      reportTotalSqft: row.reportTotalSqft || hit.reportTotalSqft,
       morawareJobSalespeople: hit.morawareJobSalespeople || row.morawareJobSalespeople,
       suggestedMondayAccountName: row.suggestedMondayAccountName || hit.suggestedMondayAccountName,
       suggestedSalesperson: row.suggestedSalesperson || hit.suggestedSalesperson,
@@ -320,13 +323,17 @@ function sortRows(rows, sortBy, sortDir) {
   const key = String(sortBy ?? "sqft");
   const cmp = (a, b) => {
     if (key === "account") return a.morawareAccountName.localeCompare(b.morawareAccountName) * dir;
+    if (key === "account_name") return a.morawareAccountName.localeCompare(b.morawareAccountName) * dir;
     if (key === "confidence") return String(a.confidence).localeCompare(String(b.confidence)) * dir;
     if (key === "matchType") return String(a.matchType).localeCompare(String(b.matchType)) * dir;
     if (key === "salesperson") return String(a.suggestedSalesperson ?? "").localeCompare(String(b.suggestedSalesperson ?? "")) * dir;
     if (key === "branch") return String(a.suggestedBranch ?? "").localeCompare(String(b.suggestedBranch ?? "")) * dir;
     if (key === "jobs") return (a.reportJobCount - b.reportJobCount) * dir;
+    if (key === "jobs_desc") return b.reportJobCount - a.reportJobCount;
+    if (key === "sqft_asc") return ((a.reportTotalSqft || 0) - (b.reportTotalSqft || 0)) || a.morawareAccountName.localeCompare(b.morawareAccountName);
+    if (key === "sqft_desc") return ((b.reportTotalSqft || 0) - (a.reportTotalSqft || 0)) || a.morawareAccountName.localeCompare(b.morawareAccountName);
     // sqft default
-    return ((a.reportTotalSqft || a.reportJobCount) - (b.reportTotalSqft || b.reportJobCount)) * dir;
+    return ((a.reportTotalSqft || 0) - (b.reportTotalSqft || 0)) * dir || (a.reportJobCount - b.reportJobCount) * dir;
   };
   return rows.slice().sort(cmp);
 }

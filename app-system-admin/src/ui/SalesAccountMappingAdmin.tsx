@@ -15,6 +15,9 @@ type SuggestionRow = {
   normalizedMorawareName: string;
   reportTotalSqft: number;
   reportJobCount: number;
+  jobsWithSqft?: number;
+  jobsMissingSqft?: number;
+  sqftSource?: string;
   morawareJobSalespeople: string;
   suggestedMondayAccountName: string | null;
   suggestedSalesperson: string | null;
@@ -69,6 +72,9 @@ type CoverageExample = {
   sourceAccountId?: string | null;
   normalizedMorawareName?: string | null;
   jobCount: number;
+  jobsWithSqft?: number;
+  jobsMissingSqft?: number;
+  totalSqft?: number;
   status: string;
   mondayAccountName?: string | null;
   assignedSalesperson?: string | null;
@@ -87,6 +93,14 @@ type CoverageResp = {
     approvedMappedJobs: number;
     needsReviewUnmappedJobs: number;
     rejectedIgnoredJobs: number;
+    totalSqftSeen: number;
+    approvedMappedSqft: number;
+    needsReviewUnmappedSqft: number;
+    rejectedIgnoredSqft: number;
+    jobsWithSqft: number;
+    jobsMissingSqft: number;
+    approvedSqftCoveragePct: number | null;
+    sqft_source?: string;
     approvedAccountCoveragePct: number | null;
     approvedJobCoveragePct: number | null;
     blackstoneUnapprovedAccounts: number;
@@ -150,7 +164,7 @@ export default function SalesAccountMappingAdmin({ token }: { token: string }) {
   const [confidence, setConfidence] = useState("");
   const [salesperson, setSalesperson] = useState("");
   const [branch, setBranch] = useState("");
-  const [sortBy, setSortBy] = useState("jobs");
+  const [sortBy, setSortBy] = useState("sqft_desc");
   const [sortDir, setSortDir] = useState("desc");
 
   const [selected, setSelected] = useState<SuggestionRow | null>(null);
@@ -282,6 +296,8 @@ export default function SalesAccountMappingAdmin({ token }: { token: string }) {
       needsReviewCount: rows.filter((r) => r.reviewStatus === "needs_review" || r.reviewStatus === "fuzzy").length
     };
   }, [rows]);
+
+  const sqftSourceLabel = coverage?.sqft_source || "Brain-derived Job Worksheet Sq.Ft.";
 
   async function approve() {
     if (!selected) return;
@@ -429,12 +445,18 @@ export default function SalesAccountMappingAdmin({ token }: { token: string }) {
           <div style={{ fontSize: 20, fontWeight: 700 }}>{String(derivedSummary.needsReviewCount)}</div>
         </div>
         <div className="card">
-          <div className="muted">Approved Sq.Ft. (if enriched)</div>
-          <div style={{ fontSize: 20, fontWeight: 700 }}>{nf(derivedSummary.approvedSqft)}</div>
+          <div className="muted">Approved Sq.Ft.</div>
+          <div style={{ fontSize: 20, fontWeight: 700 }}>{nf(coverage?.approvedMappedSqft ?? derivedSummary.approvedSqft)}</div>
+          <div className="muted" style={{ marginTop: 4 }}>
+            {pct(coverage?.approvedSqftCoveragePct)} of Brain Sq.Ft.
+          </div>
         </div>
         <div className="card">
-          <div className="muted">Unmatched Sq.Ft. (if enriched)</div>
-          <div style={{ fontSize: 20, fontWeight: 700 }}>{nf(derivedSummary.unmatchedSqft)}</div>
+          <div className="muted">Needs review Sq.Ft.</div>
+          <div style={{ fontSize: 20, fontWeight: 700 }}>{nf(coverage?.needsReviewUnmappedSqft ?? derivedSummary.unmatchedSqft)}</div>
+          <div className="muted" style={{ marginTop: 4 }}>
+            {sqftSourceLabel}
+          </div>
         </div>
         <div className="card">
           <div className="muted">Review queue total</div>
@@ -471,6 +493,7 @@ export default function SalesAccountMappingAdmin({ token }: { token: string }) {
                 <tr>
                   <th>Account</th>
                   <th className="num">Jobs</th>
+                  <th className="num">Sq.Ft.</th>
                   <th>Status</th>
                 </tr>
               </thead>
@@ -479,6 +502,7 @@ export default function SalesAccountMappingAdmin({ token }: { token: string }) {
                   <tr key={`${r.normalizedMorawareName || r.accountName}-${r.sourceAccountId || ""}`}>
                     <td>{r.accountName}</td>
                     <td className="num">{nf(r.jobCount)}</td>
+                    <td className="num">{nf(r.totalSqft ?? 0)}</td>
                     <td>
                       <span className="pill pill-warn">{r.status}</span>
                     </td>
@@ -552,9 +576,10 @@ export default function SalesAccountMappingAdmin({ token }: { token: string }) {
             <label>Sort</label>
             <div style={{ display: "flex", gap: 8 }}>
               <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
-                <option value="jobs">Jobs</option>
-                <option value="sqft">Sq.Ft. (if enriched)</option>
-                <option value="account">Account</option>
+                <option value="sqft_desc">Sq.Ft. desc</option>
+                <option value="sqft_asc">Sq.Ft. asc</option>
+                <option value="jobs_desc">Jobs desc</option>
+                <option value="account">Account name</option>
                 <option value="confidence">Confidence</option>
                 <option value="matchType">Match type</option>
                 <option value="salesperson">Salesperson</option>
@@ -604,7 +629,18 @@ export default function SalesAccountMappingAdmin({ token }: { token: string }) {
                 </td>
                 <td>{r.sourceAccountId || <span className="muted">—</span>}</td>
                 <td className="num">{String(r.reportJobCount)}</td>
-                <td className="num">{r.reportTotalSqft ? nf(r.reportTotalSqft) : <span className="muted">—</span>}</td>
+                <td className="num">
+                  {r.reportTotalSqft ? (
+                    <>
+                      {nf(r.reportTotalSqft)}
+                      <div className="muted" style={{ fontSize: 11 }}>
+                        {nf(r.jobsWithSqft ?? 0)} with · {nf(r.jobsMissingSqft ?? 0)} missing
+                      </div>
+                    </>
+                  ) : (
+                    <span className="muted">—</span>
+                  )}
+                </td>
                 <td style={{ maxWidth: 260 }}>{r.suggestedMondayAccountName || <span className="muted">—</span>}</td>
                 <td>{r.suggestedSalesperson || <span className="muted">—</span>}</td>
                 <td>{r.suggestedBranch || <span className="muted">—</span>}</td>
@@ -645,8 +681,11 @@ export default function SalesAccountMappingAdmin({ token }: { token: string }) {
             <div style={{ fontWeight: 700 }}>{selected.morawareAccountName}</div>
             <div className="muted" style={{ marginTop: 6 }}>
               Latest Brain coverage: {selected.reportJobCount} jobs
-              {selected.reportTotalSqft ? ` · ${nf(selected.reportTotalSqft)} sf from optional enrichment` : ""}
+              {selected.reportTotalSqft ? ` · ${nf(selected.reportTotalSqft)} Sq.Ft. from Brain Job Worksheet fields` : ""}
               {selected.sourceAccountId ? ` · source account ${selected.sourceAccountId}` : ""}
+            </div>
+            <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
+              Sq.Ft. is raw-account mapping priority only. Branch/salesperson Sq.Ft. is trusted only after this account mapping is approved.
             </div>
             {selected.morawareJobSalespeople ? (
               <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
