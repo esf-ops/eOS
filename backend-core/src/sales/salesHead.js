@@ -14,7 +14,7 @@ import {
   methodLabelForDisplay
 } from "./salesAttribution.js";
 import { loadSalesAttributionCoverage } from "./salesAttributionCoverage.js";
-import { buildCompanyWideSqftActuals } from "./morawareSqftActuals.js";
+import { buildCompanyWideSqftActuals, buildProductionReportReconciliation } from "./morawareSqftActuals.js";
 
 /** Roles that may call `/api/sales/*` when also granted head `sales` (admin bypass unchanged). */
 export const SALES_API_ROLES = Object.freeze(["admin", "executive", "sales", "finance", "marketing"]);
@@ -1819,7 +1819,7 @@ function chunkArray(values, size) {
 async function fetchLatestCompleteMorawareJobs(supabase, organizationId, syncHealth) {
   const pageSize = 1000;
   const selectCols =
-    "sync_run_id,source_job_id,source_account_id,account_name,status_name,process_name,salesperson_name,created_at_source,modified_at_source,raw_payload";
+    "sync_run_id,source_job_id,source_account_id,account_name,status_name,process_name,salesperson_name,created_at_source,modified_at_source,scheduled_at_source,completed_at_source,install_at_source,raw_payload";
   const group = syncHealth.latest_group;
   const runIds = Array.isArray(group?.successful_sync_run_ids) ? group.successful_sync_run_ids.map(String).filter(Boolean) : [];
   if (group?.import_group_id && group.complete === false) {
@@ -1868,6 +1868,48 @@ async function fetchLatestCompleteMorawareJobs(supabase, organizationId, syncHea
       source_group_complete: Boolean(group?.complete),
       source_import_group_id: group?.import_group_id || null,
       source_sync_run_count: runIds.length,
+      scoped_to_latest_complete_group: shouldScopeToGroup
+    }
+  };
+}
+
+async function fetchLatestCompleteMorawareActivities(supabase, organizationId, syncHealth) {
+  const pageSize = 1000;
+  const selectCols = "sync_run_id,source_activity_id,source_job_id,activity_type_name,activity_status_name,phase_name,scheduled_date,raw_payload";
+  const group = syncHealth.latest_group;
+  const runIds = Array.isArray(group?.successful_sync_run_ids) ? group.successful_sync_run_ids.map(String).filter(Boolean) : [];
+  if (group?.import_group_id && group.complete === false) {
+    return { rows: [], diagnostics: { rows_scanned: 0, query_page_count: 0, source_group_complete: false } };
+  }
+  const shouldScopeToGroup = Boolean(group?.complete && runIds.length);
+  const rows = [];
+  let queryPageCount = 0;
+  const runIdGroups = shouldScopeToGroup ? chunkArray(runIds, 40) : [null];
+  for (const runIdGroup of runIdGroups) {
+    let from = 0;
+    while (true) {
+      let q = supabase
+        .from("brain_moraware_job_activities")
+        .select(selectCols)
+        .eq("organization_id", organizationId)
+        .order("scheduled_date", { ascending: true, nullsFirst: false })
+        .range(from, from + pageSize - 1);
+      if (runIdGroup) q = q.in("sync_run_id", runIdGroup);
+      const { data, error } = await q;
+      queryPageCount += 1;
+      if (error) throw new Error(error.message);
+      if (!data?.length) break;
+      rows.push(...data);
+      if (data.length < pageSize) break;
+      from += pageSize;
+    }
+  }
+  return {
+    rows,
+    diagnostics: {
+      rows_scanned: rows.length,
+      query_page_count: queryPageCount,
+      source_group_complete: Boolean(group?.complete),
       scoped_to_latest_complete_group: shouldScopeToGroup
     }
   };
@@ -1933,11 +1975,18 @@ export async function salesDashboardFoundationHandler(req, supabaseGetter) {
     ]);
 
   let jobs;
+  let activities = [];
   let jobReadDiagnostics;
+  let activityReadDiagnostics = null;
   try {
-    const latestJobs = await fetchLatestCompleteMorawareJobs(supabase, organizationId, syncHealth);
+    const [latestJobs, latestActivities] = await Promise.all([
+      fetchLatestCompleteMorawareJobs(supabase, organizationId, syncHealth),
+      fetchLatestCompleteMorawareActivities(supabase, organizationId, syncHealth)
+    ]);
     jobs = latestJobs.rows;
+    activities = latestActivities.rows;
     jobReadDiagnostics = latestJobs.diagnostics;
+    activityReadDiagnostics = latestActivities.diagnostics;
   } catch (e) {
     return { status: 500, body: { ok: false, error: String(e?.message ?? e) } };
   }
@@ -1960,6 +2009,7 @@ export async function salesDashboardFoundationHandler(req, supabaseGetter) {
     }
   }
   const syncedSqftActualsBase = buildCompanyWideSqftActuals(jobs, { attributionCoverage, filters: req.query });
+  const productionReportReconciliation = buildProductionReportReconciliation(jobs, { activities });
   const latestGroupComplete = syncHealth.latest_group?.complete !== false;
   const syncedSqftActuals = {
     ...syncedSqftActualsBase,
@@ -1969,6 +2019,9 @@ export async function salesDashboardFoundationHandler(req, supabaseGetter) {
     source_import_group_id: jobReadDiagnostics.source_import_group_id,
     source_sync_run_count: jobReadDiagnostics.source_sync_run_count,
     scoped_to_latest_complete_group: jobReadDiagnostics.scoped_to_latest_complete_group,
+    activity_rows_scanned_for_reconciliation: activityReadDiagnostics?.rows_scanned ?? null,
+    activity_query_page_count_for_reconciliation: activityReadDiagnostics?.query_page_count ?? null,
+    production_report_reconciliation: productionReportReconciliation,
     import_group_trust_status: latestGroupComplete ? "latest_group_complete_or_single_run" : "latest_group_incomplete",
     import_group_warning: latestGroupComplete
       ? null

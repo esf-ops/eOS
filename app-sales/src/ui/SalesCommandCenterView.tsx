@@ -60,6 +60,13 @@ type SalesDashboardFoundation = {
     sqft_coverage_pct?: number | null;
     average_sqft_per_job?: number | null;
     date_coverage?: { oldest_job_created_at?: string | null; newest_job_created_at?: string | null };
+    reporting_definition?: {
+      label?: string;
+      date_basis?: string;
+      status_scope?: string;
+      process_scope?: string;
+      note?: string;
+    };
     active_filters?: {
       datePreset?: string;
       startDate?: string;
@@ -91,6 +98,41 @@ type SalesDashboardFoundation = {
     gated_filter_warning?: string | null;
     rows_scanned?: number | null;
     query_page_count?: number | null;
+    jobs_missing_report_date?: number | null;
+    status_scope_comparison?: {
+      all_jobs?: { total_sqft?: number | null; jobs_with_sqft?: number | null };
+      complete_only?: { total_sqft?: number | null; jobs_with_sqft?: number | null };
+      active_only?: { total_sqft?: number | null; jobs_with_sqft?: number | null };
+    };
+    production_report_reconciliation?: {
+      title?: string;
+      status?: string;
+      closest_reference_match?: {
+        basis?: string;
+        basis_label?: string;
+        status_scope?: string;
+        total_abs_variance_to_eric?: number | null;
+      } | null;
+      months?: Array<{
+        month: string;
+        current_sales_head_sqft: number;
+        complete_only_sqft: number;
+        active_only_sqft: number;
+        alternate_date_basis_sqft?: Record<string, number>;
+        eric_reference_total_sqft?: number | null;
+        variance_to_eric_sqft?: number | null;
+      }>;
+      diagnostics?: {
+        activities_scanned?: number | null;
+        missing_date_counts?: Record<string, number>;
+        missing_sqft_counts?: Record<string, number>;
+      };
+      production_reporting_bucket_plan?: {
+        buckets?: string[];
+        implementation_note?: string;
+      };
+      recommendation?: string;
+    };
     source_group_complete?: boolean | null;
     source_import_group_id?: string | null;
     source_sync_run_count?: number | null;
@@ -127,6 +169,13 @@ function pct(value: unknown) {
 function sqft(value: unknown) {
   const n = Number(value ?? 0);
   return Number.isFinite(n) ? new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(n) : "0";
+}
+
+function signedSqft(value: unknown) {
+  const n = Number(value ?? 0);
+  if (!Number.isFinite(n)) return "—";
+  const sign = n > 0 ? "+" : "";
+  return `${sign}${sqft(n)}`;
 }
 
 function compact(value: unknown) {
@@ -269,6 +318,8 @@ export default function SalesCommandCenterView({ token, onLoadError }: Props) {
   const groupHealthy = Boolean(group) && Number(group.failed_chunks || 0) === 0;
   const activeFilters = sqftActuals?.active_filters;
   const trendRows = sqftActuals?.grouped_sqft_trend || [];
+  const reconciliation = sqftActuals?.production_report_reconciliation;
+  const reconciliationRows = reconciliation?.months || [];
   const maxTrendSqft = Math.max(1, ...trendRows.map((row) => Number(row.total_sqft) || 0));
   const topAccounts = sqftActuals?.top_raw_accounts_by_sqft || [];
   const needsReviewAccounts = topAccounts.filter((row) => row.attribution_status !== "approved_mapping").length;
@@ -455,11 +506,11 @@ export default function SalesCommandCenterView({ token, onLoadError }: Props) {
 
         <section className="sales-command-hero" aria-label="Sales command center summary">
           <div className="sales-command-hero__main">
-            <p className="pi-card-title">YTD Synced Sq.Ft.</p>
+            <p className="pi-card-title">Worksheet Sq.Ft. by current dashboard date basis</p>
             <p className="sales-command-hero__value">{sqft(sqftActuals?.total_synced_sqft)}</p>
             <p>
               {num(sqftActuals?.rows_scanned ?? actuals?.jobs_count)} Moraware jobs scanned from the latest complete baseline group ·{" "}
-              {num(sqftActuals?.query_page_count)} query pages
+              {num(sqftActuals?.query_page_count)} query pages · {sqftActuals?.reporting_definition?.date_basis || "created/modified date"}
             </p>
           </div>
           <div className="sales-command-kpis">
@@ -492,6 +543,78 @@ export default function SalesCommandCenterView({ token, onLoadError }: Props) {
             </div>
           </div>
         </section>
+
+        {reconciliation ? (
+          <section className="pi-section sales-command-panel">
+            <div className="sales-section-heading">
+              <div>
+                <h2>Production Report Reconciliation</h2>
+                <p className="pi-sub">
+                  Reference-only comparison against Eric&apos;s Jan-Apr 2026 monthly report. This does not change the dashboard
+                  source of truth or approved attribution rules.
+                </p>
+              </div>
+              <span className="sales-status-pill sales-status-pill--warn">Diagnostic</span>
+            </div>
+            <div className="sales-command-kpis">
+              <div className="sales-command-kpi">
+                <span>Complete-only Sq.Ft.</span>
+                <strong>{sqft(sqftActuals?.status_scope_comparison?.complete_only?.total_sqft)}</strong>
+                <small>{num(sqftActuals?.status_scope_comparison?.complete_only?.jobs_with_sqft)} jobs with Sq.Ft.</small>
+              </div>
+              <div className="sales-command-kpi">
+                <span>Active-only Sq.Ft.</span>
+                <strong>{sqft(sqftActuals?.status_scope_comparison?.active_only?.total_sqft)}</strong>
+                <small>{num(sqftActuals?.status_scope_comparison?.active_only?.jobs_with_sqft)} jobs with Sq.Ft.</small>
+              </div>
+              <div className="sales-command-kpi sales-command-kpi--warn">
+                <span>Closest Jan-Apr Definition</span>
+                <strong>{reconciliation.closest_reference_match?.basis_label || "Needs review"}</strong>
+                <small>
+                  {reconciliation.closest_reference_match?.status_scope || "—"} · abs variance{" "}
+                  {sqft(reconciliation.closest_reference_match?.total_abs_variance_to_eric)}
+                </small>
+              </div>
+            </div>
+            <div className="pi-table-wrap" style={{ marginTop: 12 }}>
+              <table className="pi-table">
+                <thead>
+                  <tr>
+                    <th>Month</th>
+                    <th className="pi-num">Dashboard</th>
+                    <th className="pi-num">Complete</th>
+                    <th className="pi-num">Active</th>
+                    <th className="pi-num">Completed date</th>
+                    <th className="pi-num">Install date</th>
+                    <th className="pi-num">Eric ref</th>
+                    <th className="pi-num">Variance</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reconciliationRows.map((row) => (
+                    <tr key={row.month}>
+                      <td>{row.month}</td>
+                      <td className="pi-num">{sqft(row.current_sales_head_sqft)}</td>
+                      <td className="pi-num">{sqft(row.complete_only_sqft)}</td>
+                      <td className="pi-num">{sqft(row.active_only_sqft)}</td>
+                      <td className="pi-num">{sqft(row.alternate_date_basis_sqft?.completed_date)}</td>
+                      <td className="pi-num">{sqft(row.alternate_date_basis_sqft?.install_date)}</td>
+                      <td className="pi-num">{sqft(row.eric_reference_total_sqft)}</td>
+                      <td className="pi-num">{signedSqft(row.variance_to_eric_sqft)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="sales-filter-warning">
+              {reconciliation.recommendation || "Choose an official production definition before scheduling automated sync."}
+            </p>
+            <p className="pi-mini-note">
+              Planned buckets: {(reconciliation.production_reporting_bucket_plan?.buckets || []).join(", ")}. These should become
+              admin-configured production reporting groups; Blackstone remains separate unless explicitly configured.
+            </p>
+          </section>
+        ) : null}
 
         {sqftActuals?.extraction_status === "pending" ? (
           <div className="sales-attribution-guardrail">
