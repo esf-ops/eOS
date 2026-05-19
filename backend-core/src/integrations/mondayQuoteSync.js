@@ -33,6 +33,41 @@
 import { getMondayBoardEnvKeyForQuoteSource, isPublicQuoteSource } from "../quotes/quoteSourceConfig.js";
 import { tableHasOrganizationId } from "../organizations/organizationContext.js";
 import { roundPublicEstimateToNearestTen } from "../quotes/quoteCalculator.js";
+import {
+  buildInternalEstimateSummaryForMonday,
+  buildInternalMondayDryRunResult,
+  buildInternalMondayItemName,
+  buildMondayInternalColumnValuesFromMap,
+  fetchMondayBoardSchema,
+  internalMondayColumnMappingConfigured,
+  resolveInternalGroupKeyForStatus,
+  resolveInternalMondayColumnMap,
+  resolveInternalMondayGroupId,
+  splitInternalColumnValuesIntoGroups
+} from "./mondayInternalBoardSync.js";
+
+export {
+  buildInternalEstimateSummaryForMonday,
+  buildInternalMondayItemName,
+  fetchMondayBoardSchema,
+  internalMondayColumnMappingConfigured,
+  resolveInternalMondayColumnMap
+} from "./mondayInternalBoardSync.js";
+
+/**
+ * Admin-safe Monday board introspection (no token in response).
+ */
+export async function introspectInternalMondayBoard() {
+  const token = String(process.env.MONDAY_API_TOKEN ?? "").trim();
+  const boardId = String(process.env.MONDAY_INTERNAL_QUOTES_BOARD_ID ?? "").trim();
+  if (!token || !boardId) {
+    return { ok: false, error: "missing_config", boardId: boardId || null };
+  }
+  const schema = await fetchMondayBoardSchema(token, boardId, mondayGraphql);
+  if (!schema) return { ok: false, error: "schema_fetch_failed", boardId };
+  const resolved = resolveInternalMondayColumnMap({ boardSchema: schema, allowTitleMatch: true });
+  return { ok: true, schema, resolved, boardId };
+}
 
 /**
  * Optional per-tenant Monday board env var names (values still read from process.env).
@@ -98,6 +133,42 @@ mutation ($boardId: ID!, $itemId: ID!, $columnValues: JSON!) {
 }
 `;
 
+const CREATE_ITEM_WITH_GROUP_MUTATION = `
+mutation ($boardId: ID!, $itemName: String!, $groupId: String, $columnValues: JSON!) {
+  create_item(board_id: $boardId, group_id: $groupId, item_name: $itemName, column_values: $columnValues) {
+    id
+  }
+}
+`;
+
+const CREATE_ITEM_WITH_GROUP_NAME_ONLY_MUTATION = `
+mutation ($boardId: ID!, $itemName: String!, $groupId: String) {
+  create_item(board_id: $boardId, group_id: $groupId, item_name: $itemName) {
+    id
+  }
+}
+`;
+
+const ITEMS_BY_COLUMN_VALUE_QUERY = `
+query ($boardId: ID!, $columnId: String!, $value: String!) {
+  items_page_by_column_values(
+    limit: 5
+    board_id: $boardId
+    columns: [{ column_id: $columnId, column_values: [$value] }]
+  ) {
+    items {
+      id
+      name
+    }
+  }
+}
+`;
+
+function isMondaySyncDryRun() {
+  const v = String(process.env.MONDAY_SYNC_DRY_RUN ?? "").trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
+}
+
 /**
  * @param {Record<string, unknown>} quote
  * @param {Record<string, unknown>} snapshot
@@ -122,7 +193,19 @@ export function buildMondayQuotePayload(quote, snapshot, extras = {}) {
     project_type: q.project_type ?? null,
     project_name: q.project_name ?? null,
     prepared_by: q.prepared_by ?? null,
-    project_address: [q.project_address, q.city, q.state, q.zip].filter(Boolean).join(", ") || null,
+    project_address_street: q.project_address ?? null,
+    project_address: q.project_address ?? null,
+    account_name: ex.account_name ?? q.account_name ?? null,
+    quote_number_base: q.quote_number_base ?? ex.quote_number_base ?? null,
+    room_count: Array.isArray(snap.internal_ui?.estimate_room_drafts)
+      ? snap.internal_ui.estimate_room_drafts.length
+      : Array.isArray(snap.internal_ui?.estimate_rooms)
+        ? snap.internal_ui.estimate_rooms.length
+        : null,
+    quote_date: q.created_at ?? null,
+    last_revised_at: q.updated_at ?? null,
+    updated_at: q.updated_at ?? null,
+    entered_by: q.prepared_by ?? null,
     city: q.city ?? null,
     state: q.state ?? null,
     zip: q.zip ?? null,
@@ -194,21 +277,6 @@ function buildMondayItemNameForSource(quoteSource, payload) {
   const qn = String(payload.quote_number || "").trim() || "Quote";
   const cn = String(payload.customer_name || "").trim() || "Customer";
   return `${qn} - ${cn}`;
-}
-
-/**
- * Internal quotes board item name: prefer customer + city/state; fall back to project name.
- * @param {Record<string, unknown>} payload
- */
-export function buildInternalMondayItemName(payload) {
-  const qn = String(payload.quote_number || "").trim() || "Quote";
-  const customer = String(payload.customer_name || "").trim();
-  const project = String(payload.project_name || "").trim();
-  const cn = customer || project || "Customer";
-  const city = String(payload.city || "").trim();
-  const st = String(payload.state || "").trim();
-  const loc = city && st ? `${city}, ${st}` : city || st || "";
-  return loc ? `${qn} - ${cn} - ${loc}` : `${qn} - ${cn}`;
 }
 
 /** Env vars that count as "public Monday column mapping is configured". */
@@ -419,141 +487,32 @@ function mergeMondayInternalGroups(g) {
   };
 }
 
-/** Env vars that count as "internal Monday column mapping is configured". */
-const INTERNAL_MONDAY_COLUMN_MAPPING_ENV_NAMES = [
-  "MONDAY_INTERNAL_COL_STATUS",
-  "MONDAY_INTERNAL_COL_QUOTE_VALUE",
-  "MONDAY_INTERNAL_COL_CREATED_DATE",
-  "MONDAY_INTERNAL_COL_LAST_REVISED",
-  "MONDAY_INTERNAL_COL_REVISION",
-  "MONDAY_INTERNAL_COL_CITY",
-  "MONDAY_INTERNAL_COL_STATE",
-  "MONDAY_INTERNAL_COL_ESTIMATED_SQFT",
-  "MONDAY_INTERNAL_COL_ESTIMATE_SUMMARY",
-  "MONDAY_INTERNAL_COL_QUOTE_ID",
-  "MONDAY_INTERNAL_COL_CUSTOMER",
-  "MONDAY_INTERNAL_COL_PROJECT",
-  "MONDAY_INTERNAL_COL_SALES_REP_TEXT",
-  "MONDAY_INTERNAL_COL_BRANCH_TEXT",
-  "MONDAY_INTERNAL_COL_ENTERED_BY",
-  "MONDAY_INTERNAL_COL_PRICING_MODE"
-];
-
-export function internalMondayColumnMappingConfigured() {
-  return INTERNAL_MONDAY_COLUMN_MAPPING_ENV_NAMES.some((k) => String(process.env[k] || "").trim().length > 0);
-}
-
 /**
- * Internal quotes board: text + numbers + date + status only (see docs/quote-platform/monday-internal-quotes-setup.md).
- * @param {{ payload: Record<string, unknown>, estimateSummary: string }} input
+ * Internal quotes board column groups (env + optional title-resolved schema).
+ * @param {{ payload: Record<string, unknown>, estimateSummary: string, boardSchema?: import("./mondayInternalBoardSync.js").MondayBoardSchema|null }} input
  */
 export function buildMondayInternalColumnGroups(input) {
   const payload = input?.payload && typeof input.payload === "object" ? input.payload : {};
   const estimateSummary = String(input?.estimateSummary ?? "");
-  const skippedColumns = [];
-  /** @type {Record<string, unknown>} */
-  const groupA = {};
-  /** @type {Record<string, unknown>} */
-  const groupB = {};
-  /** @type {Record<string, unknown>} */
-  const groupC = {};
-  /** @type {Record<string, unknown>} */
-  const groupD = {};
-  /** @type {Record<string, unknown>} */
-  const groupE = {};
-  /** @type {Record<string, unknown>} */
-  const groupF = {};
-
-  const setTextIn = (target, envName, value) => {
-    const id = envCol(envName);
-    if (!id) {
-      recordSkipped(skippedColumns, "no_column_id", envName);
-      return;
-    }
-    if (value === null || value === undefined) {
-      recordSkipped(skippedColumns, "empty_value", envName);
-      return;
-    }
-    const s = String(value).trim();
-    if (!s) {
-      recordSkipped(skippedColumns, "empty_value", envName);
-      return;
-    }
-    target[id] = s;
+  const columnMap = resolveInternalMondayColumnMap({
+    boardSchema: input?.boardSchema ?? null,
+    allowTitleMatch: Boolean(input?.boardSchema?.columns?.length)
+  });
+  const { columnValues, skippedColumns } = buildMondayInternalColumnValuesFromMap({
+    payload,
+    estimateSummary,
+    columnMap
+  });
+  const split = splitInternalColumnValuesIntoGroups(columnValues);
+  return {
+    groupA: split.groupA,
+    groupB: split.groupB,
+    groupC: split.groupC,
+    groupD: split.groupD,
+    groupE: split.groupE,
+    groupF: split.groupF,
+    skippedColumns
   };
-
-  const setNumberStringIn = (target, envName, value, mode) => {
-    const id = envCol(envName);
-    if (!id) {
-      recordSkipped(skippedColumns, "no_column_id", envName);
-      return;
-    }
-    const s = formatMondayNumberString(value, mode);
-    if (s == null) {
-      recordSkipped(skippedColumns, "invalid_number", envName);
-      return;
-    }
-    target[id] = s;
-  };
-
-  setTextIn(groupA, "MONDAY_INTERNAL_COL_CITY", payload.city);
-  setTextIn(groupA, "MONDAY_INTERNAL_COL_STATE", payload.state);
-  setTextIn(groupA, "MONDAY_INTERNAL_COL_CUSTOMER", payload.customer_name);
-  setTextIn(groupA, "MONDAY_INTERNAL_COL_PROJECT", payload.project_name);
-
-  const quoteIdCol = envCol("MONDAY_INTERNAL_COL_QUOTE_ID");
-  if (quoteIdCol) {
-    const qn = String(payload.quote_number || "").trim();
-    const internal =
-      payload.quote_id != null ? String(payload.quote_id).trim() : payload.id != null ? String(payload.id).trim() : "";
-    const v = qn || internal;
-    if (v) groupA[quoteIdCol] = v;
-    else recordSkipped(skippedColumns, "empty_value", "MONDAY_INTERNAL_COL_QUOTE_ID");
-  }
-
-  setNumberStringIn(groupA, "MONDAY_INTERNAL_COL_QUOTE_VALUE", payload.quote_total, "money");
-  setNumberStringIn(groupA, "MONDAY_INTERNAL_COL_ESTIMATED_SQFT", payload.estimated_square_footage, "integer");
-
-  if (estimateSummary.trim()) {
-    setTextIn(groupB, "MONDAY_INTERNAL_COL_ESTIMATE_SUMMARY", estimateSummary.trim());
-  }
-
-  const dateCol = envCol("MONDAY_INTERNAL_COL_CREATED_DATE");
-  if (dateCol) {
-    const raw = payload.created_date ? new Date(String(payload.created_date)) : new Date();
-    const iso = Number.isFinite(raw.getTime()) ? raw.toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
-    groupC[dateCol] = { date: iso };
-  }
-
-  const lastRevCol = envCol("MONDAY_INTERNAL_COL_LAST_REVISED");
-  if (lastRevCol) {
-    const raw = payload.last_revised_at ? new Date(String(payload.last_revised_at)) : new Date();
-    const iso = Number.isFinite(raw.getTime()) ? raw.toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
-    groupC[lastRevCol] = { date: iso };
-  }
-
-  setTextIn(groupF, "MONDAY_INTERNAL_COL_REVISION", payload.revision_label);
-
-  const statusCol = envCol("MONDAY_INTERNAL_COL_STATUS");
-  if (statusCol) {
-    const label =
-      String(payload.quote_status || process.env.MONDAY_INTERNAL_STATUS_LABEL || "draft").trim() || "draft";
-    groupD[statusCol] = { label };
-  }
-
-  setTextIn(groupE, "MONDAY_INTERNAL_COL_SALES_REP_TEXT", payload.sales_rep);
-  setTextIn(groupE, "MONDAY_INTERNAL_COL_BRANCH_TEXT", payload.branch);
-  setTextIn(groupF, "MONDAY_INTERNAL_COL_ENTERED_BY", payload.prepared_by);
-  setTextIn(groupF, "MONDAY_INTERNAL_COL_PRICING_MODE", payload.pricing_mode_label);
-
-  if (envCol("MONDAY_INTERNAL_COL_SALES_REP")) {
-    recordSkipped(skippedColumns, "skipped_unimplemented_people_column", "MONDAY_INTERNAL_COL_SALES_REP");
-  }
-  if (envCol("MONDAY_INTERNAL_COL_BRANCH")) {
-    recordSkipped(skippedColumns, "skipped_unimplemented_dropdown_column", "MONDAY_INTERNAL_COL_BRANCH");
-  }
-
-  return { groupA, groupB, groupC, groupD, groupE, groupF, skippedColumns };
 }
 
 function mergeMondayPublicGroups(g) {
@@ -648,6 +607,87 @@ function extractCreateItemId(json) {
   return itemIdRaw != null ? String(itemIdRaw) : null;
 }
 
+/**
+ * @param {string} token
+ * @param {string} boardId
+ * @param {string} columnId
+ * @param {string} value
+ * @returns {Promise<string|null>}
+ */
+async function searchMondayItemIdByColumnValue(token, boardId, columnId, value) {
+  const colId = String(columnId || "").trim();
+  const val = String(value || "").trim();
+  if (!colId || !val) return null;
+  try {
+    const json = await mondayGraphql(token, ITEMS_BY_COLUMN_VALUE_QUERY, {
+      boardId: String(boardId),
+      columnId: colId,
+      value: val
+    });
+    const items = json?.data?.items_page_by_column_values?.items || [];
+    const first = items[0];
+    return first?.id != null ? String(first.id) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve existing Monday pulse for internal quote (header, family, column search).
+ * @param {{
+ *   db: import("@supabase/supabase-js").SupabaseClient,
+ *   quoteId: string,
+ *   boardId: string,
+ *   token: string,
+ *   quoteNumber: string,
+ *   quoteNumberBase?: string|null,
+ *   quoteFamilyRootId?: string|null,
+ *   columnMap: Record<string, { columnId: string }>
+ * }} p
+ */
+async function resolveExistingInternalMondayItemId(p) {
+  const { db, quoteId, boardId, token, quoteNumber, quoteNumberBase, quoteFamilyRootId, columnMap } = p;
+  if (!db?.from || !quoteId) return { itemId: null, source: null };
+
+  try {
+    const { data: row } = await db
+      .from("quote_headers")
+      .select("monday_item_id, quote_family_root_id, quote_number_base")
+      .eq("id", quoteId)
+      .maybeSingle();
+    const direct = String(row?.monday_item_id || "").trim();
+    if (direct) return { itemId: direct, source: "quote_header" };
+
+    const root = String(quoteFamilyRootId || row?.quote_family_root_id || quoteId).trim();
+    if (root) {
+      const { data: familyRows } = await db
+        .from("quote_headers")
+        .select("monday_item_id")
+        .eq("quote_family_root_id", root)
+        .not("monday_item_id", "is", null)
+        .limit(5);
+      for (const fr of familyRows || []) {
+        const fid = String(fr?.monday_item_id || "").trim();
+        if (fid) return { itemId: fid, source: "quote_family" };
+      }
+    }
+  } catch {
+    /* schema may be partial */
+  }
+
+  const quoteIdCol = columnMap?.quote_id?.columnId;
+  const searchValues = [String(quoteNumber || "").trim(), String(quoteNumberBase || "").trim()].filter(Boolean);
+  const unique = [...new Set(searchValues)];
+  if (quoteIdCol && unique.length) {
+    for (const val of unique) {
+      const found = await searchMondayItemIdByColumnValue(token, boardId, quoteIdCol, val);
+      if (found) return { itemId: found, source: "monday_column_search" };
+    }
+  }
+
+  return { itemId: null, source: null };
+}
+
 async function patchQuoteHeaderMondayIds(db, quoteId, boardId, itemId) {
   if (!db?.from || !quoteId) return;
   try {
@@ -678,11 +718,16 @@ const OPTIONAL_PUBLIC_GROUP_ORDER = /** @type {const} */ (["B", "C", "D", "E", "
  *   db: import("@supabase/supabase-js").SupabaseClient,
  *   quoteId: string,
  *   organizationId?: string|null,
- *   action?: string
+ *   action?: string,
+ *   groupId?: string|null,
+ *   createMutations?: { withColumns?: string, nameOnly?: string }
  * }} p
  */
 async function executePublicIncrementalMondaySync(p) {
   const { token, boardId, itemName, groups, skippedCols, requestPayload, db, quoteId, organizationId, action } = p;
+  const groupId = p.groupId ? String(p.groupId).trim() : null;
+  const createWithColsMutation = p.createMutations?.withColumns || CREATE_ITEM_MUTATION;
+  const createNameOnlyMutation = p.createMutations?.nameOnly || CREATE_ITEM_NAME_ONLY_MUTATION;
   const groupA = groups.groupA;
   const aKeys = Object.keys(groupA);
   /** @type {string[]} */
@@ -704,11 +749,13 @@ async function executePublicIncrementalMondaySync(p) {
     const aJson = JSON.stringify(groupA);
     createFirstColumnValuesJson = aJson;
     try {
-      const json = await mondayGraphql(token, CREATE_ITEM_MUTATION, {
+      const createVars = {
         boardId: String(boardId),
         itemName,
         columnValues: aJson
-      });
+      };
+      if (groupId) createVars.groupId = groupId;
+      const json = await mondayGraphql(token, createWithColsMutation, createVars);
       itemId = extractCreateItemId(json);
       if (!itemId) throw new Error("Monday create_item returned no id");
       createdWithColumns = true;
@@ -727,10 +774,9 @@ async function executePublicIncrementalMondaySync(p) {
         skipped_columns: skippedCols
       });
 
-      const nameJson = await mondayGraphql(token, CREATE_ITEM_NAME_ONLY_MUTATION, {
-        boardId: String(boardId),
-        itemName
-      });
+      const nameOnlyVars = { boardId: String(boardId), itemName };
+      if (groupId) nameOnlyVars.groupId = groupId;
+      const nameJson = await mondayGraphql(token, createNameOnlyMutation, nameOnlyVars);
       itemId = extractCreateItemId(nameJson);
       if (!itemId) throw new Error("Monday create_item (name-only) returned no id");
 
@@ -758,10 +804,9 @@ async function executePublicIncrementalMondaySync(p) {
       }
     }
   } else {
-    const nameJson = await mondayGraphql(token, CREATE_ITEM_NAME_ONLY_MUTATION, {
-      boardId: String(boardId),
-      itemName
-    });
+    const nameOnlyVars = { boardId: String(boardId), itemName };
+    if (groupId) nameOnlyVars.groupId = groupId;
+    const nameJson = await mondayGraphql(token, createNameOnlyMutation, nameOnlyVars);
     itemId = extractCreateItemId(nameJson);
     if (!itemId) throw new Error("Monday create_item (name-only) returned no id");
     createdWithColumns = false;
@@ -887,11 +932,20 @@ export async function syncQuoteToMonday(params) {
   const isInternalQuote = quoteSource === "internal_quote";
   const payload = params.payload && typeof params.payload === "object" ? { ...params.payload } : {};
   if (isInternalQuote && params.quoteId) {
-    const base = String(process.env.HEAD_URL_INTERNAL_ESTIMATE || process.env.HEAD_URL_QUOTE || "")
+    const qid = encodeURIComponent(String(params.quoteId));
+    const internalBase = String(process.env.HEAD_URL_INTERNAL_ESTIMATE || process.env.HEAD_URL_QUOTE || "")
       .trim()
       .replace(/\/+$/, "");
-    if (base) {
-      payload.internal_estimate_deep_link = `${base}/?quoteId=${encodeURIComponent(String(params.quoteId))}`;
+    const libraryBase = String(process.env.HEAD_URL_QUOTE_LIBRARY || "").trim().replace(/\/+$/, "");
+    if (internalBase) {
+      payload.internal_estimate_deep_link = `${internalBase}/?quoteId=${qid}`;
+    }
+    if (libraryBase) {
+      payload.quote_library_link = `${libraryBase}/?quoteId=${qid}`;
+    }
+    const linkUrl = payload.internal_estimate_deep_link || payload.quote_library_link || null;
+    if (linkUrl) {
+      payload.estimate_link = { url: linkUrl, text: "Open Internal Estimate" };
     }
   }
   const itemName = buildMondayItemNameForSource(quoteSource, payload);
@@ -1008,20 +1062,40 @@ export async function syncQuoteToMonday(params) {
       });
     }
 
-    if (isInternalQuote && internalMondayColumnMappingConfigured()) {
-      /** @type {string|null} */
-      let headerMondayItemId = null;
-      if (db?.from && params.quoteId) {
+    if (isInternalQuote) {
+      const mappingConfigured = internalMondayColumnMappingConfigured();
+      const allowTitleMatch = String(process.env.MONDAY_INTERNAL_ALLOW_TITLE_COLUMN_MATCH || "1").trim() !== "0";
+      let boardSchema = null;
+      if (allowTitleMatch && token && boardId) {
         try {
-          const { data } = await db.from("quote_headers").select("monday_item_id").eq("id", params.quoteId).maybeSingle();
-          headerMondayItemId = String(data?.monday_item_id || "").trim() || null;
+          boardSchema = await fetchMondayBoardSchema(token, boardId, mondayGraphql);
         } catch {
-          /* ignore */
+          boardSchema = null;
         }
       }
-      const intGroups = buildMondayInternalColumnGroups({ payload, estimateSummary });
+      const columnMap = resolveInternalMondayColumnMap({
+        boardSchema,
+        allowTitleMatch: Boolean(boardSchema?.columns?.length)
+      });
+      const intGroups = buildMondayInternalColumnGroups({ payload, estimateSummary, boardSchema });
       const mergedInt = mergeMondayInternalGroups(intGroups);
       const intColumnIds = Object.keys(mergedInt);
+      const groupTarget = resolveInternalMondayGroupId({
+        quoteStatus: payload.quote_status,
+        groups: boardSchema?.groups ?? []
+      });
+      const resolved = await resolveExistingInternalMondayItemId({
+        db,
+        quoteId: params.quoteId,
+        boardId: String(boardId),
+        token,
+        quoteNumber: String(payload.quote_number || ""),
+        quoteNumberBase: payload.quote_number_base != null ? String(payload.quote_number_base) : null,
+        quoteFamilyRootId: payload.quote_family_root_id != null ? String(payload.quote_family_root_id) : null,
+        columnMap
+      });
+      const existingItemId = resolved.itemId;
+      const syncAction = existingItemId ? "update" : "create";
       const intRequestPayload = {
         boardId,
         envKeyName,
@@ -1031,11 +1105,19 @@ export async function syncQuoteToMonday(params) {
         column_values_json: JSON.stringify(mergedInt),
         attempted_column_ids: intColumnIds,
         skipped_columns: intGroups.skippedColumns,
-        column_mapping_env_configured: true,
+        column_mapping_env_configured: mappingConfigured,
+        column_resolution: Object.fromEntries(
+          Object.entries(columnMap).map(([k, v]) => [k, { column_id: v.columnId, source: v.source }])
+        ),
+        target_group: groupTarget,
+        monday_item_resolution: resolved,
+        sync_action: syncAction,
         graphql:
-          intColumnIds.length > 0
-            ? "create_item_group_A_then_change_multiple_optional"
-            : "create_item_name_only",
+          existingItemId && intColumnIds.length
+            ? "change_multiple_column_values_existing_internal_item"
+            : intColumnIds.length
+              ? "create_item_group_A_then_change_multiple_optional"
+              : "create_item_name_only",
         column_groups: {
           A: Object.keys(intGroups.groupA),
           B: Object.keys(intGroups.groupB),
@@ -1044,33 +1126,70 @@ export async function syncQuoteToMonday(params) {
           E: Object.keys(intGroups.groupE),
           F: Object.keys(intGroups.groupF)
         },
-        monday_kind: "internal_incremental"
+        monday_kind: "internal_incremental",
+        timestamp: new Date().toISOString()
       };
-      if (intColumnIds.length === 0) {
-        return await createNameOnlyAndFinish("success", { note: "internal_name_only_no_resolved_columns" });
+
+      if (isMondaySyncDryRun() || params.dryRun === true) {
+        const dry = buildInternalMondayDryRunResult({
+          itemName,
+          groupKey: groupTarget.groupKey,
+          groupTitle: groupTarget.groupTitle,
+          columnValues: mergedInt,
+          skippedColumns: intGroups.skippedColumns,
+          action: syncAction,
+          mondayItemId: existingItemId
+        });
+        await writeMondaySyncLog({
+          quoteId: params.quoteId,
+          action: params.action || "sync",
+          mondayBoardId: String(boardId),
+          mondayItemId: existingItemId,
+          requestPayload: { ...intRequestPayload, dry_run: true },
+          responsePayload: dry,
+          status: "dry_run",
+          errorMessage: null,
+          db,
+          organizationId: params.organizationId ?? null
+        });
+        return {
+          ok: true,
+          skipped: false,
+          status: "dry_run",
+          monday_item_id: existingItemId,
+          monday_board_id: String(boardId),
+          warning: null,
+          dry_run: dry
+        };
       }
-      const wantsUpdateExisting = Boolean(headerMondayItemId) && String(params.action || "").toLowerCase() === "update";
-      if (wantsUpdateExisting) {
+
+      if (!mappingConfigured && intColumnIds.length === 0) {
+        return await createNameOnlyAndFinish("success", { note: "internal_name_only_no_mapping_env" });
+      }
+
+      if (existingItemId) {
         try {
-          await mondayGraphql(token, CHANGE_MULTIPLE_COLUMN_VALUES_MUTATION, {
-            boardId: String(boardId),
-            itemId: String(headerMondayItemId),
-            columnValues: JSON.stringify(mergedInt)
-          });
+          if (intColumnIds.length > 0) {
+            await mondayGraphql(token, CHANGE_MULTIPLE_COLUMN_VALUES_MUTATION, {
+              boardId: String(boardId),
+              itemId: String(existingItemId),
+              columnValues: JSON.stringify(mergedInt)
+            });
+          }
+          await patchQuoteHeaderMondayIds(db, params.quoteId, boardId, existingItemId);
           await writeMondaySyncLog({
             quoteId: params.quoteId,
             action: params.action || "sync",
             mondayBoardId: String(boardId),
-            mondayItemId: headerMondayItemId,
-            requestPayload: {
-              ...intRequestPayload,
-              graphql: "change_multiple_column_values_existing_internal_item"
-            },
+            mondayItemId: existingItemId,
+            requestPayload: intRequestPayload,
             responsePayload: {
+              sync_action: "update",
               updated_columns: intColumnIds,
-              updated_via_existing_pulse: true
+              resolved_via: resolved.source,
+              target_group: groupTarget
             },
-            status: "success_updated_columns",
+            status: intColumnIds.length ? "success_updated_columns" : "success_updated_name_only",
             errorMessage: null,
             db,
             organizationId: params.organizationId ?? null
@@ -1078,8 +1197,8 @@ export async function syncQuoteToMonday(params) {
           return {
             ok: true,
             skipped: false,
-            status: "success_updated_columns",
-            monday_item_id: headerMondayItemId,
+            status: intColumnIds.length ? "success_updated_columns" : "success_updated_name_only",
+            monday_item_id: existingItemId,
             monday_board_id: String(boardId),
             warning: null
           };
@@ -1089,9 +1208,9 @@ export async function syncQuoteToMonday(params) {
             quoteId: params.quoteId,
             action: params.action || "sync",
             mondayBoardId: String(boardId),
-            mondayItemId: headerMondayItemId,
+            mondayItemId: existingItemId,
             requestPayload: intRequestPayload,
-            responsePayload: null,
+            responsePayload: { sync_action: "update", resolved_via: resolved.source },
             status: "failed_internal_column_update",
             errorMessage: msg,
             db,
@@ -1101,23 +1220,36 @@ export async function syncQuoteToMonday(params) {
             ok: true,
             skipped: false,
             status: "failed_internal_column_update",
-            monday_item_id: headerMondayItemId,
+            monday_item_id: existingItemId,
             monday_board_id: String(boardId),
             warning: msg.slice(0, 400)
           };
         }
       }
+
+      if (intColumnIds.length === 0) {
+        return await createNameOnlyAndFinish("success", { note: "internal_name_only_no_resolved_columns" });
+      }
+
       return await executePublicIncrementalMondaySync({
         token,
         boardId,
         itemName,
         groups: intGroups,
         skippedCols: intGroups.skippedColumns,
-        requestPayload: intRequestPayload,
+        requestPayload: {
+          ...intRequestPayload,
+          target_group_id: groupTarget.groupId || null
+        },
         db,
         quoteId: params.quoteId,
         organizationId: params.organizationId,
-        action: params.action
+        action: params.action,
+        groupId: groupTarget.groupId || null,
+        createMutations: {
+          withColumns: CREATE_ITEM_WITH_GROUP_MUTATION,
+          nameOnly: CREATE_ITEM_WITH_GROUP_NAME_ONLY_MUTATION
+        }
       });
     }
 

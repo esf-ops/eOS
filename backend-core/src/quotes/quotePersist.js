@@ -385,7 +385,11 @@ export async function persistQuoteSubmission(db, opts) {
           }))
         : null,
       internal_estimate_summary: internalEstimateSummary,
-      pricing_mode_label: pricingModeLabel
+      pricing_mode_label: pricingModeLabel,
+      account_name: body.account ?? body.account_name ?? null,
+      quote_number_base: headerMerged.quote_number_base ?? null,
+      revision_label: headerMerged.revision_label ?? null,
+      quote_family_root_id: headerMerged.quote_family_root_id ?? null
     }
   );
   let mondaySync = { ok: true, skipped: true, status: "skipped" };

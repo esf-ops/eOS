@@ -6,7 +6,11 @@
 import express from "express";
 
 import { logAction } from "../auth/auditLog.js";
-import { internalMondayColumnMappingConfigured } from "../integrations/mondayQuoteSync.js";
+import {
+  buildInternalEstimateSummaryForMonday,
+  internalMondayColumnMappingConfigured,
+  introspectInternalMondayBoard
+} from "../integrations/mondayQuoteSync.js";
 import {
   mergeRowOrganizationId,
   organizationScopeOrFilter,
@@ -39,12 +43,12 @@ function isUuid(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || "").trim());
 }
 
-function buildInternalEstimateSummary(calc, body) {
-  const g = String(body.materialGroup || body.material_group || "Group Promo");
-  const mode = String(body.internalMaterialBasis || body.internal_material_basis || "wholesale");
-  const r = Number(calc?.totals?.retail || 0);
-  const sf = Number(calc?.totals?.estimated_sqft || 0);
-  return `${g} · ${mode} · $${r.toFixed(2)} · ${sf.toFixed(1)} sf`.slice(0, 1800);
+function buildInternalEstimateSummary(calc, body, snapshotToStore) {
+  return buildInternalEstimateSummaryForMonday({
+    calc,
+    body,
+    snapshot: snapshotToStore
+  });
 }
 
 function pricingModeLabel(body) {
@@ -163,7 +167,7 @@ export function attachInternalQuoteRoutes(app, deps) {
             body.customerRoomAreaBreakdown ?? body.customer_room_area_breakdown ?? null
         }
       };
-      const internalEstimateSummary = buildInternalEstimateSummary(calc, body);
+      const internalEstimateSummary = buildInternalEstimateSummary(calc, body, snapshotToStore);
       const pMode = pricingModeLabel(body);
       const warnings = [...(calc.warnings || [])];
       if (!internalMondayColumnMappingConfigured() && String(process.env.MONDAY_INTERNAL_QUOTES_BOARD_ID || "").trim()) {
@@ -248,6 +252,31 @@ export function attachInternalQuoteRoutes(app, deps) {
         }
         throw e;
       }
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  app.get("/api/internal-quotes/monday/board-schema", ...stack, async (req, res) => {
+    try {
+      const result = await introspectInternalMondayBoard();
+      if (!result.ok) {
+        const msg =
+          result.error === "missing_config"
+            ? "MONDAY_API_TOKEN and MONDAY_INTERNAL_QUOTES_BOARD_ID must be set on the server."
+            : "Could not load Monday board schema.";
+        return res.status(result.error === "missing_config" ? 400 : 502).json({ ok: false, error: msg });
+      }
+      const schema = result.schema;
+      res.json({
+        ok: true,
+        board_id: schema.boardId,
+        board_name: schema.boardName,
+        columns: schema.columns.map((c) => ({ id: c.id, title: c.title, type: c.type })),
+        groups: schema.groups,
+        resolved_column_map: result.resolved,
+        env_mapping_configured: internalMondayColumnMappingConfigured()
+      });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
     }

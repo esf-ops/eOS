@@ -337,7 +337,8 @@ export async function processInternalQuoteSave(params) {
       internal_estimate_summary: internalEstimateSummary,
       pricing_mode_label: pricingModeLabel,
       revision_label: row.revision_label,
-      quote_family_root_id: row.quote_family_root_id || row.id
+      quote_family_root_id: row.quote_family_root_id || row.id,
+      account_name: persistBody.account ?? persistBody.account_name ?? null
     });
     let mondaySync = { ok: true, skipped: true, status: null, monday_item_id: row.monday_item_id };
     try {
@@ -402,8 +403,8 @@ export async function processInternalQuoteSave(params) {
       is_current_revision: true,
       revised_from_quote_id: row.id,
       revision_note: noteFromBody(body),
-      monday_item_id: null,
-      monday_board_id: null
+      monday_item_id: row.monday_item_id ?? null,
+      monday_board_id: row.monday_board_id ?? null
     };
 
     const { quoteId, mondaySync } = await persistQuoteSubmission(db, {
