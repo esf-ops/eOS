@@ -3,6 +3,11 @@
  * Run: npx --yes tsx scripts/verify-internal-estimate-beta-fixes.ts
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 import {
   calculateQuote,
   ESF_DIRECT_PRICE_PER_SQFT,
@@ -26,6 +31,17 @@ import {
 
 function approx(a: number, b: number, eps = 0.02) {
   assert.ok(Math.abs(a - b) <= eps, `expected ${b}, got ${a}`);
+}
+
+// Customer print room breakdown uses round2 — must import from measurementEngine (bundled frontend).
+{
+  const printSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/CustomerEstimatePrint.tsx"), "utf8");
+  assert.match(
+    printSrc,
+    /import\s*\{[^}]*\bround2\b[^}]*\}\s*from\s*["']@quote-lib\/measurementEngine["']/,
+    "CustomerEstimatePrint must import round2 from @quote-lib/measurementEngine"
+  );
+  approx(round2(1.005), 1.01);
 }
 
 // Manual sqft room add-ons + persistence

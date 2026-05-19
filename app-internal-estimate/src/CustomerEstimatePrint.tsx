@@ -1,5 +1,6 @@
 import React from "react";
 import { EOS_LOGO_URL } from "@quote-lib/config";
+import { round2 } from "@quote-lib/measurementEngine";
 import type {
   CustomerRoomAreaCostBreakdown,
   InternalEstimateGroupComparisonRow,
