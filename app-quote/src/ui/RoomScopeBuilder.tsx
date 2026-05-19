@@ -1,5 +1,5 @@
 import React from "react";
-import type { EliteProgramColorRow, GuidedPiece, RoomCalcMode, RoomDraft } from "../lib/quoteTypes";
+import type { EliteProgramColorRow, GuidedLayoutPreset, GuidedPiece, RoomCalcMode, RoomDraft } from "../lib/quoteTypes";
 import { ADDON_CATALOG, VANITY_PRICING, createEstimatorRoom, newId } from "../lib/prototypeQuoteMath";
 import {
   depthPatchForGuidedPieceTypeChange,
@@ -196,7 +196,11 @@ export default function RoomScopeBuilder({
     } else {
       pieces = [{ id: newId(), pieceType: "fhb", name: "Waterfall edge", lengthIn: 0, depthIn: 96, shape: "rect" }];
     }
-    onRoomsChange(rooms.map((r) => (r.id === roomId ? { ...r, guidedPieces: pieces, calcMode: "Guided Shape" } : r)));
+    onRoomsChange(
+      rooms.map((r) =>
+        r.id === roomId ? { ...r, guidedPieces: pieces, calcMode: "Guided Shape", guidedLayoutPreset: preset as GuidedLayoutPreset } : r
+      )
+    );
   };
 
   return (

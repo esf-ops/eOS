@@ -42,6 +42,17 @@ export type EliteProgramColorRow = {
 
 export type FhbMode = "Off" | "Manual Sq Ft" | "Guided Shape";
 
+/** Guided layout preset — drives corner overlap deduction (L = 1 corner, U = 2; Galley/Rectangle do not deduct). */
+export type GuidedLayoutPreset =
+  | "Rectangle"
+  | "L-Shape"
+  | "U-Shape"
+  | "Galley"
+  | "Island"
+  | "Backsplash"
+  | "Waterfall"
+  | null;
+
 export type VanitySource = "Promo / Stock 100 Remnant" | "ESF Non-Stock Remnant";
 
 export type RoomDraft = {
@@ -55,6 +66,8 @@ export type RoomDraft = {
   materialType?: string;
   materialCatalogId?: string | null;
   calcMode: RoomCalcMode;
+  /** Set when estimator picks a guided layout preset; used for corner overlap deduction on L/U only. */
+  guidedLayoutPreset?: GuidedLayoutPreset;
   linear: { wallFt: number; splashIn: number; islandL: number; islandW: number; counterDepthIn?: number };
   direct: { counter: number; splash: number };
   guidedPieces: GuidedPiece[];

@@ -112,6 +112,18 @@
 
 ---
 
+### Supplement — Internal Estimate beta hardening (2026-05)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-05-19 |
+| **Decision** | **Room drafts** persist in `internal_ui.estimate_room_drafts` (add-ons, tear, FHB, catalog color id, guided layout preset) with API `estimate_rooms` still used for Calculate. **Use tax** is an optional percent on **countertop material only**, folded into customer countertop $ (not a separate PDF line); snapshot stores `internal_ui.use_tax_percent` and `internal_estimate_math.use_tax`. **L/U guided shapes** subtract **corner overlap** (90° inside corners) using min run depth (default 25.5″). **Internal-only custom lines** fold into customer countertop material on the PDF; names never print. **Color TBD** is a persisted project flag (`internal_ui.color_tbd`). |
+| **Why** | Beta testers reported lost room add-ons/colors on reload, over-counted L/U sf, need Lisbon-style use tax, and internal fee lines leaking to customer PDFs. |
+| **Impacted files/docs** | `app-quote/src/lib/measurementEngine.ts`, `app-quote/src/lib/prototypeQuoteMath.ts`, `app-internal-estimate/`, `backend-core/src/quotes/quoteCalculator.js`, `scripts/verify-internal-estimate-beta-fixes.ts`, `docs/quote-platform/internal-quote-test-plan.md`. |
+| **Revisit trigger** | Per-branch use-tax rules in admin; itemized use-tax on customer PDF; backend room engine parity for all FHB edge cases. |
+
+---
+
 ### 9. Public Quote Head vs Internal Estimate Head (separate deployables)
 
 | Field | Value |

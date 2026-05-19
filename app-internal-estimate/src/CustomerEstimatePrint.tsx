@@ -75,8 +75,11 @@ export type CustomerEstimatePrintProps = {
   selectedBreakdown: SelectedMaterialBreakdown;
   visibleLineItems: CustomerLineItem[];
   visibleRoomAddons: CustomerRoomAddonLine[];
-  /** Amount included in estimateTotalExact / PDF total but not listed by name; PDF uses generic “Additional adjustments” when non-zero. */
-  internalOnlyAdjustDollars: number;
+  /**
+   * Internal-only custom line $ folded into customer countertop material (not listed by name on PDF).
+   * When non-zero, increases/decreases displayed countertop material while estimate total stays exact.
+   */
+  internalMaterialFoldDollars: number;
   estimateTotalExact: number;
   comparisonRows: InternalEstimateGroupComparisonRow[];
   estimateDate: string;
@@ -137,7 +140,8 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
   const scopeRooms = props.measuredRooms.filter((r) => r.type !== "Vanity");
 
   const vanityMaterialExact = vanityRooms.reduce((s, v) => s + (Number(v.selected) || 0), 0);
-  const countertopMaterialExact = bd.totals.countertopMaterial + vanityMaterialExact;
+  const countertopMaterialExact =
+    bd.totals.countertopMaterial + vanityMaterialExact + (Number(props.internalMaterialFoldDollars) || 0);
   const backsplashMaterialExact = bd.totals.backsplashMaterial;
   const addonsExact = props.visibleRoomAddons.reduce((s, a) => s + (Number(a.total) || 0), 0);
   const hasAddons = props.visibleRoomAddons.length > 0 && addonsExact !== 0;
@@ -268,15 +272,6 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
                 <td className="cep-amt">{formatMoney(ln.lineTotal)}</td>
               </tr>
             ))}
-            {props.internalOnlyAdjustDollars !== 0 ? (
-              <tr>
-                <td>
-                  Additional adjustments{" "}
-                  <span className="cep-muted-inline">(included in project total; detail from your Elite representative)</span>
-                </td>
-                <td className="cep-amt">{formatMoney(props.internalOnlyAdjustDollars)}</td>
-              </tr>
-            ) : null}
             <tr className="cep-summary-total-row">
               <td>
                 <strong>Estimated project total</strong>

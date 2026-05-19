@@ -7,6 +7,7 @@ import type { DemoLineItem } from "./demoFallback";
 import type { GuidedPiece, MathCheckSnapshot, MeasuredRoom, PieceShape, RoomDraft, RoomEngineTotals } from "./quoteTypes";
 import type { QuoteWorkflowMethod } from "./quoteTypes";
 import {
+  guidedCornerOverlapDeductionSf,
   qualifyingSfFromRoomDrafts,
   rapidLinearAreas,
   round2,
@@ -165,7 +166,8 @@ export function mergeRoomDraftsIntoGlobalAddOns(rooms: RoomDraft[]): Record<stri
 export function measureRoomDraft(
   room: RoomDraft,
   qualifyingSf: number,
-  materialBasis: "wholesale" | "direct" = "wholesale"
+  materialBasis: "wholesale" | "direct" = "wholesale",
+  useTaxPercent = 0
 ): MeasuredRoom {
   const group = String(room.materialGroup || "Group Promo").trim();
   const rate = materialRateForInternalBasis(group, materialBasis);
@@ -262,7 +264,14 @@ export function measureRoomDraft(
       notes.push("Countertop support/bracing may be required based on island/bar depth — confirm after template.");
     }
   } else {
-    const g = sumGuidedPiecesByType(room.guidedPieces);
+    const overlap = guidedCornerOverlapDeductionSf(room);
+    const g = sumGuidedPiecesByType(room.guidedPieces, {
+      cornerOverlapDeductionSf: overlap,
+      cornerOverlapNote:
+        overlap > 0
+          ? `Corner overlap deduction: −${overlap.toFixed(2)} sf (L/U inside corners)`
+          : undefined
+    });
     counter = g.counter;
     splash = g.splash;
     fhb = g.fhb;
@@ -299,7 +308,9 @@ export function measureRoomDraft(
   details.push(...add.lines);
 
   /** Scoped material $ matches customer Quoted Material Breakdown (piece-level groups). */
-  const scopedMaterialDollars = buildSelectedMaterialBreakdown([room], materialBasis).totals.materialSubtotal;
+  const scopedMaterialDollars = buildSelectedMaterialBreakdown([room], materialBasis, {
+    useTaxPercent: Number(useTaxPercent) || 0
+  }).totals.materialSubtotal;
   selected = round2(scopedMaterialDollars + extras);
   priceableCounter = counter;
   priceableSplash = splash + fhb;
@@ -332,10 +343,11 @@ export function measureRoomDraft(
 export function calculateAllRoomDrafts(
   rooms: RoomDraft[],
   projectType: string,
-  materialBasis: "wholesale" | "direct" = "wholesale"
+  materialBasis: "wholesale" | "direct" = "wholesale",
+  useTaxPercent = 0
 ): { rooms: MeasuredRoom[]; totals: RoomEngineTotals } {
   const qualifyingSf = qualifyingSfFromRoomDrafts(rooms);
-  const measured = rooms.map((r) => measureRoomDraft(r, qualifyingSf, materialBasis));
+  const measured = rooms.map((r) => measureRoomDraft(r, qualifyingSf, materialBasis, useTaxPercent));
   if (projectType.trim().toLowerCase() === "remodel") {
     for (const m of measured) {
       m.notes.push(
@@ -438,6 +450,13 @@ export type SelectedMaterialGroupBlock = {
   ratePerSqft?: number;
 };
 
+export type UseTaxSnapshot = {
+  percent: number;
+  baseCountertopMaterial: number;
+  taxAmount: number;
+  applied: boolean;
+};
+
 export type SelectedMaterialBreakdown = {
   groups: SelectedMaterialGroupBlock[];
   totals: {
@@ -449,6 +468,8 @@ export type SelectedMaterialBreakdown = {
     countertopMaterial: number;
     /** Backsplash + full-height sf × group rate (display rollup). */
     backsplashMaterial: number;
+    /** Use tax on countertop material only (folded into customer-facing countertop $). */
+    useTax?: UseTaxSnapshot;
   };
 };
 
@@ -474,10 +495,45 @@ export function internalEstimateScopedMaterialSubtotal(rooms: RoomDraft[], basis
  * Piece/room-level sf rows for selected-material display — mirrors backend `enumerateRoomMaterialSfRows` grouping.
  * Uses the same $/sf tables as internal estimate math (`materialRateForInternalBasis`); does not apply room fixed add-ons.
  */
+/** Apply use tax to countertop material only (e.g. Lisbon office); does not tax backsplash/add-ons. */
+export function applyUseTaxToMaterialBreakdown(
+  breakdown: SelectedMaterialBreakdown,
+  useTaxPercent: number
+): SelectedMaterialBreakdown {
+  const pct = Math.max(0, Number(useTaxPercent) || 0);
+  if (pct <= 0) {
+    return {
+      ...breakdown,
+      totals: { ...breakdown.totals, useTax: { percent: 0, baseCountertopMaterial: breakdown.totals.countertopMaterial, taxAmount: 0, applied: false } }
+    };
+  }
+  const base = breakdown.totals.countertopMaterial;
+  const taxAmount = round2(base * (pct / 100));
+  const countertopMaterial = round2(base + taxAmount);
+  const materialSubtotal = round2(countertopMaterial + breakdown.totals.backsplashMaterial);
+  return {
+    groups: breakdown.groups.map((g) => {
+      const gBase = g.countertopMaterial;
+      const gTax = round2(gBase * (pct / 100));
+      return {
+        ...g,
+        countertopMaterial: round2(gBase + gTax),
+        materialSubtotal: round2(gBase + gTax + g.backsplashMaterial)
+      };
+    }),
+    totals: {
+      ...breakdown.totals,
+      countertopMaterial,
+      materialSubtotal,
+      useTax: { percent: pct, baseCountertopMaterial: base, taxAmount, applied: true }
+    }
+  };
+}
+
 export function buildSelectedMaterialBreakdown(
   rooms: RoomDraft[],
   materialBasis: "wholesale" | "direct",
-  options?: { includeRates?: boolean }
+  options?: { includeRates?: boolean; useTaxPercent?: number }
 ): SelectedMaterialBreakdown {
   const includeRates = options?.includeRates === true;
   type RawRow = SelectedMaterialScopeLine & { group: string };
@@ -545,6 +601,16 @@ export function buildSelectedMaterialBreakdown(
           backsplashSf: 0,
           fhbSf: round2(Number(room.fhbDirectSf) || 0)
         });
+      }
+      const overlap = guidedCornerOverlapDeductionSf(room);
+      if (overlap > 0) {
+        let remaining = overlap;
+        for (const row of raw) {
+          if (row.roomName !== roomName || row.countertopSf <= 0 || remaining <= 0) continue;
+          const take = Math.min(row.countertopSf, remaining);
+          row.countertopSf = round2(row.countertopSf - take);
+          remaining = round2(remaining - take);
+        }
       }
       continue;
     }
@@ -646,7 +712,9 @@ export function buildSelectedMaterialBreakdown(
     }
   );
 
-  return { groups, totals };
+  const built: SelectedMaterialBreakdown = { groups, totals };
+  const useTaxPercent = Number(options?.useTaxPercent) || 0;
+  return useTaxPercent > 0 ? applyUseTaxToMaterialBreakdown(built, useTaxPercent) : built;
 }
 
 export type InternalEstimateGroupComparisonRow = {
@@ -864,10 +932,13 @@ export function runLocalPrototypeQuote(params: {
   projectType: string;
   /** Internal estimate: sum of structured custom line $ (after validation rules). */
   customLineItemsTotal?: number;
+  /** Use tax % on countertop material only (internal estimate). */
+  useTaxPercent?: number;
 }): LocalQuoteRun {
   const basis = params.internalMaterialBasis ?? "wholesale";
   const roomBasis: "wholesale" | "direct" = params.quoteMode === "internal" ? basis : "wholesale";
-  const { rooms: measured, totals } = calculateAllRoomDrafts(params.roomDrafts, params.projectType, roomBasis);
+  const useTaxPercent = params.quoteMode === "internal" ? Number(params.useTaxPercent) || 0 : 0;
+  const { rooms: measured, totals } = calculateAllRoomDrafts(params.roomDrafts, params.projectType, roomBasis, useTaxPercent);
   const warnings: string[] = [];
   for (const m of measured) warnings.push(...m.notes);
 
@@ -1033,6 +1104,7 @@ export function createDefaultRoom(materialGroup: string): RoomDraft {
     roomType: "Kitchen",
     materialGroup,
     calcMode: "Guided Shape",
+    guidedLayoutPreset: null,
     linear: { wallFt: 0, splashIn: STANDARD_BACKSPLASH_HEIGHT_IN, islandL: 0, islandW: 0 },
     direct: { counter: 0, splash: 0 },
     guidedPieces: [
@@ -1180,14 +1252,25 @@ export function serializeRoomsForApi(rooms: RoomDraft[]): Array<Record<string, u
         }
       }
       if (pieces.length) {
-        out.push({
+        const row: Record<string, unknown> = {
           name: r.name,
           materialGroup: g,
           materialColor: r.materialColor,
           materialSupplier: r.materialSupplier,
           materialType: r.materialType,
+          materialCatalogId: r.materialCatalogId ?? null,
+          calcMode: r.calcMode,
+          addons: { ...r.addons },
+          tear: Boolean(r.tear),
+          fhbMode: r.fhbMode,
+          fhbDirectSf: r.fhbDirectSf,
+          fhbOutlets: r.fhbOutlets,
+          guidedLayoutPreset: r.guidedLayoutPreset ?? null,
+          cornerOverlapDeductionSf: guidedCornerOverlapDeductionSf(r),
           pieces
-        });
+        };
+        if (r.notes?.trim()) row.notes = r.notes.trim();
+        out.push(row);
         continue;
       }
     }
@@ -1213,17 +1296,142 @@ export function serializeRoomsForApi(rooms: RoomDraft[]): Array<Record<string, u
       const fh = sumGuidedPiecesByType(r.fhbPieces);
       fhb += fh.counter + fh.splash + fh.fhb;
     }
-    out.push({
+    const row: Record<string, unknown> = {
       name: r.name,
       materialGroup: g,
       materialColor: r.materialColor,
       materialSupplier: r.materialSupplier,
       materialType: r.materialType,
+      materialCatalogId: r.materialCatalogId ?? null,
+      calcMode: r.calcMode,
+      addons: { ...r.addons },
+      tear: Boolean(r.tear),
+      fhbMode: r.fhbMode,
+      fhbDirectSf: r.fhbDirectSf,
+      fhbOutlets: r.fhbOutlets,
+      guidedLayoutPreset: r.guidedLayoutPreset ?? null,
       countertopSqft: ct,
       backsplashSqft: round2(bs + fhb)
-    });
+    };
+    if (r.calcMode === "Rapid Linear Foot") {
+      row.linear = { ...r.linear };
+    }
+    if (r.calcMode === "Manual Sq Ft") {
+      row.directCounterSqft = ct;
+      row.directSplashSqft = bs;
+    }
+    if (r.fhbMode === "Guided Shape" && r.fhbPieces.length) {
+      row.fhbPieces = r.fhbPieces
+        .filter((p) => p.lengthIn > 0 && p.depthIn > 0)
+        .map((p) => ({
+          type: p.pieceType === "fhb" ? "splash" : p.pieceType,
+          lengthIn: p.lengthIn,
+          depthIn: p.depthIn,
+          shape: p.shape,
+          name: p.name
+        }));
+    }
+    if (r.notes?.trim()) row.notes = r.notes.trim();
+    out.push(row);
   }
   return out;
+}
+
+/** Full room drafts for `internal_ui.estimate_room_drafts` — preserves add-ons, FHB, colors, layout preset. */
+export function serializeRoomDraftsForInternalUi(rooms: RoomDraft[]): RoomDraft[] {
+  return rooms.map((r) => ({
+    ...r,
+    addons: { ...r.addons },
+    guidedPieces: r.guidedPieces.map((p) => ({ ...p })),
+    fhbPieces: r.fhbPieces.map((p) => ({ ...p })),
+    linear: { ...r.linear },
+    direct: { ...r.direct },
+    vanity: { ...r.vanity }
+  }));
+}
+
+function hydrateGuidedPieceFromRow(x: Record<string, unknown>): GuidedPiece {
+  const tRaw = String(x.type || "counter").toLowerCase();
+  const pieceType: GuidedPiece["pieceType"] = tRaw === "splash" ? "splash" : tRaw === "fhb" ? "fhb" : "counter";
+  const sh = String(x.shape || "rect").toLowerCase() === "tri" ? "tri" : "rect";
+  return {
+    id: newId(),
+    pieceType,
+    name: String(x.name || "Piece"),
+    lengthIn: Number(x.lengthIn ?? x.l ?? 0) || 0,
+    depthIn: Number(x.depthIn ?? x.d ?? 0) || 0,
+    shape: sh as PieceShape,
+    addSplash: Boolean(x.addSplash ?? x.add_splash),
+    materialOverride: Boolean(x.materialOverride ?? x.material_override),
+    materialGroup: x.materialGroup != null ? String(x.materialGroup) : undefined,
+    materialColor: x.materialColor != null ? String(x.materialColor) : undefined,
+    materialSupplier: x.materialSupplier != null ? String(x.materialSupplier) : undefined,
+    materialType: x.materialType != null ? String(x.materialType) : undefined
+  };
+}
+
+function applyRoomPersistenceFields(base: RoomDraft, r: Record<string, unknown>) {
+  if (r.materialCatalogId != null) base.materialCatalogId = String(r.materialCatalogId) || null;
+  if (r.calcMode != null) base.calcMode = String(r.calcMode) as RoomDraft["calcMode"];
+  if (r.guidedLayoutPreset != null) base.guidedLayoutPreset = String(r.guidedLayoutPreset) as RoomDraft["guidedLayoutPreset"];
+  if (r.addons && typeof r.addons === "object") {
+    base.addons = { ...(r.addons as Record<string, number>) };
+  }
+  if (r.tear != null) base.tear = Boolean(r.tear);
+  if (r.fhbMode != null) base.fhbMode = String(r.fhbMode) as RoomDraft["fhbMode"];
+  if (r.fhbDirectSf != null) base.fhbDirectSf = Number(r.fhbDirectSf) || 0;
+  if (r.fhbOutlets != null) base.fhbOutlets = Math.max(0, Math.floor(Number(r.fhbOutlets)) || 0);
+  if (r.notes != null) base.notes = String(r.notes);
+  if (r.linear && typeof r.linear === "object") {
+    const ln = r.linear as Record<string, unknown>;
+    base.linear = {
+      wallFt: Number(ln.wallFt) || 0,
+      splashIn: Number(ln.splashIn) || STANDARD_BACKSPLASH_HEIGHT_IN,
+      islandL: Number(ln.islandL) || 0,
+      islandW: Number(ln.islandW) || 0,
+      counterDepthIn: ln.counterDepthIn != null ? Number(ln.counterDepthIn) : undefined
+    };
+  }
+  const directCt = r.directCounterSqft ?? r.direct_counter_sqft;
+  const directSp = r.directSplashSqft ?? r.direct_splash_sqft;
+  if (directCt != null || directSp != null) {
+    base.direct = {
+      counter: Number(directCt ?? r.countertopSqft ?? 0) || 0,
+      splash: Number(directSp ?? 0) || 0
+    };
+  }
+  const fhbPieces = r.fhbPieces;
+  if (Array.isArray(fhbPieces) && fhbPieces.length) {
+    base.fhbPieces = fhbPieces.filter((p) => p && typeof p === "object").map((p) => hydrateGuidedPieceFromRow(p as Record<string, unknown>));
+  }
+}
+
+/** Prefer `estimate_room_drafts` when present; otherwise rebuild from API `estimate_rooms`. */
+export function hydrateRoomDraftsFromInternalUi(
+  roomDrafts: unknown,
+  estimateRooms: unknown
+): RoomDraft[] {
+  if (Array.isArray(roomDrafts) && roomDrafts.length) {
+    const out: RoomDraft[] = [];
+    for (const row of roomDrafts) {
+      if (!row || typeof row !== "object") continue;
+      const d = row as RoomDraft;
+      const base = createDefaultRoom(String(d.materialGroup || "Group Promo"));
+      Object.assign(base, {
+        ...d,
+        id: String(d.id || newId()),
+        addons: { ...(d.addons || {}) },
+        guidedPieces: (d.guidedPieces || []).map((p) => ({ ...p, id: String(p.id || newId()) })),
+        fhbPieces: (d.fhbPieces || []).map((p) => ({ ...p, id: String(p.id || newId()) })),
+        linear: { ...base.linear, ...(d.linear || {}) },
+        direct: { ...base.direct, ...(d.direct || {}) },
+        vanity: { ...base.vanity, ...(d.vanity || {}) }
+      });
+      out.push(base);
+    }
+    return out.length ? out : [createDefaultRoom("Group Promo")];
+  }
+  return hydrateRoomDraftsFromEstimateRooms(Array.isArray(estimateRooms) ? estimateRooms : []);
 }
 
 /** Rebuild room drafts from an eliteOS `estimate_rooms` / API rooms array (hydration). */
@@ -1248,42 +1456,27 @@ export function hydrateRoomDraftsFromEstimateRooms(rows: unknown[]): RoomDraft[]
     if (r.materialColor != null) base.materialColor = String(r.materialColor);
     if (r.materialSupplier != null) base.materialSupplier = String(r.materialSupplier);
     if (r.materialType != null) base.materialType = String(r.materialType);
-    if (r.materialCatalogId != null) base.materialCatalogId = String(r.materialCatalogId);
-    if (r.notes != null) base.notes = String(r.notes);
+    applyRoomPersistenceFields(base, r);
     const pieces = r.pieces;
     if (Array.isArray(pieces) && pieces.length) {
       base.calcMode = "Guided Shape";
       base.guidedPieces = pieces
         .filter((p) => p && typeof p === "object")
-        .map((p) => {
-          const x = p as Record<string, unknown>;
-          const tRaw = String(x.type || "counter").toLowerCase();
-          const pieceType: GuidedPiece["pieceType"] =
-            tRaw === "splash" ? "splash" : tRaw === "fhb" ? "fhb" : "counter";
-          const sh = String(x.shape || "rect").toLowerCase() === "tri" ? "tri" : "rect";
-          const nameStr = String(x.name || "Piece");
-          return {
-            id: newId(),
-            pieceType,
-            name: nameStr,
-            lengthIn: Number(x.lengthIn ?? x.l ?? 0) || 0,
-            depthIn: Number(x.depthIn ?? x.d ?? 0) || 0,
-            shape: sh as PieceShape,
-            addSplash: false,
-            materialOverride: Boolean(x.materialOverride ?? x.material_override),
-            materialGroup: x.materialGroup != null ? String(x.materialGroup) : undefined,
-            materialColor: x.materialColor != null ? String(x.materialColor) : undefined,
-            materialSupplier: x.materialSupplier != null ? String(x.materialSupplier) : undefined,
-            materialType: x.materialType != null ? String(x.materialType) : undefined
-          } satisfies GuidedPiece;
-        });
+        .map((p) => hydrateGuidedPieceFromRow(p as Record<string, unknown>));
       base.direct = { counter: 0, splash: 0 };
-    } else {
-      base.calcMode = "Manual Sq Ft";
+    } else if (base.calcMode !== "Rapid Linear Foot") {
+      base.calcMode = (r.calcMode as RoomDraft["calcMode"]) || "Manual Sq Ft";
       base.guidedPieces = [];
+      const totalBs = Number(r.backsplashSqft ?? r.roomSplash ?? 0) || 0;
+      const fhbSf =
+        base.fhbMode === "Manual Sq Ft"
+          ? Number(base.fhbDirectSf) || 0
+          : base.fhbMode === "Guided Shape"
+            ? sumGuidedPiecesByType(base.fhbPieces).fhb + sumGuidedPiecesByType(base.fhbPieces).counter
+            : 0;
       base.direct = {
-        counter: Number(r.countertopSqft ?? r.roomCounter ?? 0) || 0,
-        splash: Number(r.backsplashSqft ?? r.roomSplash ?? 0) || 0
+        counter: Number(r.countertopSqft ?? r.roomCounter ?? base.direct.counter ?? 0) || 0,
+        splash: Math.max(0, round2(totalBs - fhbSf))
       };
     }
     out.push(base);

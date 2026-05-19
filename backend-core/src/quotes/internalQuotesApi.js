@@ -155,7 +155,10 @@ export function attachInternalQuoteRoutes(app, deps) {
             ? body.customerEstimateDisplayGroups
             : Array.isArray(body.customer_estimate_display_groups)
               ? body.customer_estimate_display_groups
-              : []
+              : [],
+          estimate_room_drafts: body.estimateRoomDrafts ?? body.estimate_room_drafts ?? null,
+          color_tbd: Boolean(body.colorTbd ?? body.color_tbd),
+          use_tax_percent: Math.max(0, Number(body.useTaxPercent ?? body.use_tax_percent ?? 0) || 0)
         }
       };
       const internalEstimateSummary = buildInternalEstimateSummary(calc, body);

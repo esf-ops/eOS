@@ -9,10 +9,11 @@ import {
   buildSelectedMaterialBreakdown,
   calculateAllRoomDrafts,
   createEstimatorRoom,
-  hydrateRoomDraftsFromEstimateRooms,
+  hydrateRoomDraftsFromInternalUi,
   mergeRoomDraftsIntoGlobalAddOns,
   roomsNeedLocalVanityMath,
   runLocalPrototypeQuote,
+  serializeRoomDraftsForInternalUi,
   serializeRoomsForApi
 } from "@quote-lib/prototypeQuoteMath";
 import type { EliteProgramColorRow, QuoteWorkflowMethod, RoomDraft } from "@quote-lib/quoteTypes";
@@ -180,6 +181,8 @@ export default function InternalEstimateApp() {
   const [state, setState] = useState("IA");
   const [enteredBy, setEnteredBy] = useState("");
   const [colorTbd, setColorTbd] = useState(false);
+  const [useTaxPercent, setUseTaxPercent] = useState(0);
+  const [useTaxPreset, setUseTaxPreset] = useState("0");
   const [internalPricingMode, setInternalPricingMode] = useState<"direct" | "wholesale">("wholesale");
   const [customerDisplayGroups, setCustomerDisplayGroups] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(MATERIAL_GROUPS.map((g) => [g, false]))
@@ -338,7 +341,7 @@ export default function InternalEstimateApp() {
       backsplashSqft += Number(row.backsplashSqft) || 0;
     }
     if (!apiRooms.length) {
-      const { totals } = calculateAllRoomDrafts(drafts, projectType);
+      const { totals } = calculateAllRoomDrafts(drafts, projectType, internalPricingMode, Math.max(0, Number(useTaxPercent) || 0));
       countertopSqft = totals.counter;
       backsplashSqft = round2(totals.splash + totals.fhb);
     }
@@ -376,7 +379,7 @@ export default function InternalEstimateApp() {
     const draftsForReady = buildRoomDraftsForCalculate();
     let totalSfReady = 0;
     if (draftsForReady.length) {
-      const { totals } = calculateAllRoomDrafts(draftsForReady, projectType);
+      const { totals } = calculateAllRoomDrafts(draftsForReady, projectType, internalPricingMode, Math.max(0, Number(useTaxPercent) || 0));
       totalSfReady = round2(totals.counter + totals.splash + totals.fhb);
     }
     const missing: string[] = [];
@@ -417,6 +420,9 @@ export default function InternalEstimateApp() {
       engine,
       rooms: apiRooms,
       customerEstimateDisplayGroups: MATERIAL_GROUPS.filter((g) => customerDisplayGroups[g]),
+      estimateRoomDrafts: serializeRoomDraftsForInternalUi(drafts),
+      colorTbd,
+      useTaxPercent: Math.max(0, Number(useTaxPercent) || 0),
       customer_name: customerName.trim() || undefined,
       customer_email: email.trim() || undefined,
       customer_phone: phone.trim() || undefined,
@@ -459,6 +465,7 @@ export default function InternalEstimateApp() {
     accountPhone,
     accountEmail,
     colorTbd,
+    useTaxPercent,
     customerDisplayGroups
   ]);
 
@@ -486,7 +493,8 @@ export default function InternalEstimateApp() {
       applyGlobalAddOns: false,
       workflowLabel: wf,
       projectType,
-      customLineItemsTotal: round2(customLineSum)
+      customLineItemsTotal: round2(customLineSum),
+      useTaxPercent: Math.max(0, Number(useTaxPercent) || 0)
     });
     setUsedFallback(true);
     setApiPartner(null);
@@ -496,7 +504,8 @@ export default function InternalEstimateApp() {
     topMaterialGroup,
     projectType,
     internalPricingMode,
-    customLineRows
+    customLineRows,
+    useTaxPercent
   ]);
 
   const handleCalculate = useCallback(async () => {
@@ -743,7 +752,7 @@ export default function InternalEstimateApp() {
         fhbSf: 0
       };
     }
-    const { totals } = calculateAllRoomDrafts(drafts, projectType);
+    const { totals } = calculateAllRoomDrafts(drafts, projectType, internalPricingMode, Math.max(0, Number(useTaxPercent) || 0));
     const totalSf = round2(totals.counter + totals.splash + totals.fhb);
     return {
       empty: false as const,
@@ -753,7 +762,7 @@ export default function InternalEstimateApp() {
       splashSf: totals.splash,
       fhbSf: totals.fhb
     };
-  }, [buildRoomDraftsForCalculate, projectType]);
+  }, [buildRoomDraftsForCalculate, projectType, internalPricingMode, useTaxPercent]);
 
   const readinessSnapshot = useMemo(() => {
     const missing: string[] = [];
@@ -799,14 +808,16 @@ export default function InternalEstimateApp() {
       applyGlobalAddOns: false,
       workflowLabel: wf,
       projectType,
-      customLineItemsTotal: customLinePreviewTotals
+      customLineItemsTotal: customLinePreviewTotals,
+      useTaxPercent: Math.max(0, Number(useTaxPercent) || 0)
     });
   }, [
     buildRoomDraftsForCalculate,
     internalPricingMode,
     topMaterialGroup,
     projectType,
-    customLinePreviewTotals
+    customLinePreviewTotals,
+    useTaxPercent
   ]);
 
   const comparisonScopeMeta = useMemo(() => aggregateComparisonScope(roomDrafts, projectType), [roomDrafts, projectType]);
@@ -870,14 +881,20 @@ export default function InternalEstimateApp() {
     if (quoteDefaultCatalogId) {
       return eliteColors.find((c) => c.id === quoteDefaultCatalogId)?.colorName ?? "";
     }
-    return "";
-  }, [colorTbd, quoteDefaultCatalogId, eliteColors]);
+    const roomColors = [
+      ...new Set(roomDrafts.map((r) => r.materialColor?.trim()).filter(Boolean) as string[])
+    ];
+    return roomColors.length === 1 ? roomColors[0] : roomColors.length > 1 ? "Multiple room colors" : "";
+  }, [colorTbd, quoteDefaultCatalogId, eliteColors, roomDrafts]);
 
   const estimateTotalExact = partRetail ?? 0;
 
   const selectedMaterialBreakdown = useMemo(
-    () => buildSelectedMaterialBreakdown(roomDrafts, internalPricingMode),
-    [roomDrafts, internalPricingMode]
+    () =>
+      buildSelectedMaterialBreakdown(roomDrafts, internalPricingMode, {
+        useTaxPercent: Math.max(0, Number(useTaxPercent) || 0)
+      }),
+    [roomDrafts, internalPricingMode, useTaxPercent]
   );
 
   const visibleRoomAddons = useMemo(
@@ -944,11 +961,16 @@ export default function InternalEstimateApp() {
     if (comparisonScopeMeta.mixedGroupNote) parts.push("Tier comparisons are estimator-only on mixed-material scope.");
     if (internalOnlyAdjustDollars !== 0) {
       parts.push(
-        "Internal-only adjustments are included in this estimate total and in the customer PDF total; the PDF lists them only as “Additional adjustments,” not by item name."
+        "Internal-only custom lines are included in the estimate total and folded into customer countertop material on the PDF (not listed by internal name)."
+      );
+    }
+    if (selectedMaterialBreakdown.totals.useTax?.applied) {
+      parts.push(
+        `Use tax ${selectedMaterialBreakdown.totals.useTax.percent}% on countertop material (+$${selectedMaterialBreakdown.totals.useTax.taxAmount.toFixed(2)}) — folded into customer countertop amount.`
       );
     }
     return parts.length ? parts.join(" ") : null;
-  }, [stickyLiveRollup.rollupMismatch, comparisonScopeMeta.mixedGroupNote, internalOnlyAdjustDollars]);
+  }, [stickyLiveRollup.rollupMismatch, comparisonScopeMeta.mixedGroupNote, internalOnlyAdjustDollars, selectedMaterialBreakdown]);
 
   const quoteLibraryUrl = useMemo(() => {
     const raw = String(import.meta.env.VITE_HEAD_URL_QUOTE_LIBRARY ?? "").trim();
@@ -1030,10 +1052,19 @@ export default function InternalEstimateApp() {
         const imb = String(iu.internal_material_basis || "");
         if (imb === "direct" || imb === "wholesale") setInternalPricingMode(imb);
         const roomsPayload = iu.estimate_rooms;
-        if (Array.isArray(roomsPayload) && roomsPayload.length) {
-          setRoomDrafts(hydrateRoomDraftsFromEstimateRooms(roomsPayload));
+        const roomDraftsPayload = iu.estimate_room_drafts;
+        if (Array.isArray(roomDraftsPayload) && roomDraftsPayload.length) {
+          setRoomDrafts(hydrateRoomDraftsFromInternalUi(roomDraftsPayload, roomsPayload));
+        } else if (Array.isArray(roomsPayload) && roomsPayload.length) {
+          setRoomDrafts(hydrateRoomDraftsFromInternalUi(null, roomsPayload));
         } else {
           gaps.push("Room model (estimate_rooms missing on older saves — re-enter rooms if needed)");
+        }
+        if (iu.color_tbd != null) setColorTbd(Boolean(iu.color_tbd));
+        const savedTax = Number(iu.use_tax_percent ?? 0);
+        if (Number.isFinite(savedTax) && savedTax > 0) {
+          setUseTaxPercent(savedTax);
+          setUseTaxPreset([0, 2, 5].includes(savedTax) ? String(savedTax) : "custom");
         }
         const qdm = iu.quote_default_material;
         if (qdm && typeof qdm === "object") {
@@ -1317,7 +1348,48 @@ export default function InternalEstimateApp() {
                 Entered by
                 <input value={enteredBy} onChange={(e) => setEnteredBy(e.target.value)} placeholder="Defaults from sign-in" />
               </label>
+              <label className="check" style={{ alignSelf: "end" }}>
+                <input type="checkbox" checked={colorTbd} onChange={(e) => setColorTbd(e.target.checked)} />
+                Color TBD (project-wide)
+              </label>
+              <label>
+                Use tax on countertop material
+                <select
+                  value={useTaxPreset}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setUseTaxPreset(v);
+                    if (v === "custom") return;
+                    setUseTaxPercent(Number(v) || 0);
+                  }}
+                >
+                  <option value="0">0% (none)</option>
+                  <option value="2">2%</option>
+                  <option value="5">5% (e.g. Lisbon)</option>
+                  <option value="custom">Custom %</option>
+                </select>
+              </label>
+              {useTaxPreset === "custom" ? (
+                <label>
+                  Custom use tax %
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.01}
+                    value={useTaxPercent}
+                    onChange={(e) => setUseTaxPercent(Math.max(0, Number(e.target.value) || 0))}
+                  />
+                </label>
+              ) : null}
             </div>
+            {selectedMaterialBreakdown.totals.useTax?.applied ? (
+              <p className="muted small" style={{ marginTop: 8 }}>
+                Use tax: {selectedMaterialBreakdown.totals.useTax.percent}% on countertop material ($
+                {selectedMaterialBreakdown.totals.useTax.baseCountertopMaterial.toFixed(2)} base + $
+                {selectedMaterialBreakdown.totals.useTax.taxAmount.toFixed(2)}) — included in customer countertop amount, not
+                a separate PDF line.
+              </p>
+            ) : null}
           </section>
 
           <section id="sec-rooms" className="card">
@@ -1387,8 +1459,9 @@ export default function InternalEstimateApp() {
           <section id="sec-addons" className="card">
             <h2 className="ie-section-title">Add-ons &amp; Custom Items</h2>
             <p className="muted small">
-              Use presets or add custom lines. <strong>Customer-facing</strong> items appear on the estimate; <strong>internal-only</strong>{" "}
-              lines count toward the total but stay out of customer-facing output.
+              Use presets or add custom lines. <strong>Customer-facing</strong> items appear on the estimate by name.{" "}
+              <strong>Internal-only</strong> lines count toward the total and are folded into customer countertop material on the PDF
+              (not listed by internal name).
             </p>
             <p className="muted small">Sink and fixture cutouts are set per room in the room builder.</p>
 
@@ -2316,7 +2389,7 @@ export default function InternalEstimateApp() {
         selectedBreakdown={selectedMaterialBreakdown}
         visibleLineItems={visibleCustomerLines}
         visibleRoomAddons={visibleRoomAddons}
-        internalOnlyAdjustDollars={internalOnlyAdjustDollars}
+        internalMaterialFoldDollars={internalOnlyAdjustDollars}
         estimateTotalExact={estimateTotalExact}
         comparisonRows={customerEstimateComparisonRows}
         estimateDate={new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}

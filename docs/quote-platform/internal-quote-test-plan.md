@@ -78,6 +78,15 @@ Elite Stone Fabrication internal sales and estimating staff with **Quote** head 
 - **Parity rule:** Live preview keeps **`applyGlobalAddOns: false`** and puts room extras in **`measureRoomDraft`**. **Calculate** and **Save** send **`addOns`** built by **`mergeRoomDraftsIntoGlobalAddOns`** (catalog qty sums + **`tearout`** per room checkbox + **`qty-outlet`** when FHB scope sf &gt; 0) so **`calculateAddOns`** matches live room fixed charges alongside **`engine: "rooms"`**.
 - **Automated helper:** `npx --yes tsx scripts/verify-internal-estimate-mixed-material-parity.ts` (scoped stone vs breakdown, tier override case, custom line rollup, merge smoke).
 
+## 2026-05-19 — Beta fixes (add-ons, color, use tax, L/U overlap, internal PDF)
+
+- **Persistence:** `internal_ui.estimate_room_drafts` round-trips room add-ons, tear, FHB, `materialCatalogId`, guided layout preset; reload must not drop sink/cooktop qty or catalog color.
+- **Use tax:** Optional % on countertop material only (0 / 2 / 5 / custom); e.g. 10 sf Group Promo @ $45 + 5% → $472.50 countertop material; not a separate customer PDF line.
+- **L/U overlap:** L-shape subtracts one corner overlap; U-shape subtracts two; default depth 25.5″ (4.515625 sf per corner when both runs use 25.5″).
+- **Internal-only custom lines:** Included in total; folded into customer countertop material on PDF (no internal names, no “Additional adjustments” row).
+- **Color TBD:** Project checkbox persists; room catalog color still optional per room.
+- **Automated:** `npx --yes tsx scripts/verify-internal-estimate-beta-fixes.ts`
+
 ## 2026-05-15 — Customer print layout polish
 
 - **Header:** ESF logo + **Elite Stone Fabrication Estimate**; date under title; quote ref in project overview.

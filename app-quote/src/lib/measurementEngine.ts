@@ -87,7 +87,54 @@ export function rapidLinearAreas(
   return { counter: round2(counter), splash: round2(splash), lines };
 }
 
-export function sumGuidedPiecesByType(pieces: GuidedPiece[]) {
+/**
+ * Square feet to subtract for one 90° counter corner where two rectangular runs overlap.
+ * Uses min(depthA, depthB) when depths differ (standard 25.5″ → 2.125 ft × 2.125 ft = 4.515625 sf).
+ */
+export function guidedCornerOverlapSqft(depthAIn: number, depthBIn: number): number {
+  const a = Number(depthAIn) || 0;
+  const b = Number(depthBIn) || 0;
+  if (a <= 0 || b <= 0) return 0;
+  const overlapDepthIn = Math.min(a, b);
+  const ft = overlapDepthIn / 12;
+  return round2(ft * ft);
+}
+
+/** How many 90° corner overlaps to subtract for this room (L = 1, U = 2; Galley/Rectangle = 0). */
+export function guidedCornerOverlapCount(room: RoomDraft): number {
+  if (room.calcMode !== "Guided Shape") return 0;
+  const preset = room.guidedLayoutPreset;
+  if (preset === "L-Shape") return 1;
+  if (preset === "U-Shape") return 2;
+  return 0;
+}
+
+/**
+ * Total countertop sf to deduct for double-counted inside corners on L/U guided layouts.
+ * Manual sqft and non-L/U presets are unaffected.
+ */
+export function guidedCornerOverlapDeductionSf(room: RoomDraft): number {
+  const count = guidedCornerOverlapCount(room);
+  if (!count) return 0;
+  const counters = room.guidedPieces.filter((p) => p.pieceType === "counter" && p.lengthIn > 0 && p.depthIn > 0);
+  if (counters.length < 2) return 0;
+  if (count === 1) {
+    return guidedCornerOverlapSqft(counters[0].depthIn, counters[1].depthIn);
+  }
+  if (counters.length >= 3) {
+    return round2(
+      guidedCornerOverlapSqft(counters[0].depthIn, counters[1].depthIn) +
+        guidedCornerOverlapSqft(counters[1].depthIn, counters[2].depthIn)
+    );
+  }
+  const d = Math.min(...counters.map((p) => p.depthIn));
+  return round2(guidedCornerOverlapSqft(d, d) * count);
+}
+
+export function sumGuidedPiecesByType(
+  pieces: GuidedPiece[],
+  options?: { cornerOverlapDeductionSf?: number; cornerOverlapNote?: string }
+) {
   let counter = 0;
   let splash = 0;
   let fhb = 0;
@@ -109,6 +156,14 @@ export function sumGuidedPiecesByType(pieces: GuidedPiece[]) {
         }
       }
     }
+  }
+  const deduction = Number(options?.cornerOverlapDeductionSf) || 0;
+  if (deduction > 0) {
+    counter = Math.max(0, round2(counter - deduction));
+    lines.push(
+      options?.cornerOverlapNote ||
+        `Corner overlap deduction: −${deduction.toFixed(2)} sf (inside 90° corners counted twice in rectangular runs)`
+    );
   }
   return { counter: round2(counter), splash: round2(splash), fhb: round2(fhb), lines };
 }
@@ -132,6 +187,7 @@ export function qualifyingSfFromRoomDrafts(rooms: RoomDraft[]): number {
         if (p.pieceType !== "counter") continue;
         sf += sfFromGuidedPiece(p.lengthIn, p.depthIn, p.shape);
       }
+      sf = Math.max(0, round2(sf - guidedCornerOverlapDeductionSf(room)));
     }
   }
   return round2(sf);
@@ -155,6 +211,10 @@ export function measurementSummaryForRoom(room: RoomDraft, mode: RoomCalcMode): 
     );
     return { lines: r.lines };
   }
-  const g = sumGuidedPiecesByType(room.guidedPieces);
+  const overlap = guidedCornerOverlapDeductionSf(room);
+  const g = sumGuidedPiecesByType(room.guidedPieces, {
+    cornerOverlapDeductionSf: overlap,
+    cornerOverlapNote: overlap > 0 ? `Corner overlap deduction: −${overlap.toFixed(2)} sf` : undefined
+  });
   return { lines: g.lines };
 }

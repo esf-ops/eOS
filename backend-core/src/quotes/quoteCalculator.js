@@ -116,7 +116,8 @@ export function normalizePrototypeQuoteInput(input) {
         ? "Pass Through"
         : String(src.retailMethod || src.markup?.method || "Markup Percent"),
     retailFlatAdd: Number(src.retailFlatAdd ?? src.markup?.flatAdd ?? 0) || 0,
-    metadata: typeof src.metadata === "object" && src.metadata ? { ...src.metadata } : {}
+    metadata: typeof src.metadata === "object" && src.metadata ? { ...src.metadata } : {},
+    useTaxPercent: Math.max(0, Number(src.useTaxPercent ?? src.use_tax_percent ?? 0) || 0)
   };
 }
 
@@ -282,6 +283,7 @@ function enumerateRoomMaterialSfRows(input) {
   for (const room of input.rooms || []) {
     const roomName = String(room.name || room.room_name || "Room").trim() || "Room";
     if (Array.isArray(room.pieces) && room.pieces.length) {
+      const roomRowStart = rows.length;
       for (const piece of room.pieces) {
         const { sf } = calculateRoomAreas(piece);
         const t = String(piece.type || "counter");
@@ -296,6 +298,18 @@ function enumerateRoomMaterialSfRows(input) {
           sf: round2(sf),
           isSplash
         });
+      }
+      const overlap = Number(room.cornerOverlapDeductionSf ?? room.corner_overlap_deduction_sf ?? 0) || 0;
+      if (overlap > 0) {
+        counter = Math.max(0, round2(counter - overlap));
+        let remaining = overlap;
+        for (let i = rows.length - 1; i >= roomRowStart && remaining > 0; i--) {
+          if (!rows[i].isSplash && rows[i].sf > 0) {
+            const take = Math.min(rows[i].sf, remaining);
+            rows[i].sf = round2(rows[i].sf - take);
+            remaining = round2(remaining - take);
+          }
+        }
       }
     } else {
       const mat = resolveMaterialForPiece(room, null, input);
@@ -527,11 +541,13 @@ function sumRoomsWholesale(input, rules) {
   /** @type {Array<Record<string, unknown>>} */
   const materialBreakdown = [];
   let materialDollars = 0;
+  let countertopMaterialDollars = 0;
   let order = 0;
   for (const row of rows) {
     const rate = materialRateForQuote(input, row.group, rules);
     const sub = round2(row.sf * rate);
     materialDollars += sub;
+    if (!row.isSplash) countertopMaterialDollars += sub;
     roomLines.push({
       room: row.roomName,
       pieceLabel: row.pieceLabel,
@@ -558,12 +574,20 @@ function sumRoomsWholesale(input, rules) {
     });
   }
   const addOnPart = calculateAddOns({ addOns: input.addOns || {} }, rules);
+  let useTaxAmount = 0;
+  const useTaxPercent = Number(input.useTaxPercent) || 0;
+  if (useTaxPercent > 0 && String(input.quoteSource) === "internal_quote") {
+    useTaxAmount = round2(countertopMaterialDollars * (useTaxPercent / 100));
+    materialDollars += useTaxAmount;
+  }
   return {
     counter,
     splash,
     roomLines,
     materialBreakdown,
     addOnPart,
+    useTaxAmount,
+    useTaxPercent: useTaxPercent > 0 ? useTaxPercent : null,
     wholesale: round2(materialDollars + addOnPart.total)
   };
 }
@@ -573,11 +597,20 @@ function legacyWholesale(input, rules) {
   const rate = materialRateForQuote(input, g, rules);
   const ct = Number(input.areas?.countertopSqft) || 0;
   const bs = Number(input.areas?.backsplashSqft) || 0;
-  const base = ct * rate + bs * rate;
+  let countertopMaterial = ct * rate;
+  let useTaxAmount = 0;
+  const useTaxPercent = Number(input.useTaxPercent) || 0;
+  if (useTaxPercent > 0 && String(input.quoteSource) === "internal_quote") {
+    useTaxAmount = round2(countertopMaterial * (useTaxPercent / 100));
+    countertopMaterial = round2(countertopMaterial + useTaxAmount);
+  }
+  const base = countertopMaterial + bs * rate;
   const addOnPart = calculateAddOns({ addOns: input.addOns || {} }, rules);
   const vanityPart = calculateVanities(input, rules);
   return {
     wholesale: base + addOnPart.total + vanityPart.total,
+    useTaxAmount,
+    useTaxPercent: useTaxPercent > 0 ? useTaxPercent : null,
     materialGroup: g,
     rate,
     areas: { countertopSqft: ct, backsplashSqft: bs },
@@ -873,10 +906,18 @@ export async function calculateQuote(rawInput, pricingContext = {}) {
   });
   snapshot.lineItems = lineItems;
   if (String(input.quoteSource) === "internal_quote") {
+    const useTaxPercent = Number(input.useTaxPercent) || 0;
+    const useTaxAmount =
+      detail.kind === "rooms"
+        ? Number(detail.useTaxAmount) || 0
+        : detail.kind === "legacy"
+          ? Number(detail.useTaxAmount) || 0
+          : 0;
     snapshot.internal_estimate_math = {
       version: 1,
       internal_material_basis: input.internalMaterialBasis,
-      no_partner_or_public_markup_percent: true
+      no_partner_or_public_markup_percent: true,
+      use_tax: useTaxPercent > 0 ? { percent: useTaxPercent, amount: useTaxAmount, applied: true } : { percent: 0, amount: 0, applied: false }
     };
   }
   if (rawInput.readiness && typeof rawInput.readiness === "object") snapshot.readiness = rawInput.readiness;
