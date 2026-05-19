@@ -39,6 +39,8 @@ type SuggestionsResp = {
   limit: number;
   offset: number;
   rows: SuggestionRow[];
+  coverage?: CoverageResp["coverage"];
+  diagnostics?: unknown;
   source?: {
     primary?: string;
     optionalSuggestionsPath?: string | null;
@@ -112,6 +114,16 @@ type CoverageResp = {
       approvedMapped?: CoverageExample[];
       blackstoneUnapproved?: CoverageExample[];
     };
+    diagnostics?: {
+      latest_complete_import_group_id?: string | null;
+      latest_group_complete?: boolean | null;
+      jobs_scanned?: number;
+      accounts_scanned?: number;
+      account_rollups_computed?: number;
+      query_page_count?: number;
+      coverage_summary_complete?: boolean;
+      partial_warning?: string | null;
+    };
     warnings?: string[];
   };
 };
@@ -120,7 +132,6 @@ const MAP_SCHEMA_HEALTH = "/api/admin/sales-account-mapping/schema-health";
 const MAP_SUGGESTIONS = "/api/admin/sales-account-mapping/suggestions";
 const MAP_REPS_BRANCHES = "/api/admin/sales-account-mapping/reps-branches";
 const MAP_MASTER_ACCOUNTS = "/api/admin/sales-account-mapping/master-accounts";
-const MAP_COVERAGE = "/api/admin/sales-account-mapping/coverage";
 const MAP_APPROVE = "/api/admin/sales-account-mapping/approve";
 const MAP_REJECT = "/api/admin/sales-account-mapping/reject";
 const MAP_UNMAPPED = "/api/admin/sales-account-mapping/mark-unmapped";
@@ -201,20 +212,10 @@ export default function SalesAccountMappingAdmin({ token }: { token: string }) {
     }
   }, [token]);
 
-  const loadCoverage = useCallback(async () => {
-    setCoverageErr("");
-    try {
-      const data = (await apiFetch(MAP_COVERAGE, { token })) as CoverageResp;
-      setCoverage(data.coverage ?? null);
-    } catch (e) {
-      setCoverage(null);
-      setCoverageErr(e instanceof ApiError ? e.message : String((e as Error)?.message ?? e));
-    }
-  }, [token]);
-
   const loadSuggestions = useCallback(async () => {
     setBusy(true);
     setError("");
+    setCoverageErr("");
     try {
       const p = new URLSearchParams();
       if (status) p.set("status", status);
@@ -232,6 +233,10 @@ export default function SalesAccountMappingAdmin({ token }: { token: string }) {
       const data = (await apiFetch(`${MAP_SUGGESTIONS}?${p.toString()}`, { token })) as SuggestionsResp;
       setRows(data.rows ?? []);
       setTotal(data.total ?? 0);
+      setCoverage(data.coverage ?? null);
+      if (data.coverage?.diagnostics?.partial_warning) {
+        setCoverageErr(data.coverage.diagnostics.partial_warning);
+      }
     } catch (e) {
       setRows([]);
       setTotal(0);
@@ -267,9 +272,8 @@ export default function SalesAccountMappingAdmin({ token }: { token: string }) {
   useEffect(() => {
     void loadSchema();
     void loadRepsBranches();
-    void loadCoverage();
     void loadSuggestions();
-  }, [loadSchema, loadRepsBranches, loadCoverage, loadSuggestions]);
+  }, [loadSchema, loadRepsBranches, loadSuggestions]);
 
   useEffect(() => {
     if (!selected) return;
@@ -318,7 +322,6 @@ export default function SalesAccountMappingAdmin({ token }: { token: string }) {
       await apiFetch(MAP_APPROVE, { token, method: "POST", body });
       setSelected(null);
       void loadSchema();
-      void loadCoverage();
       void loadSuggestions();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String((e as Error)?.message ?? e));
@@ -335,7 +338,6 @@ export default function SalesAccountMappingAdmin({ token }: { token: string }) {
         body: { morawareAccountName: selected.morawareAccountName, reason: notes || "Rejected via admin review" }
       });
       setSelected(null);
-      void loadCoverage();
       void loadSuggestions();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String((e as Error)?.message ?? e));
@@ -352,7 +354,6 @@ export default function SalesAccountMappingAdmin({ token }: { token: string }) {
         body: { morawareAccountName: selected.morawareAccountName, reason: notes || "Intentionally unmapped" }
       });
       setSelected(null);
-      void loadCoverage();
       void loadSuggestions();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String((e as Error)?.message ?? e));
@@ -374,7 +375,6 @@ export default function SalesAccountMappingAdmin({ token }: { token: string }) {
         }
       });
       setSelected(null);
-      void loadCoverage();
       void loadSuggestions();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String((e as Error)?.message ?? e));
@@ -405,7 +405,7 @@ export default function SalesAccountMappingAdmin({ token }: { token: string }) {
         </div>
       ) : null}
 
-      {coverageErr ? <div className="banner banner-bad">Coverage error: {coverageErr}</div> : null}
+      {coverageErr ? <div className="banner banner-warn">Coverage warning: {coverageErr}</div> : null}
 
       <div className="cards" style={{ marginTop: 14 }}>
         <div className="card">
@@ -463,6 +463,14 @@ export default function SalesAccountMappingAdmin({ token }: { token: string }) {
           <div style={{ fontSize: 20, fontWeight: 700 }}>{String(total)}</div>
         </div>
       </div>
+
+      {coverage?.diagnostics ? (
+        <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>
+          Coverage diagnostics: group {coverage.diagnostics.latest_complete_import_group_id || "—"} · jobs scanned{" "}
+          {nf(coverage.diagnostics.jobs_scanned ?? 0)} · account rollups {nf(coverage.diagnostics.account_rollups_computed ?? 0)} · query pages{" "}
+          {nf(coverage.diagnostics.query_page_count ?? 0)} · {coverage.diagnostics.coverage_summary_complete === false ? "partial" : "complete"}
+        </div>
+      ) : null}
 
       {coverage ? (
         <div className="banner banner-warn" style={{ marginTop: 14 }}>

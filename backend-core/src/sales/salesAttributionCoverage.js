@@ -1,7 +1,7 @@
 import { normalizeAccountNameWithoutLocationPrefix } from "./salesAccountNameNormalizer.js";
 import { extractSqftFromMorawareJob } from "./morawareSqftActuals.js";
 
-const PAGE_SIZE = 1000;
+const PAGE_SIZE = 500;
 
 function isMissingRelationError(error) {
   const msg = String(error?.message || "");
@@ -46,12 +46,22 @@ function chunkArray(values, size) {
   return out;
 }
 
-async function fetchAllByRunIds(queryFactory, runIds) {
+async function fetchAllByRunIds(queryFactory, runIds, { chunkSize = 20, label = "rows", diagnostics = null } = {}) {
   if (!runIds.length) return fetchAll(() => queryFactory(null));
   const rows = [];
-  for (const runIdChunk of chunkArray(runIds, 40)) {
-    rows.push(...(await fetchAll(() => queryFactory(runIdChunk))));
+  for (const runIdChunk of chunkArray(runIds, chunkSize)) {
+    let from = 0;
+    while (true) {
+      const { data, error } = await queryFactory(runIdChunk).range(from, from + PAGE_SIZE - 1);
+      if (diagnostics) diagnostics.query_page_count += 1;
+      if (error) throw error;
+      if (!data?.length) break;
+      rows.push(...data);
+      if (data.length < PAGE_SIZE) break;
+      from += PAGE_SIZE;
+    }
   }
+  if (diagnostics) diagnostics[`${label}Scanned`] = rows.length;
   return rows;
 }
 
@@ -171,6 +181,12 @@ function statusForAlias(alias) {
   return "needs_review_unmapped";
 }
 
+function isStatementTimeout(error) {
+  const msg = String(error?.message || error || "").toLowerCase();
+  const code = String(error?.code || "");
+  return code === "57014" || msg.includes("canceling statement due to statement timeout") || msg.includes("statement timeout");
+}
+
 /**
  * Brain-derived attribution coverage. This intentionally counts only approved
  * Sales Account Mapping rows as trusted; local fallback rules do not improve coverage.
@@ -180,9 +196,21 @@ function statusForAlias(alias) {
  */
 export async function loadSalesAttributionCoverage(supabase, { organizationId = "" } = {}) {
   const warnings = [];
+  const diagnostics = {
+    latest_complete_import_group_id: null,
+    latest_group_complete: null,
+    jobs_scanned: 0,
+    accounts_scanned: 0,
+    account_rollups_computed: 0,
+    query_page_count: 0,
+    coverage_summary_complete: true,
+    partial_warning: null
+  };
   const latest = await latestSuccessfulSyncRunIds(supabase, organizationId);
   if (latest.warning) warnings.push(latest.warning);
   const runIds = latest.runIds;
+  diagnostics.latest_complete_import_group_id = latest.importGroupId ?? null;
+  diagnostics.latest_group_complete = latest.groupComplete ?? null;
 
   let accounts = [];
   let jobs = [];
@@ -194,30 +222,38 @@ export async function loadSalesAttributionCoverage(supabase, { organizationId = 
       accounts = await fetchAllByRunIds((runIdChunk) => {
         let q = supabase
           .from("brain_moraware_accounts")
-          .select("source_account_id,account_name,sync_run_id,last_seen_at,updated_at")
-          .order("account_name", { ascending: true });
+          .select("id,source_account_id,account_name,sync_run_id,last_seen_at,updated_at")
+          .order("id", { ascending: true });
         if (organizationId) q = q.eq("organization_id", organizationId);
         if (runIdChunk?.length) q = q.in("sync_run_id", runIdChunk);
         return q;
-      }, runIds);
+      }, runIds, { chunkSize: 20, label: "accounts", diagnostics });
     } catch (e) {
       if (isMissingRelationError(e)) warnings.push("brain_moraware_accounts table missing");
-      else throw e;
+      else if (isStatementTimeout(e)) {
+        diagnostics.coverage_summary_complete = false;
+        diagnostics.partial_warning = "Account coverage query timed out; using job-derived rows only for this response.";
+        warnings.push(diagnostics.partial_warning);
+      } else throw e;
     }
 
     try {
       jobs = await fetchAllByRunIds((runIdChunk) => {
         let q = supabase
           .from("brain_moraware_jobs")
-          .select("source_job_id,source_account_id,account_name,sync_run_id,raw_payload")
-          .order("source_account_id", { ascending: true });
+          .select("id,source_job_id,source_account_id,account_name,sync_run_id,raw_payload")
+          .order("id", { ascending: true });
         if (organizationId) q = q.eq("organization_id", organizationId);
         if (runIdChunk?.length) q = q.in("sync_run_id", runIdChunk);
         return q;
-      }, runIds);
+      }, runIds, { chunkSize: 1, label: "jobs", diagnostics });
     } catch (e) {
       if (isMissingRelationError(e)) warnings.push("brain_moraware_jobs table missing");
-      else throw e;
+      else if (isStatementTimeout(e)) {
+        diagnostics.coverage_summary_complete = false;
+        diagnostics.partial_warning = "Job Sq.Ft. rollup query timed out; returning account coverage without complete Sq.Ft. summary.";
+        warnings.push(diagnostics.partial_warning);
+      } else throw e;
     }
   }
 
@@ -353,6 +389,9 @@ export async function loadSalesAttributionCoverage(supabase, { organizationId = 
     list.sort((a, b) => (Number(b.totalSqft) || 0) - (Number(a.totalSqft) || 0) || b.jobCount - a.jobCount || String(a.accountName).localeCompare(String(b.accountName)));
   }
   counts.jobsMissingSqft = Math.max(0, counts.totalJobsSeen - counts.jobsWithSqft);
+  diagnostics.jobs_scanned = jobs.length;
+  diagnostics.accounts_scanned = accounts.length;
+  diagnostics.account_rollups_computed = accountsByKey.size;
 
   return {
     source: "brain_moraware_latest_successful_sync_plus_sales_account_aliases",
@@ -375,6 +414,7 @@ export async function loadSalesAttributionCoverage(supabase, { organizationId = 
       blackstoneUnapproved: examples.blackstoneUnapproved.slice(0, 10)
     },
     reviewRows: (examples.reviewRows || []).slice(0, 5000),
+    diagnostics,
     warnings
   };
 }

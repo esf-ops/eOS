@@ -468,6 +468,8 @@ export function attachSalesAccountMappingAdminRoutes(app, { requireAuth, require
             generatedAt: suggestions.payload?.generatedAt ?? null,
             latestImportGroupId: coverage.latest_import_group_id ?? null
           },
+          coverage,
+          diagnostics: coverage.diagnostics ?? null,
           total,
           limit,
           offset,
