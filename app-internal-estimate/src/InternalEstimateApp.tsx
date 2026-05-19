@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { apiGetJson, apiPostJson, ApiError } from "@quote-lib/api";
 import { config, EOS_LOGO_URL } from "@quote-lib/config";
 import type { DemoCalculateResult } from "@quote-lib/demoFallback";
-import { round2 } from "@quote-lib/measurementEngine";
+import { qualifyingSfFromRoomDrafts, round2 } from "@quote-lib/measurementEngine";
 import {
   aggregateComparisonScope,
   buildCustomerRoomAreaCostBreakdown,
@@ -17,7 +17,8 @@ import {
   runLocalPrototypeQuote,
   serializeCustomerRoomAreaBreakdown,
   serializeRoomDraftsForInternalUi,
-  serializeRoomsForApi
+  serializeRoomsForApi,
+  serializeVanitiesForApi
 } from "@quote-lib/prototypeQuoteMath";
 import type { EliteProgramColorRow, QuoteWorkflowMethod, RoomDraft } from "@quote-lib/quoteTypes";
 import CustomerEstimatePrint, { type CustomerLineItem } from "./CustomerEstimatePrint";
@@ -446,6 +447,8 @@ export default function InternalEstimateApp() {
       addOns,
       engine,
       rooms: apiRooms,
+      vanities: serializeVanitiesForApi(drafts, qualifyingSfFromRoomDrafts(drafts)),
+      qualifyingKitchenCounterSf: qualifyingSfFromRoomDrafts(drafts),
       customerEstimateDisplayGroups: MATERIAL_GROUPS.filter((g) => customerDisplayGroups[g]),
       estimateRoomDrafts: serializeRoomDraftsForInternalUi(drafts),
       customerRoomAreaBreakdown: serializeCustomerRoomAreaBreakdown(
@@ -454,7 +457,7 @@ export default function InternalEstimateApp() {
           measuredRooms: calculateAllRoomDrafts(drafts, projectType, internalPricingMode, Math.max(0, Number(useTaxPercent) || 0))
             .rooms,
           materialBasis: internalPricingMode,
-          useTaxPercent: Math.max(0, Number(useTaxPercent) || 0),
+          projectUseTaxPercent: Math.max(0, Number(useTaxPercent) || 0),
           customLines: customLineRows
             .filter((r) => r.name.trim())
             .map((r) => ({
@@ -939,7 +942,7 @@ export default function InternalEstimateApp() {
   const selectedMaterialBreakdown = useMemo(
     () =>
       buildSelectedMaterialBreakdown(roomDrafts, internalPricingMode, {
-        useTaxPercent: Math.max(0, Number(useTaxPercent) || 0)
+        projectUseTaxPercent: Math.max(0, Number(useTaxPercent) || 0)
       }),
     [roomDrafts, internalPricingMode, useTaxPercent]
   );
@@ -977,7 +980,7 @@ export default function InternalEstimateApp() {
         roomDrafts,
         measuredRooms: liveEstimate.measuredRooms,
         materialBasis: internalPricingMode,
-        useTaxPercent: Math.max(0, Number(useTaxPercent) || 0),
+        projectUseTaxPercent: Math.max(0, Number(useTaxPercent) || 0),
         customLines: customLinesForRoomBreakdown,
         projectColorTbd: colorTbd
       }),
@@ -1147,6 +1150,13 @@ export default function InternalEstimateApp() {
         if (Number.isFinite(savedTax) && savedTax > 0) {
           setUseTaxPercent(savedTax);
           setUseTaxPreset([0, 2, 5].includes(savedTax) ? String(savedTax) : "custom");
+          setRoomDrafts((prev) =>
+            prev.map((r) => ({
+              ...r,
+              useTaxMode: r.useTaxMode ?? "inherit_project",
+              useTaxPercent: r.useTaxPercent ?? savedTax
+            }))
+          );
         }
         const qdm = iu.quote_default_material;
         if (qdm && typeof qdm === "object") {
@@ -1520,6 +1530,8 @@ export default function InternalEstimateApp() {
               materialGroups={MATERIAL_GROUPS}
               eliteProgramColors={eliteColors}
               hideRapidLinear
+              showRoomUseTax
+              projectUseTaxPercent={Math.max(0, Number(useTaxPercent) || 0)}
             />
           </section>
 

@@ -55,6 +55,16 @@ export type GuidedLayoutPreset =
 
 export type VanitySource = "Promo / Stock 100 Remnant" | "ESF Non-Stock Remnant";
 
+export type VanityKitchenTier = "kitchen_over_35" | "kitchen_under_35";
+
+export type VanitySinkType =
+  | "oval_white"
+  | "oval_bisque"
+  | "rectangular_white"
+  | "rectangular_bisque";
+
+export type RoomUseTaxMode = "inherit_project" | "none" | "percent";
+
 export type RoomDraft = {
   id: string;
   name: string;
@@ -79,6 +89,10 @@ export type RoomDraft = {
   tear: boolean;
   raised: "Yes" | "No";
   notes: string;
+  /** Per-room use tax (countertop material only). `inherit_project` uses project default %. */
+  useTaxMode?: RoomUseTaxMode;
+  useTaxPercent?: number;
+  useTaxBase?: "countertop_material";
   vanity: {
     size: string;
     source: VanitySource;
@@ -86,6 +100,16 @@ export type RoomDraft = {
     qty: number;
     programSink: number;
     bowl: number;
+    isVanityProgram?: boolean;
+    vanityWidth?: number;
+    vanityBowlType?: "single" | "double";
+    vanityTier?: VanityKitchenTier;
+    vanityTierOverrideReason?: string;
+    vanitySinkType?: VanitySinkType;
+    vanityExtraTrips?: number;
+    vanityEligibilityNote?: string;
+    vanityProgramYear?: number;
+    outsideProgram?: boolean;
   };
 };
 
@@ -108,7 +132,26 @@ export type MeasuredRoom = {
   priceableCounter: number;
   priceableSplash: number;
   fixedTotal: number;
+  /** @deprecated use vanityProgram.tier */
   vanityTier?: "t1" | "t2";
+  vanityProgram?: {
+    programYear: number;
+    tier: VanityKitchenTier;
+    tierLabel: string;
+    tierOverrideReason?: string;
+    exactTotal: number;
+    displayTotal: number;
+    roundingMode: "nearest_5";
+    outsideProgram: boolean;
+    customerNote: string;
+    label?: string;
+  };
+  useTax?: {
+    percent: number;
+    baseCountertopMaterial: number;
+    taxAmount: number;
+    applied: boolean;
+  };
 };
 
 export type RoomEngineTotals = {

@@ -1,8 +1,28 @@
 import React from "react";
-import type { EliteProgramColorRow, GuidedLayoutPreset, GuidedPiece, RoomCalcMode, RoomDraft } from "../lib/quoteTypes";
-import { ADDON_CATALOG, VANITY_PRICING, createEstimatorRoom, newId, roomEditorDomId } from "../lib/prototypeQuoteMath";
+import type {
+  EliteProgramColorRow,
+  GuidedLayoutPreset,
+  GuidedPiece,
+  RoomCalcMode,
+  RoomDraft,
+  RoomUseTaxMode,
+  VanityKitchenTier,
+  VanitySinkType
+} from "../lib/quoteTypes";
+import {
+  ADDON_CATALOG,
+  createEstimatorRoom,
+  defaultVanityKitchenTier,
+  newId,
+  priceVanityRoomDraft,
+  resolveRoomUseTaxPercent,
+  roomEditorDomId,
+  VANITY_PRICING
+} from "../lib/prototypeQuoteMath";
+import { VANITY_PROGRAM_2026_RATES, VANITY_PROGRAM_YEAR } from "../lib/vanityProgram2026";
 import {
   depthPatchForGuidedPieceTypeChange,
+  qualifyingSfFromRoomDrafts,
   sfFromGuidedPiece,
   STANDARD_BACKSPLASH_HEIGHT_IN,
   STANDARD_COUNTER_DEPTH_IN
@@ -16,6 +36,10 @@ type Props = {
   eliteProgramColors?: EliteProgramColorRow[];
   /** Internal Estimate Head: hide rapid linear path (spec — not offered in this head). */
   hideRapidLinear?: boolean;
+  /** Project default use tax % for rooms with inherit_project. */
+  projectUseTaxPercent?: number;
+  /** Show per-room use tax controls (Internal Estimate). */
+  showRoomUseTax?: boolean;
 };
 
 function updateRoom(rooms: RoomDraft[], id: string, patch: Partial<RoomDraft>): RoomDraft[] {
@@ -99,7 +123,9 @@ export default function RoomScopeBuilder({
   onRoomsChange,
   materialGroups,
   eliteProgramColors,
-  hideRapidLinear = false
+  hideRapidLinear = false,
+  projectUseTaxPercent = 0,
+  showRoomUseTax = false
 }: Props) {
   const [colorQ, setColorQ] = React.useState<Record<string, string>>({});
   const [groupFilter, setGroupFilter] = React.useState<Record<string, string>>({});
@@ -349,20 +375,34 @@ export default function RoomScopeBuilder({
 
             {room.roomType === "Vanity" ? (
               <div className="room-vanity-block">
-                <p className="muted small">Vanity program — Promo/Stock vs ESF Non-Stock paths (prototype v1.01).</p>
+                <p className="muted small">
+                  2026 Vanity Program — 22.5″ standard depth. PROMO / Elite 100 remnants. Customer display rounds to nearest $5.
+                </p>
                 <div className="grid3">
                   <label>
                     Vanity size
                     <select
                       value={room.vanity.size}
-                      onChange={(e) =>
-                        onRoomsChange(updateRoomNested(rooms, room.id, "vanity", { ...room.vanity, size: e.target.value }))
-                      }
+                      onChange={(e) => {
+                        const code = e.target.value;
+                        const row = VANITY_PROGRAM_2026_RATES.find((r) => r.code === code);
+                        onRoomsChange(
+                          updateRoomNested(rooms, room.id, "vanity", {
+                            ...room.vanity,
+                            size: code,
+                            isVanityProgram: true,
+                            vanityProgramYear: VANITY_PROGRAM_YEAR,
+                            vanityWidth: row?.widthIn,
+                            vanityBowlType: row?.bowlCount === 2 ? "double" : "single",
+                            source: "Promo / Stock 100 Remnant"
+                          })
+                        );
+                      }}
                     >
                       <option value="none">— Select —</option>
-                      {Object.keys(VANITY_PRICING).map((k) => (
-                        <option key={k} value={k}>
-                          {VANITY_PRICING[k].name}
+                      {VANITY_PROGRAM_2026_RATES.map((r) => (
+                        <option key={r.code} value={r.code}>
+                          {r.label}
                         </option>
                       ))}
                     </select>
@@ -380,8 +420,8 @@ export default function RoomScopeBuilder({
                         )
                       }
                     >
-                      <option value="Promo / Stock 100 Remnant">Promo / Stock 100 Remnant</option>
-                      <option value="ESF Non-Stock Remnant">ESF Non-Stock Remnant</option>
+                      <option value="Promo / Stock 100 Remnant">2026 Vanity Program (Promo / Elite 100)</option>
+                      <option value="ESF Non-Stock Remnant">ESF Non-Stock Remnant (legacy)</option>
                     </select>
                   </label>
                   <label>
@@ -397,49 +437,140 @@ export default function RoomScopeBuilder({
                       }
                     />
                   </label>
-                  <label>
-                    Depth (in) — non-stock
-                    <input
-                      type="number"
-                      value={room.vanity.depth}
-                      onChange={(e) =>
-                        onRoomsChange(
-                          updateRoomNested(rooms, room.id, "vanity", { ...room.vanity, depth: Number(e.target.value) || 0 })
-                        )
-                      }
-                    />
-                  </label>
-                  <label>
-                    Program sink upgrade ($)
-                    <input
-                      type="number"
-                      value={room.vanity.programSink}
-                      onChange={(e) =>
-                        onRoomsChange(
-                          updateRoomNested(rooms, room.id, "vanity", {
-                            ...room.vanity,
-                            programSink: Number(e.target.value) || 0
-                          })
-                        )
-                      }
-                    />
-                  </label>
-                  <label>
-                    Bowl option (non-stock)
-                    <select
-                      value={String(room.vanity.bowl)}
-                      onChange={(e) =>
-                        onRoomsChange(
-                          updateRoomNested(rooms, room.id, "vanity", { ...room.vanity, bowl: Number(e.target.value) })
-                        )
-                      }
-                    >
-                      <option value="0">No / partner provided ($0)</option>
-                      <option value="35">Oval ($35)</option>
-                      <option value="55">Rectangle ($55 + $25 rect.)</option>
-                    </select>
-                  </label>
+                  {room.vanity.source === "Promo / Stock 100 Remnant" ? (
+                    <>
+                      <label>
+                        Kitchen tier
+                        <select
+                          value={room.vanity.vanityTier ?? defaultVanityKitchenTier(qualifyingSfFromRoomDrafts(rooms))}
+                          onChange={(e) =>
+                            onRoomsChange(
+                              updateRoomNested(rooms, room.id, "vanity", {
+                                ...room.vanity,
+                                vanityTier: e.target.value as VanityKitchenTier
+                              })
+                            )
+                          }
+                        >
+                          <option value="kitchen_over_35">Kitchen tops ≥ 35 sf</option>
+                          <option value="kitchen_under_35">Kitchen tops &lt; 35 sf</option>
+                        </select>
+                      </label>
+                      <label>
+                        Tier override note
+                        <input
+                          value={room.vanity.vanityTierOverrideReason ?? ""}
+                          placeholder="e.g. Template/install with kitchen"
+                          onChange={(e) =>
+                            onRoomsChange(
+                              updateRoomNested(rooms, room.id, "vanity", {
+                                ...room.vanity,
+                                vanityTierOverrideReason: e.target.value
+                              })
+                            )
+                          }
+                        />
+                      </label>
+                      <label>
+                        Sink package
+                        <select
+                          value={room.vanity.vanitySinkType ?? "oval_white"}
+                          onChange={(e) =>
+                            onRoomsChange(
+                              updateRoomNested(rooms, room.id, "vanity", {
+                                ...room.vanity,
+                                vanitySinkType: e.target.value as VanitySinkType
+                              })
+                            )
+                          }
+                        >
+                          <option value="oval_white">White oval (included)</option>
+                          <option value="oval_bisque">Bisque oval (+$10/sink)</option>
+                          <option value="rectangular_white">Rectangular white (+$25/sink)</option>
+                          <option value="rectangular_bisque">Rectangular bisque (+$25/sink)</option>
+                        </select>
+                      </label>
+                      <label>
+                        Extra template/install trips
+                        <input
+                          type="number"
+                          min={0}
+                          value={room.vanity.vanityExtraTrips ?? 0}
+                          onChange={(e) =>
+                            onRoomsChange(
+                              updateRoomNested(rooms, room.id, "vanity", {
+                                ...room.vanity,
+                                vanityExtraTrips: Math.max(0, Math.floor(Number(e.target.value) || 0))
+                              })
+                            )
+                          }
+                        />
+                      </label>
+                      <label className="ie-check-row" style={{ gridColumn: "1 / -1" }}>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(room.vanity.outsideProgram)}
+                          onChange={(e) =>
+                            onRoomsChange(
+                              updateRoomNested(rooms, room.id, "vanity", {
+                                ...room.vanity,
+                                outsideProgram: e.target.checked
+                              })
+                            )
+                          }
+                        />
+                        Quote outside vanity program (material purchase required)
+                      </label>
+                    </>
+                  ) : (
+                    <>
+                      <label>
+                        Depth (in)
+                        <input
+                          type="number"
+                          value={room.vanity.depth}
+                          onChange={(e) =>
+                            onRoomsChange(
+                              updateRoomNested(rooms, room.id, "vanity", {
+                                ...room.vanity,
+                                depth: Number(e.target.value) || 22.5
+                              })
+                            )
+                          }
+                        />
+                      </label>
+                      <label>
+                        Bowl option (non-stock)
+                        <select
+                          value={String(room.vanity.bowl)}
+                          onChange={(e) =>
+                            onRoomsChange(
+                              updateRoomNested(rooms, room.id, "vanity", { ...room.vanity, bowl: Number(e.target.value) })
+                            )
+                          }
+                        >
+                          <option value="0">No / partner provided ($0)</option>
+                          <option value="35">Oval ($35)</option>
+                          <option value="55">Rectangle ($55 + $25 rect.)</option>
+                        </select>
+                      </label>
+                    </>
+                  )}
                 </div>
+                {room.vanity.size !== "none" && room.vanity.source === "Promo / Stock 100 Remnant" ? (
+                  <p className="muted small" style={{ marginTop: 8 }}>
+                    {(() => {
+                      const priced = priceVanityRoomDraft(room, qualifyingSfFromRoomDrafts(rooms));
+                      if (!priced) return null;
+                      return (
+                        <>
+                          Program estimate: <strong>${priced.exactTotal.toFixed(2)}</strong> exact ·{" "}
+                          <strong>${priced.displayTotal.toLocaleString()}</strong> customer ($5 rounding) · {priced.tierLabel}
+                        </>
+                      );
+                    })()}
+                  </p>
+                ) : null}
               </div>
             ) : (
               <>
@@ -850,6 +981,64 @@ export default function RoomScopeBuilder({
                 </label>
               </>
             )}
+
+            {showRoomUseTax && room.roomType !== "Vanity" ? (
+              <div className="room-use-tax-block" style={{ marginTop: 12 }}>
+                <p className="muted small" style={{ margin: "0 0 8px" }}>
+                  Use tax applies to <strong>countertop material in this room only</strong> (folded into customer material amount).
+                </p>
+                <div className="grid3">
+                  <label>
+                    Use tax
+                    <select
+                      value={room.useTaxMode ?? "inherit_project"}
+                      onChange={(e) => {
+                        const mode = e.target.value as RoomUseTaxMode;
+                        onRoomsChange(
+                          updateRoom(rooms, room.id, {
+                            useTaxMode: mode,
+                            useTaxPercent:
+                              mode === "percent"
+                                ? room.useTaxPercent ?? projectUseTaxPercent
+                                : room.useTaxPercent
+                          })
+                        );
+                      }}
+                    >
+                      <option value="inherit_project">
+                        Inherit project default ({projectUseTaxPercent}%)
+                      </option>
+                      <option value="none">None</option>
+                      <option value="percent">Custom for this room</option>
+                    </select>
+                  </label>
+                  {room.useTaxMode === "percent" ? (
+                    <label>
+                      Room %
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.1}
+                        value={room.useTaxPercent ?? 0}
+                        onChange={(e) =>
+                          onRoomsChange(
+                            updateRoom(rooms, room.id, {
+                              useTaxMode: "percent",
+                              useTaxPercent: Math.max(0, Number(e.target.value) || 0)
+                            })
+                          )
+                        }
+                      />
+                    </label>
+                  ) : (
+                    <label>
+                      Effective %
+                      <input type="text" readOnly value={`${resolveRoomUseTaxPercent(room, projectUseTaxPercent)}%`} />
+                    </label>
+                  )}
+                </div>
+              </div>
+            ) : null}
 
             <div className="room-summary-bar muted small">
               Preview sf — counter: <strong>{prev.counter}</strong> · splash+FHB: <strong>{prev.splashFhb}</strong> · total:{" "}

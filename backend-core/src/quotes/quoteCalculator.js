@@ -10,6 +10,8 @@
  * - Callers must not trust client-supplied totals; use returned numbers only.
  */
 
+import { priceVanityProgram2026FromPayload, VANITY_PROGRAM_YEAR } from "./vanityProgram2026.js";
+
 const MIN_PUBLIC_RETAIL_MARKUP = 25;
 
 /** 25% public planning markup on top of Direct unit economics (material $/sf, add-ons, vanities). */
@@ -107,6 +109,7 @@ export function normalizePrototypeQuoteInput(input) {
     },
     addOns: typeof src.addOns === "object" && src.addOns ? { ...src.addOns } : {},
     rooms: Array.isArray(src.rooms) ? src.rooms : [],
+    vanities: Array.isArray(src.vanities) ? src.vanities : [],
     retailMarkupPercent:
       String(src.quoteSource || src.quote_source || "") === "internal_quote"
         ? 0
@@ -275,6 +278,15 @@ function resolveMaterialForPiece(room, piece, input) {
 /**
  * @param {ReturnType<typeof normalizePrototypeQuoteInput>} input
  */
+function qualifyingKitchenCounterSfFromInput(input) {
+  let sf = 0;
+  for (const room of input.rooms || []) {
+    if (String(room.roomType || room.room_type || "").toLowerCase() === "vanity") continue;
+    sf += Number(room.countertopSqft ?? room.countertop_sqft) || 0;
+  }
+  return round2(sf);
+}
+
 function enumerateRoomMaterialSfRows(input) {
   /** @type {Array<{ roomName: string, pieceLabel: string, group: string, color: unknown, supplier: unknown, materialType: unknown, sf: number, isSplash: boolean }>} */
   const rows = [];
@@ -421,14 +433,39 @@ export function calculateAddOns(input, rules) {
  * @param {Record<string, unknown>} input
  * @param {ReadonlyArray<Record<string, unknown>>} rules
  */
+function resolveRoomUseTaxPercentFromRow(room, projectDefaultPercent) {
+  const mode = String(room.useTaxMode ?? room.use_tax_mode ?? "inherit_project");
+  if (mode === "none") return 0;
+  if (mode === "percent") return Math.max(0, Number(room.useTaxPercent ?? room.use_tax_percent) || 0);
+  return Math.max(0, Number(projectDefaultPercent) || 0);
+}
+
 export function calculateVanities(input, rules) {
   const vanities = Array.isArray(input.vanities) ? input.vanities : [];
   const lines = [];
   let total = 0;
+  const qualifyingSf = Number(input.qualifyingKitchenCounterSf ?? input.qualifying_kitchen_counter_sf ?? 0) || 0;
   for (const v of vanities) {
     const code = String(v.code || v.sizeCode || "").trim();
     const qty = Number(v.qty) || 0;
     if (!code || qty <= 0) continue;
+    const programYear = Number(v.programYear ?? v.vanityProgramYear) || 0;
+    if (programYear === VANITY_PROGRAM_YEAR || v.vanityProgramYear === VANITY_PROGRAM_YEAR) {
+      const priced = priceVanityProgram2026FromPayload(v, qualifyingSf);
+      if (priced) {
+        const lineSubtotal = Number(priced.exactTotal) || 0;
+        total += lineSubtotal;
+        lines.push({
+          item_code: code,
+          item_name: String(priced.label || code),
+          quantity: qty,
+          unit_price: round2(lineSubtotal / qty),
+          line_subtotal: lineSubtotal,
+          vanity_program: priced
+        });
+        continue;
+      }
+    }
     const rule = (rules || []).find((r) => String(r.category) === "vanity" && String(r.item_code) === code);
     const tier1 = Boolean(v.tier1Eligible ?? v.lowerTier);
     const unit = rule != null ? Number(tier1 ? rule.base_cost ?? rule.price : rule.price) || 0 : 0;
@@ -436,7 +473,7 @@ export function calculateVanities(input, rules) {
     total += lineSubtotal;
     lines.push({ item_code: code, item_name: String(rule?.item_name || code), quantity: qty, unit_price: unit, line_subtotal: lineSubtotal });
   }
-  return { total, lines };
+  return { total: round2(total), lines };
 }
 
 /**
@@ -575,9 +612,27 @@ function sumRoomsWholesale(input, rules) {
   }
   const addOnPart = calculateAddOns({ addOns: input.addOns || {} }, rules);
   let useTaxAmount = 0;
-  const useTaxPercent = Number(input.useTaxPercent) || 0;
-  if (useTaxPercent > 0 && String(input.quoteSource) === "internal_quote") {
-    useTaxAmount = round2(countertopMaterialDollars * (useTaxPercent / 100));
+  const projectUseTaxPercent = Number(input.useTaxPercent) || 0;
+  const roomTaxByRoom = [];
+  if (String(input.quoteSource) === "internal_quote") {
+    const taxByRoomName = new Map();
+    for (const row of rows) {
+      if (row.isSplash) continue;
+      const roomInput = (input.rooms || []).find(
+        (r) => String(r.name || r.room_name || "").trim() === row.roomName
+      );
+      if (!roomInput) continue;
+      const pct = resolveRoomUseTaxPercentFromRow(roomInput, projectUseTaxPercent);
+      if (pct <= 0) continue;
+      const prev = taxByRoomName.get(row.roomName) || { base: 0, pct };
+      prev.base = round2(prev.base + row.sf * materialRateForQuote(input, row.group, rules));
+      taxByRoomName.set(row.roomName, prev);
+    }
+    for (const [roomName, { base, pct }] of taxByRoomName) {
+      const tax = round2(base * (pct / 100));
+      useTaxAmount = round2(useTaxAmount + tax);
+      roomTaxByRoom.push({ roomName, percent: pct, baseCountertopMaterial: base, taxAmount: tax });
+    }
     materialDollars += useTaxAmount;
   }
   return {
@@ -587,7 +642,8 @@ function sumRoomsWholesale(input, rules) {
     materialBreakdown,
     addOnPart,
     useTaxAmount,
-    useTaxPercent: useTaxPercent > 0 ? useTaxPercent : null,
+    useTaxPercent: useTaxAmount > 0 ? projectUseTaxPercent : null,
+    roomUseTax: roomTaxByRoom,
     wholesale: round2(materialDollars + addOnPart.total)
   };
 }
@@ -777,9 +833,11 @@ export async function calculateQuote(rawInput, pricingContext = {}) {
       detail = { kind: "legacy", ...leg, isPublicPlanning: true };
     }
   } else if (input.engine === "rooms" && input.rooms.length) {
+    input.qualifyingKitchenCounterSf = qualifyingKitchenCounterSfFromInput(input);
     const agg = sumRoomsWholesale(input, rules);
-    wholesale = agg.wholesale;
-    detail = { kind: "rooms", ...agg };
+    const vanityPart = calculateVanities(input, rules);
+    wholesale = round2(agg.wholesale + vanityPart.total);
+    detail = { kind: "rooms", ...agg, vanityPart };
   } else {
     const leg = legacyWholesale(input, rules);
     wholesale = leg.wholesale;

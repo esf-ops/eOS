@@ -15,14 +15,21 @@ import {
 } from "../backend-core/src/quotes/quoteCalculator.js";
 import { guidedCornerOverlapDeductionSf, guidedCornerOverlapSqft, round2 } from "../app-quote/src/lib/measurementEngine.ts";
 import {
+  priceVanityProgram2026,
+  roundCustomerDisplayVanity
+} from "../app-quote/src/lib/vanityProgram2026.ts";
+import {
   buildCustomerRoomAreaCostBreakdown,
   buildSelectedMaterialBreakdown,
   calculateAllRoomDrafts,
   createDefaultRoom,
+  createVanityRoom,
   hydrateCustomerRoomAreaBreakdown,
   hydrateRoomDraftsFromInternalUi,
   mergeRoomDraftsIntoGlobalAddOns,
   measureRoomDraft,
+  priceVanityRoomDraft,
+  resolveRoomUseTaxPercent,
   runLocalPrototypeQuote,
   serializeCustomerRoomAreaBreakdown,
   serializeRoomDraftsForInternalUi,
@@ -98,30 +105,26 @@ function approx(a: number, b: number, eps = 0.02) {
   approx(guidedCornerOverlapDeductionSf(uRoom), round2(overlapOne * 2));
 }
 
-// Use tax 5% on 10 sf Promo @ $45/sf → $472.50 countertop material
+// Room-level use tax: Kitchen 5% on 10 sf Promo @ $45/sf → $472.50 material in Kitchen only
 {
-  const taxBd = buildSelectedMaterialBreakdown(
-    [{ ...createDefaultRoom("Group Promo"), calcMode: "Manual Sq Ft", direct: { counter: 10, splash: 0 } }],
-    "wholesale",
-    { useTaxPercent: 5 }
-  );
-  approx(taxBd.totals.useTax?.baseCountertopMaterial ?? 0, 450);
+  const kitchen = createDefaultRoom("Group Promo");
+  kitchen.name = "Kitchen";
+  kitchen.calcMode = "Manual Sq Ft";
+  kitchen.direct = { counter: 10, splash: 0 };
+  kitchen.useTaxMode = "percent";
+  kitchen.useTaxPercent = 5;
+  const bath = createDefaultRoom("Group Promo");
+  bath.name = "Primary Bath";
+  bath.calcMode = "Manual Sq Ft";
+  bath.direct = { counter: 12, splash: 0 };
+  bath.useTaxMode = "none";
+  const { rooms: measured } = calculateAllRoomDrafts([kitchen, bath], "New Construction", "wholesale", 0);
+  approx(measured[0].useTax?.taxAmount ?? 0, 22.5);
+  approx(measured[0].selected, 472.5);
+  approx(measured[1].useTax?.applied ?? false, false);
+  approx(measured[1].selected, 540);
+  const taxBd = buildSelectedMaterialBreakdown([kitchen, bath], "wholesale", { projectUseTaxPercent: 0 });
   approx(taxBd.totals.useTax?.taxAmount ?? 0, 22.5);
-  approx(taxBd.totals.countertopMaterial, 472.5);
-  const taxCalc = await calculateQuote(
-    {
-      quoteSource: "internal_quote",
-      internalMaterialBasis: "wholesale",
-      engine: "legacy",
-      materialGroup: "Group Promo",
-      areas: { countertopSqft: 10, backsplashSqft: 0 },
-      useTaxPercent: 5,
-      rooms: [],
-      addOns: {}
-    },
-    {}
-  );
-  approx(taxCalc.totals.retail, 472.5);
 }
 
 // Direct/wholesale — no public markup on internal
@@ -196,12 +199,14 @@ function approx(a: number, b: number, eps = 0.02) {
   room.name = "Kitchen";
   room.calcMode = "Manual Sq Ft";
   room.direct = { counter: 10, splash: 0 };
-  const { rooms: measured } = calculateAllRoomDrafts([room], "New Construction", "wholesale", 5);
+  room.useTaxMode = "percent";
+  room.useTaxPercent = 5;
+  const { rooms: measured } = calculateAllRoomDrafts([room], "New Construction", "wholesale", 0);
   const bd = buildCustomerRoomAreaCostBreakdown({
     roomDrafts: [room],
     measuredRooms: measured,
     materialBasis: "wholesale",
-    useTaxPercent: 5,
+    projectUseTaxPercent: 0,
     customLines: []
   });
   approx(bd.rooms[0]?.materialAmountExact ?? 0, 472.5);
@@ -259,6 +264,36 @@ function approx(a: number, b: number, eps = 0.02) {
   const again = hydrateCustomerRoomAreaBreakdown(snap, () => built);
   assert.equal(again.rooms[0]?.displayName, "Pantry");
   approx(again.projectTotalExact, built.projectTotalExact);
+}
+
+// 2026 Vanity Program rates
+{
+  approx(priceVanityProgram2026({ sizeCode: "25_S", tier: "kitchen_over_35" })?.exactTotal ?? 0, 190);
+  approx(priceVanityProgram2026({ sizeCode: "25_S", tier: "kitchen_under_35" })?.exactTotal ?? 0, 370);
+  approx(priceVanityProgram2026({ sizeCode: "61_D", tier: "kitchen_over_35" })?.exactTotal ?? 0, 410);
+  approx(priceVanityProgram2026({ sizeCode: "61_D", tier: "kitchen_under_35" })?.exactTotal ?? 0, 700);
+  approx(priceVanityProgram2026({ sizeCode: "120_D", tier: "kitchen_under_35" })?.exactTotal ?? 0, 1150);
+  approx(
+    priceVanityProgram2026({ sizeCode: "25_S", tier: "kitchen_over_35", sinkType: "rectangular_white" })?.exactTotal ?? 0,
+    215
+  );
+  approx(
+    priceVanityProgram2026({ sizeCode: "25_S", tier: "kitchen_over_35", sinkType: "oval_bisque" })?.exactTotal ?? 0,
+    200
+  );
+  approx(
+    priceVanityProgram2026({ sizeCode: "61_D", tier: "kitchen_over_35", sinkType: "rectangular_white" })?.exactTotal ?? 0,
+    460
+  );
+  approx(priceVanityProgram2026({ sizeCode: "25_S", tier: "kitchen_over_35", extraTrips: 1 })?.exactTotal ?? 0, 340);
+  assert.equal(roundCustomerDisplayVanity(192), 190);
+  assert.equal(roundCustomerDisplayVanity(193), 195);
+  const vRoom = createVanityRoom("Group Promo");
+  vRoom.vanity.size = "61_D";
+  vRoom.vanity.vanityTier = "kitchen_over_35";
+  const priced = priceVanityRoomDraft(vRoom, 40);
+  approx(priced?.exactTotal ?? 0, 410);
+  assert.equal(priced?.displayTotal, 410);
 }
 
 console.log("verify-internal-estimate-beta-fixes: OK");

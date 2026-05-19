@@ -1,6 +1,7 @@
 import React from "react";
 import { EOS_LOGO_URL } from "@quote-lib/config";
 import { round2 } from "@quote-lib/measurementEngine";
+import { roundCustomerDisplayVanity } from "@quote-lib/prototypeQuoteMath";
 import type {
   CustomerRoomAreaCostBreakdown,
   InternalEstimateGroupComparisonRow,
@@ -164,14 +165,19 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
 
   const roomBd = props.roomAreaBreakdown;
   const roomRows = roomBd?.rooms ?? [];
-  const roomBreakdownWeights = roomRows.map((r) => r.roomTotalExact);
   const unassignedExact = roomBd?.unassignedCustomerCustomExact ?? 0;
-  const roomBreakdownWeightAll =
-    unassignedExact > 0 ? [...roomBreakdownWeights, unassignedExact] : roomBreakdownWeights;
-  const roomBreakdownDisplayParts = allocateCustomerDisplayTens(roomBreakdownWeightAll, finalRounded);
-  const roomBreakdownDisplays = roomRows.map((_, i) => roomBreakdownDisplayParts[i] ?? 0);
-  const unassignedDisplay =
-    unassignedExact > 0 ? roomBreakdownDisplayParts[roomBreakdownDisplayParts.length - 1] ?? 0 : 0;
+  const vanityExactSum = roomRows.filter((r) => r.isVanity).reduce((s, r) => s + r.roomTotalExact, 0);
+  const vanityDisplaySum = roomRows
+    .filter((r) => r.isVanity)
+    .reduce((s, r) => s + roundCustomerDisplayVanity(r.roomTotalExact), 0);
+  const nonVanityExacts = roomRows.filter((r) => !r.isVanity).map((r) => r.roomTotalExact);
+  const targetNonVanityDisplay = Math.max(0, finalRounded - vanityDisplaySum - (unassignedExact > 0 ? roundCustomerDisplay(unassignedExact) : 0));
+  const nonVanityDisplays = allocateCustomerDisplayTens(nonVanityExacts, targetNonVanityDisplay);
+  let nvIdx = 0;
+  const roomBreakdownDisplays = roomRows.map((r) =>
+    r.isVanity ? roundCustomerDisplayVanity(r.roomTotalExact) : nonVanityDisplays[nvIdx++] ?? 0
+  );
+  const unassignedDisplay = unassignedExact > 0 ? roundCustomerDisplay(unassignedExact) : 0;
   const showRoomBreakdown = roomRows.length > 0;
 
   return (
@@ -337,7 +343,13 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
                       <td>
                         <strong>{row.displayName}</strong>
                         {row.isVanity ? (
-                          <span className="cep-muted-inline"> · Vanity</span>
+                          <span className="cep-muted-inline">
+                            {" "}
+                            · Vanity program
+                            {props.measuredRooms.find((m) => m.id === row.roomId)?.vanityProgram?.label
+                              ? ` · ${props.measuredRooms.find((m) => m.id === row.roomId)?.vanityProgram?.label}`
+                              : ""}
+                          </span>
                         ) : (
                           <span className="cep-muted-inline">
                             {" "}

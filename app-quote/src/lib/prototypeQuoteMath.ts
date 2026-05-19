@@ -4,8 +4,25 @@
  */
 
 import type { DemoLineItem } from "./demoFallback";
-import type { GuidedPiece, MathCheckSnapshot, MeasuredRoom, PieceShape, RoomDraft, RoomEngineTotals } from "./quoteTypes";
+import type {
+  GuidedPiece,
+  MathCheckSnapshot,
+  MeasuredRoom,
+  PieceShape,
+  RoomDraft,
+  RoomEngineTotals,
+  VanityKitchenTier,
+  VanitySinkType
+} from "./quoteTypes";
 import type { QuoteWorkflowMethod } from "./quoteTypes";
+import {
+  defaultVanityKitchenTier,
+  legacySinkTypeFromVanityFields,
+  priceVanityProgram2026,
+  vanityProgramRateRow,
+  VANITY_PROGRAM_YEAR,
+  type VanityProgram2026Result
+} from "./vanityProgram2026";
 import {
   guidedCornerOverlapDeductionSf,
   qualifyingSfFromRoomDrafts,
@@ -17,6 +34,12 @@ import {
   sumGuidedPiecesByType
 } from "./measurementEngine";
 
+export {
+  defaultVanityKitchenTier,
+  roundCustomerDisplayVanity,
+  VANITY_PROGRAM_2026_RATES,
+  VANITY_PROGRAM_YEAR
+} from "./vanityProgram2026";
 export const VANITY_TIER_THRESHOLD_SQFT = 35;
 
 /** ESF Direct $/sqft by tier — public consumer planning uses this × (1 + planning markup %). */
@@ -141,6 +164,77 @@ function totalFhbScopeSfForOutletCharges(room: RoomDraft): number {
  * (`PROTOTYPE_ADDON_UNIT_PRICES` / `calculateAddOns`). Keeps internal calculate/save payloads aligned
  * with live `measureRoomDraft` room extras when `applyGlobalAddOns` is false in the preview runner.
  */
+/** Resolve use tax % for a room (countertop material only). */
+export function resolveRoomUseTaxPercent(room: RoomDraft, projectDefaultPercent: number): number {
+  const mode = room.useTaxMode ?? "inherit_project";
+  if (mode === "none") return 0;
+  if (mode === "percent") return Math.max(0, Number(room.useTaxPercent) || 0);
+  return Math.max(0, Number(projectDefaultPercent) || 0);
+}
+
+function useVanityProgram2026(room: RoomDraft): boolean {
+  if (room.roomType !== "Vanity") return false;
+  if (room.vanity.source !== "Promo / Stock 100 Remnant") return false;
+  if (room.vanity.outsideProgram) return false;
+  const year = Number(room.vanity.vanityProgramYear) || VANITY_PROGRAM_YEAR;
+  return year === VANITY_PROGRAM_YEAR && room.vanity.isVanityProgram !== false;
+}
+
+function resolveVanitySinkType(room: RoomDraft, bowlCount: 1 | 2): VanitySinkType {
+  if (room.vanity.vanitySinkType) return room.vanity.vanitySinkType;
+  return legacySinkTypeFromVanityFields(Number(room.vanity.programSink) || 0, Number(room.vanity.bowl) || 0, bowlCount);
+}
+
+export function priceVanityRoomDraft(room: RoomDraft, qualifyingKitchenCounterSf: number): VanityProgram2026Result | null {
+  const sk = room.vanity.size;
+  if (sk === "none" || !sk) return null;
+  const row = vanityProgramRateRow(sk);
+  if (!row) return null;
+  const tier =
+    room.vanity.vanityTier === "kitchen_over_35" || room.vanity.vanityTier === "kitchen_under_35"
+      ? room.vanity.vanityTier
+      : defaultVanityKitchenTier(qualifyingKitchenCounterSf);
+  return priceVanityProgram2026({
+    sizeCode: sk,
+    qty: room.vanity.qty,
+    depthIn: room.vanity.depth,
+    tier,
+    tierOverrideReason: room.vanity.vanityTierOverrideReason,
+    sinkType: resolveVanitySinkType(room, row.bowlCount),
+    extraTrips: room.vanity.vanityExtraTrips,
+    outsideProgram: room.vanity.outsideProgram,
+    qualifyingKitchenCounterSf
+  });
+}
+
+/** Backend `vanities[]` payload for internal calculate/save. */
+export function serializeVanitiesForApi(rooms: RoomDraft[], qualifyingKitchenCounterSf: number): Array<Record<string, unknown>> {
+  const out: Array<Record<string, unknown>> = [];
+  for (const r of rooms) {
+    if (r.roomType !== "Vanity") continue;
+    const sk = r.vanity.size;
+    if (!sk || sk === "none") continue;
+    const priced = priceVanityRoomDraft(r, qualifyingKitchenCounterSf);
+    const row = vanityProgramRateRow(sk);
+    out.push({
+      code: sk,
+      sizeCode: sk,
+      qty: Math.max(1, Math.floor(Number(r.vanity.qty) || 1)),
+      programYear: VANITY_PROGRAM_YEAR,
+      vanityProgramYear: VANITY_PROGRAM_YEAR,
+      tier: priced?.tier ?? defaultVanityKitchenTier(qualifyingKitchenCounterSf),
+      tier1Eligible: (priced?.tier ?? defaultVanityKitchenTier(qualifyingKitchenCounterSf)) === "kitchen_over_35",
+      sinkType: priced ? resolveVanitySinkType(r, row?.bowlCount ?? 1) : "oval_white",
+      extraTrips: Math.max(0, Math.floor(Number(r.vanity.vanityExtraTrips) || 0)),
+      outsideProgram: Boolean(r.vanity.outsideProgram),
+      roomName: r.name,
+      exactTotal: priced?.exactTotal ?? 0,
+      displayTotal: priced?.displayTotal ?? 0
+    });
+  }
+  return out;
+}
+
 export function mergeRoomDraftsIntoGlobalAddOns(rooms: RoomDraft[]): Record<string, number> {
   const acc: Record<string, number> = {};
   for (const room of rooms) {
@@ -167,7 +261,7 @@ export function measureRoomDraft(
   room: RoomDraft,
   qualifyingSf: number,
   materialBasis: "wholesale" | "direct" = "wholesale",
-  useTaxPercent = 0
+  projectUseTaxPercent = 0
 ): MeasuredRoom {
   const group = String(room.materialGroup || "Group Promo").trim();
   const rate = materialRateForInternalBasis(group, materialBasis);
@@ -188,10 +282,34 @@ export function measureRoomDraft(
 
   if (room.notes.trim()) details.push(`Room note: ${room.notes.trim()}`);
 
+  let roomUseTax: MeasuredRoom["useTax"];
+
   if (room.roomType === "Vanity") {
     const sk = room.vanity.size;
     const q = Math.max(1, Math.floor(room.vanity.qty) || 1);
-    if (sk !== "none" && VANITY_PRICING[sk]) {
+    let vanityProgram: VanityProgram2026Result | null = null;
+    if (sk !== "none" && useVanityProgram2026(room)) {
+      vanityProgram = priceVanityRoomDraft(room, qualifyingSf);
+      if (vanityProgram) {
+        vanityTier = vanityProgram.tier === "kitchen_over_35" ? "t1" : "t2";
+        selected = vanityProgram.exactTotal;
+        vanityTotal = selected;
+        fixedTotal = selected;
+        const tierNote = vanityProgram.tierOverrideReason
+          ? `${vanityProgram.tierLabel} (override: ${vanityProgram.tierOverrideReason})`
+          : vanityProgram.tierLabel;
+        details.push(`${vanityProgram.label}: ${tierNote} × ${q} = $${selected.toFixed(2)}`);
+        if (vanityProgram.sinkUpgradeTotal > 0) {
+          details.push(`Sink upgrade: +$${vanityProgram.sinkUpgradeTotal.toFixed(2)}`);
+        }
+        if (vanityProgram.extraTripsTotal > 0) {
+          details.push(`Extra template/install trips × ${vanityProgram.extraTrips}: +$${vanityProgram.extraTripsTotal.toFixed(2)}`);
+        }
+        if (vanityProgram.outsideProgram) {
+          notes.push("Quoted outside vanity program — confirm material purchase with customer.");
+        }
+      }
+    } else if (sk !== "none" && VANITY_PRICING[sk]) {
       const data = VANITY_PRICING[sk];
       if (room.vanity.source === "Promo / Stock 100 Remnant") {
         const lowerTier = qualifyingSf >= VANITY_TIER_THRESHOLD_SQFT;
@@ -238,7 +356,21 @@ export function measureRoomDraft(
       priceableCounter: 0,
       priceableSplash: 0,
       fixedTotal: round2(fixedTotal),
-      vanityTier
+      vanityTier,
+      vanityProgram: vanityProgram
+        ? {
+            programYear: vanityProgram.programYear,
+            tier: vanityProgram.tier,
+            tierLabel: vanityProgram.tierLabel,
+            tierOverrideReason: vanityProgram.tierOverrideReason,
+            exactTotal: vanityProgram.exactTotal,
+            displayTotal: vanityProgram.displayTotal,
+            roundingMode: vanityProgram.roundingMode,
+            outsideProgram: vanityProgram.outsideProgram,
+            customerNote: vanityProgram.customerNote,
+            label: vanityProgram.label
+          }
+        : undefined
     };
   }
 
@@ -307,10 +439,15 @@ export function measureRoomDraft(
   extras += add.extras;
   details.push(...add.lines);
 
-  /** Scoped material $ matches customer Quoted Material Breakdown (piece-level groups). */
-  const scopedMaterialDollars = buildSelectedMaterialBreakdown([room], materialBasis, {
-    useTaxPercent: Number(useTaxPercent) || 0
-  }).totals.materialSubtotal;
+  const roomTaxPct = resolveRoomUseTaxPercent(room, projectUseTaxPercent);
+  const materialNoTax = buildSelectedMaterialBreakdownCore([room], materialBasis);
+  let scopedMaterialDollars = materialNoTax.totals.materialSubtotal;
+  if (roomTaxPct > 0) {
+    const ctBase = materialNoTax.totals.countertopMaterial;
+    const taxAmount = round2(ctBase * (roomTaxPct / 100));
+    scopedMaterialDollars = round2(scopedMaterialDollars + taxAmount);
+    roomUseTax = { percent: roomTaxPct, baseCountertopMaterial: ctBase, taxAmount, applied: true };
+  }
   selected = round2(scopedMaterialDollars + extras);
   priceableCounter = counter;
   priceableSplash = splash + fhb;
@@ -336,7 +473,8 @@ export function measureRoomDraft(
     priceableCounter: round2(priceableCounter),
     priceableSplash: round2(priceableSplash),
     fixedTotal: round2(fixedTotal),
-    vanityTier
+    vanityTier,
+    useTax: roomUseTax
   };
 }
 
@@ -344,10 +482,10 @@ export function calculateAllRoomDrafts(
   rooms: RoomDraft[],
   projectType: string,
   materialBasis: "wholesale" | "direct" = "wholesale",
-  useTaxPercent = 0
+  projectUseTaxPercent = 0
 ): { rooms: MeasuredRoom[]; totals: RoomEngineTotals } {
   const qualifyingSf = qualifyingSfFromRoomDrafts(rooms);
-  const measured = rooms.map((r) => measureRoomDraft(r, qualifyingSf, materialBasis, useTaxPercent));
+  const measured = rooms.map((r) => measureRoomDraft(r, qualifyingSf, materialBasis, projectUseTaxPercent));
   if (projectType.trim().toLowerCase() === "remodel") {
     for (const m of measured) {
       m.notes.push(
@@ -530,10 +668,11 @@ export function applyUseTaxToMaterialBreakdown(
   };
 }
 
-export function buildSelectedMaterialBreakdown(
+/** Material breakdown without use tax (used internally to avoid recursion). */
+function buildSelectedMaterialBreakdownCore(
   rooms: RoomDraft[],
   materialBasis: "wholesale" | "direct",
-  options?: { includeRates?: boolean; useTaxPercent?: number }
+  options?: { includeRates?: boolean }
 ): SelectedMaterialBreakdown {
   const includeRates = options?.includeRates === true;
   type RawRow = SelectedMaterialScopeLine & { group: string };
@@ -712,9 +851,48 @@ export function buildSelectedMaterialBreakdown(
     }
   );
 
-  const built: SelectedMaterialBreakdown = { groups, totals };
-  const useTaxPercent = Number(options?.useTaxPercent) || 0;
-  return useTaxPercent > 0 ? applyUseTaxToMaterialBreakdown(built, useTaxPercent) : built;
+  return { groups, totals };
+}
+
+export function buildSelectedMaterialBreakdown(
+  rooms: RoomDraft[],
+  materialBasis: "wholesale" | "direct",
+  options?: { includeRates?: boolean; useTaxPercent?: number; projectUseTaxPercent?: number }
+): SelectedMaterialBreakdown {
+  const built = buildSelectedMaterialBreakdownCore(rooms, materialBasis, {
+    includeRates: options?.includeRates === true
+  });
+  const projectDefault = Math.max(0, Number(options?.projectUseTaxPercent ?? options?.useTaxPercent) || 0);
+  let taxBase = 0;
+  let taxAmount = 0;
+  let maxPct = 0;
+  for (const room of rooms) {
+    if (room.roomType === "Vanity") continue;
+    const pct = resolveRoomUseTaxPercent(room, projectDefault);
+    if (pct <= 0) continue;
+    const roomCt = buildSelectedMaterialBreakdownCore([room], materialBasis).totals.countertopMaterial;
+    taxBase = round2(taxBase + roomCt);
+    taxAmount = round2(taxAmount + roomCt * (pct / 100));
+    if (pct > maxPct) maxPct = pct;
+  }
+  if (taxAmount > 0) {
+    built.totals.countertopMaterial = round2(built.totals.countertopMaterial + taxAmount);
+    built.totals.materialSubtotal = round2(built.totals.materialSubtotal + taxAmount);
+    built.totals.useTax = {
+      percent: maxPct,
+      baseCountertopMaterial: taxBase,
+      taxAmount,
+      applied: true
+    };
+  } else {
+    built.totals.useTax = {
+      percent: 0,
+      baseCountertopMaterial: built.totals.countertopMaterial,
+      taxAmount: 0,
+      applied: false
+    };
+  }
+  return built;
 }
 
 export type InternalEstimateGroupComparisonRow = {
@@ -817,12 +995,13 @@ export function buildCustomerRoomAreaCostBreakdown(params: {
   roomDrafts: RoomDraft[];
   measuredRooms: MeasuredRoom[];
   materialBasis: "wholesale" | "direct";
-  useTaxPercent?: number;
+  /** Project default when room uses `inherit_project`. */
+  projectUseTaxPercent?: number;
   customLines?: CustomerRoomAreaCustomLineInput[];
   projectColorTbd?: boolean;
 }): CustomerRoomAreaCostBreakdown {
   const basis = params.materialBasis;
-  const useTaxPercent = Math.max(0, Number(params.useTaxPercent) || 0);
+  const projectUseTaxPercent = Math.max(0, Number(params.projectUseTaxPercent) || 0);
   const customLines = params.customLines ?? [];
   const draftById = new Map(params.roomDrafts.map((d) => [d.id, d]));
 
@@ -845,7 +1024,13 @@ export function buildCustomerRoomAreaCostBreakdown(params: {
     if (isVanity) {
       materialAmountExact = round2(Number(m.selected) || 0);
     } else if (draft) {
-      materialAmountExact = buildSelectedMaterialBreakdown([draft], basis, { useTaxPercent }).totals.materialSubtotal;
+      const pct = resolveRoomUseTaxPercent(draft, projectUseTaxPercent);
+      const sub = buildSelectedMaterialBreakdownCore([draft], basis);
+      materialAmountExact = sub.totals.materialSubtotal;
+      if (pct > 0) {
+        const tax = round2(sub.totals.countertopMaterial * (pct / 100));
+        materialAmountExact = round2(materialAmountExact + tax);
+      }
     }
 
     const addons: CustomerRoomAreaCostAddon[] = (m.addons ?? []).map((a) => ({
@@ -1333,13 +1518,21 @@ export function createDefaultRoom(materialGroup: string): RoomDraft {
     tear: false,
     raised: "No",
     notes: "",
+    useTaxMode: "inherit_project",
+    useTaxPercent: 0,
+    useTaxBase: "countertop_material",
     vanity: {
       size: "none",
       source: "Promo / Stock 100 Remnant",
       depth: 22.5,
       qty: 1,
       programSink: 0,
-      bowl: 0
+      bowl: 0,
+      isVanityProgram: true,
+      vanityProgramYear: VANITY_PROGRAM_YEAR,
+      vanitySinkType: "oval_white",
+      vanityExtraTrips: 0,
+      outsideProgram: false
     }
   };
 }
@@ -1373,7 +1566,15 @@ export function createVanityRoom(materialGroup: string): RoomDraft {
   r.name = "Vanity";
   r.roomType = "Vanity";
   r.calcMode = "Manual Sq Ft";
-  r.vanity = { ...r.vanity, size: "31_S", source: "Promo / Stock 100 Remnant" };
+  r.vanity = {
+    ...r.vanity,
+    size: "31_S",
+    source: "Promo / Stock 100 Remnant",
+    isVanityProgram: true,
+    vanityProgramYear: VANITY_PROGRAM_YEAR,
+    vanitySinkType: "oval_white",
+    depth: 22.5
+  };
   return r;
 }
 
@@ -1508,6 +1709,9 @@ export function serializeRoomsForApi(rooms: RoomDraft[]): Array<Record<string, u
       fhbDirectSf: r.fhbDirectSf,
       fhbOutlets: r.fhbOutlets,
       guidedLayoutPreset: r.guidedLayoutPreset ?? null,
+      useTaxMode: r.useTaxMode ?? "inherit_project",
+      useTaxPercent: Math.max(0, Number(r.useTaxPercent) || 0),
+      useTaxBase: r.useTaxBase ?? "countertop_material",
       countertopSqft: ct,
       backsplashSqft: round2(bs + fhb)
     };
@@ -1580,6 +1784,21 @@ function applyRoomPersistenceFields(base: RoomDraft, r: Record<string, unknown>)
   if (r.fhbDirectSf != null) base.fhbDirectSf = Number(r.fhbDirectSf) || 0;
   if (r.fhbOutlets != null) base.fhbOutlets = Math.max(0, Math.floor(Number(r.fhbOutlets)) || 0);
   if (r.notes != null) base.notes = String(r.notes);
+  if (r.useTaxMode != null) base.useTaxMode = String(r.useTaxMode) as RoomDraft["useTaxMode"];
+  if (r.useTaxPercent != null) base.useTaxPercent = Math.max(0, Number(r.useTaxPercent) || 0);
+  if (r.useTaxBase != null) base.useTaxBase = "countertop_material";
+  const v = r.vanity;
+  if (v && typeof v === "object") {
+    const vv = v as Record<string, unknown>;
+    if (vv.isVanityProgram != null) base.vanity.isVanityProgram = Boolean(vv.isVanityProgram);
+    if (vv.vanityProgramYear != null) base.vanity.vanityProgramYear = Number(vv.vanityProgramYear) || VANITY_PROGRAM_YEAR;
+    if (vv.vanityTier != null) base.vanity.vanityTier = String(vv.vanityTier) as VanityKitchenTier;
+    if (vv.vanityTierOverrideReason != null) base.vanity.vanityTierOverrideReason = String(vv.vanityTierOverrideReason);
+    if (vv.vanitySinkType != null) base.vanity.vanitySinkType = String(vv.vanitySinkType) as VanitySinkType;
+    if (vv.vanityExtraTrips != null) base.vanity.vanityExtraTrips = Math.max(0, Math.floor(Number(vv.vanityExtraTrips)) || 0);
+    if (vv.outsideProgram != null) base.vanity.outsideProgram = Boolean(vv.outsideProgram);
+    if (vv.vanityEligibilityNote != null) base.vanity.vanityEligibilityNote = String(vv.vanityEligibilityNote);
+  }
   if (r.linear && typeof r.linear === "object") {
     const ln = r.linear as Record<string, unknown>;
     base.linear = {
