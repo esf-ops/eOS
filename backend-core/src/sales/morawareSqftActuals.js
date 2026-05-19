@@ -49,6 +49,26 @@ function fieldsForForm(form) {
 }
 
 export function extractSqftFromMorawareJob(job) {
+  const preparedSqft = parseSqftNumber(job?.worksheet_sqft);
+  if (preparedSqft != null) {
+    return {
+      totalSqft: preparedSqft,
+      hasSqft: true,
+      confidence: "high",
+      fieldCount: 1,
+      sources: [
+        {
+          sqft: preparedSqft,
+          confidence: "high",
+          source: "sales_moraware_job_facts.worksheet_sqft",
+          label: "Sq.Ft.",
+          formName: "",
+          formTemplateName: "prepared_fact",
+          formId: ""
+        }
+      ]
+    };
+  }
   const raw = job?.raw_payload && typeof job.raw_payload === "object" ? job.raw_payload : {};
   const forms = Array.isArray(raw.forms) ? raw.forms : [];
   const matches = [];

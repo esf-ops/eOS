@@ -98,6 +98,12 @@ type SalesDashboardFoundation = {
     gated_filter_warning?: string | null;
     rows_scanned?: number | null;
     query_page_count?: number | null;
+    used_precomputed_rollup?: boolean | null;
+    prepared_rollup_warning?: string | null;
+    actuals_compute_ms?: number | null;
+    attribution_compute_ms?: number | null;
+    reconciliation_compute_ms?: number | null;
+    reconciliation_status?: string | null;
     jobs_missing_report_date?: number | null;
     status_scope_comparison?: {
       all_jobs?: { total_sqft?: number | null; jobs_with_sqft?: number | null };
@@ -324,6 +330,7 @@ export default function SalesCommandCenterView({ token, onLoadError }: Props) {
   const topAccounts = sqftActuals?.top_raw_accounts_by_sqft || [];
   const needsReviewAccounts = topAccounts.filter((row) => row.attribution_status !== "approved_mapping").length;
   const quotePipelineCount = Number(data?.quote_pipeline?.quote_forecast_events_count ?? 0) || Number(data?.quote_pipeline?.quote_headers_count ?? 0);
+  const preparedRollupMissing = sqftActuals?.extraction_status === "prepared_rollup_missing" || sqftActuals?.used_precomputed_rollup === false;
   const gatedSections = [
     "Rep leaderboard",
     "Branch comparison",
@@ -507,10 +514,10 @@ export default function SalesCommandCenterView({ token, onLoadError }: Props) {
         <section className="sales-command-hero" aria-label="Sales command center summary">
           <div className="sales-command-hero__main">
             <p className="pi-card-title">Worksheet Sq.Ft. by current dashboard date basis</p>
-            <p className="sales-command-hero__value">{sqft(sqftActuals?.total_synced_sqft)}</p>
+            <p className="sales-command-hero__value">{preparedRollupMissing ? "Rollup needed" : sqft(sqftActuals?.total_synced_sqft)}</p>
             <p>
               {num(sqftActuals?.rows_scanned ?? actuals?.jobs_count)} Moraware jobs scanned from the latest complete baseline group ·{" "}
-              {num(sqftActuals?.query_page_count)} query pages · {sqftActuals?.reporting_definition?.date_basis || "created/modified date"}
+              {num(sqftActuals?.query_page_count)} query pages · {sqftActuals?.used_precomputed_rollup ? "prepared facts" : "prepared facts unavailable"}
             </p>
           </div>
           <div className="sales-command-kpis">
@@ -543,6 +550,24 @@ export default function SalesCommandCenterView({ token, onLoadError }: Props) {
             </div>
           </div>
         </section>
+
+        {sqftActuals?.prepared_rollup_warning ? (
+          <div className="sales-attribution-guardrail">
+            <strong>Prepared Sales facts unavailable</strong>
+            <p>{sqftActuals.prepared_rollup_warning}</p>
+            <p>
+              The dashboard is intentionally not scanning raw Moraware payloads on page load. Run the controlled backend facts
+              rebuild after applying the prepared facts migration.
+            </p>
+          </div>
+        ) : null}
+
+        {sqftActuals?.reconciliation_status === "error" ? (
+          <div className="sales-attribution-guardrail">
+            <strong>Reconciliation unavailable</strong>
+            <p>Production report reconciliation failed separately; the main dashboard data remains available.</p>
+          </div>
+        ) : null}
 
         {reconciliation ? (
           <section className="pi-section sales-command-panel">

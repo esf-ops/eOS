@@ -192,9 +192,9 @@ function isStatementTimeout(error) {
  * Sales Account Mapping rows as trusted; local fallback rules do not improve coverage.
  *
  * @param {import("@supabase/supabase-js").SupabaseClient} supabase
- * @param {{ organizationId?: string }} options
+ * @param {{ organizationId?: string, includeSqftRollups?: boolean }} options
  */
-export async function loadSalesAttributionCoverage(supabase, { organizationId = "" } = {}) {
+export async function loadSalesAttributionCoverage(supabase, { organizationId = "", includeSqftRollups = true } = {}) {
   const warnings = [];
   const diagnostics = {
     latest_complete_import_group_id: null,
@@ -241,7 +241,7 @@ export async function loadSalesAttributionCoverage(supabase, { organizationId = 
       jobs = await fetchAllByRunIds((runIdChunk) => {
         let q = supabase
           .from("brain_moraware_jobs")
-          .select("id,source_job_id,source_account_id,account_name,sync_run_id,raw_payload")
+          .select(includeSqftRollups ? "id,source_job_id,source_account_id,account_name,sync_run_id,raw_payload" : "id,source_job_id,source_account_id,account_name,sync_run_id")
           .order("id", { ascending: true });
         if (organizationId) q = q.eq("organization_id", organizationId);
         if (runIdChunk?.length) q = q.in("sync_run_id", runIdChunk);
@@ -300,10 +300,12 @@ export async function loadSalesAttributionCoverage(supabase, { organizationId = 
         totalSqft: 0
       };
     slot.jobCount += 1;
-    const extracted = extractSqftFromMorawareJob(job);
-    if (extracted.hasSqft) {
-      slot.jobsWithSqft += 1;
-      slot.totalSqft += extracted.totalSqft;
+    if (includeSqftRollups) {
+      const extracted = extractSqftFromMorawareJob(job);
+      if (extracted.hasSqft) {
+        slot.jobsWithSqft += 1;
+        slot.totalSqft += extracted.totalSqft;
+      }
     }
     accountsByKey.set(key, slot);
   }

@@ -14,7 +14,7 @@ import {
   methodLabelForDisplay
 } from "./salesAttribution.js";
 import { loadSalesAttributionCoverage } from "./salesAttributionCoverage.js";
-import { buildCompanyWideSqftActuals, buildProductionReportReconciliation } from "./morawareSqftActuals.js";
+import { buildCompanyWideSqftActuals, buildProductionReportReconciliation, extractSqftFromMorawareJob } from "./morawareSqftActuals.js";
 
 /** Roles that may call `/api/sales/*` when also granted head `sales` (admin bypass unchanged). */
 export const SALES_API_ROLES = Object.freeze(["admin", "executive", "sales", "finance", "marketing"]);
@@ -1816,6 +1816,16 @@ function chunkArray(values, size) {
   return out;
 }
 
+function elapsedMs(startedAt) {
+  return Math.max(0, Date.now() - startedAt);
+}
+
+function isMissingRelationError(error) {
+  const msg = String(error?.message || "");
+  const code = String(error?.code || "");
+  return code === "42P01" || msg.toLowerCase().includes("does not exist") || msg.toLowerCase().includes("relation");
+}
+
 async function fetchLatestCompleteMorawareJobs(supabase, organizationId, syncHealth) {
   const pageSize = 1000;
   const selectCols =
@@ -1873,6 +1883,99 @@ async function fetchLatestCompleteMorawareJobs(supabase, organizationId, syncHea
   };
 }
 
+async function fetchLatestPreparedSalesJobFacts(supabase, organizationId, syncHealth) {
+  const pageSize = 1000;
+  const group = syncHealth.latest_group;
+  const importGroupId = String(group?.import_group_id ?? "").trim();
+  if (group?.import_group_id && group.complete === false) {
+    return {
+      rows: [],
+      available: false,
+      warning: "Latest Moraware group is incomplete; prepared Sales facts were not used.",
+      diagnostics: {
+        rows_scanned: 0,
+        query_page_count: 0,
+        source_group_complete: false,
+        source_import_group_id: importGroupId || null,
+        source_sync_run_count: 0,
+        scoped_to_latest_complete_group: false,
+        used_precomputed_rollup: false
+      }
+    };
+  }
+  if (!importGroupId) {
+    return {
+      rows: [],
+      available: false,
+      warning: "No latest complete import group is available for prepared Sales facts.",
+      diagnostics: {
+        rows_scanned: 0,
+        query_page_count: 0,
+        source_group_complete: null,
+        source_import_group_id: null,
+        source_sync_run_count: 0,
+        scoped_to_latest_complete_group: false,
+        used_precomputed_rollup: false
+      }
+    };
+  }
+  const rows = [];
+  let queryPageCount = 0;
+  try {
+    let from = 0;
+    while (true) {
+      const { data, error } = await supabase
+        .from("sales_moraware_job_facts")
+        .select(
+          "sync_run_id,source_job_id,source_account_id,account_name,status_name,process_name,created_at_source,modified_at_source,scheduled_at_source,completed_at_source,install_at_source,worksheet_sqft,sqft_found,report_month_created,report_month_completed,report_month_install"
+        )
+        .eq("organization_id", organizationId)
+        .eq("import_group_id", importGroupId)
+        .order("created_at_source", { ascending: true, nullsFirst: false })
+        .range(from, from + pageSize - 1);
+      queryPageCount += 1;
+      if (error) throw error;
+      if (!data?.length) break;
+      rows.push(...data);
+      if (data.length < pageSize) break;
+      from += pageSize;
+    }
+  } catch (e) {
+    if (isMissingRelationError(e)) {
+      return {
+        rows: [],
+        available: false,
+        warning: "Prepared Sales Moraware facts table is not installed yet.",
+        diagnostics: {
+          rows_scanned: 0,
+          query_page_count: queryPageCount,
+          source_group_complete: Boolean(group?.complete),
+          source_import_group_id: importGroupId,
+          source_sync_run_count: 0,
+          scoped_to_latest_complete_group: false,
+          used_precomputed_rollup: false
+        }
+      };
+    }
+    throw e;
+  }
+  const available = rows.length > 0;
+  return {
+    rows,
+    available,
+    warning: available ? null : "Prepared Sales Moraware facts have not been built for the latest complete import group.",
+    diagnostics: {
+      rows_scanned: rows.length,
+      query_page_count: queryPageCount,
+      source_group_complete: Boolean(group?.complete),
+      source_import_group_id: importGroupId,
+      source_sync_run_count: Array.isArray(group?.successful_sync_run_ids) ? group.successful_sync_run_ids.length : 0,
+      scoped_to_latest_complete_group: true,
+      used_precomputed_rollup: available
+    }
+  };
+}
+
 async function fetchLatestCompleteMorawareActivities(supabase, organizationId, syncHealth) {
   const pageSize = 1000;
   const selectCols = "sync_run_id,source_activity_id,source_job_id,activity_type_name,activity_status_name,phase_name,scheduled_date,raw_payload";
@@ -1915,6 +2018,164 @@ async function fetchLatestCompleteMorawareActivities(supabase, organizationId, s
   };
 }
 
+function monthFromDate(value) {
+  const s = String(value ?? "");
+  return /^\d{4}-\d{2}/.test(s) ? s.slice(0, 7) : null;
+}
+
+async function upsertRowsInChunks(supabase, table, rows, onConflict, size = 250) {
+  for (const part of chunkArray(rows, size)) {
+    const { error } = await supabase.from(table).upsert(part, { onConflict });
+    if (error) throw error;
+  }
+}
+
+async function buildSalesMorawareJobFactsForLatestGroup(supabase, organizationId, syncHealth) {
+  const startedAt = Date.now();
+  const group = syncHealth.latest_group;
+  const importGroupId = String(group?.import_group_id ?? "").trim();
+  const runIds = Array.isArray(group?.successful_sync_run_ids) ? group.successful_sync_run_ids.map(String).filter(Boolean) : [];
+  if (!importGroupId || !group?.complete || !runIds.length) {
+    return {
+      ok: false,
+      status: "latest_group_not_ready",
+      import_group_id: importGroupId || null,
+      jobs_scanned: 0,
+      facts_upserted: 0,
+      query_page_count: 0,
+      compute_ms: elapsedMs(startedAt)
+    };
+  }
+
+  const pageSize = 100;
+  let jobsScanned = 0;
+  let factsUpserted = 0;
+  let queryPageCount = 0;
+
+  // Dashboard requests must never do this raw-payload extraction. This builder
+  // is the controlled path to refresh prepared facts after an import/sync.
+  for (const runIdGroup of chunkArray(runIds, 1)) {
+    let from = 0;
+    while (true) {
+      let q = supabase
+        .from("brain_moraware_jobs")
+        .select(
+          "sync_run_id,source_job_id,source_account_id,account_name,status_name,process_name,salesperson_name,created_at_source,modified_at_source,scheduled_at_source,completed_at_source,install_at_source,raw_payload"
+        )
+        .eq("organization_id", organizationId)
+        .in("sync_run_id", runIdGroup)
+        .order("id", { ascending: true })
+        .range(from, from + pageSize - 1);
+      const { data, error } = await q;
+      queryPageCount += 1;
+      if (error) throw error;
+      if (!data?.length) break;
+      jobsScanned += data.length;
+      const facts = data.map((job) => {
+        const extracted = extractSqftFromMorawareJob(job);
+        return {
+          organization_id: organizationId,
+          import_group_id: importGroupId,
+          sync_run_id: job.sync_run_id,
+          source_job_id: String(job.source_job_id ?? ""),
+          source_account_id: job.source_account_id ?? null,
+          account_name: job.account_name ?? null,
+          status_name: job.status_name ?? null,
+          process_name: job.process_name ?? null,
+          salesperson_name: job.salesperson_name ?? null,
+          created_at_source: job.created_at_source ?? null,
+          modified_at_source: job.modified_at_source ?? null,
+          scheduled_at_source: job.scheduled_at_source ?? null,
+          completed_at_source: job.completed_at_source ?? null,
+          install_at_source: job.install_at_source ?? null,
+          worksheet_sqft: extracted.hasSqft ? extracted.totalSqft : null,
+          sqft_found: Boolean(extracted.hasSqft),
+          sqft_source: extracted.sources?.[0]?.source ?? null,
+          report_month_created: monthFromDate(job.created_at_source),
+          report_month_completed: monthFromDate(job.completed_at_source),
+          report_month_install: monthFromDate(job.install_at_source),
+          updated_at: new Date().toISOString()
+        };
+      });
+      await upsertRowsInChunks(supabase, "sales_moraware_job_facts", facts, "organization_id,import_group_id,source_job_id", 100);
+      factsUpserted += facts.length;
+      if (data.length < pageSize) break;
+      from += pageSize;
+    }
+  }
+
+  return {
+    ok: true,
+    status: "built",
+    import_group_id: importGroupId,
+    jobs_scanned: jobsScanned,
+    facts_upserted: factsUpserted,
+    query_page_count: queryPageCount,
+    compute_ms: elapsedMs(startedAt)
+  };
+}
+
+export async function salesProductionReconciliationHandler(req, supabaseGetter) {
+  const startedAt = Date.now();
+  const supabase = supabaseGetter();
+  const organizationId = resolveSalesOrganizationId(req);
+  if (!organizationId) return { status: 400, body: { ok: false, error: "Sales reconciliation requires organization_id context." } };
+  const syncHealth = await loadLatestMorawareGroup(supabase, organizationId);
+  const facts = await fetchLatestPreparedSalesJobFacts(supabase, organizationId, syncHealth);
+  if (!facts.available) {
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        reconciliation_status: "unavailable",
+        warning: facts.warning,
+        diagnostics: { ...facts.diagnostics, compute_ms: elapsedMs(startedAt) }
+      }
+    };
+  }
+  try {
+    const activities = await fetchLatestCompleteMorawareActivities(supabase, organizationId, syncHealth);
+    const reconciliation = buildProductionReportReconciliation(facts.rows, { activities: activities.rows });
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        reconciliation_status: "ok",
+        reconciliation,
+        diagnostics: {
+          ...facts.diagnostics,
+          activity_rows_scanned: activities.diagnostics.rows_scanned,
+          activity_query_page_count: activities.diagnostics.query_page_count,
+          compute_ms: elapsedMs(startedAt)
+        }
+      }
+    };
+  } catch (e) {
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        reconciliation_status: "error",
+        error: String(e?.message ?? e),
+        diagnostics: { ...facts.diagnostics, compute_ms: elapsedMs(startedAt) }
+      }
+    };
+  }
+}
+
+export async function salesRebuildMorawareFactsHandler(req, supabaseGetter) {
+  const supabase = supabaseGetter();
+  const organizationId = resolveSalesOrganizationId(req);
+  if (!organizationId) return { status: 400, body: { ok: false, error: "Sales facts rebuild requires organization_id context." } };
+  const syncHealth = await loadLatestMorawareGroup(supabase, organizationId);
+  try {
+    const result = await buildSalesMorawareJobFactsForLatestGroup(supabase, organizationId, syncHealth);
+    return { status: result.ok ? 200 : 409, body: result };
+  } catch (e) {
+    return { status: 500, body: { ok: false, error: String(e?.message ?? e) } };
+  }
+}
+
 function publicSyncHealth(syncHealth) {
   if (!syncHealth?.latest_group) return syncHealth;
   const { successful_sync_run_ids: _successfulSyncRunIds, ...latestGroup } = syncHealth.latest_group;
@@ -1945,6 +2206,7 @@ async function safeQuotePipelineSummary(supabase, organizationId) {
 }
 
 export async function salesDashboardFoundationHandler(req, supabaseGetter) {
+  const requestStartedAt = Date.now();
   const supabase = supabaseGetter();
   const organizationId = resolveSalesOrganizationId(req);
   if (!organizationId) {
@@ -1959,8 +2221,7 @@ export async function salesDashboardFoundationHandler(req, supabaseGetter) {
     rawFormsCount,
     rawFilesCount,
     rawAssigneesCount,
-    quotePipeline,
-    attributionCoverage
+    quotePipeline
   ] =
     await Promise.all([
       loadLatestMorawareGroup(supabase, organizationId),
@@ -1970,25 +2231,36 @@ export async function salesDashboardFoundationHandler(req, supabaseGetter) {
       safeCount(supabase, "moraware_raw_job_forms", organizationId),
       safeCount(supabase, "moraware_raw_job_files", organizationId),
       safeCount(supabase, "moraware_raw_assignees", organizationId),
-      safeQuotePipelineSummary(supabase, organizationId),
-      loadSalesAttributionCoverage(supabase, { organizationId })
+      safeQuotePipelineSummary(supabase, organizationId)
     ]);
 
-  let jobs;
-  let activities = [];
+  const attributionStartedAt = Date.now();
+  const attributionCoverage = await loadSalesAttributionCoverage(supabase, { organizationId, includeSqftRollups: false });
+  const attributionComputeMs = elapsedMs(attributionStartedAt);
+  let jobs = [];
   let jobReadDiagnostics;
-  let activityReadDiagnostics = null;
+  let preparedFacts;
   try {
-    const [latestJobs, latestActivities] = await Promise.all([
-      fetchLatestCompleteMorawareJobs(supabase, organizationId, syncHealth),
-      fetchLatestCompleteMorawareActivities(supabase, organizationId, syncHealth)
-    ]);
-    jobs = latestJobs.rows;
-    activities = latestActivities.rows;
-    jobReadDiagnostics = latestJobs.diagnostics;
-    activityReadDiagnostics = latestActivities.diagnostics;
+    preparedFacts = await fetchLatestPreparedSalesJobFacts(supabase, organizationId, syncHealth);
+    jobs = preparedFacts.rows;
+    jobReadDiagnostics = preparedFacts.diagnostics;
   } catch (e) {
-    return { status: 500, body: { ok: false, error: String(e?.message ?? e) } };
+    preparedFacts = {
+      rows: [],
+      available: false,
+      warning: String(e?.message ?? e),
+      diagnostics: {
+        rows_scanned: 0,
+        query_page_count: 0,
+        source_group_complete: syncHealth.latest_group?.complete ?? null,
+        source_import_group_id: syncHealth.latest_group?.import_group_id ?? null,
+        source_sync_run_count: 0,
+        scoped_to_latest_complete_group: false,
+        used_precomputed_rollup: false
+      }
+    };
+    jobs = [];
+    jobReadDiagnostics = preparedFacts.diagnostics;
   }
   const byStatus = new Map();
   const byProcess = new Map();
@@ -2008,8 +2280,46 @@ export async function salesDashboardFoundationHandler(req, supabaseGetter) {
       if (!oldestJobDate || d < oldestJobDate) oldestJobDate = d;
     }
   }
-  const syncedSqftActualsBase = buildCompanyWideSqftActuals(jobs, { attributionCoverage, filters: req.query });
-  const productionReportReconciliation = buildProductionReportReconciliation(jobs, { activities });
+  const actualsStartedAt = Date.now();
+  const syncedSqftActualsBase = preparedFacts.available
+    ? buildCompanyWideSqftActuals(jobs, { attributionCoverage, filters: req.query })
+    : {
+        source: "sales_moraware_job_facts",
+        extraction_status: "prepared_rollup_missing",
+        active_filters: {},
+        total_synced_sqft: null,
+        total_jobs_evaluated: 0,
+        jobs_with_sqft: 0,
+        jobs_missing_sqft: 0,
+        sqft_coverage_pct: null,
+        average_sqft_per_job: null,
+        date_coverage: { oldest_job_created_at: null, newest_job_created_at: null },
+        grouped_sqft_trend: [],
+        monthly_sqft_trend: [],
+        top_raw_accounts_by_sqft: [],
+        filtered_attribution_coverage: null,
+        notes: [
+          "Prepared Sales Moraware facts are required for fast dashboard reads.",
+          "Run the controlled facts/rollup builder after deploying the additive facts table migration."
+        ]
+      };
+  const actualsComputeMs = elapsedMs(actualsStartedAt);
+  const includeReconciliation = String(req.query?.includeReconciliation ?? "").trim() === "1";
+  let productionReportReconciliation = null;
+  let reconciliationStatus = includeReconciliation ? "not_requested" : "not_requested";
+  let reconciliationComputeMs = null;
+  if (includeReconciliation) {
+    const reconciliationStartedAt = Date.now();
+    try {
+      const latestActivities = await fetchLatestCompleteMorawareActivities(supabase, organizationId, syncHealth);
+      productionReportReconciliation = buildProductionReportReconciliation(jobs, { activities: latestActivities.rows });
+      reconciliationStatus = "ok";
+    } catch (e) {
+      reconciliationStatus = "error";
+      productionReportReconciliation = { status: "error", error: String(e?.message ?? e) };
+    }
+    reconciliationComputeMs = elapsedMs(reconciliationStartedAt);
+  }
   const latestGroupComplete = syncHealth.latest_group?.complete !== false;
   const syncedSqftActuals = {
     ...syncedSqftActualsBase,
@@ -2019,14 +2329,19 @@ export async function salesDashboardFoundationHandler(req, supabaseGetter) {
     source_import_group_id: jobReadDiagnostics.source_import_group_id,
     source_sync_run_count: jobReadDiagnostics.source_sync_run_count,
     scoped_to_latest_complete_group: jobReadDiagnostics.scoped_to_latest_complete_group,
-    activity_rows_scanned_for_reconciliation: activityReadDiagnostics?.rows_scanned ?? null,
-    activity_query_page_count_for_reconciliation: activityReadDiagnostics?.query_page_count ?? null,
+    used_precomputed_rollup: jobReadDiagnostics.used_precomputed_rollup,
+    prepared_rollup_warning: preparedFacts.warning ?? null,
+    actuals_compute_ms: actualsComputeMs,
+    attribution_compute_ms: attributionComputeMs,
+    reconciliation_compute_ms: reconciliationComputeMs,
+    reconciliation_status: reconciliationStatus,
     production_report_reconciliation: productionReportReconciliation,
     import_group_trust_status: latestGroupComplete ? "latest_group_complete_or_single_run" : "latest_group_incomplete",
     import_group_warning: latestGroupComplete
       ? null
       : "Latest Moraware import group is incomplete or has a failed latest chunk attempt; treat 2026 baseline actuals as partial until the group is completed successfully."
   };
+  const latestGroupRows = syncHealth.latest_group?.total_row_counts || {};
 
   return {
     status: 200,
@@ -2049,7 +2364,7 @@ export async function salesDashboardFoundationHandler(req, supabaseGetter) {
       sync_health: publicSyncHealth(syncHealth),
       actuals: {
         source: "brain_moraware_*",
-        jobs_count: jobs.length,
+        jobs_count: jobs.length || Number(latestGroupRows.jobs ?? 0) || 0,
         accounts_count: accountCount.count,
         active_account_ids_in_jobs: accountIds.size,
         job_activities_count: activityCount.count,
@@ -2069,7 +2384,7 @@ export async function salesDashboardFoundationHandler(req, supabaseGetter) {
       data_contract: {
         actuals: "Moraware Brain tables provide job/account/activity/status/process actuals.",
         company_sqft_actuals:
-          "Company-wide synced sqft totals are extracted from Brain-owned Moraware Job Worksheet Sq.Ft. fields and may include all valid synced jobs.",
+          "Company-wide synced sqft totals read prepared Sales Moraware facts for fast dashboard loads; raw Moraware payload extraction is a controlled build/import concern.",
         forward_pipeline: "Quote Library quote_headers and quote_forecast_events provide future quote/forecast signals when populated.",
         mappings: "Elite 100 color/group/manufacturer/account attribution should remain backend-owned/admin-configurable.",
         account_branch_attribution:
@@ -2081,13 +2396,22 @@ export async function salesDashboardFoundationHandler(req, supabaseGetter) {
         ...(latestGroupComplete
           ? []
           : ["latest Moraware import group is incomplete; 2026 baseline actuals are partial until resume completes all chunks"]),
+        ...(preparedFacts.available ? [] : ["prepared Sales Moraware facts are missing for the latest complete import group; run controlled facts/rollup builder before treating dashboard Sq.Ft. as available"]),
         "revenue actuals are not yet normalized in brain_moraware_jobs",
         "branch/salesperson sqft totals remain gated until approved Sales Account Mapping coverage is high",
         "Elite 100 color/group/manufacturer mapping is not yet connected to Moraware foundation rows",
         "account/branch attribution needs approved backend mapping between Moraware account/customer names and sales ownership/location",
         "job_files and assignees may be absent from current live capped imports",
         "machine/resource assignment and material inventory are intentionally out of scope for this pass"
-      ]
+      ],
+      performance_diagnostics: {
+        request_compute_ms: elapsedMs(requestStartedAt),
+        actuals_compute_ms: actualsComputeMs,
+        attribution_compute_ms: attributionComputeMs,
+        reconciliation_compute_ms: reconciliationComputeMs,
+        used_precomputed_rollup: Boolean(jobReadDiagnostics.used_precomputed_rollup),
+        reconciliation_status: reconciliationStatus
+      }
     }
   };
 }
@@ -2136,6 +2460,20 @@ export function attachSalesHeadRoutes(app, { requireAuth, requireRole, requireHe
     requireRole(roleList),
     headAccessSales,
     execSales(salesDashboardFoundationHandler)
+  );
+  app.get(
+    "/api/sales/production-reconciliation",
+    requireAuth(),
+    requireRole(roleList),
+    headAccessSales,
+    execSales(salesProductionReconciliationHandler)
+  );
+  app.post(
+    "/api/sales/admin/rebuild-moraware-facts",
+    requireAuth(),
+    requireRole(["admin"]),
+    headAccessSales,
+    execSales(salesRebuildMorawareFactsHandler)
   );
   app.get(
     "/api/sales/performance-intelligence",
