@@ -22,7 +22,7 @@ Set **Monday column IDs** (from introspection below). If none are set, the serve
 | `MONDAY_INTERNAL_COL_EST_SQ_FT` | Est Sq Ft | numbers |
 | `MONDAY_INTERNAL_COL_QUOTE_AMOUNT` | Quote Amount | numbers |
 | `MONDAY_INTERNAL_COL_ROOM_COUNT` | Room Count | numbers |
-| `MONDAY_INTERNAL_COL_STATUS` | Status | status (label must exist on board) |
+| `MONDAY_INTERNAL_COL_STATUS` | Status | status — labels mapped from `quote_status` (see below) |
 | `MONDAY_INTERNAL_COL_PHONE` | Phone | phone |
 | `MONDAY_INTERNAL_COL_EMAIL` | Email | email |
 | `MONDAY_INTERNAL_COL_PROJECT_ADDRESS` | Project Address | text |
@@ -40,6 +40,20 @@ Legacy aliases still work: `MONDAY_INTERNAL_COL_CUSTOMER`, `MONDAY_INTERNAL_COL_
 | `MONDAY_INTERNAL_GROUP_NEW_QUOTES` | New Quotes |
 | `MONDAY_INTERNAL_GROUP_IN_REVIEW` | In Review |
 | `MONDAY_INTERNAL_GROUP_APPROVED_QUOTES` | Approved Quotes |
+
+### Status label mapping (Monday board labels)
+
+eliteOS `quote_status` maps to Monday Status labels (override via env):
+
+| Internal status | Monday label (default) | Env override |
+|-----------------|------------------------|--------------|
+| draft, testing_review, in_review, needs_review, new, archived | Pending | `MONDAY_INTERNAL_STATUS_DRAFT_LABEL` / `MONDAY_INTERNAL_STATUS_IN_REVIEW_LABEL` |
+| sent, submitted, follow_up, revised | In Negotiation | `MONDAY_INTERNAL_STATUS_SENT_LABEL` |
+| sold, approved, accepted | Accepted | `MONDAY_INTERNAL_STATUS_SOLD_LABEL` |
+| lost, rejected, declined | Rejected | `MONDAY_INTERNAL_STATUS_REJECTED_LABEL` |
+| unknown | Pending | — |
+
+Column updates are applied **per column** on existing items. A bad Status label logs `success_partial_columns` and still updates Estimate Link, Quote Amount, etc.
 
 When group IDs are unset, new items are created without `group_id` (typically land in the board default). **Status** column still reflects `quote_status`. Group routing by status:
 

@@ -138,6 +138,7 @@ function noteFromBody(body) {
  * @param {Record<string, unknown>} params.snapshotToStore
  * @param {string|null} params.internalEstimateSummary
  * @param {string|null} params.pricingModeLabel
+ * @param {string|null} [params.estimatorDisplayName]
  * @param {Set<string>} params.internalStatuses
  */
 export async function processInternalQuoteSave(params) {
@@ -150,6 +151,7 @@ export async function processInternalQuoteSave(params) {
     snapshotToStore,
     internalEstimateSummary,
     pricingModeLabel,
+    estimatorDisplayName = null,
     internalStatuses
   } = params;
 
@@ -217,6 +219,7 @@ export async function processInternalQuoteSave(params) {
       organizationContext,
       internalEstimateSummary,
       pricingModeLabel,
+      estimatorDisplayName,
       headerExtras
     });
 
@@ -338,7 +341,8 @@ export async function processInternalQuoteSave(params) {
       pricing_mode_label: pricingModeLabel,
       revision_label: row.revision_label,
       quote_family_root_id: row.quote_family_root_id || row.id,
-      account_name: persistBody.account ?? persistBody.account_name ?? null
+      account_name: persistBody.account ?? persistBody.account_name ?? null,
+      estimated_by_display: estimatorDisplayName
     });
     let mondaySync = { ok: true, skipped: true, status: null, monday_item_id: row.monday_item_id };
     try {
@@ -421,6 +425,7 @@ export async function processInternalQuoteSave(params) {
       organizationContext,
       internalEstimateSummary,
       pricingModeLabel,
+      estimatorDisplayName,
       headerExtras
     });
 

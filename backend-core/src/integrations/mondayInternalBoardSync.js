@@ -206,24 +206,51 @@ export function resolveInternalMondayColumnMap(opts = {}) {
   return map;
 }
 
+const INTERNAL_STATUS_PENDING_DEFAULT = "Pending";
+const INTERNAL_STATUS_NEGOTIATION_DEFAULT = "In Negotiation";
+const INTERNAL_STATUS_ACCEPTED_DEFAULT = "Accepted";
+const INTERNAL_STATUS_REJECTED_DEFAULT = "Rejected";
+
 /**
+ * @param {Record<string, string>} [env]
+ */
+export function internalMondayStatusEnvLabels(env = process.env) {
+  return {
+    pending:
+      String(env.MONDAY_INTERNAL_STATUS_DRAFT_LABEL || env.MONDAY_INTERNAL_STATUS_IN_REVIEW_LABEL || INTERNAL_STATUS_PENDING_DEFAULT).trim() ||
+      INTERNAL_STATUS_PENDING_DEFAULT,
+    inReview: String(env.MONDAY_INTERNAL_STATUS_IN_REVIEW_LABEL || env.MONDAY_INTERNAL_STATUS_DRAFT_LABEL || INTERNAL_STATUS_PENDING_DEFAULT).trim() ||
+      INTERNAL_STATUS_PENDING_DEFAULT,
+    sent: String(env.MONDAY_INTERNAL_STATUS_SENT_LABEL || INTERNAL_STATUS_NEGOTIATION_DEFAULT).trim() || INTERNAL_STATUS_NEGOTIATION_DEFAULT,
+    sold: String(env.MONDAY_INTERNAL_STATUS_SOLD_LABEL || INTERNAL_STATUS_ACCEPTED_DEFAULT).trim() || INTERNAL_STATUS_ACCEPTED_DEFAULT,
+    rejected: String(env.MONDAY_INTERNAL_STATUS_REJECTED_LABEL || INTERNAL_STATUS_REJECTED_DEFAULT).trim() || INTERNAL_STATUS_REJECTED_DEFAULT
+  };
+}
+
+/**
+ * Map eliteOS internal quote_status → existing Monday Status labels.
+ * Unknown statuses fall back to Pending (never throws).
  * @param {string} quoteStatus
+ * @param {Record<string, string>} [env]
  * @returns {string}
  */
-export function mapInternalStatusToMondayLabel(quoteStatus) {
+export function mapInternalStatusToMondayLabel(quoteStatus, env = process.env) {
   const s = String(quoteStatus || "draft").trim().toLowerCase();
-  const map = {
-    draft: "Draft",
-    testing_review: "In review",
-    sent: "Sent",
-    follow_up: "Follow up",
-    revised: "Revised",
-    sold: "Sold",
-    lost: "Lost",
-    archived: "Archived",
-    submitted: "Submitted"
-  };
-  return map[s] || String(process.env.MONDAY_INTERNAL_STATUS_LABEL || "Draft").trim() || "Draft";
+  const labels = internalMondayStatusEnvLabels(env);
+
+  if (["draft", "testing_review", "in_review", "needs_review", "new", "archived"].includes(s)) {
+    return labels.pending;
+  }
+  if (["sent", "submitted", "follow_up", "revised"].includes(s)) {
+    return labels.sent;
+  }
+  if (["sold", "approved", "accepted"].includes(s)) {
+    return labels.sold;
+  }
+  if (["lost", "rejected", "declined"].includes(s)) {
+    return labels.rejected;
+  }
+  return labels.pending;
 }
 
 /**
@@ -260,7 +287,7 @@ export function buildInternalMondayItemName(payload) {
 
 /**
  * @param {unknown} snapshot
- * @returns {Array<{ name?: string, useTaxMode?: string, vanityProgram2026?: boolean }>}
+ * @returns {Array<{ name?: string, useTaxMode?: string, useTaxPercent?: number, vanityProgram2026?: boolean }>}
  */
 function roomRowsFromSnapshot(snapshot) {
   const snap = snapshot && typeof snapshot === "object" ? snapshot : {};
@@ -270,6 +297,7 @@ function roomRowsFromSnapshot(snapshot) {
     return drafts.map((r) => ({
       name: r?.name ?? r?.roomName ?? r?.label,
       useTaxMode: r?.useTaxMode ?? r?.use_tax_mode,
+      useTaxPercent: r?.useTaxPercent ?? r?.use_tax_percent,
       vanityProgram2026: Boolean(r?.vanityProgram2026 ?? r?.vanity_program_2026)
     }));
   }
@@ -277,8 +305,67 @@ function roomRowsFromSnapshot(snapshot) {
   return rooms.map((r) => ({
     name: r?.name ?? r?.roomName,
     useTaxMode: r?.useTaxMode,
+    useTaxPercent: r?.useTaxPercent,
     vanityProgram2026: Boolean(r?.vanityProgram2026)
   }));
+}
+
+/**
+ * @param {{ useTaxMode?: string, useTaxPercent?: number, name?: string }} room
+ * @param {number} projectDefaultPercent
+ * @returns {string|null}
+ */
+export function formatUseTaxSummaryFragment(room, projectDefaultPercent) {
+  const mode = String(room.useTaxMode || "inherit_project").trim().toLowerCase();
+  const roomName = String(room.name || "").trim();
+  if (mode === "none" || mode === "off" || !mode) return null;
+  if (mode === "percent") {
+    const pct = Math.max(0, Number(room.useTaxPercent) || 0);
+    if (pct <= 0) return null;
+    return roomName ? `Use tax: ${roomName} ${pct}%` : `Use tax: ${pct}%`;
+  }
+  if (mode === "inherit_project") {
+    const pct = Math.max(0, Number(projectDefaultPercent) || 0);
+    if (pct <= 0) return null;
+    return `Use tax: project default ${pct}%`;
+  }
+  return null;
+}
+
+/**
+ * Prefer profile / auth display name; email only when no name exists.
+ * @param {{ user?: Record<string, unknown>|null, profile?: Record<string, unknown>|null, preparedBy?: string|null, enteredBy?: string|null }} ctx
+ */
+export function resolveEstimatorDisplayName(ctx = {}) {
+  const user = ctx.user && typeof ctx.user === "object" ? ctx.user : {};
+  const profile = ctx.profile && typeof ctx.profile === "object" ? ctx.profile : {};
+  const candidates = [
+    profile.full_name,
+    profile.display_name,
+    profile.name,
+    user.full_name,
+    user.fullName,
+    user.name,
+    ctx.preparedBy,
+    ctx.enteredBy
+  ];
+  for (const c of candidates) {
+    const s = String(c || "").trim();
+    if (!s) continue;
+    if (s.includes("@")) continue;
+    return s;
+  }
+  const emailFallback = String(user.email || profile.email || ctx.preparedBy || ctx.enteredBy || "").trim();
+  return emailFallback || null;
+}
+
+/**
+ * @param {string} url
+ */
+export function buildInternalEstimateLinkValue(url) {
+  const u = String(url || "").trim();
+  if (!u) return null;
+  return { url: u, text: "Open Internal Estimate" };
 }
 
 /**
@@ -300,18 +387,28 @@ export function buildInternalEstimateSummaryForMonday(input = {}) {
   if (Number.isFinite(sf) && sf > 0) parts.push(`Sq.Ft: ${sf.toFixed(1)}.`);
   if (Number.isFinite(total)) parts.push(`Total: $${Math.round(total).toLocaleString("en-US")}.`);
 
-  const taxRooms = rooms.filter((r) => {
-    const m = String(r.useTaxMode || "").toLowerCase();
-    return m && m !== "none" && m !== "off";
-  });
-  if (taxRooms.length === 1 && taxRooms[0].name) {
-    parts.push(`Use tax: ${taxRooms[0].name} ${taxRooms[0].useTaxMode}.`);
-  } else if (taxRooms.length > 1) {
-    parts.push(`Use tax: ${taxRooms.length} room(s).`);
-  } else {
-    const pct = Math.max(0, Number(body.useTaxPercent ?? body.use_tax_percent ?? snapshot?.internal_ui?.use_tax_percent ?? 0) || 0);
-    if (pct > 0) parts.push(`Use tax: ${pct}%.`);
+  const projectTaxPct = Math.max(
+    0,
+    Number(body.useTaxPercent ?? body.use_tax_percent ?? snapshot?.internal_ui?.use_tax_percent ?? 0) || 0
+  );
+  const taxFragments = [];
+  let sawProjectDefault = false;
+  for (const room of rooms) {
+    const frag = formatUseTaxSummaryFragment(room, projectTaxPct);
+    if (!frag) continue;
+    if (frag.startsWith("Use tax: project default")) {
+      if (!sawProjectDefault) {
+        taxFragments.push(frag);
+        sawProjectDefault = true;
+      }
+    } else {
+      taxFragments.push(frag);
+    }
   }
+  if (!taxFragments.length && projectTaxPct > 0) {
+    taxFragments.push(`Use tax: project default ${projectTaxPct}%`);
+  }
+  for (const frag of taxFragments) parts.push(`${frag}.`);
 
   if (rooms.some((r) => r.vanityProgram2026)) parts.push("Vanity program: Yes.");
 
@@ -467,6 +564,33 @@ export function formatValueForMondayColumn(p) {
 }
 
 /**
+ * @param {Record<string, unknown>} p
+ */
+function normalizeEstimateLinkField(p) {
+  const raw = p.estimate_link;
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    const url = String(raw.url || "").trim();
+    if (url) return buildInternalEstimateLinkValue(url);
+  }
+  const url = String(p.internal_estimate_deep_link || p.quote_library_link || raw || "").trim();
+  return buildInternalEstimateLinkValue(url);
+}
+
+/**
+ * Classify incremental column apply outcome (pure, for tests).
+ * @param {{ appliedColumnIds: string[], failedColumnIds: string[], attemptedColumnIds: string[] }} r
+ */
+export function classifyMondayColumnApplyResult(r) {
+  const attempted = r.attemptedColumnIds?.length ?? 0;
+  const applied = r.appliedColumnIds?.length ?? 0;
+  const failed = r.failedColumnIds?.length ?? 0;
+  if (attempted === 0) return "success_updated_name_only";
+  if (failed === 0) return "success_updated_columns";
+  if (applied > 0) return "success_partial_columns";
+  return "failed_internal_column_update";
+}
+
+/**
  * Extract field values from quote Monday payload.
  * @param {Record<string, unknown>} payload
  */
@@ -481,7 +605,8 @@ export function extractInternalFieldValues(payload) {
     quote_date: quoteDate,
     salesperson: p.sales_rep ?? null,
     account: p.account_name ?? p.partner_account ?? p.customer_name ?? null,
-    estimated_by: p.prepared_by ?? p.entered_by ?? null,
+    estimated_by:
+      p.estimated_by_display ?? p.estimator_display_name ?? p.prepared_by ?? p.entered_by ?? null,
     branch: p.branch ?? null,
     est_sq_ft: p.estimated_square_footage ?? null,
     quote_amount: p.quote_total ?? null,
@@ -493,7 +618,7 @@ export function extractInternalFieldValues(payload) {
     city: p.city ?? null,
     state: p.state ?? null,
     estimate_summary: String(p.internal_estimate_summary || "").trim() || null,
-    estimate_link: p.estimate_link ?? p.internal_estimate_deep_link ?? p.quote_library_link ?? null,
+    estimate_link: normalizeEstimateLinkField(p),
     revision: p.revision_label ?? null,
     last_revised: p.last_revised_at ?? p.updated_at ?? null,
     pricing_mode: p.pricing_mode_label ?? null

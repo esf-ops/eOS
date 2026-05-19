@@ -163,7 +163,8 @@ export async function persistQuoteSubmission(db, opts) {
     internalEstimateSummary = null,
     pricingModeLabel = null,
     headerExtras = null,
-    skipMondaySync = false
+    skipMondaySync = false,
+    estimatorDisplayName = null
   } = opts;
 
   const orgId = organizationContext?.organizationId ? String(organizationContext.organizationId) : null;
@@ -389,7 +390,8 @@ export async function persistQuoteSubmission(db, opts) {
       account_name: body.account ?? body.account_name ?? null,
       quote_number_base: headerMerged.quote_number_base ?? null,
       revision_label: headerMerged.revision_label ?? null,
-      quote_family_root_id: headerMerged.quote_family_root_id ?? null
+      quote_family_root_id: headerMerged.quote_family_root_id ?? null,
+      estimated_by_display: estimatorDisplayName
     }
   );
   let mondaySync = { ok: true, skipped: true, status: "skipped" };

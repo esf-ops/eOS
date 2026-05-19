@@ -9,7 +9,8 @@ import { logAction } from "../auth/auditLog.js";
 import {
   buildInternalEstimateSummaryForMonday,
   internalMondayColumnMappingConfigured,
-  introspectInternalMondayBoard
+  introspectInternalMondayBoard,
+  resolveEstimatorDisplayNameFromDb
 } from "../integrations/mondayQuoteSync.js";
 import {
   mergeRowOrganizationId,
@@ -168,6 +169,7 @@ export function attachInternalQuoteRoutes(app, deps) {
         }
       };
       const internalEstimateSummary = buildInternalEstimateSummary(calc, body, snapshotToStore);
+      const estimatorDisplayName = await resolveEstimatorDisplayNameFromDb(db, req, body);
       const pMode = pricingModeLabel(body);
       const warnings = [...(calc.warnings || [])];
       if (!internalMondayColumnMappingConfigured() && String(process.env.MONDAY_INTERNAL_QUOTES_BOARD_ID || "").trim()) {
@@ -188,6 +190,7 @@ export function attachInternalQuoteRoutes(app, deps) {
           snapshotToStore,
           internalEstimateSummary,
           pricingModeLabel: pMode,
+          estimatorDisplayName,
           internalStatuses: INTERNAL_STATUSES
         });
         if (!result.ok) {

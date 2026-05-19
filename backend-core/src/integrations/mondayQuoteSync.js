@@ -38,8 +38,10 @@ import {
   buildInternalMondayDryRunResult,
   buildInternalMondayItemName,
   buildMondayInternalColumnValuesFromMap,
+  classifyMondayColumnApplyResult,
   fetchMondayBoardSchema,
   internalMondayColumnMappingConfigured,
+  resolveEstimatorDisplayName,
   resolveInternalGroupKeyForStatus,
   resolveInternalMondayColumnMap,
   resolveInternalMondayGroupId,
@@ -49,8 +51,11 @@ import {
 export {
   buildInternalEstimateSummaryForMonday,
   buildInternalMondayItemName,
+  classifyMondayColumnApplyResult,
   fetchMondayBoardSchema,
   internalMondayColumnMappingConfigured,
+  mapInternalStatusToMondayLabel,
+  resolveEstimatorDisplayName,
   resolveInternalMondayColumnMap
 } from "./mondayInternalBoardSync.js";
 
@@ -206,6 +211,7 @@ export function buildMondayQuotePayload(quote, snapshot, extras = {}) {
     last_revised_at: q.updated_at ?? null,
     updated_at: q.updated_at ?? null,
     entered_by: q.prepared_by ?? null,
+    estimated_by_display: ex.estimated_by_display ?? null,
     city: q.city ?? null,
     state: q.state ?? null,
     zip: q.zip ?? null,
@@ -576,6 +582,72 @@ function safeMondayErrorMessage(err) {
     .replace(/[\u0000-\u001f\u007f]/g, " ")
     .slice(0, 4000);
   return s;
+}
+
+/**
+ * @param {import("@supabase/supabase-js").SupabaseClient|null|undefined} db
+ * @param {{ user?: Record<string, unknown>|null }} req
+ * @param {Record<string, unknown>} [body]
+ */
+export async function resolveEstimatorDisplayNameFromDb(db, req, body = {}) {
+  const preparedBy = String(body.entered_by ?? body.prepared_by ?? body.preparedBy ?? "").trim() || null;
+  /** @type {Record<string, unknown>|null} */
+  let profile = null;
+  const uid = req?.user?.id != null ? String(req.user.id).trim() : "";
+  const email = String(req?.user?.email || preparedBy || "").trim();
+  if (db?.from) {
+    try {
+      if (uid) {
+        const { data } = await db.from("user_profiles").select("full_name,email").eq("id", uid).maybeSingle();
+        if (data) profile = data;
+      } else if (email && email.includes("@")) {
+        const { data } = await db.from("user_profiles").select("full_name,email").eq("email", email).maybeSingle();
+        if (data) profile = data;
+      }
+    } catch {
+      /* optional table */
+    }
+  }
+  return resolveEstimatorDisplayName({ user: req?.user ?? null, profile, preparedBy, enteredBy: preparedBy });
+}
+
+/**
+ * Apply column_values one column at a time so a single bad status label does not block Estimate Link, etc.
+ * @param {{ token: string, boardId: string, itemId: string, columnValues: Record<string, unknown> }} p
+ */
+async function applyMondayColumnValuesIncremental(p) {
+  const { token, boardId, itemId, columnValues } = p;
+  const entries = Object.entries(columnValues || {});
+  /** @type {string[]} */
+  const attemptedColumnIds = entries.map(([id]) => id);
+  /** @type {string[]} */
+  const appliedColumnIds = [];
+  /** @type {string[]} */
+  const failedColumnIds = [];
+  /** @type {Record<string, string>} */
+  const columnErrors = {};
+
+  for (const [colId, val] of entries) {
+    try {
+      await mondayGraphql(token, CHANGE_MULTIPLE_COLUMN_VALUES_MUTATION, {
+        boardId: String(boardId),
+        itemId: String(itemId),
+        columnValues: JSON.stringify({ [colId]: val })
+      });
+      appliedColumnIds.push(colId);
+    } catch (e) {
+      failedColumnIds.push(colId);
+      columnErrors[colId] = safeMondayErrorMessage(e).slice(0, 500);
+    }
+  }
+
+  return {
+    attemptedColumnIds,
+    appliedColumnIds,
+    failedColumnIds,
+    columnErrors,
+    status: classifyMondayColumnApplyResult({ attemptedColumnIds, appliedColumnIds, failedColumnIds })
+  };
 }
 
 /**
@@ -1168,63 +1240,71 @@ export async function syncQuoteToMonday(params) {
       }
 
       if (existingItemId) {
-        try {
-          if (intColumnIds.length > 0) {
-            await mondayGraphql(token, CHANGE_MULTIPLE_COLUMN_VALUES_MUTATION, {
-              boardId: String(boardId),
-              itemId: String(existingItemId),
-              columnValues: JSON.stringify(mergedInt)
-            });
-          }
-          await patchQuoteHeaderMondayIds(db, params.quoteId, boardId, existingItemId);
-          await writeMondaySyncLog({
-            quoteId: params.quoteId,
-            action: params.action || "sync",
-            mondayBoardId: String(boardId),
-            mondayItemId: existingItemId,
-            requestPayload: intRequestPayload,
-            responsePayload: {
-              sync_action: "update",
-              updated_columns: intColumnIds,
-              resolved_via: resolved.source,
-              target_group: groupTarget
-            },
-            status: intColumnIds.length ? "success_updated_columns" : "success_updated_name_only",
-            errorMessage: null,
-            db,
-            organizationId: params.organizationId ?? null
-          });
-          return {
-            ok: true,
-            skipped: false,
-            status: intColumnIds.length ? "success_updated_columns" : "success_updated_name_only",
-            monday_item_id: existingItemId,
-            monday_board_id: String(boardId),
-            warning: null
-          };
-        } catch (e) {
-          const msg = safeMondayErrorMessage(e);
-          await writeMondaySyncLog({
-            quoteId: params.quoteId,
-            action: params.action || "sync",
-            mondayBoardId: String(boardId),
-            mondayItemId: existingItemId,
-            requestPayload: intRequestPayload,
-            responsePayload: { sync_action: "update", resolved_via: resolved.source },
-            status: "failed_internal_column_update",
-            errorMessage: msg,
-            db,
-            organizationId: params.organizationId ?? null
-          });
-          return {
-            ok: true,
-            skipped: false,
-            status: "failed_internal_column_update",
-            monday_item_id: existingItemId,
-            monday_board_id: String(boardId),
-            warning: msg.slice(0, 400)
-          };
-        }
+        const applyResult =
+          intColumnIds.length > 0
+            ? await applyMondayColumnValuesIncremental({
+                token,
+                boardId: String(boardId),
+                itemId: String(existingItemId),
+                columnValues: mergedInt
+              })
+            : {
+                attemptedColumnIds: [],
+                appliedColumnIds: [],
+                failedColumnIds: [],
+                columnErrors: {},
+                status: "success_updated_name_only"
+              };
+
+        await patchQuoteHeaderMondayIds(db, params.quoteId, boardId, existingItemId);
+
+        const updateStatus = applyResult.status;
+        const partialWarning =
+          updateStatus === "success_partial_columns"
+            ? "Some Monday columns could not be updated (for example Status label mismatch). Other fields were saved on the board."
+            : updateStatus === "failed_internal_column_update"
+              ? "Monday item exists but column updates failed. Quote was still saved in eliteOS."
+              : null;
+        const errorMessage =
+          applyResult.failedColumnIds.length > 0
+            ? Object.entries(applyResult.columnErrors || {})
+                .map(([k, v]) => `${k}: ${v}`)
+                .join(" | ")
+                .slice(0, 4000)
+            : null;
+
+        await writeMondaySyncLog({
+          quoteId: params.quoteId,
+          action: params.action || "sync",
+          mondayBoardId: String(boardId),
+          mondayItemId: existingItemId,
+          requestPayload: {
+            ...intRequestPayload,
+            graphql: "change_multiple_column_values_incremental_per_column"
+          },
+          responsePayload: {
+            sync_action: "update",
+            applied_column_ids: applyResult.appliedColumnIds,
+            failed_column_ids: applyResult.failedColumnIds,
+            attempted_column_ids: applyResult.attemptedColumnIds,
+            column_errors: applyResult.columnErrors,
+            resolved_via: resolved.source,
+            target_group: groupTarget
+          },
+          status: updateStatus,
+          errorMessage,
+          db,
+          organizationId: params.organizationId ?? null
+        });
+
+        return {
+          ok: true,
+          skipped: false,
+          status: updateStatus,
+          monday_item_id: existingItemId,
+          monday_board_id: String(boardId),
+          warning: partialWarning
+        };
       }
 
       if (intColumnIds.length === 0) {
