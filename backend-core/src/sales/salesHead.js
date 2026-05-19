@@ -13,8 +13,8 @@ import {
   loadApprovedSalesAttributionMappings,
   methodLabelForDisplay
 } from "./salesAttribution.js";
-import { loadSalesAttributionCoverage } from "./salesAttributionCoverage.js";
 import { buildCompanyWideSqftActuals, buildProductionReportReconciliation, extractSqftFromMorawareJob } from "./morawareSqftActuals.js";
+import { normalizeAccountNameWithoutLocationPrefix } from "./salesAccountNameNormalizer.js";
 
 /** Roles that may call `/api/sales/*` when also granted head `sales` (admin bypass unchanged). */
 export const SALES_API_ROLES = Object.freeze(["admin", "executive", "sales", "finance", "marketing"]);
@@ -1976,6 +1976,226 @@ async function fetchLatestPreparedSalesJobFacts(supabase, organizationId, syncHe
   };
 }
 
+function latestAliasDecisionByNorm(aliases) {
+  const byNorm = new Map();
+  for (const alias of aliases) {
+    const norm = String(alias.normalized_moraware_name ?? "").trim();
+    if (!norm) continue;
+    const prev = byNorm.get(norm);
+    if (!prev) {
+      byNorm.set(norm, alias);
+      continue;
+    }
+    const prevApproved = prev.approved === true;
+    const curApproved = alias.approved === true;
+    if (curApproved && !prevApproved) {
+      byNorm.set(norm, alias);
+      continue;
+    }
+    const prevUpdated = String(prev.updated_at ?? prev.created_at ?? "");
+    const curUpdated = String(alias.updated_at ?? alias.created_at ?? "");
+    if (curUpdated > prevUpdated) byNorm.set(norm, alias);
+  }
+  return byNorm;
+}
+
+function statusForSalesAlias(alias) {
+  if (!alias) return "needs_review_unmapped";
+  const matchType = String(alias.match_type ?? "").toLowerCase();
+  const assigned = String(alias.assigned_salesperson ?? "").toLowerCase();
+  const branch = String(alias.branch ?? "").toLowerCase();
+  if (matchType === "rejected") return "rejected_ignored";
+  if (alias.approved === true && (matchType === "intentional_unmapped" || assigned === "unmapped" || branch === "unmapped")) {
+    return "rejected_ignored";
+  }
+  if (alias.approved === true) return "approved_mapped";
+  return "needs_review_unmapped";
+}
+
+async function fetchSalesAliasRows(supabase) {
+  const rows = [];
+  let from = 0;
+  const pageSize = 1000;
+  while (true) {
+    const { data, error } = await supabase
+      .from("sales_account_aliases")
+      .select(
+        "id,approved,moraware_account_name,normalized_moraware_name,monday_account_name,assigned_salesperson,branch,match_type,confidence,notes,created_at,updated_at"
+      )
+      .order("updated_at", { ascending: false })
+      .range(from, from + pageSize - 1);
+    if (error) {
+      if (isMissingRelationError(error)) return { rows, warning: "sales_account_aliases table missing; attribution coverage is unavailable." };
+      throw error;
+    }
+    if (!data?.length) break;
+    rows.push(...data);
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+  return { rows, warning: null };
+}
+
+async function loadCompactSalesAttributionCoverage(supabase, { organizationId, syncHealth }) {
+  const startedAt = Date.now();
+  const importGroupId = String(syncHealth?.latest_group?.import_group_id ?? "").trim();
+  const diagnostics = {
+    attribution_used_account_rollups: false,
+    attribution_account_rollups_count: 0,
+    attribution_mapping_rows_count: 0,
+    used_precomputed_summary: false,
+    warning: null
+  };
+  if (!importGroupId || syncHealth?.latest_group?.complete === false) {
+    diagnostics.warning = "Latest complete import group is unavailable; compact attribution coverage skipped.";
+    return {
+      source: "sales_moraware_account_rollups_plus_sales_account_aliases",
+      latest_import_group_id: importGroupId || null,
+      totalAccountsSeen: 0,
+      approvedMappedAccounts: 0,
+      needsReviewUnmappedAccounts: 0,
+      rejectedIgnoredAccounts: 0,
+      totalJobsSeen: 0,
+      approvedMappedJobs: 0,
+      needsReviewUnmappedJobs: 0,
+      rejectedIgnoredJobs: 0,
+      totalSqftSeen: 0,
+      approvedMappedSqft: 0,
+      needsReviewUnmappedSqft: 0,
+      rejectedIgnoredSqft: 0,
+      approvedAccountCoveragePct: null,
+      approvedJobCoveragePct: null,
+      approvedSqftCoveragePct: null,
+      blackstoneUnapprovedAccounts: 0,
+      warning:
+        "Revenue/sqft by branch remains preview until approved Sales Account Mapping coverage is high; local fallback rules do not count as trusted coverage.",
+      blackstone_guardrail:
+        "Blackstone remains unmapped/Moraware fallback unless an approved Sales Account Mapping row explicitly maps it.",
+      reviewRows: [],
+      diagnostics: { ...diagnostics, compute_ms: elapsedMs(startedAt) },
+      warnings: [diagnostics.warning]
+    };
+  }
+
+  let rollups = [];
+  try {
+    const { data, error } = await supabase
+      .from("sales_moraware_account_rollups")
+      .select(
+        "source_account_id,account_name,normalized_moraware_name,job_count,jobs_with_sqft,jobs_missing_sqft,total_sqft,first_report_date,last_report_date"
+      )
+      .eq("organization_id", organizationId)
+      .eq("import_group_id", importGroupId)
+      .order("total_sqft", { ascending: false });
+    if (error) throw error;
+    rollups = data ?? [];
+  } catch (e) {
+    if (!isMissingRelationError(e)) throw e;
+    diagnostics.warning = "Prepared Sales account rollups table is not installed yet.";
+  }
+
+  const aliasResult = await fetchSalesAliasRows(supabase);
+  const aliasesByNorm = latestAliasDecisionByNorm(aliasResult.rows);
+  diagnostics.attribution_used_account_rollups = rollups.length > 0;
+  diagnostics.attribution_account_rollups_count = rollups.length;
+  diagnostics.attribution_mapping_rows_count = aliasResult.rows.length;
+  diagnostics.used_precomputed_summary = rollups.length > 0;
+  if (aliasResult.warning) diagnostics.warning = aliasResult.warning;
+
+  const counts = {
+    totalAccountsSeen: 0,
+    approvedMappedAccounts: 0,
+    needsReviewUnmappedAccounts: 0,
+    rejectedIgnoredAccounts: 0,
+    totalJobsSeen: 0,
+    approvedMappedJobs: 0,
+    needsReviewUnmappedJobs: 0,
+    rejectedIgnoredJobs: 0,
+    totalSqftSeen: 0,
+    approvedMappedSqft: 0,
+    needsReviewUnmappedSqft: 0,
+    rejectedIgnoredSqft: 0,
+    blackstoneUnapprovedAccounts: 0
+  };
+  const reviewRows = [];
+  const examples = { needsReviewUnmapped: [], rejectedIgnored: [], approvedMapped: [], blackstoneUnapproved: [] };
+  for (const row of rollups) {
+    const norm = String(row.normalized_moraware_name ?? "").trim() || normalizeAccountNameWithoutLocationPrefix(row.account_name);
+    const alias = aliasesByNorm.get(norm) || null;
+    const status = statusForSalesAlias(alias);
+    const jobCount = Number(row.job_count) || 0;
+    const jobsWithSqft = Number(row.jobs_with_sqft) || 0;
+    const totalSqft = Number(row.total_sqft) || 0;
+    const example = {
+      accountName: String(row.account_name ?? row.source_account_id ?? "(unknown)"),
+      sourceAccountId: row.source_account_id ?? null,
+      normalizedMorawareName: norm || null,
+      jobCount,
+      jobsWithSqft,
+      jobsMissingSqft: Number(row.jobs_missing_sqft) || Math.max(0, jobCount - jobsWithSqft),
+      totalSqft,
+      status,
+      mondayAccountName: alias?.monday_account_name ?? null,
+      assignedSalesperson: alias?.assigned_salesperson ?? null,
+      branch: alias?.branch ?? null,
+      matchType: alias?.match_type ?? null,
+      approved: alias?.approved ?? false,
+      confidence: alias?.confidence ?? null,
+      notes: alias?.notes ?? null,
+      aliasId: alias?.id ?? null,
+      reviewStatus: status
+    };
+    counts.totalAccountsSeen += 1;
+    counts.totalJobsSeen += jobCount;
+    counts.totalSqftSeen += totalSqft;
+    if (status === "approved_mapped") {
+      counts.approvedMappedAccounts += 1;
+      counts.approvedMappedJobs += jobCount;
+      counts.approvedMappedSqft += totalSqft;
+      examples.approvedMapped.push(example);
+    } else if (status === "rejected_ignored") {
+      counts.rejectedIgnoredAccounts += 1;
+      counts.rejectedIgnoredJobs += jobCount;
+      counts.rejectedIgnoredSqft += totalSqft;
+      examples.rejectedIgnored.push(example);
+    } else {
+      counts.needsReviewUnmappedAccounts += 1;
+      counts.needsReviewUnmappedJobs += jobCount;
+      counts.needsReviewUnmappedSqft += totalSqft;
+      examples.needsReviewUnmapped.push(example);
+    }
+    if (norm.includes("blackstone") && status !== "approved_mapped") {
+      counts.blackstoneUnapprovedAccounts += 1;
+      examples.blackstoneUnapproved.push(example);
+    }
+    reviewRows.push(example);
+  }
+
+  const pct = (num, den) => (Number(den) > 0 ? (Number(num) / Number(den)) * 100 : null);
+  return {
+    source: "sales_moraware_account_rollups_plus_sales_account_aliases",
+    latest_import_group_id: importGroupId,
+    ...counts,
+    approvedAccountCoveragePct: pct(counts.approvedMappedAccounts, counts.totalAccountsSeen),
+    approvedJobCoveragePct: pct(counts.approvedMappedJobs, counts.totalJobsSeen),
+    approvedSqftCoveragePct: pct(counts.approvedMappedSqft, counts.totalSqftSeen),
+    sqft_source: "Prepared Sales Moraware account rollups",
+    warning:
+      "Revenue/sqft by branch remains preview until approved Sales Account Mapping coverage is high; local fallback rules do not count as trusted coverage.",
+    blackstone_guardrail:
+      "Blackstone remains unmapped/Moraware fallback unless an approved Sales Account Mapping row explicitly maps it.",
+    examples: {
+      needsReviewUnmapped: examples.needsReviewUnmapped.slice(0, 20),
+      rejectedIgnored: examples.rejectedIgnored.slice(0, 10),
+      approvedMapped: examples.approvedMapped.slice(0, 10),
+      blackstoneUnapproved: examples.blackstoneUnapproved.slice(0, 10)
+    },
+    reviewRows,
+    diagnostics: { ...diagnostics, compute_ms: elapsedMs(startedAt) },
+    warnings: [diagnostics.warning, aliasResult.warning].filter(Boolean)
+  };
+}
+
 async function fetchLatestCompleteMorawareActivities(supabase, organizationId, syncHealth) {
   const pageSize = 1000;
   const selectCols = "sync_run_id,source_activity_id,source_job_id,activity_type_name,activity_status_name,phase_name,scheduled_date,raw_payload";
@@ -2051,6 +2271,41 @@ async function buildSalesMorawareJobFactsForLatestGroup(supabase, organizationId
   let jobsScanned = 0;
   let factsUpserted = 0;
   let queryPageCount = 0;
+  const rollupsByAccount = new Map();
+
+  const addRollupFact = (fact) => {
+    const normalizedMorawareName = normalizeAccountNameWithoutLocationPrefix(fact.account_name);
+    const key = normalizedMorawareName || String(fact.source_account_id ?? "").trim() || "(unknown)";
+    const current =
+      rollupsByAccount.get(key) ||
+      {
+        organization_id: organizationId,
+        import_group_id: importGroupId,
+        source_account_id: fact.source_account_id ?? null,
+        account_name: fact.account_name ?? null,
+        normalized_moraware_name: normalizedMorawareName || key,
+        job_count: 0,
+        jobs_with_sqft: 0,
+        jobs_missing_sqft: 0,
+        total_sqft: 0,
+        first_report_date: null,
+        last_report_date: null,
+        updated_at: new Date().toISOString()
+      };
+    current.job_count += 1;
+    if (fact.sqft_found) {
+      current.jobs_with_sqft += 1;
+      current.total_sqft += Number(fact.worksheet_sqft) || 0;
+    } else {
+      current.jobs_missing_sqft += 1;
+    }
+    const reportDate = String(fact.created_at_source ?? "").slice(0, 10);
+    if (reportDate) {
+      if (!current.first_report_date || reportDate < current.first_report_date) current.first_report_date = reportDate;
+      if (!current.last_report_date || reportDate > current.last_report_date) current.last_report_date = reportDate;
+    }
+    rollupsByAccount.set(key, current);
+  };
 
   // Dashboard requests must never do this raw-payload extraction. This builder
   // is the controlled path to refresh prepared facts after an import/sync.
@@ -2099,10 +2354,13 @@ async function buildSalesMorawareJobFactsForLatestGroup(supabase, organizationId
       });
       await upsertRowsInChunks(supabase, "sales_moraware_job_facts", facts, "organization_id,import_group_id,source_job_id", 100);
       factsUpserted += facts.length;
+      for (const fact of facts) addRollupFact(fact);
       if (data.length < pageSize) break;
       from += pageSize;
     }
   }
+  const rollups = [...rollupsByAccount.values()].map((row) => ({ ...row, total_sqft: Math.round(row.total_sqft * 100) / 100 }));
+  await upsertRowsInChunks(supabase, "sales_moraware_account_rollups", rollups, "organization_id,import_group_id,normalized_moraware_name", 100);
 
   return {
     ok: true,
@@ -2110,6 +2368,7 @@ async function buildSalesMorawareJobFactsForLatestGroup(supabase, organizationId
     import_group_id: importGroupId,
     jobs_scanned: jobsScanned,
     facts_upserted: factsUpserted,
+    account_rollups_upserted: rollups.length,
     query_page_count: queryPageCount,
     compute_ms: elapsedMs(startedAt)
   };
@@ -2235,7 +2494,7 @@ export async function salesDashboardFoundationHandler(req, supabaseGetter) {
     ]);
 
   const attributionStartedAt = Date.now();
-  const attributionCoverage = await loadSalesAttributionCoverage(supabase, { organizationId, includeSqftRollups: false });
+  const attributionCoverage = await loadCompactSalesAttributionCoverage(supabase, { organizationId, syncHealth });
   const attributionComputeMs = elapsedMs(attributionStartedAt);
   let jobs = [];
   let jobReadDiagnostics;
@@ -2333,6 +2592,10 @@ export async function salesDashboardFoundationHandler(req, supabaseGetter) {
     prepared_rollup_warning: preparedFacts.warning ?? null,
     actuals_compute_ms: actualsComputeMs,
     attribution_compute_ms: attributionComputeMs,
+    attribution_used_account_rollups: Boolean(attributionCoverage?.diagnostics?.attribution_used_account_rollups),
+    attribution_account_rollups_count: attributionCoverage?.diagnostics?.attribution_account_rollups_count ?? null,
+    attribution_mapping_rows_count: attributionCoverage?.diagnostics?.attribution_mapping_rows_count ?? null,
+    used_precomputed_summary: Boolean(attributionCoverage?.diagnostics?.used_precomputed_summary),
     reconciliation_compute_ms: reconciliationComputeMs,
     reconciliation_status: reconciliationStatus,
     production_report_reconciliation: productionReportReconciliation,
@@ -2408,6 +2671,10 @@ export async function salesDashboardFoundationHandler(req, supabaseGetter) {
         request_compute_ms: elapsedMs(requestStartedAt),
         actuals_compute_ms: actualsComputeMs,
         attribution_compute_ms: attributionComputeMs,
+        attribution_used_account_rollups: Boolean(attributionCoverage?.diagnostics?.attribution_used_account_rollups),
+        attribution_account_rollups_count: attributionCoverage?.diagnostics?.attribution_account_rollups_count ?? null,
+        attribution_mapping_rows_count: attributionCoverage?.diagnostics?.attribution_mapping_rows_count ?? null,
+        used_precomputed_summary: Boolean(attributionCoverage?.diagnostics?.used_precomputed_summary),
         reconciliation_compute_ms: reconciliationComputeMs,
         used_precomputed_rollup: Boolean(jobReadDiagnostics.used_precomputed_rollup),
         reconciliation_status: reconciliationStatus
