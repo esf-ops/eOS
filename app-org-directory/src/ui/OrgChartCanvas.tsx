@@ -1,11 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import {
+  applyNodeChanges,
   Background,
   Controls,
   ReactFlow,
+  useEdgesState,
+  useNodesState,
   type Connection,
   type Edge,
   type Node,
+  type NodeChange,
   type ReactFlowInstance
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -14,6 +18,7 @@ import { applyAutoLayout, clearManualLayout } from "../lib/chartLayout";
 import { chartToFlow, type SeatNodeData } from "../lib/chartFlow";
 import {
   connectManagerToReport,
+  ensureLayout,
   normalizeChartData,
   removeRelationshipById
 } from "../lib/chartUtils";
@@ -24,45 +29,97 @@ const nodeTypes = { seat: OrgChartSeatNode };
 type Props = {
   chartData: ChartData;
   canEdit: boolean;
-  printMode?: boolean;
   selectedSeatId: string | null;
   onSelectSeat: (id: string | null) => void;
   onChartChange: (fn: (prev: ChartData) => ChartData) => void;
 };
 
+function chartSyncKey(chart: ChartData, selectedSeatId: string | null): string {
+  const layout = ensureLayout(chart).nodePositions;
+  return JSON.stringify({
+    seats: chart.seats,
+    departments: chart.departments,
+    relationships: chart.relationships,
+    layout,
+    selectedSeatId
+  });
+}
+
 export default function OrgChartCanvas({
   chartData,
   canEdit,
-  printMode,
   selectedSeatId,
   onSelectSeat,
   onChartChange
 }: Props) {
   const flowRef = useRef<ReactFlowInstance<Node<SeatNodeData>, Edge> | null>(null);
+  const isDraggingRef = useRef(false);
   const chart = useMemo(() => normalizeChartData(chartData), [chartData]);
+  const syncKey = useMemo(() => chartSyncKey(chart, selectedSeatId), [chart, selectedSeatId]);
 
-  const { nodes: layoutNodes, edges: layoutEdges } = useMemo(
-    () => chartToFlow(chart, selectedSeatId),
-    [chart, selectedSeatId]
-  );
+  const flowFromChart = useMemo(() => chartToFlow(chart, selectedSeatId), [chart, selectedSeatId]);
 
-  const onNodeDragStop = useCallback(
-    (_evt: React.MouseEvent, node: Node<SeatNodeData>) => {
-      if (!canEdit) return;
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node<SeatNodeData>>(flowFromChart.nodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(flowFromChart.edges);
+
+  /** Re-sync from chart_data when structure/layout changes — not while user is dragging. */
+  useEffect(() => {
+    if (isDraggingRef.current) return;
+    const next = chartToFlow(chart, selectedSeatId);
+    setNodes(next.nodes);
+    setEdges(next.edges);
+  }, [syncKey, chart, selectedSeatId, setNodes, setEdges]);
+
+  const persistNodePosition = useCallback(
+    (nodeId: string, position: { x: number; y: number }) => {
       onChartChange((prev) => {
         const n = normalizeChartData(prev);
         return {
           ...n,
           layout: {
             nodePositions: {
-              ...n.layout!.nodePositions,
-              [node.id]: { x: node.position.x, y: node.position.y }
+              ...ensureLayout(n).nodePositions,
+              [nodeId]: { x: position.x, y: position.y }
             }
           }
         };
       });
     },
-    [canEdit, onChartChange]
+    [onChartChange]
+  );
+
+  const handleNodesChange = useCallback(
+    (changes: NodeChange<Node<SeatNodeData>>[]) => {
+      setNodes((current) => applyNodeChanges(changes, current));
+
+      if (!canEdit) return;
+
+      for (const change of changes) {
+        if (change.type === "position") {
+          if (change.dragging === true) {
+            isDraggingRef.current = true;
+          }
+          if (change.dragging === false && change.position) {
+            isDraggingRef.current = false;
+            persistNodePosition(change.id, change.position);
+          }
+        }
+      }
+    },
+    [canEdit, persistNodePosition, setNodes]
+  );
+
+  const onNodeDragStart = useCallback(() => {
+    isDraggingRef.current = true;
+  }, []);
+
+  const onNodeDragStop = useCallback(
+    (_evt: React.MouseEvent, node: Node<SeatNodeData>) => {
+      isDraggingRef.current = false;
+      if (!canEdit) return;
+      persistNodePosition(node.id, node.position);
+    },
+    [canEdit, persistNodePosition]
   );
 
   const onConnect = useCallback(
@@ -126,52 +183,47 @@ export default function OrgChartCanvas({
   }, [canEdit, onChartChange, fitView]);
 
   useEffect(() => {
-    if (printMode) {
-      window.setTimeout(() => fitView(), 100);
-    }
-  }, [printMode, layoutNodes.length, fitView]);
-
-  useEffect(() => {
-    if (layoutNodes.length) {
+    if (nodes.length) {
       window.setTimeout(() => fitView(), 80);
     }
-  }, [layoutNodes.length, fitView]);
+  }, [nodes.length, fitView]);
 
   return (
-    <div className={`od-flow-wrap${printMode ? " od-flow-wrap-print" : ""}`}>
-      {!printMode && canEdit ? (
+    <div className="od-flow-wrap">
+      {canEdit ? (
         <p className="od-canvas-hint od-no-print">
           Drag cards to reposition. Connect cards to update reporting lines. Save changes to keep the layout.
         </p>
       ) : null}
-      {!printMode ? (
-        <div className="od-flow-toolbar od-no-print">
-          <button type="button" className="od-btn" onClick={fitView}>
-            Fit to view
-          </button>
-          {canEdit ? (
-            <>
-              <button type="button" className="od-btn" onClick={autoArrange}>
-                Auto-arrange
-              </button>
-              <button type="button" className="od-btn" onClick={resetLayout}>
-                Reset layout
-              </button>
-            </>
-          ) : null}
-        </div>
-      ) : null}
+      <div className="od-flow-toolbar od-no-print">
+        <button type="button" className="od-btn" onClick={fitView}>
+          Fit to view
+        </button>
+        {canEdit ? (
+          <>
+            <button type="button" className="od-btn" onClick={autoArrange}>
+              Auto-arrange
+            </button>
+            <button type="button" className="od-btn" onClick={resetLayout}>
+              Reset layout
+            </button>
+          </>
+        ) : null}
+      </div>
       <ReactFlow
-        nodes={layoutNodes}
-        edges={layoutEdges}
+        nodes={nodes}
+        edges={edges}
         nodeTypes={nodeTypes}
         onInit={(inst) => {
           flowRef.current = inst;
         }}
-        nodesDraggable={canEdit && !printMode}
-        nodesConnectable={canEdit && !printMode}
-        elementsSelectable={!printMode}
-        edgesReconnectable={canEdit && !printMode}
+        onNodesChange={handleNodesChange}
+        onEdgesChange={onEdgesChange}
+        nodesDraggable={canEdit}
+        nodesConnectable={canEdit}
+        elementsSelectable
+        edgesReconnectable={canEdit}
+        onNodeDragStart={onNodeDragStart}
         onNodeDragStop={onNodeDragStop}
         onConnect={onConnect}
         onEdgesDelete={onEdgesDelete}
@@ -183,7 +235,7 @@ export default function OrgChartCanvas({
         proOptions={{ hideAttribution: true }}
       >
         <Background gap={20} size={1} color="#e2e8f0" />
-        {!printMode ? <Controls showInteractive={canEdit} /> : null}
+        <Controls showInteractive={canEdit} />
       </ReactFlow>
     </div>
   );

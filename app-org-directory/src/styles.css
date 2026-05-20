@@ -565,14 +565,40 @@ body {
   background: #fafbfc;
 }
 
-.od-flow-wrap-print {
-  height: 70vh;
-  min-height: 480px;
-}
-
 .od-flow-wrap .react-flow {
   width: 100%;
   height: 100%;
+}
+
+.od-screen-chart--hidden {
+  display: none;
+}
+
+.od-print-chart-surface {
+  display: none;
+}
+
+.od-print-chart-surface--active {
+  display: block;
+  padding: 8px 0;
+}
+
+.od-print-mode .od-screen-chart {
+  display: none;
+}
+
+.od-print-mode .od-print-chart-surface {
+  display: block;
+}
+
+/* Live drag: no CSS transition lag on nodes */
+.react-flow__node {
+  transition: none !important;
+}
+
+.react-flow__node.dragging {
+  transition: none !important;
+  z-index: 10;
 }
 
 .od-flow-node {
@@ -633,7 +659,143 @@ body {
   border: 2px solid #fff !important;
 }
 
+.od-print-chart-body {
+  width: 100%;
+}
+
+.od-print-tree-wrap {
+  overflow: visible;
+  padding: 12px 0;
+}
+
+.od-print-tree,
+.od-print-tree ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  justify-content: center;
+  gap: 24px;
+  position: relative;
+}
+
+.od-print-tree li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 18px 10px 0;
+  position: relative;
+}
+
+.od-print-tree li::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 2px;
+  height: 18px;
+  background: #cbd5e1;
+  transform: translateX(-50%);
+}
+
+.od-print-tree > li::before {
+  display: none;
+}
+
+.od-print-tree ul::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 8%;
+  right: 8%;
+  height: 2px;
+  background: #cbd5e1;
+}
+
+.od-print-node {
+  min-width: 160px;
+  max-width: 200px;
+  border: 1px solid #cbd5e1;
+  border-top: 4px solid #94a3b8;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #fff;
+  text-align: center;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.od-print-node-name {
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.od-print-node-title {
+  font-size: 0.78rem;
+  color: #475569;
+  margin-top: 2px;
+}
+
+.od-print-node-meta {
+  margin-top: 6px;
+  font-size: 0.68rem;
+  color: #64748b;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: center;
+}
+
+.od-print-node-meta span {
+  background: #f1f5f9;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.od-print-node-open {
+  border-style: dashed;
+  background: #fffbeb;
+}
+
+.od-print-node-future {
+  background: #f8fafc;
+}
+
+.od-print-node-advisor {
+  background: #faf5ff;
+}
+
+.od-print-secondary {
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px solid #e2e8f0;
+  break-inside: avoid;
+}
+
+.od-print-secondary h2 {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+  color: var(--od-accent);
+}
+
+.od-print-secondary ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.od-print-secondary li {
+  font-size: 0.82rem;
+  color: #475569;
+  margin-bottom: 6px;
+}
+
 @media print {
+  @page {
+    size: landscape;
+    margin: 0.5in;
+  }
+
   .od-no-print {
     display: none !important;
   }
@@ -648,7 +810,7 @@ body {
 
   .od-app {
     max-width: none;
-    padding: 0.5in;
+    padding: 0;
   }
 
   .od-card {
@@ -657,25 +819,18 @@ body {
     padding: 0;
   }
 
-  .od-chart-scroll {
-    border: none;
-    background: #fff;
-    overflow: visible;
-  }
-
-  .od-node {
-    break-inside: avoid;
-    box-shadow: none;
-  }
-
+  .od-screen-chart,
   .od-flow-wrap {
-    height: auto;
-    min-height: 9in;
-    border: none;
+    display: none !important;
+  }
+
+  .od-print-chart-surface {
+    display: block !important;
   }
 
   .react-flow__controls,
-  .react-flow__attribution {
+  .react-flow__attribution,
+  .react-flow__background {
     display: none !important;
   }
 }

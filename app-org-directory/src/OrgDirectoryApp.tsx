@@ -23,6 +23,7 @@ import {
   SEAT_STATUS_OPTIONS
 } from "./lib/displayLabels";
 import OrgChartCanvas from "./ui/OrgChartCanvas";
+import PrintOrgChart from "./ui/PrintOrgChart";
 import type { ChartData, RelationshipType, Seat, SeatStatus } from "./lib/chartTypes";
 import { RECOMMENDED_HEAD_OPTIONS } from "./lib/chartTypes";
 import { getSupabase } from "./lib/supabase";
@@ -549,13 +550,25 @@ export default function OrgDirectoryApp() {
                 )}
               </>
             ) : null}
-            <button type="button" className="od-btn od-no-print" onClick={() => setPrintMode(true)}>
+            <button
+              type="button"
+              className="od-btn od-no-print"
+              onClick={() => {
+                setTab("chart");
+                setPrintMode(true);
+              }}
+            >
               Print view
             </button>
             {printMode ? (
-              <button type="button" className="od-btn od-no-print" onClick={() => setPrintMode(false)}>
-                Exit print
-              </button>
+              <>
+                <button type="button" className="od-btn od-btn-primary od-no-print" onClick={() => window.print()}>
+                  Print document
+                </button>
+                <button type="button" className="od-btn od-no-print" onClick={() => setPrintMode(false)}>
+                  Exit print
+                </button>
+              </>
             ) : null}
           </div>
           {!chartHasSeats ? (
@@ -577,14 +590,20 @@ export default function OrgDirectoryApp() {
               ) : null}
             </div>
           ) : (
-            <OrgChartCanvas
-              chartData={chartData}
-              canEdit={canEdit}
-              printMode={printMode}
-              selectedSeatId={selectedSeatId}
-              onSelectSeat={setSelectedSeatId}
-              onChartChange={updateChart}
-            />
+            <>
+              <div className={`od-screen-chart${printMode ? " od-screen-chart--hidden" : ""}`}>
+                <OrgChartCanvas
+                  chartData={chartData}
+                  canEdit={canEdit}
+                  selectedSeatId={selectedSeatId}
+                  onSelectSeat={setSelectedSeatId}
+                  onChartChange={updateChart}
+                />
+              </div>
+              <div className={`od-print-chart-surface${printMode ? " od-print-chart-surface--active" : ""}`}>
+                <PrintOrgChart chartData={chartData} />
+              </div>
+            </>
           )}
         </div>
       )}
@@ -948,9 +967,9 @@ export default function OrgDirectoryApp() {
               type="button"
               className="od-btn"
               onClick={() => {
-                setPrintMode(true);
                 setTab("chart");
-                window.setTimeout(() => window.print(), 300);
+                setPrintMode(true);
+                window.setTimeout(() => window.print(), 400);
               }}
             >
               Print chart
