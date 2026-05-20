@@ -3,28 +3,23 @@ import { apiFetch, ApiError } from "./lib/api";
 import { EOS_LOGO_URL, readOrgDirectoryConfig } from "./lib/config";
 import {
   deptMap,
-  directManagerId,
   displayName,
   isChartEmpty,
+  isStructuralSeat,
   newId,
   ensureLayout,
   normalizeChartData,
   pruneLayoutForSeats,
   removeRelationshipsForSeat,
-  seatMap,
-  setDirectManager
+  seatListLabel,
+  seatMap
 } from "./lib/chartUtils";
 import { buildEliteStarterChartData } from "./lib/eliteStarterChart";
-import {
-  APP_TITLE,
-  relationshipTypeLabel,
-  RELATIONSHIP_TYPE_OPTIONS,
-  seatStatusLabel,
-  SEAT_STATUS_OPTIONS
-} from "./lib/displayLabels";
+import { APP_TITLE, seatStatusLabel } from "./lib/displayLabels";
 import OrgChartCanvas from "./ui/OrgChartCanvas";
 import PrintOrgChart from "./ui/PrintOrgChart";
-import type { ChartData, RelationshipType, Seat, SeatStatus } from "./lib/chartTypes";
+import RoleInspectorPanel from "./ui/RoleInspectorPanel";
+import type { ChartData } from "./lib/chartTypes";
 import { RECOMMENDED_HEAD_OPTIONS } from "./lib/chartTypes";
 import { getSupabase } from "./lib/supabase";
 
@@ -325,7 +320,45 @@ export default function OrgDirectoryApp() {
       ]
     }));
     setSelectedSeatId(id);
-    setTab("seats");
+    setTab("chart");
+  };
+
+  const addStructuralSeat = () => {
+    if (!canEdit) return;
+    const id = newId("seat");
+    updateChart((prev) => ({
+      ...prev,
+      seats: [
+        ...prev.seats,
+        {
+          id,
+          personName: "",
+          title: "New group",
+          departmentId: prev.departments[0]?.id ?? null,
+          branch: "",
+          status: "structural",
+          notes: "",
+          recommendedHeads: []
+        }
+      ]
+    }));
+    setSelectedSeatId(id);
+    setTab("chart");
+  };
+
+  const removeSelectedSeat = () => {
+    if (!selectedSeatId || !canEdit) return;
+    updateChart((prev) => {
+      const nextSeats = prev.seats.filter((x) => x.id !== selectedSeatId);
+      const seatIds = new Set(nextSeats.map((s) => s.id));
+      return {
+        ...prev,
+        seats: nextSeats,
+        relationships: removeRelationshipsForSeat(selectedSeatId, prev.relationships),
+        layout: pruneLayoutForSeats(ensureLayout(prev), seatIds)
+      };
+    });
+    setSelectedSeatId(null);
   };
 
   const exportJson = async () => {
@@ -539,6 +572,9 @@ export default function OrgDirectoryApp() {
                 <button type="button" className="od-btn" onClick={addSeat}>
                   Add role
                 </button>
+                <button type="button" className="od-btn" onClick={addStructuralSeat}>
+                  Add group card
+                </button>
                 {chartHasSeats ? (
                   <button type="button" className="od-btn od-btn-quiet" onClick={() => void loadStarterChart()}>
                     Reset to starter chart
@@ -591,14 +627,33 @@ export default function OrgDirectoryApp() {
             </div>
           ) : (
             <>
-              <div className={`od-screen-chart${printMode ? " od-screen-chart--hidden" : ""}`}>
-                <OrgChartCanvas
-                  chartData={chartData}
-                  canEdit={canEdit}
-                  selectedSeatId={selectedSeatId}
-                  onSelectSeat={setSelectedSeatId}
-                  onChartChange={updateChart}
-                />
+              <div className={`od-chart-workspace od-no-print${printMode ? " od-chart-workspace--hidden" : ""}`}>
+                <div className="od-chart-workspace-canvas">
+                  <OrgChartCanvas
+                    chartData={chartData}
+                    canEdit={canEdit}
+                    selectedSeatId={selectedSeatId}
+                    onSelectSeat={setSelectedSeatId}
+                    onChartChange={updateChart}
+                  />
+                </div>
+                {selectedSeat ? (
+                  <aside className="od-chart-workspace-inspector">
+                    <RoleInspectorPanel
+                      seat={selectedSeat}
+                      chartData={chartData}
+                      canEdit={canEdit}
+                      onChartChange={updateChart}
+                      onRemove={removeSelectedSeat}
+                      onClose={() => setSelectedSeatId(null)}
+                      onManageDepartments={() => setTab("departments")}
+                    />
+                  </aside>
+                ) : (
+                  <aside className="od-chart-workspace-inspector od-chart-workspace-inspector--empty">
+                    <p className="od-muted">Select a card on the chart to edit role details here.</p>
+                  </aside>
+                )}
               </div>
               <div className={`od-print-chart-surface${printMode ? " od-print-chart-surface--active" : ""}`}>
                 <PrintOrgChart chartData={chartData} />
@@ -680,8 +735,8 @@ export default function OrgDirectoryApp() {
                         style={{ cursor: "pointer", background: selectedSeatId === s.id ? "#f1f5f9" : undefined }}
                         onClick={() => setSelectedSeatId(s.id)}
                       >
-                        <td>{displayName(s)}</td>
-                        <td>{s.title}</td>
+                        <td>{seatListLabel(s)}</td>
+                        <td>{isStructuralSeat(s) ? "—" : s.title}</td>
                         <td>{seatStatusLabel(s.status)}</td>
                       </tr>
                     ))}
@@ -689,205 +744,23 @@ export default function OrgDirectoryApp() {
                 </table>
               </div>
             </div>
-            {selectedSeat && (
+            {selectedSeat ? (
               <div style={{ flex: "1 1 320px" }}>
-                <h3 style={{ marginTop: 0 }}>Edit role</h3>
-                {(() => {
-                  const mgrId = directManagerId(selectedSeat.id, relationships);
-                  const mgr = mgrId ? sm.get(mgrId) : null;
-                  const lineRel = mgrId
-                    ? relationships.find((r) => r.fromSeatId === selectedSeat.id && r.toSeatId === mgrId)
-                    : null;
-                  return (
-                    <p className="od-muted" style={{ marginTop: 0, marginBottom: 12 }}>
-                      {mgr
-                        ? `Currently reports to ${displayName(mgr)} (${mgr.title}).`
-                        : "Top-level role — no direct manager on the chart."}
-                      {lineRel && lineRel.type !== "direct" ?
-                        ` Line type: ${relationshipTypeLabel(lineRel.type)}.`
-                      : null}
-                    </p>
-                  );
-                })()}
-                <div className="od-form-grid">
-                  <label>
-                    Person name
-                    <input
-                      disabled={!canEdit}
-                      value={selectedSeat.personName}
-                      onChange={(e) =>
-                        updateChart((prev) => ({
-                          ...prev,
-                          seats: prev.seats.map((x) =>
-                            x.id === selectedSeat.id ? { ...x, personName: e.target.value } : x
-                          )
-                        }))
-                      }
-                    />
-                  </label>
-                  <label>
-                    Title / role
-                    <input
-                      disabled={!canEdit}
-                      value={selectedSeat.title}
-                      onChange={(e) =>
-                        updateChart((prev) => ({
-                          ...prev,
-                          seats: prev.seats.map((x) => (x.id === selectedSeat.id ? { ...x, title: e.target.value } : x))
-                        }))
-                      }
-                    />
-                  </label>
-                  <label>
-                    Department
-                    <select
-                      disabled={!canEdit}
-                      value={selectedSeat.departmentId ?? ""}
-                      onChange={(e) =>
-                        updateChart((prev) => ({
-                          ...prev,
-                          seats: prev.seats.map((x) =>
-                            x.id === selectedSeat.id ? { ...x, departmentId: e.target.value || null } : x
-                          )
-                        }))
-                      }
-                    >
-                      <option value="">—</option>
-                      {departments.map((d) => (
-                        <option key={d.id} value={d.id}>
-                          {d.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    Branch / location
-                    <input
-                      disabled={!canEdit}
-                      value={selectedSeat.branch}
-                      onChange={(e) =>
-                        updateChart((prev) => ({
-                          ...prev,
-                          seats: prev.seats.map((x) => (x.id === selectedSeat.id ? { ...x, branch: e.target.value } : x))
-                        }))
-                      }
-                    />
-                  </label>
-                  <label>
-                    Status
-                    <select
-                      disabled={!canEdit}
-                      value={selectedSeat.status}
-                      onChange={(e) =>
-                        updateChart((prev) => ({
-                          ...prev,
-                          seats: prev.seats.map((x) =>
-                            x.id === selectedSeat.id ? { ...x, status: e.target.value as SeatStatus } : x
-                          )
-                        }))
-                      }
-                    >
-                      {SEAT_STATUS_OPTIONS.map((st) => (
-                        <option key={st.value} value={st.value}>
-                          {st.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label style={{ gridColumn: "1 / -1" }}>
-                    Notes
-                    <textarea
-                      disabled={!canEdit}
-                      rows={3}
-                      value={selectedSeat.notes}
-                      onChange={(e) =>
-                        updateChart((prev) => ({
-                          ...prev,
-                          seats: prev.seats.map((x) => (x.id === selectedSeat.id ? { ...x, notes: e.target.value } : x))
-                        }))
-                      }
-                    />
-                  </label>
-                  <label>
-                    Reports to
-                    <select
-                      disabled={!canEdit}
-                      value={directManagerId(selectedSeat.id, relationships) ?? ""}
-                      onChange={(e) => {
-                        const mgr = e.target.value || null;
-                        updateChart((prev) => ({
-                          ...prev,
-                          relationships: setDirectManager(selectedSeat.id, mgr, prev.relationships)
-                        }));
-                      }}
-                    >
-                      <option value="">— (top level) —</option>
-                      {seats
-                        .filter((s) => s.id !== selectedSeat.id)
-                        .map((s) => (
-                          <option key={s.id} value={s.id}>
-                            {displayName(s)} — {s.title}
-                          </option>
-                        ))}
-                    </select>
-                  </label>
-                  {directManagerId(selectedSeat.id, relationships) ? (
-                    <label>
-                      Reporting line type
-                      <select
-                        disabled={!canEdit}
-                        value={
-                          relationships.find(
-                            (r) =>
-                              r.fromSeatId === selectedSeat.id &&
-                              r.toSeatId === directManagerId(selectedSeat.id, relationships)
-                          )?.type ?? "direct"
-                        }
-                        onChange={(e) => {
-                          const mgr = directManagerId(selectedSeat.id, relationships);
-                          if (!mgr) return;
-                          const t = e.target.value as RelationshipType;
-                          updateChart((prev) => ({
-                            ...prev,
-                            relationships: prev.relationships.map((r) =>
-                              r.fromSeatId === selectedSeat.id && r.toSeatId === mgr ? { ...r, type: t } : r
-                            )
-                          }));
-                        }}
-                      >
-                        {RELATIONSHIP_TYPE_OPTIONS.map((opt) => (
-                          <option key={opt.value} value={opt.value}>
-                            {opt.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  ) : null}
-                </div>
-                {canEdit ? (
-                  <button
-                    type="button"
-                    className="od-btn"
-                    style={{ marginTop: 12 }}
-                    onClick={() => {
-                      updateChart((prev) => {
-                        const nextSeats = prev.seats.filter((x) => x.id !== selectedSeat.id);
-                        const seatIds = new Set(nextSeats.map((s) => s.id));
-                        return {
-                          ...prev,
-                          seats: nextSeats,
-                          relationships: removeRelationshipsForSeat(selectedSeat.id, prev.relationships),
-                          layout: pruneLayoutForSeats(ensureLayout(prev), seatIds)
-                        };
-                      });
-                      setSelectedSeatId(null);
-                    }}
-                  >
-                    Remove role
+                <p className="od-muted" style={{ marginTop: 0 }}>
+                  <button type="button" className="od-btn od-btn-quiet" onClick={() => setTab("chart")}>
+                    Edit on Org Chart
                   </button>
-                ) : null}
+                </p>
+                <RoleInspectorPanel
+                  seat={selectedSeat}
+                  chartData={chartData}
+                  canEdit={canEdit}
+                  onChartChange={updateChart}
+                  onRemove={removeSelectedSeat}
+                  onManageDepartments={() => setTab("departments")}
+                />
               </div>
-            )}
+            ) : null}
           </div>
         </div>
       )}
@@ -907,36 +780,38 @@ export default function OrgDirectoryApp() {
                 </tr>
               </thead>
               <tbody>
-                {seats.map((s) => (
-                  <tr key={s.id}>
-                    <td>{displayName(s)}</td>
-                    <td>{s.title}</td>
-                    <td>
-                      {canEdit ? (
-                        <select
-                          multiple
-                          value={s.recommendedHeads}
-                          onChange={(e) => {
-                            const opts = Array.from(e.target.selectedOptions).map((o) => o.value);
-                            updateChart((prev) => ({
-                              ...prev,
-                              seats: prev.seats.map((x) => (x.id === s.id ? { ...x, recommendedHeads: opts } : x))
-                            }));
-                          }}
-                          style={{ minWidth: 220, minHeight: 80 }}
-                        >
-                          {RECOMMENDED_HEAD_OPTIONS.map((h) => (
-                            <option key={h.slug} value={h.slug}>
-                              {h.label}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        (s.recommendedHeads || []).join(", ") || "—"
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                {seats
+                  .filter((s) => !isStructuralSeat(s))
+                  .map((s) => (
+                    <tr key={s.id}>
+                      <td>{displayName(s)}</td>
+                      <td>{s.title}</td>
+                      <td>
+                        {canEdit ? (
+                          <select
+                            multiple
+                            value={s.recommendedHeads}
+                            onChange={(e) => {
+                              const opts = Array.from(e.target.selectedOptions).map((o) => o.value);
+                              updateChart((prev) => ({
+                                ...prev,
+                                seats: prev.seats.map((x) => (x.id === s.id ? { ...x, recommendedHeads: opts } : x))
+                              }));
+                            }}
+                            style={{ minWidth: 220, minHeight: 80 }}
+                          >
+                            {RECOMMENDED_HEAD_OPTIONS.map((h) => (
+                              <option key={h.slug} value={h.slug}>
+                                {h.label}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          (s.recommendedHeads || []).join(", ") || "—"
+                        )}
+                      </td>
+                    </tr>
+                  ))}
               </tbody>
             </table>
           </div>

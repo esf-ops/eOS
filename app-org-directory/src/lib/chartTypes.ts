@@ -1,5 +1,5 @@
 export type RelationshipType = "direct" | "dotted" | "advisory" | "partner_context";
-export type SeatStatus = "filled" | "open" | "future" | "advisor";
+export type SeatStatus = "filled" | "open" | "future" | "advisor" | "structural";
 
 export type Department = {
   id: string;

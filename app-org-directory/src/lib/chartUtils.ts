@@ -136,13 +136,47 @@ export function nonDirectRelationships(relationships: Relationship[]): Relations
   return relationships.filter((r) => r.type !== "direct");
 }
 
+export function isStructuralSeat(seat: Pick<Seat, "status">): boolean {
+  return seat.status === "structural";
+}
+
+export function isPersonSeat(seat: Pick<Seat, "status">): boolean {
+  return !isStructuralSeat(seat);
+}
+
+/** Deduplicate advisory/dotted/partner lines for print and summaries. */
+export function dedupeSecondaryRelationships(relationships: Relationship[]): Relationship[] {
+  const seen = new Set<string>();
+  const out: Relationship[] = [];
+  for (const r of nonDirectRelationships(relationships)) {
+    const [a, b] = [r.fromSeatId, r.toSeatId].sort();
+    const key = `${a}|${b}|${r.type}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(r);
+  }
+  return out;
+}
+
 export function displayName(seat: Seat): string {
+  if (isStructuralSeat(seat)) {
+    const title = String(seat.title || "").trim();
+    return title || "Group";
+  }
   const n = String(seat.personName || "").trim();
   if (n) return n;
   if (seat.status === "open") return "Open role";
   if (seat.status === "future") return "Future role";
-  if (seat.status === "advisor") return "Advisor";
-  return "Unnamed";
+  if (seat.status === "advisor") return seat.title?.trim() || "Advisor";
+  return seat.title?.trim() || "Unnamed";
+}
+
+export function seatListLabel(seat: Seat): string {
+  if (isStructuralSeat(seat)) return displayName(seat);
+  const name = displayName(seat);
+  const title = String(seat.title || "").trim();
+  if (title && name !== title) return `${name} — ${title}`;
+  return name;
 }
 
 export function pruneLayoutForSeats(layout: ChartLayout, seatIds: Set<string>): ChartLayout {

@@ -6,18 +6,30 @@ import {
   seatStatusLabel,
   sortRootSeatIds
 } from "../lib/displayLabels";
-import { childrenOf, deptMap, displayName, normalizeChartData, nonDirectRelationships, rootSeatIds, seatMap } from "../lib/chartUtils";
+import {
+  childrenOf,
+  dedupeSecondaryRelationships,
+  deptMap,
+  displayName,
+  isStructuralSeat,
+  normalizeChartData,
+  rootSeatIds,
+  seatMap
+} from "../lib/chartUtils";
 
 function PrintSeatCard({ seat, dept }: { seat: Seat; dept?: Department }) {
+  const structural = isStructuralSeat(seat);
   const branch = formatBranchLabel(seat.branch);
-  const showStatus = seat.status !== "filled";
+  const showStatus = !structural && seat.status !== "filled";
   return (
     <div
-      className={`od-print-node od-print-node-${seat.status}`}
+      className={`od-print-node od-print-node-${seat.status}${structural ? " od-print-node-structural" : ""}`}
       style={dept?.color ? ({ borderTopColor: dept.color } as CSSProperties) : undefined}
     >
       <div className="od-print-node-name">{displayName(seat)}</div>
-      <div className="od-print-node-title">{seat.title}</div>
+      {!structural && seat.title && displayName(seat) !== seat.title ? (
+        <div className="od-print-node-title">{seat.title}</div>
+      ) : null}
       <div className="od-print-node-meta">
         {dept ? <span>{dept.name}</span> : null}
         {branch ? <span>{branch}</span> : null}
@@ -67,7 +79,7 @@ export default function PrintOrgChart({ chartData }: Props) {
   const { seats, relationships, departments } = chart;
   const sm = seatMap(seats);
   const roots = sortRootSeatIds(rootSeatIds(seats, relationships), seats);
-  const secondary = nonDirectRelationships(relationships);
+  const secondary = dedupeSecondaryRelationships(relationships);
 
   return (
     <div className="od-print-chart-body">

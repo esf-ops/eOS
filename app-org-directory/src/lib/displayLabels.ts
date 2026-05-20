@@ -6,7 +6,8 @@ const SEAT_STATUS_LABELS: Record<SeatStatus, string> = {
   filled: "Assigned",
   open: "Open role",
   future: "Future role",
-  advisor: "Advisor"
+  advisor: "Advisor context",
+  structural: "Structural group"
 };
 
 const RELATIONSHIP_TYPE_LABELS: Record<RelationshipType, string> = {
@@ -34,6 +35,14 @@ export function formatBranchLabel(branch: string): string | null {
   return b;
 }
 
+const GENERIC_REL_LABELS = /^(future dotted line|dotted-line|partner_context|direct|advisory)$/i;
+
+export function humanRelationshipNote(label?: string): string | null {
+  const extra = String(label ?? "").trim();
+  if (!extra || GENERIC_REL_LABELS.test(extra)) return null;
+  return extra;
+}
+
 export function formatSecondaryRelationshipLine(
   fromName: string,
   toName: string,
@@ -41,7 +50,7 @@ export function formatSecondaryRelationshipLine(
   label?: string
 ): string {
   const typeLabel = relationshipTypeLabel(type);
-  const extra = String(label ?? "").trim();
+  const extra = humanRelationshipNote(label);
   if (extra) return `${fromName} ↔ ${toName} · ${typeLabel} (${extra})`;
   return `${fromName} ↔ ${toName} · ${typeLabel}`;
 }
@@ -57,8 +66,11 @@ export const SEAT_STATUS_OPTIONS: { value: SeatStatus; label: string }[] = [
   { value: "filled", label: "Assigned" },
   { value: "open", label: "Open role" },
   { value: "future", label: "Future role" },
-  { value: "advisor", label: "Advisor" }
+  { value: "advisor", label: "Advisor context" },
+  { value: "structural", label: "Structural group" }
 ];
+
+export const PERSON_SEAT_STATUS_OPTIONS = SEAT_STATUS_OPTIONS.filter((o) => o.value !== "structural");
 
 /** Prefer Owner / top leadership when multiple tree roots exist. */
 export function sortRootSeatIds(seatIds: string[], seats: { id: string; title?: string; personName?: string }[]): string[] {
@@ -69,6 +81,7 @@ export function sortRootSeatIds(seatIds: string[], seats: { id: string; title?: 
     const name = String(s?.personName ?? "").toLowerCase();
     if (title.includes("owner")) return 0;
     if (id === "seat_eric" || name.includes("eric")) return 1;
+    if ((s as { status?: string }).status === "structural") return 3;
     if (s && !String(s.personName ?? "").trim()) return 4;
     return 2;
   };

@@ -29,6 +29,36 @@ export function buildEliteStarterChartData(): ChartData {
       recommendedHeads: ["executive", "reports"]
     },
     {
+      id: "seat_struct_advisory",
+      personName: "",
+      title: "Advisory Board / Partner Advisors",
+      departmentId: "dept_owner",
+      branch: "",
+      status: "structural" as const,
+      notes: "Planning group — not an employee seat",
+      recommendedHeads: []
+    },
+    {
+      id: "seat_struct_ops",
+      personName: "",
+      title: "Operating Leadership",
+      departmentId: "dept_owner",
+      branch: "",
+      status: "structural" as const,
+      notes: "Operating leadership lane",
+      recommendedHeads: []
+    },
+    {
+      id: "seat_dean",
+      personName: "Dean Happel",
+      title: "Fox Partnership Advisor",
+      departmentId: "dept_partner",
+      branch: "Fox",
+      status: "advisor" as const,
+      notes: "Advisory context — not a separate employee record",
+      recommendedHeads: []
+    },
+    {
       id: "seat_chris",
       personName: "Chris Henely",
       title: "Strategic Operations",
@@ -69,16 +99,6 @@ export function buildEliteStarterChartData(): ChartData {
       recommendedHeads: ["production", "shop_tv", "install"]
     },
     {
-      id: "seat_dean",
-      personName: "Dean Happel",
-      title: "Fox Partnership Advisor",
-      departmentId: "dept_partner",
-      branch: "Fox",
-      status: "advisor" as const,
-      notes: "Partner / advisory context",
-      recommendedHeads: []
-    },
-    {
       id: "seat_open_estimator",
       personName: "",
       title: "Estimator (Open)",
@@ -101,13 +121,17 @@ export function buildEliteStarterChartData(): ChartData {
   ];
 
   const relationships = [
-    { id: "rel_1", fromSeatId: "seat_chris", toSeatId: "seat_eric", type: "direct" as const, label: "" },
-    { id: "rel_2", fromSeatId: "seat_marshal", toSeatId: "seat_eric", type: "direct" as const, label: "" },
-    { id: "rel_3", fromSeatId: "seat_adam", toSeatId: "seat_marshal", type: "direct" as const, label: "" },
-    { id: "rel_4", fromSeatId: "seat_george", toSeatId: "seat_chris", type: "direct" as const, label: "" },
-    { id: "rel_5", fromSeatId: "seat_dean", toSeatId: "seat_eric", type: "partner_context" as const, label: "Fox workflow" },
-    { id: "rel_6", fromSeatId: "seat_open_estimator", toSeatId: "seat_marshal", type: "direct" as const, label: "" },
-    { id: "rel_7", fromSeatId: "seat_open_ops", toSeatId: "seat_george", type: "dotted" as const, label: "Future dotted line" }
+    { id: "rel_1", fromSeatId: "seat_struct_advisory", toSeatId: "seat_eric", type: "direct" as const, label: "" },
+    { id: "rel_2", fromSeatId: "seat_struct_ops", toSeatId: "seat_eric", type: "direct" as const, label: "" },
+    { id: "rel_3", fromSeatId: "seat_dean", toSeatId: "seat_struct_advisory", type: "direct" as const, label: "" },
+    { id: "rel_4", fromSeatId: "seat_chris", toSeatId: "seat_struct_ops", type: "direct" as const, label: "" },
+    { id: "rel_5", fromSeatId: "seat_marshal", toSeatId: "seat_struct_ops", type: "direct" as const, label: "" },
+    { id: "rel_6", fromSeatId: "seat_adam", toSeatId: "seat_marshal", type: "direct" as const, label: "" },
+    { id: "rel_7", fromSeatId: "seat_george", toSeatId: "seat_chris", type: "direct" as const, label: "" },
+    { id: "rel_8", fromSeatId: "seat_open_estimator", toSeatId: "seat_marshal", type: "direct" as const, label: "" },
+    { id: "rel_9", fromSeatId: "seat_open_ops", toSeatId: "seat_george", type: "dotted" as const, label: "" },
+    { id: "rel_10", fromSeatId: "seat_adam", toSeatId: "seat_struct_advisory", type: "advisory" as const, label: "" },
+    { id: "rel_11", fromSeatId: "seat_george", toSeatId: "seat_struct_advisory", type: "advisory" as const, label: "" }
   ];
 
   return { departments, seats, relationships, layout: { nodePositions: {} } };

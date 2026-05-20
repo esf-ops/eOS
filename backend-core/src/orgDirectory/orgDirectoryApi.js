@@ -10,7 +10,7 @@ import { buildEliteStarterChartData } from "./orgDirectoryStarter.js";
 const jsonParser = express.json({ limit: "2mb" });
 
 const RELATIONSHIP_TYPES = new Set(["direct", "dotted", "advisory", "partner_context"]);
-const SEAT_STATUSES = new Set(["filled", "open", "future", "advisor"]);
+const SEAT_STATUSES = new Set(["filled", "open", "future", "advisor", "structural"]);
 
 function pickStr(v) {
   return v == null ? "" : String(v).trim();

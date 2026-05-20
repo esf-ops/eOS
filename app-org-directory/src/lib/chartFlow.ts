@@ -1,5 +1,4 @@
 import { MarkerType, type Edge, type Node } from "@xyflow/react";
-import { relationshipTypeLabel } from "./displayLabels";
 import type { ChartData, RelationshipType } from "./chartTypes";
 import { computeAutoLayout, resolveNodePosition } from "./chartLayout";
 import { deptMap } from "./chartUtils";
@@ -40,15 +39,14 @@ export function chartToFlow(chart: ChartData, selectedSeatId: string | null): { 
 
   const edges: Edge[] = chart.relationships.map((r) => {
     const vis = edgeVisual(r.type);
-    const label = r.label?.trim() ? `${relationshipTypeLabel(r.type)} · ${r.label}` : relationshipTypeLabel(r.type);
     return {
       id: r.id,
       source: r.toSeatId,
       target: r.fromSeatId,
-      label: r.type === "direct" ? undefined : label,
+      label: undefined,
       style: vis,
       markerEnd: { type: MarkerType.ArrowClosed, color: vis.stroke },
-      data: { relType: r.type },
+      data: { relType: r.type, relLabel: r.label },
       animated: r.type !== "direct"
     };
   });
