@@ -46,6 +46,13 @@ export function formatSecondaryRelationshipLine(
   return `${fromName} ↔ ${toName} · ${typeLabel}`;
 }
 
+export const RELATIONSHIP_TYPE_OPTIONS: { value: RelationshipType; label: string }[] = [
+  { value: "direct", label: "Direct report" },
+  { value: "dotted", label: "Dotted-line" },
+  { value: "advisory", label: "Advisory" },
+  { value: "partner_context", label: "Partner / Advisor" }
+];
+
 export const SEAT_STATUS_OPTIONS: { value: SeatStatus; label: string }[] = [
   { value: "filled", label: "Assigned" },
   { value: "open", label: "Open role" },

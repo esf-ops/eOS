@@ -27,7 +27,21 @@ function isMissingRelationError(error) {
 }
 
 function emptyChartData() {
-  return { departments: [], seats: [], relationships: [] };
+  return { departments: [], seats: [], relationships: [], layout: { nodePositions: {} } };
+}
+
+function sanitizeLayout(input) {
+  const raw = input && typeof input === "object" ? input : {};
+  const np = raw.nodePositions && typeof raw.nodePositions === "object" ? raw.nodePositions : {};
+  const nodePositions = {};
+  for (const [k, v] of Object.entries(np)) {
+    const id = pickStr(k);
+    if (!id || !v || typeof v !== "object") continue;
+    const x = Number(v.x);
+    const y = Number(v.y);
+    if (Number.isFinite(x) && Number.isFinite(y)) nodePositions[id] = { x, y };
+  }
+  return { nodePositions };
 }
 
 function sanitizeChartData(input) {
@@ -87,7 +101,9 @@ function sanitizeChartData(input) {
     })
     .filter(Boolean);
 
-  return { departments: deptOut, seats: seatOut, relationships: relOut };
+  const layout = sanitizeLayout(raw.layout);
+
+  return { departments: deptOut, seats: seatOut, relationships: relOut, layout };
 }
 
 function roleMayEditByDefault(role) {

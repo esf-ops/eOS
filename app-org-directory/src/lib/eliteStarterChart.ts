@@ -110,5 +110,5 @@ export function buildEliteStarterChartData(): ChartData {
     { id: "rel_7", fromSeatId: "seat_open_ops", toSeatId: "seat_george", type: "dotted" as const, label: "Future dotted line" }
   ];
 
-  return { departments, seats, relationships };
+  return { departments, seats, relationships, layout: { nodePositions: {} } };
 }

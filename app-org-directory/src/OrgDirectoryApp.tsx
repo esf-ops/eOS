@@ -2,27 +2,28 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch, ApiError } from "./lib/api";
 import { EOS_LOGO_URL, readOrgDirectoryConfig } from "./lib/config";
 import {
-  childrenOf,
   deptMap,
   directManagerId,
   displayName,
   isChartEmpty,
   newId,
-  nonDirectRelationships,
-  rootSeatIds,
+  ensureLayout,
+  normalizeChartData,
+  pruneLayoutForSeats,
+  removeRelationshipsForSeat,
   seatMap,
   setDirectManager
 } from "./lib/chartUtils";
 import { buildEliteStarterChartData } from "./lib/eliteStarterChart";
 import {
   APP_TITLE,
-  formatBranchLabel,
-  formatSecondaryRelationshipLine,
+  relationshipTypeLabel,
+  RELATIONSHIP_TYPE_OPTIONS,
   seatStatusLabel,
-  SEAT_STATUS_OPTIONS,
-  sortRootSeatIds
+  SEAT_STATUS_OPTIONS
 } from "./lib/displayLabels";
-import type { ChartData, Department, Relationship, Seat, SeatStatus } from "./lib/chartTypes";
+import OrgChartCanvas from "./ui/OrgChartCanvas";
+import type { ChartData, RelationshipType, Seat, SeatStatus } from "./lib/chartTypes";
 import { RECOMMENDED_HEAD_OPTIONS } from "./lib/chartTypes";
 import { getSupabase } from "./lib/supabase";
 
@@ -54,66 +55,6 @@ function AuthShell({
         <a href={homeUrl}>Back to Home</a>
       </p>
     </div>
-  );
-}
-
-function SeatNode({ seat, dept, isTopLeader }: { seat: Seat; dept?: Department; isTopLeader?: boolean }) {
-  const branch = formatBranchLabel(seat.branch);
-  const showStatus = seat.status !== "filled";
-  const nodeClass = [
-    "od-node",
-    isTopLeader ? "od-node-top" : "",
-    seat.status === "open" ? "od-node-open" : "",
-    seat.status === "future" ? "od-node-future" : "",
-    seat.status === "advisor" ? "od-node-advisor" : ""
-  ]
-    .filter(Boolean)
-    .join(" ");
-  return (
-    <div
-      className={nodeClass}
-      style={dept?.color ? ({ "--od-dept-color": dept.color } as React.CSSProperties) : undefined}
-    >
-      <div className="od-node-name">{displayName(seat)}</div>
-      <div className="od-node-title">{seat.title}</div>
-      <div className="od-node-meta">
-        {dept ? <span className="od-tag od-tag-dept">{dept.name}</span> : null}
-        {branch ? <span className="od-tag od-tag-loc">{branch}</span> : null}
-        {showStatus ? <span className="od-tag od-tag-status">{seatStatusLabel(seat.status)}</span> : null}
-      </div>
-    </div>
-  );
-}
-
-function TreeBranch({
-  seatId,
-  seats,
-  relationships,
-  departments,
-  isTopLeader
-}: {
-  seatId: string;
-  seats: Seat[];
-  relationships: Relationship[];
-  departments: Department[];
-  isTopLeader?: boolean;
-}) {
-  const sm = seatMap(seats);
-  const dm = deptMap(departments);
-  const seat = sm.get(seatId);
-  if (!seat) return null;
-  const kids = childrenOf(seatId, seats, relationships);
-  return (
-    <li className={isTopLeader ? "od-tree-top" : undefined}>
-      <SeatNode seat={seat} dept={seat.departmentId ? dm.get(seat.departmentId) : undefined} isTopLeader={isTopLeader} />
-      {kids.length > 0 ? (
-        <ul>
-          {kids.map((c) => (
-            <TreeBranch key={c.id} seatId={c.id} seats={seats} relationships={relationships} departments={departments} />
-          ))}
-        </ul>
-      ) : null}
-    </li>
   );
 }
 
@@ -246,7 +187,7 @@ export default function OrgDirectoryApp() {
           seeded?: boolean;
         };
         const cd = r.chart?.chart_data;
-        if (cd) setChartData(cd);
+        if (cd) setChartData(normalizeChartData(cd as ChartData));
         setChartId(r.chart?.id ?? null);
         setChartDirty(false);
         if (r.seeded) {
@@ -326,7 +267,7 @@ export default function OrgDirectoryApp() {
         if (!starter.seats.length) {
           throw new Error("Starter chart has no roles — contact support.");
         }
-        setChartData(starter);
+        setChartData(normalizeChartData(starter));
         setChartDirty(true);
         setError("");
         setMsg("Starter chart loaded — click Save changes to keep these updates.");
@@ -343,19 +284,14 @@ export default function OrgDirectoryApp() {
   const relationships = chartData?.relationships ?? [];
   const sm = useMemo(() => seatMap(seats), [seats]);
   const dm = useMemo(() => deptMap(departments), [departments]);
-  const roots = useMemo(
-    () => sortRootSeatIds(rootSeatIds(seats, relationships), seats),
-    [seats, relationships]
-  );
-  const secondaryRels = useMemo(() => nonDirectRelationships(relationships), [relationships]);
   const chartHasSeats = seats.length > 0;
 
   const selectedSeat = selectedSeatId ? sm.get(selectedSeatId) : null;
 
-  const updateChart = (fn: (prev: ChartData) => ChartData) => {
-    setChartData((prev) => (prev ? fn(prev) : prev));
+  const updateChart = useCallback((fn: (prev: ChartData) => ChartData) => {
+    setChartData((prev) => (prev ? normalizeChartData(fn(normalizeChartData(prev))) : prev));
     setChartDirty(true);
-  };
+  }, []);
 
   const addDepartment = () => {
     if (!canEdit) return;
@@ -409,11 +345,14 @@ export default function OrgDirectoryApp() {
         const parsed = JSON.parse(String(reader.result)) as { chart_data?: ChartData } & ChartData;
         const cd = parsed.chart_data ?? parsed;
         if (!cd.seats || !cd.departments) throw new Error("Invalid chart JSON");
-        setChartData({
-          departments: cd.departments,
-          seats: cd.seats,
-          relationships: cd.relationships ?? []
-        });
+        setChartData(
+          normalizeChartData({
+            departments: cd.departments,
+            seats: cd.seats,
+            relationships: cd.relationships ?? [],
+            layout: cd.layout
+          })
+        );
         setChartDirty(true);
         setMsg("Imported JSON into editor — click Save changes to persist.");
       } catch (e: unknown) {
@@ -638,42 +577,15 @@ export default function OrgDirectoryApp() {
               ) : null}
             </div>
           ) : (
-            <div className="od-chart-stage">
-              <div className="od-chart-scroll">
-                <div className="od-tree">
-                  <ul className="od-tree-roots">
-                    {roots.map((rid, idx) => (
-                      <TreeBranch
-                        key={rid}
-                        seatId={rid}
-                        seats={seats}
-                        relationships={relationships}
-                        departments={departments}
-                        isTopLeader={idx === 0}
-                      />
-                    ))}
-                  </ul>
-                </div>
-              </div>
-            </div>
+            <OrgChartCanvas
+              chartData={chartData}
+              canEdit={canEdit}
+              printMode={printMode}
+              selectedSeatId={selectedSeatId}
+              onSelectSeat={setSelectedSeatId}
+              onChartChange={updateChart}
+            />
           )}
-          {secondaryRels.length > 0 ? (
-            <div className="od-secondary-rels">
-              <strong>Advisory / Cross-functional Relationships</strong>
-              <ul>
-                {secondaryRels.map((r) => {
-                  const from = sm.get(r.fromSeatId);
-                  const to = sm.get(r.toSeatId);
-                  if (!from || !to) return null;
-                  return (
-                    <li key={r.id}>
-                      {formatSecondaryRelationshipLine(displayName(from), displayName(to), r.type, r.label)}
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          ) : null}
         </div>
       )}
 
@@ -761,6 +673,23 @@ export default function OrgDirectoryApp() {
             {selectedSeat && (
               <div style={{ flex: "1 1 320px" }}>
                 <h3 style={{ marginTop: 0 }}>Edit role</h3>
+                {(() => {
+                  const mgrId = directManagerId(selectedSeat.id, relationships);
+                  const mgr = mgrId ? sm.get(mgrId) : null;
+                  const lineRel = mgrId
+                    ? relationships.find((r) => r.fromSeatId === selectedSeat.id && r.toSeatId === mgrId)
+                    : null;
+                  return (
+                    <p className="od-muted" style={{ marginTop: 0, marginBottom: 12 }}>
+                      {mgr
+                        ? `Currently reports to ${displayName(mgr)} (${mgr.title}).`
+                        : "Top-level role — no direct manager on the chart."}
+                      {lineRel && lineRel.type !== "direct" ?
+                        ` Line type: ${relationshipTypeLabel(lineRel.type)}.`
+                      : null}
+                    </p>
+                  );
+                })()}
                 <div className="od-form-grid">
                   <label>
                     Person name
@@ -883,21 +812,57 @@ export default function OrgDirectoryApp() {
                         ))}
                     </select>
                   </label>
+                  {directManagerId(selectedSeat.id, relationships) ? (
+                    <label>
+                      Reporting line type
+                      <select
+                        disabled={!canEdit}
+                        value={
+                          relationships.find(
+                            (r) =>
+                              r.fromSeatId === selectedSeat.id &&
+                              r.toSeatId === directManagerId(selectedSeat.id, relationships)
+                          )?.type ?? "direct"
+                        }
+                        onChange={(e) => {
+                          const mgr = directManagerId(selectedSeat.id, relationships);
+                          if (!mgr) return;
+                          const t = e.target.value as RelationshipType;
+                          updateChart((prev) => ({
+                            ...prev,
+                            relationships: prev.relationships.map((r) =>
+                              r.fromSeatId === selectedSeat.id && r.toSeatId === mgr ? { ...r, type: t } : r
+                            )
+                          }));
+                        }}
+                      >
+                        {RELATIONSHIP_TYPE_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
                 </div>
                 {canEdit ? (
                   <button
                     type="button"
                     className="od-btn"
                     style={{ marginTop: 12 }}
-                    onClick={() =>
-                      updateChart((prev) => ({
-                        ...prev,
-                        seats: prev.seats.filter((x) => x.id !== selectedSeat.id),
-                        relationships: prev.relationships.filter(
-                          (r) => r.fromSeatId !== selectedSeat.id && r.toSeatId !== selectedSeat.id
-                        )
-                      }))
-                    }
+                    onClick={() => {
+                      updateChart((prev) => {
+                        const nextSeats = prev.seats.filter((x) => x.id !== selectedSeat.id);
+                        const seatIds = new Set(nextSeats.map((s) => s.id));
+                        return {
+                          ...prev,
+                          seats: nextSeats,
+                          relationships: removeRelationshipsForSeat(selectedSeat.id, prev.relationships),
+                          layout: pruneLayoutForSeats(ensureLayout(prev), seatIds)
+                        };
+                      });
+                      setSelectedSeatId(null);
+                    }}
                   >
                     Remove role
                   </button>
@@ -911,7 +876,7 @@ export default function OrgDirectoryApp() {
       {chartData && tab === "access" && (
         <div className="od-card">
           <p className="od-muted">
-            Suggested eliteOS tools by role — planning notes only; access is still managed in System Admin.
+            Recommended only — does not change actual eliteOS permissions. Access is managed in System Admin.
           </p>
           <div className="od-table-wrap">
             <table className="od-table">
@@ -991,7 +956,8 @@ export default function OrgDirectoryApp() {
               Print chart
             </button>
           </div>
-          <p className="od-muted">Export downloads your saved org chart. Import updates the editor — use Save changes to persist.</p>
+          <p className="od-muted">Export downloads your saved org chart (including layout). Import updates the editor — use Save changes to persist.</p>
+          {/* TODO: Future roster CSV staging — paste CSV to create draft unassigned seats in an "Unassigned / Review" department. Must not create users or grant access. */}
         </div>
       )}
 

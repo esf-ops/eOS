@@ -27,10 +27,17 @@ export type Relationship = {
   label: string;
 };
 
+export type NodePosition = { x: number; y: number };
+
+export type ChartLayout = {
+  nodePositions: Record<string, NodePosition>;
+};
+
 export type ChartData = {
   departments: Department[];
   seats: Seat[];
   relationships: Relationship[];
+  layout?: ChartLayout;
 };
 
 export const RECOMMENDED_HEAD_OPTIONS = [
