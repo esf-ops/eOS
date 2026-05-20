@@ -14,12 +14,7 @@ import {
   seatListLabel,
   seatMap
 } from "./lib/chartUtils";
-import {
-  CHART_TEMPLATES,
-  TEMPLATE_REPLACE_CONFIRM,
-  type ChartTemplateId,
-  getChartTemplate
-} from "./lib/chartTemplates";
+import { buildEliteStarterChartData } from "./lib/eliteStarterChart";
 import { APP_TITLE, PRINT_SUBTITLE, seatStatusLabel } from "./lib/displayLabels";
 import OrgChartCanvas from "./ui/OrgChartCanvas";
 import PrintOrgChart from "./ui/PrintOrgChart";
@@ -82,7 +77,6 @@ export default function OrgDirectoryApp() {
   const [msg, setMsg] = useState("");
   const [selectedSeatId, setSelectedSeatId] = useState<string | null>(null);
   const [printMode, setPrintMode] = useState(false);
-  const [selectedTemplateId, setSelectedTemplateId] = useState<ChartTemplateId>("operating_model");
 
   const canEdit = Boolean(me?.can_edit);
 
@@ -251,32 +245,29 @@ export default function OrgDirectoryApp() {
     }
   }, [token, chartData, canEdit]);
 
-  const loadChartTemplate = useCallback(
-    (templateId: ChartTemplateId, opts?: { skipConfirm?: boolean }) => {
+  const loadStarterChart = useCallback(
+    (opts?: { skipConfirm?: boolean }) => {
       if (!canEdit) {
-        setError("You do not have edit access to load a template.");
-        return;
-      }
-      const tmpl = getChartTemplate(templateId);
-      if (!tmpl) {
-        setError("Unknown template.");
+        setError("You do not have edit access to load the starter chart.");
         return;
       }
       const hasWork = (chartData?.seats?.length ?? 0) > 0;
       if (hasWork && !opts?.skipConfirm) {
-        const ok = window.confirm(TEMPLATE_REPLACE_CONFIRM);
+        const ok = window.confirm(
+          "This will replace the current working chart with the starter chart. Export or save a copy first if you want to keep the current version."
+        );
         if (!ok) return;
       }
       try {
-        const next = tmpl.build();
-        if (!next.seats.length) {
-          throw new Error("Template has no roles — contact support.");
+        const starter = buildEliteStarterChartData();
+        if (!starter.seats.length) {
+          throw new Error("Starter chart has no roles — contact support.");
         }
-        setChartData(normalizeChartData(next));
+        setChartData(normalizeChartData(starter));
         setChartDirty(true);
         setSelectedSeatId(null);
         setError("");
-        setMsg(`${tmpl.name} loaded — planning starting point. Click Save changes to persist.`);
+        setMsg("Starter chart loaded — click Save changes to keep these updates.");
         setTab("chart");
       } catch (e: unknown) {
         setError(e instanceof ApiError ? e.message : String((e as Error)?.message ?? e));
@@ -572,7 +563,7 @@ export default function OrgDirectoryApp() {
 
       {loading && !chartData ? <p className="od-muted">Loading chart…</p> : null}
       {!loading && chartData && isChartEmpty(chartData) && tab !== "chart" ? (
-        <p className="od-muted od-no-print">Chart is empty — open Org Chart and load a template to begin.</p>
+        <p className="od-muted od-no-print">Chart is empty — open Org Chart and load the starter chart.</p>
       ) : null}
 
       {chartData && tab === "chart" && (
@@ -586,30 +577,15 @@ export default function OrgDirectoryApp() {
                 <button type="button" className="od-btn" onClick={addStructuralSeat}>
                   Add group card
                 </button>
-                <div className="od-template-picker">
-                  <label className="od-template-picker-label">
-                    Template
-                    <select
-                      value={selectedTemplateId}
-                      onChange={(e) => setSelectedTemplateId(e.target.value as ChartTemplateId)}
-                      disabled={!canEdit}
-                    >
-                      {CHART_TEMPLATES.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <button
-                    type="button"
-                    className={chartHasSeats ? "od-btn od-btn-quiet" : "od-btn od-btn-primary"}
-                    disabled={!canEdit}
-                    onClick={() => void loadChartTemplate(selectedTemplateId, { skipConfirm: !chartHasSeats })}
-                  >
-                    {chartHasSeats ? "Replace with template" : "Load template"}
+                {chartHasSeats ? (
+                  <button type="button" className="od-btn od-btn-quiet" onClick={() => void loadStarterChart()}>
+                    Reset to starter chart
                   </button>
-                </div>
+                ) : (
+                  <button type="button" className="od-btn od-btn-primary" onClick={() => loadStarterChart({ skipConfirm: true })}>
+                    Load starter chart
+                  </button>
+                )}
               </>
             ) : null}
             <button
@@ -637,26 +613,18 @@ export default function OrgDirectoryApp() {
             <div className="od-empty-chart od-no-print">
               <p className="od-empty-title">Start your org chart</p>
               <p className="od-muted">
-                Choose a planning template below. This is a draft structure — review and adjust before relying on it.
-                Click <strong>Save changes</strong> when you are ready to persist.
+                Load the starter chart to preview leadership, branch lanes, and open roles — then click{" "}
+                <strong>Save changes</strong> to keep your work.
               </p>
               {canEdit ? (
-                <div className="od-empty-templates">
-                  {CHART_TEMPLATES.map((t) => (
-                    <button
-                      key={t.id}
-                      type="button"
-                      className={`od-template-card${t.id === "operating_model" ? " od-template-card-featured" : ""}`}
-                      onClick={() => {
-                        setSelectedTemplateId(t.id);
-                        void loadChartTemplate(t.id, { skipConfirm: true });
-                      }}
-                    >
-                      <span className="od-template-card-name">{t.name}</span>
-                      <span className="od-template-card-desc">{t.description}</span>
-                    </button>
-                  ))}
-                </div>
+                <button
+                  type="button"
+                  className="od-btn od-btn-primary"
+                  style={{ marginTop: 12 }}
+                  onClick={() => void loadStarterChart({ skipConfirm: true })}
+                >
+                  Load starter chart
+                </button>
               ) : null}
             </div>
           ) : (

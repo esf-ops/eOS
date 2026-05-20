@@ -32,8 +32,6 @@ export default function OrgChartSeatNode({ data }: NodeProps<SeatFlowNode>) {
       <div className="od-flow-node-name">{displayName(seat)}</div>
       {!structural && seat.title && displayName(seat) !== seat.title ? (
         <div className="od-flow-node-title">{seat.title}</div>
-      ) : structural ? (
-        <div className="od-flow-node-title od-flow-node-title-muted">Structural lane</div>
       ) : null}
       <div className="od-flow-node-meta">
         {dept ? <span className="od-tag od-tag-dept">{dept.name}</span> : null}
