@@ -1,8 +1,8 @@
 import type { ChartData } from "./chartTypes";
 
 /**
- * Elite starter org chart (v1 planning demo).
- * Keep aligned with `backend-core/src/orgDirectory/orgDirectoryStarter.js`.
+ * Basic starter chart template (compact planning demo).
+ * Keep aligned with `backend-core/src/orgDirectory/orgDirectoryStarter.js` for API seed.
  *
  * Relationship convention (matches `chartUtils.ts`):
  * - `fromSeatId` = report / child seat
