@@ -34,7 +34,10 @@ const HEAD_URL_ENV_KEYS_FOR_CORS = Object.freeze([
 ]);
 
 function isProductionBrain() {
-  return String(process.env.NODE_ENV ?? "").toLowerCase() === "production";
+  const nodeEnv = String(process.env.NODE_ENV ?? "").toLowerCase();
+  if (nodeEnv === "production") return true;
+  const vercelEnv = String(process.env.VERCEL_ENV ?? "").toLowerCase();
+  return vercelEnv === "production";
 }
 
 /**
@@ -75,7 +78,8 @@ export function isUnsafeLauncherHeadUrl(url) {
 }
 
 /**
- * Strips unsafe launcher URLs when NODE_ENV=production so `/api/me/heads` never returns dev/loopback targets.
+ * Strips unsafe launcher URLs when Brain runs in production so `/api/me/heads` never returns dev/loopback targets.
+ * Production also requires HTTPS (no http:// eliteosfab or otherwise).
  *
  * @param {string} url
  * @returns {string}
@@ -85,7 +89,17 @@ export function sanitizeLauncherHeadUrl(url) {
   if (!trimmed) return "";
   if (!isProductionBrain()) return trimmed;
   if (isUnsafeLauncherHeadUrl(trimmed)) return "";
+  try {
+    if (new URL(trimmed).protocol !== "https:") return "";
+  } catch {
+    return "";
+  }
   return trimmed;
+}
+
+/** @returns {boolean} */
+export function isProductionLauncherContext() {
+  return isProductionBrain();
 }
 
 function firstTrimmedEnv(keys) {

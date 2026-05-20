@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { ApiError, apiFetch } from "../lib/api";
-import { EOS_LOGO_URL, isUnsafeLauncherHeadUrl, resolveHeadLaunchUrl } from "../lib/config";
+import { EOS_LOGO_URL, resolveHeadLaunchUrl, sanitizeLauncherLaunchUrl } from "../lib/config";
 import { supabase } from "../lib/supabase";
 
 function readOAuthErrorFromBrowser(): string | null {
@@ -95,19 +95,24 @@ function launcherCardTitle(h: HeadCard): string {
   return fallback || h.slug;
 }
 
-const AVAILABLE_SORT_PRIORITY = ["quote", "quote_library", "pricing_admin", "system_admin", "public_quote"];
+const AVAILABLE_SORT_PRIORITY = [
+  "quote",
+  "quote_library",
+  "pricing_admin",
+  "system_admin",
+  "org_directory",
+  "public_quote"
+];
 
 type LauncherSection = "Available Tools" | "Coming Soon Tools";
 
 function pickLaunchUrl(head: HeadCard): string | null {
-  const fromApi = String(head.url ?? "").trim().replace(/\/+$/, "");
-  const fb = resolveHeadLaunchUrl(head.slug);
-  const raw = String(fromApi || fb || "")
-    .trim()
-    .replace(/\/+$/, "");
-  if (!raw) return null;
-  if (import.meta.env.PROD && isUnsafeLauncherHeadUrl(raw)) return null;
-  return raw;
+  const fromApi = sanitizeLauncherLaunchUrl(head.url);
+  if (import.meta.env.DEV) {
+    const fb = sanitizeLauncherLaunchUrl(resolveHeadLaunchUrl(head.slug));
+    return fromApi || fb;
+  }
+  return fromApi;
 }
 
 function isEliteosfabProductionUrl(url: string): boolean {
@@ -152,7 +157,7 @@ function resolveCardBadges(head: HeadCard, roadmapSection: boolean): string[] {
 }
 
 function shouldShowUrlOnCard(url: string | null): boolean {
-  if (!url) return false;
+  if (!url || sanitizeLauncherLaunchUrl(url) !== url) return false;
   if (import.meta.env.DEV) return true;
   return !isEliteosfabProductionUrl(url);
 }

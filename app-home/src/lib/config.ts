@@ -40,6 +40,28 @@ export function isUnsafeLauncherHeadUrl(url: string): boolean {
   }
 }
 
+/** Built app served to end users (not Vite dev server). */
+function isProductionHomeRuntime(): boolean {
+  return !import.meta.env.DEV;
+}
+
+/**
+ * Normalizes a launcher URL for Home cards. In production builds, drops unsafe hosts and non-HTTPS targets.
+ */
+export function sanitizeLauncherLaunchUrl(url: string | null | undefined): string | null {
+  const raw = String(url ?? "").trim().replace(/\/+$/, "");
+  if (!raw) return null;
+  if (isUnsafeLauncherHeadUrl(raw)) return null;
+  if (isProductionHomeRuntime()) {
+    try {
+      if (new URL(raw).protocol !== "https:") return null;
+    } catch {
+      return null;
+    }
+  }
+  return raw;
+}
+
 function envPick(key?: string): string {
   if (!key) return "";
   const raw = String((env as Record<string, string | undefined>)[key] ?? "").trim();
@@ -79,6 +101,7 @@ const HEAD_ENV_KEYS: Record<string, string> = {
   quote_library: "VITE_HEAD_URL_QUOTE_LIBRARY",
   pricing_admin: "VITE_HEAD_URL_PRICING_ADMIN",
   public_quote: "VITE_HEAD_URL_PUBLIC_QUOTE",
+  org_directory: "VITE_HEAD_URL_ORG_DIRECTORY",
   app_home: "VITE_HEAD_URL_APP_HOME"
 };
 
@@ -100,11 +123,8 @@ export function resolveHeadLaunchUrl(slug: string): string | null {
   const primaryKey = HEAD_ENV_KEYS[s];
   const legacyKey = HEAD_LEGACY_ENV_KEYS[s];
   const fromEnv = envPick(primaryKey) || envPick(legacyKey);
-  if (fromEnv) {
-    if (!import.meta.env.DEV && isUnsafeLauncherHeadUrl(fromEnv)) return null;
-    return fromEnv;
-  }
-  if (!import.meta.env.DEV) return null;
+  if (fromEnv) return sanitizeLauncherLaunchUrl(fromEnv);
+  if (isProductionHomeRuntime()) return null;
   const d = HEAD_URL_DEFAULTS[s];
   return d ?? null;
 }
