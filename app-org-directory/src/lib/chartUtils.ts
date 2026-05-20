@@ -144,13 +144,16 @@ export function isPersonSeat(seat: Pick<Seat, "status">): boolean {
   return !isStructuralSeat(seat);
 }
 
-/** Deduplicate advisory/dotted/partner lines for print and summaries. */
+/** Deduplicate advisory/dotted/partner lines for summaries. */
 export function dedupeSecondaryRelationships(relationships: Relationship[]): Relationship[] {
   const seen = new Set<string>();
   const out: Relationship[] = [];
   for (const r of nonDirectRelationships(relationships)) {
+    const labelNorm = String(r.label ?? "")
+      .trim()
+      .toLowerCase();
     const [a, b] = [r.fromSeatId, r.toSeatId].sort();
-    const key = `${a}|${b}|${r.type}`;
+    const key = `${a}|${b}|${r.type}|${labelNorm}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(r);

@@ -2,6 +2,8 @@ import type { RelationshipType, SeatStatus } from "./chartTypes";
 
 export const APP_TITLE = "Elite Stone Fabrication Org Chart";
 
+export const PRINT_SUBTITLE = "Organizational structure and reporting relationships";
+
 const SEAT_STATUS_LABELS: Record<SeatStatus, string> = {
   filled: "Assigned",
   open: "Open role",
@@ -25,6 +27,23 @@ export function seatStatusLabel(status: SeatStatus | string): string {
 export function relationshipTypeLabel(type: RelationshipType | string): string {
   const key = String(type ?? "").trim() as RelationshipType;
   return RELATIONSHIP_TYPE_LABELS[key] ?? type;
+}
+
+/** Leadership-facing labels for print context lines (never raw enum values). */
+export function printRelationshipTypeLabel(type: RelationshipType | string): string {
+  const key = String(type ?? "").trim() as RelationshipType;
+  switch (key) {
+    case "partner_context":
+      return "Partner / Advisor";
+    case "advisory":
+      return "Advisory relationship";
+    case "dotted":
+      return "Dotted-line relationship";
+    case "direct":
+      return "Direct report";
+    default:
+      return relationshipTypeLabel(type);
+  }
 }
 
 /** Hide generic branch labels on chart cards. */

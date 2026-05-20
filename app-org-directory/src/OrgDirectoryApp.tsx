@@ -15,7 +15,7 @@ import {
   seatMap
 } from "./lib/chartUtils";
 import { buildEliteStarterChartData } from "./lib/eliteStarterChart";
-import { APP_TITLE, seatStatusLabel } from "./lib/displayLabels";
+import { APP_TITLE, PRINT_SUBTITLE, seatStatusLabel } from "./lib/displayLabels";
 import OrgChartCanvas from "./ui/OrgChartCanvas";
 import PrintOrgChart from "./ui/PrintOrgChart";
 import RoleInspectorPanel from "./ui/RoleInspectorPanel";
@@ -492,6 +492,7 @@ export default function OrgDirectoryApp() {
     <div className={`od-app ${printMode ? "od-print-mode" : ""}`}>
       <div className="od-print-header od-print-only">
         <h1>{APP_TITLE}</h1>
+        <p className="od-print-subtitle">{PRINT_SUBTITLE}</p>
       </div>
 
       <header className="od-header od-no-print">
@@ -627,6 +628,12 @@ export default function OrgDirectoryApp() {
             </div>
           ) : (
             <>
+              {printMode ? (
+                <p className="od-print-tip od-no-print">
+                  For best output, use <strong>Landscape</strong> and turn off browser <strong>Headers and footers</strong> in
+                  the print dialog.
+                </p>
+              ) : null}
               <div className={`od-chart-workspace od-no-print${printMode ? " od-chart-workspace--hidden" : ""}`}>
                 <div className="od-chart-workspace-canvas">
                   <OrgChartCanvas

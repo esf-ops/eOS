@@ -525,18 +525,35 @@ body {
 
 .od-print-header {
   text-align: center;
-  margin-bottom: 16px;
+  margin-bottom: 10px;
 }
 
 .od-print-header h1 {
   margin: 0;
-  font-size: 1.5rem;
+  font-size: 1.45rem;
   color: var(--od-accent);
 }
 
+.od-print-subtitle {
+  margin: 4px 0 0;
+  font-size: 0.92rem;
+  color: var(--od-muted);
+  font-weight: 400;
+}
+
+.od-print-tip {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  font-size: 0.88rem;
+  color: #475569;
+}
+
 .od-print-footer {
-  margin-top: 24px;
-  padding-top: 12px;
+  margin-top: 16px;
+  padding-top: 10px;
   border-top: 1px solid var(--od-border);
   text-align: center;
   font-size: 0.75rem;
@@ -671,7 +688,12 @@ body {
 
 .od-print-chart-surface--active {
   display: block;
-  padding: 8px 0;
+  padding: 4px 0 8px;
+  width: 100%;
+}
+
+.od-print-mode .od-chart-card {
+  padding: 12px 16px 16px;
 }
 
 .od-print-mode .od-screen-chart,
@@ -681,6 +703,11 @@ body {
 
 .od-print-mode .od-print-chart-surface {
   display: block;
+  width: 100%;
+}
+
+.od-print-mode .od-print-main-hierarchy {
+  min-height: 200px;
 }
 
 /* Live drag: no CSS transition lag on nodes */
@@ -775,11 +802,24 @@ body {
 
 .od-print-chart-body {
   width: 100%;
+  max-width: none;
 }
 
-.od-print-tree-wrap {
-  overflow: visible;
-  padding: 12px 0;
+.od-print-main-hierarchy {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  padding: 0;
+}
+
+.od-print-tree-scaler {
+  display: inline-block;
+  max-width: 100%;
+}
+
+.od-print-tree-scaler--compact {
+  transform: scale(0.92);
+  transform-origin: top center;
 }
 
 .od-print-tree,
@@ -789,15 +829,19 @@ body {
   padding: 0;
   display: flex;
   justify-content: center;
-  gap: 24px;
+  gap: 16px;
   position: relative;
+}
+
+.od-print-tree-primary {
+  margin: 0 auto;
 }
 
 .od-print-tree li {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 18px 10px 0;
+  padding: 14px 8px 0;
   position: relative;
 }
 
@@ -807,8 +851,8 @@ body {
   top: 0;
   left: 50%;
   width: 2px;
-  height: 18px;
-  background: #cbd5e1;
+  height: 14px;
+  background: #94a3b8;
   transform: translateX(-50%);
 }
 
@@ -820,50 +864,54 @@ body {
   content: "";
   position: absolute;
   top: 0;
-  left: 8%;
-  right: 8%;
+  left: 6%;
+  right: 6%;
   height: 2px;
-  background: #cbd5e1;
+  background: #94a3b8;
 }
 
 .od-print-node {
-  min-width: 160px;
-  max-width: 200px;
-  border: 1px solid #cbd5e1;
+  min-width: 200px;
+  max-width: 280px;
+  border: 1px solid #94a3b8;
   border-top: 4px solid #94a3b8;
   border-radius: 10px;
-  padding: 10px 12px;
+  padding: 12px 16px;
   background: #fff;
   text-align: center;
   break-inside: avoid;
   page-break-inside: avoid;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.od-print-node-kind {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #64748b;
+  margin-bottom: 4px;
 }
 
 .od-print-node-name {
   font-weight: 700;
-  font-size: 0.9rem;
+  font-size: 1rem;
+  line-height: 1.25;
+  color: #0f172a;
 }
 
 .od-print-node-title {
-  font-size: 0.78rem;
+  font-size: 0.85rem;
   color: #475569;
-  margin-top: 2px;
+  margin-top: 4px;
+  line-height: 1.3;
 }
 
 .od-print-node-meta {
   margin-top: 6px;
-  font-size: 0.68rem;
+  font-size: 0.78rem;
   color: #64748b;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  justify-content: center;
-}
-
-.od-print-node-meta span {
-  background: #f1f5f9;
-  padding: 2px 6px;
-  border-radius: 4px;
+  line-height: 1.35;
 }
 
 .od-print-node-open {
@@ -886,35 +934,51 @@ body {
   border-top-width: 4px;
 }
 
-.od-print-secondary {
-  margin-top: 20px;
-  padding-top: 14px;
-  border-top: 1px solid #e2e8f0;
-  break-inside: avoid;
-}
-
-.od-print-secondary h2 {
-  margin: 0 0 8px;
+.od-print-section-title {
+  margin: 0 0 6px;
   font-size: 0.95rem;
   color: var(--od-accent);
+  font-weight: 700;
 }
 
-.od-print-secondary ul {
+.od-print-extra-roots {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed #e2e8f0;
+}
+
+.od-print-secondary {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 2px solid #e2e8f0;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.od-print-secondary-help {
+  margin: 0 0 10px;
+  font-size: 0.8rem;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+.od-print-context-list {
   margin: 0;
-  padding: 0;
-  list-style: none;
+  padding: 0 0 0 1.1rem;
+  list-style: disc;
 }
 
-.od-print-secondary li {
-  font-size: 0.82rem;
-  color: #475569;
-  margin-bottom: 6px;
+.od-print-context-list li {
+  font-size: 0.84rem;
+  color: #334155;
+  margin-bottom: 5px;
+  line-height: 1.35;
 }
 
 @media print {
   @page {
-    size: landscape;
-    margin: 0.5in;
+    size: landscape letter;
+    margin: 0.35in 0.4in;
   }
 
   .od-no-print {
@@ -927,26 +991,101 @@ body {
 
   body {
     background: #fff;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 
   .od-app {
     max-width: none;
     padding: 0;
+    margin: 0;
   }
 
   .od-card {
     box-shadow: none;
     border: none;
     padding: 0;
+    margin: 0;
+  }
+
+  .od-print-header {
+    margin-bottom: 6px;
+  }
+
+  .od-print-header h1 {
+    font-size: 17pt;
+  }
+
+  .od-print-subtitle {
+    font-size: 9.5pt;
+  }
+
+  .od-print-footer {
+    margin-top: 10px;
+    font-size: 8.5pt;
+  }
+
+  .od-print-chart-surface {
+    display: block !important;
+    padding: 0;
+  }
+
+  .od-print-main-hierarchy {
+    page-break-inside: avoid;
+  }
+
+  .od-print-tree-scaler {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+  }
+
+  .od-print-tree {
+    gap: 12px;
+  }
+
+  .od-print-tree li {
+    padding-top: 12px;
+  }
+
+  .od-print-node {
+    min-width: 210px;
+    max-width: 300px;
+    padding: 13px 16px;
+  }
+
+  .od-print-node-name {
+    font-size: 11pt;
+  }
+
+  .od-print-node-title {
+    font-size: 9.5pt;
+  }
+
+  .od-print-node-meta {
+    font-size: 8.5pt;
+  }
+
+  .od-print-secondary {
+    margin-top: 10px;
+    padding-top: 8px;
+  }
+
+  .od-print-section-title {
+    font-size: 11pt;
+  }
+
+  .od-print-secondary-help {
+    font-size: 8.5pt;
+  }
+
+  .od-print-context-list li {
+    font-size: 9pt;
   }
 
   .od-screen-chart,
   .od-flow-wrap {
     display: none !important;
-  }
-
-  .od-print-chart-surface {
-    display: block !important;
   }
 
   .react-flow__controls,
