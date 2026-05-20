@@ -514,6 +514,33 @@ body {
   font-size: 0.88rem;
 }
 
+.od-export-card .od-export-section-title {
+  margin: 0 0 8px;
+  font-size: 1.05rem;
+  color: var(--od-accent);
+}
+
+.od-export-card .od-export-section-title-spaced {
+  margin-top: 22px;
+}
+
+.od-outline-preview {
+  margin: 12px 0 0;
+  padding: 14px 16px;
+  max-height: min(420px, 50vh);
+  overflow: auto;
+  background: #f8fafc;
+  border: 1px solid var(--od-border);
+  border-radius: 10px;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #1e293b;
+  user-select: all;
+}
+
 .od-print-only {
   display: none;
 }

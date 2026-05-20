@@ -15,6 +15,12 @@ import {
   seatMap
 } from "./lib/chartUtils";
 import { buildEliteStarterChartData } from "./lib/eliteStarterChart";
+import {
+  buildOrgChartMarkdownOutline,
+  buildOrgChartTextOutline,
+  OUTLINE_MD_FILENAME,
+  OUTLINE_TXT_FILENAME
+} from "./lib/orgChartOutline";
 import { APP_TITLE, PRINT_SUBTITLE, seatStatusLabel } from "./lib/displayLabels";
 import OrgChartCanvas from "./ui/OrgChartCanvas";
 import PrintOrgChart from "./ui/PrintOrgChart";
@@ -283,6 +289,11 @@ export default function OrgDirectoryApp() {
   const dm = useMemo(() => deptMap(departments), [departments]);
   const chartHasSeats = seats.length > 0;
 
+  const outlineText = useMemo(
+    () => (chartData ? buildOrgChartTextOutline(chartData) : ""),
+    [chartData]
+  );
+
   const selectedSeat = selectedSeatId ? sm.get(selectedSeatId) : null;
 
   const updateChart = useCallback((fn: (prev: ChartData) => ChartData) => {
@@ -361,6 +372,35 @@ export default function OrgDirectoryApp() {
     });
     setSelectedSeatId(null);
   };
+
+  const copyOutline = useCallback(async () => {
+    if (!outlineText) {
+      setError("Nothing to copy — chart is empty.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(outlineText);
+      setError("");
+      setMsg("Org chart outline copied.");
+    } catch {
+      setError("Could not copy to clipboard. Select the preview text below and copy manually.");
+    }
+  }, [outlineText]);
+
+  const downloadOutline = useCallback(
+    (format: "txt" | "md") => {
+      if (!chartData) return;
+      const content = format === "md" ? buildOrgChartMarkdownOutline(chartData) : outlineText;
+      const blob = new Blob([content], { type: format === "md" ? "text/markdown;charset=utf-8" : "text/plain;charset=utf-8" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = format === "md" ? OUTLINE_MD_FILENAME : OUTLINE_TXT_FILENAME;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      setMsg(format === "md" ? "Markdown outline downloaded." : "Text outline downloaded.");
+    },
+    [chartData, outlineText]
+  );
 
   const exportJson = async () => {
     if (!token) return;
@@ -827,10 +867,47 @@ export default function OrgDirectoryApp() {
       )}
 
       {tab === "export" && (
-        <div className="od-card">
+        <div className="od-card od-export-card">
+          <h2 className="od-export-section-title">Human-readable outline</h2>
+          <p className="od-muted">
+            Text outline for meetings, approval, and documents. Generated from the current chart in the editor (save first
+            to include your latest changes on the server).
+          </p>
           <div className="od-toolbar">
-            <button type="button" className="od-btn od-btn-primary" onClick={() => void exportJson()}>
-              Export JSON
+            <button type="button" className="od-btn od-btn-primary" onClick={() => void copyOutline()} disabled={!chartHasSeats}>
+              Copy text outline
+            </button>
+            <button type="button" className="od-btn" onClick={() => downloadOutline("txt")} disabled={!chartHasSeats}>
+              Download .txt
+            </button>
+            <button type="button" className="od-btn" onClick={() => downloadOutline("md")} disabled={!chartHasSeats}>
+              Download .md
+            </button>
+            <button
+              type="button"
+              className="od-btn"
+              onClick={() => {
+                setTab("chart");
+                setPrintMode(true);
+                window.setTimeout(() => window.print(), 400);
+              }}
+            >
+              Print chart
+            </button>
+          </div>
+          {chartHasSeats ? (
+            <pre className="od-outline-preview" aria-label="Org chart text outline preview">
+              {outlineText}
+            </pre>
+          ) : (
+            <p className="od-muted">Load or build a chart on the Org Chart tab to preview an outline here.</p>
+          )}
+
+          <h2 className="od-export-section-title od-export-section-title-spaced">Technical backup</h2>
+          <p className="od-muted">JSON is the full chart backup for import and restore (departments, seats, relationships, layout).</p>
+          <div className="od-toolbar">
+            <button type="button" className="od-btn" onClick={() => void exportJson()}>
+              Export backup JSON
             </button>
             {canEdit ? (
               <label className="od-btn">
@@ -846,19 +923,7 @@ export default function OrgDirectoryApp() {
                 />
               </label>
             ) : null}
-            <button
-              type="button"
-              className="od-btn"
-              onClick={() => {
-                setTab("chart");
-                setPrintMode(true);
-                window.setTimeout(() => window.print(), 400);
-              }}
-            >
-              Print chart
-            </button>
           </div>
-          <p className="od-muted">Export downloads your saved org chart (including layout). Import updates the editor — use Save changes to persist.</p>
           {/* TODO: Future roster CSV staging — paste CSV to create draft unassigned seats in an "Unassigned / Review" department. Must not create users or grant access. */}
         </div>
       )}
