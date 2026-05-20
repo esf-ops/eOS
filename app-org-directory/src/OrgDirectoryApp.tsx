@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { apiFetch, ApiError, EOS_LOGO_URL } from "./lib/api";
+import { apiFetch, ApiError } from "./lib/api";
+import { EOS_LOGO_URL, readOrgDirectoryConfig } from "./lib/config";
 import {
   childrenOf,
   deptMap,
@@ -18,11 +19,33 @@ import { getSupabase } from "./lib/supabase";
 type Tab = "chart" | "departments" | "seats" | "access" | "export";
 
 type MeResp = {
+  ok?: boolean;
   can_view?: boolean;
   can_edit?: boolean;
   organization_id?: string;
   user?: { email?: string; role?: string };
 };
+
+function AuthShell({
+  title,
+  children,
+  homeUrl
+}: {
+  title: string;
+  children: React.ReactNode;
+  homeUrl: string;
+}) {
+  return (
+    <div className="od-app od-auth od-card">
+      <img src={EOS_LOGO_URL} alt="Elite Stone Fabrication" style={{ maxWidth: 220, marginBottom: 16 }} />
+      <h1>{title}</h1>
+      {children}
+      <p className="od-muted" style={{ marginTop: 20 }}>
+        <a href={homeUrl}>Back to Home</a>
+      </p>
+    </div>
+  );
+}
 
 function SeatNode({ seat, dept }: { seat: Seat; dept?: Department }) {
   const statusClass =
@@ -77,13 +100,19 @@ function TreeBranch({
 }
 
 export default function OrgDirectoryApp() {
+  const { config: runtimeConfig, missing: configMissing } = readOrgDirectoryConfig();
+  const homeUrl = runtimeConfig?.homeUrl ?? "https://www.eliteosfab.com";
   const supabase = getSupabase();
+  const [sessionBootstrapped, setSessionBootstrapped] = useState(false);
   const [token, setToken] = useState<string | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState("");
   const [tab, setTab] = useState<Tab>("chart");
   const [me, setMe] = useState<MeResp | null>(null);
+  const [meLoading, setMeLoading] = useState(false);
+  const [accessDenied, setAccessDenied] = useState(false);
   const [chartData, setChartData] = useState<ChartData | null>(null);
   const [chartId, setChartId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -95,12 +124,38 @@ export default function OrgDirectoryApp() {
 
   const canEdit = Boolean(me?.can_edit);
 
+  /** Restore JWT from shared cookie storage (same pattern as Quote Library / Internal Estimate). */
+  useEffect(() => {
+    if (!supabase) {
+      setSessionBootstrapped(true);
+      return;
+    }
+    let alive = true;
+    void supabase.auth.getSession().then(({ data }) => {
+      if (!alive) return;
+      const tok = data.session?.access_token ?? "";
+      setToken(tok || null);
+      setSessionBootstrapped(true);
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((_evt, sess) => {
+      if (!alive) return;
+      const tok = sess?.access_token ?? "";
+      setToken(tok || null);
+      setSessionBootstrapped(true);
+    });
+    return () => {
+      alive = false;
+      sub.subscription.unsubscribe();
+    };
+  }, [supabase]);
+
   const signIn = useCallback(async () => {
     setAuthError("");
     if (!supabase) {
-      setAuthError("Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.");
+      setAuthError("Supabase is not configured for this deployment.");
       return;
     }
+    setAuthBusy(true);
     try {
       const { data, error: err } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
       if (err) throw err;
@@ -110,6 +165,8 @@ export default function OrgDirectoryApp() {
       setPassword("");
     } catch (e: unknown) {
       setAuthError(String((e as Error)?.message ?? e));
+    } finally {
+      setAuthBusy(false);
     }
   }, [email, password, supabase]);
 
@@ -118,17 +175,49 @@ export default function OrgDirectoryApp() {
     setToken(null);
     setMe(null);
     setChartData(null);
+    setChartId(null);
+    setAccessDenied(false);
+    setError("");
+    setMsg("");
   }, [supabase]);
 
   const loadMe = useCallback(async () => {
     if (!token) return;
-    const m = (await apiFetch("/api/org-directory/me", token)) as MeResp;
-    setMe(m);
-  }, [token]);
+    setMeLoading(true);
+    setError("");
+    setAccessDenied(false);
+    try {
+      const m = (await apiFetch("/api/org-directory/me", token)) as MeResp;
+      setMe(m);
+    } catch (e: unknown) {
+      setMe(null);
+      setChartData(null);
+      setChartId(null);
+      if (e instanceof ApiError) {
+        if (e.status === 401) {
+          setToken(null);
+          if (supabase) await supabase.auth.signOut();
+          setAuthError("Sign in required — your session expired or is invalid.");
+          return;
+        }
+        if (e.status === 403) {
+          setAccessDenied(true);
+          setError(
+            e.message ||
+              "org_directory head access required. Ask an admin to grant the Org Directory tool in System Admin."
+          );
+          return;
+        }
+      }
+      setError(e instanceof ApiError ? e.message : String((e as Error)?.message ?? e));
+    } finally {
+      setMeLoading(false);
+    }
+  }, [token, supabase]);
 
   const loadChart = useCallback(
     async (opts?: { seed?: boolean }) => {
-      if (!token) return;
+      if (!token || accessDenied) return;
       setLoading(true);
       setError("");
       try {
@@ -141,19 +230,42 @@ export default function OrgDirectoryApp() {
         if (cd) setChartData(cd);
         setChartId(r.chart?.id ?? null);
         if (r.seeded) setMsg("Loaded Elite starter chart.");
-        await loadMe();
       } catch (e: unknown) {
+        if (e instanceof ApiError && e.status === 401) {
+          setToken(null);
+          if (supabase) await supabase.auth.signOut();
+          setAuthError("Sign in required — your session expired or is invalid.");
+          return;
+        }
+        if (e instanceof ApiError && e.status === 403) {
+          setAccessDenied(true);
+          setError(
+            e.message ||
+              "org_directory head access required. Ask an admin to grant the Org Directory tool in System Admin."
+          );
+          return;
+        }
         setError(e instanceof ApiError ? e.message : String((e as Error)?.message ?? e));
       } finally {
         setLoading(false);
       }
     },
-    [token, loadMe]
+    [token, accessDenied, supabase]
   );
 
   useEffect(() => {
-    if (token) void loadChart();
-  }, [token, loadChart]);
+    if (!token) {
+      setMe(null);
+      setAccessDenied(false);
+      return;
+    }
+    void loadMe();
+  }, [token, loadMe]);
+
+  useEffect(() => {
+    if (!token || !me || accessDenied) return;
+    void loadChart();
+  }, [token, me, accessDenied, loadChart]);
 
   const saveChart = useCallback(async () => {
     if (!token || !chartData || !canEdit) return;
@@ -252,16 +364,38 @@ export default function OrgDirectoryApp() {
     reader.readAsText(file);
   };
 
+  if (configMissing.length > 0) {
+    return (
+      <AuthShell title="eliteOS Org Directory" homeUrl={homeUrl}>
+        <p className="od-muted">This deployment is missing required configuration.</p>
+        <ul className="od-muted">
+          {configMissing.map((k) => (
+            <li key={k}>
+              <code>{k}</code> is not set
+            </li>
+          ))}
+        </ul>
+        <p className="od-muted">Set these on the Vercel project for app-org-directory, then redeploy.</p>
+      </AuthShell>
+    );
+  }
+
+  if (!sessionBootstrapped) {
+    return (
+      <AuthShell title="eliteOS Org Directory" homeUrl={homeUrl}>
+        <p className="od-muted">Loading session…</p>
+      </AuthShell>
+    );
+  }
+
   if (!token) {
     return (
-      <div className="od-app od-auth od-card">
-        <img src={EOS_LOGO_URL} alt="Elite Stone Fabrication" style={{ maxWidth: 220, marginBottom: 16 }} />
-        <h1>eliteOS Org Directory</h1>
-        <p className="od-muted">Sign in with your eliteOS account (org_directory head access required).</p>
+      <AuthShell title="eliteOS Org Directory" homeUrl={homeUrl}>
+        <p className="od-muted">Sign in with your eliteOS account. Org Directory head access is required after sign-in.</p>
         {authError ? <div className="od-error">{authError}</div> : null}
         <label>
           Email
-          <input className="od-form-grid" value={email} onChange={(e) => setEmail(e.target.value)} />
+          <input className="od-form-grid" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" />
         </label>
         <label style={{ marginTop: 12 }}>
           Password
@@ -269,13 +403,57 @@ export default function OrgDirectoryApp() {
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && void signIn()}
+            onKeyDown={(e) => e.key === "Enter" && !authBusy && void signIn()}
+            autoComplete="current-password"
           />
         </label>
-        <button type="button" className="od-btn od-btn-primary" style={{ marginTop: 16 }} onClick={() => void signIn()}>
-          Sign in
+        <button
+          type="button"
+          className="od-btn od-btn-primary"
+          style={{ marginTop: 16 }}
+          disabled={authBusy}
+          onClick={() => void signIn()}
+        >
+          {authBusy ? "Signing in…" : "Sign in"}
         </button>
-      </div>
+      </AuthShell>
+    );
+  }
+
+  if (meLoading && !me && !accessDenied) {
+    return (
+      <AuthShell title="eliteOS Org Directory" homeUrl={homeUrl}>
+        <p className="od-muted">Checking org_directory access…</p>
+      </AuthShell>
+    );
+  }
+
+  if (accessDenied) {
+    return (
+      <AuthShell title="eliteOS Org Directory" homeUrl={homeUrl}>
+        <div className="od-error">org_directory head access required</div>
+        <p className="od-muted">
+          {error ||
+            "Ask an eliteOS administrator to grant the Org Directory tool in System Admin (user_head_access for head slug org_directory)."}
+        </p>
+        <button type="button" className="od-btn" style={{ marginTop: 12 }} onClick={() => void signOut()}>
+          Sign out
+        </button>
+      </AuthShell>
+    );
+  }
+
+  if (error && !me) {
+    return (
+      <AuthShell title="eliteOS Org Directory" homeUrl={homeUrl}>
+        <div className="od-error">{error}</div>
+        <button type="button" className="od-btn od-btn-primary" style={{ marginTop: 12 }} onClick={() => void loadMe()}>
+          Retry
+        </button>
+        <button type="button" className="od-btn" style={{ marginTop: 8 }} onClick={() => void signOut()}>
+          Sign out
+        </button>
+      </AuthShell>
     );
   }
 
@@ -340,6 +518,9 @@ export default function OrgDirectoryApp() {
       </nav>
 
       {loading && !chartData ? <p className="od-muted">Loading chart…</p> : null}
+      {!loading && !chartData && !error ? (
+        <p className="od-muted od-no-print">No chart data yet. Use Reload or load the Elite starter chart.</p>
+      ) : null}
 
       {chartData && tab === "chart" && (
         <div className="od-card">

@@ -1,9 +1,4 @@
-function backendBase(): string {
-  return String(import.meta.env.VITE_BACKEND_URL || "http://localhost:3001")
-    .trim()
-    .replace(/\/+$/, "")
-    .replace(/\/api$/i, "");
-}
+import { readOrgDirectoryConfig } from "./config";
 
 export class ApiError extends Error {
   status: number;
@@ -13,6 +8,14 @@ export class ApiError extends Error {
     this.status = status;
     this.body = body;
   }
+}
+
+function backendBase(): string {
+  const { config, missing } = readOrgDirectoryConfig();
+  if (!config) {
+    throw new ApiError(0, `Backend URL missing — set ${missing.join(", ")} on this deployment.`, null);
+  }
+  return config.backendBaseUrl;
 }
 
 async function parseJson(res: Response): Promise<unknown> {
@@ -43,6 +46,3 @@ export async function apiFetch(path: string, token: string, init: RequestInit = 
   }
   return body;
 }
-
-export const EOS_LOGO_URL =
-  "https://www.elitestonefabrication.com/wp-content/uploads/2021/09/cropped-ESF-Horizontal-Logo-500x150-px_09_09.png";
