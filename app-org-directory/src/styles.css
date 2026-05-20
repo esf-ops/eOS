@@ -79,6 +79,25 @@ body {
   color: #166534;
 }
 
+.od-pill-warn {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.od-empty-chart {
+  padding: 28px 20px;
+  text-align: center;
+  border: 1px dashed var(--od-border);
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.od-empty-chart .od-empty-title {
+  margin: 0 0 8px;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
 .od-pill-view {
   background: #fef3c7;
   color: #92400e;

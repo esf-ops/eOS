@@ -8,6 +8,11 @@ export function emptyChartData(): ChartData {
   return { departments: [], seats: [], relationships: [] };
 }
 
+export function isChartEmpty(data: ChartData | null | undefined): boolean {
+  if (!data) return true;
+  return (data.seats?.length ?? 0) === 0 && (data.departments?.length ?? 0) === 0;
+}
+
 export function deptMap(departments: Department[]): Map<string, Department> {
   return new Map(departments.map((d) => [d.id, d]));
 }

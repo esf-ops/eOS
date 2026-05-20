@@ -139,12 +139,26 @@ async function loadActiveChart(db, organizationId) {
   return { missing: false, chart: data?.[0] ?? null };
 }
 
+function isChartDataEmpty(chartData) {
+  const cd = sanitizeChartData(chartData);
+  return cd.seats.length === 0 && cd.departments.length === 0;
+}
+
 async function ensureActiveChart(db, organizationId, userId, { seedStarter = false } = {}) {
   const existing = await loadActiveChart(db, organizationId);
   if (existing.missing) return { ok: false, error: "org_directory_charts table missing — apply eliteos_org_directory_v1.sql" };
   if (existing.chart) {
-    const chart_data = sanitizeChartData(existing.chart.chart_data);
-    return { ok: true, chart: { ...existing.chart, chart_data }, created: false };
+    let chart_data = sanitizeChartData(existing.chart.chart_data);
+    const appliedSeed = seedStarter && isChartDataEmpty(chart_data);
+    if (appliedSeed) {
+      chart_data = buildEliteStarterChartData();
+    }
+    return {
+      ok: true,
+      chart: { ...existing.chart, chart_data },
+      created: false,
+      seeded: appliedSeed
+    };
   }
 
   const chart_data = seedStarter ? buildEliteStarterChartData() : emptyChartData();

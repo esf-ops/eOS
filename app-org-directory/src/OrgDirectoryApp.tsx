@@ -6,12 +6,14 @@ import {
   deptMap,
   directManagerId,
   displayName,
+  isChartEmpty,
   newId,
   nonDirectRelationships,
   rootSeatIds,
   seatMap,
   setDirectManager
 } from "./lib/chartUtils";
+import { buildEliteStarterChartData } from "./lib/eliteStarterChart";
 import type { ChartData, Department, Relationship, Seat, SeatStatus } from "./lib/chartTypes";
 import { RECOMMENDED_HEAD_OPTIONS } from "./lib/chartTypes";
 import { getSupabase } from "./lib/supabase";
@@ -115,6 +117,7 @@ export default function OrgDirectoryApp() {
   const [accessDenied, setAccessDenied] = useState(false);
   const [chartData, setChartData] = useState<ChartData | null>(null);
   const [chartId, setChartId] = useState<string | null>(null);
+  const [chartDirty, setChartDirty] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -229,7 +232,10 @@ export default function OrgDirectoryApp() {
         const cd = r.chart?.chart_data;
         if (cd) setChartData(cd);
         setChartId(r.chart?.id ?? null);
-        if (r.seeded) setMsg("Loaded Elite starter chart.");
+        setChartDirty(false);
+        if (r.seeded) {
+          setMsg("Starter chart loaded from server — click Save chart if you make further edits.");
+        }
       } catch (e: unknown) {
         if (e instanceof ApiError && e.status === 401) {
           setToken(null);
@@ -278,12 +284,33 @@ export default function OrgDirectoryApp() {
         body: JSON.stringify({ chart_data: chartData })
       });
       setMsg("Chart saved.");
+      setChartDirty(false);
     } catch (e: unknown) {
       setError(e instanceof ApiError ? e.message : String((e as Error)?.message ?? e));
     } finally {
       setSaving(false);
     }
   }, [token, chartData, canEdit]);
+
+  const loadStarterChart = useCallback(() => {
+    if (!canEdit) {
+      setError("You do not have edit access to load the starter chart.");
+      return;
+    }
+    try {
+      const starter = buildEliteStarterChartData();
+      if (!starter.seats.length) {
+        throw new Error("Starter chart has no seats — check eliteStarterChart.ts");
+      }
+      setChartData(starter);
+      setChartDirty(true);
+      setError("");
+      setMsg("Starter chart loaded — click Save chart to keep these changes.");
+      setTab("chart");
+    } catch (e: unknown) {
+      setError(e instanceof ApiError ? e.message : String((e as Error)?.message ?? e));
+    }
+  }, [canEdit]);
 
   const departments = chartData?.departments ?? [];
   const seats = chartData?.seats ?? [];
@@ -292,11 +319,13 @@ export default function OrgDirectoryApp() {
   const dm = useMemo(() => deptMap(departments), [departments]);
   const roots = useMemo(() => rootSeatIds(seats, relationships), [seats, relationships]);
   const secondaryRels = useMemo(() => nonDirectRelationships(relationships), [relationships]);
+  const chartHasSeats = seats.length > 0;
 
   const selectedSeat = selectedSeatId ? sm.get(selectedSeatId) : null;
 
   const updateChart = (fn: (prev: ChartData) => ChartData) => {
     setChartData((prev) => (prev ? fn(prev) : prev));
+    setChartDirty(true);
   };
 
   const addDepartment = () => {
@@ -356,7 +385,8 @@ export default function OrgDirectoryApp() {
           seats: cd.seats,
           relationships: cd.relationships ?? []
         });
-        setMsg("Imported JSON into editor — click Save to persist.");
+        setChartDirty(true);
+        setMsg("Imported JSON into editor — click Save chart to persist.");
       } catch (e: unknown) {
         setError(String((e as Error)?.message ?? e));
       }
@@ -476,10 +506,11 @@ export default function OrgDirectoryApp() {
         </div>
         <div className="od-toolbar">
           {canEdit ? (
-            <button type="button" className="od-btn od-btn-primary" disabled={saving} onClick={() => void saveChart()}>
-              {saving ? "Saving…" : "Save chart"}
+            <button type="button" className="od-btn od-btn-primary" disabled={saving || !chartDirty} onClick={() => void saveChart()}>
+              {saving ? "Saving…" : chartDirty ? "Save chart (unsaved)" : "Save chart"}
             </button>
           ) : null}
+          {chartDirty ? <span className="od-pill od-pill-warn od-no-print">Unsaved changes</span> : null}
           <button type="button" className="od-btn" onClick={() => void loadChart()}>
             Reload
           </button>
@@ -518,8 +549,8 @@ export default function OrgDirectoryApp() {
       </nav>
 
       {loading && !chartData ? <p className="od-muted">Loading chart…</p> : null}
-      {!loading && !chartData && !error ? (
-        <p className="od-muted od-no-print">No chart data yet. Use Reload or load the Elite starter chart.</p>
+      {!loading && chartData && isChartEmpty(chartData) && tab !== "chart" ? (
+        <p className="od-muted od-no-print">Chart is empty — open Org Chart and load the Elite starter chart.</p>
       ) : null}
 
       {chartData && tab === "chart" && (
@@ -530,7 +561,7 @@ export default function OrgDirectoryApp() {
                 <button type="button" className="od-btn" onClick={addSeat}>
                   Add seat
                 </button>
-                <button type="button" className="od-btn" onClick={() => void loadChart({ seed: true })}>
+                <button type="button" className="od-btn od-btn-primary" onClick={loadStarterChart}>
                   Load Elite starter chart
                 </button>
               </>
@@ -544,15 +575,30 @@ export default function OrgDirectoryApp() {
               </button>
             ) : null}
           </div>
-          <div className="od-chart-scroll">
-            <div className="od-tree">
-              <ul>
-                {roots.map((rid) => (
-                  <TreeBranch key={rid} seatId={rid} seats={seats} relationships={relationships} departments={departments} />
-                ))}
-              </ul>
+          {!chartHasSeats ? (
+            <div className="od-empty-chart od-no-print">
+              <p className="od-empty-title">No seats on this chart yet</p>
+              <p className="od-muted">
+                Load the Elite starter chart to preview Eric, Chris, Marshal, Adam, George, Dean, and open-seat examples —
+                then click <strong>Save chart</strong> to persist.
+              </p>
+              {canEdit ? (
+                <button type="button" className="od-btn od-btn-primary" style={{ marginTop: 12 }} onClick={loadStarterChart}>
+                  Load Elite starter chart
+                </button>
+              ) : null}
             </div>
-          </div>
+          ) : (
+            <div className="od-chart-scroll">
+              <div className="od-tree">
+                <ul>
+                  {roots.map((rid) => (
+                    <TreeBranch key={rid} seatId={rid} seats={seats} relationships={relationships} departments={departments} />
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
           {secondaryRels.length > 0 ? (
             <div className="od-secondary-rels">
               <strong>Non-direct relationships</strong>
