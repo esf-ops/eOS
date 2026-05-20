@@ -13,6 +13,7 @@ import { requireHeadAccess } from "./auth/headAccessMiddleware.js";
 import { logAction, logLoginEvent } from "./auth/auditLog.js";
 import { attachAdvancedSystemAdminUserRoutes } from "./admin/systemAdminUserManagement.js";
 import { attachMorawareAdminRoutes } from "./admin/morawareAdmin.js";
+import { attachOrgDirectoryRoutes } from "./orgDirectory/orgDirectoryApi.js";
 import { attachSalesAccountMappingAdminRoutes } from "./admin/salesAccountMappingAdmin.js";
 import { attachIdentityResolutionAdminRoutes } from "./admin/identityResolutionAdmin.js";
 import { attachQuoteRoutes } from "./quotes/quoteRoutes.js";
@@ -427,7 +428,10 @@ const fixedEliteOsOrigins = [
   "https://quotes.eliteosfab.com",
   "https://eliteos-quotes.vercel.app",
   "https://system.eliteosfab.com",
-  "http://localhost:5177"
+  "https://org.eliteosfab.com",
+  "https://org-directory.eliteosfab.com",
+  "http://localhost:5177",
+  "http://localhost:5185"
 ];
 
 const allowedOrigins = [
@@ -1022,6 +1026,13 @@ attachSalesAccountMappingAdminRoutes(app, {
 });
 
 attachMorawareAdminRoutes(app, {
+  requireAuth,
+  requireRole,
+  requireHeadAccess,
+  getSupabase: supabaseServerClient
+});
+
+attachOrgDirectoryRoutes(app, {
   requireAuth,
   requireRole,
   requireHeadAccess,

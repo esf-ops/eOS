@@ -28,6 +28,14 @@ export const HEAD_LAUNCHER_CATALOG = [
     href: "/system-admin"
   },
   {
+    slug: "org_directory",
+    label: "eliteOS Org Directory",
+    description: "Plan departments, roles, reporting lines, and recommended eliteOS access (planning only).",
+    category: "People",
+    href: "/org-directory",
+    roleNote: "Does not change actual user permissions — use System Admin for head access."
+  },
+  {
     slug: "pricing_admin",
     label: "eliteOS Pricing Admin Head",
     description: "Material tiers, add-ons, and quote pricing policy (authorized staff only).",

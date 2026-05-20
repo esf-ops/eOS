@@ -73,6 +73,7 @@ Status is **conceptual** unless a separate tracker says otherwise. Use the label
 
 - **Home / Launcher Head** — **`app-home/`**; production **`https://www.eliteosfab.com`**; Supabase sign-in + **`GET /api/me`** / **`GET /api/me/heads`** to render allowed head cards (Brain is source of truth for assignments; admin / executive / `super_admin` see full catalog in the launcher response).
 - **System Admin Head** — **`app-system-admin/`**; **`https://system.eliteosfab.com`**; identity and access governance (users, roles, `user_head_access`, invites, lifecycle actions, diagnostics). **Quote Library** owns primary quote search/workflow (separate head below); **Pricing Admin** owns pricing configuration (`FEATURE_DECISIONS.md` §13).  
+- **Org Directory Head** — **`app-org-directory/`**; **`https://org.eliteosfab.com`** (env `HEAD_URL_ORG_DIRECTORY`); planning org chart JSON (`org_directory` slug). Does not grant real head access — see `FEATURE_DECISIONS.md` §25.  
 - User Management Head  
 - Role / Permissions / Head Access Head  
 - Brain Health / Sync Admin Head  

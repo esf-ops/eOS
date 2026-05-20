@@ -10,6 +10,7 @@ const SLUG_TO_ENV_KEYS = Object.freeze({
   pricing_admin: ["HEAD_URL_PRICING_ADMIN"],
   sales: ["HEAD_URL_SALES"],
   system_admin: ["HEAD_URL_SYSTEM_ADMIN"],
+  org_directory: ["HEAD_URL_ORG_DIRECTORY"],
   executive: ["HEAD_URL_EXECUTIVE"],
   brain_health: ["HEAD_URL_BRAIN_HEALTH"],
   production: ["HEAD_URL_PRODUCTION"],
