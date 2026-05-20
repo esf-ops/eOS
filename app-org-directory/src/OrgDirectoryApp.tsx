@@ -14,6 +14,14 @@ import {
   setDirectManager
 } from "./lib/chartUtils";
 import { buildEliteStarterChartData } from "./lib/eliteStarterChart";
+import {
+  APP_TITLE,
+  formatBranchLabel,
+  formatSecondaryRelationshipLine,
+  seatStatusLabel,
+  SEAT_STATUS_OPTIONS,
+  sortRootSeatIds
+} from "./lib/displayLabels";
 import type { ChartData, Department, Relationship, Seat, SeatStatus } from "./lib/chartTypes";
 import { RECOMMENDED_HEAD_OPTIONS } from "./lib/chartTypes";
 import { getSupabase } from "./lib/supabase";
@@ -49,23 +57,29 @@ function AuthShell({
   );
 }
 
-function SeatNode({ seat, dept }: { seat: Seat; dept?: Department }) {
-  const statusClass =
-    seat.status === "open"
-      ? "od-status-open"
-      : seat.status === "future"
-        ? "od-status-future"
-        : seat.status === "advisor"
-          ? "od-status-advisor"
-          : "";
+function SeatNode({ seat, dept, isTopLeader }: { seat: Seat; dept?: Department; isTopLeader?: boolean }) {
+  const branch = formatBranchLabel(seat.branch);
+  const showStatus = seat.status !== "filled";
+  const nodeClass = [
+    "od-node",
+    isTopLeader ? "od-node-top" : "",
+    seat.status === "open" ? "od-node-open" : "",
+    seat.status === "future" ? "od-node-future" : "",
+    seat.status === "advisor" ? "od-node-advisor" : ""
+  ]
+    .filter(Boolean)
+    .join(" ");
   return (
-    <div className="od-node" style={dept?.color ? { borderTop: `4px solid ${dept.color}` } : undefined}>
+    <div
+      className={nodeClass}
+      style={dept?.color ? ({ "--od-dept-color": dept.color } as React.CSSProperties) : undefined}
+    >
       <div className="od-node-name">{displayName(seat)}</div>
       <div className="od-node-title">{seat.title}</div>
       <div className="od-node-meta">
-        {dept ? <span className="od-tag">{dept.name}</span> : null}
-        {seat.branch ? <span className="od-tag">{seat.branch}</span> : null}
-        <span className={`od-tag ${statusClass}`}>{seat.status}</span>
+        {dept ? <span className="od-tag od-tag-dept">{dept.name}</span> : null}
+        {branch ? <span className="od-tag od-tag-loc">{branch}</span> : null}
+        {showStatus ? <span className="od-tag od-tag-status">{seatStatusLabel(seat.status)}</span> : null}
       </div>
     </div>
   );
@@ -75,12 +89,14 @@ function TreeBranch({
   seatId,
   seats,
   relationships,
-  departments
+  departments,
+  isTopLeader
 }: {
   seatId: string;
   seats: Seat[];
   relationships: Relationship[];
   departments: Department[];
+  isTopLeader?: boolean;
 }) {
   const sm = seatMap(seats);
   const dm = deptMap(departments);
@@ -88,8 +104,8 @@ function TreeBranch({
   if (!seat) return null;
   const kids = childrenOf(seatId, seats, relationships);
   return (
-    <li>
-      <SeatNode seat={seat} dept={seat.departmentId ? dm.get(seat.departmentId) : undefined} />
+    <li className={isTopLeader ? "od-tree-top" : undefined}>
+      <SeatNode seat={seat} dept={seat.departmentId ? dm.get(seat.departmentId) : undefined} isTopLeader={isTopLeader} />
       {kids.length > 0 ? (
         <ul>
           {kids.map((c) => (
@@ -207,7 +223,7 @@ export default function OrgDirectoryApp() {
           setAccessDenied(true);
           setError(
             e.message ||
-              "org_directory head access required. Ask an admin to grant the Org Directory tool in System Admin."
+              "Org Chart access required. Ask an administrator to grant Org Directory in System Admin."
           );
           return;
         }
@@ -234,7 +250,7 @@ export default function OrgDirectoryApp() {
         setChartId(r.chart?.id ?? null);
         setChartDirty(false);
         if (r.seeded) {
-          setMsg("Starter chart loaded from server — click Save chart if you make further edits.");
+          setMsg("Starter chart loaded from server — click Save changes if you make further edits.");
         }
       } catch (e: unknown) {
         if (e instanceof ApiError && e.status === 401) {
@@ -247,7 +263,7 @@ export default function OrgDirectoryApp() {
           setAccessDenied(true);
           setError(
             e.message ||
-              "org_directory head access required. Ask an admin to grant the Org Directory tool in System Admin."
+              "Org Chart access required. Ask an administrator to grant Org Directory in System Admin."
           );
           return;
         }
@@ -283,7 +299,7 @@ export default function OrgDirectoryApp() {
         method: "PATCH",
         body: JSON.stringify({ chart_data: chartData })
       });
-      setMsg("Chart saved.");
+      setMsg("Changes saved.");
       setChartDirty(false);
     } catch (e: unknown) {
       setError(e instanceof ApiError ? e.message : String((e as Error)?.message ?? e));
@@ -292,32 +308,45 @@ export default function OrgDirectoryApp() {
     }
   }, [token, chartData, canEdit]);
 
-  const loadStarterChart = useCallback(() => {
-    if (!canEdit) {
-      setError("You do not have edit access to load the starter chart.");
-      return;
-    }
-    try {
-      const starter = buildEliteStarterChartData();
-      if (!starter.seats.length) {
-        throw new Error("Starter chart has no seats — check eliteStarterChart.ts");
+  const loadStarterChart = useCallback(
+    (opts?: { skipConfirm?: boolean }) => {
+      if (!canEdit) {
+        setError("You do not have edit access to load the starter chart.");
+        return;
       }
-      setChartData(starter);
-      setChartDirty(true);
-      setError("");
-      setMsg("Starter chart loaded — click Save chart to keep these changes.");
-      setTab("chart");
-    } catch (e: unknown) {
-      setError(e instanceof ApiError ? e.message : String((e as Error)?.message ?? e));
-    }
-  }, [canEdit]);
+      const hasWork = (chartData?.seats?.length ?? 0) > 0;
+      if (hasWork && !opts?.skipConfirm) {
+        const ok = window.confirm(
+          "Replace the current org chart with the starter template?\n\nAny unsaved edits will be lost unless you save first."
+        );
+        if (!ok) return;
+      }
+      try {
+        const starter = buildEliteStarterChartData();
+        if (!starter.seats.length) {
+          throw new Error("Starter chart has no roles — contact support.");
+        }
+        setChartData(starter);
+        setChartDirty(true);
+        setError("");
+        setMsg("Starter chart loaded — click Save changes to keep these updates.");
+        setTab("chart");
+      } catch (e: unknown) {
+        setError(e instanceof ApiError ? e.message : String((e as Error)?.message ?? e));
+      }
+    },
+    [canEdit, chartData]
+  );
 
   const departments = chartData?.departments ?? [];
   const seats = chartData?.seats ?? [];
   const relationships = chartData?.relationships ?? [];
   const sm = useMemo(() => seatMap(seats), [seats]);
   const dm = useMemo(() => deptMap(departments), [departments]);
-  const roots = useMemo(() => rootSeatIds(seats, relationships), [seats, relationships]);
+  const roots = useMemo(
+    () => sortRootSeatIds(rootSeatIds(seats, relationships), seats),
+    [seats, relationships]
+  );
   const secondaryRels = useMemo(() => nonDirectRelationships(relationships), [relationships]);
   const chartHasSeats = seats.length > 0;
 
@@ -386,7 +415,7 @@ export default function OrgDirectoryApp() {
           relationships: cd.relationships ?? []
         });
         setChartDirty(true);
-        setMsg("Imported JSON into editor — click Save chart to persist.");
+        setMsg("Imported JSON into editor — click Save changes to persist.");
       } catch (e: unknown) {
         setError(String((e as Error)?.message ?? e));
       }
@@ -396,7 +425,7 @@ export default function OrgDirectoryApp() {
 
   if (configMissing.length > 0) {
     return (
-      <AuthShell title="eliteOS Org Directory" homeUrl={homeUrl}>
+      <AuthShell title={APP_TITLE} homeUrl={homeUrl}>
         <p className="od-muted">This deployment is missing required configuration.</p>
         <ul className="od-muted">
           {configMissing.map((k) => (
@@ -412,7 +441,7 @@ export default function OrgDirectoryApp() {
 
   if (!sessionBootstrapped) {
     return (
-      <AuthShell title="eliteOS Org Directory" homeUrl={homeUrl}>
+      <AuthShell title={APP_TITLE} homeUrl={homeUrl}>
         <p className="od-muted">Loading session…</p>
       </AuthShell>
     );
@@ -420,8 +449,8 @@ export default function OrgDirectoryApp() {
 
   if (!token) {
     return (
-      <AuthShell title="eliteOS Org Directory" homeUrl={homeUrl}>
-        <p className="od-muted">Sign in with your eliteOS account. Org Directory head access is required after sign-in.</p>
+      <AuthShell title={APP_TITLE} homeUrl={homeUrl}>
+        <p className="od-muted">Sign in with your Elite Stone Fabrication / eliteOS account.</p>
         {authError ? <div className="od-error">{authError}</div> : null}
         <label>
           Email
@@ -452,19 +481,18 @@ export default function OrgDirectoryApp() {
 
   if (meLoading && !me && !accessDenied) {
     return (
-      <AuthShell title="eliteOS Org Directory" homeUrl={homeUrl}>
-        <p className="od-muted">Checking org_directory access…</p>
+      <AuthShell title={APP_TITLE} homeUrl={homeUrl}>
+        <p className="od-muted">Loading your org chart access…</p>
       </AuthShell>
     );
   }
 
   if (accessDenied) {
     return (
-      <AuthShell title="eliteOS Org Directory" homeUrl={homeUrl}>
-        <div className="od-error">org_directory head access required</div>
+      <AuthShell title={APP_TITLE} homeUrl={homeUrl}>
+        <div className="od-error">Org Chart access required</div>
         <p className="od-muted">
-          {error ||
-            "Ask an eliteOS administrator to grant the Org Directory tool in System Admin (user_head_access for head slug org_directory)."}
+          {error || "Ask an administrator to grant Org Directory access in System Admin."}
         </p>
         <button type="button" className="od-btn" style={{ marginTop: 12 }} onClick={() => void signOut()}>
           Sign out
@@ -475,7 +503,7 @@ export default function OrgDirectoryApp() {
 
   if (error && !me) {
     return (
-      <AuthShell title="eliteOS Org Directory" homeUrl={homeUrl}>
+      <AuthShell title={APP_TITLE} homeUrl={homeUrl}>
         <div className="od-error">{error}</div>
         <button type="button" className="od-btn od-btn-primary" style={{ marginTop: 12 }} onClick={() => void loadMe()}>
           Retry
@@ -489,30 +517,41 @@ export default function OrgDirectoryApp() {
 
   return (
     <div className={`od-app ${printMode ? "od-print-mode" : ""}`}>
+      <div className="od-print-header od-print-only">
+        <h1>{APP_TITLE}</h1>
+      </div>
+
       <header className="od-header od-no-print">
-        <div>
-          <img src={EOS_LOGO_URL} alt="" style={{ maxWidth: 180, marginBottom: 8 }} />
-          <h1>eliteOS Org Directory</h1>
-          <p className="od-subtitle">
-            Planning tool for departments, roles, reporting lines, and recommended eliteOS access.
-          </p>
-          <div className="od-pill-row">
-            <span className={`od-pill ${canEdit ? "od-pill-edit" : "od-pill-view"}`}>
-              {canEdit ? "Can edit" : "View only"}
-            </span>
-            {me?.user?.email ? <span className="od-pill">{me.user.email}</span> : null}
-            {me?.user?.role ? <span className="od-pill">Role: {me.user.role}</span> : null}
+        <div className="od-header-main">
+          <img className="od-logo" src={EOS_LOGO_URL} alt="Elite Stone Fabrication" />
+          <div>
+            <h1>{APP_TITLE}</h1>
+            <p className="od-subtitle">
+              Build and maintain the company structure by role, department, location, and reporting relationship.
+            </p>
+            <div className="od-pill-row">
+              <span className={`od-pill ${canEdit ? "od-pill-edit" : "od-pill-view"}`}>
+                {canEdit ? "Can edit" : "View only"}
+              </span>
+              {chartDirty ? <span className="od-pill od-pill-warn">Unsaved changes</span> : null}
+            </div>
+            <details className="od-access-details">
+              <summary>Access details</summary>
+              <div className="od-access-details-body">
+                {me?.user?.email ? <div className="od-access-line">{me.user.email}</div> : null}
+                {me?.user?.role ? <div className="od-access-line od-access-muted">Signed in as {me.user.role}</div> : null}
+              </div>
+            </details>
           </div>
         </div>
-        <div className="od-toolbar">
+        <div className="od-toolbar od-header-actions">
           {canEdit ? (
             <button type="button" className="od-btn od-btn-primary" disabled={saving || !chartDirty} onClick={() => void saveChart()}>
-              {saving ? "Saving…" : chartDirty ? "Save chart (unsaved)" : "Save chart"}
+              {saving ? "Saving…" : "Save changes"}
             </button>
           ) : null}
-          {chartDirty ? <span className="od-pill od-pill-warn od-no-print">Unsaved changes</span> : null}
           <button type="button" className="od-btn" onClick={() => void loadChart()}>
-            Reload
+            Refresh
           </button>
           <button type="button" className="od-btn" onClick={() => void signOut()}>
             Sign out
@@ -521,8 +560,7 @@ export default function OrgDirectoryApp() {
       </header>
 
       <div className="od-callout od-no-print">
-        <strong>Planning only</strong> — this chart does not change actual eliteOS permissions. System Admin remains
-        the source for user invites and head access.
+        Org planning workspace. User invitations and app access are managed separately in System Admin.
       </div>
 
       {error ? <div className="od-error od-no-print">{error}</div> : null}
@@ -537,8 +575,8 @@ export default function OrgDirectoryApp() {
           [
             ["chart", "Org Chart"],
             ["departments", "Departments"],
-            ["seats", "Seat Editor"],
-            ["access", "Access Planning"],
+            ["seats", "Roles & People"],
+            ["access", "Tool Access Planning"],
             ["export", "Export / Print"]
           ] as const
         ).map(([id, label]) => (
@@ -550,20 +588,26 @@ export default function OrgDirectoryApp() {
 
       {loading && !chartData ? <p className="od-muted">Loading chart…</p> : null}
       {!loading && chartData && isChartEmpty(chartData) && tab !== "chart" ? (
-        <p className="od-muted od-no-print">Chart is empty — open Org Chart and load the Elite starter chart.</p>
+        <p className="od-muted od-no-print">Chart is empty — open Org Chart and load the starter chart.</p>
       ) : null}
 
       {chartData && tab === "chart" && (
-        <div className="od-card">
+        <div className="od-card od-chart-card">
           <div className="od-toolbar od-no-print">
             {canEdit ? (
               <>
                 <button type="button" className="od-btn" onClick={addSeat}>
-                  Add seat
+                  Add role
                 </button>
-                <button type="button" className="od-btn od-btn-primary" onClick={loadStarterChart}>
-                  Load Elite starter chart
-                </button>
+                {chartHasSeats ? (
+                  <button type="button" className="od-btn od-btn-quiet" onClick={() => void loadStarterChart()}>
+                    Reset to starter chart
+                  </button>
+                ) : (
+                  <button type="button" className="od-btn od-btn-primary" onClick={() => loadStarterChart({ skipConfirm: true })}>
+                    Load starter chart
+                  </button>
+                )}
               </>
             ) : null}
             <button type="button" className="od-btn od-no-print" onClick={() => setPrintMode(true)}>
@@ -577,39 +621,53 @@ export default function OrgDirectoryApp() {
           </div>
           {!chartHasSeats ? (
             <div className="od-empty-chart od-no-print">
-              <p className="od-empty-title">No seats on this chart yet</p>
+              <p className="od-empty-title">Start your org chart</p>
               <p className="od-muted">
-                Load the Elite starter chart to preview Eric, Chris, Marshal, Adam, George, Dean, and open-seat examples —
-                then click <strong>Save chart</strong> to persist.
+                Load the starter chart to preview leadership, branch lanes, and open roles — then click{" "}
+                <strong>Save changes</strong> to keep your work.
               </p>
               {canEdit ? (
-                <button type="button" className="od-btn od-btn-primary" style={{ marginTop: 12 }} onClick={loadStarterChart}>
-                  Load Elite starter chart
+                <button
+                  type="button"
+                  className="od-btn od-btn-primary"
+                  style={{ marginTop: 12 }}
+                  onClick={() => void loadStarterChart({ skipConfirm: true })}
+                >
+                  Load starter chart
                 </button>
               ) : null}
             </div>
           ) : (
-            <div className="od-chart-scroll">
-              <div className="od-tree">
-                <ul>
-                  {roots.map((rid) => (
-                    <TreeBranch key={rid} seatId={rid} seats={seats} relationships={relationships} departments={departments} />
-                  ))}
-                </ul>
+            <div className="od-chart-stage">
+              <div className="od-chart-scroll">
+                <div className="od-tree">
+                  <ul className="od-tree-roots">
+                    {roots.map((rid, idx) => (
+                      <TreeBranch
+                        key={rid}
+                        seatId={rid}
+                        seats={seats}
+                        relationships={relationships}
+                        departments={departments}
+                        isTopLeader={idx === 0}
+                      />
+                    ))}
+                  </ul>
+                </div>
               </div>
             </div>
           )}
           {secondaryRels.length > 0 ? (
             <div className="od-secondary-rels">
-              <strong>Non-direct relationships</strong>
+              <strong>Advisory / Cross-functional Relationships</strong>
               <ul>
                 {secondaryRels.map((r) => {
                   const from = sm.get(r.fromSeatId);
                   const to = sm.get(r.toSeatId);
+                  if (!from || !to) return null;
                   return (
                     <li key={r.id}>
-                      {displayName(from!)} → {displayName(to!)} ({r.type}
-                      {r.label ? `: ${r.label}` : ""})
+                      {formatSecondaryRelationshipLine(displayName(from), displayName(to), r.type, r.label)}
                     </li>
                   );
                 })}
@@ -657,7 +715,7 @@ export default function OrgDirectoryApp() {
                 ) : (
                   <strong>{d.name}</strong>
                 )}
-                <span className="od-muted">{seats.filter((s) => s.departmentId === d.id).length} seats</span>
+                <span className="od-muted">{seats.filter((s) => s.departmentId === d.id).length} roles</span>
               </div>
             ))}
           </div>
@@ -669,7 +727,7 @@ export default function OrgDirectoryApp() {
           <div className="od-toolbar od-no-print">
             {canEdit ? (
               <button type="button" className="od-btn od-btn-primary" onClick={addSeat}>
-                Add seat
+                Add role
               </button>
             ) : null}
           </div>
@@ -693,7 +751,7 @@ export default function OrgDirectoryApp() {
                       >
                         <td>{displayName(s)}</td>
                         <td>{s.title}</td>
-                        <td>{s.status}</td>
+                        <td>{seatStatusLabel(s.status)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -702,7 +760,7 @@ export default function OrgDirectoryApp() {
             </div>
             {selectedSeat && (
               <div style={{ flex: "1 1 320px" }}>
-                <h3 style={{ marginTop: 0 }}>Edit seat</h3>
+                <h3 style={{ marginTop: 0 }}>Edit role</h3>
                 <div className="od-form-grid">
                   <label>
                     Person name
@@ -781,9 +839,9 @@ export default function OrgDirectoryApp() {
                         }))
                       }
                     >
-                      {(["filled", "open", "future", "advisor"] as const).map((st) => (
-                        <option key={st} value={st}>
-                          {st}
+                      {SEAT_STATUS_OPTIONS.map((st) => (
+                        <option key={st.value} value={st.value}>
+                          {st.label}
                         </option>
                       ))}
                     </select>
@@ -841,7 +899,7 @@ export default function OrgDirectoryApp() {
                       }))
                     }
                   >
-                    Remove seat
+                    Remove role
                   </button>
                 ) : null}
               </div>
@@ -852,14 +910,16 @@ export default function OrgDirectoryApp() {
 
       {chartData && tab === "access" && (
         <div className="od-card">
-          <p className="od-muted">Recommended eliteOS heads by seat — does not grant real permissions.</p>
+          <p className="od-muted">
+            Suggested eliteOS tools by role — planning notes only; access is still managed in System Admin.
+          </p>
           <div className="od-table-wrap">
             <table className="od-table">
               <thead>
                 <tr>
-                  <th>Person / seat</th>
-                  <th>Title</th>
-                  <th>Recommended heads</th>
+                  <th>Person / role</th>
+                  <th>Responsibility</th>
+                  <th>Suggested tools</th>
                 </tr>
               </thead>
               <tbody>
@@ -931,9 +991,11 @@ export default function OrgDirectoryApp() {
               Print chart
             </button>
           </div>
-          <p className="od-muted">Export downloads the server-backed chart. Import updates the editor; save to persist.</p>
+          <p className="od-muted">Export downloads your saved org chart. Import updates the editor — use Save changes to persist.</p>
         </div>
       )}
+
+      <footer className="od-print-footer od-print-only">Generated from eliteOS Org Directory</footer>
     </div>
   );
 }
