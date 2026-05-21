@@ -6,6 +6,8 @@
 import type { DemoLineItem } from "./demoFallback";
 import type {
   GuidedPiece,
+  GuidedShapeGroup,
+  GuidedShapeGroupType,
   MathCheckSnapshot,
   MeasuredRoom,
   PieceShape,
@@ -25,6 +27,7 @@ import {
 } from "./vanityProgram2026";
 import {
   guidedCornerOverlapDeductionSf,
+  guidedCornerOverlapDeductionSfForPieces,
   qualifyingSfFromRoomDrafts,
   rapidLinearAreas,
   round2,
@@ -33,6 +36,12 @@ import {
   STANDARD_COUNTER_DEPTH_IN,
   sumGuidedPiecesByType
 } from "./measurementEngine";
+import {
+  normalizeGuidedShapeRoom,
+  normalizeGuidedShapeRooms,
+  sumAllGuidedShapeGroups,
+  totalGuidedCornerOverlapDeductionSf
+} from "./guidedShapeGroups";
 
 export {
   defaultVanityKitchenTier,
@@ -149,7 +158,8 @@ function totalFhbScopeSfForOutletCharges(room: RoomDraft): number {
   if (room.roomType === "Vanity") return 0;
   let fhb = 0;
   if (room.calcMode === "Guided Shape") {
-    const g = sumGuidedPiecesByType(room.guidedPieces);
+    const norm = normalizeGuidedShapeRoom(room);
+    const g = sumAllGuidedShapeGroups(norm);
     fhb += g.fhb;
   }
   if (room.fhbMode === "Manual Sq Ft") fhb += Number(room.fhbDirectSf) || 0;
@@ -397,19 +407,13 @@ export function measureRoomDraft(
       notes.push("Countertop support/bracing may be required based on island/bar depth — confirm after template.");
     }
   } else {
-    const overlap = guidedCornerOverlapDeductionSf(room);
-    const g = sumGuidedPiecesByType(room.guidedPieces, {
-      cornerOverlapDeductionSf: overlap,
-      cornerOverlapNote:
-        overlap > 0
-          ? `Corner overlap deduction: −${overlap.toFixed(2)} sf (L/U inside corners)`
-          : undefined
-    });
-    counter = g.counter;
-    splash = g.splash;
-    fhb = g.fhb;
-    details.push(...g.lines);
-    for (const p of room.guidedPieces) {
+    const norm = normalizeGuidedShapeRoom(room);
+    const grouped = sumAllGuidedShapeGroups(norm);
+    counter = grouped.counter;
+    splash = grouped.splash;
+    fhb = grouped.fhb;
+    details.push(...grouped.lines);
+    for (const p of norm.guidedPieces) {
       const sf = sfFromGuidedPiece(p.lengthIn, p.depthIn, p.shape);
       if (sf > 0 && (room.roomType === "Island" || room.roomType === "Bar") && p.pieceType === "counter" && p.depthIn > 30) {
         notes.push("Island/bar counter depth over 30″ — support/bracing may be required.");
@@ -686,73 +690,83 @@ function buildSelectedMaterialBreakdownCore(
       continue;
     }
 
-    if (room.calcMode === "Guided Shape" && room.guidedPieces.some((p) => p.lengthIn > 0 && p.depthIn > 0)) {
-      for (const p of room.guidedPieces) {
-        const sf = sfFromGuidedPiece(p.lengthIn, p.depthIn, p.shape);
-        if (sf <= 0) continue;
-        const g = resolveMaterialGroupForPiece(room, p);
-        const colorLabel = colorLabelForPiece(room, p);
-        const label = p.name?.trim() || (p.pieceType === "splash" ? "Backsplash" : p.pieceType === "fhb" ? "Full height" : "Countertop");
-        if (p.pieceType === "splash") {
-          raw.push({ roomName, label, group: g, colorLabel, countertopSf: 0, backsplashSf: sf, fhbSf: 0 });
-        } else if (p.pieceType === "fhb") {
-          raw.push({ roomName, label, group: g, colorLabel, countertopSf: 0, backsplashSf: 0, fhbSf: sf });
-        } else {
-          raw.push({ roomName, label, group: g, colorLabel, countertopSf: sf, backsplashSf: 0, fhbSf: 0 });
-          if (p.pieceType === "counter" && p.addSplash && p.lengthIn > 0) {
-            const spSf = round2((p.lengthIn * STANDARD_BACKSPLASH_HEIGHT_IN) / 144);
-            if (spSf > 0) {
-              raw.push({
-                roomName,
-                label: `${label} — 4″ backsplash`,
-                group: g,
-                colorLabel,
-                countertopSf: 0,
-                backsplashSf: spSf,
-                fhbSf: 0
-              });
+    if (room.calcMode === "Guided Shape") {
+      const norm = normalizeGuidedShapeRoom(room);
+      const shapeGroups = norm.guidedShapeGroups?.length ? norm.guidedShapeGroups : [];
+      const hasGuidedDims = shapeGroups.some((grp) => grp.pieces.some((p) => p.lengthIn > 0 && p.depthIn > 0));
+      if (hasGuidedDims) {
+        for (const grp of shapeGroups) {
+          const groupRows: RawRow[] = [];
+          for (const p of grp.pieces) {
+            const sf = sfFromGuidedPiece(p.lengthIn, p.depthIn, p.shape);
+            if (sf <= 0) continue;
+            const g = resolveMaterialGroupForPiece(room, p);
+            const colorLabel = colorLabelForPiece(room, p);
+            const baseLabel = p.name?.trim() || (p.pieceType === "splash" ? "Backsplash" : p.pieceType === "fhb" ? "Full height" : "Countertop");
+            const label = `${grp.name}: ${baseLabel}`;
+            if (p.pieceType === "splash") {
+              groupRows.push({ roomName, label, group: g, colorLabel, countertopSf: 0, backsplashSf: sf, fhbSf: 0 });
+            } else if (p.pieceType === "fhb") {
+              groupRows.push({ roomName, label, group: g, colorLabel, countertopSf: 0, backsplashSf: 0, fhbSf: sf });
+            } else {
+              groupRows.push({ roomName, label, group: g, colorLabel, countertopSf: sf, backsplashSf: 0, fhbSf: 0 });
+              if (p.pieceType === "counter" && p.addSplash && p.lengthIn > 0) {
+                const spSf = round2((p.lengthIn * STANDARD_BACKSPLASH_HEIGHT_IN) / 144);
+                if (spSf > 0) {
+                  groupRows.push({
+                    roomName,
+                    label: `${label} — 4″ backsplash`,
+                    group: g,
+                    colorLabel,
+                    countertopSf: 0,
+                    backsplashSf: spSf,
+                    fhbSf: 0
+                  });
+                }
+              }
             }
           }
+          const overlap = guidedCornerOverlapDeductionSfForPieces(grp.shapeType, grp.pieces);
+          if (overlap > 0) {
+            let remaining = overlap;
+            for (const row of groupRows) {
+              if (row.countertopSf <= 0 || remaining <= 0) continue;
+              const take = Math.min(row.countertopSf, remaining);
+              row.countertopSf = round2(row.countertopSf - take);
+              remaining = round2(remaining - take);
+            }
+          }
+          raw.push(...groupRows);
         }
-      }
-      if (room.fhbMode === "Guided Shape") {
-        for (const p of room.fhbPieces) {
-          const sf = sfFromGuidedPiece(p.lengthIn, p.depthIn, p.shape);
-          if (sf <= 0) continue;
-          const g = resolveMaterialGroupForPiece(room, p);
+        if (room.fhbMode === "Guided Shape") {
+          for (const p of room.fhbPieces) {
+            const sf = sfFromGuidedPiece(p.lengthIn, p.depthIn, p.shape);
+            if (sf <= 0) continue;
+            const g = resolveMaterialGroupForPiece(room, p);
+            raw.push({
+              roomName,
+              label: p.name?.trim() || "Full height backsplash",
+              group: g,
+              colorLabel: colorLabelForPiece(room, p),
+              countertopSf: 0,
+              backsplashSf: 0,
+              fhbSf: sf
+            });
+          }
+        } else if (room.fhbMode === "Manual Sq Ft" && (Number(room.fhbDirectSf) || 0) > 0) {
+          const g = String(room.materialGroup || "Group Promo").trim();
           raw.push({
             roomName,
-            label: p.name?.trim() || "Full height backsplash",
+            label: "Full height backsplash",
             group: g,
-            colorLabel: colorLabelForPiece(room, p),
+            colorLabel: room.materialColor?.trim() || undefined,
             countertopSf: 0,
             backsplashSf: 0,
-            fhbSf: sf
+            fhbSf: round2(Number(room.fhbDirectSf) || 0)
           });
         }
-      } else if (room.fhbMode === "Manual Sq Ft" && (Number(room.fhbDirectSf) || 0) > 0) {
-        const g = String(room.materialGroup || "Group Promo").trim();
-        raw.push({
-          roomName,
-          label: "Full height backsplash",
-          group: g,
-          colorLabel: room.materialColor?.trim() || undefined,
-          countertopSf: 0,
-          backsplashSf: 0,
-          fhbSf: round2(Number(room.fhbDirectSf) || 0)
-        });
+        continue;
       }
-      const overlap = guidedCornerOverlapDeductionSf(room);
-      if (overlap > 0) {
-        let remaining = overlap;
-        for (const row of raw) {
-          if (row.roomName !== roomName || row.countertopSf <= 0 || remaining <= 0) continue;
-          const take = Math.min(row.countertopSf, remaining);
-          row.countertopSf = round2(row.countertopSf - take);
-          remaining = round2(remaining - take);
-        }
-      }
-      continue;
     }
 
     let ct = 0;
@@ -1463,22 +1477,33 @@ export function emptyGuidedPiece(pieceType: GuidedPiece["pieceType"], name: stri
   return { id: newId(), pieceType, name, lengthIn: 0, depthIn, shape: "rect" };
 }
 
-/** Single guided “main run” starter for Internal Estimate Head — avoids a bulky default L-shape. */
+/** Single guided “main run” starter for Internal Estimate Head — one straight shape group. */
 export function createEstimatorRoom(materialGroup: string): RoomDraft {
   const r = createDefaultRoom(materialGroup);
   r.name = "Room / Area";
-  r.guidedPieces = [
-    {
-      id: newId(),
-      pieceType: "counter",
-      name: "Main run",
-      lengthIn: 0,
-      depthIn: STANDARD_COUNTER_DEPTH_IN,
-      shape: "rect",
-      addSplash: true
-    }
-  ];
-  return r;
+  r.guidedLayoutPreset = null;
+  const starter: GuidedPiece = {
+    id: newId(),
+    pieceType: "counter",
+    name: "Main run",
+    lengthIn: 0,
+    depthIn: STANDARD_COUNTER_DEPTH_IN,
+    shape: "rect",
+    addSplash: true
+  };
+  return normalizeGuidedShapeRoom({
+    ...r,
+    calcMode: "Guided Shape",
+    guidedPieces: [starter],
+    guidedShapeGroups: [
+      {
+        id: newId(),
+        name: "Straight run",
+        shapeType: "straight",
+        pieces: [starter]
+      }
+    ]
+  });
 }
 
 export function createDefaultRoom(materialGroup: string): RoomDraft {
@@ -1615,9 +1640,10 @@ export function serializeRoomsForApi(rooms: RoomDraft[]): Array<Record<string, u
   for (const r of rooms) {
     if (r.roomType === "Vanity") continue;
     const g = r.materialGroup || "Group Promo";
-    if (r.calcMode === "Guided Shape" && r.guidedPieces.length) {
+    const guidedRoom = r.calcMode === "Guided Shape" ? normalizeGuidedShapeRoom(r) : r;
+    if (guidedRoom.calcMode === "Guided Shape" && guidedRoom.guidedPieces.length) {
       const pieces: Array<Record<string, unknown>> = [];
-      for (const p of r.guidedPieces.filter((x) => x.lengthIn > 0 && x.depthIn > 0)) {
+      for (const p of guidedRoom.guidedPieces.filter((x) => x.lengthIn > 0 && x.depthIn > 0)) {
         const row: Record<string, unknown> = {
           type: p.pieceType === "fhb" ? "splash" : p.pieceType,
           lengthIn: p.lengthIn,
@@ -1665,8 +1691,8 @@ export function serializeRoomsForApi(rooms: RoomDraft[]): Array<Record<string, u
           fhbMode: r.fhbMode,
           fhbDirectSf: r.fhbDirectSf,
           fhbOutlets: r.fhbOutlets,
-          guidedLayoutPreset: r.guidedLayoutPreset ?? null,
-          cornerOverlapDeductionSf: guidedCornerOverlapDeductionSf(r),
+          guidedLayoutPreset: guidedRoom.guidedLayoutPreset ?? null,
+          cornerOverlapDeductionSf: totalGuidedCornerOverlapDeductionSf(guidedRoom),
           pieces
         };
         if (r.notes?.trim()) row.notes = r.notes.trim();
@@ -1742,10 +1768,14 @@ export function serializeRoomsForApi(rooms: RoomDraft[]): Array<Record<string, u
 
 /** Full room drafts for `internal_ui.estimate_room_drafts` — preserves add-ons, FHB, colors, layout preset. */
 export function serializeRoomDraftsForInternalUi(rooms: RoomDraft[]): RoomDraft[] {
-  return rooms.map((r) => ({
+  return normalizeGuidedShapeRooms(rooms).map((r) => ({
     ...r,
     addons: { ...r.addons },
     guidedPieces: r.guidedPieces.map((p) => ({ ...p })),
+    guidedShapeGroups: r.guidedShapeGroups?.map((g) => ({
+      ...g,
+      pieces: g.pieces.map((p) => ({ ...p }))
+    })),
     fhbPieces: r.fhbPieces.map((p) => ({ ...p })),
     linear: { ...r.linear },
     direct: { ...r.direct },
@@ -1777,6 +1807,21 @@ function applyRoomPersistenceFields(base: RoomDraft, r: Record<string, unknown>)
   if (r.materialCatalogId != null) base.materialCatalogId = String(r.materialCatalogId) || null;
   if (r.calcMode != null) base.calcMode = String(r.calcMode) as RoomDraft["calcMode"];
   if (r.guidedLayoutPreset != null) base.guidedLayoutPreset = String(r.guidedLayoutPreset) as RoomDraft["guidedLayoutPreset"];
+  const shapeGroups = r.guidedShapeGroups;
+  if (Array.isArray(shapeGroups) && shapeGroups.length) {
+    base.guidedShapeGroups = shapeGroups
+      .filter((g) => g && typeof g === "object")
+      .map((g) => {
+        const gr = g as Record<string, unknown>;
+        const pieces = Array.isArray(gr.pieces) ? gr.pieces : [];
+        return {
+          id: String(gr.id || newId()),
+          name: String(gr.name || "Shape group"),
+          shapeType: String(gr.shapeType || "manual") as GuidedShapeGroupType,
+          pieces: pieces.filter((p) => p && typeof p === "object").map((p) => hydrateGuidedPieceFromRow(p as Record<string, unknown>))
+        } satisfies GuidedShapeGroup;
+      });
+  }
   if (r.addons && typeof r.addons === "object") {
     base.addons = { ...(r.addons as Record<string, number>) };
   }
@@ -1845,11 +1890,11 @@ export function hydrateRoomDraftsFromInternalUi(
         direct: { ...base.direct, ...(d.direct || {}) },
         vanity: { ...base.vanity, ...(d.vanity || {}) }
       });
-      out.push(base);
+      out.push(base.calcMode === "Guided Shape" ? normalizeGuidedShapeRoom(base) : base);
     }
     return out.length ? out : [createDefaultRoom("Group Promo")];
   }
-  return hydrateRoomDraftsFromEstimateRooms(Array.isArray(estimateRooms) ? estimateRooms : []);
+  return normalizeGuidedShapeRooms(hydrateRoomDraftsFromEstimateRooms(Array.isArray(estimateRooms) ? estimateRooms : []));
 }
 
 /** Rebuild room drafts from an eliteOS `estimate_rooms` / API rooms array (hydration). */
@@ -1897,7 +1942,7 @@ export function hydrateRoomDraftsFromEstimateRooms(rows: unknown[]): RoomDraft[]
         splash: Math.max(0, round2(totalBs - fhbSf))
       };
     }
-    out.push(base);
+    out.push(base.calcMode === "Guided Shape" ? normalizeGuidedShapeRoom(base) : base);
   }
   return out.length ? out : [createDefaultRoom("Group Promo")];
 }

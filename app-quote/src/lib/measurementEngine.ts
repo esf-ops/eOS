@@ -100,23 +100,21 @@ export function guidedCornerOverlapSqft(depthAIn: number, depthBIn: number): num
   return round2(ft * ft);
 }
 
-/** How many 90° corner overlaps to subtract for this room (L = 1, U = 2; Galley/Rectangle = 0). */
-export function guidedCornerOverlapCount(room: RoomDraft): number {
-  if (room.calcMode !== "Guided Shape") return 0;
-  const preset = room.guidedLayoutPreset;
-  if (preset === "L-Shape") return 1;
-  if (preset === "U-Shape") return 2;
+/** Corner overlap count for one shape group (L = 1, U = 2). */
+export function guidedCornerOverlapCountForShapeType(shapeType: string | undefined | null): number {
+  if (shapeType === "L-Shape") return 1;
+  if (shapeType === "U-Shape") return 2;
   return 0;
 }
 
-/**
- * Total countertop sf to deduct for double-counted inside corners on L/U guided layouts.
- * Manual sqft and non-L/U presets are unaffected.
- */
-export function guidedCornerOverlapDeductionSf(room: RoomDraft): number {
-  const count = guidedCornerOverlapCount(room);
+/** Overlap deduction for pieces within a single shape group. */
+export function guidedCornerOverlapDeductionSfForPieces(
+  shapeType: string | undefined | null,
+  pieces: GuidedPiece[]
+): number {
+  const count = guidedCornerOverlapCountForShapeType(shapeType);
   if (!count) return 0;
-  const counters = room.guidedPieces.filter((p) => p.pieceType === "counter" && p.lengthIn > 0 && p.depthIn > 0);
+  const counters = pieces.filter((p) => p.pieceType === "counter" && p.lengthIn > 0 && p.depthIn > 0);
   if (counters.length < 2) return 0;
   if (count === 1) {
     return guidedCornerOverlapSqft(counters[0].depthIn, counters[1].depthIn);
@@ -129,6 +127,33 @@ export function guidedCornerOverlapDeductionSf(room: RoomDraft): number {
   }
   const d = Math.min(...counters.map((p) => p.depthIn));
   return round2(guidedCornerOverlapSqft(d, d) * count);
+}
+
+/** How many 90° corner overlaps to subtract for this room (legacy single-preset or sum of groups). */
+export function guidedCornerOverlapCount(room: RoomDraft): number {
+  if (room.calcMode !== "Guided Shape") return 0;
+  const groups = room.guidedShapeGroups;
+  if (groups?.length) {
+    return groups.reduce((n, g) => n + guidedCornerOverlapCountForShapeType(g.shapeType), 0);
+  }
+  return guidedCornerOverlapCountForShapeType(room.guidedLayoutPreset);
+}
+
+/**
+ * Total countertop sf to deduct for double-counted inside corners.
+ * Sums per-group deductions when `guidedShapeGroups` exist; otherwise legacy room preset.
+ */
+export function guidedCornerOverlapDeductionSf(room: RoomDraft): number {
+  if (room.calcMode !== "Guided Shape") return 0;
+  const groups = room.guidedShapeGroups;
+  if (groups?.length) {
+    let sum = 0;
+    for (const g of groups) {
+      sum = round2(sum + guidedCornerOverlapDeductionSfForPieces(g.shapeType, g.pieces));
+    }
+    return sum;
+  }
+  return guidedCornerOverlapDeductionSfForPieces(room.guidedLayoutPreset, room.guidedPieces);
 }
 
 export function sumGuidedPiecesByType(

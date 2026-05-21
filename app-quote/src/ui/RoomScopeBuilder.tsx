@@ -1,14 +1,23 @@
 import React from "react";
 import type {
   EliteProgramColorRow,
-  GuidedLayoutPreset,
   GuidedPiece,
+  GuidedShapeGroupType,
   RoomCalcMode,
   RoomDraft,
   RoomUseTaxMode,
   VanityKitchenTier,
   VanitySinkType
 } from "../lib/quoteTypes";
+import {
+  appendGuidedShapeGroup,
+  groupTotalsPreview,
+  groupTypeLabel,
+  normalizeGuidedShapeRoom,
+  removeGuidedShapeGroup,
+  roomGuidedGroupsPreview,
+  updateGuidedShapeGroup
+} from "../lib/guidedShapeGroups";
 import {
   ADDON_CATALOG,
   createEstimatorRoom,
@@ -23,7 +32,6 @@ import { VANITY_PROGRAM_2026_RATES, VANITY_PROGRAM_YEAR } from "../lib/vanityPro
 import { buildGuidedShapeMathAudit } from "../lib/guidedShapeMathAudit";
 import {
   depthPatchForGuidedPieceTypeChange,
-  guidedCornerOverlapDeductionSf,
   qualifyingSfFromRoomDrafts,
   sfFromGuidedPiece,
   STANDARD_BACKSPLASH_HEIGHT_IN,
@@ -68,12 +76,9 @@ function roomTotalsPreview(room: RoomDraft): { counter: number; splashFhb: numbe
     if (room.linear.splashIn > 0) s += room.linear.wallFt * (room.linear.splashIn / 12);
     c += room.linear.islandL * room.linear.islandW;
   } else {
-    for (const p of room.guidedPieces) {
-      const sf = sfFromGuidedPiece(p.lengthIn, p.depthIn, p.shape);
-      if (p.pieceType === "splash") s += sf;
-      else if (p.pieceType === "fhb") f += sf;
-      else c += sf;
-    }
+    const g = roomGuidedGroupsPreview(normalizeGuidedShapeRoom(room));
+    c = g.counter;
+    s = g.splashFhb;
   }
   if (room.fhbMode === "Manual Sq Ft") f += room.fhbDirectSf;
   if (room.fhbMode === "Guided Shape") {
@@ -135,6 +140,7 @@ export default function RoomScopeBuilder({
   const [colorQ, setColorQ] = React.useState<Record<string, string>>({});
   const [groupFilter, setGroupFilter] = React.useState<Record<string, string>>({});
   const [pieceOverridesOpen, setPieceOverridesOpen] = React.useState<Record<string, boolean>>({});
+  const [selectedGroupByRoom, setSelectedGroupByRoom] = React.useState<Record<string, string>>({});
   const [undoSnapshot, setUndoSnapshot] = React.useState<{ rooms: RoomDraft[]; message: string } | null>(null);
 
   React.useEffect(() => {
@@ -151,6 +157,7 @@ export default function RoomScopeBuilder({
       linear: { ...r.linear },
       vanity: { ...r.vanity },
       guidedPieces: r.guidedPieces.map((p) => ({ ...p })),
+      guidedShapeGroups: r.guidedShapeGroups?.map((g) => ({ ...g, pieces: g.pieces.map((p) => ({ ...p })) })),
       fhbPieces: r.fhbPieces.map((p) => ({ ...p }))
     }));
 
@@ -175,29 +182,44 @@ export default function RoomScopeBuilder({
   const setPiece = (roomId: string, pieceId: string, patch: Partial<GuidedPiece>, list: "guided" | "fhb") => {
     const next = rooms.map((r) => {
       if (r.id !== roomId) return r;
-      const arr = list === "guided" ? [...r.guidedPieces] : [...r.fhbPieces];
-      const idx = arr.findIndex((p) => p.id === pieceId);
-      if (idx < 0) return r;
-      arr[idx] = { ...arr[idx], ...patch };
-      return list === "guided" ? { ...r, guidedPieces: arr } : { ...r, fhbPieces: arr };
+      if (list === "fhb") {
+        const arr = [...r.fhbPieces];
+        const idx = arr.findIndex((p) => p.id === pieceId);
+        if (idx < 0) return r;
+        arr[idx] = { ...arr[idx], ...patch };
+        return { ...r, fhbPieces: arr };
+      }
+      const norm = normalizeGuidedShapeRoom(r);
+      const groups = (norm.guidedShapeGroups || []).map((g) => ({
+        ...g,
+        pieces: g.pieces.map((p) => (p.id === pieceId ? { ...p, ...patch } : p))
+      }));
+      return normalizeGuidedShapeRoom({ ...norm, guidedShapeGroups: groups });
     });
     onRoomsChange(next);
   };
 
-  const addPiece = (roomId: string, list: "guided" | "fhb") => {
+  const addPiece = (roomId: string, list: "guided" | "fhb", groupId?: string) => {
     const piece: GuidedPiece = {
       id: newId(),
       pieceType: list === "fhb" ? "fhb" : "counter",
       name: list === "fhb" ? "Full height section" : "Counter section",
       lengthIn: 0,
-      depthIn: list === "fhb" ? 18 : 25.5,
+      depthIn: list === "fhb" ? 18 : STANDARD_COUNTER_DEPTH_IN,
       shape: "rect"
     };
     onRoomsChange(
       rooms.map((r) => {
         if (r.id !== roomId) return r;
-        if (list === "guided") return { ...r, guidedPieces: [...r.guidedPieces, piece] };
-        return { ...r, fhbPieces: [...r.fhbPieces, piece] };
+        if (list === "fhb") return { ...r, fhbPieces: [...r.fhbPieces, piece] };
+        const norm = normalizeGuidedShapeRoom(r);
+        const groups = norm.guidedShapeGroups || [];
+        const targetId = groupId || selectedGroupByRoom[roomId] || groups[groups.length - 1]?.id;
+        if (!targetId) return appendGuidedShapeGroup(r, "manual");
+        const nextGroups = groups.map((g) =>
+          g.id === targetId ? { ...g, pieces: [...g.pieces, piece] } : g
+        );
+        return normalizeGuidedShapeRoom({ ...norm, guidedShapeGroups: nextGroups });
       })
     );
   };
@@ -205,7 +227,11 @@ export default function RoomScopeBuilder({
   const removePiece = (roomId: string, pieceId: string, list: "guided" | "fhb") => {
     if (enableDestructiveGuards) {
       const room = rooms.find((r) => r.id === roomId);
-      const piece = (list === "guided" ? room?.guidedPieces : room?.fhbPieces)?.find((p) => p.id === pieceId);
+      const norm = room ? normalizeGuidedShapeRoom(room) : null;
+      const piece =
+        list === "guided"
+          ? norm?.guidedPieces.find((p) => p.id === pieceId)
+          : room?.fhbPieces.find((p) => p.id === pieceId);
       const label = piece?.name?.trim() || "this piece";
       if (!window.confirm(`Remove ${label}?\n\nThis can change the estimate total.`)) return;
       setUndoSnapshot({ rooms: cloneRooms(rooms), message: "Piece removed" });
@@ -213,80 +239,43 @@ export default function RoomScopeBuilder({
     onRoomsChange(
       rooms.map((r) => {
         if (r.id !== roomId) return r;
-        if (list === "guided") return { ...r, guidedPieces: r.guidedPieces.filter((p) => p.id !== pieceId) };
-        return { ...r, fhbPieces: r.fhbPieces.filter((p) => p.id !== pieceId) };
+        if (list === "fhb") return { ...r, fhbPieces: r.fhbPieces.filter((p) => p.id !== pieceId) };
+        const norm = normalizeGuidedShapeRoom(r);
+        const groups = (norm.guidedShapeGroups || []).map((g) => ({
+          ...g,
+          pieces: g.pieces.filter((p) => p.id !== pieceId)
+        }));
+        return normalizeGuidedShapeRoom({ ...norm, guidedShapeGroups: groups });
       })
     );
   };
 
-  type RoomLayoutPreset = "Rectangle" | "L-Shape" | "U-Shape" | "Galley" | "Island" | "Backsplash" | "Waterfall";
-
-  const applyPreset = (roomId: string, preset: RoomLayoutPreset) => {
-    if (enableDestructiveGuards) {
-      const room = rooms.find((r) => r.id === roomId);
-      const hasData = Boolean(
-        room?.guidedPieces.some((p) => p.lengthIn > 0 || p.depthIn > 0 || String(p.name || "").trim())
-      );
-      if (
-        hasData &&
-        !window.confirm(
-          `Replace current guided pieces with the ${preset} preset?\n\nExisting piece lengths will be cleared. This can change the estimate total.`
-        )
-      ) {
-        return;
-      }
-    }
-    const depth = 25.5;
-    let pieces: GuidedPiece[] = [];
-    if (preset === "Rectangle") {
-      pieces = [
-        {
-          id: newId(),
-          pieceType: "counter",
-          name: "Main run",
-          lengthIn: 0,
-          depthIn: depth,
-          shape: "rect",
-          addSplash: true
-        }
-      ];
-    } else if (preset === "L-Shape") {
-      pieces = [
-        { id: newId(), pieceType: "counter", name: "Main Wall Run", lengthIn: 0, depthIn: depth, shape: "rect" },
-        { id: newId(), pieceType: "counter", name: "Short Return", lengthIn: 0, depthIn: depth, shape: "rect" }
-      ];
-    } else if (preset === "U-Shape") {
-      pieces = [
-        { id: newId(), pieceType: "counter", name: "Left Run", lengthIn: 0, depthIn: depth, shape: "rect" },
-        { id: newId(), pieceType: "counter", name: "Back Run", lengthIn: 0, depthIn: depth, shape: "rect" },
-        { id: newId(), pieceType: "counter", name: "Right Run", lengthIn: 0, depthIn: depth, shape: "rect" }
-      ];
-    } else if (preset === "Galley") {
-      pieces = [
-        { id: newId(), pieceType: "counter", name: "Left Wall", lengthIn: 0, depthIn: depth, shape: "rect" },
-        { id: newId(), pieceType: "counter", name: "Right Wall", lengthIn: 0, depthIn: depth, shape: "rect" }
-      ];
-    } else if (preset === "Island") {
-      pieces = [{ id: newId(), pieceType: "counter", name: "Island", lengthIn: 0, depthIn: 36, shape: "rect" }];
-    } else if (preset === "Backsplash") {
-      pieces = [
-        {
-          id: newId(),
-          pieceType: "splash",
-          name: "Backsplash run",
-          lengthIn: 0,
-          depthIn: STANDARD_BACKSPLASH_HEIGHT_IN,
-          shape: "rect"
-        }
-      ];
-    } else {
-      pieces = [{ id: newId(), pieceType: "fhb", name: "Waterfall edge", lengthIn: 0, depthIn: 96, shape: "rect" }];
-    }
+  const appendShapeGroup = (roomId: string, shapeType: GuidedShapeGroupType) => {
     onRoomsChange(
-      rooms.map((r) =>
-        r.id === roomId ? { ...r, guidedPieces: pieces, calcMode: "Guided Shape", guidedLayoutPreset: preset as GuidedLayoutPreset } : r
-      )
+      rooms.map((r) => {
+        if (r.id !== roomId) return r;
+        const next = appendGuidedShapeGroup(r, shapeType);
+        const gid = next.guidedShapeGroups?.[next.guidedShapeGroups.length - 1]?.id;
+        if (gid) setSelectedGroupByRoom((m) => ({ ...m, [roomId]: gid }));
+        return next;
+      })
     );
+  };
+
+  const removeShapeGroup = (roomId: string, groupId: string) => {
+    const room = rooms.find((r) => r.id === roomId);
+    const norm = room ? normalizeGuidedShapeRoom(room) : null;
+    const grp = norm?.guidedShapeGroups?.find((g) => g.id === groupId);
+    const label = grp?.name?.trim() || "this shape group";
+    if (enableDestructiveGuards) {
+      if (!window.confirm(`Remove shape group “${label}” and all its pieces?\n\nThis can change the estimate total.`)) return;
+      setUndoSnapshot({ rooms: cloneRooms(rooms), message: "Shape group removed" });
+    }
+    onRoomsChange(rooms.map((r) => (r.id === roomId ? removeGuidedShapeGroup(r, groupId) : r)));
+  };
+
+  const renameShapeGroup = (roomId: string, groupId: string, name: string) => {
+    onRoomsChange(rooms.map((r) => (r.id === roomId ? updateGuidedShapeGroup(r, groupId, { name }) : r)));
   };
 
   const restoreUndo = () => {
@@ -705,29 +694,24 @@ export default function RoomScopeBuilder({
 
                 {room.calcMode === "Guided Shape" ? (
                   <div className="room-panel">
-                    <p className="muted small">Presets load example counter pieces — enter lengths in inches (depth defaults to 25.5″).</p>
-                    <div className="mode-row room-preset-row" style={{ marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
-                      <button type="button" className="btn secondary" onClick={() => applyPreset(room.id, "Rectangle")}>
-                        Rectangle
-                      </button>
-                      <button type="button" className="btn secondary" onClick={() => applyPreset(room.id, "L-Shape")}>
-                        L-shape
-                      </button>
-                      <button type="button" className="btn secondary" onClick={() => applyPreset(room.id, "U-Shape")}>
-                        U-shape
-                      </button>
-                      <button type="button" className="btn secondary" onClick={() => applyPreset(room.id, "Galley")}>
-                        Galley
-                      </button>
-                      <button type="button" className="btn secondary" onClick={() => applyPreset(room.id, "Island")}>
-                        Island
-                      </button>
-                      <button type="button" className="btn secondary" onClick={() => applyPreset(room.id, "Backsplash")}>
-                        Backsplash
-                      </button>
-                      <button type="button" className="btn secondary" onClick={() => applyPreset(room.id, "Waterfall")}>
-                        Waterfall
-                      </button>
+                    <p className="muted small">
+                      Add shape groups for each counter area (e.g. stove wall + main U-shape). L/U overlap deducts within a group only.
+                    </p>
+                    <div className="ie-shape-group-add-row">
+                      <span className="muted small">Add shape group:</span>
+                      {(
+                        [
+                          ["straight", "Straight run"],
+                          ["L-Shape", "L-shape"],
+                          ["U-Shape", "U-shape"],
+                          ["Island", "Island"],
+                          ["manual", "Manual pieces"]
+                        ] as const
+                      ).map(([t, label]) => (
+                        <button key={t} type="button" className="btn secondary btn-sm" onClick={() => appendShapeGroup(room.id, t)}>
+                          + {label}
+                        </button>
+                      ))}
                     </div>
                     <label className="check" style={{ gridColumn: "1 / -1", marginTop: 8 }}>
                       <input
@@ -739,136 +723,208 @@ export default function RoomScopeBuilder({
                       />
                       Piece-level material overrides (advanced — off by default)
                     </label>
-                    {room.guidedPieces.map((p) => (
-                      <div key={p.id} className="piece-row grid3">
-                        <label>
-                          Label
-                          <input
-                            value={p.name}
-                            onChange={(e) => setPiece(room.id, p.id, { name: e.target.value }, "guided")}
-                          />
-                        </label>
-                        <label>
-                          Type
-                          <select
-                            value={p.pieceType}
-                            onChange={(e) => {
-                              const nextType = e.target.value as GuidedPiece["pieceType"];
-                              const depthPatch = depthPatchForGuidedPieceTypeChange(p.pieceType, nextType, p.depthIn);
-                              setPiece(room.id, p.id, { pieceType: nextType, ...depthPatch }, "guided");
-                            }}
+                    {(() => {
+                      const norm = normalizeGuidedShapeRoom(room);
+                      const groups = norm.guidedShapeGroups || [];
+                      const selectedId = selectedGroupByRoom[room.id] || groups[groups.length - 1]?.id;
+                      return groups.map((grp) => {
+                        const gPrev = groupTotalsPreview(grp);
+                        const isSelected = grp.id === selectedId;
+                        return (
+                          <div
+                            key={grp.id}
+                            className={`ie-shape-group-card${isSelected ? " is-selected" : ""}`}
+                            onClick={() => setSelectedGroupByRoom((m) => ({ ...m, [room.id]: grp.id }))}
                           >
-                            <option value="counter">Counter</option>
-                            <option value="splash">Backsplash</option>
-                            <option value="fhb">Full height</option>
-                          </select>
-                        </label>
-                        <label>
-                          Shape
-                          <select
-                            value={p.shape}
-                            onChange={(e) => setPiece(room.id, p.id, { shape: e.target.value as GuidedPiece["shape"] }, "guided")}
-                          >
-                            <option value="rect">Rectangle</option>
-                            <option value="tri">Triangle</option>
-                          </select>
-                        </label>
-                        <label>
-                          Length (in)
-                          <input
-                            type="number"
-                            value={p.lengthIn || ""}
-                            onChange={(e) => setPiece(room.id, p.id, { lengthIn: Number(e.target.value) || 0 }, "guided")}
-                          />
-                        </label>
-                        <label>
-                          {p.pieceType === "splash" ? "Height (in)" : "Depth / height (in)"}
-                          <input
-                            type="number"
-                            value={p.depthIn || ""}
-                            placeholder={
-                              p.pieceType === "splash"
-                                ? String(STANDARD_BACKSPLASH_HEIGHT_IN)
-                                : String(STANDARD_COUNTER_DEPTH_IN)
-                            }
-                            onChange={(e) => setPiece(room.id, p.id, { depthIn: Number(e.target.value) || 0 }, "guided")}
-                          />
-                        </label>
-                        {pieceOverridesOpen[room.id] ? (
-                          <>
-                            <label className="check" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                              <input
-                                type="checkbox"
-                                checked={Boolean(p.materialOverride)}
-                                onChange={(e) =>
-                                  setPiece(room.id, p.id, { materialOverride: e.target.checked, materialGroup: room.materialGroup }, "guided")
-                                }
-                              />
-                              Override material for this piece
-                            </label>
-                            {p.materialOverride ? (
-                              <>
+                            <div className="ie-shape-group-head">
+                              <label className="ie-shape-group-name">
+                                Group name
+                                <input
+                                  value={grp.name}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onChange={(e) => renameShapeGroup(room.id, grp.id, e.target.value)}
+                                />
+                              </label>
+                              <span className="ie-shape-group-type muted small">{groupTypeLabel(grp.shapeType)}</span>
+                              <span className="ie-shape-group-sf muted small">
+                                {gPrev.counter.toFixed(2)} ct sf · {gPrev.splashFhb.toFixed(2)} splash/FHB
+                                {gPrev.overlap > 0 ? ` · −${gPrev.overlap.toFixed(2)} overlap` : ""}
+                              </span>
+                              {groups.length > 1 ? (
+                                <button
+                                  type="button"
+                                  className="btn secondary btn-danger-quiet btn-sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    removeShapeGroup(room.id, grp.id);
+                                  }}
+                                >
+                                  Remove group
+                                </button>
+                              ) : null}
+                            </div>
+                            {grp.pieces.map((p) => (
+                              <div key={p.id} className="piece-row grid3">
                                 <label>
-                                  Piece material group
+                                  Label
+                                  <input
+                                    value={p.name}
+                                    onChange={(e) => setPiece(room.id, p.id, { name: e.target.value }, "guided")}
+                                  />
+                                </label>
+                                <label>
+                                  Type
                                   <select
-                                    value={p.materialGroup || room.materialGroup}
-                                    onChange={(e) => setPiece(room.id, p.id, { materialGroup: e.target.value }, "guided")}
+                                    value={p.pieceType}
+                                    onChange={(e) => {
+                                      const nextType = e.target.value as GuidedPiece["pieceType"];
+                                      const depthPatch = depthPatchForGuidedPieceTypeChange(p.pieceType, nextType, p.depthIn);
+                                      setPiece(room.id, p.id, { pieceType: nextType, ...depthPatch }, "guided");
+                                    }}
                                   >
-                                    {materialGroups.map((g) => (
-                                      <option key={g} value={g}>
-                                        {g}
-                                      </option>
-                                    ))}
+                                    <option value="counter">Counter</option>
+                                    <option value="splash">Backsplash</option>
+                                    <option value="fhb">Full height</option>
                                   </select>
                                 </label>
                                 <label>
-                                  Piece color label
+                                  Shape
+                                  <select
+                                    value={p.shape}
+                                    onChange={(e) => setPiece(room.id, p.id, { shape: e.target.value as GuidedPiece["shape"] }, "guided")}
+                                  >
+                                    <option value="rect">Rectangle</option>
+                                    <option value="tri">Triangle</option>
+                                  </select>
+                                </label>
+                                <label>
+                                  Length (in)
                                   <input
-                                    value={p.materialColor || ""}
-                                    onChange={(e) => setPiece(room.id, p.id, { materialColor: e.target.value }, "guided")}
-                                    placeholder="Optional — display on estimate"
+                                    type="number"
+                                    value={p.lengthIn || ""}
+                                    onChange={(e) => setPiece(room.id, p.id, { lengthIn: Number(e.target.value) || 0 }, "guided")}
                                   />
                                 </label>
-                              </>
-                            ) : null}
-                          </>
-                        ) : null}
-                        <div className="piece-row-remove">
-                          <button
-                            type="button"
-                            className="btn secondary btn-danger-quiet"
-                            onClick={() => removePiece(room.id, p.id, "guided")}
-                          >
-                            Remove piece
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                    <div className="piece-add-row">
-                      <button type="button" className="btn secondary" onClick={() => addPiece(room.id, "guided")}>
-                        + Add counter / splash piece
-                      </button>
-                    </div>
-                    {renderMiniVisual(room)}
+                                <label>
+                                  {p.pieceType === "splash" ? "Height (in)" : "Depth / height (in)"}
+                                  <input
+                                    type="number"
+                                    value={p.depthIn || ""}
+                                    placeholder={
+                                      p.pieceType === "splash"
+                                        ? String(STANDARD_BACKSPLASH_HEIGHT_IN)
+                                        : String(STANDARD_COUNTER_DEPTH_IN)
+                                    }
+                                    onChange={(e) => setPiece(room.id, p.id, { depthIn: Number(e.target.value) || 0 }, "guided")}
+                                  />
+                                </label>
+                                {pieceOverridesOpen[room.id] ? (
+                                  <>
+                                    <label className="check" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                      <input
+                                        type="checkbox"
+                                        checked={Boolean(p.materialOverride)}
+                                        onChange={(e) =>
+                                          setPiece(
+                                            room.id,
+                                            p.id,
+                                            { materialOverride: e.target.checked, materialGroup: room.materialGroup },
+                                            "guided"
+                                          )
+                                        }
+                                      />
+                                      Override material for this piece
+                                    </label>
+                                    {p.materialOverride ? (
+                                      <>
+                                        <label>
+                                          Piece material group
+                                          <select
+                                            value={p.materialGroup || room.materialGroup}
+                                            onChange={(e) => setPiece(room.id, p.id, { materialGroup: e.target.value }, "guided")}
+                                          >
+                                            {materialGroups.map((g) => (
+                                              <option key={g} value={g}>
+                                                {g}
+                                              </option>
+                                            ))}
+                                          </select>
+                                        </label>
+                                        <label>
+                                          Piece color label
+                                          <input
+                                            value={p.materialColor || ""}
+                                            onChange={(e) => setPiece(room.id, p.id, { materialColor: e.target.value }, "guided")}
+                                            placeholder="Optional — display on estimate"
+                                          />
+                                        </label>
+                                      </>
+                                    ) : null}
+                                  </>
+                                ) : null}
+                                <div className="piece-row-remove">
+                                  <button
+                                    type="button"
+                                    className="btn secondary btn-danger-quiet"
+                                    onClick={() => removePiece(room.id, p.id, "guided")}
+                                  >
+                                    Remove piece
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                            <div className="piece-add-row">
+                              <button
+                                type="button"
+                                className="btn secondary btn-sm"
+                                onClick={() => addPiece(room.id, "guided", grp.id)}
+                              >
+                                + Add piece to {grp.name}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      });
+                    })()}
+                    {renderMiniVisual(normalizeGuidedShapeRoom(room))}
                     {enableDestructiveGuards ? (() => {
                       const audit = buildGuidedShapeMathAudit(room);
                       if (!audit) return null;
-                      const overlap = guidedCornerOverlapDeductionSf(room);
                       return (
                         <details className="ie-guided-math-audit">
                           <summary>Shape math breakdown (internal)</summary>
                           <p className="muted small">
-                            Priced totals use these numbers. Layout preset: <strong>{audit.layoutPreset}</strong>
-                            {overlap > 0 ? (
+                            Priced totals use these numbers.{" "}
+                            {audit.groupAudits.length > 1 ? (
+                              <>
+                                <strong>{audit.groupAudits.length} shape groups</strong>
+                              </>
+                            ) : (
+                              <>
+                                Layout: <strong>{audit.layoutPreset}</strong>
+                              </>
+                            )}
+                            {audit.cornerOverlapDeductionSf > 0 ? (
                               <>
                                 {" "}
-                                · Corner overlap deducted: <strong>{overlap.toFixed(2)} sf</strong>
+                                · Room overlap deducted: <strong>{audit.cornerOverlapDeductionSf.toFixed(2)} sf</strong>
                               </>
                             ) : null}
                           </p>
+                          {audit.groupAudits.map((ga) => (
+                            <div key={ga.groupId} className="ie-math-audit-group">
+                              <p className="small">
+                                <strong>{ga.groupName}</strong> ({ga.shapeType}) — counter {ga.finalCounterSf.toFixed(2)} sf
+                                {ga.overlapDeductionSf > 0 ? ` (raw ${ga.rawCounterSf.toFixed(2)} − overlap ${ga.overlapDeductionSf.toFixed(2)})` : ""}
+                                {" · "}
+                                splash/FHB {ga.finalSplashFhbSf.toFixed(2)} sf
+                              </p>
+                            </div>
+                          ))}
                           <table className="ie-math-audit-table">
                             <thead>
                               <tr>
+                                <th>Group</th>
                                 <th>Piece</th>
                                 <th>Type</th>
                                 <th>Dimensions</th>
@@ -878,6 +934,7 @@ export default function RoomScopeBuilder({
                             <tbody>
                               {audit.pieceRows.map((row) => (
                                 <tr key={row.pieceId}>
+                                  <td>{row.groupName}</td>
                                   <td>{row.name}</td>
                                   <td>{row.pieceType}</td>
                                   <td>
@@ -897,13 +954,12 @@ export default function RoomScopeBuilder({
                             ))}
                           </ul>
                           <p className="muted small ie-math-audit-totals">
-                            <strong>Counter SF (priced):</strong> {audit.finalCounterSf.toFixed(2)} ·{" "}
+                            <strong>Room counter SF (priced):</strong> {audit.finalCounterSf.toFixed(2)} ·{" "}
                             <strong>Backsplash + FHB SF:</strong> {audit.finalBacksplashFhbSf.toFixed(2)}
                             {audit.sumCounterRaw > audit.finalCounterSf ? (
                               <>
                                 {" "}
-                                (raw counter sum {audit.sumCounterRaw.toFixed(2)} − overlap{" "}
-                                {audit.cornerOverlapDeductionSf.toFixed(2)})
+                                (raw counter {audit.sumCounterRaw.toFixed(2)} − overlap {audit.cornerOverlapDeductionSf.toFixed(2)})
                               </>
                             ) : null}
                           </p>

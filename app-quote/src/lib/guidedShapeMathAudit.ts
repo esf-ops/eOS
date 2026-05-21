@@ -1,16 +1,19 @@
 import type { GuidedPiece, RoomDraft } from "./quoteTypes";
 import {
-  guidedCornerOverlapCount,
+  guidedCornerOverlapCountForShapeType,
   guidedCornerOverlapDeductionSf,
+  guidedCornerOverlapDeductionSfForPieces,
   guidedCornerOverlapSqft,
   round2,
   sfFromGuidedPiece,
   STANDARD_BACKSPLASH_HEIGHT_IN,
   sumGuidedPiecesByType
 } from "./measurementEngine";
+import { groupTypeLabel, normalizeGuidedShapeRoom, sumGuidedShapeGroup } from "./guidedShapeGroups";
 
 export type GuidedPieceAuditRow = {
   pieceId: string;
+  groupName: string;
   name: string;
   pieceType: string;
   shape: string;
@@ -20,16 +23,29 @@ export type GuidedPieceAuditRow = {
   addSplashSf: number;
 };
 
+export type GuidedShapeGroupAudit = {
+  groupId: string;
+  groupName: string;
+  shapeType: string;
+  rawCounterSf: number;
+  rawSplashSf: number;
+  rawFhbSf: number;
+  overlapDeductionSf: number;
+  finalCounterSf: number;
+  finalSplashFhbSf: number;
+  detailLines: string[];
+};
+
 export type GuidedShapeMathAudit = {
   roomName: string;
   calcMode: string;
   layoutPreset: string;
   pieceRows: GuidedPieceAuditRow[];
+  groupAudits: GuidedShapeGroupAudit[];
   sumCounterRaw: number;
   sumSplashRaw: number;
   sumFhbRaw: number;
   cornerOverlapCount: number;
-  cornerOverlapPerCornerSf: number | null;
   cornerOverlapDeductionSf: number;
   finalCounterSf: number;
   finalBacksplashFhbSf: number;
@@ -40,46 +56,87 @@ function shapeLabel(shape: GuidedPiece["shape"]): string {
   return shape === "tri" ? "Triangle" : "Rectangle";
 }
 
-/** Internal-only breakdown for guided-shape rooms (L/U overlap, per-piece SF). */
+/** Internal-only breakdown for guided-shape rooms (per-group L/U overlap). */
 export function buildGuidedShapeMathAudit(room: RoomDraft): GuidedShapeMathAudit | null {
   if (room.roomType === "Vanity") return null;
   if (room.calcMode !== "Guided Shape") return null;
 
+  const norm = normalizeGuidedShapeRoom(room);
+  const groups = norm.guidedShapeGroups || [];
   const pieceRows: GuidedPieceAuditRow[] = [];
+  const groupAudits: GuidedShapeGroupAudit[] = [];
   let sumCounterRaw = 0;
   let sumSplashRaw = 0;
   let sumFhbRaw = 0;
+  let cornerOverlapDeductionSf = 0;
+  let cornerOverlapCount = 0;
+  const detailLines: string[] = [];
 
-  for (const p of room.guidedPieces) {
-    const rawSf = sfFromGuidedPiece(p.lengthIn, p.depthIn, p.shape);
-    let addSplashSf = 0;
-    if (p.pieceType === "counter" && p.addSplash && p.lengthIn > 0) {
-      addSplashSf = round2((p.lengthIn * STANDARD_BACKSPLASH_HEIGHT_IN) / 144);
+  for (const grp of groups) {
+    let rawCounter = 0;
+    let rawSplash = 0;
+    let rawFhb = 0;
+    for (const p of grp.pieces) {
+      const rawSf = sfFromGuidedPiece(p.lengthIn, p.depthIn, p.shape);
+      let addSplashSf = 0;
+      if (p.pieceType === "counter" && p.addSplash && p.lengthIn > 0) {
+        addSplashSf = round2((p.lengthIn * STANDARD_BACKSPLASH_HEIGHT_IN) / 144);
+      }
+      pieceRows.push({
+        pieceId: p.id,
+        groupName: grp.name,
+        name: p.name || "Piece",
+        pieceType: p.pieceType,
+        shape: shapeLabel(p.shape),
+        lengthIn: p.lengthIn,
+        depthIn: p.depthIn,
+        rawSf,
+        addSplashSf
+      });
+      if (p.pieceType === "splash") rawSplash += rawSf;
+      else if (p.pieceType === "fhb") rawFhb += rawSf;
+      else {
+        rawCounter += rawSf;
+        rawSplash += addSplashSf;
+      }
     }
-    pieceRows.push({
-      pieceId: p.id,
-      name: p.name || "Piece",
-      pieceType: p.pieceType,
-      shape: shapeLabel(p.shape),
-      lengthIn: p.lengthIn,
-      depthIn: p.depthIn,
-      rawSf,
-      addSplashSf
+    const summed = sumGuidedShapeGroup(grp);
+    const overlap = summed.overlapDeduction;
+    cornerOverlapDeductionSf = round2(cornerOverlapDeductionSf + overlap);
+    cornerOverlapCount += guidedCornerOverlapCountForShapeType(grp.shapeType);
+    sumCounterRaw = round2(sumCounterRaw + rawCounter);
+    sumSplashRaw = round2(sumSplashRaw + rawSplash);
+    sumFhbRaw = round2(sumFhbRaw + rawFhb);
+    const grpLines = summed.lines.map((ln) => `[${grp.name}] ${ln}`);
+    detailLines.push(...grpLines);
+    if (overlap > 0) {
+      detailLines.push(
+        `${grp.name} (${groupTypeLabel(grp.shapeType)}): corner overlap −${overlap.toFixed(2)} sf within group`
+      );
+    }
+    groupAudits.push({
+      groupId: grp.id,
+      groupName: grp.name,
+      shapeType: groupTypeLabel(grp.shapeType),
+      rawCounterSf: round2(rawCounter),
+      rawSplashSf: round2(rawSplash),
+      rawFhbSf: round2(rawFhb),
+      overlapDeductionSf: overlap,
+      finalCounterSf: summed.counter,
+      finalSplashFhbSf: round2(summed.splash + summed.fhb),
+      detailLines: grpLines
     });
-    if (p.pieceType === "splash") sumSplashRaw += rawSf;
-    else if (p.pieceType === "fhb") sumFhbRaw += rawSf;
-    else {
-      sumCounterRaw += rawSf;
-      sumSplashRaw += addSplashSf;
-    }
   }
 
+  let fhbExtra = 0;
   if (room.fhbMode === "Guided Shape") {
     for (const p of room.fhbPieces) {
       const rawSf = sfFromGuidedPiece(p.lengthIn, p.depthIn, p.shape);
-      sumFhbRaw += rawSf;
+      fhbExtra += rawSf;
+      sumFhbRaw = round2(sumFhbRaw + rawSf);
       pieceRows.push({
         pieceId: p.id,
+        groupName: "FHB",
         name: p.name || "FHB piece",
         pieceType: "fhb",
         shape: shapeLabel(p.shape),
@@ -90,68 +147,35 @@ export function buildGuidedShapeMathAudit(room: RoomDraft): GuidedShapeMathAudit
       });
     }
   } else if (room.fhbMode === "Manual Sq Ft") {
-    sumFhbRaw += Number(room.fhbDirectSf) || 0;
+    fhbExtra = Number(room.fhbDirectSf) || 0;
+    sumFhbRaw = round2(sumFhbRaw + fhbExtra);
   }
 
-  const overlapCount = guidedCornerOverlapCount(room);
-  const counters = room.guidedPieces.filter((p) => p.pieceType === "counter" && p.lengthIn > 0 && p.depthIn > 0);
-  const cornerOverlapPerCornerSf =
-    overlapCount === 1 && counters.length >= 2
-      ? guidedCornerOverlapSqft(counters[0].depthIn, counters[1].depthIn)
-      : overlapCount === 2 && counters.length >= 3
-        ? guidedCornerOverlapSqft(counters[0].depthIn, counters[1].depthIn)
-        : overlapCount > 0 && counters.length >= 2
-          ? guidedCornerOverlapSqft(counters[0].depthIn, counters[1].depthIn)
-          : null;
-
-  const cornerOverlapDeductionSf = guidedCornerOverlapDeductionSf(room);
-  const summed = sumGuidedPiecesByType(room.guidedPieces, {
-    cornerOverlapDeductionSf,
-    cornerOverlapNote:
-      overlapCount > 0
-        ? `Corner overlap deduction (${room.guidedLayoutPreset || "preset"}): −${cornerOverlapDeductionSf.toFixed(2)} sf`
-        : undefined
+  const roomOverlap = guidedCornerOverlapDeductionSf(norm);
+  const flatSummed = sumGuidedPiecesByType(norm.guidedPieces, {
+    cornerOverlapDeductionSf: roomOverlap
   });
 
-  let fhbExtra = 0;
-  if (room.fhbMode === "Guided Shape") {
-    for (const p of room.fhbPieces) {
-      fhbExtra += sfFromGuidedPiece(p.lengthIn, p.depthIn, p.shape);
-    }
-  } else if (room.fhbMode === "Manual Sq Ft") {
-    fhbExtra = Number(room.fhbDirectSf) || 0;
-  }
-
-  const detailLines = [...summed.lines];
   if (fhbExtra > 0 && room.fhbMode !== "Guided Shape") {
     detailLines.push(`Manual FHB sf: ${round2(fhbExtra).toFixed(2)} sf`);
   }
-  if (overlapCount > 0) {
-    detailLines.push(
-      `L/U overlap rule: ${overlapCount} inside corner${overlapCount === 1 ? "" : "s"} × min(depth)×min(depth) in sq ft`
-    );
-    if (cornerOverlapPerCornerSf != null && overlapCount === 2) {
-      detailLines.push(`Per-corner overlap (first pair): ${cornerOverlapPerCornerSf.toFixed(4)} sf`);
-    }
-  } else if (room.guidedPieces.filter((p) => p.pieceType === "counter").length >= 2 && !room.guidedLayoutPreset) {
-    detailLines.push(
-      "No corner overlap applied — choose L-Shape or U-Shape preset (or confirm dimensions) if inside corners should deduct overlap."
-    );
+  if (groups.length > 1) {
+    detailLines.push(`Room total: ${groups.length} shape groups — overlap deducted within each group only.`);
   }
 
   return {
     roomName: room.name || "Room",
     calcMode: room.calcMode,
-    layoutPreset: room.guidedLayoutPreset || "—",
+    layoutPreset: norm.guidedLayoutPreset || (groups.length === 1 ? groups[0]?.shapeType : "Multiple groups"),
     pieceRows,
+    groupAudits,
     sumCounterRaw: round2(sumCounterRaw),
     sumSplashRaw: round2(sumSplashRaw),
     sumFhbRaw: round2(sumFhbRaw),
-    cornerOverlapCount: overlapCount,
-    cornerOverlapPerCornerSf,
-    cornerOverlapDeductionSf,
-    finalCounterSf: summed.counter,
-    finalBacksplashFhbSf: round2(summed.splash + summed.fhb + fhbExtra),
+    cornerOverlapCount,
+    cornerOverlapDeductionSf: roomOverlap,
+    finalCounterSf: flatSummed.counter,
+    finalBacksplashFhbSf: round2(flatSummed.splash + flatSummed.fhb + fhbExtra),
     detailLines
   };
 }

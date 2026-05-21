@@ -53,6 +53,24 @@ export type GuidedLayoutPreset =
   | "Waterfall"
   | null;
 
+/** Shape group type within a guided room — overlap applies inside the group only. */
+export type GuidedShapeGroupType =
+  | "straight"
+  | "manual"
+  | "L-Shape"
+  | "U-Shape"
+  | "Galley"
+  | "Island"
+  | "Backsplash"
+  | "Waterfall";
+
+export type GuidedShapeGroup = {
+  id: string;
+  name: string;
+  shapeType: GuidedShapeGroupType;
+  pieces: GuidedPiece[];
+};
+
 export type VanitySource = "Promo / Stock 100 Remnant" | "ESF Non-Stock Remnant";
 
 export type VanityKitchenTier = "kitchen_over_35" | "kitchen_under_35";
@@ -76,10 +94,13 @@ export type RoomDraft = {
   materialType?: string;
   materialCatalogId?: string | null;
   calcMode: RoomCalcMode;
-  /** Set when estimator picks a guided layout preset; used for corner overlap deduction on L/U only. */
+  /** Legacy single-preset flag; kept in sync when exactly one L/U layout group exists. */
   guidedLayoutPreset?: GuidedLayoutPreset;
+  /** Additive guided shape groups (Internal Estimate v1). */
+  guidedShapeGroups?: GuidedShapeGroup[];
   linear: { wallFt: number; splashIn: number; islandL: number; islandW: number; counterDepthIn?: number };
   direct: { counter: number; splash: number };
+  /** Flattened pieces from all groups — API, canvas, backward compatibility. */
   guidedPieces: GuidedPiece[];
   fhbMode: FhbMode;
   fhbDirectSf: number;

@@ -14,6 +14,7 @@ import {
   PROTOTYPE_TIER_PRICE_PER_SQFT
 } from "../backend-core/src/quotes/quoteCalculator.js";
 import { guidedCornerOverlapDeductionSf, guidedCornerOverlapSqft, round2 } from "../app-quote/src/lib/measurementEngine.ts";
+import { appendGuidedShapeGroup, updateGuidedShapeGroup } from "../app-quote/src/lib/guidedShapeGroups.ts";
 import { buildGuidedShapeMathAudit, cedarValleySpec73StyleFixture } from "../app-quote/src/lib/guidedShapeMathAudit.ts";
 import {
   priceVanityProgram2026,
@@ -25,6 +26,7 @@ import {
   buildSelectedMaterialBreakdown,
   calculateAllRoomDrafts,
   createDefaultRoom,
+  createEstimatorRoom,
   createVanityRoom,
   hydrateCustomerRoomAreaBreakdown,
   hydrateRoomDraftsFromInternalUi,
@@ -319,6 +321,64 @@ function approx(a: number, b: number, eps = 0.02) {
   const rawL = (120 * 25.5) / 144 + (60 * 25.5) / 144;
   approx(cv.counterSf, rawL - overlapOne);
   approx(cv.backsplashSf, (120 * 4) / 144);
+}
+
+// Spec 73: additive shape groups — U-shape after straight wall does not reset prior group
+{
+  let kitchen = createEstimatorRoom("Group Promo");
+  kitchen.name = "Kitchen";
+  const straightId = kitchen.guidedShapeGroups![0].id;
+  kitchen = updateGuidedShapeGroup(kitchen, straightId, {
+    name: "Left stove wall",
+    pieces: [
+      { id: "a", pieceType: "counter", name: "Left of stove", lengthIn: 48, depthIn: 25.5, shape: "rect" },
+      { id: "b", pieceType: "counter", name: "Right of stove", lengthIn: 36, depthIn: 25.5, shape: "rect" }
+    ]
+  });
+  kitchen = appendGuidedShapeGroup(kitchen, "U-Shape", "Main U-shape");
+  assert.equal(kitchen.guidedShapeGroups!.length, 2);
+  const straightAfter = kitchen.guidedShapeGroups!.find((g) => g.id === straightId);
+  assert.equal(straightAfter?.pieces[0].lengthIn, 48);
+  assert.equal(straightAfter?.pieces[1].lengthIn, 36);
+  const uGrp = kitchen.guidedShapeGroups!.find((g) => g.shapeType === "U-Shape");
+  assert.ok(uGrp);
+  kitchen = updateGuidedShapeGroup(kitchen, uGrp!.id, {
+    pieces: uGrp!.pieces.map((p, i) => ({
+      ...p,
+      lengthIn: i === 0 ? 96 : i === 1 ? 120 : 96,
+      depthIn: 25.5
+    }))
+  });
+  const straightSf = (48 * 25.5) / 144 + (36 * 25.5) / 144;
+  const uRaw = ((96 + 120 + 96) * 25.5) / 144;
+  const overlapOne = guidedCornerOverlapSqft(25.5, 25.5);
+  const measured = measureRoomDraft(kitchen, 0, "wholesale", 0);
+  approx(measured.counter, straightSf + uRaw - round2(overlapOne * 2));
+  const audit = buildGuidedShapeMathAudit(kitchen);
+  assert.ok(audit);
+  assert.equal(audit!.groupAudits.length, 2);
+  assert.ok(audit!.groupAudits.some((g) => g.overlapDeductionSf > 0 && /U/i.test(g.shapeType)));
+  assert.ok(audit!.groupAudits.some((g) => g.overlapDeductionSf === 0 && g.groupName === "Left stove wall"));
+}
+
+// L-shape overlap within single group only
+{
+  const lGroup = createDefaultRoom("Group Promo");
+  lGroup.calcMode = "Guided Shape";
+  lGroup.guidedShapeGroups = [
+    {
+      id: "g1",
+      name: "L run",
+      shapeType: "L-Shape",
+      pieces: [
+        { id: "a", pieceType: "counter", name: "Main", lengthIn: 120, depthIn: 25.5, shape: "rect" },
+        { id: "b", pieceType: "counter", name: "Return", lengthIn: 60, depthIn: 25.5, shape: "rect" }
+      ]
+    }
+  ];
+  lGroup.guidedPieces = lGroup.guidedShapeGroups[0].pieces;
+  const overlapOne = guidedCornerOverlapSqft(25.5, 25.5);
+  approx(guidedCornerOverlapDeductionSf(lGroup), overlapOne);
 }
 
 console.log("verify-internal-estimate-beta-fixes: OK");
