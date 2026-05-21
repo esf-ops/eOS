@@ -752,8 +752,152 @@ body {
   width: 100%;
 }
 
-.od-print-mode .od-print-executive {
-  min-height: 200px;
+/* One-page executive print sheet (fixed printable area, no multi-page flow). */
+.od-print-one-page-sheet {
+  box-sizing: border-box;
+  width: 10.5in;
+  height: 7.5in;
+  max-height: 7.5in;
+  margin: 0 auto;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  page-break-after: avoid;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
+.od-print-one-page-header {
+  flex: 0 0 auto;
+  text-align: center;
+  margin-bottom: 4px;
+}
+
+.od-print-one-page-header h1 {
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.15;
+  color: var(--od-accent);
+}
+
+.od-print-one-page-header p {
+  margin: 2px 0 0;
+  font-size: 0.72rem;
+  color: var(--od-muted);
+  font-weight: 400;
+}
+
+.od-print-one-page-owner {
+  flex: 0 0 auto;
+  text-align: center;
+  font-weight: 700;
+  font-size: 0.82rem;
+  color: #0f172a;
+  margin-bottom: 4px;
+  padding-bottom: 3px;
+  border-bottom: 2px solid var(--od-accent);
+}
+
+.od-print-one-page-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1.2fr 1.2fr 0.9fr 0.75fr 0.75fr;
+  grid-template-rows: minmax(0, 1fr);
+  gap: 4px;
+  overflow: hidden;
+  align-items: stretch;
+}
+
+.od-print-one-page-footer {
+  flex: 0 0 auto;
+  margin-top: 3px;
+  padding-top: 2px;
+  border-top: 1px solid #e2e8f0;
+  text-align: center;
+  font-size: 0.62rem;
+  color: var(--od-muted);
+}
+
+.od-print-1p-panel {
+  border: 1px solid #cbd5e1;
+  border-radius: 5px;
+  padding: 4px 5px 5px;
+  background: #fff;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.od-print-1p-panel-title {
+  margin: 0 0 3px;
+  padding-bottom: 2px;
+  border-bottom: 1.5px solid var(--od-accent);
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--od-accent);
+  text-align: center;
+  line-height: 1.15;
+  flex-shrink: 0;
+}
+
+.od-print-1p-peers {
+  display: grid;
+  gap: 4px;
+  align-items: start;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.od-print-1p-peer-col {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.od-print-1p-peer-head {
+  font-weight: 700;
+  font-size: 0.64rem;
+  line-height: 1.2;
+  color: #0f172a;
+  text-align: center;
+  padding: 2px 3px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 3px;
+}
+
+.od-print-1p-lines {
+  margin: 0;
+  padding-left: 0.85em;
+  list-style: disc;
+  font-size: 0.6rem;
+  line-height: 1.22;
+  color: #334155;
+  overflow: hidden;
+}
+
+.od-print-1p-lines-tight {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.od-print-1p-lines li {
+  margin-bottom: 1px;
+}
+
+.od-print-mode .od-print-chart-surface--active {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+  overflow: auto;
 }
 
 /* Live drag: no CSS transition lag on nodes */
@@ -1044,19 +1188,22 @@ body {
 
 @media print {
   @page {
-    size: landscape letter;
-    margin: 0.35in 0.4in;
+    size: letter landscape;
+    margin: 0.25in;
   }
 
   .od-no-print {
     display: none !important;
   }
 
-  .od-print-only {
-    display: block !important;
-  }
-
+  html,
   body {
+    width: 10.5in;
+    height: 8in;
+    max-height: 8in;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
     background: #fff;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
@@ -1064,8 +1211,12 @@ body {
 
   .od-app {
     max-width: none;
+    width: 10.5in;
+    height: 8in;
+    max-height: 8in;
     padding: 0;
     margin: 0;
+    overflow: hidden;
   }
 
   .od-card {
@@ -1073,78 +1224,72 @@ body {
     border: none;
     padding: 0;
     margin: 0;
+    overflow: hidden;
   }
 
-  .od-print-header {
-    margin-bottom: 6px;
-  }
-
-  .od-print-header h1 {
-    font-size: 17pt;
-  }
-
-  .od-print-subtitle {
-    font-size: 9.5pt;
-  }
-
-  .od-print-footer {
-    margin-top: 10px;
-    font-size: 8.5pt;
-  }
-
-  .od-print-chart-surface {
+  .od-print-chart-surface,
+  .od-print-chart-surface--active {
     display: block !important;
     padding: 0;
+    margin: 0;
+    overflow: hidden;
+    height: 8in;
+    max-height: 8in;
   }
 
-  .od-print-executive {
-    font-size: 7.5pt;
+  .od-print-one-page-sheet {
+    width: 10.5in;
+    height: 7.5in;
+    max-height: 7.5in;
+    margin: 0;
+    overflow: hidden;
+    page-break-after: avoid;
+    page-break-before: avoid;
+    break-inside: avoid;
   }
 
-  .od-print-panels-grid {
-    gap: 5px;
+  .od-print-one-page-header h1 {
+    font-size: 13pt;
   }
 
-  .od-print-panel {
-    padding: 5px 6px 7px;
+  .od-print-one-page-header p {
+    font-size: 8pt;
   }
 
-  .od-print-panel-title {
-    font-size: 7.5pt;
-    margin-bottom: 4px;
-  }
-
-  .od-print-mini-name {
-    font-size: 7pt;
-  }
-
-  .od-print-mini-owner .od-print-mini-name {
+  .od-print-one-page-owner {
     font-size: 10pt;
+    margin-bottom: 3px;
   }
 
-  .od-print-mini-title {
+  .od-print-one-page-grid {
+    gap: 3px;
+  }
+
+  .od-print-1p-panel {
+    padding: 3px 4px 4px;
+  }
+
+  .od-print-1p-panel-title {
+    font-size: 7pt;
+    margin-bottom: 2px;
+  }
+
+  .od-print-1p-peer-head {
     font-size: 6.5pt;
   }
 
-  .od-print-mini-meta {
+  .od-print-1p-lines {
+    font-size: 6pt;
+    line-height: 1.18;
+  }
+
+  .od-print-one-page-footer {
     font-size: 6pt;
   }
 
-  .od-print-secondary {
-    margin-top: 6px;
-    padding-top: 5px;
-  }
-
-  .od-print-section-title {
-    font-size: 7.5pt;
-  }
-
-  .od-print-context-list li {
-    font-size: 6.5pt;
-  }
-
   .od-screen-chart,
-  .od-flow-wrap {
+  .od-flow-wrap,
+  .od-chart-workspace {
     display: none !important;
   }
 

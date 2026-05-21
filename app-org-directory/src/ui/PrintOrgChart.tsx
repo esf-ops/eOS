@@ -1,146 +1,80 @@
-import type { CSSProperties } from "react";
-import type { ChartData, Department, Seat } from "../lib/chartTypes";
-import { formatBranchLabel, seatStatusLabel } from "../lib/displayLabels";
-import { deptMap, isStructuralSeat, normalizeChartData, seatMap } from "../lib/chartUtils";
+import type { ChartData, Seat } from "../lib/chartTypes";
+import { APP_TITLE, PRINT_SUBTITLE } from "../lib/displayLabels";
+import { isStructuralSeat, normalizeChartData, seatMap } from "../lib/chartUtils";
 import { outlineSeatLabel } from "../lib/orgChartOutline";
-import {
-  duplicatePersonNames,
-  filterPrintSecondaryRelationships,
-  formatPrintContextRelationshipLine
-} from "../lib/printLayout";
 import {
   additionalPanelRootIds,
   isOwnerSeat,
-  printPanelSpanClass,
   sectionPanelIds,
-  selectPrintOwnerId,
-  sortDirectChildrenForPrint
+  selectPrintOwnerId
 } from "../lib/printSectionLayout";
+import {
+  buildPanelContent,
+  orderSectionsForOnePage,
+  resolveOnePageSectionIds,
+  type PanelContent,
+  type PeerColumn
+} from "../lib/printOnePageCompact";
 
-function PrintMiniCard({
-  seat,
-  dept,
-  variant = "default"
-}: {
-  seat: Seat;
-  dept?: Department;
-  variant?: "owner" | "peer" | "sub" | "default";
-}) {
-  const structural = isStructuralSeat(seat);
-  const branch = formatBranchLabel(seat.branch);
-  const showStatus = !structural && seat.status !== "filled";
-  const title = String(seat.title ?? "").trim();
-  const heading = outlineSeatLabel(seat);
-  const showRole = !structural && title && heading !== title;
+const PRINT_FOOTER = "Generated from eliteOS Org Directory";
 
-  const metaParts: string[] = [];
-  if (dept?.name && variant !== "owner") metaParts.push(dept.name);
-  if (branch) metaParts.push(branch);
-  if (showStatus) metaParts.push(seatStatusLabel(seat.status));
-
+function PrintPeerColumn({ column }: { column: PeerColumn }) {
+  const { peer, lines } = column;
   return (
-    <div
-      className={`od-print-mini od-print-mini-${variant} od-print-mini-${seat.status}${structural ? " od-print-mini-structural" : ""}`}
-      style={dept?.color ? ({ borderTopColor: dept.color } as CSSProperties) : undefined}
-    >
-      {structural && variant !== "owner" ? <span className="od-print-mini-kind">Group</span> : null}
-      <div className="od-print-mini-name">{heading}</div>
-      {showRole ? <div className="od-print-mini-title">{title}</div> : null}
-      {metaParts.length > 0 ? <div className="od-print-mini-meta">{metaParts.join(" · ")}</div> : null}
+    <div className="od-print-1p-peer-col">
+      <div className="od-print-1p-peer-head">{outlineSeatLabel(peer)}</div>
+      {lines.length > 0 ? (
+        <ul className="od-print-1p-lines">
+          {lines.map((ln) => (
+            <li key={ln.key}>{ln.text}</li>
+          ))}
+        </ul>
+      ) : null}
     </div>
   );
 }
 
-/** Descendants below a peer leader — always vertical (no peer columns at deeper levels). */
-function PrintVerticalSubtree({
-  parentId,
-  chart,
-  departments,
-  visited
-}: {
-  parentId: string;
-  chart: ChartData;
-  departments: Department[];
-  visited: Set<string>;
-}) {
-  if (visited.has(parentId)) return null;
-  const nextVisited = new Set(visited);
-  nextVisited.add(parentId);
-  const dm = deptMap(departments);
-  const sm = seatMap(chart.seats);
-  const childIds = sortDirectChildrenForPrint(parentId, chart);
-  if (!childIds.length) return null;
+function PrintPanelBody({ content }: { content: PanelContent }) {
+  if (content.mode === "peer-columns") {
+    return (
+      <div
+        className="od-print-1p-peers"
+        style={{ gridTemplateColumns: `repeat(${Math.min(content.columns.length, 2)}, minmax(0, 1fr))` }}
+      >
+        {content.columns.map((col) => (
+          <PrintPeerColumn key={col.peerId} column={col} />
+        ))}
+      </div>
+    );
+  }
 
+  const lines = content.mode === "compact-list" ? content.lines : content.lines;
   return (
-    <div className="od-print-subtree">
-      {childIds.map((cid) => {
-        const seat = sm.get(cid);
-        if (!seat) return null;
-        return (
-          <div key={cid} className="od-print-sub-item">
-            <PrintMiniCard seat={seat} dept={seat.departmentId ? dm.get(seat.departmentId) : undefined} variant="sub" />
-            <PrintVerticalSubtree parentId={cid} chart={chart} departments={departments} visited={nextVisited} />
-          </div>
-        );
-      })}
-    </div>
+    <ul className="od-print-1p-lines od-print-1p-lines-tight">
+      {lines.map((ln) => (
+        <li key={ln.key}>{ln.text}</li>
+      ))}
+    </ul>
   );
 }
 
-/** One major department / group panel with peer leaders in columns. */
-function PrintSectionPanel({
+function PrintPanel({
   sectionId,
   chart,
-  departments
+  size,
+  customerServiceSectionId
 }: {
   sectionId: string;
   chart: ChartData;
-  departments: Department[];
+  size: "wide" | "narrow";
+  customerServiceSectionId: string | null;
 }) {
-  const sm = seatMap(chart.seats);
-  const dm = deptMap(departments);
-  const section = sm.get(sectionId);
-  if (!section) return null;
-
-  const peerIds = sortDirectChildrenForPrint(sectionId, chart);
-  const spanClass = printPanelSpanClass(section, peerIds.length);
-  const panelTitle = outlineSeatLabel(section);
-
+  const content = buildPanelContent(sectionId, chart, { customerServiceSectionId });
+  if (!content) return null;
   return (
-    <section className={`od-print-panel ${spanClass}`.trim()}>
-      <h3 className="od-print-panel-title">{panelTitle}</h3>
-      {peerIds.length === 0 ? (
-        <PrintMiniCard
-          seat={section}
-          dept={section.departmentId ? dm.get(section.departmentId) : undefined}
-          variant="peer"
-        />
-      ) : (
-        <div
-          className="od-print-panel-peers"
-          style={{ gridTemplateColumns: `repeat(${Math.min(peerIds.length, 4)}, minmax(0, 1fr))` }}
-        >
-          {peerIds.map((peerId) => {
-            const peer = sm.get(peerId);
-            if (!peer) return null;
-            return (
-              <div key={peerId} className="od-print-peer-col">
-                <PrintMiniCard
-                  seat={peer}
-                  dept={peer.departmentId ? dm.get(peer.departmentId) : undefined}
-                  variant="peer"
-                />
-                <PrintVerticalSubtree
-                  parentId={peerId}
-                  chart={chart}
-                  departments={departments}
-                  visited={new Set([sectionId])}
-                />
-              </div>
-            );
-          })}
-        </div>
-      )}
+    <section className={`od-print-1p-panel od-print-1p-panel--${size}`}>
+      <h3 className="od-print-1p-panel-title">{content.title}</h3>
+      <PrintPanelBody content={content} />
     </section>
   );
 }
@@ -150,60 +84,42 @@ type Props = {
 };
 
 /**
- * Executive one-page print: owner on top, major groups as horizontal panels,
- * peer leaders side-by-side within each panel (siblings never stacked as a vertical chain).
+ * Fixed one-page executive print sheet — does not flow across browser pages.
+ * Peer leaders render in columns; deeper structure uses compact text rows.
  */
 export default function PrintOrgChart({ chartData }: Props) {
   const chart = normalizeChartData(chartData);
-  const { seats, relationships, departments } = chart;
-  const sm = seatMap(seats);
-  const duplicateNames = duplicatePersonNames(seats);
   const ownerId = selectPrintOwnerId(chart);
-  const owner = ownerId ? sm.get(ownerId) : null;
-  const sectionIds = sectionPanelIds(chart, ownerId);
-  const extraPanelRoots = additionalPanelRootIds(chart, ownerId);
-  const secondary = filterPrintSecondaryRelationships(chart);
-
-  const showOwnerRow = owner && (isOwnerSeat(owner) || isStructuralSeat(owner) || sectionIds.length > 0);
+  const owner = ownerId ? seatMap(chart.seats).get(ownerId) : null;
+  const rawSectionIds = [
+    ...sectionPanelIds(chart, ownerId),
+    ...additionalPanelRootIds(chart, ownerId).filter((id) => !sectionPanelIds(chart, ownerId).includes(id))
+  ];
+  const { panelIds, customerServiceSectionId } = resolveOnePageSectionIds(rawSectionIds, chart.seats);
+  const ordered = orderSectionsForOnePage(panelIds, chart.seats);
 
   return (
-    <div className="od-print-executive">
-      {showOwnerRow && owner ? (
-        <div className="od-print-owner-row">
-          <PrintMiniCard
-            seat={owner}
-            dept={owner.departmentId ? deptMap(departments).get(owner.departmentId) : undefined}
-            variant="owner"
-          />
-        </div>
-      ) : null}
+    <div className="od-print-one-page-sheet" aria-label="One-page org chart print">
+      <header className="od-print-one-page-header">
+        <h1>{APP_TITLE}</h1>
+        <p>{PRINT_SUBTITLE}</p>
+      </header>
 
-      <div className="od-print-panels-grid">
-        {sectionIds.map((sid) => (
-          <PrintSectionPanel key={sid} sectionId={sid} chart={chart} departments={departments} />
-        ))}
-        {extraPanelRoots.map((rid) => (
-          <PrintSectionPanel key={rid} sectionId={rid} chart={chart} departments={departments} />
+      {owner ? <div className="od-print-one-page-owner">{outlineSeatLabel(owner)}</div> : null}
+
+      <div className="od-print-one-page-grid">
+        {ordered.map(({ id, size }) => (
+          <PrintPanel
+            key={id}
+            sectionId={id}
+            chart={chart}
+            size={size}
+            customerServiceSectionId={customerServiceSectionId}
+          />
         ))}
       </div>
 
-      {secondary.length > 0 ? (
-        <div className="od-print-secondary od-print-secondary-compact">
-          <h2 className="od-print-section-title">Advisory / Partner Context</h2>
-          <ul className="od-print-context-list">
-            {secondary.map((r) => {
-              const from = sm.get(r.fromSeatId);
-              const to = sm.get(r.toSeatId);
-              if (!from || !to) return null;
-              return (
-                <li key={r.id}>
-                  {formatPrintContextRelationshipLine(from, to, r.type, r.label, duplicateNames)}
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      ) : null}
+      <footer className="od-print-one-page-footer">{PRINT_FOOTER}</footer>
     </div>
   );
 }

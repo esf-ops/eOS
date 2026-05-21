@@ -531,11 +531,6 @@ export default function OrgDirectoryApp() {
 
   return (
     <div className={`od-app ${printMode ? "od-print-mode" : ""}`}>
-      <div className="od-print-header od-print-only">
-        <h1>{APP_TITLE}</h1>
-        <p className="od-print-subtitle">{PRINT_SUBTITLE}</p>
-      </div>
-
       <header className="od-header od-no-print">
         <div className="od-header-main">
           <img className="od-logo" src={EOS_LOGO_URL} alt="Elite Stone Fabrication" />
@@ -928,7 +923,6 @@ export default function OrgDirectoryApp() {
         </div>
       )}
 
-      <footer className="od-print-footer od-print-only">Generated from eliteOS Org Directory</footer>
     </div>
   );
 }
