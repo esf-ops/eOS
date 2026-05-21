@@ -23,6 +23,7 @@ import {
 } from "./lib/orgChartOutline";
 import { APP_TITLE, PRINT_SUBTITLE, seatStatusLabel } from "./lib/displayLabels";
 import OrgChartCanvas from "./ui/OrgChartCanvas";
+import { PRINT_SCALE_PRESETS, type PrintScalePreset } from "./lib/printScale";
 import PrintOrgChart from "./ui/PrintOrgChart";
 import RoleInspectorPanel from "./ui/RoleInspectorPanel";
 import type { ChartData } from "./lib/chartTypes";
@@ -83,6 +84,7 @@ export default function OrgDirectoryApp() {
   const [msg, setMsg] = useState("");
   const [selectedSeatId, setSelectedSeatId] = useState<string | null>(null);
   const [printMode, setPrintMode] = useState(false);
+  const [printScale, setPrintScale] = useState<PrintScalePreset>("safe");
 
   const canEdit = Boolean(me?.can_edit);
 
@@ -665,10 +667,25 @@ export default function OrgDirectoryApp() {
           ) : (
             <>
               {printMode ? (
-                <p className="od-print-tip od-no-print">
-                  For best output, use <strong>Landscape</strong> and turn off browser <strong>Headers and footers</strong> in
-                  the print dialog.
-                </p>
+                <>
+                  <div className="od-print-scale-bar od-no-print" role="group" aria-label="Print scale">
+                    <span className="od-print-scale-label">Print scale</span>
+                    {PRINT_SCALE_PRESETS.map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        className={`od-btn od-btn-quiet od-print-scale-btn${printScale === opt.id ? " od-print-scale-btn--active" : ""}`}
+                        onClick={() => setPrintScale(opt.id)}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="od-print-tip od-no-print">
+                    For best output, use <strong>Landscape</strong>, turn off browser <strong>Headers and footers</strong>,
+                    and use <strong>Fit safe</strong> if the page edge is clipped.
+                  </p>
+                </>
               ) : null}
               <div className={`od-chart-workspace od-no-print${printMode ? " od-chart-workspace--hidden" : ""}`}>
                 <div className="od-chart-workspace-canvas">
@@ -699,7 +716,7 @@ export default function OrgDirectoryApp() {
                 )}
               </div>
               <div className={`od-print-chart-surface${printMode ? " od-print-chart-surface--active" : ""}`}>
-                <PrintOrgChart chartData={chartData} />
+                <PrintOrgChart chartData={chartData} printScale={printScale} />
               </div>
             </>
           )}

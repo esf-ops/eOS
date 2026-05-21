@@ -1,4 +1,6 @@
+import type { CSSProperties } from "react";
 import type { ChartData } from "../lib/chartTypes";
+import { printScaleCssVars, type PrintScalePreset } from "../lib/printScale";
 import { APP_TITLE, PRINT_SUBTITLE } from "../lib/displayLabels";
 import { normalizeChartData, seatMap } from "../lib/chartUtils";
 import { outlineSeatLabel } from "../lib/orgChartOutline";
@@ -71,11 +73,19 @@ function OpsRow({ row }: { row: PrintOpsRow }) {
   );
 }
 
-function ExecutiveThreeColumnSheet({ model }: { model: ExecutivePrintModel }) {
+function sheetStyle(printScale: PrintScalePreset): CSSProperties {
+  return printScaleCssVars(printScale) as CSSProperties;
+}
+
+function ExecutiveThreeColumnSheet({ model, printScale }: { model: ExecutivePrintModel; printScale: PrintScalePreset }) {
   const { owner, sales, production, governance } = model;
 
   return (
-    <div className="od-print-one-page-sheet od-print-exec-sheet" aria-label="Executive org chart print">
+    <div
+      className="od-print-one-page-sheet od-print-exec-sheet"
+      style={sheetStyle(printScale)}
+      aria-label="Executive org chart print"
+    >
       <header className="od-print-one-page-header">
         <h1>{APP_TITLE}</h1>
         <p>{PRINT_SUBTITLE}</p>
@@ -193,7 +203,7 @@ function CompactPanelBody({ content }: { content: PanelContent }) {
   );
 }
 
-function CompactOnePageFallback({ chart }: { chart: ChartData }) {
+function CompactOnePageFallback({ chart, printScale }: { chart: ChartData; printScale: PrintScalePreset }) {
   const ownerId = selectPrintOwnerId(chart);
   const owner = ownerId ? seatMap(chart.seats).get(ownerId) : null;
   const rawSectionIds = [
@@ -204,7 +214,11 @@ function CompactOnePageFallback({ chart }: { chart: ChartData }) {
   const ordered = orderSectionsForOnePage(panelIds, chart.seats);
 
   return (
-    <div className="od-print-one-page-sheet od-print-compact-sheet" aria-label="Compact org chart print">
+    <div
+      className="od-print-one-page-sheet od-print-compact-sheet"
+      style={sheetStyle(printScale)}
+      aria-label="Compact org chart print"
+    >
       <header className="od-print-one-page-header">
         <h1>{APP_TITLE}</h1>
         <p>{PRINT_SUBTITLE}</p>
@@ -229,13 +243,14 @@ function CompactOnePageFallback({ chart }: { chart: ChartData }) {
 
 type Props = {
   chartData: ChartData;
+  printScale?: PrintScalePreset;
 };
 
-export default function PrintOrgChart({ chartData }: Props) {
+export default function PrintOrgChart({ chartData, printScale = "safe" }: Props) {
   const chart = normalizeChartData(chartData);
   const executiveModel = buildExecutivePrintModel(chart);
   if (executiveModel) {
-    return <ExecutiveThreeColumnSheet model={executiveModel} />;
+    return <ExecutiveThreeColumnSheet model={executiveModel} printScale={printScale} />;
   }
-  return <CompactOnePageFallback chart={chart} />;
+  return <CompactOnePageFallback chart={chart} printScale={printScale} />;
 }
