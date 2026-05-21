@@ -1293,6 +1293,24 @@ select:focus {
   flex: 1 1 200px;
 }
 
+.ie-shape-group-control {
+  flex: 0 1 auto;
+  min-width: 120px;
+  font-size: 0.82rem;
+}
+
+.ie-shape-group-control select {
+  display: block;
+  width: 100%;
+  margin-top: 2px;
+}
+
+.ie-shape-group-hint {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: 0.78rem;
+}
+
 .ie-math-audit-group {
   margin: 6px 0;
 }

@@ -14,6 +14,7 @@ import {
   mergeRoomDraftsIntoGlobalAddOns,
   roomEditorDomId,
   roomsNeedLocalVanityMath,
+  INTERNAL_ESTIMATE_MEASURE_OPTIONS,
   runLocalPrototypeQuote,
   serializeCustomerRoomAreaBreakdown,
   serializeRoomDraftsForInternalUi,
@@ -370,8 +371,14 @@ export default function InternalEstimateApp() {
       backsplashSqft += Number(row.backsplashSqft) || 0;
     }
     if (!apiRooms.length) {
-      const { totals } = calculateAllRoomDrafts(drafts, projectType, internalPricingMode, Math.max(0, Number(useTaxPercent) || 0));
-      countertopSqft = totals.counter;
+      const { totals } = calculateAllRoomDrafts(
+        drafts,
+        projectType,
+        internalPricingMode,
+        Math.max(0, Number(useTaxPercent) || 0),
+        INTERNAL_ESTIMATE_MEASURE_OPTIONS
+      );
+      countertopSqft = totals.priceableCounter;
       backsplashSqft = round2(totals.splash + totals.fhb);
     }
     const engine = apiRooms.length >= 1 ? "rooms" : "legacy";
@@ -408,7 +415,13 @@ export default function InternalEstimateApp() {
     const draftsForReady = buildRoomDraftsForCalculate();
     let totalSfReady = 0;
     if (draftsForReady.length) {
-      const { totals } = calculateAllRoomDrafts(draftsForReady, projectType, internalPricingMode, Math.max(0, Number(useTaxPercent) || 0));
+      const { totals } = calculateAllRoomDrafts(
+        draftsForReady,
+        projectType,
+        internalPricingMode,
+        Math.max(0, Number(useTaxPercent) || 0),
+        INTERNAL_ESTIMATE_MEASURE_OPTIONS
+      );
       totalSfReady = round2(totals.counter + totals.splash + totals.fhb);
     }
     const missing: string[] = [];
@@ -803,13 +816,20 @@ export default function InternalEstimateApp() {
         fhbSf: 0
       };
     }
-    const { totals } = calculateAllRoomDrafts(drafts, projectType, internalPricingMode, Math.max(0, Number(useTaxPercent) || 0));
-    const totalSf = round2(totals.counter + totals.splash + totals.fhb);
+    const { totals } = calculateAllRoomDrafts(
+      drafts,
+      projectType,
+      internalPricingMode,
+      Math.max(0, Number(useTaxPercent) || 0),
+      INTERNAL_ESTIMATE_MEASURE_OPTIONS
+    );
+    const totalSf = round2(totals.priceableCounter + totals.splash + totals.fhb);
     return {
       empty: false as const,
       method: workflowLabel(INTERNAL_ESTIMATE_WORKFLOW),
       totalSf,
-      counterSf: totals.counter,
+      counterSf: totals.priceableCounter,
+      exactCounterSf: totals.counter,
       splashSf: totals.splash,
       fhbSf: totals.fhb
     };
@@ -943,7 +963,8 @@ export default function InternalEstimateApp() {
   const selectedMaterialBreakdown = useMemo(
     () =>
       buildSelectedMaterialBreakdown(roomDrafts, internalPricingMode, {
-        projectUseTaxPercent: Math.max(0, Number(useTaxPercent) || 0)
+        projectUseTaxPercent: Math.max(0, Number(useTaxPercent) || 0),
+        ...INTERNAL_ESTIMATE_MEASURE_OPTIONS
       }),
     [roomDrafts, internalPricingMode, useTaxPercent]
   );
@@ -2034,8 +2055,14 @@ export default function InternalEstimateApp() {
                 <strong>{liveEstimate.mathCheck.vanityTierLabel}</strong>
               </li>
               <li>
-                <span>Countertop sf (totals)</span>
+                <span>Countertop sf (chargeable / priced)</span>
                 <strong>{liveEstimate.mathCheck.countertopSf.toFixed(2)}</strong>
+                {liveEstimate.mathCheck.exactCountertopSf != null &&
+                Math.abs(liveEstimate.mathCheck.exactCountertopSf - liveEstimate.mathCheck.countertopSf) > 0.01 ? (
+                  <span className="muted small" style={{ display: "block", fontWeight: "normal" }}>
+                    Exact measured: {liveEstimate.mathCheck.exactCountertopSf.toFixed(2)} sf (Elite rounds counter up to whole SF for pricing)
+                  </span>
+                ) : null}
               </li>
               <li>
                 <span>Backsplash sf</span>
@@ -2439,8 +2466,15 @@ export default function InternalEstimateApp() {
                       <strong>{Number(partSqft ?? 0).toFixed(2)}</strong>
                     </div>
                     <div className="summary-row">
-                      <span>Countertop sf (scope)</span>
+                      <span>Countertop sf (chargeable)</span>
                       <strong>{scopePreview.counterSf.toFixed(2)}</strong>
+                      {"exactCounterSf" in scopePreview &&
+                      scopePreview.exactCounterSf != null &&
+                      Math.abs(scopePreview.exactCounterSf - scopePreview.counterSf) > 0.01 ? (
+                        <span className="muted small" style={{ display: "block", fontWeight: "normal" }}>
+                          Exact: {scopePreview.exactCounterSf.toFixed(2)} sf
+                        </span>
+                      ) : null}
                     </div>
                     <div className="summary-row">
                       <span>Backsplash + FHB sf</span>

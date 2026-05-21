@@ -13,7 +13,13 @@ import {
   ESF_DIRECT_PRICE_PER_SQFT,
   PROTOTYPE_TIER_PRICE_PER_SQFT
 } from "../backend-core/src/quotes/quoteCalculator.js";
-import { guidedCornerOverlapDeductionSf, guidedCornerOverlapSqft, round2 } from "../app-quote/src/lib/measurementEngine.ts";
+import {
+  chargeableCounterSqftFromExact,
+  guidedCornerOverlapDeductionSf,
+  guidedCornerOverlapDeductionSfForGroup,
+  guidedCornerOverlapSqft,
+  round2
+} from "../app-quote/src/lib/measurementEngine.ts";
 import { appendGuidedShapeGroup, updateGuidedShapeGroup } from "../app-quote/src/lib/guidedShapeGroups.ts";
 import { buildGuidedShapeMathAudit, cedarValleySpec73StyleFixture } from "../app-quote/src/lib/guidedShapeMathAudit.ts";
 import {
@@ -28,6 +34,7 @@ import {
   createDefaultRoom,
   createEstimatorRoom,
   createVanityRoom,
+  INTERNAL_ESTIMATE_MEASURE_OPTIONS,
   hydrateCustomerRoomAreaBreakdown,
   hydrateRoomDraftsFromInternalUi,
   mergeRoomDraftsIntoGlobalAddOns,
@@ -319,7 +326,8 @@ function approx(a: number, b: number, eps = 0.02) {
   const cv = cedarValleySpec73StyleFixture(createDefaultRoom);
   const overlapOne = guidedCornerOverlapSqft(25.5, 25.5);
   const rawL = (120 * 25.5) / 144 + (60 * 25.5) / 144;
-  approx(cv.counterSf, rawL - overlapOne);
+  const exactL = rawL - overlapOne;
+  approx(cv.counterSf, chargeableCounterSqftFromExact(exactL));
   approx(cv.backsplashSf, (120 * 4) / 144);
 }
 
@@ -352,13 +360,99 @@ function approx(a: number, b: number, eps = 0.02) {
   const straightSf = (48 * 25.5) / 144 + (36 * 25.5) / 144;
   const uRaw = ((96 + 120 + 96) * 25.5) / 144;
   const overlapOne = guidedCornerOverlapSqft(25.5, 25.5);
-  const measured = measureRoomDraft(kitchen, 0, "wholesale", 0);
-  approx(measured.counter, straightSf + uRaw - round2(overlapOne * 2));
-  const audit = buildGuidedShapeMathAudit(kitchen);
+  const measured = measureRoomDraft(kitchen, 0, "wholesale", 0, INTERNAL_ESTIMATE_MEASURE_OPTIONS);
+  const exactCounter = straightSf + uRaw - round2(overlapOne * 2);
+  approx(measured.counter, exactCounter, 0.15);
+  approx(measured.priceableCounter, chargeableCounterSqftFromExact(exactCounter), 0.01);
+  const audit = buildGuidedShapeMathAudit(kitchen, INTERNAL_ESTIMATE_MEASURE_OPTIONS);
   assert.ok(audit);
   assert.equal(audit!.groupAudits.length, 2);
   assert.ok(audit!.groupAudits.some((g) => g.overlapDeductionSf > 0 && /U/i.test(g.shapeType)));
   assert.ok(audit!.groupAudits.some((g) => g.overlapDeductionSf === 0 && g.groupName === "Left stove wall"));
+}
+
+// Chargeable counter SF: 36.3 exact → 37 priced (not per-piece round-up to 38)
+{
+  const len = (sf: number) => round2((sf * 144) / 25.5);
+  const pieces = [
+    { id: "a", pieceType: "counter" as const, name: "A", lengthIn: len(15.4), depthIn: 25.5, shape: "rect" as const },
+    { id: "b", pieceType: "counter" as const, name: "B", lengthIn: len(10.3), depthIn: 25.5, shape: "rect" as const },
+    { id: "c", pieceType: "counter" as const, name: "C", lengthIn: len(10.6), depthIn: 25.5, shape: "rect" as const }
+  ];
+  const room = createDefaultRoom("Group Promo");
+  room.calcMode = "Guided Shape";
+  room.guidedShapeGroups = [{ id: "g1", name: "Runs", shapeType: "manual", overlapMode: "none", pieces }];
+  room.guidedPieces = pieces;
+  const { rooms: measured } = calculateAllRoomDrafts(
+    [room],
+    "New Construction",
+    "wholesale",
+    0,
+    INTERNAL_ESTIMATE_MEASURE_OPTIONS
+  );
+  const raw = round2(15.4 + 10.3 + 10.6);
+  approx(raw, 36.3, 0.02);
+  assert.equal(chargeableCounterSqftFromExact(raw), 37);
+  approx(measured[0].counter, raw, 0.05);
+  approx(measured[0].priceableCounter, 37);
+  approx(measured[0].chargeableCounter ?? measured[0].priceableCounter, 37);
+  const perPieceCeil = Math.ceil(15.4) + Math.ceil(10.3) + Math.ceil(10.6);
+  assert.notEqual(perPieceCeil, 37, "per-piece ceiling must not be used");
+}
+
+// U-shape gross / no deduction
+{
+  const uRoom = createDefaultRoom("Group Promo");
+  uRoom.calcMode = "Guided Shape";
+  uRoom.guidedShapeGroups = [
+    {
+      id: "u1",
+      name: "Main U",
+      shapeType: "U-Shape",
+      overlapMode: "none",
+      pieces: [
+        { id: "a", pieceType: "counter", name: "L", lengthIn: 90, depthIn: 25.5, shape: "rect" },
+        { id: "b", pieceType: "counter", name: "B", lengthIn: 120, depthIn: 25.5, shape: "rect" },
+        { id: "c", pieceType: "counter", name: "R", lengthIn: 36, depthIn: 25.5, shape: "rect" }
+      ]
+    }
+  ];
+  uRoom.guidedPieces = uRoom.guidedShapeGroups[0].pieces;
+  const grp = uRoom.guidedShapeGroups[0];
+  assert.equal(guidedCornerOverlapDeductionSfForGroup(grp), 0);
+  const rawU = ((90 + 120 + 36) * 25.5) / 144;
+  const measured = measureRoomDraft(uRoom, 0, "wholesale", 0, INTERNAL_ESTIMATE_MEASURE_OPTIONS);
+  approx(measured.counter, rawU, 0.1);
+}
+
+// Backsplash: counter without addSplash; explicit splash piece only
+{
+  const room = createDefaultRoom("Group Promo");
+  room.calcMode = "Guided Shape";
+  room.guidedShapeGroups = [
+    {
+      id: "g1",
+      name: "U runs",
+      shapeType: "U-Shape",
+      overlapMode: "U-Shape",
+      backsplashMode: "include",
+      pieces: [
+        { id: "a", pieceType: "counter", name: "Run", lengthIn: 120, depthIn: 25.5, shape: "rect", addSplash: false },
+        {
+          id: "s",
+          pieceType: "splash",
+          name: "Sink splash",
+          lengthIn: 126,
+          depthIn: 4,
+          shape: "rect"
+        }
+      ]
+    }
+  ];
+  room.guidedPieces = room.guidedShapeGroups[0].pieces;
+  const { rooms: measured } = calculateAllRoomDrafts([room], "New Construction", "wholesale", 0, INTERNAL_ESTIMATE_MEASURE_OPTIONS);
+  approx(measured[0].splash, (126 * 4) / 144);
+  assert.ok(measured[0].splash < 4);
 }
 
 // L-shape overlap within single group only

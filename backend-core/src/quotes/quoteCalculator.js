@@ -11,6 +11,12 @@
  */
 
 import { priceVanityProgram2026FromPayload, VANITY_PROGRAM_YEAR } from "./vanityProgram2026.js";
+import {
+  applyChargeableCounterCeilToGuidedRows,
+  enumerateGuidedRoomMaterialRows,
+  isGuidedShapeRoom,
+  shouldApplyChargeableCounterCeil
+} from "./roomGuidedMeasurement.js";
 
 const MIN_PUBLIC_RETAIL_MARKUP = 25;
 
@@ -292,9 +298,51 @@ function enumerateRoomMaterialSfRows(input) {
   const rows = [];
   let counter = 0;
   let splash = 0;
+  /** @type {Array<Record<string, unknown>>} */
+  const roomMeasurementSummaries = [];
+  const useChargeableCeil = shouldApplyChargeableCounterCeil(input.quoteSource);
+
   for (const room of input.rooms || []) {
     const roomName = String(room.name || room.room_name || "Room").trim() || "Room";
-    if (Array.isArray(room.pieces) && room.pieces.length) {
+    if (Array.isArray(room.pieces) && room.pieces.length && isGuidedShapeRoom(room)) {
+      let guided = enumerateGuidedRoomMaterialRows(room);
+      let exactCounter = guided.exactCounter;
+      let chargeableCounter = exactCounter;
+      let counterRoundingAdjustment = 0;
+      if (useChargeableCeil) {
+        const ceiled = applyChargeableCounterCeilToGuidedRows(guided.rows, exactCounter);
+        guided = { ...guided, rows: ceiled.rows };
+        chargeableCounter = ceiled.chargeableCounter;
+        counterRoundingAdjustment = ceiled.counterRoundingAdjustment;
+      }
+      const roomSplashTotal = round2(guided.splash + guided.fhb);
+      for (const row of guided.rows) {
+        const isSplash = Boolean(row.isSplash || row.isFhb);
+        const mat = resolveMaterialForPiece(room, null, input);
+        rows.push({
+          roomName,
+          pieceLabel: row.pieceLabel,
+          ...mat,
+          sf: round2(row.sf),
+          isSplash
+        });
+      }
+      counter += chargeableCounter;
+      splash += roomSplashTotal;
+      roomMeasurementSummaries.push({
+        roomName,
+        measurementEngine: "guided_shape_groups_v1",
+        exactCountertopSqft: exactCounter,
+        chargeableCountertopSqft: chargeableCounter,
+        countertopRoundingAdjustmentSqft: counterRoundingAdjustment,
+        backsplashSqft: guided.splash,
+        fhbSqft: guided.fhb,
+        backsplashFhbSqft: roomSplashTotal,
+        cornerOverlapDeductionSqft: guided.cornerOverlapDeductionSf,
+        chargeableCounterCeilApplied: useChargeableCeil,
+        guidedShapeGroups: guided.groups
+      });
+    } else if (Array.isArray(room.pieces) && room.pieces.length) {
       const roomRowStart = rows.length;
       for (const piece of room.pieces) {
         const { sf } = calculateRoomAreas(piece);
@@ -333,7 +381,7 @@ function enumerateRoomMaterialSfRows(input) {
       if (bs > 0) rows.push({ roomName, pieceLabel: "Backsplash", ...mat, sf: round2(bs), isSplash: true });
     }
   }
-  return { rows, counter, splash };
+  return { rows, counter, splash, roomMeasurementSummaries };
 }
 
 /**
@@ -344,7 +392,10 @@ function enumerateRoomMaterialSfRows(input) {
  */
 function sumRoomsPublicPlanning(input, rules, markupMult = PUBLIC_PLANNING_MARKUP_MULTIPLIER) {
   const mult = Number(markupMult) > 0 ? Number(markupMult) : PUBLIC_PLANNING_MARKUP_MULTIPLIER;
-  const { rows, counter, splash } = enumerateRoomMaterialSfRows(input);
+  const { rows, counter, splash } = enumerateRoomMaterialSfRows({
+    ...input,
+    quoteSource: "public_retail"
+  });
   let directMaterial = 0;
   const roomLines = [];
   /** @type {Array<Record<string, unknown>>} */
@@ -573,7 +624,7 @@ export function buildCalculationSnapshot(input, resolved, totals, extras = {}) {
 }
 
 function sumRoomsWholesale(input, rules) {
-  const { rows, counter, splash } = enumerateRoomMaterialSfRows(input);
+  const { rows, counter, splash, roomMeasurementSummaries } = enumerateRoomMaterialSfRows(input);
   const roomLines = [];
   /** @type {Array<Record<string, unknown>>} */
   const materialBreakdown = [];
@@ -644,6 +695,7 @@ function sumRoomsWholesale(input, rules) {
     useTaxAmount,
     useTaxPercent: useTaxAmount > 0 ? projectUseTaxPercent : null,
     roomUseTax: roomTaxByRoom,
+    roomMeasurementSummaries,
     wholesale: round2(materialDollars + addOnPart.total)
   };
 }
@@ -977,6 +1029,9 @@ export async function calculateQuote(rawInput, pricingContext = {}) {
       no_partner_or_public_markup_percent: true,
       use_tax: useTaxPercent > 0 ? { percent: useTaxPercent, amount: useTaxAmount, applied: true } : { percent: 0, amount: 0, applied: false }
     };
+    if (detail.kind === "rooms" && Array.isArray(detail.roomMeasurementSummaries)) {
+      snapshot.room_measurement_summaries = detail.roomMeasurementSummaries;
+    }
   }
   if (rawInput.readiness && typeof rawInput.readiness === "object") snapshot.readiness = rawInput.readiness;
   if (rawInput.fileChecklist && typeof rawInput.fileChecklist === "object") snapshot.file_checklist = rawInput.fileChecklist;

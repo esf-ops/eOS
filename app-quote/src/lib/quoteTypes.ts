@@ -64,10 +64,20 @@ export type GuidedShapeGroupType =
   | "Backsplash"
   | "Waterfall";
 
+/** Per-group corner overlap for pricing — `auto` follows shape type (L=1, U=2). */
+export type GuidedOverlapMode = "auto" | "none" | "L-Shape" | "U-Shape";
+
+/** Backsplash scope for a shape group — `exclude` omits splash pieces and 4″ add-ons in this group. */
+export type GuidedGroupBacksplashMode = "include" | "exclude";
+
 export type GuidedShapeGroup = {
   id: string;
   name: string;
   shapeType: GuidedShapeGroupType;
+  /** Corner deduction mode; omitted/`auto` preserves legacy shape-default behavior. */
+  overlapMode?: GuidedOverlapMode;
+  /** When `exclude`, backsplash/splash SF from this group is not counted. */
+  backsplashMode?: GuidedGroupBacksplashMode;
   pieces: GuidedPiece[];
 };
 
@@ -141,6 +151,10 @@ export type MeasuredRoom = {
   group: string;
   rate: number;
   counter: number;
+  /** Priced/chargeable countertop SF (may round up from exact when internal Elite rule applies). */
+  chargeableCounter?: number;
+  /** SF added by rounding exact counter up to next whole foot (internal diagnostics). */
+  counterRoundingAdjustment?: number;
   splash: number;
   fhb: number;
   totalSf: number;
@@ -194,7 +208,10 @@ export type MathCheckSnapshot = {
   vanityTierThreshold: number;
   vanityTierLabel: string;
   measurementLines: string[];
+  /** Priced/chargeable counter SF (internal may round up from exact). */
   countertopSf: number;
+  /** Exact measured counter SF before chargeable round-up (internal diagnostics). */
+  exactCountertopSf?: number;
   backsplashSf: number;
   fullHeightSf: number;
   totalScopeSf: number;

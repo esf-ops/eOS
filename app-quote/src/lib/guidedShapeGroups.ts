@@ -1,7 +1,16 @@
-import type { GuidedLayoutPreset, GuidedPiece, GuidedShapeGroup, GuidedShapeGroupType, RoomDraft } from "./quoteTypes";
+import type {
+  GuidedGroupBacksplashMode,
+  GuidedLayoutPreset,
+  GuidedOverlapMode,
+  GuidedPiece,
+  GuidedShapeGroup,
+  GuidedShapeGroupType,
+  RoomDraft
+} from "./quoteTypes";
 import {
+  guidedCornerOverlapDeductionSfForGroup,
   guidedCornerOverlapDeductionSfForPieces,
-  guidedCornerOverlapCountForShapeType,
+  overlapModeLabel,
   round2,
   STANDARD_BACKSPLASH_HEIGHT_IN,
   STANDARD_COUNTER_DEPTH_IN,
@@ -55,7 +64,7 @@ export function piecesForGroupPreset(shapeType: GuidedShapeGroupType): GuidedPie
   });
   switch (shapeType) {
     case "straight":
-      return [mk("counter", "Main run", depth, true)];
+      return [mk("counter", "Main run", depth)];
     case "L-Shape":
       return [mk("counter", "Main Wall Run", depth), mk("counter", "Short Return", depth)];
     case "U-Shape":
@@ -83,25 +92,28 @@ export function flattenGuidedPiecesFromGroups(groups: GuidedShapeGroup[]): Guide
   return groups.flatMap((g) => g.pieces.map((p) => ({ ...p })));
 }
 
-export function guidedCornerOverlapCountForGroup(shapeType: GuidedShapeGroupType): number {
-  return guidedCornerOverlapCountForShapeType(shapeType);
+export function defaultOverlapModeForShapeType(shapeType: GuidedShapeGroupType): GuidedOverlapMode {
+  return "auto";
 }
 
-export function guidedCornerOverlapDeductionSfForGroup(
-  shapeType: GuidedShapeGroupType,
-  pieces: GuidedPiece[]
-): number {
-  return guidedCornerOverlapDeductionSfForPieces(shapeType, pieces);
+export function piecesForGroupWithBacksplashFilter(group: GuidedShapeGroup): GuidedPiece[] {
+  if (group.backsplashMode !== "exclude") return group.pieces;
+  return group.pieces.filter((p) => p.pieceType === "counter");
 }
 
 export function sumGuidedShapeGroup(group: GuidedShapeGroup): GroupSfTotals {
-  const overlap = guidedCornerOverlapDeductionSfForGroup(group.shapeType, group.pieces);
-  const summed = sumGuidedPiecesByType(group.pieces, {
+  const overlap = guidedCornerOverlapDeductionSfForGroup(group);
+  const excludeBs = group.backsplashMode === "exclude";
+  const pieces = piecesForGroupWithBacksplashFilter(group);
+  const modeLbl = overlapModeLabel(group.overlapMode, group.shapeType);
+  const summed = sumGuidedPiecesByType(pieces, {
     cornerOverlapDeductionSf: overlap,
     cornerOverlapNote:
       overlap > 0
-        ? `${group.name}: corner overlap −${overlap.toFixed(2)} sf (${groupTypeLabel(group.shapeType)})`
-        : undefined
+        ? `${group.name}: corner overlap −${overlap.toFixed(2)} sf (${modeLbl})`
+        : undefined,
+    skipAutoSplash: excludeBs,
+    skipSplashPieces: excludeBs
   });
   return {
     counter: summed.counter,
@@ -143,6 +155,8 @@ export function normalizeGuidedShapeRoom(room: RoomDraft): RoomDraft {
   }
   let groups = room.guidedShapeGroups?.map((g) => ({
     ...g,
+    overlapMode: g.overlapMode ?? defaultOverlapModeForShapeType(g.shapeType),
+    backsplashMode: g.backsplashMode ?? "include",
     pieces: g.pieces.map((p) => ({ ...p }))
   }));
   if (!groups?.length) {
@@ -163,6 +177,8 @@ export function normalizeGuidedShapeRoom(room: RoomDraft): RoomDraft {
         id: gid(),
         name: legacyPreset ? String(legacyPreset) : defaultGroupName(shapeType, 0),
         shapeType,
+        overlapMode: defaultOverlapModeForShapeType(shapeType),
+        backsplashMode: "include",
         pieces
       }
     ];
@@ -186,6 +202,8 @@ export function createGuidedShapeGroup(shapeType: GuidedShapeGroupType, name?: s
     id: gid(),
     name: name?.trim() || defaultGroupName(shapeType, index),
     shapeType,
+    overlapMode: defaultOverlapModeForShapeType(shapeType),
+    backsplashMode: "include",
     pieces: piecesForGroupPreset(shapeType)
   };
 }
@@ -201,7 +219,7 @@ export function appendGuidedShapeGroup(room: RoomDraft, shapeType: GuidedShapeGr
 export function updateGuidedShapeGroup(
   room: RoomDraft,
   groupId: string,
-  patch: Partial<Pick<GuidedShapeGroup, "name" | "shapeType" | "pieces">>
+  patch: Partial<Pick<GuidedShapeGroup, "name" | "shapeType" | "pieces" | "overlapMode" | "backsplashMode">>
 ): RoomDraft {
   const norm = normalizeGuidedShapeRoom(room);
   const groups = (norm.guidedShapeGroups || []).map((g) => {
@@ -229,7 +247,7 @@ export function totalGuidedCornerOverlapDeductionSf(room: RoomDraft): number {
   if (norm.calcMode !== "Guided Shape") return 0;
   let sum = 0;
   for (const g of norm.guidedShapeGroups || []) {
-    sum = round2(sum + guidedCornerOverlapDeductionSfForGroup(g.shapeType, g.pieces));
+    sum = round2(sum + guidedCornerOverlapDeductionSfForGroup(g));
   }
   return sum;
 }

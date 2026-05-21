@@ -9,7 +9,37 @@ import {
   tableHasOrganizationId
 } from "../organizations/organizationContext.js";
 import { calculateRoomAreas, roundPublicEstimateToNearestTen } from "./quoteCalculator.js";
+import {
+  chargeableCounterSqftFromExact,
+  enumerateGuidedRoomMaterialRows,
+  isGuidedShapeRoom,
+  shouldApplyChargeableCounterCeil
+} from "./roomGuidedMeasurement.js";
 import { buildLeadAssignmentRow } from "./quoteTerritoryAssignment.js";
+
+function countertopAndBacksplashSqftFromRoomRow(r, quoteSource) {
+  let ct = Number(r.countertopSqft ?? r.chargeableCountertopSqft ?? r.roomCounter ?? 0) || 0;
+  let bs = Number(r.backsplashSqft ?? r.roomSplash ?? 0) || 0;
+  if (Array.isArray(r.pieces) && r.pieces.length && isGuidedShapeRoom(r)) {
+    const guided = enumerateGuidedRoomMaterialRows(r);
+    const useCeil = shouldApplyChargeableCounterCeil(quoteSource);
+    ct = useCeil ? chargeableCounterSqftFromExact(guided.exactCounter) : round2(guided.exactCounter);
+    bs = round2(guided.splash + guided.fhb);
+    return { ct, bs, guided };
+  }
+  if (Array.isArray(r.pieces) && r.pieces.length) {
+    ct = 0;
+    bs = 0;
+    for (const p of r.pieces) {
+      const { sf } = calculateRoomAreas(p);
+      const t = String(p.type || "counter");
+      if (t === "splash") bs += sf;
+      else ct += sf;
+    }
+    return { ct: round2(ct), bs: round2(bs), guided: null };
+  }
+  return { ct: round2(ct), bs: round2(bs), guided: null };
+}
 
 export function isMissingRelationError(error) {
   const msg = String(error?.message || "");
@@ -102,20 +132,7 @@ export async function replaceQuoteLinesAndRooms(db, opts) {
 
   const rooms = Array.isArray(body.rooms) ? body.rooms : [];
   const roomRows = rooms.map((r, idx) => {
-    let ct = Number(r.countertopSqft ?? r.roomCounter ?? 0) || 0;
-    let bs = Number(r.backsplashSqft ?? r.roomSplash ?? 0) || 0;
-    if (Array.isArray(r.pieces) && r.pieces.length) {
-      ct = 0;
-      bs = 0;
-      for (const p of r.pieces) {
-        const { sf } = calculateRoomAreas(p);
-        const t = String(p.type || "counter");
-        if (t === "splash") bs += sf;
-        else ct += sf;
-      }
-      ct = round2(ct);
-      bs = round2(bs);
-    }
+    const { ct, bs, guided } = countertopAndBacksplashSqftFromRoomRow(r, quoteSource);
     const totalSq = round2(ct + bs);
     return {
       quote_id: quoteId,
@@ -132,8 +149,12 @@ export async function replaceQuoteLinesAndRooms(db, opts) {
       metadata: {
         ...(typeof r.metadata === "object" && r.metadata ? r.metadata : {}),
         pieces: Array.isArray(r.pieces) ? r.pieces : undefined,
+        guided_shape_groups: r.guidedShapeGroups ?? r.guided_shape_groups,
         material_color: r.materialColor || null,
-        material_type: r.materialType || null
+        material_type: r.materialType || null,
+        exact_countertop_sqft: guided?.exactCounter ?? r.exactCountertopSqft ?? null,
+        chargeable_countertop_sqft: ct,
+        corner_overlap_deduction_sqft: guided?.cornerOverlapDeductionSf ?? r.cornerOverlapDeductionSf ?? null
       }
     };
   }).map((r) => mergeRowOrganizationId(r, orgId, orgTables.has("quote_rooms")));
@@ -261,20 +282,7 @@ export async function persistQuoteSubmission(db, opts) {
 
   const rooms = Array.isArray(body.rooms) ? body.rooms : [];
   const roomRows = rooms.map((r, idx) => {
-    let ct = Number(r.countertopSqft ?? r.roomCounter ?? 0) || 0;
-    let bs = Number(r.backsplashSqft ?? r.roomSplash ?? 0) || 0;
-    if (Array.isArray(r.pieces) && r.pieces.length) {
-      ct = 0;
-      bs = 0;
-      for (const p of r.pieces) {
-        const { sf } = calculateRoomAreas(p);
-        const t = String(p.type || "counter");
-        if (t === "splash") bs += sf;
-        else ct += sf;
-      }
-      ct = round2(ct);
-      bs = round2(bs);
-    }
+    const { ct, bs, guided } = countertopAndBacksplashSqftFromRoomRow(r, quoteSource);
     const totalSq = round2(ct + bs);
     return {
       quote_id: quoteId,
@@ -291,8 +299,12 @@ export async function persistQuoteSubmission(db, opts) {
       metadata: {
         ...(typeof r.metadata === "object" && r.metadata ? r.metadata : {}),
         pieces: Array.isArray(r.pieces) ? r.pieces : undefined,
+        guided_shape_groups: r.guidedShapeGroups ?? r.guided_shape_groups,
         material_color: r.materialColor || null,
-        material_type: r.materialType || null
+        material_type: r.materialType || null,
+        exact_countertop_sqft: guided?.exactCounter ?? r.exactCountertopSqft ?? null,
+        chargeable_countertop_sqft: ct,
+        corner_overlap_deduction_sqft: guided?.cornerOverlapDeductionSf ?? r.cornerOverlapDeductionSf ?? null
       }
     };
   }).map((r) => mergeRowOrganizationId(r, orgId, orgTables.has("quote_rooms")));

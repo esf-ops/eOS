@@ -26,7 +26,9 @@ import {
   type VanityProgram2026Result
 } from "./vanityProgram2026";
 import {
+  chargeableCounterSqftFromExact,
   guidedCornerOverlapDeductionSf,
+  guidedCornerOverlapDeductionSfForGroup,
   guidedCornerOverlapDeductionSfForPieces,
   qualifyingSfFromRoomDrafts,
   rapidLinearAreas,
@@ -42,6 +44,16 @@ import {
   sumAllGuidedShapeGroups,
   totalGuidedCornerOverlapDeductionSf
 } from "./guidedShapeGroups";
+
+/** Internal Estimate measurement options (not used by public quote wizard). */
+export type InternalMeasureOptions = {
+  /** Elite rule: ceil final room counter SF for material pricing after all groups/pieces. */
+  chargeableCounterCeil?: boolean;
+};
+
+export const INTERNAL_ESTIMATE_MEASURE_OPTIONS: InternalMeasureOptions = {
+  chargeableCounterCeil: true
+};
 
 export {
   defaultVanityKitchenTier,
@@ -272,7 +284,8 @@ export function measureRoomDraft(
   room: RoomDraft,
   qualifyingSf: number,
   materialBasis: "wholesale" | "direct" = "wholesale",
-  projectUseTaxPercent = 0
+  projectUseTaxPercent = 0,
+  measureOptions?: InternalMeasureOptions
 ): MeasuredRoom {
   const group = String(room.materialGroup || "Group Promo").trim();
   const rate = materialRateForInternalBasis(group, materialBasis);
@@ -445,7 +458,9 @@ export function measureRoomDraft(
   details.push(...add.lines);
 
   const roomTaxPct = resolveRoomUseTaxPercent(room, projectUseTaxPercent);
-  const materialNoTax = buildSelectedMaterialBreakdownCore([room], materialBasis);
+  const materialNoTax = buildSelectedMaterialBreakdownCore([room], materialBasis, {
+    chargeableCounterCeil: measureOptions?.chargeableCounterCeil
+  });
   let scopedMaterialDollars = materialNoTax.totals.materialSubtotal;
   if (roomTaxPct > 0) {
     const ctBase = materialNoTax.totals.countertopMaterial;
@@ -454,7 +469,19 @@ export function measureRoomDraft(
     roomUseTax = { percent: roomTaxPct, baseCountertopMaterial: ctBase, taxAmount, applied: true };
   }
   selected = round2(scopedMaterialDollars + extras);
-  priceableCounter = counter;
+  const chargeableCounter = measureOptions?.chargeableCounterCeil
+    ? chargeableCounterSqftFromExact(counter)
+    : counter;
+  const counterRoundingAdjustment =
+    measureOptions?.chargeableCounterCeil && chargeableCounter > counter
+      ? round2(chargeableCounter - counter)
+      : 0;
+  if (counterRoundingAdjustment > 0) {
+    details.push(
+      `Chargeable countertop: ${chargeableCounter.toFixed(0)} sf (rounded up from ${counter.toFixed(2)} sf exact)`
+    );
+  }
+  priceableCounter = chargeableCounter;
   priceableSplash = splash + fhb;
   fixedTotal = extras;
 
@@ -466,6 +493,8 @@ export function measureRoomDraft(
     group,
     rate,
     counter: round2(counter),
+    chargeableCounter: round2(chargeableCounter),
+    counterRoundingAdjustment,
     splash: round2(splash),
     fhb: round2(fhb),
     totalSf,
@@ -487,10 +516,11 @@ export function calculateAllRoomDrafts(
   rooms: RoomDraft[],
   projectType: string,
   materialBasis: "wholesale" | "direct" = "wholesale",
-  projectUseTaxPercent = 0
+  projectUseTaxPercent = 0,
+  measureOptions?: InternalMeasureOptions
 ): { rooms: MeasuredRoom[]; totals: RoomEngineTotals } {
   const qualifyingSf = qualifyingSfFromRoomDrafts(rooms);
-  const measured = rooms.map((r) => measureRoomDraft(r, qualifyingSf, materialBasis, projectUseTaxPercent));
+  const measured = rooms.map((r) => measureRoomDraft(r, qualifyingSf, materialBasis, projectUseTaxPercent, measureOptions));
   if (projectType.trim().toLowerCase() === "remodel") {
     for (const m of measured) {
       m.notes.push(
@@ -674,10 +704,31 @@ export function applyUseTaxToMaterialBreakdown(
 }
 
 /** Material breakdown without use tax (used internally to avoid recursion). */
+function applyChargeableCounterCeilToRoomRows(
+  raw: Array<SelectedMaterialScopeLine & { group: string }>,
+  roomName: string
+): void {
+  const roomRows = raw.filter((r) => r.roomName === roomName && r.countertopSf > 0);
+  const exact = round2(roomRows.reduce((s, r) => s + r.countertopSf, 0));
+  const priced = chargeableCounterSqftFromExact(exact);
+  const delta = round2(priced - exact);
+  if (delta <= 0) return;
+  const g = roomRows[0]?.group || "Group Promo";
+  raw.push({
+    roomName,
+    label: "Countertop chargeable SF (round up)",
+    group: g,
+    colorLabel: roomRows[0]?.colorLabel,
+    countertopSf: delta,
+    backsplashSf: 0,
+    fhbSf: 0
+  });
+}
+
 function buildSelectedMaterialBreakdownCore(
   rooms: RoomDraft[],
   materialBasis: "wholesale" | "direct",
-  options?: { includeRates?: boolean }
+  options?: { includeRates?: boolean; chargeableCounterCeil?: boolean }
 ): SelectedMaterialBreakdown {
   const includeRates = options?.includeRates === true;
   type RawRow = SelectedMaterialScopeLine & { group: string };
@@ -697,9 +748,11 @@ function buildSelectedMaterialBreakdownCore(
       if (hasGuidedDims) {
         for (const grp of shapeGroups) {
           const groupRows: RawRow[] = [];
+          const excludeBs = grp.backsplashMode === "exclude";
           for (const p of grp.pieces) {
             const sf = sfFromGuidedPiece(p.lengthIn, p.depthIn, p.shape);
             if (sf <= 0) continue;
+            if (excludeBs && p.pieceType !== "counter") continue;
             const g = resolveMaterialGroupForPiece(room, p);
             const colorLabel = colorLabelForPiece(room, p);
             const baseLabel = p.name?.trim() || (p.pieceType === "splash" ? "Backsplash" : p.pieceType === "fhb" ? "Full height" : "Countertop");
@@ -710,12 +763,12 @@ function buildSelectedMaterialBreakdownCore(
               groupRows.push({ roomName, label, group: g, colorLabel, countertopSf: 0, backsplashSf: 0, fhbSf: sf });
             } else {
               groupRows.push({ roomName, label, group: g, colorLabel, countertopSf: sf, backsplashSf: 0, fhbSf: 0 });
-              if (p.pieceType === "counter" && p.addSplash && p.lengthIn > 0) {
+              if (p.pieceType === "counter" && p.addSplash && p.lengthIn > 0 && !excludeBs) {
                 const spSf = round2((p.lengthIn * STANDARD_BACKSPLASH_HEIGHT_IN) / 144);
                 if (spSf > 0) {
                   groupRows.push({
                     roomName,
-                    label: `${label} — 4″ backsplash`,
+                    label: `${label} — 4″ backsplash (on run)`,
                     group: g,
                     colorLabel,
                     countertopSf: 0,
@@ -726,7 +779,7 @@ function buildSelectedMaterialBreakdownCore(
               }
             }
           }
-          const overlap = guidedCornerOverlapDeductionSfForPieces(grp.shapeType, grp.pieces);
+          const overlap = guidedCornerOverlapDeductionSfForGroup(grp);
           if (overlap > 0) {
             let remaining = overlap;
             for (const row of groupRows) {
@@ -765,6 +818,9 @@ function buildSelectedMaterialBreakdownCore(
             fhbSf: round2(Number(room.fhbDirectSf) || 0)
           });
         }
+        if (options?.chargeableCounterCeil) {
+          applyChargeableCounterCeilToRoomRows(raw, roomName);
+        }
         continue;
       }
     }
@@ -785,6 +841,9 @@ function buildSelectedMaterialBreakdownCore(
       );
       ct = a.counter;
       bs = a.splash;
+      if (options?.chargeableCounterCeil && ct > 0) {
+        ct = chargeableCounterSqftFromExact(ct);
+      }
     }
     if (room.fhbMode === "Manual Sq Ft") fhb += Number(room.fhbDirectSf) || 0;
     if (room.fhbMode === "Guided Shape") {
@@ -872,10 +931,16 @@ function buildSelectedMaterialBreakdownCore(
 export function buildSelectedMaterialBreakdown(
   rooms: RoomDraft[],
   materialBasis: "wholesale" | "direct",
-  options?: { includeRates?: boolean; useTaxPercent?: number; projectUseTaxPercent?: number }
+  options?: {
+    includeRates?: boolean;
+    useTaxPercent?: number;
+    projectUseTaxPercent?: number;
+    chargeableCounterCeil?: boolean;
+  }
 ): SelectedMaterialBreakdown {
   const built = buildSelectedMaterialBreakdownCore(rooms, materialBasis, {
-    includeRates: options?.includeRates === true
+    includeRates: options?.includeRates === true,
+    chargeableCounterCeil: options?.chargeableCounterCeil
   });
   const projectDefault = Math.max(0, Number(options?.projectUseTaxPercent ?? options?.useTaxPercent) || 0);
   let taxBase = 0;
@@ -885,7 +950,9 @@ export function buildSelectedMaterialBreakdown(
     if (room.roomType === "Vanity") continue;
     const pct = resolveRoomUseTaxPercent(room, projectDefault);
     if (pct <= 0) continue;
-    const roomCt = buildSelectedMaterialBreakdownCore([room], materialBasis).totals.countertopMaterial;
+    const roomCt = buildSelectedMaterialBreakdownCore([room], materialBasis, {
+      chargeableCounterCeil: options?.chargeableCounterCeil
+    }).totals.countertopMaterial;
     taxBase = round2(taxBase + roomCt);
     taxAmount = round2(taxAmount + roomCt * (pct / 100));
     if (pct > maxPct) maxPct = pct;
@@ -1014,6 +1081,7 @@ export function buildCustomerRoomAreaCostBreakdown(params: {
   projectUseTaxPercent?: number;
   customLines?: CustomerRoomAreaCustomLineInput[];
   projectColorTbd?: boolean;
+  measureOptions?: InternalMeasureOptions;
 }): CustomerRoomAreaCostBreakdown {
   const basis = params.materialBasis;
   const projectUseTaxPercent = Math.max(0, Number(params.projectUseTaxPercent) || 0);
@@ -1031,7 +1099,9 @@ export function buildCustomerRoomAreaCostBreakdown(params: {
     roomKeys.push({ id: m.id, key });
 
     const isVanity = m.type === "Vanity";
-    const countertopSf = round2(Number(m.counter) || 0);
+    const countertopSf = round2(
+      Number(m.chargeableCounter ?? m.priceableCounter ?? m.counter) || 0
+    );
     const backsplashFhbSf = round2((Number(m.splash) || 0) + (Number(m.fhb) || 0));
     const totalSqft = round2(Number(m.totalSf) || countertopSf + backsplashFhbSf);
 
@@ -1040,7 +1110,9 @@ export function buildCustomerRoomAreaCostBreakdown(params: {
       materialAmountExact = round2(Number(m.selected) || 0);
     } else if (draft) {
       const pct = resolveRoomUseTaxPercent(draft, projectUseTaxPercent);
-      const sub = buildSelectedMaterialBreakdownCore([draft], basis);
+      const sub = buildSelectedMaterialBreakdownCore([draft], basis, {
+        chargeableCounterCeil: params.measureOptions?.chargeableCounterCeil
+      });
       materialAmountExact = sub.totals.materialSubtotal;
       if (pct > 0) {
         const tax = round2(sub.totals.countertopMaterial * (pct / 100));
@@ -1336,7 +1408,15 @@ export function runLocalPrototypeQuote(params: {
   const basis = params.internalMaterialBasis ?? "wholesale";
   const roomBasis: "wholesale" | "direct" = params.quoteMode === "internal" ? basis : "wholesale";
   const useTaxPercent = params.quoteMode === "internal" ? Number(params.useTaxPercent) || 0 : 0;
-  const { rooms: measured, totals } = calculateAllRoomDrafts(params.roomDrafts, params.projectType, roomBasis, useTaxPercent);
+  const measureOptions: InternalMeasureOptions | undefined =
+    params.quoteMode === "internal" ? { chargeableCounterCeil: true } : undefined;
+  const { rooms: measured, totals } = calculateAllRoomDrafts(
+    params.roomDrafts,
+    params.projectType,
+    roomBasis,
+    useTaxPercent,
+    measureOptions
+  );
   const warnings: string[] = [];
   for (const m of measured) warnings.push(...m.notes);
 
@@ -1419,7 +1499,9 @@ export function runLocalPrototypeQuote(params: {
     vanityTierThreshold: VANITY_TIER_THRESHOLD_SQFT,
     vanityTierLabel,
     measurementLines,
-    countertopSf: round2(totals.counter),
+    countertopSf:
+      params.quoteMode === "internal" ? round2(totals.priceableCounter) : round2(totals.counter),
+    exactCountertopSf: params.quoteMode === "internal" ? round2(totals.counter) : undefined,
     backsplashSf: round2(totals.splash),
     fullHeightSf: round2(totals.fhb),
     totalScopeSf: round2(totals.counter + totals.splash + totals.fhb),
@@ -1494,13 +1576,15 @@ export function createEstimatorRoom(materialGroup: string): RoomDraft {
   return normalizeGuidedShapeRoom({
     ...r,
     calcMode: "Guided Shape",
-    guidedPieces: [starter],
+    guidedPieces: [{ ...starter, addSplash: false }],
     guidedShapeGroups: [
       {
         id: newId(),
         name: "Straight run",
         shapeType: "straight",
-        pieces: [starter]
+        overlapMode: "auto",
+        backsplashMode: "include",
+        pieces: [{ ...starter, addSplash: false }]
       }
     ]
   });
@@ -1678,6 +1762,9 @@ export function serializeRoomsForApi(rooms: RoomDraft[]): Array<Record<string, u
         }
       }
       if (pieces.length) {
+        const grouped = sumAllGuidedShapeGroups(guidedRoom);
+        const exactCounter = grouped.counter;
+        const chargeableCounter = chargeableCounterSqftFromExact(exactCounter);
         const row: Record<string, unknown> = {
           name: r.name,
           materialGroup: g,
@@ -1692,7 +1779,33 @@ export function serializeRoomsForApi(rooms: RoomDraft[]): Array<Record<string, u
           fhbDirectSf: r.fhbDirectSf,
           fhbOutlets: r.fhbOutlets,
           guidedLayoutPreset: guidedRoom.guidedLayoutPreset ?? null,
+          guidedShapeGroups: (guidedRoom.guidedShapeGroups || []).map((grp) => ({
+            id: grp.id,
+            name: grp.name,
+            shapeType: grp.shapeType,
+            overlapMode: grp.overlapMode ?? "auto",
+            backsplashMode: grp.backsplashMode ?? "include",
+            pieces: grp.pieces
+              .filter((x) => x.lengthIn > 0 && x.depthIn > 0)
+              .map((p) => ({
+                type: p.pieceType === "fhb" ? "splash" : p.pieceType,
+                name: p.name,
+                lengthIn: p.lengthIn,
+                depthIn: p.depthIn,
+                shape: p.shape,
+                addSplash: Boolean(p.addSplash),
+                materialOverride: p.materialOverride,
+                materialGroup: p.materialGroup,
+                materialColor: p.materialColor,
+                materialSupplier: p.materialSupplier,
+                materialType: p.materialType
+              }))
+          })),
           cornerOverlapDeductionSf: totalGuidedCornerOverlapDeductionSf(guidedRoom),
+          exactCountertopSqft: exactCounter,
+          chargeableCountertopSqft: chargeableCounter,
+          countertopSqft: chargeableCounter,
+          backsplashSqft: round2(grouped.splash + grouped.fhb),
           pieces
         };
         if (r.notes?.trim()) row.notes = r.notes.trim();
@@ -1814,10 +1927,17 @@ function applyRoomPersistenceFields(base: RoomDraft, r: Record<string, unknown>)
       .map((g) => {
         const gr = g as Record<string, unknown>;
         const pieces = Array.isArray(gr.pieces) ? gr.pieces : [];
+        const om = gr.overlapMode != null ? String(gr.overlapMode) : undefined;
+        const bm = gr.backsplashMode != null ? String(gr.backsplashMode) : undefined;
         return {
           id: String(gr.id || newId()),
           name: String(gr.name || "Shape group"),
           shapeType: String(gr.shapeType || "manual") as GuidedShapeGroupType,
+          overlapMode:
+            om === "none" || om === "L-Shape" || om === "U-Shape" || om === "auto"
+              ? (om as GuidedShapeGroup["overlapMode"])
+              : undefined,
+          backsplashMode: bm === "exclude" || bm === "include" ? (bm as GuidedShapeGroup["backsplashMode"]) : undefined,
           pieces: pieces.filter((p) => p && typeof p === "object").map((p) => hydrateGuidedPieceFromRow(p as Record<string, unknown>))
         } satisfies GuidedShapeGroup;
       });

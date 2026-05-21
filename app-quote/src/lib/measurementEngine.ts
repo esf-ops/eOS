@@ -5,7 +5,7 @@
  * - Manual: direct sf entry
  */
 
-import type { GuidedPiece, RoomCalcMode, RoomDraft } from "./quoteTypes";
+import type { GuidedOverlapMode, GuidedPiece, GuidedShapeGroup, RoomCalcMode, RoomDraft } from "./quoteTypes";
 
 export const STANDARD_COUNTER_DEPTH_IN = 25.5;
 export const STANDARD_BACKSPLASH_HEIGHT_IN = 4;
@@ -107,12 +107,33 @@ export function guidedCornerOverlapCountForShapeType(shapeType: string | undefin
   return 0;
 }
 
+export function guidedCornerOverlapCountForMode(
+  overlapMode: GuidedOverlapMode | undefined | null,
+  shapeType: string | undefined | null
+): number {
+  const mode = overlapMode ?? "auto";
+  if (mode === "none") return 0;
+  if (mode === "L-Shape") return 1;
+  if (mode === "U-Shape") return 2;
+  return guidedCornerOverlapCountForShapeType(shapeType);
+}
+
+/** Elite internal estimate: round final exact countertop SF up to next whole square foot (not per piece). */
+export function chargeableCounterSqftFromExact(exactSf: number): number {
+  const ex = round2(exactSf);
+  if (ex <= 0) return 0;
+  const whole = Math.round(ex);
+  if (Math.abs(ex - whole) < 0.005) return whole;
+  return Math.ceil(ex);
+}
+
 /** Overlap deduction for pieces within a single shape group. */
 export function guidedCornerOverlapDeductionSfForPieces(
   shapeType: string | undefined | null,
-  pieces: GuidedPiece[]
+  pieces: GuidedPiece[],
+  overlapMode?: GuidedOverlapMode | null
 ): number {
-  const count = guidedCornerOverlapCountForShapeType(shapeType);
+  const count = guidedCornerOverlapCountForMode(overlapMode, shapeType);
   if (!count) return 0;
   const counters = pieces.filter((p) => p.pieceType === "counter" && p.lengthIn > 0 && p.depthIn > 0);
   if (counters.length < 2) return 0;
@@ -134,7 +155,7 @@ export function guidedCornerOverlapCount(room: RoomDraft): number {
   if (room.calcMode !== "Guided Shape") return 0;
   const groups = room.guidedShapeGroups;
   if (groups?.length) {
-    return groups.reduce((n, g) => n + guidedCornerOverlapCountForShapeType(g.shapeType), 0);
+    return groups.reduce((n, g) => n + guidedCornerOverlapCountForMode(g.overlapMode, g.shapeType), 0);
   }
   return guidedCornerOverlapCountForShapeType(room.guidedLayoutPreset);
 }
@@ -149,16 +170,35 @@ export function guidedCornerOverlapDeductionSf(room: RoomDraft): number {
   if (groups?.length) {
     let sum = 0;
     for (const g of groups) {
-      sum = round2(sum + guidedCornerOverlapDeductionSfForPieces(g.shapeType, g.pieces));
+      sum = round2(sum + guidedCornerOverlapDeductionSfForGroup(g));
     }
     return sum;
   }
   return guidedCornerOverlapDeductionSfForPieces(room.guidedLayoutPreset, room.guidedPieces);
 }
 
+export function guidedCornerOverlapDeductionSfForGroup(group: GuidedShapeGroup): number {
+  return guidedCornerOverlapDeductionSfForPieces(group.shapeType, group.pieces, group.overlapMode);
+}
+
+export function overlapModeLabel(mode: GuidedOverlapMode | undefined, shapeType: string): string {
+  const m = mode ?? "auto";
+  if (m === "none") return "None (gross runs)";
+  if (m === "L-Shape") return "L corner";
+  if (m === "U-Shape") return "U corners";
+  return shapeType === "L-Shape" || shapeType === "U-Shape" ? `Auto (${shapeType})` : "Auto";
+}
+
 export function sumGuidedPiecesByType(
   pieces: GuidedPiece[],
-  options?: { cornerOverlapDeductionSf?: number; cornerOverlapNote?: string }
+  options?: {
+    cornerOverlapDeductionSf?: number;
+    cornerOverlapNote?: string;
+    /** Skip 4″ backsplash add-on from counter pieces. */
+    skipAutoSplash?: boolean;
+    /** Ignore explicit splash/fhb piece rows. */
+    skipSplashPieces?: boolean;
+  }
 ) {
   let counter = 0;
   let splash = 0;
@@ -169,11 +209,13 @@ export function sumGuidedPiecesByType(
     if (sf <= 0) continue;
     const shapeLbl = p.shape === "tri" ? "Triangle" : "Rectangle";
     lines.push(`${p.name} (${shapeLbl}): ${p.lengthIn}" × ${p.depthIn}" = ${sf.toFixed(2)} sf`);
-    if (p.pieceType === "splash") splash += sf;
-    else if (p.pieceType === "fhb") fhb += sf;
-    else {
+    if (p.pieceType === "splash") {
+      if (!options?.skipSplashPieces) splash += sf;
+    } else if (p.pieceType === "fhb") {
+      if (!options?.skipSplashPieces) fhb += sf;
+    } else {
       counter += sf;
-      if (p.pieceType === "counter" && p.addSplash && p.lengthIn > 0) {
+      if (p.pieceType === "counter" && p.addSplash && p.lengthIn > 0 && !options?.skipAutoSplash) {
         const spSf = round2((p.lengthIn * STANDARD_BACKSPLASH_HEIGHT_IN) / 144);
         if (spSf > 0) {
           splash += spSf;

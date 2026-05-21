@@ -1,6 +1,8 @@
 import React from "react";
 import type {
   EliteProgramColorRow,
+  GuidedGroupBacksplashMode,
+  GuidedOverlapMode,
   GuidedPiece,
   GuidedShapeGroupType,
   RoomCalcMode,
@@ -9,6 +11,7 @@ import type {
   VanityKitchenTier,
   VanitySinkType
 } from "../lib/quoteTypes";
+import { INTERNAL_ESTIMATE_MEASURE_OPTIONS } from "../lib/prototypeQuoteMath";
 import {
   appendGuidedShapeGroup,
   groupTotalsPreview,
@@ -276,6 +279,14 @@ export default function RoomScopeBuilder({
 
   const renameShapeGroup = (roomId: string, groupId: string, name: string) => {
     onRoomsChange(rooms.map((r) => (r.id === roomId ? updateGuidedShapeGroup(r, groupId, { name }) : r)));
+  };
+
+  const setGroupOverlapMode = (roomId: string, groupId: string, overlapMode: GuidedOverlapMode) => {
+    onRoomsChange(rooms.map((r) => (r.id === roomId ? updateGuidedShapeGroup(r, groupId, { overlapMode }) : r)));
+  };
+
+  const setGroupBacksplashMode = (roomId: string, groupId: string, backsplashMode: GuidedGroupBacksplashMode) => {
+    onRoomsChange(rooms.map((r) => (r.id === roomId ? updateGuidedShapeGroup(r, groupId, { backsplashMode }) : r)));
   };
 
   const restoreUndo = () => {
@@ -746,9 +757,37 @@ export default function RoomScopeBuilder({
                                 />
                               </label>
                               <span className="ie-shape-group-type muted small">{groupTypeLabel(grp.shapeType)}</span>
+                              <label className="ie-shape-group-control" onClick={(e) => e.stopPropagation()}>
+                                Corner deduction
+                                <select
+                                  value={grp.overlapMode ?? "auto"}
+                                  onChange={(e) =>
+                                    setGroupOverlapMode(room.id, grp.id, e.target.value as GuidedOverlapMode)
+                                  }
+                                  title="Use gross runs when you want to price entered lengths without subtracting corners."
+                                >
+                                  <option value="auto">Auto</option>
+                                  <option value="none">None / gross runs</option>
+                                  <option value="L-Shape">L corner</option>
+                                  <option value="U-Shape">U corners</option>
+                                </select>
+                              </label>
+                              <label className="ie-shape-group-control check" onClick={(e) => e.stopPropagation()}>
+                                <input
+                                  type="checkbox"
+                                  checked={grp.backsplashMode !== "exclude"}
+                                  onChange={(e) =>
+                                    setGroupBacksplashMode(room.id, grp.id, e.target.checked ? "include" : "exclude")
+                                  }
+                                />
+                                Include backsplash in this group
+                              </label>
                               <span className="ie-shape-group-sf muted small">
                                 {gPrev.counter.toFixed(2)} ct sf · {gPrev.splashFhb.toFixed(2)} splash/FHB
                                 {gPrev.overlap > 0 ? ` · −${gPrev.overlap.toFixed(2)} overlap` : ""}
+                              </span>
+                              <span className="muted small ie-shape-group-hint">
+                                Gross runs: no corner deduction. Uncheck backsplash to price counter only (e.g. stove wall).
                               </span>
                               {groups.length > 1 ? (
                                 <button
@@ -818,6 +857,21 @@ export default function RoomScopeBuilder({
                                     onChange={(e) => setPiece(room.id, p.id, { depthIn: Number(e.target.value) || 0 }, "guided")}
                                   />
                                 </label>
+                                {p.pieceType === "counter" && grp.backsplashMode !== "exclude" ? (
+                                  <label className="check" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                    <input
+                                      type="checkbox"
+                                      checked={Boolean(p.addSplash)}
+                                      onChange={(e) => setPiece(room.id, p.id, { addSplash: e.target.checked }, "guided")}
+                                    />
+                                    Add 4″ backsplash on this run (length × 4″ / 144)
+                                  </label>
+                                ) : null}
+                                {p.pieceType === "splash" ? (
+                                  <span className="muted small" style={{ gridColumn: "1 / -1" }}>
+                                    Backsplash piece — counts toward backsplash SF only.
+                                  </span>
+                                ) : null}
                                 {pieceOverridesOpen[room.id] ? (
                                   <>
                                     <label className="check" style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -888,13 +942,13 @@ export default function RoomScopeBuilder({
                     })()}
                     {renderMiniVisual(normalizeGuidedShapeRoom(room))}
                     {enableDestructiveGuards ? (() => {
-                      const audit = buildGuidedShapeMathAudit(room);
+                      const audit = buildGuidedShapeMathAudit(room, INTERNAL_ESTIMATE_MEASURE_OPTIONS);
                       if (!audit) return null;
                       return (
                         <details className="ie-guided-math-audit">
                           <summary>Shape math breakdown (internal)</summary>
                           <p className="muted small">
-                            Priced totals use these numbers.{" "}
+                            Priced totals use chargeable SF where noted.{" "}
                             {audit.groupAudits.length > 1 ? (
                               <>
                                 <strong>{audit.groupAudits.length} shape groups</strong>
@@ -914,10 +968,14 @@ export default function RoomScopeBuilder({
                           {audit.groupAudits.map((ga) => (
                             <div key={ga.groupId} className="ie-math-audit-group">
                               <p className="small">
-                                <strong>{ga.groupName}</strong> ({ga.shapeType}) — counter {ga.finalCounterSf.toFixed(2)} sf
-                                {ga.overlapDeductionSf > 0 ? ` (raw ${ga.rawCounterSf.toFixed(2)} − overlap ${ga.overlapDeductionSf.toFixed(2)})` : ""}
+                                <strong>{ga.groupName}</strong> ({ga.shapeType}) — {ga.overlapMode} · {ga.backsplashMode}
+                                <br />
+                                Counter {ga.finalCounterSf.toFixed(2)} sf
+                                {ga.overlapDeductionSf > 0
+                                  ? ` (raw ${ga.rawCounterSf.toFixed(2)} − overlap ${ga.overlapDeductionSf.toFixed(2)})`
+                                  : ""}
                                 {" · "}
-                                splash/FHB {ga.finalSplashFhbSf.toFixed(2)} sf
+                                splash/FHB {ga.finalSplashFhbSf.toFixed(2)} sf (exact)
                               </p>
                             </div>
                           ))}
@@ -928,6 +986,7 @@ export default function RoomScopeBuilder({
                                 <th>Piece</th>
                                 <th>Type</th>
                                 <th>Dimensions</th>
+                                <th>Backsplash</th>
                                 <th className="num">Raw SF</th>
                               </tr>
                             </thead>
@@ -940,6 +999,7 @@ export default function RoomScopeBuilder({
                                   <td>
                                     {row.lengthIn}&quot; × {row.depthIn}&quot; ({row.shape})
                                   </td>
+                                  <td>{row.backsplashSource || (row.pieceType === "counter" ? "—" : row.pieceType)}</td>
                                   <td className="num">
                                     {row.rawSf.toFixed(2)}
                                     {row.addSplashSf > 0 ? ` + ${row.addSplashSf.toFixed(2)} splash` : ""}
@@ -954,14 +1014,21 @@ export default function RoomScopeBuilder({
                             ))}
                           </ul>
                           <p className="muted small ie-math-audit-totals">
-                            <strong>Room counter SF (priced):</strong> {audit.finalCounterSf.toFixed(2)} ·{" "}
-                            <strong>Backsplash + FHB SF:</strong> {audit.finalBacksplashFhbSf.toFixed(2)}
-                            {audit.sumCounterRaw > audit.finalCounterSf ? (
+                            <strong>Exact counter SF:</strong> {audit.exactCounterSf.toFixed(2)}
+                            {audit.counterRoundingAdjustment > 0 ? (
                               <>
                                 {" "}
-                                (raw counter {audit.sumCounterRaw.toFixed(2)} − overlap {audit.cornerOverlapDeductionSf.toFixed(2)})
+                                → <strong>Chargeable counter SF:</strong> {audit.chargeableCounterSf.toFixed(0)} (+
+                                {audit.counterRoundingAdjustment.toFixed(2)} round-up)
                               </>
-                            ) : null}
+                            ) : (
+                              <>
+                                {" "}
+                                · <strong>Chargeable counter SF:</strong> {audit.chargeableCounterSf.toFixed(2)}
+                              </>
+                            )}
+                            <br />
+                            <strong>Backsplash + FHB SF (exact, no round-up):</strong> {audit.finalBacksplashFhbSf.toFixed(2)}
                           </p>
                         </details>
                       );

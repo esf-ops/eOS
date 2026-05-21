@@ -1,9 +1,9 @@
 import type { GuidedPiece, RoomDraft } from "./quoteTypes";
 import {
-  guidedCornerOverlapCountForShapeType,
+  chargeableCounterSqftFromExact,
+  guidedCornerOverlapCountForMode,
   guidedCornerOverlapDeductionSf,
-  guidedCornerOverlapDeductionSfForPieces,
-  guidedCornerOverlapSqft,
+  overlapModeLabel,
   round2,
   sfFromGuidedPiece,
   STANDARD_BACKSPLASH_HEIGHT_IN,
@@ -21,12 +21,15 @@ export type GuidedPieceAuditRow = {
   depthIn: number;
   rawSf: number;
   addSplashSf: number;
+  backsplashSource?: string;
 };
 
 export type GuidedShapeGroupAudit = {
   groupId: string;
   groupName: string;
   shapeType: string;
+  overlapMode: string;
+  backsplashMode: string;
   rawCounterSf: number;
   rawSplashSf: number;
   rawFhbSf: number;
@@ -47,6 +50,9 @@ export type GuidedShapeMathAudit = {
   sumFhbRaw: number;
   cornerOverlapCount: number;
   cornerOverlapDeductionSf: number;
+  exactCounterSf: number;
+  chargeableCounterSf: number;
+  counterRoundingAdjustment: number;
   finalCounterSf: number;
   finalBacksplashFhbSf: number;
   detailLines: string[];
@@ -57,7 +63,10 @@ function shapeLabel(shape: GuidedPiece["shape"]): string {
 }
 
 /** Internal-only breakdown for guided-shape rooms (per-group L/U overlap). */
-export function buildGuidedShapeMathAudit(room: RoomDraft): GuidedShapeMathAudit | null {
+export function buildGuidedShapeMathAudit(
+  room: RoomDraft,
+  measureOptions?: { chargeableCounterCeil?: boolean }
+): GuidedShapeMathAudit | null {
   if (room.roomType === "Vanity") return null;
   if (room.calcMode !== "Guided Shape") return null;
 
@@ -76,11 +85,17 @@ export function buildGuidedShapeMathAudit(room: RoomDraft): GuidedShapeMathAudit
     let rawCounter = 0;
     let rawSplash = 0;
     let rawFhb = 0;
+    const excludeBs = grp.backsplashMode === "exclude";
     for (const p of grp.pieces) {
       const rawSf = sfFromGuidedPiece(p.lengthIn, p.depthIn, p.shape);
       let addSplashSf = 0;
-      if (p.pieceType === "counter" && p.addSplash && p.lengthIn > 0) {
+      let backsplashSource: string | undefined;
+      if (p.pieceType === "counter" && p.addSplash && p.lengthIn > 0 && !excludeBs) {
         addSplashSf = round2((p.lengthIn * STANDARD_BACKSPLASH_HEIGHT_IN) / 144);
+        backsplashSource = `4″ on run (${p.name})`;
+      }
+      if (p.pieceType === "splash" && !excludeBs) {
+        backsplashSource = "splash piece";
       }
       pieceRows.push({
         pieceId: p.id,
@@ -91,33 +106,42 @@ export function buildGuidedShapeMathAudit(room: RoomDraft): GuidedShapeMathAudit
         lengthIn: p.lengthIn,
         depthIn: p.depthIn,
         rawSf,
-        addSplashSf
+        addSplashSf,
+        backsplashSource
       });
-      if (p.pieceType === "splash") rawSplash += rawSf;
-      else if (p.pieceType === "fhb") rawFhb += rawSf;
-      else {
+      if (p.pieceType === "splash") {
+        if (!excludeBs) rawSplash += rawSf;
+      } else if (p.pieceType === "fhb") {
+        if (!excludeBs) rawFhb += rawSf;
+      } else {
         rawCounter += rawSf;
-        rawSplash += addSplashSf;
+        if (!excludeBs) rawSplash += addSplashSf;
       }
     }
     const summed = sumGuidedShapeGroup(grp);
     const overlap = summed.overlapDeduction;
     cornerOverlapDeductionSf = round2(cornerOverlapDeductionSf + overlap);
-    cornerOverlapCount += guidedCornerOverlapCountForShapeType(grp.shapeType);
+    cornerOverlapCount += guidedCornerOverlapCountForMode(grp.overlapMode, grp.shapeType);
     sumCounterRaw = round2(sumCounterRaw + rawCounter);
     sumSplashRaw = round2(sumSplashRaw + rawSplash);
     sumFhbRaw = round2(sumFhbRaw + rawFhb);
     const grpLines = summed.lines.map((ln) => `[${grp.name}] ${ln}`);
     detailLines.push(...grpLines);
+    const modeLbl = overlapModeLabel(grp.overlapMode, grp.shapeType);
     if (overlap > 0) {
-      detailLines.push(
-        `${grp.name} (${groupTypeLabel(grp.shapeType)}): corner overlap −${overlap.toFixed(2)} sf within group`
-      );
+      detailLines.push(`${grp.name}: corner overlap −${overlap.toFixed(2)} sf (${modeLbl})`);
+    } else if (grp.overlapMode === "none") {
+      detailLines.push(`${grp.name}: gross runs — no corner deduction`);
+    }
+    if (excludeBs) {
+      detailLines.push(`${grp.name}: backsplash excluded from this group`);
     }
     groupAudits.push({
       groupId: grp.id,
       groupName: grp.name,
       shapeType: groupTypeLabel(grp.shapeType),
+      overlapMode: modeLbl,
+      backsplashMode: excludeBs ? "Exclude backsplash" : "Include backsplash",
       rawCounterSf: round2(rawCounter),
       rawSplashSf: round2(rawSplash),
       rawFhbSf: round2(rawFhb),
@@ -143,7 +167,8 @@ export function buildGuidedShapeMathAudit(room: RoomDraft): GuidedShapeMathAudit
         lengthIn: p.lengthIn,
         depthIn: p.depthIn,
         rawSf,
-        addSplashSf: 0
+        addSplashSf: 0,
+        backsplashSource: "FHB piece"
       });
     }
   } else if (room.fhbMode === "Manual Sq Ft") {
@@ -152,6 +177,18 @@ export function buildGuidedShapeMathAudit(room: RoomDraft): GuidedShapeMathAudit
   }
 
   const roomOverlap = guidedCornerOverlapDeductionSf(norm);
+  let exactCounter = 0;
+  for (const ga of groupAudits) {
+    exactCounter = round2(exactCounter + ga.finalCounterSf);
+  }
+  const chargeableCounterSf = measureOptions?.chargeableCounterCeil
+    ? chargeableCounterSqftFromExact(exactCounter)
+    : exactCounter;
+  const counterRoundingAdjustment =
+    measureOptions?.chargeableCounterCeil && chargeableCounterSf > exactCounter
+      ? round2(chargeableCounterSf - exactCounter)
+      : 0;
+
   const flatSummed = sumGuidedPiecesByType(norm.guidedPieces, {
     cornerOverlapDeductionSf: roomOverlap
   });
@@ -162,6 +199,12 @@ export function buildGuidedShapeMathAudit(room: RoomDraft): GuidedShapeMathAudit
   if (groups.length > 1) {
     detailLines.push(`Room total: ${groups.length} shape groups — overlap deducted within each group only.`);
   }
+  if (counterRoundingAdjustment > 0) {
+    detailLines.push(
+      `Chargeable countertop: ${chargeableCounterSf.toFixed(0)} sf (rounded up from ${exactCounter.toFixed(2)} sf exact; +${counterRoundingAdjustment.toFixed(2)} sf)`
+    );
+  }
+  detailLines.push(`Backsplash/FHB priced at exact SF (no round-up rule).`);
 
   return {
     roomName: room.name || "Room",
@@ -174,7 +217,10 @@ export function buildGuidedShapeMathAudit(room: RoomDraft): GuidedShapeMathAudit
     sumFhbRaw: round2(sumFhbRaw),
     cornerOverlapCount,
     cornerOverlapDeductionSf: roomOverlap,
-    finalCounterSf: flatSummed.counter,
+    exactCounterSf: exactCounter,
+    chargeableCounterSf,
+    counterRoundingAdjustment,
+    finalCounterSf: measureOptions?.chargeableCounterCeil ? chargeableCounterSf : flatSummed.counter,
     finalBacksplashFhbSf: round2(flatSummed.splash + flatSummed.fhb + fhbExtra),
     detailLines
   };
@@ -201,9 +247,9 @@ export function cedarValleySpec73StyleFixture(
     }
   ];
   room.fhbMode = "Off";
-  const audit = buildGuidedShapeMathAudit(room);
+  const audit = buildGuidedShapeMathAudit(room, { chargeableCounterCeil: true });
   return {
-    counterSf: audit?.finalCounterSf ?? 0,
+    counterSf: audit?.chargeableCounterSf ?? audit?.finalCounterSf ?? 0,
     backsplashSf: audit?.finalBacksplashFhbSf ?? 0
   };
 }
