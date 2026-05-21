@@ -799,6 +799,253 @@ body {
   border-bottom: 2px solid var(--od-accent);
 }
 
+/* —— Executive 3-column review sheet —— */
+.od-print-exec-owner-wrap {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: center;
+  margin-bottom: 5px;
+}
+
+.od-print-exec-owner-card {
+  display: inline-block;
+  min-width: 200px;
+  padding: 5px 18px 6px;
+  text-align: center;
+  background: #fff;
+  border: 1px solid #b8c5d6;
+  border-radius: 8px;
+  border-top: 3px solid var(--od-accent);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.od-print-exec-owner-name {
+  font-weight: 700;
+  font-size: 0.78rem;
+  color: #0f172a;
+  line-height: 1.2;
+}
+
+.od-print-exec-owner-title {
+  font-size: 0.66rem;
+  color: #475569;
+  margin-top: 1px;
+}
+
+.od-print-exec-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1.08fr 1fr 0.78fr;
+  gap: 6px;
+  overflow: hidden;
+  align-items: stretch;
+}
+
+.od-print-exec-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #b8c5d6;
+  border-radius: 7px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  padding: 5px 6px 6px;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.od-print-exec-panel--sales {
+  border-top: 3px solid #2563eb;
+}
+
+.od-print-exec-panel--production {
+  border-top: 3px solid #059669;
+}
+
+.od-print-exec-panel--finance {
+  border-top: 3px solid #4f46e5;
+}
+
+.od-print-exec-panel--partners {
+  border-top: 3px solid #7c3aed;
+}
+
+.od-print-exec-panel--safety {
+  border-top: 3px solid #dc2626;
+}
+
+.od-print-exec-panel-title {
+  margin: 0 0 5px;
+  padding-bottom: 3px;
+  border-bottom: 1.5px solid #e2e8f0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--od-accent);
+  text-align: center;
+  line-height: 1.15;
+  flex-shrink: 0;
+}
+
+.od-print-exec-peers {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+  overflow: hidden;
+}
+
+.od-print-exec-peer {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 3px;
+  background: #fff;
+  border: 1px solid #dbe3ed;
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.od-print-exec-peer-leader {
+  flex-shrink: 0;
+  text-align: center;
+  padding: 4px 5px;
+  background: linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%);
+  border: 1px solid #93c5fd;
+  border-radius: 4px;
+  font-size: 0.64rem;
+  line-height: 1.2;
+}
+
+.od-print-exec-peer-team {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.od-print-exec-person {
+  padding: 2px 4px 2px 7px;
+  border-left: 2px solid #cbd5e1;
+  font-size: 0.6rem;
+  line-height: 1.22;
+  background: #fff;
+}
+
+.od-print-exec-person--nested {
+  padding-left: 5px;
+  border-left-color: #e2e8f0;
+  font-size: 0.58rem;
+}
+
+.od-print-exec-person-name {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.od-print-exec-person-title {
+  font-weight: 400;
+  color: #475569;
+}
+
+.od-print-exec-branch {
+  padding: 3px 4px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+}
+
+.od-print-exec-branch-team {
+  margin-top: 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.od-print-exec-ops {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+}
+
+.od-print-exec-ops--dense {
+  margin-top: 0;
+  font-size: 0.58rem;
+}
+
+.od-print-exec-op-row {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 3px 4px;
+  align-items: baseline;
+  padding: 3px 5px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  font-size: 0.6rem;
+  line-height: 1.2;
+}
+
+.od-print-exec-op-row--solo {
+  grid-template-columns: 1fr;
+}
+
+.od-print-exec-op-label {
+  font-weight: 700;
+  color: #0f172a;
+  white-space: nowrap;
+}
+
+.od-print-exec-op-sep {
+  color: #94a3b8;
+}
+
+.od-print-exec-op-value {
+  color: #334155;
+  min-width: 0;
+}
+
+.od-print-exec-col-gov {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.od-print-exec-panel--gov {
+  flex: 1 1 0;
+  min-height: 0;
+  padding: 4px 5px 5px;
+}
+
+.od-print-exec-people-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.od-print-exec-people-stack .od-print-exec-person {
+  border-left: none;
+  padding: 3px 5px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+}
+
+/* Compact fallback (5-column text layout) */
 .od-print-one-page-grid {
   flex: 1 1 auto;
   min-height: 0;
@@ -1259,6 +1506,47 @@ body {
   .od-print-one-page-owner {
     font-size: 10pt;
     margin-bottom: 3px;
+  }
+
+  .od-print-exec-owner-name {
+    font-size: 11pt;
+  }
+
+  .od-print-exec-owner-title {
+    font-size: 9pt;
+  }
+
+  .od-print-exec-body {
+    gap: 5px;
+  }
+
+  .od-print-exec-panel-title {
+    font-size: 8.5pt;
+  }
+
+  .od-print-exec-peer-leader {
+    font-size: 7.5pt;
+  }
+
+  .od-print-exec-person {
+    font-size: 7pt;
+  }
+
+  .od-print-exec-person--nested {
+    font-size: 6.5pt;
+  }
+
+  .od-print-exec-op-row {
+    font-size: 6.75pt;
+    padding: 2px 4px;
+  }
+
+  .od-print-exec-ops--dense .od-print-exec-op-row {
+    font-size: 6.5pt;
+  }
+
+  .od-print-exec-people-stack .od-print-exec-person {
+    font-size: 7pt;
   }
 
   .od-print-one-page-grid {
