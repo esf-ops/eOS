@@ -117,6 +117,74 @@ function opsRowFromGroup(group: Seat, chart: ChartData): PrintOpsRow {
   return { key: group.id, label, value: value || label };
 }
 
+/** Compact ops rows from direct reports under the production leader (e.g. George → Shop, Install, …). */
+function buildLeaderOpsRows(leaderSeatId: string, chart: ChartData): PrintOpsRow[] {
+  const sm = seatMap(chart.seats);
+  const rows: PrintOpsRow[] = [];
+  const childIds = sortDirectChildrenForPrint(leaderSeatId, chart);
+
+  for (const cid of childIds) {
+    const child = sm.get(cid);
+    if (!child) continue;
+    if (isStructuralSeat(child)) {
+      rows.push(opsRowFromGroup(child, chart));
+      continue;
+    }
+    const grandIds = sortDirectChildrenForPrint(cid, chart);
+    const grand = grandIds.map((id) => sm.get(id)).filter(Boolean) as Seat[];
+    if (grand.length > 0) {
+      const head = formatCompactChildPart(child);
+      const team = grand.map(formatCompactChildPart).join(" · ");
+      rows.push({
+        key: cid,
+        label: displayName(child),
+        value: team ? `${head} · ${team}` : head
+      });
+    } else {
+      rows.push({
+        key: cid,
+        label: "",
+        value: formatCompactChildPart(child)
+      });
+    }
+  }
+  return rows;
+}
+
+function leaderAlreadyHasCustomerService(leaderSeatId: string, chart: ChartData): boolean {
+  const sm = seatMap(chart.seats);
+  return sortDirectChildrenForPrint(leaderSeatId, chart).some((id) => {
+    const seat = sm.get(id);
+    return seat && /customer service/i.test(displayName(seat).toLowerCase());
+  });
+}
+
+function appendCustomerServiceOpsRows(
+  opsRows: PrintOpsRow[],
+  customerServiceSectionId: string | null,
+  chart: ChartData,
+  leaderSeatId: string | null
+): void {
+  if (!customerServiceSectionId) return;
+  if (leaderSeatId && leaderAlreadyHasCustomerService(leaderSeatId, chart)) return;
+
+  const sm = seatMap(chart.seats);
+  const csChildIds = sortDirectChildrenForPrint(customerServiceSectionId, chart);
+  for (const cid of csChildIds) {
+    const child = sm.get(cid);
+    if (!child) continue;
+    if (isStructuralSeat(child)) {
+      opsRows.push(opsRowFromGroup(child, chart));
+    } else {
+      opsRows.push({
+        key: cid,
+        label: "Customer Service",
+        value: formatCompactChildPart(child)
+      });
+    }
+  }
+}
+
 function buildProductionPanel(
   sectionId: string,
   chart: ChartData,
@@ -128,28 +196,19 @@ function buildProductionPanel(
   const childSeats = childIds.map((id) => sm.get(id)).filter(Boolean) as Seat[];
   const persons = childSeats.filter((c) => isPersonSeat(c));
   const structs = childSeats.filter((c) => isStructuralSeat(c));
-  const leader = persons[0] ? toPersonRow(persons[0]) : { key: sectionId, name: displayName(section) };
+  const leaderSeat = persons[0] ?? null;
+  const leader = leaderSeat ? toPersonRow(leaderSeat) : { key: sectionId, name: displayName(section) };
   const opsRows: PrintOpsRow[] = structs.map((g) => opsRowFromGroup(g, chart));
 
-  if (customerServiceSectionId) {
-    const csChildIds = sortDirectChildrenForPrint(customerServiceSectionId, chart);
-    for (const cid of csChildIds) {
-      const child = sm.get(cid);
-      if (!child) continue;
-      if (isStructuralSeat(child)) {
-        opsRows.push(opsRowFromGroup(child, chart));
-      } else {
-        opsRows.push({
-          key: cid,
-          label: "Customer Service",
-          value: formatCompactChildPart(child)
-        });
-      }
-    }
+  if (leaderSeat) {
+    opsRows.push(...buildLeaderOpsRows(leaderSeat.id, chart));
   }
 
+  appendCustomerServiceOpsRows(opsRows, customerServiceSectionId, chart, leaderSeat?.id ?? null);
+
   for (const p of persons.slice(1)) {
-    opsRows.push({ key: p.id, label: "", value: [p.personName, p.title].filter(Boolean).join(" — ") || displayName(p) });
+    const row = toPersonRow(p);
+    opsRows.push({ key: p.id, label: "", value: row.title ? `${row.name} — ${row.title}` : row.name });
   }
 
   return { title: displayName(section), leader, opsRows };
