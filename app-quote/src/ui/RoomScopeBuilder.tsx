@@ -32,7 +32,7 @@ import {
   VANITY_PRICING
 } from "../lib/prototypeQuoteMath";
 import { VANITY_PROGRAM_2026_RATES, VANITY_PROGRAM_YEAR } from "../lib/vanityProgram2026";
-import { buildGuidedShapeMathAudit } from "../lib/guidedShapeMathAudit";
+import { buildGuidedShapeMathAudit, detectLikelyBacksplashDoubleCount } from "../lib/guidedShapeMathAudit";
 import {
   depthPatchForGuidedPieceTypeChange,
   qualifyingSfFromRoomDrafts,
@@ -942,9 +942,22 @@ export default function RoomScopeBuilder({
                     })()}
                     {renderMiniVisual(normalizeGuidedShapeRoom(room))}
                     {enableDestructiveGuards ? (() => {
+                      const backsplashDupWarnings = detectLikelyBacksplashDoubleCount(room);
                       const audit = buildGuidedShapeMathAudit(room, INTERNAL_ESTIMATE_MEASURE_OPTIONS);
-                      if (!audit) return null;
+                      if (!audit && !backsplashDupWarnings.length) return null;
                       return (
+                        <>
+                          {backsplashDupWarnings.length ? (
+                            <div className="warn-box" style={{ marginTop: 10 }}>
+                              <strong>Backsplash double-count risk</strong>
+                              <ul className="mini-lines">
+                                {backsplashDupWarnings.map((w, i) => (
+                                  <li key={i}>{w}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
+                          {audit ? (
                         <details className="ie-guided-math-audit">
                           <summary>Shape math breakdown (internal)</summary>
                           <p className="muted small">
@@ -1031,6 +1044,8 @@ export default function RoomScopeBuilder({
                             <strong>Backsplash + FHB SF (exact, no round-up):</strong> {audit.finalBacksplashFhbSf.toFixed(2)}
                           </p>
                         </details>
+                          ) : null}
+                        </>
                       );
                     })() : null}
                   </div>

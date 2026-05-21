@@ -891,7 +891,14 @@ export default function InternalEstimateApp() {
     useTaxPercent
   ]);
 
-  const comparisonScopeMeta = useMemo(() => aggregateComparisonScope(roomDrafts, projectType), [roomDrafts, projectType]);
+  const comparisonScopeMeta = useMemo(
+    () =>
+      aggregateComparisonScope(roomDrafts, projectType, {
+        materialBasis: internalPricingMode,
+        projectUseTaxPercent: Math.max(0, Number(useTaxPercent) || 0)
+      }),
+    [roomDrafts, projectType, internalPricingMode, useTaxPercent]
+  );
 
   const visualCanvasSummary = useMemo(() => visualCanvasSummaryStats(roomDrafts), [roomDrafts]);
 
@@ -901,9 +908,10 @@ export default function InternalEstimateApp() {
       backsplashSqft: comparisonScopeMeta.backsplashSqft,
       roomFixedDollars: comparisonScopeMeta.addonDollars,
       customLineDollars: customLinePreviewTotals,
+      useTaxPercent: Math.max(0, Number(useTaxPercent) || 0),
       basis: internalPricingMode
     });
-  }, [comparisonScopeMeta, customLinePreviewTotals, internalPricingMode]);
+  }, [comparisonScopeMeta, customLinePreviewTotals, internalPricingMode, useTaxPercent]);
 
   const backendHint = config.backendBaseUrl;
   const partRetail = liveEstimate.retail;
@@ -1922,9 +1930,9 @@ export default function InternalEstimateApp() {
                 Internal — all price groups ({internalPricingMode === "wholesale" ? "wholesale $/sf" : "ESF Direct $/sf"}, no markup %)
               </h3>
               <p className="muted small">
-                Estimator comparison only — material columns use countertop sf and backsplash + FHB sf at each tier rate. Full total adds
-                room fixed add-ons and structured custom lines (same for every group row). Your selected mixed-material quote follows
-                Quoted Material Breakdown / backend calculate.
+                Estimator comparison only — countertop material uses <strong>chargeable</strong> counter SF (whole-foot round-up);
+                backsplash + FHB use exact SF. Full total adds room fixed add-ons, structured custom lines, and use tax on countertop
+                material when set. Aligned with live preview and backend calculate.
               </p>
               <table className="print-table">
                 <thead>

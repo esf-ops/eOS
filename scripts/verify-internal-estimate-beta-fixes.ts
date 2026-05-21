@@ -21,7 +21,11 @@ import {
   round2
 } from "../app-quote/src/lib/measurementEngine.ts";
 import { appendGuidedShapeGroup, updateGuidedShapeGroup } from "../app-quote/src/lib/guidedShapeGroups.ts";
-import { buildGuidedShapeMathAudit, cedarValleySpec73StyleFixture } from "../app-quote/src/lib/guidedShapeMathAudit.ts";
+import {
+  buildGuidedShapeMathAudit,
+  cedarValleySpec73StyleFixture,
+  detectLikelyBacksplashDoubleCount
+} from "../app-quote/src/lib/guidedShapeMathAudit.ts";
 import {
   priceVanityProgram2026,
   roundCustomerDisplayAddonLine,
@@ -38,6 +42,8 @@ import {
   hydrateCustomerRoomAreaBreakdown,
   hydrateRoomDraftsFromInternalUi,
   mergeRoomDraftsIntoGlobalAddOns,
+  aggregateComparisonScope,
+  buildInternalEstimateGroupComparison,
   measureRoomDraft,
   priceVanityRoomDraft,
   resolveRoomUseTaxPercent,
@@ -473,6 +479,120 @@ function approx(a: number, b: number, eps = 0.02) {
   lGroup.guidedPieces = lGroup.guidedShapeGroups[0].pieces;
   const overlapOne = guidedCornerOverlapSqft(25.5, 25.5);
   approx(guidedCornerOverlapDeductionSf(lGroup), overlapOne);
+}
+
+// Pricing authority: tier comparison + live preview use chargeable counter SF (not exact)
+{
+  const len = (sf: number) => round2((sf * 144) / 25.5);
+  const pieces = [
+    { id: "a", pieceType: "counter" as const, name: "A", lengthIn: len(15.4), depthIn: 25.5, shape: "rect" as const },
+    { id: "b", pieceType: "counter" as const, name: "B", lengthIn: len(10.3), depthIn: 25.5, shape: "rect" as const },
+    { id: "c", pieceType: "counter" as const, name: "C", lengthIn: len(10.6), depthIn: 25.5, shape: "rect" as const }
+  ];
+  const room = createDefaultRoom("Group Promo");
+  room.calcMode = "Guided Shape";
+  room.guidedShapeGroups = [{ id: "g1", name: "Runs", shapeType: "manual", overlapMode: "none", pieces }];
+  room.guidedPieces = pieces;
+  const scope = aggregateComparisonScope([room], "New Construction", { materialBasis: "wholesale" });
+  const exact = round2(15.4 + 10.3 + 10.6);
+  approx(scope.exactCounterSqft, exact, 0.02);
+  assert.equal(scope.countertopSqft, 37);
+  const rate = PROTOTYPE_TIER_PRICE_PER_SQFT["Group Promo"];
+  const exactCounter$ = round2(exact * rate);
+  const chargeableCounter$ = round2(37 * rate);
+  assert.notEqual(exactCounter$, chargeableCounter$);
+  const compRow = buildInternalEstimateGroupComparison({
+    countertopSqft: scope.countertopSqft,
+    backsplashSqft: scope.backsplashSqft,
+    roomFixedDollars: scope.addonDollars,
+    customLineDollars: 0,
+    basis: "wholesale"
+  }).find((r) => r.group === "Group Promo");
+  approx(compRow!.materialCounter, chargeableCounter$);
+  const live = runLocalPrototypeQuote({
+    quoteMode: "internal",
+    internalMaterialBasis: "wholesale",
+    materialGroupTop: "Group Promo",
+    roomDrafts: [room],
+    globalAddOns: {},
+    applyGlobalAddOns: false,
+    workflowLabel: "Internal",
+    projectType: "New Construction"
+  });
+  const matrixRow = live.allGroupMatrix.find((r) => r.group === "Group Promo");
+  approx(matrixRow!.counter, chargeableCounter$);
+  approx(live.mathCheck.countertopSf, 37);
+}
+
+// Live total aligns with all-group matrix + custom lines (use tax included when set)
+{
+  const room = createEstimatorRoom("Group Promo");
+  room.name = "Kitchen";
+  room.addons = { "qty-sink": 1, "qty-cook": 1 };
+  const scope = aggregateComparisonScope([room], "New Construction", {
+    materialBasis: "wholesale",
+    projectUseTaxPercent: 2
+  });
+  const comp = buildInternalEstimateGroupComparison({
+    countertopSqft: scope.countertopSqft,
+    backsplashSqft: scope.backsplashSqft,
+    roomFixedDollars: scope.addonDollars,
+    customLineDollars: 0,
+    useTaxPercent: 2,
+    basis: "wholesale"
+  }).find((r) => r.group === "Group Promo");
+  const live = runLocalPrototypeQuote({
+    quoteMode: "internal",
+    internalMaterialBasis: "wholesale",
+    materialGroupTop: "Group Promo",
+    roomDrafts: [room],
+    globalAddOns: {},
+    applyGlobalAddOns: false,
+    workflowLabel: "Internal",
+    projectType: "New Construction",
+    useTaxPercent: 2
+  });
+  const matrixPromo = live.allGroupMatrix.find((r) => r.group === "Group Promo")!;
+  approx(comp!.fullTotal, matrixPromo.wholesale, 0.05);
+  approx(live.retail, matrixPromo.wholesale, 0.05);
+}
+
+// Backsplash double-count warning (does not delete pieces)
+{
+  const room = createDefaultRoom("Group Promo");
+  room.calcMode = "Guided Shape";
+  room.guidedShapeGroups = [
+    {
+      id: "g1",
+      name: "Main",
+      shapeType: "straight",
+      overlapMode: "none",
+      backsplashMode: "include",
+      pieces: [
+        {
+          id: "c",
+          pieceType: "counter",
+          name: "Run",
+          lengthIn: 120,
+          depthIn: 25.5,
+          shape: "rect",
+          addSplash: true
+        },
+        {
+          id: "s",
+          pieceType: "splash",
+          name: "Manual splash",
+          lengthIn: 120,
+          depthIn: 4,
+          shape: "rect"
+        }
+      ]
+    }
+  ];
+  room.guidedPieces = room.guidedShapeGroups[0].pieces;
+  const warns = detectLikelyBacksplashDoubleCount(room);
+  assert.ok(warns.length >= 1);
+  assert.match(warns[0], /double-count|counted twice/i);
 }
 
 console.log("verify-internal-estimate-beta-fixes: OK");

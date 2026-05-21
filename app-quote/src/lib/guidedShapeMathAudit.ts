@@ -226,6 +226,36 @@ export function buildGuidedShapeMathAudit(
   };
 }
 
+/**
+ * Warn when a counter run has "Add 4″ backsplash" and a manual splash piece with similar length in the same group.
+ * Does not remove or change measurements.
+ */
+export function detectLikelyBacksplashDoubleCount(room: RoomDraft): string[] {
+  const warnings: string[] = [];
+  const norm = normalizeGuidedShapeRoom(room);
+  for (const grp of norm.guidedShapeGroups ?? []) {
+    if (grp.backsplashMode === "exclude") continue;
+    const counters = grp.pieces.filter(
+      (p) => p.pieceType === "counter" && p.addSplash && p.lengthIn > 0 && p.depthIn > 0
+    );
+    const splashes = grp.pieces.filter(
+      (p) => p.pieceType === "splash" && p.lengthIn > 0 && p.depthIn > 0
+    );
+    for (const c of counters) {
+      for (const s of splashes) {
+        const lenMatch = Math.abs(s.lengthIn - c.lengthIn) <= 2;
+        const heightStd = Math.abs((s.depthIn || STANDARD_BACKSPLASH_HEIGHT_IN) - STANDARD_BACKSPLASH_HEIGHT_IN) < 1.5;
+        if (lenMatch && heightStd) {
+          warnings.push(
+            `Shape group "${grp.name}": "${c.name}" has Add 4″ backsplash checked and manual splash "${s.name}" with similar length — backsplash SF may be counted twice. Uncheck the box or remove the duplicate splash piece.`
+          );
+        }
+      }
+    }
+  }
+  return warnings;
+}
+
 /** Cedar Valley / Spec 73 style L-shape regression (120″ + 60″ @ 25.5″, one corner). */
 export function cedarValleySpec73StyleFixture(
   createRoom: () => RoomDraft

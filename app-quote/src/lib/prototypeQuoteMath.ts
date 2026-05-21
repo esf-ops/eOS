@@ -580,15 +580,21 @@ export function buildAllGroupMatrix(totals: RoomEngineTotals) {
 }
 
 /** Internal estimate: each tier at wholesale or direct $/sf — no partner markup row. */
-export function buildInternalGroupMatrix(totals: RoomEngineTotals, materialBasis: "wholesale" | "direct") {
+export function buildInternalGroupMatrix(
+  totals: RoomEngineTotals,
+  materialBasis: "wholesale" | "direct",
+  useTaxPercent = 0
+) {
+  const taxPct = Math.max(0, Number(useTaxPercent) || 0);
   return PROTOTYPE_TIERS.map((t) => {
     const rate = materialRateForInternalBasis(t.n, materialBasis);
     const c = totals.priceableCounter * rate;
     const b = totals.priceableSplash * rate;
-    const wholesale = round2(c + b + totals.fixed);
+    const useTax = taxPct > 0 ? round2(c * (taxPct / 100)) : 0;
+    const wholesale = round2(c + b + useTax + totals.fixed);
     return {
       group: t.n,
-      counter: round2(c),
+      counter: round2(c + useTax),
       backsplash: round2(b),
       fixed: totals.fixed,
       wholesale,
@@ -1205,23 +1211,28 @@ export function buildInternalEstimateGroupComparison(params: {
   backsplashSqft: number;
   roomFixedDollars: number;
   customLineDollars: number;
+  /** Project/room use tax % on countertop material at each tier rate (0 = none). */
+  useTaxPercent?: number;
   basis: "wholesale" | "direct";
 }): InternalEstimateGroupComparisonRow[] {
   const ct = Number(params.countertopSqft) || 0;
   const bs = Number(params.backsplashSqft) || 0;
   const roomFix = round2(Number(params.roomFixedDollars) || 0);
   const custom = round2(Number(params.customLineDollars) || 0);
+  const taxPct = Math.max(0, Number(params.useTaxPercent) || 0);
   const fullExtra = round2(roomFix + custom);
   return PROTOTYPE_TIERS.map((t) => {
     const rate = materialRateForInternalBasis(t.n, params.basis);
     const materialCounter = round2(ct * rate);
+    const useTax = taxPct > 0 ? round2(materialCounter * (taxPct / 100)) : 0;
+    const materialCounterPriced = round2(materialCounter + useTax);
     const materialSplashFhb = round2(bs * rate);
-    const materialTotal = round2(materialCounter + materialSplashFhb);
+    const materialTotal = round2(materialCounterPriced + materialSplashFhb);
     const fullTotal = round2(materialTotal + fullExtra);
     return {
       group: t.n,
       ratePerSqft: rate,
-      materialCounter,
+      materialCounter: materialCounterPriced,
       materialSplashFhb,
       materialTotal,
       fullTotal
@@ -1283,19 +1294,83 @@ export function buildMaterialGroupComparison(params: {
   });
 }
 
+/** Single pricing scope for Internal Estimate comparisons, live preview, and tier matrices. */
+export type InternalEstimateScopeTotals = {
+  /** Measured counter SF before Elite whole-foot ceil (audit only). */
+  exactCounterSqft: number;
+  /** Priced countertop SF (chargeable ceil when enabled). */
+  chargeableCounterSqft: number;
+  /** Backsplash + FHB SF at exact dimensions (no ceil). */
+  backsplashFhbSqft: number;
+  roomFixedDollars: number;
+  /** Use tax on countertop material (same basis as live estimate). */
+  useTaxAmount: number;
+};
+
+/**
+ * Internal Estimate pricing authority — chargeable counter, exact splash/FHB, room fixed add-ons, use tax.
+ */
+export function getInternalEstimateScopeTotals(
+  drafts: RoomDraft[],
+  projectType: string,
+  materialBasis: "wholesale" | "direct" = "wholesale",
+  projectUseTaxPercent = 0,
+  measureOptions: InternalMeasureOptions = INTERNAL_ESTIMATE_MEASURE_OPTIONS
+): InternalEstimateScopeTotals & { measuredRooms: MeasuredRoom[] } {
+  const { rooms: measuredRooms, totals } = calculateAllRoomDrafts(
+    drafts,
+    projectType,
+    materialBasis,
+    projectUseTaxPercent,
+    measureOptions
+  );
+  const breakdown = buildSelectedMaterialBreakdown(drafts, materialBasis, {
+    projectUseTaxPercent,
+    chargeableCounterCeil: measureOptions.chargeableCounterCeil
+  });
+  return {
+    exactCounterSqft: round2(totals.counter),
+    chargeableCounterSqft: round2(totals.priceableCounter),
+    backsplashFhbSqft: round2(totals.priceableSplash),
+    roomFixedDollars: round2(totals.fixed),
+    useTaxAmount: round2(breakdown.totals.useTax?.taxAmount ?? 0),
+    measuredRooms
+  };
+}
+
 export function aggregateComparisonScope(
   drafts: RoomDraft[],
-  projectType: string
+  projectType: string,
+  options?: {
+    materialBasis?: "wholesale" | "direct";
+    projectUseTaxPercent?: number;
+    measureOptions?: InternalMeasureOptions;
+  }
 ): {
   countertopSqft: number;
   backsplashSqft: number;
   addonDollars: number;
+  useTaxAmount: number;
+  exactCounterSqft: number;
   mixedGroupNote: string | null;
 } {
   if (!drafts.length) {
-    return { countertopSqft: 0, backsplashSqft: 0, addonDollars: 0, mixedGroupNote: null };
+    return {
+      countertopSqft: 0,
+      backsplashSqft: 0,
+      addonDollars: 0,
+      useTaxAmount: 0,
+      exactCounterSqft: 0,
+      mixedGroupNote: null
+    };
   }
-  const { rooms, totals } = calculateAllRoomDrafts(drafts, projectType);
+  const scope = getInternalEstimateScopeTotals(
+    drafts,
+    projectType,
+    options?.materialBasis ?? "wholesale",
+    options?.projectUseTaxPercent ?? 0,
+    options?.measureOptions ?? INTERNAL_ESTIMATE_MEASURE_OPTIONS
+  );
   const groups = new Set<string>();
   let pieceOverride = false;
   for (const r of drafts) {
@@ -1309,16 +1384,18 @@ export function aggregateComparisonScope(
       }
     }
   }
-  for (const r of rooms) {
+  for (const r of scope.measuredRooms) {
     if (r.type === "Vanity") continue;
     if (r.counter + r.splash + r.fhb <= 0) continue;
     groups.add(r.group);
   }
   const mixed = groups.size > 1 || pieceOverride;
   return {
-    countertopSqft: totals.priceableCounter,
-    backsplashSqft: totals.priceableSplash,
-    addonDollars: round2(totals.fixed),
+    countertopSqft: scope.chargeableCounterSqft,
+    backsplashSqft: scope.backsplashFhbSqft,
+    addonDollars: scope.roomFixedDollars,
+    useTaxAmount: scope.useTaxAmount,
+    exactCounterSqft: scope.exactCounterSqft,
     mixedGroupNote: mixed
       ? "Estimator comparison only — comparison rows price all countertop sf and backsplash + FHB sf at one tier each; your selected estimate uses mixed piece/room groups (aligned with live summary and backend calculate)."
       : null
@@ -1529,7 +1606,9 @@ export function runLocalPrototypeQuote(params: {
   const confidence = reviewNeeded ? "Review needed — confirm measurements" : "High for demo purposes";
 
   const allGroupMatrix =
-    params.quoteMode === "internal" ? buildInternalGroupMatrix(totals, basis) : buildAllGroupMatrix(totals);
+    params.quoteMode === "internal"
+      ? buildInternalGroupMatrix(totals, basis, useTaxPercent)
+      : buildAllGroupMatrix(totals);
 
   return {
     usedFallback: true,
