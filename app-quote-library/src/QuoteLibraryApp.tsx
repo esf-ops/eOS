@@ -434,6 +434,29 @@ export default function QuoteLibraryApp() {
     ];
   }, [metrics]);
 
+  const loadRevisionsForDetail = useCallback(
+    async (quoteId: string) => {
+      if (!sessionToken || !quoteId) {
+        setRevisions([]);
+        return;
+      }
+      try {
+        const rev = (await apiGet(`/api/quote-library/quotes/${quoteId}/revisions`, sessionToken)) as Record<
+          string,
+          unknown
+        >;
+        if (rev.ok === true && Array.isArray(rev.revisions)) {
+          setRevisions(rev.revisions as Record<string, unknown>[]);
+        } else {
+          setRevisions([]);
+        }
+      } catch {
+        setRevisions([]);
+      }
+    },
+    [sessionToken]
+  );
+
   const refreshListAndDetail = useCallback(async () => {
     void loadMetrics();
     void loadRows();
@@ -441,11 +464,12 @@ export default function QuoteLibraryApp() {
       try {
         const d = (await apiGet(`/api/quote-library/quotes/${detailId}`, sessionToken)) as Record<string, unknown>;
         setDetail(d);
+        await loadRevisionsForDetail(detailId);
       } catch {
         /* ignore */
       }
     }
-  }, [detailId, sessionToken, loadMetrics, loadRows]);
+  }, [detailId, sessionToken, loadMetrics, loadRows, loadRevisionsForDetail]);
 
   const runAction = async (label: string, fn: () => Promise<string | void>) => {
     setMsg(null);
@@ -990,29 +1014,109 @@ export default function QuoteLibraryApp() {
                 </dl>
               </div>
 
-              {str(header.quote_source) === "internal_quote" && revisions.length ? (
+              {str(header.quote_source) === "internal_quote" ? (
                 <div className="drawer-section">
                   <h3>Revision history</h3>
-                  <ul className="muted small" style={{ paddingLeft: 18 }}>
-                    {revisions.map((rev) => (
-                      <li key={str(rev.id)} style={{ marginBottom: 8 }}>
-                        <strong>{str(rev.quote_number)}</strong>
-                        {rev.revision_label ? <> · {str(rev.revision_label)}</> : null}
-                        {rev.is_current_revision ? <> · latest</> : null}
-                        {" · "}
-                        {formatMoneyStandard(rev.grand_total)}{" "}
-                        <button
-                          type="button"
-                          className="btn ghost btn-xs"
-                          onClick={() =>
-                            window.open(`${internalBase}/?quoteId=${encodeURIComponent(str(rev.id))}`, "_blank", "noopener,noreferrer")
-                          }
-                        >
-                          Internal Estimate
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
+                  {revisions.length ? (
+                    <table className="print-table" style={{ marginTop: 8 }}>
+                      <thead>
+                        <tr>
+                          <th>Revision</th>
+                          <th>Total</th>
+                          <th>Updated</th>
+                          <th />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {revisions.map((rev) => {
+                          const revId = str(rev.id);
+                          const isLatest = rev.is_current_revision === true;
+                          const isViewing = revId === detailId;
+                          return (
+                            <tr key={revId}>
+                              <td>
+                                <strong>{str(rev.revision_label) || "R?"}</strong>
+                                {isLatest ? (
+                                  <span className="pill pill-live" style={{ marginLeft: 6 }}>
+                                    latest
+                                  </span>
+                                ) : null}
+                                {isViewing ? (
+                                  <span className="muted small" style={{ display: "block" }}>
+                                    viewing
+                                  </span>
+                                ) : null}
+                                <span className="muted small" style={{ display: "block" }}>
+                                  {str(rev.quote_number)}
+                                </span>
+                              </td>
+                              <td>{formatMoneyStandard(rev.grand_total)}</td>
+                              <td>{formatShortDate(rev.updated_at)}</td>
+                              <td style={{ whiteSpace: "nowrap" }}>
+                                {!isViewing ? (
+                                  <button type="button" className="btn ghost btn-xs" onClick={() => setDetailId(revId)}>
+                                    View
+                                  </button>
+                                ) : null}{" "}
+                                <button
+                                  type="button"
+                                  className="btn ghost btn-xs"
+                                  onClick={() =>
+                                    window.open(
+                                      `${internalBase}/?quoteId=${encodeURIComponent(revId)}`,
+                                      "_blank",
+                                      "noopener,noreferrer"
+                                    )
+                                  }
+                                >
+                                  Open IE
+                                </button>
+                                {!isLatest ? (
+                                  <>
+                                    {" "}
+                                    <button
+                                      type="button"
+                                      className="btn ghost btn-xs"
+                                      onClick={() => {
+                                        if (
+                                          !window.confirm(
+                                            `Restore ${str(rev.revision_label) || "this revision"} as a new latest revision? Prior revisions stay in history.`
+                                          )
+                                        ) {
+                                          return;
+                                        }
+                                        void runAction("Restore revision", async () => {
+                                          const res = (await apiPost(
+                                            `/api/quote-library/quotes/${revId}/restore-as-revision`,
+                                            sessionToken!,
+                                            {}
+                                          )) as Record<string, unknown>;
+                                          const newId = str(res.quoteId ?? res.quote_id);
+                                          const qn = str(res.quote_number);
+                                          if (newId) setDetailId(newId);
+                                          return qn
+                                            ? `New latest revision ${qn} created from ${str(rev.revision_label) || "snapshot"}.`
+                                            : "New latest revision created.";
+                                        });
+                                      }}
+                                    >
+                                      Restore
+                                    </button>
+                                  </>
+                                ) : null}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <p className="muted small">No revision rows found for this quote family.</p>
+                  )}
+                  <p className="muted small" style={{ marginTop: 8 }}>
+                    Use <strong>Save revision</strong> in Internal Estimate to freeze the current snapshot and start a new revision (R2, R3…).
+                    <strong> Update quote</strong> edits the latest revision in place.
+                  </p>
                 </div>
               ) : null}
 
@@ -1092,8 +1196,19 @@ export default function QuoteLibraryApp() {
                   >
                     Duplicate quote
                   </button>
-                  <a className="btn secondary" href={`${internalBase}?quoteId=${encodeURIComponent(detailId)}`} target="_blank" rel="noreferrer">
-                    Open in Internal Estimate
+                  <a
+                    className="btn secondary"
+                    href={`${internalBase}?quoteId=${encodeURIComponent(
+                      str(
+                        revisions.find((r) => r.is_current_revision === true)?.id ||
+                          header.id ||
+                          detailId
+                      )
+                    )}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open latest in Internal Estimate
                   </a>
                   {mondayUrl ? (
                     <a className="btn secondary" href={mondayUrl} target="_blank" rel="noreferrer">
@@ -1102,8 +1217,8 @@ export default function QuoteLibraryApp() {
                   ) : null}
                 </div>
                 <p className="muted" style={{ marginTop: 12, fontSize: "0.8125rem" }}>
-                  Open in Internal Estimate loads customer, workflow, rooms, custom lines, and checklist fields when stored on the quote
-                  snapshot. Save from Internal Estimate still creates a new quote row today unless a revision endpoint is used.
+                  Open in Internal Estimate loads the full saved snapshot for the selected revision. Use <strong>Save revision</strong> to
+                  add R2/R3 without losing prior snapshots; <strong>Restore</strong> copies an older revision forward as a new latest revision.
                 </p>
                 <div className="workflow-hint">
                   <strong>After Mark sold:</strong> use <em>Generate Moraware Entry Doc</em> and <em>Generate QuickBooks Entry Doc</em> below.

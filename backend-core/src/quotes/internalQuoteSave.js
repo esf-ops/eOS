@@ -82,6 +82,30 @@ async function fetchScopedInternalQuote(db, id, orgId, hasQuoteHeadersOrg) {
 }
 
 /**
+ * Backfill revision family columns on legacy rows (no-op when already set).
+ * @param {import("@supabase/supabase-js").SupabaseClient} db
+ * @param {Record<string, unknown>} row
+ */
+async function ensureRevisionFamilyMetadata(db, row, orgId, hasQuoteHeadersOrg) {
+  const root = row.quote_family_root_id || row.id;
+  const base = esf.deriveQuoteNumberBaseFromRow(row);
+  /** @type {Record<string, unknown>} */
+  const patches = {};
+  if (!row.quote_family_root_id) patches.quote_family_root_id = root;
+  if (base && !row.quote_number_base) patches.quote_number_base = base;
+  if (!row.revision_number || Number(row.revision_number) < 1) patches.revision_number = 1;
+  if (!row.revision_label) patches.revision_label = esf.revisionLabelFromNumber(Number(patches.revision_number || row.revision_number) || 1);
+  if (row.is_current_revision == null) patches.is_current_revision = true;
+  if (!Object.keys(patches).length) return row;
+  patches.updated_at = new Date().toISOString();
+  let ub = db.from("quote_headers").update(patches).eq("id", row.id).eq("quote_source", "internal_quote");
+  ub = applyQuoteHeaderOrgScope(ub, orgId, hasQuoteHeadersOrg);
+  const { error } = await ub;
+  if (error) throw error;
+  return { ...row, ...patches };
+}
+
+/**
  * @param {import("@supabase/supabase-js").SupabaseClient} db
  * @param {string} rootId
  * @param {string|null} orgId
@@ -252,7 +276,7 @@ export async function processInternalQuoteSave(params) {
     if (!existingId) {
       return { ok: false, httpStatus: 400, error: "quote_id is required for update_existing" };
     }
-    const row = await fetchScopedInternalQuote(db, existingId, orgId, hasQuoteHeadersOrg);
+    let row = await fetchScopedInternalQuote(db, existingId, orgId, hasQuoteHeadersOrg);
     if (!row) return { ok: false, httpStatus: 404, error: "Not found" };
     if (row.archived_at) return { ok: false, httpStatus: 400, error: "Quote is archived — restore before editing." };
     if (row.is_current_revision === false) {
@@ -262,6 +286,7 @@ export async function processInternalQuoteSave(params) {
         error: "This is a historical revision. Open the latest revision or save a new revision."
       };
     }
+    row = await ensureRevisionFamilyMetadata(db, row, orgId, hasQuoteHeadersOrg);
 
     const fin = buildInternalFinancialHeader(persistBody, calc);
     const updates = {
@@ -376,12 +401,13 @@ export async function processInternalQuoteSave(params) {
   /** --- save_revision --- */
   async function runSaveRevision() {
     if (!existingId) return { ok: false, httpStatus: 400, error: "quote_id is required for save_revision" };
-    const row = await fetchScopedInternalQuote(db, existingId, orgId, hasQuoteHeadersOrg);
+    let row = await fetchScopedInternalQuote(db, existingId, orgId, hasQuoteHeadersOrg);
     if (!row) return { ok: false, httpStatus: 404, error: "Not found" };
     if (row.archived_at) return { ok: false, httpStatus: 400, error: "Quote is archived." };
     if (row.is_current_revision === false) {
       return { ok: false, httpStatus: 400, error: "Open the latest revision before saving a new revision." };
     }
+    row = await ensureRevisionFamilyMetadata(db, row, orgId, hasQuoteHeadersOrg);
 
     const root = String(row.quote_family_root_id || row.id);
     const base = esf.deriveQuoteNumberBaseFromRow(row);

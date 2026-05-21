@@ -14,6 +14,11 @@ import {
 } from "../organizations/organizationContext.js";
 import * as esf from "./quoteEsfNumber.js";
 import { isMissingRelationError, generateQuoteNumber } from "./quotePersist.js";
+import {
+  buildInternalEstimateSummaryForMonday,
+  resolveEstimatorDisplayNameFromDb
+} from "../integrations/mondayQuoteSync.js";
+import { restoreInternalQuoteAsNewRevision } from "./internalQuoteRestore.js";
 import { buildMorawareEntryDocPayload, buildQuickBooksEntryDocPayload } from "./quoteLibraryHandoffPayloads.js";
 
 const jsonParser = express.json({ limit: "2mb" });
@@ -37,6 +42,15 @@ function isUuid(value) {
 
 function pickStr(v) {
   return v != null ? String(v).trim() : "";
+}
+
+function pricingModeLabel(body) {
+  const m = String(body.internalMaterialBasis || body.internal_material_basis || "wholesale").toLowerCase();
+  return m === "direct" ? "Direct" : "Wholesale";
+}
+
+function buildInternalEstimateSummary(calc, body, snapshotToStore) {
+  return buildInternalEstimateSummaryForMonday({ calc, body, snapshot: snapshotToStore });
 }
 
 function deriveAccountName(row) {
@@ -124,8 +138,14 @@ function mapListRow(r, handoffDocsByQuote) {
   const morDoc = docs.find((d) => d.doc_type === "moraware_entry");
   const qbDoc = docs.find((d) => d.doc_type === "quickbooks_entry");
   const revLab = pickStr(r.revision_label);
+  const base = pickStr(r.quote_number_base);
   const qn = pickStr(r.quote_number);
-  const revSummary = revLab && qn ? `${qn} · ${revLab}` : qn || revLab;
+  const revSummary =
+    base && revLab
+      ? `${base} · ${revLab}${r.is_current_revision ? " · latest" : ""}`
+      : revLab && qn
+        ? `${qn} · ${revLab}`
+        : qn || revLab;
   return {
     id: r.id,
     quote_number: r.quote_number,
@@ -778,7 +798,11 @@ export function attachQuoteLibraryRoutes(app, deps) {
       if (!isUuid(id)) return res.status(400).json({ ok: false, error: "Invalid id" });
       const db = getSupabase();
       const { orgId, hasQuoteHeadersOrg } = await loadOrgScope(db, req);
-      let qb0 = db.from("quote_headers").select("id,quote_source,quote_family_root_id").eq("id", id).limit(1);
+      let qb0 = db
+        .from("quote_headers")
+        .select("id,quote_source,quote_family_root_id,quote_number_base")
+        .eq("id", id)
+        .limit(1);
       qb0 = applyQuoteHeaderOrgScope(qb0, orgId, hasQuoteHeadersOrg);
       const { data: seedRows, error: seedErr } = await qb0;
       if (seedErr) throw seedErr;
@@ -811,6 +835,7 @@ export function attachQuoteLibraryRoutes(app, deps) {
       res.json({
         ok: true,
         quote_family_root_id: root,
+        quote_number_base: seed.quote_number_base ?? null,
         revisions: (data || []).map((r) => ({
           id: r.id,
           quote_number: r.quote_number,
@@ -824,6 +849,68 @@ export function attachQuoteLibraryRoutes(app, deps) {
         }))
       });
     } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  app.post("/api/quote-library/quotes/:id/restore-as-revision", ...stack, jsonParser, async (req, res) => {
+    try {
+      const restoreFromId = pickStr(req.params.id);
+      if (!isUuid(restoreFromId)) return res.status(400).json({ ok: false, error: "Invalid id" });
+      const db = getSupabase();
+      const organizationContext = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
+      const userEmail = String(req.user?.email || req.user?.id || "unknown");
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const revisionNote = body.revision_note ?? body.revisionNote ?? null;
+      const estimatorDisplayName = await resolveEstimatorDisplayNameFromDb(db, req, body);
+      const result = await restoreInternalQuoteAsNewRevision({
+        db,
+        restoreFromId,
+        organizationContext,
+        userEmail,
+        revisionNote,
+        internalStatuses: INTERNAL_STATUSES,
+        buildInternalEstimateSummary,
+        pricingModeLabel,
+        estimatorDisplayName
+      });
+      if (!result.ok) {
+        return res.status(result.httpStatus || 400).json({ ok: false, error: result.error });
+      }
+      await logAction({
+        user: req.user,
+        head: "quote_library",
+        actionType: "quote_revision_restored",
+        entityType: "quote_header",
+        entityId: result.quoteId,
+        entityLabel: result.quote_number,
+        metadata: {
+          restored_from_quote_id: restoreFromId,
+          revision_number: result.revision_number,
+          revision_label: result.revision_label
+        },
+        req
+      });
+      res.json({
+        ok: true,
+        quoteId: result.quoteId,
+        quote_id: result.quoteId,
+        quote_number: result.quote_number,
+        revision_number: result.revision_number,
+        revision_label: result.revision_label,
+        quote_family_root_id: result.quote_family_root_id,
+        is_current_revision: result.is_current_revision,
+        save_mode: result.save_mode,
+        monday_sync_status: result.monday_sync_status ?? null
+      });
+    } catch (e) {
+      if (isMissingRelationError(e)) {
+        return res.status(503).json({
+          ok: false,
+          installed: false,
+          message: "Quote platform tables not installed. Apply backend-core/supabase migrations."
+        });
+      }
       res.status(500).json({ ok: false, error: String(e?.message || e) });
     }
   });

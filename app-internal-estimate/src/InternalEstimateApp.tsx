@@ -701,11 +701,15 @@ export default function InternalEstimateApp() {
     return "Save quote";
   }, [urlQuoteId, saveIntent]);
 
-  const handleSubmit = useCallback(async () => {
+  const handleSubmit = useCallback(async (forcedIntent?: InternalSaveIntent) => {
     setSubmitBusy(true);
     setSubmitMsg(null);
     setSubmitDiagnostic(null);
-    const payload = buildSubmitPayload();
+    const intent = forcedIntent ?? saveIntent;
+    const payload = {
+      ...buildSubmitPayload(),
+      ...(urlQuoteId ? { save_mode: intent } : {})
+    };
 
     try {
       if (!sessionToken) {
@@ -716,7 +720,7 @@ export default function InternalEstimateApp() {
       if (
         urlQuoteId &&
         hydratedIsCurrentRevision === false &&
-        (saveIntent === "update_existing" || saveIntent === "save_revision")
+        (intent === "update_existing" || intent === "save_revision")
       ) {
         setSubmitMsg(
           "This is a historical revision (read-only for update/revision). Open the latest revision from Quote Library, or use Save as new quote."
@@ -747,13 +751,15 @@ export default function InternalEstimateApp() {
               : true;
         setLastSavedQuoteNumber(qn || null);
         setLastSavedQuoteId(qid && qid !== "undefined" ? qid : null);
+        if (sm === "save_revision" || sm === "save_as_new_quote" || sm === "create") {
+          setSaveIntent("update_existing");
+        }
         if (qid && sm && sm !== "update_existing") {
           hydrationRanRef.current = false;
           setUrlQuoteId(qid);
           const u = new URL(window.location.href);
           u.searchParams.set("quoteId", qid);
           window.history.replaceState({}, "", `${u.pathname}?${u.searchParams.toString()}${u.hash}`);
-          setSaveIntent("update_existing");
           setHydratedIsCurrentRevision(true);
           setLoadedFromLibrary(true);
         } else if (sm === "update_existing") {
@@ -2022,9 +2028,30 @@ export default function InternalEstimateApp() {
             <button type="button" className="btn primary big" disabled={calcBusy} onClick={() => void handleCalculate()}>
               {calcBusy ? "Calculating…" : "Calculate"}
             </button>
-            <button type="button" className="btn secondary big" disabled={submitBusy} onClick={() => void handleSubmit()}>
-              {submitBusy ? "Working…" : savePrimaryLabel}
-            </button>
+            {urlQuoteId ? (
+              <>
+                <button
+                  type="button"
+                  className="btn secondary big"
+                  disabled={submitBusy || hydratedIsCurrentRevision === false}
+                  onClick={() => void handleSubmit("update_existing")}
+                >
+                  {submitBusy && saveIntent === "update_existing" ? "Working…" : "Update quote"}
+                </button>
+                <button
+                  type="button"
+                  className="btn primary big"
+                  disabled={submitBusy || hydratedIsCurrentRevision === false}
+                  onClick={() => void handleSubmit("save_revision")}
+                >
+                  {submitBusy && saveIntent === "save_revision" ? "Working…" : "Save revision"}
+                </button>
+              </>
+            ) : (
+              <button type="button" className="btn primary big" disabled={submitBusy} onClick={() => void handleSubmit()}>
+                {submitBusy ? "Working…" : "Save quote"}
+              </button>
+            )}
           </div>
           {!sessionToken ? (
             <p className="muted small" style={{ marginTop: 0 }}>
@@ -2557,9 +2584,30 @@ export default function InternalEstimateApp() {
           <button type="button" className="btn secondary btn-sm" onClick={printCustomerEstimate} title="Print customer estimate PDF">
             Print estimate
           </button>
-          <button type="button" className="btn secondary btn-sm" disabled={submitBusy} onClick={() => void handleSubmit()}>
-            {submitBusy ? "Saving…" : savePrimaryLabel}
-          </button>
+          {urlQuoteId ? (
+            <>
+              <button
+                type="button"
+                className="btn secondary btn-sm"
+                disabled={submitBusy || hydratedIsCurrentRevision === false}
+                onClick={() => void handleSubmit("update_existing")}
+              >
+                Update
+              </button>
+              <button
+                type="button"
+                className="btn primary btn-sm"
+                disabled={submitBusy || hydratedIsCurrentRevision === false}
+                onClick={() => void handleSubmit("save_revision")}
+              >
+                Save revision
+              </button>
+            </>
+          ) : (
+            <button type="button" className="btn primary btn-sm" disabled={submitBusy} onClick={() => void handleSubmit()}>
+              {submitBusy ? "Saving…" : "Save quote"}
+            </button>
+          )}
         </div>
       </nav>
 
