@@ -1,7 +1,7 @@
 import React from "react";
 import { EOS_LOGO_URL } from "@quote-lib/config";
 import { round2 } from "@quote-lib/measurementEngine";
-import { roundCustomerDisplayVanity } from "@quote-lib/prototypeQuoteMath";
+import { roundCustomerDisplayAddonLine, roundCustomerDisplayVanity } from "@quote-lib/prototypeQuoteMath";
 import type {
   CustomerRoomAreaCostBreakdown,
   InternalEstimateGroupComparisonRow,
@@ -10,6 +10,7 @@ import type {
 } from "@quote-lib/prototypeQuoteMath";
 import type { MeasuredRoom } from "@quote-lib/quoteTypes";
 
+/** Project-level customer totals — round up to nearest $10 (unchanged). Vanity uses nearest $5; add-on lines use ceil-to-$5. */
 export function roundCustomerDisplay(amount: number): number {
   const n = Number(amount);
   if (!Number.isFinite(n) || n <= 0) return 0;
@@ -330,13 +331,8 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
                 const addonExact = row.addons.reduce((s, a) => s + a.amountExact, 0);
                 const customExact = row.customerCustomLines.reduce((s, c) => s + c.amountExact, 0);
                 const materialExact = round2(row.materialAmountExact + customExact);
-                const addonDisplay =
-                  addonExact > 0
-                    ? allocateCustomerDisplayTens(
-                        row.addons.map((a) => a.amountExact),
-                        roundCustomerDisplay(addonExact)
-                      )
-                    : [];
+                const addonDisplay = row.addons.map((a) => roundCustomerDisplayAddonLine(a.amountExact));
+                const addonDisplaySum = addonDisplay.reduce((s, v) => s + v, 0);
                 return (
                   <React.Fragment key={row.roomId}>
                     <tr className="cep-room-breakdown-main-row">
@@ -360,7 +356,9 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
                       </td>
                       <td className="cep-num">{formatSf(row.totalSqft)}</td>
                       <td className="cep-num cep-amt">{formatMoney(materialExact)}</td>
-                      <td className="cep-num cep-amt">{addonExact > 0 ? formatMoney(addonExact) : "—"}</td>
+                      <td className="cep-num cep-amt">
+                        {addonExact > 0 ? `$${addonDisplaySum.toLocaleString()}` : "—"}
+                      </td>
                       <td className="cep-num cep-amt">
                         <strong>{`$${(roomBreakdownDisplays[idx] ?? 0).toLocaleString()}`}</strong>
                       </td>

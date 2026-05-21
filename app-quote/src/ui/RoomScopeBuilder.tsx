@@ -20,8 +20,10 @@ import {
   VANITY_PRICING
 } from "../lib/prototypeQuoteMath";
 import { VANITY_PROGRAM_2026_RATES, VANITY_PROGRAM_YEAR } from "../lib/vanityProgram2026";
+import { buildGuidedShapeMathAudit } from "../lib/guidedShapeMathAudit";
 import {
   depthPatchForGuidedPieceTypeChange,
+  guidedCornerOverlapDeductionSf,
   qualifyingSfFromRoomDrafts,
   sfFromGuidedPiece,
   STANDARD_BACKSPLASH_HEIGHT_IN,
@@ -40,6 +42,8 @@ type Props = {
   projectUseTaxPercent?: number;
   /** Show per-room use tax controls (Internal Estimate). */
   showRoomUseTax?: boolean;
+  /** Internal Estimate: confirm destructive actions and show undo snackbar. */
+  enableDestructiveGuards?: boolean;
 };
 
 function updateRoom(rooms: RoomDraft[], id: string, patch: Partial<RoomDraft>): RoomDraft[] {
@@ -125,13 +129,48 @@ export default function RoomScopeBuilder({
   eliteProgramColors,
   hideRapidLinear = false,
   projectUseTaxPercent = 0,
-  showRoomUseTax = false
+  showRoomUseTax = false,
+  enableDestructiveGuards = false
 }: Props) {
   const [colorQ, setColorQ] = React.useState<Record<string, string>>({});
   const [groupFilter, setGroupFilter] = React.useState<Record<string, string>>({});
   const [pieceOverridesOpen, setPieceOverridesOpen] = React.useState<Record<string, boolean>>({});
+  const [undoSnapshot, setUndoSnapshot] = React.useState<{ rooms: RoomDraft[]; message: string } | null>(null);
+
+  React.useEffect(() => {
+    if (!undoSnapshot) return;
+    const t = window.setTimeout(() => setUndoSnapshot(null), 12_000);
+    return () => window.clearTimeout(t);
+  }, [undoSnapshot]);
+
+  const cloneRooms = (list: RoomDraft[]): RoomDraft[] =>
+    list.map((r) => ({
+      ...r,
+      addons: { ...r.addons },
+      direct: { ...r.direct },
+      linear: { ...r.linear },
+      vanity: { ...r.vanity },
+      guidedPieces: r.guidedPieces.map((p) => ({ ...p })),
+      fhbPieces: r.fhbPieces.map((p) => ({ ...p }))
+    }));
+
   const addRoom = () => onRoomsChange([...rooms, createEstimatorRoom(rooms[0]?.materialGroup || "Group Promo")]);
-  const removeRoom = (id: string) => onRoomsChange(rooms.filter((r) => r.id !== id));
+
+  const removeRoom = (id: string) => {
+    if (enableDestructiveGuards) {
+      const room = rooms.find((r) => r.id === id);
+      const label = room?.name?.trim() || "this room";
+      if (
+        !window.confirm(
+          `Remove ${label}?\n\nThis removes the room and all pieces from the estimate. This can change the estimate total.`
+        )
+      ) {
+        return;
+      }
+      setUndoSnapshot({ rooms: cloneRooms(rooms), message: "Room removed" });
+    }
+    onRoomsChange(rooms.filter((r) => r.id !== id));
+  };
 
   const setPiece = (roomId: string, pieceId: string, patch: Partial<GuidedPiece>, list: "guided" | "fhb") => {
     const next = rooms.map((r) => {
@@ -164,6 +203,13 @@ export default function RoomScopeBuilder({
   };
 
   const removePiece = (roomId: string, pieceId: string, list: "guided" | "fhb") => {
+    if (enableDestructiveGuards) {
+      const room = rooms.find((r) => r.id === roomId);
+      const piece = (list === "guided" ? room?.guidedPieces : room?.fhbPieces)?.find((p) => p.id === pieceId);
+      const label = piece?.name?.trim() || "this piece";
+      if (!window.confirm(`Remove ${label}?\n\nThis can change the estimate total.`)) return;
+      setUndoSnapshot({ rooms: cloneRooms(rooms), message: "Piece removed" });
+    }
     onRoomsChange(
       rooms.map((r) => {
         if (r.id !== roomId) return r;
@@ -176,6 +222,20 @@ export default function RoomScopeBuilder({
   type RoomLayoutPreset = "Rectangle" | "L-Shape" | "U-Shape" | "Galley" | "Island" | "Backsplash" | "Waterfall";
 
   const applyPreset = (roomId: string, preset: RoomLayoutPreset) => {
+    if (enableDestructiveGuards) {
+      const room = rooms.find((r) => r.id === roomId);
+      const hasData = Boolean(
+        room?.guidedPieces.some((p) => p.lengthIn > 0 || p.depthIn > 0 || String(p.name || "").trim())
+      );
+      if (
+        hasData &&
+        !window.confirm(
+          `Replace current guided pieces with the ${preset} preset?\n\nExisting piece lengths will be cleared. This can change the estimate total.`
+        )
+      ) {
+        return;
+      }
+    }
     const depth = 25.5;
     let pieces: GuidedPiece[] = [];
     if (preset === "Rectangle") {
@@ -229,8 +289,22 @@ export default function RoomScopeBuilder({
     );
   };
 
+  const restoreUndo = () => {
+    if (!undoSnapshot) return;
+    onRoomsChange(undoSnapshot.rooms);
+    setUndoSnapshot(null);
+  };
+
   return (
     <div className="room-builder">
+      {enableDestructiveGuards && undoSnapshot ? (
+        <div className="ie-undo-toast" role="status">
+          <span>{undoSnapshot.message}. </span>
+          <button type="button" className="btn secondary btn-sm" onClick={restoreUndo}>
+            Undo
+          </button>
+        </div>
+      ) : null}
       <div className="room-builder-toolbar">
         <button type="button" className="btn secondary" onClick={addRoom}>
           + Add room
@@ -247,8 +321,8 @@ export default function RoomScopeBuilder({
             <div className="room-card-head">
               <h3 className="room-card-title">Room / Area</h3>
               {rooms.length > 1 ? (
-                <button type="button" className="btn secondary" onClick={() => removeRoom(room.id)}>
-                  Remove
+                <button type="button" className="btn secondary btn-danger-quiet" onClick={() => removeRoom(room.id)}>
+                  Remove room
                 </button>
               ) : null}
             </div>
@@ -759,17 +833,83 @@ export default function RoomScopeBuilder({
                             ) : null}
                           </>
                         ) : null}
-                        <div style={{ display: "flex", alignItems: "flex-end" }}>
-                          <button type="button" className="btn secondary" onClick={() => removePiece(room.id, p.id, "guided")}>
+                        <div className="piece-row-remove">
+                          <button
+                            type="button"
+                            className="btn secondary btn-danger-quiet"
+                            onClick={() => removePiece(room.id, p.id, "guided")}
+                          >
                             Remove piece
                           </button>
                         </div>
                       </div>
                     ))}
-                    <button type="button" className="btn secondary" style={{ marginTop: 8 }} onClick={() => addPiece(room.id, "guided")}>
-                      + Counter / splash piece
-                    </button>
+                    <div className="piece-add-row">
+                      <button type="button" className="btn secondary" onClick={() => addPiece(room.id, "guided")}>
+                        + Add counter / splash piece
+                      </button>
+                    </div>
                     {renderMiniVisual(room)}
+                    {enableDestructiveGuards ? (() => {
+                      const audit = buildGuidedShapeMathAudit(room);
+                      if (!audit) return null;
+                      const overlap = guidedCornerOverlapDeductionSf(room);
+                      return (
+                        <details className="ie-guided-math-audit">
+                          <summary>Shape math breakdown (internal)</summary>
+                          <p className="muted small">
+                            Priced totals use these numbers. Layout preset: <strong>{audit.layoutPreset}</strong>
+                            {overlap > 0 ? (
+                              <>
+                                {" "}
+                                · Corner overlap deducted: <strong>{overlap.toFixed(2)} sf</strong>
+                              </>
+                            ) : null}
+                          </p>
+                          <table className="ie-math-audit-table">
+                            <thead>
+                              <tr>
+                                <th>Piece</th>
+                                <th>Type</th>
+                                <th>Dimensions</th>
+                                <th className="num">Raw SF</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {audit.pieceRows.map((row) => (
+                                <tr key={row.pieceId}>
+                                  <td>{row.name}</td>
+                                  <td>{row.pieceType}</td>
+                                  <td>
+                                    {row.lengthIn}&quot; × {row.depthIn}&quot; ({row.shape})
+                                  </td>
+                                  <td className="num">
+                                    {row.rawSf.toFixed(2)}
+                                    {row.addSplashSf > 0 ? ` + ${row.addSplashSf.toFixed(2)} splash` : ""}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                          <ul className="ie-math-audit-lines muted small">
+                            {audit.detailLines.map((line, i) => (
+                              <li key={i}>{line}</li>
+                            ))}
+                          </ul>
+                          <p className="muted small ie-math-audit-totals">
+                            <strong>Counter SF (priced):</strong> {audit.finalCounterSf.toFixed(2)} ·{" "}
+                            <strong>Backsplash + FHB SF:</strong> {audit.finalBacksplashFhbSf.toFixed(2)}
+                            {audit.sumCounterRaw > audit.finalCounterSf ? (
+                              <>
+                                {" "}
+                                (raw counter sum {audit.sumCounterRaw.toFixed(2)} − overlap{" "}
+                                {audit.cornerOverlapDeductionSf.toFixed(2)})
+                              </>
+                            ) : null}
+                          </p>
+                        </details>
+                      );
+                    })() : null}
                   </div>
                 ) : null}
 
@@ -935,41 +1075,61 @@ export default function RoomScopeBuilder({
                             onChange={(e) => setPiece(room.id, p.id, { depthIn: Number(e.target.value) || 0 }, "fhb")}
                           />
                         </label>
-                        <div style={{ display: "flex", alignItems: "flex-end" }}>
-                          <button type="button" className="btn secondary" onClick={() => removePiece(room.id, p.id, "fhb")}>
-                            Remove
+                        <div className="piece-row-remove">
+                          <button
+                            type="button"
+                            className="btn secondary btn-danger-quiet"
+                            onClick={() => removePiece(room.id, p.id, "fhb")}
+                          >
+                            Remove FHB piece
                           </button>
                         </div>
                       </div>
                     ))}
-                    <button type="button" className="btn secondary" onClick={() => addPiece(room.id, "fhb")}>
-                      + FHB piece
-                    </button>
+                    <div className="piece-add-row">
+                      <button type="button" className="btn secondary" onClick={() => addPiece(room.id, "fhb")}>
+                        + Add FHB piece
+                      </button>
+                    </div>
                   </div>
                 ) : null}
 
                 <h4 className="h3">Room add-ons</h4>
-                <div className="grid3">
-                  {ADDON_CATALOG.map((a) => (
-                    <label key={a.id}>
-                      {a.label}
-                      <span className="muted small"> (${a.price})</span>
-                      <input
-                        type="number"
-                        min={0}
-                        value={room.addons[a.id] ?? ""}
-                        onChange={(e) => {
-                          const v = Math.max(0, Math.floor(Number(e.target.value) || 0));
-                          onRoomsChange(
-                            rooms.map((r) => {
-                              if (r.id !== room.id) return r;
-                              return { ...r, addons: { ...r.addons, [a.id]: v } };
-                            })
-                          );
-                        }}
-                      />
-                    </label>
-                  ))}
+                <p className="muted small">Enter quantity for each cutout or fixture. Default is 0 — use 1 when the item applies.</p>
+                <div className="grid3 room-addon-grid">
+                  {ADDON_CATALOG.map((a) => {
+                    const isSink = a.id === "qty-sink" || a.id === "qty-bar";
+                    const qty = room.addons[a.id] ?? 0;
+                    return (
+                      <label key={a.id} className={isSink ? "room-addon-row room-addon-row--sink" : "room-addon-row"}>
+                        <span className="room-addon-label">
+                          {a.label}
+                          <span className="muted small"> (${a.price} ea)</span>
+                        </span>
+                        <span className="room-addon-qty-wrap">
+                          <span className="room-addon-qty-label">Qty</span>
+                          <input
+                            type="number"
+                            min={0}
+                            step={1}
+                            aria-label={`${a.label} quantity`}
+                            placeholder="0"
+                            className="room-addon-qty-input"
+                            value={qty > 0 ? qty : ""}
+                            onChange={(e) => {
+                              const v = Math.max(0, Math.floor(Number(e.target.value) || 0));
+                              onRoomsChange(
+                                rooms.map((r) => {
+                                  if (r.id !== room.id) return r;
+                                  return { ...r, addons: { ...r.addons, [a.id]: v } };
+                                })
+                              );
+                            }}
+                          />
+                        </span>
+                      </label>
+                    );
+                  })}
                 </div>
                 <label className="check">
                   <input

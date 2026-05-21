@@ -61,11 +61,24 @@ const RATE_BY_CODE = new Map(VANITY_PROGRAM_2026_RATES.map((r) => [r.code, r]));
 
 export const VANITY_TIER_THRESHOLD_SQFT = 35;
 
-/** Customer-facing vanity program $ — nearest $5 (internal exact math unchanged). */
+/**
+ * Customer-facing vanity program $ — nearest $5 (internal exact math unchanged).
+ * Project estimate totals elsewhere still round up to the nearest $10; do not use this for whole-project totals.
+ */
 export function roundCustomerDisplayVanity(amount: number): number {
   const n = Number(amount);
   if (!Number.isFinite(n) || n <= 0) return 0;
   return Math.round(n / 5) * 5;
+}
+
+/**
+ * Customer-facing add-on / small program line display — round up to nearest $5 (e.g. $252 → $255).
+ * Isolated from project-total $10 rounding in CustomerEstimatePrint.
+ */
+export function roundCustomerDisplayAddonLine(amount: number): number {
+  const n = Number(amount);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.ceil(n / 5) * 5;
 }
 
 export function vanityProgramRateRow(code: string): VanityProgram2026RateRow | undefined {

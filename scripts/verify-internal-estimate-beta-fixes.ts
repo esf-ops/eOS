@@ -14,8 +14,10 @@ import {
   PROTOTYPE_TIER_PRICE_PER_SQFT
 } from "../backend-core/src/quotes/quoteCalculator.js";
 import { guidedCornerOverlapDeductionSf, guidedCornerOverlapSqft, round2 } from "../app-quote/src/lib/measurementEngine.ts";
+import { buildGuidedShapeMathAudit, cedarValleySpec73StyleFixture } from "../app-quote/src/lib/guidedShapeMathAudit.ts";
 import {
   priceVanityProgram2026,
+  roundCustomerDisplayAddonLine,
   roundCustomerDisplayVanity
 } from "../app-quote/src/lib/vanityProgram2026.ts";
 import {
@@ -288,12 +290,35 @@ function approx(a: number, b: number, eps = 0.02) {
   approx(priceVanityProgram2026({ sizeCode: "25_S", tier: "kitchen_over_35", extraTrips: 1 })?.exactTotal ?? 0, 340);
   assert.equal(roundCustomerDisplayVanity(192), 190);
   assert.equal(roundCustomerDisplayVanity(193), 195);
+  assert.equal(roundCustomerDisplayAddonLine(252), 255);
+  assert.equal(roundCustomerDisplayAddonLine(0), 0);
   const vRoom = createVanityRoom("Group Promo");
   vRoom.vanity.size = "61_D";
   vRoom.vanity.vanityTier = "kitchen_over_35";
   const priced = priceVanityRoomDraft(vRoom, 40);
   approx(priced?.exactTotal ?? 0, 410);
   assert.equal(priced?.displayTotal, 410);
+}
+
+// Guided shape math audit (internal breakdown)
+{
+  const lRoom = createDefaultRoom("Group Promo");
+  lRoom.calcMode = "Guided Shape";
+  lRoom.guidedLayoutPreset = "L-Shape";
+  lRoom.guidedPieces = [
+    { id: "a", pieceType: "counter", name: "Main", lengthIn: 120, depthIn: 25.5, shape: "rect" },
+    { id: "b", pieceType: "counter", name: "Return", lengthIn: 60, depthIn: 25.5, shape: "rect" }
+  ];
+  const audit = buildGuidedShapeMathAudit(lRoom);
+  assert.ok(audit);
+  assert.ok(audit!.finalCounterSf > 0);
+  assert.ok(audit!.cornerOverlapDeductionSf > 0);
+  assert.ok(audit!.detailLines.some((ln) => /overlap/i.test(ln)));
+  const cv = cedarValleySpec73StyleFixture(createDefaultRoom);
+  const overlapOne = guidedCornerOverlapSqft(25.5, 25.5);
+  const rawL = (120 * 25.5) / 144 + (60 * 25.5) / 144;
+  approx(cv.counterSf, rawL - overlapOne);
+  approx(cv.backsplashSf, (120 * 4) / 144);
 }
 
 console.log("verify-internal-estimate-beta-fixes: OK");

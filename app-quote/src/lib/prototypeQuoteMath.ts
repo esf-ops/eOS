@@ -36,6 +36,7 @@ import {
 
 export {
   defaultVanityKitchenTier,
+  roundCustomerDisplayAddonLine,
   roundCustomerDisplayVanity,
   VANITY_PROGRAM_2026_RATES,
   VANITY_PROGRAM_YEAR

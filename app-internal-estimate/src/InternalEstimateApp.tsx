@@ -194,6 +194,7 @@ export default function InternalEstimateApp() {
     Object.fromEntries(MATERIAL_GROUPS.map((g) => [g, false]))
   );
   const [customLineRows, setCustomLineRows] = useState<CustomLineRow[]>([]);
+  const [customLineUndo, setCustomLineUndo] = useState<CustomLineRow[] | null>(null);
   const [eliteColors, setEliteColors] = useState<EliteProgramColorRow[]>([]);
   const [colorCatalogWarnings, setColorCatalogWarnings] = useState<string[]>([]);
   const [quoteDefaultCatalogId, setQuoteDefaultCatalogId] = useState("");
@@ -1532,6 +1533,7 @@ export default function InternalEstimateApp() {
               hideRapidLinear
               showRoomUseTax
               projectUseTaxPercent={Math.max(0, Number(useTaxPercent) || 0)}
+              enableDestructiveGuards
             />
           </section>
 
@@ -1586,6 +1588,21 @@ export default function InternalEstimateApp() {
               (not listed by internal name).
             </p>
             <p className="muted small">Sink and fixture cutouts are set per room in the room builder.</p>
+            {customLineUndo ? (
+              <div className="ie-undo-toast" role="status">
+                <span>Custom line removed. </span>
+                <button
+                  type="button"
+                  className="btn secondary btn-sm"
+                  onClick={() => {
+                    setCustomLineRows(customLineUndo);
+                    setCustomLineUndo(null);
+                  }}
+                >
+                  Undo
+                </button>
+              </div>
+            ) : null}
 
             <h3 className="h3">Show price group options on customer estimate</h3>
             <p className="muted small" style={{ marginTop: 4 }}>
@@ -1727,7 +1744,21 @@ export default function InternalEstimateApp() {
                       }
                     />
                   </label>
-                  <button type="button" className="btn secondary" onClick={() => setCustomLineRows((prev) => prev.filter((x) => x.id !== row.id))}>
+                  <button
+                    type="button"
+                    className="btn secondary btn-danger-quiet"
+                    onClick={() => {
+                      if (
+                        !window.confirm(
+                          `Remove "${row.name.trim() || "this line"}"?\n\nThis can change the estimate total.`
+                        )
+                      ) {
+                        return;
+                      }
+                      setCustomLineUndo(customLineRows);
+                      setCustomLineRows((prev) => prev.filter((x) => x.id !== row.id));
+                    }}
+                  >
                     Remove line
                   </button>
                 </div>
