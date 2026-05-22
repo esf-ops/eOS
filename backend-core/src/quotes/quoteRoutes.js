@@ -3,6 +3,8 @@ import express from "express";
 import { resolveOrganizationContext } from "../organizations/organizationContext.js";
 import { calculateQuote, computePublicConsumerEstimatesByGroup, roundPublicEstimateToNearestTen } from "./quoteCalculator.js";
 import { attachInternalQuoteRoutes } from "./internalQuotesApi.js";
+import { attachPartnerQuoteRoutes } from "./partnerQuotesApi.js";
+import { assertInternalQuoteOperator } from "./partnerContext.js";
 import { attachQuoteLibraryRoutes } from "./quoteLibraryApi.js";
 import { attachPricingAdminHeadApi } from "./pricingAdminHeadApi.js";
 import { attachQuotePricingAdminApi } from "./quotePricingAdminApi.js";
@@ -192,16 +194,20 @@ export function attachQuoteRoutes(app, { requireAuth, requireRole, requireHeadAc
     });
   });
 
-  app.post("/api/partner-quote/submit", requireAuth(), jsonParser, async (_req, res) => {
-    res.status(501).json({
-      ok: false,
-      notImplemented: true,
-      message:
-        "POST /api/partner-quote/submit is scaffolded. Use POST /api/quote/submit with quote_source partner_quote / partner_portal until this route is completed. See docs/quote-platform/three-head-quote-architecture.md."
-    });
-  });
+  const blockPartnerOnlyOnGenericQuote = async (req, res, next) => {
+    try {
+      await assertInternalQuoteOperator(req, supabaseGetter());
+      next();
+    } catch (e) {
+      res.status(Number(e?.statusCode) || 403).json({
+        ok: false,
+        error: String(e?.message || e),
+        code: e?.code || "forbidden"
+      });
+    }
+  };
 
-  app.post("/api/quote/calculate", requireAuth(), jsonParser, async (req, res) => {
+  app.post("/api/quote/calculate", requireAuth(), blockPartnerOnlyOnGenericQuote, jsonParser, async (req, res) => {
     try {
       const db = supabaseGetter();
       const body = req.body && typeof req.body === "object" ? req.body : {};
@@ -216,7 +222,7 @@ export function attachQuoteRoutes(app, { requireAuth, requireRole, requireHeadAc
     }
   });
 
-  app.post("/api/quote/submit", requireAuth(), jsonParser, async (req, res) => {
+  app.post("/api/quote/submit", requireAuth(), blockPartnerOnlyOnGenericQuote, jsonParser, async (req, res) => {
     try {
       const db = supabaseGetter();
       const body = req.body && typeof req.body === "object" ? req.body : {};
@@ -265,12 +271,13 @@ export function attachQuoteRoutes(app, { requireAuth, requireRole, requireHeadAc
   });
 
   attachQuotePipelineRoutes(app, { requireAuth, requireRole, requireHeadAccess, getSupabase });
+  attachPartnerQuoteRoutes(app, { requireAuth, requireHeadAccess, getSupabase });
   attachInternalQuoteRoutes(app, { requireAuth, requireHeadAccess, getSupabase });
   attachQuoteLibraryRoutes(app, { requireAuth, requireHeadAccess, getSupabase });
   attachQuotePricingAdminApi(app, { requireAuth, requireRole, requireHeadAccess, getSupabase });
   attachPricingAdminHeadApi(app, { requireAuth, requireRole, requireHeadAccess, getSupabase });
 
   console.log(
-    "[quotes] mounted POST /api/public-quote/calculate, POST /api/public-quote/submit-measurements, POST /api/internal-quote/submit (501), POST /api/partner-quote/submit (501), POST /api/quote/calculate, POST /api/quote/submit, /api/internal-quotes/*, /api/quote-library/*; quote pipeline GET/PATCH /api/quotes/pipeline*; admin quote APIs via quotePricingAdminApi.js; Pricing Admin head via pricingAdminHeadApi.js"
+    "[quotes] mounted POST /api/public-quote/calculate, POST /api/public-quote/submit-measurements, GET/POST /api/partner-quote/*, POST /api/quote/calculate, POST /api/quote/submit, /api/internal-quotes/*, /api/quote-library/*; quote pipeline GET/PATCH /api/quotes/pipeline*; admin quote APIs via quotePricingAdminApi.js; Pricing Admin head via pricingAdminHeadApi.js"
   );
 }

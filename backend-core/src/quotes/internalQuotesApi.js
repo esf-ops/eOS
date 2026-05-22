@@ -6,6 +6,7 @@
 import express from "express";
 
 import { logAction } from "../auth/auditLog.js";
+import { assertInternalQuoteOperator } from "./partnerContext.js";
 import {
   buildInternalEstimateSummaryForMonday,
   internalMondayColumnMappingConfigured,
@@ -106,7 +107,19 @@ function listRow(r) {
 export function attachInternalQuoteRoutes(app, deps) {
   const { requireAuth, requireHeadAccess, getSupabase } = deps;
   const headQuote = requireHeadAccess("quote", { getSupabase });
-  const stack = [requireAuth(), headQuote];
+  const rejectPartnerOnlyUser = async (req, res, next) => {
+    try {
+      await assertInternalQuoteOperator(req, getSupabase());
+      next();
+    } catch (e) {
+      res.status(Number(e?.statusCode) || 403).json({
+        ok: false,
+        error: String(e?.message || e),
+        code: e?.code || "forbidden"
+      });
+    }
+  };
+  const stack = [requireAuth(), headQuote, rejectPartnerOnlyUser];
 
   app.post("/api/internal-quotes/calculate", ...stack, jsonParser, async (req, res) => {
     try {

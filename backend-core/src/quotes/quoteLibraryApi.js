@@ -6,6 +6,7 @@
 import express from "express";
 
 import { logAction } from "../auth/auditLog.js";
+import { assertInternalQuoteOperator } from "./partnerContext.js";
 import {
   mergeRowOrganizationId,
   organizationScopeOrFilter,
@@ -240,7 +241,19 @@ function aggregateQuoteMetrics(rows, startMs, endMs) {
  */
 export function attachQuoteLibraryRoutes(app, deps) {
   const { requireAuth, requireHeadAccess, getSupabase } = deps;
-  const stack = [requireAuth(), requireHeadAccess("quote_library", { getSupabase })];
+  const rejectPartnerOnlyUser = async (req, res, next) => {
+    try {
+      await assertInternalQuoteOperator(req, getSupabase());
+      next();
+    } catch (e) {
+      res.status(Number(e?.statusCode) || 403).json({
+        ok: false,
+        error: String(e?.message || e),
+        code: e?.code || "forbidden"
+      });
+    }
+  };
+  const stack = [requireAuth(), requireHeadAccess("quote_library", { getSupabase }), rejectPartnerOnlyUser];
 
   app.get("/api/quote-library/quotes", ...stack, async (req, res) => {
     try {
