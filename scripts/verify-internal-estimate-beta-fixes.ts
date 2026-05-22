@@ -595,4 +595,19 @@ function approx(a: number, b: number, eps = 0.02) {
   assert.match(warns[0], /double-count|counted twice/i);
 }
 
+// Internal Estimate save / revision UX (sticky footer forces save_mode)
+{
+  const ieSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/InternalEstimateApp.tsx"), "utf8");
+  assert.match(ieSrc, /handleSubmit\("save_revision"\)/, "sticky Save revision must force save_revision");
+  assert.match(ieSrc, /handleSubmit\("update_existing"\)/, "sticky Update must force update_existing");
+  assert.match(ieSrc, /buildSubmitPayload\(urlQuoteId \? intent/, "save payload must use forced intent");
+  assert.match(ieSrc, /Saved as \$\{savedLabel\}/, "success copy must show Saved as ESF-…-R#");
+  assert.match(ieSrc, /setSaveIntent\(ic \? "save_revision"/, "current revision must default to save_revision");
+  assert.doesNotMatch(
+    ieSrc,
+    /value=\{saveIntent\}[\s\S]{0,120}<option value="save_as_new_quote"/,
+    "select must not bind invalid create intent to save_as_new_quote option"
+  );
+}
+
 console.log("verify-internal-estimate-beta-fixes: OK");
