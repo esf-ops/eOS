@@ -767,6 +767,61 @@ select:focus {
   font-size: 0.88rem;
 }
 
+.ie-esf-measure-callout {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #f0f9ff;
+  line-height: 1.45;
+}
+
+.ie-measure-help {
+  margin: 0 0 10px;
+  padding-left: 1.1rem;
+  line-height: 1.45;
+}
+
+.ie-preset-btn {
+  border-color: #93c5fd;
+}
+
+.ie-shape-group-advanced {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px dashed #e2e8f0;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.ie-shape-group-advanced-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin-top: 8px;
+}
+
+.ie-piece-advanced {
+  flex: 1 1 100%;
+  margin-top: 4px;
+}
+
+.ie-piece-row-simple {
+  align-items: end;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.ie-piece-splash-check {
+  flex: 1 1 100%;
+  margin: 0;
+}
+
+.ie-layout-preview {
+  margin-top: 12px;
+}
+
 .ie-shape-group-add-row {
   display: flex;
   flex-wrap: wrap;

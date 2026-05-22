@@ -216,6 +216,81 @@ export function appendGuidedShapeGroup(room: RoomDraft, shapeType: GuidedShapeGr
   return normalizeGuidedShapeRoom({ ...norm, guidedShapeGroups: groups, calcMode: "Guided Shape" });
 }
 
+/** Quick-add presets for common Internal Estimate layouts (Spec 73 / multi-area kitchens). */
+export type GuidedShapeQuickPreset = "stove_wall" | "main_u" | "straight" | "l_shape" | "u_shape";
+
+export function createGuidedShapeGroupFromPreset(
+  preset: GuidedShapeQuickPreset,
+  index = 0
+): GuidedShapeGroup {
+  const depth = STANDARD_COUNTER_DEPTH_IN;
+  const mkCounter = (name: string, addSplash = false): GuidedPiece => ({
+    id: gid(),
+    pieceType: "counter",
+    name,
+    lengthIn: 0,
+    depthIn: depth,
+    shape: "rect",
+    addSplash
+  });
+  switch (preset) {
+    case "stove_wall":
+      return {
+        id: gid(),
+        name: index > 0 ? `Stove wall ${index + 1}` : "Stove wall",
+        shapeType: "straight",
+        overlapMode: "none",
+        backsplashMode: "exclude",
+        pieces: [mkCounter("Left of stove"), mkCounter("Right of stove")]
+      };
+    case "main_u":
+      return {
+        id: gid(),
+        name: index > 0 ? `Main U-shape ${index + 1}` : "Main U-shape",
+        shapeType: "U-Shape",
+        overlapMode: "none",
+        backsplashMode: "include",
+        pieces: [mkCounter("Left run"), mkCounter("Back / sink run"), mkCounter("Right run")]
+      };
+    case "l_shape":
+      return {
+        id: gid(),
+        name: index > 0 ? `L-shape ${index + 1}` : "L-shape",
+        shapeType: "L-Shape",
+        overlapMode: "auto",
+        backsplashMode: "include",
+        pieces: piecesForGroupPreset("L-Shape")
+      };
+    case "u_shape":
+      return {
+        id: gid(),
+        name: index > 0 ? `U-shape ${index + 1}` : "U-shape",
+        shapeType: "U-Shape",
+        overlapMode: "none",
+        backsplashMode: "include",
+        pieces: piecesForGroupPreset("U-Shape")
+      };
+    case "straight":
+    default:
+      return {
+        id: gid(),
+        name: index > 0 ? `Straight run ${index + 1}` : "Straight run",
+        shapeType: "straight",
+        overlapMode: "none",
+        backsplashMode: "include",
+        pieces: piecesForGroupPreset("straight")
+      };
+  }
+}
+
+export function appendGuidedShapeGroupFromPreset(room: RoomDraft, preset: GuidedShapeQuickPreset): RoomDraft {
+  const norm = normalizeGuidedShapeRoom(room);
+  const groups = [...(norm.guidedShapeGroups || [])];
+  const next = createGuidedShapeGroupFromPreset(preset, groups.length);
+  groups.push(next);
+  return normalizeGuidedShapeRoom({ ...norm, guidedShapeGroups: groups, calcMode: "Guided Shape" });
+}
+
 export function updateGuidedShapeGroup(
   room: RoomDraft,
   groupId: string,
