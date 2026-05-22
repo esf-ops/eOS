@@ -603,11 +603,11 @@ function approx(a: number, b: number, eps = 0.02) {
   assert.match(ieSrc, /buildSubmitPayload\(urlQuoteId \? intent/, "save payload must use forced intent");
   assert.match(ieSrc, /Saved as \$\{savedLabel\}/, "success copy must show Saved as ESF-…-R#");
   assert.match(ieSrc, /setSaveIntent\(ic \? "save_revision"/, "current revision must default to save_revision");
-  assert.doesNotMatch(
-    ieSrc,
-    /value=\{saveIntent\}[\s\S]{0,120}<option value="save_as_new_quote"/,
-    "select must not bind invalid create intent to save_as_new_quote option"
-  );
+  assert.match(ieSrc, /handleRestoreAsRevision/, "historical revision must support restore-as-revision");
+  assert.match(ieSrc, /restore-as-revision/, "must call internal restore-as-revision API");
+  assert.match(ieSrc, /Start new quote/, "must expose Start new quote control");
+  assert.match(ieSrc, /pickLatestFamilyRevision/, "must resolve latest revision from family list");
+  assert.match(ieSrc, /Older revision open/, "historical copy must explain restore path");
 }
 
 console.log("verify-internal-estimate-beta-fixes: OK");

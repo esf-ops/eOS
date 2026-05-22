@@ -1199,11 +1199,17 @@ export default function QuoteLibraryApp() {
                   <a
                     className="btn secondary"
                     href={`${internalBase}?quoteId=${encodeURIComponent(
-                      str(
-                        revisions.find((r) => r.is_current_revision === true)?.id ||
-                          header.id ||
-                          detailId
-                      )
+                      (() => {
+                        const flagged = revisions.find((r) => r.is_current_revision === true);
+                        if (flagged?.id) return str(flagged.id);
+                        const byNumber = revisions.reduce<Record<string, unknown> | null>((best, r) => {
+                          if (!best) return r;
+                          const bn = Number(best.revision_number) || 0;
+                          const rn = Number(r.revision_number) || 0;
+                          return rn >= bn ? r : best;
+                        }, null);
+                        return str(byNumber?.id || header.id || detailId);
+                      })()
                     )}`}
                     target="_blank"
                     rel="noreferrer"

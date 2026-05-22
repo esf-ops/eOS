@@ -140,6 +140,42 @@ function workflowLabel(wf: QuoteWorkflowMethod): string {
   return labels[wf];
 }
 
+type InternalSaveIntent = "create" | "update_existing" | "save_revision" | "save_as_new_quote";
+
+type FamilyRevisionRow = {
+  id: string;
+  quote_number?: string | null;
+  revision_number?: number | null;
+  revision_label?: string | null;
+  is_current_revision?: boolean | null;
+};
+
+function parseIsCurrentRevisionFlag(raw: unknown): boolean | null {
+  if (raw === true) return true;
+  if (raw === false) return false;
+  return null;
+}
+
+function pickLatestFamilyRevision(revisions: FamilyRevisionRow[]): FamilyRevisionRow | null {
+  if (!revisions.length) return null;
+  const flagged = revisions.find((r) => r.is_current_revision === true);
+  if (flagged) return flagged;
+  return revisions.reduce<FamilyRevisionRow | null>((best, r) => {
+    if (!best) return r;
+    const bn = Number(best.revision_number) || 0;
+    const rn = Number(r.revision_number) || 0;
+    return rn >= bn ? r : best;
+  }, null);
+}
+
+function isOpenedRevisionLatest(openedId: string, revisions: FamilyRevisionRow[], rowFlag: boolean | null): boolean {
+  const latest = pickLatestFamilyRevision(revisions);
+  if (latest?.id) return String(latest.id) === String(openedId);
+  if (rowFlag === false) return false;
+  if (rowFlag === true) return true;
+  return true;
+}
+
 function localRunToDemo(r: ReturnType<typeof runLocalPrototypeQuote>): DemoCalculateResult {
   return {
     usedFallback: true,
@@ -209,13 +245,16 @@ export default function InternalEstimateApp() {
 
   const [quoteWorkflowStatus, setQuoteWorkflowStatus] = useState("testing_review");
   const [revisionNoteDraft, setRevisionNoteDraft] = useState("");
-  type InternalSaveIntent = "create" | "update_existing" | "save_revision" | "save_as_new_quote";
   const [saveIntent, setSaveIntent] = useState<InternalSaveIntent>("create");
   const [pendingSubmitIntent, setPendingSubmitIntent] = useState<InternalSaveIntent | null>(null);
   const [revisionBaselineSig, setRevisionBaselineSig] = useState<string | null>(null);
   const [hydratedIsCurrentRevision, setHydratedIsCurrentRevision] = useState<boolean | null>(null);
   const [hydratedDisplayRevision, setHydratedDisplayRevision] = useState<string | null>(null);
   const [quoteFamilyRootId, setQuoteFamilyRootId] = useState<string | null>(null);
+  const [familyLatestQuoteId, setFamilyLatestQuoteId] = useState<string | null>(null);
+  const [familyLatestQuoteNumber, setFamilyLatestQuoteNumber] = useState<string | null>(null);
+  const [startNewQuoteModalOpen, setStartNewQuoteModalOpen] = useState(false);
+  const [restoreBusy, setRestoreBusy] = useState(false);
 
   /** `?quoteId=` hydration — must be declared before `buildSubmitPayload` / save hooks (TDZ if referenced earlier). */
   const [urlQuoteId, setUrlQuoteId] = useState<string | null>(null);
@@ -231,6 +270,8 @@ export default function InternalEstimateApp() {
       setHydratedIsCurrentRevision(null);
       setHydratedDisplayRevision(null);
       setQuoteFamilyRootId(null);
+      setFamilyLatestQuoteId(null);
+      setFamilyLatestQuoteNumber(null);
       setRevisionBaselineSig(null);
       setSaveIntent("create");
       setQuoteWorkflowStatus("testing_review");
@@ -244,6 +285,9 @@ export default function InternalEstimateApp() {
   /** Must sit before save/hydration callbacks that clear it after Save Revision / new quote id. */
   const hydrationRanRef = useRef(false);
   const revisionBaselineCapturedForQuoteRef = useRef<string | null>(null);
+  const startNewAfterSaveRef = useRef<
+    null | "save_revision" | "update_existing" | "restore" | "save_as_new_quote"
+  >(null);
 
   const [calcBusy, setCalcBusy] = useState(false);
   const [calcError, setCalcError] = useState<string | null>(null);
@@ -595,7 +639,7 @@ export default function InternalEstimateApp() {
     if (!sessionToken) return "Sign in to save revisions to Quote Library.";
     if (hydratedIsCurrentRevision === null) return "Loading quote metadata…";
     if (hydratedIsCurrentRevision === false) {
-      return "This revision is read-only. Open the latest revision from Quote Library, or use Save as new quote.";
+      return "Older revision open — use Restore as new revision (same ESF family) or open the latest revision.";
     }
     if (submitBusy) return "Save in progress…";
     if (!revisionDirty && !revisionNoteDraft.trim()) return "No changes to save as revision.";
@@ -616,18 +660,97 @@ export default function InternalEstimateApp() {
   const savePanelPrimaryBlockReason = useMemo(() => {
     if (!urlQuoteId) {
       if (!sessionToken) return "Sign in to save a new estimate.";
-      if (submitBusy) return "Save in progress…";
+      if (submitBusy || restoreBusy) return "Save in progress…";
       return null;
     }
+    if (hydratedIsCurrentRevision === false) return null;
     if (saveIntent === "save_revision") return saveRevisionBlockReason;
     if (saveIntent === "update_existing") return updateQuoteBlockReason;
     if (saveIntent === "save_as_new_quote") {
       if (!sessionToken) return "Sign in to save.";
-      if (submitBusy) return "Save in progress…";
+      if (submitBusy || restoreBusy) return "Save in progress…";
       return null;
     }
     return updateQuoteBlockReason;
-  }, [urlQuoteId, sessionToken, submitBusy, saveIntent, saveRevisionBlockReason, updateQuoteBlockReason]);
+  }, [
+    urlQuoteId,
+    sessionToken,
+    submitBusy,
+    restoreBusy,
+    saveIntent,
+    saveRevisionBlockReason,
+    updateQuoteBlockReason,
+    hydratedIsCurrentRevision
+  ]);
+
+  const restoreRevisionBlockReason = useMemo(() => {
+    if (!urlQuoteId) return null;
+    if (!sessionToken) return "Sign in to restore a revision.";
+    if (hydratedIsCurrentRevision === null) return "Loading quote metadata…";
+    if (hydratedIsCurrentRevision !== false) return "This revision is already the latest.";
+    if (submitBusy || restoreBusy) return "Save in progress…";
+    return null;
+  }, [urlQuoteId, sessionToken, hydratedIsCurrentRevision, submitBusy, restoreBusy]);
+
+  const hasUnsavedWork = useMemo(() => {
+    if (urlQuoteId) return revisionDirty || Boolean(revisionNoteDraft.trim());
+    const hasCustomer = Boolean(
+      customerName.trim() ||
+        projectName.trim() ||
+        projectAddress.trim() ||
+        accountName.trim() !== "Direct" ||
+        salesRep.trim()
+    );
+    const hasRooms =
+      roomDrafts.length > 1 ||
+      roomDrafts.some((r) => r.name !== "Kitchen" || r.calcMode !== "Guided Shape" || (r.guidedPieces?.length ?? 0) > 0);
+    return hasCustomer || hasRooms || customLineRows.length > 0;
+  }, [
+    urlQuoteId,
+    revisionDirty,
+    revisionNoteDraft,
+    customerName,
+    projectName,
+    projectAddress,
+    accountName,
+    salesRep,
+    roomDrafts,
+    customLineRows.length
+  ]);
+
+  const applyPostSaveQuoteIdentity = useCallback(
+    (qid: string, qn: string, revLab: string, isCurrent: boolean, saveMode: string) => {
+      setLastSavedQuoteNumber(qn || null);
+      setLastSavedQuoteId(qid && qid !== "undefined" ? qid : null);
+      if (saveMode === "save_revision" || saveMode === "restore") {
+        setSaveIntent("save_revision");
+      } else if (saveMode === "save_as_new_quote" || saveMode === "create") {
+        setSaveIntent("update_existing");
+      } else if (saveMode === "update_existing") {
+        setSaveIntent("save_revision");
+      }
+      if (qid && saveMode !== "update_existing") {
+        hydrationRanRef.current = false;
+        revisionBaselineCapturedForQuoteRef.current = null;
+        setUrlQuoteId(qid);
+        const u = new URL(window.location.href);
+        u.searchParams.set("quoteId", qid);
+        window.history.replaceState({}, "", `${u.pathname}?${u.searchParams.toString()}${u.hash}`);
+        setHydratedIsCurrentRevision(true);
+        setLoadedFromLibrary(true);
+        setFamilyLatestQuoteId(qid);
+        if (qn) setFamilyLatestQuoteNumber(qn);
+      } else if (saveMode === "update_existing") {
+        setHydratedIsCurrentRevision(isCurrent);
+      }
+      if (qn) {
+        const hist = !isCurrent ? " · historical revision" : "";
+        setHydratedDisplayRevision(`${qn}${revLab && !qn.includes(revLab) ? ` · ${revLab}` : ""}${hist}`);
+      }
+      setRevisionBaselineSig(computeRevisionBaselineSig());
+    },
+    [computeRevisionBaselineSig]
+  );
 
   const runLocalFromDrafts = useCallback(() => {
     const drafts = buildRoomDraftsForCalculate();
@@ -792,11 +915,134 @@ export default function InternalEstimateApp() {
 
   const savePrimaryLabel = useMemo(() => {
     if (!urlQuoteId) return "Save quote";
-    if (saveIntent === "update_existing") return "Update quote";
+    if (hydratedIsCurrentRevision === false) return "Restore as new revision";
+    if (saveIntent === "update_existing") return "Update current revision";
     if (saveIntent === "save_revision") return "Save revision";
-    if (saveIntent === "save_as_new_quote") return "Save as new quote";
+    if (saveIntent === "save_as_new_quote") return "Save as separate new quote";
     return "Save quote";
-  }, [urlQuoteId, saveIntent]);
+  }, [urlQuoteId, saveIntent, hydratedIsCurrentRevision]);
+
+  const openLatestRevisionInPlace = useCallback(() => {
+    if (!familyLatestQuoteId || familyLatestQuoteId === urlQuoteId) return;
+    hydrationRanRef.current = false;
+    revisionBaselineCapturedForQuoteRef.current = null;
+    setUrlQuoteId(familyLatestQuoteId);
+    const u = new URL(window.location.href);
+    u.searchParams.set("quoteId", familyLatestQuoteId);
+    window.history.replaceState({}, "", `${u.pathname}?${u.searchParams.toString()}${u.hash}`);
+    setSubmitMsg(null);
+  }, [familyLatestQuoteId, urlQuoteId]);
+
+  const beginNewQuote = useCallback(() => {
+    hydrationRanRef.current = false;
+    revisionBaselineCapturedForQuoteRef.current = null;
+    setUrlQuoteId(null);
+    setHydratedIsCurrentRevision(null);
+    setHydratedDisplayRevision(null);
+    setQuoteFamilyRootId(null);
+    setFamilyLatestQuoteId(null);
+    setFamilyLatestQuoteNumber(null);
+    setRevisionBaselineSig(null);
+    setLoadedFromLibrary(false);
+    setLastSavedQuoteId(null);
+    setLastSavedQuoteNumber(null);
+    setSaveIntent("create");
+    setRevisionNoteDraft("");
+    setQuoteWorkflowStatus("testing_review");
+    setSubmitMsg(null);
+    setSubmitDiagnostic(null);
+    setHydrationGaps([]);
+    setRoomDrafts([createEstimatorRoom("Group Promo")]);
+    setVisualLayoutByPieceKey({});
+    setAccountName("Direct");
+    setAccountPhone("");
+    setAccountEmail("");
+    setCustomerName("");
+    setPhone("");
+    setEmail("");
+    setProjectType("Kitchen");
+    setBranch("Dyersville");
+    setSalesRep("");
+    setProjectName("");
+    setProjectAddress("");
+    setCity("");
+    setState("IA");
+    setColorTbd(false);
+    setUseTaxPercent(0);
+    setUseTaxPreset("0");
+    setInternalPricingMode("wholesale");
+    setCustomLineRows([]);
+    setQuoteDefaultCatalogId("");
+    setCustomerDisplayGroups(Object.fromEntries(MATERIAL_GROUPS.map((g) => [g, false])));
+    const u = new URL(window.location.href);
+    u.searchParams.delete("quoteId");
+    window.history.replaceState({}, "", `${u.pathname}${u.search}${u.hash}`);
+  }, []);
+
+  const handleStartNewQuoteClick = useCallback(() => {
+    if (!hasUnsavedWork) {
+      beginNewQuote();
+      return;
+    }
+    setStartNewQuoteModalOpen(true);
+  }, [hasUnsavedWork, beginNewQuote]);
+
+  const handleRestoreAsRevision = useCallback(async () => {
+    if (restoreRevisionBlockReason || !urlQuoteId) {
+      if (restoreRevisionBlockReason) setSubmitMsg(restoreRevisionBlockReason);
+      return;
+    }
+    setRestoreBusy(true);
+    setPendingSubmitIntent("save_revision");
+    setSubmitMsg(null);
+    setSubmitDiagnostic(null);
+    try {
+      if (!sessionToken) {
+        setSubmitMsg("Sign in to restore a revision.");
+        return;
+      }
+      const token = await ensureAccessToken();
+      if (!token) {
+        setSubmitMsg("Your session expired. Please sign in again.");
+        return;
+      }
+      if (token !== sessionToken) setSessionToken(token);
+      const raw = (await apiPostJson(`/api/internal-quotes/${urlQuoteId}/restore-as-revision`, token, {
+        revision_note: revisionNoteDraft.trim() || null
+      })) as Record<string, unknown>;
+      if (raw.ok === true) {
+        const qn = String(raw.quote_number ?? raw.quoteNumber ?? "");
+        const qid = String(raw.quoteId ?? raw.quote_id ?? "");
+        const revLab = String(raw.revision_label ?? raw.revisionLabel ?? "").trim();
+        applyPostSaveQuoteIdentity(qid, qn, revLab, true, "restore");
+        const savedLabel = qn || (revLab ? `revision ${revLab}` : "quote");
+        setSubmitMsg(`Restored as ${savedLabel}. This is now the latest revision.`);
+        setBackendCalcOk(true);
+        if (startNewAfterSaveRef.current === "restore") {
+          startNewAfterSaveRef.current = null;
+          beginNewQuote();
+        }
+      } else {
+        setSubmitMsg(String(raw.error || "Restore failed."));
+        setSubmitDiagnostic(JSON.stringify({ route: "POST restore-as-revision", response: raw }, null, 2));
+      }
+    } catch (e: unknown) {
+      startNewAfterSaveRef.current = null;
+      setSubmitMsg(e instanceof ApiError ? e.message : "Restore failed unexpectedly.");
+      setSubmitDiagnostic(String(e));
+    } finally {
+      setRestoreBusy(false);
+      setPendingSubmitIntent(null);
+    }
+  }, [
+    restoreRevisionBlockReason,
+    urlQuoteId,
+    sessionToken,
+    ensureAccessToken,
+    revisionNoteDraft,
+    applyPostSaveQuoteIdentity,
+    beginNewQuote
+  ]);
 
   const handleSubmit = useCallback(async (forcedIntent?: InternalSaveIntent) => {
     const intent: InternalSaveIntent = forcedIntent ?? (urlQuoteId ? saveIntent : "create");
@@ -838,7 +1084,7 @@ export default function InternalEstimateApp() {
         (intent === "update_existing" || intent === "save_revision")
       ) {
         setSubmitMsg(
-          "This is a historical revision (read-only for update/revision). Open the latest revision from Quote Library, or use Save as new quote."
+          "Older revision open — use Restore as new revision to continue this ESF family, or open the latest revision."
         );
         return;
       }
@@ -864,47 +1110,29 @@ export default function InternalEstimateApp() {
             : raw.is_current_revision === true
               ? true
               : true;
-        setLastSavedQuoteNumber(qn || null);
-        setLastSavedQuoteId(qid && qid !== "undefined" ? qid : null);
-        if (sm === "save_revision") {
-          setSaveIntent("save_revision");
-        } else if (sm === "save_as_new_quote" || sm === "create") {
-          setSaveIntent("update_existing");
-        } else if (sm === "update_existing") {
-          setSaveIntent("save_revision");
-        }
-        if (qid && sm && sm !== "update_existing") {
-          hydrationRanRef.current = false;
-          setUrlQuoteId(qid);
-          const u = new URL(window.location.href);
-          u.searchParams.set("quoteId", qid);
-          window.history.replaceState({}, "", `${u.pathname}?${u.searchParams.toString()}${u.hash}`);
-          setHydratedIsCurrentRevision(true);
-          setLoadedFromLibrary(true);
-        } else if (sm === "update_existing") {
-          setHydratedIsCurrentRevision(isCurrent);
-        }
-        if (qn) {
-          const hist = !isCurrent ? " · historical revision" : "";
-          setHydratedDisplayRevision(`${qn}${revLab && !qn.includes(revLab) ? ` · ${revLab}` : ""}${hist}`);
-        }
+        applyPostSaveQuoteIdentity(qid, qn, revLab, isCurrent, sm);
         const savedLabel = qn || (revLab ? `revision ${revLab}` : "quote");
         if (sm === "save_revision") {
-          setSubmitMsg(`Saved as ${savedLabel}. This is now the latest revision — use Save revision again when you change scope.`);
+          setSubmitMsg(`Saved as ${savedLabel}. This is now the latest revision.`);
         } else if (sm === "update_existing") {
           setSubmitMsg(`Updated ${savedLabel} in place (same revision row).`);
         } else if (sm === "save_as_new_quote") {
-          setSubmitMsg(`Saved as new quote family: ${savedLabel}.`);
+          setSubmitMsg(`Saved as separate new quote family: ${savedLabel}.`);
         } else {
           setSubmitMsg(qn ? `Saved as ${savedLabel}.` : "Saved to eliteOS Quote Library.");
         }
-        setRevisionBaselineSig(computeRevisionBaselineSig());
         setSubmitDiagnostic(null);
         setBackendCalcOk(true);
         if (Array.isArray(raw.warnings) && raw.warnings.length) {
           setSubmitMsg((prev) => `${prev} ${(raw.warnings as string[]).join(" ")}`);
         }
+        const after = startNewAfterSaveRef.current;
+        if (after === "save_revision" || after === "update_existing" || after === "save_as_new_quote") {
+          startNewAfterSaveRef.current = null;
+          beginNewQuote();
+        }
       } else {
+        startNewAfterSaveRef.current = null;
         setSubmitMsg(String(raw.error || "Something went wrong while saving."));
         setSubmitDiagnostic(JSON.stringify({ route: "POST /api/internal-quotes/save", response: raw }, null, 2));
       }
@@ -926,6 +1154,7 @@ export default function InternalEstimateApp() {
         );
         return;
       }
+      startNewAfterSaveRef.current = null;
       setSubmitMsg("Save failed unexpectedly. Please try again.");
       setSubmitDiagnostic(String(e));
     } finally {
@@ -942,7 +1171,8 @@ export default function InternalEstimateApp() {
     saveRevisionBlockReason,
     updateQuoteBlockReason,
     submitBusy,
-    computeRevisionBaselineSig
+    applyPostSaveQuoteIdentity,
+    beginNewQuote
   ]);
 
   const scopePreview = useMemo(() => {
@@ -1375,19 +1605,49 @@ export default function InternalEstimateApp() {
         }
         const qs = String(q.quote_status || "testing_review");
         setQuoteWorkflowStatus(qs);
-        const ic = q.is_current_revision !== false;
-        setHydratedIsCurrentRevision(ic);
         const rlab = q.revision_label != null ? String(q.revision_label) : "";
         const qnDisp = String(q.quote_number || "");
         const famRoot = q.quote_family_root_id != null ? String(q.quote_family_root_id) : "";
         setQuoteFamilyRootId(famRoot || urlQuoteId);
+
+        let familyRevisions: FamilyRevisionRow[] = [];
+        try {
+          const revRaw = (await apiGetJson(`/api/internal-quotes/${urlQuoteId}/revisions`, sessionToken)) as Record<
+            string,
+            unknown
+          >;
+          if (!cancelled && revRaw.ok === true && Array.isArray(revRaw.revisions)) {
+            familyRevisions = (revRaw.revisions as Record<string, unknown>[]).map((r) => ({
+              id: String(r.id ?? ""),
+              quote_number: r.quote_number != null ? String(r.quote_number) : null,
+              revision_number: r.revision_number != null ? Number(r.revision_number) : null,
+              revision_label: r.revision_label != null ? String(r.revision_label) : null,
+              is_current_revision: parseIsCurrentRevisionFlag(r.is_current_revision)
+            }));
+          }
+        } catch {
+          /* optional — fall back to row flag */
+        }
+
+        const latestRev = pickLatestFamilyRevision(familyRevisions);
+        if (latestRev?.id) {
+          setFamilyLatestQuoteId(latestRev.id);
+          setFamilyLatestQuoteNumber(latestRev.quote_number ? String(latestRev.quote_number) : null);
+        } else {
+          setFamilyLatestQuoteId(urlQuoteId);
+          setFamilyLatestQuoteNumber(qnDisp || null);
+        }
+
+        const rowFlag = parseIsCurrentRevisionFlag(q.is_current_revision);
+        const ic = isOpenedRevisionLatest(urlQuoteId, familyRevisions, rowFlag);
+        setHydratedIsCurrentRevision(ic);
         setHydratedDisplayRevision(
-          qnDisp ? `${qnDisp}${rlab && !qnDisp.includes(rlab) ? ` · ${rlab}` : ""}${ic ? "" : " · historical revision"}` : null
+          qnDisp ? `${qnDisp}${rlab && !qnDisp.includes(rlab) ? ` · ${rlab}` : ""}${ic ? "" : " · older revision"}` : null
         );
         setRevisionNoteDraft(String(q.revision_note ?? ""));
         setSaveIntent(ic ? "save_revision" : "save_as_new_quote");
-        setLastSavedQuoteId(urlQuoteId);
-        setLastSavedQuoteNumber(qnDisp || null);
+        setLastSavedQuoteId(ic ? urlQuoteId : latestRev?.id ?? urlQuoteId);
+        setLastSavedQuoteNumber(ic ? qnDisp || null : latestRev?.quote_number ? String(latestRev.quote_number) : qnDisp || null);
         setLoadedFromLibrary(true);
         setHydrationGaps(gaps);
       } catch (e) {
@@ -1431,6 +1691,9 @@ export default function InternalEstimateApp() {
             </div>
           </div>
           <div className="ie-header-actions">
+            <button type="button" className="btn secondary btn-sm" onClick={handleStartNewQuoteClick}>
+              Start new quote
+            </button>
             <a className="btn secondary btn-sm" href={`${quoteLibraryUrl}/`} target="_blank" rel="noreferrer">
               Open Quote Library
             </a>
@@ -1461,8 +1724,13 @@ export default function InternalEstimateApp() {
                   (<strong>{hydratedDisplayRevision}</strong>)
                 </>
               ) : null}
-              . Use pinned <strong>Save revision</strong> (recommended after scope changes) or <strong>Update</strong> to edit this
-              revision in place. Save panel dropdown mirrors those actions; Save as new quote starts a new ESF family only when needed.
+              . Use pinned <strong>Save revision</strong> after scope changes, or <strong>Update current revision</strong> to edit in place.
+              {hydratedIsCurrentRevision === false ? (
+                <>
+                  {" "}
+                  You opened an <strong>older revision</strong> — restore it to continue the same ESF family, or open the latest.
+                </>
+              ) : null}
             </p>
           ) : (
             <p className="muted" style={{ margin: 0 }}>
@@ -2185,26 +2453,45 @@ export default function InternalEstimateApp() {
               {calcBusy ? "Calculating…" : "Calculate"}
             </button>
             {urlQuoteId ? (
-              <>
-                <button
-                  type="button"
-                  className="btn secondary big"
-                  disabled={Boolean(updateQuoteBlockReason)}
-                  title={updateQuoteBlockReason ?? undefined}
-                  onClick={() => void handleSubmit("update_existing")}
-                >
-                  {submitBusy && pendingSubmitIntent === "update_existing" ? "Working…" : "Update quote"}
-                </button>
-                <button
-                  type="button"
-                  className="btn primary big"
-                  disabled={Boolean(saveRevisionBlockReason)}
-                  title={saveRevisionBlockReason ?? undefined}
-                  onClick={() => void handleSubmit("save_revision")}
-                >
-                  {submitBusy && pendingSubmitIntent === "save_revision" ? "Working…" : "Save revision"}
-                </button>
-              </>
+              hydratedIsCurrentRevision === false ? (
+                <>
+                  <button
+                    type="button"
+                    className="btn primary big"
+                    disabled={Boolean(restoreRevisionBlockReason)}
+                    title={restoreRevisionBlockReason ?? undefined}
+                    onClick={() => void handleRestoreAsRevision()}
+                  >
+                    {restoreBusy ? "Restoring…" : "Restore as new revision"}
+                  </button>
+                  {familyLatestQuoteId && familyLatestQuoteId !== urlQuoteId ? (
+                    <button type="button" className="btn secondary big" onClick={openLatestRevisionInPlace}>
+                      Open latest revision
+                    </button>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="btn secondary big"
+                    disabled={Boolean(updateQuoteBlockReason)}
+                    title={updateQuoteBlockReason ?? undefined}
+                    onClick={() => void handleSubmit("update_existing")}
+                  >
+                    {submitBusy && pendingSubmitIntent === "update_existing" ? "Working…" : "Update current revision"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn primary big"
+                    disabled={Boolean(saveRevisionBlockReason)}
+                    title={saveRevisionBlockReason ?? undefined}
+                    onClick={() => void handleSubmit("save_revision")}
+                  >
+                    {submitBusy && pendingSubmitIntent === "save_revision" ? "Working…" : "Save revision"}
+                  </button>
+                </>
+              )
             ) : (
               <button type="button" className="btn primary big" disabled={submitBusy} onClick={() => void handleSubmit()}>
                 {submitBusy ? "Working…" : "Save quote"}
@@ -2479,79 +2766,130 @@ export default function InternalEstimateApp() {
             <h2 className="ie-section-title">Save</h2>
             {submitMsg ? <p>{submitMsg}</p> : <p className="muted">Submit saves to eliteOS when you’re signed in and quote tables are installed.</p>}
             {urlQuoteId ? (
-              <div className="grid2" style={{ marginTop: 12, gap: 12 }}>
-                <label>
-                  Save action
-                  <select
-                    value={
-                      saveIntent === "create"
-                        ? "save_revision"
-                        : saveIntent === "update_existing" ||
-                            saveIntent === "save_revision" ||
-                            saveIntent === "save_as_new_quote"
-                          ? saveIntent
-                          : "save_revision"
-                    }
-                    onChange={(e) => setSaveIntent(e.target.value as InternalSaveIntent)}
-                    disabled={hydratedIsCurrentRevision === false}
-                  >
-                    <option value="update_existing">Update quote (same revision row)</option>
-                    <option value="save_revision">Save revision (R2, R3…)</option>
-                    <option value="save_as_new_quote">Save as new quote (new ESF #)</option>
-                  </select>
-                  {hydratedIsCurrentRevision === false ? (
-                    <span className="muted small" style={{ display: "block", marginTop: 4 }}>
-                      Historical revision — open the latest from Quote Library to update or add R3+.
-                    </span>
-                  ) : saveIntent === "save_revision" ? (
-                    <span className="muted small" style={{ display: "block", marginTop: 4 }}>
-                      Default for scope changes. Creates the next revision and keeps prior rows frozen.
-                    </span>
-                  ) : saveIntent === "update_existing" ? (
-                    <span className="muted small" style={{ display: "block", marginTop: 4 }}>
-                      Overwrites this revision row without incrementing R#.
-                    </span>
-                  ) : (
-                    <span className="muted small" style={{ display: "block", marginTop: 4 }}>
-                      Starts a new ESF number family — not the usual path for Dyer/Spec 73 revisions.
-                    </span>
-                  )}
-                  {saveRevisionBlockReason && saveIntent === "save_revision" ? (
-                    <span className="muted small" style={{ display: "block", marginTop: 4, color: "#b45309" }}>
-                      {saveRevisionBlockReason}
-                    </span>
-                  ) : null}
-                </label>
-                <label>
-                  Quote status (persisted)
-                  <input
-                    value={quoteWorkflowStatus}
-                    onChange={(e) => setQuoteWorkflowStatus(e.target.value)}
-                    placeholder="draft, sent, follow_up…"
-                  />
-                </label>
-                <label style={{ gridColumn: "1 / -1" }}>
-                  Revision note (optional)
-                  <input value={revisionNoteDraft} onChange={(e) => setRevisionNoteDraft(e.target.value)} placeholder="Visible on quote row metadata" />
-                </label>
-                <div style={{ gridColumn: "1 / -1" }}>
-                  <button
-                    type="button"
-                    className="btn primary"
-                    disabled={Boolean(savePanelPrimaryBlockReason)}
-                    title={savePanelPrimaryBlockReason ?? undefined}
-                    onClick={() =>
-                      void handleSubmit(
-                        urlQuoteId
-                          ? saveIntent === "create"
+              <div style={{ marginTop: 12 }}>
+                {hydratedIsCurrentRevision === false ? (
+                  <div className="warn-box" style={{ marginBottom: 12 }}>
+                    <strong>Older revision open.</strong> You can view it, restore it as a new latest revision (same ESF
+                    family), or save it as a separate new quote.
+                    {familyLatestQuoteNumber && familyLatestQuoteId && familyLatestQuoteId !== urlQuoteId ? (
+                      <p className="muted small" style={{ margin: "8px 0 0" }}>
+                        Latest in this family: <strong>{familyLatestQuoteNumber}</strong>
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+                <div className="grid2" style={{ gap: 12 }}>
+                  {hydratedIsCurrentRevision !== false ? (
+                    <label>
+                      Save action
+                      <select
+                        value={
+                          saveIntent === "create"
                             ? "save_revision"
-                            : saveIntent
-                          : undefined
-                      )
-                    }
-                  >
-                    {submitBusy && pendingSubmitIntent ? "Working…" : savePrimaryLabel}
-                  </button>
+                            : saveIntent === "update_existing" ||
+                                saveIntent === "save_revision" ||
+                                saveIntent === "save_as_new_quote"
+                              ? saveIntent
+                              : "save_revision"
+                        }
+                        onChange={(e) => setSaveIntent(e.target.value as InternalSaveIntent)}
+                      >
+                        <option value="update_existing">Update current revision</option>
+                        <option value="save_revision">Save revision (R2, R3…)</option>
+                      </select>
+                      {saveIntent === "save_revision" ? (
+                        <span className="muted small" style={{ display: "block", marginTop: 4 }}>
+                          Default for scope changes. Creates the next revision and keeps prior rows frozen.
+                        </span>
+                      ) : (
+                        <span className="muted small" style={{ display: "block", marginTop: 4 }}>
+                          Overwrites this revision row without incrementing R#.
+                        </span>
+                      )}
+                      {saveRevisionBlockReason && saveIntent === "save_revision" ? (
+                        <span className="muted small" style={{ display: "block", marginTop: 4, color: "#b45309" }}>
+                          {saveRevisionBlockReason}
+                        </span>
+                      ) : null}
+                      {updateQuoteBlockReason && saveIntent === "update_existing" ? (
+                        <span className="muted small" style={{ display: "block", marginTop: 4, color: "#b45309" }}>
+                          {updateQuoteBlockReason}
+                        </span>
+                      ) : null}
+                    </label>
+                  ) : (
+                    <div>
+                      <p className="muted small" style={{ margin: 0 }}>
+                        Restore copies this snapshot forward as the next revision in the same ESF family.
+                      </p>
+                      {restoreRevisionBlockReason ? (
+                        <p className="muted small" style={{ margin: "8px 0 0", color: "#b45309" }}>
+                          {restoreRevisionBlockReason}
+                        </p>
+                      ) : null}
+                    </div>
+                  )}
+                  <label>
+                    Quote status (persisted)
+                    <input
+                      value={quoteWorkflowStatus}
+                      onChange={(e) => setQuoteWorkflowStatus(e.target.value)}
+                      placeholder="draft, sent, follow_up…"
+                      disabled={hydratedIsCurrentRevision === false}
+                    />
+                  </label>
+                  <label style={{ gridColumn: hydratedIsCurrentRevision !== false ? "1 / -1" : undefined }}>
+                    Revision note (optional)
+                    <input value={revisionNoteDraft} onChange={(e) => setRevisionNoteDraft(e.target.value)} placeholder="Visible on quote row metadata" />
+                  </label>
+                  <div style={{ gridColumn: "1 / -1", display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+                    <button
+                      type="button"
+                      className="btn primary"
+                      disabled={
+                        hydratedIsCurrentRevision === false
+                          ? Boolean(restoreRevisionBlockReason)
+                          : Boolean(savePanelPrimaryBlockReason)
+                      }
+                      title={
+                        hydratedIsCurrentRevision === false
+                          ? restoreRevisionBlockReason ?? undefined
+                          : savePanelPrimaryBlockReason ?? undefined
+                      }
+                      onClick={() =>
+                        hydratedIsCurrentRevision === false
+                          ? void handleRestoreAsRevision()
+                          : void handleSubmit(
+                              saveIntent === "create" ? "save_revision" : saveIntent
+                            )
+                      }
+                    >
+                      {restoreBusy || (submitBusy && pendingSubmitIntent)
+                        ? "Working…"
+                        : savePrimaryLabel}
+                    </button>
+                    {hydratedIsCurrentRevision === false && familyLatestQuoteId && familyLatestQuoteId !== urlQuoteId ? (
+                      <button type="button" className="btn secondary" onClick={openLatestRevisionInPlace}>
+                        Open latest revision
+                      </button>
+                    ) : null}
+                  </div>
+                  <details style={{ gridColumn: "1 / -1" }}>
+                    <summary className="muted small">More save options</summary>
+                    <div style={{ marginTop: 10 }}>
+                      <button
+                        type="button"
+                        className="btn secondary btn-sm"
+                        disabled={Boolean(savePanelPrimaryBlockReason) && hydratedIsCurrentRevision !== false}
+                        onClick={() => void handleSubmit("save_as_new_quote")}
+                      >
+                        Save as separate new quote
+                      </button>
+                      <p className="muted small" style={{ marginTop: 8 }}>
+                        Starts a new ESF number family — only when you intentionally want a separate quote record.
+                      </p>
+                    </div>
+                  </details>
                 </div>
               </div>
             ) : null}
@@ -2577,13 +2915,21 @@ export default function InternalEstimateApp() {
                   View in Quote Library
                 </a>
                 <span className="muted small" style={{ marginLeft: 12 }}>
-                  Latest saved reference: <strong>{lastSavedQuoteNumber}</strong>
-                  {hydratedDisplayRevision ? (
+                  {hydratedIsCurrentRevision === false ? (
                     <>
-                      {" "}
-                      · editing <strong>{hydratedDisplayRevision}</strong>
+                      Opened: <strong>{hydratedDisplayRevision ?? lastSavedQuoteNumber}</strong>
+                      {familyLatestQuoteNumber ? (
+                        <>
+                          {" "}
+                          · Latest in family: <strong>{familyLatestQuoteNumber}</strong>
+                        </>
+                      ) : null}
                     </>
-                  ) : null}
+                  ) : (
+                    <>
+                      Editing: <strong>{hydratedDisplayRevision ?? lastSavedQuoteNumber}</strong>
+                    </>
+                  )}
                 </span>
               </p>
             ) : null}
@@ -2804,26 +3150,38 @@ export default function InternalEstimateApp() {
             Print estimate
           </button>
           {urlQuoteId ? (
-            <>
-              <button
-                type="button"
-                className="btn secondary btn-sm"
-                disabled={Boolean(updateQuoteBlockReason)}
-                title={updateQuoteBlockReason ?? undefined}
-                onClick={() => void handleSubmit("update_existing")}
-              >
-                {submitBusy && pendingSubmitIntent === "update_existing" ? "Updating…" : "Update"}
-              </button>
+            hydratedIsCurrentRevision === false ? (
               <button
                 type="button"
                 className="btn primary btn-sm"
-                disabled={Boolean(saveRevisionBlockReason)}
-                title={saveRevisionBlockReason ?? undefined}
-                onClick={() => void handleSubmit("save_revision")}
+                disabled={Boolean(restoreRevisionBlockReason)}
+                title={restoreRevisionBlockReason ?? undefined}
+                onClick={() => void handleRestoreAsRevision()}
               >
-                {submitBusy && pendingSubmitIntent === "save_revision" ? "Saving…" : "Save revision"}
+                {restoreBusy ? "Restoring…" : "Restore as new revision"}
               </button>
-            </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="btn secondary btn-sm"
+                  disabled={Boolean(updateQuoteBlockReason)}
+                  title={updateQuoteBlockReason ?? undefined}
+                  onClick={() => void handleSubmit("update_existing")}
+                >
+                  {submitBusy && pendingSubmitIntent === "update_existing" ? "Updating…" : "Update"}
+                </button>
+                <button
+                  type="button"
+                  className="btn primary btn-sm"
+                  disabled={Boolean(saveRevisionBlockReason)}
+                  title={saveRevisionBlockReason ?? undefined}
+                  onClick={() => void handleSubmit("save_revision")}
+                >
+                  {submitBusy && pendingSubmitIntent === "save_revision" ? "Saving…" : "Save revision"}
+                </button>
+              </>
+            )
           ) : (
             <button type="button" className="btn primary btn-sm" disabled={submitBusy} onClick={() => void handleSubmit()}>
               {submitBusy ? "Saving…" : "Save quote"}
@@ -2831,6 +3189,88 @@ export default function InternalEstimateApp() {
           )}
         </div>
       </nav>
+
+      {startNewQuoteModalOpen ? (
+        <div className="ie-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="ie-start-new-title">
+          <div className="ie-modal-card">
+            <h3 id="ie-start-new-title" style={{ marginTop: 0 }}>
+              Start a new quote?
+            </h3>
+            <p className="muted small">
+              You have unsaved changes on the current estimate. What would you like to do before starting a new quote?
+            </p>
+            <div className="ie-modal-actions">
+              {hydratedIsCurrentRevision === false ? (
+                <>
+                  <button
+                    type="button"
+                    className="btn primary"
+                    disabled={Boolean(restoreRevisionBlockReason)}
+                    onClick={() => {
+                      setStartNewQuoteModalOpen(false);
+                      startNewAfterSaveRef.current = "restore";
+                      void handleRestoreAsRevision();
+                    }}
+                  >
+                    Restore as new revision, then start new
+                  </button>
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    onClick={() => {
+                      setStartNewQuoteModalOpen(false);
+                      startNewAfterSaveRef.current = "save_as_new_quote";
+                      void handleSubmit("save_as_new_quote");
+                    }}
+                  >
+                    Save as separate new quote, then start new
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="btn primary"
+                    disabled={Boolean(saveRevisionBlockReason)}
+                    onClick={() => {
+                      setStartNewQuoteModalOpen(false);
+                      startNewAfterSaveRef.current = "save_revision";
+                      void handleSubmit("save_revision");
+                    }}
+                  >
+                    Save revision, then start new
+                  </button>
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    disabled={Boolean(updateQuoteBlockReason)}
+                    onClick={() => {
+                      setStartNewQuoteModalOpen(false);
+                      startNewAfterSaveRef.current = "update_existing";
+                      void handleSubmit("update_existing");
+                    }}
+                  >
+                    Update current quote, then start new
+                  </button>
+                </>
+              )}
+              <button
+                type="button"
+                className="btn secondary btn-danger-quiet"
+                onClick={() => {
+                  setStartNewQuoteModalOpen(false);
+                  beginNewQuote();
+                }}
+              >
+                Discard changes and start new
+              </button>
+              <button type="button" className="btn ghost" onClick={() => setStartNewQuoteModalOpen(false)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <footer className="footer">eliteOS Internal Estimate Head · Elite Stone Fabrication · {new Date().getFullYear()}</footer>
       </div>

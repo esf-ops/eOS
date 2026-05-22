@@ -23,6 +23,7 @@ import { fetchEliteProgramMaterialColors } from "./materialColorsCatalog.js";
 import * as esf from "./quoteEsfNumber.js";
 import { validateInternalQuotePatchContext } from "./internalQuotePatchPolicy.js";
 import { processInternalQuoteSave } from "./internalQuoteSave.js";
+import { restoreInternalQuoteAsNewRevision } from "./internalQuoteRestore.js";
 import { generateQuoteNumber, isMissingRelationError } from "./quotePersist.js";
 
 
@@ -540,5 +541,98 @@ export function attachInternalQuoteRoutes(app, deps) {
     }
   });
 
-  console.log("[quotes] mounted /api/internal-quotes/* (calculate, save, list, material-colors, get, patch, duplicate)");
+  app.get("/api/internal-quotes/:id/revisions", ...stack, async (req, res) => {
+    try {
+      const id = String(req.params.id || "").trim();
+      if (!isUuid(id)) return res.status(400).json({ ok: false, error: "Invalid id" });
+      const db = getSupabase();
+      const { orgId, hasQuoteHeadersOrg } = await loadInternalOrgScope(db, req);
+      let qb0 = db
+        .from("quote_headers")
+        .select("id,quote_source,quote_family_root_id,quote_number_base")
+        .eq("id", id)
+        .eq("quote_source", "internal_quote")
+        .limit(1);
+      qb0 = applyQuoteHeaderOrgScope(qb0, orgId, hasQuoteHeadersOrg);
+      const { data: seedRows, error: seedErr } = await qb0;
+      if (seedErr) throw seedErr;
+      const seed = seedRows?.[0];
+      if (!seed) return res.status(404).json({ ok: false, error: "Not found" });
+      const root = String(seed.quote_family_root_id || seed.id);
+      let qb = db
+        .from("quote_headers")
+        .select(
+          "id,quote_number,revision_number,revision_label,is_current_revision,grand_total,quote_status,created_at,updated_at,quote_family_root_id"
+        )
+        .eq("quote_source", "internal_quote")
+        .or(`id.eq.${root},quote_family_root_id.eq.${root}`)
+        .order("revision_number", { ascending: true });
+      qb = applyQuoteHeaderOrgScope(qb, orgId, hasQuoteHeadersOrg);
+      const { data, error } = await qb;
+      if (error) throw error;
+      res.json({
+        ok: true,
+        quote_family_root_id: root,
+        quote_number_base: seed.quote_number_base ?? null,
+        revisions: (data || []).map((r) => ({
+          id: r.id,
+          quote_number: r.quote_number,
+          revision_number: r.revision_number,
+          revision_label: r.revision_label,
+          is_current_revision: r.is_current_revision,
+          grand_total: r.grand_total,
+          quote_status: r.quote_status,
+          created_at: r.created_at,
+          updated_at: r.updated_at
+        }))
+      });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  app.post("/api/internal-quotes/:id/restore-as-revision", ...stack, jsonParser, async (req, res) => {
+    try {
+      const restoreFromId = String(req.params.id || "").trim();
+      if (!isUuid(restoreFromId)) return res.status(400).json({ ok: false, error: "Invalid id" });
+      const db = getSupabase();
+      const organizationContext = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
+      const userEmail = String(req.user?.email || req.user?.id || "unknown");
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const revisionNote = body.revision_note ?? body.revisionNote ?? null;
+      const estimatorDisplayName = await resolveEstimatorDisplayNameFromDb(db, req, body);
+      const result = await restoreInternalQuoteAsNewRevision({
+        db,
+        restoreFromId,
+        organizationContext,
+        userEmail,
+        revisionNote,
+        internalStatuses: INTERNAL_STATUSES,
+        buildInternalEstimateSummary,
+        pricingModeLabel,
+        estimatorDisplayName
+      });
+      if (!result.ok) {
+        return res.status(result.httpStatus || 400).json({ ok: false, error: result.error });
+      }
+      res.json({
+        ok: true,
+        quoteId: result.quoteId,
+        quote_id: result.quoteId,
+        quote_number: result.quote_number,
+        revision_number: result.revision_number,
+        revision_label: result.revision_label,
+        quote_family_root_id: result.quote_family_root_id,
+        is_current_revision: result.is_current_revision,
+        save_mode: result.save_mode,
+        monday_sync_status: result.monday_sync_status ?? null
+      });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  console.log(
+    "[quotes] mounted /api/internal-quotes/* (calculate, save, list, material-colors, get, patch, duplicate, revisions, restore-as-revision)"
+  );
 }
