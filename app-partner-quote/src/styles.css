@@ -1,0 +1,241 @@
+:root {
+  --pq-primary: #0f766e;
+  --pq-secondary: #115e59;
+  --pq-bg: #f8fafc;
+  --pq-card: #fff;
+  --pq-text: #0f172a;
+  --pq-muted: #64748b;
+  --pq-border: #e2e8f0;
+  --pq-warn-bg: #fffbeb;
+  --pq-warn-border: #fcd34d;
+}
+
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  background: var(--pq-bg);
+  color: var(--pq-text);
+  line-height: 1.5;
+}
+.pq-page {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px 20px 48px;
+}
+.pq-hero {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+.pq-logo-partner {
+  max-height: 56px;
+  max-width: 200px;
+  object-fit: contain;
+}
+.pq-logo-fallback {
+  max-width: 180px;
+  height: auto;
+}
+.pq-hero h1 {
+  margin: 0 0 4px;
+  font-size: 1.5rem;
+}
+.pq-sub {
+  margin: 0;
+  color: var(--pq-muted);
+  font-size: 0.95rem;
+}
+.pq-pilot-banner {
+  background: var(--pq-warn-bg);
+  border: 1px solid var(--pq-warn-border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  font-size: 0.9rem;
+}
+.pq-card {
+  background: var(--pq-card);
+  border: 1px solid var(--pq-border);
+  border-radius: 10px;
+  padding: 16px 18px;
+  margin-bottom: 16px;
+}
+.pq-card h2 {
+  margin: 0 0 12px;
+  font-size: 1.1rem;
+}
+.pq-context-card {
+  border-left: 4px solid var(--pq-primary);
+}
+.pq-context-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.pq-label {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--pq-muted);
+  margin-bottom: 4px;
+}
+.pq-grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.pq-grid-main {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .pq-grid-main,
+  .pq-context-grid,
+  .pq-grid2 {
+    grid-template-columns: 1fr;
+  }
+}
+.pq-span2 {
+  grid-column: 1 / -1;
+}
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.9rem;
+}
+input,
+select,
+textarea {
+  font: inherit;
+  border: 1px solid var(--pq-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.pq-fieldset {
+  border: 1px solid var(--pq-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 12px 0;
+}
+.pq-radio {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+}
+.pq-btn {
+  border: 1px solid var(--pq-border);
+  background: #fff;
+  padding: 10px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.95rem;
+}
+.pq-btn.primary {
+  background: var(--pq-primary);
+  border-color: var(--pq-primary);
+  color: #fff;
+}
+.pq-btn.primary:hover {
+  background: var(--pq-secondary);
+}
+.pq-btn.secondary {
+  background: #f0fdfa;
+  border-color: var(--pq-primary);
+  color: var(--pq-primary);
+}
+.pq-btn.ghost {
+  background: transparent;
+}
+.pq-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.pq-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+.pq-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.pq-tabs button {
+  border: 1px solid var(--pq-border);
+  background: #fff;
+  padding: 8px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.pq-tabs button.on {
+  border-color: var(--pq-primary);
+  background: #f0fdfa;
+  color: var(--pq-primary);
+}
+.pq-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.pq-muted {
+  color: var(--pq-muted);
+  font-size: 0.9rem;
+}
+.pq-error {
+  color: #b91c1c;
+}
+.pq-ok {
+  color: var(--pq-primary);
+}
+.pq-warn {
+  color: #b45309;
+  font-size: 0.85rem;
+  margin: 4px 0 0;
+}
+.pq-warn-list {
+  color: #b45309;
+  font-size: 0.9rem;
+}
+.pq-error-card {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+.pq-total {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--pq-primary);
+  margin: 0 0 8px;
+}
+.pq-estimate-card {
+  position: sticky;
+  top: 16px;
+}
+.pq-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+.pq-table th,
+.pq-table td {
+  border-bottom: 1px solid var(--pq-border);
+  padding: 8px 6px;
+  text-align: left;
+}
+.pq-pick-list {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
