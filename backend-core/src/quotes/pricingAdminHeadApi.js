@@ -13,6 +13,7 @@ import {
 } from "../organizations/organizationContext.js";
 import { logAction } from "../auth/auditLog.js";
 import { isPricingAdminFoundationInstalled, resolvePricingAdminConfig } from "./pricingConfigResolver.js";
+import { attachPartnerSetupAdminApi } from "./partnerSetupAdminApi.js";
 
 const jsonParser = express.json({ limit: "512kb" });
 
@@ -519,7 +520,9 @@ export function attachPricingAdminHeadApi(app, { requireAuth, requireRole, requi
     }
   });
 
+  attachPartnerSetupAdminApi(app, { requireAuth, requireRole, requireHeadAccess, getSupabase });
+
   console.log(
-    "[pricing-admin-head] mounted GET/POST/PATCH /api/pricing-admin/price-groups*, rates*, addons*, rules*, audit-log, status, config-preview"
+    "[pricing-admin-head] mounted GET/POST/PATCH /api/pricing-admin/price-groups*, rates*, addons*, rules*, audit-log, status, config-preview, partner-setup/*"
   );
 }

@@ -580,6 +580,12 @@ export function attachQuotePricingAdminApi(app, { requireAuth, requireRole, requ
         {
           account_name: String(b.account_name || "").trim() || "Unnamed partner",
           account_type: String(b.account_type || "dealer").trim() || "dealer",
+          account_slug:
+            b.account_slug != null
+              ? String(b.account_slug).trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || null
+              : null,
+          display_name: b.display_name != null ? String(b.display_name).trim() || null : null,
+          status: String(b.status || "active").trim().toLowerCase() === "inactive" ? "inactive" : "active",
           monday_account_id: b.monday_account_id != null ? String(b.monday_account_id).trim() || null : null,
           moraware_account_id: b.moraware_account_id != null ? String(b.moraware_account_id).trim() || null : null,
           default_sales_rep: b.default_sales_rep != null ? String(b.default_sales_rep).trim() || null : null,
@@ -635,6 +641,13 @@ export function attachQuotePricingAdminApi(app, { requireAuth, requireRole, requ
       }
       if (b.default_branch !== undefined) patch.default_branch = b.default_branch == null ? null : String(b.default_branch).trim();
       if (b.is_active !== undefined) patch.is_active = Boolean(b.is_active);
+      if (b.account_slug != null) patch.account_slug = String(b.account_slug).trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || null;
+      if (b.display_name != null) patch.display_name = String(b.display_name).trim() || null;
+      if (b.status != null) {
+        const st = String(b.status).trim().toLowerCase();
+        patch.status = st === "inactive" ? "inactive" : "active";
+        patch.is_active = st !== "inactive";
+      }
       if (b.metadata !== undefined) patch.metadata = typeof b.metadata === "object" && b.metadata ? b.metadata : {};
       const { data, error } = await db.from("quote_partner_accounts").update(patch).eq("id", id).select("*").limit(1);
       if (error) {

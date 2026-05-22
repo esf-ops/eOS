@@ -73,6 +73,30 @@ h1 {
   background: #f0fdfa;
   color: var(--primary);
 }
+tr.row-selected td {
+  background: #f0fdfa;
+}
+ul.checklist {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+ul.checklist li {
+  padding: 4px 0;
+}
+ul.checklist li.ok-item {
+  color: #0f766e;
+}
+ul.checklist li.bad-item {
+  color: #b45309;
+}
+textarea {
+  width: 100%;
+  font: inherit;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
 .grid2 {
   display: grid;
   grid-template-columns: 1fr 1fr;

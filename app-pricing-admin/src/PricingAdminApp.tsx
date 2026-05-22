@@ -2,8 +2,9 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { apiGetJson, apiPatchJson, ApiError } from "@quote-lib/api";
 import { config, EOS_LOGO_URL } from "@quote-lib/config";
 import { getSupabase } from "./lib/supabase";
+import PartnerSetupTab from "./PartnerSetupTab";
 
-type Tab = "dashboard" | "groups" | "addons" | "rules" | "audit" | "planned";
+type Tab = "dashboard" | "partner_setup" | "groups" | "addons" | "rules" | "audit" | "planned";
 
 type Row = Record<string, unknown>;
 
@@ -257,6 +258,7 @@ export default function PricingAdminApp() {
             {(
               [
                 ["dashboard", "Dashboard"],
+                ["partner_setup", "Partner setup"],
                 ["groups", "Material groups"],
                 ["addons", "Add-ons"],
                 ["rules", "Public rules"],
@@ -269,6 +271,10 @@ export default function PricingAdminApp() {
               </button>
             ))}
           </div>
+
+          {tab === "partner_setup" ? (
+            <PartnerSetupTab sessionToken={sessionToken} onMessage={setMsg} onError={setErr} />
+          ) : null}
 
           {tab === "dashboard" ? (
             <div className="card">
