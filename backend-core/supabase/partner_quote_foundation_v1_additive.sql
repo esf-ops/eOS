@@ -101,10 +101,13 @@ ALTER TABLE public.quote_headers
 CREATE INDEX IF NOT EXISTS idx_quote_headers_created_by_user_id
   ON public.quote_headers (created_by_user_id)
   WHERE created_by_user_id IS NOT NULL;
-
--- ---------------------------------------------------------------------------
--- 5) One active pricing assignment per partner (partial unique index)
--- ---------------------------------------------------------------------------
-CREATE UNIQUE INDEX IF NOT EXISTS uq_quote_partner_pricing_assignments_one_active
-  ON public.quote_partner_pricing_assignments (partner_account_id)
-  WHERE is_active = true AND (ends_at IS NULL OR ends_at > now());
+-- Removed optional invalid Postgres index predicate using now/current_date/current_timestamp.
+-- This index can be replaced later with a simpler active-only constraint or trigger.
+--
+--
+---- ---------------------------------------------------------------------------
+---- 5) One active pricing assignment per partner (partial unique index)
+---- ---------------------------------------------------------------------------
+--CREATE UNIQUE INDEX IF NOT EXISTS uq_quote_partner_pricing_assignments_one_active
+--  ON public.quote_partner_pricing_assignments (partner_account_id)
+--  WHERE is_active = true AND (ends_at IS NULL OR ends_at > now());
