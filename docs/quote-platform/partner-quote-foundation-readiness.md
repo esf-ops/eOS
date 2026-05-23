@@ -364,6 +364,18 @@ Creates: `quote_partner_user_access`, `quote_partner_branding_settings`, columns
 
 ---
 
+## 18. Leakage verification & RLS draft (2026-05-19)
+
+| Artifact | Path |
+|----------|------|
+| DB-backed leakage script | `backend-core/src/scripts/verifyPartnerQuoteLeakage.mjs` |
+| Operator guide | `docs/quote-platform/partner-quote-leakage-verification.md` |
+| RLS draft (not applied) | `backend-core/supabase/partner_quote_rls_draft.sql` |
+
+Run leakage checks only with `PARTNER_LEAK_TEST_CONFIRM=yes` and explicit test UUIDs (no partner names in code). **`app-partner-quote`** is an internal pilot shell — external launch blockers remain in the operator guide.
+
+---
+
 ## References
 
 - `docs/quote-platform/three-head-quote-architecture.md`
