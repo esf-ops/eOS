@@ -119,7 +119,8 @@ export function attachInternalQuoteRoutes(app, deps) {
       });
     }
   };
-  const stack = [requireAuth(), headQuote, rejectPartnerOnlyUser];
+  /** Partner users blocked before head check so 403 always uses partner_use_partner_routes (not head-only denial). */
+  const stack = [requireAuth(), rejectPartnerOnlyUser, headQuote];
 
   app.post("/api/internal-quotes/calculate", ...stack, jsonParser, async (req, res) => {
     try {

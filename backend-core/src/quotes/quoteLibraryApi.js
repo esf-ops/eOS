@@ -253,7 +253,8 @@ export function attachQuoteLibraryRoutes(app, deps) {
       });
     }
   };
-  const stack = [requireAuth(), requireHeadAccess("quote_library", { getSupabase }), rejectPartnerOnlyUser];
+  /** Partner users blocked before head check so 403 always uses partner_use_partner_routes. */
+  const stack = [requireAuth(), rejectPartnerOnlyUser, requireHeadAccess("quote_library", { getSupabase })];
 
   app.get("/api/quote-library/quotes", ...stack, async (req, res) => {
     try {

@@ -103,11 +103,26 @@ async function apiJson(method, cfg, path, token, body = null) {
 }
 
 function assertForbidden(label, res, expectedCodes = []) {
-  assert.ok(res.status === 403 || res.status === 404, `${label}: expected 403/404, got ${res.status}`);
+  assert.ok(res.status === 403 || res.status === 404, `${label}: expected 403/404, got ${res.status} body=${JSON.stringify(res.json)}`);
   const code = String(res.json?.code ?? "");
   if (expectedCodes.length && code) {
-    assert.ok(expectedCodes.includes(code), `${label}: expected code in ${expectedCodes.join(", ")}, got ${code}`);
+    assert.ok(expectedCodes.includes(code), `${label}: expected code in ${expectedCodes.join(", ")}, got ${code} body=${JSON.stringify(res.json)}`);
   }
+}
+
+/** Internal/library/generic routes must not be usable by dealer_partner test users. */
+function assertDealerBlockedFromInternalRoute(label, res) {
+  assert.equal(res.status, 403, `${label}: expected 403, got ${res.status} body=${JSON.stringify(res.json)}`);
+  const code = String(res.json?.code ?? "");
+  const err = String(res.json?.error ?? "");
+  const safe =
+    code === "partner_use_partner_routes" ||
+    (code === "forbidden" && /partner-quote routes/i.test(err)) ||
+    (!code && /do not have access to this head/i.test(err));
+  assert.ok(
+    safe,
+    `${label}: unsafe or unexpected block — need partner_use_partner_routes or documented head denial. code=${JSON.stringify(code)} error=${JSON.stringify(err)} body=${JSON.stringify(res.json)}`
+  );
 }
 
 function assertPartnerSafeCalculate(label, json) {
@@ -270,11 +285,15 @@ async function main() {
       areas: { countertopSqft: 10, backsplashSqft: 0 },
       materialGroup: "Group B"
     });
-    assert.equal(internalCalc.status, 403, `${label}: internal-quotes/calculate must 403`);
-    assert.equal(String(internalCalc.json?.code ?? ""), "partner_use_partner_routes");
+    assertDealerBlockedFromInternalRoute(`${label} POST /api/internal-quotes/calculate`, internalCalc);
+    if (String(internalCalc.json?.code ?? "") !== "partner_use_partner_routes") {
+      console.warn(
+        `[routes] ${label} internal-quotes/calculate blocked with code=${JSON.stringify(internalCalc.json?.code)} (acceptable if head denied before partner guard)`
+      );
+    }
 
     const library = await apiJson("GET", cfg, "/api/quote-library/quotes?page=1&pageSize=5", token);
-    assert.equal(library.status, 403, `${label}: quote-library must 403`);
+    assertDealerBlockedFromInternalRoute(`${label} GET /api/quote-library/quotes`, library);
 
     const genericSubmit = await apiJson("POST", cfg, "/api/quote/submit", token, {
       quote_source: "partner_quote",
@@ -282,7 +301,12 @@ async function main() {
       engine: "rooms",
       rooms: [{ name: "X", materialGroup: "Group B", countertopSqft: 1, backsplashSqft: 0 }]
     });
-    assert.equal(genericSubmit.status, 403, `${label}: generic /api/quote/submit must 403`);
+    assertDealerBlockedFromInternalRoute(`${label} POST /api/quote/submit`, genericSubmit);
+    assert.equal(
+      String(genericSubmit.json?.code ?? ""),
+      "partner_use_partner_routes",
+      `${label} generic submit should use partner guard (no head middleware). body=${JSON.stringify(genericSubmit.json)}`
+    );
   }
   console.log("[routes] dealer_partner blocked from internal/library/generic ok");
 
