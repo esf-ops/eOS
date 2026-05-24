@@ -187,6 +187,8 @@ export type MeasuredRoom = {
     taxAmount: number;
     applied: boolean;
   };
+  /** True when this room is priced via Vanity Program (fixed program pricing). False/undefined = countertop pricing. */
+  isVanityProgram?: boolean;
 };
 
 export type RoomEngineTotals = {

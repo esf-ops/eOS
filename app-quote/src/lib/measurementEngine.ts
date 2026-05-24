@@ -261,7 +261,7 @@ export function qualifyingSfFromRoomDrafts(rooms: RoomDraft[]): number {
 }
 
 export function measurementSummaryForRoom(room: RoomDraft, mode: RoomCalcMode): { lines: string[] } {
-  if (room.roomType === "Vanity") return { lines: ["Vanity program room (fixed pricing path)."] };
+  if (room.roomType === "Vanity" && room.vanity.isVanityProgram !== false) return { lines: ["Vanity program room (fixed pricing path)."] };
   if (mode === "Manual Sq Ft") {
     const lines: string[] = [];
     if (room.direct.counter > 0) lines.push(`Manual countertop: ${room.direct.counter.toFixed(2)} sf`);

@@ -83,7 +83,8 @@ function overlapModeOptionLabel(mode: GuidedOverlapMode): string {
 }
 
 function roomTotalsPreview(room: RoomDraft): { counter: number; splashFhb: number; total: number } {
-  if (room.roomType === "Vanity") return { counter: 0, splashFhb: 0, total: 0 };
+  // Vanity Program rooms have fixed pricing; standard-mode vanity rooms price as countertop.
+  if (room.roomType === "Vanity" && room.vanity.isVanityProgram !== false) return { counter: 0, splashFhb: 0, total: 0 };
   let c = 0;
   let s = 0;
   let f = 0;
@@ -368,7 +369,16 @@ export default function RoomScopeBuilder({
                 Type
                 <select
                   value={room.roomType}
-                  onChange={(e) => onRoomsChange(updateRoom(rooms, room.id, { roomType: e.target.value }))}
+                  onChange={(e) => {
+                    const nextType = e.target.value;
+                    const patch: Partial<RoomDraft> = { roomType: nextType };
+                    // When changing TO Vanity for the first time, default to standard countertop
+                    // pricing so the estimator must explicitly opt in to the Vanity Program.
+                    if (nextType === "Vanity" && room.roomType !== "Vanity") {
+                      patch.vanity = { ...room.vanity, isVanityProgram: false };
+                    }
+                    onRoomsChange(updateRoom(rooms, room.id, patch));
+                  }}
                 >
                   {["Kitchen", "Island", "Laundry", "Bar", "Pantry", "Fireplace", "Shower", "Vanity", "Other"].map((t) => (
                     <option key={t} value={t}>
@@ -477,9 +487,31 @@ export default function RoomScopeBuilder({
             ) : null}
 
             {room.roomType === "Vanity" ? (
+              <div className="room-vanity-mode-bar" style={{ marginTop: 12, marginBottom: 4 }}>
+                <label style={{ fontWeight: 600 }}>
+                  Vanity pricing
+                  <select
+                    value={room.vanity.isVanityProgram !== false ? "program" : "standard"}
+                    onChange={(e) =>
+                      onRoomsChange(
+                        updateRoomNested(rooms, room.id, "vanity", {
+                          ...room.vanity,
+                          isVanityProgram: e.target.value === "program"
+                        })
+                      )
+                    }
+                  >
+                    <option value="standard">Standard countertop (material + dimensions)</option>
+                    <option value="program">2026 Vanity Program (opt-in)</option>
+                  </select>
+                </label>
+              </div>
+            ) : null}
+
+            {room.roomType === "Vanity" && room.vanity.isVanityProgram !== false ? (
               <div className="room-vanity-block">
                 <p className="muted small">
-                  2026 Vanity Program — 22.5″ standard depth. PROMO / Elite 100 remnants. Customer display rounds to nearest $5.
+                  2026 Vanity Program — 22.5″ standard depth. Promo / Elite 100 remnants. Customer display rounds to nearest $5.
                 </p>
                 <div className="grid3">
                   <label>
@@ -555,8 +587,8 @@ export default function RoomScopeBuilder({
                             )
                           }
                         >
-                          <option value="kitchen_over_35">Kitchen tops ≥ 35 sf</option>
-                          <option value="kitchen_under_35">Kitchen tops &lt; 35 sf</option>
+                          <option value="kitchen_over_35">Kitchen tops 35 sq ft or more</option>
+                          <option value="kitchen_under_35">Kitchen tops under 35 sq ft</option>
                         </select>
                       </label>
                       <label>
@@ -587,7 +619,7 @@ export default function RoomScopeBuilder({
                             )
                           }
                         >
-                          <option value="oval_white">White oval (included)</option>
+                          <option value="oval_white">White oval (no extra charge)</option>
                           <option value="oval_bisque">Bisque oval (+$10/sink)</option>
                           <option value="rectangular_white">Rectangular white (+$25/sink)</option>
                           <option value="rectangular_bisque">Rectangular bisque (+$25/sink)</option>
@@ -1430,6 +1462,15 @@ export default function RoomScopeBuilder({
           </div>
         );
       })}
+
+      <div className="room-builder-toolbar room-builder-toolbar-bottom">
+        <button type="button" className="btn secondary" onClick={addRoom}>
+          + Add room / area
+        </button>
+        <span className="muted small">
+          {rooms.length} room{rooms.length === 1 ? "" : "s"}
+        </span>
+      </div>
     </div>
   );
 }

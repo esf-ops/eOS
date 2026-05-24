@@ -167,7 +167,7 @@ function sumRoomAddons(room: RoomDraft): { extras: number; addons: MeasuredRoom[
 
 /** Full-height backsplash sf used for FHB outlet charges — mirrors `measureRoomDraft` (non-vanity). */
 function totalFhbScopeSfForOutletCharges(room: RoomDraft): number {
-  if (room.roomType === "Vanity") return 0;
+  if (room.roomType === "Vanity" && room.vanity.isVanityProgram !== false) return 0;
   let fhb = 0;
   if (room.calcMode === "Guided Shape") {
     const norm = normalizeGuidedShapeRoom(room);
@@ -230,11 +230,11 @@ export function priceVanityRoomDraft(room: RoomDraft, qualifyingKitchenCounterSf
   });
 }
 
-/** Backend `vanities[]` payload for internal calculate/save. */
+/** Backend `vanities[]` payload for internal calculate/save. Only includes Vanity Program rooms. */
 export function serializeVanitiesForApi(rooms: RoomDraft[], qualifyingKitchenCounterSf: number): Array<Record<string, unknown>> {
   const out: Array<Record<string, unknown>> = [];
   for (const r of rooms) {
-    if (r.roomType !== "Vanity") continue;
+    if (r.roomType !== "Vanity" || r.vanity.isVanityProgram === false) continue;
     const sk = r.vanity.size;
     if (!sk || sk === "none") continue;
     const priced = priceVanityRoomDraft(r, qualifyingKitchenCounterSf);
@@ -261,7 +261,7 @@ export function serializeVanitiesForApi(rooms: RoomDraft[], qualifyingKitchenCou
 export function mergeRoomDraftsIntoGlobalAddOns(rooms: RoomDraft[]): Record<string, number> {
   const acc: Record<string, number> = {};
   for (const room of rooms) {
-    if (room.roomType === "Vanity") continue;
+    if (room.roomType === "Vanity" && room.vanity.isVanityProgram !== false) continue;
     for (const spec of ADDON_CATALOG) {
       const qty = Math.max(0, Math.floor(Number(room.addons[spec.id]) || 0));
       if (!qty) continue;
@@ -308,7 +308,9 @@ export function measureRoomDraft(
 
   let roomUseTax: MeasuredRoom["useTax"];
 
-  if (room.roomType === "Vanity") {
+  // Only enter vanity program path when isVanityProgram is not explicitly false.
+  // Standard-mode vanity rooms (isVanityProgram === false) fall through to normal countertop math.
+  if (room.roomType === "Vanity" && room.vanity.isVanityProgram !== false) {
     const sk = room.vanity.size;
     const q = Math.max(1, Math.floor(room.vanity.qty) || 1);
     let vanityProgram: VanityProgram2026Result | null = null;
@@ -381,6 +383,7 @@ export function measureRoomDraft(
       priceableSplash: 0,
       fixedTotal: round2(fixedTotal),
       vanityTier,
+      isVanityProgram: true,
       vanityProgram: vanityProgram
         ? {
             programYear: vanityProgram.programYear,
@@ -743,7 +746,8 @@ function buildSelectedMaterialBreakdownCore(
   for (const room of rooms) {
     const roomName = room.name.trim() || room.roomType || "Room";
 
-    if (room.roomType === "Vanity") {
+    // Vanity Program rooms are priced separately; standard-mode vanity rooms price as countertop.
+    if (room.roomType === "Vanity" && room.vanity.isVanityProgram !== false) {
       continue;
     }
 
@@ -953,7 +957,8 @@ export function buildSelectedMaterialBreakdown(
   let taxAmount = 0;
   let maxPct = 0;
   for (const room of rooms) {
-    if (room.roomType === "Vanity") continue;
+    // Vanity Program rooms have fixed pricing with no use-tax; standard-mode vanity rooms price as countertop.
+    if (room.roomType === "Vanity" && room.vanity.isVanityProgram !== false) continue;
     const pct = resolveRoomUseTaxPercent(room, projectDefault);
     if (pct <= 0) continue;
     const roomCt = buildSelectedMaterialBreakdownCore([room], materialBasis, {
@@ -1104,7 +1109,7 @@ export function buildCustomerRoomAreaCostBreakdown(params: {
     const key = normalizeRoomMatchKey(displayName);
     roomKeys.push({ id: m.id, key });
 
-    const isVanity = m.type === "Vanity";
+    const isVanity = Boolean(m.isVanityProgram);
     const countertopSf = round2(
       Number(m.chargeableCounter ?? m.priceableCounter ?? m.counter) || 0
     );
@@ -1374,7 +1379,7 @@ export function aggregateComparisonScope(
   const groups = new Set<string>();
   let pieceOverride = false;
   for (const r of drafts) {
-    if (r.roomType === "Vanity") continue;
+    if (r.roomType === "Vanity" && r.vanity.isVanityProgram !== false) continue;
     if (r.calcMode === "Guided Shape") {
       for (const p of r.guidedPieces) {
         if (p.materialOverride && String(p.materialGroup || "").trim()) pieceOverride = true;
@@ -1385,7 +1390,7 @@ export function aggregateComparisonScope(
     }
   }
   for (const r of scope.measuredRooms) {
-    if (r.type === "Vanity") continue;
+    if (r.isVanityProgram) continue;
     if (r.counter + r.splash + r.fhb <= 0) continue;
     groups.add(r.group);
   }
@@ -1500,7 +1505,7 @@ export function runLocalPrototypeQuote(params: {
   const materialLines: DemoLineItem[] = [];
   for (const r of measured) {
     if (r.selected <= 0) continue;
-    if (r.type === "Vanity") {
+    if (r.isVanityProgram) {
       materialLines.push({
         line_type: "vanity",
         category: "vanity_program",
@@ -1536,7 +1541,7 @@ export function runLocalPrototypeQuote(params: {
   const lineItems = [...materialLines, ...globalPart.lines];
   const estimated_sqft = round2(
     measured.reduce((s, r) => {
-      if (r.type === "Vanity") return s;
+      if (r.isVanityProgram) return s;
       return s + r.totalSf;
     }, 0)
   );
@@ -1794,14 +1799,16 @@ export function syntheticRoomForWorkflow(
 }
 
 export function roomsNeedLocalVanityMath(rooms: RoomDraft[]): boolean {
-  return rooms.some((r) => r.roomType === "Vanity");
+  return rooms.some((r) => r.roomType === "Vanity" && r.vanity.isVanityProgram !== false);
 }
 
-/** Serialize non-vanity rooms for backend `engine: "rooms"` (pieces optional). */
+/** Serialize non-vanity (and standard-mode vanity) rooms for backend `engine: "rooms"` (pieces optional). */
 export function serializeRoomsForApi(rooms: RoomDraft[]): Array<Record<string, unknown>> {
   const out: Array<Record<string, unknown>> = [];
   for (const r of rooms) {
-    if (r.roomType === "Vanity") continue;
+    // Vanity Program rooms are serialized separately via serializeVanitiesForApi.
+    // Standard-mode vanity rooms price as countertop and are included here.
+    if (r.roomType === "Vanity" && r.vanity.isVanityProgram !== false) continue;
     const g = r.materialGroup || "Group Promo";
     const guidedRoom = r.calcMode === "Guided Shape" ? normalizeGuidedShapeRoom(r) : r;
     if (guidedRoom.calcMode === "Guided Shape" && guidedRoom.guidedPieces.length) {
@@ -2108,6 +2115,8 @@ export function hydrateRoomDraftsFromEstimateRooms(rows: unknown[]): RoomDraft[]
       const vr = createVanityRoom(mg);
       vr.name = String(r.name || r.room_name || "Vanity");
       vr.notes = r.notes != null ? String(r.notes) : "";
+      // Restore persisted fields including isVanityProgram (false = standard countertop mode).
+      applyRoomPersistenceFields(vr, r);
       out.push(vr);
       continue;
     }
