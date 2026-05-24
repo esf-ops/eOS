@@ -54,10 +54,14 @@ function yearWindow(year) {
   return { year: y, start, endExclusive };
 }
 
+let _supabaseServerClientInstance = null;
 function supabaseServerClient() {
-  const url = requiredEnv("SUPABASE_URL");
-  const key = requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
-  return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+  if (!_supabaseServerClientInstance) {
+    const url = requiredEnv("SUPABASE_URL");
+    const key = requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
+    _supabaseServerClientInstance = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+  }
+  return _supabaseServerClientInstance;
 }
 
 const headAccessExecutive = requireHeadAccess("executive", { getSupabase: supabaseServerClient });

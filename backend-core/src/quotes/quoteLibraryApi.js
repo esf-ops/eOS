@@ -1307,7 +1307,6 @@ export function attachQuoteLibraryRoutes(app, deps) {
   async function insertHandoffDoc(db, orgId, req, quoteId, docType, payload) {
     const orgTables = new Set();
     if (orgId && (await tableHasOrganizationId(db, "quote_handoff_documents"))) orgTables.add("quote_handoff_documents");
-    if (orgId && (await tableHasOrganizationId(db, "quote_handoff_documents"))) orgTables.add("quote_handoff_documents");
     const row = mergeRowOrganizationId(
       {
         quote_id: quoteId,

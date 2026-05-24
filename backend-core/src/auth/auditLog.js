@@ -6,10 +6,14 @@ function requiredEnv(name) {
   return v;
 }
 
+let _auditAdminClientInstance = null;
 function supabaseAdminClient() {
-  const url = requiredEnv("SUPABASE_URL");
-  const key = requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
-  return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+  if (!_auditAdminClientInstance) {
+    const url = requiredEnv("SUPABASE_URL");
+    const key = requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
+    _auditAdminClientInstance = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+  }
+  return _auditAdminClientInstance;
 }
 
 function clientIp(req) {

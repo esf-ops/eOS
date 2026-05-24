@@ -10,10 +10,14 @@ function requiredEnv(name) {
   return v;
 }
 
+let _authAdminClientInstance = null;
 function supabaseAdminClient() {
-  const url = requiredEnv("SUPABASE_URL");
-  const key = requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
-  return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+  if (!_authAdminClientInstance) {
+    const url = requiredEnv("SUPABASE_URL");
+    const key = requiredEnv("SUPABASE_SERVICE_ROLE_KEY");
+    _authAdminClientInstance = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+  }
+  return _authAdminClientInstance;
 }
 
 export function getBearerToken(req) {

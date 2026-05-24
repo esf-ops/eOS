@@ -67,7 +67,7 @@ function round2(n) {
 async function collectQuoteOrgTables(db, orgId) {
   const orgTables = new Set();
   if (orgId) {
-    for (const t of [
+    const tables = [
       "quote_headers",
       "quote_line_items",
       "quote_rooms",
@@ -75,8 +75,11 @@ async function collectQuoteOrgTables(db, orgId) {
       "quote_lead_assignments",
       "quote_submission_payloads",
       "quote_monday_sync_log"
-    ]) {
-      if (await tableHasOrganizationId(db, t)) orgTables.add(t);
+    ];
+    // Probe all tables in parallel — each check is an independent lightweight query.
+    const results = await Promise.all(tables.map((t) => tableHasOrganizationId(db, t)));
+    for (let i = 0; i < tables.length; i++) {
+      if (results[i]) orgTables.add(tables[i]);
     }
   }
   return orgTables;

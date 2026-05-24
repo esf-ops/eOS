@@ -348,9 +348,14 @@ export async function resolveHeadAccessContext(supabase, reqUser) {
     };
   }
 
-  const { data: prof, error: pe } = await supabase.from("user_profiles").select("user_kind").eq("id", id).maybeSingle();
-
-  const userKind = pe ? "internal" : pickStr(prof?.user_kind || "internal") || "internal";
+  // Prefer user_kind already loaded by requireAuth (req.user.user_kind) to avoid a redundant
+  // user_profiles SELECT on every guarded route. Fall back to a DB lookup when not supplied
+  // (e.g., direct calls from /api/me/heads that do not go through requireAuth).
+  let userKind = pickStr(reqUser?.user_kind || "");
+  if (!userKind) {
+    const { data: prof, error: pe } = await supabase.from("user_profiles").select("user_kind").eq("id", id).maybeSingle();
+    userKind = pe ? "internal" : pickStr(prof?.user_kind || "internal") || "internal";
+  }
   const dealer = userKind === "dealer_partner";
 
   /** @type {Set<string>} */
