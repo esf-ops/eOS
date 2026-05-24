@@ -728,6 +728,17 @@ function legacyWholesale(input, rules) {
 }
 
 /**
+ * Returns true if the error is a known "table doesn't exist yet" PostgREST error.
+ * Duplicated from quotePersist.js to avoid a circular import (quotePersist imports from here).
+ * @param {unknown} error
+ */
+function isMissingPricingTable(error) {
+  const msg = String(error?.message || "");
+  const code = String(error?.code || "");
+  return code === "42P01" || msg.toLowerCase().includes("does not exist") || msg.toLowerCase().includes("relation");
+}
+
+/**
  * Resolve pricing structure + rules from Supabase-like client or use prototype mirror.
  * @param {{ quoteSource?: string, partnerAccountId?: string|null, requestedPricingStructureId?: string|null, db?: { from: Function } }} params
  */
@@ -807,7 +818,29 @@ export async function resolvePricingStructure(params) {
     const m = Number(structure.retail_markup_percent) || 0;
     const eff = structure.pricing_mode === "public_retail" ? Math.max(m, MIN_PUBLIC_RETAIL_MARKUP) : m;
     return { structure, rules, effectiveRetailMarkupPercent: eff };
-  } catch {
+  } catch (caughtErr) {
+    // Foundation tables not installed yet — safe fallback for all sources.
+    if (isMissingPricingTable(caughtErr)) {
+      const rules = prototypeMirrorRules();
+      return {
+        structure: {
+          id: null,
+          code: "PROTOTYPE_V101",
+          name: "Prototype mirror (foundation not installed)",
+          pricing_mode: quoteSource === "public_retail" ? "public_retail" : "partner",
+          retail_markup_percent: quoteSource === "public_retail" ? MIN_PUBLIC_RETAIL_MARKUP : 20
+        },
+        rules,
+        effectiveRetailMarkupPercent: quoteSource === "public_retail" ? MIN_PUBLIC_RETAIL_MARKUP : 20,
+        fallbackCode: "PROTOTYPE_V101"
+      };
+    }
+    // partner_quote must fail closed on any unexpected DB/runtime error — never silently use
+    // prototype pricing when the partner has a real pricing structure that errored during lookup.
+    if (quoteSource === "partner_quote") {
+      throw caughtErr;
+    }
+    // internal_quote / public_retail / partner_portal: preserve existing fallback behavior.
     const rules = prototypeMirrorRules();
     return {
       structure: {

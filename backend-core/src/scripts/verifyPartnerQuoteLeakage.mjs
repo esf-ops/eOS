@@ -10,6 +10,7 @@
 import "dotenv/config";
 import assert from "node:assert/strict";
 import { createClient } from "@supabase/supabase-js";
+import { assertNoInternalEconomicsInPartnerCalculate } from "../quotes/partnerQuoteSanitize.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -136,6 +137,13 @@ function assertPartnerSafeCalculate(label, json) {
   const blob = JSON.stringify(json);
   assert.ok(!/"wholesale"\s*:/i.test(blob), `${label}: JSON must not include wholesale field`);
   assert.ok(!/"profit"\s*:/i.test(blob), `${label}: JSON must not include profit field`);
+  // Run the full allowlist assertion from partnerQuoteSanitize — catches any new internal-economics
+  // fields that the allowlist blocks but this function does not individually enumerate.
+  try {
+    assertNoInternalEconomicsInPartnerCalculate(json);
+  } catch (err) {
+    assert.fail(`${label}: allowlist assertion failed — ${err.message}`);
+  }
 }
 
 function minimalPartnerPayload(marker, materialGroup = "Group B") {

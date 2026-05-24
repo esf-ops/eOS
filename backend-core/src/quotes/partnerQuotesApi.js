@@ -132,6 +132,13 @@ export function attachPartnerQuoteRoutes(app, { requireAuth, requireHeadAccess, 
       if (!partnerRoleAllowsSubmit(ctx.partnerRole)) {
         return res.status(403).json({ ok: false, error: "Your partner role cannot submit quotes.", code: "partner_role_forbidden" });
       }
+      if (!ctx.pricingAssignment || !ctx.pricingAssignment.pricing_structure_id) {
+        return res.status(400).json({
+          ok: false,
+          error: "No active pricing assignment for this partner account. Contact your fabricator admin to assign a pricing program.",
+          code: "partner_no_pricing_assignment"
+        });
+      }
       const body = req.body && typeof req.body === "object" ? req.body : {};
       const organizationContext = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
       const calcInput = {
@@ -216,10 +223,12 @@ export function attachPartnerQuoteRoutes(app, { requireAuth, requireHeadAccess, 
       const rows = (data || []).filter(
         (r) => String(r.partner_account_id) === ctx.partnerAccountId && String(r.quote_source) === "partner_quote"
       );
+      const PAGE_LIMIT = 100;
       res.json({
         ok: true,
         partner_account_id: ctx.partnerAccountId,
-        quotes: rows.map(sanitizePartnerQuoteListRow)
+        quotes: rows.map(sanitizePartnerQuoteListRow),
+        has_more: rows.length >= PAGE_LIMIT
       });
     } catch (e) {
       return handlePartnerError(res, e);

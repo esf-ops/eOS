@@ -434,9 +434,19 @@ const fixedEliteOsOrigins = [
   "http://localhost:5185"
 ];
 
+/** Localhost origins are development-only; exclude in production to reduce attack surface. */
+const isProductionDeployment =
+  String(process.env.VERCEL_ENV ?? "").trim() === "production" ||
+  String(process.env.NODE_ENV ?? "").trim() === "production";
+
 const allowedOrigins = [
   ...new Set(
-    [...defaultAllowedOrigins, ...fixedEliteOsOrigins, ...envOriginAdditions, ...collectHeadEnvOriginsForCors()]
+    [
+      ...(isProductionDeployment ? [] : defaultAllowedOrigins),
+      ...fixedEliteOsOrigins.filter((o) => !isProductionDeployment || !o.startsWith("http://localhost")),
+      ...envOriginAdditions,
+      ...collectHeadEnvOriginsForCors()
+    ]
       .map(normalizeBrowserOrigin)
       .filter(Boolean)
   )
