@@ -88,11 +88,227 @@ const LAUNCHER_TOOL_TITLE_BY_SLUG: Record<string, string> = {
   dealer_resources: "Dealer Resources"
 };
 
-function launcherCardTitle(h: HeadCard): string {
-  const mapped = LAUNCHER_TOOL_TITLE_BY_SLUG[h.slug];
-  if (mapped) return mapped;
-  const fallback = String(h.title ?? h.label ?? "").trim();
-  return fallback || h.slug;
+/**
+ * Visual category tint per head slug. Drives the icon tile gradient and a subtle card accent.
+ * Purely presentational — does not affect permissions, ordering, or routing.
+ */
+type HeadTint = "navy" | "burgundy" | "violet" | "teal" | "amber" | "slate";
+
+const HEAD_TINT_BY_SLUG: Record<string, HeadTint> = {
+  quote: "burgundy",
+  quote_library: "navy",
+  pricing_admin: "amber",
+  system_admin: "slate",
+  public_quote: "teal",
+  executive: "violet",
+  brain_health: "teal",
+  sales: "violet",
+  production: "navy",
+  shop_tv: "slate",
+  install: "amber",
+  purchasing: "amber",
+  customer_service: "teal",
+  hr: "violet",
+  safety: "burgundy",
+  marketing: "violet",
+  finance: "navy",
+  reports: "slate",
+  partner_quote: "burgundy",
+  dealer_resources: "navy",
+  org_directory: "slate"
+};
+
+function headTintFor(slug: string): HeadTint {
+  return HEAD_TINT_BY_SLUG[slug] ?? "slate";
+}
+
+/**
+ * Inline SVG glyph for each head. Stroke-based, currentColor, no external icon font.
+ * Falls back to a neutral grid glyph when slug is unknown.
+ */
+function HeadGlyph({ slug }: { slug: string }) {
+  const common = {
+    width: 22,
+    height: 22,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.7,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    "aria-hidden": true
+  };
+  switch (slug) {
+    case "quote":
+      return (
+        <svg {...common}>
+          <path d="M4 19l4-1 11-11a1.8 1.8 0 0 0 0-2.5l-.5-.5a1.8 1.8 0 0 0-2.5 0L5 15l-1 4Z" />
+          <path d="M14.5 6.5l3 3" />
+        </svg>
+      );
+    case "quote_library":
+      return (
+        <svg {...common}>
+          <path d="M5 4h11a2 2 0 0 1 2 2v14l-4-2-4 2-4-2-4 2V6a2 2 0 0 1 2-2Z" />
+          <path d="M9 8h6" />
+          <path d="M9 12h4" />
+        </svg>
+      );
+    case "pricing_admin":
+      return (
+        <svg {...common}>
+          <path d="M3 12V5a2 2 0 0 1 2-2h7l9 9-9 9-9-9Z" />
+          <circle cx="8" cy="8" r="1.6" />
+        </svg>
+      );
+    case "system_admin":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06A2 2 0 1 1 4.28 16.93l.06-.06A1.7 1.7 0 0 0 4.68 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06A2 2 0 1 1 7.07 4.28l.06.06a1.7 1.7 0 0 0 1.87.34h.07a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9v.07a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1Z" />
+        </svg>
+      );
+    case "public_quote":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="9" />
+          <path d="M3 12h18" />
+          <path d="M12 3a13 13 0 0 1 0 18a13 13 0 0 1 0-18Z" />
+        </svg>
+      );
+    case "partner_quote":
+      return (
+        <svg {...common}>
+          <path d="M3 10l4-4 4 4 4-4 4 4-4 4-4-4-4 4-4-4Z" />
+          <path d="M11 14l3 3" />
+        </svg>
+      );
+    case "dealer_resources":
+      return (
+        <svg {...common}>
+          <path d="M4 5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2V5Z" />
+          <path d="M8 7h8" />
+          <path d="M8 11h6" />
+        </svg>
+      );
+    case "executive":
+      return (
+        <svg {...common}>
+          <path d="M4 19h16" />
+          <path d="M7 16V9" />
+          <path d="M12 16V5" />
+          <path d="M17 16v-5" />
+        </svg>
+      );
+    case "brain_health":
+      return (
+        <svg {...common}>
+          <path d="M3 12h4l2-5 4 10 2-5h6" />
+        </svg>
+      );
+    case "sales":
+      return (
+        <svg {...common}>
+          <path d="M3 17l6-6 4 4 8-9" />
+          <path d="M14 6h7v7" />
+        </svg>
+      );
+    case "production":
+      return (
+        <svg {...common}>
+          <path d="M3 7l9-4 9 4-9 4-9-4Z" />
+          <path d="M3 12l9 4 9-4" />
+          <path d="M3 17l9 4 9-4" />
+        </svg>
+      );
+    case "shop_tv":
+      return (
+        <svg {...common}>
+          <rect x="3" y="5" width="18" height="12" rx="2" />
+          <path d="M8 21h8" />
+          <path d="M12 17v4" />
+        </svg>
+      );
+    case "install":
+      return (
+        <svg {...common}>
+          <path d="M14 4l6 6-3 3-3-3-7 7H4v-3l7-7-3-3 3-3Z" />
+        </svg>
+      );
+    case "purchasing":
+      return (
+        <svg {...common}>
+          <path d="M3 4h2l2 12h12l2-8H7" />
+          <circle cx="9" cy="20" r="1.4" />
+          <circle cx="18" cy="20" r="1.4" />
+        </svg>
+      );
+    case "customer_service":
+      return (
+        <svg {...common}>
+          <path d="M21 11.5a8.5 8.5 0 1 1-3.4-6.8" />
+          <path d="M21 4v5h-5" />
+          <path d="M8 13a4 4 0 0 0 8 0" />
+        </svg>
+      );
+    case "hr":
+      return (
+        <svg {...common}>
+          <circle cx="9" cy="8" r="3" />
+          <path d="M3 20a6 6 0 0 1 12 0" />
+          <circle cx="17" cy="9" r="2.4" />
+          <path d="M15 20a4 4 0 0 1 6-3.5" />
+        </svg>
+      );
+    case "safety":
+      return (
+        <svg {...common}>
+          <path d="M12 3l8 3v6a8 8 0 0 1-8 9 8 8 0 0 1-8-9V6l8-3Z" />
+          <path d="M9 12l2 2 4-4" />
+        </svg>
+      );
+    case "marketing":
+      return (
+        <svg {...common}>
+          <path d="M3 11l16-7v16L3 13v-2Z" />
+          <path d="M7 13v6" />
+        </svg>
+      );
+    case "finance":
+      return (
+        <svg {...common}>
+          <path d="M12 2v20" />
+          <path d="M17 6.5a4 4 0 0 0-4-2.5h-2a3 3 0 0 0 0 6h2a3 3 0 0 1 0 6h-2a4 4 0 0 1-4-2.5" />
+        </svg>
+      );
+    case "reports":
+      return (
+        <svg {...common}>
+          <path d="M5 3h10l4 4v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" />
+          <path d="M14 3v5h5" />
+          <path d="M8 14h8" />
+          <path d="M8 18h5" />
+        </svg>
+      );
+    case "org_directory":
+      return (
+        <svg {...common}>
+          <rect x="3" y="4" width="18" height="16" rx="2" />
+          <path d="M7 9h10" />
+          <path d="M7 13h7" />
+          <path d="M7 17h4" />
+        </svg>
+      );
+    default:
+      return (
+        <svg {...common}>
+          <rect x="4" y="4" width="7" height="7" rx="1.5" />
+          <rect x="13" y="4" width="7" height="7" rx="1.5" />
+          <rect x="4" y="13" width="7" height="7" rx="1.5" />
+          <rect x="13" y="13" width="7" height="7" rx="1.5" />
+        </svg>
+      );
+  }
 }
 
 const AVAILABLE_SORT_PRIORITY = [
@@ -162,6 +378,13 @@ function shouldShowUrlOnCard(url: string | null): boolean {
   return !isEliteosfabProductionUrl(url);
 }
 
+function launcherCardTitle(h: HeadCard): string {
+  const mapped = LAUNCHER_TOOL_TITLE_BY_SLUG[h.slug];
+  if (mapped) return mapped;
+  const fallback = String(h.title ?? h.label ?? "").trim();
+  return fallback || h.slug;
+}
+
 function sortAvailableHeads(a: HeadCard, b: HeadCard): number {
   const ua = Boolean(pickLaunchUrl(a) && a.enabled);
   const ub = Boolean(pickLaunchUrl(b) && b.enabled);
@@ -176,6 +399,50 @@ function sortAvailableHeads(a: HeadCard, b: HeadCard): number {
 
 function sortRoadmapHeads(a: HeadCard, b: HeadCard): number {
   return launcherCardTitle(a).localeCompare(launcherCardTitle(b));
+}
+
+function firstNameFromDisplay(name: string, email: string): string {
+  const n = name.trim();
+  if (n && !n.includes("@")) {
+    const first = n.split(/\s+/)[0];
+    if (first) return first;
+  }
+  const local = email.split("@")[0] || "";
+  const candidate = local.split(/[._-]/)[0] || "";
+  if (!candidate) return "";
+  return candidate.charAt(0).toUpperCase() + candidate.slice(1);
+}
+
+function initialsFor(name: string, email: string): string {
+  const n = (name || "").trim();
+  if (n && !n.includes("@")) {
+    const parts = n.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  }
+  const local = (email || "").split("@")[0] || "";
+  if (local) return local.slice(0, 2).toUpperCase();
+  return "EO";
+}
+
+/** Arrow glyph shown inside the primary "Open" affordance. */
+function ArrowOut() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M7 17L17 7" />
+      <path d="M8 7h9v9" />
+    </svg>
+  );
 }
 
 export default function App() {
@@ -433,20 +700,41 @@ export default function App() {
     "Signed in user";
   const displayEmail = String(u?.email ?? session?.user?.email ?? "").trim();
   const displayOrg = String(u?.organization_id ?? headsUser?.organization_id ?? "").trim();
+  const firstName = firstNameFromDisplay(displayName, displayEmail);
+  const initials = initialsFor(displayName, displayEmail);
+
+  const availableCount = grouped.find((g) => g.section === "Available Tools")?.items.length ?? 0;
+  const roadmapCount = grouped.find((g) => g.section === "Coming Soon Tools")?.items.length ?? 0;
+  const heroGreeting = firstName ? `Welcome back, ${firstName}.` : "Welcome back.";
 
   return (
     <div className="shell">
       {showShell ? (
-        <header className="topbar">
-          <div className="brand-row">
-            <img src={EOS_LOGO_URL} alt="Elite Stone Fabrication" />
-            <div className="brand-text">
-              <h1>eliteOS Home</h1>
-              <div className="tag">Elite Stone Fabrication — operating system launcher</div>
-            </div>
-          </div>
+        <header className="topbar" role="banner">
+          <a href="/" className="brand-row brand-row-link" aria-label="eliteOS home">
+            <span className="brand-mark" aria-hidden>
+              <img src={EOS_LOGO_URL} alt="" />
+            </span>
+            <span className="brand-text">
+              <span className="brand-wordmark">eliteOS</span>
+              <span className="brand-sub">Elite Stone Fabrication</span>
+            </span>
+          </a>
           <div className="topbar-actions">
-            <button type="button" className="btn" onClick={() => void reloadAccess()} disabled={refreshBusy || loadingData}>
+            <div className="topbar-account" aria-label="Signed in user">
+              <span className="topbar-avatar" aria-hidden>{initials}</span>
+              <span className="topbar-account-text">
+                <span className="topbar-account-name">{displayName}</span>
+                {u?.role ? <span className="topbar-account-role">{u.role}</span> : null}
+              </span>
+            </div>
+            <button
+              type="button"
+              className="btn btn-quiet"
+              onClick={() => void reloadAccess()}
+              disabled={refreshBusy || loadingData}
+              title="Refresh your tool access from the Brain"
+            >
               {refreshBusy ? "Refreshing…" : "Refresh access"}
             </button>
             <button type="button" className="btn btn-ghost" onClick={() => void signOutClick()}>
@@ -456,66 +744,82 @@ export default function App() {
         </header>
       ) : null}
 
-      <main className="main launcher-main">
+      <main className="main launcher-main" role="main">
         {!showShell ? (
-          <div className="login-panel">
-            {urlFlowError ? (
-              <div className="banner banner-error" style={{ marginBottom: 16 }}>
-                {urlFlowError}
+          <div className="auth-stage">
+            <section className="auth-brand" aria-hidden={false}>
+              <div className="auth-brand-mark">
+                <img src={EOS_LOGO_URL} alt="Elite Stone Fabrication" />
               </div>
-            ) : null}
-            <div className="brand-row" style={{ marginBottom: 16 }}>
-              <img src={EOS_LOGO_URL} alt="" style={{ height: 48 }} />
-              <div className="brand-text">
-                <h1>eliteOS</h1>
-                <div className="tag">Elite Stone · eliteOS</div>
-              </div>
-            </div>
-            <p className="motto">Keep the Titans running well.</p>
-            <p className="subtitle">
-              Moraware records the work. eliteOS explains the work. Your tools move the work.
-            </p>
-            <form onSubmit={(e) => void submitLogin(e)}>
-              <div className="field">
-                <label htmlFor="email">Email</label>
-                <input
-                  id="email"
-                  type="email"
-                  autoComplete="username"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                />
-              </div>
-              <div className="field">
-                <label htmlFor="password">Password</label>
-                <input
-                  id="password"
-                  type="password"
-                  autoComplete="current-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                />
-              </div>
-              {authError ? <div className="banner banner-error" style={{ marginBottom: 12 }}>{authError}</div> : null}
-              <button type="submit" className="btn btn-primary" disabled={loginBusy}>
-                {loginBusy ? "Signing in…" : "Sign in"}
-              </button>
-            </form>
-            <p className="muted-note">
-              Authentication uses Supabase (anon key only). No Moraware credentials or service role keys are used in this
-              app.
-            </p>
+              <h1 className="auth-brand-wordmark">eliteOS</h1>
+              <p className="auth-brand-motto">Keep the Titans running well.</p>
+              <p className="auth-brand-positioning">
+                One operating layer for quotes, pricing, partners, sales, production, and shop flow.
+              </p>
+              <ul className="auth-brand-points">
+                <li><span className="dot dot-burgundy" />Moraware records the work.</li>
+                <li><span className="dot dot-navy" />eliteOS explains the work.</li>
+                <li><span className="dot dot-violet" />Your tools move the work.</li>
+              </ul>
+            </section>
+            <section className="auth-panel" aria-label="Sign in">
+              {urlFlowError ? (
+                <div className="banner banner-error" role="alert" style={{ marginBottom: 16 }}>
+                  {urlFlowError}
+                </div>
+              ) : null}
+              <header className="auth-panel-header">
+                <h2 className="auth-panel-title">Sign in</h2>
+                <p className="auth-panel-sub">Continue to the eliteOS launcher.</p>
+              </header>
+              <form onSubmit={(e) => void submitLogin(e)} noValidate>
+                <div className="field">
+                  <label htmlFor="email">Email</label>
+                  <input
+                    id="email"
+                    type="email"
+                    autoComplete="username"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                    placeholder="you@example.com"
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="password">Password</label>
+                  <input
+                    id="password"
+                    type="password"
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                  />
+                </div>
+                {authError ? (
+                  <div className="banner banner-error" role="alert" style={{ marginBottom: 12 }}>
+                    {authError}
+                  </div>
+                ) : null}
+                <button type="submit" className="btn btn-primary" disabled={loginBusy}>
+                  {loginBusy ? "Signing in…" : "Sign in"}
+                </button>
+              </form>
+              <p className="muted-note auth-trust">
+                Authenticated through Supabase. No Moraware credentials or service role keys are used here.
+              </p>
+            </section>
           </div>
         ) : invitePasswordGate ? (
-          <div className="login-panel" style={{ maxWidth: 440 }}>
-            <h2 style={{ marginTop: 0 }}>Finish your eliteOS account</h2>
-            <p className="subtitle" style={{ marginBottom: 16 }}>
-              You signed in from an invite or reset link. Set a password you can use with email sign-in, or continue to the
-              launcher and set it later in Supabase Account settings.
-            </p>
-            <form onSubmit={(e) => void submitInvitePassword(e)}>
+          <div className="auth-panel auth-panel-standalone" aria-label="Set password">
+            <header className="auth-panel-header">
+              <h2 className="auth-panel-title">Finish your eliteOS account</h2>
+              <p className="auth-panel-sub">
+                You signed in from an invite or reset link. Set a password you can use with email sign-in, or continue and
+                set it later in account settings.
+              </p>
+            </header>
+            <form onSubmit={(e) => void submitInvitePassword(e)} noValidate>
               <div className="field">
                 <label htmlFor="invite-pw">New password</label>
                 <input
@@ -538,7 +842,11 @@ export default function App() {
                   minLength={8}
                 />
               </div>
-              {invitePwErr ? <div className="banner banner-error" style={{ marginBottom: 12 }}>{invitePwErr}</div> : null}
+              {invitePwErr ? (
+                <div className="banner banner-error" role="alert" style={{ marginBottom: 12 }}>
+                  {invitePwErr}
+                </div>
+              ) : null}
               <button type="submit" className="btn btn-primary" disabled={invitePwBusy}>
                 {invitePwBusy ? "Saving…" : "Save password & continue"}
               </button>
@@ -549,67 +857,79 @@ export default function App() {
           </div>
         ) : (
           <>
-            <div className="launcher-intro">
-              <div className="user-summary">
-                <div className="user-summary-primary">
-                  <span className="user-summary-name">{displayName}</span>
-                  {displayEmail ? <span className="user-summary-email">{displayEmail}</span> : null}
+            <section className="hero" aria-labelledby="hero-greeting">
+              <div className="hero-inner">
+                <p className="hero-eyebrow">Operating system · Elite Stone Fabrication</p>
+                <h1 id="hero-greeting" className="hero-title">{heroGreeting}</h1>
+                <p className="hero-motto">Keep the Titans running well.</p>
+                <p className="hero-positioning">
+                  One operating layer for quotes, pricing, partners, sales, production, and shop flow.
+                </p>
+                <div className="hero-stats" role="list">
+                  <div className="hero-stat" role="listitem">
+                    <span className="hero-stat-value">{loadingData && !headsPayload ? "—" : availableCount}</span>
+                    <span className="hero-stat-label">{availableCount === 1 ? "Tool available" : "Tools available"}</span>
+                  </div>
+                  <div className="hero-stat-divider" aria-hidden />
+                  <div className="hero-stat" role="listitem">
+                    <span className="hero-stat-value">{loadingData && !headsPayload ? "—" : roadmapCount}</span>
+                    <span className="hero-stat-label">On the roadmap</span>
+                  </div>
+                  <div className="hero-stat-divider" aria-hidden />
+                  <div className="hero-stat" role="listitem">
+                    <span className="hero-stat-value">{u?.role ?? "—"}</span>
+                    <span className="hero-stat-label">Your role</span>
+                  </div>
                 </div>
-                {u?.role ? <span className="role-chip">{u.role}</span> : null}
               </div>
+              <div className="hero-aurora" aria-hidden />
+            </section>
 
-              <details className="access-details">
-                <summary className="access-details-summary">Access details</summary>
-                <div className="access-details-body">
-                  <p className="muted-note access-note">{SECURITY_NOTE}</p>
-                  {displayOrg ? (
-                    <p className="access-meta">
-                      <span className="access-meta-label">Organization</span>
-                      <code className="access-meta-value">{displayOrg}</code>
-                    </p>
-                  ) : null}
-                  {showTechnicalDetails && headsPayload?.heads?.length ? (
-                    <div className="tech-details">
-                      <div className="tech-details-caption">Technical reference (internal slug → launch URL)</div>
-                      <ul className="tech-details-list">
-                        {headsPayload.heads.map((h) => (
-                          <li key={`tech-${h.slug}`}>
-                            <div className="tech-tool-line">
-                              <span className="tech-tool-label">{launcherCardTitle(h)}</span>
-                              <code className="tech-slug">{h.slug}</code>
-                              {h.slug === "quote" ?
-                                <span className="tech-gloss"> Internal Estimate access key</span>
-                              : null}
-                            </div>
-                            <span className="tech-url">{pickLaunchUrl(h) ?? "—"}</span>
-                            {h.role_note ?
-                              <span className="tech-role-note">{h.role_note}</span>
-                            : null}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null}
-                </div>
-              </details>
-            </div>
-
-            {loadError ? <div className="banner banner-error">{loadError}</div> : null}
-
-            {headsPayload?.inactive ? (
-              <div className="banner banner-warn">
-                This account is inactive. You cannot open tools until an admin re-enables access.
+            {loadError ? (
+              <div className="banner banner-error" role="alert">
+                <strong>Could not load your tools.</strong>
+                <span style={{ display: "block", marginTop: 4 }}>{loadError}</span>
+                <button
+                  type="button"
+                  className="btn btn-quiet"
+                  style={{ marginTop: 10 }}
+                  onClick={() => void reloadAccess()}
+                  disabled={refreshBusy || loadingData}
+                >
+                  {refreshBusy ? "Retrying…" : "Retry"}
+                </button>
               </div>
             ) : null}
 
-            {loadingData && !headsPayload ? <p className="muted-note">Loading your tools…</p> : null}
+            {headsPayload?.inactive ? (
+              <div className="banner banner-warn" role="alert">
+                <strong>This account is inactive.</strong>
+                <span style={{ display: "block", marginTop: 4 }}>
+                  You can sign in, but tools are read-only until an admin re-enables access.
+                </span>
+              </div>
+            ) : null}
+
+            {loadingData && !headsPayload ? (
+              <div className="card-grid card-grid-available" aria-hidden>
+                {[0, 1, 2, 3].map((i) => (
+                  <div key={i} className="head-card head-card-available skeleton-card">
+                    <div className="skel skel-icon" />
+                    <div className="skel skel-title" />
+                    <div className="skel skel-line" />
+                    <div className="skel skel-line skel-line-short" />
+                    <div className="skel skel-btn" />
+                  </div>
+                ))}
+              </div>
+            ) : null}
 
             {assignableHeads.length === 0 && headsPayload && !loadingData ? (
-              <div className="empty-box launcher-empty">
+              <div className="empty-box launcher-empty" role="status">
                 {isAdminLike ? (
                   <>
                     <p className="empty-title">No tools are assigned yet.</p>
-                    <p className="empty-sub">Use System Admin to assign tool access.</p>
+                    <p className="empty-sub">Open System Admin to assign tool access to this account.</p>
                   </>
                 ) : (
                   <>
@@ -627,17 +947,21 @@ export default function App() {
                 <section
                   key={section}
                   className={`launcher-section${roadmapSection ? " launcher-section-roadmap" : " launcher-section-available"}`}
+                  aria-label={section}
                 >
-                  <h2 className="section-kicker">{section}</h2>
-                  {roadmapSection ?
-                    <p className="section-lede muted-note">
-                      Planned tools stay informational here until a production launch link is configured on the Brain.
+                  <div className="section-head">
+                    <h2 className="section-title">{section}</h2>
+                    <span className="section-count">{items.length}</span>
+                  </div>
+                  {roadmapSection ? (
+                    <p className="section-lede">
+                      Planned tools live here until a production launch link is configured on the Brain.
                     </p>
-                  :
-                    <p className="section-lede muted-note">
+                  ) : (
+                    <p className="section-lede">
                       Production tools you can open when assigned. Each destination still enforces Brain permissions.
                     </p>
-                  }
+                  )}
                   <div className={roadmapSection ? "card-grid card-grid-roadmap" : "card-grid card-grid-available"}>
                     {items.map((h) => {
                       const url = pickLaunchUrl(h);
@@ -647,6 +971,7 @@ export default function App() {
                       const cardTitle = launcherCardTitle(h);
                       const showUrl = shouldShowUrlOnCard(url);
                       const openLabel = h.slug === "public_quote" ? "Open public site" : "Open tool";
+                      const tint = headTintFor(h.slug);
 
                       function openHead() {
                         if (!canNavigate || !url) return;
@@ -656,35 +981,41 @@ export default function App() {
                       return (
                         <article
                           key={h.slug}
-                          className={`head-card${roadmapSection ? " head-card-roadmap" : " head-card-available"}${inactiveClass}`}
+                          className={`head-card${roadmapSection ? " head-card-roadmap" : " head-card-available"}${inactiveClass} tint-${tint}`}
                         >
+                          <div className="head-card-top">
+                            <span className={`head-glyph head-glyph-${tint}`} aria-hidden>
+                              <HeadGlyph slug={h.slug} />
+                            </span>
+                            <div className="pill-row" aria-label="Status">
+                              {pills.map((t, pi) => (
+                                <span key={`${h.slug}-${pi}-${t}`} className={pillClass(t)}>
+                                  {t}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
                           <h3 className="head-card-title">{cardTitle}</h3>
                           <p className={roadmapSection ? "desc desc-roadmap" : "desc"}>{h.description}</p>
-                          {showUrl && url ?
+                          {showUrl && url ? (
                             <p className="url-subtle" title={url}>
                               {url}
                             </p>
-                          : null}
-                          <div className="pill-row">
-                            {pills.map((t, pi) => (
-                              <span key={`${h.slug}-${pi}-${t}`} className={pillClass(t)}>
-                                {t}
-                              </span>
-                            ))}
-                          </div>
-                          {canNavigate ?
+                          ) : null}
+                          {canNavigate ? (
                             <button type="button" className="btn btn-open head-open-btn" onClick={openHead}>
-                              {openLabel}
+                              <span>{openLabel}</span>
+                              <ArrowOut />
                             </button>
-                          : null}
-                          {!canNavigate && !roadmapSection ?
+                          ) : null}
+                          {!canNavigate && !roadmapSection ? (
                             <p className="card-foot muted-note">
                               {url ? "Ask your admin for access to open this tool." : null}
                             </p>
-                          : null}
-                          {roadmapSection ?
+                          ) : null}
+                          {roadmapSection ? (
                             <p className="card-foot muted-note">On the roadmap — not available to open yet.</p>
-                          : null}
+                          ) : null}
                         </article>
                       );
                     })}
@@ -692,11 +1023,46 @@ export default function App() {
                 </section>
               );
             })}
+
+            <details className="access-details" aria-label="Access details">
+              <summary className="access-details-summary">Access details</summary>
+              <div className="access-details-body">
+                <p className="muted-note access-note">{SECURITY_NOTE}</p>
+                {displayOrg ? (
+                  <p className="access-meta">
+                    <span className="access-meta-label">Organization</span>
+                    <code className="access-meta-value">{displayOrg}</code>
+                  </p>
+                ) : null}
+                {showTechnicalDetails && headsPayload?.heads?.length ? (
+                  <div className="tech-details">
+                    <div className="tech-details-caption">Technical reference (internal slug → launch URL)</div>
+                    <ul className="tech-details-list">
+                      {headsPayload.heads.map((h) => (
+                        <li key={`tech-${h.slug}`}>
+                          <div className="tech-tool-line">
+                            <span className="tech-tool-label">{launcherCardTitle(h)}</span>
+                            <code className="tech-slug">{h.slug}</code>
+                            {h.slug === "quote" ?
+                              <span className="tech-gloss"> Internal Estimate access key</span>
+                            : null}
+                          </div>
+                          <span className="tech-url">{pickLaunchUrl(h) ?? "—"}</span>
+                          {h.role_note ?
+                            <span className="tech-role-note">{h.role_note}</span>
+                          : null}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </div>
+            </details>
           </>
         )}
       </main>
 
-      <footer className="footer-bar">
+      <footer className="footer-bar" role="contentinfo">
         <div className="footer-line footer-brand">eliteOS · Elite Stone Fabrication</div>
         <div className="footer-line footer-tagline">Keep the Titans running well.</div>
       </footer>
