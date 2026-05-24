@@ -225,22 +225,44 @@ export async function resolvePartnerContext(req, options = {}) {
 
 /**
  * Partner-only users (dealer_partner) must not use internal/generic quote APIs.
+ *
+ * Hardened fail-closed behavior:
+ * - Missing userId → 403 (no anonymous pass-through on internal routes).
+ * - DB query fails because partner foundation tables are not yet installed → 503 (documented environment gap).
+ * - Any other DB/network error → re-throw so the caller's error handler returns 500; never silently pass.
+ * - user_kind null/empty on the profile row → treated as "internal" (non-partner) and allowed through.
+ *   This is the safe default because the bootstrap path defaults to user_kind "internal".
+ *   A new account that has not yet had user_kind set will be treated as internal, not as a partner bypass.
+ * - user_kind "dealer_partner" → always 403 with code partner_use_partner_routes.
+ *
  * @param {import("express").Request} req
  * @param {import("@supabase/supabase-js").SupabaseClient} supabase
  */
 export async function assertInternalQuoteOperator(req, supabase) {
   const userId = String(req?.user?.id || "").trim();
-  if (!userId) return;
-  try {
-    const { data, error } = await supabase.from("user_profiles").select("user_kind").eq("id", userId).limit(1);
-    if (error) return;
-    if (String(data?.[0]?.user_kind || "") === "dealer_partner") {
-      const err = new Error("Partner users must use /api/partner-quote routes.");
-      err.statusCode = 403;
-      err.code = "partner_use_partner_routes";
-      throw err;
-    }
-  } catch (e) {
-    if (e?.statusCode === 403) throw e;
+  if (!userId) {
+    const err = new Error("Authentication required for internal quote operations.");
+    err.statusCode = 403;
+    err.code = "partner_use_partner_routes";
+    throw err;
   }
+  const { data, error } = await supabase.from("user_profiles").select("user_kind").eq("id", userId).limit(1);
+  if (error) {
+    if (isMissingRelationError(error)) {
+      throw new PartnerContextError(
+        "User profiles table not available. Cannot verify internal quote operator status.",
+        503,
+        "partner_foundation_missing"
+      );
+    }
+    // All other DB errors: re-throw so the middleware returns 500 rather than silently passing.
+    throw error;
+  }
+  if (String(data?.[0]?.user_kind || "") === "dealer_partner") {
+    const err = new Error("Partner users must use /api/partner-quote routes.");
+    err.statusCode = 403;
+    err.code = "partner_use_partner_routes";
+    throw err;
+  }
+  // user_kind null/empty or any non-dealer_partner value → internal operator, allowed through.
 }

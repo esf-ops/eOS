@@ -68,6 +68,9 @@ async function insertBootstrapProfile(supabase, authUser) {
     role: "viewer",
     department: null,
     is_active: true,
+    // Default to "internal" so assertInternalQuoteOperator never treats a freshly-bootstrapped
+    // account as a partner bypass. Admins assign "dealer_partner" explicitly when onboarding partners.
+    user_kind: "internal",
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
   };

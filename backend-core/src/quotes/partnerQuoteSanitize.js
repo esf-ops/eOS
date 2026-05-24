@@ -1,16 +1,36 @@
 /**
  * Partner-safe DTO shaping — no wholesale/direct economics, raw rules, or internal diagnostics.
+ *
+ * Design: partner calculate response uses an ALLOWLIST for the snapshot field rather than a denylist.
+ * Only explicitly listed fields are forwarded; new calculator fields are safe-by-default (excluded).
+ *
+ * Fields stripped from partner calculate response (non-exhaustive, allowlist enforces completeness):
+ *   material_breakdown   — contains wholesaleSubtotal per room
+ *   roomLines            — contains internal rate/wholesale per piece
+ *   lineItemDetails      — raw per-line internal economics
+ *   roomMeasurementSummaries — internal measurement diagnostics
+ *   inputSummary         — internal input echo
+ *   measurement_source   — internal source tag
+ *   quoteInputMode       — internal UI mode
+ *   lineItems            — raw line items (separate safe list returned at top level)
+ *   internal_ui          — internal estimate UI state
+ *   internal_estimate_math — internal economics detail
+ *   ruleCount            — internal rule count
+ *   totals.wholesale     — ESF wholesale subtotal
+ *   totals.profit        — margin / profit value
+ *   retailMarkupPercent  — internal markup config
+ *   pricingStructure.*   — all fields except code and name
  */
 
-const PARTNER_FORBIDDEN_SNAPSHOT_KEYS = [
-  "inputSummary",
-  "measurement_source",
-  "quoteInputMode",
-  "lineItems",
-  "internal_ui",
-  "internal_estimate_math",
-  "ruleCount"
-];
+/**
+ * Partner-safe snapshot fields — ONLY these keys are forwarded to the partner calculate response.
+ * pricingStructure is further reduced to {code, name} only.
+ */
+const PARTNER_SNAPSHOT_ALLOWLIST = new Set([
+  "pricingStructure",
+  "quote_source",
+  "version"
+]);
 
 /**
  * @param {ReadonlyArray<{ partner_account_id: string, role: string, is_active?: boolean }>} accesses
@@ -77,25 +97,35 @@ export function partnerRoleAllowsSubmit(role) {
 }
 
 /**
+ * Build the partner-safe snapshot using an allowlist — only PARTNER_SNAPSHOT_ALLOWLIST keys are kept.
+ * pricingStructure is further reduced to {code, name}.
+ * @param {Record<string, unknown>} calcSnapshot
+ * @returns {Record<string, unknown>}
+ */
+function buildPartnerSafeSnapshot(calcSnapshot) {
+  const src = calcSnapshot && typeof calcSnapshot === "object" ? calcSnapshot : {};
+  /** @type {Record<string, unknown>} */
+  const safe = {};
+  for (const key of PARTNER_SNAPSHOT_ALLOWLIST) {
+    if (Object.prototype.hasOwnProperty.call(src, key)) {
+      safe[key] = src[key];
+    }
+  }
+  if (safe.pricingStructure && typeof safe.pricingStructure === "object") {
+    const ps = safe.pricingStructure;
+    safe.pricingStructure = {
+      code: (ps.code ?? null),
+      name: (ps.name ?? null)
+    };
+  }
+  return safe;
+}
+
+/**
  * @param {Record<string, unknown>} calcResult
  */
 export function sanitizePartnerCalculateResponse(calcResult) {
-  const snap = calcResult?.snapshot && typeof calcResult.snapshot === "object" ? { ...calcResult.snapshot } : {};
-  for (const k of PARTNER_FORBIDDEN_SNAPSHOT_KEYS) delete snap[k];
-  if (snap.totals && typeof snap.totals === "object") {
-    const t = { ...snap.totals };
-    delete t.wholesale;
-    delete t.profit;
-    snap.totals = t;
-  }
-  if (snap.pricingStructure && typeof snap.pricingStructure === "object") {
-    const ps = snap.pricingStructure;
-    snap.pricingStructure = {
-      code: ps.code ?? null,
-      name: ps.name ?? null
-    };
-  }
-  delete snap.retailMarkupPercent;
+  const safeSnap = buildPartnerSafeSnapshot(calcResult?.snapshot);
 
   const lineItems = Array.isArray(calcResult?.lineItems)
     ? calcResult.lineItems.map((ln) => ({
@@ -109,6 +139,11 @@ export function sanitizePartnerCalculateResponse(calcResult) {
       }))
     : [];
 
+  const structureLabel =
+    calcResult?.pricing?.structureCode ??
+    safeSnap.pricingStructure?.code ??
+    null;
+
   return {
     ok: true,
     display: "partner_quote_safe",
@@ -117,12 +152,60 @@ export function sanitizePartnerCalculateResponse(calcResult) {
       estimated_sqft: calcResult?.totals?.estimated_sqft ?? null
     },
     lineItems,
-    snapshot: snap,
+    snapshot: safeSnap,
     warnings: calcResult?.warnings || [],
     pricing: {
-      structure_label: calcResult?.pricing?.structureCode ?? snap.pricingStructure?.code ?? null
+      structure_label: structureLabel
     }
   };
+}
+
+/**
+ * Assert that a partner calculate response object contains no internal economics fields.
+ * Throws if any forbidden key is found anywhere in the top-level or snapshot.
+ * Intended for use in tests and the leakage verification script.
+ * @param {Record<string, unknown>} response — parsed JSON body from partner calculate
+ */
+export function assertNoInternalEconomicsInPartnerCalculate(response) {
+  const FORBIDDEN_RESPONSE_KEYS = ["wholesale", "profit", "margin", "retailMarkupPercent", "material_breakdown"];
+  const FORBIDDEN_SNAPSHOT_KEYS = [
+    "wholesale",
+    "profit",
+    "margin",
+    "retailMarkupPercent",
+    "material_breakdown",
+    "roomLines",
+    "lineItemDetails",
+    "roomMeasurementSummaries",
+    "inputSummary",
+    "measurement_source",
+    "quoteInputMode",
+    "internal_ui",
+    "internal_estimate_math",
+    "ruleCount"
+  ];
+
+  for (const k of FORBIDDEN_RESPONSE_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(response, k)) {
+      throw new Error(`Partner calculate response must not contain top-level key "${k}"`);
+    }
+  }
+  const totals = response?.totals;
+  if (totals && typeof totals === "object") {
+    for (const k of ["wholesale", "profit", "margin"]) {
+      if (Object.prototype.hasOwnProperty.call(totals, k)) {
+        throw new Error(`Partner calculate response totals must not contain key "${k}"`);
+      }
+    }
+  }
+  const snap = response?.snapshot;
+  if (snap && typeof snap === "object") {
+    for (const k of FORBIDDEN_SNAPSHOT_KEYS) {
+      if (Object.prototype.hasOwnProperty.call(snap, k)) {
+        throw new Error(`Partner calculate response snapshot must not contain key "${k}"`);
+      }
+    }
+  }
 }
 
 /**

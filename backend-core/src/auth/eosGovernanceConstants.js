@@ -33,9 +33,15 @@ export function isKnownHeadSlug(slug) {
 
 /**
  * Dealer/partner-safe heads only (`user_kind === dealer_partner`).
- * Add `quote_history` here once it exists in `EOS_HEAD_SLUGS`.
+ *
+ * "quote" (Internal Estimate) was intentionally removed:
+ *   - dealer_partner users are blocked from internal estimate routes by assertInternalQuoteOperator.
+ *   - Removing "quote" from this set adds a second structural layer — requireHeadAccess("quote") now also
+ *     blocks dealer users at the middleware level before the partner guard even runs.
+ *   - dealer_admin / dealer_user roles (user_kind "internal") are unaffected — their defaultSlugSet
+ *     still grants "quote" since the dealer-safe check applies only to user_kind === "dealer_partner".
  */
-export const DEALER_SAFE_HEAD_SLUGS = Object.freeze(["partner_quote", "dealer_resources", "quote"]);
+export const DEALER_SAFE_HEAD_SLUGS = Object.freeze(["partner_quote", "dealer_resources"]);
 
 /** Subset of `EOS_HEAD_SLUGS` — extend `DEALER_SAFE_HEAD_SLUGS` when new dealer-only heads ship. */
 export const DEALER_SAFE_HEAD_SLUG_SET = new Set(DEALER_SAFE_HEAD_SLUGS.filter((s) => _headSet.has(s)));

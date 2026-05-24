@@ -4,6 +4,7 @@
 
 import express from "express";
 
+import { logAction } from "../auth/auditLog.js";
 import { resolveOrganizationContext } from "../organizations/organizationContext.js";
 import { calculateQuote } from "./quoteCalculator.js";
 import { PartnerContextError, assertInternalQuoteOperator, resolvePartnerContext } from "./partnerContext.js";
@@ -83,6 +84,13 @@ export function attachPartnerQuoteRoutes(app, { requireAuth, requireHeadAccess, 
       if (!partnerRoleAllowsCalculate(ctx.partnerRole)) {
         return res.status(403).json({ ok: false, error: "Your partner role cannot run estimates.", code: "partner_role_forbidden" });
       }
+      if (!ctx.pricingAssignment || !ctx.pricingAssignment.pricing_structure_id) {
+        return res.status(400).json({
+          ok: false,
+          error: "No active pricing assignment for this partner account. Contact your fabricator admin to assign a pricing program.",
+          code: "partner_no_pricing_assignment"
+        });
+      }
       const body = req.body && typeof req.body === "object" ? req.body : {};
       const calcInput = {
         ...body,
@@ -91,7 +99,27 @@ export function attachPartnerQuoteRoutes(app, { requireAuth, requireHeadAccess, 
         partnerAccountId: ctx.partnerAccountId
       };
       const calc = await calculateQuote(calcInput, { db });
-      res.json(sanitizePartnerCalculateResponse(calc));
+      const safeResponse = sanitizePartnerCalculateResponse(calc);
+
+      void logAction({
+        user: req.user,
+        head: "partner_quote",
+        actionType: "partner_quote_calculated",
+        entityType: "quote_calculation",
+        entityId: null,
+        req,
+        metadata: {
+          organization_id: ctx.organizationId ?? null,
+          partner_account_id: ctx.partnerAccountId ?? null,
+          quote_source: "partner_quote",
+          estimated_total: safeResponse.totals?.estimate_total ?? null,
+          estimated_sqft: safeResponse.totals?.estimated_sqft ?? null,
+          pricing_structure_id: ctx.pricingAssignment.pricing_structure_id ?? null,
+          structure_code: ctx.pricingAssignment.structure_code ?? null
+        }
+      }).catch((err) => console.warn("[partner-quote] logAction calculate failed (non-fatal):", String(err?.message || err)));
+
+      res.json(safeResponse);
     } catch (e) {
       return handlePartnerError(res, e);
     }

@@ -188,7 +188,9 @@ function defaultSlugSet(role, userKind) {
   const kind = String(userKind ?? "internal").trim();
 
   if (kind === "dealer_partner") {
-    return sanitizeSlugSet(["partner_quote", "dealer_resources", "quote"]);
+    // "quote" (Internal Estimate) intentionally excluded — dealer_partner users must not see or reach
+    // internal estimate routes. DEALER_SAFE_HEAD_SLUGS also no longer includes "quote" for the same reason.
+    return sanitizeSlugSet(["partner_quote", "dealer_resources"]);
   }
   if (r === "admin") {
     return new Set(EOS_HEAD_SLUGS);
