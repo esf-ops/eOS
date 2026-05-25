@@ -185,9 +185,52 @@ content. Other heads can apply the same wash via the shared body background.
 ### 6.1 Top bar
 
 - Sticky, glass-like (`backdrop-filter: blur(14px)`, ~74% white).
-- Brand mark on the left (logo tile + wordmark + sub).
-- Account chip + quiet/ghost buttons on the right.
-- Account chip uses initials in a navy gradient avatar.
+- **Brand row (left):** logo tile + `eliteOS` wordmark + a sub line that
+  combines the head name and the workspace name. For operational heads use
+  the format `<Head name> · <Workspace>`
+  (e.g. `Quote Library · Elite Stone Fabrication`). For the Launcher itself
+  the sub line is just `<Workspace>`.
+- **Account chip (right):** initials avatar (navy gradient) + display name +
+  optional caption (role or email if shown) + a small caret that rotates
+  when the menu is open. Click toggles the **user menu** (see §6.1.1).
+- **Quiet actions** (Refresh, etc.) belong inside the user menu for
+  operational heads. The Launcher may show them inline because they are
+  identity-level actions on the *platform* surface. Avoid putting more than
+  one inline action next to the chip on a head — keep that surface calm.
+- The chip is always a `<button>` (not a `<div>`), `aria-haspopup="menu"`,
+  `aria-expanded` reflects open state, focus ring + Escape to close.
+
+#### 6.1.1 User menu
+
+A small dropdown rooted on the account chip. Same pattern across every
+protected head.
+
+- **Header block** (inside the panel): user display name, email, and a
+  quiet `Workspace · <name> · on slabOS` line. Echoes §2.1 brand levels.
+- **Item rows** (`.user-menu-item`): icon tile + label stack
+  (primary line + 0.72 rem muted meta line) + optional trailing `↗` glyph
+  for links that leave the head.
+- **Standard items** (in this order):
+  1. **Open Home** — anchor to `https://www.eliteosfab.com` (or
+     `VITE_HEAD_URL_HOME`); trailing `↗`.
+  2. **Refresh data / Refresh access** — re-runs the head's existing data
+     fetches. Disabled while in-flight; label flips to `Refreshing…`.
+  3. **System Admin** — *only* rendered when the current user is
+     `admin` / `super_admin` / `executive` *and* that role is already known
+     client-side. If a head has no role information without a new backend
+     call, **omit** this item entirely. Never gate by initials, email, or
+     UI-only check.
+  4. **Profile & preferences** — placeholder, disabled with a
+     `Coming soon` meta line. No backend page is built yet.
+  5. **Sign out** — sits in a `.user-menu-footer` separator block.
+     Burgundy on hover; calls the existing `signOut` handler.
+- **Behavior:** outside click + `Escape` close the menu; opening sets focus
+  to the menu container; respects `prefers-reduced-motion` (no
+  pop-in animation when reduced).
+- **No new backend endpoints.** The chip identity comes from the local
+  Supabase `session.user` (`email`, `id`, `user_metadata.full_name`); role
+  comes from existing payloads only — never from speculative API calls
+  added during a UI pass.
 
 ### 6.2 Hero (signed-in only)
 
@@ -514,3 +557,165 @@ When restyling an operational head, never touch:
 - `runAction` wrapper, `window.confirm` prompts, error/success copy paths.
 
 These remain a **backend** responsibility; the visual pass is purely surface.
+
+---
+
+## 13. Protected head app shell (template)
+
+This is the **canonical app-shell pattern** every protected eliteOS head
+should adopt. Home Launcher is the reference; Quote Library is the first
+operational head wired up to the full shell. Future heads (Internal
+Estimate, Sales, Production, Shop TV, Invoices, …) should start from this
+template before adding head-specific surfaces.
+
+### 13.1 Shell layout
+
+```
+<div class="shell">
+  <header class="topbar" role="banner">
+    <a class="brand-row brand-row-link">
+      <span class="brand-mark"><img workspace logo /></span>
+      <span class="brand-text">
+        <span class="brand-wordmark">eliteOS</span>
+        <span class="brand-sub">{HeadName · Workspace}</span>
+      </span>
+    </a>
+    <div class="topbar-actions">
+      <div class="topbar-account-wrap">
+        <button class="topbar-account" aria-haspopup="menu" aria-expanded="…">
+          <span class="topbar-avatar">{INITIALS}</span>
+          <span class="topbar-account-text">
+            <span class="topbar-account-name">{User name}</span>
+            <span class="topbar-account-role">{email or role pill}</span>
+          </span>
+          <span class="topbar-account-caret">▾</span>
+        </button>
+        {open ? <div class="user-menu" role="menu"> … </div> : null}
+      </div>
+    </div>
+  </header>
+
+  <main class="main" role="main">
+    {/* hero · banners · metrics · tabs · cards · list/drawer */}
+  </main>
+
+  <footer class="footer-bar" role="contentinfo">
+    eliteOS · {Head name}
+    Keep the Titans running well.
+  </footer>
+</div>
+```
+
+### 13.2 Left side: workspace + product identity
+
+- `brand-mark` shows the workspace logo (resolution order in §2.1). The
+  fallback is the local `EOS_LOGO_URL` asset for the current Elite tenant.
+- `brand-wordmark` is **always** `eliteOS`. Never put `slabOS` here — the
+  topbar is a workspace surface, not a platform surface (see §2.1).
+- `brand-sub` is `<Head name> · <Workspace>` for operational heads and
+  `<Workspace>` for the Launcher. Below 720 px the sub collapses.
+- The brand row is a link to the head's own root (`/`). Hover background
+  tint is shared with Home Launcher (`rgba(11, 26, 51, 0.04)`).
+
+### 13.3 Right side: user chip + menu
+
+See §6.1 and §6.1.1 for visual tokens. Behavior requirements:
+
+- **Identity** comes from the local Supabase `session.user`:
+  - `email` and `id` are always present.
+  - `user_metadata.full_name` / `name` / `display_name` provide the
+    friendly name when set. Otherwise derive a display name from the local
+    part of the email.
+  - Initials are derived from name (or email local part if no name).
+- **Role pill** only renders when the role is already in scope (Home
+  Launcher reads it from `/api/me`). Heads that have not wired up `/api/me`
+  show the email as the secondary caption instead.
+- **System Admin link** only renders when the role is one of
+  `admin` / `super_admin` / `executive`. If the role is unknown, the link
+  is omitted entirely — never gate by UI-only checks or by guessing from
+  email.
+- **Refresh action** calls the head's existing data loaders only
+  (Launcher: `/api/me` + `/api/me/heads`; Quote Library: metrics + active
+  list + open detail). Never invent new endpoints in a UI pass.
+- **Profile & preferences** is a placeholder until a real
+  `/preferences` surface ships. Render it disabled with a
+  `Coming soon` meta line.
+- **Sign out** always calls the existing `signOut` helper for the head;
+  never bypass the helper to call Supabase directly inline.
+
+### 13.4 New head starter checklist
+
+Every new protected head must satisfy this checklist before being merged:
+
+1. **Shared Brain APIs.** Read identity / heads / business data from
+   `backend-core` (or its documented successor). Do not introduce parallel
+   sources of truth for users, organizations, quotes, pricing, or sync
+   logs.
+2. **Backend-enforced permissions.** Authorization lives in backend
+   middleware (and RLS where used). The shell may *hide* a menu item
+   when the role is known, but **never** rely on UI hiding for security.
+   Every protected route still needs `requireAuth` + `requireHeadAccess`
+   (or the documented equivalent) server-side.
+3. **Workspace identity.** Show the workspace logo + name in the topbar
+   brand row *and* (when there is a hero) in the hero workspace panel.
+   Use `resolveWorkspaceName` / `resolveWorkspaceLogoUrl` helpers that
+   default to the Elite Stone fallback but accept backend payload values
+   without code changes.
+4. **User chip + menu.** Wire up the chip from the local Supabase session
+   only — no speculative `/api/me` call added during a UI pass. Use the
+   standard menu order from §6.1.1.
+5. **Loading / error / empty states.** Every list, every async surface,
+   every dependent component must explicitly render:
+   - a loading state (skeleton or shimmer);
+   - an empty state (tinted glyph + title + one sentence + one CTA);
+   - an error banner (`banner-error`) with a plain-English message and a
+     retry / contact path. Raw exception text never reaches the user.
+6. **No fake metrics.** KPIs and counts are real values from the backend
+   or are omitted. Zero / `—` states use `.metric-zero` quieting; they
+   never get fake fallback numbers.
+7. **No secrets in the frontend.** No Supabase service-role key, Monday
+   token, Moraware credential, partner API secret, signing key, or
+   webhook secret may live in the browser bundle, in client env vars
+   exposed to the bundle, in client logs, or in DevTools-visible payloads.
+   Only the Supabase **anon** key and head URLs are safe.
+8. **Tenant scoping.** New tables / new payloads must carry
+   `organization_id` (and use it in queries) or document a narrow
+   exception in `docs/eliteos/FEATURE_DECISIONS.md`.
+9. **Design tokens.** Reuse the token block from the Home Launcher
+   (`:root { --eos-* }`). Do not introduce per-head accent colors. Reuse
+   the topbar, buttons, pills, banners, hero, drawer patterns documented
+   here (§6, §12, §13).
+10. **Reduced-motion + a11y.** Every animation has a
+    `prefers-reduced-motion` opt-out. Every interactive element has a
+    visible focus ring. Icon-only controls carry `aria-label`. Modals,
+    drawers, and menus respect Escape and outside-click.
+11. **Documentation.** When the head ships, update
+    `docs/eliteos/SYSTEM_BLUEPRINT.md`, `docs/eliteos/CURRENT_SYSTEM_MAP.md`,
+    and `docs/eliteos/eliteos-master-head-map.md` to register the head
+    and its domain. Record any architectural decision in
+    `docs/eliteos/FEATURE_DECISIONS.md`.
+12. **No premature extraction.** The shared `AppShell` / `UserMenu`
+    components are not extracted yet. Mirror the patterns in your head;
+    once Home, Quote Library, and Internal Estimate all converge, the
+    shared package will be carved out (§13.5).
+
+### 13.5 Future: shared AppShell package
+
+When at least three heads (Home, Quote Library, Internal Estimate) carry
+the same shell, lift these primitives into a shared package under
+`shared/eliteos-app-shell/`:
+
+- `<Topbar>` (brand row + actions slot).
+- `<UserMenu>` (chip + dropdown + standard items + role-gated System Admin).
+- `<HeroWorkspacePanel>` (right-column workspace identity).
+- `<EmptyState>`, `<SkeletonRow>`, `<Banner>` primitives.
+
+Until then, the rules of thumb:
+
+- **Tokens move first.** A single `:root` token block is already shared
+  in spirit; the next consolidation step is to make it a literal import.
+- **Patterns move second.** Lift only what at least two heads have
+  proven works — don't extract speculatively.
+- **APIs stay backend-driven.** The shared package must remain a
+  presentational/identity layer; it must not own data fetching for
+  business entities (quotes, pricing, partners).

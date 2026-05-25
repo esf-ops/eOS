@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiGet, apiPatch, apiPost, ApiError } from "./lib/api";
 import { formatDateTime, formatMoneyStandard, formatMoneyWhole, formatShortDate, formatSqft } from "./lib/format";
 import {
@@ -168,9 +168,69 @@ function internalEstimateUrl(): string {
   return raw.replace(/\/+$/, "") || "https://internal.eliteosfab.com";
 }
 
+/**
+ * eliteOS Home / Launcher canonical URL. Used by the user menu's "Open Home"
+ * action. Configurable via `VITE_HEAD_URL_HOME` for staging / local dev;
+ * defaults to the production launcher domain documented in
+ * `docs/eliteos/CURRENT_SYSTEM_MAP.md`.
+ */
+function homeLauncherUrl(): string {
+  const raw = String(import.meta.env.VITE_HEAD_URL_HOME ?? "").trim();
+  return raw.replace(/\/+$/, "") || "https://www.eliteosfab.com";
+}
+
+/**
+ * Derive a friendly display name from an email address (everything before `@`,
+ * with separators turned into spaces and word casing applied). Falls back to
+ * the email itself when no `@` is present.
+ *
+ * No backend call is required — this works off the client-side Supabase
+ * session.user.email value.
+ */
+function deriveDisplayNameFromEmail(email: string): string {
+  const e = String(email || "").trim();
+  if (!e) return "";
+  const local = e.includes("@") ? e.split("@")[0] : e;
+  const words = local.replace(/[._-]+/g, " ").split(/\s+/).filter(Boolean);
+  if (!words.length) return e;
+  return words.map((w) => w[0]?.toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+}
+
+function userInitialsFor(name: string, email: string): string {
+  const n = String(name || "").trim();
+  if (n) {
+    const parts = n.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  }
+  const e = String(email || "").trim();
+  if (e) {
+    const local = e.includes("@") ? e.split("@")[0] : e;
+    const parts = local.replace(/[._-]+/g, " ").split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return local.slice(0, 2).toUpperCase();
+  }
+  return "ES";
+}
+
 export default function QuoteLibraryApp() {
   const supabase = getSupabase();
   const [sessionToken, setSessionToken] = useState<string | null>(null);
+  /**
+   * Email + id come straight from the Supabase session.user object
+   * (already kept up to date by `onAuthStateChange`). We never make a new
+   * `/api/me` call from this head — the chip identity is purely client-side.
+   * Role is intentionally NOT surfaced here because we have no role claim in
+   * scope without a backend call; the user menu hides any role-gated link
+   * (e.g. System Admin) for the same reason.
+   */
+  const [userEmail, setUserEmail] = useState<string>("");
+  const [userId, setUserId] = useState<string>("");
+  const [userMetaName, setUserMetaName] = useState<string>("");
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [refreshBusy, setRefreshBusy] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement | null>(null);
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
@@ -209,11 +269,26 @@ export default function QuoteLibraryApp() {
   const [showRaw, setShowRaw] = useState(false);
 
   const internalBase = useMemo(() => internalEstimateUrl(), []);
+  const homeBase = useMemo(() => homeLauncherUrl(), []);
 
   const workspaceName = useMemo(() => resolveWorkspaceName(), []);
   const workspaceShortId = useMemo(() => resolveWorkspaceShortId(), []);
   const workspaceLogoUrl = useMemo(() => resolveWorkspaceLogoUrl(), []);
   const workspaceInitialsValue = useMemo(() => workspaceInitials(workspaceName), [workspaceName]);
+
+  /**
+   * Display values for the topbar user chip. Resolved entirely client-side
+   * from `session.user` — no `/api/me` call is added in this pass.
+   */
+  const userDisplayName = useMemo(
+    () => userMetaName || deriveDisplayNameFromEmail(userEmail) || "Signed in",
+    [userMetaName, userEmail]
+  );
+  const userDisplayEmail = useMemo(() => userEmail, [userEmail]);
+  const userDisplayInitials = useMemo(
+    () => userInitialsFor(userMetaName, userEmail),
+    [userMetaName, userEmail]
+  );
 
   const activeFilterCount = useMemo(() => {
     let n = 0;
@@ -298,27 +373,61 @@ export default function QuoteLibraryApp() {
     setSelectedIds(new Set());
     setDetail(null);
     setDetailId(null);
+    setUserEmail("");
+    setUserId("");
+    setUserMetaName("");
+    setUserMenuOpen(false);
   }, [supabase]);
 
-  /** Restore JWT from shared cookie storage (same pattern as Internal Estimate / Home). */
+  /**
+   * Restore JWT (and basic user identity) from shared cookie storage. Same
+   * pattern as Internal Estimate / Home, but we also pluck `email` / `id` /
+   * `user_metadata.full_name` from the local session object so the topbar
+   * user chip can render without any new backend call.
+   */
   useEffect(() => {
     if (!supabase) return;
     let alive = true;
-    void supabase.auth.getSession().then(({ data }) => {
-      if (!alive) return;
-      const tok = data.session?.access_token ?? "";
-      setSessionToken(tok || null);
-    });
-    const { data: sub } = supabase.auth.onAuthStateChange((_evt, sess) => {
+    const applySession = (sess: { access_token?: string; user?: { id?: string; email?: string | null; user_metadata?: Record<string, unknown> } | null } | null) => {
       if (!alive) return;
       const tok = sess?.access_token ?? "";
       setSessionToken(tok || null);
-    });
+      const u = sess?.user || null;
+      setUserEmail(String(u?.email ?? ""));
+      setUserId(String(u?.id ?? ""));
+      const meta = (u?.user_metadata ?? {}) as Record<string, unknown>;
+      const metaName = [meta.full_name, meta.name, meta.display_name]
+        .map((v) => (typeof v === "string" ? v.trim() : ""))
+        .find((v) => Boolean(v)) || "";
+      setUserMetaName(metaName);
+    };
+    void supabase.auth.getSession().then(({ data }) => applySession(data.session));
+    const { data: sub } = supabase.auth.onAuthStateChange((_evt, sess) => applySession(sess));
     return () => {
       alive = false;
       sub.subscription.unsubscribe();
     };
   }, [supabase]);
+
+  /** Close the user menu on outside click / Escape. */
+  useEffect(() => {
+    if (!userMenuOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (!userMenuRef.current) return;
+      if (!userMenuRef.current.contains(e.target as Node)) {
+        setUserMenuOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setUserMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [userMenuOpen]);
 
   const loadMetrics = useCallback(async () => {
     if (!sessionToken) return;
@@ -522,6 +631,22 @@ export default function QuoteLibraryApp() {
     }
   }, [detailId, sessionToken, loadMetrics, loadRows, loadRevisionsForDetail]);
 
+  /**
+   * `Refresh data` action surfaced from the user menu. Re-runs the existing
+   * data fetches (metrics + active list + detail/revisions if open) — no new
+   * API endpoints are added, only existing ones are re-invoked.
+   */
+  const handleMenuRefresh = useCallback(async () => {
+    if (!sessionToken || refreshBusy) return;
+    setRefreshBusy(true);
+    setUserMenuOpen(false);
+    try {
+      await refreshListAndDetail();
+    } finally {
+      setRefreshBusy(false);
+    }
+  }, [refreshBusy, refreshListAndDetail, sessionToken]);
+
   const runAction = async (label: string, fn: () => Promise<string | void>) => {
     setMsg(null);
     setErr(null);
@@ -640,20 +765,141 @@ export default function QuoteLibraryApp() {
   return (
     <div className="shell">
       <header className="topbar" role="banner">
-        <a href="/" className="brand-row brand-row-link" aria-label="eliteOS Quote Library — Elite Stone Fabrication">
+        <a
+          href="/"
+          className="brand-row brand-row-link"
+          aria-label={`eliteOS Quote Library — ${workspaceName}`}
+        >
           <span className="brand-mark" aria-hidden>
-            <img src={EOS_LOGO_URL} alt="" />
+            <img src={workspaceLogoUrl ?? EOS_LOGO_URL} alt="" />
           </span>
           <span className="brand-text">
             <span className="brand-wordmark">eliteOS</span>
-            <span className="brand-sub">Quote Library · Elite Stone Fabrication</span>
+            <span className="brand-sub">Quote Library · {workspaceName}</span>
           </span>
         </a>
         <div className="topbar-actions">
           {sessionToken ? (
-            <button type="button" className="btn btn-ghost" onClick={() => void signOut()}>
-              Sign out
-            </button>
+            <div
+              className="topbar-account-wrap"
+              ref={userMenuRef}
+            >
+              <button
+                type="button"
+                className={`topbar-account${userMenuOpen ? " is-open" : ""}`}
+                aria-label="Open account menu"
+                aria-haspopup="menu"
+                aria-expanded={userMenuOpen}
+                onClick={() => setUserMenuOpen((v) => !v)}
+              >
+                <span className="topbar-avatar" aria-hidden>
+                  {userDisplayInitials}
+                </span>
+                <span className="topbar-account-text">
+                  <span className="topbar-account-name">{userDisplayName}</span>
+                  {userDisplayEmail && userDisplayEmail.toLowerCase() !== userDisplayName.toLowerCase() ? (
+                    <span className="topbar-account-role">{userDisplayEmail}</span>
+                  ) : null}
+                </span>
+                <span className="topbar-account-caret" aria-hidden>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </span>
+              </button>
+              {userMenuOpen ? (
+                <div className="user-menu" role="menu" aria-label="Account menu">
+                  <div className="user-menu-header">
+                    <p className="user-menu-name">{userDisplayName}</p>
+                    {userDisplayEmail ? <p className="user-menu-email">{userDisplayEmail}</p> : null}
+                    <p className="user-menu-workspace">
+                      <span>Workspace ·</span>{" "}
+                      <strong>{workspaceName}</strong>
+                      <span className="user-menu-sep" aria-hidden>·</span>
+                      <span>on slabOS</span>
+                    </p>
+                  </div>
+                  <div className="user-menu-list">
+                    <a
+                      href={homeBase}
+                      className="user-menu-item"
+                      role="menuitem"
+                      onClick={() => setUserMenuOpen(false)}
+                    >
+                      <span className="user-menu-icon" aria-hidden>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M3 11.5L12 4l9 7.5" />
+                          <path d="M5 10v10h14V10" />
+                          <path d="M10 20v-6h4v6" />
+                        </svg>
+                      </span>
+                      <span className="user-menu-label">
+                        <span>Open Home</span>
+                        <span className="user-menu-meta">eliteOS Launcher</span>
+                      </span>
+                      <span className="user-menu-shortcut" aria-hidden>↗</span>
+                    </a>
+                    <button
+                      type="button"
+                      className="user-menu-item"
+                      role="menuitem"
+                      onClick={() => void handleMenuRefresh()}
+                      disabled={refreshBusy || busy}
+                    >
+                      <span className="user-menu-icon" aria-hidden>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M21 12a9 9 0 1 1-3-6.7" />
+                          <path d="M21 4v5h-5" />
+                        </svg>
+                      </span>
+                      <span className="user-menu-label">
+                        <span>{refreshBusy ? "Refreshing data…" : "Refresh data"}</span>
+                        <span className="user-menu-meta">Metrics, list, and open quote</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="user-menu-item is-disabled"
+                      role="menuitem"
+                      aria-disabled="true"
+                      disabled
+                      title="Profile / Preferences is coming soon"
+                    >
+                      <span className="user-menu-icon" aria-hidden>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="12" cy="8" r="3.5" />
+                          <path d="M5 20c1.5-3.5 4.2-5 7-5s5.5 1.5 7 5" />
+                        </svg>
+                      </span>
+                      <span className="user-menu-label">
+                        <span>Profile &amp; preferences</span>
+                        <span className="user-menu-meta">Coming soon</span>
+                      </span>
+                    </button>
+                  </div>
+                  <div className="user-menu-footer">
+                    <button
+                      type="button"
+                      className="user-menu-item user-menu-signout"
+                      role="menuitem"
+                      onClick={() => {
+                        setUserMenuOpen(false);
+                        void signOut();
+                      }}
+                    >
+                      <span className="user-menu-icon" aria-hidden>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                          <polyline points="16 17 21 12 16 7" />
+                          <line x1="21" y1="12" x2="9" y2="12" />
+                        </svg>
+                      </span>
+                      <span className="user-menu-label">Sign out</span>
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
           ) : null}
         </div>
       </header>
