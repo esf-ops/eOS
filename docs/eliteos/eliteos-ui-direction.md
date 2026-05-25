@@ -390,7 +390,12 @@ Shop TV, Invoices, …).
 <div class="shell">
   <header class="topbar"> brand-row + topbar-actions </header>
   <main class="main">
-    <section class="ql-hero"> eyebrow + h1 + sub + domain ref </section>
+    <section class="ql-hero">
+      <div class="ql-hero-grid">
+        <div class="ql-hero-main">   ← eyebrow + h1 + sub + domain ref
+        <aside class="hero-workspace"> ← workspace identity panel
+      </div>
+    </section>
     [optional status banners]
     <div class="metrics">             ← real KPIs only, no fake data
     <div class="tabs">                ← view switcher (sticky-ish, glass)
@@ -407,9 +412,20 @@ Shop TV, Invoices, …).
 - **Top bar** matches §6.1 exactly. Brand row reads `eliteOS · <Head Name> ·
   <Workspace>`. Head-specific context lives in the **hero eyebrow**, not the
   topbar.
-- **Hero** is *operational, not promotional*: eyebrow + one-line title + one
-  sub line + a domain/handle reference. No KPI strip if the metrics already
-  appear as their own grid below.
+- **Hero** is *operational, not promotional*: a 2-column grid with operational
+  copy on the left (eyebrow + one-line title + one sub line + a domain/handle
+  reference) and the **workspace identity panel** on the right. Below 820 px
+  the panel stacks beneath the main column. No KPI strip if the metrics
+  already appear as their own grid below.
+- **Workspace identity panel** mirrors the Home Launcher hero workspace block
+  (see §6.2): small uppercase `WORKSPACE` eyebrow → framed workspace logo →
+  workspace name → quiet `"on slabOS · <short id>"` meta. Resolution order
+  follows §2.1: backend `organization_logo_url` if available, otherwise the
+  Elite Stone fallback asset, otherwise gradient initials. Operational heads
+  that do not call `/api/me` are allowed to use a local
+  `resolveWorkspaceLogoUrl` helper that hard-codes the fallback constants —
+  the helper signature must remain backend-friendly so that adding the
+  payload later is a one-line change.
 - **Metric cards** use the same accent stripe + tabular-num value + uppercase
   label as Home, but they are **real metrics from the backend**. Zero-state
   values (`—`, `0`, `$0`) get a quiet neutral stripe via `.metric-zero`.
@@ -426,15 +442,68 @@ Shop TV, Invoices, …).
 - **Empty states** include a soft tinted glyph tile (56×56), title, sentence,
   and one primary action. The "no internal estimates" variant deep-links to
   the Internal Estimate Head.
-- **Drawer** (`.drawer`) for detail/workflow is *right-anchored, full-height*,
-  uses the new fade+slide entrance, and respects `prefers-reduced-motion`.
-  Workflow buttons go inside a `.workflow-grid` flex row; destructive actions
-  always live behind a `window.confirm`.
 - **Debug accordion** stays available behind a dashed-border details block —
   staff need raw payloads in production, but they should never compete with
   the operational view.
 
-### 12.3 Behavior the visual pass must preserve
+### 12.3 Detail drawer pattern (Quote Library reference)
+
+The right-anchored drawer is the canonical detail/workflow surface for any
+operational head. It is **not a modal** — staff can still read the list
+behind it. Structure (top to bottom):
+
+1. **Sticky header** (`.drawer-header`, glass, blurred):
+   - `Quote` eyebrow + small ghost close button (× icon, 36×36 hit target).
+   - Identifier row: monospace quote-number chip (`.quote-num-lg`),
+     status pill, source pill.
+   - `.drawer-title` (account-derived, 1.35 rem 700, tight tracking).
+   - `.drawer-subtitle` for the optional customer/project line.
+2. **Drawer body** (`.drawer-body`, scrollable, `scrollbar-gutter: stable`):
+   each section uses `.drawer-block` (top border separator between sections;
+   first block has no top border) and an uppercase `<h3>` eyebrow heading.
+3. **Overview**:
+   - `.stat-grid` of 4 cards (1 prominent + 3 standard). Total is prominent;
+     Sq ft, Created, Updated are standard. Tabular numerics, accent dot on
+     the prominent card.
+   - `.drawer-meta-dl` two-column definition grid for Account, Customer,
+     Project, Location, and (when populated) Sales rep / Branch.
+4. **Workflow** (action surface):
+   - Primary `Open latest in Internal Estimate` is a full-width
+     `.btn-primary .btn-block` with a quiet arrow glyph.
+   - `Update status` group: Mark sent (secondary), Mark sold
+     (`.btn-status-sold`, green wash), Mark lost (danger).
+   - `Manage` group: Archive, Duplicate quote, Open Monday item (when
+     `monday_*` ids are present).
+   - All destructive or hand-off-altering actions stay behind
+     `window.confirm`. The `runAction` wrapper and existing API calls do
+     **not** change.
+   - Longer guidance lives in a `.quiet-detail` `<details>` so the surface
+     stays scannable.
+5. **Revisions** (`internal_quote` only):
+   - `.revision-list` of card rows. Each row shows a large `Rn` chip,
+     `Latest`/`Viewing` pills, the snapshot total, the updated date, the
+     revision quote number (monospace inline code), and inline actions
+     (View · Open IE · Restore). `Restore` retains its confirm prompt.
+   - The current revision and the row being viewed get green/violet
+     accents so staff can tell them apart at a glance.
+6. **Handoff documents**:
+   - `.handoff-grid` of two `.handoff-status-card`s (Moraware, QuickBooks).
+     Each shows the latest doc status as a pill, the generation timestamp
+     (or "Not generated yet."), and a full-width `Generate` / `Regenerate`
+     button.
+   - Past documents collapse into a `Document history` `.quiet-detail` to
+     keep the surface calm.
+7. **Measurements & estimate**:
+   - A short summary line plus a compact `.drawer-meta-dl-compact` grid for
+     material basis, sinks/cooktops/cutouts, rooms, line items, passthrough
+     and custom-line counts.
+   - Long lists (Rooms, Material/color breakdown) collapse into
+     `.quiet-detail` so they never dominate.
+8. **Timeline**: unchanged structure — refined `.timeline` styling only.
+9. **Admin debug accordion**: dashed-border block at the bottom. Hidden by
+   default; toggled with the same ghost button.
+
+### 12.4 Behavior the visual pass must preserve
 
 When restyling an operational head, never touch:
 
@@ -442,5 +511,6 @@ When restyling an operational head, never touch:
 - Status transitions, archive/duplicate/restore flows.
 - Auth and `requireHeadAccess` assumptions.
 - Quote math, revision/save semantics, Monday/Moraware/QuickBooks payloads.
+- `runAction` wrapper, `window.confirm` prompts, error/success copy paths.
 
 These remain a **backend** responsibility; the visual pass is purely surface.

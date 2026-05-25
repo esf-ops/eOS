@@ -15,6 +15,48 @@ import { getSupabase } from "./lib/supabase";
 const EOS_LOGO_URL =
   "https://www.elitestonefabrication.com/wp-content/uploads/2021/09/cropped-ESF-Horizontal-Logo-500x150-px_09_09.png";
 
+/**
+ * Brand architecture (see docs/eliteos/eliteos-ui-direction.md §2.1).
+ *
+ * The Quote Library is a single-tenant operational head right now — it does not
+ * call `/api/me` and has no access to `organization_*` payload fields. We mirror
+ * the Home Launcher's `DEFAULT_WORKSPACE_*` constants so that the workspace
+ * identity panel in the hero matches the platform pattern, and so that future
+ * iterations (which may receive `organization_logo_url` from the backend) can
+ * extend `resolveWorkspaceLogoUrl` without churning the UI.
+ *
+ * Resolution order (per design doc):
+ *   1. me.user.organization_logo_url       — not in scope here yet
+ *   2. headsPayload.user.organization_logo_url — not in scope here yet
+ *   3. Local Elite Stone Fabrication asset (EOS_LOGO_URL)
+ *   4. Initials in a gradient text frame
+ */
+const DEFAULT_WORKSPACE_NAME = "Elite Stone Fabrication";
+const DEFAULT_WORKSPACE_SHORT = "ESF";
+
+function resolveWorkspaceName(): string {
+  return DEFAULT_WORKSPACE_NAME;
+}
+
+function resolveWorkspaceShortId(): string {
+  return DEFAULT_WORKSPACE_SHORT;
+}
+
+function resolveWorkspaceLogoUrl(): string | null {
+  return EOS_LOGO_URL || null;
+}
+
+function workspaceInitials(name: string): string {
+  return (
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w[0]?.toUpperCase() ?? "")
+      .join("") || "ES"
+  );
+}
+
 const DEFAULT_PAGE_SIZE = 50;
 const PAGE_SIZE_OPTIONS = [50, 100, 250];
 
@@ -60,6 +102,14 @@ function statusPillClass(raw: unknown): string {
   return "pill pill-status-neutral";
 }
 
+function handoffPillClass(status: unknown): string {
+  const s = str(status).toLowerCase();
+  if (s === "generated" || s === "reviewed" || s === "completed") return "pill pill-status-won";
+  if (s === "voided") return "pill pill-status-lost";
+  if (s === "draft") return "pill pill-status-active";
+  return "pill pill-status-neutral";
+}
+
 function canBatchArchiveRow(row: Record<string, unknown>): boolean {
   const status = str(row.quote_status).toLowerCase();
   return !row.archived_at && status !== "sold" && status !== "won" && Boolean(str(row.id));
@@ -91,26 +141,22 @@ function HandoffDocBlock({ doc }: { doc: Record<string, unknown> }) {
   const title = dtype === "moraware_entry" ? "Moraware Entry Doc" : dtype === "quickbooks_entry" ? "QuickBooks Entry Doc" : dtype;
   const payload = doc.payload && typeof doc.payload === "object" ? (doc.payload as Record<string, unknown>) : {};
   const warnings = Array.isArray(payload.missing_field_warnings) ? (payload.missing_field_warnings as unknown[]) : [];
-  const st = str(doc.status);
-  const pillClass =
-    st === "generated" || st === "reviewed" || st === "completed" ? "pill pill-status-won" : st === "voided" ? "pill pill-status-lost" : "pill pill-status-neutral";
   return (
     <div className="handoff-card">
-      <h4>
-        {title} <span className={pillClass} style={{ marginLeft: 8 }}>{labelHandoffDocStatus(doc.status)}</span>
-      </h4>
-      <p className="muted" style={{ margin: "4px 0", fontSize: "0.75rem" }}>
-        Generated {formatDateTime(doc.generated_at)}
-      </p>
+      <div className="handoff-card-head">
+        <h4>{title}</h4>
+        <span className={handoffPillClass(doc.status)}>{labelHandoffDocStatus(doc.status)}</span>
+      </div>
+      <p className="handoff-card-meta">Generated {formatDateTime(doc.generated_at)}</p>
       {warnings.length ? (
-        <div className="warn" style={{ marginTop: 8 }}>
+        <div className="banner banner-warn" style={{ marginTop: 10 }}>
           {warnings.map((w, i) => (
             <div key={i}>{str(w)}</div>
           ))}
         </div>
       ) : null}
       <details>
-        <summary style={{ cursor: "pointer", fontSize: "0.8125rem", fontWeight: 600 }}>Review payload</summary>
+        <summary className="handoff-card-summary">Review payload</summary>
         <div className="payload-preview">{JSON.stringify(payload, null, 2)}</div>
       </details>
     </div>
@@ -163,6 +209,11 @@ export default function QuoteLibraryApp() {
   const [showRaw, setShowRaw] = useState(false);
 
   const internalBase = useMemo(() => internalEstimateUrl(), []);
+
+  const workspaceName = useMemo(() => resolveWorkspaceName(), []);
+  const workspaceShortId = useMemo(() => resolveWorkspaceShortId(), []);
+  const workspaceLogoUrl = useMemo(() => resolveWorkspaceLogoUrl(), []);
+  const workspaceInitialsValue = useMemo(() => workspaceInitials(workspaceName), [workspaceName]);
 
   const activeFilterCount = useMemo(() => {
     let n = 0;
@@ -557,6 +608,35 @@ export default function QuoteLibraryApp() {
   const snap = (detail?.calculation_snapshot as Record<string, unknown>) || {};
   const iu = (snap.internal_ui as Record<string, unknown>) || {};
 
+  const drawerAccount = displayAccountColumn(header);
+  const drawerIsInternal = str(header.quote_source) === "internal_quote";
+  const drawerWarnings = (Array.isArray(detail?.warnings) ? (detail!.warnings as unknown[]) : []).filter(
+    (w): w is string => typeof w === "string"
+  );
+  const moraDoc = detail ? latestHandoffDoc(detail, "moraware_entry") : undefined;
+  const qbDoc = detail ? latestHandoffDoc(detail, "quickbooks_entry") : undefined;
+  const handoffDocs = (Array.isArray(detail?.handoff_documents)
+    ? (detail!.handoff_documents as unknown[])
+    : []) as Record<string, unknown>[];
+
+  /**
+   * Resolve the id of the latest revision in this quote family for "Open latest in
+   * Internal Estimate". Existing semantics preserved: prefer the row flagged
+   * `is_current_revision === true`, otherwise pick the highest revision_number,
+   * otherwise fall back to header.id, otherwise detailId.
+   */
+  const latestRevId = (() => {
+    const flagged = revisions.find((r) => r.is_current_revision === true);
+    if (flagged?.id) return str(flagged.id);
+    const byNumber = revisions.reduce<Record<string, unknown> | null>((best, r) => {
+      if (!best) return r;
+      const bn = Number(best.revision_number) || 0;
+      const rn = Number(r.revision_number) || 0;
+      return rn >= bn ? r : best;
+    }, null);
+    return str(byNumber?.id || header.id || detailId || "");
+  })();
+
   return (
     <div className="shell">
       <header className="topbar" role="banner">
@@ -640,21 +720,64 @@ export default function QuoteLibraryApp() {
         {sessionToken ? (
           <>
           <section className="ql-hero" aria-labelledby="ql-hero-title">
-            <div className="ql-hero-inner">
-              <p className="hero-eyebrow">Internal tool · Quote Library</p>
-              <h1 id="ql-hero-title" className="hero-title">Quote command center</h1>
-              <p className="hero-sub">
-                Account-centered search, status workflow, revisions, and sold-job handoff for every quote in eliteOS.
-              </p>
-              <p className="hero-domain muted-note">
-                <span>Domain ·</span>{" "}
-                <code className="hero-domain-code">quotes.eliteosfab.com</code>
-                <span className="hero-domain-sep" aria-hidden>·</span>
-                <span>separate from the public tool at</span>{" "}
-                <code className="hero-domain-code">quote.eliteosfab.com</code>
-              </p>
-            </div>
             <div className="hero-aurora" aria-hidden />
+            <div className="ql-hero-grid">
+              <div className="ql-hero-main">
+                <p className="hero-eyebrow">Internal tool · Quote Library</p>
+                <h1 id="ql-hero-title" className="hero-title">Quote command center</h1>
+                <p className="hero-sub">
+                  Account-centered search, status workflow, revisions, and sold-job handoff for every quote in eliteOS.
+                </p>
+                <p className="hero-domain muted-note">
+                  <span>Domain ·</span>{" "}
+                  <code className="hero-domain-code">quotes.eliteosfab.com</code>
+                  <span className="hero-domain-sep" aria-hidden>·</span>
+                  <span>separate from the public tool at</span>{" "}
+                  <code className="hero-domain-code">quote.eliteosfab.com</code>
+                </p>
+              </div>
+
+              <aside
+                className="hero-workspace"
+                aria-label={`Workspace · ${workspaceName}`}
+              >
+                <p className="hero-workspace-eyebrow">Workspace</p>
+                <div className="hero-workspace-card">
+                  <div className="hero-workspace-mark">
+                    {workspaceLogoUrl ? (
+                      <img
+                        src={workspaceLogoUrl}
+                        alt=""
+                        loading="lazy"
+                        onError={(e) => {
+                          (e.currentTarget as HTMLImageElement).style.display = "none";
+                          const fallback = (e.currentTarget.parentElement as HTMLElement | null)?.querySelector(
+                            ".hero-workspace-initials"
+                          ) as HTMLElement | null;
+                          if (fallback) fallback.style.display = "flex";
+                        }}
+                      />
+                    ) : null}
+                    <span
+                      className="hero-workspace-initials"
+                      aria-hidden={workspaceLogoUrl ? "true" : "false"}
+                      style={workspaceLogoUrl ? { display: "none" } : undefined}
+                    >
+                      {workspaceInitialsValue}
+                    </span>
+                  </div>
+                  <div className="hero-workspace-text">
+                    <p className="hero-workspace-name">{workspaceName}</p>
+                    <p className="hero-workspace-meta">
+                      <span>on </span>
+                      <span className="hero-workspace-platform">slabOS</span>
+                      <span className="hero-workspace-sep" aria-hidden>·</span>
+                      <span>{workspaceShortId}</span>
+                    </p>
+                  </div>
+                </div>
+              </aside>
+            </div>
           </section>
 
           {msg ? <div className="banner banner-info" role="status">{msg}</div> : null}
@@ -1057,338 +1180,427 @@ export default function QuoteLibraryApp() {
       {detailId && detail ? (
         <>
           <div role="presentation" className="drawer-backdrop" onClick={() => setDetailId(null)} />
-          <aside className="drawer">
-            <div className="drawer-inner">
-              <div className="drawer-top">
-                <div>
-                  <h2>Quote {str(header.quote_number)}</h2>
-                  <p className="muted" style={{ margin: "6px 0 0" }}>
-                    {str(header.quote_status_display || labelQuoteStatus(header.quote_status))} · {labelQuoteSource(header.quote_source)}
-                  </p>
-                </div>
-                <button type="button" className="btn ghost btn-xs" onClick={() => setDetailId(null)}>
-                  Close
+          <aside className="drawer" aria-label={`Quote ${str(header.quote_number) || ""} detail`}>
+            <header className="drawer-header">
+              <div className="drawer-header-top">
+                <p className="drawer-eyebrow">Quote</p>
+                <button
+                  type="button"
+                  className="drawer-close"
+                  aria-label="Close drawer"
+                  onClick={() => setDetailId(null)}
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M18 6L6 18" />
+                    <path d="M6 6l12 12" />
+                  </svg>
                 </button>
               </div>
-              {(Array.isArray(detail.warnings) ? detail.warnings : []).length ? (
-                <div className="warn">
-                  {(detail.warnings as string[]).map((w) => (
+              <div className="drawer-id-row">
+                <span className="quote-num quote-num-lg">{str(header.quote_number) || "—"}</span>
+                <span className={statusPillClass(header.quote_status)}>
+                  {str(header.quote_status_display) || labelQuoteStatus(header.quote_status)}
+                </span>
+                <span className="pill pill-source">{labelQuoteSource(header.quote_source)}</span>
+              </div>
+              <h2 className="drawer-title">{drawerAccount.primary || "—"}</h2>
+              {drawerAccount.subline || drawerAccount.projectCell ? (
+                <p className="drawer-subtitle">
+                  {[drawerAccount.subline, drawerAccount.projectCell].filter(Boolean).join(" · ")}
+                </p>
+              ) : null}
+            </header>
+
+            <div className="drawer-body">
+              {drawerWarnings.length ? (
+                <div className="banner banner-warn" role="alert">
+                  {drawerWarnings.map((w) => (
                     <div key={w}>{w}</div>
                   ))}
                 </div>
               ) : null}
 
-              <div className="drawer-section">
-                <h3>Quote summary</h3>
-                <dl className="summary-dl">
-                  <dt>Quote #</dt>
-                  <dd>
-                    <span className="quote-num">{str(header.quote_number)}</span>
-                  </dd>
-                  <dt>Account</dt>
-                  <dd>{str(header.account_name) || "—"}</dd>
-                  <dt>Customer</dt>
-                  <dd>{str(header.customer_name) || "—"}</dd>
-                  <dt>Project</dt>
-                  <dd>{str(header.project_name) || "—"}</dd>
-                  <dt>Location</dt>
-                  <dd>{[str(header.project_address), loc(header)].filter((x) => x && x !== "—").join(" · ") || "—"}</dd>
-                  <dt>Total</dt>
-                  <dd>{formatMoneyStandard(header.grand_total)}</dd>
-                  <dt>Sq ft</dt>
-                  <dd>{formatSqft(header.estimated_sqft)}</dd>
-                  <dt>Created</dt>
-                  <dd>{formatShortDate(header.created_at)}</dd>
-                  <dt>Updated</dt>
-                  <dd>{formatShortDate(header.updated_at)}</dd>
-                </dl>
-              </div>
+              <section className="drawer-block" aria-labelledby="dwr-overview">
+                <h3 id="dwr-overview" className="sr-only">Overview</h3>
+                <div className="stat-grid">
+                  <div className="stat-card stat-card-prominent">
+                    <p className="stat-label">Total</p>
+                    <p className="stat-value stat-value-lg">{formatMoneyStandard(header.grand_total)}</p>
+                  </div>
+                  <div className="stat-card">
+                    <p className="stat-label">Sq ft</p>
+                    <p className="stat-value">{formatSqft(header.estimated_sqft)}</p>
+                  </div>
+                  <div className="stat-card">
+                    <p className="stat-label">Created</p>
+                    <p className="stat-value-sm">{formatShortDate(header.created_at)}</p>
+                  </div>
+                  <div className="stat-card">
+                    <p className="stat-label">Updated</p>
+                    <p className="stat-value-sm">{formatShortDate(header.updated_at)}</p>
+                  </div>
+                </div>
 
-              {str(header.quote_source) === "internal_quote" ? (
-                <div className="drawer-section">
-                  <h3>Revision history</h3>
+                <dl className="drawer-meta-dl">
+                  <div className="dl-row">
+                    <dt>Account</dt>
+                    <dd>{str(header.account_name) || "—"}</dd>
+                  </div>
+                  <div className="dl-row">
+                    <dt>Customer</dt>
+                    <dd>{str(header.customer_name) || "—"}</dd>
+                  </div>
+                  <div className="dl-row">
+                    <dt>Project</dt>
+                    <dd>{str(header.project_name) || "—"}</dd>
+                  </div>
+                  <div className="dl-row">
+                    <dt>Location</dt>
+                    <dd>{[str(header.project_address), loc(header)].filter((x) => x && x !== "—").join(" · ") || "—"}</dd>
+                  </div>
+                  {str(header.sales_rep) ? (
+                    <div className="dl-row">
+                      <dt>Sales rep</dt>
+                      <dd>{str(header.sales_rep)}</dd>
+                    </div>
+                  ) : null}
+                  {str(header.branch) ? (
+                    <div className="dl-row">
+                      <dt>Branch</dt>
+                      <dd>{str(header.branch)}</dd>
+                    </div>
+                  ) : null}
+                </dl>
+              </section>
+
+              <section className="drawer-block">
+                <h3>Workflow</h3>
+                <a
+                  href={`${internalBase}?quoteId=${encodeURIComponent(latestRevId)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="btn btn-primary btn-block btn-with-icon"
+                >
+                  <span>Open latest in Internal Estimate</span>
+                  <span className="btn-arrow" aria-hidden>↗</span>
+                </a>
+
+                <div className="workflow-group">
+                  <p className="workflow-group-label">Update status</p>
+                  <div className="workflow-row">
+                    <button
+                      type="button"
+                      className="btn secondary"
+                      onClick={() =>
+                        void runAction("Sent", async () => {
+                          await apiPatch(`/api/quote-library/quotes/${detailId}/status`, sessionToken!, { status: "sent" });
+                        })
+                      }
+                    >
+                      Mark sent
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-status btn-status-sold"
+                      onClick={() => {
+                        if (
+                          !window.confirm(
+                            "Mark this quote as sold? After selling, generate Moraware and QuickBooks entry docs from this panel (no automatic writeback to Moraware or QuickBooks)."
+                          )
+                        ) {
+                          return;
+                        }
+                        void runAction("Sold", async () => {
+                          await apiPost(`/api/quote-library/quotes/${detailId}/mark-sold`, sessionToken!, {});
+                          return "Marked sold. Next: generate Moraware Entry Doc, then QuickBooks Entry Doc, when ready.";
+                        });
+                      }}
+                    >
+                      Mark sold
+                    </button>
+                    <button
+                      type="button"
+                      className="btn danger"
+                      onClick={() => {
+                        if (!window.confirm("Mark this quote as lost?")) return;
+                        void runAction("Lost", async () => {
+                          await apiPatch(`/api/quote-library/quotes/${detailId}/status`, sessionToken!, { status: "lost" });
+                        });
+                      }}
+                    >
+                      Mark lost
+                    </button>
+                  </div>
+                </div>
+
+                <div className="workflow-group">
+                  <p className="workflow-group-label">Manage</p>
+                  <div className="workflow-row">
+                    <button
+                      type="button"
+                      className="btn secondary"
+                      onClick={() => {
+                        if (!window.confirm("Soft-archive this quote? It will be hidden from default totals until Show archived is enabled.")) {
+                          return;
+                        }
+                        void runAction("Archived", async () => {
+                          await apiPost(`/api/quote-library/quotes/${detailId}/archive`, sessionToken!, {
+                            confirm: true
+                          });
+                        });
+                      }}
+                    >
+                      Archive
+                    </button>
+                    <button
+                      type="button"
+                      className="btn secondary"
+                      onClick={() => {
+                        if (!window.confirm("Create a duplicate quote from this record?")) return;
+                        void runAction("Duplicate", async () => {
+                          const res = (await apiPost(`/api/quote-library/quotes/${detailId}/duplicate`, sessionToken!)) as Record<string, unknown>;
+                          const qn = str(res.quote_number);
+                          const qid = str(res.quoteId);
+                          return qn ? `Duplicate created: ${qn}${qid ? ` (ID ${qid})` : ""}` : "Duplicate created.";
+                        });
+                      }}
+                    >
+                      Duplicate quote
+                    </button>
+                    {mondayUrl ? (
+                      <a className="btn secondary btn-with-icon" href={mondayUrl} target="_blank" rel="noreferrer">
+                        <span>Open Monday item</span>
+                        <span className="btn-arrow" aria-hidden>↗</span>
+                      </a>
+                    ) : null}
+                  </div>
+                </div>
+
+                <details className="quiet-detail">
+                  <summary>Workflow guidance</summary>
+                  <p>
+                    <strong>Open latest in Internal Estimate</strong> loads the full saved snapshot for the latest revision. Use{" "}
+                    <strong>Save revision</strong> there to freeze the current state and start R2/R3; <strong>Update quote</strong> edits the latest
+                    revision in place; <strong>Restore</strong> copies an older revision forward as a new latest.
+                  </p>
+                  <p>
+                    <strong>After Mark sold,</strong> use <em>Generate Moraware doc</em> and <em>Generate QuickBooks doc</em> below. Documents are stored
+                    for staff review only — there is no automatic writeback to Moraware or QuickBooks.
+                  </p>
+                </details>
+              </section>
+
+              {drawerIsInternal ? (
+                <section className="drawer-block">
+                  <h3>Revisions</h3>
                   {revisions.length ? (
-                    <table className="print-table" style={{ marginTop: 8 }}>
-                      <thead>
-                        <tr>
-                          <th>Revision</th>
-                          <th>Total</th>
-                          <th>Updated</th>
-                          <th />
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {revisions.map((rev) => {
-                          const revId = str(rev.id);
-                          const isLatest = rev.is_current_revision === true;
-                          const isViewing = revId === detailId;
-                          return (
-                            <tr key={revId}>
-                              <td>
-                                <strong>{str(rev.revision_label) || "R?"}</strong>
-                                {isLatest ? (
-                                  <span className="pill pill-live" style={{ marginLeft: 6 }}>
-                                    latest
-                                  </span>
+                    <ul className="revision-list">
+                      {revisions.map((rev) => {
+                        const revId = str(rev.id);
+                        const isLatest = rev.is_current_revision === true;
+                        const isViewing = revId === detailId;
+                        return (
+                          <li
+                            key={revId}
+                            className={`revision-row${isLatest ? " is-latest" : ""}${isViewing ? " is-viewing" : ""}`}
+                          >
+                            <div className="revision-id">
+                              <span className="revision-chip">{str(rev.revision_label) || "R?"}</span>
+                              <div className="revision-id-badges">
+                                {isLatest ? <span className="pill pill-live">Latest</span> : null}
+                                {isViewing ? <span className="pill pill-status-active">Viewing</span> : null}
+                              </div>
+                            </div>
+                            <div className="revision-meta">
+                              <p className="revision-total">{formatMoneyStandard(rev.grand_total)}</p>
+                              <p className="revision-meta-sub muted-note">
+                                Updated {formatShortDate(rev.updated_at)}
+                                {str(rev.quote_number) ? (
+                                  <>
+                                    {" · "}
+                                    <code className="revision-qnum">{str(rev.quote_number)}</code>
+                                  </>
                                 ) : null}
-                                {isViewing ? (
-                                  <span className="muted small" style={{ display: "block" }}>
-                                    viewing
-                                  </span>
-                                ) : null}
-                                <span className="muted small" style={{ display: "block" }}>
-                                  {str(rev.quote_number)}
-                                </span>
-                              </td>
-                              <td>{formatMoneyStandard(rev.grand_total)}</td>
-                              <td>{formatShortDate(rev.updated_at)}</td>
-                              <td style={{ whiteSpace: "nowrap" }}>
-                                {!isViewing ? (
-                                  <button type="button" className="btn ghost btn-xs" onClick={() => setDetailId(revId)}>
-                                    View
-                                  </button>
-                                ) : null}{" "}
+                              </p>
+                            </div>
+                            <div className="revision-actions">
+                              {!isViewing ? (
+                                <button type="button" className="btn ghost btn-xs" onClick={() => setDetailId(revId)}>
+                                  View
+                                </button>
+                              ) : null}
+                              <button
+                                type="button"
+                                className="btn ghost btn-xs btn-with-icon"
+                                onClick={() =>
+                                  window.open(
+                                    `${internalBase}/?quoteId=${encodeURIComponent(revId)}`,
+                                    "_blank",
+                                    "noopener,noreferrer"
+                                  )
+                                }
+                              >
+                                <span>Open IE</span>
+                                <span className="btn-arrow" aria-hidden>↗</span>
+                              </button>
+                              {!isLatest ? (
                                 <button
                                   type="button"
                                   className="btn ghost btn-xs"
-                                  onClick={() =>
-                                    window.open(
-                                      `${internalBase}/?quoteId=${encodeURIComponent(revId)}`,
-                                      "_blank",
-                                      "noopener,noreferrer"
-                                    )
-                                  }
+                                  onClick={() => {
+                                    if (
+                                      !window.confirm(
+                                        `Restore ${str(rev.revision_label) || "this revision"} as a new latest revision? Prior revisions stay in history.`
+                                      )
+                                    ) {
+                                      return;
+                                    }
+                                    void runAction("Restore revision", async () => {
+                                      const res = (await apiPost(
+                                        `/api/quote-library/quotes/${revId}/restore-as-revision`,
+                                        sessionToken!,
+                                        {}
+                                      )) as Record<string, unknown>;
+                                      const newId = str(res.quoteId ?? res.quote_id);
+                                      const qn = str(res.quote_number);
+                                      if (newId) setDetailId(newId);
+                                      return qn
+                                        ? `New latest revision ${qn} created from ${str(rev.revision_label) || "snapshot"}.`
+                                        : "New latest revision created.";
+                                    });
+                                  }}
                                 >
-                                  Open IE
+                                  Restore
                                 </button>
-                                {!isLatest ? (
-                                  <>
-                                    {" "}
-                                    <button
-                                      type="button"
-                                      className="btn ghost btn-xs"
-                                      onClick={() => {
-                                        if (
-                                          !window.confirm(
-                                            `Restore ${str(rev.revision_label) || "this revision"} as a new latest revision? Prior revisions stay in history.`
-                                          )
-                                        ) {
-                                          return;
-                                        }
-                                        void runAction("Restore revision", async () => {
-                                          const res = (await apiPost(
-                                            `/api/quote-library/quotes/${revId}/restore-as-revision`,
-                                            sessionToken!,
-                                            {}
-                                          )) as Record<string, unknown>;
-                                          const newId = str(res.quoteId ?? res.quote_id);
-                                          const qn = str(res.quote_number);
-                                          if (newId) setDetailId(newId);
-                                          return qn
-                                            ? `New latest revision ${qn} created from ${str(rev.revision_label) || "snapshot"}.`
-                                            : "New latest revision created.";
-                                        });
-                                      }}
-                                    >
-                                      Restore
-                                    </button>
-                                  </>
-                                ) : null}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
+                              ) : null}
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
                   ) : (
-                    <p className="muted small">No revision rows found for this quote family.</p>
+                    <p className="muted-note">No revision rows found for this quote family.</p>
                   )}
-                  <p className="muted small" style={{ marginTop: 8 }}>
-                    Use <strong>Save revision</strong> in Internal Estimate to freeze the current snapshot and start a new revision (R2, R3…).
-                    <strong> Update quote</strong> edits the latest revision in place.
-                  </p>
-                </div>
+                </section>
               ) : null}
 
-              <div className="drawer-section">
-                <h3>Workflow</h3>
-                <div className="workflow-grid">
-                  <button
-                    type="button"
-                    className="btn secondary"
-                    onClick={() =>
-                      void runAction("Sent", async () => {
-                        await apiPatch(`/api/quote-library/quotes/${detailId}/status`, sessionToken!, { status: "sent" });
-                      })
-                    }
-                  >
-                    Mark sent
-                  </button>
-                  <button
-                    type="button"
-                    className="btn primary"
-                    onClick={() => {
-                      if (
-                        !window.confirm(
-                          "Mark this quote as sold? After selling, generate Moraware and QuickBooks entry docs from this panel (no automatic writeback to Moraware or QuickBooks)."
-                        )
-                      ) {
-                        return;
-                      }
-                      void runAction("Sold", async () => {
-                        await apiPost(`/api/quote-library/quotes/${detailId}/mark-sold`, sessionToken!, {});
-                        return "Marked sold. Next: generate Moraware Entry Doc, then QuickBooks Entry Doc, when ready.";
-                      });
-                    }}
-                  >
-                    Mark sold
-                  </button>
-                  <button
-                    type="button"
-                    className="btn danger"
-                    onClick={() => {
-                      if (!window.confirm("Mark this quote as lost?")) return;
-                      void runAction("Lost", async () => {
-                        await apiPatch(`/api/quote-library/quotes/${detailId}/status`, sessionToken!, { status: "lost" });
-                      });
-                    }}
-                  >
-                    Mark lost
-                  </button>
-                  <button
-                    type="button"
-                    className="btn secondary"
-                    onClick={() => {
-                      if (!window.confirm("Soft-archive this quote? It will be hidden from default totals until Show archived is enabled.")) {
-                        return;
-                      }
-                      void runAction("Archived", async () => {
-                        await apiPost(`/api/quote-library/quotes/${detailId}/archive`, sessionToken!, {
-                          confirm: true
-                        });
-                      });
-                    }}
-                  >
-                    Archive
-                  </button>
-                  <button
-                    type="button"
-                    className="btn secondary"
-                    onClick={() => {
-                      if (!window.confirm("Create a duplicate quote from this record?")) return;
-                      void runAction("Duplicate", async () => {
-                        const res = (await apiPost(`/api/quote-library/quotes/${detailId}/duplicate`, sessionToken!)) as Record<string, unknown>;
-                        const qn = str(res.quote_number);
-                        const qid = str(res.quoteId);
-                        return qn ? `Duplicate created: ${qn}${qid ? ` (ID ${qid})` : ""}` : "Duplicate created.";
-                      });
-                    }}
-                  >
-                    Duplicate quote
-                  </button>
-                  <a
-                    className="btn secondary"
-                    href={`${internalBase}?quoteId=${encodeURIComponent(
-                      (() => {
-                        const flagged = revisions.find((r) => r.is_current_revision === true);
-                        if (flagged?.id) return str(flagged.id);
-                        const byNumber = revisions.reduce<Record<string, unknown> | null>((best, r) => {
-                          if (!best) return r;
-                          const bn = Number(best.revision_number) || 0;
-                          const rn = Number(r.revision_number) || 0;
-                          return rn >= bn ? r : best;
-                        }, null);
-                        return str(byNumber?.id || header.id || detailId);
-                      })()
-                    )}`}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Open latest in Internal Estimate
-                  </a>
-                  {mondayUrl ? (
-                    <a className="btn secondary" href={mondayUrl} target="_blank" rel="noreferrer">
-                      Open Monday item
-                    </a>
-                  ) : null}
-                </div>
-                <p className="muted" style={{ marginTop: 12, fontSize: "0.8125rem" }}>
-                  Open in Internal Estimate loads the full saved snapshot for the selected revision. Use <strong>Save revision</strong> to
-                  add R2/R3 without losing prior snapshots; <strong>Restore</strong> copies an older revision forward as a new latest revision.
-                </p>
-                <div className="workflow-hint">
-                  <strong>After Mark sold:</strong> use <em>Generate Moraware Entry Doc</em> and <em>Generate QuickBooks Entry Doc</em> below.
-                  Documents are stored for staff review only.
-                </div>
-              </div>
-
-              <div className="drawer-section">
+              <section className="drawer-block">
                 <h3>Handoff documents</h3>
-                <p className="muted" style={{ marginTop: 0 }}>
-                  Moraware: {labelHandoffDocStatus(latestHandoffDoc(detail, "moraware_entry")?.status)} · QuickBooks:{" "}
-                  {labelHandoffDocStatus(latestHandoffDoc(detail, "quickbooks_entry")?.status)}
+                <p className="muted-note section-lede">
+                  Generate handoff documents after Mark sold. Stored for staff review only — no automatic writeback to Moraware or QuickBooks.
                 </p>
-                <div className="workflow-grid">
-                  <button
-                    type="button"
-                    className="btn secondary"
-                    onClick={() =>
-                      void runAction("Moraware doc", async () => {
-                        await apiPost(`/api/quote-library/quotes/${detailId}/generate-moraware-entry-doc`, sessionToken!);
-                        return "Moraware Entry Doc generated — review payload below.";
-                      })
-                    }
-                  >
-                    Generate Moraware entry doc
-                  </button>
-                  <button
-                    type="button"
-                    className="btn secondary"
-                    onClick={() =>
-                      void runAction("QuickBooks doc", async () => {
-                        await apiPost(`/api/quote-library/quotes/${detailId}/generate-quickbooks-entry-doc`, sessionToken!);
-                        return "QuickBooks Entry Doc generated — review payload below.";
-                      })
-                    }
-                  >
-                    Generate QuickBooks entry doc
-                  </button>
+                <div className="handoff-grid">
+                  <div className={`handoff-status-card${moraDoc ? "" : " is-empty"}`}>
+                    <div className="handoff-status-head">
+                      <p className="handoff-status-title">Moraware Entry Doc</p>
+                      <span className={handoffPillClass(moraDoc?.status)}>{labelHandoffDocStatus(moraDoc?.status)}</span>
+                    </div>
+                    <p className="handoff-status-meta">
+                      {moraDoc ? `Generated ${formatDateTime(moraDoc.generated_at)}` : "Not generated yet."}
+                    </p>
+                    <button
+                      type="button"
+                      className="btn secondary btn-block"
+                      onClick={() =>
+                        void runAction("Moraware doc", async () => {
+                          await apiPost(`/api/quote-library/quotes/${detailId}/generate-moraware-entry-doc`, sessionToken!);
+                          return "Moraware Entry Doc generated — review payload in document history.";
+                        })
+                      }
+                    >
+                      {moraDoc ? "Regenerate Moraware doc" : "Generate Moraware doc"}
+                    </button>
+                  </div>
+                  <div className={`handoff-status-card${qbDoc ? "" : " is-empty"}`}>
+                    <div className="handoff-status-head">
+                      <p className="handoff-status-title">QuickBooks Entry Doc</p>
+                      <span className={handoffPillClass(qbDoc?.status)}>{labelHandoffDocStatus(qbDoc?.status)}</span>
+                    </div>
+                    <p className="handoff-status-meta">
+                      {qbDoc ? `Generated ${formatDateTime(qbDoc.generated_at)}` : "Not generated yet."}
+                    </p>
+                    <button
+                      type="button"
+                      className="btn secondary btn-block"
+                      onClick={() =>
+                        void runAction("QuickBooks doc", async () => {
+                          await apiPost(`/api/quote-library/quotes/${detailId}/generate-quickbooks-entry-doc`, sessionToken!);
+                          return "QuickBooks Entry Doc generated — review payload in document history.";
+                        })
+                      }
+                    >
+                      {qbDoc ? "Regenerate QuickBooks doc" : "Generate QuickBooks doc"}
+                    </button>
+                  </div>
                 </div>
-                {(Array.isArray(detail.handoff_documents) ? detail.handoff_documents : []).map((h: unknown, i: number) => (
-                  <HandoffDocBlock key={i} doc={h as Record<string, unknown>} />
-                ))}
-              </div>
+                {handoffDocs.length ? (
+                  <details className="quiet-detail">
+                    <summary>
+                      Document history ({handoffDocs.length} {handoffDocs.length === 1 ? "document" : "documents"})
+                    </summary>
+                    <div className="handoff-doc-list">
+                      {handoffDocs.map((h, i) => (
+                        <HandoffDocBlock key={i} doc={h} />
+                      ))}
+                    </div>
+                  </details>
+                ) : null}
+              </section>
 
-              <div className="drawer-section">
+              <section className="drawer-block">
                 <h3>Measurements &amp; estimate</h3>
-                <p className="muted">{str(snap.inputSummary) || "No measurement summary on snapshot."}</p>
-                <p className="muted">
-                  Material / pricing: {str((iu as { internal_material_basis?: string }).internal_material_basis) || "—"}
+                <p className="drawer-summary-text">{str(snap.inputSummary) || "No measurement summary on snapshot."}</p>
+                <dl className="drawer-meta-dl drawer-meta-dl-compact">
+                  <div className="dl-row">
+                    <dt>Material / pricing</dt>
+                    <dd>{str((iu as { internal_material_basis?: string }).internal_material_basis) || "—"}</dd>
+                  </div>
                   {iu.sinks || iu.cooktops || iu.cutouts ? (
-                    <>
-                      {" "}
-                      · Sinks/cooktops/cutouts: {[str(iu.sinks), str(iu.cooktops), str(iu.cutouts)].filter(Boolean).join(" · ") || "—"}
-                    </>
+                    <div className="dl-row">
+                      <dt>Sinks · cooktops · cutouts</dt>
+                      <dd>{[str(iu.sinks), str(iu.cooktops), str(iu.cutouts)].filter(Boolean).join(" · ") || "—"}</dd>
+                    </div>
                   ) : null}
-                </p>
-                <p className="muted">
-                  Add-ons / custom:{" "}
-                  {Array.isArray(iu.custom_passthrough_items) && (iu.custom_passthrough_items as unknown[]).length
-                    ? `${(iu.custom_passthrough_items as unknown[]).length} passthrough item(s)`
-                    : "—"}
+                  <div className="dl-row">
+                    <dt>Rooms</dt>
+                    <dd>{(detail.rooms as unknown[] | undefined)?.length ?? 0}</dd>
+                  </div>
+                  <div className="dl-row">
+                    <dt>Line items</dt>
+                    <dd>{(detail.line_items as unknown[] | undefined)?.length ?? 0}</dd>
+                  </div>
+                  {Array.isArray(iu.custom_passthrough_items) && (iu.custom_passthrough_items as unknown[]).length ? (
+                    <div className="dl-row">
+                      <dt>Passthrough items</dt>
+                      <dd>{(iu.custom_passthrough_items as unknown[]).length}</dd>
+                    </div>
+                  ) : null}
                   {Array.isArray(iu.custom_line_items) && (iu.custom_line_items as unknown[]).length ? (
-                    <>
-                      {" "}
-                      · Structured custom lines: {(iu.custom_line_items as unknown[]).length}
-                    </>
+                    <div className="dl-row">
+                      <dt>Custom line items</dt>
+                      <dd>{(iu.custom_line_items as unknown[]).length}</dd>
+                    </div>
                   ) : null}
-                </p>
+                </dl>
+                {Array.isArray(detail.rooms) && (detail.rooms as Record<string, unknown>[]).length ? (
+                  <details className="quiet-detail">
+                    <summary>Rooms ({(detail.rooms as unknown[]).length})</summary>
+                    <ul className="drawer-line-list">
+                      {(detail.rooms as Record<string, unknown>[]).slice(0, 12).map((room, idx) => (
+                        <li key={idx}>
+                          {str(room.room_name) || "Room"} — countertop {formatSqft(room.countertop_sqft)}
+                          {room.backsplash_sqft != null && Number(room.backsplash_sqft) > 0
+                            ? ` · backsplash ${Number(room.backsplash_sqft).toLocaleString()} sf`
+                            : null}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                ) : null}
                 {Array.isArray(snap.material_breakdown) && (snap.material_breakdown as unknown[]).length ? (
-                  <div style={{ marginTop: 10 }}>
-                    <h4 className="h3" style={{ margin: "0 0 6px" }}>
-                      Material / color breakdown
-                    </h4>
-                    <ul className="muted" style={{ fontSize: "0.8125rem", paddingLeft: 18, margin: 0 }}>
+                  <details className="quiet-detail">
+                    <summary>Material / color breakdown ({(snap.material_breakdown as unknown[]).length})</summary>
+                    <ul className="drawer-line-list">
                       {(snap.material_breakdown as Record<string, unknown>[]).slice(0, 24).map((ln, idx) => (
                         <li key={idx}>
                           {str(ln.room)} — {str(ln.piece)} · {str(ln.materialGroup)}
@@ -1397,25 +1609,12 @@ export default function QuoteLibraryApp() {
                         </li>
                       ))}
                     </ul>
-                  </div>
+                  </details>
                 ) : null}
-                <p className="muted">
-                  Rooms: {(detail.rooms as unknown[] | undefined)?.length ?? 0} · Line items: {(detail.line_items as unknown[] | undefined)?.length ?? 0}
-                </p>
-                {Array.isArray(detail.rooms) && (detail.rooms as Record<string, unknown>[]).length ? (
-                  <ul className="muted" style={{ fontSize: "0.8125rem", paddingLeft: 18 }}>
-                    {(detail.rooms as Record<string, unknown>[]).slice(0, 12).map((room, idx) => (
-                      <li key={idx}>
-                        {str(room.room_name) || "Room"} — countertop {formatSqft(room.countertop_sqft)}
-                        {room.backsplash_sqft != null && Number(room.backsplash_sqft) > 0 ? ` · backsplash ${Number(room.backsplash_sqft).toLocaleString()} sf` : null}
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-              </div>
+              </section>
 
-              <div className="drawer-section">
-                <h3>Timeline &amp; activity</h3>
+              <section className="drawer-block">
+                <h3>Timeline</h3>
                 <ul className="timeline">
                   <li>
                     <div className="tl-time">{formatDateTime(header.created_at)}</div>
@@ -1458,14 +1657,14 @@ export default function QuoteLibraryApp() {
                     );
                   })}
                 </ul>
-              </div>
+              </section>
 
-              <div className="drawer-section debug-accordion">
+              <section className="drawer-block debug-accordion">
                 <button type="button" className="btn ghost btn-xs" onClick={() => setShowRaw((s) => !s)}>
                   {showRaw ? "Hide" : "Show"} admin / debug — raw calculation snapshot
                 </button>
                 {showRaw ? <pre>{JSON.stringify(detail.calculation_snapshot ?? {}, null, 2)}</pre> : null}
-              </div>
+              </section>
             </div>
           </aside>
         </>
