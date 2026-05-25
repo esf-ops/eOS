@@ -366,8 +366,81 @@ When a new head is built (Sales, Production, Shop TV, …), it must:
 | `app-home/src/ui/App.tsx` | Launcher React entry, head cards, hero, auth flows |
 | `app-home/src/ui/styles.css` | Design tokens + all launcher styling |
 | `app-home/index.html` | `theme-color`, description, title |
+| `app-quote-library/src/QuoteLibraryApp.tsx` | Reference operational head: topbar + content hero + filters + table + drawer |
+| `app-quote-library/src/styles.css` | Reuses the token block locally; pattern reference for operational/workflow heads |
 | `docs/eliteos/eliteos-ui-direction.md` | This document |
 
 When extracting a shared design package later, lift the `:root` token block,
 buttons, pills, cards, and banners first. Hero + topbar can stay head-specific
 until two heads need them.
+
+---
+
+## 12. Pattern: operational heads (Quote Library reference)
+
+The Home Launcher is the *primary* north star, but it is a launcher, not an
+operational tool. The **Quote Library** is the first operational head in the
+new visual system, so use it as the reference when building heads that center
+on **search → list → detail** workflows (future heads: Sales, Production,
+Shop TV, Invoices, …).
+
+### 12.1 Page skeleton
+
+```
+<div class="shell">
+  <header class="topbar"> brand-row + topbar-actions </header>
+  <main class="main">
+    <section class="ql-hero"> eyebrow + h1 + sub + domain ref </section>
+    [optional status banners]
+    <div class="metrics">             ← real KPIs only, no fake data
+    <div class="tabs">                ← view switcher (sticky-ish, glass)
+    <section class="card">            ← search & filters
+    <section class="card">            ← list (table) or grid (by-account)
+  </main>
+  [optional <aside class="drawer">]   ← detail / workflow / timeline
+  <footer class="footer-bar">
+</div>
+```
+
+### 12.2 Operational specifics
+
+- **Top bar** matches §6.1 exactly. Brand row reads `eliteOS · <Head Name> ·
+  <Workspace>`. Head-specific context lives in the **hero eyebrow**, not the
+  topbar.
+- **Hero** is *operational, not promotional*: eyebrow + one-line title + one
+  sub line + a domain/handle reference. No KPI strip if the metrics already
+  appear as their own grid below.
+- **Metric cards** use the same accent stripe + tabular-num value + uppercase
+  label as Home, but they are **real metrics from the backend**. Zero-state
+  values (`—`, `0`, `$0`) get a quiet neutral stripe via `.metric-zero`.
+- **Tabs** are pill-style inside a glass tray. Active tab carries a small
+  burgundy dot. Use tabs only when the underlying API supports view-scoped
+  queries (here: `all`, `by_account`, `my`, `internal`, `public`, `sold`,
+  `handoff`).
+- **Filter card** uses the standard card chrome, an inline filter-count meta,
+  and a `filter-toolbar` separated by a top border for Apply / Clear.
+- **Data table** keeps a `min-width` so columns never crush. Status uses
+  pill vocabulary from §6.5; quote number uses a monospace chip.
+- **Skeleton row** (`.ql-skeleton-row`) replaces the table while busy on
+  empty rows. Same shimmer system as Home.
+- **Empty states** include a soft tinted glyph tile (56×56), title, sentence,
+  and one primary action. The "no internal estimates" variant deep-links to
+  the Internal Estimate Head.
+- **Drawer** (`.drawer`) for detail/workflow is *right-anchored, full-height*,
+  uses the new fade+slide entrance, and respects `prefers-reduced-motion`.
+  Workflow buttons go inside a `.workflow-grid` flex row; destructive actions
+  always live behind a `window.confirm`.
+- **Debug accordion** stays available behind a dashed-border details block —
+  staff need raw payloads in production, but they should never compete with
+  the operational view.
+
+### 12.3 Behavior the visual pass must preserve
+
+When restyling an operational head, never touch:
+
+- API calls, search/filter/sort params, pagination semantics.
+- Status transitions, archive/duplicate/restore flows.
+- Auth and `requireHeadAccess` assumptions.
+- Quote math, revision/save semantics, Monday/Moraware/QuickBooks payloads.
+
+These remain a **backend** responsibility; the visual pass is purely surface.

@@ -558,66 +558,122 @@ export default function QuoteLibraryApp() {
   const iu = (snap.internal_ui as Record<string, unknown>) || {};
 
   return (
-    <div className="page">
-      <header className="hero">
-        <div className="hero-brand">
-          <img className="hero-logo" src={EOS_LOGO_URL} alt="Elite Stone Fabrication" />
-          <div className="hero-copy">
-            <h1>eliteOS Quote Library Head</h1>
-            <p className="sub">Account-centered search, status workflow, and sold-job handoff documents — your command center over quotes in Supabase.</p>
-            <p className="domain-line">
-              Canonical domain: <strong>quotes.eliteosfab.com</strong> — separate from the public tool at <strong>quote.eliteosfab.com</strong>.
-            </p>
-          </div>
-        </div>
-        <div>
+    <div className="shell">
+      <header className="topbar" role="banner">
+        <a href="/" className="brand-row brand-row-link" aria-label="eliteOS Quote Library — Elite Stone Fabrication">
+          <span className="brand-mark" aria-hidden>
+            <img src={EOS_LOGO_URL} alt="" />
+          </span>
+          <span className="brand-text">
+            <span className="brand-wordmark">eliteOS</span>
+            <span className="brand-sub">Quote Library · Elite Stone Fabrication</span>
+          </span>
+        </a>
+        <div className="topbar-actions">
           {sessionToken ? (
-            <button type="button" className="btn secondary" onClick={() => void signOut()}>
+            <button type="button" className="btn btn-ghost" onClick={() => void signOut()}>
               Sign out
             </button>
           ) : null}
         </div>
       </header>
 
-      {!supabase ? <div className="warn">Configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to sign in.</div> : null}
-
-      {!sessionToken ? (
-        <section className="card">
-          <h2>Sign in</h2>
-          <div className="grid2">
-            <label>
-              Email
-              <input value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} autoComplete="username" />
-            </label>
-            <label>
-              Password
-              <input
-                type="password"
-                value={authPassword}
-                onChange={(e) => setAuthPassword(e.target.value)}
-                autoComplete="current-password"
-              />
-            </label>
+      <main className="main" role="main">
+        {!supabase ? (
+          <div className="banner banner-warn" role="alert">
+            <strong>Supabase is not configured.</strong>{" "}
+            Set <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code> to sign in.
           </div>
-          {authError ? <p className="error">{authError}</p> : null}
-          <button type="button" className="btn primary" style={{ marginTop: 12 }} disabled={authBusy} onClick={() => void signIn()}>
-            {authBusy ? "Signing in…" : "Sign in"}
-          </button>
-        </section>
-      ) : null}
+        ) : null}
 
-      {sessionToken ? (
-        <>
-          {msg ? <p className="ok">{msg}</p> : null}
-          {err ? <p className="error">{err}</p> : null}
-
-          <div className="metrics">
-            {metricCards.map((c) => (
-              <div key={c.key} className="metric">
-                <div className="val">{c.val}</div>
-                <div className="lbl">{c.label}</div>
+        {!sessionToken ? (
+          <section className="auth-panel auth-panel-standalone" aria-label="Sign in">
+            <header className="auth-panel-header">
+              <p className="auth-panel-eyebrow">Quote Library · Elite Stone Fabrication</p>
+              <h2 className="auth-panel-title">Sign in to continue</h2>
+              <p className="auth-panel-sub">
+                Use your eliteOS staff account. The Home Launcher signs you in across every head — this page is for direct access.
+              </p>
+            </header>
+            <div className="field-grid">
+              <div className="field">
+                <label htmlFor="ql-email">Email</label>
+                <input
+                  id="ql-email"
+                  value={authEmail}
+                  onChange={(e) => setAuthEmail(e.target.value)}
+                  autoComplete="username"
+                  placeholder="you@example.com"
+                />
               </div>
-            ))}
+              <div className="field">
+                <label htmlFor="ql-password">Password</label>
+                <input
+                  id="ql-password"
+                  type="password"
+                  value={authPassword}
+                  onChange={(e) => setAuthPassword(e.target.value)}
+                  autoComplete="current-password"
+                />
+              </div>
+            </div>
+            {authError ? (
+              <div className="banner banner-error" role="alert" style={{ marginTop: 8 }}>
+                {authError}
+              </div>
+            ) : null}
+            <button
+              type="button"
+              className="btn btn-primary"
+              style={{ marginTop: 16 }}
+              disabled={authBusy}
+              onClick={() => void signIn()}
+            >
+              {authBusy ? "Signing in…" : "Sign in"}
+            </button>
+            <p className="muted-note auth-trust">
+              Authenticated through Supabase. No service-role keys are used in the browser.
+            </p>
+          </section>
+        ) : null}
+
+        {sessionToken ? (
+          <>
+          <section className="ql-hero" aria-labelledby="ql-hero-title">
+            <div className="ql-hero-inner">
+              <p className="hero-eyebrow">Internal tool · Quote Library</p>
+              <h1 id="ql-hero-title" className="hero-title">Quote command center</h1>
+              <p className="hero-sub">
+                Account-centered search, status workflow, revisions, and sold-job handoff for every quote in eliteOS.
+              </p>
+              <p className="hero-domain muted-note">
+                <span>Domain ·</span>{" "}
+                <code className="hero-domain-code">quotes.eliteosfab.com</code>
+                <span className="hero-domain-sep" aria-hidden>·</span>
+                <span>separate from the public tool at</span>{" "}
+                <code className="hero-domain-code">quote.eliteosfab.com</code>
+              </p>
+            </div>
+            <div className="hero-aurora" aria-hidden />
+          </section>
+
+          {msg ? <div className="banner banner-info" role="status">{msg}</div> : null}
+          {err ? <div className="banner banner-error" role="alert">{err}</div> : null}
+
+          <div className="metrics" role="list" aria-label="Quote library metrics">
+            {metricCards.map((c) => {
+              const isEmpty = c.val === "—" || c.val === "$0" || c.val === "0";
+              return (
+                <div
+                  key={c.key}
+                  className={`metric${isEmpty ? " metric-zero" : ""}`}
+                  role="listitem"
+                >
+                  <div className="val">{c.val}</div>
+                  <div className="lbl">{c.label}</div>
+                </div>
+              );
+            })}
           </div>
 
           <div className="tabs" role="tablist" aria-label="Quote views">
@@ -851,19 +907,52 @@ export default function QuoteLibraryApp() {
                   <span className="muted">Select visible active quotes to archive them in bulk.</span>
                 )}
               </div>
-              {!busy && rows.length === 0 && tab === "internal" ? (
+              {busy && rows.length === 0 ? (
+                <div className="ql-skeleton" aria-hidden>
+                  {[0, 1, 2, 3, 4, 5].map((i) => (
+                    <div key={i} className="ql-skeleton-row">
+                      <div className="skel skel-chip" />
+                      <div className="skel skel-line skel-line-strong" />
+                      <div className="skel skel-line" />
+                      <div className="skel skel-pill" />
+                      <div className="skel skel-pill" />
+                      <div className="skel skel-line skel-line-short" />
+                      <div className="skel skel-line skel-line-short" />
+                    </div>
+                  ))}
+                </div>
+              ) : !busy && rows.length === 0 && tab === "internal" ? (
                 <div className="empty-state">
+                  <div className="empty-glyph" aria-hidden>
+                    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M5 4h11a2 2 0 0 1 2 2v14l-4-2-4 2-4-2-4 2V6a2 2 0 0 1 2-2Z" />
+                      <path d="M9 8h6" />
+                      <path d="M9 12h4" />
+                    </svg>
+                  </div>
                   <h3>No internal estimates yet</h3>
                   <p>Create one from the eliteOS Internal Estimate Head.</p>
-                  <a className="btn primary" href={`${internalBase}/`} target="_blank" rel="noreferrer" style={{ textDecoration: "none", display: "inline-block", marginTop: 8 }}>
+                  <a
+                    className="btn btn-primary"
+                    href={`${internalBase}/`}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ textDecoration: "none", marginTop: 12 }}
+                  >
                     Open Internal Estimate Head
                   </a>
                 </div>
               ) : !busy && rows.length === 0 ? (
                 <div className="empty-state">
+                  <div className="empty-glyph" aria-hidden>
+                    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="11" cy="11" r="7" />
+                      <path d="M21 21l-4.3-4.3" />
+                    </svg>
+                  </div>
                   <h3>No quotes match these filters</h3>
                   <p>Clear filters or widen search to see more results.</p>
-                  <button type="button" className="btn secondary" onClick={clearFilters}>
+                  <button type="button" className="btn secondary" onClick={clearFilters} style={{ marginTop: 12 }}>
                     Clear filters
                   </button>
                 </div>
@@ -963,6 +1052,7 @@ export default function QuoteLibraryApp() {
           )}
         </>
       ) : null}
+      </main>
 
       {detailId && detail ? (
         <>
@@ -1380,6 +1470,11 @@ export default function QuoteLibraryApp() {
           </aside>
         </>
       ) : null}
+
+      <footer className="footer-bar" role="contentinfo">
+        <div className="footer-line footer-brand">eliteOS · Quote Library</div>
+        <div className="footer-line footer-tagline">Keep the Titans running well.</div>
+      </footer>
     </div>
   );
 }
