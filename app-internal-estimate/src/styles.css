@@ -357,9 +357,19 @@ body {
 
 .ie-app-shell {
   display: grid;
-  grid-template-columns: 168px minmax(0, 1fr) 300px;
-  gap: 18px;
-  align-items: start;
+  /* Pull the rail slightly left and the right panel slightly right so the
+     center estimating column gets more space. Rail and right panel use
+     clamp() so they shrink gracefully toward 1024 but never push the center
+     below a usable width. */
+  grid-template-columns:
+    clamp(168px, 12vw, 196px)
+    minmax(0, 1fr)
+    clamp(280px, 21vw, 312px);
+  gap: clamp(14px, 1.4vw, 22px);
+  align-items: stretch;
+  min-width: 0;
+  /* Visual breathing room between the hero/url-banner and the workspace. */
+  margin-top: clamp(4px, 0.6vw, 10px);
 }
 
 .ie-rail {
@@ -452,12 +462,15 @@ body {
 }
 
 .ie-aside.side-col {
-  position: sticky;
-  top: 12px;
+  /* Aside cell stretches to the row height (set on .ie-app-shell). The
+     sticky behavior now lives on .ie-aside-panel so the panel pins below
+     the topbar instead of trying to pin a full-row-height grid item. */
+  position: static;
   align-self: stretch;
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
 }
 
 .ie-signin-row .ie-signin-fields {
@@ -862,9 +875,13 @@ select {
 
 input:focus,
 select:focus {
+  /* Slate-blue focus ring — premium, accessible, and clearly NOT the
+     burgundy/red error treatment. Burgundy/red is reserved for actual
+     validation errors so a Cooktop qty focus doesn't read as alarm.
+     See docs/eliteos/eliteos-ui-direction.md §12.5.4l. */
   outline: none;
-  border-color: var(--elite-red);
-  box-shadow: 0 0 0 3px rgba(185, 28, 28, 0.12);
+  border-color: rgba(46, 105, 184, 0.55);
+  box-shadow: 0 0 0 3px rgba(46, 105, 184, 0.16);
   background: #fff;
 }
 
@@ -5105,9 +5122,10 @@ textarea:hover {
 input:focus,
 select:focus,
 textarea:focus {
+  /* Match the upper input:focus rule — slate-blue, premium, not alarm-red. */
   outline: none;
-  border-color: var(--eos-accent);
-  box-shadow: 0 0 0 3px var(--eos-accent-ring);
+  border-color: rgba(46, 105, 184, 0.55);
+  box-shadow: 0 0 0 3px rgba(46, 105, 184, 0.16);
   background: var(--eos-surface);
 }
 
@@ -5534,7 +5552,13 @@ textarea:focus {
 }
 
 .ie-rail-link {
+  /* `width: 100%; min-width: 0;` is critical — without it the button is
+     sized to its content (chip + label intrinsic width), so a long label
+     like "Add-ons & Custom Items" makes the button wider than the 168 px
+     rail column and visually spills out the right edge. */
   display: flex;
+  width: 100%;
+  min-width: 0;
   align-items: center;
   gap: 10px;
   padding: 8px 9px;
@@ -5546,6 +5570,7 @@ textarea:focus {
   cursor: pointer;
   background: transparent;
   border: 1px solid transparent;
+  text-align: left;
   transition:
     background var(--eos-dur-1) var(--eos-ease),
     color var(--eos-dur-1) var(--eos-ease),
@@ -5594,7 +5619,12 @@ textarea:focus {
 }
 
 .ie-rail-link-label {
-  flex: 1;
+  /* `flex: 1 1 0` (not `flex: 1`) + `min-width: 0` is required for the
+     ellipsis to actually kick in inside a flex row. Default flex items
+     have `min-width: auto` which means they don't shrink below their
+     content width. */
+  flex: 1 1 0;
+  min-width: 0;
   text-align: left;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -6169,5 +6199,2489 @@ textarea:focus {
 .ie-main details > summary:focus-visible {
   outline: 2px solid var(--eos-accent-ring);
   outline-offset: 2px;
+}
+
+/* ====================================================================== */
+/* === IE Third Refinement Pass — premium estimating workspace polish === */
+/* ====================================================================== */
+
+/* ----- Section head pattern (eyebrow title + supporting meta) ---------- */
+
+.ie-section-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 14px;
+}
+
+.ie-section-head .ie-section-title {
+  margin: 0;
+}
+
+.ie-section-meta {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--eos-ink-muted);
+  letter-spacing: 0.005em;
+  max-width: 64ch;
+}
+
+.ie-section-meta strong {
+  color: var(--eos-ink-soft);
+  font-weight: 600;
+}
+
+.ie-section-head-tight {
+  margin-bottom: 6px;
+}
+
+/* ----- Job Info subgroup system ---------------------------------------- */
+
+.ie-job-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.ie-job-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 18px 18px;
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(248, 250, 254, 0.7) 0%, rgba(252, 253, 255, 0.55) 100%);
+  border: 1px solid rgba(11, 26, 51, 0.06);
+  position: relative;
+}
+
+.ie-job-group::before {
+  content: "";
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  top: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, rgba(112, 26, 26, 0.25), rgba(112, 26, 26, 0.05));
+  opacity: 0.55;
+}
+
+.ie-job-group-head {
+  margin: 0;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--eos-ink-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ie-job-group-head::after {
+  content: "";
+  display: inline-block;
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(11, 26, 51, 0.1), rgba(11, 26, 51, 0));
+  opacity: 0.5;
+}
+
+.ie-job-group .grid3.ie-job-grid {
+  gap: 14px 16px;
+}
+
+.ie-job-group label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--eos-ink-soft);
+  letter-spacing: 0.005em;
+}
+
+.ie-job-group label > input,
+.ie-job-group label > select {
+  margin-top: 6px;
+  /* `width: 100%; min-width: 0; max-width: 100%` ensures a long email or
+     "entered by" value can't widen the grid cell beyond its column — the
+     value truncates inside the input rather than blowing out the layout. */
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  border-radius: 10px;
+  border: 1px solid rgba(11, 26, 51, 0.16);
+  background: #ffffff;
+  padding: 9px 12px;
+  font-size: 0.92rem;
+  color: var(--eos-ink);
+  text-overflow: ellipsis;
+  transition: border-color 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
+}
+
+.ie-job-group label {
+  /* label is the grid cell; lock min-width: 0 so the label/input combo
+     cooperates with the grid's minmax(0, 1fr). */
+  min-width: 0;
+}
+
+.ie-job-group label > input::placeholder {
+  color: rgba(11, 26, 51, 0.34);
+}
+
+.ie-job-group label > input:hover,
+.ie-job-group label > select:hover {
+  border-color: rgba(11, 26, 51, 0.28);
+}
+
+.ie-job-group label > input:focus,
+.ie-job-group label > select:focus {
+  border-color: rgba(46, 105, 184, 0.55);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(46, 105, 184, 0.16);
+  background: #ffffff;
+}
+
+.ie-job-group label.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(11, 26, 51, 0.08);
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.ie-job-group label.check:hover {
+  border-color: rgba(11, 26, 51, 0.18);
+  background: #ffffff;
+}
+
+.ie-job-group label.check input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--eos-accent);
+  margin: 0;
+}
+
+@media (max-width: 720px) {
+  .ie-job-group {
+    padding: 14px;
+  }
+}
+
+/* ----- Tasteful inline status notes ----------------------------------- */
+
+.ie-note-quiet {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(11, 26, 51, 0.04);
+  border: 1px solid rgba(11, 26, 51, 0.06);
+  font-size: 0.78rem;
+  line-height: 1.55;
+  color: var(--eos-ink-soft);
+}
+
+.ie-note-quiet strong {
+  color: var(--eos-ink);
+  font-weight: 600;
+}
+
+.ie-note-quiet-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--eos-ink-muted);
+  margin-top: 6px;
+}
+
+.ie-note-info {
+  background: rgba(20, 70, 140, 0.06);
+  border-color: rgba(20, 70, 140, 0.16);
+  color: #14305f;
+}
+
+.ie-note-info .ie-note-quiet-dot {
+  background: #2563a6;
+}
+
+.ie-note-info strong {
+  color: #0b264d;
+}
+
+.ie-note-useTax {
+  background: rgba(112, 26, 26, 0.04);
+  border-color: rgba(112, 26, 26, 0.14);
+  color: #5e1818;
+}
+
+.ie-note-useTax .ie-note-quiet-dot {
+  background: var(--eos-accent);
+}
+
+.ie-note-useTax strong {
+  color: #3f1010;
+}
+
+.ie-note-error {
+  background: rgba(192, 30, 30, 0.06);
+  border-color: rgba(192, 30, 30, 0.22);
+  color: #8a1818;
+  font-weight: 600;
+}
+
+.ie-note-error .ie-note-quiet-dot {
+  background: #c01e1e;
+  animation: ie-note-error-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes ie-note-error-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.55; transform: scale(0.85); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ie-note-error .ie-note-quiet-dot {
+    animation: none;
+  }
+}
+
+/* ----- Status banner system (info / warn / error) --------------------- */
+
+.ie-status-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 12px 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(11, 26, 51, 0.08);
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(11, 26, 51, 0.04);
+  font-size: 0.86rem;
+  line-height: 1.55;
+}
+
+.ie-status-banner-copy {
+  margin: 0;
+  color: var(--eos-ink-soft);
+}
+
+.ie-status-banner-copy strong {
+  color: var(--eos-ink);
+}
+
+.ie-status-banner-dot {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  margin-top: 7px;
+  border-radius: 999px;
+  background: var(--eos-ink-muted);
+  box-shadow: 0 0 0 4px rgba(11, 26, 51, 0.04);
+}
+
+.ie-status-banner.is-info {
+  background: linear-gradient(180deg, rgba(232, 240, 252, 0.7) 0%, rgba(247, 250, 254, 0.8) 100%);
+  border-color: rgba(20, 70, 140, 0.18);
+}
+
+.ie-status-banner.is-info .ie-status-banner-dot {
+  background: #2563a6;
+  box-shadow: 0 0 0 4px rgba(37, 99, 166, 0.12);
+}
+
+.ie-status-banner.is-warn {
+  background: linear-gradient(180deg, rgba(254, 244, 226, 0.8) 0%, rgba(254, 251, 244, 0.7) 100%);
+  border-color: rgba(180, 83, 9, 0.22);
+}
+
+.ie-status-banner.is-warn .ie-status-banner-copy {
+  color: #6b3a08;
+}
+
+.ie-status-banner.is-warn .ie-status-banner-dot {
+  background: #b45309;
+  box-shadow: 0 0 0 4px rgba(180, 83, 9, 0.14);
+}
+
+.ie-status-banner.is-error {
+  background: linear-gradient(180deg, rgba(254, 230, 230, 0.7) 0%, rgba(252, 245, 245, 0.7) 100%);
+  border-color: rgba(192, 30, 30, 0.24);
+}
+
+.ie-status-banner.is-error .ie-status-banner-copy {
+  color: #8a1818;
+  font-weight: 600;
+}
+
+.ie-status-banner.is-error .ie-status-banner-dot {
+  background: #c01e1e;
+  box-shadow: 0 0 0 4px rgba(192, 30, 30, 0.14);
+  animation: ie-status-banner-error-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes ie-status-banner-error-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.55; transform: scale(0.85); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ie-status-banner.is-error .ie-status-banner-dot {
+    animation: none;
+  }
+}
+
+/* ----- Refined sign-in card (premium preview framing) ----------------- */
+
+.ie-signin-row {
+  padding: 26px 26px 24px !important;
+  position: relative;
+  background:
+    radial-gradient(140% 90% at 0% 0%, rgba(112, 26, 26, 0.06) 0%, rgba(255, 255, 255, 0) 60%),
+    linear-gradient(180deg, #ffffff 0%, rgba(252, 252, 254, 0.96) 100%) !important;
+}
+
+.ie-signin-eyebrow {
+  margin: 0 0 8px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--eos-accent);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ie-signin-eyebrow::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--eos-accent);
+  box-shadow: 0 0 0 4px rgba(112, 26, 26, 0.12);
+  animation: ie-signin-eyebrow-pulse 2s ease-in-out infinite;
+}
+
+@keyframes ie-signin-eyebrow-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ie-signin-eyebrow::before { animation: none; }
+}
+
+.ie-signin-title {
+  margin: 0 0 6px;
+  font-size: 1.4rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--eos-ink);
+  line-height: 1.2;
+}
+
+.ie-signin-title-accent {
+  background: linear-gradient(135deg, var(--eos-accent) 0%, #4a2960 70%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.ie-signin-sub {
+  margin: 0 0 16px;
+  font-size: 0.86rem;
+  color: var(--eos-ink-muted);
+  line-height: 1.5;
+  max-width: 60ch;
+}
+
+.ie-signin-row .ie-signin-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.ie-signin-row .ie-signin-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--eos-ink-soft);
+  letter-spacing: 0.01em;
+}
+
+.ie-signin-row .ie-signin-fields input {
+  border-radius: 10px;
+  border: 1px solid rgba(11, 26, 51, 0.18);
+  background: #ffffff;
+  padding: 10px 12px;
+  font-size: 0.92rem;
+  color: var(--eos-ink);
+}
+
+.ie-signin-row .ie-signin-fields input:focus {
+  outline: none;
+  border-color: rgba(46, 105, 184, 0.55);
+  box-shadow: 0 0 0 3px rgba(46, 105, 184, 0.16);
+}
+
+.ie-signin-submit {
+  padding: 10px 18px !important;
+  font-weight: 700 !important;
+  border-radius: 10px !important;
+  letter-spacing: 0.005em !important;
+}
+
+@media (max-width: 720px) {
+  .ie-signin-row .ie-signin-fields {
+    grid-template-columns: 1fr;
+  }
+  .ie-signin-submit {
+    width: 100%;
+  }
+}
+
+/* ----- Refined live-strip status banner ------------------------------- */
+
+.ie-live-strip {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0 0 16px;
+  padding: 12px 16px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #ffffff 0%, rgba(252, 253, 255, 0.96) 100%);
+  border: 1px solid rgba(11, 26, 51, 0.08);
+  box-shadow: 0 1px 3px rgba(11, 26, 51, 0.04);
+  font-size: 0.85rem;
+  position: relative;
+}
+
+.ie-live-strip-dot {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--eos-ink-muted);
+  box-shadow: 0 0 0 4px rgba(11, 26, 51, 0.05);
+  animation: ie-live-strip-pulse 2.2s ease-in-out infinite;
+}
+
+@keyframes ie-live-strip-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.55; transform: scale(0.9); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ie-live-strip-dot { animation: none; }
+}
+
+.ie-live-strip-label {
+  flex: 0 0 auto;
+  font-weight: 700;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--eos-ink-soft);
+}
+
+.ie-live-strip-copy {
+  flex: 1 1 auto;
+  font-size: 0.82rem;
+  color: var(--eos-ink-muted);
+  line-height: 1.45;
+}
+
+.ie-live-strip.is-preview {
+  background: linear-gradient(180deg, rgba(254, 244, 226, 0.55) 0%, rgba(255, 252, 246, 0.7) 100%);
+  border-color: rgba(180, 83, 9, 0.2);
+}
+
+.ie-live-strip.is-preview .ie-live-strip-dot {
+  background: #b45309;
+  box-shadow: 0 0 0 4px rgba(180, 83, 9, 0.14);
+}
+
+.ie-live-strip.is-preview .ie-live-strip-label {
+  color: #6b3a08;
+}
+
+.ie-live-strip.is-confirmed {
+  background: linear-gradient(180deg, rgba(225, 246, 232, 0.55) 0%, rgba(244, 252, 247, 0.65) 100%);
+  border-color: rgba(22, 130, 78, 0.22);
+}
+
+.ie-live-strip.is-confirmed .ie-live-strip-dot {
+  background: #1f7a4a;
+  box-shadow: 0 0 0 4px rgba(31, 122, 74, 0.16);
+}
+
+.ie-live-strip.is-confirmed .ie-live-strip-label {
+  color: #0e4f2c;
+}
+
+.ie-live-strip.is-warn {
+  background: linear-gradient(180deg, rgba(252, 234, 208, 0.7) 0%, rgba(255, 248, 240, 0.7) 100%);
+  border-color: rgba(180, 83, 9, 0.3);
+}
+
+.ie-live-strip.is-warn .ie-live-strip-dot {
+  background: #b45309;
+  box-shadow: 0 0 0 4px rgba(180, 83, 9, 0.18);
+}
+
+.ie-live-strip.is-warn .ie-live-strip-label {
+  color: #5b300a;
+}
+
+@media (max-width: 720px) {
+  .ie-live-strip {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  .ie-live-strip-label {
+    order: 1;
+  }
+  .ie-live-strip-copy {
+    flex: 1 1 100%;
+    order: 2;
+  }
+}
+
+/* ----- Refined URL banner (loaded-from-library) ----------------------- */
+
+.ie-url-banner {
+  position: relative;
+  margin: 0 0 18px;
+  padding: 16px 20px 14px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #ffffff 0%, rgba(252, 253, 255, 0.95) 100%);
+  border: 1px solid rgba(11, 26, 51, 0.08);
+  box-shadow: 0 1px 3px rgba(11, 26, 51, 0.05);
+  overflow: hidden;
+}
+
+.ie-url-banner::before {
+  content: "";
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  top: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, rgba(31, 122, 74, 0.42), rgba(31, 122, 74, 0.08));
+  opacity: 0.75;
+}
+
+.ie-url-banner.is-older-rev::before {
+  background: linear-gradient(90deg, rgba(180, 83, 9, 0.42), rgba(180, 83, 9, 0.08));
+}
+
+.ie-url-banner.is-loading::before {
+  background: linear-gradient(90deg, rgba(11, 26, 51, 0.22), rgba(11, 26, 51, 0.04));
+}
+
+.ie-url-banner-title {
+  margin: 0 0 4px;
+  font-size: 0.96rem;
+  font-weight: 700;
+  color: var(--eos-ink);
+  letter-spacing: -0.005em;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ie-url-banner-rev {
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--eos-accent);
+  background: rgba(112, 26, 26, 0.08);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.ie-url-banner-loading {
+  color: var(--eos-ink-muted);
+}
+
+.ie-url-banner-loading-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--eos-ink-muted);
+  margin-right: 6px;
+  animation: ie-url-banner-loading-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes ie-url-banner-loading-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.7); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ie-url-banner-loading-dot { animation: none; }
+}
+
+.ie-url-banner-copy {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  color: var(--eos-ink-muted);
+}
+
+.ie-url-banner-copy strong {
+  color: var(--eos-ink-soft);
+}
+
+.ie-url-banner-gaps {
+  margin: 10px 0 0;
+  padding-left: 22px;
+  font-size: 0.78rem;
+  color: var(--eos-ink-muted);
+  line-height: 1.5;
+}
+
+.ie-url-banner-gaps li {
+  margin-bottom: 2px;
+}
+
+/* ----- Refined right summary (live quote panel) ----------------------- */
+
+.ie-aside .summary-card.ie-summary-card-compact {
+  padding: 22px 22px 18px;
+}
+
+.ie-summary-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px dashed rgba(11, 26, 51, 0.1);
+}
+
+.ie-summary-eyebrow {
+  margin: 0;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--eos-accent);
+}
+
+.ie-summary-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--eos-ink);
+  letter-spacing: -0.01em;
+}
+
+.ie-summary-mode-pill {
+  margin: 6px 0 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--eos-ink-soft);
+  background: rgba(11, 26, 51, 0.05);
+  border: 1px solid rgba(11, 26, 51, 0.08);
+  padding: 3px 10px;
+  border-radius: 999px;
+  align-self: flex-start;
+}
+
+.ie-summary-mode-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--eos-accent);
+  box-shadow: 0 0 0 3px rgba(112, 26, 26, 0.14);
+}
+
+.ie-summary-mode-pill[data-mode="wholesale"] .ie-summary-mode-dot {
+  background: #2563a6;
+  box-shadow: 0 0 0 3px rgba(37, 99, 166, 0.14);
+}
+
+.ie-summary-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(248, 250, 254, 0.55);
+  border: 1px solid rgba(11, 26, 51, 0.06);
+}
+
+.ie-summary-section.ie-summary-hero {
+  background:
+    radial-gradient(120% 100% at 0% 0%, rgba(112, 26, 26, 0.05) 0%, rgba(255, 255, 255, 0) 60%),
+    linear-gradient(180deg, #ffffff 0%, rgba(252, 253, 255, 0.95) 100%);
+  border-color: rgba(11, 26, 51, 0.08);
+}
+
+.ie-summary-section.ie-summary-readiness {
+  background: rgba(248, 250, 254, 0.4);
+}
+
+.ie-summary-section-head {
+  margin: 0 0 2px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--eos-ink-muted);
+}
+
+.ie-summary-kicker {
+  margin: 0;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--eos-ink-muted);
+  text-transform: uppercase;
+}
+
+.ie-aside .ie-summary-section .ie-summary-compact-hero {
+  margin: 0;
+  font-size: 1.85rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-feature-settings: "tnum" 1;
+  background: linear-gradient(135deg, #0b1a33 0%, var(--eos-accent) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  line-height: 1.1;
+}
+
+.ie-summary-hero-sub {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+  color: var(--eos-ink-muted);
+  line-height: 1.45;
+}
+
+.ie-summary-hero-sub strong {
+  color: var(--eos-ink);
+  font-feature-settings: "tnum" 1;
+}
+
+.ie-summary-hero-sub-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--eos-ink-muted);
+  flex: 0 0 auto;
+}
+
+.ie-summary-hero-sub.is-confirmed {
+  color: #0e4f2c;
+}
+
+.ie-summary-hero-sub.is-confirmed .ie-summary-hero-sub-dot {
+  background: #1f7a4a;
+  box-shadow: 0 0 0 3px rgba(31, 122, 74, 0.16);
+}
+
+.ie-summary-hero-sub.is-preview {
+  color: #6b3a08;
+}
+
+.ie-summary-hero-sub.is-preview .ie-summary-hero-sub-dot {
+  background: #b45309;
+  box-shadow: 0 0 0 3px rgba(180, 83, 9, 0.14);
+}
+
+.ie-summary-rows-compact {
+  gap: 4px;
+}
+
+.ie-summary-row-compact {
+  font-size: 0.82rem;
+  padding: 5px 0;
+  border-bottom: 1px solid rgba(11, 26, 51, 0.06);
+}
+
+.ie-summary-row-compact:last-child {
+  border-bottom: none;
+}
+
+.ie-summary-row-compact span {
+  color: var(--eos-ink-muted);
+}
+
+.ie-summary-row-compact strong {
+  color: var(--eos-ink);
+  font-feature-settings: "tnum" 1;
+  font-weight: 700;
+}
+
+.ie-summary-row-internal {
+  background: rgba(112, 26, 26, 0.04);
+  border-radius: 8px;
+  padding: 5px 8px !important;
+  margin: 2px 0;
+}
+
+.ie-summary-row-internal span,
+.ie-summary-row-internal strong {
+  color: #5e1818;
+}
+
+.ie-summary-explainer {
+  margin: 2px 0 0;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  color: var(--eos-ink-muted);
+}
+
+.ie-summary-explainer strong {
+  color: var(--eos-ink-soft);
+  font-weight: 600;
+}
+
+.ie-summary-explainer-quiet {
+  color: rgba(11, 26, 51, 0.45);
+}
+
+/* Readiness pill row */
+
+.ie-summary-readiness-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 4px 0;
+  flex-wrap: wrap;
+}
+
+.ie-summary-readiness-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.005em;
+}
+
+.ie-summary-readiness-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+}
+
+.ie-summary-readiness-pill.is-ok {
+  background: rgba(31, 122, 74, 0.1);
+  color: #0e4f2c;
+  border: 1px solid rgba(31, 122, 74, 0.22);
+}
+
+.ie-summary-readiness-pill.is-ok .ie-summary-readiness-dot {
+  background: #1f7a4a;
+  box-shadow: 0 0 0 3px rgba(31, 122, 74, 0.18);
+}
+
+.ie-summary-readiness-pill.is-missing {
+  background: rgba(180, 83, 9, 0.1);
+  color: #6b3a08;
+  border: 1px solid rgba(180, 83, 9, 0.22);
+}
+
+.ie-summary-readiness-pill.is-missing .ie-summary-readiness-dot {
+  background: #b45309;
+  box-shadow: 0 0 0 3px rgba(180, 83, 9, 0.18);
+}
+
+.ie-summary-readiness-score {
+  font-size: 0.8rem;
+  color: var(--eos-ink-muted);
+}
+
+.ie-summary-readiness-score strong {
+  color: var(--eos-ink);
+  font-feature-settings: "tnum" 1;
+}
+
+.ie-summary-note-warn {
+  margin: 6px 0 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  background: rgba(180, 83, 9, 0.08);
+  border: 1px solid rgba(180, 83, 9, 0.22);
+  border-radius: 10px;
+  font-size: 0.78rem;
+  color: #6b3a08;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.ie-summary-note-warn-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #b45309;
+  margin-top: 6px;
+  box-shadow: 0 0 0 3px rgba(180, 83, 9, 0.16);
+}
+
+/* ----- Visual layout chips inside the section head -------------------- */
+
+.ie-visual-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0 0;
+}
+
+.ie-visual-meta-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--eos-ink-soft);
+  background: rgba(11, 26, 51, 0.05);
+  border: 1px solid rgba(11, 26, 51, 0.08);
+  padding: 3px 9px;
+  border-radius: 999px;
+  letter-spacing: 0.005em;
+}
+
+.ie-visual-meta-chip strong {
+  color: var(--eos-ink);
+  font-feature-settings: "tnum" 1;
+  font-weight: 700;
+}
+
+/* Hide legacy separator if it lingers anywhere */
+.ie-visual-sep { display: none; }
+
+/* ----- Add-ons cutout hint quieting ----------------------------------- */
+
+.ie-addons-cutout-hint {
+  margin: 6px 0 12px;
+  padding: 8px 12px;
+  background: rgba(11, 26, 51, 0.03);
+  border-left: 2px solid rgba(11, 26, 51, 0.1);
+  border-radius: 0 8px 8px 0;
+  font-size: 0.78rem;
+  color: var(--eos-ink-muted);
+}
+
+/* ====================================================================== */
+/* ===  Room builder polish — IE-scoped overrides (no shared file edit) === */
+/* ====================================================================== */
+
+.ie-main .room-builder {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ie-main .room-builder-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(248, 250, 254, 0.7) 0%, rgba(252, 253, 255, 0.6) 100%);
+  border: 1px solid rgba(11, 26, 51, 0.08);
+}
+
+.ie-main .room-builder-toolbar > .btn.secondary {
+  border-radius: 10px;
+  border-color: rgba(11, 26, 51, 0.16);
+  background: #ffffff;
+  font-weight: 700;
+  letter-spacing: 0.005em;
+  padding: 8px 14px;
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+
+.ie-main .room-builder-toolbar > .btn.secondary:hover {
+  border-color: var(--eos-accent);
+  box-shadow: 0 0 0 3px rgba(112, 26, 26, 0.08);
+  transform: translateY(-1px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ie-main .room-builder-toolbar > .btn.secondary:hover { transform: none; }
+}
+
+.ie-main .room-builder-toolbar > .muted.small {
+  flex: 1 1 auto;
+  font-size: 0.78rem;
+  color: var(--eos-ink-muted);
+}
+
+/* Premium room card */
+
+.ie-main .room-card-lite.card {
+  position: relative;
+  padding: 22px 22px 20px;
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, #ffffff 0%, rgba(252, 253, 255, 0.96) 100%);
+  border: 1px solid rgba(11, 26, 51, 0.08);
+  box-shadow: 0 2px 6px rgba(11, 26, 51, 0.05);
+  transition: box-shadow 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+.ie-main .room-card-lite.card:hover {
+  border-color: rgba(11, 26, 51, 0.14);
+  box-shadow: 0 6px 14px rgba(11, 26, 51, 0.07);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ie-main .room-card-lite.card { transition: none; }
+  .ie-main .room-card-lite.card:hover { transform: none; }
+}
+
+.ie-main .room-card-lite.card::before {
+  content: "";
+  position: absolute;
+  left: 22px;
+  right: 22px;
+  top: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, rgba(11, 26, 51, 0.22), rgba(112, 26, 26, 0.18) 60%, rgba(112, 26, 26, 0.04));
+  opacity: 0.65;
+}
+
+.ie-main .room-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px dashed rgba(11, 26, 51, 0.1);
+}
+
+.ie-main .room-card-title {
+  margin: 0;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--eos-ink-muted);
+}
+
+.ie-main .room-card-head .btn.btn-danger-quiet {
+  font-size: 0.74rem;
+  padding: 4px 10px;
+  border-radius: 8px;
+  color: var(--eos-accent);
+  border: 1px solid rgba(112, 26, 26, 0.18);
+  background: rgba(112, 26, 26, 0.04);
+}
+
+.ie-main .room-card-head .btn.btn-danger-quiet:hover {
+  background: rgba(112, 26, 26, 0.1);
+  border-color: var(--eos-accent);
+}
+
+/* Vanity mode bar */
+
+.ie-main .room-vanity-mode-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, rgba(244, 235, 248, 0.6) 0%, rgba(252, 250, 254, 0.6) 100%);
+  border: 1px solid rgba(74, 41, 96, 0.16);
+  flex-wrap: wrap;
+}
+
+.ie-main .room-vanity-mode-bar::before {
+  content: "Vanity mode";
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #4a2960;
+  margin-right: 2px;
+}
+
+.ie-main .room-vanity-mode-bar .btn,
+.ie-main .room-vanity-mode-bar button:not(.btn) {
+  border-radius: 999px;
+  border-color: rgba(74, 41, 96, 0.22);
+}
+
+.ie-main .room-vanity-block {
+  position: relative;
+  padding: 14px 14px 12px;
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(252, 250, 254, 0.7) 0%, rgba(255, 255, 255, 0.7) 100%);
+  border: 1px solid rgba(74, 41, 96, 0.12);
+  margin-top: 8px;
+}
+
+.ie-main .room-vanity-block::before {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, rgba(74, 41, 96, 0.32), rgba(74, 41, 96, 0.06));
+  opacity: 0.7;
+}
+
+/* Measure mode toggle */
+
+.ie-main .ie-measure-toggle {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 999px;
+  background: rgba(11, 26, 51, 0.05);
+  border: 1px solid rgba(11, 26, 51, 0.08);
+}
+
+.ie-main .ie-measure-toggle-btn {
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
+  color: var(--eos-ink-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.005em;
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease, box-shadow 140ms ease;
+}
+
+.ie-main .ie-measure-toggle-btn:hover {
+  color: var(--eos-ink);
+}
+
+.ie-main .ie-measure-toggle-btn.on {
+  background: #ffffff;
+  color: var(--eos-ink);
+  box-shadow: 0 1px 2px rgba(11, 26, 51, 0.08), 0 0 0 1px rgba(11, 26, 51, 0.06);
+}
+
+/* Shape group card */
+
+.ie-main .ie-shape-group-card {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #ffffff;
+  border: 1px solid rgba(11, 26, 51, 0.08);
+  box-shadow: 0 1px 2px rgba(11, 26, 51, 0.03);
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.ie-main .ie-shape-group-card:hover {
+  border-color: rgba(11, 26, 51, 0.16);
+}
+
+.ie-main .ie-shape-group-card.is-selected {
+  border-color: var(--eos-accent);
+  box-shadow: 0 0 0 3px rgba(112, 26, 26, 0.08), 0 1px 2px rgba(11, 26, 51, 0.03);
+  background:
+    linear-gradient(180deg, rgba(254, 252, 252, 1) 0%, #ffffff 100%);
+}
+
+.ie-main .ie-shape-group-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ie-main .ie-shape-group-name {
+  flex: 1 1 200px;
+}
+
+.ie-main .ie-shape-group-name input {
+  border-radius: 8px;
+}
+
+.ie-main .ie-shape-group-type,
+.ie-main .ie-shape-group-sf {
+  font-size: 0.72rem;
+  background: rgba(11, 26, 51, 0.05);
+  border: 1px solid rgba(11, 26, 51, 0.08);
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 600;
+  color: var(--eos-ink-soft);
+}
+
+.ie-main .ie-shape-group-sf {
+  background: rgba(112, 26, 26, 0.06);
+  color: #5e1818;
+  border-color: rgba(112, 26, 26, 0.14);
+  font-feature-settings: "tnum" 1;
+}
+
+.ie-main .ie-shape-group-add-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  background: rgba(11, 26, 51, 0.03);
+  border-radius: 10px;
+  flex-wrap: wrap;
+}
+
+.ie-main .ie-shape-group-add-row .muted.small {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--eos-ink-muted);
+}
+
+.ie-main .ie-preset-btn {
+  border-radius: 999px !important;
+  padding: 4px 10px !important;
+  font-size: 0.74rem !important;
+  font-weight: 600 !important;
+}
+
+.ie-main .ie-shape-group-advanced {
+  margin-top: 10px;
+  padding: 8px 10px;
+  background: rgba(11, 26, 51, 0.02);
+  border-radius: 8px;
+  border: 1px solid rgba(11, 26, 51, 0.05);
+}
+
+.ie-main .ie-shape-group-advanced summary {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--eos-ink-muted);
+  cursor: pointer;
+}
+
+.ie-main .ie-shape-group-advanced summary:hover {
+  color: var(--eos-ink);
+}
+
+/* Piece row simple */
+
+.ie-main .piece-row.ie-piece-row-simple {
+  padding: 8px;
+  border-radius: 10px;
+  background: rgba(248, 250, 254, 0.6);
+  border: 1px solid rgba(11, 26, 51, 0.05);
+  margin-top: 6px;
+  align-items: end;
+}
+
+.ie-main .piece-row.ie-piece-row-simple:hover {
+  border-color: rgba(11, 26, 51, 0.1);
+  background: rgba(248, 250, 254, 0.85);
+}
+
+.ie-main .ie-piece-splash-check {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--eos-ink-soft);
+}
+
+.ie-main .piece-row-remove .btn.btn-danger-quiet {
+  border-radius: 8px;
+  color: var(--eos-accent);
+  border: 1px solid rgba(112, 26, 26, 0.18);
+  background: rgba(112, 26, 26, 0.04);
+}
+
+/* Undo toast in room builder */
+
+.ie-main .ie-undo-toast {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: #ffffff;
+  border: 1px solid rgba(11, 26, 51, 0.1);
+  box-shadow: 0 6px 14px rgba(11, 26, 51, 0.06);
+  font-size: 0.82rem;
+  color: var(--eos-ink-soft);
+}
+
+.ie-main .ie-undo-toast .btn.btn-sm {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.005em;
+  border-radius: 999px;
+}
+
+/* ESF measure callout */
+
+.ie-main .ie-esf-measure-callout {
+  margin: 8px 0;
+  padding: 8px 12px;
+  background: rgba(20, 70, 140, 0.04);
+  border: 1px solid rgba(20, 70, 140, 0.14);
+  border-radius: 10px;
+  font-size: 0.78rem;
+  color: #14305f;
+  line-height: 1.5;
+}
+
+/* Room panel container */
+
+.ie-main .room-panel {
+  margin-top: 12px;
+  padding: 12px 14px;
+  background: rgba(248, 250, 254, 0.45);
+  border: 1px solid rgba(11, 26, 51, 0.06);
+  border-radius: 12px;
+}
+
+/* ----- Sticky bar bottom padding safety ------------------------------- */
+
+.ie-shell-body {
+  /* Ensure last card never sits under the sticky command bar */
+  padding-bottom: clamp(150px, 14vh, 200px);
+}
+
+@media (max-width: 720px) {
+  .ie-shell-body {
+    padding-bottom: clamp(190px, 22vh, 240px);
+  }
+}
+
+/* ----- Hero compact-loaded variant ------------------------------------ */
+
+.ie-shell-loaded .ie-hero {
+  padding-top: 28px;
+  padding-bottom: 22px;
+}
+
+.ie-shell-loaded .ie-hero-title {
+  font-size: clamp(1.55rem, 2.4vw, 1.95rem);
+  margin-bottom: 6px;
+}
+
+.ie-shell-loaded .ie-hero-sub {
+  display: none;
+}
+
+.ie-shell-preview .ie-hero {
+  padding-bottom: 26px;
+}
+
+/* ----- Sticky command bar — refine cluster spacing -------------------- */
+
+.ie-sticky-actions-cluster {
+  gap: 8px;
+}
+
+.ie-sticky-actions-cluster .btn {
+  letter-spacing: 0.005em;
+}
+
+.ie-sticky-actions-cluster .btn.primary {
+  box-shadow: 0 4px 10px rgba(112, 26, 26, 0.18);
+}
+
+.ie-sticky-actions-cluster .btn:disabled,
+.ie-sticky-actions-cluster .btn[disabled] {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* ----- Print safety: hide the new chrome ------------------------------ */
+
+@media print {
+  .ie-status-banner,
+  .ie-note-quiet,
+  .ie-live-strip,
+  .ie-signin-row,
+  .ie-url-banner,
+  .ie-summary-mode-pill,
+  .ie-summary-readiness-pill,
+  .ie-summary-hero-sub,
+  .ie-summary-note-warn,
+  .ie-visual-meta-chip,
+  .ie-job-group-head,
+  .ie-section-meta {
+    display: none !important;
+  }
+  .ie-job-group {
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+  }
+  .ie-job-group::before { display: none !important; }
+  .ie-summary-section {
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+  }
+}
+
+/* ======================================================================== */
+/* === IE Flagship Polish Pass (4th) — sticky live panel, overflow,      === */
+/* === preview-mode rationalization, room/add-on/custom-line consistency === */
+/* ======================================================================== */
+
+:root {
+  /* Approximations used for sticky offsets / content reservation.
+     Tuned for the current topbar (logo + wordmark + Start new quote) and
+     the sticky command bar (status pill + actions). */
+  --ie-topbar-h: 72px;
+  --ie-sticky-bar-h: 92px;
+  --ie-sticky-bar-gap: 24px;
+}
+
+@media (max-width: 1020px) {
+  :root {
+    /* Topbar wraps less; sticky bar stacks taller on narrow viewports. */
+    --ie-topbar-h: 64px;
+    --ie-sticky-bar-h: 132px;
+  }
+}
+
+/* ----- Global overflow / min-width safety ------------------------------ */
+
+html,
+body {
+  /* `clip` is stronger than `hidden` and doesn't break sticky/transform
+     contexts on descendants — preferred over `overflow-x: hidden`. */
+  overflow-x: clip;
+}
+
+.shell {
+  min-width: 0;
+}
+
+.ie-no-print {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 100vh;
+}
+
+.ie-shell-body {
+  width: 100%;
+  /* Bumped from 1360px so the center estimator column gets more horizontal
+     real estate on 1440 / 1600+ viewports without overflowing 1280 / 1024. */
+  max-width: 1480px;
+  margin: 0 auto;
+  padding:
+    clamp(18px, 2vw, 26px)
+    clamp(20px, 2.4vw, 32px)
+    calc(var(--ie-sticky-bar-h) + var(--ie-sticky-bar-gap) + 36px);
+  min-width: 0;
+  /*
+   * Intentionally NOT setting `overflow-x: clip` here.
+   *
+   * Per the CSS Overflow Module the clip value should not establish a new
+   * scroll container, but in practice Chrome/Safari have historically broken
+   * `position: sticky` on descendants when an ancestor uses `overflow: clip`
+   * or `overflow-x: clip`. We've already pinned `overflow-x: clip` on
+   * `html, body` to prevent horizontal page scroll, so adding it here on the
+   * sticky-panel ancestor is unnecessary and risks regressing the flagship
+   * sticky live-quote behavior.
+   */
+}
+
+@media (max-width: 720px) {
+  .ie-shell-body {
+    padding:
+      14px
+      clamp(12px, 4vw, 18px)
+      calc(var(--ie-sticky-bar-h) + var(--ie-sticky-bar-gap) + 56px);
+  }
+}
+
+.ie-app-shell,
+.ie-main,
+.ie-aside.side-col,
+.ie-rail {
+  min-width: 0;
+}
+
+/* Anything inside the main column that has a chance to overflow horizontally
+   (long URLs, long catalog names, sticky-bar shadow, etc.) is now clipped at
+   the column edge rather than expanding the shell width. */
+.ie-main {
+  max-width: 100%;
+}
+
+.ie-main > .card,
+.ie-main > section.card {
+  max-width: 100%;
+  /* Use clip on the x-axis only so long URLs/strings don't widen the
+     column, while still allowing decorative ::before stripes (top: 0)
+     and any z-index overlays to render naturally. */
+  overflow-x: clip;
+}
+
+/* The card's nested details/grids must also respect the column width. */
+.ie-main .card .grid3,
+.ie-main .card .room-builder,
+.ie-main .card .ie-shape-group-card,
+.ie-main .card .piece-row {
+  min-width: 0;
+}
+
+/* ----- Topbar — never let the right cluster push content off-screen ---- */
+
+.topbar {
+  /* clamp the side padding so the actions cluster has room at 1024 px
+     viewports without losing the premium feel at wide widths. */
+  padding: 14px clamp(16px, 2.4vw, 28px);
+  min-width: 0;
+}
+
+.topbar .brand-row {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.topbar .brand-text {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.topbar .brand-sub {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: clamp(160px, 22vw, 360px);
+}
+
+.topbar-actions {
+  flex: 0 1 auto;
+  min-width: 0;
+  align-items: center;
+  flex-wrap: nowrap;
+}
+
+@media (max-width: 720px) {
+  .topbar-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+}
+
+/* Preview mode is already conveyed by the sign-in card + hero pill + sticky
+   pill. Hide the topbar pill before it would start crowding the actions row
+   on narrow laptop widths. */
+@media (max-width: 980px) {
+  .topbar-preview-pill {
+    display: none;
+  }
+}
+
+/* ----- Sticky live quote panel (right summary) ------------------------- */
+/*
+ * Root cause of the prior pass NOT being sticky:
+ * `.summary-card.ie-summary-card-compact` (which `.ie-aside-panel` also
+ * carries) sets `flex: 1; min-height: 0;`. The aside grid cell
+ * (`.ie-aside.side-col`) is `display: flex; flex-direction: column`, so the
+ * panel was stretching to fill the **entire** row height (which equals the
+ * tall main column's height). `position: sticky` then had no room to
+ * "stick" because the sticky element WAS the full row.
+ *
+ * Fix: override `flex` back to `0 0 auto` so the panel sizes to its content
+ * (capped at max-height), giving sticky a smaller-than-row containing
+ * block to scroll within.
+ */
+.ie-aside-panel,
+.ie-aside-panel.summary-card,
+.ie-aside-panel.summary-card.ie-summary-card-compact {
+  position: sticky;
+  top: calc(var(--ie-topbar-h) + 14px);
+  flex: 0 0 auto;
+  align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 0;
+  /* Leaves room for sticky topbar above and sticky command bar below, so
+     the panel never overlaps either chrome surface. */
+  max-height: calc(
+    100vh - var(--ie-topbar-h) - 14px - var(--ie-sticky-bar-h) - 14px
+  );
+  /* The summary card was given padding/margin elsewhere; keep that exactly
+     as-is — only flex/sticky behavior is overridden here. */
+  z-index: 1;
+}
+
+.ie-aside-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 6px;
+  /* Subtle internal scrollbar so it doesn't read as a fix-it warning. */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(11, 26, 51, 0.18) transparent;
+}
+
+.ie-aside-scroll::-webkit-scrollbar { width: 8px; }
+.ie-aside-scroll::-webkit-scrollbar-track { background: transparent; }
+.ie-aside-scroll::-webkit-scrollbar-thumb {
+  background: rgba(11, 26, 51, 0.16);
+  border-radius: 999px;
+}
+.ie-aside-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(11, 26, 51, 0.28);
+}
+
+@media (max-width: 1020px) {
+  /* At narrow widths the grid collapses and the aside stacks below the
+     main column — drop the sticky behavior so it scrolls naturally. */
+  .ie-aside.side-col {
+    position: static !important;
+    align-self: stretch !important;
+  }
+  .ie-aside-panel {
+    position: static;
+    top: auto;
+    max-height: min(60vh, 520px);
+  }
+  .ie-aside-scroll {
+    max-height: min(56vh, 480px);
+  }
+}
+
+/* ----- Hero live pill — calmer signed-out state ----------------------- */
+
+.ie-hero-live.is-signed-out,
+.ie-hero-live.is-muted {
+  background: rgba(11, 26, 51, 0.05);
+  border-color: rgba(11, 26, 51, 0.14);
+  color: var(--eos-ink-soft);
+}
+
+.ie-hero-live.is-signed-out .ie-hero-live-dot,
+.ie-hero-live.is-muted .ie-hero-live-dot {
+  background: var(--eos-ink-mid, #6b7a93);
+  box-shadow: 0 0 0 3px rgba(11, 26, 51, 0.06);
+  animation: none;
+}
+
+/* ----- Sticky bar status pill — calmer signed-out state --------------- */
+
+.ie-sticky-status-pill.is-signed-out {
+  background: rgba(11, 26, 51, 0.05);
+  border-color: rgba(11, 26, 51, 0.14);
+  color: var(--eos-ink-soft);
+}
+
+.ie-sticky-status-pill.is-signed-out .ie-sticky-status-dot {
+  background: var(--eos-ink-mid, #6b7a93);
+  box-shadow: 0 0 0 3px rgba(11, 26, 51, 0.06);
+  animation: none;
+}
+
+/* ----- Sticky command bar — never crowd content ----------------------- */
+
+.ie-sticky-actions {
+  /* Re-confirm dimensions used by --ie-sticky-bar-h. */
+  padding-top: 12px;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+}
+
+.ie-sticky-actions-inner {
+  width: 100%;
+  max-width: 1360px;
+  margin: 0 auto;
+  padding: 0 clamp(16px, 2.4vw, 28px);
+  display: flex;
+  align-items: center;
+  gap: clamp(10px, 1.4vw, 18px);
+  justify-content: space-between;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+@media (max-width: 720px) {
+  .ie-sticky-actions-inner {
+    justify-content: stretch;
+  }
+  .ie-sticky-actions-cluster {
+    width: 100%;
+    justify-content: stretch;
+  }
+  .ie-sticky-actions-cluster .btn {
+    flex: 1 1 auto;
+    min-width: 110px;
+  }
+  .ie-sticky-status {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+/* ----- Output / Save mirrored-action zone ----------------------------- */
+/* Inline actions inside #sec-save are demoted to secondary so the sticky
+   bar remains the unambiguous primary command surface. */
+
+.ie-output-actions {
+  margin: 18px 0 4px;
+  padding: 16px clamp(14px, 1.6vw, 20px);
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1.8fr);
+  gap: clamp(12px, 1.6vw, 22px);
+  align-items: center;
+  background:
+    linear-gradient(180deg, rgba(248, 250, 254, 0.72) 0%, rgba(252, 253, 255, 0.6) 100%);
+  border: 1px dashed rgba(11, 26, 51, 0.16);
+  border-radius: 14px;
+}
+
+@media (max-width: 880px) {
+  .ie-output-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ie-output-actions-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ie-output-actions-eyebrow {
+  margin: 0;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--eos-ink-muted);
+}
+
+.ie-output-actions-copy {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--eos-ink-muted);
+}
+
+.ie-output-actions-copy strong {
+  color: var(--eos-ink-soft);
+}
+
+.ie-output-actions .ie-print-hint {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--eos-ink-muted);
+  line-height: 1.45;
+}
+
+.ie-output-actions-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.ie-output-actions .btn.big {
+  padding: 9px 16px;
+  font-size: 0.86rem;
+  min-height: 38px;
+  border-radius: 10px;
+  letter-spacing: 0.005em;
+}
+
+@media (max-width: 880px) {
+  .ie-output-actions-buttons {
+    justify-content: stretch;
+  }
+  .ie-output-actions .btn.big {
+    flex: 1 1 calc(50% - 4px);
+    min-width: 120px;
+  }
+}
+
+/* ----- Quick Add row — unified button system -------------------------- */
+
+.ie-main .ie-shape-group-add-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  background: rgba(248, 250, 254, 0.7);
+  border: 1px solid rgba(11, 26, 51, 0.08);
+  border-radius: 12px;
+}
+
+.ie-main .ie-shape-group-add-label {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--eos-ink-muted);
+}
+
+.ie-main .ie-shape-group-add-cluster {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #ffffff;
+  border: 1px solid rgba(11, 26, 51, 0.08);
+}
+
+.ie-main .ie-shape-group-add-cluster--presets {
+  background: rgba(74, 41, 96, 0.06);
+  border-color: rgba(74, 41, 96, 0.16);
+}
+
+.ie-main .ie-shape-group-add-cluster-tag {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--eos-ink-muted);
+  padding: 0 4px;
+}
+
+.ie-main .ie-shape-group-add-cluster--presets .ie-shape-group-add-cluster-tag {
+  color: #4a2960;
+}
+
+/* Unified quick-add button styling — applies to every preset/blank-add btn
+   inside the row. Replaces inconsistent sizes from the prior pass. */
+.ie-main .ie-shape-group-add-row .btn,
+.ie-main .ie-shape-group-add-row .btn.btn-sm,
+.ie-main .ie-shape-group-add-row .ie-preset-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 14px !important;
+  min-height: 32px;
+  font-size: 0.78rem !important;
+  font-weight: 600 !important;
+  letter-spacing: 0 !important;
+  line-height: 1.2;
+  border-radius: 999px !important;
+  border: 1px solid rgba(11, 26, 51, 0.14);
+  background: #ffffff;
+  color: var(--eos-ink-soft);
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    color 140ms ease,
+    transform 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.ie-main .ie-shape-group-add-row .btn:hover,
+.ie-main .ie-shape-group-add-row .ie-preset-btn:hover {
+  border-color: var(--eos-accent);
+  color: var(--eos-accent);
+  background: rgba(163, 19, 47, 0.04);
+  transform: translateY(-1px);
+  box-shadow: 0 1px 3px rgba(11, 26, 51, 0.06);
+}
+
+.ie-main .ie-shape-group-add-cluster--presets .btn {
+  background: #ffffff;
+  border-color: rgba(74, 41, 96, 0.22);
+  color: #4a2960;
+}
+
+.ie-main .ie-shape-group-add-cluster--presets .btn:hover {
+  background: rgba(74, 41, 96, 0.06);
+  border-color: #4a2960;
+  color: #4a2960;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ie-main .ie-shape-group-add-row .btn:hover { transform: none; }
+}
+
+/* ----- Selected shape group — refined "premium selected" (not alarm-red) */
+
+.ie-main .ie-shape-group-card.is-selected {
+  border-color: rgba(46, 105, 184, 0.45) !important;
+  background:
+    linear-gradient(180deg, rgba(245, 249, 255, 1) 0%, #ffffff 100%) !important;
+  box-shadow:
+    0 0 0 3px rgba(46, 105, 184, 0.1),
+    0 1px 3px rgba(11, 26, 51, 0.05) !important;
+}
+
+.ie-main .ie-shape-group-card.is-selected .ie-shape-group-type {
+  background: rgba(46, 105, 184, 0.1);
+  border-color: rgba(46, 105, 184, 0.2);
+  color: #1e4a85;
+}
+
+/* ----- Room add-ons — IDENTICAL tile treatment for ALL items ---------- */
+/*
+ * Important: the prior pass relied on `:has(input[value])` to light up
+ * an "active" state when qty > 0. React-controlled inputs do NOT keep
+ * their `value` HTML attribute in sync with current state — the
+ * controlled value lives in the DOM property, not the attribute — so
+ * the `:has(input[value=...])` selector was unreliable and sometimes
+ * left tiles inconsistently highlighted. This pass removes the value-
+ * sniffing selector and uses a focus-within highlight only.
+ *
+ * The shared component also flags the sink/bar tiles with
+ * `.room-addon-row--sink`. We deliberately apply IDENTICAL styling to
+ * `.room-addon-row` and `.room-addon-row--sink` so the row visually
+ * reads as one consistent grid — no "first two tiles look highlighted"
+ * regression.
+ */
+
+.ie-main .room-addon-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px 12px;
+  align-items: stretch;
+}
+
+.ie-main .room-addon-grid .room-addon-row,
+.ie-main .room-addon-grid .room-addon-row.room-addon-row--sink {
+  /* Identical structure for every tile. `display: grid` with two rows
+     (label, qty) gives clean baseline alignment across all tiles. */
+  display: grid;
+  grid-template-rows: auto auto;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid rgba(11, 26, 51, 0.1);
+  border-radius: 10px;
+  background: #ffffff !important;
+  min-width: 0;
+  box-shadow: none;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.ie-main .room-addon-grid .room-addon-row:hover {
+  border-color: rgba(11, 26, 51, 0.18);
+  background: rgba(248, 250, 254, 0.9) !important;
+}
+
+/* Focus-within is reliable across browsers and gives clear daily-use
+   feedback when an estimator clicks into a qty field. Slate-blue, not
+   alarm-red. */
+.ie-main .room-addon-grid .room-addon-row:focus-within {
+  border-color: rgba(46, 105, 184, 0.5);
+  background: #ffffff !important;
+  box-shadow: 0 0 0 3px rgba(46, 105, 184, 0.14);
+}
+
+.ie-main .room-addon-label {
+  font-weight: 600;
+  font-size: 0.84rem;
+  color: var(--eos-ink-soft);
+  line-height: 1.4;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ie-main .room-addon-label .muted.small {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--eos-ink-muted);
+}
+
+.ie-main .room-addon-qty-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ie-main .room-addon-qty-label {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--eos-ink-muted);
+  min-width: auto;
+}
+
+.ie-main .room-addon-qty-input {
+  width: 4.4rem;
+  max-width: 4.4rem;
+  border-radius: 8px;
+  border: 1px solid rgba(11, 26, 51, 0.18);
+  padding: 6px 10px;
+  font-size: 0.88rem;
+  text-align: right;
+  font-feature-settings: "tnum" 1;
+  background: #ffffff;
+}
+
+.ie-main .room-addon-qty-input:focus {
+  outline: none;
+  border-color: rgba(46, 105, 184, 0.55);
+  box-shadow: 0 0 0 3px rgba(46, 105, 184, 0.16);
+}
+
+/* ----- Structured custom-line presets — balanced grid ----------------- */
+
+.ie-custom-line-presets {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
+  margin: 6px 0 10px;
+  min-width: 0;
+}
+
+.ie-custom-line-preset-btn,
+.ie-custom-line-presets .btn {
+  justify-content: center !important;
+  padding: 9px 14px !important;
+  font-size: 0.85rem !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.005em !important;
+  min-height: 40px;
+  border-radius: 10px !important;
+  border: 1px solid rgba(11, 26, 51, 0.14) !important;
+  background: #ffffff !important;
+  color: var(--eos-ink-soft) !important;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition:
+    border-color 140ms ease,
+    color 140ms ease,
+    background 140ms ease,
+    transform 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.ie-custom-line-preset-btn:hover,
+.ie-custom-line-presets .btn:hover {
+  border-color: var(--eos-accent) !important;
+  color: var(--eos-accent) !important;
+  background: rgba(163, 19, 47, 0.04) !important;
+  transform: translateY(-1px);
+  box-shadow: 0 1px 3px rgba(11, 26, 51, 0.06);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ie-custom-line-preset-btn:hover,
+  .ie-custom-line-presets .btn:hover {
+    transform: none;
+  }
+}
+
+.ie-custom-line-presets-hint {
+  margin: 4px 0 12px;
+  font-size: 0.74rem;
+  color: var(--eos-ink-muted);
+}
+
+/* ----- Price group comparison — balanced check grid ------------------- */
+
+.ie-group-compare-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 8px;
+  margin: 6px 0 16px;
+}
+
+.ie-group-compare-grid > label.check.ie-group-compare-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 9px 12px;
+  border: 1px solid rgba(11, 26, 51, 0.12);
+  border-radius: 10px;
+  background: #ffffff;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--eos-ink-soft);
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
+}
+
+.ie-group-compare-grid > label.check.ie-group-compare-check:hover {
+  border-color: rgba(11, 26, 51, 0.22);
+  background: rgba(248, 250, 254, 0.7);
+}
+
+.ie-group-compare-grid > label.check.ie-group-compare-check input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--eos-accent);
+}
+
+.ie-group-compare-grid > label.check.ie-group-compare-check:has(input[type="checkbox"]:checked) {
+  border-color: var(--eos-accent);
+  background: rgba(163, 19, 47, 0.06);
+  color: var(--eos-ink);
+}
+
+.ie-group-compare-grid .ie-group-compare-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ----- Left rail active state ----------------------------------------- */
+
+.ie-rail-link.is-active {
+  background: rgba(163, 19, 47, 0.06);
+  color: var(--eos-accent);
+}
+
+.ie-rail-link.is-active .ie-rail-link-num {
+  background: var(--eos-accent);
+  color: #ffffff;
+  border-color: var(--eos-accent);
+  box-shadow: 0 0 0 3px rgba(163, 19, 47, 0.12);
+}
+
+.ie-rail-link.is-active .ie-rail-link-label {
+  color: var(--eos-accent);
+  font-weight: 700;
+}
+
+/* Quiet caret/eyebrow update to match active state context */
+.ie-rail-room-block {
+  margin-left: 18px;
+  padding-left: 8px;
+  border-left: 2px solid rgba(11, 26, 51, 0.08);
+}
+
+/* ----- Job Info tightening (4th pass) --------------------------------- */
+
+.ie-job-groups {
+  gap: 14px;
+}
+
+.ie-job-group {
+  padding: 12px 14px 14px;
+}
+
+.ie-main .ie-job-group .grid3.ie-job-grid {
+  gap: 10px 14px;
+}
+
+.ie-main .ie-job-group label {
+  font-size: 0.78rem;
+}
+
+.ie-main .ie-job-group label > input,
+.ie-main .ie-job-group label > select {
+  padding: 8px 11px;
+  font-size: 0.88rem;
+}
+
+.ie-job-group .ie-job-group-head {
+  margin-bottom: 4px;
+}
+
+/* ----- Section card vertical density ---------------------------------- */
+
+.ie-main > .card {
+  padding: 22px 22px 18px;
+}
+
+@media (max-width: 720px) {
+  .ie-main > .card {
+    padding: 18px 16px 16px;
+  }
+}
+
+.ie-section-head {
+  margin-bottom: 10px;
+}
+
+/* ----- Right summary — extra density refinement ----------------------- */
+
+.ie-aside .summary-card.ie-summary-card-compact {
+  padding: 20px 18px 16px;
+}
+
+.ie-summary-section {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+}
+
+.ie-summary-explainer {
+  font-size: 0.7rem;
+  line-height: 1.45;
+}
+
+.ie-summary-explainer-quiet {
+  color: rgba(11, 26, 51, 0.42);
+}
+
+.ie-aside .ie-summary-section .ie-summary-compact-hero {
+  font-size: 1.7rem;
+}
+
+.ie-summary-row-compact {
+  font-size: 0.8rem;
+  padding: 4px 0;
+}
+
+/* Audit details — collapsed by default already (no `open` attr). Make the
+   summary feel like a quiet caret toggle. */
+.ie-summary-audit {
+  margin-top: 10px;
+  padding: 8px 10px;
+  background: rgba(11, 26, 51, 0.03);
+  border-radius: 10px;
+  border: 1px solid rgba(11, 26, 51, 0.06);
+}
+
+.ie-summary-audit > summary {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--eos-ink-soft);
+  list-style: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ----- Add Rooms toolbar (room builder) — premium ergonomics ---------- */
+
+.ie-main .room-builder-toolbar {
+  padding: 10px 12px;
+  margin-bottom: 14px;
+}
+
+.ie-main .room-builder-toolbar > .btn.secondary {
+  padding: 8px 16px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+
+/* ----- General polish — tabular numerics for $ values ---------------- */
+
+.ie-main .summary-row strong,
+.ie-aside .summary-row strong,
+.ie-aside .ie-summary-row-compact strong,
+.ie-aside .ie-summary-readiness-score strong {
+  font-feature-settings: "tnum" 1;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ----- Defensive print updates --------------------------------------- */
+
+@media print {
+  .ie-aside-panel,
+  .ie-aside-scroll,
+  .ie-output-actions,
+  .ie-shape-group-add-row,
+  .ie-shape-group-add-cluster-tag,
+  .ie-shape-group-add-label,
+  .ie-rail-link.is-active .ie-rail-link-num {
+    /* Internal panels are already hidden via .ie-no-print, but reset
+       potentially expensive properties so a partial print preview
+       cannot show backgrounds/sticky positioning artifacts. */
+    position: static !important;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+}
+
+/* =====================================================================
+ * Corrective layout pass — final defensive overrides
+ * ---------------------------------------------------------------------
+ * Everything below is intentionally appended last so its cascade wins
+ * over earlier rules without needing nuclear `!important` everywhere.
+ * Scope is `.ie-main` / `.ie-app-shell` so app-quote shared styles
+ * remain unaffected in any other head.
+ * ===================================================================*/
+
+/* ----- Room-builder selected states: slate-blue, never alarm-red ----- */
+/*
+ * Inside the Internal Estimate workspace, "selected" should read as a
+ * premium product state — not a destructive/error state. The shared
+ * room builder (`app-quote/src/ui/RoomScopeBuilder.tsx`) uses
+ * `.preset-shape-card.on`, `.detail-segment--selected`, and
+ * `.detail-option-card--selected`. We do NOT change those classes —
+ * we just retint them when rendered inside `.ie-main`.
+ */
+.ie-main .preset-shape-card.on,
+.ie-main .detail-segment--selected,
+.ie-main .detail-option-card--selected,
+.ie-main .preset-visual-card.on,
+.ie-main .quote-method-card.on,
+.ie-main .big-choice-card.on,
+.ie-main .specialty-chip.on {
+  border-color: rgba(46, 105, 184, 0.5) !important;
+  background:
+    linear-gradient(180deg, rgba(245, 249, 255, 0.95) 0%, #ffffff 100%) !important;
+  color: var(--eos-ink) !important;
+  box-shadow: 0 0 0 3px rgba(46, 105, 184, 0.12) !important;
+}
+
+/* The wizard track current-step dot is the only place where the
+ * burgundy chip remains useful as a brand accent — but soften the
+ * outer ring so it doesn't read as alarm. */
+.ie-main .wizard-dot.on,
+.ie-main .wizard-track-item.current .wizard-track-dot {
+  border-color: rgba(163, 19, 47, 0.55) !important;
+  box-shadow: 0 0 0 3px rgba(163, 19, 47, 0.08) !important;
+}
+
+/* ----- Grid item min-width safety for the Job Info / form grids ------- */
+/*
+ * Any direct child of `.grid3` inside `.ie-main` must respect the
+ * column boundary so a long email or "entered by" value cannot widen
+ * the column above `minmax(0, 1fr)`.
+ */
+.ie-main .grid3 > *,
+.ie-main .ie-job-grid > *,
+.ie-main .ie-summary-grid > *,
+.ie-main .ie-output-actions-buttons > * {
+  min-width: 0;
+}
+
+/* ----- Sticky command bar safety ------------------------------------- */
+/*
+ * The sticky bottom command bar must always render above the sticky
+ * right Live Quote Panel (which is now z-index: 1). Re-assert the
+ * bar's stacking order so the two can never visually overlap.
+ */
+.ie-sticky-actions {
+  z-index: 60;
+}
+
+/* ----- Quick Add row & sub-clusters: enforce uniform sizing ---------- */
+/*
+ * The shared `.btn.btn-sm.ie-preset-btn` class plus the IE-only
+ * `.ie-shape-group-add-cluster .btn` rules already align all six
+ * Quick Add buttons. This block locks in the final visual contract
+ * so a future button-variant doesn't reintroduce inconsistency.
+ */
+.ie-main .ie-shape-group-add-cluster .btn.ie-preset-btn,
+.ie-main .ie-shape-group-add-row .btn.ie-preset-btn {
+  height: 36px;
+  min-height: 36px;
+  padding: 0 14px;
+  font-size: 0.86rem;
+  font-weight: 600;
+  border-radius: 999px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.ie-main .ie-shape-group-add-cluster {
+  min-width: 0;
+  align-items: center;
+}
+
+/* ----- Right summary: keep the panel itself non-shrinking ------------ */
+/*
+ * The Inner `.ie-aside-scroll` provides internal scrolling. Belt-and-
+ * suspenders: ensure the scroll container is the ONLY thing inside the
+ * sticky panel that can grow, and ensure it actually scrolls.
+ */
+.ie-aside-panel > .ie-aside-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* ----- Topbar action area: never wrap the brand off the screen ------- */
+.brand-row {
+  min-width: 0;
+}
+
+.brand-text {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.brand-sub {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ----- Nested rail (per-room toggle): label truncation -------------- */
+.ie-rail-room-block,
+.ie-rail-room-list {
+  min-width: 0;
+}
+
+.ie-rail-room-toggle,
+.ie-rail-room-link {
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+}
+
+/* ----- Narrow-screen rescue: keep panel non-sticky < 1020 ------------ */
+/*
+ * Already declared above; re-asserting here so that the late `flex: 0
+ * 0 auto` override doesn't accidentally reintroduce sticky on small
+ * viewports where the layout collapses.
+ */
+@media (max-width: 1020px) {
+  .ie-aside-panel,
+  .ie-aside-panel.summary-card,
+  .ie-aside-panel.summary-card.ie-summary-card-compact {
+    position: static !important;
+    top: auto !important;
+    max-height: min(60vh, 520px) !important;
+  }
 }
 

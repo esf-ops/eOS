@@ -675,6 +675,305 @@ When restyling any estimating head:
     *Additional adjustments*);
   - preserve the Lisbon address spelling as `200 Kraiburg Blvd`.
 
+### 12.5.4a Subsection grouping inside dense form cards
+
+A flat 3-column grid of inputs reads like data entry, not like a
+production workspace. Inside dense form sections (e.g. `Job Info`),
+wrap related fields into **labeled subgroups** rather than splitting
+the card:
+
+```
+<section class="card" id="sec-job">
+  <div class="ie-section-head">
+    <h2 class="ie-section-title">Job Info</h2>
+    <p class="ie-section-meta">…short scannable purpose line…</p>
+  </div>
+  <div class="ie-job-groups">
+    <div class="ie-job-group">
+      <p class="ie-job-group-head">Account</p>
+      <div class="grid3 ie-job-grid">…labels…</div>
+    </div>
+    <div class="ie-job-group">…</div>
+  </div>
+</section>
+```
+
+Each `ie-job-group` is a quiet rounded container (`#f8fafe → #fcfdff`
+gradient, 1 px hairline, 14 px radius) with a tiny burgundy accent
+stripe along the top edge and an uppercase eyebrow label whose trailing
+hairline reaches the right margin. Field order **never** changes;
+only the visual rhythm does. The pattern scales to any other dense
+form card (`Add-ons`, `Save`, etc.).
+
+### 12.5.4b Connection / live-strip pattern
+
+The "are we talking to the backend?" banner sits as a slim pill-style
+row directly above the first section card. It has three states driven
+purely by client state (no new backend probes):
+
+- `is-preview` — Sign-in needed / preview mode (amber dot + warm tint).
+- `is-confirmed` — Backend Calculate connected (green dot + cool tint).
+- `is-warn` — Backend Calculate failed, fallback live preview is in
+  effect (amber + stronger border).
+
+The pill prints a short `LABEL` (uppercase) and a longer copy line in
+the same row, with a pulsing dot that respects `prefers-reduced-motion`.
+
+### 12.5.4c Status banners (info / warn / error)
+
+Replace inline `<p class="error">` / `<div class="fallback-banner">`
+strings with the `.ie-status-banner` component (`is-info / is-warn /
+is-error`). It pairs a colored dot, a soft tinted gradient background,
+and a 1 px tinted border so the meaning is readable at a glance without
+hijacking attention. Error variant pulses; reduced-motion users get a
+static dot. Use `.ie-note-quiet` for the smaller inline notes (e.g. Use
+tax disclosure, Save status message) where a full banner would be too
+loud.
+
+### 12.5.4d Right-summary anatomy
+
+The estimator summary is the second-most-trusted surface after the
+sticky bar. Its anatomy:
+
+1. `ie-summary-head` — `Live quote panel` eyebrow + `Estimator
+   summary` title + a small pricing-mode pill (`data-mode="wholesale"
+   | "direct"`).
+2. `ie-summary-hero` — kicker line + the gradient hero total + a single
+   inline status sub-line (`is-confirmed` green-dot when the last
+   Calculate is verified, `is-preview` amber-dot otherwise).
+3. `ie-summary-section` (Breakdown) — compact row-divider list with
+   tabular numerics; internal-only adjustments live in a tinted
+   burgundy row.
+4. `ie-summary-section` (Readiness) — a pill (`is-ok` green / `is-missing`
+   amber) plus a small `Score N%` number. Warnings get an inset
+   amber strip.
+5. Internal badge + `<details>` audit drawer for engine fields.
+
+Every value displayed is already in scope — no totals were added,
+removed, or recomputed.
+
+### 12.5.4e Sign-in / preview-state framing
+
+When `supabase && !sessionToken`, the sign-in card uses the
+`.ie-signin-row` premium framing:
+
+- `Preview · Sign in to save, calculate, or print` burgundy eyebrow
+  with a pulsing dot.
+- `Sign in with your eliteOS account` headline, with the brand word in
+  a burgundy → violet gradient.
+- One-line supporting copy explaining what is and isn't possible in
+  preview mode.
+- Email / Password / `Sign in` controls in a `1fr 1fr auto` grid
+  collapsing to a single column on ≤ 720 px.
+- Errors render as `.ie-note-quiet.ie-note-error`, never as raw text.
+
+### 12.5.4f Sticky live quote panel (flagship rule)
+
+The right Estimator Summary is the second-most-trusted surface after the
+sticky bottom command bar. Because estimators spend hours inside the
+form column, the live panel **must remain visible** while scrolling.
+
+The pattern:
+
+- `.ie-app-shell` is a 3-column grid
+  (`clamp(168px, 12vw, 196px) minmax(0, 1fr) clamp(280px, 21vw, 312px)`)
+  with `align-items: stretch` so the aside cell takes the full row
+  height of the (very tall) main column. Side columns intentionally
+  use `clamp()` so the **center main column** widens on bigger screens
+  (≈ 850 px main column at 1440 px) without squeezing.
+- The grid cell `.ie-aside.side-col` is **not** sticky itself
+  (`position: static`). It exists just to size the column.
+- The inner `.ie-aside-panel` is the sticky element, pinned to
+  `top: calc(var(--ie-topbar-h) + 14px)` (so it never tucks under the
+  sticky topbar) with
+  `max-height: calc(100vh - var(--ie-topbar-h) - 14px -
+  var(--ie-sticky-bar-h) - 14px)` (so it never overlaps the sticky
+  command bar at the bottom).
+- **Critical override** (the root cause of an earlier failed pass):
+  `.ie-aside-panel` also carries `.summary-card.ie-summary-card-compact`
+  which sets `flex: 1; min-height: 0`. Because the parent
+  `.ie-aside.side-col` is `display: flex; flex-direction: column`,
+  `flex: 1` makes the panel **fill the entire row height** — leaving
+  sticky no room to actually stick. We explicitly override
+  `flex: 0 0 auto` on the sticky panel so it sizes to its own content
+  capped at `max-height`. Sticky now has a containing block smaller
+  than the row and can move.
+- Inside it, `.ie-aside-scroll` is `overflow-y: auto` with `min-height: 0`
+  so anything that doesn't fit scrolls within the panel rather than
+  pushing it out of the viewport.
+- The CSS variables `--ie-topbar-h` and `--ie-sticky-bar-h` live in
+  `:root` and are tuned per breakpoint (smaller on mobile where the
+  command bar stacks taller).
+- `z-index: 1` on the sticky panel and `z-index: 60` on the sticky
+  command bar ensure stacking order: command bar always above the
+  live panel.
+- At `max-width: 1020px` the grid collapses to one column and the panel
+  drops sticky behavior, falling back to a normal stacked card with
+  `max-height: min(60vh, 520px)` so it stays scannable on tablets.
+
+Things that will silently break sticky and must be avoided on any
+ancestor:
+
+- `overflow: hidden | auto | scroll` (use `overflow-x: clip` **only on
+  `html, body`**, NOT on intermediate ancestors of the sticky element —
+  Chrome/Safari have historically broken sticky when a clipping context
+  sits between the sticky element and the viewport scroll context).
+- `transform`, `filter`, `perspective`, `will-change`, `contain` — any
+  of these create a new containing block for `position: fixed` and have
+  historically broken `position: sticky` for descendants as well.
+- `flex: 1` (or `flex-grow: 1`) on the sticky element itself when its
+  parent is a flex container — the sticky element will fill the parent
+  and have no room to stick. Override to `flex: 0 0 auto` if it inherits
+  a flex rule from a shared card class.
+
+### 12.5.4g Overflow-safe shell (1440 → 1024)
+
+The shell must never spawn horizontal scroll at the laptop widths
+estimators use most (1440 / 1280 / 1024). The recipe:
+
+- `html, body { overflow-x: clip; }` — kills overflow without breaking
+  sticky descendants.
+- `.shell`, `.ie-shell-body`, `.ie-app-shell`, `.ie-main`,
+  `.ie-aside.side-col`, `.ie-rail` all carry `min-width: 0` so a long
+  flex child cannot expand them past their column.
+- `.ie-shell-body` uses `padding: clamp(16px, 2.4vw, 28px)` on the X
+  axis and `padding-bottom: calc(var(--ie-sticky-bar-h) +
+  var(--ie-sticky-bar-gap) + 36px)` to reserve room under the sticky
+  command bar.
+- `.topbar { padding: 14px clamp(16px, 2.4vw, 28px); }` and
+  `.topbar-actions { flex-wrap: nowrap }` (with the optional preview
+  pill hidden ≤ 980 px) keep the topbar from clipping its right cluster.
+- `.brand-sub { max-width: clamp(160px, 22vw, 360px) }` with
+  `text-overflow: ellipsis` so the head subtitle truncates instead of
+  clipping the wordmark.
+- Long URLs / catalog names use `.ie-main > .card { overflow-x: clip }`
+  so a single wide child cannot push the column past the main column
+  width.
+
+### 12.5.4h Preview-mode hierarchy (single primary indicator)
+
+When `supabase && !sessionToken`, the UI used to repeat "preview" /
+"sign in" copy in five places. The flagship rule is:
+
+- **Primary indicator (one only):** the topbar preview pill
+  (`.topbar-preview-pill`) — always visible because the topbar is
+  sticky.
+- **Action surface:** the `.ie-signin-row` premium card directly above
+  the form, with the burgundy "Preview · Sign in to save, calculate, or
+  print" eyebrow.
+- **Secondary echoes (quiet):** the hero live pill becomes a calm
+  `is-muted` "Live preview" (slate dot, no amber/warning tint), the
+  sticky bar status pill shows the same calmer "Live preview" copy.
+- **Suppressed when redundant:** `.ie-live-strip` (the connection-state
+  band) is hidden entirely while signed out — the topbar pill and
+  sign-in card already convey it.
+
+Repeating an alarmed-looking pill in every region makes the workspace
+feel broken. One primary + quiet echoes feels intentional.
+
+### 12.5.4i Quick-add and preset button language
+
+Two label-clarity rules for the room builder quick-add row:
+
+1. **Cluster presets vs blank shapes.** Kitchen presets
+   (`appendShapeGroupPreset`) and blank shapes
+   (`appendShapeGroup`) sit in two visually distinct pill clusters
+   (`.ie-shape-group-add-cluster--presets` violet-tinted,
+   `.ie-shape-group-add-cluster--shapes` neutral) with `Presets` /
+   `Add shape` eyebrows.
+2. **Disambiguate U-shape labels.** The two buttons that previously
+   read `+ Main U-shape` and `+ U-shape` now read
+   `+ Kitchen U-shape` (preset — pre-filled main run + legs) and
+   `+ U-shape (blank)` (custom — fill in run lengths). Every button
+   carries a `title=` tooltip explaining what it adds.
+
+Every quick-add button shares the same `.ie-shape-group-add-row .btn`
+visual system: pill 999 px radius, `padding: 6px 14px`, `min-height:
+32 px`, `font-size: 0.78 rem`, `font-weight: 600`. Random oversized
+buttons in the row are a regression.
+
+### 12.5.4j Active workflow rail step (scroll-derived)
+
+The left rail highlights the section currently in the viewport using a
+single `IntersectionObserver` rooted at `[-35%, -50%]` margins, with
+fallbacks if the API is missing. Active state styling:
+
+- `.ie-rail-link.is-active` — burgundy tint on background + label.
+- `.ie-rail-link.is-active .ie-rail-link-num` — burgundy fill, white
+  digit, soft accent ring.
+
+The state is purely scroll-derived — no fake completion checkmarks, no
+forced ordering.
+
+### 12.5.4k Inline mirrored actions (Save/Output)
+
+The Save/Output area duplicates the sticky bar's actions because the
+sticky bar is only useful when the user is mid-scroll. The mirrored
+inline actions are demoted to secondary so the sticky bar remains the
+unambiguous primary command surface:
+
+- All inline buttons use `.btn secondary big` (no `.btn primary`).
+- The block is wrapped in `.ie-output-actions` — dashed border, soft
+  background, and a `Mirrors the pinned command bar` eyebrow + helper
+  copy on the left, buttons cluster on the right.
+- All handlers, `disabled`, `title=`, and busy states stay verbatim;
+  only visual weight changes.
+
+### 12.5.4l Focus colour — slate-blue, never alarm-red
+
+`var(--elite-red)` / `var(--eos-accent)` (`#a3132f`) is the brand
+accent for primary actions and the wizard "current step" dot. It is
+**not** appropriate as the default input focus colour: estimators
+quickly read it as an error/destructive state, especially on Cooktop /
+qty inputs where there is no actual validation problem.
+
+Rule:
+
+- Default focus ring on `input`, `select`, `textarea` is slate-blue
+  (`border-color: rgba(46, 105, 184, 0.55)` + `box-shadow: 0 0 0 3px
+  rgba(46, 105, 184, 0.16)`).
+- Burgundy / red focus styling is **reserved** for actual validation
+  errors and destructive confirmations.
+- Selected-state cards (`.preset-shape-card.on`,
+  `.detail-segment--selected`, `.detail-option-card--selected`,
+  `.ie-shape-group-card.is-selected`, etc.) all read as **slate-blue
+  premium selection**, not burgundy alarm, when rendered inside
+  `.ie-main`.
+
+### 12.5.4m Add-on tile parity (no `:has(input[value])` tricks)
+
+The room add-ons grid renders both regular add-ons and sink/faucet
+add-ons through the same component (`.room-addon-row` plus a
+`.room-addon-row--sink` flag). Both variants must render with
+**identical** padding, border, radius, and background — the only
+difference is the structured payload they emit.
+
+Implementation rules:
+
+- Apply identical CSS to `.room-addon-row` and
+  `.room-addon-row.room-addon-row--sink` inside `.ie-main`.
+- Hover and focus states use the slate-blue rule from §12.5.4l.
+- **Do not rely on `:has(input[value]:not([value="0"]))`** to light
+  up an "active" state when `qty > 0`. React-controlled inputs keep
+  the current value in the DOM property, not the HTML attribute, so
+  the selector lights up randomly or not at all. Use `:focus-within`
+  for input feedback and let the layout itself communicate state.
+
+### 12.5.4n Long-field overflow (Job Info, Sales)
+
+Long email / "Entered by" values used to widen the Job Info grid and
+push the layout off the right edge. Three rules close that hole:
+
+- Every direct child of an `.ie-job-grid` / `.grid3` cell carries
+  `min-width: 0` so the `minmax(0, 1fr)` column actually shrinks.
+- Inputs inside `.ie-job-group label` are `width: 100%; min-width: 0;
+  max-width: 100%; box-sizing: border-box;` with `text-overflow:
+  ellipsis` so long values truncate inside the field.
+- The page-level guard `html, body { overflow-x: clip }` catches any
+  remaining horizontal overflow — it does NOT propagate to the sticky
+  panel ancestors because we intentionally **do not** put
+  `overflow-x: clip` on `.ie-shell-body` or `.ie-app-shell`.
+
 ### 12.5.5 Behavior the visual pass must preserve
 
 When restyling an estimating head, never touch:

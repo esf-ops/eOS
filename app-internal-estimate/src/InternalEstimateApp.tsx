@@ -305,6 +305,8 @@ export default function InternalEstimateApp() {
   const [visualCanvasExpanded, setVisualCanvasExpanded] = useState(false);
   const [roomsSubnavOpen, setRoomsSubnavOpen] = useState(true);
   const [activeRoomNavId, setActiveRoomNavId] = useState<string | null>(null);
+  /** Scroll-derived active workflow section (purely visual — no fake state). */
+  const [activeWorkflowSectionId, setActiveWorkflowSectionId] = useState<string | null>(null);
 
   const [accountName, setAccountName] = useState("Direct");
   const [accountPhone, setAccountPhone] = useState("");
@@ -488,6 +490,43 @@ export default function InternalEstimateApp() {
       document.removeEventListener("keydown", onKey);
     };
   }, [userMenuOpen]);
+
+  /**
+   * Scroll-derived active workflow section for the left rail highlight.
+   * Purely presentational — no fake completion state, no new data sources.
+   */
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof IntersectionObserver === "undefined") return;
+    const ids = ["sec-job", "sec-rooms", "sec-visual", "sec-addons", "sec-review", "sec-save"];
+    const targets: HTMLElement[] = [];
+    ids.forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) targets.push(el);
+    });
+    if (targets.length === 0) return;
+    const visibility = new Map<string, number>();
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const id = (entry.target as HTMLElement).id;
+          visibility.set(id, entry.isIntersecting ? entry.intersectionRatio : 0);
+        }
+        let bestId: string | null = null;
+        let bestRatio = 0;
+        ids.forEach((id) => {
+          const ratio = visibility.get(id) ?? 0;
+          if (ratio > bestRatio) {
+            bestRatio = ratio;
+            bestId = id;
+          }
+        });
+        if (bestId) setActiveWorkflowSectionId(bestId);
+      },
+      { rootMargin: "-35% 0px -50% 0px", threshold: [0.05, 0.25, 0.5, 0.75, 1] }
+    );
+    targets.forEach((el) => observer.observe(el));
+    return () => observer.disconnect();
+  }, [roomDrafts.length]);
 
   const ensureAccessToken = useCallback(async (): Promise<string | null> => {
     if (!supabase) return null;
@@ -1836,7 +1875,7 @@ export default function InternalEstimateApp() {
   ]);
 
   return (
-    <div className="shell page-internal-estimate">
+    <div className={`shell page-internal-estimate${urlQuoteId && loadedFromLibrary ? " ie-shell-loaded" : ""}${sessionToken ? " ie-shell-signed-in" : " ie-shell-preview"}`}>
       <div className="ie-no-print">
       <header className="topbar" role="banner">
         <a
@@ -2044,12 +2083,14 @@ export default function InternalEstimateApp() {
                           : "Live preview"}
                     </span>
                   </span>
-                ) : (
-                  <span className="ie-hero-live is-signed-out" aria-live="polite">
-                    <span className="ie-hero-live-dot" aria-hidden />
-                    <span>Sign in to save &amp; calculate</span>
-                  </span>
-                )}
+                ) : null}
+                {/*
+                  When signed-out the topbar already shows the primary
+                  "Preview mode" pill — duplicating it here in the hero is
+                  the exact repetition the corrective pass is removing. The
+                  signed-in branch above is retained because it carries live
+                  status ("Calculating…" / "Backend confirmed").
+                */}
               </div>
               <h1 id="ie-hero-title" className="ie-hero-title">
                 Estimate <span className="ie-hero-title-accent">workspace</span>
@@ -2131,31 +2172,36 @@ export default function InternalEstimateApp() {
         </section>
 
       {urlQuoteId ? (
-        <div className="card ie-card-tight ie-url-banner">
+        <div
+          className={`ie-url-banner${hydratedIsCurrentRevision === false ? " is-older-rev" : loadedFromLibrary ? " is-loaded" : " is-loading"}`}
+          role={loadedFromLibrary ? "status" : undefined}
+        >
           {loadedFromLibrary ? (
-            <p className="ok" style={{ margin: 0 }}>
-              Loaded saved estimate
-              {hydratedDisplayRevision ? (
-                <>
-                  {" "}
-                  (<strong>{hydratedDisplayRevision}</strong>)
-                </>
-              ) : null}
-              . Use pinned <strong>Save revision</strong> after scope changes, or <strong>Update current revision</strong> to edit in place.
-              {hydratedIsCurrentRevision === false ? (
-                <>
-                  {" "}
-                  You opened an <strong>older revision</strong> — restore it to continue the same ESF family, or open the latest.
-                </>
-              ) : null}
-            </p>
+            <>
+              <p className="ie-url-banner-title">
+                Loaded from Quote Library
+                {hydratedDisplayRevision ? (
+                  <span className="ie-url-banner-rev"> · {hydratedDisplayRevision}</span>
+                ) : null}
+              </p>
+              <p className="ie-url-banner-copy">
+                Use pinned <strong>Save revision</strong> after scope changes, or <strong>Update current revision</strong> to edit in place.
+                {hydratedIsCurrentRevision === false ? (
+                  <>
+                    {" "}
+                    You opened an <strong>older revision</strong> — restore it to continue the same ESF family, or open the latest.
+                  </>
+                ) : null}
+              </p>
+            </>
           ) : (
-            <p className="muted" style={{ margin: 0 }}>
+            <p className="ie-url-banner-title ie-url-banner-loading">
+              <span className="ie-url-banner-loading-dot" aria-hidden />
               Loading quote…
             </p>
           )}
           {hydrationGaps.length ? (
-            <ul className="muted small" style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+            <ul className="ie-url-banner-gaps">
               {hydrationGaps.map((g) => (
                 <li key={g}>{g}</li>
               ))}
@@ -2169,11 +2215,14 @@ export default function InternalEstimateApp() {
           <p className="ie-rail-title" aria-hidden>
             Workflow
           </p>
-          {WORKFLOW_SECTIONS.map((s, i) => (
+          {WORKFLOW_SECTIONS.map((s, i) => {
+            const isActive = activeWorkflowSectionId === s.id;
+            return (
             <React.Fragment key={s.id}>
               <button
                 type="button"
-                className="ie-rail-link"
+                className={`ie-rail-link${isActive ? " is-active" : ""}`}
+                aria-current={isActive ? "true" : undefined}
                 onClick={() => scrollToWorkflowSection(s.id)}
               >
                 <span className="ie-rail-link-num" aria-hidden>
@@ -2209,12 +2258,20 @@ export default function InternalEstimateApp() {
                 </div>
               ) : null}
             </React.Fragment>
-          ))}
+            );
+          })}
         </nav>
 
         <main className="ie-main">
           {supabase && !sessionToken ? (
-            <div className="card ie-card-tight ie-signin-row">
+            <div className="card ie-signin-row" role="region" aria-labelledby="ie-signin-title">
+              <p className="ie-signin-eyebrow">Preview · Sign in to save, calculate, or print</p>
+              <h2 id="ie-signin-title" className="ie-signin-title">
+                Sign in with your <span className="ie-signin-title-accent">eliteOS</span> account
+              </h2>
+              <p className="ie-signin-sub">
+                Totals update live while you type, but Calculate, Save, and Print need an authenticated session.
+              </p>
               <div className="ie-signin-fields">
                 <label>
                   Email
@@ -2229,35 +2286,53 @@ export default function InternalEstimateApp() {
                     autoComplete="current-password"
                   />
                 </label>
-                <button type="button" className="btn primary" disabled={authBusy} onClick={() => void signIn()}>
+                <button
+                  type="button"
+                  className="btn primary ie-signin-submit"
+                  disabled={authBusy}
+                  onClick={() => void signIn()}
+                >
                   {authBusy ? "Signing in…" : "Sign in"}
                 </button>
               </div>
-              {authError ? <p className="error" style={{ margin: "8px 0 0" }}>{authError}</p> : null}
+              {authError ? (
+                <p className="ie-note-quiet ie-note-error" role="alert">
+                  <span className="ie-note-quiet-dot" aria-hidden />
+                  {authError}
+                </p>
+              ) : null}
             </div>
           ) : null}
 
-          <div className="card ie-card-tight ie-live-strip">
-            {!sessionToken ? (
-              <p className="ie-connection-preview" style={{ margin: 0 }}>
-                <span className="pill pill-demo">Preview</span> Sign in to save to Quote Library. Totals update live while you
-                type; Calculate validates with eliteOS when signed in.
-              </p>
-            ) : backendCalcOk === true ? (
-              <p className="ie-connection-ok" style={{ margin: 0 }}>
-                Live backend calculation connected.
-              </p>
-            ) : backendCalcOk === false && usedFallback ? (
-              <p className="ie-connection-warn" style={{ margin: 0 }}>
-                Live preview for totals — backend calculate did not connect. Tap Calculate to retry, or sign out and back in if
-                save fails.
-              </p>
-            ) : (
-              <p className="ie-connection-preview" style={{ margin: 0 }}>
-                Signed in — live preview while typing; tap Calculate to validate with eliteOS before save.
-              </p>
-            )}
-          </div>
+          {sessionToken ? (
+            <div
+              className={`ie-live-strip${
+                backendCalcOk === true
+                  ? " is-confirmed"
+                  : backendCalcOk === false && usedFallback
+                    ? " is-warn"
+                    : " is-preview"
+              }`}
+              role="status"
+              aria-live="polite"
+            >
+              <span className="ie-live-strip-dot" aria-hidden />
+              <span className="ie-live-strip-label">
+                {backendCalcOk === true
+                  ? "Backend connected"
+                  : backendCalcOk === false && usedFallback
+                    ? "Backend retry needed"
+                    : "Live preview"}
+              </span>
+              <span className="ie-live-strip-copy">
+                {backendCalcOk === true
+                  ? "Live backend calculation connected. Tap Calculate any time to verify line items."
+                  : backendCalcOk === false && usedFallback
+                    ? "Live preview for totals — backend Calculate did not connect. Tap Calculate to retry, or sign out and back in if save fails."
+                    : "Live preview while you type. Tap Calculate to validate with eliteOS before save."}
+              </span>
+            </div>
+          ) : null}
 
           <div className="card ie-card-tight ie-pricing-bar">
             <span className="ie-pricing-label">Pricing mode</span>
@@ -2280,126 +2355,157 @@ export default function InternalEstimateApp() {
           </div>
 
           <section id="sec-job" className="card">
-            <h2 className="ie-section-title">Job Info</h2>
-            <div className="grid3 ie-job-grid">
-              <label>
-                Account
-                <input value={accountName} onChange={(e) => setAccountName(e.target.value)} placeholder="Direct" />
-              </label>
-              <label>
-                Account contact phone
-                <input value={accountPhone} onChange={(e) => setAccountPhone(e.target.value)} placeholder="Phone" />
-              </label>
-              <label>
-                Account contact email
-                <input value={accountEmail} onChange={(e) => setAccountEmail(e.target.value)} placeholder="Email" />
-              </label>
-              <label>
-                Customer
-                <input value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Customer or site" />
-              </label>
-              <label>
-                Customer phone
-                <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone" />
-              </label>
-              <label>
-                Customer email
-                <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" />
-              </label>
-              <label>
-                Elite job name
-                <input value={projectName} onChange={(e) => setProjectName(e.target.value)} placeholder="Job name" />
-              </label>
-              <label>
-                Project address
-                <input value={projectAddress} onChange={(e) => setProjectAddress(e.target.value)} placeholder="Street address" />
-              </label>
-              <label>
-                City
-                <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="City" />
-              </label>
-              <label>
-                State
-                <input value={state} onChange={(e) => setState(e.target.value)} placeholder="IA" />
-              </label>
-              <label>
-                Project type
-                <input value={projectType} onChange={(e) => setProjectType(e.target.value)} />
-              </label>
-              <label>
-                Branch
-                <select value={branch} onChange={(e) => setBranch(e.target.value)}>
-                  {INTERNAL_BRANCHES.map((b) => (
-                    <option key={b} value={b}>
-                      {b}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Salesperson <span className="muted">(required)</span>
-                <select value={salesRep} onChange={(e) => setSalesRep(e.target.value)} required>
-                  <option value="">— Select —</option>
-                  {INTERNAL_SALES_REPS.map((r) => (
-                    <option key={r} value={r}>
-                      {r}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Entered by
-                <input value={enteredBy} onChange={(e) => setEnteredBy(e.target.value)} placeholder="Defaults from sign-in" />
-              </label>
-              <label className="check" style={{ alignSelf: "end" }}>
-                <input type="checkbox" checked={colorTbd} onChange={(e) => setColorTbd(e.target.checked)} />
-                Color TBD (project-wide)
-              </label>
-              <label>
-                Use tax on countertop material
-                <select
-                  value={useTaxPreset}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setUseTaxPreset(v);
-                    if (v === "custom") return;
-                    setUseTaxPercent(Number(v) || 0);
-                  }}
-                >
-                  <option value="0">0% (none)</option>
-                  <option value="2">2%</option>
-                  <option value="5">5% (e.g. Lisbon)</option>
-                  <option value="custom">Custom %</option>
-                </select>
-              </label>
-              {useTaxPreset === "custom" ? (
-                <label>
-                  Custom use tax %
-                  <input
-                    type="number"
-                    min={0}
-                    step={0.01}
-                    value={useTaxPercent}
-                    onChange={(e) => setUseTaxPercent(Math.max(0, Number(e.target.value) || 0))}
-                  />
-                </label>
-              ) : null}
+            <div className="ie-section-head">
+              <h2 className="ie-section-title">Job Info</h2>
+              <p className="ie-section-meta">
+                Account &amp; customer contact · Project location · Sales team · Quote settings
+              </p>
+            </div>
+            <div className="ie-job-groups">
+              <div className="ie-job-group">
+                <p className="ie-job-group-head">Account</p>
+                <div className="grid3 ie-job-grid">
+                  <label>
+                    Account
+                    <input value={accountName} onChange={(e) => setAccountName(e.target.value)} placeholder="Direct" />
+                  </label>
+                  <label>
+                    Account contact phone
+                    <input value={accountPhone} onChange={(e) => setAccountPhone(e.target.value)} placeholder="Phone" />
+                  </label>
+                  <label>
+                    Account contact email
+                    <input value={accountEmail} onChange={(e) => setAccountEmail(e.target.value)} placeholder="Email" />
+                  </label>
+                </div>
+              </div>
+
+              <div className="ie-job-group">
+                <p className="ie-job-group-head">Customer</p>
+                <div className="grid3 ie-job-grid">
+                  <label>
+                    Customer
+                    <input value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Customer or site" />
+                  </label>
+                  <label>
+                    Customer phone
+                    <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone" />
+                  </label>
+                  <label>
+                    Customer email
+                    <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" />
+                  </label>
+                </div>
+              </div>
+
+              <div className="ie-job-group">
+                <p className="ie-job-group-head">Project</p>
+                <div className="grid3 ie-job-grid">
+                  <label>
+                    Elite job name
+                    <input value={projectName} onChange={(e) => setProjectName(e.target.value)} placeholder="Job name" />
+                  </label>
+                  <label>
+                    Project address
+                    <input value={projectAddress} onChange={(e) => setProjectAddress(e.target.value)} placeholder="Street address" />
+                  </label>
+                  <label>
+                    City
+                    <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="City" />
+                  </label>
+                  <label>
+                    State
+                    <input value={state} onChange={(e) => setState(e.target.value)} placeholder="IA" />
+                  </label>
+                  <label>
+                    Project type
+                    <input value={projectType} onChange={(e) => setProjectType(e.target.value)} />
+                  </label>
+                </div>
+              </div>
+
+              <div className="ie-job-group">
+                <p className="ie-job-group-head">Sales &amp; quote settings</p>
+                <div className="grid3 ie-job-grid">
+                  <label>
+                    Branch
+                    <select value={branch} onChange={(e) => setBranch(e.target.value)}>
+                      {INTERNAL_BRANCHES.map((b) => (
+                        <option key={b} value={b}>
+                          {b}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Salesperson <span className="muted">(required)</span>
+                    <select value={salesRep} onChange={(e) => setSalesRep(e.target.value)} required>
+                      <option value="">— Select —</option>
+                      {INTERNAL_SALES_REPS.map((r) => (
+                        <option key={r} value={r}>
+                          {r}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Entered by
+                    <input value={enteredBy} onChange={(e) => setEnteredBy(e.target.value)} placeholder="Defaults from sign-in" />
+                  </label>
+                  <label className="check" style={{ alignSelf: "end" }}>
+                    <input type="checkbox" checked={colorTbd} onChange={(e) => setColorTbd(e.target.checked)} />
+                    Color TBD (project-wide)
+                  </label>
+                  <label>
+                    Use tax on countertop material
+                    <select
+                      value={useTaxPreset}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setUseTaxPreset(v);
+                        if (v === "custom") return;
+                        setUseTaxPercent(Number(v) || 0);
+                      }}
+                    >
+                      <option value="0">0% (none)</option>
+                      <option value="2">2%</option>
+                      <option value="5">5% (e.g. Lisbon)</option>
+                      <option value="custom">Custom %</option>
+                    </select>
+                  </label>
+                  {useTaxPreset === "custom" ? (
+                    <label>
+                      Custom use tax %
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.01}
+                        value={useTaxPercent}
+                        onChange={(e) => setUseTaxPercent(Math.max(0, Number(e.target.value) || 0))}
+                      />
+                    </label>
+                  ) : null}
+                </div>
+              </div>
             </div>
             {selectedMaterialBreakdown.totals.useTax?.applied ? (
-              <p className="muted small" style={{ marginTop: 8 }}>
-                Use tax: {selectedMaterialBreakdown.totals.useTax.percent}% on countertop material ($
-                {selectedMaterialBreakdown.totals.useTax.baseCountertopMaterial.toFixed(2)} base + $
-                {selectedMaterialBreakdown.totals.useTax.taxAmount.toFixed(2)}) — included in customer countertop amount, not
-                a separate PDF line.
+              <p className="ie-note-quiet ie-note-useTax" role="status">
+                <span className="ie-note-quiet-dot" aria-hidden />
+                Use tax: <strong>{selectedMaterialBreakdown.totals.useTax.percent}%</strong> on countertop material
+                {" "}(<strong>${selectedMaterialBreakdown.totals.useTax.baseCountertopMaterial.toFixed(2)}</strong> base + {" "}
+                <strong>${selectedMaterialBreakdown.totals.useTax.taxAmount.toFixed(2)}</strong>)
+                {" "}— included in customer countertop amount, not a separate PDF line.
               </p>
             ) : null}
           </section>
 
           <section id="sec-rooms" className="card">
-            <h2 className="ie-section-title">Rooms / Areas</h2>
-            <p className="muted small">
-              Build each room: guided dimensions or manual sq ft, price group, optional catalog color or Color TBD in the picker.
-            </p>
+            <div className="ie-section-head">
+              <h2 className="ie-section-title">Rooms / Areas</h2>
+              <p className="ie-section-meta">
+                Guided shapes or manual sq ft · Price group + color · Standard vanity or 2026 Vanity Program opt-in
+              </p>
+            </div>
             <details className="ie-future-tools">
               <summary>Future tools</summary>
               <p className="muted small" style={{ margin: "8px 0 0" }}>
@@ -2422,13 +2528,22 @@ export default function InternalEstimateApp() {
           <section id="sec-visual" className="card ie-visual-section">
             <div className="ie-visual-summary-row">
               <div className="ie-visual-summary-text">
-                <h2 className="ie-section-title ie-visual-heading">Visual layout verification</h2>
-                <p className="muted small ie-visual-meta">
-                  <strong>{visualCanvasSummary.roomCount}</strong> room{visualCanvasSummary.roomCount === 1 ? "" : "s"} ·{" "}
-                  <strong>{visualCanvasSummary.pieceCount}</strong> piece{visualCanvasSummary.pieceCount === 1 ? "" : "s"} · Mix{" "}
-                  <strong>{visualCanvasSummary.tierSummary}</strong>
-                  <span className="ie-visual-sep"> · </span>
-                  <span className="ie-visual-reminder">Visual only — pricing uses room fields.</span>
+                <div className="ie-section-head ie-section-head-tight">
+                  <h2 className="ie-section-title ie-visual-heading">Visual layout verification</h2>
+                  <p className="ie-section-meta">
+                    Drag-and-rotate verification board · does not change Calculate, Save, or customer print totals
+                  </p>
+                </div>
+                <p className="ie-visual-meta">
+                  <span className="ie-visual-meta-chip">
+                    <strong>{visualCanvasSummary.roomCount}</strong> room{visualCanvasSummary.roomCount === 1 ? "" : "s"}
+                  </span>
+                  <span className="ie-visual-meta-chip">
+                    <strong>{visualCanvasSummary.pieceCount}</strong> piece{visualCanvasSummary.pieceCount === 1 ? "" : "s"}
+                  </span>
+                  <span className="ie-visual-meta-chip">
+                    Mix <strong>{visualCanvasSummary.tierSummary}</strong>
+                  </span>
                 </p>
               </div>
               <div className="ie-visual-summary-actions">
@@ -2463,13 +2578,14 @@ export default function InternalEstimateApp() {
           </section>
 
           <section id="sec-addons" className="card">
-            <h2 className="ie-section-title">Add-ons &amp; Custom Items</h2>
-            <p className="muted small">
-              Use presets or add custom lines. <strong>Customer-facing</strong> items appear on the estimate by name.{" "}
-              <strong>Internal-only</strong> lines count toward the total and are folded into customer countertop material on the PDF
-              (not listed by internal name).
-            </p>
-            <p className="muted small">Sink and fixture cutouts are set per room in the room builder.</p>
+            <div className="ie-section-head">
+              <h2 className="ie-section-title">Add-ons &amp; Custom Items</h2>
+              <p className="ie-section-meta">
+                Presets and custom lines · <strong>Customer-facing</strong> show on the estimate · <strong>Internal-only</strong> roll into
+                countertop material on the PDF (not listed by internal name)
+              </p>
+            </div>
+            <p className="muted small ie-addons-cutout-hint">Sink and fixture cutouts are set per room in the room builder.</p>
             {customLineUndo ? (
               <div className="ie-undo-toast" role="status">
                 <span>Custom line removed. </span>
@@ -2491,31 +2607,32 @@ export default function InternalEstimateApp() {
               Choose only the alternate groups you want shown to the customer. Internal worksheet below can list every tier; customer
               print includes comparisons only for checked groups (default: none).
             </p>
-            <div className="mode-row" style={{ flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
+            <div className="ie-group-compare-grid" role="group" aria-label="Customer-facing price group comparisons">
               {MATERIAL_GROUPS.map((g) => (
-                <label key={g} className="check" style={{ minWidth: 120 }}>
+                <label key={g} className="check ie-group-compare-check">
                   <input
                     type="checkbox"
                     checked={Boolean(customerDisplayGroups[g])}
                     onChange={(e) => setCustomerDisplayGroups((prev) => ({ ...prev, [g]: e.target.checked }))}
                   />
-                  {g}
+                  <span className="ie-group-compare-label">{g}</span>
                 </label>
               ))}
             </div>
             {comparisonScopeMeta.mixedGroupNote ? (
-              <p className="muted small" style={{ marginTop: -10, marginBottom: 16 }}>
+              <p className="ie-note-quiet ie-note-info" role="status" style={{ marginTop: 6 }}>
+                <span className="ie-note-quiet-dot" aria-hidden />
                 {comparisonScopeMeta.mixedGroupNote}
               </p>
             ) : null}
 
             <h3 className="h3">Structured custom line items</h3>
-            <div className="mode-row" style={{ flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+            <div className="ie-custom-line-presets" role="group" aria-label="Add a structured custom line item">
               {CUSTOM_LINE_PRESETS.map((p) => (
                 <button
                   key={p.key}
                   type="button"
-                  className="btn secondary"
+                  className="btn secondary ie-custom-line-preset-btn"
                   onClick={() =>
                     setCustomLineRows((prev) => [
                       ...prev,
@@ -2537,7 +2654,7 @@ export default function InternalEstimateApp() {
                 </button>
               ))}
             </div>
-            <p className="muted small">Discount lines need a negative unit price.</p>
+            <p className="muted small ie-custom-line-presets-hint">Discount lines need a negative unit price.</p>
               {customLineRows.map((row) => (
                 <div key={row.id} className="grid3" style={{ marginBottom: 10, borderBottom: "1px solid var(--border)", paddingBottom: 10 }}>
                   {!row.customerFacing ? (
@@ -2692,10 +2809,12 @@ export default function InternalEstimateApp() {
 
             <div className="ie-workflow-tail">
             <section id="sec-review" className="card">
-              <h2 className="ie-section-title">Review</h2>
-              <p className="muted small">
-                Readiness feeds snapshots — it does not block Calculate or Save in this build.
-              </p>
+              <div className="ie-section-head">
+                <h2 className="ie-section-title">Review</h2>
+                <p className="ie-section-meta">
+                  Readiness feeds snapshots — it does not block Calculate or Save in this build
+                </p>
+              </div>
               <p>
                 <strong>Score:</strong> {readinessSnapshot.score}% ·{" "}
                 <strong>{readinessSnapshot.readyForReview ? "Ready for ESF review" : "Needs info"}</strong>
@@ -2862,64 +2981,70 @@ export default function InternalEstimateApp() {
               <p className="muted small">Elite Stone Fabrication — internal estimate. Not a homeowner contract.</p>
             </details>
 
-          <div className="actions">
-            <p className="muted small" style={{ flex: "1 1 220px", margin: 0 }}>
-              Same actions as the <strong>pinned bar below</strong> — use whichever is closer while you scroll.
-            </p>
-            <button type="button" className="btn secondary big" onClick={printCustomerEstimate}>
-              Print customer estimate
-            </button>
-            <p className="ie-print-hint">
-              For the cleanest PDF, turn off browser &ldquo;Headers and footers&rdquo; in the print dialog.
-            </p>
-            <button type="button" className="btn primary big" disabled={calcBusy} onClick={() => void handleCalculate()}>
-              {calcBusy ? "Calculating…" : "Calculate"}
-            </button>
-            {urlQuoteId ? (
-              hydratedIsCurrentRevision === false ? (
-                <>
-                  <button
-                    type="button"
-                    className="btn primary big"
-                    disabled={Boolean(restoreRevisionBlockReason)}
-                    title={restoreRevisionBlockReason ?? undefined}
-                    onClick={() => void handleRestoreAsRevision()}
-                  >
-                    {restoreBusy ? "Restoring…" : "Restore as new revision"}
-                  </button>
-                  {familyLatestQuoteId && familyLatestQuoteId !== urlQuoteId ? (
-                    <button type="button" className="btn secondary big" onClick={openLatestRevisionInPlace}>
-                      Open latest revision
-                    </button>
-                  ) : null}
-                </>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    className="btn secondary big"
-                    disabled={Boolean(updateQuoteBlockReason)}
-                    title={updateQuoteBlockReason ?? undefined}
-                    onClick={() => void handleSubmit("update_existing")}
-                  >
-                    {submitBusy && pendingSubmitIntent === "update_existing" ? "Working…" : "Update current revision"}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn primary big"
-                    disabled={Boolean(saveRevisionBlockReason)}
-                    title={saveRevisionBlockReason ?? undefined}
-                    onClick={() => void handleSubmit("save_revision")}
-                  >
-                    {submitBusy && pendingSubmitIntent === "save_revision" ? "Working…" : "Save revision"}
-                  </button>
-                </>
-              )
-            ) : (
-              <button type="button" className="btn primary big" disabled={submitBusy} onClick={() => void handleSubmit()}>
-                {submitBusy ? "Working…" : "Save quote"}
+          <div className="actions ie-output-actions" role="group" aria-label="Save/Output mirrored actions">
+            <div className="ie-output-actions-meta">
+              <p className="ie-output-actions-eyebrow">Mirrors the pinned command bar</p>
+              <p className="ie-output-actions-copy">
+                Same actions as the <strong>pinned bar below</strong> — use whichever is closer while you scroll. The pinned
+                bar is the primary all-day surface.
+              </p>
+              <p className="ie-print-hint">
+                For the cleanest PDF, turn off browser &ldquo;Headers and footers&rdquo; in the print dialog.
+              </p>
+            </div>
+            <div className="ie-output-actions-buttons">
+              <button type="button" className="btn secondary big" onClick={printCustomerEstimate}>
+                Print customer estimate
               </button>
-            )}
+              <button type="button" className="btn secondary big" disabled={calcBusy} onClick={() => void handleCalculate()}>
+                {calcBusy ? "Calculating…" : "Calculate"}
+              </button>
+              {urlQuoteId ? (
+                hydratedIsCurrentRevision === false ? (
+                  <>
+                    <button
+                      type="button"
+                      className="btn secondary big"
+                      disabled={Boolean(restoreRevisionBlockReason)}
+                      title={restoreRevisionBlockReason ?? undefined}
+                      onClick={() => void handleRestoreAsRevision()}
+                    >
+                      {restoreBusy ? "Restoring…" : "Restore as new revision"}
+                    </button>
+                    {familyLatestQuoteId && familyLatestQuoteId !== urlQuoteId ? (
+                      <button type="button" className="btn secondary big" onClick={openLatestRevisionInPlace}>
+                        Open latest revision
+                      </button>
+                    ) : null}
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      className="btn secondary big"
+                      disabled={Boolean(updateQuoteBlockReason)}
+                      title={updateQuoteBlockReason ?? undefined}
+                      onClick={() => void handleSubmit("update_existing")}
+                    >
+                      {submitBusy && pendingSubmitIntent === "update_existing" ? "Working…" : "Update current revision"}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn secondary big"
+                      disabled={Boolean(saveRevisionBlockReason)}
+                      title={saveRevisionBlockReason ?? undefined}
+                      onClick={() => void handleSubmit("save_revision")}
+                    >
+                      {submitBusy && pendingSubmitIntent === "save_revision" ? "Working…" : "Save revision"}
+                    </button>
+                  </>
+                )
+              ) : (
+                <button type="button" className="btn secondary big" disabled={submitBusy} onClick={() => void handleSubmit()}>
+                  {submitBusy ? "Working…" : "Save quote"}
+                </button>
+              )}
+            </div>
           </div>
           {!sessionToken ? (
             <p className="muted small" style={{ marginTop: 0 }}>
@@ -2928,15 +3053,28 @@ export default function InternalEstimateApp() {
             </p>
           ) : null}
 
-          {vanityLocalNote ? <div className="fallback-banner">{vanityLocalNote}</div> : null}
-
-          {usedFallback && sessionToken && backendCalcOk === false ? (
-            <p className="muted small" style={{ margin: "0 0 12px" }}>
-              Calculate used local preview math — save still requires a verified session and backend when available.
-            </p>
+          {vanityLocalNote ? (
+            <div className="ie-status-banner is-info" role="status">
+              <span className="ie-status-banner-dot" aria-hidden />
+              <p className="ie-status-banner-copy">{vanityLocalNote}</p>
+            </div>
           ) : null}
 
-          {calcError ? <p className="error">{calcError}</p> : null}
+          {usedFallback && sessionToken && backendCalcOk === false ? (
+            <div className="ie-status-banner is-warn" role="status">
+              <span className="ie-status-banner-dot" aria-hidden />
+              <p className="ie-status-banner-copy">
+                Calculate used local preview math — save still requires a verified session and backend when available.
+              </p>
+            </div>
+          ) : null}
+
+          {calcError ? (
+            <div className="ie-status-banner is-error" role="alert">
+              <span className="ie-status-banner-dot" aria-hidden />
+              <p className="ie-status-banner-copy">{calcError}</p>
+            </div>
+          ) : null}
 
           <details className="card math-check">
             <summary>Math check &amp; tier diagnostics (live preview)</summary>
@@ -3186,8 +3324,20 @@ export default function InternalEstimateApp() {
             </div>
 
           <section id="sec-save" className="card">
-            <h2 className="ie-section-title">Save</h2>
-            {submitMsg ? <p>{submitMsg}</p> : <p className="muted">Submit saves to eliteOS when you’re signed in and quote tables are installed.</p>}
+            <div className="ie-section-head">
+              <h2 className="ie-section-title">Save</h2>
+              <p className="ie-section-meta">
+                Save to Quote Library · Update current revision · Save Revision after scope changes
+              </p>
+            </div>
+            {submitMsg ? (
+              <p className="ie-note-quiet ie-note-info" role="status">
+                <span className="ie-note-quiet-dot" aria-hidden />
+                {submitMsg}
+              </p>
+            ) : (
+              <p className="muted">Submit saves to eliteOS when you’re signed in and quote tables are installed.</p>
+            )}
             {urlQuoteId ? (
               <div style={{ marginTop: 12 }}>
                 {hydratedIsCurrentRevision === false ? (
@@ -3378,89 +3528,102 @@ export default function InternalEstimateApp() {
         <aside className="ie-aside side-col" aria-label="Estimator summary">
           <div className="ie-aside-panel summary-card ie-summary-card-compact">
             <div className="ie-aside-scroll">
-              <h2>Estimator summary</h2>
-              <div className="summary-rows" style={{ marginBottom: 8 }}>
-                <div className="summary-row" style={{ fontSize: "0.88rem" }}>
-                  <span>Pricing mode</span>
-                  <strong>{internalPricingMode === "wholesale" ? "Wholesale" : "Direct / Retail"}</strong>
-                </div>
+              <div className="ie-summary-head">
+                <p className="ie-summary-eyebrow">Live quote panel</p>
+                <h2 className="ie-summary-title">Estimator summary</h2>
+                <p className="ie-summary-mode-pill" data-mode={internalPricingMode}>
+                  <span className="ie-summary-mode-dot" aria-hidden />
+                  {internalPricingMode === "wholesale" ? "Wholesale" : "Direct / Retail"}
+                </p>
               </div>
-              <p className="summary-kicker" style={{ margin: "0 0 2px" }}>
-                Estimate total (rate book, no markup %)
-              </p>
-              <p className="ie-summary-compact-hero">{partRetail != null ? `$${Number(partRetail).toFixed(2)}` : "—"}</p>
-              {lastCalcLive && serverRetailVerified != null ? (
-                <p className="muted small" style={{ margin: "0 0 8px" }}>
-                  Last Calculate (backend): <strong>${serverRetailVerified.toFixed(2)}</strong>
-                </p>
-              ) : (
-                <p className="muted small" style={{ margin: "0 0 8px" }}>
-                  Live preview — tap Calculate when signed in to verify line items.
-                </p>
-              )}
-              <div className="summary-rows" style={{ gap: 6 }}>
-                <div className="summary-row" style={{ fontSize: "0.82rem" }}>
-                  <span>Countertop material</span>
-                  <strong>${stickyLiveRollup.countertopMaterial.toFixed(2)}</strong>
-                </div>
-                <div className="summary-row" style={{ fontSize: "0.82rem" }}>
-                  <span>Backsplash material</span>
-                  <strong>${stickyLiveRollup.backsplashMaterial.toFixed(2)}</strong>
-                </div>
-                <div className="summary-row" style={{ fontSize: "0.82rem" }}>
-                  <span>Add-ons / fixtures</span>
-                  <strong>${stickyLiveRollup.roomAddOnsFixtures.toFixed(2)}</strong>
-                </div>
-                {customerFacingCustomLinesDollars !== 0 ? (
-                  <div className="summary-row" style={{ fontSize: "0.82rem" }}>
-                    <span>Customer-facing custom lines</span>
-                    <strong>${customerFacingCustomLinesDollars.toFixed(2)}</strong>
-                  </div>
-                ) : null}
-                {internalOnlyAdjustDollars !== 0 ? (
-                  <>
-                    <div className="summary-row" style={{ fontSize: "0.82rem" }}>
-                      <span>Internal-only adjustments</span>
-                      <strong>${internalOnlyAdjustDollars.toFixed(2)}</strong>
-                    </div>
-                    <p className="muted small" style={{ margin: "0 0 6px", fontSize: "0.72rem", lineHeight: 1.4 }}>
-                      Included in estimate total and customer PDF total; PDF shows as generic <strong>Additional adjustments</strong> only
-                      (no internal line names).
-                    </p>
-                  </>
+
+              <div className="ie-summary-section ie-summary-hero">
+                <p className="ie-summary-kicker">Estimate total · rate book, no markup %</p>
+                <p className="ie-summary-compact-hero">{partRetail != null ? `$${Number(partRetail).toFixed(2)}` : "—"}</p>
+                {lastCalcLive && serverRetailVerified != null ? (
+                  <p className="ie-summary-hero-sub is-confirmed">
+                    <span className="ie-summary-hero-sub-dot" aria-hidden />
+                    Last Calculate (backend): <strong>${serverRetailVerified.toFixed(2)}</strong>
+                  </p>
                 ) : (
-                  <p className="muted small" style={{ margin: "4px 0 0", fontSize: "0.72rem", lineHeight: 1.4 }}>
-                    No internal-only custom lines — customer PDF total matches named lines plus stone/add-ons only.
+                  <p className="ie-summary-hero-sub is-preview">
+                    <span className="ie-summary-hero-sub-dot" aria-hidden />
+                    Live preview — tap Calculate (signed in) to verify line items.
                   </p>
                 )}
               </div>
-              <p className="muted small" style={{ margin: "6px 0 8px", fontSize: "0.72rem", lineHeight: 1.4 }}>
-                <strong>Add-ons / fixtures</strong> are room catalog extras (cutouts, tear-out, etc.). Customer-facing custom lines are the
-                structured items marked customer-facing below.
-              </p>
-              <div className="ie-summary-inline-bits">
-                <span>
-                  Readiness <strong>{readinessSnapshot.score}%</strong>
-                </span>
-                <span>
-                  {readinessSnapshot.readyForReview ? (
-                    <strong style={{ color: "var(--ok)" }}>Core fields OK</strong>
-                  ) : (
-                    <strong>Missing items</strong>
-                  )}
-                </span>
-              </div>
-              <p className="muted small" style={{ margin: "8px 0 10px" }}>
-                Same mixed piece/room groups as Quoted Material Breakdown / customer print.
-              </p>
-              {estimatorSidebarNote ? (
-                <p className="muted small" style={{ margin: "0 0 10px", lineHeight: 1.45, color: "#92400e", fontWeight: 600 }}>
-                  {estimatorSidebarNote}
+
+              <div className="ie-summary-section">
+                <p className="ie-summary-section-head">Breakdown</p>
+                <div className="summary-rows ie-summary-rows-compact">
+                  <div className="summary-row ie-summary-row-compact">
+                    <span>Countertop material</span>
+                    <strong>${stickyLiveRollup.countertopMaterial.toFixed(2)}</strong>
+                  </div>
+                  <div className="summary-row ie-summary-row-compact">
+                    <span>Backsplash material</span>
+                    <strong>${stickyLiveRollup.backsplashMaterial.toFixed(2)}</strong>
+                  </div>
+                  <div className="summary-row ie-summary-row-compact">
+                    <span>Add-ons / fixtures</span>
+                    <strong>${stickyLiveRollup.roomAddOnsFixtures.toFixed(2)}</strong>
+                  </div>
+                  {customerFacingCustomLinesDollars !== 0 ? (
+                    <div className="summary-row ie-summary-row-compact">
+                      <span>Customer-facing custom lines</span>
+                      <strong>${customerFacingCustomLinesDollars.toFixed(2)}</strong>
+                    </div>
+                  ) : null}
+                  {internalOnlyAdjustDollars !== 0 ? (
+                    <div className="summary-row ie-summary-row-compact ie-summary-row-internal">
+                      <span>Internal-only adjustments</span>
+                      <strong>${internalOnlyAdjustDollars.toFixed(2)}</strong>
+                    </div>
+                  ) : null}
+                </div>
+                {internalOnlyAdjustDollars !== 0 ? (
+                  <p className="ie-summary-explainer">
+                    Included in estimate total and customer PDF total; PDF shows as generic{" "}
+                    <strong>Additional adjustments</strong> only (no internal line names).
+                  </p>
+                ) : (
+                  <p className="ie-summary-explainer">
+                    No internal-only custom lines — customer PDF total matches named lines plus stone/add-ons only.
+                  </p>
+                )}
+                <p className="ie-summary-explainer ie-summary-explainer-quiet">
+                  <strong>Add-ons / fixtures</strong> are room catalog extras (cutouts, tear-out, etc.). Customer-facing custom lines
+                  are the structured items marked customer-facing below.
                 </p>
-              ) : null}
-              <div className="internal-badge" style={{ marginTop: 0 }}>
-                Internal — not customer-facing
               </div>
+
+              <div className="ie-summary-section ie-summary-readiness">
+                <p className="ie-summary-section-head">Readiness</p>
+                <div className="ie-summary-readiness-row">
+                  <span
+                    className={`ie-summary-readiness-pill${
+                      readinessSnapshot.readyForReview ? " is-ok" : " is-missing"
+                    }`}
+                  >
+                    <span className="ie-summary-readiness-dot" aria-hidden />
+                    {readinessSnapshot.readyForReview ? "Core fields OK" : "Missing items"}
+                  </span>
+                  <span className="ie-summary-readiness-score">
+                    Score <strong>{readinessSnapshot.score}%</strong>
+                  </span>
+                </div>
+                <p className="ie-summary-explainer ie-summary-explainer-quiet">
+                  Same mixed piece/room groups as Quoted Material Breakdown / customer print.
+                </p>
+                {estimatorSidebarNote ? (
+                  <p className="ie-summary-note-warn" role="status">
+                    <span className="ie-summary-note-warn-dot" aria-hidden />
+                    {estimatorSidebarNote}
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="internal-badge">Internal — not customer-facing</div>
 
               <details className="ie-summary-audit" style={{ marginTop: 14 }}>
                 <summary>Full breakdown &amp; audit fields</summary>
@@ -3585,9 +3748,7 @@ export default function InternalEstimateApp() {
                   ? "Calculating…"
                   : lastCalcLive && serverRetailVerified != null
                     ? "Backend confirmed"
-                    : sessionToken
-                      ? "Live preview"
-                      : "Preview mode"}
+                    : "Live preview"}
               </span>
             </span>
             <span className="ie-sticky-status-total" aria-label="Current live estimate total">

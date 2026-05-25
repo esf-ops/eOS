@@ -775,41 +775,63 @@ export default function RoomScopeBuilder({
                       SF. Use <strong>gross runs</strong> when matching a quote measured by total run length.
                     </div>
                     <div className="ie-shape-group-add-row">
-                      <span className="muted small">Quick add:</span>
+                      <span className="ie-shape-group-add-label">Quick add</span>
                       {enableDestructiveGuards ? (
-                        <>
+                        <div className="ie-shape-group-add-cluster ie-shape-group-add-cluster--presets" role="group" aria-label="Pre-filled kitchen presets">
+                          <span className="ie-shape-group-add-cluster-tag" aria-hidden>Presets</span>
                           <button
                             type="button"
                             className="btn secondary btn-sm ie-preset-btn"
+                            title="Pre-filled stove wall with main run + filler — edit lengths after adding"
                             onClick={() => appendShapeGroupPreset(room.id, "stove_wall")}
                           >
-                            + Stove wall
+                            + Kitchen stove wall
                           </button>
                           <button
                             type="button"
                             className="btn secondary btn-sm ie-preset-btn"
+                            title="Pre-filled kitchen U-shape: main run + left leg + right leg — edit lengths after adding"
                             onClick={() => appendShapeGroupPreset(room.id, "main_u")}
                           >
-                            + Main U-shape
+                            + Kitchen U-shape
                           </button>
-                        </>
+                        </div>
                       ) : null}
-                      <button
-                        type="button"
-                        className="btn secondary btn-sm"
-                        onClick={() => appendShapeGroup(room.id, "straight")}
-                      >
-                        + Straight run
-                      </button>
-                      <button type="button" className="btn secondary btn-sm" onClick={() => appendShapeGroup(room.id, "L-Shape")}>
-                        + L-shape
-                      </button>
-                      <button type="button" className="btn secondary btn-sm" onClick={() => appendShapeGroup(room.id, "U-Shape")}>
-                        + U-shape
-                      </button>
-                      <button type="button" className="btn secondary btn-sm" onClick={() => appendShapeGroup(room.id, "Island")}>
-                        + Island
-                      </button>
+                      <div className="ie-shape-group-add-cluster ie-shape-group-add-cluster--shapes" role="group" aria-label="Add a blank shape">
+                        <span className="ie-shape-group-add-cluster-tag" aria-hidden>Add shape</span>
+                        <button
+                          type="button"
+                          className="btn secondary btn-sm ie-preset-btn"
+                          title="Add a blank single-run area"
+                          onClick={() => appendShapeGroup(room.id, "straight")}
+                        >
+                          + Straight run
+                        </button>
+                        <button
+                          type="button"
+                          className="btn secondary btn-sm ie-preset-btn"
+                          title="Add a blank L-shape — fill in two run lengths"
+                          onClick={() => appendShapeGroup(room.id, "L-Shape")}
+                        >
+                          + L-shape
+                        </button>
+                        <button
+                          type="button"
+                          className="btn secondary btn-sm ie-preset-btn"
+                          title="Add a blank U-shape — fill in main run + two legs (no preset lengths)"
+                          onClick={() => appendShapeGroup(room.id, "U-Shape")}
+                        >
+                          + U-shape (blank)
+                        </button>
+                        <button
+                          type="button"
+                          className="btn secondary btn-sm ie-preset-btn"
+                          title="Add a blank island area"
+                          onClick={() => appendShapeGroup(room.id, "Island")}
+                        >
+                          + Island
+                        </button>
+                      </div>
                     </div>
                     {(() => {
                       const norm = normalizeGuidedShapeRoom(room);
