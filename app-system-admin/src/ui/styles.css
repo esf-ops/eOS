@@ -1733,3 +1733,187 @@ h2,
 h3 {
   color: var(--eos-text);
 }
+
+/* --- Organizations tab (governance v1) -------------------------------
+ *
+ * Surface elements only — no auth, no edits. Edits still happen in the
+ * People & access drawer; this tab is a read-only governance view.
+ */
+
+.org-workspace-card {
+  display: flex;
+  gap: 18px;
+  align-items: stretch;
+  padding: 18px 20px;
+  margin: 6px 0 16px;
+  border-radius: 16px;
+  border: 1px solid var(--eos-line);
+  background: linear-gradient(180deg, #ffffff 0%, var(--eos-surface-soft) 100%);
+  box-shadow: var(--eos-shadow);
+}
+
+@media (max-width: 720px) {
+  .org-workspace-card { flex-direction: column; }
+}
+
+.org-workspace-mark {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #ffffff 0%, var(--eos-surface-soft) 100%);
+  border: 1px solid var(--eos-line);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex: 0 0 auto;
+  box-shadow: var(--eos-shadow-sm);
+}
+
+.org-workspace-mark img {
+  max-width: 56px;
+  max-height: 56px;
+  object-fit: contain;
+}
+
+.org-workspace-initials {
+  font-size: 1.1rem;
+}
+
+.org-workspace-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.org-workspace-eyebrow {
+  margin: 0 0 4px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--eos-ink-muted);
+}
+
+.org-workspace-name {
+  margin: 0 0 8px;
+  font-size: 1.25rem;
+  font-weight: 750;
+  color: var(--eos-text);
+  letter-spacing: -0.01em;
+}
+
+.org-workspace-meta {
+  margin: 0 0 12px;
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 0;
+  font-size: 0.84rem;
+  color: var(--eos-ink-muted);
+}
+
+.org-workspace-meta strong { color: var(--eos-text); }
+
+.org-workspace-dl {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) 1fr;
+  gap: 6px 16px;
+  margin: 0;
+  font-size: 0.86rem;
+}
+
+.org-workspace-dl dt {
+  color: var(--eos-ink-muted);
+  font-weight: 600;
+}
+
+.org-workspace-dl dd {
+  margin: 0;
+  color: var(--eos-text);
+  word-break: break-word;
+}
+
+/* Stats — extra warn variant for "missing org_id" */
+.org-stat-grid {
+  margin-bottom: 16px;
+}
+
+.stat-card-warn {
+  background: var(--eos-warn-bg);
+  border-color: #fcd34d;
+}
+
+.stat-card-warn .stat-value {
+  color: var(--eos-warn);
+}
+
+/* Missing-org warning card */
+.org-warn-card {
+  border-left: 4px solid #f59e0b;
+  background: linear-gradient(180deg, #fffdf5 0%, #ffffff 100%);
+}
+
+/* Readiness panel */
+.org-readiness-card {
+  background: linear-gradient(180deg, var(--eos-surface) 0%, var(--eos-surface-soft) 100%);
+  border-color: var(--eos-line);
+}
+
+.org-readiness-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  margin-top: 10px;
+}
+
+.org-readiness-heading {
+  margin: 0 0 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--eos-ink-muted);
+}
+
+.org-readiness-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+  font-size: 0.86rem;
+  color: var(--eos-text);
+}
+
+.org-readiness-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: flex-start;
+  line-height: 1.45;
+}
+
+.btn-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--eos-link);
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.btn-link:hover,
+.btn-link:focus-visible {
+  text-decoration: underline;
+  color: var(--eos-primary-hover);
+  outline: none;
+}
+
+.org-workspace-card,
+.org-warn-card,
+.org-readiness-card {
+  min-width: 0;
+}

@@ -1121,6 +1121,96 @@ export default function App() {
     return { total, active, internal, dealer, admins };
   }, [rows]);
 
+  /**
+   * Organizations tab — frontend-only derivation from already-loaded data.
+   *
+   * We do **not** add a new backend call. The signed-in admin's row is
+   * looked up in the roster (which `/api/system-admin/users` already
+   * returned), and its `organization_id` is treated as the current
+   * workspace organization. Falls back to the most common
+   * `organization_id` on the roster, then to "(no organization context)".
+   *
+   * All counts below are derived from the same roster payload — no
+   * speculative joins, no fake metrics. If the data isn't there, the
+   * readiness panel calls it out instead of inventing numbers.
+   */
+  const meUserId = String(me?.user?.id ?? "");
+  const workspaceOrgId = useMemo(() => {
+    if (!rows.length) return "";
+    const mine = meUserId
+      ? rows.find((r) => String(r.id ?? "") === meUserId)
+      : undefined;
+    const fromMe = String(mine?.organization_id ?? "").trim();
+    if (fromMe) return fromMe;
+    /** Fall back to the most-common org_id on the roster so a misconfigured
+     *  admin profile (no org assigned to me) still shows a useful context. */
+    const counts = new Map<string, number>();
+    for (const r of rows) {
+      const id = String(r.organization_id ?? "").trim();
+      if (!id) continue;
+      counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
+    let best = "";
+    let bestN = 0;
+    for (const [id, n] of counts) {
+      if (n > bestN) {
+        best = id;
+        bestN = n;
+      }
+    }
+    return best;
+  }, [rows, meUserId]);
+
+  const orgMembers = useMemo(() => {
+    if (!rows.length) return [] as AdminRow[];
+    if (!workspaceOrgId) {
+      /** No detectable workspace org — surface every roster member that
+       *  is assigned to *some* organization so admins can see the shape. */
+      return rows.filter((r) => Boolean(String(r.organization_id ?? "").trim()));
+    }
+    return rows.filter((r) => String(r.organization_id ?? "").trim() === workspaceOrgId);
+  }, [rows, workspaceOrgId]);
+
+  const orgStats = useMemo(() => {
+    const total = orgMembers.length;
+    let active = 0;
+    let inactive = 0;
+    let admins = 0;
+    let internal = 0;
+    let dealer = 0;
+    for (const r of orgMembers) {
+      if (r.is_active === false) inactive++;
+      else active++;
+      const rl = String(r.role ?? "").trim().toLowerCase();
+      if (rl === "admin" || rl === "super_admin") admins++;
+      const kind = String(r.user_kind_normalized ?? "internal");
+      if (kind === "dealer_partner") dealer++;
+      else internal++;
+    }
+    const unassigned = rows.filter((r) => !String(r.organization_id ?? "").trim()).length;
+    const otherOrgIds = new Set<string>();
+    for (const r of rows) {
+      const id = String(r.organization_id ?? "").trim();
+      if (id && id !== workspaceOrgId) otherOrgIds.add(id);
+    }
+    return { total, active, inactive, admins, internal, dealer, unassigned, otherOrgs: otherOrgIds.size };
+  }, [orgMembers, rows, workspaceOrgId]);
+
+  const unassignedMembers = useMemo(
+    () => rows.filter((r) => !String(r.organization_id ?? "").trim()),
+    [rows]
+  );
+
+  /**
+   * Lightweight cross-link from the Organizations tab into People & access.
+   * Reuses the existing `selectedId` / drawer flow — no new edit surface
+   * is introduced here. Switching tabs preserves all in-flight admin state.
+   */
+  const openUserInPeople = useCallback((userId: string) => {
+    setSelectedId(String(userId));
+    setActiveView("people");
+  }, []);
+
   const referenceHeadsKey = useMemo(() => (reference?.heads ?? []).join("|"), [reference?.heads]);
 
   useEffect(() => {
@@ -1977,14 +2067,354 @@ export default function App() {
               <>
                 <h2 style={{ marginTop: 0 }}>Organizations</h2>
                 <p className="muted">
-                  Organization membership is stored on each user profile as a UUID. Broader org directory and bulk tools
-                  will grow here over time.
+                  Read-only governance view of the current workspace. Membership lives on each user profile (<code>user_profiles.organization_id</code>); edits still flow through{" "}
+                  <strong>People &amp; access</strong> and <strong>Invite users</strong>.
                 </p>
+
+                {/* 1. Current organization / workspace card */}
+                <section className="org-workspace-card" aria-label={`Workspace · ${workspaceName}`}>
+                  <div className="org-workspace-mark">
+                    {workspaceLogoUrl ? (
+                      <img
+                        src={workspaceLogoUrl}
+                        alt=""
+                        loading="lazy"
+                        onError={(e) => {
+                          (e.currentTarget as HTMLImageElement).style.display = "none";
+                          const fallback = (e.currentTarget.parentElement as HTMLElement | null)?.querySelector(
+                            ".org-workspace-initials"
+                          ) as HTMLElement | null;
+                          if (fallback) fallback.style.display = "flex";
+                        }}
+                      />
+                    ) : null}
+                    <span
+                      className="org-workspace-initials hero-workspace-initials"
+                      aria-hidden={workspaceLogoUrl ? "true" : "false"}
+                      style={workspaceLogoUrl ? { display: "none" } : undefined}
+                    >
+                      {workspaceInitials}
+                    </span>
+                  </div>
+                  <div className="org-workspace-body">
+                    <p className="org-workspace-eyebrow">Current workspace</p>
+                    <h3 className="org-workspace-name">{workspaceName}</h3>
+                    <p className="org-workspace-meta">
+                      <span className="pill pill-good">Active tenant</span>
+                      <span className="user-menu-sep" aria-hidden>·</span>
+                      <span>on <strong>slabOS</strong></span>
+                      <span className="user-menu-sep" aria-hidden>·</span>
+                      <span>{workspaceShortId}</span>
+                    </p>
+                    <dl className="org-workspace-dl">
+                      <dt>Organization ID</dt>
+                      <dd>
+                        {workspaceOrgId ? (
+                          <code className="mono-break" title={workspaceOrgId}>{workspaceOrgId}</code>
+                        ) : (
+                          <span className="muted">Not yet derivable from loaded roster — assign at least one user (including yourself) an <code>organization_id</code> through People &amp; access or Invite users.</span>
+                        )}
+                      </dd>
+                      <dt>Tenant context</dt>
+                      <dd className="muted">
+                        Used for user assignment today and future tenant-aware routing / pricing / settings.
+                      </dd>
+                    </dl>
+                  </div>
+                </section>
+
+                {/* 2. Organization stats — real counts only, never invented */}
+                <div className="stat-grid org-stat-grid">
+                  <div className="stat-card">
+                    <div className="stat-value">{orgStats.total}</div>
+                    <div className="stat-label">Assigned to this org</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-value">{orgStats.active}</div>
+                    <div className="stat-label">Active</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-value">{orgStats.inactive}</div>
+                    <div className="stat-label">Inactive</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-value">{orgStats.admins}</div>
+                    <div className="stat-label">Admin / super_admin</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-value">{orgStats.internal}</div>
+                    <div className="stat-label">Internal</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-value">{orgStats.dealer}</div>
+                    <div className="stat-label">Dealer / partner</div>
+                  </div>
+                  <div className={`stat-card${orgStats.unassigned > 0 ? " stat-card-warn" : " stat-card-muted"}`}>
+                    <div className="stat-value">{orgStats.unassigned}</div>
+                    <div className="stat-label">Missing org_id</div>
+                  </div>
+                  {orgStats.otherOrgs > 0 ? (
+                    <div className="stat-card stat-card-muted">
+                      <div className="stat-value">{orgStats.otherOrgs}</div>
+                      <div className="stat-label">Other organizations seen</div>
+                    </div>
+                  ) : null}
+                </div>
+
+                {/* 4. Missing organization_id readiness — only when non-zero */}
+                {unassignedMembers.length > 0 ? (
+                  <div className="admin-card org-warn-card">
+                    <div className="card-heading-row">
+                      <div>
+                        <h3 style={{ marginTop: 0 }}>
+                          Users missing organization assignment{" "}
+                          <span className="pill pill-warn" style={{ marginLeft: 6 }}>
+                            {unassignedMembers.length}
+                          </span>
+                        </h3>
+                        <p className="muted" style={{ marginTop: 4 }}>
+                          Assigning every roster user an <code>organization_id</code> keeps tenant-aware routing, pricing,
+                          and future SaaS settings reliable. Edit assignment from the People &amp; access drawer or set it
+                          at invite time. Nothing is auto-assigned here.
+                        </p>
+                      </div>
+                      <div className="card-heading-actions">
+                        <button
+                          type="button"
+                          className="btn"
+                          onClick={() => {
+                            setSelectedId(null);
+                            setDetail(null);
+                            setActiveView("people");
+                          }}
+                        >
+                          Open People &amp; access
+                        </button>
+                        <button
+                          type="button"
+                          className="btn"
+                          onClick={() => {
+                            setSelectedId(null);
+                            setDetail(null);
+                            setActiveView("invite_users");
+                          }}
+                        >
+                          Invite a user
+                        </button>
+                      </div>
+                    </div>
+                    <div className="table-scroll" style={{ marginTop: 12 }}>
+                      <table className="simple">
+                        <thead>
+                          <tr>
+                            <th>User</th>
+                            <th>Email</th>
+                            <th>Role</th>
+                            <th>Status</th>
+                            <th />
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {unassignedMembers.map((r) => (
+                            <tr key={String(r.id)} onClick={() => openUserInPeople(String(r.id))}>
+                              <td className="user-cell">
+                                <strong>{String(r.full_name || r.email || "Unnamed user")}</strong>
+                                <span>{String(r.department || "No department")}</span>
+                              </td>
+                              <td>{String(r.email ?? "")}</td>
+                              <td>
+                                <span className="role-badge">{titleizeToken(r.role)}</span>
+                              </td>
+                              <td>
+                                <span className={`pill ${r.is_active !== false ? "pill-good" : "pill-bad"}`}>
+                                  {r.is_active !== false ? "Active" : "Inactive"}
+                                </span>
+                              </td>
+                              <td>
+                                <button
+                                  type="button"
+                                  className="btn-link"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openUserInPeople(String(r.id));
+                                  }}
+                                >
+                                  Manage in People &amp; access →
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : null}
+
+                {/* 3. Members in this organization */}
                 <div className="admin-card">
-                  <p style={{ margin: 0 }}>
-                    Use <strong>People &amp; access</strong> to see organization IDs on the roster or edit a user in the
-                    drawer. Use <strong>Invite users</strong> to attach an optional organization when someone is first
-                    created.
+                  <div className="card-heading-row">
+                    <div>
+                      <h3 style={{ marginTop: 0 }}>Members in {workspaceName}</h3>
+                      <p className="muted" style={{ marginTop: 4 }}>
+                        {workspaceOrgId
+                          ? `Users with organization_id = ${workspaceOrgId.slice(0, 8)}… (${orgMembers.length}). Detail editing stays in People & access.`
+                          : `No workspace organization ID detected yet — listing every roster member assigned to any organization (${orgMembers.length}).`}
+                      </p>
+                    </div>
+                    <div className="card-heading-actions">
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={() => {
+                          setSelectedId(null);
+                          setDetail(null);
+                          setActiveView("people");
+                        }}
+                      >
+                        Open People &amp; access
+                      </button>
+                    </div>
+                  </div>
+
+                  {!orgMembers.length ? (
+                    <div className="empty-state">
+                      <strong>No members loaded for this workspace yet.</strong>
+                      <p>
+                        Roster is either empty or no users carry an <code>organization_id</code>. Invite a user or assign
+                        one from People &amp; access to start building the workspace directory.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="table-scroll">
+                      <table className="simple">
+                        <thead>
+                          <tr>
+                            <th>Member</th>
+                            <th>Email</th>
+                            <th>Role</th>
+                            <th>Status</th>
+                            <th>Tools</th>
+                            <th>Organization ID</th>
+                            <th />
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {orgMembers.map((r) => {
+                            const heads = [...new Set(r.allowed_heads_list ?? [])];
+                            const orgId = String(r.organization_id ?? "").trim();
+                            return (
+                              <tr key={String(r.id)} onClick={() => openUserInPeople(String(r.id))}>
+                                <td className="user-cell">
+                                  <strong>{String(r.full_name || r.email || "Unnamed user")}</strong>
+                                  <span>
+                                    {String(r.department || "No department")}
+                                    {" · "}
+                                    {titleizeToken(r.user_kind_normalized ?? "internal")}
+                                  </span>
+                                </td>
+                                <td>{String(r.email ?? "")}</td>
+                                <td>
+                                  <span className="role-badge">{titleizeToken(r.role)}</span>
+                                </td>
+                                <td>
+                                  <span className={`pill ${r.is_active !== false ? "pill-good" : "pill-bad"}`}>
+                                    {r.is_active !== false ? "Active" : "Inactive"}
+                                  </span>
+                                </td>
+                                <td className="muted">
+                                  {heads.length ? `${heads.length} tool${heads.length === 1 ? "" : "s"}` : "None"}
+                                </td>
+                                <td>
+                                  {orgId ? (
+                                    <code className="mono-break" title={orgId} style={{ fontSize: 11 }}>
+                                      {orgId.slice(0, 8)}…
+                                    </code>
+                                  ) : (
+                                    <span className="muted">—</span>
+                                  )}
+                                </td>
+                                <td>
+                                  <button
+                                    type="button"
+                                    className="btn-link"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openUserInPeople(String(r.id));
+                                    }}
+                                  >
+                                    Manage in People &amp; access →
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                  <p className="muted" style={{ marginTop: 10, fontSize: 12 }}>
+                    Edit user details, head access, dealer access, and pricing groups in <strong>People &amp; access</strong>.
+                    Set an initial organization at invite time in <strong>Invite users</strong>.
+                  </p>
+                </div>
+
+                {/* 5. Readiness / future setup panel */}
+                <div className="admin-card org-readiness-card">
+                  <h3 style={{ marginTop: 0 }}>Organization governance · readiness</h3>
+                  <div className="org-readiness-grid">
+                    <div>
+                      <h4 className="org-readiness-heading">Available now</h4>
+                      <ul className="org-readiness-list">
+                        <li>
+                          <span className="mini-check ok">In place</span>{" "}
+                          <code>user_profiles.organization_id</code> stores tenant membership per user.
+                        </li>
+                        <li>
+                          <span className="mini-check ok">In place</span>{" "}
+                          Assign / update <code>organization_id</code> from <strong>People &amp; access</strong> drawer
+                          (profile edit) — backend-validated.
+                        </li>
+                        <li>
+                          <span className="mini-check ok">In place</span>{" "}
+                          Set initial <code>organization_id</code> when inviting from <strong>Invite users</strong>.
+                        </li>
+                        <li>
+                          <span className="mini-check ok">In place</span>{" "}
+                          Single-tenant workspace fallback (<strong>{workspaceName}</strong>) wired into the protected-head
+                          app shell.
+                        </li>
+                      </ul>
+                    </div>
+                    <div>
+                      <h4 className="org-readiness-heading">Planned (future Tenant Settings head)</h4>
+                      <ul className="org-readiness-list">
+                        <li>
+                          <span className="mini-check missing">Planned</span>{" "}
+                          First-class organization directory (read / create / archive organizations).
+                        </li>
+                        <li>
+                          <span className="mini-check missing">Planned</span>{" "}
+                          Workspace branding (display name, logo, accent colour overrides).
+                        </li>
+                        <li>
+                          <span className="mini-check missing">Planned</span>{" "}
+                          Branch / location settings, time zones, and operating-hours metadata.
+                        </li>
+                        <li>
+                          <span className="mini-check missing">Planned</span>{" "}
+                          Tenant-aware integration config (Moraware, Monday, partner APIs) — moved out of System Admin.
+                        </li>
+                        <li>
+                          <span className="mini-check missing">Planned</span>{" "}
+                          SaaS onboarding flow (org creation → admin invite → head provisioning).
+                        </li>
+                      </ul>
+                    </div>
+                  </div>
+                  <p className="safety-callout" style={{ marginTop: 12 }}>
+                    Visibility on this tab is not authorization. Edits to <code>organization_id</code> still flow through
+                    backend <code>{USER_MGMT_API}/users/:id/profile</code> with role/head-access enforcement; this view is
+                    intentionally read-only.
                   </p>
                 </div>
               </>
