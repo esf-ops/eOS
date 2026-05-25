@@ -40,6 +40,53 @@ platform feels like **one** operating system, not a collection of separate apps.
 
 ---
 
+## 2.1 Brand architecture (slabOS / eliteOS / workspace)
+
+eliteOS is one of two brand levels the user sees inside the platform. Future
+SaaS tenants may have their own workspace identity, but the **platform** brand
+stays consistent.
+
+| Level | Name | Where it appears |
+|---|---|---|
+| **Platform / master brand** | `slabOS` | Sign-in, invite/recovery gate, and any other surface the user reaches *before* a workspace is selected. |
+| **Tenant / workspace** | `eliteOS` *as Elite Stone Fabrication's workspace* | The signed-in launcher, head cards, hero, top bar. Future tenants would show their own workspace name and logo in the same slots. |
+| **Organization identity** | Org logo + org name (Elite Stone Fabrication today) | Right side of the signed-in hero card. Optional `organization_name` / `organization_logo_url` on the backend `/api/me*` payloads when supplied; falls back to the current Elite asset and `"Elite Stone Fabrication"` literal. |
+
+### Rules
+
+1. **Do not globally rename eliteOS to slabOS.** Repo identifiers,
+   environment variables, head slugs, route paths, head URLs, audit-log values,
+   and backend API contracts continue to use `eliteOS` / `eos_*`. Only
+   *user-facing copy at the platform layer* uses `slabOS`.
+2. **slabOS shows up on platform surfaces only.** Sign-in card title and the
+   left-hand brand panel. Once signed in, the user is in *a workspace* — show
+   the workspace identity, not slabOS, as the primary mark. The hero
+   workspace panel includes a quiet `"on slabOS"` line to anchor the
+   relationship.
+3. **No mixed-level branding inside the same surface.** Don't put a giant
+   slabOS wordmark in the topbar next to a giant eliteOS wordmark. Pick one
+   level per surface.
+4. **Tenant logo resolution order** (used by the hero workspace panel):
+   1. `me.user.organization_logo_url` (backend, when supplied)
+   2. `headsPayload.user.organization_logo_url` (backend, when supplied)
+   3. Local Elite Stone Fabrication asset (`EOS_LOGO_URL`)
+   4. Initials in a gradient text frame
+5. **Tenant name resolution order** mirrors the logo order, with
+   `"Elite Stone Fabrication"` as the final fallback for the current tenant.
+6. **Default workspace constants** live in one place
+   (`DEFAULT_WORKSPACE_NAME` / `DEFAULT_WORKSPACE_SHORT` in
+   `app-home/src/ui/App.tsx`). When backend supplies tenant fields, those
+   defaults are bypassed automatically — no UI change required.
+
+### Voice per level
+
+| Level | Voice |
+|---|---|
+| slabOS | Calm, premium, infrastructural. *"Fabrication operating system."* No motto, no Elite-specific language. |
+| eliteOS (Elite workspace) | Tenant-flavored, Elite-specific. Motto and three-line core narrative live here. |
+
+---
+
 ## 3. Color direction
 
 All values live in `app-home/src/ui/styles.css` as CSS custom properties.
@@ -146,9 +193,32 @@ content. Other heads can apply the same wash via the shared body background.
 
 - Soft white card with a layered **aurora** wash (burgundy + violet + blue)
   blurred behind content.
-- Eyebrow (uppercase) → greeting → motto (burgundy) → positioning line → KPI
-  strip (Tools available · On the roadmap · Your role).
-- KPIs are read from real backend data; never invent metrics.
+- Two-column grid: welcome content on the left, **workspace identity panel**
+  on the right (≥ 821px). Below 821px the workspace panel collapses to a
+  horizontal row beneath the welcome block.
+- **Left column:** eyebrow (`Workspace · <name>`) → greeting → motto
+  (burgundy) → positioning line → KPI strip (Tools available · On the roadmap
+  · Your role).
+- **Right column (workspace panel):** small uppercase `WORKSPACE` eyebrow →
+  framed workspace logo → workspace name → quiet `"on slabOS · <short id>"`
+  meta line. The framed logo uses a white inner card so any tenant logo —
+  including a dark mark — reads cleanly. Falls back to gradient initials when
+  no logo asset is available.
+- KPIs and workspace fields are read from real backend data; never invent
+  metrics or tenant identities. See §2.1 for resolution order.
+
+### 6.2.1 Auth (slabOS platform brand)
+
+- Two-column layout: slabOS brand panel on the left, sign-in card on the
+  right. Stacks below 960px.
+- **Left:** small slab glyph + `slabOS` wordmark + tagline
+  ("Fabrication operating system.") + a one-line positioning paragraph +
+  a quiet pill that names the current workspace
+  (`Elite Stone Fabrication runs on slabOS`).
+- **Right (sign-in card):** title `Sign in to your workspace`, sub
+  `Continue to the eliteOS launcher for Elite Stone Fabrication.`
+- **Invite gate** reuses the slabOS mark above the form title to anchor it
+  as a platform surface (it appears *before* a workspace context exists).
 
 ### 6.3 Head card
 
@@ -258,6 +328,16 @@ When a new head is built (Sales, Production, Shop TV, …), it must:
 8. **Plain-English copy.** Avoid jargon, expose internal slugs only inside
    collapsible "Access details" / "Technical reference" sections for
    admin/exec users.
+9. **Respect the brand levels (see §2.1).** Inside a signed-in head, the
+   workspace (e.g. *Elite Stone Fabrication*) is the visible identity. The
+   `slabOS` platform brand appears only at pre-workspace / auth surfaces. If
+   a head ever needs to mention the platform, use a quiet `"on slabOS"`
+   trailing line, not a wordmark.
+10. **Default tenant constants in one place.** When a head needs the
+    workspace name or logo, read it from backend `me`/`heads` fields with
+    fallbacks to a single constant (model after `DEFAULT_WORKSPACE_NAME` /
+    `resolveWorkspaceLogoUrl` in `app-home/src/ui/App.tsx`). Never scatter
+    `"Elite Stone Fabrication"` literals through head logic.
 
 ---
 
@@ -272,6 +352,10 @@ When a new head is built (Sales, Production, Shop TV, …), it must:
 - Modal overlays that block the launcher when they aren't required by flow.
 - Hiding real diagnostics in production *without* a collapse — keep them
   available behind `<details>` for admins and execs.
+- Mixing brand levels on the same surface — large slabOS *and* eliteOS
+  wordmarks at the same hierarchy (see §2.1). Pick one level per surface.
+- Renaming `eliteOS` to `slabOS` in repo identifiers, env vars, head slugs,
+  or backend contracts. Brand levels are a **UI/copy** concern only.
 
 ---
 

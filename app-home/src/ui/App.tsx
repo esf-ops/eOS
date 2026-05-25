@@ -31,6 +31,9 @@ type MeUser = {
   organization_id?: string | null;
   user_kind?: string;
   isActive?: boolean;
+  /** Optional, forward-compatible. Used by the hero workspace panel when backend supplies it. */
+  organization_name?: string | null;
+  organization_logo_url?: string | null;
 };
 
 type MeResp = { ok: boolean; user: MeUser };
@@ -57,9 +60,62 @@ type HeadCard = {
 type HeadsResp = {
   ok: boolean;
   inactive?: boolean;
-  user?: { id: string; email: string; role: string; userKind?: string; full_name?: string; organization_id?: string | null };
+  user?: {
+    id: string;
+    email: string;
+    role: string;
+    userKind?: string;
+    full_name?: string;
+    organization_id?: string | null;
+    /** Optional, forward-compatible. Surfaced in the hero workspace panel when present. */
+    organization_name?: string | null;
+    organization_logo_url?: string | null;
+  };
   heads: HeadCard[];
 };
+
+/**
+ * Default workspace identity for the current Elite tenant.
+ *
+ * eliteOS is Elite Stone Fabrication's workspace inside the slabOS platform.
+ * When the backend eventually returns `organization_name` / `organization_logo_url`
+ * for any tenant, those values take precedence over these defaults — no UI change
+ * needed. Kept here (not scattered) so a multi-tenant rollout has one place to swap.
+ */
+const DEFAULT_WORKSPACE_NAME = "Elite Stone Fabrication";
+const DEFAULT_WORKSPACE_SHORT = "Elite Stone";
+
+function resolveWorkspaceName(me: MeResp | null, heads: HeadsResp | null): string {
+  return (
+    String(me?.user?.organization_name ?? "").trim() ||
+    String(heads?.user?.organization_name ?? "").trim() ||
+    DEFAULT_WORKSPACE_NAME
+  );
+}
+
+function resolveWorkspaceLogoUrl(me: MeResp | null, heads: HeadsResp | null): string {
+  const fromBackend =
+    String(me?.user?.organization_logo_url ?? "").trim() ||
+    String(heads?.user?.organization_logo_url ?? "").trim();
+  if (fromBackend) return fromBackend;
+  // Local fallback — current tenant uses the existing Elite Stone Fabrication asset.
+  return EOS_LOGO_URL;
+}
+
+function workspaceShortId(orgId: string | null | undefined): string {
+  const s = String(orgId ?? "").trim();
+  if (!s) return "";
+  // Show the first UUID block (8 chars) so admins can recognize the workspace at a glance
+  // without exposing the full ID. Falls back to first 8 of any non-UUID string.
+  return s.split("-")[0]?.slice(0, 8) || s.slice(0, 8);
+}
+
+function workspaceInitials(name: string): string {
+  const parts = name.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return "EO";
+}
 
 const SECURITY_NOTE =
   "What you see here reflects your access assignments. The Brain still enforces sign-in and permissions on every request.";
@@ -425,6 +481,37 @@ function initialsFor(name: string, email: string): string {
   return "EO";
 }
 
+/**
+ * Typographic mark for the slabOS platform brand.
+ *
+ * Pure SVG, monochromatic, no asset request. Used only at the platform-level
+ * surfaces (sign-in, sign-out gate). Inside a signed-in workspace the brand
+ * mark on the topbar is the tenant's logo, not slabOS, to avoid mixing levels.
+ */
+function SlabMark({ size = 28 }: { size?: number }) {
+  const w = size * 1.85;
+  return (
+    <svg
+      width={w}
+      height={size}
+      viewBox="0 0 52 28"
+      fill="none"
+      aria-hidden
+      style={{ display: "block" }}
+    >
+      <defs>
+        <linearGradient id="slab-mark-grad" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#0b1a33" />
+          <stop offset="100%" stopColor="#a3132f" />
+        </linearGradient>
+      </defs>
+      {/* Stacked slab silhouettes — recognizable but quiet */}
+      <path d="M10 6 L46 6 L42 13 L6 13 Z" fill="url(#slab-mark-grad)" opacity="0.92" />
+      <path d="M14 16 L50 16 L46 23 L10 23 Z" fill="url(#slab-mark-grad)" opacity="0.55" />
+    </svg>
+  );
+}
+
 /** Arrow glyph shown inside the primary "Open" affordance. */
 function ArrowOut() {
   return (
@@ -702,6 +789,12 @@ export default function App() {
   const displayOrg = String(u?.organization_id ?? headsUser?.organization_id ?? "").trim();
   const firstName = firstNameFromDisplay(displayName, displayEmail);
   const initials = initialsFor(displayName, displayEmail);
+  const workspaceName = resolveWorkspaceName(me, headsPayload);
+  const workspaceLogoUrl = resolveWorkspaceLogoUrl(me, headsPayload);
+  const workspaceShort = workspaceShortId(displayOrg);
+  const workspaceInits = workspaceInitials(workspaceName);
+  // True when the backend has not supplied an org logo and we're showing the local Elite fallback.
+  const workspaceLogoIsFallback = workspaceLogoUrl === EOS_LOGO_URL;
 
   const availableCount = grouped.find((g) => g.section === "Available Tools")?.items.length ?? 0;
   const roadmapCount = grouped.find((g) => g.section === "Coming Soon Tools")?.items.length ?? 0;
@@ -711,13 +804,13 @@ export default function App() {
     <div className="shell">
       {showShell ? (
         <header className="topbar" role="banner">
-          <a href="/" className="brand-row brand-row-link" aria-label="eliteOS home">
+          <a href="/" className="brand-row brand-row-link" aria-label={`eliteOS Home — ${workspaceName}`}>
             <span className="brand-mark" aria-hidden>
-              <img src={EOS_LOGO_URL} alt="" />
+              <img src={workspaceLogoUrl} alt="" />
             </span>
             <span className="brand-text">
               <span className="brand-wordmark">eliteOS</span>
-              <span className="brand-sub">Elite Stone Fabrication</span>
+              <span className="brand-sub">{workspaceName}</span>
             </span>
           </a>
           <div className="topbar-actions">
@@ -748,19 +841,23 @@ export default function App() {
         {!showShell ? (
           <div className="auth-stage">
             <section className="auth-brand" aria-hidden={false}>
-              <div className="auth-brand-mark">
-                <img src={EOS_LOGO_URL} alt="Elite Stone Fabrication" />
+              <div className="slab-brand-row">
+                <span className="slab-brand-mark" aria-hidden>
+                  <SlabMark size={30} />
+                </span>
+                <h1 className="slab-wordmark">slabOS</h1>
               </div>
-              <h1 className="auth-brand-wordmark">eliteOS</h1>
-              <p className="auth-brand-motto">Keep the Titans running well.</p>
-              <p className="auth-brand-positioning">
-                One operating layer for quotes, pricing, partners, sales, production, and shop flow.
+              <p className="slab-tagline">Fabrication operating system.</p>
+              <p className="slab-positioning">
+                A premium operating layer for stone fabricators — quotes, pricing, partners, sales,
+                production, and shop flow in one place.
               </p>
-              <ul className="auth-brand-points">
-                <li><span className="dot dot-burgundy" />Moraware records the work.</li>
-                <li><span className="dot dot-navy" />eliteOS explains the work.</li>
-                <li><span className="dot dot-violet" />Your tools move the work.</li>
-              </ul>
+              <div className="slab-tenant-line" aria-label="Current workspace">
+                <span className="slab-tenant-dot" aria-hidden />
+                <span className="slab-tenant-text">
+                  <strong>Elite Stone Fabrication</strong> runs on slabOS
+                </span>
+              </div>
             </section>
             <section className="auth-panel" aria-label="Sign in">
               {urlFlowError ? (
@@ -769,8 +866,10 @@ export default function App() {
                 </div>
               ) : null}
               <header className="auth-panel-header">
-                <h2 className="auth-panel-title">Sign in</h2>
-                <p className="auth-panel-sub">Continue to the eliteOS launcher.</p>
+                <h2 className="auth-panel-title">Sign in to your workspace</h2>
+                <p className="auth-panel-sub">
+                  Continue to the eliteOS launcher for Elite Stone Fabrication.
+                </p>
               </header>
               <form onSubmit={(e) => void submitLogin(e)} noValidate>
                 <div className="field">
@@ -812,8 +911,14 @@ export default function App() {
           </div>
         ) : invitePasswordGate ? (
           <div className="auth-panel auth-panel-standalone" aria-label="Set password">
+            <div className="slab-brand-row slab-brand-row-compact">
+              <span className="slab-brand-mark" aria-hidden>
+                <SlabMark size={22} />
+              </span>
+              <span className="slab-wordmark slab-wordmark-compact">slabOS</span>
+            </div>
             <header className="auth-panel-header">
-              <h2 className="auth-panel-title">Finish your eliteOS account</h2>
+              <h2 className="auth-panel-title">Finish your workspace account</h2>
               <p className="auth-panel-sub">
                 You signed in from an invite or reset link. Set a password you can use with email sign-in, or continue and
                 set it later in account settings.
@@ -858,29 +963,65 @@ export default function App() {
         ) : (
           <>
             <section className="hero" aria-labelledby="hero-greeting">
-              <div className="hero-inner">
-                <p className="hero-eyebrow">Operating system · Elite Stone Fabrication</p>
-                <h1 id="hero-greeting" className="hero-title">{heroGreeting}</h1>
-                <p className="hero-motto">Keep the Titans running well.</p>
-                <p className="hero-positioning">
-                  One operating layer for quotes, pricing, partners, sales, production, and shop flow.
-                </p>
-                <div className="hero-stats" role="list">
-                  <div className="hero-stat" role="listitem">
-                    <span className="hero-stat-value">{loadingData && !headsPayload ? "—" : availableCount}</span>
-                    <span className="hero-stat-label">{availableCount === 1 ? "Tool available" : "Tools available"}</span>
-                  </div>
-                  <div className="hero-stat-divider" aria-hidden />
-                  <div className="hero-stat" role="listitem">
-                    <span className="hero-stat-value">{loadingData && !headsPayload ? "—" : roadmapCount}</span>
-                    <span className="hero-stat-label">On the roadmap</span>
-                  </div>
-                  <div className="hero-stat-divider" aria-hidden />
-                  <div className="hero-stat" role="listitem">
-                    <span className="hero-stat-value">{u?.role ?? "—"}</span>
-                    <span className="hero-stat-label">Your role</span>
+              <div className="hero-grid">
+                <div className="hero-inner">
+                  <p className="hero-eyebrow">Workspace · {workspaceName}</p>
+                  <h1 id="hero-greeting" className="hero-title">{heroGreeting}</h1>
+                  <p className="hero-motto">Keep the Titans running well.</p>
+                  <p className="hero-positioning">
+                    One operating layer for quotes, pricing, partners, sales, production, and shop flow.
+                  </p>
+                  <div className="hero-stats" role="list">
+                    <div className="hero-stat" role="listitem">
+                      <span className="hero-stat-value">{loadingData && !headsPayload ? "—" : availableCount}</span>
+                      <span className="hero-stat-label">{availableCount === 1 ? "Tool available" : "Tools available"}</span>
+                    </div>
+                    <div className="hero-stat-divider" aria-hidden />
+                    <div className="hero-stat" role="listitem">
+                      <span className="hero-stat-value">{loadingData && !headsPayload ? "—" : roadmapCount}</span>
+                      <span className="hero-stat-label">On the roadmap</span>
+                    </div>
+                    <div className="hero-stat-divider" aria-hidden />
+                    <div className="hero-stat" role="listitem">
+                      <span className="hero-stat-value">{u?.role ?? "—"}</span>
+                      <span className="hero-stat-label">Your role</span>
+                    </div>
                   </div>
                 </div>
+                <aside
+                  className="hero-workspace"
+                  aria-label={`Workspace: ${workspaceName}`}
+                >
+                  <span className="hero-workspace-eyebrow">Workspace</span>
+                  <div className="hero-workspace-frame">
+                    {workspaceLogoUrl ? (
+                      <img
+                        src={workspaceLogoUrl}
+                        alt={workspaceLogoIsFallback ? "" : `${workspaceName} logo`}
+                        className="hero-workspace-logo"
+                        loading="lazy"
+                        decoding="async"
+                      />
+                    ) : (
+                      <span className="hero-workspace-initials" aria-hidden>{workspaceInits}</span>
+                    )}
+                  </div>
+                  <div className="hero-workspace-name">{workspaceName}</div>
+                  <div className="hero-workspace-meta">
+                    <span className="hero-workspace-platform">on slabOS</span>
+                    {workspaceShort ? (
+                      <>
+                        <span className="hero-workspace-sep" aria-hidden>·</span>
+                        <code
+                          className="hero-workspace-id"
+                          title={`Organization ID: ${displayOrg}`}
+                        >
+                          {workspaceShort}
+                        </code>
+                      </>
+                    ) : null}
+                  </div>
+                </aside>
               </div>
               <div className="hero-aurora" aria-hidden />
             </section>
