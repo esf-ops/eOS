@@ -193,9 +193,106 @@ function localRunToDemo(r: ReturnType<typeof runLocalPrototypeQuote>): DemoCalcu
   };
 }
 
+/**
+ * Workspace identity constants — mirror the Home Launcher / Quote Library
+ * pattern so the topbar + hero workspace panel render consistently across
+ * heads without any new backend call. When `/api/me` becomes available to
+ * Internal Estimate, `resolveWorkspaceLogoUrl` can be extended without
+ * changing the UI.
+ *
+ * Resolution order (per docs/eliteos/eliteos-ui-direction.md §2.1):
+ *   1. me.user.organization_logo_url       — not in scope here yet
+ *   2. headsPayload.user.organization_logo_url — not in scope here yet
+ *   3. Local Elite Stone Fabrication asset (EOS_LOGO_URL)
+ *   4. Gradient initials text frame
+ */
+const DEFAULT_WORKSPACE_NAME = "Elite Stone Fabrication";
+const DEFAULT_WORKSPACE_SHORT = "ESF";
+
+function resolveWorkspaceName(): string {
+  return DEFAULT_WORKSPACE_NAME;
+}
+
+function resolveWorkspaceShortId(): string {
+  return DEFAULT_WORKSPACE_SHORT;
+}
+
+function resolveWorkspaceLogoUrl(): string | null {
+  return EOS_LOGO_URL || null;
+}
+
+function workspaceInitials(name: string): string {
+  return (
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w[0]?.toUpperCase() ?? "")
+      .join("") || "ES"
+  );
+}
+
+/**
+ * eliteOS Home / Launcher canonical URL used by the user menu's "Open Home"
+ * action. Configurable via `VITE_HEAD_URL_HOME` for staging / local dev;
+ * defaults to the production launcher domain documented in
+ * `docs/eliteos/CURRENT_SYSTEM_MAP.md`.
+ */
+function homeLauncherUrl(): string {
+  const raw = String(import.meta.env.VITE_HEAD_URL_HOME ?? "").trim();
+  return raw.replace(/\/+$/, "") || "https://www.eliteosfab.com";
+}
+
+/**
+ * Derive a friendly display name from an email address (everything before
+ * the `@`, with separators turned into spaces and word casing applied).
+ * Falls back to the email itself when no `@` is present.
+ *
+ * No backend call required — works off `session.user.email` only.
+ */
+function deriveDisplayNameFromEmail(email: string): string {
+  const e = String(email || "").trim();
+  if (!e) return "";
+  const local = e.includes("@") ? e.split("@")[0] : e;
+  const words = local.replace(/[._-]+/g, " ").split(/\s+/).filter(Boolean);
+  if (!words.length) return e;
+  return words.map((w) => w[0]?.toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+}
+
+function userInitialsFor(name: string, email: string): string {
+  const n = String(name || "").trim();
+  if (n) {
+    const parts = n.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  }
+  const e = String(email || "").trim();
+  if (e) {
+    const local = e.includes("@") ? e.split("@")[0] : e;
+    const parts = local.replace(/[._-]+/g, " ").split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return local.slice(0, 2).toUpperCase();
+  }
+  return "ES";
+}
+
 export default function InternalEstimateApp() {
   const supabase = getSupabase();
   const [sessionToken, setSessionToken] = useState<string | null>(null);
+  /**
+   * Email + id come straight from the Supabase session.user object
+   * (already kept up to date by `onAuthStateChange`). We never add a new
+   * `/api/me` call from this head in this pass — the topbar chip identity is
+   * purely client-side. Role is intentionally NOT surfaced here because we
+   * have no role claim in scope without a backend call; the user menu hides
+   * any role-gated link (e.g. System Admin) for the same reason.
+   */
+  const [userEmail, setUserEmail] = useState<string>("");
+  const [userId, setUserId] = useState<string>("");
+  const [userMetaName, setUserMetaName] = useState<string>("");
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement | null>(null);
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
@@ -332,29 +429,65 @@ export default function InternalEstimateApp() {
     if (supabase) await supabase.auth.signOut();
     setSessionToken(null);
     setBackendCalcOk(null);
+    setUserEmail("");
+    setUserId("");
+    setUserMetaName("");
+    setUserMenuOpen(false);
   }, [supabase]);
 
   useEffect(() => {
     if (!supabase) return;
     let alive = true;
 
-    void supabase.auth.getSession().then(({ data }) => {
-      if (!alive) return;
-      const tok = data.session?.access_token ?? "";
-      setSessionToken(tok || null);
-    });
-
-    const { data: sub } = supabase.auth.onAuthStateChange((_evt, sess) => {
+    const applySession = (
+      sess: {
+        access_token?: string;
+        user?: { id?: string; email?: string | null; user_metadata?: Record<string, unknown> } | null;
+      } | null
+    ) => {
       if (!alive) return;
       const tok = sess?.access_token ?? "";
       setSessionToken(tok || null);
-    });
+      const u = sess?.user || null;
+      setUserEmail(String(u?.email ?? ""));
+      setUserId(String(u?.id ?? ""));
+      const meta = (u?.user_metadata ?? {}) as Record<string, unknown>;
+      const metaName =
+        [meta.full_name, meta.name, meta.display_name]
+          .map((v) => (typeof v === "string" ? v.trim() : ""))
+          .find((v) => Boolean(v)) || "";
+      setUserMetaName(metaName);
+    };
+
+    void supabase.auth.getSession().then(({ data }) => applySession(data.session));
+
+    const { data: sub } = supabase.auth.onAuthStateChange((_evt, sess) => applySession(sess));
 
     return () => {
       alive = false;
       sub.subscription.unsubscribe();
     };
   }, [supabase]);
+
+  /** Close the user menu on outside click / Escape. */
+  useEffect(() => {
+    if (!userMenuOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (!userMenuRef.current) return;
+      if (!userMenuRef.current.contains(e.target as Node)) {
+        setUserMenuOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setUserMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [userMenuOpen]);
 
   const ensureAccessToken = useCallback(async (): Promise<string | null> => {
     if (!supabase) return null;
@@ -1463,6 +1596,30 @@ export default function InternalEstimateApp() {
     return raw.replace(/\/+$/, "") || "https://quotes.eliteosfab.com";
   }, []);
 
+  const homeBase = useMemo(() => homeLauncherUrl(), []);
+
+  const workspaceName = useMemo(() => resolveWorkspaceName(), []);
+  const workspaceShortId = useMemo(() => resolveWorkspaceShortId(), []);
+  const workspaceLogoUrl = useMemo(() => resolveWorkspaceLogoUrl(), []);
+  const workspaceInitialsValue = useMemo(() => workspaceInitials(workspaceName), [workspaceName]);
+
+  /**
+   * Display values for the topbar user chip. Resolved entirely client-side
+   * from `session.user` — no `/api/me` call is added in this pass. The
+   * userId state is kept in scope so a future System Admin link / preferences
+   * page can read it without churning the user-menu plumbing.
+   */
+  void userId;
+  const userDisplayName = useMemo(
+    () => userMetaName || deriveDisplayNameFromEmail(userEmail) || "Signed in",
+    [userMetaName, userEmail]
+  );
+  const userDisplayEmail = userEmail;
+  const userDisplayInitials = useMemo(
+    () => userInitialsFor(userMetaName, userEmail),
+    [userMetaName, userEmail]
+  );
+
   useEffect(() => {
     if (!supabase || !sessionToken) return;
     void supabase.auth.getSession().then(({ data }) => {
@@ -1679,39 +1836,299 @@ export default function InternalEstimateApp() {
   ]);
 
   return (
-    <div className="page page-internal-estimate">
+    <div className="shell page-internal-estimate">
       <div className="ie-no-print">
-      <header className="ie-header-compact">
-        <div className="ie-header-row">
-          <div className="ie-header-brand">
-            <img className="ie-logo-sm" src={EOS_LOGO_URL} alt="Elite Stone Fabrication" />
-            <div>
-              <h1 className="ie-header-title">eliteOS Internal Estimate Head</h1>
-              <p className="ie-header-sub">Staff estimating workspace</p>
+      <header className="topbar" role="banner">
+        <a
+          href="/"
+          className="brand-row brand-row-link"
+          aria-label={`eliteOS Internal Estimate — ${workspaceName}`}
+        >
+          <span className="brand-mark" aria-hidden>
+            <img src={workspaceLogoUrl ?? EOS_LOGO_URL} alt="" />
+          </span>
+          <span className="brand-text">
+            <span className="brand-wordmark">eliteOS</span>
+            <span className="brand-sub">Internal Estimate · {workspaceName}</span>
+          </span>
+        </a>
+        <div className="topbar-actions">
+          <button
+            type="button"
+            className="topbar-action-btn"
+            onClick={handleStartNewQuoteClick}
+            title="Start a new quote (saves or updates current first)"
+          >
+            <span className="topbar-action-btn-icon" aria-hidden>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 5v14" />
+                <path d="M5 12h14" />
+              </svg>
+            </span>
+            <span className="topbar-action-btn-label">Start new quote</span>
+          </button>
+          {!sessionToken ? (
+            <span
+              className="topbar-preview-pill"
+              title="Sign in below to save, calculate, or print"
+            >
+              <span className="topbar-preview-pill-dot" aria-hidden />
+              <span>Preview mode</span>
+            </span>
+          ) : null}
+          {sessionToken ? (
+            <div className="topbar-account-wrap" ref={userMenuRef}>
+              <button
+                type="button"
+                className={`topbar-account${userMenuOpen ? " is-open" : ""}`}
+                aria-label="Open account menu"
+                aria-haspopup="menu"
+                aria-expanded={userMenuOpen}
+                onClick={() => setUserMenuOpen((v) => !v)}
+              >
+                <span className="topbar-avatar" aria-hidden>
+                  {userDisplayInitials}
+                </span>
+                <span className="topbar-account-text">
+                  <span className="topbar-account-name">{userDisplayName}</span>
+                  {userDisplayEmail &&
+                  userDisplayEmail.toLowerCase() !== userDisplayName.toLowerCase() ? (
+                    <span className="topbar-account-role">{userDisplayEmail}</span>
+                  ) : null}
+                </span>
+                <span className="topbar-account-caret" aria-hidden>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </span>
+              </button>
+              {userMenuOpen ? (
+                <div className="user-menu" role="menu" aria-label="Account menu">
+                  <div className="user-menu-header">
+                    <p className="user-menu-name">{userDisplayName}</p>
+                    {userDisplayEmail ? <p className="user-menu-email">{userDisplayEmail}</p> : null}
+                    <p className="user-menu-workspace">
+                      <span>Workspace ·</span>{" "}
+                      <strong>{workspaceName}</strong>
+                      <span className="user-menu-sep" aria-hidden>·</span>
+                      <span>on slabOS</span>
+                    </p>
+                  </div>
+                  <div className="user-menu-list">
+                    <a
+                      href={homeBase}
+                      className="user-menu-item"
+                      role="menuitem"
+                      onClick={() => setUserMenuOpen(false)}
+                    >
+                      <span className="user-menu-icon" aria-hidden>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M3 11.5L12 4l9 7.5" />
+                          <path d="M5 10v10h14V10" />
+                          <path d="M10 20v-6h4v6" />
+                        </svg>
+                      </span>
+                      <span className="user-menu-label">
+                        <span>Open Home</span>
+                        <span className="user-menu-meta">eliteOS Launcher</span>
+                      </span>
+                      <span className="user-menu-shortcut" aria-hidden>↗</span>
+                    </a>
+                    <a
+                      href={`${quoteLibraryUrl}/`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="user-menu-item"
+                      role="menuitem"
+                      onClick={() => setUserMenuOpen(false)}
+                    >
+                      <span className="user-menu-icon" aria-hidden>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="3" y="4" width="18" height="16" rx="2.5" />
+                          <path d="M3 9h18" />
+                          <path d="M8 13h6" />
+                          <path d="M8 16h8" />
+                        </svg>
+                      </span>
+                      <span className="user-menu-label">
+                        <span>Open Quote Library</span>
+                        <span className="user-menu-meta">Search, statuses, revisions</span>
+                      </span>
+                      <span className="user-menu-shortcut" aria-hidden>↗</span>
+                    </a>
+                    <button
+                      type="button"
+                      className="user-menu-item"
+                      role="menuitem"
+                      onClick={() => {
+                        setUserMenuOpen(false);
+                        handleStartNewQuoteClick();
+                      }}
+                    >
+                      <span className="user-menu-icon" aria-hidden>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M12 5v14" />
+                          <path d="M5 12h14" />
+                        </svg>
+                      </span>
+                      <span className="user-menu-label">
+                        <span>Start new quote</span>
+                        <span className="user-menu-meta">Saves or updates current first</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="user-menu-item is-disabled"
+                      role="menuitem"
+                      aria-disabled="true"
+                      disabled
+                      title="Profile / Preferences is coming soon"
+                    >
+                      <span className="user-menu-icon" aria-hidden>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="12" cy="8" r="3.5" />
+                          <path d="M5 20c1.5-3.5 4.2-5 7-5s5.5 1.5 7 5" />
+                        </svg>
+                      </span>
+                      <span className="user-menu-label">
+                        <span>Profile &amp; preferences</span>
+                        <span className="user-menu-meta">Coming soon</span>
+                      </span>
+                    </button>
+                  </div>
+                  <div className="user-menu-footer">
+                    <button
+                      type="button"
+                      className="user-menu-item user-menu-signout"
+                      role="menuitem"
+                      onClick={() => {
+                        setUserMenuOpen(false);
+                        void signOut();
+                      }}
+                    >
+                      <span className="user-menu-icon" aria-hidden>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                          <polyline points="16 17 21 12 16 7" />
+                          <line x1="21" y1="12" x2="9" y2="12" />
+                        </svg>
+                      </span>
+                      <span className="user-menu-label">Sign out</span>
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </div>
-          </div>
-          <div className="ie-header-actions">
-            <button type="button" className="btn secondary btn-sm" onClick={handleStartNewQuoteClick}>
-              Start new quote
-            </button>
-            <a className="btn secondary btn-sm" href={`${quoteLibraryUrl}/`} target="_blank" rel="noreferrer">
-              Open Quote Library
-            </a>
-            {supabase ? (
-              sessionToken ? (
-                <>
-                  <span className="pill pill-live">Signed in</span>
-                  <button type="button" className="btn secondary btn-sm" onClick={() => void signOut()}>
-                    Sign out
-                  </button>
-                </>
-              ) : (
-                <span className="muted small">Sign in to save to Quote Library</span>
-              )
-            ) : null}
-          </div>
+          ) : null}
         </div>
       </header>
+
+      <div className="ie-shell-body">
+        <section className="ie-hero" aria-labelledby="ie-hero-title">
+          <div className="ie-hero-aurora" aria-hidden />
+          <div className="ie-hero-grid">
+            <div className="ie-hero-main">
+              <div className="ie-hero-eyebrow-row">
+                <p className="ie-hero-eyebrow">Internal tool · Internal Estimate</p>
+                {sessionToken ? (
+                  <span
+                    className={`ie-hero-live${calcBusy ? " is-busy" : lastCalcLive ? " is-confirmed" : " is-preview"}`}
+                    aria-live="polite"
+                  >
+                    <span className="ie-hero-live-dot" aria-hidden />
+                    <span>
+                      {calcBusy
+                        ? "Calculating…"
+                        : lastCalcLive && serverRetailVerified != null
+                          ? "Backend confirmed"
+                          : "Live preview"}
+                    </span>
+                  </span>
+                ) : (
+                  <span className="ie-hero-live is-signed-out" aria-live="polite">
+                    <span className="ie-hero-live-dot" aria-hidden />
+                    <span>Sign in to save &amp; calculate</span>
+                  </span>
+                )}
+              </div>
+              <h1 id="ie-hero-title" className="ie-hero-title">
+                Estimate <span className="ie-hero-title-accent">workspace</span>
+              </h1>
+              <p className="ie-hero-sub">
+                Build, calculate, and revise stone estimates with the same pricing engine and revision history used in the Quote Library. Saved revisions hand off cleanly to Moraware and QuickBooks once sold.
+              </p>
+              <dl className="ie-hero-stats" aria-label="Live estimate context">
+                <div className="ie-hero-stat">
+                  <dt>Rooms</dt>
+                  <dd>{roomDrafts.length}</dd>
+                </div>
+                <div className="ie-hero-stat">
+                  <dt>Sq ft</dt>
+                  <dd>
+                    {Number(partSqft ?? 0) > 0 ? Number(partSqft ?? 0).toFixed(1) : "—"}
+                  </dd>
+                </div>
+                <div className="ie-hero-stat">
+                  <dt>Basis</dt>
+                  <dd>{internalPricingMode === "wholesale" ? "Wholesale" : "Direct"}</dd>
+                </div>
+                <div className="ie-hero-stat">
+                  <dt>Branch</dt>
+                  <dd>{branch}</dd>
+                </div>
+                <div className="ie-hero-stat ie-hero-stat-mode">
+                  <dt>{urlQuoteId ? "Editing" : "Mode"}</dt>
+                  <dd>
+                    {urlQuoteId
+                      ? hydratedDisplayRevision || (loadedFromLibrary ? "Saved quote" : "Loading…")
+                      : "New estimate"}
+                  </dd>
+                </div>
+              </dl>
+            </div>
+
+            <aside
+              className="hero-workspace"
+              aria-label={`Workspace · ${workspaceName}`}
+            >
+              <p className="hero-workspace-eyebrow">Workspace</p>
+              <div className="hero-workspace-card">
+                <div className="hero-workspace-mark">
+                  {workspaceLogoUrl ? (
+                    <img
+                      src={workspaceLogoUrl}
+                      alt=""
+                      loading="lazy"
+                      onError={(e) => {
+                        (e.currentTarget as HTMLImageElement).style.display = "none";
+                        const fallback = (
+                          e.currentTarget.parentElement as HTMLElement | null
+                        )?.querySelector(".hero-workspace-initials") as HTMLElement | null;
+                        if (fallback) fallback.style.display = "flex";
+                      }}
+                    />
+                  ) : null}
+                  <span
+                    className="hero-workspace-initials"
+                    aria-hidden={workspaceLogoUrl ? "true" : "false"}
+                    style={workspaceLogoUrl ? { display: "none" } : undefined}
+                  >
+                    {workspaceInitialsValue}
+                  </span>
+                </div>
+                <div className="hero-workspace-text">
+                  <p className="hero-workspace-name">{workspaceName}</p>
+                  <p className="hero-workspace-meta">
+                    <span>on </span>
+                    <span className="hero-workspace-platform">slabOS</span>
+                    <span className="hero-workspace-sep" aria-hidden>·</span>
+                    <span>{workspaceShortId}</span>
+                  </p>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </section>
 
       {urlQuoteId ? (
         <div className="card ie-card-tight ie-url-banner">
@@ -1749,14 +2166,20 @@ export default function InternalEstimateApp() {
 
       <div className="ie-app-shell">
         <nav className="ie-rail" aria-label="Estimate workflow">
-          {WORKFLOW_SECTIONS.map((s) => (
+          <p className="ie-rail-title" aria-hidden>
+            Workflow
+          </p>
+          {WORKFLOW_SECTIONS.map((s, i) => (
             <React.Fragment key={s.id}>
               <button
                 type="button"
                 className="ie-rail-link"
                 onClick={() => scrollToWorkflowSection(s.id)}
               >
-                {s.label}
+                <span className="ie-rail-link-num" aria-hidden>
+                  {String(i + 1).padStart(2, "0")}
+                </span>
+                <span className="ie-rail-link-label">{s.label}</span>
               </button>
               {s.id === "sec-rooms" && roomNavLabels.length > 0 ? (
                 <div className="ie-rail-room-block">
@@ -3140,53 +3563,98 @@ export default function InternalEstimateApp() {
           </div>
         </aside>
       </div>
+      </div>
 
       <nav className="ie-sticky-actions" aria-label="Pinned estimate actions">
         <div className="ie-sticky-actions-inner">
-          <button type="button" className="btn primary btn-sm" disabled={calcBusy} onClick={() => void handleCalculate()}>
-            {calcBusy ? "Calculating…" : "Calculate"}
-          </button>
-          <button type="button" className="btn secondary btn-sm" onClick={printCustomerEstimate} title="Print customer estimate PDF">
-            Print estimate
-          </button>
-          {urlQuoteId ? (
-            hydratedIsCurrentRevision === false ? (
-              <button
-                type="button"
-                className="btn primary btn-sm"
-                disabled={Boolean(restoreRevisionBlockReason)}
-                title={restoreRevisionBlockReason ?? undefined}
-                onClick={() => void handleRestoreAsRevision()}
-              >
-                {restoreBusy ? "Restoring…" : "Restore as new revision"}
-              </button>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  className="btn secondary btn-sm"
-                  disabled={Boolean(updateQuoteBlockReason)}
-                  title={updateQuoteBlockReason ?? undefined}
-                  onClick={() => void handleSubmit("update_existing")}
-                >
-                  {submitBusy && pendingSubmitIntent === "update_existing" ? "Updating…" : "Update"}
-                </button>
+          <div className="ie-sticky-status" aria-live="polite">
+            <span
+              className={`ie-sticky-status-pill${
+                calcBusy
+                  ? " is-busy"
+                  : lastCalcLive && serverRetailVerified != null
+                    ? " is-confirmed"
+                    : sessionToken
+                      ? " is-preview"
+                      : " is-signed-out"
+              }`}
+            >
+              <span className="ie-sticky-status-dot" aria-hidden />
+              <span className="ie-sticky-status-label">
+                {calcBusy
+                  ? "Calculating…"
+                  : lastCalcLive && serverRetailVerified != null
+                    ? "Backend confirmed"
+                    : sessionToken
+                      ? "Live preview"
+                      : "Preview mode"}
+              </span>
+            </span>
+            <span className="ie-sticky-status-total" aria-label="Current live estimate total">
+              {partRetail != null ? `$${Number(partRetail).toFixed(2)}` : "—"}
+            </span>
+          </div>
+          <div className="ie-sticky-actions-cluster">
+            <button
+              type="button"
+              className="btn primary btn-sm"
+              disabled={calcBusy}
+              onClick={() => void handleCalculate()}
+            >
+              {calcBusy ? "Calculating…" : "Calculate"}
+            </button>
+            <button
+              type="button"
+              className="btn secondary btn-sm"
+              onClick={printCustomerEstimate}
+              title="Print customer estimate PDF"
+            >
+              Print estimate
+            </button>
+            {urlQuoteId ? (
+              hydratedIsCurrentRevision === false ? (
                 <button
                   type="button"
                   className="btn primary btn-sm"
-                  disabled={Boolean(saveRevisionBlockReason)}
-                  title={saveRevisionBlockReason ?? undefined}
-                  onClick={() => void handleSubmit("save_revision")}
+                  disabled={Boolean(restoreRevisionBlockReason)}
+                  title={restoreRevisionBlockReason ?? undefined}
+                  onClick={() => void handleRestoreAsRevision()}
                 >
-                  {submitBusy && pendingSubmitIntent === "save_revision" ? "Saving…" : "Save revision"}
+                  {restoreBusy ? "Restoring…" : "Restore as new revision"}
                 </button>
-              </>
-            )
-          ) : (
-            <button type="button" className="btn primary btn-sm" disabled={submitBusy} onClick={() => void handleSubmit()}>
-              {submitBusy ? "Saving…" : "Save quote"}
-            </button>
-          )}
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="btn secondary btn-sm"
+                    disabled={Boolean(updateQuoteBlockReason)}
+                    title={updateQuoteBlockReason ?? undefined}
+                    onClick={() => void handleSubmit("update_existing")}
+                  >
+                    {submitBusy && pendingSubmitIntent === "update_existing" ? "Updating…" : "Update"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn primary btn-sm"
+                    disabled={Boolean(saveRevisionBlockReason)}
+                    title={saveRevisionBlockReason ?? undefined}
+                    onClick={() => void handleSubmit("save_revision")}
+                  >
+                    {submitBusy && pendingSubmitIntent === "save_revision" ? "Saving…" : "Save revision"}
+                  </button>
+                </>
+              )
+            ) : (
+              <button
+                type="button"
+                className="btn primary btn-sm"
+                disabled={submitBusy}
+                onClick={() => void handleSubmit()}
+              >
+                {submitBusy ? "Saving…" : "Save quote"}
+              </button>
+            )}
+          </div>
         </div>
       </nav>
 
@@ -3272,7 +3740,9 @@ export default function InternalEstimateApp() {
         </div>
       ) : null}
 
-      <footer className="footer">eliteOS Internal Estimate Head · Elite Stone Fabrication · {new Date().getFullYear()}</footer>
+      <footer className="footer-bar" role="contentinfo">
+        <strong>eliteOS</strong> · Internal Estimate · {workspaceName} · {new Date().getFullYear()}
+      </footer>
       </div>
 
       <CustomerEstimatePrint

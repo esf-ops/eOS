@@ -411,6 +411,9 @@ When a new head is built (Sales, Production, Shop TV, …), it must:
 | `app-home/index.html` | `theme-color`, description, title |
 | `app-quote-library/src/QuoteLibraryApp.tsx` | Reference operational head: topbar + content hero + filters + table + drawer |
 | `app-quote-library/src/styles.css` | Reuses the token block locally; pattern reference for operational/workflow heads |
+| `app-internal-estimate/src/InternalEstimateApp.tsx` | Reference estimating head: shared topbar + hero + rail/main/aside + sticky action bar |
+| `app-internal-estimate/src/styles.css` | Reuses the token block locally; pattern reference for dense, calc-driven estimating heads |
+| `app-internal-estimate/src/CustomerEstimatePrint.tsx` | Customer-facing print component — **isolated** from the app shell; do not restyle without explicit approval |
 | `docs/eliteos/eliteos-ui-direction.md` | This document |
 
 When extracting a shared design package later, lift the `:root` token block,
@@ -557,6 +560,137 @@ When restyling an operational head, never touch:
 - `runAction` wrapper, `window.confirm` prompts, error/success copy paths.
 
 These remain a **backend** responsibility; the visual pass is purely surface.
+
+---
+
+## 12.5 Pattern: estimating heads (Internal Estimate reference)
+
+The Quote Library is the reference for *search → list → detail* heads.
+**Internal Estimate** is the first reference for *estimating* heads — dense,
+calc-driven workspaces that center on a long form, a sticky live summary,
+and a pinned action bar. The same shell pattern from §13 applies; the
+specifics below capture what makes an estimating head trustworthy without
+sacrificing the eliteOS visual quality bar.
+
+### 12.5.1 Page skeleton
+
+```
+<div class="shell page-internal-estimate">
+  <header class="topbar"> brand-row + user-menu </header>
+  <div class="ie-shell-body">                       ← max-width content rail
+    <section class="ie-hero">                       ← head intro card
+      <div class="ie-hero-grid">
+        <div class="ie-hero-main">   ← eyebrow + h1 + sub + contextual chips
+        <aside class="hero-workspace"> ← workspace identity panel
+      </div>
+    </section>
+    [optional ie-url-banner card]                   ← deep-link / loaded-quote status
+    <div class="ie-app-shell">                       ← 3-col layout
+      <nav class="ie-rail">                          ← left workflow rail (sticky)
+      <main class="ie-main">                         ← project / rooms / addons / review / save
+      <aside class="ie-aside side-col">              ← live estimator summary (sticky)
+    </div>
+  </div>
+  <nav class="ie-sticky-actions">                    ← pinned global actions, glass-blur
+  <footer class="footer-bar">
+</div>
+<CustomerEstimatePrint /> ← isolated print branch (see §12.5.4)
+```
+
+### 12.5.2 Density and trust rules
+
+- **Estimator speed > visual flourish.** Fields keep their existing order
+  and grouping. Section spacing is the only thing that should change in a
+  visual pass; never reorder controls or move fields between sections.
+- **One primary action per surface.** The sticky action bar is the
+  canonical place for `Calculate / Save / Update / Save revision /
+  Print`. Inline buttons inside sections stay secondary (`.btn.secondary`
+  / `.btn.ghost`) so the global actions read first.
+- **Hero is a live command band, not a promo strip.** Eyebrow + bold
+  title (with a gradient `Workspace` accent) + supportive copy + a
+  bordered live-stats strip showing **real** values pulled straight from
+  the estimator state — `Rooms`, `Sq ft (engine)`, `Basis`,
+  `Branch`, `Mode / Editing R{n}`. A single live status pill in the
+  top-right of the hero ("Backend confirmed" / "Live preview" /
+  "Calculating…" / "Sign in to save & calculate") makes the workspace
+  feel alive without adding any new backend call. Never display KPIs
+  that aren't already in scope.
+- **Live summary card is a control panel, not a chart.** Tabular
+  numerics, a single gradient hero total (`linear-gradient(135deg,
+  ink → blue)`), a small list of rolled-up groups, and a
+  collapsible audit `<details>` for engine fields. A 3 px gradient
+  accent stripe runs across the top edge. No fake totals, no
+  promotional embellishment.
+
+### 12.5.3 Sticky bottom command bar
+
+- Pinned with `position: fixed`, glass background
+  (`rgba(255, 255, 255, 0.86)` + `saturate(180%) blur(18px)`), top border
+  in `--eos-line`, soft drop shadow, and `safe-area-inset-bottom`
+  padding for iOS.
+- **Two clusters** separated by `justify-content: space-between`:
+  - **Left:** live status pill (with pulsing dot + `prefers-reduced-motion`
+    opt-out) — `Backend confirmed` (green) / `Live preview` (blue) /
+    `Calculating…` (violet) / `Preview mode` (warn). Next to it, a
+    `Live total · ${amount}` readout in tabular numerics. This makes the
+    "is this calc trustworthy?" answer always visible without scrolling.
+  - **Right:** action cluster. Order: `Calculate` (primary) ·
+    `Print estimate` (secondary) · `Update / Save revision / Restore`
+    (context-dependent, primary on the current-revision action,
+    secondary on the alternate). On viewports ≤ 880 px the two clusters
+    stack to a column with `Live total` centered.
+- Buttons that gate on backend conditions (sign-in, dirty state, locked
+  revision) keep their existing `title=` hover hint with the gating
+  reason — never silently disable.
+
+### 12.5.3a Left workflow rail
+
+- Numbered step navigator (`01 Job Info`, `02 Rooms / Areas`, …) where
+  the number lives in a quiet rounded chip and the label sits beside it.
+  Hover state tints both the chip and the label in burgundy
+  (`rgba(163, 19, 47, 0.x)`) so it reads like a navigable step list, not
+  a row of plain links.
+- A small uppercase `WORKFLOW` eyebrow sits above the list.
+- Sub-areas (per-room links under `02 Rooms / Areas`) keep the existing
+  collapse toggle, just restyled.
+
+### 12.5.4 Customer print/PDF guardrail
+
+The customer-facing `CustomerEstimatePrint` component lives as a **sibling**
+of `.ie-no-print` and is hidden in screen media. The shell topbar, hero,
+sticky bar, footer, and `.user-menu` are explicitly hidden inside the
+`@media print` block (see `app-internal-estimate/src/styles.css`).
+
+When restyling any estimating head:
+
+- **Do not** apply app-shell tokens to `.cep-*` print classes.
+- **Do not** introduce shadows, gradients, or fancy backgrounds in the
+  PDF — printed pages must remain calm, readable, and ink-cheap.
+- The customer estimate must continue to:
+  - hide internal-only worksheet/math diagnostics;
+  - hide per-sf rates;
+  - lead with the customer-facing estimate summary;
+  - include the **Quoted Material Breakdown** by room/group;
+  - omit internal-only custom lines by name (they roll into
+    *Additional adjustments*);
+  - preserve the Lisbon address spelling as `200 Kraiburg Blvd`.
+
+### 12.5.5 Behavior the visual pass must preserve
+
+When restyling an estimating head, never touch:
+
+- Quote math, calculator behavior, room measurement logic.
+- Standard vanity vs Vanity Program opt-in, vanity tier labels.
+- Add-on / custom-line pricing, use tax handling.
+- Save / Update / Save revision / Restore-as-revision / Save-as-new-quote
+  flows, hydration from existing `quoteId`.
+- Monday / Moraware / QuickBooks payloads triggered on save.
+- Visual Layout Canvas state, drag/rotate semantics.
+- `runAction` (or equivalent) wrappers, `window.confirm` prompts,
+  error/success copy paths.
+
+These remain a **backend** (or quote-engine) responsibility; the visual
+pass is purely surface.
 
 ---
 
