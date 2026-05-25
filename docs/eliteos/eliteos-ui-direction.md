@@ -1001,6 +1001,37 @@ operational head wired up to the full shell. Future heads (Internal
 Estimate, Sales, Production, Shop TV, Invoices, …) should start from this
 template before adding head-specific surfaces.
 
+### 13.0 Adopters (current)
+
+| Head | Variant | Source of identity | Role surfaced in menu? |
+| --- | --- | --- | --- |
+| **Home Launcher** (`app-home`) | Reference / Launcher | `/api/me` + `/api/me/heads` | yes (admin links role-gated) |
+| **Quote Library** (`app-quote-library`) | Operational head | Local Supabase `session.user` (no new `/api/me` call) | no — role not in scope |
+| **Internal Estimate** (`app-internal-estimate`) | Flagship estimating head | Local Supabase `session.user` (no new `/api/me` call) | no — role not in scope |
+| **Pricing Admin** (`app-pricing-admin`) | Operational admin head (v1 shell) | Local Supabase `session.user` (no new `/api/me` call) | no — role not in scope |
+| **System Admin** (`app-system-admin`) | Governance head (v1 shell) | Existing `/api/me` payload (already required for head authorization) | **yes** — role pill (admin / super_admin) is shown because `/api/me` is already in scope |
+
+Rules every adopter follows:
+
+- The shell never adds a *new* backend call to power the chip. Heads that
+  already call `/api/me` (Home, System Admin) may surface role; heads
+  that do not (Quote Library, Internal Estimate, Pricing Admin) keep the
+  chip purely client-side and omit role.
+- The shell is **never** the security boundary. Hiding "System Admin" in
+  the menu, or hiding admin-only actions in the body, must always be
+  paired with backend `requireAuth` + role / head-access enforcement.
+  See `docs/eliteos/security-audit.md` and the workspace rule
+  `eliteos-architecture.mdc` for the cross-check.
+- `Profile & preferences` is a disabled placeholder in every adopter
+  until the dedicated **Profile / Preferences v1** pass ships. Do not
+  wire it to a partial preferences surface in a UI-only pass.
+- Adopting the shell must not change any existing API call, payload
+  shape, role/head-access enforcement, audit log, or workflow behavior.
+  Adopters that prefer to keep an existing primary action color (e.g.
+  System Admin uses indigo / blue Save / primary buttons) may do so —
+  the burgundy `--eos-accent` is used for the wordmark / auth-panel
+  eyebrow / sign-out treatment, not as a forced primary recolor.
+
 ### 13.1 Shell layout
 
 ```

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { ApiError, apiFetch } from "../lib/api";
 import { fetchSchemaHealth, SCHEMA_HEALTH_PATH, type SchemaHealthResp } from "../lib/schemaHealth";
@@ -18,6 +18,81 @@ const PRICING_ADMIN_URL = String(
 )
   .trim()
   .replace(/\/+$/, "");
+
+/**
+ * Protected-head shell — brand architecture mirrors Home Launcher /
+ * Quote Library / Internal Estimate / Pricing Admin.
+ *
+ * System Admin already calls `/api/me` for role enforcement, so the
+ * topbar user chip can use that payload for display name + email + role
+ * without any new backend call. Workspace identity is still derived
+ * client-side from the platform default constants (single-tenant today;
+ * resolver can pull `organization_logo_url` later).
+ *
+ * See `docs/eliteos/eliteos-ui-direction.md` §13 (Protected head app
+ * shell) for the template this pattern is locked to.
+ */
+const DEFAULT_WORKSPACE_NAME = "Elite Stone Fabrication";
+const DEFAULT_WORKSPACE_SHORT = "ESF";
+/** Elite Stone Fabrication logo fallback — keeps the workspace panel
+ *  visually anchored even before a backend logo field exists. */
+const EOS_LOGO_URL =
+  "https://www.elitestonefabrication.com/wp-content/uploads/2021/09/cropped-ESF-Horizontal-Logo-500x150-px_09_09.png";
+
+function resolveWorkspaceName(): string {
+  return DEFAULT_WORKSPACE_NAME;
+}
+
+function resolveWorkspaceShortId(): string {
+  return DEFAULT_WORKSPACE_SHORT;
+}
+
+function resolveWorkspaceLogoUrl(): string | null {
+  return EOS_LOGO_URL || null;
+}
+
+function workspaceInitialsValue(name: string): string {
+  return (
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w[0]?.toUpperCase() ?? "")
+      .join("") || "ES"
+  );
+}
+
+function homeLauncherUrl(): string {
+  const raw = String(import.meta.env.VITE_HEAD_URL_HOME ?? "").trim();
+  return raw.replace(/\/+$/, "") || "https://www.eliteosfab.com";
+}
+
+function deriveDisplayNameFromEmail(email: string): string {
+  const e = String(email || "").trim();
+  if (!e) return "";
+  const local = e.includes("@") ? e.split("@")[0] : e;
+  const words = local.replace(/[._-]+/g, " ").split(/\s+/).filter(Boolean);
+  if (!words.length) return e;
+  return words.map((w) => w[0]?.toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+}
+
+function userInitialsFor(name: string, email: string): string {
+  const n = String(name || "").trim();
+  if (n) {
+    const parts = n.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  }
+  const e = String(email || "").trim();
+  if (e) {
+    const local = e.includes("@") ? e.split("@")[0] : e;
+    const parts = local.replace(/[._-]+/g, " ").split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return local.slice(0, 2).toUpperCase();
+  }
+  return "ES";
+}
 
 type MainNavView =
   | "people"
@@ -827,6 +902,55 @@ export default function App() {
   const [auditEvents, setAuditEvents] = useState<AuditEventsResp | null>(null);
   const [auditError, setAuditError] = useState("");
 
+  /**
+   * Protected-head topbar identity. All values are derived from data that
+   * is *already* loaded by this head (`session.user` and `/api/me`) — no
+   * new backend call is added by the shell pass. Role is shown because
+   * `/api/me` is already the source of truth for head authorization here.
+   */
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement | null>(null);
+
+  const homeBase = useMemo(() => homeLauncherUrl(), []);
+  const workspaceName = useMemo(() => resolveWorkspaceName(), []);
+  const workspaceShortId = useMemo(() => resolveWorkspaceShortId(), []);
+  const workspaceLogoUrl = useMemo(() => resolveWorkspaceLogoUrl(), []);
+  const workspaceInitials = useMemo(() => workspaceInitialsValue(workspaceName), [workspaceName]);
+
+  const sessionEmail = useMemo(() => String(session?.user?.email ?? ""), [session?.user?.email]);
+  const meEmail = useMemo(() => String(me?.user?.email ?? ""), [me?.user?.email]);
+  const meFullName = useMemo(() => String(me?.user?.fullName ?? ""), [me?.user?.fullName]);
+  const meRole = useMemo(() => String(me?.user?.role ?? ""), [me?.user?.role]);
+  const userDisplayName = useMemo(
+    () => meFullName || deriveDisplayNameFromEmail(meEmail || sessionEmail) || "Signed in",
+    [meFullName, meEmail, sessionEmail]
+  );
+  const userDisplayEmail = useMemo(() => meEmail || sessionEmail, [meEmail, sessionEmail]);
+  const userDisplayInitials = useMemo(
+    () => userInitialsFor(meFullName, meEmail || sessionEmail),
+    [meFullName, meEmail, sessionEmail]
+  );
+
+  /** Close user menu on outside click / Escape. */
+  useEffect(() => {
+    if (!userMenuOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (!userMenuRef.current) return;
+      if (!userMenuRef.current.contains(e.target as Node)) {
+        setUserMenuOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setUserMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [userMenuOpen]);
+
   function pushToast(kind: "info" | "error", text: string) {
     setToast({ kind, text });
     window.setTimeout(() => setToast(null), 4500);
@@ -1119,43 +1243,99 @@ export default function App() {
     }
   }
 
+  /**
+   * Sign-out path is shared between the user menu and any direct button.
+   * The fire-and-forget audit log call (`/api/auth/log-event`) is preserved
+   * exactly so existing audit/governance behavior does not regress.
+   */
+  async function handleSignOut() {
+    const t = String(sessionToken ?? "").trim();
+    if (t) {
+      try {
+        await apiFetch("/api/auth/log-event", {
+          token: t,
+          method: "POST",
+          body: { event_type: "sign_out", tool_slug: "system_admin" }
+        });
+      } catch {
+        /* best-effort audit only */
+      }
+    }
+    void supabase.auth.signOut();
+    setPassword("");
+    setSelectedId(null);
+    setSchemaHealthResult(null);
+    setSchemaHealthProbeError(null);
+    setSchemaHealthDevMeta(null);
+    setMorawareStatus(null);
+    setMorawareStatusError("");
+    setMorawareStatusLoading(false);
+    setUserMenuOpen(false);
+  }
+
   if (!session) {
     return (
       <div className="shell">
-        <div className="topbar topbar-admin">
-          <div className="topbar-brand">
-            <strong>eliteOS System Admin Head</strong>
-            <div className="muted">Governance & user access foundation</div>
-          </div>
-        </div>
-        <div className="sign-in-layout">
-          <div className="sign-in-panel">
-          <h2 style={{ marginTop: 0 }}>Sign in</h2>
-          <form onSubmit={submitLogin}>
-            <div className="field">
-              <label htmlFor="email">Email</label>
-              <input id="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" />
-            </div>
-            <div className="field">
-              <label htmlFor="password">Password</label>
-              <input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete="current-password"
-              />
-            </div>
-            <button type="submit" disabled={loginBusy || !email || !password} className="btn btn-primary">
-              {loginBusy ? "Signing in…" : "Sign in"}
-            </button>
-            {authError ? <p className="form-error">{authError}</p> : null}
-          </form>
-          <p className="muted" style={{ marginTop: 16 }}>
-            Passwords flow through Supabase only; admins never manage other accounts’ plaintext secrets from this UI.
-          </p>
-          </div>
-        </div>
+        <header className="topbar" role="banner">
+          <a
+            href={homeBase}
+            className="brand-row brand-row-link"
+            aria-label={`eliteOS System Admin — ${workspaceName}`}
+          >
+            <span className="brand-mark" aria-hidden>
+              {workspaceLogoUrl ? <img src={workspaceLogoUrl} alt="" /> : null}
+            </span>
+            <span className="brand-text">
+              <span className="brand-wordmark">eliteOS</span>
+              <span className="brand-sub">System Admin · {workspaceName}</span>
+            </span>
+          </a>
+        </header>
+        <main className="main" role="main">
+          <section className="auth-panel auth-panel-standalone" aria-label="Sign in">
+            <header className="auth-panel-header">
+              <p className="auth-panel-eyebrow">System Admin · {workspaceName}</p>
+              <h2 className="auth-panel-title">Sign in to continue</h2>
+              <p className="auth-panel-sub">
+                Use your eliteOS staff account. Only admin and super_admin roles can operate this management head — backend authorization is enforced on every API call.
+              </p>
+            </header>
+            <form onSubmit={submitLogin} className="auth-form">
+              <div className="field-grid">
+                <div className="field">
+                  <label htmlFor="email">Email</label>
+                  <input id="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" />
+                </div>
+                <div className="field">
+                  <label htmlFor="password">Password</label>
+                  <input
+                    id="password"
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    autoComplete="current-password"
+                  />
+                </div>
+              </div>
+              {authError ? (
+                <div className="banner banner-bad" role="alert" style={{ marginTop: 12 }}>
+                  {authError}
+                </div>
+              ) : null}
+              <button
+                type="submit"
+                disabled={loginBusy || !email || !password}
+                className="btn btn-primary"
+                style={{ marginTop: 16 }}
+              >
+                {loginBusy ? "Signing in…" : "Sign in"}
+              </button>
+            </form>
+            <p className="auth-trust">
+              Authenticated through Supabase. No service-role keys are used in the browser; admins never manage other accounts&apos; plaintext secrets from this UI.
+            </p>
+          </section>
+        </main>
       </div>
     );
   }
@@ -1164,12 +1344,202 @@ export default function App() {
 
   return (
     <div className="shell">
-      <div className="topbar topbar-admin">
-        <div className="topbar-brand">
-          <strong>eliteOS System Admin Head</strong>
-          <div className="muted">{me?.user?.email ?? ""} · session active</div>
+      <header className="topbar" role="banner">
+        <a
+          href={homeBase}
+          className="brand-row brand-row-link"
+          aria-label={`eliteOS System Admin — ${workspaceName}`}
+        >
+          <span className="brand-mark" aria-hidden>
+            {workspaceLogoUrl ? <img src={workspaceLogoUrl} alt="" /> : null}
+          </span>
+          <span className="brand-text">
+            <span className="brand-wordmark">eliteOS</span>
+            <span className="brand-sub">System Admin · {workspaceName}</span>
+          </span>
+        </a>
+        <div className="topbar-actions">
+          <div className="topbar-account-wrap" ref={userMenuRef}>
+            <button
+              type="button"
+              className={`topbar-account${userMenuOpen ? " is-open" : ""}`}
+              aria-label="Open account menu"
+              aria-haspopup="menu"
+              aria-expanded={userMenuOpen}
+              onClick={() => setUserMenuOpen((v) => !v)}
+            >
+              <span className="topbar-avatar" aria-hidden>{userDisplayInitials}</span>
+              <span className="topbar-account-text">
+                <span className="topbar-account-name">{userDisplayName}</span>
+                {userDisplayEmail && userDisplayEmail.toLowerCase() !== userDisplayName.toLowerCase() ? (
+                  <span className="topbar-account-role">{userDisplayEmail}</span>
+                ) : null}
+              </span>
+              <span className="topbar-account-caret" aria-hidden>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </span>
+            </button>
+            {userMenuOpen ? (
+              <div className="user-menu" role="menu" aria-label="Account menu">
+                <div className="user-menu-header">
+                  <p className="user-menu-name">{userDisplayName}</p>
+                  {userDisplayEmail ? <p className="user-menu-email">{userDisplayEmail}</p> : null}
+                  {meRole ? (
+                    <p className="user-menu-role">
+                      <span className="role-badge">{titleizeToken(meRole)}</span>
+                    </p>
+                  ) : null}
+                  <p className="user-menu-workspace">
+                    <span>Workspace ·</span>{" "}
+                    <strong>{workspaceName}</strong>
+                    <span className="user-menu-sep" aria-hidden>·</span>
+                    <span>on slabOS</span>
+                  </p>
+                </div>
+                <div className="user-menu-list">
+                  <a
+                    href={homeBase}
+                    className="user-menu-item"
+                    role="menuitem"
+                    onClick={() => setUserMenuOpen(false)}
+                  >
+                    <span className="user-menu-icon" aria-hidden>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M3 11.5L12 4l9 7.5" />
+                        <path d="M5 10v10h14V10" />
+                        <path d="M10 20v-6h4v6" />
+                      </svg>
+                    </span>
+                    <span className="user-menu-label">
+                      <span>Open Home</span>
+                      <span className="user-menu-meta">eliteOS Launcher</span>
+                    </span>
+                    <span className="user-menu-shortcut" aria-hidden>↗</span>
+                  </a>
+                  <button
+                    type="button"
+                    className="user-menu-item"
+                    role="menuitem"
+                    onClick={() => {
+                      setUserMenuOpen(false);
+                      void refreshAll();
+                    }}
+                  >
+                    <span className="user-menu-icon" aria-hidden>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21 12a9 9 0 1 1-3-6.7" />
+                        <path d="M21 4v5h-5" />
+                      </svg>
+                    </span>
+                    <span className="user-menu-label">
+                      <span>Reload data</span>
+                      <span className="user-menu-meta">Roster, reference, diagnostics</span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="user-menu-item is-disabled"
+                    role="menuitem"
+                    aria-disabled="true"
+                    disabled
+                    title="Profile / Preferences is coming soon"
+                  >
+                    <span className="user-menu-icon" aria-hidden>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="8" r="3.5" />
+                        <path d="M5 20c1.5-3.5 4.2-5 7-5s5.5 1.5 7 5" />
+                      </svg>
+                    </span>
+                    <span className="user-menu-label">
+                      <span>Profile &amp; preferences</span>
+                      <span className="user-menu-meta">Coming soon</span>
+                    </span>
+                  </button>
+                </div>
+                <div className="user-menu-footer">
+                  <button
+                    type="button"
+                    className="user-menu-item user-menu-signout"
+                    role="menuitem"
+                    onClick={() => void handleSignOut()}
+                  >
+                    <span className="user-menu-icon" aria-hidden>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                        <polyline points="16 17 21 12 16 7" />
+                        <line x1="21" y1="12" x2="9" y2="12" />
+                      </svg>
+                    </span>
+                    <span className="user-menu-label">Sign out</span>
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
         </div>
-        <nav className="main-nav-pills" aria-label="System admin">
+      </header>
+
+      <section className="sa-hero" aria-labelledby="sa-hero-title">
+        <div className="hero-aurora" aria-hidden />
+        <div className="sa-hero-grid">
+          <div className="sa-hero-main">
+            <p className="hero-eyebrow">Internal tool · System Admin</p>
+            <h1 id="sa-hero-title" className="hero-title">Governance console</h1>
+            <p className="hero-sub">
+              Users, roles, head access, invites, lifecycle actions, and platform diagnostics. Backend authorization is the source of truth — every action here calls{" "}
+              <code className="hero-domain-code">{USER_MGMT_API}</code>.
+            </p>
+            {!canOperate && listError ? (
+              <p className="hero-domain muted-note">
+                <span className="hero-warn-pill" aria-hidden /> {listError}
+              </p>
+            ) : null}
+          </div>
+
+          <aside className="hero-workspace" aria-label={`Workspace · ${workspaceName}`}>
+            <p className="hero-workspace-eyebrow">Workspace</p>
+            <div className="hero-workspace-card">
+              <div className="hero-workspace-mark">
+                {workspaceLogoUrl ? (
+                  <img
+                    src={workspaceLogoUrl}
+                    alt=""
+                    loading="lazy"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).style.display = "none";
+                      const fallback = (e.currentTarget.parentElement as HTMLElement | null)?.querySelector(
+                        ".hero-workspace-initials"
+                      ) as HTMLElement | null;
+                      if (fallback) fallback.style.display = "flex";
+                    }}
+                  />
+                ) : null}
+                <span
+                  className="hero-workspace-initials"
+                  aria-hidden={workspaceLogoUrl ? "true" : "false"}
+                  style={workspaceLogoUrl ? { display: "none" } : undefined}
+                >
+                  {workspaceInitials}
+                </span>
+              </div>
+              <div className="hero-workspace-text">
+                <p className="hero-workspace-name">{workspaceName}</p>
+                <p className="hero-workspace-meta">
+                  <span>on </span>
+                  <span className="hero-workspace-platform">slabOS</span>
+                  <span className="hero-workspace-sep" aria-hidden>·</span>
+                  <span>{workspaceShortId}</span>
+                </p>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      {canOperate ? (
+        <nav className="sa-subnav" aria-label="System admin">
           {(
             [
               ["people", "People & access"],
@@ -1230,39 +1600,7 @@ export default function App() {
             Identity resolution
           </button>
         </nav>
-        <div className="topbar-tail">
-          {!canOperate ? <span className="topbar-warn">{listError}</span> : null}
-          <button
-            type="button"
-            className="btn"
-            onClick={async () => {
-              const t = String(sessionToken ?? "").trim();
-              if (t) {
-                try {
-                  await apiFetch("/api/auth/log-event", {
-                    token: t,
-                    method: "POST",
-                    body: { event_type: "sign_out", tool_slug: "system_admin" }
-                  });
-                } catch {
-                  /* best-effort audit only */
-                }
-              }
-              void supabase.auth.signOut();
-              setPassword("");
-              setSelectedId(null);
-              setSchemaHealthResult(null);
-              setSchemaHealthProbeError(null);
-              setSchemaHealthDevMeta(null);
-              setMorawareStatus(null);
-              setMorawareStatusError("");
-              setMorawareStatusLoading(false);
-            }}
-          >
-            Sign out
-          </button>
-        </div>
-      </div>
+      ) : null}
 
       {!canOperate ? (
         <div className="panel">
