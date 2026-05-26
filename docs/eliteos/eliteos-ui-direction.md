@@ -220,8 +220,9 @@ protected head.
      client-side. If a head has no role information without a new backend
      call, **omit** this item entirely. Never gate by initials, email, or
      UI-only check.
-  4. **Profile & preferences** — placeholder, disabled with a
-     `Coming soon` meta line. No backend page is built yet.
+  4. **Profile & preferences** — links to `{VITE_HEAD_URL_HOME}?view=profile`
+     (the eliteOS Home profile/preferences surface). Opens in the same tab.
+     Meta line reads "eliteOS Home". No longer disabled as of v1 (2026-05-27).
   5. **Sign out** — sits in a `.user-menu-footer` separator block.
      Burgundy on hover; calls the existing `signOut` handler.
 - **Behavior:** outside click + `Escape` close the menu; opening sets focus
@@ -1023,9 +1024,12 @@ Rules every adopter follows:
   paired with backend `requireAuth` + role / head-access enforcement.
   See `docs/eliteos/security-audit.md` and the workspace rule
   `eliteos-architecture.mdc` for the cross-check.
-- `Profile & preferences` is a disabled placeholder in every adopter
-  until the dedicated **Profile / Preferences v1** pass ships. Do not
-  wire it to a partial preferences surface in a UI-only pass.
+- **`Profile & preferences` is live as of v1 (2026-05-27).** The menu
+  item is now an `<a>` link to `{VITE_HEAD_URL_HOME}?view=profile`
+  (app-home Profile & Preferences view). Do NOT make it a disabled
+  button. Do NOT build a separate preferences page inside each head.
+  The canonical destination is always app-home `?view=profile`.
+  See `docs/eliteos/FEATURE_DECISIONS.md §34` for the full rationale.
 - Adopting the shell must not change any existing API call, payload
   shape, role/head-access enforcement, audit log, or workflow behavior.
   Adopters that prefer to keep an existing primary action color (e.g.
@@ -1102,9 +1106,10 @@ See §6.1 and §6.1.1 for visual tokens. Behavior requirements:
 - **Refresh action** calls the head's existing data loaders only
   (Launcher: `/api/me` + `/api/me/heads`; Quote Library: metrics + active
   list + open detail). Never invent new endpoints in a UI pass.
-- **Profile & preferences** is a placeholder until a real
-  `/preferences` surface ships. Render it disabled with a
-  `Coming soon` meta line.
+- **Profile & preferences** links to `{VITE_HEAD_URL_HOME}?view=profile`
+  (app-home Profile & Preferences v1). Render as an `<a>` tag, same-tab,
+  with meta line "eliteOS Home". Never render as a disabled button anymore.
+  See §34 in FEATURE_DECISIONS.md.
 - **Sign out** always calls the existing `signOut` helper for the head;
   never bypass the helper to call Supabase directly inline.
 

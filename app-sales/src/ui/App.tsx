@@ -472,13 +472,12 @@ export default function App() {
                     </span>
                     <span className="eos-user-menu-shortcut" aria-hidden>↗</span>
                   </a>
-                  <button
-                    type="button"
-                    className="eos-user-menu-item is-disabled"
+                  <a
+                    href={`${config.homeUrl}?view=profile`}
+                    className="eos-user-menu-item"
                     role="menuitem"
-                    aria-disabled="true"
-                    disabled
-                    title="Profile / Preferences is coming soon"
+                    onClick={() => setUserMenuOpen(false)}
+                    title="Profile & preferences"
                   >
                     <span className="eos-user-menu-icon" aria-hidden>
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
@@ -488,9 +487,9 @@ export default function App() {
                     </span>
                     <span className="eos-user-menu-label">
                       <span>Profile &amp; preferences</span>
-                      <span className="eos-user-menu-meta">Coming soon</span>
+                      <span className="eos-user-menu-meta">eliteOS Home</span>
                     </span>
-                  </button>
+                  </a>
                 </div>
                 <div className="eos-user-menu-footer">
                   <button

@@ -3,6 +3,8 @@ import type { Session } from "@supabase/supabase-js";
 import { ApiError, apiFetch } from "../lib/api";
 import { EOS_LOGO_URL, resolveHeadLaunchUrl, sanitizeLauncherLaunchUrl } from "../lib/config";
 import { supabase } from "../lib/supabase";
+import ProfileView from "./ProfileView";
+import type { UserPreferences } from "./ProfileView";
 
 function readOAuthErrorFromBrowser(): string | null {
   if (typeof window === "undefined") return null;
@@ -73,6 +75,41 @@ type HeadsResp = {
   };
   heads: HeadCard[];
 };
+
+// ---------------------------------------------------------------------------
+// User Preferences — defaults, localStorage persistence helpers
+// ---------------------------------------------------------------------------
+
+const DEFAULT_PREFS: UserPreferences = {
+  default_landing_head: null,
+  table_density: "comfortable",
+  open_heads_in_new_tab: true,
+  show_advanced_panels_default: false
+};
+
+const PREFS_LS_KEY = "eos_user_prefs_v1";
+
+function readLocalPrefs(): UserPreferences {
+  try {
+    const raw = typeof localStorage !== "undefined" ? localStorage.getItem(PREFS_LS_KEY) : null;
+    if (!raw) return { ...DEFAULT_PREFS };
+    return { ...DEFAULT_PREFS, ...JSON.parse(raw) };
+  } catch {
+    return { ...DEFAULT_PREFS };
+  }
+}
+
+function writeLocalPrefs(p: UserPreferences): void {
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(PREFS_LS_KEY, JSON.stringify(p));
+    }
+  } catch { /* best-effort */ }
+}
+
+// ---------------------------------------------------------------------------
+// Workspace identity
+// ---------------------------------------------------------------------------
 
 /**
  * Default workspace identity for the current Elite tenant.
@@ -545,6 +582,21 @@ export default function App() {
   const [loadingData, setLoadingData] = useState(false);
   const [refreshBusy, setRefreshBusy] = useState(false);
 
+  // Home user menu dropdown
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+
+  // Profile & Preferences view state
+  const [view, setView] = useState<"launcher" | "profile">(() => {
+    if (typeof window === "undefined") return "launcher";
+    try {
+      return new URLSearchParams(window.location.search).get("view") === "profile"
+        ? "profile"
+        : "launcher";
+    } catch { return "launcher"; }
+  });
+  const [prefs, setPrefs] = useState<UserPreferences>(readLocalPrefs);
+
   const bootUrlRef = useRef<{ path: string; hash: string; search: string } | null>(null);
   if (bootUrlRef.current === null && typeof window !== "undefined") {
     bootUrlRef.current = {
@@ -567,12 +619,21 @@ export default function App() {
     setLoadError("");
     setLoadingData(true);
     try {
-      const [meJson, headsJson] = await Promise.all([
+      const [meJson, headsJson, prefsResp] = await Promise.all([
         apiFetch("/api/me", { token: t }) as Promise<MeResp>,
-        apiFetch("/api/me/heads", { token: t }) as Promise<HeadsResp>
+        apiFetch("/api/me/heads", { token: t }) as Promise<HeadsResp>,
+        apiFetch("/api/me/preferences", { token: t }).catch(() => null) as Promise<{
+          ok: boolean;
+          preferences: UserPreferences;
+        } | null>
       ]);
       setMe(meJson);
       setHeadsPayload(headsJson);
+      if (prefsResp?.preferences) {
+        const merged = { ...DEFAULT_PREFS, ...prefsResp.preferences };
+        setPrefs(merged);
+        writeLocalPrefs(merged);
+      }
     } catch (e: unknown) {
       if (e instanceof ApiError) setLoadError(e.message);
       else setLoadError(String((e as Error)?.message ?? e));
@@ -687,6 +748,37 @@ export default function App() {
     };
   }, [hydrate]);
 
+  // Handle browser back/forward navigation between launcher and profile view
+  useEffect(() => {
+    function handlePop() {
+      try {
+        const qs = new URLSearchParams(window.location.search);
+        setView(qs.get("view") === "profile" ? "profile" : "launcher");
+      } catch { /* ignore */ }
+    }
+    window.addEventListener("popstate", handlePop);
+    return () => window.removeEventListener("popstate", handlePop);
+  }, []);
+
+  // Close the Home user menu on outside click or Escape
+  useEffect(() => {
+    if (!userMenuOpen) return;
+    function handleClick(e: MouseEvent) {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
+        setUserMenuOpen(false);
+      }
+    }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setUserMenuOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [userMenuOpen]);
+
   async function submitLogin(ev: React.FormEvent) {
     ev.preventDefault();
     setAuthError("");
@@ -721,6 +813,30 @@ export default function App() {
     setInvitePwErr("");
     setUrlFlowError("");
     await supabase.auth.signOut();
+  }
+
+  function navToProfile() {
+    setView("profile");
+    window.history.pushState({ view: "profile" }, "", "?view=profile");
+  }
+
+  function navToLauncher() {
+    setView("launcher");
+    window.history.pushState({ view: "launcher" }, "", "/");
+  }
+
+  async function savePreferences(newPrefs: UserPreferences): Promise<void> {
+    writeLocalPrefs(newPrefs);
+    setPrefs(newPrefs);
+    const token = session?.access_token ?? "";
+    if (!token) return;
+    try {
+      await apiFetch("/api/me/preferences", {
+        token,
+        method: "PATCH",
+        body: newPrefs
+      });
+    } catch { /* localStorage already saved — fine */ }
   }
 
   async function submitInvitePassword(ev: React.FormEvent) {
@@ -814,25 +930,103 @@ export default function App() {
             </span>
           </a>
           <div className="topbar-actions">
-            <div className="topbar-account" aria-label="Signed in user">
-              <span className="topbar-avatar" aria-hidden>{initials}</span>
-              <span className="topbar-account-text">
-                <span className="topbar-account-name">{displayName}</span>
-                {u?.role ? <span className="topbar-account-role">{u.role}</span> : null}
-              </span>
+            <div className="home-user-menu-wrap" ref={userMenuRef}>
+              <button
+                type="button"
+                className="home-user-chip"
+                aria-haspopup="menu"
+                aria-expanded={userMenuOpen}
+                onClick={() => setUserMenuOpen((o) => !o)}
+                aria-label="Account menu"
+              >
+                <span className="home-user-chip-avatar" aria-hidden>{initials}</span>
+                <span className="home-user-chip-text">
+                  <span className="home-user-chip-name">{displayName}</span>
+                  {u?.role ? <span className="home-user-chip-role">{u.role}</span> : null}
+                </span>
+                <svg
+                  className="home-user-chip-chevron"
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                >
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
+              </button>
+
+              {userMenuOpen ? (
+                <div className="home-user-menu" role="menu" aria-label="Account menu">
+                  <div className="home-user-menu-header">
+                    <p className="home-user-menu-display-name">{displayName}</p>
+                    {displayEmail ? <p className="home-user-menu-email">{displayEmail}</p> : null}
+                    <p className="home-user-menu-workspace">Workspace · {workspaceName} · on slabOS</p>
+                  </div>
+
+                  <div className="home-user-menu-body">
+                    <button
+                      type="button"
+                      className="home-user-menu-item"
+                      role="menuitem"
+                      onClick={() => { setUserMenuOpen(false); navToProfile(); }}
+                    >
+                      <span className="home-user-menu-icon" aria-hidden>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="12" cy="8" r="3.5" />
+                          <path d="M5 20c1.5-3.5 4.2-5 7-5s5.5 1.5 7 5" />
+                        </svg>
+                      </span>
+                      <span className="home-user-menu-label">
+                        <span>Profile &amp; preferences</span>
+                        <span className="home-user-menu-meta">Account, settings</span>
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      className="home-user-menu-item"
+                      role="menuitem"
+                      onClick={() => { setUserMenuOpen(false); void reloadAccess(); }}
+                      disabled={refreshBusy || loadingData}
+                    >
+                      <span className="home-user-menu-icon" aria-hidden>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M21 12a9 9 0 1 1-3-6.7" />
+                          <path d="M21 4v5h-5" />
+                        </svg>
+                      </span>
+                      <span className="home-user-menu-label">
+                        <span>{refreshBusy ? "Refreshing…" : "Refresh access"}</span>
+                        <span className="home-user-menu-meta">Tools &amp; permissions</span>
+                      </span>
+                    </button>
+                  </div>
+
+                  <div className="home-user-menu-footer">
+                    <button
+                      type="button"
+                      className="home-user-menu-item home-user-menu-signout"
+                      role="menuitem"
+                      onClick={() => { setUserMenuOpen(false); void signOutClick(); }}
+                    >
+                      <span className="home-user-menu-icon" aria-hidden>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                          <polyline points="16 17 21 12 16 7" />
+                          <line x1="21" y1="12" x2="9" y2="12" />
+                        </svg>
+                      </span>
+                      <span className="home-user-menu-label">Sign out</span>
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </div>
-            <button
-              type="button"
-              className="btn btn-quiet"
-              onClick={() => void reloadAccess()}
-              disabled={refreshBusy || loadingData}
-              title="Refresh your tool access from the Brain"
-            >
-              {refreshBusy ? "Refreshing…" : "Refresh access"}
-            </button>
-            <button type="button" className="btn btn-ghost" onClick={() => void signOutClick()}>
-              Sign out
-            </button>
           </div>
         </header>
       ) : null}
@@ -960,6 +1154,17 @@ export default function App() {
               Skip for now — open launcher
             </button>
           </div>
+        ) : view === "profile" ? (
+          <ProfileView
+            user={me?.user}
+            heads={headsPayload?.heads ?? []}
+            prefs={prefs}
+            loading={loadingData}
+            loadError={loadError}
+            sessionEmail={String(session?.user?.email ?? "").trim()}
+            onBack={navToLauncher}
+            onSave={savePreferences}
+          />
         ) : (
           <>
             <section className="hero" aria-labelledby="hero-greeting">
@@ -973,12 +1178,18 @@ export default function App() {
                   </p>
                   <div className="hero-stats" role="list">
                     <div className="hero-stat" role="listitem">
-                      <span className="hero-stat-value">{loadingData && !headsPayload ? "—" : availableCount}</span>
-                      <span className="hero-stat-label">{availableCount === 1 ? "Tool available" : "Tools available"}</span>
+                      <span className="hero-stat-value">
+                        {!headsPayload ? "—" : availableCount}
+                      </span>
+                      <span className="hero-stat-label">
+                        {!headsPayload || availableCount === 1 ? "Tool available" : "Tools available"}
+                      </span>
                     </div>
                     <div className="hero-stat-divider" aria-hidden />
                     <div className="hero-stat" role="listitem">
-                      <span className="hero-stat-value">{loadingData && !headsPayload ? "—" : roadmapCount}</span>
+                      <span className="hero-stat-value">
+                        {!headsPayload ? "—" : roadmapCount}
+                      </span>
                       <span className="hero-stat-label">On the roadmap</span>
                     </div>
                     <div className="hero-stat-divider" aria-hidden />
@@ -1116,19 +1327,28 @@ export default function App() {
 
                       function openHead() {
                         if (!canNavigate || !url) return;
-                        window.open(url, "_blank", "noopener,noreferrer");
+                        if (prefs.open_heads_in_new_tab) {
+                          window.open(url, "_blank", "noopener,noreferrer");
+                        } else {
+                          window.location.href = url;
+                        }
                       }
+
+                      const isDefaultHead = prefs.default_landing_head === h.slug;
 
                       return (
                         <article
                           key={h.slug}
-                          className={`head-card${roadmapSection ? " head-card-roadmap" : " head-card-available"}${inactiveClass} tint-${tint}`}
+                          className={`head-card${roadmapSection ? " head-card-roadmap" : " head-card-available"}${inactiveClass}${isDefaultHead ? " head-card-default" : ""} tint-${tint}`}
                         >
                           <div className="head-card-top">
                             <span className={`head-glyph head-glyph-${tint}`} aria-hidden>
                               <HeadGlyph slug={h.slug} />
                             </span>
                             <div className="pill-row" aria-label="Status">
+                              {isDefaultHead ? (
+                                <span className="pill pill-default" title="Your default tool">Default</span>
+                              ) : null}
                               {pills.map((t, pi) => (
                                 <span key={`${h.slug}-${pi}-${t}`} className={pillClass(t)}>
                                   {t}

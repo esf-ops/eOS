@@ -435,3 +435,22 @@
 
 ---
 
+## §34 — Profile & Preferences v1: central user self-service surface in app-home
+
+| Field | Value |
+|---|---|
+| **Date** | 2026-05-27 |
+| **Decision** | Profile & Preferences v1 lives in app-home at `?view=profile`. Protected-head user menus link to this route. Safe user-owned UI preferences are persisted via `GET /api/me/preferences` + `PATCH /api/me/preferences` with a `user_preferences` table (additive, manual apply). Roles, head access, org assignment, and partner access remain exclusively in System Admin. |
+| **Why** | Home is the central auth and launcher entry point. A single profile surface avoids duplicating preferences logic across every head. The self-service scope is strictly limited to UI preferences so no permission surface is opened. |
+| **Routing** | No router in app-home. `view` React state initialized from `?view=profile` URL param. `history.pushState` keeps URL in sync. `popstate` handles browser back. |
+| **Persistence** | Backend-first: `user_preferences` table (see `backend-core/supabase/eliteos_user_preferences_v1.sql`). Backend degrades gracefully if table not yet applied (returns defaults / no-op writes). Frontend falls back to `localStorage` key `eos_user_prefs_v1`. Once SQL is applied, DB becomes the source of truth transparently. |
+| **Preferences v1** | `default_landing_head` (slug or null), `table_density` (comfortable/compact), `open_heads_in_new_tab` (boolean), `show_advanced_panels_default` (boolean). |
+| **Profile fields** | All read-only in v1: full name, email, role, user type, workspace/org, account status, assigned tools. Display name editing requires a dedicated self-service PATCH on `user_profiles` — not yet built; documented here for the next pass. |
+| **Security** | `requireAuth()` only on preference routes. User can only read/update their own row (enforced both by backend `user_id = req.user.id` and by RLS `auth.uid() = user_id`). Explicit allowlist of updatable keys. Role, org_id, head access, is_active, and any auth metadata are not writable through this API. |
+| **What System Admin still owns** | Users, roles, org assignment, head access, invites, deactivate/reactivate, dealer/partner access, diagnostics. Profile & Preferences is not a replacement. |
+| **Impacted files** | `app-home/src/ui/App.tsx`, `app-home/src/ui/ProfileView.tsx`, `app-home/src/ui/styles.css`, `backend-core/src/server.js`, `backend-core/supabase/eliteos_user_preferences_v1.sql`, `app-quote-library/src/QuoteLibraryApp.tsx`, `app-internal-estimate/src/InternalEstimateApp.tsx`, `app-pricing-admin/src/PricingAdminApp.tsx`, `app-system-admin/src/ui/App.tsx`, `app-sales/src/ui/App.tsx` |
+| **SQL apply note** | `backend-core/supabase/eliteos_user_preferences_v1.sql` must be applied manually in Supabase before DB persistence is active. App degrades to localStorage-only until then. No data loss — localStorage values are written to DB on next save after table is applied. |
+| **Revisit trigger** | Display name self-service edit (needs a safe `/api/me/profile` PATCH). Additional preference keys. Extracting shared `<UserMenu>` component across heads once convergence is planned. |
+
+---
+

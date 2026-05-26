@@ -1023,6 +1023,104 @@ app.get("/api/me", requireAuth(), async (req, res) => {
   res.json({ ok: true, user: req.user });
 });
 
+// ---------------------------------------------------------------------------
+// Profile & Preferences API — safe user-owned UI preferences only.
+// Security: requireAuth() only; users can read/update their own row.
+// Never allows role, org, head-access, or permission changes.
+// Degrades gracefully if user_preferences table is not yet applied
+// (returns defaults on GET, no-op on PATCH).
+// ---------------------------------------------------------------------------
+
+const _PREF_DEFAULTS = {
+  default_landing_head: null,
+  table_density: "comfortable",
+  open_heads_in_new_tab: true,
+  show_advanced_panels_default: false
+};
+
+const _PREF_ALLOWED_KEYS = new Set([
+  "default_landing_head",
+  "table_density",
+  "open_heads_in_new_tab",
+  "show_advanced_panels_default"
+]);
+
+const _PREF_ALLOWED_TABLE_DENSITY = new Set(["comfortable", "compact"]);
+
+const _PREF_ALLOWED_LANDING_HEADS = new Set([
+  "quote", "quote_library", "pricing_admin", "system_admin",
+  "sales", "executive", "brain_health", "public_quote",
+  "production", "shop_tv", "install", "purchasing",
+  "customer_service", "hr", "safety", "org_directory"
+]);
+
+app.get("/api/me/preferences", requireAuth(), async (req, res) => {
+  try {
+    const supabase = supabaseServerClient();
+    const { data, error } = await supabase
+      .from("user_preferences")
+      .select("default_landing_head,table_density,open_heads_in_new_tab,show_advanced_panels_default")
+      .eq("user_id", req.user.id)
+      .maybeSingle();
+    if (error) {
+      // Table likely not yet applied — return defaults, not an error
+      return res.json({ ok: true, preferences: { ..._PREF_DEFAULTS }, source: "defaults" });
+    }
+    const preferences = data ? { ..._PREF_DEFAULTS, ...data } : { ..._PREF_DEFAULTS };
+    return res.json({ ok: true, preferences, source: data ? "db" : "defaults" });
+  } catch {
+    return res.json({ ok: true, preferences: { ..._PREF_DEFAULTS }, source: "defaults" });
+  }
+});
+
+app.patch("/api/me/preferences", requireAuth(), async (req, res) => {
+  const body = req.body || {};
+  const patch = {};
+
+  for (const key of Object.keys(body)) {
+    if (!_PREF_ALLOWED_KEYS.has(key)) {
+      return res.status(400).json({ ok: false, error: `Unknown preference key: ${key}` });
+    }
+    const val = body[key];
+    if (key === "table_density") {
+      if (!_PREF_ALLOWED_TABLE_DENSITY.has(val)) {
+        return res.status(400).json({ ok: false, error: "table_density must be comfortable or compact" });
+      }
+      patch.table_density = val;
+    } else if (key === "open_heads_in_new_tab" || key === "show_advanced_panels_default") {
+      if (typeof val !== "boolean") {
+        return res.status(400).json({ ok: false, error: `${key} must be boolean` });
+      }
+      patch[key] = val;
+    } else if (key === "default_landing_head") {
+      if (val !== null && !_PREF_ALLOWED_LANDING_HEADS.has(val)) {
+        return res.status(400).json({ ok: false, error: "Unknown landing head slug" });
+      }
+      patch.default_landing_head = val;
+    }
+  }
+
+  if (Object.keys(patch).length === 0) {
+    return res.json({ ok: true, message: "No changes" });
+  }
+
+  patch.updated_at = new Date().toISOString();
+
+  try {
+    const supabase = supabaseServerClient();
+    const { error } = await supabase
+      .from("user_preferences")
+      .upsert({ user_id: req.user.id, ...patch }, { onConflict: "user_id" });
+    if (error) {
+      // Table not yet applied — acknowledge gracefully (localStorage fallback in frontend)
+      return res.json({ ok: true, message: "Noted (table pending apply)", source: "no-op" });
+    }
+    return res.json({ ok: true, message: "Preferences saved", source: "db" });
+  } catch {
+    return res.json({ ok: true, message: "Noted (table pending apply)", source: "no-op" });
+  }
+});
+
 attachSalesHeadRoutes(app, {
   requireAuth,
   requireRole,

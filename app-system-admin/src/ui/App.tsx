@@ -1528,13 +1528,12 @@ export default function App() {
                       <span className="user-menu-meta">Roster, reference, diagnostics</span>
                     </span>
                   </button>
-                  <button
-                    type="button"
-                    className="user-menu-item is-disabled"
+                  <a
+                    href={`${homeBase}?view=profile`}
+                    className="user-menu-item"
                     role="menuitem"
-                    aria-disabled="true"
-                    disabled
-                    title="Profile / Preferences is coming soon"
+                    onClick={() => setUserMenuOpen(false)}
+                    title="Profile & preferences"
                   >
                     <span className="user-menu-icon" aria-hidden>
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
@@ -1544,9 +1543,9 @@ export default function App() {
                     </span>
                     <span className="user-menu-label">
                       <span>Profile &amp; preferences</span>
-                      <span className="user-menu-meta">Coming soon</span>
+                      <span className="user-menu-meta">eliteOS Home</span>
                     </span>
-                  </button>
+                  </a>
                 </div>
                 <div className="user-menu-footer">
                   <button
