@@ -388,6 +388,12 @@ export default function InternalEstimateApp() {
   const startNewAfterSaveRef = useRef<
     null | "save_revision" | "update_existing" | "restore" | "save_as_new_quote"
   >(null);
+  // Holds the latest customer-facing display total so buildSubmitPayload can read
+  // it at call time without declaring it in its deps array. Writing to a ref in the
+  // render body is a standard React escape-hatch for "always up-to-date" values.
+  // (Declaring it in the deps array caused a TDZ crash in the production bundle
+  //  because customerDisplayTotal is const-declared 558 lines below the useCallback.)
+  const customerDisplayTotalRef = useRef(0);
 
   const [calcBusy, setCalcBusy] = useState(false);
   const [calcError, setCalcError] = useState<string | null>(null);
@@ -1044,7 +1050,7 @@ export default function InternalEstimateApp() {
   const buildSubmitPayload = useCallback((saveModeOverride?: InternalSaveIntent) => {
     const base = {
       ...buildCalcPayload(),
-      customerDisplayTotal,
+      customerDisplayTotal: customerDisplayTotalRef.current,
       customer_name: customerName.trim() || null,
       customer_email: email.trim() || null,
       customer_phone: phone.trim() || null,
@@ -1070,7 +1076,6 @@ export default function InternalEstimateApp() {
     return { ...base, save_mode: "create" as const };
   }, [
     buildCalcPayload,
-    customerDisplayTotal,
     customerName,
     email,
     phone,
@@ -1618,6 +1623,8 @@ export default function InternalEstimateApp() {
     );
     return summaryCounterDisplay + summaryBacksplashDisplay + summaryAddonsDisplay + summaryVisibleLinesDisplay;
   }, [selectedMaterialBreakdown, liveEstimate.measuredRooms, visibleRoomAddons, visibleCustomerLines, internalOnlyAdjustDollars]);
+  // Keep ref in sync so buildSubmitPayload reads the fresh value at save time.
+  customerDisplayTotalRef.current = customerDisplayTotal;
 
   /** Matches customer print Quoted Material Breakdown + vanity + room extras + custom lines — same basis as live total. */
   const stickyLiveRollup = useMemo(() => {
