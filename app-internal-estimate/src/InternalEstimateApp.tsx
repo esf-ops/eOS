@@ -2367,7 +2367,7 @@ export default function InternalEstimateApp() {
                 <div className="grid3 ie-job-grid">
                   <label>
                     Account
-                    <input value={accountName} onChange={(e) => setAccountName(e.target.value)} placeholder="Direct" />
+                    <input value={accountName} onChange={(e) => setAccountName(e.target.value)} placeholder="Account Name" />
                   </label>
                   <label>
                     Account contact phone

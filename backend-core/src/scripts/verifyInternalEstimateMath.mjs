@@ -367,4 +367,51 @@ const ceilRoomsBoth = await calculateQuote(
 // counter 8.3 → 9, backsplash 2.11 → 3
 assertNear("12 rooms-engine counter 8.3→9 + backsplash 2.11→3", ceilRoomsBoth.totals.retail, (9 + 3) * wRate);
 
+// ── Customer-facing print total = sum of rounded visible rows ───────────────
+// These are pure-math tests mirroring the logic in CustomerEstimatePrint.tsx.
+// roundCustomerDisplay: ceil to nearest $10 for amounts > 0; 0 otherwise.
+function roundCustomerDisplay(amount) {
+  const n = Number(amount);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.ceil(n / 10) * 10;
+}
+
+function assertEq(label, actual, expected) {
+  if (actual !== expected) throw new Error(`${label}: expected ${expected}, got ${actual}`);
+}
+
+// Individual rows round up to nearest $10.
+assertEq("cep-row counter $963 → $970", roundCustomerDisplay(963), 970);
+assertEq("cep-row backsplash $136 → $140", roundCustomerDisplay(136), 140);
+assertEq("cep-row addons $100 → $100", roundCustomerDisplay(100), 100);
+assertEq("cep-row fixture $88 → $90", roundCustomerDisplay(88), 90);
+
+// Total = sum of rounded rows, NOT roundCustomerDisplay(exactSum).
+// Exact sum = 963+136+100+88 = 1287 → roundCustomerDisplay(1287) = $1,290 (WRONG).
+// Correct = $970 + $140 + $100 + $90 = $1,300.
+const qaCounterExact = 963;
+const qaBacksplashExact = 136;
+const qaAddonsExact = 100;
+const qaFixtureExact = 88;
+const qaExactSum = qaCounterExact + qaBacksplashExact + qaAddonsExact + qaFixtureExact;
+const qaOldWay = roundCustomerDisplay(qaExactSum); // $1,290 — the pre-fix total
+const qaNewWay =
+  roundCustomerDisplay(qaCounterExact) +
+  roundCustomerDisplay(qaBacksplashExact) +
+  roundCustomerDisplay(qaAddonsExact) +
+  roundCustomerDisplay(qaFixtureExact);
+assertEq("cep-total QA old way (exact rounded) was $1,290", qaOldWay, 1290);
+assertEq("cep-total QA new way (sum of rounded rows) is $1,300", qaNewWay, 1300);
+assertEq("cep-total new > old when individual ceilings compound", qaNewWay > qaOldWay, true);
+
+// Simpler: two rows that each round up; total must equal sum of rounded rows.
+assertEq("cep-total two-row: $966+$133 → $970+$140 = $1,110", roundCustomerDisplay(966) + roundCustomerDisplay(133), 1110);
+assertEq("cep-total two-row exact sum $1,099 rounds to $1,100 (≠ row sum)", roundCustomerDisplay(966 + 133), 1100);
+// The above confirms the mismatch; the correct customer total is $1,110.
+
+// Zero amounts stay zero.
+assertEq("cep-row zero amount → $0", roundCustomerDisplay(0), 0);
+// Negative (discount) amounts stay zero in customer display.
+assertEq("cep-row negative stays 0", roundCustomerDisplay(-50), 0);
+
 console.log("verifyInternalEstimateMath: ok");

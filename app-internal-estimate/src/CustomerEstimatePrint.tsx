@@ -137,7 +137,6 @@ const BRANCH_LOCATIONS = [
 ] as const;
 
 export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps) {
-  const finalRounded = roundCustomerDisplay(props.estimateTotalExact);
   const addrLine = [props.projectAddress, props.city, props.state].filter(Boolean).join(", ");
   const { selectedBreakdown: bd } = props;
 
@@ -153,6 +152,17 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
 
   const summaryCounterDisplay = roundCustomerDisplay(countertopMaterialExact);
   const summaryBacksplashDisplay = roundCustomerDisplay(backsplashMaterialExact);
+  /**
+   * Customer-facing Estimated project total = sum of rounded visible Estimate Summary rows.
+   * Each row is independently rounded to the nearest $10 first; total is their sum — not the
+   * exact internal grand total rounded. This ensures visible rows always reconcile to the total.
+   */
+  const summaryAddonsDisplay = hasAddons ? roundCustomerDisplay(addonsExact) : 0;
+  const summaryVisibleLinesDisplay = props.visibleLineItems.reduce(
+    (s, ln) => s + roundCustomerDisplay(Number(ln.lineTotal) || 0),
+    0
+  );
+  const finalRounded = summaryCounterDisplay + summaryBacksplashDisplay + summaryAddonsDisplay + summaryVisibleLinesDisplay;
 
   const stoneCtExacts = bd.groups.map((g) => g.countertopMaterial);
   const stoneBsExacts = bd.groups.map((g) => g.backsplashMaterial);
@@ -305,7 +315,7 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
             </tr>
           </tbody>
         </table>
-        <p className="cep-muted cep-round-note">Displayed amounts round up to the nearest $10. Estimate only — not a contract.</p>
+        <p className="cep-muted cep-round-note">Each line rounds up to the nearest $10; <strong>Estimated project total</strong> is the sum of the rounded lines. Estimate only — not a contract.</p>
       </section>
 
       {showRoomBreakdown ? (

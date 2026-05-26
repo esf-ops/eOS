@@ -392,3 +392,15 @@
 | **Revisit trigger** | Elite changes sqft billing policy (e.g. allows fractional billing); Pricing Admin adds configurable rounding per org; new input modes bypass this path. |
 
 ---
+
+### 31. Customer-facing Internal Estimate print total = sum of rounded visible rows
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-05-26 |
+| **Decision** | The **"Estimated project total"** on the customer-facing Internal Estimate PDF equals the arithmetic sum of each individually-rounded visible Estimate Summary row, not a second rounding of the exact internal grand total. Each row rounds to the nearest $10 first; total = sum of those rounded rows. |
+| **Why** | Elite's sales process rounds each customer-facing line item before presenting it to the customer. The displayed total must reconcile with the visible rows: rounding the raw exact aggregate once can produce a total $10 lower than the sum of the already-rounded rows. Example: rows display $970 + $140 + $100 + $90 = $1,300; the pre-fix code showed $1,290. |
+| **Impacted files** | `app-internal-estimate/src/CustomerEstimatePrint.tsx` — `finalRounded` now computed as `summaryCounterDisplay + summaryBacksplashDisplay + summaryAddonsDisplay + summaryVisibleLinesDisplay`. Room / Area Cost Breakdown continues to reconcile to this total via `allocateCustomerDisplayTens`. `props.estimateTotalExact` preserved for internal audit. |
+| **Revisit trigger** | Elite changes customer-display rounding granularity (e.g. nearest $5, exact), or decides the PDF total should reflect the raw exact total rather than the sum of rounded rows. |
+
+---
