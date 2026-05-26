@@ -380,3 +380,15 @@
 | **Revisit trigger** | First non-Elite tenant (backend supplies real `organization_name` / `organization_logo_url`); final platform naming decision (slabOS vs another name); a unified SaaS marketing site that needs to align with this brand split. |
 
 ---
+
+### 30. Internal Estimate chargeable sqft: always ceil to next whole square foot
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-05-26 |
+| **Decision** | For **Internal Estimate** (`quoteSource: "internal_quote"`), chargeable **countertop** and **backsplash/FHB** square footage must always round up to the next whole square foot before pricing. Examples: 8.3 sf countertop charges as 9 sf; 2.11 sf backsplash charges as 3 sf; 0 remains 0. Rounding happens at the **room-level aggregate per material-group bucket** (not per individual run), so mixed-material rooms round each group's splash independently. Exact measured sf is preserved in `counter`/`splash`/`fhb` on `MeasuredRoom` and in `exactCountertopSqft`/`exactBacksplashFhbSqft` in the backend calculation snapshot for audit and diagnostics. Applies uniformly across guided-shape, rapid-linear, and manual sq-ft input modes. |
+| **Why** | Aligns with Elite estimating practice: fractional square footage should not result in undercharging. |
+| **Impacted files/docs** | `app-quote/src/lib/measurementEngine.ts` (`chargeableSplashSqftFromExact`), `app-quote/src/lib/prototypeQuoteMath.ts` (`measureRoomDraft`, `buildSelectedMaterialBreakdownCore`, `applyChargeableSplashCeilToRoomRows`, `buildCustomerRoomAreaCostBreakdown`), `app-quote/src/lib/quoteTypes.ts` (`MeasuredRoom.chargeableSplash`, `.splashRoundingAdjustment`), `backend-core/src/quotes/roomGuidedMeasurement.js` (`chargeableSplashSqftFromExact`, `applyChargeableSplashCeilToGuidedRows`, `shouldApplyChargeableSplashCeil`), `backend-core/src/quotes/quoteCalculator.js` (`enumerateRoomMaterialSfRows`, `legacyWholesale`), `backend-core/src/scripts/verifyInternalEstimateMath.mjs` (tests 6–12). |
+| **Revisit trigger** | Elite changes sqft billing policy (e.g. allows fractional billing); Pricing Admin adds configurable rounding per org; new input modes bypass this path. |
+
+---

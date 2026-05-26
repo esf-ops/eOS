@@ -13,9 +13,13 @@
 import { priceVanityProgram2026FromPayload, VANITY_PROGRAM_YEAR } from "./vanityProgram2026.js";
 import {
   applyChargeableCounterCeilToGuidedRows,
+  applyChargeableSplashCeilToGuidedRows,
+  chargeableCounterSqftFromExact,
+  chargeableSplashSqftFromExact,
   enumerateGuidedRoomMaterialRows,
   isGuidedShapeRoom,
-  shouldApplyChargeableCounterCeil
+  shouldApplyChargeableCounterCeil,
+  shouldApplyChargeableSplashCeil
 } from "./roomGuidedMeasurement.js";
 
 const MIN_PUBLIC_RETAIL_MARKUP = 25;
@@ -301,6 +305,7 @@ function enumerateRoomMaterialSfRows(input) {
   /** @type {Array<Record<string, unknown>>} */
   const roomMeasurementSummaries = [];
   const useChargeableCeil = shouldApplyChargeableCounterCeil(input.quoteSource);
+  const useChargeableSplashCeil = shouldApplyChargeableSplashCeil(input.quoteSource);
 
   for (const room of input.rooms || []) {
     const roomName = String(room.name || room.room_name || "Room").trim() || "Room";
@@ -315,7 +320,15 @@ function enumerateRoomMaterialSfRows(input) {
         chargeableCounter = ceiled.chargeableCounter;
         counterRoundingAdjustment = ceiled.counterRoundingAdjustment;
       }
-      const roomSplashTotal = round2(guided.splash + guided.fhb);
+      const exactSplashTotal = round2(guided.splash + guided.fhb);
+      let chargeableSplashTotal = exactSplashTotal;
+      let splashRoundingAdjustment = 0;
+      if (useChargeableSplashCeil) {
+        const splashCeiled = applyChargeableSplashCeilToGuidedRows(guided.rows, exactSplashTotal);
+        guided = { ...guided, rows: splashCeiled.rows };
+        chargeableSplashTotal = splashCeiled.chargeableSplash;
+        splashRoundingAdjustment = splashCeiled.splashRoundingAdjustment;
+      }
       for (const row of guided.rows) {
         const isSplash = Boolean(row.isSplash || row.isFhb);
         const mat = resolveMaterialForPiece(room, null, input);
@@ -328,18 +341,22 @@ function enumerateRoomMaterialSfRows(input) {
         });
       }
       counter += chargeableCounter;
-      splash += roomSplashTotal;
+      splash += chargeableSplashTotal;
       roomMeasurementSummaries.push({
         roomName,
         measurementEngine: "guided_shape_groups_v1",
         exactCountertopSqft: exactCounter,
         chargeableCountertopSqft: chargeableCounter,
         countertopRoundingAdjustmentSqft: counterRoundingAdjustment,
+        exactBacksplashFhbSqft: exactSplashTotal,
+        chargeableBacksplashFhbSqft: chargeableSplashTotal,
+        backsplashRoundingAdjustmentSqft: splashRoundingAdjustment,
         backsplashSqft: guided.splash,
         fhbSqft: guided.fhb,
-        backsplashFhbSqft: roomSplashTotal,
+        backsplashFhbSqft: chargeableSplashTotal,
         cornerOverlapDeductionSqft: guided.cornerOverlapDeductionSf,
         chargeableCounterCeilApplied: useChargeableCeil,
+        chargeableSplashCeilApplied: useChargeableSplashCeil,
         guidedShapeGroups: guided.groups
       });
     } else if (Array.isArray(room.pieces) && room.pieces.length) {
@@ -373,8 +390,10 @@ function enumerateRoomMaterialSfRows(input) {
       }
     } else {
       const mat = resolveMaterialForPiece(room, null, input);
-      const ct = Number(room.countertopSqft) || 0;
-      const bs = Number(room.backsplashSqft) || 0;
+      let ct = Number(room.countertopSqft) || 0;
+      let bs = Number(room.backsplashSqft) || 0;
+      if (useChargeableCeil && ct > 0) ct = chargeableCounterSqftFromExact(ct);
+      if (useChargeableSplashCeil && bs > 0) bs = chargeableSplashSqftFromExact(bs);
       counter += ct;
       splash += bs;
       if (ct > 0) rows.push({ roomName, pieceLabel: "Countertop", ...mat, sf: round2(ct), isSplash: false });
@@ -703,8 +722,11 @@ function sumRoomsWholesale(input, rules) {
 function legacyWholesale(input, rules) {
   const g = String(input.materialGroup || "Group Promo");
   const rate = materialRateForQuote(input, g, rules);
-  const ct = Number(input.areas?.countertopSqft) || 0;
-  const bs = Number(input.areas?.backsplashSqft) || 0;
+  const isInternal = String(input.quoteSource) === "internal_quote";
+  let ct = Number(input.areas?.countertopSqft) || 0;
+  let bs = Number(input.areas?.backsplashSqft) || 0;
+  if (isInternal && ct > 0) ct = chargeableCounterSqftFromExact(ct);
+  if (isInternal && bs > 0) bs = chargeableSplashSqftFromExact(bs);
   let countertopMaterial = ct * rate;
   let useTaxAmount = 0;
   const useTaxPercent = Number(input.useTaxPercent) || 0;

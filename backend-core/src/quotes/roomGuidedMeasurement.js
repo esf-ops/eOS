@@ -52,6 +52,15 @@ export function chargeableCounterSqftFromExact(exactSf) {
   return Math.ceil(ex);
 }
 
+/** Elite internal estimate: ceil final exact backsplash/FHB SF (not per piece). */
+export function chargeableSplashSqftFromExact(exactSf) {
+  const ex = round2(exactSf);
+  if (ex <= 0) return 0;
+  const whole = Math.round(ex);
+  if (Math.abs(ex - whole) < 0.005) return whole;
+  return Math.ceil(ex);
+}
+
 export function guidedCornerOverlapDeductionSfForPieces(shapeType, pieces, overlapMode) {
   const count = guidedCornerOverlapCountForMode(overlapMode, shapeType);
   if (!count) return 0;
@@ -288,6 +297,33 @@ export function applyChargeableCounterCeilToGuidedRows(rows, exactCounter) {
   };
 }
 
+/**
+ * Apply Internal Estimate chargeable backsplash/FHB ceil at room level (add priced adjustment row).
+ * exactSplashTotal = guided.splash + guided.fhb (combined splash+FHB for this room).
+ */
+export function applyChargeableSplashCeilToGuidedRows(rows, exactSplashTotal) {
+  const priced = chargeableSplashSqftFromExact(exactSplashTotal);
+  const delta = round2(priced - exactSplashTotal);
+  if (delta <= 0) {
+    return { rows, exactSplashTotal, chargeableSplash: priced, splashRoundingAdjustment: 0 };
+  }
+  const next = [
+    ...rows,
+    {
+      pieceLabel: "Backsplash/FHB chargeable SF (round up)",
+      sf: delta,
+      isSplash: true,
+      isFhb: false
+    }
+  ];
+  return {
+    rows: next,
+    exactSplashTotal,
+    chargeableSplash: priced,
+    splashRoundingAdjustment: delta
+  };
+}
+
 export function isGuidedShapeRoom(room) {
   const calc = String(room.calcMode ?? room.calc_mode ?? "");
   if (calc === "Guided Shape") return true;
@@ -303,5 +339,9 @@ export function isGuidedShapeRoom(room) {
 }
 
 export function shouldApplyChargeableCounterCeil(quoteSource) {
+  return String(quoteSource || "") === "internal_quote";
+}
+
+export function shouldApplyChargeableSplashCeil(quoteSource) {
   return String(quoteSource || "") === "internal_quote";
 }

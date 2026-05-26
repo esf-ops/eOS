@@ -157,6 +157,10 @@ export type MeasuredRoom = {
   counterRoundingAdjustment?: number;
   splash: number;
   fhb: number;
+  /** Priced/chargeable backsplash+FHB SF (may round up from exact when internal Elite rule applies). */
+  chargeableSplash?: number;
+  /** SF added by rounding exact backsplash/FHB up to next whole foot (internal diagnostics). */
+  splashRoundingAdjustment?: number;
   totalSf: number;
   extras: number;
   selected: number;

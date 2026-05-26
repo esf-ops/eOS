@@ -127,8 +127,15 @@ const wRate = PROTOTYPE_TIER_PRICE_PER_SQFT["Group Promo"];
     },
     {}
   );
-  const splashSf = (126 * 4) / 144;
-  assertNear("backsplash only from U group", q.detail.splash, splashSf, 0.05);
+  const splashSf = (126 * 4) / 144; // 3.5 exact → 4 chargeable (ceiled)
+  const chargeableSplash = Math.ceil(splashSf);
+  // q.detail.splash is chargeable (ceiled) for internal_quote
+  assertNear("backsplash only from U group (chargeable)", q.detail.splash, chargeableSplash, 0.05);
+  // Exact splash preserved in snapshot
+  const summaries = q.snapshot?.room_measurement_summaries || [];
+  if (summaries.length === 1) {
+    assertNear("backsplash only from U group (exact in snapshot)", summaries[0].exactBacksplashFhbSqft ?? summaries[0].backsplashSqft, splashSf, 0.05);
+  }
 }
 
 // Spec 73 style: straight + U gross

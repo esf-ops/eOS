@@ -27,6 +27,7 @@ import {
 } from "./vanityProgram2026";
 import {
   chargeableCounterSqftFromExact,
+  chargeableSplashSqftFromExact,
   guidedCornerOverlapDeductionSf,
   guidedCornerOverlapDeductionSfForGroup,
   guidedCornerOverlapDeductionSfForPieces,
@@ -484,8 +485,20 @@ export function measureRoomDraft(
       `Chargeable countertop: ${chargeableCounter.toFixed(0)} sf (rounded up from ${counter.toFixed(2)} sf exact)`
     );
   }
+  const chargeableSplash = measureOptions?.chargeableCounterCeil
+    ? chargeableSplashSqftFromExact(splash + fhb)
+    : splash + fhb;
+  const splashRoundingAdjustment =
+    measureOptions?.chargeableCounterCeil && chargeableSplash > splash + fhb
+      ? round2(chargeableSplash - (splash + fhb))
+      : 0;
+  if (splashRoundingAdjustment > 0) {
+    details.push(
+      `Chargeable backsplash/FHB: ${chargeableSplash.toFixed(0)} sf (rounded up from ${(splash + fhb).toFixed(2)} sf exact)`
+    );
+  }
   priceableCounter = chargeableCounter;
-  priceableSplash = splash + fhb;
+  priceableSplash = chargeableSplash;
   fixedTotal = extras;
 
   const totalSf = round2(counter + splash + fhb);
@@ -500,6 +513,8 @@ export function measureRoomDraft(
     counterRoundingAdjustment,
     splash: round2(splash),
     fhb: round2(fhb),
+    chargeableSplash: round2(chargeableSplash),
+    splashRoundingAdjustment,
     totalSf,
     extras: round2(extras),
     selected: round2(selected),
@@ -734,6 +749,36 @@ function applyChargeableCounterCeilToRoomRows(
   });
 }
 
+/**
+ * Ceil backsplash+FHB SF per room per material-group bucket.
+ * Mixed-material rooms (piece-level group overrides) get independent rounding per group.
+ */
+function applyChargeableSplashCeilToRoomRows(
+  raw: Array<SelectedMaterialScopeLine & { group: string }>,
+  roomName: string
+): void {
+  const groups = new Set<string>();
+  for (const r of raw) {
+    if (r.roomName === roomName && (r.backsplashSf > 0 || r.fhbSf > 0)) groups.add(r.group);
+  }
+  for (const grp of groups) {
+    const grpRows = raw.filter((r) => r.roomName === roomName && r.group === grp && (r.backsplashSf > 0 || r.fhbSf > 0));
+    const exact = round2(grpRows.reduce((s, r) => s + r.backsplashSf + r.fhbSf, 0));
+    const priced = chargeableSplashSqftFromExact(exact);
+    const delta = round2(priced - exact);
+    if (delta <= 0) continue;
+    raw.push({
+      roomName,
+      label: "Backsplash/FHB chargeable SF (round up)",
+      group: grp,
+      colorLabel: grpRows[0]?.colorLabel,
+      countertopSf: 0,
+      backsplashSf: delta,
+      fhbSf: 0
+    });
+  }
+}
+
 function buildSelectedMaterialBreakdownCore(
   rooms: RoomDraft[],
   materialBasis: "wholesale" | "direct",
@@ -830,6 +875,7 @@ function buildSelectedMaterialBreakdownCore(
         }
         if (options?.chargeableCounterCeil) {
           applyChargeableCounterCeilToRoomRows(raw, roomName);
+          applyChargeableSplashCeilToRoomRows(raw, roomName);
         }
         continue;
       }
@@ -841,6 +887,9 @@ function buildSelectedMaterialBreakdownCore(
     if (room.calcMode === "Manual Sq Ft") {
       ct = Number(room.direct.counter) || 0;
       bs = Number(room.direct.splash) || 0;
+      if (options?.chargeableCounterCeil && ct > 0) {
+        ct = chargeableCounterSqftFromExact(ct);
+      }
     } else if (room.calcMode === "Rapid Linear Foot") {
       const a = rapidLinearAreas(
         room.linear.wallFt,
@@ -866,6 +915,9 @@ function buildSelectedMaterialBreakdownCore(
     if (ct > 0) raw.push({ roomName, label: "Countertop", group: g, colorLabel, countertopSf: round2(ct), backsplashSf: 0, fhbSf: 0 });
     if (bs > 0) raw.push({ roomName, label: "Backsplash", group: g, colorLabel, countertopSf: 0, backsplashSf: round2(bs), fhbSf: 0 });
     if (fhb > 0) raw.push({ roomName, label: "Full height backsplash", group: g, colorLabel, countertopSf: 0, backsplashSf: 0, fhbSf: round2(fhb) });
+    if (options?.chargeableCounterCeil) {
+      applyChargeableSplashCeilToRoomRows(raw, roomName);
+    }
   }
 
   const groupMap = new Map<string, SelectedMaterialGroupBlock>();
@@ -1113,7 +1165,9 @@ export function buildCustomerRoomAreaCostBreakdown(params: {
     const countertopSf = round2(
       Number(m.chargeableCounter ?? m.priceableCounter ?? m.counter) || 0
     );
-    const backsplashFhbSf = round2((Number(m.splash) || 0) + (Number(m.fhb) || 0));
+    const backsplashFhbSf = isVanity
+      ? round2((Number(m.splash) || 0) + (Number(m.fhb) || 0))
+      : round2(Number(m.chargeableSplash ?? m.priceableSplash ?? (Number(m.splash) || 0) + (Number(m.fhb) || 0)));
     const totalSqft = round2(Number(m.totalSf) || countertopSf + backsplashFhbSf);
 
     let materialAmountExact = 0;

@@ -127,6 +127,15 @@ export function chargeableCounterSqftFromExact(exactSf: number): number {
   return Math.ceil(ex);
 }
 
+/** Elite internal estimate: round final exact backsplash/FHB SF up to next whole square foot (not per piece). */
+export function chargeableSplashSqftFromExact(exactSf: number): number {
+  const ex = round2(exactSf);
+  if (ex <= 0) return 0;
+  const whole = Math.round(ex);
+  if (Math.abs(ex - whole) < 0.005) return whole;
+  return Math.ceil(ex);
+}
+
 /** Overlap deduction for pieces within a single shape group. */
 export function guidedCornerOverlapDeductionSfForPieces(
   shapeType: string | undefined | null,
