@@ -16,6 +16,19 @@ const EOS_LOGO_URL =
   "https://www.elitestonefabrication.com/wp-content/uploads/2021/09/cropped-ESF-Horizontal-Logo-500x150-px_09_09.png";
 
 /**
+ * Returns the customer-facing Estimated project total for display in Quote Library list rows
+ * and the detail drawer. Uses the persisted `customer_display_total` (sum of rounded visible
+ * customer Estimate Summary rows, matching the customer PDF) when available on the saved quote.
+ * Falls back to `grand_total` (exact backend calculation total) for older quotes saved before
+ * this field was introduced — no crashes, no mass-mutation of old records.
+ */
+function pickDisplayTotal(r: Record<string, unknown>): number {
+  const cdt = Number(r.customer_display_total);
+  if (Number.isFinite(cdt) && cdt > 0) return cdt;
+  return Number(r.grand_total) || 0;
+}
+
+/**
  * Brand architecture (see docs/eliteos/eliteos-ui-direction.md §2.1).
  *
  * The Quote Library is a single-tenant operational head right now — it does not
@@ -1392,7 +1405,7 @@ export default function QuoteLibraryApp() {
                             </td>
                             <td className="hide-md">{str(r.sales_rep) || "—"}</td>
                             <td className="hide-md">{str(r.branch) || "—"}</td>
-                            <td className="col-total">{formatMoneyWhole(r.grand_total)}</td>
+                            <td className="col-total">{formatMoneyWhole(pickDisplayTotal(r as Record<string, unknown>))}</td>
                             <td className="hide-sm">{formatSqft(r.estimated_sqft)}</td>
                             <td>{formatShortDate(r.updated_at)}</td>
                             <td className="hide-md muted" style={{ maxWidth: 140 }}>
@@ -1470,8 +1483,10 @@ export default function QuoteLibraryApp() {
                 <h3 id="dwr-overview" className="sr-only">Overview</h3>
                 <div className="stat-grid">
                   <div className="stat-card stat-card-prominent">
-                    <p className="stat-label">Total</p>
-                    <p className="stat-value stat-value-lg">{formatMoneyStandard(header.grand_total)}</p>
+                    <p className="stat-label">
+                      {header.customer_display_total != null ? "Customer estimate total" : "Total"}
+                    </p>
+                    <p className="stat-value stat-value-lg">{formatMoneyStandard(pickDisplayTotal(header))}</p>
                   </div>
                   <div className="stat-card">
                     <p className="stat-label">Sq ft</p>

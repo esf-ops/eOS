@@ -180,7 +180,13 @@ export function attachInternalQuoteRoutes(app, deps) {
           color_tbd: Boolean(body.colorTbd ?? body.color_tbd),
           use_tax_percent: Math.max(0, Number(body.useTaxPercent ?? body.use_tax_percent ?? 0) || 0),
           customer_room_area_breakdown:
-            body.customerRoomAreaBreakdown ?? body.customer_room_area_breakdown ?? null
+            body.customerRoomAreaBreakdown ?? body.customer_room_area_breakdown ?? null,
+          /** Customer-facing Estimated project total = sum of rounded visible Estimate Summary rows.
+           * Matches CustomerEstimatePrint.finalRounded. Preferred by Quote Library over grand_total. */
+          customer_display_total: (() => {
+            const cdt = Number(body.customerDisplayTotal ?? body.customer_display_total);
+            return Number.isFinite(cdt) && cdt > 0 ? cdt : null;
+          })()
         }
       };
       const internalEstimateSummary = buildInternalEstimateSummary(calc, body, snapshotToStore);

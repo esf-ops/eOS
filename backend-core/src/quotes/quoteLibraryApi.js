@@ -133,6 +133,21 @@ function applyQuoteHeaderOrgScope(qb, orgId, hasQuoteHeadersOrg) {
   return filt ? qb.or(filt) : qb;
 }
 
+/**
+ * Extract the customer-facing Estimated project total from the saved calculation snapshot,
+ * if present. Returns null for older quotes that were saved before this field was introduced.
+ * @param {Record<string, unknown>} r
+ * @returns {number|null}
+ */
+function pickSnapshotCustomerDisplayTotal(r) {
+  const snap = r.calculation_snapshot;
+  if (!snap || typeof snap !== "object") return null;
+  const iu = snap.internal_ui;
+  if (!iu || typeof iu !== "object") return null;
+  const cdt = Number(iu.customer_display_total);
+  return Number.isFinite(cdt) && cdt > 0 ? cdt : null;
+}
+
 function mapListRow(r, handoffDocsByQuote) {
   const hid = String(r.id);
   const docs = handoffDocsByQuote.get(hid) || [];
@@ -171,6 +186,7 @@ function mapListRow(r, handoffDocsByQuote) {
     sales_rep: r.sales_rep,
     branch: r.branch,
     grand_total: r.grand_total,
+    customer_display_total: pickSnapshotCustomerDisplayTotal(r),
     estimated_sqft: r.estimated_sqft,
     created_at: r.created_at,
     updated_at: r.updated_at,
@@ -791,7 +807,12 @@ export function attachQuoteLibraryRoutes(app, deps) {
 
     return {
       ok: true,
-      header: { ...header, account_name: deriveAccountName(header), quote_status_display: displayStatus(header.quote_status) },
+      header: {
+        ...header,
+        account_name: deriveAccountName(header),
+        quote_status_display: displayStatus(header.quote_status),
+        customer_display_total: pickSnapshotCustomerDisplayTotal(header)
+      },
       submitted_payload: payloadRow?.submitted_payload ?? null,
       normalized_payload: payloadRow?.normalized_payload ?? null,
       calculation_snapshot: header.calculation_snapshot,

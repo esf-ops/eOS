@@ -1,7 +1,7 @@
 import React from "react";
 import { EOS_LOGO_URL } from "@quote-lib/config";
 import { round2 } from "@quote-lib/measurementEngine";
-import { roundCustomerDisplayAddonLine, roundCustomerDisplayVanity } from "@quote-lib/prototypeQuoteMath";
+import { roundCustomerDisplay, roundCustomerDisplayAddonLine, roundCustomerDisplayVanity } from "@quote-lib/prototypeQuoteMath";
 import type {
   CustomerRoomAreaCostBreakdown,
   InternalEstimateGroupComparisonRow,
@@ -9,13 +9,6 @@ import type {
   SelectedMaterialScopeLine
 } from "@quote-lib/prototypeQuoteMath";
 import type { MeasuredRoom } from "@quote-lib/quoteTypes";
-
-/** Project-level customer totals — round up to nearest $10 (unchanged). Vanity uses nearest $5; add-on lines use ceil-to-$5. */
-export function roundCustomerDisplay(amount: number): number {
-  const n = Number(amount);
-  if (!Number.isFinite(n) || n <= 0) return 0;
-  return Math.ceil(n / 10) * 10;
-}
 
 /**
  * Split a customer-facing rounded total across positive exact weights using proportional $10 buckets

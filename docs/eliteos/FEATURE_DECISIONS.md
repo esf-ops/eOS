@@ -418,3 +418,20 @@
 | **Revisit trigger** | Approval to land the additive KPI snapshot migration + read-only `GET /api/sales/kpi-history` endpoint; arrival of the Partner Quote head; consolidation/extraction of the shared protected-head topbar into a reusable component. |
 
 ---
+## §33 — Quote Library primary quote value uses the customer-facing Estimated project total
+
+| Field | Value |
+|---|---|
+| **Date** | 2026-05-26 |
+| **Decision** | Quote Library's primary displayed Total / Quote Value (list row and detail drawer) uses `customer_display_total` — the customer-facing Estimated project total that matches the customer estimate PDF — instead of the raw backend exact total stored in `grand_total`. |
+| **Why** | `grand_total` stores `round2(calc.totals.retail)`, the exact backend calculation result. The customer PDF shows a different number: each visible Estimate Summary row (countertop material, backsplash material, add-ons, customer-facing custom lines) rounds up independently to the nearest $10, and the displayed total is the sum of those rounded rows. Sales, billing, and future KPI quote pipeline reporting must reference the number the customer actually sees, not an internal precision artifact. |
+| **Root cause of discrepancy** | (a) Sum of individually rounded rows ≠ the grand total rounded once. (b) Per-room add-ons may price differently in the backend (DB pricing rules can override or zero-out prototype add-on catalog prices) vs. the frontend prototype. The customer PDF always reflected the frontend-computed rounded total; `grand_total` reflected the backend exact total. |
+| **Implementation** | `roundCustomerDisplay` moved from a local export in `CustomerEstimatePrint.tsx` to a shared export in `app-quote/src/lib/prototypeQuoteMath.ts`. `InternalEstimateApp` computes `customerDisplayTotal` (same formula as `CustomerEstimatePrint.finalRounded`) at save time and includes it in the save payload. `internalQuotesApi.js` stores it as `calculation_snapshot.internal_ui.customer_display_total` (additive JSON field, no schema migration). `quoteLibraryApi.js` reads it in `mapListRow` and the detail response via `pickSnapshotCustomerDisplayTotal`. `QuoteLibraryApp.tsx` uses `pickDisplayTotal(row)` = `customer_display_total ?? grand_total` in the list row and drawer stat card. The drawer label changes from "Total" to "Customer estimate total" when the new field is present. |
+| **Backward compatibility** | `pickDisplayTotal` falls back to `grand_total` for older saved quotes that do not yet have `customer_display_total` in their snapshot. No old records are rewritten. Old quotes display unchanged until the estimator re-saves or saves a new revision. |
+| **Internal exact math preserved** | `grand_total` and `calculation_snapshot.totals.retail` are unchanged and remain available for internal audit, pricing checks, and non-display uses. |
+| **Scope limits** | Quote Library metrics/aggregates (`total_open_quote_value`, period buckets) still use `grand_total` for now — these are a separate KPI/reporting concern. Monday sync uses the same `grand_total` path it always has. No quote math rates, sq ft rounding, auth/permissions, status workflows, or public markup were changed. No SQL migrations were run. |
+| **Impacted files** | `app-quote/src/lib/prototypeQuoteMath.ts` (add `roundCustomerDisplay` export), `app-internal-estimate/src/CustomerEstimatePrint.tsx` (import instead of local def), `app-internal-estimate/src/InternalEstimateApp.tsx` (add `customerDisplayTotal` useMemo + save payload), `backend-core/src/quotes/internalQuotesApi.js` (persist `customer_display_total` in snapshot), `backend-core/src/quotes/quoteLibraryApi.js` (expose in `mapListRow` and detail header), `app-quote-library/src/QuoteLibraryApp.tsx` (use `pickDisplayTotal`), `backend-core/src/scripts/verifyInternalEstimateMath.mjs` (new QA tests). |
+| **Revisit trigger** | If Elite wants separate explicit reporting columns for internal exact total vs customer-facing quote value in the metrics aggregates and pipeline; or if Monday sync should also use the customer-facing total. |
+
+---
+

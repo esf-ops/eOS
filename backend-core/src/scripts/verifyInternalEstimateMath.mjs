@@ -414,4 +414,33 @@ assertEq("cep-row zero amount → $0", roundCustomerDisplay(0), 0);
 // Negative (discount) amounts stay zero in customer display.
 assertEq("cep-row negative stays 0", roundCustomerDisplay(-50), 0);
 
+// ── QA example: customer PDF total vs Quote Library grand_total ──────────────
+// This mirrors the observed discrepancy: Quote Library showed $2,151.18 (exact backend
+// material total) while the customer PDF showed $2,360 (sum of rounded visible rows).
+// customer_display_total = roundCustomerDisplay(countertop) + roundCustomerDisplay(addons)
+//                        = $2,160 + $0 (no backsplash) + $200 + $0 (no visible cust lines)
+//                        = $2,360 — matches the customer PDF.
+const qaCountertopExact2 = 2151.18; // exact backend material
+const qaAddonsExact2 = 200;         // room add-ons (sink cutout etc.)
+const qaCounterDisplay2 = roundCustomerDisplay(qaCountertopExact2); // $2,160
+const qaAddonsDisplay2 = roundCustomerDisplay(qaAddonsExact2);       // $200
+assertEq("ql-qa counter 2151.18 rounds to 2160", qaCounterDisplay2, 2160);
+assertEq("ql-qa addons 200 rounds to 200", qaAddonsDisplay2, 200);
+const qaCustomerDisplayTotal2 = qaCounterDisplay2 + qaAddonsDisplay2;
+assertEq("ql-qa customer_display_total = 2360", qaCustomerDisplayTotal2, 2360);
+// grand_total (exact) is NOT 2360 — confirm the old wrong value would not match PDF.
+const qaGrandTotal2 = Math.round(qaCountertopExact2 * 100) / 100; // = 2151.18
+assertEq("ql-qa grand_total != customer_display_total", qaGrandTotal2 !== qaCustomerDisplayTotal2, true);
+
+// pickDisplayTotal logic: prefer customer_display_total when present; fall back to grand_total.
+function pickDisplayTotal(row) {
+  const cdt = Number(row.customer_display_total);
+  if (Number.isFinite(cdt) && cdt > 0) return cdt;
+  return Number(row.grand_total) || 0;
+}
+assertEq("ql-pick new quote uses customer_display_total", pickDisplayTotal({ customer_display_total: 2360, grand_total: 2151.18 }), 2360);
+assertEq("ql-pick old quote falls back to grand_total", pickDisplayTotal({ customer_display_total: null, grand_total: 2151.18 }), 2151.18);
+assertEq("ql-pick missing customer_display_total falls back", pickDisplayTotal({ grand_total: 1500 }), 1500);
+assertEq("ql-pick zero customer_display_total falls back", pickDisplayTotal({ customer_display_total: 0, grand_total: 1500 }), 1500);
+
 console.log("verifyInternalEstimateMath: ok");
