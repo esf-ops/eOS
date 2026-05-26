@@ -404,3 +404,17 @@
 | **Revisit trigger** | Elite changes customer-display rounding granularity (e.g. nearest $5, exact), or decides the PDF total should reflect the raw exact total rather than the sum of rounded rows. |
 
 ---
+
+### 32. Sales Head joined the eliteOS protected-head shell + KPI History scaffold
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-05-26 |
+| **Decision** | The **eliteOS Sales Head** (`app-sales`) now uses the shared protected-head shell pattern: sticky topbar with workspace identity + eliteOS wordmark + "Sales Dashboard · Elite Stone Fabrication" subtitle + user chip / dropdown menu (Open Home, Profile & preferences disabled, Sign out); a premium hero block ("Internal tool · Sales Dashboard · Sales performance command center"); and a new read-only **KPI History scaffold tab** that communicates the intended Moraware + Quote Library + future Partner Quote source model without rendering any fake or inferred metrics. The pre-existing Command Center / Quote Pipeline / Legacy Intelligence subviews and **every** backend API call (`/api/me`, `/api/sales/filters`, `/api/sales/dashboard-foundation`) are preserved unchanged. |
+| **Why** | Sales Head still used a legacy app-shell while every other internal head had moved to the new pattern. KPI history was being treated as a single future build instead of a labeled, source-aware view — leadership needs to see *where every number came from* before composite KPIs are introduced. Restating the source-of-truth principle (Moraware owns production facts, Quote Library owns quote facts, Sales Head explains and compares — does not mutate) in a visible scaffold prevents accidental "invented metric" drift as the KPI engine is built out. |
+| **Trust / guardrails preserved** | Branch / rep / account attribution stays gated by approved **Sales Account Mapping**. **Blackstone guardrail** is reaffirmed in the KPI scaffold copy and the planning doc: Blackstone does not default to Dyersville unless an explicit approved mapping changes that. No new public/partner markup, no service-role exposure in the browser, no browser-side Moraware calls. |
+| **Impacted files/docs** | `app-sales/src/ui/App.tsx` (rewrite — new protected-head shell, hero, tab bar, user menu), `app-sales/src/ui/styles.css` (eliteOS tokens + shell classes prepended; legacy classes preserved for unmodified subviews), `app-sales/src/ui/KpiHistoryScaffold.tsx` (new), `docs/eliteos/sales-kpi-history-plan.md` (new), `docs/eliteos/eliteos-ui-direction.md` (Sales Head added to the protected-head roster). |
+| **Out of scope (intentionally not built)** | KPI snapshot tables / migrations, KPI rollup engine, partner pipeline data fetch, Moraware sync rewrite, Sales attribution rewrite, Quote Library rewrite, KPI editing UI, backfill scripts. `sales_kpi_snapshots` / `sales_kpi_metric_definitions` / `sales_kpi_targets` / `sales_kpi_notes` / `weekly_quote_pipeline_rollups` / `moraware_production_kpi_rollups` remain **planning entries only** until explicitly approved. |
+| **Revisit trigger** | Approval to land the additive KPI snapshot migration + read-only `GET /api/sales/kpi-history` endpoint; arrival of the Partner Quote head; consolidation/extraction of the shared protected-head topbar into a reusable component. |
+
+---

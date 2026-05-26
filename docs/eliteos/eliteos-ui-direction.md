@@ -1010,13 +1010,14 @@ template before adding head-specific surfaces.
 | **Internal Estimate** (`app-internal-estimate`) | Flagship estimating head | Local Supabase `session.user` (no new `/api/me` call) | no — role not in scope |
 | **Pricing Admin** (`app-pricing-admin`) | Operational admin head (v1 shell) | Local Supabase `session.user` (no new `/api/me` call) | no — role not in scope |
 | **System Admin** (`app-system-admin`) | Governance head (v1 shell) | Existing `/api/me` payload (already required for head authorization) | **yes** — role pill (admin / super_admin) is shown because `/api/me` is already in scope |
+| **Sales Dashboard** (`app-sales`) | Performance / leadership head (v1 shell) | Existing `/api/me` payload (already required for sales head access) | **yes** — role label is shown because `/api/me` is already in scope |
 
 Rules every adopter follows:
 
 - The shell never adds a *new* backend call to power the chip. Heads that
-  already call `/api/me` (Home, System Admin) may surface role; heads
-  that do not (Quote Library, Internal Estimate, Pricing Admin) keep the
-  chip purely client-side and omit role.
+  already call `/api/me` (Home, System Admin, Sales Dashboard) may
+  surface role; heads that do not (Quote Library, Internal Estimate,
+  Pricing Admin) keep the chip purely client-side and omit role.
 - The shell is **never** the security boundary. Hiding "System Admin" in
   the menu, or hiding admin-only actions in the body, must always be
   paired with backend `requireAuth` + role / head-access enforcement.
