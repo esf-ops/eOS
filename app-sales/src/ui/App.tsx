@@ -7,7 +7,7 @@ import type { FiltersResponse, MeResp } from "../lib/types";
 import SalesCommandCenterView from "./SalesCommandCenterView";
 import SalesIntelligenceView from "./SalesIntelligenceView";
 import QuotePipelinePanel from "./QuotePipelinePanel";
-import KpiHistoryScaffold from "./KpiHistoryScaffold";
+import KpiV1Panel from "./KpiV1Panel";
 import "./sales-intelligence.css";
 
 /**
@@ -123,7 +123,7 @@ type SalesTab = "command_center" | "quote_pipeline" | "kpi_history" | "intellige
 const TABS: ReadonlyArray<{ id: SalesTab; label: string; planning?: boolean }> = [
   { id: "command_center", label: "Command center" },
   { id: "quote_pipeline", label: "Quote pipeline" },
-  { id: "kpi_history", label: "KPI history", planning: true },
+  { id: "kpi_history", label: "KPI history" },
   { id: "intelligence", label: "Legacy intelligence" }
 ];
 
@@ -631,7 +631,7 @@ export default function App() {
 
             {salesTab === "quote_pipeline" ? <QuotePipelinePanel token={token} /> : null}
 
-            {salesTab === "kpi_history" ? <KpiHistoryScaffold /> : null}
+            {salesTab === "kpi_history" ? <KpiV1Panel token={token} /> : null}
 
             {salesTab === "intelligence" ? (
               <>

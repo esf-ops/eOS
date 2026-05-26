@@ -635,7 +635,7 @@ export default function SalesCommandCenterView({ token, onLoadError }: Props) {
             </p>
             <p className="pi-mini-note">
               Planned buckets: {(reconciliation.production_reporting_bucket_plan?.buckets || []).join(", ")}. These should become
-              admin-configured production reporting groups; Blackstone remains separate unless explicitly configured.
+              admin-configured production reporting groups with approved account-specific mapping rules.
             </p>
           </section>
         ) : null}
@@ -767,9 +767,9 @@ export default function SalesCommandCenterView({ token, onLoadError }: Props) {
               <small>{num(coverage?.approvedMappedJobs)} approved mapped jobs</small>
             </div>
             <div>
-              <span>Blackstone guardrail</span>
+              <span>Attribution guardrail</span>
               <strong>Protected</strong>
-              <small>{coverage?.blackstone_guardrail || "Blackstone does not default to Dyersville."}</small>
+              <small>Account-specific mapping guardrails are active. Protected attribution rules are enforced.</small>
             </div>
           </div>
           <p className="sales-filter-warning">

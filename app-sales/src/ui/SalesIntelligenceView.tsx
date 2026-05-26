@@ -263,7 +263,7 @@ export default function SalesIntelligenceView({ token, me, legacyFilterQuery, on
           Branch / location
           <select value={branch} onChange={(e) => setBranch(e.target.value)}>
             <option value="All">All</option>
-            {(pi?.branches ?? ["Lisbon", "Dyersville", "Iowa City", "Unmapped / Moraware only"]).map((b) => (
+            {(pi?.branches ?? []).map((b) => (
               <option key={b} value={b}>
                 {b}
               </option>
@@ -280,7 +280,7 @@ export default function SalesIntelligenceView({ token, me, legacyFilterQuery, on
               </option>
             ))}
             <option value="House Account - Lisbon">House Account - Lisbon</option>
-            <option value="House Account - Dyersville">House Account - Dyersville</option>
+            {/* House Account - Dyersville removed: branch names come from approved Sales Account Mapping data, not hardcoded UI */}
             <option value="__MORAWARE_FALLBACK__">Moraware fallback (class)</option>
           </select>
         </label>

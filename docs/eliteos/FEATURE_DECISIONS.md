@@ -435,6 +435,24 @@
 
 ---
 
+## §35 — Sales KPI v1: read-only KPI rollup from existing Quote Library and Moraware data
+
+| Field | Value |
+|---|---|
+| **Date** | 2026-05-27 |
+| **Decision** | Add `GET /api/sales/kpi-v1` — a read-only, source-labeled, freshness-labeled, trust-labeled KPI rollup endpoint. Quote Library pipeline facts (count, customer-facing value, avg, period trend) come directly from `quote_headers`. Moraware production facts (worksheet sqft, job count, period trend) come from `sales_moraware_job_facts` via the same `fetchLatestPreparedSalesJobFacts` + `buildCompanyWideSqftActuals` functions already used by the Sales Dashboard foundation handler. The static `KpiHistoryScaffold` tab is replaced by the live `KpiV1Panel.tsx` component. No new SQL tables are created; no existing query patterns are changed. |
+| **Quote value rule** | Quote value uses `calculation_snapshot.internal_ui.customer_display_total` (customer-facing estimated project total) when available; falls back to `grand_total` for older quotes without a CDT snapshot field. This matches the Quote Library display rule (§33). |
+| **Moraware metrics** | Worksheet sqft and job count from `sales_moraware_job_facts`. Template count and installed sqft are not available in current prepared facts — returned as `null` with a `not_available_in_current_data` note, never faked. |
+| **Partner Quote** | Shown as "Planned / Future" in the UI. No partner quote data is fetched or shown. |
+| **Attribution guardrails** | `branch_rep_gated: true` and `protected_mapping_rules_enforced: true` are always set in the trust block. Company-wide totals are available; branch/rep splits remain gated by approved Sales Account Mapping. No hardcoded customer/account names appear in visible static Sales Dashboard copy. The Blackstone guardrail lives in backend attribution code and tests — not in visible dashboard copy. |
+| **Historical workbook** | The Excel KPI workbook was inspected as reference only. No values were imported or hardcoded. A future controlled import pass is documented in `sales-kpi-history-plan.md §7`. |
+| **No migrations run** | All data comes from existing tables. No SQL migrations were created or run. |
+| **Security** | Same `requireAuth → requireRole(SALES_API_ROLES) → requireHeadAccess("sales")` chain as all Sales Head routes. No service role key in frontend. No browser-side Moraware calls. No secrets exposure. |
+| **Impacted files** | `backend-core/src/sales/salesHead.js` (new handler + helpers + route), `app-sales/src/ui/KpiV1Panel.tsx` (new), `app-sales/src/ui/App.tsx` (render KpiV1Panel, remove Planning tab badge), `app-sales/src/ui/styles.css` (KPI v1 styles), `backend-core/src/scripts/verifySalesKpiV1.mjs` (34 tests), `docs/eliteos/sales-kpi-history-plan.md` (updated). |
+| **Revisit trigger** | Landing `sales_kpi_snapshots` migration + writer; adding branch/rep split KPIs once mapping coverage is approved; Partner Quote head goes live; controlled historical workbook import pass. |
+
+---
+
 ## §34 — Profile & Preferences v1: central user self-service surface in app-home
 
 | Field | Value |

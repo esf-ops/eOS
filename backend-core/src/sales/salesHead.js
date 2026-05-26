@@ -2748,6 +2748,356 @@ export async function salesDashboardFoundationHandler(req, supabaseGetter) {
   };
 }
 
+// ── KPI v1 helpers ────────────────────────────────────────────────────────
+
+function validateYmd(raw) {
+  const s = String(raw ?? "").trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+}
+
+/**
+ * Pick the customer-facing display value for a quote row.
+ * Prefers `calculation_snapshot.internal_ui.customer_display_total` (customer-facing
+ * estimated project total), falls back to `grand_total` for older quotes.
+ */
+function pickKpiCdtValue(row) {
+  const snap = row.calculation_snapshot;
+  if (snap && typeof snap === "object") {
+    const iu = snap.internal_ui;
+    if (iu && typeof iu === "object") {
+      const cdt = Number(iu.customer_display_total);
+      if (Number.isFinite(cdt) && cdt > 0) return { value: cdt, source: "customer_display_total" };
+    }
+  }
+  const gt = Number(row.grand_total);
+  if (Number.isFinite(gt) && gt > 0) return { value: gt, source: "grand_total_fallback" };
+  return { value: 0, source: "zero" };
+}
+
+function periodBucketForKpi(dateYmd, grain) {
+  if (!dateYmd || dateYmd.length < 10) return "undated";
+  if (grain === "week") {
+    const sw = startOfWeekMondayLocal(dateYmd);
+    return sw || dateYmd.slice(0, 7);
+  }
+  return dateYmd.slice(0, 7);
+}
+
+function buildQuotePipelineResult(rows, startDate, endDate, grain, revisionFiltered) {
+  const periods = new Map();
+  const statusMap = new Map();
+  let totalCount = 0;
+  let totalValue = 0;
+  let cdtCount = 0;
+  let gtFallbackCount = 0;
+  let mostRecentUpdatedAt = null;
+
+  for (const row of rows) {
+    const dateStr = row.created_at ? row.created_at.slice(0, 10) : null;
+    if (!dateStr || dateStr < startDate || dateStr > endDate) continue;
+    const bucket = periodBucketForKpi(dateStr, grain);
+    const { value: quoteValue, source: valueSource } = pickKpiCdtValue(row);
+    const status = String(row.quote_status ?? "").trim() || "unknown";
+
+    if (!periods.has(bucket)) {
+      periods.set(bucket, {
+        period_label: bucket,
+        period_start: bucket,
+        quote_count: 0,
+        customer_quote_value: 0,
+        customer_display_total_used: 0,
+        grand_total_fallback_used: 0,
+        sent_count: 0,
+        sold_count: 0,
+        lost_count: 0,
+        status_breakdown: {}
+      });
+    }
+    const p = periods.get(bucket);
+    p.quote_count += 1;
+    p.customer_quote_value += quoteValue;
+    if (valueSource === "customer_display_total") p.customer_display_total_used += 1;
+    else p.grand_total_fallback_used += 1;
+    p.status_breakdown[status] = (p.status_breakdown[status] || 0) + 1;
+    if (/sent|pending/i.test(status)) p.sent_count += 1;
+    if (/won|sold|accepted|approved/i.test(status)) p.sold_count += 1;
+    if (/lost|rejected|declined|cancelled|canceled/i.test(status)) p.lost_count += 1;
+
+    increment(statusMap, status);
+    totalCount += 1;
+    totalValue += quoteValue;
+    if (valueSource === "customer_display_total") cdtCount += 1;
+    else gtFallbackCount += 1;
+
+    const updAt = row.updated_at || row.created_at;
+    if (updAt && (!mostRecentUpdatedAt || updAt > mostRecentUpdatedAt)) mostRecentUpdatedAt = updAt;
+  }
+
+  const periodsArr = [...periods.values()]
+    .sort((a, b) => String(a.period_start).localeCompare(String(b.period_start)))
+    .map((p) => ({
+      ...p,
+      average_quote_value: p.quote_count > 0 ? Math.round(p.customer_quote_value / p.quote_count) : 0,
+      customer_quote_value: Math.round(p.customer_quote_value)
+    }));
+
+  return {
+    ok: true,
+    periods: periodsArr,
+    totals: {
+      quote_count: totalCount,
+      customer_quote_value: Math.round(totalValue),
+      average_quote_value: totalCount > 0 ? Math.round(totalValue / totalCount) : 0,
+      customer_display_total_used: cdtCount,
+      grand_total_fallback_used: gtFallbackCount
+    },
+    statusBreakdown: mapToRows(statusMap, "status"),
+    mostRecentUpdatedAt,
+    revision_filter_applied: revisionFiltered
+  };
+}
+
+async function fetchKpiQuotePipeline(supabase, organizationId, startDate, endDate, grain) {
+  const startTs = `${startDate}T00:00:00`;
+  const endTs = `${endDate}T23:59:59.999`;
+
+  const baseSelect = "id,grand_total,calculation_snapshot,quote_status,created_at,updated_at";
+
+  let q = supabase
+    .from("quote_headers")
+    .select(baseSelect)
+    .is("archived_at", null)
+    .gte("created_at", startTs)
+    .lte("created_at", endTs)
+    .order("created_at", { ascending: true })
+    .limit(5000);
+  if (organizationId) q = q.eq("organization_id", organizationId);
+
+  let qCurrent = q.eq("is_current_revision", true);
+  const { data, error } = await qCurrent;
+  if (error) {
+    if (String(error?.message ?? "").toLowerCase().includes("is_current_revision")) {
+      let qFallback = supabase
+        .from("quote_headers")
+        .select(baseSelect)
+        .is("archived_at", null)
+        .gte("created_at", startTs)
+        .lte("created_at", endTs)
+        .order("created_at", { ascending: true })
+        .limit(5000);
+      if (organizationId) qFallback = qFallback.eq("organization_id", organizationId);
+      const res2 = await qFallback;
+      if (res2.error) throw res2.error;
+      return buildQuotePipelineResult(res2.data || [], startDate, endDate, grain, false);
+    }
+    throw error;
+  }
+  return buildQuotePipelineResult(data || [], startDate, endDate, grain, true);
+}
+
+async function fetchKpiMorawareActuals(supabase, organizationId, startDate, endDate, grain) {
+  let syncHealth;
+  try {
+    syncHealth = await loadLatestMorawareGroup(supabase, organizationId);
+  } catch (e) {
+    return {
+      ok: true,
+      periods: [],
+      totals: null,
+      extractionStatus: "not_available",
+      syncNote: `Moraware sync health unavailable: ${String(e?.message ?? e)}`,
+      morawareLastSuccess: null,
+      syncHealth: null
+    };
+  }
+
+  let facts;
+  try {
+    facts = await fetchLatestPreparedSalesJobFacts(supabase, organizationId, syncHealth);
+  } catch (e) {
+    return {
+      ok: true,
+      periods: [],
+      totals: null,
+      extractionStatus: "not_available",
+      syncNote: `Moraware prepared facts unavailable: ${String(e?.message ?? e)}`,
+      morawareLastSuccess: null,
+      syncHealth
+    };
+  }
+
+  if (!facts.available) {
+    return {
+      ok: true,
+      periods: [],
+      totals: null,
+      extractionStatus: "not_available",
+      syncNote: facts.warning || "Moraware prepared facts are not available.",
+      morawareLastSuccess: null,
+      syncHealth
+    };
+  }
+
+  const actuals = buildCompanyWideSqftActuals(facts.rows, {
+    filters: { datePreset: "custom", startDate, endDate, timeGrain: grain }
+  });
+
+  const latestGroupId = syncHealth.latest_group?.import_group_id ?? null;
+  const latestGroupComplete = syncHealth.latest_group?.complete ?? null;
+  const syncNote = latestGroupId
+    ? `Import group ${latestGroupId} (${latestGroupComplete ? "complete" : "incomplete"})`
+    : "No Moraware import group found.";
+
+  const morawareLastSuccess =
+    syncHealth.latest_group?.completed_at ?? syncHealth.last_success?.finished_at ?? null;
+
+  const periods = actuals.grouped_sqft_trend.map((row) => ({
+    period_label: row.period,
+    period_start: row.period,
+    worksheet_sqft: row.total_sqft,
+    job_count: row.job_count,
+    jobs_with_sqft: row.jobs_with_sqft,
+    template_count: null,
+    installed_sqft: null,
+    template_count_note: "not_available_in_current_data",
+    installed_sqft_note: "not_available_in_current_data"
+  }));
+
+  return {
+    ok: true,
+    periods,
+    totals: {
+      worksheet_sqft: actuals.total_synced_sqft,
+      job_count: actuals.total_jobs_evaluated,
+      jobs_with_sqft: actuals.jobs_with_sqft,
+      sqft_coverage_pct:
+        actuals.sqft_coverage_pct != null ? Math.round(actuals.sqft_coverage_pct * 10) / 10 : null,
+      average_sqft_per_job:
+        actuals.average_sqft_per_job != null
+          ? Math.round(actuals.average_sqft_per_job * 100) / 100
+          : null,
+      template_count: null,
+      installed_sqft: null
+    },
+    extractionStatus: actuals.extraction_status,
+    syncNote,
+    morawareLastSuccess,
+    syncHealth
+  };
+}
+
+/**
+ * GET /api/sales/kpi-v1 — read-only KPI rollup from existing quote_headers and
+ * sales_moraware_job_facts. No new tables; source/freshness/trust-labeled response.
+ *
+ * Query params: start_date (YYYY-MM-DD), end_date (YYYY-MM-DD), grain (week|month)
+ */
+export async function salesKpiV1Handler(req, supabaseGetter) {
+  const supabase = supabaseGetter();
+  const organizationId = resolveSalesOrganizationId(req);
+  if (!organizationId) {
+    return { status: 400, body: { ok: false, error: "Sales KPI v1 requires organization_id context." } };
+  }
+
+  const generatedAt = new Date().toISOString();
+  const today = calendarTodayLocalYmd();
+  const tl = parseLocalYmd(today);
+  const startDate = validateYmd(req.query.start_date) || `${tl.getFullYear()}-01-01`;
+  const endDate = validateYmd(req.query.end_date) || today;
+  if (startDate > endDate) {
+    return { status: 400, body: { ok: false, error: "start_date must be on or before end_date." } };
+  }
+  const grain = ["week", "month"].includes(String(req.query.grain ?? "").trim().toLowerCase())
+    ? String(req.query.grain).trim().toLowerCase()
+    : "month";
+
+  const [quotePipelineResult, morawareResult] = await Promise.all([
+    fetchKpiQuotePipeline(supabase, organizationId, startDate, endDate, grain).catch((e) => ({
+      ok: false,
+      error: String(e?.message ?? e)
+    })),
+    fetchKpiMorawareActuals(supabase, organizationId, startDate, endDate, grain).catch((e) => ({
+      ok: false,
+      error: String(e?.message ?? e)
+    }))
+  ]);
+
+  return {
+    status: 200,
+    body: {
+      ok: true,
+      range: { start_date: startDate, end_date: endDate, grain },
+      freshness: {
+        moraware_last_success:
+          morawareResult.ok && "morawareLastSuccess" in morawareResult
+            ? morawareResult.morawareLastSuccess
+            : null,
+        quote_last_updated: quotePipelineResult.ok
+          ? (quotePipelineResult.mostRecentUpdatedAt ?? null)
+          : null,
+        generated_at: generatedAt
+      },
+      trust: {
+        attribution_status: "company_wide_available_branch_rep_gated",
+        branch_rep_gated: true,
+        protected_mapping_rules_enforced: true,
+        note: "Branch/rep attribution is gated by approved Sales Account Mapping. Company-wide totals are available before mapping coverage is high. Account-specific mapping guardrails are enforced."
+      },
+      quote_pipeline: quotePipelineResult.ok
+        ? {
+            source: "quote_library",
+            trust: "customer_display_total_preferred",
+            customer_display_total_note:
+              "Quote value uses customer_display_total (customer-facing estimate total) when available; falls back to grand_total for older quotes.",
+            quote_date_basis:
+              "created_at (internal estimate creation date; no sent_at or quote_date on current schema)",
+            revision_filter: quotePipelineResult.revision_filter_applied
+              ? "is_current_revision=true and archived_at IS NULL"
+              : "archived_at IS NULL (is_current_revision not available)",
+            periods: quotePipelineResult.periods,
+            totals: quotePipelineResult.totals,
+            status_breakdown: quotePipelineResult.statusBreakdown
+          }
+        : {
+            source: "quote_library",
+            status: "not_available",
+            error: quotePipelineResult.error,
+            periods: [],
+            totals: null
+          },
+      moraware_actuals: morawareResult.ok
+        ? {
+            source: "moraware_prepared_facts",
+            trust: "company_wide_actuals",
+            extraction_status: morawareResult.extractionStatus,
+            sync_note: morawareResult.syncNote,
+            periods: morawareResult.periods,
+            totals: morawareResult.totals
+          }
+        : {
+            source: "moraware_prepared_facts",
+            status: "not_available",
+            error: morawareResult.error,
+            periods: [],
+            totals: null
+          },
+      partner_quote: {
+        source: "partner_quote",
+        status: "planned",
+        note: "Partner Quote KPIs are planned for a future pass. No partner quote data is available yet."
+      },
+      notes: [
+        "Branch, salesperson, and account attribution remains gated by approved Sales Account Mapping.",
+        "Account-specific mapping guardrails are enforced by the Sales Account Mapping system.",
+        "Company-wide totals are available before branch/rep rollups are trusted.",
+        "Quote value uses the customer-facing estimated project total (customer_display_total) when available, grand_total for older quotes."
+      ]
+    }
+  };
+}
+
+// ── End KPI v1 ────────────────────────────────────────────────────────────
+
 /**
  * Register Sales Head read routes. Matches Executive pattern: requireAuth → requireRole (admin bypass) → head access.
  * @param {import("express").Application} app
@@ -2767,6 +3117,12 @@ export function attachSalesHeadRoutes(app, { requireAuth, requireRole, requireHe
       }
     };
   }
+
+  console.log(
+    "[sales] mounted GET /api/sales/{summary,salesperson-performance,account-performance,trend,jobs,filters," +
+    "dashboard-foundation,production-reconciliation,performance-intelligence,debug,kpi-v1} " +
+    "(requireAuth + SALES_API_ROLES + sales head)"
+  );
 
   app.get("/api/sales/summary", requireAuth(), requireRole(roleList), headAccessSales, execSales(salesSummaryHandler));
   app.get(
@@ -2815,4 +3171,5 @@ export function attachSalesHeadRoutes(app, { requireAuth, requireRole, requireHe
     execSales(salesPerformanceIntelligenceHandler)
   );
   app.get("/api/sales/debug", requireAuth(), requireRole(roleList), headAccessSales, execSales(salesDebugHandler));
+  app.get("/api/sales/kpi-v1", requireAuth(), requireRole(roleList), headAccessSales, execSales(salesKpiV1Handler));
 }

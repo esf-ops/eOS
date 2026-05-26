@@ -215,8 +215,9 @@ export default function KpiHistoryScaffold() {
             split totals may not.
           </li>
           <li>
-            <strong>Blackstone guardrail preserved.</strong> Blackstone does not default to Dyersville — this rule
-            survives any new KPI rollup unless Chris explicitly approves a mapping change.
+            <strong>Protected attribution rules are enforced.</strong> Account-specific mapping guardrails
+            are active. No account is attributed to a branch or rep without an approved Sales Account Mapping
+            row — this applies to every new KPI rollup.
           </li>
           <li>Manual / historical imports are allowed for older years, but must be labeled <code>manual_import</code> with an import note.</li>
           <li>Frontend never calculates production / pipeline KPI totals from raw payloads — backend prepared rollups own the math.</li>
