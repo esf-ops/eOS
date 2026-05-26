@@ -56,18 +56,6 @@ export const INTERNAL_ESTIMATE_MEASURE_OPTIONS: InternalMeasureOptions = {
   chargeableCounterCeil: true
 };
 
-/**
- * Project-level customer estimate row display — round up to nearest $10.
- * Each visible Estimate Summary row (countertop material, backsplash material,
- * add-ons, customer-facing custom lines) rounds up independently; the customer-facing
- * Estimated project total = sum of those rounded rows.
- * Shared by CustomerEstimatePrint and InternalEstimateApp (for save-time persistence).
- */
-export function roundCustomerDisplay(amount: number): number {
-  const n = Number(amount);
-  if (!Number.isFinite(n) || n <= 0) return 0;
-  return Math.ceil(n / 10) * 10;
-}
 
 export {
   defaultVanityKitchenTier,

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiGetJson, apiPostJson, ApiError } from "@quote-lib/api";
+import { roundCustomerDisplay } from "@quote-lib/customerDisplayRounding";
 import { config, EOS_LOGO_URL } from "@quote-lib/config";
 import type { DemoCalculateResult } from "@quote-lib/demoFallback";
 import { qualifyingSfFromRoomDrafts, round2 } from "@quote-lib/measurementEngine";
@@ -14,7 +15,6 @@ import {
   mergeRoomDraftsIntoGlobalAddOns,
   roomEditorDomId,
   roomsNeedLocalVanityMath,
-  roundCustomerDisplay,
   INTERNAL_ESTIMATE_MEASURE_OPTIONS,
   runLocalPrototypeQuote,
   serializeCustomerRoomAreaBreakdown,

@@ -1,7 +1,8 @@
 import React from "react";
 import { EOS_LOGO_URL } from "@quote-lib/config";
 import { round2 } from "@quote-lib/measurementEngine";
-import { roundCustomerDisplay, roundCustomerDisplayAddonLine, roundCustomerDisplayVanity } from "@quote-lib/prototypeQuoteMath";
+import { roundCustomerDisplay } from "@quote-lib/customerDisplayRounding";
+import { roundCustomerDisplayAddonLine, roundCustomerDisplayVanity } from "@quote-lib/prototypeQuoteMath";
 import type {
   CustomerRoomAreaCostBreakdown,
   InternalEstimateGroupComparisonRow,
