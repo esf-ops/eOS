@@ -253,19 +253,28 @@ async function fetchUserDetailEnriched(sb, userId) {
   const uid = pickStr(userId);
   const first = await sb
     .from("user_profiles")
-    .select("id,email,full_name,role,department,is_active,user_kind,last_login_at,created_at,updated_at,organization_id")
+    .select("id,email,full_name,role,department,is_active,user_kind,last_login_at,created_at,updated_at,organization_id,job_title")
     .eq("id", uid)
     .limit(1);
   let profRows;
   let pe;
-  if (first.error && String(first.error.message ?? "").includes("organization_id")) {
-    const second = await sb
+  if (first.error && String(first.error.message ?? "").toLowerCase().includes("job_title")) {
+    // job_title column not yet applied — retry without it
+    const r2 = await sb
+      .from("user_profiles")
+      .select("id,email,full_name,role,department,is_active,user_kind,last_login_at,created_at,updated_at,organization_id")
+      .eq("id", uid)
+      .limit(1);
+    profRows = r2.data;
+    pe = r2.error;
+  } else if (first.error && String(first.error.message ?? "").includes("organization_id")) {
+    const r3 = await sb
       .from("user_profiles")
       .select("id,email,full_name,role,department,is_active,user_kind,last_login_at,created_at,updated_at")
       .eq("id", uid)
       .limit(1);
-    profRows = second.data;
-    pe = second.error;
+    profRows = r3.data;
+    pe = r3.error;
   } else {
     profRows = first.data;
     pe = first.error;
@@ -611,23 +620,40 @@ export function attachAdvancedSystemAdminUserRoutes(app, ctx) {
   r.get("/users", ...adminGuard, async (_req, res) => {
     try {
       const supabase = sbFn();
+      const ordOpts = [
+        { column: "role", ascending: true },
+        { column: "full_name", ascending: true },
+        { column: "email", ascending: true }
+      ];
       const first = await supabase
         .from("user_profiles")
-        .select("id,email,full_name,role,department,is_active,user_kind,last_login_at,created_at,updated_at,organization_id")
-        .order("role", { ascending: true })
-        .order("full_name", { ascending: true })
-        .order("email", { ascending: true });
+        .select("id,email,full_name,role,department,is_active,user_kind,last_login_at,created_at,updated_at,organization_id,job_title")
+        .order(ordOpts[0].column, { ascending: ordOpts[0].ascending })
+        .order(ordOpts[1].column, { ascending: ordOpts[1].ascending })
+        .order(ordOpts[2].column, { ascending: ordOpts[2].ascending });
       let rows = first.data ?? [];
       let err = first.error;
+      // Degrade: job_title column not yet applied
+      if (err && String(err.message ?? "").toLowerCase().includes("job_title")) {
+        const r2 = await supabase
+          .from("user_profiles")
+          .select("id,email,full_name,role,department,is_active,user_kind,last_login_at,created_at,updated_at,organization_id")
+          .order(ordOpts[0].column, { ascending: ordOpts[0].ascending })
+          .order(ordOpts[1].column, { ascending: ordOpts[1].ascending })
+          .order(ordOpts[2].column, { ascending: ordOpts[2].ascending });
+        rows = r2.data ?? [];
+        err = r2.error;
+      }
+      // Degrade: organization_id column not yet applied
       if (err && String(err.message ?? "").includes("organization_id")) {
-        const second = await supabase
+        const r3 = await supabase
           .from("user_profiles")
           .select("id,email,full_name,role,department,is_active,user_kind,last_login_at,created_at,updated_at")
-          .order("role", { ascending: true })
-          .order("full_name", { ascending: true })
-          .order("email", { ascending: true });
-        rows = second.data ?? [];
-        err = second.error;
+          .order(ordOpts[0].column, { ascending: ordOpts[0].ascending })
+          .order(ordOpts[1].column, { ascending: ordOpts[1].ascending })
+          .order(ordOpts[2].column, { ascending: ordOpts[2].ascending });
+        rows = r3.data ?? [];
+        err = r3.error;
       }
       if (err) throw new Error(err.message);
       try {

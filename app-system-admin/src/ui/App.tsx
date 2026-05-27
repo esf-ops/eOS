@@ -2821,6 +2821,8 @@ function ProfileForm({
   const [fullName, setFullName] = useState(String(profile.full_name ?? ""));
   const [jobTitle, setJobTitle] = useState(String(profile.job_title ?? ""));
   const [orgLoadError, setOrgLoadError] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   const roleOptions = useMemo(() => {
     const r = String(profile.role ?? "").trim();
@@ -2848,18 +2850,26 @@ function ProfileForm({
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    await apiFetch(`${USER_MGMT_API}/users/${encodeURIComponent(profile.id)}/profile`, {
-      token,
-      method: "POST",
-      body: {
-        full_name: fullName.trim(),
-        role,
-        department: department.trim() || null,
-        organization_id: organizationId.trim() || null,
-        job_title: jobTitle.trim() || null
-      }
-    });
-    onDone();
+    setSaving(true);
+    setSaveError("");
+    try {
+      await apiFetch(`${USER_MGMT_API}/users/${encodeURIComponent(profile.id)}/profile`, {
+        token,
+        method: "POST",
+        body: {
+          full_name: fullName.trim(),
+          role,
+          department: department.trim() || null,
+          organization_id: organizationId.trim() || null,
+          job_title: jobTitle.trim() || null
+        }
+      });
+      onDone();
+    } catch (err: unknown) {
+      setSaveError(String((err as Error)?.message ?? err) || "Save failed — try again.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -2924,8 +2934,18 @@ function ProfileForm({
       <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
         Active / inactive status is managed under <strong>Account actions</strong> (deactivate or reactivate) so changes stay aligned with admin audit rules.
       </p>
-      <button type="submit" className="btn btn-primary" style={{ marginTop: 10 }}>
-        Save profile
+      {saveError ? (
+        <p style={{ fontSize: 12, color: "var(--eos-danger, #b91c1c)", margin: "8px 0 0" }}>
+          {saveError}
+        </p>
+      ) : null}
+      <button
+        type="submit"
+        className="btn btn-primary"
+        disabled={saving}
+        style={{ marginTop: 10 }}
+      >
+        {saving ? "Saving…" : "Save profile"}
       </button>
     </form>
   );
