@@ -218,3 +218,4 @@ Stabilization phase **ends** when all are true:
 - [eliteOS-master-head-map.md](./eliteOS-master-head-map.md)  
 - [sales-kpi-history-plan.md](./sales-kpi-history-plan.md)  
 - [STATUS_REPORT_2026-05-27.md](./STATUS_REPORT_2026-05-27.md)  
+- [STABILIZATION_QA_LOG_2026-05-27.md](./STABILIZATION_QA_LOG_2026-05-27.md) — working QA checklist and bug log  
