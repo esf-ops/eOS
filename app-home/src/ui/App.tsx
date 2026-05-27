@@ -33,8 +33,10 @@ type MeUser = {
   organization_id?: string | null;
   user_kind?: string;
   isActive?: boolean;
+  job_title?: string | null;
   /** Optional, forward-compatible. Used by the hero workspace panel when backend supplies it. */
   organization_name?: string | null;
+  organization_slug?: string | null;
   organization_logo_url?: string | null;
 };
 
@@ -71,6 +73,7 @@ type HeadsResp = {
     organization_id?: string | null;
     /** Optional, forward-compatible. Surfaced in the hero workspace panel when present. */
     organization_name?: string | null;
+    organization_slug?: string | null;
     organization_logo_url?: string | null;
   };
   heads: HeadCard[];
@@ -139,12 +142,17 @@ function resolveWorkspaceLogoUrl(me: MeResp | null, heads: HeadsResp | null): st
   return EOS_LOGO_URL;
 }
 
-function workspaceShortId(orgId: string | null | undefined): string {
-  const s = String(orgId ?? "").trim();
-  if (!s) return "";
-  // Show the first UUID block (8 chars) so admins can recognize the workspace at a glance
-  // without exposing the full ID. Falls back to first 8 of any non-UUID string.
-  return s.split("-")[0]?.slice(0, 8) || s.slice(0, 8);
+/** Returns a short admin-visible workspace identifier. Prefers org slug/key over raw UUID. */
+function workspaceShortId(
+  orgSlug: string | null | undefined,
+  orgId: string | null | undefined
+): string {
+  const slug = String(orgSlug ?? "").trim();
+  if (slug) return slug;
+  const id = String(orgId ?? "").trim();
+  if (!id) return "";
+  // Show only the first UUID block as a subtle admin chip — not primary display.
+  return id.split("-")[0]?.slice(0, 8) || id.slice(0, 8);
 }
 
 function workspaceInitials(name: string): string {
@@ -902,12 +910,13 @@ export default function App() {
     String(u?.email ?? session?.user?.email ?? "").trim() ||
     "Signed in user";
   const displayEmail = String(u?.email ?? session?.user?.email ?? "").trim();
-  const displayOrg = String(u?.organization_id ?? headsUser?.organization_id ?? "").trim();
+  const displayOrgId = String(u?.organization_id ?? headsUser?.organization_id ?? "").trim();
+  const displayOrgSlug = String(u?.organization_slug ?? headsUser?.organization_slug ?? "").trim() || null;
   const firstName = firstNameFromDisplay(displayName, displayEmail);
   const initials = initialsFor(displayName, displayEmail);
   const workspaceName = resolveWorkspaceName(me, headsPayload);
   const workspaceLogoUrl = resolveWorkspaceLogoUrl(me, headsPayload);
-  const workspaceShort = workspaceShortId(displayOrg);
+  const workspaceShort = workspaceShortId(displayOrgSlug, displayOrgId);
   const workspaceInits = workspaceInitials(workspaceName);
   // True when the backend has not supplied an org logo and we're showing the local Elite fallback.
   const workspaceLogoIsFallback = workspaceLogoUrl === EOS_LOGO_URL;
@@ -1225,7 +1234,7 @@ export default function App() {
                         <span className="hero-workspace-sep" aria-hidden>·</span>
                         <code
                           className="hero-workspace-id"
-                          title={`Organization ID: ${displayOrg}`}
+                          title={displayOrgId ? `Organization ID: ${displayOrgId}` : "Organization"}
                         >
                           {workspaceShort}
                         </code>

@@ -11,6 +11,46 @@ function pickStr(v) {
   return v != null ? String(v).trim() : "";
 }
 
+// ---------------------------------------------------------------------------
+// Organization helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetch a Map<orgId, {display_name, organization_key}> from the organizations
+ * table. Returns an empty Map if the table doesn't exist or is unreachable.
+ * @param {import("@supabase/supabase-js").SupabaseClient} sb
+ * @returns {Promise<Map<string, {display_name: string, organization_key: string}>>}
+ */
+async function fetchOrgLookup(sb) {
+  try {
+    const { data, error } = await sb
+      .from("organizations")
+      .select("id,display_name,organization_key,is_active");
+    if (error || !data) return new Map();
+    return new Map(data.map((o) => [String(o.id), o]));
+  } catch {
+    return new Map();
+  }
+}
+
+/**
+ * Enrich a user row (or any object with organization_id) with org display info.
+ * Mutates the row in-place and returns it.
+ */
+function applyOrgInfo(row, orgLookup) {
+  const orgId = String(row.organization_id ?? "").trim();
+  if (!orgId) return row;
+  const org = orgLookup.get(orgId);
+  if (org) {
+    row.organization_name = org.display_name ?? null;
+    row.organization_slug = org.organization_key ?? null;
+  } else {
+    row.organization_name = null;
+    row.organization_slug = null;
+  }
+  return row;
+}
+
 const DEFAULT_ELITEOS_INVITE_CALLBACK = "https://www.eliteosfab.com/auth/callback";
 
 function isLocalhostRedirectUrl(url) {
@@ -537,6 +577,18 @@ export function attachAdvancedSystemAdminUserRoutes(app, ctx) {
       } catch (_) {
         pricingGroups = [];
       }
+      // Load organizations for dropdown — graceful if table absent
+      let organizations = [];
+      try {
+        const { data: orgData } = await sb
+          .from("organizations")
+          .select("id,display_name,organization_key,is_active")
+          .order("display_name", { ascending: true });
+        organizations = orgData ?? [];
+      } catch (_) {
+        organizations = [];
+      }
+
       res.json({
         ok: true,
         heads: [...EOS_HEAD_SLUGS],
@@ -548,7 +600,8 @@ export function attachAdvancedSystemAdminUserRoutes(app, ctx) {
         })),
         roles: [...APPLICATION_ROLES],
         dealers,
-        pricing_groups: pricingGroups
+        pricing_groups: pricingGroups,
+        organizations
       });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
@@ -582,6 +635,11 @@ export function attachAdvancedSystemAdminUserRoutes(app, ctx) {
       } catch (e) {
         console.warn("GET /api/*/users enrich skipped:", String(e?.message || e));
       }
+      // Enrich with organization display name — graceful if table absent
+      try {
+        const orgLookup = await fetchOrgLookup(supabase);
+        if (orgLookup.size > 0) rows = rows.map((r) => applyOrgInfo({ ...r }, orgLookup));
+      } catch (_) { /* non-fatal */ }
       res.json({ ok: true, rows });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
@@ -717,30 +775,46 @@ export function attachAdvancedSystemAdminUserRoutes(app, ctx) {
         const o = pickStr(body.organization_id);
         patch.organization_id = o ? parseUuidOrEmpty(o) || null : null;
       }
+      // job_title: display-only, freeform — degrades gracefully if column absent
+      const hasJobTitle = body.job_title !== undefined;
+      if (hasJobTitle) patch.job_title = pickStr(body.job_title) || null;
 
       const sb = sbFn();
       let data;
       let error;
-      const upd = await sb
-        .from("user_profiles")
-        .update(patch)
-        .eq("id", userId)
-        .select("id,email,full_name,role,department,is_active,user_kind,last_login_at,created_at,updated_at,organization_id")
-        .limit(1);
+      const selectCols = "id,email,full_name,role,department,is_active,user_kind,last_login_at,created_at,updated_at,organization_id,job_title";
+      const selectColsNoJobTitle = "id,email,full_name,role,department,is_active,user_kind,last_login_at,created_at,updated_at,organization_id";
+      const selectColsBasic = "id,email,full_name,role,department,is_active,user_kind,last_login_at,created_at,updated_at";
+
+      const upd = await sb.from("user_profiles").update(patch).eq("id", userId).select(selectCols).limit(1);
       data = upd.data;
       error = upd.error;
-      if (error && String(error.message ?? "").includes("organization_id")) {
-        const upd2 = await sb
-          .from("user_profiles")
-          .update(patch)
-          .eq("id", userId)
-          .select("id,email,full_name,role,department,is_active,user_kind,last_login_at,created_at,updated_at")
-          .limit(1);
+      // Degrade: if job_title column absent, retry without it
+      if (error && String(error.message ?? "").toLowerCase().includes("job_title")) {
+        const patchNoJT = { ...patch };
+        delete patchNoJT.job_title;
+        const upd2 = await sb.from("user_profiles").update(patchNoJT).eq("id", userId).select(selectColsNoJobTitle).limit(1);
         data = upd2.data;
         error = upd2.error;
       }
+      // Degrade: if organization_id column absent, retry without it
+      if (error && String(error.message ?? "").includes("organization_id")) {
+        const patchBasic = { ...patch };
+        delete patchBasic.organization_id;
+        delete patchBasic.job_title;
+        const upd3 = await sb.from("user_profiles").update(patchBasic).eq("id", userId).select(selectColsBasic).limit(1);
+        data = upd3.data;
+        error = upd3.error;
+      }
       if (error) throw new Error(error.message);
       if (!data?.[0]) return res.status(404).json({ ok: false, error: "User not found" });
+
+      // Enrich response with org name
+      const profile = data[0];
+      try {
+        const orgLookup = await fetchOrgLookup(sb);
+        applyOrgInfo(profile, orgLookup);
+      } catch (_) { /* non-fatal */ }
 
       await logAction({
         user: req.user,
@@ -753,7 +827,7 @@ export function attachAdvancedSystemAdminUserRoutes(app, ctx) {
         req
       });
 
-      res.json({ ok: true, profile: data[0] });
+      res.json({ ok: true, profile });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
     }
@@ -1205,30 +1279,43 @@ export function attachAdvancedSystemAdminUserRoutes(app, ctx) {
         const o = pickStr(body.organization_id);
         patch.organization_id = o ? parseUuidOrEmpty(o) || null : null;
       }
+      // job_title: display-only — degrades gracefully if column absent
+      const hasJobTitlePatch = body.job_title !== undefined;
+      if (hasJobTitlePatch) patch.job_title = pickStr(body.job_title) || null;
 
       const sb = sbFn();
       let data;
       let error;
-      const upd = await sb
-        .from("user_profiles")
-        .update(patch)
-        .eq("id", userId)
-        .select("id,email,full_name,role,department,is_active,user_kind,last_login_at,created_at,updated_at,organization_id")
-        .limit(1);
+      const patchSelectCols = "id,email,full_name,role,department,is_active,user_kind,last_login_at,created_at,updated_at,organization_id,job_title";
+      const patchSelectColsNoJT = "id,email,full_name,role,department,is_active,user_kind,last_login_at,created_at,updated_at,organization_id";
+      const patchSelectBasic = "id,email,full_name,role,department,is_active,user_kind,last_login_at,created_at,updated_at";
+
+      const upd = await sb.from("user_profiles").update(patch).eq("id", userId).select(patchSelectCols).limit(1);
       data = upd.data;
       error = upd.error;
-      if (error && String(error.message ?? "").includes("organization_id")) {
-        const upd2 = await sb
-          .from("user_profiles")
-          .update(patch)
-          .eq("id", userId)
-          .select("id,email,full_name,role,department,is_active,user_kind,last_login_at,created_at,updated_at")
-          .limit(1);
+      if (error && String(error.message ?? "").toLowerCase().includes("job_title")) {
+        const p2 = { ...patch };
+        delete p2.job_title;
+        const upd2 = await sb.from("user_profiles").update(p2).eq("id", userId).select(patchSelectColsNoJT).limit(1);
         data = upd2.data;
         error = upd2.error;
       }
+      if (error && String(error.message ?? "").includes("organization_id")) {
+        const p3 = { ...patch };
+        delete p3.organization_id;
+        delete p3.job_title;
+        const upd3 = await sb.from("user_profiles").update(p3).eq("id", userId).select(patchSelectBasic).limit(1);
+        data = upd3.data;
+        error = upd3.error;
+      }
       if (error) throw new Error(error.message);
       if (!data?.[0]) return res.status(404).json({ ok: false, error: "User not found" });
+
+      const patchedProfile = data[0];
+      try {
+        const orgLookup = await fetchOrgLookup(sb);
+        applyOrgInfo(patchedProfile, orgLookup);
+      } catch (_) { /* non-fatal */ }
 
       await logAction({
         user: req.user,
@@ -1241,7 +1328,7 @@ export function attachAdvancedSystemAdminUserRoutes(app, ctx) {
         req
       });
 
-      res.json({ ok: true, profile: data[0] });
+      res.json({ ok: true, profile: patchedProfile });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
     }

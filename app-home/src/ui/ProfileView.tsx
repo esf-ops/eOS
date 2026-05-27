@@ -13,8 +13,10 @@ type ProfileUser = {
   department?: string;
   organization_id?: string | null;
   organization_name?: string | null;
+  organization_slug?: string | null;
   user_kind?: string;
   isActive?: boolean;
+  job_title?: string | null;
 };
 
 type ProfileHead = {
@@ -253,8 +255,14 @@ export default function ProfileView({
               <span className="profile-field-label">Email</span>
               <span className="profile-field-value">{loading ? "—" : displayEmail || "—"}</span>
             </div>
+            {!loadError && user?.job_title ? (
+              <div className="profile-field-row">
+                <span className="profile-field-label">Job title</span>
+                <span className="profile-field-value">{user.job_title}</span>
+              </div>
+            ) : null}
             <div className="profile-field-row">
-              <span className="profile-field-label">Role</span>
+              <span className="profile-field-label">Permission role</span>
               <span className="profile-field-value">
                 {loading ? "—" : !apiAvailable ? (
                   <span className="profile-field-unavailable">Unavailable</span>

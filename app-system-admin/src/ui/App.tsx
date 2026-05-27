@@ -148,6 +148,7 @@ type AdminRow = Record<string, unknown> & {
   full_name?: string | null;
   role?: string | null;
   department?: string | null;
+  job_title?: string | null;
   user_kind?: string | null;
   is_active?: boolean | null;
   user_kind_normalized?: string;
@@ -157,9 +158,18 @@ type AdminRow = Record<string, unknown> & {
   created_at?: string | null;
   updated_at?: string | null;
   organization_id?: string | null;
+  organization_name?: string | null;
+  organization_slug?: string | null;
   allowed_heads_list?: string[];
   dealer_access?: DealerAccessBrief[];
   auth_summary?: UserAuthSummary | null;
+};
+
+type OrgOption = {
+  id: string;
+  display_name: string;
+  organization_key: string;
+  is_active?: boolean | null;
 };
 
 type ReferenceResp = {
@@ -169,6 +179,7 @@ type ReferenceResp = {
   roles: string[];
   dealers: { id: string; account_name: string }[];
   pricing_groups: { id: string; code: string; label: string | null }[];
+  organizations?: OrgOption[];
 };
 
 type UserDetailResp = Record<string, unknown> & {
@@ -358,14 +369,25 @@ function UserSnapshot({ profile, detail }: { profile: AdminRow; detail: UserDeta
         <dd>{String(profile.email ?? "—")}</dd>
         <dt>Full name</dt>
         <dd>{String(profile.full_name ?? "—")}</dd>
-        <dt>Role</dt>
+        <dt>Permission role</dt>
         <dd>{titleizeToken(profile.role)}</dd>
+        <dt>Job title</dt>
+        <dd>{String(profile.job_title ?? "—")}</dd>
         <dt>Department</dt>
         <dd>{String(profile.department ?? "—")}</dd>
         <dt>Organization</dt>
         <dd>
-          {profile.organization_id ? (
-            <code style={{ fontSize: 12 }} title={String(profile.organization_id)}>
+          {profile.organization_name ? (
+            <>
+              {String(profile.organization_name)}
+              {profile.organization_id ? (
+                <span className="muted" style={{ display: "block", fontSize: 11, marginTop: 2 }}>
+                  <code title="Organization ID">{String(profile.organization_id)}</code>
+                </span>
+              ) : null}
+            </>
+          ) : profile.organization_id ? (
+            <code style={{ fontSize: 12 }} title="Organization ID (name not available)">
               {String(profile.organization_id)}
             </code>
           ) : (
@@ -2705,6 +2727,7 @@ export default function App() {
                   <h4>Edit profile</h4>
                   <ProfileForm
                     roles={reference?.roles ?? []}
+                    organizations={reference?.organizations ?? []}
                     profile={profileDrawer}
                     token={sessionToken}
                     onDone={() => void refreshAll()}
@@ -2781,11 +2804,13 @@ export default function App() {
 
 function ProfileForm({
   roles,
+  organizations,
   profile,
   token,
   onDone
 }: {
   roles: string[];
+  organizations: OrgOption[];
   profile: AdminRow;
   token: string;
   onDone: () => void;
@@ -2794,6 +2819,8 @@ function ProfileForm({
   const [department, setDepartment] = useState(String(profile.department ?? ""));
   const [organizationId, setOrganizationId] = useState(String(profile.organization_id ?? ""));
   const [fullName, setFullName] = useState(String(profile.full_name ?? ""));
+  const [jobTitle, setJobTitle] = useState(String(profile.job_title ?? ""));
+  const [orgLoadError, setOrgLoadError] = useState(false);
 
   const roleOptions = useMemo(() => {
     const r = String(profile.role ?? "").trim();
@@ -2802,12 +2829,22 @@ function ProfileForm({
     return [...set].sort((a, b) => a.localeCompare(b));
   }, [roles, profile.role]);
 
+  // If the organizations list is empty and we have an existing org_id, fall back to text
+  // so the admin can at least see and manually clear it.
+  const orgDropdownAvailable = organizations.length > 0;
+
   useEffect(() => {
     setRole(String(profile.role ?? ""));
     setDepartment(String(profile.department ?? ""));
     setOrganizationId(String(profile.organization_id ?? ""));
     setFullName(String(profile.full_name ?? ""));
+    setJobTitle(String(profile.job_title ?? ""));
+    setOrgLoadError(false);
   }, [profile]);
+
+  useEffect(() => {
+    setOrgLoadError(organizations.length === 0 && Boolean(profile.organization_id));
+  }, [organizations, profile.organization_id]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -2815,10 +2852,11 @@ function ProfileForm({
       token,
       method: "POST",
       body: {
+        full_name: fullName.trim(),
         role,
         department: department.trim() || null,
         organization_id: organizationId.trim() || null,
-        full_name: fullName.trim()
+        job_title: jobTitle.trim() || null
       }
     });
     onDone();
@@ -2831,23 +2869,57 @@ function ProfileForm({
         <input value={fullName} onChange={(e) => setFullName(e.target.value)} />
       </div>
       <div className="field">
-        <label>Role</label>
+        <label>Permission role</label>
         <select value={role} onChange={(e) => setRole(e.target.value)}>
           {roleOptions.map((rVal) => (
             <option key={rVal} value={rVal}>
-              {rVal}
+              {titleizeToken(rVal)}
             </option>
           ))}
         </select>
       </div>
-      <small className="muted">Validated against canonical role list.</small>
+      <div className="field">
+        <label>Job title</label>
+        <input
+          value={jobTitle}
+          onChange={(e) => setJobTitle(e.target.value)}
+          placeholder="e.g. Project Manager, Sales Rep, Fabricator"
+        />
+      </div>
+      <small className="muted" style={{ display: "block", marginBottom: 8 }}>
+        Permission role controls access. Job title is display-only.
+      </small>
       <div className="field">
         <label>Department</label>
         <input value={department} onChange={(e) => setDepartment(e.target.value)} />
       </div>
       <div className="field">
-        <label>Organization ID (UUID or empty)</label>
-        <input value={organizationId} onChange={(e) => setOrganizationId(e.target.value)} placeholder="Clear field to unset" />
+        <label>Organization</label>
+        {orgDropdownAvailable ? (
+          <select value={organizationId} onChange={(e) => setOrganizationId(e.target.value)}>
+            <option value="">— Unassigned —</option>
+            {organizations.map((org) => (
+              <option key={org.id} value={org.id}>
+                {org.display_name}
+                {org.organization_key ? ` (${org.organization_key})` : ""}
+                {org.is_active === false ? " [inactive]" : ""}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <>
+            {orgLoadError ? (
+              <p className="muted" style={{ fontSize: 12, marginBottom: 4, color: "var(--color-warning, #b45309)" }}>
+                Organization list unavailable — existing assignment preserved. You may clear the field to unset.
+              </p>
+            ) : null}
+            <input
+              value={organizationId}
+              onChange={(e) => setOrganizationId(e.target.value)}
+              placeholder="Organization ID (UUID) or leave blank to unset"
+            />
+          </>
+        )}
       </div>
       <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
         Active / inactive status is managed under <strong>Account actions</strong> (deactivate or reactivate) so changes stay aligned with admin audit rules.

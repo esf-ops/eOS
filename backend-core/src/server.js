@@ -1020,7 +1020,23 @@ async function recordThrottledAuthEvent(req, eventType, toolSlug, metadata) {
 
 app.get("/api/me", requireAuth(), async (req, res) => {
   await recordThrottledAuthEvent(req, "session_seen", "home", { route: "/api/me" });
-  res.json({ ok: true, user: req.user });
+  const user = { ...req.user };
+  // Enrich with organization display name — graceful if organizations table absent
+  if (user.organization_id) {
+    try {
+      const sb = supabaseServerClient();
+      const { data } = await sb
+        .from("organizations")
+        .select("display_name,organization_key")
+        .eq("id", user.organization_id)
+        .maybeSingle();
+      if (data) {
+        user.organization_name = data.display_name ?? null;
+        user.organization_slug = data.organization_key ?? null;
+      }
+    } catch (_) { /* non-fatal — org table may not be applied yet */ }
+  }
+  res.json({ ok: true, user });
 });
 
 // ---------------------------------------------------------------------------
