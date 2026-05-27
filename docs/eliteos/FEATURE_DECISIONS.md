@@ -472,3 +472,18 @@
 
 ---
 
+## §36 — 2026-05-27 eliteOS Stabilization Milestone
+
+| Field | Value |
+|---|---|
+| **Date** | 2026-05-27 |
+| **Decision** | The platform has reached a meaningful **internal-beta milestone** after a major build push (Home identity/org display, protected-head shell, Profile & Preferences v1, System Admin org/job title, Internal Estimate customer totals, Quote Library CDT, Sales Dashboard + KPI v1, Partner Quote hardening foundation, Moraware prepared facts). **Broad feature expansion pauses** temporarily in favor of a **Stabilization Phase** focused on smoke testing, bug fixing, deployment verification, SQL apply verification, and documentation cleanup. |
+| **Milestone docs** | [STATUS_REPORT_2026-05-27.md](./STATUS_REPORT_2026-05-27.md) (formal checkpoint) · [STABILIZATION_PLAN_2026-05-27.md](./STABILIZATION_PLAN_2026-05-27.md) (operating rules and exit criteria). |
+| **Active heads for smoke testing** | Home Launcher, System Admin, Internal Estimate, Quote Library, Pricing Admin, Sales Dashboard (plus Public Quote and internal Partner Quote pilot as applicable). |
+| **Partner Quote** | Remains **internal / hardened pilot only**. Not external-production until RLS, leakage verification (`verifyPartnerQuoteLeakage.mjs`), and security review are green. |
+| **Intentionally deferred until stabilization exit** | Quote Library detail dialog refactor; Sales KPI v1.1; historical KPI workbook import; Partner Quote external rollout; new production heads; SaaS/multi-tenant packaging; large monolith refactors. |
+| **Allowed during stabilization** | Blocker/regression fixes and small one-file polish; Auto for tiny fixes; Sonnet/Opus for P0 or reset; smoke tests and docs; no new major heads. |
+| **Revisit trigger** | Stabilization exit criteria met (see stabilization plan); team selects **one** next major build. |
+
+---
+
