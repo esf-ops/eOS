@@ -142,19 +142,6 @@ function resolveWorkspaceLogoUrl(me: MeResp | null, heads: HeadsResp | null): st
   return EOS_LOGO_URL;
 }
 
-/** Returns a short admin-visible workspace identifier. Prefers org slug/key over raw UUID. */
-function workspaceShortId(
-  orgSlug: string | null | undefined,
-  orgId: string | null | undefined
-): string {
-  const slug = String(orgSlug ?? "").trim();
-  if (slug) return slug;
-  const id = String(orgId ?? "").trim();
-  if (!id) return "";
-  // Show only the first UUID block as a subtle admin chip — not primary display.
-  return id.split("-")[0]?.slice(0, 8) || id.slice(0, 8);
-}
-
 function workspaceInitials(name: string): string {
   const parts = name.split(/\s+/).filter(Boolean);
   if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
@@ -916,7 +903,6 @@ export default function App() {
   const initials = initialsFor(displayName, displayEmail);
   const workspaceName = resolveWorkspaceName(me, headsPayload);
   const workspaceLogoUrl = resolveWorkspaceLogoUrl(me, headsPayload);
-  const workspaceShort = workspaceShortId(displayOrgSlug, displayOrgId);
   const workspaceInits = workspaceInitials(workspaceName);
   // True when the backend has not supplied an org logo and we're showing the local Elite fallback.
   const workspaceLogoIsFallback = workspaceLogoUrl === EOS_LOGO_URL;
@@ -930,7 +916,7 @@ export default function App() {
   const department = String(u?.department ?? "").trim() || null;
   // Hero third stat: prefer job_title, fall back to role
   const heroIdentityValue = jobTitle ?? u?.role ?? "—";
-  const heroIdentityLabel = jobTitle ? "Your title" : "Your role";
+  const heroIdentityLabel = "Your role";
   // User chip subtitle: prefer job_title, then department, then role
   const chipSubtitle = jobTitle ?? department ?? u?.role ?? null;
 
@@ -1238,17 +1224,6 @@ export default function App() {
                   <div className="hero-workspace-name">{workspaceName}</div>
                   <div className="hero-workspace-meta">
                     <span className="hero-workspace-platform">on slabOS</span>
-                    {workspaceShort ? (
-                      <>
-                        <span className="hero-workspace-sep" aria-hidden>·</span>
-                        <code
-                          className="hero-workspace-id"
-                          title={displayOrgId ? `Organization ID: ${displayOrgId}` : "Organization"}
-                        >
-                          {workspaceShort}
-                        </code>
-                      </>
-                    ) : null}
                   </div>
                 </aside>
               </div>
@@ -1411,6 +1386,12 @@ export default function App() {
                   <p className="access-meta">
                     <span className="access-meta-label">Permission role</span>
                     <code className="access-meta-value">{u.role}</code>
+                  </p>
+                ) : null}
+                {displayOrgSlug ? (
+                  <p className="access-meta">
+                    <span className="access-meta-label">Organization slug</span>
+                    <code className="access-meta-value">{displayOrgSlug}</code>
                   </p>
                 ) : null}
                 {displayOrgId ? (
