@@ -1398,10 +1398,10 @@ export default function App() {
               <summary className="access-details-summary">Access details</summary>
               <div className="access-details-body">
                 <p className="muted-note access-note">{SECURITY_NOTE}</p>
-                {displayOrg ? (
+                {displayOrgId ? (
                   <p className="access-meta">
-                    <span className="access-meta-label">Organization</span>
-                    <code className="access-meta-value">{displayOrg}</code>
+                    <span className="access-meta-label">Organization ID</span>
+                    <code className="access-meta-value">{displayOrgId}</code>
                   </p>
                 ) : null}
                 {showTechnicalDetails && headsPayload?.heads?.length ? (
