@@ -29,11 +29,32 @@ export function getBearerToken(req) {
 async function loadUserProfileOrNull(supabase, userId) {
   const { data, error } = await supabase
     .from("user_profiles")
-    .select("id,email,full_name,role,department,is_active,user_kind,last_login_at,organization_id")
+    .select("id,email,full_name,role,department,is_active,user_kind,last_login_at,organization_id,job_title")
     .eq("id", userId)
     .limit(1);
   if (error) {
     const msg = String(error.message ?? "");
+    // Degrade gracefully if newer columns are absent
+    if (msg.toLowerCase().includes("job_title")) {
+      const { data: r2, error: e2 } = await supabase
+        .from("user_profiles")
+        .select("id,email,full_name,role,department,is_active,user_kind,last_login_at,organization_id")
+        .eq("id", userId)
+        .limit(1);
+      if (e2) {
+        if (String(e2.message ?? "").includes("organization_id")) {
+          const { data: r3, error: e3 } = await supabase
+            .from("user_profiles")
+            .select("id,email,full_name,role,department,is_active,user_kind,last_login_at")
+            .eq("id", userId)
+            .limit(1);
+          if (e3) throw new Error(e3.message);
+          return r3?.[0] ?? null;
+        }
+        throw new Error(e2.message);
+      }
+      return r2?.[0] ?? null;
+    }
     if (msg.includes("organization_id")) {
       const { data: retry, error: e2 } = await supabase
         .from("user_profiles")
@@ -131,10 +152,12 @@ function attachUser(req, authUser, profile) {
     role: profile?.role || "viewer",
     fullName,
     full_name: fullName,
-    department: profile?.department || "",
+    department: profile?.department || null,
     organization_id: organizationId || null,
     user_kind: userKind,
-    isActive: profile?.is_active !== false
+    isActive: profile?.is_active !== false,
+    // Display-only fields — do not use for access checks
+    job_title: profile?.job_title ?? null
   };
 }
 

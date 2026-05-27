@@ -261,6 +261,12 @@ export default function ProfileView({
                 <span className="profile-field-value">{user.job_title}</span>
               </div>
             ) : null}
+            {!loadError && user?.department ? (
+              <div className="profile-field-row">
+                <span className="profile-field-label">Department</span>
+                <span className="profile-field-value">{user.department}</span>
+              </div>
+            ) : null}
             <div className="profile-field-row">
               <span className="profile-field-label">Permission role</span>
               <span className="profile-field-value">

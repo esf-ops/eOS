@@ -925,6 +925,15 @@ export default function App() {
   const roadmapCount = grouped.find((g) => g.section === "Coming Soon Tools")?.items.length ?? 0;
   const heroGreeting = firstName ? `Welcome back, ${firstName}.` : "Welcome back.";
 
+  // job_title is the human-facing display title; permission role is access metadata only.
+  const jobTitle = String(u?.job_title ?? "").trim() || null;
+  const department = String(u?.department ?? "").trim() || null;
+  // Hero third stat: prefer job_title, fall back to role
+  const heroIdentityValue = jobTitle ?? u?.role ?? "—";
+  const heroIdentityLabel = jobTitle ? "Your title" : "Your role";
+  // User chip subtitle: prefer job_title, then department, then role
+  const chipSubtitle = jobTitle ?? department ?? u?.role ?? null;
+
   return (
     <div className="shell">
       {showShell ? (
@@ -949,9 +958,9 @@ export default function App() {
                 aria-label="Account menu"
               >
                 <span className="home-user-chip-avatar" aria-hidden>{initials}</span>
-                <span className="home-user-chip-text">
+                  <span className="home-user-chip-text">
                   <span className="home-user-chip-name">{displayName}</span>
-                  {u?.role ? <span className="home-user-chip-role">{u.role}</span> : null}
+                  {chipSubtitle ? <span className="home-user-chip-role">{chipSubtitle}</span> : null}
                 </span>
                 <svg
                   className="home-user-chip-chevron"
@@ -1203,8 +1212,8 @@ export default function App() {
                     </div>
                     <div className="hero-stat-divider" aria-hidden />
                     <div className="hero-stat" role="listitem">
-                      <span className="hero-stat-value">{u?.role ?? "—"}</span>
-                      <span className="hero-stat-label">Your role</span>
+                      <span className="hero-stat-value">{heroIdentityValue}</span>
+                      <span className="hero-stat-label">{heroIdentityLabel}</span>
                     </div>
                   </div>
                 </div>
@@ -1398,6 +1407,12 @@ export default function App() {
               <summary className="access-details-summary">Access details</summary>
               <div className="access-details-body">
                 <p className="muted-note access-note">{SECURITY_NOTE}</p>
+                {u?.role ? (
+                  <p className="access-meta">
+                    <span className="access-meta-label">Permission role</span>
+                    <code className="access-meta-value">{u.role}</code>
+                  </p>
+                ) : null}
                 {displayOrgId ? (
                   <p className="access-meta">
                     <span className="access-meta-label">Organization ID</span>
