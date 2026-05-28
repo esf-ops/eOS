@@ -10,6 +10,7 @@ import type {
 } from "@quote-lib/prototypeQuoteMath";
 import type { MeasuredRoom } from "@quote-lib/quoteTypes";
 import { prepareCustomerPrintDisplayRows } from "./lib/customerPrintDisplayRows";
+import type { CustomerEstimateDisplayModel } from "./lib/customerEstimateDisplayModel";
 
 /**
  * Split a customer-facing rounded total across positive exact weights using proportional $10 buckets
@@ -79,6 +80,8 @@ export type CustomerEstimatePrintProps = {
    */
   internalMaterialFoldDollars: number;
   estimateTotalExact: number;
+  /** Customer-facing summary + rounding — same source as Live Quote Panel and customerDisplayTotal. */
+  customerDisplay: CustomerEstimateDisplayModel;
   roomAreaBreakdown: CustomerRoomAreaCostBreakdown | null;
   comparisonRows: InternalEstimateGroupComparisonRow[];
   estimateDate: string;
@@ -138,25 +141,17 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
   const scopeRooms = props.measuredRooms.filter((r) => r.type !== "Vanity");
 
   const vanityMaterialExact = vanityRooms.reduce((s, v) => s + (Number(v.selected) || 0), 0);
-  const countertopMaterialExact =
-    bd.totals.countertopMaterial + vanityMaterialExact + (Number(props.internalMaterialFoldDollars) || 0);
-  const backsplashMaterialExact = bd.totals.backsplashMaterial;
-  const addonsExact = props.visibleRoomAddons.reduce((s, a) => s + (Number(a.total) || 0), 0);
-  const hasAddons = props.visibleRoomAddons.length > 0 && addonsExact !== 0;
+  const display = props.customerDisplay;
+  const countertopMaterialExact = display.countertopMaterialExact;
+  const backsplashMaterialExact = display.backsplashMaterialExact;
+  const addonsExact = display.addonsExact;
+  const hasAddons = addonsExact !== 0;
 
-  const summaryCounterDisplay = roundCustomerDisplay(countertopMaterialExact);
-  const summaryBacksplashDisplay = roundCustomerDisplay(backsplashMaterialExact);
-  /**
-   * Customer-facing Estimated project total = sum of rounded visible Estimate Summary rows.
-   * Each row is independently rounded to the nearest $10 first; total is their sum — not the
-   * exact internal grand total rounded. This ensures visible rows always reconcile to the total.
-   */
-  const summaryAddonsDisplay = hasAddons ? roundCustomerDisplay(addonsExact) : 0;
-  const summaryVisibleLinesDisplay = props.visibleLineItems.reduce(
-    (s, ln) => s + roundCustomerDisplay(Number(ln.lineTotal) || 0),
-    0
-  );
-  const finalRounded = summaryCounterDisplay + summaryBacksplashDisplay + summaryAddonsDisplay + summaryVisibleLinesDisplay;
+  const summaryCounterDisplay = display.summaryCounterDisplay;
+  const summaryBacksplashDisplay = display.summaryBacksplashDisplay;
+  const summaryAddonsDisplay = display.summaryAddonsDisplay;
+  const summaryVisibleLinesDisplay = display.summaryVisibleLinesDisplay;
+  const finalRounded = display.finalRounded;
 
   const stoneCtExacts = bd.groups.map((g) => g.countertopMaterial);
   const stoneBsExacts = bd.groups.map((g) => g.backsplashMaterial);
@@ -188,6 +183,7 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
   const customerPrintRoomRows = prepareCustomerPrintDisplayRows({
     roomRows,
     roomAreaDisplayTotals: roomBreakdownDisplays,
+    roomExtrasExact: roomRows.map((r) => display.roomExtrasExactByRoomId[r.roomId] ?? 0),
     unassignedDisplayTotal: unassignedDisplay
   });
 

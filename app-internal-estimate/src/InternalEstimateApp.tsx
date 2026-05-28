@@ -30,6 +30,7 @@ import VisualLayoutCanvas, {
   visualLayoutKeysForRooms
 } from "./VisualLayoutCanvas";
 import { resolveAccessToken } from "./lib/authSession";
+import { buildCustomerEstimateDisplayModel } from "./lib/customerEstimateDisplayModel";
 import { friendlyApiErrorMessage } from "./lib/saveErrorMessage";
 import { getSupabase } from "./lib/supabase";
 import RoomScopeBuilder from "@quote-ui/RoomScopeBuilder";
@@ -1599,30 +1600,26 @@ export default function InternalEstimateApp() {
   );
 
   /**
-   * Customer-facing Estimated project total = sum of rounded visible Estimate Summary rows.
-   * Mirrors CustomerEstimatePrint.finalRounded exactly.
-   * Persisted in the save snapshot (internal_ui.customer_display_total) so Quote Library
-   * can display the customer-facing total instead of the raw backend exact total.
+   * Customer-facing display model — shared by Live Quote Panel, customerDisplayTotal, and print.
+   * Add-ons use measuredRooms[].extras (matches stickyLiveRollup), not addons[] alone.
    */
-  const customerDisplayTotal = useMemo(() => {
-    const bd = selectedMaterialBreakdown;
-    const vanityMaterialExact = liveEstimate.measuredRooms
-      .filter((r) => r.type === "Vanity")
-      .reduce((s, v) => s + (Number(v.selected) || 0), 0);
-    const countertopMaterialExact =
-      bd.totals.countertopMaterial + vanityMaterialExact + internalOnlyAdjustDollars;
-    const backsplashMaterialExact = bd.totals.backsplashMaterial;
-    const addonsExact = visibleRoomAddons.reduce((s, a) => s + (Number(a.total) || 0), 0);
-    const hasAddons = visibleRoomAddons.length > 0 && addonsExact !== 0;
-    const summaryCounterDisplay = roundCustomerDisplay(countertopMaterialExact);
-    const summaryBacksplashDisplay = roundCustomerDisplay(backsplashMaterialExact);
-    const summaryAddonsDisplay = hasAddons ? roundCustomerDisplay(addonsExact) : 0;
-    const summaryVisibleLinesDisplay = visibleCustomerLines.reduce(
-      (s, ln) => s + roundCustomerDisplay(Number(ln.lineTotal) || 0),
-      0
-    );
-    return summaryCounterDisplay + summaryBacksplashDisplay + summaryAddonsDisplay + summaryVisibleLinesDisplay;
-  }, [selectedMaterialBreakdown, liveEstimate.measuredRooms, visibleRoomAddons, visibleCustomerLines, internalOnlyAdjustDollars]);
+  const customerEstimateDisplay = useMemo(
+    () =>
+      buildCustomerEstimateDisplayModel({
+        selectedBreakdown: selectedMaterialBreakdown,
+        measuredRooms: liveEstimate.measuredRooms,
+        visibleCustomerLines,
+        internalMaterialFoldDollars: internalOnlyAdjustDollars
+      }),
+    [
+      selectedMaterialBreakdown,
+      liveEstimate.measuredRooms,
+      visibleCustomerLines,
+      internalOnlyAdjustDollars
+    ]
+  );
+
+  const customerDisplayTotal = customerEstimateDisplay.finalRounded;
   // Keep ref in sync so buildSubmitPayload reads the fresh value at save time.
   customerDisplayTotalRef.current = customerDisplayTotal;
 
@@ -3961,6 +3958,7 @@ export default function InternalEstimateApp() {
         visibleRoomAddons={visibleRoomAddons}
         internalMaterialFoldDollars={internalOnlyAdjustDollars}
         estimateTotalExact={estimateTotalExact}
+        customerDisplay={customerEstimateDisplay}
         roomAreaBreakdown={liveRoomAreaBreakdown}
         comparisonRows={customerEstimateComparisonRows}
         estimateDate={new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}

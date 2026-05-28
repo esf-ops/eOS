@@ -1,10 +1,18 @@
 #!/usr/bin/env node
 /**
- * Customer Estimate Print — Room / Area Cost Breakdown display reconciliation.
- * Mirrors prepareCustomerPrintDisplayRows (app-internal-estimate/src/lib/customerPrintDisplayRows.ts).
+ * Customer Estimate Print — display reconciliation.
+ * Mirrors:
+ *   - buildCustomerEstimateDisplayModel (customerEstimateDisplayModel.ts)
+ *   - prepareCustomerPrintDisplayRows (customerPrintDisplayRows.ts)
  *
  * Run: node backend-core/src/scripts/verifyCustomerEstimatePrintReconciliation.mjs
  */
+
+function roundCustomerDisplay(amount) {
+  const n = Number(amount);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.ceil(n / 10) * 10;
+}
 
 function roundCustomerDisplayAddonLine(amount) {
   const n = Number(amount);
@@ -12,7 +20,7 @@ function roundCustomerDisplayAddonLine(amount) {
   return Math.ceil(n / 5) * 5;
 }
 
-/** Same rule as customerPrintDisplayRows.ts for Soble-style rows. */
+/** Same rule as customerPrintDisplayRows.ts for room rows. */
 function prepareDisplayRow(displayedAreaTotal, addonAmountsExact) {
   const displayedAddOns = addonAmountsExact.reduce((s, a) => s + roundCustomerDisplayAddonLine(a), 0);
   const displayedMaterial = displayedAreaTotal - displayedAddOns;
@@ -25,36 +33,63 @@ function assertEqual(label, actual, expected) {
   }
 }
 
-// Soble-style customer-facing totals (Estimate summary authority)
-const summaryCounterDisplay = 6750;
-const summaryBacksplashDisplay = 2680;
-const summaryAddonsDisplay = 550;
-const finalRounded = summaryCounterDisplay + summaryBacksplashDisplay + summaryAddonsDisplay;
-assertEqual("project total", finalRounded, 9980);
-assertEqual("summary material total", summaryCounterDisplay + summaryBacksplashDisplay, 9430);
+// --- Soble current live exact summary (ESF-DYER-000015 after recalculate) ---
+const countertopExact = 6744.24;
+const backsplashExact = 2679;
+const addonsExactLive = 670;
 
-// Room area totals (allocated to reconcile with project total)
-const kitchenAreaTotal = 7830;
-const kitchenAddonsExact = [450];
-const laundryAreaTotal = 2150;
-const laundryAddonsExact = [100];
+assertEqual("countertop display", roundCustomerDisplay(countertopExact), 6750);
+assertEqual("backsplash display", roundCustomerDisplay(backsplashExact), 2680);
+assertEqual("add-ons display", roundCustomerDisplay(addonsExactLive), 670);
 
-const kitchen = prepareDisplayRow(kitchenAreaTotal, kitchenAddonsExact);
-const laundry = prepareDisplayRow(laundryAreaTotal, laundryAddonsExact);
+const finalRoundedLive = 6750 + 2680 + 670;
+assertEqual("estimated project total", finalRoundedLive, 10100);
+assertEqual("summary material display total", 6750 + 2680, 9430);
 
-assertEqual("Kitchen material display", kitchen.displayedMaterial, 7380);
-assertEqual("Kitchen add-ons display", kitchen.displayedAddOns, 450);
-assertEqual("Kitchen area total", kitchen.displayedAreaTotal, 7830);
-assertEqual("Kitchen material + add-ons", kitchen.displayedMaterial + kitchen.displayedAddOns, kitchenAreaTotal);
+// Room rows allocated to $10,100 (kitchen gained $120 vs saved $9,980 snapshot — FHB/other extras)
+const kitchenAreaTotalLive = 7950;
+const kitchenAddonsExactLive = [450, 120];
+const laundryAreaTotalLive = 2150;
+const laundryAddonsExactLive = [100];
 
-assertEqual("Laundry material display", laundry.displayedMaterial, 2050);
-assertEqual("Laundry add-ons display", laundry.displayedAddOns, 100);
-assertEqual("Laundry area total", laundry.displayedAreaTotal, 2150);
-assertEqual("Laundry material + add-ons", laundry.displayedMaterial + laundry.displayedAddOns, laundryAreaTotal);
+const kitchenLive = prepareDisplayRow(kitchenAreaTotalLive, kitchenAddonsExactLive);
+const laundryLive = prepareDisplayRow(laundryAreaTotalLive, laundryAddonsExactLive);
 
-const materialDisplaySum = kitchen.displayedMaterial + laundry.displayedMaterial;
-const areaTotalSum = kitchenAreaTotal + laundryAreaTotal;
-assertEqual("Material displays sum", materialDisplaySum, 9430);
-assertEqual("Area totals sum to project total", areaTotalSum, finalRounded);
+assertEqual("Kitchen material display (live)", kitchenLive.displayedMaterial, 7380);
+assertEqual("Kitchen add-ons display (live)", kitchenLive.displayedAddOns, 570);
+assertEqual(
+  "Kitchen material + add-ons (live)",
+  kitchenLive.displayedMaterial + kitchenLive.displayedAddOns,
+  kitchenAreaTotalLive
+);
+
+assertEqual("Laundry material display (live)", laundryLive.displayedMaterial, 2050);
+assertEqual("Laundry add-ons display (live)", laundryLive.displayedAddOns, 100);
+assertEqual(
+  "Laundry material + add-ons (live)",
+  laundryLive.displayedMaterial + laundryLive.displayedAddOns,
+  laundryAreaTotalLive
+);
+
+assertEqual(
+  "Area totals sum to live project total",
+  kitchenAreaTotalLive + laundryAreaTotalLive,
+  finalRoundedLive
+);
+assertEqual(
+  "Material displays sum to summary material total",
+  kitchenLive.displayedMaterial + laundryLive.displayedMaterial,
+  9430
+);
+
+// --- Legacy saved snapshot ($9,980) — room row reconciliation still holds ---
+const finalRoundedSaved = 6750 + 2680 + 550;
+assertEqual("saved snapshot project total", finalRoundedSaved, 9980);
+
+const kitchenSaved = prepareDisplayRow(7830, [450]);
+const laundrySaved = prepareDisplayRow(2150, [100]);
+assertEqual("Kitchen material + add-ons (saved)", kitchenSaved.displayedMaterial + kitchenSaved.displayedAddOns, 7830);
+assertEqual("Laundry material + add-ons (saved)", laundrySaved.displayedMaterial + laundrySaved.displayedAddOns, 2150);
+assertEqual("Saved area totals sum", 7830 + 2150, finalRoundedSaved);
 
 console.log("verifyCustomerEstimatePrintReconciliation: ok");
