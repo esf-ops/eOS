@@ -1,9 +1,21 @@
 import { roundCustomerDisplay } from "@quote-lib/customerDisplayRounding";
 import { round2 } from "@quote-lib/measurementEngine";
-import type { SelectedMaterialBreakdown } from "@quote-lib/prototypeQuoteMath";
+import type {
+  CustomerRoomAreaCostBreakdown,
+  SelectedMaterialBreakdown,
+  SelectedMaterialScopeLine
+} from "@quote-lib/prototypeQuoteMath";
 import type { MeasuredRoom } from "@quote-lib/quoteTypes";
+import {
+  prepareCustomerPrintDisplayRows,
+  type CustomerPrintDisplayRoomRow
+} from "./customerPrintDisplayRows";
 
 export type CustomerEstimateDisplayLineItem = {
+  name: string;
+  description?: string;
+  qty?: number;
+  roomName?: string;
   lineTotal: number;
 };
 
@@ -12,9 +24,43 @@ export type CustomerAddonDetailLine = {
   label: string;
   roomName: string;
   amountExact: number;
+  /** Customer-facing line amount (exact catalog/extra dollars on detail section). */
+  displayAmount: number;
+};
+
+export type CustomerEstimateSummaryRow = {
+  key: string;
+  label: string;
+  displayAmount: number;
+};
+
+export type CustomerMaterialScopeRoomRow = {
+  roomName: string;
+  countertopSf: number;
+  backsplashSf: number;
+};
+
+/** Scope-only material group block — square footage reference, no customer dollar amounts. */
+export type CustomerMaterialScopeGroup = {
+  group: string;
+  colorLabel?: string;
+  roomRows: CustomerMaterialScopeRoomRow[];
+  countertopSf: number;
+  backsplashFhbSf: number;
+};
+
+export type CustomerVanityScopeNote = {
+  roomId: string;
+  roomName: string;
+  materialGroup: string;
+  programLabel?: string;
+  note: string;
 };
 
 const FHB_ELECTRICAL_DETAIL_RE = /full-height backsplash electrical cutouts/i;
+
+const VANITY_ROLLUP_NOTE =
+  "Vanity program pricing rolls into Countertop material in Estimate summary.";
 
 function labelFromMeasuredRoomDetail(detail: string): string {
   const trimmed = detail.trim();
@@ -32,8 +78,53 @@ function amountFromMeasuredRoomDetail(detail: string): number | null {
 }
 
 /**
+ * Split a customer-facing rounded total across positive exact weights using proportional $10 buckets
+ * + largest remainder so displayed amounts sum exactly to `targetDisplay` (always a multiple of $10).
+ */
+export function allocateCustomerDisplayTens(exacts: number[], targetDisplay: number): number[] {
+  const n = exacts.length;
+  if (n === 0) return [];
+  const cleaned = exacts.map((x) => (Number.isFinite(x) && x > 0 ? x : 0));
+  const sumExact = cleaned.reduce((a, b) => a + b, 0);
+  const target = Math.max(0, Math.round(targetDisplay));
+  if (sumExact <= 0 || target <= 0) return cleaned.map(() => 0);
+
+  const units = Math.round(target / 10);
+  if (units <= 0) return cleaned.map(() => 0);
+
+  const rawUnits = cleaned.map((e) => (e / sumExact) * units);
+  const floorUnits = rawUnits.map((r) => Math.floor(r));
+  const assigned = floorUnits.reduce((a, b) => a + b, 0);
+  let deficit = units - assigned;
+  const order = rawUnits
+    .map((r, i) => ({ i, rem: r - floorUnits[i] }))
+    .sort((a, b) => b.rem - a.rem);
+  const out = floorUnits.map((f) => f * 10);
+  for (let k = 0; k < deficit; k++) {
+    out[order[k].i] += 10;
+  }
+  return out;
+}
+
+function aggregateScopeLinesByRoom(lines: SelectedMaterialScopeLine[]): CustomerMaterialScopeRoomRow[] {
+  const byRoom = new Map<string, CustomerMaterialScopeRoomRow>();
+  for (const ln of lines) {
+    const key = ln.roomName.trim() || "Room";
+    const row = byRoom.get(key) ?? { roomName: key, countertopSf: 0, backsplashSf: 0 };
+    row.countertopSf += ln.countertopSf;
+    row.backsplashSf += ln.backsplashSf + ln.fhbSf;
+    byRoom.set(key, row);
+  }
+  return [...byRoom.values()].map((r) => ({
+    roomName: r.roomName,
+    countertopSf: round2(r.countertopSf),
+    backsplashSf: round2(r.backsplashSf)
+  }));
+}
+
+/**
  * Customer-facing add-on detail lines for PDF — catalog add-ons plus room extras not in addons[]
- * (e.g. FHB electrical cutouts). Line amounts are exact; subtotal uses roundCustomerDisplay on total extras.
+ * (e.g. FHB electrical cutouts).
  */
 export function buildCustomerAddonDetailLines(measuredRooms: MeasuredRoom[]): CustomerAddonDetailLine[] {
   const lines: CustomerAddonDetailLine[] = [];
@@ -43,7 +134,7 @@ export function buildCustomerAddonDetailLines(measuredRooms: MeasuredRoom[]): Cu
     for (const a of room.addons) {
       const amountExact = round2(Number(a.total) || 0);
       if (amountExact > 0) {
-        lines.push({ label: a.label, roomName, amountExact });
+        lines.push({ label: a.label, roomName, amountExact, displayAmount: amountExact });
       }
     }
 
@@ -61,7 +152,8 @@ export function buildCustomerAddonDetailLines(measuredRooms: MeasuredRoom[]): Cu
       lines.push({
         label: labelFromMeasuredRoomDetail(detail),
         roomName,
-        amountExact
+        amountExact,
+        displayAmount: amountExact
       });
       otherExtras = round2(otherExtras - amountExact);
     }
@@ -70,12 +162,103 @@ export function buildCustomerAddonDetailLines(measuredRooms: MeasuredRoom[]): Cu
       lines.push({
         label: "Additional room extras",
         roomName,
-        amountExact: otherExtras
+        amountExact: otherExtras,
+        displayAmount: otherExtras
       });
     }
   }
 
   return lines;
+}
+
+function buildEstimateSummaryRows(params: {
+  summaryCounterDisplay: number;
+  summaryBacksplashDisplay: number;
+  summaryAddonsDisplay: number;
+  hasAddons: boolean;
+  visibleCustomerLines: CustomerEstimateDisplayLineItem[];
+}): CustomerEstimateSummaryRow[] {
+  const rows: CustomerEstimateSummaryRow[] = [
+    { key: "countertop", label: "Countertop material", displayAmount: params.summaryCounterDisplay },
+    { key: "backsplash", label: "Backsplash material", displayAmount: params.summaryBacksplashDisplay }
+  ];
+  if (params.hasAddons) {
+    rows.push({ key: "addons", label: "Add-ons / fixtures", displayAmount: params.summaryAddonsDisplay });
+  }
+  for (const ln of params.visibleCustomerLines) {
+    const displayAmount = roundCustomerDisplay(Number(ln.lineTotal) || 0);
+    if (displayAmount <= 0) continue;
+    let label = ln.name.trim() || "Custom item";
+    if (ln.description?.trim()) label += ` — ${ln.description.trim()}`;
+    if (ln.roomName?.trim()) label += ` (${ln.roomName.trim()})`;
+    if (ln.qty != null && ln.qty !== 1) label += ` × ${ln.qty}`;
+    rows.push({
+      key: `custom-${label}-${displayAmount}`,
+      label,
+      displayAmount
+    });
+  }
+  return rows;
+}
+
+function buildRoomAreaPrintRows(params: {
+  finalRounded: number;
+  roomAreaBreakdown: CustomerRoomAreaCostBreakdown | null;
+  roomExtrasExactByRoomId: Record<string, number>;
+}): {
+  rows: CustomerPrintDisplayRoomRow[];
+  unassignedDisplayTotal: number;
+  unassignedExact: number;
+  showRoomBreakdown: boolean;
+} {
+  const roomRows = params.roomAreaBreakdown?.rooms ?? [];
+  const unassignedExact = round2(Number(params.roomAreaBreakdown?.unassignedCustomerCustomExact) || 0);
+  if (!roomRows.length) {
+    return { rows: [], unassignedDisplayTotal: 0, unassignedExact, showRoomBreakdown: false };
+  }
+
+  const unassignedDisplay = unassignedExact > 0 ? roundCustomerDisplay(unassignedExact) : 0;
+  const targetRoomDisplay = Math.max(0, params.finalRounded - unassignedDisplay);
+  const roomAreaDisplayTotals = allocateCustomerDisplayTens(
+    roomRows.map((r) => r.roomTotalExact),
+    targetRoomDisplay
+  );
+
+  const prepared = prepareCustomerPrintDisplayRows({
+    roomRows,
+    roomAreaDisplayTotals,
+    roomExtrasExact: roomRows.map((r) => params.roomExtrasExactByRoomId[r.roomId] ?? 0),
+    unassignedDisplayTotal: unassignedDisplay
+  });
+
+  return {
+    rows: prepared.rows,
+    unassignedDisplayTotal: unassignedDisplay,
+    unassignedExact,
+    showRoomBreakdown: true
+  };
+}
+
+function buildMaterialScopeGroups(selectedBreakdown: SelectedMaterialBreakdown): CustomerMaterialScopeGroup[] {
+  return selectedBreakdown.groups.map((block) => ({
+    group: block.group,
+    colorLabel: block.colorLabel,
+    roomRows: aggregateScopeLinesByRoom(block.lines),
+    countertopSf: block.countertopSf,
+    backsplashFhbSf: round2(block.backsplashSf + block.fhbSf)
+  }));
+}
+
+function buildVanityScopeNotes(measuredRooms: MeasuredRoom[]): CustomerVanityScopeNote[] {
+  return measuredRooms
+    .filter((r) => r.type === "Vanity" && (Number(r.selected) || 0) > 0)
+    .map((v) => ({
+      roomId: v.id,
+      roomName: v.name,
+      materialGroup: v.group,
+      programLabel: v.vanityProgram?.label,
+      note: VANITY_ROLLUP_NOTE
+    }));
 }
 
 /** Customer-facing summary + rounding — matches Live Quote Panel (stickyLiveRollup) basis. */
@@ -91,8 +274,19 @@ export type CustomerEstimateDisplayModel = {
   finalRounded: number;
   /** Per-room extras exact (same source as Live Quote Panel add-ons row). */
   roomExtrasExactByRoomId: Record<string, number>;
-  /** Add-ons / Fixtures detail rows — must sum to addonsExact. */
+  /** Add-ons / Fixtures detail rows — exact amounts sum to addonsExact. */
   addonDetailLines: CustomerAddonDetailLine[];
+  /** Estimate Summary rows — displayAmount values sum to finalRounded. */
+  estimateSummaryRows: CustomerEstimateSummaryRow[];
+  /** Room / Area Cost Breakdown — area totals sum to finalRounded (plus unassigned row when present). */
+  roomAreaPrintRows: CustomerPrintDisplayRoomRow[];
+  unassignedDisplayTotal: number;
+  unassignedExact: number;
+  showRoomBreakdown: boolean;
+  hasAddons: boolean;
+  /** Quoted Material Breakdown — scope / SF only (no customer dollar amounts). */
+  materialScopeGroups: CustomerMaterialScopeGroup[];
+  vanityScopeNotes: CustomerVanityScopeNote[];
 };
 
 export type BuildCustomerEstimateDisplayModelParams = {
@@ -100,11 +294,12 @@ export type BuildCustomerEstimateDisplayModelParams = {
   measuredRooms: MeasuredRoom[];
   visibleCustomerLines: CustomerEstimateDisplayLineItem[];
   internalMaterialFoldDollars: number;
+  roomAreaBreakdown: CustomerRoomAreaCostBreakdown | null;
 };
 
 /**
- * Single customer-facing display model for Internal Estimate live panel, customerDisplayTotal,
- * and CustomerEstimatePrint. Uses measuredRooms[].extras for add-ons (not addons[] alone).
+ * Single customer-facing display model for Internal Estimate customerDisplayTotal and CustomerEstimatePrint.
+ * Uses measuredRooms[].extras for add-ons (not addons[] alone). All PDF dollar rows are prepared here.
  */
 export function buildCustomerEstimateDisplayModel(
   params: BuildCustomerEstimateDisplayModelParams
@@ -137,6 +332,19 @@ export function buildCustomerEstimateDisplayModel(
   }
 
   const addonDetailLines = buildCustomerAddonDetailLines(params.measuredRooms);
+  const estimateSummaryRows = buildEstimateSummaryRows({
+    summaryCounterDisplay,
+    summaryBacksplashDisplay,
+    summaryAddonsDisplay,
+    hasAddons,
+    visibleCustomerLines: params.visibleCustomerLines
+  });
+
+  const roomArea = buildRoomAreaPrintRows({
+    finalRounded,
+    roomAreaBreakdown: params.roomAreaBreakdown,
+    roomExtrasExactByRoomId
+  });
 
   return {
     countertopMaterialExact,
@@ -148,6 +356,14 @@ export function buildCustomerEstimateDisplayModel(
     summaryVisibleLinesDisplay,
     finalRounded,
     roomExtrasExactByRoomId,
-    addonDetailLines
+    addonDetailLines,
+    estimateSummaryRows,
+    roomAreaPrintRows: roomArea.rows,
+    unassignedDisplayTotal: roomArea.unassignedDisplayTotal,
+    unassignedExact: roomArea.unassignedExact,
+    showRoomBreakdown: roomArea.showRoomBreakdown,
+    hasAddons,
+    materialScopeGroups: buildMaterialScopeGroups(params.selectedBreakdown),
+    vanityScopeNotes: buildVanityScopeNotes(params.measuredRooms)
   };
 }

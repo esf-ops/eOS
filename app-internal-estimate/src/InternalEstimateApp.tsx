@@ -1608,14 +1608,22 @@ export default function InternalEstimateApp() {
       buildCustomerEstimateDisplayModel({
         selectedBreakdown: selectedMaterialBreakdown,
         measuredRooms: liveEstimate.measuredRooms,
-        visibleCustomerLines,
-        internalMaterialFoldDollars: internalOnlyAdjustDollars
+        visibleCustomerLines: visibleCustomerLines.map((ln) => ({
+          name: ln.name,
+          description: ln.description,
+          qty: ln.qty,
+          roomName: ln.roomName,
+          lineTotal: ln.lineTotal
+        })),
+        internalMaterialFoldDollars: internalOnlyAdjustDollars,
+        roomAreaBreakdown: liveRoomAreaBreakdown
       }),
     [
       selectedMaterialBreakdown,
       liveEstimate.measuredRooms,
       visibleCustomerLines,
-      internalOnlyAdjustDollars
+      internalOnlyAdjustDollars,
+      liveRoomAreaBreakdown
     ]
   );
 
@@ -3959,7 +3967,6 @@ export default function InternalEstimateApp() {
         internalMaterialFoldDollars={internalOnlyAdjustDollars}
         estimateTotalExact={estimateTotalExact}
         customerDisplay={customerEstimateDisplay}
-        roomAreaBreakdown={liveRoomAreaBreakdown}
         comparisonRows={customerEstimateComparisonRows}
         estimateDate={new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}
       />
