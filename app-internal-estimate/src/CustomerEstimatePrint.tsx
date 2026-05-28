@@ -1,8 +1,7 @@
 import React from "react";
 import { EOS_LOGO_URL } from "@quote-lib/config";
-import { round2 } from "@quote-lib/measurementEngine";
 import { roundCustomerDisplay } from "@quote-lib/customerDisplayRounding";
-import { roundCustomerDisplayAddonLine, roundCustomerDisplayVanity } from "@quote-lib/prototypeQuoteMath";
+import { roundCustomerDisplayVanity } from "@quote-lib/prototypeQuoteMath";
 import type {
   CustomerRoomAreaCostBreakdown,
   InternalEstimateGroupComparisonRow,
@@ -10,6 +9,7 @@ import type {
   SelectedMaterialScopeLine
 } from "@quote-lib/prototypeQuoteMath";
 import type { MeasuredRoom } from "@quote-lib/quoteTypes";
+import { prepareCustomerPrintDisplayRows } from "./lib/customerPrintDisplayRows";
 
 /**
  * Split a customer-facing rounded total across positive exact weights using proportional $10 buckets
@@ -185,6 +185,12 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
   const unassignedDisplay = unassignedExact > 0 ? roundCustomerDisplay(unassignedExact) : 0;
   const showRoomBreakdown = roomRows.length > 0;
 
+  const customerPrintRoomRows = prepareCustomerPrintDisplayRows({
+    roomRows,
+    roomAreaDisplayTotals: roomBreakdownDisplays,
+    unassignedDisplayTotal: unassignedDisplay
+  });
+
   return (
     <div className="customer-estimate-print" aria-hidden="true">
       <header className="cep-header">
@@ -331,60 +337,53 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
               </tr>
             </thead>
             <tbody>
-              {roomRows.map((row, idx) => {
-                const addonExact = row.addons.reduce((s, a) => s + a.amountExact, 0);
-                const customExact = row.customerCustomLines.reduce((s, c) => s + c.amountExact, 0);
-                const materialExact = round2(row.materialAmountExact + customExact);
-                const addonDisplay = row.addons.map((a) => roundCustomerDisplayAddonLine(a.amountExact));
-                const addonDisplaySum = addonDisplay.reduce((s, v) => s + v, 0);
+              {customerPrintRoomRows.rows.map((displayRow) => {
                 return (
-                  <React.Fragment key={row.roomId}>
+                  <React.Fragment key={displayRow.roomId}>
                     <tr className="cep-room-breakdown-main-row">
                       <td>
-                        <strong>{row.displayName}</strong>
-                        {row.isVanity ? (
+                        <strong>{displayRow.displayName}</strong>
+                        {displayRow.isVanity ? (
                           <span className="cep-muted-inline">
                             {" "}
                             · Vanity program
-                            {props.measuredRooms.find((m) => m.id === row.roomId)?.vanityProgram?.label
-                              ? ` · ${props.measuredRooms.find((m) => m.id === row.roomId)?.vanityProgram?.label}`
+                            {props.measuredRooms.find((m) => m.id === displayRow.roomId)?.vanityProgram?.label
+                              ? ` · ${props.measuredRooms.find((m) => m.id === displayRow.roomId)?.vanityProgram?.label}`
                               : ""}
                           </span>
                         ) : (
                           <span className="cep-muted-inline">
                             {" "}
-                            · {row.materialGroup}
-                            {row.colorLabel ? ` · ${row.colorLabel}` : props.colorTbd ? " · Color TBD" : ""}
+                            · {displayRow.materialGroup}
+                            {displayRow.colorLabel ? ` · ${displayRow.colorLabel}` : props.colorTbd ? " · Color TBD" : ""}
                           </span>
                         )}
                       </td>
-                      <td className="cep-num">{formatSf(row.totalSqft)}</td>
-                      <td className="cep-num cep-amt">{formatMoney(materialExact)}</td>
+                      <td className="cep-num">{formatSf(displayRow.totalSqft)}</td>
+                      <td className="cep-num cep-amt">{`$${displayRow.displayedMaterial.toLocaleString()}`}</td>
                       <td className="cep-num cep-amt">
-                        {addonExact > 0 ? `$${addonDisplaySum.toLocaleString()}` : "—"}
+                        {displayRow.displayedAddOns > 0 ? `$${displayRow.displayedAddOns.toLocaleString()}` : "—"}
                       </td>
                       <td className="cep-num cep-amt">
-                        <strong>{`$${(roomBreakdownDisplays[idx] ?? 0).toLocaleString()}`}</strong>
+                        <strong>{`$${displayRow.displayedAreaTotal.toLocaleString()}`}</strong>
                       </td>
                     </tr>
-                    {row.addons.length > 0 ? (
+                    {displayRow.addonLines.length > 0 ? (
                       <tr className="cep-room-breakdown-detail-row">
                         <td colSpan={5}>
                           <ul className="cep-room-addon-list">
-                            {row.addons.map((a, ai) => (
-                              <li key={`${row.roomId}-${a.label}`}>
+                            {displayRow.addonLines.map((a) => (
+                              <li key={`${displayRow.roomId}-${a.label}`}>
                                 {a.label}
-                                {addonDisplay[ai] != null && addonDisplay[ai] > 0
-                                  ? ` — $${addonDisplay[ai].toLocaleString()}`
-                                  : null}
+                                {a.displayedAmount > 0 ? ` — $${a.displayedAmount.toLocaleString()}` : null}
                               </li>
                             ))}
                           </ul>
                         </td>
                       </tr>
                     ) : null}
-                    {row.customerCustomLines.map((c) => (
-                      <tr key={`${row.roomId}-${c.name}`} className="cep-room-breakdown-detail-row">
+                    {displayRow.customerCustomLines.map((c) => (
+                      <tr key={`${displayRow.roomId}-${c.name}`} className="cep-room-breakdown-detail-row">
                         <td colSpan={4} className="cep-room-custom-line">
                           {c.name}
                         </td>
