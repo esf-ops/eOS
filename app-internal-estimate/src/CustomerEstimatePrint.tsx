@@ -407,13 +407,13 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
           <h2 className="cep-h2">Add-ons / fixtures</h2>
           <table className="cep-table cep-table-compact cep-table-amounts">
             <tbody>
-              {props.visibleRoomAddons.map((a) => (
-                <tr key={`${a.roomName}-${a.label}`}>
+              {display.addonDetailLines.map((a) => (
+                <tr key={`${a.roomName}-${a.label}-${a.amountExact}`}>
                   <td>
                     {a.label}
                     {a.roomName ? <span className="cep-addon-room"> · {a.roomName}</span> : null}
                   </td>
-                  <td className="cep-amt">{formatMoney(a.total)}</td>
+                  <td className="cep-amt">{formatMoney(a.amountExact)}</td>
                 </tr>
               ))}
               <tr className="cep-subtotal-row">
