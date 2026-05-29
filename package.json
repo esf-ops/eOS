@@ -35,6 +35,7 @@
     "eos:moraware:generate-live-capped-snapshot": "node backend-core/src/scripts/moraware/generateLiveCappedSnapshot.js",
     "eos:moraware:generate-tiny-snapshot": "node backend-core/src/scripts/moraware/generateTinySnapshot.js",
     "eos:moraware:import-snapshot": "node backend-core/src/scripts/moraware/importSnapshotToBrain.js",
+    "eos:moraware:run-scheduled-pipeline": "node backend-core/src/scripts/moraware/runScheduledMorawarePipeline.js",
     "eos:moraware:verify-tiny-mapping": "node backend-core/src/scripts/moraware/verifyTinySnapshotMapping.mjs",
     "eos:probe:moraware-assignee-xml": "node backend-core/src/scripts/probeMorawareAssigneeXml.js",
     "eos:analyze:moraware-sdk-activity": "node backend-core/src/scripts/analyzeMorawareSdkActivityMethods.js",

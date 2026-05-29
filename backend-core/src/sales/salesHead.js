@@ -13,6 +13,7 @@ import {
   loadApprovedSalesAttributionMappings,
   methodLabelForDisplay
 } from "./salesAttribution.js";
+import { loadLatestCompleteImportGroup } from "../moraware/morawareSyncHealth.js";
 import { buildCompanyWideSqftActuals, buildProductionReportReconciliation, extractSqftFromMorawareJob } from "./morawareSqftActuals.js";
 import { normalizeAccountNameWithoutLocationPrefix } from "./salesAccountNameNormalizer.js";
 
@@ -2422,13 +2423,37 @@ export async function salesProductionReconciliationHandler(req, supabaseGetter) 
   }
 }
 
+function syncHealthFromCompleteImportGroup(completeGroup) {
+  if (!completeGroup?.import_group_id) return { latest_group: null };
+  return {
+    latest_group: {
+      import_group_id: completeGroup.import_group_id,
+      chunk_count: completeGroup.observed_chunk_count ?? null,
+      attempted_runs: completeGroup.attempted_runs ?? null,
+      expected_chunk_count: completeGroup.expected_chunk_count ?? null,
+      successful_chunks: completeGroup.successful_chunks ?? null,
+      failed_chunks: completeGroup.failed_chunks ?? null,
+      missing_chunk_indices: completeGroup.missing_chunk_indices ?? [],
+      complete: Boolean(completeGroup.complete),
+      successful_sync_run_ids: completeGroup.successful_sync_run_ids ?? [],
+      total_row_counts: completeGroup.total_row_counts ?? {}
+    }
+  };
+}
+
+/** Rebuild prepared Sales facts from the latest **complete** Moraware import group. */
+export async function rebuildSalesMorawarePreparedFacts(supabase, organizationId) {
+  const completeGroup = await loadLatestCompleteImportGroup(supabase, organizationId);
+  const syncHealth = syncHealthFromCompleteImportGroup(completeGroup);
+  return buildSalesMorawareJobFactsForLatestGroup(supabase, organizationId, syncHealth);
+}
+
 export async function salesRebuildMorawareFactsHandler(req, supabaseGetter) {
   const supabase = supabaseGetter();
   const organizationId = resolveSalesOrganizationId(req);
   if (!organizationId) return { status: 400, body: { ok: false, error: "Sales facts rebuild requires organization_id context." } };
-  const syncHealth = await loadLatestMorawareGroup(supabase, organizationId);
   try {
-    const result = await buildSalesMorawareJobFactsForLatestGroup(supabase, organizationId, syncHealth);
+    const result = await rebuildSalesMorawarePreparedFacts(supabase, organizationId);
     return { status: result.ok ? 200 : 409, body: result };
   } catch (e) {
     return { status: 500, body: { ok: false, error: String(e?.message ?? e) } };

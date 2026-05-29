@@ -52,6 +52,38 @@ Used by **`backend-core/src/scripts/syncMoraware.js`**, discovery in `src/morawa
 | `MORAWARE_PROCESS_IDS` | Optional CSV override when discovery needs explicit process list. |
 | `MORAWARE_PAGE_SIZE` / `MORAWARE_SEARCH_PAGE_SIZE` | Pagination. |
 | `MORAWARE_DISCOVERY`, `MORAWARE_DISCOVERY_MODE` | Diagnostic / discovery flows (normally off in cron). |
+| `MORAWARE_SYNC_IMPORT_SECRET` | Shared secret for `POST /api/internal/moraware-sync/import` and rebuild (`x-moraware-sync-secret` or `x-eos-cron-secret`). |
+| `MORAWARE_DEFAULT_ORGANIZATION_ID` | Org UUID for worker imports and scheduled pipeline. |
+| `BACKEND_URL` | Vercel backend base for worker import/rebuild calls (no trailing `/api`). |
+| `MORAWARE_SNAPSHOT_MODE` | Snapshot runner mode, e.g. `baseline_2026` for Sales YTD baseline. |
+| `MORAWARE_BASELINE_START_DATE` / `MORAWARE_BASELINE_END_DATE` | Date bounds for `baseline_2026` snapshot (end defaults to today in scheduled runner). |
+| `MORAWARE_BASELINE_MAX_*` / `MORAWARE_LIVE_MAX_*` | Snapshot safety caps; runner aborts import if jobs/activities/forms hit caps. |
+| `MORAWARE_SYNC_IMPORT_FILE` | Snapshot JSON path for import (default `debug/moraware/baseline-2026/baseline-2026-moraware-snapshot.json`). |
+| `MORAWARE_IMPORT_ALLOW_LARGE_BASELINE` | Must be `1` for large baseline chunked imports. |
+| `MORAWARE_IMPORT_CHUNKED` | Set `1` for multi-chunk imports (required for large baselines). |
+| `MORAWARE_IMPORT_DRY_RUN` | `1` = chunk plan only, no HTTP import (scheduled runner skips rebuild too). |
+| `MORAWARE_IMPORT_RESUME_GROUP_ID` | Resume a failed import group (same `import_group_id`). |
+| `MORAWARE_IMPORT_START_CHUNK_INDEX` | Resume from chunk index (requires `MORAWARE_IMPORT_RESUME_GROUP_ID`). |
+| `MORAWARE_PIPELINE_SKIP_GENERATE` | `1` = skip Moraware snapshot generation (resume/import-only). |
+| `MORAWARE_IMPORT_MAX_*_PER_CHUNK` | Chunk sizing for Vercel payload limits (see moraware-sync-foundation.md). |
+
+### Phase 1 scheduled pipeline (worker only)
+
+Run on a **Mac launchd / self-hosted worker**, not Vercel:
+
+```bash
+npm run eos:moraware:run-scheduled-pipeline
+```
+
+Dry-run:
+
+```bash
+MORAWARE_IMPORT_DRY_RUN=1 npm run eos:moraware:run-scheduled-pipeline
+```
+
+Worker needs Moraware creds + `BACKEND_URL` + import secret + `MORAWARE_DEFAULT_ORGANIZATION_ID`. Backend needs matching secrets + `SUPABASE_SERVICE_ROLE_KEY`. Logs: `debug/moraware/scheduled-runs/*.jsonl`.
+
+See `backend-core/SCHEDULING.md` and `docs/eliteos/moraware-sync-foundation.md`.
 
 ---
 

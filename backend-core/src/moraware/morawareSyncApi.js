@@ -553,6 +553,47 @@ export function attachMorawareSyncRoutes(app, deps) {
     }
   });
 
+  app.post("/api/internal/moraware-sync/rebuild-prepared-facts", jsonParser, async (req, res) => {
+    if (!requireImportSecret(req, res)) return;
+    const organizationId = resolveOrganizationId(req);
+    if (!organizationId || organizationId === UNASSIGNED_ORGANIZATION_ID) {
+      res.status(400).json({
+        ok: false,
+        error: "organization_id required (JSON body, x-organization-id header, or MORAWARE_DEFAULT_ORGANIZATION_ID)"
+      });
+      return;
+    }
+    try {
+      const { rebuildSalesMorawarePreparedFacts } = await import("../sales/salesHead.js");
+      const db = getSupabase();
+      const result = await rebuildSalesMorawarePreparedFacts(db, organizationId);
+      try {
+        await logAction({
+          user: null,
+          head: "brain_health",
+          actionType: "moraware_rebuild_prepared_facts",
+          entityType: "sales_moraware_job_facts",
+          entityId: result.import_group_id || null,
+          outcome: result.ok ? "success" : result.status || "failed",
+          metadata: {
+            import_group_id: result.import_group_id || null,
+            jobs_scanned: result.jobs_scanned ?? null,
+            facts_upserted: result.facts_upserted ?? null,
+            account_rollups_upserted: result.account_rollups_upserted ?? null,
+            query_page_count: result.query_page_count ?? null,
+            compute_ms: result.compute_ms ?? null
+          },
+          req
+        });
+      } catch {
+        /* audit logging is non-fatal for rebuild */
+      }
+      res.status(result.ok ? 200 : 409).json(result);
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
   app.get("/api/moraware-sync/status", ...healthStack, async (req, res) => {
     try {
       const db = getSupabase();

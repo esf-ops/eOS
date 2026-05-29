@@ -560,7 +560,99 @@ Windows Task Scheduler is not required for the validated v1 live capped scope. U
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/moraware-sdk-trace/MorawareSdkActivityAssigneeLinkProbe.ps1
 ```
 
-## Future Windows Task Scheduler
+## Phase 1 autosync — scheduled Moraware → Sales pipeline
+
+Phase 1 turns the proven manual baseline pipeline into **one worker command** plus a **cron-safe internal rebuild endpoint**.
+
+| Step | Runs on | Action |
+|------|---------|--------|
+| 1 | Self-hosted worker | `npm run eos:moraware:run-scheduled-pipeline` generates `baseline_2026` snapshot |
+| 2 | Worker → Vercel | Chunked `POST /api/internal/moraware-sync/import` |
+| 3 | Worker → Vercel | `POST /api/internal/moraware-sync/rebuild-prepared-facts` (secret auth, no browser JWT) |
+| 4 | Sales Dashboard | Reads prepared facts + sync health (unchanged UI) |
+
+**Do not** schedule snapshot generation on Vercel. **Do not** use Vercel cron for the full pipeline.
+
+### Worker setup
+
+Required env on the worker (never in browser bundles):
+
+```bash
+MORAWARE_API_URL=
+MORAWARE_USERNAME=
+MORAWARE_PASSWORD=
+MORAWARE_DEFAULT_ORGANIZATION_ID=
+BACKEND_URL=https://your-backend.vercel.app
+MORAWARE_SYNC_IMPORT_SECRET=   # or EOS_CRON_SECRET
+```
+
+Optional defaults applied by the runner when omitted:
+
+- `MORAWARE_SNAPSHOT_MODE=baseline_2026`
+- `MORAWARE_BASELINE_START_DATE=2026-01-01`
+- `MORAWARE_BASELINE_END_DATE=<today>`
+- Chunked import caps matching the proven manual baseline import
+
+Structured JSONL logs: `debug/moraware/scheduled-runs/`
+
+### Backend setup (Vercel)
+
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `MORAWARE_SYNC_IMPORT_SECRET` and/or `EOS_CRON_SECRET` (must match worker headers)
+
+Internal endpoints (shared secret via `x-moraware-sync-secret` or `x-eos-cron-secret`):
+
+- `POST /api/internal/moraware-sync/import`
+- `POST /api/internal/moraware-sync/rebuild-prepared-facts` — body `{ "organization_id": "<uuid>" }` optional when `MORAWARE_DEFAULT_ORGANIZATION_ID` is set on the server
+
+Admin/manual rebuild (unchanged): `POST /api/sales/admin/rebuild-moraware-facts` (admin + sales head JWT).
+
+### Commands
+
+Dry-run (safe — no import HTTP, no rebuild):
+
+```bash
+MORAWARE_IMPORT_DRY_RUN=1 npm run eos:moraware:run-scheduled-pipeline
+```
+
+Supervised live run:
+
+```bash
+npm run eos:moraware:run-scheduled-pipeline
+```
+
+Resume failed chunk group (no regenerate):
+
+```bash
+MORAWARE_PIPELINE_SKIP_GENERATE=1 \
+MORAWARE_IMPORT_RESUME_GROUP_ID=<uuid> \
+MORAWARE_IMPORT_START_CHUNK_INDEX=<n> \
+npm run eos:moraware:run-scheduled-pipeline
+```
+
+### Cap warning guard
+
+The scheduled runner aborts before import if snapshot generation reports cap warnings for **jobs**, **job_activities**, or **job_forms**. **job_files** cap warnings are allowed when `MORAWARE_BASELINE_MAX_FILES=0` or `MORAWARE_LIVE_MAX_FILES=0`.
+
+### Schedule on Mac (launchd)
+
+Schedule `npm run eos:moraware:run-scheduled-pipeline` off-hours via launchd or cron on a Mac/worker with Moraware HTTP access. Load env from a file outside the repo.
+
+**Disable:** unload the launchd plist or remove the cron entry.
+
+See `backend-core/SCHEDULING.md` for launchd notes.
+
+### Verify freshness
+
+After a successful run:
+
+1. `GET /api/admin/moraware/health` → `prepared_facts.freshness: fresh`, recent `sync_freshness_seconds`
+2. System Admin → Moraware → Sync Health + Prepared Facts tabs
+3. Sales Dashboard → sync banner (last success age, chunk group complete)
+
+---
+
+## Future Windows Task Scheduler (live capped observation runs)
 
 Do not schedule automatically yet. When scheduling is approved later, prefer scheduling the live capped snapshot plus import as two explicit commands so the ignored JSON artifact remains inspectable between steps.
 

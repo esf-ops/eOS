@@ -396,7 +396,8 @@ export async function loadPreparedFactsSummary(db, organizationId, latestComplet
     latest_complete_import_group_id: completeGroupId || null,
     freshness,
     rebuild_endpoint: "POST /api/sales/admin/rebuild-moraware-facts",
-    rebuild_requires: "admin role + sales head access"
+    internal_rebuild_endpoint: "POST /api/internal/moraware-sync/rebuild-prepared-facts",
+    rebuild_requires: "admin role + sales head access (admin route); cron secret (internal route)"
   };
 }
 
@@ -477,21 +478,23 @@ export async function buildMorawareAdminHealth(db, organizationId, { countMode =
       ]
     },
     scheduled_sync: {
-      implemented: false,
+      implemented: true,
       moraware_admin_triggers_sync: false,
+      phase: "phase_1_worker_pipeline",
+      worker_command: "npm run eos:moraware:run-scheduled-pipeline",
       existing_repo_patterns: [
-        "POST /api/internal/sync/nightly (x-eos-cron-secret) → syncMoraware.js",
-        "POST /api/internal/sync/recent (x-eos-cron-secret) → syncMoraware.js",
-        "POST /api/internal/moraware-sync/import (x-moraware-sync-secret) — chunked Brain import (preferred for baseline)"
+        "npm run eos:moraware:run-scheduled-pipeline (Mac launchd / self-hosted worker)",
+        "POST /api/internal/moraware-sync/import (x-moraware-sync-secret or x-eos-cron-secret)",
+        "POST /api/internal/moraware-sync/rebuild-prepared-facts (same secret headers)",
+        "POST /api/internal/sync/nightly (x-eos-cron-secret) → legacy syncMoraware.js only"
       ],
-      optional_future_endpoint: "POST /api/internal/moraware-sync/run-scheduled",
       checklist: [
-        "Reuse EOS_CRON_SECRET or MORAWARE_SYNC_RUN_SECRET — do not add unauthenticated triggers",
-        "Small caps only (recent window, no baseline_2026)",
-        "No-overlap lock per organization",
-        "Post batches to existing POST /api/internal/moraware-sync/import",
-        "Rebuild prepared facts after successful complete group",
-        "Log run to moraware_sync_runs with mode=scheduled"
+        "Run on a self-hosted worker — do not generate snapshots on Vercel",
+        "Set worker env: Moraware creds, BACKEND_URL, MORAWARE_SYNC_IMPORT_SECRET or EOS_CRON_SECRET, MORAWARE_DEFAULT_ORGANIZATION_ID",
+        "Schedule with Mac launchd or cron off-hours; disable by unloading the plist or removing the cron entry",
+        "Use MORAWARE_IMPORT_DRY_RUN=1 for a safe import plan review",
+        "Resume failed chunk groups with MORAWARE_IMPORT_RESUME_GROUP_ID + MORAWARE_IMPORT_START_CHUNK_INDEX",
+        "Verify GET /api/admin/moraware/health prepared_facts.freshness=fresh after success"
       ]
     }
   };
