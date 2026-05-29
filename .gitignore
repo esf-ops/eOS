@@ -28,3 +28,4 @@ debug/
 # Local/vendor SDK binaries
 tools/moraware-sdk-trace/lib/*.dll
 !tools/moraware-sdk-trace/lib/.gitkeep
+.vercel
