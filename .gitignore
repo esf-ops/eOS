@@ -21,6 +21,11 @@ dist/
 out*.json
 debug/
 
+# Worker env copies inside repo (production path is /etc/eliteos/moraware-worker.env)
+deploy/moraware-worker/moraware-worker.env
+**/moraware-worker.env
+!**/moraware-worker.env.example
+
 # .NET build artifacts
 **/bin/
 **/obj/

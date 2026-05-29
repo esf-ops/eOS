@@ -17,7 +17,7 @@ This repo is structured so **Heads never call Moraware directly**. Moraware data
 
 | Layer | Where it runs | Command / endpoint |
 |-------|----------------|-------------------|
-| Snapshot generation | **Self-hosted worker** (Mac launchd, cron, or self-hosted CI runner) | `npm run eos:moraware:run-scheduled-pipeline` (step 1 inside runner) |
+| Snapshot generation | **Production: Ubuntu cloud VM** ([runbook](../eliteos/moraware-cloud-worker-runbook.md)); dev: any self-hosted worker | `npm run eos:moraware:run-scheduled-pipeline` |
 | Chunked import | Worker calls **Vercel backend** | `POST /api/internal/moraware-sync/import` |
 | Prepared facts rebuild | Worker calls **Vercel backend** | `POST /api/internal/moraware-sync/rebuild-prepared-facts` |
 | Sales Dashboard reads | Browser → backend | Prepared tables only (`sales_moraware_job_facts`, rollups) |
@@ -35,6 +35,8 @@ npm run eos:moraware:run-scheduled-pipeline
 Implementation: `backend-core/src/scripts/moraware/runScheduledMorawarePipeline.js`
 
 Structured logs: `debug/moraware/scheduled-runs/*.jsonl` (git-ignored).
+
+**Production worker:** See [`docs/eliteos/moraware-cloud-worker-runbook.md`](../docs/eliteos/moraware-cloud-worker-runbook.md) — Ubuntu VM, env at `/etc/eliteos/moraware-worker.env`, cron via `deploy/moraware-worker/run-moraware-worker.sh`.
 
 ### Required worker env vars
 
@@ -71,9 +73,11 @@ Reviews chunk plan via import dry-run; skips HTTP import, prepared-facts rebuild
 npm run eos:moraware:run-scheduled-pipeline
 ```
 
-Run once during business hours before enabling launchd/cron.
+Run once during business hours before enabling production cron.
 
-### Mac launchd example (off-hours)
+### Dev-only: Mac launchd (not production)
+
+For local/dev scheduling only — **production should use the [cloud worker runbook](../docs/eliteos/moraware-cloud-worker-runbook.md)**.
 
 Create `~/Library/LaunchAgents/com.eliteos.moraware-nightly.plist` pointing at the repo with env vars loaded from a **non-repo** `.env` file, then:
 

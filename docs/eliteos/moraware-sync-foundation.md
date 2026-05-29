@@ -636,13 +636,17 @@ npm run eos:moraware:run-scheduled-pipeline
 
 The scheduled runner aborts before import if snapshot generation reports cap warnings for **jobs**, **job_activities**, or **job_forms**. **job_files** cap warnings are allowed when `MORAWARE_BASELINE_MAX_FILES=0` or `MORAWARE_LIVE_MAX_FILES=0`.
 
-### Schedule on Mac (launchd)
+### Schedule on cloud VM (production)
 
-Schedule `npm run eos:moraware:run-scheduled-pipeline` off-hours via launchd or cron on a Mac/worker with Moraware HTTP access. Load env from a file outside the repo.
+Use an **Ubuntu cloud VM** with cron or systemd timer — not a developer MacBook and not Vercel cron. Full setup: [`docs/eliteos/moraware-cloud-worker-runbook.md`](../eliteos/moraware-cloud-worker-runbook.md).
 
-**Disable:** unload the launchd plist or remove the cron entry.
+Templates: `deploy/moraware-worker/` (env example, wrapper, crontab, optional systemd).
 
-See `backend-core/SCHEDULING.md` for launchd notes.
+**Disable:** remove cron line or `systemctl disable --now moraware-worker.timer`.
+
+### Dev-only: Mac launchd
+
+For local observation only — not production. See `backend-core/SCHEDULING.md`.
 
 ### Verify freshness
 

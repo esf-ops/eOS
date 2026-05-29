@@ -83,6 +83,8 @@ MORAWARE_IMPORT_DRY_RUN=1 npm run eos:moraware:run-scheduled-pipeline
 
 Worker needs Moraware creds + `BACKEND_URL` + import secret + `MORAWARE_DEFAULT_ORGANIZATION_ID`. Backend needs matching secrets + `SUPABASE_SERVICE_ROLE_KEY`. Logs: `debug/moraware/scheduled-runs/*.jsonl`.
 
+**Production cloud VM:** copy `deploy/moraware-worker/moraware-worker.env.example` to `/etc/eliteos/moraware-worker.env` on the worker (never commit). See [`docs/eliteos/moraware-cloud-worker-runbook.md`](eliteos/moraware-cloud-worker-runbook.md).
+
 See `backend-core/SCHEDULING.md` and `docs/eliteos/moraware-sync-foundation.md`.
 
 ---

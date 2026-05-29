@@ -1,0 +1,18 @@
+# eliteOS Moraware nightly worker — example crontab for user `eliteos`
+#
+# Install:
+#   sudo -u eliteos crontab -e
+# Paste the job line below (adjust paths if needed).
+#
+# Do NOT put resume variables or large inline env blocks here.
+# Secrets live in /etc/eliteos/moraware-worker.env (outside Git).
+# Sync logic lives in the repo: npm run eos:moraware:run-scheduled-pipeline
+
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+
+# 1:30 AM US Central, nightly Moraware → Sales pipeline (~60–90 min typical)
+30 1 * * * TZ=America/Chicago /opt/eliteos/eOS/deploy/moraware-worker/run-moraware-worker.sh >> /var/log/eliteos/moraware-nightly.log 2>&1
+
+# Alternative: 2:00 AM Central
+# 0 2 * * * TZ=America/Chicago /opt/eliteos/eOS/deploy/moraware-worker/run-moraware-worker.sh >> /var/log/eliteos/moraware-nightly.log 2>&1
