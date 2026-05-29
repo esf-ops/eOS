@@ -609,11 +609,13 @@ Admin/manual rebuild (unchanged): `POST /api/sales/admin/rebuild-moraware-facts`
 
 ### Commands
 
-Dry-run (safe — no import HTTP, no rebuild):
+Dry-run (safe — chunk plan only; no HTTP import, no rebuild, no freshness verification):
 
 ```bash
 MORAWARE_IMPORT_DRY_RUN=1 npm run eos:moraware:run-scheduled-pipeline
 ```
+
+The runner logs `pipeline_dry_run_complete` and prints that no import or rebuild was executed.
 
 Supervised live run:
 

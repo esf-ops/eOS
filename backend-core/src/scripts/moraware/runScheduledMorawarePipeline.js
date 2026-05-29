@@ -1,10 +1,15 @@
 import "dotenv/config";
-
 import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+/** Frozen at module load (after dotenv). Never re-read — child scripts must not change this. */
+const PIPELINE_DRY_RUN_AT_STARTUP = (() => {
+  const s = String(process.env.MORAWARE_IMPORT_DRY_RUN ?? "").trim().toLowerCase();
+  return s === "1" || s === "true" || s === "yes";
+})();
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 const GENERATE_SCRIPT = path.join(REPO_ROOT, "backend-core/src/scripts/moraware/generateLiveCappedSnapshot.js");
@@ -61,6 +66,32 @@ function baselineMaxFilesCap() {
   return 10000;
 }
 
+/** Frozen boolean from pipeline startup — never re-read process.env.MORAWARE_IMPORT_DRY_RUN. */
+function readPipelineDryRunAtStartup() {
+  return PIPELINE_DRY_RUN_AT_STARTUP;
+}
+
+/** Whether the live pipeline may call rebuild-prepared-facts after import. */
+export function shouldRebuild({ pipelineDryRun, importOk = true }) {
+  if (pipelineDryRun) return false;
+  return Boolean(importOk);
+}
+
+function childProcessEnv(pipelineDryRun) {
+  return {
+    ...process.env,
+    MORAWARE_IMPORT_DRY_RUN: pipelineDryRun ? "1" : "0"
+  };
+}
+
+function assertRebuildAllowed(pipelineDryRun) {
+  if (pipelineDryRun) {
+    throw new Error(
+      "Dry run cannot rebuild prepared facts: POST /api/internal/moraware-sync/rebuild-prepared-facts is blocked when MORAWARE_IMPORT_DRY_RUN=1."
+    );
+  }
+}
+
 function applyPipelineDefaults() {
   process.env.MORAWARE_SNAPSHOT_MODE = process.env.MORAWARE_SNAPSHOT_MODE || "baseline_2026";
   process.env.MORAWARE_BASELINE_START_DATE = process.env.MORAWARE_BASELINE_START_DATE || "2026-01-01";
@@ -86,11 +117,11 @@ function shouldSkipGenerate() {
   return envTruthy(process.env.MORAWARE_PIPELINE_SKIP_GENERATE) || isResumeImport();
 }
 
-function runNodeScript(scriptPath, label) {
+function runNodeScript(scriptPath, label, pipelineDryRun) {
   const startedAt = Date.now();
   const result = spawnSync(process.execPath, [scriptPath], {
     cwd: REPO_ROOT,
-    env: process.env,
+    env: childProcessEnv(pipelineDryRun),
     stdio: "inherit"
   });
   if (result.status !== 0) {
@@ -145,7 +176,8 @@ async function assertSnapshotCapWarningsAllowed(logger) {
   );
 }
 
-async function postRebuildPreparedFacts({ secret, organizationId }) {
+async function postRebuildPreparedFacts({ secret, organizationId, pipelineDryRun }) {
+  assertRebuildAllowed(pipelineDryRun);
   const url = `${backendBase()}/api/internal/moraware-sync/rebuild-prepared-facts`;
   const res = await fetch(url, {
     method: "POST",
@@ -206,9 +238,24 @@ function createLogger() {
   };
 }
 
-async function preflight({ skipGenerate }) {
-  requiredEnv("BACKEND_URL");
-  pickSecret();
+async function finishDryRunPipeline(logger, pipelineStartedAt) {
+  const message =
+    "DRY RUN complete: chunk plan reviewed only. No HTTP import, no prepared facts rebuild, and no freshness verification were executed.";
+  await logger.log("pipeline_dry_run_complete", {
+    total_duration_ms: Date.now() - pipelineStartedAt,
+    import_executed: false,
+    rebuild_executed: false,
+    verification_executed: false,
+    note: message
+  });
+  console.log(`\n${message}\n`);
+}
+
+async function preflight({ skipGenerate, pipelineDryRun }) {
+  if (!pipelineDryRun) {
+    requiredEnv("BACKEND_URL");
+    pickSecret();
+  }
   requiredEnv("MORAWARE_DEFAULT_ORGANIZATION_ID");
   if (!skipGenerate) {
     requiredEnv("MORAWARE_API_URL");
@@ -217,9 +264,25 @@ async function preflight({ skipGenerate }) {
   }
 }
 
+function runShouldRebuildSelfTest() {
+  const cases = [
+    { pipelineDryRun: true, importOk: true, want: false },
+    { pipelineDryRun: true, importOk: false, want: false },
+    { pipelineDryRun: false, importOk: true, want: true },
+    { pipelineDryRun: false, importOk: false, want: false }
+  ];
+  for (const { pipelineDryRun, importOk, want } of cases) {
+    const got = shouldRebuild({ pipelineDryRun, importOk });
+    if (got !== want) {
+      throw new Error(`shouldRebuild self-test failed: pipelineDryRun=${pipelineDryRun} importOk=${importOk} got=${got} want=${want}`);
+    }
+  }
+  console.log("shouldRebuild self-test OK");
+}
+
 async function main() {
+  const pipelineDryRun = readPipelineDryRunAtStartup();
   applyPipelineDefaults();
-  const dryRun = envTruthy(process.env.MORAWARE_IMPORT_DRY_RUN);
   const skipGenerate = shouldSkipGenerate();
   const logger = createLogger();
   const organizationId = requiredEnv("MORAWARE_DEFAULT_ORGANIZATION_ID");
@@ -228,7 +291,8 @@ async function main() {
   await logger.log("pipeline_start", {
     mode: process.env.MORAWARE_SNAPSHOT_MODE,
     organization_id: organizationId,
-    dry_run: dryRun,
+    dry_run: pipelineDryRun,
+    pipeline_dry_run: pipelineDryRun,
     skip_generate: skipGenerate,
     resume_group_id: String(process.env.MORAWARE_IMPORT_RESUME_GROUP_ID ?? "").trim() || null,
     start_chunk_index: String(process.env.MORAWARE_IMPORT_START_CHUNK_INDEX ?? "").trim() || null,
@@ -237,16 +301,17 @@ async function main() {
   });
 
   try {
-    await preflight({ skipGenerate });
+    await preflight({ skipGenerate, pipelineDryRun });
 
     if (!skipGenerate) {
-      await logger.log("generate_start", { script: path.relative(REPO_ROOT, GENERATE_SCRIPT) });
-      const generateResult = runNodeScript(GENERATE_SCRIPT, "Moraware snapshot generation");
-      await logger.log("generate_complete", generateResult);
+      await logger.log("generate_start", { script: path.relative(REPO_ROOT, GENERATE_SCRIPT), dry_run: pipelineDryRun });
+      const generateResult = runNodeScript(GENERATE_SCRIPT, "Moraware snapshot generation", pipelineDryRun);
+      await logger.log("generate_complete", { ...generateResult, dry_run: pipelineDryRun });
       await assertSnapshotCapWarningsAllowed(logger);
     } else {
       await logger.log("generate_skipped", {
-        reason: isResumeImport() ? "resume_import" : "MORAWARE_PIPELINE_SKIP_GENERATE"
+        reason: isResumeImport() ? "resume_import" : "MORAWARE_PIPELINE_SKIP_GENERATE",
+        dry_run: pipelineDryRun
       });
       const snapshotPath = path.resolve(REPO_ROOT, process.env.MORAWARE_SYNC_IMPORT_FILE || DEFAULT_SNAPSHOT_FILE);
       await fs.access(snapshotPath);
@@ -254,31 +319,33 @@ async function main() {
 
     await logger.log("import_start", {
       script: path.relative(REPO_ROOT, IMPORT_SCRIPT),
-      dry_run: dryRun
+      dry_run: pipelineDryRun
     });
     try {
-      const importResult = runNodeScript(IMPORT_SCRIPT, "Moraware snapshot import");
-      await logger.log("import_complete", importResult);
+      const importResult = runNodeScript(IMPORT_SCRIPT, "Moraware snapshot import", pipelineDryRun);
+      await logger.log("import_complete", { ...importResult, dry_run: pipelineDryRun });
     } catch (e) {
       await logger.log("import_failed", {
         error: String(e?.message || e),
+        dry_run: pipelineDryRun,
         resume_hint: resumeCommandHint()
       });
       console.error("\nSuggested resume command:\n", resumeCommandHint());
       throw e;
     }
 
-    if (dryRun) {
-      await logger.log("pipeline_dry_run_complete", {
-        total_duration_ms: Date.now() - pipelineStartedAt,
-        note: "Import dry-run finished; prepared facts rebuild skipped."
-      });
+    if (pipelineDryRun) {
+      await finishDryRunPipeline(logger, pipelineStartedAt);
       return;
     }
 
+    if (!shouldRebuild({ pipelineDryRun, importOk: true })) {
+      throw new Error("Import did not succeed; prepared facts rebuild is not allowed.");
+    }
+
     const secret = pickSecret();
-    await logger.log("rebuild_start", { organization_id: organizationId });
-    const rebuild = await postRebuildPreparedFacts({ secret, organizationId });
+    await logger.log("rebuild_start", { organization_id: organizationId, dry_run: pipelineDryRun });
+    const rebuild = await postRebuildPreparedFacts({ secret, organizationId, pipelineDryRun });
     await logger.log("rebuild_complete", rebuild);
 
     if (!rebuild?.ok) {
@@ -302,13 +369,25 @@ async function main() {
     await logger.log("pipeline_failed", {
       phase: String(e?.phase || "unknown"),
       error: String(e?.message || e),
+      dry_run: pipelineDryRun,
       total_duration_ms: Date.now() - pipelineStartedAt
     });
     throw e;
   }
 }
 
-main().catch((e) => {
-  console.error(e?.stack || e);
-  process.exitCode = 1;
-});
+function isDirectRun() {
+  if (!process.argv[1]) return false;
+  return fileURLToPath(import.meta.url) === path.resolve(process.cwd(), process.argv[1]);
+}
+
+if (isDirectRun()) {
+  if (process.argv.includes("--self-test") || envTruthy(process.env.MORAWARE_PIPELINE_SELF_TEST)) {
+    runShouldRebuildSelfTest();
+  } else {
+    main().catch((e) => {
+      console.error(e?.stack || e);
+      process.exitCode = 1;
+    });
+  }
+}

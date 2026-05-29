@@ -63,7 +63,7 @@ Optional pipeline controls:
 MORAWARE_IMPORT_DRY_RUN=1 npm run eos:moraware:run-scheduled-pipeline
 ```
 
-Reviews chunk plan via import dry-run; skips prepared-facts rebuild.
+Reviews chunk plan via import dry-run; skips HTTP import, prepared-facts rebuild, and freshness verification. Exits 0 with a clear console message.
 
 ### Manual live run (supervised)
 

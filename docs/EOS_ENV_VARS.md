@@ -61,7 +61,7 @@ Used by **`backend-core/src/scripts/syncMoraware.js`**, discovery in `src/morawa
 | `MORAWARE_SYNC_IMPORT_FILE` | Snapshot JSON path for import (default `debug/moraware/baseline-2026/baseline-2026-moraware-snapshot.json`). |
 | `MORAWARE_IMPORT_ALLOW_LARGE_BASELINE` | Must be `1` for large baseline chunked imports. |
 | `MORAWARE_IMPORT_CHUNKED` | Set `1` for multi-chunk imports (required for large baselines). |
-| `MORAWARE_IMPORT_DRY_RUN` | `1` = chunk plan only, no HTTP import (scheduled runner skips rebuild too). |
+| `MORAWARE_IMPORT_DRY_RUN` | `1` = chunk plan only; scheduled runner skips HTTP import side effects, prepared-facts rebuild, and freshness verification. |
 | `MORAWARE_IMPORT_RESUME_GROUP_ID` | Resume a failed import group (same `import_group_id`). |
 | `MORAWARE_IMPORT_START_CHUNK_INDEX` | Resume from chunk index (requires `MORAWARE_IMPORT_RESUME_GROUP_ID`). |
 | `MORAWARE_PIPELINE_SKIP_GENERATE` | `1` = skip Moraware snapshot generation (resume/import-only). |
