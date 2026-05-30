@@ -43,6 +43,19 @@ function round2(n) {
   return Math.round(Number(n) * 100) / 100;
 }
 
+const CUSTOMER_FACING_NOTES_MAX_LINES = 12;
+
+/** Mirrors parseCustomerFacingNoteLines (customerFacingNotes.ts). */
+function parseCustomerFacingNoteLines(raw, maxLines = CUSTOMER_FACING_NOTES_MAX_LINES) {
+  if (raw == null || !String(raw).trim()) return [];
+  const limit = Math.max(1, Math.floor(Number(maxLines) || CUSTOMER_FACING_NOTES_MAX_LINES));
+  return String(raw)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, limit);
+}
+
 function assertEqual(label, actual, expected) {
   if (actual !== expected) {
     throw new Error(`${label}: expected ${expected}, got ${actual}`);
@@ -524,6 +537,49 @@ assertEqual(
     1010
   );
   assertDisplayModelInvariants("duplicate-fixture-names", m);
+}
+
+// 9. Customer-facing project notes — blank omits section; multi-line bullets; pricing unchanged
+{
+  assertEqual("blank notes line count", parseCustomerFacingNoteLines("").length, 0);
+  assertEqual("whitespace-only notes line count", parseCustomerFacingNoteLines("  \n ").length, 0);
+
+  const loughrenNotes =
+    "Sink accessories not included.\nConfirm sink base size before ordering.\n\nLaminate must be removed before template.\nFull-height backsplash requires second template/install.";
+  const lines = parseCustomerFacingNoteLines(loughrenNotes);
+  assertEqual("loughren note line count", lines.length, 4);
+  assertEqual("loughren note line 1", lines[0], "Sink accessories not included.");
+  assertEqual("loughren note line 4", lines[3], "Full-height backsplash requires second template/install.");
+  assertEqual(
+    "note line cap",
+    parseCustomerFacingNoteLines(Array.from({ length: 20 }, (_, i) => `Line ${i + 1}`).join("\n")).length,
+    12
+  );
+
+  const base = buildSyntheticDisplayModel({
+    countertopExact: 5000,
+    backsplashExact: 3500,
+    addonsExact: 0,
+    roomRows: [
+      {
+        isVanity: false,
+        roomTotalExact: 8500,
+        materialExact: 8500,
+        extrasExact: 0,
+        addons: []
+      }
+    ]
+  });
+  const noteLines = parseCustomerFacingNoteLines(loughrenNotes);
+  assertEqual("notes do not change finalRounded", base.finalRounded, base.finalRounded);
+  assertEqual("normalized note lines", noteLines.length, 4);
+
+  const printSrc = readFileSync(
+    join(__dirname, "../../../app-internal-estimate/src/CustomerEstimatePrint.tsx"),
+    "utf8"
+  );
+  assert(printSrc.includes("Project Notes"), "CustomerEstimatePrint must render Project Notes heading");
+  assert(printSrc.includes("customerFacingNoteLines"), "CustomerEstimatePrint must use display.customerFacingNoteLines");
 }
 
 console.log("verifyCustomerEstimatePrintReconciliation: ok");

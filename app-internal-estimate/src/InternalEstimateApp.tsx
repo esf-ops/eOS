@@ -336,6 +336,7 @@ export default function InternalEstimateApp() {
   const [comparisonGroupColorLabels, setComparisonGroupColorLabels] = useState<Record<string, string>>(() =>
     Object.fromEntries(MATERIAL_GROUPS.map((g) => [g, ""]))
   );
+  const [customerFacingNotes, setCustomerFacingNotes] = useState("");
   const [customLineRows, setCustomLineRows] = useState<CustomLineRow[]>([]);
   const [customLineUndo, setCustomLineUndo] = useState<CustomLineRow[] | null>(null);
   const [eliteColors, setEliteColors] = useState<EliteProgramColorRow[]>([]);
@@ -710,6 +711,7 @@ export default function InternalEstimateApp() {
           comparisonGroupColorLabels[g].trim()
         ])
       ),
+      customerFacingNotes: customerFacingNotes.trim() || undefined,
       estimateRoomDrafts: serializeRoomDraftsForInternalUi(drafts),
       customerRoomAreaBreakdown: serializeCustomerRoomAreaBreakdown(
         buildCustomerRoomAreaCostBreakdown({
@@ -779,7 +781,8 @@ export default function InternalEstimateApp() {
     colorTbd,
     useTaxPercent,
     customerDisplayGroups,
-    comparisonGroupColorLabels
+    comparisonGroupColorLabels,
+    customerFacingNotes
   ]);
 
   const computeRevisionBaselineSig = useCallback((): string => {
@@ -794,6 +797,7 @@ export default function InternalEstimateApp() {
       materialGroup: p.materialGroup,
       customerEstimateDisplayGroups: p.customerEstimateDisplayGroups,
       customerEstimateComparisonColorLabels: p.customerEstimateComparisonColorLabels,
+      customerFacingNotes: p.customerFacingNotes ?? "",
       quoteDefaultMaterial: p.quoteDefaultMaterial,
       customerName: customerName.trim(),
       email: email.trim(),
@@ -1173,6 +1177,7 @@ export default function InternalEstimateApp() {
     setQuoteDefaultCatalogId("");
     setCustomerDisplayGroups(Object.fromEntries(MATERIAL_GROUPS.map((g) => [g, false])));
     setComparisonGroupColorLabels(Object.fromEntries(MATERIAL_GROUPS.map((g) => [g, ""])));
+    setCustomerFacingNotes("");
     const u = new URL(window.location.href);
     u.searchParams.delete("quoteId");
     window.history.replaceState({}, "", `${u.pathname}${u.search}${u.hash}`);
@@ -1650,14 +1655,16 @@ export default function InternalEstimateApp() {
           lineTotal: ln.lineTotal
         })),
         internalMaterialFoldDollars: internalOnlyAdjustDollars,
-        roomAreaBreakdown: liveRoomAreaBreakdown
+        roomAreaBreakdown: liveRoomAreaBreakdown,
+        customerFacingNotes
       }),
     [
       selectedMaterialBreakdown,
       liveEstimate.measuredRooms,
       visibleCustomerLines,
       internalOnlyAdjustDollars,
-      liveRoomAreaBreakdown
+      liveRoomAreaBreakdown,
+      customerFacingNotes
     ]
   );
 
@@ -1879,6 +1886,11 @@ export default function InternalEstimateApp() {
             }
             return next;
           });
+        }
+        const storedNotes =
+          iu.customer_estimate_customer_facing_notes ?? iu.customerFacingNotes ?? iu.customer_facing_notes;
+        if (storedNotes != null && String(storedNotes).trim()) {
+          setCustomerFacingNotes(String(storedNotes));
         }
         const isp = snap.inputSummary as Record<string, unknown> | undefined;
         if (isp?.materialGroup) {
@@ -2967,6 +2979,22 @@ export default function InternalEstimateApp() {
               ) : (
                 <p className="ok small">Core fields look complete — still verify sinks, edges, and site readiness before sold handoff.</p>
               )}
+              <div className="ie-customer-facing-notes" style={{ marginTop: 16 }}>
+                <label className="ie-customer-facing-notes-label">
+                  Customer-facing notes
+                  <textarea
+                    rows={5}
+                    value={customerFacingNotes}
+                    onChange={(e) => setCustomerFacingNotes(e.target.value)}
+                    placeholder={
+                      "Sink accessories not included.\nConfirm sink base size before ordering.\nLaminate must be removed before template.\nFull-height backsplash requires second template/install."
+                    }
+                  />
+                </label>
+                <p className="muted small" style={{ marginTop: 6 }}>
+                  These notes print on the customer estimate. Do not include internal-only instructions.
+                </p>
+              </div>
             </section>
 
             <details id="sec-output" className="internal-print-sheet card ie-details-worksheet">

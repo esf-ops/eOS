@@ -3120,6 +3120,18 @@ select:focus {
   margin-bottom: 2px;
 }
 
+.cep-project-notes-list {
+  margin: 0;
+  padding-left: 1rem;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: #334155;
+}
+
+.cep-project-notes-list li {
+  margin-bottom: 3px;
+}
+
 /* Customer estimate — signature: label + long line + Date + short line per row */
 .cep-signature-block {
   margin: 8px 0 8px;
@@ -3660,6 +3672,21 @@ select:focus {
 .page-internal-estimate .ie-workflow-tail > p.muted.small {
   margin-top: 6px;
   margin-bottom: 8px;
+}
+
+.ie-customer-facing-notes-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.ie-customer-facing-notes textarea {
+  width: 100%;
+  min-height: 7rem;
+  resize: vertical;
+  font-weight: 400;
+  line-height: 1.45;
 }
 
 .page-internal-estimate .ie-workflow-tail > .fallback-banner {

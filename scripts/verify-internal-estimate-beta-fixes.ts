@@ -52,6 +52,7 @@ import {
   serializeRoomDraftsForInternalUi,
   serializeRoomsForApi
 } from "../app-quote/src/lib/prototypeQuoteMath.ts";
+import { parseCustomerFacingNoteLines } from "../app-internal-estimate/src/lib/customerFacingNotes.ts";
 
 function approx(a: number, b: number, eps = 0.02) {
   assert.ok(Math.abs(a - b) <= eps, `expected ${b}, got ${a}`);
@@ -709,6 +710,69 @@ function approx(a: number, b: number, eps = 0.02) {
   const ieSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/InternalEstimateApp.tsx"), "utf8");
   assert.match(ieSrc, /comparisonGroupColorLabels/, "IE UI stores optional comparison color labels");
   assert.match(ieSrc, /roomId/, "custom lines link to room draft id");
+}
+
+// Customer-facing project notes — normalize, print model, pricing unchanged
+{
+  const LOUGHREN_NOTES =
+    "Sink accessories not included.\nConfirm sink base size before ordering.\n\nLaminate must be removed before template.\nFull-height backsplash requires second template/install.";
+
+  assert.deepEqual(parseCustomerFacingNoteLines(""), []);
+  assert.deepEqual(parseCustomerFacingNoteLines("   \n  "), []);
+  assert.deepEqual(parseCustomerFacingNoteLines(LOUGHREN_NOTES), [
+    "Sink accessories not included.",
+    "Confirm sink base size before ordering.",
+    "Laminate must be removed before template.",
+    "Full-height backsplash requires second template/install."
+  ]);
+  assert.equal(parseCustomerFacingNoteLines(Array.from({ length: 20 }, (_, i) => `Line ${i + 1}`).join("\n")).length, 12);
+
+  const kitchen = createDefaultRoom("Group D");
+  kitchen.name = "Kitchen";
+  kitchen.calcMode = "Manual Sq Ft";
+  kitchen.direct = { counter: 57, splash: 38 };
+  const calcBase = await calculateQuote(
+    {
+      quoteSource: "internal_quote",
+      engine: "legacy",
+      internalMaterialBasis: "direct",
+      materialGroup: "Group D",
+      areas: { countertopSqft: 57, backsplashSqft: 38 },
+      rooms: [],
+      addOns: {}
+    },
+    {}
+  );
+  const calcWithNotes = await calculateQuote(
+    {
+      quoteSource: "internal_quote",
+      engine: "legacy",
+      internalMaterialBasis: "direct",
+      materialGroup: "Group D",
+      areas: { countertopSqft: 57, backsplashSqft: 38 },
+      rooms: [],
+      addOns: {},
+      customerFacingNotes: LOUGHREN_NOTES,
+      customer_estimate_customer_facing_notes: LOUGHREN_NOTES
+    },
+    {}
+  );
+  assert.equal(calcBase.totals?.retail, calcWithNotes.totals?.retail, "project notes must not change pricing totals");
+
+  const displaySrc = readFileSync(join(repoRoot, "app-internal-estimate/src/lib/customerEstimateDisplayModel.ts"), "utf8");
+  assert.match(displaySrc, /customerFacingNoteLines/, "display model exposes normalized project note lines");
+  assert.match(displaySrc, /parseCustomerFacingNoteLines/, "display model normalizes raw notes");
+
+  const printSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/CustomerEstimatePrint.tsx"), "utf8");
+  assert.match(printSrc, /Project Notes/, "customer print renders Project Notes section");
+  assert.match(printSrc, /customerFacingNoteLines/, "customer print reads normalized note lines from display model");
+
+  const ieSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/InternalEstimateApp.tsx"), "utf8");
+  assert.match(ieSrc, /customerFacingNotes/, "IE stores customer-facing notes state");
+  assert.match(ieSrc, /Customer-facing notes/, "IE shows customer-facing notes textarea label");
+
+  const apiSrc = readFileSync(join(repoRoot, "backend-core/src/quotes/internalQuotesApi.js"), "utf8");
+  assert.match(apiSrc, /customer_estimate_customer_facing_notes/, "internal save persists customer-facing notes in snapshot");
 }
 
 console.log("verify-internal-estimate-beta-fixes: OK");

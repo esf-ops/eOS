@@ -184,6 +184,15 @@ export function attachInternalQuoteRoutes(app, deps) {
                   typeof body.customer_estimate_comparison_color_labels === "object"
                 ? body.customer_estimate_comparison_color_labels
                 : {},
+          customer_estimate_customer_facing_notes: (() => {
+            const raw =
+              body.customerFacingNotes ??
+              body.customer_facing_notes ??
+              body.customer_estimate_customer_facing_notes;
+            if (raw == null) return null;
+            const trimmed = String(raw).trim();
+            return trimmed || null;
+          })(),
           estimate_room_drafts: body.estimateRoomDrafts ?? body.estimate_room_drafts ?? null,
           color_tbd: Boolean(body.colorTbd ?? body.color_tbd),
           use_tax_percent: Math.max(0, Number(body.useTaxPercent ?? body.use_tax_percent ?? 0) || 0),

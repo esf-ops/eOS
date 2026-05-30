@@ -420,6 +420,17 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
         </section>
       ) : null}
 
+      {display.customerFacingNoteLines.length > 0 ? (
+        <section className="cep-section cep-section-compact cep-project-notes">
+          <h2 className="cep-h2">Project Notes</h2>
+          <ul className="cep-project-notes-list">
+            {display.customerFacingNoteLines.map((line, idx) => (
+              <li key={`note-${idx}-${line.slice(0, 24)}`}>{line}</li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
       <footer className="cep-closing">
         <div className="cep-footer-terms-sig">
           <div className="cep-terms-box">

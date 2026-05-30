@@ -50,6 +50,7 @@ export function buildInternalSavePayloadFromQuoteRow(row) {
     estimateRoomDrafts: iu.estimate_room_drafts ?? null,
     customerEstimateDisplayGroups: iu.customer_estimate_display_groups || [],
     customerRoomAreaBreakdown: iu.customer_room_area_breakdown || null,
+    customerFacingNotes: iu.customer_estimate_customer_facing_notes ?? iu.customerFacingNotes ?? null,
     quoteDefaultMaterial: iu.quote_default_material || null,
     quote_workflow: iu.quote_workflow || null,
     colorTbd: Boolean(iu.color_tbd),
@@ -105,6 +106,15 @@ function buildSnapshotToStore(calc, body) {
       use_tax_percent: Math.max(0, Number(body.useTaxPercent ?? body.use_tax_percent ?? 0) || 0),
       customer_room_area_breakdown:
         body.customerRoomAreaBreakdown ?? body.customer_room_area_breakdown ?? null,
+      customer_estimate_customer_facing_notes: (() => {
+        const raw =
+          body.customerFacingNotes ??
+          body.customer_facing_notes ??
+          body.customer_estimate_customer_facing_notes;
+        if (raw == null) return null;
+        const trimmed = String(raw).trim();
+        return trimmed || null;
+      })(),
       restored_from_quote_id: body._restored_from_quote_id ?? null,
       restored_from_revision_label: body._restored_from_revision_label ?? null
     }

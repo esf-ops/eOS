@@ -10,6 +10,7 @@ import {
   prepareCustomerPrintDisplayRows,
   type CustomerPrintDisplayRoomRow
 } from "./customerPrintDisplayRows";
+import { parseCustomerFacingNoteLines } from "./customerFacingNotes";
 
 export type CustomerEstimateDisplayLineItem = {
   /** Stable id for summary rows (custom line row id). */
@@ -313,6 +314,8 @@ export type CustomerEstimateDisplayModel = {
   /** Quoted Material Breakdown — scope / SF only (no customer dollar amounts). */
   materialScopeGroups: CustomerMaterialScopeGroup[];
   vanityScopeNotes: CustomerVanityScopeNote[];
+  /** Normalized project notes for customer PDF — one bullet per line. */
+  customerFacingNoteLines: string[];
 };
 
 export type BuildCustomerEstimateDisplayModelParams = {
@@ -321,6 +324,8 @@ export type BuildCustomerEstimateDisplayModelParams = {
   visibleCustomerLines: CustomerEstimateDisplayLineItem[];
   internalMaterialFoldDollars: number;
   roomAreaBreakdown: CustomerRoomAreaCostBreakdown | null;
+  /** Raw project notes from Internal Estimate — normalized to customerFacingNoteLines. */
+  customerFacingNotes?: string | null;
 };
 
 /**
@@ -393,6 +398,7 @@ export function buildCustomerEstimateDisplayModel(
     hasAddons,
     hasAddonOrFixtureDetail: hasAddons || customerFixtureDetailLines.length > 0,
     materialScopeGroups: buildMaterialScopeGroups(params.selectedBreakdown),
-    vanityScopeNotes: buildVanityScopeNotes(params.measuredRooms)
+    vanityScopeNotes: buildVanityScopeNotes(params.measuredRooms),
+    customerFacingNoteLines: parseCustomerFacingNoteLines(params.customerFacingNotes)
   };
 }
