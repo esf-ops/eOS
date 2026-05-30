@@ -225,8 +225,8 @@ create index if not exists idx_moraware_prepared_sales_worksheet_facts_job
 --   '/sys/report/?view=219&spreadsheet=1&exportType=AllPages&table=Report',
 --   '/sys/report/?view=219',
 --   '["Account Name","Job Name","Job Status","Job Creation Date","Job Salesperson","Total Job Worksheet Sq.Ft.","Color","Stone","Room","Branch"]'::jsonb,
---   null,
+--   '4e657f1f731e9fb054e0b9d8d4d6b1f586e612875d139ee33e4a083a5a6cfdb8',
 --   'manual',
---   'Additive report-feed lane beside Moraware API sync. Set expected_column_hash after first validated import.'
+--   'Additive report-feed lane beside Moraware API sync. Hash validated against live export run afc7b49d-af7a-4fec-85a0-0fdb11046ea3 (2026-05-30).'
 -- )
 -- on conflict (organization_id, report_type) do nothing;

@@ -22,6 +22,7 @@ Combining CSV rows + HTML-derived IDs gives faster, trustable prepared facts for
 | Report type | `sales_worksheet_facts` |
 | CSV export path | `/sys/report/?view=219&spreadsheet=1&exportType=AllPages&table=Report` |
 | HTML report path | `/sys/report/?view=219` |
+| Validated header hash | `4e657f1f731e9fb054e0b9d8d4d6b1f586e612875d139ee33e4a083a5a6cfdb8` (run `afc7b49d`, 2026-05-30) |
 
 Expected business columns (integration contract):
 
@@ -59,7 +60,7 @@ All tables use `organization_id` for SaaS readiness. RLS is **not** enabled in t
 2. Paste the full contents of [`backend-core/supabase/eliteos_moraware_report_feeds.sql`](../../backend-core/supabase/eliteos_moraware_report_feeds.sql).
 3. Run once. Re-run is safe (`IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`).
 4. Verify tables exist: `moraware_report_feeds`, `moraware_report_runs`, `moraware_report_column_profiles`, `moraware_report_raw_rows`, `moraware_report_identity_links`, `moraware_prepared_sales_worksheet_facts`.
-5. Seed the Sales Worksheet Facts feed using the commented `INSERT` at the bottom of the SQL file — **replace** `organization_id` with your real tenant UUID and set `expected_column_hash` after the first validated local POC run.
+5. Seed the Sales Worksheet Facts feed using the commented `INSERT` at the bottom of the SQL file — **replace** `organization_id` with your real tenant UUID. The validated `expected_column_hash` is already set in the seed comment: `4e657f1f731e9fb054e0b9d8d4d6b1f586e612875d139ee33e4a083a5a6cfdb8` (validated run `afc7b49d`, 2026-05-30).
 6. Do **not** paste live Moraware CSV/HTML exports into the SQL editor.
 
 ### Apply-readiness notes (schema review)
