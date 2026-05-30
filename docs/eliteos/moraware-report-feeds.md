@@ -33,7 +33,147 @@ Combining CSV rows + HTML-derived IDs gives faster, trustable prepared facts for
 | Test org | `00000000-0000-0000-0000-000000000001` | `a053cb9a-e362-4c5a-8f47-895314cec85a` | `a660473b-b200-4d14-ba0b-5b713c475c9c` | Promotion smoke 1: 3 inserted, 0 superseded |
 | Test org | (same) | (same) | `6d54c835-058f-47f8-a831-db8efca86a5b` | Promotion smoke 2: 3 inserted, 3 superseded + `superseded_by` backfill |
 
-**Next safe slice:** governed download **planning/design** (credentials vault, org-scoped Moraware Admin mappings, raw file storage policy, fetch contract) — **not** dashboard reads or live automation until that design is approved.
+**Phase A (2026-05-30):** Governed download **design contract** documented below — **no fetch implementation yet**.
+
+**Next safe slice:** inspect existing integration config patterns → verify Moraware login mechanics manually → implement `fetchReportFeedArtifacts` as network-only module if server-side login is feasible.
+
+## Governed download design (Phase A — docs only)
+
+This section is the implementation contract for the next slice. **Nothing here is built yet** — no fetch code, credential tables, API routes, cron, or Moraware network access.
+
+### 1. Governed download goal
+
+Replace the manual workflow (“save CSV to disk + save HTML to disk + run local script”) with a **backend/server-side acquisition layer** that returns the same two artifacts the existing pipeline already understands:
+
+| Output | Type | Consumer |
+|--------|------|----------|
+| `csvText` | string | `parseCsvReportRows` → staging raw rows |
+| `htmlText` | string | `parseReportHtmlIdentityRows` → identity links |
+| `metadata` | object | run record, source provenance, fetch timestamps |
+
+The fetch layer **must hand off** to the existing path — no parallel ingestion lane:
+
+```
+fetchReportFeedArtifacts (future)
+  → processReportFeedLocal({ csvText, htmlText, … })
+  → persistReportFeedRun (staging)
+  → optional promoteReportFeedFacts (MORAWARE_REPORT_FEED_PROMOTE=1)
+```
+
+**Invariants:**
+
+- **One parser, one promotion path** — do not create a second parser, second promotion path, or dashboard shortcut.
+- **Same contract** — `processReportFeedLocal`, `persistReportFeedRun`, `shouldPromoteReportRun`, and `promoteReportFeedFacts` remain unchanged; the fetch module only supplies text + metadata instead of disk reads.
+- **Same gates** — `SUPABASE_WRITE_ENABLED=1` for staging; `MORAWARE_REPORT_FEED_PROMOTE=1` for prepared facts; run must reach `validated` before promotion.
+
+Planned module name: `fetchReportFeedArtifacts` (location TBD — see credential model below).
+
+### 2. Credential model (decision placeholder)
+
+Credentials **must** be org-scoped and backend-only. Implementation location is **to be finalized after verifying Moraware login mechanics** (human-reviewed spike).
+
+| Requirement | Status |
+|-------------|--------|
+| Org-scoped (`organization_id`) | Required |
+| Backend/scripts only — never frontend or client bundles | Required |
+| No credentials in repo, fixtures, logs, or committed env | Required |
+| No cookies, SID, or session headers committed to git | Required |
+| No raw Moraware session persisted in Supabase | **Not approved** unless explicitly decided later |
+| Separate report-feed credentials from existing Moraware API/SDK credentials | **Preferred** if login/session/permission behavior differs |
+
+**Open (next slice):** Where credentials live (e.g. `organization_integration_configs` extension vs dedicated table vs secret manager reference). Do **not** create credential tables until login mechanics are verified and storage pattern is chosen.
+
+### 3. Fetch contract — view 219 (Sales Worksheet Facts)
+
+Two canonical paths relative to the Moraware base URL (org-specific host from integration config):
+
+| Artifact | Path |
+|----------|------|
+| CSV export | `/sys/report/?view=219&spreadsheet=1&exportType=AllPages&table=Report` |
+| HTML report | `/sys/report/?view=219` |
+
+**Date window:** Controlled by the **saved Moraware report view** (view 219), not by the downloader. For Sales Worksheet Facts, the intended default is **Year-to-Date / current year** as configured in Moraware Admin on that saved view.
+
+**v1 rule:** The downloader **must not** manipulate Moraware date pickers, query params for date ranges, or UI automation to change the window. If the saved view’s date range is wrong, fix it in Moraware Admin — do not scrape around it.
+
+`metadata` should include at minimum: `morawareViewId`, `reportType`, `organizationId`, `fetchedAt`, and optional `sourceHost` (no secrets).
+
+### 4. Session lifecycle (v1 preferred design)
+
+| Approach | v1 stance |
+|----------|-----------|
+| Server-side HTTP login + cookie jar in process memory | **Preferred** if feasible without browser automation |
+| Login once per run; short-lived in-memory session only | **Preferred** |
+| Persist SID/cookies to git, fixtures, Supabase, or debug output | **Forbidden** |
+| Headless browser (Puppeteer/Playwright) | **Out of scope for v1** — requires separate threat-model approval |
+| Long-lived session reuse across cron runs | **Deferred** — v1 is manual trigger only |
+
+Session material exists only for the duration of a single CLI/script invocation and is discarded when the process exits.
+
+### 5. Failure behavior
+
+All failures must produce a run in **`failed`** or **`needs_review`** status and **must not** touch active prepared facts (`moraware_prepared_sales_worksheet_facts` where `is_active = true`).
+
+| Failure code | Typical cause | Run status | Prepared facts |
+|--------------|---------------|------------|------------------|
+| `auth_failed` | Bad credentials, expired session, login page returned | `failed` | Unchanged |
+| `report_not_found` | 404, wrong view id, permission denied on report | `failed` | Unchanged |
+| `empty_export` | CSV/HTML empty or zero data rows | `needs_review` or `failed` | Unchanged |
+| `timeout` | Network or Moraware slowness exceeds limit | `failed` | Unchanged |
+| `schema_drift` | Header hash ≠ feed `expected_column_hash` | `needs_review` | Unchanged |
+| `identity_ambiguous` | Duplicate HTML keys or duplicate row hashes after enrich | `needs_review` | Unchanged |
+
+Staging rows for a failed/`needs_review` run may be written (audit trail) but promotion gates (`shouldPromoteReportRun`) must block any supersede of active prepared facts.
+
+### 6. Raw artifact storage policy (open decision)
+
+Whether to persist downloaded CSV/HTML beyond in-memory processing is **not decided**. Document options for the next slice:
+
+| Option | Pros | Cons |
+|--------|------|------|
+| **Ephemeral** — process in memory, persist only parsed staging rows | Minimal PII retention; simpler security | No re-parse without re-fetch |
+| **Supabase Storage** — org-prefixed paths, TTL | Audit/replay; operator debugging | PII/customer data in object store; RLS + retention policy required |
+
+If storage is approved later:
+
+- Paths must be **org-prefixed** (e.g. `{organization_id}/moraware-report-feeds/{run_id}/…`).
+- Define a **retention TTL** (open — e.g. 30/90 days).
+- Treat stored files as **PII/customer data** — same handling rules as live Moraware exports.
+- `source_files` JSON on `moraware_report_runs` should reference storage URIs **only if** storage is explicitly approved; until then, omit or use non-PII placeholders (e.g. `{ "mode": "ephemeral" }`).
+
+### 7. Manual trigger first (v1)
+
+v1 governed download is **manual CLI/script only** — operator-initiated, same spirit as `persistReportFeedLocal.js` today.
+
+- No cron, cloud worker, or scheduled job until a **later explicit approval**.
+- No HTTP API routes exposing fetch to browsers or external callers.
+- Env gates remain: `SUPABASE_WRITE_ENABLED=1`, optional `MORAWARE_REPORT_FEED_PROMOTE=1`.
+
+### 8. Explicitly out of scope (until separately approved)
+
+- Live cron / cloud worker scheduling
+- Dashboard reads from prepared facts
+- API routes for report-feed fetch
+- Browser scraping / headless automation
+- Moraware date picker or UI manipulation
+- Automatic Elite org promotion (real tenant)
+- Changes to existing Moraware API/SDK sync
+- Quote math, Internal Estimate, public/partner quote, Monday sync
+- Credential tables, secret commits, or Supabase session storage
+- Deployment config changes for report feeds
+
+### 9. Next recommended implementation slice
+
+After this documentation is committed:
+
+1. **Inspect** existing org-scoped integration config patterns (e.g. how Moraware API credentials are stored today) — read-only reconnaissance.
+2. **Verify Moraware login mechanics** manually with human review (can server-side HTTP login reach view 219 CSV + HTML without a browser?).
+3. **If feasible:** implement `fetchReportFeedArtifacts` as a **network-only** module that returns `{ csvText, htmlText, metadata }` and wire a new script that calls `processReportFeedLocal` → `persistReportFeedRun` (same as local path, different input source).
+4. **If not feasible:** stop and record findings; do not proceed to headless browser without separate threat-model approval.
+
+Use **Sonnet (or stronger)** for credential/session/fetch implementation; use cheaper models for docs and small edits.
+
+---
 
 ## Current feed: Sales Worksheet Facts (view 219)
 
@@ -216,15 +356,16 @@ The scheduled Moraware API / cloud worker pipeline remains the primary structure
 
 Neither lane replaces the other.
 
-## Future live-download automation (not in this POC)
+## Future live-download automation
 
-Before enabling automation:
+**Phase A (2026-05-30):** Design contract documented in [Governed download design](#governed-download-design-phase-a--docs-only) above.
 
-- Server-side credential vault + org-scoped Moraware Admin mappings
-- Raw file storage policy
-- Supabase apply of `eliteos_moraware_report_feeds.sql`
-- Promotion job with supersede semantics
-- Dashboard reads gated on `is_active` prepared facts
+**Still required before cron/dashboards:**
+
+- Credential vault implementation (after login-mechanics spike)
+- Raw file storage decision (ephemeral vs Supabase Storage)
+- Dashboard reads gated on `is_active` prepared facts + RLS
 - Security review for any HTML fetch path
+- Explicit approval for scheduled/cloud worker triggers
 
-See also: [`FEATURE_DECISIONS.md`](./FEATURE_DECISIONS.md) entry *Moraware Report Feeds as additive prepared-facts ingestion lane*.
+See also: [`FEATURE_DECISIONS.md`](./FEATURE_DECISIONS.md) entries **37** (additive lane), **38** (SQL supersede semantics), **39** (governed download v1 contract).

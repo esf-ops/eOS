@@ -511,3 +511,15 @@
 
 ---
 
+### 39. Moraware report-feed governed download v1 contract
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-05-30 |
+| **Decision** | Governed Moraware report download (when implemented) must return **`csvText` + `htmlText` + `metadata`** and feed the **existing** `processReportFeedLocal` → staging persistence → optional promotion path — **no** second parser, promotion path, or dashboard shortcut. Credentials must be **org-scoped and backend-only** (never frontend/repo/fixtures); report-feed credentials should stay **separate from API/SDK credentials** if session behavior differs. **v1 is manual CLI/script only** — no cron, API routes, or headless browser unless separately approved. Failures (`auth_failed`, `report_not_found`, `empty_export`, `timeout`, `schema_drift`, `identity_ambiguous`) must land in **`failed` / `needs_review`** runs and **must not** supersede active prepared facts. Raw CSV/HTML retention (ephemeral vs Supabase Storage) remains **open** until storage is explicitly approved. |
+| **Why** | Local-file lane is validated; the next slice needs a safe fetch contract that reuses proven parse/enrich/promote logic without duplicating ingestion or risking silent prepared-fact corruption. |
+| **Impacted files/docs** | `docs/eliteos/moraware-report-feeds.md` (§ Governed download design), `docs/eliteos/CURSOR_ACTIVE_HANDOFF.md`, future `fetchReportFeedArtifacts` module + CLI script |
+| **Revisit trigger** | After Moraware login-mechanics spike; before credential table design; before cron/API routes; before raw artifact storage in Supabase; before headless browser approach. |
+
+---
+

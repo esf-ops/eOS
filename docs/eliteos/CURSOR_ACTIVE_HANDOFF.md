@@ -18,6 +18,7 @@ Additive ingestion lane beside existing Moraware API sync. Combines saved-report
 | POC parse/enrich | Done (local files, fixtures, tests) |
 | Staging persistence | Validated (`SUPABASE_WRITE_ENABLED=1`) |
 | Promotion | Validated **test org only**; real Elite org **not** promoted |
+| Governed download design (Phase A) | **Documented** — see [`moraware-report-feeds.md` § Governed download design](./moraware-report-feeds.md#governed-download-design-phase-a--docs-only) |
 | Live download / scrape / cron / API routes | **Not built** |
 | Dashboards reading prepared facts | **Not built** |
 
@@ -59,9 +60,18 @@ Code: `backend-core/src/moraware/reportFeeds/`, scripts under `backend-core/src/
 
 ## Next slice (recommended)
 
-**Governed download planning/design only** — credential vault, org-scoped Moraware Admin config, raw file retention, fetch contract, security review. No implementation until design is approved.
+**Phase A complete (2026-05-30):** Governed download design contract is in [`moraware-report-feeds.md`](./moraware-report-feeds.md#governed-download-design-phase-a--docs-only). No fetch code yet.
 
-After that (separate slices): server-side fetch → store raw artifacts → reuse existing staging/promotion path → dashboard reads behind RLS.
+**Phase B (next implementation slice):**
+
+1. Inspect existing org-scoped integration config patterns (read-only).
+2. Verify Moraware login mechanics manually / human-reviewed — can server-side HTTP reach view 219 CSV + HTML?
+3. If feasible: implement `fetchReportFeedArtifacts` (network-only) → existing `processReportFeedLocal` → `persistReportFeedRun` path.
+4. If not feasible: document findings; do **not** add headless browser without separate threat-model approval.
+
+Use **Sonnet** for credential/session/fetch work. Still no cron, API routes, dashboards, or Elite org promotion.
+
+Later slices (separate approval): raw artifact storage decision → scheduled worker → dashboard reads behind RLS.
 
 ---
 
@@ -85,7 +95,7 @@ After that (separate slices): server-side fetch → store raw artifacts → reus
 - Old prepared facts: supersede/deactivate (`is_active`, `superseded_by`), not blind delete
 - Service-role Supabase writes: backend/scripts only, gated by env flags
 
-Durable decisions: `FEATURE_DECISIONS.md` entries **37** (additive lane) and **38** (SQL supersede semantics).
+Durable decisions: `FEATURE_DECISIONS.md` entries **37** (additive lane), **38** (SQL supersede semantics), **39** (governed download v1 contract).
 
 ---
 
