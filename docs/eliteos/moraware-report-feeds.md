@@ -49,7 +49,30 @@ Draft SQL (not auto-applied): [`backend-core/supabase/eliteos_moraware_report_fe
 | `moraware_report_identity_links` | HTML-derived account/job identity map |
 | `moraware_prepared_sales_worksheet_facts` | Promoted dashboard-ready facts (active/superseded) |
 
-All tables use `organization_id` for SaaS readiness.
+All tables use `organization_id` for SaaS readiness. RLS is **not** enabled in the draft SQL (service-role writes only until a dedicated security milestone).
+
+## Manual Supabase apply (when ready)
+
+**Do not apply until you have reviewed the SQL and replaced sentinel org IDs.**
+
+1. Open Supabase → **SQL** → **New query**.
+2. Paste the full contents of [`backend-core/supabase/eliteos_moraware_report_feeds.sql`](../../backend-core/supabase/eliteos_moraware_report_feeds.sql).
+3. Run once. Re-run is safe (`IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`).
+4. Verify tables exist: `moraware_report_feeds`, `moraware_report_runs`, `moraware_report_column_profiles`, `moraware_report_raw_rows`, `moraware_report_identity_links`, `moraware_prepared_sales_worksheet_facts`.
+5. Seed the Sales Worksheet Facts feed using the commented `INSERT` at the bottom of the SQL file — **replace** `organization_id` with your real tenant UUID and set `expected_column_hash` after the first validated local POC run.
+6. Do **not** paste live Moraware CSV/HTML exports into the SQL editor.
+
+### Apply-readiness notes (schema review)
+
+| Area | Design |
+|------|--------|
+| Active prepared facts | Partial unique index on `(organization_id, report_feed_id, row_hash) WHERE is_active = true` — allows many superseded historical rows |
+| Supersede chain | `is_active`, `superseded_at`, `superseded_by` (self-FK to replacement row) |
+| Run deletion | Prepared facts use `ON DELETE RESTRICT` for `report_run_id` — promoted facts are not silently removed when a run row is deleted |
+| Raw/staging tables | Still `ON DELETE CASCADE` from runs — safe for staging cleanup |
+| Run status | Application values: `running`, `validated`, `needs_review`, `failed`, `promoted` |
+| Identity status | Application values: `matched`, `needs_identity_review`, `ambiguous_identity` |
+| RLS | Deferred — add org-scoped policies before authenticated dashboard reads hit these tables directly |
 
 ## Identity enrichment strategy
 

@@ -4,13 +4,22 @@
 --   1) Open Supabase -> SQL -> New query.
 --   2) Paste this file; run once. Re-run is safe (IF NOT EXISTS / ADD COLUMN IF NOT EXISTS).
 --   3) Do NOT paste live Moraware customer/job exports into this file.
+--   4) Replace sentinel organization_id values with the real tenant UUID before seeding feeds.
 --
 -- Intent:
 --   Add an ingestion lane beside the existing Moraware API sync. Saved report CSV exports
 --   supply business-friendly columns; rendered report HTML supplies stable /sys/job and
 --   /sys/account IDs for identity enrichment before prepared facts promotion.
+--
+-- RLS note:
+--   RLS is intentionally NOT enabled in this draft (matches moraware_sync_foundation_v1).
+--   backend-core service role writes today. Add org-scoped RLS in a dedicated security milestone
+--   before external SaaS dashboard reads use anon/authenticated Supabase clients directly.
 
 create extension if not exists pgcrypto;
+
+-- Sentinel used only when an organization_id is not yet known/configured.
+-- Production should set MORAWARE_DEFAULT_ORGANIZATION_ID or pass organization_id in import payloads.
 
 create table if not exists public.moraware_report_feeds (
   id uuid primary key default gen_random_uuid(),
@@ -32,6 +41,9 @@ create table if not exists public.moraware_report_feeds (
   unique (organization_id, report_type)
 );
 
+comment on table public.moraware_report_feeds is
+  'Org-scoped Moraware saved-report integration contracts (view id, export/html paths, expected columns).';
+
 create index if not exists idx_moraware_report_feeds_org_active
   on public.moraware_report_feeds(organization_id, is_active);
 
@@ -39,6 +51,7 @@ create table if not exists public.moraware_report_runs (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null default '00000000-0000-0000-0000-000000000000',
   report_feed_id uuid not null references public.moraware_report_feeds(id) on delete cascade,
+  -- Allowed values (application-enforced): running | validated | needs_review | failed | promoted
   status text not null default 'running',
   started_at timestamptz not null default now(),
   finished_at timestamptz,
@@ -58,8 +71,20 @@ create table if not exists public.moraware_report_runs (
   updated_at timestamptz not null default now()
 );
 
+comment on table public.moraware_report_runs is
+  'One report-feed import attempt. Failed or needs_review runs must not replace active prepared facts.';
+
+comment on column public.moraware_report_runs.schema_drift is
+  'Header/column contract drift payload when observed_header_hash != expected_header_hash or columns missing.';
+
 create index if not exists idx_moraware_report_runs_feed_started
   on public.moraware_report_runs(report_feed_id, started_at desc);
+
+create index if not exists idx_moraware_report_runs_org_started
+  on public.moraware_report_runs(organization_id, started_at desc);
+
+create index if not exists idx_moraware_report_runs_org_status
+  on public.moraware_report_runs(organization_id, status, started_at desc);
 
 create table if not exists public.moraware_report_column_profiles (
   id uuid primary key default gen_random_uuid(),
@@ -71,6 +96,9 @@ create table if not exists public.moraware_report_column_profiles (
   columns jsonb not null default '[]'::jsonb,
   created_at timestamptz not null default now()
 );
+
+comment on table public.moraware_report_column_profiles is
+  'Per-run CSV column profile: row/column counts, non-empty stats, sample values, header hash.';
 
 create index if not exists idx_moraware_report_column_profiles_run
   on public.moraware_report_column_profiles(report_run_id);
@@ -86,17 +114,24 @@ create table if not exists public.moraware_report_raw_rows (
   job_name text,
   account_id text,
   job_id text,
+  -- Allowed values (application-enforced): matched | needs_identity_review | ambiguous_identity
   identity_status text not null default 'needs_identity_review',
   identity_reason text,
   created_at timestamptz not null default now(),
   unique (report_run_id, row_number)
 );
 
+comment on table public.moraware_report_raw_rows is
+  'Raw CSV rows for a run, enriched with HTML-derived IDs when identity matching succeeds.';
+
 create index if not exists idx_moraware_report_raw_rows_run
   on public.moraware_report_raw_rows(report_run_id);
 
 create index if not exists idx_moraware_report_raw_rows_hash
   on public.moraware_report_raw_rows(organization_id, row_hash);
+
+create index if not exists idx_moraware_report_raw_rows_identity_status
+  on public.moraware_report_raw_rows(report_run_id, identity_status);
 
 create table if not exists public.moraware_report_identity_links (
   id uuid primary key default gen_random_uuid(),
@@ -113,6 +148,9 @@ create table if not exists public.moraware_report_identity_links (
   unique (report_run_id, match_key)
 );
 
+comment on table public.moraware_report_identity_links is
+  'HTML-derived account/job identity map for a run (normalized Account Name + Job Name key).';
+
 create index if not exists idx_moraware_report_identity_links_run
   on public.moraware_report_identity_links(report_run_id);
 
@@ -120,7 +158,7 @@ create table if not exists public.moraware_prepared_sales_worksheet_facts (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null default '00000000-0000-0000-0000-000000000000',
   report_feed_id uuid not null references public.moraware_report_feeds(id) on delete cascade,
-  report_run_id uuid not null references public.moraware_report_runs(id) on delete cascade,
+  report_run_id uuid not null references public.moraware_report_runs(id) on delete restrict,
   row_hash text not null,
   account_id text,
   account_name text,
@@ -139,16 +177,32 @@ create table if not exists public.moraware_prepared_sales_worksheet_facts (
   is_active boolean not null default true,
   promoted_at timestamptz,
   superseded_at timestamptz,
+  superseded_by uuid references public.moraware_prepared_sales_worksheet_facts(id) on delete set null,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  unique (organization_id, report_feed_id, row_hash, is_active)
+  updated_at timestamptz not null default now()
 );
+
+comment on table public.moraware_prepared_sales_worksheet_facts is
+  'Promoted dashboard-ready Sales Worksheet facts. Dashboards read is_active=true rows only.';
+
+comment on column public.moraware_prepared_sales_worksheet_facts.superseded_by is
+  'Points to the newer prepared-fact row that replaced this row during promotion.';
+
+-- One active prepared fact per org + feed + row_hash. Historical superseded rows remain (is_active=false).
+create unique index if not exists uq_moraware_prepared_sales_worksheet_facts_one_active
+  on public.moraware_prepared_sales_worksheet_facts(organization_id, report_feed_id, row_hash)
+  where is_active = true;
 
 create index if not exists idx_moraware_prepared_sales_worksheet_facts_active
   on public.moraware_prepared_sales_worksheet_facts(organization_id, report_feed_id, is_active);
 
+create index if not exists idx_moraware_prepared_sales_worksheet_facts_active_only
+  on public.moraware_prepared_sales_worksheet_facts(organization_id, report_feed_id)
+  where is_active = true;
+
 create index if not exists idx_moraware_prepared_sales_worksheet_facts_job
-  on public.moraware_prepared_sales_worksheet_facts(organization_id, job_id);
+  on public.moraware_prepared_sales_worksheet_facts(organization_id, job_id)
+  where job_id is not null;
 
 -- Seed / contract documentation (run after tables exist; replace organization_id before production use):
 --

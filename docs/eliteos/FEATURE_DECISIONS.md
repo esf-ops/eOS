@@ -499,3 +499,15 @@
 
 ---
 
+### 38. Moraware report-feed SQL apply-readiness corrections
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-05-30 |
+| **Decision** | Before manual Supabase apply, correct prepared-fact supersede semantics: replace the `(…, is_active)` table unique constraint with a **partial unique index** on active rows only; add **`superseded_by`** self-reference; use **`ON DELETE RESTRICT`** on prepared facts → report runs so promoted facts are not cascade-deleted with staging run cleanup. Document deferred RLS and manual apply steps. |
+| **Why** | The original unique constraint allowed only one inactive row per `row_hash` (blocking promotion history) and cascade delete on runs could wipe promoted facts. These fixes align with “supersede, don’t blindly delete” promotion semantics. |
+| **Impacted files/docs** | `backend-core/supabase/eliteos_moraware_report_feeds.sql`, `docs/eliteos/moraware-report-feeds.md` |
+| **Revisit trigger** | After first manual SQL apply in Supabase; before promotion job or dashboard reads. |
+
+---
+
