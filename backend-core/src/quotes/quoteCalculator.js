@@ -173,7 +173,9 @@ export function normalizeCustomLineItems(src) {
       unitPrice,
       customerFacing: Boolean(row.customerFacing ?? row.customer_facing ?? true),
       internalNote: row.internalNote != null ? String(row.internalNote) : row.internal_note != null ? String(row.internal_note) : "",
-      roomName: row.roomName != null ? String(row.roomName) : row.room_name != null ? String(row.room_name) : ""
+      roomName: row.roomName != null ? String(row.roomName) : row.room_name != null ? String(row.room_name) : "",
+      roomId: row.roomId != null ? String(row.roomId) : row.room_id != null ? String(row.room_id) : "",
+      lineKey: row.lineKey != null ? String(row.lineKey) : row.line_key != null ? String(row.line_key) : ""
     });
   }
   return out;
@@ -1031,7 +1033,9 @@ export async function calculateQuote(rawInput, pricingContext = {}) {
         line_total: sub,
         customerFacing: row.customerFacing,
         internalNote: row.internalNote,
-        roomName: row.roomName
+        roomName: row.roomName,
+        roomId: row.roomId,
+        lineKey: row.lineKey
       });
       customPassLines.push({
         line_type: "custom_line_item",

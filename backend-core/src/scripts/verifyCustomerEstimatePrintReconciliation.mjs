@@ -197,7 +197,7 @@ function buildSyntheticDisplayModel(fixture) {
   }
   for (const ln of fixture.customLines || []) {
     estimateSummaryRows.push({
-      key: `custom-${ln.name}`,
+      key: ln.lineKey || `custom-${ln.name}`,
       label: ln.name,
       displayAmount: roundCustomerDisplay(ln.lineTotal)
     });
@@ -473,6 +473,57 @@ assertEqual(
   assertEqual("generic two-area kitchen add-ons", kitchen.displayedAddOns, 570);
   const laundry = prepareDisplayRow(2190, [100]);
   assertEqual("generic two-area area sum", kitchen.displayedAreaTotal + laundry.displayedAreaTotal, 10100);
+}
+
+// 8. Duplicate preset fixture names — unique line keys must not collapse summary rows
+{
+  const m = buildSyntheticDisplayModel({
+    countertopExact: 5000,
+    backsplashExact: 3500,
+    addonsExact: 540,
+    customLines: [
+      { lineKey: "sink-a", name: "Custom Sink / Faucet / Fixture", lineTotal: 450 },
+      { lineKey: "sink-b", name: "Custom Sink / Faucet / Fixture", lineTotal: 560 }
+    ],
+    measuredRooms: [
+      {
+        name: "Kitchen",
+        extras: 440,
+        addons: [{ label: "Undermount sink cutout", total: 200 }],
+        details: ["Full-height backsplash electrical cutouts × 8 @ $30"]
+      },
+      {
+        name: "Laundry",
+        extras: 100,
+        addons: [{ label: "Vanity/bar/small sink cutout", total: 100 }],
+        details: []
+      }
+    ],
+    roomRows: [
+      {
+        isVanity: false,
+        roomTotalExact: 6200,
+        materialExact: 5760,
+        extrasExact: 440,
+        addons: [{ amountExact: 200 }, { amountExact: 240 }]
+      },
+      {
+        isVanity: false,
+        roomTotalExact: 2100,
+        materialExact: 2000,
+        extrasExact: 100,
+        addons: [{ amountExact: 100 }]
+      }
+    ]
+  });
+  const fixtureRows = m.estimateSummaryRows.filter((r) => r.key === "sink-a" || r.key === "sink-b");
+  assertEqual("duplicate-name fixtures both present", fixtureRows.length, 2);
+  assertEqual(
+    "duplicate-name fixture display sum",
+    fixtureRows.reduce((s, r) => s + r.displayAmount, 0),
+    1010
+  );
+  assertDisplayModelInvariants("duplicate-fixture-names", m);
 }
 
 console.log("verifyCustomerEstimatePrintReconciliation: ok");

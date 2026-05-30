@@ -57,15 +57,15 @@ function approx(a: number, b: number, eps = 0.02) {
   assert.ok(Math.abs(a - b) <= eps, `expected ${b}, got ${a}`);
 }
 
-// Customer print room breakdown uses round2 — must import from measurementEngine (bundled frontend).
+// Customer print uses pre-rounded display amounts from customerDisplay model.
 {
   const printSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/CustomerEstimatePrint.tsx"), "utf8");
   assert.match(
     printSrc,
-    /import\s*\{[^}]*\bround2\b[^}]*\}\s*from\s*["']@quote-lib\/measurementEngine["']/,
-    "CustomerEstimatePrint must import round2 from @quote-lib/measurementEngine"
+    /display\.estimateSummaryRows/,
+    "CustomerEstimatePrint must render estimate summary from customerDisplay model"
   );
-  approx(round2(1.005), 1.01);
+  assert.match(printSrc, /roundCustomerDisplay/, "CustomerEstimatePrint must use customer display rounding helpers");
 }
 
 // Manual sqft room add-ons + persistence
@@ -608,6 +608,107 @@ function approx(a: number, b: number, eps = 0.02) {
   assert.match(ieSrc, /Start new quote/, "must expose Start new quote control");
   assert.match(ieSrc, /pickLatestFamilyRevision/, "must resolve latest revision from family list");
   assert.match(ieSrc, /Older revision open/, "historical copy must explain restore path");
+}
+
+// Loughren regression: multiple customer-facing fixtures + optional comparison color labels
+{
+  const kitchen = createDefaultRoom("Group D");
+  kitchen.name = "Kitchen";
+  kitchen.calcMode = "Manual Sq Ft";
+  kitchen.direct = { counter: 57, splash: 38 };
+  kitchen.addons["qty-sink"] = 1;
+  const laundry = createDefaultRoom("Group D");
+  laundry.name = "Laundry";
+  laundry.calcMode = "Manual Sq Ft";
+  laundry.direct = { counter: 7, splash: 1 };
+  laundry.addons["qty-sink-small"] = 1;
+  const { rooms: measured } = calculateAllRoomDrafts([kitchen, laundry], "Kitchen", "direct", 0);
+  const bd = buildCustomerRoomAreaCostBreakdown({
+    roomDrafts: [kitchen, laundry],
+    measuredRooms: measured,
+    materialBasis: "direct",
+    customLines: [
+      {
+        lineKey: "laundry-sink",
+        name: 'Blanco Precis 30" UM Sink color 442531',
+        quantity: 1,
+        unitPrice: 560,
+        customerFacing: true,
+        roomName: "Laundry",
+        roomId: laundry.id,
+        category: "Plumbing fixture"
+      },
+      {
+        lineKey: "kitchen-sink",
+        name: "Blanco Diamond Super Single Silgranit UM Sink, Truffle 441765",
+        quantity: 1,
+        unitPrice: 450,
+        customerFacing: true,
+        roomName: "Kitchen",
+        roomId: kitchen.id,
+        category: "Plumbing fixture"
+      }
+    ]
+  });
+  const kitchenRow = bd.rooms.find((r) => r.roomName === "Kitchen");
+  const laundryRow = bd.rooms.find((r) => r.roomName === "Laundry");
+  assert.equal(kitchenRow?.customerCustomLines.length, 1);
+  assert.equal(laundryRow?.customerCustomLines.length, 1);
+  assert.equal(kitchenRow?.customerCustomLines[0]?.amountExact, 450);
+  assert.equal(laundryRow?.customerCustomLines[0]?.amountExact, 560);
+
+  const calcTwoFixtures = await calculateQuote(
+    {
+      quoteSource: "internal_quote",
+      engine: "legacy",
+      internalMaterialBasis: "direct",
+      materialGroup: "Group D",
+      areas: { countertopSqft: 64, backsplashSqft: 39 },
+      rooms: [],
+      addOns: {},
+      customLineItems: [
+        {
+          lineKey: "laundry-sink",
+          name: 'Blanco Precis 30" UM Sink color 442531',
+          category: "Plumbing fixture",
+          quantity: 1,
+          unitPrice: 560,
+          customerFacing: true,
+          roomName: "Laundry",
+          roomId: laundry.id
+        },
+        {
+          lineKey: "kitchen-sink",
+          name: "Blanco Diamond Super Single Silgranit UM Sink, Truffle 441765",
+          category: "Plumbing fixture",
+          quantity: 1,
+          unitPrice: 450,
+          customerFacing: true,
+          roomName: "Kitchen",
+          roomId: kitchen.id
+        }
+      ]
+    },
+    {}
+  );
+  const customItems = calcTwoFixtures.snapshot?.custom_line_items ?? [];
+  assert.equal(customItems.length, 2, "backend keeps both custom fixture lines");
+  assert.equal(
+    customItems.reduce((s: number, r: { line_total?: number }) => s + (Number(r.line_total) || 0), 0),
+    1010
+  );
+
+  const displaySrc = readFileSync(join(repoRoot, "app-internal-estimate/src/lib/customerEstimateDisplayModel.ts"), "utf8");
+  assert.match(displaySrc, /customerFixtureDetailLines/, "display model exposes customer fixture detail lines");
+  assert.match(displaySrc, /lineKey/, "display model uses stable line keys");
+
+  const printSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/CustomerEstimatePrint.tsx"), "utf8");
+  assert.match(printSrc, /comparisonColorLabel/, "customer print shows optional comparison color labels");
+  assert.match(printSrc, /customerFixtureDetailLines/, "customer print lists custom fixtures in add-ons section");
+
+  const ieSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/InternalEstimateApp.tsx"), "utf8");
+  assert.match(ieSrc, /comparisonGroupColorLabels/, "IE UI stores optional comparison color labels");
+  assert.match(ieSrc, /roomId/, "custom lines link to room draft id");
 }
 
 console.log("verify-internal-estimate-beta-fixes: OK");

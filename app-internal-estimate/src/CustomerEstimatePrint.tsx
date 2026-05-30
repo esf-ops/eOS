@@ -6,6 +6,7 @@ import type { MeasuredRoom } from "@quote-lib/quoteTypes";
 import type { CustomerEstimateDisplayModel } from "./lib/customerEstimateDisplayModel";
 
 export type CustomerLineItem = {
+  lineKey?: string;
   name: string;
   description: string;
   qty: number;
@@ -254,8 +255,11 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
                         </td>
                       </tr>
                     ) : null}
-                    {displayRow.customerCustomLines.map((c) => (
-                      <tr key={`${displayRow.roomId}-${c.name}`} className="cep-room-breakdown-detail-row">
+                    {displayRow.customerCustomLines.map((c, cIdx) => (
+                      <tr
+                        key={c.lineKey || `${displayRow.roomId}-custom-${cIdx}-${c.amountExact}`}
+                        className="cep-room-breakdown-detail-row"
+                      >
                         <td colSpan={4} className="cep-room-custom-line">
                           {c.name}
                         </td>
@@ -278,13 +282,22 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
         </section>
       ) : null}
 
-      {display.hasAddons ? (
+      {display.hasAddonOrFixtureDetail ? (
         <section className="cep-section cep-section-compact">
           <h2 className="cep-h2">Add-ons / fixtures</h2>
           <table className="cep-table cep-table-compact cep-table-amounts">
             <tbody>
-              {display.addonDetailLines.map((a) => (
-                <tr key={`${a.roomName}-${a.label}-${a.amountExact}`}>
+              {display.addonDetailLines.map((a, idx) => (
+                <tr key={`catalog-${idx}-${a.roomName}-${a.label}-${a.amountExact}`}>
+                  <td>
+                    {a.label}
+                    {a.roomName ? <span className="cep-addon-room"> · {a.roomName}</span> : null}
+                  </td>
+                  <td className="cep-amt">{formatDisplayDollars(a.displayAmount)}</td>
+                </tr>
+              ))}
+              {display.customerFixtureDetailLines.map((a, idx) => (
+                <tr key={`fixture-${idx}-${a.roomName}-${a.label}-${a.amountExact}`}>
                   <td>
                     {a.label}
                     {a.roomName ? <span className="cep-addon-room"> · {a.roomName}</span> : null}
@@ -297,7 +310,12 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
                   <strong>Subtotal</strong>
                 </td>
                 <td className="cep-amt">
-                  <strong>{formatDisplayDollars(display.summaryAddonsDisplay)}</strong>
+                  <strong>
+                    {formatDisplayDollars(
+                      display.summaryAddonsDisplay +
+                        display.customerFixtureDetailLines.reduce((s, l) => s + l.displayAmount, 0)
+                    )}
+                  </strong>
                 </td>
               </tr>
             </tbody>
@@ -385,7 +403,12 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
             <tbody>
               {props.comparisonRows.map((row) => (
                 <tr key={row.group}>
-                  <td>{row.group}</td>
+                  <td>
+                    {row.group}
+                    {row.comparisonColorLabel ? (
+                      <span className="cep-muted-inline"> · {row.comparisonColorLabel}</span>
+                    ) : null}
+                  </td>
                   <td className="cep-num">{formatDisplayDollars(row.materialCounter)}</td>
                   <td className="cep-num">{formatDisplayDollars(row.materialSplashFhb)}</td>
                   <td className="cep-num">{formatDisplayDollars(row.materialTotal)}</td>

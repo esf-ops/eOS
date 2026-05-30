@@ -1043,6 +1043,8 @@ export function buildSelectedMaterialBreakdown(
 
 export type InternalEstimateGroupComparisonRow = {
   group: string;
+  /** Optional alternate color/material label for customer PDF (e.g. "Aura Taj"). */
+  comparisonColorLabel?: string;
   ratePerSqft: number;
   materialCounter: number;
   materialSplashFhb: number;
@@ -1061,6 +1063,8 @@ export type CustomerRoomAreaCostAddon = {
 };
 
 export type CustomerRoomAreaCostCustomLine = {
+  /** Stable key for print lists — avoids collapsing duplicate fixture names. */
+  lineKey?: string;
   name: string;
   amountExact: number;
 };
@@ -1097,7 +1101,10 @@ export type CustomerRoomAreaCustomLineInput = {
   unitPrice: number;
   customerFacing: boolean;
   roomName: string;
+  /** Prefer room draft id over free-text room name when assigning fixtures. */
+  roomId?: string;
   category: string;
+  lineKey?: string;
 };
 
 function normalizeRoomMatchKey(name: string): string {
@@ -1118,10 +1125,21 @@ function customLineAmountFromInput(row: CustomerRoomAreaCustomLineInput): number
   return round2(q * p);
 }
 
-function findRoomIndexForCustomLine(roomKeys: Array<{ id: string; key: string }>, roomName: string): number {
+function findRoomIndexForCustomLine(
+  roomKeys: Array<{ id: string; key: string }>,
+  roomName: string,
+  roomId?: string
+): number {
+  const id = String(roomId ?? "").trim();
+  if (id) {
+    const byId = roomKeys.findIndex((r) => r.id === id);
+    if (byId >= 0) return byId;
+  }
   const target = normalizeRoomMatchKey(roomName);
   if (!target) return -1;
-  return roomKeys.findIndex((r) => r.key === target);
+  const exact = roomKeys.findIndex((r) => r.key === target);
+  if (exact >= 0) return exact;
+  return roomKeys.findIndex((r) => r.key.includes(target) || target.includes(r.key));
 }
 
 function distributeAmountByWeights(pool: number, weights: number[]): number[] {
@@ -1212,10 +1230,14 @@ export function buildCustomerRoomAreaCostBreakdown(params: {
   let unassignedCustomerCustomExact = 0;
   const internalUnassignedPool = { amount: 0 };
 
-  for (const line of customLines) {
+  for (let lineIdx = 0; lineIdx < customLines.length; lineIdx++) {
+    const line = customLines[lineIdx];
     const amt = customLineAmountFromInput(line);
     if (amt === 0) continue;
-    const idx = findRoomIndexForCustomLine(roomKeys, line.roomName);
+    const idx = findRoomIndexForCustomLine(roomKeys, line.roomName, line.roomId);
+    const lineKey =
+      String(line.lineKey ?? "").trim() ||
+      `custom-${lineIdx}-${String(line.name ?? "").trim()}-${amt}`;
     if (!line.customerFacing) {
       if (idx >= 0) {
         rows[idx].materialAmountExact = round2(rows[idx].materialAmountExact + amt);
@@ -1225,7 +1247,11 @@ export function buildCustomerRoomAreaCostBreakdown(params: {
       continue;
     }
     if (idx >= 0) {
-      rows[idx].customerCustomLines.push({ name: String(line.name).trim(), amountExact: amt });
+      rows[idx].customerCustomLines.push({
+        lineKey,
+        name: String(line.name).trim(),
+        amountExact: amt
+      });
     } else {
       unassignedCustomerCustomExact = round2(unassignedCustomerCustomExact + amt);
     }

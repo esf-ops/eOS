@@ -90,6 +90,8 @@ type CustomLineRow = {
   customerFacing: boolean;
   internalNote: string;
   roomName: string;
+  /** Links fixture to a room draft for breakdown + print (preferred over roomName). */
+  roomId: string;
 };
 
 const CUSTOM_LINE_PRESETS: Array<{
@@ -330,6 +332,9 @@ export default function InternalEstimateApp() {
   const [internalPricingMode, setInternalPricingMode] = useState<"direct" | "wholesale">("wholesale");
   const [customerDisplayGroups, setCustomerDisplayGroups] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(MATERIAL_GROUPS.map((g) => [g, false]))
+  );
+  const [comparisonGroupColorLabels, setComparisonGroupColorLabels] = useState<Record<string, string>>(() =>
+    Object.fromEntries(MATERIAL_GROUPS.map((g) => [g, ""]))
   );
   const [customLineRows, setCustomLineRows] = useState<CustomLineRow[]>([]);
   const [customLineUndo, setCustomLineUndo] = useState<CustomLineRow[] | null>(null);
@@ -618,6 +623,7 @@ export default function InternalEstimateApp() {
     const customPassthroughItems: Array<{ description: string; price: number; qty: number }> = [];
     const customLineItems = customLineRows
       .map((row) => ({
+        lineKey: row.id,
         name: row.name.trim(),
         description: row.description.trim(),
         category: row.category,
@@ -625,7 +631,8 @@ export default function InternalEstimateApp() {
         unitPrice: num(row.unitPrice),
         customerFacing: row.customerFacing,
         internalNote: row.internalNote.trim(),
-        roomName: row.roomName.trim()
+        roomName: row.roomName.trim(),
+        roomId: row.roomId.trim() || undefined
       }))
       .filter((row) => {
         if (!row.name || row.quantity <= 0) return false;
@@ -697,6 +704,12 @@ export default function InternalEstimateApp() {
       vanities: serializeVanitiesForApi(drafts, qualifyingSfFromRoomDrafts(drafts)),
       qualifyingKitchenCounterSf: qualifyingSfFromRoomDrafts(drafts),
       customerEstimateDisplayGroups: MATERIAL_GROUPS.filter((g) => customerDisplayGroups[g]),
+      customerEstimateComparisonColorLabels: Object.fromEntries(
+        MATERIAL_GROUPS.filter((g) => customerDisplayGroups[g] && comparisonGroupColorLabels[g]?.trim()).map((g) => [
+          g,
+          comparisonGroupColorLabels[g].trim()
+        ])
+      ),
       estimateRoomDrafts: serializeRoomDraftsForInternalUi(drafts),
       customerRoomAreaBreakdown: serializeCustomerRoomAreaBreakdown(
         buildCustomerRoomAreaCostBreakdown({
@@ -708,11 +721,13 @@ export default function InternalEstimateApp() {
           customLines: customLineRows
             .filter((r) => r.name.trim())
             .map((r) => ({
+              lineKey: r.id,
               name: r.name.trim(),
               quantity: num(r.qty) || 1,
               unitPrice: num(r.unitPrice),
               customerFacing: r.customerFacing,
               roomName: r.roomName.trim(),
+              roomId: r.roomId.trim() || undefined,
               category: r.category
             })),
           projectColorTbd: colorTbd
@@ -763,7 +778,8 @@ export default function InternalEstimateApp() {
     accountEmail,
     colorTbd,
     useTaxPercent,
-    customerDisplayGroups
+    customerDisplayGroups,
+    comparisonGroupColorLabels
   ]);
 
   const computeRevisionBaselineSig = useCallback((): string => {
@@ -777,6 +793,7 @@ export default function InternalEstimateApp() {
       internalMaterialBasis: p.internalMaterialBasis,
       materialGroup: p.materialGroup,
       customerEstimateDisplayGroups: p.customerEstimateDisplayGroups,
+      customerEstimateComparisonColorLabels: p.customerEstimateComparisonColorLabels,
       quoteDefaultMaterial: p.quoteDefaultMaterial,
       customerName: customerName.trim(),
       email: email.trim(),
@@ -1155,6 +1172,7 @@ export default function InternalEstimateApp() {
     setCustomLineRows([]);
     setQuoteDefaultCatalogId("");
     setCustomerDisplayGroups(Object.fromEntries(MATERIAL_GROUPS.map((g) => [g, false])));
+    setComparisonGroupColorLabels(Object.fromEntries(MATERIAL_GROUPS.map((g) => [g, ""])));
     const u = new URL(window.location.href);
     u.searchParams.delete("quoteId");
     window.history.replaceState({}, "", `${u.pathname}${u.search}${u.hash}`);
@@ -1471,8 +1489,14 @@ export default function InternalEstimateApp() {
   const serverRetailVerified = !usedFallback && apiPartner?.totals?.retail != null ? Number(apiPartner.totals.retail) : null;
 
   const customerEstimateComparisonRows = useMemo(
-    () => internalGroupComparison.filter((row) => customerDisplayGroups[row.group]),
-    [internalGroupComparison, customerDisplayGroups]
+    () =>
+      internalGroupComparison
+        .filter((row) => customerDisplayGroups[row.group])
+        .map((row) => ({
+          ...row,
+          comparisonColorLabel: comparisonGroupColorLabels[row.group]?.trim() || undefined
+        })),
+    [internalGroupComparison, customerDisplayGroups, comparisonGroupColorLabels]
   );
 
   const visibleCustomerLines = useMemo((): CustomerLineItem[] => {
@@ -1482,30 +1506,34 @@ export default function InternalEstimateApp() {
       const q = num(r.qty) || 1;
       const p = num(r.unitPrice);
       if (q <= 0) continue;
+      const linkedRoom = r.roomId ? roomDrafts.find((rd) => rd.id === r.roomId) : null;
+      const roomName = (linkedRoom?.name || r.roomName).trim();
       if (r.category === "Discount/Credit") {
         if (p >= 0) continue;
         out.push({
+          lineKey: r.id,
           name: r.name.trim(),
           description: r.description.trim(),
           qty: q,
           unitPrice: p,
           lineTotal: round2(q * p),
-          roomName: r.roomName.trim()
+          roomName
         });
         continue;
       }
       if (p === 0) continue;
       out.push({
+        lineKey: r.id,
         name: r.name.trim(),
         description: r.description.trim(),
         qty: q,
         unitPrice: p,
         lineTotal: round2(q * p),
-        roomName: r.roomName.trim()
+        roomName
       });
     }
     return out;
-  }, [customLineRows]);
+  }, [customLineRows, roomDrafts]);
 
   const primaryColorLabel = useMemo(() => {
     if (colorTbd) return "";
@@ -1545,15 +1573,20 @@ export default function InternalEstimateApp() {
     () =>
       customLineRows
         .filter((r) => r.name.trim())
-        .map((r) => ({
-          name: r.name.trim(),
-          quantity: num(r.qty) || 1,
-          unitPrice: num(r.unitPrice),
-          customerFacing: r.customerFacing,
-          roomName: r.roomName.trim(),
-          category: r.category
-        })),
-    [customLineRows]
+        .map((r) => {
+          const linkedRoom = r.roomId ? roomDrafts.find((rd) => rd.id === r.roomId) : null;
+          return {
+            lineKey: r.id,
+            name: r.name.trim(),
+            quantity: num(r.qty) || 1,
+            unitPrice: num(r.unitPrice),
+            customerFacing: r.customerFacing,
+            roomName: (linkedRoom?.name || r.roomName).trim(),
+            roomId: r.roomId.trim() || undefined,
+            category: r.category
+          };
+        }),
+    [customLineRows, roomDrafts]
   );
 
   const liveRoomAreaBreakdown = useMemo(
@@ -1609,6 +1642,7 @@ export default function InternalEstimateApp() {
         selectedBreakdown: selectedMaterialBreakdown,
         measuredRooms: liveEstimate.measuredRooms,
         visibleCustomerLines: visibleCustomerLines.map((ln) => ({
+          lineKey: ln.lineKey,
           name: ln.name,
           description: ln.description,
           qty: ln.qty,
@@ -1811,7 +1845,7 @@ export default function InternalEstimateApp() {
                 ? (c as (typeof CUSTOM_LINE_CATEGORIES)[number])
                 : "Other";
               return {
-                id: newInternalRowId(),
+                id: String(row.lineKey ?? row.line_key ?? newInternalRowId()),
                 name: String(row.name ?? ""),
                 description: String(row.description ?? ""),
                 category: cat,
@@ -1819,7 +1853,8 @@ export default function InternalEstimateApp() {
                 unitPrice: String(row.unitPrice ?? row.unit_price ?? 0),
                 customerFacing: Boolean(row.customerFacing ?? true),
                 internalNote: String(row.internalNote ?? ""),
-                roomName: String(row.roomName ?? "")
+                roomName: String(row.roomName ?? row.room_name ?? ""),
+                roomId: String(row.roomId ?? row.room_id ?? "")
               };
             })
           );
@@ -1829,6 +1864,19 @@ export default function InternalEstimateApp() {
           setCustomerDisplayGroups(() => {
             const next: Record<string, boolean> = {};
             for (const g of MATERIAL_GROUPS) next[g] = cedg.includes(g);
+            return next;
+          });
+        }
+        const cccl =
+          (iu.customer_estimate_comparison_color_labels as Record<string, unknown> | undefined) ??
+          (iu.customerEstimateComparisonColorLabels as Record<string, unknown> | undefined);
+        if (cccl && typeof cccl === "object") {
+          setComparisonGroupColorLabels((prev) => {
+            const next = { ...prev };
+            for (const g of MATERIAL_GROUPS) {
+              const v = cccl[g];
+              if (v != null && String(v).trim()) next[g] = String(v).trim();
+            }
             return next;
           });
         }
@@ -2649,14 +2697,28 @@ export default function InternalEstimateApp() {
             </p>
             <div className="ie-group-compare-grid" role="group" aria-label="Customer-facing price group comparisons">
               {MATERIAL_GROUPS.map((g) => (
-                <label key={g} className="check ie-group-compare-check">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(customerDisplayGroups[g])}
-                    onChange={(e) => setCustomerDisplayGroups((prev) => ({ ...prev, [g]: e.target.checked }))}
-                  />
-                  <span className="ie-group-compare-label">{g}</span>
-                </label>
+                <div key={g} className="ie-group-compare-row">
+                  <label className="check ie-group-compare-check">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(customerDisplayGroups[g])}
+                      onChange={(e) => setCustomerDisplayGroups((prev) => ({ ...prev, [g]: e.target.checked }))}
+                    />
+                    <span className="ie-group-compare-label">{g}</span>
+                  </label>
+                  {customerDisplayGroups[g] ? (
+                    <label className="ie-group-compare-color">
+                      <span className="muted small">Optional color label</span>
+                      <input
+                        value={comparisonGroupColorLabels[g] ?? ""}
+                        onChange={(e) =>
+                          setComparisonGroupColorLabels((prev) => ({ ...prev, [g]: e.target.value }))
+                        }
+                        placeholder='e.g. Aura Taj'
+                      />
+                    </label>
+                  ) : null}
+                </div>
               ))}
             </div>
             {comparisonScopeMeta.mixedGroupNote ? (
@@ -2685,7 +2747,8 @@ export default function InternalEstimateApp() {
                         unitPrice: p.unitPrice,
                         customerFacing: p.customerFacing,
                         internalNote: "",
-                        roomName: ""
+                        roomName: "",
+                        roomId: ""
                       }
                     ])
                   }
@@ -2748,11 +2811,36 @@ export default function InternalEstimateApp() {
                   </label>
                   <label>
                     Room (optional)
+                    <select
+                      value={row.roomId}
+                      onChange={(e) => {
+                        const roomId = e.target.value;
+                        const linked = roomDrafts.find((rd) => rd.id === roomId);
+                        setCustomLineRows((prev) =>
+                          prev.map((x) =>
+                            x.id === row.id
+                              ? { ...x, roomId, roomName: linked?.name?.trim() || x.roomName }
+                              : x
+                          )
+                        );
+                      }}
+                    >
+                      <option value="">Unassigned / other</option>
+                      {roomDrafts.map((rd) => (
+                        <option key={rd.id} value={rd.id}>
+                          {rd.name?.trim() || "Room"}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Room label override
                     <input
                       value={row.roomName}
                       onChange={(e) =>
                         setCustomLineRows((prev) => prev.map((x) => (x.id === row.id ? { ...x, roomName: e.target.value } : x)))
                       }
+                      placeholder="Optional if not using room list"
                     />
                   </label>
                   <label className="check">
@@ -2817,7 +2905,8 @@ export default function InternalEstimateApp() {
                       unitPrice: "0",
                       customerFacing: true,
                       internalNote: "",
-                      roomName: ""
+                      roomName: "",
+                      roomId: ""
                     }
                   ])
                 }
@@ -2993,7 +3082,10 @@ export default function InternalEstimateApp() {
                     <tbody>
                       {customerEstimateComparisonRows.map((row) => (
                         <tr key={row.group}>
-                          <td>{row.group}</td>
+                          <td>
+                            {row.group}
+                            {row.comparisonColorLabel ? ` · ${row.comparisonColorLabel}` : ""}
+                          </td>
                           <td>{row.ratePerSqft.toFixed(2)}</td>
                           <td>${row.materialCounter.toFixed(2)}</td>
                           <td>${row.materialSplashFhb.toFixed(2)}</td>

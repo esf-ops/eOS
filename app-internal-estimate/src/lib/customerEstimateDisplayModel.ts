@@ -12,6 +12,8 @@ import {
 } from "./customerPrintDisplayRows";
 
 export type CustomerEstimateDisplayLineItem = {
+  /** Stable id for summary rows (custom line row id). */
+  lineKey?: string;
   name: string;
   description?: string;
   qty?: number;
@@ -185,20 +187,40 @@ function buildEstimateSummaryRows(params: {
   if (params.hasAddons) {
     rows.push({ key: "addons", label: "Add-ons / fixtures", displayAmount: params.summaryAddonsDisplay });
   }
-  for (const ln of params.visibleCustomerLines) {
+  params.visibleCustomerLines.forEach((ln, index) => {
     const displayAmount = roundCustomerDisplay(Number(ln.lineTotal) || 0);
-    if (displayAmount <= 0) continue;
+    if (displayAmount <= 0) return;
     let label = ln.name.trim() || "Custom item";
     if (ln.description?.trim()) label += ` — ${ln.description.trim()}`;
     if (ln.roomName?.trim()) label += ` (${ln.roomName.trim()})`;
     if (ln.qty != null && ln.qty !== 1) label += ` × ${ln.qty}`;
+    const lineKey = String(ln.lineKey ?? "").trim() || `custom-line-${index}`;
     rows.push({
-      key: `custom-${label}-${displayAmount}`,
+      key: lineKey,
       label,
       displayAmount
     });
-  }
+  });
   return rows;
+}
+
+function buildCustomerFixtureDetailLines(
+  visibleCustomerLines: CustomerEstimateDisplayLineItem[]
+): CustomerAddonDetailLine[] {
+  return visibleCustomerLines
+    .map((ln, index) => {
+      const amountExact = round2(Number(ln.lineTotal) || 0);
+      if (amountExact <= 0) return null;
+      let label = ln.name.trim() || "Custom fixture";
+      if (ln.description?.trim()) label += ` — ${ln.description.trim()}`;
+      return {
+        label,
+        roomName: ln.roomName?.trim() || "",
+        amountExact,
+        displayAmount: amountExact
+      };
+    })
+    .filter((ln): ln is CustomerAddonDetailLine => ln != null);
 }
 
 function buildRoomAreaPrintRows(params: {
@@ -274,8 +296,10 @@ export type CustomerEstimateDisplayModel = {
   finalRounded: number;
   /** Per-room extras exact (same source as Live Quote Panel add-ons row). */
   roomExtrasExactByRoomId: Record<string, number>;
-  /** Add-ons / Fixtures detail rows — exact amounts sum to addonsExact. */
+  /** Add-ons / Fixtures detail rows — catalog room extras; exact amounts sum to addonsExact. */
   addonDetailLines: CustomerAddonDetailLine[];
+  /** Customer-facing structured custom fixtures (sinks, etc.) — listed in Add-ons / Fixtures detail. */
+  customerFixtureDetailLines: CustomerAddonDetailLine[];
   /** Estimate Summary rows — displayAmount values sum to finalRounded. */
   estimateSummaryRows: CustomerEstimateSummaryRow[];
   /** Room / Area Cost Breakdown — area totals sum to finalRounded (plus unassigned row when present). */
@@ -284,6 +308,8 @@ export type CustomerEstimateDisplayModel = {
   unassignedExact: number;
   showRoomBreakdown: boolean;
   hasAddons: boolean;
+  /** True when catalog add-ons or customer fixture lines appear on the customer PDF. */
+  hasAddonOrFixtureDetail: boolean;
   /** Quoted Material Breakdown — scope / SF only (no customer dollar amounts). */
   materialScopeGroups: CustomerMaterialScopeGroup[];
   vanityScopeNotes: CustomerVanityScopeNote[];
@@ -332,6 +358,7 @@ export function buildCustomerEstimateDisplayModel(
   }
 
   const addonDetailLines = buildCustomerAddonDetailLines(params.measuredRooms);
+  const customerFixtureDetailLines = buildCustomerFixtureDetailLines(params.visibleCustomerLines);
   const estimateSummaryRows = buildEstimateSummaryRows({
     summaryCounterDisplay,
     summaryBacksplashDisplay,
@@ -357,12 +384,14 @@ export function buildCustomerEstimateDisplayModel(
     finalRounded,
     roomExtrasExactByRoomId,
     addonDetailLines,
+    customerFixtureDetailLines,
     estimateSummaryRows,
     roomAreaPrintRows: roomArea.rows,
     unassignedDisplayTotal: roomArea.unassignedDisplayTotal,
     unassignedExact: roomArea.unassignedExact,
     showRoomBreakdown: roomArea.showRoomBreakdown,
     hasAddons,
+    hasAddonOrFixtureDetail: hasAddons || customerFixtureDetailLines.length > 0,
     materialScopeGroups: buildMaterialScopeGroups(params.selectedBreakdown),
     vanityScopeNotes: buildVanityScopeNotes(params.measuredRooms)
   };
