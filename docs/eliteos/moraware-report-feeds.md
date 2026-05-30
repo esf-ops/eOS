@@ -13,6 +13,28 @@ The Moraware API/SDK sync captures structured operational data into Brain raw + 
 
 Combining CSV rows + HTML-derived IDs gives faster, trustable prepared facts for Sales Worksheet and future operational heads without relying on a fragile one-off scrape script.
 
+## Current validated status (2026-05-30)
+
+| Milestone | Status |
+|-----------|--------|
+| SQL schema | **Applied manually** in Supabase (`eliteos_moraware_report_feeds.sql`); partial unique index `uq_moraware_prepared_sales_worksheet_facts_one_active` in place |
+| Parse/enrich POC | Local-file dry-run + unit tests; sanitized fixtures only |
+| Staging persistence | **Smoke validated** via `persistReportFeedLocal.js` with `SUPABASE_WRITE_ENABLED=1` (runs, column profiles, raw rows, identity links) |
+| Prepared-fact promotion | **Smoke validated on test org only** (`00000000-0000-0000-0000-000000000001`); requires `MORAWARE_REPORT_FEED_PROMOTE=1` + validated run |
+| Live Moraware download | **Not built** — no governed fetch, no browser scrape, no cookies/SID in repo |
+| Dashboard reads | **Not wired** — prepared facts exist for test org only |
+| Real Elite org prepared facts | **Intentionally not promoted** — staging run validated; promotion deferred |
+
+### Key run IDs (Supabase)
+
+| Org | `organization_id` | Feed id | Run id | Notes |
+|-----|-------------------|---------|--------|-------|
+| Real Elite | `89180433-9fab-4024-bec9-a14d870bd0a8` | `e8c0433a-c243-4cc5-b8bb-7842ec64a0e7` | `afc7b49d-af7a-4fec-85a0-0fdb11046ea3` | `validated`, 3 rows, 3 matched; **no** prepared facts written |
+| Test org | `00000000-0000-0000-0000-000000000001` | `a053cb9a-e362-4c5a-8f47-895314cec85a` | `a660473b-b200-4d14-ba0b-5b713c475c9c` | Promotion smoke 1: 3 inserted, 0 superseded |
+| Test org | (same) | (same) | `6d54c835-058f-47f8-a831-db8efca86a5b` | Promotion smoke 2: 3 inserted, 3 superseded + `superseded_by` backfill |
+
+**Next safe slice:** governed download **planning/design** (credentials vault, org-scoped Moraware Admin mappings, raw file storage policy, fetch contract) — **not** dashboard reads or live automation until that design is approved.
+
 ## Current feed: Sales Worksheet Facts (view 219)
 
 | Field | Value |
@@ -39,7 +61,7 @@ Expected business columns (integration contract):
 
 ## Architecture (Brain tables)
 
-Draft SQL (not auto-applied): [`backend-core/supabase/eliteos_moraware_report_feeds.sql`](../../backend-core/supabase/eliteos_moraware_report_feeds.sql)
+SQL source (applied manually in Supabase 2026-05-30): [`backend-core/supabase/eliteos_moraware_report_feeds.sql`](../../backend-core/supabase/eliteos_moraware_report_feeds.sql)
 
 | Table | Purpose |
 |-------|---------|
@@ -115,6 +137,35 @@ npm run eos:test:moraware-report-feed
 ```
 
 Fixtures are sanitized fake account/job names — no real customer data, cookies, or session headers.
+
+## Staging persistence + promotion (local files → Supabase)
+
+Script: [`persistReportFeedLocal.js`](../../backend-core/src/scripts/moraware/persistReportFeedLocal.js) — `npm run eos:moraware:persist-report-feed-local`
+
+- Reads **local** CSV + HTML only (no Moraware network).
+- **Staging** writes (`moraware_report_runs`, column profiles, raw rows, identity links) require `SUPABASE_WRITE_ENABLED=1` plus service role env.
+- **Promotion** to `moraware_prepared_sales_worksheet_facts` additionally requires `MORAWARE_REPORT_FEED_PROMOTE=1` and a `validated` run with no schema drift, ambiguous identities, or duplicate row hashes.
+- Failed or `needs_review` runs do **not** replace latest active prepared facts.
+
+```bash
+export MORAWARE_REPORT_CSV_FILE=backend-core/test/fixtures/moraware-report-feeds/sales-worksheet-facts.sample.csv
+export MORAWARE_REPORT_HTML_FILE=backend-core/test/fixtures/moraware-report-feeds/sales-worksheet-facts.sample.html
+export MORAWARE_REPORT_VIEW_ID=219
+export MORAWARE_REPORT_TYPE=sales_worksheet_facts
+export MORAWARE_DEFAULT_ORGANIZATION_ID=00000000-0000-0000-0000-000000000001
+export SUPABASE_WRITE_ENABLED=1
+# Optional: MORAWARE_REPORT_FEED_PROMOTE=1
+npm run eos:moraware:persist-report-feed-local
+```
+
+Tests:
+
+```bash
+npm run eos:test:moraware-report-feed
+npm run eos:test:moraware-report-feed-persistence
+npm run eos:test:moraware-report-feed-promotion
+npm run eos:test:moraware-report-feed-promote-persistence
+```
 
 ## Production promotion pattern (future)
 
