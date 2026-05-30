@@ -487,3 +487,15 @@
 
 ---
 
+### 37. Moraware Report Feeds as additive prepared-facts ingestion lane
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-05-27 |
+| **Decision** | Moraware saved report CSV + rendered HTML identity extraction may be used as an **additive ingestion lane beside the existing Moraware API sync**. Report feeds are treated as versioned integration contracts, imported through raw runs, validated, enriched with IDs, and promoted to prepared facts **only after success**. Failed imports must **not** replace the latest successful prepared facts. |
+| **Why** | The API/SDK sync gives structured operational data, but saved reports expose business-friendly report columns and HTML links expose stable job/account IDs. Combining both gives faster trustable facts for Sales Worksheet and future operational heads without forcing a fragile one-off scrape. |
+| **Impacted files/docs** | `backend-core/supabase/eliteos_moraware_report_feeds.sql`, `backend-core/src/moraware/reportFeeds/*`, `backend-core/src/scripts/moraware/importReportFeedPoc.js`, `backend-core/test/fixtures/moraware-report-feeds/*`, `docs/eliteos/moraware-report-feeds.md`, `docs/eliteos/SYSTEM_BLUEPRINT.md`, `package.json` |
+| **Revisit trigger** | Before live Moraware download automation, before dashboards read prepared report facts, before external tenant/SaaS Moraware reuse, or before enabling writes to Supabase from report-feed imports. |
+
+---
+

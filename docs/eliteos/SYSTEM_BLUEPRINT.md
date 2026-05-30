@@ -183,6 +183,8 @@ Implementation references: `backend-core/src/quotes/quoteCalculator.js`, `backen
 
 **Current visibility:** `GET /api/moraware-sync/status` exposes latest run, last success, row counts, recent errors, data quality counts, current scope, and known gaps behind Brain Health auth/head access.
 
+**Report feeds (additive lane):** Saved Moraware report CSV exports + rendered HTML identity links (`/sys/job/<id>`, `/sys/account/<id>`) may be imported as org-scoped prepared facts **beside** the API sync — not as a replacement. See [`moraware-report-feeds.md`](./moraware-report-feeds.md) and draft SQL `backend-core/supabase/eliteos_moraware_report_feeds.sql`. Local-file POC only until live download automation is explicitly approved.
+
 **Future mapping domains (org-scoped):**
 
 - Statuses, activity types, resources/machines, custom fields  
