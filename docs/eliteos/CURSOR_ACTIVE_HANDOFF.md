@@ -65,7 +65,7 @@ Code: `backend-core/src/moraware/reportFeeds/`, scripts under `backend-core/src/
 **Phase B (next implementation slice):**
 
 1. Inspect existing org-scoped integration config patterns (read-only).
-2. Verify Moraware login mechanics manually / human-reviewed — can server-side HTTP reach view 219 CSV + HTML?
+2. Verify Moraware login mechanics manually — use [`moraware-login-mechanics-checklist.md`](./moraware-login-mechanics-checklist.md) (browser/network only; no fetch code yet).
 3. If feasible: implement `fetchReportFeedArtifacts` (network-only) → existing `processReportFeedLocal` → `persistReportFeedRun` path.
 4. If not feasible: document findings; do **not** add headless browser without separate threat-model approval.
 
