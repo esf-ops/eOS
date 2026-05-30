@@ -41,6 +41,7 @@
     "eos:test:moraware-report-feed": "node backend-core/src/moraware/reportFeeds/reportFeedParser.test.mjs",
     "eos:test:moraware-report-feed-promotion": "node backend-core/src/moraware/reportFeeds/promoteSalesWorksheetFacts.test.mjs",
     "eos:test:moraware-report-feed-persistence": "node backend-core/src/moraware/reportFeeds/reportFeedPersistence.test.mjs",
+    "eos:test:moraware-report-feed-promote-persistence": "node backend-core/src/moraware/reportFeeds/reportFeedPromotePersistence.test.mjs",
     "eos:moraware:persist-report-feed-local": "node backend-core/src/scripts/moraware/persistReportFeedLocal.js",
     "eos:probe:moraware-assignee-xml": "node backend-core/src/scripts/probeMorawareAssigneeXml.js",
     "eos:analyze:moraware-sdk-activity": "node backend-core/src/scripts/analyzeMorawareSdkActivityMethods.js",

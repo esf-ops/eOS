@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 /**
- * Moraware Report Feed — local-file staging persistence.
+ * Moraware Report Feed — local-file staging persistence + optional promotion.
  *
- * Reads CSV + HTML files from disk, runs processReportFeedLocal, and persists
- * staging data into Supabase report-feed tables.
+ * Reads CSV + HTML files from disk, runs processReportFeedLocal, persists
+ * staging data, and optionally promotes validated facts to prepared-facts table.
  *
- * Does NOT promote prepared facts.
- * Does NOT write to moraware_prepared_sales_worksheet_facts.
+ * Default behavior: staging only (no promotion).
+ * Set MORAWARE_REPORT_FEED_PROMOTE=1 to also promote after validated staging.
+ *
  * Does NOT download Moraware exports or scrape live Moraware.
  *
  * Required env vars:
@@ -21,6 +22,7 @@
  *
  * Optional:
  *   MORAWARE_REPORT_EXPECTED_COLUMN_HASH (if not set, loaded from feed contract)
+ *   MORAWARE_REPORT_FEED_PROMOTE=1       (enable prepared-fact promotion after validated staging)
  */
 import "dotenv/config";
 
@@ -39,6 +41,7 @@ import {
   loadReportFeedContract,
   persistReportFeedRun
 } from "../../moraware/reportFeeds/reportFeedPersistence.js";
+import { promoteReportFeedFacts } from "../../moraware/reportFeeds/promoteSalesWorksheetFacts.js";
 import { createWriteCapableClient } from "../../moraware/reportFeeds/reportFeedDbClient.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -60,6 +63,7 @@ async function main() {
   const reportType = env("MORAWARE_REPORT_TYPE", SALES_WORKSHEET_FACTS_REPORT_TYPE);
   const morawareViewId = Number(env("MORAWARE_REPORT_VIEW_ID", String(SALES_WORKSHEET_FACTS_VIEW_ID)));
   const organizationId = requiredEnv("MORAWARE_DEFAULT_ORGANIZATION_ID");
+  const promoteFlag = env("MORAWARE_REPORT_FEED_PROMOTE") === "1";
 
   const csvPath = path.isAbsolute(csvFile) ? csvFile : path.join(repoRoot, csvFile);
   const htmlPath = path.isAbsolute(htmlFile) ? htmlFile : path.join(repoRoot, htmlFile);
@@ -69,6 +73,7 @@ async function main() {
   console.log(`  HTML: ${htmlPath}`);
   console.log(`  Report type: ${reportType}  View: ${morawareViewId}`);
   console.log(`  Org:  ${organizationId}`);
+  console.log(`  Promotion requested: ${promoteFlag ? "YES (MORAWARE_REPORT_FEED_PROMOTE=1)" : "no"}`);
 
   // Load CSV + HTML (no Moraware network)
   const [csvText, htmlText] = await Promise.all([
@@ -142,9 +147,34 @@ async function main() {
   });
 
   console.log("\nStaging complete.");
-  console.log(`  Run id:    ${runId}`);
-  console.log(`  Status:    ${status}`);
-  console.log("No prepared facts were written. To promote, run the future promote step.");
+  console.log(`  Run id:      ${runId}`);
+  console.log(`  Status:      ${status}`);
+
+  // Optional promotion (only when MORAWARE_REPORT_FEED_PROMOTE=1)
+  if (!promoteFlag) {
+    console.log("  Promotion:   skipped (set MORAWARE_REPORT_FEED_PROMOTE=1 to promote)");
+    return;
+  }
+
+  console.log("\nAttempting promotion to moraware_prepared_sales_worksheet_facts...");
+  const promoteResult = await promoteReportFeedFacts(db, {
+    feed,
+    runId,
+    processResult,
+    promoteFlag
+  });
+
+  if (promoteResult.skipped) {
+    console.log(`  Promotion:   SKIPPED — ${promoteResult.reason}`);
+    if (promoteResult.details) {
+      console.log(`  Details:     ${JSON.stringify(promoteResult.details)}`);
+    }
+  } else {
+    console.log(`  Promotion:   succeeded`);
+    console.log(`  Inserted:    ${promoteResult.insertCount} prepared fact(s)`);
+    console.log(`  Superseded:  ${promoteResult.deactivateCount} old fact(s) deactivated`);
+    console.log(`  Backfilled:  ${promoteResult.backfillCount} superseded_by link(s)`);
+  }
 }
 
 main().catch((err) => {
