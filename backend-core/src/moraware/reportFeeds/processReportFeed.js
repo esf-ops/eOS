@@ -92,7 +92,7 @@ export { parseCsvReportRows } from "./parseCsv.js";
 export { profileReportColumns, validateHeaderContract } from "./profileColumns.js";
 export { parseReportHtmlIdentityRows } from "./parseReportHtml.js";
 export { buildIdentityMapFromHtmlRows } from "./buildIdentityMap.js";
-export { enrichReportRowsWithIdentity } from "./enrichReportRows.js";
+export { enrichReportRowsWithIdentity, buildExtraDiscriminators } from "./enrichReportRows.js";
 export { computeHeaderHash, computeReportRowHash } from "./hashUtils.js";
 export { makeIdentityMatchKey, normalizeReportName } from "./textNormalize.js";
 export {

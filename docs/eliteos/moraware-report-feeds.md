@@ -24,6 +24,7 @@ Combining CSV rows + HTML-derived IDs gives faster, trustable prepared facts for
 | Matched-only promotion (persisted run) | **Validated** — run `8f5e74d1`: 6,957 prepared facts active; 29 ambiguous excluded |
 | View 220 contract (Sales Worksheet History Facts) | **Contract built** — 34-column contract, hash `ca05eadcaeea…`, fixture, parser tests; Supabase feed INSERT ready to run manually (see [View 220 section](#view-220-sales-worksheet-history-facts)) |
 | Name-only promotion (view 220) | **Built** — `--allow-name-only` flag; permitted only for `sales_worksheet_history_facts`; promotes matched + `needs_identity_review` rows; ambiguous always excluded; run status stays `needs_review` |
+| View 220 row_hash collision fix | **Fixed** — `buildExtraDiscriminators` folds all 34 column values into the hash for `sales_worksheet_history_facts` only; view 219 hashes unchanged; 4 new regression tests pass; re-stage run `655eed33` from same CSV to get corrected hashes before promoting |
 | Live Moraware download | **Not built** — no governed fetch, no browser scrape, no cookies/SID in repo |
 | Dashboard reads | **Not wired** — prepared facts exist in Supabase but no UI reads them yet |
 
@@ -627,7 +628,8 @@ Treat each saved Moraware view as a **versioned integration contract** with its 
 - **Dashboard queries MUST filter by `report_feed_id`.** Without this filter, view 219 and view 220 rows are double-counted (same worksheet lines appear in both views with different date scopes).
 - **All existing pipeline modules reused.** Parsing, staging, API mirror identity enrichment, ambiguity review, and matched-only promotion all work without modification.
 - **`Job Status` absent.** View 220 does not include a Job Status column. The `job_status` field in promoted prepared facts will be `null` for view 220 rows. This is safe — the mapper uses `enrichedRow.jobStatus || null` and the enrichment layer defaults missing columns to `""`.
-- **Row hash isolation.** `reportType` is a component of `computeReportRowHash`. View 219 rows (`sales_worksheet_facts`) and view 220 rows (`sales_worksheet_history_facts`) for the same worksheet line will always produce **different** row hashes, preventing collision in the partial unique index.
+- **Row hash isolation.** `reportType` is a component of `computeReportRowHash`. View 219 rows (`sales_worksheet_facts`) and view 220 rows (`sales_worksheet_history_facts`) for the same worksheet line always produce **different** row hashes, preventing collision in the partial unique index.
+- **Full-row hash for view 220 (collision fix applied).** Real live exports showed 12 row_hash collisions in view 220 (rows identical in the 10 base fields—account, job, date, form, room, color, sqft—but differing in detail columns like Edge, Sink Type, etc.). The fix uses a two-tier hash: (1) base hash from the 10 standard fields (identical to view 219 path), (2) extra discriminators folded in via `buildExtraDiscriminators`—all 34 column values sorted by column name, appended only for `sales_worksheet_history_facts`. View 219 never provides `extraDiscriminators`, so its hashes are **unchanged** (backward-compatible). See Feature Decision 47.
 - **`Account Status`, sink/faucet/stove/shop/worksite columns** → `raw_row` only in v1. No new typed prepared-fact columns required; no DB migration needed.
 
 ### 34-column contract

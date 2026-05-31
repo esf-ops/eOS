@@ -1,6 +1,31 @@
 import { computeReportRowHash } from "./hashUtils.js";
 import { normalizeSpaces } from "./parseCsv.js";
 import { makeIdentityMatchKey } from "./textNormalize.js";
+import { SALES_WORKSHEET_HISTORY_FACTS_REPORT_TYPE } from "./constants.js";
+
+/**
+ * Build extra hash discriminators for report types that need full-row coverage.
+ * Returns `null` for view-219 (sales_worksheet_facts) and all other types —
+ * preserving their existing hash values exactly (backward-compatible).
+ *
+ * For sales_worksheet_history_facts (view 220), returns all raw column values
+ * sorted by column name so that any difference in any of the 34 columns produces
+ * a different row_hash, eliminating collisions caused by rows that share all base
+ * fields (account, job, date, form, room, color, sqft) but differ in detail fields
+ * (Edge, Thickness, Sink Type, Faucet Type, etc.).
+ *
+ * @param {object} row        - Raw CSV row object (column name → string value)
+ * @param {string} reportType
+ * @returns {string[]|null}
+ */
+export function buildExtraDiscriminators(row, reportType) {
+  if (reportType !== SALES_WORKSHEET_HISTORY_FACTS_REPORT_TYPE) return null;
+  if (!row || typeof row !== "object") return null;
+  // Sort by column name for deterministic order regardless of CSV header sequence.
+  return Object.keys(row)
+    .sort()
+    .map((k) => normalizeSpaces(String(row[k] ?? "")));
+}
 
 export const IDENTITY_STATUS = {
   MATCHED: "matched",
@@ -89,6 +114,7 @@ export function enrichReportRowsWithIdentity(params) {
     const lookup = lookupIdentityMatches(key, identityMap, duplicateKeys);
     const match = lookup.matches[0] ?? null;
 
+    const extraDiscriminators = buildExtraDiscriminators(row, reportType);
     const rowHash = computeReportRowHash({
       organizationId,
       reportType,
@@ -100,7 +126,8 @@ export function enrichReportRowsWithIdentity(params) {
       room,
       color,
       totalWorksheetSqft,
-      row
+      row,
+      extraDiscriminators
     });
 
     let identityStatus = lookup.status;

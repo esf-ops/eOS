@@ -571,6 +571,18 @@
 
 ---
 
+### 47. View 220 row_hash collision fix — two-tier hash with full-row extra discriminators
+
+| Field | Value |
+|-------|-------|
+| **Date** | 2026-05-31 |
+| **Decision** | After staging real view 220 data (run `655eed33`, 22,899 rows), 12 hash collision groups were detected: rows with identical values in the 10 base hash fields (account, job, date, form, room, color, sqft) but differing in detail columns (Edge, Thickness, Sink Type, Faucet Type, etc.). The fix introduces a **two-tier hash** for `sales_worksheet_history_facts`: (1) **Base hash** — unchanged, computed from the same 10 fields used by view 219. (2) **Extra discriminators** — appended only for `sales_worksheet_history_facts` via `buildExtraDiscriminators(row, reportType)`, which returns all raw row column values sorted by column name. The final hash is `sha256(baseHash + "|||" + extraDiscriminators.join("||"))`. View 219 (`sales_worksheet_facts`) never provides `extraDiscriminators` → its hashes are **completely unchanged** (backward-compatible). The distinction is implemented in `hashUtils.js` (`computeReportRowHash` accepts optional `extraDiscriminators`) and `enrichReportRows.js` (`buildExtraDiscriminators` returns `null` for non-view-220 types). No DB migration needed; the fix applies at staging time — the old run `655eed33` must be re-staged from the same CSV to get corrected hashes before promotion. |
+| **Why** | View 220 has 34 columns including many worksheet detail fields (Edge, Thickness, multiple Sink/Faucet/Stove fields, shop comments, etc.) that are absent from view 219's base hash. Two worksheet rows for the same job that differ only in edge profile or sink configuration share all 10 base fields and thus hash identically, which would violate the `(organization_id, report_feed_id, row_hash) WHERE is_active = true` partial unique index at promotion time. Using `row_number` as a tiebreaker was rejected as unstable across re-exports. Including all 34 column values (sorted by name for determinism) is robust and handles any future column additions automatically. |
+| **Impacted files** | `backend-core/src/moraware/reportFeeds/hashUtils.js`, `backend-core/src/moraware/reportFeeds/enrichReportRows.js`, `backend-core/src/moraware/reportFeeds/processReportFeed.js` (re-export), `backend-core/src/scripts/moraware/promoteReportRunMatchedFacts.js` (CLI output improvement), `backend-core/src/moraware/reportFeeds/reportFeedParser.test.mjs` (4 new regression tests), `docs/eliteos/moraware-report-feeds.md`, `docs/eliteos/CURSOR_ACTIVE_HANDOFF.md` |
+| **Revisit trigger** | If Moraware ever exports a view-220-style report with legitimately duplicate rows (all 34 columns identical) — the hash would correctly deduplicate them, and the duplicate detection logic in `enrichReportRowsWithIdentity` would mark the second row `ambiguous_identity`. Revisit if a new report type requires the same full-row hash treatment. |
+
+---
+
 ### 46. Name-only promotion — view 220 only, null IDs allowed, run status stays needs_review
 
 | Field | Value |

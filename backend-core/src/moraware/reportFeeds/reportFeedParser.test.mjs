@@ -11,6 +11,7 @@ import {
   computeHeaderHash,
   computeReportRowHash,
   enrichReportRowsWithIdentity,
+  buildExtraDiscriminators,
   IDENTITY_STATUS,
   parseCsvReportRows,
   parseReportHtmlIdentityRows,
@@ -349,6 +350,13 @@ function run() {
   testView220ProcessFeedLocal();
   testView220RowHashDistinctFromView219();
 
+  // ── Hash collision fix (view 220 row_hash granularity) ───────────────────────
+
+  testView220CollisionFix_DiffEdgeProducesDifferentHash();
+  testView220CollisionFix_IdenticalRowsSameHash();
+  testView219HashUnchangedByCollisionFix();
+  testComputeRowHashWithExtraDiscriminators();
+
   console.log("reportFeedParser.test.mjs: ok");
 }
 
@@ -502,6 +510,226 @@ function testView220RowHashDistinctFromView219() {
   const hash219 = computeReportRowHash({ ...sharedParams, reportType: "sales_worksheet_facts" });
   const hash220 = computeReportRowHash({ ...sharedParams, reportType: SALES_WORKSHEET_HISTORY_FACTS_REPORT_TYPE });
   assert.notEqual(hash219, hash220, "v220 hash: view 219 and view 220 produce distinct row hashes for same data");
+}
+
+// ── Hash collision fix tests ──────────────────────────────────────────────────
+
+/**
+ * Core regression test for the view 220 row_hash collision fix.
+ *
+ * Two view 220 rows that share ALL base hash fields (accountName, jobName,
+ * jobCreationDate, formName, room, color, totalWorksheetSqft) but differ ONLY
+ * in `Job Worksheet - Edge` MUST produce different hashes after the fix.
+ * Before the fix these two rows would hash identically, blocking promotion.
+ */
+function testView220CollisionFix_DiffEdgeProducesDifferentHash() {
+  // Build a synthetic view 220 row with all 34 columns.
+  const baseRow = {
+    "Account Name": "Sample Builders LLC",
+    "Account Salesperson": "Alice Sample",
+    "Account Status": "Active",
+    "Job Name": "Kitchen Remodel Phase A",
+    "Job Creation Date": "2025-03-01",
+    "Job Salesperson": "Bob Sample",
+    "Job Notes": "",
+    "Stone": "Quartz",
+    "Job Worksheet - Form Name": "Countertop Form",
+    "Job Worksheet - Room": "Kitchen",
+    "Job Worksheet - Color": "Cloud White",
+    "Job Worksheet - Edge": "Eased",
+    "Job Worksheet - Thickness": "3cm",
+    "Job Worksheet - Back Splash Type": "None",
+    "Job Worksheet - Back Splash Height": "",
+    "Job Worksheet - Sink Type": "Undermount",
+    "Job Worksheet - We have the sink": "Yes",
+    "Job Worksheet - ESF Provided Sink Make & Model": "",
+    "Job Worksheet - Faucet Type": "Pull-Down",
+    "Job Worksheet - We have Faucet": "Yes",
+    "Job Worksheet - ESF Provided Faucet Make & Model": "",
+    "Job Worksheet - Faucet at Jobsite": "No",
+    "Job Worksheet - Not Provided by ESF Sink Make & Model": "",
+    "Job Worksheet - Not Provided by ESF Faucet Make & Model": "",
+    "Job Worksheet - Stove Type": "None",
+    "Job Worksheet - Stove Ripper Needed": "No",
+    "Job Worksheet - Stove Ripper NOT Needed": "Yes",
+    "Job Worksheet - Make & Model": "",
+    "Job Worksheet - Stone Care Kit": "Yes",
+    "Job Worksheet - Dry Treat": "Yes",
+    "Job Worksheet - Shop Comments": "Standard cut required",
+    "Job Worksheet - More Shop Comments": "",
+    "Job Worksheet - Special Worksite Conditions": "Tight doorway",
+    "Total Job Worksheet - Sq.Ft. by Job Creation Date": "42.50"
+  };
+
+  // Row B differs ONLY in Edge: "Beveled" vs "Eased".
+  const rowB = { ...baseRow, "Job Worksheet - Edge": "Beveled" };
+
+  const headers = Object.keys(baseRow);
+
+  const result = enrichReportRowsWithIdentity({
+    headers,
+    rows: [baseRow, rowB],
+    identityMap: new Map(),
+    duplicateKeys: [],
+    organizationId: "00000000-0000-0000-0000-000000000001",
+    reportType: SALES_WORKSHEET_HISTORY_FACTS_REPORT_TYPE
+  });
+
+  assert.equal(result.rows.length, 2, "collision-fix: 2 rows enriched");
+
+  const [hashA, hashB] = result.rows.map((r) => r.rowHash);
+  assert.notEqual(
+    hashA,
+    hashB,
+    "collision-fix: Eased vs Beveled edge → different row_hashes (was colliding before fix)"
+  );
+  // Neither should be flagged ambiguous (they are genuinely distinct rows)
+  assert.equal(result.rows[0].identityStatus, IDENTITY_STATUS.UNMATCHED,
+    "collision-fix: row A is needs_identity_review");
+  assert.equal(result.rows[1].identityStatus, IDENTITY_STATUS.UNMATCHED,
+    "collision-fix: row B is needs_identity_review (not ambiguous — distinct hash)");
+  assert.equal(result.duplicatePreparedFacts.length, 0,
+    "collision-fix: no duplicate hash collisions between distinct rows");
+}
+
+/**
+ * Verify that truly identical view 220 rows still produce the SAME hash (stable deduplication).
+ * The second occurrence must be flagged as a duplicate prepared fact.
+ */
+function testView220CollisionFix_IdenticalRowsSameHash() {
+  const row = {
+    "Account Name": "Sample Builders LLC",
+    "Account Salesperson": "Alice Sample",
+    "Account Status": "Active",
+    "Job Name": "Kitchen Remodel Phase A",
+    "Job Creation Date": "2025-03-01",
+    "Job Salesperson": "Bob Sample",
+    "Job Notes": "",
+    "Stone": "Quartz",
+    "Job Worksheet - Form Name": "Countertop Form",
+    "Job Worksheet - Room": "Kitchen",
+    "Job Worksheet - Color": "Cloud White",
+    "Job Worksheet - Edge": "Eased",
+    "Job Worksheet - Thickness": "3cm",
+    "Job Worksheet - Back Splash Type": "None",
+    "Job Worksheet - Back Splash Height": "",
+    "Job Worksheet - Sink Type": "Undermount",
+    "Job Worksheet - We have the sink": "Yes",
+    "Job Worksheet - ESF Provided Sink Make & Model": "",
+    "Job Worksheet - Faucet Type": "Pull-Down",
+    "Job Worksheet - We have Faucet": "Yes",
+    "Job Worksheet - ESF Provided Faucet Make & Model": "",
+    "Job Worksheet - Faucet at Jobsite": "No",
+    "Job Worksheet - Not Provided by ESF Sink Make & Model": "",
+    "Job Worksheet - Not Provided by ESF Faucet Make & Model": "",
+    "Job Worksheet - Stove Type": "None",
+    "Job Worksheet - Stove Ripper Needed": "No",
+    "Job Worksheet - Stove Ripper NOT Needed": "Yes",
+    "Job Worksheet - Make & Model": "",
+    "Job Worksheet - Stone Care Kit": "Yes",
+    "Job Worksheet - Dry Treat": "Yes",
+    "Job Worksheet - Shop Comments": "Standard cut required",
+    "Job Worksheet - More Shop Comments": "",
+    "Job Worksheet - Special Worksite Conditions": "Tight doorway",
+    "Total Job Worksheet - Sq.Ft. by Job Creation Date": "42.50"
+  };
+
+  const headers = Object.keys(row);
+  const result = enrichReportRowsWithIdentity({
+    headers,
+    rows: [row, { ...row }],   // two truly identical rows
+    identityMap: new Map(),
+    duplicateKeys: [],
+    organizationId: "00000000-0000-0000-0000-000000000001",
+    reportType: SALES_WORKSHEET_HISTORY_FACTS_REPORT_TYPE
+  });
+
+  const [hashA, hashB] = result.rows.map((r) => r.rowHash);
+  assert.equal(hashA, hashB, "collision-fix: identical rows produce the same hash (stable)");
+  assert.equal(result.duplicatePreparedFacts.length, 1,
+    "collision-fix: truly identical row detected as duplicate prepared fact");
+  assert.equal(result.rows[1].identityStatus, IDENTITY_STATUS.AMBIGUOUS,
+    "collision-fix: second identical row flagged ambiguous (correct deduplication)");
+}
+
+/**
+ * Verify that view 219 row hashes are UNCHANGED by the collision fix.
+ * The fix must be strictly backward-compatible for sales_worksheet_facts.
+ */
+function testView219HashUnchangedByCollisionFix() {
+  // computeReportRowHash with no extraDiscriminators (view 219 path)
+  const params = {
+    organizationId: "org-1",
+    reportType: "sales_worksheet_facts",
+    accountName: "Demo Account",
+    jobName: "Demo Job",
+    jobStatus: "Quoted",
+    jobCreationDate: "2026-01-01",
+    formName: "Countertop Form",
+    room: "Kitchen",
+    color: "Cloud White",
+    totalWorksheetSqft: "42.50"
+  };
+  const hashNoParam = computeReportRowHash(params);
+  const hashExplicitNull = computeReportRowHash({ ...params, extraDiscriminators: null });
+  const hashEmptyArray = computeReportRowHash({ ...params, extraDiscriminators: [] });
+
+  assert.equal(hashNoParam, hashExplicitNull,
+    "v219-stable: extraDiscriminators=null → same hash as omitting the param");
+  assert.equal(hashNoParam, hashEmptyArray,
+    "v219-stable: extraDiscriminators=[] → same hash (empty array has no effect)");
+
+  // buildExtraDiscriminators returns null for view 219 — confirms no extras are passed during staging
+  const extras = buildExtraDiscriminators({ "Account Name": "Demo" }, "sales_worksheet_facts");
+  assert.equal(extras, null,
+    "v219-stable: buildExtraDiscriminators returns null for sales_worksheet_facts");
+}
+
+/**
+ * Unit test for computeReportRowHash with explicit extraDiscriminators.
+ * Directly verifies the new two-tier hash design independent of enrichReportRowsWithIdentity.
+ */
+function testComputeRowHashWithExtraDiscriminators() {
+  const base = {
+    organizationId: "org-1",
+    reportType: SALES_WORKSHEET_HISTORY_FACTS_REPORT_TYPE,
+    accountName: "Sample Builders",
+    jobName: "Kitchen Remodel",
+    jobStatus: "",
+    jobCreationDate: "2025-03-01",
+    formName: "Countertop Form",
+    room: "Kitchen",
+    color: "White",
+    totalWorksheetSqft: "42.5"
+  };
+
+  // Different extra discriminators → different hashes
+  const hashA = computeReportRowHash({ ...base, extraDiscriminators: ["Eased", "3cm", "Undermount"] });
+  const hashB = computeReportRowHash({ ...base, extraDiscriminators: ["Beveled", "3cm", "Undermount"] });
+  assert.notEqual(hashA, hashB,
+    "extra-disc: different discriminator values → different hashes");
+
+  // Same extra discriminators → same hash (stable)
+  const hashC = computeReportRowHash({ ...base, extraDiscriminators: ["Eased", "3cm", "Undermount"] });
+  assert.equal(hashA, hashC,
+    "extra-disc: same discriminator values → same hash (stable)");
+
+  // Extra discriminators change the hash compared to having none
+  const hashNoExtras = computeReportRowHash(base);
+  assert.notEqual(hashA, hashNoExtras,
+    "extra-disc: having extras produces different hash than having none (as expected)");
+
+  // buildExtraDiscriminators for view 220 returns a non-null sorted array
+  const row220 = { "Account Name": "Builder", "Job Worksheet - Edge": "Eased", "Stone": "Quartz" };
+  const extras220 = buildExtraDiscriminators(row220, SALES_WORKSHEET_HISTORY_FACTS_REPORT_TYPE);
+  assert.ok(Array.isArray(extras220) && extras220.length > 0,
+    "extra-disc: buildExtraDiscriminators returns array for view 220");
+  // Should be sorted by key: "Account Name" < "Job Worksheet - Edge" < "Stone"
+  assert.deepEqual(
+    extras220,
+    ["Builder", "Eased", "Quartz"],
+    "extra-disc: buildExtraDiscriminators returns values sorted by column name"
+  );
 }
 
 run();

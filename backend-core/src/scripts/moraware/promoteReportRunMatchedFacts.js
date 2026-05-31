@@ -82,6 +82,33 @@ function formatCliError(err) {
   try { return JSON.stringify(err); } catch { return String(err); }
 }
 
+/**
+ * Format a skipped-result's details object for CLI output.
+ * For unsafe_supersede_plan, emits a compact summary instead of a full hash dump.
+ * For all other reasons, emits a single-line JSON.
+ */
+function formatBlockDetails(reason, details) {
+  if (!details) return null;
+  if (reason === "unsafe_supersede_plan") {
+    const dupeHashes = Array.isArray(details.duplicateIncomingHashes)
+      ? details.duplicateIncomingHashes
+      : [];
+    const sample = dupeHashes.slice(0, 3);
+    const lines = [
+      `  Duplicate incoming row_hashes: ${dupeHashes.length}`,
+      sample.length > 0
+        ? `  Sample (up to 3):  ${sample.join(", ")}${dupeHashes.length > 3 ? " …" : ""}`
+        : null,
+      `  This indicates row_hash collisions in the staged data.`,
+      `  Fix: re-stage the CSV with the corrected hash algorithm to produce`,
+      `       a new run with unique hashes, then promote the new run.`,
+      `  Do NOT promote the old run (${dupeHashes.length} collision(s) would violate the unique index).`
+    ].filter(Boolean);
+    return lines.join("\n");
+  }
+  return `  Details:  ${JSON.stringify(details)}`;
+}
+
 async function main() {
   const applyFlag = args.includes("--apply");
   const matchedOnlyFlag = args.includes("--matched-only");
@@ -186,7 +213,8 @@ async function main() {
       console.log("BLOCKED — promotion would be refused.");
       console.log(`  Reason:   ${result.reason}`);
       if (result.details) {
-        console.log(`  Details:  ${JSON.stringify(result.details)}`);
+        const formatted = formatBlockDetails(result.reason, result.details);
+        if (formatted) console.log(formatted);
       }
       console.log();
       if (result.reason === "ambiguous_rows_require_matched_only_flag") {
@@ -249,7 +277,8 @@ async function main() {
     console.log("BLOCKED — promotion refused.");
     console.log(`  Reason:   ${result.reason}`);
     if (result.details) {
-      console.log(`  Details:  ${JSON.stringify(result.details)}`);
+      const formatted = formatBlockDetails(result.reason, result.details);
+      if (formatted) console.log(formatted);
     }
     process.exit(1);
   }
