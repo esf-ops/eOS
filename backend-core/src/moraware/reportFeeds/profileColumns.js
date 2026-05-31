@@ -46,7 +46,9 @@ export function profileReportColumns(parsed) {
  * @returns {{ ok: boolean, observedHash: string, expectedHash: string|null, missingHeaders: string[], unexpectedHeaders: string[] }}
  */
 export function validateHeaderContract(profile, expectedHeaders = [], expectedColumnHash = null) {
-  const observed = new Set((profile.columns || []).map((c) => c.header));
+  // Normalize observed headers defensively — parseCsvReportRows already normalizes,
+  // but guard against profiles built from other sources (NBSP, trailing spaces).
+  const observed = new Set((profile.columns || []).map((c) => normalizeSpaces(c.header)).filter(Boolean));
   const expected = (expectedHeaders || []).map((h) => normalizeSpaces(h)).filter(Boolean);
   const missingHeaders = expected.filter((h) => !observed.has(h));
   const unexpectedHeaders = [...observed].filter((h) => !expected.includes(h));

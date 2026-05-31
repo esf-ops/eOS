@@ -31,7 +31,7 @@ Full detail: [`moraware-report-feeds.md`](./moraware-report-feeds.md)
 | Real Elite | `89180433-9fab-4024-bec9-a14d870bd0a8` | `e8c0433a-c243-4cc5-b8bb-7842ec64a0e7` | `afc7b49d-af7a-4fec-85a0-0fdb11046ea3` (validated staging, no promotion) |
 | Test org | `00000000-0000-0000-0000-000000000001` | `a053cb9a-e362-4c5a-8f47-895314cec85a` | `a660473b-b200-4d14-ba0b-5b713c475c9c` (promo smoke 1); `6d54c835-058f-47f8-a831-db8efca86a5b` (promo smoke 2, supersede) |
 
-Sales Worksheet Facts contract: view `219`, `report_type=sales_worksheet_facts`, header hash `4e657f1f731e9fb054e0b9d8d4d6b1f586e612875d139ee33e4a083a5a6cfdb8`.
+Sales Worksheet Facts contract: view `219`, `report_type=sales_worksheet_facts`, header hash `71d40fbb6a946c015c5dad7b74ca11b1287e0c939eaa53a12cf674b518d0114d` (16 real Moraware columns, no Branch — Option B, 2026-05-30).
 
 ### Key commands
 
@@ -95,7 +95,7 @@ Later slices (separate approval): raw artifact storage decision → scheduled wo
 - Old prepared facts: supersede/deactivate (`is_active`, `superseded_by`), not blind delete
 - Service-role Supabase writes: backend/scripts only, gated by env flags
 
-Durable decisions: `FEATURE_DECISIONS.md` entries **37** (additive lane), **38** (SQL supersede semantics), **39** (governed download v1 contract).
+Durable decisions: `FEATURE_DECISIONS.md` entries **37** (additive lane), **38** (SQL supersede semantics), **39** (governed download v1 contract), **40** (Option B real export shape, Branch deferred).
 
 ---
 

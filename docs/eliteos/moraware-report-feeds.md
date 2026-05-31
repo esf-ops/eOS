@@ -184,20 +184,37 @@ Use **Sonnet (or stronger)** for credential/session/fetch implementation; use ch
 | Report type | `sales_worksheet_facts` |
 | CSV export path | `/sys/report/?view=219&spreadsheet=1&exportType=AllPages&table=Report` |
 | HTML report path | `/sys/report/?view=219` |
-| Validated header hash | `4e657f1f731e9fb054e0b9d8d4d6b1f586e612875d139ee33e4a083a5a6cfdb8` (run `afc7b49d`, 2026-05-30) |
+| Expected column hash | `71d40fbb6a946c015c5dad7b74ca11b1287e0c939eaa53a12cf674b518d0114d` |
+| Prior hash (simplified columns) | `4e657f1f731e9fb054e0b9d8d4d6b1f586e612875d139ee33e4a083a5a6cfdb8` — retired 2026-05-30 |
 
-Expected business columns (integration contract):
+**Column mapping decision (Option B — real Moraware export shape):** eliteOS accepts the real Moraware export as-is and normalizes it into clean prepared facts. Moraware view 219 is **not** forced to match simplified legacy column names.
 
-- Account Name
-- Job Name
-- Job Status
-- Job Creation Date
-- Job Salesperson
-- Total Job Worksheet Sq.Ft.
-- Color
-- Stone
-- Room
-- Branch
+**Branch/location decision (v1):** Branch is not present in the real view 219 export and is **not** a required contract column. `branch_or_process` is always `null` in v1 promoted facts. Future: derive location/ownership through Account Mapping / Identity Enrichment.
+
+**Export granularity:** view 219 is **worksheet-line level** — one CSV row per worksheet section (countertop, backsplash, etc.), multiple rows per job. Prepared facts are one row per CSV row. Row hashes include worksheet-line discriminators so two lines for the same job produce distinct hashes.
+
+### Real Moraware column contract (16 columns, no Branch)
+
+| Moraware column | eliteOS prepared field | Notes |
+|-----------------|------------------------|-------|
+| Account Name | `account_name` | Required for HTML identity match |
+| Account Salesperson | `raw_row` only | Not a typed prepared-fact column in v1 |
+| Job Name | `job_name` | Required for HTML identity match |
+| Job Creation Date | `job_creation_date` | |
+| Job Salesperson | `job_salesperson` | |
+| Job Status | `job_status` | |
+| Job Notes | `raw_row` only | |
+| Stone | `stone` | |
+| Job Worksheet - Form Name | row hash discriminator + `raw_row` | Not a separate prepared-fact column |
+| Job Worksheet - Room | `room` | |
+| Job Worksheet - Color | `color` | |
+| Job Worksheet - Edge | `raw_row` only | |
+| Job Worksheet - Thickness | `raw_row` only | |
+| Job Worksheet - Back Splash Type | `raw_row` only | |
+| Job Worksheet - Back Splash Height | `raw_row` only | |
+| Total Job Worksheet - Sq.Ft. by Job Creation Date | `total_worksheet_sqft` (numeric) | |
+| Branch/location | `branch_or_process` = **null** | Not in export; deferred to Account Mapping |
+| HTML identity | `account_id`, `job_id` | Nullable when unmatched |
 
 ## Architecture (Brain tables)
 

@@ -9,18 +9,29 @@ export const SALES_WORKSHEET_FACTS_HTML_PATH = "/sys/report/?view=219";
 
 export const SALES_WORKSHEET_FACTS_REPORT_TYPE = "sales_worksheet_facts";
 
-/** Expected business columns for Sales Worksheet Facts (view 219). */
+/**
+ * Expected business columns for Sales Worksheet Facts (view 219).
+ * Matches the real Moraware export shape. Branch/location is intentionally excluded
+ * for v1 — it is not present in this saved report and will be derived later
+ * through Account Mapping / Identity Enrichment.
+ */
 export const SALES_WORKSHEET_FACTS_EXPECTED_COLUMNS = [
   "Account Name",
+  "Account Salesperson",
   "Job Name",
-  "Job Status",
   "Job Creation Date",
   "Job Salesperson",
-  "Total Job Worksheet Sq.Ft.",
-  "Color",
+  "Job Status",
+  "Job Notes",
   "Stone",
-  "Room",
-  "Branch"
+  "Job Worksheet - Form Name",
+  "Job Worksheet - Room",
+  "Job Worksheet - Color",
+  "Job Worksheet - Edge",
+  "Job Worksheet - Thickness",
+  "Job Worksheet - Back Splash Type",
+  "Job Worksheet - Back Splash Height",
+  "Total Job Worksheet - Sq.Ft. by Job Creation Date"
 ];
 
 export const SALES_WORKSHEET_FACTS_FEED_SEED = {

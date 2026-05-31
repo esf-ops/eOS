@@ -97,7 +97,7 @@ function makeProcessResult(overrides = {}) {
   assert.equal(payload.html_storage_path, "/tmp/a.html", "run insert: html_storage_path");
   assert.equal(typeof payload.observed_header_hash, "string", "run insert: header hash is string");
   assert.equal(payload.observed_header_hash.length, 64, "run insert: header hash is sha256");
-  assert.equal(payload.row_count, 3, "run insert: row count from fixtures");
+  assert.equal(payload.row_count, 5, "run insert: row count from fixtures");
   assert.equal(payload.error_message, null, "run insert: no error message initially");
 }
 
@@ -109,10 +109,10 @@ function makeProcessResult(overrides = {}) {
   assert.equal(payload.organization_id, FAKE_ORG, "profile: org");
   assert.equal(payload.report_run_id, FAKE_RUN_ID, "profile: run_id");
   assert.equal(payload.header_hash.length, 64, "profile: header_hash sha256");
-  assert.equal(payload.row_count, 3, "profile: row_count");
-  assert.equal(payload.column_count, 10, "profile: column_count");
+  assert.equal(payload.row_count, 5, "profile: row_count");
+  assert.equal(payload.column_count, 16, "profile: column_count");
   assert.ok(Array.isArray(payload.columns), "profile: columns is array");
-  assert.equal(payload.columns.length, 10, "profile: 10 column profile entries");
+  assert.equal(payload.columns.length, 16, "profile: 16 column profile entries");
 }
 
 // ── buildRawRowInserts ────────────────────────────────────────────────────────
@@ -120,7 +120,7 @@ function makeProcessResult(overrides = {}) {
 {
   const result = makeProcessResult();
   const rows = buildRawRowInserts({ runId: FAKE_RUN_ID, feed: FAKE_FEED, processResult: result });
-  assert.equal(rows.length, 3, "raw rows: one per CSV row");
+  assert.equal(rows.length, 5, "raw rows: one per CSV row");
   for (const row of rows) {
     assert.equal(row.organization_id, FAKE_ORG, "raw row: org present");
     assert.equal(row.report_run_id, FAKE_RUN_ID, "raw row: run_id present");
@@ -161,8 +161,8 @@ function makeProcessResult(overrides = {}) {
   assert.equal(update.status, "validated", "final update: validated for clean fixture");
   assert.ok(update.finished_at, "final update: finished_at set");
   assert.equal(update.error_message, null, "final update: no error when clean");
-  assert.equal(update.matched_identity_count, 3, "final update: matched count");
-  assert.equal(update.unmatched_identity_count, 0, "final update: unmatched count");
+  assert.equal(update.matched_identity_count, 4, "final update: matched count");
+  assert.equal(update.unmatched_identity_count, 1, "final update: unmatched count (row 4 has no HTML entry)");
 }
 
 {

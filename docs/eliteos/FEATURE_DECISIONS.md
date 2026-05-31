@@ -523,3 +523,15 @@
 
 ---
 
+### 40. Sales Worksheet Facts — Option B real Moraware export shape; Branch deferred
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-05-30 |
+| **Decision** | eliteOS accepts the **real Moraware view 219 export shape** (16 columns including worksheet-line columns) and normalizes it into prepared facts — **Option B**. The simplified 10-column fixture (`Color`, `Room`, `Branch`, …) is retired. **Branch/location is not required** in the Sales Worksheet Facts contract for v1: it is not present in the real export and `branch_or_process` will always be `null` until derived through Account Mapping / Identity Enrichment. `computeReportRowHash` now includes worksheet-line discriminators (`formName`, `room`, `color`, `totalWorksheetSqft`) so two worksheet lines for the same job produce distinct hashes. New expected column hash: `71d40fbb6a946c015c5dad7b74ca11b1287e0c939eaa53a12cf674b518d0114d`. |
+| **Why** | Forcing Moraware to match simplified columns would require view reconfiguration and break the real export's natural worksheet-line granularity. Normalizing the real shape keeps the integration contract stable and enables worksheet-level analytics without a second parser. Excluding Branch avoids hardcoding a column that Moraware may not expose in every organization's report view. |
+| **Impacted files/docs** | `backend-core/src/moraware/reportFeeds/constants.js`, `enrichReportRows.js`, `hashUtils.js`, `profileColumns.js`, `reportFeedParser.test.mjs`, `reportFeedPersistence.test.mjs`, `reportFeedPromotePersistence.test.mjs`, `promoteSalesWorksheetFacts.test.mjs`, `backend-core/test/fixtures/moraware-report-feeds/sales-worksheet-facts.sample.csv`, `docs/eliteos/moraware-report-feeds.md`, `docs/eliteos/CURSOR_ACTIVE_HANDOFF.md` |
+| **Revisit trigger** | Before Account Mapping head derives `branch_or_process`; before adding Edge/Thickness/BackSplash as typed prepared-fact columns; before supporting additional worksheet-type feeds that share similar column structure. |
+
+---
+

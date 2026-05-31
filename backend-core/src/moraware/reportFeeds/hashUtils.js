@@ -13,7 +13,12 @@ export function computeHeaderHash(headers) {
 
 /**
  * Stable row hash for dedupe / prepared-facts identity.
- * Uses canonical business columns when present; falls back to full row JSON.
+ * Includes both job-level identity (account, job, status, date) AND
+ * worksheet-line discriminators (formName, room, color, totalWorksheetSqft)
+ * so that two worksheet rows for the same job produce distinct hashes
+ * when their line details differ.
+ *
+ * Falls back to full row JSON only when both accountName and jobName are absent.
  */
 export function computeReportRowHash(params) {
   const {
@@ -23,6 +28,10 @@ export function computeReportRowHash(params) {
     jobName = "",
     jobStatus = "",
     jobCreationDate = "",
+    formName = "",
+    room = "",
+    color = "",
+    totalWorksheetSqft = "",
     row = null
   } = params;
   const canonical = [
@@ -31,7 +40,11 @@ export function computeReportRowHash(params) {
     normalizeSpaces(accountName).toLowerCase(),
     normalizeSpaces(jobName).toLowerCase(),
     normalizeSpaces(jobStatus).toLowerCase(),
-    normalizeSpaces(jobCreationDate)
+    normalizeSpaces(jobCreationDate),
+    normalizeSpaces(formName).toLowerCase(),
+    normalizeSpaces(room).toLowerCase(),
+    normalizeSpaces(color).toLowerCase(),
+    normalizeSpaces(totalWorksheetSqft)
   ].join("||");
   if (accountName || jobName) return sha256Hex(canonical);
   return sha256Hex(JSON.stringify(row ?? {}));

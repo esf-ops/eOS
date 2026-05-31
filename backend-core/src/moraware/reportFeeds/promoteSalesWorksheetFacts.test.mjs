@@ -121,6 +121,12 @@ function makeValidProcessResult(overrides = {}) {
 }
 
 {
+  // branch_or_process is null when branchOrProcess not in real export (v1 decision: nullable)
+  const payload = mapPreparedSalesWorksheetFact(makeMapParams({ branchOrProcess: null }));
+  assert.equal(payload.branch_or_process, null, "map: branch_or_process is null when not in export (v1)");
+}
+
+{
   // Missing sqft field (undefined in enriched row)
   const row = makeEnrichedRow({ totalWorksheetSqft: undefined });
   const payload = mapPreparedSalesWorksheetFact({ ...makeMapParams(), enrichedRow: row });

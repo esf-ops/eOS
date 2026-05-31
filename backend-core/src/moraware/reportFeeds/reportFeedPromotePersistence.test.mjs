@@ -195,11 +195,11 @@ function makeMockDb({
     feed: FAKE_FEED, runId: FAKE_RUN_ID, processResult: result, promoteFlag: true
   });
   assert.equal(out.promoted, true, "first-promo: promoted=true");
-  assert.equal(out.insertCount, 3, "first-promo: 3 fixture rows inserted");
+  assert.equal(out.insertCount, 5, "first-promo: 5 fixture rows inserted");
   assert.equal(out.deactivateCount, 0, "first-promo: no deactivations (no existing)");
 
   const insertOps = db._ops.filter((o) => o.op === "insert" && o.table === "moraware_prepared_sales_worksheet_facts");
-  assert.equal(insertOps.length, 3, "first-promo: 3 insert operations");
+  assert.equal(insertOps.length, 5, "first-promo: 5 insert operations");
 
   const deleteOps = db._ops.filter((o) => o.op === "delete" || o.op === "delete_eq");
   assert.equal(deleteOps.length, 0, "first-promo: zero deletes");
@@ -222,7 +222,7 @@ function makeMockDb({
     feed: FAKE_FEED, runId: FAKE_RUN_ID, processResult: result, promoteFlag: true
   });
   assert.equal(out.promoted, true, "second-promo: promoted=true");
-  assert.equal(out.insertCount, 3, "second-promo: all 3 rows inserted");
+  assert.equal(out.insertCount, 5, "second-promo: all 5 rows inserted");
   assert.equal(out.deactivateCount, 1, "second-promo: 1 old row deactivated");
   assert.ok(out.backfillCount >= 0, "second-promo: backfillCount defined");
 }

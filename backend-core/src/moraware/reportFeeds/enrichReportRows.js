@@ -20,6 +20,8 @@ function pickColumn(headers, patterns) {
 
 /**
  * Resolve canonical column names for Sales Worksheet Facts-style exports.
+ * Handles both real Moraware header shapes ("Job Worksheet - Room") and
+ * simplified/legacy shapes ("Room") via regex fallbacks.
  */
 export function resolveSalesWorksheetColumnNames(headers) {
   return {
@@ -28,10 +30,17 @@ export function resolveSalesWorksheetColumnNames(headers) {
     jobStatus: pickColumn(headers, ["^job\\s*status$"]),
     jobCreationDate: pickColumn(headers, ["^job\\s*creation\\s*date$"]),
     jobSalesperson: pickColumn(headers, ["^job\\s*salesperson$", "^salesperson$"]),
-    totalWorksheetSqft: pickColumn(headers, ["total\\s*job\\s*worksheet\\s*sq", "worksheet.*sq", "sq\\s*\\.?\\s*ft"]),
-    color: pickColumn(headers, ["^color$", "worksheet.*color"]),
+    // "Total Job Worksheet - Sq.Ft. by Job Creation Date" or legacy "Total Job Worksheet Sq.Ft."
+    totalWorksheetSqft: pickColumn(headers, ["total\\s*job\\s*worksheet.*sq", "worksheet.*sq\\.?\\s*ft", "sq\\s*\\.?\\s*ft"]),
+    // "Job Worksheet - Color" or legacy "Color"
+    color: pickColumn(headers, ["job\\s*worksheet.*color", "^color$"]),
     stone: pickColumn(headers, ["^stone$", "^material$"]),
-    room: pickColumn(headers, ["^room$"]),
+    // "Job Worksheet - Room" or legacy "Room"
+    room: pickColumn(headers, ["job\\s*worksheet.*room", "^room$"]),
+    // "Job Worksheet - Form Name" — worksheet-line discriminator for row hash
+    formName: pickColumn(headers, ["job\\s*worksheet.*form\\s*name", "^form\\s*name$"]),
+    // Branch/location is not present in the real view 219 export; always resolves to null.
+    // Future: derive via Account Mapping / Identity Enrichment.
     branchOrProcess: pickColumn(headers, ["^branch$", "^process$", "branch\\s*or\\s*process"])
   };
 }
@@ -70,6 +79,12 @@ export function enrichReportRowsWithIdentity(params) {
     const jobName = cols.jobName ? normalizeSpaces(row[cols.jobName]) : "";
     const jobStatus = cols.jobStatus ? normalizeSpaces(row[cols.jobStatus]) : "";
     const jobCreationDate = cols.jobCreationDate ? normalizeSpaces(row[cols.jobCreationDate]) : "";
+    // Worksheet-line discriminators — ensure two rows for the same job
+    // (different room/form/color/sqft) produce distinct row_hash values.
+    const formName = cols.formName ? normalizeSpaces(row[cols.formName]) : "";
+    const room = cols.room ? normalizeSpaces(row[cols.room]) : "";
+    const color = cols.color ? normalizeSpaces(row[cols.color]) : "";
+    const totalWorksheetSqft = cols.totalWorksheetSqft ? normalizeSpaces(row[cols.totalWorksheetSqft]) : "";
     const key = makeIdentityMatchKey(accountName, jobName);
     const lookup = lookupIdentityMatches(key, identityMap, duplicateKeys);
     const match = lookup.matches[0] ?? null;
@@ -81,6 +96,10 @@ export function enrichReportRowsWithIdentity(params) {
       jobName,
       jobStatus,
       jobCreationDate,
+      formName,
+      room,
+      color,
+      totalWorksheetSqft,
       row
     });
 
@@ -108,10 +127,10 @@ export function enrichReportRowsWithIdentity(params) {
       jobStatus,
       jobCreationDate,
       jobSalesperson: cols.jobSalesperson ? normalizeSpaces(row[cols.jobSalesperson]) : "",
-      totalWorksheetSqft: cols.totalWorksheetSqft ? normalizeSpaces(row[cols.totalWorksheetSqft]) : "",
-      color: cols.color ? normalizeSpaces(row[cols.color]) : "",
+      totalWorksheetSqft,
+      color,
       stone: cols.stone ? normalizeSpaces(row[cols.stone]) : "",
-      room: cols.room ? normalizeSpaces(row[cols.room]) : "",
+      room,
       branchOrProcess: cols.branchOrProcess ? normalizeSpaces(row[cols.branchOrProcess]) : "",
       rawRow: row
     });
