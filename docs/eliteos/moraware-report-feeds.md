@@ -23,6 +23,7 @@ Combining CSV rows + HTML-derived IDs gives faster, trustable prepared facts for
 | API mirror identity enrichment | **Validated** — run `8f5e74d1`: 6,957 matched / 29 ambiguous / 0 unmatched |
 | Matched-only promotion (persisted run) | **Validated** — run `8f5e74d1`: 6,957 prepared facts active; 29 ambiguous excluded |
 | View 220 contract (Sales Worksheet History Facts) | **Contract built** — 34-column contract, hash `ca05eadcaeea…`, fixture, parser tests; Supabase feed INSERT ready to run manually (see [View 220 section](#view-220-sales-worksheet-history-facts)) |
+| Name-only promotion (view 220) | **Built** — `--allow-name-only` flag; permitted only for `sales_worksheet_history_facts`; promotes matched + `needs_identity_review` rows; ambiguous always excluded; run status stays `needs_review` |
 | Live Moraware download | **Not built** — no governed fetch, no browser scrape, no cookies/SID in repo |
 | Dashboard reads | **Not wired** — prepared facts exist in Supabase but no UI reads them yet |
 
@@ -475,63 +476,91 @@ Promotes `moraware_report_raw_rows` (already staged + enriched) to `moraware_pre
 | Condition | Result |
 |-----------|--------|
 | `schema_drift.detected = true` | BLOCKED — schema contract must match |
-| `unmatched_identity_count > 0` | BLOCKED — unmatched rows have no IDs; promoting null-ID facts would corrupt analytics |
-| `ambiguous_identity_count > 0` without `--matched-only` | BLOCKED — requires explicit opt-in to exclude ambiguous rows |
+| `unmatched_identity_count > 0` | BLOCKED — unless `--allow-name-only` (view 220 only) |
+| `ambiguous_identity_count > 0` without `--matched-only` or `--allow-name-only` | BLOCKED — requires explicit opt-in |
 | Run already `promoted` | BLOCKED — idempotency guard |
+| `--allow-name-only` for non-history feed | BLOCKED — feed `report_type` validated via DB |
 
-**Matched-only policy:**
+**Matched-only policy (view 219 and 220):**
 - Pass `--matched-only` when `ambiguous_identity_count > 0`.
 - Only `moraware_report_raw_rows` with `identity_status = "matched"` are promoted.
-- Ambiguous rows are **excluded** — never promoted, never guessed, never altered by this step.
+- Ambiguous rows are **excluded** — never promoted, never guessed, never altered.
 - Run status after matched-only apply: **remains `needs_review`** (ambiguous rows still require resolution).
-- Run status after full clean apply (0 ambiguous): updated to `"promoted"`.
+- Run status after full clean apply (0 ambiguous, 0 unmatched): updated to `"promoted"`.
+
+**Name-only policy (view 220 / `sales_worksheet_history_facts` only):**
+- Pass `--allow-name-only` for historical worksheet runs where identity coverage is incomplete.
+- Permitted **only** for `report_type = sales_worksheet_history_facts` — enforced via a DB lookup of the feed row; cannot be bypassed.
+- Promotes both `identity_status = "matched"` rows (with IDs) and `identity_status = "needs_identity_review"` rows (name-only, null `job_id`/`account_id`).
+- Ambiguous rows are **always excluded** — `--allow-name-only` inherently satisfies the ambiguous gate.
+- `identity_status` is preserved in the prepared fact — name-only facts have `identity_status = "needs_identity_review"` and null IDs.
+- Run status after name-only apply: **always `needs_review`** (identity is partial).
+- **Dashboard warning:** View 220 prepared facts may contain null `job_id`/`account_id`. All dashboard queries must filter by `report_feed_id` to avoid double-counting with view 219, and must handle null ID joins gracefully (e.g. `WHERE job_id IS NOT NULL` for job-level joins).
+- View 219 (`sales_worksheet_facts`) **cannot** use `--allow-name-only`. The gate returns `name_only_not_allowed_for_report_type`.
 
 **Supersede semantics (same as local-file path):**
 1. All deactivations first (`is_active = false`, `superseded_at = now`) — batched ≤500.
 2. All inserts next (`is_active = true`) — batched ≤500; rollback to re-activate on failure.
 3. `superseded_by` backfill — row-by-row, non-fatal.
 
-**Run summary JSON:**  On apply, appends a `promotions[]` entry to `moraware_report_runs.summary`:
+**Run summary JSON (name-only mode):**  On apply, appends a `promotions[]` entry to `moraware_report_runs.summary`:
 ```json
 {
   "promotedAt": "2026-...",
-  "mode": "matched_only",
-  "matchedRowCount": 6957,
-  "ambiguousExcluded": 29,
+  "mode": "name_only",
+  "matchedRowCount": 7059,
+  "nameOnlyRowCount": 15809,
+  "ambiguousExcluded": 7,
   "unmatchedExcluded": 0,
-  "insertCount": 6957,
+  "insertCount": 22868,
   "deactivateCount": 0,
-  "backfillCount": 0
+  "backfillCount": 0,
+  "warning": "name_only_promotion: some prepared facts have null job_id/account_id; use report_feed_id scoping for all dashboard queries against this feed"
 }
 ```
 
 **CLI usage:**
 
 ```bash
+# ── View 219 (matched-only, ambiguous excluded) ───────────────────────────────
+
 # Step 1 — review ambiguous rows (read-only)
-MORAWARE_REPORT_RUN_ID=<run-id> \
-MORAWARE_DEFAULT_ORGANIZATION_ID=<org-id> \
+MORAWARE_REPORT_RUN_ID=<run-id> MORAWARE_DEFAULT_ORGANIZATION_ID=<org-id> \
 SUPABASE_URL=<url> SUPABASE_SERVICE_ROLE_KEY=<key> \
 npm run eos:moraware:promote-report-run-matched-facts -- --review-ambiguous
 
-# Step 2 — dry-run (always run first)
-MORAWARE_REPORT_RUN_ID=<run-id> \
-MORAWARE_DEFAULT_ORGANIZATION_ID=<org-id> \
+# Step 2 — dry-run (always first)
+MORAWARE_REPORT_RUN_ID=<run-id> MORAWARE_DEFAULT_ORGANIZATION_ID=<org-id> \
 SUPABASE_URL=<url> SUPABASE_SERVICE_ROLE_KEY=<key> \
 npm run eos:moraware:promote-report-run-matched-facts
 
-# Step 3 — apply matched-only (writes prepared facts)
-MORAWARE_REPORT_RUN_ID=<run-id> \
-MORAWARE_DEFAULT_ORGANIZATION_ID=<org-id> \
-SUPABASE_URL=<url> SUPABASE_SERVICE_ROLE_KEY=<key> \
-SUPABASE_WRITE_ENABLED=1 \
+# Step 3 — apply matched-only
+MORAWARE_REPORT_RUN_ID=<run-id> MORAWARE_DEFAULT_ORGANIZATION_ID=<org-id> \
+SUPABASE_URL=<url> SUPABASE_SERVICE_ROLE_KEY=<key> SUPABASE_WRITE_ENABLED=1 \
 npm run eos:moraware:promote-report-run-matched-facts -- --apply --matched-only
+
+# ── View 220 (name-only, unmatched rows included, ambiguous excluded) ─────────
+
+# Step 1 — dry-run (shows matched + name-only breakdown; no writes)
+MORAWARE_REPORT_RUN_ID=<run-id> MORAWARE_DEFAULT_ORGANIZATION_ID=<org-id> \
+SUPABASE_URL=<url> SUPABASE_SERVICE_ROLE_KEY=<key> \
+npm run eos:moraware:promote-report-run-matched-facts
+
+# Step 2 — apply name-only
+MORAWARE_REPORT_RUN_ID=<run-id> MORAWARE_DEFAULT_ORGANIZATION_ID=<org-id> \
+SUPABASE_URL=<url> SUPABASE_SERVICE_ROLE_KEY=<key> SUPABASE_WRITE_ENABLED=1 \
+npm run eos:moraware:promote-report-run-matched-facts -- --apply --allow-name-only
 ```
 
-For the real Elite run `8f5e74d1-482f-4f38-b694-548b1bc239a1`:
+For run `655eed33` (view 220, 22,899 rows):
+- API mirror dry-run: 7,059 would match, 15,809 no-match, 7 ambiguous.
+- After API mirror apply: use `--allow-name-only` to promote matched (7,059) + name-only (15,809) = 22,868 facts; 7 ambiguous excluded.
+- Run status will stay `needs_review` (identity is partial — name-only facts have null IDs).
+
+For the real Elite run `8f5e74d1` (view 219):
 - 6,957 matched rows eligible; 29 ambiguous excluded.
 - `--matched-only` required because `ambiguous_identity_count = 29`.
-- After apply the run status will remain `needs_review` (ambiguous rows unresolved).
+- After apply the run status remains `needs_review` (ambiguous rows unresolved).
 
 **Source modules:**
 - `promotePersistedRunMatchedFacts.js` — orchestrator + pure helpers (`checkPersistedRunGates`, `persistedRawRowToEnrichedRow`, `reviewAmbiguousRows`).

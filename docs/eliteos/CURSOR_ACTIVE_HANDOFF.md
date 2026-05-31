@@ -2,7 +2,7 @@
 
 **Purpose:** Cheap context for new Cursor chats. Do not treat old chat transcripts as source of truth — use this file + `docs/eliteos/*` + `.cursor/rules/*`.
 
-**Last updated:** 2026-05-31 (view 220 contract built)
+**Last updated:** 2026-05-31 (view 220 name-only promotion built)
 
 ---
 
@@ -21,6 +21,7 @@ Additive ingestion lane beside existing Moraware API sync. Combines saved-report
 | Matched-only promotion (persisted runs) | **Built** — `promotePersistedRunMatchedFacts` + CLI; dry-run default; matched rows only; ambiguous excluded |
 | Promotion | Test org smoke-validated; **real Elite org `8f5e74d1` matched-only promoted 2026-05-31** — 6,957 active facts, 29 ambiguous excluded, run stays `needs_review` |
 | View 220 contract (Sales Worksheet History Facts) | **Contract built** — 34-col, hash `ca05eadcaeea…`, fixture, tests; Supabase feed INSERT ready (manual) |
+| Name-only promotion (view 220) | **Built** — `--allow-name-only`; view 220 only; matched + name-only rows; ambiguous excluded; run stays `needs_review` |
 | Governed download design (Phase A) | **Documented** — see [`moraware-report-feeds.md` § Governed download design](./moraware-report-feeds.md#governed-download-design-phase-a--docs-only) |
 | Live download / scrape / cron / API routes | **Not built** |
 | Dashboards reading prepared facts | **Not built** |
@@ -36,7 +37,9 @@ Full detail: [`moraware-report-feeds.md`](./moraware-report-feeds.md)
 
 Sales Worksheet Facts (view 219) contract: `report_type=sales_worksheet_facts`, hash `8e12bfb52b516ac30aa94e85d7bf92ee9c6d47741b2967586b743954136b9ade` (76-col). Columns 1–15 + col 76 → prepared facts; cols 16–75 raw_row only.
 
-Sales Worksheet History Facts (view 220) contract: `report_type=sales_worksheet_history_facts`, hash `ca05eadcaeea16417f017e857f48a89ed42ee2033242d80ee635e8002d0dd000` (34-col). Same prepared table as view 219; **dashboard queries must filter by `report_feed_id`**. Job Status absent → `job_status = null` in promoted facts. Observed live: 22,899 rows, 562,602.50 sqft (2026-05-31). Supabase feed row not yet inserted — see SQL file.
+Sales Worksheet History Facts (view 220) contract: `report_type=sales_worksheet_history_facts`, hash `ca05eadcaeea16417f017e857f48a89ed42ee2033242d80ee635e8002d0dd000` (34-col). Same prepared table as view 219; **dashboard queries must filter by `report_feed_id`**. Job Status absent → `job_status = null` in promoted facts. Observed live: 22,899 rows, 562,602.50 sqft (2026-05-31). API mirror dry-run on run `655eed33`: 7,059 match / 15,809 no-match / 7 ambiguous. Supabase feed row not yet inserted — see SQL file.
+
+**View 220 name-only promotion:** use `--allow-name-only` (NOT `--matched-only`). Promotes matched (7,059) + name-only (15,809) = 22,868 facts; 7 ambiguous excluded. Name-only facts have null `job_id`/`account_id`; `identity_status = "needs_identity_review"`. Run status stays `needs_review` (identity partial). **Cannot be used on view 219 feeds** — DB-enforced.
 
 ### Key commands
 
@@ -55,6 +58,9 @@ npm run eos:moraware:enrich-report-run-api-mirror -- --apply  # add SUPABASE_WRI
 npm run eos:moraware:promote-report-run-matched-facts -- --review-ambiguous  # read-only
 npm run eos:moraware:promote-report-run-matched-facts                         # dry-run
 npm run eos:moraware:promote-report-run-matched-facts -- --apply --matched-only  # add SUPABASE_WRITE_ENABLED=1
+
+# View 220 name-only promotion (matches + unmatched included, ambiguous excluded)
+npm run eos:moraware:promote-report-run-matched-facts -- --apply --allow-name-only  # add SUPABASE_WRITE_ENABLED=1
 
 # Tests
 npm run eos:test:moraware-report-feed
@@ -91,13 +97,22 @@ Code: `backend-core/src/moraware/reportFeeds/`, scripts under `backend-core/src/
 
 **View 220 contract built (2026-05-31):** 34-column `sales_worksheet_history_facts` contract. Fixture, parser tests, and commented Supabase feed INSERT added. All existing pipeline modules reuse without modification. No DB migration needed. Supabase feed INSERT must be run manually before staging.
 
-**Next immediate steps:**
+**View 220 name-only promotion built (2026-05-31):** `--allow-name-only` flag added to CLI and orchestrator. Permitted only for `sales_worksheet_history_facts` (DB-enforced). Promotes matched + `needs_identity_review` rows; ambiguous always excluded. Identity_status flows to prepared fact; null IDs for name-only rows. Run status stays `needs_review`. View 219 policy unchanged.
 
-1. (Optional) Run the view 220 feed INSERT in Supabase SQL editor (see `eliteos_moraware_report_feeds.sql` or `moraware-report-feeds.md` § View 220).
-2. (Optional) Stage a real view 220 CSV export using the existing pipeline.
-3. (Optional) Resolve the 29 ambiguous rows from run `8f5e74d1`.
-4. (Optional) Add `account_salesperson` as a typed column if per-account salesperson reporting is needed.
-5. Wire a dashboard to read from `moraware_prepared_sales_worksheet_facts` (separate approval — see "Do not build yet"). **Remember: always filter by `report_feed_id` to prevent double-counting view 219 and view 220.**
+**Next immediate steps (view 220):**
+
+1. Run the view 220 Supabase feed INSERT manually (see `eliteos_moraware_report_feeds.sql` or `moraware-report-feeds.md` § View 220 § Supabase feed INSERT). Replace org UUID first.
+2. Stage the view 220 CSV export using `eos:moraware:stage-report-feed-local` with `--report-feed-id <view220-feed-id>`.
+3. Run API mirror enrichment dry-run on run `655eed33` (`eos:moraware:enrich-report-run-api-mirror`).
+4. Apply API mirror enrichment (`--apply`).
+5. Dry-run name-only promotion (no flags — shows matched + name-only breakdown).
+6. Apply name-only promotion: `--apply --allow-name-only` with `SUPABASE_WRITE_ENABLED=1`.
+7. Validate: sqft total ~562,602.50, 22,899 active facts, `identity_status` breakdown matches enrichment counts.
+
+**Next immediate steps (view 219):**
+1. (Optional) Resolve the 29 ambiguous rows from run `8f5e74d1`.
+2. (Optional) Add `account_salesperson` as a typed column if per-account salesperson reporting is needed.
+3. Wire a dashboard to read from `moraware_prepared_sales_worksheet_facts` (separate approval — see "Do not build yet"). **Always filter by `report_feed_id`. Handle null `job_id`/`account_id` in view 220 rows.**
 
 **Phase B (governed download — still pending):**
 
@@ -131,7 +146,7 @@ Later slices (separate approval): raw artifact storage decision → scheduled wo
 - Old prepared facts: supersede/deactivate (`is_active`, `superseded_by`), not blind delete
 - Service-role Supabase writes: backend/scripts only, gated by env flags
 
-Durable decisions: `FEATURE_DECISIONS.md` entries **37** (additive lane), **38** (SQL supersede semantics), **39** (governed download v1 contract), **40** (Option B real export shape, Branch deferred), **41** (76-column full contract, identity-link dedup, error serialization hardening), **42** (HTML identity is best-effort; view 219 HTML is paginated; full identity deferred), **43** (API mirror enrichment: exact match, dry-run default, no promotion), **44** (matched-only promotion: ambiguous excluded, unmatched blocks, dry-run default, no auto-promote), **45** (view 220 separate feed, shared prepared table, report_feed_id scoping required, job_status null OK).
+Durable decisions: `FEATURE_DECISIONS.md` entries **37** (additive lane), **38** (SQL supersede semantics), **39** (governed download v1 contract), **40** (Option B real export shape, Branch deferred), **41** (76-column full contract, identity-link dedup, error serialization hardening), **42** (HTML identity is best-effort; view 219 HTML is paginated; full identity deferred), **43** (API mirror enrichment: exact match, dry-run default, no promotion), **44** (matched-only promotion: ambiguous excluded, unmatched blocks, dry-run default, no auto-promote), **45** (view 220 separate feed, shared prepared table, report_feed_id scoping required, job_status null OK), **46** (name-only promotion: view 220 only, null IDs allowed, run stays needs_review, DB-enforced type guard).
 
 ---
 

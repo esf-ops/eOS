@@ -2,14 +2,17 @@
 /**
  * Moraware Report Feed — promote prepared facts from a persisted/enriched run.
  *
- * Reads moraware_report_raw_rows where identity_status = "matched" for a
- * given run, then promotes them to moraware_prepared_sales_worksheet_facts,
- * preserving supersede semantics (deactivate old → insert new → backfill).
+ * Reads moraware_report_raw_rows for a given run, then promotes eligible rows to
+ * moraware_prepared_sales_worksheet_facts, preserving supersede semantics
+ * (deactivate old → insert new → backfill).
  *
  * Modes:
- *   (default)               Dry-run: prints plan, no writes.
- *   --apply --matched-only  Apply: promotes matched rows, excludes ambiguous.
- *   --review-ambiguous      Read-only: prints ambiguous match keys and candidate IDs.
+ *   (default)                       Dry-run: prints plan, no writes.
+ *   --apply --matched-only          Apply: promotes matched rows; excludes ambiguous.
+ *   --apply --allow-name-only       Apply: promotes matched + needs_identity_review rows
+ *                                   (name-only, with null job_id/account_id).
+ *                                   Permitted only for sales_worksheet_history_facts.
+ *   --review-ambiguous              Read-only: prints ambiguous match keys and candidate IDs.
  *
  * Required env vars:
  *   MORAWARE_REPORT_RUN_ID (or --run-id)
@@ -19,7 +22,8 @@
  *
  * For --apply, also required:
  *   SUPABASE_WRITE_ENABLED=1
- *   --matched-only  (required if the run has ambiguous_identity rows)
+ *   --matched-only       (required if ambiguous rows exist and --allow-name-only is not set)
+ *   --allow-name-only    (required if unmatched rows exist; permitted only for view 220)
  *
  * Safe output:
  * - Prints counts, run status, plan summary, match keys (no raw row values).
@@ -81,6 +85,7 @@ function formatCliError(err) {
 async function main() {
   const applyFlag = args.includes("--apply");
   const matchedOnlyFlag = args.includes("--matched-only");
+  const allowNameOnlyFlag = args.includes("--allow-name-only");
   const reviewAmbiguousFlag = args.includes("--review-ambiguous");
 
   const runId = requiredInput(
@@ -136,22 +141,31 @@ async function main() {
   const dryRun = !applyFlag;
   const modeLabel = dryRun
     ? "DRY-RUN (no writes)"
-    : (matchedOnlyFlag ? "APPLY matched-only (ambiguous rows excluded)" : "APPLY full");
+    : allowNameOnlyFlag
+      ? "APPLY name-only (matched + unmatched rows included; ambiguous excluded)"
+      : matchedOnlyFlag
+        ? "APPLY matched-only (ambiguous rows excluded)"
+        : "APPLY full";
 
-  console.log("Moraware report-feed — promote matched prepared facts");
-  console.log(`  Run ID:       ${runId}`);
-  console.log(`  Org ID:       ${organizationId}`);
-  console.log(`  Mode:         ${modeLabel}`);
+  console.log("Moraware report-feed — promote prepared facts");
+  console.log(`  Run ID:           ${runId}`);
+  console.log(`  Org ID:           ${organizationId}`);
+  console.log(`  Mode:             ${modeLabel}`);
   if (matchedOnlyFlag) {
-    console.log("  matched-only: YES — ambiguous rows will be excluded from prepared facts");
+    console.log("  matched-only:     YES — ambiguous rows will be excluded from prepared facts");
+  }
+  if (allowNameOnlyFlag) {
+    console.log("  allow-name-only:  YES — needs_identity_review rows will be promoted as name-only facts");
+    console.log("                    (null job_id/account_id; permitted only for sales_worksheet_history_facts)");
   }
   console.log();
 
-  if (applyFlag && !matchedOnlyFlag) {
-    // Warn that --apply without --matched-only requires zero ambiguous rows.
+  if (applyFlag && !matchedOnlyFlag && !allowNameOnlyFlag) {
     console.log(
-      "NOTE: --apply without --matched-only will be blocked if the run has\n" +
-      "      ambiguous_identity rows.  Pass --matched-only to exclude them."
+      "NOTE: --apply without --matched-only or --allow-name-only will be blocked\n" +
+      "      if the run has ambiguous_identity or unmatched_identity rows.\n" +
+      "      Pass --matched-only to exclude ambiguous rows.\n" +
+      "      Pass --allow-name-only to include unmatched rows as name-only facts (view 220 only)."
     );
     console.log();
   }
@@ -162,13 +176,14 @@ async function main() {
     runId,
     organizationId,
     matchedOnly: matchedOnlyFlag,
+    allowNameOnly: allowNameOnlyFlag,
     dryRun
   });
 
   // ── Dry-run output ──────────────────────────────────────────────────────────
   if (dryRun) {
     if (result.skipped) {
-      console.log(`BLOCKED — promotion would be refused.`);
+      console.log("BLOCKED — promotion would be refused.");
       console.log(`  Reason:   ${result.reason}`);
       if (result.details) {
         console.log(`  Details:  ${JSON.stringify(result.details)}`);
@@ -180,31 +195,58 @@ async function main() {
           "  while explicitly excluding ambiguous rows from prepared facts."
         );
       }
+      if (result.reason === "unmatched_rows_present") {
+        console.log(
+          "  Pass --allow-name-only to include needs_identity_review rows as name-only facts.\n" +
+          "  Only permitted for report_type=sales_worksheet_history_facts (view 220)."
+        );
+      }
+      if (result.reason === "name_only_not_allowed_for_report_type") {
+        console.log(
+          `  --allow-name-only is only permitted for sales_worksheet_history_facts.\n` +
+          `  This run's feed has report_type="${result.details?.reportType ?? "unknown"}".\n` +
+          "  Use --matched-only instead to exclude ambiguous rows for view 219 feeds."
+        );
+      }
       return;
     }
 
-    console.log(`Run status:         ${result.runStatus}`);
-    console.log(`Report feed ID:     ${result.reportFeedId}`);
-    console.log(`Schema drift:       ${result.schemaDrift ? "YES (would be blocked)" : "none"}`);
+    console.log(`Run status:             ${result.runStatus}`);
+    console.log(`Report feed ID:         ${result.reportFeedId}`);
+    console.log(`Schema drift:           ${result.schemaDrift ? "YES (would be blocked)" : "none"}`);
     console.log();
     console.log("Promotion plan:");
-    console.log(`  Matched rows eligible:   ${result.matchedRowsEligible}`);
-    console.log(`  Ambiguous rows excluded: ${result.ambiguousExcluded}`);
-    console.log(`  Unmatched rows:          ${result.unmatchedCount}`);
-    console.log(`  Old facts to deactivate: ${result.plan.deactivateCount}`);
-    console.log(`  New facts to insert:     ${result.plan.insertCount}`);
-    console.log(`  Superseded_by backfills: ${result.plan.backfillCount}`);
+    console.log(`  Matched rows eligible:    ${result.matchedRowsEligible}`);
+    if (result.plan.allowNameOnly) {
+      console.log(`  Name-only rows eligible:  ${result.nameOnlyRowsEligible}`);
+    }
+    console.log(`  Ambiguous rows excluded:  ${result.ambiguousExcluded}`);
+    if (!result.plan.allowNameOnly) {
+      console.log(`  Unmatched rows:           ${result.unmatchedCount}`);
+    }
+    console.log(`  Old facts to deactivate:  ${result.plan.deactivateCount}`);
+    console.log(`  New facts to insert:      ${result.plan.insertCount}`);
+    console.log(`  Superseded_by backfills:  ${result.plan.backfillCount}`);
+    if (result.plan.allowNameOnly && result.nameOnlyRowsEligible > 0) {
+      console.log();
+      console.log(
+        `WARNING: ${result.nameOnlyRowsEligible} name-only fact(s) will have null job_id and null account_id.\n` +
+        "         Dashboard queries must filter by report_feed_id to avoid double-counting\n" +
+        "         and handle null ID joins gracefully."
+      );
+    }
     console.log();
+    const applyHint = allowNameOnlyFlag
+      ? "--apply --allow-name-only"
+      : "--apply --matched-only";
     console.log("DRY-RUN complete — no writes performed.");
-    console.log(
-      "To apply, run with --apply --matched-only (and SUPABASE_WRITE_ENABLED=1)."
-    );
+    console.log(`To apply, run with ${applyHint} (and SUPABASE_WRITE_ENABLED=1).`);
     return;
   }
 
   // ── Apply output ────────────────────────────────────────────────────────────
   if (result.skipped) {
-    console.log(`BLOCKED — promotion refused.`);
+    console.log("BLOCKED — promotion refused.");
     console.log(`  Reason:   ${result.reason}`);
     if (result.details) {
       console.log(`  Details:  ${JSON.stringify(result.details)}`);
@@ -212,25 +254,38 @@ async function main() {
     process.exit(1);
   }
 
-  console.log(`Run status (after):  ${result.runStatus}`);
-  console.log(`Report feed ID:      ${result.reportFeedId}`);
+  console.log(`Run status (after):   ${result.runStatus}`);
+  console.log(`Report feed ID:       ${result.reportFeedId}`);
   console.log();
   console.log("Promotion applied:");
-  console.log(`  Matched rows promoted:   ${result.insertCount}`);
-  console.log(`  Old facts deactivated:   ${result.deactivateCount}`);
-  console.log(`  superseded_by backfills: ${result.backfillCount}`);
-  console.log(`  Ambiguous rows excluded: ${result.ambiguousExcluded}`);
-  console.log(`  Unmatched rows excluded: ${result.unmatchedExcluded}`);
+  if (result.allowNameOnly) {
+    console.log(`  Matched rows promoted:    ${result.matchedRowCount}`);
+    console.log(`  Name-only rows promoted:  ${result.nameOnlyRowCount}`);
+    console.log(`  Total facts inserted:     ${result.insertCount}`);
+  } else {
+    console.log(`  Rows promoted:            ${result.insertCount}`);
+  }
+  console.log(`  Old facts deactivated:    ${result.deactivateCount}`);
+  console.log(`  superseded_by backfills:  ${result.backfillCount}`);
+  console.log(`  Ambiguous rows excluded:  ${result.ambiguousExcluded}`);
+  if (!result.allowNameOnly) {
+    console.log(`  Unmatched rows excluded:  ${result.unmatchedExcluded}`);
+  }
   console.log();
-  if (result.matchedOnly && result.ambiguousExcluded > 0) {
+  if (result.allowNameOnly && result.nameOnlyRowCount > 0) {
+    console.log(
+      `WARNING: ${result.nameOnlyRowCount} name-only fact(s) have null job_id and null account_id.\n` +
+      `         Run status kept as "${result.runStatus}" because identity is partial.\n` +
+      "         Dashboard queries must filter by report_feed_id and handle null ID joins."
+    );
+  } else if (result.matchedOnly && result.ambiguousExcluded > 0) {
     console.log(
       `NOTE: ${result.ambiguousExcluded} ambiguous row(s) remain in moraware_report_raw_rows.\n` +
       "      Run --review-ambiguous to inspect them.\n" +
-      "      Run status kept as \"" + result.runStatus + "\" (not \"promoted\") because\n" +
-      "      ambiguous rows have not been resolved."
+      `      Run status kept as "${result.runStatus}" because ambiguous rows are unresolved.`
     );
   } else {
-    console.log(`Run status set to "promoted".`);
+    console.log('Run status set to "promoted".');
   }
 }
 

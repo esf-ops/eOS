@@ -571,6 +571,18 @@
 
 ---
 
+### 46. Name-only promotion — view 220 only, null IDs allowed, run status stays needs_review
+
+| Field | Value |
+|-------|-------|
+| **Date** | 2026-05-31 |
+| **Decision** | A new `--allow-name-only` flag is added to `promoteReportRunMatchedFacts` (CLI) and `promotePersistedRunMatchedFacts` (module). When set, it promotes both `identity_status = "matched"` rows (with `job_id`/`account_id`) AND `identity_status = "needs_identity_review"` rows (name-only, null `job_id`/`account_id`) to `moraware_prepared_sales_worksheet_facts`. Behavior: (1) **Permitted only for `report_type = sales_worksheet_history_facts`** — the orchestrator loads the feed row from `moraware_report_feeds` and validates `report_type`; passing `--allow-name-only` for a view 219 feed returns `name_only_not_allowed_for_report_type` and blocks. (2) **Ambiguous rows are always excluded** — `--allow-name-only` inherently bypasses both the unmatched gate and the ambiguous gate (ambiguous rows are excluded by design, not promoted). (3) **Schema drift still blocks** — no override. (4) **`identity_status` is preserved** in the prepared fact — name-only facts have `identity_status = "needs_identity_review"` and null IDs. (5) **Run status stays `needs_review`** whenever any name-only rows are promoted, because identity is partial. The run never reaches `"promoted"` while name-only facts exist. (6) **Run summary** appends `mode = "name_only"`, `nameOnlyRowCount`, a `warning` string, and `unmatchedExcluded = 0` (since unmatched rows are included, not excluded). (7) **Dry-run default** — `--apply` required; `SUPABASE_WRITE_ENABLED=1` required. The rationale for allowing name-only for view 220: the historical worksheet export is the source of truth for YoY analytics (account_name, job_name, sqft, stone, salesperson). Blocking promotion because the API mirror doesn't have IDs for historical jobs would prevent the YoY dashboard from receiving its primary data. The dashboard aggregates by `account_name`/`job_salesperson`/`stone`/`room`, not by `job_id`, so null IDs are acceptable. View 219 (current-year) is not affected — it retains the unmatched-blocks policy. |
+| **Why** | The API mirror only contains current/recent jobs; historical worksheet rows (pre-dating the API sync) will never match. Blocking on unmatched rows for view 220 would permanently prevent YoY analytics from being populated. Name-only prepared facts are useful for YoY totals (sum by salesperson, stone, period). Dashboard queries already require `report_feed_id` scoping per Entry 45 — adding a null-ID handling note is a natural extension. |
+| **Impacted files** | `backend-core/src/moraware/reportFeeds/promotePersistedRunMatchedFacts.js`, `backend-core/src/scripts/moraware/promoteReportRunMatchedFacts.js`, `backend-core/src/moraware/reportFeeds/promotePersistedRunMatchedFacts.test.mjs`, `docs/eliteos/moraware-report-feeds.md`, `docs/eliteos/CURSOR_ACTIVE_HANDOFF.md` |
+| **Revisit trigger** | Before wiring a YoY dashboard — ensure `WHERE report_feed_id = <v220-feed-id>` and `null` ID handling are documented in dashboard query specs; before adding fuzzy identity matching that could retroactively match historical name-only rows; before supporting name-only mode for any other report type. |
+
+---
+
 ### 45. View 220 Sales Worksheet History Facts — separate feed, shared prepared table, report_feed_id scoping required
 
 | Field | Value |

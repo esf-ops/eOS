@@ -3,17 +3,29 @@
  *
  * This is the post-enrichment promotion path: reads already-staged and
  * API-mirror-enriched rows from moraware_report_raw_rows, then promotes
- * only "matched" rows to moraware_prepared_sales_worksheet_facts.
+ * them to moraware_prepared_sales_worksheet_facts.
  *
  * Unlike promoteReportFeedFacts (which promotes from in-memory processResult),
- * this module reads from the DB and supports matched-only mode for runs that
- * have ambiguous identity rows.
+ * this module reads from the DB and supports two special modes for runs that
+ * have identity complications:
+ *
+ *   matchedOnly = true  — promotes only identity_status="matched" rows;
+ *                          excludes ambiguous_identity rows; used when ambiguous rows
+ *                          exist but a clean majority can be promoted.
+ *
+ *   allowNameOnly = true — additionally promotes identity_status="needs_identity_review"
+ *                           rows as name-only facts (null job_id / account_id);
+ *                           permitted ONLY for report_type=sales_worksheet_history_facts
+ *                           (enforced via DB lookup — cannot be bypassed by caller);
+ *                           always excludes ambiguous_identity rows;
+ *                           run status stays needs_review when name-only rows are included
+ *                           because identity is partial.
  *
  * Safe defaults:
  * - dryRun = true — no writes without explicit dryRun: false
  * - Refuses if schema_drift.detected = true
- * - Refuses if unmatched_identity_count > 0
- * - Refuses ambiguous rows unless matchedOnly = true
+ * - Refuses if unmatched_identity_count > 0 (unless allowNameOnly)
+ * - Refuses ambiguous rows unless matchedOnly or allowNameOnly
  * - Never promotes ambiguous_identity rows
  * - Never deletes prepared facts
  * - Preserves supersede semantics (deactivate → insert → backfill)
@@ -31,11 +43,17 @@
 import { mapPreparedSalesWorksheetFact } from "./mapPreparedSalesWorksheetFact.js";
 import { planPreparedFactSupersede } from "./planPreparedFactSupersede.js";
 import { loadActivePreparedFacts } from "./promoteSalesWorksheetFacts.js";
+import { SALES_WORKSHEET_HISTORY_FACTS_REPORT_TYPE } from "./constants.js";
 
 const RAW_ROWS_PAGE_SIZE = 1000;
 const DEACTIVATE_BATCH_SIZE = 500;
 const INSERT_BATCH_SIZE = 500;
 const IDENTITY_LINKS_PAGE_SIZE = 1000;
+
+/** Column list for moraware_report_raw_rows queries (avoids repetition). */
+const RAW_ROW_SELECT =
+  "id, row_hash, account_id, job_id, account_name, job_name, " +
+  "identity_status, identity_reason, raw_row, row_number";
 
 /** Wrap a bare Supabase/PostgREST error object so it has a usable .stack. */
 function toError(err) {
@@ -88,15 +106,19 @@ async function fetchAllPages(db, table, filters, select, pageSize) {
  * Blocks on:
  *   - run already promoted
  *   - schema_drift.detected = true
- *   - unmatched_identity_count > 0
- *   - ambiguous_identity_count > 0 unless matchedOnly = true
+ *   - unmatched_identity_count > 0   (unless allowNameOnly = true)
+ *   - ambiguous_identity_count > 0   (unless matchedOnly OR allowNameOnly)
+ *
+ * allowNameOnly = true bypasses both the unmatched gate and the ambiguous gate.
+ * The orchestrator is responsible for validating that allowNameOnly is only set
+ * for report_type = sales_worksheet_history_facts (via a DB lookup before this call).
  *
  * @param {object} run - moraware_report_runs DB row
- * @param {{ matchedOnly?: boolean }} [opts]
+ * @param {{ matchedOnly?: boolean, allowNameOnly?: boolean }} [opts]
  * @returns {{ ok: boolean, reason: string|null, details?: object }}
  */
 export function checkPersistedRunGates(run, opts = {}) {
-  const { matchedOnly = false } = opts;
+  const { matchedOnly = false, allowNameOnly = false } = opts;
 
   if (!run || typeof run !== "object") {
     return { ok: false, reason: "invalid_run" };
@@ -115,7 +137,7 @@ export function checkPersistedRunGates(run, opts = {}) {
   }
 
   const unmatchedCount = run.unmatched_identity_count ?? 0;
-  if (unmatchedCount > 0) {
+  if (unmatchedCount > 0 && !allowNameOnly) {
     return {
       ok: false,
       reason: "unmatched_rows_present",
@@ -124,7 +146,8 @@ export function checkPersistedRunGates(run, opts = {}) {
   }
 
   const ambiguousCount = run.ambiguous_identity_count ?? 0;
-  if (ambiguousCount > 0 && !matchedOnly) {
+  // allowNameOnly inherently excludes ambiguous rows, so it satisfies this gate.
+  if (ambiguousCount > 0 && !matchedOnly && !allowNameOnly) {
     return {
       ok: false,
       reason: "ambiguous_rows_require_matched_only_flag",
@@ -236,31 +259,41 @@ export async function reviewAmbiguousRows(db, { runId, organizationId }) {
  * Promote prepared facts from persisted moraware_report_raw_rows.
  *
  * Execution order (enforced):
- *   1. Load + gate-check the run.
- *   2. Fetch matched raw rows (paged).
- *   3. Map to prepared-fact payloads (mapPreparedSalesWorksheetFact).
- *   4. Load existing active facts (loadActivePreparedFacts).
- *   5. Build supersede plan (planPreparedFactSupersede).
- *   6. [dry-run] Return plan summary — no writes.
- *   7. [apply] Batch-deactivate old active facts.
- *   8. [apply] Batch-insert new active facts; rollback on failure.
- *   9. [apply] Row-by-row backfill superseded_by (non-fatal).
- *  10. [apply] Update run summary JSON and status.
+ *   1. Load + org-validate the run.
+ *   2. [allowNameOnly] Validate feed report_type via DB — must be sales_worksheet_history_facts.
+ *   3. Gate checks (checkPersistedRunGates).
+ *   4. Fetch matched raw rows (paged).
+ *   5. [allowNameOnly] Fetch needs_identity_review rows (name-only) (paged).
+ *   6. Map all eligible rows to prepared-fact payloads (mapPreparedSalesWorksheetFact).
+ *   7. Load existing active facts (loadActivePreparedFacts).
+ *   8. Build supersede plan (planPreparedFactSupersede).
+ *   9. [dry-run] Return plan summary — no writes.
+ *  10. [apply] Batch-deactivate old active facts.
+ *  11. [apply] Batch-insert new active facts; rollback on failure.
+ *  12. [apply] Row-by-row backfill superseded_by (non-fatal).
+ *  13. [apply] Update run summary JSON and status.
  *
  * @param {import("@supabase/supabase-js").SupabaseClient} db
  * @param {object} params
- * @param {string}           params.runId          - UUID of moraware_report_runs row
- * @param {string}           params.organizationId - Organization UUID
- * @param {boolean}          [params.matchedOnly]  - If true, promotes only matched rows even
- *                                                    if ambiguous rows exist.  Default false.
- * @param {boolean}          [params.dryRun]       - If true (default), no DB writes performed.
- * @param {Date|string|null} [params.promotedAt]   - Timestamp override (defaults to now).
+ * @param {string}           params.runId           - UUID of moraware_report_runs row
+ * @param {string}           params.organizationId  - Organization UUID
+ * @param {boolean}          [params.matchedOnly]   - If true, promotes only matched rows even
+ *                                                     if ambiguous rows exist.  Default false.
+ * @param {boolean}          [params.allowNameOnly] - If true, also promotes needs_identity_review
+ *                                                     rows as name-only facts (null job_id/account_id).
+ *                                                     Permitted only for sales_worksheet_history_facts.
+ *                                                     Always excludes ambiguous_identity rows.
+ *                                                     Run status stays needs_review (identity partial).
+ *                                                     Default false.
+ * @param {boolean}          [params.dryRun]        - If true (default), no DB writes performed.
+ * @param {Date|string|null} [params.promotedAt]    - Timestamp override (defaults to now).
  * @returns {Promise<PromotePersistedResult>}
  */
 export async function promotePersistedRunMatchedFacts(db, {
   runId,
   organizationId,
   matchedOnly = false,
+  allowNameOnly = false,
   dryRun = true,
   promotedAt = null
 }) {
@@ -282,8 +315,36 @@ export async function promotePersistedRunMatchedFacts(db, {
     );
   }
 
-  // ── Step 2: Gate checks ───────────────────────────────────────────────────────
-  const gate = checkPersistedRunGates(run, { matchedOnly });
+  const feedId = run.report_feed_id;
+  if (!feedId) {
+    return { promoted: false, skipped: true, dryRun, reason: "missing_report_feed_id" };
+  }
+
+  // ── Step 2: Validate name-only mode is only permitted for historical worksheet feed ─
+  if (allowNameOnly) {
+    const { data: feed, error: feedErr } = await db
+      .from("moraware_report_feeds")
+      .select("report_type")
+      .eq("id", feedId)
+      .maybeSingle();
+    if (feedErr) throw toError(feedErr);
+    const feedReportType = feed?.report_type ?? null;
+    if (feedReportType !== SALES_WORKSHEET_HISTORY_FACTS_REPORT_TYPE) {
+      return {
+        promoted: false,
+        skipped: true,
+        dryRun,
+        reason: "name_only_not_allowed_for_report_type",
+        details: {
+          reportType: feedReportType,
+          allowedFor: SALES_WORKSHEET_HISTORY_FACTS_REPORT_TYPE
+        }
+      };
+    }
+  }
+
+  // ── Step 3: Gate checks ───────────────────────────────────────────────────────
+  const gate = checkPersistedRunGates(run, { matchedOnly, allowNameOnly });
   if (!gate.ok) {
     return {
       promoted: false,
@@ -294,31 +355,46 @@ export async function promotePersistedRunMatchedFacts(db, {
     };
   }
 
-  const feedId = run.report_feed_id;
-  if (!feedId) {
-    return { promoted: false, skipped: true, dryRun, reason: "missing_report_feed_id" };
-  }
-
   const now = promotedAt ? new Date(promotedAt).toISOString() : new Date().toISOString();
   const ambiguousCount = run.ambiguous_identity_count ?? 0;
   const unmatchedCount = run.unmatched_identity_count ?? 0;
 
-  // ── Step 3: Fetch matched raw rows (paged) ────────────────────────────────────
+  // ── Step 4: Fetch matched raw rows (paged) ────────────────────────────────────
   const matchedRawRows = await fetchAllPages(
     db,
     "moraware_report_raw_rows",
     { organization_id: organizationId, report_run_id: runId, identity_status: "matched" },
-    "id, row_hash, account_id, job_id, account_name, job_name, " +
-    "identity_status, identity_reason, raw_row, row_number",
+    RAW_ROW_SELECT,
     RAW_ROWS_PAGE_SIZE
   );
 
-  if (matchedRawRows.length === 0) {
-    return { promoted: false, skipped: true, dryRun, reason: "no_matched_rows" };
+  // ── Step 5: Fetch name-only rows (needs_identity_review) if allowNameOnly ─────
+  let nameOnlyRawRows = [];
+  if (allowNameOnly) {
+    nameOnlyRawRows = await fetchAllPages(
+      db,
+      "moraware_report_raw_rows",
+      { organization_id: organizationId, report_run_id: runId, identity_status: "needs_identity_review" },
+      RAW_ROW_SELECT,
+      RAW_ROWS_PAGE_SIZE
+    );
   }
 
-  // ── Step 4: Map to prepared-fact payloads ─────────────────────────────────────
-  const incomingFacts = matchedRawRows.map((dbRow) =>
+  const allEligibleRows = [...matchedRawRows, ...nameOnlyRawRows];
+
+  if (allEligibleRows.length === 0) {
+    return {
+      promoted: false,
+      skipped: true,
+      dryRun,
+      reason: allowNameOnly ? "no_eligible_rows" : "no_matched_rows"
+    };
+  }
+
+  // ── Step 6: Map to prepared-fact payloads ─────────────────────────────────────
+  // identity_status flows through to the prepared fact for all rows.
+  // Name-only rows will have null account_id and null job_id in the prepared fact.
+  const incomingFacts = allEligibleRows.map((dbRow) =>
     mapPreparedSalesWorksheetFact({
       enrichedRow: persistedRawRowToEnrichedRow(dbRow),
       organizationId,
@@ -328,13 +404,13 @@ export async function promotePersistedRunMatchedFacts(db, {
     })
   );
 
-  // ── Step 5: Load existing active facts for supersede plan ─────────────────────
+  // ── Step 7: Load existing active facts for supersede plan ─────────────────────
   const existingActiveFacts = await loadActivePreparedFacts(db, {
     organizationId,
     reportFeedId: feedId
   });
 
-  // ── Step 6: Build supersede plan ──────────────────────────────────────────────
+  // ── Step 8: Build supersede plan ──────────────────────────────────────────────
   const plan = planPreparedFactSupersede({
     existingActiveFacts,
     incomingFacts,
@@ -358,7 +434,7 @@ export async function promotePersistedRunMatchedFacts(db, {
   const insertSteps = plan.steps.filter((s) => s.action === "insert");
   const backfillSteps = plan.steps.filter((s) => s.action === "backfill_superseded_by");
 
-  // ── Step 7 (dry-run): Return plan summary — no writes ─────────────────────────
+  // ── Step 9 (dry-run): Return plan summary — no writes ─────────────────────────
   if (dryRun) {
     return {
       promoted: false,
@@ -370,18 +446,20 @@ export async function promotePersistedRunMatchedFacts(db, {
       runStatus: run.status,
       schemaDrift: run.schema_drift?.detected === true,
       matchedRowsEligible: matchedRawRows.length,
+      nameOnlyRowsEligible: nameOnlyRawRows.length,
       ambiguousExcluded: ambiguousCount,
-      unmatchedCount,
+      unmatchedCount: allowNameOnly ? 0 : unmatchedCount,
       plan: {
         insertCount: plan.insertCount,
         deactivateCount: plan.deactivateCount,
         backfillCount: plan.backfillCount,
-        matchedOnly
+        matchedOnly,
+        allowNameOnly
       }
     };
   }
 
-  // ── Step 8: Batch-deactivate old active facts ─────────────────────────────────
+  // ── Step 10: Batch-deactivate old active facts ────────────────────────────────
   // All deactivations before any inserts to satisfy the partial unique index.
   const deactivateIds = deactivateSteps.map((s) => s.payload.id);
   for (let i = 0; i < deactivateIds.length; i += DEACTIVATE_BATCH_SIZE) {
@@ -393,7 +471,7 @@ export async function promotePersistedRunMatchedFacts(db, {
     if (error) throw toError(error);
   }
 
-  // ── Step 9: Batch-insert new active facts (with rollback on failure) ──────────
+  // ── Step 11: Batch-insert new active facts (with rollback on failure) ─────────
   const newIdByHash = new Map();
   try {
     const insertPayloads = insertSteps.map((s) => s.payload);
@@ -424,7 +502,7 @@ export async function promotePersistedRunMatchedFacts(db, {
     throw insertErr;
   }
 
-  // ── Step 10: Backfill superseded_by (row-by-row, non-fatal) ──────────────────
+  // ── Step 12: Backfill superseded_by (row-by-row, non-fatal) ──────────────────
   let backfillCount = 0;
   for (const step of backfillSteps) {
     const newId = newIdByHash.get(String(step.payload.newFactRowHash ?? ""));
@@ -440,17 +518,25 @@ export async function promotePersistedRunMatchedFacts(db, {
     }
   }
 
-  // ── Step 11: Update run summary and status ────────────────────────────────────
+  // ── Step 13: Update run summary and status ────────────────────────────────────
   const promotionEntry = {
     promotedAt: now,
-    mode: matchedOnly ? "matched_only" : "full",
+    mode: allowNameOnly ? "name_only" : (matchedOnly ? "matched_only" : "full"),
     matchedRowCount: matchedRawRows.length,
+    ...(allowNameOnly ? { nameOnlyRowCount: nameOnlyRawRows.length } : {}),
     ambiguousExcluded: ambiguousCount,
-    unmatchedExcluded: unmatchedCount,
+    unmatchedExcluded: allowNameOnly ? 0 : unmatchedCount,
     insertCount: insertSteps.length,
     deactivateCount: deactivateSteps.length,
     backfillCount,
-    dryRun: false
+    dryRun: false,
+    ...(allowNameOnly && nameOnlyRawRows.length > 0
+      ? {
+          warning:
+            "name_only_promotion: some prepared facts have null job_id/account_id; " +
+            "use report_feed_id scoping for all dashboard queries against this feed"
+        }
+      : {})
   };
 
   const existingSummary = run.summary ?? {};
@@ -462,13 +548,15 @@ export async function promotePersistedRunMatchedFacts(db, {
     ]
   };
 
-  // Status:
+  // Status logic:
+  //   - name-only mode with name-only rows promoted → needs_review (identity is partial)
   //   - matchedOnly with ambiguous rows remaining → keep existing status (e.g. "needs_review")
-  //     so operators know the run is not fully resolved.
-  //   - All rows cleanly matched (no ambiguous, no unmatched) → set to "promoted".
-  const newStatus = (matchedOnly && ambiguousCount > 0)
-    ? run.status
-    : "promoted";
+  //   - All rows cleanly resolved → "promoted"
+  const newStatus = (() => {
+    if (allowNameOnly && nameOnlyRawRows.length > 0) return "needs_review";
+    if (matchedOnly && ambiguousCount > 0) return run.status;
+    return "promoted";
+  })();
 
   const { error: runUpdateErr } = await db
     .from("moraware_report_runs")
@@ -485,11 +573,14 @@ export async function promotePersistedRunMatchedFacts(db, {
     reportFeedId: feedId,
     runStatus: newStatus,
     matchedOnly,
+    allowNameOnly,
+    matchedRowCount: matchedRawRows.length,
+    nameOnlyRowCount: nameOnlyRawRows.length,
     insertCount: insertSteps.length,
     deactivateCount: deactivateSteps.length,
     backfillCount,
     ambiguousExcluded: ambiguousCount,
-    unmatchedExcluded: unmatchedCount
+    unmatchedExcluded: allowNameOnly ? 0 : unmatchedCount
   };
 }
 
@@ -507,18 +598,22 @@ export async function promotePersistedRunMatchedFacts(db, {
  * @property {boolean}      promoted
  * @property {boolean}      dryRun
  * @property {boolean}      skipped
- * @property {string|null}  reason            - Block reason when skipped=true
- * @property {object|null}  [details]         - Extra context for block reasons
+ * @property {string|null}  reason               - Block reason when skipped=true
+ * @property {object|null}  [details]            - Extra context for block reasons
  * @property {string}       [runId]
  * @property {string}       [organizationId]
  * @property {string}       [reportFeedId]
  * @property {string}       [runStatus]
  * @property {boolean}      [matchedOnly]
+ * @property {boolean}      [allowNameOnly]
+ * @property {number}       [matchedRowCount]     - applied rows with identity_status=matched
+ * @property {number}       [nameOnlyRowCount]    - applied rows with identity_status=needs_identity_review
  * @property {number}       [insertCount]
  * @property {number}       [deactivateCount]
  * @property {number}       [backfillCount]
  * @property {number}       [ambiguousExcluded]
  * @property {number}       [unmatchedExcluded]
  * @property {number}       [matchedRowsEligible]  - dry-run only
+ * @property {number}       [nameOnlyRowsEligible] - dry-run only; allowNameOnly mode only
  * @property {object}       [plan]                 - dry-run only
  */

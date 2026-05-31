@@ -15,11 +15,12 @@ import {
 
 // ── Fake IDs ──────────────────────────────────────────────────────────────────
 
-const FAKE_ORG   = "00000000-0000-0000-0000-000000000001";
-const FAKE_FEED  = "aaaaaaaa-0000-0000-0000-000000000001";
-const FAKE_RUN   = "bbbbbbbb-0000-0000-0000-000000000001";
-const FACT_ID_1  = "cccccccc-0000-0000-0000-000000000001";
-const FACT_ID_2  = "cccccccc-0000-0000-0000-000000000002";
+const FAKE_ORG          = "00000000-0000-0000-0000-000000000001";
+const FAKE_FEED         = "aaaaaaaa-0000-0000-0000-000000000001"; // view 219 feed
+const FAKE_HISTORY_FEED = "aaaaaaaa-0000-0000-0000-000000000002"; // view 220 feed
+const FAKE_RUN          = "bbbbbbbb-0000-0000-0000-000000000001";
+const FACT_ID_1         = "cccccccc-0000-0000-0000-000000000001";
+const FACT_ID_2         = "cccccccc-0000-0000-0000-000000000002";
 
 // ── Fake run rows ─────────────────────────────────────────────────────────────
 
@@ -72,6 +73,42 @@ const SAMPLE_MATCHED_ROWS = [
   makeRawRow({ id: "row-3", row_hash: "hash-c" })
 ];
 
+/** Fake name-only raw row (needs_identity_review, no account_id/job_id). */
+function makeNameOnlyRawRow(overrides = {}) {
+  return {
+    id: "norow-" + Math.random().toString(36).slice(2, 8),
+    row_hash: "hash-no-" + Math.random().toString(36).slice(2, 16),
+    account_id: null,
+    job_id: null,
+    account_name: "Historic Builder Co",
+    job_name: "Old Kitchen Project",
+    identity_status: "needs_identity_review",
+    identity_reason: "no_api_mirror_match",
+    raw_row: {
+      "Account Name": "Historic Builder Co",
+      "Job Name": "Old Kitchen Project",
+      "Job Creation Date": "2023-01-15",
+      "Job Salesperson": "Bob",
+      "Stone": "Granite",
+      "Job Worksheet - Color": "Gray",
+      "Job Worksheet - Room": "Kitchen",
+      "Total Job Worksheet - Sq.Ft. by Job Creation Date": "38.0"
+    },
+    row_number: 10,
+    ...overrides
+  };
+}
+
+const SAMPLE_NAME_ONLY_ROWS = [
+  makeNameOnlyRawRow({ id: "norow-1", row_hash: "hash-no-a" }),
+  makeNameOnlyRawRow({ id: "norow-2", row_hash: "hash-no-b" }),
+  makeNameOnlyRawRow({ id: "norow-3", row_hash: "hash-no-c" })
+];
+
+// Feed stubs for feed-type validation tests.
+const FAKE_FEED_V219 = { id: FAKE_FEED, report_type: "sales_worksheet_facts" };
+const FAKE_FEED_V220 = { id: FAKE_HISTORY_FEED, report_type: "sales_worksheet_history_facts" };
+
 // ── Mock DB factory ───────────────────────────────────────────────────────────
 
 /**
@@ -79,7 +116,9 @@ const SAMPLE_MATCHED_ROWS = [
  *
  * @param {object} opts
  * @param {object|null}  opts.run               - Run row returned by maybeSingle()
+ * @param {object|null}  opts.feed              - Feed row returned by maybeSingle() (for report_type lookup)
  * @param {Array}        opts.matchedRawRows     - Raw rows with identity_status='matched'
+ * @param {Array}        opts.nameOnlyRawRows    - Raw rows with identity_status='needs_identity_review'
  * @param {Array}        opts.activeFacts        - Existing active prepared facts
  * @param {Array}        opts.ambiguousLinks     - Ambiguous identity links
  * @param {Error|null}   opts.insertError        - Simulate insert failure
@@ -88,7 +127,9 @@ const SAMPLE_MATCHED_ROWS = [
  */
 function makeMockDb({
   run = null,
+  feed = null,
   matchedRawRows = [],
+  nameOnlyRawRows = [],
   activeFacts = [],
   ambiguousLinks = [],
   insertError = null,
@@ -118,7 +159,9 @@ function makeMockDb({
           if (t === "moraware_report_raw_rows") {
             const statusFilter = eqFilters["identity_status"];
             const runFilter = eqFilters["report_run_id"];
-            let rows = matchedRawRows;
+            // Combine matched and name-only rows; filter by identity_status
+            const allRawRows = [...matchedRawRows, ...nameOnlyRawRows];
+            let rows = allRawRows;
             if (statusFilter) rows = rows.filter((r) => r.identity_status === statusFilter);
             if (runFilter) rows = rows.filter((r) => !r.report_run_id || r.report_run_id === runFilter);
             const page = rows.slice(from, to + 1);
@@ -142,8 +185,12 @@ function makeMockDb({
         maybeSingle() {
           const { tableName: t, eqFilters } = state;
           if (t === "moraware_report_runs") {
-            // Return matching run or null
             const match = run && eqFilters["id"] === run.id ? run : null;
+            return Promise.resolve({ data: match, error: null });
+          }
+          if (t === "moraware_report_feeds") {
+            // Return matching feed or null (used to validate report_type for allowNameOnly)
+            const match = feed && eqFilters["id"] === feed.id ? feed : null;
             return Promise.resolve({ data: match, error: null });
           }
           return Promise.resolve({ data: null, error: null });
@@ -712,6 +759,281 @@ function makeMockDb({
       assert.ok(typeof payload.row_hash === "string" && payload.row_hash.length > 0, "payload: row_hash set");
     }
   }
+}
+
+// ── checkPersistedRunGates — allowNameOnly ────────────────────────────────────
+
+{
+  // allowNameOnly bypasses unmatched gate
+  const r = checkPersistedRunGates(makeRun({ unmatched_identity_count: 5 }), { allowNameOnly: true });
+  assert.equal(r.ok, true, "gates-name-only: unmatched + allowNameOnly → ok");
+}
+
+{
+  // allowNameOnly also bypasses ambiguous gate (excludes ambiguous by design — no extra flag needed)
+  const r = checkPersistedRunGates(
+    makeRun({ unmatched_identity_count: 3, ambiguous_identity_count: 2 }),
+    { allowNameOnly: true }
+  );
+  assert.equal(r.ok, true, "gates-name-only: unmatched + ambiguous + allowNameOnly → ok");
+}
+
+{
+  // schema drift still blocks even with allowNameOnly
+  const r = checkPersistedRunGates(
+    makeRun({ schema_drift: { detected: true }, unmatched_identity_count: 5 }),
+    { allowNameOnly: true }
+  );
+  assert.equal(r.ok, false, "gates-name-only: schema drift blocks despite allowNameOnly");
+  assert.equal(r.reason, "schema_drift_detected");
+}
+
+{
+  // already promoted still blocks even with allowNameOnly
+  const r = checkPersistedRunGates(
+    makeRun({ status: "promoted", unmatched_identity_count: 5 }),
+    { allowNameOnly: true }
+  );
+  assert.equal(r.ok, false, "gates-name-only: already_promoted blocks despite allowNameOnly");
+  assert.equal(r.reason, "already_promoted");
+}
+
+// ── promotePersistedRunMatchedFacts — allowNameOnly: feed-type guard ──────────
+
+{
+  // View 219 (sales_worksheet_facts) must not allow name-only mode
+  const fakeRun = makeRun({ unmatched_identity_count: 5, ambiguous_identity_count: 0 });
+  const db = makeMockDb({ run: fakeRun, feed: FAKE_FEED_V219 });
+  const result = await promotePersistedRunMatchedFacts(db, {
+    runId: FAKE_RUN, organizationId: FAKE_ORG, allowNameOnly: true, dryRun: true
+  });
+  assert.equal(result.skipped, true, "v219-no-name-only: skipped=true");
+  assert.equal(result.reason, "name_only_not_allowed_for_report_type", "v219-no-name-only: correct reason");
+  assert.equal(result.details.reportType, "sales_worksheet_facts", "v219-no-name-only: details.reportType");
+  assert.equal(result.details.allowedFor, "sales_worksheet_history_facts", "v219-no-name-only: details.allowedFor");
+  const writes = db._log.filter((e) => ["insert", "update"].includes(e.op));
+  assert.equal(writes.length, 0, "v219-no-name-only: zero writes");
+}
+
+{
+  // View 219 with allowNameOnly=false and unmatched rows → blocked by unmatched gate (not name-only gate)
+  const fakeRun = makeRun({ unmatched_identity_count: 5, ambiguous_identity_count: 0 });
+  const db = makeMockDb({ run: fakeRun, feed: FAKE_FEED_V219 });
+  const result = await promotePersistedRunMatchedFacts(db, {
+    runId: FAKE_RUN, organizationId: FAKE_ORG, allowNameOnly: false, dryRun: true
+  });
+  assert.equal(result.skipped, true, "v219-unmatched-default: skipped=true");
+  assert.equal(result.reason, "unmatched_rows_present", "v219-unmatched-default: unmatched gate fires first");
+}
+
+// ── promotePersistedRunMatchedFacts — allowNameOnly: dry-run (view 220) ───────
+
+{
+  const fakeRun = makeRun({
+    report_feed_id: FAKE_HISTORY_FEED,
+    unmatched_identity_count: 3,
+    ambiguous_identity_count: 1,
+    matched_identity_count: 3
+  });
+  const db = makeMockDb({
+    run: fakeRun, feed: FAKE_FEED_V220,
+    matchedRawRows: SAMPLE_MATCHED_ROWS,
+    nameOnlyRawRows: SAMPLE_NAME_ONLY_ROWS,
+    activeFacts: []
+  });
+
+  const result = await promotePersistedRunMatchedFacts(db, {
+    runId: FAKE_RUN, organizationId: FAKE_ORG, allowNameOnly: true, dryRun: true
+  });
+
+  assert.equal(result.dryRun, true, "v220-dry-run: dryRun=true");
+  assert.equal(result.promoted, false, "v220-dry-run: promoted=false");
+  assert.equal(result.skipped, false, "v220-dry-run: skipped=false (plan computed)");
+  assert.equal(result.matchedRowsEligible, 3, "v220-dry-run: 3 matched rows eligible");
+  assert.equal(result.nameOnlyRowsEligible, 3, "v220-dry-run: 3 name-only rows eligible");
+  assert.equal(result.ambiguousExcluded, 1, "v220-dry-run: 1 ambiguous excluded");
+  assert.equal(result.unmatchedCount, 0, "v220-dry-run: unmatchedCount=0 (included as name-only)");
+  assert.equal(result.plan.insertCount, 6, "v220-dry-run: 6 inserts planned (3 matched + 3 name-only)");
+  assert.equal(result.plan.allowNameOnly, true, "v220-dry-run: plan.allowNameOnly=true");
+  const writes = db._log.filter((e) => ["insert", "update"].includes(e.op));
+  assert.equal(writes.length, 0, "v220-dry-run: zero DB writes");
+}
+
+// ── promotePersistedRunMatchedFacts — allowNameOnly: apply (view 220) ─────────
+
+{
+  const fakeRun = makeRun({
+    report_feed_id: FAKE_HISTORY_FEED,
+    unmatched_identity_count: 3,
+    ambiguous_identity_count: 1,
+    matched_identity_count: 3
+  });
+  const db = makeMockDb({
+    run: fakeRun, feed: FAKE_FEED_V220,
+    matchedRawRows: SAMPLE_MATCHED_ROWS,
+    nameOnlyRawRows: SAMPLE_NAME_ONLY_ROWS,
+    activeFacts: []
+  });
+
+  const result = await promotePersistedRunMatchedFacts(db, {
+    runId: FAKE_RUN, organizationId: FAKE_ORG, allowNameOnly: true, dryRun: false
+  });
+
+  assert.equal(result.promoted, true, "v220-apply: promoted=true");
+  assert.equal(result.dryRun, false, "v220-apply: dryRun=false");
+  assert.equal(result.allowNameOnly, true, "v220-apply: allowNameOnly=true");
+  assert.equal(result.matchedRowCount, 3, "v220-apply: matchedRowCount=3");
+  assert.equal(result.nameOnlyRowCount, 3, "v220-apply: nameOnlyRowCount=3");
+  assert.equal(result.insertCount, 6, "v220-apply: 6 total rows inserted");
+  assert.equal(result.ambiguousExcluded, 1, "v220-apply: 1 ambiguous excluded");
+  assert.equal(result.unmatchedExcluded, 0, "v220-apply: unmatchedExcluded=0 (included as name-only)");
+  // Run status stays needs_review because name-only facts have partial identity
+  assert.equal(result.runStatus, "needs_review", "v220-apply: status=needs_review (identity partial)");
+
+  const insertOps = db._log.filter((o) => o.op === "insert" && o.table === "moraware_prepared_sales_worksheet_facts");
+  const totalInserted = insertOps.reduce((s, op) => s + op.data.length, 0);
+  assert.equal(totalInserted, 6, "v220-apply: 6 facts inserted total");
+}
+
+// ── identity_status and null IDs preserved in prepared facts (name-only) ──────
+
+{
+  const fakeRun = makeRun({
+    report_feed_id: FAKE_HISTORY_FEED,
+    unmatched_identity_count: 1,
+    ambiguous_identity_count: 0,
+    matched_identity_count: 1
+  });
+  const singleMatchedRow = makeRawRow({ id: "m-1", row_hash: "hash-m-1" });
+  const singleNameOnlyRow = makeNameOnlyRawRow({ id: "no-1", row_hash: "hash-no-1" });
+  const db = makeMockDb({
+    run: fakeRun, feed: FAKE_FEED_V220,
+    matchedRawRows: [singleMatchedRow],
+    nameOnlyRawRows: [singleNameOnlyRow],
+    activeFacts: []
+  });
+
+  await promotePersistedRunMatchedFacts(db, {
+    runId: FAKE_RUN, organizationId: FAKE_ORG, allowNameOnly: true, dryRun: false
+  });
+
+  const insertOps = db._log.filter((o) => o.op === "insert" && o.table === "moraware_prepared_sales_worksheet_facts");
+  const allInserted = insertOps.flatMap((o) => o.data);
+  assert.equal(allInserted.length, 2, "identity-status: 2 rows inserted");
+
+  // Matched row → identity_status="matched", account_id and job_id populated
+  const matchedFact = allInserted.find((f) => f.row_hash === singleMatchedRow.row_hash);
+  assert.ok(matchedFact, "identity-status: matched fact found");
+  assert.equal(matchedFact.identity_status, "matched", "identity-status: matched fact has identity_status=matched");
+  assert.ok(matchedFact.account_id != null, "identity-status: matched fact has account_id");
+  assert.ok(matchedFact.job_id != null, "identity-status: matched fact has job_id");
+
+  // Name-only row → identity_status="needs_identity_review", null account_id and job_id
+  const nameOnlyFact = allInserted.find((f) => f.row_hash === singleNameOnlyRow.row_hash);
+  assert.ok(nameOnlyFact, "identity-status: name-only fact found");
+  assert.equal(nameOnlyFact.identity_status, "needs_identity_review", "identity-status: name-only fact preserves identity_status");
+  assert.equal(nameOnlyFact.account_id, null, "identity-status: name-only fact has null account_id");
+  assert.equal(nameOnlyFact.job_id, null, "identity-status: name-only fact has null job_id");
+  assert.ok(nameOnlyFact.account_name, "identity-status: name-only fact has account_name");
+  assert.ok(nameOnlyFact.job_name, "identity-status: name-only fact has job_name");
+}
+
+// ── name-only run summary entry ───────────────────────────────────────────────
+
+{
+  const fakeRun = makeRun({
+    report_feed_id: FAKE_HISTORY_FEED,
+    unmatched_identity_count: 3,
+    ambiguous_identity_count: 1,
+    summary: {}
+  });
+  const db = makeMockDb({
+    run: fakeRun, feed: FAKE_FEED_V220,
+    matchedRawRows: SAMPLE_MATCHED_ROWS,
+    nameOnlyRawRows: SAMPLE_NAME_ONLY_ROWS,
+    activeFacts: []
+  });
+
+  await promotePersistedRunMatchedFacts(db, {
+    runId: FAKE_RUN, organizationId: FAKE_ORG, allowNameOnly: true, dryRun: false
+  });
+
+  const runUpdateOp = db._log.find((o) => o.op === "update" && o.table === "moraware_report_runs");
+  assert.ok(runUpdateOp, "name-only-summary: run update op found");
+  const entry = runUpdateOp.data.summary?.promotions?.[0];
+  assert.ok(entry, "name-only-summary: promotions entry present");
+  assert.equal(entry.mode, "name_only", "name-only-summary: mode=name_only");
+  assert.equal(entry.matchedRowCount, 3, "name-only-summary: matchedRowCount");
+  assert.equal(entry.nameOnlyRowCount, 3, "name-only-summary: nameOnlyRowCount");
+  assert.equal(entry.ambiguousExcluded, 1, "name-only-summary: ambiguousExcluded");
+  assert.equal(entry.unmatchedExcluded, 0, "name-only-summary: unmatchedExcluded=0");
+  assert.ok(entry.warning, "name-only-summary: warning present for partial identity");
+  assert.equal(entry.dryRun, false, "name-only-summary: dryRun=false");
+}
+
+// ── schema drift blocks name-only promotion ───────────────────────────────────
+
+{
+  const fakeRun = makeRun({
+    report_feed_id: FAKE_HISTORY_FEED,
+    schema_drift: { detected: true, observedHash: "aaa", expectedHash: "bbb" },
+    unmatched_identity_count: 5
+  });
+  const db = makeMockDb({ run: fakeRun, feed: FAKE_FEED_V220 });
+  const result = await promotePersistedRunMatchedFacts(db, {
+    runId: FAKE_RUN, organizationId: FAKE_ORG, allowNameOnly: true, dryRun: true
+  });
+  assert.equal(result.skipped, true, "drift-name-only: skipped=true");
+  assert.equal(result.reason, "schema_drift_detected", "drift-name-only: schema drift blocks");
+  const writes = db._log.filter((e) => ["insert", "update"].includes(e.op));
+  assert.equal(writes.length, 0, "drift-name-only: zero writes");
+}
+
+// ── no deletes in name-only mode ──────────────────────────────────────────────
+
+{
+  const fakeRun = makeRun({
+    report_feed_id: FAKE_HISTORY_FEED,
+    unmatched_identity_count: 2,
+    ambiguous_identity_count: 0
+  });
+  const db = makeMockDb({
+    run: fakeRun, feed: FAKE_FEED_V220,
+    matchedRawRows: SAMPLE_MATCHED_ROWS,
+    nameOnlyRawRows: SAMPLE_NAME_ONLY_ROWS.slice(0, 2),
+    activeFacts: []
+  });
+
+  await promotePersistedRunMatchedFacts(db, {
+    runId: FAKE_RUN, organizationId: FAKE_ORG, allowNameOnly: true, dryRun: false
+  });
+
+  const deleteOps = db._log.filter((o) => o.op === "delete");
+  assert.equal(deleteOps.length, 0, "no-delete-name-only: zero delete ops");
+}
+
+// ── name-only with zero name-only rows (edge case: unmatched count non-zero but no rows fetched) ──
+
+{
+  // No rows fetched for needs_identity_review → no_eligible_rows if matched is also empty
+  const fakeRun = makeRun({
+    report_feed_id: FAKE_HISTORY_FEED,
+    matched_identity_count: 0,
+    unmatched_identity_count: 3,
+    ambiguous_identity_count: 0
+  });
+  const db = makeMockDb({
+    run: fakeRun, feed: FAKE_FEED_V220,
+    matchedRawRows: [],
+    nameOnlyRawRows: [],
+    activeFacts: []
+  });
+
+  const result = await promotePersistedRunMatchedFacts(db, {
+    runId: FAKE_RUN, organizationId: FAKE_ORG, allowNameOnly: true, dryRun: false
+  });
+  assert.equal(result.skipped, true, "no-eligible: skipped=true");
+  assert.equal(result.reason, "no_eligible_rows", "no-eligible: reason=no_eligible_rows");
 }
 
 console.log("promotePersistedRunMatchedFacts.test.mjs: ok");
