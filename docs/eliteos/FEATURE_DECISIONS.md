@@ -571,3 +571,15 @@
 
 ---
 
+### 44. Matched-only promotion — ambiguous rows excluded, unmatched blocks, dry-run default
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-05-31 |
+| **Decision** | A new persisted-run promotion path (`promotePersistedRunMatchedFacts`) reads from `moraware_report_raw_rows` (post-enrichment DB state) rather than from an in-memory `processResult`. Promotion policy for v1: (1) **schema drift blocks** — if `schema_drift.detected = true`, refuse; (2) **unmatched rows block** — if `unmatched_identity_count > 0`, refuse (unmatched rows have no `account_id`/`job_id`; null-ID facts corrupt analytics); (3) **ambiguous rows block unless `--matched-only`** — if `ambiguous_identity_count > 0` and the caller has not passed `--matched-only`, refuse; (4) **matched-only excludes ambiguous** — in matched-only mode, only `identity_status = "matched"` rows are promoted; `ambiguous_identity` rows are never promoted, never guessed, and not altered by this step; (5) **run status** — if matched-only and ambiguous rows remain, status stays at its current value (e.g. `needs_review`); if all rows matched cleanly, status is updated to `"promoted"`; (6) **run summary** — a `promotions[]` entry is appended to `moraware_report_runs.summary` recording `mode`, counts, and timestamp; (7) **default dry-run** — pass `--apply --matched-only` with `SUPABASE_WRITE_ENABLED=1` to write; (8) **promotion is never automatic** — no cron, no triggered promotion; operator decision only. Supersede semantics (deactivate → insert → backfill) and rollback-on-insert-failure are preserved from the existing `promoteReportFeedFacts` path. Batched deactivations and inserts (≤500 per query) are used for efficiency at real-run scale (~7,000 rows). |
+| **Why** | After post-hoc API mirror enrichment, the prepared-fact promotion must read from the persisted DB state, not from in-memory enrichedRows. Blocking on unmatched rows prevents polluting prepared facts with null-ID rows. Allowing matched-only promotion while excluding ambiguous rows means the 6,957 clearly matched rows for the real Elite run can be safely promoted without waiting for manual resolution of 29 ambiguous rows. Dry-run default is consistent with the enrichment step. |
+| **Impacted files** | `promotePersistedRunMatchedFacts.js`, `promoteReportRunMatchedFacts.js` (CLI), `promotePersistedRunMatchedFacts.test.mjs`, `package.json`, `docs/eliteos/moraware-report-feeds.md`, `docs/eliteos/CURSOR_ACTIVE_HANDOFF.md` |
+| **Revisit trigger** | Before adding a "resolve ambiguous" workflow; before supporting bulk re-promotion after manual identity correction; before dashboards begin reading `moraware_prepared_sales_worksheet_facts`. |
+
+---
+

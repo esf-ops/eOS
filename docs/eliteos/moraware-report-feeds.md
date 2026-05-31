@@ -388,12 +388,20 @@ Fixtures are sanitized fake account/job names — no real customer data, cookies
 ### Recommended run sequence
 
 ```
-1. persistReportFeedLocal   (staging: CSV+HTML → raw rows + HTML identity links)
-2. enrichReportRunFromApiMirror --dry-run  (review: how many rows API mirror can resolve)
-3. enrichReportRunFromApiMirror --apply    (apply: update raw rows + insert API mirror links)
-4. Inspect run — if status=validated and identity coverage acceptable:
-5. persistReportFeedLocal MORAWARE_REPORT_FEED_PROMOTE=1  (promote to prepared facts)
+1. persistReportFeedLocal          (staging: CSV+HTML → raw rows + HTML identity links)
+2. enrichReportRunFromApiMirror --dry-run   (review: how many rows API mirror can resolve)
+3. enrichReportRunFromApiMirror --apply     (apply: update raw rows + insert API mirror links)
+4. promoteReportRunMatchedFacts --review-ambiguous  (review: inspect ambiguous match keys)
+5. promoteReportRunMatchedFacts              (dry-run: show promotion plan, no writes)
+6. promoteReportRunMatchedFacts --apply --matched-only  (apply: promote only matched rows)
 ```
+
+Steps 1–3 stage and identity-enrich the data.  Steps 4–6 promote it to prepared facts.
+
+**Key decision point at step 5/6:**
+- If `ambiguous_identity_count > 0`, pass `--matched-only` at apply time.  Ambiguous rows are excluded from prepared facts but remain in `moraware_report_raw_rows` for review.
+- If `unmatched_identity_count > 0`, promotion is blocked.  Re-run enrichment or resolve manually before promoting.
+- If `schema_drift.detected = true`, promotion is blocked.  Do not promote until the feed contract is updated.
 
 ### persistReportFeedLocal
 
@@ -423,6 +431,83 @@ npm run eos:test:moraware-report-feed-persistence
 npm run eos:test:moraware-report-feed-promotion
 npm run eos:test:moraware-report-feed-promote-persistence
 ```
+
+### promoteReportRunMatchedFacts (persisted-run promotion)
+
+Script: [`promoteReportRunMatchedFacts.js`](../../backend-core/src/scripts/moraware/promoteReportRunMatchedFacts.js) — `npm run eos:moraware:promote-report-run-matched-facts`
+
+Promotes `moraware_report_raw_rows` (already staged + enriched) to `moraware_prepared_sales_worksheet_facts`.  This is the post-enrichment promotion path that reads from the DB rather than from an in-memory `processResult`.
+
+**Gate checks (hard blocks):**
+| Condition | Result |
+|-----------|--------|
+| `schema_drift.detected = true` | BLOCKED — schema contract must match |
+| `unmatched_identity_count > 0` | BLOCKED — unmatched rows have no IDs; promoting null-ID facts would corrupt analytics |
+| `ambiguous_identity_count > 0` without `--matched-only` | BLOCKED — requires explicit opt-in to exclude ambiguous rows |
+| Run already `promoted` | BLOCKED — idempotency guard |
+
+**Matched-only policy:**
+- Pass `--matched-only` when `ambiguous_identity_count > 0`.
+- Only `moraware_report_raw_rows` with `identity_status = "matched"` are promoted.
+- Ambiguous rows are **excluded** — never promoted, never guessed, never altered by this step.
+- Run status after matched-only apply: **remains `needs_review`** (ambiguous rows still require resolution).
+- Run status after full clean apply (0 ambiguous): updated to `"promoted"`.
+
+**Supersede semantics (same as local-file path):**
+1. All deactivations first (`is_active = false`, `superseded_at = now`) — batched ≤500.
+2. All inserts next (`is_active = true`) — batched ≤500; rollback to re-activate on failure.
+3. `superseded_by` backfill — row-by-row, non-fatal.
+
+**Run summary JSON:**  On apply, appends a `promotions[]` entry to `moraware_report_runs.summary`:
+```json
+{
+  "promotedAt": "2026-...",
+  "mode": "matched_only",
+  "matchedRowCount": 6957,
+  "ambiguousExcluded": 29,
+  "unmatchedExcluded": 0,
+  "insertCount": 6957,
+  "deactivateCount": 0,
+  "backfillCount": 0
+}
+```
+
+**CLI usage:**
+
+```bash
+# Step 1 — review ambiguous rows (read-only)
+MORAWARE_REPORT_RUN_ID=<run-id> \
+MORAWARE_DEFAULT_ORGANIZATION_ID=<org-id> \
+SUPABASE_URL=<url> SUPABASE_SERVICE_ROLE_KEY=<key> \
+npm run eos:moraware:promote-report-run-matched-facts -- --review-ambiguous
+
+# Step 2 — dry-run (always run first)
+MORAWARE_REPORT_RUN_ID=<run-id> \
+MORAWARE_DEFAULT_ORGANIZATION_ID=<org-id> \
+SUPABASE_URL=<url> SUPABASE_SERVICE_ROLE_KEY=<key> \
+npm run eos:moraware:promote-report-run-matched-facts
+
+# Step 3 — apply matched-only (writes prepared facts)
+MORAWARE_REPORT_RUN_ID=<run-id> \
+MORAWARE_DEFAULT_ORGANIZATION_ID=<org-id> \
+SUPABASE_URL=<url> SUPABASE_SERVICE_ROLE_KEY=<key> \
+SUPABASE_WRITE_ENABLED=1 \
+npm run eos:moraware:promote-report-run-matched-facts -- --apply --matched-only
+```
+
+For the real Elite run `8f5e74d1-482f-4f38-b694-548b1bc239a1`:
+- 6,957 matched rows eligible; 29 ambiguous excluded.
+- `--matched-only` required because `ambiguous_identity_count = 29`.
+- After apply the run status will remain `needs_review` (ambiguous rows unresolved).
+
+**Source modules:**
+- `promotePersistedRunMatchedFacts.js` — orchestrator + pure helpers (`checkPersistedRunGates`, `persistedRawRowToEnrichedRow`, `reviewAmbiguousRows`).
+- `promoteReportRunMatchedFacts.js` — CLI entry point.
+- Reuses `mapPreparedSalesWorksheetFact`, `planPreparedFactSupersede`, `loadActivePreparedFacts` from existing promotion helpers.
+
+**Tests:** `npm run eos:test:moraware-report-feed-promote-persisted`
+
+---
 
 ## Production promotion pattern (future)
 

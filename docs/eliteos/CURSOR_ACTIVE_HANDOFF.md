@@ -18,7 +18,8 @@ Additive ingestion lane beside existing Moraware API sync. Combines saved-report
 | POC parse/enrich | Done (local files, fixtures, tests) |
 | Staging persistence | Validated (`SUPABASE_WRITE_ENABLED=1`) |
 | API mirror identity enrichment | **Built** — `enrichRunFromApiMirror` + CLI; dry-run default; exact account+job match only; no fuzzy |
-| Promotion | Validated **test org only**; real Elite org **not** promoted |
+| Matched-only promotion (persisted runs) | **Built** — `promotePersistedRunMatchedFacts` + CLI; dry-run default; matched rows only; ambiguous excluded |
+| Promotion | Validated **test org only**; real Elite org run `8f5e74d1` staged + enriched — **not yet promoted** |
 | Governed download design (Phase A) | **Documented** — see [`moraware-report-feeds.md` § Governed download design](./moraware-report-feeds.md#governed-download-design-phase-a--docs-only) |
 | Live download / scrape / cron / API routes | **Not built** |
 | Dashboards reading prepared facts | **Not built** |
@@ -29,7 +30,7 @@ Full detail: [`moraware-report-feeds.md`](./moraware-report-feeds.md)
 
 | Org | `organization_id` | Feed id | Notable run id |
 |-----|-------------------|---------|----------------|
-| Real Elite | `89180433-9fab-4024-bec9-a14d870bd0a8` | `e8c0433a-c243-4cc5-b8bb-7842ec64a0e7` | `afc7b49d` (validated staging, no promotion); `cb765461` (failed — schema drift + identity-link dupe; prompted 76-col hardening) |
+| Real Elite | `89180433-9fab-4024-bec9-a14d870bd0a8` | `e8c0433a-c243-4cc5-b8bb-7842ec64a0e7` | `afc7b49d` (validated staging, no promotion); `cb765461` (failed — schema drift + identity-link dupe; prompted 76-col hardening); `8f5e74d1` (staged + API mirror enriched — 6,957 matched / 29 ambiguous / 0 unmatched — **not yet promoted**) |
 | Test org | `00000000-0000-0000-0000-000000000001` | `a053cb9a-e362-4c5a-8f47-895314cec85a` | `a660473b-b200-4d14-ba0b-5b713c475c9c` (promo smoke 1); `6d54c835-058f-47f8-a831-db8efca86a5b` (promo smoke 2, supersede) |
 
 Sales Worksheet Facts contract: view `219`, `report_type=sales_worksheet_facts`, header hash `8e12bfb52b516ac30aa94e85d7bf92ee9c6d47741b2967586b743954136b9ade` (76-column real Moraware export — full shape including activity/CS/install columns, no Branch — hardened 2026-05-30). Columns 1–15 + col 76 mapped to prepared facts; cols 16–75 raw_row only.
@@ -40,12 +41,17 @@ Sales Worksheet Facts contract: view `219`, `report_type=sales_worksheet_facts`,
 # Dry-run POC (no Supabase)
 npm run eos:moraware:report-feed-poc
 
-# Staging (+ optional promotion with MORAWARE_REPORT_FEED_PROMOTE=1)
+# Staging (+ optional immediate promotion with MORAWARE_REPORT_FEED_PROMOTE=1)
 npm run eos:moraware:persist-report-feed-local
 
 # Post-hoc API mirror enrichment (dry-run first, then --apply)
 npm run eos:moraware:enrich-report-run-api-mirror
 npm run eos:moraware:enrich-report-run-api-mirror -- --apply  # add SUPABASE_WRITE_ENABLED=1
+
+# Matched-only promotion of a persisted+enriched run
+npm run eos:moraware:promote-report-run-matched-facts -- --review-ambiguous  # read-only
+npm run eos:moraware:promote-report-run-matched-facts                         # dry-run
+npm run eos:moraware:promote-report-run-matched-facts -- --apply --matched-only  # add SUPABASE_WRITE_ENABLED=1
 
 # Tests
 npm run eos:test:moraware-report-feed
@@ -53,12 +59,14 @@ npm run eos:test:moraware-report-feed-persistence
 npm run eos:test:moraware-api-mirror-enrichment
 npm run eos:test:moraware-report-feed-promotion
 npm run eos:test:moraware-report-feed-promote-persistence
+npm run eos:test:moraware-report-feed-promote-persisted
 
 # Repo sanity
 npm run eos:check:local
 ```
 
-Promotion gates: `SUPABASE_WRITE_ENABLED=1`, `MORAWARE_REPORT_FEED_PROMOTE=1`, run `validated`, no schema drift / ambiguous identities / duplicate row hashes.
+Promotion gates (persisted-run path): `SUPABASE_WRITE_ENABLED=1`, `--apply --matched-only`, no schema drift, no unmatched rows.
+Promotion gates (local-file path): `SUPABASE_WRITE_ENABLED=1`, `MORAWARE_REPORT_FEED_PROMOTE=1`, run `validated`, no schema drift / ambiguous / duplicate row hashes.
 
 Code: `backend-core/src/moraware/reportFeeds/`, scripts under `backend-core/src/scripts/moraware/`.
 
@@ -74,14 +82,15 @@ Code: `backend-core/src/moraware/reportFeeds/`, scripts under `backend-core/src/
 
 **API mirror enrichment built (2026-05-31):** `enrichRunFromApiMirror` + CLI implemented. Uses `brain_moraware_jobs` as full-coverage identity source after HTML-only staging. Dry-run default; exact account+job match only; no fuzzy matching; never touches promoted runs or prepared facts.
 
-**Next immediate steps:**
+**Matched-only promotion built (2026-05-31):** `promotePersistedRunMatchedFacts` + CLI implemented. Reads from `moraware_report_raw_rows` (post-enrichment DB rows), promotes only `identity_status = "matched"` rows to prepared facts, excludes ambiguous rows, preserves supersede semantics. Dry-run default; `--apply --matched-only` required when ambiguous rows exist.
 
-1. Update `expected_column_hash` in Supabase for Elite org feed (if not yet done — hash: `8e12bfb5…`).
-2. Re-run `persistReportFeedLocal.js` for the current real Elite CSV+HTML to get a fresh run ID.
-3. Dry-run enrichment: `MORAWARE_REPORT_RUN_ID=<new-run-id> ... npm run eos:moraware:enrich-report-run-api-mirror`
-4. Review dry-run output (eligible, would-match, would-ambiguous counts).
-5. Apply: add `SUPABASE_WRITE_ENABLED=1 ... -- --apply`
-6. Review new run counts — if `matched_identity_count` is acceptable for the intended analytics, consider promotion (separate decision).
+**Next immediate steps (real Elite run `8f5e74d1`):**
+
+1. Review ambiguous rows: `MORAWARE_REPORT_RUN_ID=8f5e74d1-482f-4f38-b694-548b1bc239a1 ... -- --review-ambiguous`
+2. Dry-run promotion: `MORAWARE_REPORT_RUN_ID=8f5e74d1-482f-4f38-b694-548b1bc239a1 ... npm run eos:moraware:promote-report-run-matched-facts`
+3. Review dry-run output (matched rows eligible, ambiguous excluded, deactivations planned).
+4. Apply: `SUPABASE_WRITE_ENABLED=1 ... -- --apply --matched-only`
+5. Verify `moraware_prepared_sales_worksheet_facts` active row count after apply.
 
 **Phase B (governed download — still pending):**
 
@@ -115,7 +124,7 @@ Later slices (separate approval): raw artifact storage decision → scheduled wo
 - Old prepared facts: supersede/deactivate (`is_active`, `superseded_by`), not blind delete
 - Service-role Supabase writes: backend/scripts only, gated by env flags
 
-Durable decisions: `FEATURE_DECISIONS.md` entries **37** (additive lane), **38** (SQL supersede semantics), **39** (governed download v1 contract), **40** (Option B real export shape, Branch deferred), **41** (76-column full contract, identity-link dedup, error serialization hardening), **42** (HTML identity is best-effort; view 219 HTML is paginated; full identity deferred), **43** (API mirror enrichment: exact match, dry-run default, no promotion).
+Durable decisions: `FEATURE_DECISIONS.md` entries **37** (additive lane), **38** (SQL supersede semantics), **39** (governed download v1 contract), **40** (Option B real export shape, Branch deferred), **41** (76-column full contract, identity-link dedup, error serialization hardening), **42** (HTML identity is best-effort; view 219 HTML is paginated; full identity deferred), **43** (API mirror enrichment: exact match, dry-run default, no promotion), **44** (matched-only promotion: ambiguous excluded, unmatched blocks, dry-run default, no auto-promote).
 
 ---
 
