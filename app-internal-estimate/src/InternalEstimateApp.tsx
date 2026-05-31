@@ -2538,7 +2538,7 @@ export default function InternalEstimateApp() {
                     </select>
                   </label>
                   <label>
-                    Salesperson <span className="muted">(required)</span>
+                    Salesperson <span className="req-star" aria-label="required">*</span>
                     <select value={salesRep} onChange={(e) => setSalesRep(e.target.value)} required>
                       <option value="">— Select —</option>
                       {INTERNAL_SALES_REPS.map((r) => (
@@ -2586,6 +2586,25 @@ export default function InternalEstimateApp() {
                     </label>
                   ) : null}
                 </div>
+              </div>
+
+              <div className="ie-job-group ie-job-group--cfn">
+                <p className="ie-job-group-head">Customer estimate note</p>
+                <p className="ie-job-group-hint">
+                  These notes print in the customer-facing estimate PDF under "Project Notes." Use them for
+                  exclusions, site requirements, or reminders the customer should see — not internal staff instructions.
+                </p>
+                <label className="ie-customer-facing-notes-label">
+                  <textarea
+                    rows={4}
+                    value={customerFacingNotes}
+                    onChange={(e) => setCustomerFacingNotes(e.target.value)}
+                    placeholder={
+                      "Sink accessories not included.\nConfirm sink base size before ordering.\nLaminate must be removed before template.\nFull-height backsplash requires second template/install."
+                    }
+                    aria-label="Customer-facing project notes — prints on customer estimate"
+                  />
+                </label>
               </div>
             </div>
             {selectedMaterialBreakdown.totals.useTax?.applied ? (
@@ -2979,22 +2998,6 @@ export default function InternalEstimateApp() {
               ) : (
                 <p className="ok small">Core fields look complete — still verify sinks, edges, and site readiness before sold handoff.</p>
               )}
-              <div className="ie-customer-facing-notes" style={{ marginTop: 16 }}>
-                <label className="ie-customer-facing-notes-label">
-                  Customer-facing notes
-                  <textarea
-                    rows={5}
-                    value={customerFacingNotes}
-                    onChange={(e) => setCustomerFacingNotes(e.target.value)}
-                    placeholder={
-                      "Sink accessories not included.\nConfirm sink base size before ordering.\nLaminate must be removed before template.\nFull-height backsplash requires second template/install."
-                    }
-                  />
-                </label>
-                <p className="muted small" style={{ marginTop: 6 }}>
-                  These notes print on the customer estimate. Do not include internal-only instructions.
-                </p>
-              </div>
             </section>
 
             <details id="sec-output" className="internal-print-sheet card ie-details-worksheet">

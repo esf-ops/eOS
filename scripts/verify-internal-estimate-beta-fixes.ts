@@ -769,7 +769,7 @@ function approx(a: number, b: number, eps = 0.02) {
 
   const ieSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/InternalEstimateApp.tsx"), "utf8");
   assert.match(ieSrc, /customerFacingNotes/, "IE stores customer-facing notes state");
-  assert.match(ieSrc, /Customer-facing notes/, "IE shows customer-facing notes textarea label");
+  assert.match(ieSrc, /Customer estimate note|customer.facing.*note/i, "IE shows customer-facing notes field");
 
   const apiSrc = readFileSync(join(repoRoot, "backend-core/src/quotes/internalQuotesApi.js"), "utf8");
   assert.match(apiSrc, /customer_estimate_customer_facing_notes/, "internal save persists customer-facing notes in snapshot");

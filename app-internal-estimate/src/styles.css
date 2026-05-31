@@ -3674,6 +3674,26 @@ select:focus {
   margin-bottom: 8px;
 }
 
+/* Required field asterisk — replaces "(required)" text */
+.req-star {
+  color: var(--color-error, #c0392b);
+  font-weight: 700;
+  margin-left: 2px;
+  font-size: 0.95em;
+}
+
+/* Customer estimate note group in Job Info */
+.ie-job-group--cfn {
+  grid-column: 1 / -1;
+}
+
+.ie-job-group-hint {
+  margin: 0 0 10px;
+  font-size: 0.84rem;
+  color: var(--color-text-muted, #666);
+  line-height: 1.45;
+}
+
 .ie-customer-facing-notes-label {
   display: flex;
   flex-direction: column;
@@ -3683,7 +3703,7 @@ select:focus {
 
 .ie-customer-facing-notes textarea {
   width: 100%;
-  min-height: 7rem;
+  min-height: 6rem;
   resize: vertical;
   font-weight: 400;
   line-height: 1.45;
