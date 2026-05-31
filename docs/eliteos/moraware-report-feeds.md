@@ -13,17 +13,17 @@ The Moraware API/SDK sync captures structured operational data into Brain raw + 
 
 Combining CSV rows + HTML-derived IDs gives faster, trustable prepared facts for Sales Worksheet and future operational heads without relying on a fragile one-off scrape script.
 
-## Current validated status (2026-05-30)
+## Current validated status (2026-05-31)
 
 | Milestone | Status |
 |-----------|--------|
 | SQL schema | **Applied manually** in Supabase (`eliteos_moraware_report_feeds.sql`); partial unique index `uq_moraware_prepared_sales_worksheet_facts_one_active` in place |
 | Parse/enrich POC | Local-file dry-run + unit tests; sanitized fixtures only |
 | Staging persistence | **Smoke validated** via `persistReportFeedLocal.js` with `SUPABASE_WRITE_ENABLED=1` (runs, column profiles, raw rows, identity links) |
-| Prepared-fact promotion | **Smoke validated on test org only** (`00000000-0000-0000-0000-000000000001`); requires `MORAWARE_REPORT_FEED_PROMOTE=1` + validated run |
+| API mirror identity enrichment | **Validated** — run `8f5e74d1`: 6,957 matched / 29 ambiguous / 0 unmatched |
+| Matched-only promotion (persisted run) | **Validated** — run `8f5e74d1`: 6,957 prepared facts active; 29 ambiguous excluded |
 | Live Moraware download | **Not built** — no governed fetch, no browser scrape, no cookies/SID in repo |
-| Dashboard reads | **Not wired** — prepared facts exist for test org only |
-| Real Elite org prepared facts | **Intentionally not promoted** — staging run validated; promotion deferred |
+| Dashboard reads | **Not wired** — prepared facts exist in Supabase but no UI reads them yet |
 
 ### Key run IDs (Supabase)
 
@@ -31,12 +31,44 @@ Combining CSV rows + HTML-derived IDs gives faster, trustable prepared facts for
 |-----|-------------------|---------|--------|-------|
 | Real Elite | `89180433-9fab-4024-bec9-a14d870bd0a8` | `e8c0433a-c243-4cc5-b8bb-7842ec64a0e7` | `afc7b49d-af7a-4fec-85a0-0fdb11046ea3` | `validated`, 3 rows, 3 matched; **no** prepared facts written |
 | Real Elite | (same) | (same) | `cb765461-f181-4ca8-a22d-b44e0bec0766` | `failed` — schema drift (16-col hash vs 76-col real); duplicate identity-link key. Prompted 76-col hardening. HTML snapshot: 22 job links / 4 account links vs 6,986 CSV rows — HTML pagination confirmed. |
+| Real Elite | (same) | (same) | `8f5e74d1-482f-4f38-b694-548b1bc239a1` | `needs_review` (29 ambiguous rows remain unresolved) — **6,957 matched-only prepared facts promoted 2026-05-31**. See [v1 validation results](#v1-validation-results-run-8f5e74d1) below. |
 | Test org | `00000000-0000-0000-0000-000000000001` | `a053cb9a-e362-4c5a-8f47-895314cec85a` | `a660473b-b200-4d14-ba0b-5b713c475c9c` | Promotion smoke 1: 3 inserted, 0 superseded |
 | Test org | (same) | (same) | `6d54c835-058f-47f8-a831-db8efca86a5b` | Promotion smoke 2: 3 inserted, 3 superseded + `superseded_by` backfill |
 
 **Phase A (2026-05-30):** Governed download **design contract** documented below — **no fetch implementation yet**.
 
 **Next safe slice:** inspect existing integration config patterns → verify Moraware login mechanics manually → implement `fetchReportFeedArtifacts` as network-only module if server-side login is feasible.
+
+### v1 validation results (run `8f5e74d1`)
+
+**Date promoted:** 2026-05-31  
+**Mode:** matched-only (`--apply --matched-only`)  
+**Run status:** `needs_review` (29 ambiguous rows remain excluded)
+
+| Metric | Value |
+|--------|-------|
+| Active prepared fact rows | **6,957** |
+| Distinct jobs (by `job_id`) | **2,634** |
+| Total worksheet sqft | **176,516.00** |
+| Identity matched | 6,957 |
+| Ambiguous rows excluded | 29 |
+| Unmatched rows | 0 |
+| Old facts superseded | 0 (first promotion — no prior active rows) |
+
+**Validation checks performed:**
+
+- Job-status sqft totals reconcile to the overall `total_worksheet_sqft` aggregate of 176,516.00.
+- Outlier check: no rows with `total_worksheet_sqft > 500` found (sanity cap in `parseSqft` is 99,999; no unit-error outliers detected).
+- Rows with `null total_worksheet_sqft` exist and are expected (worksheet lines that do not carry a sqft value); validation queries must sort nulls last or filter them explicitly.
+
+**Known v1 gaps:**
+
+| Gap | Notes |
+|-----|-------|
+| `account_salesperson` not in prepared facts | v1 maps `job_salesperson` only; `"Account Salesperson"` is column 2 in the 76-col contract but is not currently a typed column on `moraware_prepared_sales_worksheet_facts`. Add in a future migration if per-account salesperson reporting is needed. |
+| 29 ambiguous rows excluded | These rows matched more than one `brain_moraware_jobs` entry for the same normalised `account_name + job_name` key. They remain in `moraware_report_raw_rows` with `identity_status = "ambiguous_identity"` and are not in prepared facts. Resolve by running `--review-ambiguous`, investigating the duplicates in `brain_moraware_jobs`, and re-promoting once resolved. |
+| Branch / location not in prepared facts | `branch_or_process` is always `null` in v1 — "Branch" column is absent from the real Moraware view 219 export. Deferred to Account Mapping head. |
+| Dashboards not wired | `moraware_prepared_sales_worksheet_facts` has 6,957 active rows but nothing reads them yet. |
 
 ## Governed download design (Phase A — docs only)
 

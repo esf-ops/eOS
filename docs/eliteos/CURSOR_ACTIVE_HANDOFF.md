@@ -2,7 +2,7 @@
 
 **Purpose:** Cheap context for new Cursor chats. Do not treat old chat transcripts as source of truth — use this file + `docs/eliteos/*` + `.cursor/rules/*`.
 
-**Last updated:** 2026-05-31
+**Last updated:** 2026-05-31 (v1 validation)
 
 ---
 
@@ -19,7 +19,7 @@ Additive ingestion lane beside existing Moraware API sync. Combines saved-report
 | Staging persistence | Validated (`SUPABASE_WRITE_ENABLED=1`) |
 | API mirror identity enrichment | **Built** — `enrichRunFromApiMirror` + CLI; dry-run default; exact account+job match only; no fuzzy |
 | Matched-only promotion (persisted runs) | **Built** — `promotePersistedRunMatchedFacts` + CLI; dry-run default; matched rows only; ambiguous excluded |
-| Promotion | Validated **test org only**; real Elite org run `8f5e74d1` staged + enriched — **not yet promoted** |
+| Promotion | Test org smoke-validated; **real Elite org `8f5e74d1` matched-only promoted 2026-05-31** — 6,957 active facts, 29 ambiguous excluded, run stays `needs_review` |
 | Governed download design (Phase A) | **Documented** — see [`moraware-report-feeds.md` § Governed download design](./moraware-report-feeds.md#governed-download-design-phase-a--docs-only) |
 | Live download / scrape / cron / API routes | **Not built** |
 | Dashboards reading prepared facts | **Not built** |
@@ -30,7 +30,7 @@ Full detail: [`moraware-report-feeds.md`](./moraware-report-feeds.md)
 
 | Org | `organization_id` | Feed id | Notable run id |
 |-----|-------------------|---------|----------------|
-| Real Elite | `89180433-9fab-4024-bec9-a14d870bd0a8` | `e8c0433a-c243-4cc5-b8bb-7842ec64a0e7` | `afc7b49d` (validated staging, no promotion); `cb765461` (failed — schema drift + identity-link dupe; prompted 76-col hardening); `8f5e74d1` (staged + API mirror enriched — 6,957 matched / 29 ambiguous / 0 unmatched — **not yet promoted**) |
+| Real Elite | `89180433-9fab-4024-bec9-a14d870bd0a8` | `e8c0433a-c243-4cc5-b8bb-7842ec64a0e7` | `afc7b49d` (validated staging, no promotion); `cb765461` (failed — schema drift + identity-link dupe; prompted 76-col hardening); `8f5e74d1` (**matched-only promoted 2026-05-31** — 6,957 active facts / 29 ambiguous excluded / 0 unmatched; run status `needs_review`) |
 | Test org | `00000000-0000-0000-0000-000000000001` | `a053cb9a-e362-4c5a-8f47-895314cec85a` | `a660473b-b200-4d14-ba0b-5b713c475c9c` (promo smoke 1); `6d54c835-058f-47f8-a831-db8efca86a5b` (promo smoke 2, supersede) |
 
 Sales Worksheet Facts contract: view `219`, `report_type=sales_worksheet_facts`, header hash `8e12bfb52b516ac30aa94e85d7bf92ee9c6d47741b2967586b743954136b9ade` (76-column real Moraware export — full shape including activity/CS/install columns, no Branch — hardened 2026-05-30). Columns 1–15 + col 76 mapped to prepared facts; cols 16–75 raw_row only.
@@ -84,13 +84,13 @@ Code: `backend-core/src/moraware/reportFeeds/`, scripts under `backend-core/src/
 
 **Matched-only promotion built (2026-05-31):** `promotePersistedRunMatchedFacts` + CLI implemented. Reads from `moraware_report_raw_rows` (post-enrichment DB rows), promotes only `identity_status = "matched"` rows to prepared facts, excludes ambiguous rows, preserves supersede semantics. Dry-run default; `--apply --matched-only` required when ambiguous rows exist.
 
-**Next immediate steps (real Elite run `8f5e74d1`):**
+**v1 validation complete (2026-05-31):** Run `8f5e74d1` matched-only promoted. Results: 6,957 active prepared facts, 2,634 distinct jobs, 176,516.00 total worksheet sqft, 29 ambiguous rows excluded (run stays `needs_review`). Job-status sqft totals reconcile. No sqft outliers detected. `account_salesperson` is not a typed column in v1 (job_salesperson used instead). Rows with null `total_worksheet_sqft` are expected and should sort nulls-last in validation queries. See [`moraware-report-feeds.md` § v1 validation results](./moraware-report-feeds.md#v1-validation-results-run-8f5e74d1) for full detail.
 
-1. Review ambiguous rows: `MORAWARE_REPORT_RUN_ID=8f5e74d1-482f-4f38-b694-548b1bc239a1 ... -- --review-ambiguous`
-2. Dry-run promotion: `MORAWARE_REPORT_RUN_ID=8f5e74d1-482f-4f38-b694-548b1bc239a1 ... npm run eos:moraware:promote-report-run-matched-facts`
-3. Review dry-run output (matched rows eligible, ambiguous excluded, deactivations planned).
-4. Apply: `SUPABASE_WRITE_ENABLED=1 ... -- --apply --matched-only`
-5. Verify `moraware_prepared_sales_worksheet_facts` active row count after apply.
+**Next immediate steps:**
+
+1. (Optional) Resolve the 29 ambiguous rows: run `--review-ambiguous`, investigate duplicate entries in `brain_moraware_jobs`, correct data, then re-promote to clear `needs_review` status.
+2. (Optional) Add `account_salesperson` as a typed column to `moraware_prepared_sales_worksheet_facts` if per-account salesperson reporting is needed — requires a migration + mapping update.
+3. Wire a dashboard to read from `moraware_prepared_sales_worksheet_facts` (separate approval — see "Do not build yet").
 
 **Phase B (governed download — still pending):**
 
@@ -98,7 +98,7 @@ Code: `backend-core/src/moraware/reportFeeds/`, scripts under `backend-core/src/
 2. If feasible: implement `fetchReportFeedArtifacts` (network-only) → existing `processReportFeedLocal` → `persistReportFeedRun` path.
 3. If not feasible: document findings; do **not** add headless browser without separate threat-model approval.
 
-Use **Sonnet** for credential/session/fetch work. Still no cron, API routes, dashboards, or Elite org promotion.
+Use **Sonnet** for credential/session/fetch work. Still no cron, API routes, or dashboard reads.
 
 Later slices (separate approval): raw artifact storage decision → scheduled worker → dashboard reads behind RLS.
 
