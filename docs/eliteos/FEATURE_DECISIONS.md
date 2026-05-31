@@ -571,6 +571,18 @@
 
 ---
 
+### 45. View 220 Sales Worksheet History Facts — separate feed, shared prepared table, report_feed_id scoping required
+
+| Field | Value |
+|-------|-------|
+| **Date** | 2026-05-31 |
+| **Decision** | Moraware view 220 ("Sales YoY report") is ingested as a **separate feed** with `report_type = "sales_worksheet_history_facts"` (not as a variant of view 219). Facts are stored in the **same `moraware_prepared_sales_worksheet_facts` table** as view 219, scoped by `report_feed_id`. No new prepared table is created. **Dashboard queries MUST always include a `report_feed_id` filter** — without it, view 219 and view 220 rows for the same underlying worksheet line are double-counted. Row hashes are naturally isolated: `reportType` is part of `computeReportRowHash`, so view 219 (`sales_worksheet_facts`) and view 220 (`sales_worksheet_history_facts`) rows for the same job+line produce **different** hashes. `Job Status` is absent from view 220; `job_status` will be `null` in promoted prepared facts from this feed. All existing pipeline modules (parsing, staging, API mirror enrichment, ambiguity review, matched-only promotion) reuse without modification. No DB migration required. |
+| **Why** | A separate `report_type` + `report_feed_id` provides clear data lineage, prevents cross-feed supersede collisions, and allows view 220 to be ingested with a different date window (historical) than view 219 (current-year). A new prepared table would duplicate schema, complicate dashboard joins, and offer no isolation benefit beyond what `report_feed_id` already provides. Naming the type `sales_worksheet_history_facts` (not `sales_worksheet_yoy_facts`) keeps the contract at the ingestion-data level — YoY is a dashboard calculation, not an ingestion distinction. |
+| **Impacted files** | `backend-core/src/moraware/reportFeeds/constants.js` (new constants), `processReportFeed.js` (new exports), `reportFeedParser.test.mjs` (new tests), `backend-core/test/fixtures/moraware-report-feeds/sales-worksheet-history-facts.sample.csv` (new fixture), `backend-core/supabase/eliteos_moraware_report_feeds.sql` (commented INSERT), `docs/eliteos/moraware-report-feeds.md`, `docs/eliteos/CURSOR_ACTIVE_HANDOFF.md` |
+| **Revisit trigger** | Before wiring any dashboard that reads both view 219 and view 220 facts (ensure `report_feed_id` filter is enforced); before adding typed prepared-fact columns for sink/faucet/stove/shop/worksite fields; before supporting a second organization's view 220 feed. |
+
+---
+
 ### 44. Matched-only promotion — ambiguous rows excluded, unmatched blocks, dry-run default
 
 | Field | Value |

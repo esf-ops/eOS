@@ -18,13 +18,17 @@ import {
   profileReportColumns,
   validateHeaderContract,
   buildIdentityMapFromHtmlRows,
-  SALES_WORKSHEET_FACTS_EXPECTED_COLUMNS
+  SALES_WORKSHEET_FACTS_EXPECTED_COLUMNS,
+  SALES_WORKSHEET_HISTORY_FACTS_EXPECTED_COLUMNS,
+  SALES_WORKSHEET_HISTORY_FACTS_EXPECTED_COLUMN_HASH,
+  SALES_WORKSHEET_HISTORY_FACTS_REPORT_TYPE
 } from "./processReportFeed.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const fixtureDir = join(__dirname, "../../../test/fixtures/moraware-report-feeds");
 const csvFixture = readFileSync(join(fixtureDir, "sales-worksheet-facts.sample.csv"), "utf8");
 const htmlFixture = readFileSync(join(fixtureDir, "sales-worksheet-facts.sample.html"), "utf8");
+const historyFixtureCsv = readFileSync(join(fixtureDir, "sales-worksheet-history-facts.sample.csv"), "utf8");
 
 // Fixture layout:
 // Row 0: North Branch - Sample Builders LLC | Kitchen Remodel Phase A | Countertop Form | Kitchen
@@ -335,7 +339,169 @@ function run() {
   testEndToEndLocalProcessing();
   testRowHashStable();
   testRowHashWorksheetDiscrimination();
+  // ── View 220: Sales Worksheet History Facts ──────────────────────────────────
+
+  testView220ColumnContract();
+  testView220CsvParse();
+  testView220ColumnProfile();
+  testView220HeaderContract();
+  testView220EnrichmentNoJobStatus();
+  testView220ProcessFeedLocal();
+  testView220RowHashDistinctFromView219();
+
   console.log("reportFeedParser.test.mjs: ok");
+}
+
+// ── View 220 test functions ───────────────────────────────────────────────────
+
+function testView220ColumnContract() {
+  assert.equal(
+    SALES_WORKSHEET_HISTORY_FACTS_EXPECTED_COLUMNS.length,
+    34,
+    "v220 contract: 34 expected columns"
+  );
+  const computed = computeExpectedColumnHash(SALES_WORKSHEET_HISTORY_FACTS_EXPECTED_COLUMNS);
+  assert.equal(
+    computed,
+    SALES_WORKSHEET_HISTORY_FACTS_EXPECTED_COLUMN_HASH,
+    "v220 contract: computed hash matches hardcoded constant"
+  );
+  assert.equal(
+    SALES_WORKSHEET_HISTORY_FACTS_EXPECTED_COLUMN_HASH,
+    "ca05eadcaeea16417f017e857f48a89ed42ee2033242d80ee635e8002d0dd000",
+    "v220 contract: hash is the expected live-export value"
+  );
+  assert.ok(
+    !SALES_WORKSHEET_HISTORY_FACTS_EXPECTED_COLUMNS.includes("Job Status"),
+    "v220 contract: Job Status is absent (key difference from view 219)"
+  );
+  assert.ok(
+    SALES_WORKSHEET_HISTORY_FACTS_EXPECTED_COLUMNS.includes("Account Status"),
+    "v220 contract: Account Status present"
+  );
+  assert.ok(
+    SALES_WORKSHEET_HISTORY_FACTS_EXPECTED_COLUMNS.includes("Job Worksheet - Sink Type"),
+    "v220 contract: Sink Type present"
+  );
+  assert.ok(
+    SALES_WORKSHEET_HISTORY_FACTS_EXPECTED_COLUMNS.includes("Total Job Worksheet - Sq.Ft. by Job Creation Date"),
+    "v220 contract: sqft column present"
+  );
+}
+
+function testView220CsvParse() {
+  const parsed = parseCsvReportRows(historyFixtureCsv);
+  assert.equal(parsed.headers.length, 34, "v220 csv: 34 headers");
+  assert.equal(parsed.rows.length, 5, "v220 csv: 5 data rows");
+  assert.ok(parsed.headers.includes("Account Name"), "v220 csv: Account Name present");
+  assert.ok(parsed.headers.includes("Job Name"), "v220 csv: Job Name present");
+  assert.ok(!parsed.headers.includes("Job Status"), "v220 csv: Job Status absent in view 220");
+  assert.ok(parsed.headers.includes("Account Status"), "v220 csv: Account Status present");
+  assert.ok(
+    parsed.headers.includes("Total Job Worksheet - Sq.Ft. by Job Creation Date"),
+    "v220 csv: sqft column present"
+  );
+  assert.equal(parsed.rows[0]["Job Name"], "Kitchen Remodel Phase A", "v220 csv: first row Job Name");
+  assert.equal(parsed.rows[1]["Job Worksheet - Form Name"], "Backsplash Form", "v220 csv: second row form name");
+  assert.equal(
+    parsed.rows[0]["Total Job Worksheet - Sq.Ft. by Job Creation Date"],
+    "42.50",
+    "v220 csv: sqft value parsed"
+  );
+}
+
+function testView220ColumnProfile() {
+  const parsed = parseCsvReportRows(historyFixtureCsv);
+  const profile = profileReportColumns(parsed);
+  assert.equal(profile.columnCount, 34, "v220 profile: 34 columns");
+  assert.equal(
+    profile.headerHash,
+    SALES_WORKSHEET_HISTORY_FACTS_EXPECTED_COLUMN_HASH,
+    "v220 profile: header hash matches contract"
+  );
+  assert.equal(profile.rowCount, 5, "v220 profile: 5 rows");
+}
+
+function testView220HeaderContract() {
+  const parsed = parseCsvReportRows(historyFixtureCsv);
+  const profile = profileReportColumns(parsed);
+  const validation = validateHeaderContract(
+    profile,
+    SALES_WORKSHEET_HISTORY_FACTS_EXPECTED_COLUMNS,
+    SALES_WORKSHEET_HISTORY_FACTS_EXPECTED_COLUMN_HASH
+  );
+  assert.equal(validation.missingHeaders.length, 0, "v220 contract: no missing headers");
+  assert.equal(validation.unexpectedHeaders.length, 0, "v220 contract: no unexpected headers");
+}
+
+function testView220EnrichmentNoJobStatus() {
+  const parsed = parseCsvReportRows(historyFixtureCsv);
+  const enrichment = enrichReportRowsWithIdentity({
+    headers: parsed.headers,
+    rows: parsed.rows,
+    identityMap: new Map(),
+    duplicateKeys: [],
+    organizationId: "00000000-0000-0000-0000-000000000001",
+    reportType: SALES_WORKSHEET_HISTORY_FACTS_REPORT_TYPE
+  });
+
+  assert.equal(enrichment.rows.length, 5, "v220 enrich: 5 enriched rows");
+  for (const row of enrichment.rows) {
+    // jobStatus column absent from view 220 headers → resolved as empty string, never throws
+    assert.equal(typeof row.jobStatus, "string", "v220 enrich: jobStatus is string (not undefined)");
+    // accountName and jobName are populated
+    assert.ok(row.accountName, "v220 enrich: accountName populated");
+    assert.ok(row.jobName, "v220 enrich: jobName populated");
+    // rowHash is always a non-empty string
+    assert.ok(typeof row.rowHash === "string" && row.rowHash.length > 0, "v220 enrich: rowHash set");
+  }
+  // All rows are needs_identity_review (no identity map entries)
+  assert.equal(
+    enrichment.counts.needs_identity_review,
+    5,
+    "v220 enrich: all 5 rows unmatched with empty identity map"
+  );
+}
+
+function testView220ProcessFeedLocal() {
+  const result = processReportFeedLocal({
+    csvText: historyFixtureCsv,
+    htmlText: htmlFixture,   // reuse view 219 HTML fixture — same fake account/job names
+    organizationId: "00000000-0000-0000-0000-000000000001",
+    reportType: SALES_WORKSHEET_HISTORY_FACTS_REPORT_TYPE,
+    expectedColumns: SALES_WORKSHEET_HISTORY_FACTS_EXPECTED_COLUMNS,
+    expectedColumnHash: SALES_WORKSHEET_HISTORY_FACTS_EXPECTED_COLUMN_HASH,
+    morawareViewId: 220
+  });
+
+  assert.equal(result.schemaDrift.detected, false, "v220 process: no schema drift");
+  assert.equal(result.morawareViewId, 220, "v220 process: morawareViewId=220");
+  assert.equal(result.reportType, SALES_WORKSHEET_HISTORY_FACTS_REPORT_TYPE, "v220 process: reportType correct");
+  assert.equal(result.profile.columnCount, 34, "v220 process: 34 columns");
+  assert.equal(result.enrichment.rows.length, 5, "v220 process: 5 enriched rows");
+  // HTML fixture has identity for the same fake account/job names used in the history fixture
+  assert.ok(result.enrichment.counts.matched >= 4, "v220 process: at least 4 rows matched via HTML identity");
+  assert.equal(result.enrichment.counts.needs_identity_review, 1, "v220 process: 1 unmatched row");
+}
+
+function testView220RowHashDistinctFromView219() {
+  // The same worksheet line ingested via view 219 and view 220 must produce different row hashes
+  // because reportType is part of the hash input. This prevents cross-feed hash collisions
+  // in moraware_prepared_sales_worksheet_facts.
+  const sharedParams = {
+    organizationId: "org-1",
+    accountName: "Sample Builders LLC",
+    jobName: "Kitchen Remodel Phase A",
+    jobStatus: "",
+    jobCreationDate: "2025-03-01",
+    formName: "Countertop Form",
+    room: "Kitchen",
+    color: "White",
+    totalWorksheetSqft: "42.50"
+  };
+  const hash219 = computeReportRowHash({ ...sharedParams, reportType: "sales_worksheet_facts" });
+  const hash220 = computeReportRowHash({ ...sharedParams, reportType: SALES_WORKSHEET_HISTORY_FACTS_REPORT_TYPE });
+  assert.notEqual(hash219, hash220, "v220 hash: view 219 and view 220 produce distinct row hashes for same data");
 }
 
 run();

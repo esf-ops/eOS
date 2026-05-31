@@ -2,7 +2,7 @@
 
 **Purpose:** Cheap context for new Cursor chats. Do not treat old chat transcripts as source of truth — use this file + `docs/eliteos/*` + `.cursor/rules/*`.
 
-**Last updated:** 2026-05-31 (v1 validation)
+**Last updated:** 2026-05-31 (view 220 contract built)
 
 ---
 
@@ -20,6 +20,7 @@ Additive ingestion lane beside existing Moraware API sync. Combines saved-report
 | API mirror identity enrichment | **Built** — `enrichRunFromApiMirror` + CLI; dry-run default; exact account+job match only; no fuzzy |
 | Matched-only promotion (persisted runs) | **Built** — `promotePersistedRunMatchedFacts` + CLI; dry-run default; matched rows only; ambiguous excluded |
 | Promotion | Test org smoke-validated; **real Elite org `8f5e74d1` matched-only promoted 2026-05-31** — 6,957 active facts, 29 ambiguous excluded, run stays `needs_review` |
+| View 220 contract (Sales Worksheet History Facts) | **Contract built** — 34-col, hash `ca05eadcaeea…`, fixture, tests; Supabase feed INSERT ready (manual) |
 | Governed download design (Phase A) | **Documented** — see [`moraware-report-feeds.md` § Governed download design](./moraware-report-feeds.md#governed-download-design-phase-a--docs-only) |
 | Live download / scrape / cron / API routes | **Not built** |
 | Dashboards reading prepared facts | **Not built** |
@@ -33,7 +34,9 @@ Full detail: [`moraware-report-feeds.md`](./moraware-report-feeds.md)
 | Real Elite | `89180433-9fab-4024-bec9-a14d870bd0a8` | `e8c0433a-c243-4cc5-b8bb-7842ec64a0e7` | `afc7b49d` (validated staging, no promotion); `cb765461` (failed — schema drift + identity-link dupe; prompted 76-col hardening); `8f5e74d1` (**matched-only promoted 2026-05-31** — 6,957 active facts / 29 ambiguous excluded / 0 unmatched; run status `needs_review`) |
 | Test org | `00000000-0000-0000-0000-000000000001` | `a053cb9a-e362-4c5a-8f47-895314cec85a` | `a660473b-b200-4d14-ba0b-5b713c475c9c` (promo smoke 1); `6d54c835-058f-47f8-a831-db8efca86a5b` (promo smoke 2, supersede) |
 
-Sales Worksheet Facts contract: view `219`, `report_type=sales_worksheet_facts`, header hash `8e12bfb52b516ac30aa94e85d7bf92ee9c6d47741b2967586b743954136b9ade` (76-column real Moraware export — full shape including activity/CS/install columns, no Branch — hardened 2026-05-30). Columns 1–15 + col 76 mapped to prepared facts; cols 16–75 raw_row only.
+Sales Worksheet Facts (view 219) contract: `report_type=sales_worksheet_facts`, hash `8e12bfb52b516ac30aa94e85d7bf92ee9c6d47741b2967586b743954136b9ade` (76-col). Columns 1–15 + col 76 → prepared facts; cols 16–75 raw_row only.
+
+Sales Worksheet History Facts (view 220) contract: `report_type=sales_worksheet_history_facts`, hash `ca05eadcaeea16417f017e857f48a89ed42ee2033242d80ee635e8002d0dd000` (34-col). Same prepared table as view 219; **dashboard queries must filter by `report_feed_id`**. Job Status absent → `job_status = null` in promoted facts. Observed live: 22,899 rows, 562,602.50 sqft (2026-05-31). Supabase feed row not yet inserted — see SQL file.
 
 ### Key commands
 
@@ -84,13 +87,17 @@ Code: `backend-core/src/moraware/reportFeeds/`, scripts under `backend-core/src/
 
 **Matched-only promotion built (2026-05-31):** `promotePersistedRunMatchedFacts` + CLI implemented. Reads from `moraware_report_raw_rows` (post-enrichment DB rows), promotes only `identity_status = "matched"` rows to prepared facts, excludes ambiguous rows, preserves supersede semantics. Dry-run default; `--apply --matched-only` required when ambiguous rows exist.
 
-**v1 validation complete (2026-05-31):** Run `8f5e74d1` matched-only promoted. Results: 6,957 active prepared facts, 2,634 distinct jobs, 176,516.00 total worksheet sqft, 29 ambiguous rows excluded (run stays `needs_review`). Job-status sqft totals reconcile. No sqft outliers detected. `account_salesperson` is not a typed column in v1 (job_salesperson used instead). Rows with null `total_worksheet_sqft` are expected and should sort nulls-last in validation queries. See [`moraware-report-feeds.md` § v1 validation results](./moraware-report-feeds.md#v1-validation-results-run-8f5e74d1) for full detail.
+**v1 validation complete (2026-05-31):** Run `8f5e74d1` matched-only promoted. Results: 6,957 active prepared facts, 2,634 distinct jobs, 176,516.00 total worksheet sqft, 29 ambiguous rows excluded (run stays `needs_review`). See [`moraware-report-feeds.md` § v1 validation results](./moraware-report-feeds.md#v1-validation-results-run-8f5e74d1) for full detail.
+
+**View 220 contract built (2026-05-31):** 34-column `sales_worksheet_history_facts` contract. Fixture, parser tests, and commented Supabase feed INSERT added. All existing pipeline modules reuse without modification. No DB migration needed. Supabase feed INSERT must be run manually before staging.
 
 **Next immediate steps:**
 
-1. (Optional) Resolve the 29 ambiguous rows: run `--review-ambiguous`, investigate duplicate entries in `brain_moraware_jobs`, correct data, then re-promote to clear `needs_review` status.
-2. (Optional) Add `account_salesperson` as a typed column to `moraware_prepared_sales_worksheet_facts` if per-account salesperson reporting is needed — requires a migration + mapping update.
-3. Wire a dashboard to read from `moraware_prepared_sales_worksheet_facts` (separate approval — see "Do not build yet").
+1. (Optional) Run the view 220 feed INSERT in Supabase SQL editor (see `eliteos_moraware_report_feeds.sql` or `moraware-report-feeds.md` § View 220).
+2. (Optional) Stage a real view 220 CSV export using the existing pipeline.
+3. (Optional) Resolve the 29 ambiguous rows from run `8f5e74d1`.
+4. (Optional) Add `account_salesperson` as a typed column if per-account salesperson reporting is needed.
+5. Wire a dashboard to read from `moraware_prepared_sales_worksheet_facts` (separate approval — see "Do not build yet"). **Remember: always filter by `report_feed_id` to prevent double-counting view 219 and view 220.**
 
 **Phase B (governed download — still pending):**
 
@@ -124,7 +131,7 @@ Later slices (separate approval): raw artifact storage decision → scheduled wo
 - Old prepared facts: supersede/deactivate (`is_active`, `superseded_by`), not blind delete
 - Service-role Supabase writes: backend/scripts only, gated by env flags
 
-Durable decisions: `FEATURE_DECISIONS.md` entries **37** (additive lane), **38** (SQL supersede semantics), **39** (governed download v1 contract), **40** (Option B real export shape, Branch deferred), **41** (76-column full contract, identity-link dedup, error serialization hardening), **42** (HTML identity is best-effort; view 219 HTML is paginated; full identity deferred), **43** (API mirror enrichment: exact match, dry-run default, no promotion), **44** (matched-only promotion: ambiguous excluded, unmatched blocks, dry-run default, no auto-promote).
+Durable decisions: `FEATURE_DECISIONS.md` entries **37** (additive lane), **38** (SQL supersede semantics), **39** (governed download v1 contract), **40** (Option B real export shape, Branch deferred), **41** (76-column full contract, identity-link dedup, error serialization hardening), **42** (HTML identity is best-effort; view 219 HTML is paginated; full identity deferred), **43** (API mirror enrichment: exact match, dry-run default, no promotion), **44** (matched-only promotion: ambiguous excluded, unmatched blocks, dry-run default, no auto-promote), **45** (view 220 separate feed, shared prepared table, report_feed_id scoping required, job_status null OK).
 
 ---
 

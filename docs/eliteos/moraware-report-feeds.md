@@ -22,6 +22,7 @@ Combining CSV rows + HTML-derived IDs gives faster, trustable prepared facts for
 | Staging persistence | **Smoke validated** via `persistReportFeedLocal.js` with `SUPABASE_WRITE_ENABLED=1` (runs, column profiles, raw rows, identity links) |
 | API mirror identity enrichment | **Validated** — run `8f5e74d1`: 6,957 matched / 29 ambiguous / 0 unmatched |
 | Matched-only promotion (persisted run) | **Validated** — run `8f5e74d1`: 6,957 prepared facts active; 29 ambiguous excluded |
+| View 220 contract (Sales Worksheet History Facts) | **Contract built** — 34-column contract, hash `ca05eadcaeea…`, fixture, parser tests; Supabase feed INSERT ready to run manually (see [View 220 section](#view-220-sales-worksheet-history-facts)) |
 | Live Moraware download | **Not built** — no governed fetch, no browser scrape, no cookies/SID in repo |
 | Dashboard reads | **Not wired** — prepared facts exist in Supabase but no UI reads them yet |
 
@@ -580,6 +581,100 @@ Treat each saved Moraware view as a **versioned integration contract** with its 
 - **Moraware mappings must become organization-scoped** before external SaaS reuse.
 - **Do not commit real Moraware exports** containing customer PII.
 - **Do not commit generated debug output** unless intentionally sanitized for tests.
+
+## View 220: Sales Worksheet History Facts
+
+**Purpose:** Historical worksheet export (date-ranged) used for YoY / Sales Dashboard trend analytics.
+
+**`report_type`:** `sales_worksheet_history_facts`  
+**`moraware_view_id`:** `220`  
+**Columns:** 34  
+**Header hash:** `ca05eadcaeea16417f017e857f48a89ed42ee2033242d80ee635e8002d0dd000`  
+**Observed live export (2026-05-31):** 22,899 rows · 562,602.50 total sqft · 2025-01-02 through 2026-05-30
+
+### Architecture decisions
+
+- **Separate feed, shared prepared table.** View 220 uses `moraware_prepared_sales_worksheet_facts` — the same table as view 219 — scoped by `report_feed_id`. A second prepared table is not needed; `report_feed_id` provides full isolation. See Feature Decision 45.
+- **Dashboard queries MUST filter by `report_feed_id`.** Without this filter, view 219 and view 220 rows are double-counted (same worksheet lines appear in both views with different date scopes).
+- **All existing pipeline modules reused.** Parsing, staging, API mirror identity enrichment, ambiguity review, and matched-only promotion all work without modification.
+- **`Job Status` absent.** View 220 does not include a Job Status column. The `job_status` field in promoted prepared facts will be `null` for view 220 rows. This is safe — the mapper uses `enrichedRow.jobStatus || null` and the enrichment layer defaults missing columns to `""`.
+- **Row hash isolation.** `reportType` is a component of `computeReportRowHash`. View 219 rows (`sales_worksheet_facts`) and view 220 rows (`sales_worksheet_history_facts`) for the same worksheet line will always produce **different** row hashes, preventing collision in the partial unique index.
+- **`Account Status`, sink/faucet/stove/shop/worksite columns** → `raw_row` only in v1. No new typed prepared-fact columns required; no DB migration needed.
+
+### 34-column contract
+
+| # | Column | Prepared-fact mapping |
+|---|--------|-----------------------|
+| 1 | Account Name | `account_name` |
+| 2 | Account Salesperson | `raw_row` only (v1) |
+| 3 | Account Status | `raw_row` only (v1) |
+| 4 | Job Name | `job_name` |
+| 5 | Job Creation Date | `job_creation_date` |
+| 6 | Job Salesperson | `job_salesperson` |
+| 7 | Job Notes | `raw_row` only (v1) |
+| 8 | Stone | `stone` |
+| 9 | Job Worksheet - Form Name | row hash discriminator + `raw_row` |
+| 10 | Job Worksheet - Room | `room` |
+| 11 | Job Worksheet - Color | `color` |
+| 12–15 | Edge, Thickness, Back Splash Type/Height | `raw_row` only (v1) |
+| 16–33 | Sink, Faucet, Stove, Stone Care Kit, Dry Treat, Shop Comments, Worksite Conditions | `raw_row` only (v1) |
+| 34 | Total Job Worksheet - Sq.Ft. by Job Creation Date | `total_worksheet_sqft` |
+
+Note: `job_status` is absent from view 220. Promoted prepared facts will have `job_status = null` for this feed.
+
+### Supabase feed INSERT (run manually — replace org UUID)
+
+```sql
+insert into public.moraware_report_feeds (
+  organization_id, name, moraware_view_id, report_type,
+  export_path, html_path, expected_columns, expected_column_hash, cadence, notes
+) values (
+  '00000000-0000-0000-0000-000000000000',
+  'eliteOS - Sales Worksheet History Facts',
+  220,
+  'sales_worksheet_history_facts',
+  '/sys/report/?view=220&spreadsheet=1&exportType=AllPages&table=Report',
+  '/sys/report/?view=220',
+  '["Account Name","Account Salesperson","Account Status","Job Name","Job Creation Date","Job Salesperson","Job Notes","Stone","Job Worksheet - Form Name","Job Worksheet - Room","Job Worksheet - Color","Job Worksheet - Edge","Job Worksheet - Thickness","Job Worksheet - Back Splash Type","Job Worksheet - Back Splash Height","Job Worksheet - Sink Type","Job Worksheet - We have the sink","Job Worksheet - ESF Provided Sink Make & Model","Job Worksheet - Faucet Type","Job Worksheet - We have Faucet","Job Worksheet - ESF Provided Faucet Make & Model","Job Worksheet - Faucet at Jobsite","Job Worksheet - Not Provided by ESF Sink Make & Model","Job Worksheet - Not Provided by ESF Faucet Make & Model","Job Worksheet - Stove Type","Job Worksheet - Stove Ripper Needed","Job Worksheet - Stove Ripper NOT Needed","Job Worksheet - Make & Model","Job Worksheet - Stone Care Kit","Job Worksheet - Dry Treat","Job Worksheet - Shop Comments","Job Worksheet - More Shop Comments","Job Worksheet - Special Worksite Conditions","Total Job Worksheet - Sq.Ft. by Job Creation Date"]'::jsonb,
+  'ca05eadcaeea16417f017e857f48a89ed42ee2033242d80ee635e8002d0dd000',
+  'manual',
+  'Historical worksheet export (date-ranged) for YoY / trend analytics. Separate feed from view 219; dashboard queries must scope by report_feed_id. Job Status absent from this view; job_status will be null in prepared facts.'
+)
+on conflict (organization_id, report_type) do nothing;
+```
+
+### Run sequence (once feed row is seeded in Supabase)
+
+```bash
+# 1. Stage CSV
+SUPABASE_WRITE_ENABLED=1 npm run eos:moraware:stage-report-run -- \
+  --report-feed-id <view220-feed-uuid> --csv-path ./view-220.csv
+
+# 2. Enrich identity from API mirror
+SUPABASE_WRITE_ENABLED=1 npm run eos:moraware:enrich-report-run-api-mirror -- \
+  --run-id <run-uuid> --organization-id <org-uuid>
+
+# 3. Review ambiguous rows (read-only)
+npm run eos:moraware:promote-report-run-matched-facts -- \
+  --run-id <run-uuid> --organization-id <org-uuid> --review-ambiguous
+
+# 4. Dry-run promotion
+npm run eos:moraware:promote-report-run-matched-facts -- \
+  --run-id <run-uuid> --organization-id <org-uuid>
+
+# 5. Apply matched-only promotion
+SUPABASE_WRITE_ENABLED=1 npm run eos:moraware:promote-report-run-matched-facts -- \
+  --run-id <run-uuid> --organization-id <org-uuid> --apply --matched-only
+```
+
+### Source files
+
+- **Contract:** `backend-core/src/moraware/reportFeeds/constants.js` — `SALES_WORKSHEET_HISTORY_FACTS_EXPECTED_COLUMNS`, `SALES_WORKSHEET_HISTORY_FACTS_EXPECTED_COLUMN_HASH`, `SALES_WORKSHEET_HISTORY_FACTS_REPORT_TYPE`
+- **Fixture:** `backend-core/test/fixtures/moraware-report-feeds/sales-worksheet-history-facts.sample.csv`
+- **Tests:** `backend-core/src/moraware/reportFeeds/reportFeedParser.test.mjs` — `testView220*` functions
+- **SQL seed:** `backend-core/supabase/eliteos_moraware_report_feeds.sql` — commented INSERT at end of file
+
+---
 
 ## Relationship to existing Moraware API sync
 

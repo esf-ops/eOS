@@ -230,3 +230,34 @@ create index if not exists idx_moraware_prepared_sales_worksheet_facts_job
 --   'Additive report-feed lane beside Moraware API sync. Hash validated against live export run afc7b49d-af7a-4fec-85a0-0fdb11046ea3 (2026-05-30).'
 -- )
 -- on conflict (organization_id, report_type) do nothing;
+
+-- View 220: Sales Worksheet History Facts
+-- Historical (date-ranged) worksheet export used for YoY / Sales Dashboard analytics.
+-- Separate feed from view 219 — dashboard queries MUST filter by report_feed_id to avoid double-counting.
+-- Job Status is absent from this view; job_status will be null in promoted prepared facts.
+-- Replace '00000000-0000-0000-0000-000000000000' with the real org UUID before running.
+--
+-- insert into public.moraware_report_feeds (
+--   organization_id,
+--   name,
+--   moraware_view_id,
+--   report_type,
+--   export_path,
+--   html_path,
+--   expected_columns,
+--   expected_column_hash,
+--   cadence,
+--   notes
+-- ) values (
+--   '00000000-0000-0000-0000-000000000000',
+--   'eliteOS - Sales Worksheet History Facts',
+--   220,
+--   'sales_worksheet_history_facts',
+--   '/sys/report/?view=220&spreadsheet=1&exportType=AllPages&table=Report',
+--   '/sys/report/?view=220',
+--   '["Account Name","Account Salesperson","Account Status","Job Name","Job Creation Date","Job Salesperson","Job Notes","Stone","Job Worksheet - Form Name","Job Worksheet - Room","Job Worksheet - Color","Job Worksheet - Edge","Job Worksheet - Thickness","Job Worksheet - Back Splash Type","Job Worksheet - Back Splash Height","Job Worksheet - Sink Type","Job Worksheet - We have the sink","Job Worksheet - ESF Provided Sink Make & Model","Job Worksheet - Faucet Type","Job Worksheet - We have Faucet","Job Worksheet - ESF Provided Faucet Make & Model","Job Worksheet - Faucet at Jobsite","Job Worksheet - Not Provided by ESF Sink Make & Model","Job Worksheet - Not Provided by ESF Faucet Make & Model","Job Worksheet - Stove Type","Job Worksheet - Stove Ripper Needed","Job Worksheet - Stove Ripper NOT Needed","Job Worksheet - Make & Model","Job Worksheet - Stone Care Kit","Job Worksheet - Dry Treat","Job Worksheet - Shop Comments","Job Worksheet - More Shop Comments","Job Worksheet - Special Worksite Conditions","Total Job Worksheet - Sq.Ft. by Job Creation Date"]'::jsonb,
+--   'ca05eadcaeea16417f017e857f48a89ed42ee2033242d80ee635e8002d0dd000',
+--   'manual',
+--   'Historical worksheet export (date-ranged) for YoY / trend analytics. Separate feed from view 219; dashboard queries must scope by report_feed_id. Job Status absent from this view; job_status will be null in prepared facts. Hash validated against live export 2026-05-31 (22,899 rows, 562,602.50 total sqft).'
+-- )
+-- on conflict (organization_id, report_type) do nothing;
