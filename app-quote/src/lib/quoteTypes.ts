@@ -124,6 +124,12 @@ export type RoomDraft = {
   useTaxMode?: RoomUseTaxMode;
   useTaxPercent?: number;
   useTaxBase?: "countertop_material";
+  /**
+   * Edge profile selection for this room/area. Standard edges are included in fabrication;
+   * upgraded edges are captured for the estimator but are NOT yet priced by the backend calculator.
+   * Backend pricing for upgraded edges (per LF) is a must-fix follow-up slice.
+   */
+  edgeProfile?: string;
   vanity: {
     size: string;
     source: VanitySource;

@@ -2552,10 +2552,7 @@ export default function InternalEstimateApp() {
                     Entered by
                     <input value={enteredBy} onChange={(e) => setEnteredBy(e.target.value)} placeholder="Defaults from sign-in" />
                   </label>
-                  <label className="check" style={{ alignSelf: "end" }}>
-                    <input type="checkbox" checked={colorTbd} onChange={(e) => setColorTbd(e.target.checked)} />
-                    Color TBD (project-wide)
-                  </label>
+                  {/* Color TBD is captured per-room in the Room builder — no project-wide toggle needed */}
                   <label>
                     Use tax on countertop material
                     <select

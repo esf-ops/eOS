@@ -26,11 +26,14 @@ import {
 import {
   ADDON_CATALOG,
   createEstimatorRoom,
+  DEFAULT_EDGE_PROFILE,
   defaultVanityKitchenTier,
   newId,
   priceVanityRoomDraft,
   resolveRoomUseTaxPercent,
   roomEditorDomId,
+  STANDARD_EDGE_PROFILES,
+  UPGRADED_EDGE_PROFILES,
   VANITY_PRICING
 } from "../lib/prototypeQuoteMath";
 import { VANITY_PROGRAM_2026_RATES, VANITY_PROGRAM_YEAR } from "../lib/vanityProgram2026";
@@ -485,6 +488,37 @@ export default function RoomScopeBuilder({
                 </p>
               </div>
             ) : null}
+
+            <div style={{ marginTop: 10 }}>
+              <label style={{ maxWidth: 280 }}>
+                Edge profile
+                <select
+                  value={room.edgeProfile ?? DEFAULT_EDGE_PROFILE}
+                  onChange={(e) => onRoomsChange(updateRoom(rooms, room.id, { edgeProfile: e.target.value }))}
+                >
+                  <optgroup label="Standard (included)">
+                    {STANDARD_EDGE_PROFILES.map((ep) => (
+                      <option key={ep} value={ep}>
+                        {ep}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Upgraded (not yet priced — backend follow-up)">
+                    {UPGRADED_EDGE_PROFILES.map((ep) => (
+                      <option key={ep} value={ep}>
+                        {ep}
+                      </option>
+                    ))}
+                  </optgroup>
+                </select>
+              </label>
+              {UPGRADED_EDGE_PROFILES.includes(room.edgeProfile as (typeof UPGRADED_EDGE_PROFILES)[number]) && (
+                <p className="muted small" style={{ marginTop: 4 }}>
+                  Upgraded edge selected — selection saved, but LF pricing is not yet calculated.
+                  A backend Pricing Admin slice is required before this appears in the customer total.
+                </p>
+              )}
+            </div>
 
             {room.roomType === "Vanity" ? (
               <div className="room-vanity-mode-bar" style={{ marginTop: 12, marginBottom: 4 }}>

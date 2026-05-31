@@ -56,6 +56,30 @@ export const INTERNAL_ESTIMATE_MEASURE_OPTIONS: InternalMeasureOptions = {
   chargeableCounterCeil: true
 };
 
+/**
+ * Standard edge profiles — included in fabrication, no extra charge.
+ * Default is "Eased" (3mm eased edge, most common shop default).
+ */
+export const STANDARD_EDGE_PROFILES = ["Eased", "Beveled", "Pencil", "Bullnose"] as const;
+
+/**
+ * Upgraded edge profiles — captured per room for estimating.
+ * NOTE: These are NOT yet priced by the backend calculator.
+ * Pricing by linear foot is a must-fix backend/Pricing Admin follow-up slice.
+ */
+export const UPGRADED_EDGE_PROFILES = [
+  "Full Bullnose",
+  "Ogee",
+  "Waterfall",
+  "Laminated (mitered)",
+  "Dupont"
+] as const;
+
+export type StandardEdgeProfile = (typeof STANDARD_EDGE_PROFILES)[number];
+export type UpgradedEdgeProfile = (typeof UPGRADED_EDGE_PROFILES)[number];
+
+/** Default edge profile when none is specified. */
+export const DEFAULT_EDGE_PROFILE: StandardEdgeProfile = "Eased";
 
 export {
   defaultVanityKitchenTier,
@@ -2120,6 +2144,7 @@ function applyRoomPersistenceFields(base: RoomDraft, r: Record<string, unknown>)
   if (r.useTaxMode != null) base.useTaxMode = String(r.useTaxMode) as RoomDraft["useTaxMode"];
   if (r.useTaxPercent != null) base.useTaxPercent = Math.max(0, Number(r.useTaxPercent) || 0);
   if (r.useTaxBase != null) base.useTaxBase = "countertop_material";
+  if (r.edgeProfile != null) base.edgeProfile = String(r.edgeProfile);
   const v = r.vanity;
   if (v && typeof v === "object") {
     const vv = v as Record<string, unknown>;
