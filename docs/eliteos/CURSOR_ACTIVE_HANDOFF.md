@@ -2,7 +2,7 @@
 
 **Purpose:** Cheap context for new Cursor chats. Do not treat old chat transcripts as source of truth — use this file + `docs/eliteos/*` + `.cursor/rules/*`.
 
-**Last updated:** 2026-05-31 (view 220 row_hash collision fix)
+**Last updated:** 2026-05-31 (view 220 name-only promotion validated)
 
 ---
 
@@ -22,7 +22,8 @@ Additive ingestion lane beside existing Moraware API sync. Combines saved-report
 | Promotion | Test org smoke-validated; **real Elite org `8f5e74d1` matched-only promoted 2026-05-31** — 6,957 active facts, 29 ambiguous excluded, run stays `needs_review` |
 | View 220 contract (Sales Worksheet History Facts) | **Contract built** — 34-col, hash `ca05eadcaeea…`, fixture, tests; Supabase feed INSERT ready (manual) |
 | Name-only promotion (view 220) | **Built** — `--allow-name-only`; view 220 only; matched + name-only rows; ambiguous excluded; run stays `needs_review` |
-| View 220 row_hash collision fix | **Fixed** — `buildExtraDiscriminators` folds all 34 cols into hash for view 220 only; view 219 hashes unchanged; 4 new regression tests pass. **Re-stage run `655eed33` before promoting** |
+| View 220 row_hash collision fix | **Fixed & validated** — `buildExtraDiscriminators`; view 219 unchanged; 4 regression tests. Run `655eed33` discarded (stale); replaced by `7e532f55` |
+| View 220 name-only promotion | **Promoted 2026-05-31** — run `7e532f55`, feed `02ae8a2a`; 22,875 active facts / 561,989.50 sqft; 6,985 matched + 15,890 name-only; 24 ambiguous excluded; run `needs_review` |
 | Governed download design (Phase A) | **Documented** — see [`moraware-report-feeds.md` § Governed download design](./moraware-report-feeds.md#governed-download-design-phase-a--docs-only) |
 | Live download / scrape / cron / API routes | **Not built** |
 | Dashboards reading prepared facts | **Not built** |
@@ -33,14 +34,18 @@ Full detail: [`moraware-report-feeds.md`](./moraware-report-feeds.md)
 
 | Org | `organization_id` | Feed id | Notable run id |
 |-----|-------------------|---------|----------------|
-| Real Elite | `89180433-9fab-4024-bec9-a14d870bd0a8` | `e8c0433a-c243-4cc5-b8bb-7842ec64a0e7` | `afc7b49d` (validated staging, no promotion); `cb765461` (failed — schema drift + identity-link dupe; prompted 76-col hardening); `8f5e74d1` (**matched-only promoted 2026-05-31** — 6,957 active facts / 29 ambiguous excluded / 0 unmatched; run status `needs_review`) |
+| Real Elite | `89180433-9fab-4024-bec9-a14d870bd0a8` | `e8c0433a-c243-4cc5-b8bb-7842ec64a0e7` (view 219) | `afc7b49d` (validated staging, no promo); `cb765461` (failed — schema drift); `8f5e74d1` (**matched-only promoted** — 6,957 facts / 29 ambiguous excluded; `needs_review`) |
+| Real Elite | (same) | `02ae8a2a-ea1f-4d03-ae59-276af15435ed` (view 220) | `655eed33` (stale — pre-hash-fix; do not promote); `7e532f55` (**name-only promoted 2026-05-31** — 22,875 facts / 561,989.50 sqft / 24 ambiguous excluded; `needs_review`) |
 | Test org | `00000000-0000-0000-0000-000000000001` | `a053cb9a-e362-4c5a-8f47-895314cec85a` | `a660473b-b200-4d14-ba0b-5b713c475c9c` (promo smoke 1); `6d54c835-058f-47f8-a831-db8efca86a5b` (promo smoke 2, supersede) |
 
 Sales Worksheet Facts (view 219) contract: `report_type=sales_worksheet_facts`, hash `8e12bfb52b516ac30aa94e85d7bf92ee9c6d47741b2967586b743954136b9ade` (76-col). Columns 1–15 + col 76 → prepared facts; cols 16–75 raw_row only.
 
-Sales Worksheet History Facts (view 220) contract: `report_type=sales_worksheet_history_facts`, hash `ca05eadcaeea16417f017e857f48a89ed42ee2033242d80ee635e8002d0dd000` (34-col). Same prepared table as view 219; **dashboard queries must filter by `report_feed_id`**. Job Status absent → `job_status = null` in promoted facts. Observed live: 22,899 rows, 562,602.50 sqft (2026-05-31). API mirror dry-run on run `655eed33`: 7,059 match / 15,809 no-match / 7 ambiguous. **⚠ Run `655eed33` has stale hashes (12 collision groups detected). Discard it. After the collision fix, re-stage from the same CSV to get a new run with corrected hashes.** Supabase feed row not yet inserted — see SQL file.
+Sales Worksheet History Facts (view 220) contract: `report_type=sales_worksheet_history_facts`, hash `ca05eadcaeea16417f017e857f48a89ed42ee2033242d80ee635e8002d0dd000` (34-col). Feed `02ae8a2a-ea1f-4d03-ae59-276af15435ed`. Same prepared table as view 219; **dashboard queries must filter by `report_feed_id = '02ae8a2a-ea1f-4d03-ae59-276af15435ed'`**. Job Status absent → `job_status = null` in promoted facts.
 
-**View 220 name-only promotion:** use `--allow-name-only` (NOT `--matched-only`). Promotes matched (7,059) + name-only (15,809) = 22,868 facts; 7 ambiguous excluded. Name-only facts have null `job_id`/`account_id`; `identity_status = "needs_identity_review"`. Run status stays `needs_review` (identity partial). **Cannot be used on view 219 feeds** — DB-enforced.
+**Run `655eed33`** — stale (pre-hash-fix, 12 collision groups). Do not promote.  
+**Run `7e532f55`** — **name-only promoted 2026-05-31**. 22,875 active facts / 561,989.50 sqft / 6,985 matched + 15,890 name-only / 24 ambiguous excluded. Run status `needs_review` (identity partial).
+
+**View 220 name-only promotion:** use `--allow-name-only` (NOT `--matched-only`). Name-only facts have null `job_id`/`account_id`; `identity_status = "needs_identity_review"`. Run status stays `needs_review`. **Cannot be used on view 219 feeds** — DB-enforced. Dashboard queries must handle null ID joins explicitly.
 
 ### Key commands
 
@@ -98,18 +103,14 @@ Code: `backend-core/src/moraware/reportFeeds/`, scripts under `backend-core/src/
 
 **View 220 contract built (2026-05-31):** 34-column `sales_worksheet_history_facts` contract. Fixture, parser tests, and commented Supabase feed INSERT added. All existing pipeline modules reuse without modification. No DB migration needed. Supabase feed INSERT must be run manually before staging.
 
-**View 220 row_hash collision fix (2026-05-31):** `buildExtraDiscriminators` now folds all 34 raw column values (sorted by name) into the hash for `sales_worksheet_history_facts`, eliminating collisions between rows that share all base fields but differ in detail columns (Edge, Thickness, Sink Type, etc.). View 219 hashes are fully unchanged. 4 new regression tests pass. Old run `655eed33` has stale hashes — discard it and re-stage.
+**View 220 row_hash collision fix (2026-05-31):** `buildExtraDiscriminators` now folds all 34 raw column values (sorted by name) into the hash for `sales_worksheet_history_facts`, eliminating collisions between rows that share all base fields but differ in detail columns (Edge, Thickness, Sink Type, etc.). View 219 hashes are fully unchanged. 4 new regression tests pass. Old run `655eed33` discarded; replaced by run `7e532f55`.
 
-**Next immediate steps (view 220):**
+**View 220 name-only promotion complete (2026-05-31):** Run `7e532f55` promoted from feed `02ae8a2a`. 22,875 active prepared facts / 561,989.50 sqft. 6,985 matched (177,070.50 sqft) + 15,890 name-only (384,919.00 sqft). 24 ambiguous excluded. Run status `needs_review` (identity partial). See [`moraware-report-feeds.md` § v2 validation results](./moraware-report-feeds.md#v2-validation-results-run-7e532f55).
 
-1. Run the view 220 Supabase feed INSERT manually (see `eliteos_moraware_report_feeds.sql` or `moraware-report-feeds.md` § View 220 § Supabase feed INSERT). Replace org UUID first.
-2. **Re-stage** the view 220 CSV export (same file as produced run `655eed33`) using `eos:moraware:stage-report-feed-local` with `--report-feed-id <view220-feed-id>`. This creates a new run with corrected row_hashes.
-3. Run API mirror enrichment dry-run on the **new run ID** (`eos:moraware:enrich-report-run-api-mirror`).
-4. Apply API mirror enrichment (`--apply`).
-5. Dry-run name-only promotion (no flags — shows matched + name-only breakdown).
-6. Verify **zero duplicate hash groups** in the dry-run output before applying.
-7. Apply name-only promotion: `--apply --allow-name-only` with `SUPABASE_WRITE_ENABLED=1`.
-8. Validate: sqft total ~562,602.50, 22,899 active facts, `identity_status` breakdown matches enrichment counts.
+**Next immediate steps (view 220):** ✅ Staging, enrichment, and name-only promotion are complete. No pending operator actions.
+
+- Dashboard wiring requires separate approval. When building: always filter by `report_feed_id = '02ae8a2a-ea1f-4d03-ae59-276af15435ed'` and handle null `job_id`/`account_id` explicitly in joins.
+- The 24 ambiguous excluded rows can be investigated via `--review-ambiguous` if ID resolution is desired later.
 
 **Next immediate steps (view 219):**
 1. (Optional) Resolve the 29 ambiguous rows from run `8f5e74d1`.

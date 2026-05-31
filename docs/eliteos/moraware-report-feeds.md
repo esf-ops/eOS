@@ -24,7 +24,8 @@ Combining CSV rows + HTML-derived IDs gives faster, trustable prepared facts for
 | Matched-only promotion (persisted run) | **Validated** — run `8f5e74d1`: 6,957 prepared facts active; 29 ambiguous excluded |
 | View 220 contract (Sales Worksheet History Facts) | **Contract built** — 34-column contract, hash `ca05eadcaeea…`, fixture, parser tests; Supabase feed INSERT ready to run manually (see [View 220 section](#view-220-sales-worksheet-history-facts)) |
 | Name-only promotion (view 220) | **Built** — `--allow-name-only` flag; permitted only for `sales_worksheet_history_facts`; promotes matched + `needs_identity_review` rows; ambiguous always excluded; run status stays `needs_review` |
-| View 220 row_hash collision fix | **Fixed** — `buildExtraDiscriminators` folds all 34 column values into the hash for `sales_worksheet_history_facts` only; view 219 hashes unchanged; 4 new regression tests pass; re-stage run `655eed33` from same CSV to get corrected hashes before promoting |
+| View 220 row_hash collision fix | **Fixed & validated** — `buildExtraDiscriminators` folds all 34 column values into hash for view 220 only; view 219 hashes unchanged; 4 regression tests pass; run `655eed33` discarded (stale hashes); re-staged as run `7e532f55` |
+| View 220 name-only promotion (validated) | **Promoted 2026-05-31** — run `7e532f55`, feed `02ae8a2a`; 22,875 active facts / 561,989.50 sqft; 6,985 matched + 15,890 name-only; 24 ambiguous excluded; run stays `needs_review` |
 | Live Moraware download | **Not built** — no governed fetch, no browser scrape, no cookies/SID in repo |
 | Dashboard reads | **Not wired** — prepared facts exist in Supabase but no UI reads them yet |
 
@@ -35,6 +36,8 @@ Combining CSV rows + HTML-derived IDs gives faster, trustable prepared facts for
 | Real Elite | `89180433-9fab-4024-bec9-a14d870bd0a8` | `e8c0433a-c243-4cc5-b8bb-7842ec64a0e7` | `afc7b49d-af7a-4fec-85a0-0fdb11046ea3` | `validated`, 3 rows, 3 matched; **no** prepared facts written |
 | Real Elite | (same) | (same) | `cb765461-f181-4ca8-a22d-b44e0bec0766` | `failed` — schema drift (16-col hash vs 76-col real); duplicate identity-link key. Prompted 76-col hardening. HTML snapshot: 22 job links / 4 account links vs 6,986 CSV rows — HTML pagination confirmed. |
 | Real Elite | (same) | (same) | `8f5e74d1-482f-4f38-b694-548b1bc239a1` | `needs_review` (29 ambiguous rows remain unresolved) — **6,957 matched-only prepared facts promoted 2026-05-31**. See [v1 validation results](#v1-validation-results-run-8f5e74d1) below. |
+| Real Elite | `89180433-9fab-4024-bec9-a14d870bd0a8` | `02ae8a2a-ea1f-4d03-ae59-276af15435ed` | `655eed33-cc07-4362-9140-1e075adc4406` | **Stale — do not promote.** View 220 staged before hash collision fix; 12 collision groups detected. Discarded; replaced by run `7e532f55`. |
+| Real Elite | (same) | `02ae8a2a-ea1f-4d03-ae59-276af15435ed` | `7e532f55-c9f4-41f6-8dce-036540207d61` | `needs_review` (identity partial — name-only facts) — **22,875 name-only promoted 2026-05-31**. See [v2 validation results](#v2-validation-results-run-7e532f55) below. |
 | Test org | `00000000-0000-0000-0000-000000000001` | `a053cb9a-e362-4c5a-8f47-895314cec85a` | `a660473b-b200-4d14-ba0b-5b713c475c9c` | Promotion smoke 1: 3 inserted, 0 superseded |
 | Test org | (same) | (same) | `6d54c835-058f-47f8-a831-db8efca86a5b` | Promotion smoke 2: 3 inserted, 3 superseded + `superseded_by` backfill |
 
@@ -72,6 +75,41 @@ Combining CSV rows + HTML-derived IDs gives faster, trustable prepared facts for
 | 29 ambiguous rows excluded | These rows matched more than one `brain_moraware_jobs` entry for the same normalised `account_name + job_name` key. They remain in `moraware_report_raw_rows` with `identity_status = "ambiguous_identity"` and are not in prepared facts. Resolve by running `--review-ambiguous`, investigating the duplicates in `brain_moraware_jobs`, and re-promoting once resolved. |
 | Branch / location not in prepared facts | `branch_or_process` is always `null` in v1 — "Branch" column is absent from the real Moraware view 219 export. Deferred to Account Mapping head. |
 | Dashboards not wired | `moraware_prepared_sales_worksheet_facts` has 6,957 active rows but nothing reads them yet. |
+
+### v2 validation results (run `7e532f55`)
+
+**Date promoted:** 2026-05-31  
+**Feed:** `02ae8a2a-ea1f-4d03-ae59-276af15435ed` (Sales Worksheet History Facts, view 220)  
+**Mode:** name-only (`--apply --allow-name-only`)  
+**Run status:** `needs_review` (identity partial — name-only facts have null `job_id`/`account_id`)  
+**Hash algorithm:** two-tier (base fields + all 34 column values via `buildExtraDiscriminators`) — collision-free
+
+| Metric | Value |
+|--------|-------|
+| Active prepared fact rows | **22,875** |
+| Total worksheet sqft | **561,989.50** |
+| Matched facts (with `job_id`/`account_id`) | **6,985 rows** / 2,644 distinct matched jobs / **177,070.50 sqft** |
+| Name-only facts (null IDs, `identity_status = needs_identity_review`) | **15,890 rows** / **384,919.00 sqft** |
+| Ambiguous rows excluded | **24** |
+| Old facts superseded | 0 (first view 220 promotion — no prior active rows for this feed) |
+
+**Validation notes:**
+
+- `identity_status` preserved in prepared facts: matched rows have populated `job_id`/`account_id`; name-only rows have `null` for both.
+- Run status stays `needs_review` by design — partial identity is expected for historical data where the API mirror has no record.
+- **Dashboard queries MUST filter by `report_feed_id = '02ae8a2a-ea1f-4d03-ae59-276af15435ed'`** to avoid double-counting view 219 and view 220 rows for the same underlying worksheet lines.
+- Null `job_id`/`account_id` joins must be handled explicitly in dashboard queries (e.g. `LEFT JOIN ... ON job_id IS NOT NULL`).
+- `job_status` is `null` for all view 220 prepared facts (column absent from export).
+- Stale run `655eed33` (pre-hash-fix) remains in `moraware_report_raw_rows` as `needs_review` / unpromoted. It must not be promoted.
+
+**Known v2 gaps:**
+
+| Gap | Notes |
+|-----|-------|
+| 24 ambiguous rows excluded | Same cause as v1 — multiple `brain_moraware_jobs` entries for the same normalised key. Remain in raw rows; not in prepared facts. |
+| 15,890 name-only rows have null IDs | API mirror only holds recent/current jobs; historical pre-sync jobs will never match. Name-only facts are useful for YoY sqft totals by salesperson/stone/period. ID-based joins require the matched subset (`identity_status = 'matched'`). |
+| `account_salesperson` not typed | Same as v1 — raw_row only in this version. |
+| Dashboards not wired | 22,875 active view 220 facts exist but nothing reads them yet. Requires `report_feed_id` filter and null ID handling. |
 
 ## Governed download design (Phase A — docs only)
 
@@ -553,10 +591,12 @@ SUPABASE_URL=<url> SUPABASE_SERVICE_ROLE_KEY=<key> SUPABASE_WRITE_ENABLED=1 \
 npm run eos:moraware:promote-report-run-matched-facts -- --apply --allow-name-only
 ```
 
-For run `655eed33` (view 220, 22,899 rows):
-- API mirror dry-run: 7,059 would match, 15,809 no-match, 7 ambiguous.
-- After API mirror apply: use `--allow-name-only` to promote matched (7,059) + name-only (15,809) = 22,868 facts; 7 ambiguous excluded.
-- Run status will stay `needs_review` (identity is partial — name-only facts have null IDs).
+For run `7e532f55` (view 220, feed `02ae8a2a`, **promoted 2026-05-31**):
+- API mirror enrichment applied before promotion.
+- Promoted with `--allow-name-only`: 6,985 matched + 15,890 name-only = 22,875 facts; 24 ambiguous excluded.
+- Run status `needs_review` (identity partial — name-only facts have null IDs). See [v2 validation results](#v2-validation-results-run-7e532f55).
+
+Run `655eed33` (view 220, same feed) is **stale — do not promote**. It was staged before the two-tier hash fix and has 12 collision groups.
 
 For the real Elite run `8f5e74d1` (view 219):
 - 6,957 matched rows eligible; 29 ambiguous excluded.
