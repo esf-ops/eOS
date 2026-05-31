@@ -2574,6 +2574,113 @@ input[type="checkbox"] {
   }
 }
 
+/* ==========================================================================
+   Quote Detail Modal — replaces the side drawer.
+   The .drawer-* content classes (drawer-block, stat-grid, revision-list, etc.)
+   are reused inside .ql-modal-body unchanged.
+   ========================================================================== */
+
+.ql-modal-wrap {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  background: rgba(11, 26, 51, 0.45);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  animation: ql-modal-fade var(--eos-dur-2) var(--eos-ease) both;
+}
+
+@keyframes ql-modal-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.ql-modal {
+  position: relative;
+  width: 100%;
+  max-width: 720px;
+  max-height: calc(100vh - 48px);
+  background:
+    radial-gradient(60% 40% at 100% 0%, rgba(108, 79, 207, 0.05), transparent 65%),
+    radial-gradient(50% 35% at 0%   0%, rgba(46, 105, 184, 0.05), transparent 65%),
+    #ffffff;
+  border-radius: var(--r-xl);
+  border: 1px solid var(--eos-line);
+  box-shadow:
+    0 24px 72px rgba(11, 26, 51, 0.20),
+    0  4px 18px rgba(11, 26, 51, 0.10);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: ql-modal-rise var(--eos-dur-2) var(--eos-ease) both;
+}
+
+@keyframes ql-modal-rise {
+  from { transform: translateY(8px) scale(0.99); opacity: 0; }
+  to   { transform: translateY(0)   scale(1);    opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ql-modal-wrap,
+  .ql-modal {
+    animation: none;
+  }
+}
+
+.ql-modal-header {
+  flex-shrink: 0;
+  padding: 18px 26px;
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: saturate(180%) blur(14px);
+  -webkit-backdrop-filter: saturate(180%) blur(14px);
+  border-bottom: 1px solid var(--eos-line);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ql-modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 22px 26px 56px;
+  scroll-behavior: smooth;
+}
+
+@supports (scrollbar-gutter: stable) {
+  .ql-modal-body {
+    scrollbar-gutter: stable;
+  }
+}
+
+/* Prevent page scroll behind the modal (modern browsers). */
+body:has(.ql-modal-wrap) {
+  overflow: hidden;
+}
+
+@media (max-width: 720px) {
+  .ql-modal-wrap {
+    padding: 0;
+    align-items: flex-end;
+  }
+  .ql-modal {
+    max-width: 100%;
+    max-height: 92vh;
+    border-radius: var(--r-xl) var(--r-xl) 0 0;
+  }
+  .ql-modal-header {
+    padding: 16px 18px 14px;
+  }
+  .ql-modal-body {
+    padding: 18px 18px 48px;
+  }
+}
+
 /* ----- Print ------------------------------------------------------------ */
 
 @media print {
