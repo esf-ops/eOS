@@ -89,14 +89,20 @@ const UPGRADED_EDGE_PROFILE_NAMES = new Set([
 
 /**
  * Resolve the specialty edge $/LF rate from pricing rules, falling back to the constant.
+ * Returns `{ rate, rateSource }` so the snapshot can record where the rate came from.
+ * - rateSource "pricing_rules": rate found in `quote_pricing_rules` (Pricing Admin controls it).
+ * - rateSource "fallback": no DB rule found; using SPECIALTY_EDGE_RATE_PER_LF constant.
  * @param {ReadonlyArray<Record<string, unknown>>} rules
+ * @returns {{ rate: number, rateSource: "pricing_rules" | "fallback" }}
  */
 function resolveEdgeRateFromRules(rules) {
   const rule = (rules || []).find(
     (r) => String(r.item_code) === "specialty_edge_per_lf" && String(r.category) !== "material_group"
   );
-  if (rule != null && Number(rule.price) >= 0) return Number(rule.price);
-  return SPECIALTY_EDGE_RATE_PER_LF;
+  if (rule != null && Number(rule.price) >= 0) {
+    return { rate: Number(rule.price), rateSource: "pricing_rules" };
+  }
+  return { rate: SPECIALTY_EDGE_RATE_PER_LF, rateSource: "fallback" };
 }
 
 /**
@@ -107,7 +113,7 @@ function resolveEdgeRateFromRules(rules) {
  * @param {ReadonlyArray<Record<string, unknown>>} rules
  */
 function calculateRoomUpgradedEdges(rooms, rules) {
-  const rate = resolveEdgeRateFromRules(rules);
+  const { rate, rateSource } = resolveEdgeRateFromRules(rules);
   /** @type {Array<Record<string, unknown>>} */
   const lines = [];
   /** @type {string[]} */
@@ -135,7 +141,7 @@ function calculateRoomUpgradedEdges(rooms, rules) {
       line_subtotal: lineSubtotal
     });
   }
-  return { total: round2(total), lines, warnings, rate, rateSource: "specialty_edge_per_lf" };
+  return { total: round2(total), lines, warnings, rate, rateSource };
 }
 
 /** Future: how quote measurements were produced (AI, layout, manual, …). */

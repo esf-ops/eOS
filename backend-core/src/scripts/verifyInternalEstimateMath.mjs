@@ -553,13 +553,16 @@ if (upgEdgeDirect.totals.retail !== upgEdgeDirect.totals.wholesale) {
   throw new Error("EDGE-4: internal_quote direct: retail must equal wholesale");
 }
 
-// Snapshot records edge rate for historical stability
+// Snapshot records edge rate and source for historical stability
 if (!upgEdge.snapshot?.internal_estimate_math?.upgraded_edge_pricing) {
   throw new Error("EDGE-5: snapshot must include upgraded_edge_pricing in internal_estimate_math");
 }
 const snap = upgEdge.snapshot.internal_estimate_math.upgraded_edge_pricing;
 assertNear("EDGE-5 snapshot rate_per_lf", snap.rate_per_lf, SPECIALTY_EDGE_RATE_PER_LF);
 assertNear("EDGE-5 snapshot total", snap.total, expectedEdgeCharge);
+if (snap.rate_source !== "fallback") {
+  throw new Error(`EDGE-5: rate_source must be "fallback" when no DB rules provided, got "${snap.rate_source}"`);
+}
 
 // Multi-room: two rooms with upgraded edge, one standard
 const multiEdge = await calculateQuote(
@@ -588,5 +591,33 @@ const multiEdge = await calculateQuote(
 );
 const multiEdgeCharge = Math.round(10 * SPECIALTY_EDGE_RATE_PER_LF * 100) / 100;
 assertNear("EDGE-6 multi-room: only upgraded room adds charge", multiEdge.totals.retail, 15 * wRate + multiEdgeCharge);
+
+// Pricing Admin / quote_pricing_rules overrides the fallback rate
+// When a rule with item_code "specialty_edge_per_lf" is present, that rate is used.
+const customEdgeRate = 20;
+const upgEdgeCustomRate = await calculateQuote(
+  {
+    ...edgeBase,
+    rooms: [
+      {
+        name: "Kitchen",
+        materialGroup: "Group Promo",
+        countertopSqft: 10,
+        backsplashSqft: 0,
+        edgeProfile: "Ogee",
+        upgradedEdgeLf: 5
+      }
+    ]
+  },
+  { rules: [{ item_code: "specialty_edge_per_lf", category: "edge", price: customEdgeRate }] }
+);
+const expectedCustomEdgeCharge = Math.round(5 * customEdgeRate * 100) / 100;
+assertNear("EDGE-7 custom rate from rules: 5 LF × $20 = $100", upgEdgeCustomRate.totals.retail, 10 * wRate + expectedCustomEdgeCharge);
+const snap7 = upgEdgeCustomRate.snapshot?.internal_estimate_math?.upgraded_edge_pricing;
+if (!snap7) throw new Error("EDGE-7: snapshot must include upgraded_edge_pricing");
+assertNear("EDGE-7 snapshot rate_per_lf", snap7.rate_per_lf, customEdgeRate);
+if (snap7.rate_source !== "pricing_rules") {
+  throw new Error(`EDGE-7: rate_source must be "pricing_rules" when rule provided, got "${snap7.rate_source}"`);
+}
 
 console.log("verifyInternalEstimateMath: ok");

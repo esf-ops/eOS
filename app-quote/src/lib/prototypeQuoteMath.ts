@@ -1266,6 +1266,19 @@ export function buildCustomerRoomAreaCostBreakdown(params: {
       amountExact: round2(Number(a.total) || 0)
     }));
 
+    // Per-room upgraded edge charge — shown as a named addon line in the customer PDF.
+    // Rate uses UPGRADED_EDGE_PREVIEW_RATE_PER_LF (matches backend fallback) for the live preview;
+    // after backend Calculate, the snapshot uses the authoritative backend rate.
+    if (draft && draft.edgeProfile && UPGRADED_EDGE_PROFILE_SET.has(draft.edgeProfile)) {
+      const edgeLf = Number(draft.upgradedEdgeLf) || 0;
+      if (edgeLf > 0) {
+        addons.push({
+          label: `${draft.edgeProfile} edge upgrade`,
+          amountExact: round2(edgeLf * UPGRADED_EDGE_PREVIEW_RATE_PER_LF)
+        });
+      }
+    }
+
     rows.push({
       roomId: m.id,
       roomName: displayName,

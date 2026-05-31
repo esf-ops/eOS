@@ -163,6 +163,7 @@ function prepareRoomPrintRows(roomRows, roomAreaDisplayTotals, roomExtrasExact, 
     const roomExtras = round2(roomExtrasExact[idx] != null ? Number(roomExtrasExact[idx]) : catalogAddonSum);
     const otherExtras = round2(Math.max(0, roomExtras - catalogAddonSum));
     const addonLines = row.addons.map((a) => ({
+      label: a.label || "",
       amountExact: a.amountExact,
       displayedAmount: roundCustomerDisplayAddonLine(a.amountExact)
     }));
@@ -180,7 +181,7 @@ function prepareRoomPrintRows(roomRows, roomAreaDisplayTotals, roomExtrasExact, 
     if (displayedMaterial < 0) {
       displayedMaterial = roundCustomerDisplay(row.materialAmountExact + row.customSum);
     }
-    rows.push({ displayedMaterial, displayedAddOns, displayedAreaTotal, isVanity: row.isVanity });
+    rows.push({ displayedMaterial, displayedAddOns, displayedAreaTotal, isVanity: row.isVanity, addonLines });
   });
   const unassigned = Math.max(0, Math.round(unassignedDisplayTotal ?? 0));
   return { rows, unassigned, areaTotalSum: rows.reduce((s, r) => s + r.displayedAreaTotal, 0) + unassigned };
@@ -637,6 +638,71 @@ assertEqual(
   assert(appSrc.includes("liveUpgradedEdgeTotal"), "InternalEstimateApp must compute liveUpgradedEdgeTotal");
   assert(appSrc.includes("Edge upgrades"), "InternalEstimateApp sticky panel must show 'Edge upgrades' row");
   assert(appSrc.includes("computeLocalUpgradedEdgeTotal"), "InternalEstimateApp must call computeLocalUpgradedEdgeTotal");
+
+  // EDGE-DISPLAY-4: room-level edge addon appears in addonLines and reconciles with finalRounded
+  //
+  // Simulate what buildCustomerRoomAreaCostBreakdown produces after the per-room edge fix:
+  // Kitchen has Ogee edge 4 LF × $15 = $60 edge addon. Bath has no edge.
+  const EDGE_RATE = 15;
+  const kitchenEdgeExact = 4 * EDGE_RATE; // $60
+  const kitchenMaterialExact = 5000;
+  const bathMaterialExact = 3500;
+
+  // roomRows now include the edge addon in each row.addons[]
+  const edgeRoomRows = [
+    {
+      isVanity: false,
+      // roomTotalExact = material + catalog_addons + edge
+      roomTotalExact: kitchenMaterialExact + kitchenEdgeExact, // 5060
+      materialExact: kitchenMaterialExact,
+      extrasExact: 0,
+      addons: [{ amountExact: kitchenEdgeExact, label: "Ogee edge upgrade" }]
+    },
+    {
+      isVanity: false,
+      roomTotalExact: bathMaterialExact, // 3500
+      materialExact: bathMaterialExact,
+      extrasExact: 0,
+      addons: []
+    }
+  ];
+
+  const edgeRoomModel = buildSyntheticDisplayModel({
+    countertopExact: kitchenMaterialExact + bathMaterialExact, // 8500 total material
+    backsplashExact: 0,
+    addonsExact: 0,
+    upgradedEdgeExact: kitchenEdgeExact, // $60 edge in Estimate Summary
+    roomRows: edgeRoomRows
+  });
+
+  // Estimate Summary must include Edge upgrades row
+  const edgeSummaryRow = edgeRoomModel.estimateSummaryRows.find((r) => r.key === "edge_upgrades");
+  assert(edgeSummaryRow != null, "EDGE-DISPLAY-4: Edge upgrades row in Estimate Summary");
+  assertEqual("EDGE-DISPLAY-4: edge summary display amount", edgeSummaryRow.displayAmount, roundCustomerDisplay(kitchenEdgeExact));
+
+  // Room area totals must sum to finalRounded (allocateCustomerDisplayTens allocates proportionally)
+  assertDisplayModelInvariants("EDGE-DISPLAY-4: room-breakdown with edge", edgeRoomModel);
+
+  // Kitchen (the edge room) must have a larger displayed area total than Bath
+  assert(
+    edgeRoomModel.roomAreaPrintRows[0].displayedAreaTotal > edgeRoomModel.roomAreaPrintRows[1].displayedAreaTotal,
+    "EDGE-DISPLAY-4: Kitchen with edge upgrade must have larger area total than Bath"
+  );
+
+  // Kitchen must have an addonLine for the edge
+  const kitchenRow = edgeRoomModel.roomAreaPrintRows[0];
+  const edgeAddonLine = kitchenRow.addonLines.find((a) => a.label === "Ogee edge upgrade");
+  assert(edgeAddonLine != null, "EDGE-DISPLAY-4: Kitchen room row must have 'Ogee edge upgrade' addonLine");
+  assert(edgeAddonLine.displayedAmount > 0, "EDGE-DISPLAY-4: edge addonLine displayedAmount must be > 0");
+
+  // prototypeQuoteMath.ts must compute edge addons per room in buildCustomerRoomAreaCostBreakdown
+  const quoteMathSrc = readFileSync(
+    join(__dirname, "../../../app-quote/src/lib/prototypeQuoteMath.ts"),
+    "utf8"
+  );
+  assert(quoteMathSrc.includes("edge upgrade"), "prototypeQuoteMath must add 'edge upgrade' addon label per room");
+  assert(quoteMathSrc.includes("UPGRADED_EDGE_PREVIEW_RATE_PER_LF"), "prototypeQuoteMath must use UPGRADED_EDGE_PREVIEW_RATE_PER_LF in room breakdown");
+  assert(quoteMathSrc.includes("UPGRADED_EDGE_PROFILE_SET"), "prototypeQuoteMath must check UPGRADED_EDGE_PROFILE_SET in room breakdown");
 }
 
 console.log("verifyCustomerEstimatePrintReconciliation: ok");
