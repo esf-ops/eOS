@@ -306,17 +306,53 @@ while the real CSV export has **6,986 rows**. This means the vast majority of CS
 
 **This is expected behavior for v1.** Unmatched rows are not errors — they represent jobs and accounts that exist in Moraware but were not visible in the paginated HTML snapshot.
 
-### Full identity coverage path (future slices, separate approval)
+### Post-hoc API mirror enrichment (implemented 2026-05-31)
 
-Three options for achieving full `account_id` + `job_id` coverage — choose one when ready:
+After initial staging, run the API mirror enrichment pass to resolve `needs_identity_review` rows using `brain_moraware_jobs` as the full-coverage identity source.
 
-| Option | Mechanism | Notes |
-|--------|-----------|-------|
-| **A. True all-pages HTML** | Discover paginated HTML or use export with `exportType=AllPages` parameter against the HTML report path | Requires verifying whether Moraware supports an all-pages variant for HTML (not just CSV) |
-| **B. Moraware API/SDK mirror** | Use existing Moraware API sync data (`moraware_jobs`, `moraware_accounts` or equivalent) as the identity lookup table | Likely the cleanest path — avoids HTML scraping entirely; reuses existing integration |
-| **C. Account Mapping / Identity Enrichment head** | Build a separate account-mapping layer that maps `Account Name` + `Job Name` → eliteOS `account_id` / `job_id` via fuzzy/exact lookup against synced data | More general; supports non-Moraware feeds |
+**Matching rules (v1):**
+- Exact normalized `account_name + job_name` match only — using `makeIdentityMatchKey()` (strips location prefixes, lowercases, removes punctuation).
+- No fuzzy matching. No account-name-only matching. No guessing.
+- Only rows with `identity_status = "needs_identity_review"` are eligible — existing `matched` and `ambiguous_identity` rows are never downgraded.
+- Duplicate key in `brain_moraware_jobs` with same IDs → harmless; one entry kept.
+- Duplicate key with different `source_account_id`/`source_job_id` → `ambiguous_identity` for all CSV rows matching that key.
+- Default mode is **dry-run** — prints plan, no writes.
+- Pass `--apply` (with `SUPABASE_WRITE_ENABLED=1`) to commit changes.
 
-**Until a full-coverage option is implemented:** all staging runs will report high `needs_identity_review` counts. This does not block staging; it does block accurate `total_worksheet_sqft` aggregation by account in prepared-fact queries.
+**Writes on apply:**
+- `moraware_report_raw_rows`: UPDATE `account_id`, `job_id`, `identity_status`, `identity_reason` for matched/ambiguous rows (batched ≤500 per query, grouped by account+job).
+- `moraware_report_identity_links`: UPSERT one row per unique match key (`source=api_mirror`); HTML-enriched keys are skipped via `on conflict do nothing`.
+- `moraware_report_runs`: UPDATE `matched_identity_count`, `unmatched_identity_count`, `ambiguous_identity_count`; append enrichment entry to `summary.apiMirrorEnrichments[]`.
+
+**CLI usage:**
+
+```bash
+# Step 1 — dry-run (always run first)
+MORAWARE_REPORT_RUN_ID=<run-id> \
+MORAWARE_DEFAULT_ORGANIZATION_ID=<org-id> \
+SUPABASE_URL=<url> SUPABASE_SERVICE_ROLE_KEY=<key> \
+npm run eos:moraware:enrich-report-run-api-mirror
+
+# Step 2 — apply after reviewing dry-run output
+MORAWARE_REPORT_RUN_ID=<run-id> \
+MORAWARE_DEFAULT_ORGANIZATION_ID=<org-id> \
+SUPABASE_URL=<url> SUPABASE_SERVICE_ROLE_KEY=<key> \
+SUPABASE_WRITE_ENABLED=1 \
+npm run eos:moraware:enrich-report-run-api-mirror -- --apply
+```
+
+**Source modules:**
+- `buildApiMirrorIdentityMap.js` — pure; builds identity Map + duplicateKeys Set from brain_moraware_jobs rows.
+- `planApiMirrorEnrichment.js` — pure; produces toMatch/toAmbiguous/toSkip plan from staged rows + identity map.
+- `enrichRunFromApiMirror.js` — orchestrator; reads DB, builds plan, applies writes.
+- `enrichReportRunFromApiMirror.js` — CLI entry point.
+
+**Future full-coverage options (if API mirror proves insufficient):**
+
+| Option | Mechanism |
+|--------|-----------|
+| True all-pages HTML | Verify if Moraware supports an all-pages HTML variant (not just CSV) |
+| Account Mapping / Identity Enrichment head | Separate account-mapping layer with fuzzy/exact lookup — supports non-Moraware feeds |
 
 Utilities live in [`backend-core/src/moraware/reportFeeds/`](../../backend-core/src/moraware/reportFeeds/).
 
@@ -348,6 +384,18 @@ npm run eos:test:moraware-report-feed
 Fixtures are sanitized fake account/job names — no real customer data, cookies, or session headers.
 
 ## Staging persistence + promotion (local files → Supabase)
+
+### Recommended run sequence
+
+```
+1. persistReportFeedLocal   (staging: CSV+HTML → raw rows + HTML identity links)
+2. enrichReportRunFromApiMirror --dry-run  (review: how many rows API mirror can resolve)
+3. enrichReportRunFromApiMirror --apply    (apply: update raw rows + insert API mirror links)
+4. Inspect run — if status=validated and identity coverage acceptable:
+5. persistReportFeedLocal MORAWARE_REPORT_FEED_PROMOTE=1  (promote to prepared facts)
+```
+
+### persistReportFeedLocal
 
 Script: [`persistReportFeedLocal.js`](../../backend-core/src/scripts/moraware/persistReportFeedLocal.js) — `npm run eos:moraware:persist-report-feed-local`
 

@@ -559,3 +559,15 @@
 
 ---
 
+### 43. API mirror identity enrichment — exact match, dry-run default, brain_moraware_jobs as source
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-05-31 |
+| **Decision** | A post-hoc identity enrichment pass (`enrichRunFromApiMirror`) uses `brain_moraware_jobs` as the primary full-coverage identity source after initial staging. Matching rules for v1: (1) exact normalized `account_name + job_name` match only via `makeIdentityMatchKey()` — which strips location prefixes (e.g. "North Branch - "), lowercases, and removes punctuation; (2) no fuzzy matching, no account-name-only matching, no guessing; (3) only rows with `identity_status = "needs_identity_review"` are eligible — existing `matched` and `ambiguous_identity` rows are never downgraded; (4) duplicate key in `brain_moraware_jobs` with same IDs → harmless; (5) duplicate key with different IDs → `ambiguous_identity` for all matching CSV rows. Default mode is **dry-run** (no writes) — operator must explicitly pass `--apply` with `SUPABASE_WRITE_ENABLED=1`. Promotion remains a separate step and is not triggered by enrichment. |
+| **Why** | HTML-only identity coverage is too sparse (22 job links vs ~7,000 CSV rows) due to Moraware HTML pagination. `brain_moraware_jobs` is populated by the existing Moraware API sync and provides full job coverage for the organization. Exact match is safe and deterministic; fuzzy matching is deferred until there is a reviewed false-positive rate. Dry-run default prevents accidental mass-updates in production. |
+| **Impacted files** | `buildApiMirrorIdentityMap.js`, `planApiMirrorEnrichment.js`, `enrichRunFromApiMirror.js`, `enrichReportRunFromApiMirror.js` (CLI), `apiMirrorEnrichment.test.mjs`, `package.json`, `docs/eliteos/moraware-report-feeds.md`, `docs/eliteos/CURSOR_ACTIVE_HANDOFF.md` |
+| **Revisit trigger** | Before adding fuzzy matching or account-name-only fallback; before supporting a different identity source for a different report type; if `brain_moraware_jobs` schema changes. |
+
+---
+

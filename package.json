@@ -43,6 +43,8 @@
     "eos:test:moraware-report-feed-persistence": "node backend-core/src/moraware/reportFeeds/reportFeedPersistence.test.mjs",
     "eos:test:moraware-report-feed-promote-persistence": "node backend-core/src/moraware/reportFeeds/reportFeedPromotePersistence.test.mjs",
     "eos:moraware:persist-report-feed-local": "node backend-core/src/scripts/moraware/persistReportFeedLocal.js",
+    "eos:moraware:enrich-report-run-api-mirror": "node backend-core/src/scripts/moraware/enrichReportRunFromApiMirror.js",
+    "eos:test:moraware-api-mirror-enrichment": "node backend-core/src/moraware/reportFeeds/apiMirrorEnrichment.test.mjs",
     "eos:probe:moraware-assignee-xml": "node backend-core/src/scripts/probeMorawareAssigneeXml.js",
     "eos:analyze:moraware-sdk-activity": "node backend-core/src/scripts/analyzeMorawareSdkActivityMethods.js",
     "eos:probe:moraware-sdk-activity-read": "node backend-core/src/scripts/emitMorawareSdkActivityReadProbe.js",

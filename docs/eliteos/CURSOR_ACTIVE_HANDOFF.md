@@ -2,7 +2,7 @@
 
 **Purpose:** Cheap context for new Cursor chats. Do not treat old chat transcripts as source of truth — use this file + `docs/eliteos/*` + `.cursor/rules/*`.
 
-**Last updated:** 2026-05-30
+**Last updated:** 2026-05-31
 
 ---
 
@@ -17,6 +17,7 @@ Additive ingestion lane beside existing Moraware API sync. Combines saved-report
 | Schema | Applied manually in Supabase |
 | POC parse/enrich | Done (local files, fixtures, tests) |
 | Staging persistence | Validated (`SUPABASE_WRITE_ENABLED=1`) |
+| API mirror identity enrichment | **Built** — `enrichRunFromApiMirror` + CLI; dry-run default; exact account+job match only; no fuzzy |
 | Promotion | Validated **test org only**; real Elite org **not** promoted |
 | Governed download design (Phase A) | **Documented** — see [`moraware-report-feeds.md` § Governed download design](./moraware-report-feeds.md#governed-download-design-phase-a--docs-only) |
 | Live download / scrape / cron / API routes | **Not built** |
@@ -42,9 +43,14 @@ npm run eos:moraware:report-feed-poc
 # Staging (+ optional promotion with MORAWARE_REPORT_FEED_PROMOTE=1)
 npm run eos:moraware:persist-report-feed-local
 
+# Post-hoc API mirror enrichment (dry-run first, then --apply)
+npm run eos:moraware:enrich-report-run-api-mirror
+npm run eos:moraware:enrich-report-run-api-mirror -- --apply  # add SUPABASE_WRITE_ENABLED=1
+
 # Tests
 npm run eos:test:moraware-report-feed
 npm run eos:test:moraware-report-feed-persistence
+npm run eos:test:moraware-api-mirror-enrichment
 npm run eos:test:moraware-report-feed-promotion
 npm run eos:test:moraware-report-feed-promote-persistence
 
@@ -66,14 +72,22 @@ Code: `backend-core/src/moraware/reportFeeds/`, scripts under `backend-core/src/
 
 **HTML pagination finding (2026-05-30):** The saved view 219 HTML (`/sys/report/?view=219`) is paginated by Moraware — only **22 job links + 4 account links** visible, vs 6,986 CSV rows. HTML identity enrichment is intentionally best-effort. High `needs_identity_review` counts are expected and normal until a full-coverage identity source is wired (true all-pages HTML, Moraware API mirror, or Account Mapping). This does not block staging. Do not attempt to solve HTML pagination in the current slice.
 
-**Phase B (next implementation slice):**
+**API mirror enrichment built (2026-05-31):** `enrichRunFromApiMirror` + CLI implemented. Uses `brain_moraware_jobs` as full-coverage identity source after HTML-only staging. Dry-run default; exact account+job match only; no fuzzy matching; never touches promoted runs or prepared facts.
 
-1. Update `expected_column_hash` in Supabase for Elite org feed (see Manual Supabase UPDATE note above).
-2. Re-run `persistReportFeedLocal.js` for Elite org — should now produce `needs_review` (schema drift gone, no unique-constraint failure; high unmatched count is expected from HTML pagination).
-3. Decide on full identity coverage path: true all-pages HTML discovery vs Moraware API mirror vs Account Mapping (see `moraware-report-feeds.md` § Full identity coverage path).
-4. Verify Moraware login mechanics manually — use [`moraware-login-mechanics-checklist.md`](./moraware-login-mechanics-checklist.md) (browser/network only; no fetch code yet).
-5. If feasible: implement `fetchReportFeedArtifacts` (network-only) → existing `processReportFeedLocal` → `persistReportFeedRun` path.
-6. If not feasible: document findings; do **not** add headless browser without separate threat-model approval.
+**Next immediate steps:**
+
+1. Update `expected_column_hash` in Supabase for Elite org feed (if not yet done — hash: `8e12bfb5…`).
+2. Re-run `persistReportFeedLocal.js` for the current real Elite CSV+HTML to get a fresh run ID.
+3. Dry-run enrichment: `MORAWARE_REPORT_RUN_ID=<new-run-id> ... npm run eos:moraware:enrich-report-run-api-mirror`
+4. Review dry-run output (eligible, would-match, would-ambiguous counts).
+5. Apply: add `SUPABASE_WRITE_ENABLED=1 ... -- --apply`
+6. Review new run counts — if `matched_identity_count` is acceptable for the intended analytics, consider promotion (separate decision).
+
+**Phase B (governed download — still pending):**
+
+1. Verify Moraware login mechanics manually — use [`moraware-login-mechanics-checklist.md`](./moraware-login-mechanics-checklist.md) (browser/network only; no fetch code yet).
+2. If feasible: implement `fetchReportFeedArtifacts` (network-only) → existing `processReportFeedLocal` → `persistReportFeedRun` path.
+3. If not feasible: document findings; do **not** add headless browser without separate threat-model approval.
 
 Use **Sonnet** for credential/session/fetch work. Still no cron, API routes, dashboards, or Elite org promotion.
 
@@ -101,7 +115,7 @@ Later slices (separate approval): raw artifact storage decision → scheduled wo
 - Old prepared facts: supersede/deactivate (`is_active`, `superseded_by`), not blind delete
 - Service-role Supabase writes: backend/scripts only, gated by env flags
 
-Durable decisions: `FEATURE_DECISIONS.md` entries **37** (additive lane), **38** (SQL supersede semantics), **39** (governed download v1 contract), **40** (Option B real export shape, Branch deferred), **41** (76-column full contract, identity-link dedup, error serialization hardening), **42** (HTML identity is best-effort; view 219 HTML is paginated; full identity deferred).
+Durable decisions: `FEATURE_DECISIONS.md` entries **37** (additive lane), **38** (SQL supersede semantics), **39** (governed download v1 contract), **40** (Option B real export shape, Branch deferred), **41** (76-column full contract, identity-link dedup, error serialization hardening), **42** (HTML identity is best-effort; view 219 HTML is paginated; full identity deferred), **43** (API mirror enrichment: exact match, dry-run default, no promotion).
 
 ---
 
