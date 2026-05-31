@@ -68,6 +68,76 @@ export const PROTOTYPE_ADDON_UNIT_PRICES = Object.freeze({
 
 export const PROTOTYPE_VANITY_TIER_THRESHOLD_SQFT = 35;
 
+/**
+ * Fallback specialty edge rate per linear foot ($/LF).
+ * Mirrors `specialty_edge_per_lf` in `pricingConfigResolver.fallbackAddonCatalogByCode()`.
+ * Will be overridden by `quote_addon_catalog` DB row when Pricing Admin is wired in.
+ */
+export const SPECIALTY_EDGE_RATE_PER_LF = 15;
+
+/**
+ * Upgraded edge profile names that incur a $/LF charge.
+ * Must mirror `UPGRADED_EDGE_PROFILES` in `app-quote/src/lib/prototypeQuoteMath.ts`.
+ */
+const UPGRADED_EDGE_PROFILE_NAMES = new Set([
+  "Full Bullnose",
+  "Ogee",
+  "Waterfall",
+  "Laminated (mitered)",
+  "Dupont"
+]);
+
+/**
+ * Resolve the specialty edge $/LF rate from pricing rules, falling back to the constant.
+ * @param {ReadonlyArray<Record<string, unknown>>} rules
+ */
+function resolveEdgeRateFromRules(rules) {
+  const rule = (rules || []).find(
+    (r) => String(r.item_code) === "specialty_edge_per_lf" && String(r.category) !== "material_group"
+  );
+  if (rule != null && Number(rule.price) >= 0) return Number(rule.price);
+  return SPECIALTY_EDGE_RATE_PER_LF;
+}
+
+/**
+ * Calculate upgraded edge charges per room.
+ * Standard edges: $0. Upgraded edges with LF > 0: lf × rate.
+ * Upgraded edges with LF = 0 emit a warning and are not priced.
+ * @param {ReadonlyArray<Record<string, unknown>>} rooms
+ * @param {ReadonlyArray<Record<string, unknown>>} rules
+ */
+function calculateRoomUpgradedEdges(rooms, rules) {
+  const rate = resolveEdgeRateFromRules(rules);
+  /** @type {Array<Record<string, unknown>>} */
+  const lines = [];
+  /** @type {string[]} */
+  const warnings = [];
+  let total = 0;
+  for (const room of rooms || []) {
+    const profile = String(room.edgeProfile ?? room.edge_profile ?? "").trim();
+    if (!profile || !UPGRADED_EDGE_PROFILE_NAMES.has(profile)) continue;
+    const lf = Number(room.upgradedEdgeLf ?? room.upgraded_edge_lf ?? 0) || 0;
+    const roomName = String(room.name || room.room_name || "Room").trim();
+    if (lf <= 0) {
+      warnings.push(
+        `Room "${roomName}": upgraded edge "${profile}" selected but linear feet not entered — edge charge omitted.`
+      );
+      continue;
+    }
+    const lineSubtotal = round2(lf * rate);
+    total += lineSubtotal;
+    lines.push({
+      item_code: "specialty_edge_per_lf",
+      item_name: `${profile} edge — ${roomName}`,
+      room_name: roomName,
+      quantity: lf,
+      unit_price: rate,
+      line_subtotal: lineSubtotal
+    });
+  }
+  return { total: round2(total), lines, warnings, rate, rateSource: "specialty_edge_per_lf" };
+}
+
 /** Future: how quote measurements were produced (AI, layout, manual, …). */
 export const QUOTE_INPUT_MODES = Object.freeze([
   "simple_public_preset",
@@ -683,6 +753,7 @@ function sumRoomsWholesale(input, rules) {
     });
   }
   const addOnPart = calculateAddOns({ addOns: input.addOns || {} }, rules);
+  const upgradedEdgePart = calculateRoomUpgradedEdges(input.rooms, rules);
   let useTaxAmount = 0;
   const projectUseTaxPercent = Number(input.useTaxPercent) || 0;
   const roomTaxByRoom = [];
@@ -713,11 +784,12 @@ function sumRoomsWholesale(input, rules) {
     roomLines,
     materialBreakdown,
     addOnPart,
+    upgradedEdgePart,
     useTaxAmount,
     useTaxPercent: useTaxAmount > 0 ? projectUseTaxPercent : null,
     roomUseTax: roomTaxByRoom,
     roomMeasurementSummaries,
-    wholesale: round2(materialDollars + addOnPart.total)
+    wholesale: round2(materialDollars + addOnPart.total + upgradedEdgePart.total)
   };
 }
 
@@ -947,6 +1019,7 @@ export async function calculateQuote(rawInput, pricingContext = {}) {
     const vanityPart = calculateVanities(input, rules);
     wholesale = round2(agg.wholesale + vanityPart.total);
     detail = { kind: "rooms", ...agg, vanityPart };
+    for (const w of agg.upgradedEdgePart?.warnings ?? []) warnings.push(w);
   } else {
     const leg = legacyWholesale(input, rules);
     wholesale = leg.wholesale;
@@ -1088,6 +1161,14 @@ export async function calculateQuote(rawInput, pricingContext = {}) {
       no_partner_or_public_markup_percent: true,
       use_tax: useTaxPercent > 0 ? { percent: useTaxPercent, amount: useTaxAmount, applied: true } : { percent: 0, amount: 0, applied: false }
     };
+    if (detail.kind === "rooms" && detail.upgradedEdgePart) {
+      snapshot.internal_estimate_math.upgraded_edge_pricing = {
+        rate_per_lf: detail.upgradedEdgePart.rate,
+        rate_source: detail.upgradedEdgePart.rateSource,
+        total: detail.upgradedEdgePart.total,
+        room_count: detail.upgradedEdgePart.lines.length
+      };
+    }
     if (detail.kind === "rooms" && Array.isArray(detail.roomMeasurementSummaries)) {
       snapshot.room_measurement_summaries = detail.roomMeasurementSummaries;
     }
@@ -1220,6 +1301,19 @@ function buildLineItems(detail, input, totals, pricingMode = "", publicMult = 1)
         unit_type: "each",
         unit_price: round2(ln.unit_price * pubMult),
         line_subtotal: round2(ln.line_subtotal * pubMult)
+      });
+    }
+    for (const ln of detail.upgradedEdgePart?.lines || []) {
+      lines.push({
+        line_type: "addon",
+        category: "edge",
+        item_code: ln.item_code,
+        item_name: ln.item_name,
+        room_name: ln.room_name,
+        quantity: ln.quantity,
+        unit_type: "per_lf",
+        unit_price: ln.unit_price,
+        line_subtotal: round2(ln.line_subtotal)
       });
     }
   }

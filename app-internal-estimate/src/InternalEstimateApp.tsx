@@ -20,7 +20,8 @@ import {
   serializeCustomerRoomAreaBreakdown,
   serializeRoomDraftsForInternalUi,
   serializeRoomsForApi,
-  serializeVanitiesForApi
+  serializeVanitiesForApi,
+  UPGRADED_EDGE_PROFILES
 } from "@quote-lib/prototypeQuoteMath";
 import type { EliteProgramColorRow, QuoteWorkflowMethod, RoomDraft } from "@quote-lib/quoteTypes";
 import CustomerEstimatePrint, { type CustomerLineItem } from "./CustomerEstimatePrint";
@@ -1422,9 +1423,19 @@ export default function InternalEstimateApp() {
     if (colorTbd) {
       warnings.push("Color marked TBD — confirm before Sent/Sold when you have a selection.");
     }
+    const edgeMissingLf = roomDrafts.filter(
+      (r) =>
+        UPGRADED_EDGE_PROFILES.includes(r.edgeProfile as (typeof UPGRADED_EDGE_PROFILES)[number]) &&
+        !(r.upgradedEdgeLf && r.upgradedEdgeLf > 0)
+    );
+    if (edgeMissingLf.length > 0) {
+      warnings.push(
+        `${edgeMissingLf.length} room${edgeMissingLf.length > 1 ? "s" : ""} have an upgraded edge selected but no linear feet entered — edge charge will not be calculated.`
+      );
+    }
     const score = Math.max(0, Math.min(100, 100 - missing.length * 14));
     return { missing, warnings, score, readyForReview: missing.length === 0 };
-  }, [accountName, salesRep, customerName, projectName, projectAddress, city, state, scopePreview, colorTbd]);
+  }, [accountName, salesRep, customerName, projectName, projectAddress, city, state, scopePreview, colorTbd, roomDrafts]);
 
   const customLinePreviewTotals = useMemo(() => {
     let sum = 0;

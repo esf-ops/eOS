@@ -5,7 +5,8 @@
 import {
   calculateQuote,
   ESF_DIRECT_PRICE_PER_SQFT,
-  PROTOTYPE_TIER_PRICE_PER_SQFT
+  PROTOTYPE_TIER_PRICE_PER_SQFT,
+  SPECIALTY_EDGE_RATE_PER_LF
 } from "../quotes/quoteCalculator.js";
 
 function assertNear(label, actual, expected, eps = 0.02) {
@@ -442,5 +443,150 @@ assertEq("ql-pick new quote uses customer_display_total", pickDisplayTotal({ cus
 assertEq("ql-pick old quote falls back to grand_total", pickDisplayTotal({ customer_display_total: null, grand_total: 2151.18 }), 2151.18);
 assertEq("ql-pick missing customer_display_total falls back", pickDisplayTotal({ grand_total: 1500 }), 1500);
 assertEq("ql-pick zero customer_display_total falls back", pickDisplayTotal({ customer_display_total: 0, grand_total: 1500 }), 1500);
+
+// ── Upgraded edge pricing ──────────────────────────────────────────────────────
+
+const edgeBase = {
+  quoteSource: "internal_quote",
+  engine: "rooms",
+  internalMaterialBasis: "wholesale",
+  materialGroup: "Group Promo",
+  rooms: [],
+  addOns: {}
+};
+
+// Standard edge: no extra charge regardless of LF field
+const stdEdge = await calculateQuote(
+  {
+    ...edgeBase,
+    rooms: [
+      {
+        name: "Kitchen",
+        materialGroup: "Group Promo",
+        countertopSqft: 10,
+        backsplashSqft: 0,
+        edgeProfile: "Eased",
+        upgradedEdgeLf: 20
+      }
+    ]
+  },
+  {}
+);
+assertNear("EDGE-1 standard Eased edge: no extra charge", stdEdge.totals.retail, 10 * wRate);
+if ((stdEdge.warnings || []).some((w) => w.includes("edge"))) {
+  throw new Error("EDGE-1: standard edge must not emit edge warnings");
+}
+
+// Upgraded edge with LF: charges lf * SPECIALTY_EDGE_RATE_PER_LF
+const upgEdge = await calculateQuote(
+  {
+    ...edgeBase,
+    rooms: [
+      {
+        name: "Kitchen",
+        materialGroup: "Group Promo",
+        countertopSqft: 10,
+        backsplashSqft: 0,
+        edgeProfile: "Ogee",
+        upgradedEdgeLf: 12
+      }
+    ]
+  },
+  {}
+);
+const expectedEdgeCharge = Math.round(12 * SPECIALTY_EDGE_RATE_PER_LF * 100) / 100;
+assertNear("EDGE-2 Ogee 12 LF: material + edge charge", upgEdge.totals.retail, 10 * wRate + expectedEdgeCharge);
+const edgeLine = (upgEdge.lineItems || []).find((l) => l.category === "edge");
+if (!edgeLine) throw new Error("EDGE-2: edge line item missing from lineItems");
+assertNear("EDGE-2 edge line subtotal", edgeLine.line_subtotal, expectedEdgeCharge);
+if (edgeLine.unit_type !== "per_lf") throw new Error("EDGE-2: edge line unit_type must be per_lf");
+if ((upgEdge.warnings || []).some((w) => w.includes("edge"))) {
+  throw new Error("EDGE-2: upgraded edge with LF must not emit a warning");
+}
+
+// Upgraded edge with LF = 0: emits warning, does NOT add cost
+const upgEdgeNoLf = await calculateQuote(
+  {
+    ...edgeBase,
+    rooms: [
+      {
+        name: "Kitchen",
+        materialGroup: "Group Promo",
+        countertopSqft: 10,
+        backsplashSqft: 0,
+        edgeProfile: "Waterfall",
+        upgradedEdgeLf: 0
+      }
+    ]
+  },
+  {}
+);
+assertNear("EDGE-3 upgraded edge LF=0: no cost added", upgEdgeNoLf.totals.retail, 10 * wRate);
+if (!(upgEdgeNoLf.warnings || []).some((w) => w.includes("edge"))) {
+  throw new Error("EDGE-3: upgraded edge with LF=0 must emit a warning");
+}
+const noEdgeLine = (upgEdgeNoLf.lineItems || []).find((l) => l.category === "edge");
+if (noEdgeLine) throw new Error("EDGE-3: no edge line item should appear when LF=0");
+
+// Direct mode with upgraded edge: no markup, edge still calculated
+const upgEdgeDirect = await calculateQuote(
+  {
+    ...edgeBase,
+    internalMaterialBasis: "direct",
+    rooms: [
+      {
+        name: "Kitchen",
+        materialGroup: "Group Promo",
+        countertopSqft: 10,
+        backsplashSqft: 0,
+        edgeProfile: "Dupont",
+        upgradedEdgeLf: 8
+      }
+    ]
+  },
+  {}
+);
+const dRatePromo = ESF_DIRECT_PRICE_PER_SQFT["Group Promo"];
+const edgeChargeDirect = Math.round(8 * SPECIALTY_EDGE_RATE_PER_LF * 100) / 100;
+assertNear("EDGE-4 direct mode: no markup, edge charge added", upgEdgeDirect.totals.retail, 10 * dRatePromo + edgeChargeDirect);
+if (upgEdgeDirect.totals.retail !== upgEdgeDirect.totals.wholesale) {
+  throw new Error("EDGE-4: internal_quote direct: retail must equal wholesale");
+}
+
+// Snapshot records edge rate for historical stability
+if (!upgEdge.snapshot?.internal_estimate_math?.upgraded_edge_pricing) {
+  throw new Error("EDGE-5: snapshot must include upgraded_edge_pricing in internal_estimate_math");
+}
+const snap = upgEdge.snapshot.internal_estimate_math.upgraded_edge_pricing;
+assertNear("EDGE-5 snapshot rate_per_lf", snap.rate_per_lf, SPECIALTY_EDGE_RATE_PER_LF);
+assertNear("EDGE-5 snapshot total", snap.total, expectedEdgeCharge);
+
+// Multi-room: two rooms with upgraded edge, one standard
+const multiEdge = await calculateQuote(
+  {
+    ...edgeBase,
+    rooms: [
+      {
+        name: "Kitchen",
+        materialGroup: "Group Promo",
+        countertopSqft: 10,
+        backsplashSqft: 0,
+        edgeProfile: "Ogee",
+        upgradedEdgeLf: 10
+      },
+      {
+        name: "Bath",
+        materialGroup: "Group Promo",
+        countertopSqft: 5,
+        backsplashSqft: 0,
+        edgeProfile: "Eased",
+        upgradedEdgeLf: 0
+      }
+    ]
+  },
+  {}
+);
+const multiEdgeCharge = Math.round(10 * SPECIALTY_EDGE_RATE_PER_LF * 100) / 100;
+assertNear("EDGE-6 multi-room: only upgraded room adds charge", multiEdge.totals.retail, 15 * wRate + multiEdgeCharge);
 
 console.log("verifyInternalEstimateMath: ok");

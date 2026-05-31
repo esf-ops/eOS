@@ -126,10 +126,14 @@ export type RoomDraft = {
   useTaxBase?: "countertop_material";
   /**
    * Edge profile selection for this room/area. Standard edges are included in fabrication;
-   * upgraded edges are captured for the estimator but are NOT yet priced by the backend calculator.
-   * Backend pricing for upgraded edges (per LF) is a must-fix follow-up slice.
+   * upgraded edges are charged per linear foot by the backend calculator.
    */
   edgeProfile?: string;
+  /**
+   * Linear feet of upgraded edge for this room. Required (> 0) when edgeProfile is an upgraded
+   * profile; ignored for standard edges. The backend calculator applies the $/LF rate.
+   */
+  upgradedEdgeLf?: number;
   vanity: {
     size: string;
     source: VanitySource;

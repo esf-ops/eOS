@@ -1997,6 +1997,8 @@ export function serializeRoomsForApi(rooms: RoomDraft[]): Array<Record<string, u
           chargeableCountertopSqft: chargeableCounter,
           countertopSqft: chargeableCounter,
           backsplashSqft: round2(grouped.splash + grouped.fhb),
+          edgeProfile: r.edgeProfile ?? DEFAULT_EDGE_PROFILE,
+          upgradedEdgeLf: r.upgradedEdgeLf ?? 0,
           pieces
         };
         if (r.notes?.trim()) row.notes = r.notes.trim();
@@ -2043,6 +2045,8 @@ export function serializeRoomsForApi(rooms: RoomDraft[]): Array<Record<string, u
       useTaxMode: r.useTaxMode ?? "inherit_project",
       useTaxPercent: Math.max(0, Number(r.useTaxPercent) || 0),
       useTaxBase: r.useTaxBase ?? "countertop_material",
+      edgeProfile: r.edgeProfile ?? DEFAULT_EDGE_PROFILE,
+      upgradedEdgeLf: r.upgradedEdgeLf ?? 0,
       countertopSqft: ct,
       backsplashSqft: round2(bs + fhb)
     };
@@ -2145,6 +2149,7 @@ function applyRoomPersistenceFields(base: RoomDraft, r: Record<string, unknown>)
   if (r.useTaxPercent != null) base.useTaxPercent = Math.max(0, Number(r.useTaxPercent) || 0);
   if (r.useTaxBase != null) base.useTaxBase = "countertop_material";
   if (r.edgeProfile != null) base.edgeProfile = String(r.edgeProfile);
+  if (r.upgradedEdgeLf != null) base.upgradedEdgeLf = Math.max(0, Number(r.upgradedEdgeLf) || 0);
   const v = r.vanity;
   if (v && typeof v === "object") {
     const vv = v as Record<string, unknown>;

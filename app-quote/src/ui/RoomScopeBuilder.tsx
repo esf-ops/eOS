@@ -490,32 +490,63 @@ export default function RoomScopeBuilder({
             ) : null}
 
             <div style={{ marginTop: 10 }}>
-              <label style={{ maxWidth: 280 }}>
-                Edge profile
-                <select
-                  value={room.edgeProfile ?? DEFAULT_EDGE_PROFILE}
-                  onChange={(e) => onRoomsChange(updateRoom(rooms, room.id, { edgeProfile: e.target.value }))}
-                >
-                  <optgroup label="Standard (included)">
-                    {STANDARD_EDGE_PROFILES.map((ep) => (
-                      <option key={ep} value={ep}>
-                        {ep}
-                      </option>
-                    ))}
-                  </optgroup>
-                  <optgroup label="Upgraded (not yet priced — backend follow-up)">
-                    {UPGRADED_EDGE_PROFILES.map((ep) => (
-                      <option key={ep} value={ep}>
-                        {ep}
-                      </option>
-                    ))}
-                  </optgroup>
-                </select>
-              </label>
+              <div className="grid3" style={{ alignItems: "end" }}>
+                <label>
+                  Edge profile
+                  <select
+                    value={room.edgeProfile ?? DEFAULT_EDGE_PROFILE}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      const isUpgraded = UPGRADED_EDGE_PROFILES.includes(next as (typeof UPGRADED_EDGE_PROFILES)[number]);
+                      onRoomsChange(
+                        updateRoom(rooms, room.id, {
+                          edgeProfile: next,
+                          upgradedEdgeLf: isUpgraded ? (room.upgradedEdgeLf ?? 0) : 0
+                        })
+                      );
+                    }}
+                  >
+                    <optgroup label="Standard (included)">
+                      {STANDARD_EDGE_PROFILES.map((ep) => (
+                        <option key={ep} value={ep}>
+                          {ep}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Upgraded (charged by LF)">
+                      {UPGRADED_EDGE_PROFILES.map((ep) => (
+                        <option key={ep} value={ep}>
+                          {ep}
+                        </option>
+                      ))}
+                    </optgroup>
+                  </select>
+                </label>
+                {UPGRADED_EDGE_PROFILES.includes(room.edgeProfile as (typeof UPGRADED_EDGE_PROFILES)[number]) && (
+                  <label>
+                    Upgraded edge linear feet
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.5"
+                      value={room.upgradedEdgeLf ?? ""}
+                      placeholder="0"
+                      onChange={(e) =>
+                        onRoomsChange(
+                          updateRoom(rooms, room.id, { upgradedEdgeLf: Math.max(0, Number(e.target.value) || 0) })
+                        )
+                      }
+                    />
+                  </label>
+                )}
+              </div>
               {UPGRADED_EDGE_PROFILES.includes(room.edgeProfile as (typeof UPGRADED_EDGE_PROFILES)[number]) && (
                 <p className="muted small" style={{ marginTop: 4 }}>
-                  Upgraded edge selected — selection saved, but LF pricing is not yet calculated.
-                  A backend Pricing Admin slice is required before this appears in the customer total.
+                  {!(room.upgradedEdgeLf && room.upgradedEdgeLf > 0) ? (
+                    <strong>Enter linear feet — upgraded edge will not be priced without LF.</strong>
+                  ) : (
+                    <>Rate applied by backend calculator.</>
+                  )}
                 </p>
               )}
             </div>
