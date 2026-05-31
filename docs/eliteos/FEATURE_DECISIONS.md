@@ -528,10 +528,34 @@
 | Field | Value |
 |-------|--------|
 | **Date** | 2026-05-30 |
-| **Decision** | eliteOS accepts the **real Moraware view 219 export shape** (16 columns including worksheet-line columns) and normalizes it into prepared facts — **Option B**. The simplified 10-column fixture (`Color`, `Room`, `Branch`, …) is retired. **Branch/location is not required** in the Sales Worksheet Facts contract for v1: it is not present in the real export and `branch_or_process` will always be `null` until derived through Account Mapping / Identity Enrichment. `computeReportRowHash` now includes worksheet-line discriminators (`formName`, `room`, `color`, `totalWorksheetSqft`) so two worksheet lines for the same job produce distinct hashes. New expected column hash: `71d40fbb6a946c015c5dad7b74ca11b1287e0c939eaa53a12cf674b518d0114d`. |
+| **Decision** | eliteOS accepts the **real Moraware view 219 export shape** (initially scoped to 16 columns; confirmed at **76 columns** via live run `cb765461`, 2026-05-30) and normalizes it into prepared facts — **Option B**. The simplified 10-column fixture (`Color`, `Room`, `Branch`, …) is retired. **Branch/location is not required** in the Sales Worksheet Facts contract for v1: it is not present in the real export and `branch_or_process` will always be `null` until derived through Account Mapping / Identity Enrichment. `computeReportRowHash` now includes worksheet-line discriminators (`formName`, `room`, `color`, `totalWorksheetSqft`) so two worksheet lines for the same job produce distinct hashes. Expected column hash updated to `8e12bfb52b516ac30aa94e85d7bf92ee9c6d47741b2967586b743954136b9ade` (76-column full contract). Prior 16-column hash `71d40fbb…` is retired. |
 | **Why** | Forcing Moraware to match simplified columns would require view reconfiguration and break the real export's natural worksheet-line granularity. Normalizing the real shape keeps the integration contract stable and enables worksheet-level analytics without a second parser. Excluding Branch avoids hardcoding a column that Moraware may not expose in every organization's report view. |
 | **Impacted files/docs** | `backend-core/src/moraware/reportFeeds/constants.js`, `enrichReportRows.js`, `hashUtils.js`, `profileColumns.js`, `reportFeedParser.test.mjs`, `reportFeedPersistence.test.mjs`, `reportFeedPromotePersistence.test.mjs`, `promoteSalesWorksheetFacts.test.mjs`, `backend-core/test/fixtures/moraware-report-feeds/sales-worksheet-facts.sample.csv`, `docs/eliteos/moraware-report-feeds.md`, `docs/eliteos/CURSOR_ACTIVE_HANDOFF.md` |
 | **Revisit trigger** | Before Account Mapping head derives `branch_or_process`; before adding Edge/Thickness/BackSplash as typed prepared-fact columns; before supporting additional worksheet-type feeds that share similar column structure. |
+
+---
+
+### 41. Sales Worksheet Facts — 76-column full contract, identity-link dedup, error serialization hardening
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-05-30 |
+| **Decision** | After the first real Elite staging run (`cb765461`) failed with schema drift (16-col hash vs real 76-col export) and a `duplicate key value violates unique constraint "moraware_report_identity_links_report_run_id_match_key_key"` error, the following hardening decisions were made: (1) `SALES_WORKSHEET_FACTS_EXPECTED_COLUMNS` expanded to all 76 real columns — columns 1–15 and column 76 map to prepared facts; columns 16–75 (activity/CS/install status) stored in `raw_row` only for v1. (2) `buildIdentityLinkInserts` deduplicates by `match_key` before insert: same key + same IDs → 1 row `is_ambiguous=false`; same key + different IDs → 1 row `is_ambiguous=true`. This prevents the unique-constraint violation caused by the HTML report repeating the same account+job link once per worksheet line. (3) Supabase/PostgREST error objects (plain objects with `message/code/details/hint` but no `.stack`) are now wrapped in a proper `Error` in `batchInsert` and direct-throw paths; `buildRunFinalUpdate` uses `formatSupabaseError`; `persistReportFeedLocal.js` CLI catch uses `formatCliError`. This prevents `FATAL: [object Object]` in CLI output. |
+| **Why** | Real Moraware view 219 has 76 columns, not 16. The additional columns are operational activity/scheduling data that is useful for future analytics but does not belong in v1 prepared facts. Identity-link dedup is required because Moraware HTML reports list each account+job link once per worksheet row, not once per job. Error wrapping is required for operator debuggability during staging runs. |
+| **Impacted files/docs** | `constants.js`, `reportFeedPersistence.js`, `persistReportFeedLocal.js`, `sales-worksheet-facts.sample.csv`, `reportFeedParser.test.mjs`, `reportFeedPersistence.test.mjs`, `moraware-report-feeds.md`, `CURSOR_ACTIVE_HANDOFF.md` |
+| **Revisit trigger** | Before mapping any activity/CS/install columns to typed prepared-fact fields; before supporting a different org whose view 219 export has a different column count. |
+
+---
+
+### 42. HTML identity enrichment is best-effort; view 219 HTML report is paginated
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-05-30 |
+| **Decision** | The saved Moraware view 219 HTML report (`/sys/report/?view=219`) is **paginated/limited** — it returns only 22 unique `/sys/job/` links and 4 unique `/sys/account/` links regardless of whether an `AllPages` variant is requested. The CSV export for the same view returns 6,986 rows. **HTML identity enrichment is therefore best-effort in v1**: most CSV rows will have `identity_status = needs_identity_review`. This is not an error condition. Unmatched rows are always persisted. Duplicate HTML match keys are deduplicated before insert (see entry 41). Full `account_id` + `job_id` coverage will come from a separately approved slice using one of: (A) true all-pages HTML discovery, (B) existing Moraware API/SDK mirror as identity lookup, or (C) Account Mapping / Identity Enrichment head. The current slice does **not** attempt to solve HTML pagination. |
+| **Why** | Moraware's report renderer paginates HTML by default. Attempting to scrape all pages in the current slice would require browser automation or session-cookie work that is explicitly out of scope. The prepared-fact pipeline is still useful even with partial identity: raw rows persist, sqft data is captured, and identity can be backfilled later. |
+| **Impacted files/docs** | `docs/eliteos/moraware-report-feeds.md` § Identity enrichment strategy, `docs/eliteos/CURSOR_ACTIVE_HANDOFF.md` |
+| **Revisit trigger** | When choosing a full identity coverage path (true all-pages HTML, API mirror, or Account Mapping). |
 
 ---
 

@@ -37,7 +37,7 @@ const htmlFixture = readFileSync(join(fixtureDir, "sales-worksheet-facts.sample.
 
 function testCsvParse() {
   const parsed = parseCsvReportRows(csvFixture);
-  assert.equal(parsed.headers.length, 16, "csv: 16 real Moraware headers");
+  assert.equal(parsed.headers.length, 76, "csv: 76 real Moraware headers");
   assert.equal(parsed.rows.length, 5, "csv: 5 data rows");
   assert.ok(parsed.headers.includes("Account Name"), "csv: Account Name present");
   assert.ok(parsed.headers.includes("Job Name"), "csv: Job Name present");
@@ -45,6 +45,8 @@ function testCsvParse() {
   assert.ok(parsed.headers.includes("Job Worksheet - Color"), "csv: Job Worksheet - Color present");
   assert.ok(parsed.headers.includes("Job Worksheet - Form Name"), "csv: Job Worksheet - Form Name present");
   assert.ok(parsed.headers.includes("Total Job Worksheet - Sq.Ft. by Job Creation Date"), "csv: sqft column present");
+  assert.ok(parsed.headers.includes("First Install - Quartz Basic in Job Status"), "csv: activity column present");
+  assert.ok(parsed.headers.includes("First Customer Service - Challenging in Job Notes"), "csv: last activity column present");
   assert.ok(!parsed.headers.includes("Branch"), "csv: Branch not in real export headers");
   assert.equal(parsed.rows[0]["Job Name"], "Kitchen Remodel Phase A", "csv: first row Job Name");
   assert.equal(parsed.rows[1]["Job Name"], "Kitchen Remodel Phase A", "csv: second row same job (multi-worksheet)");
@@ -55,7 +57,7 @@ function testColumnProfile() {
   const parsed = parseCsvReportRows(csvFixture);
   const profile = profileReportColumns(parsed);
   assert.equal(profile.rowCount, 5, "profile: 5 rows");
-  assert.equal(profile.columnCount, 16, "profile: 16 columns");
+  assert.equal(profile.columnCount, 76, "profile: 76 columns");
   assert.equal(profile.columns[0].nonEmptyCount, 5, "profile: all 5 rows have Account Name");
   assert.ok(profile.columns[0].sampleValues.length >= 1, "profile: at least one sample value");
   assert.equal(typeof profile.headerHash, "string", "profile: headerHash is string");
@@ -71,19 +73,28 @@ function testHeaderHashStable() {
 
 // NBSP / trailing-space normalization: a CSV with "Account Name\u00A0" (NBSP) in the header
 // row must produce the same header hash as a clean CSV (parseCsvReportRows normalizes).
+// Builds the dirty CSV dynamically from SALES_WORKSHEET_FACTS_EXPECTED_COLUMNS so it always
+// matches the current column count.
 function testNbspAndTrailingSpaceHeaderNormalization() {
-  const dirtyHeader = `"Account Name\u00A0","Account Salesperson","Job Name","Job Creation Date","Job Salesperson","Job Status","Job Notes","Stone","Job Worksheet - Form Name","Job Worksheet - Room","Job Worksheet - Color","Job Worksheet - Edge","Job Worksheet - Thickness","Job Worksheet - Back Splash Type","Job Worksheet - Back Splash Height","Total Job Worksheet - Sq.Ft. by Job Creation Date"\n"A","B","C","2026-01-01","D","Quoted","","Quartz","F","Room","Color","Eased","3cm","None","0","10.00"\n`;
-  const cleanHeader = csvFixture; // fixture has clean headers
+  // Add NBSP to the first header; trailing space to the last
+  const dirtyColumns = SALES_WORKSHEET_FACTS_EXPECTED_COLUMNS.map((h, i) => {
+    if (i === 0) return h + "\u00A0";
+    if (i === SALES_WORKSHEET_FACTS_EXPECTED_COLUMNS.length - 1) return h + " ";
+    return h;
+  });
+  const fakeValues = SALES_WORKSHEET_FACTS_EXPECTED_COLUMNS.map(() => "test");
+  const dirtyHeaderRow = dirtyColumns.map((h) => `"${h}"`).join(",");
+  const fakeDataRow = fakeValues.map((v) => `"${v}"`).join(",");
+  const dirtyCsv = dirtyHeaderRow + "\n" + fakeDataRow + "\n";
 
-  const parsedDirty = parseCsvReportRows(dirtyHeader);
-  const parsedClean = parseCsvReportRows(cleanHeader);
+  const parsedDirty = parseCsvReportRows(dirtyCsv);
+  const parsedClean = parseCsvReportRows(csvFixture);
   const profileDirty = profileReportColumns(parsedDirty);
   const profileClean = profileReportColumns(parsedClean);
 
   assert.equal(profileDirty.headerHash, profileClean.headerHash,
     "normalization: NBSP/trailing-space header → same hash as clean");
 
-  // validateHeaderContract with clean expected_columns must also pass for dirty CSV
   const expectedHash = computeExpectedColumnHash(SALES_WORKSHEET_FACTS_EXPECTED_COLUMNS);
   const validation = validateHeaderContract(
     profileDirty,
@@ -91,7 +102,7 @@ function testNbspAndTrailingSpaceHeaderNormalization() {
     expectedHash
   );
   assert.equal(validation.ok, true,
-    "normalization: NBSP header validates against clean expected_columns");
+    "normalization: NBSP/trailing-space header validates against clean expected_columns");
 }
 
 function testSchemaDriftDetection() {

@@ -10,8 +10,26 @@
  * Only persistReportFeedRun() performs actual DB writes; all build* helpers are pure.
  */
 
-const RAW_ROWS_BATCH_SIZE = 500;
-const IDENTITY_LINKS_BATCH_SIZE = 500;
+export const RAW_ROWS_BATCH_SIZE = 500;
+export const IDENTITY_LINKS_BATCH_SIZE = 500;
+
+/**
+ * Format a Supabase/PostgREST error object (or any thrown value) into a readable string.
+ * Extracts message/code/details/hint; never prints raw row data or secrets.
+ */
+function formatSupabaseError(err) {
+  if (!err) return "unknown error";
+  if (typeof err === "string") return err;
+  const parts = [
+    err.message,
+    err.code && `[code=${err.code}]`,
+    err.details && `[details=${err.details}]`,
+    err.hint && `[hint=${err.hint}]`
+  ].filter(Boolean);
+  if (parts.length) return parts.join(" ");
+  if (err instanceof Error) return err.stack || err.message;
+  try { return JSON.stringify(err); } catch { return String(err); }
+}
 
 // ── Pure row-shape helpers ────────────────────────────────────────────────────
 
@@ -96,36 +114,48 @@ export function buildRawRowInserts({ runId, feed, processResult }) {
 
 /**
  * Build moraware_report_identity_links insert payloads from the HTML identity extraction.
+ *
+ * Deduplicates by match_key before returning — real Moraware HTML reports repeat
+ * the same account+job link once per worksheet row, which would violate the
+ * (report_run_id, match_key) unique constraint if inserted as-is.
+ *
+ * Dedup rules:
+ * - Same match_key, same account_id+job_id → keep one entry, is_ambiguous=false.
+ * - Same match_key, different account_id or job_id → keep first entry, is_ambiguous=true.
  */
 export function buildIdentityLinkInserts({ runId, feed, processResult }) {
   const htmlRows = processResult.htmlIdentity?.rows ?? [];
-  const duplicateKeys = new Set(
-    (processResult.htmlIdentity?.duplicateKeyCount ?? 0) > 0
-      ? (processResult.enrichment?.rows ?? [])
-          .filter((r) => r.identityStatus === "ambiguous_identity")
-          .map((r) => r.identityReason === "duplicate_html_identity_key" ? r.accountName + "||" + r.jobName : null)
-          .filter(Boolean)
-      : []
-  );
+  /** @type {Map<string, object>} match_key → insert payload */
+  const seenKeys = new Map();
 
-  // Use the identity map from the process result when available.
-  const identityMap = processResult.htmlIdentity?.rows ?? [];
+  for (const row of htmlRows) {
+    const matchKey = `${String(row.accountName ?? "").toLowerCase().trim()}||${String(row.jobName ?? "").toLowerCase().trim()}`;
+    if (seenKeys.has(matchKey)) {
+      const existing = seenKeys.get(matchKey);
+      // Mark ambiguous when same key maps to different IDs (genuinely conflicting identity)
+      if (
+        existing.account_id !== (row.accountId ?? null) ||
+        existing.job_id !== (row.jobId ?? null)
+      ) {
+        existing.is_ambiguous = true;
+      }
+      // Otherwise same IDs — harmless duplicate from multi-worksheet-row HTML; skip silently.
+    } else {
+      seenKeys.set(matchKey, {
+        organization_id: feed.organization_id,
+        report_run_id: runId,
+        match_key: matchKey,
+        account_id: row.accountId ?? null,
+        account_name: row.accountName || null,
+        job_id: row.jobId ?? null,
+        job_name: row.jobName || null,
+        source: "html_report",
+        is_ambiguous: false
+      });
+    }
+  }
 
-  return identityMap.map((row) => {
-    // Reconstruct the match key the same way buildIdentityMapFromHtmlRows would.
-    // We store it for operator inspection — exact match key is rebuilt from names.
-    return {
-      organization_id: feed.organization_id,
-      report_run_id: runId,
-      match_key: `${String(row.accountName ?? "").toLowerCase().trim()}||${String(row.jobName ?? "").toLowerCase().trim()}`,
-      account_id: row.accountId ?? null,
-      account_name: row.accountName || null,
-      job_id: row.jobId ?? null,
-      job_name: row.jobName || null,
-      source: "html_report",
-      is_ambiguous: false
-    };
-  });
+  return [...seenKeys.values()];
 }
 
 /**
@@ -156,7 +186,7 @@ export function buildRunFinalUpdate({ runId, processResult, error = null }) {
       htmlIdentityUniqueKeyCount: processResult.htmlIdentity?.uniqueKeyCount ?? 0,
       htmlIdentityDuplicateKeyCount: processResult.htmlIdentity?.duplicateKeyCount ?? 0
     },
-    error_message: error ? String(error.message ?? error) : null
+    error_message: error ? formatSupabaseError(error) : null
   };
 }
 
@@ -167,7 +197,13 @@ async function batchInsert(db, table, rows, batchSize) {
   for (let i = 0; i < rows.length; i += batchSize) {
     const chunk = rows.slice(i, i + batchSize);
     const { error } = await db.from(table).insert(chunk);
-    if (error) throw error;
+    if (error) {
+      // Wrap bare Supabase/PostgREST error objects so callers always get a proper Error
+      // with a readable .message and a .stack — prevents "FATAL: [object Object]" in CLI.
+      const wrapped = new Error(formatSupabaseError(error));
+      wrapped.supabaseError = error;
+      throw wrapped;
+    }
   }
 }
 
@@ -229,7 +265,11 @@ export async function persistReportFeedRun(db, { feed, processResult, sourceFile
     const { error: profileErr } = await db
       .from("moraware_report_column_profiles")
       .insert(profilePayload);
-    if (profileErr) throw profileErr;
+    if (profileErr) {
+      const wrapped = new Error(formatSupabaseError(profileErr));
+      wrapped.supabaseError = profileErr;
+      throw wrapped;
+    }
 
     // Step 3 — raw rows (batched)
     const rawRows = buildRawRowInserts({ runId, feed, processResult });
@@ -245,7 +285,11 @@ export async function persistReportFeedRun(db, { feed, processResult, sourceFile
       .from("moraware_report_runs")
       .update(finalUpdate)
       .eq("id", runId);
-    if (finalErr) throw finalErr;
+    if (finalErr) {
+      const wrapped = new Error(formatSupabaseError(finalErr));
+      wrapped.supabaseError = finalErr;
+      throw wrapped;
+    }
 
     return { runId, status: finalUpdate.status };
   } catch (err) {

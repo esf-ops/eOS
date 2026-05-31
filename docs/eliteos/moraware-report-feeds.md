@@ -30,6 +30,7 @@ Combining CSV rows + HTML-derived IDs gives faster, trustable prepared facts for
 | Org | `organization_id` | Feed id | Run id | Notes |
 |-----|-------------------|---------|--------|-------|
 | Real Elite | `89180433-9fab-4024-bec9-a14d870bd0a8` | `e8c0433a-c243-4cc5-b8bb-7842ec64a0e7` | `afc7b49d-af7a-4fec-85a0-0fdb11046ea3` | `validated`, 3 rows, 3 matched; **no** prepared facts written |
+| Real Elite | (same) | (same) | `cb765461-f181-4ca8-a22d-b44e0bec0766` | `failed` — schema drift (16-col hash vs 76-col real); duplicate identity-link key. Prompted 76-col hardening. HTML snapshot: 22 job links / 4 account links vs 6,986 CSV rows — HTML pagination confirmed. |
 | Test org | `00000000-0000-0000-0000-000000000001` | `a053cb9a-e362-4c5a-8f47-895314cec85a` | `a660473b-b200-4d14-ba0b-5b713c475c9c` | Promotion smoke 1: 3 inserted, 0 superseded |
 | Test org | (same) | (same) | `6d54c835-058f-47f8-a831-db8efca86a5b` | Promotion smoke 2: 3 inserted, 3 superseded + `superseded_by` backfill |
 
@@ -184,7 +185,8 @@ Use **Sonnet (or stronger)** for credential/session/fetch implementation; use ch
 | Report type | `sales_worksheet_facts` |
 | CSV export path | `/sys/report/?view=219&spreadsheet=1&exportType=AllPages&table=Report` |
 | HTML report path | `/sys/report/?view=219` |
-| Expected column hash | `71d40fbb6a946c015c5dad7b74ca11b1287e0c939eaa53a12cf674b518d0114d` |
+| Expected column hash | `8e12bfb52b516ac30aa94e85d7bf92ee9c6d47741b2967586b743954136b9ade` |
+| Prior hash (16-column real shape) | `71d40fbb6a946c015c5dad7b74ca11b1287e0c939eaa53a12cf674b518d0114d` — retired 2026-05-30 |
 | Prior hash (simplified columns) | `4e657f1f731e9fb054e0b9d8d4d6b1f586e612875d139ee33e4a083a5a6cfdb8` — retired 2026-05-30 |
 
 **Column mapping decision (Option B — real Moraware export shape):** eliteOS accepts the real Moraware export as-is and normalizes it into clean prepared facts. Moraware view 219 is **not** forced to match simplified legacy column names.
@@ -193,7 +195,13 @@ Use **Sonnet (or stronger)** for credential/session/fetch implementation; use ch
 
 **Export granularity:** view 219 is **worksheet-line level** — one CSV row per worksheet section (countertop, backsplash, etc.), multiple rows per job. Prepared facts are one row per CSV row. Row hashes include worksheet-line discriminators so two lines for the same job produce distinct hashes.
 
-### Real Moraware column contract (16 columns, no Branch)
+### Real Moraware column contract (76 columns, no Branch)
+
+The real view 219 export has **76 normalized columns**. Columns 1–15 are core worksheet/sales fields mapped to prepared-fact columns. Columns 16–75 are activity, install, and customer-service status fields stored in `raw_row` only (v1). Column 76 is the sqft total.
+
+**Verified from live run** `cb765461-f181-4ca8-a22d-b44e0bec0766` (2026-05-30).
+
+#### Core mapped columns (1–15 + sqft at 76)
 
 | Moraware column | eliteOS prepared field | Notes |
 |-----------------|------------------------|-------|
@@ -212,9 +220,26 @@ Use **Sonnet (or stronger)** for credential/session/fetch implementation; use ch
 | Job Worksheet - Thickness | `raw_row` only | |
 | Job Worksheet - Back Splash Type | `raw_row` only | |
 | Job Worksheet - Back Splash Height | `raw_row` only | |
-| Total Job Worksheet - Sq.Ft. by Job Creation Date | `total_worksheet_sqft` (numeric) | |
+| Total Job Worksheet - Sq.Ft. by Job Creation Date (col 76) | `total_worksheet_sqft` (numeric) | |
 | Branch/location | `branch_or_process` = **null** | Not in export; deferred to Account Mapping |
 | HTML identity | `account_id`, `job_id` | Nullable when unmatched |
+
+#### Activity / status columns (16–75, `raw_row` only in v1)
+
+Columns 16–75 are grouped by activity type in sets of 5 (`Status`, `Date`, `Sched Time`, `Assigned To`, `Notes`):
+
+- Last Customer Service — Basic (16–20)
+- Last Customer Service — Challenging (21–25)
+- First Install — Quartz Basic (26–30)
+- First Install — Quartz Challenging (31–35)
+- First Install — Granite Basic (36–40)
+- First Install — Granite Challenging (41–45)
+- First Install — Quartzite/Marble (46–50)
+- First Install — Waterfalls (51–55)
+- First Install — Special Edge (56–60)
+- First Install — Fireplace/Shower Walls (61–65)
+- First Customer Service — Basic (66–70)
+- First Customer Service — Challenging (71–75)
 
 ## Architecture (Brain tables)
 
@@ -239,7 +264,7 @@ All tables use `organization_id` for SaaS readiness. RLS is **not** enabled in t
 2. Paste the full contents of [`backend-core/supabase/eliteos_moraware_report_feeds.sql`](../../backend-core/supabase/eliteos_moraware_report_feeds.sql).
 3. Run once. Re-run is safe (`IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`).
 4. Verify tables exist: `moraware_report_feeds`, `moraware_report_runs`, `moraware_report_column_profiles`, `moraware_report_raw_rows`, `moraware_report_identity_links`, `moraware_prepared_sales_worksheet_facts`.
-5. Seed the Sales Worksheet Facts feed using the commented `INSERT` at the bottom of the SQL file — **replace** `organization_id` with your real tenant UUID. The validated `expected_column_hash` is already set in the seed comment: `4e657f1f731e9fb054e0b9d8d4d6b1f586e612875d139ee33e4a083a5a6cfdb8` (validated run `afc7b49d`, 2026-05-30).
+5. Seed the Sales Worksheet Facts feed using the commented `INSERT` at the bottom of the SQL file — **replace** `organization_id` with your real tenant UUID. Use `expected_column_hash = '8e12bfb52b516ac30aa94e85d7bf92ee9c6d47741b2967586b743954136b9ade'` (76-column real shape, verified run `cb765461`, 2026-05-30).
 6. Do **not** paste live Moraware CSV/HTML exports into the SQL editor.
 
 ### Apply-readiness notes (schema review)
@@ -256,6 +281,8 @@ All tables use `organization_id` for SaaS readiness. RLS is **not** enabled in t
 
 ## Identity enrichment strategy
 
+### Current behavior (best-effort)
+
 1. Parse CSV rows for business columns.
 2. Parse HTML report rows and extract:
    - `job_id`, `job_name` from `/sys/job/<id>`
@@ -263,8 +290,33 @@ All tables use `organization_id` for SaaS readiness. RLS is **not** enabled in t
 3. Build an identity map keyed by normalized `Account Name + Job Name`.
 4. Enrich CSV rows:
    - **matched** — exactly one HTML identity for the key
-   - **needs_identity_review** — no HTML match (row still stored as raw)
-   - **ambiguous_identity** — duplicate HTML keys or duplicate row hash (never silently guessed)
+   - **needs_identity_review** — no HTML match (row still stored as raw; never fails staging)
+   - **ambiguous_identity** — duplicate HTML keys that map to different IDs; `is_ambiguous=true` in identity-links table; never silently guessed
+
+Unmatched and ambiguous rows are **always persisted as staging data**. They never block a run or fail silently. Duplicate HTML match keys are deduplicated before insert and never cause a unique-constraint violation.
+
+### Known limitation: HTML report pagination (discovered 2026-05-30)
+
+The saved view 219 HTML report (`/sys/report/?view=219`) is **paginated/limited by Moraware**. Both `view-219.html` and attempted `view-219-allpages.html` contained only:
+
+- **22 unique `/sys/job/` links**
+- **4 unique `/sys/account/` links**
+
+while the real CSV export has **6,986 rows**. This means the vast majority of CSV rows will be `needs_identity_review` until a full-coverage identity source is available.
+
+**This is expected behavior for v1.** Unmatched rows are not errors — they represent jobs and accounts that exist in Moraware but were not visible in the paginated HTML snapshot.
+
+### Full identity coverage path (future slices, separate approval)
+
+Three options for achieving full `account_id` + `job_id` coverage — choose one when ready:
+
+| Option | Mechanism | Notes |
+|--------|-----------|-------|
+| **A. True all-pages HTML** | Discover paginated HTML or use export with `exportType=AllPages` parameter against the HTML report path | Requires verifying whether Moraware supports an all-pages variant for HTML (not just CSV) |
+| **B. Moraware API/SDK mirror** | Use existing Moraware API sync data (`moraware_jobs`, `moraware_accounts` or equivalent) as the identity lookup table | Likely the cleanest path — avoids HTML scraping entirely; reuses existing integration |
+| **C. Account Mapping / Identity Enrichment head** | Build a separate account-mapping layer that maps `Account Name` + `Job Name` → eliteOS `account_id` / `job_id` via fuzzy/exact lookup against synced data | More general; supports non-Moraware feeds |
+
+**Until a full-coverage option is implemented:** all staging runs will report high `needs_identity_review` counts. This does not block staging; it does block accurate `total_worksheet_sqft` aggregation by account in prepared-fact queries.
 
 Utilities live in [`backend-core/src/moraware/reportFeeds/`](../../backend-core/src/moraware/reportFeeds/).
 

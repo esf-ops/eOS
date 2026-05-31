@@ -177,7 +177,26 @@ async function main() {
   }
 }
 
+/**
+ * Format any thrown value (Error, Supabase error object, string) into a readable CLI message.
+ * Supabase/PostgREST errors are plain objects with message/code/details/hint but no .stack.
+ */
+function formatCliError(err) {
+  if (!err) return "unknown error";
+  if (typeof err === "string") return err;
+  if (err instanceof Error) return err.stack || err.message;
+  // Supabase/PostgREST error object
+  const parts = [
+    err.message,
+    err.code && `[code=${err.code}]`,
+    err.details && `[details=${err.details}]`,
+    err.hint && `[hint=${err.hint}]`
+  ].filter(Boolean);
+  if (parts.length) return parts.join(" ");
+  try { return JSON.stringify(err); } catch { return String(err); }
+}
+
 main().catch((err) => {
-  console.error("\nFATAL:", err?.stack || String(err));
+  console.error("\nFATAL:", formatCliError(err));
   process.exit(1);
 });

@@ -11,11 +11,17 @@ export const SALES_WORKSHEET_FACTS_REPORT_TYPE = "sales_worksheet_facts";
 
 /**
  * Expected business columns for Sales Worksheet Facts (view 219).
- * Matches the real Moraware export shape. Branch/location is intentionally excluded
- * for v1 — it is not present in this saved report and will be derived later
+ * Full 76-column real Moraware export shape (verified 2026-05-30).
+ *
+ * Columns 1-15 are core worksheet/sales fields mapped to prepared facts.
+ * Columns 16-75 are activity/install/CS status fields stored in raw_row only (v1).
+ * Column 76 is the sqft total (mapped to total_worksheet_sqft).
+ *
+ * Branch/location is intentionally absent from this view — derived later
  * through Account Mapping / Identity Enrichment.
  */
 export const SALES_WORKSHEET_FACTS_EXPECTED_COLUMNS = [
+  // Core worksheet fields (mapped to prepared-fact columns)
   "Account Name",
   "Account Salesperson",
   "Job Name",
@@ -31,6 +37,68 @@ export const SALES_WORKSHEET_FACTS_EXPECTED_COLUMNS = [
   "Job Worksheet - Thickness",
   "Job Worksheet - Back Splash Type",
   "Job Worksheet - Back Splash Height",
+  // Activity / customer service / install status fields (raw_row only in v1)
+  "Last Customer Service - Basic in Job Status",
+  "Last Customer Service - Basic in Job Date",
+  "Last Customer Service - Basic in Job Sched Time",
+  "Last Customer Service - Basic in Job Assigned To",
+  "Last Customer Service - Basic in Job Notes",
+  "Last Customer Service - Challenging in Job Status",
+  "Last Customer Service - Challenging in Job Date",
+  "Last Customer Service - Challenging in Job Sched Time",
+  "Last Customer Service - Challenging in Job Assigned To",
+  "Last Customer Service - Challenging in Job Notes",
+  "First Install - Quartz Basic in Job Status",
+  "First Install - Quartz Basic in Job Date",
+  "First Install - Quartz Basic in Job Sched Time",
+  "First Install - Quartz Basic in Job Assigned To",
+  "First Install - Quartz Basic in Job Notes",
+  "First Install - Quartz Challenging in Job Status",
+  "First Install - Quartz Challenging in Job Date",
+  "First Install - Quartz Challenging in Job Sched Time",
+  "First Install - Quartz Challenging in Job Assigned To",
+  "First Install - Quartz Challenging in Job Notes",
+  "First Install - Granite Basic in Job Status",
+  "First Install - Granite Basic in Job Date",
+  "First Install - Granite Basic in Job Sched Time",
+  "First Install - Granite Basic in Job Assigned To",
+  "First Install - Granite Basic in Job Notes",
+  "First Install - Granite Challenging in Job Status",
+  "First Install - Granite Challenging in Job Date",
+  "First Install - Granite Challenging in Job Sched Time",
+  "First Install - Granite Challenging in Job Assigned To",
+  "First Install - Granite Challenging in Job Notes",
+  "First Install - Quartzite/Marble in Job Status",
+  "First Install - Quartzite/Marble in Job Date",
+  "First Install - Quartzite/Marble in Job Sched Time",
+  "First Install - Quartzite/Marble in Job Assigned To",
+  "First Install - Quartzite/Marble in Job Notes",
+  "First Install - Waterfalls in Job Status",
+  "First Install - Waterfalls in Job Date",
+  "First Install - Waterfalls in Job Sched Time",
+  "First Install - Waterfalls in Job Assigned To",
+  "First Install - Waterfalls in Job Notes",
+  "First Install - Special Edge in Job Status",
+  "First Install - Special Edge in Job Date",
+  "First Install - Special Edge in Job Sched Time",
+  "First Install - Special Edge in Job Assigned To",
+  "First Install - Special Edge in Job Notes",
+  "First Install - Fireplace/Shower Walls in Job Status",
+  "First Install - Fireplace/Shower Walls in Job Date",
+  "First Install - Fireplace/Shower Walls in Job Sched Time",
+  "First Install - Fireplace/Shower Walls in Job Assigned To",
+  "First Install - Fireplace/Shower Walls in Job Notes",
+  "First Customer Service - Basic in Job Status",
+  "First Customer Service - Basic in Job Date",
+  "First Customer Service - Basic in Job Sched Time",
+  "First Customer Service - Basic in Job Assigned To",
+  "First Customer Service - Basic in Job Notes",
+  "First Customer Service - Challenging in Job Status",
+  "First Customer Service - Challenging in Job Date",
+  "First Customer Service - Challenging in Job Sched Time",
+  "First Customer Service - Challenging in Job Assigned To",
+  "First Customer Service - Challenging in Job Notes",
+  // Sqft total (mapped to total_worksheet_sqft in prepared facts)
   "Total Job Worksheet - Sq.Ft. by Job Creation Date"
 ];
 

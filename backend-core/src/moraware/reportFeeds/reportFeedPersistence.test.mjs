@@ -16,7 +16,8 @@ import {
   buildRawRowInserts,
   buildReportRunInsert,
   buildRunFinalUpdate,
-  persistReportFeedRun
+  persistReportFeedRun,
+  RAW_ROWS_BATCH_SIZE
 } from "./reportFeedPersistence.js";
 import {
   computeExpectedColumnHash,
@@ -110,9 +111,9 @@ function makeProcessResult(overrides = {}) {
   assert.equal(payload.report_run_id, FAKE_RUN_ID, "profile: run_id");
   assert.equal(payload.header_hash.length, 64, "profile: header_hash sha256");
   assert.equal(payload.row_count, 5, "profile: row_count");
-  assert.equal(payload.column_count, 16, "profile: column_count");
+  assert.equal(payload.column_count, 76, "profile: column_count");
   assert.ok(Array.isArray(payload.columns), "profile: columns is array");
-  assert.equal(payload.columns.length, 16, "profile: 16 column profile entries");
+  assert.equal(payload.columns.length, 76, "profile: 76 column profile entries");
 }
 
 // ── buildRawRowInserts ────────────────────────────────────────────────────────
@@ -295,6 +296,73 @@ function makeMockDb(overrides = {}) {
   const payload = buildReportRunInsert({ feed: FAKE_FEED, processResult: result, sourceFiles: {} });
   const json = JSON.stringify(payload);
   assert.ok(!json.includes("prepared_sales_worksheet"), "run insert payload: no prepared facts table reference");
+}
+
+// ── buildIdentityLinkInserts: deduplication ───────────────────────────────────
+
+{
+  // Duplicate match_key with SAME IDs (e.g. same job appears N times in HTML for multi-worksheet rows)
+  // → must produce exactly 1 insert row, is_ambiguous=false
+  const dupeHtmlRows = [
+    { accountId: "462", accountName: "Sample Builders LLC", jobId: "37780", jobName: "Kitchen Remodel Phase A" },
+    { accountId: "462", accountName: "Sample Builders LLC", jobId: "37780", jobName: "Kitchen Remodel Phase A" },
+    { accountId: "462", accountName: "Sample Builders LLC", jobId: "37780", jobName: "Kitchen Remodel Phase A" }
+  ];
+  const fakePR = { htmlIdentity: { rows: dupeHtmlRows }, enrichment: { rows: [], duplicatePreparedFacts: [] } };
+  const links = buildIdentityLinkInserts({ runId: FAKE_RUN_ID, feed: FAKE_FEED, processResult: fakePR });
+  assert.equal(links.length, 1, "dedup-same: 3 duplicate rows with same IDs → 1 identity link");
+  assert.equal(links[0].is_ambiguous, false, "dedup-same: is_ambiguous=false when IDs match");
+  assert.equal(links[0].account_id, "462", "dedup-same: correct account_id");
+  assert.equal(links[0].job_id, "37780", "dedup-same: correct job_id");
+}
+
+{
+  // Duplicate match_key with DIFFERENT job IDs → conflicting identity, is_ambiguous=true
+  const conflictHtmlRows = [
+    { accountId: "462", accountName: "Sample Builders LLC", jobId: "37780", jobName: "Kitchen Remodel Phase A" },
+    { accountId: "462", accountName: "Sample Builders LLC", jobId: "99999", jobName: "Kitchen Remodel Phase A" }
+  ];
+  const fakePR = { htmlIdentity: { rows: conflictHtmlRows }, enrichment: { rows: [], duplicatePreparedFacts: [] } };
+  const links = buildIdentityLinkInserts({ runId: FAKE_RUN_ID, feed: FAKE_FEED, processResult: fakePR });
+  assert.equal(links.length, 1, "dedup-conflict: conflicting job IDs for same key → 1 identity link");
+  assert.equal(links[0].is_ambiguous, true, "dedup-conflict: is_ambiguous=true when IDs differ");
+}
+
+{
+  // Multiple distinct match_keys → all preserved
+  const mixedHtmlRows = [
+    { accountId: "462", accountName: "Builders LLC", jobId: "37780", jobName: "Job A" },
+    { accountId: "901", accountName: "Stone Partners", jobId: "45001", jobName: "Job B" },
+    { accountId: "462", accountName: "Builders LLC", jobId: "37780", jobName: "Job A" } // duplicate of first
+  ];
+  const fakePR = { htmlIdentity: { rows: mixedHtmlRows }, enrichment: { rows: [], duplicatePreparedFacts: [] } };
+  const links = buildIdentityLinkInserts({ runId: FAKE_RUN_ID, feed: FAKE_FEED, processResult: fakePR });
+  assert.equal(links.length, 2, "dedup-mixed: 2 distinct keys + 1 duplicate → 2 identity links");
+}
+
+// ── batchInsert: large array uses multiple insert calls ───────────────────────
+
+{
+  // Build a process result with RAW_ROWS_BATCH_SIZE + 1 fake enriched rows so that
+  // persistReportFeedRun must call insert at least twice for moraware_report_raw_rows.
+  const baseResult = makeProcessResult();
+  const fakeRow = baseResult.enrichment.rows[0];
+  const manyRows = Array.from({ length: RAW_ROWS_BATCH_SIZE + 1 }, (_, i) => ({
+    ...fakeRow,
+    rowNumber: i + 1,
+    rowHash: `fakehash${String(i).padStart(59, "0")}` // unique hash per row
+  }));
+  const bigResult = {
+    ...baseResult,
+    enrichment: { ...baseResult.enrichment, rows: manyRows },
+    profile: { ...baseResult.profile, rowCount: manyRows.length }
+  };
+  const db = makeMockDb();
+  await persistReportFeedRun(db, { feed: FAKE_FEED, processResult: bigResult, sourceFiles: {} });
+
+  const rawRowInserts = db._log.filter((e) => e.op === "insert" && e.table === "moraware_report_raw_rows");
+  assert.ok(rawRowInserts.length >= 2,
+    `batch: ${RAW_ROWS_BATCH_SIZE + 1} rows → at least 2 insert calls for raw_rows (got ${rawRowInserts.length})`);
 }
 
 console.log("reportFeedPersistence.test.mjs: ok");
