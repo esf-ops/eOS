@@ -3674,26 +3674,49 @@ select:focus {
   margin-bottom: 8px;
 }
 
-/* Required field asterisk — replaces "(required)" text */
+/* Required field asterisk — inline with label text, never wraps to own line */
+.ie-label-text {
+  display: block;
+}
+
 .req-star {
   color: var(--color-error, #c0392b);
   font-weight: 700;
   margin-left: 2px;
   font-size: 0.95em;
+  display: inline;
 }
 
-/* Customer estimate note group in Job Info */
+/* Customer-facing project notes — compact inline field within the job grid */
 .ie-job-group--cfn {
   grid-column: 1 / -1;
+  margin-top: 4px;
 }
 
-.ie-job-group-hint {
-  margin: 0 0 10px;
-  font-size: 0.84rem;
-  color: var(--color-text-muted, #666);
+.ie-cfn-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.ie-cfn-field textarea {
+  width: 100%;
+  min-height: 5rem;
+  resize: vertical;
+  font-weight: 400;
   line-height: 1.45;
 }
 
+/* Small helper text below a field (used for notes-on-estimate hint) */
+.ie-field-hint {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--color-text-muted, #666);
+  font-weight: 400;
+  line-height: 1.35;
+}
+
+/* Legacy class retained in case anything references it */
 .ie-customer-facing-notes-label {
   display: flex;
   flex-direction: column;

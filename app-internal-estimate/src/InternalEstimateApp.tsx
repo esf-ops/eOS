@@ -2538,7 +2538,7 @@ export default function InternalEstimateApp() {
                     </select>
                   </label>
                   <label>
-                    Salesperson <span className="req-star" aria-label="required">*</span>
+                    <span className="ie-label-text">Salesperson <span className="req-star" aria-label="required">*</span></span>
                     <select value={salesRep} onChange={(e) => setSalesRep(e.target.value)} required>
                       <option value="">— Select —</option>
                       {INTERNAL_SALES_REPS.map((r) => (
@@ -2589,22 +2589,20 @@ export default function InternalEstimateApp() {
               </div>
 
               <div className="ie-job-group ie-job-group--cfn">
-                <p className="ie-job-group-head">Customer estimate note</p>
-                <p className="ie-job-group-hint">
-                  These notes print in the customer-facing estimate PDF under "Project Notes." Use them for
-                  exclusions, site requirements, or reminders the customer should see — not internal staff instructions.
-                </p>
-                <label className="ie-customer-facing-notes-label">
-                  <textarea
-                    rows={4}
-                    value={customerFacingNotes}
-                    onChange={(e) => setCustomerFacingNotes(e.target.value)}
-                    placeholder={
-                      "Sink accessories not included.\nConfirm sink base size before ordering.\nLaminate must be removed before template.\nFull-height backsplash requires second template/install."
-                    }
-                    aria-label="Customer-facing project notes — prints on customer estimate"
-                  />
-                </label>
+                <div className="grid3 ie-job-grid">
+                  <label className="ie-cfn-field" style={{ gridColumn: "1 / -1" }}>
+                    Customer-facing project notes
+                    <textarea
+                      rows={3}
+                      value={customerFacingNotes}
+                      onChange={(e) => setCustomerFacingNotes(e.target.value)}
+                      placeholder={
+                        "Sink accessories not included.\nConfirm sink base size before ordering.\nLaminate must be removed before template.\nFull-height backsplash requires second template/install."
+                      }
+                    />
+                    <span className="ie-field-hint">Prints under Project Notes on the customer estimate.</span>
+                  </label>
+                </div>
               </div>
             </div>
             {selectedMaterialBreakdown.totals.useTax?.applied ? (
@@ -3144,71 +3142,9 @@ export default function InternalEstimateApp() {
               <p className="muted small">Elite Stone Fabrication — internal estimate. Not a homeowner contract.</p>
             </details>
 
-          <div className="actions ie-output-actions" role="group" aria-label="Save/Output mirrored actions">
-            <div className="ie-output-actions-meta">
-              <p className="ie-output-actions-eyebrow">Mirrors the pinned command bar</p>
-              <p className="ie-output-actions-copy">
-                Same actions as the <strong>pinned bar below</strong> — use whichever is closer while you scroll. The pinned
-                bar is the primary all-day surface.
-              </p>
-              <p className="ie-print-hint">
-                For the cleanest PDF, turn off browser &ldquo;Headers and footers&rdquo; in the print dialog.
-              </p>
-            </div>
-            <div className="ie-output-actions-buttons">
-              <button type="button" className="btn secondary big" onClick={printCustomerEstimate}>
-                Print customer estimate
-              </button>
-              <button type="button" className="btn secondary big" disabled={calcBusy} onClick={() => void handleCalculate()}>
-                {calcBusy ? "Calculating…" : "Calculate"}
-              </button>
-              {urlQuoteId ? (
-                hydratedIsCurrentRevision === false ? (
-                  <>
-                    <button
-                      type="button"
-                      className="btn secondary big"
-                      disabled={Boolean(restoreRevisionBlockReason)}
-                      title={restoreRevisionBlockReason ?? undefined}
-                      onClick={() => void handleRestoreAsRevision()}
-                    >
-                      {restoreBusy ? "Restoring…" : "Restore as new revision"}
-                    </button>
-                    {familyLatestQuoteId && familyLatestQuoteId !== urlQuoteId ? (
-                      <button type="button" className="btn secondary big" onClick={openLatestRevisionInPlace}>
-                        Open latest revision
-                      </button>
-                    ) : null}
-                  </>
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      className="btn secondary big"
-                      disabled={Boolean(updateQuoteBlockReason)}
-                      title={updateQuoteBlockReason ?? undefined}
-                      onClick={() => void handleSubmit("update_existing")}
-                    >
-                      {submitBusy && pendingSubmitIntent === "update_existing" ? "Working…" : "Update current revision"}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn secondary big"
-                      disabled={Boolean(saveRevisionBlockReason)}
-                      title={saveRevisionBlockReason ?? undefined}
-                      onClick={() => void handleSubmit("save_revision")}
-                    >
-                      {submitBusy && pendingSubmitIntent === "save_revision" ? "Working…" : "Save revision"}
-                    </button>
-                  </>
-                )
-              ) : (
-                <button type="button" className="btn secondary big" disabled={submitBusy} onClick={() => void handleSubmit()}>
-                  {submitBusy ? "Working…" : "Save quote"}
-                </button>
-              )}
-            </div>
-          </div>
+          <p className="ie-print-hint muted small">
+            For the cleanest PDF, turn off browser &ldquo;Headers and footers&rdquo; in the print dialog.
+          </p>
           {!sessionToken ? (
             <p className="muted small" style={{ marginTop: 0 }}>
               <strong>Save quote</strong> requires sign-in and backend quote storage. Use <strong>Calculate</strong> for local
