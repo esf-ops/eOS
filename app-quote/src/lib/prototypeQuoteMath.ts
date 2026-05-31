@@ -63,9 +63,8 @@ export const INTERNAL_ESTIMATE_MEASURE_OPTIONS: InternalMeasureOptions = {
 export const STANDARD_EDGE_PROFILES = ["Eased", "Beveled", "Pencil", "Bullnose"] as const;
 
 /**
- * Upgraded edge profiles — captured per room for estimating.
- * NOTE: These are NOT yet priced by the backend calculator.
- * Pricing by linear foot is a must-fix backend/Pricing Admin follow-up slice.
+ * Upgraded edge profiles — charged by linear foot via backend calculator.
+ * Must stay in sync with `UPGRADED_EDGE_PROFILE_NAMES` in `quoteCalculator.js`.
  */
 export const UPGRADED_EDGE_PROFILES = [
   "Full Bullnose",
@@ -80,6 +79,40 @@ export type UpgradedEdgeProfile = (typeof UPGRADED_EDGE_PROFILES)[number];
 
 /** Default edge profile when none is specified. */
 export const DEFAULT_EDGE_PROFILE: StandardEdgeProfile = "Eased";
+
+/**
+ * Fallback edge rate for live preview only — matches `SPECIALTY_EDGE_RATE_PER_LF`
+ * in `quoteCalculator.js`. Backend is authoritative for the submitted total.
+ */
+export const UPGRADED_EDGE_PREVIEW_RATE_PER_LF = 15;
+
+const UPGRADED_EDGE_PROFILE_SET = new Set<string>(UPGRADED_EDGE_PROFILES);
+
+/**
+ * Compute a local upgraded edge charge for live preview from room drafts.
+ * Returns total, per-room breakdown, and warnings for missing LF.
+ * The backend calculator is authoritative; this is for sticky panel / customer display preview only.
+ */
+export function computeLocalUpgradedEdgeTotal(rooms: RoomDraft[]): {
+  total: number;
+  roomCount: number;
+  warnings: string[];
+} {
+  let total = 0;
+  let roomCount = 0;
+  const warnings: string[] = [];
+  for (const r of rooms) {
+    if (!r.edgeProfile || !UPGRADED_EDGE_PROFILE_SET.has(r.edgeProfile)) continue;
+    const lf = Number(r.upgradedEdgeLf) || 0;
+    if (lf <= 0) {
+      warnings.push(`${r.name}: upgraded edge "${r.edgeProfile}" — enter linear feet.`);
+      continue;
+    }
+    total = round2(total + lf * UPGRADED_EDGE_PREVIEW_RATE_PER_LF);
+    roomCount++;
+  }
+  return { total, roomCount, warnings };
+}
 
 export {
   defaultVanityKitchenTier,

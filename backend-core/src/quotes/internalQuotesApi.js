@@ -238,10 +238,9 @@ export function attachInternalQuoteRoutes(app, deps) {
         const quoteNumber = result.quote_number;
         const mondaySync = {
           status: result.monday_sync_status,
-          monday_item_id: result.monday_item_id,
-          warning: null
+          monday_item_id: result.monday_item_id
         };
-        if (mondaySync?.warning) warnings.push(mondaySync.warning);
+        // monday_sync_warning not yet returned by processInternalQuoteSave — defer propagation
         const saveMode = String(result.save_mode ?? "").trim();
         await logAction({
           user: req.user,

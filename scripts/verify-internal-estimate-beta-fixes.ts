@@ -35,6 +35,7 @@ import {
   buildCustomerRoomAreaCostBreakdown,
   buildSelectedMaterialBreakdown,
   calculateAllRoomDrafts,
+  computeLocalUpgradedEdgeTotal,
   createDefaultRoom,
   createEstimatorRoom,
   createVanityRoom,
@@ -50,7 +51,9 @@ import {
   runLocalPrototypeQuote,
   serializeCustomerRoomAreaBreakdown,
   serializeRoomDraftsForInternalUi,
-  serializeRoomsForApi
+  serializeRoomsForApi,
+  UPGRADED_EDGE_PREVIEW_RATE_PER_LF,
+  UPGRADED_EDGE_PROFILES
 } from "../app-quote/src/lib/prototypeQuoteMath.ts";
 import { parseCustomerFacingNoteLines } from "../app-internal-estimate/src/lib/customerFacingNotes.ts";
 
@@ -773,6 +776,61 @@ function approx(a: number, b: number, eps = 0.02) {
 
   const apiSrc = readFileSync(join(repoRoot, "backend-core/src/quotes/internalQuotesApi.js"), "utf8");
   assert.match(apiSrc, /customer_estimate_customer_facing_notes/, "internal save persists customer-facing notes in snapshot");
+}
+
+// computeLocalUpgradedEdgeTotal — local preview matches backend rate
+{
+  const baseRoom = {
+    id: "r1",
+    name: "Kitchen",
+    materialGroup: "Group Promo",
+    shape: "rectangle" as const,
+    width: 10,
+    depth: 5,
+    backsplashHeight: 4,
+    backsplashWall: "back" as const,
+    sinkCount: 0,
+    sinkType: "undermount" as const,
+    addons: {}
+  };
+
+  // Standard edge — zero charge, no warning
+  const std = computeLocalUpgradedEdgeTotal([{ ...baseRoom, edgeProfile: "Eased", upgradedEdgeLf: 20 }]);
+  assert.equal(std.total, 0, "EDGE-LOCAL-1: standard edge produces zero charge");
+  assert.equal(std.warnings.length, 0, "EDGE-LOCAL-1: standard edge produces no warnings");
+
+  // Upgraded edge with LF — expect lf × rate
+  const upgraded = computeLocalUpgradedEdgeTotal([{ ...baseRoom, edgeProfile: "Ogee", upgradedEdgeLf: 12 }]);
+  assert.equal(upgraded.total, 12 * UPGRADED_EDGE_PREVIEW_RATE_PER_LF, "EDGE-LOCAL-2: Ogee 12 LF charges 12 × rate");
+  assert.equal(upgraded.roomCount, 1, "EDGE-LOCAL-2: one room counted");
+  assert.equal(upgraded.warnings.length, 0, "EDGE-LOCAL-2: no warnings when LF provided");
+
+  // Upgraded edge without LF — zero charge, one warning
+  const noLf = computeLocalUpgradedEdgeTotal([{ ...baseRoom, edgeProfile: "Waterfall", upgradedEdgeLf: 0 }]);
+  assert.equal(noLf.total, 0, "EDGE-LOCAL-3: upgraded with LF=0 produces zero charge");
+  assert.equal(noLf.warnings.length, 1, "EDGE-LOCAL-3: upgraded with LF=0 emits one warning");
+
+  // Multi-room: one upgraded, one standard
+  const multi = computeLocalUpgradedEdgeTotal([
+    { ...baseRoom, id: "r1", name: "Kitchen", edgeProfile: "Ogee", upgradedEdgeLf: 10 },
+    { ...baseRoom, id: "r2", name: "Bath", edgeProfile: "Eased", upgradedEdgeLf: 0 }
+  ]);
+  assert.equal(multi.total, 10 * UPGRADED_EDGE_PREVIEW_RATE_PER_LF, "EDGE-LOCAL-4: only upgraded room adds charge");
+  assert.equal(multi.roomCount, 1, "EDGE-LOCAL-4: only one upgraded room counted");
+
+  // Constant matches backend and is consistent with UPGRADED_EDGE_PROFILES
+  assert.equal(UPGRADED_EDGE_PREVIEW_RATE_PER_LF, 15, "EDGE-LOCAL-5: preview rate is $15/LF (matches backend fallback)");
+  assert.ok(UPGRADED_EDGE_PROFILES.includes("Ogee"), "EDGE-LOCAL-5: Ogee is in UPGRADED_EDGE_PROFILES");
+
+  // Source check: InternalEstimateApp wires edge into partRetail and stickyLiveRollup
+  const appSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/InternalEstimateApp.tsx"), "utf8");
+  assert.match(appSrc, /liveUpgradedEdgeTotal/, "IE must compute liveUpgradedEdgeTotal");
+  assert.match(appSrc, /Edge upgrades/, "IE sticky panel must show Edge upgrades row");
+  assert.match(appSrc, /upgradedEdgeTotalExact/, "IE must pass upgradedEdgeTotalExact to display model");
+
+  // Source check: display model exposes summaryEdgeDisplay
+  const dmSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/lib/customerEstimateDisplayModel.ts"), "utf8");
+  assert.match(dmSrc, /summaryEdgeDisplay/, "display model must expose summaryEdgeDisplay");
 }
 
 console.log("verify-internal-estimate-beta-fixes: OK");

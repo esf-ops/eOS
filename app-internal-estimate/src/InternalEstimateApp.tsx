@@ -10,6 +10,7 @@ import {
   buildInternalEstimateGroupComparison,
   buildSelectedMaterialBreakdown,
   calculateAllRoomDrafts,
+  computeLocalUpgradedEdgeTotal,
   createEstimatorRoom,
   hydrateRoomDraftsFromInternalUi,
   mergeRoomDraftsIntoGlobalAddOns,
@@ -1500,7 +1501,14 @@ export default function InternalEstimateApp() {
   }, [comparisonScopeMeta, customLinePreviewTotals, internalPricingMode, useTaxPercent]);
 
   const backendHint = config.backendBaseUrl;
-  const partRetail = liveEstimate.retail;
+
+  /** Local preview of upgraded edge charge — added to partRetail so sticky total matches backend. */
+  const liveUpgradedEdgeTotal = useMemo(
+    () => computeLocalUpgradedEdgeTotal(roomDrafts).total,
+    [roomDrafts]
+  );
+
+  const partRetail = round2((liveEstimate.retail ?? 0) + liveUpgradedEdgeTotal);
   const partSqft = liveEstimate.estimated_sqft;
   const serverRetailVerified = !usedFallback && apiPartner?.totals?.retail != null ? Number(apiPartner.totals.retail) : null;
 
@@ -1667,7 +1675,8 @@ export default function InternalEstimateApp() {
         })),
         internalMaterialFoldDollars: internalOnlyAdjustDollars,
         roomAreaBreakdown: liveRoomAreaBreakdown,
-        customerFacingNotes
+        customerFacingNotes,
+        upgradedEdgeTotalExact: liveUpgradedEdgeTotal
       }),
     [
       selectedMaterialBreakdown,
@@ -1675,7 +1684,8 @@ export default function InternalEstimateApp() {
       visibleCustomerLines,
       internalOnlyAdjustDollars,
       liveRoomAreaBreakdown,
-      customerFacingNotes
+      customerFacingNotes,
+      liveUpgradedEdgeTotal
     ]
   );
 
@@ -1683,7 +1693,7 @@ export default function InternalEstimateApp() {
   // Keep ref in sync so buildSubmitPayload reads the fresh value at save time.
   customerDisplayTotalRef.current = customerDisplayTotal;
 
-  /** Matches customer print Quoted Material Breakdown + vanity + room extras + custom lines — same basis as live total. */
+  /** Matches customer print Quoted Material Breakdown + vanity + room extras + custom lines + edge — same basis as live total. */
   const stickyLiveRollup = useMemo(() => {
     const bd = selectedMaterialBreakdown;
     let vanityFlat = 0;
@@ -1695,16 +1705,17 @@ export default function InternalEstimateApp() {
     const countertopMaterial = round2(bd.totals.countertopMaterial + vanityFlat);
     const backsplashMaterial = bd.totals.backsplashMaterial;
     const roomAddOnsFixtures = round2(roomExtras);
-    const recomputed = round2(bd.totals.materialSubtotal + vanityFlat + roomExtras + customLinePreviewTotals);
+    const recomputed = round2(bd.totals.materialSubtotal + vanityFlat + roomExtras + customLinePreviewTotals + liveUpgradedEdgeTotal);
     return {
       countertopMaterial,
       backsplashMaterial,
       roomAddOnsFixtures,
+      upgradedEdge: liveUpgradedEdgeTotal,
       structuredCustomLines: customLinePreviewTotals,
       recomputed,
       rollupMismatch: Math.abs(recomputed - (Number(partRetail) || 0)) > 0.03
     };
-  }, [selectedMaterialBreakdown, liveEstimate.measuredRooms, customLinePreviewTotals, partRetail]);
+  }, [selectedMaterialBreakdown, liveEstimate.measuredRooms, customLinePreviewTotals, liveUpgradedEdgeTotal, partRetail]);
 
   const estimatorSidebarNote = useMemo(() => {
     const parts: string[] = [];
@@ -3675,6 +3686,12 @@ export default function InternalEstimateApp() {
                     <span>Add-ons / fixtures</span>
                     <strong>${stickyLiveRollup.roomAddOnsFixtures.toFixed(2)}</strong>
                   </div>
+                  {stickyLiveRollup.upgradedEdge > 0 ? (
+                    <div className="summary-row ie-summary-row-compact">
+                      <span>Edge upgrades</span>
+                      <strong>${stickyLiveRollup.upgradedEdge.toFixed(2)}</strong>
+                    </div>
+                  ) : null}
                   {customerFacingCustomLinesDollars !== 0 ? (
                     <div className="summary-row ie-summary-row-compact">
                       <span>Customer-facing custom lines</span>

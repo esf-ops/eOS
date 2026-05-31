@@ -178,6 +178,7 @@ function buildEstimateSummaryRows(params: {
   summaryCounterDisplay: number;
   summaryBacksplashDisplay: number;
   summaryAddonsDisplay: number;
+  summaryEdgeDisplay: number;
   hasAddons: boolean;
   visibleCustomerLines: CustomerEstimateDisplayLineItem[];
 }): CustomerEstimateSummaryRow[] {
@@ -187,6 +188,9 @@ function buildEstimateSummaryRows(params: {
   ];
   if (params.hasAddons) {
     rows.push({ key: "addons", label: "Add-ons / fixtures", displayAmount: params.summaryAddonsDisplay });
+  }
+  if (params.summaryEdgeDisplay > 0) {
+    rows.push({ key: "edge_upgrades", label: "Edge upgrades", displayAmount: params.summaryEdgeDisplay });
   }
   params.visibleCustomerLines.forEach((ln, index) => {
     const displayAmount = roundCustomerDisplay(Number(ln.lineTotal) || 0);
@@ -293,6 +297,8 @@ export type CustomerEstimateDisplayModel = {
   summaryCounterDisplay: number;
   summaryBacksplashDisplay: number;
   summaryAddonsDisplay: number;
+  /** Rounded upgraded edge display amount — $0 when no upgraded edges. */
+  summaryEdgeDisplay: number;
   summaryVisibleLinesDisplay: number;
   finalRounded: number;
   /** Per-room extras exact (same source as Live Quote Panel add-ons row). */
@@ -326,6 +332,11 @@ export type BuildCustomerEstimateDisplayModelParams = {
   roomAreaBreakdown: CustomerRoomAreaCostBreakdown | null;
   /** Raw project notes from Internal Estimate — normalized to customerFacingNoteLines. */
   customerFacingNotes?: string | null;
+  /**
+   * Upgraded edge charge total (exact, before customer rounding) from the local preview or
+   * backend calculate. Rounded to nearest $10 for display. Missing → treated as $0.
+   */
+  upgradedEdgeTotalExact?: number;
 };
 
 /**
@@ -347,15 +358,17 @@ export function buildCustomerEstimateDisplayModel(
   const addonsExact = round2(params.measuredRooms.reduce((s, r) => s + (Number(r.extras) || 0), 0));
   const hasAddons = addonsExact !== 0;
 
+  const upgradedEdgeExact = round2(Math.max(0, Number(params.upgradedEdgeTotalExact) || 0));
   const summaryCounterDisplay = roundCustomerDisplay(countertopMaterialExact);
   const summaryBacksplashDisplay = roundCustomerDisplay(backsplashMaterialExact);
   const summaryAddonsDisplay = hasAddons ? roundCustomerDisplay(addonsExact) : 0;
+  const summaryEdgeDisplay = upgradedEdgeExact > 0 ? roundCustomerDisplay(upgradedEdgeExact) : 0;
   const summaryVisibleLinesDisplay = params.visibleCustomerLines.reduce(
     (s, ln) => s + roundCustomerDisplay(Number(ln.lineTotal) || 0),
     0
   );
   const finalRounded =
-    summaryCounterDisplay + summaryBacksplashDisplay + summaryAddonsDisplay + summaryVisibleLinesDisplay;
+    summaryCounterDisplay + summaryBacksplashDisplay + summaryAddonsDisplay + summaryEdgeDisplay + summaryVisibleLinesDisplay;
 
   const roomExtrasExactByRoomId: Record<string, number> = {};
   for (const r of params.measuredRooms) {
@@ -368,6 +381,7 @@ export function buildCustomerEstimateDisplayModel(
     summaryCounterDisplay,
     summaryBacksplashDisplay,
     summaryAddonsDisplay,
+    summaryEdgeDisplay,
     hasAddons,
     visibleCustomerLines: params.visibleCustomerLines
   });
@@ -385,6 +399,7 @@ export function buildCustomerEstimateDisplayModel(
     summaryCounterDisplay,
     summaryBacksplashDisplay,
     summaryAddonsDisplay,
+    summaryEdgeDisplay,
     summaryVisibleLinesDisplay,
     finalRounded,
     roomExtrasExactByRoomId,

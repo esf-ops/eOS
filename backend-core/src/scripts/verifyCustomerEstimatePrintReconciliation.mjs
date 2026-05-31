@@ -190,12 +190,14 @@ function buildSyntheticDisplayModel(fixture) {
   const summaryCounterDisplay = roundCustomerDisplay(fixture.countertopExact);
   const summaryBacksplashDisplay = roundCustomerDisplay(fixture.backsplashExact);
   const summaryAddonsDisplay = fixture.addonsExact > 0 ? roundCustomerDisplay(fixture.addonsExact) : 0;
+  const upgradedEdgeExact = Number(fixture.upgradedEdgeExact) || 0;
+  const summaryEdgeDisplay = upgradedEdgeExact > 0 ? roundCustomerDisplay(upgradedEdgeExact) : 0;
   const summaryCustomDisplay = (fixture.customLines || []).reduce(
     (s, ln) => s + roundCustomerDisplay(ln.lineTotal),
     0
   );
   const finalRounded =
-    summaryCounterDisplay + summaryBacksplashDisplay + summaryAddonsDisplay + summaryCustomDisplay;
+    summaryCounterDisplay + summaryBacksplashDisplay + summaryAddonsDisplay + summaryEdgeDisplay + summaryCustomDisplay;
 
   const estimateSummaryRows = [
     { key: "countertop", label: "Countertop material", displayAmount: summaryCounterDisplay },
@@ -207,6 +209,9 @@ function buildSyntheticDisplayModel(fixture) {
       label: "Add-ons / fixtures",
       displayAmount: summaryAddonsDisplay
     });
+  }
+  if (summaryEdgeDisplay > 0) {
+    estimateSummaryRows.push({ key: "edge_upgrades", label: "Edge upgrades", displayAmount: summaryEdgeDisplay });
   }
   for (const ln of fixture.customLines || []) {
     estimateSummaryRows.push({
@@ -580,6 +585,58 @@ assertEqual(
   );
   assert(printSrc.includes("Project Notes"), "CustomerEstimatePrint must render Project Notes heading");
   assert(printSrc.includes("customerFacingNoteLines"), "CustomerEstimatePrint must use display.customerFacingNoteLines");
+}
+
+// 10. Upgraded edge display — adds "Edge upgrades" row and is included in finalRounded
+{
+  const UPGRADED_EDGE_PREVIEW_RATE = 15;
+  const edgeExact = 4 * UPGRADED_EDGE_PREVIEW_RATE; // 4 LF × $15 = $60
+
+  // With upgraded edge
+  const withEdge = buildSyntheticDisplayModel({
+    countertopExact: 5000,
+    backsplashExact: 3500,
+    addonsExact: 0,
+    upgradedEdgeExact: edgeExact,
+    roomRows: [{ isVanity: false, roomTotalExact: 8560, materialExact: 8500, extrasExact: 0, addons: [] }]
+  });
+  const edgeRow = withEdge.estimateSummaryRows.find((r) => r.key === "edge_upgrades");
+  assert(edgeRow != null, "EDGE-DISPLAY-1: 'Edge upgrades' row must appear in estimateSummaryRows");
+  assertEqual("EDGE-DISPLAY-1: edge display amount", edgeRow.displayAmount, roundCustomerDisplay(edgeExact));
+  assertDisplayModelInvariants("EDGE-DISPLAY-1: with-edge model", withEdge);
+
+  // Without upgraded edge (standard only)
+  const noEdge = buildSyntheticDisplayModel({
+    countertopExact: 5000,
+    backsplashExact: 3500,
+    addonsExact: 0,
+    upgradedEdgeExact: 0,
+    roomRows: [{ isVanity: false, roomTotalExact: 8500, materialExact: 8500, extrasExact: 0, addons: [] }]
+  });
+  const noEdgeRow = noEdge.estimateSummaryRows.find((r) => r.key === "edge_upgrades");
+  assert(noEdgeRow == null, "EDGE-DISPLAY-2: no 'Edge upgrades' row when upgradedEdgeExact = 0");
+  assertDisplayModelInvariants("EDGE-DISPLAY-2: no-edge model", noEdge);
+
+  // finalRounded increases by the edge display amount
+  const diff = withEdge.finalRounded - noEdge.finalRounded;
+  assertEqual("EDGE-DISPLAY-3: finalRounded difference equals edge display", diff, roundCustomerDisplay(edgeExact));
+
+  // Verify source files reference edge upgrades / summaryEdgeDisplay
+  const displayModelSrc = readFileSync(
+    join(__dirname, "../../../app-internal-estimate/src/lib/customerEstimateDisplayModel.ts"),
+    "utf8"
+  );
+  assert(displayModelSrc.includes("summaryEdgeDisplay"), "customerEstimateDisplayModel must compute summaryEdgeDisplay");
+  assert(displayModelSrc.includes("Edge upgrades"), "customerEstimateDisplayModel must label row 'Edge upgrades'");
+  assert(displayModelSrc.includes("upgradedEdgeTotalExact"), "customerEstimateDisplayModel must accept upgradedEdgeTotalExact param");
+
+  const appSrc = readFileSync(
+    join(__dirname, "../../../app-internal-estimate/src/InternalEstimateApp.tsx"),
+    "utf8"
+  );
+  assert(appSrc.includes("liveUpgradedEdgeTotal"), "InternalEstimateApp must compute liveUpgradedEdgeTotal");
+  assert(appSrc.includes("Edge upgrades"), "InternalEstimateApp sticky panel must show 'Edge upgrades' row");
+  assert(appSrc.includes("computeLocalUpgradedEdgeTotal"), "InternalEstimateApp must call computeLocalUpgradedEdgeTotal");
 }
 
 console.log("verifyCustomerEstimatePrintReconciliation: ok");
