@@ -426,6 +426,111 @@ html, body {
   background: var(--eos-info-soft); color: var(--eos-info);
 }
 
+/* ── Hero pills (source label) ────────────────────────────────────────────── */
+.hero-pills { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+.source-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 12px; border-radius: 9999px;
+  background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.2);
+  font-size: 12px; color: rgba(255,255,255,0.9);
+}
+.source-pill--invalid {
+  background: rgba(185,28,28,0.25); border-color: rgba(254,202,202,0.4);
+  color: #fecaca;
+}
+.source-pill--file { color: rgba(255,255,255,0.55); font-size: 11px; }
+
+/* ── Workbench card ───────────────────────────────────────────────────────── */
+.workbench-card { padding: 0; }
+
+.workbench-toolbar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap; padding: 14px 18px;
+  border-bottom: 1px solid var(--eos-line);
+  background: var(--eos-surface-soft);
+}
+.workbench-toolbar-left  { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.workbench-toolbar-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.workbench-hint { font-size: 12px; color: var(--eos-ink-muted); }
+.workbench-hint code {
+  font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+  font-size: 11px; background: var(--eos-bg-soft); padding: 1px 4px;
+  border-radius: 3px; border: 1px solid var(--eos-line);
+}
+
+/* Workbench buttons */
+.btn-wb {
+  padding: 6px 14px; border-radius: var(--r-sm); font-size: 13px; font-weight: 600;
+  cursor: pointer; white-space: nowrap; transition: background 100ms, color 100ms;
+  border: 1px solid transparent;
+}
+.btn-wb--primary {
+  background: var(--lab-accent); color: #fff; border-color: var(--lab-accent);
+}
+.btn-wb--primary:hover { background: #3730a3; border-color: #3730a3; }
+.btn-wb--secondary {
+  background: var(--eos-surface); color: var(--eos-ink-soft);
+  border-color: var(--eos-line-strong);
+}
+.btn-wb--secondary:hover { background: var(--eos-bg-soft); }
+.btn-wb--ghost {
+  background: transparent; color: var(--eos-ink-muted); border-color: transparent;
+}
+.btn-wb--ghost:hover { background: var(--eos-bg-soft); color: var(--eos-ink); }
+.btn-wb--copy {
+  background: var(--eos-surface); color: var(--eos-ink-mid);
+  border-color: var(--eos-line-strong);
+}
+.btn-wb--copy:hover { background: var(--eos-bg-soft); }
+.btn-wb--copied {
+  background: var(--eos-success-soft) !important; color: var(--eos-success) !important;
+  border-color: var(--eos-success-border) !important;
+}
+
+/* Textarea */
+.workbench-textarea-wrap { padding: 14px 18px 0; }
+.workbench-textarea {
+  width: 100%; resize: vertical; min-height: 220px;
+  padding: 10px 12px; border-radius: var(--r-sm);
+  border: 1.5px solid var(--eos-line-strong); background: var(--eos-bg);
+  color: var(--eos-ink); font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+  font-size: 12px; line-height: 1.6; outline: none;
+  transition: border-color 140ms;
+}
+.workbench-textarea:focus { border-color: var(--lab-accent); background: var(--eos-surface); }
+.workbench-textarea--error { border-color: var(--eos-danger); background: var(--eos-danger-soft); }
+.workbench-textarea--ok    { border-color: var(--eos-success-border); }
+
+.workbench-textarea-footer {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 5px 2px 10px; font-size: 11px; color: var(--eos-ink-faint);
+}
+.workbench-status-ok   { color: var(--eos-success); font-weight: 600; }
+.workbench-status-info { color: var(--lab-accent); font-weight: 500; }
+
+/* Parse error card */
+.workbench-error {
+  display: flex; align-items: flex-start; gap: 12px;
+  margin: 0 18px 14px; padding: 12px 14px; border-radius: var(--r-sm);
+  background: var(--eos-danger-soft); border: 1px solid var(--eos-danger-border);
+}
+.workbench-error-icon { font-size: 16px; color: var(--eos-danger); flex-shrink: 0; }
+.workbench-error-body { display: flex; flex-direction: column; gap: 2px; }
+.workbench-error-title { font-size: 13px; font-weight: 700; color: var(--eos-danger); }
+.workbench-error-msg { font-size: 12px; color: var(--eos-ink-soft); font-family: ui-monospace, monospace; }
+
+/* Schema hint */
+.workbench-schema-hint {
+  padding: 10px 18px 14px; font-size: 11px; color: var(--eos-ink-faint);
+  border-top: 1px solid var(--eos-line); margin-top: 4px;
+  display: flex; gap: 0; flex-wrap: wrap;
+}
+.workbench-schema-hint code {
+  font-family: ui-monospace, "Cascadia Code", monospace; font-size: 11px;
+  background: var(--eos-bg-soft); padding: 0 3px; border-radius: 2px;
+}
+
 /* ── Responsive ───────────────────────────────────────────────────────────── */
 @media (max-width: 600px) {
   .lab-topbar-inner { padding: 0 16px; }

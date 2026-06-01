@@ -126,7 +126,9 @@ Cross-app dependency note: `app-ai-takeoff/vite.config.ts` aliases `@takeoff-cor
 bundles them cleanly. `fs.allow: [repoRoot]` enables cross-workspace resolution during dev.
 TypeScript ambient declarations are in `src/takeoff.d.ts`.
 
-The lab head is **not registered in Home Launcher** in v1. It is a local dev/lab tool only.
+**Lab v2 (2026-06-01):** Adds a pasted JSON workbench — paste any `TakeoffResult` JSON from an AI tool (Gemini, ChatGPT, etc.), click Validate, and the summary/rooms/diagnostics/import-preview update with the recomputed result. Still no live AI call, no file upload, no storage, no Internal Estimate mutation. Source label in the header shows "Spec 73 sample", "Pasted takeoff JSON", or "Invalid draft". A "Copy summary" button copies computed sf + diagnostics to clipboard.
+
+The lab head is **not registered in Home Launcher** in v1/v2. It is a local dev/lab tool only.
 Dev server: `npm run dev --prefix app-ai-takeoff` → `http://localhost:5186`.
 
 ---
