@@ -129,14 +129,14 @@ a {
   z-index: 20;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   flex-wrap: wrap;
-  gap: 10px 16px;
+  gap: 10px 12px;
   padding: 12px 28px;
   background: rgba(255, 255, 255, 0.74);
   backdrop-filter: saturate(180%) blur(14px);
   -webkit-backdrop-filter: saturate(180%) blur(14px);
   border-bottom: 1px solid var(--eos-line);
+  animation: topbar-in 280ms ease-out both;
 }
 
 .brand-row {
@@ -206,6 +206,8 @@ a {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .topbar-account {
@@ -280,6 +282,8 @@ a {
   border: 1px solid var(--eos-line);
   box-shadow: var(--sh-2);
   margin-bottom: 32px;
+  animation: hero-in 520ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  animation-delay: 40ms;
 }
 
 .hero-grid {
@@ -520,6 +524,8 @@ a {
   align-items: baseline;
   gap: 12px;
   margin: 0 0 6px;
+  animation: section-head-in 380ms ease-out both;
+  animation-delay: var(--section-head-delay, 80ms);
 }
 
 .section-title {
@@ -579,9 +585,9 @@ a {
   position: relative;
   display: flex;
   align-items: center;
-  flex: 1 1 160px;
+  flex: 0 1 220px;
   min-width: 140px;
-  max-width: 260px;
+  max-width: 220px;
   background: rgba(11, 26, 51, 0.04);
   border: 1px solid var(--eos-line-strong);
   border-radius: var(--r-md);
@@ -692,6 +698,7 @@ a {
     box-shadow var(--eos-dur-2) var(--eos-ease),
     border-color var(--eos-dur-2) var(--eos-ease);
   animation: card-enter 360ms var(--eos-ease) both;
+  animation-delay: var(--card-delay, 0ms);
 }
 
 @keyframes card-enter {
@@ -705,7 +712,25 @@ a {
   }
 }
 
+@keyframes topbar-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes hero-in {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes section-head-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .topbar,
+  .hero,
+  .section-head,
   .head-card {
     animation: none;
     transition: none;

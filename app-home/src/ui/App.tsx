@@ -1419,7 +1419,10 @@ export default function App() {
                   className={`launcher-section${roadmapSection ? " launcher-section-roadmap" : " launcher-section-available"}`}
                   aria-label={section}
                 >
-                  <div className="section-head">
+                  <div
+                    className="section-head"
+                    style={{ "--section-head-delay": roadmapSection ? "200ms" : "60ms" } as React.CSSProperties}
+                  >
                     <h2 className="section-title">{section}</h2>
                     <span className="section-count">{items.length}</span>
                   </div>
@@ -1433,7 +1436,7 @@ export default function App() {
                     </p>
                   )}
                   <div className={roadmapSection ? "card-grid card-grid-roadmap" : "card-grid card-grid-available"}>
-                    {items.map((h) => {
+                    {items.map((h, idx) => {
                       const url = pickLaunchUrl(h);
                       const canNavigate = Boolean(h.enabled && url && !roadmapSection);
                       const inactiveClass = !canNavigate ? " is-muted" : "";
@@ -1442,6 +1445,7 @@ export default function App() {
                       const showUrl = shouldShowUrlOnCard(url);
                       const openLabel = h.slug === "public_quote" ? "Open public site" : "Open tool";
                       const tint = headTintFor(h.slug);
+                      const cardDelayMs = roadmapSection ? 220 + idx * 25 : 120 + idx * 35;
 
                       function openHead() {
                         if (!canNavigate || !url) return;
@@ -1457,6 +1461,7 @@ export default function App() {
                       return (
                         <article
                           key={h.slug}
+                          style={{ "--card-delay": `${cardDelayMs}ms` } as React.CSSProperties}
                           className={`head-card${roadmapSection ? " head-card-roadmap" : " head-card-available"}${inactiveClass}${isDefaultHead ? " head-card-default" : ""} tint-${tint}`}
                         >
                           <div className="head-card-top">
