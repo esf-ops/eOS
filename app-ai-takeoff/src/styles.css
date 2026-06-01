@@ -531,6 +531,106 @@ html, body {
   background: var(--eos-bg-soft); padding: 0 3px; border-radius: 2px;
 }
 
+/* ── v3: Edit mode — section header + toggle controls ────────────────────── */
+.lab-section-header {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap; margin-bottom: 12px;
+}
+.edit-mode-controls {
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+}
+
+/* Edit toggle button */
+.btn-edit-toggle {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 14px; border-radius: 9999px; font-size: 12.5px; font-weight: 600;
+  border: 1.5px solid var(--eos-line-strong); background: var(--eos-surface);
+  color: var(--eos-ink-soft); cursor: pointer; transition: all 140ms;
+  white-space: nowrap;
+}
+.btn-edit-toggle:hover { background: var(--eos-bg-soft); color: var(--eos-ink); }
+.btn-edit-toggle--active {
+  background: #fffbeb; border-color: #d97706; color: #92400e;
+}
+.btn-edit-toggle--active:hover { background: #fef3c7; }
+
+/* Reset edits button (inline with toggle) */
+.btn-edit-action {
+  padding: 5px 12px; border-radius: 9999px; font-size: 12px; font-weight: 500;
+  border: 1.5px solid transparent; cursor: pointer; transition: all 140ms;
+  white-space: nowrap;
+}
+.btn-edit-action--reset {
+  background: transparent; color: var(--eos-ink-muted);
+  border-color: var(--eos-line-strong);
+}
+.btn-edit-action--reset:hover { background: var(--eos-bg-soft); color: var(--eos-danger); border-color: var(--eos-danger-border); }
+
+/* Edit mode banner */
+.edit-mode-banner {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 14px; border-radius: var(--r-sm);
+  background: #fffbeb; border: 1px solid #fcd34d;
+  color: #78350f; font-size: 12.5px; margin-bottom: 12px;
+}
+.edit-mode-banner-icon { font-size: 15px; flex-shrink: 0; }
+
+/* Room block edit highlight */
+.room-block--edit { border-color: #fcd34d; }
+.room-block--edit .room-header { background: #fffdf5; }
+
+/* ── v3: Inline edit inputs ───────────────────────────────────────────────── */
+.edit-input {
+  border: 1.5px solid #d1d5db; border-radius: 4px; padding: 2px 6px;
+  font-size: 12.5px; background: #fff; color: var(--eos-ink);
+  transition: border-color 120ms, box-shadow 120ms; outline: none;
+  font-family: inherit;
+}
+.edit-input:focus {
+  border-color: var(--lab-accent);
+  box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.12);
+}
+
+.edit-input--text { min-width: 80px; max-width: 240px; }
+.edit-input--num  { width: 64px; text-align: right; -moz-appearance: textfield; }
+.edit-input--num::-webkit-inner-spin-button,
+.edit-input--num::-webkit-outer-spin-button { opacity: 0.5; }
+
+/* Room name — wider text field inside the header button */
+.edit-input--room-name { min-width: 120px; max-width: 200px; font-weight: 600; }
+/* Area label — medium text field */
+.edit-input--area-label { min-width: 100px; max-width: 180px; font-weight: 500; }
+/* Run label — fits inside the narrow label column */
+.edit-input--run-label { min-width: 100px; max-width: 160px; }
+/* Run dim — tight number column */
+.edit-input--run-dim { width: 60px; }
+/* Backsplash dimensions */
+.edit-input--bs-linear { width: 68px; }
+.edit-input--bs-height { width: 52px; }
+
+/* Run row in edit mode */
+.run-row--edit td { vertical-align: middle; }
+.run-sf--live { font-weight: 600; color: var(--lab-accent); }
+
+/* Backsplash edit inputs wrapper */
+.backsplash-edit-inputs {
+  display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap;
+}
+.backsplash-edit-sep { font-size: 12px; color: var(--eos-ink-muted); }
+
+/* ── v3: Source pills — edited/note variants ──────────────────────────────── */
+.source-pill--edited {
+  background: #fffbeb; color: #92400e; border-color: #fcd34d;
+}
+.source-pill--edit-note {
+  background: transparent; color: var(--eos-ink-faint);
+  border: 1px solid transparent; font-size: 11px; padding: 2px 6px;
+  border-radius: 9999px; white-space: nowrap;
+}
+
+/* Workbench status — edited state */
+.workbench-status-edited { color: #d97706; font-weight: 500; }
+
 /* ── Responsive ───────────────────────────────────────────────────────────── */
 @media (max-width: 600px) {
   .lab-topbar-inner { padding: 0 16px; }

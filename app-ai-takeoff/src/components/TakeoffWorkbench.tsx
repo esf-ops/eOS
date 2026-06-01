@@ -1,27 +1,27 @@
 /**
- * TakeoffWorkbench — pasted JSON workbench panel.
+ * TakeoffWorkbench — JSON workbench panel (v3).
  *
- * Provides:
- *   - "Load Spec 73 sample" → fills textarea with the known-good fixture JSON
- *   - Textarea for pasting any TakeoffResult JSON
- *   - "Validate takeoff" → triggers parse + compute + validate + import-plan
- *   - "Reset" → clears textarea + restores Spec 73
- *   - "Copy computed summary" → copies formatted sf/diagnostics summary to clipboard
- *   - Parse error display (friendly, non-crashing)
+ * Buttons:
+ *   - Load Spec 73 sample → fills textarea + resets to spec73
+ *   - Validate takeoff    → parse + compute + validate + import-plan
+ *   - Reset               → clears textarea + restores Spec 73 ("Reset all")
+ *   - Copy summary        → copies computed sf/diagnostics summary
+ *   - Copy edited JSON    → copies current editDraft as JSON (shown when applicable)
  */
 import React from "react";
-import type { SourceMode } from "../TakeoffLabApp";
+import type { DisplayMode } from "../TakeoffLabApp";
 
 interface Props {
   pastedDraft: string;
   onDraftChange: (s: string) => void;
   onLoadSample: () => void;
   onValidate: () => void;
-  onReset: () => void;
+  onResetAll: () => void;
   onCopySummary: () => void;
+  onCopyEditedJson: () => void;
   parseError: string | null;
-  copyFeedback: boolean;
-  sourceMode: SourceMode;
+  copyFeedback: "summary" | "json" | null;
+  displayMode: DisplayMode;
 }
 
 export default function TakeoffWorkbench({
@@ -29,13 +29,15 @@ export default function TakeoffWorkbench({
   onDraftChange,
   onLoadSample,
   onValidate,
-  onReset,
+  onResetAll,
   onCopySummary,
+  onCopyEditedJson,
   parseError,
   copyFeedback,
-  sourceMode
+  displayMode,
 }: Props) {
   const charCount = pastedDraft.length;
+  const showEditedJson = displayMode === "edited" || displayMode === "pasted" || displayMode === "spec73";
 
   return (
     <div className="workbench-card lab-card">
@@ -52,18 +54,29 @@ export default function TakeoffWorkbench({
         <div className="workbench-toolbar-right">
           <button
             className="btn-wb btn-wb--ghost"
-            onClick={onReset}
+            onClick={onResetAll}
             type="button"
-            aria-label="Reset to Spec 73"
+            aria-label="Reset all to Spec 73"
+            title="Reset all — restores Spec 73 sample and clears edits"
           >
-            Reset
+            Reset all
           </button>
+          {showEditedJson && (
+            <button
+              className={`btn-wb btn-wb--copy${copyFeedback === "json" ? " btn-wb--copied" : ""}`}
+              onClick={onCopyEditedJson}
+              type="button"
+              title="Copy current TakeoffResult JSON (including any edits)"
+            >
+              {copyFeedback === "json" ? "✓ Copied JSON" : "Copy edited JSON"}
+            </button>
+          )}
           <button
-            className={`btn-wb btn-wb--copy${copyFeedback ? " btn-wb--copied" : ""}`}
+            className={`btn-wb btn-wb--copy${copyFeedback === "summary" ? " btn-wb--copied" : ""}`}
             onClick={onCopySummary}
             type="button"
           >
-            {copyFeedback ? "✓ Copied" : "Copy summary"}
+            {copyFeedback === "summary" ? "✓ Copied" : "Copy summary"}
           </button>
           <button className="btn-wb btn-wb--primary" onClick={onValidate} type="button">
             Validate takeoff
@@ -74,7 +87,11 @@ export default function TakeoffWorkbench({
       {/* Textarea */}
       <div className="workbench-textarea-wrap">
         <textarea
-          className={`workbench-textarea${sourceMode === "invalid" ? " workbench-textarea--error" : sourceMode === "pasted" ? " workbench-textarea--ok" : ""}`}
+          className={`workbench-textarea${
+            displayMode === "invalid" ? " workbench-textarea--error" :
+            displayMode === "pasted"  ? " workbench-textarea--ok" :
+            ""
+          }`}
           value={pastedDraft}
           onChange={(e) => onDraftChange(e.target.value)}
           spellCheck={false}
@@ -86,10 +103,13 @@ export default function TakeoffWorkbench({
         />
         <div className="workbench-textarea-footer">
           <span className="workbench-char-count">{charCount > 0 ? `${charCount.toLocaleString()} chars` : "Empty"}</span>
-          {sourceMode === "pasted" && !parseError && (
+          {displayMode === "pasted" && !parseError && (
             <span className="workbench-status-ok">✓ Valid — displayed below</span>
           )}
-          {sourceMode === "spec73" && (
+          {displayMode === "edited" && (
+            <span className="workbench-status-edited">✎ Edited draft — use "Copy edited JSON" to export</span>
+          )}
+          {displayMode === "spec73" && (
             <span className="workbench-status-info">Spec 73 sample active</span>
           )}
         </div>
