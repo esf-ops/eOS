@@ -179,7 +179,7 @@ Contract-first foundation for AI Takeoff — pure functions, no UI, no AI API ca
 | `fixtures/spec73.fixture.mjs` — Spec 73 known-good fixture | **Built** |
 | `takeoff.contract.test.mjs` — 16 test groups | **Built, all passing** |
 | `docs/eliteos/ai-takeoff-foundation.md` | **Written** |
-| `app-ai-takeoff/` UI head | **Not built** |
+| `app-ai-takeoff/` lab shell | **Built** — fixture/reviewer only (2026-06-01) |
 | Live AI API extraction | **Not built** |
 | Internal Estimate "Import from Takeoff" button | **Not built** |
 | Supabase storage for takeoff jobs/results | **Not built** |
@@ -201,9 +201,13 @@ npm run eos:check:local             # full repo check
 ### Durable decision
 See `FEATURE_DECISIONS.md` entry **48** (contract-first, AI-not-authority, separate head).
 
+### Lab shell (built 2026-06-01)
+`app-ai-takeoff/` exists as a **read-only fixture viewer**. Dev: `npm run dev --prefix app-ai-takeoff` → `http://localhost:5186`. Build: `npm run eos:build:ai-takeoff`. Not registered in Home Launcher yet.
+
 ### Next slice (requires separate approval)
 1. Wire a real AI call (vision model) to produce a `TakeoffResult` draft from an uploaded plan image/PDF.
-2. Or: Build the `app-ai-takeoff/` lab head UI — plan upload → draft review → validator display → approve/reject.
+2. Extend `app-ai-takeoff/` to accept uploaded plan files and display AI-extracted drafts through the existing validator/import-preview UI.
+3. Enable the "Import to Internal Estimate" action once approved (no Internal Estimate UI changes until this slice).
 
 ---
 

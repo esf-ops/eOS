@@ -110,6 +110,27 @@ The validator passes this fixture with zero errors. Run: `npm run eos:test:takeo
 
 ---
 
+## AI Takeoff Lab v1 shell (`app-ai-takeoff/`)
+
+**Status:** Built 2026-06-01. Fixture/reviewer only.
+
+The lab head is a **read-only review UI**. It:
+- Loads the Spec 73 fixture at startup (no file upload, no API call)
+- Runs `computeTakeoffMeasurements`, `validateTakeoffResult`, and `planTakeoffImport` locally
+- Displays measurement summary cards, room/area/run table, validator diagnostics, and import plan
+- Shows a **disabled** "Import to Internal Estimate — coming later" button explaining the boundary
+- Does **not** write data anywhere, does not call the Brain API, does not touch Internal Estimate
+
+Cross-app dependency note: `app-ai-takeoff/vite.config.ts` aliases `@takeoff-core` →
+`backend-core/src/takeoff/`. The takeoff modules are pure ESM with no Node.js builtins — vite
+bundles them cleanly. `fs.allow: [repoRoot]` enables cross-workspace resolution during dev.
+TypeScript ambient declarations are in `src/takeoff.d.ts`.
+
+The lab head is **not registered in Home Launcher** in v1. It is a local dev/lab tool only.
+Dev server: `npm run dev --prefix app-ai-takeoff` → `http://localhost:5186`.
+
+---
+
 ## Files shipped (this slice)
 
 ```
@@ -122,13 +143,31 @@ backend-core/src/takeoff/
   fixtures/
     spec73.fixture.mjs         Known-good Spec 73 fixture
 
+app-ai-takeoff/                Lab head shell (v1 — fixture viewer only)
+  index.html
+  package.json
+  vite.config.ts               @takeoff-core alias → backend-core/src/takeoff/
+  tsconfig.json
+  src/
+    main.tsx
+    TakeoffLabApp.tsx           Top-level shell
+    takeoff.d.ts                Ambient type declarations for .mjs imports
+    components/
+      TakeoffSummaryCards.tsx
+      TakeoffRoomsReview.tsx
+      TakeoffDiagnosticsPanel.tsx
+      TakeoffImportPreview.tsx
+    styles.css
+
 docs/eliteos/
   ai-takeoff-foundation.md     This document
 ```
 
-Test script added to `package.json`:
+Scripts added to root `package.json`:
 ```
-npm run eos:test:takeoff-contract
+npm run eos:test:takeoff-contract   # contract tests
+npm run eos:build:ai-takeoff        # build the lab head
+# eos:check:local now includes eos:build:ai-takeoff at the end
 ```
 
 ---
