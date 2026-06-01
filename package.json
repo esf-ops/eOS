@@ -38,6 +38,7 @@
     "eos:moraware:run-scheduled-pipeline": "node backend-core/src/scripts/moraware/runScheduledMorawarePipeline.js",
     "eos:moraware:verify-tiny-mapping": "node backend-core/src/scripts/moraware/verifyTinySnapshotMapping.mjs",
     "eos:moraware:report-feed-poc": "node backend-core/src/scripts/moraware/importReportFeedPoc.js",
+    "eos:test:pricing-authority": "node backend-core/src/quotes/pricingAuthority.contract.test.mjs",
     "eos:test:moraware-report-feed": "node backend-core/src/moraware/reportFeeds/reportFeedParser.test.mjs",
     "eos:test:moraware-report-feed-promotion": "node backend-core/src/moraware/reportFeeds/promoteSalesWorksheetFacts.test.mjs",
     "eos:test:moraware-report-feed-persistence": "node backend-core/src/moraware/reportFeeds/reportFeedPersistence.test.mjs",

@@ -1,0 +1,281 @@
+/**
+ * Pricing authority contract tests — lock current behavior before Pricing Admin resolver cutover.
+ *
+ * Live math: quoteCalculator.js + legacy quote_pricing_structures / quote_pricing_rules (when installed).
+ * Pricing Admin foundation tables are NOT wired to calculateQuote() yet.
+ *
+ * Run: npm run eos:test:pricing-authority
+ */
+import assert from "node:assert/strict";
+
+import {
+  applyRetailProtection,
+  calculateQuote,
+  directPricePerSqftForGroup,
+  ESF_DIRECT_PRICE_PER_SQFT,
+  normalizePrototypeQuoteInput,
+  PROTOTYPE_TIER_PRICE_PER_SQFT,
+  resolvePricingStructure
+} from "./quoteCalculator.js";
+
+const PARTNER_STRUCTURE_ID = "11111111-1111-1111-1111-111111111111";
+const PARTNER_ACCOUNT_ID = "22222222-2222-2222-2222-222222222222";
+
+/** Minimal partner/dealer structure for injected pricing context. */
+function partnerStructure(overrides = {}) {
+  return {
+    id: PARTNER_STRUCTURE_ID,
+    code: "dealer_tier_1",
+    name: "Dealer tier 1 (test)",
+    pricing_mode: "dealer",
+    retail_markup_percent: 0,
+    is_active: true,
+    ...overrides
+  };
+}
+
+/** Single material_group rule row (legacy quote_pricing_rules shape). */
+function materialGroupRule(groupName, pricePerSqft) {
+  return {
+    category: "material_group",
+    item_code: `GROUP_${groupName.replace(/\s+/g, "_").toUpperCase()}`,
+    item_name: groupName,
+    unit_type: "per_sqft",
+    price: pricePerSqft,
+    is_active: true
+  };
+}
+
+function internalLegacyInput(overrides = {}) {
+  return {
+    quoteSource: "internal_quote",
+    engine: "legacy",
+    materialGroup: "Group Promo",
+    areas: { countertopSqft: 10, backsplashSqft: 0 },
+    addOns: {},
+    ...overrides
+  };
+}
+
+function publicLegacyInput(overrides = {}) {
+  return {
+    quoteSource: "public_retail",
+    engine: "legacy",
+    materialGroup: "Group Promo",
+    areas: { countertopSqft: 10, backsplashSqft: 0 },
+    addOns: {},
+    ...overrides
+  };
+}
+
+function injectedPricingContext({ structure, rules }) {
+  return {
+    structure,
+    rules,
+    effectiveRetailMarkupPercent:
+      structure.pricing_mode === "public_retail"
+        ? Math.max(Number(structure.retail_markup_percent) || 0, 25)
+        : Number(structure.retail_markup_percent) || 0
+  };
+}
+
+// ── A. internal_quote never applies public/partner markup ─────────────────────
+
+{
+  const normalized = normalizePrototypeQuoteInput({
+    quoteSource: "internal_quote",
+    retailMarkupPercent: 40,
+    retailMethod: "Markup Percent"
+  });
+  assert.equal(normalized.retailMarkupPercent, 0, "internal: client markup percent stripped at normalize");
+  assert.equal(normalized.retailMethod, "Pass Through", "internal: retail method forced to Pass Through");
+
+  const calc = await calculateQuote(
+    internalLegacyInput({ retailMarkupPercent: 50, retailMethod: "Markup Percent" }),
+    injectedPricingContext({
+      structure: partnerStructure({ pricing_mode: "internal" }),
+      rules: [materialGroupRule("Group Promo", 45)]
+    })
+  );
+
+  assert.equal(calc.totals.wholesale, calc.totals.retail, "internal: retail equals wholesale (no markup layer)");
+  assert.equal(calc.totals.profit, 0, "internal: zero profit from markup");
+  assert.equal(calc.pricing.appliedRetailMarkupPercent, 0, "internal: applied retail markup percent is 0");
+  assert.equal(
+    calc.snapshot.internal_estimate_math?.no_partner_or_public_markup_percent,
+    true,
+    "internal: snapshot flags no partner/public markup"
+  );
+  console.log("ok: internal_quote never applies public/partner markup");
+}
+
+// ── B. internal Direct basis uses ESF Direct constants (current authority) ───
+
+{
+  // Authority today: directPricePerSqftForGroup / ESF_DIRECT_PRICE_PER_SQFT — not quote_price_group_rates.
+  const expectedRate = ESF_DIRECT_PRICE_PER_SQFT["Group Promo"];
+  assert.equal(directPricePerSqftForGroup("Group Promo"), expectedRate);
+  assert.equal(expectedRate, 70, "ESF Direct Group Promo is $70/sf in constants");
+
+  const wholesaleRulePrice = 99;
+  const calc = await calculateQuote(
+    internalLegacyInput({ internalMaterialBasis: "direct" }),
+    injectedPricingContext({
+      structure: partnerStructure({ pricing_mode: "internal" }),
+      rules: [materialGroupRule("Group Promo", wholesaleRulePrice)]
+    })
+  );
+
+  const expectedMaterial = 10 * expectedRate;
+  assert.equal(calc.totals.wholesale, expectedMaterial, "internal Direct: uses ESF Direct $/sf, ignores wholesale rule price");
+  console.log("ok: internal Direct basis uses ESF Direct constants");
+}
+
+// ── C. internal Wholesale uses quote_pricing_rules when provided ───────────────
+
+{
+  const rulePrice = 88;
+  const calcWithRules = await calculateQuote(
+    internalLegacyInput({ internalMaterialBasis: "wholesale" }),
+    injectedPricingContext({
+      structure: partnerStructure({ pricing_mode: "dealer" }),
+      rules: [materialGroupRule("Group Promo", rulePrice)]
+    })
+  );
+  assert.equal(calcWithRules.totals.wholesale, 10 * rulePrice, "internal Wholesale: material from provided quote_pricing_rules");
+
+  const prototypeRate = PROTOTYPE_TIER_PRICE_PER_SQFT["Group Promo"];
+  const calcFallback = await calculateQuote(
+    internalLegacyInput({ internalMaterialBasis: "wholesale" }),
+    injectedPricingContext({
+      structure: partnerStructure({ pricing_mode: "dealer" }),
+      rules: []
+    })
+  );
+  assert.equal(
+    calcFallback.totals.wholesale,
+    10 * prototypeRate,
+    "internal Wholesale: empty rules fall back to PROTOTYPE_TIER_PRICE_PER_SQFT constants"
+  );
+  console.log("ok: internal Wholesale uses rules path with explicit prototype fallback");
+}
+
+// ── D. public_retail enforces minimum 25% markup ─────────────────────────────
+
+{
+  const directSubtotal = 10 * ESF_DIRECT_PRICE_PER_SQFT["Group Promo"];
+  const protectedLow = applyRetailProtection({
+    wholesale: directSubtotal,
+    retailMarkupPercent: 10,
+    pricingMode: "public_retail"
+  });
+  assert.equal(protectedLow.appliedMarkupPercent, 25, "applyRetailProtection: floors below-min markup to 25%");
+  assert.equal(protectedLow.enforcedMin, true, "applyRetailProtection: records min enforcement");
+  assert.equal(protectedLow.retail, directSubtotal * 1.25, "applyRetailProtection: retail uses 25% floor");
+
+  const calc = await calculateQuote(
+    publicLegacyInput({ retailMarkupPercent: 10 }),
+    {
+      structure: {
+        id: "pub-1",
+        code: "public_retail",
+        name: "Public retail (test)",
+        pricing_mode: "public_retail",
+        retail_markup_percent: 10
+      },
+      rules: [materialGroupRule("Group Promo", 999)],
+      // Simulate resolvePricingStructure passing through sub-min structure markup before calculator floor.
+      effectiveRetailMarkupPercent: 10
+    }
+  );
+
+  assert.equal(calc.totals.wholesale, directSubtotal, "public: wholesale stores Direct subtotal before markup");
+  assert.equal(calc.totals.retail, directSubtotal * 1.25, "public: retail applies 25% minimum markup");
+  assert.equal(calc.pricing.appliedRetailMarkupPercent, 25, "public: applied markup percent is floored to 25");
+  assert.ok(
+    calc.warnings.some((w) => String(w).includes("25%")),
+    "public: warns when markup raised to minimum"
+  );
+
+  const internalCheck = await calculateQuote(
+    internalLegacyInput({ retailMarkupPercent: 10 }),
+    injectedPricingContext({
+      structure: partnerStructure({ pricing_mode: "dealer", retail_markup_percent: 10 }),
+      rules: [materialGroupRule("Group Promo", 45)]
+    })
+  );
+  assert.equal(internalCheck.totals.profit, 0, "public floor does not affect internal_quote profit");
+  console.log("ok: public_retail enforces minimum 25% markup");
+}
+
+// ── E. partner_quote resolvePricingStructure fails closed on DB errors ────────
+
+{
+  const structureRow = {
+    id: PARTNER_STRUCTURE_ID,
+    code: "dealer_tier_1",
+    name: "Assigned structure",
+    pricing_mode: "dealer",
+    retail_markup_percent: 0,
+    is_active: true
+  };
+
+  /** Supabase-style chain mock: structure load succeeds; rules query rejects (no .limit on rules). */
+  function makePartnerDbThatThrowsOnRules() {
+    return {
+      from(table) {
+        const chain = {
+          select() {
+            return chain;
+          },
+          eq(col, val) {
+            if (table === "quote_pricing_rules" && col === "is_active") {
+              return Promise.reject(new Error("simulated rules load failure"));
+            }
+            return chain;
+          },
+          order() {
+            return chain;
+          },
+          limit() {
+            if (table === "quote_pricing_structures") {
+              return Promise.resolve({ data: [structureRow], error: null });
+            }
+            return Promise.resolve({ data: [], error: null });
+          }
+        };
+        return chain;
+      }
+    };
+  }
+
+  await assert.rejects(
+    () =>
+      resolvePricingStructure({
+        quoteSource: "partner_quote",
+        partnerAccountId: PARTNER_ACCOUNT_ID,
+        requestedPricingStructureId: PARTNER_STRUCTURE_ID,
+        db: makePartnerDbThatThrowsOnRules()
+      }),
+    (err) => err instanceof Error && /simulated rules load failure/.test(err.message),
+    "partner_quote: unexpected DB error must throw (fail closed), not silently use prototype pricing"
+  );
+
+  const internalOnError = await resolvePricingStructure({
+    quoteSource: "internal_quote",
+    partnerAccountId: PARTNER_ACCOUNT_ID,
+    db: makePartnerDbThatThrowsOnRules()
+  });
+  assert.equal(
+    internalOnError.fallbackCode,
+    "PROTOTYPE_V101",
+    "internal_quote: same DB error may fall back to prototype (not fail closed)"
+  );
+
+  console.log("ok: partner_quote resolvePricingStructure fails closed on DB errors");
+}
+
+// TODO(partner-pricing-e2e): Full POST /api/partner-quote/calculate harness with auth + assignment
+// requires Express/Supabase integration fixtures. Contract above covers fail-closed resolver behavior only.
+
+console.log("\npricingAuthority.contract: all tests passed");
