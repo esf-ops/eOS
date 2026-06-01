@@ -844,70 +844,52 @@ export default function RoomScopeBuilder({
                       <strong>eliteOS pricing:</strong> Chargeable counter SF rounds up from exact measured SF. Backsplash uses exact
                       SF. Use <strong>gross runs</strong> when matching a quote measured by total run length.
                     </div>
-                    <div className="ie-shape-group-add-row">
-                      <span className="ie-shape-group-add-label">Quick add</span>
-                      {enableDestructiveGuards ? (
-                        <div className="ie-shape-group-add-cluster ie-shape-group-add-cluster--presets" role="group" aria-label="Pre-filled kitchen presets">
-                          <span className="ie-shape-group-add-cluster-tag" aria-hidden>Presets</span>
-                          <button
-                            type="button"
-                            className="btn secondary btn-sm ie-preset-btn"
-                            title="Pre-filled stove wall with main run + filler — edit lengths after adding"
-                            onClick={() => appendShapeGroupPreset(room.id, "stove_wall")}
-                          >
-                            + Kitchen stove wall
-                          </button>
-                          <button
-                            type="button"
-                            className="btn secondary btn-sm ie-preset-btn"
-                            title="Pre-filled kitchen U-shape: main run + left leg + right leg — edit lengths after adding"
-                            onClick={() => appendShapeGroupPreset(room.id, "main_u")}
-                          >
-                            + Kitchen U-shape
-                          </button>
-                        </div>
-                      ) : null}
-                      <div className="ie-shape-group-add-cluster ie-shape-group-add-cluster--shapes" role="group" aria-label="Add a blank shape">
-                        <span className="ie-shape-group-add-cluster-tag" aria-hidden>Add shape</span>
-                        <button
-                          type="button"
-                          className="btn secondary btn-sm ie-preset-btn"
-                          title="Add a blank single-run area"
-                          onClick={() => appendShapeGroup(room.id, "straight")}
-                        >
-                          + Straight run
-                        </button>
-                        <button
-                          type="button"
-                          className="btn secondary btn-sm ie-preset-btn"
-                          title="Add a blank L-shape — fill in two run lengths"
-                          onClick={() => appendShapeGroup(room.id, "L-Shape")}
-                        >
-                          + L-shape
-                        </button>
-                        <button
-                          type="button"
-                          className="btn secondary btn-sm ie-preset-btn"
-                          title="Add a blank U-shape — fill in main run + two legs (no preset lengths)"
-                          onClick={() => appendShapeGroup(room.id, "U-Shape")}
-                        >
-                          + U-shape (blank)
-                        </button>
-                        <button
-                          type="button"
-                          className="btn secondary btn-sm ie-preset-btn"
-                          title="Add a blank island area"
-                          onClick={() => appendShapeGroup(room.id, "Island")}
-                        >
-                          + Island
-                        </button>
-                      </div>
+                    <div className="ie-shape-group-add-row" role="group" aria-label="Add a shape to this room">
+                      <button
+                        type="button"
+                        className="btn secondary btn-sm ie-preset-btn"
+                        title="Add a single-run area"
+                        onClick={() => appendShapeGroup(room.id, "straight")}
+                      >
+                        + Straight run
+                      </button>
+                      <button
+                        type="button"
+                        className="btn secondary btn-sm ie-preset-btn"
+                        title="Add an L-shape — fill in two run lengths"
+                        onClick={() => appendShapeGroup(room.id, "L-Shape")}
+                      >
+                        + L-shape
+                      </button>
+                      <button
+                        type="button"
+                        className="btn secondary btn-sm ie-preset-btn"
+                        title="Add a U-shape — fill in main run + two legs"
+                        onClick={() => appendShapeGroup(room.id, "U-Shape")}
+                      >
+                        + U-shape
+                      </button>
+                      <button
+                        type="button"
+                        className="btn secondary btn-sm ie-preset-btn"
+                        title="Add an island area"
+                        onClick={() => appendShapeGroup(room.id, "Island")}
+                      >
+                        + Island
+                      </button>
                     </div>
                     {(() => {
                       const norm = normalizeGuidedShapeRoom(room);
                       const groups = norm.guidedShapeGroups || [];
                       const selectedId = selectedGroupByRoom[room.id] || groups[groups.length - 1]?.id;
-                      return groups.map((grp) => {
+                      return (
+                        <>
+                          {!groups.length ? (
+                            <p className="muted small" style={{ margin: "12px 0 4px" }}>
+                              No counter areas added yet. Add a shape above to begin measuring this room.
+                            </p>
+                          ) : null}
+                          {groups.map((grp) => {
                         const gPrev = groupTotalsPreview(grp);
                         const isSelected = grp.id === selectedId;
                         return (
@@ -1138,7 +1120,9 @@ export default function RoomScopeBuilder({
                             </div>
                           </div>
                         );
-                      });
+                          })}
+                        </>
+                      );
                     })()}
                     <details className="ie-layout-preview">
                       <summary className="muted small">Layout preview (diagram only)</summary>

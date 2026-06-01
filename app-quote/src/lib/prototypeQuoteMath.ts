@@ -1799,29 +1799,11 @@ export function createEstimatorRoom(materialGroup: string): RoomDraft {
   const r = createDefaultRoom(materialGroup);
   r.name = "Room / Area";
   r.guidedLayoutPreset = null;
-  const starter: GuidedPiece = {
-    id: newId(),
-    pieceType: "counter",
-    name: "Main run",
-    lengthIn: 0,
-    depthIn: STANDARD_COUNTER_DEPTH_IN,
-    shape: "rect",
-    addSplash: true
-  };
   return normalizeGuidedShapeRoom({
     ...r,
     calcMode: "Guided Shape",
-    guidedPieces: [{ ...starter, addSplash: false }],
-    guidedShapeGroups: [
-      {
-        id: newId(),
-        name: "Straight run",
-        shapeType: "straight",
-        overlapMode: "auto",
-        backsplashMode: "include",
-        pieces: [{ ...starter, addSplash: false }]
-      }
-    ]
+    guidedPieces: [],
+    guidedShapeGroups: []
   });
 }
 

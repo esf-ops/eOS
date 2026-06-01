@@ -211,7 +211,8 @@ export function createGuidedShapeGroup(shapeType: GuidedShapeGroupType, name?: s
 export function appendGuidedShapeGroup(room: RoomDraft, shapeType: GuidedShapeGroupType, customName?: string): RoomDraft {
   const norm = normalizeGuidedShapeRoom(room);
   const groups = [...(norm.guidedShapeGroups || [])];
-  const next = createGuidedShapeGroup(shapeType, customName, groups.length);
+  const sameTypeCount = groups.filter((g) => g.shapeType === shapeType).length;
+  const next = createGuidedShapeGroup(shapeType, customName, sameTypeCount);
   groups.push(next);
   return normalizeGuidedShapeRoom({ ...norm, guidedShapeGroups: groups, calcMode: "Guided Shape" });
 }
