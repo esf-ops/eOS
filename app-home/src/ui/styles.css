@@ -130,8 +130,9 @@ a {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 14px 28px;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  padding: 12px 28px;
   background: rgba(255, 255, 255, 0.74);
   backdrop-filter: saturate(180%) blur(14px);
   -webkit-backdrop-filter: saturate(180%) blur(14px);
@@ -383,6 +384,30 @@ a {
   z-index: 0;
 }
 
+/* Ambient cursor spotlight — follows pointer inside the hero panel.
+   Set via CSS vars on the .hero element by handleHeroPointerMove().
+   pointer-events: none ensures it never blocks clicks or text selection. */
+.hero-spotlight {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(
+    600px circle at var(--spotlight-x, 50%) var(--spotlight-y, 30%),
+    rgba(255, 255, 255, 0.13) 0%,
+    rgba(163, 19, 47, 0.04) 40%,
+    transparent 70%
+  );
+  opacity: var(--spotlight-opacity, 0);
+  transition: opacity 700ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-spotlight {
+    display: none;
+  }
+}
+
 /* ----- Workspace identity panel (right side of hero) -------------------- */
 
 .hero-workspace {
@@ -548,24 +573,26 @@ a {
   gap: 14px;
 }
 
-/* ----- Launcher search bar ---------------------------------------------- */
+/* ----- Top-nav search bar ----------------------------------------------- */
 
-.launcher-search-bar {
+.topbar-search-wrap {
   position: relative;
   display: flex;
   align-items: center;
-  max-width: 460px;
-  margin: 0 0 28px;
-  background: var(--eos-surface);
+  flex: 1 1 160px;
+  min-width: 140px;
+  max-width: 260px;
+  background: rgba(11, 26, 51, 0.04);
   border: 1px solid var(--eos-line-strong);
   border-radius: var(--r-md);
-  box-shadow: var(--sh-1);
   transition:
     border-color var(--eos-dur-1) var(--eos-ease),
-    box-shadow var(--eos-dur-1) var(--eos-ease);
+    box-shadow var(--eos-dur-1) var(--eos-ease),
+    background var(--eos-dur-1) var(--eos-ease);
 }
 
-.launcher-search-bar:focus-within {
+.topbar-search-wrap:focus-within {
+  background: var(--eos-surface);
   border-color: var(--eos-accent);
   box-shadow: 0 0 0 3px var(--eos-accent-ring);
 }
@@ -585,8 +612,8 @@ a {
   border: none;
   outline: none;
   background: transparent;
-  padding: 10px 40px 10px 38px;
-  font-size: 0.9rem;
+  padding: 8px 36px 8px 36px;
+  font-size: 0.86rem;
   font-family: inherit;
   color: var(--eos-ink);
   border-radius: inherit;
@@ -1569,16 +1596,13 @@ a {
 
 @media (max-width: 720px) {
   .topbar {
-    padding: 12px 16px;
+    padding: 10px 16px;
   }
   .topbar-account {
     display: none;
   }
   .main {
     padding: 20px 16px 40px;
-  }
-  .launcher-search-bar {
-    max-width: 100%;
   }
   .hero {
     padding: 28px 22px 24px;
@@ -1606,6 +1630,15 @@ a {
   }
   .slab-wordmark {
     font-size: 2.4rem;
+  }
+}
+
+/* Search bar wraps to its own row below brand + user chip on narrow screens */
+@media (max-width: 560px) {
+  .topbar-search-wrap {
+    order: 10;
+    flex-basis: 100%;
+    max-width: 100%;
   }
 }
 

@@ -614,6 +614,7 @@ export default function App() {
   // Home user menu dropdown
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
+  const heroRef = useRef<HTMLElement>(null);
 
   // Profile & Preferences view state
   const [view, setView] = useState<"launcher" | "profile">(() => {
@@ -900,6 +901,22 @@ export default function App() {
     setInvitePwErr("");
   }
 
+  function handleHeroPointerMove(e: React.PointerEvent<HTMLElement>) {
+    if (e.pointerType === "touch") return;
+    const el = heroRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * 100;
+    const y = ((e.clientY - rect.top) / rect.height) * 100;
+    el.style.setProperty("--spotlight-x", `${x}%`);
+    el.style.setProperty("--spotlight-y", `${y}%`);
+    el.style.setProperty("--spotlight-opacity", "1");
+  }
+
+  function handleHeroPointerLeave() {
+    heroRef.current?.style.setProperty("--spotlight-opacity", "0");
+  }
+
   const assignableHeads = useMemo(() => {
     const hs = headsPayload?.heads ?? [];
     return hs.filter((h) => h.slug !== "public_quote" && h.enabled);
@@ -988,6 +1005,35 @@ export default function App() {
               <span className="brand-sub">{workspaceName}</span>
             </span>
           </a>
+          <div className="topbar-search-wrap" role="search">
+            <span className="launcher-search-icon" aria-hidden>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="7" />
+                <path d="m21 21-4.35-4.35" />
+              </svg>
+            </span>
+            <input
+              type="search"
+              className="launcher-search-input"
+              placeholder="Find a head…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              aria-label="Find a head"
+              autoComplete="off"
+            />
+            {searchQuery ? (
+              <button
+                type="button"
+                className="launcher-search-clear"
+                onClick={() => setSearchQuery("")}
+                aria-label="Clear search"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+              </button>
+            ) : null}
+          </div>
           <div className="topbar-actions">
             <div className="home-user-menu-wrap" ref={userMenuRef}>
               <button
@@ -1024,7 +1070,7 @@ export default function App() {
                   <div className="home-user-menu-header">
                     <p className="home-user-menu-display-name">{displayName}</p>
                     {displayEmail ? <p className="home-user-menu-email">{displayEmail}</p> : null}
-                    <p className="home-user-menu-workspace">Workspace · {workspaceName} · on slabOS</p>
+                    <p className="home-user-menu-workspace">Workspace · {workspaceName} · on eliteOS</p>
                   </div>
 
                   <div className="home-user-menu-body">
@@ -1108,7 +1154,7 @@ export default function App() {
               <div className="slab-tenant-line" aria-label="Current workspace">
                 <span className="slab-tenant-dot" aria-hidden />
                 <span className="slab-tenant-text">
-                  <strong>Elite Stone Fabrication</strong> runs on slabOS
+                  <strong>Elite Stone Fabrication</strong> on eliteOS
                 </span>
               </div>
             </section>
@@ -1226,7 +1272,13 @@ export default function App() {
           />
         ) : (
           <>
-            <section className="hero" aria-labelledby="hero-greeting">
+            <section
+              className="hero"
+              aria-labelledby="hero-greeting"
+              ref={heroRef}
+              onPointerMove={handleHeroPointerMove}
+              onPointerLeave={handleHeroPointerLeave}
+            >
               <div className="hero-grid">
                 <div className="hero-inner">
                   <p className="hero-eyebrow">Workspace · {workspaceName}</p>
@@ -1278,11 +1330,12 @@ export default function App() {
                   </div>
                   <div className="hero-workspace-name">{workspaceName}</div>
                   <div className="hero-workspace-meta">
-                    <span className="hero-workspace-platform">on slabOS</span>
+                    <span className="hero-workspace-platform">on eliteOS</span>
                   </div>
                 </aside>
               </div>
               <div className="hero-aurora" aria-hidden />
+              <div className="hero-spotlight" aria-hidden />
             </section>
 
             {loadError ? (
@@ -1337,38 +1390,6 @@ export default function App() {
                     <p className="empty-sub">Ask your eliteOS administrator for the tools you need.</p>
                   </>
                 )}
-              </div>
-            ) : null}
-
-            {(availableCount + roadmapCount) > 0 && !loadingData ? (
-              <div className="launcher-search-bar" role="search">
-                <span className="launcher-search-icon" aria-hidden>
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="11" cy="11" r="7" />
-                    <path d="m21 21-4.35-4.35" />
-                  </svg>
-                </span>
-                <input
-                  type="search"
-                  className="launcher-search-input"
-                  placeholder="Find a head…"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  aria-label="Find a head"
-                  autoComplete="off"
-                />
-                {searchQuery ? (
-                  <button
-                    type="button"
-                    className="launcher-search-clear"
-                    onClick={() => setSearchQuery("")}
-                    aria-label="Clear search"
-                  >
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
-                      <path d="M18 6L6 18M6 6l12 12" />
-                    </svg>
-                  </button>
-                ) : null}
               </div>
             ) : null}
 
