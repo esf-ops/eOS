@@ -1698,7 +1698,9 @@ export default function InternalEstimateApp() {
     let vanityFlat = 0;
     let roomExtras = 0;
     for (const r of liveEstimate.measuredRooms) {
-      if (r.type === "Vanity") vanityFlat += Number(r.selected) || 0;
+      // Only vanity-program rooms are excluded from selectedBreakdown; standard-mode vanity rooms
+      // (isVanityProgram === false/undefined) are already in materialSubtotal — do not double-count.
+      if (r.isVanityProgram === true) vanityFlat += Number(r.selected) || 0;
       roomExtras += Number(r.extras) || 0;
     }
     const countertopMaterial = round2(bd.totals.countertopMaterial + vanityFlat);

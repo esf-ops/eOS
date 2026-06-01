@@ -278,7 +278,7 @@ function buildMaterialScopeGroups(selectedBreakdown: SelectedMaterialBreakdown):
 
 function buildVanityScopeNotes(measuredRooms: MeasuredRoom[]): CustomerVanityScopeNote[] {
   return measuredRooms
-    .filter((r) => r.type === "Vanity" && (Number(r.selected) || 0) > 0)
+    .filter((r) => r.isVanityProgram === true && (Number(r.selected) || 0) > 0)
     .map((v) => ({
       roomId: v.id,
       roomName: v.name,
@@ -346,8 +346,11 @@ export type BuildCustomerEstimateDisplayModelParams = {
 export function buildCustomerEstimateDisplayModel(
   params: BuildCustomerEstimateDisplayModelParams
 ): CustomerEstimateDisplayModel {
+  // Only true vanity-program rooms are excluded from selectedBreakdown; standard-mode vanity rooms
+  // (isVanityProgram === false/undefined) price as countertop and are already in selectedBreakdown.
+  // Using r.type === "Vanity" here would double-count any standard-mode vanity room's material.
   const vanityMaterialExact = params.measuredRooms
-    .filter((r) => r.type === "Vanity")
+    .filter((r) => r.isVanityProgram === true)
     .reduce((s, v) => s + (Number(v.selected) || 0), 0);
   const countertopMaterialExact = round2(
     params.selectedBreakdown.totals.countertopMaterial +

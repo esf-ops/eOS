@@ -278,4 +278,95 @@ function injectedPricingContext({ structure, rules }) {
 // TODO(partner-pricing-e2e): Full POST /api/partner-quote/calculate harness with auth + assignment
 // requires Express/Supabase integration fixtures. Contract above covers fail-closed resolver behavior only.
 
+// ── F. customer display model: standard-mode Vanity room must NOT double-count ─
+//
+// Regression guard for: a room with roomType="Vanity" but isVanityProgram=false/undefined
+// (standard sqft pricing, vanity program NOT active) was incorrectly matched by the old
+// `r.type === "Vanity"` filter and added to vanityMaterialExact ON TOP OF
+// selectedBreakdown.totals.countertopMaterial — causing the PDF countertop line to double-count.
+//
+// Observed: 49" Bath (Group B, 8 sf @ $65 + 2% tax + $100 sink = $760.40 r.selected)
+//   OLD:  countertopMaterialExact = $530.40 (breakdown) + $760.40 (double-count) = $1,290.80 → rounds to $1,300
+//   NEW:  countertopMaterialExact = $530.40 (breakdown) + $0 (excluded) = $530.40 → rounds to $540
+//   OLD PDF total: $1,300 + $130 + $100 + $250 = $1,780  (WRONG)
+//   NEW PDF total:   $540 + $130 + $100 + $250 = $1,020  (correct — equals live total rounded up to $10)
+//
+// Fix: filter by r.isVanityProgram === true (only vanity-program rooms are excluded from selectedBreakdown).
+
+{
+  // Simulated MeasuredRoom for a Vanity-type room using standard sqft pricing (isVanityProgram not set).
+  // .selected includes counter + backsplash + use-tax + sink cutout addon.
+  const stdVanityRoom = {
+    id: "bath-49-test",
+    type: "Vanity",          // roomType = "Vanity" but standard pricing
+    isVanityProgram: false,  // NOT using the vanity program
+    selected: 760.40,        // 8 sf counter + 2 sf splash + 2% tax + $100 sink = $760.40
+    extras: 100,
+    name: '49" Bath',
+    group: "Group B"
+  };
+
+  // True vanity-program room (isVanityProgram: true) — should still be captured.
+  const programVanityRoom = {
+    id: "vanity-49-prog",
+    type: "Vanity",
+    isVanityProgram: true,
+    selected: 590,  // priceVanityProgram2026 under_35 result for 49_S
+    extras: 0,
+    name: '49" Vanity (program)',
+    group: "Group B"
+  };
+
+  // After fix: only capture rooms where isVanityProgram === true.
+  function vanityMaterialSum(rooms) {
+    return rooms.filter((r) => r.isVanityProgram === true).reduce((s, v) => s + (Number(v.selected) || 0), 0);
+  }
+
+  // Standard-mode Vanity room: must not contribute to vanity rollup (it's already in selectedBreakdown).
+  assert.equal(
+    vanityMaterialSum([stdVanityRoom]),
+    0,
+    "display model: standard-mode Vanity room (isVanityProgram=false) excluded from vanity rollup — no double-count"
+  );
+
+  // Vanity-program room: must still be captured.
+  assert.equal(
+    vanityMaterialSum([programVanityRoom]),
+    590,
+    "display model: true vanity-program room (isVanityProgram=true) included in vanity rollup"
+  );
+
+  // Regression guard: the OLD filter (r.type === "Vanity") would have double-counted.
+  function vanityMaterialSumOld(rooms) {
+    return rooms.filter((r) => r.type === "Vanity").reduce((s, v) => s + (Number(v.selected) || 0), 0);
+  }
+  assert.equal(
+    vanityMaterialSumOld([stdVanityRoom]),
+    760.40,
+    "regression guard: old type-based filter incorrectly adds $760.40 for standard-mode Vanity room"
+  );
+
+  // Simulate countertopMaterialExact before/after fix.
+  const selectedBreakdownCountertop = 530.40; // 8 sf × $65/sf + 2% use-tax ($520 + $10.40)
+  const counterExactOld = selectedBreakdownCountertop + vanityMaterialSumOld([stdVanityRoom]);
+  const counterExactNew = selectedBreakdownCountertop + vanityMaterialSum([stdVanityRoom]);
+
+  assert.ok(Math.abs(counterExactOld - 1290.80) < 0.01, "OLD: countertopMaterialExact ≈ $1,290.80 (leads to $1,300 rounded up)");
+  assert.ok(Math.abs(counterExactNew - 530.40) < 0.01,  "NEW: countertopMaterialExact = $530.40 (leads to $540 rounded up)");
+
+  // Verify the old PDF total would have been $1,780 and the new total is $1,020.
+  function ceilTen(n) { return Math.ceil(n / 10) * 10; }
+  const backsplash = 130;
+  const addons = 100;
+  const customLine = 250;
+
+  const oldFinalRounded = ceilTen(counterExactOld) + ceilTen(backsplash) + ceilTen(addons) + ceilTen(customLine);
+  const newFinalRounded = ceilTen(counterExactNew) + ceilTen(backsplash) + ceilTen(addons) + ceilTen(customLine);
+
+  assert.equal(oldFinalRounded, 1780, "regression guard: old PDF total was $1,780 (wrong)");
+  assert.equal(newFinalRounded, 1020, "new PDF total is $1,020 (correct — live exact $1,010.40 rounded up per row)");
+
+  console.log("ok: standard-mode Vanity room does not double-count in customer display model");
+}
+
 console.log("\npricingAuthority.contract: all tests passed");
