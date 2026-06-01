@@ -275,6 +275,52 @@ function injectedPricingContext({ structure, rules }) {
   console.log("ok: partner_quote resolvePricingStructure fails closed on DB errors");
 }
 
+// ── G. Remnant Direct/Retail rate = $50/sf; no markup in internal mode ────────
+
+{
+  // Regression guard: Remnant must be in ESF_DIRECT_PRICE_PER_SQFT at $50 (not Group Promo fallback).
+  assert.equal(
+    ESF_DIRECT_PRICE_PER_SQFT["Remnant"],
+    50,
+    "Remnant: ESF_DIRECT_PRICE_PER_SQFT['Remnant'] = $50/sf"
+  );
+
+  // Wholesale fallback must also be defined (prevents silent Group Promo $45 in wholesale mode).
+  assert.equal(
+    PROTOTYPE_TIER_PRICE_PER_SQFT["Remnant"],
+    50,
+    "Remnant: PROTOTYPE_TIER_PRICE_PER_SQFT['Remnant'] = $50/sf (explicit fallback prevents Group Promo shadow)"
+  );
+
+  // Direct/Retail Internal Estimate: 10 sf Remnant → $500 material, no markup applied.
+  const calc = await calculateQuote(
+    internalLegacyInput({
+      materialGroup: "Remnant",
+      areas: { countertopSqft: 10, backsplashSqft: 0 },
+      internalMaterialBasis: "direct"
+    }),
+    injectedPricingContext({
+      structure: partnerStructure({ pricing_mode: "internal" }),
+      rules: [materialGroupRule("Group Promo", 999)] // Remnant not in rules; must use Direct constant, not fallback
+    })
+  );
+  assert.equal(calc.totals.wholesale, 500, "Remnant Direct: 10 sf × $50 = $500 material");
+  assert.equal(calc.totals.retail, 500,    "Remnant Direct: no markup on internal_quote (retail = wholesale)");
+  assert.equal(calc.totals.profit, 0,      "Remnant Direct: zero profit on internal_quote");
+
+  // Existing groups Promo–F unchanged: spot-check Group F Direct still $135/sf.
+  const calcF = await calculateQuote(
+    internalLegacyInput({ materialGroup: "Group F", areas: { countertopSqft: 10, backsplashSqft: 0 }, internalMaterialBasis: "direct" }),
+    injectedPricingContext({
+      structure: partnerStructure({ pricing_mode: "internal" }),
+      rules: []
+    })
+  );
+  assert.equal(calcF.totals.wholesale, 1350, "Group F Direct unchanged: 10 sf × $135 = $1,350");
+
+  console.log("ok: Remnant Direct $50/sf with no internal markup; existing groups unchanged");
+}
+
 // TODO(partner-pricing-e2e): Full POST /api/partner-quote/calculate harness with auth + assignment
 // requires Express/Supabase integration fixtures. Contract above covers fail-closed resolver behavior only.
 

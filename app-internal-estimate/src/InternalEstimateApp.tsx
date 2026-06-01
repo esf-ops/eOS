@@ -44,7 +44,8 @@ const MATERIAL_GROUPS = [
   "Group C",
   "Group D",
   "Group E",
-  "Group F"
+  "Group F",
+  "Remnant"
 ];
 
 const INTERNAL_ESTIMATE_WORKFLOW: QuoteWorkflowMethod = "room_by_room";

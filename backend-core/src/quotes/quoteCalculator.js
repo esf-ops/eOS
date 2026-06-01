@@ -39,7 +39,9 @@ export const ESF_DIRECT_PRICE_PER_SQFT = Object.freeze({
   "Group C": 95,
   "Group D": 105,
   "Group E": 120,
-  "Group F": 135
+  "Group F": 135,
+  // Remnant: Internal Estimate Direct/Retail remnant pricing. Not a public consumer tier.
+  "Remnant": 50
 });
 
 /** Prototype v1.01 tier $/sf (Group Promo → Group F) — partner/seed mirror; not public consumer material rates. */
@@ -50,7 +52,9 @@ export const PROTOTYPE_TIER_PRICE_PER_SQFT = Object.freeze({
   "Group C": 75,
   "Group D": 85,
   "Group E": 100,
-  "Group F": 115
+  "Group F": 115,
+  // Remnant wholesale fallback = $50 (same as Direct; prevents silent Group Promo fallback in wholesale mode).
+  "Remnant": 50
 });
 
 /** Prototype add-on unit prices (legacy global ids). */

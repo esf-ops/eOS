@@ -131,7 +131,8 @@ export const ESF_DIRECT_TIER_RATES: ReadonlyArray<{ n: string; directPerSqft: nu
   { n: "Group C", directPerSqft: 95 },
   { n: "Group D", directPerSqft: 105 },
   { n: "Group E", directPerSqft: 120 },
-  { n: "Group F", directPerSqft: 135 }
+  { n: "Group F", directPerSqft: 135 },
+  { n: "Remnant", directPerSqft: 50 }
 ];
 
 /** Prototype v1.01 tier $/sf (partner / dealer economics mirror — not public consumer material rates). */
@@ -142,7 +143,8 @@ export const PROTOTYPE_TIERS: ReadonlyArray<{ n: string; p: number }> = [
   { n: "Group C", p: 75 },
   { n: "Group D", p: 85 },
   { n: "Group E", p: 100 },
-  { n: "Group F", p: 115 }
+  { n: "Group F", p: 115 },
+  { n: "Remnant", p: 50 }
 ];
 
 export const VANITY_PRICING: Record<string, { name: string; t1: number; t2: number; b: number }> = {
