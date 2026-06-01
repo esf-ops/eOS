@@ -548,6 +548,106 @@ a {
   gap: 14px;
 }
 
+/* ----- Launcher search bar ---------------------------------------------- */
+
+.launcher-search-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  max-width: 460px;
+  margin: 0 0 28px;
+  background: var(--eos-surface);
+  border: 1px solid var(--eos-line-strong);
+  border-radius: var(--r-md);
+  box-shadow: var(--sh-1);
+  transition:
+    border-color var(--eos-dur-1) var(--eos-ease),
+    box-shadow var(--eos-dur-1) var(--eos-ease);
+}
+
+.launcher-search-bar:focus-within {
+  border-color: var(--eos-accent);
+  box-shadow: 0 0 0 3px var(--eos-accent-ring);
+}
+
+.launcher-search-icon {
+  position: absolute;
+  left: 12px;
+  color: var(--eos-ink-faint);
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+  flex-shrink: 0;
+}
+
+.launcher-search-input {
+  width: 100%;
+  border: none;
+  outline: none;
+  background: transparent;
+  padding: 10px 40px 10px 38px;
+  font-size: 0.9rem;
+  font-family: inherit;
+  color: var(--eos-ink);
+  border-radius: inherit;
+}
+
+.launcher-search-input::placeholder {
+  color: var(--eos-ink-faint);
+}
+
+/* Remove the browser's default clear button on search inputs */
+.launcher-search-input::-webkit-search-decoration,
+.launcher-search-input::-webkit-search-cancel-button,
+.launcher-search-input::-webkit-search-results-button {
+  -webkit-appearance: none;
+}
+
+.launcher-search-clear {
+  position: absolute;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(11, 26, 51, 0.08);
+  color: var(--eos-ink-mid);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background var(--eos-dur-1) var(--eos-ease);
+}
+
+.launcher-search-clear:hover {
+  background: rgba(11, 26, 51, 0.15);
+  color: var(--eos-ink);
+}
+
+.launcher-search-clear:focus-visible {
+  outline: 2px solid var(--eos-accent-ring);
+  outline-offset: 1px;
+}
+
+.launcher-search-empty {
+  margin: 8px 0 24px;
+}
+
+.launcher-search-reset {
+  padding: 0 2px;
+  font-size: inherit;
+  color: var(--eos-ink-mid);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.launcher-search-reset:hover:not(:disabled) {
+  background: transparent;
+  color: var(--eos-ink);
+}
+
 /* ----- Head card --------------------------------------------------------- */
 
 .head-card {
@@ -605,6 +705,13 @@ a {
   transform: translateY(-2px);
   box-shadow: var(--sh-card-hover);
   border-color: var(--eos-line-strong);
+}
+
+/* Reveal the top-edge accent stripe on hover / keyboard-focus */
+.head-card-available:hover::after,
+.head-card-available:focus-within::after {
+  border-top-color: var(--eos-accent);
+  opacity: 0.28;
 }
 
 .head-card-available.is-muted {
@@ -673,6 +780,21 @@ a {
   opacity: 0.72;
 }
 
+/* Category eyebrow — purely presentational, above the card title */
+.head-card-eyebrow {
+  margin: 0 0 4px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--eos-ink-faint);
+  line-height: 1;
+}
+
+.head-card-roadmap .head-card-eyebrow {
+  opacity: 0.65;
+}
+
 .head-card-title {
   margin: 0 0 6px;
   font-size: 1.04rem;
@@ -680,6 +802,7 @@ a {
   letter-spacing: -0.018em;
   color: var(--eos-ink);
   line-height: 1.25;
+  text-wrap: balance;
 }
 
 .head-card-roadmap .head-card-title {
@@ -693,6 +816,7 @@ a {
   line-height: 1.52;
   color: var(--eos-ink-mid);
   margin: 0;
+  text-wrap: pretty;
 }
 
 .desc-roadmap {
@@ -1152,6 +1276,12 @@ a {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  border-radius: var(--r-sm);
+}
+
+.access-details-summary:focus-visible {
+  outline: 2px solid var(--eos-accent-ring);
+  outline-offset: 2px;
 }
 
 .access-details-summary::-webkit-details-marker {
@@ -1447,6 +1577,9 @@ a {
   .main {
     padding: 20px 16px 40px;
   }
+  .launcher-search-bar {
+    max-width: 100%;
+  }
   .hero {
     padding: 28px 22px 24px;
     border-radius: var(--r-lg);
@@ -1582,6 +1715,12 @@ a {
 
 .home-user-chip[aria-expanded="true"] .home-user-chip-chevron {
   transform: rotate(180deg);
+}
+
+.home-user-chip:focus-visible {
+  outline: 2px solid var(--eos-accent-ring);
+  outline-offset: 2px;
+  border-radius: 24px;
 }
 
 /* Dropdown */

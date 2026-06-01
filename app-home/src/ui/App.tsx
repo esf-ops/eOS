@@ -211,6 +211,39 @@ function headTintFor(slug: string): HeadTint {
 }
 
 /**
+ * Presentational category label per head slug.
+ * Front-end only — does not affect permissions, ordering, or routing.
+ * Easy to move to a shared config or backend payload later.
+ */
+const HEAD_CATEGORY_BY_SLUG: Record<string, string> = {
+  quote: "Quote",
+  quote_library: "Quote",
+  pricing_admin: "Admin",
+  system_admin: "Admin",
+  org_directory: "Platform",
+  public_quote: "Quote",
+  executive: "Sales",
+  brain_health: "Platform",
+  sales: "Sales",
+  production: "Production",
+  shop_tv: "Production",
+  install: "Production",
+  purchasing: "Production",
+  customer_service: "Customer",
+  hr: "Admin",
+  safety: "Platform",
+  marketing: "Sales",
+  finance: "Admin",
+  reports: "Platform",
+  partner_quote: "Quote",
+  dealer_resources: "Quote",
+};
+
+function headCategoryFor(slug: string): string {
+  return HEAD_CATEGORY_BY_SLUG[slug] ?? "Platform";
+}
+
+/**
  * Inline SVG glyph for each head. Stroke-based, currentColor, no external icon font.
  * Falls back to a neutral grid glyph when slug is unknown.
  */
@@ -576,6 +609,7 @@ export default function App() {
   const [loadError, setLoadError] = useState("");
   const [loadingData, setLoadingData] = useState(false);
   const [refreshBusy, setRefreshBusy] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   // Home user menu dropdown
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -885,6 +919,27 @@ export default function App() {
       { section: "Coming Soon Tools" as const, items: roadmap }
     ] satisfies Array<{ section: LauncherSection; items: HeadCard[] }>;
   }, [headsPayload]);
+
+  const filteredGrouped = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return grouped;
+    return grouped.map(({ section, items }) => {
+      const roadmap = section === "Coming Soon Tools";
+      return {
+        section,
+        items: items.filter((h) => {
+          const title = launcherCardTitle(h).toLowerCase();
+          const desc = String(h.description ?? "").toLowerCase();
+          const cat = headCategoryFor(h.slug).toLowerCase();
+          const pills = resolveCardBadges(h, roadmap).join(" ").toLowerCase();
+          return title.includes(q) || desc.includes(q) || cat.includes(q) || pills.includes(q);
+        })
+      };
+    });
+  }, [grouped, searchQuery]);
+
+  const searchActive = searchQuery.trim().length > 0;
+  const searchTotalCount = filteredGrouped.reduce((s, g) => s + g.items.length, 0);
 
   const showShell = Boolean(session?.access_token);
   const u = me?.user;
@@ -1285,7 +1340,56 @@ export default function App() {
               </div>
             ) : null}
 
-            {grouped.map(({ section, items }) => {
+            {(availableCount + roadmapCount) > 0 && !loadingData ? (
+              <div className="launcher-search-bar" role="search">
+                <span className="launcher-search-icon" aria-hidden>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="11" cy="11" r="7" />
+                    <path d="m21 21-4.35-4.35" />
+                  </svg>
+                </span>
+                <input
+                  type="search"
+                  className="launcher-search-input"
+                  placeholder="Find a head…"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  aria-label="Find a head"
+                  autoComplete="off"
+                />
+                {searchQuery ? (
+                  <button
+                    type="button"
+                    className="launcher-search-clear"
+                    onClick={() => setSearchQuery("")}
+                    aria-label="Clear search"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+                      <path d="M18 6L6 18M6 6l12 12" />
+                    </svg>
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+
+            {searchActive && searchTotalCount === 0 ? (
+              <div className="empty-box launcher-search-empty" role="status">
+                <p className="empty-title">No tools match your search.</p>
+                <p className="empty-sub">
+                  Try a different term, or{" "}
+                  <button
+                    type="button"
+                    className="btn btn-ghost launcher-search-reset"
+                    onClick={() => setSearchQuery("")}
+                  >
+                    clear the search
+                  </button>
+                  .
+                </p>
+              </div>
+            ) : null}
+
+            {filteredGrouped.map(({ section, items }) => {
               if (!items.length) return null;
               const roadmapSection = section === "Coming Soon Tools";
               return (
@@ -1349,6 +1453,7 @@ export default function App() {
                               ))}
                             </div>
                           </div>
+                          <p className="head-card-eyebrow">{headCategoryFor(h.slug)}</p>
                           <h3 className="head-card-title">{cardTitle}</h3>
                           <p className={roadmapSection ? "desc desc-roadmap" : "desc"}>{h.description}</p>
                           {showUrl && url ? (
