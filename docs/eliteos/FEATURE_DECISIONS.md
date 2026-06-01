@@ -619,3 +619,15 @@
 
 ---
 
+### 48. AI Takeoff foundation — contract-first architecture, AI is not pricing authority
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-06-01 |
+| **Decision** | AI Takeoff is implemented as a **pure contract layer** under `backend-core/src/takeoff/` before any UI, AI API calls, or Internal Estimate wiring. The contract defines a versioned JSON schema (`TakeoffResult`, schema v1.0) for AI- or manually-produced takeoff results. All square footage is **recomputed deterministically** from raw dimensions (`lengthIn`, `depthIn`) by `takeoffMeasurementCalc.mjs` — AI-provided totals are stored for audit and compared but **never used for pricing or chargeable sf**. A pure validator (`takeoffValidator.mjs`) returns structured diagnostics (error / warning / info) before any import is allowed. A pure import planner (`takeoffImportPlanner.mjs`) maps approved results to `RoomScopeBuilder`-compatible `GuidedShapeGroup` drafts without mutating quote state. AI Takeoff will be a **separate head** (`app-ai-takeoff/`) from Internal Estimate; it feeds into Internal Estimate via a future "Import from Takeoff" action but does not change Internal Estimate beta behavior today. |
+| **Why** | AI must not become the final pricing authority — eliteOS owns measurement math. Contract-first ensures the schema is stable before AI extraction, UI, and import are wired. A separate head keeps AI Takeoff experimentally isolated from Internal Estimate beta. Pure functions (no I/O, no side effects) allow deterministic testing without Supabase or API dependencies. |
+| **Impacted files** | `backend-core/src/takeoff/takeoffContract.mjs`, `takeoffMeasurementCalc.mjs`, `takeoffValidator.mjs`, `takeoffImportPlanner.mjs`, `takeoff.contract.test.mjs`, `fixtures/spec73.fixture.mjs`, `package.json` (new `eos:test:takeoff-contract` script), `docs/eliteos/ai-takeoff-foundation.md` |
+| **Revisit trigger** | Before wiring a real AI call to produce `TakeoffResult` drafts; before adding the `app-ai-takeoff/` head; before adding "Import from Takeoff" to Internal Estimate; before supporting multi-room or multi-page plans; before adding Supabase persistence for takeoff jobs/results. |
+
+---
+

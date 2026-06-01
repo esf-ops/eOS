@@ -162,6 +162,51 @@ Durable decisions: `FEATURE_DECISIONS.md` entries **37** (additive lane), **38**
 
 ---
 
+---
+
+## AI Takeoff foundation (2026-06-01)
+
+Contract-first foundation for AI Takeoff — pure functions, no UI, no AI API calls, no Internal Estimate changes.
+
+### Status
+
+| Piece | State |
+|-------|-------|
+| `takeoffContract.mjs` — versioned schema v1.0, factory helpers | **Built** |
+| `takeoffMeasurementCalc.mjs` — deterministic sf calculator | **Built** |
+| `takeoffValidator.mjs` — structured diagnostics (15 codes) | **Built** |
+| `takeoffImportPlanner.mjs` — RoomScopeBuilder import plan | **Built** |
+| `fixtures/spec73.fixture.mjs` — Spec 73 known-good fixture | **Built** |
+| `takeoff.contract.test.mjs` — 16 test groups | **Built, all passing** |
+| `docs/eliteos/ai-takeoff-foundation.md` | **Written** |
+| `app-ai-takeoff/` UI head | **Not built** |
+| Live AI API extraction | **Not built** |
+| Internal Estimate "Import from Takeoff" button | **Not built** |
+| Supabase storage for takeoff jobs/results | **Not built** |
+
+### Spec 73 verified results
+- Countertop exact sf: **59.96**
+- Backsplash exact sf: **6.61**
+- Combined exact sf: **66.57**
+- Chargeable countertop: **60 sf** (ceiling)
+- Chargeable backsplash: **7 sf** (ceiling)
+
+### Key commands
+```bash
+npm run eos:test:takeoff-contract   # all 16 test groups
+npm run eos:test:pricing-authority  # confirm no pricing regression
+npm run eos:check:local             # full repo check
+```
+
+### Durable decision
+See `FEATURE_DECISIONS.md` entry **48** (contract-first, AI-not-authority, separate head).
+
+### Next slice (requires separate approval)
+1. Wire a real AI call (vision model) to produce a `TakeoffResult` draft from an uploaded plan image/PDF.
+2. Or: Build the `app-ai-takeoff/` lab head UI — plan upload → draft review → validator display → approve/reject.
+
+---
+
 ## Other heads (unchanged this slice)
 
 Quote platform, Monday sync, Moraware API worker, pricing admin — **out of scope** unless the user names them. See `docs/eliteos/SYSTEM_BLUEPRINT.md` and `docs/eliteos/eliteOS-master-head-map.md`.
