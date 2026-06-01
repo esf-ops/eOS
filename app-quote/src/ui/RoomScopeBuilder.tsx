@@ -1,4 +1,7 @@
 import React from "react";
+
+/** Set to false to hide manual square footage entry for beta quoting. Re-enable when needed. */
+const ENABLE_MANUAL_SQUARE_FOOTAGE_ENTRY = false;
 import type {
   EliteProgramColorRow,
   GuidedGroupBacksplashMode,
@@ -786,13 +789,15 @@ export default function RoomScopeBuilder({
                         >
                           Build from runs
                         </button>
-                        <button
-                          type="button"
-                          className={`ie-measure-toggle-btn ${room.calcMode === "Manual Sq Ft" ? "on" : ""}`}
-                          onClick={() => onRoomsChange(updateRoom(rooms, room.id, { calcMode: "Manual Sq Ft" }))}
-                        >
-                          Manual square footage
-                        </button>
+                        {ENABLE_MANUAL_SQUARE_FOOTAGE_ENTRY ? (
+                          <button
+                            type="button"
+                            className={`ie-measure-toggle-btn ${room.calcMode === "Manual Sq Ft" ? "on" : ""}`}
+                            onClick={() => onRoomsChange(updateRoom(rooms, room.id, { calcMode: "Manual Sq Ft" }))}
+                          >
+                            Manual square footage
+                          </button>
+                        ) : null}
                       </div>
                     ) : (
                       <select
@@ -803,7 +808,7 @@ export default function RoomScopeBuilder({
                       >
                         <option>Guided Shape</option>
                         <option>Rapid Linear Foot</option>
-                        <option>Manual Sq Ft</option>
+                        {ENABLE_MANUAL_SQUARE_FOOTAGE_ENTRY ? <option>Manual Sq Ft</option> : null}
                       </select>
                     )}
                   </label>

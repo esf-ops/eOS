@@ -313,7 +313,7 @@ export default function InternalEstimateApp() {
   /** Scroll-derived active workflow section (purely visual — no fake state). */
   const [activeWorkflowSectionId, setActiveWorkflowSectionId] = useState<string | null>(null);
 
-  const [accountName, setAccountName] = useState("Direct");
+  const [accountName, setAccountName] = useState("");
   const [accountPhone, setAccountPhone] = useState("");
   const [accountEmail, setAccountEmail] = useState("");
   const [customerName, setCustomerName] = useState("");
@@ -667,7 +667,7 @@ export default function InternalEstimateApp() {
       totalSfReady = round2(totals.counter + totals.splash + totals.fhb);
     }
     const missing: string[] = [];
-    if (!accountName.trim()) missing.push("Account (enter a name or keep Direct)");
+    if (!accountName.trim()) missing.push("Account name");
     if (!salesRep.trim()) missing.push("Salesperson");
     if (!customerName.trim()) missing.push("Customer name");
     if (!projectName.trim()) missing.push("Elite job name");
@@ -900,7 +900,7 @@ export default function InternalEstimateApp() {
       customerName.trim() ||
         projectName.trim() ||
         projectAddress.trim() ||
-        accountName.trim() !== "Direct" ||
+        Boolean(accountName.trim()) ||
         salesRep.trim()
     );
     const hasRooms =
@@ -1157,7 +1157,7 @@ export default function InternalEstimateApp() {
     setHydrationGaps([]);
     setRoomDrafts([createEstimatorRoom("Group Promo")]);
     setVisualLayoutByPieceKey({});
-    setAccountName("Direct");
+    setAccountName("");
     setAccountPhone("");
     setAccountEmail("");
     setCustomerName("");
@@ -1413,7 +1413,7 @@ export default function InternalEstimateApp() {
 
   const readinessSnapshot = useMemo(() => {
     const missing: string[] = [];
-    if (!accountName.trim()) missing.push("Account (enter a name or keep Direct)");
+    if (!accountName.trim()) missing.push("Account name");
     if (!salesRep.trim()) missing.push("Salesperson");
     if (!customerName.trim()) missing.push("Customer name");
     if (!projectName.trim()) missing.push("Elite job name");
@@ -2606,22 +2606,6 @@ export default function InternalEstimateApp() {
                 </div>
               </div>
 
-              <div className="ie-job-group ie-job-group--cfn">
-                <div className="grid3 ie-job-grid">
-                  <label className="ie-cfn-field" style={{ gridColumn: "1 / -1" }}>
-                    Customer-facing project notes
-                    <textarea
-                      rows={3}
-                      value={customerFacingNotes}
-                      onChange={(e) => setCustomerFacingNotes(e.target.value)}
-                      placeholder={
-                        "Sink accessories not included.\nConfirm sink base size before ordering.\nLaminate must be removed before template.\nFull-height backsplash requires second template/install."
-                      }
-                    />
-                    <span className="ie-field-hint">Prints under Project Notes on the customer estimate.</span>
-                  </label>
-                </div>
-              </div>
             </div>
             {selectedMaterialBreakdown.totals.useTax?.applied ? (
               <p className="ie-note-quiet ie-note-useTax" role="status">
@@ -2741,44 +2725,6 @@ export default function InternalEstimateApp() {
                   Undo
                 </button>
               </div>
-            ) : null}
-
-            <h3 className="h3">Show price group options on customer estimate</h3>
-            <p className="muted small" style={{ marginTop: 4 }}>
-              Choose only the alternate groups you want shown to the customer. Internal worksheet below can list every tier; customer
-              print includes comparisons only for checked groups (default: none).
-            </p>
-            <div className="ie-group-compare-grid" role="group" aria-label="Customer-facing price group comparisons">
-              {MATERIAL_GROUPS.map((g) => (
-                <div key={g} className="ie-group-compare-row">
-                  <label className="check ie-group-compare-check">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(customerDisplayGroups[g])}
-                      onChange={(e) => setCustomerDisplayGroups((prev) => ({ ...prev, [g]: e.target.checked }))}
-                    />
-                    <span className="ie-group-compare-label">{g}</span>
-                  </label>
-                  {customerDisplayGroups[g] ? (
-                    <label className="ie-group-compare-color">
-                      <span className="muted small">Optional color label</span>
-                      <input
-                        value={comparisonGroupColorLabels[g] ?? ""}
-                        onChange={(e) =>
-                          setComparisonGroupColorLabels((prev) => ({ ...prev, [g]: e.target.value }))
-                        }
-                        placeholder='e.g. Aura Taj'
-                      />
-                    </label>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-            {comparisonScopeMeta.mixedGroupNote ? (
-              <p className="ie-note-quiet ie-note-info" role="status" style={{ marginTop: 6 }}>
-                <span className="ie-note-quiet-dot" aria-hidden />
-                {comparisonScopeMeta.mixedGroupNote}
-              </p>
             ) : null}
 
             <h3 className="h3">Structured custom line items</h3>
@@ -2967,6 +2913,70 @@ export default function InternalEstimateApp() {
                 + Add custom line item
               </button>
             </section>
+
+          <section id="sec-compare-notes" className="card">
+            <div className="ie-section-head">
+              <h2 className="ie-section-title">Compare Group Prices &amp; Notes</h2>
+              <p className="ie-section-meta">
+                Customer-facing price group comparisons · Project notes for customer estimate
+              </p>
+            </div>
+
+            <h3 className="h3">Show price group options on customer estimate</h3>
+            <p className="muted small" style={{ marginTop: 4 }}>
+              Choose only the alternate groups you want shown to the customer. Internal worksheet below can list every tier; customer
+              print includes comparisons only for checked groups (default: none).
+            </p>
+            <div className="ie-group-compare-grid" role="group" aria-label="Customer-facing price group comparisons">
+              {MATERIAL_GROUPS.map((g) => (
+                <div key={g} className="ie-group-compare-row">
+                  <label className="check ie-group-compare-check">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(customerDisplayGroups[g])}
+                      onChange={(e) => setCustomerDisplayGroups((prev) => ({ ...prev, [g]: e.target.checked }))}
+                    />
+                    <span className="ie-group-compare-label">{g}</span>
+                  </label>
+                  {customerDisplayGroups[g] ? (
+                    <label className="ie-group-compare-color">
+                      <span className="muted small">Optional color label</span>
+                      <input
+                        value={comparisonGroupColorLabels[g] ?? ""}
+                        onChange={(e) =>
+                          setComparisonGroupColorLabels((prev) => ({ ...prev, [g]: e.target.value }))
+                        }
+                        placeholder="e.g. Aura Taj"
+                      />
+                    </label>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+            {comparisonScopeMeta.mixedGroupNote ? (
+              <p className="ie-note-quiet ie-note-info" role="status" style={{ marginTop: 6 }}>
+                <span className="ie-note-quiet-dot" aria-hidden />
+                {comparisonScopeMeta.mixedGroupNote}
+              </p>
+            ) : null}
+
+            <div style={{ marginTop: 24 }}>
+              <h3 className="h3">Customer-facing project notes</h3>
+              <p className="muted small" style={{ marginTop: 4, marginBottom: 6 }}>
+                Prints under Project Notes on the customer estimate.
+              </p>
+              <label className="ie-cfn-field">
+                <textarea
+                  rows={3}
+                  value={customerFacingNotes}
+                  onChange={(e) => setCustomerFacingNotes(e.target.value)}
+                  placeholder={
+                    "Sink accessories not included.\nConfirm sink base size before ordering.\nLaminate must be removed before template.\nFull-height backsplash requires second template/install."
+                  }
+                />
+              </label>
+            </div>
+          </section>
 
             <section className="card">
               <h2>Drawing / file checklist</h2>

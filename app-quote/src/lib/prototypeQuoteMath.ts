@@ -60,7 +60,7 @@ export const INTERNAL_ESTIMATE_MEASURE_OPTIONS: InternalMeasureOptions = {
  * Standard edge profiles — included in fabrication, no extra charge.
  * Default is "Eased" (3mm eased edge, most common shop default).
  */
-export const STANDARD_EDGE_PROFILES = ["Eased", "Beveled", "Pencil", "Bullnose"] as const;
+export const STANDARD_EDGE_PROFILES = ["Eased", "Beveled", "Bullnose"] as const;
 
 /**
  * Upgraded edge profiles — charged by linear foot via backend calculator.
