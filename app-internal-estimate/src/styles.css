@@ -6094,6 +6094,31 @@ textarea:focus {
   justify-content: flex-end;
 }
 
+/* Save confirmation strip — sits below the main sticky row, full-width */
+.ie-sticky-save-msg {
+  width: 100%;
+  text-align: center;
+  font-size: 0.72rem;
+  font-weight: 500;
+  line-height: 1.3;
+  padding: 0 16px 6px;
+  margin: 0;
+  max-width: 1360px;
+  margin-left: auto;
+  margin-right: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ie-sticky-save-msg.is-ok {
+  color: var(--eos-success, #16a34a);
+}
+
+.ie-sticky-save-msg.is-error {
+  color: var(--eos-error, #dc2626);
+}
+
 @media (max-width: 880px) {
   .ie-sticky-actions-inner {
     flex-direction: column;
@@ -6106,6 +6131,9 @@ textarea:focus {
   }
   .ie-sticky-actions-cluster {
     justify-content: center;
+  }
+  .ie-sticky-save-msg {
+    text-align: center;
   }
 }
 
@@ -6522,6 +6550,11 @@ textarea:focus {
   .ie-note-error .ie-note-quiet-dot {
     animation: none;
   }
+}
+
+/* Bottom-margin reset so the color catalog warning is flush against RoomScopeBuilder */
+.ie-color-catalog-warn {
+  margin-bottom: 12px;
 }
 
 /* ----- Status banner system (info / warn / error) --------------------- */

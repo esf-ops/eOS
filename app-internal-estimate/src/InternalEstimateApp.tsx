@@ -67,7 +67,6 @@ const WORKFLOW_SECTIONS = [
   { id: "sec-visual", label: "Visual layout" },
   { id: "sec-addons", label: "Add-ons & Custom Items" },
   { id: "sec-review", label: "Review" },
-  { id: "sec-output", label: "Output" },
   { id: "sec-save", label: "Save" }
 ] as const;
 
@@ -352,7 +351,7 @@ export default function InternalEstimateApp() {
   const [lastSavedQuoteNumber, setLastSavedQuoteNumber] = useState<string | null>(null);
   const [lastSavedQuoteId, setLastSavedQuoteId] = useState<string | null>(null);
 
-  const [quoteWorkflowStatus, setQuoteWorkflowStatus] = useState("testing_review");
+  const [quoteWorkflowStatus, setQuoteWorkflowStatus] = useState("draft");
   const [revisionNoteDraft, setRevisionNoteDraft] = useState("");
   const [saveIntent, setSaveIntent] = useState<InternalSaveIntent>("create");
   const [pendingSubmitIntent, setPendingSubmitIntent] = useState<InternalSaveIntent | null>(null);
@@ -383,7 +382,7 @@ export default function InternalEstimateApp() {
       setFamilyLatestQuoteNumber(null);
       setRevisionBaselineSig(null);
       setSaveIntent("create");
-      setQuoteWorkflowStatus("testing_review");
+      setQuoteWorkflowStatus("draft");
       setRevisionNoteDraft("");
       return;
     }
@@ -1086,7 +1085,7 @@ export default function InternalEstimateApp() {
       branch: branch.trim() || null,
       sales_rep: salesRep.trim() || null,
       entered_by: enteredBy.trim() || null,
-      quote_status: quoteWorkflowStatus.trim() || "testing_review"
+      quote_status: quoteWorkflowStatus.trim() || "draft"
     };
     if (urlQuoteId) {
       const mode = saveModeOverride ?? saveIntent;
@@ -1152,7 +1151,7 @@ export default function InternalEstimateApp() {
     setLastSavedQuoteNumber(null);
     setSaveIntent("create");
     setRevisionNoteDraft("");
-    setQuoteWorkflowStatus("testing_review");
+    setQuoteWorkflowStatus("draft");
     setSubmitMsg(null);
     setSubmitDiagnostic(null);
     setHydrationGaps([]);
@@ -1922,7 +1921,7 @@ export default function InternalEstimateApp() {
             return prev.map((r, i) => (i === 0 ? { ...r, materialGroup: g } : r));
           });
         }
-        const qs = String(q.quote_status || "testing_review");
+        const qs = String(q.quote_status || "draft");
         setQuoteWorkflowStatus(qs);
         const rlab = q.revision_label != null ? String(q.revision_label) : "";
         const qnDisp = String(q.quote_number || "");
@@ -2649,6 +2648,12 @@ export default function InternalEstimateApp() {
                 Use the <strong>Visual Layout Canvas</strong> section below for quick drag-and-rotate verification — it does not change pricing math.
               </p>
             </details>
+            {colorCatalogWarnings.length > 0 ? (
+              <div className="ie-note-quiet ie-note-error ie-color-catalog-warn" role="alert">
+                <span className="ie-note-quiet-dot" aria-hidden />
+                {colorCatalogWarnings.join(" ")} Select a material group manually below.
+              </div>
+            ) : null}
             <RoomScopeBuilder
               rooms={roomDrafts}
               onRoomsChange={setRoomDrafts}
@@ -3941,6 +3946,11 @@ export default function InternalEstimateApp() {
             )}
           </div>
         </div>
+        {submitMsg ? (
+          <p className={`ie-sticky-save-msg${submitDiagnostic ? " is-error" : " is-ok"}`} role="status">
+            {submitMsg}
+          </p>
+        ) : null}
       </nav>
 
       {startNewQuoteModalOpen ? (
