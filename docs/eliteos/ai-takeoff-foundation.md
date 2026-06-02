@@ -1234,6 +1234,42 @@ Deployed-head UX fix: `takeoff.eliteosfab.com` now renders the standard eliteOS 
 
 ---
 
+## v5.9.2: upload-first empty state + nonstandard depth QA + IE/QL UI alignment
+
+Corrects the deployed `takeoff.eliteosfab.com` page to behave and look like an eliteOS head, not a standalone demo.
+
+### Upload-first empty state
+
+`sourceMode` initializes to `"none"` (new mode). All measurement sections (summary, QA gate, rooms, diagnostics, import preview, benchmark, debug) are gated on `hasActiveSource` (sourceMode !== "none") and are completely hidden until the user uploads a plan or explicitly loads the demo sample. Start New Takeoff now resets to `"none"` (empty upload-first state), not Spec 73.
+
+### Spec 73 demo demotion
+
+Spec 73 sample is only loadable via explicit click inside the JSON workbench (collapsed by default). When loaded, a yellow `demo-notice` banner appears: "Demo sample — not a real workspace." with a "Clear demo data" link. The 41" peninsula depth in the Spec 73 fixture is intentional test data and now correctly triggers `NONSTANDARD_DEPTH_ASSUMED` when the validator runs on it.
+
+### NONSTANDARD_DEPTH_ASSUMED diagnostic (v5.9.2)
+
+New `TAKEOFF_DIAGNOSTIC_CODE.NONSTANDARD_DEPTH_ASSUMED`. Fires in `takeoffValidator.mjs` on any `counter` run whose label matches `island|peninsula|raised bar|bar top|desk|waterfall|specialty` and whose depth exceeds 26". Standard 25.5" wall runs are NOT flagged. The `evaluateTakeoffQaGate` escalates this to `needs_review` (warning severity). Tests T24/T25 in `takeoffQaGate.test.mjs`.
+
+### UI alignment with IE/QL
+
+- Dark gradient hero removed → compact white `takeoff-page-sub` subheader with page title and description
+- Token values aligned with IE/QL: `--r-lg:18px`, `--r-md:12px`, richer `--eos-shadow-sm`, IE/QL aurora radial-gradient body background
+- Section spacing reduced (32px → 24px gap)
+- `lab-card` no longer uses `overflow:hidden` to improve readability
+
+### Impacted files (v5.9.2)
+
+| File | Change |
+|------|--------|
+| `backend-core/src/takeoff/takeoffContract.mjs` | Add `NONSTANDARD_DEPTH_ASSUMED` code |
+| `backend-core/src/takeoff/takeoffValidator.mjs` | Add nonstandard depth check in `validateRun` |
+| `backend-core/src/takeoff/takeoffQaGate.mjs` | Add check 10b for `NONSTANDARD_DEPTH_ASSUMED` → warning |
+| `backend-core/src/takeoff/takeoffQaGate.test.mjs` | Add T24 (NONSTANDARD_DEPTH_ASSUMED → needs_review), T25 (standard depth → no warning) |
+| `app-ai-takeoff/src/TakeoffLabApp.tsx` | `sourceMode` init → `"none"`, `hasActiveSource`/`isDemoMode` derived, hero → compact subheader, content gated, demo notice, Start New Takeoff → empty state |
+| `app-ai-takeoff/src/styles.css` | Remove dark hero; add `takeoff-page-sub`, `demo-notice`; update tokens to IE/QL values |
+
+---
+
 ## Durable decisions
 
-See `FEATURE_DECISIONS.md` entries **48** (contract-first, AI-not-authority), **49** (quote files storage architecture), **50** (provider-neutral extraction layer, AI output never authoritative, raw PDFs not committed), **51** (benchmark truth fixtures, review gates), **52** (automatic QA gate must pass before any future import path), **53** (AI provider can be swapped server-side for benchmarked comparison; every model output still goes through eliteOS recompute, validator, benchmark evaluator, and QA gate), **54** (AI Takeoff deployed as protected head), and **55** (shell alignment + session hydration).
+See `FEATURE_DECISIONS.md` entries **48** (contract-first, AI-not-authority), **49** (quote files storage architecture), **50** (provider-neutral extraction layer, AI output never authoritative, raw PDFs not committed), **51** (benchmark truth fixtures, review gates), **52** (automatic QA gate must pass before any future import path), **53** (AI provider can be swapped server-side for benchmarked comparison; every model output still goes through eliteOS recompute, validator, benchmark evaluator, and QA gate), **54** (AI Takeoff deployed as protected head), **55** (shell alignment + session hydration), and **56** (upload-first empty state + nonstandard depth QA + IE/QL alignment).

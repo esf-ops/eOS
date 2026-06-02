@@ -79,6 +79,23 @@ function validateRun(run, runPath) {
       ds.push(diag(WARNING, C.SUSPICIOUS_DEPTH, `Run "${run.label}": counter depthIn ${d}" is unusually shallow (<${MIN_COUNTER_DEPTH_IN}").`, `${runPath}.depthIn`, run.sourcePages));
     } else if (d > MAX_COUNTER_DEPTH_IN) {
       ds.push(diag(WARNING, C.SUSPICIOUS_DEPTH, `Run "${run.label}": counter depthIn ${d}" is unusually deep (>${MAX_COUNTER_DEPTH_IN}").`, `${runPath}.depthIn`, run.sourcePages));
+    } else if (d > 26) {
+      // Nonstandard depth check (v5.9.2): island/peninsula/raised-bar/desk/waterfall depths
+      // must come from visible plan dimensions — they cannot be assumed or invented.
+      // Standard wall counters are 25.5"; anything notably above that for a specialty piece
+      // requires explicit plan evidence.
+      const NONSTANDARD_PIECE_RE = /\b(island|peninsula|raised[\s-]bar|bar[\s-]top|desk|waterfall|specialty)\b/i;
+      if (NONSTANDARD_PIECE_RE.test(String(run.label ?? ""))) {
+        ds.push(diag(
+          WARNING,
+          C.NONSTANDARD_DEPTH_ASSUMED,
+          `Run "${run.label}": depth ${d}" is nonstandard for a standard wall counter (standard = 25.5"). ` +
+          `Island, peninsula, raised bar, desk, and waterfall depths must come from visible plan dimensions — ` +
+          `they cannot be assumed or invented. Verify this dimension is documented on the plan before using this takeoff.`,
+          `${runPath}.depthIn`,
+          run.sourcePages
+        ));
+      }
     }
   }
 

@@ -181,7 +181,7 @@ Contract-first foundation + file-backed workspace + live AI extraction + benchma
 | v5.5 runs | v4+inv+ev | TBD — run manually | — | 78 sf | 4 sf | — | Three-step evidence anchored |
 | v5.6 runs | v5+inv+ev+ref | TBD — run manually | — | 78 sf | 4 sf | — | Ref total reconciliation |
 
-**Status:** v5.9 built + deployed as `ai_takeoff` protected head. Shell alignment + session fix applied (v5.9.1): topbar, brand-row, avatar user-menu, and `auth-panel-standalone` now match the standard eliteOS protected-head pattern (Pricing Admin / Quote Library / Internal Estimate). Auth uses `getSession()` + `onAuthStateChange` for fast hydration from the shared `.eliteosfab.com` cookie — no separate sign-in needed when already signed in via Home. JSON workbench demoted to collapsed details section; Gemini provider, QA gate, benchmark context, run history, and all backend route guards unchanged.
+**Status:** v5.9.2 — upload-first, nonstandard-depth QA, IE/QL UI alignment. Dark hero removed; page initializes to empty upload-first state (`sourceMode="none"`); Spec 73 only loads on explicit demo click (with demo badge). Start New Takeoff goes to empty state, not Spec 73. `NONSTANDARD_DEPTH_ASSUMED` validator code fires on island/peninsula/bar/desk/waterfall runs > 26" depth and escalates to `needs_review` in the QA gate. Token values updated to match IE/QL (radius, shadow, body background). Shell alignment (v5.9.1): topbar, brand-row, avatar user-menu, `auth-panel-standalone` match standard eliteOS protected-head pattern. Auth: `getSession()` + `onAuthStateChange` shared `.eliteosfab.com` cookie SSO.
 
 **Deployed URL:** https://takeoff.eliteosfab.com — Vercel project `app-ai-takeoff`, domain `takeoff.eliteosfab.com`
 

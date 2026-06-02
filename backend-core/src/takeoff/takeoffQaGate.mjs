@@ -317,6 +317,26 @@ export function evaluateTakeoffQaGate({
     ));
   }
 
+  // ── 10b. Nonstandard depth assumed (v5.9.2) ───────────────────────────────
+  // Fires whenever the validator detected an island/peninsula/bar/desk/waterfall
+  // run with a depth over 26" — meaning the depth wasn't clearly standard (25.5")
+  // and must be verified against visible plan dimensions.
+
+  const nonstandardDepthCount = countCode(diagnostics, "NONSTANDARD_DEPTH_ASSUMED");
+  if (nonstandardDepthCount > 0) {
+    allIssues.push(issue(
+      "NONSTANDARD_DEPTH_ASSUMED",
+      `Nonstandard depth${nonstandardDepthCount > 1 ? "s" : ""} — plan verification required`,
+      "warning",
+      `${nonstandardDepthCount} run${nonstandardDepthCount !== 1 ? "s" : ""} (island, peninsula, raised bar, desk, or waterfall) ` +
+      `${nonstandardDepthCount === 1 ? "has" : "have"} a depth over 26". ` +
+      `Nonstandard depths must come from visible plan dimensions, not assumptions.`,
+      "Verify each flagged depth is clearly shown on the uploaded plan. " +
+      "If the depth is unclear, the piece must be re-measured before this takeoff can be used.",
+      "validator"
+    ));
+  }
+
   // ── 11. Benchmark evaluator result ───────────────────────────────────────
 
   if (benchmarkEvaluation?.finalRecommendation === "fail") {

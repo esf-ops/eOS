@@ -15,10 +15,12 @@
  * State model:
  *   authToken     — Supabase access token (null = not signed in)
  *   takeoffJobId  — quote_takeoff_jobs.id (null = no workspace)
+ *   sourceMode    — "none" (upload-first empty) | "spec73" | "pasted" | "file" | "ai-draft" | "invalid"
  *   sourceResult  — the last validated source TakeoffResult (never mutated by edits)
  *   editDraft     — a mutable copy; patch handlers produce new objects immutably
  *   hasEdits      — derived: editDraft.rooms ≠ sourceResult.rooms
- *   displayMode   — "spec73" | "pasted" | "file" | "ai-draft" | "edited" | "invalid"
+ *   hasActiveSource — derived: sourceMode !== "none"; gates all measurement sections
+ *   displayMode   — "none" | "spec73" | "pasted" | "file" | "ai-draft" | "edited" | "invalid"
  *   activeState   — always computed from editDraft (pure, synchronous)
  *
  * URL param: ?takeoffJobId=<uuid> — auto-loads workspace on init.
@@ -104,8 +106,9 @@ function userInitialsFor(name: string, email: string): string {
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-export type SourceMode = "spec73" | "pasted" | "file" | "ai-draft" | "invalid";
-export type DisplayMode = "spec73" | "pasted" | "file" | "ai-draft" | "edited" | "invalid";
+/** "none" = upload-first empty state (default when signed in, no source loaded yet). */
+export type SourceMode = "none" | "spec73" | "pasted" | "file" | "ai-draft" | "invalid";
+export type DisplayMode = "none" | "spec73" | "pasted" | "file" | "ai-draft" | "edited" | "invalid";
 
 export interface ActiveComputedState {
   result: TakeoffResult;
@@ -285,8 +288,12 @@ export default function TakeoffLabApp() {
   const [planFilename, setPlanFilename] = useState<string | null>(null);
 
   // ── Source state (last validated; never mutated by UI edits) ─────────────
+  // Initialized to Spec73 as a computation fallback, but sourceMode starts as
+  // "none" — the upload-first empty state. Measurement sections are gated on
+  // hasActiveSource (sourceMode !== "none") and are not displayed until the
+  // user uploads a plan or explicitly loads the demo sample.
   const [sourceResult, setSourceResult] = useState<TakeoffResult>(makeSpec73);
-  const [sourceMode, setSourceMode] = useState<SourceMode>("spec73");
+  const [sourceMode, setSourceMode] = useState<SourceMode>("none");
 
   // ── Edit draft (starts = sourceResult; patched by inline edit handlers) ──
   const [editDraft, setEditDraft] = useState<TakeoffResult>(makeSpec73);
@@ -336,7 +343,14 @@ export default function TakeoffLabApp() {
     [editDraft.rooms, sourceResult.rooms]
   );
 
+  /** True when a real source is loaded (uploaded plan, AI draft, pasted JSON, or demo). */
+  const hasActiveSource = sourceMode !== "none";
+
+  /** True when the Spec 73 demo sample is explicitly loaded — show demo badge. */
+  const isDemoMode = sourceMode === "spec73";
+
   const displayMode: DisplayMode =
+    sourceMode === "none"      ? "none"      :
     sourceMode === "invalid"   ? "invalid"   :
     hasEdits                   ? "edited"    :
     sourceMode;
@@ -346,11 +360,12 @@ export default function TakeoffLabApp() {
     catch { return computeAll(makeSpec73()); }
   }, [editDraft]);
 
-  // v5.8: Automatic QA gate — only for AI drafts and file-loaded results, not spec73/pasted.
+  // v5.8: Automatic QA gate — only for AI drafts and file-loaded results.
   // v5.8.1: Includes benchmarkQaContext when the user has evaluated a benchmark preset/target.
+  // v5.9.2: Also skips "none" (empty/upload-first state).
   // Declared after activeState to avoid temporal dead zone.
   const qaGate = useMemo((): QaGateResult | null => {
-    if (sourceMode === "spec73" || sourceMode === "pasted" || sourceMode === "invalid") return null;
+    if (sourceMode === "none" || sourceMode === "spec73" || sourceMode === "pasted" || sourceMode === "invalid") return null;
     try {
       return evaluateTakeoffQaGate({
         takeoffResult:         activeState.result,
@@ -428,6 +443,7 @@ export default function TakeoffLabApp() {
   }, []);
 
   // v5.8: Start New Takeoff — clears workspace state + URL param without deleting any data.
+  // v5.9.2: Resets to upload-first empty state ("none"), not Spec 73 sample.
   const handleStartNewTakeoff = useCallback(() => {
     if (hasEdits) {
       if (!window.confirm(
@@ -448,7 +464,12 @@ export default function TakeoffLabApp() {
     setBenchmarkQaContext(null);
     setPastedDraft("");
     setParseError(null);
-    commitSource(makeSpec73(), "spec73");
+    // Go to upload-first empty state — not Spec 73.
+    setSourceResult(makeSpec73()); // keep computation fallback
+    setEditDraft(makeSpec73());    // keep computation fallback
+    setSourceMode("none");
+    setIsEditing(false);
+    setResetKey((k) => k + 1);
   }, [hasEdits]);
 
   // ── Edit actions ──────────────────────────────────────────────────────────
@@ -529,13 +550,19 @@ export default function TakeoffLabApp() {
 
   const handleCopySummary = useCallback(() => {
     const { result, computed, validation, importPlan } = activeState;
-    const srcLabel = {
-      spec73: "Spec 73 sample", pasted: "Pasted takeoff JSON",
-      file: planFilename ?? "Plan file", edited: "Edited draft", invalid: "Invalid draft",
-    }[displayMode];
+    const srcLabel: Record<string, string> = {
+      none:       "No source loaded",
+      spec73:     "Spec 73 demo sample",
+      pasted:     "Pasted takeoff JSON",
+      "ai-draft": planFilename ? `AI draft: ${planFilename}` : "AI draft",
+      file:       planFilename ?? "Plan file",
+      edited:     "Edited draft",
+      invalid:    "Invalid draft",
+    };
+    const srcLabelStr = srcLabel[displayMode] ?? displayMode;
     triggerCopy("summary", [
       "eliteOS AI Takeoff — Computed Summary",
-      `Source: ${srcLabel}  ·  Schema: v${result.schemaVersion}  ·  Status: ${result.status}`,
+      `Source: ${srcLabelStr}  ·  Schema: v${result.schemaVersion}  ·  Status: ${result.status}`,
       "",
       `Countertop:  ${computed.countertopExactSf.toFixed(2)} sf exact  (${computed.chargeableCountertopSf} sf chargeable)`,
       `Backsplash:  ${computed.backsplashExactSf.toFixed(2)} sf exact  (${computed.chargeableBacksplashSf} sf chargeable)`,
@@ -608,7 +635,8 @@ export default function TakeoffLabApp() {
 
   // ── Derived display values ────────────────────────────────────────────────
   const sourceLabel: Record<DisplayMode, string> = {
-    spec73:    "Spec 73 sample",
+    none:      "No source",
+    spec73:    "Spec 73 demo sample",
     pasted:    "Pasted takeoff JSON",
     file:      planFilename ? `Plan: ${planFilename}` : "Uploaded plan",
     "ai-draft": planFilename ? `AI draft: ${planFilename}` : "AI draft",
@@ -720,62 +748,61 @@ export default function TakeoffLabApp() {
         </div>
       </header>
 
-      {/* ── Hero ──────────────────────────────────────────────────── */}
-      <section className="takeoff-hero" aria-labelledby="takeoff-hero-title">
-        <div className="hero-aurora" aria-hidden />
-        <div className="takeoff-hero-inner">
-          <div className="takeoff-hero-main">
-            <p className="hero-eyebrow">Internal tool · AI Takeoff Lab</p>
-            <h1 id="takeoff-hero-title" className="hero-title">AI Takeoff Lab</h1>
-            <p className="hero-sub">
-              Review countertop and backsplash measurements before they become quote data.
-              AI proposes dimensions — eliteOS recomputes and validates independently.
+      {/* ── Compact page subheader (replaces dark hero block) ────── */}
+      <div className="takeoff-page-sub" role="region" aria-label="Takeoff session status">
+        <div className="takeoff-page-sub-inner">
+          <div className="takeoff-page-sub-title">
+            <h1 className="takeoff-page-heading">AI Takeoff Lab</h1>
+            <p className="takeoff-page-desc">
+              AI proposes countertop and backsplash dimensions — eliteOS recomputes and validates
+              independently. No quote is created or mutated.
             </p>
-            {authToken && (
-              <div className="hero-pills">
-                <span className={pillClass}>
-                  {displayMode === "invalid"  ? "⚠"  :
-                   displayMode === "edited"   ? "✎"  :
-                   displayMode === "ai-draft" ? "✦"  :
-                   displayMode === "file"     ? "📄" : "◎"}{" "}
-                  {sourceLabel[displayMode]}
-                </span>
-                {displayMode === "ai-draft" && (
-                  <span className="source-pill source-pill--review-note">
-                    AI draft · estimator review required
-                  </span>
-                )}
-                {displayMode === "ai-draft" && aiDraftMeta && (
-                  <span className="source-pill source-pill--ai-meta">
-                    Prompt {aiDraftMeta.promptVersion ?? "?"} · {aiDraftMeta.modelUsed ?? "model unknown"}
-                  </span>
-                )}
-                {result.source?.fileName && displayMode !== "file" && displayMode !== "invalid" && (
-                  <span className="source-pill source-pill--file">{result.source.fileName}</span>
-                )}
-                {hasEdits && (
-                  <span className="source-pill source-pill--edit-note">
-                    Changes are local to this Lab session
-                  </span>
-                )}
-                {takeoffJobId && (
-                  <>
-                    <span className="source-pill source-pill--workspace">Workspace active</span>
-                    <button
-                      type="button"
-                      className="start-new-btn"
-                      onClick={handleStartNewTakeoff}
-                      title="Clear this workspace from the screen and start a fresh takeoff (data is preserved)"
-                    >
-                      ↩ Start new takeoff
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
           </div>
+          {authToken && hasActiveSource && (
+            <div className="hero-pills">
+              <span className={pillClass}>
+                {displayMode === "invalid"  ? "⚠"  :
+                 displayMode === "edited"   ? "✎"  :
+                 displayMode === "ai-draft" ? "✦"  :
+                 displayMode === "file"     ? "📄" :
+                 displayMode === "spec73"   ? "⚙"  : "◎"}{" "}
+                {sourceLabel[displayMode]}
+              </span>
+              {displayMode === "ai-draft" && (
+                <span className="source-pill source-pill--review-note">
+                  AI draft · estimator review required
+                </span>
+              )}
+              {displayMode === "ai-draft" && aiDraftMeta && (
+                <span className="source-pill source-pill--ai-meta">
+                  Prompt {aiDraftMeta.promptVersion ?? "?"} · {aiDraftMeta.modelUsed ?? "model unknown"}
+                </span>
+              )}
+              {result.source?.fileName && displayMode !== "file" && displayMode !== "invalid" && displayMode !== "spec73" && (
+                <span className="source-pill source-pill--file">{result.source.fileName}</span>
+              )}
+              {hasEdits && displayMode !== "spec73" && (
+                <span className="source-pill source-pill--edit-note">
+                  Changes are local to this Lab session
+                </span>
+              )}
+              {takeoffJobId && (
+                <>
+                  <span className="source-pill source-pill--workspace">Workspace active</span>
+                  <button
+                    type="button"
+                    className="start-new-btn"
+                    onClick={handleStartNewTakeoff}
+                    title="Clear this workspace from the screen and start a fresh takeoff (data is preserved)"
+                  >
+                    ↩ Start new takeoff
+                  </button>
+                </>
+              )}
+            </div>
+          )}
         </div>
-      </section>
+      </div>
 
       {/* ── Main content ──────────────────────────────────────────── */}
       <main className="main" role="main">
@@ -881,7 +908,7 @@ export default function TakeoffLabApp() {
             </section>
           )}
 
-          {/* JSON workbench — secondary / developer tool */}
+          {/* JSON workbench — secondary / developer tool — collapsed by default */}
           <details className="lab-section lab-section-collapsible">
             <summary className="lab-section-summary">
               <span className="lab-section-title" style={{ margin: 0 }}>JSON workbench</span>
@@ -898,10 +925,41 @@ export default function TakeoffLabApp() {
                 onCopyEditedJson={handleCopyEditedJson}
                 parseError={parseError}
                 copyFeedback={copyFeedback}
-                displayMode={displayMode as "spec73" | "pasted" | "edited" | "invalid"}
+                displayMode={displayMode as "none" | "spec73" | "pasted" | "edited" | "invalid"}
               />
             </div>
           </details>
+
+          {/* ── Demo sample notice — shown when Spec 73 is explicitly loaded ── */}
+          {isDemoMode && (
+            <div className="demo-notice" role="note">
+              <span className="demo-notice-badge">Demo sample</span>
+              <span className="demo-notice-text">
+                <strong>Not a real workspace.</strong>{" "}
+                The Spec 73 fixture uses a 41" peninsula depth specific to this test plan.
+                Do not treat this as a template — nonstandard depths must come from the actual plan.{" "}
+                <button
+                  type="button"
+                  className="demo-notice-clear"
+                  onClick={() => {
+                    setSourceResult(makeSpec73());
+                    setEditDraft(makeSpec73());
+                    setSourceMode("none");
+                    setIsEditing(false);
+                    setResetKey((k) => k + 1);
+                    setPastedDraft("");
+                    setParseError(null);
+                  }}
+                >
+                  Clear demo data
+                </button>
+              </span>
+            </div>
+          )}
+
+          {/* ── All measurement sections — only shown when a source is loaded ── */}
+          {hasActiveSource && (
+            <>
 
           {/* Summary cards */}
           <section className="lab-section">
@@ -1095,6 +1153,9 @@ export default function TakeoffLabApp() {
               </span>
             )}
           </div>
+
+            </> /* end hasActiveSource */
+          )}
 
         </div>
       </main>

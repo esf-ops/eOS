@@ -3,51 +3,55 @@
  * Aligned with the eliteOS design system (same tokens as Pricing Admin, Quote Library, etc.)
  */
 
-/* ── Design tokens ────────────────────────────────────────────────────────── */
+/* ── Design tokens — aligned with eliteOS Internal Estimate / Quote Library ── */
 :root {
-  --eos-bg:            #f5f7fb;
+  --eos-bg:            #f6f7fb;
   --eos-bg-soft:       #eef2f8;
   --eos-surface:       #ffffff;
-  --eos-surface-soft:  #f8fafc;
+  --eos-surface-soft:  rgba(255,255,255,0.78);
   --eos-ink:           #0b1a33;
-  --eos-ink-soft:      #1e293b;
-  --eos-ink-mid:       #475569;
-  --eos-ink-muted:     #64748b;
-  --eos-ink-faint:     #94a3b8;
-  --eos-line:          #e2e8f0;
-  --eos-line-strong:   #cbd5e1;
+  --eos-ink-soft:      #1e2b48;
+  --eos-ink-mid:       #475067;
+  --eos-ink-muted:     #6b7892;
+  --eos-ink-faint:     #94a0b8;
+  --eos-line:          rgba(11,26,51,0.08);
+  --eos-line-strong:   rgba(11,26,51,0.14);
 
   /* Brand — burgundy */
   --eos-accent:        #a3132f;
-  --eos-accent-hover:  #7c0e23;
-  --eos-accent-soft:   #fdf2f4;
-  --eos-accent-ring:   rgba(163, 19, 47, 0.18);
+  --eos-accent-hover:  #8e0f28;
+  --eos-accent-active: #79091e;
+  --eos-accent-soft:   rgba(163,19,47,0.08);
+  --eos-accent-ring:   rgba(163,19,47,0.35);
 
   /* Lab / AI theme — deep indigo accent */
   --lab-accent:        #4338ca;
   --lab-accent-soft:   #eef2ff;
   --lab-accent-border: #c7d2fe;
 
-  /* Status */
-  --eos-success:        #15803d;
-  --eos-success-soft:   #f0fdf4;
-  --eos-success-border: #bbf7d0;
-  --eos-warn:           #b45309;
-  --eos-warn-soft:      #fffbeb;
-  --eos-warn-border:    #fcd34d;
-  --eos-danger:         #b91c1c;
-  --eos-danger-soft:    #fef2f2;
-  --eos-danger-border:  #fecaca;
-  --eos-info:           #1d4ed8;
-  --eos-info-soft:      #eff6ff;
-  --eos-info-border:    #bfdbfe;
+  /* Status — matches IE/QL exact values */
+  --eos-success:        #0c6e3a;
+  --eos-success-soft:   rgba(16,122,61,0.10);
+  --eos-success-border: rgba(16,122,61,0.22);
+  --eos-warn:           #7a4a10;
+  --eos-warn-soft:      rgba(180,92,12,0.10);
+  --eos-warn-border:    rgba(180,92,12,0.24);
+  --eos-danger:         #a3132f;
+  --eos-danger-soft:    rgba(163,19,47,0.08);
+  --eos-danger-border:  rgba(163,19,47,0.24);
+  --eos-info:           #1e4c92;
+  --eos-info-soft:      rgba(46,105,184,0.10);
+  --eos-info-border:    rgba(46,105,184,0.22);
 
-  --eos-shadow-sm: 0 1px 2px rgba(15,23,42,.05), 0 2px 6px rgba(15,23,42,.04);
-  --eos-shadow:    0 1px 2px rgba(15,23,42,.06), 0 6px 18px rgba(15,23,42,.06);
+  /* Shadows — richer, matches IE/QL */
+  --eos-shadow-sm: 0 1px 2px rgba(11,26,51,0.04), 0 8px 26px rgba(11,26,51,0.06);
+  --eos-shadow:    0 2px 4px rgba(11,26,51,0.06), 0 14px 38px rgba(11,26,51,0.10);
 
+  /* Radii — matches IE/QL */
   --r-sm: 8px;
-  --r-md: 10px;
-  --r-lg: 14px;
+  --r-md: 12px;
+  --r-lg: 18px;
+  --r-xl: 22px;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -55,12 +59,19 @@
 html, body {
   margin: 0;
   padding: 0;
-  background: var(--eos-bg);
   color: var(--eos-ink);
   font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-feature-settings: "ss01", "cv11";
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
   overflow-x: clip;
+  background:
+    radial-gradient(60% 50% at 12% 4%, rgba(212,226,247,0.55), transparent 60%),
+    radial-gradient(50% 50% at 92% 0%, rgba(225,220,243,0.5), transparent 65%),
+    radial-gradient(45% 55% at 100% 100%, rgba(244,216,225,0.45), transparent 70%),
+    linear-gradient(180deg, #fbfcfe 0%, #f4f6fb 60%, #eef1f8 100%);
+  background-attachment: fixed;
 }
 
 /* ── Layout ───────────────────────────────────────────────────────────────── */
@@ -160,27 +171,31 @@ html, body {
 .user-menu-signout:hover { background: var(--eos-danger-soft); }
 .user-menu-signout .user-menu-icon { color: var(--eos-danger); }
 
-/* ── Hero ─────────────────────────────────────────────────────────────────── */
-.takeoff-hero {
-  position: relative; overflow: hidden;
-  background: linear-gradient(135deg, var(--eos-ink) 0%, #1a3254 60%, #1a2744 100%);
-  color: #fff; padding: clamp(28px, 4vw, 48px) clamp(16px, 2.4vw, 28px) clamp(24px, 3.5vw, 40px);
+/* ── Page subheader — compact, matches IE/QL layout (replaces dark hero) ─── */
+.takeoff-page-sub {
+  background: var(--eos-surface);
+  border-bottom: 1px solid var(--eos-line);
+  padding: 18px clamp(16px, 2.4vw, 28px);
 }
-.hero-aurora {
-  position: absolute; inset: 0; pointer-events: none;
-  background:
-    radial-gradient(900px 400px at 90% -20%, rgba(67,56,202,.28), transparent 55%),
-    radial-gradient(600px 300px at -5% 110%, rgba(163,19,47,.18), transparent 60%);
+.takeoff-page-sub-inner {
+  max-width: 1100px; margin: 0 auto;
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap;
 }
-.takeoff-hero-inner { position: relative; max-width: 1280px; margin: 0 auto; }
-.takeoff-hero-main { max-width: 800px; }
-.hero-eyebrow { margin: 0 0 8px; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(255,255,255,.5); }
-.hero-title { margin: 0 0 10px; font-size: clamp(22px, 4vw, 32px); font-weight: 800; letter-spacing: -0.5px; line-height: 1.1; }
-.hero-sub { margin: 0 0 20px; font-size: 14px; color: rgba(255,255,255,.72); max-width: 600px; line-height: 1.65; }
+.takeoff-page-sub-title { flex: 1 1 300px; min-width: 0; }
+.takeoff-page-heading {
+  margin: 0 0 4px;
+  font-size: 18px; font-weight: 800; letter-spacing: -0.3px;
+  color: var(--eos-ink); line-height: 1.2;
+}
+.takeoff-page-desc {
+  margin: 0; font-size: 13px; color: var(--eos-ink-muted); line-height: 1.5;
+  max-width: 560px;
+}
 
 /* ── Main content ─────────────────────────────────────────────────────────── */
-.main { flex: 1 1 auto; width: 100%; max-width: 1280px; margin: 0 auto; padding: clamp(18px, 2.2vw, 32px) clamp(16px, 2.4vw, 28px) 56px; min-width: 0; }
-.lab-main-inner { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 32px; }
+.main { flex: 1 1 auto; width: 100%; padding: clamp(16px, 2vw, 28px) clamp(16px, 2.4vw, 28px) 56px; min-width: 0; }
+.lab-main-inner { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; }
 
 /* ── Auth panel (standalone) ──────────────────────────────────────────────── */
 .auth-panel-standalone {
@@ -220,6 +235,27 @@ html, body {
 details[open] > .lab-section-summary::before { transform: rotate(90deg); }
 .lab-section-summary-note { font-size: 12px; color: var(--eos-ink-muted); margin-left: auto; }
 
+/* ── Demo sample notice ───────────────────────────────────────────────────── */
+.demo-notice {
+  display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap;
+  padding: 12px 16px; border-radius: var(--r-md);
+  background: var(--eos-warn-soft); border: 1px solid var(--eos-warn-border);
+  font-size: 13px; color: var(--eos-warn);
+}
+.demo-notice-badge {
+  display: inline-flex; align-items: center; padding: 1px 8px;
+  border-radius: 9999px; font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+  background: var(--eos-warn); color: #fff; white-space: nowrap; flex-shrink: 0;
+}
+.demo-notice-text { flex: 1; line-height: 1.5; }
+.demo-notice-clear {
+  background: none; border: 1px solid var(--eos-warn); border-radius: var(--r-sm);
+  color: var(--eos-warn); font-size: 12px; font-weight: 600; padding: 2px 10px;
+  cursor: pointer; margin-left: 4px;
+  transition: background 120ms;
+}
+.demo-notice-clear:hover { background: rgba(0,0,0,0.06); }
+
 /* ── Footer bar ───────────────────────────────────────────────────────────── */
 .footer-bar {
   display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
@@ -235,7 +271,7 @@ details[open] > .lab-section-summary::before { transform: rotate(90deg); }
 
 .lab-card {
   background: var(--eos-surface); border: 1px solid var(--eos-line);
-  border-radius: var(--r-lg); box-shadow: var(--eos-shadow-sm); overflow: hidden;
+  border-radius: var(--r-lg); box-shadow: var(--eos-shadow-sm);
 }
 
 /* ── Summary grid ─────────────────────────────────────────────────────────── */

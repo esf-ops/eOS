@@ -29,6 +29,8 @@
  *  21.  [v5.8.1] benchmarkContext expected BS 6 vs computed 0 → do_not_import
  *  22.  [v5.8.1] benchmarkContext expected no-BS vs computed BS > 0 → do_not_import
  *  23.  [v5.8.1] benchmarkContext result contains no Supabase/quote/pricing data
+ *  24.  [v5.9.2] NONSTANDARD_DEPTH_ASSUMED diagnostic → needs_review, warning severity
+ *  25.  [v5.9.2] no NONSTANDARD_DEPTH_ASSUMED for standard-depth run → ready_for_review
  */
 import assert from "node:assert/strict";
 import { evaluateTakeoffQaGate } from "./takeoffQaGate.mjs";
@@ -537,4 +539,35 @@ function makePageInventory(pages = [], recommendedMeasurementPages = []) {
   console.log("ok: T23 — benchmarkContext result contains no Supabase/quote/pricing data");
 }
 
-console.log("\ntakeoffQaGate: all 23 tests passed");
+// 24. NONSTANDARD_DEPTH_ASSUMED in diagnostics → needs_review (v5.9.2)
+{
+  const result = evaluateTakeoffQaGate({
+    takeoffResult:         makeResult(),
+    computedMeasurements:  makeComputed(45, 0),
+    validationDiagnostics: makeValidation(["NONSTANDARD_DEPTH_ASSUMED"]),
+  });
+
+  assert.equal(result.status, "needs_review", "T24: NONSTANDARD_DEPTH_ASSUMED → needs_review");
+  assert.equal(result.severity, "yellow", "T24: severity yellow");
+  const issue = result.topIssues.find((i) => i.code === "NONSTANDARD_DEPTH_ASSUMED");
+  assert.ok(issue, "T24: NONSTANDARD_DEPTH_ASSUMED issue present in topIssues");
+  assert.equal(issue.severity, "warning", "T24: NONSTANDARD_DEPTH_ASSUMED is a warning (not critical)");
+  assert.ok(issue.message.includes("plan"), "T24: message references plan verification");
+  console.log("ok: T24 — NONSTANDARD_DEPTH_ASSUMED → needs_review, warning severity");
+}
+
+// 25. No NONSTANDARD_DEPTH_ASSUMED and no other issues → ready_for_review (standard depth wall run)
+{
+  const result = evaluateTakeoffQaGate({
+    takeoffResult:         makeResult(),
+    computedMeasurements:  makeComputed(31, 0),
+    validationDiagnostics: makeValidation([]),
+  });
+
+  assert.equal(result.status, "ready_for_review", "T25: no issues → ready_for_review");
+  const issue = result.topIssues.find((i) => i.code === "NONSTANDARD_DEPTH_ASSUMED");
+  assert.ok(!issue, "T25: no NONSTANDARD_DEPTH_ASSUMED issue for standard-depth runs");
+  console.log("ok: T25 — no NONSTANDARD_DEPTH_ASSUMED for standard depth run");
+}
+
+console.log("\ntakeoffQaGate: all 25 tests passed");

@@ -728,3 +728,21 @@
 
 ---
 
+### 56. AI Takeoff Lab — upload-first empty state + nonstandard depth QA (v5.9.2)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-05-31 |
+| **Decision** | Corrected the deployed AI Takeoff head to be upload-first (no Spec 73/demo data shown by default when signed in) and added a `NONSTANDARD_DEPTH_ASSUMED` validator rule for island/peninsula/raised bar/desk/waterfall runs with depths over 26". |
+| **Upload-first state** | `sourceMode` now initializes to `"none"` instead of `"spec73"`. All measurement sections (summary, QA gate, rooms, diagnostics, import preview, benchmark, debug) are gated on `hasActiveSource` (sourceMode !== "none"). The page shows the plan upload card as the primary action when no source is loaded. |
+| **Start New Takeoff** | Resets to `sourceMode = "none"` (upload-first empty state), not Spec 73. Workspace data is preserved in the backend. |
+| **Spec 73 / demo** | Spec 73 sample is only loadable via explicit click in the JSON workbench (collapsed by default). When loaded, a yellow `demo-notice` banner ("Demo sample — not a real workspace") appears with a "Clear demo data" link. |
+| **NONSTANDARD_DEPTH_ASSUMED** | New `TAKEOFF_DIAGNOSTIC_CODE.NONSTANDARD_DEPTH_ASSUMED`. Fires in `takeoffValidator.mjs` on any `counter` run whose label matches island/peninsula/raised bar/desk/waterfall and whose depth exceeds 26". Standard 25.5" wall runs are NOT flagged. |
+| **QA gate** | `evaluateTakeoffQaGate` escalates `NONSTANDARD_DEPTH_ASSUMED` to `needs_review` (warning severity). The AI Takeoff must require estimator verification for any nonstandard specialty piece depth. |
+| **Spec 73 fixture** | Functional values (59.96 sf CT, 6.61 sf BS) unchanged. The peninsula run at 41" now correctly triggers `NONSTANDARD_DEPTH_ASSUMED` when the validator runs — this is intentional and expected for the test fixture. |
+| **UI tokens** | Aligned with IE/QL: `--r-lg:18px`, `--r-md:12px`, richer `--eos-shadow-sm`, IE/QL aurora body background. Dark hero block removed; replaced with compact `takeoff-page-sub` white subheader. |
+| **Security unchanged** | All backend route guards, auth patterns, and hard boundaries unchanged. |
+| **Impacted files** | `backend-core/src/takeoff/takeoffContract.mjs`, `backend-core/src/takeoff/takeoffValidator.mjs`, `backend-core/src/takeoff/takeoffQaGate.mjs`, `backend-core/src/takeoff/takeoffQaGate.test.mjs`, `app-ai-takeoff/src/TakeoffLabApp.tsx`, `app-ai-takeoff/src/styles.css` |
+
+---
+

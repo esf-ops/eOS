@@ -80,6 +80,9 @@ export const TAKEOFF_DIAGNOSTIC_CODE = Object.freeze({
   REFERENCE_TOTAL_COMBINED_MISMATCH:   "REFERENCE_TOTAL_COMBINED_MISMATCH",
   REFERENCE_TOTAL_NO_BS_CONFLICT:      "REFERENCE_TOTAL_NO_BS_CONFLICT",
   EVIDENCE_DIMENSION_NOT_USED:         "EVIDENCE_DIMENSION_NOT_USED",
+
+  // Nonstandard piece depth — island/peninsula/bar/desk/waterfall requires plan evidence (v5.9.2)
+  NONSTANDARD_DEPTH_ASSUMED:           "NONSTANDARD_DEPTH_ASSUMED",
 });
 
 /**
