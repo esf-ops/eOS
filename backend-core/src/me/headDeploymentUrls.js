@@ -24,7 +24,8 @@ const SLUG_TO_ENV_KEYS = Object.freeze({
   finance: ["HEAD_URL_FINANCE"],
   reports: ["HEAD_URL_REPORTS"],
   partner_quote: ["HEAD_URL_PARTNER_QUOTE"],
-  dealer_resources: ["HEAD_URL_DEALER_RESOURCES"]
+  dealer_resources: ["HEAD_URL_DEALER_RESOURCES"],
+  ai_takeoff: ["HEAD_URL_AI_TAKEOFF"]  // v5.9: AI Takeoff Lab — https://takeoff.eliteosfab.com
 });
 
 /** Env keys whose URLs become Browser `Origin` values allowed by backend-core CORS (scheme + host [+ port]). */

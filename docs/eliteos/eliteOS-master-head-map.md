@@ -97,7 +97,7 @@ Status is **conceptual** unless a separate tracker says otherwise. Use the label
 - Quote Source Configuration Head  
 - Sales Territory Admin Head  
 - Partner Pricing Assignment Head  
-- AI Takeoff Head  
+- **AI Takeoff Lab** (**`app-ai-takeoff`** — **`https://takeoff.eliteosfab.com`**; slug `ai_takeoff`; internal preview; estimator-facing plan takeoff with AI extraction, benchmark evaluator, QA gate; import to Internal Estimate remains disabled)  
 - Visualize / Layout Quote Head  
 - Quote Forecasting / Bid-Close Analytics Head  
 

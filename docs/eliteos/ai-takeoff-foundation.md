@@ -1022,6 +1022,109 @@ Make AI Takeoff easier to use by automatically interpreting the existing diagnos
 
 ---
 
+## Deployment: AI Takeoff Lab as a protected head (takeoff.eliteosfab.com)
+
+**Status:** Deployed (2026-05-31)
+
+### Head registration
+
+The AI Takeoff Lab is registered as a first-class eliteOS protected head with slug `ai_takeoff`:
+
+| Property | Value |
+|---|---|
+| Slug | `ai_takeoff` |
+| Label | AI Takeoff Lab |
+| URL env | `HEAD_URL_AI_TAKEOFF=https://takeoff.eliteosfab.com` |
+| Category | Revenue |
+| Launcher visibility | admin / super_admin see it by default; other users need explicit `user_head_access` assignment |
+
+All governance constants, launcher catalog, and deployment URL resolution are updated:
+- `EOS_HEAD_SLUGS` in `eosGovernanceConstants.js`
+- `HEAD_LAUNCHER_CATALOG` in `launcherHeads.js`
+- `SLUG_TO_ENV_KEYS` in `headDeploymentUrls.js` (also adds it to CORS allowed origins automatically)
+
+### Backend auth / head access
+
+All takeoff API routes (`/api/takeoff-jobs/*`) require:
+1. `requireAuth()` — valid Supabase Bearer token
+2. `requireHeadAccess("ai_takeoff", ...)` — user must have `ai_takeoff` in their `actionableGrantSet`
+
+Admin / super_admin users always pass the head access check. Non-admin users need the `ai_takeoff` slug explicitly assigned in `user_head_access` via System Admin.
+
+The `headAccess` dep uses a safe no-op fallback in tests (where only `requireAuth` + `getSupabase` are injected), preserving existing test behavior.
+
+### CORS
+
+`https://takeoff.eliteosfab.com` is allowed by:
+1. `*.eliteosfab.com` subdomain trust (active when `VERCEL_ENV=production` or `EOS_TRUST_ELITEOSFAB_SUBDOMAIN_ORIGINS=1`)
+2. `collectHeadEnvOriginsForCors()` when `HEAD_URL_AI_TAKEOFF=https://takeoff.eliteosfab.com` is set
+
+Local dev (`http://localhost:5186`) is covered by the `localhost:5173–5189` default range.
+
+No wildcard CORS was added.
+
+### Frontend auth
+
+`app-ai-takeoff` already uses the eliteOS-standard patterns:
+- `getSupabase()` with `buildEliteosSupabaseAuthOptions` from `@shared/eliteos-supabase`
+- `resolveAccessToken()` for session refresh (120-second refresh window)
+- Bearer token in `Authorization` header on all API calls
+- Inline email/password sign-in form (same pattern as other eliteOS protected heads)
+- User email displayed in topbar; sign-out button
+
+No auth flow changes were needed.
+
+### Frontend env vars
+
+Frontend reads only Vite-safe variables. Production Vercel project should set:
+
+```env
+VITE_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
+VITE_BACKEND_URL=https://backend-core-six.vercel.app
+```
+
+Never set `VITE_OPENAI_API_KEY`, `VITE_GEMINI_API_KEY`, or `VITE_SUPABASE_SERVICE_ROLE_KEY`.
+
+### Vercel project setup
+
+1. Create new Vercel project from the eOS monorepo.
+2. Set **Root Directory** = `app-ai-takeoff`
+3. Set **Framework** = Vite
+4. **Build command**: `npm run build`
+5. **Output directory**: `dist`
+6. Add the three frontend env vars above.
+7. Assign custom domain `takeoff.eliteosfab.com`.
+
+### Cloudflare / DNS
+
+Add a CNAME record:
+- Name: `takeoff`
+- Target: Vercel project's `cname.vercel-dns.com` (or as shown in Vercel domain settings)
+
+### Backend Vercel env (backend-core project)
+
+Add to the backend-core Vercel environment:
+
+```env
+HEAD_URL_AI_TAKEOFF=https://takeoff.eliteosfab.com
+
+# AI Takeoff extraction (choose one provider):
+TAKEOFF_AI_ENABLED=1
+TAKEOFF_AI_PROVIDER=gemini            # or openai
+GEMINI_TAKEOFF_MODEL=gemini-2.5-pro
+GEMINI_API_KEY=<secret — set in Vercel env, never committed>
+OPENAI_API_KEY=<secret — set in Vercel env, never committed>
+```
+
+### Supabase Auth
+
+Ensure `https://takeoff.eliteosfab.com` is in the Supabase project's **Site URL** / **Redirect URLs** list under Authentication → URL Configuration. Add it alongside the other eliteOS head URLs.
+
+The AI Takeoff Lab uses the same Supabase project and anon key as other eliteOS heads — no separate auth project is required.
+
+---
+
 ## v5.9: Gemini provider test for PDF/vision extraction
 
 **Status:** Built (2026-05-31)

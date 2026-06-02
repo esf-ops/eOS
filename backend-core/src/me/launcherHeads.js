@@ -145,6 +145,14 @@ export const HEAD_LAUNCHER_CATALOG = [
     description: "Partner- and dealer-facing resources.",
     category: "Partner",
     href: "/dealer-resources"
+  },
+  {
+    slug: "ai_takeoff",
+    label: "AI Takeoff Lab",
+    description: "Upload plans, extract countertop measurement evidence, and review AI-generated takeoffs before quote import.",
+    category: "Revenue",
+    href: "/takeoff",
+    roleNote: "Internal preview — AI-assisted plan takeoff for estimators. Import to Internal Estimate remains disabled until QA gates pass consistently."
   }
 ];
 

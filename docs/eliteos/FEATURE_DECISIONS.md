@@ -697,3 +697,19 @@
 
 ---
 
+### 54. AI Takeoff Lab deployed as a protected internal head (ai_takeoff) at takeoff.eliteosfab.com
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-05-31 |
+| **Decision** | The AI Takeoff Lab is registered as a first-class eliteOS protected head with slug `ai_takeoff`, deployed at `https://takeoff.eliteosfab.com`. All API routes are gated by `requireHeadAccess("ai_takeoff", ...)` in addition to `requireAuth()`. Admin / super_admin users bypass the head access check by role. Non-admin users require explicit `user_head_access` assignment in System Admin. The head appears in Home Launcher for users with access. |
+| **Why** | Testing on localhost was friction-heavy: repeated sign-ins, backend restarts, stuck workspace URLs. A permanent deployed head at a real domain removes this friction while preserving all auth/security guardrails. The deployment reuses all existing eliteOS head patterns: launcher catalog, head deployment URLs, CORS via `collectHeadEnvOriginsForCors`, and `requireHeadAccess` middleware. |
+| **Access model** | `user_head_access.head_slug = 'ai_takeoff'` for non-admin users. Admin / super_admin: always passes. No dealer/partner access (not in `DEALER_SAFE_HEAD_SLUGS`). |
+| **CORS** | `takeoff.eliteosfab.com` covered by `*.eliteosfab.com` subdomain trust + `HEAD_URL_AI_TAKEOFF` env var in backend-core. No wildcard CORS. |
+| **Frontend safety** | Only `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_BACKEND_URL` in frontend. No AI API keys in browser bundle. |
+| **Import still blocked** | Deploying as a protected head does not change the import gate. Import to Internal Estimate remains disabled. |
+| **Impacted files** | `eosGovernanceConstants.js` (add `ai_takeoff`), `headDeploymentUrls.js` (add `HEAD_URL_AI_TAKEOFF`), `launcherHeads.js` (add catalog entry), `server.js` (create `headAccessAiTakeoff`), `takeoffWorkspaceRoutes.js` (apply `guardHead`), `app-ai-takeoff/.env.example` (new), `backend-core/.env.example` (add HEAD_URL_AI_TAKEOFF) |
+| **Revisit trigger** | When AI import is enabled, revisit the head access model to determine whether the `ai_takeoff` slug should gate import or whether that should be a separate privilege. |
+
+---
+

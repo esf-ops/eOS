@@ -42,9 +42,16 @@ const jsonParser = express.json({ limit: "4mb" }); // TakeoffResult JSON can be 
 
 /**
  * @param {import("express").Express} app
- * @param {{ requireAuth: Function, getSupabase: () => import("@supabase/supabase-js").SupabaseClient }} deps
+ * @param {{
+ *   requireAuth: Function,
+ *   getSupabase: () => import("@supabase/supabase-js").SupabaseClient,
+ *   headAccess: Function,   — requireHeadAccess("ai_takeoff", ...) middleware; all takeoff routes are gated
+ * }} deps
  */
-export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase }) {
+export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase, headAccess }) {
+  // Inline guard: headAccess is provided in production by server.js; fall back to a
+  // no-op for backwards-compat with tests that inject requireAuth + getSupabase only.
+  const guardHead = typeof headAccess === "function" ? headAccess : (_r, _s, next) => next();
 
   // ── POST /api/takeoff-jobs ─────────────────────────────────────────────────
   //
@@ -57,7 +64,7 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase }) 
   // Response:
   //   { ok: true, takeoffJobId, startedAt, reviewStatus, hasSavedResult, file: {...} }
   //
-  app.post("/api/takeoff-jobs", requireAuth(), jsonParser, async (req, res) => {
+  app.post("/api/takeoff-jobs", requireAuth(), guardHead, jsonParser, async (req, res) => {
     try {
       const supabase = getSupabase();
       const user = req.user;
@@ -92,7 +99,7 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase }) 
   // Response:
   //   { ok: true, takeoffJobId, reviewStatus, startedAt, hasSavedResult, isWorkspace, file: {...} }
   //
-  app.get("/api/takeoff-jobs/:id", requireAuth(), async (req, res) => {
+  app.get("/api/takeoff-jobs/:id", requireAuth(), guardHead, async (req, res) => {
     try {
       const supabase = getSupabase();
 
@@ -128,7 +135,7 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase }) 
   // Response:
   //   { ok: true, takeoffJobId, savedAt, schemaVersion, reviewStatus, summary: {...} }
   //
-  app.post("/api/takeoff-jobs/:id/results", requireAuth(), jsonParser, async (req, res) => {
+  app.post("/api/takeoff-jobs/:id/results", requireAuth(), guardHead, jsonParser, async (req, res) => {
     try {
       const supabase = getSupabase();
       const user = req.user;
@@ -168,7 +175,7 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase }) 
   //     normalizedTakeoffJson, computedMeasurementsJson, validationDiagnosticsJson,
   //     importPlanJson, file: {...} }
   //
-  app.get("/api/takeoff-jobs/:id/results/latest", requireAuth(), async (req, res) => {
+  app.get("/api/takeoff-jobs/:id/results/latest", requireAuth(), guardHead, async (req, res) => {
     try {
       const supabase = getSupabase();
 
@@ -205,7 +212,7 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase }) 
   //
   // NOTE: registered BEFORE /:id/results/:resultId to avoid route collision.
   //
-  app.get("/api/takeoff-jobs/:id/results", requireAuth(), async (req, res) => {
+  app.get("/api/takeoff-jobs/:id/results", requireAuth(), guardHead, async (req, res) => {
     try {
       const supabase = getSupabase();
       const orgCtx = await resolveOrganizationContext({ req, supabase, mode: "authenticated" });
@@ -240,7 +247,7 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase }) 
   //     promptVersion, modelUsed, normalizedTakeoffJson, computedMeasurementsJson,
   //     validationDiagnosticsJson, importPlanJson }
   //
-  app.get("/api/takeoff-jobs/:id/results/:resultId", requireAuth(), async (req, res) => {
+  app.get("/api/takeoff-jobs/:id/results/:resultId", requireAuth(), guardHead, async (req, res) => {
     try {
       const supabase = getSupabase();
       const orgCtx = await resolveOrganizationContext({ req, supabase, mode: "authenticated" });
@@ -288,7 +295,7 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase }) 
   //     normalizedTakeoffJson, computedMeasurementsJson, validationDiagnosticsJson,
   //     importPlanJson, summary, modelUsed, promptVersion, usage }
   //
-  app.post("/api/takeoff-jobs/:id/generate-ai-draft", requireAuth(), async (req, res) => {
+  app.post("/api/takeoff-jobs/:id/generate-ai-draft", requireAuth(), guardHead, async (req, res) => {
     try {
       const supabase = getSupabase();
       const user = req.user;

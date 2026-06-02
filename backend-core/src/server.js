@@ -66,9 +66,10 @@ function supabaseServerClient() {
   return _supabaseServerClientInstance;
 }
 
-const headAccessExecutive = requireHeadAccess("executive", { getSupabase: supabaseServerClient });
+const headAccessExecutive   = requireHeadAccess("executive",   { getSupabase: supabaseServerClient });
 const headAccessBrainHealth = requireHeadAccess("brain_health", { getSupabase: supabaseServerClient });
 const headAccessSystemAdmin = requireHeadAccess("system_admin", { getSupabase: supabaseServerClient });
+const headAccessAiTakeoff   = requireHeadAccess("ai_takeoff",   { getSupabase: supabaseServerClient });
 
 function cronSecretOrNull() {
   const s = String(process.env.EOS_CRON_SECRET ?? "").trim();
@@ -1190,7 +1191,8 @@ attachQuoteFileRoutes(app, {
 
 attachTakeoffWorkspaceRoutes(app, {
   requireAuth,
-  getSupabase: supabaseServerClient
+  getSupabase:  supabaseServerClient,
+  headAccess:   headAccessAiTakeoff,
 });
 
 app.post("/api/auth/log-login", requireAuth(), express.json(), async (req, res) => {

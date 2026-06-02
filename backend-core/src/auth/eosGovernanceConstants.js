@@ -22,7 +22,8 @@ export const EOS_HEAD_SLUGS = Object.freeze([
   "finance",
   "reports",
   "partner_quote",
-  "dealer_resources"
+  "dealer_resources",
+  "ai_takeoff"   // v5.9: AI Takeoff Lab — internal preview head
 ]);
 
 const _headSet = new Set(EOS_HEAD_SLUGS);

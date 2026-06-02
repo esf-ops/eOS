@@ -164,7 +164,7 @@ Durable decisions: `FEATURE_DECISIONS.md` entries **37** (additive lane), **38**
 
 ---
 
-## AI Takeoff Lab (2026-05-31, v5.9 built)
+## AI Takeoff Lab (2026-05-31, v5.9 built + deployed as protected head)
 
 Contract-first foundation + file-backed workspace + live AI extraction + benchmark/evaluation harness + run history + debug view + four-step extraction (inventory → dimension evidence → targeted extraction → validator reconciliation) + cutout handling rules + sanitized benchmark evaluator + automatic QA gate (v5.8) + **swappable AI provider — Gemini support** (v5.9).
 
@@ -181,7 +181,13 @@ Contract-first foundation + file-backed workspace + live AI extraction + benchma
 | v5.5 runs | v4+inv+ev | TBD — run manually | — | 78 sf | 4 sf | — | Three-step evidence anchored |
 | v5.6 runs | v5+inv+ev+ref | TBD — run manually | — | 78 sf | 4 sf | — | Ref total reconciliation |
 
-**Status:** v5.9 built. Gemini provider (`geminiTakeoffProvider.mjs`) added for all three AI passes. Set `TAKEOFF_AI_PROVIDER=gemini` + `GEMINI_API_KEY` to run extraction through Gemini. OpenAI remains the default. Run history shows a colored provider pill (green = openai, blue = gemini). v5.8 automatic QA gate, v5.8.1 benchmark context escalation, v5.7 benchmark evaluator + 10 sanitized fixtures all preserved unchanged. Import still blocked until consistent benchmark pass.
+**Status:** v5.9 built + deployed as `ai_takeoff` protected head. Gemini provider (`geminiTakeoffProvider.mjs`) added for all three AI passes. Set `TAKEOFF_AI_PROVIDER=gemini` + `GEMINI_API_KEY` to run extraction through Gemini. OpenAI remains the default. Run history shows a colored provider pill (green = openai, blue = gemini). v5.8 automatic QA gate, v5.8.1 benchmark context escalation, v5.7 benchmark evaluator + 10 sanitized fixtures all preserved unchanged. Import still blocked until consistent benchmark pass.
+
+**Deployed URL:** https://takeoff.eliteosfab.com — Vercel project `app-ai-takeoff`, domain `takeoff.eliteosfab.com`
+
+**Head access:** `ai_takeoff` slug in `user_head_access` table (or admin/super_admin role which auto-passes). Backend enforces via `requireHeadAccess("ai_takeoff", ...)` on all takeoff API routes.
+
+**CORS:** `takeoff.eliteosfab.com` is covered by the `*.eliteosfab.com` subdomain trust + `HEAD_URL_AI_TAKEOFF` env in backend. No wildcard CORS added.
 
 ### Known benchmark categories (v5.7)
 
