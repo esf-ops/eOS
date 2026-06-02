@@ -237,7 +237,7 @@ npm run eos:test:takeoff-contract             # 24 tests A-X (incl. v5.5 cutout 
 npm run eos:test:takeoff-workspace-service    # 30 tests
 npm run eos:test:takeoff-extraction-service   # 28 tests (incl. v5.4 inv + v5.5 evidence)
 npm run eos:test:takeoff-page-inventory       # 10 tests (v5.4)
-npm run eos:test:takeoff-dimension-evidence   # 10 new tests (v5.5)
+npm run eos:test:takeoff-dimension-evidence   # 13 tests (v5.5 + v5.6)
 npm run eos:test:takeoff-benchmark            # 7 tests (pure eval helpers)
 npm run eos:test:pricing-authority            # confirm no pricing regression
 npm run eos:check:local                       # full repo check
@@ -268,22 +268,12 @@ OPENAI_API_KEY=sk-...       never client-exposed
 | v5.3 — Extraction run history, debug panel, _meta tracking | Built |
 | v5.4 — Page inventory + targeted extraction pass | Built |
 | v5.5 — Dimension evidence table + cutout handling rules | **Built** |
+|| v5.6 — Reference total reconciliation + evidence coverage warnings | **Built** |
 
 Dev: `npm run dev --prefix app-ai-takeoff` -> `http://localhost:5186`. Not in Home Launcher yet.
 
 ### Next required focus
-**Run manual QA with the three-step evidence extraction and compare accuracy against 78 CT / 4 BS target.**
-
-Steps:
-1. Open Lab with the existing hand sketch workspace.
-2. Click "Generate AI draft" to run the new three-step extraction (inventory → dimension evidence → targeted extraction).
-3. Check the **Page Inventory** panel — confirm hand sketch page is recommended and email pages are ignored.
-4. Check the **Dimension Evidence** panel — confirm ALL major labeled dimensions on the sketch are extracted (e.g. island 108×56, sink wall 91.5×25.5, etc.) BEFORE judging the final takeoff.
-5. If the evidence table is missing a dimension: the v4 extraction will likely miss it too — the evidence prompt needs tuning.
-6. If the evidence table has all dimensions: check whether the final TakeoffResult builds runs from those exact values.
-7. Confirm sink/cooktop cutouts appear in the evidence cutouts[], not in TakeoffResult exclusions[].
-8. Run the Benchmark / QA panel — compare against 78 CT / 4 BS target.
-9. Compare against prior runs in run history.
+**Run manual QA for reference benchmarks 001-004 using private PDFs. Verify `REFERENCE_TOTAL_*_MISMATCH` warnings appear for benchmarks where AI computed value deviates from visible reference total. Target: 31 CT, 53 CT / 6 BS, 49 CT / 0 BS, 50 CT / 0 BS.**
 
 ### Import gate
 Do NOT enable "Import from Takeoff" until:
