@@ -1,5 +1,5 @@
 /**
- * Takeoff Workspace Routes — file-backed takeoff workspace (v4).
+ * Takeoff Workspace Routes — normalized takeoff workspace (v4.5).
  *
  * Endpoints:
  *   POST /api/takeoff-jobs                   — create workspace from uploaded quote file
@@ -7,13 +7,18 @@
  *   POST /api/takeoff-jobs/:id/results        — save reviewed TakeoffResult (server recomputes)
  *   GET  /api/takeoff-jobs/:id/results/latest — load latest saved result
  *
- * In v4, `takeoffJobId` == `quoteFileId` (1:1 mapping via quote_files.metadata).
- * v5 will introduce proper quote_takeoff_jobs rows when the SQL migration is confirmed.
+ * v4.5: `takeoffJobId` is a real quote_takeoff_jobs.id (quote_id = null for Lab/pre-quote flows).
+ *       Results are persisted in quote_takeoff_results (with fallback to quote_takeoff_jobs.result_summary
+ *       if quote_takeoff_results.quote_id NOT NULL constraint is not yet relaxed in this env).
+ *       See takeoffWorkspaceService.mjs for the full persistence strategy.
+ *
+ * Legacy v4: if a request arrives with a quoteFileId as the workspace ID (v4 behavior),
+ *       the service falls back to reading from quote_files.metadata (read-only).
  *
  * All endpoints:
  *   - Require authentication.
  *   - Derive organizationId from auth context (never from client body).
- *   - Verify file/workspace ownership before any read/write.
+ *   - Verify job/file ownership before any read/write.
  *   - Never return storage_path.
  *   - No AI calls. No quote mutation. No pricing logic.
  *
@@ -39,7 +44,7 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase }) 
   // ── POST /api/takeoff-jobs ─────────────────────────────────────────────────
   //
   // Creates a takeoff workspace from an already-uploaded quote file.
-  // The quoteFileId serves as the takeoff job ID in v4.
+  // Returns a real quote_takeoff_jobs.id as the takeoffJobId.
   //
   // Request body:
   //   quoteFileId  uuid  required — must belong to the authenticated org
