@@ -204,10 +204,59 @@ See `FEATURE_DECISIONS.md` entry **48** (contract-first, AI-not-authority, separ
 ### Lab shell (built 2026-06-01)
 `app-ai-takeoff/` exists as a **read-only fixture viewer**. Dev: `npm run dev --prefix app-ai-takeoff` → `http://localhost:5186`. Build: `npm run eos:build:ai-takeoff`. Not registered in Home Launcher yet.
 
+### Lab versions
+| Version | Status |
+|---------|--------|
+| v1 — Spec 73 fixture viewer | Built 2026-06-01 |
+| v2 — Pasted JSON workbench | Built 2026-06-01 |
+| v3 — Editable review fields | Built 2026-06-01 — inline edit for run dimensions/labels/backsplash; live recompute on every change; Reset edits / Reset all; Copy edited JSON; "Edited draft" status pill |
+| v4 — File upload + live AI | Not built |
+
 ### Next slice (requires separate approval)
-1. Wire a real AI call (vision model) to produce a `TakeoffResult` draft from an uploaded plan image/PDF.
-2. Extend `app-ai-takeoff/` to accept uploaded plan files and display AI-extracted drafts through the existing validator/import-preview UI.
-3. Enable the "Import to Internal Estimate" action once approved (no Internal Estimate UI changes until this slice).
+1. Apply `eliteos_quote_files_takeoff_storage.sql` manually + create `eliteos-quote-files` bucket (private) in Supabase.
+2. Build backend upload endpoint: `createSignedUploadUrl` → write `quote_files` row → log `uploaded` event.
+3. Add Internal Estimate file panel (list + upload, no AI Takeoff yet).
+4. Wire AI model call to produce `TakeoffResult` draft from uploaded plan.
+
+---
+
+## Quote Files + Takeoff Storage (2026-06-01)
+
+File storage architecture for Internal Estimate, AI Takeoff, and sold-quote/Moraware handoff.
+
+### Status
+
+| Piece | State |
+|-------|-------|
+| `eliteos_quote_files_takeoff_storage.sql` — SQL draft | **Written** — not applied |
+| Supabase bucket `eliteos-quote-files` | **Not created** |
+| `quote_files` table | **Designed** — draft only |
+| `quote_file_events` table | **Designed** — draft only |
+| Additive changes to `quote_takeoff_jobs` | **Designed** — draft only |
+| Additive changes to `quote_takeoff_results` | **Designed** — draft only |
+| `quoteFileStoragePath.mjs` — pure helper | **Built** |
+| `quoteFileStoragePath.test.mjs` — 10 test groups | **Built, all passing** |
+| `docs/eliteos/quote-files-storage.md` | **Written** |
+| Upload UI (Internal Estimate or Lab) | **Not built** |
+| Signed URL endpoint | **Not built** |
+| RLS policies | **Not applied** |
+
+### Key decisions
+- `quote_files` is general-purpose for Internal Estimate and all quote types; AI Takeoff is optional
+- Files (bytes) in Supabase Storage; metadata in Postgres
+- `quote_id` references `quote_headers.id` for all quote source types (no separate `internal_quote_id`)
+- `quote_takeoff_jobs.quote_id` made nullable — allows pre-quote Lab uploads
+- `storage_provider` field enables future R2/S3 migration without schema change
+- All downloads via signed URLs — `storage_path` never exposed to clients
+
+See `FEATURE_DECISIONS.md` entry **49** and `docs/eliteos/quote-files-storage.md`.
+
+### Key commands
+```bash
+npm run eos:test:quote-file-storage   # 10 test groups, all passing
+npm run eos:test:takeoff-contract     # 16 test groups, all passing
+npm run eos:check:local               # full repo check
+```
 
 ---
 

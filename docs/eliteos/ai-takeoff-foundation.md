@@ -231,6 +231,26 @@ Expand fixture and import planner for multi-room plans (bathrooms, pantry, laund
 
 ---
 
+## Quote Files + Takeoff Storage Architecture
+
+See [`quote-files-storage.md`](./quote-files-storage.md) for the full design.
+
+**Summary:** `quote_files` is the general-purpose file attachment table for Internal Estimate and all quote types. AI Takeoff (`takeoff_jobs` / `takeoff_results`) is an optional processing layer on top. Most Internal Estimate files will never run through AI Takeoff.
+
+| Table / Component | Role |
+|---|---|
+| `quote_files` | General file metadata; one row per uploaded file; org-scoped |
+| `quote_file_events` | Append-only audit trail for file lifecycle and handoff actions |
+| `quote_takeoff_jobs` (extended) | AI processing job, now with nullable `quote_id` for pre-quote flows |
+| `quote_takeoff_results` (extended) | Full contract JSON stored alongside existing sparse measurement rows |
+| `eliteos-quote-files` bucket | Private Supabase Storage bucket (not yet created — draft only) |
+| `buildQuoteFileStoragePath()` | Pure helper for deterministic storage path construction |
+| `sanitizeStorageFilename()` | Pure filename sanitizer (path traversal prevention) |
+
+**Status (2026-06-01):** SQL draft written, not applied. Bucket not created. No upload UI. No Supabase writes.
+
+---
+
 ## Durable decisions
 
-See `FEATURE_DECISIONS.md` entry **48** for the architectural rationale for contract-first, AI-not-authority, and separate-head design.
+See `FEATURE_DECISIONS.md` entries **48** (contract-first, AI-not-authority) and **49** (quote files storage architecture).

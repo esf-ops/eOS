@@ -631,3 +631,15 @@
 
 ---
 
+### 49. Quote files storage architecture — object storage for quote-attached files, Postgres for metadata
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-06-01 |
+| **Decision** | All quote-related file bytes (cabinet plans, measurement plans, photos, signed approvals, customer PDFs) live in **Supabase Storage** (private bucket `eliteos-quote-files`), never in Postgres rows. Postgres (`quote_files` table) tracks metadata, ownership, quote linkage, takeoff linkage, and lifecycle only. `quote_files` is a **general-purpose attachment table for Internal Estimate and all quote types** — AI Takeoff (`takeoff_jobs` / `takeoff_results`) is an **optional processing layer** on top; most files will never run through AI Takeoff. A file may exist without a quote (pre-quote upload) and without a takeoff job. `quote_id` references `quote_headers.id` for all quote source types; `quote_headers.quote_source` distinguishes `internal_quote` / `partner_quote` / `public_consumer`. The existing `quote_takeoff_jobs.quote_id` NOT NULL constraint is relaxed to nullable (additive, backward-safe) to allow pre-quote takeoff flows. All downloads are mediated by short-lived signed URLs (backend-generated); `storage_path` is never exposed to untrusted clients. A `storage_provider` field allows future migration to Cloudflare R2 or AWS S3 without schema change. |
+| **Why** | Binary blobs in Postgres waste row storage and slow queries. Signed URLs allow fine-grained access control without complex RLS on bytes. General-purpose `quote_files` avoids duplicating attachment infrastructure for each feature. Separating quote linkage from takeoff linkage means most Internal Estimate usage (attach a cabinet plan, a photo, a signed approval) requires zero AI involvement. Pre-quote file uploads are required for the AI Takeoff Lab flow (upload plan before creating the quote). |
+| **Impacted files** | `backend-core/supabase/eliteos_quote_files_takeoff_storage.sql` (SQL draft — not applied), `backend-core/src/files/quoteFileStoragePath.mjs`, `backend-core/src/files/quoteFileStoragePath.test.mjs`, `package.json` (`eos:test:quote-file-storage`), `docs/eliteos/quote-files-storage.md`, `docs/eliteos/ai-takeoff-foundation.md` |
+| **Revisit trigger** | Before applying SQL to Supabase; before creating the storage bucket; before building any upload UI; before implementing signed URL generation; before wiring Moraware file handoff; before implementing RLS policies for `quote_files`. |
+
+---
+
