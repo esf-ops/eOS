@@ -90,20 +90,61 @@ export default function TakeoffLabApp() {
   // ── Auth ──────────────────────────────────────────────────────────────────
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+
+  // Sign-in form
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   useEffect(() => {
     const supabase = getSupabase();
     if (!supabase) { setAuthChecked(true); return; }
-    void resolveAccessToken(supabase).then((tok) => {
+    void resolveAccessToken(supabase).then(async (tok) => {
       setAuthToken(tok);
       setAuthChecked(true);
+      if (tok) {
+        const { data } = await supabase.auth.getUser();
+        setUserEmail(data.user?.email ?? null);
+      }
     });
     // Listen for auth changes (sign-in / sign-out).
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async () => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       const tok = await resolveAccessToken(supabase);
       setAuthToken(tok);
+      setUserEmail(session?.user?.email ?? null);
     });
     return () => subscription.unsubscribe();
+  }, []);
+
+  const signIn = useCallback(async () => {
+    setAuthError(null);
+    const supabase = getSupabase();
+    if (!supabase) {
+      setAuthError("Sign-in is not configured — set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.");
+      return;
+    }
+    setAuthBusy(true);
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: authEmail.trim(),
+        password: authPassword,
+      });
+      if (error) throw error;
+      setAuthPassword(""); // clear password from memory
+    } catch (e) {
+      setAuthError(e instanceof Error ? e.message : "Sign-in failed.");
+    } finally {
+      setAuthBusy(false);
+    }
+  }, [authEmail, authPassword]);
+
+  const signOut = useCallback(async () => {
+    const supabase = getSupabase();
+    if (supabase) await supabase.auth.signOut();
+    setAuthToken(null);
+    setUserEmail(null);
   }, []);
 
   // ── Workspace state (file-backed) ────────────────────────────────────────
@@ -361,11 +402,20 @@ export default function TakeoffLabApp() {
             <span className="lab-topbar-divider" aria-hidden>·</span>
             <span className="lab-topbar-head">AI Takeoff Lab</span>
           </div>
-          <div className="lab-topbar-badges">
-            <span className="badge badge-lab">Lab · review only</span>
-            <span className="badge badge-safe">No quote mutation</span>
-            {authChecked && !authToken && (
-              <span className="badge badge-unauthed">Not signed in</span>
+          <div className="lab-topbar-right">
+            <div className="lab-topbar-badges">
+              <span className="badge badge-lab">Lab · review only</span>
+              <span className="badge badge-safe">No quote mutation</span>
+            </div>
+            {authChecked && (
+              authToken
+                ? <div className="auth-topbar-user">
+                    {userEmail && <span className="auth-topbar-email">{userEmail}</span>}
+                    <button type="button" className="auth-topbar-signout" onClick={() => void signOut()}>
+                      Sign out
+                    </button>
+                  </div>
+                : <span className="badge badge-unauthed">Not signed in</span>
             )}
           </div>
         </div>
@@ -412,6 +462,62 @@ export default function TakeoffLabApp() {
       {/* ── Main content ──────────────────────────────────────────── */}
       <main className="lab-main">
         <div className="lab-main-inner">
+
+          {/* ── Sign-in panel (shown only when not authenticated) ─────── */}
+          {authChecked && !authToken && (
+            <section className="lab-section">
+              <h2 className="lab-section-title">Sign in</h2>
+              <div className="auth-panel lab-card">
+                <p className="auth-panel-desc">
+                  Sign in to upload plan files, create workspaces, and generate AI drafts.
+                  The JSON workbench and Spec 73 sample are available without sign-in.
+                </p>
+                {!getSupabase() && (
+                  <div className="auth-panel-warn">
+                    <strong>Supabase is not configured.</strong>{" "}
+                    Set <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code> in your <code>.env</code> file.
+                  </div>
+                )}
+                <div className="auth-panel-fields">
+                  <label className="auth-panel-label">
+                    Email
+                    <input
+                      type="email"
+                      className="auth-panel-input"
+                      value={authEmail}
+                      onChange={(e) => setAuthEmail(e.target.value)}
+                      autoComplete="username"
+                      disabled={authBusy || !getSupabase()}
+                      onKeyDown={(e) => e.key === "Enter" && void signIn()}
+                    />
+                  </label>
+                  <label className="auth-panel-label">
+                    Password
+                    <input
+                      type="password"
+                      className="auth-panel-input"
+                      value={authPassword}
+                      onChange={(e) => setAuthPassword(e.target.value)}
+                      autoComplete="current-password"
+                      disabled={authBusy || !getSupabase()}
+                      onKeyDown={(e) => e.key === "Enter" && void signIn()}
+                    />
+                  </label>
+                </div>
+                {authError && (
+                  <div className="auth-panel-error" role="alert">{authError}</div>
+                )}
+                <button
+                  type="button"
+                  className="auth-panel-btn"
+                  disabled={authBusy || !authEmail.trim() || !authPassword || !getSupabase()}
+                  onClick={() => void signIn()}
+                >
+                  {authBusy ? "Signing in…" : "Sign in"}
+                </button>
+              </div>
+            </section>
+          )}
 
           {/* ── Source plan file (v4) ──────────────────────────────────── */}
           <section className="lab-section">
