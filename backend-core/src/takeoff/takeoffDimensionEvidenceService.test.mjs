@@ -16,6 +16,9 @@
  *   8. Provider throwing an error re-throws as evidenceFailed
  *   9. evidencePromptVersion included in returned evidence
  *  10. No quote mutation, no pricing in result
+ *  11. referenceTotals array returned in normalized evidence (v5.6)
+ *  12. "50 sq' no b/s" reference total: countertopSf=50, noBacksplash=true, backsplashSf=0
+ *  13. "4\" BSP = 6 sq'" reference total: backsplashSf=6, backsplashHeightIn=4
  */
 
 import assert from "node:assert/strict";
@@ -265,7 +268,7 @@ function mockProvider(rawText) {
   });
 
   assert.equal(result.evidencePromptVersion, EVIDENCE_PROMPT_VERSION, "T9: evidencePromptVersion in result");
-  assert.equal(result.evidencePromptVersion, "v1", "T9: evidencePromptVersion is v1");
+  assert.equal(result.evidencePromptVersion, "v2", "T9: evidencePromptVersion is v2");
   console.log("ok: evidencePromptVersion included in returned DimensionEvidence");
 }
 
@@ -290,4 +293,104 @@ function mockProvider(rawText) {
   console.log("ok: dimension evidence result contains no quote mutation / pricing data");
 }
 
-console.log("\ntakeoffDimensionEvidenceService: all 10 tests passed");
+// ── T11: referenceTotals returned in normalized evidence ──────────────────────
+{
+  const evidenceWithRefs = makeValidEvidenceJson({
+    referenceTotals: [
+      {
+        id: "ref-1",
+        pageNumber: 1,
+        rawText: "50 sq' no b/s",
+        countertopSf: 50,
+        noBacksplash: true,
+        backsplashSf: 0,
+        confidence: "high",
+        notes: [],
+      },
+    ],
+  });
+
+  const result = await runDimensionEvidence({
+    fileBuffer:       FAKE_FILE_BUFFER,
+    mimeType:         "application/pdf",
+    originalFilename: FAKE_FILENAME,
+    providerFn:       mockProvider(evidenceWithRefs),
+  });
+
+  assert.ok(Array.isArray(result.referenceTotals), "T11: referenceTotals must be an array");
+  assert.equal(result.referenceTotals.length, 1, "T11: exactly 1 reference total in result");
+  assert.equal(result.referenceTotals[0].rawText, "50 sq' no b/s", "T11: rawText preserved");
+  console.log("ok: referenceTotals array returned in normalized evidence");
+}
+
+// ── T12: "50 sq' no b/s" → countertopSf=50, noBacksplash=true, backsplashSf=0 ─
+{
+  const evidenceWith50NoBs = makeValidEvidenceJson({
+    referenceTotals: [
+      {
+        id: "ref-1",
+        pageNumber: 1,
+        rawText: "50 sq' no b/s",
+        label: null,
+        countertopSf: 50,
+        backsplashSf: 0,
+        combinedSf: null,
+        noBacksplash: true,
+        backsplashHeightIn: null,
+        confidence: "high",
+        notes: [],
+      },
+    ],
+  });
+
+  const result = await runDimensionEvidence({
+    fileBuffer:       FAKE_FILE_BUFFER,
+    mimeType:         "application/pdf",
+    originalFilename: FAKE_FILENAME,
+    providerFn:       mockProvider(evidenceWith50NoBs),
+  });
+
+  const ref = result.referenceTotals[0];
+  assert.equal(ref.countertopSf,   50,   "T12: countertopSf must be 50");
+  assert.equal(ref.noBacksplash,   true, "T12: noBacksplash must be true");
+  assert.equal(ref.backsplashSf,   0,    "T12: backsplashSf must be 0");
+  assert.equal(ref.rawText, "50 sq' no b/s", "T12: rawText must be preserved verbatim");
+  console.log('ok: "50 sq\' no b/s" reference total correctly parsed');
+}
+
+// ── T13: "4" BSP = 6 sq'" → backsplashSf=6, backsplashHeightIn=4 ─────────────
+{
+  const evidenceWithBsp = makeValidEvidenceJson({
+    referenceTotals: [
+      {
+        id: "ref-2",
+        pageNumber: 1,
+        rawText: '4" BSP = 6 sq\'',
+        label: null,
+        countertopSf: null,
+        backsplashSf: 6,
+        combinedSf: null,
+        noBacksplash: false,
+        backsplashHeightIn: 4,
+        confidence: "high",
+        notes: [],
+      },
+    ],
+  });
+
+  const result = await runDimensionEvidence({
+    fileBuffer:       FAKE_FILE_BUFFER,
+    mimeType:         "application/pdf",
+    originalFilename: FAKE_FILENAME,
+    providerFn:       mockProvider(evidenceWithBsp),
+  });
+
+  const ref = result.referenceTotals[0];
+  assert.equal(ref.backsplashSf,      6, 'T13: backsplashSf must be 6');
+  assert.equal(ref.backsplashHeightIn, 4, 'T13: backsplashHeightIn must be 4');
+  assert.equal(ref.noBacksplash, false,   'T13: noBacksplash must be false');
+  assert.equal(ref.countertopSf,  null,   'T13: countertopSf must be null (BS-only ref)');
+  console.log('ok: "4" BSP = 6 sq\'" reference total correctly parsed');
+}
+
+console.log("\ntakeoffDimensionEvidenceService: all 13 tests passed");

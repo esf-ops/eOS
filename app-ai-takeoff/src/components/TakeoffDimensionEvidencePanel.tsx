@@ -42,6 +42,20 @@ export interface EvidenceCutout {
   notes?:      string[];
 }
 
+export interface EvidenceReferenceTotal {
+  id:               string;
+  pageNumber?:      number | null;
+  rawText:          string;
+  label?:           string | null;
+  countertopSf?:    number | null;
+  backsplashSf?:    number | null;
+  combinedSf?:      number | null;
+  noBacksplash?:    boolean;
+  backsplashHeightIn?: number | null;
+  confidence:       "high" | "medium" | "low";
+  notes?:           string[];
+}
+
 export interface DimensionEvidence {
   schemaVersion:         string;
   evidencePromptVersion?: string;
@@ -49,12 +63,29 @@ export interface DimensionEvidence {
   dimensions:            EvidenceDimension[];
   notes:                 EvidenceNote[];
   cutouts:               EvidenceCutout[];
+  referenceTotals?:      EvidenceReferenceTotal[];
   uncertainItems:        string[];
   reviewRequired:        boolean;
 }
 
+/** Minimal computed measurements type for reconciliation display. */
+interface TakeoffComputedPartial {
+  countertopExactSf: number;
+  backsplashExactSf: number;
+  combinedExactSf:   number;
+}
+
+/** Minimal diagnostic for coverage warnings display. */
+interface TakeoffDiagnosticPartial {
+  code:    string;
+  level:   string;
+  message: string;
+}
+
 interface Props {
-  evidence: DimensionEvidence;
+  evidence:    DimensionEvidence;
+  computed?:   TakeoffComputedPartial | null;
+  validation?: { diagnostics: TakeoffDiagnosticPartial[] } | null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -152,12 +183,34 @@ function DimensionRow({ dim }: { dim: EvidenceDimension }) {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function TakeoffDimensionEvidencePanel({ evidence }: Props) {
+const REF_CT_TOLERANCE       = 2;
+const REF_BS_TOLERANCE       = 1;
+const REF_COMBINED_TOLERANCE = 2;
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+function reconcileStatus(
+  refVal: number | null | undefined,
+  computedVal: number,
+  tolerance: number
+): "pass" | "mismatch" | null {
+  if (refVal == null) return null;
+  return Math.abs(round2(refVal) - round2(computedVal)) <= tolerance ? "pass" : "mismatch";
+}
+
+export default function TakeoffDimensionEvidencePanel({ evidence, computed, validation }: Props) {
   const dimCount    = evidence.dimensions.length;
   const noteCount   = evidence.notes.length;
   const cutoutCount = evidence.cutouts.length;
+  const refTotals   = evidence.referenceTotals ?? [];
 
   const hasUncertain = evidence.uncertainItems.length > 0;
+
+  const coverageWarnings = (validation?.diagnostics ?? []).filter(
+    (d) => d.code === "EVIDENCE_DIMENSION_NOT_USED"
+  );
 
   return (
     <details className="ev-panel lab-card">
@@ -170,6 +223,12 @@ export default function TakeoffDimensionEvidencePanel({ evidence }: Props) {
           )}
           {cutoutCount > 0 && (
             <span className="ev-count ev-count--cutout">{cutoutCount} cutout{cutoutCount !== 1 ? "s" : ""}</span>
+          )}
+          {refTotals.length > 0 && (
+            <span className="ev-count ev-count--ref">{refTotals.length} ref total{refTotals.length !== 1 ? "s" : ""}</span>
+          )}
+          {coverageWarnings.length > 0 && (
+            <span className="ev-count ev-count--warn">{coverageWarnings.length} coverage warning{coverageWarnings.length !== 1 ? "s" : ""}</span>
           )}
           {evidence.reviewRequired && (
             <span className="ev-review-badge">Review required</span>
@@ -258,6 +317,112 @@ export default function TakeoffDimensionEvidencePanel({ evidence }: Props) {
             <ul className="ev-uncertain-list">
               {evidence.uncertainItems.map((u, i) => (
                 <li key={i} className="ev-uncertain-item">{u}</li>
+              ))}
+            </ul>
+          </details>
+        )}
+
+        {/* Reference totals + reconciliation (v5.6) */}
+        {refTotals.length > 0 && (
+          <details className="ev-section ev-section--ref" open>
+            <summary className="ev-section-header ev-section-toggle ev-section-header--ref">
+              Reference totals ({refTotals.length}) — visible estimator sqft callouts
+            </summary>
+            <div className="ev-ref-rule">
+              Visible reference totals are high-priority reconciliation evidence but are
+              not final pricing authority. eliteOS computed values from structured dimensions remain authoritative.
+            </div>
+            <table className="ev-ref-table">
+              <thead>
+                <tr>
+                  <th>Raw text</th>
+                  <th>CT ref</th>
+                  <th>BS ref</th>
+                  <th>No BS</th>
+                  <th>Page</th>
+                  <th>Conf</th>
+                  {computed && <th>CT computed</th>}
+                  {computed && <th>BS computed</th>}
+                  {computed && <th>Status</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {refTotals.map((ref) => {
+                  const ctStatus  = computed ? reconcileStatus(ref.countertopSf, computed.countertopExactSf, REF_CT_TOLERANCE) : null;
+                  const bsStatus  = computed ? reconcileStatus(ref.backsplashSf,  computed.backsplashExactSf, REF_BS_TOLERANCE) : null;
+                  const noBsConflict = ref.noBacksplash && computed && computed.backsplashExactSf > 0;
+
+                  const overallStatus =
+                    ctStatus === "mismatch" || bsStatus === "mismatch" || noBsConflict
+                      ? "mismatch"
+                      : ctStatus === "pass" || bsStatus === "pass"
+                        ? "pass"
+                        : null;
+
+                  return (
+                    <tr key={ref.id ?? ref.rawText} className="ev-ref-row">
+                      <td className="ev-ref-raw">&ldquo;{ref.rawText}&rdquo;</td>
+                      <td className="ev-ref-ct">{ref.countertopSf != null ? `${ref.countertopSf} sf` : "—"}</td>
+                      <td className="ev-ref-bs">{ref.backsplashSf != null ? `${ref.backsplashSf} sf` : "—"}</td>
+                      <td className="ev-ref-nobs">{ref.noBacksplash ? <span className="ev-nobs-badge">No B/S</span> : "—"}</td>
+                      <td className="ev-ref-page">{ref.pageNumber != null ? `p${ref.pageNumber}` : "—"}</td>
+                      <td><span className={confidenceClass(ref.confidence)}>{ref.confidence}</span></td>
+                      {computed && (
+                        <td className="ev-ref-computed">
+                          {round2(computed.countertopExactSf)} sf
+                          {ref.countertopSf != null && (
+                            <span className={`ev-ref-delta ${ctStatus === "mismatch" ? "ev-ref-delta--warn" : "ev-ref-delta--ok"}`}>
+                              {" "}({round2(computed.countertopExactSf - ref.countertopSf) >= 0 ? "+" : ""}{round2(computed.countertopExactSf - ref.countertopSf).toFixed(1)})
+                            </span>
+                          )}
+                        </td>
+                      )}
+                      {computed && (
+                        <td className="ev-ref-computed">
+                          {round2(computed.backsplashExactSf)} sf
+                          {ref.backsplashSf != null && !ref.noBacksplash && (
+                            <span className={`ev-ref-delta ${bsStatus === "mismatch" ? "ev-ref-delta--warn" : "ev-ref-delta--ok"}`}>
+                              {" "}({round2(computed.backsplashExactSf - ref.backsplashSf) >= 0 ? "+" : ""}{round2(computed.backsplashExactSf - ref.backsplashSf).toFixed(1)})
+                            </span>
+                          )}
+                          {noBsConflict && (
+                            <span className="ev-ref-delta ev-ref-delta--warn"> ⚠ conflicts with No B/S</span>
+                          )}
+                        </td>
+                      )}
+                      {computed && (
+                        <td>
+                          {overallStatus === "pass" && <span className="ev-status-badge ev-status-badge--pass">Pass</span>}
+                          {overallStatus === "mismatch" && <span className="ev-status-badge ev-status-badge--warn">Needs review</span>}
+                          {overallStatus === null && <span className="ev-status-badge ev-status-badge--neutral">—</span>}
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </details>
+        )}
+
+        {/* Evidence coverage warnings (v5.6) */}
+        {coverageWarnings.length > 0 && (
+          <details className="ev-section ev-section--coverage" open>
+            <summary className="ev-section-header ev-section-toggle ev-section-header--warn">
+              Coverage warnings ({coverageWarnings.length}) — high-confidence dimensions not used in final runs
+            </summary>
+            <div className="ev-coverage-rule">
+              These high-confidence evidence dimensions were extracted in the evidence pass but
+              have no matching run in the final TakeoffResult. This may indicate the model
+              dropped or merged these dimensions during TakeoffResult assembly.
+              Estimator review required.
+            </div>
+            <ul className="ev-coverage-list">
+              {coverageWarnings.map((w, i) => (
+                <li key={i} className="ev-coverage-item">
+                  <span className="ev-coverage-warn-icon">⚠</span>
+                  <span className="ev-coverage-msg">{w.message}</span>
+                </li>
               ))}
             </ul>
           </details>

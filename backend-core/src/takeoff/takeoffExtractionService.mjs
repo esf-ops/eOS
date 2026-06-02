@@ -325,7 +325,7 @@ export async function runAiTakeoffExtraction({
   let computed, validation, importPlan;
   try {
     computed    = computeTakeoffMeasurements(normalized);
-    validation  = validateTakeoffResult(normalized, computed);
+    validation  = validateTakeoffResult(normalized, computed, dimensionEvidence);
     importPlan  = planTakeoffImport(normalized, computed);
   } catch (calcErr) {
     await setJobStatus(supabase, takeoffJobId, organizationId, {

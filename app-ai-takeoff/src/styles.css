@@ -1690,3 +1690,166 @@ html, body {
   border-radius: 6px;
   text-align: center;
 }
+
+/* ── Reference totals section (v5.6) ──────────────────────────────────────────── */
+
+.ev-count--ref {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.ev-count--warn {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.ev-section--ref > summary.ev-section-header--ref {
+  color: #1e40af;
+  font-weight: 600;
+}
+
+.ev-ref-rule {
+  font-size: 0.72rem;
+  color: #6b7280;
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-radius: 5px;
+  padding: 5px 8px;
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+
+.ev-ref-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.72rem;
+}
+
+.ev-ref-table th {
+  background: #eff6ff;
+  color: #374151;
+  font-weight: 600;
+  padding: 4px 6px;
+  text-align: left;
+  border-bottom: 1px solid #bfdbfe;
+  white-space: nowrap;
+}
+
+.ev-ref-row td {
+  padding: 4px 6px;
+  border-bottom: 1px solid #e5e7eb;
+  vertical-align: middle;
+}
+
+.ev-ref-raw {
+  font-size: 0.7rem;
+  font-style: italic;
+  color: #374151;
+  max-width: 160px;
+  word-break: break-word;
+}
+
+.ev-ref-ct,
+.ev-ref-bs {
+  font-variant-numeric: tabular-nums;
+  color: #1f2937;
+}
+
+.ev-ref-computed {
+  font-variant-numeric: tabular-nums;
+  color: #1f2937;
+}
+
+.ev-ref-delta {
+  font-size: 0.68rem;
+}
+
+.ev-ref-delta--ok {
+  color: #16a34a;
+}
+
+.ev-ref-delta--warn {
+  color: #d97706;
+  font-weight: 600;
+}
+
+.ev-nobs-badge {
+  font-size: 0.68rem;
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-weight: 600;
+}
+
+.ev-status-badge {
+  font-size: 0.68rem;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-weight: 600;
+}
+
+.ev-status-badge--pass {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.ev-status-badge--warn {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.ev-status-badge--neutral {
+  background: #f3f4f6;
+  color: #9ca3af;
+}
+
+/* ── Evidence coverage warnings (v5.6) ─────────────────────────────────────────── */
+
+.ev-section--coverage > summary.ev-section-header--warn {
+  color: #92400e;
+  font-weight: 600;
+}
+
+.ev-coverage-rule {
+  font-size: 0.72rem;
+  color: #6b7280;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 5px;
+  padding: 5px 8px;
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+
+.ev-coverage-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ev-coverage-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 0.72rem;
+  color: #78350f;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 5px;
+  padding: 5px 8px;
+}
+
+.ev-coverage-warn-icon {
+  flex-shrink: 0;
+  font-size: 0.8rem;
+  margin-top: 1px;
+}
+
+.ev-coverage-msg {
+  line-height: 1.4;
+}

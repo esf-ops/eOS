@@ -21,7 +21,7 @@
  *  14.  review_status is always 'needs_review' — never 'approved'
  *  15.  No quote mutation — quote_headers table never touched
  *  16.  storage_path never returned in response
- *  17.  Provider called with expected metadata (mimeType, originalFilename, promptVersion v4)
+ *  17.  Provider called with expected metadata (mimeType, originalFilename, promptVersion v5)
  *  18.  NOT NULL fallback — graceful degradation to result_summary
  *  19.  resultRowId returned in response
  *  20.  raw_ai_result_json stored with _meta envelope
@@ -628,7 +628,7 @@ await test("storage_path never returned in result", async () => {
 });
 
 // 17. Provider called with expected metadata
-await test("provider called with expected metadata (mimeType, filename, promptVersion)", async () => {
+await test("provider called with expected metadata (mimeType, filename, promptVersion v5)", async () => {
   let capturedInput = null;
   const capturingProvider = async (input) => {
     capturedInput = input;
@@ -654,7 +654,7 @@ await test("provider called with expected metadata (mimeType, filename, promptVe
   assert.ok(capturedInput, "provider must have been called");
   assert.equal(capturedInput.mimeType,         MOCK_FILE_ROW.mime_type,          "mimeType mismatch");
   assert.equal(capturedInput.originalFilename, MOCK_FILE_ROW.original_filename,  "originalFilename mismatch");
-  assert.equal(capturedInput.promptVersion,    "v4",                             "promptVersion must be v4");
+  assert.equal(capturedInput.promptVersion,    "v5",                             "promptVersion must be v5");
   assert.ok(Buffer.isBuffer(capturedInput.fileBuffer), "fileBuffer must be a Buffer");
   assert.ok(capturedInput.fileBuffer.length > 0,       "fileBuffer must not be empty");
 });

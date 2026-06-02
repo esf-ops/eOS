@@ -27,8 +27,11 @@
  * v4: user message also includes dimension evidence table (pre-extracted labeled
  *     dimensions, notes, cutouts). Extraction model builds runs directly from the
  *     evidence table rather than re-reading the whole plan.
+ * v5: user message also includes referenceTotals from dimension evidence (visible
+ *     estimator sqft callouts). Extraction model uses them for aiProvidedTotals and
+ *     adds review notes when structured run totals differ from visible references.
  */
-export const PROMPT_VERSION = "v4";
+export const PROMPT_VERSION = "v5";
 
 // ── Schema description ─────────────────────────────────────────────────────────
 //
@@ -249,10 +252,11 @@ Return ONLY the JSON — no other text.`;
 function _buildEvidenceContextSection(evidence) {
   if (!evidence || !Array.isArray(evidence.dimensions)) return "";
 
-  const dims    = evidence.dimensions;
-  const notes   = evidence.notes ?? [];
-  const cutouts = evidence.cutouts ?? [];
-  const uncertain = evidence.uncertainItems ?? [];
+  const dims         = evidence.dimensions;
+  const notes        = evidence.notes ?? [];
+  const cutouts      = evidence.cutouts ?? [];
+  const refTotals    = evidence.referenceTotals ?? [];
+  const uncertain    = evidence.uncertainItems ?? [];
 
   const lines = [
     "── DIMENSION EVIDENCE TABLE (from dimension extraction pass) ─────────────────",
@@ -295,6 +299,39 @@ function _buildEvidenceContextSection(evidence) {
       lines.push(`  [${c.type ?? "cutout"}] ${c.label} · ${c.confidence ?? "?"} confidence · page ${c.pageNumber ?? "?"}`);
     }
     lines.push("");
+  }
+
+  if (refTotals.length > 0) {
+    lines.push(
+      "── REFERENCE TOTALS (visible estimator sqft callouts) ───────────────────────",
+      "These are high-priority reconciliation evidence. Do NOT silently ignore them.",
+      "Do NOT force run math to match them by inventing dimensions.",
+      "If structured dimensions conflict with a reference total: preserve structured dimensions, add review note.",
+      "If noBacksplash=true: set backsplashIncluded=false, backsplashLinearIn=0 UNLESS conflicting note exists.",
+      "",
+    );
+    for (const ref of refTotals) {
+      const parts = [];
+      if (ref.countertopSf != null) parts.push(`CT ${ref.countertopSf} sf`);
+      if (ref.noBacksplash)         parts.push("NO BACKSPLASH");
+      if (ref.backsplashSf != null) parts.push(`BS ${ref.backsplashSf} sf`);
+      if (ref.combinedSf   != null) parts.push(`combined ${ref.combinedSf} sf`);
+      if (ref.backsplashHeightIn != null) parts.push(`BS height ${ref.backsplashHeightIn}"`);
+      const pageStr = ref.pageNumber ? ` — page ${ref.pageNumber}` : "";
+      const confStr = ref.confidence ? ` (${ref.confidence})` : "";
+      lines.push(`  [${ref.id ?? "ref"}] "${ref.rawText}" → ${parts.join(", ") || "reference note"}${pageStr}${confStr}`);
+    }
+    lines.push("");
+    lines.push(
+      "Reconciliation instructions:",
+      "  1. Add each reference total to projectAssumptions as: 'Visible reference total: [rawText]'.",
+      "  2. If countertopSf is present: set aiProvidedTotals.countertopExactSf to that value.",
+      "  3. If backsplashSf is present: set aiProvidedTotals.backsplashExactSf to that value.",
+      "  4. If noBacksplash is true: do NOT populate any backsplashLinearIn on any area unless there is a conflicting note.",
+      "  5. If structured run totals differ significantly from the reference total: add a review note explaining the discrepancy.",
+      "─────────────────────────────────────────────────────────────────────────────",
+      "",
+    );
   }
 
   if (uncertain.length > 0) {

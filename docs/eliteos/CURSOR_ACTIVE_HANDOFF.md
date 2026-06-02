@@ -164,7 +164,7 @@ Durable decisions: `FEATURE_DECISIONS.md` entries **37** (additive lane), **38**
 
 ---
 
-## AI Takeoff Lab (2026-06-02, v5.5 built)
+## AI Takeoff Lab (2026-06-02, v5.6 built)
 
 Contract-first foundation + file-backed workspace + live AI extraction + benchmark/evaluation harness + run history + debug view + three-step extraction (inventory → dimension evidence → targeted extraction) + cutout handling rules.
 
@@ -179,19 +179,20 @@ Contract-first foundation + file-backed workspace + live AI extraction + benchma
 | Later run | v2 | **48.97 sf** | 0.00 sf | 78 sf | 4 sf | -29.03 | CT **severe regression** / BS missed |
 | v5.4 run | v3+inv | 44.99 sf | 3.07 sf | 78 sf | 4 sf | -33.01 | CT **still regressed** / BS partial |
 | v5.5 runs | v4+inv+ev | TBD — run manually | — | 78 sf | 4 sf | — | Three-step evidence anchored |
+| v5.6 runs | v5+inv+ev+ref | TBD — run manually | — | 78 sf | 4 sf | — | Ref total reconciliation |
 
-**Status:** v5.5 three-step extraction is built. Manual QA needed to assess accuracy improvement from dimension evidence anchoring. Import blocked until consistent benchmark pass.
+**Status:** v5.6 reference total reconciliation + evidence coverage warnings built. Manual QA needed with reference benchmarks 001–004. Import blocked until consistent benchmark pass.
 
 ### Status
 
 | Piece | State |
 |-------|-------|
-| `takeoffContract.mjs` — schema v1.0; `cutouts[]` field + `CUTOUT_IN_EXCLUSIONS_WARNING` (v5.5) | **Built** |
+| `takeoffContract.mjs` — schema v1.0; `cutouts[]` field + `CUTOUT_IN_EXCLUSIONS_WARNING` (v5.5); 5 new diagnostic codes incl. `REFERENCE_TOTAL_*` + `EVIDENCE_DIMENSION_NOT_USED` (v5.6) | **Built** |
 | `takeoffMeasurementCalc.mjs` — deterministic sf calculator | **Built** |
-| `takeoffValidator.mjs` — 18 diagnostic codes incl. v5.1 BS guards + v5.5 cutout guard | **Built** |
+| `takeoffValidator.mjs` — 18+ diagnostic codes incl. v5.1 BS guards, v5.5 cutout guard, v5.6 ref total + coverage checks | **Built** |
 | `takeoffImportPlanner.mjs` — RoomScopeBuilder import plan | **Built** |
 | `fixtures/spec73.fixture.mjs` — Spec 73 known-good fixture | **Built** |
-| `takeoff.contract.test.mjs` — 21 test groups (incl. v5.5 T/U cutout tests) | **Built, all passing** |
+| `takeoff.contract.test.mjs` — **24 tests** (A-X, incl. v5.5 T/U cutout tests + v5.6) | **Built, all passing** |
 | `docs/eliteos/ai-takeoff-foundation.md` | **Written** |
 | `app-ai-takeoff/` lab shell | **Built** |
 | `takeoffWorkspaceService.mjs` — workspace persistence; `dimensionEvidence` in `getResultById` (v5.5) | **Built** |
@@ -199,25 +200,28 @@ Contract-first foundation + file-backed workspace + live AI extraction + benchma
 | `takeoffPageInventoryPrompt.mjs` — inventory prompt v1 (v5.4) | **Built** |
 | `takeoffPageInventoryService.mjs` — page inventory service (v5.4) | **Built** |
 | `takeoffPageInventoryService.test.mjs` — 10 tests | **Built, all passing** |
-| `takeoffDimensionEvidencePrompt.mjs` — dimension evidence prompt v1 (v5.5) | **Built** |
-| `takeoffDimensionEvidenceService.mjs` — dimension evidence service (v5.5) | **Built** |
-| `takeoffDimensionEvidenceService.test.mjs` — 10 tests | **Built, all passing** |
-| `takeoffExtractionPrompt.mjs` — AI system prompt (**v4**, inventory + evidence context) | **Built** |
+| `takeoffDimensionEvidencePrompt.mjs` — dimension evidence prompt **v2** (v5.6); adds `referenceTotals[]` | **Built** |
+| `takeoffDimensionEvidenceService.mjs` — dimension evidence service; normalizes `referenceTotals` (v5.6) | **Built** |
+| `takeoffDimensionEvidenceService.test.mjs` — **13 tests** | **Built, all passing** |
+|| `takeoffEvidenceCoverage.mjs` — NEW (v5.6) pure coverage helper; `compareDimensionEvidenceToTakeoffRuns` | **Built** |
+|| `EVIDENCE_PROMPT_VERSION` = **v2** | — |
+| `takeoffExtractionPrompt.mjs` — AI system prompt (**v5**, inventory + evidence + ref totals context) | **Built** |
+|| `PROMPT_VERSION` = **v5** | — |
 | `takeoffAiProvider.mjs` + `openAiTakeoffProvider.mjs` — `dimensionEvidence` param (v5.5) | **Built** |
-| `takeoffExtractionService.mjs` — three-step extraction (inv → evidence → extraction) | **Built** |
+| `takeoffExtractionService.mjs` — four-step extraction (inv → evidence → extraction → validate w/ dimensionEvidence) | **Built** |
 | `takeoffExtractionService.test.mjs` — 28 tests (21-24 v5.4, 25-28 v5.5) | **Built, all passing** |
 | `POST /api/takeoff-jobs/:id/generate-ai-draft` endpoint | **Built** |
 | `GET /api/takeoff-jobs/:id/results` — list run summaries (v5.3) | **Built** |
 | `GET /api/takeoff-jobs/:id/results/:resultId` — load run with inv + evidence (v5.5) | **Built** |
 | AI draft button + progress UI in `app-ai-takeoff/` | **Built** |
-| `takeoffBenchmark.mjs` — eval helpers + hand sketch 001 fixture (v5.2) | **Built** |
+| `takeoffBenchmark.mjs` — eval helpers + hand sketch 001 fixture (v5.2) + 4 reference benchmarks 001-004 (v5.6) | **Built** |
 | `takeoffBenchmark.test.mjs` — 7 tests | **Built, all passing** |
 | `TakeoffBenchmarkPanel.tsx` — QA evaluation panel (v5.2) | **Built** |
 | Prompt version badge in AI draft mode (v5.2) | **Built** |
 | `TakeoffRunHistoryPanel.tsx` — extraction run history panel (v5.3) | **Built** |
 | `TakeoffDebugPanel.tsx` — debug view with page inv + dimension evidence sections (v5.5) | **Built** |
 | `TakeoffPageInventoryPanel.tsx` — page classification panel (v5.4) | **Built** |
-| `TakeoffDimensionEvidencePanel.tsx` — dimension evidence table panel (v5.5) | **Built** |
+| `TakeoffDimensionEvidencePanel.tsx` — shows ref totals reconciliation + coverage warnings (v5.6) | **Built** |
 | Internal Estimate "Import from Takeoff" button | **Not built — blocked on extraction accuracy** |
 
 ### Spec 73 verified results
@@ -229,7 +233,7 @@ Contract-first foundation + file-backed workspace + live AI extraction + benchma
 
 ### Key commands
 ```bash
-npm run eos:test:takeoff-contract             # 21 test groups (incl. v5.5 cutout warning)
+npm run eos:test:takeoff-contract             # 24 tests A-X (incl. v5.5 cutout + v5.6 ref total/coverage)
 npm run eos:test:takeoff-workspace-service    # 30 tests
 npm run eos:test:takeoff-extraction-service   # 28 tests (incl. v5.4 inv + v5.5 evidence)
 npm run eos:test:takeoff-page-inventory       # 10 tests (v5.4)

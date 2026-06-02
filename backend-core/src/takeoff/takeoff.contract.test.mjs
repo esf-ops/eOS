@@ -25,6 +25,9 @@
  *   S. No false positive when notes say "no B/S"
  *   T. Validator warns: sink/cooktop/faucet in exclusions (CUTOUT_IN_EXCLUSIONS_WARNING)
  *   U. No false positive: true material exclusion (no cutout keyword) does not trigger warning
+ *   V. Validator warns: reference total CT 50 sf vs computed ~36 sf (REFERENCE_TOTAL_COUNTERTOP_MISMATCH)
+ *   W. Validator warns: noBacksplash=true but computed backsplash > 0 (REFERENCE_TOTAL_NO_BS_CONFLICT)
+ *   X. Validator warns: high-confidence evidence dimension not in final runs (EVIDENCE_DIMENSION_NOT_USED)
  */
 
 import assert from "node:assert/strict";
@@ -399,6 +402,141 @@ function near(a, b, label) {
   console.log("ok: no false positive CUTOUT_IN_EXCLUSIONS_WARNING for true material exclusion");
 }
 
+// ── V. REFERENCE_TOTAL_COUNTERTOP_MISMATCH fires when ref total differs from computed ──
+{
+  // Create a takeoff that computes ~35.4 sf countertop (200" × 25.5" / 144)
+  const run = makeTakeoffRun({ label: "Counter", lengthIn: 200, depthIn: 25.5, pieceType: "counter" });
+  const area = makeTakeoffArea({ label: "Kitchen", runs: [run], backsplashIncluded: false });
+  const room = makeTakeoffRoom({ name: "Kitchen", areas: [area] });
+  const tr = makeTakeoffResult({ status: TAKEOFF_STATUS.DRAFT, rooms: [room] });
+  const computed = computeTakeoffMeasurements(tr);
+
+  // Provide dimension evidence with a reference total of 50 sf (diff = ~14.6 sf > 2 sf tolerance)
+  const dimensionEvidence = {
+    dimensions: [],
+    notes: [],
+    cutouts: [],
+    referenceTotals: [
+      {
+        id: "ref-1",
+        pageNumber: 1,
+        rawText: "50 sq' no b/s",
+        countertopSf: 50,
+        noBacksplash: true,
+        backsplashSf: 0,
+        confidence: "high",
+        notes: [],
+      },
+    ],
+    uncertainItems: [],
+    reviewRequired: true,
+  };
+
+  const validation = validateTakeoffResult(tr, computed, dimensionEvidence);
+
+  const w = validation.diagnostics.find(
+    (x) => x.code === TAKEOFF_DIAGNOSTIC_CODE.REFERENCE_TOTAL_COUNTERTOP_MISMATCH
+  );
+  assert.ok(w, "V: REFERENCE_TOTAL_COUNTERTOP_MISMATCH must fire when ref CT differs by > 2 sf");
+  assert.equal(w.level, "warning", "V: diagnostic level must be warning");
+  assert.match(w.message, /50/, "V: message must reference the ref total countertop sf");
+  assert.match(w.message, /[Ee]stimator review/, "V: message must say estimator review required");
+  console.log("ok: REFERENCE_TOTAL_COUNTERTOP_MISMATCH fires when ref CT differs from computed");
+}
+
+// ── W. REFERENCE_TOTAL_NO_BS_CONFLICT fires when noBacksplash=true but computed bs > 0 ──
+{
+  // Create a takeoff that computes some backsplash (area with backsplashLinearIn > 0)
+  const run = makeTakeoffRun({ label: "Counter", lengthIn: 72, depthIn: 25.5, pieceType: "counter" });
+  const area = makeTakeoffArea({
+    label: "Kitchen",
+    runs: [run],
+    backsplashIncluded: true,
+    backsplashLinearIn: 72,
+    backsplashHeightIn: 4,
+  });
+  const room = makeTakeoffRoom({ name: "Kitchen", areas: [area] });
+  const tr = makeTakeoffResult({ status: TAKEOFF_STATUS.DRAFT, rooms: [room] });
+  const computed = computeTakeoffMeasurements(tr);
+  assert.ok(computed.backsplashExactSf > 0, "W: test setup must compute non-zero backsplash");
+
+  // Provide dimension evidence with noBacksplash=true
+  const dimensionEvidence = {
+    dimensions: [],
+    notes: [],
+    cutouts: [],
+    referenceTotals: [
+      {
+        id: "ref-1",
+        pageNumber: 1,
+        rawText: "Kitchen 49 / NO BS",
+        countertopSf: 49,
+        noBacksplash: true,
+        backsplashSf: 0,
+        confidence: "high",
+        notes: [],
+      },
+    ],
+    uncertainItems: [],
+    reviewRequired: true,
+  };
+
+  const validation = validateTakeoffResult(tr, computed, dimensionEvidence);
+
+  const w = validation.diagnostics.find(
+    (x) => x.code === TAKEOFF_DIAGNOSTIC_CODE.REFERENCE_TOTAL_NO_BS_CONFLICT
+  );
+  assert.ok(w, "W: REFERENCE_TOTAL_NO_BS_CONFLICT must fire when noBacksplash=true but computed bs > 0");
+  assert.equal(w.level, "warning", "W: diagnostic level must be warning");
+  assert.match(w.message, /no backsplash|NO BS|no b\/s/i, "W: message must reference the no-BS note");
+  assert.match(w.message, /[Ee]stimator review/, "W: message must say estimator review required");
+  console.log("ok: REFERENCE_TOTAL_NO_BS_CONFLICT fires when noBacksplash=true but computed bs > 0");
+}
+
+// ── X. EVIDENCE_DIMENSION_NOT_USED fires for high-confidence dim not in final runs ──
+{
+  // Create a takeoff with a run of length 200" (far from evidence dim of 108")
+  const run = makeTakeoffRun({ label: "Counter", lengthIn: 200, depthIn: 25.5, pieceType: "counter" });
+  const area = makeTakeoffArea({ label: "Kitchen", runs: [run], backsplashIncluded: false });
+  const room = makeTakeoffRoom({ name: "Kitchen", areas: [area] });
+  const tr = makeTakeoffResult({ status: TAKEOFF_STATUS.DRAFT, rooms: [room] });
+  const computed = computeTakeoffMeasurements(tr);
+
+  // Provide high-confidence island dimension not matched by any run (length 108, far from 200)
+  const dimensionEvidence = {
+    dimensions: [
+      {
+        id: "dim-1",
+        pageNumber: 1,
+        label: "Island top",
+        rawText: "108 x 56",
+        lengthIn: 108,
+        depthIn: 56,
+        confidence: "high",
+        category: "island",
+        interpretationNotes: [],
+      },
+    ],
+    notes: [],
+    cutouts: [],
+    referenceTotals: [],
+    uncertainItems: [],
+    reviewRequired: false,
+  };
+
+  const validation = validateTakeoffResult(tr, computed, dimensionEvidence);
+
+  const w = validation.diagnostics.find(
+    (x) => x.code === TAKEOFF_DIAGNOSTIC_CODE.EVIDENCE_DIMENSION_NOT_USED
+  );
+  assert.ok(w, "X: EVIDENCE_DIMENSION_NOT_USED must fire when high-confidence dim not in runs");
+  assert.equal(w.level, "warning", "X: diagnostic level must be warning");
+  assert.match(w.message, /Island top/, "X: message must reference the dimension label");
+  assert.match(w.message, /108/, "X: message must reference the dimension length");
+  assert.match(w.message, /[Ee]stimator review/, "X: message must say estimator review required");
+  console.log("ok: EVIDENCE_DIMENSION_NOT_USED fires for high-confidence dim not matched in final runs");
+}
+
 // ── N. No pricing/math behavior changes (smoke) ───────────────────────────────
 {
   // Verify takeoff math doesn't interfere with existing pricing constants
@@ -414,4 +552,4 @@ function near(a, b, label) {
   console.log("ok: takeoff foundation does not change pricing/math behavior");
 }
 
-console.log("\ntakeoff.contract: all tests passed");
+console.log("\ntakeoff.contract: all tests passed (A–X)"); 

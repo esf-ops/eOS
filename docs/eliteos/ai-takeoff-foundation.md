@@ -730,6 +730,92 @@ Rules for using this evidence table:
 
 ---
 
+## v5.6: Visible reference total reconciliation + evidence coverage warnings
+
+**Status:** Built (2026-06-02)
+
+### Goal
+
+Make visible estimator reference totals first-class evidence; warn when evidence dimensions are not converted into final runs.
+
+### Motivation
+
+Even with 3-step extraction, the final `TakeoffResult` was ignoring visible sqft callouts written directly on plans — annotations like "50 sq' no b/s" or "4\" BSP = 6 sq'" that represent an estimator's own measured totals. Reference benchmarks 002–004 showed mismatches of 5–14 sf between these visible totals and what the AI extracted. `referenceTotals` makes those callouts a first-class reconciliation signal.
+
+### New files
+
+| File | Purpose |
+|---|---|
+| `backend-core/src/takeoff/takeoffEvidenceCoverage.mjs` (NEW) | Pure helper — `compareDimensionEvidenceToTakeoffRuns(dimensionEvidence, takeoffResult)` returns `{ unusedDimensions, coveredCount, totalHighConfidenceCount }`. Matches runs within ±5″ tolerance. |
+
+### Modified files
+
+| File | Change |
+|---|---|
+| `takeoffDimensionEvidencePrompt.mjs` | Bumped to **v2**; added `referenceTotals[]` schema and extraction rules |
+| `takeoffDimensionEvidenceService.mjs` | Normalizes `referenceTotals` array |
+| `takeoffContract.mjs` | Added 5 new diagnostic codes: `REFERENCE_TOTAL_COUNTERTOP_MISMATCH`, `REFERENCE_TOTAL_BACKSPLASH_MISMATCH`, `REFERENCE_TOTAL_COMBINED_MISMATCH`, `REFERENCE_TOTAL_NO_BS_CONFLICT`, `EVIDENCE_DIMENSION_NOT_USED` |
+| `takeoffValidator.mjs` | Added optional third param `dimensionEvidence = null`; reference total reconciliation checks (tolerances: CT ±2 sf, BS ±1 sf, combined ±2 sf); evidence coverage check using `compareDimensionEvidenceToTakeoffRuns` |
+| `takeoffExtractionPrompt.mjs` | Bumped to **v5**; added reference totals section in `_buildEvidenceContextSection` showing visible reference totals + reconciliation instructions |
+| `takeoffExtractionService.mjs` | Passes `dimensionEvidence` as third arg to `validateTakeoffResult` |
+| `takeoffBenchmark.mjs` | Added 4 reference benchmarks: `REFERENCE_BENCHMARK_001` (31 CT / 0 BS), `REFERENCE_BENCHMARK_002` (53 CT / 6 BS), `REFERENCE_BENCHMARK_003` (49 CT / 0 BS), `REFERENCE_BENCHMARK_004` (50 CT / 0 BS) |
+| `TakeoffDimensionEvidencePanel.tsx` | Added `EvidenceReferenceTotal` type, `referenceTotals?` to `DimensionEvidence`, optional `computed` and `validation` props; shows reference totals table with reconciliation (CT ref vs computed delta, BS ref vs computed delta, pass/needs review badge); shows coverage warnings section for `EVIDENCE_DIMENSION_NOT_USED` diagnostics |
+| `styles.css` | Added reference totals and coverage warning styles |
+
+### `referenceTotals` schema
+
+Reference totals are visible sqft callouts written on the plan by the estimator — e.g. "50 sq'", "50 sq' no b/s", "Kitchen 49 / NO BS", "4\" BSP = 6 sq'", "Reception Desk 31 sq'".
+
+```json
+{
+  "id": "ref-1",
+  "pageNumber": 1,
+  "rawText": "50 sq' no b/s",
+  "label": "Kitchen total",
+  "countertopSf": 50,
+  "backsplashSf": null,
+  "combinedSf": null,
+  "noBacksplash": true,
+  "backsplashHeightIn": null,
+  "confidence": "high",
+  "notes": []
+}
+```
+
+Fields: `id`, `pageNumber`, `rawText`, `label?`, `countertopSf?`, `backsplashSf?`, `combinedSf?`, `noBacksplash?`, `backsplashHeightIn?`, `confidence`, `notes?`.
+
+**Reference totals are NOT final pricing authority.** They are high-priority reconciliation evidence. The eliteOS deterministic calculator (`computeTakeoffMeasurements`) remains authoritative for all pricing. Reference totals are stored in `dimensionEvidence.referenceTotals[]` (in `raw_ai_result_json._meta.dimensionEvidence`).
+
+### Four-step extraction flow (v5.6)
+
+```
+1. Page inventory pass        → classifies pages; identifies measurement vs context pages (v5.4)
+2. Dimension evidence pass    → extracts all labeled dimensions, notes, cutouts, referenceTotals (v5.5/v5.6)
+3. Final extraction pass      → builds TakeoffResult; receives reference totals; adds reconciliation
+                                 instructions to the prompt (v5.6)
+4. Validator reconciliation   → fires REFERENCE_TOTAL_*_MISMATCH and EVIDENCE_DIMENSION_NOT_USED
+   + coverage checks            warnings (v5.6)
+```
+
+Each step is non-fatal. Failures in earlier steps degrade gracefully without blocking the final extraction.
+
+### New diagnostic codes (v5.6)
+
+| Code | Severity | Trigger |
+|---|---|---|
+| `REFERENCE_TOTAL_COUNTERTOP_MISMATCH` | warning | Visible CT ref total differs from computed CT by > ±2 sf |
+| `REFERENCE_TOTAL_BACKSPLASH_MISMATCH` | warning | Visible BS ref total differs from computed BS by > ±1 sf |
+| `REFERENCE_TOTAL_COMBINED_MISMATCH` | warning | Visible combined ref total differs from computed combined by > ±2 sf |
+| `REFERENCE_TOTAL_NO_BS_CONFLICT` | warning | Ref total says no backsplash but computed BS > 0 |
+| `EVIDENCE_DIMENSION_NOT_USED` | warning | High-confidence dimension from evidence pass has no matching run in TakeoffResult (±5″ tolerance) |
+
+### Prompt versions
+
+- `EVIDENCE_PROMPT_VERSION` = `"v2"` (added `referenceTotals[]` extraction)
+- `PROMPT_VERSION` = `"v5"` (reference totals injected into evidence context section)
+
+---
+
 ## Durable decisions
 
 See `FEATURE_DECISIONS.md` entries **48** (contract-first, AI-not-authority), **49** (quote files storage architecture), and **50** (provider-neutral extraction layer, AI output never authoritative, raw PDFs not committed).

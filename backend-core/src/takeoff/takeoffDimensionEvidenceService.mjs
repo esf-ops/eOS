@@ -242,7 +242,7 @@ export async function runDimensionEvidence({
     );
   }
 
-  // Normalize: ensure all arrays are present.
+  // Normalize: ensure all arrays are present, including v5.6 referenceTotals.
   return {
     schemaVersion:          parsed.schemaVersion ?? "1.0",
     evidencePromptVersion:  EVIDENCE_PROMPT_VERSION,
@@ -250,6 +250,7 @@ export async function runDimensionEvidence({
     dimensions:             parsed.dimensions,
     notes:                  Array.isArray(parsed.notes) ? parsed.notes : [],
     cutouts:                Array.isArray(parsed.cutouts) ? parsed.cutouts : [],
+    referenceTotals:        Array.isArray(parsed.referenceTotals) ? parsed.referenceTotals : [],
     uncertainItems:         Array.isArray(parsed.uncertainItems) ? parsed.uncertainItems : [],
     reviewRequired:         Boolean(parsed.reviewRequired ?? false),
   };

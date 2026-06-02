@@ -798,11 +798,15 @@ export default function TakeoffLabApp() {
             </section>
           )}
 
-          {/* ── Dimension evidence (v5.5) — shown when evidence table is available ── */}
+          {/* ── Dimension evidence (v5.5/v5.6) — shown when evidence table is available ── */}
           {dimensionEvidence && (
             <section className="lab-section">
               <h2 className="lab-section-title">Dimension evidence</h2>
-              <TakeoffDimensionEvidencePanel evidence={dimensionEvidence} />
+              <TakeoffDimensionEvidencePanel
+                evidence={dimensionEvidence}
+                computed={computed}
+                validation={validation}
+              />
             </section>
           )}
 

@@ -9,10 +9,12 @@
  *   - Pure functions only: no I/O, no DB calls, no AI calls, no pricing logic.
  *   - Always compares against eliteOS computed totals — never raw AI totals.
  *   - HAND_SKETCH_BENCHMARK_001 is a dev/QA-only fixture. Source PDF is private and NOT committed.
+ *   - REFERENCE_BENCHMARK_001–004 (v5.6): sanitized benchmarks with visible reference totals.
+ *     Source PDFs are private and NOT committed to the repo.
  *
  * Usage (manual QA script or test):
- *   import { evaluateTakeoffAgainstBenchmark, HAND_SKETCH_BENCHMARK_001, compareAiTakeoffRuns } from "./takeoffBenchmark.mjs";
- *   const result = evaluateTakeoffAgainstBenchmark(computedMeasurements, HAND_SKETCH_BENCHMARK_001);
+ *   import { evaluateTakeoffAgainstBenchmark, REFERENCE_BENCHMARK_001, compareAiTakeoffRuns } from "./takeoffBenchmark.mjs";
+ *   const result = evaluateTakeoffAgainstBenchmark(computedMeasurements, REFERENCE_BENCHMARK_001);
  *   const diff   = compareAiTakeoffRuns(prevEval, currEval);
  */
 
@@ -63,6 +65,133 @@ export const HAND_SKETCH_BENCHMARK_001 = Object.freeze({
     "Model may record aiProvidedTotals.backsplashExactSf > 0 without populating backsplashLinearIn (structured field missing).",
     "Model may produce contradictory output: 'No Back Splash' note alongside 1.04 sf backsplash.",
     "Prompt v2 regressed countertop from 76.97 sf to 68.41 sf due to island dimension shrinkage.",
+  ]),
+  createdAt: "2026-06-02T00:00:00.000Z",
+});
+
+// ── Reference benchmark fixtures (v5.6) ──────────────────────────────────────
+//
+// Sanitized benchmarks drawn from real plan types but using only expected values
+// and failure-mode notes. Source PDFs are private and NOT committed to the repo.
+// visibleReferenceTotals are the estimator-written sqft callouts on the plan —
+// used to verify that the dimension evidence pass extracts them correctly.
+
+/**
+ * Reference benchmark 001 — single countertop piece with explicit sqft callout.
+ *
+ * Source PDF: private, not committed.
+ * Plan type: commercial piece with a printed "31 sq ft" reference.
+ * Observed: v5.5 AI computed ~32.98 sf countertop — close, within tolerance.
+ */
+export const REFERENCE_BENCHMARK_001 = Object.freeze({
+  benchmarkId:           "reference-benchmark-001",
+  label:                 "Reference benchmark 001 — 31 sf single piece",
+  sourceFilename:        "reference_benchmark_001.pdf",   // private — not in repo
+  expectedCountertopSf:  31,
+  expectedBacksplashSf:  0,
+  expectedCombinedSf:    31,
+  toleranceSf:           2,
+  visibleReferenceTotals: Object.freeze([
+    { rawText: "31 sq'", countertopSf: 31, noBacksplash: true, confidence: "high" },
+  ]),
+  notes: Object.freeze([
+    "Single commercial countertop piece with explicit sqft callout.",
+    "No backsplash expected.",
+    "Observed v5.5: AI computed ~32.98 sf — close, within tolerance.",
+  ]),
+  knownFailureModes: Object.freeze([
+    "Model may round differently from plan reference; expect ±2 sf tolerance.",
+  ]),
+  createdAt: "2026-06-02T00:00:00.000Z",
+});
+
+/**
+ * Reference benchmark 002 — handwritten kitchen with CT reference + 4" backsplash sqft.
+ *
+ * Source PDF: private, not committed.
+ * Plan type: handwritten kitchen sketch with "53 sq'" notation and "4 inch backsplash = 6 sq'" note.
+ * Observed: v5.5 AI computed ~54 sf countertop; backsplash likely missed/inconsistent.
+ */
+export const REFERENCE_BENCHMARK_002 = Object.freeze({
+  benchmarkId:           "reference-benchmark-002",
+  label:                 "Reference benchmark 002 — 53 sf kitchen + 6 sf backsplash",
+  sourceFilename:        "reference_benchmark_002.pdf",   // private — not in repo
+  expectedCountertopSf:  53,
+  expectedBacksplashSf:  6,
+  expectedCombinedSf:    59,
+  toleranceSf:           2,
+  visibleReferenceTotals: Object.freeze([
+    { rawText: "Kitchen 53 sq'",    countertopSf: 53, noBacksplash: false, confidence: "high" },
+    { rawText: "4\" BSP = 6 sq'",   backsplashSf: 6, backsplashHeightIn: 4, confidence: "high" },
+  ]),
+  notes: Object.freeze([
+    "Handwritten kitchen sketch with visible countertop and backsplash reference totals.",
+    "4 inch backsplash at 6 sq ft explicitly stated on plan.",
+    "Observed v5.5: AI got ~54 sf CT; backsplash reconciliation unreliable.",
+  ]),
+  knownFailureModes: Object.freeze([
+    "Model may miss the backsplash sqft reference or fail to set backsplashLinearIn.",
+    "Model may produce contradictory output: AI reference backsplash total > 0 but structured value = 0.",
+  ]),
+  createdAt: "2026-06-02T00:00:00.000Z",
+});
+
+/**
+ * Reference benchmark 003 — cabinet plan with sqft callout and explicit no-backsplash note.
+ *
+ * Source PDF: private, not committed.
+ * Plan type: printed/digital cabinet plan with "49 / NO BS" notation.
+ * Observed: v5.5 AI computed ~54 sf — overcounted by ~5 sf.
+ */
+export const REFERENCE_BENCHMARK_003 = Object.freeze({
+  benchmarkId:           "reference-benchmark-003",
+  label:                 "Reference benchmark 003 — 49 sf / no backsplash",
+  sourceFilename:        "reference_benchmark_003.pdf",   // private — not in repo
+  expectedCountertopSf:  49,
+  expectedBacksplashSf:  0,
+  expectedCombinedSf:    49,
+  toleranceSf:           2,
+  visibleReferenceTotals: Object.freeze([
+    { rawText: "Kitchen 49 / NO BS", countertopSf: 49, noBacksplash: true, backsplashSf: 0, confidence: "high" },
+  ]),
+  notes: Object.freeze([
+    "Cabinet plan with explicit 49 sf countertop and NO BS notation.",
+    "Backsplash must not be generated.",
+    "Observed v5.5: AI computed ~54 sf — overcounted by ~5 sf.",
+  ]),
+  knownFailureModes: Object.freeze([
+    "Model may invent additional dimensions not on plan, overcounting sf.",
+    "Model may generate backsplash despite explicit NO BS note.",
+  ]),
+  createdAt: "2026-06-02T00:00:00.000Z",
+});
+
+/**
+ * Reference benchmark 004 — plan with visible 50 sq ft callout, no backsplash.
+ *
+ * Source PDF: private, not committed.
+ * Plan type: plan with "50 sq ft" or "50 sq' no b/s" notation.
+ * Observed: v5.5 AI computed ~36 sf — significantly undercounted.
+ */
+export const REFERENCE_BENCHMARK_004 = Object.freeze({
+  benchmarkId:           "reference-benchmark-004",
+  label:                 "Reference benchmark 004 — 50 sf / no backsplash",
+  sourceFilename:        "reference_benchmark_004.pdf",   // private — not in repo
+  expectedCountertopSf:  50,
+  expectedBacksplashSf:  0,
+  expectedCombinedSf:    50,
+  toleranceSf:           2,
+  visibleReferenceTotals: Object.freeze([
+    { rawText: "50 sq' no b/s", countertopSf: 50, noBacksplash: true, backsplashSf: 0, confidence: "high" },
+  ]),
+  notes: Object.freeze([
+    "Plan with visible 50 sq ft reference and no-backsplash callout.",
+    "Observed v5.5: AI computed ~36 sf — significantly undercounted (~14 sf gap).",
+    "This is the primary regression benchmark for v5.6 reference total reconciliation.",
+  ]),
+  knownFailureModes: Object.freeze([
+    "Model misses major countertop dimensions from this plan type.",
+    "REFERENCE_TOTAL_COUNTERTOP_MISMATCH warning expected until extraction is improved.",
   ]),
   createdAt: "2026-06-02T00:00:00.000Z",
 });

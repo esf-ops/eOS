@@ -17,12 +17,18 @@ import {
   TAKEOFF_DIAGNOSTIC_LEVEL,
   TAKEOFF_SCHEMA_VERSION
 } from "./takeoffContract.mjs";
+import { compareDimensionEvidenceToTakeoffRuns } from "./takeoffEvidenceCoverage.mjs";
 
 const { INFO, WARNING, ERROR } = TAKEOFF_DIAGNOSTIC_LEVEL;
 const C = TAKEOFF_DIAGNOSTIC_CODE;
 
 /** Tolerance (sf) for AI-provided vs computed total comparison. */
 const SF_TOLERANCE = 0.05;
+
+/** Tolerances (sf) for reference total vs computed reconciliation (v5.6). */
+const REF_TOTAL_CT_TOLERANCE       = 2;
+const REF_TOTAL_BS_TOLERANCE       = 1;
+const REF_TOTAL_COMBINED_TOLERANCE = 2;
 
 /** Maximum plausible single run length in inches (beyond this is suspicious). */
 const MAX_PLAUSIBLE_LENGTH_IN = 240;
@@ -198,6 +204,7 @@ function gatherAllNotes(result) {
  *
  * @param {import('./takeoffContract.mjs').TakeoffResult} takeoffResult
  * @param {import('./takeoffMeasurementCalc.mjs').TakeoffComputedMeasurements} computed
+ * @param {object|null} [dimensionEvidence] - optional DimensionEvidence from evidence pass (v5.6)
  * @returns {TakeoffValidationResult}
  *
  * @typedef {Object} TakeoffValidationResult
@@ -209,7 +216,7 @@ function gatherAllNotes(result) {
  * @property {number} warningCount
  * @property {number} infoCount
  */
-export function validateTakeoffResult(takeoffResult, computed) {
+export function validateTakeoffResult(takeoffResult, computed, dimensionEvidence = null) {
   const diagnostics = [];
 
   // Schema version
@@ -284,6 +291,94 @@ export function validateTakeoffResult(takeoffResult, computed) {
           "projectAssumptions"
         ));
       }
+    }
+  }
+
+  // Reference total reconciliation (v5.6)
+  // Compare visible estimator reference totals against eliteOS computed values.
+  // These are warnings only — eliteOS computed structured runs remain authoritative.
+  if (Array.isArray(dimensionEvidence?.referenceTotals) && dimensionEvidence.referenceTotals.length > 0) {
+    for (const ref of dimensionEvidence.referenceTotals) {
+      if (ref.confidence === "low") continue;
+      const pageNums = ref.pageNumber ? [ref.pageNumber] : undefined;
+
+      if (ref.countertopSf != null) {
+        const diff = round2(Math.abs(round2(Number(ref.countertopSf)) - round2(computed.countertopExactSf)));
+        if (diff > REF_TOTAL_CT_TOLERANCE) {
+          diagnostics.push(diag(
+            WARNING,
+            C.REFERENCE_TOTAL_COUNTERTOP_MISMATCH,
+            `Visible reference total "${ref.rawText}" shows ${round2(Number(ref.countertopSf))} sf countertop ` +
+            `but eliteOS computed ${round2(computed.countertopExactSf)} sf ` +
+            `(diff ${diff.toFixed(2)} sf, tolerance ${REF_TOTAL_CT_TOLERANCE} sf). ` +
+            `Estimator review required — verify whether structured dimensions or the reference total is correct.`,
+            "dimensionEvidence.referenceTotals",
+            pageNums
+          ));
+        }
+      }
+
+      if (ref.backsplashSf != null && !ref.noBacksplash) {
+        const diff = round2(Math.abs(round2(Number(ref.backsplashSf)) - round2(computed.backsplashExactSf)));
+        if (diff > REF_TOTAL_BS_TOLERANCE) {
+          diagnostics.push(diag(
+            WARNING,
+            C.REFERENCE_TOTAL_BACKSPLASH_MISMATCH,
+            `Visible reference total "${ref.rawText}" shows ${round2(Number(ref.backsplashSf))} sf backsplash ` +
+            `but eliteOS computed ${round2(computed.backsplashExactSf)} sf ` +
+            `(diff ${diff.toFixed(2)} sf, tolerance ${REF_TOTAL_BS_TOLERANCE} sf). ` +
+            `Estimator review required.`,
+            "dimensionEvidence.referenceTotals",
+            pageNums
+          ));
+        }
+      }
+
+      if (ref.combinedSf != null) {
+        const diff = round2(Math.abs(round2(Number(ref.combinedSf)) - round2(computed.combinedExactSf)));
+        if (diff > REF_TOTAL_COMBINED_TOLERANCE) {
+          diagnostics.push(diag(
+            WARNING,
+            C.REFERENCE_TOTAL_COMBINED_MISMATCH,
+            `Visible reference total "${ref.rawText}" shows ${round2(Number(ref.combinedSf))} sf combined ` +
+            `but eliteOS computed ${round2(computed.combinedExactSf)} sf ` +
+            `(diff ${diff.toFixed(2)} sf, tolerance ${REF_TOTAL_COMBINED_TOLERANCE} sf). ` +
+            `Estimator review required.`,
+            "dimensionEvidence.referenceTotals",
+            pageNums
+          ));
+        }
+      }
+
+      if (ref.noBacksplash === true && computed.backsplashExactSf > 0) {
+        diagnostics.push(diag(
+          WARNING,
+          C.REFERENCE_TOTAL_NO_BS_CONFLICT,
+          `Plan note "${ref.rawText}" indicates no backsplash, ` +
+          `but eliteOS computed ${round2(computed.backsplashExactSf)} sf backsplash. ` +
+          `Estimator review required — check whether backsplash should be removed from all areas.`,
+          "dimensionEvidence.referenceTotals",
+          ref.pageNumber ? [ref.pageNumber] : undefined
+        ));
+      }
+    }
+  }
+
+  // Evidence coverage check (v5.6)
+  // Warn about high-confidence evidence dimensions not represented in the final TakeoffResult.
+  if (dimensionEvidence) {
+    const coverage = compareDimensionEvidenceToTakeoffRuns(dimensionEvidence, takeoffResult);
+    for (const dim of coverage.unusedDimensions) {
+      const depthStr = dim.depthIn != null ? ` × ${dim.depthIn}"` : "";
+      diagnostics.push(diag(
+        WARNING,
+        C.EVIDENCE_DIMENSION_NOT_USED,
+        `High-confidence dimension "${dim.label}" (${dim.lengthIn}"${depthStr}, page ${dim.pageNumber ?? "?"}) ` +
+        `was extracted in the evidence pass but has no matching run in the final TakeoffResult ` +
+        `(within ±5"). Estimator review required — was this dimension dropped or merged?`,
+        "rooms",
+        dim.pageNumber != null ? [dim.pageNumber] : undefined
+      ));
     }
   }
 
