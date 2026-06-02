@@ -787,7 +787,11 @@ export default function TakeoffLabApp() {
           {/* ── Benchmark / QA evaluation (v5.2) ─────────────────────── */}
           <section className="lab-section">
             <h2 className="lab-section-title">Benchmark / QA evaluation</h2>
-            <TakeoffBenchmarkPanel computed={computed} />
+            <TakeoffBenchmarkPanel
+              computed={computed}
+              dimensionEvidence={dimensionEvidence}
+              validation={validation}
+            />
           </section>
 
           {/* ── Page inventory (v5.4) — shown when a page inventory is available ── */}

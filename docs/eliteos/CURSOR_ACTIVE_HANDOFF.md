@@ -164,9 +164,9 @@ Durable decisions: `FEATURE_DECISIONS.md` entries **37** (additive lane), **38**
 
 ---
 
-## AI Takeoff Lab (2026-06-02, v5.6 built)
+## AI Takeoff Lab (2026-06-02, v5.7 built)
 
-Contract-first foundation + file-backed workspace + live AI extraction + benchmark/evaluation harness + run history + debug view + three-step extraction (inventory → dimension evidence → targeted extraction) + cutout handling rules.
+Contract-first foundation + file-backed workspace + live AI extraction + benchmark/evaluation harness + run history + debug view + four-step extraction (inventory → dimension evidence → targeted extraction → validator reconciliation) + cutout handling rules + sanitized benchmark evaluator.
 
 **Last updated:** 2026-06-02
 
@@ -181,7 +181,22 @@ Contract-first foundation + file-backed workspace + live AI extraction + benchma
 | v5.5 runs | v4+inv+ev | TBD — run manually | — | 78 sf | 4 sf | — | Three-step evidence anchored |
 | v5.6 runs | v5+inv+ev+ref | TBD — run manually | — | 78 sf | 4 sf | — | Ref total reconciliation |
 
-**Status:** v5.6 reference total reconciliation + evidence coverage warnings built. Manual QA needed with reference benchmarks 001–004. Import blocked until consistent benchmark pass.
+**Status:** v5.7 benchmark evaluator built. 10 sanitized benchmark fixtures (A–J) with rich schema + `takeoffBenchmarkEvaluator.mjs` classifies failure categories and final recommendations. Panel shows preset buttons + evaluator analysis. Import blocked until consistent benchmark pass.
+
+### Known benchmark categories (v5.7)
+
+| ID | Label | Expected CT | Expected BS | Expected Status | Confidence |
+|----|-------|-------------|-------------|-----------------|------------|
+| ref-001 | Simple written-reference desk | 31 | 0 | auto_pass | high |
+| ref-002 | Kitchen with 4" BSP reference | 53 | 6 | review_required | high |
+| ref-003 | No-backsplash kitchen reference | 49 | 0 | auto_pass | high |
+| ref-004 | No-backsplash sketch reference | 50 | 0 | auto_pass | high |
+| clean-rect-001 | Clean rectangle geometry | ~78 | 0 | auto_pass | high |
+| waterfall-001 | Waterfall / stepped-shape | ~76.3 | 0 | review_required | medium |
+| mixed-fhbs-001 | CT + standard BS + FHBS | 62 | 51 (11+40) | review_required | medium |
+| high-bs-001 | High BS + mixed area split | 132 | ~23.2 | review_required | medium |
+| messy-email-001 | Messy email + sketch | unknown | unknown | review_required | low |
+| multi-page-001 | Multi-page cabinet packet | unknown | unknown | review_required | low |
 
 ### Status
 
@@ -203,10 +218,10 @@ Contract-first foundation + file-backed workspace + live AI extraction + benchma
 | `takeoffDimensionEvidencePrompt.mjs` — dimension evidence prompt **v2** (v5.6); adds `referenceTotals[]` | **Built** |
 | `takeoffDimensionEvidenceService.mjs` — dimension evidence service; normalizes `referenceTotals` (v5.6) | **Built** |
 | `takeoffDimensionEvidenceService.test.mjs` — **13 tests** | **Built, all passing** |
-|| `takeoffEvidenceCoverage.mjs` — NEW (v5.6) pure coverage helper; `compareDimensionEvidenceToTakeoffRuns` | **Built** |
-|| `EVIDENCE_PROMPT_VERSION` = **v2** | — |
+| `takeoffEvidenceCoverage.mjs` — pure coverage helper; `compareDimensionEvidenceToTakeoffRuns` (v5.6) | **Built** |
+| `EVIDENCE_PROMPT_VERSION` = **v2** | — |
 | `takeoffExtractionPrompt.mjs` — AI system prompt (**v5**, inventory + evidence + ref totals context) | **Built** |
-|| `PROMPT_VERSION` = **v5** | — |
+| `PROMPT_VERSION` = **v5** | — |
 | `takeoffAiProvider.mjs` + `openAiTakeoffProvider.mjs` — `dimensionEvidence` param (v5.5) | **Built** |
 | `takeoffExtractionService.mjs` — four-step extraction (inv → evidence → extraction → validate w/ dimensionEvidence) | **Built** |
 | `takeoffExtractionService.test.mjs` — 28 tests (21-24 v5.4, 25-28 v5.5) | **Built, all passing** |
@@ -214,9 +229,11 @@ Contract-first foundation + file-backed workspace + live AI extraction + benchma
 | `GET /api/takeoff-jobs/:id/results` — list run summaries (v5.3) | **Built** |
 | `GET /api/takeoff-jobs/:id/results/:resultId` — load run with inv + evidence (v5.5) | **Built** |
 | AI draft button + progress UI in `app-ai-takeoff/` | **Built** |
-| `takeoffBenchmark.mjs` — eval helpers + hand sketch 001 fixture (v5.2) + 4 reference benchmarks 001-004 (v5.6) | **Built** |
+| `takeoffBenchmark.mjs` — eval helpers + 10 sanitized fixtures A–J (v5.7 schema) | **Built** |
 | `takeoffBenchmark.test.mjs` — 7 tests | **Built, all passing** |
-| `TakeoffBenchmarkPanel.tsx` — QA evaluation panel (v5.2) | **Built** |
+| `takeoffBenchmarkEvaluator.mjs` — NEW (v5.7): scores computed totals vs fixture, classifies failure category | **Built** |
+| `takeoffBenchmarkEvaluator.test.mjs` — **17 tests** | **Built, all passing** |
+| `TakeoffBenchmarkPanel.tsx` — preset buttons + evaluator analysis (v5.7) | **Built** |
 | Prompt version badge in AI draft mode (v5.2) | **Built** |
 | `TakeoffRunHistoryPanel.tsx` — extraction run history panel (v5.3) | **Built** |
 | `TakeoffDebugPanel.tsx` — debug view with page inv + dimension evidence sections (v5.5) | **Built** |
@@ -233,6 +250,7 @@ Contract-first foundation + file-backed workspace + live AI extraction + benchma
 
 ### Key commands
 ```bash
+npm run eos:test:takeoff-benchmark-evaluator  # 17 tests (v5.7 evaluator)
 npm run eos:test:takeoff-contract             # 24 tests A-X (incl. v5.5 cutout + v5.6 ref total/coverage)
 npm run eos:test:takeoff-workspace-service    # 30 tests
 npm run eos:test:takeoff-extraction-service   # 28 tests (incl. v5.4 inv + v5.5 evidence)
@@ -252,7 +270,7 @@ OPENAI_API_KEY=sk-...       never client-exposed
 ```
 
 ### Durable decisions
-`FEATURE_DECISIONS.md` entries **48** (contract-first), **49** (quote files storage), **50** (provider-neutral extraction, AI-not-authoritative, no raw PDFs committed).
+`FEATURE_DECISIONS.md` entries **48** (contract-first), **49** (quote files storage), **50** (provider-neutral extraction, AI-not-authoritative, no raw PDFs committed), **51** (v5.7 sanitized benchmark evaluator foundation).
 
 ### Lab versions
 | Version | Status |
@@ -267,13 +285,16 @@ OPENAI_API_KEY=sk-...       never client-exposed
 | v5.2 — Benchmark/evaluation harness, prompt regression guard | Built |
 | v5.3 — Extraction run history, debug panel, _meta tracking | Built |
 | v5.4 — Page inventory + targeted extraction pass | Built |
-| v5.5 — Dimension evidence table + cutout handling rules | **Built** |
-|| v5.6 — Reference total reconciliation + evidence coverage warnings | **Built** |
+| v5.5 — Dimension evidence table + cutout handling rules | Built |
+| v5.6 — Reference total reconciliation + evidence coverage warnings | Built |
+| v5.7 — Sanitized benchmark evaluator foundation | **Built** |
 
 Dev: `npm run dev --prefix app-ai-takeoff` -> `http://localhost:5186`. Not in Home Launcher yet.
 
 ### Next required focus
-**Run manual QA for reference benchmarks 001-004 using private PDFs. Verify `REFERENCE_TOTAL_*_MISMATCH` warnings appear for benchmarks where AI computed value deviates from visible reference total. Target: 31 CT, 53 CT / 6 BS, 49 CT / 0 BS, 50 CT / 0 BS.**
+1. **Run manual QA for reference benchmarks 001–004 and clean rectangle 001 using private PDFs.** Load preset in Benchmark / QA panel and check evaluator analysis.
+2. **Decide next extraction improvement:** geometry-first extraction pass, or build a review/approve UI workflow for operators.
+3. **Do not import** until at minimum benchmarks ref-001, ref-003, ref-004, clean-rect-001 consistently pass as `auto_pass` in live runs.
 
 ### Import gate
 Do NOT enable "Import from Takeoff" until:

@@ -816,6 +816,124 @@ Each step is non-fatal. Failures in earlier steps degrade gracefully without blo
 
 ---
 
+## v5.7: Sanitized benchmark evaluator foundation
+
+**Status:** Built (2026-06-02)
+
+### Goal
+
+Make AI Takeoff measurable by providing a deterministic evaluator that scores each AI run against known truth fixtures and classifies why a run failed. AI results are inconsistent across real plan types; this slice replaces "does it look right?" manual QA with structured, repeatable scoring.
+
+### Motivation
+
+Real-plan testing showed that even simple reference plans produce different results across AI runs. Without a structured evaluator:
+- We cannot know if a prompt change improved or regressed extraction.
+- We cannot classify whether a failure was a geometry issue, a backsplash classification issue, or a reference total reconciliation issue.
+- We cannot gate the import path on meaningful accuracy criteria.
+
+### New and modified files
+
+| File | Change |
+|------|--------|
+| `takeoffBenchmark.mjs` | Expanded 4 reference fixtures (A–D) to full v5.7 schema + 6 new fixtures (E–J). All 10 fixtures include `category`, `planType`, `truthConfidence`, `expectedStatus`, `expectedStandardBacksplashSf`, `toleranceCountertopSf`, `toleranceBacksplashSf`, `expectedNoBacksplash`, `expectedBacksplashType`, `reviewGateReasons`. Source PDFs remain private. |
+| `takeoffBenchmarkEvaluator.mjs` | NEW — pure function evaluator. Exports `evaluateTakeoffBenchmark(...)`. Scores computed totals vs fixture, classifies failure category, enforces review gates. |
+| `takeoffBenchmarkEvaluator.test.mjs` | NEW — 17 tests covering all failure categories and boundary conditions. |
+| `TakeoffBenchmarkPanel.tsx` | Preset buttons for all reference benchmarks. Rich evaluator output section with recommendation badge, failure category, reference totals status, evidence coverage, validator failures. |
+| `TakeoffLabApp.tsx` | Passes `dimensionEvidence` and `validation` to `TakeoffBenchmarkPanel`. |
+| `styles.css` | New preset button styles + rich evaluator output styles. |
+
+### Benchmark fixture schema (v5.7)
+
+Each fixture includes:
+
+```javascript
+{
+  benchmarkId, label, category, planType,
+  truthConfidence: "high" | "medium" | "low",
+  expectedStatus: "auto_pass" | "review_required",
+  expectedCountertopSf,
+  expectedStandardBacksplashSf,
+  expectedHighBacksplashSf?,        // optional (high 10" or 12" backsplash area)
+  expectedFullHeightBacksplashSf?,  // optional (full-height backsplash)
+  expectedCombinedSf?,
+  expectedNoBacksplash?,
+  expectedBacksplashType?,          // "none" | "standard_4in" | "high_backsplash" | "full_height" | "mixed"
+  toleranceCountertopSf,
+  toleranceBacksplashSf,
+  visibleReferenceTotals?,
+  expectedAreaBuckets?,
+  importantExpectedDimensions?,
+  knownFailureModes,
+  reviewGateReasons?,
+  notes,
+}
+```
+
+### Evaluator output
+
+```javascript
+{
+  benchmarkId, label, category, expectedStatus,
+  finalRecommendation: "auto_pass" | "review_required" | "fail",
+  failureCategory: "none" | "cutout_deduction_violation" | "extraction_failure" |
+    "backsplash_classification_failure" | "geometry_failure" |
+    "reference_reconciliation_failure" | "mixed_area_scope_failure" |
+    "evidence_coverage_failure" | "review_gate_failure",
+  countertop: { expectedSf, computedSf, deltaSf, errorPercent, pass },
+  standardBacksplash: { ... },
+  highBacksplash?: { expectedSf, note: "cannot decompose" },  // informational
+  fullHeightBacksplash?: { expectedSf, note: "cannot decompose" },
+  combined: { ... },
+  referenceTotals: { expectedCaptured, captured, noBacksplashCorrect, mismatchWarnings[] },
+  evidenceCoverage: { unusedHighConfidenceDimensions, pass },
+  reviewGate: { expectedReviewRequired, modelAttemptedAutoPass, pass },
+  validatorFailures: [],
+  notes: [],
+}
+```
+
+### Failure category logic (priority order)
+
+1. **`cutout_deduction_violation`** — `CUTOUT_IN_EXCLUSIONS_WARNING` in diagnostics
+2. **`extraction_failure`** — computed CT = 0 when fixture expects > 0
+3. **`backsplash_classification_failure`** — invented BS on no-BS plan, or expected BS > 0 but computed = 0, or `REFERENCE_TOTAL_NO_BS_CONFLICT`
+4. **`geometry_failure`** — CT pct error > 10%
+5. **`reference_reconciliation_failure`** — any `REFERENCE_TOTAL_*` in diagnostics
+6. **`mixed_area_scope_failure`** — FHBS or high BS expected, total BS mismatched
+7. **`evidence_coverage_failure`** — `EVIDENCE_DIMENSION_NOT_USED` in diagnostics
+8. **`review_gate_failure`** — fixture requires review, nothing else wrong
+9. **`none`** — all checks pass
+
+### Final recommendation rules
+
+- **`fail`**: cutout deduction, extraction failure, invented BS on no-BS plan, CT pct error > 10%
+- **`review_required`**: fixture `expectedStatus = review_required` (always), moderate failures
+- **`auto_pass`**: all metrics within sf tolerance AND fixture `expectedStatus = auto_pass` AND no critical diagnostics
+
+### Important invariants
+
+- AI output remains **evidence, not authority**. Raw AI totals are never used for scoring.
+- Source PDFs remain private — never committed to repo.
+- Import path remains **blocked** until at minimum ref-001, ref-003, ref-004, clean-rect-001 consistently `auto_pass` in live runs.
+- `expectedHighBacksplashSf` and `expectedFullHeightBacksplashSf` are informational in the evaluator output — `computedMeasurements.backsplashExactSf` cannot be decomposed into bucket types without structured AI output per bucket.
+
+### Known benchmark categories (A–J)
+
+| Fixture | Expected CT | Expected BS | Status |
+|---------|-------------|-------------|--------|
+| ref-001 — Simple written-reference desk | 31 | 0 (no BS) | auto_pass |
+| ref-002 — Kitchen with 4" backsplash | 53 | 6 | review_required |
+| ref-003 — No-backsplash kitchen | 49 | 0 (no BS) | auto_pass |
+| ref-004 — No-backsplash sketch | 50 | 0 (no BS) | auto_pass |
+| clean-rect-001 — Clean rectangle geometry | ~78 | 0 | auto_pass |
+| waterfall-001 — Waterfall/stepped shape | ~76.3 | 0 | review_required |
+| mixed-fhbs-001 — CT + standard BS + FHBS | 62 | 51 (11+40) | review_required |
+| high-bs-001 — High BS + mixed area | 132 | ~23.2 | review_required |
+| messy-email-001 — Messy email + sketch | unknown | unknown | review_required |
+| multi-page-001 — Multi-page cabinet packet | unknown | unknown | review_required |
+
+---
+
 ## Durable decisions
 
 See `FEATURE_DECISIONS.md` entries **48** (contract-first, AI-not-authority), **49** (quote files storage architecture), and **50** (provider-neutral extraction layer, AI output never authoritative, raw PDFs not committed).

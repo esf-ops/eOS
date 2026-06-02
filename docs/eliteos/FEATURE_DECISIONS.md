@@ -655,3 +655,16 @@
 
 ---
 
+### 51. AI Takeoff v5.7 — sanitized benchmark truth fixtures, deterministic recompute, evaluator, review gates — import blocked until gates pass
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-06-02 |
+| **Decision** | AI Takeoff uses four architectural invariants before any quote import path is considered: **(1) Sanitized benchmark truth fixtures.** Expected values come from manually-reviewed real plan types but are stored only as sanitized expected numbers (no customer names, no real plan PDFs). Source PDFs are private and never committed. **(2) Deterministic recompute.** All measurements are computed by `takeoffMeasurementCalc.mjs` from raw dimensions — never from AI-provided totals. AI totals are audit-only. **(3) Written-total reconciliation and evidence coverage.** `validateTakeoffResult` checks AI output against visible estimator-written totals (`REFERENCE_TOTAL_*_MISMATCH`) and against high-confidence extracted dimensions (`EVIDENCE_DIMENSION_NOT_USED`) before any approval gate. **(4) Review gates.** `takeoffBenchmarkEvaluator.mjs` scores each AI run against a known fixture and returns `finalRecommendation: auto_pass | review_required | fail`. Fixtures with `expectedStatus: review_required` can never produce `auto_pass`. The import path (Internal Estimate "Import from Takeoff") remains blocked until benchmarks `ref-001`, `ref-003`, `ref-004`, and `clean-rect-001` consistently pass as `auto_pass` in live runs, AND the evaluator produces no `fail` recommendations for review-required fixtures. |
+| **Why** | AI extractions have been inconsistent across real plan types. This architecture makes AI Takeoff measurable, classifies failure modes systematically, and prevents premature import of incorrect takeoff data into the quoting pipeline. |
+| **Failure categories** | `none`, `cutout_deduction_violation`, `extraction_failure`, `backsplash_classification_failure`, `geometry_failure`, `reference_reconciliation_failure`, `mixed_area_scope_failure`, `evidence_coverage_failure`, `review_gate_failure` |
+| **Impacted files** | `takeoffBenchmark.mjs` (10 fixtures A–J), `takeoffBenchmarkEvaluator.mjs` (new), `takeoffBenchmarkEvaluator.test.mjs` (new, 17 tests), `TakeoffBenchmarkPanel.tsx` (presets + evaluator UI), `TakeoffLabApp.tsx`, `styles.css`, `docs/eliteos/ai-takeoff-foundation.md`, `docs/eliteos/CURSOR_ACTIVE_HANDOFF.md` |
+| **Revisit trigger** | When at least 4 benchmark fixtures consistently produce `auto_pass` in live runs with private PDFs. At that point re-evaluate whether to enable the import path for passing benchmarks only. Also revisit when adding new plan types (add fixture first, evaluate, then modify extraction). |
+
+---
+

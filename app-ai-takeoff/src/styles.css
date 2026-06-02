@@ -1090,6 +1090,112 @@ html, body {
   margin: 0; font-size: 12px; color: var(--eos-ink-faint); line-height: 1.5;
 }
 
+/* ── Benchmark presets (v5.7) ─────────────────────────────────────────────── */
+.benchmark-presets {
+  display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px;
+}
+.benchmark-presets-label {
+  font-size: 11px; font-weight: 600; color: var(--eos-ink-soft); text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.benchmark-preset-btns {
+  display: flex; flex-wrap: wrap; gap: 6px;
+}
+.benchmark-preset-btn {
+  padding: 4px 10px; border-radius: 9999px;
+  background: var(--eos-surface-raised); color: var(--eos-ink-soft);
+  border: 1px solid var(--eos-line-strong);
+  font-size: 11px; font-weight: 500; cursor: pointer; transition: all .15s;
+  white-space: nowrap;
+}
+.benchmark-preset-btn:hover {
+  background: var(--lab-accent-soft); color: var(--lab-accent);
+  border-color: var(--lab-accent-border);
+}
+.benchmark-preset-btn--active {
+  background: var(--lab-accent-soft); color: var(--lab-accent);
+  border-color: var(--lab-accent); font-weight: 700;
+}
+
+/* ── Rich evaluator output (v5.7) ─────────────────────────────────────────── */
+.benchmark-rich {
+  margin-top: 12px;
+  border: 1px solid var(--eos-line);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+.benchmark-rich summary {
+  list-style: none; cursor: pointer;
+  padding: 8px 12px; font-size: 12px; font-weight: 600; color: var(--eos-ink-soft);
+  background: var(--eos-surface-raised);
+  display: flex; align-items: center; gap: 6px;
+}
+.benchmark-rich summary::-webkit-details-marker { display: none; }
+.benchmark-rich-title { font-size: 12px; font-weight: 600; color: var(--eos-ink); }
+.benchmark-rich-category {
+  font-size: 11px; font-weight: 400; color: var(--eos-ink-faint);
+}
+.benchmark-rich-body {
+  padding: 10px 12px; display: flex; flex-direction: column; gap: 8px;
+  background: var(--eos-surface);
+}
+.benchmark-rich-row {
+  display: flex; align-items: baseline; gap: 10px;
+}
+.benchmark-rich-key {
+  font-size: 11px; font-weight: 600; color: var(--eos-ink-soft);
+  min-width: 130px; flex-shrink: 0;
+}
+.benchmark-rich-value {
+  font-size: 12px; color: var(--eos-ink);
+}
+.benchmark-rich-value--ok {
+  font-size: 12px; color: var(--eos-success); font-weight: 500;
+}
+.benchmark-rich-value--warn {
+  font-size: 12px; color: var(--eos-warn); font-weight: 500;
+}
+.benchmark-rich-failures {
+  display: flex; flex-direction: column; gap: 4px;
+}
+.benchmark-rich-failure-list {
+  margin: 4px 0 0 0; padding: 0; list-style: none;
+}
+.benchmark-rich-failure-item {
+  font-size: 11px; color: var(--eos-warn); font-family: monospace;
+  background: var(--eos-warn-soft); border-radius: 4px;
+  padding: 2px 7px; margin-bottom: 3px;
+}
+.benchmark-rich-notes-detail {
+  margin-top: 2px;
+}
+.benchmark-rich-notes-detail summary {
+  background: none; padding: 0; font-size: 11px; color: var(--eos-ink-soft);
+  font-weight: 600; cursor: pointer;
+}
+.benchmark-rich-notes-list {
+  margin: 4px 0 0 0; padding: 0 0 0 14px; list-style: disc;
+}
+.benchmark-rich-note {
+  font-size: 11px; color: var(--eos-ink-faint); margin-bottom: 2px; line-height: 1.5;
+}
+.benchmark-rec {
+  padding: 3px 10px; border-radius: 9999px;
+  font-size: 11px; font-weight: 700;
+}
+.benchmark-rec--pass {
+  background: var(--eos-success-soft); color: var(--eos-success);
+  border: 1px solid var(--eos-success-border);
+}
+.benchmark-rec--review {
+  background: var(--eos-warn-soft); color: var(--eos-warn);
+  border: 1px solid var(--eos-warn-border);
+}
+.benchmark-rec--fail {
+  background: var(--eos-danger-soft); color: var(--eos-danger);
+  border: 1px solid var(--eos-danger-border);
+}
+
 /* ── Run history panel (v5.3) ─────────────────────────────────────────────── */
 
 .run-history-panel {
