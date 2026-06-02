@@ -45,6 +45,7 @@ import TakeoffImportPreview from "./components/TakeoffImportPreview";
 import TakeoffWorkbench from "./components/TakeoffWorkbench";
 import TakeoffPlanFileSection from "./components/TakeoffPlanFileSection";
 import TakeoffBenchmarkPanel from "./components/TakeoffBenchmarkPanel";
+import type { BenchmarkQaContext } from "./components/TakeoffBenchmarkPanel";
 import TakeoffRunHistoryPanel from "./components/TakeoffRunHistoryPanel";
 import TakeoffDebugPanel from "./components/TakeoffDebugPanel";
 import TakeoffQaGatePanel from "./components/TakeoffQaGatePanel";
@@ -189,6 +190,9 @@ export default function TakeoffLabApp() {
   const [pageInventory,    setPageInventory]    = useState<PageInventory    | null>(null);
   const [dimensionEvidence, setDimensionEvidence] = useState<DimensionEvidence | null>(null);
 
+  // v5.8.1: Benchmark/manual QA context — set by TakeoffBenchmarkPanel after "Evaluate" click.
+  const [benchmarkQaContext, setBenchmarkQaContext] = useState<BenchmarkQaContext | null>(null);
+
   // ── Workspace state (file-backed) ────────────────────────────────────────
   const [takeoffJobId, setTakeoffJobId] = useState<string | null>(urlJobId);
   const [planFilename, setPlanFilename] = useState<string | null>(null);
@@ -245,22 +249,6 @@ export default function TakeoffLabApp() {
     [editDraft.rooms, sourceResult.rooms]
   );
 
-  // v5.8: Automatic QA gate — only for AI drafts and file-loaded results, not spec73/pasted.
-  const qaGate = useMemo((): QaGateResult | null => {
-    if (sourceMode === "spec73" || sourceMode === "pasted" || sourceMode === "invalid") return null;
-    try {
-      return evaluateTakeoffQaGate({
-        takeoffResult:         activeState.result,
-        computedMeasurements:  activeState.computed,
-        validationDiagnostics: activeState.validation,
-        dimensionEvidence:     dimensionEvidence ?? null,
-        pageInventory:         pageInventory     ?? null,
-      }) as QaGateResult;
-    } catch {
-      return null;
-    }
-  }, [sourceMode, activeState, dimensionEvidence, pageInventory]);
-
   const displayMode: DisplayMode =
     sourceMode === "invalid"   ? "invalid"   :
     hasEdits                   ? "edited"    :
@@ -270,6 +258,33 @@ export default function TakeoffLabApp() {
     try { return computeAll(editDraft); }
     catch { return computeAll(makeSpec73()); }
   }, [editDraft]);
+
+  // v5.8: Automatic QA gate — only for AI drafts and file-loaded results, not spec73/pasted.
+  // v5.8.1: Includes benchmarkQaContext when the user has evaluated a benchmark preset/target.
+  // Declared after activeState to avoid temporal dead zone.
+  const qaGate = useMemo((): QaGateResult | null => {
+    if (sourceMode === "spec73" || sourceMode === "pasted" || sourceMode === "invalid") return null;
+    try {
+      return evaluateTakeoffQaGate({
+        takeoffResult:         activeState.result,
+        computedMeasurements:  activeState.computed,
+        validationDiagnostics: activeState.validation,
+        dimensionEvidence:     dimensionEvidence ?? null,
+        pageInventory:         pageInventory     ?? null,
+        benchmarkEvaluation:   benchmarkQaContext?.benchmarkEvaluation ?? null,
+        benchmarkContext:      benchmarkQaContext ? {
+          expectedCountertopSf:  benchmarkQaContext.expectedCountertopSf,
+          expectedBacksplashSf:  benchmarkQaContext.expectedBacksplashSf,
+          toleranceCountertopSf: benchmarkQaContext.toleranceCountertopSf,
+          toleranceBacksplashSf: benchmarkQaContext.toleranceBacksplashSf,
+          source:                benchmarkQaContext.source,
+          label:                 benchmarkQaContext.label,
+        } : null,
+      }) as QaGateResult;
+    } catch {
+      return null;
+    }
+  }, [sourceMode, activeState, dimensionEvidence, pageInventory, benchmarkQaContext]);
 
   const spec73Json = useMemo(() => JSON.stringify(makeSpec73(), null, 2), []);
 
@@ -343,6 +358,7 @@ export default function TakeoffLabApp() {
     setCurrentResultId(null);
     setPageInventory(null);
     setDimensionEvidence(null);
+    setBenchmarkQaContext(null);
     setPastedDraft("");
     setParseError(null);
     commitSource(makeSpec73(), "spec73");
@@ -851,6 +867,7 @@ export default function TakeoffLabApp() {
               computed={computed}
               dimensionEvidence={dimensionEvidence}
               validation={validation}
+              onBenchmarkEvaluated={setBenchmarkQaContext}
             />
           </section>
 

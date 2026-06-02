@@ -21,6 +21,14 @@
  *  13.  Helper is pure (no Supabase/quote data in output)
  *  14.  ready_for_review summary includes computed CT/BS values
  *  15.  reviewChecklist always present
+ *  16.  [v5.8.1] benchmarkContext CT 49 vs computed 80.93 → do_not_import
+ *  17.  [v5.8.1] benchmarkContext CT 50 vs computed 73 → do_not_import
+ *  18.  [v5.8.1] benchmarkContext CT 31 vs computed 32.98 tolerance 2 → ready_for_review
+ *  19.  [v5.8.1] benchmarkEvaluation review_required → needs_review
+ *  20.  [v5.8.1] no benchmarkContext preserves automatic-only behavior
+ *  21.  [v5.8.1] benchmarkContext expected BS 6 vs computed 0 → do_not_import
+ *  22.  [v5.8.1] benchmarkContext expected no-BS vs computed BS > 0 → do_not_import
+ *  23.  [v5.8.1] benchmarkContext result contains no Supabase/quote/pricing data
  */
 import assert from "node:assert/strict";
 import { evaluateTakeoffQaGate } from "./takeoffQaGate.mjs";
@@ -353,4 +361,180 @@ function makePageInventory(pages = [], recommendedMeasurementPages = []) {
   console.log("ok: T15 — reviewChecklist always present with ≥4 items");
 }
 
-console.log("\ntakeoffQaGate: all 15 tests passed");
+// 16. benchmarkContext: expected CT 49, computed 80.93 → do_not_import (v5.8.1)
+{
+  const result = evaluateTakeoffQaGate({
+    takeoffResult:         makeResult(),
+    computedMeasurements:  makeComputed(80.93, 0),
+    validationDiagnostics: makeValidation([]),
+    benchmarkContext: {
+      expectedCountertopSf: 49,
+      expectedBacksplashSf: 0,
+      toleranceCountertopSf: 2,
+      toleranceBacksplashSf: 1,
+      source: "benchmark_preset",
+    },
+  });
+
+  assert.equal(result.status, "do_not_import", "T16: expected 49, computed 80.93 → do_not_import");
+  assert.equal(result.severity, "red", "T16: severity red");
+  assert.ok(
+    result.topIssues.some((i) => i.code === "QA_EXPECTED_COUNTERTOP_MISMATCH" && i.severity === "critical"),
+    "T16: QA_EXPECTED_COUNTERTOP_MISMATCH critical issue present"
+  );
+  assert.ok(result.benchmarkContextActive, "T16: benchmarkContextActive = true");
+  assert.ok(
+    result.topIssues.find((i) => i.code === "QA_EXPECTED_COUNTERTOP_MISMATCH")?.message.includes("49.00"),
+    "T16: issue message references expected value"
+  );
+  console.log("ok: T16 — benchmarkContext 49 expected vs 80.93 computed → do_not_import");
+}
+
+// 17. benchmarkContext: expected CT 50, computed 73 → do_not_import (v5.8.1)
+{
+  const result = evaluateTakeoffQaGate({
+    takeoffResult:         makeResult(),
+    computedMeasurements:  makeComputed(73, 0),
+    validationDiagnostics: makeValidation([]),
+    benchmarkContext: {
+      expectedCountertopSf: 50,
+      expectedBacksplashSf: 0,
+      toleranceCountertopSf: 2,
+      toleranceBacksplashSf: 1,
+      source: "manual_qa",
+    },
+  });
+
+  assert.equal(result.status, "do_not_import", "T17: expected 50, computed 73 → do_not_import");
+  const issue17 = result.topIssues.find((i) => i.code === "QA_EXPECTED_COUNTERTOP_MISMATCH");
+  assert.ok(issue17, "T17: QA_EXPECTED_COUNTERTOP_MISMATCH issue present");
+  assert.ok(issue17.message.includes("+23.00") || issue17.message.includes("23.00"), "T17: delta in message");
+  console.log("ok: T17 — benchmarkContext 50 expected vs 73 computed → do_not_import (+23 sf / 46%)");
+}
+
+// 18. benchmarkContext: expected CT 31, computed 32.98, tolerance 2 → ready_for_review (within tol)
+{
+  const result = evaluateTakeoffQaGate({
+    takeoffResult:         makeResult(),
+    computedMeasurements:  makeComputed(32.98, 0),
+    validationDiagnostics: makeValidation([]),
+    benchmarkContext: {
+      expectedCountertopSf: 31,
+      expectedBacksplashSf: 0,
+      toleranceCountertopSf: 2,
+      toleranceBacksplashSf: 1,
+      source: "benchmark_preset",
+    },
+  });
+
+  assert.equal(result.status, "ready_for_review", "T18: delta 1.98 within tol 2 → ready_for_review");
+  assert.ok(
+    !result.topIssues.some((i) => i.code === "QA_EXPECTED_COUNTERTOP_MISMATCH"),
+    "T18: no QA_EXPECTED_COUNTERTOP_MISMATCH issue when within tolerance"
+  );
+  assert.ok(result.benchmarkContextActive, "T18: benchmarkContextActive = true");
+  console.log("ok: T18 — benchmarkContext 31 expected vs 32.98 computed (tol 2) → ready_for_review");
+}
+
+// 19. benchmarkEvaluation review_required → needs_review (v5.8.1)
+{
+  const result = evaluateTakeoffQaGate({
+    takeoffResult:         makeResult(),
+    computedMeasurements:  makeComputed(53, 6),
+    validationDiagnostics: makeValidation([]),
+    benchmarkEvaluation: { finalRecommendation: "review_required", failureCategory: "review_gate_failure" },
+  });
+
+  assert.equal(result.status, "needs_review", "T19: benchmark review_required → needs_review");
+  assert.ok(
+    result.topIssues.some((i) => i.code === "BENCHMARK_REVIEW_REQUIRED"),
+    "T19: BENCHMARK_REVIEW_REQUIRED issue present"
+  );
+  console.log("ok: T19 — benchmarkEvaluation review_required → needs_review");
+}
+
+// 20. No benchmarkContext preserves existing v5.8 behavior
+{
+  const result = evaluateTakeoffQaGate({
+    takeoffResult:         makeResult(),
+    computedMeasurements:  makeComputed(80.93, 0),  // same as T16 but no context
+    validationDiagnostics: makeValidation([]),
+    // no benchmarkContext
+  });
+
+  assert.equal(result.status, "ready_for_review", "T20: no benchmarkContext, clean diags → ready_for_review");
+  assert.equal(result.benchmarkContextActive, false, "T20: benchmarkContextActive = false");
+  console.log("ok: T20 — no benchmarkContext preserves automatic-only behavior");
+}
+
+// 21. benchmarkContext: expected BS 6, computed BS 0 → do_not_import
+{
+  const result = evaluateTakeoffQaGate({
+    takeoffResult:         makeResult(),
+    computedMeasurements:  makeComputed(53, 0),   // BS missed
+    validationDiagnostics: makeValidation([]),
+    benchmarkContext: {
+      expectedCountertopSf: 53,
+      expectedBacksplashSf: 6,
+      toleranceCountertopSf: 2,
+      toleranceBacksplashSf: 1,
+      source: "benchmark_preset",
+    },
+  });
+
+  assert.equal(result.status, "do_not_import", "T21: expected BS 6, computed 0 → do_not_import");
+  assert.ok(
+    result.topIssues.some((i) => i.code === "QA_EXPECTED_BACKSPLASH_MISMATCH" && i.severity === "critical"),
+    "T21: QA_EXPECTED_BACKSPLASH_MISMATCH critical present"
+  );
+  console.log("ok: T21 — benchmarkContext: expected BS 6 but computed 0 → do_not_import");
+}
+
+// 22. benchmarkContext: expected no-BS (0), computed BS > 0 → do_not_import
+{
+  const result = evaluateTakeoffQaGate({
+    takeoffResult:         makeResult(),
+    computedMeasurements:  makeComputed(49, 3.5),  // BS invented
+    validationDiagnostics: makeValidation([]),
+    benchmarkContext: {
+      expectedCountertopSf: 49,
+      expectedBacksplashSf: 0,
+      toleranceCountertopSf: 2,
+      toleranceBacksplashSf: 1,
+      source: "benchmark_preset",
+    },
+  });
+
+  assert.equal(result.status, "do_not_import", "T22: expected no-BS, computed BS 3.5 → do_not_import");
+  assert.ok(
+    result.topIssues.some((i) => i.code === "QA_EXPECTED_BACKSPLASH_MISMATCH" && i.severity === "critical"),
+    "T22: QA_EXPECTED_BACKSPLASH_MISMATCH critical present"
+  );
+  console.log("ok: T22 — benchmarkContext: expected no-BS but computed 3.5 sf → do_not_import");
+}
+
+// 23. No quote mutation, no pricing data in benchmarkContext result
+{
+  const result = evaluateTakeoffQaGate({
+    takeoffResult:         makeResult(),
+    computedMeasurements:  makeComputed(73, 0),
+    validationDiagnostics: makeValidation([]),
+    benchmarkContext: {
+      expectedCountertopSf: 50,
+      expectedBacksplashSf: 0,
+      toleranceCountertopSf: 2,
+      source: "manual_qa",
+    },
+  });
+
+  const resultStr = JSON.stringify(result);
+  const forbidden = ["supabase", "quoteId", "quote_id", "pricingRate", "organizationId",
+                     "quote_headers", "lineItems", "markup", "pricePerSf"];
+  for (const key of forbidden) {
+    assert.ok(!resultStr.toLowerCase().includes(key.toLowerCase()),
+      `T23: result must not contain "${key}"`);
+  }
+  console.log("ok: T23 — benchmarkContext result contains no Supabase/quote/pricing data");
+}
+
+console.log("\ntakeoffQaGate: all 23 tests passed");

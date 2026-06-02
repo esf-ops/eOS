@@ -34,10 +34,22 @@ import { evaluateTakeoffBenchmark } from "@takeoff-core/takeoffBenchmarkEvaluato
 type SimpleEvalResult = ReturnType<typeof evaluateTakeoffAgainstBenchmark>;
 type RichEvalResult   = ReturnType<typeof evaluateTakeoffBenchmark>;
 
+/** Passed to TakeoffLabApp so the main QA card can reflect benchmark truth. */
+export interface BenchmarkQaContext {
+  expectedCountertopSf:  number;
+  expectedBacksplashSf:  number;
+  toleranceCountertopSf: number;
+  toleranceBacksplashSf: number;
+  source:                "benchmark_preset" | "manual_qa";
+  label:                 string;
+  benchmarkEvaluation:   object | null;  // richResult from evaluateTakeoffBenchmark
+}
+
 interface Props {
-  computed:             TakeoffComputedMeasurements;
-  dimensionEvidence?:   object | null;
-  validation?:          { diagnostics: Array<{ code: string; level: string; message: string }> } | null;
+  computed:               TakeoffComputedMeasurements;
+  dimensionEvidence?:     object | null;
+  validation?:            { diagnostics: Array<{ code: string; level: string; message: string }> } | null;
+  onBenchmarkEvaluated?:  (ctx: BenchmarkQaContext | null) => void;
 }
 
 // ── Preset list ───────────────────────────────────────────────────────────────
@@ -108,18 +120,31 @@ function failureCategoryLabel(cat: string): string {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function TakeoffBenchmarkPanel({ computed, dimensionEvidence, validation }: Props) {
+export default function TakeoffBenchmarkPanel({
+  computed,
+  dimensionEvidence,
+  validation,
+  onBenchmarkEvaluated,
+}: Props) {
   const [expectedCt,    setExpectedCt]    = useState("");
   const [expectedBs,    setExpectedBs]    = useState("");
   const [toleranceSf,   setToleranceSf]   = useState("2");
   const [evalNotes,     setEvalNotes]     = useState("");
   const [activePreset,  setActivePreset]  = useState<string | null>(null);
+  const [activeLabel,   setActiveLabel]   = useState<string>("Manual QA target");
   const [activeFixture, setActiveFixture] = useState<object | null>(null);
   const [simpleResult,  setSimpleResult]  = useState<SimpleEvalResult | null>(null);
   const [richResult,    setRichResult]    = useState<RichEvalResult | null>(null);
   const [evalError,     setEvalError]     = useState<string | null>(null);
 
-  function loadPreset(key: string, fixture: typeof REFERENCE_BENCHMARK_001) {
+  /** Clear the parent QA context whenever inputs change without re-evaluating. */
+  function clearContext() {
+    setSimpleResult(null);
+    setRichResult(null);
+    onBenchmarkEvaluated?.(null);
+  }
+
+  function loadPreset(key: string, fixture: typeof REFERENCE_BENCHMARK_001, label: string) {
     const expBs = (fixture as any).expectedStandardBacksplashSf
       ?? (fixture as any).expectedBacksplashSf ?? 0;
     setExpectedCt(String((fixture as any).expectedCountertopSf ?? ""));
@@ -128,9 +153,9 @@ export default function TakeoffBenchmarkPanel({ computed, dimensionEvidence, val
       (fixture as any).toleranceCountertopSf ?? (fixture as any).toleranceSf ?? 2
     ));
     setActivePreset(key);
+    setActiveLabel(label);
     setActiveFixture(fixture);
-    setSimpleResult(null);
-    setRichResult(null);
+    clearContext();
     setEvalError(null);
     setEvalNotes("");
   }
@@ -157,16 +182,29 @@ export default function TakeoffBenchmarkPanel({ computed, dimensionEvidence, val
     const benchForSimple = activeFixture ?? manualBench;
     setSimpleResult(evaluateTakeoffAgainstBenchmark(computed, benchForSimple as any));
 
+    let rich: RichEvalResult | null = null;
     if (activeFixture) {
-      setRichResult(evaluateTakeoffBenchmark({
+      rich = evaluateTakeoffBenchmark({
         benchmark:            activeFixture,
         computedMeasurements: computed,
         dimensionEvidence:    dimensionEvidence as any ?? null,
         validationDiagnostics: validation ?? null,
-      }));
+      });
+      setRichResult(rich);
     } else {
       setRichResult(null);
     }
+
+    // Notify parent so the main QA card can include this benchmark truth.
+    onBenchmarkEvaluated?.({
+      expectedCountertopSf:  ct,
+      expectedBacksplashSf:  bs,
+      toleranceCountertopSf: tol,
+      toleranceBacksplashSf: tol,
+      source:                activePreset ? "benchmark_preset" : "manual_qa",
+      label:                 activeLabel,
+      benchmarkEvaluation:   rich,
+    });
   }
 
   const canEvaluate = Boolean(expectedCt.trim()) && Boolean(expectedBs.trim());
@@ -190,7 +228,7 @@ export default function TakeoffBenchmarkPanel({ computed, dimensionEvidence, val
               key={p.key}
               type="button"
               className={`benchmark-preset-btn ${activePreset === p.key ? "benchmark-preset-btn--active" : ""}`}
-              onClick={() => loadPreset(p.key, p.fixture as any)}
+              onClick={() => loadPreset(p.key, p.fixture as any, p.label)}
             >
               {p.label}
             </button>
@@ -205,7 +243,7 @@ export default function TakeoffBenchmarkPanel({ computed, dimensionEvidence, val
             type="number"
             className="benchmark-input"
             value={expectedCt}
-            onChange={(e) => { setExpectedCt(e.target.value); setSimpleResult(null); setRichResult(null); }}
+            onChange={(e) => { setExpectedCt(e.target.value); clearContext(); }}
             placeholder="78"
             step="0.5"
           />
@@ -216,7 +254,7 @@ export default function TakeoffBenchmarkPanel({ computed, dimensionEvidence, val
             type="number"
             className="benchmark-input"
             value={expectedBs}
-            onChange={(e) => { setExpectedBs(e.target.value); setSimpleResult(null); setRichResult(null); }}
+            onChange={(e) => { setExpectedBs(e.target.value); clearContext(); }}
             placeholder="4"
             step="0.5"
           />
@@ -227,7 +265,7 @@ export default function TakeoffBenchmarkPanel({ computed, dimensionEvidence, val
             type="number"
             className="benchmark-input"
             value={toleranceSf}
-            onChange={(e) => { setToleranceSf(e.target.value); setSimpleResult(null); setRichResult(null); }}
+            onChange={(e) => { setToleranceSf(e.target.value); clearContext(); }}
             placeholder="2"
             step="0.5"
             min="0"

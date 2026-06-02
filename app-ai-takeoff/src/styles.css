@@ -1205,6 +1205,10 @@ html, body {
 .qa-gate-footer-note {
   font-size: 11px; color: var(--eos-ink-faint); line-height: 1.5;
 }
+.qa-gate-benchmark-note {
+  display: block; margin-bottom: 4px;
+  font-size: 11px; font-weight: 600; color: var(--eos-ink-soft);
+}
 
 /* Start New Takeoff button */
 .start-new-btn {

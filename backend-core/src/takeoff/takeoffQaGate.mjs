@@ -1,5 +1,5 @@
 /**
- * takeoffQaGate — automatic QA gate for AI takeoff results (v5.8).
+ * takeoffQaGate — automatic QA gate for AI takeoff results (v5.8 / v5.8.1).
  *
  * Pure function: no I/O, no DB calls, no AI calls, no pricing logic.
  * Safe to import in both Node.js (backend) and browser (frontend via @takeoff-core alias).
@@ -8,6 +8,19 @@
  *   ready_for_review — no critical issues; estimator can review and approve
  *   needs_review     — issues found; estimator review required before use
  *   do_not_import    — critical issues; result likely incomplete or has conflicting data
+ *
+ * v5.8.1: benchmarkContext param.
+ *   When a benchmark preset or manual expected values are provided, the QA gate uses
+ *   those expected values as authoritative ground truth. If the computed CT/BS diverges
+ *   from the expected values beyond tolerance, the gate escalates accordingly —
+ *   even if no diagnostic codes were fired (e.g. when referenceTotals[] are absent).
+ *
+ *   Tolerance check is authoritative: if absDelta <= toleranceCountertopSf, the CT
+ *   benchmark check passes regardless of percent error.
+ *
+ *   Escalation for CT mismatch beyond tolerance:
+ *     - pctError > 10% OR absDelta >= 10 sf → critical → do_not_import
+ *     - any other delta > tolerance         → warning  → needs_review
  *
  * Import to Internal Estimate is always blocked in v5.8 regardless of QA status.
  * The best possible status is "ready_for_review" — not "approved" or "importable."
@@ -103,18 +116,27 @@ function issue(code, label, severity, message, recommendedAction, source) {
  *   validationDiagnostics: object,   — TakeoffValidationResult (required)
  *   dimensionEvidence?:    object,   — DimensionEvidence (optional)
  *   pageInventory?:        object,   — PageInventory (optional)
- *   benchmarkEvaluation?:  object,   — BenchmarkEvaluation (optional)
+ *   benchmarkEvaluation?:  object,   — BenchmarkEvaluation from evaluateTakeoffBenchmark (optional)
+ *   benchmarkContext?: {{             — Manual/preset expected values (optional, v5.8.1)
+ *     expectedCountertopSf?: number,
+ *     expectedBacksplashSf?: number,
+ *     toleranceCountertopSf?: number,
+ *     toleranceBacksplashSf?: number,
+ *     source?: "benchmark_preset" | "manual_qa" | "visible_reference",
+ *     label?: string,
+ *   }}
  * }} params
  *
  * @returns {{
- *   status:              "ready_for_review" | "needs_review" | "do_not_import",
- *   severity:            "green" | "yellow" | "red",
- *   headline:            string,
- *   summary:             string,
- *   topIssues:           Array<{ code, label, severity, message, recommendedAction, source }>,
- *   positiveSignals:     string[],
- *   reviewChecklist:     string[],
- *   importBlockedReason: string | null,
+ *   status:                "ready_for_review" | "needs_review" | "do_not_import",
+ *   severity:              "green" | "yellow" | "red",
+ *   headline:              string,
+ *   summary:               string,
+ *   topIssues:             Array<{ code, label, severity, message, recommendedAction, source }>,
+ *   positiveSignals:       string[],
+ *   reviewChecklist:       string[],
+ *   importBlockedReason:   string | null,
+ *   benchmarkContextActive: boolean,
  * }}
  */
 export function evaluateTakeoffQaGate({
@@ -124,6 +146,7 @@ export function evaluateTakeoffQaGate({
   dimensionEvidence   = null,
   pageInventory       = null,
   benchmarkEvaluation = null,
+  benchmarkContext    = null,
 }) {
   const computed    = computedMeasurements;
   const diagnostics = validationDiagnostics?.diagnostics ?? [];
@@ -294,7 +317,7 @@ export function evaluateTakeoffQaGate({
     ));
   }
 
-  // ── 11. Benchmark evaluation failed ──────────────────────────────────────
+  // ── 11. Benchmark evaluator result ───────────────────────────────────────
 
   if (benchmarkEvaluation?.finalRecommendation === "fail") {
     allIssues.push(issue(
@@ -305,6 +328,82 @@ export function evaluateTakeoffQaGate({
       "Review the Benchmark / QA evaluation section for details on the failure.",
       "benchmark"
     ));
+  } else if (benchmarkEvaluation?.finalRecommendation === "review_required") {
+    allIssues.push(issue(
+      "BENCHMARK_REVIEW_REQUIRED",
+      `Benchmark review required (${benchmarkEvaluation.failureCategory ?? "fixture policy"})`,
+      "warning",
+      `This benchmark fixture requires estimator review — it cannot auto-pass. Failure category: ${benchmarkEvaluation.failureCategory ?? "review_gate_failure"}.`,
+      "Review the Benchmark / QA evaluation section. Verify the takeoff manually against the plan.",
+      "benchmark"
+    ));
+  }
+
+  // ── 12. Benchmark / manual expected value context (v5.8.1) ───────────────
+  // When a benchmark preset or manual target is active, compare computed
+  // CT and BS against the expected values. This catches cases where
+  // referenceTotals[] were not extracted and no diagnostic codes fired.
+
+  const hasBenchmarkContext = benchmarkContext != null;
+
+  if (hasBenchmarkContext) {
+    const expCt  = benchmarkContext.expectedCountertopSf;
+    const expBs  = benchmarkContext.expectedBacksplashSf;
+    const ctTol  = benchmarkContext.toleranceCountertopSf  ?? 2;
+    const bsTol  = benchmarkContext.toleranceBacksplashSf  ?? 1;
+
+    // ── CT check ─────────────────────────────────────────────────────────
+    if (expCt != null && expCt > 0) {
+      const ctDelta    = computed.countertopExactSf - expCt;
+      const ctAbsDelta = Math.abs(ctDelta);
+      if (ctAbsDelta > ctTol) {
+        const ctPct    = round2(ctAbsDelta / expCt * 100);
+        const sign     = ctDelta > 0 ? "+" : "";
+        const isCrit   = ctPct > CT_MISMATCH_CRITICAL_PCT || ctAbsDelta >= 10;
+        allIssues.push(issue(
+          "QA_EXPECTED_COUNTERTOP_MISMATCH",
+          "Computed countertop does not match benchmark target",
+          isCrit ? "critical" : "warning",
+          `Expected ${expCt.toFixed(2)} sf countertop, computed ${computed.countertopExactSf.toFixed(2)} sf (${sign}${ctDelta.toFixed(2)} sf / ${sign}${ctPct.toFixed(1)}%).`,
+          "Review missing or extra countertop pieces before saving. Check each run for incorrect dimensions.",
+          "benchmark"
+        ));
+      }
+    }
+
+    // ── BS check ─────────────────────────────────────────────────────────
+    if (expBs != null) {
+      const computedBs = computed.backsplashExactSf;
+      if (expBs === 0 && computedBs > 0) {
+        // Plan says no backsplash but AI computed one.
+        allIssues.push(issue(
+          "QA_EXPECTED_BACKSPLASH_MISMATCH",
+          "Backsplash computed but benchmark expects none",
+          "critical",
+          `Benchmark target expects 0.00 sf backsplash but eliteOS computed ${computedBs.toFixed(2)} sf. The AI may have invented backsplash that does not exist.`,
+          "Remove all backsplash entries. The plan or benchmark indicates no stone backsplash.",
+          "benchmark"
+        ));
+      } else if (expBs > 0) {
+        const bsDelta    = computedBs - expBs;
+        const bsAbsDelta = Math.abs(bsDelta);
+        if (bsAbsDelta > bsTol) {
+          const bsPct  = round2(bsAbsDelta / expBs * 100);
+          const sign   = bsDelta > 0 ? "+" : "";
+          const isCrit = computedBs === 0 || bsPct > 20 || bsAbsDelta >= 5;
+          allIssues.push(issue(
+            "QA_EXPECTED_BACKSPLASH_MISMATCH",
+            "Computed backsplash does not match benchmark target",
+            isCrit ? "critical" : "warning",
+            computedBs === 0
+              ? `Expected ${expBs.toFixed(2)} sf backsplash but eliteOS computed 0.00 sf. Backsplash may be missing or unstructured.`
+              : `Expected ${expBs.toFixed(2)} sf backsplash, computed ${computedBs.toFixed(2)} sf (${sign}${bsDelta.toFixed(2)} sf / ${sign}${bsPct.toFixed(1)}%).`,
+            "Verify backsplash linear inches and height are correctly structured in all areas.",
+            "benchmark"
+          ));
+        }
+      }
+    }
   }
 
   // ── Determine status ──────────────────────────────────────────────────────
@@ -385,9 +484,24 @@ export function evaluateTakeoffQaGate({
 
   // ── Headline and summary ──────────────────────────────────────────────────
 
+  const benchmarkContextActive =
+    hasBenchmarkContext ||
+    (benchmarkEvaluation?.finalRecommendation != null &&
+     benchmarkEvaluation.finalRecommendation !== "auto_pass");
+
+  const hasBenchmarkMismatch = allIssues.some(
+    (i) => i.code === "QA_EXPECTED_COUNTERTOP_MISMATCH" || i.code === "QA_EXPECTED_BACKSPLASH_MISMATCH"
+  );
+
   const headline =
-    status === "ready_for_review" ? "Takeoff looks complete — ready for estimator review"
-    : status === "needs_review"   ? "Takeoff needs estimator review before use"
+    status === "ready_for_review"
+      ? "Takeoff looks complete — ready for estimator review"
+    : hasBenchmarkMismatch && status === "do_not_import"
+      ? "Computed takeoff does not match selected benchmark target"
+    : hasBenchmarkMismatch && status === "needs_review"
+      ? "Computed takeoff differs from benchmark target — review required"
+    : status === "needs_review"
+      ? "Takeoff needs estimator review before use"
     : "Do not use this takeoff — likely missing or conflicting data";
 
   const ct = computed.countertopExactSf.toFixed(2);
@@ -435,5 +549,6 @@ export function evaluateTakeoffQaGate({
     positiveSignals,
     reviewChecklist,
     importBlockedReason,
+    benchmarkContextActive,
   };
 }

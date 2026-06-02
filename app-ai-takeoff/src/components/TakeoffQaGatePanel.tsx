@@ -27,14 +27,15 @@ export interface QaGateIssue {
 }
 
 export interface QaGateResult {
-  status:              "ready_for_review" | "needs_review" | "do_not_import";
-  severity:            "green" | "yellow" | "red";
-  headline:            string;
-  summary:             string;
-  topIssues:           QaGateIssue[];
-  positiveSignals:     string[];
-  reviewChecklist:     string[];
-  importBlockedReason: string | null;
+  status:                  "ready_for_review" | "needs_review" | "do_not_import";
+  severity:                "green" | "yellow" | "red";
+  headline:                string;
+  summary:                 string;
+  topIssues:               QaGateIssue[];
+  positiveSignals:         string[];
+  reviewChecklist:         string[];
+  importBlockedReason:     string | null;
+  benchmarkContextActive?: boolean;
 }
 
 interface Props {
@@ -145,8 +146,13 @@ export default function TakeoffQaGatePanel({ qaGate }: Props) {
         </ul>
       </details>
 
-      {/* Import note */}
+      {/* Import note + benchmark context indicator */}
       <div className="qa-gate-footer">
+        {qaGate.benchmarkContextActive && (
+          <span className="qa-gate-benchmark-note">
+            ◎ QA includes selected benchmark target.
+          </span>
+        )}
         <span className="qa-gate-footer-note">
           Import to Internal Estimate is not yet enabled in v5.8.
           This QA result is for estimator review guidance only.
