@@ -2354,6 +2354,94 @@ input[type="checkbox"] {
   margin-top: 8px;
 }
 
+/* ── Quote Files Block ───────────────────────────────────────────────────── */
+
+.qf-state {
+  padding: 6px 0;
+}
+
+.qf-error {
+  display: flex;
+  align-items: center;
+  color: var(--eos-danger, #b91c1c);
+  font-size: 0.82rem;
+}
+
+.qf-download-error {
+  font-size: 0.82rem;
+  color: var(--eos-danger, #b91c1c);
+  margin: 0 0 8px;
+}
+
+.qf-file-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.qf-file-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--eos-line);
+  font-size: 0.82rem;
+}
+
+.qf-file-row:last-child {
+  border-bottom: none;
+}
+
+.qf-file-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.qf-filename {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qf-role-pill {
+  flex-shrink: 0;
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--eos-ink-faint, rgba(0,0,0,0.05));
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--eos-ink-muted);
+  white-space: nowrap;
+}
+
+.qf-file-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--eos-ink-muted);
+  flex: 1 1 160px;
+  flex-wrap: wrap;
+}
+
+.qf-sep {
+  color: var(--eos-ink-faint, #d1d5db);
+}
+
+.qf-visibility {
+  text-transform: lowercase;
+  opacity: 0.75;
+}
+
+.qf-file-actions {
+  flex-shrink: 0;
+}
+
 /* Legacy handoff-card block (also used inside the document-history collapse). */
 .handoff-card {
   border: 1px solid var(--eos-line);

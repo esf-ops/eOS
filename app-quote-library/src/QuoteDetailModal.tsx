@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { apiPatch, apiPost } from "./lib/api";
+import { QuoteFilesBlock } from "./QuoteFilesBlock";
 import {
   formatDateTime,
   formatMoneyStandard,
@@ -770,6 +771,9 @@ export function QuoteDetailModal({
                 </details>
               ) : null}
             </section>
+
+            {/* Quote Files */}
+            <QuoteFilesBlock quoteId={detailId} token={sessionToken} />
 
             {/* Measurements & estimate */}
             <section className="drawer-block">
