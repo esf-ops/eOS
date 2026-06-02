@@ -44,6 +44,8 @@ import TakeoffImportPreview from "./components/TakeoffImportPreview";
 import TakeoffWorkbench from "./components/TakeoffWorkbench";
 import TakeoffPlanFileSection from "./components/TakeoffPlanFileSection";
 import TakeoffBenchmarkPanel from "./components/TakeoffBenchmarkPanel";
+import TakeoffRunHistoryPanel from "./components/TakeoffRunHistoryPanel";
+import TakeoffDebugPanel from "./components/TakeoffDebugPanel";
 import { getSupabase } from "./lib/supabase";
 import { resolveAccessToken } from "./lib/authSession";
 import { labApiGet, labApiPost, LabApiError } from "./lib/api";
@@ -163,12 +165,18 @@ export default function TakeoffLabApp() {
     setUserEmail(null);
   }, []);
 
-  // ── AI draft metadata (prompt version, model) ────────────────────────────
+  // ── AI draft metadata (prompt version, model, result ID) ────────────────
   const [aiDraftMeta, setAiDraftMeta] = useState<{
     promptVersion: string | null;
-    modelUsed: string | null;
-    summary: object | null;
+    modelUsed:     string | null;
+    summary:       object | null;
   } | null>(null);
+
+  // ID of the currently-loaded AI extraction result row (for history indicator).
+  const [currentResultId, setCurrentResultId] = useState<string | null>(null);
+
+  // Incremented after new AI extraction to trigger run history refresh.
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
 
   // ── Workspace state (file-backed) ────────────────────────────────────────
   const [takeoffJobId, setTakeoffJobId] = useState<string | null>(urlJobId);
@@ -393,13 +401,34 @@ export default function TakeoffLabApp() {
   // ── Handle AI draft generated (v5) ───────────────────────────────────────
 
   const handleAiDraftGenerated = useCallback((
-    result: TakeoffResult,
+    result:   TakeoffResult,
     filename: string,
-    meta: { promptVersion: string | null; modelUsed: string | null; summary: object | null }
+    meta:     { promptVersion: string | null; modelUsed: string | null; resultRowId: string | null; summary?: object | null }
   ) => {
     commitSource(result, "ai-draft");
     setPlanFilename(filename);
-    setAiDraftMeta(meta);
+    setAiDraftMeta({
+      promptVersion: meta.promptVersion ?? null,
+      modelUsed:     meta.modelUsed     ?? null,
+      summary:       meta.summary       ?? null,
+    });
+    setCurrentResultId(meta.resultRowId ?? null);
+    setHistoryRefreshKey((k) => k + 1);
+  }, []);
+
+  // ── Handle loading a historical run from run history panel (v5.3) ─────────
+
+  const handleLoadHistoricalRun = useCallback((
+    result: TakeoffResult,
+    meta:   { promptVersion: string | null; modelUsed: string | null; resultId: string }
+  ) => {
+    commitSource(result, "ai-draft");
+    setAiDraftMeta({
+      promptVersion: meta.promptVersion ?? null,
+      modelUsed:     meta.modelUsed     ?? null,
+      summary:       null,
+    });
+    setCurrentResultId(meta.resultId);
   }, []);
 
   // ── Derived display values ────────────────────────────────────────────────
@@ -573,6 +602,21 @@ export default function TakeoffLabApp() {
             />
           </section>
 
+          {/* ── AI extraction run history (v5.3) ──────────────────────── */}
+          {takeoffJobId && authToken && (
+            <section className="lab-section">
+              <h2 className="lab-section-title">AI extraction history</h2>
+              <TakeoffRunHistoryPanel
+                takeoffJobId={takeoffJobId}
+                token={authToken}
+                currentResultId={currentResultId}
+                currentComputed={computed}
+                refreshKey={historyRefreshKey}
+                onLoadRun={handleLoadHistoricalRun}
+              />
+            </section>
+          )}
+
           {/* JSON workbench */}
           <section className="lab-section">
             <h2 className="lab-section-title">JSON workbench</h2>
@@ -719,6 +763,16 @@ export default function TakeoffLabApp() {
           <section className="lab-section">
             <h2 className="lab-section-title">Benchmark / QA evaluation</h2>
             <TakeoffBenchmarkPanel computed={computed} />
+          </section>
+
+          {/* ── Debug: AI output (v5.3) — collapsed JSON view ──────────── */}
+          <section className="lab-section">
+            <TakeoffDebugPanel
+              result={result}
+              computed={computed}
+              validation={validation}
+              importPlan={importPlan}
+            />
           </section>
 
           {/* Footer */}

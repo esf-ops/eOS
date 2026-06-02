@@ -32,6 +32,8 @@ import {
   getTakeoffWorkspace,
   saveTakeoffResult,
   getLatestTakeoffResult,
+  listTakeoffResults,
+  getResultById,
 } from "./takeoffWorkspaceService.mjs";
 import { runAiTakeoffExtraction } from "./takeoffExtractionService.mjs";
 import { resolveOrganizationContext } from "../organizations/organizationContext.js";
@@ -183,6 +185,77 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase }) 
       });
 
       return res.json({ ok: true, ...result });
+    } catch (e) {
+      const status = e.statusCode ?? 500;
+      const code = status < 500 ? "validation_error" : "server_error";
+      return res.status(status).json({ ok: false, error: String(e?.message ?? e), code });
+    }
+  });
+
+  // ── GET /api/takeoff-jobs/:id/results ─────────────────────────────────────
+  //
+  // v5.3: List recent AI extraction run summaries for a takeoff job.
+  // Returns safe metadata only — no full JSON, no storage_path, no secrets.
+  // Sorted newest-first, limit 20.
+  //
+  // Response:
+  //   { ok: true, results: [{ id, createdAt, promptVersion, modelUsed,
+  //     computedCountertopSf, computedBacksplashSf, computedCombinedSf,
+  //     warningCount, errorCount, reviewStatus, schemaVersion, source }] }
+  //
+  // NOTE: registered BEFORE /:id/results/:resultId to avoid route collision.
+  //
+  app.get("/api/takeoff-jobs/:id/results", requireAuth(), async (req, res) => {
+    try {
+      const supabase = getSupabase();
+      const orgCtx = await resolveOrganizationContext({ req, supabase, mode: "authenticated" });
+      if (!orgCtx.organizationId) {
+        return res.status(503).json({ ok: false, error: "Organization context not available" });
+      }
+      const takeoffJobId = String(req.params.id ?? "").trim();
+      const result = await listTakeoffResults({
+        supabase,
+        organizationId: orgCtx.organizationId,
+        takeoffJobId,
+      });
+      return res.json(result);
+    } catch (e) {
+      const status = e.statusCode ?? 500;
+      const code = status < 500 ? "validation_error" : "server_error";
+      return res.status(status).json({ ok: false, error: String(e?.message ?? e), code });
+    }
+  });
+
+  // ── GET /api/takeoff-jobs/:id/results/:resultId ────────────────────────────
+  //
+  // v5.3: Load a specific AI extraction result by ID.
+  // Returns full result with server-recomputed measurements.
+  // storage_path and secrets never returned.
+  //
+  // IMPORTANT: registered AFTER /results/latest to avoid Express treating "latest"
+  // as a :resultId value.
+  //
+  // Response:
+  //   { ok: true, takeoffJobId, resultId, savedAt, schemaVersion, reviewStatus,
+  //     promptVersion, modelUsed, normalizedTakeoffJson, computedMeasurementsJson,
+  //     validationDiagnosticsJson, importPlanJson }
+  //
+  app.get("/api/takeoff-jobs/:id/results/:resultId", requireAuth(), async (req, res) => {
+    try {
+      const supabase = getSupabase();
+      const orgCtx = await resolveOrganizationContext({ req, supabase, mode: "authenticated" });
+      if (!orgCtx.organizationId) {
+        return res.status(503).json({ ok: false, error: "Organization context not available" });
+      }
+      const takeoffJobId = String(req.params.id ?? "").trim();
+      const resultId     = String(req.params.resultId ?? "").trim();
+      const result = await getResultById({
+        supabase,
+        organizationId: orgCtx.organizationId,
+        takeoffJobId,
+        resultId,
+      });
+      return res.json(result);
     } catch (e) {
       const status = e.statusCode ?? 500;
       const code = status < 500 ? "validation_error" : "server_error";

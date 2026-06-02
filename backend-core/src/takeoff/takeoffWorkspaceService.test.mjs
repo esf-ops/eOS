@@ -27,6 +27,8 @@ import {
   getTakeoffWorkspace,
   saveTakeoffResult,
   getLatestTakeoffResult,
+  listTakeoffResults,
+  getResultById,
 } from "./takeoffWorkspaceService.mjs";
 import { buildSpec73Fixture } from "./fixtures/spec73.fixture.mjs";
 
@@ -810,6 +812,225 @@ function makeMockSupabase({
   );
 
   console.log("ok: getLatestTakeoffResult — save then load round-trip");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// listTakeoffResults — cross-org job not visible → 404
+// ═══════════════════════════════════════════════════════════════════════════════
+
+{
+  const { supabase } = makeMockSupabase({ jobRow: makeJobRow({ organization_id: OTHER_ORG }) });
+
+  await assert.rejects(
+    () => listTakeoffResults({ supabase, organizationId: ORG_ID, takeoffJobId: JOB_ID }),
+    /not found/i,
+    "cross-org job → 404"
+  );
+
+  console.log("ok: listTakeoffResults — cross-org not visible");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// listTakeoffResults — returns empty array when no results exist
+// ═══════════════════════════════════════════════════════════════════════════════
+
+{
+  const { supabase } = makeMockSupabase({
+    jobRow: makeJobRow({ result_summary: {} }),
+    resultRows: [],
+  });
+
+  const { ok, results } = await listTakeoffResults({
+    supabase, organizationId: ORG_ID, takeoffJobId: JOB_ID,
+  });
+
+  assert.equal(ok, true);
+  assert.deepEqual(results, [], "empty results array when no rows");
+  console.log("ok: listTakeoffResults — empty array when no results");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// listTakeoffResults — returns summaries from results table with _meta
+// ═══════════════════════════════════════════════════════════════════════════════
+
+{
+  const resultRowWithMeta = makeResultRow({
+    raw_ai_result_json: {
+      _meta: { promptVersion: "v2", modelUsed: "gpt-4o", savedAt: "2026-06-02T00:00:00.000Z" },
+    },
+    computed_measurements_json: { countertopExactSf: 68.41, backsplashExactSf: 1.04, combinedExactSf: 69.45 },
+    validation_diagnostics_json: { warningCount: 3, errorCount: 0 },
+  });
+
+  const { supabase } = makeMockSupabase({
+    jobRow: makeJobRow(),
+    resultRows: [resultRowWithMeta],
+  });
+
+  const { ok, results } = await listTakeoffResults({
+    supabase, organizationId: ORG_ID, takeoffJobId: JOB_ID,
+  });
+
+  assert.equal(ok, true);
+  assert.equal(results.length, 1, "one result summary returned");
+  const r = results[0];
+  assert.equal(r.id, RESULT_ID);
+  assert.equal(r.promptVersion, "v2", "promptVersion from _meta");
+  assert.equal(r.modelUsed, "gpt-4o", "modelUsed from _meta");
+  assert.ok(Math.abs(r.computedCountertopSf - 68.41) < 0.01, "CT sf correct");
+  assert.ok(Math.abs(r.computedBacksplashSf - 1.04) < 0.01, "BS sf correct");
+  assert.equal(r.warningCount, 3, "warningCount correct");
+  assert.equal(r.source, "results_table");
+  // Never returns raw JSON or storage_path.
+  assert.ok(!("normalized_takeoff_json" in r), "full JSON not in summary");
+  assert.ok(!("storage_path" in r), "storage_path not in summary");
+  console.log("ok: listTakeoffResults — summaries from results table with _meta");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// listTakeoffResults — falls back to result_summary when no table rows
+// ═══════════════════════════════════════════════════════════════════════════════
+
+{
+  const { supabase } = makeMockSupabase({
+    jobRow: makeJobRow({
+      status: "completed",
+      result_summary: {
+        aiExtraction: true,
+        savedAt: "2026-06-01T05:00:00.000Z",
+        schemaVersion: "1.0",
+        reviewStatus: "needs_review",
+        promptVersion: "v1",
+        modelUsed: "gpt-4o",
+        countertopExactSf: 76.97,
+        backsplashExactSf: 0.00,
+        combinedExactSf: 76.97,
+        warningCount: 2,
+        errorCount: 0,
+        resultRowId: null,
+      },
+    }),
+    resultRows: [],
+  });
+
+  const { ok, results } = await listTakeoffResults({
+    supabase, organizationId: ORG_ID, takeoffJobId: JOB_ID,
+  });
+
+  assert.equal(ok, true);
+  assert.equal(results.length, 1, "fallback entry returned");
+  const r = results[0];
+  assert.equal(r.promptVersion, "v1", "promptVersion from result_summary");
+  assert.equal(r.modelUsed, "gpt-4o", "modelUsed from result_summary");
+  assert.ok(Math.abs(r.computedCountertopSf - 76.97) < 0.01, "CT sf from fallback");
+  assert.equal(r.source, "result_summary");
+  assert.ok(!("storage_path" in r), "storage_path not in fallback summary");
+  console.log("ok: listTakeoffResults — falls back to result_summary");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// getResultById — loads full result with recompute
+// ═══════════════════════════════════════════════════════════════════════════════
+
+{
+  const resultRowWithMeta = makeResultRow({
+    raw_ai_result_json: {
+      _meta: { promptVersion: "v2", modelUsed: "gpt-4o", savedAt: "2026-06-02T00:00:00.000Z" },
+    },
+  });
+
+  const { supabase } = makeMockSupabase({
+    jobRow: makeJobRow(),
+    resultRows: [resultRowWithMeta],
+  });
+
+  const result = await getResultById({
+    supabase, organizationId: ORG_ID, takeoffJobId: JOB_ID, resultId: RESULT_ID,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.resultId, RESULT_ID);
+  assert.equal(result.takeoffJobId, JOB_ID);
+  assert.equal(result.promptVersion, "v2", "promptVersion from _meta");
+  assert.equal(result.modelUsed, "gpt-4o", "modelUsed from _meta");
+  assert.ok(result.normalizedTakeoffJson, "normalizedTakeoffJson returned");
+  assert.ok(result.computedMeasurementsJson, "computedMeasurementsJson returned");
+  assert.ok(result.validationDiagnosticsJson, "validationDiagnosticsJson returned");
+  assert.ok(result.importPlanJson, "importPlanJson returned");
+  // storage_path never returned.
+  assert.ok(!("storage_path" in result), "storage_path not in result");
+  // Full recompute should give Spec73 values.
+  assert.ok(
+    Math.abs(result.computedMeasurementsJson.countertopExactSf - 59.96) < 0.01,
+    "fresh recompute gives correct CT sf"
+  );
+  console.log("ok: getResultById — full result with recompute");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// getResultById — cross-org job not visible → 404
+// ═══════════════════════════════════════════════════════════════════════════════
+
+{
+  const { supabase } = makeMockSupabase({ jobRow: makeJobRow({ organization_id: OTHER_ORG }) });
+
+  await assert.rejects(
+    () => getResultById({
+      supabase, organizationId: ORG_ID, takeoffJobId: JOB_ID, resultId: RESULT_ID,
+    }),
+    /not found/i,
+    "cross-org job → 404"
+  );
+
+  console.log("ok: getResultById — cross-org not visible");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// getResultById — result not found → 404
+// ═══════════════════════════════════════════════════════════════════════════════
+
+{
+  const { supabase } = makeMockSupabase({
+    jobRow: makeJobRow(),
+    resultRows: [], // no result rows
+  });
+
+  const OTHER_RESULT_ID = "e6666666-6666-4666-8666-666666666666";
+
+  await assert.rejects(
+    () => getResultById({
+      supabase, organizationId: ORG_ID, takeoffJobId: JOB_ID, resultId: OTHER_RESULT_ID,
+    }),
+    /not found/i,
+    "missing result → 404"
+  );
+
+  console.log("ok: getResultById — result not found → 404");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// No quote mutation in listTakeoffResults / getResultById
+// ═══════════════════════════════════════════════════════════════════════════════
+
+{
+  const inserts = [];
+  const updates = [];
+  const { supabase } = makeMockSupabase({
+    jobRow: makeJobRow(),
+    resultRows: [makeResultRow()],
+    capturedInserts: inserts,
+    capturedUpdates: updates,
+  });
+
+  await listTakeoffResults({ supabase, organizationId: ORG_ID, takeoffJobId: JOB_ID });
+  await getResultById({ supabase, organizationId: ORG_ID, takeoffJobId: JOB_ID, resultId: RESULT_ID });
+
+  const quoteMutation =
+    inserts.some((i) => i.table === "quote_headers") ||
+    updates.some((u) => u.table === "quote_headers");
+  assert.equal(quoteMutation, false, "no quote_headers mutation");
+  assert.equal(inserts.length, 0, "no inserts in list/get operations");
+  console.log("ok: listTakeoffResults + getResultById — no quote mutation, no inserts");
 }
 
 console.log("\ntakeoffWorkspaceService: all tests passed");

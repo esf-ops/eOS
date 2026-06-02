@@ -545,6 +545,164 @@ export async function getLatestTakeoffResult({
   };
 }
 
+// ── listTakeoffResults ────────────────────────────────────────────────────────
+
+/**
+ * List recent AI extraction run summaries for a takeoff job.
+ *
+ * Returns safe metadata only — storage_path, API secrets, and full normalized JSON
+ * are never included. Sorted newest-first, limit 20.
+ *
+ * Extracts promptVersion and modelUsed from the _meta envelope in raw_ai_result_json
+ * (injected by runAiTakeoffExtraction since v5.3).
+ *
+ * Falls back to job.result_summary when no table rows exist (quote_id NOT NULL fallback).
+ *
+ * @param {{ supabase: object, organizationId: string, takeoffJobId: string }} params
+ * @returns {Promise<{ ok: true, results: RunSummary[] }>}
+ */
+export async function listTakeoffResults({ supabase, organizationId, takeoffJobId }) {
+  if (!isUuid(organizationId)) throw workspaceError("organizationId must be a valid UUID");
+  if (!isUuid(takeoffJobId))   throw workspaceError("takeoffJobId must be a valid UUID");
+
+  const jobRow = await loadVerifiedJobRow(supabase, organizationId, takeoffJobId);
+  if (!jobRow) throw workspaceError("Takeoff job not found", 404);
+
+  const { data: rows, error: rowsErr } = await supabase
+    .from("quote_takeoff_results")
+    .select(
+      "id,created_at,review_status,schema_version," +
+      "raw_ai_result_json,computed_measurements_json,validation_diagnostics_json"
+    )
+    .eq("takeoff_job_id", takeoffJobId)
+    .eq("organization_id", organizationId)
+    .order("created_at", { ascending: false })
+    .limit(20);
+
+  if (rowsErr) throw workspaceError(`DB error listing results: ${rowsErr.message}`, 503);
+
+  const results = [];
+
+  if (rows && rows.length > 0) {
+    for (const row of rows) {
+      const computed    = row.computed_measurements_json ?? {};
+      const diagnostics = row.validation_diagnostics_json ?? {};
+      // _meta was injected by runAiTakeoffExtraction; not present on manual saves.
+      const meta        = row.raw_ai_result_json?._meta ?? {};
+      results.push({
+        id:                   row.id,
+        createdAt:            row.created_at,
+        promptVersion:        meta.promptVersion ?? null,
+        modelUsed:            meta.modelUsed ?? null,
+        computedCountertopSf: computed.countertopExactSf ?? 0,
+        computedBacksplashSf: computed.backsplashExactSf ?? 0,
+        computedCombinedSf:   computed.combinedExactSf   ?? 0,
+        warningCount:         diagnostics.warningCount   ?? diagnostics.warnings?.length ?? 0,
+        errorCount:           diagnostics.errorCount     ?? diagnostics.errors?.length   ?? 0,
+        reviewStatus:         row.review_status ?? "needs_review",
+        schemaVersion:        row.schema_version ?? null,
+        source:               "results_table",
+      });
+    }
+  }
+
+  // Fallback: surface the job's result_summary when no table rows exist.
+  if (results.length === 0 && jobRow.result_summary?.aiExtraction) {
+    const rs      = jobRow.result_summary;
+    const computed    = rs.computedMeasurementsJson ?? {};
+    const diagnostics = rs.validationDiagnosticsJson ?? {};
+    results.push({
+      id:                   rs.resultRowId ?? null,
+      createdAt:            rs.savedAt ?? jobRow.updated_at ?? new Date().toISOString(),
+      promptVersion:        rs.promptVersion ?? null,
+      modelUsed:            rs.modelUsed ?? null,
+      computedCountertopSf: rs.countertopExactSf ?? computed.countertopExactSf ?? 0,
+      computedBacksplashSf: rs.backsplashExactSf ?? computed.backsplashExactSf ?? 0,
+      computedCombinedSf:   rs.combinedExactSf   ?? computed.combinedExactSf   ?? 0,
+      warningCount:         rs.warningCount ?? diagnostics.warningCount ?? 0,
+      errorCount:           rs.errorCount   ?? diagnostics.errorCount   ?? 0,
+      reviewStatus:         rs.reviewStatus ?? "needs_review",
+      schemaVersion:        rs.schemaVersion ?? null,
+      source:               "result_summary",
+    });
+  }
+
+  return { ok: true, results };
+}
+
+// ── getResultById ─────────────────────────────────────────────────────────────
+
+/**
+ * Load a specific AI extraction result by ID, with fresh server-side recompute.
+ *
+ * Returns full normalized JSON + recomputed measurements + diagnostics + import plan.
+ * storage_path and secrets are never returned.
+ *
+ * @param {{ supabase: object, organizationId: string, takeoffJobId: string, resultId: string }} params
+ */
+export async function getResultById({
+  supabase,
+  organizationId,
+  takeoffJobId,
+  resultId,
+}) {
+  if (!isUuid(organizationId)) throw workspaceError("organizationId must be a valid UUID");
+  if (!isUuid(takeoffJobId))   throw workspaceError("takeoffJobId must be a valid UUID");
+  if (!isUuid(resultId))       throw workspaceError("resultId must be a valid UUID");
+
+  // Verify job ownership first (cross-org returns 404 via filter).
+  const jobRow = await loadVerifiedJobRow(supabase, organizationId, takeoffJobId);
+  if (!jobRow) throw workspaceError("Takeoff job not found", 404);
+
+  const { data: resRows, error: resErr } = await supabase
+    .from("quote_takeoff_results")
+    .select(
+      "id,created_at,review_status,schema_version," +
+      "raw_ai_result_json,normalized_takeoff_json," +
+      "computed_measurements_json,validation_diagnostics_json,import_plan_json"
+    )
+    .eq("id", resultId)
+    .eq("takeoff_job_id", takeoffJobId)
+    .eq("organization_id", organizationId)
+    .limit(1);
+
+  if (resErr) throw workspaceError(`DB error loading result: ${resErr.message}`, 503);
+  if (!resRows || resRows.length === 0) throw workspaceError("Result not found", 404);
+  const row = resRows[0];
+
+  if (!row.normalized_takeoff_json) throw workspaceError("Result has no takeoff JSON", 404);
+
+  // Fresh server-side recompute (guards against calculation changes since save).
+  let freshComputed, freshValidation, freshImportPlan;
+  try {
+    freshComputed    = computeTakeoffMeasurements(row.normalized_takeoff_json);
+    freshValidation  = validateTakeoffResult(row.normalized_takeoff_json, freshComputed);
+    freshImportPlan  = planTakeoffImport(row.normalized_takeoff_json, freshComputed);
+  } catch (calcErr) {
+    // Use stored values if recompute fails.
+    freshComputed    = row.computed_measurements_json;
+    freshValidation  = row.validation_diagnostics_json;
+    freshImportPlan  = row.import_plan_json;
+  }
+
+  const meta = row.raw_ai_result_json?._meta ?? {};
+
+  return {
+    ok:                        true,
+    takeoffJobId,
+    resultId:                  row.id,
+    savedAt:                   row.created_at,
+    schemaVersion:             row.schema_version ?? null,
+    reviewStatus:              row.review_status ?? "needs_review",
+    promptVersion:             meta.promptVersion ?? null,
+    modelUsed:                 meta.modelUsed ?? null,
+    normalizedTakeoffJson:     row.normalized_takeoff_json,
+    computedMeasurementsJson:  freshComputed,
+    validationDiagnosticsJson: freshValidation,
+    importPlanJson:            freshImportPlan,
+  };
+}
+
 // ── Legacy v4 helpers (read-only) ─────────────────────────────────────────────
 
 /**

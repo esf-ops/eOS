@@ -290,17 +290,23 @@ export async function runAiTakeoffExtraction({
 
   // 11. Insert quote_takeoff_results row.
   //     review_status is ALWAYS 'needs_review' — AI never auto-approved.
-  //     raw_ai_result_json stores the model's original output for audit.
+  //     raw_ai_result_json stores the model's original output plus a _meta envelope
+  //     containing promptVersion, modelUsed, and savedAt for run-history queries.
   let rawAiJson = null;
   if (rawText) {
     try { rawAiJson = JSON.parse(rawText); } catch { rawAiJson = { _raw: rawText.slice(0, 5000) }; }
   }
+  // Inject eliteOS run metadata as a reserved _meta key so listTakeoffResults
+  // can surface promptVersion/modelUsed without a separate DB column.
+  const augmentedRawAiJson = rawAiJson != null
+    ? { ...rawAiJson, _meta: { promptVersion: PROMPT_VERSION, modelUsed, savedAt: now } }
+    : { _meta: { promptVersion: PROMPT_VERSION, modelUsed, savedAt: now } };
 
   const resultPayload = {
     organization_id:              organizationId,
     takeoff_job_id:               takeoffJobId,
     schema_version:               schemaVersion,
-    raw_ai_result_json:           rawAiJson,
+    raw_ai_result_json:           augmentedRawAiJson,
     normalized_takeoff_json:      normalized,
     computed_measurements_json:   computed,
     validation_diagnostics_json:  validation,
@@ -362,6 +368,7 @@ export async function runAiTakeoffExtraction({
   return {
     ok:                        true,
     takeoffJobId,
+    resultRowId:               resultRowId ?? null,  // null when NOT NULL fallback triggered
     savedAt:                   now,
     schemaVersion,
     reviewStatus:              "needs_review",

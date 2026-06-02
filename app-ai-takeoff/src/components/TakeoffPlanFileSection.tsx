@@ -74,7 +74,12 @@ export interface TakeoffPlanFileSectionProps {
   onAiDraftGenerated: (
     result: TakeoffResult,
     filename: string,
-    meta: { promptVersion: string | null; modelUsed: string | null; summary?: object | null }
+    meta: {
+      promptVersion: string | null;
+      modelUsed:     string | null;
+      resultRowId:   string | null;
+      summary?:      object | null;
+    }
   ) => void;
 }
 
@@ -267,11 +272,12 @@ export default function TakeoffPlanFileSection({
         token,
         {}
       ) as {
-        ok: boolean;
+        ok:                    boolean;
         normalizedTakeoffJson: TakeoffResult;
-        promptVersion: string | null;
-        modelUsed: string | null;
-        summary: object | null;
+        promptVersion:         string | null;
+        modelUsed:             string | null;
+        resultRowId:           string | null;
+        summary:               object | null;
       };
 
       // Clear progress timers.
@@ -282,8 +288,9 @@ export default function TakeoffPlanFileSection({
         setAiStep("done");
         onAiDraftGenerated(res.normalizedTakeoffJson, workspace.file.originalFilename, {
           promptVersion: res.promptVersion ?? null,
-          modelUsed:     res.modelUsed ?? null,
-          summary:       res.summary ?? null,
+          modelUsed:     res.modelUsed     ?? null,
+          resultRowId:   res.resultRowId   ?? null,
+          summary:       res.summary       ?? null,
         });
       } else {
         throw new Error("Server returned an unexpected response");

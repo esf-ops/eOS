@@ -670,6 +670,45 @@ await test("quote_id NOT NULL violation → graceful fallback to result_summary"
   assert.ok(completedUpdate.result_summary?.normalizedTakeoffJson, "normalizedTakeoffJson in result_summary");
 });
 
+// 19. resultRowId is returned in the response
+await test("resultRowId returned in service response", async () => {
+  const result = await runAiTakeoffExtraction({
+    supabase:       makeSupabase(),
+    organizationId: ORG_ID,
+    userId: null,
+    takeoffJobId:   JOB_ID,
+    providerFn:     makeSuccessProvider(),
+    configOverride: ENABLED_CONFIG,
+  });
+  // resultRowId is present in response (may be null if NOT NULL fallback, but key must exist)
+  assert.ok("resultRowId" in result, "resultRowId must be present in response");
+});
+
+// 20. raw_ai_result_json includes _meta envelope with promptVersion and modelUsed
+await test("raw_ai_result_json stored with _meta envelope", async () => {
+  // Use trackMutations: true so _mutations.resultInserts captures the INSERT payload.
+  const supabase = makeSupabase({ trackMutations: true });
+
+  await runAiTakeoffExtraction({
+    supabase,
+    organizationId: ORG_ID,
+    userId: null,
+    takeoffJobId:   JOB_ID,
+    providerFn:     makeSuccessProvider(),
+    configOverride: ENABLED_CONFIG,
+  });
+
+  // resultInserts[0] is the quote_takeoff_results insert payload.
+  const payload = supabase._mutations.resultInserts[0];
+  assert.ok(payload, "quote_takeoff_results insert must have occurred");
+  const storedRawJson = payload.raw_ai_result_json;
+  assert.ok(storedRawJson, "raw_ai_result_json must be stored");
+  assert.ok(storedRawJson._meta, "_meta key must be present in raw_ai_result_json");
+  assert.ok(storedRawJson._meta.promptVersion, "_meta.promptVersion must be set");
+  assert.ok(storedRawJson._meta.modelUsed, "_meta.modelUsed must be set");
+  assert.ok(storedRawJson._meta.savedAt, "_meta.savedAt must be set");
+});
+
 // ── Summary ───────────────────────────────────────────────────────────────────
 
 console.log(`\n  ${passed} passed, ${failed} failed\n`);

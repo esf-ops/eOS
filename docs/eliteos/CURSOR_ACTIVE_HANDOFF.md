@@ -164,20 +164,21 @@ Durable decisions: `FEATURE_DECISIONS.md` entries **37** (additive lane), **38**
 
 ---
 
-## AI Takeoff Lab (2026-06-02, v5.2 built)
+## AI Takeoff Lab (2026-06-02, v5.3 built)
 
-Contract-first foundation + file-backed workspace + live AI extraction + benchmark/evaluation harness.
+Contract-first foundation + file-backed workspace + live AI extraction + benchmark/evaluation harness + run history + debug view.
 
 **Last updated:** 2026-06-02
 
 ### Current AI extraction status (Hand sketch benchmark 001)
 
-| Run | Prompt | CT exact | BS exact | CT target | BS target | Result |
-|-----|--------|----------|----------|-----------|-----------|--------|
-| v5 prompt v1 | v1 | 76.97 sf | 0.00 sf | 78 sf | 4 sf | CT close / BS missed |
-| v5.1 prompt v2 | v2 | **68.41 sf** | 1.04 sf | 78 sf | 4 sf | CT **regressed** / BS partial |
+| Run | Prompt | CT exact | BS exact | CT target | BS target | CT delta | Result |
+|-----|--------|----------|----------|-----------|-----------|----------|--------|
+| v5 run 1 | v1 | 76.97 sf | 0.00 sf | 78 sf | 4 sf | -1.03 | CT close / BS missed |
+| v5.1 run | v2 | **68.41 sf** | 1.04 sf | 78 sf | 4 sf | -9.59 | CT **regressed** / BS partial |
+| Later run | v2 | **48.97 sf** | 0.00 sf | 78 sf | 4 sf | -29.03 | CT **severe regression** / BS missed |
 
-**Status:** Prompt must be re-tuned. Import blocked until hand sketch benchmark 001 passes.
+**Status:** Results vary significantly across runs. Prompt re-tuning required. Import blocked until consistent benchmark pass.
 
 ### Status
 
@@ -192,17 +193,21 @@ Contract-first foundation + file-backed workspace + live AI extraction + benchma
 | `docs/eliteos/ai-takeoff-foundation.md` | **Written** |
 | `app-ai-takeoff/` lab shell | **Built** |
 | `takeoffWorkspaceService.mjs` — workspace persistence (v4.5) | **Built** |
-| `takeoffWorkspaceService.test.mjs` — 22 tests | **Built, all passing** |
+| `takeoffWorkspaceService.test.mjs` — 30 tests (incl. v5.3 list/get) | **Built, all passing** |
 | `takeoffExtractionPrompt.mjs` — AI system prompt (now v2) | **Built** |
 | `takeoffAiProvider.mjs` + `openAiTakeoffProvider.mjs` | **Built** |
-| `takeoffExtractionService.mjs` — orchestration service | **Built** |
-| `takeoffExtractionService.test.mjs` — 18 tests (all mocked) | **Built, all passing** |
+| `takeoffExtractionService.mjs` — orchestration service (v5.3: adds _meta, resultRowId) | **Built** |
+| `takeoffExtractionService.test.mjs` — 20 tests (all mocked) | **Built, all passing** |
 | `POST /api/takeoff-jobs/:id/generate-ai-draft` endpoint | **Built** |
+| `GET /api/takeoff-jobs/:id/results` — list run summaries (v5.3) | **Built** |
+| `GET /api/takeoff-jobs/:id/results/:resultId` — load run by ID (v5.3) | **Built** |
 | AI draft button + progress UI in `app-ai-takeoff/` | **Built** |
 | `takeoffBenchmark.mjs` — eval helpers + hand sketch 001 fixture (v5.2) | **Built** |
 | `takeoffBenchmark.test.mjs` — 7 tests (v5.2) | **Built, all passing** |
 | `TakeoffBenchmarkPanel.tsx` — QA evaluation panel in Lab (v5.2) | **Built** |
 | Prompt version badge in AI draft mode (v5.2) | **Built** |
+| `TakeoffRunHistoryPanel.tsx` — extraction run history panel (v5.3) | **Built** |
+| `TakeoffDebugPanel.tsx` — collapsed JSON debug view (v5.3) | **Built** |
 | Internal Estimate "Import from Takeoff" button | **Not built — blocked on extraction accuracy** |
 
 ### Spec 73 verified results
@@ -215,8 +220,8 @@ Contract-first foundation + file-backed workspace + live AI extraction + benchma
 ### Key commands
 ```bash
 npm run eos:test:takeoff-contract             # 19 test groups
-npm run eos:test:takeoff-workspace-service    # 22 tests
-npm run eos:test:takeoff-extraction-service   # 18 tests (mocked AI)
+npm run eos:test:takeoff-workspace-service    # 30 tests (incl. v5.3 list/get)
+npm run eos:test:takeoff-extraction-service   # 20 tests (incl. v5.3 _meta + resultRowId)
 npm run eos:test:takeoff-benchmark            # 7 tests (pure eval helpers)
 npm run eos:test:pricing-authority            # confirm no pricing regression
 npm run eos:check:local                       # full repo check
@@ -243,12 +248,20 @@ OPENAI_API_KEY=sk-...       never client-exposed
 | v4.5 — Normalized workspace persistence | Built |
 | v5 — Live AI extraction (OpenAI Responses API) | Built |
 | v5.1 — Backsplash tuning, diagnostics, AI review notes UI | Built |
-| v5.2 — Benchmark/evaluation harness, prompt regression guard | **Built** |
+| v5.2 — Benchmark/evaluation harness, prompt regression guard | Built |
+| v5.3 — Extraction run history, debug panel, _meta tracking | **Built** |
 
 Dev: `npm run dev --prefix app-ai-takeoff` -> `http://localhost:5186`. Not in Home Launcher yet.
 
 ### Next required focus
-**Re-tune prompt / model for hand sketch job 001.** Use `TakeoffBenchmarkPanel` (Load hand sketch target -> Evaluate) after every extraction run. Run `compareAiTakeoffRuns` to detect regressions before shipping any prompt change.
+**Understand and fix result variance before prompt tuning.** Use the new run history panel to compare CT/BS across runs. Use the debug panel to inspect the raw normalized JSON for each run. Key question: why do later runs with the same prompt v2 regress from 68.41 sf to 48.97 sf?
+
+Steps:
+1. Open Lab with a workspace that has multiple extractions.
+2. Check run history panel — compare CT/BS deltas across runs.
+3. Click "Load" on each run to view its full debug JSON.
+4. Identify which rooms/dimensions are shrinking across runs.
+5. Only then adjust the prompt — with a clear hypothesis.
 
 ### Import gate
 Do NOT enable "Import from Takeoff" until:

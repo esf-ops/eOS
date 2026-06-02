@@ -361,6 +361,71 @@ npm run eos:test:takeoff-benchmark  # 7 tests, all pure
 
 ---
 
+## v5.3: Extraction debug panel + run history (2026-06-02)
+
+**Status:** Built.
+
+### Goal
+
+The benchmark panel (v5.2) revealed that AI extraction results vary dramatically across runs — the same hand sketch benchmark 001 has produced outputs ranging from 76.97 CT / 0 BS to 68.41 CT / 1.04 BS to 48.97 CT / 0 BS, while the estimator target is 78 CT / 4 BS. Before tuning prompts or models further, we need a layer to **understand** why results vary, not just that they do.
+
+v5.3 adds:
+- **Run history** — a persistent, queryable list of all AI extraction attempts for a workspace.
+- **Run metadata** — every stored result now carries `promptVersion`, `modelUsed`, and a timestamp in a `_meta` envelope injected into `raw_ai_result_json`.
+- **Debug view** — a collapsed panel showing the full normalized JSON, computed measurements, validation diagnostics, and import plan for the current loaded result.
+- **Regression comparison** — the run history panel shows CT/BS deltas versus the currently loaded run so the estimator can see relative quality at a glance.
+
+### What v5.3 adds
+
+**Backend: `takeoffExtractionService.mjs`** changes:
+- `raw_ai_result_json` now stores a `_meta` envelope: `{ promptVersion, modelUsed, savedAt }` alongside the AI's raw output. No schema change needed — `_meta` is a reserved prefix in the stored JSON.
+- Response now includes `resultRowId` (the `quote_takeoff_results.id` for the run, or null if the NOT NULL fallback triggered).
+
+**Backend: `takeoffWorkspaceService.mjs`** new exports:
+- `listTakeoffResults({ supabase, organizationId, takeoffJobId })` — returns up to 20 safe run summaries (no full JSON, no storage_path). Extracts `promptVersion`/`modelUsed` from `_meta`. Falls back to `result_summary` when no table rows exist.
+- `getResultById({ supabase, organizationId, takeoffJobId, resultId })` — loads a specific result by ID with fresh server-side recompute.
+
+**Backend: `takeoffWorkspaceRoutes.js`** new endpoints:
+- `GET /api/takeoff-jobs/:id/results` — list safe run summaries.
+- `GET /api/takeoff-jobs/:id/results/:resultId` — load a specific result in full (registered after `/results/latest` to avoid Express route collision).
+
+**Frontend: `TakeoffRunHistoryPanel.tsx`** (new):
+- Fetches run history on mount and after each new extraction (`refreshKey` prop).
+- Shows a compact table: timestamp, prompt version, model, CT sf, BS sf (with `+/- X sf` delta vs currently loaded run, color-coded), warning count, "Load" button.
+- "Load this run" fetches the full result by ID and calls `onLoadRun` to restore it into the review UI.
+- "Loaded ✓" indicator marks the currently active run.
+
+**Frontend: `TakeoffDebugPanel.tsx`** (new):
+- Collapsed `<details>` element, always rendered but hidden by default.
+- Four sections with Copy buttons: normalized TakeoffResult JSON, computed measurements, validation diagnostics, import plan.
+- Internal Lab only — not shown in Internal Estimate or Quote Library.
+
+### Current known benchmark results (hand sketch benchmark 001)
+
+| Run | Prompt | CT sf | BS sf | Target CT | Target BS | CT delta | BS delta |
+|-----|--------|-------|-------|-----------|-----------|----------|----------|
+| v5 run 1 | v1 | 76.97 | 0.00 | 78 | 4 | -1.03 | -4.00 |
+| v5 run 2 | v2 | 68.41 | 1.04 | 78 | 4 | -9.59 | -2.96 |
+| Later run | v2 | 48.97 | 0.00 | 78 | 4 | -29.03 | -4.00 |
+
+The best observed CT result (76.97 sf) was close to target (78 sf), but has not been reproduced consistently. Backsplash remains unreliable across all runs.
+
+### Import gate (unchanged)
+
+Import into Internal Estimate remains blocked until:
+1. The hand sketch benchmark 001 passes consistently (CT and BS within ±2 sf) across at least two consecutive extraction runs.
+2. A human estimator reviews and approves the extraction result.
+3. No regressions against the benchmark are introduced by prompt/model changes.
+
+### Tests
+
+```bash
+npm run eos:test:takeoff-workspace-service  # includes 9 new tests for listTakeoffResults + getResultById
+npm run eos:test:takeoff-extraction-service # includes 2 new tests for resultRowId + _meta
+```
+
+---
+
 ## Quote-import planning (architecture note)
 
 This section describes the intended flow for converting an AI draft into a quote. **This is not implemented yet.** It is documented here so the architecture is clear before the import slice is built.
