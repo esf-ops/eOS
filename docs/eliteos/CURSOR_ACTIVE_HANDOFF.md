@@ -164,11 +164,11 @@ Durable decisions: `FEATURE_DECISIONS.md` entries **37** (additive lane), **38**
 
 ---
 
-## AI Takeoff Lab (2026-06-02, v5.7 built)
+## AI Takeoff Lab (2026-05-31, v5.8 built)
 
-Contract-first foundation + file-backed workspace + live AI extraction + benchmark/evaluation harness + run history + debug view + four-step extraction (inventory → dimension evidence → targeted extraction → validator reconciliation) + cutout handling rules + sanitized benchmark evaluator.
+Contract-first foundation + file-backed workspace + live AI extraction + benchmark/evaluation harness + run history + debug view + four-step extraction (inventory → dimension evidence → targeted extraction → validator reconciliation) + cutout handling rules + sanitized benchmark evaluator + **automatic QA gate** (v5.8).
 
-**Last updated:** 2026-06-02
+**Last updated:** 2026-05-31
 
 ### Current AI extraction status (Hand sketch benchmark 001)
 
@@ -181,7 +181,7 @@ Contract-first foundation + file-backed workspace + live AI extraction + benchma
 | v5.5 runs | v4+inv+ev | TBD — run manually | — | 78 sf | 4 sf | — | Three-step evidence anchored |
 | v5.6 runs | v5+inv+ev+ref | TBD — run manually | — | 78 sf | 4 sf | — | Ref total reconciliation |
 
-**Status:** v5.7 benchmark evaluator built. 10 sanitized benchmark fixtures (A–J) with rich schema + `takeoffBenchmarkEvaluator.mjs` classifies failure categories and final recommendations. Panel shows preset buttons + evaluator analysis. Import blocked until consistent benchmark pass.
+**Status:** v5.8 built. Automatic QA gate (`takeoffQaGate.mjs`) interprets diagnostics into `ready_for_review / needs_review / do_not_import` after every AI draft. `TakeoffQaGatePanel` shown prominently above Validation diagnostics. "Start new takeoff" button clears workspace state. v5.7 benchmark evaluator + 10 sanitized benchmark fixtures also present. Import blocked until consistent benchmark pass.
 
 ### Known benchmark categories (v5.7)
 
@@ -234,12 +234,16 @@ Contract-first foundation + file-backed workspace + live AI extraction + benchma
 | `takeoffBenchmarkEvaluator.mjs` — NEW (v5.7): scores computed totals vs fixture, classifies failure category | **Built** |
 | `takeoffBenchmarkEvaluator.test.mjs` — **17 tests** | **Built, all passing** |
 | `TakeoffBenchmarkPanel.tsx` — preset buttons + evaluator analysis (v5.7) | **Built** |
+| `takeoffQaGate.mjs` — NEW (v5.8): pure automatic QA gate; statuses: `ready_for_review / needs_review / do_not_import` | **Built** |
+| `takeoffQaGate.test.mjs` — **15 tests** | **Built, all passing** |
+| `TakeoffQaGatePanel.tsx` — NEW (v5.8): estimator-facing QA result card; above Validation diagnostics | **Built** |
+| `TakeoffLabApp.tsx` — `qaGate` via `useMemo`; "Start new takeoff" button (v5.8) | **Built** |
 | Prompt version badge in AI draft mode (v5.2) | **Built** |
 | `TakeoffRunHistoryPanel.tsx` — extraction run history panel (v5.3) | **Built** |
 | `TakeoffDebugPanel.tsx` — debug view with page inv + dimension evidence sections (v5.5) | **Built** |
 | `TakeoffPageInventoryPanel.tsx` — page classification panel (v5.4) | **Built** |
 | `TakeoffDimensionEvidencePanel.tsx` — shows ref totals reconciliation + coverage warnings (v5.6) | **Built** |
-| Internal Estimate "Import from Takeoff" button | **Not built — blocked on extraction accuracy** |
+| Internal Estimate "Import from Takeoff" button | **Not built — blocked on extraction accuracy + QA gate** |
 
 ### Spec 73 verified results
 - Countertop exact sf: **59.96**
@@ -250,6 +254,7 @@ Contract-first foundation + file-backed workspace + live AI extraction + benchma
 
 ### Key commands
 ```bash
+npm run eos:test:takeoff-qa-gate              # 15 tests (v5.8 QA gate)
 npm run eos:test:takeoff-benchmark-evaluator  # 17 tests (v5.7 evaluator)
 npm run eos:test:takeoff-contract             # 24 tests A-X (incl. v5.5 cutout + v5.6 ref total/coverage)
 npm run eos:test:takeoff-workspace-service    # 30 tests
@@ -270,7 +275,7 @@ OPENAI_API_KEY=sk-...       never client-exposed
 ```
 
 ### Durable decisions
-`FEATURE_DECISIONS.md` entries **48** (contract-first), **49** (quote files storage), **50** (provider-neutral extraction, AI-not-authoritative, no raw PDFs committed), **51** (v5.7 sanitized benchmark evaluator foundation).
+`FEATURE_DECISIONS.md` entries **48** (contract-first), **49** (quote files storage), **50** (provider-neutral extraction, AI-not-authoritative, no raw PDFs committed), **51** (v5.7 sanitized benchmark evaluator foundation), **52** (v5.8 automatic QA gate — must pass before any future import path).
 
 ### Lab versions
 | Version | Status |
@@ -288,13 +293,14 @@ OPENAI_API_KEY=sk-...       never client-exposed
 | v5.5 — Dimension evidence table + cutout handling rules | Built |
 | v5.6 — Reference total reconciliation + evidence coverage warnings | Built |
 | v5.7 — Sanitized benchmark evaluator foundation | **Built** |
+| v5.8 — Automatic QA gate + estimator-friendly review mode | **Built** |
 
 Dev: `npm run dev --prefix app-ai-takeoff` -> `http://localhost:5186`. Not in Home Launcher yet.
 
-### Next required focus
-1. **Run manual QA for reference benchmarks 001–004 and clean rectangle 001 using private PDFs.** Load preset in Benchmark / QA panel and check evaluator analysis.
-2. **Decide next extraction improvement:** geometry-first extraction pass, or build a review/approve UI workflow for operators.
-3. **Do not import** until at minimum benchmarks ref-001, ref-003, ref-004, clean-rect-001 consistently pass as `auto_pass` in live runs.
+### Next required focus (post v5.8)
+1. **Run manual QA for benchmarks ref-001–004 and clean-rect-001 using private PDFs.** Observe the Takeoff QA Result card — it should read `ready_for_review` (green) for a good run. Confirm the QA gate accurately reflects real extraction quality.
+2. **Decide next extraction improvement:** geometry-first assembly pass to capture missed pieces, or a human-in-the-loop review/approve workflow for operators.
+3. **Do not enable import** until at minimum benchmarks ref-001, ref-003, ref-004, clean-rect-001 consistently pass as `auto_pass` in the benchmark evaluator AND produce `ready_for_review` in the automatic QA gate on live runs.
 
 ### Import gate
 Do NOT enable "Import from Takeoff" until:

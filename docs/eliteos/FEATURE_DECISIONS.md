@@ -668,3 +668,17 @@
 
 ---
 
+### 52. AI Takeoff v5.8 — automatic QA gate must pass before any future import path; AI output cannot directly create/approve quote measurements
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-05-31 |
+| **Decision** | An automatic QA gate (`takeoffQaGate.mjs`) must be computed after every AI extraction and must return at minimum `needs_review` (yellow) before any future import path is enabled. The gate must return `ready_for_review` (green) — not a custom approval — as the best possible pre-import status. AI output can never directly create or approve quote measurements. The QA gate is a pure function (no I/O, no DB, no AI, no pricing) that interprets existing diagnostics into an estimator-facing summary: `ready_for_review / needs_review / do_not_import`. A critical issue (do_not_import) blocks import without exception. |
+| **Why** | The v5.7 benchmark evaluator is powerful but requires manual benchmark selection. Estimators should not have to inspect JSON or choose presets to understand whether a takeoff is usable. The automatic QA gate provides a deterministic, immediate, estimator-facing answer after every AI draft. This makes the human-in-the-loop review step obvious and enforceable. |
+| **Statuses** | `ready_for_review` (green) — no critical issues; estimator may review and approve. `needs_review` (yellow) — issues found; estimator attention required. `do_not_import` (red) — critical issues; must not be imported. |
+| **Critical triggers** | Validation errors, CT = 0, cutout in exclusions, 2+ unused high-confidence dimensions, CT reference mismatch >10%, no-BS conflict, no measurement pages in inventory, benchmark `fail`. |
+| **Impacted files** | `takeoffQaGate.mjs` (new), `takeoffQaGate.test.mjs` (new, 15 tests), `TakeoffQaGatePanel.tsx` (new), `TakeoffLabApp.tsx` (useMemo qaGate + Start New Takeoff), `takeoffExtractionService.mjs` (qaGate in `_meta` + response), `takeoffWorkspaceService.mjs` (recompute qaGate in getResultById), `styles.css`, `docs/eliteos/ai-takeoff-foundation.md`, `docs/eliteos/CURSOR_ACTIVE_HANDOFF.md` |
+| **Revisit trigger** | When the benchmark evaluator consistently produces `auto_pass` for ≥4 benchmark types AND the QA gate produces `ready_for_review` reliably in live runs. At that point, consider building a formal human-approve step that allows an estimator to promote a `ready_for_review` takeoff into Internal Estimate. |
+
+---
+

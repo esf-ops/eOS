@@ -1090,6 +1090,135 @@ html, body {
   margin: 0; font-size: 12px; color: var(--eos-ink-faint); line-height: 1.5;
 }
 
+/* ── Takeoff QA Gate (v5.8) ───────────────────────────────────────────────── */
+.qa-gate-card {
+  display: flex; flex-direction: column; gap: 12px;
+  border-radius: var(--r-md); padding: 16px 18px;
+  border-width: 2px; border-style: solid;
+}
+.qa-gate-card--green {
+  background: var(--eos-success-soft);
+  border-color: var(--eos-success-border);
+}
+.qa-gate-card--yellow {
+  background: var(--eos-warn-soft);
+  border-color: var(--eos-warn-border);
+}
+.qa-gate-card--red {
+  background: var(--eos-danger-soft);
+  border-color: var(--eos-danger-border);
+}
+.qa-gate-header {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+}
+.qa-gate-badge {
+  padding: 4px 12px; border-radius: 9999px;
+  font-size: 12px; font-weight: 700; white-space: nowrap;
+}
+.qa-gate-badge--green  { background: var(--eos-success); color: #fff; }
+.qa-gate-badge--yellow { background: var(--eos-warn); color: #fff; }
+.qa-gate-badge--red    { background: var(--eos-danger); color: #fff; }
+.qa-gate-headline {
+  font-size: 14px; font-weight: 600;
+  color: var(--eos-ink);
+}
+.qa-gate-summary {
+  margin: 0; font-size: 13px; color: var(--eos-ink-soft); line-height: 1.5;
+}
+.qa-gate-issues {
+  display: flex; flex-direction: column; gap: 8px;
+}
+.qa-gate-issue {
+  padding: 10px 12px; border-radius: var(--r-sm);
+  border: 1px solid var(--eos-line);
+  background: var(--eos-surface);
+}
+.qa-gate-issue--critical { border-color: var(--eos-danger-border); background: var(--eos-surface); }
+.qa-gate-issue--warning  { border-color: var(--eos-warn-border);   background: var(--eos-surface); }
+.qa-gate-issue--info     { border-color: var(--eos-line);           background: var(--eos-surface); }
+.qa-gate-issue-header {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 5px;
+}
+.qa-gate-issue-icon {
+  font-size: 13px; flex-shrink: 0;
+}
+.qa-gate-issue--critical .qa-gate-issue-icon { color: var(--eos-danger); }
+.qa-gate-issue--warning  .qa-gate-issue-icon { color: var(--eos-warn); }
+.qa-gate-issue--info     .qa-gate-issue-icon { color: var(--eos-ink-faint); }
+.qa-gate-issue-label {
+  font-size: 13px; font-weight: 600; color: var(--eos-ink); flex: 1;
+}
+.qa-gate-issue-source {
+  font-size: 10px; font-weight: 600; color: var(--eos-ink-faint);
+  padding: 2px 6px; border-radius: 9999px;
+  background: var(--eos-surface-raised); border: 1px solid var(--eos-line);
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.qa-gate-issue-msg {
+  margin: 0 0 5px 0; font-size: 12px; color: var(--eos-ink-soft); line-height: 1.5;
+}
+.qa-gate-issue-action {
+  margin: 0; font-size: 12px; color: var(--eos-ink-faint); line-height: 1.5;
+}
+.qa-gate-signals {
+  border: 1px solid var(--eos-line); border-radius: var(--r-sm);
+  overflow: hidden;
+}
+.qa-gate-signals summary {
+  list-style: none; cursor: pointer;
+  padding: 8px 12px; font-size: 12px; font-weight: 600;
+  color: var(--eos-success); background: var(--eos-success-soft);
+  display: flex; align-items: center; gap: 6px;
+}
+.qa-gate-signals summary::-webkit-details-marker { display: none; }
+.qa-gate-signals-list {
+  margin: 0; padding: 8px 12px 8px 28px; list-style: none;
+}
+.qa-gate-signal {
+  font-size: 12px; color: var(--eos-ink-soft); margin-bottom: 3px; line-height: 1.5;
+}
+.qa-gate-signal-check { color: var(--eos-success); margin-right: 5px; }
+.qa-gate-checklist {
+  border: 1px solid var(--eos-line); border-radius: var(--r-sm); overflow: hidden;
+}
+.qa-gate-checklist summary {
+  list-style: none; cursor: pointer;
+  padding: 8px 12px; font-size: 12px; font-weight: 600;
+  color: var(--eos-ink-soft); background: var(--eos-surface-raised);
+}
+.qa-gate-checklist summary::-webkit-details-marker { display: none; }
+.qa-gate-checklist-list {
+  margin: 0; padding: 8px 12px 8px 12px; list-style: none; display: flex; flex-direction: column; gap: 6px;
+}
+.qa-gate-checklist-item {
+  display: flex; align-items: baseline; gap: 8px;
+  font-size: 12px; color: var(--eos-ink-soft); line-height: 1.4;
+}
+.qa-gate-checklist-box {
+  display: inline-block; width: 14px; height: 14px; flex-shrink: 0;
+  border: 1.5px solid var(--eos-line-strong); border-radius: 3px;
+  margin-top: 1px;
+}
+.qa-gate-footer {
+  padding-top: 8px; border-top: 1px solid var(--eos-line);
+}
+.qa-gate-footer-note {
+  font-size: 11px; color: var(--eos-ink-faint); line-height: 1.5;
+}
+
+/* Start New Takeoff button */
+.start-new-btn {
+  padding: 5px 14px; border-radius: 9999px;
+  background: var(--eos-surface-raised); color: var(--eos-ink-soft);
+  border: 1px solid var(--eos-line-strong);
+  font-size: 12px; font-weight: 500; cursor: pointer;
+  transition: all .15s; white-space: nowrap;
+}
+.start-new-btn:hover {
+  background: var(--eos-warn-soft); color: var(--eos-warn);
+  border-color: var(--eos-warn-border);
+}
+
 /* ── Benchmark presets (v5.7) ─────────────────────────────────────────────── */
 .benchmark-presets {
   display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px;

@@ -34,6 +34,7 @@ import { computeTakeoffMeasurements } from "./takeoffMeasurementCalc.mjs";
 import { validateTakeoffResult } from "./takeoffValidator.mjs";
 import { planTakeoffImport } from "./takeoffImportPlanner.mjs";
 import { TAKEOFF_SCHEMA_VERSION } from "./takeoffContract.mjs";
+import { evaluateTakeoffQaGate } from "./takeoffQaGate.mjs";
 
 // ── Validation helpers ────────────────────────────────────────────────────────
 
@@ -687,6 +688,20 @@ export async function getResultById({
 
   const meta = row.raw_ai_result_json?._meta ?? {};
 
+  // v5.8: recompute QA gate from fresh data (ensures consistency with recomputed measurements).
+  let freshQaGate = null;
+  try {
+    freshQaGate = evaluateTakeoffQaGate({
+      takeoffResult:         row.normalized_takeoff_json,
+      computedMeasurements:  freshComputed,
+      validationDiagnostics: freshValidation,
+      dimensionEvidence:     meta.dimensionEvidence ?? null,
+      pageInventory:         meta.pageInventory     ?? null,
+    });
+  } catch {
+    freshQaGate = meta.qaGate ?? null; // fall back to stored value
+  }
+
   return {
     ok:                        true,
     takeoffJobId,
@@ -702,6 +717,7 @@ export async function getResultById({
     importPlanJson:            freshImportPlan,
     pageInventory:             meta.pageInventory    ?? null, // v5.4: null for pre-inventory runs
     dimensionEvidence:         meta.dimensionEvidence ?? null, // v5.5: null for pre-evidence runs
+    qaGate:                    freshQaGate,           // v5.8: automatic QA gate result
   };
 }
 

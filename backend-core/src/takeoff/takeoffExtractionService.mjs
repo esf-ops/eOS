@@ -38,6 +38,7 @@ import { computeTakeoffMeasurements } from "./takeoffMeasurementCalc.mjs";
 import { validateTakeoffResult }       from "./takeoffValidator.mjs";
 import { planTakeoffImport }           from "./takeoffImportPlanner.mjs";
 import { TAKEOFF_SCHEMA_VERSION }      from "./takeoffContract.mjs";
+import { evaluateTakeoffQaGate }       from "./takeoffQaGate.mjs";
 import { getExtractionProvider, readExtractionConfig } from "./takeoffAiProvider.mjs";
 import { QUOTE_FILE_BUCKET }           from "../files/quoteFileStoragePath.mjs";
 import { PROMPT_VERSION }              from "./takeoffExtractionPrompt.mjs";
@@ -322,11 +323,23 @@ export async function runAiTakeoffExtraction({
   };
 
   // 10. Server-side recompute — AI totals are NEVER used for pricing.
-  let computed, validation, importPlan;
+  let computed, validation, importPlan, qaGate;
   try {
     computed    = computeTakeoffMeasurements(normalized);
     validation  = validateTakeoffResult(normalized, computed, dimensionEvidence);
     importPlan  = planTakeoffImport(normalized, computed);
+    // v5.8: automatic QA gate — pure function, safe to call here
+    try {
+      qaGate = evaluateTakeoffQaGate({
+        takeoffResult:         normalized,
+        computedMeasurements:  computed,
+        validationDiagnostics: validation,
+        dimensionEvidence:     dimensionEvidence ?? null,
+        pageInventory:         pageInventory     ?? null,
+      });
+    } catch {
+      qaGate = null; // non-fatal
+    }
   } catch (calcErr) {
     await setJobStatus(supabase, takeoffJobId, organizationId, {
       status: "failed",
@@ -369,6 +382,7 @@ export async function runAiTakeoffExtraction({
     savedAt:          now,
     pageInventory:    pageInventory    ?? null, // v5.4: null when inventory was skipped or failed
     dimensionEvidence: dimensionEvidence ?? null, // v5.5: null when evidence was skipped or failed
+    qaGate:           qaGate           ?? null, // v5.8: automatic QA gate result
   };
   const augmentedRawAiJson = rawAiJson != null
     ? { ...rawAiJson, _meta: metaEnvelope }
@@ -454,5 +468,6 @@ export async function runAiTakeoffExtraction({
     usage,
     pageInventory:             pageInventory    ?? null, // v5.4: null when skipped or failed
     dimensionEvidence:         dimensionEvidence ?? null, // v5.5: null when skipped or failed
+    qaGate:                    qaGate           ?? null, // v5.8: automatic QA gate result
   };
 }

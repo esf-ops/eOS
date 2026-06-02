@@ -934,6 +934,94 @@ Each fixture includes:
 
 ---
 
+## v5.8: Automatic QA gate + estimator-friendly review mode
+
+**Status:** Built (2026-05-31)
+
+### Goal
+
+Make AI Takeoff easier to use by automatically interpreting the existing diagnostics and evaluator data, then surfacing a clear estimator-facing QA result after every AI draft. The user should not need to inspect JSON, choose benchmark presets, or manually diagnose every warning.
+
+### New file
+
+| File | Purpose |
+|---|---|
+| `backend-core/src/takeoff/takeoffQaGate.mjs` | Pure QA gate evaluator — no I/O, no DB, no AI, no pricing |
+| `backend-core/src/takeoff/takeoffQaGate.test.mjs` | 15 unit tests for the QA gate |
+| `app-ai-takeoff/src/components/TakeoffQaGatePanel.tsx` | Estimator-facing QA result card |
+
+### QA gate statuses
+
+| Status | Severity | When |
+|---|---|---|
+| `ready_for_review` | green | No critical issues, structured runs captured, no significant mismatch |
+| `needs_review` | yellow | Issues found (unused dims, moderate mismatch, BS not structured, etc.) |
+| `do_not_import` | red | Critical issues: validation errors, large CT mismatch, cutout in exclusions, no-BS conflict, no measurement pages, 2+ unused dimensions |
+
+**Import is always blocked in v5.8 regardless of QA status.** Best possible status is `ready_for_review`, not approved or importable.
+
+### QA gate return shape
+
+```js
+{
+  status:              "ready_for_review" | "needs_review" | "do_not_import",
+  severity:            "green" | "yellow" | "red",
+  headline:            string,
+  summary:             string,
+  topIssues: [{
+    code, label, severity: "info"|"warning"|"critical",
+    message, recommendedAction, source
+  }],
+  positiveSignals:     string[],
+  reviewChecklist:     string[],
+  importBlockedReason: string | null,
+}
+```
+
+### Issue escalation rules (priority order)
+
+1. `validationDiagnostics.hasErrors` → critical → `do_not_import`
+2. No rooms/runs extracted (CT = 0) → critical → `do_not_import`
+3. `CUTOUT_IN_EXCLUSIONS_WARNING` → critical → `do_not_import`
+4. `EVIDENCE_DIMENSION_NOT_USED` × 2+ → critical → `do_not_import`
+5. `REFERENCE_TOTAL_COUNTERTOP_MISMATCH` with pct error > 10% → critical → `do_not_import`
+6. `REFERENCE_TOTAL_NO_BS_CONFLICT` → critical → `do_not_import`
+7. `NO_MEASUREMENT_PAGES` (page inventory has pages but none are measurement pages) → critical → `do_not_import`
+8. Benchmark `finalRecommendation === "fail"` → critical → `do_not_import`
+9. `EVIDENCE_DIMENSION_NOT_USED` × 1 → warning → `needs_review`
+10. `REFERENCE_TOTAL_COUNTERTOP_MISMATCH` pct ≤ 10% → warning → `needs_review`
+11. `REFERENCE_TOTAL_BACKSPLASH_MISMATCH` → warning → `needs_review`
+12. `AI_BACKSPLASH_TOTAL_NOT_STRUCTURED` → warning → `needs_review`
+
+### Positive signals
+
+- No validation errors
+- Structured runs captured with CT > 0
+- Reference totals present and reconciled (no mismatch diagnostics)
+- All high-confidence dimensions used
+- No-backsplash correctly recognized (BS = 0 when plan says no BS)
+- Measurement pages identified in page inventory
+
+### Backend integration
+
+- `takeoffExtractionService.mjs` calls `evaluateTakeoffQaGate` after validation; stores result in `_meta.qaGate` and returns `qaGate` in the API response.
+- `takeoffWorkspaceService.mjs` `getResultById` recomputes the QA gate from fresh data when loading historical runs.
+
+### Frontend integration
+
+- `TakeoffLabApp.tsx` computes `qaGate` as a `useMemo` from `activeState`, `dimensionEvidence`, and `pageInventory` — always current, reacts to edits.
+- `TakeoffQaGatePanel` is placed directly below Measurement Summary, above Validation diagnostics.
+- Existing debug/benchmark panels remain, visually demoted.
+
+### Start New Takeoff (v5.8)
+
+- A "↩ Start new takeoff" button appears in the hero pill area whenever a workspace is active (`takeoffJobId` is set).
+- Clicking it removes `?takeoffJobId=` from the URL via `history.pushState` and resets all workspace state.
+- If there are unsaved edits, a confirmation dialog is shown: "Start a new takeoff? This will leave the current workspace saved but clear it from the screen."
+- No DB deletion — old data is still accessible by reopening the original URL.
+
+---
+
 ## Durable decisions
 
-See `FEATURE_DECISIONS.md` entries **48** (contract-first, AI-not-authority), **49** (quote files storage architecture), and **50** (provider-neutral extraction layer, AI output never authoritative, raw PDFs not committed).
+See `FEATURE_DECISIONS.md` entries **48** (contract-first, AI-not-authority), **49** (quote files storage architecture), **50** (provider-neutral extraction layer, AI output never authoritative, raw PDFs not committed), and **51** (benchmark truth fixtures, review gates) and **52** (automatic QA gate must pass before any future import path).

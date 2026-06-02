@@ -33,6 +33,7 @@ import { buildSpec73Fixture } from "@takeoff-core/fixtures/spec73.fixture.mjs";
 import { computeTakeoffMeasurements } from "@takeoff-core/takeoffMeasurementCalc.mjs";
 import { validateTakeoffResult } from "@takeoff-core/takeoffValidator.mjs";
 import { planTakeoffImport } from "@takeoff-core/takeoffImportPlanner.mjs";
+import { evaluateTakeoffQaGate } from "@takeoff-core/takeoffQaGate.mjs";
 import type { TakeoffResult, TakeoffArea, TakeoffRun } from "@takeoff-core/takeoffContract.mjs";
 import type { TakeoffComputedMeasurements } from "@takeoff-core/takeoffMeasurementCalc.mjs";
 import type { TakeoffValidationResult } from "@takeoff-core/takeoffValidator.mjs";
@@ -46,6 +47,8 @@ import TakeoffPlanFileSection from "./components/TakeoffPlanFileSection";
 import TakeoffBenchmarkPanel from "./components/TakeoffBenchmarkPanel";
 import TakeoffRunHistoryPanel from "./components/TakeoffRunHistoryPanel";
 import TakeoffDebugPanel from "./components/TakeoffDebugPanel";
+import TakeoffQaGatePanel from "./components/TakeoffQaGatePanel";
+import type { QaGateResult } from "./components/TakeoffQaGatePanel";
 import TakeoffPageInventoryPanel from "./components/TakeoffPageInventoryPanel";
 import type { PageInventory } from "./components/TakeoffPageInventoryPanel";
 import TakeoffDimensionEvidencePanel from "./components/TakeoffDimensionEvidencePanel";
@@ -242,6 +245,22 @@ export default function TakeoffLabApp() {
     [editDraft.rooms, sourceResult.rooms]
   );
 
+  // v5.8: Automatic QA gate — only for AI drafts and file-loaded results, not spec73/pasted.
+  const qaGate = useMemo((): QaGateResult | null => {
+    if (sourceMode === "spec73" || sourceMode === "pasted" || sourceMode === "invalid") return null;
+    try {
+      return evaluateTakeoffQaGate({
+        takeoffResult:         activeState.result,
+        computedMeasurements:  activeState.computed,
+        validationDiagnostics: activeState.validation,
+        dimensionEvidence:     dimensionEvidence ?? null,
+        pageInventory:         pageInventory     ?? null,
+      }) as QaGateResult;
+    } catch {
+      return null;
+    }
+  }, [sourceMode, activeState, dimensionEvidence, pageInventory]);
+
   const displayMode: DisplayMode =
     sourceMode === "invalid"   ? "invalid"   :
     hasEdits                   ? "edited"    :
@@ -305,6 +324,29 @@ export default function TakeoffLabApp() {
     setParseError(null);
     commitSource(makeSpec73(), "spec73");
   }, []);
+
+  // v5.8: Start New Takeoff — clears workspace state + URL param without deleting any data.
+  const handleStartNewTakeoff = useCallback(() => {
+    if (hasEdits) {
+      if (!window.confirm(
+        "Start a new takeoff? This will leave the current workspace saved but clear it from the screen."
+      )) return;
+    }
+    // Remove takeoffJobId from URL without a page reload.
+    const url = new URL(window.location.href);
+    url.searchParams.delete("takeoffJobId");
+    window.history.pushState({}, "", url.toString());
+    // Reset workspace state (no DB deletion).
+    setTakeoffJobId(null);
+    setPlanFilename(null);
+    setAiDraftMeta(null);
+    setCurrentResultId(null);
+    setPageInventory(null);
+    setDimensionEvidence(null);
+    setPastedDraft("");
+    setParseError(null);
+    commitSource(makeSpec73(), "spec73");
+  }, [hasEdits]);
 
   // ── Edit actions ──────────────────────────────────────────────────────────
 
@@ -538,9 +580,19 @@ export default function TakeoffLabApp() {
               </span>
             )}
             {takeoffJobId && (
-              <span className="source-pill source-pill--workspace">
-                Workspace active
-              </span>
+              <>
+                <span className="source-pill source-pill--workspace">
+                  Workspace active
+                </span>
+                <button
+                  type="button"
+                  className="start-new-btn"
+                  onClick={handleStartNewTakeoff}
+                  title="Clear this workspace from the screen and start a fresh takeoff (data is preserved)"
+                >
+                  ↩ Start new takeoff
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -664,6 +716,14 @@ export default function TakeoffLabApp() {
             <h2 className="lab-section-title">Measurement summary</h2>
             <TakeoffSummaryCards computed={computed} importPlan={importPlan} />
           </section>
+
+          {/* ── v5.8: Automatic QA gate — estimator-facing result ─────────── */}
+          {qaGate && (
+            <section className="lab-section">
+              <h2 className="lab-section-title">Takeoff QA result</h2>
+              <TakeoffQaGatePanel qaGate={qaGate} />
+            </section>
+          )}
 
           {/* AI review notes — visible whenever assumptions/notes exist in the result */}
           {(() => {
