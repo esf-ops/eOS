@@ -32,6 +32,7 @@ import VisualLayoutCanvas, {
   visualLayoutKeysForRooms
 } from "./VisualLayoutCanvas";
 import { resolveAccessToken } from "./lib/authSession";
+import { QuoteFilesPanel } from "./QuoteFilesPanel";
 import { buildCustomerEstimateDisplayModel } from "./lib/customerEstimateDisplayModel";
 import { friendlyApiErrorMessage } from "./lib/saveErrorMessage";
 import { getSupabase } from "./lib/supabase";
@@ -3643,6 +3644,11 @@ export default function InternalEstimateApp() {
               </p>
             ) : null}
           </section>
+
+          <QuoteFilesPanel
+            quoteId={lastSavedQuoteId ?? urlQuoteId}
+            getToken={ensureAccessToken}
+          />
 
           <details className="card ie-diagnostics">
             <summary>Diagnostics</summary>
