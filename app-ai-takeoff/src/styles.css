@@ -1370,6 +1370,29 @@ html, body {
 .run-history-delta { font-size: 10px; font-weight: 500; }
 .run-history-delta--pos { color: var(--eos-success); }
 .run-history-delta--neg { color: var(--eos-danger); }
+
+/* v5.9: Provider source pill in run history */
+.run-history-provider-pill {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+.run-history-provider-pill--openai {
+  background: #e8f5e9;
+  color: #2e7d32;
+  border: 1px solid #a5d6a7;
+}
+.run-history-provider-pill--gemini {
+  background: #e8eaf6;
+  color: #3949ab;
+  border: 1px solid #9fa8da;
+}
 .run-history-delta--neutral { color: var(--eos-ink-muted); }
 
 .run-history-warn-badge {

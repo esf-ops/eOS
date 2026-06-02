@@ -24,6 +24,7 @@ export interface RunSummary {
   id:                   string | null;
   createdAt:            string;
   promptVersion:        string | null;
+  provider:             string | null; // v5.9: "openai" | "gemini"
   modelUsed:            string | null;
   computedCountertopSf: number;
   computedBacksplashSf: number;
@@ -202,7 +203,7 @@ export default function TakeoffRunHistoryPanel({
         <thead>
           <tr>
             <th>Time</th>
-            <th>Prompt · Model</th>
+            <th>Provider · Model</th>
             <th>CT sf</th>
             <th>BS sf</th>
             <th>Warnings</th>
@@ -220,8 +221,12 @@ export default function TakeoffRunHistoryPanel({
               <tr key={run.id ?? `run-${i}`} className={isLoaded ? "run-history-row run-history-row--loaded" : "run-history-row"}>
                 <td className="run-history-ts">{fmtDate(run.createdAt)}</td>
                 <td className="run-history-meta">
-                  {run.promptVersion ? `Prompt ${run.promptVersion}` : "—"}
-                  {run.modelUsed ? ` · ${run.modelUsed}` : ""}
+                  {run.provider && (
+                    <span className={`run-history-provider-pill run-history-provider-pill--${run.provider}`}>
+                      {run.provider}
+                    </span>
+                  )}
+                  {run.modelUsed ? ` ${run.modelUsed}` : (run.promptVersion ? `Prompt ${run.promptVersion}` : "—")}
                 </td>
                 <td className="run-history-sf">
                   {fmtSf(run.computedCountertopSf)}

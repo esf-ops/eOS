@@ -164,9 +164,9 @@ Durable decisions: `FEATURE_DECISIONS.md` entries **37** (additive lane), **38**
 
 ---
 
-## AI Takeoff Lab (2026-05-31, v5.8 built)
+## AI Takeoff Lab (2026-05-31, v5.9 built)
 
-Contract-first foundation + file-backed workspace + live AI extraction + benchmark/evaluation harness + run history + debug view + four-step extraction (inventory → dimension evidence → targeted extraction → validator reconciliation) + cutout handling rules + sanitized benchmark evaluator + **automatic QA gate** (v5.8).
+Contract-first foundation + file-backed workspace + live AI extraction + benchmark/evaluation harness + run history + debug view + four-step extraction (inventory → dimension evidence → targeted extraction → validator reconciliation) + cutout handling rules + sanitized benchmark evaluator + automatic QA gate (v5.8) + **swappable AI provider — Gemini support** (v5.9).
 
 **Last updated:** 2026-05-31
 
@@ -181,7 +181,7 @@ Contract-first foundation + file-backed workspace + live AI extraction + benchma
 | v5.5 runs | v4+inv+ev | TBD — run manually | — | 78 sf | 4 sf | — | Three-step evidence anchored |
 | v5.6 runs | v5+inv+ev+ref | TBD — run manually | — | 78 sf | 4 sf | — | Ref total reconciliation |
 
-**Status:** v5.8 built. Automatic QA gate (`takeoffQaGate.mjs`) interprets diagnostics into `ready_for_review / needs_review / do_not_import` after every AI draft. `TakeoffQaGatePanel` shown prominently above Validation diagnostics. "Start new takeoff" button clears workspace state. v5.7 benchmark evaluator + 10 sanitized benchmark fixtures also present. Import blocked until consistent benchmark pass.
+**Status:** v5.9 built. Gemini provider (`geminiTakeoffProvider.mjs`) added for all three AI passes. Set `TAKEOFF_AI_PROVIDER=gemini` + `GEMINI_API_KEY` to run extraction through Gemini. OpenAI remains the default. Run history shows a colored provider pill (green = openai, blue = gemini). v5.8 automatic QA gate, v5.8.1 benchmark context escalation, v5.7 benchmark evaluator + 10 sanitized fixtures all preserved unchanged. Import still blocked until consistent benchmark pass.
 
 ### Known benchmark categories (v5.7)
 
@@ -235,11 +235,14 @@ Contract-first foundation + file-backed workspace + live AI extraction + benchma
 | `takeoffBenchmarkEvaluator.test.mjs` — **17 tests** | **Built, all passing** |
 | `TakeoffBenchmarkPanel.tsx` — preset buttons + evaluator analysis (v5.7) | **Built** |
 | `takeoffQaGate.mjs` — NEW (v5.8): pure automatic QA gate; statuses: `ready_for_review / needs_review / do_not_import` | **Built** |
-| `takeoffQaGate.test.mjs` — **15 tests** | **Built, all passing** |
+| `takeoffQaGate.test.mjs` — **23 tests** (incl. v5.8.1 benchmarkContext) | **Built, all passing** |
 | `TakeoffQaGatePanel.tsx` — NEW (v5.8): estimator-facing QA result card; above Validation diagnostics | **Built** |
-| `TakeoffLabApp.tsx` — `qaGate` via `useMemo`; "Start new takeoff" button (v5.8) | **Built** |
+| `TakeoffLabApp.tsx` — `qaGate` via `useMemo`; "Start new takeoff" button (v5.8); `benchmarkQaContext` state (v5.8.1) | **Built** |
+| `geminiTakeoffProvider.mjs` — NEW (v5.9): Gemini provider for all 3 AI passes | **Built** |
+| `geminiTakeoffProvider.test.mjs` — **25 tests** | **Built, all passing** |
+| `takeoffAiProvider.mjs` — updated (v5.9): `gemini` in `SUPPORTED_PROVIDERS`; `getInventoryProvider`/`getEvidenceProvider` helpers; provider-aware `readExtractionConfig` | **Built** |
 | Prompt version badge in AI draft mode (v5.2) | **Built** |
-| `TakeoffRunHistoryPanel.tsx` — extraction run history panel (v5.3) | **Built** |
+| `TakeoffRunHistoryPanel.tsx` — run history panel + provider source pill (v5.9) | **Built** |
 | `TakeoffDebugPanel.tsx` — debug view with page inv + dimension evidence sections (v5.5) | **Built** |
 | `TakeoffPageInventoryPanel.tsx` — page classification panel (v5.4) | **Built** |
 | `TakeoffDimensionEvidencePanel.tsx` — shows ref totals reconciliation + coverage warnings (v5.6) | **Built** |
@@ -254,7 +257,8 @@ Contract-first foundation + file-backed workspace + live AI extraction + benchma
 
 ### Key commands
 ```bash
-npm run eos:test:takeoff-qa-gate              # 15 tests (v5.8 QA gate)
+npm run eos:test:takeoff-gemini-provider      # 25 tests (v5.9 Gemini provider)
+npm run eos:test:takeoff-qa-gate              # 23 tests (v5.8 QA gate + v5.8.1 benchmarkContext)
 npm run eos:test:takeoff-benchmark-evaluator  # 17 tests (v5.7 evaluator)
 npm run eos:test:takeoff-contract             # 24 tests A-X (incl. v5.5 cutout + v5.6 ref total/coverage)
 npm run eos:test:takeoff-workspace-service    # 30 tests
@@ -275,7 +279,7 @@ OPENAI_API_KEY=sk-...       never client-exposed
 ```
 
 ### Durable decisions
-`FEATURE_DECISIONS.md` entries **48** (contract-first), **49** (quote files storage), **50** (provider-neutral extraction, AI-not-authoritative, no raw PDFs committed), **51** (v5.7 sanitized benchmark evaluator foundation), **52** (v5.8 automatic QA gate — must pass before any future import path).
+`FEATURE_DECISIONS.md` entries **48** (contract-first), **49** (quote files storage), **50** (provider-neutral extraction, AI-not-authoritative, no raw PDFs committed), **51** (v5.7 sanitized benchmark evaluator foundation), **52** (v5.8 automatic QA gate — must pass before any future import path), **53** (v5.9 provider swap for benchmarked comparison — every output still goes through eliteOS recompute + validator + QA gate).
 
 ### Lab versions
 | Version | Status |
@@ -294,13 +298,29 @@ OPENAI_API_KEY=sk-...       never client-exposed
 | v5.6 — Reference total reconciliation + evidence coverage warnings | Built |
 | v5.7 — Sanitized benchmark evaluator foundation | **Built** |
 | v5.8 — Automatic QA gate + estimator-friendly review mode | **Built** |
+| v5.8.1 — QA gate respects selected benchmark/manual expected values | **Built** |
+| v5.9 — Gemini provider test for PDF/vision extraction | **Built** |
 
 Dev: `npm run dev --prefix app-ai-takeoff` -> `http://localhost:5186`. Not in Home Launcher yet.
 
-### Next required focus (post v5.8)
-1. **Run manual QA for benchmarks ref-001–004 and clean-rect-001 using private PDFs.** Observe the Takeoff QA Result card — it should read `ready_for_review` (green) for a good run. Confirm the QA gate accurately reflects real extraction quality.
-2. **Decide next extraction improvement:** geometry-first assembly pass to capture missed pieces, or a human-in-the-loop review/approve workflow for operators.
-3. **Do not enable import** until at minimum benchmarks ref-001, ref-003, ref-004, clean-rect-001 consistently pass as `auto_pass` in the benchmark evaluator AND produce `ready_for_review` in the automatic QA gate on live runs.
+### Next required focus (post v5.9)
+
+**Manual QA steps for testing Gemini on known private benchmarks:**
+
+1. Add `GEMINI_API_KEY` to `backend-core/.env.local`.
+2. Set `TAKEOFF_AI_PROVIDER=gemini` and `GEMINI_TAKEOFF_MODEL=gemini-2.5-pro`.
+3. Restart backend with env loaded.
+4. Open AI Takeoff Lab.
+5. Run **Merschman** / simple desk — confirm source pill shows `gemini`, QA gate is green.
+6. Run **Kelley 50 / no BS** — select benchmark "Kelley 50" in Benchmark panel, confirm QA card turns red (do_not_import) if Gemini also inflates CT.
+7. Run **Weidenheim 49 / no BS** — same check: expect do_not_import if CT > ~51.
+8. Run **Nietert 53 + 6 BS** — confirm backsplash is picked up correctly.
+9. Compare run history: Gemini runs should show blue `gemini` pill, OpenAI runs show green `openai` pill.
+10. Confirm "Import to Internal Estimate" remains disabled regardless of provider.
+
+**Ongoing:**
+- Do not enable import until benchmarks ref-001, ref-003, ref-004, clean-rect-001 consistently pass `auto_pass` in the benchmark evaluator AND `ready_for_review` in the QA gate on live runs, for both OpenAI and Gemini.
+- Use benchmark evaluator results side-by-side to decide which provider performs better on the private plan library.
 
 ### Import gate
 Do NOT enable "Import from Takeoff" until:

@@ -1022,6 +1022,86 @@ Make AI Takeoff easier to use by automatically interpreting the existing diagnos
 
 ---
 
+## v5.9: Gemini provider test for PDF/vision extraction
+
+**Status:** Built (2026-05-31)
+
+### Overview
+
+v5.9 adds Google Gemini as a swappable AI backend for the AI Takeoff Lab. The goal is to test whether Gemini performs better than OpenAI on PDF/vision countertop plan reading, using the existing benchmark evaluator and QA gate as objective scoring tools.
+
+This is a provider/model comparison slice only. No import path was enabled and no pricing or quote data was touched.
+
+### Provider selection
+
+Set `TAKEOFF_AI_PROVIDER` in the server environment to choose the AI backend:
+
+| `TAKEOFF_AI_PROVIDER` | Provider used |
+|---|---|
+| `openai` (default) | OpenAI `gpt-4o` (existing behavior unchanged) |
+| `gemini` | Google Gemini `gemini-2.5-pro` (or `GEMINI_TAKEOFF_MODEL`) |
+| _(anything else)_ | Backend error — startup rejected |
+
+### Environment variables
+
+For Gemini:
+```env
+TAKEOFF_AI_ENABLED=1
+TAKEOFF_AI_PROVIDER=gemini
+GEMINI_TAKEOFF_MODEL=gemini-2.5-pro
+GEMINI_API_KEY=<your key — never commit>
+```
+
+For OpenAI (unchanged):
+```env
+TAKEOFF_AI_ENABLED=1
+TAKEOFF_AI_PROVIDER=openai
+TAKEOFF_AI_MODEL=gpt-4o
+OPENAI_API_KEY=sk-...
+```
+
+### Gemini provider behavior
+
+- Uses the Gemini `generateContent` REST API (v1beta) via Node.js `fetch` — no npm package.
+- Sends the PDF or image as inline base64 `inlineData` in the request body.
+- Requests `responseMimeType: "application/json"` via `generationConfig`.
+- Strips markdown code fences (`\`\`\`json ... \`\`\``) from the response as a safety measure — Gemini may return fences even when JSON mode is requested.
+- Supports all three AI passes: page inventory, dimension evidence, and final TakeoffResult extraction, using the same prompts as the OpenAI provider (prompt versions unchanged).
+- Returns `provider: "gemini"` and `modelUsed` (resolved model version from the API response) in every provider result.
+- API key is **never** logged or returned to the frontend (it appears in the query string per Gemini's design — Gemini endpoints use `?key=...`).
+
+### Run history / source pill
+
+Every run now stores `provider` in the `_meta` envelope of `raw_ai_result_json`. The run history panel displays a colored source pill (green for `openai`, blue for `gemini`) next to the model name so it is immediately obvious which provider generated each historical run.
+
+### Quality authority unchanged
+
+Switching to Gemini does not change how AI output is evaluated. Regardless of provider:
+
+1. eliteOS server **always recomputes** measurements from the AI-extracted rooms — AI totals are never used for pricing.
+2. The **validator** runs reconciliation checks, reference total comparison, and coverage diagnostics.
+3. The **benchmark evaluator** (`takeoffBenchmarkEvaluator.mjs`) scores the run against known truth fixtures.
+4. The **QA gate** (`takeoffQaGate.mjs`) produces the final `ready_for_review / needs_review / do_not_import` verdict.
+5. The **benchmark context** (v5.8.1) still turns the QA card red when the computed value diverges from a selected expected value — provider-agnostic.
+
+The benchmark evaluator and QA gate are the source of truth for judging model quality across providers. AI output is always evidence, never authority.
+
+### Files added / changed
+
+| File | Change |
+|---|---|
+| `backend-core/src/takeoff/geminiTakeoffProvider.mjs` | **New** — Gemini provider for all 3 passes |
+| `backend-core/src/takeoff/geminiTakeoffProvider.test.mjs` | **New** — 25 mocked tests |
+| `backend-core/src/takeoff/takeoffAiProvider.mjs` | Add `gemini` to `SUPPORTED_PROVIDERS`; add `getInventoryProvider`, `getEvidenceProvider`; update `readExtractionConfig` for provider-aware key selection |
+| `backend-core/src/takeoff/takeoffExtractionService.mjs` | Wire Gemini inventory/evidence providers; add `provider` to `_meta` envelope; provider-aware error message for missing API key |
+| `backend-core/src/takeoff/takeoffWorkspaceService.mjs` | Expose `provider` from `_meta` in `listTakeoffResults` and `getResultById` |
+| `app-ai-takeoff/src/components/TakeoffRunHistoryPanel.tsx` | Add `provider` field to `RunSummary`; display colored source pill in run history table |
+| `app-ai-takeoff/src/styles.css` | Add `.run-history-provider-pill` styles (green for openai, blue for gemini) |
+| `backend-core/.env.example` | Document all AI Takeoff env vars including Gemini block |
+| `package.json` | Add `eos:test:takeoff-gemini-provider` script |
+
+---
+
 ## Durable decisions
 
-See `FEATURE_DECISIONS.md` entries **48** (contract-first, AI-not-authority), **49** (quote files storage architecture), **50** (provider-neutral extraction layer, AI output never authoritative, raw PDFs not committed), and **51** (benchmark truth fixtures, review gates) and **52** (automatic QA gate must pass before any future import path).
+See `FEATURE_DECISIONS.md` entries **48** (contract-first, AI-not-authority), **49** (quote files storage architecture), **50** (provider-neutral extraction layer, AI output never authoritative, raw PDFs not committed), **51** (benchmark truth fixtures, review gates), **52** (automatic QA gate must pass before any future import path), and **53** (AI provider can be swapped server-side for benchmarked comparison; every model output still goes through eliteOS recompute, validator, benchmark evaluator, and QA gate).

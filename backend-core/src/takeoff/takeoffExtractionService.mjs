@@ -39,7 +39,7 @@ import { validateTakeoffResult }       from "./takeoffValidator.mjs";
 import { planTakeoffImport }           from "./takeoffImportPlanner.mjs";
 import { TAKEOFF_SCHEMA_VERSION }      from "./takeoffContract.mjs";
 import { evaluateTakeoffQaGate }       from "./takeoffQaGate.mjs";
-import { getExtractionProvider, readExtractionConfig } from "./takeoffAiProvider.mjs";
+import { getExtractionProvider, getInventoryProvider, getEvidenceProvider, readExtractionConfig } from "./takeoffAiProvider.mjs";
 import { QUOTE_FILE_BUCKET }           from "../files/quoteFileStoragePath.mjs";
 import { PROMPT_VERSION }              from "./takeoffExtractionPrompt.mjs";
 import { runPageInventory }            from "./takeoffPageInventoryService.mjs";
@@ -114,8 +114,10 @@ export async function runAiTakeoffExtraction({
       );
     }
     if (!config.apiKey) {
+      const keyVar = config.providerName === "gemini" ? "GEMINI_API_KEY" : "OPENAI_API_KEY";
       throw extractionError(
-        "OPENAI_API_KEY is not configured on this server.",
+        `${keyVar} is not configured on this server. ` +
+        `Set ${keyVar} in the server environment.`,
         503
       );
     }
@@ -208,6 +210,8 @@ export async function runAiTakeoffExtraction({
   //      - we are in real AI mode (no providerFn override — production path)
   //    When providerFn is set but inventoryProviderFn is not, we skip inventory
   //    so existing unit tests (which mock only providerFn) remain unaffected.
+  //    v5.9: resolve Gemini inventory provider from config when not explicitly injected.
+  const effectiveInventoryFn = inventoryProviderFn ?? getInventoryProvider(config?.providerName ?? "openai");
   let pageInventory = null;
   const shouldRunInventory = inventoryProviderFn != null || !providerFn;
   if (shouldRunInventory) {
@@ -218,7 +222,7 @@ export async function runAiTakeoffExtraction({
         originalFilename: file.original_filename,
         modelName:       config?.modelName ?? "gpt-4o",
         apiKey:          config?.apiKey ?? null,
-        providerFn:      inventoryProviderFn ?? null,
+        providerFn:      effectiveInventoryFn,
       });
     } catch (inventoryErr) {
       console.warn(
@@ -233,6 +237,8 @@ export async function runAiTakeoffExtraction({
   // 6b. Run dimension evidence pass (v5.5).
   //     Same skip logic as inventory: only run when dimensionEvidenceProviderFn is provided
   //     (test/override mode) or when we are in real AI mode (no providerFn override).
+  //     v5.9: resolve Gemini evidence provider from config when not explicitly injected.
+  const effectiveEvidenceFn = dimensionEvidenceProviderFn ?? getEvidenceProvider(config?.providerName ?? "openai");
   let dimensionEvidence = null;
   const shouldRunEvidence = dimensionEvidenceProviderFn != null || !providerFn;
   if (shouldRunEvidence) {
@@ -244,7 +250,7 @@ export async function runAiTakeoffExtraction({
         modelName:        config?.modelName ?? "gpt-4o",
         apiKey:           config?.apiKey ?? null,
         pageInventory,                           // v5.5: focus evidence on recommended pages
-        providerFn:       dimensionEvidenceProviderFn ?? null,
+        providerFn:       effectiveEvidenceFn,
       });
     } catch (evidenceErr) {
       console.warn(
@@ -378,6 +384,7 @@ export async function runAiTakeoffExtraction({
   // can surface promptVersion/modelUsed/pageInventory without a separate DB column.
   const metaEnvelope = {
     promptVersion:    PROMPT_VERSION,
+    provider:         config?.providerName ?? "openai", // v5.9: which AI provider was used
     modelUsed,
     savedAt:          now,
     pageInventory:    pageInventory    ?? null, // v5.4: null when inventory was skipped or failed

@@ -594,7 +594,8 @@ export async function listTakeoffResults({ supabase, organizationId, takeoffJobI
         id:                   row.id,
         createdAt:            row.created_at,
         promptVersion:        meta.promptVersion ?? null,
-        modelUsed:            meta.modelUsed ?? null,
+        provider:             meta.provider      ?? null, // v5.9: "openai" | "gemini"
+        modelUsed:            meta.modelUsed     ?? null,
         computedCountertopSf: computed.countertopExactSf ?? 0,
         computedBacksplashSf: computed.backsplashExactSf ?? 0,
         computedCombinedSf:   computed.combinedExactSf   ?? 0,
@@ -616,6 +617,7 @@ export async function listTakeoffResults({ supabase, organizationId, takeoffJobI
       id:                   rs.resultRowId ?? null,
       createdAt:            rs.savedAt ?? jobRow.updated_at ?? new Date().toISOString(),
       promptVersion:        rs.promptVersion ?? null,
+      provider:             rs.provider      ?? null, // v5.9
       modelUsed:            rs.modelUsed ?? null,
       computedCountertopSf: rs.countertopExactSf ?? computed.countertopExactSf ?? 0,
       computedBacksplashSf: rs.backsplashExactSf ?? computed.backsplashExactSf ?? 0,
@@ -710,7 +712,8 @@ export async function getResultById({
     schemaVersion:             row.schema_version ?? null,
     reviewStatus:              row.review_status ?? "needs_review",
     promptVersion:             meta.promptVersion ?? null,
-    modelUsed:                 meta.modelUsed ?? null,
+    provider:                  meta.provider      ?? null, // v5.9: "openai" | "gemini"
+    modelUsed:                 meta.modelUsed     ?? null,
     normalizedTakeoffJson:     row.normalized_takeoff_json,
     computedMeasurementsJson:  freshComputed,
     validationDiagnosticsJson: freshValidation,

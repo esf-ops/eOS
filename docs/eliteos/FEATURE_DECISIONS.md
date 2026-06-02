@@ -682,3 +682,18 @@
 
 ---
 
+### 53. AI Takeoff v5.9 — AI provider can be swapped server-side for benchmarked model testing; every model output must still go through eliteOS recompute, validator, benchmark evaluator, and QA gate
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-05-31 |
+| **Decision** | The AI backend for takeoff extraction can be switched between providers (initially OpenAI and Gemini) by setting `TAKEOFF_AI_PROVIDER` in the server environment. All three AI passes (page inventory, dimension evidence, final TakeoffResult extraction) are provider-swappable. Adding a new provider requires only a new file and a new case in `takeoffAiProvider.mjs`. **No matter which provider is used**, the output must always pass through: (1) eliteOS server-side recompute, (2) validator reconciliation, (3) benchmark evaluator, and (4) automatic QA gate. The provider name is stored in `_meta.provider` of `raw_ai_result_json` for every run. |
+| **Why** | Testing a single provider in isolation is insufficient to determine which AI model reads countertop plans best. The benchmark evaluator and QA gate create a consistent, objective scoring framework that applies equally to every provider. Swapping providers must be zero-friction (env var only) to encourage frequent comparison without code changes. |
+| **Provider security** | `GEMINI_API_KEY` is set server-side only, never frontend-exposed. It appears in the Gemini REST API query string (Gemini's design) but is never logged. `OPENAI_API_KEY` is likewise server-side only. No AI key may appear in any Vite env var or client bundle. |
+| **Current providers** | `openai` (default: `gpt-4o`), `gemini` (default: `gemini-2.5-pro`). Unknown providers are rejected with a clear error at startup. |
+| **Import still blocked** | This decision does not change the import gate. No import path was enabled. `ready_for_review` from the QA gate, consistently passing the benchmark evaluator, and explicit operator approval are still all required before any import can be enabled. |
+| **Impacted files** | `geminiTakeoffProvider.mjs` (new), `geminiTakeoffProvider.test.mjs` (new, 25 tests), `takeoffAiProvider.mjs` (updated), `takeoffExtractionService.mjs` (provider routing + `_meta.provider`), `takeoffWorkspaceService.mjs` (expose `provider`), `TakeoffRunHistoryPanel.tsx` (provider pill), `styles.css`, `backend-core/.env.example`, `package.json` |
+| **Revisit trigger** | When Gemini and OpenAI have been compared on ≥10 private plan benchmarks and a clear winner emerges, consider removing the losing provider from the lab default and documenting the outcome. |
+
+---
+
