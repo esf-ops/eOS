@@ -913,6 +913,43 @@ html, body {
   line-height: 1.5;
 }
 
+/* ── v5.1: Diagnostics AI reference note ─────────────────────────────────── */
+.diag-ai-note {
+  margin: 10px 0 2px;
+  padding: 8px 12px;
+  border-radius: var(--r-sm);
+  background: var(--eos-info-soft);
+  border: 1px solid var(--eos-info-border);
+  color: var(--eos-info);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+/* ── v5.1: AI review notes panel ─────────────────────────────────────────── */
+.ai-review-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ai-review-notes-intro {
+  margin: 0;
+  font-size: 12px;
+  color: var(--eos-ink-mid);
+  line-height: 1.5;
+}
+.ai-review-notes-list {
+  margin: 0;
+  padding: 0 0 0 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ai-review-notes-item {
+  font-size: 12px;
+  color: var(--eos-ink-soft);
+  line-height: 1.5;
+}
+
 /* Workbench status — edited state */
 .workbench-status-edited { color: #d97706; font-weight: 500; }
 

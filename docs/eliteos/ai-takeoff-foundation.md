@@ -288,10 +288,36 @@ All tests use mocked AI provider and mocked Supabase. No real OpenAI calls in CI
 
 ---
 
-## Future slices (separate approval required)
+## Quote-import planning (architecture note)
 
-### Import into Internal Estimate
-Add an "Import from Takeoff" button to Internal Estimate that reads an approved `ImportPlan` and calls `appendGuidedShapeGroup` to populate room shapes. No behavior change to existing manual entry.
+This section describes the intended flow for converting an AI draft into a quote. **This is not implemented yet.** It is documented here so the architecture is clear before the import slice is built.
+
+### Intended flow
+
+```
+AI draft  →  estimator review  →  reviewed TakeoffResult  →  Internal Estimate import
+```
+
+1. **AI draft** — `runAiTakeoffExtraction` produces a `TakeoffResult` with `status: "draft"` and `reviewStatus: "needs_review"`. AI output is never authoritative for pricing.
+2. **Estimator review** — The estimator reviews the AI Takeoff Lab, corrects dimensions, confirms backsplash, and clicks "Save reviewed takeoff draft." `reviewStatus` may be changed to `"reviewed"`.
+3. **Reviewed TakeoffResult** — The saved result is stored in `quote_takeoff_results`. `status` should be `"reviewed"` or `"approved"` before import is enabled.
+4. **Internal Estimate import** — A future "Import from Takeoff" button reads the `ImportPlan` and calls `appendGuidedShapeGroup` to populate rooms/areas/runs in the Internal Estimate draft. The estimator still completes: customer name, account, material selection, pricing, color TBD flags, edge profiles, add-ons, and tax.
+5. **Quote Library draft** (later) — After the Internal Estimate is saved, a Quote Library entry can be created with `status: "Needs estimator review"` and the `quote_file_id` linked to the new `quote_id` for traceability.
+
+### What import must NOT do
+
+- Import must never auto-calculate final pricing or apply markup.
+- Import must never auto-approve a draft or change `reviewStatus` to `"approved"`.
+- Import must never mutate an already-saved quote — it only populates a new Internal Estimate draft.
+- Import must never expose `storage_path` or AI provider credentials to the frontend.
+
+### Status (v5.1)
+
+The "Import to Internal Estimate" button in the Lab is intentionally disabled. The `importPlanJson` is computed and stored in `quote_takeoff_results` for when the import slice is built.
+
+---
+
+## Future slices (separate approval required)
 
 ### Import into Internal Estimate
 Add an "Import from Takeoff" button to Internal Estimate that reads an approved `ImportPlan` and calls `appendGuidedShapeGroup` to populate room shapes. No behavior change to existing manual entry.

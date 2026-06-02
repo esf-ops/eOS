@@ -639,7 +639,7 @@ await test("provider called with expected metadata (mimeType, filename, promptVe
   assert.ok(capturedInput, "provider must have been called");
   assert.equal(capturedInput.mimeType,         MOCK_FILE_ROW.mime_type,          "mimeType mismatch");
   assert.equal(capturedInput.originalFilename, MOCK_FILE_ROW.original_filename,  "originalFilename mismatch");
-  assert.equal(capturedInput.promptVersion,    "v1",                             "promptVersion must be v1");
+  assert.equal(capturedInput.promptVersion,    "v2",                             "promptVersion must be v2");
   assert.ok(Buffer.isBuffer(capturedInput.fileBuffer), "fileBuffer must be a Buffer");
   assert.ok(capturedInput.fileBuffer.length > 0,       "fileBuffer must not be empty");
 });

@@ -2,6 +2,14 @@ import React from "react";
 import type { TakeoffValidationResult } from "@takeoff-core/takeoffValidator.mjs";
 import type { TakeoffDiagnostic } from "@takeoff-core/takeoffContract.mjs";
 
+const AI_REFERENCE_CODES = new Set([
+  "TOTAL_MISMATCH_COUNTERTOP",
+  "TOTAL_MISMATCH_BACKSPLASH",
+  "TOTAL_MISMATCH_COMBINED",
+  "AI_BACKSPLASH_TOTAL_NOT_STRUCTURED",
+  "POSSIBLE_BACKSPLASH_NOTE",
+]);
+
 interface Props {
   validation: TakeoffValidationResult;
 }
@@ -61,6 +69,13 @@ export default function TakeoffDiagnosticsPanel({ validation }: Props) {
         <div className="diag-group">
           <div className="diag-group-label">Warnings — review recommended</div>
           {warnings.map((d, i) => <DiagRow key={i} d={d} />)}
+          {warnings.some((d) => AI_REFERENCE_CODES.has(d.code)) && (
+            <p className="diag-ai-note">
+              AI reference totals are not authoritative — eliteOS computed values are based on
+              structured run dimensions, not the model&apos;s estimates. Countertop and backsplash
+              square footage shown above are the eliteOS-computed values.
+            </p>
+          )}
         </div>
       )}
       {infos.length > 0 && (

@@ -74,6 +74,21 @@ function computeAll(result: TakeoffResult): ActiveComputedState {
   return { result, computed, validation, importPlan };
 }
 
+/** Collect all assumption/note strings from the full TakeoffResult tree. */
+function gatherReviewNotes(result: TakeoffResult): string[] {
+  const notes: string[] = [];
+  for (const a of result.projectAssumptions ?? []) notes.push(a);
+  for (const room of result.rooms ?? []) {
+    for (const n of room.notes ?? []) notes.push(`[${room.name}] ${n}`);
+    for (const a of room.assumptions ?? []) notes.push(`[${room.name}] ${a}`);
+    for (const area of room.areas ?? []) {
+      for (const n of area.notes ?? []) notes.push(`[${room.name} › ${area.label}] ${n}`);
+      for (const a of area.assumptions ?? []) notes.push(`[${room.name} › ${area.label}] ${a}`);
+    }
+  }
+  return notes;
+}
+
 function makeSpec73(): TakeoffResult { return buildSpec73Fixture(); }
 
 function urlJobId(): string | null {
@@ -563,6 +578,28 @@ export default function TakeoffLabApp() {
             <TakeoffSummaryCards computed={computed} importPlan={importPlan} />
           </section>
 
+          {/* AI review notes — visible whenever assumptions/notes exist in the result */}
+          {(() => {
+            const notes = gatherReviewNotes(result);
+            if (notes.length === 0) return null;
+            return (
+              <section className="lab-section">
+                <h2 className="lab-section-title">AI assumptions &amp; review notes</h2>
+                <div className="ai-review-notes lab-card">
+                  <p className="ai-review-notes-intro">
+                    Review these AI-generated notes before saving or importing.
+                    Correct any assumptions that do not match the plan.
+                  </p>
+                  <ul className="ai-review-notes-list">
+                    {notes.map((note, i) => (
+                      <li key={i} className="ai-review-notes-item">{note}</li>
+                    ))}
+                  </ul>
+                </div>
+              </section>
+            );
+          })()}
+
           {/* Room / area / run review */}
           <section className="lab-section">
             <div className="lab-section-header">
@@ -659,20 +696,6 @@ export default function TakeoffLabApp() {
             <h2 className="lab-section-title">Import preview</h2>
             <TakeoffImportPreview importPlan={importPlan} />
           </section>
-
-          {/* Assumptions */}
-          {(result.projectAssumptions?.length ?? 0) > 0 && (
-            <section className="lab-section">
-              <h2 className="lab-section-title">Project assumptions</h2>
-              <div className="lab-card">
-                <ul className="lab-assumption-list">
-                  {result.projectAssumptions!.map((a, i) => (
-                    <li key={i}>{a}</li>
-                  ))}
-                </ul>
-              </div>
-            </section>
-          )}
 
           {/* Footer */}
           <div className="lab-footer-note">

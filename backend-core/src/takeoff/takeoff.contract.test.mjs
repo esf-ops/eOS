@@ -20,6 +20,9 @@
  *   N. Pricing authority contract tests still pass (smoke)
  *   O. sfFromRun unit tests
  *   P. cornerOverlapSf unit test
+ *   Q. Validator warns: AI backsplash total > 0 but computed = 0 (AI_BACKSPLASH_TOTAL_NOT_STRUCTURED)
+ *   R. Validator warns: backsplash keyword in notes with zero computed (POSSIBLE_BACKSPLASH_NOTE)
+ *   S. No false positive when notes say "no B/S"
  */
 
 import assert from "node:assert/strict";
@@ -275,6 +278,77 @@ function near(a, b, label) {
   assert.equal(bsGroup.pieces[0].lengthIn, 120, "Backsplash linear 120\"");
   assert.equal(groups.find(g => g.shapeType === "straight")?.shapeType, "straight", "Counter group still present");
   console.log("ok: import planner backsplash linear inches → Backsplash group");
+}
+
+// ── Q. Validator warns: AI backsplash total > 0 but computed = 0 ─────────
+{
+  const run = makeTakeoffRun({ label: "Counter", lengthIn: 72, depthIn: 25.5, pieceType: "counter" });
+  // No backsplashLinearIn on area — AI model detected backsplash but didn't structure it
+  const area = makeTakeoffArea({ label: "Kitchen counter", runs: [run] });
+  const room = makeTakeoffRoom({ name: "Kitchen", areas: [area] });
+  const tr = makeTakeoffResult({
+    status: TAKEOFF_STATUS.DRAFT,
+    rooms: [room],
+    aiProvidedTotals: { countertopExactSf: 12.75, backsplashExactSf: 8.52 },
+  });
+  const computed = computeTakeoffMeasurements(tr);
+  const validation = validateTakeoffResult(tr, computed);
+
+  assert.equal(computed.backsplashExactSf, 0, "Q: no structured backsplash → computed = 0");
+  const d = validation.diagnostics.find((x) => x.code === TAKEOFF_DIAGNOSTIC_CODE.AI_BACKSPLASH_TOTAL_NOT_STRUCTURED);
+  assert.ok(d, "Q: AI_BACKSPLASH_TOTAL_NOT_STRUCTURED warning fires when AI total > 0 but computed = 0");
+  assert.equal(d.level, TAKEOFF_DIAGNOSTIC_LEVEL.WARNING, "Q: diagnostic is WARNING level");
+  // TOTAL_MISMATCH_BACKSPLASH should also fire (different code, both correct)
+  const mismatch = validation.diagnostics.find((x) => x.code === TAKEOFF_DIAGNOSTIC_CODE.TOTAL_MISMATCH_BACKSPLASH);
+  assert.ok(mismatch, "Q: TOTAL_MISMATCH_BACKSPLASH also fires");
+  // POSSIBLE_BACKSPLASH_NOTE should NOT fire since AI total guard already covers it
+  const noteFire = validation.diagnostics.find((x) => x.code === TAKEOFF_DIAGNOSTIC_CODE.POSSIBLE_BACKSPLASH_NOTE);
+  assert.equal(noteFire, undefined, "Q: POSSIBLE_BACKSPLASH_NOTE does not double-fire alongside AI_BACKSPLASH_TOTAL_NOT_STRUCTURED");
+  // Countertop computation unchanged
+  near(computed.countertopExactSf, 12.75, "Q: countertop computation unchanged");
+  console.log("ok: AI_BACKSPLASH_TOTAL_NOT_STRUCTURED warning fires on unstructured backsplash");
+}
+
+// ── R. Validator warns: backsplash keyword in notes, computed = 0 ─────────
+{
+  const run = makeTakeoffRun({ label: "Counter", lengthIn: 72, depthIn: 25.5, pieceType: "counter" });
+  const area = makeTakeoffArea({ label: "Counter", runs: [run] }); // no backsplashLinearIn
+  const room = makeTakeoffRoom({ name: "Kitchen", areas: [area] });
+  const tr = makeTakeoffResult({
+    status: TAKEOFF_STATUS.DRAFT,
+    rooms: [room],
+    projectAssumptions: ["4 inch B/S noted on plan — could not determine linear inches"],
+    // no aiProvidedTotals.backsplashExactSf
+  });
+  const computed = computeTakeoffMeasurements(tr);
+  const validation = validateTakeoffResult(tr, computed);
+
+  assert.equal(computed.backsplashExactSf, 0, "R: no structured backsplash → computed = 0");
+  const d = validation.diagnostics.find((x) => x.code === TAKEOFF_DIAGNOSTIC_CODE.POSSIBLE_BACKSPLASH_NOTE);
+  assert.ok(d, "R: POSSIBLE_BACKSPLASH_NOTE fires when note mentions B/S and computed = 0");
+  assert.equal(d.level, TAKEOFF_DIAGNOSTIC_LEVEL.WARNING, "R: diagnostic is WARNING level");
+  console.log("ok: POSSIBLE_BACKSPLASH_NOTE fires on backsplash keyword with zero computed backsplash");
+}
+
+// ── S. No false positive: "no B/S" note does not trigger POSSIBLE_BACKSPLASH_NOTE ─
+{
+  const run = makeTakeoffRun({ label: "Counter", lengthIn: 72, depthIn: 25.5, pieceType: "counter" });
+  const area = makeTakeoffArea({ label: "Counter", runs: [run] });
+  const room = makeTakeoffRoom({ name: "Kitchen", areas: [area], notes: ["no B/S"] });
+  const tr = makeTakeoffResult({
+    status: TAKEOFF_STATUS.DRAFT,
+    rooms: [room],
+    // no aiProvidedTotals
+  });
+  const computed = computeTakeoffMeasurements(tr);
+  const validation = validateTakeoffResult(tr, computed);
+
+  assert.equal(computed.backsplashExactSf, 0, "S: no backsplash computed when not structured");
+  const d = validation.diagnostics.find((x) => x.code === TAKEOFF_DIAGNOSTIC_CODE.POSSIBLE_BACKSPLASH_NOTE);
+  assert.equal(d, undefined, "S: no POSSIBLE_BACKSPLASH_NOTE false positive when notes say 'no B/S'");
+  const bsNotStructured = validation.diagnostics.find((x) => x.code === TAKEOFF_DIAGNOSTIC_CODE.AI_BACKSPLASH_TOTAL_NOT_STRUCTURED);
+  assert.equal(bsNotStructured, undefined, "S: no AI_BACKSPLASH_TOTAL_NOT_STRUCTURED false positive (no AI total)");
+  console.log("ok: no false positive backsplash warning when notes say 'no B/S'");
 }
 
 // ── N. No pricing/math behavior changes (smoke) ───────────────────────────────

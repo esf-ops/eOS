@@ -157,6 +157,27 @@ function round2(n) {
 }
 
 /**
+ * Collect every note/assumption string from the full TakeoffResult tree.
+ * Used for keyword-based backsplash heuristics.
+ * @param {import('./takeoffContract.mjs').TakeoffResult} result
+ * @returns {string[]}
+ */
+function gatherAllNotes(result) {
+  return [
+    ...(result.projectAssumptions ?? []),
+    ...(result.rooms ?? []).flatMap((r) => [
+      ...(r.notes ?? []),
+      ...(r.assumptions ?? []),
+      ...(r.areas ?? []).flatMap((a) => [
+        ...(a.notes ?? []),
+        ...(a.assumptions ?? []),
+        ...(a.runs ?? []).flatMap((rn) => rn.notes ?? [])
+      ])
+    ])
+  ];
+}
+
+/**
  * Validate a TakeoffResult against its computed measurements.
  * Returns a structured validation result with all diagnostics.
  *
@@ -211,6 +232,44 @@ export function validateTakeoffResult(takeoffResult, computed) {
 
     const combMismatch = checkTotalMismatch(ai.combinedExactSf, computed.combinedExactSf, C.TOTAL_MISMATCH_COMBINED, "combinedExactSf");
     if (combMismatch) diagnostics.push(combMismatch);
+
+    // Guard: AI reference backsplash total present but no structured backsplash was extracted.
+    // This happens when the model detected backsplash but didn't populate backsplashLinearIn.
+    const aiBsTotal = Number(ai.backsplashExactSf ?? 0);
+    if (aiBsTotal > 0 && computed.backsplashExactSf === 0) {
+      diagnostics.push(diag(
+        WARNING,
+        C.AI_BACKSPLASH_TOTAL_NOT_STRUCTURED,
+        `Backsplash detected in AI reference total (${aiBsTotal.toFixed(2)} sf) but eliteOS computed 0.00 sf — ` +
+        `no structured backsplashLinearIn / backsplashHeightIn was found in any area. ` +
+        `AI reference total is not authoritative; eliteOS value is based on structured run dimensions. ` +
+        `Estimator must review backsplash and enter dimensions manually if applicable.`,
+        "aiProvidedTotals.backsplashExactSf"
+      ));
+    }
+  }
+
+  // Guard: backsplash keyword found in notes/assumptions but computed backsplash is zero.
+  // Fires only when there is no AI reference total (the guard above covers that case).
+  if (computed.backsplashExactSf === 0) {
+    const aiProvidedBs = Number(takeoffResult.aiProvidedTotals?.backsplashExactSf ?? 0);
+    if (!(aiProvidedBs > 0)) {
+      const POSITIVE_BS_RE = /(?:^|[^a-z])(?:b\/s|backsplash|splash)/i;
+      const NEGATIVE_BS_RE = /\bno\s+(?:b\/s|backsplash)\b/i;
+      const hasPosNote = gatherAllNotes(takeoffResult).some((t) => {
+        const text = String(t);
+        return !NEGATIVE_BS_RE.test(text) && POSITIVE_BS_RE.test(text);
+      });
+      if (hasPosNote) {
+        diagnostics.push(diag(
+          WARNING,
+          C.POSSIBLE_BACKSPLASH_NOTE,
+          "Backsplash keyword found in notes or assumptions but eliteOS computed 0.00 sf backsplash. " +
+          "Review whether structured backsplashLinearIn / backsplashHeightIn should be added to any area.",
+          "projectAssumptions"
+        ));
+      }
+    }
   }
 
   const errorCount = diagnostics.filter((d) => d.level === ERROR).length;

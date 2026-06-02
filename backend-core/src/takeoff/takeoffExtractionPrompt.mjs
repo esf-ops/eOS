@@ -21,7 +21,7 @@
  */
 
 /** Bump when extraction rules or schema guidance changes. */
-export const PROMPT_VERSION = "v1";
+export const PROMPT_VERSION = "v2";
 
 // ── Schema description ─────────────────────────────────────────────────────────
 //
@@ -147,15 +147,22 @@ RUNS (individual countertop pieces)
 • shape = "rect" for rectangular pieces; "tri" for triangular pieces.
 • pieceType: "counter" for countertops, "splash" for backsplash-only pieces, "fhb" for full-height backsplash.
 
-BACKSPLASH
-• backsplashIncluded: true if backsplash is part of this area; false otherwise.
-• backsplashLinearIn: total linear inches of backsplash for this area (from the layout, not computed sf).
-• backsplashHeightIn: typically 4 inches standard unless plan specifies otherwise.
-• "no B/S", "no backsplash", "tile on wall" → backsplashIncluded = false.
-• "4\" B/S", "4 inch backsplash" → backsplashHeightIn = 4.
-• "full height", "FHB" → pieceType = "fhb", height from counter to upper cabinets.
-• Open peninsula sides: no backsplash unless plan says otherwise.
-• Range/cooktop/refrigerator openings interrupt backsplash (reduce backsplashLinearIn accordingly) unless plan says otherwise.
+BACKSPLASH — READ CAREFULLY
+• backsplashIncluded: set true whenever any backsplash applies to this area; set false only when the plan or notes explicitly say otherwise.
+• backsplashLinearIn: REQUIRED when backsplash is present. Set to the total linear inches of counter wall that receives backsplash (from the run lengths, minus appliance openings and open sides). Do NOT leave unset or at 0 when a backsplash note exists.
+• backsplashHeightIn: REQUIRED when backsplashLinearIn > 0. Default is 4 (inches) unless the plan specifies a different height. Always set explicitly.
+• CRITICAL: If a plan note, label, or annotation mentions B/S, backsplash, splash, 4" B/S, 4 inch B/S, "std B/S", or similar:
+  - Set backsplashIncluded = true on the relevant area.
+  - Estimate backsplashLinearIn from the runs that receive backsplash (typically the perimeter/wall runs; exclude islands, open peninsula sides, and appliance gaps).
+  - Set backsplashHeightIn = 4 for standard backsplash, or use the height stated in the note.
+  - Record the note in the area's notes array.
+• If the plan or note says "no B/S", "no backsplash", "n/b/s" → set backsplashIncluded = false, backsplashLinearIn = 0, and add to assumptions: "No backsplash per plan note."
+• If the note says "tile on wall", "existing tile", or "customer tile" → set backsplashIncluded = false. Stone backsplash is not required. Add to notes: "Tile on wall — stone backsplash not fabricated." Add to assumptions: "Tile backsplash noted — review required."
+• If the plan shows a backsplash sqft total (e.g. "8.52 sq ft B/S", "8.5 sf backsplash") but you cannot determine specific linear inches: record it in aiProvidedTotals.backsplashExactSf and add to projectAssumptions: "Backsplash sqft reference found but linear inches could not be determined — estimator must verify and enter backsplashLinearIn manually." Do NOT leave all areas with backsplashLinearIn = 0 when you also record a positive aiProvidedTotals.backsplashExactSf unless the notes explicitly say no backsplash.
+• "full height", "FHB", "full-height backsplash" → pieceType = "fhb" on the backsplash run; use height from counter to upper cabinets if visible, otherwise note "FHB height unknown — review required."
+• Open peninsula/island sides: no backsplash unless plan explicitly notes it.
+• Range/cooktop/refrigerator openings interrupt backsplash — subtract the appliance opening width from backsplashLinearIn unless the plan says otherwise.
+• When you record a backsplash-related assumption or note, also set backsplashIncluded and backsplashLinearIn consistently. Do not leave them unset.
 
 CUTOUTS AND EXCLUSIONS
 • Sink cutouts, cooktop cutouts: add to the area's exclusions array: { "label": "Sink cutout", "lengthIn": 33, "depthIn": 22 }. These are for reference only — eliteOS does not automatically subtract them.
