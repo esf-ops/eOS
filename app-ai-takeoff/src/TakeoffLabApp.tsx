@@ -55,8 +55,52 @@ import type { PageInventory } from "./components/TakeoffPageInventoryPanel";
 import TakeoffDimensionEvidencePanel from "./components/TakeoffDimensionEvidencePanel";
 import type { DimensionEvidence } from "./components/TakeoffDimensionEvidencePanel";
 import { getSupabase } from "./lib/supabase";
-import { resolveAccessToken } from "./lib/authSession";
 import { labApiGet, labApiPost, LabApiError } from "./lib/api";
+
+// ── Workspace + head constants ─────────────────────────────────────────────
+
+const DEFAULT_WORKSPACE_NAME = "Elite Stone Fabrication";
+
+const EOS_LOGO_URL =
+  "https://www.elitestonefabrication.com/wp-content/uploads/2021/09/cropped-ESF-Horizontal-Logo-500x150-px_09_09.png";
+
+function homeLauncherUrl(): string {
+  const raw = String(
+    (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_HEAD_URL_HOME ?? ""
+  ).trim();
+  return raw.replace(/\/+$/, "") || "https://www.eliteosfab.com";
+}
+
+function resolveWorkspaceLogoUrl(): string | null {
+  return EOS_LOGO_URL || null;
+}
+
+function deriveDisplayNameFromEmail(email: string): string {
+  const e = String(email || "").trim();
+  if (!e) return "";
+  const local = e.includes("@") ? e.split("@")[0] : e;
+  const words = local.replace(/[._-]+/g, " ").split(/\s+/).filter(Boolean);
+  if (!words.length) return e;
+  return words.map((w) => w[0]?.toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+}
+
+function userInitialsFor(name: string, email: string): string {
+  const n = String(name || "").trim();
+  if (n) {
+    const parts = n.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  }
+  const e = String(email || "").trim();
+  if (e) {
+    const local = e.includes("@") ? e.split("@")[0] : e;
+    const parts = local.replace(/[._-]+/g, " ").split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return local.slice(0, 2).toUpperCase();
+  }
+  return "ES";
+}
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -116,7 +160,10 @@ export default function TakeoffLabApp() {
   // ── Auth ──────────────────────────────────────────────────────────────────
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [userEmail, setUserEmail] = useState<string>("");
+  const [userMetaName, setUserMetaName] = useState<string>("");
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement | null>(null);
 
   // Sign-in form
   const [authEmail, setAuthEmail] = useState("");
@@ -127,21 +174,32 @@ export default function TakeoffLabApp() {
   useEffect(() => {
     const supabase = getSupabase();
     if (!supabase) { setAuthChecked(true); return; }
-    void resolveAccessToken(supabase).then(async (tok) => {
-      setAuthToken(tok);
+    let alive = true;
+    /**
+     * Mirrors the Pricing Admin / Quote Library session hydration pattern.
+     * Uses getSession() for fast initial load from the shared .eliteosfab.com
+     * cookie, then onAuthStateChange keeps the token up-to-date on refresh.
+     */
+    const applySession = (sess: {
+      access_token?: string;
+      user?: { email?: string | null; user_metadata?: Record<string, unknown> } | null;
+    } | null) => {
+      if (!alive) return;
+      const tok = String(sess?.access_token ?? "").trim();
+      setAuthToken(tok || null);
       setAuthChecked(true);
-      if (tok) {
-        const { data } = await supabase.auth.getUser();
-        setUserEmail(data.user?.email ?? null);
-      }
-    });
-    // Listen for auth changes (sign-in / sign-out).
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      const tok = await resolveAccessToken(supabase);
-      setAuthToken(tok);
-      setUserEmail(session?.user?.email ?? null);
-    });
-    return () => subscription.unsubscribe();
+      const u = sess?.user ?? null;
+      setUserEmail(String(u?.email ?? ""));
+      const meta = (u?.user_metadata ?? {}) as Record<string, unknown>;
+      const metaName =
+        [meta.full_name, meta.name, meta.display_name]
+          .map((v) => (typeof v === "string" ? v.trim() : ""))
+          .find((v) => Boolean(v)) || "";
+      setUserMetaName(metaName);
+    };
+    void supabase.auth.getSession().then(({ data }) => applySession(data.session));
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => applySession(session));
+    return () => { alive = false; subscription.unsubscribe(); };
   }, []);
 
   const signIn = useCallback(async () => {
@@ -153,12 +211,14 @@ export default function TakeoffLabApp() {
     }
     setAuthBusy(true);
     try {
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email: authEmail.trim(),
         password: authPassword,
       });
       if (error) throw error;
-      setAuthPassword(""); // clear password from memory
+      if (!data.session?.access_token) throw new Error("No access token returned.");
+      // onAuthStateChange → applySession handles setting authToken / userEmail
+      setAuthPassword("");
     } catch (e) {
       setAuthError(e instanceof Error ? e.message : "Sign-in failed.");
     } finally {
@@ -170,8 +230,35 @@ export default function TakeoffLabApp() {
     const supabase = getSupabase();
     if (supabase) await supabase.auth.signOut();
     setAuthToken(null);
-    setUserEmail(null);
+    setUserEmail("");
+    setUserMetaName("");
+    setUserMenuOpen(false);
   }, []);
+
+  /** Close user menu on outside click or Escape. */
+  useEffect(() => {
+    if (!userMenuOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (!userMenuRef.current) return;
+      if (!userMenuRef.current.contains(e.target as Node)) setUserMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setUserMenuOpen(false); };
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [userMenuOpen]);
+
+  const userDisplayName = useMemo(
+    () => userMetaName || deriveDisplayNameFromEmail(userEmail) || "Signed in",
+    [userMetaName, userEmail]
+  );
+  const userDisplayInitials = useMemo(
+    () => userInitialsFor(userMetaName, userEmail),
+    [userMetaName, userEmail]
+  );
 
   // ── AI draft metadata (prompt version, model, result ID) ────────────────
   const [aiDraftMeta, setAiDraftMeta] = useState<{
@@ -514,6 +601,11 @@ export default function TakeoffLabApp() {
     setDimensionEvidence(meta.dimensionEvidence ?? null);
   }, []);
 
+  // ── Workspace / shell values (stable — no deps) ──────────────────────────
+  const workspaceName   = DEFAULT_WORKSPACE_NAME;
+  const workspaceLogoUrl = resolveWorkspaceLogoUrl();
+  const homeBase        = homeLauncherUrl();
+
   // ── Derived display values ────────────────────────────────────────────────
   const sourceLabel: Record<DisplayMode, string> = {
     spec73:    "Spec 73 sample",
@@ -533,144 +625,223 @@ export default function TakeoffLabApp() {
   const { result, computed, validation, importPlan } = activeState;
 
   return (
-    <div className="lab-root">
-      {/* ── Top bar ───────────────────────────────────────────────── */}
-      <header className="lab-topbar">
-        <div className="lab-topbar-inner">
-          <div className="lab-topbar-brand">
-            <span className="lab-topbar-wordmark">eliteOS</span>
-            <span className="lab-topbar-divider" aria-hidden>·</span>
-            <span className="lab-topbar-head">AI Takeoff Lab</span>
+    <div className="shell">
+      {/* ── Top bar ─────────────────────────────────────────────────── */}
+      <header className="topbar" role="banner">
+        <a
+          href={homeBase}
+          className="brand-row brand-row-link"
+          aria-label={`eliteOS AI Takeoff Lab — ${workspaceName}`}
+        >
+          <span className="brand-mark" aria-hidden>
+            {workspaceLogoUrl ? <img src={workspaceLogoUrl} alt="" /> : null}
+          </span>
+          <span className="brand-text">
+            <span className="brand-wordmark">eliteOS</span>
+            <span className="brand-sub">AI Takeoff Lab · {workspaceName}</span>
+          </span>
+        </a>
+        <div className="topbar-actions">
+          <div className="topbar-badges">
+            <span className="badge badge-lab">Lab · review only</span>
+            <span className="badge badge-safe">No quote mutation</span>
           </div>
-          <div className="lab-topbar-right">
-            <div className="lab-topbar-badges">
-              <span className="badge badge-lab">Lab · review only</span>
-              <span className="badge badge-safe">No quote mutation</span>
-            </div>
-            {authChecked && (
-              authToken
-                ? <div className="auth-topbar-user">
-                    {userEmail && <span className="auth-topbar-email">{userEmail}</span>}
-                    <button type="button" className="auth-topbar-signout" onClick={() => void signOut()}>
-                      Sign out
+          {authChecked && authToken ? (
+            <div className="topbar-account-wrap" ref={userMenuRef}>
+              <button
+                type="button"
+                className={`topbar-account${userMenuOpen ? " is-open" : ""}`}
+                aria-label="Open account menu"
+                aria-haspopup="menu"
+                aria-expanded={userMenuOpen}
+                onClick={() => setUserMenuOpen((v) => !v)}
+              >
+                <span className="topbar-avatar" aria-hidden>{userDisplayInitials}</span>
+                <span className="topbar-account-text">
+                  <span className="topbar-account-name">{userDisplayName}</span>
+                  {userEmail && userEmail.toLowerCase() !== userDisplayName.toLowerCase() ? (
+                    <span className="topbar-account-role">{userEmail}</span>
+                  ) : null}
+                </span>
+                <span className="topbar-account-caret" aria-hidden>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </span>
+              </button>
+              {userMenuOpen ? (
+                <div className="user-menu" role="menu" aria-label="Account menu">
+                  <div className="user-menu-header">
+                    <p className="user-menu-name">{userDisplayName}</p>
+                    {userEmail ? <p className="user-menu-email">{userEmail}</p> : null}
+                    <p className="user-menu-workspace">
+                      <span>Workspace ·</span>{" "}
+                      <strong>{workspaceName}</strong>
+                    </p>
+                  </div>
+                  <div className="user-menu-list">
+                    <a
+                      href={homeBase}
+                      className="user-menu-item"
+                      role="menuitem"
+                      onClick={() => setUserMenuOpen(false)}
+                    >
+                      <span className="user-menu-icon" aria-hidden>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M3 11.5L12 4l9 7.5" /><path d="M5 10v10h14V10" /><path d="M10 20v-6h4v6" />
+                        </svg>
+                      </span>
+                      <span className="user-menu-label">
+                        <span>Open Home</span>
+                        <span className="user-menu-meta">eliteOS Launcher</span>
+                      </span>
+                      <span className="user-menu-shortcut" aria-hidden>↗</span>
+                    </a>
+                  </div>
+                  <div className="user-menu-footer">
+                    <button
+                      type="button"
+                      className="user-menu-item user-menu-signout"
+                      role="menuitem"
+                      onClick={() => { setUserMenuOpen(false); void signOut(); }}
+                    >
+                      <span className="user-menu-icon" aria-hidden>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" />
+                        </svg>
+                      </span>
+                      <span className="user-menu-label">Sign out</span>
                     </button>
                   </div>
-                : <span className="badge badge-unauthed">Not signed in</span>
-            )}
-          </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </header>
 
-      {/* ── Page hero ─────────────────────────────────────────────── */}
-      <div className="lab-hero">
-        <div className="lab-hero-inner">
-          <h1 className="lab-hero-title">AI Takeoff Lab</h1>
-          <p className="lab-hero-sub">
-            Review countertop and backsplash measurements before they become quote data.
-            AI proposes dimensions — eliteOS recomputes and validates independently.
-          </p>
-          <div className="hero-pills">
-            <span className={pillClass}>
-              {displayMode === "invalid"  ? "⚠"  :
-               displayMode === "edited"   ? "✎"  :
-               displayMode === "ai-draft" ? "✦"  :
-               displayMode === "file"     ? "📄" : "◎"}{" "}
-              {sourceLabel[displayMode]}
-            </span>
-            {displayMode === "ai-draft" && (
-              <span className="source-pill source-pill--review-note">
-                AI draft · estimator review required
-              </span>
-            )}
-            {displayMode === "ai-draft" && aiDraftMeta && (
-              <span className="source-pill source-pill--ai-meta">
-                Prompt {aiDraftMeta.promptVersion ?? "?"} · {aiDraftMeta.modelUsed ?? "model unknown"}
-              </span>
-            )}
-            {result.source?.fileName && displayMode !== "file" && displayMode !== "invalid" && (
-              <span className="source-pill source-pill--file">{result.source.fileName}</span>
-            )}
-            {hasEdits && (
-              <span className="source-pill source-pill--edit-note">
-                Changes are local to this Lab session
-              </span>
-            )}
-            {takeoffJobId && (
-              <>
-                <span className="source-pill source-pill--workspace">
-                  Workspace active
+      {/* ── Hero ──────────────────────────────────────────────────── */}
+      <section className="takeoff-hero" aria-labelledby="takeoff-hero-title">
+        <div className="hero-aurora" aria-hidden />
+        <div className="takeoff-hero-inner">
+          <div className="takeoff-hero-main">
+            <p className="hero-eyebrow">Internal tool · AI Takeoff Lab</p>
+            <h1 id="takeoff-hero-title" className="hero-title">AI Takeoff Lab</h1>
+            <p className="hero-sub">
+              Review countertop and backsplash measurements before they become quote data.
+              AI proposes dimensions — eliteOS recomputes and validates independently.
+            </p>
+            {authToken && (
+              <div className="hero-pills">
+                <span className={pillClass}>
+                  {displayMode === "invalid"  ? "⚠"  :
+                   displayMode === "edited"   ? "✎"  :
+                   displayMode === "ai-draft" ? "✦"  :
+                   displayMode === "file"     ? "📄" : "◎"}{" "}
+                  {sourceLabel[displayMode]}
                 </span>
-                <button
-                  type="button"
-                  className="start-new-btn"
-                  onClick={handleStartNewTakeoff}
-                  title="Clear this workspace from the screen and start a fresh takeoff (data is preserved)"
-                >
-                  ↩ Start new takeoff
-                </button>
-              </>
+                {displayMode === "ai-draft" && (
+                  <span className="source-pill source-pill--review-note">
+                    AI draft · estimator review required
+                  </span>
+                )}
+                {displayMode === "ai-draft" && aiDraftMeta && (
+                  <span className="source-pill source-pill--ai-meta">
+                    Prompt {aiDraftMeta.promptVersion ?? "?"} · {aiDraftMeta.modelUsed ?? "model unknown"}
+                  </span>
+                )}
+                {result.source?.fileName && displayMode !== "file" && displayMode !== "invalid" && (
+                  <span className="source-pill source-pill--file">{result.source.fileName}</span>
+                )}
+                {hasEdits && (
+                  <span className="source-pill source-pill--edit-note">
+                    Changes are local to this Lab session
+                  </span>
+                )}
+                {takeoffJobId && (
+                  <>
+                    <span className="source-pill source-pill--workspace">Workspace active</span>
+                    <button
+                      type="button"
+                      className="start-new-btn"
+                      onClick={handleStartNewTakeoff}
+                      title="Clear this workspace from the screen and start a fresh takeoff (data is preserved)"
+                    >
+                      ↩ Start new takeoff
+                    </button>
+                  </>
+                )}
+              </div>
             )}
           </div>
         </div>
-      </div>
+      </section>
 
       {/* ── Main content ──────────────────────────────────────────── */}
-      <main className="lab-main">
+      <main className="main" role="main">
         <div className="lab-main-inner">
 
           {/* ── Sign-in panel (shown only when not authenticated) ─────── */}
           {authChecked && !authToken && (
-            <section className="lab-section">
-              <h2 className="lab-section-title">Sign in</h2>
-              <div className="auth-panel lab-card">
-                <p className="auth-panel-desc">
-                  Sign in to upload plan files, create workspaces, and generate AI drafts.
-                  The JSON workbench and Spec 73 sample are available without sign-in.
+            <section className="auth-panel auth-panel-standalone" aria-label="Sign in">
+              <header className="auth-panel-header">
+                <p className="auth-panel-eyebrow">AI Takeoff Lab · {workspaceName}</p>
+                <h2 className="auth-panel-title">Sign in to continue</h2>
+                <p className="auth-panel-sub">
+                  Sign in with your eliteOS staff account to upload plan files, create workspaces,
+                  and generate AI drafts. Backend head access is enforced on every API call.
                 </p>
-                {!getSupabase() && (
-                  <div className="auth-panel-warn">
-                    <strong>Supabase is not configured.</strong>{" "}
-                    Set <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code> in your <code>.env</code> file.
-                  </div>
-                )}
-                <div className="auth-panel-fields">
-                  <label className="auth-panel-label">
-                    Email
-                    <input
-                      type="email"
-                      className="auth-panel-input"
-                      value={authEmail}
-                      onChange={(e) => setAuthEmail(e.target.value)}
-                      autoComplete="username"
-                      disabled={authBusy || !getSupabase()}
-                      onKeyDown={(e) => e.key === "Enter" && void signIn()}
-                    />
-                  </label>
-                  <label className="auth-panel-label">
-                    Password
-                    <input
-                      type="password"
-                      className="auth-panel-input"
-                      value={authPassword}
-                      onChange={(e) => setAuthPassword(e.target.value)}
-                      autoComplete="current-password"
-                      disabled={authBusy || !getSupabase()}
-                      onKeyDown={(e) => e.key === "Enter" && void signIn()}
-                    />
-                  </label>
+              </header>
+              {!getSupabase() ? (
+                <div className="banner banner-warn" role="alert">
+                  <strong>Supabase is not configured.</strong>{" "}
+                  Set <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code>.
                 </div>
-                {authError && (
-                  <div className="auth-panel-error" role="alert">{authError}</div>
-                )}
-                <button
-                  type="button"
-                  className="auth-panel-btn"
-                  disabled={authBusy || !authEmail.trim() || !authPassword || !getSupabase()}
-                  onClick={() => void signIn()}
-                >
-                  {authBusy ? "Signing in…" : "Sign in"}
-                </button>
+              ) : null}
+              <div className="field-grid">
+                <div className="field">
+                  <label htmlFor="atl-email">Email</label>
+                  <input
+                    id="atl-email"
+                    type="email"
+                    value={authEmail}
+                    onChange={(e) => setAuthEmail(e.target.value)}
+                    autoComplete="username"
+                    placeholder="you@example.com"
+                    disabled={authBusy || !getSupabase()}
+                    onKeyDown={(e) => e.key === "Enter" && void signIn()}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="atl-password">Password</label>
+                  <input
+                    id="atl-password"
+                    type="password"
+                    value={authPassword}
+                    onChange={(e) => setAuthPassword(e.target.value)}
+                    autoComplete="current-password"
+                    disabled={authBusy || !getSupabase()}
+                    onKeyDown={(e) => e.key === "Enter" && void signIn()}
+                  />
+                </div>
               </div>
+              {authError ? (
+                <div className="banner banner-error" role="alert" style={{ marginTop: 8 }}>
+                  {authError}
+                </div>
+              ) : null}
+              <button
+                type="button"
+                className="btn primary"
+                style={{ marginTop: 16 }}
+                disabled={authBusy || !authEmail.trim() || !authPassword || !getSupabase()}
+                onClick={() => void signIn()}
+              >
+                {authBusy ? "Signing in…" : "Sign in"}
+              </button>
+              <p className="auth-trust">
+                Authenticated through Supabase. No service-role keys are used in the browser.
+              </p>
             </section>
           )}
 
@@ -710,22 +881,27 @@ export default function TakeoffLabApp() {
             </section>
           )}
 
-          {/* JSON workbench */}
-          <section className="lab-section">
-            <h2 className="lab-section-title">JSON workbench</h2>
-            <TakeoffWorkbench
-              pastedDraft={pastedDraft}
-              onDraftChange={setPastedDraft}
-              onLoadSample={handleLoadSample}
-              onValidate={handleValidate}
-              onResetAll={handleResetAll}
-              onCopySummary={handleCopySummary}
-              onCopyEditedJson={handleCopyEditedJson}
-              parseError={parseError}
-              copyFeedback={copyFeedback}
-              displayMode={displayMode as "spec73" | "pasted" | "edited" | "invalid"}
-            />
-          </section>
+          {/* JSON workbench — secondary / developer tool */}
+          <details className="lab-section lab-section-collapsible">
+            <summary className="lab-section-summary">
+              <span className="lab-section-title" style={{ margin: 0 }}>JSON workbench</span>
+              <span className="lab-section-summary-note">Developer / demo — paste or load Spec 73 sample</span>
+            </summary>
+            <div style={{ marginTop: 12 }}>
+              <TakeoffWorkbench
+                pastedDraft={pastedDraft}
+                onDraftChange={setPastedDraft}
+                onLoadSample={handleLoadSample}
+                onValidate={handleValidate}
+                onResetAll={handleResetAll}
+                onCopySummary={handleCopySummary}
+                onCopyEditedJson={handleCopyEditedJson}
+                parseError={parseError}
+                copyFeedback={copyFeedback}
+                displayMode={displayMode as "spec73" | "pasted" | "edited" | "invalid"}
+              />
+            </div>
+          </details>
 
           {/* Summary cards */}
           <section className="lab-section">
@@ -903,7 +1079,7 @@ export default function TakeoffLabApp() {
             />
           </section>
 
-          {/* Footer */}
+          {/* Footer note */}
           <div className="lab-footer-note">
             <span className="lab-footer-schema">Schema v{result.schemaVersion}</span>
             <span className="lab-footer-status">
@@ -922,6 +1098,11 @@ export default function TakeoffLabApp() {
 
         </div>
       </main>
+
+      <footer className="footer-bar" role="contentinfo">
+        <span>eliteOS · AI Takeoff Lab</span>
+        <span className="footer-meta">Authorized staff only — backend authorization is the source of truth.</span>
+      </footer>
     </div>
   );
 }

@@ -706,10 +706,25 @@
 | **Why** | Testing on localhost was friction-heavy: repeated sign-ins, backend restarts, stuck workspace URLs. A permanent deployed head at a real domain removes this friction while preserving all auth/security guardrails. The deployment reuses all existing eliteOS head patterns: launcher catalog, head deployment URLs, CORS via `collectHeadEnvOriginsForCors`, and `requireHeadAccess` middleware. |
 | **Access model** | `user_head_access.head_slug = 'ai_takeoff'` for non-admin users. Admin / super_admin: always passes. No dealer/partner access (not in `DEALER_SAFE_HEAD_SLUGS`). |
 | **CORS** | `takeoff.eliteosfab.com` covered by `*.eliteosfab.com` subdomain trust + `HEAD_URL_AI_TAKEOFF` env var in backend-core. No wildcard CORS. |
-| **Frontend safety** | Only `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_BACKEND_URL` in frontend. No AI API keys in browser bundle. |
+| **Frontend safety** | Only `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_BACKEND_URL`, `VITE_HEAD_URL_HOME` in frontend. No AI API keys in browser bundle. |
 | **Import still blocked** | Deploying as a protected head does not change the import gate. Import to Internal Estimate remains disabled. |
 | **Impacted files** | `eosGovernanceConstants.js` (add `ai_takeoff`), `headDeploymentUrls.js` (add `HEAD_URL_AI_TAKEOFF`), `launcherHeads.js` (add catalog entry), `server.js` (create `headAccessAiTakeoff`), `takeoffWorkspaceRoutes.js` (apply `guardHead`), `app-ai-takeoff/.env.example` (new), `backend-core/.env.example` (add HEAD_URL_AI_TAKEOFF) |
 | **Revisit trigger** | When AI import is enabled, revisit the head access model to determine whether the `ai_takeoff` slug should gate import or whether that should be a separate privilege. |
+
+---
+
+### 55. AI Takeoff Lab — eliteOS shell alignment + session hydration fix (v5.9.1)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-05-31 |
+| **Decision** | Aligned `app-ai-takeoff` visual shell and auth initialization pattern with the standard eliteOS protected-head convention (Pricing Admin / Quote Library / Internal Estimate). |
+| **Shell changes** | Root `div.shell` + `header.topbar` + `brand-row brand-row-link` (logo → eliteOS wordmark → "AI Takeoff Lab · ESF"), avatar dropdown `topbar-account-wrap` with user-menu (Open Home, Sign out). `auth-panel-standalone` replaces the inline auth card. JSON workbench wrapped in `<details>` and moved to a collapsed secondary section. Standard `.main` wrapper. Footer bar added. |
+| **Auth hydration** | Replaced `resolveAccessToken()` in the initial `useEffect` with `supabase.auth.getSession()` + `onAuthStateChange` `applySession` pattern (mirrors Pricing Admin). Extracts `user_metadata.full_name/name/display_name` for display name without a separate `getUser()` call. Session from Home Launcher is already shared via `.eliteosfab.com`-scoped cookie from `buildEliteosSupabaseAuthOptions`. No URL hash handoff needed — the shared cookie is the mechanism. |
+| **Session sharing prerequisite** | `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` on Vercel `app-ai-takeoff` must point to the **same** Supabase project as Home. If they differ, the cookie key won't match and sign-in will be required. |
+| **Home Launcher link** | `VITE_HEAD_URL_HOME` env var wires the brand link and "Open Home" user-menu item. Defaults to `https://www.eliteosfab.com`. |
+| **Security unchanged** | All backend route guards (`requireAuth()` → `requireHeadAccess("ai_takeoff", ...)`) untouched. Frontend shell is not authorization. |
+| **Impacted files** | `app-ai-takeoff/src/TakeoffLabApp.tsx`, `app-ai-takeoff/src/styles.css`, `app-ai-takeoff/src/vite-env.d.ts`, `app-ai-takeoff/.env.example` |
 
 ---
 

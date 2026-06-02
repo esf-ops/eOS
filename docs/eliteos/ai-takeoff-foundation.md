@@ -1205,6 +1205,35 @@ The benchmark evaluator and QA gate are the source of truth for judging model qu
 
 ---
 
+## v5.9.1: eliteOS shell alignment + session hydration fix
+
+Deployed-head UX fix: `takeoff.eliteosfab.com` now renders the standard eliteOS protected-head shell and resolves the existing session from `.eliteosfab.com`-scoped cookies without prompting for sign-in again.
+
+### Changes
+
+**Auth hydration** — replaced `resolveAccessToken()` initial check with `supabase.auth.getSession()` + `onAuthStateChange` `applySession` pattern (matches Pricing Admin). Extracts `user_metadata.full_name/name/display_name` for display name. Session sharing via the shared `.eliteosfab.com` cookie requires `VITE_SUPABASE_URL` to match the same Supabase project as Home.
+
+**Shell** — `div.shell` + `header.topbar` + `brand-row brand-row-link` (ESF logo → "eliteOS" wordmark → "AI Takeoff Lab · ESF") replacing standalone `lab-root`/`lab-topbar-*` CSS. Avatar dropdown (`topbar-account-wrap`) with user-menu (Open Home → `VITE_HEAD_URL_HOME`, Sign out) mirrors Pricing Admin/Quote Library.
+
+**Sign-in panel** — `auth-panel auth-panel-standalone` matching the Pricing Admin sign-in pattern with `auth-panel-header`, `auth-panel-title`, `field-grid`, `btn.primary`.
+
+**Hero** — `section.takeoff-hero` with `hero-aurora` background, `hero-eyebrow`, `hero-title`, `hero-sub`. Status pills shown only when signed in.
+
+**JSON workbench** — wrapped in `<details class="lab-section-collapsible">`, collapsed by default, labeled "Developer / demo". Prevents it from appearing as the primary state for signed-in users.
+
+**Footer** — `footer.footer-bar` appended after `</main>`.
+
+### Impacted files (v5.9.1)
+
+| File | Change |
+|------|--------|
+| `app-ai-takeoff/src/TakeoffLabApp.tsx` | Workspace helpers (`homeLauncherUrl`, `userInitialsFor`, etc.), auth `applySession` pattern, `userMetaName`/`userMenuOpen`/`userMenuRef` state, standard topbar + user-menu JSX, `auth-panel-standalone` sign-in panel, collapsible workbench, footer bar |
+| `app-ai-takeoff/src/styles.css` | Remove `lab-root`/`lab-topbar-*`/`lab-hero-*`/`lab-main`. Add `shell`, `topbar`, `brand-row`, `brand-mark`, `brand-text`, `topbar-account-wrap`, `topbar-account`, `user-menu`, `takeoff-hero`, `hero-aurora`, `main`, `auth-panel-standalone`, `field-grid`, `btn`, `banner`, `footer-bar`, `lab-section-collapsible` |
+| `app-ai-takeoff/src/vite-env.d.ts` | Add `VITE_HEAD_URL_HOME`, `VITE_ELITEOS_AUTH_COOKIE_DOMAIN` types |
+| `app-ai-takeoff/.env.example` | Add `VITE_HEAD_URL_HOME`; document session-sharing prerequisite |
+
+---
+
 ## Durable decisions
 
-See `FEATURE_DECISIONS.md` entries **48** (contract-first, AI-not-authority), **49** (quote files storage architecture), **50** (provider-neutral extraction layer, AI output never authoritative, raw PDFs not committed), **51** (benchmark truth fixtures, review gates), **52** (automatic QA gate must pass before any future import path), and **53** (AI provider can be swapped server-side for benchmarked comparison; every model output still goes through eliteOS recompute, validator, benchmark evaluator, and QA gate).
+See `FEATURE_DECISIONS.md` entries **48** (contract-first, AI-not-authority), **49** (quote files storage architecture), **50** (provider-neutral extraction layer, AI output never authoritative, raw PDFs not committed), **51** (benchmark truth fixtures, review gates), **52** (automatic QA gate must pass before any future import path), **53** (AI provider can be swapped server-side for benchmarked comparison; every model output still goes through eliteOS recompute, validator, benchmark evaluator, and QA gate), **54** (AI Takeoff deployed as protected head), and **55** (shell alignment + session hydration).

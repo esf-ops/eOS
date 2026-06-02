@@ -181,7 +181,7 @@ Contract-first foundation + file-backed workspace + live AI extraction + benchma
 | v5.5 runs | v4+inv+ev | TBD — run manually | — | 78 sf | 4 sf | — | Three-step evidence anchored |
 | v5.6 runs | v5+inv+ev+ref | TBD — run manually | — | 78 sf | 4 sf | — | Ref total reconciliation |
 
-**Status:** v5.9 built + deployed as `ai_takeoff` protected head. Gemini provider (`geminiTakeoffProvider.mjs`) added for all three AI passes. Set `TAKEOFF_AI_PROVIDER=gemini` + `GEMINI_API_KEY` to run extraction through Gemini. OpenAI remains the default. Run history shows a colored provider pill (green = openai, blue = gemini). v5.8 automatic QA gate, v5.8.1 benchmark context escalation, v5.7 benchmark evaluator + 10 sanitized fixtures all preserved unchanged. Import still blocked until consistent benchmark pass.
+**Status:** v5.9 built + deployed as `ai_takeoff` protected head. Shell alignment + session fix applied (v5.9.1): topbar, brand-row, avatar user-menu, and `auth-panel-standalone` now match the standard eliteOS protected-head pattern (Pricing Admin / Quote Library / Internal Estimate). Auth uses `getSession()` + `onAuthStateChange` for fast hydration from the shared `.eliteosfab.com` cookie — no separate sign-in needed when already signed in via Home. JSON workbench demoted to collapsed details section; Gemini provider, QA gate, benchmark context, run history, and all backend route guards unchanged.
 
 **Deployed URL:** https://takeoff.eliteosfab.com — Vercel project `app-ai-takeoff`, domain `takeoff.eliteosfab.com`
 
