@@ -736,7 +736,7 @@ export default function QuoteLibraryApp() {
                       <span>Workspace ·</span>{" "}
                       <strong>{workspaceName}</strong>
                       <span className="user-menu-sep" aria-hidden>·</span>
-                      <span>on slabOS</span>
+                      <span>on eliteOS</span>
                     </p>
                   </div>
                   <div className="user-menu-list">
@@ -893,13 +893,6 @@ export default function QuoteLibraryApp() {
                 <p className="hero-sub">
                   Account-centered search, status workflow, revisions, and sold-job handoff for every quote in eliteOS.
                 </p>
-                <p className="hero-domain muted-note">
-                  <span>Domain ·</span>{" "}
-                  <code className="hero-domain-code">quotes.eliteosfab.com</code>
-                  <span className="hero-domain-sep" aria-hidden>·</span>
-                  <span>separate from the public tool at</span>{" "}
-                  <code className="hero-domain-code">quote.eliteosfab.com</code>
-                </p>
               </div>
 
               <aside
@@ -935,7 +928,7 @@ export default function QuoteLibraryApp() {
                     <p className="hero-workspace-name">{workspaceName}</p>
                     <p className="hero-workspace-meta">
                       <span>on </span>
-                      <span className="hero-workspace-platform">slabOS</span>
+                      <span className="hero-workspace-platform">eliteOS</span>
                       <span className="hero-workspace-sep" aria-hidden>·</span>
                       <span>{workspaceShortId}</span>
                     </p>

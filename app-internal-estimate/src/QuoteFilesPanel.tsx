@@ -1,8 +1,8 @@
 /**
- * QuoteFilesPanel — v1 file attachment panel for Internal Estimate.
+ * QuoteFilesPanel — file attachment panel for Internal Estimate.
  *
  * Scope:
- *   - Upload / list / download only. No delete, no preview, no AI Takeoff.
+ *   - Upload / list / download / archive. No permanent delete, no preview, no AI Takeoff.
  *   - Requires a saved quote (quoteId). Shows a gated message for unsaved estimates.
  *   - All storage ops go through the backend signed-URL endpoints.
  *     The frontend never receives or stores a storage_path.
@@ -11,10 +11,14 @@
  * Upload flow:
  *   1. POST /api/quote-files/upload-intent → { signedUploadUrl, quoteFileId, ... }
  *   2. PUT file bytes directly to signedUploadUrl (Supabase Storage signed URL, no auth header).
- *   3. Refresh file list via GET /api/quote-files?quoteId=...
+ *   3. POST /api/quote-files/confirm-upload → logs 'uploaded' event once bytes are confirmed.
+ *   4. Refresh file list via GET /api/quote-files?quoteId=...
  *
  * Download flow:
  *   POST /api/quote-files/download-url → { signedUrl } → open in new tab.
+ *
+ * Archive flow:
+ *   POST /api/quote-files/archive → sets status = 'archived'; removes from normal lists.
  *
  * Hard boundaries: no quote math, no pricing, no AI calls, no Moraware, no Monday.
  */
@@ -106,6 +110,9 @@ export function QuoteFilesPanel({ quoteId, getToken }: QuoteFilesPanelProps) {
 
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+
+  const [archivingId, setArchivingId] = useState<string | null>(null);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -208,12 +215,18 @@ export function QuoteFilesPanel({ quoteId, getToken }: QuoteFilesPanelProps) {
         throw new Error(`Storage upload failed: ${detail.slice(0, 120)}`);
       }
 
+      // Step 3 — Confirm upload: log 'uploaded' event now that bytes are in storage.
+      setUploadMsg("Confirming upload…");
+      await apiPostJson("/api/quote-files/confirm-upload", token, {
+        quoteFileId: intent.quoteFileId,
+      });
+
       setUploadStatus("success");
       setUploadMsg("File uploaded successfully.");
       setSelectedFile(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
 
-      // Step 3 — Refresh file list.
+      // Step 4 — Refresh file list.
       await loadFiles();
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Upload failed. Please try again.";
@@ -245,6 +258,33 @@ export function QuoteFilesPanel({ quoteId, getToken }: QuoteFilesPanelProps) {
       setDownloadingId(null);
     }
   }, [getToken]);
+
+  // ── Archive ───────────────────────────────────────────────────────────────
+
+  const handleArchive = useCallback(async (fileId: string, filename: string) => {
+    const confirmed = window.confirm(
+      `Remove this file from the quote?\n\n"${filename}"\n\nThe stored file will be archived, not permanently deleted.`
+    );
+    if (!confirmed) return;
+
+    setArchivingId(fileId);
+    setArchiveError(null);
+    const token = await getToken();
+    if (!token) {
+      setArchiveError("Not signed in.");
+      setArchivingId(null);
+      return;
+    }
+    try {
+      await apiPostJson("/api/quote-files/archive", token, { quoteFileId: fileId });
+      await loadFiles();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Archive failed. Please try again.";
+      setArchiveError(msg);
+    } finally {
+      setArchivingId(null);
+    }
+  }, [getToken, loadFiles]);
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -396,6 +436,11 @@ export function QuoteFilesPanel({ quoteId, getToken }: QuoteFilesPanelProps) {
                   ✗ {downloadError}
                 </p>
               ) : null}
+              {archiveError ? (
+                <p className="muted small" style={{ color: "var(--color-error, #b91c1c)", marginBottom: 8 }}>
+                  ✗ {archiveError}
+                </p>
+              ) : null}
               <table
                 style={{
                   width: "100%",
@@ -434,14 +479,24 @@ export function QuoteFilesPanel({ quoteId, getToken }: QuoteFilesPanelProps) {
                       <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>
                         <span className="muted small">{f.visibility}</span>
                       </td>
-                      <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>
+                      <td style={{ padding: "6px 8px", whiteSpace: "nowrap", display: "flex", gap: 6 }}>
                         <button
                           type="button"
                           className="btn secondary btn-sm"
-                          disabled={downloadingId === f.id}
+                          disabled={downloadingId === f.id || archivingId === f.id}
                           onClick={() => void handleDownload(f.id)}
                         >
                           {downloadingId === f.id ? "Loading…" : "Download"}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn secondary btn-sm"
+                          disabled={archivingId === f.id || downloadingId === f.id}
+                          onClick={() => void handleArchive(f.id, f.originalFilename)}
+                          title="Archive this file (not permanently deleted)"
+                          style={{ color: "var(--color-error, #b91c1c)" }}
+                        >
+                          {archivingId === f.id ? "Removing…" : "Remove"}
                         </button>
                       </td>
                     </tr>

@@ -1,10 +1,12 @@
 /**
- * Quote File Routes — signed upload/download intent + file list.
+ * Quote File Routes — signed upload/download intent + file list + lifecycle.
  *
  * Endpoints:
- *   POST /api/quote-files/upload-intent  — create a signed upload URL + quote_files metadata row
- *   POST /api/quote-files/download-url   — create a signed download URL for an existing file
- *   GET  /api/quote-files                — list files for a quote (?quoteId=...)
+ *   POST /api/quote-files/upload-intent   — create a signed upload URL + quote_files metadata row
+ *   POST /api/quote-files/confirm-upload  — confirm bytes reached storage; log 'uploaded' event
+ *   POST /api/quote-files/download-url    — create a signed download URL for an existing file
+ *   POST /api/quote-files/archive         — soft-archive a file (remove from default lists)
+ *   GET  /api/quote-files                 — list files for a quote (?quoteId=...)
  *
  * All endpoints:
  *   - Require authentication (requireAuth middleware).
@@ -18,8 +20,10 @@
 import express from "express";
 import {
   createQuoteFileUploadIntent,
+  confirmQuoteFileUpload,
   createQuoteFileDownloadUrl,
   listQuoteFilesForQuote,
+  archiveQuoteFile,
 } from "./quoteFileService.mjs";
 import { resolveOrganizationContext } from "../organizations/organizationContext.js";
 
@@ -109,6 +113,46 @@ export function attachQuoteFileRoutes(app, { requireAuth, getSupabase }) {
     }
   });
 
+  // ── POST /api/quote-files/confirm-upload ──────────────────────────────────
+  //
+  // Called by the client after a successful PUT to the signed upload URL.
+  // Logs the 'uploaded' event in quote_file_events at the correct moment
+  // (when bytes are confirmed in storage, not when intent was created).
+  //
+  // Request body:
+  //   quoteFileId  uuid  required
+  //
+  // Response:
+  //   { ok: true }
+  //
+  app.post("/api/quote-files/confirm-upload", requireAuth(), jsonParser, async (req, res) => {
+    try {
+      const supabase = getSupabase();
+      const user = req.user;
+
+      const orgCtx = await resolveOrganizationContext({ req, supabase, mode: "authenticated" });
+      if (!orgCtx.organizationId) {
+        return res.status(503).json({ ok: false, error: "Organization context not available" });
+      }
+
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const quoteFileId = String(body.quoteFileId ?? "").trim();
+
+      const result = await confirmQuoteFileUpload({
+        supabase,
+        organizationId: orgCtx.organizationId,
+        userId: user?.id ?? null,
+        quoteFileId,
+      });
+
+      return res.json(result);
+    } catch (e) {
+      const status = e.statusCode ?? 500;
+      const code = status < 500 ? "validation_error" : "server_error";
+      return res.status(status).json({ ok: false, error: String(e?.message ?? e), code });
+    }
+  });
+
   // ── POST /api/quote-files/download-url ────────────────────────────────────
   //
   // Generates a short-lived signed download URL for an existing quote file.
@@ -152,6 +196,46 @@ export function attachQuoteFileRoutes(app, { requireAuth, getSupabase }) {
         fileRole: result.fileRole,
         visibility: result.visibility,
       });
+    } catch (e) {
+      const status = e.statusCode ?? 500;
+      const code = status < 500 ? "validation_error" : "server_error";
+      return res.status(status).json({ ok: false, error: String(e?.message ?? e), code });
+    }
+  });
+
+  // ── POST /api/quote-files/archive ─────────────────────────────────────────
+  //
+  // Soft-archives a quote file. Sets status = 'archived' and logs the event.
+  // File bytes are NOT deleted from Supabase Storage. Metadata row is preserved.
+  // Archived files are excluded from normal list responses.
+  //
+  // Request body:
+  //   quoteFileId  uuid  required
+  //
+  // Response:
+  //   { ok: true }
+  //
+  app.post("/api/quote-files/archive", requireAuth(), jsonParser, async (req, res) => {
+    try {
+      const supabase = getSupabase();
+      const user = req.user;
+
+      const orgCtx = await resolveOrganizationContext({ req, supabase, mode: "authenticated" });
+      if (!orgCtx.organizationId) {
+        return res.status(503).json({ ok: false, error: "Organization context not available" });
+      }
+
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const quoteFileId = String(body.quoteFileId ?? "").trim();
+
+      const result = await archiveQuoteFile({
+        supabase,
+        organizationId: orgCtx.organizationId,
+        userId: user?.id ?? null,
+        quoteFileId,
+      });
+
+      return res.json(result);
     } catch (e) {
       const status = e.statusCode ?? 500;
       const code = status < 500 ? "validation_error" : "server_error";

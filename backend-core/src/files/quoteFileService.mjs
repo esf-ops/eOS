@@ -319,22 +319,10 @@ export async function createQuoteFileUploadIntent({
 
   const expiresAt = new Date(Date.now() + SIGNED_UPLOAD_TTL_SECONDS * 1000).toISOString();
 
-  // ── Log event ─────────────────────────────────────────────────────────────
-
-  await logQuoteFileEvent({
-    supabase,
-    organizationId,
-    quoteFileId,
-    actorUserId: userId ?? null,
-    action: "uploaded",
-    metadata: {
-      file_role: fileRole,
-      visibility,
-      context_type: resolvedContextType ?? "unlinked",
-      quote_id: quoteId ?? null,
-      takeoff_job_id: takeoffJobId ?? null,
-    },
-  });
+  // Note: the 'uploaded' event is deliberately NOT logged here.
+  // The client calls POST /api/quote-files/confirm-upload after the Supabase
+  // Storage PUT succeeds, which logs the 'uploaded' event at the correct moment
+  // (when bytes are confirmed in storage, not just when intent was created).
 
   return {
     quoteFileId,
@@ -344,6 +332,139 @@ export async function createQuoteFileUploadIntent({
     uploadToken: uploadData.token ?? null,
     expiresAt,
   };
+}
+
+/**
+ * Confirm that a file was successfully uploaded to Supabase Storage.
+ * Called by the client after a successful PUT to the signed upload URL.
+ * Logs the 'uploaded' event at the correct moment — when bytes are in storage.
+ *
+ * @param {{ supabase: import("@supabase/supabase-js").SupabaseClient, organizationId: string, userId: string|null, quoteFileId: string }} params
+ */
+export async function confirmQuoteFileUpload({
+  supabase,
+  organizationId,
+  userId,
+  quoteFileId,
+}) {
+  if (!organizationId || !isUuid(organizationId)) {
+    throw validationError("organizationId must be a valid UUID");
+  }
+  if (!quoteFileId || !isUuid(quoteFileId)) {
+    throw validationError("quoteFileId must be a valid UUID");
+  }
+
+  const { data: fileRows, error: fetchErr } = await supabase
+    .from("quote_files")
+    .select("id,organization_id,status,file_role,quote_id")
+    .eq("id", quoteFileId)
+    .limit(1);
+
+  if (fetchErr) {
+    throw Object.assign(new Error(`Failed to load file: ${fetchErr.message}`), { statusCode: 503 });
+  }
+  if (!fileRows || fileRows.length === 0) {
+    throw validationError("File not found", 404);
+  }
+
+  const file = fileRows[0];
+  if (String(file.organization_id ?? "") !== organizationId) {
+    throw validationError("File does not belong to this organization", 403);
+  }
+  if (file.status === "deleted") {
+    throw validationError("File has been deleted", 410);
+  }
+  if (file.status === "archived") {
+    throw validationError("File is archived", 410);
+  }
+
+  await logQuoteFileEvent({
+    supabase,
+    organizationId,
+    quoteFileId,
+    actorUserId: userId ?? null,
+    action: "uploaded",
+    metadata: {
+      file_role: file.file_role,
+      quote_id: file.quote_id ?? null,
+    },
+  });
+
+  return { ok: true };
+}
+
+/**
+ * Archive a quote file (soft-remove from normal lists).
+ * Sets status = 'archived' and logs the 'archived' event.
+ * Does NOT delete bytes from Supabase Storage.
+ * Does NOT permanently delete the metadata row.
+ *
+ * @param {{ supabase: import("@supabase/supabase-js").SupabaseClient, organizationId: string, userId: string|null, quoteFileId: string }} params
+ */
+export async function archiveQuoteFile({
+  supabase,
+  organizationId,
+  userId,
+  quoteFileId,
+}) {
+  if (!organizationId || !isUuid(organizationId)) {
+    throw validationError("organizationId must be a valid UUID");
+  }
+  if (!quoteFileId || !isUuid(quoteFileId)) {
+    throw validationError("quoteFileId must be a valid UUID");
+  }
+
+  const { data: fileRows, error: fetchErr } = await supabase
+    .from("quote_files")
+    .select("id,organization_id,status,file_role,quote_id")
+    .eq("id", quoteFileId)
+    .limit(1);
+
+  if (fetchErr) {
+    throw Object.assign(new Error(`Failed to load file: ${fetchErr.message}`), { statusCode: 503 });
+  }
+  if (!fileRows || fileRows.length === 0) {
+    throw validationError("File not found", 404);
+  }
+
+  const file = fileRows[0];
+  if (String(file.organization_id ?? "") !== organizationId) {
+    throw validationError("File does not belong to this organization", 403);
+  }
+  if (file.status === "deleted") {
+    throw validationError("File has been permanently deleted and cannot be archived", 410);
+  }
+  if (file.status === "archived") {
+    throw validationError("File is already archived", 409);
+  }
+
+  const now = new Date().toISOString();
+  const { error: updateErr } = await supabase
+    .from("quote_files")
+    .update({ status: "archived", archived_at: now, updated_at: now })
+    .eq("id", quoteFileId)
+    .eq("organization_id", organizationId);
+
+  if (updateErr) {
+    throw Object.assign(
+      new Error(`Failed to archive file: ${updateErr.message}`),
+      { statusCode: 503 }
+    );
+  }
+
+  await logQuoteFileEvent({
+    supabase,
+    organizationId,
+    quoteFileId,
+    actorUserId: userId ?? null,
+    action: "archived",
+    metadata: {
+      file_role: file.file_role,
+      quote_id: file.quote_id ?? null,
+    },
+  });
+
+  return { ok: true };
 }
 
 /**

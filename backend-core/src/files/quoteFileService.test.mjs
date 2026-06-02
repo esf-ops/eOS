@@ -13,8 +13,10 @@ import {
   quoteSourceToContextType,
   logQuoteFileEvent,
   createQuoteFileUploadIntent,
+  confirmQuoteFileUpload,
   createQuoteFileDownloadUrl,
   listQuoteFilesForQuote,
+  archiveQuoteFile,
   ALLOWED_FILE_ROLES,
   ALLOWED_VISIBILITIES,
   ALLOWED_MIME_TYPES,
@@ -43,7 +45,9 @@ function makeMockSupabase({
   takeoffJobRow = null,    // { id, organization_id }
   fileRow = null,          // { id, organization_id, storage_path, status, ... }
   insertError = null,      // error to inject on insert
+  updateError = null,      // error to inject on update
   capturedEvents = [],     // array to collect logged quote_file_events
+  capturedUpdates = [],    // array to collect update calls { table, fields, eqFilters }
   signedUploadUrl = "https://supabase.test/upload?token=abc",
   signedDownloadUrl = "https://supabase.test/download?token=xyz",
   storageError = null,     // error to inject on storage calls
@@ -89,6 +93,21 @@ function makeMockSupabase({
     return builder;
   }
 
+  function makeUpdateBuilder(table, fields) {
+    let _eqFilters = [];
+    const builder = {
+      eq(col, val) {
+        _eqFilters.push({ col, val: String(val) });
+        return builder;
+      },
+      then(resolve) {
+        capturedUpdates.push({ table, fields, eqFilters: [..._eqFilters] });
+        return resolve({ error: updateError ?? null });
+      },
+    };
+    return builder;
+  }
+
   const supabase = {
     from(table) {
       return {
@@ -106,6 +125,9 @@ function makeMockSupabase({
             return Promise.resolve({ error: null });
           }
           return Promise.resolve({ error: null });
+        },
+        update(fields) {
+          return makeUpdateBuilder(table, fields);
         },
       };
     },
@@ -128,7 +150,7 @@ function makeMockSupabase({
     },
   };
 
-  return { supabase, capturedEvents };
+  return { supabase, capturedEvents, capturedUpdates };
 }
 
 // ── isUuid ────────────────────────────────────────────────────────────────────
@@ -289,7 +311,7 @@ function makeMockSupabase({
   console.log("ok: createQuoteFileUploadIntent — quote org mismatch rejected");
 }
 
-// ── createQuoteFileUploadIntent — success + path shape ───────────────────────
+// ── createQuoteFileUploadIntent — success + path shape (no premature event) ───
 
 {
   const events = [];
@@ -315,12 +337,10 @@ function makeMockSupabase({
   assert.ok(typeof result.signedUploadUrl === "string" && result.signedUploadUrl.length > 0, "signedUploadUrl returned");
   assert.ok(result.expiresAt, "expiresAt returned");
 
-  // Event logged
-  assert.equal(events.length, 1);
-  assert.equal(events[0].action, "uploaded");
-  assert.equal(events[0].organization_id, ORG_ID);
+  // No event should be logged at intent time — 'uploaded' is deferred to confirm-upload.
+  assert.equal(events.length, 0, "no event logged at intent creation (confirm-upload deferred)");
 
-  console.log("ok: createQuoteFileUploadIntent — success + path shape + event logged");
+  console.log("ok: createQuoteFileUploadIntent — success + path shape, no premature event");
 }
 
 // ── createQuoteFileUploadIntent — unlinked (no quoteId, no jobId) ─────────────
@@ -582,6 +602,154 @@ function makeMockSupabase({
   assert.equal(f.fileRole, "cabinet_plan");
 
   console.log("ok: listQuoteFilesForQuote — storage_path not exposed in list response");
+}
+
+// ── confirmQuoteFileUpload — success + event logged ───────────────────────────
+
+{
+  const events = [];
+  const { supabase } = makeMockSupabase({
+    fileRow: {
+      id: FILE_ID,
+      organization_id: ORG_ID,
+      status: "uploaded",
+      file_role: "cabinet_plan",
+      quote_id: QUOTE_ID,
+    },
+    capturedEvents: events,
+  });
+
+  const result = await confirmQuoteFileUpload({
+    supabase,
+    organizationId: ORG_ID,
+    userId: USER_ID,
+    quoteFileId: FILE_ID,
+  });
+
+  assert.equal(result.ok, true, "returns ok: true");
+  assert.equal(events.length, 1, "one event logged");
+  assert.equal(events[0].action, "uploaded", "action is 'uploaded'");
+  assert.equal(events[0].organization_id, ORG_ID);
+  assert.equal(events[0].quote_file_id, FILE_ID);
+  assert.deepEqual(events[0].metadata, { file_role: "cabinet_plan", quote_id: QUOTE_ID });
+
+  console.log("ok: confirmQuoteFileUpload — success + event logged");
+}
+
+// ── confirmQuoteFileUpload — rejects org mismatch ─────────────────────────────
+
+{
+  const { supabase } = makeMockSupabase({
+    fileRow: { id: FILE_ID, organization_id: OTHER_ORG, status: "uploaded", file_role: "other" },
+  });
+
+  await assert.rejects(
+    () => confirmQuoteFileUpload({ supabase, organizationId: ORG_ID, userId: USER_ID, quoteFileId: FILE_ID }),
+    /does not belong to this organization/,
+    "org mismatch rejected"
+  );
+
+  console.log("ok: confirmQuoteFileUpload — org mismatch rejected");
+}
+
+// ── confirmQuoteFileUpload — rejects archived file ────────────────────────────
+
+{
+  const { supabase } = makeMockSupabase({
+    fileRow: { id: FILE_ID, organization_id: ORG_ID, status: "archived", file_role: "other" },
+  });
+
+  await assert.rejects(
+    () => confirmQuoteFileUpload({ supabase, organizationId: ORG_ID, userId: USER_ID, quoteFileId: FILE_ID }),
+    /archived/,
+    "archived file rejected"
+  );
+
+  console.log("ok: confirmQuoteFileUpload — archived file rejected");
+}
+
+// ── archiveQuoteFile — success + status update + event logged ─────────────────
+
+{
+  const events = [];
+  const updates = [];
+  const { supabase } = makeMockSupabase({
+    fileRow: {
+      id: FILE_ID,
+      organization_id: ORG_ID,
+      status: "active",
+      file_role: "cabinet_plan",
+      quote_id: QUOTE_ID,
+    },
+    capturedEvents: events,
+    capturedUpdates: updates,
+  });
+
+  const result = await archiveQuoteFile({
+    supabase,
+    organizationId: ORG_ID,
+    userId: USER_ID,
+    quoteFileId: FILE_ID,
+  });
+
+  assert.equal(result.ok, true, "returns ok: true");
+  assert.equal(updates.length, 1, "one update call");
+  assert.equal(updates[0].table, "quote_files");
+  assert.equal(updates[0].fields.status, "archived", "status set to archived");
+  assert.ok(updates[0].fields.archived_at, "archived_at set");
+  assert.equal(events.length, 1, "one event logged");
+  assert.equal(events[0].action, "archived", "action is 'archived'");
+  assert.equal(events[0].quote_file_id, FILE_ID);
+
+  console.log("ok: archiveQuoteFile — success, status updated, event logged");
+}
+
+// ── archiveQuoteFile — rejects already archived ───────────────────────────────
+
+{
+  const { supabase } = makeMockSupabase({
+    fileRow: { id: FILE_ID, organization_id: ORG_ID, status: "archived", file_role: "other" },
+  });
+
+  await assert.rejects(
+    () => archiveQuoteFile({ supabase, organizationId: ORG_ID, userId: USER_ID, quoteFileId: FILE_ID }),
+    /already archived/,
+    "already-archived file rejected"
+  );
+
+  console.log("ok: archiveQuoteFile — already archived rejected");
+}
+
+// ── archiveQuoteFile — rejects deleted file ───────────────────────────────────
+
+{
+  const { supabase } = makeMockSupabase({
+    fileRow: { id: FILE_ID, organization_id: ORG_ID, status: "deleted", file_role: "other" },
+  });
+
+  await assert.rejects(
+    () => archiveQuoteFile({ supabase, organizationId: ORG_ID, userId: USER_ID, quoteFileId: FILE_ID }),
+    /permanently deleted/,
+    "deleted file rejected"
+  );
+
+  console.log("ok: archiveQuoteFile — deleted file rejected");
+}
+
+// ── archiveQuoteFile — rejects org mismatch ───────────────────────────────────
+
+{
+  const { supabase } = makeMockSupabase({
+    fileRow: { id: FILE_ID, organization_id: OTHER_ORG, status: "active", file_role: "other" },
+  });
+
+  await assert.rejects(
+    () => archiveQuoteFile({ supabase, organizationId: ORG_ID, userId: USER_ID, quoteFileId: FILE_ID }),
+    /does not belong to this organization/,
+    "cross-org archive rejected"
+  );
+
+  console.log("ok: archiveQuoteFile — org mismatch rejected");
 }
 
 console.log("\nquoteFileService: all tests passed");
