@@ -345,9 +345,6 @@ export default function InternalEstimateApp() {
   const [eliteColors, setEliteColors] = useState<EliteProgramColorRow[]>([]);
   const [colorCatalogWarnings, setColorCatalogWarnings] = useState<string[]>([]);
   const [quoteDefaultCatalogId, setQuoteDefaultCatalogId] = useState("");
-  const [cabinetPlansNote, setCabinetPlansNote] = useState("");
-  const [sitePhotosNote, setSitePhotosNote] = useState("");
-  const [fixtureSpecsNote, setFixtureSpecsNote] = useState("");
   const [loadedFromLibrary, setLoadedFromLibrary] = useState(false);
   const [hydrationGaps, setHydrationGaps] = useState<string[]>([]);
   const [lastSavedQuoteNumber, setLastSavedQuoteNumber] = useState<string | null>(null);
@@ -685,12 +682,6 @@ export default function InternalEstimateApp() {
       score: Math.max(0, Math.min(100, 100 - missing.length * 14)),
       readyForReview: missing.length === 0
     };
-    const fileChecklist = {
-      cabinet_plans: cabinetPlansNote.trim() || null,
-      site_photos: sitePhotosNote.trim() || null,
-      fixture_specs: fixtureSpecsNote.trim() || null,
-      note: "File upload/storage will be added later — list required files here for ESF review."
-    };
     return {
       quoteSource: "internal_quote",
       materialGroup: topMaterialGroup,
@@ -699,7 +690,6 @@ export default function InternalEstimateApp() {
       customLineItems,
       quoteDefaultMaterial,
       readiness,
-      fileChecklist,
       quote_workflow: INTERNAL_ESTIMATE_WORKFLOW,
       areas: { countertopSqft, backsplashSqft },
       addOns,
@@ -769,9 +759,6 @@ export default function InternalEstimateApp() {
     customLineRows,
     eliteColors,
     quoteDefaultCatalogId,
-    cabinetPlansNote,
-    sitePhotosNote,
-    fixtureSpecsNote,
     internalPricingMode,
     projectName,
     projectAddress,
@@ -2982,26 +2969,6 @@ export default function InternalEstimateApp() {
             </div>
           </section>
 
-            <section className="card">
-              <h2>Drawing / file checklist</h2>
-              <p className="muted small">
-                File upload/storage will be added later — list filenames or links your team should expect for ESF review.
-              </p>
-              <div className="grid3">
-                <label>
-                  Cabinet plans / drawings
-                  <input value={cabinetPlansNote} onChange={(e) => setCabinetPlansNote(e.target.value)} placeholder="e.g. Smith-kitchen.pdf" />
-                </label>
-                <label>
-                  Site photos
-                  <input value={sitePhotosNote} onChange={(e) => setSitePhotosNote(e.target.value)} placeholder="List or describe" />
-                </label>
-                <label>
-                  Sink / faucet / appliance specs
-                  <input value={fixtureSpecsNote} onChange={(e) => setFixtureSpecsNote(e.target.value)} placeholder="Model numbers, etc." />
-                </label>
-              </div>
-            </section>
 
             <div className="ie-workflow-tail">
             <section id="sec-review" className="card">
