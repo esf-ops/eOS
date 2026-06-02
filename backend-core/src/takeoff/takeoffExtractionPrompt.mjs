@@ -20,8 +20,12 @@
  *   - Plans with unclear or missing dimensions (must flag for review, not guess)
  */
 
-/** Bump when extraction rules or schema guidance changes. */
-export const PROMPT_VERSION = "v2";
+/**
+ * Bump when extraction rules or schema guidance changes.
+ * v3: user message now includes page inventory context (recommended pages,
+ *     pre-classified dimensions/notes) when a prior inventory pass succeeded.
+ */
+export const PROMPT_VERSION = "v3";
 
 // ── Schema description ─────────────────────────────────────────────────────────
 //
@@ -199,16 +203,91 @@ DO NOT
 
 /**
  * Build the user message for a specific plan file.
- * @param {{ originalFilename: string, pageCount?: number|null }} params
+ *
+ * When a PageInventory is provided (from the prior classification pass), it is
+ * embedded as context so the extraction model knows which pages to focus on and
+ * has pre-identified dimension evidence as hints.
+ *
+ * @param {{ originalFilename: string, pageCount?: number|null, pageInventory?: object|null }} params
  * @returns {string}
  */
-export function buildUserMessage({ originalFilename, pageCount }) {
+export function buildUserMessage({ originalFilename, pageCount, pageInventory }) {
   const pageNote = pageCount > 1
     ? ` This plan has ${pageCount} pages — process all pages and combine rooms.`
     : "";
+
+  const inventorySection = _buildInventoryContextSection(pageInventory);
+
   return `Plan file: "${originalFilename}"${pageNote}
 
-Extract all countertop and backsplash measurements and return the TakeoffResult JSON object.
+${inventorySection}Extract all countertop and backsplash measurements and return the TakeoffResult JSON object.
 
 Return ONLY the JSON — no other text.`;
+}
+
+/**
+ * Format page inventory into a guidance section for the extraction prompt.
+ * Returns empty string when inventory is null or has no pages.
+ *
+ * @param {object|null} inventory
+ * @returns {string}
+ */
+function _buildInventoryContextSection(inventory) {
+  if (!inventory || !Array.isArray(inventory.pages) || inventory.pages.length === 0) {
+    return "";
+  }
+
+  const recPages     = inventory.recommendedMeasurementPages ?? [];
+  const ignoredPages = inventory.pagesToIgnore ?? [];
+
+  const lines = [
+    "── PAGE INVENTORY CONTEXT (from prior classification pass) ──────────────────",
+  ];
+
+  if (recPages.length > 0) {
+    lines.push(`Recommended measurement page(s): ${recPages.join(", ")}`);
+  }
+  if (ignoredPages.length > 0) {
+    lines.push(`Pages to ignore (email/context only, no measurements): ${ignoredPages.join(", ")}`);
+  }
+
+  // Emit visible dimensions from recommended pages as evidence hints.
+  const dimLines  = [];
+  const noteLines = [];
+  for (const page of inventory.pages) {
+    if (!page.recommendedForTakeoff) continue;
+    const pNum = page.pageNumber;
+    for (const dim of page.visibleDimensions ?? []) {
+      dimLines.push(
+        `  Page ${pNum} · ${dim.label}: ${dim.value}${dim.unit ? " " + dim.unit : ""} (${dim.confidence} confidence, raw: "${dim.rawText ?? dim.value}")`
+      );
+    }
+    for (const note of page.visibleNotes ?? []) {
+      noteLines.push(
+        `  Page ${pNum} · [${note.category}] "${note.text}" (${note.confidence} confidence)`
+      );
+    }
+  }
+
+  if (dimLines.length > 0) {
+    lines.push("Pre-classified visible dimensions (use as evidence, verify against the plan):");
+    lines.push(...dimLines);
+  }
+  if (noteLines.length > 0) {
+    lines.push("Pre-classified visible notes:");
+    lines.push(...noteLines);
+  }
+
+  lines.push(
+    "Instructions for using this context:",
+    "  - Focus measurement extraction on the recommended page(s) listed above.",
+    "  - Do NOT treat email/context pages as measurement sources.",
+    "  - Use the pre-classified dimensions as hints — confirm against the actual drawing.",
+    "  - If your extraction for a dimension differs from the hint, add a review note.",
+    "  - Still return a complete TakeoffResult; do not truncate rooms or runs.",
+    "─────────────────────────────────────────────────────────────────────────────",
+    "",
+  );
+
+  return lines.join("\n") + "\n";
 }

@@ -2,21 +2,23 @@
  * takeoffExtractionService — orchestrates AI takeoff extraction for a workspace.
  *
  * Flow:
- *   1. Verify AI is enabled (TAKEOFF_AI_ENABLED=1).
- *   2. Load quote_takeoff_jobs row + verify org ownership.
- *   3. Verify quote_file_id is set and the file is active.
- *   4. Set job status = 'processing'.
- *   5. Download file bytes from private Supabase Storage (service-role key).
- *   6. Call AI provider with file bytes + prompt.
- *   7. Handle JSON parse failure → mark job 'failed' + return extraction_failed error.
- *   8. Normalize TakeoffResult (enforce status = "draft", add source metadata).
- *   9. Server-side recompute (computeTakeoffMeasurements) — AI totals never trusted.
- *  10. Server-side validate (validateTakeoffResult).
- *  11. Generate import plan (planTakeoffImport).
- *  12. Insert quote_takeoff_results row (graceful fallback to job.result_summary
- *      if quote_id NOT NULL constraint is not yet relaxed).
- *  13. Update quote_takeoff_jobs status = 'completed' | 'failed'.
- *  14. Return normalized result + computed + validation + importPlan.
+ *   1.  Verify AI is enabled (TAKEOFF_AI_ENABLED=1).
+ *   2.  Load quote_takeoff_jobs row + verify org ownership.
+ *   3.  Verify quote_file_id is set and the file is active.
+ *   4.  Set job status = 'processing'.
+ *   5.  Download file bytes from private Supabase Storage (service-role key).
+ *   6.  Run page inventory pass (v5.4) — classify pages, identify measurement pages.
+ *       Non-fatal: if inventory fails, extraction continues without inventory context.
+ *   7.  Call AI provider with file bytes + prompt (includes inventory context if available).
+ *   8.  Handle JSON parse failure → mark job 'failed' + return extraction_failed error.
+ *   9.  Normalize TakeoffResult (enforce status = "draft", add source metadata).
+ *  10.  Server-side recompute (computeTakeoffMeasurements) — AI totals never trusted.
+ *  11.  Server-side validate (validateTakeoffResult).
+ *  12.  Generate import plan (planTakeoffImport).
+ *  13.  Insert quote_takeoff_results row (graceful fallback to job.result_summary
+ *       if quote_id NOT NULL constraint is not yet relaxed).
+ *  14.  Update quote_takeoff_jobs status = 'completed' | 'failed'.
+ *  15.  Return normalized result + computed + validation + importPlan + pageInventory.
  *
  * Security:
  *   - storage_path is never returned to the client.
@@ -28,6 +30,9 @@
  * Testability:
  *   providerFn and configOverride params allow full unit testing with mocked AI.
  *   When providerFn is provided, AI config checks (env vars) are skipped.
+ *   inventoryProviderFn allows independent testing of the inventory step.
+ *   When only providerFn is provided (no inventoryProviderFn), the inventory step
+ *   is skipped to preserve existing test behavior.
  */
 import { computeTakeoffMeasurements } from "./takeoffMeasurementCalc.mjs";
 import { validateTakeoffResult }       from "./takeoffValidator.mjs";
@@ -36,6 +41,7 @@ import { TAKEOFF_SCHEMA_VERSION }      from "./takeoffContract.mjs";
 import { getExtractionProvider, readExtractionConfig } from "./takeoffAiProvider.mjs";
 import { QUOTE_FILE_BUCKET }           from "../files/quoteFileStoragePath.mjs";
 import { PROMPT_VERSION }              from "./takeoffExtractionPrompt.mjs";
+import { runPageInventory }            from "./takeoffPageInventoryService.mjs";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -79,8 +85,9 @@ export async function runAiTakeoffExtraction({
   organizationId,
   userId,
   takeoffJobId,
-  providerFn    = null,
-  configOverride = null,
+  providerFn         = null,
+  configOverride     = null,
+  inventoryProviderFn = null,  // v5.4: injectable for testing; null = use default OpenAI call
 }) {
   // 1. Validate inputs.
   if (!isUuid(organizationId)) {
@@ -192,7 +199,35 @@ export async function runAiTakeoffExtraction({
     );
   }
 
-  // 7. Call AI provider with file bytes.
+  // 6. Run page inventory pass (v5.4).
+  //    Only attempted when:
+  //      - inventoryProviderFn is explicitly provided (test/override mode), or
+  //      - we are in real AI mode (no providerFn override — production path)
+  //    When providerFn is set but inventoryProviderFn is not, we skip inventory
+  //    so existing unit tests (which mock only providerFn) remain unaffected.
+  let pageInventory = null;
+  const shouldRunInventory = inventoryProviderFn != null || !providerFn;
+  if (shouldRunInventory) {
+    try {
+      pageInventory = await runPageInventory({
+        fileBuffer,
+        mimeType:        file.mime_type ?? "",
+        originalFilename: file.original_filename,
+        modelName:       config?.modelName ?? "gpt-4o",
+        apiKey:          config?.apiKey ?? null,
+        providerFn:      inventoryProviderFn ?? null,
+      });
+    } catch (inventoryErr) {
+      console.warn(
+        `[takeoffExtraction] Page inventory failed for job ${takeoffJobId} — ` +
+        `continuing extraction without page context:`,
+        inventoryErr.message
+      );
+      // Non-fatal: extraction proceeds without inventory context in the user message.
+    }
+  }
+
+  // 7. Call AI provider with file bytes (+ inventory context if available).
   let providerOutput;
   try {
     providerOutput = await provider({
@@ -202,6 +237,7 @@ export async function runAiTakeoffExtraction({
       promptVersion:    PROMPT_VERSION,
       modelName:        config?.modelName ?? "gpt-4o",
       apiKey:           config?.apiKey ?? null,
+      pageInventory,   // v5.4: passes recommended pages + dimension hints to extraction model
     });
   } catch (providerErr) {
     await setJobStatus(supabase, takeoffJobId, organizationId, {
@@ -297,10 +333,16 @@ export async function runAiTakeoffExtraction({
     try { rawAiJson = JSON.parse(rawText); } catch { rawAiJson = { _raw: rawText.slice(0, 5000) }; }
   }
   // Inject eliteOS run metadata as a reserved _meta key so listTakeoffResults
-  // can surface promptVersion/modelUsed without a separate DB column.
+  // can surface promptVersion/modelUsed/pageInventory without a separate DB column.
+  const metaEnvelope = {
+    promptVersion: PROMPT_VERSION,
+    modelUsed,
+    savedAt:       now,
+    pageInventory: pageInventory ?? null,  // v5.4: null when inventory was skipped or failed
+  };
   const augmentedRawAiJson = rawAiJson != null
-    ? { ...rawAiJson, _meta: { promptVersion: PROMPT_VERSION, modelUsed, savedAt: now } }
-    : { _meta: { promptVersion: PROMPT_VERSION, modelUsed, savedAt: now } };
+    ? { ...rawAiJson, _meta: metaEnvelope }
+    : { _meta: metaEnvelope };
 
   const resultPayload = {
     organization_id:              organizationId,
@@ -364,7 +406,7 @@ export async function runAiTakeoffExtraction({
     },
   });
 
-  // 13. Return result (storage_path never included).
+  // 15. Return result (storage_path never included).
   return {
     ok:                        true,
     takeoffJobId,
@@ -380,5 +422,6 @@ export async function runAiTakeoffExtraction({
     modelUsed,
     promptVersion:             PROMPT_VERSION,
     usage,
+    pageInventory:             pageInventory ?? null,  // v5.4: null when skipped or failed
   };
 }

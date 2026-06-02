@@ -46,6 +46,8 @@ import TakeoffPlanFileSection from "./components/TakeoffPlanFileSection";
 import TakeoffBenchmarkPanel from "./components/TakeoffBenchmarkPanel";
 import TakeoffRunHistoryPanel from "./components/TakeoffRunHistoryPanel";
 import TakeoffDebugPanel from "./components/TakeoffDebugPanel";
+import TakeoffPageInventoryPanel from "./components/TakeoffPageInventoryPanel";
+import type { PageInventory } from "./components/TakeoffPageInventoryPanel";
 import { getSupabase } from "./lib/supabase";
 import { resolveAccessToken } from "./lib/authSession";
 import { labApiGet, labApiPost, LabApiError } from "./lib/api";
@@ -177,6 +179,9 @@ export default function TakeoffLabApp() {
 
   // Incremented after new AI extraction to trigger run history refresh.
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+
+  // v5.4: Page inventory from the classification pass (null = not yet run or failed).
+  const [pageInventory, setPageInventory] = useState<PageInventory | null>(null);
 
   // ── Workspace state (file-backed) ────────────────────────────────────────
   const [takeoffJobId, setTakeoffJobId] = useState<string | null>(urlJobId);
@@ -403,7 +408,13 @@ export default function TakeoffLabApp() {
   const handleAiDraftGenerated = useCallback((
     result:   TakeoffResult,
     filename: string,
-    meta:     { promptVersion: string | null; modelUsed: string | null; resultRowId: string | null; summary?: object | null }
+    meta:     {
+      promptVersion: string | null;
+      modelUsed:     string | null;
+      resultRowId:   string | null;
+      summary?:      object | null;
+      pageInventory?: object | null;
+    }
   ) => {
     commitSource(result, "ai-draft");
     setPlanFilename(filename);
@@ -414,13 +425,19 @@ export default function TakeoffLabApp() {
     });
     setCurrentResultId(meta.resultRowId ?? null);
     setHistoryRefreshKey((k) => k + 1);
+    setPageInventory((meta.pageInventory as PageInventory | null) ?? null);
   }, []);
 
   // ── Handle loading a historical run from run history panel (v5.3) ─────────
 
   const handleLoadHistoricalRun = useCallback((
     result: TakeoffResult,
-    meta:   { promptVersion: string | null; modelUsed: string | null; resultId: string }
+    meta:   {
+      promptVersion:  string | null;
+      modelUsed:      string | null;
+      resultId:       string;
+      pageInventory?: PageInventory | null;
+    }
   ) => {
     commitSource(result, "ai-draft");
     setAiDraftMeta({
@@ -429,6 +446,7 @@ export default function TakeoffLabApp() {
       summary:       null,
     });
     setCurrentResultId(meta.resultId);
+    setPageInventory(meta.pageInventory ?? null);
   }, []);
 
   // ── Derived display values ────────────────────────────────────────────────
@@ -765,6 +783,14 @@ export default function TakeoffLabApp() {
             <TakeoffBenchmarkPanel computed={computed} />
           </section>
 
+          {/* ── Page inventory (v5.4) — shown when a page inventory is available ── */}
+          {pageInventory && (
+            <section className="lab-section">
+              <h2 className="lab-section-title">Page inventory</h2>
+              <TakeoffPageInventoryPanel inventory={pageInventory} />
+            </section>
+          )}
+
           {/* ── Debug: AI output (v5.3) — collapsed JSON view ──────────── */}
           <section className="lab-section">
             <TakeoffDebugPanel
@@ -772,6 +798,7 @@ export default function TakeoffLabApp() {
               computed={computed}
               validation={validation}
               importPlan={importPlan}
+              pageInventory={pageInventory}
             />
           </section>
 

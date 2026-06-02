@@ -21,7 +21,16 @@
  *  14.  review_status is always 'needs_review' — never 'approved'
  *  15.  No quote mutation — quote_headers table never touched
  *  16.  storage_path never returned in response
- *  17.  Provider called with expected metadata (mimeType, originalFilename, promptVersion)
+ *  17.  Provider called with expected metadata (mimeType, originalFilename, promptVersion v3)
+ *  18.  NOT NULL fallback — graceful degradation to result_summary
+ *  19.  resultRowId returned in response
+ *  20.  raw_ai_result_json stored with _meta envelope
+ *
+ * v5.4 page inventory tests:
+ *  21.  inventoryProviderFn called when provided
+ *  22.  extraction provider receives pageInventory from inventory pass
+ *  23.  pageInventory stored in _meta.pageInventory
+ *  24.  inventory failure is non-fatal — extraction still completes
  */
 
 import assert from "node:assert/strict";
@@ -639,7 +648,7 @@ await test("provider called with expected metadata (mimeType, filename, promptVe
   assert.ok(capturedInput, "provider must have been called");
   assert.equal(capturedInput.mimeType,         MOCK_FILE_ROW.mime_type,          "mimeType mismatch");
   assert.equal(capturedInput.originalFilename, MOCK_FILE_ROW.original_filename,  "originalFilename mismatch");
-  assert.equal(capturedInput.promptVersion,    "v2",                             "promptVersion must be v2");
+  assert.equal(capturedInput.promptVersion,    "v3",                             "promptVersion must be v3");
   assert.ok(Buffer.isBuffer(capturedInput.fileBuffer), "fileBuffer must be a Buffer");
   assert.ok(capturedInput.fileBuffer.length > 0,       "fileBuffer must not be empty");
 });
@@ -707,6 +716,164 @@ await test("raw_ai_result_json stored with _meta envelope", async () => {
   assert.ok(storedRawJson._meta.promptVersion, "_meta.promptVersion must be set");
   assert.ok(storedRawJson._meta.modelUsed, "_meta.modelUsed must be set");
   assert.ok(storedRawJson._meta.savedAt, "_meta.savedAt must be set");
+});
+
+// ── v5.4: Page inventory integration tests (21–24) ────────────────────────────
+
+/** Build a minimal valid PageInventory for testing. */
+function makeInventoryFixture({ recommendedPages = [1] } = {}) {
+  return {
+    schemaVersion:              "1.0",
+    inventoryPromptVersion:     "v1",
+    pages: recommendedPages.map((n) => ({
+      pageNumber:                   n,
+      pageType:                     "hand_sketch",
+      measurementRelevance:         "high",
+      orientation:                  "upright",
+      containsCountertopDimensions: true,
+      containsBacksplashNotes:      true,
+      containsCutoutNotes:          false,
+      containsMaterialColorNotes:   false,
+      summary:                      "Test sketch page",
+      visibleDimensions: [
+        { label: "Island", value: "108 x 56", unit: "in", confidence: "high", rawText: "108\" x 56\"" },
+      ],
+      visibleNotes: [
+        { text: "4\" B/S", category: "backsplash", confidence: "high" },
+      ],
+      recommendedForTakeoff: true,
+      reviewNotes: [],
+    })),
+    recommendedMeasurementPages: recommendedPages,
+    pagesToIgnore: [],
+    overallNotes: [],
+  };
+}
+
+/** Mock inventory provider that returns a valid inventory. */
+function makeInventoryProvider(fixture = makeInventoryFixture()) {
+  return async () => ({
+    rawText:    JSON.stringify(fixture),
+    parsed:     fixture,
+    parseError: null,
+    modelUsed:  "gpt-4o",
+    usage:      { promptTokens: 300, completionTokens: 400 },
+  });
+}
+
+/** Mock inventory provider that throws. */
+function makeThrowingInventoryProvider(msg = "Inventory AI error") {
+  return async () => { throw new Error(msg); };
+}
+
+// 21. inventoryProviderFn is called when provided
+await test("extraction calls inventory provider when inventoryProviderFn is provided", async () => {
+  let inventoryCalled = false;
+  const trackingInventoryProvider = async (input) => {
+    inventoryCalled = true;
+    const fixture = makeInventoryFixture();
+    return {
+      rawText:    JSON.stringify(fixture),
+      parsed:     fixture,
+      parseError: null,
+      modelUsed:  "gpt-4o",
+      usage:      { promptTokens: 300, completionTokens: 400 },
+    };
+  };
+
+  await runAiTakeoffExtraction({
+    supabase:            makeSupabase(),
+    organizationId:      ORG_ID,
+    userId:              null,
+    takeoffJobId:        JOB_ID,
+    providerFn:          makeSuccessProvider(),
+    configOverride:      ENABLED_CONFIG,
+    inventoryProviderFn: trackingInventoryProvider,
+  });
+
+  assert.ok(inventoryCalled, "inventory provider must have been called");
+});
+
+// 22. extraction provider receives pageInventory when inventory succeeds
+await test("extraction provider receives pageInventory from inventory pass", async () => {
+  let capturedInput = null;
+  const capturingProvider = async (input) => {
+    capturedInput = input;
+    const fixture = buildSpec73Fixture();
+    return {
+      rawText:    JSON.stringify(fixture),
+      parsed:     fixture,
+      parseError: null,
+      modelUsed:  "gpt-4o",
+      usage:      { promptTokens: 200, completionTokens: 800 },
+    };
+  };
+
+  const inventoryFixture = makeInventoryFixture({ recommendedPages: [1] });
+
+  await runAiTakeoffExtraction({
+    supabase:            makeSupabase(),
+    organizationId:      ORG_ID,
+    userId:              null,
+    takeoffJobId:        JOB_ID,
+    providerFn:          capturingProvider,
+    configOverride:      ENABLED_CONFIG,
+    inventoryProviderFn: makeInventoryProvider(inventoryFixture),
+  });
+
+  assert.ok(capturedInput, "extraction provider must have been called");
+  assert.ok(capturedInput.pageInventory, "extraction provider must receive pageInventory");
+  assert.deepEqual(
+    capturedInput.pageInventory.recommendedMeasurementPages,
+    [1],
+    "recommendedMeasurementPages must be passed through"
+  );
+});
+
+// 23. page inventory stored in raw_ai_result_json._meta.pageInventory
+await test("page inventory stored in _meta.pageInventory of raw_ai_result_json", async () => {
+  const supabase = makeSupabase({ trackMutations: true });
+  const inventoryFixture = makeInventoryFixture({ recommendedPages: [1] });
+
+  await runAiTakeoffExtraction({
+    supabase,
+    organizationId:      ORG_ID,
+    userId:              null,
+    takeoffJobId:        JOB_ID,
+    providerFn:          makeSuccessProvider(),
+    configOverride:      ENABLED_CONFIG,
+    inventoryProviderFn: makeInventoryProvider(inventoryFixture),
+  });
+
+  const payload = supabase._mutations.resultInserts[0];
+  assert.ok(payload, "quote_takeoff_results insert must have occurred");
+  const meta = payload.raw_ai_result_json?._meta;
+  assert.ok(meta, "_meta must be present");
+  assert.ok(meta.pageInventory, "_meta.pageInventory must be stored");
+  assert.deepEqual(
+    meta.pageInventory.recommendedMeasurementPages,
+    [1],
+    "stored pageInventory must include recommendedMeasurementPages"
+  );
+  assert.ok(Array.isArray(meta.pageInventory.pages), "stored pageInventory.pages must be an array");
+});
+
+// 24. inventory provider failure is non-fatal — extraction still completes
+await test("inventory provider failure is non-fatal — extraction still succeeds", async () => {
+  const result = await runAiTakeoffExtraction({
+    supabase:            makeSupabase(),
+    organizationId:      ORG_ID,
+    userId:              null,
+    takeoffJobId:        JOB_ID,
+    providerFn:          makeSuccessProvider(),
+    configOverride:      ENABLED_CONFIG,
+    inventoryProviderFn: makeThrowingInventoryProvider("Inventory AI call timed out"),
+  });
+
+  // Extraction should still succeed even though inventory failed.
+  assert.equal(result.ok, true, "extraction must succeed despite inventory failure");
+  assert.equal(result.reviewStatus, "needs_review", "reviewStatus must be needs_review");
+  assert.equal(result.pageInventory, null, "pageInventory must be null when inventory failed");
 });
 
 // ── Summary ───────────────────────────────────────────────────────────────────

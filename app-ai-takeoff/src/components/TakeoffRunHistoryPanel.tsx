@@ -43,6 +43,7 @@ interface LoadedRunResult {
   modelUsed:                 string | null;
   normalizedTakeoffJson:     TakeoffResult;
   computedMeasurementsJson:  TakeoffComputedMeasurements;
+  pageInventory:             object | null;  // v5.4
 }
 
 export interface TakeoffRunHistoryPanelProps {
@@ -53,7 +54,12 @@ export interface TakeoffRunHistoryPanelProps {
   refreshKey?:     number;
   onLoadRun: (
     result:   TakeoffResult,
-    meta:     { promptVersion: string | null; modelUsed: string | null; resultId: string }
+    meta:     {
+      promptVersion: string | null;
+      modelUsed:     string | null;
+      resultId:      string;
+      pageInventory?: object | null;
+    }
   ) => void;
 }
 
@@ -139,9 +145,10 @@ export default function TakeoffRunHistoryPanel({
 
       if (res.ok && res.normalizedTakeoffJson) {
         onLoadRun(res.normalizedTakeoffJson, {
-          promptVersion: res.promptVersion ?? null,
-          modelUsed:     res.modelUsed     ?? null,
+          promptVersion: res.promptVersion  ?? null,
+          modelUsed:     res.modelUsed      ?? null,
           resultId:      res.resultId,
+          pageInventory: res.pageInventory  ?? null,
         });
       } else {
         throw new Error("Server returned unexpected response");

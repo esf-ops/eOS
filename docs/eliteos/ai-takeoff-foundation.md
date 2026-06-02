@@ -426,6 +426,134 @@ npm run eos:test:takeoff-extraction-service # includes 2 new tests for resultRow
 
 ---
 
+## v5.4: Page inventory + targeted extraction pass (2026-06-02)
+
+**Status:** Built.
+
+### Goal
+
+Improve AI extraction accuracy and consistency by splitting the extraction into a **two-step workflow**:
+
+1. **Page inventory pass** — classify each page (hand sketch, email, elevation, etc.), identify which pages contain measurement dimensions, and pre-extract visible dimension labels and notes as evidence.
+2. **Targeted extraction pass** — run the full TakeoffResult extraction using the page inventory as context: tell the model which pages to focus on and provide the pre-classified dimension evidence as hints.
+
+**Why this matters:** The same benchmark PDF has produced wildly inconsistent results (76.97 → 68.41 → 48.97 CT sf). The root cause is that a messy multi-page PDF (plan + email + elevation) causes the model to draw measurements from wrong pages, or focus on only part of a page, on each run. The inventory pass anchors the extraction to the correct page.
+
+### What v5.4 adds
+
+**New files:**
+- `backend-core/src/takeoff/takeoffPageInventoryPrompt.mjs` — system prompt + user message for the classification pass. Includes `INVENTORY_PROMPT_VERSION = "v1"`.
+- `backend-core/src/takeoff/takeoffPageInventoryService.mjs` — `runPageInventory()` service. Calls the OpenAI Responses API with the inventory prompt, parses `PageInventory` JSON, normalizes `recommendedMeasurementPages` / `pagesToIgnore`. Injectable `providerFn` for mocked tests.
+- `backend-core/src/takeoff/takeoffPageInventoryService.test.mjs` — 10 tests covering parse success, parse failure, empty pages, provider capture, error propagation, and no-pricing/no-mutation guarantee.
+- `app-ai-takeoff/src/components/TakeoffPageInventoryPanel.tsx` — Lab-internal UI panel showing per-page classification (type badge, relevance, CT dims, BS notes, summary) and expandable dimension/note evidence.
+
+**Modified files:**
+- `backend-core/src/takeoff/takeoffExtractionService.mjs`:
+  - Added `inventoryProviderFn` parameter (injectable for testing).
+  - After file download, runs `runPageInventory()` before the main extraction call.
+  - Inventory failure is **non-fatal** — extraction continues without context.
+  - Passes `pageInventory` to the provider call.
+  - Stores `pageInventory` in `raw_ai_result_json._meta.pageInventory`.
+  - Returns `pageInventory` in the response.
+  - Existing tests (1–20) unaffected: they provide `providerFn` without `inventoryProviderFn`, so the inventory step is skipped automatically.
+- `backend-core/src/takeoff/takeoffExtractionPrompt.mjs`:
+  - Bumped `PROMPT_VERSION = "v3"` (user message now includes inventory context section).
+  - `buildUserMessage()` now accepts optional `pageInventory` parameter and formats recommended pages, visible dimensions, and notes as a guidance section.
+- `backend-core/src/takeoff/openAiTakeoffProvider.mjs`:
+  - Added `pageInventory = null` parameter, passed to `buildUserMessage`.
+- `backend-core/src/takeoff/takeoffWorkspaceService.mjs`:
+  - `getResultById` now returns `pageInventory: meta.pageInventory ?? null` from `_meta`.
+- `app-ai-takeoff/src/TakeoffLabApp.tsx`:
+  - New `pageInventory` state. Updated after both new AI extraction (`handleAiDraftGenerated`) and historical run load (`handleLoadHistoricalRun`).
+  - `TakeoffPageInventoryPanel` rendered conditionally below the Benchmark panel.
+  - `pageInventory` passed to `TakeoffDebugPanel` for the JSON debug section.
+- `app-ai-takeoff/src/components/TakeoffDebugPanel.tsx`:
+  - Optional `pageInventory` prop; adds "Page inventory JSON" section with Copy button when present.
+- `app-ai-takeoff/src/components/TakeoffRunHistoryPanel.tsx`:
+  - `onLoadRun` callback now includes `pageInventory` from `getResultById`.
+- `app-ai-takeoff/src/components/TakeoffPlanFileSection.tsx`:
+  - `onAiDraftGenerated` meta type includes `pageInventory?: object | null`.
+- `app-ai-takeoff/src/styles.css`:
+  - Added comprehensive `inv-*` CSS rules for the page inventory panel.
+
+### PageInventory schema (from `takeoffPageInventoryPrompt.mjs`)
+
+```json
+{
+  "schemaVersion": "1.0",
+  "pages": [
+    {
+      "pageNumber": 1,
+      "pageType": "hand_sketch | cabinet_plan | elevation | email_context | rendering | spec | floor_plan | irrelevant | unknown",
+      "measurementRelevance": "high | medium | low | none",
+      "orientation": "upright | rotated_90 | ...",
+      "containsCountertopDimensions": true,
+      "containsBacksplashNotes": true,
+      "containsCutoutNotes": false,
+      "containsMaterialColorNotes": false,
+      "summary": "...",
+      "visibleDimensions": [{ "label": "Island", "value": "108 x 56", "unit": "in", "confidence": "high", "rawText": "..." }],
+      "visibleNotes": [{ "text": "4\" B/S", "category": "backsplash", "confidence": "high" }],
+      "recommendedForTakeoff": true,
+      "reviewNotes": []
+    }
+  ],
+  "recommendedMeasurementPages": [1],
+  "pagesToIgnore": [2],
+  "overallNotes": []
+}
+```
+
+### Two-step extraction flow
+
+```
+Upload plan file
+  → runPageInventory()     ← first AI call (classification)
+  → pageInventory          ← recommended pages, dimension evidence
+  → runAiTakeoffExtraction() ← second AI call (structured extraction with inventory context)
+  → TakeoffResult + pageInventory stored in _meta
+```
+
+### Inventory context injected into extraction prompt (v3)
+
+When inventory succeeds, the extraction user message includes:
+
+```
+── PAGE INVENTORY CONTEXT (from prior classification pass) ──
+Recommended measurement page(s): 1
+Pages to ignore (email/context only): 2
+Pre-classified visible dimensions:
+  Page 1 · Island: 108 x 56 in (high confidence)
+  Page 1 · Sink wall: 91.5 in (high confidence)
+Pre-classified visible notes:
+  Page 1 · [backsplash] "4" B/S" (high confidence)
+Instructions:
+  - Focus extraction on the recommended page(s).
+  - Do NOT treat email/context pages as measurement sources.
+  - Use pre-classified dimensions as hints — confirm against the plan.
+  - If extraction differs from hints, add a review note.
+```
+
+### Inventory failure handling
+
+If the inventory AI call fails (network error, API timeout, parse failure), extraction proceeds without context. `pageInventory` is `null` in the response and `_meta`. A warning is logged server-side. This prevents inventory failures from blocking the extraction.
+
+### Tests added
+
+```bash
+npm run eos:test:takeoff-page-inventory      # 10 new tests
+npm run eos:test:takeoff-extraction-service  # +4 new tests (21–24), test 17 updated to v3
+```
+
+### Import gate (unchanged)
+
+Import into Internal Estimate remains blocked until:
+1. The hand sketch benchmark 001 passes consistently (CT and BS within ±2 sf) across at least two consecutive extraction runs.
+2. A human estimator reviews and approves the extraction result.
+3. No regressions against the benchmark are introduced by prompt/model changes.
+
+---
+
 ## Quote-import planning (architecture note)
 
 This section describes the intended flow for converting an AI draft into a quote. **This is not implemented yet.** It is documented here so the architecture is clear before the import slice is built.

@@ -700,6 +700,7 @@ export async function getResultById({
     computedMeasurementsJson:  freshComputed,
     validationDiagnosticsJson: freshValidation,
     importPlanJson:            freshImportPlan,
+    pageInventory:             meta.pageInventory ?? null,  // v5.4: null for pre-inventory runs
   };
 }
 

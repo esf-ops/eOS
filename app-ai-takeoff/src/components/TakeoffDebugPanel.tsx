@@ -17,14 +17,16 @@ import type { TakeoffResult,
               TakeoffValidationResult,
               TakeoffImportPlan } from "@takeoff-core/takeoffContract.mjs";
 import type { TakeoffComputedMeasurements } from "@takeoff-core/takeoffMeasurementCalc.mjs";
+import type { PageInventory } from "./TakeoffPageInventoryPanel";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface Props {
-  result:     TakeoffResult;
-  computed:   TakeoffComputedMeasurements;
-  validation: TakeoffValidationResult;
-  importPlan: TakeoffImportPlan;
+  result:        TakeoffResult;
+  computed:      TakeoffComputedMeasurements;
+  validation:    TakeoffValidationResult;
+  importPlan:    TakeoffImportPlan;
+  pageInventory?: PageInventory | null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -81,12 +83,16 @@ export default function TakeoffDebugPanel({
   computed,
   validation,
   importPlan,
+  pageInventory,
 }: Props) {
   return (
     <details className="debug-panel lab-card">
       <summary className="debug-panel-summary">
         <span className="debug-panel-title">Debug: AI output</span>
-        <span className="debug-panel-hint">Normalized JSON · Computed · Diagnostics · Import plan</span>
+        <span className="debug-panel-hint">
+          Normalized JSON · Computed · Diagnostics · Import plan
+          {pageInventory ? " · Page inventory" : ""}
+        </span>
       </summary>
 
       <div className="debug-panel-sections">
@@ -106,6 +112,12 @@ export default function TakeoffDebugPanel({
           title="Import plan"
           data={importPlan}
         />
+        {pageInventory && (
+          <DebugSection
+            title="Page inventory JSON"
+            data={pageInventory}
+          />
+        )}
       </div>
     </details>
   );
