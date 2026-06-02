@@ -618,6 +618,129 @@ html, body {
 }
 .backsplash-edit-sep { font-size: 12px; color: var(--eos-ink-muted); }
 
+/* ── v4: Source pills — file + workspace variants ────────────────────────── */
+.source-pill--workspace {
+  background: var(--lab-accent-soft); color: var(--lab-accent);
+  border-color: var(--lab-accent-border);
+}
+
+/* ── v4: Plan file section ───────────────────────────────────────────────── */
+.plan-file-section { padding: 0; overflow: visible; }
+
+.plan-file-auth-gate {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 20px 24px;
+}
+.plan-file-auth-icon { font-size: 18px; margin-top: 2px; }
+.plan-file-auth-text { margin: 0; font-size: 13px; color: var(--eos-ink-mid); line-height: 1.6; }
+
+.plan-file-upload-form { padding: 20px 24px; }
+.plan-file-upload-hint { margin: 0 0 16px; font-size: 13px; color: var(--eos-ink-mid); }
+.plan-file-upload-row {
+  display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px;
+}
+.plan-file-pick-group { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 200px; }
+.plan-file-chosen { font-size: 12px; color: var(--eos-ink-muted); word-break: break-all; flex: 1; }
+.plan-file-role-group { display: flex; flex-direction: column; gap: 4px; }
+.plan-file-role-label { font-size: 11px; font-weight: 600; color: var(--eos-ink-muted); }
+.plan-file-upload-msg {
+  margin: 10px 0 0; font-size: 12px; color: var(--eos-ink-mid);
+}
+.plan-file-upload-msg--error { color: var(--eos-danger); }
+
+.plan-btn {
+  display: inline-flex; align-items: center; padding: 7px 14px;
+  border-radius: var(--r-sm); font-size: 13px; font-weight: 600; cursor: pointer;
+  border: 1px solid transparent; white-space: nowrap;
+  transition: background 120ms, border-color 120ms;
+}
+.plan-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.plan-btn--primary {
+  background: var(--lab-accent); color: #fff; border-color: var(--lab-accent);
+}
+.plan-btn--primary:not(:disabled):hover { background: #3730a3; }
+.plan-btn--secondary {
+  background: var(--eos-surface); color: var(--eos-ink-soft);
+  border-color: var(--eos-line-strong);
+}
+.plan-btn--secondary:not(:disabled):hover { background: var(--eos-bg-soft); }
+
+.plan-file-loaded { padding: 20px 24px; display: flex; flex-direction: column; gap: 12px; }
+
+.plan-file-meta-row {
+  display: flex; align-items: flex-start; gap: 14px; flex-wrap: wrap;
+}
+.plan-file-icon { font-size: 24px; margin-top: 2px; }
+.plan-file-meta-details { flex: 1; min-width: 160px; }
+.plan-file-filename { margin: 0 0 3px; font-size: 14px; font-weight: 700; color: var(--eos-ink); word-break: break-all; }
+.plan-file-meta-sub { margin: 0; font-size: 12px; color: var(--eos-ink-muted); }
+.plan-file-actions { display: flex; gap: 8px; flex-shrink: 0; }
+
+.plan-file-error { margin: 0; font-size: 12px; color: var(--eos-danger); }
+.plan-file-error--inline { margin-top: 0; }
+.plan-file-loading { margin: 0; font-size: 13px; color: var(--eos-ink-muted); padding: 20px 24px; }
+
+.plan-file-workspace-meta {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 10px 0; border-top: 1px solid var(--eos-line);
+}
+.plan-file-job-label { font-size: 11px; font-weight: 600; color: var(--eos-ink-muted); }
+.plan-file-job-id {
+  font-size: 11px; font-family: monospace; color: var(--eos-ink-soft);
+  background: var(--eos-bg-soft); padding: 1px 6px; border-radius: 4px;
+  border: 1px solid var(--eos-line); max-width: 320px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.plan-file-status-chip {
+  display: inline-flex; align-items: center; padding: 2px 8px;
+  border-radius: 9999px; font-size: 11px; font-weight: 600;
+}
+.plan-file-status-chip--review {
+  background: var(--eos-warn-soft); color: var(--eos-warn); border: 1px solid var(--eos-warn-border);
+}
+.plan-file-status-chip--saved {
+  background: var(--eos-success-soft); color: var(--eos-success); border: 1px solid var(--eos-success-border);
+}
+
+.plan-file-note {
+  margin: 0; font-size: 12px; color: var(--eos-ink-faint);
+  border-top: 1px solid var(--eos-line); padding-top: 10px;
+}
+
+/* ── v4: Save panel ─────────────────────────────────────────────────────── */
+.save-panel { overflow: visible; }
+.save-panel-inner {
+  display: flex; align-items: flex-start; gap: 20px; padding: 20px 24px;
+  flex-wrap: wrap;
+}
+.save-panel-info { flex: 1; min-width: 200px; }
+.save-panel-desc { margin: 0 0 8px; font-size: 13px; color: var(--eos-ink-mid); line-height: 1.6; }
+.save-panel-last-saved { margin: 0; font-size: 12px; color: var(--eos-ink-muted); }
+.save-panel-actions { flex-shrink: 0; padding-top: 2px; }
+.save-panel-btn {
+  display: inline-flex; align-items: center; padding: 9px 18px;
+  border-radius: var(--r-sm); font-size: 13px; font-weight: 700; cursor: pointer;
+  background: var(--lab-accent); color: #fff; border: none;
+  transition: background 120ms;
+}
+.save-panel-btn:not(:disabled):hover { background: #3730a3; }
+.save-panel-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.save-panel-msg {
+  padding: 0 24px 14px; font-size: 12px; color: var(--eos-ink-mid);
+}
+.save-panel-msg--saved { color: var(--eos-success); }
+.save-panel-msg--error { color: var(--eos-danger); }
+
+/* ── v4: Auth badge + footer job ID ─────────────────────────────────────── */
+.badge-unauthed {
+  background: var(--eos-warn-soft); color: var(--eos-warn);
+  border: 1px solid var(--eos-warn-border);
+}
+.lab-footer-job-id {
+  font-size: 11px; font-family: monospace; color: var(--eos-ink-muted);
+  background: transparent;
+}
+
 /* ── v3: Source pills — edited/note variants ──────────────────────────────── */
 .source-pill--edited {
   background: #fffbeb; color: #92400e; border-color: #fcd34d;

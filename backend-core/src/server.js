@@ -18,6 +18,7 @@ import { attachSalesAccountMappingAdminRoutes } from "./admin/salesAccountMappin
 import { attachIdentityResolutionAdminRoutes } from "./admin/identityResolutionAdmin.js";
 import { attachQuoteRoutes } from "./quotes/quoteRoutes.js";
 import { attachQuoteFileRoutes } from "./files/quoteFileRoutes.js";
+import { attachTakeoffWorkspaceRoutes } from "./takeoff/takeoffWorkspaceRoutes.js";
 import { collectHeadEnvOriginsForCors } from "./me/headDeploymentUrls.js";
 import { buildMeHeadsPayload } from "./me/launcherHeads.js";
 import { buildTitansTodayPayload, parseTitansTodayQuery } from "./titans/titansToday.js";
@@ -1183,6 +1184,11 @@ attachQuoteRoutes(app, {
 });
 
 attachQuoteFileRoutes(app, {
+  requireAuth,
+  getSupabase: supabaseServerClient
+});
+
+attachTakeoffWorkspaceRoutes(app, {
   requireAuth,
   getSupabase: supabaseServerClient
 });

@@ -1,21 +1,28 @@
 /**
- * AI Takeoff Lab — top-level shell (v3: editable review fields).
+ * AI Takeoff Lab — top-level shell (v4: file-backed takeoff workspace).
  *
  * v1: loads Spec 73 fixture at init, read-only viewer.
  * v2: adds JSON workbench (paste + validate).
  * v3: adds inline edit mode — edit run dimensions, room/area names,
  *     backsplash assumptions; eliteOS recomputes on every change.
+ * v4: file-backed workspace — upload plan file, create takeoff job,
+ *     save/load reviewed TakeoffResult; no AI extraction yet.
  *
  * State model:
+ *   authToken     — Supabase access token (null = not signed in)
+ *   takeoffJobId  — quoteFileId acting as workspace ID (null = no workspace)
  *   sourceResult  — the last validated source TakeoffResult (never mutated by edits)
  *   editDraft     — a mutable copy; patch handlers produce new objects immutably
  *   hasEdits      — derived: editDraft.rooms ≠ sourceResult.rooms
  *   displayMode   — "spec73" | "pasted" | "edited" | "invalid"
  *   activeState   — always computed from editDraft (pure, synchronous)
  *
- * No API calls. No quote mutation. All computations are local.
+ * URL param: ?takeoffJobId=<uuid> — auto-loads workspace on init.
+ *
+ * Core lab features (spec73, paste JSON, edit) are available without auth.
+ * File upload, workspace save/load require an authenticated session.
  */
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buildSpec73Fixture } from "@takeoff-core/fixtures/spec73.fixture.mjs";
 import { computeTakeoffMeasurements } from "@takeoff-core/takeoffMeasurementCalc.mjs";
 import { validateTakeoffResult } from "@takeoff-core/takeoffValidator.mjs";
@@ -29,11 +36,15 @@ import TakeoffRoomsReview from "./components/TakeoffRoomsReview";
 import TakeoffDiagnosticsPanel from "./components/TakeoffDiagnosticsPanel";
 import TakeoffImportPreview from "./components/TakeoffImportPreview";
 import TakeoffWorkbench from "./components/TakeoffWorkbench";
+import TakeoffPlanFileSection from "./components/TakeoffPlanFileSection";
+import { getSupabase } from "./lib/supabase";
+import { resolveAccessToken } from "./lib/authSession";
+import { labApiGet, labApiPost, LabApiError } from "./lib/api";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-export type SourceMode = "spec73" | "pasted" | "invalid";
-export type DisplayMode = "spec73" | "pasted" | "edited" | "invalid";
+export type SourceMode = "spec73" | "pasted" | "file" | "invalid";
+export type DisplayMode = "spec73" | "pasted" | "file" | "edited" | "invalid";
 
 export interface ActiveComputedState {
   result: TakeoffResult;
@@ -42,10 +53,11 @@ export interface ActiveComputedState {
   importPlan: TakeoffImportPlan;
 }
 
-// Patch types for each level
 export type RoomPatch  = { name?: string };
 export type AreaPatch  = { label?: string; backsplashLinearIn?: number; backsplashHeightIn?: number };
 export type RunPatch   = { label?: string; lengthIn?: number; depthIn?: number };
+
+type SaveStatus = "idle" | "saving" | "saved" | "error";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -58,9 +70,40 @@ function computeAll(result: TakeoffResult): ActiveComputedState {
 
 function makeSpec73(): TakeoffResult { return buildSpec73Fixture(); }
 
+function urlJobId(): string | null {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get("takeoffJobId");
+    return id?.trim() || null;
+  } catch { return null; }
+}
+
 // ── Component ──────────────────────────────────────────────────────────────
 
 export default function TakeoffLabApp() {
+  // ── Auth ──────────────────────────────────────────────────────────────────
+  const [authToken, setAuthToken] = useState<string | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+
+  useEffect(() => {
+    const supabase = getSupabase();
+    if (!supabase) { setAuthChecked(true); return; }
+    void resolveAccessToken(supabase).then((tok) => {
+      setAuthToken(tok);
+      setAuthChecked(true);
+    });
+    // Listen for auth changes (sign-in / sign-out).
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async () => {
+      const tok = await resolveAccessToken(supabase);
+      setAuthToken(tok);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // ── Workspace state (file-backed) ────────────────────────────────────────
+  const [takeoffJobId, setTakeoffJobId] = useState<string | null>(urlJobId);
+  const [planFilename, setPlanFilename] = useState<string | null>(null);
+
   // ── Source state (last validated; never mutated by UI edits) ─────────────
   const [sourceResult, setSourceResult] = useState<TakeoffResult>(makeSpec73);
   const [sourceMode, setSourceMode] = useState<SourceMode>("spec73");
@@ -69,39 +112,63 @@ export default function TakeoffLabApp() {
   const [editDraft, setEditDraft] = useState<TakeoffResult>(makeSpec73);
   const [isEditing, setIsEditing] = useState(false);
 
-  // Increment to force remount of uncontrolled inputs when source resets.
   const [resetKey, setResetKey] = useState(0);
 
   // ── Workbench state ───────────────────────────────────────────────────────
   const [pastedDraft, setPastedDraft] = useState("");
   const [parseError, setParseError] = useState<string | null>(null);
 
-  // ── Copy feedback (tracks which button is in "Copied" state) ─────────────
+  // ── Save state ────────────────────────────────────────────────────────────
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<string | null>(null);
+
+  // ── Copy feedback ─────────────────────────────────────────────────────────
   const [copyFeedback, setCopyFeedback] = useState<"summary" | "json" | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ── Derived: has the user edited anything relative to sourceResult? ───────
+  // ── Load saved result from workspace ─────────────────────────────────────
+  useEffect(() => {
+    const jobId = urlJobId();
+    if (!jobId || !authToken) return;
+    void (async () => {
+      try {
+        const res = await labApiGet(`/api/takeoff-jobs/${encodeURIComponent(jobId)}/results/latest`, authToken) as {
+          ok: boolean;
+          normalizedTakeoffJson: TakeoffResult;
+          savedAt: string;
+        };
+        if (res.ok && res.normalizedTakeoffJson) {
+          commitSource(res.normalizedTakeoffJson, "file");
+          setSavedAt(res.savedAt);
+        }
+      } catch {
+        // No saved result yet — that's fine; Lab starts with spec73.
+      }
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authToken]); // only on first token resolution
+
+  // ── Derived ───────────────────────────────────────────────────────────────
+
   const hasEdits = useMemo(
     () => JSON.stringify(editDraft.rooms) !== JSON.stringify(sourceResult.rooms),
     [editDraft.rooms, sourceResult.rooms]
   );
 
-  // ── Derived: display mode for pill label ────────────────────────────────
   const displayMode: DisplayMode =
     sourceMode === "invalid" ? "invalid" :
     hasEdits ? "edited" :
     sourceMode;
 
-  // ── Active computed state — always from editDraft ─────────────────────
   const activeState = useMemo((): ActiveComputedState => {
     try { return computeAll(editDraft); }
     catch { return computeAll(makeSpec73()); }
   }, [editDraft]);
 
-  // ── Spec 73 JSON (pre-stringified for fast "Load sample") ────────────────
   const spec73Json = useMemo(() => JSON.stringify(makeSpec73(), null, 2), []);
 
-  // ── Helper: commit a new source (validate/load) ──────────────────────────
+  // ── Helper: commit a new source ───────────────────────────────────────────
   function commitSource(result: TakeoffResult, mode: SourceMode) {
     setSourceResult(result);
     setEditDraft(result);
@@ -196,6 +263,29 @@ export default function TakeoffLabApp() {
     }));
   }, []);
 
+  // ── Save reviewed takeoff ─────────────────────────────────────────────────
+
+  const handleSaveDraft = useCallback(async () => {
+    if (!takeoffJobId || !authToken) return;
+    setSaveStatus("saving");
+    setSaveMsg("Saving takeoff draft…");
+    try {
+      const res = await labApiPost(`/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}/results`, authToken, {
+        takeoffResult: editDraft,
+        reviewStatus: "needs_review",
+      }) as { ok: boolean; savedAt: string; summary: { countertopExactSf: number; backsplashExactSf: number } };
+      setSaveStatus("saved");
+      setSavedAt(res.savedAt);
+      setSaveMsg(
+        `Saved — ${res.summary.countertopExactSf.toFixed(2)} sf countertop · ${res.summary.backsplashExactSf.toFixed(2)} sf backsplash`
+      );
+    } catch (e) {
+      const msg = e instanceof LabApiError ? e.message : e instanceof Error ? e.message : "Save failed.";
+      setSaveStatus("error");
+      setSaveMsg(msg);
+    }
+  }, [takeoffJobId, authToken, editDraft]);
+
   // ── Copy actions ──────────────────────────────────────────────────────────
 
   function triggerCopy(kind: "summary" | "json", text: string) {
@@ -208,7 +298,10 @@ export default function TakeoffLabApp() {
 
   const handleCopySummary = useCallback(() => {
     const { result, computed, validation, importPlan } = activeState;
-    const srcLabel = { spec73: "Spec 73 sample", pasted: "Pasted takeoff JSON", edited: "Edited draft", invalid: "Invalid draft" }[displayMode];
+    const srcLabel = {
+      spec73: "Spec 73 sample", pasted: "Pasted takeoff JSON",
+      file: planFilename ?? "Plan file", edited: "Edited draft", invalid: "Invalid draft",
+    }[displayMode];
     triggerCopy("summary", [
       "eliteOS AI Takeoff — Computed Summary",
       `Source: ${srcLabel}  ·  Schema: v${result.schemaVersion}  ·  Status: ${result.status}`,
@@ -219,8 +312,9 @@ export default function TakeoffLabApp() {
       "",
       `Validator:   ${validation.errorCount} error${validation.errorCount !== 1 ? "s" : ""}, ${validation.warningCount} warning${validation.warningCount !== 1 ? "s" : ""}, ${validation.infoCount} info`,
       `Import:      ${importPlan.canImport ? `Ready — ${importPlan.rooms.length} room${importPlan.rooms.length !== 1 ? "s" : ""} mapped` : `Blocked — ${importPlan.blockedReason ?? "see diagnostics"}`}`,
-    ].join("\n"));
-  }, [activeState, displayMode]);
+      takeoffJobId ? `\nWorkspace ID: ${takeoffJobId}` : "",
+    ].join("\n").trim());
+  }, [activeState, displayMode, planFilename, takeoffJobId]);
 
   const handleCopyEditedJson = useCallback(() => {
     triggerCopy("json", JSON.stringify(editDraft, null, 2));
@@ -230,12 +324,14 @@ export default function TakeoffLabApp() {
   const sourceLabel: Record<DisplayMode, string> = {
     spec73:  "Spec 73 sample",
     pasted:  "Pasted takeoff JSON",
+    file:    planFilename ? `Plan: ${planFilename}` : "Uploaded plan",
     edited:  "Edited draft",
     invalid: "Invalid draft",
   };
   const pillClass =
     displayMode === "invalid" ? "source-pill source-pill--invalid" :
     displayMode === "edited"  ? "source-pill source-pill--edited"  :
+    displayMode === "file"    ? "source-pill source-pill--file"    :
     "source-pill";
 
   const { result, computed, validation, importPlan } = activeState;
@@ -253,6 +349,9 @@ export default function TakeoffLabApp() {
           <div className="lab-topbar-badges">
             <span className="badge badge-lab">Lab · review only</span>
             <span className="badge badge-safe">No quote mutation</span>
+            {authChecked && !authToken && (
+              <span className="badge badge-unauthed">Not signed in</span>
+            )}
           </div>
         </div>
       </header>
@@ -267,15 +366,20 @@ export default function TakeoffLabApp() {
           </p>
           <div className="hero-pills">
             <span className={pillClass}>
-              {displayMode === "invalid" ? "⚠" : displayMode === "edited" ? "✎" : "◎"}{" "}
+              {displayMode === "invalid" ? "⚠" : displayMode === "edited" ? "✎" : displayMode === "file" ? "📄" : "◎"}{" "}
               {sourceLabel[displayMode]}
             </span>
-            {result.source?.fileName && displayMode !== "invalid" && (
+            {result.source?.fileName && displayMode !== "file" && displayMode !== "invalid" && (
               <span className="source-pill source-pill--file">{result.source.fileName}</span>
             )}
             {hasEdits && (
               <span className="source-pill source-pill--edit-note">
                 Changes are local to this Lab session
+              </span>
+            )}
+            {takeoffJobId && (
+              <span className="source-pill source-pill--workspace">
+                Workspace active
               </span>
             )}
           </div>
@@ -285,6 +389,26 @@ export default function TakeoffLabApp() {
       {/* ── Main content ──────────────────────────────────────────── */}
       <main className="lab-main">
         <div className="lab-main-inner">
+
+          {/* ── Source plan file (v4) ──────────────────────────────────── */}
+          <section className="lab-section">
+            <h2 className="lab-section-title">Source plan file</h2>
+            <TakeoffPlanFileSection
+              takeoffJobId={takeoffJobId}
+              token={authToken}
+              onWorkspaceCreated={(jobId, filename) => {
+                setTakeoffJobId(jobId);
+                setPlanFilename(filename);
+                // Update URL so the workspace survives a reload.
+                const url = new URL(window.location.href);
+                url.searchParams.set("takeoffJobId", jobId);
+                window.history.replaceState({}, "", url.toString());
+              }}
+              onWorkspaceLoaded={(filename) => {
+                setPlanFilename(filename);
+              }}
+            />
+          </section>
 
           {/* JSON workbench */}
           <section className="lab-section">
@@ -299,7 +423,7 @@ export default function TakeoffLabApp() {
               onCopyEditedJson={handleCopyEditedJson}
               parseError={parseError}
               copyFeedback={copyFeedback}
-              displayMode={displayMode}
+              displayMode={displayMode as "spec73" | "pasted" | "edited" | "invalid"}
             />
           </section>
 
@@ -309,7 +433,7 @@ export default function TakeoffLabApp() {
             <TakeoffSummaryCards computed={computed} importPlan={importPlan} />
           </section>
 
-          {/* Room / area / run review (with optional edit mode) */}
+          {/* Room / area / run review */}
           <section className="lab-section">
             <div className="lab-section-header">
               <h2 className="lab-section-title" style={{ margin: 0 }}>Rooms, areas & runs</h2>
@@ -350,6 +474,50 @@ export default function TakeoffLabApp() {
             />
           </section>
 
+          {/* ── Save reviewed takeoff draft (v4) ─────────────────────── */}
+          {takeoffJobId && authToken && (
+            <section className="lab-section">
+              <h2 className="lab-section-title">Save reviewed takeoff</h2>
+              <div className="save-panel lab-card">
+                <div className="save-panel-inner">
+                  <div className="save-panel-info">
+                    <p className="save-panel-desc">
+                      Save the current edited measurements as a reviewed draft tied to the workspace.
+                      The backend recomputes all square footage independently from your dimensions.
+                      No quote is created or mutated.
+                    </p>
+                    {savedAt && (
+                      <p className="save-panel-last-saved">
+                        Last saved:{" "}
+                        <strong>{new Date(savedAt).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}</strong>
+                      </p>
+                    )}
+                  </div>
+                  <div className="save-panel-actions">
+                    <button
+                      type="button"
+                      className="save-panel-btn"
+                      disabled={saveStatus === "saving"}
+                      onClick={() => void handleSaveDraft()}
+                    >
+                      {saveStatus === "saving" ? "Saving…" : "Save reviewed takeoff draft"}
+                    </button>
+                  </div>
+                </div>
+                {saveMsg && (
+                  <p
+                    className={`save-panel-msg${saveStatus === "error" ? " save-panel-msg--error" : saveStatus === "saved" ? " save-panel-msg--saved" : ""}`}
+                    role="status"
+                    aria-live="polite"
+                  >
+                    {saveStatus === "saved" ? "✓ " : saveStatus === "error" ? "✗ " : ""}
+                    {saveMsg}
+                  </p>
+                )}
+              </div>
+            </section>
+          )}
+
           {/* Validator diagnostics */}
           <section className="lab-section">
             <h2 className="lab-section-title">Validation diagnostics</h2>
@@ -382,9 +550,15 @@ export default function TakeoffLabApp() {
             <span className="lab-footer-status">
               Status: <strong className={`status-chip status-${result.status}`}>{result.status}</strong>
             </span>
-            <span className="lab-footer-safe">
-              All computations are deterministic and local — no data is sent anywhere.
-            </span>
+            {takeoffJobId ? (
+              <span className="lab-footer-safe">
+                Workspace: <code className="lab-footer-job-id">{takeoffJobId}</code>
+              </span>
+            ) : (
+              <span className="lab-footer-safe">
+                All computations are deterministic and local — no data is sent anywhere.
+              </span>
+            )}
           </div>
 
         </div>

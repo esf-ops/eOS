@@ -17,7 +17,9 @@ export default defineConfig({
       // Import the pure backend takeoff contract modules directly.
       // These are plain ESM (no Node.js builtins) and vite can bundle them.
       // fs.allow: [repoRoot] permits cross-workspace file access during dev.
-      "@takeoff-core": path.resolve(repoRoot, "backend-core/src/takeoff")
+      "@takeoff-core": path.resolve(repoRoot, "backend-core/src/takeoff"),
+      // Shared auth helpers (used by multiple heads).
+      "@shared": path.resolve(repoRoot, "shared"),
     }
   }
 });
