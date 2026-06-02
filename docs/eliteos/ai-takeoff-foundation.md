@@ -288,6 +288,79 @@ All tests use mocked AI provider and mocked Supabase. No real OpenAI calls in CI
 
 ---
 
+## v5.1: Backsplash tuning + diagnostics (2026-06-01)
+
+**Status:** Built.
+
+Enhanced the AI extraction prompt (v2) with explicit backsplash rules: structured `backsplashLinearIn`/`backsplashHeightIn` fields, handling of "no B/S" vs. positive notes, `aiProvidedTotals.backsplashExactSf`, and "full height" cases.
+
+Added two new validator diagnostics:
+- `AI_BACKSPLASH_TOTAL_NOT_STRUCTURED` — AI reported a backsplash total but no structured run was produced.
+- `POSSIBLE_BACKSPLASH_NOTE` — Notes mention backsplash/tile keywords but computed backsplash = 0.
+
+Added "AI assumptions & review notes" panel to the Lab UI, consolidating all project/room/area notes in one prominent place.
+
+**Observed hand sketch job 001 result after v5.1 (prompt v2):**
+- Countertop exact: **68.41 sf** (regressed from 76.97 sf — island shrank to 86″ × 56″)
+- Backsplash exact: **1.04 sf** (slight improvement from 0.00 sf, but still below target of 4 sf)
+- Prompt v2 made backsplash slightly better but countertop significantly worse.
+
+---
+
+## v5.2: Benchmark / evaluation harness (2026-06-02)
+
+**Status:** Built.
+
+### Motivation
+
+After v5.1 prompt tuning, countertop accuracy regressed from 76.97 sf to 68.41 sf against the hand sketch 001 estimator target of 78 sf. Without a structured evaluation harness, it is impossible to know whether a prompt/model change made things better or worse.
+
+### What v5.2 adds
+
+**`backend-core/src/takeoff/takeoffBenchmark.mjs`** — pure evaluation helpers:
+- `HAND_SKETCH_BENCHMARK_001` — dev-only fixture with estimator-approved targets (78 sf CT / 4 sf BS), known failure modes, and extraction history notes.
+- `evaluateTakeoffAgainstBenchmark(computed, benchmark)` — computes delta, % error, pass/fail, and `backsplashHighSeverity` flag per category. Always uses **eliteOS computed totals** — never raw AI totals.
+- `compareAiTakeoffRuns(previousEval, currentEval)` — compares two evaluations and flags regressions (current error > previous error by > 0.5 sf).
+
+**`app-ai-takeoff/src/components/TakeoffBenchmarkPanel.tsx`** — Lab UI evaluation panel:
+- Manual fields for expected CT sf and BS sf.
+- Tolerance ± sf input.
+- "Load hand sketch target" button pre-fills from `HAND_SKETCH_BENCHMARK_001` (78 sf / 4 sf).
+- "Evaluate current draft" runs the pure function client-side — no backend call needed.
+- Results table: Expected / Computed / Delta / % Error / Pass per row.
+- Summary pill: PASS / NEEDS REVIEW / REGRESSION.
+- High-severity callout when expected BS > 0 but computed = 0.
+- Local QA notes textarea (not persisted).
+
+**Prompt version badge** — when an AI draft is active, a small badge in the source pills area shows `Prompt vX · model-name` using metadata returned by the extraction endpoint.
+
+### Benchmark rules
+
+- eliteOS computed totals are the measurement being compared, not raw AI totals.
+- Missing backsplash when `expectedBacksplashSf > 0` → `backsplashHighSeverity = true` → not a pass.
+- CT or BS delta > tolerance (default ±2 sf) → `needs_review`.
+- Comparison: current run error > previous run error by > 0.5 sf → `regression`.
+
+### Private PDFs stay private
+
+Raw customer PDFs, cabinet plans, and measurement sketches are **never committed to the repo**. The `HAND_SKETCH_BENCHMARK_001` fixture contains only estimator-approved numeric targets and descriptive notes — no raw measurement data or customer PII.
+
+### When to run evaluation
+
+Run `evaluateTakeoffAgainstBenchmark` against the hand sketch benchmark 001 target after **every** prompt or model change before shipping. A regression in countertop (e.g. > 2 sf delta) or missing backsplash must be investigated before proceeding.
+
+### Import gate
+
+Import into Internal Estimate should wait until the hand sketch job 001 benchmark passes consistently (both CT and BS within tolerance) across at least two extraction runs. Do not enable the import button until extraction accuracy is verified.
+
+### Tests
+
+```bash
+npm run eos:test:takeoff-benchmark  # 7 tests, all pure
+```
+
+---
+
 ## Quote-import planning (architecture note)
 
 This section describes the intended flow for converting an AI draft into a quote. **This is not implemented yet.** It is documented here so the architecture is clear before the import slice is built.

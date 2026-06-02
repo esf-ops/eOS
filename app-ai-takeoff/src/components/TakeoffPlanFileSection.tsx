@@ -71,7 +71,11 @@ export interface TakeoffPlanFileSectionProps {
   /** Called when an existing workspace loads (e.g. from URL param). */
   onWorkspaceLoaded: (filename: string) => void;
   /** Called when an AI draft is successfully generated. Parent loads it into the review UI. */
-  onAiDraftGenerated: (result: TakeoffResult, filename: string) => void;
+  onAiDraftGenerated: (
+    result: TakeoffResult,
+    filename: string,
+    meta: { promptVersion: string | null; modelUsed: string | null; summary?: object | null }
+  ) => void;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -262,7 +266,13 @@ export default function TakeoffPlanFileSection({
         `/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}/generate-ai-draft`,
         token,
         {}
-      ) as { ok: boolean; normalizedTakeoffJson: TakeoffResult };
+      ) as {
+        ok: boolean;
+        normalizedTakeoffJson: TakeoffResult;
+        promptVersion: string | null;
+        modelUsed: string | null;
+        summary: object | null;
+      };
 
       // Clear progress timers.
       aiTimersRef.current.forEach(clearTimeout);
@@ -270,7 +280,11 @@ export default function TakeoffPlanFileSection({
 
       if (res.ok && res.normalizedTakeoffJson) {
         setAiStep("done");
-        onAiDraftGenerated(res.normalizedTakeoffJson, workspace.file.originalFilename);
+        onAiDraftGenerated(res.normalizedTakeoffJson, workspace.file.originalFilename, {
+          promptVersion: res.promptVersion ?? null,
+          modelUsed:     res.modelUsed ?? null,
+          summary:       res.summary ?? null,
+        });
       } else {
         throw new Error("Server returned an unexpected response");
       }

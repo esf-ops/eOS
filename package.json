@@ -44,6 +44,7 @@
     "eos:test:takeoff-contract": "node backend-core/src/takeoff/takeoff.contract.test.mjs",
     "eos:test:takeoff-workspace-service": "node backend-core/src/takeoff/takeoffWorkspaceService.test.mjs",
     "eos:test:takeoff-extraction-service": "node backend-core/src/takeoff/takeoffExtractionService.test.mjs",
+    "eos:test:takeoff-benchmark": "node backend-core/src/takeoff/takeoffBenchmark.test.mjs",
     "eos:test:moraware-report-feed": "node backend-core/src/moraware/reportFeeds/reportFeedParser.test.mjs",
     "eos:test:moraware-report-feed-promotion": "node backend-core/src/moraware/reportFeeds/promoteSalesWorksheetFacts.test.mjs",
     "eos:test:moraware-report-feed-persistence": "node backend-core/src/moraware/reportFeeds/reportFeedPersistence.test.mjs",

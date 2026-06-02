@@ -164,9 +164,20 @@ Durable decisions: `FEATURE_DECISIONS.md` entries **37** (additive lane), **38**
 
 ---
 
-## AI Takeoff Lab (2026-06-01, v5 built)
+## AI Takeoff Lab (2026-06-02, v5.2 built)
 
-Contract-first foundation + file-backed workspace + live AI extraction (OpenAI Responses API).
+Contract-first foundation + file-backed workspace + live AI extraction + benchmark/evaluation harness.
+
+**Last updated:** 2026-06-02
+
+### Current AI extraction status (Hand sketch benchmark 001)
+
+| Run | Prompt | CT exact | BS exact | CT target | BS target | Result |
+|-----|--------|----------|----------|-----------|-----------|--------|
+| v5 prompt v1 | v1 | 76.97 sf | 0.00 sf | 78 sf | 4 sf | CT close / BS missed |
+| v5.1 prompt v2 | v2 | **68.41 sf** | 1.04 sf | 78 sf | 4 sf | CT **regressed** / BS partial |
+
+**Status:** Prompt must be re-tuned. Import blocked until hand sketch benchmark 001 passes.
 
 ### Status
 
@@ -174,21 +185,25 @@ Contract-first foundation + file-backed workspace + live AI extraction (OpenAI R
 |-------|-------|
 | `takeoffContract.mjs` — versioned schema v1.0, factory helpers | **Built** |
 | `takeoffMeasurementCalc.mjs` — deterministic sf calculator | **Built** |
-| `takeoffValidator.mjs` — structured diagnostics (15 codes) | **Built** |
+| `takeoffValidator.mjs` — structured diagnostics (17 codes incl. v5.1 BS guards) | **Built** |
 | `takeoffImportPlanner.mjs` — RoomScopeBuilder import plan | **Built** |
 | `fixtures/spec73.fixture.mjs` — Spec 73 known-good fixture | **Built** |
-| `takeoff.contract.test.mjs` — 16 test groups | **Built, all passing** |
+| `takeoff.contract.test.mjs` — 19 test groups | **Built, all passing** |
 | `docs/eliteos/ai-takeoff-foundation.md` | **Written** |
 | `app-ai-takeoff/` lab shell | **Built** |
 | `takeoffWorkspaceService.mjs` — workspace persistence (v4.5) | **Built** |
 | `takeoffWorkspaceService.test.mjs` — 22 tests | **Built, all passing** |
-| `takeoffExtractionPrompt.mjs` — AI system prompt (v1) | **Built** |
+| `takeoffExtractionPrompt.mjs` — AI system prompt (now v2) | **Built** |
 | `takeoffAiProvider.mjs` + `openAiTakeoffProvider.mjs` | **Built** |
 | `takeoffExtractionService.mjs` — orchestration service | **Built** |
 | `takeoffExtractionService.test.mjs` — 18 tests (all mocked) | **Built, all passing** |
 | `POST /api/takeoff-jobs/:id/generate-ai-draft` endpoint | **Built** |
 | AI draft button + progress UI in `app-ai-takeoff/` | **Built** |
-| Internal Estimate "Import from Takeoff" button | **Not built** |
+| `takeoffBenchmark.mjs` — eval helpers + hand sketch 001 fixture (v5.2) | **Built** |
+| `takeoffBenchmark.test.mjs` — 7 tests (v5.2) | **Built, all passing** |
+| `TakeoffBenchmarkPanel.tsx` — QA evaluation panel in Lab (v5.2) | **Built** |
+| Prompt version badge in AI draft mode (v5.2) | **Built** |
+| Internal Estimate "Import from Takeoff" button | **Not built — blocked on extraction accuracy** |
 
 ### Spec 73 verified results
 - Countertop exact sf: **59.96**
@@ -199,9 +214,10 @@ Contract-first foundation + file-backed workspace + live AI extraction (OpenAI R
 
 ### Key commands
 ```bash
-npm run eos:test:takeoff-contract             # 16 test groups
+npm run eos:test:takeoff-contract             # 19 test groups
 npm run eos:test:takeoff-workspace-service    # 22 tests
 npm run eos:test:takeoff-extraction-service   # 18 tests (mocked AI)
+npm run eos:test:takeoff-benchmark            # 7 tests (pure eval helpers)
 npm run eos:test:pricing-authority            # confirm no pricing regression
 npm run eos:check:local                       # full repo check
 ```
@@ -225,15 +241,25 @@ OPENAI_API_KEY=sk-...       never client-exposed
 | v3 — Editable review fields | Built |
 | v4 — File-backed workspace (no AI) | Built |
 | v4.5 — Normalized workspace persistence | Built |
-| v5 — Live AI extraction (OpenAI Responses API) | **Built** |
+| v5 — Live AI extraction (OpenAI Responses API) | Built |
+| v5.1 — Backsplash tuning, diagnostics, AI review notes UI | Built |
+| v5.2 — Benchmark/evaluation harness, prompt regression guard | **Built** |
 
-Dev: `npm run dev --prefix app-ai-takeoff` → `http://localhost:5186`. Not in Home Launcher yet.
+Dev: `npm run dev --prefix app-ai-takeoff` -> `http://localhost:5186`. Not in Home Launcher yet.
 
-### Next slice (requires separate approval)
-- Enable Internal Estimate “Import from Takeoff” button.
+### Next required focus
+**Re-tune prompt / model for hand sketch job 001.** Use `TakeoffBenchmarkPanel` (Load hand sketch target -> Evaluate) after every extraction run. Run `compareAiTakeoffRuns` to detect regressions before shipping any prompt change.
+
+### Import gate
+Do NOT enable "Import from Takeoff" until:
+1. `evaluateTakeoffAgainstBenchmark(computed, HAND_SKETCH_BENCHMARK_001)` returns `pass` for both CT and BS.
+2. Two consecutive runs show no regression vs each other.
+3. Estimator manually reviews the draft.
+
+### Future slices (separate approval required)
+- Enable Internal Estimate "Import from Takeoff" button (gated above).
 - Multi-room / multi-page plan improvements.
 - Dealer/partner upload flow (separate auth/org scoping required).
-
 ---
 
 ## Quote Files + Takeoff Storage (2026-06-01)

@@ -953,6 +953,143 @@ html, body {
 /* Workbench status — edited state */
 .workbench-status-edited { color: #d97706; font-weight: 500; }
 
+/* ── v5.2: Prompt version badge ──────────────────────────────────────────── */
+.source-pill--ai-meta {
+  background: #f3f4f6; color: var(--eos-ink-muted);
+  border: 1px solid var(--eos-line-strong);
+  font-size: 11px; font-family: monospace; letter-spacing: 0.01em;
+}
+
+/* ── v5.2: Benchmark / QA evaluation panel ───────────────────────────────── */
+.benchmark-panel {
+  display: flex; flex-direction: column; gap: 14px;
+}
+
+.benchmark-header {
+  display: flex; flex-direction: column; gap: 4px;
+}
+.benchmark-header-title {
+  font-size: 13px; font-weight: 700; color: var(--eos-ink-soft);
+}
+.benchmark-header-sub {
+  font-size: 12px; color: var(--eos-ink-muted); line-height: 1.5;
+}
+
+.benchmark-inputs {
+  display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px;
+}
+.benchmark-label {
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 12px; font-weight: 500; color: var(--eos-ink-soft);
+}
+.benchmark-input {
+  width: 90px; padding: 6px 8px;
+  border: 1px solid var(--eos-line-strong); border-radius: var(--r-sm);
+  background: var(--eos-surface); color: var(--eos-ink);
+  font-size: 13px; font-family: inherit;
+  outline: none;
+}
+.benchmark-input:focus {
+  border-color: var(--lab-accent);
+  box-shadow: 0 0 0 2px var(--lab-accent-border);
+}
+
+.benchmark-actions {
+  display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap;
+}
+.benchmark-btn {
+  padding: 7px 14px; border-radius: var(--r-sm);
+  font-size: 12px; font-weight: 600; cursor: pointer;
+  transition: background 100ms, color 100ms;
+}
+.benchmark-btn--load {
+  background: var(--eos-surface-soft);
+  border: 1px solid var(--eos-line-strong);
+  color: var(--eos-ink-mid);
+}
+.benchmark-btn--load:hover {
+  background: var(--eos-bg-soft);
+}
+.benchmark-btn--evaluate {
+  background: var(--lab-accent); color: #fff;
+  border: none;
+}
+.benchmark-btn--evaluate:not(:disabled):hover { background: #3730a3; }
+.benchmark-btn--evaluate:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.benchmark-error {
+  font-size: 12px; color: var(--eos-danger);
+  padding: 6px 10px; border-radius: var(--r-sm);
+  background: var(--eos-danger-soft); border: 1px solid var(--eos-danger-border);
+}
+
+.benchmark-results {
+  display: flex; flex-direction: column; gap: 10px;
+}
+
+.benchmark-table {
+  width: 100%; border-collapse: collapse; font-size: 12px;
+}
+.benchmark-table th {
+  text-align: left; font-weight: 600; color: var(--eos-ink-muted);
+  padding: 4px 8px; border-bottom: 1px solid var(--eos-line);
+  font-size: 11px;
+}
+.benchmark-table td {
+  padding: 5px 8px; border-bottom: 1px solid var(--eos-line);
+  color: var(--eos-ink-soft);
+}
+.benchmark-row--fail td { background: var(--eos-danger-soft); }
+.benchmark-category { font-weight: 600; color: var(--eos-ink); }
+.benchmark-severity-flag { color: var(--eos-warn); font-size: 11px; }
+.benchmark-delta--neg { color: var(--eos-danger); font-weight: 600; }
+.benchmark-delta--pos { color: var(--eos-success); font-weight: 600; }
+
+.benchmark-footer {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.benchmark-summary {
+  padding: 4px 12px; border-radius: 9999px;
+  font-size: 12px; font-weight: 700;
+}
+.benchmark-summary--pass {
+  background: var(--eos-success-soft); color: var(--eos-success);
+  border: 1px solid var(--eos-success-border);
+}
+.benchmark-summary--needs-review {
+  background: var(--eos-warn-soft); color: var(--eos-warn);
+  border: 1px solid var(--eos-warn-border);
+}
+.benchmark-summary--regression {
+  background: var(--eos-danger-soft); color: var(--eos-danger);
+  border: 1px solid var(--eos-danger-border);
+}
+.benchmark-tolerance {
+  font-size: 11px; color: var(--eos-ink-faint);
+}
+.benchmark-high-severity {
+  font-size: 12px; color: var(--eos-warn); font-weight: 500;
+}
+
+.benchmark-notes-label {
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 12px; font-weight: 500; color: var(--eos-ink-soft);
+}
+.benchmark-notes {
+  width: 100%; padding: 7px 10px; border-radius: var(--r-sm);
+  border: 1px solid var(--eos-line-strong);
+  background: var(--eos-surface); color: var(--eos-ink);
+  font-size: 12px; font-family: inherit; resize: vertical; outline: none;
+}
+.benchmark-notes:focus {
+  border-color: var(--lab-accent);
+  box-shadow: 0 0 0 2px var(--lab-accent-border);
+}
+
+.benchmark-hint {
+  margin: 0; font-size: 12px; color: var(--eos-ink-faint); line-height: 1.5;
+}
+
 /* ── Responsive ───────────────────────────────────────────────────────────── */
 @media (max-width: 600px) {
   .lab-topbar-inner { padding: 0 16px; }

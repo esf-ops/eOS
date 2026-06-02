@@ -43,6 +43,7 @@ import TakeoffDiagnosticsPanel from "./components/TakeoffDiagnosticsPanel";
 import TakeoffImportPreview from "./components/TakeoffImportPreview";
 import TakeoffWorkbench from "./components/TakeoffWorkbench";
 import TakeoffPlanFileSection from "./components/TakeoffPlanFileSection";
+import TakeoffBenchmarkPanel from "./components/TakeoffBenchmarkPanel";
 import { getSupabase } from "./lib/supabase";
 import { resolveAccessToken } from "./lib/authSession";
 import { labApiGet, labApiPost, LabApiError } from "./lib/api";
@@ -161,6 +162,13 @@ export default function TakeoffLabApp() {
     setAuthToken(null);
     setUserEmail(null);
   }, []);
+
+  // ── AI draft metadata (prompt version, model) ────────────────────────────
+  const [aiDraftMeta, setAiDraftMeta] = useState<{
+    promptVersion: string | null;
+    modelUsed: string | null;
+    summary: object | null;
+  } | null>(null);
 
   // ── Workspace state (file-backed) ────────────────────────────────────────
   const [takeoffJobId, setTakeoffJobId] = useState<string | null>(urlJobId);
@@ -384,9 +392,14 @@ export default function TakeoffLabApp() {
 
   // ── Handle AI draft generated (v5) ───────────────────────────────────────
 
-  const handleAiDraftGenerated = useCallback((result: TakeoffResult, filename: string) => {
+  const handleAiDraftGenerated = useCallback((
+    result: TakeoffResult,
+    filename: string,
+    meta: { promptVersion: string | null; modelUsed: string | null; summary: object | null }
+  ) => {
     commitSource(result, "ai-draft");
     setPlanFilename(filename);
+    setAiDraftMeta(meta);
   }, []);
 
   // ── Derived display values ────────────────────────────────────────────────
@@ -455,6 +468,11 @@ export default function TakeoffLabApp() {
             {displayMode === "ai-draft" && (
               <span className="source-pill source-pill--review-note">
                 AI draft · estimator review required
+              </span>
+            )}
+            {displayMode === "ai-draft" && aiDraftMeta && (
+              <span className="source-pill source-pill--ai-meta">
+                Prompt {aiDraftMeta.promptVersion ?? "?"} · {aiDraftMeta.modelUsed ?? "model unknown"}
               </span>
             )}
             {result.source?.fileName && displayMode !== "file" && displayMode !== "invalid" && (
@@ -695,6 +713,12 @@ export default function TakeoffLabApp() {
           <section className="lab-section">
             <h2 className="lab-section-title">Import preview</h2>
             <TakeoffImportPreview importPlan={importPlan} />
+          </section>
+
+          {/* ── Benchmark / QA evaluation (v5.2) ─────────────────────── */}
+          <section className="lab-section">
+            <h2 className="lab-section-title">Benchmark / QA evaluation</h2>
+            <TakeoffBenchmarkPanel computed={computed} />
           </section>
 
           {/* Footer */}
