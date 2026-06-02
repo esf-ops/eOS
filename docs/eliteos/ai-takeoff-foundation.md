@@ -133,43 +133,53 @@ Dev server: `npm run dev --prefix app-ai-takeoff` → `http://localhost:5186`.
 
 ---
 
-## Files shipped (this slice)
+## Files shipped (v1–v5)
 
 ```
 backend-core/src/takeoff/
-  takeoffContract.mjs          Schema constants, factory helpers, JSDoc types
-  takeoffMeasurementCalc.mjs   Deterministic sf calculator (pure)
-  takeoffValidator.mjs         Structured diagnostics (pure)
-  takeoffImportPlanner.mjs     RoomScopeBuilder import plan mapper (pure)
-  takeoff.contract.test.mjs    Contract + fixture tests
+  takeoffContract.mjs            Schema constants, factory helpers, JSDoc types (v1)
+  takeoffMeasurementCalc.mjs     Deterministic sf calculator (pure) (v1)
+  takeoffValidator.mjs           Structured diagnostics (pure) (v1)
+  takeoffImportPlanner.mjs       RoomScopeBuilder import plan mapper (pure) (v1)
+  takeoff.contract.test.mjs      Contract + fixture tests (v1)
+  takeoffWorkspaceService.mjs    Workspace persistence (quote_takeoff_jobs / results) (v4.5)
+  takeoffWorkspaceService.test.mjs
+  takeoffWorkspaceRoutes.js      API routes (v4 → v5 with generate-ai-draft) (v5)
+  takeoffExtractionPrompt.mjs    AI extraction system prompt (v5)
+  takeoffAiProvider.mjs          Provider factory + env config (v5)
+  openAiTakeoffProvider.mjs      OpenAI Responses API implementation (v5)
+  takeoffExtractionService.mjs   Orchestration: download → AI → recompute → save (v5)
+  takeoffExtractionService.test.mjs  18 tests, all mocked (v5)
   fixtures/
-    spec73.fixture.mjs         Known-good Spec 73 fixture
+    spec73.fixture.mjs           Known-good Spec 73 fixture (v1)
 
-app-ai-takeoff/                Lab head shell (v1 — fixture viewer only)
-  index.html
-  package.json
-  vite.config.ts               @takeoff-core alias → backend-core/src/takeoff/
-  tsconfig.json
+app-ai-takeoff/
   src/
-    main.tsx
-    TakeoffLabApp.tsx           Top-level shell
-    takeoff.d.ts                Ambient type declarations for .mjs imports
+    TakeoffLabApp.tsx            Top-level shell (v1 → v5: ai-draft mode)
     components/
+      TakeoffPlanFileSection.tsx  Upload + workspace + AI generate button (v4 → v5)
       TakeoffSummaryCards.tsx
       TakeoffRoomsReview.tsx
       TakeoffDiagnosticsPanel.tsx
       TakeoffImportPreview.tsx
-    styles.css
+      TakeoffWorkbench.tsx
+    styles.css                   AI draft styles (v5)
+    lib/
+      api.ts
+      supabase.ts
+      authSession.ts
+      config.ts
 
 docs/eliteos/
   ai-takeoff-foundation.md     This document
 ```
 
 Scripts added to root `package.json`:
-```
-npm run eos:test:takeoff-contract   # contract tests
-npm run eos:build:ai-takeoff        # build the lab head
-# eos:check:local now includes eos:build:ai-takeoff at the end
+```bash
+npm run eos:test:takeoff-contract            # contract tests (16 groups)
+npm run eos:test:takeoff-workspace-service   # workspace tests (22 tests)
+npm run eos:test:takeoff-extraction-service  # extraction tests (18 tests) — NEW v5
+npm run eos:build:ai-takeoff                 # build the lab head
 ```
 
 ---
@@ -212,13 +222,76 @@ If a shape cannot be cleanly represented, the planner emits a `UNSUPPORTED_SHAPE
 
 ---
 
+## v5: Live AI Extraction (2026-06-01)
+
+**Status:** Built.
+
+### What v5 adds
+
+Users upload a cabinet plan PDF or image to the AI Takeoff Lab, create a file-backed workspace, then click **"Generate AI takeoff draft."** The backend:
+
+1. Verifies auth + org ownership.
+2. Loads the source file row (gets `storage_path` — never exposed to client).
+3. Downloads file bytes from private Supabase Storage using the service-role key.
+4. Sends the file to OpenAI (Responses API) with a structured system prompt requesting `TakeoffResult` JSON.
+5. Parses the AI response.
+6. **Server-side recomputes** all square footage with `computeTakeoffMeasurements()` — AI totals are reference only.
+7. Validates with `validateTakeoffResult()`.
+8. Generates import plan with `planTakeoffImport()`.
+9. Saves to `quote_takeoff_results` (or `quote_takeoff_jobs.result_summary` fallback) with `review_status = "needs_review"`.
+10. Returns normalized JSON + computed + diagnostics + import plan.
+
+The frontend loads the result into the existing review/edit UI with a "AI draft" pill and a note that estimator review is required.
+
+### AI drafts are never authoritative
+
+- `review_status` is always `"needs_review"` — the API never auto-approves.
+- `aiProvidedTotals` stored for audit comparison but never used for pricing.
+- Computed sf from `computeTakeoffMeasurements()` is always the authoritative value.
+- Import to Internal Estimate remains disabled — this slice is review only.
+
+### Provider-neutral design
+
+- `takeoffAiProvider.mjs` — factory + config reader
+- `openAiTakeoffProvider.mjs` — OpenAI Responses API (fetch-based, no npm package)
+- Adding Gemini or Claude: add a new provider file + case in `getExtractionProvider()`
+
+### Config (server env vars)
+
+```
+TAKEOFF_AI_ENABLED=1        required — must be exactly "1"
+TAKEOFF_AI_PROVIDER=openai  default: openai
+TAKEOFF_AI_MODEL=gpt-4o     default: gpt-4o
+OPENAI_API_KEY=sk-...       required — never client-exposed
+```
+
+### Real PDFs are private
+
+Raw customer PDFs, cabinet plans, and measurement sketches are used only as private manual QA / benchmarking inputs. They are **never committed to the repo**. Tests use sanitized synthetic data (Spec 73 fixture + minimal in-memory blobs). Real files live in private Supabase Storage only.
+
+### Representative plan types designed for
+
+- Hand-drawn countertop sketches with labeled dimensions, cutouts, waterfall notes
+- Scanned/rotated PDFs (single-page)
+- Multi-page cabinet design packets (elevation pages + field notes)
+- Email + sketch hybrids
+- Commercial/non-kitchen shapes with explicit sqft references
+- Plans with unclear/missing dimensions (model marks low confidence; no guessing)
+
+### Tests (v5)
+
+```bash
+npm run eos:test:takeoff-extraction-service  # 18 tests, all mocked
+```
+
+All tests use mocked AI provider and mocked Supabase. No real OpenAI calls in CI.
+
+---
+
 ## Future slices (separate approval required)
 
-### Next slice: AI extraction integration
-Wire a real AI call (vision or structured extraction) to produce a `TakeoffResult` draft from an uploaded plan. The contract and validator are already in place.
-
-### AI Takeoff Lab head (`app-ai-takeoff/`)
-Standalone head for uploading plans, reviewing AI-produced drafts, running the validator UI, and approving for import. Deployed on a separate hostname; does not touch Internal Estimate beta.
+### Import into Internal Estimate
+Add an "Import from Takeoff" button to Internal Estimate that reads an approved `ImportPlan` and calls `appendGuidedShapeGroup` to populate room shapes. No behavior change to existing manual entry.
 
 ### Import into Internal Estimate
 Add an "Import from Takeoff" button to Internal Estimate that reads an approved `ImportPlan` and calls `appendGuidedShapeGroup` to populate room shapes. No behavior change to existing manual entry.
@@ -253,4 +326,4 @@ See [`quote-files-storage.md`](./quote-files-storage.md) for the full design.
 
 ## Durable decisions
 
-See `FEATURE_DECISIONS.md` entries **48** (contract-first, AI-not-authority) and **49** (quote files storage architecture).
+See `FEATURE_DECISIONS.md` entries **48** (contract-first, AI-not-authority), **49** (quote files storage architecture), and **50** (provider-neutral extraction layer, AI output never authoritative, raw PDFs not committed).

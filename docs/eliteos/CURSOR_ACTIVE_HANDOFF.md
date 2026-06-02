@@ -164,9 +164,9 @@ Durable decisions: `FEATURE_DECISIONS.md` entries **37** (additive lane), **38**
 
 ---
 
-## AI Takeoff foundation (2026-06-01)
+## AI Takeoff Lab (2026-06-01, v5 built)
 
-Contract-first foundation for AI Takeoff — pure functions, no UI, no AI API calls, no Internal Estimate changes.
+Contract-first foundation + file-backed workspace + live AI extraction (OpenAI Responses API).
 
 ### Status
 
@@ -179,10 +179,16 @@ Contract-first foundation for AI Takeoff — pure functions, no UI, no AI API ca
 | `fixtures/spec73.fixture.mjs` — Spec 73 known-good fixture | **Built** |
 | `takeoff.contract.test.mjs` — 16 test groups | **Built, all passing** |
 | `docs/eliteos/ai-takeoff-foundation.md` | **Written** |
-| `app-ai-takeoff/` lab shell | **Built** — fixture/reviewer only (2026-06-01) |
-| Live AI API extraction | **Not built** |
+| `app-ai-takeoff/` lab shell | **Built** |
+| `takeoffWorkspaceService.mjs` — workspace persistence (v4.5) | **Built** |
+| `takeoffWorkspaceService.test.mjs` — 22 tests | **Built, all passing** |
+| `takeoffExtractionPrompt.mjs` — AI system prompt (v1) | **Built** |
+| `takeoffAiProvider.mjs` + `openAiTakeoffProvider.mjs` | **Built** |
+| `takeoffExtractionService.mjs` — orchestration service | **Built** |
+| `takeoffExtractionService.test.mjs` — 18 tests (all mocked) | **Built, all passing** |
+| `POST /api/takeoff-jobs/:id/generate-ai-draft` endpoint | **Built** |
+| AI draft button + progress UI in `app-ai-takeoff/` | **Built** |
 | Internal Estimate "Import from Takeoff" button | **Not built** |
-| Supabase storage for takeoff jobs/results | **Not built** |
 
 ### Spec 73 verified results
 - Countertop exact sf: **59.96**
@@ -193,30 +199,40 @@ Contract-first foundation for AI Takeoff — pure functions, no UI, no AI API ca
 
 ### Key commands
 ```bash
-npm run eos:test:takeoff-contract   # all 16 test groups
-npm run eos:test:pricing-authority  # confirm no pricing regression
-npm run eos:check:local             # full repo check
+npm run eos:test:takeoff-contract             # 16 test groups
+npm run eos:test:takeoff-workspace-service    # 22 tests
+npm run eos:test:takeoff-extraction-service   # 18 tests (mocked AI)
+npm run eos:test:pricing-authority            # confirm no pricing regression
+npm run eos:check:local                       # full repo check
 ```
 
-### Durable decision
-See `FEATURE_DECISIONS.md` entry **48** (contract-first, AI-not-authority, separate head).
+### Server env vars for live AI
+```
+TAKEOFF_AI_ENABLED=1        required
+TAKEOFF_AI_PROVIDER=openai  default: openai
+TAKEOFF_AI_MODEL=gpt-4o     default: gpt-4o
+OPENAI_API_KEY=sk-...       never client-exposed
+```
 
-### Lab shell (built 2026-06-01)
-`app-ai-takeoff/` exists as a **read-only fixture viewer**. Dev: `npm run dev --prefix app-ai-takeoff` → `http://localhost:5186`. Build: `npm run eos:build:ai-takeoff`. Not registered in Home Launcher yet.
+### Durable decisions
+`FEATURE_DECISIONS.md` entries **48** (contract-first), **49** (quote files storage), **50** (provider-neutral extraction, AI-not-authoritative, no raw PDFs committed).
 
 ### Lab versions
 | Version | Status |
 |---------|--------|
-| v1 — Spec 73 fixture viewer | Built 2026-06-01 |
-| v2 — Pasted JSON workbench | Built 2026-06-01 |
-| v3 — Editable review fields | Built 2026-06-01 — inline edit for run dimensions/labels/backsplash; live recompute on every change; Reset edits / Reset all; Copy edited JSON; "Edited draft" status pill |
-| v4 — File upload + live AI | Not built |
+| v1 — Spec 73 fixture viewer | Built |
+| v2 — Pasted JSON workbench | Built |
+| v3 — Editable review fields | Built |
+| v4 — File-backed workspace (no AI) | Built |
+| v4.5 — Normalized workspace persistence | Built |
+| v5 — Live AI extraction (OpenAI Responses API) | **Built** |
+
+Dev: `npm run dev --prefix app-ai-takeoff` → `http://localhost:5186`. Not in Home Launcher yet.
 
 ### Next slice (requires separate approval)
-1. Apply `eliteos_quote_files_takeoff_storage.sql` manually + create `eliteos-quote-files` bucket (private) in Supabase.
-2. Build backend upload endpoint: `createSignedUploadUrl` → write `quote_files` row → log `uploaded` event.
-3. Add Internal Estimate file panel (list + upload, no AI Takeoff yet).
-4. Wire AI model call to produce `TakeoffResult` draft from uploaded plan.
+- Enable Internal Estimate “Import from Takeoff” button.
+- Multi-room / multi-page plan improvements.
+- Dealer/partner upload flow (separate auth/org scoping required).
 
 ---
 

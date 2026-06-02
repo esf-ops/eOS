@@ -1,5 +1,5 @@
 /**
- * AI Takeoff Lab — top-level shell (v4: file-backed takeoff workspace).
+ * AI Takeoff Lab — top-level shell (v5: live AI extraction from uploaded plan files).
  *
  * v1: loads Spec 73 fixture at init, read-only viewer.
  * v2: adds JSON workbench (paste + validate).
@@ -7,20 +7,26 @@
  *     backsplash assumptions; eliteOS recomputes on every change.
  * v4: file-backed workspace — upload plan file, create takeoff job,
  *     save/load reviewed TakeoffResult; no AI extraction yet.
+ * v4.5: normalized takeoff workspace persistence (quote_takeoff_jobs + quote_takeoff_results).
+ * v5: live AI extraction — "Generate AI takeoff draft" calls backend which sends the
+ *     source file to OpenAI, receives TakeoffResult JSON, recomputes and validates
+ *     server-side, and returns the normalized result. review_status is always 'needs_review'.
  *
  * State model:
  *   authToken     — Supabase access token (null = not signed in)
- *   takeoffJobId  — quoteFileId acting as workspace ID (null = no workspace)
+ *   takeoffJobId  — quote_takeoff_jobs.id (null = no workspace)
  *   sourceResult  — the last validated source TakeoffResult (never mutated by edits)
  *   editDraft     — a mutable copy; patch handlers produce new objects immutably
  *   hasEdits      — derived: editDraft.rooms ≠ sourceResult.rooms
- *   displayMode   — "spec73" | "pasted" | "edited" | "invalid"
+ *   displayMode   — "spec73" | "pasted" | "file" | "ai-draft" | "edited" | "invalid"
  *   activeState   — always computed from editDraft (pure, synchronous)
  *
  * URL param: ?takeoffJobId=<uuid> — auto-loads workspace on init.
  *
  * Core lab features (spec73, paste JSON, edit) are available without auth.
- * File upload, workspace save/load require an authenticated session.
+ * File upload, workspace save/load, AI extraction require an authenticated session.
+ *
+ * Hard boundary: Import to Internal Estimate remains disabled.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buildSpec73Fixture } from "@takeoff-core/fixtures/spec73.fixture.mjs";
@@ -43,8 +49,8 @@ import { labApiGet, labApiPost, LabApiError } from "./lib/api";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-export type SourceMode = "spec73" | "pasted" | "file" | "invalid";
-export type DisplayMode = "spec73" | "pasted" | "file" | "edited" | "invalid";
+export type SourceMode = "spec73" | "pasted" | "file" | "ai-draft" | "invalid";
+export type DisplayMode = "spec73" | "pasted" | "file" | "ai-draft" | "edited" | "invalid";
 
 export interface ActiveComputedState {
   result: TakeoffResult;
@@ -157,8 +163,8 @@ export default function TakeoffLabApp() {
   );
 
   const displayMode: DisplayMode =
-    sourceMode === "invalid" ? "invalid" :
-    hasEdits ? "edited" :
+    sourceMode === "invalid"   ? "invalid"   :
+    hasEdits                   ? "edited"    :
     sourceMode;
 
   const activeState = useMemo((): ActiveComputedState => {
@@ -320,18 +326,27 @@ export default function TakeoffLabApp() {
     triggerCopy("json", JSON.stringify(editDraft, null, 2));
   }, [editDraft]);
 
-  // ── Derived display values ─────────────────────────────────────────────
+  // ── Handle AI draft generated (v5) ───────────────────────────────────────
+
+  const handleAiDraftGenerated = useCallback((result: TakeoffResult, filename: string) => {
+    commitSource(result, "ai-draft");
+    setPlanFilename(filename);
+  }, []);
+
+  // ── Derived display values ────────────────────────────────────────────────
   const sourceLabel: Record<DisplayMode, string> = {
-    spec73:  "Spec 73 sample",
-    pasted:  "Pasted takeoff JSON",
-    file:    planFilename ? `Plan: ${planFilename}` : "Uploaded plan",
-    edited:  "Edited draft",
-    invalid: "Invalid draft",
+    spec73:    "Spec 73 sample",
+    pasted:    "Pasted takeoff JSON",
+    file:      planFilename ? `Plan: ${planFilename}` : "Uploaded plan",
+    "ai-draft": planFilename ? `AI draft: ${planFilename}` : "AI draft",
+    edited:    "Edited draft",
+    invalid:   "Invalid draft",
   };
   const pillClass =
-    displayMode === "invalid" ? "source-pill source-pill--invalid" :
-    displayMode === "edited"  ? "source-pill source-pill--edited"  :
-    displayMode === "file"    ? "source-pill source-pill--file"    :
+    displayMode === "invalid"   ? "source-pill source-pill--invalid"   :
+    displayMode === "edited"    ? "source-pill source-pill--edited"    :
+    displayMode === "ai-draft"  ? "source-pill source-pill--ai-draft"  :
+    displayMode === "file"      ? "source-pill source-pill--file"      :
     "source-pill";
 
   const { result, computed, validation, importPlan } = activeState;
@@ -366,9 +381,17 @@ export default function TakeoffLabApp() {
           </p>
           <div className="hero-pills">
             <span className={pillClass}>
-              {displayMode === "invalid" ? "⚠" : displayMode === "edited" ? "✎" : displayMode === "file" ? "📄" : "◎"}{" "}
+              {displayMode === "invalid"  ? "⚠"  :
+               displayMode === "edited"   ? "✎"  :
+               displayMode === "ai-draft" ? "✦"  :
+               displayMode === "file"     ? "📄" : "◎"}{" "}
               {sourceLabel[displayMode]}
             </span>
+            {displayMode === "ai-draft" && (
+              <span className="source-pill source-pill--review-note">
+                AI draft · estimator review required
+              </span>
+            )}
             {result.source?.fileName && displayMode !== "file" && displayMode !== "invalid" && (
               <span className="source-pill source-pill--file">{result.source.fileName}</span>
             )}
@@ -407,6 +430,7 @@ export default function TakeoffLabApp() {
               onWorkspaceLoaded={(filename) => {
                 setPlanFilename(filename);
               }}
+              onAiDraftGenerated={handleAiDraftGenerated}
             />
           </section>
 

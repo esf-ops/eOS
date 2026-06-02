@@ -1,28 +1,30 @@
 /**
- * Takeoff Workspace Routes — normalized takeoff workspace (v4.5).
+ * Takeoff Workspace Routes — AI Takeoff Lab workspace and AI extraction (v5).
  *
  * Endpoints:
- *   POST /api/takeoff-jobs                   — create workspace from uploaded quote file
- *   GET  /api/takeoff-jobs/:id               — get workspace status + file metadata
- *   POST /api/takeoff-jobs/:id/results        — save reviewed TakeoffResult (server recomputes)
- *   GET  /api/takeoff-jobs/:id/results/latest — load latest saved result
+ *   POST /api/takeoff-jobs                        — create workspace from uploaded quote file
+ *   GET  /api/takeoff-jobs/:id                    — get workspace status + file metadata
+ *   POST /api/takeoff-jobs/:id/results             — save reviewed TakeoffResult (server recomputes)
+ *   GET  /api/takeoff-jobs/:id/results/latest      — load latest saved result
+ *   POST /api/takeoff-jobs/:id/generate-ai-draft   — generate AI draft from uploaded plan (v5)
  *
- * v4.5: `takeoffJobId` is a real quote_takeoff_jobs.id (quote_id = null for Lab/pre-quote flows).
- *       Results are persisted in quote_takeoff_results (with fallback to quote_takeoff_jobs.result_summary
- *       if quote_takeoff_results.quote_id NOT NULL constraint is not yet relaxed in this env).
- *       See takeoffWorkspaceService.mjs for the full persistence strategy.
+ * v5: adds live AI extraction via POST /api/takeoff-jobs/:id/generate-ai-draft.
+ *   - Backend downloads file from private storage, sends to AI provider, recomputes server-side.
+ *   - review_status is always 'needs_review' — AI draft is never auto-approved.
+ *   - Controlled by TAKEOFF_AI_ENABLED=1, TAKEOFF_AI_PROVIDER, TAKEOFF_AI_MODEL, OPENAI_API_KEY.
+ *   - storage_path and API key are never returned to clients.
+ *   - No quote mutation. No import.
  *
- * Legacy v4: if a request arrives with a quoteFileId as the workspace ID (v4 behavior),
- *       the service falls back to reading from quote_files.metadata (read-only).
+ * v4.5: `takeoffJobId` is a real quote_takeoff_jobs.id (quote_id = null for pre-quote Lab flows).
+ *       Results persisted in quote_takeoff_results (with fallback to quote_takeoff_jobs.result_summary
+ *       if quote_takeoff_results.quote_id NOT NULL is not yet relaxed).
  *
  * All endpoints:
  *   - Require authentication.
  *   - Derive organizationId from auth context (never from client body).
  *   - Verify job/file ownership before any read/write.
  *   - Never return storage_path.
- *   - No AI calls. No quote mutation. No pricing logic.
- *
- * Hard boundaries: no pricing, no Monday, no Moraware, no Internal Estimate mutation.
+ *   - No pricing, no Monday, no Moraware, no Internal Estimate mutation.
  */
 import express from "express";
 import {
@@ -31,6 +33,7 @@ import {
   saveTakeoffResult,
   getLatestTakeoffResult,
 } from "./takeoffWorkspaceService.mjs";
+import { runAiTakeoffExtraction } from "./takeoffExtractionService.mjs";
 import { resolveOrganizationContext } from "../organizations/organizationContext.js";
 
 const jsonParser = express.json({ limit: "4mb" }); // TakeoffResult JSON can be large
@@ -184,6 +187,63 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase }) 
       const status = e.statusCode ?? 500;
       const code = status < 500 ? "validation_error" : "server_error";
       return res.status(status).json({ ok: false, error: String(e?.message ?? e), code });
+    }
+  });
+
+  // ── POST /api/takeoff-jobs/:id/generate-ai-draft ──────────────────────────
+  //
+  // v5: Generate an AI takeoff draft from the workspace's uploaded source file.
+  //
+  // Behavior:
+  //   1. Verify auth + org ownership.
+  //   2. Verify job has a source file (quote_file_id set, file status = active).
+  //   3. Set job status = 'processing'.
+  //   4. Download file bytes from private Supabase Storage (service-role — never client-exposed).
+  //   5. Send to AI provider (OpenAI) for measurement extraction.
+  //   6. Server-side recompute with computeTakeoffMeasurements (AI totals not trusted).
+  //   7. Server-side validate with validateTakeoffResult.
+  //   8. Generate import plan with planTakeoffImport.
+  //   9. Save to quote_takeoff_results (review_status = 'needs_review').
+  //  10. Return normalizedTakeoffJson + computed + diagnostics + importPlan.
+  //
+  // Requires: TAKEOFF_AI_ENABLED=1 and OPENAI_API_KEY in server environment.
+  // Does NOT import into a quote. Does NOT enable the Internal Estimate import button.
+  // review_status is ALWAYS 'needs_review' — AI output is never auto-approved.
+  //
+  // Response:
+  //   { ok: true, takeoffJobId, savedAt, schemaVersion, reviewStatus,
+  //     normalizedTakeoffJson, computedMeasurementsJson, validationDiagnosticsJson,
+  //     importPlanJson, summary, modelUsed, promptVersion, usage }
+  //
+  app.post("/api/takeoff-jobs/:id/generate-ai-draft", requireAuth(), async (req, res) => {
+    try {
+      const supabase = getSupabase();
+      const user = req.user;
+
+      const orgCtx = await resolveOrganizationContext({ req, supabase, mode: "authenticated" });
+      if (!orgCtx.organizationId) {
+        return res.status(503).json({ ok: false, error: "Organization context not available" });
+      }
+
+      const takeoffJobId = String(req.params.id ?? "").trim();
+
+      const result = await runAiTakeoffExtraction({
+        supabase,
+        organizationId: orgCtx.organizationId,
+        userId: user?.id ?? null,
+        takeoffJobId,
+      });
+
+      return res.json(result);
+    } catch (e) {
+      const status = e.statusCode ?? 500;
+      const code = e.code ?? (status < 500 ? "validation_error" : "server_error");
+      return res.status(status).json({
+        ok:    false,
+        error: String(e?.message ?? e),
+        code,
+        ...(e.rawExcerpt != null && { rawExcerpt: e.rawExcerpt }),
+      });
     }
   });
 }

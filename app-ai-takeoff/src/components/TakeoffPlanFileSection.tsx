@@ -1,5 +1,5 @@
 /**
- * TakeoffPlanFileSection — source plan file upload + workspace panel.
+ * TakeoffPlanFileSection — source plan file upload + workspace panel (v5).
  *
  * Upload flow:
  *   1. User picks a PDF/image file.
@@ -13,14 +13,21 @@
  *   - GET /api/takeoff-jobs/:id on mount → show file metadata + workspace status.
  *   - Parent provides onWorkspaceLoaded(file) so the source pill can show the filename.
  *
+ * AI draft flow (v5):
+ *   - User clicks "Generate AI takeoff draft".
+ *   - POST /api/takeoff-jobs/:id/generate-ai-draft
+ *   - Backend: downloads file from storage, calls OpenAI, recomputes server-side.
+ *   - On success: calls onAiDraftGenerated(normalizedTakeoffJson, filename).
+ *   - review_status is always 'needs_review' — estimator must approve before import.
+ *
  * Security:
  *   - organizationId never sent from client — derived server-side from auth.
  *   - storage_path never displayed.
- *   - Signed URLs only for download.
- *
- * No AI calls. No quote mutation.
+ *   - OPENAI_API_KEY never in client code.
+ *   - No quote mutation.
  */
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import type { TakeoffResult } from "@takeoff-core/takeoffContract.mjs";
 import { labApiGet, labApiPost, storagePut, LabApiError } from "../lib/api";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -55,7 +62,7 @@ interface WorkspaceState {
 }
 
 export interface TakeoffPlanFileSectionProps {
-  /** Current takeoff job ID (quoteFileId). Null when no workspace yet. */
+  /** Current takeoff job ID. Null when no workspace yet. */
   takeoffJobId: string | null;
   /** Bearer token for authenticated API calls. Null = not signed in. */
   token: string | null;
@@ -63,6 +70,8 @@ export interface TakeoffPlanFileSectionProps {
   onWorkspaceCreated: (jobId: string, filename: string) => void;
   /** Called when an existing workspace loads (e.g. from URL param). */
   onWorkspaceLoaded: (filename: string) => void;
+  /** Called when an AI draft is successfully generated. Parent loads it into the review UI. */
+  onAiDraftGenerated: (result: TakeoffResult, filename: string) => void;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -86,11 +95,24 @@ function roleLabelFor(role: string): string {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
+// Progress messages shown during AI extraction (timed — one API call, multiple UX steps).
+const AI_STEP_MSGS: Record<AiStep, string | null> = {
+  idle:        null,
+  sending:     "Sending plan to AI model…",
+  generating:  "Generating AI draft…",
+  recomputing: "Recomputing with eliteOS…",
+  done:        "Ready for review",
+  error:       null,
+};
+
+type AiStep = "idle" | "sending" | "generating" | "recomputing" | "done" | "error";
+
 export default function TakeoffPlanFileSection({
   takeoffJobId,
   token,
   onWorkspaceCreated,
   onWorkspaceLoaded,
+  onAiDraftGenerated,
 }: TakeoffPlanFileSectionProps) {
   const [workspace, setWorkspace] = useState<WorkspaceState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -105,6 +127,11 @@ export default function TakeoffPlanFileSection({
 
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+
+  // AI draft generation state (v5)
+  const [aiStep, setAiStep] = useState<AiStep>("idle");
+  const [aiError, setAiError] = useState<string | null>(null);
+  const aiTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -214,9 +241,52 @@ export default function TakeoffPlanFileSection({
     }
   }, [token]);
 
+  // ── AI draft generation (v5) ─────────────────────────────────────────────
+
+  const handleGenerateAiDraft = useCallback(async () => {
+    if (!takeoffJobId || !token || !workspace) return;
+
+    // Clear any previous timers.
+    aiTimersRef.current.forEach(clearTimeout);
+    aiTimersRef.current = [];
+
+    setAiStep("sending");
+    setAiError(null);
+
+    // Simulate multi-step progress during the single API call.
+    aiTimersRef.current.push(setTimeout(() => setAiStep("generating"),  3500));
+    aiTimersRef.current.push(setTimeout(() => setAiStep("recomputing"), 9000));
+
+    try {
+      const res = await labApiPost(
+        `/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}/generate-ai-draft`,
+        token,
+        {}
+      ) as { ok: boolean; normalizedTakeoffJson: TakeoffResult };
+
+      // Clear progress timers.
+      aiTimersRef.current.forEach(clearTimeout);
+      aiTimersRef.current = [];
+
+      if (res.ok && res.normalizedTakeoffJson) {
+        setAiStep("done");
+        onAiDraftGenerated(res.normalizedTakeoffJson, workspace.file.originalFilename);
+      } else {
+        throw new Error("Server returned an unexpected response");
+      }
+    } catch (e) {
+      aiTimersRef.current.forEach(clearTimeout);
+      aiTimersRef.current = [];
+      const msg = e instanceof LabApiError ? e.message : e instanceof Error ? e.message : "AI extraction failed.";
+      setAiStep("error");
+      setAiError(msg);
+    }
+  }, [takeoffJobId, token, workspace, onAiDraftGenerated]);
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   const isBusy = uploadStep !== "idle" && uploadStep !== "done" && uploadStep !== "error";
+  const isAiBusy = aiStep === "sending" || aiStep === "generating" || aiStep === "recomputing";
   const canUpload = Boolean(selectedFile) && Boolean(token) && !isBusy;
 
   // Show sign-in prompt if no token.
@@ -278,9 +348,56 @@ export default function TakeoffPlanFileSection({
             )}
           </div>
 
-          <p className="plan-file-note">
-            No AI extraction yet — this file is stored and ready for a future AI takeoff job.
-          </p>
+          {/* AI draft generation (v5) */}
+          <div className="ai-draft-panel">
+            <div className="ai-draft-row">
+              <button
+                type="button"
+                className={`plan-btn plan-btn--ai${isAiBusy ? " plan-btn--ai-busy" : ""}`}
+                disabled={isAiBusy}
+                onClick={() => void handleGenerateAiDraft()}
+              >
+                {isAiBusy ? (
+                  <span className="ai-draft-spinner" aria-hidden>◌</span>
+                ) : aiStep === "done" ? (
+                  "↻ Re-generate AI takeoff draft"
+                ) : (
+                  "✦ Generate AI takeoff draft"
+                )}
+                {isAiBusy && (
+                  <span className="ai-draft-progress-text">
+                    {AI_STEP_MSGS[aiStep]}
+                  </span>
+                )}
+              </button>
+
+              {aiStep === "done" && (
+                <span className="ai-draft-success-note">
+                  AI draft loaded — estimator review required before import.
+                </span>
+              )}
+            </div>
+
+            {isAiBusy && (
+              <p className="ai-draft-progress" role="status" aria-live="polite">
+                {AI_STEP_MSGS[aiStep]}
+              </p>
+            )}
+
+            {aiStep === "error" && aiError && (
+              <p className="ai-draft-error" role="alert">
+                ✗ {aiError}
+              </p>
+            )}
+
+            {(aiStep === "idle" || aiStep === "done") && !isAiBusy && (
+              <p className="ai-draft-hint">
+                {aiStep === "done"
+                  ? "AI draft requires estimator review before quote import. Dimensions are recomputed by eliteOS — AI totals are for reference only."
+                  : "Send this plan to AI for automatic measurement extraction. eliteOS recomputes and validates all dimensions independently."}
+              </p>
+            )}
+          </div>
         </div>
       ) : loadError ? (
         <p className="plan-file-error">Failed to load workspace: {loadError}</p>
