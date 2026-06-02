@@ -79,7 +79,8 @@ export interface TakeoffPlanFileSectionProps {
       modelUsed:     string | null;
       resultRowId:   string | null;
       summary?:      object | null;
-      pageInventory?: object | null;  // v5.4: PageInventory from classification pass
+      pageInventory?:     object | null; // v5.4: PageInventory from classification pass
+      dimensionEvidence?: object | null; // v5.5: DimensionEvidence from evidence pass
     }
   ) => void;
 }
@@ -279,7 +280,8 @@ export default function TakeoffPlanFileSection({
         modelUsed:             string | null;
         resultRowId:           string | null;
         summary:               object | null;
-        pageInventory:         object | null;  // v5.4
+        pageInventory:         object | null; // v5.4
+        dimensionEvidence:     object | null; // v5.5
       };
 
       // Clear progress timers.
@@ -293,7 +295,8 @@ export default function TakeoffPlanFileSection({
           modelUsed:     res.modelUsed      ?? null,
           resultRowId:   res.resultRowId    ?? null,
           summary:       res.summary        ?? null,
-          pageInventory: res.pageInventory  ?? null,
+          pageInventory:     res.pageInventory    ?? null,
+          dimensionEvidence: res.dimensionEvidence ?? null,
         });
       } else {
         throw new Error("Server returned an unexpected response");

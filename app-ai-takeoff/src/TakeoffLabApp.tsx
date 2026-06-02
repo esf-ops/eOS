@@ -48,6 +48,8 @@ import TakeoffRunHistoryPanel from "./components/TakeoffRunHistoryPanel";
 import TakeoffDebugPanel from "./components/TakeoffDebugPanel";
 import TakeoffPageInventoryPanel from "./components/TakeoffPageInventoryPanel";
 import type { PageInventory } from "./components/TakeoffPageInventoryPanel";
+import TakeoffDimensionEvidencePanel from "./components/TakeoffDimensionEvidencePanel";
+import type { DimensionEvidence } from "./components/TakeoffDimensionEvidencePanel";
 import { getSupabase } from "./lib/supabase";
 import { resolveAccessToken } from "./lib/authSession";
 import { labApiGet, labApiPost, LabApiError } from "./lib/api";
@@ -181,7 +183,8 @@ export default function TakeoffLabApp() {
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
 
   // v5.4: Page inventory from the classification pass (null = not yet run or failed).
-  const [pageInventory, setPageInventory] = useState<PageInventory | null>(null);
+  const [pageInventory,    setPageInventory]    = useState<PageInventory    | null>(null);
+  const [dimensionEvidence, setDimensionEvidence] = useState<DimensionEvidence | null>(null);
 
   // ── Workspace state (file-backed) ────────────────────────────────────────
   const [takeoffJobId, setTakeoffJobId] = useState<string | null>(urlJobId);
@@ -413,7 +416,8 @@ export default function TakeoffLabApp() {
       modelUsed:     string | null;
       resultRowId:   string | null;
       summary?:      object | null;
-      pageInventory?: object | null;
+      pageInventory?:     object | null;
+      dimensionEvidence?: object | null;
     }
   ) => {
     commitSource(result, "ai-draft");
@@ -425,7 +429,8 @@ export default function TakeoffLabApp() {
     });
     setCurrentResultId(meta.resultRowId ?? null);
     setHistoryRefreshKey((k) => k + 1);
-    setPageInventory((meta.pageInventory as PageInventory | null) ?? null);
+    setPageInventory((meta.pageInventory    as PageInventory    | null) ?? null);
+    setDimensionEvidence((meta.dimensionEvidence as DimensionEvidence | null) ?? null);
   }, []);
 
   // ── Handle loading a historical run from run history panel (v5.3) ─────────
@@ -436,7 +441,8 @@ export default function TakeoffLabApp() {
       promptVersion:  string | null;
       modelUsed:      string | null;
       resultId:       string;
-      pageInventory?: PageInventory | null;
+      pageInventory?:     PageInventory    | null;
+      dimensionEvidence?: DimensionEvidence | null;
     }
   ) => {
     commitSource(result, "ai-draft");
@@ -447,6 +453,7 @@ export default function TakeoffLabApp() {
     });
     setCurrentResultId(meta.resultId);
     setPageInventory(meta.pageInventory ?? null);
+    setDimensionEvidence(meta.dimensionEvidence ?? null);
   }, []);
 
   // ── Derived display values ────────────────────────────────────────────────
@@ -791,6 +798,14 @@ export default function TakeoffLabApp() {
             </section>
           )}
 
+          {/* ── Dimension evidence (v5.5) — shown when evidence table is available ── */}
+          {dimensionEvidence && (
+            <section className="lab-section">
+              <h2 className="lab-section-title">Dimension evidence</h2>
+              <TakeoffDimensionEvidencePanel evidence={dimensionEvidence} />
+            </section>
+          )}
+
           {/* ── Debug: AI output (v5.3) — collapsed JSON view ──────────── */}
           <section className="lab-section">
             <TakeoffDebugPanel
@@ -799,6 +814,7 @@ export default function TakeoffLabApp() {
               validation={validation}
               importPlan={importPlan}
               pageInventory={pageInventory}
+              dimensionEvidence={dimensionEvidence}
             />
           </section>
 

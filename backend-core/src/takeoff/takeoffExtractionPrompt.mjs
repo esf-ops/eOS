@@ -22,10 +22,13 @@
 
 /**
  * Bump when extraction rules or schema guidance changes.
- * v3: user message now includes page inventory context (recommended pages,
+ * v3: user message includes page inventory context (recommended pages,
  *     pre-classified dimensions/notes) when a prior inventory pass succeeded.
+ * v4: user message also includes dimension evidence table (pre-extracted labeled
+ *     dimensions, notes, cutouts). Extraction model builds runs directly from the
+ *     evidence table rather than re-reading the whole plan.
  */
-export const PROMPT_VERSION = "v3";
+export const PROMPT_VERSION = "v4";
 
 // ── Schema description ─────────────────────────────────────────────────────────
 //
@@ -168,9 +171,13 @@ BACKSPLASH — READ CAREFULLY
 • Range/cooktop/refrigerator openings interrupt backsplash — subtract the appliance opening width from backsplashLinearIn unless the plan says otherwise.
 • When you record a backsplash-related assumption or note, also set backsplashIncluded and backsplashLinearIn consistently. Do not leave them unset.
 
-CUTOUTS AND EXCLUSIONS
-• Sink cutouts, cooktop cutouts: add to the area's exclusions array: { "label": "Sink cutout", "lengthIn": 33, "depthIn": 22 }. These are for reference only — eliteOS does not automatically subtract them.
-• Do NOT subtract cutout area from dimensions; record dimensions as-if the piece is full.
+CUTOUTS AND EXCLUSIONS — CRITICAL RULE
+• Sink cutouts, cooktop cutouts, and faucet holes are FABRICATION OPERATIONS, not material exclusions.
+• Do NOT add sink/cooktop/faucet cutouts to area.exclusions[].
+• Record them in area.notes[] or area.cutouts[] (if that field is present) for reference only.
+• Do NOT subtract sink/cooktop/cutout area from material square footage.
+• area.exclusions[] is ONLY for true missing-material sections: windows in counters, missing slab areas, or explicit gaps where stone is not present.
+• If you are unsure whether something is a cutout or a true material exclusion: default to notes[] and add a review flag.
 
 NOTES
 • Record all handwritten notes in the notes array: "no B/S", "waterfall", "raised bar", "grain match", "miter", "undermount", "farmhouse sink", "seating", "flush", "4\" overhang".
@@ -208,21 +215,109 @@ DO NOT
  * embedded as context so the extraction model knows which pages to focus on and
  * has pre-identified dimension evidence as hints.
  *
- * @param {{ originalFilename: string, pageCount?: number|null, pageInventory?: object|null }} params
+ * When a DimensionEvidence is provided (from the prior evidence pass), it is
+ * embedded as an authoritative dimension table so the extraction model builds runs
+ * directly from pre-identified measurements rather than re-reading the whole plan.
+ *
+ * @param {{ originalFilename: string, pageCount?: number|null, pageInventory?: object|null, dimensionEvidence?: object|null }} params
  * @returns {string}
  */
-export function buildUserMessage({ originalFilename, pageCount, pageInventory }) {
+export function buildUserMessage({ originalFilename, pageCount, pageInventory, dimensionEvidence }) {
   const pageNote = pageCount > 1
     ? ` This plan has ${pageCount} pages — process all pages and combine rooms.`
     : "";
 
   const inventorySection = _buildInventoryContextSection(pageInventory);
+  const evidenceSection   = _buildEvidenceContextSection(dimensionEvidence);
 
   return `Plan file: "${originalFilename}"${pageNote}
 
-${inventorySection}Extract all countertop and backsplash measurements and return the TakeoffResult JSON object.
+${inventorySection}${evidenceSection}Extract all countertop and backsplash measurements and return the TakeoffResult JSON object.
 
 Return ONLY the JSON — no other text.`;
+}
+
+/**
+ * Format dimension evidence into a directive table section for the extraction prompt.
+ * When present, the extraction model is instructed to build runs directly from the
+ * evidence table rather than re-reading the plan from scratch.
+ * Returns empty string when evidence is null or has no dimensions.
+ *
+ * @param {object|null} evidence
+ * @returns {string}
+ */
+function _buildEvidenceContextSection(evidence) {
+  if (!evidence || !Array.isArray(evidence.dimensions)) return "";
+
+  const dims    = evidence.dimensions;
+  const notes   = evidence.notes ?? [];
+  const cutouts = evidence.cutouts ?? [];
+  const uncertain = evidence.uncertainItems ?? [];
+
+  const lines = [
+    "── DIMENSION EVIDENCE TABLE (from dimension extraction pass) ─────────────────",
+    "IMPORTANT: Build TakeoffResult runs primarily from this pre-extracted evidence.",
+    "Do NOT invent dimensions that are not in this table.",
+    "Do NOT put cutouts/sink/cooktop/faucet in area.exclusions[].",
+    "",
+  ];
+
+  if (dims.length > 0) {
+    lines.push("Extracted dimensions (create one run per dimension where applicable):");
+    for (const d of dims) {
+      const l = d.lengthIn != null ? `${d.lengthIn}` : "?";
+      const dep = d.depthIn != null ? `${d.depthIn}` : "null";
+      const rawPart = d.rawText ? ` — raw: "${d.rawText}"` : "";
+      const notePart = d.interpretationNotes?.length > 0
+        ? ` (${d.interpretationNotes.join("; ")})`
+        : "";
+      lines.push(
+        `  [${d.id ?? "dim"}] ${d.label} · ${l} × ${dep} in · ${d.category ?? "countertop_run"} · ${d.confidence ?? "?"} confidence · page ${d.pageNumber ?? "?"}${rawPart}${notePart}`
+      );
+    }
+    lines.push("");
+  } else {
+    lines.push("(No dimensions extracted in evidence pass — extract from plan directly.)");
+    lines.push("");
+  }
+
+  if (notes.length > 0) {
+    lines.push("Extracted notes (use to set backsplash/waterfall/edge fields):");
+    for (const n of notes) {
+      lines.push(`  [${n.category ?? "note"}] "${n.text}" · ${n.confidence ?? "?"} · page ${n.pageNumber ?? "?"}`);
+    }
+    lines.push("");
+  }
+
+  if (cutouts.length > 0) {
+    lines.push("Cutouts identified (add to area.notes[] or area.cutouts[], NOT to area.exclusions[]):");
+    for (const c of cutouts) {
+      lines.push(`  [${c.type ?? "cutout"}] ${c.label} · ${c.confidence ?? "?"} confidence · page ${c.pageNumber ?? "?"}`);
+    }
+    lines.push("");
+  }
+
+  if (uncertain.length > 0) {
+    lines.push("Uncertain items requiring estimator review (add to projectAssumptions):");
+    for (const u of uncertain) {
+      lines.push(`  ${u}`);
+    }
+    lines.push("");
+  }
+
+  lines.push(
+    "Rules for using this evidence table:",
+    "  1. For each dimension with both lengthIn and depthIn: create a TakeoffRun using those exact values.",
+    "  2. For dimensions with depthIn=null: apply standard depth (25.5\" counter / 21.5\" vanity) and add to area.assumptions[].",
+    "  3. Group dimensions into rooms/areas based on their labels and categories.",
+    "  4. Do NOT add sink/cooktop/faucet to area.exclusions[]. They are fabrication add-ons.",
+    "  5. If a required dimension is NOT in this table: add 'MISSING: <description>' to projectAssumptions[].",
+    "  6. If your reading of the plan conflicts with evidence above: add a review note explaining the discrepancy.",
+    "─────────────────────────────────────────────────────────────────────────────",
+    "",
+  );
+
+  return lines.join("\n") + "\n";
 }
 
 /**

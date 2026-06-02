@@ -21,7 +21,7 @@
  *  14.  review_status is always 'needs_review' — never 'approved'
  *  15.  No quote mutation — quote_headers table never touched
  *  16.  storage_path never returned in response
- *  17.  Provider called with expected metadata (mimeType, originalFilename, promptVersion v3)
+ *  17.  Provider called with expected metadata (mimeType, originalFilename, promptVersion v4)
  *  18.  NOT NULL fallback — graceful degradation to result_summary
  *  19.  resultRowId returned in response
  *  20.  raw_ai_result_json stored with _meta envelope
@@ -31,6 +31,12 @@
  *  22.  extraction provider receives pageInventory from inventory pass
  *  23.  pageInventory stored in _meta.pageInventory
  *  24.  inventory failure is non-fatal — extraction still completes
+ *
+ * v5.5 dimension evidence tests:
+ *  25.  dimensionEvidenceProviderFn called when provided
+ *  26.  extraction provider receives dimensionEvidence from evidence pass
+ *  27.  dimensionEvidence stored in _meta.dimensionEvidence
+ *  28.  evidence failure is non-fatal — extraction still completes
  */
 
 import assert from "node:assert/strict";
@@ -648,7 +654,7 @@ await test("provider called with expected metadata (mimeType, filename, promptVe
   assert.ok(capturedInput, "provider must have been called");
   assert.equal(capturedInput.mimeType,         MOCK_FILE_ROW.mime_type,          "mimeType mismatch");
   assert.equal(capturedInput.originalFilename, MOCK_FILE_ROW.original_filename,  "originalFilename mismatch");
-  assert.equal(capturedInput.promptVersion,    "v3",                             "promptVersion must be v3");
+  assert.equal(capturedInput.promptVersion,    "v4",                             "promptVersion must be v4");
   assert.ok(Buffer.isBuffer(capturedInput.fileBuffer), "fileBuffer must be a Buffer");
   assert.ok(capturedInput.fileBuffer.length > 0,       "fileBuffer must not be empty");
 });
@@ -874,6 +880,172 @@ await test("inventory provider failure is non-fatal — extraction still succeed
   assert.equal(result.ok, true, "extraction must succeed despite inventory failure");
   assert.equal(result.reviewStatus, "needs_review", "reviewStatus must be needs_review");
   assert.equal(result.pageInventory, null, "pageInventory must be null when inventory failed");
+});
+
+// ── v5.5: Dimension evidence integration tests (25–28) ────────────────────────
+
+/** Build a minimal DimensionEvidence fixture for testing. */
+function makeEvidenceFixture({ pages = [1] } = {}) {
+  return {
+    schemaVersion:         "1.0",
+    evidencePromptVersion: "v1",
+    sourcePages:           pages,
+    dimensions: [
+      {
+        id:               "dim-1",
+        pageNumber:       1,
+        label:            "Island top",
+        rawText:          "108 x 56",
+        lengthIn:         108,
+        depthIn:          56,
+        confidence:       "high",
+        category:         "countertop_run",
+        interpretationNotes: [],
+      },
+    ],
+    notes: [
+      { pageNumber: 1, text: "4\" B/S standard", category: "backsplash", confidence: "high" },
+    ],
+    cutouts: [
+      { pageNumber: 1, type: "sink", label: "Sink cutout", confidence: "high", notes: [] },
+    ],
+    uncertainItems: [],
+    reviewRequired: false,
+  };
+}
+
+/** Mock evidence provider that returns a valid evidence fixture. */
+function makeEvidenceProvider(fixture = makeEvidenceFixture()) {
+  return async () => ({
+    rawText:    JSON.stringify(fixture),
+    parsed:     fixture,
+    parseError: null,
+    modelUsed:  "gpt-4o",
+    usage:      { promptTokens: 300, completionTokens: 400 },
+  });
+}
+
+/** Mock evidence provider that throws. */
+function makeThrowingEvidenceProvider(msg = "Evidence AI error") {
+  return async () => { throw new Error(msg); };
+}
+
+// 25. dimensionEvidenceProviderFn is called when provided
+await test("extraction calls dimension evidence provider when dimensionEvidenceProviderFn is provided", async () => {
+  let evidenceCalled = false;
+  const trackingEvidenceProvider = async () => {
+    evidenceCalled = true;
+    const fixture = makeEvidenceFixture();
+    return {
+      rawText:    JSON.stringify(fixture),
+      parsed:     fixture,
+      parseError: null,
+      modelUsed:  "gpt-4o",
+      usage:      { promptTokens: 300, completionTokens: 400 },
+    };
+  };
+
+  await runAiTakeoffExtraction({
+    supabase:                    makeSupabase(),
+    organizationId:              ORG_ID,
+    userId:                      null,
+    takeoffJobId:                JOB_ID,
+    providerFn:                  makeSuccessProvider(),
+    configOverride:              ENABLED_CONFIG,
+    dimensionEvidenceProviderFn: trackingEvidenceProvider,
+  });
+
+  assert.ok(evidenceCalled, "dimension evidence provider must have been called");
+});
+
+// 26. extraction provider receives dimensionEvidence when evidence pass succeeds
+await test("extraction provider receives dimensionEvidence from evidence pass", async () => {
+  let capturedInput = null;
+  const capturingProvider = async (input) => {
+    capturedInput = input;
+    const fixture = buildSpec73Fixture();
+    return {
+      rawText:    JSON.stringify(fixture),
+      parsed:     fixture,
+      parseError: null,
+      modelUsed:  "gpt-4o",
+      usage:      { promptTokens: 200, completionTokens: 800 },
+    };
+  };
+
+  const evidenceFixture = makeEvidenceFixture({ pages: [1] });
+
+  await runAiTakeoffExtraction({
+    supabase:                    makeSupabase(),
+    organizationId:              ORG_ID,
+    userId:                      null,
+    takeoffJobId:                JOB_ID,
+    providerFn:                  capturingProvider,
+    configOverride:              ENABLED_CONFIG,
+    dimensionEvidenceProviderFn: makeEvidenceProvider(evidenceFixture),
+  });
+
+  assert.ok(capturedInput, "extraction provider must have been called");
+  assert.ok(capturedInput.dimensionEvidence, "extraction provider must receive dimensionEvidence");
+  assert.equal(
+    capturedInput.dimensionEvidence.dimensions[0].label,
+    "Island top",
+    "dimensionEvidence.dimensions must be passed through"
+  );
+  assert.equal(
+    capturedInput.dimensionEvidence.cutouts[0].type,
+    "sink",
+    "dimensionEvidence.cutouts must be passed through"
+  );
+});
+
+// 27. dimensionEvidence stored in raw_ai_result_json._meta.dimensionEvidence
+await test("dimension evidence stored in _meta.dimensionEvidence of raw_ai_result_json", async () => {
+  const supabase = makeSupabase({ trackMutations: true });
+  const evidenceFixture = makeEvidenceFixture({ pages: [1] });
+
+  await runAiTakeoffExtraction({
+    supabase,
+    organizationId:              ORG_ID,
+    userId:                      null,
+    takeoffJobId:                JOB_ID,
+    providerFn:                  makeSuccessProvider(),
+    configOverride:              ENABLED_CONFIG,
+    dimensionEvidenceProviderFn: makeEvidenceProvider(evidenceFixture),
+  });
+
+  const payload = supabase._mutations.resultInserts[0];
+  assert.ok(payload, "quote_takeoff_results insert must have occurred");
+  const meta = payload.raw_ai_result_json?._meta;
+  assert.ok(meta, "_meta must be present");
+  assert.ok(meta.dimensionEvidence, "_meta.dimensionEvidence must be stored");
+  assert.equal(
+    meta.dimensionEvidence.dimensions[0].label,
+    "Island top",
+    "stored dimensionEvidence must include dimensions"
+  );
+  assert.equal(
+    meta.dimensionEvidence.cutouts[0].type,
+    "sink",
+    "stored dimensionEvidence must include cutouts"
+  );
+});
+
+// 28. evidence provider failure is non-fatal — extraction still completes
+await test("evidence provider failure is non-fatal — extraction still succeeds", async () => {
+  const result = await runAiTakeoffExtraction({
+    supabase:                    makeSupabase(),
+    organizationId:              ORG_ID,
+    userId:                      null,
+    takeoffJobId:                JOB_ID,
+    providerFn:                  makeSuccessProvider(),
+    configOverride:              ENABLED_CONFIG,
+    dimensionEvidenceProviderFn: makeThrowingEvidenceProvider("Evidence AI call timed out"),
+  });
+
+  assert.equal(result.ok, true, "extraction must succeed despite evidence failure");
+  assert.equal(result.reviewStatus, "needs_review", "reviewStatus must be needs_review");
+  assert.equal(result.dimensionEvidence, null, "dimensionEvidence must be null when evidence failed");
 });
 
 // ── Summary ───────────────────────────────────────────────────────────────────

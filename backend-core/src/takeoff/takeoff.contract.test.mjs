@@ -23,6 +23,8 @@
  *   Q. Validator warns: AI backsplash total > 0 but computed = 0 (AI_BACKSPLASH_TOTAL_NOT_STRUCTURED)
  *   R. Validator warns: backsplash keyword in notes with zero computed (POSSIBLE_BACKSPLASH_NOTE)
  *   S. No false positive when notes say "no B/S"
+ *   T. Validator warns: sink/cooktop/faucet in exclusions (CUTOUT_IN_EXCLUSIONS_WARNING)
+ *   U. No false positive: true material exclusion (no cutout keyword) does not trigger warning
  */
 
 import assert from "node:assert/strict";
@@ -349,6 +351,52 @@ function near(a, b, label) {
   const bsNotStructured = validation.diagnostics.find((x) => x.code === TAKEOFF_DIAGNOSTIC_CODE.AI_BACKSPLASH_TOTAL_NOT_STRUCTURED);
   assert.equal(bsNotStructured, undefined, "S: no AI_BACKSPLASH_TOTAL_NOT_STRUCTURED false positive (no AI total)");
   console.log("ok: no false positive backsplash warning when notes say 'no B/S'");
+}
+
+// ── T. CUTOUT_IN_EXCLUSIONS_WARNING fires when exclusion label contains cutout keyword ─
+{
+  const run = makeTakeoffRun({ label: "Counter", lengthIn: 91.5, depthIn: 25.5, pieceType: "counter" });
+  const area = makeTakeoffArea({
+    label: "Kitchen",
+    runs: [run],
+    exclusions: [
+      { label: "Sink cutout", lengthIn: 33, depthIn: 22 }, // should trigger warning
+    ],
+  });
+  const room = makeTakeoffRoom({ name: "Kitchen", areas: [area] });
+  const tr = makeTakeoffResult({ status: TAKEOFF_STATUS.DRAFT, rooms: [room] });
+  const computed = computeTakeoffMeasurements(tr);
+  const validation = validateTakeoffResult(tr, computed);
+
+  const w = validation.diagnostics.find(
+    (x) => x.code === TAKEOFF_DIAGNOSTIC_CODE.CUTOUT_IN_EXCLUSIONS_WARNING
+  );
+  assert.ok(w, "T: CUTOUT_IN_EXCLUSIONS_WARNING must fire when exclusion label contains 'sink'");
+  assert.equal(w.level, "warning", "T: diagnostic level must be warning");
+  assert.match(w.message, /sink/i, "T: message must reference the cutout keyword");
+  console.log("ok: CUTOUT_IN_EXCLUSIONS_WARNING fires for sink/cooktop/faucet in exclusions");
+}
+
+// ── U. No false positive: true material exclusion does not trigger cutout warning ─
+{
+  const run = makeTakeoffRun({ label: "Counter", lengthIn: 72, depthIn: 25.5, pieceType: "counter" });
+  const area = makeTakeoffArea({
+    label: "Kitchen",
+    runs: [run],
+    exclusions: [
+      { label: "Window opening", lengthIn: 30, depthIn: 12 }, // true material exclusion — no cutout keyword
+    ],
+  });
+  const room = makeTakeoffRoom({ name: "Kitchen", areas: [area] });
+  const tr = makeTakeoffResult({ status: TAKEOFF_STATUS.DRAFT, rooms: [room] });
+  const computed = computeTakeoffMeasurements(tr);
+  const validation = validateTakeoffResult(tr, computed);
+
+  const w = validation.diagnostics.find(
+    (x) => x.code === TAKEOFF_DIAGNOSTIC_CODE.CUTOUT_IN_EXCLUSIONS_WARNING
+  );
+  assert.equal(w, undefined, "U: no false positive CUTOUT_IN_EXCLUSIONS_WARNING for 'Window opening'");
+  console.log("ok: no false positive CUTOUT_IN_EXCLUSIONS_WARNING for true material exclusion");
 }
 
 // ── N. No pricing/math behavior changes (smoke) ───────────────────────────────

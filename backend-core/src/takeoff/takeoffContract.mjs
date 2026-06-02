@@ -69,7 +69,10 @@ export const TAKEOFF_DIAGNOSTIC_CODE = Object.freeze({
 
   // Review flags
   LOW_CONFIDENCE: "LOW_CONFIDENCE",
-  PENDING_REVIEW: "PENDING_REVIEW"
+  PENDING_REVIEW: "PENDING_REVIEW",
+
+  // Cutout handling (v5.5)
+  CUTOUT_IN_EXCLUSIONS_WARNING: "CUTOUT_IN_EXCLUSIONS_WARNING",
 });
 
 /**
@@ -145,6 +148,11 @@ export function makeTakeoffRun(overrides = {}) {
  * @property {"none"|"L-Shape"|"U-Shape"|"auto"} [overlapMode]
  * @property {Array<{depthA_in:number,depthB_in:number,sfDeducted?:number}>} [cornerDeductions]
  * @property {Array<{label:string,lengthIn?:number,depthIn?:number,sfExcluded?:number}>} [exclusions]
+ *   exclusions[] is for TRUE missing-material areas only (e.g. a window or missing slab section).
+ *   Sink/cooktop/faucet cutouts MUST NOT be placed here — they are fabrication add-ons.
+ * @property {Array<{type:string,label:string,confidence?:string,notes?:string[]}>} [cutouts]
+ *   cutouts[] is for sink/cooktop/faucet openings that are fabrication operations, NOT material deductions.
+ *   Presence in this array does NOT affect square footage calculations.
  * @property {string[]} [notes]
  * @property {string[]} [assumptions]
  * @property {number[]} [sourcePages]
@@ -162,7 +170,8 @@ export function makeTakeoffArea(overrides = {}) {
     ...(overrides.overlapMode != null && { overlapMode: overrides.overlapMode }),
     ...(overrides.cornerDeductions != null && { cornerDeductions: overrides.cornerDeductions }),
     ...(overrides.exclusions != null && { exclusions: overrides.exclusions }),
-    ...(overrides.notes != null && { notes: overrides.notes }),
+    ...(overrides.cutouts   != null && { cutouts:    overrides.cutouts }),
+    ...(overrides.notes     != null && { notes:      overrides.notes }),
     ...(overrides.assumptions != null && { assumptions: overrides.assumptions }),
     ...(overrides.sourcePages != null && { sourcePages: overrides.sourcePages }),
     ...(overrides.aiProvidedSf != null && { aiProvidedSf: Number(overrides.aiProvidedSf) })

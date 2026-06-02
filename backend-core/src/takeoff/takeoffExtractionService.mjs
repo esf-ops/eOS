@@ -42,6 +42,7 @@ import { getExtractionProvider, readExtractionConfig } from "./takeoffAiProvider
 import { QUOTE_FILE_BUCKET }           from "../files/quoteFileStoragePath.mjs";
 import { PROMPT_VERSION }              from "./takeoffExtractionPrompt.mjs";
 import { runPageInventory }            from "./takeoffPageInventoryService.mjs";
+import { runDimensionEvidence }        from "./takeoffDimensionEvidenceService.mjs";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -85,9 +86,10 @@ export async function runAiTakeoffExtraction({
   organizationId,
   userId,
   takeoffJobId,
-  providerFn         = null,
-  configOverride     = null,
-  inventoryProviderFn = null,  // v5.4: injectable for testing; null = use default OpenAI call
+  providerFn              = null,
+  configOverride          = null,
+  inventoryProviderFn     = null,  // v5.4: injectable for testing; null = use default OpenAI call
+  dimensionEvidenceProviderFn = null, // v5.5: injectable for testing; null = use default OpenAI call
 }) {
   // 1. Validate inputs.
   if (!isUuid(organizationId)) {
@@ -227,17 +229,44 @@ export async function runAiTakeoffExtraction({
     }
   }
 
-  // 7. Call AI provider with file bytes (+ inventory context if available).
+  // 6b. Run dimension evidence pass (v5.5).
+  //     Same skip logic as inventory: only run when dimensionEvidenceProviderFn is provided
+  //     (test/override mode) or when we are in real AI mode (no providerFn override).
+  let dimensionEvidence = null;
+  const shouldRunEvidence = dimensionEvidenceProviderFn != null || !providerFn;
+  if (shouldRunEvidence) {
+    try {
+      dimensionEvidence = await runDimensionEvidence({
+        fileBuffer,
+        mimeType:         file.mime_type ?? "",
+        originalFilename: file.original_filename,
+        modelName:        config?.modelName ?? "gpt-4o",
+        apiKey:           config?.apiKey ?? null,
+        pageInventory,                           // v5.5: focus evidence on recommended pages
+        providerFn:       dimensionEvidenceProviderFn ?? null,
+      });
+    } catch (evidenceErr) {
+      console.warn(
+        `[takeoffExtraction] Dimension evidence failed for job ${takeoffJobId} — ` +
+        `continuing extraction without evidence table:`,
+        evidenceErr.message
+      );
+      // Non-fatal: extraction proceeds without evidence context in the user message.
+    }
+  }
+
+  // 7. Call AI provider with file bytes (+ inventory + evidence context if available).
   let providerOutput;
   try {
     providerOutput = await provider({
       fileBuffer,
-      mimeType:         file.mime_type ?? "",
-      originalFilename: file.original_filename,
-      promptVersion:    PROMPT_VERSION,
-      modelName:        config?.modelName ?? "gpt-4o",
-      apiKey:           config?.apiKey ?? null,
-      pageInventory,   // v5.4: passes recommended pages + dimension hints to extraction model
+      mimeType:          file.mime_type ?? "",
+      originalFilename:  file.original_filename,
+      promptVersion:     PROMPT_VERSION,
+      modelName:         config?.modelName ?? "gpt-4o",
+      apiKey:            config?.apiKey ?? null,
+      pageInventory,     // v5.4: passes recommended pages + dimension hints to extraction model
+      dimensionEvidence, // v5.5: passes pre-extracted dimension table to anchor run building
     });
   } catch (providerErr) {
     await setJobStatus(supabase, takeoffJobId, organizationId, {
@@ -335,10 +364,11 @@ export async function runAiTakeoffExtraction({
   // Inject eliteOS run metadata as a reserved _meta key so listTakeoffResults
   // can surface promptVersion/modelUsed/pageInventory without a separate DB column.
   const metaEnvelope = {
-    promptVersion: PROMPT_VERSION,
+    promptVersion:    PROMPT_VERSION,
     modelUsed,
-    savedAt:       now,
-    pageInventory: pageInventory ?? null,  // v5.4: null when inventory was skipped or failed
+    savedAt:          now,
+    pageInventory:    pageInventory    ?? null, // v5.4: null when inventory was skipped or failed
+    dimensionEvidence: dimensionEvidence ?? null, // v5.5: null when evidence was skipped or failed
   };
   const augmentedRawAiJson = rawAiJson != null
     ? { ...rawAiJson, _meta: metaEnvelope }
@@ -422,6 +452,7 @@ export async function runAiTakeoffExtraction({
     modelUsed,
     promptVersion:             PROMPT_VERSION,
     usage,
-    pageInventory:             pageInventory ?? null,  // v5.4: null when skipped or failed
+    pageInventory:             pageInventory    ?? null, // v5.4: null when skipped or failed
+    dimensionEvidence:         dimensionEvidence ?? null, // v5.5: null when skipped or failed
   };
 }

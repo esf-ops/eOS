@@ -616,6 +616,120 @@ See [`quote-files-storage.md`](./quote-files-storage.md) for the full design.
 
 ---
 
+---
+
+## v5.5: Dimension evidence table + cutout handling rules (2026-06-02)
+
+**Goal:** Force a dimension-first extraction step to prevent the model from missing or shrinking countertop pieces on messy hand sketches. Also enforce the business rule that sink/cooktop cutouts must never reduce material square footage.
+
+**Motivation:** v5.4 page inventory improved page selection, but the final takeoff was still missing major pieces. A hand-sketch run computed 44.99 sf CT / 3.07 sf BS vs. estimator target 78 CT / 4 BS. The three-step flow (inventory → evidence → extraction) anchors the final extraction to a pre-verified dimension table.
+
+### New files
+
+| File | Purpose |
+|---|---|
+| `takeoffDimensionEvidencePrompt.mjs` | System prompt + user message for dimension evidence extraction pass |
+| `takeoffDimensionEvidenceService.mjs` | Service that runs the second-pass dimension evidence extraction |
+| `takeoffDimensionEvidenceService.test.mjs` | 10 mocked unit tests |
+| `TakeoffDimensionEvidencePanel.tsx` | React UI panel showing extracted dimensions, notes, cutouts |
+
+### Modified files
+
+| File | Change |
+|---|---|
+| `takeoffContract.mjs` | Added `CUTOUT_IN_EXCLUSIONS_WARNING` diagnostic code; added `cutouts?: []` optional field to `TakeoffArea` |
+| `takeoffValidator.mjs` | Fires `CUTOUT_IN_EXCLUSIONS_WARNING` when an exclusion label contains sink/cooktop/faucet/cutout/undermount |
+| `takeoffExtractionPrompt.mjs` | Bumped to **v4**; added `_buildEvidenceContextSection()` that formats dimension evidence table into the user message; updated cutout/exclusions rule in system prompt |
+| `openAiTakeoffProvider.mjs` | Accepts `dimensionEvidence` parameter; passes to `buildUserMessage` |
+| `takeoffExtractionService.mjs` | Added `dimensionEvidenceProviderFn` param; new step 6b runs evidence after inventory; stores `dimensionEvidence` in `_meta`; returns `dimensionEvidence` in response |
+| `takeoffWorkspaceService.mjs` | `getResultById` extracts `dimensionEvidence` from `_meta` and returns it |
+| `takeoffExtractionService.test.mjs` | Added tests 25–28; updated test 17 to expect v4 |
+| `takeoff.contract.test.mjs` | Added tests T and U for `CUTOUT_IN_EXCLUSIONS_WARNING` |
+| `TakeoffDebugPanel.tsx` | Accepts `dimensionEvidence` prop; adds "Dimension evidence JSON" section |
+| `TakeoffPlanFileSection.tsx` | Passes `dimensionEvidence` in `onAiDraftGenerated` callback |
+| `TakeoffRunHistoryPanel.tsx` | Passes `dimensionEvidence` in `onLoadRun` callback |
+| `TakeoffLabApp.tsx` | Manages `dimensionEvidence` state; renders `TakeoffDimensionEvidencePanel` |
+| `styles.css` | Added `ev-*` CSS for evidence panel |
+| `package.json` | Added `eos:test:takeoff-dimension-evidence` script |
+
+### DimensionEvidence schema v1.0
+
+```json
+{
+  "schemaVersion": "1.0",
+  "evidencePromptVersion": "v1",
+  "sourcePages": [1],
+  "dimensions": [
+    {
+      "id": "dim-1",
+      "pageNumber": 1,
+      "label": "Island top",
+      "rawText": "108 x 56",
+      "lengthIn": 108,
+      "depthIn": 56,
+      "confidence": "high",
+      "category": "countertop_run",
+      "interpretationNotes": []
+    }
+  ],
+  "notes": [
+    { "pageNumber": 1, "text": "4\" B/S standard", "category": "backsplash", "confidence": "high" }
+  ],
+  "cutouts": [
+    { "pageNumber": 1, "type": "sink", "label": "Sink cutout", "confidence": "high", "notes": [] }
+  ],
+  "uncertainItems": [],
+  "reviewRequired": false
+}
+```
+
+### Three-step extraction flow (v5.5)
+
+```
+1. Page inventory pass    → classifies pages; identifies measurement vs context pages
+2. Dimension evidence pass → extracts all labeled dimensions, notes, cutouts as evidence table
+3. Final extraction pass   → builds TakeoffResult using evidence table as primary source
+```
+
+Each step is non-fatal. If inventory or evidence fails, the extraction proceeds without that context rather than blocking the job.
+
+### Cutout handling business rule
+
+- **Sink/cooktop/faucet cutouts are fabrication operations, not material exclusions.**
+- They must never appear in `area.exclusions[]`.
+- They must never reduce material square footage.
+- They are recorded in `area.cutouts[]` (new optional field) or `area.notes[]`.
+- The extraction system prompt now explicitly forbids cutouts in exclusions.
+- The validator fires `CUTOUT_IN_EXCLUSIONS_WARNING` (warning level) when an exclusion label contains sink, cooktop, faucet, cutout, or undermount.
+
+### Evidence context injection (v4 prompt)
+
+The dimension evidence table is formatted into the extraction user message as:
+
+```
+── DIMENSION EVIDENCE TABLE (from dimension extraction pass) ─────────────────
+IMPORTANT: Build TakeoffResult runs primarily from this pre-extracted evidence.
+Do NOT invent dimensions that are not in this table.
+Do NOT put cutouts/sink/cooktop/faucet in area.exclusions[].
+
+Extracted dimensions (create one run per dimension where applicable):
+  [dim-1] Island top · 108 × 56 in · countertop_run · high confidence · page 1 — raw: "108 x 56"
+
+Extracted notes:
+  [backsplash] "4\" B/S standard" · high · page 1
+
+Cutouts identified (add to notes[], NOT to exclusions[]):
+  [sink] Sink cutout · high confidence · page 1
+
+Rules for using this evidence table:
+  1. For each dimension with both lengthIn and depthIn: create a TakeoffRun.
+  2. For dimensions with depthIn=null: apply standard depth + add to assumptions[].
+  ...
+─────────────────────────────────────────────────────────────────────────────
+```
+
+---
+
 ## Durable decisions
 
 See `FEATURE_DECISIONS.md` entries **48** (contract-first, AI-not-authority), **49** (quote files storage architecture), and **50** (provider-neutral extraction layer, AI output never authoritative, raw PDFs not committed).

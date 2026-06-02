@@ -60,7 +60,8 @@ export async function openAiTakeoffProvider({
   promptVersion: _promptVersion, // stored by caller in result row; not needed here
   modelName = "gpt-4o",
   apiKey,
-  pageInventory = null, // v5.4: optional PageInventory from prior classification pass
+  pageInventory     = null, // v5.4: optional PageInventory from prior classification pass
+  dimensionEvidence = null, // v5.5: optional DimensionEvidence from prior evidence pass
 }) {
   // ── Guards ───────────────────────────────────────────────────────────────────
 
@@ -110,7 +111,7 @@ export async function openAiTakeoffProvider({
 
   const textBlock = {
     type: "input_text",
-    text: buildUserMessage({ originalFilename, pageInventory }),
+    text: buildUserMessage({ originalFilename, pageInventory, dimensionEvidence }),
   };
 
   // ── Responses API payload ────────────────────────────────────────────────────

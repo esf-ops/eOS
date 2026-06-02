@@ -164,9 +164,9 @@ Durable decisions: `FEATURE_DECISIONS.md` entries **37** (additive lane), **38**
 
 ---
 
-## AI Takeoff Lab (2026-06-02, v5.4 built)
+## AI Takeoff Lab (2026-06-02, v5.5 built)
 
-Contract-first foundation + file-backed workspace + live AI extraction + benchmark/evaluation harness + run history + debug view + two-step page inventory extraction.
+Contract-first foundation + file-backed workspace + live AI extraction + benchmark/evaluation harness + run history + debug view + three-step extraction (inventory → dimension evidence → targeted extraction) + cutout handling rules.
 
 **Last updated:** 2026-06-02
 
@@ -177,42 +177,47 @@ Contract-first foundation + file-backed workspace + live AI extraction + benchma
 | v5 run 1 | v1 | 76.97 sf | 0.00 sf | 78 sf | 4 sf | -1.03 | CT close / BS missed |
 | v5.1 run | v2 | **68.41 sf** | 1.04 sf | 78 sf | 4 sf | -9.59 | CT **regressed** / BS partial |
 | Later run | v2 | **48.97 sf** | 0.00 sf | 78 sf | 4 sf | -29.03 | CT **severe regression** / BS missed |
-| v5.4 runs | v3+inv | TBD — run manually | — | 78 sf | 4 sf | — | Two-step inventory pass wired |
+| v5.4 run | v3+inv | 44.99 sf | 3.07 sf | 78 sf | 4 sf | -33.01 | CT **still regressed** / BS partial |
+| v5.5 runs | v4+inv+ev | TBD — run manually | — | 78 sf | 4 sf | — | Three-step evidence anchored |
 
-**Status:** v5.4 two-step extraction is built. Manual QA needed to assess accuracy improvement. Import blocked until consistent benchmark pass.
+**Status:** v5.5 three-step extraction is built. Manual QA needed to assess accuracy improvement from dimension evidence anchoring. Import blocked until consistent benchmark pass.
 
 ### Status
 
 | Piece | State |
 |-------|-------|
-| `takeoffContract.mjs` — versioned schema v1.0, factory helpers | **Built** |
+| `takeoffContract.mjs` — schema v1.0; `cutouts[]` field + `CUTOUT_IN_EXCLUSIONS_WARNING` (v5.5) | **Built** |
 | `takeoffMeasurementCalc.mjs` — deterministic sf calculator | **Built** |
-| `takeoffValidator.mjs` — structured diagnostics (17 codes incl. v5.1 BS guards) | **Built** |
+| `takeoffValidator.mjs` — 18 diagnostic codes incl. v5.1 BS guards + v5.5 cutout guard | **Built** |
 | `takeoffImportPlanner.mjs` — RoomScopeBuilder import plan | **Built** |
 | `fixtures/spec73.fixture.mjs` — Spec 73 known-good fixture | **Built** |
-| `takeoff.contract.test.mjs` — 19 test groups | **Built, all passing** |
+| `takeoff.contract.test.mjs` — 21 test groups (incl. v5.5 T/U cutout tests) | **Built, all passing** |
 | `docs/eliteos/ai-takeoff-foundation.md` | **Written** |
 | `app-ai-takeoff/` lab shell | **Built** |
-| `takeoffWorkspaceService.mjs` — workspace persistence (v4.5) | **Built** |
-| `takeoffWorkspaceService.test.mjs` — 30 tests (incl. v5.3 list/get) | **Built, all passing** |
-| `takeoffPageInventoryPrompt.mjs` — inventory classification prompt v1 (v5.4) | **Built** |
+| `takeoffWorkspaceService.mjs` — workspace persistence; `dimensionEvidence` in `getResultById` (v5.5) | **Built** |
+| `takeoffWorkspaceService.test.mjs` — 30 tests | **Built, all passing** |
+| `takeoffPageInventoryPrompt.mjs` — inventory prompt v1 (v5.4) | **Built** |
 | `takeoffPageInventoryService.mjs` — page inventory service (v5.4) | **Built** |
-| `takeoffPageInventoryService.test.mjs` — 10 tests (v5.4) | **Built, all passing** |
-| `takeoffExtractionPrompt.mjs` — AI system prompt (now v3, with inventory context) | **Built** |
-| `takeoffAiProvider.mjs` + `openAiTakeoffProvider.mjs` | **Built** |
-| `takeoffExtractionService.mjs` — two-step extraction (v5.4: inventory → targeted extraction) | **Built** |
-| `takeoffExtractionService.test.mjs` — 24 tests (all mocked; 21-24 are v5.4) | **Built, all passing** |
+| `takeoffPageInventoryService.test.mjs` — 10 tests | **Built, all passing** |
+| `takeoffDimensionEvidencePrompt.mjs` — dimension evidence prompt v1 (v5.5) | **Built** |
+| `takeoffDimensionEvidenceService.mjs` — dimension evidence service (v5.5) | **Built** |
+| `takeoffDimensionEvidenceService.test.mjs` — 10 tests | **Built, all passing** |
+| `takeoffExtractionPrompt.mjs` — AI system prompt (**v4**, inventory + evidence context) | **Built** |
+| `takeoffAiProvider.mjs` + `openAiTakeoffProvider.mjs` — `dimensionEvidence` param (v5.5) | **Built** |
+| `takeoffExtractionService.mjs` — three-step extraction (inv → evidence → extraction) | **Built** |
+| `takeoffExtractionService.test.mjs` — 28 tests (21-24 v5.4, 25-28 v5.5) | **Built, all passing** |
 | `POST /api/takeoff-jobs/:id/generate-ai-draft` endpoint | **Built** |
 | `GET /api/takeoff-jobs/:id/results` — list run summaries (v5.3) | **Built** |
-| `GET /api/takeoff-jobs/:id/results/:resultId` — load run by ID (v5.3+v5.4 pageInventory) | **Built** |
+| `GET /api/takeoff-jobs/:id/results/:resultId` — load run with inv + evidence (v5.5) | **Built** |
 | AI draft button + progress UI in `app-ai-takeoff/` | **Built** |
 | `takeoffBenchmark.mjs` — eval helpers + hand sketch 001 fixture (v5.2) | **Built** |
-| `takeoffBenchmark.test.mjs` — 7 tests (v5.2) | **Built, all passing** |
-| `TakeoffBenchmarkPanel.tsx` — QA evaluation panel in Lab (v5.2) | **Built** |
+| `takeoffBenchmark.test.mjs` — 7 tests | **Built, all passing** |
+| `TakeoffBenchmarkPanel.tsx` — QA evaluation panel (v5.2) | **Built** |
 | Prompt version badge in AI draft mode (v5.2) | **Built** |
 | `TakeoffRunHistoryPanel.tsx` — extraction run history panel (v5.3) | **Built** |
-| `TakeoffDebugPanel.tsx` — collapsed JSON debug view (v5.3+v5.4 pageInventory section) | **Built** |
+| `TakeoffDebugPanel.tsx` — debug view with page inv + dimension evidence sections (v5.5) | **Built** |
 | `TakeoffPageInventoryPanel.tsx` — page classification panel (v5.4) | **Built** |
+| `TakeoffDimensionEvidencePanel.tsx` — dimension evidence table panel (v5.5) | **Built** |
 | Internal Estimate "Import from Takeoff" button | **Not built — blocked on extraction accuracy** |
 
 ### Spec 73 verified results
@@ -224,10 +229,11 @@ Contract-first foundation + file-backed workspace + live AI extraction + benchma
 
 ### Key commands
 ```bash
-npm run eos:test:takeoff-contract             # 19 test groups
-npm run eos:test:takeoff-workspace-service    # 30 tests (incl. v5.3 list/get)
-npm run eos:test:takeoff-extraction-service   # 24 tests (incl. v5.4 inventory)
-npm run eos:test:takeoff-page-inventory       # 10 new tests (v5.4)
+npm run eos:test:takeoff-contract             # 21 test groups (incl. v5.5 cutout warning)
+npm run eos:test:takeoff-workspace-service    # 30 tests
+npm run eos:test:takeoff-extraction-service   # 28 tests (incl. v5.4 inv + v5.5 evidence)
+npm run eos:test:takeoff-page-inventory       # 10 tests (v5.4)
+npm run eos:test:takeoff-dimension-evidence   # 10 new tests (v5.5)
 npm run eos:test:takeoff-benchmark            # 7 tests (pure eval helpers)
 npm run eos:test:pricing-authority            # confirm no pricing regression
 npm run eos:check:local                       # full repo check
@@ -256,21 +262,24 @@ OPENAI_API_KEY=sk-...       never client-exposed
 | v5.1 — Backsplash tuning, diagnostics, AI review notes UI | Built |
 | v5.2 — Benchmark/evaluation harness, prompt regression guard | Built |
 | v5.3 — Extraction run history, debug panel, _meta tracking | Built |
-| v5.4 — Page inventory + targeted extraction pass | **Built** |
+| v5.4 — Page inventory + targeted extraction pass | Built |
+| v5.5 — Dimension evidence table + cutout handling rules | **Built** |
 
 Dev: `npm run dev --prefix app-ai-takeoff` -> `http://localhost:5186`. Not in Home Launcher yet.
 
 ### Next required focus
-**Run manual QA with the two-step inventory extraction and compare accuracy.**
+**Run manual QA with the three-step evidence extraction and compare accuracy against 78 CT / 4 BS target.**
 
 Steps:
 1. Open Lab with the existing hand sketch workspace.
-2. Click "Generate AI draft" to run the new two-step extraction (inventory + targeted extraction).
-3. Check the Page Inventory panel — confirm the hand sketch page is classified as recommended and the email page (if present) is ignored.
-4. Check the run history panel — compare CT/BS against prior v1/v2 runs.
-5. Run the Benchmark / QA panel — compare against 78 CT / 4 BS target.
-6. If results are closer and consistent, proceed to backsplash prompt tuning.
-7. If results are still inconsistent, use the debug panel to compare normalized JSON across runs and identify variance source.
+2. Click "Generate AI draft" to run the new three-step extraction (inventory → dimension evidence → targeted extraction).
+3. Check the **Page Inventory** panel — confirm hand sketch page is recommended and email pages are ignored.
+4. Check the **Dimension Evidence** panel — confirm ALL major labeled dimensions on the sketch are extracted (e.g. island 108×56, sink wall 91.5×25.5, etc.) BEFORE judging the final takeoff.
+5. If the evidence table is missing a dimension: the v4 extraction will likely miss it too — the evidence prompt needs tuning.
+6. If the evidence table has all dimensions: check whether the final TakeoffResult builds runs from those exact values.
+7. Confirm sink/cooktop cutouts appear in the evidence cutouts[], not in TakeoffResult exclusions[].
+8. Run the Benchmark / QA panel — compare against 78 CT / 4 BS target.
+9. Compare against prior runs in run history.
 
 ### Import gate
 Do NOT enable "Import from Takeoff" until:

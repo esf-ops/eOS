@@ -17,16 +17,18 @@ import type { TakeoffResult,
               TakeoffValidationResult,
               TakeoffImportPlan } from "@takeoff-core/takeoffContract.mjs";
 import type { TakeoffComputedMeasurements } from "@takeoff-core/takeoffMeasurementCalc.mjs";
-import type { PageInventory } from "./TakeoffPageInventoryPanel";
+import type { PageInventory }     from "./TakeoffPageInventoryPanel";
+import type { DimensionEvidence } from "./TakeoffDimensionEvidencePanel";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface Props {
-  result:        TakeoffResult;
-  computed:      TakeoffComputedMeasurements;
-  validation:    TakeoffValidationResult;
-  importPlan:    TakeoffImportPlan;
-  pageInventory?: PageInventory | null;
+  result:             TakeoffResult;
+  computed:           TakeoffComputedMeasurements;
+  validation:         TakeoffValidationResult;
+  importPlan:         TakeoffImportPlan;
+  pageInventory?:     PageInventory | null;
+  dimensionEvidence?: DimensionEvidence | null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -84,6 +86,7 @@ export default function TakeoffDebugPanel({
   validation,
   importPlan,
   pageInventory,
+  dimensionEvidence,
 }: Props) {
   return (
     <details className="debug-panel lab-card">
@@ -91,7 +94,8 @@ export default function TakeoffDebugPanel({
         <span className="debug-panel-title">Debug: AI output</span>
         <span className="debug-panel-hint">
           Normalized JSON · Computed · Diagnostics · Import plan
-          {pageInventory ? " · Page inventory" : ""}
+          {pageInventory     ? " · Page inventory"      : ""}
+          {dimensionEvidence ? " · Dimension evidence"  : ""}
         </span>
       </summary>
 
@@ -116,6 +120,12 @@ export default function TakeoffDebugPanel({
           <DebugSection
             title="Page inventory JSON"
             data={pageInventory}
+          />
+        )}
+        {dimensionEvidence && (
+          <DebugSection
+            title="Dimension evidence JSON"
+            data={dimensionEvidence}
           />
         )}
       </div>

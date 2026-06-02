@@ -102,6 +102,21 @@ function validateArea(area, areaPath) {
     ds.push(diag(INFO, C.MISSING_BACKSPLASH_HEIGHT, `Area "${area.label}": backsplashLinearIn set but backsplashHeightIn missing — defaulting to 4".`, `${areaPath}.backsplashHeightIn`));
   }
 
+  // Cutout-in-exclusions guard (v5.5): sink/cooktop/faucet should never reduce material sf.
+  const CUTOUT_KEYWORDS_RE = /\b(sink|cooktop|faucet|cutout|undermount)\b/i;
+  for (const excl of (area.exclusions ?? [])) {
+    if (CUTOUT_KEYWORDS_RE.test(String(excl.label ?? ""))) {
+      ds.push(diag(
+        WARNING,
+        C.CUTOUT_IN_EXCLUSIONS_WARNING,
+        `Area "${area.label}": exclusion "${excl.label}" appears to be a cutout (sink / cooktop / faucet). ` +
+        `Cutouts are fabrication operations and should not reduce material square footage. ` +
+        `Move this to area.notes[], area.cutouts[], or project notes unless it is a true material exclusion (e.g. a missing slab section or window opening).`,
+        `${areaPath}.exclusions`
+      ));
+    }
+  }
+
   return ds;
 }
 
