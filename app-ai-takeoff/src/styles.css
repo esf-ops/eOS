@@ -1051,6 +1051,38 @@ details[open] > .lab-section-summary::before { transform: rotate(90deg); }
   line-height: 1.5;
 }
 
+/* ── v5.9.3: AI provider config badge ────────────────────────────────────── */
+.ai-provider-badge {
+  display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+  margin-top: 10px; padding-top: 10px;
+  border-top: 1px solid var(--eos-line);
+  font-size: 12px;
+}
+.ai-provider-badge-label {
+  color: var(--eos-ink-muted); font-weight: 600; white-space: nowrap;
+}
+.ai-provider-badge-pill {
+  display: inline-flex; align-items: center;
+  padding: 1px 9px; border-radius: 9999px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.02em;
+  border: 1px solid;
+}
+.ai-provider-badge-pill--gemini {
+  background: var(--eos-info-soft);
+  color: var(--eos-info);
+  border-color: var(--eos-info-border);
+}
+.ai-provider-badge-pill--openai {
+  background: var(--eos-success-soft);
+  color: var(--eos-success);
+  border-color: var(--eos-success-border);
+}
+.ai-provider-badge-warn {
+  color: var(--eos-warn);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 /* ── v5.1: Diagnostics AI reference note ─────────────────────────────────── */
 .diag-ai-note {
   margin: 10px 0 2px;

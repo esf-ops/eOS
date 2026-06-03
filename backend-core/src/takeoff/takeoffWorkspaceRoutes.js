@@ -2,6 +2,7 @@
  * Takeoff Workspace Routes — AI Takeoff Lab workspace and AI extraction (v5).
  *
  * Endpoints:
+ *   GET  /api/takeoff/config                       — safe AI provider config (v5.9.3)
  *   POST /api/takeoff-jobs                        — create workspace from uploaded quote file
  *   GET  /api/takeoff-jobs/:id                    — get workspace status + file metadata
  *   POST /api/takeoff-jobs/:id/results             — save reviewed TakeoffResult (server recomputes)
@@ -36,6 +37,7 @@ import {
   getResultById,
 } from "./takeoffWorkspaceService.mjs";
 import { runAiTakeoffExtraction } from "./takeoffExtractionService.mjs";
+import { readSafeProviderConfig } from "./takeoffAiProvider.mjs";
 import { resolveOrganizationContext } from "../organizations/organizationContext.js";
 
 const jsonParser = express.json({ limit: "4mb" }); // TakeoffResult JSON can be large
@@ -52,6 +54,24 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase, he
   // Inline guard: headAccess is provided in production by server.js; fall back to a
   // no-op for backwards-compat with tests that inject requireAuth + getSupabase only.
   const guardHead = typeof headAccess === "function" ? headAccess : (_r, _s, next) => next();
+
+  // ── GET /api/takeoff/config ───────────────────────────────────────────────
+  //
+  // Returns safe AI provider configuration for the UI (no API key values).
+  // Used to display a compact provider badge near the "Generate AI draft" button
+  // so operators can quickly confirm which backend provider is active.
+  //
+  // Response shape:
+  //   { ok, takeoffAiEnabled, activeProvider, model, hasGeminiKey, hasOpenAiKey }
+  //
+  app.get("/api/takeoff/config", requireAuth(), guardHead, (_req, res) => {
+    try {
+      const config = readSafeProviderConfig();
+      return res.json({ ok: true, ...config });
+    } catch (e) {
+      return res.status(500).json({ ok: false, error: String(e?.message ?? e) });
+    }
+  });
 
   // ── POST /api/takeoff-jobs ─────────────────────────────────────────────────
   //

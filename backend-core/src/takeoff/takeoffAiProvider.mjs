@@ -139,3 +139,31 @@ export function readExtractionConfig() {
     apiKey,
   };
 }
+
+/**
+ * Build the safe provider config for the GET /api/takeoff/config endpoint.
+ *
+ * Returns only non-sensitive information: whether AI is enabled, which provider
+ * is active, the model name, and whether each provider's API key is present.
+ * API key values are NEVER included.
+ *
+ * Shape matches what the /api/takeoff/config endpoint returns.
+ *
+ * @returns {{
+ *   takeoffAiEnabled: boolean,
+ *   activeProvider:   "openai" | "gemini" | string,
+ *   model:            string,
+ *   hasGeminiKey:     boolean,
+ *   hasOpenAiKey:     boolean,
+ * }}
+ */
+export function readSafeProviderConfig() {
+  const cfg = readExtractionConfig();
+  return {
+    takeoffAiEnabled: cfg.enabled,
+    activeProvider:   cfg.providerName,
+    model:            cfg.modelName,
+    hasGeminiKey:     Boolean(String(process.env.GEMINI_API_KEY ?? "").trim()),
+    hasOpenAiKey:     Boolean(String(process.env.OPENAI_API_KEY ?? "").trim()),
+  };
+}

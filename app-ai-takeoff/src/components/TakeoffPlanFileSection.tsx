@@ -61,6 +61,14 @@ interface WorkspaceState {
   file: PlanFileMeta;
 }
 
+interface ProviderConfig {
+  takeoffAiEnabled: boolean;
+  activeProvider:   string;
+  model:            string;
+  hasGeminiKey:     boolean;
+  hasOpenAiKey:     boolean;
+}
+
 export interface TakeoffPlanFileSectionProps {
   /** Current takeoff job ID. Null when no workspace yet. */
   takeoffJobId: string | null;
@@ -144,6 +152,9 @@ export default function TakeoffPlanFileSection({
   const [aiError, setAiError] = useState<string | null>(null);
   const aiTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
+  // Provider config badge state (v5.9.3) — fetched once per token+workspace load
+  const [providerConfig, setProviderConfig] = useState<ProviderConfig | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ── Load existing workspace ────────────────────────────────────────────────
@@ -164,6 +175,23 @@ export default function TakeoffPlanFileSection({
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [takeoffJobId, token]);
+
+  // ── Fetch provider config (v5.9.3) ───────────────────────────────────────
+  // Non-blocking: fetched when the workspace is loaded so the badge appears
+  // before the user clicks Generate. Failure is silently swallowed.
+
+  useEffect(() => {
+    if (!token || !workspace) return;
+    let alive = true;
+    void (async () => {
+      try {
+        const cfg = await labApiGet("/api/takeoff/config", token) as ProviderConfig & { ok: boolean };
+        if (alive && cfg.ok) setProviderConfig(cfg);
+      } catch { /* non-blocking; badge stays hidden */ }
+    })();
+    return () => { alive = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, workspace?.takeoffJobId]);
 
   // ── Upload ────────────────────────────────────────────────────────────────
 
@@ -423,6 +451,30 @@ export default function TakeoffPlanFileSection({
                   ? "AI draft requires estimator review before quote import. Dimensions are recomputed by eliteOS — AI totals are for reference only."
                   : "Send this plan to AI for automatic measurement extraction. eliteOS recomputes and validates all dimensions independently."}
               </p>
+            )}
+
+            {/* Provider config badge (v5.9.3) */}
+            {providerConfig && (
+              <div className="ai-provider-badge" aria-label="Active AI backend provider">
+                <span className="ai-provider-badge-label">Backend provider:</span>
+                <span
+                  className={`ai-provider-badge-pill ai-provider-badge-pill--${providerConfig.activeProvider === "gemini" ? "gemini" : "openai"}`}
+                >
+                  {providerConfig.activeProvider} · {providerConfig.model}
+                </span>
+                {!providerConfig.takeoffAiEnabled && (
+                  <span className="ai-provider-badge-warn">
+                    AI disabled — set TAKEOFF_AI_ENABLED=1 in backend-core env
+                  </span>
+                )}
+                {providerConfig.takeoffAiEnabled &&
+                  providerConfig.activeProvider === "openai" &&
+                  providerConfig.hasGeminiKey && (
+                  <span className="ai-provider-badge-warn">
+                    Backend is using OpenAI. If Gemini was expected, check TAKEOFF_AI_PROVIDER in backend-core Vercel env and redeploy.
+                  </span>
+                )}
+              </div>
             )}
           </div>
         </div>
