@@ -442,8 +442,10 @@ export default function TakeoffLabApp() {
     commitSource(makeSpec73(), "spec73");
   }, []);
 
-  // v5.8: Start New Takeoff — clears workspace state + URL param without deleting any data.
+  // v5.8:   Start New Takeoff — clears workspace state + URL param without deleting any data.
   // v5.9.2: Resets to upload-first empty state ("none"), not Spec 73 sample.
+  // v5.9.4: Setting takeoffJobId → null now also triggers TakeoffPlanFileSection's reset
+  //         effect, which clears its own `workspace` state and reveals the upload form.
   const handleStartNewTakeoff = useCallback(() => {
     if (hasEdits) {
       if (!window.confirm(
@@ -454,8 +456,9 @@ export default function TakeoffLabApp() {
     const url = new URL(window.location.href);
     url.searchParams.delete("takeoffJobId");
     window.history.pushState({}, "", url.toString());
-    // Reset workspace state (no DB deletion).
-    setTakeoffJobId(null);
+
+    // ── Parent-owned workspace / source / result state ────────────────────
+    setTakeoffJobId(null);       // triggers TakeoffPlanFileSection reset effect
     setPlanFilename(null);
     setAiDraftMeta(null);
     setCurrentResultId(null);
@@ -464,9 +467,15 @@ export default function TakeoffLabApp() {
     setBenchmarkQaContext(null);
     setPastedDraft("");
     setParseError(null);
-    // Go to upload-first empty state — not Spec 73.
-    setSourceResult(makeSpec73()); // keep computation fallback
-    setEditDraft(makeSpec73());    // keep computation fallback
+
+    // ── Save panel state ──────────────────────────────────────────────────
+    setSaveStatus("idle");
+    setSaveMsg(null);
+    setSavedAt(null);
+
+    // ── Source / edit / display state — go to upload-first empty state ────
+    setSourceResult(makeSpec73()); // keep computation fallback safe
+    setEditDraft(makeSpec73());
     setSourceMode("none");
     setIsEditing(false);
     setResetKey((k) => k + 1);

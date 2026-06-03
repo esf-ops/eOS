@@ -157,6 +157,33 @@ export default function TakeoffPlanFileSection({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // ── Reset all local state when parent clears the workspace (v5.9.4) ────────
+  //
+  // When handleStartNewTakeoff() runs, the parent sets takeoffJobId → null.
+  // The workspace-load effect below just returns early on null — it never clears
+  // `workspace` — so the old file card stays visible. This effect explicitly
+  // resets every piece of local state owned by this component when the job ID
+  // is cleared, leaving the component in its blank upload-ready state.
+  //
+  // Also runs on initial mount when takeoffJobId is already null, which is fine
+  // since the state is already at defaults.
+
+  useEffect(() => {
+    if (takeoffJobId !== null) return;
+    setWorkspace(null);
+    setLoadError(null);
+    setSelectedFile(null);
+    setFileRole("cabinet_plan");
+    setUploadStep("idle");
+    setUploadMsg(null);
+    setDownloadingId(null);
+    setDownloadError(null);
+    setAiStep("idle");
+    setAiError(null);
+    setProviderConfig(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }, [takeoffJobId]);
+
   // ── Load existing workspace ────────────────────────────────────────────────
 
   useEffect(() => {
