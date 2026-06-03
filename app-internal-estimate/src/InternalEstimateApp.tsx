@@ -1664,7 +1664,10 @@ export default function InternalEstimateApp() {
         internalMaterialFoldDollars: internalOnlyAdjustDollars,
         roomAreaBreakdown: liveRoomAreaBreakdown,
         customerFacingNotes,
-        upgradedEdgeTotalExact: liveUpgradedEdgeTotal
+        upgradedEdgeTotalExact: liveUpgradedEdgeTotal,
+        preparedBy: enteredBy,
+        comparisonRows: customerEstimateComparisonRows,
+        projectUseTaxPercent: Math.max(0, Number(useTaxPercent) || 0)
       }),
     [
       selectedMaterialBreakdown,
@@ -1673,7 +1676,10 @@ export default function InternalEstimateApp() {
       internalOnlyAdjustDollars,
       liveRoomAreaBreakdown,
       customerFacingNotes,
-      liveUpgradedEdgeTotal
+      liveUpgradedEdgeTotal,
+      enteredBy,
+      customerEstimateComparisonRows,
+      useTaxPercent
     ]
   );
 
@@ -2961,9 +2967,7 @@ export default function InternalEstimateApp() {
                   rows={3}
                   value={customerFacingNotes}
                   onChange={(e) => setCustomerFacingNotes(e.target.value)}
-                  placeholder={
-                    "Sink accessories not included.\nConfirm sink base size before ordering.\nLaminate must be removed before template.\nFull-height backsplash requires second template/install."
-                  }
+                  placeholder="Optional — prints under Project Notes on the customer estimate."
                 />
               </label>
             </div>
@@ -4040,14 +4044,8 @@ export default function InternalEstimateApp() {
         primaryGroup={topMaterialGroup}
         primaryColorLabel={primaryColorLabel}
         colorTbd={colorTbd}
-        measuredRooms={liveEstimate.measuredRooms}
-        selectedBreakdown={selectedMaterialBreakdown}
-        visibleLineItems={visibleCustomerLines}
-        visibleRoomAddons={visibleRoomAddons}
-        internalMaterialFoldDollars={internalOnlyAdjustDollars}
         estimateTotalExact={estimateTotalExact}
         customerDisplay={customerEstimateDisplay}
-        comparisonRows={customerEstimateComparisonRows}
         estimateDate={new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}
       />
     </div>

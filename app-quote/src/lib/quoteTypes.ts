@@ -120,6 +120,8 @@ export type RoomDraft = {
   tear: boolean;
   raised: "Yes" | "No";
   notes: string;
+  /** Customer-facing note for this room — prints under the room row on the customer estimate PDF. Internal notes are never printed. */
+  customerNote?: string;
   /** Per-room use tax (countertop material only). `inherit_project` uses project default %. */
   useTaxMode?: RoomUseTaxMode;
   useTaxPercent?: number;

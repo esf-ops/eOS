@@ -832,6 +832,15 @@ export default function RoomScopeBuilder({
                       placeholder="Optional"
                     />
                   </label>
+                  <label>
+                    Customer-facing room notes
+                    <span className="ie-field-hint">Prints under this room on the customer estimate.</span>
+                    <input
+                      value={room.customerNote ?? ""}
+                      onChange={(e) => onRoomsChange(updateRoom(rooms, room.id, { customerNote: e.target.value }))}
+                      placeholder="Optional"
+                    />
+                  </label>
                 </div>
 
                 {room.calcMode === "Guided Shape" ? (

@@ -28,6 +28,8 @@ export type CustomerPrintDisplayRoomRow = {
   displayedAreaTotal: number;
   addonLines: CustomerPrintDisplayAddonLine[];
   customerCustomLines: CustomerRoomAreaCostCustomLine[];
+  /** Customer-facing room notes to print under this room row. Empty array when none. */
+  customerNoteLines: string[];
   reconciliationWarning?: string;
 };
 
@@ -41,6 +43,11 @@ export type PrepareCustomerPrintDisplayRowsParams = {
    */
   roomExtrasExact?: number[];
   unassignedDisplayTotal?: number;
+  /**
+   * Customer-facing note text per row (same order as `roomRows`).
+   * Each entry is split on newlines, trimmed, and filtered; empty string → no note lines.
+   */
+  roomCustomerNotes?: string[];
 };
 
 export type PrepareCustomerPrintDisplayRowsResult = {
@@ -105,6 +112,12 @@ export function prepareCustomerPrintDisplayRows(
       warnings.push(reconciliationWarning);
     }
 
+    const rawNote = params.roomCustomerNotes?.[idx] ?? row.customerNote ?? "";
+    const customerNoteLines = String(rawNote)
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+
     rows.push({
       roomId: row.roomId,
       roomName: row.roomName,
@@ -118,6 +131,7 @@ export function prepareCustomerPrintDisplayRows(
       displayedAreaTotal,
       addonLines,
       customerCustomLines: row.customerCustomLines,
+      customerNoteLines,
       reconciliationWarning
     });
   });

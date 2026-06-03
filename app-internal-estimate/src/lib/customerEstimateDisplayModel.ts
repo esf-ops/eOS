@@ -2,6 +2,7 @@ import { roundCustomerDisplay } from "@quote-lib/customerDisplayRounding";
 import { round2 } from "@quote-lib/measurementEngine";
 import type {
   CustomerRoomAreaCostBreakdown,
+  InternalEstimateGroupComparisonRow,
   SelectedMaterialBreakdown,
   SelectedMaterialScopeLine
 } from "@quote-lib/prototypeQuoteMath";
@@ -12,6 +13,7 @@ import {
   type CustomerPrintDisplayRoomRow
 } from "./customerPrintDisplayRows";
 import { parseCustomerFacingNoteLines } from "./customerFacingNotes";
+import { formatPreparedByDisplayName } from "./formatPreparedByName";
 
 export type CustomerEstimateDisplayLineItem = {
   /** Stable id for summary rows (custom line row id). */
@@ -59,6 +61,24 @@ export type CustomerVanityScopeNote = {
   materialGroup: string;
   programLabel?: string;
   note: string;
+};
+
+/** Per-room row in the optional material group comparison table. */
+export type CustomerPrintComparisonRoomRow = {
+  roomId: string;
+  roomDisplayName: string;
+  isVanity: boolean;
+  /** Displayed area total per selected comparison group. Key = group name. */
+  groupDisplayTotals: Record<string, number>;
+};
+
+/** Full optional material group comparison table for the customer PDF. */
+export type CustomerPrintComparisonTable = {
+  roomRows: CustomerPrintComparisonRoomRow[];
+  /** Estimated project total per selected group (sum of room totals + unassigned). */
+  projectDisplayTotals: Record<string, number>;
+  /** Selected groups in display order, with optional color labels. */
+  selectedGroups: Array<{ group: string; colorLabel?: string }>;
 };
 
 const FHB_ELECTRICAL_DETAIL_RE = /full-height backsplash electrical cutouts/i;
@@ -184,15 +204,41 @@ function buildEstimateSummaryRows(params: {
   summaryAddonsDisplay: number;
   summaryEdgeDisplay: number;
   hasAddons: boolean;
+  addonDetailLines: CustomerAddonDetailLine[];
+  customerFixtureDetailLines: CustomerAddonDetailLine[];
   visibleCustomerLines: CustomerEstimateDisplayLineItem[];
 }): CustomerEstimateSummaryRow[] {
   const rows: CustomerEstimateSummaryRow[] = [
     { key: "countertop", label: "Countertop material", displayAmount: params.summaryCounterDisplay },
     { key: "backsplash", label: "Backsplash material", displayAmount: params.summaryBacksplashDisplay }
   ];
+
+  // Specific add-on lines instead of a single generic "Add-ons / fixtures" row.
+  // Catalog add-ons and customer fixture lines are expanded individually.
   if (params.hasAddons) {
-    rows.push({ key: "addons", label: "Add-ons / fixtures", displayAmount: params.summaryAddonsDisplay });
+    const addonLinesSeen = new Set<string>();
+    params.addonDetailLines.forEach((a, idx) => {
+      if (a.displayAmount <= 0) return;
+      const key = `addon-${idx}-${a.label}-${a.roomName}`;
+      if (addonLinesSeen.has(key)) return;
+      addonLinesSeen.add(key);
+      const label = a.roomName ? `${a.label} · ${a.roomName}` : a.label;
+      rows.push({ key, label, displayAmount: a.displayAmount });
+    });
+    params.customerFixtureDetailLines.forEach((a, idx) => {
+      if (a.displayAmount <= 0) return;
+      const key = `fixture-${idx}-${a.label}-${a.roomName}`;
+      const label = a.roomName ? `${a.label} · ${a.roomName}` : a.label;
+      rows.push({ key, label, displayAmount: a.displayAmount });
+    });
+    // Fallback: if no individual lines resolved (e.g. all zero), keep generic row to preserve total
+    const specificCount = params.addonDetailLines.filter((a) => a.displayAmount > 0).length +
+      params.customerFixtureDetailLines.filter((a) => a.displayAmount > 0).length;
+    if (specificCount === 0 && params.summaryAddonsDisplay > 0) {
+      rows.push({ key: "addons", label: "Add-ons / fixtures", displayAmount: params.summaryAddonsDisplay });
+    }
   }
+
   if (params.summaryEdgeDisplay > 0) {
     rows.push({ key: "edge_upgrades", label: "Edge upgrades", displayAmount: params.summaryEdgeDisplay });
   }
@@ -273,7 +319,8 @@ function buildRoomAreaPrintRows(params: {
     roomRows,
     roomAreaDisplayTotals,
     roomExtrasExact: roomRows.map((r) => params.roomExtrasExactByRoomId[r.roomId] ?? 0),
-    unassignedDisplayTotal: unassignedDisplay
+    unassignedDisplayTotal: unassignedDisplay,
+    roomCustomerNotes: roomRows.map((r) => r.customerNote ?? "")
   });
 
   return {
@@ -282,6 +329,66 @@ function buildRoomAreaPrintRows(params: {
     unassignedExact,
     showRoomBreakdown: true
   };
+}
+
+/**
+ * Build the per-room optional material group comparison table.
+ * For vanity program rooms the display total is fixed across all groups.
+ * For other rooms, material is re-priced at each group's rate using the rate from comparisonRows.
+ * Room add-ons are fixed (unchanged across groups).
+ */
+function buildRoomComparisonTable(params: {
+  roomAreaBreakdown: CustomerRoomAreaCostBreakdown | null;
+  comparisonRows: InternalEstimateGroupComparisonRow[];
+  projectUseTaxPercent: number;
+  unassignedDisplayTotal: number;
+}): CustomerPrintComparisonTable | null {
+  const { comparisonRows, roomAreaBreakdown } = params;
+  if (!comparisonRows.length || !roomAreaBreakdown?.rooms.length) return null;
+
+  const selectedGroups = comparisonRows.map((r) => ({
+    group: r.group,
+    colorLabel: r.comparisonColorLabel
+  }));
+  const taxPct = Math.max(0, Number(params.projectUseTaxPercent) || 0);
+
+  const roomRows: CustomerPrintComparisonRoomRow[] = [];
+
+  for (const room of roomAreaBreakdown.rooms) {
+    const addonSum = round2(room.addons.reduce((s, a) => s + a.amountExact, 0));
+    const customSum = round2(room.customerCustomLines.reduce((s, c) => s + c.amountExact, 0));
+    const fixedExtrasExact = round2(addonSum + customSum);
+
+    const groupDisplayTotals: Record<string, number> = {};
+    for (const compRow of comparisonRows) {
+      if (room.isVanity) {
+        // Vanity program price is fixed regardless of material group
+        groupDisplayTotals[compRow.group] = room.fixedDisplayTotal ?? roundCustomerDisplay(room.roomTotalExact);
+      } else {
+        const rate = compRow.ratePerSqft;
+        const counterMat = round2(room.countertopSf * rate);
+        const useTax = taxPct > 0 ? round2(counterMat * (taxPct / 100)) : 0;
+        const backsplashMat = round2(room.backsplashFhbSf * rate);
+        const totalExact = round2(counterMat + useTax + backsplashMat + fixedExtrasExact);
+        groupDisplayTotals[compRow.group] = roundCustomerDisplay(totalExact);
+      }
+    }
+
+    roomRows.push({
+      roomId: room.roomId,
+      roomDisplayName: room.displayName,
+      isVanity: room.isVanity,
+      groupDisplayTotals
+    });
+  }
+
+  const projectDisplayTotals: Record<string, number> = {};
+  for (const compRow of comparisonRows) {
+    const roomSum = roomRows.reduce((s, r) => s + (r.groupDisplayTotals[compRow.group] ?? 0), 0);
+    projectDisplayTotals[compRow.group] = round2(roomSum + params.unassignedDisplayTotal);
+  }
+
+  return { roomRows, projectDisplayTotals, selectedGroups };
 }
 
 function buildMaterialScopeGroups(selectedBreakdown: SelectedMaterialBreakdown): CustomerMaterialScopeGroup[] {
@@ -340,6 +447,10 @@ export type CustomerEstimateDisplayModel = {
   vanityScopeNotes: CustomerVanityScopeNote[];
   /** Normalized project notes for customer PDF — one bullet per line. */
   customerFacingNoteLines: string[];
+  /** Optional per-room material group comparison table. Null when no groups are selected. */
+  roomComparisonTable: CustomerPrintComparisonTable | null;
+  /** Formatted "Prepared by" display name for the customer PDF. Full name preferred over email. */
+  preparedByDisplayName: string;
 };
 
 export type BuildCustomerEstimateDisplayModelParams = {
@@ -355,6 +466,18 @@ export type BuildCustomerEstimateDisplayModelParams = {
    * backend calculate. Rounded to nearest $10 for display. Missing → treated as $0.
    */
   upgradedEdgeTotalExact?: number;
+  /**
+   * "Prepared by" raw value (email or name) — formatted to a display name for the customer PDF.
+   * Omit or leave blank to show "—".
+   */
+  preparedBy?: string | null;
+  /**
+   * Already-filtered comparison group rows (from buildInternalEstimateGroupComparison filtered to
+   * customerDisplayGroups). When non-empty, roomComparisonTable is built in the display model.
+   */
+  comparisonRows?: InternalEstimateGroupComparisonRow[];
+  /** Project use tax percent — required for per-room comparison pricing. */
+  projectUseTaxPercent?: number;
 };
 
 /**
@@ -413,6 +536,8 @@ export function buildCustomerEstimateDisplayModel(
     summaryAddonsDisplay,
     summaryEdgeDisplay,
     hasAddons,
+    addonDetailLines,
+    customerFixtureDetailLines,
     visibleCustomerLines: params.visibleCustomerLines
   });
 
@@ -420,6 +545,14 @@ export function buildCustomerEstimateDisplayModel(
     finalRounded,
     roomAreaBreakdown: params.roomAreaBreakdown,
     roomExtrasExactByRoomId
+  });
+
+  const comparisonRows = params.comparisonRows ?? [];
+  const roomComparisonTable = buildRoomComparisonTable({
+    roomAreaBreakdown: params.roomAreaBreakdown,
+    comparisonRows,
+    projectUseTaxPercent: Math.max(0, Number(params.projectUseTaxPercent) || 0),
+    unassignedDisplayTotal: roomArea.unassignedDisplayTotal
   });
 
   return {
@@ -444,6 +577,8 @@ export function buildCustomerEstimateDisplayModel(
     hasAddonOrFixtureDetail: hasAddons || customerFixtureDetailLines.length > 0,
     materialScopeGroups: buildMaterialScopeGroups(params.selectedBreakdown),
     vanityScopeNotes: buildVanityScopeNotes(params.measuredRooms),
-    customerFacingNoteLines: parseCustomerFacingNoteLines(params.customerFacingNotes)
+    customerFacingNoteLines: parseCustomerFacingNoteLines(params.customerFacingNotes),
+    roomComparisonTable,
+    preparedByDisplayName: formatPreparedByDisplayName(params.preparedBy)
   };
 }

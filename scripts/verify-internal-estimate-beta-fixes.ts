@@ -56,6 +56,8 @@ import {
   UPGRADED_EDGE_PROFILES
 } from "../app-quote/src/lib/prototypeQuoteMath.ts";
 import { parseCustomerFacingNoteLines } from "../app-internal-estimate/src/lib/customerFacingNotes.ts";
+import { buildCustomerEstimateDisplayModel } from "../app-internal-estimate/src/lib/customerEstimateDisplayModel.ts";
+import { formatPreparedByDisplayName } from "../app-internal-estimate/src/lib/formatPreparedByName.ts";
 
 function approx(a: number, b: number, eps = 0.02) {
   assert.ok(Math.abs(a - b) <= eps, `expected ${b}, got ${a}`);
@@ -707,8 +709,10 @@ function approx(a: number, b: number, eps = 0.02) {
   assert.match(displaySrc, /lineKey/, "display model uses stable line keys");
 
   const printSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/CustomerEstimatePrint.tsx"), "utf8");
-  assert.match(printSrc, /comparisonColorLabel/, "customer print shows optional comparison color labels");
-  assert.match(printSrc, /customerFixtureDetailLines/, "customer print lists custom fixtures in add-ons section");
+  // Comparison color labels now come through display.roomComparisonTable.selectedGroups[].colorLabel
+  assert.match(printSrc, /colorLabel/, "customer print shows optional comparison color labels via selectedGroups");
+  // customerFixtureDetailLines are now handled in the display model's estimateSummaryRows, not rendered directly
+  assert.match(printSrc, /estimateSummaryRows/, "customer print renders estimateSummaryRows (which includes fixture lines)");
 
   const ieSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/InternalEstimateApp.tsx"), "utf8");
   assert.match(ieSrc, /comparisonGroupColorLabels/, "IE UI stores optional comparison color labels");
@@ -911,6 +915,150 @@ function approx(a: number, b: number, eps = 0.02) {
   const printSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/CustomerEstimatePrint.tsx"), "utf8");
   assert.match(printSrc, /nearest \$5/, "CustomerEstimatePrint copy must say 'nearest $5'");
   assert.doesNotMatch(printSrc, /nearest \$10/, "CustomerEstimatePrint must not have old nearest-$10 copy");
+}
+
+// ─── CUSTOMER PDF CLEANUP REGRESSION CHECKS ───────────────────────────────
+
+// PREP-BY-1: formatPreparedByDisplayName converts email to full name
+{
+  assert.equal(formatPreparedByDisplayName("peg.reid@elitestonefabrication.com"), "Peg Reid", "PREP-BY-1: peg.reid email → Peg Reid");
+  assert.equal(formatPreparedByDisplayName("chris.henely@elitestonefabrication.com"), "Chris Henely", "PREP-BY-1: chris.henely email → Chris Henely");
+  assert.equal(formatPreparedByDisplayName("Casey Johnson"), "Casey Johnson", "PREP-BY-1: plain name returned as-is");
+  assert.equal(formatPreparedByDisplayName(""), "", "PREP-BY-1: empty → empty string");
+  assert.equal(formatPreparedByDisplayName(null), "", "PREP-BY-1: null → empty string");
+  assert.equal(formatPreparedByDisplayName("casey@esf.com"), "Casey", "PREP-BY-1: single-segment local → capitalized");
+}
+
+// PDF-STRUCT-1: CustomerEstimatePrint source checks — removed sections + structure
+{
+  const printSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/CustomerEstimatePrint.tsx"), "utf8");
+
+  // Removed sections
+  assert.doesNotMatch(printSrc, /Scope summary/i, "PDF-STRUCT-1: Scope Summary section removed");
+  assert.doesNotMatch(printSrc, /Quoted material breakdown/i, "PDF-STRUCT-1: Quoted Material Breakdown section removed");
+  assert.doesNotMatch(printSrc, /cep-breakdown/, "PDF-STRUCT-1: Quoted Material Breakdown container removed");
+  assert.doesNotMatch(printSrc, /materialScopeGroups/, "PDF-STRUCT-1: materialScopeGroups not rendered in print");
+  assert.doesNotMatch(printSrc, /Add-ons \/ fixtures/, "PDF-STRUCT-1: separate Add-ons / Fixtures section removed");
+  assert.doesNotMatch(printSrc, /Total sf/i, "PDF-STRUCT-1: Total SF column removed from room table");
+  assert.doesNotMatch(printSrc, /displayRow\.totalSqft/, "PDF-STRUCT-1: totalSqft not rendered in room table");
+  assert.doesNotMatch(printSrc, /scope reference.*not a second/, "PDF-STRUCT-1: internal scope reference copy removed");
+  assert.doesNotMatch(printSrc, /comparisonRows/, "PDF-STRUCT-1: comparisonRows prop not used directly (now via display model)");
+
+  // Room/Area table column headers
+  assert.match(printSrc, /Room \/ area/, "PDF-STRUCT-1: Room / area column present");
+  assert.match(printSrc, /Material/, "PDF-STRUCT-1: Material column present");
+  assert.match(printSrc, /Add-ons/, "PDF-STRUCT-1: Add-ons column present");
+  assert.match(printSrc, /Area total/, "PDF-STRUCT-1: Area total column present");
+
+  // Includes: add-on label format under room row
+  assert.match(printSrc, /Includes:/, "PDF-STRUCT-1: Includes: label under room row");
+
+  // Customer-facing room notes render
+  assert.match(printSrc, /customerNoteLines/, "PDF-STRUCT-1: customerNoteLines rendered under room");
+
+  // Comparison table uses display model
+  assert.match(printSrc, /display\.roomComparisonTable/, "PDF-STRUCT-1: comparison uses display.roomComparisonTable");
+  assert.match(printSrc, /groupDisplayTotals/, "PDF-STRUCT-1: per-room group totals rendered");
+  assert.match(printSrc, /projectDisplayTotals/, "PDF-STRUCT-1: project total per group rendered");
+
+  // Prepared by uses display model name
+  assert.match(printSrc, /preparedByDisplayName/, "PDF-STRUCT-1: preparedByDisplayName used from display model");
+
+  // Project notes still present (rendered conditionally)
+  assert.match(printSrc, /Project Notes/, "PDF-STRUCT-1: Project Notes section still present");
+  assert.match(printSrc, /customerFacingNoteLines/, "PDF-STRUCT-1: customerFacingNoteLines still rendered");
+
+  // nearest $5 copy preserved
+  assert.match(printSrc, /nearest \$5/, "PDF-STRUCT-1: nearest $5 copy preserved");
+  assert.doesNotMatch(printSrc, /nearest \$10/, "PDF-STRUCT-1: no nearest $10 copy");
+}
+
+// PDF-DM-1: display model source — exposes new fields, uses helpers correctly
+{
+  const dmSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/lib/customerEstimateDisplayModel.ts"), "utf8");
+  assert.match(dmSrc, /preparedByDisplayName/, "PDF-DM-1: display model exposes preparedByDisplayName");
+  assert.match(dmSrc, /roomComparisonTable/, "PDF-DM-1: display model exposes roomComparisonTable");
+  assert.match(dmSrc, /CustomerPrintComparisonTable/, "PDF-DM-1: CustomerPrintComparisonTable type defined");
+  assert.match(dmSrc, /CustomerPrintComparisonRoomRow/, "PDF-DM-1: CustomerPrintComparisonRoomRow type defined");
+  assert.match(dmSrc, /formatPreparedByDisplayName/, "PDF-DM-1: formatPreparedByDisplayName imported and used");
+  // Summary rows expand specific addon lines; generic row only as fallback when no specific lines exist
+  assert.match(dmSrc, /addonDetailLines/, "PDF-DM-1: addonDetailLines expanded in summary rows");
+  assert.match(dmSrc, /specificCount/, "PDF-DM-1: specificCount logic present — generic fallback only when no specifics");
+  // Vanity fixed display total preserved in comparison
+  assert.match(dmSrc, /fixedDisplayTotal/, "PDF-DM-1: fixedDisplayTotal used in comparison builder");
+}
+
+// PDF-DM-VANITY-1: customerNote field propagates through CustomerRoomAreaCostRow
+{
+  const vanity = createVanityRoom();
+  vanity.name = "Master Vanity";
+  vanity.vanity.size = "37_S";
+  vanity.vanity.isVanityProgram = true;
+  vanity.vanity.vanitySinkType = "rectangular_white";
+
+  const kitchen = createDefaultRoom("Group Promo");
+  kitchen.name = "Kitchen";
+  kitchen.calcMode = "Manual Sq Ft";
+  kitchen.direct = { counter: 40, splash: 8 };
+  (kitchen as typeof kitchen & { customerNote?: string }).customerNote = "Confirm sink base before template.";
+
+  const mKitchen = measureRoomDraft(kitchen, 0, "direct", 0);
+  const mVanity = measureRoomDraft(vanity, 40, "direct", 0);
+
+  const rab = buildCustomerRoomAreaCostBreakdown({
+    roomDrafts: [kitchen, vanity],
+    measuredRooms: [mKitchen, mVanity],
+    materialBasis: "direct",
+    projectUseTaxPercent: 0
+  });
+
+  // Kitchen row customerNote should be propagated
+  const kitchenRow = rab.rooms.find((r) => r.roomId === kitchen.id);
+  assert.ok(kitchenRow != null, "PDF-DM-VANITY-1: kitchen row in breakdown");
+  assert.equal(kitchenRow!.customerNote, "Confirm sink base before template.", "PDF-DM-VANITY-1: customerNote propagated to breakdown row");
+
+  // Vanity row customerNote defaults to empty string
+  const vanityRow = rab.rooms.find((r) => r.roomId === vanity.id);
+  assert.ok(vanityRow != null, "PDF-DM-VANITY-1: vanity row in breakdown");
+  assert.equal(vanityRow!.isVanity, true, "PDF-DM-VANITY-1: vanity row isVanity");
+  assert.equal(vanityRow!.fixedDisplayTotal, 265, "PDF-DM-VANITY-1: vanity fixedDisplayTotal = $265");
+  assert.equal(vanityRow!.customerNote, "", "PDF-DM-VANITY-1: vanity customerNote defaults to empty string");
+}
+
+// PDF-SOURCE-1: no default seeded project notes in InternalEstimateApp
+{
+  const appSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/InternalEstimateApp.tsx"), "utf8");
+  assert.doesNotMatch(appSrc, /Sink accessories not included/, "PDF-SOURCE-1: no default seeded project notes in app");
+  assert.doesNotMatch(appSrc, /Laminate must be removed/, "PDF-SOURCE-1: no prefill project notes in app");
+}
+
+// PDF-SOURCE-2: InternalEstimateApp passes new params to buildCustomerEstimateDisplayModel
+{
+  const appSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/InternalEstimateApp.tsx"), "utf8");
+  assert.match(appSrc, /preparedBy.*enteredBy/, "PDF-SOURCE-2: preparedBy wired from enteredBy");
+  assert.match(appSrc, /comparisonRows.*customerEstimateComparisonRows/, "PDF-SOURCE-2: comparisonRows passed to display model");
+  assert.match(appSrc, /projectUseTaxPercent/, "PDF-SOURCE-2: projectUseTaxPercent passed to display model");
+}
+
+// PDF-SOURCE-3: CustomerEstimatePrint no longer accepts removed props
+{
+  const printSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/CustomerEstimatePrint.tsx"), "utf8");
+  assert.doesNotMatch(printSrc, /measuredRooms.*MeasuredRoom/, "PDF-SOURCE-3: measuredRooms prop removed from CustomerEstimatePrint");
+  assert.doesNotMatch(printSrc, /selectedBreakdown.*SelectedMaterialBreakdown/, "PDF-SOURCE-3: selectedBreakdown prop removed from CustomerEstimatePrint");
+}
+
+// PDF-SOURCE-4: CustomerRoomAreaCostRow has customerNote field
+{
+  const mathSrc = readFileSync(join(repoRoot, "app-quote/src/lib/prototypeQuoteMath.ts"), "utf8");
+  assert.match(mathSrc, /customerNote.*string/, "PDF-SOURCE-4: customerNote: string field on CustomerRoomAreaCostRow");
+}
+
+// PDF-SOURCE-5: RoomScopeBuilder has customer-facing notes field
+{
+  const uiSrc = readFileSync(join(repoRoot, "app-quote/src/ui/RoomScopeBuilder.tsx"), "utf8");
+  assert.match(uiSrc, /Customer-facing room notes/, "PDF-SOURCE-5: Customer-facing room notes label in RoomScopeBuilder");
+  assert.match(uiSrc, /customerNote/, "PDF-SOURCE-5: customerNote field updated in RoomScopeBuilder");
+  assert.match(uiSrc, /Prints under this room/, "PDF-SOURCE-5: helper copy for customer-facing notes field");
 }
 
 console.log("verify-internal-estimate-beta-fixes: OK");

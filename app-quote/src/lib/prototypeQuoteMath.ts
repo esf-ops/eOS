@@ -1150,6 +1150,8 @@ export type CustomerRoomAreaCostRow = {
    * This prevents internal fold adjustments or ceiling rounding from inflating the vanity display price.
    */
   fixedDisplayTotal?: number;
+  /** Customer-facing note for this room — prints under the room on the customer PDF. Empty string when absent. */
+  customerNote: string;
 };
 
 export type CustomerRoomAreaCostBreakdown = {
@@ -1309,7 +1311,8 @@ export function buildCustomerRoomAreaCostBreakdown(params: {
       addons,
       customerCustomLines: [],
       roomTotalExact: 0,
-      fixedDisplayTotal
+      fixedDisplayTotal,
+      customerNote: String(draft?.customerNote ?? "").trim()
     });
   }
 
