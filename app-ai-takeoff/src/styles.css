@@ -2447,6 +2447,45 @@ details[open] > .lab-section-summary::before { transform: rotate(90deg); }
   font-weight: 600;
 }
 
+/* ── Developer section drawer ── */
+.lab-section-dev {
+  border-color: var(--eos-line);
+  background: var(--eos-bg);
+}
+.lab-section-dev > .lab-section-summary {
+  opacity: 0.75;
+}
+.lab-section-dev > .lab-section-summary:hover {
+  opacity: 1;
+}
+.lab-section-title--dev {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--eos-ink-muted);
+}
+.dev-tools-notice {
+  font-size: 0.78rem;
+  color: var(--eos-ink-muted);
+  background: var(--eos-bg-soft);
+  border: 1px solid var(--eos-line);
+  border-radius: var(--r-sm);
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  font-style: italic;
+}
+.dev-tools-active-badge {
+  font-style: normal;
+  font-weight: 600;
+  color: var(--lab-accent);
+}
+
+/* ── Excluded-runs source pill ── */
+.source-pill--excluded {
+  background: var(--eos-bg-soft);
+  color: var(--eos-ink-muted);
+  border: 1px dashed var(--eos-line-strong);
+}
+
 /* ── lab-section-desc (supporting text under section header) ── */
 .lab-section-desc {
   margin: -6px 0 10px;

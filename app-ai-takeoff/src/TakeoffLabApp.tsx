@@ -482,6 +482,7 @@ export default function TakeoffLabApp() {
   // v5.9.2: Resets to upload-first empty state ("none"), not Spec 73 sample.
   // v5.9.4: Setting takeoffJobId → null now also triggers TakeoffPlanFileSection's reset
   //         effect, which clears its own `workspace` state and reveals the upload form.
+  // v6.1.1: Also resets workbench/benchmark state.
   const handleStartNewTakeoff = useCallback(() => {
     if (hasEdits) {
       if (!window.confirm(
@@ -515,6 +516,11 @@ export default function TakeoffLabApp() {
     setSourceMode("none");
     setIsEditing(false);
     setResetKey((k) => k + 1);
+
+    // ── Review workbench state ────────────────────────────────────────────
+    setExcludedRunIds(new Set());
+    setReviewNotes({});
+    setEvidenceReviewState({});
   }, [hasEdits]);
 
   // ── Edit actions ──────────────────────────────────────────────────────────
@@ -653,7 +659,7 @@ export default function TakeoffLabApp() {
     setEvidenceReviewState((prev) => ({ ...prev, [dimId]: "reviewed" }));
   }, []);
 
-  // Reconciliation against full editDraft (for workbench + save warning).
+  // ── Reconciliation against full editDraft (for workbench + save warning) ─
   // Re-runs when editDraft or dimensionEvidence changes.
   const fullReconciliation = useMemo(() => {
     if (!dimensionEvidence) return null;
@@ -671,6 +677,27 @@ export default function TakeoffLabApp() {
       };
     } catch { return null; }
   }, [editDraft, dimensionEvidence]);
+
+  /**
+   * True when the evidence reconciliation found issues that need estimator attention.
+   * Used to auto-open the Evidence trace collapsible panel.
+   */
+  const hasEvidenceIssues = Boolean(
+    fullReconciliation?.checksRan && (
+      fullReconciliation.unsupportedRuns.length > 0 ||
+      fullReconciliation.changedRuns.length > 0 ||
+      fullReconciliation.conflictingRuns.length > 0 ||
+      fullReconciliation.unusedHighConfidenceDimensions.length > 0
+    )
+  );
+
+  /** Count of unresolved evidence issues (for save warning + summary labels). */
+  const unresolvedCount = fullReconciliation ? countUnresolvedWorkbenchIssues({
+    reconciliation:      fullReconciliation as Parameters<typeof countUnresolvedWorkbenchIssues>[0]["reconciliation"],
+    excludedRunIds,
+    reviewNotes,
+    evidenceReviewState,
+  }) : 0;
 
   // ── Save reviewed takeoff ─────────────────────────────────────────────────
 
@@ -925,23 +952,19 @@ export default function TakeoffLabApp() {
                  displayMode === "spec73"   ? "⚙"  : "◎"}{" "}
                 {sourceLabel[displayMode]}
               </span>
-              {displayMode === "ai-draft" && (
-                <span className="source-pill source-pill--review-note">
-                  AI draft · estimator review required
-                </span>
-              )}
               {displayMode === "ai-draft" && aiDraftMeta && (
                 <span className="source-pill source-pill--ai-meta">
-                  Prompt {aiDraftMeta.promptVersion ?? "?"} · {aiDraftMeta.modelUsed ?? "model unknown"}
+                  {aiDraftMeta.promptVersion ?? "?"} · {aiDraftMeta.modelUsed ?? "model unknown"}
                 </span>
               )}
               {result.source?.fileName && displayMode !== "file" && displayMode !== "invalid" && displayMode !== "spec73" && (
                 <span className="source-pill source-pill--file">{result.source.fileName}</span>
               )}
               {hasEdits && displayMode !== "spec73" && (
-                <span className="source-pill source-pill--edit-note">
-                  Changes are local to this Lab session
-                </span>
+                <span className="source-pill source-pill--edit-note">Edited</span>
+              )}
+              {excludedRunIds.size > 0 && (
+                <span className="source-pill source-pill--excluded">{excludedRunIds.size} run{excludedRunIds.size !== 1 ? "s" : ""} excluded</span>
               )}
               {takeoffJobId && (
                 <>
@@ -1119,13 +1142,13 @@ export default function TakeoffLabApp() {
           {hasActiveSource && (
             <>
 
-          {/* Summary cards */}
+          {/* ── 1. Measurement summary ──────────────────────────────────── */}
           <section className="lab-section">
             <h2 className="lab-section-title">Measurement summary</h2>
             <TakeoffSummaryCards computed={computed} importPlan={importPlan} />
           </section>
 
-          {/* ── v5.8: Automatic QA gate — estimator-facing result ─────────── */}
+          {/* ── 2. Takeoff QA result ─────────────────────────────────────── */}
           {qaGate && (
             <section className="lab-section">
               <h2 className="lab-section-title">Takeoff QA result</h2>
@@ -1133,7 +1156,7 @@ export default function TakeoffLabApp() {
             </section>
           )}
 
-          {/* AI review notes — visible whenever assumptions/notes exist in the result */}
+          {/* ── 3. AI assumptions & review notes ─────────────────────────── */}
           {(() => {
             const notes = gatherReviewNotes(result);
             if (notes.length === 0) return null;
@@ -1142,8 +1165,7 @@ export default function TakeoffLabApp() {
                 <h2 className="lab-section-title">AI assumptions &amp; review notes</h2>
                 <div className="ai-review-notes lab-card">
                   <p className="ai-review-notes-intro">
-                    Review these AI-generated notes before saving or importing.
-                    Correct any assumptions that do not match the plan.
+                    Review these AI-generated notes before saving. Correct any assumptions that do not match the plan.
                   </p>
                   <ul className="ai-review-notes-list">
                     {notes.map((note, i) => (
@@ -1155,218 +1177,265 @@ export default function TakeoffLabApp() {
             );
           })()}
 
-          {/* Room / area / run review */}
+          {/* ── 4. Takeoff review workbench (PRIMARY) ────────────────────── */}
           <section className="lab-section">
             <div className="lab-section-header">
-              <h2 className="lab-section-title" style={{ margin: 0 }}>Rooms, areas & runs</h2>
-              <div className="edit-mode-controls">
-                {hasEdits && !isEditing && (
-                  <button className="btn-edit-action btn-edit-action--reset" onClick={handleResetEdits} type="button">
-                    Reset edits
-                  </button>
-                )}
-                {isEditing && hasEdits && (
-                  <button className="btn-edit-action btn-edit-action--reset" onClick={handleResetEdits} type="button">
-                    Reset edits
-                  </button>
-                )}
-                <button
-                  className={`btn-edit-toggle${isEditing ? " btn-edit-toggle--active" : ""}`}
-                  onClick={() => setIsEditing((v) => !v)}
-                  type="button"
-                >
-                  {isEditing ? "✓ Done editing" : "✎ Edit measurements"}
+              <h2 className="lab-section-title" style={{ margin: 0 }}>Takeoff review workbench</h2>
+              {hasEdits && (
+                <button className="btn-edit-action btn-edit-action--reset" onClick={handleResetEdits} type="button">
+                  Reset edits
                 </button>
-              </div>
+              )}
             </div>
-            {isEditing && (
-              <div className="edit-mode-banner">
-                <span className="edit-mode-banner-icon">✎</span>
-                <span>Edit mode — changes update totals and diagnostics instantly. Changes are local to this Lab session.</span>
-              </div>
-            )}
-            <TakeoffRoomsReview
-              key={resetKey}
-              result={result}
-              computed={computed}
-              editMode={isEditing}
-              onPatchRoom={handlePatchRoom}
-              onPatchArea={handlePatchArea}
-              onPatchRun={handlePatchRun}
-            />
-          </section>
-
-          {/* Save reviewed takeoff placeholder — moved after Evidence Trace & Workbench below */}
-
-          {/* Validator diagnostics */}
-          <section className="lab-section">
-            <h2 className="lab-section-title">Validation diagnostics</h2>
-            <TakeoffDiagnosticsPanel validation={validation} />
-          </section>
-
-          {/* Import preview */}
-          <section className="lab-section">
-            <h2 className="lab-section-title">Import preview</h2>
-            <TakeoffImportPreview importPlan={importPlan} />
-          </section>
-
-          {/* ── Benchmark / QA evaluation (v5.2) ─────────────────────── */}
-          <section className="lab-section">
-            <h2 className="lab-section-title">Benchmark / QA evaluation</h2>
-            <TakeoffBenchmarkPanel
-              computed={computed}
+            <p className="lab-section-desc">
+              Review and correct the takeoff before saving. Edit dimensions, exclude bad runs, and add reviewer notes.
+              The Measurement Summary above updates instantly.
+            </p>
+            <TakeoffReviewWorkbench
+              editDraft={editDraft}
               dimensionEvidence={dimensionEvidence}
-              validation={validation}
-              onBenchmarkEvaluated={setBenchmarkQaContext}
+              excludedRunIds={excludedRunIds}
+              reviewNotes={reviewNotes}
+              evidenceReviewState={evidenceReviewState}
+              onPatchRun={handlePatchRun}
+              onPatchArea={handlePatchArea}
+              onToggleExcludeRun={handleToggleExcludeRun}
+              onSetReviewNote={handleSetReviewNote}
+              onMarkEvidenceReviewed={handleMarkEvidenceReviewed}
             />
           </section>
 
-          {/* ── Page inventory (v5.4) — shown when a page inventory is available ── */}
-          {pageInventory && (
-            <section className="lab-section">
-              <h2 className="lab-section-title">Page inventory</h2>
-              <TakeoffPageInventoryPanel inventory={pageInventory} />
-            </section>
-          )}
-
-          {/* ── Dimension evidence (v5.5/v5.6) — shown when evidence table is available ── */}
-          {dimensionEvidence && (
-            <section className="lab-section">
-              <h2 className="lab-section-title">Dimension evidence</h2>
-              <TakeoffDimensionEvidencePanel
-                evidence={dimensionEvidence}
-                computed={computed}
-                validation={validation}
-              />
-            </section>
-          )}
-
-          {/* ── Evidence trace (v6.0) — per-run traceability to dimension evidence ── */}
-          {dimensionEvidence && (
-            <section className="lab-section">
-              <h2 className="lab-section-title">Evidence trace</h2>
-              <p className="lab-section-desc">
-                Each final run is checked against extracted dimension evidence.
-                Unsupported, changed, or conflicting dimensions are flagged for estimator review.
-                Use the action buttons to apply evidence values or mark unused evidence reviewed.
-              </p>
-              <TakeoffEvidenceTracePanel
-                result={editDraft}
-                dimensionEvidence={dimensionEvidence}
-                actions={{
-                  onUseEvidenceValue:    handlePatchRunById,
-                  onAddEvidenceAsRun:    handleAddEvidenceAsRun,
-                  onMarkEvidenceReviewed: handleMarkEvidenceReviewed,
-                  evidenceReviewState,
-                }}
-              />
-            </section>
-          )}
-
-          {/* ── Review Workbench (v6.1) — estimator edits + evidence-assisted corrections ── */}
-          {hasActiveSource && (
-            <section className="lab-section">
-              <h2 className="lab-section-title">Takeoff review workbench</h2>
-              <p className="lab-section-desc">
-                Review and edit every run before saving. Changes update the Measurement Summary instantly.
-                Excluded runs are removed from the computed total but kept in the draft for reference.
-                No quote is created or mutated.
-              </p>
-              <TakeoffReviewWorkbench
-                editDraft={editDraft}
-                dimensionEvidence={dimensionEvidence}
-                excludedRunIds={excludedRunIds}
-                reviewNotes={reviewNotes}
-                evidenceReviewState={evidenceReviewState}
-                onPatchRun={handlePatchRun}
-                onPatchArea={handlePatchArea}
-                onToggleExcludeRun={handleToggleExcludeRun}
-                onSetReviewNote={handleSetReviewNote}
-                onMarkEvidenceReviewed={handleMarkEvidenceReviewed}
-              />
-            </section>
-          )}
-
-          {/* ── Save reviewed takeoff draft (v4, moved after workbench in v6.1) ── */}
+          {/* ── 5. Save reviewed takeoff ─────────────────────────────────── */}
           {takeoffJobId && authToken && (
             <section className="lab-section">
               <h2 className="lab-section-title">Save reviewed takeoff</h2>
-              {(() => {
-                const unresolvedCount = fullReconciliation ? countUnresolvedWorkbenchIssues({
-                  reconciliation:      fullReconciliation as Parameters<typeof countUnresolvedWorkbenchIssues>[0]["reconciliation"],
-                  excludedRunIds,
-                  reviewNotes,
-                  evidenceReviewState,
-                }) : 0;
-                return (
-                  <div className="save-panel lab-card">
-                    {unresolvedCount > 0 && (
-                      <div className="save-panel-warning" role="alert">
-                        <span className="save-panel-warning-icon">⚠</span>
-                        <span>
-                          <strong>{unresolvedCount} unresolved evidence issue{unresolvedCount !== 1 ? "s" : ""}</strong> remain in the
-                          workbench. Review them above, or save anyway.
-                        </span>
-                      </div>
-                    )}
-                    {excludedRunIds.size > 0 && (
-                      <div className="save-panel-info-note">
-                        <span className="save-panel-info-icon">ℹ</span>
-                        <span>
-                          {excludedRunIds.size} excluded run{excludedRunIds.size !== 1 ? "s" : ""} will not appear in the saved draft.
-                          Measurement totals reflect included runs only.
-                        </span>
-                      </div>
-                    )}
-                    <div className="save-panel-inner">
-                      <div className="save-panel-info">
-                        <p className="save-panel-desc">
-                          Save the current reviewed measurements as a draft tied to this workspace.
-                          The backend recomputes all square footage independently from your dimensions.
-                          No quote is created or mutated.
-                        </p>
-                        {savedAt && (
-                          <p className="save-panel-last-saved">
-                            Last saved:{" "}
-                            <strong>{new Date(savedAt).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}</strong>
-                          </p>
-                        )}
-                      </div>
-                      <div className="save-panel-actions">
-                        <button
-                          type="button"
-                          className="save-panel-btn"
-                          disabled={saveStatus === "saving"}
-                          onClick={() => {
-                            if (unresolvedCount > 0) {
-                              if (!window.confirm(
-                                `${unresolvedCount} unresolved evidence issue${unresolvedCount !== 1 ? "s" : ""} remain. Save reviewed draft anyway?`
-                              )) return;
-                            }
-                            void handleSaveDraft();
-                          }}
-                        >
-                          {saveStatus === "saving" ? "Saving…" : "Save reviewed takeoff draft"}
-                        </button>
-                      </div>
-                    </div>
-                    {saveMsg && (
-                      <p
-                        className={`save-panel-msg${saveStatus === "error" ? " save-panel-msg--error" : saveStatus === "saved" ? " save-panel-msg--saved" : ""}`}
-                        role="status"
-                        aria-live="polite"
-                      >
-                        {saveStatus === "saved" ? "✓ " : saveStatus === "error" ? "✗ " : ""}
-                        {saveMsg}
+              <div className="save-panel lab-card">
+                {unresolvedCount > 0 && (
+                  <div className="save-panel-warning" role="alert">
+                    <span className="save-panel-warning-icon">⚠</span>
+                    <span>
+                      <strong>{unresolvedCount} unresolved evidence issue{unresolvedCount !== 1 ? "s" : ""}</strong>{" "}
+                      remain in the workbench checklist. Review them above, or save anyway.
+                    </span>
+                  </div>
+                )}
+                {excludedRunIds.size > 0 && (
+                  <div className="save-panel-info-note">
+                    <span className="save-panel-info-icon">ℹ</span>
+                    <span>
+                      {excludedRunIds.size} excluded run{excludedRunIds.size !== 1 ? "s" : ""} will not appear in the saved draft.
+                    </span>
+                  </div>
+                )}
+                <div className="save-panel-inner">
+                  <div className="save-panel-info">
+                    <p className="save-panel-desc">
+                      The backend recomputes all square footage independently from your dimensions.
+                    </p>
+                    {savedAt && (
+                      <p className="save-panel-last-saved">
+                        Last saved:{" "}
+                        <strong>{new Date(savedAt).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}</strong>
                       </p>
                     )}
                   </div>
-                );
-              })()}
+                  <div className="save-panel-actions">
+                    <button
+                      type="button"
+                      className="save-panel-btn"
+                      disabled={saveStatus === "saving"}
+                      onClick={() => {
+                        if (unresolvedCount > 0) {
+                          if (!window.confirm(
+                            `${unresolvedCount} unresolved evidence issue${unresolvedCount !== 1 ? "s" : ""} remain. Save reviewed draft anyway?`
+                          )) return;
+                        }
+                        void handleSaveDraft();
+                      }}
+                    >
+                      {saveStatus === "saving" ? "Saving…" : "Save reviewed takeoff draft"}
+                    </button>
+                  </div>
+                </div>
+                {saveMsg && (
+                  <p
+                    className={`save-panel-msg${saveStatus === "error" ? " save-panel-msg--error" : saveStatus === "saved" ? " save-panel-msg--saved" : ""}`}
+                    role="status"
+                    aria-live="polite"
+                  >
+                    {saveStatus === "saved" ? "✓ " : saveStatus === "error" ? "✗ " : ""}
+                    {saveMsg}
+                  </p>
+                )}
+              </div>
             </section>
           )}
 
-          {/* ── Debug: AI output (v5.3) — collapsed JSON view ──────────── */}
+          {/* ════════════════════════════════════════════════════════════════
+              SECONDARY PANELS — collapsed by default
+              ════════════════════════════════════════════════════════════════ */}
+
+          {/* ── Evidence trace (auto-opens when issues exist) ─────────────── */}
+          {dimensionEvidence && (
+            <details
+              className="lab-section lab-section-collapsible"
+              open={hasEvidenceIssues || undefined}
+            >
+              <summary className="lab-section-summary">
+                <span className="lab-section-title" style={{ margin: 0 }}>Evidence trace</span>
+                <span className="lab-section-summary-note">
+                  {fullReconciliation?.checksRan
+                    ? unresolvedCount > 0
+                      ? `${unresolvedCount} issue${unresolvedCount !== 1 ? "s" : ""} — check workbench checklist`
+                      : "all clear"
+                    : "per-run traceability to dimension evidence"}
+                </span>
+              </summary>
+              <div style={{ marginTop: 12 }}>
+                <p className="lab-section-desc">
+                  Each final run traced against extracted dimension evidence. Use action buttons to apply evidence values or mark unused evidence reviewed.
+                </p>
+                <TakeoffEvidenceTracePanel
+                  result={editDraft}
+                  dimensionEvidence={dimensionEvidence}
+                  actions={{
+                    onUseEvidenceValue:     handlePatchRunById,
+                    onAddEvidenceAsRun:     handleAddEvidenceAsRun,
+                    onMarkEvidenceReviewed: handleMarkEvidenceReviewed,
+                    evidenceReviewState,
+                  }}
+                />
+              </div>
+            </details>
+          )}
+
+          {/* ── Rooms, areas & runs (legacy tree view) ───────────────────── */}
+          <details className="lab-section lab-section-collapsible">
+            <summary className="lab-section-summary">
+              <span className="lab-section-title" style={{ margin: 0 }}>Rooms, areas &amp; runs</span>
+              <span className="lab-section-summary-note">Legacy tree view — use workbench above for editing</span>
+            </summary>
+            <div style={{ marginTop: 12 }}>
+              <div className="lab-section-header" style={{ marginBottom: 8 }}>
+                <div className="edit-mode-controls">
+                  {hasEdits && (
+                    <button className="btn-edit-action btn-edit-action--reset" onClick={handleResetEdits} type="button">
+                      Reset edits
+                    </button>
+                  )}
+                  <button
+                    className={`btn-edit-toggle${isEditing ? " btn-edit-toggle--active" : ""}`}
+                    onClick={() => setIsEditing((v) => !v)}
+                    type="button"
+                  >
+                    {isEditing ? "✓ Done editing" : "✎ Edit measurements"}
+                  </button>
+                </div>
+              </div>
+              {isEditing && (
+                <div className="edit-mode-banner">
+                  <span className="edit-mode-banner-icon">✎</span>
+                  <span>Edit mode — changes update totals instantly. Prefer the Review Workbench above for run-level edits.</span>
+                </div>
+              )}
+              <TakeoffRoomsReview
+                key={resetKey}
+                result={result}
+                computed={computed}
+                editMode={isEditing}
+                onPatchRoom={handlePatchRoom}
+                onPatchArea={handlePatchArea}
+                onPatchRun={handlePatchRun}
+              />
+            </div>
+          </details>
+
+          {/* ── Page inventory ───────────────────────────────────────────── */}
+          {pageInventory && (
+            <details className="lab-section lab-section-collapsible">
+              <summary className="lab-section-summary">
+                <span className="lab-section-title" style={{ margin: 0 }}>Page inventory</span>
+                <span className="lab-section-summary-note">Plan page classification</span>
+              </summary>
+              <div style={{ marginTop: 12 }}>
+                <TakeoffPageInventoryPanel inventory={pageInventory} />
+              </div>
+            </details>
+          )}
+
+          {/* ── Dimension evidence ───────────────────────────────────────── */}
+          {dimensionEvidence && (
+            <details className="lab-section lab-section-collapsible">
+              <summary className="lab-section-summary">
+                <span className="lab-section-title" style={{ margin: 0 }}>Dimension evidence</span>
+                <span className="lab-section-summary-note">Raw extracted dimensions from plan</span>
+              </summary>
+              <div style={{ marginTop: 12 }}>
+                <TakeoffDimensionEvidencePanel
+                  evidence={dimensionEvidence}
+                  computed={computed}
+                  validation={validation}
+                />
+              </div>
+            </details>
+          )}
+
+          {/* ── Validation diagnostics ───────────────────────────────────── */}
+          <details className="lab-section lab-section-collapsible">
+            <summary className="lab-section-summary">
+              <span className="lab-section-title" style={{ margin: 0 }}>Validation diagnostics</span>
+              <span className="lab-section-summary-note">
+                {validation.errorCount > 0
+                  ? `${validation.errorCount} error${validation.errorCount !== 1 ? "s" : ""}, ${validation.warningCount} warning${validation.warningCount !== 1 ? "s" : ""}`
+                  : validation.warningCount > 0
+                  ? `${validation.warningCount} warning${validation.warningCount !== 1 ? "s" : ""}`
+                  : "no errors"}
+              </span>
+            </summary>
+            <div style={{ marginTop: 12 }}>
+              <TakeoffDiagnosticsPanel validation={validation} />
+            </div>
+          </details>
+
+          {/* ── Import preview ───────────────────────────────────────────── */}
+          <details className="lab-section lab-section-collapsible">
+            <summary className="lab-section-summary">
+              <span className="lab-section-title" style={{ margin: 0 }}>Import preview</span>
+              <span className="lab-section-summary-note">
+                {importPlan.canImport
+                  ? `${importPlan.rooms.length} room${importPlan.rooms.length !== 1 ? "s" : ""} mapped`
+                  : "blocked — see diagnostics"}
+              </span>
+            </summary>
+            <div style={{ marginTop: 12 }}>
+              <TakeoffImportPreview importPlan={importPlan} />
+            </div>
+          </details>
+
+          {/* ── Developer / benchmark tools ──────────────────────────────── */}
+          <details className="lab-section lab-section-collapsible lab-section-dev">
+            <summary className="lab-section-summary">
+              <span className="lab-section-title lab-section-title--dev" style={{ margin: 0 }}>Developer / benchmark tools</span>
+              <span className="lab-section-summary-note">Internal model testing only</span>
+            </summary>
+            <div style={{ marginTop: 12 }}>
+              <div className="dev-tools-notice" role="note">
+                Benchmark presets are for internal model testing only.
+                Estimator review should use the Takeoff Review Workbench above.
+                {benchmarkQaContext && (
+                  <span className="dev-tools-active-badge"> · Benchmark active: {benchmarkQaContext.label}</span>
+                )}
+              </div>
+              <TakeoffBenchmarkPanel
+                computed={computed}
+                dimensionEvidence={dimensionEvidence}
+                validation={validation}
+                onBenchmarkEvaluated={setBenchmarkQaContext}
+              />
+            </div>
+          </details>
+
+          {/* ── Debug JSON ───────────────────────────────────────────────── */}
           <section className="lab-section">
             <TakeoffDebugPanel
               result={result}
@@ -1390,7 +1459,7 @@ export default function TakeoffLabApp() {
               </span>
             ) : (
               <span className="lab-footer-safe">
-                All computations are deterministic and local — no data is sent anywhere.
+                Computations are deterministic and local.
               </span>
             )}
           </div>
