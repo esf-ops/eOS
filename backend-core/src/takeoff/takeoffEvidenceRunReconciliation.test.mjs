@@ -472,6 +472,250 @@ test("T18: reconciliation returns only pure data (no quote/pricing fields)", () 
   assert.ok(!resultStr.includes("import"),  "T18: no import in output");
 });
 
+// ── T19–T24: Review workbench behavior — pure helper checks ───────────────────
+//
+// These tests verify the measurement math that underpins the workbench:
+//   T19: editing a run's length changes the computed total
+//   T20: excluding a run (filtering it out) removes it from the computed total
+//   T21: adding unused evidence as a run updates the computed total
+//   T22: marking evidence reviewed softens unresolved issue count
+//   T23: save path uses effectiveDraft (excluded runs absent) — verified structurally
+//   T24: no quote / pricing mutation in workbench helpers
+
+// Dynamic import of calc helpers (same ESM pattern as T17).
+const { computeTakeoffMeasurements } = await import("./takeoffMeasurementCalc.mjs");
+
+function makeWorkbenchResult(runs, overrides = {}) {
+  return makeTakeoffResult(runs, overrides);
+}
+
+/**
+ * Filter excluded run IDs from a TakeoffResult (mirrors effectiveDraft logic in TakeoffLabApp).
+ */
+function filterExcludedRuns(takeoffResult, excludedRunIds) {
+  return {
+    ...takeoffResult,
+    rooms: takeoffResult.rooms.map((room) => ({
+      ...room,
+      areas: room.areas.map((area) => ({
+        ...area,
+        runs: area.runs.filter((run) => !excludedRunIds.has(run.id)),
+      })),
+    })),
+  };
+}
+
+/**
+ * Count unresolved issues (mirrors countUnresolvedWorkbenchIssues in TakeoffReviewWorkbench.tsx).
+ */
+function countUnresolvedIssues(reconciliation, { excludedRunIds, reviewNotes, evidenceReviewState }) {
+  if (!reconciliation?.checksRan) return 0;
+  let count = 0;
+  for (const l of reconciliation.unsupportedRuns) {
+    if (!excludedRunIds.has(l.runId) && !reviewNotes[l.runId]) count++;
+  }
+  for (const l of reconciliation.changedRuns) {
+    if (!excludedRunIds.has(l.runId) && !reviewNotes[l.runId]) count++;
+  }
+  for (const l of reconciliation.conflictingRuns) {
+    if (!excludedRunIds.has(l.runId) && !reviewNotes[l.runId]) count++;
+  }
+  for (const d of reconciliation.unusedHighConfidenceDimensions) {
+    const dimId = d.id ?? d.label;
+    if (!evidenceReviewState[dimId]) count++;
+  }
+  return count;
+}
+
+// ── T19: editing a run's length changes computed total ──
+
+test("T19: editing a run length changes computed countertop total", () => {
+  const runId = "run-edit-test";
+  const original = makeWorkbenchResult([
+    { id: runId, label: "Sink wall", lengthIn: 100, depthIn: 25.5, shape: "rect", pieceType: "counter", sourcePages: [1] },
+  ]);
+
+  const edited = makeWorkbenchResult([
+    { id: runId, label: "Sink wall", lengthIn: 80, depthIn: 25.5, shape: "rect", pieceType: "counter", sourcePages: [1] },
+  ]);
+
+  const originalMeas = computeTakeoffMeasurements(original);
+  const editedMeas   = computeTakeoffMeasurements(edited);
+
+  // 100 × 25.5 / 144 ≈ 17.71 sf; 80 × 25.5 / 144 ≈ 14.17 sf
+  assert.ok(originalMeas.countertopExactSf > editedMeas.countertopExactSf,
+    "T19: editing 100\" → 80\" reduces countertop sf");
+  assert.ok(
+    Math.abs(originalMeas.countertopExactSf - 17.71) < 0.05,
+    `T19: original sf ≈ 17.71 (got ${originalMeas.countertopExactSf})`
+  );
+  assert.ok(
+    Math.abs(editedMeas.countertopExactSf - 14.17) < 0.05,
+    `T19: edited sf ≈ 14.17 (got ${editedMeas.countertopExactSf})`
+  );
+});
+
+// ── T20: excluding a run removes it from computed total ──
+
+test("T20: excluding a run removes it from the computed total", () => {
+  const excludeId = "run-to-exclude";
+  const result = makeWorkbenchResult([
+    { id: "run-keep",    label: "Sink wall",  lengthIn: 100, depthIn: 25.5, shape: "rect", pieceType: "counter", sourcePages: [1] },
+    { id: excludeId,     label: "Extra run",  lengthIn: 60,  depthIn: 25.5, shape: "rect", pieceType: "counter", sourcePages: [1] },
+  ]);
+
+  const excludedRunIds = new Set([excludeId]);
+  const effectiveDraft = filterExcludedRuns(result, excludedRunIds);
+
+  const fullMeas      = computeTakeoffMeasurements(result);
+  const effectiveMeas = computeTakeoffMeasurements(effectiveDraft);
+
+  assert.ok(fullMeas.countertopExactSf > effectiveMeas.countertopExactSf,
+    "T20: excluding a run reduces total sf");
+
+  // Full: (100 + 60) × 25.5 / 144 = 28.33 sf; effective: 100 × 25.5 / 144 = 17.71 sf
+  assert.ok(
+    Math.abs(effectiveMeas.countertopExactSf - 17.71) < 0.05,
+    `T20: effective sf ≈ 17.71 (got ${effectiveMeas.countertopExactSf})`
+  );
+
+  // Excluded run should not appear in effectiveDraft
+  const effectiveRuns = effectiveDraft.rooms.flatMap((r) => r.areas.flatMap((a) => a.runs));
+  assert.ok(!effectiveRuns.some((r) => r.id === excludeId),
+    "T20: excluded run not present in effectiveDraft");
+});
+
+// ── T21: adding unused evidence as a run updates computed total ──
+
+test("T21: adding an unused evidence dim as a run updates computed total", () => {
+  const original = makeWorkbenchResult([
+    { id: "run-keep", label: "Sink wall", lengthIn: 100, depthIn: 25.5, shape: "rect", pieceType: "counter", sourcePages: [1] },
+  ]);
+
+  // Simulate "Add as run" for the 90"×41" island dim (d8 in SPEC73_EVIDENCE).
+  const newRun = {
+    id:         "evidence-run-d8",
+    label:      "Island",
+    lengthIn:   90,
+    depthIn:    41,
+    shape:      "rect",
+    pieceType:  "counter",
+    sourcePages: [1],
+  };
+
+  const withAdded = {
+    ...original,
+    rooms: original.rooms.map((room, ri) =>
+      ri !== 0 ? room : {
+        ...room,
+        areas: room.areas.map((area, ai) =>
+          ai !== 0 ? area : { ...area, runs: [...area.runs, newRun] }
+        ),
+      }
+    ),
+  };
+
+  const origMeas  = computeTakeoffMeasurements(original);
+  const addedMeas = computeTakeoffMeasurements(withAdded);
+
+  // Island adds 90 × 41 / 144 = 25.63 sf
+  const islandSf = (90 * 41) / 144;
+  const expectedTotal = origMeas.countertopExactSf + islandSf;
+  assert.ok(
+    Math.abs(addedMeas.countertopExactSf - expectedTotal) < 0.1,
+    `T21: total after adding island ≈ ${expectedTotal.toFixed(2)} sf (got ${addedMeas.countertopExactSf})`
+  );
+});
+
+// ── T22: marking evidence reviewed reduces unresolved issue count ──
+
+test("T22: marking evidence reviewed reduces unresolved issue count to zero", () => {
+  // One changed run + one unused dim → 2 unresolved issues.
+  const runs = [
+    makeRun({ label: "Right of stove", lengthIn: 24, depthIn: 25.5 }),  // changed (nearest: 25.5")
+    makeRun({ label: "Sink wall",      lengthIn: 100, depthIn: 25.5 }), // supported
+  ];
+  const reconciliation = reconcileRunsWithEvidence({
+    takeoffResult:     makeTakeoffResult(runs),
+    dimensionEvidence: SPEC73_EVIDENCE,
+  });
+
+  assert.ok(reconciliation.checksRan, "T22: checks ran");
+
+  const changedRun = reconciliation.changedRuns[0];
+  assert.ok(changedRun, "T22: at least one changed run exists");
+
+  // Initially: changed run unresolved + multiple unused dims unresolved.
+  const initialCount = countUnresolvedIssues(reconciliation, {
+    excludedRunIds:     new Set(),
+    reviewNotes:        {},
+    evidenceReviewState: {},
+  });
+  assert.ok(initialCount > 0, `T22: initial unresolved count > 0 (got ${initialCount})`);
+
+  // Mark the changed run as reviewed via a note.
+  const reviewNotes = {};
+  reviewNotes[changedRun.runId] = "Verified against plan — right side is 24\"";
+
+  // Also mark any conflicting runs as reviewed (sink wall at 100" has 109.5" nearby → conflict).
+  for (const l of reconciliation.conflictingRuns) {
+    reviewNotes[l.runId] = "Conflict reviewed — correct dimension confirmed";
+  }
+
+  // Mark all unused dims as reviewed.
+  const evidenceReviewState = {};
+  for (const d of reconciliation.unusedHighConfidenceDimensions) {
+    evidenceReviewState[d.id ?? d.label] = "reviewed";
+  }
+
+  const afterCount = countUnresolvedIssues(reconciliation, {
+    excludedRunIds: new Set(),
+    reviewNotes,
+    evidenceReviewState,
+  });
+
+  assert.equal(afterCount, 0, `T22: all issues resolved after marking reviewed (got ${afterCount})`);
+});
+
+// ── T23: save path uses effectiveDraft (excluded runs absent) ──
+
+test("T23: effectiveDraft excludes specified run IDs, used for save", () => {
+  const excludeId = "run-bad";
+  const result = makeWorkbenchResult([
+    { id: "run-good", label: "Good run",   lengthIn: 100, depthIn: 25.5, shape: "rect", pieceType: "counter", sourcePages: [1] },
+    { id: excludeId,  label: "Bad run",    lengthIn: 50,  depthIn: 25.5, shape: "rect", pieceType: "counter", sourcePages: [1] },
+  ]);
+
+  const effectiveDraft = filterExcludedRuns(result, new Set([excludeId]));
+  const allRunIds = effectiveDraft.rooms.flatMap((r) => r.areas.flatMap((a) => a.runs.map((run) => run.id)));
+
+  assert.ok(!allRunIds.includes(excludeId),  "T23: excluded run absent from effectiveDraft");
+  assert.ok(allRunIds.includes("run-good"), "T23: included run present in effectiveDraft");
+
+  // Measurement only counts the included run.
+  const meas = computeTakeoffMeasurements(effectiveDraft);
+  assert.ok(
+    Math.abs(meas.countertopExactSf - (100 * 25.5 / 144)) < 0.05,
+    "T23: measurement reflects only included runs"
+  );
+});
+
+// ── T24: no quote / pricing mutation in workbench helpers ──
+
+test("T24: workbench helpers produce no quote/pricing fields", () => {
+  const runs = [makeRun({ label: "Sink wall", lengthIn: 100 })];
+  const result = makeTakeoffResult(runs);
+  const excluded = filterExcludedRuns(result, new Set());
+  const recon    = reconcileRunsWithEvidence({ takeoffResult: result, dimensionEvidence: SPEC73_EVIDENCE });
+  const meas     = computeTakeoffMeasurements(excluded);
+
+  const allJson = JSON.stringify({ excluded, recon, meas });
+  assert.ok(!allJson.includes("price"),   "T24: no price field in output");
+  assert.ok(!allJson.includes("markup"),  "T24: no markup field in output");
+  assert.ok(!allJson.includes("quote_id"),"T24: no quote_id in output");
+  assert.ok(!allJson.includes("\"import\""), "T24: no import field in output");
+});
+
 // ── Summary ────────────────────────────────────────────────────────────────────
 
 console.log(`\n${passed} passed, ${failed} failed`);

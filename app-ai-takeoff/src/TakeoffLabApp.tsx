@@ -57,6 +57,9 @@ import type { PageInventory } from "./components/TakeoffPageInventoryPanel";
 import TakeoffDimensionEvidencePanel from "./components/TakeoffDimensionEvidencePanel";
 import type { DimensionEvidence } from "./components/TakeoffDimensionEvidencePanel";
 import TakeoffEvidenceTracePanel from "./components/TakeoffEvidenceTracePanel";
+import TakeoffReviewWorkbench, { countUnresolvedWorkbenchIssues } from "./components/TakeoffReviewWorkbench";
+import { reconcileRunsWithEvidence } from "@takeoff-core/takeoffEvidenceRunReconciliation.mjs";
+import { makeTakeoffRun } from "@takeoff-core/takeoffContract.mjs";
 import { getSupabase } from "./lib/supabase";
 import { labApiGet, labApiPost, LabApiError } from "./lib/api";
 
@@ -315,6 +318,14 @@ export default function TakeoffLabApp() {
   const [copyFeedback, setCopyFeedback] = useState<"summary" | "json" | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // ── Review workbench state (v6.1) ─────────────────────────────────────────
+  /** Run IDs excluded by the estimator — filtered from computation but kept in editDraft */
+  const [excludedRunIds, setExcludedRunIds] = useState<Set<string>>(() => new Set());
+  /** Per-run reviewer notes keyed by run.id */
+  const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
+  /** Per-evidence-dim review state (ignored | reviewed), keyed by dim id or label */
+  const [evidenceReviewState, setEvidenceReviewState] = useState<Record<string, "ignored" | "reviewed">>({});
+
   // ── Load saved result from workspace ─────────────────────────────────────
   useEffect(() => {
     const jobId = urlJobId();
@@ -356,10 +367,30 @@ export default function TakeoffLabApp() {
     hasEdits                   ? "edited"    :
     sourceMode;
 
+  /**
+   * effectiveDraft = editDraft with excluded runs filtered out.
+   * This is what eliteOS recomputes and what gets saved to the backend.
+   * The full editDraft (including excluded) is passed to the review workbench
+   * so the estimator can see and re-include excluded runs.
+   */
+  const effectiveDraft = useMemo((): TakeoffResult => {
+    if (excludedRunIds.size === 0) return editDraft;
+    return {
+      ...editDraft,
+      rooms: editDraft.rooms.map((room) => ({
+        ...room,
+        areas: room.areas.map((area: TakeoffArea) => ({
+          ...area,
+          runs: area.runs.filter((run: TakeoffRun) => !excludedRunIds.has(run.id)),
+        })),
+      })),
+    };
+  }, [editDraft, excludedRunIds]);
+
   const activeState = useMemo((): ActiveComputedState => {
-    try { return computeAll(editDraft); }
+    try { return computeAll(effectiveDraft); }
     catch { return computeAll(makeSpec73()); }
-  }, [editDraft]);
+  }, [effectiveDraft]);
 
   // v5.8: Automatic QA gate — only for AI drafts and file-loaded results.
   // v5.8.1: Includes benchmarkQaContext when the user has evaluated a benchmark preset/target.
@@ -399,6 +430,10 @@ export default function TakeoffLabApp() {
     setParseError(null);
     setIsEditing(false);
     setResetKey((k) => k + 1);
+    // Reset review workbench state for each new source load.
+    setExcludedRunIds(new Set());
+    setReviewNotes({});
+    setEvidenceReviewState({});
   }
 
   // ── Workbench actions ─────────────────────────────────────────────────────
@@ -525,6 +560,118 @@ export default function TakeoffLabApp() {
     }));
   }, []);
 
+  // ── Review workbench handlers (v6.1) ─────────────────────────────────────
+
+  const handleToggleExcludeRun = useCallback((runId: string) => {
+    setExcludedRunIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(runId)) next.delete(runId);
+      else next.add(runId);
+      return next;
+    });
+  }, []);
+
+  const handleSetReviewNote = useCallback((runId: string, note: string) => {
+    setReviewNotes((prev) => ({ ...prev, [runId]: note }));
+  }, []);
+
+  const handleMarkEvidenceReviewed = useCallback((dimId: string, status: "ignored" | "reviewed") => {
+    setEvidenceReviewState((prev) => ({ ...prev, [dimId]: status }));
+  }, []);
+
+  /** Patch a run by its ID (used by evidence trace "Use evidence value" actions). */
+  const handlePatchRunById = useCallback((runId: string, patch: RunPatch) => {
+    setEditDraft((prev) => {
+      for (let ri = 0; ri < prev.rooms.length; ri++) {
+        for (let ai = 0; ai < prev.rooms[ri].areas.length; ai++) {
+          const runIdx = prev.rooms[ri].areas[ai].runs.findIndex((r: TakeoffRun) => r.id === runId);
+          if (runIdx >= 0) {
+            return {
+              ...prev,
+              rooms: prev.rooms.map((room, rr) =>
+                rr !== ri ? room : {
+                  ...room,
+                  areas: room.areas.map((area: TakeoffArea, aa: number) =>
+                    aa !== ai ? area : {
+                      ...area,
+                      runs: area.runs.map((run: TakeoffRun, xx: number) =>
+                        xx !== runIdx ? run : { ...run, ...patch }
+                      ),
+                    }
+                  ),
+                }
+              ),
+            };
+          }
+        }
+      }
+      return prev;
+    });
+  }, []);
+
+  /** Add an evidence dimension as a new run to the first eligible countertop area. */
+  const handleAddEvidenceAsRun = useCallback((dim: {
+    id?: string; label: string; lengthIn: number; depthIn?: number | null; pageNumber?: number
+  }) => {
+    setEditDraft((prev) => {
+      if (!prev.rooms.length) return prev;
+      // Find first countertop-type area across all rooms.
+      for (let ri = 0; ri < prev.rooms.length; ri++) {
+        const room = prev.rooms[ri];
+        for (let ai = 0; ai < room.areas.length; ai++) {
+          const area = room.areas[ai] as TakeoffArea;
+          if (area.areaType === "countertop" || !area.areaType) {
+            const newRun = makeTakeoffRun({
+              label:       dim.label,
+              lengthIn:    dim.lengthIn,
+              depthIn:     dim.depthIn ?? 25.5,
+              pieceType:   "counter",
+              shape:       "rect",
+              sourcePages: dim.pageNumber != null ? [dim.pageNumber] : [],
+            });
+            return {
+              ...prev,
+              rooms: prev.rooms.map((room2, rr) =>
+                rr !== ri ? room2 : {
+                  ...room2,
+                  areas: room2.areas.map((area2: TakeoffArea, aa: number) =>
+                    aa !== ai ? area2 : {
+                      ...area2,
+                      runs: [...area2.runs, newRun],
+                    }
+                  ),
+                }
+              ),
+            };
+          }
+        }
+      }
+      return prev;
+    });
+    // Mark the evidence dim as reviewed once it's been added as a run.
+    const dimId = dim.id ?? dim.label;
+    setEvidenceReviewState((prev) => ({ ...prev, [dimId]: "reviewed" }));
+  }, []);
+
+  // Reconciliation against full editDraft (for workbench + save warning).
+  // Re-runs when editDraft or dimensionEvidence changes.
+  const fullReconciliation = useMemo(() => {
+    if (!dimensionEvidence) return null;
+    try {
+      return reconcileRunsWithEvidence({
+        takeoffResult:     editDraft,
+        dimensionEvidence,
+      }) as {
+        runLinks:                       { runId: string; verdict: string; conflicting: boolean }[];
+        unusedHighConfidenceDimensions: { id?: string; label: string; lengthIn: number; depthIn?: number | null; pageNumber?: number }[];
+        unsupportedRuns:                { runId: string }[];
+        changedRuns:                    { runId: string }[];
+        conflictingRuns:                { runId: string }[];
+        checksRan:                      boolean;
+      };
+    } catch { return null; }
+  }, [editDraft, dimensionEvidence]);
+
   // ── Save reviewed takeoff ─────────────────────────────────────────────────
 
   const handleSaveDraft = useCallback(async () => {
@@ -533,7 +680,7 @@ export default function TakeoffLabApp() {
     setSaveMsg("Saving takeoff draft…");
     try {
       const res = await labApiPost(`/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}/results`, authToken, {
-        takeoffResult: editDraft,
+        takeoffResult: effectiveDraft,   // use filtered draft (excluded runs removed)
         reviewStatus: "needs_review",
       }) as { ok: boolean; savedAt: string; summary: { countertopExactSf: number; backsplashExactSf: number } };
       setSaveStatus("saved");
@@ -546,7 +693,7 @@ export default function TakeoffLabApp() {
       setSaveStatus("error");
       setSaveMsg(msg);
     }
-  }, [takeoffJobId, authToken, editDraft]);
+  }, [takeoffJobId, authToken, effectiveDraft]);
 
   // ── Copy actions ──────────────────────────────────────────────────────────
 
@@ -1049,49 +1196,7 @@ export default function TakeoffLabApp() {
             />
           </section>
 
-          {/* ── Save reviewed takeoff draft (v4) ─────────────────────── */}
-          {takeoffJobId && authToken && (
-            <section className="lab-section">
-              <h2 className="lab-section-title">Save reviewed takeoff</h2>
-              <div className="save-panel lab-card">
-                <div className="save-panel-inner">
-                  <div className="save-panel-info">
-                    <p className="save-panel-desc">
-                      Save the current edited measurements as a reviewed draft tied to the workspace.
-                      The backend recomputes all square footage independently from your dimensions.
-                      No quote is created or mutated.
-                    </p>
-                    {savedAt && (
-                      <p className="save-panel-last-saved">
-                        Last saved:{" "}
-                        <strong>{new Date(savedAt).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}</strong>
-                      </p>
-                    )}
-                  </div>
-                  <div className="save-panel-actions">
-                    <button
-                      type="button"
-                      className="save-panel-btn"
-                      disabled={saveStatus === "saving"}
-                      onClick={() => void handleSaveDraft()}
-                    >
-                      {saveStatus === "saving" ? "Saving…" : "Save reviewed takeoff draft"}
-                    </button>
-                  </div>
-                </div>
-                {saveMsg && (
-                  <p
-                    className={`save-panel-msg${saveStatus === "error" ? " save-panel-msg--error" : saveStatus === "saved" ? " save-panel-msg--saved" : ""}`}
-                    role="status"
-                    aria-live="polite"
-                  >
-                    {saveStatus === "saved" ? "✓ " : saveStatus === "error" ? "✗ " : ""}
-                    {saveMsg}
-                  </p>
-                )}
-              </div>
-            </section>
-          )}
+          {/* Save reviewed takeoff placeholder — moved after Evidence Trace & Workbench below */}
 
           {/* Validator diagnostics */}
           <section className="lab-section">
@@ -1143,11 +1248,121 @@ export default function TakeoffLabApp() {
               <p className="lab-section-desc">
                 Each final run is checked against extracted dimension evidence.
                 Unsupported, changed, or conflicting dimensions are flagged for estimator review.
+                Use the action buttons to apply evidence values or mark unused evidence reviewed.
               </p>
               <TakeoffEvidenceTracePanel
-                result={result}
+                result={editDraft}
                 dimensionEvidence={dimensionEvidence}
+                actions={{
+                  onUseEvidenceValue:    handlePatchRunById,
+                  onAddEvidenceAsRun:    handleAddEvidenceAsRun,
+                  onMarkEvidenceReviewed: handleMarkEvidenceReviewed,
+                  evidenceReviewState,
+                }}
               />
+            </section>
+          )}
+
+          {/* ── Review Workbench (v6.1) — estimator edits + evidence-assisted corrections ── */}
+          {hasActiveSource && (
+            <section className="lab-section">
+              <h2 className="lab-section-title">Takeoff review workbench</h2>
+              <p className="lab-section-desc">
+                Review and edit every run before saving. Changes update the Measurement Summary instantly.
+                Excluded runs are removed from the computed total but kept in the draft for reference.
+                No quote is created or mutated.
+              </p>
+              <TakeoffReviewWorkbench
+                editDraft={editDraft}
+                dimensionEvidence={dimensionEvidence}
+                excludedRunIds={excludedRunIds}
+                reviewNotes={reviewNotes}
+                evidenceReviewState={evidenceReviewState}
+                onPatchRun={handlePatchRun}
+                onPatchArea={handlePatchArea}
+                onToggleExcludeRun={handleToggleExcludeRun}
+                onSetReviewNote={handleSetReviewNote}
+                onMarkEvidenceReviewed={handleMarkEvidenceReviewed}
+              />
+            </section>
+          )}
+
+          {/* ── Save reviewed takeoff draft (v4, moved after workbench in v6.1) ── */}
+          {takeoffJobId && authToken && (
+            <section className="lab-section">
+              <h2 className="lab-section-title">Save reviewed takeoff</h2>
+              {(() => {
+                const unresolvedCount = fullReconciliation ? countUnresolvedWorkbenchIssues({
+                  reconciliation:      fullReconciliation as Parameters<typeof countUnresolvedWorkbenchIssues>[0]["reconciliation"],
+                  excludedRunIds,
+                  reviewNotes,
+                  evidenceReviewState,
+                }) : 0;
+                return (
+                  <div className="save-panel lab-card">
+                    {unresolvedCount > 0 && (
+                      <div className="save-panel-warning" role="alert">
+                        <span className="save-panel-warning-icon">⚠</span>
+                        <span>
+                          <strong>{unresolvedCount} unresolved evidence issue{unresolvedCount !== 1 ? "s" : ""}</strong> remain in the
+                          workbench. Review them above, or save anyway.
+                        </span>
+                      </div>
+                    )}
+                    {excludedRunIds.size > 0 && (
+                      <div className="save-panel-info-note">
+                        <span className="save-panel-info-icon">ℹ</span>
+                        <span>
+                          {excludedRunIds.size} excluded run{excludedRunIds.size !== 1 ? "s" : ""} will not appear in the saved draft.
+                          Measurement totals reflect included runs only.
+                        </span>
+                      </div>
+                    )}
+                    <div className="save-panel-inner">
+                      <div className="save-panel-info">
+                        <p className="save-panel-desc">
+                          Save the current reviewed measurements as a draft tied to this workspace.
+                          The backend recomputes all square footage independently from your dimensions.
+                          No quote is created or mutated.
+                        </p>
+                        {savedAt && (
+                          <p className="save-panel-last-saved">
+                            Last saved:{" "}
+                            <strong>{new Date(savedAt).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}</strong>
+                          </p>
+                        )}
+                      </div>
+                      <div className="save-panel-actions">
+                        <button
+                          type="button"
+                          className="save-panel-btn"
+                          disabled={saveStatus === "saving"}
+                          onClick={() => {
+                            if (unresolvedCount > 0) {
+                              if (!window.confirm(
+                                `${unresolvedCount} unresolved evidence issue${unresolvedCount !== 1 ? "s" : ""} remain. Save reviewed draft anyway?`
+                              )) return;
+                            }
+                            void handleSaveDraft();
+                          }}
+                        >
+                          {saveStatus === "saving" ? "Saving…" : "Save reviewed takeoff draft"}
+                        </button>
+                      </div>
+                    </div>
+                    {saveMsg && (
+                      <p
+                        className={`save-panel-msg${saveStatus === "error" ? " save-panel-msg--error" : saveStatus === "saved" ? " save-panel-msg--saved" : ""}`}
+                        role="status"
+                        aria-live="polite"
+                      >
+                        {saveStatus === "saved" ? "✓ " : saveStatus === "error" ? "✗ " : ""}
+                        {saveMsg}
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
             </section>
           )}
 

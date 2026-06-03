@@ -16,6 +16,19 @@ import { reconcileRunsWithEvidence } from "@takeoff-core/takeoffEvidenceRunRecon
 import type { DimensionEvidence } from "./TakeoffDimensionEvidencePanel";
 import type { TakeoffResult } from "@takeoff-core/takeoffContract.mjs";
 
+// ── Action callback types (v6.1) ───────────────────────────────────────────────
+
+export type EvidenceActionCallbacks = {
+  /** Estimator applied an evidence value to a run's length */
+  onUseEvidenceValue?:    (runId: string, newLengthIn: number) => void;
+  /** Estimator wants to add this unused evidence dim as a new run */
+  onAddEvidenceAsRun?:    (dim: EvidenceDimInfo) => void;
+  /** Estimator marks an evidence dim as reviewed or ignored */
+  onMarkEvidenceReviewed?: (dimId: string, status: "ignored" | "reviewed") => void;
+  /** Current evidence review state (so buttons reflect applied state) */
+  evidenceReviewState?:   Record<string, "ignored" | "reviewed">;
+};
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface RunLink {
@@ -55,6 +68,8 @@ interface ReconciliationResult {
 export interface TakeoffEvidenceTracePanelProps {
   result:           TakeoffResult;
   dimensionEvidence: DimensionEvidence | null;
+  /** v6.1: action callbacks for evidence-assisted corrections */
+  actions?: EvidenceActionCallbacks;
 }
 
 // ── Verdict badge ─────────────────────────────────────────────────────────────
@@ -80,7 +95,14 @@ function VerdictBadge({ verdict, conflicting }: { verdict: RunLink["verdict"]; c
 export default function TakeoffEvidenceTracePanel({
   result,
   dimensionEvidence,
+  actions = {},
 }: TakeoffEvidenceTracePanelProps) {
+  const {
+    onUseEvidenceValue,
+    onAddEvidenceAsRun,
+    onMarkEvidenceReviewed,
+    evidenceReviewState = {},
+  } = actions;
   const reconciliation = useMemo<ReconciliationResult | null>(() => {
     if (!result || !dimensionEvidence) return null;
     try {
@@ -188,17 +210,45 @@ export default function TakeoffEvidenceTracePanel({
                 </span>
               )}
               {link.verdict === "changed" && link.nearestChanged && (
-                <span className="et-ev-change">
-                  nearest: "{link.nearestChanged.label}" {link.nearestChanged.lengthIn}" · p.{link.nearestChanged.pageNumber ?? "?"}
-                  {" "}(Δ{Math.abs(link.lengthIn - (link.nearestChanged.lengthIn ?? 0)).toFixed(1)}")
-                </span>
+                <>
+                  <span className="et-ev-change">
+                    nearest: "{link.nearestChanged.label}" {link.nearestChanged.lengthIn}" · p.{link.nearestChanged.pageNumber ?? "?"}
+                    {" "}(Δ{Math.abs(link.lengthIn - (link.nearestChanged.lengthIn ?? 0)).toFixed(1)}")
+                  </span>
+                  {onUseEvidenceValue && (
+                    <button
+                      type="button"
+                      className="et-action-btn et-action-btn--use"
+                      title={`Set run length to ${link.nearestChanged.lengthIn}" (evidence value)`}
+                      onClick={() => onUseEvidenceValue(link.runId, link.nearestChanged!.lengthIn)}
+                    >
+                      Use {link.nearestChanged.lengthIn}"
+                    </button>
+                  )}
+                </>
               )}
               {link.verdict === "unsupported" && (
                 <span className="et-ev-none">no match within ±10"</span>
               )}
               {link.conflicting && link.matchedDims.length > 1 && (
                 <span className="et-ev-conflict">
-                  {link.matchedDims.length} nearby: {link.matchedDims.map((d) => `${d.lengthIn}"`).join(", ")}
+                  {link.matchedDims.length} nearby:{" "}
+                  {link.matchedDims.map((d, di) => (
+                    <React.Fragment key={di}>
+                      {di > 0 && " / "}
+                      <span>{d.lengthIn}"</span>
+                      {onUseEvidenceValue && (
+                        <button
+                          type="button"
+                          className="et-action-btn et-action-btn--use et-action-btn--inline"
+                          title={`Use ${d.lengthIn}" from "${d.label}"`}
+                          onClick={() => onUseEvidenceValue(link.runId, d.lengthIn)}
+                        >
+                          Use
+                        </button>
+                      )}
+                    </React.Fragment>
+                  ))}
                 </span>
               )}
             </span>
@@ -211,11 +261,55 @@ export default function TakeoffEvidenceTracePanel({
         <div className="et-unused-section">
           <p className="et-unused-title">High-confidence evidence not used in any run:</p>
           <ul className="et-unused-list">
-            {reconciliation.unusedHighConfidenceDimensions.map((d, i) => (
-              <li key={i} className="et-unused-item">
-                "{d.label}" {d.lengthIn}"{d.depthIn != null ? ` × ${d.depthIn}"` : ""} · p.{(d as EvidenceDimInfo).pageNumber ?? "?"}
-              </li>
-            ))}
+            {reconciliation.unusedHighConfidenceDimensions.map((d, i) => {
+              const dimId = (d as EvidenceDimInfo).id ?? d.label;
+              const reviewState = evidenceReviewState[dimId];
+              return (
+                <li key={i} className={`et-unused-item${reviewState ? ` et-unused-item--${reviewState}` : ""}`}>
+                  <span className="et-unused-item-text">
+                    "{d.label}" {d.lengthIn}"{d.depthIn != null ? ` × ${d.depthIn}"` : ""} · p.{(d as EvidenceDimInfo).pageNumber ?? "?"}
+                  </span>
+                  {!reviewState && (
+                    <span className="et-unused-item-actions">
+                      {onAddEvidenceAsRun && (
+                        <button
+                          type="button"
+                          className="et-action-btn et-action-btn--add"
+                          title={`Add "${d.label}" as a new run`}
+                          onClick={() => onAddEvidenceAsRun(d as EvidenceDimInfo)}
+                        >
+                          + Add as run
+                        </button>
+                      )}
+                      {onMarkEvidenceReviewed && (
+                        <>
+                          <button
+                            type="button"
+                            className="et-action-btn et-action-btn--reviewed"
+                            onClick={() => onMarkEvidenceReviewed(dimId, "reviewed")}
+                          >
+                            Mark reviewed
+                          </button>
+                          <button
+                            type="button"
+                            className="et-action-btn et-action-btn--ignore"
+                            onClick={() => onMarkEvidenceReviewed(dimId, "ignored")}
+                          >
+                            Ignore
+                          </button>
+                        </>
+                      )}
+                    </span>
+                  )}
+                  {reviewState === "reviewed" && (
+                    <span className="et-unused-reviewed">✓ reviewed</span>
+                  )}
+                  {reviewState === "ignored" && (
+                    <span className="et-unused-ignored">ignored</span>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}
