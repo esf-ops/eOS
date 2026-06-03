@@ -64,14 +64,23 @@ export interface TakeoffReviewWorkbenchProps {
 
 // ── Verdict badge ──────────────────────────────────────────────────────────────
 
-function EvidenceBadge({ link, excluded }: { link: RunLink | null; excluded: boolean }) {
+function EvidenceBadge({ link, excluded, isReviewed }: {
+  link:       RunLink | null;
+  excluded:   boolean;
+  isReviewed: boolean;
+}) {
   if (excluded) {
     return <span className="rw-badge rw-badge--excluded">excluded</span>;
-  }  if (!link || link.verdict === "exempt") {
+  }
+  if (!link || link.verdict === "exempt") {
     return <span className="rw-badge rw-badge--muted">n/a</span>;
   }
   if (link.verdict === "supported" && !link.conflicting) {
     return <span className="rw-badge rw-badge--ok">✓ supported</span>;
+  }
+  // Issue rows: when the estimator has reviewed/accepted, show accepted badge
+  if (isReviewed) {
+    return <span className="rw-badge rw-badge--accepted">✓ accepted</span>;
   }
   if (link.verdict === "supported" && link.conflicting) {
     return <span className="rw-badge rw-badge--warn">⚠ conflict</span>;
@@ -158,12 +167,36 @@ function RunRow({ row, excluded, note, onPatchRun, onToggleExclude, onSetNote }:
   const { roomIdx, areaIdx, runIdx, run, link } = row;
 
   const isCounter = (run.pieceType ?? "counter") === "counter";
+
+  // A row "has an evidence issue" when it has a flagged verdict or conflicting match.
+  const hasEvidenceIssue = !excluded && link !== null && (
+    link.verdict === "unsupported" ||
+    link.verdict === "changed" ||
+    (link.verdict === "supported" && link.conflicting)
+  );
+
+  // A row is considered "reviewed / accepted" when it has an issue AND a reviewer note.
+  // This is the same signal that countUnresolvedWorkbenchIssues uses.
+  const isReviewed = hasEvidenceIssue && Boolean(note);
+
   const rowCls = [
     "rw-run-row",
     excluded ? "rw-run-row--excluded" : "",
-    !excluded && link?.verdict === "unsupported" ? "rw-run-row--error" : "",
-    !excluded && (link?.verdict === "changed" || link?.conflicting) ? "rw-run-row--warn" : "",
+    // Only show error/warn highlight when unresolved
+    !excluded && !isReviewed && link?.verdict === "unsupported" ? "rw-run-row--error" : "",
+    !excluded && !isReviewed && (link?.verdict === "changed" || link?.conflicting) ? "rw-run-row--warn" : "",
   ].filter(Boolean).join(" ");
+
+  const ACCEPT_NOTE = "Reviewed and accepted as correct.";
+
+  const handleAccept = () => {
+    // Set the reviewer note state (drives checklist resolution)
+    onSetNote(run.id, ACCEPT_NOTE);
+    // Also bake into run.assemblyNotes so the note survives save/reload
+    const existing = run.assemblyNotes?.trim() ?? "";
+    const combined = existing ? `${existing}; ${ACCEPT_NOTE}` : ACCEPT_NOTE;
+    onPatchRun(roomIdx, areaIdx, runIdx, { assemblyNotes: combined });
+  };
 
   return (
     <div className={rowCls} role="row">
@@ -224,8 +257,9 @@ function RunRow({ row, excluded, note, onPatchRun, onToggleExclude, onSetNote }:
 
       {/* Evidence status */}
       <div className="rw-cell rw-cell--status" role="cell">
-        <EvidenceBadge link={link} excluded={excluded} />
-        {!excluded && <EvidenceHint link={link} />}
+        <EvidenceBadge link={link} excluded={excluded} isReviewed={isReviewed} />
+        {/* Suppress hint once the estimator has accepted the row */}
+        {!excluded && !isReviewed && <EvidenceHint link={link} />}
       </div>
 
       {/* Source pages */}
@@ -246,13 +280,24 @@ function RunRow({ row, excluded, note, onPatchRun, onToggleExclude, onSetNote }:
         </button>
       </div>
 
-      {/* Review note */}
+      {/* Review note + Accept action */}
       <div className="rw-cell rw-cell--note" role="cell">
+        {/* Accept as correct button — shown when issue exists and no note yet */}
+        {hasEvidenceIssue && !note && !excluded && (
+          <button
+            type="button"
+            className="rw-accept-btn"
+            onClick={handleAccept}
+            title="Mark this run as reviewed and accepted without changing its dimensions"
+          >
+            Accept as correct
+          </button>
+        )}
         <input
           className="rw-note-input"
           type="text"
           value={note}
-          placeholder="Note: reason for accepting or changing…"
+          placeholder={hasEvidenceIssue ? "Add note if accepting issue…" : "Note: reason for accepting or changing…"}
           aria-label="Reviewer note"
           onChange={(e) => onSetNote(run.id, e.target.value)}
         />

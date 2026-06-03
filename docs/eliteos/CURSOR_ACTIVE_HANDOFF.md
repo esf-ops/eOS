@@ -2,7 +2,7 @@
 
 **Purpose:** Cheap context for new Cursor chats. Do not treat old chat transcripts as source of truth — use this file + `docs/eliteos/*` + `.cursor/rules/*`.
 
-**Last updated:** 2026-06-03 (AI Takeoff v6.2.1 — estimator workflow polish; dev tools hidden by default)
+**Last updated:** 2026-06-03 (AI Takeoff v6.2.2 — Accept as correct for conflict/changed/unsupported rows)
 
 ---
 
@@ -322,6 +322,27 @@ Dev: `npm run dev --prefix app-ai-takeoff` -> `http://localhost:5186`. Not in Ho
 | All existing tests | **All passing** (28 extraction, 25 QA gate, 18 reconciliation, 13 dim-evidence, 25 Gemini, 6 config) |
 | Build | **Clean** (vite build, eos:check:local) |
 | Import disabled | **Still disabled** — no change |
+
+### v6.2.2 status: conflict/changed/unsupported resolution in Review Workbench (2026-06-03 ✅)
+
+| Area | State |
+|------|-------|
+| "Accept as correct" button | **Done** — appears on conflict/changed/unsupported rows when no note yet |
+| `✓ accepted` badge | **Done** — replaces ⚠/✗ badge when row has reviewer note |
+| Row warning style | **Done** — error/warn highlight removed once row is accepted |
+| Evidence hint | **Done** — suppressed once row is accepted (not clutter) |
+| Persistence on save | **Done** — `assemblyNotes` patched on run when accepted; survives save/reload |
+| `RunPatch` type | **Done** — extended with `assemblyNotes?: string` |
+| Note placeholder | **Done** — conflict rows show "Add note if accepting issue…" |
+| `countUnresolvedWorkbenchIssues` | Already correct — resolves when `reviewNotes[runId]` truthy; no change needed |
+| T25: conflict no note = unresolved | **Done** |
+| T26: conflict with reviewer note = resolved | **Done** |
+| T27: excluded conflict = resolved | **Done** |
+| T28: accepting does not change measurement | **Done** |
+| All tests | **28 pass** (evidence reconciliation), **25 pass** (QA gate), **33 pass** (fabrication rules) |
+| Build | **Clean** |
+
+**Merschman flow (post-fix):** 1. Open Merschman. 2. Two conflict rows visible. 3. Click "Accept as correct" on each. 4. Badge changes to "✓ accepted". 5. Checklist shows "✓ All items reviewed". 6. Save warning disappears. 7. Save. 8. Reload — `assemblyNotes` on runs will contain "Reviewed and accepted as correct." confirming it was accepted.
 
 ### v6.2.1 status: estimator workflow polish (2026-06-03 ✅)
 

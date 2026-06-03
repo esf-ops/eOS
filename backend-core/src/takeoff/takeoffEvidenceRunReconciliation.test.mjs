@@ -716,6 +716,131 @@ test("T24: workbench helpers produce no quote/pricing fields", () => {
   assert.ok(!allJson.includes("\"import\""), "T24: no import field in output");
 });
 
+// ── T25: conflict row with no note counts as unresolved ──
+
+test("T25: conflict row with no note and not reviewed counts unresolved", () => {
+  // Spec73 evidence has two dims near 100" (both 100" and 109.5") → conflict on Sink wall 100"
+  const runs = [
+    makeRun({ label: "Sink wall", lengthIn: 100, depthIn: 25.5 }),
+  ];
+  const reconciliation = reconcileRunsWithEvidence({
+    takeoffResult:     makeTakeoffResult(runs),
+    dimensionEvidence: SPEC73_EVIDENCE,
+  });
+
+  assert.ok(reconciliation.checksRan, "T25: checks ran");
+  const conflictRun = reconciliation.conflictingRuns[0];
+  assert.ok(conflictRun, "T25: at least one conflicting run exists");
+
+  const count = countUnresolvedIssues(reconciliation, {
+    excludedRunIds:      new Set(),
+    reviewNotes:         {},
+    evidenceReviewState: {},
+  });
+
+  assert.ok(count > 0, `T25: unresolved count > 0 without note (got ${count})`);
+});
+
+// ── T26: conflict row with reviewer note resolves the issue ──
+
+test("T26: conflict row with reviewer note does not count unresolved", () => {
+  const runs = [
+    makeRun({ label: "Sink wall", lengthIn: 100, depthIn: 25.5 }),
+  ];
+  const reconciliation = reconcileRunsWithEvidence({
+    takeoffResult:     makeTakeoffResult(runs),
+    dimensionEvidence: SPEC73_EVIDENCE,
+  });
+
+  assert.ok(reconciliation.checksRan, "T26: checks ran");
+  const conflictRun = reconciliation.conflictingRuns[0];
+  assert.ok(conflictRun, "T26: at least one conflicting run exists");
+
+  // Mark the conflict run with a reviewer note — mirrors "Accept as correct" UX
+  const reviewNotes = { [conflictRun.runId]: "Reviewed and accepted as correct." };
+
+  // Mark unused dims so they don't inflate the count
+  const evidenceReviewState = {};
+  for (const d of reconciliation.unusedHighConfidenceDimensions) {
+    evidenceReviewState[d.id ?? d.label] = "reviewed";
+  }
+
+  const count = countUnresolvedIssues(reconciliation, {
+    excludedRunIds: new Set(),
+    reviewNotes,
+    evidenceReviewState,
+  });
+
+  assert.equal(count, 0, `T26: all issues resolved after reviewer note (got ${count})`);
+});
+
+// ── T27: excluded conflict row does not count unresolved ──
+
+test("T27: excluded conflict row does not count unresolved", () => {
+  const runs = [
+    makeRun({ label: "Sink wall", lengthIn: 100, depthIn: 25.5 }),
+  ];
+  const reconciliation = reconcileRunsWithEvidence({
+    takeoffResult:     makeTakeoffResult(runs),
+    dimensionEvidence: SPEC73_EVIDENCE,
+  });
+
+  assert.ok(reconciliation.checksRan, "T27: checks ran");
+  const conflictRun = reconciliation.conflictingRuns[0];
+  assert.ok(conflictRun, "T27: at least one conflicting run exists");
+
+  // Exclude the conflict run — should zero out its issue
+  const excludedRunIds = new Set([conflictRun.runId]);
+  const evidenceReviewState = {};
+  for (const d of reconciliation.unusedHighConfidenceDimensions) {
+    evidenceReviewState[d.id ?? d.label] = "reviewed";
+  }
+
+  const count = countUnresolvedIssues(reconciliation, {
+    excludedRunIds,
+    reviewNotes:         {},
+    evidenceReviewState,
+  });
+
+  assert.equal(count, 0, `T27: excluded conflict run does not count as unresolved (got ${count})`);
+});
+
+// ── T28: accepting conflict does not change measurement total ──
+
+test("T28: accepting conflict does not change measurement total", () => {
+  // Simulate the "Accept as correct" action: only sets a reviewer note + patches assemblyNotes
+  // Neither affects measurement calculation.
+  const runs = [
+    makeRun({ label: "Sink wall",    lengthIn: 100, depthIn: 25.5 }),
+    makeRun({ label: "Right side",   lengthIn: 40,  depthIn: 25.5 }),
+  ];
+  const result = makeTakeoffResult(runs);
+  const measBefore = computeTakeoffMeasurements(result);
+
+  // Simulate accept: patch assemblyNotes (no lengthIn/depthIn change)
+  const accepted = {
+    ...result,
+    rooms: result.rooms.map((room) => ({
+      ...room,
+      areas: room.areas.map((area) => ({
+        ...area,
+        runs: area.runs.map((run) =>
+          run.label === "Sink wall"
+            ? { ...run, assemblyNotes: "Reviewed and accepted as correct." }
+            : run
+        ),
+      })),
+    })),
+  };
+
+  const measAfter = computeTakeoffMeasurements(accepted);
+
+  assert.ok(
+    Math.abs(measBefore.countertopExactSf - measAfter.countertopExactSf) < 0.001,
+    `T28: measurement unchanged after acceptance (${measBefore.countertopExactSf.toFixed(4)} vs ${measAfter.countertopExactSf.toFixed(4)})`
+  );
+});
+
 // ── Summary ────────────────────────────────────────────────────────────────────
 
 console.log(`\n${passed} passed, ${failed} failed`);

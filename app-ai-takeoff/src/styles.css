@@ -2682,7 +2682,7 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
 .rw-cell--status { flex-direction: column; align-items: flex-start; gap: 3px; }
 .rw-cell--pages  { justify-content: center; font-size: 0.72rem; color: var(--eos-ink-muted); }
 .rw-cell--toggle { justify-content: center; }
-.rw-cell--note   {}
+.rw-cell--note   { display: flex; flex-direction: column; gap: 2px; }
 
 /* ── Inline label / dim inputs ── */
 .rw-label-input {
@@ -2767,6 +2767,8 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
 .rw-badge--error    { background: var(--eos-danger-soft);  color: var(--eos-danger);   border: 1px solid var(--eos-danger-border); }
 .rw-badge--muted    { background: var(--eos-bg-soft);      color: var(--eos-ink-faint); border: 1px solid var(--eos-line); }
 .rw-badge--excluded { background: var(--eos-bg);           color: var(--eos-ink-faint); border: 1px dashed var(--eos-line); }
+/* Accepted — issue was reviewed and accepted by estimator */
+.rw-badge--accepted { background: var(--eos-success-soft); color: var(--eos-success);  border: 1px solid var(--eos-success-border); opacity: 0.85; }
 
 /* ── Evidence hint ── */
 .rw-ev-hint {
@@ -2806,7 +2808,26 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
   border-style: solid;
 }
 
-/* ── Checklist ── */
+/* ── Accept as correct button ── */
+.rw-accept-btn {
+  display: inline-block;
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 3px;
+  border: 1px solid var(--eos-success-border);
+  background: var(--eos-success-soft);
+  color: var(--eos-success);
+  cursor: pointer;
+  white-space: nowrap;
+  margin-bottom: 4px;
+  transition: background 0.12s, color 0.12s;
+}
+.rw-accept-btn:hover {
+  background: var(--eos-success);
+  color: #fff;
+  border-color: var(--eos-success);
+}
 .rw-checklist {
   border: 1px solid var(--eos-line);
   border-radius: var(--r-sm);
