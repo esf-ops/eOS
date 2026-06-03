@@ -1210,6 +1210,18 @@ input[type="checkbox"] {
 
 /* ----- Metrics grid ----------------------------------------------------- */
 
+.metrics-section {
+  margin-bottom: 0;
+}
+
+.metrics-filter-note {
+  font-size: 0.72rem;
+  color: var(--eos-muted, #888);
+  text-align: right;
+  margin: 0 0 6px;
+  letter-spacing: 0.01em;
+}
+
 .metrics {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));

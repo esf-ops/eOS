@@ -155,6 +155,22 @@ function deriveDisplayNameFromEmail(email: string): string {
   return words.map((w) => w[0]?.toUpperCase() + w.slice(1).toLowerCase()).join(" ");
 }
 
+/**
+ * Format a raw "entered by" / "prepared by" value for display in the quote table.
+ *
+ * Resolution order:
+ *   1. Plain name already set (no "@") — returned as-is after trim.
+ *   2. Email local part — "peg.reid@..." → "Peg Reid", "casey@..." → "Casey".
+ *   3. Raw email — returned verbatim as a last resort.
+ *   4. Empty / null / undefined — returns "—".
+ */
+function formatPersonDisplayName(raw: unknown): string {
+  const s = String(raw ?? "").trim();
+  if (!s) return "—";
+  if (!s.includes("@")) return s;
+  return deriveDisplayNameFromEmail(s) || s;
+}
+
 function userInitialsFor(name: string, email: string): string {
   const n = String(name || "").trim();
   if (n) {
@@ -203,8 +219,18 @@ export default function QuoteLibraryApp() {
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [listMeta, setListMeta] = useState<ListMeta>(EMPTY_LIST_META);
   const [metrics, setMetrics] = useState<Record<string, unknown> | null>(null);
+  const [metricsIsFiltered, setMetricsIsFiltered] = useState(false);
   const [accountGroups, setAccountGroups] = useState<Record<string, unknown>[]>([]);
 
+  /** Monotonically-increasing counter used to discard stale metrics responses. */
+  const metricsLoadSeqRef = useRef(0);
+
+  /**
+   * `searchInput` holds the live text-input value; `search` is the debounced
+   * version that drives actual API queries.  Splitting prevents a fetch on
+   * every keystroke while keeping the input responsive.
+   */
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [accountQ, setAccountQ] = useState("");
   const [status, setStatus] = useState("");
@@ -225,6 +251,36 @@ export default function QuoteLibraryApp() {
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
   const [revisions, setRevisions] = useState<Record<string, unknown>[]>([]);
   const [showArchived, setShowArchived] = useState(false);
+
+  // Debounce the raw search input → committed search (avoids a fetch on every keystroke).
+  useEffect(() => {
+    if (searchInput === search) return;
+    const tid = setTimeout(() => setSearch(searchInput), 280);
+    return () => clearTimeout(tid);
+  }, [searchInput, search]);
+
+  /**
+   * Mirror all active filter state into a ref so that `loadMetrics` (which is
+   * stable, only depending on `sessionToken`) can always read the latest values
+   * without being recreated on every filter change.
+   */
+  type FilterSnapshot = {
+    tab: TabId; search: string; accountQ: string; status: string;
+    quoteSource: string; branch: string; salesRep: string;
+    createdFrom: string; createdTo: string; handoffStatus: string;
+    showArchived: boolean;
+  };
+  const filterStateRef = useRef<FilterSnapshot>({
+    tab: "all", search: "", accountQ: "", status: "",
+    quoteSource: "", branch: "", salesRep: "",
+    createdFrom: "", createdTo: "", handoffStatus: "", showArchived: false
+  });
+  useEffect(() => {
+    filterStateRef.current = {
+      tab, search, accountQ, status, quoteSource, branch, salesRep,
+      createdFrom, createdTo, handoffStatus, showArchived
+    };
+  }, [tab, search, accountQ, status, quoteSource, branch, salesRep, createdFrom, createdTo, handoffStatus, showArchived]);
 
   const internalBase = useMemo(() => internalEstimateUrl(), []);
   const homeBase = useMemo(() => homeLauncherUrl(), []);
@@ -250,7 +306,8 @@ export default function QuoteLibraryApp() {
 
   const activeFilterCount = useMemo(() => {
     let n = 0;
-    if (search.trim()) n += 1;
+    // Use searchInput so the badge reacts to what the user has typed, not just the committed debounce value.
+    if (searchInput.trim()) n += 1;
     if (accountQ.trim()) n += 1;
     if (status) n += 1;
     if (quoteSource) n += 1;
@@ -261,7 +318,7 @@ export default function QuoteLibraryApp() {
     if (handoffStatus) n += 1;
     if (showArchived) n += 1;
     return n;
-  }, [search, accountQ, status, quoteSource, branch, salesRep, createdFrom, createdTo, handoffStatus, showArchived]);
+  }, [searchInput, accountQ, status, quoteSource, branch, salesRep, createdFrom, createdTo, handoffStatus, showArchived]);
 
   const listContextKey = useMemo(
     () =>
@@ -285,6 +342,7 @@ export default function QuoteLibraryApp() {
   );
 
   const clearFilters = useCallback(() => {
+    setSearchInput("");
     setSearch("");
     setAccountQ("");
     setStatus("");
@@ -389,11 +447,35 @@ export default function QuoteLibraryApp() {
 
   const loadMetrics = useCallback(async () => {
     if (!sessionToken) return;
+    // Increment the sequence so any in-flight response with an older seq is discarded.
+    const seq = ++metricsLoadSeqRef.current;
+    const fs = filterStateRef.current;
+
+    // Build filter params (same dimensions as the list, minus sort/pagination).
+    const params = new URLSearchParams();
+    if (fs.search.trim()) params.set("search", fs.search.trim());
+    if (fs.accountQ.trim()) params.set("account", fs.accountQ.trim());
+    if (fs.status) params.set("status", fs.status);
+    if (fs.quoteSource) params.set("quote_source", fs.quoteSource);
+    if (fs.branch.trim()) params.set("branch", fs.branch.trim());
+    if (fs.salesRep.trim()) params.set("sales_rep", fs.salesRep.trim());
+    if (fs.createdFrom) params.set("created_from", fs.createdFrom);
+    if (fs.createdTo) params.set("created_to", fs.createdTo);
+    if (fs.showArchived) params.set("include_archived", "1");
+    if (fs.tab === "my") params.set("my", "1");
+    if (fs.tab === "internal") params.set("view", "internal_estimates");
+    if (fs.tab === "public") params.set("view", "public_leads");
+    if (fs.tab === "sold") params.set("view", "sold_jobs");
+    if (fs.tab === "handoff") params.set("view", "needs_handoff");
+
+    const qs = params.toString();
     try {
-      const m = (await apiGet("/api/quote-library/metrics", sessionToken)) as Record<string, unknown>;
+      const m = (await apiGet(`/api/quote-library/metrics${qs ? `?${qs}` : ""}`, sessionToken)) as Record<string, unknown>;
+      if (seq !== metricsLoadSeqRef.current) return; // discard stale response
       setMetrics((m.metrics as Record<string, unknown>) || {});
+      setMetricsIsFiltered(!!(m.is_filtered));
     } catch {
-      setMetrics({});
+      // Keep the previous (stale) metrics visible on error — don't blank the cards.
     }
   }, [sessionToken]);
 
@@ -483,6 +565,7 @@ export default function QuoteLibraryApp() {
     pageOffset
   ]);
 
+  // Initial metrics load (fires when sessionToken becomes available).
   useEffect(() => {
     void loadMetrics();
   }, [loadMetrics]);
@@ -496,10 +579,14 @@ export default function QuoteLibraryApp() {
     setSelectedIds(new Set());
   }, [pageOffset]);
 
+  // Load rows and metrics whenever the tab or active list query changes.
+  // loadMetrics reads filter state via filterStateRef so it stays stable and
+  // does not need to be listed in the deps beyond its identity change (token).
   useEffect(() => {
+    void loadMetrics();
     if (tab === "by_account") void loadAccounts();
     else void loadRows();
-  }, [tab, loadRows, loadAccounts]);
+  }, [tab, loadRows, loadAccounts, loadMetrics]);
 
   useEffect(() => {
     if (!sessionToken || !detailId) {
@@ -941,20 +1028,27 @@ export default function QuoteLibraryApp() {
           {msg ? <div className="banner banner-info" role="status">{msg}</div> : null}
           {err ? <div className="banner banner-error" role="alert">{err}</div> : null}
 
-          <div className="metrics" role="list" aria-label="Quote library metrics">
-            {metricCards.map((c) => {
-              const isEmpty = c.val === "—" || c.val === "$0" || c.val === "0";
-              return (
-                <div
-                  key={c.key}
-                  className={`metric${isEmpty ? " metric-zero" : ""}`}
-                  role="listitem"
-                >
-                  <div className="val">{c.val}</div>
-                  <div className="lbl">{c.label}</div>
-                </div>
-              );
-            })}
+          <div className="metrics-section">
+            {metricsIsFiltered ? (
+              <p className="metrics-filter-note" aria-live="polite">
+                Metrics reflect current filters
+              </p>
+            ) : null}
+            <div className="metrics" role="list" aria-label="Quote library metrics">
+              {metricCards.map((c) => {
+                const isEmpty = c.val === "—" || c.val === "$0" || c.val === "0";
+                return (
+                  <div
+                    key={c.key}
+                    className={`metric${isEmpty ? " metric-zero" : ""}`}
+                    role="listitem"
+                  >
+                    <div className="val">{c.val}</div>
+                    <div className="lbl">{c.label}</div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
           <div className="tabs" role="tablist" aria-label="Quote views">
@@ -1007,8 +1101,8 @@ export default function QuoteLibraryApp() {
               <label className="search-span search-prominent">
                 Global search
                 <input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
                   placeholder="Customer, project, quote #, city, rep…"
                 />
               </label>
@@ -1090,8 +1184,11 @@ export default function QuoteLibraryApp() {
                 className="btn primary"
                 disabled={busy}
                 onClick={() => {
+                  // Commit the live search input immediately (without waiting for debounce).
+                  setSearch(searchInput);
                   setPageOffset(0);
                   setSelectedIds(new Set());
+                  void loadMetrics();
                   return tab === "by_account" ? void loadAccounts() : void loadRows();
                 }}
               >
@@ -1261,6 +1358,7 @@ export default function QuoteLibraryApp() {
                         <th>Status</th>
                         <th className="hide-md">Sales rep</th>
                         <th className="hide-md">Branch</th>
+                        <th className="hide-md">Entered by</th>
                         <th className="col-total">Total</th>
                         <th className="hide-sm">Sq ft</th>
                         <th>Updated</th>
@@ -1304,6 +1402,7 @@ export default function QuoteLibraryApp() {
                             </td>
                             <td className="hide-md">{str(r.sales_rep) || "—"}</td>
                             <td className="hide-md">{str(r.branch) || "—"}</td>
+                            <td className="hide-md">{formatPersonDisplayName(r.prepared_by)}</td>
                             <td className="col-total">{formatMoneyWhole(pickDisplayTotal(r as Record<string, unknown>))}</td>
                             <td className="hide-sm">{formatSqft(r.estimated_sqft)}</td>
                             <td>{formatShortDate(r.updated_at)}</td>

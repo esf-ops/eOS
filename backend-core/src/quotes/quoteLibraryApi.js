@@ -134,6 +134,80 @@ function applyQuoteHeaderOrgScope(qb, orgId, hasQuoteHeadersOrg) {
 }
 
 /**
+ * Apply the standard quote list filter params to a Supabase query builder.
+ * Used by both the list endpoint and the metrics endpoint so they operate on
+ * the same row set. Does NOT apply sort, pagination, or handoff_status
+ * (handoff_status is a post-fetch computed field, not a DB column).
+ *
+ * @param {object} qb  Supabase query builder
+ * @param {object} query  req.query or equivalent
+ * @param {{ userEmail?: string, userName?: string }} [opts]
+ */
+function applyQuoteListFilters(qb, query, opts = {}) {
+  const { userEmail = "", userName = "" } = opts;
+
+  const view = pickStr(query.view);
+  if (view === "internal_estimates") qb = qb.eq("quote_source", "internal_quote");
+  else if (view === "public_leads") qb = qb.eq("quote_source", "public_consumer");
+  else if (view === "sold_jobs" || view === "needs_handoff") {
+    try { qb = qb.or("quote_status.eq.sold,quote_status.eq.won"); } catch { /* ignore */ }
+  }
+
+  const my = pickStr(query.my);
+  if (my === "1" || my === "true") {
+    if (userEmail || userName) {
+      const parts = [];
+      if (userEmail) parts.push(`sales_rep.ilike.%${userEmail.slice(0, 48)}%`);
+      if (userName) parts.push(`sales_rep.ilike.%${userName.slice(0, 48)}%`);
+      if (parts.length) {
+        try { qb = qb.or(parts.join(",")); } catch { /* ignore */ }
+      }
+    }
+  }
+
+  const search = pickStr(query.search);
+  if (search) {
+    const s = search.replace(/%/g, "").slice(0, 80);
+    const pat = `%${s}%`;
+    try {
+      qb = qb.or(
+        `customer_name.ilike.${pat},project_name.ilike.${pat},project_address.ilike.${pat},quote_number.ilike.${pat},city.ilike.${pat},state.ilike.${pat},zip.ilike.${pat},sales_rep.ilike.${pat},branch.ilike.${pat},quote_status.ilike.${pat}`
+      );
+    } catch { /* ignore */ }
+  }
+
+  const account = pickStr(query.account);
+  if (account) {
+    const a = account.replace(/%/g, "").slice(0, 80);
+    const pat = `%${a}%`;
+    try { qb = qb.or(`customer_name.ilike.${pat},project_name.ilike.${pat},quote_number.ilike.${pat}`); } catch { /* ignore */ }
+  }
+
+  const status = pickStr(query.status);
+  if (status) qb = qb.eq("quote_status", status);
+
+  const branch = pickStr(query.branch);
+  if (branch) {
+    try { qb = qb.ilike("branch", `%${branch.slice(0, 40)}%`); } catch { /* ignore */ }
+  }
+
+  const salesRep = pickStr(query.sales_rep);
+  if (salesRep) {
+    try { qb = qb.ilike("sales_rep", `%${salesRep.slice(0, 40)}%`); } catch { /* ignore */ }
+  }
+
+  const quoteSource = pickStr(query.quote_source);
+  if (quoteSource) qb = qb.eq("quote_source", quoteSource);
+
+  const cf = pickStr(query.created_from);
+  if (cf) qb = qb.gte("created_at", cf);
+  const ct = pickStr(query.created_to);
+  if (ct) qb = qb.lte("created_at", ct);
+
+  return qb;
+}
+
+/**
  * Extract the customer-facing Estimated project total from the saved calculation snapshot,
  * if present. Returns null for older quotes that were saved before this field was introduced.
  * @param {Record<string, unknown>} r
@@ -190,6 +264,7 @@ function mapListRow(r, handoffDocsByQuote) {
     estimated_sqft: r.estimated_sqft,
     created_at: r.created_at,
     updated_at: r.updated_at,
+    prepared_by: r.prepared_by ?? null,
     latest_monday_sync_status: r._monday_status ?? null,
     handoff_status: handoffRollupFromRows(docs),
     moraware_doc_status: morDoc?.status ?? "none",
@@ -544,7 +619,10 @@ export function attachQuoteLibraryRoutes(app, deps) {
     try {
       const db = getSupabase();
       const { orgId, hasQuoteHeadersOrg } = await loadOrgScope(db, req);
-      const scopeSource = pickStr(req.query.quote_source);
+
+      const includeArchived =
+        pickStr(req.query.include_archived) === "1" ||
+        pickStr(req.query.show_archived).toLowerCase() === "true";
 
       let qb = db
         .from("quote_headers")
@@ -552,17 +630,23 @@ export function attachQuoteLibraryRoutes(app, deps) {
           "id,quote_status,quote_source,grand_total,created_at,updated_at,is_current_revision,archived_at"
         );
       qb = applyQuoteHeaderOrgScope(qb, orgId, hasQuoteHeadersOrg);
-      try {
-        qb = qb.is("archived_at", null);
-      } catch {
-        /* ignore */
+      if (!includeArchived) {
+        try {
+          qb = qb.is("archived_at", null);
+        } catch {
+          /* ignore */
+        }
       }
       try {
         qb = qb.or("is_current_revision.eq.true,is_current_revision.is.null");
       } catch {
         /* ignore */
       }
-      if (scopeSource) qb = qb.eq("quote_source", scopeSource);
+
+      // Apply all standard list filters (same as list endpoint, minus sort/pagination).
+      const userEmail = pickStr(req.user?.email);
+      const userName = pickStr(req.user?.full_name);
+      qb = applyQuoteListFilters(qb, req.query, { userEmail, userName });
 
       const { data: rows, error } = await qb.limit(6000);
       if (error) {
@@ -637,11 +721,28 @@ export function attachQuoteLibraryRoutes(app, deps) {
 
       const internalRows = (rows || []).filter((r) => String(r.quote_source || "") === "internal_quote");
 
+      // Detect whether any client filters were applied so the frontend can show
+      // "Metrics reflect current filters" when the cards are not global.
+      const isFiltered = !!(
+        req.query.view ||
+        req.query.my ||
+        req.query.search ||
+        req.query.account ||
+        req.query.status ||
+        req.query.quote_source ||
+        req.query.branch ||
+        req.query.sales_rep ||
+        req.query.created_from ||
+        req.query.created_to ||
+        includeArchived
+      );
+
       res.json({
         ok: true,
+        is_filtered: isFiltered,
         total_row_sample: (rows || []).length,
         metrics_note:
-          "Headline cards use latest revision rows only (is_current_revision) and exclude archived quotes. Period buckets filter by updated_at.",
+          "Headline cards use latest revision rows only (is_current_revision). Period buckets filter by updated_at. Filters from the active list view are forwarded.",
         metrics: {
           total_open_quote_value: Math.round(openValue * 100) / 100,
           open_quotes: openCount,
