@@ -91,6 +91,12 @@ export interface TakeoffPlanFileSectionProps {
       dimensionEvidence?: object | null; // v5.5: DimensionEvidence from evidence pass
     }
   ) => void;
+  /**
+   * Called after the source plan is successfully archived.
+   * Parent should clear workspace + URL and return to upload-first empty state.
+   * (v5.9.5)
+   */
+  onPlanArchived: () => void;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -132,9 +138,15 @@ export default function TakeoffPlanFileSection({
   onWorkspaceCreated,
   onWorkspaceLoaded,
   onAiDraftGenerated,
+  onPlanArchived,
 }: TakeoffPlanFileSectionProps) {
   const [workspace, setWorkspace] = useState<WorkspaceState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+
+  // Archive state (v5.9.5)
+  type ArchiveStep = "idle" | "archiving" | "done" | "error";
+  const [archiveStep, setArchiveStep] = useState<ArchiveStep>("idle");
+  const [archiveError, setArchiveError] = useState<string | null>(null);
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [fileRole, setFileRole] = useState("cabinet_plan");
@@ -181,6 +193,8 @@ export default function TakeoffPlanFileSection({
     setAiStep("idle");
     setAiError(null);
     setProviderConfig(null);
+    setArchiveStep("idle");
+    setArchiveError(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
   }, [takeoffJobId]);
 
@@ -365,11 +379,47 @@ export default function TakeoffPlanFileSection({
     }
   }, [takeoffJobId, token, workspace, onAiDraftGenerated]);
 
+  // ── Remove / archive plan (v5.9.5) ───────────────────────────────────────
+  //
+  // Soft-archives the source file via POST /api/quote-files/archive.
+  // File bytes and rows are NOT deleted. Saved takeoff runs remain in history.
+  // On success, calls onPlanArchived() which triggers the parent reset
+  // (same cleanup as Start New Takeoff).
+
+  const handleRemovePlan = useCallback(async () => {
+    if (!workspace || !token) return;
+    const quoteFileId = workspace.file.id;
+
+    const confirmed = window.confirm(
+      "Remove this plan from the active AI Takeoff workspace?\n\n" +
+      "The file will be archived — not permanently deleted. " +
+      "Saved takeoff runs will remain in history.\n\n" +
+      "You can upload a different plan after removing."
+    );
+    if (!confirmed) return;
+
+    setArchiveStep("archiving");
+    setArchiveError(null);
+
+    try {
+      await labApiPost("/api/quote-files/archive", token, { quoteFileId });
+      setArchiveStep("done");
+      onPlanArchived();
+    } catch (e) {
+      const msg = e instanceof LabApiError ? e.message : e instanceof Error ? e.message : "Archive failed.";
+      setArchiveStep("error");
+      setArchiveError(msg);
+    }
+  }, [workspace, token, onPlanArchived]);
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   const isBusy = uploadStep !== "idle" && uploadStep !== "done" && uploadStep !== "error";
   const isAiBusy = aiStep === "sending" || aiStep === "generating" || aiStep === "recomputing";
   const canUpload = Boolean(selectedFile) && Boolean(token) && !isBusy;
+  const isArchiving = archiveStep === "archiving";
+  /** True if the workspace's source file has been archived (shows notice, hides Generate). */
+  const isFileArchived = workspace?.file.status === "archived";
 
   // Show sign-in prompt if no token.
   if (!token) {
@@ -402,14 +452,27 @@ export default function TakeoffPlanFileSection({
               </p>
             </div>
             <div className="plan-file-actions">
-              <button
-                type="button"
-                className="plan-btn plan-btn--secondary"
-                disabled={downloadingId === workspace.file.id}
-                onClick={() => void handleDownload(workspace.file.id)}
-              >
-                {downloadingId === workspace.file.id ? "Opening…" : "Open / Download"}
-              </button>
+              {!isFileArchived && (
+                <button
+                  type="button"
+                  className="plan-btn plan-btn--secondary"
+                  disabled={downloadingId === workspace.file.id}
+                  onClick={() => void handleDownload(workspace.file.id)}
+                >
+                  {downloadingId === workspace.file.id ? "Opening…" : "Open / Download"}
+                </button>
+              )}
+              {!isFileArchived && (
+                <button
+                  type="button"
+                  className="plan-btn plan-btn--remove"
+                  disabled={isArchiving}
+                  onClick={() => void handleRemovePlan()}
+                  title="Archive the source plan — the file is not deleted and saved takeoff runs remain in history"
+                >
+                  {isArchiving ? "Removing…" : "Remove plan"}
+                </button>
+              )}
             </div>
           </div>
 
@@ -430,8 +493,27 @@ export default function TakeoffPlanFileSection({
             )}
           </div>
 
-          {/* AI draft generation (v5) */}
-          <div className="ai-draft-panel">
+          {/* Archive error */}
+          {archiveStep === "error" && archiveError && (
+            <p className="plan-file-error plan-file-error--inline">✗ {archiveError}</p>
+          )}
+
+          {/* Archived file notice — shown when source file was previously archived */}
+          {isFileArchived && (
+            <div className="plan-file-archived-notice" role="alert">
+              <span className="plan-file-archived-icon" aria-hidden>📦</span>
+              <div className="plan-file-archived-body">
+                <p className="plan-file-archived-title">Source plan archived</p>
+                <p className="plan-file-archived-desc">
+                  This source plan was archived. Saved takeoff runs remain in history.
+                  Start a new takeoff or upload another plan.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* AI draft generation (v5) — hidden for archived files */}
+          {!isFileArchived && <div className="ai-draft-panel">
             <div className="ai-draft-row">
               <button
                 type="button"
@@ -503,7 +585,7 @@ export default function TakeoffPlanFileSection({
                 )}
               </div>
             )}
-          </div>
+          </div>}
         </div>
       ) : loadError ? (
         <p className="plan-file-error">Failed to load workspace: {loadError}</p>

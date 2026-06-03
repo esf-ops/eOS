@@ -802,6 +802,29 @@ details[open] > .lab-section-summary::before { transform: rotate(90deg); }
   border-color: var(--eos-line-strong);
 }
 .plan-btn--secondary:not(:disabled):hover { background: var(--eos-bg-soft); }
+.plan-btn--remove {
+  background: var(--eos-surface); color: var(--eos-danger);
+  border-color: var(--eos-danger-border);
+}
+.plan-btn--remove:not(:disabled):hover {
+  background: var(--eos-danger-soft);
+}
+
+/* ── Archived file notice (v5.9.5) ──────────────────────────────────────── */
+.plan-file-archived-notice {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 12px 14px; border-radius: var(--r-md);
+  background: var(--eos-warn-soft); border: 1px solid var(--eos-warn-border);
+}
+.plan-file-archived-icon { font-size: 20px; flex-shrink: 0; }
+.plan-file-archived-body { flex: 1; min-width: 0; }
+.plan-file-archived-title {
+  margin: 0 0 2px; font-size: 13px; font-weight: 700;
+  color: var(--eos-warn);
+}
+.plan-file-archived-desc {
+  margin: 0; font-size: 12px; color: var(--eos-warn); line-height: 1.5;
+}
 
 .plan-file-loaded { padding: 20px 24px; display: flex; flex-direction: column; gap: 12px; }
 

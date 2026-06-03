@@ -899,6 +899,7 @@ export default function TakeoffLabApp() {
                 setPlanFilename(filename);
               }}
               onAiDraftGenerated={handleAiDraftGenerated}
+              onPlanArchived={handleStartNewTakeoff}
             />
           </section>
 
