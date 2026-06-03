@@ -83,6 +83,15 @@ export const TAKEOFF_DIAGNOSTIC_CODE = Object.freeze({
 
   // Nonstandard piece depth — island/peninsula/bar/desk/waterfall requires plan evidence (v5.9.2)
   NONSTANDARD_DEPTH_ASSUMED:           "NONSTANDARD_DEPTH_ASSUMED",
+
+  // Evidence traceability — runs must be traceable to extracted dimension evidence (v6.0)
+  // These fire when the final TakeoffResult geometry cannot be tied back to the evidence table.
+  RUN_LENGTH_NOT_SUPPORTED_BY_EVIDENCE: "RUN_LENGTH_NOT_SUPPORTED_BY_EVIDENCE",
+  RUN_DEPTH_NOT_SUPPORTED_BY_EVIDENCE:  "RUN_DEPTH_NOT_SUPPORTED_BY_EVIDENCE",
+  EVIDENCE_DIMENSION_CHANGED_IN_RUN:    "EVIDENCE_DIMENSION_CHANGED_IN_RUN",
+  CONFLICTING_DIMENSIONS_USED_SILENTLY: "CONFLICTING_DIMENSIONS_USED_SILENTLY",
+  UNSUPPORTED_CORNER_DEDUCTION:         "UNSUPPORTED_CORNER_DEDUCTION",
+  DRAFT_ASSEMBLY_REVIEW_REQUIRED:       "DRAFT_ASSEMBLY_REVIEW_REQUIRED",
 });
 
 /**
@@ -126,6 +135,14 @@ export const TAKEOFF_SHAPE_TYPE = Object.freeze({
  * @property {number} [exposedEndOverhangIn]
  * @property {number[]} [sourcePages]
  * @property {string[]} [notes]
+ * — Evidence trace fields (v6.0, optional — backward compatible) —
+ * @property {string} [lengthEvidenceId]     id of the evidence dimension used for this run's length
+ * @property {string} [depthEvidenceId]      id of the evidence dimension used for this run's depth
+ * @property {string[]} [evidenceIds]        all evidence dim ids that contributed to this run
+ * @property {number[]} [evidenceSourcePages] pages where evidence supporting this run appeared
+ * @property {string} [assemblyNotes]        model's explanation of how evidence was assembled
+ * @property {"high"|"medium"|"low"} [assemblyConfidence]  model's confidence in the assembly
+ * @property {boolean} [requiresEstimatorReview]  true when model flagged conflicting or unclear evidence
  */
 export function makeTakeoffRun(overrides = {}) {
   return {
@@ -137,7 +154,15 @@ export function makeTakeoffRun(overrides = {}) {
     pieceType: overrides.pieceType ?? "counter",
     ...(overrides.exposedEndOverhangIn != null && { exposedEndOverhangIn: Number(overrides.exposedEndOverhangIn) }),
     ...(overrides.sourcePages != null && { sourcePages: overrides.sourcePages }),
-    ...(overrides.notes != null && { notes: overrides.notes })
+    ...(overrides.notes != null && { notes: overrides.notes }),
+    // Evidence trace fields — optional, populated by AI model (v6.0)
+    ...(overrides.lengthEvidenceId      != null && { lengthEvidenceId: String(overrides.lengthEvidenceId) }),
+    ...(overrides.depthEvidenceId       != null && { depthEvidenceId: String(overrides.depthEvidenceId) }),
+    ...(overrides.evidenceIds           != null && { evidenceIds: overrides.evidenceIds }),
+    ...(overrides.evidenceSourcePages   != null && { evidenceSourcePages: overrides.evidenceSourcePages }),
+    ...(overrides.assemblyNotes         != null && { assemblyNotes: String(overrides.assemblyNotes) }),
+    ...(overrides.assemblyConfidence    != null && { assemblyConfidence: overrides.assemblyConfidence }),
+    ...(overrides.requiresEstimatorReview != null && { requiresEstimatorReview: Boolean(overrides.requiresEstimatorReview) }),
   };
 }
 

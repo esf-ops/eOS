@@ -2308,3 +2308,149 @@ details[open] > .lab-section-summary::before { transform: rotate(90deg); }
 .ev-coverage-msg {
   line-height: 1.4;
 }
+
+/* ── Evidence Trace Panel (v6.0) ──────────────────────────────────────────────── */
+
+.et-panel {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.et-empty {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--eos-ink-muted);
+  font-style: italic;
+}
+
+/* ── Summary bar ── */
+.et-summary-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+.et-summary-item {
+  border-radius: 20px;
+  padding: 2px 10px;
+  letter-spacing: 0.01em;
+}
+.et-summary-item--ok    { background: var(--eos-success-soft); color: var(--eos-success); border: 1px solid var(--eos-success-border); }
+.et-summary-item--warn  { background: var(--eos-warn-soft);    color: var(--eos-warn);    border: 1px solid var(--eos-warn-border); }
+.et-summary-item--error { background: var(--eos-danger-soft);  color: var(--eos-danger);  border: 1px solid var(--eos-danger-border); }
+
+/* ── Per-run table ── */
+.et-run-table {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  border: 1px solid var(--eos-line);
+}
+.et-run-row {
+  display: grid;
+  grid-template-columns: 2fr 60px 80px 110px 1fr;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 10px;
+  font-size: 0.79rem;
+  background: var(--eos-surface);
+}
+.et-run-row--header {
+  background: var(--eos-bg-soft);
+  font-weight: 600;
+  font-size: 0.72rem;
+  color: var(--eos-ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.et-run-row--warn  { background: rgba(180,92,12,0.04); }
+.et-run-row--error { background: rgba(163,19,47,0.04); }
+
+.et-run-label { font-weight: 500; color: var(--eos-ink); }
+.et-run-dim   { color: var(--eos-ink-mid); font-variant-numeric: tabular-nums; }
+.et-dim-note  { font-size: 0.69rem; color: var(--eos-ink-faint); }
+
+/* ── Verdict badges ── */
+.et-badge {
+  display: inline-block;
+  font-size: 0.69rem;
+  font-weight: 700;
+  border-radius: 4px;
+  padding: 2px 6px;
+  letter-spacing: 0.01em;
+}
+.et-badge--ok    { background: var(--eos-success-soft); color: var(--eos-success);  border: 1px solid var(--eos-success-border); }
+.et-badge--warn  { background: var(--eos-warn-soft);    color: var(--eos-warn);     border: 1px solid var(--eos-warn-border); }
+.et-badge--error { background: var(--eos-danger-soft);  color: var(--eos-danger);   border: 1px solid var(--eos-danger-border); }
+.et-badge--muted { background: var(--eos-bg-soft);      color: var(--eos-ink-muted); border: 1px solid var(--eos-line); }
+
+/* ── Evidence reference cell ── */
+.et-evidence-ref { font-size: 0.74rem; color: var(--eos-ink-muted); min-width: 0; }
+.et-ev-match    { color: var(--eos-ink-mid); }
+.et-ev-change   { color: var(--eos-warn); font-style: italic; }
+.et-ev-none     { color: var(--eos-danger); font-style: italic; }
+.et-ev-conflict { color: var(--eos-warn); }
+
+/* ── Unused evidence section ── */
+.et-unused-section {
+  padding: 10px 12px;
+  border-radius: var(--r-sm);
+  background: var(--eos-warn-soft);
+  border: 1px solid var(--eos-warn-border);
+}
+.et-unused-title {
+  margin: 0 0 6px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: var(--eos-warn);
+}
+.et-unused-list {
+  margin: 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.et-unused-item { font-size: 0.76rem; color: var(--eos-warn); }
+
+/* ── Issue list (corner deductions, etc.) ── */
+.et-issue-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.et-issue {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: var(--r-sm);
+  font-size: 0.78rem;
+}
+.et-issue--warn  { background: var(--eos-warn-soft);   color: var(--eos-warn);   border: 1px solid var(--eos-warn-border); }
+.et-issue--error { background: var(--eos-danger-soft); color: var(--eos-danger); border: 1px solid var(--eos-danger-border); }
+.et-issue-icon   { flex-shrink: 0; }
+
+/* ── All-clear message ── */
+.et-all-clear {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--eos-success);
+  font-weight: 600;
+}
+
+/* ── lab-section-desc (supporting text under section header) ── */
+.lab-section-desc {
+  margin: -6px 0 10px;
+  font-size: 0.78rem;
+  color: var(--eos-ink-muted);
+  line-height: 1.5;
+}

@@ -309,20 +309,37 @@ OPENAI_API_KEY=sk-...       never client-exposed
 
 Dev: `npm run dev --prefix app-ai-takeoff` -> `http://localhost:5186`. Not in Home Launcher yet.
 
-### Next required focus (post v5.9)
+### v6.0 status: evidence-first integrity (2026-05-31 ✅)
 
-**Manual QA steps for testing Gemini on known private benchmarks:**
+| Area | State |
+|------|-------|
+| New diagnostic codes (6) | **Done** — contract.mjs |
+| `takeoffEvidenceRunReconciliation.mjs` | **Done** — pure helper, 18 tests passing |
+| Validator integration | **Done** — calls reconciliation after evidence coverage check |
+| QA gate integration (checks 11a–11e) | **Done** — escalates unsupported/changed/conflict/corner/review |
+| Extraction prompt v6 | **Done** — assemblyNotes required, requiresEstimatorReview, evidence citation rules |
+| UI: Evidence Trace panel | **Done** — compact per-run verdict table with badge + evidence ref |
+| All existing tests | **All passing** (28 extraction, 25 QA gate, 18 reconciliation, 13 dim-evidence, 25 Gemini, 6 config) |
+| Build | **Clean** (vite build, eos:check:local) |
+| Import disabled | **Still disabled** — no change |
 
-1. Add `GEMINI_API_KEY` to `backend-core/.env.local`.
-2. Set `TAKEOFF_AI_PROVIDER=gemini` and `GEMINI_TAKEOFF_MODEL=gemini-2.5-pro`.
-3. Restart backend with env loaded.
-4. Open AI Takeoff Lab.
-5. Run **Merschman** / simple desk — confirm source pill shows `gemini`, QA gate is green.
-6. Run **Kelley 50 / no BS** — select benchmark "Kelley 50" in Benchmark panel, confirm QA card turns red (do_not_import) if Gemini also inflates CT.
-7. Run **Weidenheim 49 / no BS** — same check: expect do_not_import if CT > ~51.
-8. Run **Nietert 53 + 6 BS** — confirm backsplash is picked up correctly.
-9. Compare run history: Gemini runs should show blue `gemini` pill, OpenAI runs show green `openai` pill.
-10. Confirm "Import to Internal Estimate" remains disabled regardless of provider.
+### Manual QA checklist (post v6.0 deployment)
+
+1. Upload Spec 73 PDF.
+2. Generate Gemini draft.
+3. **Evidence Trace section** shows per-run verdicts — confirm 100", 40", 25.5", 90" runs show ✓ supported badges.
+4. Confirm the "Right of stove" 24" run (if Gemini still generates it) shows ⚠ changed badge.
+5. Confirm 109.5", 34.5", 54" stove-wall evidence dims appear in "High-confidence evidence not used in any run" list.
+6. Confirm QA gate is **not green** when there are changed/unsupported dims.
+7. Confirm L-shape corner deductions without overlapMode set trigger ✗ badge in trace.
+8. Confirm eliteOS recompute still works correctly from structured runs.
+9. Confirm "Import to Internal Estimate" remains disabled.
+10. Confirm provider badge (Gemini/OpenAI) still shows near Generate button.
+
+### Ongoing (pre-import)
+
+- Do not enable import until benchmarks ref-001, ref-003, ref-004, clean-rect-001 consistently pass `auto_pass` in the benchmark evaluator AND `ready_for_review` in the QA gate on live runs, for both OpenAI and Gemini.
+- Use benchmark evaluator results side-by-side to decide which provider performs better on the private plan library.
 
 **Ongoing:**
 - Do not enable import until benchmarks ref-001, ref-003, ref-004, clean-rect-001 consistently pass `auto_pass` in the benchmark evaluator AND `ready_for_review` in the QA gate on live runs, for both OpenAI and Gemini.

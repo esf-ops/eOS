@@ -1270,6 +1270,90 @@ New `TAKEOFF_DIAGNOSTIC_CODE.NONSTANDARD_DEPTH_ASSUMED`. Fires in `takeoffValida
 
 ---
 
+## v6.0: Evidence-first takeoff integrity — no silent geometry changes
+
+Fixes the root cause of the Spec 73 geometry loss: the model was silently transforming correct dimension evidence (109.5", 34.5", 54", 100", 40", 23" depth, 90"×41" island) into an incorrect final TakeoffResult (24" right-of-stove, 23" depths everywhere, missing stove-wall spans).
+
+### Core principle
+
+Every final countertop run must be traceable to an extracted dimension evidence dimension. If no high-confidence evidence supports a run's length, the run is flagged. If a run's length differs from the nearest evidence by more than rounding tolerance, it is flagged as "changed." The QA gate escalates both conditions before any estimator review.
+
+### New module: `takeoffEvidenceRunReconciliation.mjs`
+
+Pure helper (no I/O, no DB, no AI). Input: `{ takeoffResult, dimensionEvidence }`. Output: `{ runLinks, unsupportedRuns, changedRuns, conflictingRuns, unusedHighConfidenceDimensions, cornerDeductionWarnings, diagnostics, checksRan }`.
+
+**Verdict tiers:**
+- `supported` — run length within ±1" of a high-confidence evidence dimension (same dim, rounding only)
+- `changed` — nearest evidence is 1–10" away (model modified a dimension without explanation)
+- `unsupported` — no evidence within ±10" (model invented this length)
+- `exempt` — splash/fhb runs or no evidence available
+
+**Standard depth exemption:** 25.5" (kitchen counter) and 21.5" (bathroom vanity) are always allowed without depth evidence.
+
+### New diagnostic codes (v6.0)
+
+| Code | When | Severity |
+|------|------|----------|
+| `RUN_LENGTH_NOT_SUPPORTED_BY_EVIDENCE` | Run length >10" from all evidence | WARNING |
+| `EVIDENCE_DIMENSION_CHANGED_IN_RUN` | Run length 1–10" from nearest evidence | WARNING |
+| `CONFLICTING_DIMENSIONS_USED_SILENTLY` | Multiple evidence dims near a single run | WARNING |
+| `UNSUPPORTED_CORNER_DEDUCTION` | cornerDeductions without L/U overlapMode | WARNING |
+| `DRAFT_ASSEMBLY_REVIEW_REQUIRED` | run.requiresEstimatorReview === true | WARNING |
+| `RUN_DEPTH_NOT_SUPPORTED_BY_EVIDENCE` | (defined, not yet triggered) | WARNING |
+
+### QA gate escalation
+
+- 1 unsupported run → needs_review
+- ≥2 unsupported runs → do_not_import (critical)
+- Changed dims → needs_review
+- Conflicting dims → needs_review
+- Unsupported corner deduction → do_not_import (critical)
+- AI-flagged review runs → needs_review
+
+Positive signal: "All runs traceable to dimension evidence" added when no reconciliation issues found.
+
+### Extraction prompt v6
+
+- `PROMPT_VERSION` bumped to "v6"
+- Every run must include `assemblyNotes` explaining which evidence dimension it used
+- Optional `lengthEvidenceId`, `depthEvidenceId` fields in run (model cites evidence IDs)
+- `requiresEstimatorReview: boolean` on run — model sets true when evidence conflicts
+- Explicit instruction: do NOT silently pick between conflicting evidence; set review flag
+- Explicit instruction: do NOT invent dimensions; cite evidence for every run
+
+### UI: Evidence Trace panel
+
+New "Evidence trace" section (below Dimension evidence, above Debug). Runs client-side (pure function via `@takeoff-core` alias). Shows:
+- Summary bar: X supported / Y changed / Z unsupported / N evidence unused
+- Per-run table: run label, length, depth, verdict badge (✓/⚠/✗), evidence reference
+- Unused evidence list (high-confidence dims not matched by any run)
+- Corner deduction warnings
+
+### What doesn't change
+
+- eliteOS recompute (takeoffMeasurementCalc.mjs) — unchanged
+- Gemini/OpenAI provider routing — unchanged
+- Import to Internal Estimate — remains disabled
+- Pricing — untouched
+
+### File changes
+
+| File | Change |
+|------|--------|
+| `takeoffContract.mjs` | 6 new diagnostic codes; optional evidence trace fields added to TakeoffRun typedef + makeTakeoffRun factory |
+| `takeoffEvidenceRunReconciliation.mjs` | New pure helper |
+| `takeoffValidator.mjs` | Calls reconcileRunsWithEvidence after coverage check; emits new diagnostic codes |
+| `takeoffQaGate.mjs` | 5 new QA gate checks (11a–11e); positive signal for clean reconciliation |
+| `takeoffExtractionPrompt.mjs` | Bumped to v6; evidence traceability rules; schema example updated |
+| `takeoffEvidenceRunReconciliation.test.mjs` | New — 18 test cases |
+| `TakeoffEvidenceTracePanel.tsx` | New UI component |
+| `TakeoffLabApp.tsx` | Import + render Evidence trace section |
+| `styles.css` | CSS for `.et-*` evidence trace classes |
+| `package.json` | `eos:test:takeoff-evidence-reconciliation` script |
+| `takeoffExtractionService.test.mjs` | Updated PROMPT_VERSION assertion v5→v6 |
+
+---
+
 ## Durable decisions
 
-See `FEATURE_DECISIONS.md` entries **48** (contract-first, AI-not-authority), **49** (quote files storage architecture), **50** (provider-neutral extraction layer, AI output never authoritative, raw PDFs not committed), **51** (benchmark truth fixtures, review gates), **52** (automatic QA gate must pass before any future import path), **53** (AI provider can be swapped server-side for benchmarked comparison; every model output still goes through eliteOS recompute, validator, benchmark evaluator, and QA gate), **54** (AI Takeoff deployed as protected head), **55** (shell alignment + session hydration), and **56** (upload-first empty state + nonstandard depth QA + IE/QL alignment).
+See `FEATURE_DECISIONS.md` entries **48** (contract-first, AI-not-authority), **49** (quote files storage architecture), **50** (provider-neutral extraction layer, AI output never authoritative, raw PDFs not committed), **51** (benchmark truth fixtures, review gates), **52** (automatic QA gate must pass before any future import path), **53** (AI provider can be swapped server-side for benchmarked comparison; every model output still goes through eliteOS recompute, validator, benchmark evaluator, and QA gate), **54** (AI Takeoff deployed as protected head), **55** (shell alignment + session hydration), **56** (upload-first empty state + nonstandard depth QA + IE/QL alignment), and **60** (evidence-first integrity — runs must trace to evidence, reconciliation diagnostics, v6 prompt).

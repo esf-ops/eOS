@@ -337,6 +337,93 @@ export function evaluateTakeoffQaGate({
     ));
   }
 
+  // ── 11a. Evidence reconciliation — unsupported runs (v6.0) ───────────────
+  // Fires when a run's length has no support in the dimension evidence table.
+
+  const unsupportedRunCount = countCode(diagnostics, "RUN_LENGTH_NOT_SUPPORTED_BY_EVIDENCE");
+  if (unsupportedRunCount >= 2) {
+    allIssues.push(issue(
+      "MULTIPLE_UNSUPPORTED_RUNS",
+      `${unsupportedRunCount} runs not traceable to evidence`,
+      "critical",
+      `${unsupportedRunCount} final countertop runs have lengths that do not match any high-confidence ` +
+      `evidence dimension. The model likely invented these dimensions without plan support.`,
+      "Review the Evidence trace section. Verify each unsupported run against the uploaded plan and regenerate if needed.",
+      "evidence_reconciliation"
+    ));
+  } else if (unsupportedRunCount === 1) {
+    allIssues.push(issue(
+      "UNSUPPORTED_RUN",
+      "One run not traceable to evidence",
+      "warning",
+      "A final countertop run has a length that does not match any high-confidence evidence dimension (within ±10\"). " +
+      "The model may have invented this dimension.",
+      "Review the Evidence trace section. Verify the flagged run's length against the plan before saving.",
+      "evidence_reconciliation"
+    ));
+  }
+
+  // ── 11b. Evidence reconciliation — changed dimensions (v6.0) ─────────────
+
+  const changedDimCount = countCode(diagnostics, "EVIDENCE_DIMENSION_CHANGED_IN_RUN");
+  if (changedDimCount > 0) {
+    allIssues.push(issue(
+      "EVIDENCE_DIMENSION_CHANGED",
+      `${changedDimCount} run${changedDimCount !== 1 ? "s" : ""} modified from evidence`,
+      "warning",
+      `${changedDimCount} run${changedDimCount !== 1 ? "s" : ""} ${changedDimCount === 1 ? "has" : "have"} a length ` +
+      `that is close to (but different from) a high-confidence evidence dimension. ` +
+      `The model may have silently modified a dimension without explanation.`,
+      "Review the Evidence trace section. Confirm whether the final run length or the evidence dimension is correct.",
+      "evidence_reconciliation"
+    ));
+  }
+
+  // ── 11c. Conflicting dimensions silently resolved (v6.0) ──────────────────
+
+  const conflictingDimCount = countCode(diagnostics, "CONFLICTING_DIMENSIONS_USED_SILENTLY");
+  if (conflictingDimCount > 0) {
+    allIssues.push(issue(
+      "CONFLICTING_DIMENSIONS_SILENT",
+      `${conflictingDimCount} run${conflictingDimCount !== 1 ? "s" : ""} with conflicting evidence`,
+      "warning",
+      `${conflictingDimCount} run${conflictingDimCount !== 1 ? "s" : ""} ${conflictingDimCount === 1 ? "has" : "have"} ` +
+      `multiple nearby evidence dimensions. The model chose one without explanation — ` +
+      `this may represent a floor-plan vs elevation conflict.`,
+      "Review the Evidence trace section. Verify which dimension is the correct assembly value for each flagged run.",
+      "evidence_reconciliation"
+    ));
+  }
+
+  // ── 11d. Unsupported corner deduction (v6.0) ──────────────────────────────
+
+  if (hasCode(diagnostics, "UNSUPPORTED_CORNER_DEDUCTION")) {
+    allIssues.push(issue(
+      "UNSUPPORTED_CORNER_DEDUCTION",
+      "Corner deduction without L/U-shape layout",
+      "critical",
+      "An area has cornerDeductions applied but is not marked as L-Shape or U-Shape. " +
+      "This incorrectly reduces countertop square footage.",
+      "Set overlapMode to 'L-Shape' or 'U-Shape' if this is a corner layout, or remove the deductions.",
+      "evidence_reconciliation"
+    ));
+  }
+
+  // ── 11e. Draft assembly review required (v6.0) ────────────────────────────
+
+  const assemblyReviewCount = countCode(diagnostics, "DRAFT_ASSEMBLY_REVIEW_REQUIRED");
+  if (assemblyReviewCount > 0) {
+    allIssues.push(issue(
+      "DRAFT_ASSEMBLY_REVIEW_REQUIRED",
+      `${assemblyReviewCount} run${assemblyReviewCount !== 1 ? "s" : ""} flagged by AI for review`,
+      "warning",
+      `The AI model flagged ${assemblyReviewCount} run${assemblyReviewCount !== 1 ? "s" : ""} as requiring ` +
+      `estimator review (requiresEstimatorReview=true). These runs have conflicting or unclear evidence.`,
+      "Review each flagged run in the Evidence trace section. Verify against the plan before saving.",
+      "evidence_reconciliation"
+    ));
+  }
+
   // ── 11. Benchmark evaluator result ───────────────────────────────────────
 
   if (benchmarkEvaluation?.finalRecommendation === "fail") {
@@ -479,6 +566,16 @@ export function evaluateTakeoffQaGate({
 
   if (unusedDimCount === 0 && dimensionEvidence?.dimensions?.length > 0) {
     positiveSignals.push("All high-confidence dimensions used in final runs");
+  }
+
+  // v6.0: evidence reconciliation positive signals
+  if (
+    dimensionEvidence?.dimensions?.length > 0 &&
+    unsupportedRunCount === 0 &&
+    changedDimCount === 0 &&
+    conflictingDimCount === 0
+  ) {
+    positiveSignals.push("All runs traceable to dimension evidence");
   }
 
   const noBsInRef = dimensionEvidence?.referenceTotals?.some((r) => r.noBacksplash === true) ?? false;

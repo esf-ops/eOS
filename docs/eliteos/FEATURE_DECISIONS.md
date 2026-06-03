@@ -728,6 +728,24 @@
 
 ---
 
+### 60. AI Takeoff — evidence-first integrity + no silent geometry changes (v6.0)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-05-31 |
+| **Decision** | AI Takeoff is now evidence-first. Model-generated final geometry is not trusted unless every run is traceable to extracted dimension evidence and passes reconciliation checks. |
+| **Problem** | Gemini correctly identified evidence (109.5", 34.5", 54", 100", 40", 23", 90"×41") but the final TakeoffResult silently transformed this into runs using 24" (unsupported), 23" (depth assumption), and missed the 109.5"/34.5"/54" stove-wall dimensions entirely. |
+| **Solution** | New `reconcileRunsWithEvidence` pure helper checks every final `counter` run against high-confidence `countertop_run`/`island` evidence dimensions (±1" exact match, ±10" "changed" zone). QA gate escalates issues found by reconciliation. |
+| **New diagnostic codes** | `RUN_LENGTH_NOT_SUPPORTED_BY_EVIDENCE` (no evidence within ±10"), `EVIDENCE_DIMENSION_CHANGED_IN_RUN` (differs from nearest by 1–10"), `CONFLICTING_DIMENSIONS_USED_SILENTLY` (multiple evidence dims nearby), `UNSUPPORTED_CORNER_DEDUCTION` (cornerDeductions without L/U-shape), `DRAFT_ASSEMBLY_REVIEW_REQUIRED` (run.requiresEstimatorReview=true), `RUN_DEPTH_NOT_SUPPORTED_BY_EVIDENCE` (code defined, not yet triggered by default). |
+| **Verdict tiers** | supported (≤1" from evidence), changed (1–10"), unsupported (>10" or no evidence). Standard depths (25.5" kitchen / 21.5" vanity) are exempt from depth checks. |
+| **QA gate** | Unsupported runs → needs_review (1) or do_not_import (≥2). Changed dims → needs_review. Conflicting dims → needs_review. Unsupported corner deduction → critical → do_not_import. |
+| **Prompt v6** | `PROMPT_VERSION` bumped to "v6". Every run must include `assemblyNotes` citing which evidence was used. `lengthEvidenceId`, `depthEvidenceId`, `assemblyConfidence`, `requiresEstimatorReview` optional fields added to run schema (backward-compatible). Model must set `requiresEstimatorReview=true` on conflicting/unclear runs. |
+| **UI** | New "Evidence trace" section (between Dimension evidence and Debug panel) shows per-run verdict badges (✓ supported / ⚠ changed / ✗ unsupported), evidence match, and unused evidence dims. |
+| **Hard boundaries** | No import enabled. No pricing. No quote mutation. No provider routing changes. |
+| **Impacted files** | `takeoffContract.mjs`, `takeoffEvidenceRunReconciliation.mjs` (new), `takeoffValidator.mjs`, `takeoffQaGate.mjs`, `takeoffExtractionPrompt.mjs`, `takeoffEvidenceRunReconciliation.test.mjs` (new), `TakeoffEvidenceTracePanel.tsx` (new), `TakeoffLabApp.tsx`, `styles.css`, `package.json`, `takeoffExtractionService.test.mjs` |
+
+---
+
 ### 56. AI Takeoff Lab — upload-first empty state + nonstandard depth QA (v5.9.2)
 
 | Field | Value |

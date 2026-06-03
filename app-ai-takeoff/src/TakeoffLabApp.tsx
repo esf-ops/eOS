@@ -56,6 +56,7 @@ import TakeoffPageInventoryPanel from "./components/TakeoffPageInventoryPanel";
 import type { PageInventory } from "./components/TakeoffPageInventoryPanel";
 import TakeoffDimensionEvidencePanel from "./components/TakeoffDimensionEvidencePanel";
 import type { DimensionEvidence } from "./components/TakeoffDimensionEvidencePanel";
+import TakeoffEvidenceTracePanel from "./components/TakeoffEvidenceTracePanel";
 import { getSupabase } from "./lib/supabase";
 import { labApiGet, labApiPost, LabApiError } from "./lib/api";
 
@@ -1131,6 +1132,21 @@ export default function TakeoffLabApp() {
                 evidence={dimensionEvidence}
                 computed={computed}
                 validation={validation}
+              />
+            </section>
+          )}
+
+          {/* ── Evidence trace (v6.0) — per-run traceability to dimension evidence ── */}
+          {dimensionEvidence && (
+            <section className="lab-section">
+              <h2 className="lab-section-title">Evidence trace</h2>
+              <p className="lab-section-desc">
+                Each final run is checked against extracted dimension evidence.
+                Unsupported, changed, or conflicting dimensions are flagged for estimator review.
+              </p>
+              <TakeoffEvidenceTracePanel
+                result={result}
+                dimensionEvidence={dimensionEvidence}
               />
             </section>
           )}

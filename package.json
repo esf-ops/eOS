@@ -51,6 +51,7 @@
     "eos:test:takeoff-qa-gate": "node backend-core/src/takeoff/takeoffQaGate.test.mjs",
     "eos:test:takeoff-gemini-provider": "node backend-core/src/takeoff/geminiTakeoffProvider.test.mjs",
     "eos:test:takeoff-config": "node backend-core/src/takeoff/takeoffConfig.test.mjs",
+    "eos:test:takeoff-evidence-reconciliation": "node backend-core/src/takeoff/takeoffEvidenceRunReconciliation.test.mjs",
     "eos:test:moraware-report-feed": "node backend-core/src/moraware/reportFeeds/reportFeedParser.test.mjs",
     "eos:test:moraware-report-feed-promotion": "node backend-core/src/moraware/reportFeeds/promoteSalesWorksheetFacts.test.mjs",
     "eos:test:moraware-report-feed-persistence": "node backend-core/src/moraware/reportFeeds/reportFeedPersistence.test.mjs",

@@ -18,6 +18,7 @@ import {
   TAKEOFF_SCHEMA_VERSION
 } from "./takeoffContract.mjs";
 import { compareDimensionEvidenceToTakeoffRuns } from "./takeoffEvidenceCoverage.mjs";
+import { reconcileRunsWithEvidence } from "./takeoffEvidenceRunReconciliation.mjs";
 
 const { INFO, WARNING, ERROR } = TAKEOFF_DIAGNOSTIC_LEVEL;
 const C = TAKEOFF_DIAGNOSTIC_CODE;
@@ -396,6 +397,54 @@ export function validateTakeoffResult(takeoffResult, computed, dimensionEvidence
         "rooms",
         dim.pageNumber != null ? [dim.pageNumber] : undefined
       ));
+    }
+  }
+
+  // Evidence-to-run reconciliation (v6.0)
+  // Per-run check: is every final run traceable to extracted dimension evidence?
+  // Produces new diagnostic codes: RUN_LENGTH_NOT_SUPPORTED_BY_EVIDENCE,
+  // EVIDENCE_DIMENSION_CHANGED_IN_RUN, CONFLICTING_DIMENSIONS_USED_SILENTLY,
+  // UNSUPPORTED_CORNER_DEDUCTION, DRAFT_ASSEMBLY_REVIEW_REQUIRED.
+  if (dimensionEvidence) {
+    try {
+      const reconciliation = reconcileRunsWithEvidence({ takeoffResult, dimensionEvidence });
+      // Only add reconciliation diagnostics when evidence checks actually ran
+      // (i.e., there were high-confidence countertop evidence dimensions to check against).
+      if (reconciliation.checksRan) {
+        for (const d of reconciliation.diagnostics) {
+          // Avoid duplicating UNSUPPORTED_CORNER_DEDUCTION if already added (it cannot be,
+          // since this is the only place it is emitted, but guard defensively).
+          diagnostics.push(d);
+        }
+      } else {
+        // No eligible evidence dims to match against, but still check corner deductions
+        // and requiresEstimatorReview flags (these don't require evidence to be present).
+        for (const d of reconciliation.diagnostics) {
+          if (
+            d.code === C.UNSUPPORTED_CORNER_DEDUCTION ||
+            d.code === C.DRAFT_ASSEMBLY_REVIEW_REQUIRED
+          ) {
+            diagnostics.push(d);
+          }
+        }
+      }
+    } catch {
+      // Reconciliation is non-fatal — never block validation for a reconciliation error.
+    }
+  } else {
+    // No evidence available: still check corner deductions and review flags.
+    try {
+      const reconciliation = reconcileRunsWithEvidence({ takeoffResult, dimensionEvidence: null });
+      for (const d of reconciliation.diagnostics) {
+        if (
+          d.code === C.UNSUPPORTED_CORNER_DEDUCTION ||
+          d.code === C.DRAFT_ASSEMBLY_REVIEW_REQUIRED
+        ) {
+          diagnostics.push(d);
+        }
+      }
+    } catch {
+      // Non-fatal.
     }
   }
 

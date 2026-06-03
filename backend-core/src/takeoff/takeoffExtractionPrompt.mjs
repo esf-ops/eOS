@@ -30,8 +30,12 @@
  * v5: user message also includes referenceTotals from dimension evidence (visible
  *     estimator sqft callouts). Extraction model uses them for aiProvidedTotals and
  *     adds review notes when structured run totals differ from visible references.
+ * v6: evidence-first traceability rules added. Every run must cite its evidence via
+ *     assemblyNotes + optional lengthEvidenceId/depthEvidenceId. Model must not
+ *     silently resolve conflicts or invent dimensions unsupported by evidence.
+ *     requiresEstimatorReview added to run schema.
  */
-export const PROMPT_VERSION = "v5";
+export const PROMPT_VERSION = "v6";
 
 // ── Schema description ─────────────────────────────────────────────────────────
 //
@@ -80,7 +84,10 @@ const SCHEMA_EXAMPLE = `
               "pieceType": "counter",
               "exposedEndOverhangIn": 0,
               "sourcePages": [1],
-              "notes": ["Sink at center"]
+              "notes": ["Sink at center"],
+              "lengthEvidenceId": "dim-001",
+              "assemblyNotes": "Length from evidence dim-001 'Sink wall 91.5\"'; standard 25.5\" depth assumed.",
+              "assemblyConfidence": "high"
             },
             {
               "id": "<uuid>",
@@ -90,7 +97,10 @@ const SCHEMA_EXAMPLE = `
               "shape": "rect",
               "pieceType": "counter",
               "sourcePages": [1],
-              "notes": ["Range at right end — backsplash interrupted"]
+              "notes": ["Range at right end — backsplash interrupted"],
+              "lengthEvidenceId": "dim-002",
+              "assemblyNotes": "Length from evidence dim-002 'Stove wall 72\"'; standard 25.5\" depth assumed.",
+              "assemblyConfidence": "high"
             }
           ]
         },
@@ -109,7 +119,11 @@ const SCHEMA_EXAMPLE = `
               "shape": "rect",
               "pieceType": "counter",
               "sourcePages": [1],
-              "notes": ["Seating on south side"]
+              "notes": ["Seating on south side"],
+              "lengthEvidenceId": "dim-003",
+              "depthEvidenceId": "dim-003",
+              "assemblyNotes": "Length 77.5\" and depth 41\" from evidence dim-003 'Island 77.5×41'. Nonstandard depth documented on plan.",
+              "assemblyConfidence": "high"
             }
           ]
         }
@@ -156,6 +170,26 @@ RUNS (individual countertop pieces)
 • Waterfall panels: create a run with pieceType = "counter" and label it "Waterfall - [side]".
 • shape = "rect" for rectangular pieces; "tri" for triangular pieces.
 • pieceType: "counter" for countertops, "splash" for backsplash-only pieces, "fhb" for full-height backsplash.
+
+EVIDENCE TRACEABILITY (v6) — REQUIRED FOR EVERY RUN
+• Every run MUST include assemblyNotes explaining which evidence dimension(s) it used.
+  Example: "Length from dim-004 'Sink wall 100\"'; depth 25.5\" assumed (standard)."
+• When the dimension evidence table is provided, set lengthEvidenceId to the [id] of the evidence dimension
+  used for the run length. Set depthEvidenceId similarly when evidence has an explicit depth.
+• Do NOT invent final runs from dimensions not in the evidence table.
+• Do NOT silently choose between conflicting evidence dimensions (floor plan vs elevation, for example).
+  Instead: set requiresEstimatorReview = true, add an assemblyNotes entry explaining the conflict, and use
+  the more conservative (smaller) dimension. Never silently pick the larger dimension.
+• Do NOT replace plan-view dimensions with cabinet-width sums unless explicitly justified in assemblyNotes.
+• Do NOT apply L-shape/U-shape cornerDeductions unless the layout overlap is explicit and the overlapMode is set.
+• Do NOT assume nonstandard depths (>26") — nonstandard depths must come from visible plan evidence and must
+  be cited via depthEvidenceId. If the plan has no explicit depth label, use the standard default (25.5"
+  counter, 21.5" vanity) and document in assemblyNotes.
+• If the correct assembly is genuinely unclear (conflicting evidence, missing dimensions, ambiguous layout):
+  set requiresEstimatorReview = true on the affected run, describe the uncertainty in assemblyNotes, and use
+  the most defensible dimension. Do NOT force a confident geometry when the plan is ambiguous.
+• Set assemblyConfidence = "high" when the run directly matches a single unambiguous evidence dimension.
+  Set "medium" when inferring from adjacent dimensions or multiple sources. Set "low" when uncertain.
 
 BACKSPLASH — READ CAREFULLY
 • backsplashIncluded: set true whenever any backsplash applies to this area; set false only when the plan or notes explicitly say otherwise.
@@ -206,7 +240,10 @@ DO NOT
 • Do NOT calculate final customer price.
 • Do NOT apply markup or labor rates.
 • Do NOT invent dimensions not visible in the plan.
-• Do NOT return markdown, explanation, or any text outside the JSON.`;
+• Do NOT return markdown, explanation, or any text outside the JSON.
+• Do NOT silently resolve conflicting evidence — use requiresEstimatorReview = true.
+• Do NOT omit assemblyNotes from any run — every run must explain its evidence source.
+• Do NOT use a dimension from a non-measurement page (email text, spec sheet) as a run length.`;
 }
 
 // ── User message ───────────────────────────────────────────────────────────────
@@ -343,13 +380,21 @@ function _buildEvidenceContextSection(evidence) {
   }
 
   lines.push(
-    "Rules for using this evidence table:",
+    "Rules for using this evidence table (v6 — evidence-first):",
     "  1. For each dimension with both lengthIn and depthIn: create a TakeoffRun using those exact values.",
     "  2. For dimensions with depthIn=null: apply standard depth (25.5\" counter / 21.5\" vanity) and add to area.assumptions[].",
     "  3. Group dimensions into rooms/areas based on their labels and categories.",
     "  4. Do NOT add sink/cooktop/faucet to area.exclusions[]. They are fabrication add-ons.",
     "  5. If a required dimension is NOT in this table: add 'MISSING: <description>' to projectAssumptions[].",
     "  6. If your reading of the plan conflicts with evidence above: add a review note explaining the discrepancy.",
+    "  7. REQUIRED: Set lengthEvidenceId on every counter run to the [id] of the evidence dimension used.",
+    "     If no single evidence dim was used (e.g. standard depth assumption), leave depthEvidenceId unset.",
+    "  8. REQUIRED: Set assemblyNotes on every counter run explaining which evidence dimension(s) were used.",
+    "     If dimensions are conflicting or unclear, set requiresEstimatorReview = true on that run.",
+    "  9. Do NOT silently pick between conflicting dimensions. If floor plan says 34.5\" and elevation says",
+    "     25.5\", set requiresEstimatorReview = true, note both values in assemblyNotes, and use the more",
+    "     conservative (smaller or more clearly labeled) value.",
+    " 10. Do NOT invent dimensions that are not in this evidence table.",
     "─────────────────────────────────────────────────────────────────────────────",
     "",
   );
