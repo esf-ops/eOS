@@ -507,7 +507,81 @@ export const MULTI_PAGE_CABINET_PACKET_001 = Object.freeze({
   createdAt: "2026-06-02T00:00:00.000Z",
 });
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+/**
+ * K. Kelley reviewed rule fixture — "50 sq' no b/s" reference-total-is-not-authority proof case (v6.2).
+ *
+ * Source PDF: private, not committed.
+ * Plan type: sketch plan with "50 sq' no b/s" notation.
+ * Reviewed estimator result: ~39.91 sf countertop / 0 backsplash.
+ *
+ * The visible reference note "50 sq' no b/s" is comparison evidence ONLY.
+ * It is NOT the calculation authority. The estimator reviewed the geometry and
+ * determined that several questionable/ambiguous runs should be excluded, yielding
+ * ~39.91 sf from the reviewed structured dimensions.
+ *
+ * Key ambiguities:
+ *   - Island dimension: 64" vs 69" (model chose 64; estimator reviewed and accepted)
+ *   - "2 STOVE" text: ambiguous — unclear if one or two pieces; estimator reviewed
+ *   - Horizontal section: excluded by estimator as questionable
+ *   - Island depth: 36" with visible evidence (not assumed)
+ *
+ * This fixture gates the system against blindly targeting 50 sf via reconciled geometry.
+ * Any AI run that produces ~50 sf by "reconciling" to the reference note is a failure.
+ * The reviewed 39.91 sf is the correct result for the estimator-reviewed draft.
+ *
+ * expectedStatus: "review_required" — this plan always requires estimator review.
+ * The Kelley fixture proves: written reference totals are comparison evidence, not authority.
+ */
+export const KELLEY_REVIEWED_RULE_FIXTURE = Object.freeze({
+  benchmarkId:                  "kelley-reviewed-rule-fixture",
+  label:                        "Kelley reviewed — reference total is not authority",
+  category:                     "written reference total wrong / geometry review required",
+  planType:                     "sketch with written reference and geometry ambiguity",
+  truthConfidence:              "high",
+  expectedStatus:               "review_required",
+  sourceFilename:               "kelley_plan.pdf",   // private — not in repo
+  expectedCountertopSf:         39.91,
+  expectedStandardBacksplashSf: 0,
+  expectedBacksplashSf:         0,                   // backward-compat alias
+  expectedCombinedSf:           39.91,
+  expectedNoBacksplash:         true,
+  expectedBacksplashType:       "none",
+  toleranceCountertopSf:        2,
+  toleranceBacksplashSf:        1,
+  toleranceSf:                  2,                   // backward-compat alias
+  visibleReferenceTotals: Object.freeze([
+    { rawText: "50 sq' no b/s", countertopSf: 50, noBacksplash: true, backsplashSf: 0, confidence: "high" },
+  ]),
+  reviewGateReasons: Object.freeze([
+    "Plan has visible '50 sq' no b/s' note — this is comparison evidence only, NOT the target.",
+    "Estimator reviewed and determined ~39.91 sf from visible geometry after excluding questionable runs.",
+    "AI may target 50 sf by reconciling geometry — this is a failure mode, not a pass.",
+    "Island depth 36\" has visible evidence — must not be flagged as unsupported/assumed.",
+    "'2 STOVE' text is ambiguous — estimator must review whether two pieces are visibly dimensioned.",
+    "Excluded horizontal section: estimator confirmed this section should not count.",
+    "No backsplash confirmed — all areas must have 0 backsplash despite wall runs.",
+  ]),
+  notes: Object.freeze([
+    "Proof case for v6.2 fabrication rules: reference totals are comparison evidence, not calculation authority.",
+    "Reviewed estimator result: ~39.91 sf countertop / 0 backsplash.",
+    "Visible '50 sq' no b/s' reference note must be treated as comparison-only.",
+    "Island dimension ambiguity: 64\" vs 69\" — estimator accepted 64\" in reviewed draft.",
+    "Island depth 36\" has visible evidence — NONSTANDARD_DEPTH_VERIFIED_FROM_EVIDENCE expected, not unsupported.",
+    "'2 STOVE' ambiguous text — INFERRED_DUPLICATE_PIECE_REVIEW_REQUIRED expected if model duplicates without geometry.",
+    "Excluded horizontal section — CORNER_DEDUCTION_WITH_EXCLUDED_OR_MISSING_LEG if deduction not removed.",
+    "AI-generated ~48.15 sf 'reconciled to 50' must remain review_required.",
+    "Source PDF: private, not committed.",
+  ]),
+  knownFailureModes: Object.freeze([
+    "Model may reconcile geometry to reach 50 sf by assuming larger dimensions — this is a failure.",
+    "Model may note 'adjusted to reach reference total' in assemblyNotes — triggers REFERENCE_TOTAL_USED_AS_GEOMETRY_TARGET.",
+    "Model may duplicate '2 STOVE' piece without explicit geometry — triggers INFERRED_DUPLICATE_PIECE_REVIEW_REQUIRED.",
+    "Model may flag 36\" island depth as assumed/unsupported when evidence is visible — this is a false alarm.",
+    "Model may include excluded horizontal section — estimator must manually exclude via Review Workbench.",
+    "Model may generate backsplash despite explicit no-b/s note.",
+  ]),
+  createdAt: "2026-06-03T00:00:00.000Z",
+});
 
 function round2(n) {
   return Math.round(n * 100) / 100;

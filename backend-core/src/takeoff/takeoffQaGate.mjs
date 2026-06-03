@@ -49,6 +49,20 @@ const REF_TOTAL_CODES = new Set([
   "REFERENCE_TOTAL_NO_BS_CONFLICT",
 ]);
 
+// ── Fabrication rule code sets (v6.2) ─────────────────────────────────────────
+
+const FABRICATION_RULE_NEEDS_REVIEW_CODES = new Set([
+  "REFERENCE_TOTAL_USED_AS_GEOMETRY_TARGET",
+  "INFERRED_DUPLICATE_PIECE_REVIEW_REQUIRED",
+  "NONSTANDARD_DEPTH_UNSUPPORTED",
+  "CORNER_DEDUCTION_WITH_EXCLUDED_OR_MISSING_LEG",
+  "BACKSPLASH_SCOPE_CONFLICT",
+]);
+
+const FABRICATION_RULE_CRITICAL_CODES = new Set([
+  "CUTOUT_DEDUCTED_FROM_MATERIAL",
+]);
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function round2(n) {
@@ -337,6 +351,97 @@ export function evaluateTakeoffQaGate({
     ));
   }
 
+  // ── 10c. Fabrication rules — critical violations (v6.2) ──────────────────
+  // CUTOUT_DEDUCTED_FROM_MATERIAL: critical — cutout in exclusions reduces sf.
+  // Note: overlaps with CUTOUT_IN_EXCLUSIONS_WARNING (v5.5) — the fabrication
+  // rules engine is the authoritative source; both codes trigger this issue.
+
+  if (hasCode(diagnostics, "CUTOUT_DEDUCTED_FROM_MATERIAL")) {
+    allIssues.push(issue(
+      "CUTOUT_DEDUCTED_FROM_MATERIAL",
+      "Cutout deducted from material sf (fabrication rule violation)",
+      "critical",
+      "A sink, cooktop, or faucet cutout was placed in material exclusions, incorrectly reducing countertop sf. " +
+      "Cutouts are fabrication operations — they must never reduce material square footage.",
+      "Remove the cutout from exclusions[] and record it in area.cutouts[] or area.notes[] as a fabrication note.",
+      "fabrication_rule"
+    ));
+  }
+
+  // ── 10d. Fabrication rules — needs_review violations (v6.2) ───────────────
+
+  // Reference total used as geometry target.
+  if (hasCode(diagnostics, "REFERENCE_TOTAL_USED_AS_GEOMETRY_TARGET")) {
+    allIssues.push(issue(
+      "REFERENCE_TOTAL_USED_AS_GEOMETRY_TARGET",
+      "Geometry forced to match reference total",
+      "warning",
+      "The AI attempted to reconcile geometry toward a written reference total. " +
+      "Reference totals are comparison evidence only — dimensions must come from visible plan geometry.",
+      "Verify all run dimensions come from visible geometry, not from arithmetic targeting the written total.",
+      "fabrication_rule"
+    ));
+  }
+
+  // Inferred duplicate piece.
+  if (hasCode(diagnostics, "INFERRED_DUPLICATE_PIECE_REVIEW_REQUIRED")) {
+    allIssues.push(issue(
+      "INFERRED_DUPLICATE_PIECE_REVIEW_REQUIRED",
+      "Assumed duplicate piece requires review",
+      "warning",
+      "A piece was assumed or inferred without explicit geometry evidence (e.g. '2 STOVE' text without dimensioned geometry). " +
+      "Verify the plan shows two distinct dimensioned pieces before including both.",
+      "Check whether the plan visibly draws and dimensions the duplicate piece. " +
+      "If ambiguous, include only one piece or set requiresEstimatorReview.",
+      "fabrication_rule"
+    ));
+  }
+
+  // Backsplash scope conflict.
+  if (hasCode(diagnostics, "BACKSPLASH_SCOPE_CONFLICT")) {
+    // Severity depends on whether it conflicts with a clear no-b/s note.
+    const isClearNoBS = hasCode(diagnostics, "REFERENCE_TOTAL_NO_BS_CONFLICT");
+    allIssues.push(issue(
+      "BACKSPLASH_SCOPE_CONFLICT",
+      "Backsplash scope conflict",
+      isClearNoBS ? "critical" : "warning",
+      "Plan indicates no backsplash but backsplash dimensions are present in the takeoff, " +
+      "or conflicting backsplash notes exist on different pages.",
+      "Review all plan pages for backsplash scope. Remove backsplash dimensions that conflict with no-backsplash notes.",
+      "fabrication_rule"
+    ));
+  }
+
+  // Corner deduction with excluded/missing leg.
+  const cornerWithExcludedLegCount = countCode(diagnostics, "CORNER_DEDUCTION_WITH_EXCLUDED_OR_MISSING_LEG");
+  if (cornerWithExcludedLegCount > 0) {
+    allIssues.push(issue(
+      "CORNER_DEDUCTION_WITH_EXCLUDED_OR_MISSING_LEG",
+      `Corner deduction with excluded or missing leg`,
+      "warning",
+      `${cornerWithExcludedLegCount} area${cornerWithExcludedLegCount !== 1 ? "s have" : " has"} a corner deduction ` +
+      `but one or more of the overlapping runs have been excluded. ` +
+      `This over-reduces countertop sf and may undersize the material order.`,
+      "Remove corner deductions for excluded runs. Only apply deductions when both overlapping legs are present.",
+      "fabrication_rule"
+    ));
+  }
+
+  // Unsupported nonstandard depth (fabrication rule, separate from NONSTANDARD_DEPTH_ASSUMED).
+  const nonstandardDepthUnsupportedCount = countCode(diagnostics, "NONSTANDARD_DEPTH_UNSUPPORTED");
+  if (nonstandardDepthUnsupportedCount > 0) {
+    allIssues.push(issue(
+      "NONSTANDARD_DEPTH_UNSUPPORTED",
+      `Nonstandard depth${nonstandardDepthUnsupportedCount > 1 ? "s" : ""} — no evidence support`,
+      "warning",
+      `${nonstandardDepthUnsupportedCount} run${nonstandardDepthUnsupportedCount !== 1 ? "s" : ""} ` +
+      `(island, peninsula, raised bar, desk, or waterfall) ${nonstandardDepthUnsupportedCount === 1 ? "has" : "have"} ` +
+      `a nonstandard depth that could not be confirmed by evidence.`,
+      "Verify the depth is explicitly labeled on the plan. Add depthEvidenceId to confirm when evidence is present.",
+      "fabrication_rule"
+    ));
+  }
+
   // ── 11a. Evidence reconciliation — unsupported runs (v6.0) ───────────────
   // Fires when a run's length has no support in the dimension evidence table.
 
@@ -581,6 +686,21 @@ export function evaluateTakeoffQaGate({
   const noBsInRef = dimensionEvidence?.referenceTotals?.some((r) => r.noBacksplash === true) ?? false;
   if (noBsInRef && computed.backsplashExactSf === 0 && !hasCode(diagnostics, "REFERENCE_TOTAL_NO_BS_CONFLICT")) {
     positiveSignals.push("No-backsplash correctly recognized — computed 0.00 sf backsplash");
+  }
+
+  // v6.2: fabrication rules positive signals
+  if (hasCode(diagnostics, "NO_BACKSPLASH_CONFIRMED")) {
+    // Only add if not already covered by the above noBsInRef signal.
+    if (!noBsInRef) {
+      positiveSignals.push("No-backsplash confirmed — all areas correctly have 0 backsplash");
+    }
+  }
+
+  const nonstandardDepthVerifiedCount = countCode(diagnostics, "NONSTANDARD_DEPTH_VERIFIED_FROM_EVIDENCE");
+  if (nonstandardDepthVerifiedCount > 0) {
+    positiveSignals.push(
+      `${nonstandardDepthVerifiedCount} nonstandard depth${nonstandardDepthVerifiedCount !== 1 ? "s" : ""} verified from plan evidence`
+    );
   }
 
   if (computed.backsplashExactSf === 0 && !hasCode(diagnostics, "AI_BACKSPLASH_TOTAL_NOT_STRUCTURED")) {

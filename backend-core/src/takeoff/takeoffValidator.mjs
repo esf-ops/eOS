@@ -19,6 +19,7 @@ import {
 } from "./takeoffContract.mjs";
 import { compareDimensionEvidenceToTakeoffRuns } from "./takeoffEvidenceCoverage.mjs";
 import { reconcileRunsWithEvidence } from "./takeoffEvidenceRunReconciliation.mjs";
+import { evaluateTakeoffFabricationRules } from "./takeoffFabricationRules.mjs";
 
 const { INFO, WARNING, ERROR } = TAKEOFF_DIAGNOSTIC_LEVEL;
 const C = TAKEOFF_DIAGNOSTIC_CODE;
@@ -60,9 +61,10 @@ function diag(level, code, message, path, sourcePages) {
  * Validate a single run and return any diagnostics.
  * @param {import('./takeoffContract.mjs').TakeoffRun} run
  * @param {string} runPath
+ * @param {object|null} [dimensionEvidence] - passed down for depth evidence check
  * @returns {import('./takeoffContract.mjs').TakeoffDiagnostic[]}
  */
-function validateRun(run, runPath) {
+function validateRun(run, runPath, dimensionEvidence = null) {
   const ds = [];
   const l = Number(run.lengthIn) || 0;
   const d = Number(run.depthIn) || 0;
@@ -81,21 +83,33 @@ function validateRun(run, runPath) {
     } else if (d > MAX_COUNTER_DEPTH_IN) {
       ds.push(diag(WARNING, C.SUSPICIOUS_DEPTH, `Run "${run.label}": counter depthIn ${d}" is unusually deep (>${MAX_COUNTER_DEPTH_IN}").`, `${runPath}.depthIn`, run.sourcePages));
     } else if (d > 26) {
-      // Nonstandard depth check (v5.9.2): island/peninsula/raised-bar/desk/waterfall depths
-      // must come from visible plan dimensions — they cannot be assumed or invented.
+      // Nonstandard depth check (v5.9.2 / v6.2):
+      // Island/peninsula/raised-bar/desk/waterfall depths must come from visible plan dimensions.
       // Standard wall counters are 25.5"; anything notably above that for a specialty piece
       // requires explicit plan evidence.
+      //
+      // v6.2 refinement: if the run has depthEvidenceId set, or if the dimension evidence table
+      // contains a matching depth, we emit NONSTANDARD_DEPTH_VERIFIED_FROM_EVIDENCE (info, via
+      // fabrication rules module) rather than NONSTANDARD_DEPTH_ASSUMED (warning).
+      // The validator emits NONSTANDARD_DEPTH_ASSUMED only when evidence is absent.
       const NONSTANDARD_PIECE_RE = /\b(island|peninsula|raised[\s-]bar|bar[\s-]top|desk|waterfall|specialty)\b/i;
       if (NONSTANDARD_PIECE_RE.test(String(run.label ?? ""))) {
-        ds.push(diag(
-          WARNING,
-          C.NONSTANDARD_DEPTH_ASSUMED,
-          `Run "${run.label}": depth ${d}" is nonstandard for a standard wall counter (standard = 25.5"). ` +
-          `Island, peninsula, raised bar, desk, and waterfall depths must come from visible plan dimensions — ` +
-          `they cannot be assumed or invented. Verify this dimension is documented on the plan before using this takeoff.`,
-          `${runPath}.depthIn`,
-          run.sourcePages
-        ));
+        // Check if depth has evidence support.
+        const hasDepthEvidence = _hasDepthEvidence(run, dimensionEvidence);
+
+        if (!hasDepthEvidence) {
+          ds.push(diag(
+            WARNING,
+            C.NONSTANDARD_DEPTH_ASSUMED,
+            `Run "${run.label}": depth ${d}" is nonstandard for a standard wall counter (standard = 25.5"). ` +
+            `Island, peninsula, raised bar, desk, and waterfall depths must come from visible plan dimensions — ` +
+            `they cannot be assumed or invented. Verify this dimension is documented on the plan before using this takeoff.`,
+            `${runPath}.depthIn`,
+            run.sourcePages
+          ));
+        }
+        // If depth HAS evidence, the fabrication rules module emits NONSTANDARD_DEPTH_VERIFIED_FROM_EVIDENCE (info).
+        // We do not emit a warning here — the validator is silent when evidence is present.
       }
     }
   }
@@ -107,9 +121,10 @@ function validateRun(run, runPath) {
  * Validate a single area.
  * @param {import('./takeoffContract.mjs').TakeoffArea} area
  * @param {string} areaPath
+ * @param {object|null} [dimensionEvidence]
  * @returns {import('./takeoffContract.mjs').TakeoffDiagnostic[]}
  */
-function validateArea(area, areaPath) {
+function validateArea(area, areaPath, dimensionEvidence = null) {
   const ds = [];
   const runs = area.runs ?? [];
 
@@ -118,7 +133,7 @@ function validateArea(area, areaPath) {
   }
 
   for (let i = 0; i < runs.length; i++) {
-    ds.push(...validateRun(runs[i], `${areaPath}.runs[${i}]`));
+    ds.push(...validateRun(runs[i], `${areaPath}.runs[${i}]`, dimensionEvidence));
   }
 
   // If backsplashLinearIn is set but no height, default 4" will be used — flag as info.
@@ -148,9 +163,10 @@ function validateArea(area, areaPath) {
  * Validate a single room.
  * @param {import('./takeoffContract.mjs').TakeoffRoom} room
  * @param {string} roomPath
+ * @param {object|null} [dimensionEvidence]
  * @returns {import('./takeoffContract.mjs').TakeoffDiagnostic[]}
  */
-function validateRoom(room, roomPath) {
+function validateRoom(room, roomPath, dimensionEvidence = null) {
   const ds = [];
 
   if (!room.name?.trim()) {
@@ -162,7 +178,7 @@ function validateRoom(room, roomPath) {
   }
 
   for (let i = 0; i < (room.areas ?? []).length; i++) {
-    ds.push(...validateArea(room.areas[i], `${roomPath}.areas[${i}]`));
+    ds.push(...validateArea(room.areas[i], `${roomPath}.areas[${i}]`, dimensionEvidence));
   }
 
   return ds;
@@ -193,6 +209,32 @@ function checkTotalMismatch(aiTotal, computed, code, label) {
 
 function round2(n) {
   return Math.round(n * 100) / 100;
+}
+
+/**
+ * Check if a run's depth has supporting evidence (v6.2 depth refinement).
+ * @param {object} run
+ * @param {object|null} dimensionEvidence
+ * @returns {boolean}
+ */
+function _hasDepthEvidence(run, dimensionEvidence) {
+  // Direct citation.
+  if (run.depthEvidenceId) {
+    if (dimensionEvidence?.dimensions) {
+      return dimensionEvidence.dimensions.some(
+        (d) => (d.id ?? d.label) === run.depthEvidenceId
+      );
+    }
+    return true; // depthEvidenceId set but no evidence table — trust reviewer assertion
+  }
+  // Table scan: any evidence dimension with a matching depthIn.
+  if (dimensionEvidence?.dimensions) {
+    const d = Number(run.depthIn);
+    return dimensionEvidence.dimensions.some(
+      (dim) => dim.depthIn != null && Math.abs(Number(dim.depthIn) - d) <= 1
+    );
+  }
+  return false;
 }
 
 /**
@@ -247,7 +289,7 @@ export function validateTakeoffResult(takeoffResult, computed, dimensionEvidence
     diagnostics.push(diag(ERROR, C.MISSING_ROOMS, "TakeoffResult has no rooms.", "rooms"));
   } else {
     for (let i = 0; i < takeoffResult.rooms.length; i++) {
-      diagnostics.push(...validateRoom(takeoffResult.rooms[i], `rooms[${i}]`));
+      diagnostics.push(...validateRoom(takeoffResult.rooms[i], `rooms[${i}]`, dimensionEvidence));
     }
   }
 
@@ -446,6 +488,30 @@ export function validateTakeoffResult(takeoffResult, computed, dimensionEvidence
     } catch {
       // Non-fatal.
     }
+  }
+
+  // Fabrication rules engine (v6.2)
+  // Run all deterministic fabrication rules and merge findings into diagnostics.
+  // This is non-fatal — never blocks validation for a fabrication rules error.
+  try {
+    const fabrication = evaluateTakeoffFabricationRules({
+      takeoffResult,
+      dimensionEvidence,
+      validationDiagnostics: null, // diagnostics still accumulating
+    });
+    for (const f of fabrication.findings) {
+      // Convert fabrication finding to a TakeoffDiagnostic for consistency.
+      // Fabrication findings always have source: "fabrication_rule" but diagnostics use level/code/message.
+      diagnostics.push({
+        level:   f.level,
+        code:    f.code,
+        message: f.message,
+        ...(f.path ? { path: f.path } : {}),
+        source:  "fabrication_rule",
+      });
+    }
+  } catch {
+    // Non-fatal — fabrication rules must never block validation.
   }
 
   const errorCount = diagnostics.filter((d) => d.level === ERROR).length;

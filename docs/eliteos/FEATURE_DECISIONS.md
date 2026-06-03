@@ -746,6 +746,25 @@
 
 ---
 
+### 62. AI Takeoff v6.2 — deterministic fabrication rules engine; reference totals are comparison evidence, not calculation authority (Kelley proof case)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-06-03 |
+| **Decision** | AI Takeoff now evaluates every `TakeoffResult` through a deterministic fabrication rules engine before the QA gate. Written reference totals (e.g. "50 sq' no b/s") are treated as comparison evidence only — they must never be used to size or add geometry. The estimator-reviewed structured runs are the source of truth. eliteOS recompute is always authoritative. |
+| **Problem** | The AI tried to reconcile toward a visible reference note ("50 sq' no b/s") by adding or resizing runs, producing ~48–50 sf instead of the correct ~39.91 sf. The correct reviewed draft excludes the questionable horizontal section and island ambiguity, arriving at ~39.91 sf / 0 backsplash — which is less than the written 50 sf reference. The rules engine must detect and flag this reconciliation pattern and prevent false positives on clean reviewed takeoffs. |
+| **Solution** | New pure module `takeoffFabricationRules.mjs` implements 8 rule codes across 7 classifiers. Integrated into `takeoffValidator.mjs` and `takeoffQaGate.mjs`. Prompt bumped to v6.1 with an explicit FABRICATION RULES section. New `KELLEY_REVIEWED_RULE_FIXTURE` added to `takeoffBenchmark.mjs` as a regression fixture. |
+| **Core principle** | Reference totals are evidence for comparison, not calculation authority. Estimator-reviewed structured runs are the source of truth. |
+| **New rule codes** | `REFERENCE_TOTAL_USED_AS_GEOMETRY_TARGET` (warning), `NO_BACKSPLASH_CONFIRMED` (info), `BACKSPLASH_SCOPE_CONFLICT` (error/warning), `CUTOUT_DEDUCTED_FROM_MATERIAL` (error), `INFERRED_DUPLICATE_PIECE_REVIEW_REQUIRED` (warning), `CORNER_DEDUCTION_WITH_EXCLUDED_OR_MISSING_LEG` (warning), `NONSTANDARD_DEPTH_VERIFIED_FROM_EVIDENCE` (info), `NONSTANDARD_DEPTH_UNSUPPORTED` (warning). |
+| **QA gate** | Cutout deducted → do_not_import. Reference total as geometry target / inferred duplicate / backsplash scope conflict / nonstandard depth unsupported → needs_review. Verified depth / no-b/s confirmed → positive signal. |
+| **Extraction prompt** | Bumped to v6.1. FABRICATION RULES section added with explicit: no geometry reconciliation to reference totals; no cutouts in exclusions; no duplicate pieces without visible geometry; no corner deductions without overlap; nonstandard depths need evidence. |
+| **Kelley fixture** | `KELLEY_REVIEWED_RULE_FIXTURE` (expectedStatus: review_required, expectedCountertopSf: 39.91, expectedNoBacksplash: true, visibleReferenceTotals: ["50 sq' no b/s"]). Prevents system from targeting 50 sf. Island 36" depth verified from evidence. "2 STOVE" ambiguity flagged. |
+| **Tests** | 33 new unit tests in `takeoffFabricationRules.test.mjs`. All 28 extraction service tests updated for v6.1 promptVersion. All 24/25/17 reconciliation/QA/benchmark tests passing. |
+| **Hard boundaries** | No import enabled. No pricing. No quote mutation. No provider routing changes. No raw PDFs. No secrets exposed. |
+| **Impacted files** | `takeoffFabricationRules.mjs` (new), `takeoffFabricationRules.test.mjs` (new), `takeoffContract.mjs`, `takeoffValidator.mjs`, `takeoffQaGate.mjs`, `takeoffExtractionPrompt.mjs`, `takeoffBenchmark.mjs`, `TakeoffQaGatePanel.tsx`, `TakeoffLabApp.tsx`, `styles.css`, `takeoffExtractionService.test.mjs`, `package.json` |
+
+---
+
 ### 56. AI Takeoff Lab — upload-first empty state + nonstandard depth QA (v5.9.2)
 
 | Field | Value |

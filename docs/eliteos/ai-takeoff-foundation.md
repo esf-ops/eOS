@@ -1354,6 +1354,145 @@ New "Evidence trace" section (below Dimension evidence, above Debug). Runs clien
 
 ---
 
+---
+
+## v6.1: Takeoff Review Workbench + promoted review UI
+
+*(see FEATURE_DECISIONS.md entry 61)*
+
+---
+
+## v6.2: Deterministic fabrication rules engine + Kelley rule fixture (2026-06-03)
+
+**Status:** Built.
+
+### Core principle
+
+> Reference totals are evidence for comparison, not calculation authority.
+> Estimator-reviewed structured runs are the source of truth.
+> eliteOS recompute is authoritative. AI-provided totals are never authoritative.
+
+### Motivation
+
+The Kelley plan proof case exposed a failure mode where the AI tried to force geometry toward a written reference note ("50 sq' no b/s") rather than computing from visible dimensions. The estimator-reviewed result is ~39.91 sf / 0 backsplash — but the AI kept targeting 50 sf via assumed/reconciled geometry. v6.2 installs a deterministic rules engine that catches this class of error and makes the business rules machine-verifiable.
+
+### New module: `takeoffFabricationRules.mjs`
+
+Pure rules engine (no I/O, no DB, no AI, no pricing). Exports:
+- `evaluateTakeoffFabricationRules({ takeoffResult, dimensionEvidence, validationDiagnostics, reviewState })`
+- `classifyDepthEvidence(run, dimensionEvidence)`
+- `shouldApplyCornerDeduction(area, excludedRunIds)`
+- `classifyReferenceTotalUsage(takeoffResult)`
+- `classifyBacksplashRule(takeoffResult, dimensionEvidence)`
+- `classifyCutoutRule(takeoffResult)`
+- `classifyInferredPieceRule(takeoffResult)`
+- `classifyCornerDeductionRule(takeoffResult, reviewState)`
+- `classifyNonstandardDepth(takeoffResult, dimensionEvidence)`
+
+Returns findings: `{ code, level, message, path, recommendedAction, source: "fabrication_rule", ruleId }`
+
+### Business rules encoded (A–G)
+
+| Rule | Code | Level |
+|------|------|-------|
+| A — Reference total used as geometry target | `REFERENCE_TOTAL_USED_AS_GEOMETRY_TARGET` | warning |
+| B — No-backsplash confirmed (positive) | `NO_BACKSPLASH_CONFIRMED` | info |
+| B — Backsplash scope conflict | `BACKSPLASH_SCOPE_CONFLICT` | error/warning |
+| C — Cutout deducted from material sf | `CUTOUT_DEDUCTED_FROM_MATERIAL` | error |
+| D — Inferred duplicate piece | `INFERRED_DUPLICATE_PIECE_REVIEW_REQUIRED` | warning |
+| E — Corner deduction with excluded/missing leg | `CORNER_DEDUCTION_WITH_EXCLUDED_OR_MISSING_LEG` | warning |
+| F — Nonstandard depth verified from evidence | `NONSTANDARD_DEPTH_VERIFIED_FROM_EVIDENCE` | info |
+| F — Nonstandard depth unsupported | `NONSTANDARD_DEPTH_UNSUPPORTED` | warning |
+
+### Kelley reviewed rule fixture
+
+New `KELLEY_REVIEWED_RULE_FIXTURE` in `takeoffBenchmark.mjs`:
+- `expectedStatus: "review_required"`
+- Expected countertop: 39.91 sf / backsplash: 0
+- Visible reference: "50 sq' no b/s" — comparison evidence only
+- Ambiguity: island 64 vs 69, "2 STOVE", excluded horizontal section
+- Island 36" depth with evidence → VERIFIED, not unsupported
+- Prevents system from blindly targeting 50 sf
+
+### Validator changes (v6.2)
+
+- `validateTakeoffResult` now calls `evaluateTakeoffFabricationRules` and merges findings into diagnostics.
+- `validateRun` refined: `NONSTANDARD_DEPTH_ASSUMED` only fires when no depth evidence exists.
+- When depth evidence IS present, the fabrication rules module emits `NONSTANDARD_DEPTH_VERIFIED_FROM_EVIDENCE` (info) — the validator is silent.
+- New codes added to `TAKEOFF_DIAGNOSTIC_CODE`: `REFERENCE_TOTAL_USED_AS_GEOMETRY_TARGET`, `NO_BACKSPLASH_CONFIRMED`, `BACKSPLASH_SCOPE_CONFLICT`, `CUTOUT_DEDUCTED_FROM_MATERIAL`, `INFERRED_DUPLICATE_PIECE_REVIEW_REQUIRED`, `CORNER_DEDUCTION_WITH_EXCLUDED_OR_MISSING_LEG`, `NONSTANDARD_DEPTH_VERIFIED_FROM_EVIDENCE`, `NONSTANDARD_DEPTH_UNSUPPORTED`.
+
+### QA gate changes (v6.2)
+
+New checks 10c and 10d in `evaluateTakeoffQaGate`:
+
+| Issue | Severity | QA status |
+|-------|----------|-----------|
+| `CUTOUT_DEDUCTED_FROM_MATERIAL` | critical | do_not_import |
+| `REFERENCE_TOTAL_USED_AS_GEOMETRY_TARGET` | warning | needs_review |
+| `INFERRED_DUPLICATE_PIECE_REVIEW_REQUIRED` | warning | needs_review |
+| `BACKSPLASH_SCOPE_CONFLICT` | warning/critical | needs_review / do_not_import |
+| `CORNER_DEDUCTION_WITH_EXCLUDED_OR_MISSING_LEG` | warning | needs_review |
+| `NONSTANDARD_DEPTH_UNSUPPORTED` | warning | needs_review |
+| `NONSTANDARD_DEPTH_VERIFIED_FROM_EVIDENCE` | info | positive signal |
+| `NO_BACKSPLASH_CONFIRMED` | info | positive signal |
+
+### Extraction prompt v6.1
+
+- Bumped `PROMPT_VERSION` to `"v6.1"`.
+- Added explicit `FABRICATION RULES (v6.1)` section to the system prompt with 5 subsections:
+  1. Reference totals are comparison-only (must not force geometry)
+  2. No-backsplash: honor explicitly
+  3. Cutouts: never in exclusions
+  4. Duplicate/inferred pieces: geometry evidence required
+  5. L/U-shape corner deductions: overlap must be visible
+  6. Nonstandard depths: evidence required
+- Updated `DO NOT` list to reference the new fabrication rules section.
+
+### UI changes (v6.2)
+
+- `TakeoffQaGatePanel.tsx`: added `fabricationFindings` optional prop; renders a compact "Fabrication rules" subsection with per-finding icons; updated `sourceBadge` to show "Fab rules" for `fabrication_rule` source.
+- `TakeoffLabApp.tsx`: added `fabricationFindings` useMemo that calls `evaluateTakeoffFabricationRules` with current `activeState.result` and `excludedRunIds`; passes to `TakeoffQaGatePanel`.
+- `styles.css`: added `qa-gate-fab-rules*` CSS rules.
+
+### Tests (v6.2)
+
+```bash
+npm run eos:test:takeoff-fabrication-rules  # 33 new tests — all passing
+```
+
+All existing tests updated/confirmed:
+```bash
+npm run eos:test:takeoff-evidence-reconciliation  # 24 passing
+npm run eos:test:takeoff-qa-gate                  # 25 passing
+npm run eos:test:takeoff-benchmark-evaluator      # 17 passing
+npm run eos:test:takeoff-extraction-service       # 28 passing (promptVersion v6.1)
+npm run build --prefix app-ai-takeoff             # clean
+npm run eos:check:local                           # clean
+```
+
+### Files changed (v6.2)
+
+| File | Change |
+|------|--------|
+| `takeoffFabricationRules.mjs` | **New** — pure rules engine, 8 fabrication rule codes, 7 classifiers |
+| `takeoffFabricationRules.test.mjs` | **New** — 33 tests |
+| `takeoffContract.mjs` | Added 8 new diagnostic codes for fabrication rules |
+| `takeoffValidator.mjs` | Imports fabrication rules; calls evaluateTakeoffFabricationRules; refines NONSTANDARD_DEPTH_ASSUMED with depth evidence check |
+| `takeoffQaGate.mjs` | Checks 10c–10d for fabrication rule violations; new positive signals |
+| `takeoffExtractionPrompt.mjs` | Bumped to v6.1; FABRICATION RULES section added |
+| `takeoffBenchmark.mjs` | Added KELLEY_REVIEWED_RULE_FIXTURE |
+| `TakeoffQaGatePanel.tsx` | fabricationFindings prop; "Fabrication rules" subsection; sourceBadge update |
+| `TakeoffLabApp.tsx` | Import evaluateTakeoffFabricationRules; fabricationFindings useMemo; passes to panel |
+| `styles.css` | qa-gate-fab-rules* CSS |
+| `takeoffExtractionService.test.mjs` | Updated promptVersion assertion v6 → v6.1 |
+| `package.json` | Added eos:test:takeoff-fabrication-rules script |
+
+### Durable decisions
+
+See `FEATURE_DECISIONS.md` entry **62** (deterministic fabrication rules engine; reference totals are comparison evidence, not calculation authority; Kelley fixture proof case).
+
+---
+
 ## Durable decisions
 
 See `FEATURE_DECISIONS.md` entries **48** (contract-first, AI-not-authority), **49** (quote files storage architecture), **50** (provider-neutral extraction layer, AI output never authoritative, raw PDFs not committed), **51** (benchmark truth fixtures, review gates), **52** (automatic QA gate must pass before any future import path), **53** (AI provider can be swapped server-side for benchmarked comparison; every model output still goes through eliteOS recompute, validator, benchmark evaluator, and QA gate), **54** (AI Takeoff deployed as protected head), **55** (shell alignment + session hydration), **56** (upload-first empty state + nonstandard depth QA + IE/QL alignment), and **60** (evidence-first integrity — runs must trace to evidence, reconciliation diagnostics, v6 prompt).

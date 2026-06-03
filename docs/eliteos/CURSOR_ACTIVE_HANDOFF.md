@@ -2,7 +2,7 @@
 
 **Purpose:** Cheap context for new Cursor chats. Do not treat old chat transcripts as source of truth — use this file + `docs/eliteos/*` + `.cursor/rules/*`.
 
-**Last updated:** 2026-05-31 (view 220 name-only promotion validated)
+**Last updated:** 2026-06-03 (AI Takeoff v6.2 — fabrication rules engine + Kelley proof case)
 
 ---
 
@@ -322,6 +322,36 @@ Dev: `npm run dev --prefix app-ai-takeoff` -> `http://localhost:5186`. Not in Ho
 | All existing tests | **All passing** (28 extraction, 25 QA gate, 18 reconciliation, 13 dim-evidence, 25 Gemini, 6 config) |
 | Build | **Clean** (vite build, eos:check:local) |
 | Import disabled | **Still disabled** — no change |
+
+### v6.2 status: deterministic fabrication rules engine + Kelley proof case (2026-06-03 ✅)
+
+| Area | State |
+|------|-------|
+| `takeoffFabricationRules.mjs` (new) | **Done** — pure rules engine, 8 codes, 7 classifiers |
+| `takeoffFabricationRules.test.mjs` (new) | **Done** — 33 tests all passing |
+| Diagnostic codes (8 new) | **Done** — contract.mjs updated |
+| Validator integration | **Done** — `evaluateTakeoffFabricationRules` merged into diagnostics; `NONSTANDARD_DEPTH_ASSUMED` refined with depth evidence check |
+| QA gate integration (checks 10c–10d) | **Done** — cutout→do_not_import; ref-total/dup/bs-conflict/depth-unsupported→needs_review; positive signals for verified depth + no-b/s |
+| Extraction prompt v6.1 | **Done** — `PROMPT_VERSION = "v6.1"`, explicit FABRICATION RULES section (6 subsections) |
+| Kelley fixture | **Done** — `KELLEY_REVIEWED_RULE_FIXTURE`: ~39.91 sf / 0 bs / review_required; ref "50 sq' no b/s" is comparison-only |
+| UI: Fabrication rules panel | **Done** — `TakeoffQaGatePanel.tsx` shows "Fabrication rules" subsection with per-finding icons |
+| All tests | **All passing** (33 fabrication, 24 reconciliation, 25 QA gate, 17 benchmark evaluator, 28 extraction service) |
+| Build | **Clean** (vite build, eos:check:local) |
+| Import disabled | **Still disabled** — no change |
+
+**Core principle (v6.2):** Reference totals are evidence for comparison, not calculation authority. Estimator-reviewed structured runs are the source of truth. eliteOS recompute is authoritative.
+
+### Manual QA checklist (post v6.2)
+
+1. Load Kelley reviewed draft.
+2. Confirm measured total remains around 39.91 sf / 0 backsplash.
+3. Confirm visible "50 sq' no b/s" note is labeled as reference evidence — no finding that it's authoritative.
+4. Confirm no-b/s is honored — "No backsplash confirmed" info appears in Fabrication rules.
+5. If "2 STOVE" ambiguity is present in assemblyNotes, confirm `INFERRED_DUPLICATE_PIECE_REVIEW_REQUIRED` fires.
+6. Confirm island 36" depth with evidence shows `NONSTANDARD_DEPTH_VERIFIED_FROM_EVIDENCE` (info, not warning).
+7. Confirm excluded L leg does not leave an invalid corner deduction — `CORNER_DEDUCTION_WITH_EXCLUDED_OR_MISSING_LEG` fires when a leg is excluded.
+8. Save reviewed draft and reload — confirm Import remains disabled.
+9. Confirm any assemblyNotes containing "to reconcile with" triggers `REFERENCE_TOTAL_USED_AS_GEOMETRY_TARGET`.
 
 ### Manual QA checklist (post v6.0 deployment)
 

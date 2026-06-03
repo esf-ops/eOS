@@ -1392,6 +1392,31 @@ details[open] > .lab-section-summary::before { transform: rotate(90deg); }
   border: 1.5px solid var(--eos-line-strong); border-radius: 3px;
   margin-top: 1px;
 }
+
+/* ── Fabrication rules subsection (v6.2) ─── */
+.qa-gate-fab-rules {
+  border-top: 1px solid var(--eos-line); margin-top: 12px; padding-top: 4px;
+}
+.qa-gate-fab-rules-title {
+  font-size: 11px; font-weight: 600; color: var(--eos-ink-soft);
+  text-transform: uppercase; letter-spacing: .04em;
+  cursor: pointer; list-style: none; padding: 6px 0; user-select: none;
+}
+.qa-gate-fab-rules-title::-webkit-details-marker { display: none; }
+.qa-gate-fab-rules-title::before { content: "▸ "; font-size: 10px; }
+details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾ "; }
+.qa-gate-fab-rules-list {
+  margin: 0; padding: 4px 0 6px 0; list-style: none; display: flex; flex-direction: column; gap: 5px;
+}
+.qa-gate-fab-rule {
+  display: flex; align-items: flex-start; gap: 6px; font-size: 12px; line-height: 1.45;
+}
+.qa-gate-fab-rule-icon { flex-shrink: 0; width: 14px; text-align: center; margin-top: 1px; }
+.qa-gate-fab-rule-msg { color: var(--eos-ink); }
+.qa-gate-fab-rule--error .qa-gate-fab-rule-icon { color: var(--eos-red, #c0392b); }
+.qa-gate-fab-rule--warning .qa-gate-fab-rule-icon { color: var(--eos-orange, #d68000); }
+.qa-gate-fab-rule--info .qa-gate-fab-rule-icon { color: var(--eos-green, #2d9a6f); }
+.qa-gate-fab-rule--info .qa-gate-fab-rule-msg { color: var(--eos-ink-soft); }
 .qa-gate-footer {
   padding-top: 8px; border-top: 1px solid var(--eos-line);
 }

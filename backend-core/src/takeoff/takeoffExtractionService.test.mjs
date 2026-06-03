@@ -628,7 +628,7 @@ await test("storage_path never returned in result", async () => {
 });
 
 // 17. Provider called with expected metadata
-await test("provider called with expected metadata (mimeType, filename, promptVersion v5)", async () => {
+await test("provider called with expected metadata (mimeType, filename, promptVersion v6.1)", async () => {
   let capturedInput = null;
   const capturingProvider = async (input) => {
     capturedInput = input;
@@ -654,7 +654,7 @@ await test("provider called with expected metadata (mimeType, filename, promptVe
   assert.ok(capturedInput, "provider must have been called");
   assert.equal(capturedInput.mimeType,         MOCK_FILE_ROW.mime_type,          "mimeType mismatch");
   assert.equal(capturedInput.originalFilename, MOCK_FILE_ROW.original_filename,  "originalFilename mismatch");
-  assert.equal(capturedInput.promptVersion,    "v6",                             "promptVersion must be v6");
+  assert.equal(capturedInput.promptVersion,    "v6.1",                           "promptVersion must be v6.1");
   assert.ok(Buffer.isBuffer(capturedInput.fileBuffer), "fileBuffer must be a Buffer");
   assert.ok(capturedInput.fileBuffer.length > 0,       "fileBuffer must not be empty");
 });

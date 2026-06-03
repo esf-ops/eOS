@@ -40,6 +40,15 @@ export interface QaGateResult {
 
 interface Props {
   qaGate: QaGateResult;
+  /** Optional fabrication rule findings for the dedicated "Fabrication rules" subsection. */
+  fabricationFindings?: FabricationFinding[];
+}
+
+/** Lightweight shape for fabrication rule findings passed to the panel. */
+export interface FabricationFinding {
+  code:    string;
+  level:   "info" | "warning" | "error";
+  message: string;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -54,18 +63,20 @@ function issueIcon(severity: "info" | "warning" | "critical"): string {
 
 function sourceBadge(source: string): string {
   const MAP: Record<string, string> = {
-    validator:       "Validator",
-    evidence:        "Evidence",
-    reference_total: "Ref total",
-    benchmark:       "Benchmark",
-    page_inventory:  "Page inv",
+    validator:         "Validator",
+    evidence:          "Evidence",
+    reference_total:   "Ref total",
+    benchmark:         "Benchmark",
+    page_inventory:    "Page inv",
+    fabrication_rule:  "Fab rules",
+    evidence_reconciliation: "Evidence",
   };
   return MAP[source] ?? source;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function TakeoffQaGatePanel({ qaGate }: Props) {
+export default function TakeoffQaGatePanel({ qaGate, fabricationFindings }: Props) {
   const [checklistOpen, setChecklistOpen] = useState(false);
   const [signalsOpen, setSignalsOpen] = useState(false);
 
@@ -123,6 +134,26 @@ export default function TakeoffQaGatePanel({ qaGate }: Props) {
                 <span className="qa-gate-signal-check">✓</span> {s}
               </li>
             ))}
+          </ul>
+        </details>
+      )}
+
+      {/* Fabrication rules subsection (v6.2) */}
+      {fabricationFindings && fabricationFindings.length > 0 && (
+        <details className="qa-gate-fab-rules" open>
+          <summary className="qa-gate-fab-rules-title">
+            Fabrication rules ({fabricationFindings.length})
+          </summary>
+          <ul className="qa-gate-fab-rules-list">
+            {fabricationFindings.map((f, i) => {
+              const icon = f.level === "error" ? "✗" : f.level === "warning" ? "⚠" : "ℹ";
+              return (
+                <li key={i} className={`qa-gate-fab-rule qa-gate-fab-rule--${f.level}`}>
+                  <span className="qa-gate-fab-rule-icon">{icon}</span>
+                  <span className="qa-gate-fab-rule-msg">{f.message}</span>
+                </li>
+              );
+            })}
           </ul>
         </details>
       )}

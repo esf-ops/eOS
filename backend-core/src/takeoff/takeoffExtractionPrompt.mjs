@@ -34,8 +34,12 @@
  *     assemblyNotes + optional lengthEvidenceId/depthEvidenceId. Model must not
  *     silently resolve conflicts or invent dimensions unsupported by evidence.
  *     requiresEstimatorReview added to run schema.
+ * v6.1: fabrication rules added explicitly. Reference totals are comparison-only.
+ *     Do not force geometry to match a written total. Do not duplicate pieces without
+ *     visible geometry. Do not deduct cutouts from material sf. Nonstandard depths must
+ *     cite evidence. Conflict → requiresEstimatorReview, never silent resolution.
  */
-export const PROMPT_VERSION = "v6";
+export const PROMPT_VERSION = "v6.1";
 
 // ── Schema description ─────────────────────────────────────────────────────────
 //
@@ -243,7 +247,57 @@ DO NOT
 • Do NOT return markdown, explanation, or any text outside the JSON.
 • Do NOT silently resolve conflicting evidence — use requiresEstimatorReview = true.
 • Do NOT omit assemblyNotes from any run — every run must explain its evidence source.
-• Do NOT use a dimension from a non-measurement page (email text, spec sheet) as a run length.`;
+• Do NOT use a dimension from a non-measurement page (email text, spec sheet) as a run length.
+
+── FABRICATION RULES (v6.1) — CRITICAL ─────────────────────────────────────────
+
+REFERENCE TOTALS ARE COMPARISON-ONLY
+• A visible written total like "50 sq' no b/s" or "49 / NO BS" is an estimator reference note — it is
+  comparison evidence, NOT calculation authority.
+• Do NOT add, resize, duplicate, or choose dimensions specifically to make your run math reach a written total.
+• Do NOT write assemblyNotes like "adjusted to reach reference total", "to reconcile with 50", "sized to match",
+  or any similar phrase that indicates geometry was forced toward a written number.
+• If your computed run total differs from a visible reference total: compute from visible dimensions anyway,
+  record the reference total in aiProvidedTotals, and add a review note explaining the discrepancy.
+• If a written total conflicts with visible geometry: preserve the conflict in notes. Compute from visible geometry.
+
+NO BACKSPLASH — HONOR EXPLICITLY
+• If the plan says "no b/s", "no BS", "n/b/s", "NO BS", "no backsplash", or a referenceTotals entry has
+  noBacksplash = true: set backsplashIncluded = false and backsplashLinearIn = 0 on ALL areas.
+  Do NOT add any backsplash to any area, even if a wall run exists, unless a conflicting page explicitly
+  requires stone backsplash.
+• If a different page conflicts (e.g. "FHB on range wall"), set requiresEstimatorReview = true on that area
+  and note the conflict — do not silently override the no-backsplash rule.
+
+CUTOUTS — NEVER IN EXCLUSIONS
+• Sink cutouts, cooktop cutouts, and faucet holes are FABRICATION OPERATIONS — they do NOT reduce material sf.
+• Do NOT add any sink, cooktop, faucet, undermount, or cutout to area.exclusions[].
+• Record them in area.cutouts[] or area.notes[] only.
+• area.exclusions[] is ONLY for true missing-material sections (window openings, missing slab areas, explicit gaps).
+
+DUPLICATE / INFERRED PIECES — GEOMETRY EVIDENCE REQUIRED
+• Do NOT duplicate a piece because of a text label like "2 STOVE", "TWO RANGES", or similar.
+  Unless two distinct pieces are visibly drawn and dimensioned on the plan, use only one.
+• If you cannot determine from the plan whether there is one or two pieces: set requiresEstimatorReview = true
+  on the affected run, note the ambiguity in assemblyNotes, and use one piece.
+• Do NOT write "assumed duplicate", "assumed two pieces", or "two identical" without explicit geometry.
+
+L/U-SHAPE CORNER DEDUCTIONS — OVERLAP MUST BE VISIBLE
+• Apply cornerDeductions ONLY when: (1) overlapMode is L-Shape or U-Shape, (2) both overlapping legs are
+  explicitly included in the area, and (3) the overlap is actual duplicate material area.
+• If input dimensions appear to be net countertop pieces (already deducted), do NOT auto-apply a corner
+  deduction unless explicit overlap evidence exists.
+• Do NOT assume a corner deduction exists because the layout looks like an L-shape from context.
+
+NONSTANDARD DEPTHS — EVIDENCE REQUIRED
+• Standard depths (25.5" kitchen counter, 21.5" vanity) do NOT need evidence.
+• Any depth > 26" on an island, peninsula, raised bar, bar top, desk, or waterfall MUST come from visible
+  plan evidence. Set depthEvidenceId to the evidence dimension ID.
+• If the plan shows a nonstandard depth explicitly: cite it in assemblyNotes and set depthEvidenceId.
+• If no explicit depth label exists for a nonstandard piece: use the standard default (25.5") and document
+  in assemblyNotes — do NOT assume or invent a larger depth.
+
+─────────────────────────────────────────────────────────────────────────────`;
 }
 
 // ── User message ───────────────────────────────────────────────────────────────

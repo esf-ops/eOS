@@ -51,7 +51,7 @@ import type { BenchmarkQaContext } from "./components/TakeoffBenchmarkPanel";
 import TakeoffRunHistoryPanel from "./components/TakeoffRunHistoryPanel";
 import TakeoffDebugPanel from "./components/TakeoffDebugPanel";
 import TakeoffQaGatePanel from "./components/TakeoffQaGatePanel";
-import type { QaGateResult } from "./components/TakeoffQaGatePanel";
+import type { QaGateResult, FabricationFinding } from "./components/TakeoffQaGatePanel";
 import TakeoffPageInventoryPanel from "./components/TakeoffPageInventoryPanel";
 import type { PageInventory } from "./components/TakeoffPageInventoryPanel";
 import TakeoffDimensionEvidencePanel from "./components/TakeoffDimensionEvidencePanel";
@@ -59,6 +59,7 @@ import type { DimensionEvidence } from "./components/TakeoffDimensionEvidencePan
 import TakeoffEvidenceTracePanel from "./components/TakeoffEvidenceTracePanel";
 import TakeoffReviewWorkbench, { countUnresolvedWorkbenchIssues } from "./components/TakeoffReviewWorkbench";
 import { reconcileRunsWithEvidence } from "@takeoff-core/takeoffEvidenceRunReconciliation.mjs";
+import { evaluateTakeoffFabricationRules } from "@takeoff-core/takeoffFabricationRules.mjs";
 import { makeTakeoffRun } from "@takeoff-core/takeoffContract.mjs";
 import { getSupabase } from "./lib/supabase";
 import { labApiGet, labApiPost, LabApiError } from "./lib/api";
@@ -419,6 +420,27 @@ export default function TakeoffLabApp() {
       return null;
     }
   }, [sourceMode, activeState, dimensionEvidence, pageInventory, benchmarkQaContext]);
+
+  // v6.2: Fabrication rule findings — computed from the current effective draft.
+  // Passed to TakeoffQaGatePanel for the dedicated "Fabrication rules" subsection.
+  const fabricationFindings = useMemo((): FabricationFinding[] => {
+    if (sourceMode === "none" || sourceMode === "invalid") return [];
+    try {
+      const { findings } = evaluateTakeoffFabricationRules({
+        takeoffResult:     activeState.result,
+        dimensionEvidence: dimensionEvidence ?? null,
+        reviewState:       excludedRunIds.size > 0 ? { excludedRunIds } : null,
+      });
+      // Return a compact shape for the UI: only code, level, and a short message.
+      return findings.map((f) => ({
+        code:    f.code,
+        level:   f.level as "info" | "warning" | "error",
+        message: f.message,
+      }));
+    } catch {
+      return [];
+    }
+  }, [sourceMode, activeState, dimensionEvidence, excludedRunIds]);
 
   const spec73Json = useMemo(() => JSON.stringify(makeSpec73(), null, 2), []);
 
@@ -1152,7 +1174,7 @@ export default function TakeoffLabApp() {
           {qaGate && (
             <section className="lab-section">
               <h2 className="lab-section-title">Takeoff QA result</h2>
-              <TakeoffQaGatePanel qaGate={qaGate} />
+              <TakeoffQaGatePanel qaGate={qaGate} fabricationFindings={fabricationFindings.length > 0 ? fabricationFindings : undefined} />
             </section>
           )}
 
