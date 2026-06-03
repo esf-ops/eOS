@@ -86,6 +86,14 @@ test("BE-8 sort params are NOT forwarded to metrics (no .sort / .direction in ap
   assert.doesNotMatch(helperMatch[0], /query\.direction/);
 });
 
+test("BE-9 HOTFIX: metrics response uses pickStr(req.query.quote_source), not undefined scopeSource variable", () => {
+  // scopeSource was removed when applyQuoteListFilters was introduced, but the
+  // res.json() block still referenced it — a ReferenceError at runtime that caused
+  // every /api/quote-library/metrics request to return 500.
+  assert.doesNotMatch(backendSrc, /scoped_quote_source:\s*scopeSource/);
+  assert.match(backendSrc, /scoped_quote_source:.*req\.query\.quote_source/);
+});
+
 // ---------------------------------------------------------------------------
 // Source: frontend
 // ---------------------------------------------------------------------------

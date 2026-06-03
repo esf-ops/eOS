@@ -752,7 +752,7 @@ export function attachQuoteLibraryRoutes(app, deps) {
           sold_this_month: soldMonth,
           needs_moraware_entry_doc: needsMw,
           needs_quickbooks_entry_doc: needsQb,
-          scoped_quote_source: scopeSource || null,
+          scoped_quote_source: pickStr(req.query.quote_source) || null,
           periods: {
             week: weekAgg,
             month: monthAgg,
