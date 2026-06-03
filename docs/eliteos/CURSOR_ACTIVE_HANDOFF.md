@@ -2,7 +2,7 @@
 
 **Purpose:** Cheap context for new Cursor chats. Do not treat old chat transcripts as source of truth — use this file + `docs/eliteos/*` + `.cursor/rules/*`.
 
-**Last updated:** 2026-06-03 (AI Takeoff v6.2 — fabrication rules engine + Kelley proof case)
+**Last updated:** 2026-06-03 (AI Takeoff v6.2.1 — estimator workflow polish; dev tools hidden by default)
 
 ---
 
@@ -322,6 +322,26 @@ Dev: `npm run dev --prefix app-ai-takeoff` -> `http://localhost:5186`. Not in Ho
 | All existing tests | **All passing** (28 extraction, 25 QA gate, 18 reconciliation, 13 dim-evidence, 25 Gemini, 6 config) |
 | Build | **Clean** (vite build, eos:check:local) |
 | Import disabled | **Still disabled** — no change |
+
+### v6.2.1 status: estimator workflow polish (2026-06-03 ✅)
+
+| Area | State |
+|------|-------|
+| Page branding | "AI Takeoff Lab" → "AI Takeoff" throughout |
+| JSON Workbench | **Hidden by default** — only visible when `VITE_TAKEOFF_SHOW_DEV_TOOLS=1` |
+| Benchmark / Debug tools | **Hidden by default** — same flag required |
+| AI assumptions section | Renamed → "Plan notes & AI review flags" with category split (plan notes vs AI flags) |
+| Review Workbench heading | "Review measurements before saving" + concise helper copy |
+| Table column headers | "Run label" → "Run / piece", "Status" → "Include?" |
+| Include/exclude toggles | Text now "✓ included" / "↩ re-include" for clarity |
+| Reviewer note placeholder | "Note: reason for accepting or changing…" |
+| Evidence hint | Fixed stale `Δ0.0"` bug — now shows "nearest plan dim: …" |
+| Save section | Button "Save reviewed takeoff" (drop "draft"); explanation added; better unresolved warning and success messages |
+| Technical panels | Grouped under "Technical details" label with divider |
+| Build | Clean |
+| All tests | Passing (33 fabrication, 24 reconciliation, 25 QA gate) |
+
+**Dev tools flag:** Set `VITE_TAKEOFF_SHOW_DEV_TOOLS=1` in `.env.local` to expose JSON Workbench, Benchmark tools, and Debug JSON.
 
 ### v6.2 status: deterministic fabrication rules engine + Kelley proof case (2026-06-03 ✅)
 

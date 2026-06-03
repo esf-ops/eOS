@@ -67,8 +67,7 @@ export interface TakeoffReviewWorkbenchProps {
 function EvidenceBadge({ link, excluded }: { link: RunLink | null; excluded: boolean }) {
   if (excluded) {
     return <span className="rw-badge rw-badge--excluded">excluded</span>;
-  }
-  if (!link || link.verdict === "exempt") {
+  }  if (!link || link.verdict === "exempt") {
     return <span className="rw-badge rw-badge--muted">n/a</span>;
   }
   if (link.verdict === "supported" && !link.conflicting) {
@@ -93,13 +92,12 @@ function EvidenceHint({ link }: { link: RunLink | null }) {
   if (link.verdict === "changed" && link.nearestChanged) {
     return (
       <span className="rw-ev-hint rw-ev-hint--warn">
-        nearest: "{link.nearestChanged.label}" {link.nearestChanged.lengthIn}" · p.{link.nearestChanged.pageNumber ?? "?"}
-        {" "}(Δ{Math.abs(0).toFixed(1)}")
+        nearest plan dim: "{link.nearestChanged.label}" {link.nearestChanged.lengthIn}" · p.{link.nearestChanged.pageNumber ?? "?"}
       </span>
     );
   }
   if (link.verdict === "unsupported") {
-    return <span className="rw-ev-hint rw-ev-hint--error">no evidence within ±10"</span>;
+    return <span className="rw-ev-hint rw-ev-hint--error">no plan evidence within ±10"</span>;
   }
   if (link.conflicting && link.matchedDims.length > 1) {
     return (
@@ -244,7 +242,7 @@ function RunRow({ row, excluded, note, onPatchRun, onToggleExclude, onSetNote }:
           title={excluded ? "Re-include this run in the total" : "Exclude this run from the total"}
           aria-pressed={excluded}
         >
-          {excluded ? "excluded" : "include"}
+          {excluded ? "↩ re-include" : "✓ included"}
         </button>
       </div>
 
@@ -254,7 +252,7 @@ function RunRow({ row, excluded, note, onPatchRun, onToggleExclude, onSetNote }:
           className="rw-note-input"
           type="text"
           value={note}
-          placeholder="reviewer note…"
+          placeholder="Note: reason for accepting or changing…"
           aria-label="Reviewer note"
           onChange={(e) => onSetNote(run.id, e.target.value)}
         />
@@ -558,12 +556,12 @@ export default function TakeoffReviewWorkbench({
 
         {/* Table header */}
         <div className="rw-run-row rw-run-row--header" role="row">
-          <span role="columnheader" className="rw-cell rw-cell--label">Run label</span>
+          <span role="columnheader" className="rw-cell rw-cell--label">Run / piece</span>
           <span role="columnheader" className="rw-cell rw-cell--dim">Length</span>
           <span role="columnheader" className="rw-cell rw-cell--dim">Depth</span>
           <span role="columnheader" className="rw-cell rw-cell--status">Evidence</span>
           <span role="columnheader" className="rw-cell rw-cell--pages">Pages</span>
-          <span role="columnheader" className="rw-cell rw-cell--toggle">Status</span>
+          <span role="columnheader" className="rw-cell rw-cell--toggle">Include?</span>
           <span role="columnheader" className="rw-cell rw-cell--note">Reviewer note</span>
         </div>
 
@@ -604,7 +602,7 @@ export default function TakeoffReviewWorkbench({
 
       {!dimensionEvidence && (
         <p className="rw-no-evidence-note">
-          Evidence trace is only available for AI draft runs. Dimension editing is still active.
+          Evidence tracing is only available for AI-generated drafts. Dimension editing is still active above.
         </p>
       )}
     </div>

@@ -1130,6 +1130,17 @@ details[open] > .lab-section-summary::before { transform: rotate(90deg); }
   color: var(--eos-ink-mid);
   line-height: 1.5;
 }
+.ai-review-notes-category {
+  margin: 4px 0 0;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--eos-ink-muted);
+}
+.ai-review-notes-category--flags {
+  color: var(--eos-warn);
+}
 .ai-review-notes-list {
   margin: 0;
   padding: 0 0 0 18px;
@@ -1141,6 +1152,15 @@ details[open] > .lab-section-summary::before { transform: rotate(90deg); }
   font-size: 12px;
   color: var(--eos-ink-soft);
   line-height: 1.5;
+}
+.ai-review-notes-item--info {
+  color: var(--eos-ink-muted);
+}
+.ai-review-notes-item--flag {
+  color: var(--eos-ink-soft);
+}
+.ai-review-notes-item--flag::marker {
+  color: var(--eos-warn);
 }
 
 /* Workbench status — edited state */
@@ -2473,6 +2493,25 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
 }
 
 /* ── Developer section drawer ── */
+/* ── Secondary panel group label ───────────────────────────────────────── */
+.lab-secondary-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border-top: 1px solid var(--eos-line);
+  margin-top: 8px;
+  padding-top: 4px;
+}
+.lab-secondary-group-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--eos-ink-faint);
+  margin: 8px 0 4px;
+  padding: 0 2px;
+}
+
 .lab-section-dev {
   border-color: var(--eos-line);
   background: var(--eos-bg);

@@ -64,6 +64,14 @@ import { makeTakeoffRun } from "@takeoff-core/takeoffContract.mjs";
 import { getSupabase } from "./lib/supabase";
 import { labApiGet, labApiPost, LabApiError } from "./lib/api";
 
+// ── Dev-tools flag ─────────────────────────────────────────────────────────
+// Set VITE_TAKEOFF_SHOW_DEV_TOOLS=1 in .env.local to expose JSON workbench,
+// benchmark tools, and debug JSON. Hidden by default in normal estimator flow.
+const showDevTools = String(
+  (import.meta as unknown as { env?: Record<string, string> }).env
+    ?.VITE_TAKEOFF_SHOW_DEV_TOOLS ?? ""
+).trim() === "1";
+
 // ── Workspace + head constants ─────────────────────────────────────────────
 
 const DEFAULT_WORKSPACE_NAME = "Elite Stone Fabrication";
@@ -726,7 +734,7 @@ export default function TakeoffLabApp() {
   const handleSaveDraft = useCallback(async () => {
     if (!takeoffJobId || !authToken) return;
     setSaveStatus("saving");
-    setSaveMsg("Saving takeoff draft…");
+    setSaveMsg("Saving reviewed takeoff…");
     try {
       const res = await labApiPost(`/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}/results`, authToken, {
         takeoffResult: effectiveDraft,   // use filtered draft (excluded runs removed)
@@ -735,7 +743,7 @@ export default function TakeoffLabApp() {
       setSaveStatus("saved");
       setSavedAt(res.savedAt);
       setSaveMsg(
-        `Saved — ${res.summary.countertopExactSf.toFixed(2)} sf countertop · ${res.summary.backsplashExactSf.toFixed(2)} sf backsplash`
+        `Reviewed takeoff saved — ${res.summary.countertopExactSf.toFixed(2)} sf countertop · ${res.summary.backsplashExactSf.toFixed(2)} sf backsplash`
       );
     } catch (e) {
       const msg = e instanceof LabApiError ? e.message : e instanceof Error ? e.message : "Save failed.";
@@ -865,19 +873,19 @@ export default function TakeoffLabApp() {
         <a
           href={homeBase}
           className="brand-row brand-row-link"
-          aria-label={`eliteOS AI Takeoff Lab — ${workspaceName}`}
+          aria-label={`eliteOS AI Takeoff — ${workspaceName}`}
         >
           <span className="brand-mark" aria-hidden>
             {workspaceLogoUrl ? <img src={workspaceLogoUrl} alt="" /> : null}
           </span>
           <span className="brand-text">
             <span className="brand-wordmark">eliteOS</span>
-            <span className="brand-sub">AI Takeoff Lab · {workspaceName}</span>
+            <span className="brand-sub">AI Takeoff · {workspaceName}</span>
           </span>
         </a>
         <div className="topbar-actions">
           <div className="topbar-badges">
-            <span className="badge badge-lab">Lab · review only</span>
+            <span className="badge badge-lab">Review only</span>
             <span className="badge badge-safe">No quote mutation</span>
           </div>
           {authChecked && authToken ? (
@@ -958,10 +966,10 @@ export default function TakeoffLabApp() {
       <div className="takeoff-page-sub" role="region" aria-label="Takeoff session status">
         <div className="takeoff-page-sub-inner">
           <div className="takeoff-page-sub-title">
-            <h1 className="takeoff-page-heading">AI Takeoff Lab</h1>
+            <h1 className="takeoff-page-heading">AI Takeoff</h1>
             <p className="takeoff-page-desc">
-              AI proposes countertop and backsplash dimensions — eliteOS recomputes and validates
-              independently. No quote is created or mutated.
+              Review plan dimensions, correct measurements, and save a reviewed takeoff.
+              eliteOS recomputes square footage independently — no quote is created or mutated.
             </p>
           </div>
           {authToken && hasActiveSource && (
@@ -1014,7 +1022,7 @@ export default function TakeoffLabApp() {
           {authChecked && !authToken && (
             <section className="auth-panel auth-panel-standalone" aria-label="Sign in">
               <header className="auth-panel-header">
-                <p className="auth-panel-eyebrow">AI Takeoff Lab · {workspaceName}</p>
+                <p className="auth-panel-eyebrow">AI Takeoff · {workspaceName}</p>
                 <h2 className="auth-panel-title">Sign in to continue</h2>
                 <p className="auth-panel-sub">
                   Sign in with your eliteOS staff account to upload plan files, create workspaces,
@@ -1111,10 +1119,11 @@ export default function TakeoffLabApp() {
             </section>
           )}
 
-          {/* JSON workbench — secondary / developer tool — collapsed by default */}
-          <details className="lab-section lab-section-collapsible">
+          {/* JSON workbench — developer-only tool, hidden unless VITE_TAKEOFF_SHOW_DEV_TOOLS=1 */}
+          {showDevTools && (
+          <details className="lab-section lab-section-collapsible lab-section-dev">
             <summary className="lab-section-summary">
-              <span className="lab-section-title" style={{ margin: 0 }}>JSON workbench</span>
+              <span className="lab-section-title lab-section-title--dev" style={{ margin: 0 }}>JSON workbench</span>
               <span className="lab-section-summary-note">Developer / demo — paste or load Spec 73 sample</span>
             </summary>
             <div style={{ marginTop: 12 }}>
@@ -1132,6 +1141,7 @@ export default function TakeoffLabApp() {
               />
             </div>
           </details>
+          )}
 
           {/* ── Demo sample notice — shown when Spec 73 is explicitly loaded ── */}
           {isDemoMode && (
@@ -1178,41 +1188,66 @@ export default function TakeoffLabApp() {
             </section>
           )}
 
-          {/* ── 3. AI assumptions & review notes ─────────────────────────── */}
+          {/* ── 3. Plan notes & AI review flags ──────────────────────────── */}
           {(() => {
             const notes = gatherReviewNotes(result);
             if (notes.length === 0) return null;
+
+            // Separate notes into categories by heuristic keywords
+            const flagKeywords = /\b(assumed?|unclear|uncertain|ambiguous|estimate|inferred?|to reconcile|duplicate|missing|conflict|review|check|verify|note:|warning|caution)\b/i;
+            const planNotes   = notes.filter((n) => !flagKeywords.test(n));
+            const reviewFlags = notes.filter((n) =>  flagKeywords.test(n));
+
             return (
               <section className="lab-section">
-                <h2 className="lab-section-title">AI assumptions &amp; review notes</h2>
+                <h2 className="lab-section-title">Plan notes &amp; AI review flags</h2>
                 <div className="ai-review-notes lab-card">
                   <p className="ai-review-notes-intro">
-                    Review these AI-generated notes before saving. Correct any assumptions that do not match the plan.
+                    These are notes the AI noticed from the plan. Confirm anything flagged in the Review Workbench before saving.
                   </p>
-                  <ul className="ai-review-notes-list">
-                    {notes.map((note, i) => (
-                      <li key={i} className="ai-review-notes-item">{note}</li>
-                    ))}
-                  </ul>
+                  {planNotes.length > 0 && (
+                    <>
+                      {reviewFlags.length > 0 && (
+                        <p className="ai-review-notes-category">Plan notes</p>
+                      )}
+                      <ul className="ai-review-notes-list">
+                        {planNotes.map((note, i) => (
+                          <li key={i} className="ai-review-notes-item ai-review-notes-item--info">{note}</li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                  {reviewFlags.length > 0 && (
+                    <>
+                      <p className="ai-review-notes-category ai-review-notes-category--flags">AI flags — review before saving</p>
+                      <ul className="ai-review-notes-list">
+                        {reviewFlags.map((note, i) => (
+                          <li key={i} className="ai-review-notes-item ai-review-notes-item--flag">{note}</li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
                 </div>
               </section>
             );
           })()}
 
-          {/* ── 4. Takeoff review workbench (PRIMARY) ────────────────────── */}
+          {/* ── 4. Review measurements (PRIMARY) ─────────────────────────── */}
           <section className="lab-section">
             <div className="lab-section-header">
-              <h2 className="lab-section-title" style={{ margin: 0 }}>Takeoff review workbench</h2>
+              <div>
+                <h2 className="lab-section-title" style={{ margin: 0 }}>Review measurements before saving</h2>
+                <p className="lab-section-desc" style={{ marginTop: 4, marginBottom: 0 }}>
+                  Edit dimensions, exclude incorrect runs, or mark flagged items reviewed.
+                  The measurement totals above update instantly.
+                </p>
+              </div>
               {hasEdits && (
                 <button className="btn-edit-action btn-edit-action--reset" onClick={handleResetEdits} type="button">
                   Reset edits
                 </button>
               )}
             </div>
-            <p className="lab-section-desc">
-              Review and correct the takeoff before saving. Edit dimensions, exclude bad runs, and add reviewer notes.
-              The Measurement Summary above updates instantly.
-            </p>
             <TakeoffReviewWorkbench
               editDraft={editDraft}
               dimensionEvidence={dimensionEvidence}
@@ -1236,8 +1271,8 @@ export default function TakeoffLabApp() {
                   <div className="save-panel-warning" role="alert">
                     <span className="save-panel-warning-icon">⚠</span>
                     <span>
-                      <strong>{unresolvedCount} unresolved evidence issue{unresolvedCount !== 1 ? "s" : ""}</strong>{" "}
-                      remain in the workbench checklist. Review them above, or save anyway.
+                      <strong>{unresolvedCount} review item{unresolvedCount !== 1 ? "s" : ""} still unresolved</strong>{" "}
+                      in the workbench checklist. You can save now, but resolve them before import.
                     </span>
                   </div>
                 )}
@@ -1245,14 +1280,16 @@ export default function TakeoffLabApp() {
                   <div className="save-panel-info-note">
                     <span className="save-panel-info-icon">ℹ</span>
                     <span>
-                      {excludedRunIds.size} excluded run{excludedRunIds.size !== 1 ? "s" : ""} will not appear in the saved draft.
+                      {excludedRunIds.size} excluded run{excludedRunIds.size !== 1 ? "s" : ""} will not be saved.
                     </span>
                   </div>
                 )}
                 <div className="save-panel-inner">
                   <div className="save-panel-info">
                     <p className="save-panel-desc">
-                      The backend recomputes all square footage independently from your dimensions.
+                      Stores this estimator-reviewed takeoff on the workspace.
+                      It does not create a quote.
+                      Later, reviewed takeoffs will be importable into Internal Estimate.
                     </p>
                     {savedAt && (
                       <p className="save-panel-last-saved">
@@ -1269,13 +1306,13 @@ export default function TakeoffLabApp() {
                       onClick={() => {
                         if (unresolvedCount > 0) {
                           if (!window.confirm(
-                            `${unresolvedCount} unresolved evidence issue${unresolvedCount !== 1 ? "s" : ""} remain. Save reviewed draft anyway?`
+                            `${unresolvedCount} review item${unresolvedCount !== 1 ? "s" : ""} are still unresolved. Save anyway? They should be resolved before import.`
                           )) return;
                         }
                         void handleSaveDraft();
                       }}
                     >
-                      {saveStatus === "saving" ? "Saving…" : "Save reviewed takeoff draft"}
+                      {saveStatus === "saving" ? "Saving…" : "Save reviewed takeoff"}
                     </button>
                   </div>
                 </div>
@@ -1295,7 +1332,11 @@ export default function TakeoffLabApp() {
 
           {/* ════════════════════════════════════════════════════════════════
               SECONDARY PANELS — collapsed by default
+              All panels below are for reference or debugging. They do not
+              affect the review workflow above.
               ════════════════════════════════════════════════════════════════ */}
+          <div className="lab-secondary-group">
+            <p className="lab-secondary-group-label">Technical details</p>
 
           {/* ── Evidence trace (auto-opens when issues exist) ─────────────── */}
           {dimensionEvidence && (
@@ -1335,7 +1376,7 @@ export default function TakeoffLabApp() {
           <details className="lab-section lab-section-collapsible">
             <summary className="lab-section-summary">
               <span className="lab-section-title" style={{ margin: 0 }}>Rooms, areas &amp; runs</span>
-              <span className="lab-section-summary-note">Legacy tree view — use workbench above for editing</span>
+              <span className="lab-section-summary-note">Tree view — use Review Workbench above for editing</span>
             </summary>
             <div style={{ marginTop: 12 }}>
               <div className="lab-section-header" style={{ marginBottom: 8 }}>
@@ -1357,7 +1398,7 @@ export default function TakeoffLabApp() {
               {isEditing && (
                 <div className="edit-mode-banner">
                   <span className="edit-mode-banner-icon">✎</span>
-                  <span>Edit mode — changes update totals instantly. Prefer the Review Workbench above for run-level edits.</span>
+                  <span>Edit mode — changes update totals instantly. Use Review Workbench above for run-level edits.</span>
                 </div>
               )}
               <TakeoffRoomsReview
@@ -1434,7 +1475,10 @@ export default function TakeoffLabApp() {
             </div>
           </details>
 
-          {/* ── Developer / benchmark tools ──────────────────────────────── */}
+          </div>{/* end lab-secondary-group */}
+
+          {/* ── Developer / benchmark tools (dev-only) ───────────────────── */}
+          {showDevTools && (
           <details className="lab-section lab-section-collapsible lab-section-dev">
             <summary className="lab-section-summary">
               <span className="lab-section-title lab-section-title--dev" style={{ margin: 0 }}>Developer / benchmark tools</span>
@@ -1443,7 +1487,7 @@ export default function TakeoffLabApp() {
             <div style={{ marginTop: 12 }}>
               <div className="dev-tools-notice" role="note">
                 Benchmark presets are for internal model testing only.
-                Estimator review should use the Takeoff Review Workbench above.
+                Estimator review should use the Review Workbench above.
                 {benchmarkQaContext && (
                   <span className="dev-tools-active-badge"> · Benchmark active: {benchmarkQaContext.label}</span>
                 )}
@@ -1456,8 +1500,10 @@ export default function TakeoffLabApp() {
               />
             </div>
           </details>
+          )}
 
-          {/* ── Debug JSON ───────────────────────────────────────────────── */}
+          {/* ── Debug JSON (dev-only) ─────────────────────────────────────── */}
+          {showDevTools && (
           <section className="lab-section">
             <TakeoffDebugPanel
               result={result}
@@ -1468,6 +1514,7 @@ export default function TakeoffLabApp() {
               dimensionEvidence={dimensionEvidence}
             />
           </section>
+          )}
 
           {/* Footer note */}
           <div className="lab-footer-note">
@@ -1493,7 +1540,7 @@ export default function TakeoffLabApp() {
       </main>
 
       <footer className="footer-bar" role="contentinfo">
-        <span>eliteOS · AI Takeoff Lab</span>
+        <span>eliteOS · AI Takeoff</span>
         <span className="footer-meta">Authorized staff only — backend authorization is the source of truth.</span>
       </footer>
     </div>
