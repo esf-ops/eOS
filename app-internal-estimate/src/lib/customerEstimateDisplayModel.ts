@@ -5,6 +5,7 @@ import type {
   SelectedMaterialBreakdown,
   SelectedMaterialScopeLine
 } from "@quote-lib/prototypeQuoteMath";
+import { roundCustomerDisplayVanity } from "@quote-lib/vanityProgram2026";
 import type { MeasuredRoom } from "@quote-lib/quoteTypes";
 import {
   prepareCustomerPrintDisplayRows,
@@ -81,10 +82,10 @@ function amountFromMeasuredRoomDetail(detail: string): number | null {
 }
 
 /**
- * Split a customer-facing rounded total across positive exact weights using proportional $10 buckets
- * + largest remainder so displayed amounts sum exactly to `targetDisplay` (always a multiple of $10).
+ * Split a customer-facing rounded total across positive exact weights using proportional $5 buckets
+ * + largest remainder so displayed amounts sum exactly to `targetDisplay` (always a multiple of $5).
  */
-export function allocateCustomerDisplayTens(exacts: number[], targetDisplay: number): number[] {
+export function allocateCustomerDisplayFives(exacts: number[], targetDisplay: number): number[] {
   const n = exacts.length;
   if (n === 0) return [];
   const cleaned = exacts.map((x) => (Number.isFinite(x) && x > 0 ? x : 0));
@@ -92,7 +93,7 @@ export function allocateCustomerDisplayTens(exacts: number[], targetDisplay: num
   const target = Math.max(0, Math.round(targetDisplay));
   if (sumExact <= 0 || target <= 0) return cleaned.map(() => 0);
 
-  const units = Math.round(target / 10);
+  const units = Math.round(target / 5);
   if (units <= 0) return cleaned.map(() => 0);
 
   const rawUnits = cleaned.map((e) => (e / sumExact) * units);
@@ -102,12 +103,15 @@ export function allocateCustomerDisplayTens(exacts: number[], targetDisplay: num
   const order = rawUnits
     .map((r, i) => ({ i, rem: r - floorUnits[i] }))
     .sort((a, b) => b.rem - a.rem);
-  const out = floorUnits.map((f) => f * 10);
+  const out = floorUnits.map((f) => f * 5);
   for (let k = 0; k < deficit; k++) {
-    out[order[k].i] += 10;
+    out[order[k].i] += 5;
   }
   return out;
 }
+
+/** @deprecated Use allocateCustomerDisplayFives — rounding is now nearest $5. */
+export const allocateCustomerDisplayTens = allocateCustomerDisplayFives;
 
 function aggregateScopeLinesByRoom(lines: SelectedMaterialScopeLine[]): CustomerMaterialScopeRoomRow[] {
   const byRoom = new Map<string, CustomerMaterialScopeRoomRow>();
@@ -245,11 +249,25 @@ function buildRoomAreaPrintRows(params: {
   }
 
   const unassignedDisplay = unassignedExact > 0 ? roundCustomerDisplay(unassignedExact) : 0;
+
+  // Separate vanity rooms (fixed display total, immune to fold/rounding inflation) from
+  // proportional rooms. The fixed sum is subtracted from targetRoomDisplay before proportional
+  // allocation, ensuring the vanity program customer price is never inflated by internal adjustments.
+  const fixedTotal = roomRows.reduce((s, r) => s + (r.fixedDisplayTotal ?? 0), 0);
   const targetRoomDisplay = Math.max(0, params.finalRounded - unassignedDisplay);
-  const roomAreaDisplayTotals = allocateCustomerDisplayTens(
-    roomRows.map((r) => r.roomTotalExact),
-    targetRoomDisplay
+  const targetProportionalDisplay = Math.max(0, targetRoomDisplay - fixedTotal);
+
+  // Build allocations array: fixed rooms get fixedDisplayTotal, proportional rooms get allocated share.
+  const proportionalExacts = roomRows.map((r) => (r.fixedDisplayTotal != null ? 0 : r.roomTotalExact));
+  const proportionalAllocated = allocateCustomerDisplayFives(
+    proportionalExacts.filter((_, i) => roomRows[i].fixedDisplayTotal == null),
+    targetProportionalDisplay
   );
+  let propIdx = 0;
+  const roomAreaDisplayTotals = roomRows.map((r) => {
+    if (r.fixedDisplayTotal != null) return r.fixedDisplayTotal;
+    return proportionalAllocated[propIdx++] ?? 0;
+  });
 
   const prepared = prepareCustomerPrintDisplayRows({
     roomRows,
@@ -348,13 +366,22 @@ export function buildCustomerEstimateDisplayModel(
 ): CustomerEstimateDisplayModel {
   // Only true vanity-program rooms are excluded from selectedBreakdown; standard-mode vanity rooms
   // (isVanityProgram === false/undefined) price as countertop and are already in selectedBreakdown.
+  // Only true vanity-program rooms are excluded from selectedBreakdown; standard-mode vanity rooms
+  // (isVanityProgram === false/undefined) price as countertop and are already in selectedBreakdown.
   // Using r.type === "Vanity" here would double-count any standard-mode vanity room's material.
-  const vanityMaterialExact = params.measuredRooms
+  //
+  // Use vanityProgram.displayTotal (nearest $5) rather than exactTotal so the customer-facing
+  // estimate reflects the program price sheet. This prevents fold adjustments or rounding from
+  // inflating the vanity amount beyond its stated program price.
+  const vanityDisplayContribution = params.measuredRooms
     .filter((r) => r.isVanityProgram === true)
-    .reduce((s, v) => s + (Number(v.selected) || 0), 0);
+    .reduce(
+      (s, v) => s + (v.vanityProgram?.displayTotal ?? roundCustomerDisplayVanity(Number(v.selected) || 0)),
+      0
+    );
   const countertopMaterialExact = round2(
     params.selectedBreakdown.totals.countertopMaterial +
-      vanityMaterialExact +
+      vanityDisplayContribution +
       (Number(params.internalMaterialFoldDollars) || 0)
   );
   const backsplashMaterialExact = round2(params.selectedBreakdown.totals.backsplashMaterial);

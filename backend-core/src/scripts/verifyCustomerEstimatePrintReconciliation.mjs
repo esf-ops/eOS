@@ -24,7 +24,7 @@ const FORBIDDEN_IN_VERIFY = [
 function roundCustomerDisplay(amount) {
   const n = Number(amount);
   if (!Number.isFinite(n) || n <= 0) return 0;
-  return Math.ceil(n / 10) * 10;
+  return Math.round(n / 5) * 5;
 }
 
 function roundCustomerDisplayVanity(amount) {
@@ -73,14 +73,14 @@ function assertNoCustomerSpecificHardcoding() {
   }
 }
 
-function allocateCustomerDisplayTens(exacts, targetDisplay) {
+function allocateCustomerDisplayFives(exacts, targetDisplay) {
   const n = exacts.length;
   if (n === 0) return [];
   const cleaned = exacts.map((x) => (Number.isFinite(x) && x > 0 ? x : 0));
   const sumExact = cleaned.reduce((a, b) => a + b, 0);
   const target = Math.max(0, Math.round(targetDisplay));
   if (sumExact <= 0 || target <= 0) return cleaned.map(() => 0);
-  const units = Math.round(target / 10);
+  const units = Math.round(target / 5);
   if (units <= 0) return cleaned.map(() => 0);
   const rawUnits = cleaned.map((e) => (e / sumExact) * units);
   const floorUnits = rawUnits.map((r) => Math.floor(r));
@@ -89,10 +89,12 @@ function allocateCustomerDisplayTens(exacts, targetDisplay) {
   const order = rawUnits
     .map((r, i) => ({ i, rem: r - floorUnits[i] }))
     .sort((a, b) => b.rem - a.rem);
-  const out = floorUnits.map((f) => f * 10);
-  for (let k = 0; k < deficit; k++) out[order[k].i] += 10;
+  const out = floorUnits.map((f) => f * 5);
+  for (let k = 0; k < deficit; k++) out[order[k].i] += 5;
   return out;
 }
+// Deprecated alias — kept for any inline references in this file.
+const allocateCustomerDisplayTens = allocateCustomerDisplayFives;
 
 const FHB_ELECTRICAL_DETAIL_RE = /full-height backsplash electrical cutouts/i;
 
@@ -228,14 +230,33 @@ function buildSyntheticDisplayModel(fixture) {
 
   const unassignedDisplay = unassignedExact > 0 ? roundCustomerDisplay(unassignedExact) : 0;
   const targetRoomDisplay = Math.max(0, finalRounded - unassignedDisplay);
-  const roomAreaDisplayTotals = allocateCustomerDisplayTens(
-    roomRows.map((r) => r.roomTotalExact),
-    targetRoomDisplay
+
+  // Mirrors buildRoomAreaPrintRows: vanity rooms with fixedDisplayTotal are pinned;
+  // non-vanity rooms get proportional $5 allocation of the remaining budget.
+  const rowsWithFixed = roomRows.map((r) => ({
+    ...r,
+    fixedDisplayTotal:
+      r.fixedDisplayTotal != null
+        ? r.fixedDisplayTotal
+        : r.isVanity
+          ? roundCustomerDisplayVanity(r.roomTotalExact)
+          : undefined
+  }));
+  const fixedTotal = rowsWithFixed.reduce((s, r) => s + (r.fixedDisplayTotal ?? 0), 0);
+  const targetProportionalDisplay = Math.max(0, targetRoomDisplay - fixedTotal);
+  const proportionalExacts = rowsWithFixed
+    .filter((r) => r.fixedDisplayTotal == null)
+    .map((r) => r.roomTotalExact);
+  const proportionalAllocated = allocateCustomerDisplayFives(proportionalExacts, targetProportionalDisplay);
+  let propIdx = 0;
+  const roomAreaDisplayTotals = rowsWithFixed.map((r) =>
+    r.fixedDisplayTotal != null ? r.fixedDisplayTotal : (proportionalAllocated[propIdx++] ?? 0)
   );
+
   const roomExtrasExact = roomRows.map((r) => r.extrasExact ?? r.addons.reduce((s, a) => s + a.amountExact, 0));
 
   const roomPrint = prepareRoomPrintRows(
-    roomRows.map((r) => ({
+    rowsWithFixed.map((r) => ({
       addons: r.addons,
       materialAmountExact: r.materialExact,
       customSum: r.customSum || 0,
@@ -434,8 +455,10 @@ assertNoCustomerSpecificHardcoding();
     materialScopeGroups: [{ group: "Group 1", displayDollars: null }]
   });
   assertDisplayModelInvariants("vanity-only", m);
-  assertEqual("vanity-only final", m.finalRounded, 890);
-  assertEqual("vanity-only room area", m.roomAreaPrintRows[0]?.displayedAreaTotal, 890);
+  // 887 → Math.round(887/5)*5 = 885 with nearest-$5 rounding
+  assertEqual("vanity-only final", m.finalRounded, 885);
+  // Vanity room pins to fixedDisplayTotal = roundCustomerDisplayVanity(887) = 885
+  assertEqual("vanity-only room area", m.roomAreaPrintRows[0]?.displayedAreaTotal, 885);
 }
 
 // 6. Mixed countertop + vanity / program
@@ -680,7 +703,7 @@ assertEqual(
   assert(edgeSummaryRow != null, "EDGE-DISPLAY-4: Edge upgrades row in Estimate Summary");
   assertEqual("EDGE-DISPLAY-4: edge summary display amount", edgeSummaryRow.displayAmount, roundCustomerDisplay(kitchenEdgeExact));
 
-  // Room area totals must sum to finalRounded (allocateCustomerDisplayTens allocates proportionally)
+  // Room area totals must sum to finalRounded (allocateCustomerDisplayFives allocates proportionally)
   assertDisplayModelInvariants("EDGE-DISPLAY-4: room-breakdown with edge", edgeRoomModel);
 
   // Kitchen (the edge room) must have a larger displayed area total than Bath
@@ -703,6 +726,120 @@ assertEqual(
   assert(quoteMathSrc.includes("edge upgrade"), "prototypeQuoteMath must add 'edge upgrade' addon label per room");
   assert(quoteMathSrc.includes("UPGRADED_EDGE_PREVIEW_RATE_PER_LF"), "prototypeQuoteMath must use UPGRADED_EDGE_PREVIEW_RATE_PER_LF in room breakdown");
   assert(quoteMathSrc.includes("UPGRADED_EDGE_PROFILE_SET"), "prototypeQuoteMath must check UPGRADED_EDGE_PROFILE_SET in room breakdown");
+}
+
+// 11. VANITY-ISOLATION: vanity program price must not be inflated by fold or room rounding
+// Simulates: kitchen countertops with use tax + 37" vanity ($265 program price) + $50 internal fold
+{
+  const kitchenWithTax = 1535; // kitchen exact after use tax
+  const vanityDisplayPrice = 265; // 37" single bowl over35 — already a multiple of $5
+  const internalFold = 50; // internal-only custom line adjustment
+  // countertopExact mirrors countertopMaterialExact = kitchen + vanityDisplay + fold
+  const countertopExact = kitchenWithTax + vanityDisplayPrice + internalFold; // 1850
+
+  const model = buildSyntheticDisplayModel({
+    countertopExact,
+    backsplashExact: 0,
+    addonsExact: 0,
+    roomRows: [
+      {
+        // Kitchen — non-vanity, proportional allocation
+        isVanity: false,
+        roomTotalExact: kitchenWithTax,
+        materialExact: kitchenWithTax,
+        extrasExact: 0,
+        addons: []
+      },
+      {
+        // Vanity room — fixedDisplayTotal pins price to program display price
+        isVanity: true,
+        roomTotalExact: vanityDisplayPrice,
+        materialExact: vanityDisplayPrice,
+        extrasExact: 0,
+        addons: []
+      }
+    ]
+  });
+
+  assertDisplayModelInvariants("VANITY-ISOLATION-1", model);
+
+  // Estimate Summary countertop amount includes vanity at its program price
+  const counterRow = model.estimateSummaryRows.find((r) => r.key === "countertop");
+  assertEqual(
+    "VANITY-ISOLATION-1: countertop summary = roundCustomerDisplay(countertopExact)",
+    counterRow.displayAmount,
+    roundCustomerDisplay(countertopExact)
+  );
+
+  // Vanity room must show exactly its program display price — not inflated by fold or rounding
+  const vanityRoomRow = model.roomAreaPrintRows[1];
+  assertEqual(
+    "VANITY-ISOLATION-1: vanity room pins to program display price",
+    vanityRoomRow.displayedAreaTotal,
+    vanityDisplayPrice // $265, not $270 or $280
+  );
+
+  // Kitchen room absorbs the proportional share including fold
+  const kitchenRoomRow = model.roomAreaPrintRows[0];
+  const expectedKitchen = roundCustomerDisplay(countertopExact) - vanityDisplayPrice;
+  assertEqual(
+    "VANITY-ISOLATION-1: kitchen room gets remainder including fold",
+    kitchenRoomRow.displayedAreaTotal,
+    expectedKitchen
+  );
+
+  // Total reconciles
+  assertEqual(
+    "VANITY-ISOLATION-1: room totals sum to finalRounded",
+    kitchenRoomRow.displayedAreaTotal + vanityRoomRow.displayedAreaTotal,
+    model.finalRounded
+  );
+}
+
+// 12. Customer print copy and rounding convention assertions
+{
+  const printSrc = readFileSync(
+    join(__dirname, "../../../app-internal-estimate/src/CustomerEstimatePrint.tsx"),
+    "utf8"
+  );
+  assert(
+    printSrc.includes("nearest $5"),
+    "CustomerEstimatePrint must say 'nearest $5' (not nearest $10)"
+  );
+  assert(
+    !printSrc.includes("nearest $10"),
+    "CustomerEstimatePrint must not have old 'nearest $10' copy"
+  );
+
+  const roundingSrc = readFileSync(
+    join(__dirname, "../../../app-quote/src/lib/customerDisplayRounding.ts"),
+    "utf8"
+  );
+  assert(
+    roundingSrc.includes("Math.round(n / 5) * 5"),
+    "customerDisplayRounding must use Math.round(n/5)*5 for nearest-$5"
+  );
+  assert(
+    !roundingSrc.includes("Math.ceil(n / 10) * 10"),
+    "customerDisplayRounding must not have old nearest-$10 ceil"
+  );
+
+  const displayModelSrc = readFileSync(
+    join(__dirname, "../../../app-internal-estimate/src/lib/customerEstimateDisplayModel.ts"),
+    "utf8"
+  );
+  assert(
+    displayModelSrc.includes("allocateCustomerDisplayFives"),
+    "customerEstimateDisplayModel must use allocateCustomerDisplayFives"
+  );
+  assert(
+    displayModelSrc.includes("fixedDisplayTotal"),
+    "customerEstimateDisplayModel must handle fixedDisplayTotal for vanity rooms"
+  );
+  assert(
+    displayModelSrc.includes("vanityDisplayContribution"),
+    "customerEstimateDisplayModel must use vanityDisplayContribution (nearest-$5 vanity display price)"
+  );
 }
 
 console.log("verifyCustomerEstimatePrintReconciliation: ok");

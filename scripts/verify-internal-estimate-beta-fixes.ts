@@ -833,4 +833,84 @@ function approx(a: number, b: number, eps = 0.02) {
   assert.match(dmSrc, /summaryEdgeDisplay/, "display model must expose summaryEdgeDisplay");
 }
 
+// VANITY-TAX-1: vanity program price is isolated from use tax and fold; displays at nearest $5
+{
+  // 37" single bowl, kitchen_over_35 tier, rectangular_white sink (+$25 upgrade):
+  // base=$240, sinkUpgrade=$25, exactTotal=$265, displayTotal=$265
+  // This matches the Hunter beta bug scenario: "Program estimate: $265.00 exact · $265 customer"
+  const vanityResult = priceVanityProgram2026({
+    sizeCode: "37_S",
+    tier: "kitchen_over_35",
+    qualifyingKitchenCounterSf: 40,
+    sinkType: "rectangular_white"
+  });
+  assert.ok(vanityResult != null, "VANITY-TAX-1: priceVanityProgram2026 returned result");
+  assert.equal(vanityResult!.exactTotal, 265, "VANITY-TAX-1: 37_S over35 + rectangular_white = $265 exactTotal");
+  assert.equal(vanityResult!.displayTotal, 265, "VANITY-TAX-1: displayTotal = $265 (already multiple of $5)");
+
+  // measureRoomDraft stores exactTotal as selected, and displayTotal in vanityProgram sub-object
+  const vanityDraft = createVanityRoom();
+  vanityDraft.name = "Master Bath Vanity";
+  vanityDraft.vanity.size = "37_S";
+  vanityDraft.vanity.isVanityProgram = true;
+  vanityDraft.vanity.vanitySinkType = "rectangular_white"; // matches the $265 = $240 + $25 upgrade scenario
+
+  const measured = measureRoomDraft(vanityDraft, 40, "direct", 7); // 7% project use tax
+  assert.equal(measured.isVanityProgram, true, "VANITY-TAX-1: vanity room is marked isVanityProgram");
+  assert.equal(measured.selected, 265, "VANITY-TAX-1: measured.selected = exactTotal = $265");
+  assert.equal(measured.vanityProgram?.exactTotal, 265, "VANITY-TAX-1: vanityProgram.exactTotal = $265");
+  assert.equal(measured.vanityProgram?.displayTotal, 265, "VANITY-TAX-1: vanityProgram.displayTotal = $265");
+
+  // Use tax must NOT be applied to vanity program rooms in buildSelectedMaterialBreakdown
+  const singleVanityBreakdown = buildSelectedMaterialBreakdown([vanityDraft], "direct", {
+    projectUseTaxPercent: 7
+  });
+  // Vanity is excluded from selectedBreakdown (its price goes through vanityMaterialExact path)
+  assert.equal(
+    singleVanityBreakdown.totals.countertopMaterial,
+    0,
+    "VANITY-TAX-1: vanity must not appear in selectedBreakdown.countertopMaterial"
+  );
+  assert.equal(
+    singleVanityBreakdown.totals.useTax?.taxAmount ?? 0,
+    0,
+    "VANITY-TAX-1: no use tax on vanity-only breakdown"
+  );
+
+  // buildCustomerRoomAreaCostBreakdown must set fixedDisplayTotal for vanity rooms
+  const roomBreakdown = buildCustomerRoomAreaCostBreakdown({
+    roomDrafts: [vanityDraft],
+    measuredRooms: [measured],
+    materialBasis: "direct",
+    projectUseTaxPercent: 7
+  });
+  const vanityRow = roomBreakdown.rooms[0];
+  assert.ok(vanityRow != null, "VANITY-TAX-1: room breakdown has vanity row");
+  assert.equal(vanityRow.isVanity, true, "VANITY-TAX-1: vanityRow.isVanity = true");
+  assert.equal(vanityRow.fixedDisplayTotal, 265, "VANITY-TAX-1: vanityRow.fixedDisplayTotal = $265 (program price)");
+  assert.equal(vanityRow.materialAmountExact, 265, "VANITY-TAX-1: vanityRow.materialAmountExact = $265");
+
+  // Customer-facing rounding: roundCustomerDisplayVanity($265) = $265
+  assert.equal(roundCustomerDisplayVanity(265), 265, "VANITY-TAX-1: roundCustomerDisplayVanity($265) = $265");
+}
+
+// VANITY-TAX-2: customerEstimateDisplayModel uses vanityProgram.displayTotal (not exactTotal) for vanity contribution
+{
+  const dmSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/lib/customerEstimateDisplayModel.ts"), "utf8");
+  assert.match(dmSrc, /vanityDisplayContribution/, "display model must use vanityDisplayContribution (not vanityMaterialExact)");
+  assert.match(dmSrc, /vanityProgram\?\.displayTotal/, "display model must read vanityProgram.displayTotal");
+  assert.match(dmSrc, /allocateCustomerDisplayFives/, "display model must use allocateCustomerDisplayFives");
+  assert.match(dmSrc, /fixedDisplayTotal/, "display model buildRoomAreaPrintRows must handle fixedDisplayTotal");
+
+  // roundCustomerDisplay must use nearest-$5 (not nearest-$10 ceiling)
+  const roundingSrc = readFileSync(join(repoRoot, "app-quote/src/lib/customerDisplayRounding.ts"), "utf8");
+  assert.match(roundingSrc, /Math\.round\(n \/ 5\) \* 5/, "roundCustomerDisplay must be nearest-$5 round");
+  assert.doesNotMatch(roundingSrc, /Math\.ceil\(n \/ 10\) \* 10/, "roundCustomerDisplay must not be nearest-$10 ceil");
+
+  // CustomerEstimatePrint must say nearest $5
+  const printSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/CustomerEstimatePrint.tsx"), "utf8");
+  assert.match(printSrc, /nearest \$5/, "CustomerEstimatePrint copy must say 'nearest $5'");
+  assert.doesNotMatch(printSrc, /nearest \$10/, "CustomerEstimatePrint must not have old nearest-$10 copy");
+}
+
 console.log("verify-internal-estimate-beta-fixes: OK");

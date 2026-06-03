@@ -6,16 +6,16 @@
  * helpers are co-located with large shared modules (e.g. prototypeQuoteMath.ts).
  *
  * Rule: each visible customer Estimate Summary row (countertop material, backsplash
- * material, add-ons, customer-facing custom lines) rounds up independently to the
- * nearest $10.  The customer-facing Estimated project total = sum of those rounded rows.
+ * material, add-ons, customer-facing custom lines) rounds to the nearest $5.
+ * The customer-facing Estimated project total = sum of those rounded rows.
  */
 
 /**
- * Round a project-level customer estimate row amount up to the nearest $10.
+ * Round a project-level customer estimate row amount to the nearest $5.
  * Returns 0 for zero, negative, or non-finite inputs.
  */
 export function roundCustomerDisplay(amount: number): number {
   const n = Number(amount);
   if (!Number.isFinite(n) || n <= 0) return 0;
-  return Math.ceil(n / 10) * 10;
+  return Math.round(n / 5) * 5;
 }

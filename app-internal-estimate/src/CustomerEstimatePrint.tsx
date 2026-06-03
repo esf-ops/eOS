@@ -185,8 +185,8 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
           </tbody>
         </table>
         <p className="cep-muted cep-round-note">
-          Each line rounds up to the nearest $10; <strong>Estimated project total</strong> is the sum of the rounded
-          lines. Estimate only — not a contract.
+          Customer-facing amounts round to the nearest $5; <strong>Estimated project total</strong> is the sum of the
+          rounded lines. Estimate only — not a contract.
         </p>
       </section>
 
@@ -195,7 +195,7 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
           <h2 className="cep-h2">Room / area cost breakdown</h2>
           <p className="cep-muted cep-room-breakdown-lead">
             Estimated cost by room or area so you can compare scope — for example, kitchen now and bath later. Amounts
-            round to the nearest $10 and reconcile with <strong>Estimated project total</strong> above. Use tax and
+            round to the nearest $5 and reconcile with <strong>Estimated project total</strong> above. Use tax and
             material selections are included in each area&apos;s material amount (not shown as separate tax lines).
           </p>
           <table className="cep-table cep-table-compact cep-table-amounts cep-room-breakdown-table">

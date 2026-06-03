@@ -1143,6 +1143,12 @@ export type CustomerRoomAreaCostRow = {
   addons: CustomerRoomAreaCostAddon[];
   customerCustomLines: CustomerRoomAreaCostCustomLine[];
   roomTotalExact: number;
+  /**
+   * Vanity program rooms only — the nearest-$5 customer display price (from vanityProgram.displayTotal).
+   * When set, the room allocation is pinned to this fixed value instead of proportional scaling.
+   * This prevents internal fold adjustments or ceiling rounding from inflating the vanity display price.
+   */
+  fixedDisplayTotal?: number;
 };
 
 export type CustomerRoomAreaCostBreakdown = {
@@ -1249,8 +1255,14 @@ export function buildCustomerRoomAreaCostBreakdown(params: {
     const totalSqft = round2(Number(m.totalSf) || countertopSf + backsplashFhbSf);
 
     let materialAmountExact = 0;
+    let fixedDisplayTotal: number | undefined;
     if (isVanity) {
-      materialAmountExact = round2(Number(m.selected) || 0);
+      // Use the vanity program's nearest-$5 display price as both the weight and the pinned display total.
+      // This prevents kitchen use tax, internal fold adjustments, or ceiling rounding from inflating
+      // the vanity program customer price beyond what the program sheet specifies.
+      const vanityDisplay = m.vanityProgram?.displayTotal ?? roundCustomerDisplayVanity(Number(m.selected) || 0);
+      materialAmountExact = vanityDisplay;
+      fixedDisplayTotal = vanityDisplay;
     } else if (draft) {
       const pct = resolveRoomUseTaxPercent(draft, projectUseTaxPercent);
       const sub = buildSelectedMaterialBreakdownCore([draft], basis, {
@@ -1295,7 +1307,8 @@ export function buildCustomerRoomAreaCostBreakdown(params: {
       materialAmountExact,
       addons,
       customerCustomLines: [],
-      roomTotalExact: 0
+      roomTotalExact: 0,
+      fixedDisplayTotal
     });
   }
 
