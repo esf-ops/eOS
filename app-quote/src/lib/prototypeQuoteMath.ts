@@ -21,6 +21,7 @@ import {
   defaultVanityKitchenTier,
   legacySinkTypeFromVanityFields,
   priceVanityProgram2026,
+  roundCustomerDisplayVanity,
   vanityProgramRateRow,
   VANITY_PROGRAM_YEAR,
   type VanityProgram2026Result
