@@ -191,6 +191,15 @@ export function makeTakeoffRun(overrides = {}) {
  * @property {boolean} [backsplashIncluded]
  * @property {number} [backsplashHeightIn]
  * @property {number} [backsplashLinearIn]
+ * @property {number} [backsplashManualSf]
+ *   Estimator-entered direct square-footage override for backsplash (v6.3).
+ *   When set, overrides the linear×height calculation.
+ *   When backsplashScope is "no_stone" or "tile_by_others", this value is ignored by the calc.
+ * @property {"no_stone"|"standard"|"full_height"|"tile_by_others"|"needs_review"} [backsplashScope]
+ *   Estimator-selected backsplash scope (v6.3).
+ *   "no_stone" and "tile_by_others" force computed backsplash to 0 regardless of other fields.
+ * @property {string} [backsplashReviewNote]
+ *   Free-text reviewer note for the backsplash decision (v6.3).
  * @property {"none"|"L-Shape"|"U-Shape"|"auto"} [overlapMode]
  * @property {Array<{depthA_in:number,depthB_in:number,sfDeducted?:number}>} [cornerDeductions]
  * @property {Array<{label:string,lengthIn?:number,depthIn?:number,sfExcluded?:number}>} [exclusions]
@@ -213,6 +222,9 @@ export function makeTakeoffArea(overrides = {}) {
     ...(overrides.backsplashIncluded != null && { backsplashIncluded: Boolean(overrides.backsplashIncluded) }),
     ...(overrides.backsplashHeightIn != null && { backsplashHeightIn: Number(overrides.backsplashHeightIn) }),
     ...(overrides.backsplashLinearIn != null && { backsplashLinearIn: Number(overrides.backsplashLinearIn) }),
+    ...(overrides.backsplashManualSf  != null && { backsplashManualSf:  Number(overrides.backsplashManualSf) }),
+    ...(overrides.backsplashScope     != null && { backsplashScope:     String(overrides.backsplashScope) }),
+    ...(overrides.backsplashReviewNote != null && { backsplashReviewNote: String(overrides.backsplashReviewNote) }),
     ...(overrides.overlapMode != null && { overlapMode: overrides.overlapMode }),
     ...(overrides.cornerDeductions != null && { cornerDeductions: overrides.cornerDeductions }),
     ...(overrides.exclusions != null && { exclusions: overrides.exclusions }),

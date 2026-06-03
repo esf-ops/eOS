@@ -128,7 +128,7 @@ function validateArea(area, areaPath, dimensionEvidence = null) {
   const ds = [];
   const runs = area.runs ?? [];
 
-  if (runs.length === 0 && !(area.backsplashLinearIn > 0)) {
+  if (runs.length === 0 && !(area.backsplashLinearIn > 0) && !(area.backsplashManualSf > 0)) {
     ds.push(diag(WARNING, C.EMPTY_AREA, `Area "${area.label}": no runs and no backsplash linear inches defined.`, areaPath));
   }
 
@@ -317,8 +317,15 @@ export function validateTakeoffResult(takeoffResult, computed, dimensionEvidence
 
     // Guard: AI reference backsplash total present but no structured backsplash was extracted.
     // This happens when the model detected backsplash but didn't populate backsplashLinearIn.
+    // v6.3: suppress when estimator has explicitly chosen no-stone or tile-by-others scope
+    //       (natural suppression also occurs when computed.backsplashExactSf > 0 after manual sf entry).
     const aiBsTotal = Number(ai.backsplashExactSf ?? 0);
-    if (aiBsTotal > 0 && computed.backsplashExactSf === 0) {
+    const estimatorChoseNoBS = (takeoffResult.rooms ?? []).some(
+      (r) => (r.areas ?? []).some((a) =>
+        a.backsplashScope === "no_stone" || a.backsplashScope === "tile_by_others"
+      )
+    );
+    if (aiBsTotal > 0 && computed.backsplashExactSf === 0 && !estimatorChoseNoBS) {
       diagnostics.push(diag(
         WARNING,
         C.AI_BACKSPLASH_TOTAL_NOT_STRUCTURED,

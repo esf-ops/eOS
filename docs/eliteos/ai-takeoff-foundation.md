@@ -1495,4 +1495,51 @@ See `FEATURE_DECISIONS.md` entry **62** (deterministic fabrication rules engine;
 
 ## Durable decisions
 
-See `FEATURE_DECISIONS.md` entries **48** (contract-first, AI-not-authority), **49** (quote files storage architecture), **50** (provider-neutral extraction layer, AI output never authoritative, raw PDFs not committed), **51** (benchmark truth fixtures, review gates), **52** (automatic QA gate must pass before any future import path), **53** (AI provider can be swapped server-side for benchmarked comparison; every model output still goes through eliteOS recompute, validator, benchmark evaluator, and QA gate), **54** (AI Takeoff deployed as protected head), **55** (shell alignment + session hydration), **56** (upload-first empty state + nonstandard depth QA + IE/QL alignment), and **60** (evidence-first integrity — runs must trace to evidence, reconciliation diagnostics, v6 prompt).
+See `FEATURE_DECISIONS.md` entries **48** (contract-first, AI-not-authority), **49** (quote files storage architecture), **50** (provider-neutral extraction layer, AI output never authoritative, raw PDFs not committed), **51** (benchmark truth fixtures, review gates), **52** (automatic QA gate must pass before any future import path), **53** (AI provider can be swapped server-side for benchmarked comparison; every model output still goes through eliteOS recompute, validator, benchmark evaluator, and QA gate), **54** (AI Takeoff deployed as protected head), **55** (shell alignment + session hydration), **56** (upload-first empty state + nonstandard depth QA + IE/QL alignment), **60** (evidence-first integrity — runs must trace to evidence, reconciliation diagnostics, v6 prompt), and **63** (v6.3 backsplash review controls — estimator-entered manual sf + scope selection are authoritative, AI reference totals are never authoritative for backsplash).
+
+---
+
+## v6.3: Backsplash review controls in Review Workbench (2026-06-03)
+
+**Goal:** Allow estimators to confirm, correct, or zero out backsplash measurements inside AI Takeoff before saving a reviewed takeoff. Hoskins proved the need: AI identified a 4 sf backsplash reference but computed 0 because no structured fields were populated.
+
+### New fields on `TakeoffArea`
+
+| Field | Type | Description |
+|---|---|---|
+| `backsplashManualSf` | `number?` | Estimator-entered direct sf override. Overrides linear×height calculation. |
+| `backsplashScope` | `"no_stone"\|"standard"\|"full_height"\|"tile_by_others"\|"needs_review"?` | Estimator-selected scope. `no_stone` and `tile_by_others` force computed BS = 0. |
+| `backsplashReviewNote` | `string?` | Free-text reviewer note for the backsplash decision. |
+
+### Computation priority (`computeAreaSf`)
+
+1. `backsplashScope === "no_stone" | "tile_by_others"` → BS = 0 (overrides all)
+2. `backsplashManualSf > 0` → BS = manualSf (overrides linear×height)
+3. `backsplashLinearIn > 0` → BS = linearIn × heightIn / 144 (existing behavior)
+4. Splash runs from `area.runs` (existing behavior)
+
+### Review Workbench UI
+
+`BacksplashAreaRow` renders after each area's runs:
+- Scope select (5 options)
+- Height / linear-inches / manual-sf inputs (hidden for no-stone/tile-by-others)
+- Live "= X.XX sf" computed display
+- "Use AI/ref total: X.XX sf" button — appears when AI provided a total and no manual sf is entered yet
+- Reviewer note field
+
+### Validator changes
+
+- `AI_BACKSPLASH_TOTAL_NOT_STRUCTURED` is naturally suppressed when `computed.backsplashExactSf > 0` (manual sf was entered). Also suppressed when any area's `backsplashScope = "no_stone" | "tile_by_others"` (estimator explicitly chose no stone backsplash).
+- `EMPTY_AREA` check updated to also pass when `backsplashManualSf > 0`.
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `backend-core/src/takeoff/takeoffContract.mjs` | Added `backsplashManualSf`, `backsplashScope`, `backsplashReviewNote` to `TakeoffArea` JSDoc + `makeTakeoffArea` |
+| `backend-core/src/takeoff/takeoffMeasurementCalc.mjs` | Updated `computeAreaSf` for scope + manual sf priority |
+| `backend-core/src/takeoff/takeoffValidator.mjs` | `AI_BACKSPLASH_TOTAL_NOT_STRUCTURED` suppressed for no-stone scope; `EMPTY_AREA` checks `backsplashManualSf` |
+| `backend-core/src/takeoff/takeoffMeasurementCalc.test.mjs` | New — 20 tests covering all backsplash scenarios |
+| `app-ai-takeoff/src/TakeoffLabApp.tsx` | Extended `AreaPatch` type |
+| `app-ai-takeoff/src/components/TakeoffReviewWorkbench.tsx` | Added `BacksplashAreaRow`; updated `onPatchArea` type |
+| `app-ai-takeoff/src/styles.css` | Added `rw-bs-*` CSS classes |

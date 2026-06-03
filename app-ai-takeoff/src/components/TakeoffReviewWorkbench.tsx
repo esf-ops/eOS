@@ -14,9 +14,10 @@
 
 import React, { useMemo, useRef } from "react";
 import { reconcileRunsWithEvidence } from "@takeoff-core/takeoffEvidenceRunReconciliation.mjs";
+import { computeAreaSf } from "@takeoff-core/takeoffMeasurementCalc.mjs";
 import type { TakeoffResult, TakeoffArea, TakeoffRun } from "@takeoff-core/takeoffContract.mjs";
 import type { DimensionEvidence } from "./TakeoffDimensionEvidencePanel";
-import type { RunPatch } from "../TakeoffLabApp";
+import type { AreaPatch, RunPatch } from "../TakeoffLabApp";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -55,7 +56,7 @@ export interface TakeoffReviewWorkbenchProps {
   reviewNotes:         Record<string, string>;
   evidenceReviewState: Record<string, "ignored" | "reviewed">;
   onPatchRun:          (roomIdx: number, areaIdx: number, runIdx: number, patch: RunPatch) => void;
-  onPatchArea:         (roomIdx: number, areaIdx: number, patch: { label?: string }) => void;
+  onPatchArea:         (roomIdx: number, areaIdx: number, patch: AreaPatch) => void;
   onToggleExcludeRun:  (runId: string) => void;
   onSetReviewNote:     (runId: string, note: string) => void;
   /** Called from checklist — marks an evidence dim as reviewed so the checklist item clears */
@@ -125,7 +126,7 @@ interface AreaGroupHeaderProps {
   areaLabel: string;
   roomIdx:   number;
   areaIdx:   number;
-  onPatchArea: (roomIdx: number, areaIdx: number, patch: { label?: string }) => void;
+  onPatchArea: (roomIdx: number, areaIdx: number, patch: AreaPatch) => void;
 }
 
 function AreaGroupHeader({ roomName, areaLabel, roomIdx, areaIdx, onPatchArea }: AreaGroupHeaderProps) {
@@ -148,6 +149,174 @@ function AreaGroupHeader({ roomName, areaLabel, roomIdx, areaIdx, onPatchArea }:
           if (e.key === "Enter") { (e.target as HTMLInputElement).blur(); }
         }}
       />
+    </div>
+  );
+}
+
+// ── Backsplash area row ────────────────────────────────────────────────────────
+
+const BS_SCOPE_OPTIONS = [
+  { value: "needs_review",   label: "Needs review (select scope)" },
+  { value: "standard",       label: "Standard backsplash" },
+  { value: "full_height",    label: "Full-height backsplash" },
+  { value: "no_stone",       label: "No stone backsplash" },
+  { value: "tile_by_others", label: "Tile by others / exclude from stone" },
+] as const;
+
+interface BacksplashAreaRowProps {
+  area:              TakeoffArea;
+  roomIdx:           number;
+  areaIdx:           number;
+  aiProvidedBsTotal: number;
+  onPatchArea:       (roomIdx: number, areaIdx: number, patch: AreaPatch) => void;
+}
+
+function BacksplashAreaRow({ area, roomIdx, areaIdx, aiProvidedBsTotal, onPatchArea }: BacksplashAreaRowProps) {
+  const scope = (area.backsplashScope ?? "needs_review") as string;
+  const showInputs = scope !== "no_stone" && scope !== "tile_by_others";
+
+  // Compute live BS sf for display
+  const { backsplashSf } = computeAreaSf(area);
+
+  // Show the "Use AI total" hint when: AI provided a total, no manual sf is set yet,
+  // no linear inches are set, and scope doesn't explicitly exclude BS.
+  const showAiHint =
+    aiProvidedBsTotal > 0 &&
+    showInputs &&
+    !(area.backsplashManualSf ?? 0) &&
+    !(area.backsplashLinearIn ?? 0);
+
+  const handleScopeChange = (newScope: string) => {
+    const patch: AreaPatch = { backsplashScope: newScope };
+    if (newScope === "no_stone" || newScope === "tile_by_others") {
+      patch.backsplashManualSf = 0;
+      patch.backsplashLinearIn = 0;
+    }
+    onPatchArea(roomIdx, areaIdx, patch);
+  };
+
+  const handleUseAiTotal = () => {
+    onPatchArea(roomIdx, areaIdx, {
+      backsplashManualSf: aiProvidedBsTotal,
+      backsplashScope: scope === "needs_review" ? "standard" : scope,
+      backsplashReviewNote:
+        `Used visible/reference backsplash total (${aiProvidedBsTotal.toFixed(2)} sf) after estimator review.`,
+    });
+  };
+
+  const scopeNote =
+    scope === "no_stone"      ? " (no stone BS)" :
+    scope === "tile_by_others" ? " (tile, not stone)" : "";
+
+  return (
+    <div className="rw-bs-row">
+      <span className="rw-bs-label">Backsplash</span>
+
+      <select
+        className="rw-bs-scope-select"
+        value={scope}
+        onChange={(e) => handleScopeChange(e.target.value)}
+        aria-label="Backsplash scope"
+      >
+        {BS_SCOPE_OPTIONS.map((o) => (
+          <option key={o.value} value={o.value}>{o.label}</option>
+        ))}
+      </select>
+
+      {showInputs && (
+        <>
+          <label className="rw-bs-field">
+            <span className="rw-bs-field-label">Height</span>
+            <input
+              key={`bsh-${area.id}-${area.backsplashHeightIn ?? ""}`}
+              className="rw-dim-input rw-bs-input"
+              type="number"
+              step="0.5"
+              min="0"
+              placeholder="4"
+              defaultValue={area.backsplashHeightIn ?? ""}
+              onBlur={(e) => {
+                const v = parseFloat(e.target.value);
+                if (!isNaN(v) && v > 0) onPatchArea(roomIdx, areaIdx, { backsplashHeightIn: v });
+              }}
+              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+              aria-label="Backsplash height inches"
+            />
+            <span className="rw-dim-unit">"</span>
+          </label>
+
+          <label className="rw-bs-field">
+            <span className="rw-bs-field-label">Linear in</span>
+            <input
+              key={`bsl-${area.id}-${area.backsplashLinearIn ?? ""}`}
+              className="rw-dim-input rw-bs-input"
+              type="number"
+              step="1"
+              min="0"
+              defaultValue={area.backsplashLinearIn ?? ""}
+              onBlur={(e) => {
+                const v = parseFloat(e.target.value);
+                if (!isNaN(v) && v >= 0) onPatchArea(roomIdx, areaIdx, { backsplashLinearIn: v });
+              }}
+              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+              aria-label="Backsplash linear inches"
+            />
+            <span className="rw-dim-unit">"</span>
+          </label>
+
+          <label className="rw-bs-field">
+            <span className="rw-bs-field-label">Manual sf</span>
+            <input
+              key={`bsm-${area.id}-${area.backsplashManualSf ?? ""}`}
+              className="rw-dim-input rw-bs-input"
+              type="number"
+              step="0.01"
+              min="0"
+              defaultValue={area.backsplashManualSf ?? ""}
+              onBlur={(e) => {
+                const v = parseFloat(e.target.value);
+                if (!isNaN(v) && v >= 0) onPatchArea(roomIdx, areaIdx, { backsplashManualSf: v });
+              }}
+              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+              aria-label="Manual backsplash square footage override"
+            />
+            <span className="rw-dim-unit">sf</span>
+          </label>
+        </>
+      )}
+
+      <span className="rw-bs-computed">
+        = {backsplashSf.toFixed(2)} sf{scopeNote}
+      </span>
+
+      {showAiHint && (
+        <button
+          type="button"
+          className="rw-bs-ai-btn"
+          onClick={handleUseAiTotal}
+          title={`AI/reference detected ${aiProvidedBsTotal.toFixed(2)} sf backsplash (not structured). Click to use as manual entry.`}
+        >
+          Use AI/ref total: {aiProvidedBsTotal.toFixed(2)} sf
+        </button>
+      )}
+
+      <label className="rw-bs-note-field">
+        <input
+          key={`bsnote-${area.id}-${area.backsplashReviewNote ?? ""}`}
+          className="rw-note-input rw-bs-note-input"
+          type="text"
+          defaultValue={area.backsplashReviewNote ?? ""}
+          placeholder="Backsplash note…"
+          onBlur={(e) => {
+            const v = e.target.value;
+            if (v !== (area.backsplashReviewNote ?? "")) {
+              onPatchArea(roomIdx, areaIdx, { backsplashReviewNote: v });
+            }
+          }}
+          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+          aria-label="Backsplash reviewer note"
+        />
+      </label>
     </div>
   );
 }
@@ -611,28 +780,41 @@ export default function TakeoffReviewWorkbench({
         </div>
 
         {/* Rows grouped by area */}
-        {groups.map((group) => (
-          <React.Fragment key={group.key}>
-            <AreaGroupHeader
-              roomName={group.roomName}
-              areaLabel={group.areaLabel}
-              roomIdx={group.roomIdx}
-              areaIdx={group.areaIdx}
-              onPatchArea={onPatchArea}
-            />
-            {group.rows.map((row) => (
-              <RunRow
-                key={row.run.id}
-                row={row}
-                excluded={excludedRunIds.has(row.run.id)}
-                note={reviewNotes[row.run.id] ?? ""}
-                onPatchRun={onPatchRun}
-                onToggleExclude={onToggleExcludeRun}
-                onSetNote={onSetReviewNote}
+        {groups.map((group) => {
+          const area = editDraft.rooms[group.roomIdx]?.areas[group.areaIdx];
+          const aiProvidedBsTotal = Number(editDraft.aiProvidedTotals?.backsplashExactSf ?? 0);
+          return (
+            <React.Fragment key={group.key}>
+              <AreaGroupHeader
+                roomName={group.roomName}
+                areaLabel={group.areaLabel}
+                roomIdx={group.roomIdx}
+                areaIdx={group.areaIdx}
+                onPatchArea={onPatchArea}
               />
-            ))}
-          </React.Fragment>
-        ))}
+              {group.rows.map((row) => (
+                <RunRow
+                  key={row.run.id}
+                  row={row}
+                  excluded={excludedRunIds.has(row.run.id)}
+                  note={reviewNotes[row.run.id] ?? ""}
+                  onPatchRun={onPatchRun}
+                  onToggleExclude={onToggleExcludeRun}
+                  onSetNote={onSetReviewNote}
+                />
+              ))}
+              {area && (
+                <BacksplashAreaRow
+                  area={area}
+                  roomIdx={group.roomIdx}
+                  areaIdx={group.areaIdx}
+                  aiProvidedBsTotal={aiProvidedBsTotal}
+                  onPatchArea={onPatchArea}
+                />
+              )}
+            </React.Fragment>
+          );
+        })}
       </div>
 
       {/* ── Checklist ──────────────────────────────────────────────────────── */}

@@ -91,9 +91,17 @@ export function computeAreaSf(area) {
   }
   countertopSf = round2(Math.max(0, countertopSf - overlapDeductionSf));
 
-  // If the area declares its own backsplash via linear inches (not individual splash runs),
-  // add that to backsplashSf. This handles the common "238 linear inches @ 4in" pattern.
-  if ((area.backsplashLinearIn ?? 0) > 0 && backsplashSf === 0) {
+  // Backsplash scope + manual sf support (v6.3).
+  // Priority order:
+  //   1. "no_stone" / "tile_by_others" scope — estimator confirmed no stone BS, zero regardless.
+  //   2. backsplashManualSf > 0 — direct sf entry, overrides linear×height.
+  //   3. backsplashLinearIn > 0 — area-level linear inches × height (legacy + normal flow).
+  //   4. Splash runs already accumulated from area.runs above (backsplashSf already set).
+  if (area.backsplashScope === "no_stone" || area.backsplashScope === "tile_by_others") {
+    backsplashSf = 0;
+  } else if ((area.backsplashManualSf ?? 0) > 0) {
+    backsplashSf = round2(Number(area.backsplashManualSf));
+  } else if ((area.backsplashLinearIn ?? 0) > 0 && backsplashSf === 0) {
     const heightIn = area.backsplashHeightIn ?? 4;
     backsplashSf = round2(sfFromRun(area.backsplashLinearIn, heightIn));
   }

@@ -2,7 +2,7 @@
 
 **Purpose:** Cheap context for new Cursor chats. Do not treat old chat transcripts as source of truth — use this file + `docs/eliteos/*` + `.cursor/rules/*`.
 
-**Last updated:** 2026-06-03 (AI Takeoff v6.2.2 — Accept as correct for conflict/changed/unsupported rows)
+**Last updated:** 2026-06-03 (AI Takeoff v6.3 — Backsplash review controls in Review Workbench)
 
 ---
 
@@ -322,6 +322,30 @@ Dev: `npm run dev --prefix app-ai-takeoff` -> `http://localhost:5186`. Not in Ho
 | All existing tests | **All passing** (28 extraction, 25 QA gate, 18 reconciliation, 13 dim-evidence, 25 Gemini, 6 config) |
 | Build | **Clean** (vite build, eos:check:local) |
 | Import disabled | **Still disabled** — no change |
+
+### v6.3 status: backsplash review controls in Review Workbench (2026-06-03 ✅)
+
+| Item | Status |
+|------|--------|
+| `backsplashManualSf` / `backsplashScope` / `backsplashReviewNote` on TakeoffArea | ✅ Added to contract + makeTakeoffArea |
+| `computeAreaSf` priority: no_stone/tile_by_others → manual sf → linear×height | ✅ Updated |
+| `AI_BACKSPLASH_TOTAL_NOT_STRUCTURED` suppressed for no-stone scope | ✅ Updated validator |
+| `BacksplashAreaRow` in Review Workbench (scope, height, linear, manual sf, "Use AI total" btn, note) | ✅ Implemented |
+| Live Measurement Summary updates with backsplash changes | ✅ Via React state / `effectiveDraft` |
+| Save reviewed takeoff preserves backsplash fields | ✅ Via `AreaPatch` → `setEditDraft` → `effectiveDraft` |
+| Tests: 20 new tests in `takeoffMeasurementCalc.test.mjs` | ✅ All pass |
+| All other test suites | ✅ 33/33 fab rules · 25/25 QA gate · 28/28 extraction service |
+| Build | ✅ Clean |
+
+**Manual QA checklist (Hoskins):**
+1. Load Hoskins workspace
+2. Confirm CT remains ~78.04 sf
+3. Confirm AI/ref BS "Use 4.00 sf" button appears in workbench
+4. Click it → BS summary updates to 4.00 sf
+5. Change scope to "No stone backsplash" → BS becomes 0.00
+6. Enter linear 48" + height 3" → BS = 1.00 sf
+7. Save reviewed takeoff → reload → confirm backsplash choice persists
+8. Confirm Import remains disabled
 
 ### v6.2.2 status: conflict/changed/unsupported resolution in Review Workbench (2026-06-03 ✅)
 

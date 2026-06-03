@@ -765,6 +765,23 @@
 
 ---
 
+### 63. AI Takeoff v6.3 — Backsplash review controls in Review Workbench (2026-06-03)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-06-03 |
+| **Decision** | Added estimator-facing backsplash review controls to the Review Workbench. Estimators can now select a backsplash scope, enter linear inches + height, enter a manual square footage override, and leave a reviewer note per area — before saving a reviewed takeoff. |
+| **Motivation** | Hoskins plan: AI identified 4.00 sf backsplash in reference notes but computed 0 because no structured fields were populated. The workbench had no way to add backsplash without editing raw JSON. |
+| **New TakeoffArea fields** | `backsplashManualSf?: number`, `backsplashScope?: "no_stone"\|"standard"\|"full_height"\|"tile_by_others"\|"needs_review"`, `backsplashReviewNote?: string` |
+| **Computation priority** | (1) `no_stone`/`tile_by_others` scope → BS = 0 regardless; (2) `backsplashManualSf > 0` → BS = manualSf; (3) `backsplashLinearIn > 0` → linear×height; (4) splash runs. Manual sf is treated as estimator-reviewed input, not AI authority. |
+| **"Use AI/ref total" button** | Appears when AI provided a backsplash total and no manual sf is set. Clicking it sets `backsplashManualSf` to the AI reference total and sets scope to "standard" with a reviewer note. QA warning clears naturally when `computed.backsplashExactSf > 0`. |
+| **Validator changes** | `AI_BACKSPLASH_TOTAL_NOT_STRUCTURED` suppressed when `estimatorChoseNoBS` (no_stone/tile_by_others scope). `EMPTY_AREA` check updated to also pass when `backsplashManualSf > 0`. |
+| **Tests** | 20 new tests in `takeoffMeasurementCalc.test.mjs` covering all backsplash scenarios. New `eos:test:takeoff-measurement-calc` script. |
+| **Hard boundaries** | No import enabled. No pricing. No quote mutation. No provider routing changes. No raw PDFs. No secrets exposed. |
+| **Impacted files** | `takeoffContract.mjs`, `takeoffMeasurementCalc.mjs`, `takeoffMeasurementCalc.test.mjs` (new), `takeoffValidator.mjs`, `TakeoffLabApp.tsx`, `TakeoffReviewWorkbench.tsx`, `styles.css`, `package.json` |
+
+---
+
 ### 56. AI Takeoff Lab — upload-first empty state + nonstandard depth QA (v5.9.2)
 
 | Field | Value |

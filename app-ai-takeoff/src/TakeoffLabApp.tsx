@@ -131,7 +131,14 @@ export interface ActiveComputedState {
 }
 
 export type RoomPatch  = { name?: string };
-export type AreaPatch  = { label?: string; backsplashLinearIn?: number; backsplashHeightIn?: number };
+export type AreaPatch  = {
+  label?: string;
+  backsplashLinearIn?: number;
+  backsplashHeightIn?: number;
+  backsplashManualSf?: number;
+  backsplashScope?: string;
+  backsplashReviewNote?: string;
+};
 export type RunPatch   = { label?: string; lengthIn?: number; depthIn?: number; assemblyNotes?: string };
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";

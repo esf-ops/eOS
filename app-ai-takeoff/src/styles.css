@@ -2945,6 +2945,74 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
 .rw-empty { font-size: 0.82rem; color: var(--eos-ink-muted); font-style: italic; }
 .rw-no-evidence-note { font-size: 0.76rem; color: var(--eos-ink-faint); font-style: italic; margin: 4px 0 0; }
 
+/* ── Backsplash area row (v6.3) ────────────────────────────────────────────── */
+.rw-bs-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px 5px 20px;
+  background: var(--eos-bg);
+  border-bottom: 1px solid var(--eos-line);
+  font-size: 0.76rem;
+  color: var(--eos-ink-mid);
+}
+.rw-bs-label {
+  font-weight: 600;
+  color: var(--eos-ink);
+  font-size: 0.72rem;
+  min-width: 70px;
+}
+.rw-bs-scope-select {
+  font-size: 0.74rem;
+  padding: 2px 4px;
+  border: 1px solid var(--eos-line);
+  border-radius: 4px;
+  background: var(--eos-bg-soft);
+  color: var(--eos-ink);
+  cursor: pointer;
+  max-width: 200px;
+}
+.rw-bs-scope-select:focus { outline: 1px solid var(--lab-accent); }
+.rw-bs-field {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.72rem;
+  color: var(--eos-ink-muted);
+}
+.rw-bs-field-label {
+  font-size: 0.68rem;
+  color: var(--eos-ink-faint);
+  white-space: nowrap;
+}
+.rw-bs-input { width: 54px !important; }
+.rw-bs-computed {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--eos-ink);
+  margin-left: 4px;
+  white-space: nowrap;
+}
+.rw-bs-scope-note {
+  font-weight: 400;
+  color: var(--eos-ink-muted);
+  font-size: 0.7rem;
+}
+.rw-bs-ai-btn {
+  font-size: 0.7rem;
+  padding: 2px 7px;
+  background: var(--eos-warn-soft);
+  color: var(--eos-warn);
+  border: 1px solid var(--eos-warn-border);
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.rw-bs-ai-btn:hover { background: var(--eos-warn-border); color: var(--eos-ink); }
+.rw-bs-note-field { flex: 1; min-width: 120px; }
+.rw-bs-note-input { width: 100%; font-size: 0.72rem; }
+
 /* ── Evidence trace action buttons (v6.1) ── */
 .et-action-btn {
   font-size: 0.68rem;
