@@ -862,3 +862,19 @@
 
 ---
 
+### 68. SlabCloud inventory cache — SQL applied; write-gated persistence layer built (no production write yet)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-06-04 |
+| **Decision** | The cache SQL has been **applied and verified in Supabase** (5 tables, RLS enabled on all). A backend persistence layer now writes normalized SlabCloud inventory into those tables, **gated behind `SLABCLOUD_CACHE_WRITE_ENABLED=1`**. With the gate off (default), the flow fetches + normalizes read-only and reports `would_write` counts while making **zero** Supabase insert/upsert/update calls. With the gate on it requires `SLABCLOUD_ORGANIZATION_ID` + service-role config and fails loudly if missing. SlabCloud (Andrey) confirmed ESF may proceed with read-only use of the JSON feed for internal slabOS integration. **No production write has been performed yet** — the first real write must be a manual, reviewed run. No scheduled automation, no UI, no holds, no inactive marking, no writeback. |
+| **Why** | Separating the write gate from the data pipeline lets us validate the full fetch→normalize→persist path (including would-write counts and payload shapes) with no tenant-data risk, then flip a single env var for a controlled first write. The gate matches the repo's existing `SUPABASE_WRITE_ENABLED` convention. |
+| **Write order** | INSERT `slabcloud_sync_runs` (running) → INSERT `slab_inventory_raw_records` (all records incl. missing slab id) → UPSERT `slab_inventory` (records with `external_slab_id` only) → UPSERT `slab_materials` → UPSERT `slab_images` (`image_status=unknown`) → UPDATE sync run (completed). On error the run is marked `failed`. Never deletes; `slab_deactivated_count` always 0 in Phase 1. |
+| **Dry-run cache result** | Full run 2026-06-04: would write 1 sync run · 384 raw records · 384 inventory · 44 materials · 384 images · 0 warnings. No Supabase writes performed. |
+| **Identity / count** | Inventory upsert conflict key: `organization_id,external_source,external_company_code,external_slab_id`. `count_for_color` is stored as-is and never summed (it is group-level). Records with a missing `external_slab_id` are preserved in raw records but skipped from `slab_inventory`/`slab_images`. |
+| **Tests** | `slabCloudPersistence.test.mjs` (mock Supabase, no network): gate behavior, sync-run creation, raw insert, inventory/material/image upsert keys, missing-id skip, count-not-summed, org id on every payload, no deletes, failure→failed status, write requires db+org, no inactive marking. All passing alongside the Phase 0 suite. |
+| **Impacted files/docs** | `backend-core/src/slabcloud/slabCloudPersistence.js` (created), `backend-core/src/slabcloud/slabCloudSync.js` (created), `backend-core/src/scripts/slabcloud/cacheSlabCloudInventory.js` (created), `backend-core/src/slabcloud/slabCloudPersistence.test.mjs` (created), `package.json` (`eos:slabcloud:cache`, `eos:test:slabcloud-cache`), `docs/eliteos/slabcloud-inventory-poc.md`, `docs/eliteos/slabos-slab-inventory-profit-engine-roadmap.md`, `docs/eliteos/FEATURE_DECISIONS.md` (this entry). |
+| **Revisit trigger** | First manual gated write is reviewed and approved; SlabCloud written confirmation received; scheduling is proposed; internal Slab Inventory head (Phase 2) begins; inactive-marking / first_seen preservation is implemented. |
+
+---
+

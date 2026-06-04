@@ -1,7 +1,7 @@
 # SlabCloud Inventory Integration — Read-Only Dry-Run POC
 
-**Status:** Proof of concept complete. Full uncapped dry-run succeeded. SQL schema draft created. Not yet applied to Supabase.
-**Date:** 2026-06-04 (POC) · 2026-06-04 (full dry-run + SQL draft)
+**Status:** POC complete · full dry-run succeeded · SQL **applied & verified in Supabase** · write-gated persistence layer built (dry-run by default; no production write yet).
+**Date:** 2026-06-04 (POC) · 2026-06-04 (full dry-run + SQL draft) · 2026-06-04 (SQL applied + persistence layer)
 **Owner module:** `backend-core/src/slabcloud/`
 
 This document describes the first foundation for a future slabOS **Slab Inventory / showroom / SlabRoom** experience: a safe way to pull Elite Stone Fabrication's slab inventory out of SlabCloud's JSON endpoints and normalize it into a consistent internal shape.
@@ -54,6 +54,10 @@ It **never** writes to a database, **never** mutates external systems, and **nev
 | `backend-core/src/slabcloud/normalizeSlabCloudInventory.js` | Pure normalization: `metersToInches`, `normalizeSlabRecord(s)`, `buildImageUrlGuesses`, `extractDistinctColorNames`, `summarizeInventory`. No I/O. |
 | `backend-core/src/slabcloud/slabCloudInventoryPoc.test.mjs` | Unit tests (pure, no network). |
 | `backend-core/src/scripts/slabcloud/importSlabCloudInventoryPoc.js` | Dry-run script that orchestrates fetch → normalize → write local JSON. |
+| `backend-core/src/slabcloud/slabCloudPersistence.js` | **Write-gated** Supabase persistence (pure builders + orchestrator). No writes unless `SLABCLOUD_CACHE_WRITE_ENABLED=1`. |
+| `backend-core/src/slabcloud/slabCloudSync.js` | Orchestration: fetch → normalize → persist. Returns one summary object. |
+| `backend-core/src/scripts/slabcloud/cacheSlabCloudInventory.js` | Cache script. Dry-run by default; writes to Supabase only with the gate enabled. |
+| `backend-core/src/slabcloud/slabCloudPersistence.test.mjs` | Persistence unit tests (mock Supabase, no network). |
 
 ### NPM scripts
 
@@ -61,8 +65,12 @@ It **never** writes to a database, **never** mutates external systems, and **nev
 # Run the dry-run POC (writes debug/slabcloud/*.json)
 npm run eos:slabcloud:inventory-poc
 
+# Run the cache flow in dry-run mode (no Supabase writes)
+npm run eos:slabcloud:cache
+
 # Run the unit tests
 npm run eos:test:slabcloud-inventory
+npm run eos:test:slabcloud-cache
 ```
 
 ---
@@ -215,16 +223,38 @@ Explicitly out of scope for this POC:
 
 ---
 
+## 10a. Supabase persistence (Phase 1 — write-gated)
+
+The cache SQL (`backend-core/supabase/eliteos_slabcloud_inventory_cache.sql`) has been **applied and verified in Supabase**. RLS is enabled on all five tables. The persistence layer that writes into them is built and **gated behind `SLABCLOUD_CACHE_WRITE_ENABLED=1`**.
+
+**Write-gate behavior:**
+- Default (gate off): the cache flow fetches + normalizes (read-only) and reports `would_write` counts. **No Supabase insert/upsert/update calls are made.**
+- Gate on (`SLABCLOUD_CACHE_WRITE_ENABLED=1`): persists to the cache. Requires `SLABCLOUD_ORGANIZATION_ID`, `SUPABASE_URL`, and `SUPABASE_SERVICE_ROLE_KEY`; fails loudly if any are missing.
+
+**Write order:** create `slabcloud_sync_runs` (running) → insert `slab_inventory_raw_records` (all records, incl. missing slab id) → upsert `slab_inventory` (records with `external_slab_id` only) → upsert `slab_materials` → upsert `slab_images` (`image_status=unknown`) → update sync run (completed). On error the run is marked `failed`.
+
+**Phase 1 guarantees:** no deletes, no inactive marking (`slab_deactivated_count` always 0), no writeback to SlabCloud/Slabsmith, every payload carries `organization_id`, `count_for_color` stored as-is (never summed).
+
+**Cache env vars (in addition to the read-only vars in §4):**
+
+| Var | Default | Meaning |
+|-----|---------|---------|
+| `SLABCLOUD_CACHE_WRITE_ENABLED` | _(off)_ | Must equal `1` to write to Supabase. |
+| `SLABCLOUD_ORGANIZATION_ID` | _(none)_ | Required only when writing. |
+| `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | _(none)_ | Service-role config, required only when writing. |
+
+**Rollout sequence:** dry-run smoke first → manual single write with the gate enabled (reviewed) → then consider scheduling. **No scheduled automation exists yet. No UI exists yet.**
+
+---
+
 ## 11. Future path
 
-Full dry-run output reviewed. SlabCloud verbal approval received. Next steps:
+Dry-run reviewed · SlabCloud verbal approval received · SQL applied · persistence built (write-gated). Next steps:
 
-1. Review SQL schema draft: `backend-core/supabase/eliteos_slabcloud_inventory_cache.sql` (draft only, not yet applied).
-2. Build `slabCloudPersistence.js` + tests (write-gated behind `SLABCLOUD_CACHE_WRITE_ENABLED`).
-3. Apply SQL to staging Supabase and run a smoke sync.
-4. Obtain SlabCloud **written confirmation** of API use.
-5. Promote to production cache.
-6. Plan internal **Slab Inventory head** (`app-slab-inventory`) — Phase 2.
+1. Run the dry-run cache smoke: `npm run eos:slabcloud:cache` (no writes).
+2. First **real write** — manual, reviewed, with `SLABCLOUD_CACHE_WRITE_ENABLED=1` against the target org (see roadmap for the exact command).
+3. Obtain SlabCloud **written confirmation** of API use before any scheduled production sync.
+4. Plan internal **Slab Inventory head** (`app-slab-inventory`) — Phase 2.
 
 A real head must use **backend-owned cached data**, **never** direct browser calls to SlabCloud.
 

@@ -144,13 +144,23 @@ These are non-negotiable guardrails for every phase:
 
 ---
 
-### Phase 1 — slabOS Inventory Cache
+### Phase 1 — slabOS Inventory Cache 🔄 **(In progress 2026-06-04)**
 
 **Goal:** Create a Supabase-backed normalized slab inventory cache so internal heads have a stable, backend-owned data source.
 
-**Trigger:** Dry-run output reviewed ✅. SlabCloud verbal approval received ✅. Written confirmation preferred before production promotion.
+**Trigger:** Dry-run output reviewed ✅. SlabCloud verbal approval received ✅. Written confirmation preferred before scheduled production sync.
 
-**SQL schema draft:** `backend-core/supabase/eliteos_slabcloud_inventory_cache.sql` — drafted 2026-06-04, not yet applied.
+**SQL schema:** `backend-core/supabase/eliteos_slabcloud_inventory_cache.sql` — **applied & verified in Supabase** (5 tables, RLS enabled).
+
+**Persistence layer (built, write-gated):**
+- `backend-core/src/slabcloud/slabCloudPersistence.js` — pure builders + orchestrator; writes only when `SLABCLOUD_CACHE_WRITE_ENABLED=1`
+- `backend-core/src/slabcloud/slabCloudSync.js` — fetch → normalize → persist
+- `backend-core/src/scripts/slabcloud/cacheSlabCloudInventory.js` — dry-run by default
+- `backend-core/src/slabcloud/slabCloudPersistence.test.mjs` — mock-Supabase unit tests (all passing)
+
+**Dry-run cache result (full, 2026-06-04):** would write 1 sync run · 384 raw records · 384 inventory · 44 materials · 384 images · 0 warnings. No Supabase writes performed.
+
+**Remaining for Phase 1:** dry-run smoke ✅ → first manual gated write (reviewed) → SlabCloud written confirmation → optional scheduling. No UI, no holds, no inactive marking, no writeback.
 
 **Potential tables (planning sketches — no SQL yet):**
 
