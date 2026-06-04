@@ -2,7 +2,27 @@
 
 **Purpose:** Cheap context for new Cursor chats. Do not treat old chat transcripts as source of truth — use this file + `docs/eliteos/*` + `.cursor/rules/*`.
 
-**Last updated:** 2026-06-03 (Internal Estimate stabilization — stale docs/alias cleanup)
+**Last updated:** 2026-06-04 (Shared EliteosTopbar standardization — Home, Quote Library, Sales Dashboard migrated; architecture rule codified)
+
+---
+
+## Completed this session: Shared eliteOS topbar standardization (2026-06-04)
+
+The shared `EliteosTopbar` component is now the canonical header shell for all protected eliteOS heads. Three heads migrated:
+
+| Head | Status |
+|------|--------|
+| `app-home` (Home Launcher) | ✅ Migrated — search passed as `searchSlot` |
+| `app-quote-library` (Quote Library) | ✅ Migrated — role/title subtitle from `/api/me`; casing override |
+| `app-sales` (Sales Dashboard) | ✅ Migrated — role/title from existing `/api/me` data; no search |
+
+**Architecture rule is now codified** in:
+- `.cursor/rules/eliteos-architecture.mdc` — "Shared topbar" and "New protected head scaffold" bullets.
+- `docs/eliteos/SYSTEM_BLUEPRINT.md §15` — shared topbar contract, prop table, import pattern, CSS override pattern.
+- `docs/eliteos/SYSTEM_BLUEPRINT.md §16` — new-head checklist (10 items).
+- `docs/eliteos/FEATURE_DECISIONS.md §64` — dated decision log entry.
+
+**Do not build one-off local topbar markup for the next protected head.** Start with `EliteosTopbar` from the scaffold.
 
 ---
 

@@ -800,3 +800,20 @@
 
 ---
 
+### 64. Shared eliteOS topbar standardization (Home, Quote Library, Sales Dashboard migrated; durable rule for all future protected heads)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-06-04 |
+| **Decision** | All **protected internal eliteOS heads** must use the shared, presentational **`EliteosTopbar`** component (`shared/eliteos-ui/EliteosTopbar.tsx` + `shared/eliteos-ui/eliteosTopbar.css`) for their header shell. One-off local topbar markup is **not permitted** for new protected heads. The first migration wave covered **Home Launcher** (`app-home`), **Quote Library** (`app-quote-library`), and **Sales Dashboard** (`app-sales`). The shared component is purely presentational: it owns only the dropdown open/close state and accepts all user identity, org data, menu items, and sign-out callbacks through props. |
+| **Why** | Three independent local topbar implementations had diverged in visual appearance, UX behavior (chip subtitle format, casing, menu structure), and accessibility patterns. A shared shell eliminates that drift, ensures visual and UX consistency across the OS, and codifies the correct presentational boundary (no auth, no Supabase, no env vars, no business logic in the topbar component). Each future head should include it in the initial scaffold rather than as a retrofit. |
+| **Shared component contract** | **Must not** import Supabase, call backend APIs, read env vars, own auth/session state, or contain domain logic. Each head passes `userName`, `userEmail`, `initials`, `userSubtitle` (role/title from `/api/me`; fallback email), `organizationName`, `logoSrc`, `homeHref`, `menuItems`, and `onSignOut`. The `searchSlot` prop is reserved for **Home Launcher only** unless explicitly approved per head. |
+| **Subtitle fallback order** | `job_title → department → role → email`. Role/title is upper-cased in JavaScript before passing as `userSubtitle`; email fallback uses natural casing with a per-head `text-transform: none` override in the head's own CSS if needed. |
+| **Public/customer heads** | `app-quote` (Public Quote Head) and `app-partner-quote` are intentionally excluded — they are not staff heads and may use different chrome. |
+| **CSS namespace** | Shared topbar classes use the `.eliteos-topbar-*` prefix to prevent conflicts with head-local `eos-*` styles. Heads requiring casing overrides add a scoped rule (`.eliteos-topbar .eliteos-topbar-chip-role { text-transform: none; }`) to their own stylesheet only. |
+| **New-head checklist** | See `docs/eliteos/SYSTEM_BLUEPRINT.md §16`. All new protected heads must pass the checklist before production. |
+| **Impacted files/docs** | `shared/eliteos-ui/EliteosTopbar.tsx` (created), `shared/eliteos-ui/eliteosTopbar.css` (created), `app-home/src/ui/App.tsx`, `app-home/src/ui/styles.css`, `app-home/tsconfig.json`, `app-quote-library/src/QuoteLibraryApp.tsx`, `app-quote-library/src/styles.css`, `app-quote-library/tsconfig.json`, `app-sales/src/ui/App.tsx`, `app-sales/src/ui/styles.css`, `app-sales/src/lib/types.ts`, `app-sales/tsconfig.json`, `docs/eliteos/SYSTEM_BLUEPRINT.md` (§15–16 added), `docs/eliteos/FEATURE_DECISIONS.md` (this entry), `.cursor/rules/eliteos-architecture.mdc` (shared topbar + new-head checklist rule added). |
+| **Revisit trigger** | A new protected head is added; `EliteosTopbar` API is extended; design system overhaul replaces the shared CSS; or a head is explicitly approved to use alternative chrome. |
+
+---
+

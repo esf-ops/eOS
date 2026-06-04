@@ -243,6 +243,86 @@ Stale docs cost more than short doc updates.
 
 ---
 
+## 15. Shared topbar architecture
+
+### Rule
+Every **protected internal head** (`app-home`, `app-quote-library`, `app-sales`, and all future staff heads) must use the shared, presentational **`EliteosTopbar`** component for its header/topbar shell. Do not build one-off local topbar markup for new protected heads.
+
+```
+shared/eliteos-ui/EliteosTopbar.tsx   ← component
+shared/eliteos-ui/eliteosTopbar.css   ← namespaced styles (.eliteos-topbar-*)
+```
+
+### Contract (presentational-only)
+
+The shared component **must never**:
+- Import Supabase or any auth client.
+- Call backend APIs directly.
+- Read environment variables.
+- Own auth/session state or permissions.
+- Contain pricing, quote, or other domain business logic.
+
+Each consuming head is responsible for fetching its own user/org data and passing it through props.
+
+### Key props
+
+| Prop | Who sets it | Notes |
+|------|-------------|-------|
+| `appName` | Each head | e.g. `"Quote Library"`. Omit on Home to show org name only. |
+| `organizationName` | Each head | e.g. `"Elite Stone Fabrication"` |
+| `logoSrc` | Each head | Brand mark image URL |
+| `homeHref` | Each head | `config.homeUrl` — links the brand back to Home Launcher |
+| `userName`, `userEmail`, `initials` | Each head | From existing session / `/api/me` data |
+| `userSubtitle` | Each head | `job_title → department → role → email` fallback; upper-case role/title in JS, let email fall back in natural casing |
+| `menuItems` | Each head | "Open Home", "Profile & preferences", and any head-specific safe items |
+| `onSignOut` | Each head | Existing `supabase.auth.signOut()` call — do not change sign-out behavior |
+| `searchSlot` | **Home Launcher only** | Pass the head-finder/search input as a React node. All other heads omit this prop. |
+| `primaryActionSlot`, `statusSlot` | Optional | Reserved for future per-head primary actions |
+
+### Public/customer-facing heads
+
+`app-quote` (Public Quote) and `app-partner-quote` are **not** protected staff heads — they may intentionally use different chrome and do not need `EliteosTopbar`.
+
+### Import pattern
+
+Use a relative path from the consuming app to `shared/eliteos-ui/`. Ensure `server.fs.allow: [repoRoot]` is set in `vite.config.ts` (already done on all staff heads) and add `../shared/eliteos-ui/**/*.ts` and `../shared/eliteos-ui/**/*.tsx` to the head's `tsconfig.json` `include` array (see `app-home`, `app-quote-library`, `app-sales` for reference).
+
+```ts
+import EliteosTopbar from "../../../shared/eliteos-ui/EliteosTopbar";
+import type { EliteosTopbarMenuItem } from "../../../shared/eliteos-ui/EliteosTopbar";
+```
+
+### CSS casing override pattern
+
+The shared CSS applies `text-transform: uppercase` to the chip role/subtitle. If a head needs natural-case email fallbacks, add a scoped override to the head's own stylesheet (see `app-quote-library` and `app-sales`):
+
+```css
+.eliteos-topbar .eliteos-topbar-chip-role {
+  text-transform: none;
+}
+```
+
+---
+
+## 16. New protected-head checklist
+
+Use this checklist when scaffolding any new protected eliteOS head. Completing all items is required before the head is considered production-ready.
+
+| # | Item | Notes |
+|---|------|-------|
+| 1 | **Supabase / session pattern** | Use `shared/eliteos-supabase/` (`buildEliteosSupabaseAuthOptions`) so the cross-subdomain session cookie is honored. Mirror the `getSession()` + `onAuthStateChange` bootstrap from `app-home` or `app-quote-library`. |
+| 2 | **Backend permission guard** | Every protected Brain route the head calls must be gated by `requireAuth()` + `requireHeadAccess("<slug>", ...)` in `backend-core`. UI-only gating is insufficient. |
+| 3 | **Head access assignment** | Register the new slug in `eosGovernanceConstants.js` (`EOS_HEAD_SLUGS`), `headDeploymentUrls.js`, and `launcherHeads.js`. Add the head-access middleware call in `server.js`. Update `docs/eliteos/eliteOS-master-head-map.md`. |
+| 4 | **Shared `EliteosTopbar`** | Import and use `shared/eliteos-ui/EliteosTopbar`. Do not build a local topbar. Pass `appName`, `organizationName`, `logoSrc`, `homeHref`, user chip props, `menuItems`, and `onSignOut`. Do not pass `searchSlot` unless explicitly approved. Update `tsconfig.json` `include` to cover `shared/eliteos-ui`. |
+| 5 | **Standard eliteOS design tokens** | Include the `--eos-*` token set (colors, shadows, motion) and the `--r-md`/`--sh-1` tokens consumed by the brand mark. Align with the Sales / Quote Library / Home pattern. |
+| 6 | **No secrets in the frontend bundle** | Only `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_BACKEND_URL`, and `VITE_HOME_URL` (or equivalent) in the browser env. No service role keys, Monday tokens, Moraware credentials, or AI provider keys. |
+| 7 | **No privileged business logic in frontend** | Pricing math, permission logic, and data mutations must live in `backend-core`. The frontend is a display and interaction layer only. |
+| 8 | **CORS wiring** | Add the production hostname to `collectHeadEnvOriginsForCors` via the `HEAD_URL_<SLUG>` env var pattern. No wildcard CORS. |
+| 9 | **Build command registered** | Add `npm run build --prefix app-<name>` to the `eos:build:all-heads` script in the root `package.json` and update §13 (Required checks) in this document. |
+| 10 | **`FEATURE_DECISIONS.md` entry** | Record the head's purpose, access model, CORS strategy, frontend safety posture, and any intentional exceptions. |
+
+---
+
 ## Related documents
 
 | Document | Purpose |
