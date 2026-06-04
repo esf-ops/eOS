@@ -68,7 +68,7 @@ function fallbackMaterialDisplay(row: CustomerRoomAreaCostRow): number {
  * Prepare customer-print Room / Area Cost Breakdown rows so that, for each room:
  *   displayed Material + displayed Add-ons = displayed Area Total.
  *
- * Area total is the customer-facing authority (from proportional $10 allocation in print).
+ * Area total is the customer-facing authority (from proportional $5 allocation in print).
  * Material is derived; exact/internal math is unchanged.
  */
 export function prepareCustomerPrintDisplayRows(

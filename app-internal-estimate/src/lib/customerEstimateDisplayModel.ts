@@ -130,9 +130,6 @@ export function allocateCustomerDisplayFives(exacts: number[], targetDisplay: nu
   return out;
 }
 
-/** @deprecated Use allocateCustomerDisplayFives — rounding is now nearest $5. */
-export const allocateCustomerDisplayTens = allocateCustomerDisplayFives;
-
 function aggregateScopeLinesByRoom(lines: SelectedMaterialScopeLine[]): CustomerMaterialScopeRoomRow[] {
   const byRoom = new Map<string, CustomerMaterialScopeRoomRow>();
   for (const ln of lines) {

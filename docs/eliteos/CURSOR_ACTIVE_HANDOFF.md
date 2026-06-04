@@ -2,7 +2,7 @@
 
 **Purpose:** Cheap context for new Cursor chats. Do not treat old chat transcripts as source of truth — use this file + `docs/eliteos/*` + `.cursor/rules/*`.
 
-**Last updated:** 2026-06-03 (AI Takeoff v6.3 — Backsplash review controls in Review Workbench)
+**Last updated:** 2026-06-03 (Internal Estimate stabilization — stale docs/alias cleanup)
 
 ---
 
@@ -489,6 +489,26 @@ npm run eos:test:quote-file-storage   # 10 test groups, all passing
 npm run eos:test:takeoff-contract     # 16 test groups, all passing
 npm run eos:check:local               # full repo check
 ```
+
+---
+
+## Internal Estimate — completed beta fixes (stabilization basis)
+
+These fixes are in place as of the stale-docs/alias cleanup pass (2026-06-03). Do not re-introduce old behavior.
+
+| Fix | Status |
+|-----|--------|
+| Vanity program $265 no longer inflates to $280 | ✅ Fixed — `vanityProgram2026` rate map corrected; verify-internal-estimate-beta-fixes asserts `$265` is used |
+| Customer-facing rounding is nearest $5 (not $10) | ✅ Fixed — `roundCustomerDisplay` uses `Math.ceil(n / 5) * 5`; verify scripts assert no nearest-$10 ceiling remains |
+| Customer PDF cleanup: Scope Summary, Quoted Material Breakdown, and Total SF column removed | ✅ Fixed — `CustomerEstimatePrint.tsx` no longer renders those sections |
+| Customer-facing room notes added to PDF | ✅ Fixed — room notes rendered in customer print |
+| Quote Library `/metrics` 500 hotfix — `scopeSource` undefined variable removed | ✅ Fixed — `applyQuoteListFilters` replaced stale inline `scopeSource`; verify-quote-library-improvements asserts clean |
+
+**Deprecated alias cleanup (this pass):**
+- `allocateCustomerDisplayTens` export removed from `customerEstimateDisplayModel.ts` (no callers — replaced by `allocateCustomerDisplayFives`)
+- Local `allocateCustomerDisplayTens` alias removed from `verifyCustomerEstimatePrintReconciliation.mjs` (was defined but never used in the file)
+- `FEATURE_DECISIONS.md` §31 and §33 updated from "nearest $10" → "nearest $5" to match current behavior
+- `customerPrintDisplayRows.ts` comment updated from "proportional $10 allocation" → "proportional $5 allocation"
 
 ---
 

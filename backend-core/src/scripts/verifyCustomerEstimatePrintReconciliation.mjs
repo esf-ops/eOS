@@ -93,9 +93,6 @@ function allocateCustomerDisplayFives(exacts, targetDisplay) {
   for (let k = 0; k < deficit; k++) out[order[k].i] += 5;
   return out;
 }
-// Deprecated alias — kept for any inline references in this file.
-const allocateCustomerDisplayTens = allocateCustomerDisplayFives;
-
 const FHB_ELECTRICAL_DETAIL_RE = /full-height backsplash electrical cutouts/i;
 
 function labelFromMeasuredRoomDetail(detail) {
