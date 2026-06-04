@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { ApiError, apiFetch } from "../lib/api";
 import { fetchSchemaHealth, SCHEMA_HEALTH_PATH, type SchemaHealthResp } from "../lib/schemaHealth";
@@ -8,6 +8,8 @@ import SalesAccountMappingAdmin from "./SalesAccountMappingAdmin";
 import IdentityResolutionReadiness from "./IdentityResolutionReadiness";
 import QuotePricingAdminView from "./QuotePricingAdminView";
 import QuotePipelinePanel from "./QuotePipelinePanel";
+import EliteosTopbar from "../../../shared/eliteos-ui/EliteosTopbar";
+import type { EliteosTopbarMenuItem } from "../../../shared/eliteos-ui/EliteosTopbar";
 
 /** User-management router is mounted here and under `/api/admin` (same handlers). */
 const USER_MGMT_API = "/api/system-admin";
@@ -131,7 +133,15 @@ function headDisplayLabel(slug: string, catalog: HeadCatalogEntry[] | undefined)
 
 type MeResp = {
   ok: boolean;
-  user: { id: string; email: string; role: string; fullName?: string };
+  user: {
+    id: string;
+    email: string;
+    role: string;
+    fullName?: string;
+    /** Display-only fields from /api/me; preferred for the topbar chip subtitle. */
+    job_title?: string | null;
+    department?: string | null;
+  };
 };
 
 type DealerAccessBrief = Record<string, unknown> & {
@@ -930,9 +940,6 @@ export default function App() {
    * new backend call is added by the shell pass. Role is shown because
    * `/api/me` is already the source of truth for head authorization here.
    */
-  const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const userMenuRef = useRef<HTMLDivElement | null>(null);
-
   const homeBase = useMemo(() => homeLauncherUrl(), []);
   const workspaceName = useMemo(() => resolveWorkspaceName(), []);
   const workspaceShortId = useMemo(() => resolveWorkspaceShortId(), []);
@@ -943,6 +950,8 @@ export default function App() {
   const meEmail = useMemo(() => String(me?.user?.email ?? ""), [me?.user?.email]);
   const meFullName = useMemo(() => String(me?.user?.fullName ?? ""), [me?.user?.fullName]);
   const meRole = useMemo(() => String(me?.user?.role ?? ""), [me?.user?.role]);
+  const meJobTitle = useMemo(() => String(me?.user?.job_title ?? ""), [me?.user?.job_title]);
+  const meDepartment = useMemo(() => String(me?.user?.department ?? ""), [me?.user?.department]);
   const userDisplayName = useMemo(
     () => meFullName || deriveDisplayNameFromEmail(meEmail || sessionEmail) || "Signed in",
     [meFullName, meEmail, sessionEmail]
@@ -952,26 +961,18 @@ export default function App() {
     () => userInitialsFor(meFullName, meEmail || sessionEmail),
     [meFullName, meEmail, sessionEmail]
   );
-
-  /** Close user menu on outside click / Escape. */
-  useEffect(() => {
-    if (!userMenuOpen) return;
-    const onDocClick = (e: MouseEvent) => {
-      if (!userMenuRef.current) return;
-      if (!userMenuRef.current.contains(e.target as Node)) {
-        setUserMenuOpen(false);
-      }
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setUserMenuOpen(false);
-    };
-    document.addEventListener("mousedown", onDocClick);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDocClick);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [userMenuOpen]);
+  /**
+   * Chip subtitle fallback (shared topbar standard):
+   * job_title → department → role → email. Role/title is uppercased here;
+   * the email fallback keeps natural casing (see styles.css override).
+   */
+  const userChipSubtitle = useMemo(() => {
+    const roleTitle = (meJobTitle || meDepartment || meRole || "").trim();
+    if (roleTitle) return roleTitle.toUpperCase();
+    return userDisplayEmail && userDisplayEmail.toLowerCase() !== userDisplayName.toLowerCase()
+      ? userDisplayEmail
+      : "";
+  }, [meJobTitle, meDepartment, meRole, userDisplayEmail, userDisplayName]);
 
   function pushToast(kind: "info" | "error", text: string) {
     setToast({ kind, text });
@@ -1382,27 +1383,53 @@ export default function App() {
     setMorawareStatus(null);
     setMorawareStatusError("");
     setMorawareStatusLoading(false);
-    setUserMenuOpen(false);
   }
+
+  const homeIcon = (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 11.5L12 4l9 7.5" />
+      <path d="M5 10v10h14V10" />
+      <path d="M10 20v-6h4v6" />
+    </svg>
+  );
+  const reloadIcon = (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 12a9 9 0 1 1-3-6.7" />
+      <path d="M21 4v5h-5" />
+    </svg>
+  );
+  const profileIcon = (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="8" r="3.5" />
+      <path d="M5 20c1.5-3.5 4.2-5 7-5s5.5 1.5 7 5" />
+    </svg>
+  );
+  const saMenuItems: EliteosTopbarMenuItem[] = [
+    { label: "Open Home", meta: "eliteOS Launcher", href: homeBase, icon: homeIcon },
+    {
+      label: "Reload data",
+      meta: "Roster, reference, diagnostics",
+      onClick: () => void refreshAll(),
+      icon: reloadIcon
+    },
+    {
+      label: "Profile & preferences",
+      meta: "eliteOS Home",
+      href: `${homeBase}?view=profile`,
+      title: "Profile & preferences",
+      icon: profileIcon
+    }
+  ];
 
   if (!session) {
     return (
       <div className="shell">
-        <header className="topbar" role="banner">
-          <a
-            href={homeBase}
-            className="brand-row brand-row-link"
-            aria-label={`eliteOS System Admin — ${workspaceName}`}
-          >
-            <span className="brand-mark" aria-hidden>
-              {workspaceLogoUrl ? <img src={workspaceLogoUrl} alt="" /> : null}
-            </span>
-            <span className="brand-text">
-              <span className="brand-wordmark">eliteOS</span>
-              <span className="brand-sub">System Admin · {workspaceName}</span>
-            </span>
-          </a>
-        </header>
+        <EliteosTopbar
+          appName="System Admin"
+          organizationName={workspaceName}
+          logoSrc={workspaceLogoUrl ?? undefined}
+          homeHref={homeBase}
+        />
         <main className="main" role="main">
           <section className="auth-panel auth-panel-standalone" aria-label="Sign in">
             <header className="auth-panel-header">
@@ -1456,141 +1483,18 @@ export default function App() {
 
   return (
     <div className="shell">
-      <header className="topbar" role="banner">
-        <a
-          href={homeBase}
-          className="brand-row brand-row-link"
-          aria-label={`eliteOS System Admin — ${workspaceName}`}
-        >
-          <span className="brand-mark" aria-hidden>
-            {workspaceLogoUrl ? <img src={workspaceLogoUrl} alt="" /> : null}
-          </span>
-          <span className="brand-text">
-            <span className="brand-wordmark">eliteOS</span>
-            <span className="brand-sub">System Admin · {workspaceName}</span>
-          </span>
-        </a>
-        <div className="topbar-actions">
-          <div className="topbar-account-wrap" ref={userMenuRef}>
-            <button
-              type="button"
-              className={`topbar-account${userMenuOpen ? " is-open" : ""}`}
-              aria-label="Open account menu"
-              aria-haspopup="menu"
-              aria-expanded={userMenuOpen}
-              onClick={() => setUserMenuOpen((v) => !v)}
-            >
-              <span className="topbar-avatar" aria-hidden>{userDisplayInitials}</span>
-              <span className="topbar-account-text">
-                <span className="topbar-account-name">{userDisplayName}</span>
-                {userDisplayEmail && userDisplayEmail.toLowerCase() !== userDisplayName.toLowerCase() ? (
-                  <span className="topbar-account-role">{userDisplayEmail}</span>
-                ) : null}
-              </span>
-              <span className="topbar-account-caret" aria-hidden>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="6 9 12 15 18 9" />
-                </svg>
-              </span>
-            </button>
-            {userMenuOpen ? (
-              <div className="user-menu" role="menu" aria-label="Account menu">
-                <div className="user-menu-header">
-                  <p className="user-menu-name">{userDisplayName}</p>
-                  {userDisplayEmail ? <p className="user-menu-email">{userDisplayEmail}</p> : null}
-                  {meRole ? (
-                    <p className="user-menu-role">
-                      <span className="role-badge">{titleizeToken(meRole)}</span>
-                    </p>
-                  ) : null}
-                  <p className="user-menu-workspace">
-                    <span>Workspace ·</span>{" "}
-                    <strong>{workspaceName}</strong>
-                    <span className="user-menu-sep" aria-hidden>·</span>
-                    <span>on slabOS</span>
-                  </p>
-                </div>
-                <div className="user-menu-list">
-                  <a
-                    href={homeBase}
-                    className="user-menu-item"
-                    role="menuitem"
-                    onClick={() => setUserMenuOpen(false)}
-                  >
-                    <span className="user-menu-icon" aria-hidden>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M3 11.5L12 4l9 7.5" />
-                        <path d="M5 10v10h14V10" />
-                        <path d="M10 20v-6h4v6" />
-                      </svg>
-                    </span>
-                    <span className="user-menu-label">
-                      <span>Open Home</span>
-                      <span className="user-menu-meta">eliteOS Launcher</span>
-                    </span>
-                    <span className="user-menu-shortcut" aria-hidden>↗</span>
-                  </a>
-                  <button
-                    type="button"
-                    className="user-menu-item"
-                    role="menuitem"
-                    onClick={() => {
-                      setUserMenuOpen(false);
-                      void refreshAll();
-                    }}
-                  >
-                    <span className="user-menu-icon" aria-hidden>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M21 12a9 9 0 1 1-3-6.7" />
-                        <path d="M21 4v5h-5" />
-                      </svg>
-                    </span>
-                    <span className="user-menu-label">
-                      <span>Reload data</span>
-                      <span className="user-menu-meta">Roster, reference, diagnostics</span>
-                    </span>
-                  </button>
-                  <a
-                    href={`${homeBase}?view=profile`}
-                    className="user-menu-item"
-                    role="menuitem"
-                    onClick={() => setUserMenuOpen(false)}
-                    title="Profile & preferences"
-                  >
-                    <span className="user-menu-icon" aria-hidden>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                        <circle cx="12" cy="8" r="3.5" />
-                        <path d="M5 20c1.5-3.5 4.2-5 7-5s5.5 1.5 7 5" />
-                      </svg>
-                    </span>
-                    <span className="user-menu-label">
-                      <span>Profile &amp; preferences</span>
-                      <span className="user-menu-meta">eliteOS Home</span>
-                    </span>
-                  </a>
-                </div>
-                <div className="user-menu-footer">
-                  <button
-                    type="button"
-                    className="user-menu-item user-menu-signout"
-                    role="menuitem"
-                    onClick={() => void handleSignOut()}
-                  >
-                    <span className="user-menu-icon" aria-hidden>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                        <polyline points="16 17 21 12 16 7" />
-                        <line x1="21" y1="12" x2="9" y2="12" />
-                      </svg>
-                    </span>
-                    <span className="user-menu-label">Sign out</span>
-                  </button>
-                </div>
-              </div>
-            ) : null}
-          </div>
-        </div>
-      </header>
+      <EliteosTopbar
+        appName="System Admin"
+        organizationName={workspaceName}
+        logoSrc={workspaceLogoUrl ?? undefined}
+        homeHref={homeBase}
+        userName={userDisplayName}
+        userEmail={userDisplayEmail}
+        userSubtitle={userChipSubtitle}
+        initials={userDisplayInitials}
+        menuItems={saMenuItems}
+        onSignOut={() => void handleSignOut()}
+      />
 
       <section className="sa-hero" aria-labelledby="sa-hero-title">
         <div className="hero-aurora" aria-hidden />
