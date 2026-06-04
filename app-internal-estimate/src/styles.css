@@ -7774,6 +7774,11 @@ textarea:focus {
   --ie-topbar-h: 72px;
   --ie-sticky-bar-h: 92px;
   --ie-sticky-bar-gap: 24px;
+  /* Public alias for the tokenized topbar height. Aliased (not a second
+     literal) so the sticky-offset source of truth stays --ie-topbar-h
+     and the two can never drift apart. Used by sticky offsets such as
+     the compact scroll-context strip and the Live Quote Panel. */
+  --topbar-h: var(--ie-topbar-h);
 }
 
 @media (max-width: 1020px) {
@@ -8786,5 +8791,196 @@ body {
     top: auto !important;
     max-height: min(60vh, 520px) !important;
   }
+}
+
+/* =====================================================================
+ * Workspace density + scroll-context pass (approved limited plan)
+ * ---------------------------------------------------------------------
+ * Appended last so its cascade wins over earlier density passes without
+ * needing `!important`. Scoped to .ie-main / .ie-aside / .page-internal-
+ * estimate so the shared app-quote styles used by other heads are never
+ * affected. Pure presentation only — no pricing, measurement, save,
+ * customer-PDF, or data behavior is touched anywhere in this block.
+ * ===================================================================*/
+
+/* ----- Compact scroll-context strip ---------------------------------- */
+/*
+ * Conservative alternative to making the full ~220px hero sticky. The
+ * large hero stays in normal document flow; this small strip is sticky
+ * just under the topbar and only becomes visible once the hero scrolls
+ * out of view (driven by an IntersectionObserver in InternalEstimateApp
+ * that toggles `data-active`). It shows essential context only — job /
+ * quote reference, customer / account, and the live total — and never
+ * replaces the hero or any save / status chrome.
+ */
+.ie-context-strip {
+  position: sticky;
+  top: var(--topbar-h);
+  z-index: 25; /* below topbar (30), user menu (60), and modal (80) */
+  /* Collapsed by default: reserves no space until activated on scroll. */
+  max-height: 0;
+  margin: 0;
+  opacity: 0;
+  overflow: hidden;
+  transform: translateY(-6px);
+  pointer-events: none;
+  transition: opacity 0.16s ease, transform 0.16s ease, max-height 0.16s ease,
+    margin 0.16s ease;
+}
+
+.ie-context-strip[data-active="true"] {
+  max-height: 64px;
+  margin-bottom: 14px;
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.ie-context-strip-inner {
+  display: flex;
+  align-items: center;
+  gap: 10px 18px;
+  flex-wrap: nowrap;
+  padding: 8px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--eos-line);
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.98) 0%,
+    rgba(250, 251, 255, 0.95) 100%
+  );
+  box-shadow: var(--sh-1);
+}
+
+.ie-context-strip-primary {
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--eos-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 42%;
+}
+
+.ie-context-strip-secondary {
+  font-size: 0.82rem;
+  color: var(--eos-ink-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 32%;
+}
+
+.ie-context-strip-total {
+  margin-left: auto;
+  font-weight: 700;
+  font-size: 0.98rem;
+  color: var(--eos-accent);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Off-switch on narrow screens: the layout collapses at 1020px and the
+   topbar can wrap, so the strip is removed entirely (no reserved space,
+   no sticky offset) below that width. */
+@media (max-width: 1020px) {
+  .ie-context-strip {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ie-context-strip {
+    transition: none;
+  }
+}
+
+/* ----- Job Info — extra density -------------------------------------- */
+.ie-main .ie-job-groups {
+  gap: 10px;
+}
+
+.ie-main .ie-job-group {
+  padding: 10px 12px 11px;
+  gap: 7px;
+}
+
+.ie-main .ie-job-group .grid3.ie-job-grid {
+  gap: 8px 12px;
+}
+
+.ie-main .ie-job-group .ie-job-group-head {
+  margin-bottom: 2px;
+}
+
+/* ----- Rooms / Areas — extra density --------------------------------- */
+.ie-main .room-card-lite {
+  margin-bottom: 10px;
+}
+
+.ie-main .room-card-lite.card {
+  padding: 14px 16px 14px;
+}
+
+.ie-main .room-card-head {
+  margin-bottom: 8px;
+}
+
+.ie-main .room-panel {
+  margin-top: 8px;
+  padding: 9px 11px;
+}
+
+.ie-main .room-addon-grid {
+  gap: 7px 10px;
+}
+
+/* ----- Card-in-card chrome — lighten nested cards -------------------- */
+/*
+ * Top-level section cards keep their own card chrome. The per-room cards
+ * nested inside the Rooms / Areas section drop their drop-shadow so the
+ * section no longer reads as card-in-card; a 1px border still preserves
+ * the visual boundary and readability. Collapsed worksheet / math-check
+ * details in the workflow tail also read lighter when closed.
+ */
+.ie-main .room-card-lite.card {
+  box-shadow: none;
+  border-color: rgba(11, 26, 51, 0.1);
+}
+
+.ie-main .ie-details-worksheet:not([open]),
+.ie-main details.math-check:not([open]) {
+  box-shadow: none;
+}
+
+/* ----- Live Quote Panel — extra density ------------------------------ */
+.ie-aside .summary-card.ie-summary-card-compact {
+  padding: 16px 16px 14px;
+}
+
+.ie-aside .ie-summary-section {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+}
+
+.ie-aside .ie-summary-rows-compact {
+  gap: 1px;
+}
+
+.ie-aside .ie-summary-row-compact {
+  padding: 3px 0;
+  font-size: 0.78rem;
+}
+
+.ie-aside .ie-summary-section .ie-summary-compact-hero {
+  font-size: 1.6rem;
+}
+
+.ie-aside .ie-section-head {
+  margin-bottom: 6px;
+}
+
+.ie-aside .ie-summary-section-head {
+  margin-bottom: 4px;
 }
 

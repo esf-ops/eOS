@@ -315,6 +315,13 @@ export default function InternalEstimateApp() {
   const [activeRoomNavId, setActiveRoomNavId] = useState<string | null>(null);
   /** Scroll-derived active workflow section (purely visual — no fake state). */
   const [activeWorkflowSectionId, setActiveWorkflowSectionId] = useState<string | null>(null);
+  /**
+   * True once the hero has scrolled out of view, used only to reveal the
+   * compact sticky context strip. Purely presentational — toggles a CSS
+   * data attribute, owns no estimate data.
+   */
+  const [heroCompact, setHeroCompact] = useState(false);
+  const heroRef = useRef<HTMLElement | null>(null);
 
   const [accountName, setAccountName] = useState("");
   const [accountPhone, setAccountPhone] = useState("");
@@ -542,6 +549,23 @@ export default function InternalEstimateApp() {
     targets.forEach((el) => observer.observe(el));
     return () => observer.disconnect();
   }, [roomDrafts.length]);
+
+  /**
+   * Reveal the compact context strip once the hero scrolls under the
+   * topbar. Single IntersectionObserver, fires only on threshold crossing
+   * (no scroll-handler thrash), with cleanup. Purely presentational.
+   */
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof IntersectionObserver === "undefined") return;
+    const el = heroRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => setHeroCompact(!entry.isIntersecting),
+      { rootMargin: "-80px 0px 0px 0px", threshold: 0 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   const ensureAccessToken = useCallback(async (): Promise<string | null> => {
     if (!supabase) return null;
@@ -2137,7 +2161,7 @@ export default function InternalEstimateApp() {
       </header>
 
       <div className="ie-shell-body">
-        <section className="ie-hero" aria-labelledby="ie-hero-title">
+        <section className="ie-hero" aria-labelledby="ie-hero-title" ref={heroRef}>
           <div className="ie-hero-aurora" aria-hidden />
           <div className="ie-hero-grid">
             <div className="ie-hero-main">
@@ -2244,6 +2268,29 @@ export default function InternalEstimateApp() {
             </aside>
           </div>
         </section>
+
+        <div
+          className="ie-context-strip"
+          data-active={heroCompact ? "true" : "false"}
+          aria-hidden={!heroCompact}
+        >
+          <div className="ie-context-strip-inner">
+            <span className="ie-context-strip-primary">
+              {projectName.trim() ||
+                (urlQuoteId
+                  ? hydratedDisplayRevision ?? lastSavedQuoteNumber ?? "Estimate"
+                  : "New estimate")}
+            </span>
+            {customerName.trim() || accountName.trim() ? (
+              <span className="ie-context-strip-secondary">
+                {customerName.trim() || accountName.trim()}
+              </span>
+            ) : null}
+            <span className="ie-context-strip-total">
+              {partRetail != null ? `$${Number(partRetail).toFixed(2)}` : "—"}
+            </span>
+          </div>
+        </div>
 
       {urlQuoteId ? (
         <div
