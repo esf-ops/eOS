@@ -25,7 +25,8 @@ const SLUG_TO_ENV_KEYS = Object.freeze({
   reports: ["HEAD_URL_REPORTS"],
   partner_quote: ["HEAD_URL_PARTNER_QUOTE"],
   dealer_resources: ["HEAD_URL_DEALER_RESOURCES"],
-  ai_takeoff: ["HEAD_URL_AI_TAKEOFF"]  // v5.9: AI Takeoff Lab — https://takeoff.eliteosfab.com
+  ai_takeoff: ["HEAD_URL_AI_TAKEOFF"],  // v5.9: AI Takeoff Lab — https://takeoff.eliteosfab.com
+  slab_inventory: ["HEAD_URL_SLAB_INVENTORY"]  // Slab Inventory Head v1 — read-only internal slab browser
 });
 
 /** Env keys whose URLs become Browser `Origin` values allowed by backend-core CORS (scheme + host [+ port]). */

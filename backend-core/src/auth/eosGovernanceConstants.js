@@ -23,7 +23,8 @@ export const EOS_HEAD_SLUGS = Object.freeze([
   "reports",
   "partner_quote",
   "dealer_resources",
-  "ai_takeoff"   // v5.9: AI Takeoff Lab — internal preview head
+  "ai_takeoff",   // v5.9: AI Takeoff Lab — internal preview head
+  "slab_inventory" // Slab Inventory Head v1 — read-only internal slab browser (SlabCloud cache)
 ]);
 
 const _headSet = new Set(EOS_HEAD_SLUGS);

@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "paths": {
+      "@quote-lib/*": ["../app-quote/src/lib/*"]
+    }
+  },
+  "include": [
+    "src",
+    "../shared/eliteos-supabase/**/*.ts",
+    "../shared/eliteos-ui/**/*.ts",
+    "../shared/eliteos-ui/**/*.tsx"
+  ]
+}

@@ -148,7 +148,7 @@ Status is **conceptual** unless a separate tracker says otherwise. Use the label
 
 - Purchasing / Material Readiness Head  
 - Supplier / Vendor Head  
-- Inventory / Slab Head  
+- **Slab Inventory Head** (**`app-slab-inventory/`** — env `HEAD_URL_SLAB_INVENTORY`; slug `slab_inventory`; Brain routes `/api/slab-inventory/*`; **read-only v1**) — internal slab browser over the normalized SlabCloud cache (`slab_inventory` / `slab_images` / `slab_materials` / `slabcloud_sync_runs`). SlabCloud/Slabsmith stays the source of truth; no holds, allocation, overrides, or writeback. `price_group` is shown as **imported source price group**, not slabOS pricing authority. (Supersedes the generic "Inventory / Slab Head" placeholder for v1.)  
 - SlabSmith Integration Head  
 - Remnant Head  
 - Material Risk / Reorder Recommendation Head  

@@ -906,3 +906,23 @@
 
 ---
 
+### 71. Slab Inventory Head v1 — protected, read-only internal slab browser
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-06-04 |
+| **Decision** | Shipped the first protected internal **Slab Inventory** head (`app-slab-inventory`, slug `slab_inventory`) as a **read-only** browser over the normalized SlabCloud cache. New backend routes `GET /api/slab-inventory/summary`, `/filters`, `/slabs`, `/slabs/:id` are gated by `requireAuth()` + `requireHeadAccess("slab_inventory")`, organization-scoped, and served via the **service-role** server client (frontend never reads Supabase directly for slab data). The frontend uses the shared `EliteosTopbar` (identity "eliteOS" / "Inventory · Elite Stone Fabrication", no `searchSlot`), the shared light eliteOS design language (no dark gallery), a summary stat strip, backend-owned filters/search/pagination/sort, a slab card grid + list toggle, a slab detail lightbox, and a sync-status panel. |
+| **Source / authority** | SlabCloud/Slabsmith remains the external source of truth; slabOS reads from its cache. The head performs **no mutations** and **no writeback**. Verified structurally by a test asserting only GET routes are registered (no POST/PUT/PATCH/DELETE). |
+| **Price group rule** | `slab_inventory.price_group` is surfaced as **`source_price_group`** (label "Source price group", "imported") — explicitly NOT slabOS pricing authority. No override UI in v1; future price-group assignment must be a separate overlay table, never a mutation of source cache rows. |
+| **Count semantics** | Actual slab counts are row counts / distinct `external_slab_id`. SlabCloud's `count_for_color` is **never summed** and is not even in the staff-safe projection. A regression test proves the summary count equals the number of rows, not the sum of `count_for_color`. |
+| **Staff-safe fields** | Internal-only projection (color, material, distributor, source price group, thickness, rack, lot, dimensions in inches, inventory/external IDs, image url/thumb/status, sync metadata). Raw JSON, meter source columns, and `usable_*` fields are excluded. No customer-safe public API was added. |
+| **Registration** | Added `slab_inventory` to `EOS_HEAD_SLUGS`, a launcher catalog row (category Inventory), and `HEAD_URL_SLAB_INVENTORY` in `headDeploymentUrls.js` (auto-wires `/api/me/heads` URL + CORS origin). **Not** added to any role default — non-admins see it only via explicit `user_head_access` assignment (admins/executives see it in the full catalog). Routes mounted from `server.js`. |
+| **RLS** | The cache tables keep RLS enabled with no permissive policies; the head reads them via the service-role server client only. No new SELECT policy was added for v1 (no direct browser reads). |
+| **Tests** | `eos:test:slab-inventory-api` (pure helpers: clamp, sort whitelist, param parsing, source-price-group labeling, image-map preference, count semantics, and GET-only route shape). `node --check` on new backend files; `app-slab-inventory` builds; `eos:check:local`, head-access, and slabcloud suites all pass. Added to `eos:build:all-heads` + `eos:check:local`. |
+| **Intentionally NOT built (v1)** | Public showroom, customer SlabRoom, holds/reservations, quote-linked allocation, drag/drop allocation, price-group overrides, scheduled sync automation, payment/scheduling/customer approval, image byte download/proxy/caching, Cmd+K palette, color swatches, AI recommendations. No changes to Internal Estimate pricing/math, Quote Library, Sales Dashboard, Moraware, AI Takeoff, or the shared topbar. |
+| **Impacted files/docs** | `app-slab-inventory/*` (new Vite React head), `backend-core/src/slabInventory/slabInventoryApi.js` (+ `.test.mjs`), `backend-core/src/server.js`, `backend-core/src/auth/eosGovernanceConstants.js`, `backend-core/src/me/launcherHeads.js`, `backend-core/src/me/headDeploymentUrls.js`, `package.json` (`eos:build:slab-inventory`, `eos:test:slab-inventory-api`, all-heads + check wiring), `docs/eliteos/eliteOS-master-head-map.md`, `docs/eliteos/FEATURE_DECISIONS.md` (this entry). |
+| **Manual step required** | Grant access by inserting a `user_head_access` row per user: `insert into public.user_head_access (user_id, head_slug) values ('<auth_user_id>', 'slab_inventory');` (admins/executives already see it). Set `HEAD_URL_SLAB_INVENTORY` (and `VITE_BACKEND_URL` / `VITE_SUPABASE_*` for the app) when deploying. No DB migration is required (cache tables already applied). |
+| **Revisit trigger** | Org-scoped RLS SELECT policy is needed for direct reads; holds/allocation or price-group overlay begins; showroom/SlabRoom is proposed; image caching to Supabase Storage is proposed. |
+
+---
+

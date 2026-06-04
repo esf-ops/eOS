@@ -19,6 +19,7 @@ import { attachIdentityResolutionAdminRoutes } from "./admin/identityResolutionA
 import { attachQuoteRoutes } from "./quotes/quoteRoutes.js";
 import { attachQuoteFileRoutes } from "./files/quoteFileRoutes.js";
 import { attachTakeoffWorkspaceRoutes } from "./takeoff/takeoffWorkspaceRoutes.js";
+import { attachSlabInventoryRoutes } from "./slabInventory/slabInventoryApi.js";
 import { collectHeadEnvOriginsForCors } from "./me/headDeploymentUrls.js";
 import { buildMeHeadsPayload } from "./me/launcherHeads.js";
 import { buildTitansTodayPayload, parseTitansTodayQuery } from "./titans/titansToday.js";
@@ -1193,6 +1194,12 @@ attachTakeoffWorkspaceRoutes(app, {
   requireAuth,
   getSupabase:  supabaseServerClient,
   headAccess:   headAccessAiTakeoff,
+});
+
+attachSlabInventoryRoutes(app, {
+  requireAuth,
+  requireHeadAccess,
+  getSupabase: supabaseServerClient
 });
 
 app.post("/api/auth/log-login", requireAuth(), express.json(), async (req, res) => {

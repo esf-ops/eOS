@@ -153,6 +153,15 @@ export const HEAD_LAUNCHER_CATALOG = [
     category: "Revenue",
     href: "/takeoff",
     roleNote: "Internal preview — AI-assisted plan takeoff for estimators. Import to Internal Estimate remains disabled until QA gates pass consistently."
+  },
+  {
+    slug: "slab_inventory",
+    label: "eliteOS Slab Inventory Head",
+    description: "Browse the cached SlabCloud slab inventory — colors, materials, dimensions, racks, and photos (read-only).",
+    category: "Inventory",
+    href: "/slab-inventory",
+    roleNote:
+      "Read-only v1 — reads the normalized SlabCloud cache; no holds, allocation, or writeback. Price group shown is the imported source value, not slabOS pricing authority. Backend APIs still require slab_inventory head access per request."
   }
 ];
 
