@@ -1,7 +1,7 @@
 # SlabCloud Inventory Integration — Read-Only Dry-Run POC
 
-**Status:** Proof of concept (read-only, dry-run). Not wired into any head, Supabase, or sync pipeline.
-**Date:** 2026-06-04
+**Status:** Proof of concept complete. Full uncapped dry-run succeeded. SQL schema draft created. Not yet applied to Supabase.
+**Date:** 2026-06-04 (POC) · 2026-06-04 (full dry-run + SQL draft)
 **Owner module:** `backend-core/src/slabcloud/`
 
 This document describes the first foundation for a future slabOS **Slab Inventory / showroom / SlabRoom** experience: a safe way to pull Elite Stone Fabrication's slab inventory out of SlabCloud's JSON endpoints and normalize it into a consistent internal shape.
@@ -143,7 +143,7 @@ Written to (both gitignored under `debug/`):
 - `debug/slabcloud/slabcloud-inventory-dry-run.json` — full payload: config, endpoints, summary, warnings, materials, normalized slabs.
 - `debug/slabcloud/slabcloud-inventory-summary.json` — small summary: counts + a few sample slabs.
 
-### Example summary (capped live run, `SLABCLOUD_MAX_DETAILS=10`)
+### Capped live run (`SLABCLOUD_MAX_DETAILS=10`) — 2026-06-04
 
 ```
 slabRecordCount: 30
@@ -153,6 +153,33 @@ materialsEndpointCount: 44
 summedSlabCount: 118
 warnings: 0
 ```
+
+### Full uncapped run (all colors) — 2026-06-04
+
+```
+materialsEndpointCount: 44
+slabRecordCount: 384 (source: detail)
+distinctColorCount: 139
+distinctMaterialCount: 23
+summedSlabCount: (not summed — count_for_color is group-level, not per-row)
+warnings: 0
+```
+
+No auth, no cookies, no writes. All 23 materials and 139 distinct colors successfully fetched and normalized. Zero warnings across the full uncapped run.
+
+> **count_for_color semantics:** The `count` field is repeated at the color-group level on every detail row for the same color. Summing it across rows will over-count. Actual slab count = number of distinct `external_slab_id` rows per color in the cache.
+
+---
+
+## 8a. SlabCloud API approval
+
+**Verbal confirmation received 2026-06-04:** Andrey (SlabCloud) verbally approved read-only internal use of the `/api/slabs/kbyd` and `/api/materials/kbyd` endpoints for ESF/slabOS.
+
+**Written confirmation is still preferred** before:
+- Scheduling recurring automated syncs against production Supabase
+- Building a public showroom or customer SlabRoom that depends on this data path
+
+No rate limits, fees, or API plan requirements were mentioned, but these remain open questions to confirm in writing.
 
 ---
 
@@ -190,11 +217,15 @@ Explicitly out of scope for this POC:
 
 ## 11. Future path
 
-After reviewing the dry-run output we will decide whether to:
+Full dry-run output reviewed. SlabCloud verbal approval received. Next steps:
 
-1. Build Supabase **cache tables** (org-scoped by `organization_id`) populated by a **backend-owned** fetch, and/or
-2. Build an internal **Slab Inventory head** that reads the cached data.
+1. Review SQL schema draft: `backend-core/supabase/eliteos_slabcloud_inventory_cache.sql` (draft only, not yet applied).
+2. Build `slabCloudPersistence.js` + tests (write-gated behind `SLABCLOUD_CACHE_WRITE_ENABLED`).
+3. Apply SQL to staging Supabase and run a smoke sync.
+4. Obtain SlabCloud **written confirmation** of API use.
+5. Promote to production cache.
+6. Plan internal **Slab Inventory head** (`app-slab-inventory`) — Phase 2.
 
 A real head must use **backend-owned cached data**, **never** direct browser calls to SlabCloud.
 
-> **Action item:** Confirm with SlabCloud whether these JSON endpoints are **approved for internal/automated use** before scheduling any recurring sync.
+See [`slabos-slab-inventory-profit-engine-roadmap.md`](./slabos-slab-inventory-profit-engine-roadmap.md) for the full phased plan.

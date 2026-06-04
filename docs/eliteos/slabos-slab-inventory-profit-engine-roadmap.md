@@ -60,14 +60,17 @@ Company code `kbyd` was reachable **without credentials, cookies, or session tok
 
 > **Company code vs public slug:** The API company code is `kbyd`. The public inventory URL slug is `/inventory/esf/`. These are not the same — treat the company code as configurable (`SLABCLOUD_COMPANY_CODE`) and never assume the two are interchangeable.
 
-### Live dry-run results (capped, `SLABCLOUD_MAX_DETAILS=10`)
+### Dry-run results
 
-- Materials rows: **44**
-- Slab records (from detail fetches): **30**
-- Distinct colors (in cap): **10**
-- Distinct materials: **6**
-- Summed slab count: **118**
-- Warnings: **0**
+**Capped run (`SLABCLOUD_MAX_DETAILS=10`, 2026-06-04):**
+- Materials rows: **44**, Slab records: **30**, Distinct colors: **10**, Distinct materials: **6**, Warnings: **0**
+
+**Full uncapped run (all colors, 2026-06-04):**
+- Materials rows: **44**, Slab records: **384**, Distinct colors: **139**, Distinct materials: **23**, Warnings: **0**
+
+All 23 materials and 139 distinct color names fetched and normalized successfully. No auth, no cookies, no writes.
+
+> `count_for_color` is a group-level value repeated on every detail row for a color — do not sum it across rows. Actual slab count = `COUNT(DISTINCT external_slab_id)` per color in the cache.
 
 ### Field mapping
 
@@ -128,12 +131,16 @@ These are non-negotiable guardrails for every phase:
 **Deliverables (done):**
 - `backend-core/src/slabcloud/slabCloudClient.js` — read-only HTTP helpers
 - `backend-core/src/slabcloud/normalizeSlabCloudInventory.js` — pure normalization
-- `backend-core/src/slabcloud/slabCloudInventoryPoc.test.mjs` — unit tests
+- `backend-core/src/slabcloud/slabCloudInventoryPoc.test.mjs` — unit tests (all passing)
 - `backend-core/src/scripts/slabcloud/importSlabCloudInventoryPoc.js` — dry-run script
-- `docs/eliteos/slabcloud-inventory-poc.md` — endpoint doc
-- `debug/slabcloud/slabcloud-inventory-dry-run.json` + `...-summary.json` — sample output
+- `docs/eliteos/slabcloud-inventory-poc.md` — endpoint doc with full dry-run results
+- `debug/slabcloud/slabcloud-inventory-dry-run.json` + `...-summary.json` — sample output (gitignored)
 
-**No Supabase writes. No UI. No holds. No schema changes.**
+**Full uncapped dry-run result:** 44 materials · 384 slab records · 139 distinct colors · 23 distinct materials · 0 warnings.
+
+**SlabCloud approval:** Verbal OK from Andrey for read-only internal use received 2026-06-04. Written confirmation preferred before scheduled production sync.
+
+**No Supabase writes. No UI. No holds. No schema applied.**
 
 ---
 
@@ -141,7 +148,9 @@ These are non-negotiable guardrails for every phase:
 
 **Goal:** Create a Supabase-backed normalized slab inventory cache so internal heads have a stable, backend-owned data source.
 
-**Trigger:** After dry-run output is reviewed and SlabCloud endpoint use is confirmed.
+**Trigger:** Dry-run output reviewed ✅. SlabCloud verbal approval received ✅. Written confirmation preferred before production promotion.
+
+**SQL schema draft:** `backend-core/supabase/eliteos_slabcloud_inventory_cache.sql` — drafted 2026-06-04, not yet applied.
 
 **Potential tables (planning sketches — no SQL yet):**
 

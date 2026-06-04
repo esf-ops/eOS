@@ -848,3 +848,17 @@
 
 ---
 
+### 67. SlabCloud inventory — full dry-run succeeded, verbal API approval received, SQL schema drafted (not yet applied)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-06-04 |
+| **Decision** | The full uncapped SlabCloud dry-run (all colors, no `SLABCLOUD_MAX_DETAILS` cap) succeeded: **44 materials · 384 slab records · 139 distinct colors · 23 distinct materials · 0 warnings**. No auth, no cookies, no Supabase writes. Andrey (SlabCloud) gave **verbal approval** for ESF/slabOS read-only internal use of the `/api/slabs/kbyd` and `/api/materials/kbyd` endpoints. Written confirmation is still preferred before scheduling recurring production syncs or building a public showroom that depends on this data path. The Supabase cache schema has been **drafted** in `backend-core/supabase/eliteos_slabcloud_inventory_cache.sql` but **not yet applied** to any Supabase project. The SQL draft covers five tables: `slabcloud_sync_runs`, `slab_inventory_raw_records`, `slab_inventory`, `slab_materials`, and `slab_images`. RLS is enabled on all five tables but no permissive policies are created — service role writes only for now. |
+| **count_for_color semantics** | `count` from SlabCloud is a **color-group-level** value repeated identically on every detail row for the same color. It must **not** be summed across detail rows. Actual physical slab count = `COUNT(DISTINCT external_slab_id) WHERE color_name = X AND is_active = true`. This is documented in a `COMMENT ON COLUMN` in the SQL draft. |
+| **Why draft only** | Schema correctness and field semantics (especially `UsableA`/`UsableD`, image URL stability, and `status`/sold fields) should be confirmed against real data and with SlabCloud before the migration is applied. A staging smoke run follows the draft review. |
+| **Next steps** | (1) Review SQL draft. (2) Build `slabCloudPersistence.js` + tests (write-gated). (3) Apply SQL to staging Supabase + smoke run. (4) Obtain SlabCloud written confirmation. (5) Promote to production cache. |
+| **Impacted files/docs** | `backend-core/supabase/eliteos_slabcloud_inventory_cache.sql` (created, not applied), `docs/eliteos/slabcloud-inventory-poc.md` (full dry-run results + approval note added), `docs/eliteos/slabos-slab-inventory-profit-engine-roadmap.md` (Phase 0 results + Phase 1 SQL draft status updated), `docs/eliteos/FEATURE_DECISIONS.md` (this entry). No app code changed. |
+| **Revisit trigger** | SQL is reviewed and approved for staging apply; written SlabCloud confirmation received; `UsableA`/`UsableD` field semantics confirmed; image URL pattern confirmed; Phase 1 persistence module is built. |
+
+---
+
