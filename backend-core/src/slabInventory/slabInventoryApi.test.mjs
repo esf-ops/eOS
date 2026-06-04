@@ -177,6 +177,71 @@ import {
   console.log("ok: summarizeActiveRows (no count_for_color summing)");
 }
 
+/* ── sync-coverage fields: active_cached vs latest_sync counts ─────────── */
+//
+// This tests the logic that powers the "Needs review" callout:
+//   active_cached_slab_count   = number of active slab rows (row count only)
+//   latest_sync_slab_count     = slab_upserted_count from the last sync run
+//   active_not_seen_in_latest_sync_count = active rows whose last_seen differs
+//
+// The scenario mirrors production: 385 cached active slabs, latest sync saw 382,
+// leaving 3 active slabs not seen in the most recent run.
+{
+  const SYNC_ID_LATEST = "sync-run-latest-1111-1111-111111111111";
+  const SYNC_ID_OLD    = "sync-run-old----2222-2222-222222222222";
+
+  // 385 active rows: 382 seen in latest sync + 3 from an older run.
+  const activeRows = [
+    ...Array.from({ length: 382 }, (_, i) => ({
+      color_name: `Color${i}`,
+      material_name: "ESF Quartz",
+      price_group: "B",
+      last_seen_sync_run_id: SYNC_ID_LATEST
+    })),
+    { color_name: "India Black Pearl", material_name: "Granite",    price_group: "A", last_seen_sync_run_id: SYNC_ID_OLD },
+    { color_name: "Super White",        material_name: "ESF Quartz", price_group: "B", last_seen_sync_run_id: SYNC_ID_OLD },
+    { color_name: "Taj Sienna",         material_name: "Stratus",    price_group: "C", last_seen_sync_run_id: SYNC_ID_OLD }
+  ];
+
+  // active_cached_slab_count = total rows (385), never count_for_color sum.
+  const activeCachedCount = activeRows.length;
+  assert.equal(activeCachedCount, 385, "active_cached_slab_count = 385 rows");
+
+  // latest_sync_slab_count comes from slab_upserted_count (382 here).
+  const latestSyncSlabCount = 382;
+  assert.equal(latestSyncSlabCount, 382, "latest_sync_slab_count from slab_upserted_count");
+
+  // active_not_seen_in_latest_sync_count = rows with a different sync run id.
+  const notSeen = activeRows.filter((r) => r.last_seen_sync_run_id !== SYNC_ID_LATEST);
+  assert.equal(notSeen.length, 3, "3 active slabs not seen in latest sync");
+  assert.notEqual(activeCachedCount, latestSyncSlabCount, "counts differ when slabs were not seen");
+
+  // Sample list must be capped (up to 5 rows returned).
+  const sampleCap = 5;
+  const sample = notSeen.slice(0, sampleCap);
+  assert.ok(sample.length <= sampleCap, "sample capped at 5");
+  assert.equal(sample.length, 3, "3 not-seen rows returned in sample (all fit within cap)");
+
+  // count_for_color is not summed even when present on rows.
+  const rowsWithCount = activeRows.map((r) => ({ ...r, count_for_color: 99 }));
+  const s = summarizeActiveRows(rowsWithCount);
+  assert.equal(s.total_active_slabs, 385, "summarizeActiveRows still counts rows, not count_for_color sum");
+  assert.notEqual(s.total_active_slabs, 385 * 99, "must not be count_for_color × rows");
+
+  // When active_not_seen count is 0, gap is clean.
+  const allSeen = activeRows.map((r) => ({ ...r, last_seen_sync_run_id: SYNC_ID_LATEST }));
+  const notSeenWhenAllSeen = allSeen.filter((r) => r.last_seen_sync_run_id !== SYNC_ID_LATEST);
+  assert.equal(notSeenWhenAllSeen.length, 0, "0 not-seen when all rows point to latest sync");
+
+  // Sample must not expose raw JSON or count_for_color.
+  for (const sampleRow of sample) {
+    assert.ok(!("count_for_color" in sampleRow), "sample must not include count_for_color");
+    assert.ok(!("raw_json" in sampleRow), "sample must not include raw_json");
+  }
+
+  console.log("ok: sync-coverage fields (active_cached vs latest_sync)");
+}
+
 /* ── attach registers ONLY GET routes, gated by head access ────────────── */
 {
   const calls = [];

@@ -41,12 +41,28 @@ type LastSync = {
   triggered_by: string | null;
 } | null;
 
+type NotSeenSampleRow = {
+  id: string | null;
+  color_name: string | null;
+  material_name: string | null;
+  inventory_id: string | null;
+  rack: string | null;
+  lot: string | null;
+  source_price_group: string | null;
+};
+
 type Summary = {
   total_active_slabs: number;
   distinct_colors: number;
   distinct_materials: number;
   slabs_with_verified_images: number;
   slabs_by_price_group: { price_group: string; count: number }[];
+  // Sync-coverage fields: distinguish active cache from latest sync
+  active_cached_slab_count?: number;
+  latest_sync_slab_count?: number | null;
+  latest_sync_id?: string | null;
+  active_not_seen_in_latest_sync_count?: number;
+  active_not_seen_in_latest_sync_sample?: NotSeenSampleRow[];
   last_sync: LastSync;
 };
 
@@ -511,8 +527,10 @@ export default function SlabInventoryApp() {
                 <p className="hero-eyebrow">Internal tool · Slab Inventory</p>
                 <h1 id="si-hero-title" className="hero-title">Slab inventory</h1>
                 <p className="hero-sub">
-                  Browse the cached SlabCloud slab inventory — read-only. SlabCloud/Slabsmith remains the source of
-                  truth; slabOS reads from its normalized cache via <code>/api/slab-inventory/*</code>.
+                  Browse synced SlabCloud/Slabsmith slab inventory in a read-only eliteOS view.{" "}
+                  <span className="hero-sub-note">
+                    SlabCloud/Slabsmith remains the source of truth; slabOS displays the latest cached sync.
+                  </span>
                 </p>
               </div>
             </section>
@@ -526,10 +544,14 @@ export default function SlabInventoryApp() {
 
             {/* Summary strip */}
             <section className="stat-strip" aria-label="Inventory summary">
-              <StatCard label="Active slabs" value={summary ? summary.total_active_slabs.toLocaleString() : "—"} hint="Count of slab rows (never summed from color counts)" />
+              <StatCard
+                label="Active cached slabs"
+                value={summary ? (summary.active_cached_slab_count ?? summary.total_active_slabs).toLocaleString() : "—"}
+                hint="Count of slab rows in the slabOS cache (never summed from color counts)"
+              />
               <StatCard label="Colors" value={summary ? summary.distinct_colors.toLocaleString() : "—"} hint="Distinct color names" />
               <StatCard label="Materials" value={summary ? summary.distinct_materials.toLocaleString() : "—"} hint="Distinct material names" />
-              <StatCard label="Verified photos" value={summary ? summary.slabs_with_verified_images.toLocaleString() : "—"} hint="Images checked OK" />
+              <StatCard label="Verified photos" value={summary ? summary.slabs_with_verified_images.toLocaleString() : "—"} hint="Images confirmed OK by URL check" />
             </section>
 
             <div className="content-grid">
@@ -650,14 +672,65 @@ export default function SlabInventoryApp() {
                 <div className="side-card">
                   <h2 className="side-card-title">Sync status</h2>
                   {summary?.last_sync ? (
-                    <ul className="sync-list">
-                      <li><span>Status</span><strong className={`sync-status sync-${summary.last_sync.status}`}>{summary.last_sync.status}</strong></li>
-                      <li><span>Finished</span><strong>{fmtDate(summary.last_sync.finished_at || summary.last_sync.started_at)}</strong></li>
-                      <li><span>Slabs upserted</span><strong>{summary.last_sync.slab_upserted_count ?? "—"}</strong></li>
-                      <li><span>Image rows</span><strong>{summary.last_sync.image_row_written_count ?? "—"}</strong></li>
-                      <li><span>Warnings</span><strong>{summary.last_sync.warning_count}</strong></li>
-                      <li><span>Trigger</span><strong>{summary.last_sync.triggered_by ?? "—"}</strong></li>
-                    </ul>
+                    <>
+                      <ul className="sync-list">
+                        <li><span>Status</span><strong className={`sync-status sync-${summary.last_sync.status}`}>{summary.last_sync.status}</strong></li>
+                        <li><span>Finished</span><strong>{fmtDate(summary.last_sync.finished_at || summary.last_sync.started_at)}</strong></li>
+                        <li>
+                          <span>Latest sync</span>
+                          <strong>
+                            {summary.latest_sync_slab_count != null
+                              ? `${Number(summary.latest_sync_slab_count).toLocaleString()} slabs seen`
+                              : (summary.last_sync.slab_upserted_count != null
+                                  ? `${Number(summary.last_sync.slab_upserted_count).toLocaleString()} slabs seen`
+                                  : "—")}
+                          </strong>
+                        </li>
+                        <li>
+                          <span>Active cache</span>
+                          <strong>{(summary.active_cached_slab_count ?? summary.total_active_slabs).toLocaleString()} slabs</strong>
+                        </li>
+                        {(summary.active_not_seen_in_latest_sync_count ?? 0) > 0 ? (
+                          <li>
+                            <span>Needs review</span>
+                            <strong className="count-warn">{summary.active_not_seen_in_latest_sync_count} not seen in latest sync</strong>
+                          </li>
+                        ) : null}
+                        <li><span>Image rows</span><strong>{summary.last_sync.image_row_written_count ?? "—"}</strong></li>
+                        <li><span>Warnings</span><strong>{summary.last_sync.warning_count}</strong></li>
+                        <li><span>Trigger</span><strong>{summary.last_sync.triggered_by ?? "—"}</strong></li>
+                      </ul>
+
+                      {/* Not-seen coverage callout */}
+                      {(summary.active_not_seen_in_latest_sync_count ?? 0) > 0 ? (
+                        <div className="callout callout-warn" role="note">
+                          <p>
+                            <strong>{summary.active_not_seen_in_latest_sync_count}</strong> active cached{" "}
+                            {summary.active_not_seen_in_latest_sync_count === 1 ? "slab was" : "slabs were"} not seen
+                            in the latest SlabCloud sync. They are still shown because slabOS does not auto-deactivate
+                            inventory in v1.
+                          </p>
+                          {summary.active_not_seen_in_latest_sync_sample?.length ? (
+                            <ul className="not-seen-sample">
+                              {summary.active_not_seen_in_latest_sync_sample.map((row) => (
+                                <li key={row.id ?? row.inventory_id}>
+                                  <span className="not-seen-color">{row.color_name || "—"}</span>
+                                  {" · "}
+                                  <span className="not-seen-material">{row.material_name || "—"}</span>
+                                  {row.inventory_id ? (
+                                    <> · <code className="not-seen-inv">{row.inventory_id}</code></>
+                                  ) : null}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <p className="callout callout-ok" role="note">
+                          All active cached slabs were seen in the latest sync.
+                        </p>
+                      )}
+                    </>
                   ) : (
                     <p className="muted">No sync runs recorded yet.</p>
                   )}

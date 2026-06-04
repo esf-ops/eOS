@@ -282,13 +282,29 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
   }
 
   // GET /api/slab-inventory/summary — counts + last sync metadata (read-only).
+  //
+  // Coverage fields added to distinguish the active cache from the latest sync:
+  //   active_cached_slab_count   — rows in slab_inventory where is_active = true
+  //   latest_sync_slab_count     — slab_upserted_count from the latest completed sync run
+  //   active_not_seen_in_latest_sync_count — active rows whose last_seen_sync_run_id ≠ latest sync id
+  //   active_not_seen_in_latest_sync_sample — up to 5 staff-safe sample rows
+  //
+  // These counts reflect a known v1 behaviour: slabOS does NOT auto-deactivate slabs
+  // that vanish from the SlabCloud feed (that requires SLABCLOUD_MARK_INACTIVE=1 and
+  // a full uncapped sync). The UI uses these fields to explain the gap clearly without
+  // implying a bug or attempting to fix it automatically.
   app.get("/api/slab-inventory/summary", ...guard, async (req, res) => {
     try {
       jsonNoStore(res);
       const supabase = db();
       const organizationId = await orgId(req);
 
-      let activeQ = supabase.from("slab_inventory").select("color_name,material_name,price_group").eq("is_active", true);
+      // Fetch all active rows for aggregates (color/material/price-group distribution).
+      // NEVER selects or sums count_for_color.
+      let activeQ = supabase
+        .from("slab_inventory")
+        .select("color_name,material_name,price_group,last_seen_sync_run_id")
+        .eq("is_active", true);
       activeQ = scopeOrg(activeQ, organizationId);
       const { data: activeRows, error: activeErr } = await activeQ;
       if (activeErr) {
@@ -297,22 +313,65 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
         }
         throw activeErr;
       }
-      const summary = summarizeActiveRows(activeRows ?? []);
 
-      // Verified images (status ok), org-scoped.
-      let imgQ = supabase.from("slab_images").select("id", { count: "exact", head: true }).eq("image_status", "ok");
-      imgQ = scopeOrg(imgQ, organizationId);
-      const { count: verifiedImages } = await imgQ;
+      const activeRowList = activeRows ?? [];
+      const activeCachedSlabCount = activeRowList.length;
 
-      // Latest sync run.
+      // Latest completed (non-dry-run) sync run.
       let syncQ = supabase
         .from("slabcloud_sync_runs")
         .select("id,status,started_at,finished_at,warning_count,slab_upserted_count,image_row_written_count,triggered_by")
+        .neq("status", "dry_run")
         .order("started_at", { ascending: false })
         .limit(1);
       syncQ = scopeOrg(syncQ, organizationId);
       const { data: syncRows } = await syncQ;
       const lastSync = (syncRows && syncRows[0]) || null;
+
+      const latestSyncId = lastSync?.id ?? null;
+      // Prefer slab_upserted_count; fall back to null when absent.
+      const latestSyncSlabCount =
+        lastSync?.slab_upserted_count != null ? Number(lastSync.slab_upserted_count) : null;
+
+      // Active slabs not seen in the latest sync run (v1 does not auto-deactivate these).
+      let activeNotSeenCount = 0;
+      /** @type {Array<{id:string,color_name:string|null,material_name:string|null,inventory_id:string|null,rack:string|null,lot:string|null,source_price_group:string|null}>} */
+      let activeNotSeenSample = [];
+
+      if (latestSyncId) {
+        activeNotSeenCount = activeRowList.filter(
+          (r) => r.last_seen_sync_run_id !== latestSyncId
+        ).length;
+
+        if (activeNotSeenCount > 0) {
+          // Fetch up to 5 staff-safe sample rows (no raw JSON, no count_for_color).
+          let sampleQ = supabase
+            .from("slab_inventory")
+            .select("id,color_name,material_name,inventory_id,rack,lot,price_group")
+            .eq("is_active", true)
+            .neq("last_seen_sync_run_id", latestSyncId)
+            .order("color_name", { ascending: true, nullsFirst: false })
+            .limit(5);
+          sampleQ = scopeOrg(sampleQ, organizationId);
+          const { data: sampleRows } = await sampleQ;
+          activeNotSeenSample = (sampleRows ?? []).map((r) => ({
+            id: r.id ?? null,
+            color_name: r.color_name ?? null,
+            material_name: r.material_name ?? null,
+            inventory_id: r.inventory_id ?? null,
+            rack: r.rack ?? null,
+            lot: r.lot ?? null,
+            source_price_group: r.price_group ?? null
+          }));
+        }
+      }
+
+      const summary = summarizeActiveRows(activeRowList);
+
+      // Verified images (status ok), org-scoped.
+      let imgQ = supabase.from("slab_images").select("id", { count: "exact", head: true }).eq("image_status", "ok");
+      imgQ = scopeOrg(imgQ, organizationId);
+      const { count: verifiedImages } = await imgQ;
 
       res.json({
         ok: true,
@@ -320,6 +379,12 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
         organization_id: organizationId,
         summary: {
           ...summary,
+          // Clear naming distinguishing cached total from latest-sync count.
+          active_cached_slab_count: activeCachedSlabCount,
+          latest_sync_slab_count: latestSyncSlabCount,
+          latest_sync_id: latestSyncId,
+          active_not_seen_in_latest_sync_count: activeNotSeenCount,
+          active_not_seen_in_latest_sync_sample: activeNotSeenSample,
           slabs_with_verified_images: Number(verifiedImages || 0),
           last_sync: lastSync
             ? {
