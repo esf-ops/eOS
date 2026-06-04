@@ -119,7 +119,16 @@ body {
    The eliteOS topbar/brand/user-chip styles now live in the shared app-shell
    at shared/eliteos-ui/eliteosTopbar.css (imported by the EliteosTopbar
    component). Quote Library has no head-finder search, so nothing topbar
-   related remains in this stylesheet. */
+   related remains in this stylesheet.
+
+   Casing override (this head only): the shared chip-role style force-uppercases
+   the subtitle so the Home Launcher renders role/titles as "ARCHITECT". Quote
+   Library upper-cases its role/title in JS instead and may fall back to the
+   user's email — which must NOT be all-caps. This higher-specificity rule lives
+   in the Quote Library bundle only, so it leaves Home and other heads untouched. */
+.eliteos-topbar .eliteos-topbar-chip-role {
+  text-transform: none;
+}
 
 /* ----- Main + content hero ---------------------------------------------- */
 

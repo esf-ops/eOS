@@ -196,15 +196,21 @@ export default function QuoteLibraryApp() {
   const [sessionToken, setSessionToken] = useState<string | null>(null);
   /**
    * Email + id come straight from the Supabase session.user object
-   * (already kept up to date by `onAuthStateChange`). We never make a new
-   * `/api/me` call from this head — the chip identity is purely client-side.
-   * Role is intentionally NOT surfaced here because we have no role claim in
-   * scope without a backend call; the user menu hides any role-gated link
-   * (e.g. System Admin) for the same reason.
+   * (already kept up to date by `onAuthStateChange`). The user's role / job
+   * title / department come from the same auth-only `GET /api/me` endpoint the
+   * Home Launcher already uses — it returns only the caller's own profile, so
+   * there is no cross-tenant exposure. We use it purely to render the topbar
+   * chip subtitle (role/title) the same way Home does; it is best-effort and
+   * the chip falls back to email if the call fails.
    */
   const [userEmail, setUserEmail] = useState<string>("");
   const [userId, setUserId] = useState<string>("");
   const [userMetaName, setUserMetaName] = useState<string>("");
+  const [userProfile, setUserProfile] = useState<{ role: string; jobTitle: string; department: string }>({
+    role: "",
+    jobTitle: "",
+    department: ""
+  });
   const [refreshBusy, setRefreshBusy] = useState(false);
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
@@ -291,8 +297,9 @@ export default function QuoteLibraryApp() {
   const workspaceInitialsValue = useMemo(() => workspaceInitials(workspaceName), [workspaceName]);
 
   /**
-   * Display values for the topbar user chip. Resolved entirely client-side
-   * from `session.user` — no `/api/me` call is added in this pass.
+   * Display values for the topbar user chip. Name/email/initials are resolved
+   * client-side from `session.user`; the role/title subtitle comes from the
+   * auth-only `GET /api/me` profile fetch above.
    */
   const userDisplayName = useMemo(
     () => userMetaName || deriveDisplayNameFromEmail(userEmail) || "Signed in",
@@ -423,6 +430,39 @@ export default function QuoteLibraryApp() {
       sub.subscription.unsubscribe();
     };
   }, [supabase]);
+
+  /**
+   * Best-effort fetch of the signed-in user's role / job title / department so
+   * the topbar chip subtitle matches the Home Launcher. Reuses the existing
+   * auth-only `GET /api/me` endpoint (own-profile only — no cross-tenant data,
+   * no new backend). Failures are non-fatal: the chip falls back to email.
+   */
+  useEffect(() => {
+    if (!sessionToken) {
+      setUserProfile({ role: "", jobTitle: "", department: "" });
+      return;
+    }
+    let alive = true;
+    (async () => {
+      try {
+        const res = (await apiGet("/api/me", sessionToken)) as {
+          user?: { role?: unknown; job_title?: unknown; department?: unknown };
+        };
+        if (!alive) return;
+        const u = res?.user ?? {};
+        setUserProfile({
+          role: String(u.role ?? "").trim(),
+          jobTitle: String(u.job_title ?? "").trim(),
+          department: String(u.department ?? "").trim()
+        });
+      } catch {
+        if (alive) setUserProfile({ role: "", jobTitle: "", department: "" });
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [sessionToken]);
 
   const loadMetrics = useCallback(async () => {
     if (!sessionToken) return;
@@ -786,8 +826,15 @@ export default function QuoteLibraryApp() {
     }
   ];
 
-  const qlChipSubtitle =
-    userDisplayEmail && userDisplayEmail.toLowerCase() !== userDisplayName.toLowerCase()
+  // Chip subtitle: match the Home Launcher's fallback order
+  // (job_title -> department -> role). Role/title is upper-cased here so it
+  // reads as a polished label (e.g. "ARCHITECT") even though the shared chip
+  // role style is not force-uppercased in this head — that keeps the email
+  // fallback in its natural casing. Email is only used when no role/title.
+  const qlRoleTitle = (userProfile.jobTitle || userProfile.department || userProfile.role || "").trim();
+  const qlChipSubtitle = qlRoleTitle
+    ? qlRoleTitle.toUpperCase()
+    : userDisplayEmail && userDisplayEmail.toLowerCase() !== userDisplayName.toLowerCase()
       ? userDisplayEmail
       : "";
 
