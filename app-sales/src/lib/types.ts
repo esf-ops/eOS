@@ -4,6 +4,8 @@ export type MeUser = {
   role: string;
   full_name?: string;
   department?: string;
+  /** Optional human-facing title from /api/me; preferred for the topbar chip subtitle. */
+  job_title?: string | null;
 };
 
 export type MeResp = { ok: boolean; user: MeUser };

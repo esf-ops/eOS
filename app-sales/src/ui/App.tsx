@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { apiFetch } from "../lib/api";
 import { config } from "../lib/config";
@@ -9,6 +9,8 @@ import SalesIntelligenceView from "./SalesIntelligenceView";
 import QuotePipelinePanel from "./QuotePipelinePanel";
 import KpiV1Panel from "./KpiV1Panel";
 import BentoDashboardView from "./BentoDashboardView";
+import EliteosTopbar from "../../../shared/eliteos-ui/EliteosTopbar";
+import type { EliteosTopbarMenuItem } from "../../../shared/eliteos-ui/EliteosTopbar";
 import "./sales-intelligence.css";
 
 /**
@@ -154,8 +156,7 @@ export default function App() {
   const [appliedFilters, setAppliedFilters] = useState<FilterState>({ ...EMPTY_FILTERS });
   const [filtersMeta, setFiltersMeta] = useState<FiltersResponse | null>(null);
 
-  const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const userMenuRef = useRef<HTMLDivElement | null>(null);
+  // Account dropdown open/close state is owned by the shared EliteosTopbar.
 
   const legacyFilterQuery = useMemo(() => buildLegacyFilterQuery(appliedFilters), [appliedFilters]);
 
@@ -238,26 +239,6 @@ export default function App() {
     };
   }, [token, session?.user?.id]);
 
-  /** Close user menu on outside click / Escape. */
-  useEffect(() => {
-    if (!userMenuOpen) return;
-    const onDocClick = (e: MouseEvent) => {
-      if (!userMenuRef.current) return;
-      if (!userMenuRef.current.contains(e.target as Node)) {
-        setUserMenuOpen(false);
-      }
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setUserMenuOpen(false);
-    };
-    document.addEventListener("mousedown", onDocClick);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDocClick);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [userMenuOpen]);
-
   async function submitLogin(ev: React.FormEvent) {
     ev.preventDefault();
     setAuthError("");
@@ -273,7 +254,6 @@ export default function App() {
   }
 
   function signOut() {
-    setUserMenuOpen(false);
     void supabase.auth.signOut();
   }
 
@@ -306,29 +286,66 @@ export default function App() {
     () => userInitialsFor(userMeName, userEmail),
     [userMeName, userEmail]
   );
-  const userRole = String(me?.user?.role ?? "").trim();
+
+  // Chip subtitle: match the Home Launcher / Quote Library fallback order
+  // (job_title -> department -> role). Role/title is upper-cased here so it
+  // reads as a polished label (e.g. "ARCHITECT"); the shared chip-role style
+  // is not force-uppercased in this head (see styles.css override) so the
+  // email fallback keeps its natural casing. Email is only used when no
+  // role/title is available, and never when it just echoes the display name.
+  const userRoleTitle = (
+    String(me?.user?.job_title ?? "").trim() ||
+    String(me?.user?.department ?? "").trim() ||
+    String(me?.user?.role ?? "").trim()
+  );
+  const userChipSubtitle = userRoleTitle
+    ? userRoleTitle.toUpperCase()
+    : userEmail && userEmail.toLowerCase() !== userDisplayName.toLowerCase()
+      ? userEmail
+      : "";
 
   const workspaceName = DEFAULT_WORKSPACE_NAME;
   const workspaceShortId = DEFAULT_WORKSPACE_SHORT;
   const workspaceLogoUrl = ELITE_LOGO_URL;
   const workspaceInitialsValue = useMemo(() => workspaceInitials(workspaceName), [workspaceName]);
 
+  const salesMenuItems: EliteosTopbarMenuItem[] = [
+    {
+      label: "Open Home",
+      meta: "eliteOS Launcher",
+      href: config.homeUrl,
+      icon: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 11.5L12 4l9 7.5" />
+          <path d="M5 10v10h14V10" />
+          <path d="M10 20v-6h4v6" />
+        </svg>
+      )
+    },
+    {
+      label: "Profile & preferences",
+      meta: "eliteOS Home",
+      href: `${config.homeUrl}?view=profile`,
+      title: "Profile & preferences",
+      icon: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="8" r="3.5" />
+          <path d="M5 20c1.5-3.5 4.2-5 7-5s5.5 1.5 7 5" />
+        </svg>
+      )
+    }
+  ];
+
   const accessForbidden = Boolean(loadError && loadError.includes("do not have access"));
 
   if (authBootstrapError.trim() && !session?.access_token) {
     return (
       <div className="sales-shell">
-        <header className="eos-topbar" role="banner">
-          <span className="eos-brand-row" aria-label={`eliteOS Sales Dashboard — ${workspaceName}`}>
-            <span className="eos-brand-mark" aria-hidden>
-              <img src={workspaceLogoUrl} alt="" />
-            </span>
-            <span className="eos-brand-text">
-              <span className="eos-brand-wordmark">eliteOS</span>
-              <span className="eos-brand-sub">Sales Dashboard · {workspaceName}</span>
-            </span>
-          </span>
-        </header>
+        <EliteosTopbar
+          appName="Sales Dashboard"
+          organizationName={workspaceName}
+          logoSrc={workspaceLogoUrl}
+        />
         <main className="sales-main">
           <section className="eos-auth-panel" aria-label="Sign-in unavailable">
             <p className="eos-auth-eyebrow">Sales Dashboard · {workspaceName}</p>
@@ -347,21 +364,12 @@ export default function App() {
   if (!session?.access_token) {
     return (
       <div className="sales-shell">
-        <header className="eos-topbar" role="banner">
-          <a
-            href={config.homeUrl}
-            className="eos-brand-row"
-            aria-label={`eliteOS Sales Dashboard — ${workspaceName}`}
-          >
-            <span className="eos-brand-mark" aria-hidden>
-              <img src={workspaceLogoUrl} alt="" />
-            </span>
-            <span className="eos-brand-text">
-              <span className="eos-brand-wordmark">eliteOS</span>
-              <span className="eos-brand-sub">Sales Dashboard · {workspaceName}</span>
-            </span>
-          </a>
-        </header>
+        <EliteosTopbar
+          appName="Sales Dashboard"
+          organizationName={workspaceName}
+          logoSrc={workspaceLogoUrl}
+          homeHref={config.homeUrl}
+        />
         <main className="sales-main">
           <section className="eos-auth-panel" aria-label="Sign in">
             <p className="eos-auth-eyebrow">Internal tool · Sales Dashboard</p>
@@ -410,119 +418,18 @@ export default function App() {
 
   return (
     <div className="sales-shell">
-      <header className="eos-topbar" role="banner">
-        <a
-          href={config.homeUrl}
-          className="eos-brand-row"
-          aria-label={`eliteOS Sales Dashboard — ${workspaceName}`}
-        >
-          <span className="eos-brand-mark" aria-hidden>
-            <img src={workspaceLogoUrl} alt="" />
-          </span>
-          <span className="eos-brand-text">
-            <span className="eos-brand-wordmark">eliteOS</span>
-            <span className="eos-brand-sub">Sales Dashboard · {workspaceName}</span>
-          </span>
-        </a>
-        <div className="eos-topbar-actions">
-          <div className="eos-account-wrap" ref={userMenuRef}>
-            <button
-              type="button"
-              className={`eos-account${userMenuOpen ? " is-open" : ""}`}
-              aria-label="Open account menu"
-              aria-haspopup="menu"
-              aria-expanded={userMenuOpen}
-              onClick={() => setUserMenuOpen((v) => !v)}
-            >
-              <span className="eos-avatar" aria-hidden>
-                {userDisplayInitials}
-              </span>
-              <span className="eos-account-text">
-                <span className="eos-account-name">{userDisplayName}</span>
-                {userRole || (userEmail && userEmail.toLowerCase() !== userDisplayName.toLowerCase()) ? (
-                  <span className="eos-account-role">
-                    {userRole ? `role · ${userRole}` : userEmail}
-                  </span>
-                ) : null}
-              </span>
-              <span className="eos-account-caret" aria-hidden>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="6 9 12 15 18 9" />
-                </svg>
-              </span>
-            </button>
-            {userMenuOpen ? (
-              <div className="eos-user-menu" role="menu" aria-label="Account menu">
-                <div className="eos-user-menu-header">
-                  <p className="eos-user-menu-name">{userDisplayName}</p>
-                  {userEmail ? <p className="eos-user-menu-email">{userEmail}</p> : null}
-                  <p className="eos-user-menu-workspace">
-                    <span>Workspace ·</span> <strong>{workspaceName}</strong>
-                    <span className="eos-user-menu-sep" aria-hidden>·</span>
-                    <span>on eliteOS</span>
-                  </p>
-                </div>
-                <div className="eos-user-menu-list">
-                  <a
-                    href={config.homeUrl}
-                    className="eos-user-menu-item"
-                    role="menuitem"
-                    onClick={() => setUserMenuOpen(false)}
-                  >
-                    <span className="eos-user-menu-icon" aria-hidden>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M3 11.5L12 4l9 7.5" />
-                        <path d="M5 10v10h14V10" />
-                        <path d="M10 20v-6h4v6" />
-                      </svg>
-                    </span>
-                    <span className="eos-user-menu-label">
-                      <span>Open Home</span>
-                      <span className="eos-user-menu-meta">eliteOS Launcher</span>
-                    </span>
-                    <span className="eos-user-menu-shortcut" aria-hidden>↗</span>
-                  </a>
-                  <a
-                    href={`${config.homeUrl}?view=profile`}
-                    className="eos-user-menu-item"
-                    role="menuitem"
-                    onClick={() => setUserMenuOpen(false)}
-                    title="Profile & preferences"
-                  >
-                    <span className="eos-user-menu-icon" aria-hidden>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                        <circle cx="12" cy="8" r="3.5" />
-                        <path d="M5 20c1.5-3.5 4.2-5 7-5s5.5 1.5 7 5" />
-                      </svg>
-                    </span>
-                    <span className="eos-user-menu-label">
-                      <span>Profile &amp; preferences</span>
-                      <span className="eos-user-menu-meta">eliteOS Home</span>
-                    </span>
-                  </a>
-                </div>
-                <div className="eos-user-menu-footer">
-                  <button
-                    type="button"
-                    className="eos-user-menu-item eos-user-menu-signout"
-                    role="menuitem"
-                    onClick={signOut}
-                  >
-                    <span className="eos-user-menu-icon" aria-hidden>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                        <polyline points="16 17 21 12 16 7" />
-                        <line x1="21" y1="12" x2="9" y2="12" />
-                      </svg>
-                    </span>
-                    <span className="eos-user-menu-label">Sign out</span>
-                  </button>
-                </div>
-              </div>
-            ) : null}
-          </div>
-        </div>
-      </header>
+      <EliteosTopbar
+        appName="Sales Dashboard"
+        organizationName={workspaceName}
+        logoSrc={workspaceLogoUrl}
+        homeHref={config.homeUrl}
+        userName={userDisplayName}
+        userEmail={userEmail}
+        userSubtitle={userChipSubtitle}
+        initials={userDisplayInitials}
+        menuItems={salesMenuItems}
+        onSignOut={signOut}
+      />
 
       <main className="sales-main">
         {accessForbidden ? (
