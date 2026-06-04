@@ -34,6 +34,7 @@ import VisualLayoutCanvas, {
 import { resolveAccessToken } from "./lib/authSession";
 import { QuoteFilesPanel } from "./QuoteFilesPanel";
 import { buildCustomerEstimateDisplayModel } from "./lib/customerEstimateDisplayModel";
+import { splitInternalEstimateCustomLines } from "./lib/internalEstimateCustomLines";
 import { friendlyApiErrorMessage } from "./lib/saveErrorMessage";
 import { getSupabase } from "./lib/supabase";
 import RoomScopeBuilder from "@quote-ui/RoomScopeBuilder";
@@ -1511,41 +1512,11 @@ export default function InternalEstimateApp() {
     [internalGroupComparison, customerDisplayGroups, comparisonGroupColorLabels]
   );
 
-  const visibleCustomerLines = useMemo((): CustomerLineItem[] => {
-    const out: CustomerLineItem[] = [];
-    for (const r of customLineRows) {
-      if (!r.customerFacing || !r.name.trim()) continue;
-      const q = num(r.qty) || 1;
-      const p = num(r.unitPrice);
-      if (q <= 0) continue;
-      const linkedRoom = r.roomId ? roomDrafts.find((rd) => rd.id === r.roomId) : null;
-      const roomName = (linkedRoom?.name || r.roomName).trim();
-      if (r.category === "Discount/Credit") {
-        if (p >= 0) continue;
-        out.push({
-          lineKey: r.id,
-          name: r.name.trim(),
-          description: r.description.trim(),
-          qty: q,
-          unitPrice: p,
-          lineTotal: round2(q * p),
-          roomName
-        });
-        continue;
-      }
-      if (p === 0) continue;
-      out.push({
-        lineKey: r.id,
-        name: r.name.trim(),
-        description: r.description.trim(),
-        qty: q,
-        unitPrice: p,
-        lineTotal: round2(q * p),
-        roomName
-      });
-    }
-    return out;
-  }, [customLineRows, roomDrafts]);
+  const customLineSplit = useMemo(
+    () => splitInternalEstimateCustomLines({ customLineRows, roomDrafts }),
+    [customLineRows, roomDrafts]
+  );
+  const visibleCustomerLines = customLineSplit.visibleCustomerLines;
 
   const primaryColorLabel = useMemo(() => {
     if (colorTbd) return "";
@@ -1621,22 +1592,7 @@ export default function InternalEstimateApp() {
     ]
   );
 
-  const internalOnlyAdjustDollars = useMemo(() => {
-    let visibleCustom = 0;
-    for (const r of customLineRows) {
-      if (!r.customerFacing || !r.name.trim()) continue;
-      const q = num(r.qty) || 1;
-      const p = num(r.unitPrice);
-      if (q <= 0) continue;
-      if (r.category === "Discount/Credit") {
-        if (p < 0) visibleCustom += q * p;
-        continue;
-      }
-      if (p === 0) continue;
-      visibleCustom += q * p;
-    }
-    return round2(customLinePreviewTotals - visibleCustom);
-  }, [customLineRows, customLinePreviewTotals]);
+  const internalOnlyAdjustDollars = customLineSplit.internalOnlyAdjustDollars;
 
   /** Customer-facing structured custom lines only (included in estimate total; listed by name on PDF). */
   const customerFacingCustomLinesDollars = useMemo(
