@@ -16,5 +16,10 @@
       "@quote-ui/*": ["../app-quote/src/ui/*"]
     }
   },
-  "include": ["src", "../shared/eliteos-supabase/**/*.ts"]
+  "include": [
+    "src",
+    "../shared/eliteos-supabase/**/*.ts",
+    "../shared/eliteos-ui/**/*.ts",
+    "../shared/eliteos-ui/**/*.tsx"
+  ]
 }

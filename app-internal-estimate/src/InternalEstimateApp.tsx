@@ -37,6 +37,8 @@ import { buildCustomerEstimateDisplayModel } from "./lib/customerEstimateDisplay
 import { splitInternalEstimateCustomLines } from "./lib/internalEstimateCustomLines";
 import { friendlyApiErrorMessage } from "./lib/saveErrorMessage";
 import { getSupabase } from "./lib/supabase";
+import EliteosTopbar from "../../shared/eliteos-ui/EliteosTopbar";
+import type { EliteosTopbarMenuItem } from "../../shared/eliteos-ui/EliteosTopbar";
 import RoomScopeBuilder from "@quote-ui/RoomScopeBuilder";
 
 const MATERIAL_GROUPS = [
@@ -290,17 +292,19 @@ export default function InternalEstimateApp() {
   const [sessionToken, setSessionToken] = useState<string | null>(null);
   /**
    * Email + id come straight from the Supabase session.user object
-   * (already kept up to date by `onAuthStateChange`). We never add a new
-   * `/api/me` call from this head in this pass — the topbar chip identity is
-   * purely client-side. Role is intentionally NOT surfaced here because we
-   * have no role claim in scope without a backend call; the user menu hides
-   * any role-gated link (e.g. System Admin) for the same reason.
+   * (already kept up to date by `onAuthStateChange`). Role/title for the
+   * topbar chip subtitle is fetched best-effort from `/api/me` (see
+   * `userProfile`) — display-only, and never gates estimate data flow.
    */
   const [userEmail, setUserEmail] = useState<string>("");
   const [userId, setUserId] = useState<string>("");
   const [userMetaName, setUserMetaName] = useState<string>("");
-  const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const userMenuRef = useRef<HTMLDivElement | null>(null);
+  /** Best-effort display-only role/title from `/api/me`. */
+  const [userProfile, setUserProfile] = useState<{ role: string; jobTitle: string; department: string }>({
+    role: "",
+    jobTitle: "",
+    department: ""
+  });
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
@@ -449,7 +453,7 @@ export default function InternalEstimateApp() {
     setUserEmail("");
     setUserId("");
     setUserMetaName("");
-    setUserMenuOpen(false);
+    setUserProfile({ role: "", jobTitle: "", department: "" });
   }, [supabase]);
 
   useEffect(() => {
@@ -486,25 +490,33 @@ export default function InternalEstimateApp() {
     };
   }, [supabase]);
 
-  /** Close the user menu on outside click / Escape. */
+  /**
+   * Best-effort role/title fetch for the topbar chip subtitle. Non-fatal:
+   * any failure leaves the subtitle on its email fallback. Does not touch
+   * estimate data state. Mirrors the Quote Library / Pricing Admin pattern.
+   */
   useEffect(() => {
-    if (!userMenuOpen) return;
-    const onDocClick = (e: MouseEvent) => {
-      if (!userMenuRef.current) return;
-      if (!userMenuRef.current.contains(e.target as Node)) {
-        setUserMenuOpen(false);
+    if (!sessionToken) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const me = (await apiGetJson("/api/me", sessionToken)) as {
+          user?: { role?: string; job_title?: string | null; department?: string | null };
+        };
+        if (cancelled) return;
+        setUserProfile({
+          role: String(me?.user?.role ?? "").trim(),
+          jobTitle: String(me?.user?.job_title ?? "").trim(),
+          department: String(me?.user?.department ?? "").trim()
+        });
+      } catch {
+        /* non-fatal — chip subtitle falls back to email */
       }
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setUserMenuOpen(false);
-    };
-    document.addEventListener("mousedown", onDocClick);
-    document.addEventListener("keydown", onKey);
+    })();
     return () => {
-      document.removeEventListener("mousedown", onDocClick);
-      document.removeEventListener("keydown", onKey);
+      cancelled = true;
     };
-  }, [userMenuOpen]);
+  }, [sessionToken]);
 
   /**
    * Scroll-derived active workflow section for the left rail highlight.
@@ -1699,10 +1711,10 @@ export default function InternalEstimateApp() {
   const workspaceInitialsValue = useMemo(() => workspaceInitials(workspaceName), [workspaceName]);
 
   /**
-   * Display values for the topbar user chip. Resolved entirely client-side
-   * from `session.user` — no `/api/me` call is added in this pass. The
-   * userId state is kept in scope so a future System Admin link / preferences
-   * page can read it without churning the user-menu plumbing.
+   * Display values for the topbar user chip. Name/email/initials resolve
+   * client-side from `session.user`; the subtitle prefers role/title from the
+   * best-effort `/api/me` fetch above. The userId state is kept in scope so a
+   * future System Admin link / preferences page can read it.
    */
   void userId;
   const userDisplayName = useMemo(
@@ -1710,6 +1722,13 @@ export default function InternalEstimateApp() {
     [userMetaName, userEmail]
   );
   const userDisplayEmail = userEmail;
+  const userChipSubtitle = useMemo(() => {
+    const roleTitle = (userProfile.jobTitle || userProfile.department || userProfile.role || "").trim();
+    if (roleTitle) return roleTitle.toUpperCase();
+    return userDisplayEmail && userDisplayEmail.toLowerCase() !== userDisplayName.toLowerCase()
+      ? userDisplayEmail
+      : "";
+  }, [userProfile, userDisplayEmail, userDisplayName]);
   const userDisplayInitials = useMemo(
     () => userInitialsFor(userMetaName, userEmail),
     [userMetaName, userEmail]
@@ -1949,192 +1968,113 @@ export default function InternalEstimateApp() {
     computeRevisionBaselineSig
   ]);
 
+  const ieHomeIcon = (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 11.5L12 4l9 7.5" />
+      <path d="M5 10v10h14V10" />
+      <path d="M10 20v-6h4v6" />
+    </svg>
+  );
+  const ieLibraryIcon = (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4" width="18" height="16" rx="2.5" />
+      <path d="M3 9h18" />
+      <path d="M8 13h6" />
+      <path d="M8 16h8" />
+    </svg>
+  );
+  const iePlusIcon = (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 5v14" />
+      <path d="M5 12h14" />
+    </svg>
+  );
+  const ieProfileIcon = (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="8" r="3.5" />
+      <path d="M5 20c1.5-3.5 4.2-5 7-5s5.5 1.5 7 5" />
+    </svg>
+  );
+
+  /**
+   * "Start new quote" stays a visible topbar action (exact existing handler),
+   * and the "Preview mode" pill keeps its existing signed-out-only condition.
+   * Both render in the shared topbar's primary-action area.
+   */
+  const iePrimaryActions = (
+    <>
+      <button
+        type="button"
+        className="topbar-action-btn"
+        onClick={handleStartNewQuoteClick}
+        title="Start a new quote (saves or updates current first)"
+      >
+        <span className="topbar-action-btn-icon" aria-hidden>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 5v14" />
+            <path d="M5 12h14" />
+          </svg>
+        </span>
+        <span className="topbar-action-btn-label">Start new quote</span>
+      </button>
+      {!sessionToken ? (
+        <span className="topbar-preview-pill" title="Sign in below to save, calculate, or print">
+          <span className="topbar-preview-pill-dot" aria-hidden />
+          <span>Preview mode</span>
+        </span>
+      ) : null}
+    </>
+  );
+
+  const ieMenuItems: EliteosTopbarMenuItem[] = [
+    { label: "Open Home", meta: "eliteOS Launcher", href: homeBase, icon: ieHomeIcon },
+    {
+      label: "Open Quote Library",
+      meta: "Search, statuses, revisions",
+      onClick: () => window.open(`${quoteLibraryUrl}/`, "_blank", "noopener,noreferrer"),
+      icon: ieLibraryIcon
+    },
+    {
+      label: "Start new quote",
+      meta: "Saves or updates current first",
+      onClick: () => handleStartNewQuoteClick(),
+      icon: iePlusIcon
+    },
+    {
+      label: "Profile & preferences",
+      meta: "eliteOS Home",
+      href: `${homeLauncherUrl()}?view=profile`,
+      title: "Profile & preferences",
+      icon: ieProfileIcon
+    }
+  ];
+
   return (
     <div className={`shell page-internal-estimate${urlQuoteId && loadedFromLibrary ? " ie-shell-loaded" : ""}${sessionToken ? " ie-shell-signed-in" : " ie-shell-preview"}`}>
       <div className="ie-no-print">
-      <header className="topbar" role="banner">
-        <a
-          href="/"
-          className="brand-row brand-row-link"
-          aria-label={`eliteOS Internal Estimate — ${workspaceName}`}
-        >
-          <span className="brand-mark" aria-hidden>
-            <img src={workspaceLogoUrl ?? EOS_LOGO_URL} alt="" />
-          </span>
-          <span className="brand-text">
-            <span className="brand-wordmark">eliteOS</span>
-            <span className="brand-sub">Internal Estimate · {workspaceName}</span>
-          </span>
-        </a>
-        <div className="topbar-actions">
-          <button
-            type="button"
-            className="topbar-action-btn"
-            onClick={handleStartNewQuoteClick}
-            title="Start a new quote (saves or updates current first)"
-          >
-            <span className="topbar-action-btn-icon" aria-hidden>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 5v14" />
-                <path d="M5 12h14" />
-              </svg>
-            </span>
-            <span className="topbar-action-btn-label">Start new quote</span>
-          </button>
-          {!sessionToken ? (
-            <span
-              className="topbar-preview-pill"
-              title="Sign in below to save, calculate, or print"
-            >
-              <span className="topbar-preview-pill-dot" aria-hidden />
-              <span>Preview mode</span>
-            </span>
-          ) : null}
-          {sessionToken ? (
-            <div className="topbar-account-wrap" ref={userMenuRef}>
-              <button
-                type="button"
-                className={`topbar-account${userMenuOpen ? " is-open" : ""}`}
-                aria-label="Open account menu"
-                aria-haspopup="menu"
-                aria-expanded={userMenuOpen}
-                onClick={() => setUserMenuOpen((v) => !v)}
-              >
-                <span className="topbar-avatar" aria-hidden>
-                  {userDisplayInitials}
-                </span>
-                <span className="topbar-account-text">
-                  <span className="topbar-account-name">{userDisplayName}</span>
-                  {userDisplayEmail &&
-                  userDisplayEmail.toLowerCase() !== userDisplayName.toLowerCase() ? (
-                    <span className="topbar-account-role">{userDisplayEmail}</span>
-                  ) : null}
-                </span>
-                <span className="topbar-account-caret" aria-hidden>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="6 9 12 15 18 9" />
-                  </svg>
-                </span>
-              </button>
-              {userMenuOpen ? (
-                <div className="user-menu" role="menu" aria-label="Account menu">
-                  <div className="user-menu-header">
-                    <p className="user-menu-name">{userDisplayName}</p>
-                    {userDisplayEmail ? <p className="user-menu-email">{userDisplayEmail}</p> : null}
-                    <p className="user-menu-workspace">
-                      <span>Workspace ·</span>{" "}
-                      <strong>{workspaceName}</strong>
-                      <span className="user-menu-sep" aria-hidden>·</span>
-                      <span>on slabOS</span>
-                    </p>
-                  </div>
-                  <div className="user-menu-list">
-                    <a
-                      href={homeBase}
-                      className="user-menu-item"
-                      role="menuitem"
-                      onClick={() => setUserMenuOpen(false)}
-                    >
-                      <span className="user-menu-icon" aria-hidden>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M3 11.5L12 4l9 7.5" />
-                          <path d="M5 10v10h14V10" />
-                          <path d="M10 20v-6h4v6" />
-                        </svg>
-                      </span>
-                      <span className="user-menu-label">
-                        <span>Open Home</span>
-                        <span className="user-menu-meta">eliteOS Launcher</span>
-                      </span>
-                      <span className="user-menu-shortcut" aria-hidden>↗</span>
-                    </a>
-                    <a
-                      href={`${quoteLibraryUrl}/`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="user-menu-item"
-                      role="menuitem"
-                      onClick={() => setUserMenuOpen(false)}
-                    >
-                      <span className="user-menu-icon" aria-hidden>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                          <rect x="3" y="4" width="18" height="16" rx="2.5" />
-                          <path d="M3 9h18" />
-                          <path d="M8 13h6" />
-                          <path d="M8 16h8" />
-                        </svg>
-                      </span>
-                      <span className="user-menu-label">
-                        <span>Open Quote Library</span>
-                        <span className="user-menu-meta">Search, statuses, revisions</span>
-                      </span>
-                      <span className="user-menu-shortcut" aria-hidden>↗</span>
-                    </a>
-                    <button
-                      type="button"
-                      className="user-menu-item"
-                      role="menuitem"
-                      onClick={() => {
-                        setUserMenuOpen(false);
-                        handleStartNewQuoteClick();
-                      }}
-                    >
-                      <span className="user-menu-icon" aria-hidden>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M12 5v14" />
-                          <path d="M5 12h14" />
-                        </svg>
-                      </span>
-                      <span className="user-menu-label">
-                        <span>Start new quote</span>
-                        <span className="user-menu-meta">Saves or updates current first</span>
-                      </span>
-                    </button>
-                    <a
-                      href={`${homeLauncherUrl()}?view=profile`}
-                      className="user-menu-item"
-                      role="menuitem"
-                      onClick={() => setUserMenuOpen(false)}
-                      title="Profile & preferences"
-                    >
-                      <span className="user-menu-icon" aria-hidden>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                          <circle cx="12" cy="8" r="3.5" />
-                          <path d="M5 20c1.5-3.5 4.2-5 7-5s5.5 1.5 7 5" />
-                        </svg>
-                      </span>
-                      <span className="user-menu-label">
-                        <span>Profile &amp; preferences</span>
-                        <span className="user-menu-meta">eliteOS Home</span>
-                      </span>
-                    </a>
-                  </div>
-                  <div className="user-menu-footer">
-                    <button
-                      type="button"
-                      className="user-menu-item user-menu-signout"
-                      role="menuitem"
-                      onClick={() => {
-                        setUserMenuOpen(false);
-                        void signOut();
-                      }}
-                    >
-                      <span className="user-menu-icon" aria-hidden>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                          <polyline points="16 17 21 12 16 7" />
-                          <line x1="21" y1="12" x2="9" y2="12" />
-                        </svg>
-                      </span>
-                      <span className="user-menu-label">Sign out</span>
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-      </header>
+      {sessionToken ? (
+        <EliteosTopbar
+          appName="Internal Estimate"
+          organizationName={workspaceName}
+          logoSrc={workspaceLogoUrl ?? EOS_LOGO_URL}
+          homeHref="/"
+          primaryActionSlot={iePrimaryActions}
+          userName={userDisplayName}
+          userEmail={userDisplayEmail}
+          userSubtitle={userChipSubtitle}
+          initials={userDisplayInitials}
+          menuItems={ieMenuItems}
+          onSignOut={() => void signOut()}
+        />
+      ) : (
+        <EliteosTopbar
+          appName="Internal Estimate"
+          organizationName={workspaceName}
+          logoSrc={workspaceLogoUrl ?? EOS_LOGO_URL}
+          homeHref="/"
+          primaryActionSlot={iePrimaryActions}
+        />
+      )}
 
       <div className="ie-shell-body">
         <section className="ie-hero" aria-labelledby="ie-hero-title">
