@@ -878,3 +878,17 @@
 
 ---
 
+### 69. SlabCloud image URL verification — backend-only & write-gated; first dry-run shows guessed URL pattern is wrong (404)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-06-04 |
+| **Decision** | Image URL verification is a **separate backend step** from the inventory sync, **gated behind `SLABCLOUD_IMAGE_VERIFY_WRITE_ENABLED=1`**. It reads `slab_images` rows for an org, checks each URL with **HEAD** (lightweight `Range: bytes=0-0` GET fallback only when HEAD is unsupported), and updates **only** `slab_images.image_status` + `last_checked_at` + `updated_at`. It **never downloads/stores image bytes**, never touches `slab_inventory`, never creates/deletes rows, never marks slabs inactive, and never writes back to SlabCloud/Slabsmith. Bounded concurrency (default 3), per-request timeout, no cookies/auth. Reading Supabase requires org id + service-role config even in dry-run. |
+| **First dry-run finding** | 2026-06-04: verified 50 `unknown` rows (thumbnail-first) → **0 ok · 50 missing · 0 error** (clean `HEAD 404`); a follow-up image-first check of 10 rows → **10 missing (404)**. The **guessed** URL pattern (`/slabs/{companyCode}/{SlabID}.jpg` and `..._thumb.jpg`) is **not** SlabCloud's real image scheme. The verification tooling works correctly; only the URL pattern is unconfirmed. |
+| **Consequence** | Slab-photo display (Phase 2 gallery / Phase 3 showroom) is **blocked** until the real image/thumbnail URL format is confirmed with SlabCloud. The `slab_images` schema already supports multiple `image_url_pattern` values per slab, so the real pattern can be added alongside the guessed one and re-verified without migration. No production write of statuses was performed. |
+| **Tests** | `slabCloudImageVerification.test.mjs` (mock Supabase + mock fetch, no network): write gate, no-writes-when-off, writes-when-on, ok/missing/error verdicts, HEAD 405→GET fallback, org-scoped query only, no deletes, slab_inventory never updated, concurrency cap, skipped on missing URL, requires db+org. All passing. |
+| **Impacted files/docs** | `backend-core/src/slabcloud/slabCloudImageVerification.js` (created), `backend-core/src/scripts/slabcloud/verifySlabCloudImages.js` (created), `backend-core/src/slabcloud/slabCloudImageVerification.test.mjs` (created), `package.json` (`eos:slabcloud:verify-images`, `eos:test:slabcloud-images`), `docs/eliteos/slabcloud-inventory-poc.md`, `docs/eliteos/slabos-slab-inventory-profit-engine-roadmap.md`, `docs/eliteos/FEATURE_DECISIONS.md` (this entry). |
+| **Revisit trigger** | SlabCloud confirms the real image URL pattern; a write-enabled verification run is reviewed/approved; image caching (Supabase Storage) is proposed; Slab Inventory head/gallery begins. |
+
+---
+

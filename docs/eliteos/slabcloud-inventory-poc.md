@@ -1,7 +1,7 @@
 # SlabCloud Inventory Integration — Read-Only Dry-Run POC
 
-**Status:** POC complete · full dry-run succeeded · SQL **applied & verified in Supabase** · write-gated persistence layer built (dry-run by default; no production write yet).
-**Date:** 2026-06-04 (POC) · 2026-06-04 (full dry-run + SQL draft) · 2026-06-04 (SQL applied + persistence layer)
+**Status:** POC complete · full dry-run succeeded · SQL **applied & verified in Supabase** · write-gated persistence layer built · image verification built (backend-only, write-gated).
+**Date:** 2026-06-04 (POC) · 2026-06-04 (full dry-run + SQL draft) · 2026-06-04 (SQL applied + persistence layer) · 2026-06-04 (image verification)
 **Owner module:** `backend-core/src/slabcloud/`
 
 This document describes the first foundation for a future slabOS **Slab Inventory / showroom / SlabRoom** experience: a safe way to pull Elite Stone Fabrication's slab inventory out of SlabCloud's JSON endpoints and normalize it into a consistent internal shape.
@@ -58,6 +58,9 @@ It **never** writes to a database, **never** mutates external systems, and **nev
 | `backend-core/src/slabcloud/slabCloudSync.js` | Orchestration: fetch → normalize → persist. Returns one summary object. |
 | `backend-core/src/scripts/slabcloud/cacheSlabCloudInventory.js` | Cache script. Dry-run by default; writes to Supabase only with the gate enabled. |
 | `backend-core/src/slabcloud/slabCloudPersistence.test.mjs` | Persistence unit tests (mock Supabase, no network). |
+| `backend-core/src/slabcloud/slabCloudImageVerification.js` | **Write-gated** image URL verification (HEAD + Range-GET fallback). Updates only `slab_images` status. No bytes downloaded. |
+| `backend-core/src/scripts/slabcloud/verifySlabCloudImages.js` | Image verify script. Dry-run by default; updates `slab_images` only with the gate enabled. |
+| `backend-core/src/slabcloud/slabCloudImageVerification.test.mjs` | Image verification unit tests (mock Supabase + mock fetch). |
 
 ### NPM scripts
 
@@ -68,9 +71,13 @@ npm run eos:slabcloud:inventory-poc
 # Run the cache flow in dry-run mode (no Supabase writes)
 npm run eos:slabcloud:cache
 
+# Verify image URLs in dry-run mode (no DB writes; needs org id + Supabase creds)
+SLABCLOUD_ORGANIZATION_ID=<org-uuid> npm run eos:slabcloud:verify-images
+
 # Run the unit tests
 npm run eos:test:slabcloud-inventory
 npm run eos:test:slabcloud-cache
+npm run eos:test:slabcloud-images
 ```
 
 ---
@@ -244,6 +251,35 @@ The cache SQL (`backend-core/supabase/eliteos_slabcloud_inventory_cache.sql`) ha
 | `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | _(none)_ | Service-role config, required only when writing. |
 
 **Rollout sequence:** dry-run smoke first → manual single write with the gate enabled (reviewed) → then consider scheduling. **No scheduled automation exists yet. No UI exists yet.**
+
+---
+
+## 10b. Image URL verification (separate from inventory sync)
+
+Image verification is a **separate** backend step from the inventory sync — it never re-fetches or mutates inventory. It reads `slab_images` rows for an organization, verifies the URLs, and (behind its own gate) updates only `slab_images.image_status` + timestamps.
+
+**How it checks:** HEAD request first; a lightweight `Range: bytes=0-0` GET fallback **only** when the server reports HEAD is unsupported (405/501). **No image bytes are ever downloaded or stored** — the response body is canceled. Bounded concurrency (default 3), per-request timeout, no cookies/auth.
+
+**Statuses:** `ok` (2xx) · `missing` (404/410) · `error` (other/timeout/network) · `skipped` (row has no URL). Only `slab_images` is updated; `slab_inventory` is never touched; no rows are created or deleted; no slab is marked inactive.
+
+**Write gate:** `SLABCLOUD_IMAGE_VERIFY_WRITE_ENABLED=1` (exactly). Off by default → checks run and report would-update counts but **no DB writes**. Reading Supabase requires `SLABCLOUD_ORGANIZATION_ID` + service-role config regardless of the gate.
+
+**Env vars:**
+
+| Var | Default | Meaning |
+|-----|---------|---------|
+| `SLABCLOUD_IMAGE_VERIFY_WRITE_ENABLED` | _(off)_ | Must equal `1` to update `slab_images`. |
+| `SLABCLOUD_ORGANIZATION_ID` | _(none)_ | Required (Supabase read scope). |
+| `SLABCLOUD_IMAGE_VERIFY_LIMIT` | `50` | Max rows per run. |
+| `SLABCLOUD_IMAGE_VERIFY_CONCURRENCY` | `3` | Parallel checks. |
+| `SLABCLOUD_IMAGE_VERIFY_STATUS` | `unknown` | Row filter (`all` = no filter). |
+| `SLABCLOUD_IMAGE_VERIFY_KIND` | `thumbnail-first` | `thumbnail-first` / `image-first` / `thumbnail` / `image`. |
+
+### ⚠️ First dry-run finding (2026-06-04): guessed URL pattern returns 404
+
+The first dry-run verified 50 `unknown` rows (`thumbnail-first`): **0 ok · 50 missing · 0 error**, all clean `HEAD 404`. A follow-up `image-first` check of 10 rows was also **10 missing (404)**.
+
+**Conclusion:** The *guessed* URL pattern (`/slabs/{companyCode}/{SlabID}.jpg` and `..._thumb.jpg`) is **not** the real SlabCloud image URL scheme. The verification tooling is working correctly (it cleanly classified them as `missing`), but the URL pattern itself is unconfirmed and must be resolved before image display is built. **Action item:** ask SlabCloud for the real image/thumbnail URL format (an open question already tracked in §8a / roadmap). Once known, add it as a new `image_url_pattern` (the schema supports multiple patterns per slab) and re-verify.
 
 ---
 

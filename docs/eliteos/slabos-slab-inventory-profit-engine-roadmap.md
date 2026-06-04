@@ -162,6 +162,13 @@ These are non-negotiable guardrails for every phase:
 
 **Remaining for Phase 1:** dry-run smoke ✅ → first manual gated write (reviewed) → SlabCloud written confirmation → optional scheduling. No UI, no holds, no inactive marking, no writeback.
 
+**Image verification (built, write-gated):**
+- `backend-core/src/slabcloud/slabCloudImageVerification.js` — HEAD (+ Range-GET fallback) checks; updates only `slab_images.image_status`; never downloads bytes; gated behind `SLABCLOUD_IMAGE_VERIFY_WRITE_ENABLED=1`
+- `backend-core/src/scripts/slabcloud/verifySlabCloudImages.js` — dry-run by default
+- `backend-core/src/slabcloud/slabCloudImageVerification.test.mjs` — mock Supabase + mock fetch (all passing)
+
+> **⚠️ Finding (2026-06-04):** the first dry-run found the *guessed* image URL pattern returns **404 for all rows** (thumbnail and full-size). The guessed pattern is not SlabCloud's real scheme — **confirm the real image/thumbnail URL format with SlabCloud** before building any gallery/showroom. The verification machinery itself works (cleanly reports `missing`); only the URL pattern is wrong. This blocks slab-photo display in Phase 2/3 until resolved.
+
 **Potential tables (planning sketches — no SQL yet):**
 
 | Table | Purpose |
