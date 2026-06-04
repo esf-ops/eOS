@@ -3123,6 +3123,303 @@ export async function salesKpiV1Handler(req, supabaseGetter) {
 
 // ── End KPI v1 ────────────────────────────────────────────────────────────
 
+// ── Sales Dashboard Summary (Phase 1 — quote_headers only) ────────────────
+//
+// GET /api/sales-dashboard/summary
+//
+// Pre-aggregated, chart-ready bento dashboard payload built ONLY from reliable
+// Quote Library data (`quote_headers`). Phase 1 intentionally does NOT use
+// Moraware prepared facts or branch/rep attribution — those remain gated.
+// Frontend widgets receive prepared aggregates; no business aggregation happens
+// in the browser.
+
+const SUMMARY_RANGE_KEYS = new Set(["ytd", "rolling_30", "this_month", "this_week"]);
+
+const SUMMARY_QUOTE_SELECT =
+  "id,quote_number,customer_name,project_name,sales_rep,branch,grand_total,calculation_snapshot,quote_status,created_at,monday_item_id";
+
+/** Outcome bucket for a quote status: "won" | "lost" | "open". Archived rows are excluded upstream by query. */
+function classifyQuoteOutcome(status) {
+  const s = String(status ?? "").trim().toLowerCase();
+  if (/won|sold|accepted|approved/.test(s)) return "won";
+  if (/lost|rejected|declined|cancel/.test(s)) return "lost";
+  return "open";
+}
+
+/** Open quotes that warrant follow-up attention (aligned with quote pipeline summary). */
+function isFollowUpStatus(status) {
+  const s = String(status ?? "").trim().toLowerCase();
+  return /follow.?up|lead_submitted|reviewing/.test(s);
+}
+
+/** "YYYY-MM" → "Mon YYYY" short label for trend buckets. */
+function monthShortLabel(ym) {
+  const names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const m = Number(String(ym).slice(5, 7));
+  const name = names[m - 1] || String(ym);
+  return `${name} ${String(ym).slice(0, 4)}`;
+}
+
+/**
+ * Pure aggregation for the bento summary. Operates on already-fetched, org-scoped
+ * quote_headers rows. Returns zeros and empty arrays for empty input (never throws).
+ */
+export function buildSalesDashboardSummary(rows, { startDate, endDate, todayYmd, weekStartYmd }) {
+  let openValue = 0;
+  let wonValue = 0;
+  let lostValue = 0;
+  let openCount = 0;
+  let wonCount = 0;
+  let lostCount = 0;
+  let totalCount = 0;
+  let totalValue = 0;
+  let newToday = 0;
+  let newThisWeek = 0;
+  let followUp = 0;
+  let mondayHandoff = 0;
+  const trendMap = new Map();
+
+  for (const row of rows || []) {
+    const dateStr = row?.created_at ? String(row.created_at).slice(0, 10) : null;
+    if (!dateStr || dateStr < startDate || dateStr > endDate) continue;
+    const { value } = pickKpiCdtValue(row);
+    const outcome = classifyQuoteOutcome(row?.quote_status);
+
+    totalCount += 1;
+    totalValue += value;
+
+    if (outcome === "won") {
+      wonValue += value;
+      wonCount += 1;
+    } else if (outcome === "lost") {
+      lostValue += value;
+      lostCount += 1;
+    } else {
+      openValue += value;
+      openCount += 1;
+    }
+
+    if (dateStr === todayYmd) newToday += 1;
+    if (weekStartYmd && dateStr >= weekStartYmd && dateStr <= todayYmd) newThisWeek += 1;
+
+    if (outcome === "open" && isFollowUpStatus(row?.quote_status)) followUp += 1;
+    if (outcome === "won" && !String(row?.monday_item_id ?? "").trim()) mondayHandoff += 1;
+
+    const ym = dateStr.slice(0, 7);
+    if (!trendMap.has(ym)) {
+      trendMap.set(ym, { period_start: ym, quoted_value: 0, won_value: 0, quote_count: 0 });
+    }
+    const t = trendMap.get(ym);
+    t.quoted_value += value;
+    if (outcome === "won") t.won_value += value;
+    t.quote_count += 1;
+  }
+
+  const closed = wonCount + lostCount;
+  const winRatePct = closed > 0 ? Math.round((wonCount / closed) * 1000) / 10 : 0;
+  const averageQuoteValue = totalCount > 0 ? Math.round(totalValue / totalCount) : 0;
+
+  const trend = [...trendMap.values()]
+    .sort((a, b) => a.period_start.localeCompare(b.period_start))
+    .map((t) => ({
+      period: monthShortLabel(t.period_start),
+      period_start: t.period_start,
+      quoted_value: Math.round(t.quoted_value),
+      won_value: Math.round(t.won_value),
+      quote_count: t.quote_count
+    }));
+
+  return {
+    summary: {
+      open_pipeline_value: Math.round(openValue),
+      won_value: Math.round(wonValue),
+      active_quote_count: openCount,
+      total_quote_count: totalCount,
+      win_rate_pct: winRatePct,
+      average_quote_value: averageQuoteValue,
+      new_quotes_today: newToday,
+      new_quotes_this_week: newThisWeek
+    },
+    estimate_outcomes: [
+      { label: "Open", value: Math.round(openValue), count: openCount },
+      { label: "Won", value: Math.round(wonValue), count: wonCount },
+      { label: "Lost", value: Math.round(lostValue), count: lostCount }
+    ],
+    quote_activity: {
+      new_today: newToday,
+      new_this_week: newThisWeek,
+      follow_up_queue: followUp,
+      monday_handoff_needed: mondayHandoff,
+      average_quote_value: averageQuoteValue
+    },
+    trend
+  };
+}
+
+/** Map a quote_headers row to the public recent_quotes shape (null-safe). */
+export function mapRecentQuoteForSummary(row) {
+  const { value } = pickKpiCdtValue(row || {});
+  return {
+    id: row?.id ?? null,
+    quote_number: String(row?.quote_number ?? "").trim() || null,
+    customer: String(row?.customer_name ?? "").trim() || null,
+    project: String(row?.project_name ?? "").trim() || null,
+    salesperson: String(row?.sales_rep ?? "").trim() || null,
+    branch: String(row?.branch ?? "").trim() || null,
+    value: Math.round(value),
+    status: String(row?.quote_status ?? "").trim() || null,
+    created_at: row?.created_at ?? null
+  };
+}
+
+function buildSummaryRangeQuery(supabase, organizationId, startTs, endTs, filters, withRevision) {
+  let q = supabase
+    .from("quote_headers")
+    .select(SUMMARY_QUOTE_SELECT)
+    .is("archived_at", null)
+    .gte("created_at", startTs)
+    .lte("created_at", endTs)
+    .order("created_at", { ascending: true })
+    .limit(5000);
+  if (organizationId) q = q.eq("organization_id", organizationId);
+  if (filters.branch) q = q.ilike("branch", `%${filters.branch}%`);
+  if (filters.salesperson) q = q.ilike("sales_rep", `%${filters.salesperson}%`);
+  if (withRevision) q = q.eq("is_current_revision", true);
+  return q;
+}
+
+async function fetchSummaryQuoteRows(supabase, organizationId, startTs, endTs, filters) {
+  const res = await buildSummaryRangeQuery(supabase, organizationId, startTs, endTs, filters, true);
+  if (res.error) {
+    if (String(res.error?.message ?? "").toLowerCase().includes("is_current_revision")) {
+      const res2 = await buildSummaryRangeQuery(supabase, organizationId, startTs, endTs, filters, false);
+      if (res2.error) throw res2.error;
+      return { rows: res2.data || [], revisionFiltered: false };
+    }
+    throw res.error;
+  }
+  return { rows: res.data || [], revisionFiltered: true };
+}
+
+function buildRecentQuotesQuery(supabase, organizationId, filters, withRevision) {
+  let q = supabase
+    .from("quote_headers")
+    .select(SUMMARY_QUOTE_SELECT)
+    .is("archived_at", null)
+    .order("created_at", { ascending: false })
+    .limit(10);
+  if (organizationId) q = q.eq("organization_id", organizationId);
+  if (filters.branch) q = q.ilike("branch", `%${filters.branch}%`);
+  if (filters.salesperson) q = q.ilike("sales_rep", `%${filters.salesperson}%`);
+  if (withRevision) q = q.eq("is_current_revision", true);
+  return q;
+}
+
+async function fetchRecentQuoteRows(supabase, organizationId, filters) {
+  const res = await buildRecentQuotesQuery(supabase, organizationId, filters, true);
+  if (res.error) {
+    if (String(res.error?.message ?? "").toLowerCase().includes("is_current_revision")) {
+      const res2 = await buildRecentQuotesQuery(supabase, organizationId, filters, false);
+      if (res2.error) throw res2.error;
+      return res2.data || [];
+    }
+    throw res.error;
+  }
+  return res.data || [];
+}
+
+/**
+ * GET /api/sales-dashboard/summary — Phase 1 bento command center payload.
+ * Source: quote_headers only. No Moraware attribution. Org-scoped, aggregate-only.
+ *
+ * Query params: range (ytd|rolling_30|this_month|this_week; default ytd),
+ *               branch (string), salesperson (string).
+ */
+export async function salesDashboardSummaryHandler(req, supabaseGetter) {
+  const supabase = supabaseGetter();
+  const organizationId = resolveSalesOrganizationId(req);
+  if (!organizationId) {
+    return { status: 400, body: { ok: false, error: "Sales dashboard summary requires organization_id context." } };
+  }
+
+  const generatedAt = new Date().toISOString();
+  const rawRange = String(req.query.range ?? "ytd").trim().toLowerCase();
+  const rangeKey = SUMMARY_RANGE_KEYS.has(rawRange) ? rawRange : "ytd";
+  const resolved = resolveSalesDateRange({ range: rangeKey, compare: "none" });
+  if (!resolved.ok) {
+    return { status: 400, body: { ok: false, error: resolved.error } };
+  }
+  const startDate = resolved.startDate;
+  const endDate = resolved.endDate;
+  const startTs = `${startDate}T00:00:00`;
+  const endTs = `${endDate}T23:59:59.999`;
+
+  const branch = String(req.query.branch ?? "").trim();
+  const salesperson = String(req.query.salesperson ?? "").trim();
+  const filters = { branch: branch || null, salesperson: salesperson || null };
+
+  const todayYmd = calendarTodayLocalYmd();
+  const weekStartYmd = startOfWeekMondayLocal(todayYmd);
+
+  const baseTrustNotes = [
+    "Phase 1 uses quote_headers only. Moraware branch/rep attribution is intentionally gated.",
+    "Quote value uses customer_display_total (customer-facing estimate total) when available; falls back to grand_total for older quotes.",
+    "Win rate is won / (won + lost), excluding archived quotes.",
+    "Branch and salesperson filters apply to Quote Library fields only and are not Moraware-attributed."
+  ];
+
+  let rangeRows = [];
+  let revisionFiltered = true;
+  let dataWarning = null;
+  try {
+    const fetched = await fetchSummaryQuoteRows(supabase, organizationId, startTs, endTs, filters);
+    rangeRows = fetched.rows;
+    revisionFiltered = fetched.revisionFiltered;
+  } catch (e) {
+    // Graceful degradation: missing relation or query error returns zeros, not a 500.
+    dataWarning = `Quote data unavailable: ${String(e?.message ?? e)}`;
+    rangeRows = [];
+  }
+
+  let recentRows = [];
+  if (!dataWarning) {
+    try {
+      recentRows = await fetchRecentQuoteRows(supabase, organizationId, filters);
+    } catch {
+      recentRows = [];
+    }
+  }
+
+  const agg = buildSalesDashboardSummary(rangeRows, { startDate, endDate, todayYmd, weekStartYmd });
+  const recentQuotes = recentRows.map(mapRecentQuoteForSummary);
+
+  const trustNotes = [...baseTrustNotes];
+  trustNotes.push(
+    revisionFiltered
+      ? "Aggregates use current quote revisions only (is_current_revision = true)."
+      : "is_current_revision unavailable; aggregates include all non-archived revisions."
+  );
+  if (dataWarning) trustNotes.push(dataWarning);
+
+  return {
+    status: 200,
+    body: {
+      ok: true,
+      generated_at: generatedAt,
+      range: { key: rangeKey, start_date: startDate, end_date: endDate },
+      filters_applied: filters,
+      summary: agg.summary,
+      estimate_outcomes: agg.estimate_outcomes,
+      quote_activity: agg.quote_activity,
+      recent_quotes: recentQuotes,
+      trend: agg.trend,
+      trust_notes: trustNotes
+    }
+  };
+}
+
+// ── End Sales Dashboard Summary ───────────────────────────────────────────
+
 /**
  * Register Sales Head read routes. Matches Executive pattern: requireAuth → requireRole (admin bypass) → head access.
  * @param {import("express").Application} app
@@ -3146,7 +3443,7 @@ export function attachSalesHeadRoutes(app, { requireAuth, requireRole, requireHe
   console.log(
     "[sales] mounted GET /api/sales/{summary,salesperson-performance,account-performance,trend,jobs,filters," +
     "dashboard-foundation,production-reconciliation,performance-intelligence,debug,kpi-v1} " +
-    "(requireAuth + SALES_API_ROLES + sales head)"
+    "+ GET /api/sales-dashboard/summary (requireAuth + SALES_API_ROLES + sales head)"
   );
 
   app.get("/api/sales/summary", requireAuth(), requireRole(roleList), headAccessSales, execSales(salesSummaryHandler));
@@ -3197,4 +3494,11 @@ export function attachSalesHeadRoutes(app, { requireAuth, requireRole, requireHe
   );
   app.get("/api/sales/debug", requireAuth(), requireRole(roleList), headAccessSales, execSales(salesDebugHandler));
   app.get("/api/sales/kpi-v1", requireAuth(), requireRole(roleList), headAccessSales, execSales(salesKpiV1Handler));
+  app.get(
+    "/api/sales-dashboard/summary",
+    requireAuth(),
+    requireRole(roleList),
+    headAccessSales,
+    execSales(salesDashboardSummaryHandler)
+  );
 }

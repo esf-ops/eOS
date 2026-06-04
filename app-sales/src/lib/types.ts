@@ -207,6 +207,77 @@ export type PerformanceIntelligenceResponse = {
   debug?: Record<string, unknown>;
 };
 
+// ── Sales Dashboard bento summary (Phase 1) ────────────────────────────────
+// Mirrors GET /api/sales-dashboard/summary (quote_headers only; no Moraware
+// branch/rep attribution in Phase 1).
+
+export type SalesDashboardRangeKey = "ytd" | "rolling_30" | "this_month" | "this_week";
+
+export type SalesDashboardSummaryMetrics = {
+  open_pipeline_value: number;
+  won_value: number;
+  active_quote_count: number;
+  total_quote_count: number;
+  win_rate_pct: number;
+  average_quote_value: number;
+  new_quotes_today: number;
+  new_quotes_this_week: number;
+};
+
+export type SalesDashboardOutcome = {
+  label: string;
+  value: number;
+  count: number;
+};
+
+export type SalesDashboardActivity = {
+  new_today: number;
+  new_this_week: number;
+  follow_up_queue: number;
+  monday_handoff_needed: number;
+  average_quote_value: number;
+};
+
+export type SalesDashboardRecentQuote = {
+  id: string | null;
+  quote_number: string | null;
+  customer: string | null;
+  project: string | null;
+  salesperson: string | null;
+  branch: string | null;
+  value: number;
+  status: string | null;
+  created_at: string | null;
+};
+
+export type SalesDashboardTrendPoint = {
+  period: string;
+  period_start: string;
+  quoted_value: number;
+  won_value: number;
+  quote_count: number;
+};
+
+export type SalesDashboardSummary = {
+  ok: boolean;
+  generated_at: string;
+  range: {
+    key: SalesDashboardRangeKey;
+    start_date: string;
+    end_date: string;
+  };
+  filters_applied: {
+    branch: string | null;
+    salesperson: string | null;
+  };
+  summary: SalesDashboardSummaryMetrics;
+  estimate_outcomes: SalesDashboardOutcome[];
+  quote_activity: SalesDashboardActivity;
+  recent_quotes: SalesDashboardRecentQuote[];
+  trend: SalesDashboardTrendPoint[];
+  trust_notes: string[];
+};
+
 export type JobAttribution = {
   morawareSalesperson: string;
   normalizedSalesperson: string;

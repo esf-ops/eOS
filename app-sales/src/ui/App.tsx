@@ -8,7 +8,17 @@ import SalesCommandCenterView from "./SalesCommandCenterView";
 import SalesIntelligenceView from "./SalesIntelligenceView";
 import QuotePipelinePanel from "./QuotePipelinePanel";
 import KpiV1Panel from "./KpiV1Panel";
+import BentoDashboardView from "./BentoDashboardView";
 import "./sales-intelligence.css";
+
+/**
+ * Command Center tab content selector.
+ *
+ * Phase 1 bento command center is the default. The legacy
+ * `SalesCommandCenterView` remains imported and fully functional — flip this
+ * constant to `"legacy"` to instantly restore it with no other code changes.
+ */
+const COMMAND_CENTER_VIEW: "bento" | "legacy" = "bento";
 
 /**
  * eliteOS Sales Head — protected-head shell.
@@ -626,7 +636,11 @@ export default function App() {
             </nav>
 
             {salesTab === "command_center" ? (
-              <SalesCommandCenterView token={token} onLoadError={onPiLoadError} />
+              COMMAND_CENTER_VIEW === "bento" ? (
+                <BentoDashboardView token={token} onLoadError={onPiLoadError} />
+              ) : (
+                <SalesCommandCenterView token={token} onLoadError={onPiLoadError} />
+              )
             ) : null}
 
             {salesTab === "quote_pipeline" ? <QuotePipelinePanel token={token} /> : null}
