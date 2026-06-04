@@ -94,6 +94,19 @@ const SAMPLE = {
   assert.equal(r.usable_a_raw, "3441.754", "usable A raw preserved");
   assert.equal(r.usable_d_raw, "1980.318", "usable D raw preserved");
 
+  // Identity preserved (uppercase), but image URL path is lowercased.
+  assert.equal(r.external_slab_id, "437D9CA4-76B0-453B-BDE9-9007FFC44C5A", "external_slab_id preserved (uppercase)");
+  assert.equal(
+    r.image_url_guess,
+    "https://slabcloud.com/slabs/kbyd/437d9ca4-76b0-453b-bde9-9007ffc44c5a.jpg",
+    "image_url_guess lowercased"
+  );
+  assert.equal(
+    r.thumbnail_url_guess,
+    "https://slabcloud.com/slabs/kbyd/437d9ca4-76b0-453b-bde9-9007ffc44c5a_thumb.jpg",
+    "thumbnail_url_guess lowercased"
+  );
+
   // Raw original retained intact.
   assert.deepEqual(r.raw, SAMPLE, "raw record retained");
   console.log("ok: sample detail record normalization");
@@ -126,27 +139,30 @@ const SAMPLE = {
   });
   assert.equal(
     g.image_url_guess,
-    `https://slabcloud.com/slabs/kbyd/${SAMPLE.SlabID}.jpg`,
-    "image guess"
+    `https://slabcloud.com/slabs/kbyd/${SAMPLE.SlabID.toLowerCase()}.jpg`,
+    "image guess (lowercased SlabID)"
   );
   assert.equal(
     g.thumbnail_url_guess,
-    `https://slabcloud.com/slabs/kbyd/${SAMPLE.SlabID}_thumb.jpg`,
-    "thumb guess"
+    `https://slabcloud.com/slabs/kbyd/${SAMPLE.SlabID.toLowerCase()}_thumb.jpg`,
+    "thumb guess (lowercased SlabID)"
   );
+  // Explicit: uppercase input → lowercase URL path segment.
+  assert.match(g.image_url_guess, /437d9ca4-76b0-453b-bde9-9007ffc44c5a\.jpg$/, "uppercase SlabID → lowercase URL");
+  assert.ok(!/[A-Z]/.test(g.image_url_guess.split("/slabs/")[1]), "no uppercase in image URL path");
 
-  // Trailing slash on base URL is normalized.
+  // Trailing slash on base URL is normalized; mixed-case id lowercased.
   const g2 = buildImageUrlGuesses({
     baseUrl: "https://slabcloud.com/",
     companyCode: "kbyd",
-    slabId: "X",
+    slabId: "AbC123",
   });
-  assert.equal(g2.image_url_guess, "https://slabcloud.com/slabs/kbyd/X.jpg", "trailing slash normalized");
+  assert.equal(g2.image_url_guess, "https://slabcloud.com/slabs/kbyd/abc123.jpg", "trailing slash + lowercase");
 
   // Missing inputs → nulls (no broken URLs).
   const g3 = buildImageUrlGuesses({ companyCode: "kbyd", slabId: null });
   assert.equal(g3.image_url_guess, null, "missing slab id → null guess");
-  console.log("ok: image URL guesses");
+  console.log("ok: image URL guesses (lowercase)");
 }
 
 // ── summary aggregation counts slabs/colors/materials ────────────────────────

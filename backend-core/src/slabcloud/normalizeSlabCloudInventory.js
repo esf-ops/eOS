@@ -59,10 +59,17 @@ export function metersToInches(meters, { decimals = 2 } = {}) {
 /**
  * Build *guessed* image URLs from the observed pattern:
  *   /slabs/{companyCode}/{SlabID}.jpg
- *   /slabs/{companyCode}/{SlabID}_thumb.jpg
+ *   /slabs/{companyCode}/{lowercase-slabid}_thumb.jpg
  *
- * These are guesses only — the POC does not verify or download them by default.
- * Returns nulls when companyCode or slabId is missing.
+ * SlabCloud's real image scheme uses the SAME SlabID UUID but LOWERCASED in the
+ * URL path (confirmed via manual browser/network inspection 2026-06-04 after the
+ * initial uppercase guess returned 404). Example:
+ *   SlabID 437D9CA4-76B0-453B-BDE9-9007FFC44C5A
+ *   → /slabs/kbyd/437d9ca4-76b0-453b-bde9-9007ffc44c5a.jpg
+ *
+ * Only the URL path segment is lowercased — the slab's identity (external_slab_id)
+ * is preserved unchanged elsewhere. Returns nulls when companyCode or slabId is
+ * missing. These are still derived URLs; verification is a separate explicit step.
  */
 export function buildImageUrlGuesses({ baseUrl = "https://slabcloud.com", companyCode, slabId } = {}) {
   const base = String(baseUrl || "https://slabcloud.com").replace(/\/+$/, "");
@@ -71,9 +78,11 @@ export function buildImageUrlGuesses({ baseUrl = "https://slabcloud.com", compan
   if (!code || !id) {
     return { image_url_guess: null, thumbnail_url_guess: null };
   }
+  // Lowercase ONLY the URL path segment; identity (external_slab_id) is untouched.
+  const idLower = id.toLowerCase();
   return {
-    image_url_guess: `${base}/slabs/${code}/${id}.jpg`,
-    thumbnail_url_guess: `${base}/slabs/${code}/${id}_thumb.jpg`,
+    image_url_guess: `${base}/slabs/${code}/${idLower}.jpg`,
+    thumbnail_url_guess: `${base}/slabs/${code}/${idLower}_thumb.jpg`,
   };
 }
 

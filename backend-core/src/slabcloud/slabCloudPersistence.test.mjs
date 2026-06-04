@@ -346,8 +346,11 @@ function normalized() {
   for (const row of imgUpsert.payload) {
     assert.equal(row.image_status, "unknown", "image_status unknown");
     assert.equal(row.image_url_pattern, "slabcloud_slab_jpg", "image url pattern");
+    // URL path uses lowercased SlabID (identity in external_slab_id stays as-is).
+    assert.ok(!/[A-Z]/.test(row.image_url.split("/slabs/")[1]), "image_url path is lowercase");
+    assert.match(row.image_url, /\.jpg$/, "image_url ends .jpg");
   }
-  console.log("ok: images upsert with image_status unknown");
+  console.log("ok: images upsert with image_status unknown + lowercase URL");
 }
 
 // ── All write payloads include organization_id ───────────────────────────────

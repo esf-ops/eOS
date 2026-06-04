@@ -121,8 +121,8 @@ Raw SlabCloud fields → normalized record:
 | `length_actual_in` | derived | `Length_Actual × 39.3701`, rounded to 2 dp. |
 | `usable_a_raw` | `UsableA` | **Preserved raw**, meaning uncertain. |
 | `usable_d_raw` | `UsableD` | **Preserved raw**, meaning uncertain. |
-| `image_url_guess` | derived | `/slabs/{companyCode}/{SlabID}.jpg` (guess). |
-| `thumbnail_url_guess` | derived | `/slabs/{companyCode}/{SlabID}_thumb.jpg` (guess). |
+| `image_url_guess` | derived | `/slabs/{companyCode}/{lowercase-slabid}.jpg` (SlabID lowercased in path; see §7). |
+| `thumbnail_url_guess` | derived | `/slabs/{companyCode}/{lowercase-slabid}_thumb.jpg` (SlabID lowercased in path; see §7). |
 | `image_status` | runtime | `unknown` unless image verification ran (`ok`/`missing`/`error`). |
 | `raw` | _(whole record)_ | Untouched original for later mapping/debugging. |
 
@@ -142,10 +142,10 @@ Missing/null/garbage inputs normalize to `null` rather than throwing.
 
 ## 7. Image URL assumptions
 
-Image URLs are **guessed** from the observed pattern:
+Image URLs are **derived** from the confirmed pattern (verified 2026-06-04, see §10b). The SlabID UUID is reused but **lowercased** in the URL path; the slab's identity (`external_slab_id`) is preserved unchanged.
 
-- full: `https://slabcloud.com/slabs/{companyCode}/{SlabID}.jpg`
-- thumb: `https://slabcloud.com/slabs/{companyCode}/{SlabID}_thumb.jpg`
+- full: `https://slabcloud.com/slabs/{companyCode}/{lowercase-slabid}.jpg`
+- thumb: `https://slabcloud.com/slabs/{companyCode}/{lowercase-slabid}_thumb.jpg`
 
 By default the POC **does not download or even probe** images. With `SLABCLOUD_VERIFY_IMAGES=1`, it performs a **best-effort HEAD probe** (bounded concurrency, never fatal) and records `image_status` as `ok` / `missing` / `error`. It never downloads image bytes in bulk.
 
@@ -275,11 +275,29 @@ Image verification is a **separate** backend step from the inventory sync — it
 | `SLABCLOUD_IMAGE_VERIFY_STATUS` | `unknown` | Row filter (`all` = no filter). |
 | `SLABCLOUD_IMAGE_VERIFY_KIND` | `thumbnail-first` | `thumbnail-first` / `image-first` / `thumbnail` / `image`. |
 
-### ⚠️ First dry-run finding (2026-06-04): guessed URL pattern returns 404
+### First dry-run finding (2026-06-04): uppercase guess returned 404
 
 The first dry-run verified 50 `unknown` rows (`thumbnail-first`): **0 ok · 50 missing · 0 error**, all clean `HEAD 404`. A follow-up `image-first` check of 10 rows was also **10 missing (404)**.
 
-**Conclusion:** The *guessed* URL pattern (`/slabs/{companyCode}/{SlabID}.jpg` and `..._thumb.jpg`) is **not** the real SlabCloud image URL scheme. The verification tooling is working correctly (it cleanly classified them as `missing`), but the URL pattern itself is unconfirmed and must be resolved before image display is built. **Action item:** ask SlabCloud for the real image/thumbnail URL format (an open question already tracked in §8a / roadmap). Once known, add it as a new `image_url_pattern` (the schema supports multiple patterns per slab) and re-verify.
+This proved the *original* guess (`/slabs/{companyCode}/{SlabID}.jpg`, using the SlabID **as-is**) was not the real scheme, and confirmed the verification tooling was working correctly (it cleanly classified them as `missing`).
+
+### ✅ Resolved (2026-06-04): correct pattern uses a LOWERCASED SlabID
+
+Manual browser/network inspection confirmed the real scheme reuses the **same** SlabID UUID but **lowercased** in the URL path:
+
+- `https://slabcloud.com/slabs/{companyCode}/{lowercase-slabid}.jpg`
+- `https://slabcloud.com/slabs/{companyCode}/{lowercase-slabid}_thumb.jpg`
+
+Example — SlabID `437D9CA4-76B0-453B-BDE9-9007FFC44C5A`:
+
+| URL | HEAD |
+|-----|------|
+| `…/slabs/kbyd/437D9CA4-…C5A.jpg` (old, uppercase) | `404` |
+| `…/slabs/kbyd/437d9ca4-…c5a.jpg` (new, lowercase) | `200` |
+
+`buildImageUrlGuesses()` now lowercases **only the URL path segment**; the slab's identity (`external_slab_id`) is preserved unchanged. The `image_url_pattern` key is intentionally kept stable (`slabcloud_slab_jpg`) so a re-sync **upserts the existing `slab_images` rows in place** (correcting the stored URL casing and resetting `image_status` to `unknown`) rather than creating duplicate rows under a new pattern key.
+
+**Note — existing rows are stale:** the `slab_images` rows currently persisted in Supabase were written before this fix and still hold uppercase URLs (a no-write re-verify of 20 rows after the code fix still reported **20 missing**, because verification reads the *stored* URLs, not freshly-generated ones). A **cache sync (write-enabled) must be re-run** to refresh `slab_images` with lowercase URLs before image verification will report `ok`.
 
 ---
 

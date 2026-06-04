@@ -42,6 +42,12 @@ export const IMAGES_CONFLICT_KEY =
 
 export const DEFAULT_EXTERNAL_SOURCE = "slabcloud";
 export const DEFAULT_COMPANY_CODE = "kbyd";
+// Stable image_url_pattern key. The generated URL uses a LOWERCASED SlabID
+// (/slabs/{companyCode}/{lowercase-slabid}.jpg). The key is intentionally kept
+// stable (not renamed to e.g. "slabcloud_slab_uuid_lower_jpg") so that a re-sync
+// UPSERTS existing slab_images rows IN PLACE on the unique key
+// (organization_id, external_source, external_slab_id, image_url_pattern),
+// correcting the stored URL casing rather than orphaning the old rows.
 export const IMAGE_URL_PATTERN = "slabcloud_slab_jpg";
 
 // Used only to build dry-run payloads when no real org id is supplied.

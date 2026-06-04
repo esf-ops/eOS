@@ -167,7 +167,7 @@ These are non-negotiable guardrails for every phase:
 - `backend-core/src/scripts/slabcloud/verifySlabCloudImages.js` — dry-run by default
 - `backend-core/src/slabcloud/slabCloudImageVerification.test.mjs` — mock Supabase + mock fetch (all passing)
 
-> **⚠️ Finding (2026-06-04):** the first dry-run found the *guessed* image URL pattern returns **404 for all rows** (thumbnail and full-size). The guessed pattern is not SlabCloud's real scheme — **confirm the real image/thumbnail URL format with SlabCloud** before building any gallery/showroom. The verification machinery itself works (cleanly reports `missing`); only the URL pattern is wrong. This blocks slab-photo display in Phase 2/3 until resolved.
+> **✅ Resolved (2026-06-04):** the first dry-run found the original guessed image URL pattern returned **404 for all rows** because it used the SlabID UUID *as-is*. Manual browser/network inspection confirmed the real scheme reuses the **same SlabID but lowercased** in the URL path (`/slabs/{companyCode}/{lowercase-slabid}.jpg` / `…_thumb.jpg`); a HEAD probe of the lowercase URL returns `200` vs `404` for the uppercase one. `buildImageUrlGuesses()` now lowercases only the URL path segment (identity preserved). **Remaining step:** the persisted `slab_images` rows still hold pre-fix uppercase URLs, so a **write-enabled cache re-sync is required** to refresh them before image verification will report `ok`. The verification machinery itself works (cleanly reports `missing`); image display in Phase 2/3 is unblocked once the rows are refreshed.
 
 **Potential tables (planning sketches — no SQL yet):**
 
@@ -412,7 +412,7 @@ Before scheduling recurring syncs or building any production integration:
 | 1 | Is `/api/slabs/kbyd` approved for ESF internal automated use? | **Critical** |
 | 2 | Is `kbyd` our company code? (vs. public slug `/inventory/esf/`) | **Critical** |
 | 3 | Is there an official API, feed, or export we should use instead? | High |
-| 4 | What is the correct image URL pattern per slab? | High |
+| 4 | ~~What is the correct image URL pattern per slab?~~ **Resolved 2026-06-04:** `/slabs/{companyCode}/{lowercase-slabid}.jpg` (+ `_thumb`). | ~~High~~ Done |
 | 5 | Are image URLs stable (won't change if the slab is re-imported)? | High |
 | 6 | Are status/availability/hold/sold flags available on slab records? | High |
 | 7 | Are remnants available through the same endpoint? How to distinguish? | High |

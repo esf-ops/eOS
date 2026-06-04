@@ -892,3 +892,17 @@
 
 ---
 
+### 70. SlabCloud image URL generation fixed — lowercase SlabID in URL path (resolves #69 404s)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-06-04 |
+| **Decision** | The real SlabCloud image scheme reuses the **same SlabID UUID but lowercased** in the URL path (confirmed via manual browser/network inspection). `buildImageUrlGuesses()` now lowercases **only** the URL path segment — `/slabs/{companyCode}/{lowercase-slabid}.jpg` and `…_thumb.jpg`. The slab's identity (`external_slab_id`) is **preserved unchanged**. The `image_url_pattern` key is kept stable (`slabcloud_slab_jpg`) on purpose so a re-sync **upserts existing `slab_images` rows in place** on the unique key (correcting the stored URL casing + resetting `image_status` to `unknown`) instead of orphaning them under a new pattern key. No image rows were marked ok/missing by this change — verification remains a separate explicit script. |
+| **Validation** | Live read-only HEAD probe: uppercase `…/slabs/kbyd/437D9CA4-…C5A.jpg` → **404**; lowercase `…/slabs/kbyd/437d9ca4-…c5a.jpg` → **200**. Unit tests assert uppercase input → lowercase URL output with `external_slab_id` preserved. A post-fix no-write re-verify of 20 rows still showed **20 missing** because it reads the *already-persisted* uppercase URLs (stale rows), not freshly-generated ones. |
+| **Consequence — rows need refresh** | The `slab_images` rows currently in Supabase still hold pre-fix uppercase URLs. A **write-enabled cache sync (`SLABCLOUD_CACHE_WRITE_ENABLED=1`) must be re-run** to refresh those rows with lowercase URLs **before** running write-enabled image verification. Until then, image verification (which reads stored URLs) will keep reporting `missing`. |
+| **Tests** | `node --check` on the normalizer; `eos:test:slabcloud-inventory` (lowercase URL + identity-preservation assertions), `eos:test:slabcloud-cache` (image rows lowercase URL + stable pattern key), `eos:test:slabcloud-images`, `eos:check:local` — all passing. |
+| **Impacted files/docs** | `backend-core/src/slabcloud/normalizeSlabCloudInventory.js` (lowercase URL path), `backend-core/src/slabcloud/slabCloudPersistence.js` (stable `IMAGE_URL_PATTERN` doc note), `backend-core/src/slabcloud/slabCloudInventoryPoc.test.mjs`, `backend-core/src/slabcloud/slabCloudPersistence.test.mjs`, `docs/eliteos/slabcloud-inventory-poc.md`, `docs/eliteos/slabos-slab-inventory-profit-engine-roadmap.md`, `docs/eliteos/FEATURE_DECISIONS.md` (this entry). |
+| **Revisit trigger** | Write-enabled cache re-sync is run to refresh `slab_images`; write-enabled image verification is reviewed/approved; image caching (Supabase Storage) is proposed; Slab Inventory head/gallery begins. |
+
+---
+
