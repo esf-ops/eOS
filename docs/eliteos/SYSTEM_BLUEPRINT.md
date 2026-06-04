@@ -331,3 +331,5 @@ Use this checklist when scaffolding any new protected eliteOS head. Completing a
 | [`FEATURE_DECISIONS.md`](./FEATURE_DECISIONS.md) | Dated decisions, rationale, revisit triggers |
 | [`../quote-platform/`](../quote-platform/) | Quote engine, Monday setup, math test cases |
 | [`../EOS_ENV_VARS.md`](../EOS_ENV_VARS.md) | Environment variable reference |
+| [`slabos-slab-inventory-profit-engine-roadmap.md`](./slabos-slab-inventory-profit-engine-roadmap.md) | slabOS slab inventory phased roadmap — SlabCloud integration, showroom, SlabRoom, profit engine |
+| [`slabcloud-inventory-poc.md`](./slabcloud-inventory-poc.md) | SlabCloud endpoint discovery, field mapping, and Phase 0 dry-run POC notes |

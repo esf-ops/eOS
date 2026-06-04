@@ -832,3 +832,19 @@
 
 ---
 
+### 66. slabOS slab inventory — phased read-only-first build plan with profit engine guardrails
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-06-04 |
+| **Decision** | The slabOS slab inventory and profit engine will be built in **six ordered phases**, starting from the read-only POC (Phase 0, done) and gating every subsequent phase on SlabCloud endpoint approval, dry-run review, and previous phase stability. **Phase 1** (Supabase inventory cache) does not start until dry-run output is reviewed and SlabCloud confirms endpoint use is permitted. **No customer UI, no holds, no writeback, and no automated pricing changes will be built until their prerequisite phase is production-stable.** The profit engine (remnant suggestions, procurement forecast, margin alerts) starts as **staff-facing recommendations only** — never automatic allocation or auto-pricing. Capacity-aware quoting is deferred until Moraware/Titans production capacity data is trustworthy. |
+| **Why** | SlabCloud/Slabsmith remains the inventory source of truth. slabOS adds the workflow, intelligence, and customer-experience layers on top — without replacing Slabsmith and without risking premature schema decisions based on incomplete field data. Phasing protects against over-building before the foundational data quality is confirmed. Starting profit engine features as suggestions (not automation) reduces risk of incorrect inventory allocation or margin-damaging auto-pricing. |
+| **Phase gate order** | Phase 0 (dry-run POC) → **review output + SlabCloud confirmation** → Phase 1 (cache) → Phase 2 (internal head) → Phase 3 (showroom) → Phase 4 (holds/quote links) → Phase 5 (customer SlabRoom) → Phase 6 (profit engine recommendations). |
+| **First recommended profit feature** | Remnant / in-stock slab match suggestions surfaced inside Internal Estimate — "possible stock match found" only, staff confirms manually. Requires Phases 1 and 2 to be stable first. |
+| **Architecture guardrails** | Backend owns fetch + normalization. Frontend never calls SlabCloud directly. All cached rows carry `organization_id`. No cookies/session/auth headers ever. No Slabsmith writeback without a separate explicit decision. All protected heads use shared `EliteosTopbar`. |
+| **Open questions (blocking Phase 1)** | Is `/api/slabs/kbyd` approved for ESF automated use? Is `kbyd` our company code? Are there rate limits or API terms? What are `UsableA`/`UsableD`? Does `count` represent group or individual count? |
+| **Impacted files/docs** | `docs/eliteos/slabos-slab-inventory-profit-engine-roadmap.md` (created), `docs/eliteos/SYSTEM_BLUEPRINT.md` (related docs table updated), `docs/eliteos/FEATURE_DECISIONS.md` (this entry). No app code changed. |
+| **Revisit trigger** | SlabCloud responds to open questions; dry-run output review is complete; Phase 1 implementation is approved; any profit engine feature is approved for production; a non-ESF tenant needs slab inventory (multi-tenant scope decision required). |
+
+---
+
