@@ -5,6 +5,8 @@ import { EOS_LOGO_URL, resolveHeadLaunchUrl, sanitizeLauncherLaunchUrl } from ".
 import { supabase } from "../lib/supabase";
 import ProfileView from "./ProfileView";
 import type { UserPreferences } from "./ProfileView";
+import EliteosTopbar from "../../../shared/eliteos-ui/EliteosTopbar";
+import type { EliteosTopbarMenuItem } from "../../../shared/eliteos-ui/EliteosTopbar";
 
 function readOAuthErrorFromBrowser(): string | null {
   if (typeof window === "undefined") return null;
@@ -611,9 +613,7 @@ export default function App() {
   const [refreshBusy, setRefreshBusy] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Home user menu dropdown
-  const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const userMenuRef = useRef<HTMLDivElement>(null);
+  // Account dropdown open/close state is owned by the shared EliteosTopbar.
   const heroRef = useRef<HTMLElement>(null);
 
   // Profile & Preferences view state
@@ -789,25 +789,6 @@ export default function App() {
     window.addEventListener("popstate", handlePop);
     return () => window.removeEventListener("popstate", handlePop);
   }, []);
-
-  // Close the Home user menu on outside click or Escape
-  useEffect(() => {
-    if (!userMenuOpen) return;
-    function handleClick(e: MouseEvent) {
-      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
-        setUserMenuOpen(false);
-      }
-    }
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setUserMenuOpen(false);
-    }
-    document.addEventListener("mousedown", handleClick);
-    document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("mousedown", handleClick);
-      document.removeEventListener("keydown", handleKey);
-    };
-  }, [userMenuOpen]);
 
   async function submitLogin(ev: React.FormEvent) {
     ev.preventDefault();
@@ -992,148 +973,79 @@ export default function App() {
   // User chip subtitle: prefer job_title, then department, then role
   const chipSubtitle = jobTitle ?? department ?? u?.role ?? null;
 
+  const homeMenuItems: EliteosTopbarMenuItem[] = [
+    {
+      label: "Profile & preferences",
+      meta: "Account, settings",
+      onClick: navToProfile,
+      icon: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="8" r="3.5" />
+          <path d="M5 20c1.5-3.5 4.2-5 7-5s5.5 1.5 7 5" />
+        </svg>
+      )
+    },
+    {
+      label: refreshBusy ? "Refreshing…" : "Refresh access",
+      meta: "Tools & permissions",
+      onClick: () => void reloadAccess(),
+      disabled: refreshBusy || loadingData,
+      icon: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 12a9 9 0 1 1-3-6.7" />
+          <path d="M21 4v5h-5" />
+        </svg>
+      )
+    }
+  ];
+
+  const homeSearchSlot = (
+    <div className="topbar-search-wrap" role="search">
+      <span className="launcher-search-icon" aria-hidden>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="11" cy="11" r="7" />
+          <path d="m21 21-4.35-4.35" />
+        </svg>
+      </span>
+      <input
+        type="search"
+        className="launcher-search-input"
+        placeholder="Find a head…"
+        value={searchQuery}
+        onChange={(e) => setSearchQuery(e.target.value)}
+        aria-label="Find a head"
+        autoComplete="off"
+      />
+      {searchQuery ? (
+        <button
+          type="button"
+          className="launcher-search-clear"
+          onClick={() => setSearchQuery("")}
+          aria-label="Clear search"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+            <path d="M18 6L6 18M6 6l12 12" />
+          </svg>
+        </button>
+      ) : null}
+    </div>
+  );
+
   return (
     <div className="shell">
       {showShell ? (
-        <header className="topbar" role="banner">
-          <a href="/" className="brand-row brand-row-link" aria-label={`eliteOS Home — ${workspaceName}`}>
-            <span className="brand-mark" aria-hidden>
-              <img src={workspaceLogoUrl} alt="" />
-            </span>
-            <span className="brand-text">
-              <span className="brand-wordmark">eliteOS</span>
-              <span className="brand-sub">{workspaceName}</span>
-            </span>
-          </a>
-          <div className="topbar-search-wrap" role="search">
-            <span className="launcher-search-icon" aria-hidden>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="11" cy="11" r="7" />
-                <path d="m21 21-4.35-4.35" />
-              </svg>
-            </span>
-            <input
-              type="search"
-              className="launcher-search-input"
-              placeholder="Find a head…"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              aria-label="Find a head"
-              autoComplete="off"
-            />
-            {searchQuery ? (
-              <button
-                type="button"
-                className="launcher-search-clear"
-                onClick={() => setSearchQuery("")}
-                aria-label="Clear search"
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
-                  <path d="M18 6L6 18M6 6l12 12" />
-                </svg>
-              </button>
-            ) : null}
-          </div>
-          <div className="topbar-actions">
-            <div className="home-user-menu-wrap" ref={userMenuRef}>
-              <button
-                type="button"
-                className="home-user-chip"
-                aria-haspopup="menu"
-                aria-expanded={userMenuOpen}
-                onClick={() => setUserMenuOpen((o) => !o)}
-                aria-label="Account menu"
-              >
-                <span className="home-user-chip-avatar" aria-hidden>{initials}</span>
-                  <span className="home-user-chip-text">
-                  <span className="home-user-chip-name">{displayName}</span>
-                  {chipSubtitle ? <span className="home-user-chip-role">{chipSubtitle}</span> : null}
-                </span>
-                <svg
-                  className="home-user-chip-chevron"
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden
-                >
-                  <path d="M6 9l6 6 6-6" />
-                </svg>
-              </button>
-
-              {userMenuOpen ? (
-                <div className="home-user-menu" role="menu" aria-label="Account menu">
-                  <div className="home-user-menu-header">
-                    <p className="home-user-menu-display-name">{displayName}</p>
-                    {displayEmail ? <p className="home-user-menu-email">{displayEmail}</p> : null}
-                    <p className="home-user-menu-workspace">Workspace · {workspaceName} · on eliteOS</p>
-                  </div>
-
-                  <div className="home-user-menu-body">
-                    <button
-                      type="button"
-                      className="home-user-menu-item"
-                      role="menuitem"
-                      onClick={() => { setUserMenuOpen(false); navToProfile(); }}
-                    >
-                      <span className="home-user-menu-icon" aria-hidden>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                          <circle cx="12" cy="8" r="3.5" />
-                          <path d="M5 20c1.5-3.5 4.2-5 7-5s5.5 1.5 7 5" />
-                        </svg>
-                      </span>
-                      <span className="home-user-menu-label">
-                        <span>Profile &amp; preferences</span>
-                        <span className="home-user-menu-meta">Account, settings</span>
-                      </span>
-                    </button>
-
-                    <button
-                      type="button"
-                      className="home-user-menu-item"
-                      role="menuitem"
-                      onClick={() => { setUserMenuOpen(false); void reloadAccess(); }}
-                      disabled={refreshBusy || loadingData}
-                    >
-                      <span className="home-user-menu-icon" aria-hidden>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M21 12a9 9 0 1 1-3-6.7" />
-                          <path d="M21 4v5h-5" />
-                        </svg>
-                      </span>
-                      <span className="home-user-menu-label">
-                        <span>{refreshBusy ? "Refreshing…" : "Refresh access"}</span>
-                        <span className="home-user-menu-meta">Tools &amp; permissions</span>
-                      </span>
-                    </button>
-                  </div>
-
-                  <div className="home-user-menu-footer">
-                    <button
-                      type="button"
-                      className="home-user-menu-item home-user-menu-signout"
-                      role="menuitem"
-                      onClick={() => { setUserMenuOpen(false); void signOutClick(); }}
-                    >
-                      <span className="home-user-menu-icon" aria-hidden>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                          <polyline points="16 17 21 12 16 7" />
-                          <line x1="21" y1="12" x2="9" y2="12" />
-                        </svg>
-                      </span>
-                      <span className="home-user-menu-label">Sign out</span>
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          </div>
-        </header>
+        <EliteosTopbar
+          organizationName={workspaceName}
+          logoSrc={workspaceLogoUrl}
+          homeHref="/"
+          userName={displayName}
+          userEmail={displayEmail}
+          userSubtitle={chipSubtitle ?? ""}
+          initials={initials}
+          searchSlot={homeSearchSlot}
+          menuItems={homeMenuItems}
+          onSignOut={() => void signOutClick()}
+        />
       ) : null}
 
       <main className="main launcher-main" role="main">

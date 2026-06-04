@@ -1,0 +1,322 @@
+/* ==========================================================================
+   eliteOS shared topbar — canonical app-shell header
+   --------------------------------------------------------------------------
+   Purely presentational. Visual source of truth is the Home Launcher topbar.
+   Consumed by app-home and app-quote-library (more heads later).
+
+   Tokens (--eos-*) are provided by each consuming app's own :root in its
+   local styles.css. This file only *references* those tokens so it never
+   introduces global token definitions or conflicts.
+   ========================================================================== */
+
+.eliteos-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 12px;
+  padding: 12px 28px;
+  background: rgba(255, 255, 255, 0.74);
+  backdrop-filter: saturate(180%) blur(14px);
+  -webkit-backdrop-filter: saturate(180%) blur(14px);
+  border-bottom: 1px solid var(--eos-line);
+  animation: eliteos-topbar-in 280ms ease-out both;
+}
+
+@keyframes eliteos-topbar-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ----- Brand ------------------------------------------------------------- */
+
+.eliteos-topbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: inherit;
+  text-decoration: none;
+  border-radius: var(--r-md);
+  padding: 4px 8px;
+  margin: -4px -8px;
+  transition: background var(--eos-dur-1) var(--eos-ease);
+}
+
+.eliteos-topbar-brand-link:hover,
+.eliteos-topbar-brand-link:focus-visible {
+  background: rgba(11, 26, 51, 0.04);
+}
+
+.eliteos-topbar-brand-link:focus-visible {
+  outline: 2px solid var(--eos-accent-ring);
+  outline-offset: 2px;
+}
+
+.eliteos-topbar-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--r-md);
+  background: linear-gradient(135deg, #ffffff 0%, #f0f3fa 100%);
+  border: 1px solid var(--eos-line);
+  box-shadow: var(--sh-1);
+  overflow: hidden;
+}
+
+.eliteos-topbar-mark img {
+  max-width: 80%;
+  max-height: 80%;
+  object-fit: contain;
+}
+
+.eliteos-topbar-brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+
+.eliteos-topbar-wordmark {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--eos-ink);
+}
+
+.eliteos-topbar-sub {
+  margin-top: 2px;
+  font-size: 0.72rem;
+  color: var(--eos-ink-muted);
+  letter-spacing: 0.01em;
+}
+
+/* ----- Actions ----------------------------------------------------------- */
+
+.eliteos-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* ----- User chip --------------------------------------------------------- */
+
+.eliteos-topbar-user {
+  position: relative;
+}
+
+.eliteos-topbar-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px 5px 5px;
+  border: 1.5px solid transparent;
+  border-radius: 24px;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.eliteos-topbar-chip:hover,
+.eliteos-topbar-chip[aria-expanded="true"] {
+  background: var(--eos-surface);
+  border-color: var(--eos-line-strong);
+}
+
+.eliteos-topbar-chip-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--eos-ink-soft), var(--eos-ink));
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.eliteos-topbar-chip-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0;
+  min-width: 0;
+}
+
+.eliteos-topbar-chip-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--eos-ink);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.eliteos-topbar-chip-role {
+  font-size: 10px;
+  color: var(--eos-ink-muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1.2;
+  white-space: nowrap;
+  max-width: 22ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.eliteos-topbar-chip-chevron {
+  color: var(--eos-ink-faint);
+  flex-shrink: 0;
+  transition: transform 0.15s;
+}
+
+.eliteos-topbar-chip[aria-expanded="true"] .eliteos-topbar-chip-chevron {
+  transform: rotate(180deg);
+}
+
+.eliteos-topbar-chip:focus-visible {
+  outline: 2px solid var(--eos-accent-ring);
+  outline-offset: 2px;
+  border-radius: 24px;
+}
+
+/* ----- Dropdown ---------------------------------------------------------- */
+
+.eliteos-topbar-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 300;
+  width: 248px;
+  background: var(--eos-surface);
+  border: 1px solid var(--eos-line-strong);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(11, 26, 51, 0.14), 0 1px 4px rgba(11, 26, 51, 0.06);
+  overflow: hidden;
+  animation: eliteos-topbar-menu-in 0.12s ease-out;
+}
+
+@keyframes eliteos-topbar-menu-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .eliteos-topbar { animation: none; }
+  .eliteos-topbar-menu { animation: none; }
+}
+
+.eliteos-topbar-menu-header {
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--eos-line);
+}
+
+.eliteos-topbar-menu-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--eos-ink);
+  margin: 0 0 2px;
+}
+
+.eliteos-topbar-menu-email {
+  font-size: 11px;
+  color: var(--eos-ink-muted);
+  margin: 0 0 4px;
+  word-break: break-all;
+}
+
+.eliteos-topbar-menu-workspace {
+  font-size: 10px;
+  color: var(--eos-ink-faint);
+  margin: 0;
+}
+
+.eliteos-topbar-menu-body {
+  padding: 4px 0;
+  border-bottom: 1px solid var(--eos-line);
+}
+
+.eliteos-topbar-menu-footer {
+  padding: 4px 0;
+}
+
+.eliteos-topbar-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 16px;
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  color: var(--eos-ink);
+  font-family: inherit;
+  font-size: 13px;
+  text-decoration: none;
+  transition: background 0.1s;
+}
+
+.eliteos-topbar-menu-item:hover,
+.eliteos-topbar-menu-item:focus-visible {
+  background: var(--eos-bg);
+}
+
+.eliteos-topbar-menu-item:focus-visible {
+  outline: 2px solid var(--eos-accent-ring);
+  outline-offset: -2px;
+}
+
+.eliteos-topbar-menu-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.eliteos-topbar-menu-item-danger {
+  color: var(--eos-accent);
+}
+
+.eliteos-topbar-menu-icon {
+  color: var(--eos-ink-muted);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.eliteos-topbar-menu-item-danger .eliteos-topbar-menu-icon {
+  color: var(--eos-accent);
+}
+
+.eliteos-topbar-menu-label {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 13px;
+  min-width: 0;
+}
+
+.eliteos-topbar-menu-meta {
+  font-size: 11px;
+  color: var(--eos-ink-muted);
+}
+
+/* ----- Mobile (matches Home Launcher behavior) --------------------------- */
+
+@media (max-width: 720px) {
+  .eliteos-topbar {
+    padding: 10px 16px;
+  }
+}
+
+@media (max-width: 440px) {
+  .eliteos-topbar-sub {
+    display: none;
+  }
+}

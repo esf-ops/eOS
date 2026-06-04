@@ -11,6 +11,8 @@ import {
 } from "./lib/labels";
 import { getSupabase } from "./lib/supabase";
 import { QuoteDetailModal } from "./QuoteDetailModal";
+import EliteosTopbar from "../../shared/eliteos-ui/EliteosTopbar";
+import type { EliteosTopbarMenuItem } from "../../shared/eliteos-ui/EliteosTopbar";
 
 const EOS_LOGO_URL =
   "https://www.elitestonefabrication.com/wp-content/uploads/2021/09/cropped-ESF-Horizontal-Logo-500x150-px_09_09.png";
@@ -203,9 +205,7 @@ export default function QuoteLibraryApp() {
   const [userEmail, setUserEmail] = useState<string>("");
   const [userId, setUserId] = useState<string>("");
   const [userMetaName, setUserMetaName] = useState<string>("");
-  const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [refreshBusy, setRefreshBusy] = useState(false);
-  const userMenuRef = useRef<HTMLDivElement | null>(null);
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
@@ -392,7 +392,6 @@ export default function QuoteLibraryApp() {
     setUserEmail("");
     setUserId("");
     setUserMetaName("");
-    setUserMenuOpen(false);
   }, [supabase]);
 
   /**
@@ -424,26 +423,6 @@ export default function QuoteLibraryApp() {
       sub.subscription.unsubscribe();
     };
   }, [supabase]);
-
-  /** Close the user menu on outside click / Escape. */
-  useEffect(() => {
-    if (!userMenuOpen) return;
-    const onDocClick = (e: MouseEvent) => {
-      if (!userMenuRef.current) return;
-      if (!userMenuRef.current.contains(e.target as Node)) {
-        setUserMenuOpen(false);
-      }
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setUserMenuOpen(false);
-    };
-    document.addEventListener("mousedown", onDocClick);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDocClick);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [userMenuOpen]);
 
   const loadMetrics = useCallback(async () => {
     if (!sessionToken) return;
@@ -684,7 +663,6 @@ export default function QuoteLibraryApp() {
   const handleMenuRefresh = useCallback(async () => {
     if (!sessionToken || refreshBusy) return;
     setRefreshBusy(true);
-    setUserMenuOpen(false);
     try {
       await refreshListAndDetail();
     } finally {
@@ -769,151 +747,73 @@ export default function QuoteLibraryApp() {
     }
   }, [refreshListAndDetail, selectedIds, sessionToken]);
 
+  const qlMenuItems: EliteosTopbarMenuItem[] = [
+    {
+      label: "Open Home",
+      meta: "eliteOS Launcher",
+      href: homeBase,
+      icon: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 11.5L12 4l9 7.5" />
+          <path d="M5 10v10h14V10" />
+          <path d="M10 20v-6h4v6" />
+        </svg>
+      )
+    },
+    {
+      label: refreshBusy ? "Refreshing data…" : "Refresh data",
+      meta: "Metrics, list, and open quote",
+      onClick: () => void handleMenuRefresh(),
+      disabled: refreshBusy || busy,
+      icon: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 12a9 9 0 1 1-3-6.7" />
+          <path d="M21 4v5h-5" />
+        </svg>
+      )
+    },
+    {
+      label: "Profile & preferences",
+      meta: "eliteOS Home",
+      href: `${homeBase}?view=profile`,
+      title: "Profile & preferences",
+      icon: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="8" r="3.5" />
+          <path d="M5 20c1.5-3.5 4.2-5 7-5s5.5 1.5 7 5" />
+        </svg>
+      )
+    }
+  ];
+
+  const qlChipSubtitle =
+    userDisplayEmail && userDisplayEmail.toLowerCase() !== userDisplayName.toLowerCase()
+      ? userDisplayEmail
+      : "";
+
   return (
     <div className="shell">
-      <header className="topbar" role="banner">
-        <a
-          href="/"
-          className="brand-row brand-row-link"
-          aria-label={`eliteOS Quote Library — ${workspaceName}`}
-        >
-          <span className="brand-mark" aria-hidden>
-            <img src={workspaceLogoUrl ?? EOS_LOGO_URL} alt="" />
-          </span>
-          <span className="brand-text">
-            <span className="brand-wordmark">eliteOS</span>
-            <span className="brand-sub">Quote Library · {workspaceName}</span>
-          </span>
-        </a>
-        <div className="topbar-actions">
-          {sessionToken ? (
-            <div className="home-user-menu-wrap" ref={userMenuRef}>
-              <button
-                type="button"
-                className="home-user-chip"
-                aria-label="Account menu"
-                aria-haspopup="menu"
-                aria-expanded={userMenuOpen}
-                onClick={() => setUserMenuOpen((v) => !v)}
-              >
-                <span className="home-user-chip-avatar" aria-hidden>
-                  {userDisplayInitials}
-                </span>
-                <span className="home-user-chip-text">
-                  <span className="home-user-chip-name">{userDisplayName}</span>
-                  {userDisplayEmail && userDisplayEmail.toLowerCase() !== userDisplayName.toLowerCase() ? (
-                    <span className="home-user-chip-role">{userDisplayEmail}</span>
-                  ) : null}
-                </span>
-                <svg
-                  className="home-user-chip-chevron"
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden
-                >
-                  <path d="M6 9l6 6 6-6" />
-                </svg>
-              </button>
-              {userMenuOpen ? (
-                <div className="home-user-menu" role="menu" aria-label="Account menu">
-                  <div className="home-user-menu-header">
-                    <p className="home-user-menu-display-name">{userDisplayName}</p>
-                    {userDisplayEmail ? <p className="home-user-menu-email">{userDisplayEmail}</p> : null}
-                    <p className="home-user-menu-workspace">Workspace · {workspaceName} · on eliteOS</p>
-                  </div>
-
-                  <div className="home-user-menu-body">
-                    <a
-                      href={homeBase}
-                      className="home-user-menu-item"
-                      role="menuitem"
-                      onClick={() => setUserMenuOpen(false)}
-                    >
-                      <span className="home-user-menu-icon" aria-hidden>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M3 11.5L12 4l9 7.5" />
-                          <path d="M5 10v10h14V10" />
-                          <path d="M10 20v-6h4v6" />
-                        </svg>
-                      </span>
-                      <span className="home-user-menu-label">
-                        <span>Open Home</span>
-                        <span className="home-user-menu-meta">eliteOS Launcher</span>
-                      </span>
-                    </a>
-
-                    <button
-                      type="button"
-                      className="home-user-menu-item"
-                      role="menuitem"
-                      onClick={() => void handleMenuRefresh()}
-                      disabled={refreshBusy || busy}
-                    >
-                      <span className="home-user-menu-icon" aria-hidden>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M21 12a9 9 0 1 1-3-6.7" />
-                          <path d="M21 4v5h-5" />
-                        </svg>
-                      </span>
-                      <span className="home-user-menu-label">
-                        <span>{refreshBusy ? "Refreshing data…" : "Refresh data"}</span>
-                        <span className="home-user-menu-meta">Metrics, list, and open quote</span>
-                      </span>
-                    </button>
-
-                    <a
-                      href={`${homeBase}?view=profile`}
-                      className="home-user-menu-item"
-                      role="menuitem"
-                      onClick={() => setUserMenuOpen(false)}
-                      title="Profile & preferences"
-                    >
-                      <span className="home-user-menu-icon" aria-hidden>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                          <circle cx="12" cy="8" r="3.5" />
-                          <path d="M5 20c1.5-3.5 4.2-5 7-5s5.5 1.5 7 5" />
-                        </svg>
-                      </span>
-                      <span className="home-user-menu-label">
-                        <span>Profile &amp; preferences</span>
-                        <span className="home-user-menu-meta">eliteOS Home</span>
-                      </span>
-                    </a>
-                  </div>
-
-                  <div className="home-user-menu-footer">
-                    <button
-                      type="button"
-                      className="home-user-menu-item home-user-menu-signout"
-                      role="menuitem"
-                      onClick={() => {
-                        setUserMenuOpen(false);
-                        void signOut();
-                      }}
-                    >
-                      <span className="home-user-menu-icon" aria-hidden>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                          <polyline points="16 17 21 12 16 7" />
-                          <line x1="21" y1="12" x2="9" y2="12" />
-                        </svg>
-                      </span>
-                      <span className="home-user-menu-label">Sign out</span>
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-      </header>
-
+      {sessionToken ? (
+        <EliteosTopbar
+          appName="Quote Library"
+          organizationName={workspaceName}
+          logoSrc={workspaceLogoUrl ?? EOS_LOGO_URL}
+          homeHref="/"
+          userName={userDisplayName}
+          userEmail={userDisplayEmail}
+          userSubtitle={qlChipSubtitle}
+          initials={userDisplayInitials}
+          menuItems={qlMenuItems}
+          onSignOut={() => void signOut()}
+        />
+      ) : (
+        <EliteosTopbar
+          appName="Quote Library"
+          organizationName={workspaceName}
+          logoSrc={workspaceLogoUrl ?? EOS_LOGO_URL}
+          homeHref="/"
+        />
+      )}
       <main className="main" role="main">
         {!supabase ? (
           <div className="banner banner-warn" role="alert">
