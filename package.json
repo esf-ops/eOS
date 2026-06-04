@@ -38,6 +38,8 @@
     "eos:moraware:run-scheduled-pipeline": "node backend-core/src/scripts/moraware/runScheduledMorawarePipeline.js",
     "eos:moraware:verify-tiny-mapping": "node backend-core/src/scripts/moraware/verifyTinySnapshotMapping.mjs",
     "eos:moraware:report-feed-poc": "node backend-core/src/scripts/moraware/importReportFeedPoc.js",
+    "eos:slabcloud:inventory-poc": "node backend-core/src/scripts/slabcloud/importSlabCloudInventoryPoc.js",
+    "eos:test:slabcloud-inventory": "node backend-core/src/slabcloud/slabCloudInventoryPoc.test.mjs",
     "eos:test:quote-file-storage": "node backend-core/src/files/quoteFileStoragePath.test.mjs",
     "eos:test:quote-file-service": "node backend-core/src/files/quoteFileService.test.mjs",
     "eos:test:pricing-authority": "node backend-core/src/quotes/pricingAuthority.contract.test.mjs",

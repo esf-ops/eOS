@@ -817,3 +817,18 @@
 
 ---
 
+### 65. SlabCloud inventory integration — read-only dry-run POC only (no Supabase, no UI, no holds, no writeback)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-06-04 |
+| **Decision** | The first SlabCloud integration is a **read-only, dry-run proof of concept**. It pulls Elite Stone Fabrication slab inventory from the observed **SlabCloud JSON endpoints**, normalizes the records into a stable internal shape, and writes **local files only** under `debug/slabcloud/`. It performs **no Supabase writes, no database migrations, no holds/reservations, no writeback to SlabCloud/Slabsmith, no HTML scraping, and no cookie/session/auth automation**. The SlabCloud **company code** (observed `kbyd`) is treated as **configurable** (`SLABCLOUD_COMPANY_CODE`) and is intentionally **not** assumed to equal the public inventory slug `/inventory/esf/`. Image URLs are **guessed** from the observed pattern but **not downloaded** by default (`SLABCLOUD_VERIFY_IMAGES=1` does an optional best-effort HEAD probe). Slab dimensions (`Width_Actual`/`Length_Actual`, meters) are converted to inches for convenience but are **not** used for quote pricing in this POC; `UsableA`/`UsableD` are of uncertain meaning and are **preserved raw**, not interpreted. |
+| **Why** | Prove the data path (SlabCloud JSON → normalized slab inventory) and review real output **before** committing to schema, cache tables, or a customer/internal UI. Keeping it read-only and local avoids tenant-data risk, avoids premature Supabase coupling, and keeps the door open to either a backend-owned cached Slab Inventory head or a future SlabRoom/showroom experience — without building any of that yet. |
+| **Endpoints used** | `GET /api/materials/{companyCode}`, `GET /api/slabs/{companyCode}?type=Slab&edges=true`, and per-color detail `GET /api/slabs/{companyCode}?name={Name}&type=Slab&edges=true`. Observed publicly reachable for company `kbyd` without credentials during the POC. |
+| **Future path** | A real Slab Inventory head must use **backend-owned cached data** (server fetch + Supabase cache, org-scoped by `organization_id`), **never** direct browser calls to SlabCloud. Confirm with SlabCloud whether these endpoints are approved for sustained internal/automated use before scheduling syncs. |
+| **Explicitly NOT built** | Slab Inventory head, SlabRoom customer portal, showroom TV channel, QR display, quote/slab hold workflow, Slabsmith writeback, payments, scheduling, AI recommendations, Supabase cache tables, migrations. |
+| **Impacted files/docs** | `backend-core/src/slabcloud/slabCloudClient.js` (created), `backend-core/src/slabcloud/normalizeSlabCloudInventory.js` (created), `backend-core/src/slabcloud/slabCloudInventoryPoc.test.mjs` (created), `backend-core/src/scripts/slabcloud/importSlabCloudInventoryPoc.js` (created), `package.json` (`eos:slabcloud:inventory-poc`, `eos:test:slabcloud-inventory`), `docs/eliteos/slabcloud-inventory-poc.md` (created), `docs/eliteos/FEATURE_DECISIONS.md` (this entry). Output (gitignored): `debug/slabcloud/slabcloud-inventory-dry-run.json`, `debug/slabcloud/slabcloud-inventory-summary.json`. |
+| **Revisit trigger** | We decide to build a Slab Inventory head or SlabRoom; SlabCloud confirms (or denies) endpoint use; endpoints begin requiring auth/cookies (in which case the POC stops and the approach is re-scoped — no scraping or session automation); or pricing/area logic needs `UsableA`/`UsableD` semantics resolved. |
+
+---
+
