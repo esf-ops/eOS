@@ -7774,11 +7774,6 @@ textarea:focus {
   --ie-topbar-h: 72px;
   --ie-sticky-bar-h: 92px;
   --ie-sticky-bar-gap: 24px;
-  /* Public alias for the tokenized topbar height. Aliased (not a second
-     literal) so the sticky-offset source of truth stays --ie-topbar-h
-     and the two can never drift apart. Used by sticky offsets such as
-     the compact scroll-context strip and the Live Quote Panel. */
-  --topbar-h: var(--ie-topbar-h);
 }
 
 @media (max-width: 1020px) {
@@ -8794,105 +8789,41 @@ body {
 }
 
 /* =====================================================================
- * Workspace density + scroll-context pass (approved limited plan)
+ * Workspace density pass (approved limited plan)
  * ---------------------------------------------------------------------
  * Appended last so its cascade wins over earlier density passes without
  * needing `!important`. Scoped to .ie-main / .ie-aside / .page-internal-
  * estimate so the shared app-quote styles used by other heads are never
  * affected. Pure presentation only — no pricing, measurement, save,
  * customer-PDF, or data behavior is touched anywhere in this block.
+ *
+ * (A compact scroll-context strip was trialed here and removed after
+ * visual QA — it competed with the topbar / rail / right panel / bottom
+ * action bar. The center workspace was widened instead; see the
+ * "Workspace width" block below.)
  * ===================================================================*/
 
-/* ----- Compact scroll-context strip ---------------------------------- */
+/* ----- Workspace width — give the center column more room ------------- */
 /*
- * Conservative alternative to making the full ~220px hero sticky. The
- * large hero stays in normal document flow; this small strip is sticky
- * just under the topbar and only becomes visible once the hero scrolls
- * out of view (driven by an IntersectionObserver in InternalEstimateApp
- * that toggles `data-active`). It shows essential context only — job /
- * quote reference, customer / account, and the live total — and never
- * replaces the hero or any save / status chrome.
+ * The estimator's center column was still cramped. Widen the overall
+ * workspace cap and tighten the two side columns slightly so the center
+ * `minmax(0, 1fr)` absorbs the extra width: Job Info fields fit in
+ * cleaner horizontal rows and room cards get more room for paired
+ * controls. The left rail stays usable and the right Live Quote Panel
+ * stays readable (never below ~268px). Responsive breakpoints below
+ * 1020px are unchanged (the grid still collapses to a single column).
  */
-.ie-context-strip {
-  position: sticky;
-  top: var(--topbar-h);
-  z-index: 25; /* below topbar (30), user menu (60), and modal (80) */
-  /* Collapsed by default: reserves no space until activated on scroll. */
-  max-height: 0;
-  margin: 0;
-  opacity: 0;
-  overflow: hidden;
-  transform: translateY(-6px);
-  pointer-events: none;
-  transition: opacity 0.16s ease, transform 0.16s ease, max-height 0.16s ease,
-    margin 0.16s ease;
+.ie-shell-body {
+  /* Was 1480px. More horizontal real estate on 1600 / 1920 viewports;
+     still centered and padded so it never overflows narrower screens. */
+  max-width: 1640px;
 }
 
-.ie-context-strip[data-active="true"] {
-  max-height: 64px;
-  margin-bottom: 14px;
-  opacity: 1;
-  transform: translateY(0);
-  pointer-events: auto;
-}
-
-.ie-context-strip-inner {
-  display: flex;
-  align-items: center;
-  gap: 10px 18px;
-  flex-wrap: nowrap;
-  padding: 8px 16px;
-  border-radius: 12px;
-  border: 1px solid var(--eos-line);
-  background: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.98) 0%,
-    rgba(250, 251, 255, 0.95) 100%
-  );
-  box-shadow: var(--sh-1);
-}
-
-.ie-context-strip-primary {
-  font-weight: 700;
-  font-size: 0.9rem;
-  color: var(--eos-ink);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 42%;
-}
-
-.ie-context-strip-secondary {
-  font-size: 0.82rem;
-  color: var(--eos-ink-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 32%;
-}
-
-.ie-context-strip-total {
-  margin-left: auto;
-  font-weight: 700;
-  font-size: 0.98rem;
-  color: var(--eos-accent);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-/* Off-switch on narrow screens: the layout collapses at 1020px and the
-   topbar can wrap, so the strip is removed entirely (no reserved space,
-   no sticky offset) below that width. */
-@media (max-width: 1020px) {
-  .ie-context-strip {
-    display: none;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .ie-context-strip {
-    transition: none;
-  }
+.ie-app-shell {
+  grid-template-columns:
+    clamp(156px, 10.5vw, 184px)
+    minmax(0, 1fr)
+    clamp(268px, 18vw, 300px);
 }
 
 /* ----- Job Info — extra density -------------------------------------- */
