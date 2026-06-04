@@ -787,120 +787,124 @@ export default function QuoteLibraryApp() {
         </a>
         <div className="topbar-actions">
           {sessionToken ? (
-            <div
-              className="topbar-account-wrap"
-              ref={userMenuRef}
-            >
+            <div className="home-user-menu-wrap" ref={userMenuRef}>
               <button
                 type="button"
-                className={`topbar-account${userMenuOpen ? " is-open" : ""}`}
-                aria-label="Open account menu"
+                className="home-user-chip"
+                aria-label="Account menu"
                 aria-haspopup="menu"
                 aria-expanded={userMenuOpen}
                 onClick={() => setUserMenuOpen((v) => !v)}
               >
-                <span className="topbar-avatar" aria-hidden>
+                <span className="home-user-chip-avatar" aria-hidden>
                   {userDisplayInitials}
                 </span>
-                <span className="topbar-account-text">
-                  <span className="topbar-account-name">{userDisplayName}</span>
+                <span className="home-user-chip-text">
+                  <span className="home-user-chip-name">{userDisplayName}</span>
                   {userDisplayEmail && userDisplayEmail.toLowerCase() !== userDisplayName.toLowerCase() ? (
-                    <span className="topbar-account-role">{userDisplayEmail}</span>
+                    <span className="home-user-chip-role">{userDisplayEmail}</span>
                   ) : null}
                 </span>
-                <span className="topbar-account-caret" aria-hidden>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="6 9 12 15 18 9" />
-                  </svg>
-                </span>
+                <svg
+                  className="home-user-chip-chevron"
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                >
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
               </button>
               {userMenuOpen ? (
-                <div className="user-menu" role="menu" aria-label="Account menu">
-                  <div className="user-menu-header">
-                    <p className="user-menu-name">{userDisplayName}</p>
-                    {userDisplayEmail ? <p className="user-menu-email">{userDisplayEmail}</p> : null}
-                    <p className="user-menu-workspace">
-                      <span>Workspace ·</span>{" "}
-                      <strong>{workspaceName}</strong>
-                      <span className="user-menu-sep" aria-hidden>·</span>
-                      <span>on eliteOS</span>
-                    </p>
+                <div className="home-user-menu" role="menu" aria-label="Account menu">
+                  <div className="home-user-menu-header">
+                    <p className="home-user-menu-display-name">{userDisplayName}</p>
+                    {userDisplayEmail ? <p className="home-user-menu-email">{userDisplayEmail}</p> : null}
+                    <p className="home-user-menu-workspace">Workspace · {workspaceName} · on eliteOS</p>
                   </div>
-                  <div className="user-menu-list">
+
+                  <div className="home-user-menu-body">
                     <a
                       href={homeBase}
-                      className="user-menu-item"
+                      className="home-user-menu-item"
                       role="menuitem"
                       onClick={() => setUserMenuOpen(false)}
                     >
-                      <span className="user-menu-icon" aria-hidden>
+                      <span className="home-user-menu-icon" aria-hidden>
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
                           <path d="M3 11.5L12 4l9 7.5" />
                           <path d="M5 10v10h14V10" />
                           <path d="M10 20v-6h4v6" />
                         </svg>
                       </span>
-                      <span className="user-menu-label">
+                      <span className="home-user-menu-label">
                         <span>Open Home</span>
-                        <span className="user-menu-meta">eliteOS Launcher</span>
+                        <span className="home-user-menu-meta">eliteOS Launcher</span>
                       </span>
-                      <span className="user-menu-shortcut" aria-hidden>↗</span>
                     </a>
+
                     <button
                       type="button"
-                      className="user-menu-item"
+                      className="home-user-menu-item"
                       role="menuitem"
                       onClick={() => void handleMenuRefresh()}
                       disabled={refreshBusy || busy}
                     >
-                      <span className="user-menu-icon" aria-hidden>
+                      <span className="home-user-menu-icon" aria-hidden>
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
                           <path d="M21 12a9 9 0 1 1-3-6.7" />
                           <path d="M21 4v5h-5" />
                         </svg>
                       </span>
-                      <span className="user-menu-label">
+                      <span className="home-user-menu-label">
                         <span>{refreshBusy ? "Refreshing data…" : "Refresh data"}</span>
-                        <span className="user-menu-meta">Metrics, list, and open quote</span>
+                        <span className="home-user-menu-meta">Metrics, list, and open quote</span>
                       </span>
                     </button>
+
                     <a
                       href={`${homeBase}?view=profile`}
-                      className="user-menu-item"
+                      className="home-user-menu-item"
                       role="menuitem"
                       onClick={() => setUserMenuOpen(false)}
                       title="Profile & preferences"
                     >
-                      <span className="user-menu-icon" aria-hidden>
+                      <span className="home-user-menu-icon" aria-hidden>
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
                           <circle cx="12" cy="8" r="3.5" />
                           <path d="M5 20c1.5-3.5 4.2-5 7-5s5.5 1.5 7 5" />
                         </svg>
                       </span>
-                      <span className="user-menu-label">
+                      <span className="home-user-menu-label">
                         <span>Profile &amp; preferences</span>
-                        <span className="user-menu-meta">eliteOS Home</span>
+                        <span className="home-user-menu-meta">eliteOS Home</span>
                       </span>
                     </a>
                   </div>
-                  <div className="user-menu-footer">
+
+                  <div className="home-user-menu-footer">
                     <button
                       type="button"
-                      className="user-menu-item user-menu-signout"
+                      className="home-user-menu-item home-user-menu-signout"
                       role="menuitem"
                       onClick={() => {
                         setUserMenuOpen(false);
                         void signOut();
                       }}
                     >
-                      <span className="user-menu-icon" aria-hidden>
+                      <span className="home-user-menu-icon" aria-hidden>
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
                           <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
                           <polyline points="16 17 21 12 16 7" />
                           <line x1="21" y1="12" x2="9" y2="12" />
                         </svg>
                       </span>
-                      <span className="user-menu-label">Sign out</span>
+                      <span className="home-user-menu-label">Sign out</span>
                     </button>
                   </div>
                 </div>
