@@ -8915,3 +8915,47 @@ body {
   margin-bottom: 4px;
 }
 
+/* ----- Left workflow rail — sticky, mirror the right panel ----------- */
+/*
+ * Root cause of the clipping: the rail used `position: sticky; top: 12px`
+ * (set in the base rule) with no max-height and no overflow. 12px is
+ * above the 72px sticky topbar, so the rail's top slid under the topbar,
+ * and with no height cap its bottom was clipped once the room sub-nav
+ * made the rail taller than the viewport.
+ *
+ * Fix: mirror the right Live Quote Panel's sticky logic using the same
+ * existing tokens (--ie-topbar-h / --ie-sticky-bar-h). The rail keeps
+ * `position: sticky` (from the base rule) and now pins below the topbar,
+ * is capped to the viewport between the topbar and the bottom command
+ * bar, and scrolls internally if its content exceeds that height. The
+ * rail stays in the left column; nav items, room sub-nav, and section
+ * navigation behavior are unchanged.
+ */
+.ie-rail {
+  top: calc(var(--ie-topbar-h) + 14px);
+  max-height: calc(
+    100vh - var(--ie-topbar-h) - 14px - var(--ie-sticky-bar-h) - 14px
+  );
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* Subtle internal scrollbar, matching the right panel's treatment. */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(11, 26, 51, 0.18) transparent;
+}
+
+/*
+ * Below 1020px the grid collapses and the rail becomes a horizontal
+ * wrapped nav row. Fully restore static flow here (declared after the
+ * desktop rule so source order can never re-pin it on narrow screens)
+ * and drop the height cap / internal scroll so it never clips.
+ */
+@media (max-width: 1020px) {
+  .ie-rail {
+    position: relative;
+    top: auto;
+    max-height: none;
+    overflow: visible;
+  }
+}
+
