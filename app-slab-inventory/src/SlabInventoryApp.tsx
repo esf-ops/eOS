@@ -199,6 +199,7 @@ export default function SlabInventoryApp() {
 
   const [viewMode, setViewMode] = useState<"grid" | "table">("grid");
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const [moreFiltersOpen, setMoreFiltersOpen] = useState(false);
 
   const homeBase = useMemo(() => homeLauncherUrl(), []);
   const workspaceLogoUrl = EOS_LOGO_URL || undefined;
@@ -419,6 +420,8 @@ export default function SlabInventoryApp() {
   const activeFilterCount = [fMaterial, fColor, fPriceGroup, fThickness, fRack, fDistributor, fImageStatus, search].filter(
     Boolean
   ).length;
+  // Count of secondary (collapsed) filters that are currently active — drives the "More filters (n)" badge.
+  const secondaryFilterCount = [fThickness, fRack, fDistributor].filter(Boolean).length;
 
   const rangeStart = total === 0 ? 0 : page * PAGE_SIZE + 1;
   const rangeEnd = Math.min(total, (page + 1) * PAGE_SIZE);
@@ -558,6 +561,7 @@ export default function SlabInventoryApp() {
               <div className="content-main">
                 {/* Filter / search bar */}
                 <section className="filter-bar" aria-label="Filters">
+                  {/* Search input */}
                   <div className="filter-search">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                       <circle cx="11" cy="11" r="7" />
@@ -572,16 +576,36 @@ export default function SlabInventoryApp() {
                     />
                   </div>
 
+                  {/* Primary filters — always visible */}
                   <div className="filter-selects">
                     <SelectFilter label="Material" value={fMaterial} onChange={setFMaterial} options={filters?.materials} />
                     <SelectFilter label="Color" value={fColor} onChange={setFColor} options={filters?.colors} />
-                    <SelectFilter label="Price group" value={fPriceGroup} onChange={setFPriceGroup} options={filters?.price_groups} />
-                    <SelectFilter label="Thickness" value={fThickness} onChange={setFThickness} options={filters?.thicknesses} />
-                    <SelectFilter label="Rack" value={fRack} onChange={setFRack} options={filters?.racks} />
-                    <SelectFilter label="Distributor" value={fDistributor} onChange={setFDistributor} options={filters?.distributors} />
+                    <SelectFilter label="Source price group" value={fPriceGroup} onChange={setFPriceGroup} options={filters?.price_groups} />
                     <SelectFilter label="Image status" value={fImageStatus} onChange={setFImageStatus} options={filters?.image_statuses} />
+                    <button
+                      type="button"
+                      className={`btn secondary btn-sm filter-more-btn${moreFiltersOpen ? " open" : ""}`}
+                      onClick={() => setMoreFiltersOpen((o) => !o)}
+                      aria-expanded={moreFiltersOpen}
+                      aria-controls="filter-secondary"
+                    >
+                      {moreFiltersOpen ? "Fewer filters" : "More filters"}
+                      {secondaryFilterCount > 0 ? (
+                        <span className="filter-more-badge" aria-label={`${secondaryFilterCount} active`}>{secondaryFilterCount}</span>
+                      ) : null}
+                    </button>
                   </div>
 
+                  {/* Secondary filters — thickness, rack, distributor */}
+                  {moreFiltersOpen ? (
+                    <div id="filter-secondary" className="filter-selects filter-selects-secondary">
+                      <SelectFilter label="Thickness" value={fThickness} onChange={setFThickness} options={filters?.thicknesses} />
+                      <SelectFilter label="Rack" value={fRack} onChange={setFRack} options={filters?.racks} />
+                      <SelectFilter label="Distributor" value={fDistributor} onChange={setFDistributor} options={filters?.distributors} />
+                    </div>
+                  ) : null}
+
+                  {/* Sort / view actions */}
                   <div className="filter-actions">
                     <label className="sort-control">
                       <span>Sort</span>
@@ -596,18 +620,19 @@ export default function SlabInventoryApp() {
                     <button
                       type="button"
                       className="icon-btn"
-                      title={direction === "asc" ? "Ascending" : "Descending"}
+                      title={direction === "asc" ? "Sort ascending" : "Sort descending"}
+                      aria-label={direction === "asc" ? "Sort ascending" : "Sort descending"}
                       onClick={() => setDirection((d) => (d === "asc" ? "desc" : "asc"))}
                     >
                       {direction === "asc" ? "↑" : "↓"}
                     </button>
                     <div className="view-toggle" role="group" aria-label="View mode">
-                      <button type="button" className={viewMode === "grid" ? "on" : ""} onClick={() => setViewMode("grid")}>Grid</button>
-                      <button type="button" className={viewMode === "table" ? "on" : ""} onClick={() => setViewMode("table")}>List</button>
+                      <button type="button" className={viewMode === "grid" ? "on" : ""} onClick={() => setViewMode("grid")} aria-pressed={viewMode === "grid"}>Grid</button>
+                      <button type="button" className={viewMode === "table" ? "on" : ""} onClick={() => setViewMode("table")} aria-pressed={viewMode === "table"}>List</button>
                     </div>
                     {activeFilterCount > 0 ? (
                       <button type="button" className="btn secondary btn-sm" onClick={resetFilters}>
-                        Clear ({activeFilterCount})
+                        Clear {activeFilterCount > 1 ? `(${activeFilterCount})` : "filter"}
                       </button>
                     ) : null}
                   </div>
@@ -643,22 +668,30 @@ export default function SlabInventoryApp() {
                           <th>Color</th>
                           <th>Material</th>
                           <th>Dimensions</th>
-                          <th>Inv. ID</th>
+                          <th>ID</th>
                           <th>Rack</th>
-                          <th>Source PG</th>
-                          <th>Photo</th>
+                          <th title="Source price group — imported from SlabCloud">Source PG</th>
+                          <th title="Photo verified by URL check">Photo</th>
                         </tr>
                       </thead>
                       <tbody>
                         {slabs.map((s, i) => (
-                          <tr key={s.id} onClick={() => openSlab(i)} className="slab-row">
+                          <tr
+                            key={s.id}
+                            onClick={() => openSlab(i)}
+                            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openSlab(i); } }}
+                            className="slab-row"
+                            tabIndex={0}
+                            role="button"
+                            aria-label={`View details: ${s.color_name ?? "Unnamed"} · ${s.material_name ?? ""}`}
+                          >
                             <td className="cell-strong">{s.color_name || "—"}</td>
                             <td>{s.material_name || "—"}</td>
                             <td>{dimsLabel(s)}</td>
-                            <td><code>{s.inventory_id || "—"}</code></td>
+                            <td>{s.inventory_id ? <code>ID {s.inventory_id}</code> : "—"}</td>
                             <td>{s.rack || "—"}</td>
-                            <td>{s.source_price_group ? <span className="pg-badge">{s.source_price_group}</span> : "—"}</td>
-                            <td>{s.image_status === "ok" ? "✓" : "—"}</td>
+                            <td>{s.source_price_group ? <span className="pg-badge" title="Imported from SlabCloud">{s.source_price_group}</span> : "—"}</td>
+                            <td>{s.image_status === "ok" ? <span className="img-ok" aria-label="Verified">✓</span> : "—"}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -840,21 +873,41 @@ function SlabThumb({ slab, className }: { slab: Slab; className?: string }) {
 
 function SlabCard({ slab, onOpen }: { slab: Slab; onOpen: () => void }) {
   return (
-    <button type="button" className="slab-card" onClick={onOpen}>
+    <button
+      type="button"
+      className="slab-card"
+      onClick={onOpen}
+      aria-label={`View details: ${slab.color_name ?? "Unnamed"} · ${slab.material_name ?? ""}`}
+    >
       <div className="slab-card-media">
         <SlabThumb slab={slab} className="slab-card-img" />
-        {slab.source_price_group ? <span className="slab-card-pg pg-badge">{slab.source_price_group}</span> : null}
-        {slab.image_status === "ok" ? <span className="slab-card-verified" title="Photo verified" /> : null}
+        {slab.source_price_group ? (
+          <span className="slab-card-pg pg-badge" title="Source price group — imported from SlabCloud">
+            {slab.source_price_group}
+          </span>
+        ) : null}
+        {slab.image_status === "ok" ? (
+          <span className="slab-card-verified" role="img" aria-label="Photo verified" />
+        ) : null}
+        {/* Hover affordance — hidden until card is hovered/focused */}
+        <span className="slab-card-overlay" aria-hidden>
+          <span className="slab-card-overlay-hint">View details ›</span>
+        </span>
       </div>
       <div className="slab-card-body">
         <p className="slab-card-color">{slab.color_name || "Unnamed"}</p>
         <p className="slab-card-material">{slab.material_name || "—"}</p>
         <div className="slab-card-meta">
           <span>{dimsLabel(slab)}</span>
-          <span className="slab-card-dot" aria-hidden>·</span>
-          <span>Rack {slab.rack || "—"}</span>
+          {slab.rack ? (
+            <><span className="slab-card-dot" aria-hidden>·</span><span>Rack {slab.rack}</span></>
+          ) : null}
         </div>
-        <p className="slab-card-inv"><code>{slab.inventory_id || slab.external_slab_id || "—"}</code></p>
+        {slab.inventory_id ? (
+          <p className="slab-card-inv">ID {slab.inventory_id}</p>
+        ) : slab.external_slab_id ? (
+          <p className="slab-card-inv slab-card-inv-ext">{slab.external_slab_id.slice(0, 8)}…</p>
+        ) : null}
       </div>
     </button>
   );
