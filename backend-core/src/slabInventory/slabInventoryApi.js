@@ -19,6 +19,11 @@
  */
 
 import { resolveOrganizationContext } from "../organizations/organizationContext.js";
+import {
+  matchSourceColorWithAliases,
+  normalizeColorName as _normColorName,
+  normalizeMaterialName as _normMatName,
+} from "./colorProgramMatching.js";
 
 export const SLAB_INVENTORY_HEAD_SLUG = "slab_inventory";
 
@@ -434,6 +439,69 @@ export function parseColorInventoryParams(query = {}) {
     image_status: IMAGE_STATUS_VALUES.includes(imageStatus) ? imageStatus : "",
     active_only: activeOnly
   };
+}
+
+/**
+ * Given typed inventory rows and resolved catalog deps, return a Map keyed by
+ * catalog_item_id → { slabCount, remnantCount, slabIds }.
+ * Only exact and alias matches contribute to Elite 100 counts.
+ * Fuzzy / unmatched rows are excluded (those become Non-Stock).
+ * Exported for unit testing.
+ *
+ * @param {Array<{ color_name?: string|null, material_name?: string|null, source_inventory_type?: string|null, external_slab_id?: string|null }>} invRows
+ * @param {Array<{ id: string, color_name?: string|null, material_name?: string|null, normalized_color_name?: string, normalized_material_name?: string }>} catalogItemList
+ * @param {Array<{ normalized_alias_color_name: string, normalized_alias_material_name: string, catalog_color_name: string|null, catalog_material_name: string|null }>} resolvedAliases
+ */
+export function buildElite100InventoryMap(invRows, catalogItemList, resolvedAliases) {
+  const map = new Map(
+    (Array.isArray(catalogItemList) ? catalogItemList : []).map((c) => [
+      c.id,
+      { slabCount: 0, remnantCount: 0, slabIds: [] },
+    ])
+  );
+
+  // Deduplicate source colors before matching for performance.
+  /** @type {Map<string, { color_name: string|null, material_name: string|null, rows: Array }>} */
+  const uniqueGroups = new Map();
+  for (const r of Array.isArray(invRows) ? invRows : []) {
+    const key = `${r.color_name ?? ""}||${r.material_name ?? ""}`;
+    if (!uniqueGroups.has(key)) {
+      uniqueGroups.set(key, {
+        color_name: r.color_name,
+        material_name: r.material_name,
+        rows: [],
+      });
+    }
+    uniqueGroups.get(key).rows.push(r);
+  }
+
+  // Match each unique source color group against the catalog.
+  for (const sourceGroup of uniqueGroups.values()) {
+    const source = {
+      color_name: sourceGroup.color_name,
+      material_name: sourceGroup.material_name,
+    };
+    const result = matchSourceColorWithAliases(
+      source,
+      Array.isArray(catalogItemList) ? catalogItemList : [],
+      Array.isArray(resolvedAliases) ? resolvedAliases : []
+    );
+    // Only exact/alias → Elite 100. Fuzzy/none → Non-Stock.
+    if (result.method !== "exact" && result.method !== "alias") continue;
+    if (!result.match?.id) continue;
+
+    const acc = map.get(result.match.id);
+    if (!acc) continue;
+
+    for (const r of sourceGroup.rows) {
+      const slabId = String(r.external_slab_id ?? "").trim();
+      if (slabId) acc.slabIds.push(slabId);
+      if (r.source_inventory_type === "Slab") acc.slabCount += 1;
+      else if (r.source_inventory_type === "Remnant") acc.remnantCount += 1;
+    }
+  }
+
+  return map;
 }
 
 /**
@@ -908,7 +976,513 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
     }
   });
 
+  // -------------------------------------------------------------------------
+  // Helpers shared by the three Elite 100 / Non-Stock routes
+  // -------------------------------------------------------------------------
+
+  /**
+   * Load the active Elite 100 collection + catalog items + resolved aliases
+   * for a given organization.  All reads are server-side service-role only.
+   * Returns { collection, catalogItemList, resolvedAliases } — collection is
+   * null when no active collection exists (non-fatal).
+   */
+  async function loadElite100Deps(organizationId) {
+    const supabase = db();
+
+    const { data: collections } = await supabase
+      .from("slab_color_collections")
+      .select("id,collection_key,display_name,collection_year,is_active")
+      .eq("is_active", true)
+      .eq("organization_id", organizationId)
+      .limit(1);
+
+    const collection = collections?.[0] ?? null;
+    if (!collection) return { collection: null, catalogItemList: [], resolvedAliases: [] };
+
+    const { data: catalogItems } = await supabase
+      .from("slab_color_catalog_items")
+      .select(
+        "id,color_name,material_name,price_group,normalized_color_name,normalized_material_name,display_name,sort_order"
+      )
+      .eq("organization_id", organizationId)
+      .eq("collection_id", collection.id)
+      .eq("is_active", true);
+
+    const catalogItemList = catalogItems ?? [];
+    const catalogItemIds = catalogItemList.map((c) => c.id);
+
+    let resolvedAliases = [];
+    if (catalogItemIds.length) {
+      const { data: aliasRows } = await supabase
+        .from("slab_color_aliases")
+        .select(
+          "catalog_item_id,alias_color_name,alias_material_name,normalized_alias_color_name,normalized_alias_material_name"
+        )
+        .eq("organization_id", organizationId)
+        .eq("is_active", true)
+        .in("catalog_item_id", catalogItemIds);
+
+      const catalogItemMap = new Map(catalogItemList.map((c) => [c.id, c]));
+      resolvedAliases = (aliasRows ?? [])
+        .map((alias) => {
+          const catItem = catalogItemMap.get(alias.catalog_item_id);
+          if (!catItem) return null;
+          return {
+            normalized_alias_color_name: alias.normalized_alias_color_name,
+            normalized_alias_material_name:
+              alias.normalized_alias_material_name ?? "",
+            catalog_color_name: catItem.color_name,
+            catalog_material_name: catItem.material_name,
+          };
+        })
+        .filter(Boolean);
+    }
+
+    return { collection, catalogItemList, resolvedAliases };
+  }
+
+  // (buildElite100InventoryMap is defined and exported at module level above)
+
+  // GET /api/slab-inventory/elite100-programs
+  //
+  // Returns all active Elite 100 catalog items organized by Promo/A/B/C/D/E/F,
+  // enriched with live typed inventory counts and representative images.
+  // Every catalog item is returned even when inventory = 0.
+  // Only exact and approved-alias inventory matches contribute to counts.
+  // Fuzzy / unmatched inventory is excluded (those belong in Non-Stock).
+  // Group G is never returned. No count_for_color is read or summed.
+  app.get("/api/slab-inventory/elite100-programs", ...guard, async (req, res) => {
+    try {
+      jsonNoStore(res);
+      const supabase = db();
+      const organizationId = await orgId(req);
+
+      const { collection, catalogItemList, resolvedAliases } =
+        await loadElite100Deps(organizationId);
+
+      if (!collection) {
+        return res.json({
+          ok: true,
+          collection: null,
+          groups: [],
+          price_group_order: [...COLOR_PROGRAM_PRICE_GROUP_ORDER],
+          note: "No active Elite 100 collection found for this organization.",
+        });
+      }
+
+      // Load typed inventory (minimal projection — no count_for_color).
+      let invQ = supabase
+        .from("slab_inventory")
+        .select(
+          "id,external_slab_id,color_name,material_name,source_inventory_type"
+        )
+        .eq("is_active", true)
+        .eq("source_inventory_scope", COLOR_PROGRAM_SCOPE)
+        .in("source_inventory_type", ["Slab", "Remnant"]);
+      invQ = scopeOrg(invQ, organizationId);
+      const { data: invRows, error: invErr } = await invQ;
+      if (invErr) {
+        if (isMissingRelationError(invErr)) {
+          return res.status(503).json({
+            ok: false,
+            installed: false,
+            message: "Slab inventory cache not installed.",
+          });
+        }
+        throw invErr;
+      }
+
+      // Load all org images (avoiding PostgREST URL-length limit).
+      let imgQ = supabase
+        .from("slab_images")
+        .select("external_slab_id,image_url,thumbnail_url,image_status");
+      imgQ = scopeOrg(imgQ, organizationId);
+      const { data: imgRows } = await imgQ;
+      const imageMap = buildImageMap(imgRows ?? []);
+
+      // Match inventory to catalog items (exact/alias only).
+      const elite100Map = buildElite100InventoryMap(
+        invRows ?? [],
+        catalogItemList,
+        resolvedAliases
+      );
+
+      // Enrich each catalog item with image + inventory counts.
+      for (const [itemId, acc] of elite100Map.entries()) {
+        let verifiedCount = 0;
+        let repImage = null;
+        let repThumbnail = null;
+        for (const slabId of acc.slabIds) {
+          const img = imageMap.get(slabId);
+          if (img?.image_status === "ok") {
+            verifiedCount += 1;
+            if (!repImage) {
+              repImage = img.image_url ?? null;
+              repThumbnail = img.thumbnail_url ?? null;
+            }
+          }
+        }
+        acc.verifiedPhotoCount = verifiedCount;
+        acc.repImage = repImage;
+        acc.repThumbnail = repThumbnail;
+      }
+
+      // Sort helper: catalog sort_order then color_name.
+      function sortItems(items) {
+        return [...items].sort((a, b) => {
+          const sa = a._sort_order ?? 9999;
+          const sb = b._sort_order ?? 9999;
+          if (sa !== sb) return sa - sb;
+          return String(a.color_name ?? "").localeCompare(
+            String(b.color_name ?? ""),
+            undefined,
+            { sensitivity: "base" }
+          );
+        });
+      }
+
+      // Build grouped response.
+      const groupsMap = new Map(
+        COLOR_PROGRAM_PRICE_GROUP_ORDER.map((pg) => [pg, []])
+      );
+
+      for (const item of catalogItemList) {
+        const pg = item.price_group;
+        if (!groupsMap.has(pg)) continue; // skip Group G or unknown
+
+        const acc = elite100Map.get(item.id) ?? {
+          slabCount: 0,
+          remnantCount: 0,
+          verifiedPhotoCount: 0,
+          repImage: null,
+          repThumbnail: null,
+        };
+
+        const card = {
+          catalog_item_id: item.id,
+          color_key: makeColorKey(item.color_name, item.material_name, item.price_group),
+          color_name: item.color_name,
+          material_name: item.material_name,
+          display_name: item.display_name,
+          price_group: pg,
+          total_inventory_count:
+            (acc.slabCount ?? 0) + (acc.remnantCount ?? 0),
+          slab_count: acc.slabCount ?? 0,
+          remnant_count: acc.remnantCount ?? 0,
+          verified_photo_count: acc.verifiedPhotoCount ?? 0,
+          representative_image_url: acc.repImage ?? null,
+          representative_thumbnail_url: acc.repThumbnail ?? null,
+          has_inventory:
+            (acc.slabCount ?? 0) + (acc.remnantCount ?? 0) > 0,
+          program_status: "elite_100",
+          _sort_order: item.sort_order ?? 9999,
+        };
+        groupsMap.get(pg).push(card);
+      }
+
+      const groups = COLOR_PROGRAM_PRICE_GROUP_ORDER.map((pg) => ({
+        price_group: pg,
+        items: sortItems(groupsMap.get(pg) ?? []).map(
+          ({ _sort_order: _so, ...rest }) => rest
+        ),
+      }));
+
+      res.json({
+        ok: true,
+        installed: true,
+        collection: {
+          collection_key: collection.collection_key,
+          display_name: collection.display_name,
+          collection_year: collection.collection_year ?? null,
+          is_active: collection.is_active,
+        },
+        groups,
+        price_group_order: [...COLOR_PROGRAM_PRICE_GROUP_ORDER],
+      });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  // GET /api/slab-inventory/elite100-programs/:catalogItemId/inventory
+  //
+  // Returns physical slab and remnant rows for one Elite 100 catalog item.
+  // Matches inventory using exact normalized color/material + approved aliases.
+  // Slabs and remnants are returned in separate arrays.
+  // Supports ?type=all|slab|remnant  (default: all).
+  app.get(
+    "/api/slab-inventory/elite100-programs/:catalogItemId/inventory",
+    ...guard,
+    async (req, res) => {
+      try {
+        jsonNoStore(res);
+        const catalogItemId = trimStr(req.params.catalogItemId);
+        if (!isUuid(catalogItemId)) {
+          return res.status(400).json({ ok: false, error: "invalid catalogItemId" });
+        }
+
+        const supabase = db();
+        const organizationId = await orgId(req);
+        const typeParam = trimStr(req.query.type ?? "").toLowerCase();
+        const type = ["slab", "remnant"].includes(typeParam) ? typeParam : "all";
+
+        // Load the specific catalog item.
+        let catQ = supabase
+          .from("slab_color_catalog_items")
+          .select(
+            "id,color_name,material_name,display_name,price_group,normalized_color_name,normalized_material_name"
+          )
+          .eq("id", catalogItemId)
+          .limit(1);
+        catQ = scopeOrg(catQ, organizationId);
+        const { data: catRows, error: catErr } = await catQ;
+        if (catErr) throw catErr;
+        const catItem = catRows?.[0] ?? null;
+        if (!catItem) {
+          return res.status(404).json({
+            ok: false,
+            error: "Elite 100 catalog item not found",
+          });
+        }
+
+        // Load aliases for this specific catalog item.
+        let aliasQ = supabase
+          .from("slab_color_aliases")
+          .select(
+            "alias_color_name,alias_material_name,normalized_alias_color_name,normalized_alias_material_name"
+          )
+          .eq("catalog_item_id", catalogItemId)
+          .eq("is_active", true);
+        aliasQ = scopeOrg(aliasQ, organizationId);
+        const { data: aliasRows } = await aliasQ;
+
+        const resolvedAliases = (aliasRows ?? []).map((a) => ({
+          normalized_alias_color_name: a.normalized_alias_color_name,
+          normalized_alias_material_name:
+            a.normalized_alias_material_name ?? "",
+          catalog_color_name: catItem.color_name,
+          catalog_material_name: catItem.material_name,
+        }));
+
+        // Load typed inventory (all scope-filtered rows — filter by match in JS).
+        let invQ = supabase
+          .from("slab_inventory")
+          .select(COLOR_INVENTORY_SELECT_COLUMNS.join(","))
+          .eq("is_active", true)
+          .eq("source_inventory_scope", COLOR_PROGRAM_SCOPE)
+          .in("source_inventory_type", ["Slab", "Remnant"]);
+        invQ = scopeOrg(invQ, organizationId);
+        const { data: invRows, error: invErr } = await invQ;
+        if (invErr) {
+          if (isMissingRelationError(invErr)) {
+            return res.status(503).json({
+              ok: false,
+              installed: false,
+              message: "Slab inventory cache not installed.",
+            });
+          }
+          throw invErr;
+        }
+
+        // Filter to rows that match this catalog item (exact or alias only).
+        const matchedRows = (invRows ?? []).filter((r) => {
+          const result = matchSourceColorWithAliases(
+            { color_name: r.color_name, material_name: r.material_name },
+            [catItem],
+            resolvedAliases
+          );
+          return result.method === "exact" || result.method === "alias";
+        });
+
+        // Apply type filter.
+        let typeFiltered = matchedRows;
+        if (type === "slab") {
+          typeFiltered = matchedRows.filter(
+            (r) => trimStr(r.source_inventory_type) === "Slab"
+          );
+        } else if (type === "remnant") {
+          typeFiltered = matchedRows.filter(
+            (r) => trimStr(r.source_inventory_type) === "Remnant"
+          );
+        }
+
+        // Load images for the result set.
+        const slabIds = typeFiltered
+          .map((r) => trimStr(r.external_slab_id))
+          .filter(Boolean);
+        let imageMap = new Map();
+        if (slabIds.length) {
+          let imgQ = supabase
+            .from("slab_images")
+            .select(
+              "external_slab_id,image_url,thumbnail_url,image_status,image_url_pattern"
+            )
+            .in("external_slab_id", slabIds);
+          imgQ = scopeOrg(imgQ, organizationId);
+          const { data: imgRows } = await imgQ;
+          imageMap = buildImageMap(imgRows ?? []);
+        }
+
+        const mapRow = (r) => {
+          const img = imageMap.get(trimStr(r.external_slab_id)) ?? null;
+          return {
+            id: r.id ?? null,
+            external_slab_id: r.external_slab_id ?? null,
+            inventory_id: r.inventory_id ?? null,
+            color_name: r.color_name ?? null,
+            material_name: r.material_name ?? null,
+            source_inventory_type: r.source_inventory_type ?? null,
+            source_inventory_scope: r.source_inventory_scope ?? null,
+            source_price_group: r.price_group ?? null,
+            thickness_nominal: r.thickness_nominal ?? null,
+            rack: r.rack ?? null,
+            lot: r.lot ?? null,
+            width_actual_in: r.width_actual_in ?? null,
+            length_actual_in: r.length_actual_in ?? null,
+            image_url: img?.image_url ?? null,
+            thumbnail_url: img?.thumbnail_url ?? null,
+            image_status: img?.image_status ?? "unknown",
+            source_public_slug: r.source_public_slug ?? null,
+            source_api_company_code: r.source_api_company_code ?? null,
+            source_asset_company_code: r.source_asset_company_code ?? null,
+          };
+        };
+
+        const mapped = typeFiltered.map(mapRow);
+        const slabs = type !== "remnant"
+          ? mapped.filter((r) => r.source_inventory_type === "Slab")
+          : [];
+        const remnants = type !== "slab"
+          ? mapped.filter((r) => r.source_inventory_type === "Remnant")
+          : [];
+
+        res.json({
+          ok: true,
+          catalog_item: {
+            catalog_item_id: catItem.id,
+            color_name: catItem.color_name,
+            material_name: catItem.material_name,
+            display_name: catItem.display_name,
+            price_group: catItem.price_group,
+          },
+          totals: {
+            total: mapped.length,
+            slab_count: slabs.length,
+            remnant_count: remnants.length,
+          },
+          slabs,
+          remnants,
+          type,
+          source_price_group_label: SOURCE_PRICE_GROUP_LABEL,
+        });
+      } catch (e) {
+        res.status(500).json({ ok: false, error: String(e?.message || e) });
+      }
+    }
+  );
+
+  // GET /api/slab-inventory/non-stock-programs
+  //
+  // Returns one color card per typed inventory color/material group that is NOT
+  // matched to the active Elite 100 catalog (by exact or alias match).
+  // Fuzzy matches are included here — they remain Non-Stock until an operator
+  // explicitly promotes them via an alias record.
+  // Zero-inventory Non-Stock groups are excluded (only visible inventory shown).
+  // No count_for_color is read or summed.
+  app.get("/api/slab-inventory/non-stock-programs", ...guard, async (req, res) => {
+    try {
+      jsonNoStore(res);
+      const supabase = db();
+      const organizationId = await orgId(req);
+
+      // Load Elite 100 catalog (for exclusion). If no collection, everything is
+      // Non-Stock, so we skip matching entirely.
+      const { catalogItemList, resolvedAliases } =
+        await loadElite100Deps(organizationId);
+
+      // Load typed inventory (minimal projection).
+      let invQ = supabase
+        .from("slab_inventory")
+        .select(
+          "id,external_slab_id,color_name,material_name,price_group,source_inventory_type,source_inventory_scope"
+        )
+        .eq("is_active", true)
+        .eq("source_inventory_scope", COLOR_PROGRAM_SCOPE)
+        .in("source_inventory_type", ["Slab", "Remnant"]);
+      invQ = scopeOrg(invQ, organizationId);
+      const { data: invRows, error: invErr } = await invQ;
+      if (invErr) {
+        if (isMissingRelationError(invErr)) {
+          return res.status(503).json({
+            ok: false,
+            installed: false,
+            message: "Slab inventory cache not installed.",
+          });
+        }
+        throw invErr;
+      }
+
+      // Determine which source colors are Elite 100 (to exclude from Non-Stock).
+      const elite100Keys = new Set();
+      if (catalogItemList.length) {
+        // Deduplicate source colors.
+        const uniqueGroups = new Map();
+        for (const r of invRows ?? []) {
+          const key = `${r.color_name ?? ""}||${r.material_name ?? ""}`;
+          if (!uniqueGroups.has(key)) {
+            uniqueGroups.set(key, {
+              color_name: r.color_name,
+              material_name: r.material_name,
+            });
+          }
+        }
+        for (const [key, source] of uniqueGroups.entries()) {
+          const result = matchSourceColorWithAliases(
+            source,
+            catalogItemList,
+            resolvedAliases
+          );
+          if (result.method === "exact" || result.method === "alias") {
+            elite100Keys.add(key);
+          }
+        }
+      }
+
+      // Non-Stock rows = typed rows whose (color_name, material_name) is not Elite 100.
+      const nonStockRows = (invRows ?? []).filter((r) => {
+        const key = `${r.color_name ?? ""}||${r.material_name ?? ""}`;
+        return !elite100Keys.has(key);
+      });
+
+      // Load images.
+      let imageMap = new Map();
+      let imgQ = supabase
+        .from("slab_images")
+        .select("external_slab_id,image_url,thumbnail_url,image_status");
+      imgQ = scopeOrg(imgQ, organizationId);
+      const { data: imgRows } = await imgQ;
+      if (imgRows?.length) imageMap = buildImageMap(imgRows);
+
+      // Reuse groupColorPrograms; tag cards as non_stock.
+      const cards = groupColorPrograms(nonStockRows, imageMap).map((card) => ({
+        ...card,
+        program_status: "non_stock",
+      }));
+
+      res.json({
+        ok: true,
+        installed: true,
+        color_programs: cards,
+        total: cards.length,
+        price_group_order: [...COLOR_PROGRAM_PRICE_GROUP_ORDER],
+        source_price_group_label: SOURCE_PRICE_GROUP_LABEL,
+      });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
   console.log(
-    "[slab-inventory-head] mounted GET /api/slab-inventory/summary, /filters, /slabs, /slabs/:id, /color-programs, /colors/:colorKey/inventory (read-only)"
+    "[slab-inventory-head] mounted GET /api/slab-inventory/summary, /filters, /slabs, /slabs/:id, /color-programs, /colors/:colorKey/inventory, /elite100-programs, /elite100-programs/:catalogItemId/inventory, /non-stock-programs (read-only)"
   );
 }

@@ -748,3 +748,69 @@ npm run eos:elite100:preview-matches
 ```
 
 See `FEATURE_DECISIONS.md §77` for the full decision record.
+
+---
+
+## Phase 4 — Elite 100 / Non-Stock Color Browser UI (v1)
+
+**Status:** Shipped — 2026-06-05  
+**Decision:** `FEATURE_DECISIONS.md §78`
+
+### What was built
+
+The Slab Inventory head has been transformed from a raw slab table/grid into a **color-program browser** with three tabs:
+
+| Tab | Description |
+|-----|-------------|
+| **Elite 100** | One card per active catalog color. Grouped into horizontal carousels by Promo, A, B, C, D, E, F. Premium showroom-quality design: contained image, white mat, color name label. |
+| **Non-Stock** | One card per typed color/material group not matched to Elite 100. Clean responsive grid — searchable. |
+| **All Inventory** | Preserves the existing raw slab browser (filter/search/list/grid/lightbox/health panel). Operational fallback. |
+
+### New backend APIs (read-only)
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/slab-inventory/elite100-programs` | Active catalog organized by Promo/A–F, enriched with live typed inventory counts and representative images. Returns all 100 items even if zero inventory. |
+| `GET /api/slab-inventory/elite100-programs/:catalogItemId/inventory` | Physical slab + remnant rows for one Elite 100 catalog item (exact + alias match only). Slabs and remnants returned in separate arrays. |
+| `GET /api/slab-inventory/non-stock-programs` | One card per typed color/material group not matched to active Elite 100. Uses same `groupColorPrograms` logic. |
+
+All three new routes are `GET`, behind `requireAuth()` + `requireHeadAccess("slab_inventory")`, and are `organization_id` scoped. `count_for_color` is never read or summed.
+
+### Elite 100 design decisions
+
+- **One card = one catalog color.** Never one card per physical slab.
+- Cards use **contained/no-bleed image** with white mat/padding (12px) + rounded 8px image area + 16px card radius.
+- Color name is the only primary label; count meta is subtle (faint, small).
+- **Zero-inventory colors** still appear with a "No inventory" badge.
+- Horizontal carousels with smooth scroll + arrow controls + fade-edge gradients.
+- `program_status: "elite_100"` on all catalog cards.
+
+### Non-Stock design decisions
+
+- Simple responsive grid (`auto-fill minmax(180px, 1fr)`).
+- Client-side search filter on color name + material name.
+- Same inventory modal pattern as Elite 100 (slabs first, remnants below).
+- `program_status: "non_stock"` on all non-stock cards.
+
+### Color Inventory Modal
+
+- Opened by clicking any Elite 100 or Non-Stock card.
+- Header: Elite 100 badge + group label, color name, material, availability counts.
+- Body: **Full Slabs** section first, **Remnants** section below.
+- Each physical item: thumbnail, dimensions, thickness, rack/lot, inventory ID, source price group badge.
+- Empty states per section; "No current inventory" for both-empty case.
+- Keyboard: `Escape` closes.
+
+### Matching logic (Elite 100 → inventory)
+
+Matching follows exact priority order:
+1. Exact normalized color + material
+2. Material alias match (ESF ≡ ESF Quartz, etc.)
+3. Database alias match (approved by Chris: `slab_color_aliases`)
+
+Fuzzy matches and unmatched groups go to **Non-Stock** (never auto-classified as Elite 100 without an explicit alias record).
+
+### Exported helper
+
+`buildElite100InventoryMap(invRows, catalogItemList, resolvedAliases)` is exported from `slabInventoryApi.js` for unit testing. It returns a `Map<catalog_item_id, { slabCount, remnantCount, slabIds }>`.
+

@@ -13,6 +13,7 @@ import assert from "node:assert/strict";
 
 import {
   attachSlabInventoryRoutes,
+  buildElite100InventoryMap,
   buildImageMap,
   clampLimit,
   clampOffset,
@@ -484,11 +485,133 @@ import {
     "/api/slab-inventory/slabs",
     "/api/slab-inventory/slabs/:id",
     "/api/slab-inventory/color-programs",
-    "/api/slab-inventory/colors/:colorKey/inventory"
+    "/api/slab-inventory/colors/:colorKey/inventory",
+    "/api/slab-inventory/elite100-programs",
+    "/api/slab-inventory/elite100-programs/:catalogItemId/inventory",
+    "/api/slab-inventory/non-stock-programs"
   ]) {
     assert.ok(paths.has(expected), `route ${expected} registered`);
   }
-  console.log("ok: read-only route shape (GET only, 6 routes including color-programs)");
+  console.log("ok: read-only route shape (GET only, 9 routes including Elite 100 + Non-Stock)");
+}
+
+/* ── buildElite100InventoryMap — only exact/alias matches counted ─────── */
+{
+  const catalog = [
+    { id: "cat-1", color_name: "Alabaster", material_name: "ESF",
+      normalized_color_name: "alabaster", normalized_material_name: "esf" },
+    { id: "cat-2", color_name: "Calacatta Gold", material_name: "Cambria",
+      normalized_color_name: "calacatta gold", normalized_material_name: "cambria" }
+  ];
+  const aliases = [
+    // "Winter Fresh - ESF Quartz" is an approved alias for "Alabaster - ESF" (simplified for test).
+    {
+      normalized_alias_color_name: "winter fresh",
+      normalized_alias_material_name: "esf quartz",
+      catalog_color_name: "Alabaster",
+      catalog_material_name: "ESF"
+    }
+  ];
+
+  const invRows = [
+    // Exact match for cat-1
+    { color_name: "Alabaster", material_name: "ESF",
+      source_inventory_type: "Slab", external_slab_id: "s1" },
+    { color_name: "Alabaster", material_name: "ESF",
+      source_inventory_type: "Remnant", external_slab_id: "s2" },
+    // Alias match for cat-1
+    { color_name: "Winter Fresh", material_name: "ESF Quartz",
+      source_inventory_type: "Slab", external_slab_id: "s3" },
+    // Exact match for cat-2
+    { color_name: "Calacatta Gold", material_name: "Cambria",
+      source_inventory_type: "Slab", external_slab_id: "s4" },
+    // Fuzzy / unmatched — must NOT appear in Elite 100
+    { color_name: "Calacatta Athena", material_name: "Stratus",
+      source_inventory_type: "Slab", external_slab_id: "s5" }
+  ];
+
+  const result = buildElite100InventoryMap(invRows, catalog, aliases);
+
+  assert.equal(result.size, 2, "map has one entry per catalog item");
+  const acc1 = result.get("cat-1");
+  assert.equal(acc1.slabCount, 2, "cat-1 slabs: 1 exact + 1 alias");
+  assert.equal(acc1.remnantCount, 1, "cat-1 remnants: 1 exact");
+  assert.ok(acc1.slabIds.includes("s1") && acc1.slabIds.includes("s3"), "cat-1 slab IDs include exact + alias");
+
+  const acc2 = result.get("cat-2");
+  assert.equal(acc2.slabCount, 1, "cat-2 slabs: 1 exact");
+  assert.equal(acc2.remnantCount, 0, "cat-2 no remnants");
+
+  // Fuzzy candidate (Calacatta Athena) does NOT appear anywhere in the map.
+  for (const [, acc] of result.entries()) {
+    assert.ok(!acc.slabIds.includes("s5"), "fuzzy candidate s5 not in any catalog item");
+  }
+  console.log("ok: buildElite100InventoryMap — only exact/alias matches counted, fuzzy excluded");
+}
+
+/* ── buildElite100InventoryMap — empty catalog returns empty map ──────── */
+{
+  const result = buildElite100InventoryMap(
+    [{ color_name: "Any", material_name: "X", source_inventory_type: "Slab", external_slab_id: "s1" }],
+    [],
+    []
+  );
+  assert.equal(result.size, 0, "empty catalog → empty map");
+  console.log("ok: buildElite100InventoryMap — empty catalog");
+}
+
+/* ── buildElite100InventoryMap — zero-inventory catalog items preserved ─ */
+{
+  const catalog = [
+    { id: "cat-1", color_name: "Rare Stone", material_name: "ESF",
+      normalized_color_name: "rare stone", normalized_material_name: "esf" }
+  ];
+  const result = buildElite100InventoryMap([], catalog, []);
+  assert.equal(result.size, 1, "catalog item with no inventory still appears in map");
+  assert.equal(result.get("cat-1").slabCount, 0);
+  assert.equal(result.get("cat-1").remnantCount, 0);
+  console.log("ok: buildElite100InventoryMap — zero-inventory catalog item preserved");
+}
+
+/* ── Elite 100 program_status contract ───────────────────────────────── */
+{
+  // groupColorPrograms returns program_status: "unclassified".
+  // The non-stock route maps those cards to program_status: "non_stock".
+  // Test that non-stock override works as expected.
+  const rows = [
+    { id: "i1", external_slab_id: "s1", color_name: "Frost", material_name: "Q Quartz",
+      source_inventory_type: "Slab", source_inventory_scope: "typed", price_group: "B" }
+  ];
+  const cards = groupColorPrograms(rows, new Map()).map((card) => ({ ...card, program_status: "non_stock" }));
+  assert.equal(cards.length, 1);
+  assert.equal(cards[0].program_status, "non_stock", "non-stock cards have program_status: non_stock");
+  console.log("ok: non-stock program_status override");
+}
+
+/* ── Group G excluded from COLOR_PROGRAM_PRICE_GROUP_ORDER ───────────── */
+{
+  assert.ok(!COLOR_PROGRAM_PRICE_GROUP_ORDER.includes("G"), "Group G absent from price group order");
+  assert.deepEqual(COLOR_PROGRAM_PRICE_GROUP_ORDER, ["Promo", "A", "B", "C", "D", "E", "F"]);
+  console.log("ok: Group G excluded from price group order (Elite 100 carousels)");
+}
+
+/* ── slabs and remnants are distinct types ───────────────────────────── */
+{
+  // Verify that "Slab" and "Remnant" are counted separately in groupColorPrograms.
+  const rows = [
+    { id: "i1", external_slab_id: "s1", color_name: "Opal", material_name: "ESF",
+      source_inventory_type: "Slab", source_inventory_scope: "typed", price_group: "A" },
+    { id: "i2", external_slab_id: "s2", color_name: "Opal", material_name: "ESF",
+      source_inventory_type: "Remnant", source_inventory_scope: "typed", price_group: "A" },
+    { id: "i3", external_slab_id: "s3", color_name: "Opal", material_name: "ESF",
+      source_inventory_type: "Remnant", source_inventory_scope: "typed", price_group: "A" }
+  ];
+  const cards = groupColorPrograms(rows, new Map());
+  assert.equal(cards.length, 1, "one card for same color+material+pg");
+  assert.equal(cards[0].slab_count, 1, "1 slab");
+  assert.equal(cards[0].remnant_count, 2, "2 remnants");
+  assert.equal(cards[0].total_inventory_count, 3, "3 total");
+  console.log("ok: slabs and remnants counted separately in inventory cards");
 }
 
 console.log("\nslabInventoryApi: all tests passed");

@@ -537,6 +537,33 @@ Chris reviewed the first fuzzy match batch. 8 approved as aliases; 2 explicitly 
 
 ---
 
+### Phase 14 — Elite 100 / Non-Stock Color Browser UI v1 (2026-06-05)
+
+**Status:** Shipped · FEATURE_DECISIONS.md §78
+
+The Slab Inventory head is now a **color-program browser** — Elite 100 is the premium showroom, Non-Stock is the utility gallery, All Inventory is the operational fallback.
+
+**New backend routes (all GET, read-only):**
+
+- `GET /api/slab-inventory/elite100-programs` — Active catalog enriched with live typed inventory counts and representative images. Returns all 100 catalog items (including zero-inventory). Matching: exact + material-alias + DB-alias only. No fuzzy. No `count_for_color`.
+- `GET /api/slab-inventory/elite100-programs/:catalogItemId/inventory` — Physical slabs and remnants for one catalog item. Returns `{ slabs: [...], remnants: [...], totals, catalog_item }`.
+- `GET /api/slab-inventory/non-stock-programs` — One card per typed color/material group not matched to active Elite 100 (by exact or alias). Reuses `groupColorPrograms`. Tags cards `program_status: "non_stock"`.
+
+**New exported pure helper:** `buildElite100InventoryMap(invRows, catalogItemList, resolvedAliases)` — tested in `slabInventoryApi.test.mjs`.
+
+**Frontend changes:**
+- Three tabs: Elite 100 (default) · Non-Stock · All Inventory.
+- Elite 100: horizontal carousels per price group (Promo, A–F). Premium card design: white mat, contained image, color name label only, subtle count meta.
+- Non-Stock: searchable responsive grid. Cards show color, material, count.
+- Shared Color Inventory Modal: slabs first, remnants second. Per-item: thumbnail, dims, thickness, rack/lot, ID, source PG badge.
+- All Inventory: existing slab browser preserved intact.
+- No Group G in any UI element.
+- Zero-inventory Elite 100 colors show "No inventory" badge — still display in carousel.
+
+**Tests:** 22 passing in `slabInventoryApi.test.mjs` (was 15). All builds clean. `eos:check:local` passes.
+
+---
+
 ## 15. Do-Not-Build-Yet List
 
 The following are explicitly out of scope until the prerequisite phases are done and each item is scoped separately:

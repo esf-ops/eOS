@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { apiGetJson, ApiError } from "@quote-lib/api";
 import { config, EOS_LOGO_URL } from "@quote-lib/config";
 import { getSupabase } from "./lib/supabase";
 import EliteosTopbar from "../../shared/eliteos-ui/EliteosTopbar";
 import type { EliteosTopbarMenuItem } from "../../shared/eliteos-ui/EliteosTopbar";
 
-/* ------------------------------------------------------------------ types */
+/* ─────────────────────────────────────────── types */
 
 type Slab = {
   id: string;
@@ -77,10 +77,103 @@ type Filters = {
 
 type SortKey = "color" | "material" | "inventory_id" | "rack" | "updated_at";
 
-/* -------------------------------------------------------------- workspace */
+/* ── Elite 100 types ── */
+
+type Elite100Item = {
+  catalog_item_id: string;
+  color_key: string;
+  color_name: string | null;
+  material_name: string | null;
+  display_name: string | null;
+  price_group: string;
+  total_inventory_count: number;
+  slab_count: number;
+  remnant_count: number;
+  verified_photo_count: number;
+  representative_image_url: string | null;
+  representative_thumbnail_url: string | null;
+  has_inventory: boolean;
+  program_status: "elite_100";
+};
+
+type Elite100Group = { price_group: string; items: Elite100Item[] };
+
+type Elite100Data = {
+  collection: {
+    collection_key: string;
+    display_name: string;
+    collection_year: number | null;
+    is_active: boolean;
+  } | null;
+  groups: Elite100Group[];
+  price_group_order: string[];
+} | null;
+
+/* ── Non-Stock types ── */
+
+type NonStockItem = {
+  color_key: string;
+  color_name: string | null;
+  material_name: string | null;
+  source_price_group: string | null;
+  total_inventory_count: number;
+  slab_count: number;
+  remnant_count: number;
+  verified_photo_count: number;
+  representative_image_url: string | null;
+  representative_thumbnail_url: string | null;
+  program_status: "non_stock";
+};
+
+/* ── Color inventory modal types ── */
+
+type PhysicalItem = {
+  id: string;
+  external_slab_id: string | null;
+  inventory_id: string | null;
+  color_name: string | null;
+  material_name: string | null;
+  source_inventory_type: string | null;
+  source_inventory_scope: string | null;
+  source_price_group: string | null;
+  thickness_nominal: string | null;
+  rack: string | null;
+  lot: string | null;
+  width_actual_in: number | null;
+  length_actual_in: number | null;
+  image_url: string | null;
+  thumbnail_url: string | null;
+  image_status: string;
+  source_public_slug?: string | null;
+  source_api_company_code?: string | null;
+  source_asset_company_code?: string | null;
+};
+
+type ModalInventory = {
+  slabs: PhysicalItem[];
+  remnants: PhysicalItem[];
+  total: number;
+  slab_count: number;
+  remnant_count: number;
+} | null;
+
+type ColorModal = {
+  mode: "elite100" | "non_stock";
+  catalogItemId?: string;
+  colorKey?: string;
+  colorName: string | null;
+  materialName: string | null;
+  priceGroup?: string | null;
+} | null;
+
+type MainTab = "elite100" | "non_stock" | "all_inventory";
+
+/* ─────────────────────────────────────────── constants */
 
 const DEFAULT_WORKSPACE_NAME = "Elite Stone Fabrication";
 const PAGE_SIZE = 60;
+
+/* ─────────────────────────────────────────── utils */
 
 function homeLauncherUrl(): string {
   const raw = String(import.meta.env.VITE_HEAD_URL_HOME ?? "").trim();
@@ -122,9 +215,7 @@ function colorInitials(name: string | null): string {
   return n.slice(0, 2).toUpperCase();
 }
 
-function dimsLabel(s: Slab): string {
-  const w = s.width_actual_in;
-  const l = s.length_actual_in;
+function dimsLabel(w: number | null, l: number | null): string {
   if (w == null && l == null) return "—";
   const wl = w == null ? "?" : Math.round(Number(w));
   const ll = l == null ? "?" : Math.round(Number(l));
@@ -138,30 +229,25 @@ function fmtDate(v: string | null): string {
   return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
-/* ------------------------------------------------------------------ icons */
+/* ─────────────────────────────────────────── icons */
 
 const homeIcon = (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M3 11.5L12 4l9 7.5" />
-    <path d="M5 10v10h14V10" />
-    <path d="M10 20v-6h4v6" />
+    <path d="M3 11.5L12 4l9 7.5" /><path d="M5 10v10h14V10" /><path d="M10 20v-6h4v6" />
   </svg>
 );
 const profileIcon = (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="12" cy="8" r="3.5" />
-    <path d="M5 20c1.5-3.5 4.2-5 7-5s5.5 1.5 7 5" />
+    <circle cx="12" cy="8" r="3.5" /><path d="M5 20c1.5-3.5 4.2-5 7-5s5.5 1.5 7 5" />
   </svg>
 );
-
 const searchIcon = (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-    <circle cx="11" cy="11" r="7" />
-    <path d="M21 21l-3.5-3.5" />
+    <circle cx="11" cy="11" r="7" /><path d="M21 21l-3.5-3.5" />
   </svg>
 );
 
-/* -------------------------------------------------------------- component */
+/* ─────────────────────────────────────────── main component */
 
 export default function SlabInventoryApp() {
   const supabase = getSupabase();
@@ -169,9 +255,7 @@ export default function SlabInventoryApp() {
   const [userEmail, setUserEmail] = useState("");
   const [userMetaName, setUserMetaName] = useState("");
   const [userProfile, setUserProfile] = useState<{ role: string; jobTitle: string; department: string }>({
-    role: "",
-    jobTitle: "",
-    department: ""
+    role: "", jobTitle: "", department: ""
   });
 
   const [authEmail, setAuthEmail] = useState("");
@@ -179,7 +263,29 @@ export default function SlabInventoryApp() {
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  // Data
+  /* Tab state */
+  const [activeTab, setActiveTab] = useState<MainTab>("elite100");
+
+  /* Elite 100 state */
+  const [elite100Data, setElite100Data] = useState<Elite100Data>(null);
+  const [elite100Busy, setElite100Busy] = useState(false);
+  const [elite100Error, setElite100Error] = useState<string | null>(null);
+  const [elite100Loaded, setElite100Loaded] = useState(false);
+
+  /* Non-Stock state */
+  const [nonStockItems, setNonStockItems] = useState<NonStockItem[]>([]);
+  const [nonStockBusy, setNonStockBusy] = useState(false);
+  const [nonStockError, setNonStockError] = useState<string | null>(null);
+  const [nonStockLoaded, setNonStockLoaded] = useState(false);
+  const [nonStockSearch, setNonStockSearch] = useState("");
+
+  /* Color inventory modal state */
+  const [colorModal, setColorModal] = useState<ColorModal>(null);
+  const [modalInventory, setModalInventory] = useState<ModalInventory>(null);
+  const [modalBusy, setModalBusy] = useState(false);
+  const [modalError, setModalError] = useState<string | null>(null);
+
+  /* All Inventory state (existing slab browser) */
   const [summary, setSummary] = useState<Summary | null>(null);
   const [filters, setFilters] = useState<Filters | null>(null);
   const [slabs, setSlabs] = useState<Slab[]>([]);
@@ -188,7 +294,6 @@ export default function SlabInventoryApp() {
   const [err, setErr] = useState<string | null>(null);
   const [notInstalled, setNotInstalled] = useState(false);
 
-  // Filter UI state
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [fMaterial, setFMaterial] = useState("");
@@ -201,12 +306,9 @@ export default function SlabInventoryApp() {
   const [sort, setSort] = useState<SortKey>("color");
   const [direction, setDirection] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(0);
-
   const [viewMode, setViewMode] = useState<"grid" | "table">("grid");
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
-  const [presentationMode, setPresentationMode] = useState(false);
-  const [presentationFiltersOpen, setPresentationFiltersOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [healthOpen, setHealthOpen] = useState(false);
 
@@ -217,75 +319,56 @@ export default function SlabInventoryApp() {
     [userMetaName, userEmail]
   );
   const userDisplayInitials = useMemo(() => userInitialsFor(userMetaName, userEmail), [userMetaName, userEmail]);
-
   const chipSubtitle = useMemo(() => {
     const t = (userProfile.jobTitle || userProfile.department || userProfile.role || "").trim();
     if (t) return t.toUpperCase();
     return userEmail && userEmail.toLowerCase() !== userDisplayName.toLowerCase() ? userEmail : "";
   }, [userProfile, userEmail, userDisplayName]);
 
-  /* ----------------------------------------------------------- auth flow */
+  /* ─── auth ─── */
 
   const signIn = useCallback(async () => {
     setAuthError(null);
-    if (!supabase) {
-      setAuthError("Configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.");
-      return;
-    }
+    if (!supabase) { setAuthError("Configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY."); return; }
     setAuthBusy(true);
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: authEmail.trim(),
-        password: authPassword
-      });
+      const { data, error } = await supabase.auth.signInWithPassword({ email: authEmail.trim(), password: authPassword });
       if (error) throw error;
       const tok = data.session?.access_token;
       if (!tok) throw new Error("No access token");
       setSessionToken(tok);
       setAuthPassword("");
-    } catch (e: unknown) {
-      setAuthError(String((e as Error)?.message || e));
-    } finally {
-      setAuthBusy(false);
-    }
+    } catch (e: unknown) { setAuthError(String((e as Error)?.message || e)); }
+    finally { setAuthBusy(false); }
   }, [authEmail, authPassword, supabase]);
 
   const signOut = useCallback(async () => {
     if (supabase) await supabase.auth.signOut();
     setSessionToken(null);
-    setUserEmail("");
-    setUserMetaName("");
+    setUserEmail(""); setUserMetaName("");
     setUserProfile({ role: "", jobTitle: "", department: "" });
-    setSummary(null);
-    setFilters(null);
-    setSlabs([]);
+    setSummary(null); setFilters(null); setSlabs([]);
+    setElite100Data(null); setElite100Loaded(false);
+    setNonStockItems([]); setNonStockLoaded(false);
   }, [supabase]);
 
   useEffect(() => {
     if (!supabase) return;
     let alive = true;
-    const applySession = (sess: {
-      access_token?: string;
-      user?: { email?: string | null; user_metadata?: Record<string, unknown> } | null;
-    } | null) => {
+    const applySession = (sess: { access_token?: string; user?: { email?: string | null; user_metadata?: Record<string, unknown> } | null } | null) => {
       if (!alive) return;
       const tok = sess?.access_token ?? "";
       setSessionToken(tok || null);
       const u = sess?.user || null;
       setUserEmail(String(u?.email ?? ""));
       const meta = (u?.user_metadata ?? {}) as Record<string, unknown>;
-      const metaName =
-        [meta.full_name, meta.name, meta.display_name]
-          .map((v) => (typeof v === "string" ? v.trim() : ""))
-          .find((v) => Boolean(v)) || "";
+      const metaName = [meta.full_name, meta.name, meta.display_name]
+        .map((v) => (typeof v === "string" ? v.trim() : "")).find((v) => Boolean(v)) || "";
       setUserMetaName(metaName);
     };
     void supabase.auth.getSession().then(({ data }) => applySession(data.session));
     const { data: sub } = supabase.auth.onAuthStateChange((_evt, sess) => applySession(sess));
-    return () => {
-      alive = false;
-      sub.subscription.unsubscribe();
-    };
+    return () => { alive = false; sub.subscription.unsubscribe(); };
   }, [supabase]);
 
   useEffect(() => {
@@ -293,23 +376,15 @@ export default function SlabInventoryApp() {
     let cancelled = false;
     (async () => {
       try {
-        const me = (await apiGetJson("/api/me", sessionToken)) as {
-          user?: { role?: string; job_title?: string | null; department?: string | null };
-        };
+        const me = (await apiGetJson("/api/me", sessionToken)) as { user?: { role?: string; job_title?: string | null; department?: string | null } };
         if (cancelled) return;
-        setUserProfile({
-          role: String(me?.user?.role ?? "").trim(),
-          jobTitle: String(me?.user?.job_title ?? "").trim(),
-          department: String(me?.user?.department ?? "").trim()
-        });
-      } catch {
-        /* non-fatal */
-      }
+        setUserProfile({ role: String(me?.user?.role ?? "").trim(), jobTitle: String(me?.user?.job_title ?? "").trim(), department: String(me?.user?.department ?? "").trim() });
+      } catch { /* non-fatal */ }
     })();
     return () => { cancelled = true; };
   }, [sessionToken]);
 
-  /* ---------------------------------------------------------- data loads */
+  /* ─── data loads ─── */
 
   const loadMeta = useCallback(async () => {
     if (!sessionToken) return;
@@ -318,24 +393,87 @@ export default function SlabInventoryApp() {
         apiGetJson("/api/slab-inventory/summary", sessionToken) as Promise<{ summary?: Summary; installed?: boolean }>,
         apiGetJson("/api/slab-inventory/filters", sessionToken) as Promise<{ filters?: Filters; installed?: boolean }>
       ]);
-      if (s.installed === false || f.installed === false) {
-        setNotInstalled(true);
-        return;
-      }
+      if (s.installed === false || f.installed === false) { setNotInstalled(true); return; }
       setNotInstalled(false);
       if (s.summary) setSummary(s.summary);
       if (f.filters) setFilters(f.filters);
     } catch (e: unknown) {
-      if (e instanceof ApiError && e.status === 403) {
-        setErr("Forbidden — you need eliteOS Slab Inventory head access.");
-      } else if (e instanceof ApiError && e.status === 503) {
-        setNotInstalled(true);
-      } else {
-        setErr(e instanceof ApiError ? e.message : String(e));
-      }
+      if (e instanceof ApiError && e.status === 403) setErr("Forbidden — you need eliteOS Slab Inventory head access.");
+      else if (e instanceof ApiError && e.status === 503) setNotInstalled(true);
+      else setErr(e instanceof ApiError ? e.message : String(e));
     }
   }, [sessionToken]);
 
+  const loadElite100 = useCallback(async () => {
+    if (!sessionToken || elite100Loaded) return;
+    setElite100Busy(true);
+    setElite100Error(null);
+    try {
+      const data = (await apiGetJson("/api/slab-inventory/elite100-programs", sessionToken)) as Elite100Data & { ok?: boolean; installed?: boolean };
+      if ((data as { installed?: boolean }).installed === false) { setNotInstalled(true); return; }
+      setElite100Data(data);
+      setElite100Loaded(true);
+    } catch (e: unknown) {
+      if (e instanceof ApiError && e.status === 403) setElite100Error("Forbidden — you need eliteOS Slab Inventory head access.");
+      else setElite100Error(e instanceof ApiError ? e.message : String(e));
+    } finally { setElite100Busy(false); }
+  }, [sessionToken, elite100Loaded]);
+
+  const loadNonStock = useCallback(async () => {
+    if (!sessionToken || nonStockLoaded) return;
+    setNonStockBusy(true);
+    setNonStockError(null);
+    try {
+      const data = (await apiGetJson("/api/slab-inventory/non-stock-programs", sessionToken)) as { color_programs?: NonStockItem[]; installed?: boolean };
+      if (data.installed === false) { setNotInstalled(true); return; }
+      setNonStockItems(Array.isArray(data.color_programs) ? data.color_programs : []);
+      setNonStockLoaded(true);
+    } catch (e: unknown) {
+      if (e instanceof ApiError && e.status === 403) setNonStockError("Forbidden.");
+      else setNonStockError(e instanceof ApiError ? e.message : String(e));
+    } finally { setNonStockBusy(false); }
+  }, [sessionToken, nonStockLoaded]);
+
+  const openColorModal = useCallback(async (modal: NonNullable<ColorModal>) => {
+    setColorModal(modal);
+    setModalInventory(null);
+    setModalError(null);
+    setModalBusy(true);
+    try {
+      if (modal.mode === "elite100" && modal.catalogItemId) {
+        const data = (await apiGetJson(`/api/slab-inventory/elite100-programs/${modal.catalogItemId}/inventory`, sessionToken!)) as { slabs?: PhysicalItem[]; remnants?: PhysicalItem[]; totals?: { total: number; slab_count: number; remnant_count: number } };
+        const slabs = data.slabs ?? [];
+        const remnants = data.remnants ?? [];
+        setModalInventory({ slabs, remnants, total: data.totals?.total ?? slabs.length + remnants.length, slab_count: data.totals?.slab_count ?? slabs.length, remnant_count: data.totals?.remnant_count ?? remnants.length });
+      } else if (modal.colorKey) {
+        const data = (await apiGetJson(`/api/slab-inventory/colors/${modal.colorKey}/inventory`, sessionToken!)) as { rows?: PhysicalItem[] };
+        const rows = data.rows ?? [];
+        const slabs = rows.filter((r) => r.source_inventory_type === "Slab");
+        const remnants = rows.filter((r) => r.source_inventory_type === "Remnant");
+        setModalInventory({ slabs, remnants, total: rows.length, slab_count: slabs.length, remnant_count: remnants.length });
+      }
+    } catch (e: unknown) {
+      setModalError(e instanceof ApiError ? e.message : String(e));
+    } finally { setModalBusy(false); }
+  }, [sessionToken]);
+
+  /* Load Elite 100 on initial sign-in */
+  useEffect(() => {
+    if (sessionToken && !elite100Loaded) void loadElite100();
+  }, [sessionToken, elite100Loaded, loadElite100]);
+
+  /* Load meta for All Inventory tab on sign-in */
+  useEffect(() => { void loadMeta(); }, [loadMeta]);
+
+  /* Load tab data when switching */
+  useEffect(() => {
+    if (!sessionToken) return;
+    if (activeTab === "elite100" && !elite100Loaded) void loadElite100();
+    else if (activeTab === "non_stock" && !nonStockLoaded) void loadNonStock();
+    else if (activeTab === "all_inventory") void loadMeta();
+  }, [activeTab, sessionToken, elite100Loaded, nonStockLoaded, loadElite100, loadNonStock, loadMeta]);
+
+  /* All Inventory slab loading */
   const buildQuery = useCallback(() => {
     const p = new URLSearchParams();
     if (search) p.set("search", search);
@@ -346,77 +484,44 @@ export default function SlabInventoryApp() {
     if (fRack) p.set("rack", fRack);
     if (fDistributor) p.set("distributor", fDistributor);
     if (fImageStatus) p.set("image_status", fImageStatus);
-    p.set("sort", sort);
-    p.set("direction", direction);
-    p.set("limit", String(PAGE_SIZE));
-    p.set("offset", String(page * PAGE_SIZE));
+    p.set("sort", sort); p.set("direction", direction);
+    p.set("limit", String(PAGE_SIZE)); p.set("offset", String(page * PAGE_SIZE));
     return p.toString();
   }, [search, fMaterial, fColor, fPriceGroup, fThickness, fRack, fDistributor, fImageStatus, sort, direction, page]);
 
   const loadSlabs = useCallback(async () => {
     if (!sessionToken) return;
-    setBusy(true);
-    setErr(null);
+    setBusy(true); setErr(null);
     try {
-      const res = (await apiGetJson(`/api/slab-inventory/slabs?${buildQuery()}`, sessionToken)) as {
-        rows?: Slab[];
-        total?: number;
-        installed?: boolean;
-      };
-      if (res.installed === false) {
-        setNotInstalled(true);
-        setSlabs([]);
-        setTotal(0);
-        return;
-      }
+      const res = (await apiGetJson(`/api/slab-inventory/slabs?${buildQuery()}`, sessionToken)) as { rows?: Slab[]; total?: number; installed?: boolean };
+      if (res.installed === false) { setNotInstalled(true); setSlabs([]); setTotal(0); return; }
       setNotInstalled(false);
       setSlabs(Array.isArray(res.rows) ? res.rows : []);
       setTotal(Number(res.total || 0));
     } catch (e: unknown) {
-      if (e instanceof ApiError && e.status === 403) {
-        setErr("Forbidden — you need eliteOS Slab Inventory head access.");
-      } else if (e instanceof ApiError && e.status === 503) {
-        setNotInstalled(true);
-      } else {
-        setErr(e instanceof ApiError ? e.message : String(e));
-      }
-    } finally {
-      setBusy(false);
-    }
+      if (e instanceof ApiError && e.status === 403) setErr("Forbidden — you need eliteOS Slab Inventory head access.");
+      else if (e instanceof ApiError && e.status === 503) setNotInstalled(true);
+      else setErr(e instanceof ApiError ? e.message : String(e));
+    } finally { setBusy(false); }
   }, [sessionToken, buildQuery]);
 
-  useEffect(() => { void loadMeta(); }, [loadMeta]);
-  useEffect(() => { void loadSlabs(); }, [loadSlabs]);
+  useEffect(() => {
+    if (activeTab === "all_inventory") void loadSlabs();
+  }, [loadSlabs, activeTab]);
 
   useEffect(() => {
-    const t = setTimeout(() => {
-      setSearch(searchInput.trim());
-      setPage(0);
-    }, 300);
+    const t = setTimeout(() => { setSearch(searchInput.trim()); setPage(0); }, 300);
     return () => clearTimeout(t);
   }, [searchInput]);
 
-  useEffect(() => {
-    setPage(0);
-  }, [fMaterial, fColor, fPriceGroup, fThickness, fRack, fDistributor, fImageStatus, sort, direction]);
+  useEffect(() => { setPage(0); }, [fMaterial, fColor, fPriceGroup, fThickness, fRack, fDistributor, fImageStatus, sort, direction]);
 
   const resetFilters = () => {
-    setSearchInput("");
-    setSearch("");
-    setFMaterial("");
-    setFColor("");
-    setFPriceGroup("");
-    setFThickness("");
-    setFRack("");
-    setFDistributor("");
-    setFImageStatus("");
-    setSort("color");
-    setDirection("asc");
-    setPage(0);
+    setSearchInput(""); setSearch(""); setFMaterial(""); setFColor(""); setFPriceGroup("");
+    setFThickness(""); setFRack(""); setFDistributor(""); setFImageStatus(""); setSort("color"); setDirection("asc"); setPage(0);
   };
 
   const activeFilterCount = [fMaterial, fColor, fPriceGroup, fThickness, fRack, fDistributor, fImageStatus, search].filter(Boolean).length;
-
   const activeChips: { key: string; label: string; onClear: () => void }[] = [];
   if (search) activeChips.push({ key: "search", label: `"${search}"`, onClear: () => { setSearchInput(""); setSearch(""); } });
   if (fMaterial) activeChips.push({ key: "material", label: `Material · ${fMaterial}`, onClear: () => setFMaterial("") });
@@ -431,43 +536,44 @@ export default function SlabInventoryApp() {
   const rangeEnd = Math.min(total, (page + 1) * PAGE_SIZE);
   const maxPage = Math.max(0, Math.ceil(total / PAGE_SIZE) - 1);
 
-  /* -------------------------------------------------------- lightbox nav */
-
+  /* Lightbox keyboard nav */
   const openSlab = (i: number) => setSelectedIndex(i);
   const closeSlab = useCallback(() => setSelectedIndex(null), []);
-  const stepSlab = useCallback(
-    (delta: number) => {
-      setSelectedIndex((cur) => {
-        if (cur == null) return cur;
-        const next = cur + delta;
-        if (next < 0 || next >= slabs.length) return cur;
-        return next;
-      });
-    },
-    [slabs.length]
-  );
+  const stepSlab = useCallback((delta: number) => {
+    setSelectedIndex((cur) => { if (cur == null) return cur; const next = cur + delta; if (next < 0 || next >= slabs.length) return cur; return next; });
+  }, [slabs.length]);
 
   useEffect(() => {
     if (selectedIndex == null) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeSlab();
-      else if (e.key === "ArrowRight") stepSlab(1);
-      else if (e.key === "ArrowLeft") stepSlab(-1);
-    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeSlab(); else if (e.key === "ArrowRight") stepSlab(1); else if (e.key === "ArrowLeft") stepSlab(-1); };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [selectedIndex, closeSlab, stepSlab]);
 
   const selectedSlab = selectedIndex != null ? slabs[selectedIndex] : null;
 
-  /* -------------------------------------------------------------- topbar */
-
+  /* ─── topbar ─── */
   const menuItems: EliteosTopbarMenuItem[] = [
     { label: "Open Home", meta: "eliteOS Launcher", href: homeBase, icon: homeIcon },
     { label: "Profile & preferences", meta: "eliteOS Home", href: `${homeBase}?view=profile`, icon: profileIcon }
   ];
-
   const notSeenCount = summary?.active_not_seen_in_latest_sync_count ?? 0;
+
+  /* ─── non-stock filter ─── */
+  const filteredNonStock = useMemo(() => {
+    if (!nonStockSearch.trim()) return nonStockItems;
+    const q = nonStockSearch.trim().toLowerCase();
+    return nonStockItems.filter((item) =>
+      (item.color_name ?? "").toLowerCase().includes(q) ||
+      (item.material_name ?? "").toLowerCase().includes(q)
+    );
+  }, [nonStockItems, nonStockSearch]);
+
+  /* ─── elite100 total count ─── */
+  const elite100TotalCount = useMemo(() => {
+    if (!elite100Data?.groups) return 0;
+    return elite100Data.groups.reduce((sum, g) => sum + g.items.length, 0);
+  }, [elite100Data]);
 
   return (
     <div className="shell">
@@ -502,8 +608,7 @@ export default function SlabInventoryApp() {
               <p className="auth-panel-eyebrow">Slab Inventory · {DEFAULT_WORKSPACE_NAME}</p>
               <h2 className="auth-panel-title">Sign in to continue</h2>
               <p className="auth-panel-sub">
-                Use your eliteOS staff account. Backend authorization (Slab Inventory head access) is enforced on every
-                API call. This head is read-only.
+                Use your eliteOS staff account. Backend authorization (Slab Inventory head access) is enforced on every API call. This head is read-only.
               </p>
             </header>
             <div className="field-grid">
@@ -516,9 +621,7 @@ export default function SlabInventoryApp() {
                 <input id="si-password" type="password" value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} autoComplete="current-password" />
               </div>
             </div>
-            {authError ? (
-              <div className="banner banner-error" role="alert" style={{ marginTop: 8 }}>{authError}</div>
-            ) : null}
+            {authError ? <div className="banner banner-error" role="alert" style={{ marginTop: 8 }}>{authError}</div> : null}
             <button type="button" className="btn primary" style={{ marginTop: 16 }} disabled={authBusy} onClick={() => void signIn()}>
               {authBusy ? "Signing in…" : "Sign in"}
             </button>
@@ -528,151 +631,248 @@ export default function SlabInventoryApp() {
 
         {sessionToken ? (
           <>
-            {/* Presentation bar */}
-            {presentationMode ? (
-              <div className="presentation-bar" role="region" aria-label="Presentation mode">
-                <span className="presentation-tag">Presentation mode</span>
-                <div className="presentation-search">
-                  {searchIcon}
-                  <input
-                    type="search"
-                    value={searchInput}
-                    onChange={(e) => setSearchInput(e.target.value)}
-                    placeholder="Search slabs…"
-                    aria-label="Search slabs"
-                  />
-                </div>
-                <div className="presentation-actions">
-                  <button
-                    type="button"
-                    className="btn secondary btn-sm"
-                    onClick={() => setPresentationFiltersOpen((o) => !o)}
-                    aria-expanded={presentationFiltersOpen}
-                  >
-                    Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn primary btn-sm"
-                    onClick={() => { setPresentationMode(false); setPresentationFiltersOpen(false); }}
-                  >
-                    Exit presentation
-                  </button>
-                </div>
-                {presentationFiltersOpen ? (
-                  <div className="presentation-filter-panel">
-                    <div className="filter-drawer">
-                      <SelectFilter label="Material" value={fMaterial} onChange={setFMaterial} options={filters?.materials} />
-                      <SelectFilter label="Color" value={fColor} onChange={setFColor} options={filters?.colors} />
-                      <SelectFilter label="Source price group" value={fPriceGroup} onChange={setFPriceGroup} options={filters?.price_groups} />
-                      <SelectFilter label="Image status" value={fImageStatus} onChange={setFImageStatus} options={filters?.image_statuses} />
-                      <SelectFilter label="Thickness" value={fThickness} onChange={setFThickness} options={filters?.thicknesses} />
-                      <SelectFilter label="Rack" value={fRack} onChange={setFRack} options={filters?.racks} />
-                      <SelectFilter label="Distributor" value={fDistributor} onChange={setFDistributor} options={filters?.distributors} />
-                      {activeFilterCount > 0 ? (
-                        <button type="button" className="btn secondary btn-sm" onClick={resetFilters}>Clear all</button>
-                      ) : null}
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
+            {/* ── Tab bar ── */}
+            <nav className="tab-bar" aria-label="Inventory views">
+              <button
+                type="button"
+                className={`tab-btn${activeTab === "elite100" ? " active" : ""}`}
+                onClick={() => setActiveTab("elite100")}
+                aria-selected={activeTab === "elite100"}
+              >
+                Elite 100
+                {elite100TotalCount > 0 && (
+                  <span className="tab-badge">{elite100TotalCount}</span>
+                )}
+              </button>
+              <button
+                type="button"
+                className={`tab-btn${activeTab === "non_stock" ? " active" : ""}`}
+                onClick={() => setActiveTab("non_stock")}
+                aria-selected={activeTab === "non_stock"}
+              >
+                Non-Stock
+                {nonStockItems.length > 0 && (
+                  <span className="tab-badge">{nonStockItems.length}</span>
+                )}
+              </button>
+              <button
+                type="button"
+                className={`tab-btn${activeTab === "all_inventory" ? " active" : ""}`}
+                onClick={() => setActiveTab("all_inventory")}
+                aria-selected={activeTab === "all_inventory"}
+              >
+                All Inventory
+              </button>
+            </nav>
 
-            {/* Flat page header — normal mode only */}
-            {!presentationMode ? (
-              <section className="page-header" aria-labelledby="si-page-title">
-                <div className="page-header-inner">
-                  <div className="page-header-text">
-                    <p className="page-eyebrow">Slab inventory · read-only</p>
-                    <h1 id="si-page-title" className="page-title">Slab inventory</h1>
-                    <p className="page-subtitle">
-                      Browse synced SlabCloud/Slabsmith slab inventory in a read-only eliteOS view.{" "}
-                      <span className="page-subtitle-note">
-                        SlabCloud/Slabsmith is the source of truth; slabOS displays the latest cached sync.
-                      </span>
-                    </p>
-                  </div>
-                  <div className="page-metrics" aria-label="Inventory summary">
-                    <Metric
-                      value={summary ? (summary.active_cached_slab_count ?? summary.total_active_slabs).toLocaleString() : "—"}
-                      label="Active cached slabs"
-                      hint="Count of slab rows in the slabOS cache (never summed from color counts)"
-                    />
-                    <Metric value={summary ? summary.distinct_colors.toLocaleString() : "—"} label="Colors" hint="Distinct color names" />
-                    <Metric value={summary ? summary.distinct_materials.toLocaleString() : "—"} label="Materials" hint="Distinct material names" />
-                    <Metric value={summary ? summary.slabs_with_verified_images.toLocaleString() : "—"} label="Verified photos" hint="Images confirmed OK by URL check" />
-                  </div>
-                </div>
-              </section>
-            ) : null}
-
-            {err ? <div className="banner banner-error" role="alert">{err}</div> : null}
             {notInstalled ? (
               <div className="banner banner-warn" role="status">
                 The slab inventory cache tables are not available yet. Run the SlabCloud cache sync, then reload.
               </div>
             ) : null}
 
-            <div className={`gallery-content${presentationMode ? " is-presentation" : ""}`}>
+            {/* ── Elite 100 tab ── */}
+            {activeTab === "elite100" ? (
+              <div className="e100-page">
+                {elite100Busy && !elite100Data ? (
+                  <div className="e100-loading">
+                    <div className="e100-loading-inner">
+                      {[0, 1, 2].map((i) => (
+                        <div key={i} className="e100-skeleton-section">
+                          <div className="e100-skeleton-head skeleton-shimmer" />
+                          <div className="e100-skeleton-rail">
+                            {Array.from({ length: 5 }).map((_, j) => (
+                              <div key={j} className="e100-skeleton-card skeleton-shimmer" />
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : elite100Error ? (
+                  <div className="banner banner-error" role="alert">{elite100Error}</div>
+                ) : elite100Data?.collection === null ? (
+                  <div className="empty-state">
+                    <div className="empty-art" aria-hidden>
+                      <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="4" width="18" height="14" rx="2" />
+                        <path d="M3 14l4.5-4.5 4 4 3-3L21 14" />
+                      </svg>
+                    </div>
+                    <p className="empty-title">No active Elite 100 catalog.</p>
+                    <p className="empty-sub">Import and activate the Elite 100 color catalog to enable this view.</p>
+                  </div>
+                ) : elite100Data ? (
+                  <>
+                    <div className="e100-collection-header">
+                      <p className="e100-collection-name">{elite100Data.collection?.display_name ?? "Elite 100 Color Collection"}</p>
+                      <p className="e100-collection-sub">
+                        {elite100TotalCount} colors · Premium showroom collection · Read-only
+                      </p>
+                    </div>
+                    {elite100Data.groups.map((group) => (
+                      <Elite100Section
+                        key={group.price_group}
+                        group={group}
+                        onOpenItem={(item) => void openColorModal({
+                          mode: "elite100",
+                          catalogItemId: item.catalog_item_id,
+                          colorKey: item.color_key,
+                          colorName: item.color_name,
+                          materialName: item.material_name,
+                          priceGroup: item.price_group,
+                        })}
+                      />
+                    ))}
+                  </>
+                ) : null}
+              </div>
+            ) : null}
 
-              {/* Search + filter controls — hidden in presentation mode */}
-              {!presentationMode ? (
+            {/* ── Non-Stock tab ── */}
+            {activeTab === "non_stock" ? (
+              <div className="ns-page">
+                {nonStockBusy && !nonStockLoaded ? (
+                  <div className="ns-grid">
+                    {Array.from({ length: 12 }).map((_, i) => (
+                      <div key={i} className="ns-card-skeleton">
+                        <div className="ns-skeleton-img skeleton-shimmer" />
+                        <div className="ns-skeleton-body">
+                          <div className="skeleton-line skeleton-shimmer" style={{ width: "70%" }} />
+                          <div className="skeleton-line skeleton-shimmer" style={{ width: "45%", marginTop: 4 }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : nonStockError ? (
+                  <div className="banner banner-error" role="alert">{nonStockError}</div>
+                ) : (
+                  <>
+                    <div className="ns-header">
+                      <div className="ns-header-text">
+                        <h2 className="ns-title">Non-Stock Colors</h2>
+                        <p className="ns-sub">
+                          {nonStockItems.length} color group{nonStockItems.length !== 1 ? "s" : ""} · Typed inventory not matched to the active Elite 100 catalog
+                        </p>
+                      </div>
+                      <div className="ns-search-wrap">
+                        {searchIcon}
+                        <input
+                          type="search"
+                          value={nonStockSearch}
+                          onChange={(e) => setNonStockSearch(e.target.value)}
+                          placeholder="Search color or material…"
+                          aria-label="Search non-stock colors"
+                        />
+                      </div>
+                    </div>
+                    {filteredNonStock.length === 0 ? (
+                      <div className="empty-state">
+                        <p className="empty-title">{nonStockSearch ? "No colors match your search." : "No non-stock inventory."}</p>
+                        <p className="empty-sub">{nonStockSearch ? "Try a different search term." : "All typed inventory is matched to the active Elite 100 catalog."}</p>
+                        {nonStockSearch && <button type="button" className="btn secondary btn-sm" onClick={() => setNonStockSearch("")}>Clear search</button>}
+                      </div>
+                    ) : (
+                      <div className="ns-grid">
+                        {filteredNonStock.map((item) => (
+                          <NonStockCard
+                            key={item.color_key}
+                            item={item}
+                            onOpen={() => void openColorModal({
+                              mode: "non_stock",
+                              colorKey: item.color_key,
+                              colorName: item.color_name,
+                              materialName: item.material_name,
+                              priceGroup: item.source_price_group,
+                            })}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            ) : null}
+
+            {/* ── All Inventory tab ── */}
+            {activeTab === "all_inventory" ? (
+              <div className="gallery-content">
+                {/* Page header with metrics */}
+                <section className="page-header" aria-labelledby="si-page-title">
+                  <div className="page-header-inner">
+                    <div className="page-header-text">
+                      <p className="page-eyebrow">All Inventory · read-only operational fallback</p>
+                      <h1 id="si-page-title" className="page-title">All Inventory</h1>
+                      <p className="page-subtitle">
+                        Full paginated slab/remnant browser.{" "}
+                        <span className="page-subtitle-note">SlabCloud/Slabsmith is the source of truth.</span>
+                      </p>
+                    </div>
+                    <div className="page-metrics" aria-label="Inventory summary">
+                      <Metric value={summary ? (summary.active_cached_slab_count ?? summary.total_active_slabs).toLocaleString() : "—"} label="Active slabs" hint="Never summed from color counts" />
+                      <Metric value={summary ? summary.distinct_colors.toLocaleString() : "—"} label="Colors" />
+                      <Metric value={summary ? summary.distinct_materials.toLocaleString() : "—"} label="Materials" />
+                      <Metric value={summary ? summary.slabs_with_verified_images.toLocaleString() : "—"} label="Verified photos" />
+                    </div>
+                  </div>
+                </section>
+
+                {err ? <div className="banner banner-error" role="alert">{err}</div> : null}
+
+                {/* Sync health banner */}
+                {summary ? notSeenCount > 0 ? (
+                  <div className="trust-banner trust-banner-warn" role="alert">
+                    <div className="trust-banner-content">
+                      <span className="trust-banner-dot warn" aria-hidden />
+                      <span><strong>{notSeenCount}</strong> {notSeenCount === 1 ? "slab needs" : "slabs need"} review — active cached slabs not seen in latest sync.</span>
+                      <button type="button" className="trust-banner-btn" onClick={() => setReviewOpen((o) => !o)} aria-expanded={reviewOpen}>{reviewOpen ? "Hide" : "Review"}</button>
+                    </div>
+                    {reviewOpen && summary.active_not_seen_in_latest_sync_sample?.length ? (
+                      <ul className="trust-banner-sample">
+                        {summary.active_not_seen_in_latest_sync_sample.map((row) => (
+                          <li key={row.id ?? row.inventory_id}>
+                            <span className="not-seen-color">{row.color_name || "—"}</span>{" · "}
+                            <span className="not-seen-material">{row.material_name || "—"}</span>
+                            {row.inventory_id ? <> · <code className="not-seen-inv">{row.inventory_id}</code></> : null}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
+                ) : summary.last_sync ? (
+                  <p className="trust-ok-line" role="status">
+                    <span className="trust-ok-dot" aria-hidden />Inventory cache up to date
+                  </p>
+                ) : null : null}
+
+                {/* Search + filter controls */}
                 <section className="search-section" aria-label="Filters">
                   <div className="search-row">
                     <div className="search-input-wrap">
                       {searchIcon}
-                      <input
-                        type="search"
-                        value={searchInput}
-                        onChange={(e) => setSearchInput(e.target.value)}
-                        placeholder="Search color, material, inventory ID, rack, lot…"
-                        aria-label="Search slabs"
-                      />
+                      <input type="search" value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="Search color, material, inventory ID, rack, lot…" aria-label="Search slabs" />
                     </div>
                     <div className="search-actions">
                       <label className="sort-control">
                         <span>Sort</span>
                         <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
-                          <option value="color">Color</option>
-                          <option value="material">Material</option>
-                          <option value="inventory_id">ID</option>
-                          <option value="rack">Rack</option>
+                          <option value="color">Color</option><option value="material">Material</option>
+                          <option value="inventory_id">ID</option><option value="rack">Rack</option>
                           <option value="updated_at">Updated</option>
                         </select>
                       </label>
-                      <button
-                        type="button"
-                        className="icon-btn"
-                        title={direction === "asc" ? "Sort ascending" : "Sort descending"}
-                        aria-label={direction === "asc" ? "Sort ascending" : "Sort descending"}
-                        onClick={() => setDirection((d) => (d === "asc" ? "desc" : "asc"))}
-                      >
+                      <button type="button" className="icon-btn" title={direction === "asc" ? "Sort ascending" : "Sort descending"} aria-label={direction === "asc" ? "Sort ascending" : "Sort descending"} onClick={() => setDirection((d) => (d === "asc" ? "desc" : "asc"))}>
                         {direction === "asc" ? "↑" : "↓"}
                       </button>
                       <div className="view-toggle" role="group" aria-label="View mode">
                         <button type="button" className={viewMode === "grid" ? "on" : ""} onClick={() => setViewMode("grid")} aria-pressed={viewMode === "grid"}>Grid</button>
                         <button type="button" className={viewMode === "table" ? "on" : ""} onClick={() => setViewMode("table")} aria-pressed={viewMode === "table"}>List</button>
                       </div>
-                      <button
-                        type="button"
-                        className={`filters-btn${filterDrawerOpen ? " open" : ""}${activeFilterCount > 0 ? " has-filters" : ""}`}
-                        onClick={() => setFilterDrawerOpen((o) => !o)}
-                        aria-expanded={filterDrawerOpen}
-                        aria-controls="filter-drawer"
-                      >
+                      <button type="button" className={`filters-btn${filterDrawerOpen ? " open" : ""}${activeFilterCount > 0 ? " has-filters" : ""}`} onClick={() => setFilterDrawerOpen((o) => !o)} aria-expanded={filterDrawerOpen} aria-controls="filter-drawer">
                         Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn secondary btn-sm present-btn"
-                        onClick={() => setPresentationMode(true)}
-                        title="Hide operational chrome and focus on slabs"
-                      >
-                        Presentation
                       </button>
                     </div>
                   </div>
-
                   {filterDrawerOpen ? (
                     <div id="filter-drawer" className="filter-drawer">
                       <SelectFilter label="Material" value={fMaterial} onChange={setFMaterial} options={filters?.materials} />
@@ -682,243 +882,144 @@ export default function SlabInventoryApp() {
                       <SelectFilter label="Thickness" value={fThickness} onChange={setFThickness} options={filters?.thicknesses} />
                       <SelectFilter label="Rack" value={fRack} onChange={setFRack} options={filters?.racks} />
                       <SelectFilter label="Distributor" value={fDistributor} onChange={setFDistributor} options={filters?.distributors} />
-                      {activeFilterCount > 0 ? (
-                        <button type="button" className="btn secondary btn-sm" onClick={resetFilters}>Clear all</button>
-                      ) : null}
+                      {activeFilterCount > 0 ? <button type="button" className="btn secondary btn-sm" onClick={resetFilters}>Clear all</button> : null}
                     </div>
                   ) : null}
                 </section>
-              ) : null}
 
-              {/* Trust / sync banner — replaces right sidebar */}
-              {!presentationMode && summary ? (
-                notSeenCount > 0 ? (
-                  <div className="trust-banner trust-banner-warn" role="alert">
-                    <div className="trust-banner-content">
-                      <span className="trust-banner-dot warn" aria-hidden />
-                      <span>
-                        <strong>{notSeenCount}</strong>{" "}
-                        {notSeenCount === 1 ? "slab needs" : "slabs need"} review
-                        — active cached slabs not seen in latest sync.
-                      </span>
-                      <button
-                        type="button"
-                        className="trust-banner-btn"
-                        onClick={() => setReviewOpen((o) => !o)}
-                        aria-expanded={reviewOpen}
-                      >
-                        {reviewOpen ? "Hide" : "Review"}
+                {/* Active filter chips */}
+                {activeChips.length > 0 ? (
+                  <div className="active-chips" aria-label="Active filters">
+                    {activeChips.map((c) => (
+                      <button key={c.key} type="button" className="chip" onClick={c.onClear} title="Remove filter">
+                        <span className="chip-label">{c.label}</span><span className="chip-x" aria-hidden>×</span>
                       </button>
-                    </div>
-                    {reviewOpen && summary.active_not_seen_in_latest_sync_sample?.length ? (
-                      <ul className="trust-banner-sample">
-                        {summary.active_not_seen_in_latest_sync_sample.map((row) => (
-                          <li key={row.id ?? row.inventory_id}>
-                            <span className="not-seen-color">{row.color_name || "—"}</span>
-                            {" · "}
-                            <span className="not-seen-material">{row.material_name || "—"}</span>
-                            {row.inventory_id ? (
-                              <> · <code className="not-seen-inv">{row.inventory_id}</code></>
-                            ) : null}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : null}
+                    ))}
+                    {activeChips.length > 1 ? <button type="button" className="chip chip-clear" onClick={resetFilters}>Clear all</button> : null}
                   </div>
-                ) : summary.last_sync ? (
-                  <p className="trust-ok-line" role="status">
-                    <span className="trust-ok-dot" aria-hidden />
-                    Inventory cache up to date
-                  </p>
-                ) : null
-              ) : null}
+                ) : null}
 
-              {/* Active filter chips */}
-              {activeChips.length > 0 ? (
-                <div className="active-chips" aria-label="Active filters">
-                  {activeChips.map((c) => (
-                    <button key={c.key} type="button" className="chip" onClick={c.onClear} title="Remove filter">
-                      <span className="chip-label">{c.label}</span>
-                      <span className="chip-x" aria-hidden>×</span>
-                    </button>
-                  ))}
-                  {activeChips.length > 1 ? (
-                    <button type="button" className="chip chip-clear" onClick={resetFilters}>Clear all</button>
-                  ) : null}
-                </div>
-              ) : null}
-
-              {/* Result meta + inventory health toggle */}
-              <div className="result-meta">
-                <span>{busy ? "Loading…" : `Showing ${rangeStart.toLocaleString()}–${rangeEnd.toLocaleString()} of ${total.toLocaleString()}`}</span>
-                <span className="result-meta-right">
-                  {!presentationMode && summary?.last_sync ? (
-                    <button
-                      type="button"
-                      className="health-toggle-btn"
-                      onClick={() => setHealthOpen((o) => !o)}
-                      aria-expanded={healthOpen}
-                    >
-                      Inventory health {healthOpen ? "▴" : "▾"}
-                    </button>
-                  ) : null}
-                  <span className="result-meta-pages">
-                    <button type="button" className="page-btn" disabled={page <= 0 || busy} onClick={() => setPage((p) => Math.max(0, p - 1))}>Prev</button>
-                    <span className="page-indicator">Page {page + 1} / {maxPage + 1}</span>
-                    <button type="button" className="page-btn" disabled={page >= maxPage || busy} onClick={() => setPage((p) => Math.min(maxPage, p + 1))}>Next</button>
+                {/* Result meta + health */}
+                <div className="result-meta">
+                  <span>{busy ? "Loading…" : `Showing ${rangeStart.toLocaleString()}–${rangeEnd.toLocaleString()} of ${total.toLocaleString()}`}</span>
+                  <span className="result-meta-right">
+                    {summary?.last_sync ? (
+                      <button type="button" className="health-toggle-btn" onClick={() => setHealthOpen((o) => !o)} aria-expanded={healthOpen}>
+                        Inventory health {healthOpen ? "▴" : "▾"}
+                      </button>
+                    ) : null}
+                    <span className="result-meta-pages">
+                      <button type="button" className="page-btn" disabled={page <= 0 || busy} onClick={() => setPage((p) => Math.max(0, p - 1))}>Prev</button>
+                      <span className="page-indicator">Page {page + 1} / {maxPage + 1}</span>
+                      <button type="button" className="page-btn" disabled={page >= maxPage || busy} onClick={() => setPage((p) => Math.min(maxPage, p + 1))}>Next</button>
+                    </span>
                   </span>
-                </span>
-              </div>
+                </div>
 
-              {/* Inventory health panel — collapsible, replaces sidebar sync card */}
-              {healthOpen && summary?.last_sync && !presentationMode ? (
-                <div className="health-panel" role="region" aria-label="Inventory health">
-                  <div className="health-panel-inner">
-                    <div className="health-row">
-                      <span>Status</span>
-                      <strong className={`sync-status sync-${summary.last_sync.status}`}>{summary.last_sync.status}</strong>
+                {/* Health panel */}
+                {healthOpen && summary?.last_sync ? (
+                  <div className="health-panel" role="region" aria-label="Inventory health">
+                    <div className="health-panel-inner">
+                      <div className="health-row"><span>Status</span><strong className={`sync-status sync-${summary.last_sync.status}`}>{summary.last_sync.status}</strong></div>
+                      <div className="health-row"><span>Last sync</span><strong>{fmtDate(summary.last_sync.finished_at || summary.last_sync.started_at)}</strong></div>
+                      <div className="health-row"><span>Latest sync count</span><strong>{summary.latest_sync_slab_count != null ? `${Number(summary.latest_sync_slab_count).toLocaleString()} slabs seen` : summary.last_sync.slab_upserted_count != null ? `${Number(summary.last_sync.slab_upserted_count).toLocaleString()} slabs seen` : "—"}</strong></div>
+                      <div className="health-row"><span>Active cache</span><strong>{(summary.active_cached_slab_count ?? summary.total_active_slabs).toLocaleString()} slabs</strong></div>
+                      {notSeenCount > 0 ? <div className="health-row"><span>Needs review</span><strong className="count-warn">{notSeenCount} not seen in latest sync</strong></div> : null}
+                      <div className="health-row"><span>Warnings</span><strong>{summary.last_sync.warning_count}</strong></div>
                     </div>
-                    <div className="health-row">
-                      <span>Last sync</span>
-                      <strong>{fmtDate(summary.last_sync.finished_at || summary.last_sync.started_at)}</strong>
-                    </div>
-                    <div className="health-row">
-                      <span>Latest sync count</span>
-                      <strong>
-                        {summary.latest_sync_slab_count != null
-                          ? `${Number(summary.latest_sync_slab_count).toLocaleString()} slabs seen`
-                          : summary.last_sync.slab_upserted_count != null
-                            ? `${Number(summary.last_sync.slab_upserted_count).toLocaleString()} slabs seen`
-                            : "—"}
-                      </strong>
-                    </div>
-                    <div className="health-row">
-                      <span>Active cache</span>
-                      <strong>{(summary.active_cached_slab_count ?? summary.total_active_slabs).toLocaleString()} slabs</strong>
-                    </div>
-                    {notSeenCount > 0 ? (
-                      <div className="health-row">
-                        <span>Needs review</span>
-                        <strong className="count-warn">{notSeenCount} not seen in latest sync</strong>
+                    {summary.slabs_by_price_group?.length ? (
+                      <div className="health-pg">
+                        <p className="health-pg-label">By source price group · imported from SlabCloud</p>
+                        {summary.slabs_by_price_group.map((g) => (
+                          <div key={g.price_group} className="health-pg-row">
+                            <span className="pg-badge">{g.price_group}</span>
+                            <span className="health-pg-count">{g.count.toLocaleString()}</span>
+                          </div>
+                        ))}
                       </div>
                     ) : null}
-                    <div className="health-row">
-                      <span>Warnings</span>
-                      <strong>{summary.last_sync.warning_count}</strong>
-                    </div>
                   </div>
-                  {summary.slabs_by_price_group?.length ? (
-                    <div className="health-pg">
-                      <p className="health-pg-label">By source price group · imported from SlabCloud</p>
-                      {summary.slabs_by_price_group.map((g) => (
-                        <div key={g.price_group} className="health-pg-row">
-                          <span className="pg-badge">{g.price_group}</span>
-                          <span className="health-pg-count">{g.count.toLocaleString()}</span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
+                ) : null}
 
-              {/* Slab gallery / table / empty / skeleton */}
-              {busy && slabs.length === 0 ? (
-                <div className="slab-grid">
-                  {Array.from({ length: 8 }).map((_, i) => (
-                    <SkeletonCard key={i} />
-                  ))}
-                </div>
-              ) : slabs.length === 0 ? (
-                <div className="empty-state">
-                  <div className="empty-art" aria-hidden>
-                    <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-                      <rect x="3" y="4" width="18" height="14" rx="2" />
-                      <path d="M3 14l4.5-4.5 4 4 3-3L21 14" />
-                      <circle cx="8.5" cy="8.5" r="1.3" />
-                    </svg>
+                {/* Slab grid/table/empty/skeleton */}
+                {busy && slabs.length === 0 ? (
+                  <div className="slab-grid">{Array.from({ length: 8 }).map((_, i) => <SkeletonCard key={i} />)}</div>
+                ) : slabs.length === 0 ? (
+                  <div className="empty-state">
+                    <div className="empty-art" aria-hidden>
+                      <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="4" width="18" height="14" rx="2" /><path d="M3 14l4.5-4.5 4 4 3-3L21 14" /><circle cx="8.5" cy="8.5" r="1.3" />
+                      </svg>
+                    </div>
+                    <p className="empty-title">No slabs match these criteria.</p>
+                    <p className="empty-sub">Try removing a filter or broaden your search.</p>
+                    <div className="empty-actions">
+                      {activeFilterCount > 0 ? <button type="button" className="btn secondary btn-sm" onClick={resetFilters}>Clear filters</button> : null}
+                      {fMaterial ? <button type="button" className="btn secondary btn-sm" onClick={() => setFMaterial("")}>Show all materials</button> : null}
+                    </div>
                   </div>
-                  <p className="empty-title">No slabs match these criteria.</p>
-                  <p className="empty-sub">Try removing a filter or broaden your search.</p>
-                  <div className="empty-actions">
-                    {activeFilterCount > 0 ? (
-                      <button type="button" className="btn secondary btn-sm" onClick={resetFilters}>Clear filters</button>
-                    ) : null}
-                    {fMaterial ? (
-                      <button type="button" className="btn secondary btn-sm" onClick={() => setFMaterial("")}>Show all materials</button>
-                    ) : null}
+                ) : viewMode === "grid" ? (
+                  <div className="slab-grid">
+                    {slabs.map((s, i) => <SlabCard key={s.id} slab={s} onOpen={() => openSlab(i)} />)}
                   </div>
-                </div>
-              ) : viewMode === "grid" || presentationMode ? (
-                <div className="slab-grid">
-                  {slabs.map((s, i) => (
-                    <SlabCard key={s.id} slab={s} onOpen={() => openSlab(i)} />
-                  ))}
-                </div>
-              ) : (
-                <div className="slab-table-wrap">
-                  <table className="slab-table">
-                    <thead>
-                      <tr>
-                        <th>Color</th>
-                        <th>Material</th>
-                        <th>Dimensions</th>
-                        <th>ID</th>
-                        <th>Rack</th>
-                        <th title="Source price group — imported from SlabCloud">Source PG</th>
-                        <th title="Photo verified by URL check">Photo</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {slabs.map((s, i) => (
-                        <tr
-                          key={s.id}
-                          onClick={() => openSlab(i)}
-                          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openSlab(i); } }}
-                          className="slab-row"
-                          tabIndex={0}
-                          role="button"
-                          aria-label={`View details: ${s.color_name ?? "Unnamed"} · ${s.material_name ?? ""}`}
-                        >
-                          <td className="cell-strong">{s.color_name || "—"}</td>
-                          <td>{s.material_name || "—"}</td>
-                          <td>{dimsLabel(s)}</td>
-                          <td>{s.inventory_id ? <code>ID {s.inventory_id}</code> : "—"}</td>
-                          <td>{s.rack || "—"}</td>
-                          <td>{s.source_price_group ? <span className="pg-badge" title="Imported from SlabCloud">{s.source_price_group}</span> : "—"}</td>
-                          <td>{s.image_status === "ok" ? <span className="img-ok" aria-label="Verified">✓</span> : "—"}</td>
+                ) : (
+                  <div className="slab-table-wrap">
+                    <table className="slab-table">
+                      <thead>
+                        <tr>
+                          <th>Color</th><th>Material</th><th>Dimensions</th>
+                          <th>ID</th><th>Rack</th>
+                          <th title="Source price group — imported from SlabCloud">Source PG</th>
+                          <th title="Photo verified by URL check">Photo</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
+                      </thead>
+                      <tbody>
+                        {slabs.map((s, i) => (
+                          <tr key={s.id} onClick={() => openSlab(i)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openSlab(i); } }} className="slab-row" tabIndex={0} role="button" aria-label={`View details: ${s.color_name ?? "Unnamed"} · ${s.material_name ?? ""}`}>
+                            <td className="cell-strong">{s.color_name || "—"}</td>
+                            <td>{s.material_name || "—"}</td>
+                            <td>{dimsLabel(s.width_actual_in, s.length_actual_in)}</td>
+                            <td>{s.inventory_id ? <code>ID {s.inventory_id}</code> : "—"}</td>
+                            <td>{s.rack || "—"}</td>
+                            <td>{s.source_price_group ? <span className="pg-badge" title="Imported from SlabCloud">{s.source_price_group}</span> : "—"}</td>
+                            <td>{s.image_status === "ok" ? <span className="img-ok" aria-label="Verified">✓</span> : "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            ) : null}
+
+            {/* Color Inventory Modal (Elite 100 + Non-Stock) */}
+            {colorModal ? (
+              <ColorInventoryModal
+                modal={colorModal}
+                inventory={modalInventory}
+                busy={modalBusy}
+                error={modalError}
+                onClose={() => { setColorModal(null); setModalInventory(null); setModalError(null); }}
+              />
+            ) : null}
           </>
+        ) : null}
+
+        {/* Single-slab lightbox (All Inventory tab) */}
+        {selectedSlab ? (
+          <SlabLightbox slab={selectedSlab} index={selectedIndex ?? 0} count={slabs.length} onClose={closeSlab} onPrev={() => stepSlab(-1)} onNext={() => stepSlab(1)} />
         ) : null}
       </main>
 
-      {selectedSlab ? (
-        <SlabLightbox
-          slab={selectedSlab}
-          index={selectedIndex ?? 0}
-          count={slabs.length}
-          onClose={closeSlab}
-          onPrev={() => stepSlab(-1)}
-          onNext={() => stepSlab(1)}
-        />
-      ) : null}
-
       <footer className="footer-bar" role="contentinfo">
         <span>eliteOS · Slab Inventory</span>
-        <span className="footer-meta">
-          Read-only · {config.backendBaseUrl} · SlabCloud/Slabsmith is the source of truth
-        </span>
+        <span className="footer-meta">Read-only · {config.backendBaseUrl} · SlabCloud/Slabsmith is the source of truth</span>
       </footer>
     </div>
   );
 }
 
-/* --------------------------------------------------------- subcomponents */
+/* ─────────────────────────────────────────── shared subcomponents */
 
 function Metric({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
@@ -942,88 +1043,48 @@ function SkeletonCard() {
   );
 }
 
-function SelectFilter({
-  label,
-  value,
-  onChange,
-  options
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  options?: string[];
-}) {
+function SelectFilter({ label, value, onChange, options }: { label: string; value: string; onChange: (v: string) => void; options?: string[] }) {
   return (
     <label className="select-filter">
       <span className="sr-only">{label}</span>
       <select value={value} onChange={(e) => onChange(e.target.value)} aria-label={label} data-active={value ? "1" : "0"}>
         <option value="">{label}: all</option>
-        {(options ?? []).map((o) => (
-          <option key={o} value={o}>{o}</option>
-        ))}
+        {(options ?? []).map((o) => <option key={o} value={o}>{o}</option>)}
       </select>
     </label>
   );
 }
 
-function SlabThumb({ slab, className }: { slab: Slab; className?: string }) {
+function SlabThumb({ src, imageStatus, colorName, className }: { src: string | null; imageStatus: string; colorName: string | null; className?: string }) {
   const [failed, setFailed] = useState(false);
-  const src = slab.thumbnail_url || slab.image_url;
-  const showImage = Boolean(src) && slab.image_status !== "missing" && !failed;
+  const showImage = Boolean(src) && imageStatus !== "missing" && !failed;
   if (showImage && src) {
-    return (
-      <img
-        className={className}
-        src={src}
-        alt={`${slab.color_name ?? "Slab"} ${slab.material_name ?? ""}`.trim()}
-        loading="lazy"
-        onError={() => setFailed(true)}
-      />
-    );
+    return <img className={className} src={src} alt={`${colorName ?? "Slab"}`.trim()} loading="lazy" onError={() => setFailed(true)} />;
   }
   return (
     <div className={`slab-fallback ${className ?? ""}`} aria-hidden>
-      <span>{colorInitials(slab.color_name)}</span>
+      <span>{colorInitials(colorName)}</span>
     </div>
   );
 }
 
 function SlabCard({ slab, onOpen }: { slab: Slab; onOpen: () => void }) {
   return (
-    <button
-      type="button"
-      className="slab-card"
-      onClick={onOpen}
-      aria-label={`View details: ${slab.color_name ?? "Unnamed"} · ${slab.material_name ?? ""}`}
-    >
+    <button type="button" className="slab-card" onClick={onOpen} aria-label={`View details: ${slab.color_name ?? "Unnamed"} · ${slab.material_name ?? ""}`}>
       <div className="slab-card-media">
-        <SlabThumb slab={slab} className="slab-card-img" />
-        {slab.source_price_group ? (
-          <span className="slab-card-pg pg-badge" title="Source price group — imported from SlabCloud">
-            {slab.source_price_group}
-          </span>
-        ) : null}
-        {slab.image_status === "ok" ? (
-          <span className="slab-card-verified" role="img" aria-label="Photo verified" />
-        ) : null}
-        <span className="slab-card-overlay" aria-hidden>
-          <span className="slab-card-overlay-hint">View details ›</span>
-        </span>
+        <SlabThumb src={slab.thumbnail_url || slab.image_url} imageStatus={slab.image_status} colorName={slab.color_name} className="slab-card-img" />
+        {slab.source_price_group ? <span className="slab-card-pg pg-badge" title="Source price group — imported from SlabCloud">{slab.source_price_group}</span> : null}
+        {slab.image_status === "ok" ? <span className="slab-card-verified" role="img" aria-label="Photo verified" /> : null}
+        <span className="slab-card-overlay" aria-hidden><span className="slab-card-overlay-hint">View details ›</span></span>
       </div>
       <div className="slab-card-body">
         <p className="slab-card-color">{slab.color_name || "Unnamed"}</p>
         <p className="slab-card-material">{slab.material_name || "—"}</p>
         <div className="slab-card-meta">
-          <span>{dimsLabel(slab)}</span>
-          {slab.rack ? (
-            <><span className="slab-card-dot" aria-hidden>·</span><span>Rack {slab.rack}</span></>
-          ) : null}
+          <span>{dimsLabel(slab.width_actual_in, slab.length_actual_in)}</span>
+          {slab.rack ? <><span className="slab-card-dot" aria-hidden>·</span><span>Rack {slab.rack}</span></> : null}
         </div>
-        {slab.inventory_id ? (
-          <p className="slab-card-inv">ID {slab.inventory_id}</p>
-        ) : slab.external_slab_id ? (
-          <p className="slab-card-inv slab-card-inv-ext">{slab.external_slab_id.slice(0, 8)}…</p>
-        ) : null}
+        {slab.inventory_id ? <p className="slab-card-inv">ID {slab.inventory_id}</p> : slab.external_slab_id ? <p className="slab-card-inv slab-card-inv-ext">{slab.external_slab_id.slice(0, 8)}…</p> : null}
       </div>
     </button>
   );
@@ -1038,39 +1099,18 @@ function DetailRow({ label, value, mono }: { label: string; value: ReactNode; mo
   );
 }
 
-function SlabLightbox({
-  slab,
-  index,
-  count,
-  onClose,
-  onPrev,
-  onNext
-}: {
-  slab: Slab;
-  index: number;
-  count: number;
-  onClose: () => void;
-  onPrev: () => void;
-  onNext: () => void;
-}) {
+function SlabLightbox({ slab, index, count, onClose, onPrev, onNext }: { slab: Slab; index: number; count: number; onClose: () => void; onPrev: () => void; onNext: () => void }) {
   const [copied, setCopied] = useState(false);
   const copyId = async () => {
-    try {
-      await navigator.clipboard.writeText(String(slab.external_slab_id ?? ""));
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      /* clipboard unavailable */
-    }
+    try { await navigator.clipboard.writeText(String(slab.external_slab_id ?? "")); setCopied(true); setTimeout(() => setCopied(false), 1500); }
+    catch { /* clipboard unavailable */ }
   };
-
   return (
     <div className="lightbox-overlay" role="dialog" aria-modal="true" aria-label={`${slab.color_name ?? "Slab"} detail`} onClick={onClose}>
       <div className="lightbox" onClick={(e) => e.stopPropagation()}>
         <button type="button" className="lightbox-close" onClick={onClose} aria-label="Close">×</button>
-
         <div className="lightbox-media">
-          <SlabThumb slab={slab} className="lightbox-img" />
+          <SlabThumb src={slab.thumbnail_url || slab.image_url} imageStatus={slab.image_status} colorName={slab.color_name} className="lightbox-img" />
           {count > 1 ? (
             <>
               <button type="button" className="lightbox-nav lightbox-prev" onClick={onPrev} disabled={index <= 0} aria-label="Previous slab">‹</button>
@@ -1078,7 +1118,6 @@ function SlabLightbox({
             </>
           ) : null}
         </div>
-
         <div className="lightbox-info">
           <header className="lightbox-head">
             <p className="lightbox-eyebrow">{slab.material_name || "Slab"}</p>
@@ -1090,9 +1129,8 @@ function SlabLightbox({
               </p>
             ) : null}
           </header>
-
           <div className="detail-block">
-            <DetailRow label="Dimensions" value={dimsLabel(slab)} />
+            <DetailRow label="Dimensions" value={dimsLabel(slab.width_actual_in, slab.length_actual_in)} />
             <DetailRow label="Thickness" value={slab.thickness_nominal} />
             <DetailRow label="Distributor" value={slab.distributor} />
             <DetailRow label="Rack" value={slab.rack} />
@@ -1101,26 +1139,265 @@ function SlabLightbox({
             <DetailRow label="Image status" value={<span className={`img-status img-${slab.image_status}`}>{slab.image_status}</span>} />
             <DetailRow label="Active" value={slab.is_active ? "Yes" : "No"} />
           </div>
-
           <details className="tech-details">
             <summary>Technical details</summary>
-            <DetailRow label="External slab ID" value={
-              <span className="copy-line">
-                <code>{slab.external_slab_id || "—"}</code>
-                {slab.external_slab_id ? (
-                  <button type="button" className="copy-btn" onClick={() => void copyId()}>{copied ? "Copied" : "Copy"}</button>
-                ) : null}
-              </span>
-            } />
+            <DetailRow label="External slab ID" value={<span className="copy-line"><code>{slab.external_slab_id || "—"}</code>{slab.external_slab_id ? <button type="button" className="copy-btn" onClick={() => void copyId()}>{copied ? "Copied" : "Copy"}</button> : null}</span>} />
             <DetailRow label="Last sync run" value={slab.last_seen_sync_run_id} mono />
             <DetailRow label="Updated" value={fmtDate(slab.updated_at)} />
-            {slab.image_url ? (
-              <DetailRow label="Image URL" value={<a href={slab.image_url} target="_blank" rel="noreferrer noopener" className="img-link">open</a>} />
-            ) : null}
+            {slab.image_url ? <DetailRow label="Image URL" value={<a href={slab.image_url} target="_blank" rel="noreferrer noopener" className="img-link">open</a>} /> : null}
           </details>
-
           <p className="lightbox-foot">Read-only · source price group is imported from SlabCloud and is not slabOS pricing authority.</p>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────── Elite 100 components */
+
+function Elite100Section({ group, onOpenItem }: { group: Elite100Group; onOpenItem: (item: Elite100Item) => void }) {
+  const railRef = useRef<HTMLDivElement>(null);
+  const scroll = (dir: -1 | 1) => {
+    const rail = railRef.current;
+    if (!rail) return;
+    rail.scrollBy({ left: dir * 840, behavior: "smooth" });
+  };
+  return (
+    <section className="e100-section" aria-labelledby={`e100-group-${group.price_group}`}>
+      <div className="e100-section-head">
+        <div className="e100-section-title-row">
+          <span className={`e100-group-badge${group.price_group === "Promo" ? " promo" : ""}`} aria-hidden>
+            {group.price_group === "Promo" ? "P" : group.price_group}
+          </span>
+          <h2 id={`e100-group-${group.price_group}`} className="e100-section-title">
+            {group.price_group === "Promo" ? "Group Promo" : `Group ${group.price_group}`}
+          </h2>
+          <span className="e100-section-count">{group.items.length} color{group.items.length !== 1 ? "s" : ""}</span>
+        </div>
+        <div className="e100-section-controls" aria-label="Scroll carousel">
+          <button type="button" className="e100-scroll-btn" onClick={() => scroll(-1)} aria-label="Scroll left">‹</button>
+          <button type="button" className="e100-scroll-btn" onClick={() => scroll(1)} aria-label="Scroll right">›</button>
+        </div>
+      </div>
+      <div className="e100-rail-wrap">
+        <div className="e100-rail" ref={railRef} role="list" aria-label={`Group ${group.price_group} colors`}>
+          {group.items.map((item) => (
+            <div key={item.catalog_item_id} role="listitem">
+              <Elite100Card item={item} onOpen={() => onOpenItem(item)} />
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function Elite100Card({ item, onOpen }: { item: Elite100Item; onOpen: () => void }) {
+  const [imgFailed, setImgFailed] = useState(false);
+  const src = item.representative_thumbnail_url || item.representative_image_url;
+  const hasImage = Boolean(src) && !imgFailed;
+  return (
+    <button
+      type="button"
+      className="cp-card"
+      onClick={onOpen}
+      aria-label={`${item.color_name ?? "Color"} · ${item.has_inventory ? `${item.slab_count} slabs, ${item.remnant_count} remnants` : "No inventory"} — Open inventory`}
+    >
+      <div className="cp-card-mat">
+        <div className="cp-card-img-wrap">
+          {hasImage ? (
+            <img
+              src={src!}
+              alt={item.display_name ?? item.color_name ?? ""}
+              loading="lazy"
+              className="cp-card-img"
+              onError={() => setImgFailed(true)}
+            />
+          ) : (
+            <div className="cp-card-placeholder" aria-hidden>
+              <span>{colorInitials(item.color_name)}</span>
+            </div>
+          )}
+        </div>
+        {!item.has_inventory && (
+          <div className="cp-card-no-inv" aria-label="No current inventory">
+            <span>No inventory</span>
+          </div>
+        )}
+      </div>
+      <div className="cp-card-body">
+        <p className="cp-card-name">{item.color_name || "—"}</p>
+        {item.has_inventory && (item.slab_count > 0 || item.remnant_count > 0) && (
+          <p className="cp-card-meta">
+            {item.slab_count > 0 && <span>{item.slab_count} slab{item.slab_count !== 1 ? "s" : ""}</span>}
+            {item.slab_count > 0 && item.remnant_count > 0 && <span className="cp-dot" aria-hidden> · </span>}
+            {item.remnant_count > 0 && <span>{item.remnant_count} remnant{item.remnant_count !== 1 ? "s" : ""}</span>}
+          </p>
+        )}
+      </div>
+    </button>
+  );
+}
+
+/* ─────────────────────────────────────────── Non-Stock components */
+
+function NonStockCard({ item, onOpen }: { item: NonStockItem; onOpen: () => void }) {
+  const [imgFailed, setImgFailed] = useState(false);
+  const src = item.representative_thumbnail_url || item.representative_image_url;
+  const hasImage = Boolean(src) && !imgFailed;
+  return (
+    <button
+      type="button"
+      className="ns-card"
+      onClick={onOpen}
+      aria-label={`${item.color_name ?? "Color"} · ${item.material_name ?? ""} — Open inventory`}
+    >
+      <div className="ns-card-img-wrap">
+        {hasImage ? (
+          <img src={src!} alt={`${item.color_name ?? ""} ${item.material_name ?? ""}`.trim()} loading="lazy" className="ns-card-img" onError={() => setImgFailed(true)} />
+        ) : (
+          <div className="ns-card-fallback" aria-hidden>
+            <span>{colorInitials(item.color_name)}</span>
+          </div>
+        )}
+        {item.source_price_group && (
+          <span className="pg-badge ns-pg-badge" title="Source price group — imported from SlabCloud">
+            {item.source_price_group}
+          </span>
+        )}
+      </div>
+      <div className="ns-card-body">
+        <p className="ns-card-name">{item.color_name || "—"}</p>
+        <p className="ns-card-material">{item.material_name || "—"}</p>
+        <p className="ns-card-count">{item.slab_count > 0 ? `${item.slab_count} slab${item.slab_count !== 1 ? "s" : ""}` : ""}{item.slab_count > 0 && item.remnant_count > 0 ? " · " : ""}{item.remnant_count > 0 ? `${item.remnant_count} remnant${item.remnant_count !== 1 ? "s" : ""}` : ""}</p>
+      </div>
+    </button>
+  );
+}
+
+/* ─────────────────────────────────────────── Color Inventory Modal */
+
+function ColorInventoryModal({
+  modal,
+  inventory,
+  busy,
+  error,
+  onClose
+}: {
+  modal: NonNullable<ColorModal>;
+  inventory: ModalInventory;
+  busy: boolean;
+  error: string | null;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  const totalSlabs = inventory?.slab_count ?? 0;
+  const totalRemnants = inventory?.remnant_count ?? 0;
+
+  return (
+    <div className="cim-overlay" role="dialog" aria-modal="true" aria-label={`${modal.colorName ?? "Color"} inventory`} onClick={onClose}>
+      <div className="cim" onClick={(e) => e.stopPropagation()}>
+        <button type="button" className="cim-close" onClick={onClose} aria-label="Close">×</button>
+
+        <header className="cim-head">
+          <div className="cim-head-left">
+            <p className="cim-eyebrow">
+              {modal.mode === "elite100" ? (
+                <><span className="cim-e100-badge">Elite 100</span>{modal.priceGroup && <span className="cim-group">Group {modal.priceGroup}</span>}</>
+              ) : modal.priceGroup ? (
+                <span className="cim-group">Source Group {modal.priceGroup}</span>
+              ) : (
+                <span className="cim-group">Non-Stock</span>
+              )}
+            </p>
+            <h2 className="cim-title">{modal.colorName || "Color"}</h2>
+            {modal.materialName && <p className="cim-material">{modal.materialName}</p>}
+          </div>
+          {inventory && !busy && (
+            <div className="cim-totals">
+              <span className="cim-totals-slab">{totalSlabs} slab{totalSlabs !== 1 ? "s" : ""}</span>
+              <span className="cim-dot">·</span>
+              <span>{totalRemnants} remnant{totalRemnants !== 1 ? "s" : ""}</span>
+            </div>
+          )}
+        </header>
+
+        <div className="cim-body">
+          {busy && (
+            <div className="cim-loading">
+              <div className="cim-loading-spinner" aria-hidden />
+              Loading inventory…
+            </div>
+          )}
+          {!busy && error && (
+            <div className="banner banner-error" role="alert">{error}</div>
+          )}
+          {!busy && !error && inventory && (
+            <>
+              <section className="cim-section">
+                <h3 className="cim-section-title">Full Slabs{totalSlabs > 0 ? ` (${totalSlabs})` : ""}</h3>
+                {inventory.slabs.length === 0 ? (
+                  <p className="cim-empty">No full slabs currently available.</p>
+                ) : (
+                  <div className="cim-item-grid">
+                    {inventory.slabs.map((item) => <PhysicalItemCard key={item.id} item={item} />)}
+                  </div>
+                )}
+              </section>
+              <section className="cim-section">
+                <h3 className="cim-section-title">Remnants{totalRemnants > 0 ? ` (${totalRemnants})` : ""}</h3>
+                {inventory.remnants.length === 0 ? (
+                  <p className="cim-empty">No remnants currently available.</p>
+                ) : (
+                  <div className="cim-item-grid">
+                    {inventory.remnants.map((item) => <PhysicalItemCard key={item.id} item={item} />)}
+                  </div>
+                )}
+              </section>
+              {totalSlabs === 0 && totalRemnants === 0 && (
+                <div className="cim-no-inventory">
+                  <p>No current inventory for this {modal.mode === "elite100" ? "Elite 100 color" : "color"}.</p>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PhysicalItemCard({ item }: { item: PhysicalItem }) {
+  const [imgFailed, setImgFailed] = useState(false);
+  const src = item.thumbnail_url || item.image_url;
+  const hasImage = Boolean(src) && item.image_status !== "missing" && !imgFailed;
+  const dims = dimsLabel(item.width_actual_in, item.length_actual_in);
+  return (
+    <div className="pi-card">
+      <div className="pi-card-img-wrap">
+        {hasImage ? (
+          <img src={src!} alt="" className="pi-card-img" loading="lazy" onError={() => setImgFailed(true)} />
+        ) : (
+          <div className="pi-card-fallback" aria-hidden>
+            <span>{colorInitials(item.color_name)}</span>
+          </div>
+        )}
+      </div>
+      <div className="pi-card-info">
+        {dims !== "—" && <p className="pi-dims">{dims}</p>}
+        {item.thickness_nominal && <p className="pi-thickness">{item.thickness_nominal}</p>}
+        {item.rack && <p className="pi-meta">Rack {item.rack}{item.lot ? ` · Lot ${item.lot}` : ""}</p>}
+        {item.inventory_id && <p className="pi-id">ID {item.inventory_id}</p>}
+        {item.source_price_group && (
+          <span className="pg-badge pi-pg" title="Source price group — imported from SlabCloud">
+            {item.source_price_group}
+          </span>
+        )}
       </div>
     </div>
   );
