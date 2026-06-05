@@ -200,6 +200,8 @@ export default function SlabInventoryApp() {
   const [viewMode, setViewMode] = useState<"grid" | "table">("grid");
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [moreFiltersOpen, setMoreFiltersOpen] = useState(false);
+  const [presentationMode, setPresentationMode] = useState(false);
+  const [presentationFiltersOpen, setPresentationFiltersOpen] = useState(false);
 
   const homeBase = useMemo(() => homeLauncherUrl(), []);
   const workspaceLogoUrl = EOS_LOGO_URL || undefined;
@@ -423,6 +425,17 @@ export default function SlabInventoryApp() {
   // Count of secondary (collapsed) filters that are currently active — drives the "More filters (n)" badge.
   const secondaryFilterCount = [fThickness, fRack, fDistributor].filter(Boolean).length;
 
+  // Deliberate, removable chips for every active filter (incl. search).
+  const activeChips: { key: string; label: string; onClear: () => void }[] = [];
+  if (search) activeChips.push({ key: "search", label: `“${search}”`, onClear: () => { setSearchInput(""); setSearch(""); } });
+  if (fMaterial) activeChips.push({ key: "material", label: `Material · ${fMaterial}`, onClear: () => setFMaterial("") });
+  if (fColor) activeChips.push({ key: "color", label: `Color · ${fColor}`, onClear: () => setFColor("") });
+  if (fPriceGroup) activeChips.push({ key: "pg", label: `Source PG · ${fPriceGroup}`, onClear: () => setFPriceGroup("") });
+  if (fImageStatus) activeChips.push({ key: "img", label: `Photo · ${fImageStatus}`, onClear: () => setFImageStatus("") });
+  if (fThickness) activeChips.push({ key: "thickness", label: `Thickness · ${fThickness}`, onClear: () => setFThickness("") });
+  if (fRack) activeChips.push({ key: "rack", label: `Rack · ${fRack}`, onClear: () => setFRack("") });
+  if (fDistributor) activeChips.push({ key: "distributor", label: `Distributor · ${fDistributor}`, onClear: () => setFDistributor("") });
+
   const rangeStart = total === 0 ? 0 : page * PAGE_SIZE + 1;
   const rangeEnd = Math.min(total, (page + 1) * PAGE_SIZE);
   const maxPage = Math.max(0, Math.ceil(total / PAGE_SIZE) - 1);
@@ -524,19 +537,85 @@ export default function SlabInventoryApp() {
 
         {sessionToken ? (
           <>
-            <section className="si-hero" aria-labelledby="si-hero-title">
-              <div className="hero-aurora" aria-hidden />
-              <div className="si-hero-text">
-                <p className="hero-eyebrow">Internal tool · Slab Inventory</p>
-                <h1 id="si-hero-title" className="hero-title">Slab inventory</h1>
-                <p className="hero-sub">
-                  Browse synced SlabCloud/Slabsmith slab inventory in a read-only eliteOS view.{" "}
-                  <span className="hero-sub-note">
-                    SlabCloud/Slabsmith remains the source of truth; slabOS displays the latest cached sync.
-                  </span>
-                </p>
+            {/* ===== Hero (full) or slim presentation bar ===== */}
+            {!presentationMode ? (
+              <section className="si-hero" aria-labelledby="si-hero-title">
+                <div className="hero-aurora" aria-hidden />
+                <div className="si-hero-main">
+                  <div className="si-hero-text">
+                    <p className="hero-eyebrow">Internal tool · Slab inventory</p>
+                    <h1 id="si-hero-title" className="hero-title hero-title-display">Slab inventory</h1>
+                    <p className="hero-sub">
+                      Browse synced SlabCloud/Slabsmith slab inventory in a read-only eliteOS view.{" "}
+                      <span className="hero-sub-note">
+                        SlabCloud/Slabsmith remains the source of truth; slabOS displays the latest cached sync.
+                      </span>
+                    </p>
+                  </div>
+                  {/* Integrated metric rail */}
+                  <div className="hero-metrics" aria-label="Inventory summary">
+                    <Metric
+                      value={summary ? (summary.active_cached_slab_count ?? summary.total_active_slabs).toLocaleString() : "—"}
+                      label="Active cached slabs"
+                      hint="Count of slab rows in the slabOS cache (never summed from color counts)"
+                    />
+                    <Metric value={summary ? summary.distinct_colors.toLocaleString() : "—"} label="Colors" hint="Distinct color names" />
+                    <Metric value={summary ? summary.distinct_materials.toLocaleString() : "—"} label="Materials" hint="Distinct material names" />
+                    <Metric value={summary ? summary.slabs_with_verified_images.toLocaleString() : "—"} label="Verified photos" hint="Images confirmed OK by URL check" />
+                  </div>
+                </div>
+              </section>
+            ) : (
+              <div className="presentation-bar" role="region" aria-label="Presentation mode">
+                <span className="presentation-tag">Presentation mode</span>
+                <div className="presentation-search">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <circle cx="11" cy="11" r="7" />
+                    <path d="M21 21l-3.5-3.5" />
+                  </svg>
+                  <input
+                    type="search"
+                    value={searchInput}
+                    onChange={(e) => setSearchInput(e.target.value)}
+                    placeholder="Search slabs…"
+                    aria-label="Search slabs"
+                  />
+                </div>
+                <div className="presentation-actions">
+                  <button
+                    type="button"
+                    className="btn secondary btn-sm"
+                    onClick={() => setPresentationFiltersOpen((o) => !o)}
+                    aria-expanded={presentationFiltersOpen}
+                  >
+                    Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn primary btn-sm"
+                    onClick={() => { setPresentationMode(false); setPresentationFiltersOpen(false); }}
+                  >
+                    Exit presentation
+                  </button>
+                </div>
+                {presentationFiltersOpen ? (
+                  <div className="presentation-filter-panel">
+                    <div className="filter-selects">
+                      <SelectFilter label="Material" value={fMaterial} onChange={setFMaterial} options={filters?.materials} />
+                      <SelectFilter label="Color" value={fColor} onChange={setFColor} options={filters?.colors} />
+                      <SelectFilter label="Source price group" value={fPriceGroup} onChange={setFPriceGroup} options={filters?.price_groups} />
+                      <SelectFilter label="Image status" value={fImageStatus} onChange={setFImageStatus} options={filters?.image_statuses} />
+                      <SelectFilter label="Thickness" value={fThickness} onChange={setFThickness} options={filters?.thicknesses} />
+                      <SelectFilter label="Rack" value={fRack} onChange={setFRack} options={filters?.racks} />
+                      <SelectFilter label="Distributor" value={fDistributor} onChange={setFDistributor} options={filters?.distributors} />
+                      {activeFilterCount > 0 ? (
+                        <button type="button" className="btn secondary btn-sm" onClick={resetFilters}>Clear all</button>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
               </div>
-            </section>
+            )}
 
             {err ? <div className="banner banner-error" role="alert">{err}</div> : null}
             {notInstalled ? (
@@ -545,98 +624,106 @@ export default function SlabInventoryApp() {
               </div>
             ) : null}
 
-            {/* Summary strip */}
-            <section className="stat-strip" aria-label="Inventory summary">
-              <StatCard
-                label="Active cached slabs"
-                value={summary ? (summary.active_cached_slab_count ?? summary.total_active_slabs).toLocaleString() : "—"}
-                hint="Count of slab rows in the slabOS cache (never summed from color counts)"
-              />
-              <StatCard label="Colors" value={summary ? summary.distinct_colors.toLocaleString() : "—"} hint="Distinct color names" />
-              <StatCard label="Materials" value={summary ? summary.distinct_materials.toLocaleString() : "—"} hint="Distinct material names" />
-              <StatCard label="Verified photos" value={summary ? summary.slabs_with_verified_images.toLocaleString() : "—"} hint="Images confirmed OK by URL check" />
-            </section>
-
-            <div className="content-grid">
+            <div className={`gallery-layout${presentationMode ? " is-presentation" : ""}`}>
               <div className="content-main">
-                {/* Filter / search bar */}
-                <section className="filter-bar" aria-label="Filters">
-                  {/* Search input */}
-                  <div className="filter-search">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                      <circle cx="11" cy="11" r="7" />
-                      <path d="M21 21l-3.5-3.5" />
-                    </svg>
-                    <input
-                      type="search"
-                      value={searchInput}
-                      onChange={(e) => setSearchInput(e.target.value)}
-                      placeholder="Search color, material, inventory ID, rack, lot, distributor…"
-                      aria-label="Search slabs"
-                    />
-                  </div>
+                {/* Elegant control bar (hidden in presentation) */}
+                {!presentationMode ? (
+                  <section className="control-bar" aria-label="Filters">
+                    <div className="control-bar-top">
+                      <div className="filter-search">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                          <circle cx="11" cy="11" r="7" />
+                          <path d="M21 21l-3.5-3.5" />
+                        </svg>
+                        <input
+                          type="search"
+                          value={searchInput}
+                          onChange={(e) => setSearchInput(e.target.value)}
+                          placeholder="Search color, material, inventory ID, rack, lot, distributor…"
+                          aria-label="Search slabs"
+                        />
+                      </div>
 
-                  {/* Primary filters — always visible */}
-                  <div className="filter-selects">
-                    <SelectFilter label="Material" value={fMaterial} onChange={setFMaterial} options={filters?.materials} />
-                    <SelectFilter label="Color" value={fColor} onChange={setFColor} options={filters?.colors} />
-                    <SelectFilter label="Source price group" value={fPriceGroup} onChange={setFPriceGroup} options={filters?.price_groups} />
-                    <SelectFilter label="Image status" value={fImageStatus} onChange={setFImageStatus} options={filters?.image_statuses} />
-                    <button
-                      type="button"
-                      className={`btn secondary btn-sm filter-more-btn${moreFiltersOpen ? " open" : ""}`}
-                      onClick={() => setMoreFiltersOpen((o) => !o)}
-                      aria-expanded={moreFiltersOpen}
-                      aria-controls="filter-secondary"
-                    >
-                      {moreFiltersOpen ? "Fewer filters" : "More filters"}
-                      {secondaryFilterCount > 0 ? (
-                        <span className="filter-more-badge" aria-label={`${secondaryFilterCount} active`}>{secondaryFilterCount}</span>
-                      ) : null}
-                    </button>
-                  </div>
-
-                  {/* Secondary filters — thickness, rack, distributor */}
-                  {moreFiltersOpen ? (
-                    <div id="filter-secondary" className="filter-selects filter-selects-secondary">
-                      <SelectFilter label="Thickness" value={fThickness} onChange={setFThickness} options={filters?.thicknesses} />
-                      <SelectFilter label="Rack" value={fRack} onChange={setFRack} options={filters?.racks} />
-                      <SelectFilter label="Distributor" value={fDistributor} onChange={setFDistributor} options={filters?.distributors} />
+                      <div className="control-bar-actions">
+                        <label className="sort-control">
+                          <span>Sort</span>
+                          <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
+                            <option value="color">Color</option>
+                            <option value="material">Material</option>
+                            <option value="inventory_id">Inventory ID</option>
+                            <option value="rack">Rack</option>
+                            <option value="updated_at">Updated</option>
+                          </select>
+                        </label>
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          title={direction === "asc" ? "Sort ascending" : "Sort descending"}
+                          aria-label={direction === "asc" ? "Sort ascending" : "Sort descending"}
+                          onClick={() => setDirection((d) => (d === "asc" ? "desc" : "asc"))}
+                        >
+                          {direction === "asc" ? "↑" : "↓"}
+                        </button>
+                        <div className="view-toggle" role="group" aria-label="View mode">
+                          <button type="button" className={viewMode === "grid" ? "on" : ""} onClick={() => setViewMode("grid")} aria-pressed={viewMode === "grid"}>Grid</button>
+                          <button type="button" className={viewMode === "table" ? "on" : ""} onClick={() => setViewMode("table")} aria-pressed={viewMode === "table"}>List</button>
+                        </div>
+                        <button
+                          type="button"
+                          className="btn secondary btn-sm present-btn"
+                          onClick={() => setPresentationMode(true)}
+                          title="Hide operational chrome and focus on slabs"
+                        >
+                          Presentation
+                        </button>
+                      </div>
                     </div>
-                  ) : null}
 
-                  {/* Sort / view actions */}
-                  <div className="filter-actions">
-                    <label className="sort-control">
-                      <span>Sort</span>
-                      <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
-                        <option value="color">Color</option>
-                        <option value="material">Material</option>
-                        <option value="inventory_id">Inventory ID</option>
-                        <option value="rack">Rack</option>
-                        <option value="updated_at">Updated</option>
-                      </select>
-                    </label>
-                    <button
-                      type="button"
-                      className="icon-btn"
-                      title={direction === "asc" ? "Sort ascending" : "Sort descending"}
-                      aria-label={direction === "asc" ? "Sort ascending" : "Sort descending"}
-                      onClick={() => setDirection((d) => (d === "asc" ? "desc" : "asc"))}
-                    >
-                      {direction === "asc" ? "↑" : "↓"}
-                    </button>
-                    <div className="view-toggle" role="group" aria-label="View mode">
-                      <button type="button" className={viewMode === "grid" ? "on" : ""} onClick={() => setViewMode("grid")} aria-pressed={viewMode === "grid"}>Grid</button>
-                      <button type="button" className={viewMode === "table" ? "on" : ""} onClick={() => setViewMode("table")} aria-pressed={viewMode === "table"}>List</button>
-                    </div>
-                    {activeFilterCount > 0 ? (
-                      <button type="button" className="btn secondary btn-sm" onClick={resetFilters}>
-                        Clear {activeFilterCount > 1 ? `(${activeFilterCount})` : "filter"}
+                    {/* Filter pills */}
+                    <div className="filter-selects">
+                      <SelectFilter label="Material" value={fMaterial} onChange={setFMaterial} options={filters?.materials} />
+                      <SelectFilter label="Color" value={fColor} onChange={setFColor} options={filters?.colors} />
+                      <SelectFilter label="Source price group" value={fPriceGroup} onChange={setFPriceGroup} options={filters?.price_groups} />
+                      <SelectFilter label="Image status" value={fImageStatus} onChange={setFImageStatus} options={filters?.image_statuses} />
+                      <button
+                        type="button"
+                        className={`filter-more-btn${moreFiltersOpen ? " open" : ""}`}
+                        onClick={() => setMoreFiltersOpen((o) => !o)}
+                        aria-expanded={moreFiltersOpen}
+                        aria-controls="filter-secondary"
+                      >
+                        {moreFiltersOpen ? "Fewer filters" : "More filters"}
+                        {secondaryFilterCount > 0 ? (
+                          <span className="filter-more-badge" aria-label={`${secondaryFilterCount} active`}>{secondaryFilterCount}</span>
+                        ) : null}
                       </button>
+                    </div>
+
+                    {/* Secondary filters drawer */}
+                    {moreFiltersOpen ? (
+                      <div id="filter-secondary" className="filter-selects filter-selects-secondary">
+                        <SelectFilter label="Thickness" value={fThickness} onChange={setFThickness} options={filters?.thicknesses} />
+                        <SelectFilter label="Rack" value={fRack} onChange={setFRack} options={filters?.racks} />
+                        <SelectFilter label="Distributor" value={fDistributor} onChange={setFDistributor} options={filters?.distributors} />
+                      </div>
+                    ) : null}
+                  </section>
+                ) : null}
+
+                {/* Active filter chips */}
+                {activeChips.length > 0 ? (
+                  <div className="active-chips" aria-label="Active filters">
+                    {activeChips.map((c) => (
+                      <button key={c.key} type="button" className="chip" onClick={c.onClear} title="Remove filter">
+                        <span className="chip-label">{c.label}</span>
+                        <span className="chip-x" aria-hidden>×</span>
+                      </button>
+                    ))}
+                    {activeChips.length > 1 ? (
+                      <button type="button" className="chip chip-clear" onClick={resetFilters}>Clear all</button>
                     ) : null}
                   </div>
-                </section>
+                ) : null}
 
                 <div className="result-meta">
                   <span>{busy ? "Loading…" : `Showing ${rangeStart.toLocaleString()}–${rangeEnd.toLocaleString()} of ${total.toLocaleString()}`}</span>
@@ -647,14 +734,33 @@ export default function SlabInventoryApp() {
                   </span>
                 </div>
 
-                {slabs.length === 0 && !busy ? (
-                  <div className="empty-state">
-                    <p>No slabs match the current filters.</p>
-                    {activeFilterCount > 0 ? (
-                      <button type="button" className="btn secondary btn-sm" onClick={resetFilters}>Clear filters</button>
-                    ) : null}
+                {busy && slabs.length === 0 ? (
+                  <div className="slab-grid">
+                    {Array.from({ length: 8 }).map((_, i) => (
+                      <SkeletonCard key={i} />
+                    ))}
                   </div>
-                ) : viewMode === "grid" ? (
+                ) : slabs.length === 0 ? (
+                  <div className="empty-state">
+                    <div className="empty-art" aria-hidden>
+                      <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="4" width="18" height="14" rx="2" />
+                        <path d="M3 14l4.5-4.5 4 4 3-3L21 14" />
+                        <circle cx="8.5" cy="8.5" r="1.3" />
+                      </svg>
+                    </div>
+                    <p className="empty-title">No slabs match these criteria.</p>
+                    <p className="empty-sub">Try removing a filter or broaden your search.</p>
+                    <div className="empty-actions">
+                      {activeFilterCount > 0 ? (
+                        <button type="button" className="btn secondary btn-sm" onClick={resetFilters}>Clear filters</button>
+                      ) : null}
+                      {fMaterial ? (
+                        <button type="button" className="btn secondary btn-sm" onClick={() => setFMaterial("")}>Show all materials</button>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : viewMode === "grid" || presentationMode ? (
                   <div className="slab-grid">
                     {slabs.map((s, i) => (
                       <SlabCard key={s.id} slab={s} onOpen={() => openSlab(i)} />
@@ -700,92 +806,91 @@ export default function SlabInventoryApp() {
                 )}
               </div>
 
-              {/* Sync status panel */}
-              <aside className="content-side" aria-label="Sync status">
-                <div className="side-card">
-                  <h2 className="side-card-title">Sync status</h2>
-                  {summary?.last_sync ? (
-                    <>
-                      <ul className="sync-list">
-                        <li><span>Status</span><strong className={`sync-status sync-${summary.last_sync.status}`}>{summary.last_sync.status}</strong></li>
-                        <li><span>Finished</span><strong>{fmtDate(summary.last_sync.finished_at || summary.last_sync.started_at)}</strong></li>
-                        <li>
-                          <span>Latest sync</span>
-                          <strong>
-                            {summary.latest_sync_slab_count != null
-                              ? `${Number(summary.latest_sync_slab_count).toLocaleString()} slabs seen`
-                              : (summary.last_sync.slab_upserted_count != null
-                                  ? `${Number(summary.last_sync.slab_upserted_count).toLocaleString()} slabs seen`
-                                  : "—")}
-                          </strong>
-                        </li>
-                        <li>
-                          <span>Active cache</span>
-                          <strong>{(summary.active_cached_slab_count ?? summary.total_active_slabs).toLocaleString()} slabs</strong>
-                        </li>
-                        {(summary.active_not_seen_in_latest_sync_count ?? 0) > 0 ? (
+              {/* Sync / trust panel (hidden in presentation) */}
+              {!presentationMode ? (
+                <aside className="content-side" aria-label="Sync status">
+                  <div className="side-card">
+                    <h2 className="side-card-title">Inventory cache</h2>
+                    {summary?.last_sync ? (
+                      <>
+                        <ul className="sync-list">
+                          <li><span>Status</span><strong className={`sync-status sync-${summary.last_sync.status}`}>{summary.last_sync.status}</strong></li>
+                          <li><span>Last sync</span><strong>{fmtDate(summary.last_sync.finished_at || summary.last_sync.started_at)}</strong></li>
                           <li>
-                            <span>Needs review</span>
-                            <strong className="count-warn">{summary.active_not_seen_in_latest_sync_count} not seen in latest sync</strong>
+                            <span>Latest sync</span>
+                            <strong>
+                              {summary.latest_sync_slab_count != null
+                                ? `${Number(summary.latest_sync_slab_count).toLocaleString()} slabs seen`
+                                : (summary.last_sync.slab_upserted_count != null
+                                    ? `${Number(summary.last_sync.slab_upserted_count).toLocaleString()} slabs seen`
+                                    : "—")}
+                            </strong>
                           </li>
-                        ) : null}
-                        <li><span>Image rows</span><strong>{summary.last_sync.image_row_written_count ?? "—"}</strong></li>
-                        <li><span>Warnings</span><strong>{summary.last_sync.warning_count}</strong></li>
-                        <li><span>Trigger</span><strong>{summary.last_sync.triggered_by ?? "—"}</strong></li>
-                      </ul>
-
-                      {/* Not-seen coverage callout */}
-                      {(summary.active_not_seen_in_latest_sync_count ?? 0) > 0 ? (
-                        <div className="callout callout-warn" role="note">
-                          <p>
-                            <strong>{summary.active_not_seen_in_latest_sync_count}</strong> active cached{" "}
-                            {summary.active_not_seen_in_latest_sync_count === 1 ? "slab was" : "slabs were"} not seen
-                            in the latest SlabCloud sync. They are still shown because slabOS does not auto-deactivate
-                            inventory in v1.
-                          </p>
-                          {summary.active_not_seen_in_latest_sync_sample?.length ? (
-                            <ul className="not-seen-sample">
-                              {summary.active_not_seen_in_latest_sync_sample.map((row) => (
-                                <li key={row.id ?? row.inventory_id}>
-                                  <span className="not-seen-color">{row.color_name || "—"}</span>
-                                  {" · "}
-                                  <span className="not-seen-material">{row.material_name || "—"}</span>
-                                  {row.inventory_id ? (
-                                    <> · <code className="not-seen-inv">{row.inventory_id}</code></>
-                                  ) : null}
-                                </li>
-                              ))}
-                            </ul>
+                          <li>
+                            <span>Active cache</span>
+                            <strong>{(summary.active_cached_slab_count ?? summary.total_active_slabs).toLocaleString()} slabs</strong>
+                          </li>
+                          {(summary.active_not_seen_in_latest_sync_count ?? 0) > 0 ? (
+                            <li>
+                              <span>Needs review</span>
+                              <strong className="count-warn">{summary.active_not_seen_in_latest_sync_count} not seen</strong>
+                            </li>
                           ) : null}
-                        </div>
-                      ) : (
-                        <p className="callout callout-ok" role="note">
-                          All active cached slabs were seen in the latest sync.
-                        </p>
-                      )}
-                    </>
-                  ) : (
-                    <p className="muted">No sync runs recorded yet.</p>
-                  )}
-                </div>
+                          <li><span>Warnings</span><strong>{summary.last_sync.warning_count}</strong></li>
+                        </ul>
 
-                <div className="side-card">
-                  <h2 className="side-card-title">By source price group</h2>
-                  <p className="side-card-note">Imported from SlabCloud — not slabOS pricing authority.</p>
-                  {summary?.slabs_by_price_group?.length ? (
-                    <ul className="pg-list">
-                      {summary.slabs_by_price_group.map((g) => (
-                        <li key={g.price_group}>
-                          <span className="pg-badge">{g.price_group}</span>
-                          <span className="pg-count">{g.count.toLocaleString()}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="muted">—</p>
-                  )}
-                </div>
-              </aside>
+                        {(summary.active_not_seen_in_latest_sync_count ?? 0) > 0 ? (
+                          <div className="callout callout-warn" role="note">
+                            <p>
+                              <strong>{summary.active_not_seen_in_latest_sync_count}</strong> active cached{" "}
+                              {summary.active_not_seen_in_latest_sync_count === 1 ? "slab was" : "slabs were"} not seen
+                              in the latest SlabCloud sync. They are still shown because slabOS does not auto-deactivate
+                              inventory in v1.
+                            </p>
+                            {summary.active_not_seen_in_latest_sync_sample?.length ? (
+                              <ul className="not-seen-sample">
+                                {summary.active_not_seen_in_latest_sync_sample.map((row) => (
+                                  <li key={row.id ?? row.inventory_id}>
+                                    <span className="not-seen-color">{row.color_name || "—"}</span>
+                                    {" · "}
+                                    <span className="not-seen-material">{row.material_name || "—"}</span>
+                                    {row.inventory_id ? (
+                                      <> · <code className="not-seen-inv">{row.inventory_id}</code></>
+                                    ) : null}
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <p className="callout callout-ok" role="note">
+                            All active cached slabs were seen in the latest sync.
+                          </p>
+                        )}
+                      </>
+                    ) : (
+                      <p className="muted">No sync runs recorded yet.</p>
+                    )}
+                  </div>
+
+                  <div className="side-card">
+                    <h2 className="side-card-title">By source price group</h2>
+                    <p className="side-card-note">Imported from SlabCloud — not slabOS pricing authority.</p>
+                    {summary?.slabs_by_price_group?.length ? (
+                      <ul className="pg-list">
+                        {summary.slabs_by_price_group.map((g) => (
+                          <li key={g.price_group}>
+                            <span className="pg-badge">{g.price_group}</span>
+                            <span className="pg-count">{g.count.toLocaleString()}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="muted">—</p>
+                    )}
+                  </div>
+                </aside>
+              ) : null}
             </div>
           </>
         ) : null}
@@ -814,11 +919,24 @@ export default function SlabInventoryApp() {
 
 /* --------------------------------------------------------- subcomponents */
 
-function StatCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
+function Metric({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
-    <div className="stat-card" title={hint}>
-      <span className="stat-value">{value}</span>
-      <span className="stat-label">{label}</span>
+    <div className="metric" title={hint}>
+      <span className="metric-value">{value}</span>
+      <span className="metric-label">{label}</span>
+    </div>
+  );
+}
+
+function SkeletonCard() {
+  return (
+    <div className="slab-card slab-card-skeleton" aria-hidden>
+      <div className="slab-card-media skeleton-shimmer" />
+      <div className="slab-card-body">
+        <div className="skeleton-line skeleton-shimmer" style={{ width: "70%" }} />
+        <div className="skeleton-line skeleton-shimmer" style={{ width: "45%" }} />
+        <div className="skeleton-line skeleton-shimmer" style={{ width: "55%", marginTop: 6 }} />
+      </div>
     </div>
   );
 }
