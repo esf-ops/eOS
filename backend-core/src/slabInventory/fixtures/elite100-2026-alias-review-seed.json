@@ -1,0 +1,117 @@
+{
+  "_meta": {
+    "source": "Chris's first fuzzy-match review batch, 2026-06-05",
+    "collection_key": "elite100-2026",
+    "reviewed_by": "Chris",
+    "review_date": "2026-06-05",
+    "approved_count": 8,
+    "rejected_count": 2,
+    "notes": "These are the human-reviewed results from the first previewElite100Matches run. Approved candidates become slab_color_aliases rows. Rejected candidates become slab_color_program_match_reviews rows with review_status=rejected. Do not auto-activate the collection based on this file."
+  },
+
+  "approved_alias_candidates": [
+    {
+      "source_color_name": "Winter Fresh",
+      "source_material_name": "ESF Quartz",
+      "catalog_color_name": "Winterfresh",
+      "catalog_material_name": "ESF",
+      "price_group": "C",
+      "reason": "SlabCloud stores as two words 'Winter Fresh'; catalog uses 'Winterfresh'. Material 'ESF Quartz' is alias for 'ESF'.",
+      "reviewed_by": "Chris",
+      "review_status": "approved"
+    },
+    {
+      "source_color_name": "Belfast Grey",
+      "source_material_name": "Aggranite",
+      "catalog_color_name": "Belfast Gray",
+      "catalog_material_name": "Aggranite",
+      "price_group": "C",
+      "reason": "British spelling 'Grey' vs American 'Gray'. Same color, same brand.",
+      "reviewed_by": "Chris",
+      "review_status": "approved"
+    },
+    {
+      "source_color_name": "Classic Gray",
+      "source_material_name": "ESF Quartz",
+      "catalog_color_name": "Classic Grey",
+      "catalog_material_name": "ESF",
+      "price_group": "Promo",
+      "reason": "American spelling 'Gray' vs British 'Grey' in catalog. Material 'ESF Quartz' is alias for 'ESF'.",
+      "reviewed_by": "Chris",
+      "review_status": "approved"
+    },
+    {
+      "source_color_name": "Costal Tide",
+      "source_material_name": "ESF Quartz",
+      "catalog_color_name": "Coastal Tide",
+      "catalog_material_name": "ESF",
+      "price_group": "B",
+      "reason": "SlabCloud missing the 'a' in 'Coastal' → 'Costal'. Material 'ESF Quartz' is alias for 'ESF'.",
+      "reviewed_by": "Chris",
+      "review_status": "approved"
+    },
+    {
+      "source_color_name": "Regal D Oro",
+      "source_material_name": "Stratus",
+      "catalog_color_name": "Regal D'Oro",
+      "catalog_material_name": "Stratus",
+      "price_group": "B",
+      "reason": "SlabCloud drops the apostrophe: 'Regal D Oro' vs catalog 'Regal D\\'Oro'. Same color, same brand.",
+      "reviewed_by": "Chris",
+      "review_status": "approved"
+    },
+    {
+      "source_color_name": "Skys The Limit",
+      "source_material_name": "ESF Quartz",
+      "catalog_color_name": "Sky's the Limit",
+      "catalog_material_name": "ESF",
+      "price_group": "A",
+      "reason": "SlabCloud drops the apostrophe: 'Skys' vs catalog 'Sky\\'s'. Material 'ESF Quartz' is alias for 'ESF'.",
+      "reviewed_by": "Chris",
+      "review_status": "approved"
+    },
+    {
+      "source_color_name": "Larvik",
+      "source_material_name": "ESF Quartz",
+      "catalog_color_name": "Larvic",
+      "catalog_material_name": "ESF",
+      "price_group": "D",
+      "reason": "SlabCloud uses 'Larvik' (ending -k); catalog uses 'Larvic' (ending -c). Chris confirmed these are the same color. Material 'ESF Quartz' is alias for 'ESF'. Note: catalog 'Larvic' has a _review flag — Chris has now confirmed the catalog spelling is 'Larvic'.",
+      "reviewed_by": "Chris",
+      "review_status": "approved"
+    },
+    {
+      "source_color_name": "Whitendale",
+      "source_material_name": "Cambria",
+      "catalog_color_name": "Whitenedale",
+      "catalog_material_name": "Cambria",
+      "price_group": "A",
+      "reason": "SlabCloud drops an 'e': 'Whitendale' vs catalog 'Whitenedale'. Same color, same brand.",
+      "reviewed_by": "Chris",
+      "review_status": "approved"
+    }
+  ],
+
+  "rejected_fuzzy_candidates": [
+    {
+      "source_color_name": "Calacatta Athena",
+      "source_material_name": "Stratus",
+      "rejected_catalog_color_name": "Calacatta Lucent",
+      "rejected_catalog_material_name": "Stratus",
+      "price_group": "A",
+      "reason": "Fuzzy matched 'Calacatta Athena' to 'Calacatta Lucent' based on shared prefix. These are different colors — 'Athena' is not in the Elite 100. Explicitly rejected to prevent mis-classification.",
+      "reviewed_by": "Chris",
+      "review_status": "rejected"
+    },
+    {
+      "source_color_name": "Armitage",
+      "source_material_name": "Cambria",
+      "rejected_catalog_color_name": "Hermitage",
+      "rejected_catalog_material_name": "Cambria",
+      "price_group": "D",
+      "reason": "Fuzzy matched 'Armitage' to 'Hermitage' due to similar character sequence. These are different colors — 'Armitage' is not in the Elite 100. Explicitly rejected to prevent mis-classification.",
+      "reviewed_by": "Chris",
+      "review_status": "rejected"
+    }
+  ]
+}

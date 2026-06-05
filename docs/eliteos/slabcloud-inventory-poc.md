@@ -660,3 +660,91 @@ All four tables have RLS enabled with no permissive policies (service-role only)
 Each item in "The 100 Color Collection" is `"Color Name - Manufacturer/Brand"`. The left side is `color_name`; the right side is `material_name`. Do not reverse.
 
 See `FEATURE_DECISIONS.md §76` for the full decision record.
+
+---
+
+## 14. Elite 100 alias/review seed — Chris batch #1 applied
+
+### Summary
+
+Chris reviewed the first fuzzy match batch from `previewElite100Matches.js`. 8 fuzzy candidates were approved as aliases; 2 were explicitly rejected. The decisions are captured in a seed fixture and applied via a new import script.
+
+### New files
+
+| File | Purpose |
+|------|---------|
+| `backend-core/src/slabInventory/fixtures/elite100-2026-alias-review-seed.json` | Human-auditable record of 8 approved + 2 rejected decisions |
+| `backend-core/src/scripts/slabInventory/importElite100AliasReviews.js` | Dry-run script to apply aliases + rejections to Supabase |
+
+### Updated files
+
+| File | Change |
+|------|--------|
+| `backend-core/src/slabInventory/colorProgramMatching.js` | Added `matchSourceColorWithAliases`, `matchAllSourceColorsWithAliases`, `buildAliasPayload`, `buildRejectReviewPayload` |
+| `backend-core/src/scripts/slabInventory/previewElite100Matches.js` | Loads aliases + rejected reviews from Supabase when credentials available; uses alias-aware matching; prints rejected count |
+| `backend-core/src/slabInventory/colorProgramMatching.test.mjs` | 11 new test suites for alias/review logic |
+
+### Approved aliases (source SlabCloud name → catalog name)
+
+| Source | Catalog | Group | Reason |
+|--------|---------|-------|--------|
+| Winter Fresh / ESF Quartz | Winterfresh / ESF | C | Word split; material alias |
+| Belfast Grey / Aggranite | Belfast Gray / Aggranite | C | Grey vs Gray |
+| Classic Gray / ESF Quartz | Classic Grey / ESF | Promo | Gray vs Grey; material alias |
+| Costal Tide / ESF Quartz | Coastal Tide / ESF | B | Missing 'a'; material alias |
+| Regal D Oro / Stratus | Regal D'Oro / Stratus | B | Missing apostrophe |
+| Skys The Limit / ESF Quartz | Sky's the Limit / ESF | A | Missing apostrophe; material alias |
+| Larvik / ESF Quartz | Larvic / ESF | D | k→c; also confirms 'Larvic' is correct catalog spelling |
+| Whitendale / Cambria | Whitenedale / Cambria | A | Missing 'e' |
+
+### Rejected fuzzy candidates
+
+| Source | Was suggested as | Group | Reason |
+|--------|-----------------|-------|--------|
+| Calacatta Athena / Stratus | Calacatta Lucent / Stratus | A | Different colors — shared prefix only |
+| Armitage / Cambria | Hermitage / Cambria | D | Different colors — spurious fuzzy similarity |
+
+### Matching order (updated)
+
+1. **Exact** (normalized color + exact material) → approved
+2. **Material-alias** (exact color + `MATERIAL_ALIAS_GROUPS` compatible) → approved
+3. **DB alias** (Chris-approved `slab_color_aliases` exact match) → alias / approved
+4. **Fuzzy** (Levenshtein ≥ 0.75 + compatible material) → needs_review
+5. **None** → Non-Stock candidate
+
+### Safety rules (unchanged)
+
+- Fuzzy matches are **never** auto-approved as Elite 100.
+- Rejected records act as an explicit blocklist — they are moved from fuzzy to a separate "rejected" bucket in preview output.
+- Collection `is_active` is **never** changed by any import script.
+- `slab_inventory` is **never** touched.
+
+### Manual next steps for Chris
+
+```bash
+# 1. Import catalog (if not already done — Decision #76)
+ELITE100_CATALOG_WRITE_ENABLED=1 \
+SLABOS_ORGANIZATION_ID=<org> \
+SUPABASE_URL=... \
+SUPABASE_SERVICE_ROLE_KEY=... \
+npm run eos:elite100:import-catalog
+
+# 2. Import aliases + rejections
+ELITE100_ALIAS_REVIEW_WRITE_ENABLED=1 \
+SLABOS_ORGANIZATION_ID=<org> \
+SUPABASE_URL=... \
+SUPABASE_SERVICE_ROLE_KEY=... \
+npm run eos:elite100:import-alias-reviews
+
+# 3. Preview updated match counts (aliases now applied)
+SLABOS_ORGANIZATION_ID=<org> \
+SUPABASE_URL=... \
+SUPABASE_SERVICE_ROLE_KEY=... \
+npm run eos:elite100:preview-matches
+
+# 4. After reviewing the preview — manual activation only
+# UPDATE slab_color_collections SET is_active=true
+# WHERE collection_key='elite100-2026' AND organization_id='<org>';
+```
+
+See `FEATURE_DECISIONS.md §77` for the full decision record.

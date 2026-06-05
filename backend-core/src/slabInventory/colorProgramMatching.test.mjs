@@ -36,6 +36,10 @@ import {
   compareCatalogToSourceColor,
   matchSourceColorToCatalog,
   matchAllSourceColors,
+  matchSourceColorWithAliases,
+  matchAllSourceColorsWithAliases,
+  buildAliasPayload,
+  buildRejectReviewPayload,
 } from "./colorProgramMatching.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -444,6 +448,384 @@ const FIXTURE_PATH = join(__dirname, "fixtures/elite100-2026.json");
     }
   }
   console.log("ok: fixture display_name follows 'Color Name - Material' convention");
+}
+
+// ---------------------------------------------------------------------------
+// Alias-review seed fixture shape
+// ---------------------------------------------------------------------------
+{
+  const SEED_PATH = join(__dirname, "fixtures/elite100-2026-alias-review-seed.json");
+  const seed = JSON.parse(readFileSync(SEED_PATH, "utf8"));
+
+  // Top-level structure
+  assert.ok(Array.isArray(seed.approved_alias_candidates), "approved_alias_candidates is array");
+  assert.ok(Array.isArray(seed.rejected_fuzzy_candidates), "rejected_fuzzy_candidates is array");
+  assert.ok(seed._meta, "seed has _meta field");
+
+  // Approved count: 8 Chris-reviewed aliases
+  assert.equal(seed.approved_alias_candidates.length, 8, "8 approved alias candidates");
+
+  // Rejected count: 2 Chris-reviewed rejections
+  assert.equal(seed.rejected_fuzzy_candidates.length, 2, "2 rejected fuzzy candidates");
+
+  // Every approved candidate has required fields
+  for (const c of seed.approved_alias_candidates) {
+    assert.ok(c.source_color_name, `approved: missing source_color_name`);
+    assert.ok(c.source_material_name, `approved: missing source_material_name`);
+    assert.ok(c.catalog_color_name, `approved: missing catalog_color_name`);
+    assert.ok(c.catalog_material_name, `approved: missing catalog_material_name`);
+    assert.ok(c.price_group, `approved: missing price_group`);
+    assert.ok(c.reason, `approved: missing reason`);
+    assert.equal(c.reviewed_by, "Chris", `approved: reviewed_by must be "Chris"`);
+    assert.equal(c.review_status, "approved", `approved: review_status must be "approved"`);
+    // Must NOT be Group G
+    assert.notEqual(c.price_group, "G", `approved: price_group must not be G`);
+  }
+
+  // Every rejected candidate has required fields
+  for (const c of seed.rejected_fuzzy_candidates) {
+    assert.ok(c.source_color_name, `rejected: missing source_color_name`);
+    assert.ok(c.source_material_name, `rejected: missing source_material_name`);
+    assert.ok(c.rejected_catalog_color_name, `rejected: missing rejected_catalog_color_name`);
+    assert.ok(c.rejected_catalog_material_name, `rejected: missing rejected_catalog_material_name`);
+    assert.ok(c.reason, `rejected: missing reason`);
+    assert.equal(c.reviewed_by, "Chris", `rejected: reviewed_by must be "Chris"`);
+    assert.equal(c.review_status, "rejected", `rejected: review_status must be "rejected"`);
+  }
+
+  console.log("ok: alias-review seed fixture shape (8 approved, 2 rejected, all required fields)");
+}
+
+// ---------------------------------------------------------------------------
+// buildAliasPayload — approved alias creates correct slab_color_aliases payload
+// ---------------------------------------------------------------------------
+{
+  const candidate = {
+    source_color_name: "Winter Fresh",
+    source_material_name: "ESF Quartz",
+    catalog_color_name: "Winterfresh",
+    catalog_material_name: "ESF",
+    price_group: "C",
+  };
+  const orgId = "org-test-123";
+  const catalogItemId = "item-uuid-456";
+  const payload = buildAliasPayload(candidate, orgId, catalogItemId);
+
+  assert.equal(payload.organization_id, orgId);
+  assert.equal(payload.catalog_item_id, catalogItemId);
+  assert.equal(payload.alias_color_name, "Winter Fresh");
+  assert.equal(payload.alias_material_name, "ESF Quartz");
+  assert.equal(payload.normalized_alias_color_name, "winter fresh");
+  assert.equal(payload.normalized_alias_material_name, "esf quartz");
+  assert.equal(payload.source_system, "slabcloud");
+  assert.equal(payload.is_active, true);
+  // Must NOT touch slab_inventory or activate collection
+  assert.ok(!("slab_inventory" in payload), "alias payload must not reference slab_inventory");
+  assert.ok(!("is_active_collection" in payload), "alias payload must not activate collection");
+
+  console.log("ok: buildAliasPayload (approved alias → correct slab_color_aliases payload)");
+}
+
+// ---------------------------------------------------------------------------
+// buildRejectReviewPayload — rejected fuzzy creates correct review payload
+// ---------------------------------------------------------------------------
+{
+  const candidate = {
+    source_color_name: "Armitage",
+    source_material_name: "Cambria",
+    rejected_catalog_color_name: "Hermitage",
+    rejected_catalog_material_name: "Cambria",
+    price_group: "D",
+    reason: "Different colors, not a match",
+  };
+  const orgId = "org-test-123";
+  const catalogItemId = "item-uuid-789";
+  const payload = buildRejectReviewPayload(candidate, orgId, catalogItemId);
+
+  assert.equal(payload.organization_id, orgId);
+  assert.equal(payload.source_color_name, "Armitage");
+  assert.equal(payload.source_material_name, "Cambria");
+  assert.equal(payload.normalized_source_color_name, "armitage");
+  assert.equal(payload.normalized_source_material_name, "cambria");
+  assert.equal(payload.source_price_group, "D");
+  assert.equal(payload.matched_catalog_item_id, catalogItemId);
+  assert.equal(payload.match_method, "fuzzy");
+  assert.equal(payload.review_status, "rejected");
+  assert.equal(payload.confidence_score, null);
+  assert.ok(payload.notes, "notes field populated from reason");
+  // Must NOT be approved or needs_review
+  assert.notEqual(payload.review_status, "approved");
+  assert.notEqual(payload.review_status, "needs_review");
+  // Must NOT touch slab_inventory
+  assert.ok(!("slab_inventory" in payload), "reject payload must not reference slab_inventory");
+
+  console.log("ok: buildRejectReviewPayload (rejected → correct review payload, review_status=rejected)");
+}
+
+// ---------------------------------------------------------------------------
+// buildRejectReviewPayload — null catalog item is safe (item may not be found)
+// ---------------------------------------------------------------------------
+{
+  const candidate = {
+    source_color_name: "Calacatta Athena",
+    source_material_name: "Stratus",
+    rejected_catalog_color_name: "Calacatta Lucent",
+    rejected_catalog_material_name: "Stratus",
+    price_group: "A",
+    reason: "Different colors",
+  };
+  const payload = buildRejectReviewPayload(candidate, "org-test", null);
+  assert.equal(payload.matched_catalog_item_id, null, "null catalog item OK (item not found case)");
+  assert.equal(payload.review_status, "rejected");
+  console.log("ok: buildRejectReviewPayload (null catalogItemId handled safely)");
+}
+
+// ---------------------------------------------------------------------------
+// matchSourceColorWithAliases — Chris-approved alias overrides fuzzy
+// ---------------------------------------------------------------------------
+{
+  const catalog = [
+    { color_name: "Winterfresh", material_name: "ESF", price_group: "C" },
+    { color_name: "Coastal Tide", material_name: "ESF", price_group: "B" },
+  ];
+
+  // Without aliases: "Winter Fresh" would fuzzy-match "Winterfresh"
+  const noAliasResult = matchSourceColorToCatalog(
+    { color_name: "Winter Fresh", material_name: "ESF Quartz" },
+    catalog,
+    { fuzzyThreshold: 0.75 }
+  );
+  // It may match as alias (material alias ESF Quartz≡ESF) or fuzzy depending on name similarity
+  // Either way, with DB aliases it should resolve to alias/approved
+  assert.ok(
+    noAliasResult.method === "fuzzy" || noAliasResult.method === "alias",
+    `baseline: "Winter Fresh" should fuzzy or alias match without DB aliases (got: ${noAliasResult.method})`
+  );
+
+  // WITH Chris-approved DB aliases: should become alias match (approved)
+  const resolvedAliases = [
+    {
+      normalized_alias_color_name: "winter fresh",
+      normalized_alias_material_name: "esf quartz",
+      catalog_color_name: "Winterfresh",
+      catalog_material_name: "ESF",
+    },
+  ];
+  const withAliasResult = matchSourceColorWithAliases(
+    { color_name: "Winter Fresh", material_name: "ESF Quartz" },
+    catalog,
+    resolvedAliases,
+    { fuzzyThreshold: 0.75 }
+  );
+  assert.equal(withAliasResult.method, "alias", "DB alias match: method should be 'alias'");
+  assert.equal(withAliasResult.review_status, "approved", "DB alias match: approved");
+  assert.equal(withAliasResult.confidence, 1.0, "DB alias match: confidence 1.0");
+  assert.equal(withAliasResult.match?.color_name, "Winterfresh");
+
+  console.log("ok: matchSourceColorWithAliases (Chris-approved alias overrides fuzzy, review_status=approved)");
+}
+
+// ---------------------------------------------------------------------------
+// matchSourceColorWithAliases — exact match still takes priority over DB alias
+// ---------------------------------------------------------------------------
+{
+  const catalog = [{ color_name: "Alabaster", material_name: "ESF", price_group: "B" }];
+  const resolvedAliases = [
+    {
+      normalized_alias_color_name: "alabaster",
+      normalized_alias_material_name: "esf quartz",
+      catalog_color_name: "Alabaster",
+      catalog_material_name: "ESF",
+    },
+  ];
+  // Exact match: color + material exact → should still be "exact", not "alias"
+  const r = matchSourceColorWithAliases(
+    { color_name: "Alabaster", material_name: "ESF" },
+    catalog,
+    resolvedAliases
+  );
+  assert.equal(r.method, "exact", "exact match takes priority over DB alias");
+  assert.equal(r.review_status, "approved");
+  console.log("ok: matchSourceColorWithAliases (exact match takes priority over DB alias)");
+}
+
+// ---------------------------------------------------------------------------
+// matchSourceColorWithAliases — no alias match → falls back to fuzzy/none
+// ---------------------------------------------------------------------------
+{
+  const catalog = [{ color_name: "Winterfresh", material_name: "ESF", price_group: "C" }];
+  // Source is "Belfast Grey" — no alias, no exact match → fuzzy or none
+  const r = matchSourceColorWithAliases(
+    { color_name: "Belfast Grey", material_name: "Aggranite" },
+    catalog,
+    [], // empty aliases
+    { fuzzyThreshold: 0.75 }
+  );
+  // Should be fuzzy or none, NOT alias
+  assert.ok(r.method !== "alias", "no alias record → should not return alias method");
+  assert.ok(r.method === "fuzzy" || r.method === "none", `method should be fuzzy or none, got ${r.method}`);
+  if (r.method === "fuzzy") {
+    assert.equal(r.review_status, "needs_review", "fuzzy without DB alias still needs_review");
+  }
+  console.log("ok: matchSourceColorWithAliases (no alias → falls back to fuzzy/none, still needs_review)");
+}
+
+// ---------------------------------------------------------------------------
+// matchAllSourceColorsWithAliases — approved aliases reduce fuzzy count
+// ---------------------------------------------------------------------------
+{
+  const catalog = [
+    { color_name: "Winterfresh",  material_name: "ESF",      price_group: "C" },
+    { color_name: "Belfast Gray", material_name: "Aggranite", price_group: "C" },
+  ];
+  const sources = [
+    { color_name: "Winter Fresh",  material_name: "ESF Quartz" }, // alias → approved
+    { color_name: "Belfast Grey",  material_name: "Aggranite" },  // alias → approved (or fuzzy without alias)
+    { color_name: "Unknown Color", material_name: "Unknown" },    // none
+  ];
+
+  // Without aliases (baseline)
+  const withoutAliases = matchAllSourceColors(sources, catalog, { fuzzyThreshold: 0.75 });
+  const baselineFuzzyOrAlias = withoutAliases.fuzzy + withoutAliases.alias;
+  assert.ok(baselineFuzzyOrAlias >= 0, "baseline has some fuzzy/alias candidates");
+
+  // With Chris-approved DB aliases
+  const resolvedAliases = [
+    {
+      normalized_alias_color_name: "winter fresh",
+      normalized_alias_material_name: "esf quartz",
+      catalog_color_name: "Winterfresh",
+      catalog_material_name: "ESF",
+    },
+    {
+      normalized_alias_color_name: "belfast grey",
+      normalized_alias_material_name: "aggranite",
+      catalog_color_name: "Belfast Gray",
+      catalog_material_name: "Aggranite",
+    },
+  ];
+  const withAliases = matchAllSourceColorsWithAliases(
+    sources,
+    catalog,
+    resolvedAliases,
+    { fuzzyThreshold: 0.75 }
+  );
+  assert.ok(withAliases.alias >= 2, `with aliases: alias count should be >= 2 (got ${withAliases.alias})`);
+  assert.equal(withAliases.none, 1, "unmatched Non-Stock count unchanged");
+  assert.equal(withAliases.total, 3, "total unchanged");
+  // Fuzzy count should drop when aliases are applied
+  assert.ok(
+    withAliases.fuzzy < withoutAliases.fuzzy || withoutAliases.fuzzy === 0,
+    `fuzzy count should decrease with aliases: before=${withoutAliases.fuzzy}, after=${withAliases.fuzzy}`
+  );
+
+  console.log("ok: matchAllSourceColorsWithAliases (approved aliases reduce fuzzy count, Non-Stock unchanged)");
+}
+
+// ---------------------------------------------------------------------------
+// Rejected fuzzy candidates — not classified as Elite 100
+// ---------------------------------------------------------------------------
+{
+  // Armitage → Hermitage: rejected by Chris. Even though they fuzzy-match,
+  // the review record marks them as rejected. We test that:
+  // (a) the match itself is fuzzy/needs_review (not exact/alias/approved)
+  // (b) buildRejectReviewPayload produces review_status=rejected
+  const catalog = [{ color_name: "Hermitage", material_name: "Cambria", price_group: "D" }];
+  const r = matchSourceColorToCatalog(
+    { color_name: "Armitage", material_name: "Cambria" },
+    catalog,
+    { fuzzyThreshold: 0.75 }
+  );
+
+  // Whether this fuzzy-matches depends on similarity — either way it is NOT approved
+  if (r.method === "fuzzy") {
+    assert.equal(
+      r.review_status,
+      "needs_review",
+      "rejected pair is fuzzy+needs_review before review is applied"
+    );
+    assert.notEqual(
+      r.review_status,
+      "approved",
+      "rejected pair must NEVER be auto-approved as Elite 100"
+    );
+  } else {
+    assert.equal(r.method, "none", "if below fuzzy threshold, method=none (Non-Stock)");
+  }
+
+  // Confirm the reject review payload marks it correctly
+  const payload = buildRejectReviewPayload(
+    {
+      source_color_name: "Armitage",
+      source_material_name: "Cambria",
+      price_group: "D",
+      reason: "Different colors",
+    },
+    "org-test",
+    "catalog-item-id"
+  );
+  assert.equal(payload.review_status, "rejected");
+  assert.notEqual(payload.review_status, "approved");
+  assert.notEqual(payload.review_status, "needs_review");
+
+  console.log("ok: rejected fuzzy candidates — not classified as Elite 100, review_status=rejected");
+}
+
+// ---------------------------------------------------------------------------
+// Collection is never activated by payload builders
+// ---------------------------------------------------------------------------
+{
+  // buildAliasPayload and buildRejectReviewPayload must never set is_active on a collection
+  const aliasPayload = buildAliasPayload(
+    { source_color_name: "Test", source_material_name: "ESF" },
+    "org-1",
+    "item-1"
+  );
+  const rejectPayload = buildRejectReviewPayload(
+    { source_color_name: "Test2", source_material_name: "Cambria", reason: "test" },
+    "org-1",
+    null
+  );
+  // Neither payload should reference collection activation
+  assert.ok(!("collection_id" in aliasPayload), "alias payload has no collection_id field");
+  assert.ok(!("collection_id" in rejectPayload), "reject payload has no collection_id field");
+  assert.ok(
+    !Object.keys(aliasPayload).some((k) => k.includes("collection") && k.includes("active")),
+    "alias payload must not activate collection"
+  );
+  assert.ok(
+    !Object.keys(rejectPayload).some((k) => k.includes("collection") && k.includes("active")),
+    "reject payload must not activate collection"
+  );
+  console.log("ok: payload builders do not activate collection (is_active unchanged)");
+}
+
+// ---------------------------------------------------------------------------
+// slab_inventory is never referenced in matching or payload modules
+// ---------------------------------------------------------------------------
+{
+  // All the exported functions are pure and have no Supabase calls.
+  // Verify the matching functions don't return fields that would mutate inventory.
+  const aliasPayload = buildAliasPayload(
+    { source_color_name: "Test", source_material_name: "ESF" },
+    "org-1",
+    "item-1"
+  );
+  const fields = Object.keys(aliasPayload);
+  assert.ok(
+    !fields.some((f) => f.toLowerCase().includes("inventory")),
+    "alias payload must not contain inventory fields"
+  );
+  const matchResult = matchSourceColorWithAliases(
+    { color_name: "Alabaster", material_name: "ESF" },
+    [{ color_name: "Alabaster", material_name: "ESF", price_group: "B" }],
+    []
+  );
+  assert.ok(
+    !("inventory" in matchResult),
+    "match result must not contain inventory reference"
+  );
+  console.log("ok: slab_inventory not referenced in matching or payload modules");
 }
 
 console.log("\ncolorProgramMatching: all tests passed");

@@ -307,3 +307,174 @@ export function matchAllSourceColors(sourceColors, catalogItems = [], opts = {})
     results,
   };
 }
+
+// =============================================================================
+// Alias-aware matching — incorporates operator-reviewed DB alias records
+// =============================================================================
+
+/**
+ * Match a source color against catalog items, consulting operator-approved
+ * alias records before falling back to fuzzy matching.
+ *
+ * Matching order (extended):
+ *   1. exact    — normalized color name + material (unchanged)
+ *   2. alias    — normalized color name + MATERIAL_ALIAS_GROUPS compatible (unchanged)
+ *   3. db-alias — exact match against Chris-approved alias records → method="alias", approved
+ *   4. fuzzy    — Levenshtein similarity >= threshold → needs_review
+ *   5. none     — Non-Stock candidate
+ *
+ * The `resolvedAliases` array should have entries shaped as:
+ *   { normalized_alias_color_name, normalized_alias_material_name?,
+ *     catalog_color_name, catalog_material_name }
+ * The preview script populates these from slab_color_aliases + catalog join.
+ *
+ * @param {{ color_name: string, material_name?: string|null }} source
+ * @param {Array<{ color_name: string, material_name: string, price_group: string }>} catalogItems
+ * @param {Array<{ normalized_alias_color_name: string, normalized_alias_material_name?: string|null, catalog_color_name: string, catalog_material_name: string }>} resolvedAliases
+ * @param {{ fuzzyThreshold?: number }} [opts]
+ * @returns {{ match: object|null, method: string, confidence: number, review_status: string }}
+ */
+export function matchSourceColorWithAliases(
+  source,
+  catalogItems = [],
+  resolvedAliases = [],
+  opts = {}
+) {
+  // Steps 1 & 2: exact / material-alias (unchanged semantics)
+  const baseResult = matchSourceColorToCatalog(source, catalogItems, opts);
+  if (baseResult.method === "exact" || baseResult.method === "alias") {
+    return baseResult;
+  }
+
+  // Step 3: operator-approved DB alias lookup
+  const srcColorNorm = normalizeColorName(source.color_name);
+  const srcMatNorm = normalizeMaterialName(source.material_name || "");
+
+  for (const alias of Array.isArray(resolvedAliases) ? resolvedAliases : []) {
+    const aliasColorNorm =
+      alias.normalized_alias_color_name ??
+      normalizeColorName(alias.alias_color_name ?? "");
+    const aliasMatNorm =
+      alias.normalized_alias_material_name ??
+      normalizeMaterialName(alias.alias_material_name ?? "");
+
+    if (srcColorNorm !== aliasColorNorm) continue;
+    if (aliasMatNorm && !materialsCompatible(srcMatNorm, aliasMatNorm)) continue;
+
+    // Resolve the catalog item this alias points to
+    const catColorNorm = normalizeColorName(alias.catalog_color_name ?? "");
+    const catMatNorm = normalizeMaterialName(alias.catalog_material_name ?? "");
+
+    const catItem = (Array.isArray(catalogItems) ? catalogItems : []).find((c) => {
+      return (
+        normalizeColorName(c.color_name) === catColorNorm &&
+        materialsCompatible(normalizeMaterialName(c.material_name), catMatNorm)
+      );
+    });
+
+    if (catItem) {
+      return { match: catItem, method: "alias", confidence: 1.0, review_status: "approved" };
+    }
+  }
+
+  // Steps 4 & 5: fall back to fuzzy / none from baseResult
+  return baseResult;
+}
+
+/**
+ * Batch matching with operator-approved alias support.
+ * Unmatched colors (method=none) are Non-Stock candidates.
+ *
+ * @param {Array<{ color_name: string, material_name?: string|null }>} sourceColors
+ * @param {Array<object>} catalogItems
+ * @param {Array<object>} resolvedAliases
+ * @param {{ fuzzyThreshold?: number }} [opts]
+ * @returns {{ total: number, exact: number, alias: number, fuzzy: number, none: number, results: Array }}
+ */
+export function matchAllSourceColorsWithAliases(
+  sourceColors,
+  catalogItems = [],
+  resolvedAliases = [],
+  opts = {}
+) {
+  const results = [];
+  let exactCount = 0;
+  let aliasCount = 0;
+  let fuzzyCount = 0;
+  let noneCount = 0;
+
+  for (const source of Array.isArray(sourceColors) ? sourceColors : []) {
+    const r = matchSourceColorWithAliases(source, catalogItems, resolvedAliases, opts);
+    if (r.method === "exact") exactCount += 1;
+    else if (r.method === "alias") aliasCount += 1;
+    else if (r.method === "fuzzy") fuzzyCount += 1;
+    else noneCount += 1;
+    results.push({ source, ...r });
+  }
+
+  return {
+    total: results.length,
+    exact: exactCount,
+    alias: aliasCount,
+    fuzzy: fuzzyCount,
+    none: noneCount,
+    results,
+  };
+}
+
+// =============================================================================
+// Pure payload builders — used by importElite100AliasReviews.js (no Supabase)
+// =============================================================================
+
+/**
+ * Build the slab_color_aliases upsert payload for an approved alias candidate.
+ * Pure function — no Supabase calls. Exported for testing.
+ *
+ * @param {{ source_color_name: string, source_material_name?: string|null }} candidate
+ * @param {string} orgId
+ * @param {string|null} catalogItemId
+ * @returns {object}
+ */
+export function buildAliasPayload(candidate, orgId, catalogItemId) {
+  return {
+    organization_id: orgId,
+    catalog_item_id: catalogItemId ?? null,
+    alias_color_name: candidate.source_color_name,
+    alias_material_name: candidate.source_material_name || null,
+    normalized_alias_color_name: normalizeColorName(candidate.source_color_name),
+    normalized_alias_material_name: normalizeMaterialName(
+      candidate.source_material_name || ""
+    ),
+    source_system: "slabcloud",
+    is_active: true,
+  };
+}
+
+/**
+ * Build the slab_color_program_match_reviews upsert payload for a rejected
+ * fuzzy candidate. Pure function — no Supabase calls. Exported for testing.
+ *
+ * @param {{ source_color_name: string, source_material_name?: string|null, price_group?: string|null, reason?: string|null }} candidate
+ * @param {string} orgId
+ * @param {string|null} catalogItemId  UUID of the catalog item that was wrongly suggested
+ * @returns {object}
+ */
+export function buildRejectReviewPayload(candidate, orgId, catalogItemId) {
+  return {
+    organization_id: orgId,
+    source_color_name: candidate.source_color_name,
+    source_material_name: candidate.source_material_name || null,
+    normalized_source_color_name: normalizeColorName(candidate.source_color_name),
+    normalized_source_material_name: normalizeMaterialName(
+      candidate.source_material_name || ""
+    ),
+    source_price_group: candidate.price_group || null,
+    matched_catalog_item_id: catalogItemId ?? null,
+    match_method: "fuzzy",
+    confidence_score: null,
+    review_status: "rejected",
+    reviewer_user_id: null,
+    reviewed_at: null,
+    notes: candidate.reason || null,
+  };
+}

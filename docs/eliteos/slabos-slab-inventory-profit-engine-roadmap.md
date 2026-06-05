@@ -516,7 +516,28 @@ Elite 100 catalog layer is now in place. See `slabcloud-inventory-poc.md §13` a
 
 ---
 
-## 14. Do-Not-Build-Yet List
+## 14. Elite 100 alias/review seed — Chris batch #1 applied
+
+Chris reviewed the first fuzzy match batch. 8 approved as aliases; 2 explicitly rejected. See `slabcloud-inventory-poc.md §14` and `FEATURE_DECISIONS.md §77` for full details.
+
+**What was added:**
+- `elite100-2026-alias-review-seed.json`: machine-readable record of all 8 approved + 2 rejected decisions.
+- `importElite100AliasReviews.js`: dry-run-safe write-gated script that upserts `slab_color_aliases` (approved) and `slab_color_program_match_reviews` (rejected) to Supabase.
+- `colorProgramMatching.js` extended: `matchSourceColorWithAliases`, `matchAllSourceColorsWithAliases`, `buildAliasPayload`, `buildRejectReviewPayload` (all pure, testable).
+- `previewElite100Matches.js` updated: loads DB aliases and rejected reviews from Supabase; applies alias-aware matching; prints rejected-fuzzy count separately.
+- 11 new test suites (30 total passing).
+
+**Approved aliases (8):** Winter Fresh→Winterfresh, Belfast Grey→Belfast Gray, Classic Gray→Classic Grey, Costal Tide→Coastal Tide, Regal D Oro→Regal D'Oro, Skys The Limit→Sky's the Limit, Larvik→Larvic, Whitendale→Whitenedale.
+
+**Rejected (2):** Calacatta Athena (≠ Calacatta Lucent), Armitage (≠ Hermitage).
+
+**Fuzzy safety rule:** unchanged. Fuzzy matches are never auto-approved. Rejected records act as an explicit blocklist.
+
+**Collection activation:** still manual. `is_active` on `slab_color_collections` remains `false` until Chris manually activates after reviewing updated preview counts.
+
+---
+
+## 15. Do-Not-Build-Yet List
 
 The following are explicitly out of scope until the prerequisite phases are done and each item is scoped separately:
 
