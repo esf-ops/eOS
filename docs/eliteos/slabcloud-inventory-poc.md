@@ -867,3 +867,23 @@ npm run eos:test:slabcloud-v2-textures        # run unit tests (no network requi
 ### Next Step
 
 Run the diagnostic against live SlabCloud data to determine texture coverage across Elite 100 colors and Non-Stock groups. If coverage is sufficient (>60%), proceed to a SQL/cache layer to store `texture_hash` and `texture_url` on `slab_color_catalog_items` or a new join table.
+
+---
+
+## Phase 6 — Alias/Review Import Idempotency Fix (2026-06-05)
+
+**Status:** Import script hardened. No UI changes. 10 rows already live in production (manually inserted).
+
+**Root cause:** The original `importElite100AliasReviews.js` used `.upsert()` with `onConflict` field names that had no matching unique index in Supabase, causing the initial production run to fail.
+
+**Production unblock:** Chris manually inserted all 10 rows (8 approved aliases + 2 rejected fuzzy reviews) via direct SQL.
+
+**What was fixed:**
+- `importElite100AliasReviews.js` now uses **SELECT-then-INSERT** instead of `upsert`. Checks for an existing row before inserting — works on any DB schema version, no unique indexes required.
+- Two new exported async helpers: `findExistingAlias()` and `findExistingReview()`. Both handle nullable fields correctly using `.is("col", null)` instead of `.eq("col", null)`.
+- `main()` is now guarded with `process.argv[1] === __filename` so the script can be imported by tests without side effects.
+- `eliteos_slab_inventory_color_catalog.sql` adds two `UNIQUE INDEX ... NULLS NOT DISTINCT` indexes as a schema-level safety guard (PostgreSQL 15+). These are additive; the script no longer requires them.
+
+**Tests:** 13 new test suites added to `colorProgramMatching.test.mjs`. All 42 test suites pass. `eos:check:local` green.
+
+**Future annual alias imports:** Re-run `npm run eos:elite100:import-alias-reviews` with write credentials. Script is idempotent — existing rows are detected and skipped. No manual SQL needed.

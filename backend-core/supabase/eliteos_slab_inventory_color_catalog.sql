@@ -226,6 +226,36 @@ CREATE INDEX IF NOT EXISTS idx_slab_color_match_reviews_org_src_color
   ON public.slab_color_program_match_reviews (organization_id, normalized_source_color_name);
 
 -- ---------------------------------------------------------------------------
+-- Unique indexes for idempotent alias/review import
+-- These allow ON CONFLICT-based upsert AND protect against import duplicates.
+-- NULLS NOT DISTINCT: rows with the same NULLs are treated as duplicates,
+-- which is correct for import deduplication (requires PostgreSQL 15+).
+-- ---------------------------------------------------------------------------
+
+-- Alias import key: org + catalog_item + normalized alias name + system
+-- Allows safe re-import of the alias seed without creating duplicates.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_slab_color_aliases_import_key
+  ON public.slab_color_aliases (
+    organization_id,
+    catalog_item_id,
+    normalized_alias_color_name,
+    normalized_alias_material_name,
+    source_system
+  ) NULLS NOT DISTINCT;
+
+-- Review import key: org + normalized source color + method + status + matched item
+-- Allows safe re-import of rejected fuzzy reviews without creating duplicates.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_slab_color_program_match_reviews_import_key
+  ON public.slab_color_program_match_reviews (
+    organization_id,
+    normalized_source_color_name,
+    normalized_source_material_name,
+    match_method,
+    review_status,
+    matched_catalog_item_id
+  ) NULLS NOT DISTINCT;
+
+-- ---------------------------------------------------------------------------
 -- RLS — enable on all four tables; no permissive policies.
 -- Service-role access only (reads via backend-core server client).
 -- ---------------------------------------------------------------------------
@@ -243,8 +273,8 @@ COMMIT;
 -- 1. Open Supabase SQL editor for the target project.
 -- 2. Paste this entire file.
 -- 3. Verify the BEGIN / COMMIT wraps all statements.
--- 4. Run it. All CREATE TABLE statements are idempotent (IF NOT EXISTS).
--- 5. Confirm four new tables appear in the Supabase table editor.
+-- 4. Run it. All CREATE TABLE / CREATE INDEX statements are idempotent (IF NOT EXISTS).
+-- 5. Confirm four new tables and the unique indexes appear in the Supabase table editor.
 -- 6. Have Chris verify elite100-2026.json fixture transcription (see _review notes).
 -- 7. Run dry-run import:
 --      npm run eos:elite100:import-catalog
@@ -253,6 +283,19 @@ COMMIT;
 --        SLABOS_ORGANIZATION_ID=<org-uuid> \
 --        SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
 --        npm run eos:elite100:import-catalog
--- 9. Run match preview:
+-- 9. Apply approved aliases and rejected fuzzy reviews:
+--      ELITE100_ALIAS_REVIEW_WRITE_ENABLED=1 \
+--        SLABOS_ORGANIZATION_ID=<org-uuid> \
+--        SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
+--        npm run eos:elite100:import-alias-reviews
+--    (Script is idempotent — safe to re-run; existing rows are detected and skipped.)
+-- 10. Run match preview:
 --      npm run eos:elite100:preview-matches
+--
+-- NOTE (production unblock 2026-06-05):
+--   The 8 approved aliases and 2 rejected fuzzy reviews for the elite100-2026
+--   collection were manually inserted via SQL after the initial upsert-based script
+--   failed due to missing unique indexes. Future runs of importElite100AliasReviews.js
+--   use SELECT-then-INSERT and do not require the unique indexes to be present,
+--   but the unique indexes above are now part of the schema for safety.
 -- =============================================================================

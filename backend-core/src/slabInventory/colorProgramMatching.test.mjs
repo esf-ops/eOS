@@ -828,4 +828,272 @@ const FIXTURE_PATH = join(__dirname, "fixtures/elite100-2026.json");
   console.log("ok: slab_inventory not referenced in matching or payload modules");
 }
 
+// ---------------------------------------------------------------------------
+// importElite100AliasReviews — idempotency helpers (findExistingAlias / findExistingReview)
+// ---------------------------------------------------------------------------
+//
+// These tests import the helper functions directly to verify SELECT-then-INSERT
+// behavior without requiring a real Supabase instance or any unique DB indexes.
+//
+// Mock Supabase builder: records chained calls and resolves `.limit()` with a
+// preset value so we can test both "found" and "not found" paths.
+// ---------------------------------------------------------------------------
+{
+  const { findExistingAlias, findExistingReview } = await import(
+    "../scripts/slabInventory/importElite100AliasReviews.js"
+  );
+
+  // ── Mock builder ──────────────────────────────────────────────────────────
+
+  function makeMockChain(resolveWith) {
+    const calls = [];
+    const chain = {
+      _calls: calls,
+      from(t) { calls.push(["from", t]); return chain; },
+      select(c) { calls.push(["select", c]); return chain; },
+      eq(k, v) { calls.push(["eq", k, v]); return chain; },
+      is(k, v) { calls.push(["is", k, v]); return chain; },
+      limit() { return Promise.resolve(resolveWith); },
+    };
+    return chain;
+  }
+
+  // ── findExistingAlias — returns row when found ────────────────────────────
+  {
+    const existing = { id: "alias-uuid-1" };
+    const mock = makeMockChain({ data: [existing], error: null });
+    const result = await findExistingAlias(
+      mock,
+      "org-1",
+      "cat-item-1",
+      "winterfresh",
+      "esf",
+      "slabcloud"
+    );
+    assert.deepEqual(result, existing, "findExistingAlias returns row when found");
+    assert.ok(
+      mock._calls.some(([m, k]) => m === "eq" && k === "normalized_alias_color_name"),
+      "findExistingAlias queries normalized_alias_color_name"
+    );
+    assert.ok(
+      mock._calls.some(([m, k]) => m === "eq" && k === "source_system"),
+      "findExistingAlias queries source_system"
+    );
+    assert.ok(
+      !mock._calls.some(([m]) => m === "upsert"),
+      "findExistingAlias does not call upsert"
+    );
+    console.log("ok: findExistingAlias returns row when found");
+  }
+
+  // ── findExistingAlias — returns null when not found ───────────────────────
+  {
+    const mock = makeMockChain({ data: [], error: null });
+    const result = await findExistingAlias(
+      mock,
+      "org-1",
+      "cat-item-1",
+      "belfast gray",
+      "aggranite",
+      "slabcloud"
+    );
+    assert.equal(result, null, "findExistingAlias returns null when not found");
+    console.log("ok: findExistingAlias returns null when not found");
+  }
+
+  // ── findExistingAlias — null material uses IS NULL, not eq ───────────────
+  {
+    const mock = makeMockChain({ data: [], error: null });
+    await findExistingAlias(mock, "org-1", "cat-1", "color", null, "slabcloud");
+    const isNullCall = mock._calls.find(
+      ([m, k]) => m === "is" && k === "normalized_alias_material_name"
+    );
+    assert.ok(isNullCall, "null material uses .is() for IS NULL check");
+    const eqMatCall = mock._calls.find(
+      ([m, k]) => m === "eq" && k === "normalized_alias_material_name"
+    );
+    assert.ok(!eqMatCall, "null material does NOT use .eq() — avoids col=null PostgreSQL pitfall");
+    console.log("ok: findExistingAlias uses IS NULL for null material");
+  }
+
+  // ── findExistingAlias — non-null material uses eq ─────────────────────────
+  {
+    const mock = makeMockChain({ data: [], error: null });
+    await findExistingAlias(mock, "org-1", "cat-1", "color", "cambria", "slabcloud");
+    const eqMatCall = mock._calls.find(
+      ([m, k, v]) => m === "eq" && k === "normalized_alias_material_name" && v === "cambria"
+    );
+    assert.ok(eqMatCall, "non-null material uses .eq() with the normalized value");
+    console.log("ok: findExistingAlias uses .eq() for non-null material");
+  }
+
+  // ── findExistingAlias — propagates lookup errors ──────────────────────────
+  {
+    const errChain = makeMockChain({ data: null, error: { message: "connection refused" } });
+    let thrown = null;
+    try {
+      await findExistingAlias(errChain, "org-1", "cat-1", "color", "mat", "slabcloud");
+    } catch (e) {
+      thrown = e;
+    }
+    assert.ok(thrown !== null, "findExistingAlias throws when Supabase returns an error");
+    assert.ok(thrown.message.includes("connection refused"), "error message is propagated");
+    console.log("ok: findExistingAlias propagates Supabase errors");
+  }
+
+  // ── findExistingReview — returns row when found ───────────────────────────
+  {
+    const existing = { id: "review-uuid-1" };
+    const mock = makeMockChain({ data: [existing], error: null });
+    const result = await findExistingReview(
+      mock,
+      "org-1",
+      "calacatta athena",
+      "stratus",
+      "fuzzy",
+      "rejected",
+      "matched-cat-uuid-1"
+    );
+    assert.deepEqual(result, existing, "findExistingReview returns row when found");
+    assert.ok(
+      mock._calls.some(([m, k]) => m === "eq" && k === "match_method"),
+      "findExistingReview queries match_method"
+    );
+    assert.ok(
+      mock._calls.some(([m, k]) => m === "eq" && k === "review_status"),
+      "findExistingReview queries review_status"
+    );
+    assert.ok(
+      !mock._calls.some(([m]) => m === "upsert"),
+      "findExistingReview does not call upsert"
+    );
+    console.log("ok: findExistingReview returns row when found");
+  }
+
+  // ── findExistingReview — returns null when not found ─────────────────────
+  {
+    const mock = makeMockChain({ data: [], error: null });
+    const result = await findExistingReview(
+      mock,
+      "org-1",
+      "armitage",
+      "cambria",
+      "fuzzy",
+      "rejected",
+      "cat-uuid-2"
+    );
+    assert.equal(result, null, "findExistingReview returns null when not found");
+    console.log("ok: findExistingReview returns null when not found");
+  }
+
+  // ── findExistingReview — null material and null item use IS NULL ──────────
+  {
+    const mock = makeMockChain({ data: [], error: null });
+    await findExistingReview(mock, "org-1", "color", null, "fuzzy", "rejected", null);
+    const isNullMat = mock._calls.find(
+      ([m, k]) => m === "is" && k === "normalized_source_material_name"
+    );
+    assert.ok(isNullMat, "null source material uses .is() for IS NULL");
+    const isNullItem = mock._calls.find(
+      ([m, k]) => m === "is" && k === "matched_catalog_item_id"
+    );
+    assert.ok(isNullItem, "null matched_catalog_item_id uses .is() for IS NULL");
+    console.log("ok: findExistingReview uses IS NULL for null material and null catalog item");
+  }
+
+  // ── import script no longer uses onConflict / upsert for alias or reviews ─
+  {
+    const { readFileSync } = await import("node:fs");
+    const { fileURLToPath: ftu } = await import("node:url");
+    const { join: pjoin, dirname: pdir } = await import("node:path");
+    const scriptPath = pjoin(
+      pdir(ftu(import.meta.url)),
+      "../scripts/slabInventory/importElite100AliasReviews.js"
+    );
+    const src = readFileSync(scriptPath, "utf8");
+
+    // The script must NOT call .upsert( on slab_color_aliases or reviews.
+    // (dry-run calls are not Supabase calls; the only .upsert mentions are forbidden)
+    const upsertLines = src
+      .split("\n")
+      .map((line, i) => [i + 1, line])
+      .filter(([, line]) => /\.upsert\s*\(/.test(line) && !line.trimStart().startsWith("//") && !line.trimStart().startsWith("*"));
+    assert.equal(upsertLines.length, 0, `importElite100AliasReviews.js must not call .upsert() (found on lines: ${upsertLines.map(([n]) => n).join(", ")})`);
+
+    // The script must NOT reference onConflict for alias or review writes.
+    const onConflictLines = src
+      .split("\n")
+      .map((line, i) => [i + 1, line])
+      .filter(([, line]) => /onConflict/.test(line) && !line.trimStart().startsWith("//") && !line.trimStart().startsWith("*"));
+    assert.equal(onConflictLines.length, 0, `importElite100AliasReviews.js must not use onConflict (found on lines: ${onConflictLines.map(([n]) => n).join(", ")})`);
+
+    // The script must use .insert( for actual writes.
+    assert.ok(
+      src.includes(".insert(payload)"),
+      "import script must use .insert(payload) for writes"
+    );
+
+    console.log("ok: importElite100AliasReviews uses SELECT-then-INSERT, no upsert/onConflict");
+  }
+
+  // ── dry-run does not write (no Supabase client created) ──────────────────
+  {
+    // Guard: in dry-run mode the script branches before creating a Supabase client.
+    // Verify the source doesn't call createClient unconditionally at module scope.
+    const { readFileSync } = await import("node:fs");
+    const { fileURLToPath: ftu } = await import("node:url");
+    const { join: pjoin, dirname: pdir } = await import("node:path");
+    const src = readFileSync(
+      pjoin(pdir(ftu(import.meta.url)), "../scripts/slabInventory/importElite100AliasReviews.js"),
+      "utf8"
+    );
+    // createClient must be inside the !isDryRun block, not at top level.
+    // Verify the only top-level call is `import { createClient }`, not `createClient(`.
+    const topLevelCreateClient = src
+      .split("\n")
+      .filter((line) => /createClient\s*\(/.test(line) && !line.trimStart().startsWith("//") && !line.trimStart().startsWith("*"));
+    // There should be exactly one call and it should be inside an if block (guarded).
+    assert.equal(topLevelCreateClient.length, 1, "createClient() called exactly once (guarded by !isDryRun)");
+    assert.ok(
+      !src.match(/^createClient\(/m),
+      "createClient() is not called at module top level"
+    );
+    console.log("ok: dry-run does not write — createClient guarded by !isDryRun");
+  }
+
+  // ── slab_inventory table never referenced in import script ───────────────
+  {
+    const { readFileSync } = await import("node:fs");
+    const { fileURLToPath: ftu } = await import("node:url");
+    const { join: pjoin, dirname: pdir } = await import("node:path");
+    const src = readFileSync(
+      pjoin(pdir(ftu(import.meta.url)), "../scripts/slabInventory/importElite100AliasReviews.js"),
+      "utf8"
+    );
+    const invRef = src
+      .split("\n")
+      .filter((line) => /slab_inventory(?!_color)/.test(line) && !line.trimStart().startsWith("//") && !line.trimStart().startsWith("*"));
+    assert.equal(invRef.length, 0, `importElite100AliasReviews.js must not reference slab_inventory table (found: ${invRef.length} line(s))`);
+    console.log("ok: slab_inventory not referenced in importElite100AliasReviews.js");
+  }
+
+  // ── collection is_active is never set in import script ───────────────────
+  {
+    const { readFileSync } = await import("node:fs");
+    const { fileURLToPath: ftu } = await import("node:url");
+    const { join: pjoin, dirname: pdir } = await import("node:path");
+    const src = readFileSync(
+      pjoin(pdir(ftu(import.meta.url)), "../scripts/slabInventory/importElite100AliasReviews.js"),
+      "utf8"
+    );
+    const activateRef = src
+      .split("\n")
+      .filter((line) => /is_active\s*[:=]\s*true/.test(line) && !line.trimStart().startsWith("//") && !line.trimStart().startsWith("*"));
+    assert.equal(activateRef.length, 0, `importElite100AliasReviews.js must not set is_active=true (found: ${activateRef.length} line(s))`);
+    console.log("ok: importElite100AliasReviews never sets is_active=true (collection not activated)");
+  }
+
+  console.log("ok: importElite100AliasReviews idempotency helpers — all checks passed");
+}
+
 console.log("\ncolorProgramMatching: all tests passed");

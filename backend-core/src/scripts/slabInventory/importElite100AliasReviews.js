@@ -7,12 +7,17 @@
  *
  * For approved_alias_candidates:
  *   - Finds the catalog item by catalog_color_name + catalog_material_name + price_group
- *   - Upserts a slab_color_aliases row (source_system = slabcloud)
- *   - Does NOT create duplicates (conflict on normalized names + catalog_item_id)
+ *   - Inserts a slab_color_aliases row (source_system = slabcloud) if not already present
+ *   - Does NOT create duplicates — checks for existing row before inserting (SELECT-then-INSERT)
  *
  * For rejected_fuzzy_candidates:
  *   - Finds the catalog item that was wrongly suggested (rejected_catalog_*)
- *   - Upserts a slab_color_program_match_reviews row (review_status = rejected)
+ *   - Inserts a slab_color_program_match_reviews row (review_status = rejected) if not present
+ *
+ * Idempotency:
+ *   - Uses SELECT-then-INSERT instead of upsert/onConflict.
+ *   - Safe to re-run even if unique indexes are missing or were added after production setup.
+ *   - Handles nullable material fields correctly (IS NULL vs = value).
  *
  * Guards:
  *   - Never touches slab_inventory
@@ -41,7 +46,8 @@ import {
   normalizeMaterialName,
 } from "../../slabInventory/colorProgramMatching.js";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const WRITE_ENABLED =
   process.env.ELITE100_ALIAS_REVIEW_WRITE_ENABLED === "1";
@@ -68,6 +74,96 @@ function loadSeed(seedPath) {
     ? raw.rejected_fuzzy_candidates
     : [];
   return { approved, rejected };
+}
+
+// ---------------------------------------------------------------------------
+// Idempotency helpers — exported for unit testing
+// ---------------------------------------------------------------------------
+
+/**
+ * Find an existing alias row using the logical import key.
+ * Handles nullable normalized_alias_material_name correctly.
+ *
+ * @param {object} supabase  Supabase client (or mock)
+ * @param {string} orgId
+ * @param {string} catalogItemId
+ * @param {string} normColor   normalized_alias_color_name
+ * @param {string|null} normMaterial  normalized_alias_material_name (may be null)
+ * @param {string} sourceSystem  e.g. "slabcloud"
+ * @returns {Promise<{id: string}|null>} existing row or null
+ */
+export async function findExistingAlias(
+  supabase,
+  orgId,
+  catalogItemId,
+  normColor,
+  normMaterial,
+  sourceSystem
+) {
+  let q = supabase
+    .from("slab_color_aliases")
+    .select("id")
+    .eq("organization_id", orgId)
+    .eq("catalog_item_id", catalogItemId)
+    .eq("normalized_alias_color_name", normColor)
+    .eq("source_system", sourceSystem);
+
+  if (normMaterial != null && normMaterial !== "") {
+    q = q.eq("normalized_alias_material_name", normMaterial);
+  } else {
+    q = q.is("normalized_alias_material_name", null);
+  }
+
+  const { data, error } = await q.limit(1);
+  if (error) throw new Error(`Alias lookup error: ${error.message}`);
+  return data?.[0] ?? null;
+}
+
+/**
+ * Find an existing review row using the logical import key.
+ * Handles nullable normalized_source_material_name and matched_catalog_item_id.
+ *
+ * @param {object} supabase  Supabase client (or mock)
+ * @param {string} orgId
+ * @param {string} normColor   normalized_source_color_name
+ * @param {string|null} normMaterial  normalized_source_material_name (may be null)
+ * @param {string} matchMethod  e.g. "fuzzy"
+ * @param {string} reviewStatus  e.g. "rejected"
+ * @param {string|null} matchedCatalogItemId  (may be null)
+ * @returns {Promise<{id: string}|null>} existing row or null
+ */
+export async function findExistingReview(
+  supabase,
+  orgId,
+  normColor,
+  normMaterial,
+  matchMethod,
+  reviewStatus,
+  matchedCatalogItemId
+) {
+  let q = supabase
+    .from("slab_color_program_match_reviews")
+    .select("id")
+    .eq("organization_id", orgId)
+    .eq("normalized_source_color_name", normColor)
+    .eq("match_method", matchMethod)
+    .eq("review_status", reviewStatus);
+
+  if (normMaterial != null && normMaterial !== "") {
+    q = q.eq("normalized_source_material_name", normMaterial);
+  } else {
+    q = q.is("normalized_source_material_name", null);
+  }
+
+  if (matchedCatalogItemId != null) {
+    q = q.eq("matched_catalog_item_id", matchedCatalogItemId);
+  } else {
+    q = q.is("matched_catalog_item_id", null);
+  }
+
+  const { data, error } = await q.limit(1);
+  if (error) throw new Error(`Review lookup error: ${error.message}`);
+  return data?.[0] ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -118,7 +214,7 @@ async function findCollectionId(supabase, orgId, collectionKey) {
 }
 
 // ---------------------------------------------------------------------------
-// Apply approved aliases
+// Apply approved aliases — SELECT-then-INSERT (idempotent, no ON CONFLICT needed)
 // ---------------------------------------------------------------------------
 
 async function applyApprovedAliases(
@@ -160,22 +256,47 @@ async function applyApprovedAliases(
       continue;
     }
 
+    // SELECT-then-INSERT: check for existing row before inserting.
+    // Does not require a unique index on the DB — works on any schema version.
+    let existing;
+    try {
+      existing = await findExistingAlias(
+        supabase,
+        orgId,
+        catalogItemId,
+        payload.normalized_alias_color_name,
+        payload.normalized_alias_material_name ?? null,
+        payload.source_system
+      );
+    } catch (lookupErr) {
+      console.warn(
+        `  WARN: alias existence check failed for "${candidate.source_color_name}": ${lookupErr.message}`
+      );
+      skipCount += 1;
+      continue;
+    }
+
+    if (existing) {
+      console.log(
+        `  SKIP (already exists): alias "${candidate.source_color_name} - ${candidate.source_material_name}"` +
+          ` → "${candidate.catalog_color_name} - ${candidate.catalog_material_name}" [id=${existing.id}]`
+      );
+      skipCount += 1;
+      continue;
+    }
+
     const { error } = await supabase
       .from("slab_color_aliases")
-      .upsert(payload, {
-        onConflict:
-          "organization_id,catalog_item_id,normalized_alias_color_name,normalized_alias_material_name",
-        ignoreDuplicates: false,
-      });
+      .insert(payload);
 
     if (error) {
       console.warn(
-        `  WARN: alias upsert failed for "${candidate.source_color_name}": ${error.message}`
+        `  WARN: alias insert failed for "${candidate.source_color_name}": ${error.message}`
       );
       skipCount += 1;
     } else {
       console.log(
-        `  OK: alias upserted — "${candidate.source_color_name} - ${candidate.source_material_name}"` +
+        `  OK: alias inserted — "${candidate.source_color_name} - ${candidate.source_material_name}"` +
           ` → "${candidate.catalog_color_name} - ${candidate.catalog_material_name}" [${candidate.price_group}]`
       );
       successCount += 1;
@@ -186,7 +307,7 @@ async function applyApprovedAliases(
 }
 
 // ---------------------------------------------------------------------------
-// Apply rejected fuzzy reviews
+// Apply rejected fuzzy reviews — SELECT-then-INSERT (idempotent, no ON CONFLICT needed)
 // ---------------------------------------------------------------------------
 
 async function applyRejectedReviews(
@@ -229,22 +350,47 @@ async function applyRejectedReviews(
       continue;
     }
 
+    // SELECT-then-INSERT: check for existing row before inserting.
+    let existing;
+    try {
+      existing = await findExistingReview(
+        supabase,
+        orgId,
+        payload.normalized_source_color_name,
+        payload.normalized_source_material_name ?? null,
+        payload.match_method,
+        payload.review_status,
+        payload.matched_catalog_item_id ?? null
+      );
+    } catch (lookupErr) {
+      console.warn(
+        `  WARN: review existence check failed for "${candidate.source_color_name}": ${lookupErr.message}`
+      );
+      skipCount += 1;
+      continue;
+    }
+
+    if (existing) {
+      console.log(
+        `  SKIP (already exists): reject review "${candidate.source_color_name} - ${candidate.source_material_name}"` +
+          ` ✗ "${candidate.rejected_catalog_color_name}" [id=${existing.id}]`
+      );
+      skipCount += 1;
+      continue;
+    }
+
     const { error } = await supabase
       .from("slab_color_program_match_reviews")
-      .upsert(payload, {
-        onConflict:
-          "organization_id,normalized_source_color_name,normalized_source_material_name,matched_catalog_item_id",
-        ignoreDuplicates: false,
-      });
+      .insert(payload);
 
     if (error) {
       console.warn(
-        `  WARN: reject review upsert failed for "${candidate.source_color_name}": ${error.message}`
+        `  WARN: reject review insert failed for "${candidate.source_color_name}": ${error.message}`
       );
       skipCount += 1;
     } else {
       console.log(
-        `  OK: reject review upserted — "${candidate.source_color_name} - ${candidate.source_material_name}"` +
+        `  OK: reject review inserted — "${candidate.source_color_name} - ${candidate.source_material_name}"` +
           ` ✗ "${candidate.rejected_catalog_color_name}" [rejected]`
       );
       successCount += 1;
@@ -409,7 +555,10 @@ async function main() {
   }
 }
 
-main().catch((e) => {
-  console.error("Unhandled error:", e);
-  process.exit(1);
-});
+// Guard: only run main() when executed directly, not when imported by tests.
+if (process.argv[1] === __filename) {
+  main().catch((e) => {
+    console.error("Unhandled error:", e);
+    process.exit(1);
+  });
+}

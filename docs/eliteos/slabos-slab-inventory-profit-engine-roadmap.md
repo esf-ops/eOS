@@ -611,3 +611,23 @@ The following are explicitly out of scope until the prerequisite phases are done
 3. Initials placeholder
 
 **Next:** Run diagnostic live. If texture coverage is sufficient, build SQL/cache layer to store texture hashes against `slab_color_catalog_items`, then enrich Elite 100 API response with texture URLs.
+
+---
+
+### Phase 16 — Alias/Review Import Idempotency Fix (2026-06-05)
+
+**Status:** Import script hardened. No UI changes. 10 rows already live in production (manually inserted).
+
+**Root cause:** `importElite100AliasReviews.js` called `.upsert()` with `onConflict` field names that had no matching unique index in Supabase. Supabase returned "there is no unique or exclusion constraint matching the ON CONFLICT specification."
+
+**Production unblock:** Chris manually inserted all 10 rows (8 approved aliases + 2 rejected fuzzy reviews) via direct SQL.
+
+**What was built:**
+- `importElite100AliasReviews.js` refactored to use **SELECT-then-INSERT**: checks for an existing row before inserting. No `upsert`/`onConflict` anywhere. Handles nullable fields with `.is("col", null)`.
+- New exported helpers: `findExistingAlias()` and `findExistingReview()` — async, injectable, testable.
+- `main()` guarded with `process.argv[1] === __filename` so tests can import helpers without running the script.
+- `eliteos_slab_inventory_color_catalog.sql`: two new `UNIQUE INDEX ... NULLS NOT DISTINCT` (PostgreSQL 15+) indexes as schema-level safety guards. Additive — not required by the script.
+
+**Tests:** 13 new test suites in `colorProgramMatching.test.mjs`. All 42 pass. `eos:check:local` green.
+
+**Future annual Elite 100 alias batches:** Use the script. It is now safe to re-run at any time — existing rows are detected and skipped. No manual SQL needed.

@@ -1101,3 +1101,23 @@
 | **What is NOT built** | Texture hash storage in Supabase. Elite 100 API texture enrichment. UI changes. Any image verification or download. |
 | **Next step** | Run `npm run eos:slabcloud:v2-texture-diagnostic` with live credentials to assess texture coverage. If coverage > 60%, proceed to SQL/cache layer (new column or join table on `slab_color_catalog_items`) and enrich `GET /api/slab-inventory/elite100-programs` response with texture URLs. |
 | **Revisit trigger** | After live diagnostic run reveals texture coverage numbers; before Elite 100 card imagery upgrade. |
+
+---
+
+### 80. Elite 100 Alias/Review Import — Idempotency Fix (2026-06-05)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-06-05 |
+| **Decision** | Fixed the Elite 100 alias/review import script to be fully idempotent without relying on Supabase `upsert` / `ON CONFLICT` constraints. Production was manually unblocked; the script and SQL schema are now both durable for future annual alias batches. |
+| **Root cause** | `importElite100AliasReviews.js` called `.upsert(payload, { onConflict: "..." })` but `slab_color_aliases` and `slab_color_program_match_reviews` had no unique indexes matching the ON CONFLICT spec. Supabase rejected with "there is no unique or exclusion constraint matching the ON CONFLICT specification." |
+| **Production unblock (manual)** | Chris manually inserted the 8 approved alias rows and 2 rejected review rows via direct SQL to unblock production. The 10 rows are live. |
+| **Import script fix** | Replaced `upsert` / `onConflict` with a **SELECT-then-INSERT** pattern. For each alias/review candidate: (1) query for an existing row using the logical uniqueness key; (2) if found, log "SKIP (already exists)" and move on; (3) if not found, `.insert(payload)`. This approach works on any DB schema version, even without the new unique indexes. Nullable fields (`normalized_alias_material_name`, `matched_catalog_item_id`) use `.is("col", null)` instead of `.eq("col", null)` to avoid the PostgreSQL `col = NULL` vs `col IS NULL` pitfall. |
+| **New exported helpers** | `findExistingAlias(supabase, orgId, catalogItemId, normColor, normMaterial, sourceSystem)` and `findExistingReview(supabase, orgId, normColor, normMaterial, matchMethod, reviewStatus, matchedCatalogItemId)` — both async, both exported, both injectable for testing without mocking the entire Supabase module. |
+| **SQL schema additions** | `eliteos_slab_inventory_color_catalog.sql` now includes two idempotent unique indexes: `uq_slab_color_aliases_import_key` (org + catalog_item + norm color + norm material + source_system, NULLS NOT DISTINCT) and `uq_slab_color_program_match_reviews_import_key` (org + norm source color + norm source material + match_method + review_status + matched_catalog_item_id, NULLS NOT DISTINCT). These are safety guards — the script no longer requires them. |
+| **Unique index design** | `NULLS NOT DISTINCT` (PostgreSQL 15+) ensures two rows with the same NULL-bearing key are treated as duplicates, which is correct behavior for import deduplication. |
+| **Tests added** | 13 new test cases in `colorProgramMatching.test.mjs`: `findExistingAlias` returns row when found; returns null when not found; uses `.is()` for null material; uses `.eq()` for non-null material; propagates Supabase errors. `findExistingReview` returns row when found; returns null when not found; uses `.is()` for null material and null catalog item. Source code scan: no `.upsert(` or `onConflict` in import script; import script uses `.insert(payload)`; `createClient()` guarded by `!isDryRun`; `slab_inventory` not referenced; `is_active=true` never set. All 42 test suites pass (was 29). `eos:check:local` green. |
+| **Future annual imports** | Use the script, not manual SQL. Run: `ELITE100_ALIAS_REVIEW_WRITE_ENABLED=1 SLABOS_ORGANIZATION_ID=<org> SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... npm run eos:elite100:import-alias-reviews`. The script is safe to re-run — existing rows are detected and skipped. |
+| **What is NOT changed** | App UI. Elite 100 carousel behavior. Non-Stock tab. Texture diagnostic logic. Collection `is_active`. `slab_inventory` table. Group G. |
+| **Impacted files** | `backend-core/src/scripts/slabInventory/importElite100AliasReviews.js` (SELECT-then-INSERT, exported helpers, main() guard), `backend-core/supabase/eliteos_slab_inventory_color_catalog.sql` (2 unique indexes + updated apply steps), `backend-core/src/slabInventory/colorProgramMatching.test.mjs` (13 new test suites), docs (this entry). |
+| **Revisit trigger** | Annual Elite 100 refresh when Chris reviews a new alias batch. |
