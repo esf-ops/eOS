@@ -467,15 +467,75 @@ SLABCLOUD_CACHE_WRITE_ENABLED=1 \
 
 ---
 
+## 11c. Typed full-inventory sync — Slab + Remnant lanes (2026-06-05)
+
+**Status:** Typed mode built · dry-run confirmed · zero overlap found · capped write smoke is next.
+
+### Why typed
+
+| Scope | Rows | Type known? |
+|-------|------|-------------|
+| `slab` | ~145 summary / ~401 with details | Yes — Slab |
+| `remnant` | ~689 summary / ~1,278 with details | Yes — Remnant |
+| `all` | ~742 summary / ~1,683 with details | **No** — bare endpoint has no Type field |
+| `typed` | Two fetches merged — **1,679 total** | **Yes — each row tagged Slab or Remnant** |
+
+The future Slab Inventory color modal needs tabs (All / Full slabs / Remnants). This requires typed inventory rows. `typed` is the preferred production scope.
+
+### Typed dry-run results (ESF / kbyd, 2026-06-05)
+
+```
+Slab lane:    401 records (via ?type=Slab&edges=true + detail fetches)
+Remnant lane: 1,278 records (via ?type=Remnant&edges=true + detail fetches)
+Total:        1,679 normalized records
+Distinct SlabIDs: 1,679
+Overlap across lanes: NONE (clean — safe to write)
+Distinct colors: 740   Distinct materials: 44   Warnings: 0
+```
+
+### Overlap safety rule
+
+Write-enabled typed sync **aborts before any DB write** if any `external_slab_id` appears in both the Slab and Remnant lane responses. The error carries the full `overlapResult` for diagnosis. Dry-run proceeds with a warning instead.
+
+**ESF / kbyd confirmed clean:** No overlapping physical SlabIDs exist across lanes.
+
+### Dry-run command
+
+```bash
+SLABCLOUD_INVENTORY_SCOPE=typed \
+  SLABCLOUD_API_COMPANY_CODE=kbyd \
+  SLABCLOUD_ASSET_COMPANY_CODE=kbyd \
+  SLABCLOUD_PUBLIC_SLUG=esf \
+  npm run eos:slabcloud:cache
+```
+
+### Future capped write-enabled typed smoke (do not run until review complete)
+
+```bash
+SLABCLOUD_CACHE_WRITE_ENABLED=1 \
+  SLABCLOUD_ORGANIZATION_ID=<org-uuid> \
+  SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
+  SLABCLOUD_INVENTORY_SCOPE=typed \
+  SLABCLOUD_API_COMPANY_CODE=kbyd \
+  SLABCLOUD_ASSET_COMPANY_CODE=kbyd \
+  SLABCLOUD_PUBLIC_SLUG=esf \
+  SLABCLOUD_MAX_DETAILS=20 \
+  npm run eos:slabcloud:cache
+```
+
+---
+
 ## 11. Future path
 
-Dry-run reviewed · SlabCloud verbal approval received · SQL applied · persistence built (write-gated) · full inventory scope upgrade built (SQL draft pending apply). Next steps:
+Dry-run reviewed · SlabCloud verbal approval received · SQL applied · persistence built (write-gated) · all-scope + typed sync built. Next steps:
 
-1. Apply `backend-core/supabase/eliteos_slabcloud_inventory_scope_upgrade.sql` in Supabase SQL editor.
-2. Run all-scope dry-run: `SLABCLOUD_INVENTORY_SCOPE=all ... npm run eos:slabcloud:cache` — verify ~742 records.
-3. Run capped write-enabled all-scope smoke (see command above). Review output.
-4. Obtain SlabCloud **written confirmation** of API use before any scheduled production sync.
-5. Update `app-slab-inventory` UI to expose Remnant filter.
+1. ~~Apply `backend-core/supabase/eliteos_slabcloud_inventory_scope_upgrade.sql`~~ — **done**.
+2. ~~Run all-scope dry-run~~ — done (742 records).
+3. Run capped write-enabled **typed** smoke (1,679 records, zero overlap confirmed). See §11c.
+4. After typed write smoke passes, run full typed write without `SLABCLOUD_MAX_DETAILS` cap.
+5. Obtain SlabCloud **written confirmation** of API use before any scheduled production sync.
+6. Update `app-slab-inventory` API to filter by `source_inventory_type`; update UI for Remnant tab.
+7. Plan Elite 100 / Non-Stock tab scoping once typed inventory is in production.
 
 A real head must use **backend-owned cached data**, **never** direct browser calls to SlabCloud.
 

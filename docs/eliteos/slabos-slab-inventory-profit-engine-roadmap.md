@@ -458,21 +458,23 @@ cat debug/slabcloud/slabcloud-manager-scope-diagnostic.json
 - Q14 (resolved): `type=Full Slab` and `type=All` return 0 rows. The full catalog comes from the bare endpoint with no type param.
 - Q2 (resolved): API company code is confirmed `kbyd`. Public slug is `esf`. These are now tracked as separate config concepts.
 
-**Next manual step:** Apply SQL migration in Supabase, then run capped write-enabled all-scope smoke:
+**Next manual step:** SQL migration already applied. Run capped write-enabled **typed** smoke (preferred over all-scope, because typed gives source_inventory_type on every row):
 
 ```bash
-# Dry-run all-scope (safe)
-SLABCLOUD_INVENTORY_SCOPE=all SLABCLOUD_API_COMPANY_CODE=kbyd \
+# Dry-run typed (confirmed: 401 Slab + 1,278 Remnant = 1,679 records, zero overlap)
+SLABCLOUD_INVENTORY_SCOPE=typed SLABCLOUD_API_COMPANY_CODE=kbyd \
   SLABCLOUD_ASSET_COMPANY_CODE=kbyd SLABCLOUD_PUBLIC_SLUG=esf \
   npm run eos:slabcloud:cache
 
-# Capped write-enabled smoke (after SQL applied + review)
+# Capped write-enabled typed smoke (run after reviewing dry-run output)
 SLABCLOUD_CACHE_WRITE_ENABLED=1 SLABCLOUD_ORGANIZATION_ID=<org-uuid> \
   SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
-  SLABCLOUD_INVENTORY_SCOPE=all SLABCLOUD_API_COMPANY_CODE=kbyd \
+  SLABCLOUD_INVENTORY_SCOPE=typed SLABCLOUD_API_COMPANY_CODE=kbyd \
   SLABCLOUD_ASSET_COMPANY_CODE=kbyd SLABCLOUD_PUBLIC_SLUG=esf \
   SLABCLOUD_MAX_DETAILS=20 npm run eos:slabcloud:cache
 ```
+
+**Why typed over all:** `typed` tags every row as Slab or Remnant. `all` (bare endpoint) gives more records but no type. Use `typed` for production.
 
 ---
 

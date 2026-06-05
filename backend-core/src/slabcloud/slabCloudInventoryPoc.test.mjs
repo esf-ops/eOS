@@ -29,7 +29,10 @@ import {
   INVENTORY_SCOPE_ALL,
   INVENTORY_SCOPE_SLAB,
   INVENTORY_SCOPE_REMNANT,
+  INVENTORY_SCOPE_TYPED,
 } from "./slabCloudClient.js";
+
+import { detectSlabIdOverlap, runSlabCloudInventorySync } from "./slabCloudSync.js";
 
 // Sample detail record from the SlabCloud manager page (ESF / company "kbyd").
 const SAMPLE = {
@@ -256,13 +259,16 @@ const SAMPLE = {
   assert.equal(scopeToInventoryType(INVENTORY_SCOPE_SLAB), "Slab", "slab scope → Slab");
   assert.equal(scopeToInventoryType(INVENTORY_SCOPE_REMNANT), "Remnant", "remnant scope → Remnant");
   assert.equal(scopeToInventoryType(INVENTORY_SCOPE_ALL), null, "all scope → null (no type param)");
+  assert.equal(scopeToInventoryType(INVENTORY_SCOPE_TYPED), "Slab", "typed scope → Slab (safe URL fallback)");
   assert.equal(scopeToInventoryType("slab"), "Slab", "string 'slab' → Slab");
   assert.equal(scopeToInventoryType("remnant"), "Remnant", "string 'remnant' → Remnant");
   assert.equal(scopeToInventoryType("all"), null, "string 'all' → null");
+  assert.equal(scopeToInventoryType("typed"), "Slab", "string 'typed' → Slab (safe URL fallback)");
   assert.equal(scopeToInventoryType(null), "Slab", "null → Slab (safe default)");
   assert.equal(scopeToInventoryType(undefined), "Slab", "undefined → Slab (safe default)");
   assert.equal(scopeToInventoryType("unknown"), "Slab", "unknown → Slab (safe default)");
-  console.log("ok: scopeToInventoryType");
+  assert.equal(INVENTORY_SCOPE_TYPED, "typed", "INVENTORY_SCOPE_TYPED constant value");
+  console.log("ok: scopeToInventoryType + INVENTORY_SCOPE_TYPED");
 }
 
 // ── buildClientConfig scope + multi-code support ─────────────────────────────
@@ -396,6 +402,197 @@ const SAMPLE = {
   assert.deepEqual(out, [2, 4, 6, 8, 10], "order preserved");
   assert.deepEqual(await mapWithConcurrency([], 2, async (n) => n), [], "empty input");
   console.log("ok: mapWithConcurrency");
+}
+
+// ── detectSlabIdOverlap — pure overlap detection ──────────────────────────────
+{
+  const SLAB_UUID = "437d9ca4-76b0-453b-bde9-9007ffc44c5a";
+  const REMNANT_UUID = "b2222222-0000-0000-0000-000000000002";
+  const SHARED_UUID = "cccccccc-0000-0000-0000-000000000003";
+
+  const slabRecs = normalizeSlabRecords(
+    [
+      { ...SAMPLE, SlabID: SLAB_UUID },
+      { ...SAMPLE, SlabID: SHARED_UUID },
+    ],
+    { companyCode: "kbyd", inventoryType: "Slab", inventoryScope: "typed" }
+  );
+  const remnantRecs = normalizeSlabRecords(
+    [
+      { ...SAMPLE, SlabID: REMNANT_UUID },
+      { ...SAMPLE, SlabID: SHARED_UUID }, // same ID in both lanes → overlap
+    ],
+    { companyCode: "kbyd", inventoryType: "Remnant", inventoryScope: "typed" }
+  );
+
+  // Case: overlap exists (1 duplicate)
+  const result = detectSlabIdOverlap(slabRecs, remnantRecs);
+  assert.equal(result.typed_slab_record_count, 2, "slab lane count");
+  assert.equal(result.typed_remnant_record_count, 2, "remnant lane count");
+  assert.equal(result.typed_combined_record_count, 4, "combined count");
+  assert.equal(result.typed_distinct_slab_id_count, 3, "3 distinct IDs (slab, remnant, shared)");
+  assert.equal(result.typed_duplicate_slab_id_count, 1, "1 duplicate");
+  assert.deepEqual(result.typed_duplicate_slab_id_sample, [SHARED_UUID], "duplicate sample");
+
+  // Case: no overlap
+  const clean = detectSlabIdOverlap(
+    normalizeSlabRecords([{ ...SAMPLE, SlabID: "aaa" }], { companyCode: "kbyd" }),
+    normalizeSlabRecords([{ ...SAMPLE, SlabID: "bbb" }], { companyCode: "kbyd" })
+  );
+  assert.equal(clean.typed_duplicate_slab_id_count, 0, "no duplicates");
+  assert.equal(clean.typed_distinct_slab_id_count, 2, "2 distinct IDs");
+
+  // Case: case-insensitive comparison (SlabIDs are UUIDs with variable casing)
+  const upperSlabRecs = normalizeSlabRecords(
+    [{ ...SAMPLE, SlabID: "AAAA0000-0000-0000-0000-000000000001" }],
+    { companyCode: "kbyd" }
+  );
+  const lowerRemRecs = normalizeSlabRecords(
+    [{ ...SAMPLE, SlabID: "aaaa0000-0000-0000-0000-000000000001" }],
+    { companyCode: "kbyd" }
+  );
+  const caseResult = detectSlabIdOverlap(upperSlabRecs, lowerRemRecs);
+  assert.equal(caseResult.typed_duplicate_slab_id_count, 1, "case-insensitive overlap detected");
+
+  // Case: empty inputs are safe
+  const emptyResult = detectSlabIdOverlap([], []);
+  assert.equal(emptyResult.typed_slab_record_count, 0, "empty slab");
+  assert.equal(emptyResult.typed_remnant_record_count, 0, "empty remnant");
+  assert.equal(emptyResult.typed_duplicate_slab_id_count, 0, "no overlap on empty");
+  assert.equal(emptyResult.typed_distinct_slab_id_count, 0, "0 distinct IDs on empty");
+
+  // Non-array inputs are handled defensively
+  const nullResult = detectSlabIdOverlap(null, undefined);
+  assert.equal(nullResult.typed_duplicate_slab_id_count, 0, "null/undefined inputs safe");
+
+  // Sample capped at 10
+  const manySlabRecs = normalizeSlabRecords(
+    Array.from({ length: 15 }, (_, i) => ({ ...SAMPLE, SlabID: `id-${i}` })),
+    { companyCode: "kbyd" }
+  );
+  const manyRemRecs = normalizeSlabRecords(
+    Array.from({ length: 15 }, (_, i) => ({ ...SAMPLE, SlabID: `id-${i}` })),
+    { companyCode: "kbyd" }
+  );
+  const manyResult = detectSlabIdOverlap(manySlabRecs, manyRemRecs);
+  assert.equal(manyResult.typed_duplicate_slab_id_count, 15, "all 15 duplicated");
+  assert.equal(manyResult.typed_duplicate_slab_id_sample.length, 10, "sample capped at 10");
+
+  console.log("ok: detectSlabIdOverlap");
+}
+
+// ── runSlabCloudInventorySync typed mode — dry-run, no overlap ────────────────
+{
+  const SLAB_RAW = [
+    { SlabID: "SLAB-0001", Name: "Alabaster", Material: "Quartz", Price_Group: "B",
+      Width_Actual: "2.0", Length_Actual: "3.0", count: 2 },
+  ];
+  const REMNANT_RAW = [
+    { SlabID: "REMNANT-0001", Name: "Alabaster", Material: "Quartz", Price_Group: "B",
+      Width_Actual: "1.0", Length_Actual: "1.5", count: 1 },
+  ];
+
+  const slabSummaryCallTypes = [];
+  const mockFetchSlabSummary = async (cfg) => {
+    slabSummaryCallTypes.push(cfg.type);
+    if (cfg.type === "Slab") return SLAB_RAW;
+    if (cfg.type === "Remnant") return REMNANT_RAW;
+    return [];
+  };
+
+  const result = await runSlabCloudInventorySync({
+    config: buildClientConfig({
+      companyCode: "kbyd",
+      apiCompanyCode: "kbyd",
+      assetCompanyCode: "kbyd",
+      publicSlug: "esf",
+      inventoryScope: "typed",
+    }),
+    fetchDetails: false,
+    writeEnabled: false,
+    fetchers: {
+      fetchMaterials: async () => [],
+      fetchSlabSummary: mockFetchSlabSummary,
+      fetchSlabDetail: async () => [],
+    },
+  });
+
+  // Both lanes were fetched
+  assert.ok(slabSummaryCallTypes.includes("Slab"), "typed mode fetched Slab lane");
+  assert.ok(slabSummaryCallTypes.includes("Remnant"), "typed mode fetched Remnant lane");
+  assert.equal(slabSummaryCallTypes.length, 2, "exactly 2 summary fetches");
+
+  // Combined normalized count
+  assert.equal(result.normalizedCount, 2, "1 slab + 1 remnant = 2 normalized");
+  assert.equal(result.inventoryScope, "typed", "inventoryScope=typed in result");
+
+  // Type breakdown
+  assert.equal(result.typeBreakdown.Slab, 1, "1 Slab in breakdown");
+  assert.equal(result.typeBreakdown.Remnant, 1, "1 Remnant in breakdown");
+
+  // Overlap result
+  assert.equal(result.overlapResult.typed_duplicate_slab_id_count, 0, "no overlap");
+  assert.equal(result.overlapResult.typed_slab_record_count, 1, "overlap result slab count");
+  assert.equal(result.overlapResult.typed_remnant_record_count, 1, "overlap result remnant count");
+
+  // source_inventory_type on records (accessed via persistence dry-run counts)
+  assert.equal(result.persistence.mode, "dry-run", "dry-run mode");
+  assert.equal(result.persistence.wouldWrite.slabInventory, 2, "2 inventory rows would write");
+
+  // Fetch result has both lane counts
+  assert.equal(result.fetch.slabSummaryRowCount, 1, "slab summary row count");
+  assert.equal(result.fetch.remnantSummaryRowCount, 1, "remnant summary row count");
+
+  console.log("ok: runSlabCloudInventorySync typed dry-run (no overlap)");
+}
+
+// ── runSlabCloudInventorySync typed mode — dry-run warns on overlap ───────────
+{
+  const OVERLAPPING_RAW = [{ SlabID: "SHARED-0001", Name: "Overlap", Material: "Q", count: 1 }];
+
+  const result = await runSlabCloudInventorySync({
+    config: buildClientConfig({ companyCode: "kbyd", inventoryScope: "typed" }),
+    fetchDetails: false,
+    writeEnabled: false,
+    fetchers: {
+      fetchMaterials: async () => [],
+      fetchSlabSummary: async () => OVERLAPPING_RAW, // same ID in both lanes
+      fetchSlabDetail: async () => [],
+    },
+  });
+
+  // In dry-run, overlap produces a warning, not a throw
+  assert.equal(result.overlapResult.typed_duplicate_slab_id_count, 1, "overlap detected");
+  assert.ok(result.warnings.some((w) => /duplicate/i.test(w)), "warning mentions duplicate");
+  assert.equal(result.persistence.mode, "dry-run", "dry-run proceeds despite overlap");
+
+  console.log("ok: runSlabCloudInventorySync typed dry-run warns on overlap");
+}
+
+// ── runSlabCloudInventorySync typed mode — Slab/Remnant source_inventory_type ─
+{
+  const SLAB_ROW = { SlabID: "TYPE-S", Name: "A", Material: "Q", count: 1, Width_Actual: "2", Length_Actual: "3" };
+  const REMNANT_ROW = { SlabID: "TYPE-R", Name: "B", Material: "Q", count: 1, Width_Actual: "1", Length_Actual: "1" };
+
+  // We need to inspect normalized records; use a custom hook via persistence dry-run.
+  // Simplest: verify through the overlap result type counts.
+  const result = await runSlabCloudInventorySync({
+    config: buildClientConfig({ companyCode: "kbyd", inventoryScope: "typed" }),
+    fetchDetails: false,
+    writeEnabled: false,
+    fetchers: {
+      fetchMaterials: async () => [],
+      fetchSlabSummary: async (cfg) => cfg.type === "Slab" ? [SLAB_ROW] : [REMNANT_ROW],
+      fetchSlabDetail: async () => [],
+    },
+  });
+
+  assert.equal(result.typeBreakdown.Slab, 1, "Slab lane in breakdown");
+  assert.equal(result.typeBreakdown.Remnant, 1, "Remnant lane in breakdown");
+  // distinct IDs = 2 (no overlap)
+  assert.equal(result.overlapResult.typed_distinct_slab_id_count, 2, "2 distinct IDs");
+
+  console.log("ok: typed mode Slab/Remnant type breakdown");
 }
 
 console.log("\nslabCloudInventoryPoc: all tests passed");

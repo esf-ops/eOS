@@ -27,6 +27,8 @@ import {
   SENTINEL_ORG_ID,
 } from "./slabCloudPersistence.js";
 import { normalizeSlabRecords } from "./normalizeSlabCloudInventory.js";
+import { runSlabCloudInventorySync } from "./slabCloudSync.js";
+import { buildClientConfig } from "./slabCloudClient.js";
 
 const ORG_ID = "89180433-9fab-4024-bec9-a14d870bd0a8";
 
@@ -689,6 +691,137 @@ function normalizedRemnant() {
     }
   }
   console.log("ok: no delete/deactivate in all-scope write path");
+}
+
+// ── Typed sync: write-enabled with no overlap succeeds ───────────────────────
+{
+  const SLAB_ROW = { SlabID: "TYPED-S-0001", Name: "A", Material: "Q",
+    Price_Group: "B", Distributor: "ESF", count: 1,
+    Width_Actual: "2.0", Length_Actual: "3.0" };
+  const REMNANT_ROW = { SlabID: "TYPED-R-0001", Name: "B", Material: "Q",
+    Price_Group: "C", Distributor: "ESF", count: 1,
+    Width_Actual: "1.0", Length_Actual: "1.5" };
+
+  const db = createMockSupabase();
+  const result = await runSlabCloudInventorySync({
+    config: buildClientConfig({
+      companyCode: "kbyd",
+      apiCompanyCode: "kbyd",
+      assetCompanyCode: "kbyd",
+      publicSlug: "esf",
+      inventoryScope: "typed",
+    }),
+    fetchDetails: false,
+    organizationId: ORG_ID,
+    db,
+    writeEnabled: true,
+    fetchers: {
+      fetchMaterials: async () => [],
+      fetchSlabSummary: async (cfg) => cfg.type === "Slab" ? [SLAB_ROW] : [REMNANT_ROW],
+      fetchSlabDetail: async () => [],
+    },
+  });
+
+  assert.equal(result.inventoryScope, "typed", "result inventoryScope=typed");
+  assert.equal(result.overlapResult.typed_duplicate_slab_id_count, 0, "no overlap");
+  assert.equal(result.normalizedCount, 2, "2 normalized records (1 Slab + 1 Remnant)");
+  assert.equal(result.typeBreakdown.Slab, 1, "typeBreakdown.Slab=1");
+  assert.equal(result.typeBreakdown.Remnant, 1, "typeBreakdown.Remnant=1");
+  assert.equal(result.persistence.mode, "write", "write mode");
+
+  // Inventory upsert has both records with correct source_inventory_type
+  const invUpsert = db.calls.upserts.find((c) => c.table === TABLE_INVENTORY);
+  assert.ok(invUpsert, "inventory upsert happened");
+  assert.equal(invUpsert.payload.length, 2, "2 inventory rows");
+  const types = invUpsert.payload.map((r) => r.source_inventory_type).sort();
+  assert.deepEqual(types, ["Remnant", "Slab"], "inventory rows have Slab and Remnant types");
+  for (const row of invUpsert.payload) {
+    assert.equal(row.source_inventory_scope, "typed", "source_inventory_scope=typed");
+    assert.equal(row.source_public_slug, "esf", "source_public_slug=esf");
+  }
+
+  // No deletes
+  assert.equal(db.calls.deletes.length, 0, "no delete calls in typed write");
+  // No is_active=false
+  for (const c of db.calls.upserts) {
+    for (const row of c.payload) {
+      assert.notEqual(row.is_active, false, "no deactivation in typed write");
+    }
+  }
+
+  // Sync run has typed metadata
+  const runInsert = db.calls.inserts.find((c) => c.table === TABLE_SYNC_RUNS);
+  assert.equal(runInsert.payload.inventory_scope, "typed", "sync run inventory_scope=typed");
+  assert.equal(runInsert.payload.slab_row_count, 1, "sync run slab_row_count=1");
+  assert.equal(runInsert.payload.remnant_row_count, 1, "sync run remnant_row_count=1");
+  assert.equal(runInsert.payload.all_inventory_row_count, 2, "sync run all_inventory_row_count=2");
+  assert.equal(runInsert.payload.source_public_slug, "esf", "sync run source_public_slug=esf");
+
+  console.log("ok: typed write-enabled sync with no overlap succeeds");
+}
+
+// ── Typed sync: write-enabled with duplicate IDs aborts before any write ─────
+{
+  // Both lanes return the same SlabID → overlap detected → throw before any DB I/O.
+  const SHARED = { SlabID: "DUPE-0001", Name: "Same", Material: "Q", count: 1 };
+
+  const db = createMockSupabase();
+  let threwOverlap = false;
+  let overlapError = null;
+  try {
+    await runSlabCloudInventorySync({
+      config: buildClientConfig({ companyCode: "kbyd", inventoryScope: "typed" }),
+      fetchDetails: false,
+      organizationId: ORG_ID,
+      db,
+      writeEnabled: true,
+      fetchers: {
+        fetchMaterials: async () => [],
+        fetchSlabSummary: async () => [SHARED], // same row returned for both Slab + Remnant
+        fetchSlabDetail: async () => [],
+      },
+    });
+  } catch (err) {
+    threwOverlap = true;
+    overlapError = err;
+  }
+
+  assert.equal(threwOverlap, true, "typed write with overlap throws");
+  assert.match(overlapError.message, /duplicate/i, "error mentions duplicate");
+  assert.match(overlapError.message, /aborted/i, "error mentions aborted");
+  assert.ok(overlapError.overlapResult, "error carries overlapResult");
+  assert.equal(overlapError.overlapResult.typed_duplicate_slab_id_count, 1, "overlap count in error");
+
+  // CRITICAL: no Supabase calls were made — abort was before any write.
+  assert.equal(db.calls.inserts.length, 0, "no inserts (abort before sync run creation)");
+  assert.equal(db.calls.upserts.length, 0, "no upserts");
+  assert.equal(db.calls.updates.length, 0, "no updates");
+  assert.equal(db.calls.deletes.length, 0, "no deletes");
+
+  console.log("ok: typed write with duplicate IDs aborts before any DB write");
+}
+
+// ── Typed sync: dry-run with duplicate IDs warns but does not throw ───────────
+{
+  const SHARED = { SlabID: "DUPE-DRY", Name: "Same", Material: "Q", count: 1 };
+
+  const result = await runSlabCloudInventorySync({
+    config: buildClientConfig({ companyCode: "kbyd", inventoryScope: "typed" }),
+    fetchDetails: false,
+    writeEnabled: false,
+    fetchers: {
+      fetchMaterials: async () => [],
+      fetchSlabSummary: async () => [SHARED],
+      fetchSlabDetail: async () => [],
+    },
+  });
+
+  // Dry-run continues with warning
+  assert.equal(result.persistence.mode, "dry-run", "dry-run mode despite overlap");
+  assert.equal(result.overlapResult.typed_duplicate_slab_id_count, 1, "overlap reported");
+  assert.ok(result.warnings.some((w) => /duplicate/i.test(w)), "overlap warning present");
+
+  console.log("ok: typed dry-run with overlap warns but does not throw");
 }
 
 console.log("\nslabCloudPersistence: all tests passed");

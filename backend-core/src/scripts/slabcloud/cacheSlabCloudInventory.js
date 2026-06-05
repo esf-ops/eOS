@@ -20,9 +20,12 @@
  *   SLABCLOUD_ASSET_COMPANY_CODE   default same as SLABCLOUD_API_COMPANY_CODE
  *   SLABCLOUD_PUBLIC_SLUG          default esf (public URL slug; not used in API requests)
  *   SLABCLOUD_INVENTORY_SCOPE      default slab
- *     Options: slab → type=Slab&edges=true (historic default, ~145 ESF rows)
+ *     Options: slab    → type=Slab&edges=true (historic default, ~145 ESF rows)
  *              remnant → type=Remnant&edges=true (~689 ESF rows)
- *              all → no type param, edges=true (~742 ESF rows — full catalog)
+ *              all     → no type param, edges=true (~742 ESF rows — type unknown)
+ *              typed   → TWO fetches: Slab lane + Remnant lane, merged.
+ *                        Each record gets source_inventory_type = Slab or Remnant.
+ *                        Duplicate SlabID detection runs before any write.
  *   SLABCLOUD_TYPE                 explicit type= override (ignored when SLABCLOUD_INVENTORY_SCOPE set)
  *   SLABCLOUD_FETCH_DETAILS        default 1
  *   SLABCLOUD_CONCURRENCY          default 2
@@ -33,25 +36,26 @@
  *   SUPABASE_URL                   required only when writing
  *   SUPABASE_SERVICE_ROLE_KEY      required only when writing
  *
- * IMPORTANT: If SLABCLOUD_INVENTORY_SCOPE=all with SLABCLOUD_CACHE_WRITE_ENABLED=1,
- * the SQL migration (eliteos_slabcloud_inventory_scope_upgrade.sql) MUST be applied
- * first. Upsert payloads include new scope columns that require those DB columns.
+ * IMPORTANT: Scope upgrade SQL (eliteos_slabcloud_inventory_scope_upgrade.sql)
+ * MUST be applied before any write-enabled all/typed sync. Upsert payloads
+ * include new scope columns that require those DB columns to exist.
+ *
+ * TYPED MODE SAFETY: If duplicate SlabIDs exist across Slab and Remnant lanes,
+ * write-enabled typed sync ABORTS before any write. Dry-run reports the overlap.
  *
  * Examples:
  *   # Dry-run slab-only (safe, no writes — existing behavior)
  *   SLABCLOUD_COMPANY_CODE=kbyd npm run eos:slabcloud:cache
  *
- *   # Dry-run all-scope (safe, no writes — full catalog including remnants)
- *   SLABCLOUD_INVENTORY_SCOPE=all SLABCLOUD_API_COMPANY_CODE=kbyd \
+ *   # Dry-run typed (safe, no writes — Slab+Remnant with type classification)
+ *   SLABCLOUD_INVENTORY_SCOPE=typed SLABCLOUD_API_COMPANY_CODE=kbyd \
  *     SLABCLOUD_ASSET_COMPANY_CODE=kbyd SLABCLOUD_PUBLIC_SLUG=esf \
  *     npm run eos:slabcloud:cache
  *
- *   # Write-enabled smoke (run only after SQL migration applied + review)
- *   SLABCLOUD_CACHE_WRITE_ENABLED=1 SLABCLOUD_ORGANIZATION_ID=<org-uuid> \
- *     SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
- *     SLABCLOUD_INVENTORY_SCOPE=all SLABCLOUD_API_COMPANY_CODE=kbyd \
+ *   # Dry-run all-scope (safe, no writes — full catalog, type unknown)
+ *   SLABCLOUD_INVENTORY_SCOPE=all SLABCLOUD_API_COMPANY_CODE=kbyd \
  *     SLABCLOUD_ASSET_COMPANY_CODE=kbyd SLABCLOUD_PUBLIC_SLUG=esf \
- *     SLABCLOUD_MAX_DETAILS=20 npm run eos:slabcloud:cache
+ *     npm run eos:slabcloud:cache
  */
 import "dotenv/config";
 
@@ -134,10 +138,14 @@ async function main() {
   console.log(`  Concurrency:         ${concurrency}`);
   console.log(`  Write mode:          ${writeEnabled ? "ENABLED (will write to Supabase)" : "dry-run (no writes)"}`);
 
-  if (writeEnabled && config.inventoryScope === "all") {
+  if (writeEnabled && (config.inventoryScope === "all" || config.inventoryScope === "typed")) {
     console.log(
-      "  ⚠ All-scope write: ensure eliteos_slabcloud_inventory_scope_upgrade.sql is applied first."
+      "  ⚠  Ensure eliteos_slabcloud_inventory_scope_upgrade.sql is applied before write."
     );
+  }
+  if (config.inventoryScope === "typed") {
+    console.log("  ℹ  Typed mode: fetches Slab lane + Remnant lane separately with type tagging.");
+    console.log("     Write-enabled typed sync aborts if duplicate SlabIDs exist across lanes.");
   }
 
   // Fail loudly if writes are enabled but prerequisites are missing.
@@ -186,6 +194,7 @@ async function main() {
     fetch: result.fetch,
     normalizedCount: result.normalizedCount,
     typeBreakdown: result.typeBreakdown ?? {},
+    overlapResult: result.overlapResult ?? null,
     counts: p.counts,
     wouldWrite: p.wouldWrite,
     written: p.written,
@@ -199,11 +208,26 @@ async function main() {
     .map(([t, n]) => `${t}:${n}`)
     .join(", ") || "n/a";
 
+  const overlap = result.overlapResult ?? null;
+
   console.log("");
   console.log(`  Mode:               ${p.mode}`);
   console.log(`  Inventory scope:    ${config.inventoryScope}`);
   console.log(`  Normalized records: ${result.normalizedCount}`);
   console.log(`  Type breakdown:     ${breakdownStr}`);
+  if (overlap) {
+    console.log(`  Slab lane:          ${overlap.typed_slab_record_count} records`);
+    console.log(`  Remnant lane:       ${overlap.typed_remnant_record_count} records`);
+    console.log(`  Distinct SlabIDs:   ${overlap.typed_distinct_slab_id_count}`);
+    if (overlap.typed_duplicate_slab_id_count > 0) {
+      console.log(
+        `  ⚠  DUPLICATE SlabIDs across lanes: ${overlap.typed_duplicate_slab_id_count}` +
+          ` — sample: ${overlap.typed_duplicate_slab_id_sample.slice(0, 3).join(", ")}`
+      );
+    } else {
+      console.log(`  Overlap:            none (clean — safe to write)`);
+    }
+  }
   console.log(`  Distinct colors:    ${p.counts.distinctColorCount}`);
   console.log(`  Distinct materials: ${p.counts.distinctMaterialCount}`);
   if (p.mode === "write") {

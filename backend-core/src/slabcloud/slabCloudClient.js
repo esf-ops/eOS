@@ -27,16 +27,23 @@ export const DEFAULT_SLABCLOUD_PUBLIC_SLUG = "esf";
 //   slab     → type=Slab&edges=true     (historic default, 145 rows for ESF)
 //   remnant  → type=Remnant&edges=true  (689 rows for ESF)
 //   all      → no type param, edges=true (742 rows — full ESF catalog)
+//   typed    → two separate fetches (Slab + Remnant), merged with type tagging.
+//              Each record gets source_inventory_type = Slab or Remnant.
+//              slabCloudSync handles the two-lane orchestration — this scope
+//              does NOT map to a single API type= param.
 export const INVENTORY_SCOPE_SLAB = "slab";
 export const INVENTORY_SCOPE_REMNANT = "remnant";
 export const INVENTORY_SCOPE_ALL = "all";
+export const INVENTORY_SCOPE_TYPED = "typed";
 export const DEFAULT_INVENTORY_SCOPE = INVENTORY_SCOPE_SLAB;
 
 /**
  * Map an inventoryScope string to the SlabCloud API type= param value.
  * "all" intentionally returns null (no type param → full catalog).
+ * "typed" returns "Slab" as a safe fallback — the actual typed sync uses
+ * explicit per-lane configs and never calls this for the combined config.
  *
- * @param {string} scope - "slab" | "remnant" | "all"
+ * @param {string} scope - "slab" | "remnant" | "all" | "typed"
  * @returns {string|null} type parameter value, or null for no-type (all)
  */
 export function scopeToInventoryType(scope) {
@@ -47,6 +54,10 @@ export function scopeToInventoryType(scope) {
       return "Remnant";
     case INVENTORY_SCOPE_ALL:
       return null;
+    case INVENTORY_SCOPE_TYPED:
+      // Typed mode is a two-lane orchestration in slabCloudSync; returning "Slab"
+      // here is a safe URL-builder fallback (never used in normal typed sync flow).
+      return "Slab";
     default:
       return "Slab";
   }

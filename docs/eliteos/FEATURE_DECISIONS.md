@@ -967,3 +967,26 @@
 
 ---
 
+### 74. SlabCloud typed full-inventory sync — Slab + Remnant lanes, write-gated
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-06-05 |
+| **Decision** | Added `SLABCLOUD_INVENTORY_SCOPE=typed` — a two-lane sync mode that fetches Slab and Remnant lanes separately and merges them with explicit `source_inventory_type` tagging. This is the preferred mode for production sync because it gives every inventory row a known type (Slab or Remnant), enabling the future color modal tab (All / Full slabs / Remnants). The bare `all` scope remains available but produces `source_inventory_type = null` since the bare endpoint does not include a Type field. |
+| **Typed dry-run result** | 401 Slab records + 1,278 Remnant records = 1,679 total · 1,679 distinct SlabIDs · **zero overlap** across lanes · 740 distinct colors · 44 materials · 0 warnings. |
+| **Overlap finding** | Confirmed: Slab and Remnant lanes have **no overlapping physical SlabIDs** for ESF / kbyd. The same slab UUID does not appear in both `type=Slab` and `type=Remnant` responses. Typed write is safe. |
+| **Overlap safety rule** | Write-enabled typed sync **aborts before any DB write** if duplicate SlabIDs are detected across lanes. Error carries the overlapResult for diagnosis. Dry-run warns but proceeds with the report. |
+| **Why typed over all** | `all` scope (742 rows from bare `?edges=true`) gives completeness but type is unknown. `typed` scope (1,679 rows via two fetches) gives full type classification. The higher row count in typed reflects detail fetches resolving more individual slabs per color. |
+| **INVENTORY_SCOPE_TYPED constant** | `"typed"` — exported from `slabCloudClient.js`. `scopeToInventoryType("typed")` returns `"Slab"` as a safe URL fallback (typed mode never calls this for the combined config). |
+| **Per-lane detail fetches** | In typed mode, detail fetches use lane-specific configs: `?name=X&type=Slab&edges=true` for Slab lane, `?name=X&type=Remnant&edges=true` for Remnant lane. This ensures detail records are correctly typed. |
+| **source_inventory_scope** | All records in a typed sync get `source_inventory_scope = "typed"` (not "slab" or "remnant"). The lane is identified by `source_inventory_type`. |
+| **No hourly automation yet** | No scheduling. Manual typed write smoke is the next step (after capped run proves clean). |
+| **No inactive marking** | No rows are ever deactivated or deleted. |
+| **What is NOT built** | UI changes to `app-slab-inventory`, Elite 100 carousel, Non-Stock tab, color modal, price group overrides, scheduled automation, writeback, inactive marking. No changes to Internal Estimate, Quote Library, Sales Dashboard, Pricing Admin, Moraware, AI Takeoff, Home Launcher, shared EliteosTopbar. |
+| **Tests** | `detectSlabIdOverlap` pure function (6 cases: overlap, no overlap, case-insensitive, empty, null, sample cap). Typed sync dry-run (no overlap, with overlap warning). Typed write-enabled (no overlap → succeeds, with inventory rows showing Slab/Remnant types). Typed write-enabled (overlap → throws before any DB write, zero Supabase calls). All 22 cache + 19 inventory POC tests pass. |
+| **Impacted files** | `slabCloudClient.js` (`INVENTORY_SCOPE_TYPED`, updated `scopeToInventoryType`), `slabCloudSync.js` (`detectSlabIdOverlap` export, `runTypedInventorySync` internal, typed branch in `runSlabCloudInventorySync`), `cacheSlabCloudInventory.js` (typed output, overlap display), `slabCloudInventoryPoc.test.mjs` (typed tests), `slabCloudPersistence.test.mjs` (typed write tests), docs. |
+| **Manual step required** | Run capped write-enabled typed smoke after reviewing the dry-run output. No new SQL migration needed (columns exist from Decision #73). |
+| **Revisit trigger** | Typed write smoke succeeds cleanly; `app-slab-inventory` API + UI updated to expose Remnant filter; Elite 100 / Non-Stock tab scoped; scheduled automation proposed. |
+
+---
+
