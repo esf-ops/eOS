@@ -164,6 +164,7 @@ type ColorModal = {
   colorName: string | null;
   materialName: string | null;
   priceGroup?: string | null;
+  representativeImageUrl?: string | null;
 } | null;
 
 type MainTab = "elite100" | "non_stock" | "all_inventory";
@@ -721,6 +722,7 @@ export default function SlabInventoryApp() {
                           colorName: item.color_name,
                           materialName: item.material_name,
                           priceGroup: item.price_group,
+                          representativeImageUrl: item.representative_image_url || item.representative_thumbnail_url,
                         })}
                       />
                     ))}
@@ -1160,7 +1162,7 @@ function Elite100Section({ group, onOpenItem }: { group: Elite100Group; onOpenIt
   const scroll = (dir: -1 | 1) => {
     const rail = railRef.current;
     if (!rail) return;
-    rail.scrollBy({ left: dir * 948, behavior: "smooth" });
+    rail.scrollBy({ left: dir * 1140, behavior: "smooth" });
   };
   return (
     <section className="e100-section" aria-labelledby={`e100-group-${group.price_group}`}>
@@ -1290,6 +1292,8 @@ function ColorInventoryModal({
   error: string | null;
   onClose: () => void;
 }) {
+  const [heroImgFailed, setHeroImgFailed] = useState(false);
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     document.addEventListener("keydown", handler);
@@ -1298,14 +1302,32 @@ function ColorInventoryModal({
 
   const totalSlabs = inventory?.slab_count ?? 0;
   const totalRemnants = inventory?.remnant_count ?? 0;
+  const total = inventory?.total ?? 0;
+  const hasHeroImg = Boolean(modal.representativeImageUrl) && !heroImgFailed;
 
   return (
     <div className="cim-overlay" role="dialog" aria-modal="true" aria-label={`${modal.colorName ?? "Color"} inventory`} onClick={onClose}>
       <div className="cim" onClick={(e) => e.stopPropagation()}>
         <button type="button" className="cim-close" onClick={onClose} aria-label="Close">×</button>
 
-        <header className="cim-head">
-          <div className="cim-head-left">
+        {/* Hero: representative image + detail panel */}
+        <div className="cim-hero">
+          <div className="cim-hero-img-wrap">
+            {hasHeroImg ? (
+              <img
+                src={modal.representativeImageUrl!}
+                alt={modal.colorName ?? ""}
+                className="cim-hero-img"
+                onError={() => setHeroImgFailed(true)}
+              />
+            ) : (
+              <div className="cim-hero-placeholder" aria-hidden>
+                <span>{colorInitials(modal.colorName)}</span>
+              </div>
+            )}
+          </div>
+
+          <div className="cim-detail">
             <p className="cim-eyebrow">
               {modal.mode === "elite100" ? (
                 <><span className="cim-e100-badge">Elite 100</span>{modal.priceGroup && <span className="cim-group">Group {modal.priceGroup}</span>}</>
@@ -1317,16 +1339,26 @@ function ColorInventoryModal({
             </p>
             <h2 className="cim-title">{modal.colorName || "Color"}</h2>
             {modal.materialName && <p className="cim-material">{modal.materialName}</p>}
-          </div>
-          {inventory && !busy && (
-            <div className="cim-totals">
-              <span className="cim-totals-slab">{totalSlabs} slab{totalSlabs !== 1 ? "s" : ""}</span>
-              <span className="cim-dot">·</span>
-              <span>{totalRemnants} remnant{totalRemnants !== 1 ? "s" : ""}</span>
-            </div>
-          )}
-        </header>
 
+            <div className="cim-stats">
+              <div className="cim-stat">
+                <span className="cim-stat-n">{busy ? "—" : total}</span>
+                <span className="cim-stat-label">Available</span>
+              </div>
+              <div className="cim-stat">
+                <span className="cim-stat-n">{busy ? "—" : totalSlabs}</span>
+                <span className="cim-stat-label">Full Slabs</span>
+              </div>
+              <div className="cim-stat">
+                <span className="cim-stat-n">{busy ? "—" : totalRemnants}</span>
+                <span className="cim-stat-label">Remnants</span>
+              </div>
+            </div>
+            <p className="cim-source-note">Read-only · source price group imported from SlabCloud</p>
+          </div>
+        </div>
+
+        {/* Scrollable inventory body */}
         <div className="cim-body">
           {busy && (
             <div className="cim-loading">

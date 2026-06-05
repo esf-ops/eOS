@@ -14,7 +14,7 @@
   --eos-ink-mid: #475569;
   --eos-ink-muted: #64748b;
   /* Elite 100 carousel card width — single source of truth */
-  --e100-card-width: 296px;
+  --e100-card-width: 360px;
   --eos-ink-faint: #94a3b8;
   --eos-line: #e8ecf0;
   --eos-line-strong: #cbd5e1;
@@ -1140,7 +1140,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 .e100-skeleton-rail { display: flex; gap: 16px; overflow: hidden; }
 .e100-skeleton-card {
   flex: 0 0 var(--e100-card-width);
-  height: 380px;
+  height: 420px;
   border-radius: 20px;
 }
 
@@ -1178,10 +1178,10 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
   border-color: #cdd5e0;
 }
 
-/* Stone image tray — square (1:1) fills the card like a premium sample tile.
+/* Stone image tray — 6:5 landscape ratio, fills card like a premium sample tile.
    object-fit:cover fills from center; tray clips overflow so image is fully inset. */
 .cp-card-img-wrap {
-  aspect-ratio: 1 / 1;
+  aspect-ratio: 6 / 5;
   border-radius: 10px;
   overflow: hidden;
   background: #f5f3f0;
@@ -1191,9 +1191,9 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
   object-fit: cover;
   object-position: center;
   display: block;
-  transition: transform 400ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 420ms cubic-bezier(0.4, 0, 0.2, 1);
 }
-.cp-card:hover .cp-card-img { transform: scale(1.12); }
+.cp-card:hover .cp-card-img { transform: scale(1.16); }
 
 /* Placeholder tile for colors without images */
 .cp-card-placeholder {
@@ -1270,12 +1270,15 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 /* deprecated inline badge (no longer rendered, kept for safety) */
 .cp-card-no-inv { display: none; }
 
-/* Responsive: smaller cards on narrow viewports */
+/* Responsive: reduce card size on smaller viewports */
+@media (max-width: 960px) {
+  :root { --e100-card-width: 300px; }
+}
 @media (max-width: 680px) {
-  :root { --e100-card-width: 220px; }
+  :root { --e100-card-width: 240px; }
 }
 @media (max-width: 400px) {
-  :root { --e100-card-width: 190px; }
+  :root { --e100-card-width: 200px; }
 }
 
 /* ─────────────────────────────────────────── Non-Stock page */
@@ -1404,7 +1407,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 
 .cim {
   position: relative;
-  width: min(920px, 100%);
+  width: min(1060px, 100%);
   max-height: 90vh;
   display: flex;
   flex-direction: column;
@@ -1435,20 +1438,51 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 }
 .cim-close:hover { box-shadow: var(--eos-shadow); }
 
-.cim-head {
+/* Modal hero: large representative image (left) + color detail panel (right) */
+.cim-hero {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 20px;
-  padding: clamp(20px, 2.5vw, 28px) clamp(20px, 3vw, 32px) 18px;
-  border-bottom: 1px solid var(--eos-line);
+  align-items: stretch;
   flex-shrink: 0;
+  border-bottom: 1px solid var(--eos-line);
+  min-height: 280px;
+  max-height: 340px;
+  overflow: hidden;
 }
 
-.cim-head-left { flex: 1 1 auto; min-width: 0; }
+.cim-hero-img-wrap {
+  flex: 0 0 42%;
+  background: #f5f3f0;
+  overflow: hidden;
+  position: relative;
+}
+.cim-hero-img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  object-position: center;
+  display: block;
+}
+.cim-hero-placeholder {
+  width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(145deg, #eeecea 0%, #e4dde2 100%);
+  color: #8a8380;
+  font-size: 2.2rem;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+}
+
+.cim-detail {
+  flex: 1 1 auto;
+  padding: clamp(22px, 2.5vw, 34px) clamp(22px, 2.5vw, 38px);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  overflow: hidden;
+}
 
 .cim-eyebrow {
-  margin: 0 0 7px;
+  margin: 0 0 9px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1473,32 +1507,71 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 }
 
 .cim-title {
-  margin: 0 0 4px;
-  font-size: clamp(1.3rem, 2vw, 1.7rem);
+  margin: 0 0 5px;
+  font-size: clamp(1.4rem, 2.5vw, 2rem);
   font-weight: 800;
-  letter-spacing: -0.025em;
+  letter-spacing: -0.03em;
   color: var(--eos-ink);
   line-height: 1.1;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .cim-material {
   margin: 0;
-  font-size: 0.86rem;
+  font-size: 0.9rem;
   color: var(--eos-ink-muted);
 }
 
-.cim-totals {
+/* Stats row: total available / full slabs / remnants */
+.cim-stats {
   display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 0.84rem;
-  color: var(--eos-ink-mid);
-  font-weight: 500;
-  flex-shrink: 0;
-  padding-top: 4px;
+  margin: 22px 0 0;
+  border: 1px solid var(--eos-line);
+  border-radius: 12px;
+  overflow: hidden;
+  align-self: flex-start;
+  min-width: 260px;
+}
+.cim-stat {
+  flex: 1;
+  padding: 12px 16px;
+  text-align: center;
+  border-right: 1px solid var(--eos-line);
+}
+.cim-stat:last-child { border-right: none; }
+.cim-stat-n {
+  display: block;
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: var(--eos-ink);
+  letter-spacing: -0.03em;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+.cim-stat-label {
+  display: block;
+  font-size: 0.63rem;
+  color: var(--eos-ink-faint);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
   white-space: nowrap;
 }
-.cim-totals-slab { font-weight: 700; color: var(--eos-ink-soft); }
-.cim-dot { color: var(--eos-ink-faint); }
+.cim-source-note {
+  margin: 14px 0 0;
+  font-size: 0.67rem;
+  color: var(--eos-ink-faint);
+  font-style: italic;
+}
+
+/* Mobile: stack hero vertically */
+@media (max-width: 700px) {
+  .cim-hero { max-height: none; flex-direction: column; min-height: 0; }
+  .cim-hero-img-wrap { flex: 0 0 auto; height: 220px; }
+  .cim-stats { align-self: stretch; min-width: 0; }
+}
 
 .cim-body {
   overflow-y: auto;
@@ -1562,8 +1635,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 }
 @media (max-width: 600px) {
   .cim-item-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
-  .cim-head { flex-direction: column; gap: 10px; }
-  .cim-head, .cim-body { padding-left: 18px; padding-right: 18px; }
+  .cim-body { padding-left: 18px; padding-right: 18px; }
 }
 
 /* Physical item card (inside modal) */
