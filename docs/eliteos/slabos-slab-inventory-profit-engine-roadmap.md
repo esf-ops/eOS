@@ -589,3 +589,25 @@ The following are explicitly out of scope until the prerequisite phases are done
 | [`FEATURE_DECISIONS.md`](./FEATURE_DECISIONS.md) | Dated decisions including #65 (dry-run POC) and #66 (this phased roadmap) |
 | [`SYSTEM_BLUEPRINT.md`](./SYSTEM_BLUEPRINT.md) | System architecture, topbar rules, head checklist |
 | [`eliteOS-master-head-map.md`](./eliteOS-master-head-map.md) | Head inventory and future head planning |
+
+---
+
+### Phase 15 — SlabCloud v2 Texture Diagnostic (2026-06-05)
+
+**Status:** Diagnostic tooling shipped. No UI changes. No data writes.
+
+**What was built:**
+- `slabCloudV2TextureDiagnostic.js` — pure helpers for v2 row normalization, texture URL building, summary, duplicate detection, and typed inventory / Elite 100 catalog comparison
+- `inspectSlabCloudV2Textures.js` — runnable diagnostic script with optional Supabase comparison and optional product endpoint sampling
+- `slabCloudV2TextureDiagnostic.test.mjs` — 46 unit tests, all passing
+
+**Package scripts:** `eos:slabcloud:v2-texture-diagnostic`, `eos:test:slabcloud-v2-textures`
+
+**Safety:** No Supabase writes. No SlabCloud writes. `slab_inventory` typed rows remain the sole inventory authority. `source_count` from v2 is explicitly labeled as display-only.
+
+**Future image priority for Elite 100 cards:**
+1. SlabCloud v2 texture (`/scdata/textures/600` or `/1024`)
+2. Representative verified slab thumbnail
+3. Initials placeholder
+
+**Next:** Run diagnostic live. If texture coverage is sufficient, build SQL/cache layer to store texture hashes against `slab_color_catalog_items`, then enrich Elite 100 API response with texture URLs.

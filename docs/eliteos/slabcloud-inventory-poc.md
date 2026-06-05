@@ -814,3 +814,56 @@ Fuzzy matches and unmatched groups go to **Non-Stock** (never auto-classified as
 
 `buildElite100InventoryMap(invRows, catalogItemList, resolvedAliases)` is exported from `slabInventoryApi.js` for unit testing. It returns a `Map<catalog_item_id, { slabCount, remnantCount, slabIds }>`.
 
+
+---
+
+## Phase 5 — SlabCloud v2 Texture Endpoint Diagnostic (2026-06-05)
+
+### Purpose
+
+Investigate the SlabCloud public v2 product/color endpoints to determine whether product-level texture images are available for Elite 100 card and modal hero enrichment.
+
+This phase is **diagnostic only** — no Supabase writes, no UI changes, no inventory mutations.
+
+### V2 Endpoints Observed
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/v2/inventory/{companyCode}?cq_type=&cq_material=` | Product-level color rows — Name, Material, slug, texture hash, scColor, count |
+| `GET /api/v2/product/{companyCode}?slug={slug}&mat={material}` | Detail for one color/material — texture, palette, slabs array |
+| `GET /scdata/textures/600/{textureHash}.jpg` | 600px texture image |
+| `GET /scdata/textures/1024/{textureHash}.jpg` | 1024px texture image |
+
+### Texture Image Priority (future)
+
+1. SlabCloud v2 texture image (`/scdata/textures/600` or `/1024`)
+2. Representative verified slab thumbnail from typed `slab_inventory`
+3. Initials / placeholder
+
+**Important:** Texture images are **visual enrichment only**. The `slab_inventory` typed rows remain the sole source of truth for physical slab counts, slabs, and remnants.
+
+### Files Added
+
+| File | Purpose |
+|---|---|
+| `backend-core/src/slabcloud/slabCloudV2TextureDiagnostic.js` | Pure helpers — URL builders, row normalization, summary, duplicate detection, catalog comparison |
+| `backend-core/src/scripts/slabcloud/inspectSlabCloudV2Textures.js` | Main diagnostic script — fetches v2 inventory, normalizes, compares, optionally samples product endpoint |
+| `backend-core/src/slabcloud/slabCloudV2TextureDiagnostic.test.mjs` | 46 unit tests — no network, no Supabase |
+
+### Package Scripts Added
+
+```bash
+npm run eos:slabcloud:v2-texture-diagnostic   # run diagnostic (needs live network)
+npm run eos:test:slabcloud-v2-textures        # run unit tests (no network required)
+```
+
+### Key Design Decisions
+
+- `source_count` from v2 rows is labeled `source_count_is_display_only: true` and the summary uses the key name `slabcloud_display_count_sum_NOT_inventory_authority` to prevent confusion with physical inventory counts.
+- `SLABCLOUD_V2_PRODUCT_SAMPLE_LIMIT` defaults to `0` — product endpoint sampling is opt-in to avoid hammering the public API.
+- Optional Supabase comparison requires all three of `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `SLABOS_ORGANIZATION_ID`.
+- Texture URL building is a pure helper — no image fetching or verification in this slice.
+
+### Next Step
+
+Run the diagnostic against live SlabCloud data to determine texture coverage across Elite 100 colors and Non-Stock groups. If coverage is sufficient (>60%), proceed to a SQL/cache layer to store `texture_hash` and `texture_url` on `slab_color_catalog_items` or a new join table.

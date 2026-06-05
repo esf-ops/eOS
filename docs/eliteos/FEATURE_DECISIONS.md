@@ -1082,3 +1082,22 @@
 | **Manual QA checklist** | 1. Sign in → Elite 100 tab loads carousels (Promo through F, no G). 2. At least one card shows a stone image (kbyd image_status=ok=1679). 3. Zero-inventory card shows "No inventory" badge. 4. Click a card → Color Inventory Modal opens; slabs appear before remnants. 5. Click Non-Stock → grid loads, colors not in Elite 100 appear. 6. Non-Stock search filters cards. 7. Click Non-Stock card → modal opens. 8. Click All Inventory → existing raw browser works, health panel, sort/filter, lightbox. 9. Escape key closes modal. 10. No `count_for_color` in any API response (confirm in network tab). |
 | **Revisit trigger** | After QA; for Non-Stock v2 (add price-group grouped sections); for Elite 100 v2 (curated card art, mobile scroll indicators). |
 
+
+---
+
+## 79. SlabCloud v2 Texture Endpoint Diagnostic (2026-06-05)
+
+| Field | Value |
+|---|---|
+| **Date** | 2026-06-05 |
+| **Decision** | Build a read-only diagnostic layer to investigate SlabCloud public v2 product/color endpoints and their texture image assets, as a prerequisite for enriching Elite 100 cards with product-level stone imagery. |
+| **Endpoints investigated** | `GET /api/v2/inventory/{companyCode}?cq_type=&cq_material=` (product color rows); `GET /api/v2/product/{companyCode}?slug={slug}&mat={material}` (product detail); texture images at `/scdata/textures/600/{hash}.jpg` and `/1024/{hash}.jpg` |
+| **Texture enrichment status** | Diagnostic tooling only. No texture URLs stored in Supabase yet. No UI changes yet. |
+| **Future image priority** | 1. v2 texture image (`/scdata/textures/600` or `/1024`); 2. Representative verified slab thumbnail from typed `slab_inventory`; 3. Initials / placeholder. |
+| **Inventory authority** | `slab_inventory` typed rows remain the **sole source of truth** for counts, physical slabs, and remnants. SlabCloud v2 `count` field is labeled as display-only and never used for inventory authority. |
+| **Safety** | No Supabase writes. No SlabCloud writes. `slab_inventory` is untouched. Supabase comparison (if enabled) is read-only. Product endpoint sampling defaults to `SLABCLOUD_V2_PRODUCT_SAMPLE_LIMIT=0`. |
+| **Files added** | `backend-core/src/slabcloud/slabCloudV2TextureDiagnostic.js` (pure helpers); `backend-core/src/scripts/slabcloud/inspectSlabCloudV2Textures.js` (diagnostic script); `backend-core/src/slabcloud/slabCloudV2TextureDiagnostic.test.mjs` (46 tests) |
+| **Tests** | 46 unit tests — all passing. No network required for tests. |
+| **What is NOT built** | Texture hash storage in Supabase. Elite 100 API texture enrichment. UI changes. Any image verification or download. |
+| **Next step** | Run `npm run eos:slabcloud:v2-texture-diagnostic` with live credentials to assess texture coverage. If coverage > 60%, proceed to SQL/cache layer (new column or join table on `slab_color_catalog_items`) and enrich `GET /api/slab-inventory/elite100-programs` response with texture URLs. |
+| **Revisit trigger** | After live diagnostic run reveals texture coverage numbers; before Elite 100 card imagery upgrade. |
