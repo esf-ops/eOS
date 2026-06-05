@@ -1121,3 +1121,23 @@
 | **What is NOT changed** | App UI. Elite 100 carousel behavior. Non-Stock tab. Texture diagnostic logic. Collection `is_active`. `slab_inventory` table. Group G. |
 | **Impacted files** | `backend-core/src/scripts/slabInventory/importElite100AliasReviews.js` (SELECT-then-INSERT, exported helpers, main() guard), `backend-core/supabase/eliteos_slab_inventory_color_catalog.sql` (2 unique indexes + updated apply steps), `backend-core/src/slabInventory/colorProgramMatching.test.mjs` (13 new test suites), docs (this entry). |
 | **Revisit trigger** | Annual Elite 100 refresh when Chris reviews a new alias batch. |
+
+---
+
+### 81. Elite 100 Representative Image — Scored Selection (2026-06-05)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-06-05 |
+| **Decision** | Replace "first verified image" heuristic with a deterministic scoring system that always picks the best available physical slab photo per Elite 100 catalog color. |
+| **Motivation** | v2 texture diagnostic showed only 27/100 Elite 100 colors have SlabCloud v2 texture images. Building a texture cache is deferred. Instead, improve representative image quality from the existing `slab_inventory` + `slab_images` data by scoring rows rather than accepting the first ok image. |
+| **v2 texture status** | Total v2 rows: 741. Rows with texture: 291 (39.3%). Elite 100 with texture: 27/100. v2 texture cache deferred; will be revisited when coverage improves or as optional enrichment. |
+| **Scoring rules** | 1. Row must have `image_status = 'ok'` AND at least one URL. Non-ok rows score 0. 2. `source_inventory_type = 'Slab'` (tier 2) >> `'Remnant'` (tier 1) >> other (tier 0). Type tier × 100 000 ensures Slab always beats any Remnant regardless of area. 3. Physical area (`width_actual_in × length_actual_in`) is the tiebreaker within the same type tier. Missing dimensions receive area = 0. |
+| **New exports** | `scoreRepresentativeInventoryImage(invRow, image)` → number (0 = not usable). `chooseRepresentativeInventoryImage(invRows, imageMap)` → `{ representative_image_url, representative_thumbnail_url, representative_image_source_inventory_type, representative_image_inventory_id }`. Both pure, no Supabase, deterministic. |
+| **buildElite100InventoryMap update** | Accumulator now tracks `rows: []` (full inventory rows) in addition to `slabIds`. This feeds `chooseRepresentativeInventoryImage` without a second pass. Backward-compatible: `slabIds`, `slabCount`, `remnantCount` unchanged. |
+| **API response additions** | `GET /api/slab-inventory/elite100-programs` cards now include `representative_image_source_inventory_type` (e.g. "Slab" or "Remnant") and `representative_image_inventory_id`. Existing `representative_image_url` and `representative_thumbnail_url` fields unchanged. |
+| **Frontend** | `Elite100Item` TypeScript type updated with two new optional fields. No UI layout changes. No card redesign. |
+| **Safety** | `slab_inventory` not mutated. `count_for_color` not read. No SlabCloud/Slabsmith writeback. No collection activation. No Group G. |
+| **Tests** | 9 new test suites in `slabInventoryApi.test.mjs` (was 22 → 31): `scoreRepresentativeInventoryImage` (Slab>Remnant, ok>missing, area tiebreaker, deterministic, count_for_color not involved); `chooseRepresentativeInventoryImage` (all 6 scenarios); `buildElite100InventoryMap` rows tracked; zero-inventory null image; rejected/fuzzy rows check; alias resolution. `eos:check:local` green. All builds clean. |
+| **What is NOT changed** | Non-Stock tab logic. `groupColorPrograms` representative image logic (unchanged — Non-Stock still uses first-ok). Texture diagnostic. Import scripts. Alias/review logic. `slab_inventory` table. |
+| **Revisit trigger** | When SlabCloud v2 texture coverage for Elite 100 exceeds 60% — then layer in texture URLs as an optional enrichment on top of the scored slab images. |

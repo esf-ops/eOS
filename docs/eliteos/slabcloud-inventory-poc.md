@@ -887,3 +887,28 @@ Run the diagnostic against live SlabCloud data to determine texture coverage acr
 **Tests:** 13 new test suites added to `colorProgramMatching.test.mjs`. All 42 test suites pass. `eos:check:local` green.
 
 **Future annual alias imports:** Re-run `npm run eos:elite100:import-alias-reviews` with write credentials. Script is idempotent — existing rows are detected and skipped. No manual SQL needed.
+
+---
+
+## Phase 7 — Elite 100 Representative Image Scoring (2026-06-05)
+
+**Status:** Backend + tests shipped. Frontend type updated. No UI redesign.
+
+**v2 texture context:**
+- Total v2 inventory rows: 741 | Rows with texture: 291 (39.3%)
+- Elite 100 with v2 texture: 27/100 — coverage too low for primary use
+- v2 texture cache deferred; focus shifted to better use of existing `slab_inventory` + `slab_images` data
+
+**What was built:**
+
+Two new exported pure helpers in `slabInventoryApi.js`:
+- `scoreRepresentativeInventoryImage(invRow, image)` — deterministic numeric score. Scores 0 if `image_status ≠ 'ok'` or no URL. Otherwise: `source_inventory_type='Slab'` (tier 2 × 100 000) >> `'Remnant'` (tier 1 × 100 000). Area (`width × length`) breaks ties within same tier.
+- `chooseRepresentativeInventoryImage(invRows, imageMap)` — iterates rows, scores each, returns the best: `{ representative_image_url, representative_thumbnail_url, representative_image_source_inventory_type, representative_image_inventory_id }`.
+
+`buildElite100InventoryMap` accumulator now tracks `rows: []` (full inventory rows). This replaces the previous "first ok image" selection in the route enrichment loop with the scored selection.
+
+`GET /api/slab-inventory/elite100-programs` cards gain:
+- `representative_image_source_inventory_type` (e.g. `"Slab"` or `"Remnant"`)
+- `representative_image_inventory_id`
+
+**Tests:** 31 passing in `slabInventoryApi.test.mjs` (was 22). All 42 passing in `colorProgramMatching.test.mjs`. `eos:check:local` green.

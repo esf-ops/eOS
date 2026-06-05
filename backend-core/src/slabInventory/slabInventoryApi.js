@@ -207,6 +207,97 @@ export function buildImageMap(imageRows = []) {
 }
 
 /**
+ * Score a candidate inventory row + its resolved image for use as a
+ * representative card image.  Higher score = better candidate.
+ *
+ * Scoring tiers (descending priority):
+ *   1. Must have image_status === "ok" and at least one URL (image_url or thumbnail_url).
+ *      Rows without a usable verified image score 0 and are never chosen.
+ *   2. source_inventory_type: "Slab" >> "Remnant" >> other.
+ *      The type tier is weighted so it always dominates the area tiebreaker.
+ *   3. Physical area (width_actual_in × length_actual_in): larger wins within
+ *      the same type tier.  Rows with missing dimensions receive area = 0.
+ *
+ * Deterministic: given the same inputs the score is always the same number.
+ * Never reads count_for_color.
+ *
+ * @param {{ source_inventory_type?: string|null, width_actual_in?: number|null, length_actual_in?: number|null }} invRow
+ * @param {{ image_status?: string|null, image_url?: string|null, thumbnail_url?: string|null }|null} image
+ * @returns {number} score ≥ 0; 0 means "not usable as representative"
+ */
+export function scoreRepresentativeInventoryImage(invRow, image) {
+  if (!image) return 0;
+  if (image.image_status !== "ok") return 0;
+  if (!image.image_url && !image.thumbnail_url) return 0;
+
+  // Type tier — gap of 100 000 ensures Slab always beats any Remnant regardless of area.
+  const type = String(invRow?.source_inventory_type ?? "").trim();
+  let typeTier = 0;
+  if (type === "Slab") typeTier = 2;
+  else if (type === "Remnant") typeTier = 1;
+
+  // Area tiebreaker within the same type tier.
+  const w = Number.isFinite(+invRow?.width_actual_in) ? +invRow.width_actual_in : 0;
+  const l = Number.isFinite(+invRow?.length_actual_in) ? +invRow.length_actual_in : 0;
+  const area = w > 0 && l > 0 ? w * l : 0;
+
+  return typeTier * 100_000 + area;
+}
+
+/**
+ * Choose the best representative image from an array of inventory rows.
+ *
+ * Applies scoreRepresentativeInventoryImage to every (row, image) pair and
+ * returns the fields of the highest-scoring candidate.  Returns null fields
+ * when no row has a usable verified image (score > 0).
+ *
+ * Deterministic: same inputs → same output.  Never reads count_for_color.
+ *
+ * @param {Array<Record<string, unknown>>} invRows
+ * @param {Map<string, Record<string, unknown>>} imageMap  keyed by external_slab_id
+ * @returns {{
+ *   representative_image_url: string|null,
+ *   representative_thumbnail_url: string|null,
+ *   representative_image_source_inventory_type: string|null,
+ *   representative_image_inventory_id: string|null
+ * }}
+ */
+export function chooseRepresentativeInventoryImage(invRows, imageMap) {
+  let bestRow = null;
+  let bestImage = null;
+  let bestScore = 0;
+
+  for (const r of Array.isArray(invRows) ? invRows : []) {
+    const slabId = String(r?.external_slab_id ?? "").trim();
+    if (!slabId) continue;
+    const image = imageMap instanceof Map ? (imageMap.get(slabId) ?? null) : null;
+    const score = scoreRepresentativeInventoryImage(r, image);
+    if (score > bestScore) {
+      bestScore = score;
+      bestRow = r;
+      bestImage = image;
+    }
+  }
+
+  if (!bestImage || bestScore <= 0) {
+    return {
+      representative_image_url: null,
+      representative_thumbnail_url: null,
+      representative_image_source_inventory_type: null,
+      representative_image_inventory_id: null,
+    };
+  }
+
+  return {
+    representative_image_url: bestImage.image_url ?? null,
+    representative_thumbnail_url: bestImage.thumbnail_url ?? null,
+    representative_image_source_inventory_type:
+      String(bestRow?.source_inventory_type ?? "").trim() || null,
+    representative_image_inventory_id: bestRow?.inventory_id ?? null,
+  };
+}
+
+/**
  * Compute summary aggregates from a lightweight projection of ACTIVE slab rows.
  *
  * CRITICAL: actual slab count is the count of rows (distinct slabs), NEVER the
@@ -456,7 +547,7 @@ export function buildElite100InventoryMap(invRows, catalogItemList, resolvedAlia
   const map = new Map(
     (Array.isArray(catalogItemList) ? catalogItemList : []).map((c) => [
       c.id,
-      { slabCount: 0, remnantCount: 0, slabIds: [] },
+      { slabCount: 0, remnantCount: 0, slabIds: [], rows: [] },
     ])
   );
 
@@ -496,6 +587,7 @@ export function buildElite100InventoryMap(invRows, catalogItemList, resolvedAlia
     for (const r of sourceGroup.rows) {
       const slabId = String(r.external_slab_id ?? "").trim();
       if (slabId) acc.slabIds.push(slabId);
+      acc.rows.push(r);
       if (r.source_inventory_type === "Slab") acc.slabCount += 1;
       else if (r.source_inventory_type === "Remnant") acc.remnantCount += 1;
     }
@@ -1107,24 +1199,19 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
         resolvedAliases
       );
 
-      // Enrich each catalog item with image + inventory counts.
-      for (const [itemId, acc] of elite100Map.entries()) {
+      // Enrich each catalog item with image + inventory counts using scored representative selection.
+      for (const [, acc] of elite100Map.entries()) {
+        // Count verified photos across all matched slabs.
         let verifiedCount = 0;
-        let repImage = null;
-        let repThumbnail = null;
         for (const slabId of acc.slabIds) {
-          const img = imageMap.get(slabId);
-          if (img?.image_status === "ok") {
-            verifiedCount += 1;
-            if (!repImage) {
-              repImage = img.image_url ?? null;
-              repThumbnail = img.thumbnail_url ?? null;
-            }
-          }
+          if (imageMap.get(slabId)?.image_status === "ok") verifiedCount += 1;
         }
+        const repResult = chooseRepresentativeInventoryImage(acc.rows, imageMap);
         acc.verifiedPhotoCount = verifiedCount;
-        acc.repImage = repImage;
-        acc.repThumbnail = repThumbnail;
+        acc.repImage = repResult.representative_image_url;
+        acc.repThumbnail = repResult.representative_thumbnail_url;
+        acc.repSourceInventoryType = repResult.representative_image_source_inventory_type;
+        acc.repInventoryId = repResult.representative_image_inventory_id;
       }
 
       // Sort helper: catalog sort_order then color_name.
@@ -1156,6 +1243,8 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
           verifiedPhotoCount: 0,
           repImage: null,
           repThumbnail: null,
+          repSourceInventoryType: null,
+          repInventoryId: null,
         };
 
         const card = {
@@ -1172,6 +1261,8 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
           verified_photo_count: acc.verifiedPhotoCount ?? 0,
           representative_image_url: acc.repImage ?? null,
           representative_thumbnail_url: acc.repThumbnail ?? null,
+          representative_image_source_inventory_type: acc.repSourceInventoryType ?? null,
+          representative_image_inventory_id: acc.repInventoryId ?? null,
           has_inventory:
             (acc.slabCount ?? 0) + (acc.remnantCount ?? 0) > 0,
           program_status: "elite_100",

@@ -92,6 +92,8 @@ type Elite100Item = {
   verified_photo_count: number;
   representative_image_url: string | null;
   representative_thumbnail_url: string | null;
+  representative_image_source_inventory_type: string | null;
+  representative_image_inventory_id: string | null;
   has_inventory: boolean;
   program_status: "elite_100";
 };

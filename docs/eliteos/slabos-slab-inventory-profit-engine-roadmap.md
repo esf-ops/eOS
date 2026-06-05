@@ -614,6 +614,23 @@ The following are explicitly out of scope until the prerequisite phases are done
 
 ---
 
+### Phase 17 — Elite 100 Representative Image Scoring (2026-06-05)
+
+**Status:** Shipped. Backend scoring helpers, updated route enrichment, new API response fields, frontend type update. Tests green.
+
+**v2 texture context:** Elite 100 with v2 texture = 27/100 (27%). Coverage too low to use as primary source. Texture cache deferred as optional future enrichment.
+
+**What was built:**
+- `scoreRepresentativeInventoryImage(invRow, image)` — pure, exported, deterministic. Full slabs beat remnants; area breaks ties within same type. Non-ok images score 0.
+- `chooseRepresentativeInventoryImage(invRows, imageMap)` — pure, exported. Picks the best candidate from all matched inventory rows for a catalog color.
+- `buildElite100InventoryMap` accumulator extended with `rows: []` — feeds the scoring function.
+- `GET /api/slab-inventory/elite100-programs` cards: new fields `representative_image_source_inventory_type` and `representative_image_inventory_id`.
+- `Elite100Item` TypeScript type updated with the two new optional fields.
+
+**Tests:** 31 in `slabInventoryApi.test.mjs` (was 22). `eos:check:local` green. All builds clean.
+
+---
+
 ### Phase 16 — Alias/Review Import Idempotency Fix (2026-06-05)
 
 **Status:** Import script hardened. No UI changes. 10 rows already live in production (manually inserted).

@@ -15,6 +15,7 @@ import {
   attachSlabInventoryRoutes,
   buildElite100InventoryMap,
   buildImageMap,
+  chooseRepresentativeInventoryImage,
   clampLimit,
   clampOffset,
   COLOR_INVENTORY_SELECT_COLUMNS,
@@ -28,6 +29,7 @@ import {
   parseListParams,
   priceGroupSortIndex,
   resolveSort,
+  scoreRepresentativeInventoryImage,
   SEARCH_COLUMNS,
   SLAB_INVENTORY_HEAD_SLUG,
   SORT_COLUMNS,
@@ -537,6 +539,8 @@ import {
   assert.equal(acc1.slabCount, 2, "cat-1 slabs: 1 exact + 1 alias");
   assert.equal(acc1.remnantCount, 1, "cat-1 remnants: 1 exact");
   assert.ok(acc1.slabIds.includes("s1") && acc1.slabIds.includes("s3"), "cat-1 slab IDs include exact + alias");
+  assert.ok(Array.isArray(acc1.rows), "acc1.rows is an array");
+  assert.equal(acc1.rows.length, 3, "cat-1 rows tracked: 1 exact slab + 1 exact remnant + 1 alias slab");
 
   const acc2 = result.get("cat-2");
   assert.equal(acc2.slabCount, 1, "cat-2 slabs: 1 exact");
@@ -570,6 +574,7 @@ import {
   assert.equal(result.size, 1, "catalog item with no inventory still appears in map");
   assert.equal(result.get("cat-1").slabCount, 0);
   assert.equal(result.get("cat-1").remnantCount, 0);
+  assert.equal(result.get("cat-1").rows.length, 0, "zero-inventory item has empty rows array");
   console.log("ok: buildElite100InventoryMap — zero-inventory catalog item preserved");
 }
 
@@ -612,6 +617,263 @@ import {
   assert.equal(cards[0].remnant_count, 2, "2 remnants");
   assert.equal(cards[0].total_inventory_count, 3, "3 total");
   console.log("ok: slabs and remnants counted separately in inventory cards");
+}
+
+/* ── scoreRepresentativeInventoryImage ──────────────────────────────────── */
+{
+  const slabRow = {
+    source_inventory_type: "Slab",
+    width_actual_in: 80,
+    length_actual_in: 120,
+    inventory_id: "inv-1",
+    external_slab_id: "s1"
+  };
+  const remnantRow = {
+    source_inventory_type: "Remnant",
+    width_actual_in: 80,
+    length_actual_in: 120,
+    inventory_id: "inv-2",
+    external_slab_id: "s2"
+  };
+  const okImage = { image_status: "ok", image_url: "ok.jpg", thumbnail_url: "ok_t.jpg" };
+  const missingImage = { image_status: "missing", image_url: "m.jpg", thumbnail_url: null };
+  const unknownImage = { image_status: "unknown", image_url: null, thumbnail_url: null };
+  const noUrlImage = { image_status: "ok", image_url: null, thumbnail_url: null };
+
+  // Non-ok images score 0 regardless of type.
+  assert.equal(scoreRepresentativeInventoryImage(slabRow, missingImage), 0, "missing image → 0");
+  assert.equal(scoreRepresentativeInventoryImage(slabRow, unknownImage), 0, "unknown image → 0");
+  assert.equal(scoreRepresentativeInventoryImage(slabRow, null), 0, "null image → 0");
+  assert.equal(scoreRepresentativeInventoryImage(slabRow, noUrlImage), 0, "ok but no URL → 0");
+
+  // Slab + ok image scores higher than Remnant + ok image.
+  const slabScore = scoreRepresentativeInventoryImage(slabRow, okImage);
+  const remnantScore = scoreRepresentativeInventoryImage(remnantRow, okImage);
+  assert.ok(slabScore > remnantScore, "Slab scores higher than Remnant for same area+image");
+
+  // Larger area wins within the same type tier.
+  const bigSlab = { source_inventory_type: "Slab", width_actual_in: 130, length_actual_in: 86, inventory_id: "big", external_slab_id: "big" };
+  const smallSlab = { source_inventory_type: "Slab", width_actual_in: 20, length_actual_in: 20, inventory_id: "small", external_slab_id: "small" };
+  assert.ok(
+    scoreRepresentativeInventoryImage(bigSlab, okImage) > scoreRepresentativeInventoryImage(smallSlab, okImage),
+    "larger slab area scores higher"
+  );
+
+  // Slab with 0 area still beats any Remnant with max area.
+  const slabNoArea = { source_inventory_type: "Slab", width_actual_in: null, length_actual_in: null };
+  const bigRemnant = { source_inventory_type: "Remnant", width_actual_in: 200, length_actual_in: 200 };
+  assert.ok(
+    scoreRepresentativeInventoryImage(slabNoArea, okImage) > scoreRepresentativeInventoryImage(bigRemnant, okImage),
+    "Slab with no dims still beats large Remnant"
+  );
+
+  // Deterministic: same inputs → same score.
+  assert.equal(
+    scoreRepresentativeInventoryImage(slabRow, okImage),
+    scoreRepresentativeInventoryImage(slabRow, okImage),
+    "deterministic score"
+  );
+
+  // Missing dimensions → area = 0 (graceful, not NaN).
+  const noArea = { source_inventory_type: "Slab", width_actual_in: null, length_actual_in: null };
+  const noAreaScore = scoreRepresentativeInventoryImage(noArea, okImage);
+  assert.ok(Number.isFinite(noAreaScore) && noAreaScore > 0, "null dims produce finite positive score");
+
+  // count_for_color is not involved — score must not depend on it.
+  const rowWithCount = { ...slabRow, count_for_color: 9999 };
+  assert.equal(
+    scoreRepresentativeInventoryImage(rowWithCount, okImage),
+    scoreRepresentativeInventoryImage(slabRow, okImage),
+    "count_for_color does not affect score"
+  );
+
+  console.log("ok: scoreRepresentativeInventoryImage (Slab>Remnant, ok>missing, area tiebreaker, deterministic)");
+}
+
+/* ── chooseRepresentativeInventoryImage ─────────────────────────────────── */
+{
+  // Full-slab ok image beats remnant ok image.
+  const rows = [
+    { external_slab_id: "s-rem",  source_inventory_type: "Remnant", width_actual_in: 80, length_actual_in: 100, inventory_id: "inv-rem" },
+    { external_slab_id: "s-slab", source_inventory_type: "Slab",    width_actual_in: 60, length_actual_in: 90,  inventory_id: "inv-slab" },
+  ];
+  const imageMap = new Map([
+    ["s-rem",  { image_status: "ok", image_url: "rem.jpg",  thumbnail_url: "rem_t.jpg" }],
+    ["s-slab", { image_status: "ok", image_url: "slab.jpg", thumbnail_url: "slab_t.jpg" }],
+  ]);
+  const result = chooseRepresentativeInventoryImage(rows, imageMap);
+  assert.equal(result.representative_image_url, "slab.jpg", "full slab beats remnant");
+  assert.equal(result.representative_image_source_inventory_type, "Slab", "type reported correctly");
+  assert.equal(result.representative_image_inventory_id, "inv-slab", "inventory_id reported");
+
+  // ok image beats missing/unknown image.
+  const rows2 = [
+    { external_slab_id: "s-miss",  source_inventory_type: "Slab", width_actual_in: 120, length_actual_in: 80, inventory_id: "inv-miss" },
+    { external_slab_id: "s-ok",    source_inventory_type: "Slab", width_actual_in: 60,  length_actual_in: 60, inventory_id: "inv-ok" },
+  ];
+  const imageMap2 = new Map([
+    ["s-miss", { image_status: "missing", image_url: "miss.jpg",  thumbnail_url: null }],
+    ["s-ok",   { image_status: "ok",      image_url: "ok.jpg",    thumbnail_url: "ok_t.jpg" }],
+  ]);
+  const result2 = chooseRepresentativeInventoryImage(rows2, imageMap2);
+  assert.equal(result2.representative_image_url, "ok.jpg", "ok image beats missing/unknown even if smaller slab");
+
+  // Larger area wins among same type + ok status.
+  const rows3 = [
+    { external_slab_id: "s-big",   source_inventory_type: "Slab", width_actual_in: 130, length_actual_in: 86, inventory_id: "inv-big" },
+    { external_slab_id: "s-small", source_inventory_type: "Slab", width_actual_in: 20,  length_actual_in: 20, inventory_id: "inv-small" },
+  ];
+  const imageMap3 = new Map([
+    ["s-big",   { image_status: "ok", image_url: "big.jpg",   thumbnail_url: "big_t.jpg" }],
+    ["s-small", { image_status: "ok", image_url: "small.jpg", thumbnail_url: "small_t.jpg" }],
+  ]);
+  const result3 = chooseRepresentativeInventoryImage(rows3, imageMap3);
+  assert.equal(result3.representative_image_url, "big.jpg", "larger slab area wins");
+
+  // Fallback when no usable image exists.
+  const rows4 = [
+    { external_slab_id: "s-x", source_inventory_type: "Slab", width_actual_in: 80, length_actual_in: 80 }
+  ];
+  const imageMap4 = new Map([
+    ["s-x", { image_status: "missing", image_url: "miss.jpg", thumbnail_url: null }]
+  ]);
+  const result4 = chooseRepresentativeInventoryImage(rows4, imageMap4);
+  assert.equal(result4.representative_image_url, null, "no usable image → null url");
+  assert.equal(result4.representative_image_source_inventory_type, null, "no usable image → null type");
+  assert.equal(result4.representative_image_inventory_id, null, "no usable image → null inventory_id");
+
+  // Empty rows → all nulls (no crash).
+  const result5 = chooseRepresentativeInventoryImage([], new Map());
+  assert.equal(result5.representative_image_url, null, "empty rows → null url");
+
+  // Deterministic tie-breaking: order in array is the tie-breaker for equal scores.
+  const rowsEqual = [
+    { external_slab_id: "s-first",  source_inventory_type: "Slab", width_actual_in: 80, length_actual_in: 80, inventory_id: "inv-first" },
+    { external_slab_id: "s-second", source_inventory_type: "Slab", width_actual_in: 80, length_actual_in: 80, inventory_id: "inv-second" },
+  ];
+  const imageMapEqual = new Map([
+    ["s-first",  { image_status: "ok", image_url: "first.jpg",  thumbnail_url: "first_t.jpg" }],
+    ["s-second", { image_status: "ok", image_url: "second.jpg", thumbnail_url: "second_t.jpg" }],
+  ]);
+  const result6 = chooseRepresentativeInventoryImage(rowsEqual, imageMapEqual);
+  // First row wins on tie (strict > means equal scores keep the first winner).
+  assert.equal(result6.representative_image_url, "first.jpg", "first row wins on equal score (deterministic)");
+
+  // count_for_color is not read — verify no crash even if present.
+  const rowsWithCount = [
+    { external_slab_id: "s-c", source_inventory_type: "Slab", width_actual_in: 60, length_actual_in: 60, inventory_id: "inv-c", count_for_color: 9999 }
+  ];
+  const imageMapCount = new Map([
+    ["s-c", { image_status: "ok", image_url: "c.jpg", thumbnail_url: "c_t.jpg" }]
+  ]);
+  const result7 = chooseRepresentativeInventoryImage(rowsWithCount, imageMapCount);
+  assert.equal(result7.representative_image_url, "c.jpg", "count_for_color ignored — correct image still chosen");
+
+  console.log("ok: chooseRepresentativeInventoryImage (slab>remnant, ok>missing, area wins, fallback, deterministic, no count_for_color)");
+}
+
+/* ── buildElite100InventoryMap: rows tracked for scoring ────────────────── */
+{
+  const catalog = [
+    { id: "cat-scored", color_name: "Alpine White", material_name: "ESF",
+      normalized_color_name: "alpine white", normalized_material_name: "esf" }
+  ];
+  const invRows = [
+    { color_name: "Alpine White", material_name: "ESF",
+      source_inventory_type: "Slab", external_slab_id: "s1", inventory_id: "inv-1" },
+    { color_name: "Alpine White", material_name: "ESF",
+      source_inventory_type: "Remnant", external_slab_id: "s2", inventory_id: "inv-2" },
+  ];
+  const result = buildElite100InventoryMap(invRows, catalog, []);
+  const acc = result.get("cat-scored");
+
+  // rows array contains all matched inventory rows.
+  assert.ok(Array.isArray(acc.rows), "acc.rows is an array");
+  assert.equal(acc.rows.length, 2, "both rows are tracked");
+  assert.ok(acc.rows.some((r) => r.source_inventory_type === "Slab"), "Slab row tracked");
+  assert.ok(acc.rows.some((r) => r.source_inventory_type === "Remnant"), "Remnant row tracked");
+
+  // slabIds still populated (backward-compatible).
+  assert.ok(acc.slabIds.includes("s1") && acc.slabIds.includes("s2"), "slabIds still populated");
+  assert.equal(acc.slabCount, 1, "slabCount correct");
+  assert.equal(acc.remnantCount, 1, "remnantCount correct");
+
+  // With the rows, chooseRepresentativeInventoryImage can now pick the better image.
+  const imageMap = new Map([
+    ["s1", { image_status: "ok", image_url: "slab.jpg", thumbnail_url: "slab_t.jpg" }],
+    ["s2", { image_status: "ok", image_url: "rem.jpg",  thumbnail_url: "rem_t.jpg" }],
+  ]);
+  const repResult = chooseRepresentativeInventoryImage(acc.rows, imageMap);
+  assert.equal(repResult.representative_image_url, "slab.jpg", "chooses slab image from tracked rows");
+  assert.equal(repResult.representative_image_source_inventory_type, "Slab", "type reported from tracked rows");
+
+  console.log("ok: buildElite100InventoryMap rows tracked — enables scored representative image selection");
+}
+
+/* ── zero-inventory catalog item: no rows → null representative image ────── */
+{
+  const catalog = [
+    { id: "cat-empty", color_name: "Rare Gem", material_name: "ESF",
+      normalized_color_name: "rare gem", normalized_material_name: "esf" }
+  ];
+  const result = buildElite100InventoryMap([], catalog, []);
+  const acc = result.get("cat-empty");
+  assert.equal(acc.rows.length, 0, "no rows for zero-inventory item");
+  const repResult = chooseRepresentativeInventoryImage(acc.rows, new Map());
+  assert.equal(repResult.representative_image_url, null, "zero-inventory → null image");
+  assert.equal(repResult.representative_image_source_inventory_type, null, "zero-inventory → null type");
+  console.log("ok: zero-inventory catalog item → null representative image (no crash)");
+}
+
+/* ── rejected fuzzy still does not classify as Elite 100 ────────────────── */
+{
+  const catalog = [
+    { id: "cat-r", color_name: "Calacatta Lucent", material_name: "Stratus",
+      normalized_color_name: "calacatta lucent", normalized_material_name: "stratus" }
+  ];
+  const invRows = [
+    // Fuzzy candidate — should NOT appear in Elite 100 map
+    { color_name: "Calacatta Athena", material_name: "Stratus",
+      source_inventory_type: "Slab", external_slab_id: "s-fuzzy", inventory_id: "inv-fuzzy" }
+  ];
+  const result = buildElite100InventoryMap(invRows, catalog, []);
+  const acc = result.get("cat-r");
+  assert.equal(acc.slabCount, 0, "fuzzy match does not add to Elite 100 slabCount");
+  assert.equal(acc.rows.length, 0, "fuzzy match rows not tracked in Elite 100 acc");
+  assert.ok(!acc.slabIds.includes("s-fuzzy"), "fuzzy slab ID not in slabIds");
+  console.log("ok: rejected/fuzzy inventory does not classify as Elite 100 (rows check)");
+}
+
+/* ── aliases still resolve correctly with scored representative selection ── */
+{
+  const catalog = [
+    { id: "cat-alias", color_name: "Larvic", material_name: "ESF",
+      normalized_color_name: "larvic", normalized_material_name: "esf" }
+  ];
+  const aliases = [
+    {
+      normalized_alias_color_name: "larvik",
+      normalized_alias_material_name: "esf quartz",
+      catalog_color_name: "Larvic",
+      catalog_material_name: "ESF"
+    }
+  ];
+  const invRows = [
+    { color_name: "Larvik", material_name: "ESF Quartz",
+      source_inventory_type: "Slab", external_slab_id: "s-alias", inventory_id: "inv-alias" }
+  ];
+  const result = buildElite100InventoryMap(invRows, catalog, aliases);
+  const acc = result.get("cat-alias");
+  assert.equal(acc.slabCount, 1, "alias match counts as Elite 100 slab");
+  assert.equal(acc.rows.length, 1, "alias match row tracked");
+
+  const imageMap = new Map([
+    ["s-alias", { image_status: "ok", image_url: "alias.jpg", thumbnail_url: "alias_t.jpg" }]
+  ]);
+  const repResult = chooseRepresentativeInventoryImage(acc.rows, imageMap);
+  assert.equal(repResult.representative_image_url, "alias.jpg", "alias-matched slab provides representative image");
+  assert.equal(repResult.representative_image_source_inventory_type, "Slab");
+  console.log("ok: aliases resolve correctly and contribute representative images");
 }
 
 console.log("\nslabInventoryApi: all tests passed");
