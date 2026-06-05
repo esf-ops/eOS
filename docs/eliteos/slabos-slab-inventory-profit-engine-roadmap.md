@@ -494,7 +494,29 @@ Color-level aggregation API is now live. See `slabcloud-inventory-poc.md §12` a
 
 ---
 
-## 13. Do-Not-Build-Yet List
+## 13. Elite 100 editable color catalog + fuzzy matching foundation (Phase 2 extension)
+
+Elite 100 catalog layer is now in place. See `slabcloud-inventory-poc.md §13` and `FEATURE_DECISIONS.md §76` for full details.
+
+**What was added:**
+- SQL draft for 4 catalog tables (`slab_color_collections`, `slab_color_catalog_items`, `slab_color_aliases`, `slab_color_program_match_reviews`). Not yet applied — requires Chris to verify fixture transcription first.
+- `elite100-2026.json` fixture: 100 colors (Promo=15, A=18, B=18, C=17, D=16, E=5, F=11). 9 items flagged for review.
+- `colorProgramMatching.js`: pure helpers (`normalizeColorName`, `normalizeMaterialName`, `buildColorKey`, `levenshtein`, `materialsCompatible`, `matchSourceColorToCatalog`, `matchAllSourceColors`).
+- `importElite100Catalog.js`: dry-run-safe write-gated import script (Promo/A–F only; rejects Group G; prints all review flags).
+- `previewElite100Matches.js`: match preview (self-test without Supabase; live-test with credentials).
+- 18 new test suites in `eos:test:slab-color-program-matching`.
+
+**Active ESF price groups:** Promo, A, B, C, D, E, F only. Group G not accepted.
+
+**Fuzzy matching:** never auto-approves. All fuzzy results are `needs_review`. Exact and alias matches are `approved`. Unmatched = Non-Stock candidates.
+
+**Elite 100 list is versioned:** changes annually. Live source of truth is Supabase catalog tables after import, not hardcoded frontend logic.
+
+**Next steps before UI:** Apply SQL, verify fixture with Chris, run write-enabled import, run preview against live typed inventory.
+
+---
+
+## 14. Do-Not-Build-Yet List
 
 The following are explicitly out of scope until the prerequisite phases are done and each item is scoped separately:
 

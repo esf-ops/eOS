@@ -600,3 +600,63 @@ All cards return `program_status = "unclassified"`. Elite 100 classification req
 - `COLOR_INVENTORY_SELECT_COLUMNS` never includes `count_for_color`, `raw_json`, `usable_*`, or meter columns.
 
 See `FEATURE_DECISIONS.md §75` for the full decision record.
+
+---
+
+## 13. Elite 100 editable color catalog + fuzzy matching foundation
+
+### Summary
+
+The backend/data foundation for classifying SlabCloud color groups into Elite 100 vs. Non-Stock is now in place. This must happen before building the Elite 100 carousel UI.
+
+### New files
+
+| File | Purpose |
+|------|---------|
+| `backend-core/supabase/eliteos_slab_inventory_color_catalog.sql` | SQL draft — 4 catalog tables |
+| `backend-core/src/slabInventory/fixtures/elite100-2026.json` | 100-color fixture (transcribed from screenshot) |
+| `backend-core/src/slabInventory/colorProgramMatching.js` | Pure matching helpers |
+| `backend-core/src/scripts/slabInventory/importElite100Catalog.js` | Dry-run import script |
+| `backend-core/src/scripts/slabInventory/previewElite100Matches.js` | Match preview script |
+| `backend-core/src/slabInventory/colorProgramMatching.test.mjs` | 18 pure-unit test suites |
+
+### New SQL tables (draft — not yet applied)
+
+- **`slab_color_collections`** — versioned collection records (e.g. `elite100-2026`). `is_active=false` by default; operator activates after verifying.
+- **`slab_color_catalog_items`** — individual color entries. `price_group` constrained to Promo/A/B/C/D/E/F. Group G not allowed.
+- **`slab_color_aliases`** — alternate spellings / source-system name variants for alias matching.
+- **`slab_color_program_match_reviews`** — per-color match result records with `match_method` (exact/alias/fuzzy/manual/none) and `review_status` (approved/needs_review/rejected).
+
+All four tables have RLS enabled with no permissive policies (service-role only).
+
+### Fixture transcription notes (9 items flagged for Chris's review)
+
+| Group | Item | Note |
+|-------|------|------|
+| A | Wiscon White | Possible truncation — may be "Wisconsin White" |
+| B | Belezza | Possible spelling — may be "Bellezza" |
+| B | Regal D'Oro | Apostrophe encoding — verify matches SlabCloud source |
+| C | Aurataj | Unusual name — verify from Q Quartz product list |
+| C | Macavella | Unusual name — verify from ASMI product list |
+| D | Larvic | Possible spelling — may be "Larvik" |
+| D | Solitaj | Unusual name — verify from Q Quartz product list |
+| D | St. Soubirous | Unusual name — verify from Aggranite product list |
+| F | Calacatta Viol | Possible truncation — may be "Calacatta Viola" |
+
+**Chris must verify all `_review` items before running write-enabled import.**
+
+### Matching behavior
+
+- Matching order: **exact → alias → fuzzy → none**.
+- **Exact**: normalized color name + exact (or empty) material → `review_status=approved`.
+- **Alias**: exact color + compatible material via alias group (ESF ≡ ESF Quartz) → `review_status=approved`.
+- **Fuzzy**: Levenshtein similarity ≥ 0.75 + compatible material → `review_status=needs_review` always.
+- **None**: no match → Non-Stock candidate.
+- Low-confidence fuzzy MUST NOT silently classify as Elite 100.
+- All fuzzy suggestions require human review.
+
+### Screenshot parsing convention
+
+Each item in "The 100 Color Collection" is `"Color Name - Manufacturer/Brand"`. The left side is `color_name`; the right side is `material_name`. Do not reverse.
+
+See `FEATURE_DECISIONS.md §76` for the full decision record.
