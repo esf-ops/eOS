@@ -13,6 +13,8 @@
   --eos-ink-soft: #1e293b;
   --eos-ink-mid: #475569;
   --eos-ink-muted: #64748b;
+  /* Elite 100 carousel card width — single source of truth */
+  --e100-card-width: 296px;
   --eos-ink-faint: #94a3b8;
   --eos-line: #e8ecf0;
   --eos-line-strong: #cbd5e1;
@@ -1137,15 +1139,15 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 .e100-skeleton-head { height: 28px; width: 200px; border-radius: 8px; }
 .e100-skeleton-rail { display: flex; gap: 16px; overflow: hidden; }
 .e100-skeleton-card {
-  flex: 0 0 224px;
-  height: 296px;
-  border-radius: 18px;
+  flex: 0 0 var(--e100-card-width);
+  height: 380px;
+  border-radius: 20px;
 }
 
 /* ─────────────────────────────────────────── Color Program Card (Elite 100) */
 
 .cp-card {
-  flex: 0 0 224px;
+  flex: 0 0 var(--e100-card-width);
   display: flex;
   flex-direction: column;
   text-align: left;
@@ -1154,45 +1156,44 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
   padding: 0;
   cursor: pointer;
   scroll-snap-align: start;
-  transition: transform 240ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 280ms cubic-bezier(0.4, 0, 0.2, 1);
 }
-.cp-card:hover { transform: translateY(-5px); }
+.cp-card:hover { transform: translateY(-7px); }
 .cp-card:focus-visible { outline: none; }
 .cp-card:focus-visible .cp-card-mat { outline: 2px solid var(--eos-accent); outline-offset: 3px; }
 
-/* White mat — the premium contained-image sample tray */
+/* White mat — premium inset sample-tile treatment */
 .cp-card-mat {
   background: #ffffff;
   border: 1px solid #e8ecf0;
-  border-radius: 18px;
-  padding: 14px;
+  border-radius: 20px;
+  padding: 12px;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05), 0 2px 10px rgba(15, 23, 42, 0.04);
-  transition: box-shadow 260ms cubic-bezier(0.4, 0, 0.2, 1), border-color 200ms ease, transform 260ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: box-shadow 280ms cubic-bezier(0.4, 0, 0.2, 1), border-color 200ms ease;
   position: relative;
   overflow: hidden;
 }
 .cp-card:hover .cp-card-mat {
-  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.11), 0 4px 12px rgba(15, 23, 42, 0.06);
-  border-color: #d4dbe7;
+  box-shadow: 0 20px 48px rgba(15, 23, 42, 0.12), 0 6px 16px rgba(15, 23, 42, 0.07);
+  border-color: #cdd5e0;
 }
 
-/* Stone image tray — consistent 4:3 area, contains image without cropping */
+/* Stone image tray — square (1:1) fills the card like a premium sample tile.
+   object-fit:cover fills from center; tray clips overflow so image is fully inset. */
 .cp-card-img-wrap {
-  aspect-ratio: 4 / 3;
-  border-radius: 9px;
+  aspect-ratio: 1 / 1;
+  border-radius: 10px;
   overflow: hidden;
-  background: #f7f5f2;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  background: #f5f3f0;
 }
 .cp-card-img {
   width: 100%; height: 100%;
-  object-fit: contain;
+  object-fit: cover;
+  object-position: center;
   display: block;
-  transition: transform 360ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 400ms cubic-bezier(0.4, 0, 0.2, 1);
 }
-.cp-card:hover .cp-card-img { transform: scale(1.04); }
+.cp-card:hover .cp-card-img { transform: scale(1.12); }
 
 /* Placeholder tile for colors without images */
 .cp-card-placeholder {
@@ -1203,14 +1204,14 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
   background: linear-gradient(145deg, #eeecea 0%, #e8e3e7 100%);
   color: #8a8380;
   font-weight: 600;
-  font-size: 1rem;
-  letter-spacing: 0.12em;
+  font-size: 1.1rem;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
 /* Card body — color name + material + count or no-inventory state */
 .cp-card-body {
-  padding: 11px 2px 2px;
+  padding: 12px 2px 2px;
   display: flex;
   flex-direction: column;
   gap: 0;
@@ -1219,22 +1220,22 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 /* Color name: primary label — wraps gracefully to 2 lines */
 .cp-card-name {
   margin: 0;
-  font-size: 0.95rem;
+  font-size: 1rem;
   font-weight: 700;
   color: var(--eos-ink);
-  letter-spacing: -0.013em;
+  letter-spacing: -0.015em;
   line-height: 1.3;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  min-height: 2.46em; /* reserve 2 lines so cards align */
+  min-height: 2.6em;
 }
 
 /* Material name: always-visible faint secondary line */
 .cp-card-material {
   margin: 3px 0 0;
-  font-size: 0.7rem;
+  font-size: 0.72rem;
   color: var(--eos-ink-faint);
   font-weight: 500;
   letter-spacing: 0.01em;
@@ -1247,7 +1248,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 /* Count meta: slabs · remnants */
 .cp-card-meta {
   margin: 5px 0 0;
-  font-size: 0.69rem;
+  font-size: 0.7rem;
   color: var(--eos-ink-muted);
   display: flex;
   align-items: center;
@@ -1260,7 +1261,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 /* No-inventory text — subtle, not a pill badge */
 .cp-card-no-inv-text {
   margin: 5px 0 0;
-  font-size: 0.68rem;
+  font-size: 0.69rem;
   color: var(--eos-ink-faint);
   font-style: italic;
   letter-spacing: 0.01em;
@@ -1268,6 +1269,14 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 
 /* deprecated inline badge (no longer rendered, kept for safety) */
 .cp-card-no-inv { display: none; }
+
+/* Responsive: smaller cards on narrow viewports */
+@media (max-width: 680px) {
+  :root { --e100-card-width: 220px; }
+}
+@media (max-width: 400px) {
+  :root { --e100-card-width: 190px; }
+}
 
 /* ─────────────────────────────────────────── Non-Stock page */
 

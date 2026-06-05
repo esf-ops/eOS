@@ -1160,7 +1160,7 @@ function Elite100Section({ group, onOpenItem }: { group: Elite100Group; onOpenIt
   const scroll = (dir: -1 | 1) => {
     const rail = railRef.current;
     if (!rail) return;
-    rail.scrollBy({ left: dir * 732, behavior: "smooth" });
+    rail.scrollBy({ left: dir * 948, behavior: "smooth" });
   };
   return (
     <section className="e100-section" aria-labelledby={`e100-group-${group.price_group}`}>
