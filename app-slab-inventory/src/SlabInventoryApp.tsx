@@ -1160,7 +1160,7 @@ function Elite100Section({ group, onOpenItem }: { group: Elite100Group; onOpenIt
   const scroll = (dir: -1 | 1) => {
     const rail = railRef.current;
     if (!rail) return;
-    rail.scrollBy({ left: dir * 840, behavior: "smooth" });
+    rail.scrollBy({ left: dir * 732, behavior: "smooth" });
   };
   return (
     <section className="e100-section" aria-labelledby={`e100-group-${group.price_group}`}>
@@ -1219,20 +1219,20 @@ function Elite100Card({ item, onOpen }: { item: Elite100Item; onOpen: () => void
             </div>
           )}
         </div>
-        {!item.has_inventory && (
-          <div className="cp-card-no-inv" aria-label="No current inventory">
-            <span>No inventory</span>
-          </div>
-        )}
       </div>
       <div className="cp-card-body">
         <p className="cp-card-name">{item.color_name || "—"}</p>
-        {item.has_inventory && (item.slab_count > 0 || item.remnant_count > 0) && (
+        {item.material_name ? (
+          <p className="cp-card-material">{item.material_name}</p>
+        ) : null}
+        {item.has_inventory && (item.slab_count > 0 || item.remnant_count > 0) ? (
           <p className="cp-card-meta">
             {item.slab_count > 0 && <span>{item.slab_count} slab{item.slab_count !== 1 ? "s" : ""}</span>}
             {item.slab_count > 0 && item.remnant_count > 0 && <span className="cp-dot" aria-hidden> · </span>}
             {item.remnant_count > 0 && <span>{item.remnant_count} remnant{item.remnant_count !== 1 ? "s" : ""}</span>}
           </p>
+        ) : (
+          <p className="cp-card-no-inv-text">No current inventory</p>
         )}
       </div>
     </button>
