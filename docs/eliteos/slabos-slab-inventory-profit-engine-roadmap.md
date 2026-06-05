@@ -440,6 +440,40 @@ cat debug/slabcloud/slabcloud-manager-scope-diagnostic.json
 
 **Do NOT change `SLABCLOUD_API_COMPANY_CODE`** until diagnostic output is reviewed. Do NOT add a second sync lane (Remnant, Full Slab, etc.) without operator sign-off.
 
+### Full inventory scope upgrade (2026-06-05)
+
+**Diagnostic results confirmed:**
+
+| Endpoint | Rows |
+|----------|------|
+| `?type=Slab&edges=true` | 145 |
+| `?type=Remnant&edges=true` | 689 |
+| `?edges=true` (bare — all inventory) | **742** |
+| `?type=Full%20Slab`, `?type=All` | 0 (not supported) |
+
+**Decision:** Upgraded the cache pipeline to support `SLABCLOUD_INVENTORY_SCOPE=all` (bare `?edges=true` endpoint = full catalog). Schema draft written at `backend-core/supabase/eliteos_slabcloud_inventory_scope_upgrade.sql`. See FEATURE_DECISIONS.md §73 for full context.
+
+**Updated open questions:**
+
+- Q14 (resolved): `type=Full Slab` and `type=All` return 0 rows. The full catalog comes from the bare endpoint with no type param.
+- Q2 (resolved): API company code is confirmed `kbyd`. Public slug is `esf`. These are now tracked as separate config concepts.
+
+**Next manual step:** Apply SQL migration in Supabase, then run capped write-enabled all-scope smoke:
+
+```bash
+# Dry-run all-scope (safe)
+SLABCLOUD_INVENTORY_SCOPE=all SLABCLOUD_API_COMPANY_CODE=kbyd \
+  SLABCLOUD_ASSET_COMPANY_CODE=kbyd SLABCLOUD_PUBLIC_SLUG=esf \
+  npm run eos:slabcloud:cache
+
+# Capped write-enabled smoke (after SQL applied + review)
+SLABCLOUD_CACHE_WRITE_ENABLED=1 SLABCLOUD_ORGANIZATION_ID=<org-uuid> \
+  SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
+  SLABCLOUD_INVENTORY_SCOPE=all SLABCLOUD_API_COMPANY_CODE=kbyd \
+  SLABCLOUD_ASSET_COMPANY_CODE=kbyd SLABCLOUD_PUBLIC_SLUG=esf \
+  SLABCLOUD_MAX_DETAILS=20 npm run eos:slabcloud:cache
+```
+
 ---
 
 ## 12. Do-Not-Build-Yet List

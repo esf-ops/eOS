@@ -100,11 +100,15 @@ function wrapError(err) {
 // ── Pure payload builders ────────────────────────────────────────────────────
 
 function companyOf(config) {
-  return config?.companyCode || DEFAULT_COMPANY_CODE;
+  return config?.apiCompanyCode || config?.companyCode || DEFAULT_COMPANY_CODE;
 }
 
 /**
  * Initial slabcloud_sync_runs insert payload (status = "running").
+ *
+ * Includes scope columns added by eliteos_slabcloud_inventory_scope_upgrade.sql.
+ * PREREQUISITE: SQL migration must be applied before write-enabled runs that
+ * include non-null source_public_slug / inventory_scope / row counts.
  */
 export function buildSyncRunInsert({ organizationId, config = {}, runMeta = {}, now = defaultNow }) {
   return {
@@ -123,12 +127,23 @@ export function buildSyncRunInsert({ organizationId, config = {}, runMeta = {}, 
     slab_detail_row_count: runMeta.slabDetailRowCount ?? null,
     warning_count: 0,
     warnings: [],
+    // Scope columns — require eliteos_slabcloud_inventory_scope_upgrade.sql applied.
+    source_public_slug: config?.publicSlug ?? null,
+    source_api_company_code: config?.apiCompanyCode || companyOf(config) || null,
+    source_asset_company_code:
+      config?.assetCompanyCode || config?.apiCompanyCode || companyOf(config) || null,
+    inventory_scope: runMeta.inventoryScope ?? null,
+    slab_row_count: runMeta.slabRowCount ?? null,
+    remnant_row_count: runMeta.remnantRowCount ?? null,
+    all_inventory_row_count: runMeta.allInventoryRowCount ?? null,
   };
 }
 
 /**
  * Raw record rows — ONE per normalized record, INCLUDING records with a missing
  * external_slab_id. Raw preservation is unconditional.
+ *
+ * source_inventory_type and source_inventory_scope require SQL migration applied.
  */
 export function buildRawRecordRows({
   organizationId,
@@ -147,6 +162,9 @@ export function buildRawRecordRows({
     color_name: rec.color_name ?? null,
     record_source: recordSource,
     raw_json: rec.raw ?? {},
+    // Scope columns — require eliteos_slabcloud_inventory_scope_upgrade.sql applied.
+    source_inventory_type: rec.source_inventory_type ?? null,
+    source_inventory_scope: rec.source_inventory_scope ?? null,
   }));
 }
 
@@ -157,6 +175,9 @@ export function buildRawRecordRows({
  * Phase 1: is_active is always true; no row is ever deactivated here.
  * first_seen_sync_run_id is intentionally NOT set on upsert to avoid clobbering
  * the original value on re-sync; only last_seen_sync_run_id is maintained.
+ *
+ * Source/scope columns require eliteos_slabcloud_inventory_scope_upgrade.sql applied.
+ * is_remnant is a GENERATED column in the DB and must NOT be included in the payload.
  */
 export function buildInventoryRows({
   organizationId,
@@ -195,6 +216,13 @@ export function buildInventoryRows({
       is_active: true,
       last_seen_sync_run_id: syncRunId,
       updated_at: ts,
+      // Scope columns — require eliteos_slabcloud_inventory_scope_upgrade.sql applied.
+      // is_remnant is GENERATED ALWAYS in the DB — do not set it here.
+      source_inventory_type: rec.source_inventory_type ?? null,
+      source_inventory_scope: rec.source_inventory_scope ?? null,
+      source_public_slug: rec.source_public_slug ?? null,
+      source_api_company_code: rec.source_api_company_code ?? null,
+      source_asset_company_code: rec.source_asset_company_code ?? null,
     }));
 }
 
@@ -249,6 +277,8 @@ export function buildMaterialRows({
 /**
  * slab_images upsert rows. Only for records with both an external_slab_id and a
  * guessed image URL. image_status is always "unknown" in Phase 1 (no probing here).
+ *
+ * source_asset_company_code requires eliteos_slabcloud_inventory_scope_upgrade.sql applied.
  */
 export function buildImageRows({ organizationId, config = {}, normalized = [], now = defaultNow }) {
   const ts = now();
@@ -264,6 +294,8 @@ export function buildImageRows({ organizationId, config = {}, normalized = [], n
       image_status: "unknown",
       last_checked_at: null,
       updated_at: ts,
+      // Scope column — requires eliteos_slabcloud_inventory_scope_upgrade.sql applied.
+      source_asset_company_code: rec.source_asset_company_code ?? null,
     }));
 }
 

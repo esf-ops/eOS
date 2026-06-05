@@ -945,3 +945,25 @@
 
 ---
 
+### 73. SlabCloud full inventory cache support — Slabs + Remnants, write-gated scope upgrade
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-06-05 |
+| **Decision** | Upgraded the SlabCloud cache pipeline to support ingesting the full public ESF inventory scope (Slabs + Remnants) via the bare `?edges=true` endpoint (742 rows). Separated `publicSlug`, `apiCompanyCode`, and `assetCompanyCode` into distinct configurable concepts. Added new source provenance fields to every normalized record and payload. Schema draft only — no SQL applied, no writes to Supabase. |
+| **Diagnostic basis** | Confirmed by manager-scope diagnostic (Decision #72): `type=Slab` returns 145 rows, `type=Remnant` returns 689 rows, bare `?edges=true` returns 742. Missing inventory is a type/scope filter gap. Company code `kbyd` is confirmed correct for both API and assets. |
+| **Correct config model** | `SLABCLOUD_PUBLIC_SLUG=esf` (URL slug, traceability only) · `SLABCLOUD_API_COMPANY_CODE=kbyd` (API requests) · `SLABCLOUD_ASSET_COMPANY_CODE=kbyd` (image URL paths) · `SLABCLOUD_INVENTORY_SCOPE=all` for full catalog. Default remains `slab` to avoid surprising writes on existing production scripts. |
+| **Backward compatibility** | `SLABCLOUD_COMPANY_CODE` still maps to `apiCompanyCode`. All existing scripts that pass `companyCode: "kbyd"` continue to work unchanged. New source fields are `null` when not provided — safe for existing syncs. |
+| **Schema draft** | `backend-core/supabase/eliteos_slabcloud_inventory_scope_upgrade.sql`. Adds: `source_inventory_type`, `is_remnant` (GENERATED ALWAYS), `source_inventory_scope`, `source_public_slug`, `source_api_company_code`, `source_asset_company_code` to `slab_inventory`; `source_inventory_type`, `source_inventory_scope` to `slab_inventory_raw_records`; `source_asset_company_code` to `slab_images`; scope metadata + row counts to `slabcloud_sync_runs`. 4 new indexes. No DML, no deletes, no RLS changes. |
+| **Prerequisites for write-enabled all-scope sync** | SQL migration MUST be applied in Supabase before running write-enabled all-scope sync. Persistence payloads now include new columns; PostgREST will reject them if columns do not exist. Dry-run always safe (no Supabase calls). |
+| **is_remnant semantics** | `GENERATED ALWAYS AS (COALESCE(source_inventory_type = 'Remnant', false)) STORED`. Old rows (pre-upgrade) get `false`, not `null`. The upsert payload must NEVER include `is_remnant` — the DB computes it. |
+| **Source price group** | `price_group` remains imported-only from SlabCloud. No edit/override controls were added. This field is authoritative from the SlabCloud source. |
+| **What is NOT built** | UI changes to `app-slab-inventory`, Elite 100 carousel, Non-Stock tab, public showroom, holds/reservations, quote allocation, price group overrides, scheduled automation, writeback to SlabCloud, inactive/delete marking. No changes to Internal Estimate, Quote Library, Sales Dashboard, Pricing Admin, Moraware, AI Takeoff, Home Launcher, shared EliteosTopbar. |
+| **Tests** | Added tests for `scopeToInventoryType`, `buildClientConfig` scope/multi-code, all-scope URL (no `type=` param), `normalizeSlabRecord` source provenance fields, `buildInventoryRows`/`buildRawRecordRows`/`buildImageRows`/`buildSyncRunInsert` new fields, `is_remnant` exclusion from upsert payloads, no-delete/no-deactivate assertions. All suites pass. |
+| **Dry-run all-scope confirmed** | `SLABCLOUD_INVENTORY_SCOPE=all SLABCLOUD_API_COMPANY_CODE=kbyd SLABCLOUD_ASSET_COMPANY_CODE=kbyd SLABCLOUD_PUBLIC_SLUG=esf npm run eos:slabcloud:cache` completes successfully with ~742 normalized records. |
+| **Impacted files** | `backend-core/supabase/eliteos_slabcloud_inventory_scope_upgrade.sql` (new), `backend-core/src/slabcloud/slabCloudClient.js` (scope constants, `scopeToInventoryType`, `buildClientConfig` extended), `normalizeSlabCloudInventory.js` (source fields), `slabCloudSync.js` (normalizer opts, type breakdown), `slabCloudPersistence.js` (payload builders extended), `backend-core/src/scripts/slabcloud/cacheSlabCloudInventory.js` (new env vars, output), `slabCloudInventoryPoc.test.mjs` (new tests), `slabCloudPersistence.test.mjs` (new tests), `docs/eliteos/slabcloud-inventory-poc.md`, `docs/eliteos/slabos-slab-inventory-profit-engine-roadmap.md`, `docs/eliteos/FEATURE_DECISIONS.md` (this entry). |
+| **Manual step required** | Apply `backend-core/supabase/eliteos_slabcloud_inventory_scope_upgrade.sql` in Supabase SQL editor. Then run all-scope dry-run, then capped write-enabled smoke (see SQL file comments for exact command). |
+| **Revisit trigger** | SQL migration applied; all-scope write-enabled smoke reviewed and approved; `app-slab-inventory` UI updated to show Remnant filter; scheduled automation proposed. |
+
+---
+

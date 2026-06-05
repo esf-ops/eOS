@@ -13,6 +13,7 @@ import {
   buildRawRecordRows,
   buildImageRows,
   buildMaterialRows,
+  buildSyncRunInsert,
   materialNameOf,
   CACHE_WRITE_ENV,
   TABLE_SYNC_RUNS,
@@ -158,8 +159,30 @@ const SAMPLE_MATERIALS = [
   { Material: "ESF Quartz" }, // duplicate — should dedup
 ];
 
-function normalized() {
-  return normalizeSlabRecords(SAMPLE_RAW, { companyCode: "kbyd" });
+function normalized(opts = {}) {
+  return normalizeSlabRecords(SAMPLE_RAW, { companyCode: "kbyd", ...opts });
+}
+
+function normalizedWithScope() {
+  return normalizeSlabRecords(SAMPLE_RAW, {
+    companyCode: "kbyd",
+    apiCompanyCode: "kbyd",
+    assetCompanyCode: "kbyd",
+    publicSlug: "esf",
+    inventoryScope: "slab",
+    inventoryType: "Slab",
+  });
+}
+
+function normalizedRemnant() {
+  return normalizeSlabRecords(SAMPLE_RAW, {
+    companyCode: "kbyd",
+    apiCompanyCode: "kbyd",
+    assetCompanyCode: "kbyd",
+    publicSlug: "esf",
+    inventoryScope: "remnant",
+    inventoryType: "Remnant",
+  });
 }
 
 // ── isCacheWriteEnabled reflects env ─────────────────────────────────────────
@@ -507,6 +530,165 @@ function normalized() {
   assert.equal(materialNameOf({}), null, "materialNameOf empty → null");
   assert.equal(materialNameOf(null), null, "materialNameOf null → null");
   console.log("ok: pure builders");
+}
+
+// ── buildInventoryRows carries source provenance fields ───────────────────────
+{
+  const rows = buildInventoryRows({
+    organizationId: SENTINEL_ORG_ID,
+    config: {
+      companyCode: "kbyd",
+      apiCompanyCode: "kbyd",
+      assetCompanyCode: "kbyd",
+      publicSlug: "esf",
+      inventoryScope: "slab",
+    },
+    normalized: normalizedWithScope(),
+  });
+  assert.equal(rows.length, 2, "2 inventory rows (null id skipped)");
+  for (const row of rows) {
+    assert.equal(row.source_inventory_type, "Slab", "source_inventory_type=Slab");
+    assert.equal(row.source_inventory_scope, "slab", "source_inventory_scope=slab");
+    assert.equal(row.source_public_slug, "esf", "source_public_slug=esf");
+    assert.equal(row.source_api_company_code, "kbyd", "source_api_company_code=kbyd");
+    assert.equal(row.source_asset_company_code, "kbyd", "source_asset_company_code=kbyd");
+    // is_remnant is GENERATED in DB — must NOT appear in upsert payload.
+    assert.ok(!("is_remnant" in row), "is_remnant NOT in upsert payload (DB GENERATED)");
+  }
+
+  const remnantRows = buildInventoryRows({
+    organizationId: SENTINEL_ORG_ID,
+    config: { companyCode: "kbyd", inventoryScope: "remnant" },
+    normalized: normalizedRemnant(),
+  });
+  for (const row of remnantRows) {
+    assert.equal(row.source_inventory_type, "Remnant", "remnant rows carry source_inventory_type=Remnant");
+    assert.equal(row.source_inventory_scope, "remnant", "remnant rows carry source_inventory_scope=remnant");
+  }
+
+  // Backward compat: config without new fields → source fields null in rows (from normalized).
+  const legacyRows = buildInventoryRows({
+    organizationId: SENTINEL_ORG_ID,
+    config: { companyCode: "kbyd" },
+    normalized: normalized(),
+  });
+  for (const row of legacyRows) {
+    assert.equal(row.source_inventory_type, null, "legacy normalized → null source_inventory_type");
+    assert.equal(row.source_inventory_scope, null, "legacy normalized → null source_inventory_scope");
+    assert.equal(row.source_public_slug, null, "legacy normalized → null source_public_slug");
+  }
+  console.log("ok: buildInventoryRows source provenance fields");
+}
+
+// ── buildRawRecordRows carries source_inventory_type/scope ───────────────────
+{
+  const rows = buildRawRecordRows({
+    organizationId: SENTINEL_ORG_ID,
+    config: { companyCode: "kbyd" },
+    normalized: normalizedWithScope(),
+  });
+  assert.equal(rows.length, 3, "all 3 raw rows including null-id");
+  for (const row of rows) {
+    assert.equal(row.source_inventory_type, "Slab", "raw row source_inventory_type=Slab");
+    assert.equal(row.source_inventory_scope, "slab", "raw row source_inventory_scope=slab");
+  }
+  console.log("ok: buildRawRecordRows source inventory type/scope");
+}
+
+// ── buildImageRows carries source_asset_company_code ─────────────────────────
+{
+  const rows = buildImageRows({
+    organizationId: SENTINEL_ORG_ID,
+    config: { companyCode: "kbyd" },
+    normalized: normalizedWithScope(),
+  });
+  assert.equal(rows.length, 2, "2 image rows");
+  for (const row of rows) {
+    assert.equal(row.source_asset_company_code, "kbyd", "image row source_asset_company_code=kbyd");
+    // Image URL still uses lowercased SlabID.
+    assert.ok(!/[A-Z]/.test(row.image_url.split("/slabs/")[1]), "image_url path lowercase");
+  }
+
+  // When apiCompanyCode and assetCompanyCode differ, image URL uses asset code.
+  const splitNorm = normalizeSlabRecords(SAMPLE_RAW, {
+    companyCode: "kbyd",
+    apiCompanyCode: "api-co",
+    assetCompanyCode: "cdn-co",
+    inventoryScope: "slab",
+    inventoryType: "Slab",
+  });
+  const splitRows = buildImageRows({
+    organizationId: SENTINEL_ORG_ID,
+    config: { companyCode: "api-co" },
+    normalized: splitNorm,
+  });
+  for (const row of splitRows) {
+    assert.equal(row.source_asset_company_code, "cdn-co", "image row source_asset_company_code=cdn-co");
+    assert.ok(row.image_url.includes("/slabs/cdn-co/"), "image URL path uses cdn-co (assetCompanyCode)");
+    assert.ok(!row.image_url.includes("/slabs/api-co/"), "image URL path does NOT use api-co");
+  }
+  console.log("ok: buildImageRows source_asset_company_code + image URL uses asset code");
+}
+
+// ── buildSyncRunInsert carries scope metadata ─────────────────────────────────
+{
+  const payload = buildSyncRunInsert({
+    organizationId: ORG_ID,
+    config: {
+      companyCode: "kbyd",
+      apiCompanyCode: "kbyd",
+      assetCompanyCode: "kbyd",
+      publicSlug: "esf",
+      inventoryScope: "all",
+    },
+    runMeta: {
+      triggeredBy: "script",
+      fetchMode: "summary_only",
+      inventoryScope: "all",
+      slabRowCount: 145,
+      remnantRowCount: 689,
+      allInventoryRowCount: 742,
+    },
+  });
+  assert.equal(payload.source_public_slug, "esf", "sync run source_public_slug=esf");
+  assert.equal(payload.source_api_company_code, "kbyd", "sync run source_api_company_code=kbyd");
+  assert.equal(payload.source_asset_company_code, "kbyd", "sync run source_asset_company_code=kbyd");
+  assert.equal(payload.inventory_scope, "all", "sync run inventory_scope=all");
+  assert.equal(payload.slab_row_count, 145, "sync run slab_row_count=145");
+  assert.equal(payload.remnant_row_count, 689, "sync run remnant_row_count=689");
+  assert.equal(payload.all_inventory_row_count, 742, "sync run all_inventory_row_count=742");
+  // Null values when not provided.
+  const minimal = buildSyncRunInsert({ organizationId: ORG_ID, config: { companyCode: "kbyd" } });
+  assert.equal(minimal.source_public_slug, null, "minimal payload → null source_public_slug");
+  assert.equal(minimal.inventory_scope, null, "minimal payload → null inventory_scope");
+  console.log("ok: buildSyncRunInsert scope metadata");
+}
+
+// ── No delete or deactivate calls in write path (scope upgrade regression) ───
+{
+  const db = createMockSupabase();
+  await persistSlabCloudInventory({
+    db,
+    organizationId: ORG_ID,
+    config: {
+      companyCode: "kbyd",
+      apiCompanyCode: "kbyd",
+      assetCompanyCode: "kbyd",
+      publicSlug: "esf",
+      inventoryScope: "all",
+    },
+    normalized: normalizedWithScope(),
+    materials: SAMPLE_MATERIALS,
+    writeEnabled: true,
+  });
+  assert.equal(db.calls.deletes.length, 0, "no delete calls after scope upgrade changes");
+  for (const c of db.calls.upserts) {
+    for (const row of c.payload) {
+      assert.notEqual(row.is_active, false, "no row deactivated in all-scope write");
+      assert.ok(!("is_remnant" in row), "is_remnant not in any upsert payload (GENERATED column)");
+    }
+  }
+  console.log("ok: no delete/deactivate in all-scope write path");
 }
 
 console.log("\nslabCloudPersistence: all tests passed");

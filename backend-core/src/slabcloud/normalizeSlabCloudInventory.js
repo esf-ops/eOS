@@ -58,8 +58,8 @@ export function metersToInches(meters, { decimals = 2 } = {}) {
 
 /**
  * Build *guessed* image URLs from the observed pattern:
- *   /slabs/{companyCode}/{SlabID}.jpg
- *   /slabs/{companyCode}/{lowercase-slabid}_thumb.jpg
+ *   /slabs/{assetCompanyCode}/{SlabID}.jpg
+ *   /slabs/{assetCompanyCode}/{lowercase-slabid}_thumb.jpg
  *
  * SlabCloud's real image scheme uses the SAME SlabID UUID but LOWERCASED in the
  * URL path (confirmed via manual browser/network inspection 2026-06-04 after the
@@ -70,10 +70,19 @@ export function metersToInches(meters, { decimals = 2 } = {}) {
  * Only the URL path segment is lowercased — the slab's identity (external_slab_id)
  * is preserved unchanged elsewhere. Returns nulls when companyCode or slabId is
  * missing. These are still derived URLs; verification is a separate explicit step.
+ *
+ * `assetCompanyCode` takes priority over `companyCode` for the URL path segment,
+ * allowing the API code and the asset CDN code to differ independently.
  */
-export function buildImageUrlGuesses({ baseUrl = "https://slabcloud.com", companyCode, slabId } = {}) {
+export function buildImageUrlGuesses({
+  baseUrl = "https://slabcloud.com",
+  assetCompanyCode,
+  companyCode,
+  slabId,
+} = {}) {
   const base = String(baseUrl || "https://slabcloud.com").replace(/\/+$/, "");
-  const code = cleanString(companyCode);
+  // Use asset company code for image URLs (may differ from API company code).
+  const code = cleanString(assetCompanyCode || companyCode);
   const id = cleanString(slabId);
   if (!code || !id) {
     return { image_url_guess: null, thumbnail_url_guess: null };
@@ -91,27 +100,53 @@ export function buildImageUrlGuesses({ baseUrl = "https://slabcloud.com", compan
  *
  * Unknown/missing fields normalize to null instead of throwing, so a malformed
  * upstream payload never crashes the dry run.
+ *
+ * Source-tracking opts (all optional, all backward-compatible):
+ *   apiCompanyCode     — code used in API requests (falls back to companyCode)
+ *   assetCompanyCode   — code used in image URL paths (falls back to apiCompanyCode)
+ *   publicSlug         — public ESF URL slug (e.g. "esf")
+ *   inventoryScope     — fetch scope used: "slab" | "remnant" | "all"
+ *   inventoryType      — explicit type string used (e.g. "Slab", "Remnant").
+ *                        If omitted, inferred from raw record's Type field or inventoryScope.
  */
 export function normalizeSlabRecord(
   raw,
-  { baseUrl = "https://slabcloud.com", companyCode = "kbyd" } = {}
+  {
+    baseUrl = "https://slabcloud.com",
+    companyCode = "kbyd",
+    apiCompanyCode,
+    assetCompanyCode,
+    publicSlug,
+    inventoryScope,
+    inventoryType,
+  } = {}
 ) {
   const record = raw && typeof raw === "object" ? raw : {};
   const slabId = cleanString(record.SlabID);
-  const code = cleanString(companyCode);
+
+  // Resolve company codes with fallback chain.
+  const resolvedApiCode = cleanString(apiCompanyCode || companyCode) || "kbyd";
+  const resolvedAssetCode = cleanString(assetCompanyCode || apiCompanyCode || companyCode) || "kbyd";
 
   const widthM = toFiniteNumber(record.Width_Actual);
   const lengthM = toFiniteNumber(record.Length_Actual);
 
   const { image_url_guess, thumbnail_url_guess } = buildImageUrlGuesses({
     baseUrl,
-    companyCode: code,
+    assetCompanyCode: resolvedAssetCode,
     slabId,
   });
 
+  // Infer source_inventory_type:
+  // 1. Explicit inventoryType from fetch config (e.g. scopeToInventoryType("slab") → "Slab")
+  // 2. Type field in the raw record if SlabCloud provides it
+  // 3. null (unknown — bare endpoint returns mixed types without a field)
+  const rawRecordType = cleanString(record.Type);
+  const resolvedInventoryType = cleanString(inventoryType) || rawRecordType || null;
+
   return {
     external_source: SLABCLOUD_EXTERNAL_SOURCE,
-    external_company_code: code,
+    external_company_code: resolvedApiCode,
     external_slab_id: slabId,
     inventory_id: cleanString(record.InventoryID),
     color_name: cleanString(record.Name),
@@ -136,6 +171,15 @@ export function normalizeSlabRecord(
 
     image_url_guess,
     thumbnail_url_guess,
+
+    // Source provenance fields. Carried through to persistence.
+    // source_inventory_type is the SlabCloud type (Slab/Remnant/unknown).
+    // source price group (price_group above) is also imported-only.
+    source_inventory_type: resolvedInventoryType,
+    source_inventory_scope: cleanString(inventoryScope) || null,
+    source_public_slug: cleanString(publicSlug) || null,
+    source_api_company_code: resolvedApiCode,
+    source_asset_company_code: resolvedAssetCode,
 
     // Always keep the untouched original for later mapping/debugging.
     raw: record,

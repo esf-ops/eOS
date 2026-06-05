@@ -19,6 +19,39 @@ export const DEFAULT_SLABCLOUD_TYPE = "Slab";
 export const DEFAULT_USER_AGENT =
   "eliteOS-SlabCloud-POC/0.1 (+read-only inventory dry-run)";
 
+// Public URL slug for the ESF inventory manager page (esf in /inventory/esf/).
+// Separate from the API/asset company code ("kbyd") — they differ for ESF.
+export const DEFAULT_SLABCLOUD_PUBLIC_SLUG = "esf";
+
+// Inventory scope constants. Controls which type= param (if any) is sent.
+//   slab     → type=Slab&edges=true     (historic default, 145 rows for ESF)
+//   remnant  → type=Remnant&edges=true  (689 rows for ESF)
+//   all      → no type param, edges=true (742 rows — full ESF catalog)
+export const INVENTORY_SCOPE_SLAB = "slab";
+export const INVENTORY_SCOPE_REMNANT = "remnant";
+export const INVENTORY_SCOPE_ALL = "all";
+export const DEFAULT_INVENTORY_SCOPE = INVENTORY_SCOPE_SLAB;
+
+/**
+ * Map an inventoryScope string to the SlabCloud API type= param value.
+ * "all" intentionally returns null (no type param → full catalog).
+ *
+ * @param {string} scope - "slab" | "remnant" | "all"
+ * @returns {string|null} type parameter value, or null for no-type (all)
+ */
+export function scopeToInventoryType(scope) {
+  switch (String(scope || "").toLowerCase()) {
+    case INVENTORY_SCOPE_SLAB:
+      return "Slab";
+    case INVENTORY_SCOPE_REMNANT:
+      return "Remnant";
+    case INVENTORY_SCOPE_ALL:
+      return null;
+    default:
+      return "Slab";
+  }
+}
+
 const DEFAULT_TIMEOUT_MS = 15000;
 const DEFAULT_RETRIES = 2;
 const DEFAULT_RETRY_DELAY_MS = 600;
@@ -218,11 +251,46 @@ export async function mapWithConcurrency(items, concurrency, mapper) {
 
 // ── High-level read-only fetchers ────────────────────────────────────────────
 
+/**
+ * Build a complete client config object from environment-supplied overrides.
+ *
+ * Backward compatible: callers that only set `companyCode` and `type` continue
+ * to work as before. New callers may supply `apiCompanyCode`, `assetCompanyCode`,
+ * `publicSlug`, and `inventoryScope` to enable full-scope fetches.
+ *
+ * Precedence for the API company code:
+ *   overrides.apiCompanyCode > overrides.companyCode > DEFAULT_SLABCLOUD_COMPANY_CODE
+ *
+ * Precedence for the type= param:
+ *   overrides.type (explicit) > derived from inventoryScope > DEFAULT_SLABCLOUD_TYPE
+ *
+ * The `companyCode` key is kept in the returned object as a backward-compat alias
+ * for `apiCompanyCode` — callers that read `config.companyCode` still work.
+ */
 export function buildClientConfig(overrides = {}) {
+  const apiCompanyCode =
+    overrides.apiCompanyCode || overrides.companyCode || DEFAULT_SLABCLOUD_COMPANY_CODE;
+  const assetCompanyCode = overrides.assetCompanyCode ?? apiCompanyCode;
+  const publicSlug = overrides.publicSlug || DEFAULT_SLABCLOUD_PUBLIC_SLUG;
+  const inventoryScope = overrides.inventoryScope || DEFAULT_INVENTORY_SCOPE;
+
+  // type: explicit override wins; otherwise derive from inventoryScope.
+  let type;
+  if ("type" in overrides && overrides.type !== undefined) {
+    type = overrides.type;
+  } else {
+    type = scopeToInventoryType(inventoryScope);
+  }
+
   return {
     baseUrl: overrides.baseUrl || DEFAULT_SLABCLOUD_BASE_URL,
-    companyCode: overrides.companyCode || DEFAULT_SLABCLOUD_COMPANY_CODE,
-    type: overrides.type || DEFAULT_SLABCLOUD_TYPE,
+    // companyCode kept as backward-compat alias for apiCompanyCode.
+    companyCode: apiCompanyCode,
+    apiCompanyCode,
+    assetCompanyCode,
+    publicSlug,
+    inventoryScope,
+    type,
     edges: overrides.edges !== undefined ? overrides.edges : true,
     timeoutMs: overrides.timeoutMs || DEFAULT_TIMEOUT_MS,
     retries: overrides.retries !== undefined ? overrides.retries : DEFAULT_RETRIES,

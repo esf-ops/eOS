@@ -25,6 +25,10 @@ import {
   buildSlabDetailUrl,
   buildClientConfig,
   mapWithConcurrency,
+  scopeToInventoryType,
+  INVENTORY_SCOPE_ALL,
+  INVENTORY_SCOPE_SLAB,
+  INVENTORY_SCOPE_REMNANT,
 } from "./slabCloudClient.js";
 
 // Sample detail record from the SlabCloud manager page (ESF / company "kbyd").
@@ -245,6 +249,144 @@ const SAMPLE = {
   // Company code is not hardcoded — a different code flows through.
   assert.ok(buildMaterialsUrl({ companyCode: "acme" }).endsWith("/api/materials/acme"), "alt company code");
   console.log("ok: URL builders + configurable company code");
+}
+
+// ── scopeToInventoryType and inventory scope constants ───────────────────────
+{
+  assert.equal(scopeToInventoryType(INVENTORY_SCOPE_SLAB), "Slab", "slab scope → Slab");
+  assert.equal(scopeToInventoryType(INVENTORY_SCOPE_REMNANT), "Remnant", "remnant scope → Remnant");
+  assert.equal(scopeToInventoryType(INVENTORY_SCOPE_ALL), null, "all scope → null (no type param)");
+  assert.equal(scopeToInventoryType("slab"), "Slab", "string 'slab' → Slab");
+  assert.equal(scopeToInventoryType("remnant"), "Remnant", "string 'remnant' → Remnant");
+  assert.equal(scopeToInventoryType("all"), null, "string 'all' → null");
+  assert.equal(scopeToInventoryType(null), "Slab", "null → Slab (safe default)");
+  assert.equal(scopeToInventoryType(undefined), "Slab", "undefined → Slab (safe default)");
+  assert.equal(scopeToInventoryType("unknown"), "Slab", "unknown → Slab (safe default)");
+  console.log("ok: scopeToInventoryType");
+}
+
+// ── buildClientConfig scope + multi-code support ─────────────────────────────
+{
+  // Default scope is "slab" → type="Slab" (backward compat).
+  const defaultCfg = buildClientConfig();
+  assert.equal(defaultCfg.inventoryScope, "slab", "default scope is slab");
+  assert.equal(defaultCfg.type, "Slab", "default type is Slab");
+  assert.equal(defaultCfg.companyCode, "kbyd", "backward-compat companyCode alias");
+  assert.equal(defaultCfg.apiCompanyCode, "kbyd", "apiCompanyCode present");
+  assert.equal(defaultCfg.assetCompanyCode, "kbyd", "assetCompanyCode defaults to apiCompanyCode");
+  assert.equal(defaultCfg.publicSlug, "esf", "default public slug is esf");
+
+  // All scope → type=null (no type param in URL).
+  const allCfg = buildClientConfig({ inventoryScope: "all" });
+  assert.equal(allCfg.inventoryScope, "all", "scope=all");
+  assert.equal(allCfg.type, null, "all scope → type=null");
+
+  // Remnant scope → type="Remnant".
+  const remCfg = buildClientConfig({ inventoryScope: "remnant" });
+  assert.equal(remCfg.type, "Remnant", "remnant scope → type=Remnant");
+
+  // Explicit type override wins over inventoryScope.
+  const explicitType = buildClientConfig({ inventoryScope: "all", type: "Slab" });
+  assert.equal(explicitType.type, "Slab", "explicit type overrides scope");
+
+  // apiCompanyCode and assetCompanyCode can differ.
+  const splitCodes = buildClientConfig({ apiCompanyCode: "api-co", assetCompanyCode: "cdn-co" });
+  assert.equal(splitCodes.apiCompanyCode, "api-co", "apiCompanyCode set");
+  assert.equal(splitCodes.assetCompanyCode, "cdn-co", "assetCompanyCode set independently");
+  assert.equal(splitCodes.companyCode, "api-co", "backward-compat alias matches apiCompanyCode");
+
+  // Legacy SLABCLOUD_COMPANY_CODE-style still works via companyCode param.
+  const legacyCfg = buildClientConfig({ companyCode: "legacy" });
+  assert.equal(legacyCfg.apiCompanyCode, "legacy", "companyCode maps to apiCompanyCode");
+  assert.equal(legacyCfg.assetCompanyCode, "legacy", "assetCompanyCode falls back to apiCompanyCode");
+
+  console.log("ok: buildClientConfig scope + multi-code support");
+}
+
+// ── all scope URL has no type param ──────────────────────────────────────────
+{
+  const allCfg = buildClientConfig({ inventoryScope: "all", companyCode: "kbyd" });
+  const url = buildSlabSummaryUrl(allCfg);
+  assert.ok(!url.includes("type="), "all scope URL has no type= param");
+  assert.ok(url.includes("edges=true"), "all scope URL still has edges=true");
+  assert.ok(url.includes("/api/slabs/kbyd"), "all scope URL uses api company code");
+
+  // slab scope URL includes type=Slab.
+  const slabCfg = buildClientConfig({ inventoryScope: "slab", companyCode: "kbyd" });
+  const slabUrl = buildSlabSummaryUrl(slabCfg);
+  assert.ok(slabUrl.includes("type=Slab"), "slab scope URL has type=Slab");
+
+  // remnant scope URL includes type=Remnant.
+  const remCfg = buildClientConfig({ inventoryScope: "remnant", companyCode: "kbyd" });
+  const remUrl = buildSlabSummaryUrl(remCfg);
+  assert.ok(remUrl.includes("type=Remnant"), "remnant scope URL has type=Remnant");
+
+  console.log("ok: scope-specific URLs (slab/remnant/all)");
+}
+
+// ── normalizeSlabRecord carries source provenance fields ─────────────────────
+{
+  // With explicit inventoryType="Slab" → source_inventory_type="Slab"
+  const slabRec = normalizeSlabRecord(SAMPLE, {
+    companyCode: "kbyd",
+    inventoryType: "Slab",
+    inventoryScope: "slab",
+    publicSlug: "esf",
+    apiCompanyCode: "kbyd",
+    assetCompanyCode: "kbyd",
+  });
+  assert.equal(slabRec.source_inventory_type, "Slab", "source_inventory_type=Slab when explicit");
+  assert.equal(slabRec.source_inventory_scope, "slab", "source_inventory_scope=slab");
+  assert.equal(slabRec.source_public_slug, "esf", "source_public_slug=esf");
+  assert.equal(slabRec.source_api_company_code, "kbyd", "source_api_company_code=kbyd");
+  assert.equal(slabRec.source_asset_company_code, "kbyd", "source_asset_company_code=kbyd");
+
+  // With inventoryType="Remnant" → source_inventory_type="Remnant"
+  const remRec = normalizeSlabRecord(SAMPLE, {
+    companyCode: "kbyd",
+    inventoryType: "Remnant",
+    inventoryScope: "remnant",
+  });
+  assert.equal(remRec.source_inventory_type, "Remnant", "source_inventory_type=Remnant");
+  assert.equal(remRec.source_inventory_scope, "remnant", "source_inventory_scope=remnant");
+
+  // With no inventoryType but raw record has Type field → infers from raw record.
+  const rawWithType = { ...SAMPLE, Type: "Remnant" };
+  const inferred = normalizeSlabRecord(rawWithType, { inventoryScope: "all" });
+  assert.equal(inferred.source_inventory_type, "Remnant", "infers type from raw record.Type");
+  assert.equal(inferred.source_inventory_scope, "all", "scope=all preserved");
+
+  // With all scope and no Type field in raw → source_inventory_type is null.
+  const allRec = normalizeSlabRecord(SAMPLE, { inventoryScope: "all" });
+  assert.equal(allRec.source_inventory_type, null, "all scope + no raw Type → null");
+
+  // Backward compat: old callers omitting scope fields get null source fields.
+  const legacy = normalizeSlabRecord(SAMPLE, { companyCode: "kbyd" });
+  assert.equal(legacy.source_inventory_type, null, "legacy opts → null source_inventory_type");
+  assert.equal(legacy.source_inventory_scope, null, "legacy opts → null source_inventory_scope");
+  assert.equal(legacy.source_public_slug, null, "legacy opts → null source_public_slug");
+  assert.equal(legacy.source_api_company_code, "kbyd", "legacy opts → source_api_company_code from companyCode");
+  assert.equal(legacy.source_asset_company_code, "kbyd", "legacy opts → source_asset_company_code from companyCode");
+
+  console.log("ok: normalizeSlabRecord source provenance fields");
+}
+
+// ── image URL uses assetCompanyCode, not apiCompanyCode ──────────────────────
+{
+  // When asset and API codes differ, image URL should use asset code.
+  const rec = normalizeSlabRecord(SAMPLE, {
+    apiCompanyCode: "api-co",
+    assetCompanyCode: "cdn-co",
+    inventoryScope: "slab",
+    inventoryType: "Slab",
+  });
+  assert.ok(rec.image_url_guess.includes("/slabs/cdn-co/"), "image URL uses assetCompanyCode");
+  assert.ok(!rec.image_url_guess.includes("/slabs/api-co/"), "image URL does not use apiCompanyCode");
+  assert.equal(rec.source_api_company_code, "api-co", "source_api_company_code=api-co");
+  assert.equal(rec.source_asset_company_code, "cdn-co", "source_asset_company_code=cdn-co");
+  // SlabID is still lowercased in the URL path.
+  assert.ok(!/[A-Z]/.test(rec.image_url_guess.split("/slabs/")[1]), "image URL path lowercase");
+  console.log("ok: image URL uses assetCompanyCode (not apiCompanyCode)");
 }
 
 // ── mapWithConcurrency preserves order and bounds parallelism ────────────────

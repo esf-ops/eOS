@@ -22,6 +22,7 @@ import {
   buildMaterialsUrl,
   buildSlabSummaryUrl,
   buildSlabDetailUrl,
+  scopeToInventoryType,
 } from "./slabCloudClient.js";
 import {
   normalizeSlabRecords,
@@ -59,7 +60,21 @@ export async function runSlabCloudInventorySync({
 
   const cfg = config.companyCode ? config : buildClientConfig(config);
   const warnings = [];
-  const normalizeOpts = { baseUrl: cfg.baseUrl, companyCode: cfg.companyCode };
+
+  // Build normalizer opts that carry full source provenance.
+  // inventoryType is derived from inventoryScope so the normalizer can tag each
+  // record with the SlabCloud type (Slab/Remnant/null) that was fetched.
+  const normalizeOpts = {
+    baseUrl: cfg.baseUrl,
+    companyCode: cfg.companyCode,
+    apiCompanyCode: cfg.apiCompanyCode || cfg.companyCode,
+    assetCompanyCode: cfg.assetCompanyCode || cfg.apiCompanyCode || cfg.companyCode,
+    publicSlug: cfg.publicSlug || null,
+    inventoryScope: cfg.inventoryScope || null,
+    // inventoryType: explicit type used in the API request.
+    // null when inventoryScope="all" (bare endpoint, no type param).
+    inventoryType: scopeToInventoryType(cfg.inventoryScope),
+  };
 
   // 1) Materials (non-fatal).
   let materials = [];
@@ -96,6 +111,13 @@ export async function runSlabCloudInventorySync({
   const recordSource = detailRecordsRaw.length > 0 ? "detail" : "summary";
   const normalized = normalizeSlabRecords(primaryRaw, normalizeOpts);
 
+  // Count source_inventory_type breakdown for runMeta (used in sync run insert).
+  const typeBreakdown = {};
+  for (const rec of normalized) {
+    const t = rec.source_inventory_type || "unknown";
+    typeBreakdown[t] = (typeBreakdown[t] || 0) + 1;
+  }
+
   const runMeta = {
     triggeredBy: "script",
     fetchMode: fetchDetails ? "with_details" : "summary_only",
@@ -104,6 +126,12 @@ export async function runSlabCloudInventorySync({
     materialRowCount: materials.length,
     slabSummaryRowCount: summaryRaw.length,
     slabDetailRowCount: detailRecordsRaw.length,
+    // Scope metadata for slabcloud_sync_runs columns added by scope upgrade SQL.
+    inventoryScope: cfg.inventoryScope || null,
+    slabRowCount: typeBreakdown["Slab"] ?? 0,
+    remnantRowCount: typeBreakdown["Remnant"] ?? 0,
+    allInventoryRowCount: normalized.length,
+    typeBreakdown,
   };
 
   // 4) Persist (write-gated; dry-run unless explicitly enabled).
@@ -133,6 +161,8 @@ export async function runSlabCloudInventorySync({
       recordSource,
     },
     normalizedCount: normalized.length,
+    inventoryScope: cfg.inventoryScope || null,
+    typeBreakdown,
     warnings,
     persistence,
   };
