@@ -410,18 +410,35 @@ Before scheduling recurring syncs or building any production integration:
 | # | Question | Priority |
 |---|----------|---------|
 | 1 | Is `/api/slabs/kbyd` approved for ESF internal automated use? | **Critical** |
-| 2 | Is `kbyd` our company code? (vs. public slug `/inventory/esf/`) | **Critical** |
+| 2 | ~~Is `kbyd` our company code?~~ **Resolved 2026-06-05:** Manager console confirms `company=kbyd` even though the public URL is `/inventory/esf/manager.php`. `kbyd` is the API company code. `esf` is only the display slug. | ~~Critical~~ Done |
 | 3 | Is there an official API, feed, or export we should use instead? | High |
 | 4 | ~~What is the correct image URL pattern per slab?~~ **Resolved 2026-06-04:** `/slabs/{companyCode}/{lowercase-slabid}.jpg` (+ `_thumb`). | ~~High~~ Done |
 | 5 | Are image URLs stable (won't change if the slab is re-imported)? | High |
 | 6 | Are status/availability/hold/sold flags available on slab records? | High |
-| 7 | Are remnants available through the same endpoint? How to distinguish? | High |
+| 7 | ~~Are remnants available through the same endpoint?~~ **Under investigation 2026-06-05** via `compareSlabCloudManagerScopes.js`. Manager UI supports Remnant type. Whether `type=Remnant` returns distinct SlabIDs pending diagnostic review. | High |
 | 8 | Is bookmatch / bundle metadata available? | Medium |
 | 9 | Are `updated_at` / sync timestamps or webhooks available? | Medium |
 | 10 | Are there rate limits on the JSON endpoints? | Medium |
 | 11 | Is there an API plan, fee, or terms-of-service for programmatic access? | **Critical** |
 | 12 | What do `UsableA` and `UsableD` measure exactly (mm²? cm²? something else)? | Medium |
-| 13 | Does `count` on a detail record represent group count or individual slab count? | High |
+| 13 | ~~Does `count` on a detail record represent group count or individual slab count?~~ **Resolved 2026-06-04:** `count` is a group-level color count, repeated on every detail row for the same color. Never sum it. Actual slab count = distinct `external_slab_id` rows. | ~~High~~ Done |
+| 14 | Does `type=Full Slab` vs `type=Full Slabs` return different results? Does `type=All` return every type in one call? | High — pending diagnostic |
+
+### Manager-scope diagnostic (2026-06-05)
+
+**Key finding:** The ESF public manager page (`/inventory/esf/manager.php`) logs `company=kbyd` in its console — confirming the API company code is `kbyd`, not `esf`. Missing inventory from slabOS is likely due to **type/filter scope**, not a company code mismatch.
+
+**Tooling added:**
+
+```bash
+# Read-only diagnostic — no writes
+npm run eos:slabcloud:manager-scope-diagnostic
+
+# Review output:
+cat debug/slabcloud/slabcloud-manager-scope-diagnostic.json
+```
+
+**Do NOT change `SLABCLOUD_API_COMPANY_CODE`** until diagnostic output is reviewed. Do NOT add a second sync lane (Remnant, Full Slab, etc.) without operator sign-off.
 
 ---
 

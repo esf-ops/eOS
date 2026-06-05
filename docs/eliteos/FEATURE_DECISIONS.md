@@ -926,3 +926,22 @@
 
 ---
 
+### 72. SlabCloud manager-scope diagnostic — company code confirmed kbyd, missing inventory under investigation
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-06-05 |
+| **Decision** | Added a **read-only diagnostic script** (`backend-core/src/scripts/slabcloud/compareSlabCloudManagerScopes.js`) to determine why slabOS has fewer slabs than the public ESF manager page. No sync change, no config change, no schema change. Read results before deciding. |
+| **Manager URL discovery** | The public ESF manager URL is `https://slabcloud.com/inventory/esf/manager.php`. The browser console on that page logs `company kbyd` — confirming the **API company code is `kbyd`**, NOT `esf`. The `/inventory/esf/` path is a display slug only. |
+| **Do NOT change company code** | `SLABCLOUD_API_COMPANY_CODE` must stay `kbyd`. `SLABCLOUD_ASSET_COMPANY_CODE` must stay `kbyd`. Do NOT change either to `esf` — this would break image URL construction and the API requests. |
+| **Missing inventory hypothesis** | The current sync fetches `type=Slab&edges=true` only. The manager UI supports: Any Type, Full Slabs, Remnants, Min Length, Min Width. Missing inventory likely comes from `type=Remnant` or `type=Full Slab` variants returning distinct SlabIDs not in the current `type=Slab` scope. This is the most probable cause — pending diagnostic review. |
+| **Manager console evidence** | `company=kbyd`, `edges=true`, `showZoom=true`, `filterOpen=true`, `measure=true`. Evidence manually documented; not auth-scraped, not from session automation. |
+| **Magnify / measure UX** | `measure=true` / `showZoom=true` indicate the manager page has a zoom/measurement UI. This is **UX inspiration only** — do NOT copy or reverse-engineer `manager.js`. Any slabOS measurement UI must be original eliteOS design. |
+| **What diagnostic probes** | 8 endpoint variants: `/api/materials/kbyd`, `/api/slabs/kbyd?type=Slab&edges=true`, `?type=Remnant`, `?type=Full%20Slab`, `?type=Full%20Slabs`, `?type=All`, `?edges=true`, and bare `/api/slabs/kbyd`. Optional: HAR UUID comparison, Supabase read-only comparison. |
+| **No sync changes yet** | No changes to `SLABCLOUD_TYPE`, `cacheSlabCloudInventory.js`, `slabCloudSync.js`, or any production default. Do NOT add a second sync lane (Remnants, Full Slabs, etc.) until diagnostic output is reviewed and operator sign-off given. |
+| **Tests** | `eos:test:slabcloud-manager-scope` (pure unit tests: endpoint variant list, HAR UUID extraction, case-insensitive UUID comparison, row analysis, failed endpoint warning handling, no-write contract assertions). `node --check` on all new files. `eos:check:local` passing. |
+| **Impacted files** | `backend-core/src/slabcloud/slabCloudManagerScopeDiagnostic.js` (pure helpers), `backend-core/src/scripts/slabcloud/compareSlabCloudManagerScopes.js` (diagnostic script), `backend-core/src/slabcloud/slabCloudManagerScopeDiagnostic.test.mjs` (tests), `package.json` (`eos:slabcloud:manager-scope-diagnostic`, `eos:test:slabcloud-manager-scope`), `docs/eliteos/slabcloud-inventory-poc.md`, `docs/eliteos/slabos-slab-inventory-profit-engine-roadmap.md`, `docs/eliteos/FEATURE_DECISIONS.md` (this entry). |
+| **Revisit trigger** | Diagnostic output reviewed; operator decides whether Remnant/Full Slab sync lane is warranted; SlabCloud confirms approved type variants; type-specific count is added to slabOS summary metrics. |
+
+---
+

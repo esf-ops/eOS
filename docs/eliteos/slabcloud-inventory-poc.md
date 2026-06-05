@@ -301,6 +301,93 @@ Example — SlabID `437D9CA4-76B0-453B-BDE9-9007FFC44C5A`:
 
 ---
 
+## 11a. Manager-scope diagnostic (2026-06-05)
+
+### Discovery: ESF manager URL vs. API company code
+
+The public ESF manager page is:
+
+```
+https://slabcloud.com/inventory/esf/manager.php
+```
+
+But the **browser console** on that page logs:
+
+```
+company    kbyd
+edges      true
+showZoom   true
+filterOpen true
+measure    true
+```
+
+This confirms:
+- The API company code is **`kbyd`** — NOT `esf`.
+- `/inventory/esf/` is a public display slug, not the API company code.
+- **Do NOT change `SLABCLOUD_API_COMPANY_CODE` to `esf`.**
+- Image assets also confirm `kbyd`: `/slabs/kbyd/{lowercase-uuid}(_thumb)?.jpg`
+
+### Missing inventory hypothesis
+
+The current slabOS sync fetches **`type=Slab`** only. The manager page supports:
+- Any Type
+- Full Slabs
+- Remnants
+- Min Length / Min Width filters
+
+Missing slabs from the cache may come from **Remnant** or **Full Slab** type variants that our sync does not currently request. This is distinct from a company-code mismatch.
+
+### Diagnostic tooling
+
+Added: `backend-core/src/scripts/slabcloud/compareSlabCloudManagerScopes.js`
+
+Probes all known type/filter variants read-only:
+
+| Variant | URL |
+|---------|-----|
+| Materials | `/api/materials/kbyd` |
+| Slab (current) | `/api/slabs/kbyd?type=Slab&edges=true` |
+| Remnant | `/api/slabs/kbyd?type=Remnant&edges=true` |
+| Full Slab | `/api/slabs/kbyd?type=Full%20Slab&edges=true` |
+| Full Slabs | `/api/slabs/kbyd?type=Full%20Slabs&edges=true` |
+| All | `/api/slabs/kbyd?type=All&edges=true` |
+| No type (edges only) | `/api/slabs/kbyd?edges=true` |
+| No params | `/api/slabs/kbyd` |
+
+Also: per-name detail sampling, optional HAR UUID comparison, optional Supabase read-only comparison.
+
+```bash
+# Run the diagnostic (read-only, no writes)
+npm run eos:slabcloud:manager-scope-diagnostic
+
+# With HAR comparison:
+SLABCLOUD_PUBLIC_HAR_FILE=/path/to/esf-manager.har npm run eos:slabcloud:manager-scope-diagnostic
+
+# With HAR + Supabase read-only comparison:
+SLABCLOUD_PUBLIC_HAR_FILE=/path/to/har \
+  SLABCLOUD_ORGANIZATION_ID=<org-uuid> \
+  SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
+  npm run eos:slabcloud:manager-scope-diagnostic
+
+# Run unit tests
+npm run eos:test:slabcloud-manager-scope
+```
+
+Output: `debug/slabcloud/slabcloud-manager-scope-diagnostic.json`
+
+### Magnify / measure UX note
+
+`measure=true` and `showZoom=true` in the manager config indicate the manager page has a zoom/measurement UI. This is **UX inspiration only** — do NOT copy or reverse-engineer `manager.js`. Any slabOS measurement UI must be an original eliteOS design.
+
+### Next steps before any sync change
+
+1. Run `npm run eos:slabcloud:manager-scope-diagnostic` and review the JSON output.
+2. Confirm which type variants return distinct SlabIDs not in the current `type=Slab` sync.
+3. Decide whether a second sync lane (separate type) is warranted — **do not add without operator review**.
+4. Update `SLABCLOUD_INVENTORY_TYPES` (or equivalent config) only after review.
+
+---
+
 ## 11. Future path
 
 Dry-run reviewed · SlabCloud verbal approval received · SQL applied · persistence built (write-gated). Next steps:
