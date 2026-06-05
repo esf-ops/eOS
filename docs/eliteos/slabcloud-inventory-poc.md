@@ -540,3 +540,63 @@ Dry-run reviewed · SlabCloud verbal approval received · SQL applied · persist
 A real head must use **backend-owned cached data**, **never** direct browser calls to SlabCloud.
 
 See [`slabos-slab-inventory-profit-engine-roadmap.md`](./slabos-slab-inventory-profit-engine-roadmap.md) for the full phased plan.
+
+---
+
+## 12. Color-program read API (typed aggregation)
+
+### Summary
+
+After the typed sync landed (§10 / Decision #74), the backend now surfaces a **color-level read API** that aggregates the typed inventory into one card per `(color_name, material_name, source_price_group)` combination.
+
+### New endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/slab-inventory/color-programs` | One card per color/material/price-group — totals, slab vs remnant counts, verified photo count, representative image |
+| `GET /api/slab-inventory/colors/:colorKey/inventory` | Physical slab + remnant rows for one color group; supports `?type=all\|slab\|remnant`, `?image_status=ok`, `?active_only=false` |
+
+### Color key behavior
+
+`color_key` is a stable, deterministic slug computed by `makeColorKey(color_name, material_name, price_group)`:
+
+```
+slugify(colorName) + "--" + slugify(materialName) + "--" + slugify(priceGroup)
+```
+
+- `slugify` lowercases + trims + collapses non-alphanum runs to a single `-`.
+- Segments use `"unknown"` when the source value is null/empty.
+- Not a DB ID — not reversible. Same inputs always produce the same key.
+- Example: `"Alabaster", "ESF Quartz", "B"` → `"alabaster--esf-quartz--b"`.
+
+### Aggregation behavior
+
+- Typed rows only: `is_active = true`, `source_inventory_scope = 'typed'`, `source_inventory_type IN ('Slab', 'Remnant')`.
+- 10 legacy/null-scope rows are ignored in aggregation (no deletion, no mutation).
+- `count_for_color` is never read, never summed. Counts are physical row counts only.
+- `slab_count` / `remnant_count` come from `source_inventory_type` per row.
+- `verified_photo_count` counts slab_images rows with `image_status = 'ok'`.
+- `representative_image_url` is the first verified (`ok`) image found in the group; `null` if none.
+
+### Price group order
+
+Active ESF groups: **Promo, A, B, C, D, E, F** — in that order. Unknown/other (including Group G) sort after F.
+
+Group G is not included in the current default sort order. Data is preserved but sorts to the "other" bucket.
+
+### program_status placeholder
+
+All cards return `program_status = "unclassified"`. Elite 100 classification requires a future catalog/override layer (see Decision #75). No Elite 100 membership logic was built in this slice.
+
+### Source price group rule
+
+`source_price_group` on every card and row is the **imported SlabCloud price group** — NOT slabOS pricing authority. Label: "Source price group". No override UI was added.
+
+### Safety contracts
+
+- Both endpoints are GET-only. No mutations to `slab_inventory`, no write-back to SlabCloud.
+- Both require `requireAuth()` + `requireHeadAccess("slab_inventory")` + `organization_id` scope.
+- Service-role Supabase client only — no direct browser reads.
+- `COLOR_INVENTORY_SELECT_COLUMNS` never includes `count_for_color`, `raw_json`, `usable_*`, or meter columns.
+
+See `FEATURE_DECISIONS.md §75` for the full decision record.

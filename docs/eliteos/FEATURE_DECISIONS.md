@@ -990,3 +990,27 @@
 
 ---
 
+### 75. Slab Inventory color-program read API — typed aggregation by color/material/price-group
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-06-05 |
+| **Decision** | Added two read-only backend API endpoints for the next Slab Inventory product model (color-level cards + physical inventory modal). No UI changes. No mutations to `slab_inventory`. No new SQL migration. |
+| **New endpoints** | `GET /api/slab-inventory/color-programs` — aggregated color cards (typed rows only, one card per `color_name / material_name / source_price_group`). `GET /api/slab-inventory/colors/:colorKey/inventory` — physical slab + remnant rows for a single color group; supports `?type=all\|slab\|remnant`, `?image_status`, `?active_only`. |
+| **Aggregation** | Groups `is_active = true, source_inventory_scope = 'typed', source_inventory_type IN ('Slab','Remnant')` rows by `(color_name, material_name, price_group)`. Counts physical rows — `count_for_color` is **never read or summed**. 10 legacy/null-scope rows are ignored (not deleted, not mutated). |
+| **Slab vs Remnant** | `slab_count` and `remnant_count` come from `source_inventory_type` per row. The typed sync (Decision #74) gives every row a known type. |
+| **color_key** | Stable, deterministic slug computed by `makeColorKey(color_name, material_name, price_group)`: `slugify(c)+"--"+slugify(m)+"--"+slugify(pg)`. Not a DB ID. Not reversible. Same inputs always produce the same key. Handles null/empty via `"unknown"` fallback. The color inventory endpoint matches rows in JS (full typed row scan at ~1,679 rows — fast and avoids slug-reversal complexity). |
+| **Price group order** | Promo, A, B, C, D, E, F — then unknown/other. **Group G is not included** in the current sort order; data is preserved but sorts to the "other" bucket after F. Active ESF groups: Promo/A/B/C/D/E/F only. |
+| **Elite 100 / program_status** | All cards return `program_status = "unclassified"`. Elite 100 classification requires a future catalog/override layer (a separate slabOS overlay table mapping color_key → tier). No Elite 100 logic was built in this slice. |
+| **Source price group** | `source_price_group` on every card and row is the imported SlabCloud price group (label: "Source price group"). It is NOT slabOS pricing authority. No override UI was added. |
+| **verified_photo_count** | Count of `slab_images` rows with `image_status = 'ok'` for slabs in the group. Representative image is the first `ok`-status image found in the group's slab IDs. |
+| **Image fetch strategy** | `color-programs` fetches all org-scoped `slab_images` without filtering by slab ID (avoids PostgREST URL-length overflow with large inventories). `colors/:colorKey/inventory` uses `.in(external_slab_id, …)` scoped to the subset — safe because a color group is small. |
+| **Auth** | Both endpoints: `requireAuth()` + `requireHeadAccess("slab_inventory")` + `organization_id` scope. Service-role Supabase client only. GET-only. |
+| **Staff-safe fields** | `COLOR_INVENTORY_SELECT_COLUMNS` never includes `count_for_color`, `raw_json`, `usable_*`, or meter columns. |
+| **Tests** | 8 new pure-unit test blocks in `eos:test:slab-inventory-api`: `COLOR_PROGRAM_PRICE_GROUP_ORDER` (no Group G, frozen), `priceGroupSortIndex` (Promo=0…F=6, G/unknown=7), `makeColorKey` (stable, slug shape, null safety, separator uniqueness), `groupColorPrograms` (aggregation, slab/remnant counts, Group G to other, count_for_color never summed, representative image), `groupColorPrograms` representative image + verified count, `parseColorInventoryParams`, `COLOR_INVENTORY_SELECT_COLUMNS` (includes all fields, no banned fields), route shape (6 GET routes, no mutations). All 16 suites pass. `node --check` + `eos:check:local` green. |
+| **What is NOT built** | UI changes to `app-slab-inventory`. Elite 100 tab, carousels, Non-Stock tab, color modal UI. Price group override UI. Scheduled automation. SlabCloud writeback. Inactive/delete marking. Internal Estimate, Quote Library, Sales Dashboard, Pricing Admin, Moraware, AI Takeoff, Home Launcher, shared EliteosTopbar — all untouched. |
+| **Impacted files** | `backend-core/src/slabInventory/slabInventoryApi.js` (new helpers + 2 routes), `backend-core/src/slabInventory/slabInventoryApi.test.mjs` (8 new test blocks, import update, route count 4→6), `docs/eliteos/slabcloud-inventory-poc.md` (§12 added), `docs/eliteos/slabos-slab-inventory-profit-engine-roadmap.md` (§12 added), `docs/eliteos/FEATURE_DECISIONS.md` (this entry). |
+| **Revisit trigger** | `app-slab-inventory` UI consumes color-program API; Elite 100 catalog/override layer scoped; Non-Stock tab spec written; color modal tab (All/Slabs/Remnants) UI built. |
+
+---
+

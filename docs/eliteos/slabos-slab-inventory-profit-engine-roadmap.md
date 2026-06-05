@@ -478,7 +478,23 @@ SLABCLOUD_CACHE_WRITE_ENABLED=1 SLABCLOUD_ORGANIZATION_ID=<org-uuid> \
 
 ---
 
-## 12. Do-Not-Build-Yet List
+## 12. Color-program read API — typed inventory aggregated by color (Phase 2 extension)
+
+Color-level aggregation API is now live. See `slabcloud-inventory-poc.md §12` and `FEATURE_DECISIONS.md §75` for full details.
+
+**What was added:**
+- `GET /api/slab-inventory/color-programs` — aggregated color cards (typed rows only, one card per color/material/price-group).
+- `GET /api/slab-inventory/colors/:colorKey/inventory` — physical rows for one color group (`?type=all|slab|remnant`).
+- `makeColorKey`, `groupColorPrograms`, `priceGroupSortIndex`, `parseColorInventoryParams` helpers (all exported for testing).
+- 8 new pure-unit tests added to `eos:test:slab-inventory-api`.
+
+**Active ESF price groups:** Promo, A, B, C, D, E, F. Group G not included in current sort order.
+
+**Elite 100 / Non-Stock tab:** Not built. Requires a future catalog/override layer. `program_status = "unclassified"` for all cards.
+
+---
+
+## 13. Do-Not-Build-Yet List
 
 The following are explicitly out of scope until the prerequisite phases are done and each item is scoped separately:
 

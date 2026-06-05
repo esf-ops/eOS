@@ -16,10 +16,16 @@ import {
   buildImageMap,
   clampLimit,
   clampOffset,
+  COLOR_INVENTORY_SELECT_COLUMNS,
+  COLOR_PROGRAM_PRICE_GROUP_ORDER,
+  groupColorPrograms,
   INVENTORY_SELECT_COLUMNS,
   IMAGE_STATUS_VALUES,
+  makeColorKey,
   mapSlabRow,
+  parseColorInventoryParams,
   parseListParams,
+  priceGroupSortIndex,
   resolveSort,
   SEARCH_COLUMNS,
   SLAB_INVENTORY_HEAD_SLUG,
@@ -242,6 +248,206 @@ import {
   console.log("ok: sync-coverage fields (active_cached vs latest_sync)");
 }
 
+/* ── COLOR_PROGRAM_PRICE_GROUP_ORDER ────────────────────────────────────── */
+{
+  const order = [...COLOR_PROGRAM_PRICE_GROUP_ORDER];
+  // Must contain Promo, A, B, C, D, E, F in that order.
+  assert.deepEqual(order, ["Promo", "A", "B", "C", "D", "E", "F"], "price group order: Promo then A–F");
+  // Group G is NOT included in the current order.
+  assert.ok(!order.includes("G"), "Group G must NOT be in current price group order");
+  // The list is frozen.
+  assert.ok(Object.isFrozen(COLOR_PROGRAM_PRICE_GROUP_ORDER), "price group order is frozen");
+  console.log("ok: COLOR_PROGRAM_PRICE_GROUP_ORDER (no Group G)");
+}
+
+/* ── priceGroupSortIndex ────────────────────────────────────────────────── */
+{
+  assert.equal(priceGroupSortIndex("Promo"), 0, "Promo sorts first");
+  assert.equal(priceGroupSortIndex("A"), 1, "A");
+  assert.equal(priceGroupSortIndex("B"), 2, "B");
+  assert.equal(priceGroupSortIndex("C"), 3, "C");
+  assert.equal(priceGroupSortIndex("D"), 4, "D");
+  assert.equal(priceGroupSortIndex("E"), 5, "E");
+  assert.equal(priceGroupSortIndex("F"), 6, "F last in defined order");
+  // G falls to "other" bucket (after F).
+  assert.equal(priceGroupSortIndex("G"), 7, "Group G sorts after F (other bucket)");
+  assert.equal(priceGroupSortIndex("unknown"), 7, "unknown sorts after F");
+  assert.equal(priceGroupSortIndex(null), 7, "null sorts after F");
+  assert.equal(priceGroupSortIndex(""), 7, "empty string sorts after F");
+  // "other" index must be strictly after F.
+  assert.ok(priceGroupSortIndex("G") > priceGroupSortIndex("F"), "G > F in sort order");
+  console.log("ok: priceGroupSortIndex (Promo/A–F ordered, G and unknown after F)");
+}
+
+/* ── makeColorKey: stable and deterministic ─────────────────────────────── */
+{
+  // Same inputs always produce the same key.
+  assert.equal(makeColorKey("Alabaster", "ESF Quartz", "B"), makeColorKey("Alabaster", "ESF Quartz", "B"), "stable key");
+  // Normalized to lowercase/slug.
+  assert.equal(makeColorKey("Alabaster", "ESF Quartz", "B"), "alabaster--esf-quartz--b", "slug shape");
+  assert.equal(makeColorKey("Calacatta Gold", "Marble", "Promo"), "calacatta-gold--marble--promo");
+  // Different inputs → different keys.
+  assert.notEqual(makeColorKey("Alabaster", "ESF Quartz", "B"), makeColorKey("Alabaster", "ESF Quartz", "C"), "B vs C differ");
+  assert.notEqual(makeColorKey("Alabaster", "ESF Quartz", "B"), makeColorKey("Alabaster", "ESF Marble", "B"), "material differs");
+  // Null/empty segments fall back to "unknown".
+  assert.equal(makeColorKey(null, null, null), "unknown--unknown--unknown", "all null → unknown");
+  assert.equal(makeColorKey("", "", ""), "unknown--unknown--unknown", "all empty → unknown");
+  // Separator "--" never appears inside a segment (slugify collapses runs).
+  const key = makeColorKey("Hello   World", "A & B", "C/D");
+  const segs = key.split("--");
+  assert.equal(segs.length, 3, "exactly 3 segments separated by --");
+  for (const seg of segs) {
+    assert.ok(!seg.includes("--"), `segment "${seg}" must not contain --`);
+  }
+  console.log("ok: makeColorKey (stable, deterministic, slug-safe)");
+}
+
+/* ── groupColorPrograms: aggregation and ordering ───────────────────────── */
+{
+  const rows = [
+    // Group B: 2 slabs, 1 remnant
+    { id: "id-1", external_slab_id: "sid-1", color_name: "Alabaster", material_name: "ESF Quartz",   price_group: "B", source_inventory_type: "Slab",    source_inventory_scope: "typed" },
+    { id: "id-2", external_slab_id: "sid-2", color_name: "Alabaster", material_name: "ESF Quartz",   price_group: "B", source_inventory_type: "Slab",    source_inventory_scope: "typed" },
+    { id: "id-3", external_slab_id: "sid-3", color_name: "Alabaster", material_name: "ESF Quartz",   price_group: "B", source_inventory_type: "Remnant", source_inventory_scope: "typed" },
+    // Group Promo: 1 slab — must sort before B
+    { id: "id-4", external_slab_id: "sid-4", color_name: "Zephyr",    material_name: "ESF Quartz",   price_group: "Promo", source_inventory_type: "Slab", source_inventory_scope: "typed" },
+    // Group A: 1 remnant — must sort after Promo, before B
+    { id: "id-5", external_slab_id: "sid-5", color_name: "Marble Run", material_name: "ESF Marble",  price_group: "A", source_inventory_type: "Remnant", source_inventory_scope: "typed" },
+    // Unknown price group: must sort after F
+    { id: "id-6", external_slab_id: "sid-6", color_name: "Mystery",   material_name: "ESF Quartz",   price_group: "G", source_inventory_type: "Slab",    source_inventory_scope: "typed" },
+    // count_for_color present on rows — must never be summed
+    { id: "id-7", external_slab_id: "sid-7", color_name: "Alabaster", material_name: "ESF Quartz",   price_group: "B", source_inventory_type: "Slab",    source_inventory_scope: "typed", count_for_color: 9999 },
+    { id: "id-8", external_slab_id: "sid-8", color_name: "Alabaster", material_name: "ESF Quartz",   price_group: "B", source_inventory_type: "Slab",    source_inventory_scope: "typed", count_for_color: 9999 },
+  ];
+
+  const imageMap = new Map([
+    ["sid-1", { image_url: "a-ok.jpg",     thumbnail_url: "a-ok-t.jpg",   image_status: "ok",      image_url_pattern: "slabcloud_slab_jpg" }],
+    ["sid-2", { image_url: "a-miss.jpg",   thumbnail_url: "a-miss-t.jpg", image_status: "missing", image_url_pattern: "slabcloud_slab_jpg" }],
+    ["sid-3", { image_url: "a-ok2.jpg",    thumbnail_url: "a-ok2-t.jpg",  image_status: "ok",      image_url_pattern: "slabcloud_slab_jpg" }],
+  ]);
+
+  const cards = groupColorPrograms(rows, imageMap);
+
+  // One card per (color, material, price_group) combination.
+  const alabasterBCard = cards.find((c) => c.color_key === makeColorKey("Alabaster", "ESF Quartz", "B"));
+  assert.ok(alabasterBCard, "Alabaster/B card exists");
+
+  // Row counts — NEVER count_for_color sum.
+  // 4 Slab + 1 Remnant rows for Alabaster/ESF Quartz/B (ignoring count_for_color=9999).
+  assert.equal(alabasterBCard.slab_count, 4, "slab_count = 4 rows (not count_for_color sum)");
+  assert.equal(alabasterBCard.remnant_count, 1, "remnant_count = 1 row");
+  assert.equal(alabasterBCard.total_inventory_count, 5, "total = slab + remnant rows");
+  assert.notEqual(alabasterBCard.total_inventory_count, 9999 * 2 + 3, "must NOT use count_for_color");
+
+  // verified_photo_count uses image_status=ok only.
+  assert.equal(alabasterBCard.verified_photo_count, 2, "verified_photo_count = 2 (ok images only)");
+  // representative_image_url is from first verified image.
+  assert.equal(alabasterBCard.representative_image_url, "a-ok.jpg", "rep image = first verified image");
+
+  // source_inventory_scope = "typed", program_status = "unclassified".
+  assert.equal(alabasterBCard.source_inventory_scope, "typed", "scope is typed");
+  assert.equal(alabasterBCard.program_status, "unclassified", "program_status placeholder");
+
+  // Group order: Promo first, then A, then B, then G (unknown/other) last.
+  const pgSequence = cards.map((c) => c.source_price_group);
+  const promoIdx = pgSequence.indexOf("Promo");
+  const aIdx = pgSequence.indexOf("A");
+  const bIdx = pgSequence.indexOf("B");
+  const gIdx = pgSequence.indexOf("G");
+  assert.ok(promoIdx < aIdx, "Promo before A");
+  assert.ok(aIdx < bIdx, "A before B");
+  assert.ok(bIdx < gIdx, "B before G (G is other/unknown, sorts after F)");
+
+  // Group G is present but at the end (not excluded from results — only excluded
+  // from the defined sort order, which places it in the "other" bucket after F).
+  const gCard = cards.find((c) => c.source_price_group === "G");
+  assert.ok(gCard, "G card exists (data preserved) but sorts after F");
+  assert.ok(cards.indexOf(gCard) > cards.indexOf(cards.find((c) => c.source_price_group === "B")), "G card sorts after B");
+
+  // sample_inventory_ids is capped at 5.
+  assert.ok(alabasterBCard.sample_inventory_ids.length <= 5, "sample capped at 5");
+
+  // No count_for_color exposed on any card.
+  for (const card of cards) {
+    assert.ok(!("count_for_color" in card), "cards must not expose count_for_color");
+  }
+
+  // Within the same price group, cards are sorted by color_name asc.
+  // (Only one B-group card here — just verify the field exists.)
+  assert.ok(typeof alabasterBCard.color_name === "string" || alabasterBCard.color_name === null);
+
+  // source_price_group comes from the source row's price_group — not slabOS authority.
+  assert.equal(alabasterBCard.source_price_group, "B", "source_price_group is imported from source");
+
+  console.log("ok: groupColorPrograms (aggregation, slab/remnant, ordering, count semantics, Group G)");
+}
+
+/* ── groupColorPrograms: verified_photo_count and representative image ───── */
+{
+  // Color with no verified images — verified_photo_count=0, rep image=null.
+  const rows = [
+    { id: "i1", external_slab_id: "s1", color_name: "Dark", material_name: "Granite", price_group: "C",
+      source_inventory_type: "Slab", source_inventory_scope: "typed" }
+  ];
+  const imageMapMissing = new Map([
+    ["s1", { image_url: "d.jpg", thumbnail_url: "dt.jpg", image_status: "missing", image_url_pattern: "x" }]
+  ]);
+  const noVerified = groupColorPrograms(rows, imageMapMissing);
+  assert.equal(noVerified[0].verified_photo_count, 0, "no verified images → 0");
+  assert.equal(noVerified[0].representative_image_url, null, "no verified image → rep url null");
+
+  // Color with one ok image — use it as representative.
+  const imageMapOk = new Map([
+    ["s1", { image_url: "ok.jpg", thumbnail_url: "ok_t.jpg", image_status: "ok", image_url_pattern: "slabcloud_slab_jpg" }]
+  ]);
+  const withVerified = groupColorPrograms(rows, imageMapOk);
+  assert.equal(withVerified[0].verified_photo_count, 1, "1 verified image");
+  assert.equal(withVerified[0].representative_image_url, "ok.jpg", "ok image chosen as representative");
+
+  console.log("ok: groupColorPrograms (representative image prefers verified)");
+}
+
+/* ── parseColorInventoryParams ──────────────────────────────────────────── */
+{
+  const defaults = parseColorInventoryParams({});
+  assert.equal(defaults.type, "all", "default type=all");
+  assert.equal(defaults.active_only, true, "default active_only=true");
+  assert.equal(defaults.image_status, "", "default image_status empty");
+
+  assert.equal(parseColorInventoryParams({ type: "slab" }).type, "slab", "type=slab accepted");
+  assert.equal(parseColorInventoryParams({ type: "remnant" }).type, "remnant", "type=remnant accepted");
+  assert.equal(parseColorInventoryParams({ type: "SLAB" }).type, "slab", "type case-insensitive");
+  assert.equal(parseColorInventoryParams({ type: "bogus" }).type, "all", "unknown type → all");
+  assert.equal(parseColorInventoryParams({ active_only: "false" }).active_only, false, "active_only=false");
+  assert.equal(parseColorInventoryParams({ active_only: "0" }).active_only, false, "active_only=0");
+  assert.equal(parseColorInventoryParams({ active_only: "true" }).active_only, true, "active_only=true");
+  assert.equal(parseColorInventoryParams({ image_status: "ok" }).image_status, "ok", "image_status=ok");
+  assert.equal(parseColorInventoryParams({ image_status: "bogus" }).image_status, "", "invalid image_status dropped");
+  console.log("ok: parseColorInventoryParams");
+}
+
+/* ── COLOR_INVENTORY_SELECT_COLUMNS ─────────────────────────────────────── */
+{
+  // Must contain required staff-safe columns.
+  for (const col of [
+    "id", "external_slab_id", "inventory_id",
+    "color_name", "material_name",
+    "source_inventory_type", "source_inventory_scope",
+    "price_group", "thickness_nominal", "rack", "lot",
+    "width_actual_in", "length_actual_in",
+    "source_public_slug", "source_api_company_code", "source_asset_company_code",
+    "is_active"
+  ]) {
+    assert.ok(COLOR_INVENTORY_SELECT_COLUMNS.includes(col), `COLOR_INVENTORY_SELECT_COLUMNS includes ${col}`);
+  }
+  // Must NOT include count_for_color or raw/meter/usable fields.
+  for (const banned of ["count_for_color", "raw_json", "usable_a_raw", "usable_d_raw", "width_actual_m", "length_actual_m"]) {
+    assert.ok(!COLOR_INVENTORY_SELECT_COLUMNS.includes(banned), `must not include ${banned}`);
+  }
+  assert.ok(Object.isFrozen(COLOR_INVENTORY_SELECT_COLUMNS), "COLOR_INVENTORY_SELECT_COLUMNS is frozen");
+  console.log("ok: COLOR_INVENTORY_SELECT_COLUMNS");
+}
+
 /* ── attach registers ONLY GET routes, gated by head access ────────────── */
 {
   const calls = [];
@@ -263,7 +469,7 @@ import {
   assert.equal(SLAB_INVENTORY_HEAD_SLUG, "slab_inventory");
 
   const routeCalls = calls.filter((c) => c.path.startsWith("/api/slab-inventory"));
-  assert.ok(routeCalls.length >= 4, "at least 4 slab-inventory routes registered");
+  assert.ok(routeCalls.length >= 6, "at least 6 slab-inventory routes registered");
   for (const c of routeCalls) {
     assert.equal(c.method, "get", `route ${c.path} must be GET (read-only) — got ${c.method}`);
   }
@@ -276,11 +482,13 @@ import {
     "/api/slab-inventory/summary",
     "/api/slab-inventory/filters",
     "/api/slab-inventory/slabs",
-    "/api/slab-inventory/slabs/:id"
+    "/api/slab-inventory/slabs/:id",
+    "/api/slab-inventory/color-programs",
+    "/api/slab-inventory/colors/:colorKey/inventory"
   ]) {
     assert.ok(paths.has(expected), `route ${expected} registered`);
   }
-  console.log("ok: read-only route shape (GET only)");
+  console.log("ok: read-only route shape (GET only, 6 routes including color-programs)");
 }
 
 console.log("\nslabInventoryApi: all tests passed");
