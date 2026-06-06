@@ -14,7 +14,7 @@
   --eos-ink-mid: #475569;
   --eos-ink-muted: #64748b;
   /* Elite 100 carousel card width — single source of truth */
-  --e100-card-width: 360px;
+  --e100-card-width: 400px;
   --eos-ink-faint: #94a3b8;
   --eos-line: #e8ecf0;
   --eos-line-strong: #cbd5e1;
@@ -1122,15 +1122,26 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 
 .e100-rail {
   display: flex;
-  gap: 20px;
+  gap: 24px;
   overflow-x: auto;
-  padding: 10px 4px 36px;
+  padding: 12px 4px 44px;
   scroll-behavior: smooth;
   scroll-snap-type: x proximity;
+  scroll-padding-inline: 4px;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
 }
 .e100-rail::-webkit-scrollbar { display: none; }
+
+/* THE PRIMARY FIX: direct flex children of the rail are [role="listitem"] wrappers,
+   not .cp-card. Without this rule the wrappers flex-shrink, making cards tiny in
+   large groups (A/B/D) while small groups (E) accidentally look larger. */
+.e100-rail > [role="listitem"] {
+  flex: 0 0 var(--e100-card-width);
+  min-width: var(--e100-card-width);
+  scroll-snap-align: start;
+}
 
 /* Elite 100 loading skeletons */
 .e100-loading { padding: 0; }
@@ -1148,6 +1159,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 
 .cp-card {
   flex: 0 0 var(--e100-card-width);
+  width: 100%;
   display: flex;
   flex-direction: column;
   text-align: left;
@@ -1155,7 +1167,6 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
   border: none;
   padding: 0;
   cursor: pointer;
-  scroll-snap-align: start;
   transition: transform 280ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 .cp-card:hover { transform: translateY(-7px); }
@@ -1271,14 +1282,17 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 .cp-card-no-inv { display: none; }
 
 /* Responsive: reduce card size on smaller viewports */
+@media (max-width: 1200px) {
+  :root { --e100-card-width: 360px; }
+}
 @media (max-width: 960px) {
   :root { --e100-card-width: 300px; }
 }
 @media (max-width: 680px) {
-  :root { --e100-card-width: 240px; }
+  :root { --e100-card-width: 260px; }
 }
 @media (max-width: 400px) {
-  :root { --e100-card-width: 200px; }
+  :root { --e100-card-width: 220px; }
 }
 
 /* ─────────────────────────────────────────── Non-Stock page */

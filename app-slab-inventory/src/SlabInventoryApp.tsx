@@ -1173,7 +1173,11 @@ function Elite100Section({ group, onOpenItem }: { group: Elite100Group; onOpenIt
   const scroll = (dir: -1 | 1) => {
     const rail = railRef.current;
     if (!rail) return;
-    rail.scrollBy({ left: dir * 1140, behavior: "smooth" });
+    // Read actual card width from first child + gap (24px) so scroll step stays in sync
+    // with whatever --e100-card-width resolves to at the current viewport.
+    const firstItem = rail.firstElementChild as HTMLElement | null;
+    const cardW = firstItem ? firstItem.offsetWidth + 24 : 424;
+    rail.scrollBy({ left: dir * cardW * 2, behavior: "smooth" });
   };
   return (
     <section className="e100-section" aria-labelledby={`e100-group-${group.price_group}`}>
