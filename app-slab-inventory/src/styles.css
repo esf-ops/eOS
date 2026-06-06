@@ -1108,26 +1108,30 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 .e100-rail-wrap {
   position: relative;
 }
-.e100-rail-wrap::before,
+/* No left fade: at scroll=0 there is no off-screen content to the left, and a
+   left-edge mask visually covers the first card (Carrara Classic, etc.).
+   The right fade is the meaningful scroll hint — it signals more cards ahead. */
 .e100-rail-wrap::after {
   content: "";
   position: absolute;
   top: 0; bottom: 24px;
+  right: 0;
   width: 56px;
   z-index: 2;
   pointer-events: none;
+  background: linear-gradient(to left, #ffffff 60%, transparent);
 }
-.e100-rail-wrap::before { left: 0; background: linear-gradient(to right, #ffffff 60%, transparent); }
-.e100-rail-wrap::after { right: 0; background: linear-gradient(to left, #ffffff 60%, transparent); }
 
 .e100-rail {
   display: flex;
   gap: 24px;
   overflow-x: auto;
-  padding: 12px 4px 44px;
+  /* 8px left: enough for the card mat box-shadow not to clip at the rail edge.
+     64px right: last card can scroll fully past the 56px right fade with 8px gutter. */
+  padding: 12px 64px 44px 8px;
   scroll-behavior: smooth;
   scroll-snap-type: x proximity;
-  scroll-padding-inline: 4px;
+  scroll-padding-inline: 8px 64px;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-x: contain;
