@@ -1020,3 +1020,112 @@ Total: 68 tests passing.
    ```
 3. Verify counts: check `slab_color_visual_assets` row count and Elite 100 `catalog_item_id` coverage
 4. Future: operator manual upload / Slabsmith originals for remaining missing Elite 100 textures
+
+---
+
+## Phase 10: Hourly SlabCloud Typed Inventory Sync Automation (2026-06-06)
+
+### Goal
+Make slabOS capable of keeping the typed inventory cache fresh hourly via a secure backend-only scheduled job. No frontend changes. No browser involvement.
+
+### Architecture
+- New Express route: `POST /api/internal/slabcloud/hourly-sync`
+- Registered in `backend-core/src/server.js` via `attachSlabCloudHourlySyncRoutes`
+- Calls `runSlabCloudInventorySync` directly (no subprocess, no npm shell-out)
+- Always uses `inventoryScope: "typed"` (Slab + Remnant lanes)
+
+### Security
+- `x-eos-cron-secret: <EOS_CRON_SECRET>` — primary header (Cloudflare Worker, external callers)
+- `Authorization: Bearer <EOS_CRON_SECRET>` — secondary header (Vercel Cron native)
+- 401 if header missing or wrong; 500 if `EOS_CRON_SECRET` not set on backend
+- Service-role Supabase client injected from server — never in frontend
+
+### Anti-overlap guard
+- Queries `slabcloud_sync_runs` for `status='running'` rows within last 60 min
+- Returns 409 `{ skipped: true }` if active non-stale run found
+- Stale runs (>60 min old) never block future syncs
+- Guard failure is non-fatal (logs warning, sync continues)
+
+### Response shape
+```json
+{
+  "ok": true,
+  "mode": "write",
+  "organization_id": "...",
+  "sync_run_id": "...",
+  "inventory_scope": "typed",
+  "normalized_records": 1679,
+  "slab_count": 401,
+  "remnant_count": 1278,
+  "raw_written": 1679,
+  "inventory_upserted": 1679,
+  "materials_upserted": 5,
+  "images_upserted": 401,
+  "warnings": [],
+  "started_at": "...",
+  "finished_at": "..."
+}
+```
+
+### Scheduler setup
+**Vercel Cron (pre-configured in `vercel.json`):**
+```json
+{ "path": "/api/internal/slabcloud/hourly-sync", "schedule": "0 * * * *" }
+```
+Set `EOS_CRON_SECRET` in Vercel project env vars. Vercel Cron sends `Authorization: Bearer <EOS_CRON_SECRET>` which the endpoint accepts natively.
+
+**Cloudflare Worker alternative:**
+```javascript
+export default {
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(
+      fetch(`${env.BACKEND_URL}/api/internal/slabcloud/hourly-sync`, {
+        method: "POST",
+        headers: { "x-eos-cron-secret": env.EOS_CRON_SECRET },
+      })
+    );
+  },
+};
+```
+
+### Required env vars (backend)
+| Var | Value |
+|-----|-------|
+| `EOS_CRON_SECRET` | Strong random secret (min 32 chars) |
+| `SLABOS_ORGANIZATION_ID` | `89180433-9fab-4024-bec9-a14d870bd0a8` |
+| `SUPABASE_URL` | Supabase project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | Service role key (never in frontend) |
+| `SLABCLOUD_CACHE_WRITE_ENABLED` | `1` to enable writes |
+| `SLABCLOUD_API_COMPANY_CODE` | `kbyd` |
+| `SLABCLOUD_ASSET_COMPANY_CODE` | `kbyd` |
+| `SLABCLOUD_PUBLIC_SLUG` | `esf` |
+
+Optional:
+| Var | Default | Purpose |
+|-----|---------|---------|
+| `SLABCLOUD_CONCURRENCY` | `2` | Parallel detail fetches (if enabled) |
+| `SLABCLOUD_HOURLY_FETCH_DETAILS` | off | Enable per-color detail fetches (slower) |
+
+### Performance notes
+- Default: summary-only (`fetchDetails: false`). Completes in ~10–15 s (within Vercel Pro timeout).
+- With `SLABCLOUD_HOURLY_FETCH_DETAILS=1`: ~30–60 s. Only for long-lived workers or Vercel Enterprise.
+- Texture cache NOT run hourly (daily/manual — product assets change slowly).
+- Image verification NOT run hourly (verify only `image_status='unknown'` rows; preserve `ok` statuses).
+
+### Files changed
+- `backend-core/src/slabcloud/slabCloudHourlySyncApi.js` — new route module (exports: `validateCronSecret`, `resolveOrgId`, `findActiveRunningSync`, `buildHourlySyncConfig`, `buildHourlySyncResponse`, `attachSlabCloudHourlySyncRoutes`)
+- `backend-core/src/slabcloud/slabCloudHourlySyncApi.test.mjs` — 28 unit tests, all passing
+- `backend-core/src/server.js` — import + attach + CORS header + console.log
+- `backend-core/vercel.json` — cron config added
+- `backend-core/SCHEDULING.md` — SlabCloud hourly sync section added
+
+### Manual test command (before enabling scheduler)
+```bash
+# Dry-run (safe — no writes):
+curl -X POST https://<BACKEND_URL>/api/internal/slabcloud/hourly-sync \
+  -H "x-eos-cron-secret: <YOUR_EOS_CRON_SECRET>"
+
+# Write-enabled (requires SLABCLOUD_CACHE_WRITE_ENABLED=1 on server):
+curl -X POST https://<BACKEND_URL>/api/internal/slabcloud/hourly-sync \
+  -H "x-eos-cron-secret: <YOUR_EOS_CRON_SECRET>"
+```

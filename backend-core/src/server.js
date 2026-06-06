@@ -20,6 +20,7 @@ import { attachQuoteRoutes } from "./quotes/quoteRoutes.js";
 import { attachQuoteFileRoutes } from "./files/quoteFileRoutes.js";
 import { attachTakeoffWorkspaceRoutes } from "./takeoff/takeoffWorkspaceRoutes.js";
 import { attachSlabInventoryRoutes } from "./slabInventory/slabInventoryApi.js";
+import { attachSlabCloudHourlySyncRoutes } from "./slabcloud/slabCloudHourlySyncApi.js";
 import { collectHeadEnvOriginsForCors } from "./me/headDeploymentUrls.js";
 import { buildMeHeadsPayload } from "./me/launcherHeads.js";
 import { buildTitansTodayPayload, parseTitansTodayQuery } from "./titans/titansToday.js";
@@ -520,7 +521,7 @@ app.use(
       return callback(null, false);
     },
     credentials: true,
-    allowedHeaders: ["Content-Type", "Authorization", "x-eos-cron-secret", "x-moraware-sync-secret", "x-organization-key"],
+    allowedHeaders: ["Content-Type", "Authorization", "x-eos-cron-secret", "x-eliteos-cron-secret", "x-moraware-sync-secret", "x-organization-key"],
     methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"]
   })
 );
@@ -1202,6 +1203,10 @@ attachSlabInventoryRoutes(app, {
   getSupabase: supabaseServerClient
 });
 
+attachSlabCloudHourlySyncRoutes(app, {
+  getSupabase: supabaseServerClient
+});
+
 app.post("/api/auth/log-login", requireAuth(), express.json(), async (req, res) => {
   try {
     await logLoginEvent({ user: req.user, eventType: "launcher_opened", toolSlug: "home", metadata: req.body ?? null, req });
@@ -1697,6 +1702,7 @@ if (shouldStartLocalHttpServer()) {
     console.log("- POST /api/internal/sync/nightly");
     console.log("- POST /api/internal/sync/nightly-operational");
     console.log("- POST /api/internal/sync/retry-failed");
+    console.log("- POST /api/internal/slabcloud/hourly-sync");
   });
 }
 

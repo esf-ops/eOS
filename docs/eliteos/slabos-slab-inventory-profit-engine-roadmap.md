@@ -697,3 +697,51 @@ The following are explicitly out of scope until the prerequisite phases are done
 **Tests:** 39 new test cases (68 total passing) in `slabCloudVisualAssetCache.test.mjs`.
 
 **Open gap:** Product endpoint sweep may still miss Elite 100 textures that don't exist in SlabCloud at all. Those require Slabsmith originals, manufacturer images, or operator manual upload (supported via `asset_kind = 'manufacturer'` / `'manual_upload'` in the schema).
+
+### Phase 20 — Hourly SlabCloud Typed Inventory Sync Automation Foundation (2026-06-06)
+
+**Summary:** Protected backend-only endpoint + Vercel Cron configuration that runs the typed SlabCloud inventory cache hourly. No frontend changes. Scheduler not enabled until manually tested.
+
+**Endpoint:** `POST /api/internal/slabcloud/hourly-sync`
+
+**Inventory priority:**
+- Typed SlabCloud inventory sync is the **hourly** priority — physical slab/remnant availability must stay current.
+- SlabCloud v2 texture cache is **NOT** hourly. Texture/product assets change slowly; daily or manual is sufficient.
+- Image verification is **NOT** hourly. Only verify new/unknown images; preserve `ok` statuses for unchanged URLs.
+
+**Security model:**
+- `x-eos-cron-secret: <EOS_CRON_SECRET>` header (primary — Cloudflare Worker, any HTTP client)
+- `Authorization: Bearer <EOS_CRON_SECRET>` header (secondary — Vercel Cron native)
+- Service-role key stays on backend only (never in `app-slab-inventory` or any frontend bundle)
+
+**Anti-overlap:** Queries `slabcloud_sync_runs` for active `status='running'` rows within 60 min. Returns 409 `{ skipped: true }` if found. Stale stuck runs (>60 min) never block.
+
+**Sync path:** Calls `runSlabCloudInventorySync` directly (no `spawn`, no npm). Always `inventoryScope: "typed"`.
+
+**Write safety:**
+- Never deletes rows
+- Never marks inventory inactive
+- Never writes back to SlabCloud/Slabsmith
+- Never uses `count_for_color` or v2 display counts
+- Writes only when `SLABCLOUD_CACHE_WRITE_ENABLED=1` is set
+
+**Vercel Cron:** `vercel.json` pre-configured. Set `EOS_CRON_SECRET` in Vercel env before activating.
+
+**Cloudflare Worker alternative:** Document-only handler in PoC doc — not deployed code.
+
+**Tests:** 28 in `slabCloudHourlySyncApi.test.mjs` (all passing): secret validation (missing/invalid/wrong/empty → 401; unconfigured → 500; valid custom header → ok; valid Bearer → ok; wrong Bearer → 401); org ID resolution; anti-overlap (null when clear, row when found, throws on error); stale threshold = 60 min; config always typed; no count_for_color; response shape (write + dry-run); safety invariants.
+
+**Files changed:** `slabCloudHourlySyncApi.js` (new), `slabCloudHourlySyncApi.test.mjs` (new, 28 tests), `server.js` (import + attach + CORS + console.log), `vercel.json` (cron), `SCHEDULING.md` (SlabCloud section), 3 docs files.
+
+**Manual test before enabling scheduler:**
+```bash
+curl -X POST https://<BACKEND_URL>/api/internal/slabcloud/hourly-sync \
+  -H "x-eos-cron-secret: <EOS_CRON_SECRET>"
+```
+
+**Next steps:**
+1. Set `EOS_CRON_SECRET`, `SLABOS_ORGANIZATION_ID`, `SLABCLOUD_CACHE_WRITE_ENABLED=1`, `SLABCLOUD_API_COMPANY_CODE=kbyd`, `SLABCLOUD_PUBLIC_SLUG=esf` in Vercel env
+2. Test endpoint manually (dry-run, then write-enabled)
+3. Verify `slabcloud_sync_runs` row created with `status='completed'`
+4. Enable Vercel Cron (vercel.json already configured — just deploy)
+5. Monitor first scheduled run via Vercel dashboard or `/api/internal/slabcloud/hourly-sync` response
