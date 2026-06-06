@@ -877,3 +877,213 @@ import {
 }
 
 console.log("\nslabInventoryApi: all tests passed");
+
+// ── Visual asset helpers (chooseVisualAssetForDisplay, buildVisualAssetEnrichmentFields,
+//    buildVisualAssetMap, buildNonStockVisualAssetMap) ──────────────────────────
+
+import {
+  chooseVisualAssetForDisplay,
+  buildVisualAssetEnrichmentFields,
+  buildVisualAssetMap,
+  buildNonStockVisualAssetMap,
+} from "./slabInventoryApi.js";
+
+const ASSET_TEXTURE_IMPORTED = {
+  id: "va-001", catalog_item_id: "cat-001",
+  review_status: "imported", asset_kind: "texture",
+  is_primary: false, is_active: true,
+  texture_url_600: "https://slabcloud.com/scdata/textures/600/hash1.jpg",
+  texture_url_1024: "https://slabcloud.com/scdata/textures/1024/hash1.jpg",
+  source_system: "slabcloud_v2",
+};
+const ASSET_TEXTURE_APPROVED = {
+  id: "va-002", catalog_item_id: "cat-001",
+  review_status: "approved", asset_kind: "texture",
+  is_primary: true, is_active: true,
+  texture_url_600: "https://slabcloud.com/scdata/textures/600/hash2.jpg",
+  texture_url_1024: "https://slabcloud.com/scdata/textures/1024/hash2.jpg",
+  source_system: "slabcloud_v2",
+};
+const ASSET_REJECTED = {
+  id: "va-003", catalog_item_id: "cat-001",
+  review_status: "rejected", asset_kind: "texture",
+  is_primary: false, is_active: true,
+  texture_url_600: "https://example.com/rejected.jpg",
+  source_system: "slabcloud_v2",
+};
+const ASSET_INACTIVE = {
+  id: "va-004", catalog_item_id: "cat-001",
+  review_status: "approved", asset_kind: "texture",
+  is_primary: true, is_active: false,
+  texture_url_600: "https://example.com/inactive.jpg",
+  source_system: "slabcloud_v2",
+};
+
+// chooseVisualAssetForDisplay
+{
+  const best = chooseVisualAssetForDisplay([ASSET_TEXTURE_IMPORTED, ASSET_TEXTURE_APPROVED]);
+  assert.equal(best?.id, "va-002", "approved > imported");
+  console.log("ok: chooseVisualAssetForDisplay — approved beats imported");
+}
+{
+  const best = chooseVisualAssetForDisplay([ASSET_TEXTURE_IMPORTED]);
+  assert.equal(best?.id, "va-001", "imported asset returned when no approved");
+  console.log("ok: chooseVisualAssetForDisplay — imported returned when no approved");
+}
+{
+  const best = chooseVisualAssetForDisplay([ASSET_REJECTED, ASSET_INACTIVE]);
+  assert.equal(best, null, "rejected + inactive → null");
+  console.log("ok: chooseVisualAssetForDisplay — rejected/inactive assets not shown");
+}
+{
+  assert.equal(chooseVisualAssetForDisplay([]), null, "empty array → null");
+  assert.equal(chooseVisualAssetForDisplay(null), null, "null → null");
+  console.log("ok: chooseVisualAssetForDisplay — edge cases");
+}
+{
+  // Approved + primary beats approved without primary
+  const nonPrimary = { ...ASSET_TEXTURE_APPROVED, is_primary: false, id: "va-005" };
+  const best = chooseVisualAssetForDisplay([nonPrimary, ASSET_TEXTURE_APPROVED]);
+  assert.equal(best?.id, "va-002", "approved+primary beats approved");
+  console.log("ok: chooseVisualAssetForDisplay — is_primary preference");
+}
+
+// buildVisualAssetEnrichmentFields
+{
+  const fields = buildVisualAssetEnrichmentFields(ASSET_TEXTURE_APPROVED);
+  assert.equal(fields.visual_asset_url, ASSET_TEXTURE_APPROVED.texture_url_600, "visual_asset_url = texture_url_600");
+  assert.equal(fields.visual_asset_url_600, ASSET_TEXTURE_APPROVED.texture_url_600, "visual_asset_url_600");
+  assert.equal(fields.visual_asset_url_1024, ASSET_TEXTURE_APPROVED.texture_url_1024, "visual_asset_url_1024");
+  assert.equal(fields.visual_asset_source, "slabcloud_v2", "visual_asset_source");
+  assert.equal(fields.visual_asset_kind, "texture", "visual_asset_kind");
+  assert.equal(fields.visual_asset_review_status, "approved", "visual_asset_review_status");
+  console.log("ok: buildVisualAssetEnrichmentFields — approved asset");
+}
+{
+  const fields = buildVisualAssetEnrichmentFields(null);
+  assert.equal(fields.visual_asset_url, null, "null asset → null url");
+  assert.equal(fields.visual_asset_url_600, null);
+  assert.equal(fields.visual_asset_url_1024, null);
+  assert.equal(fields.visual_asset_source, null);
+  assert.equal(fields.visual_asset_kind, null);
+  assert.equal(fields.visual_asset_review_status, null);
+  console.log("ok: buildVisualAssetEnrichmentFields — null asset returns null fields");
+}
+{
+  // Never exposes count or inventory authority fields
+  const fields = buildVisualAssetEnrichmentFields({ ...ASSET_TEXTURE_IMPORTED, source_count: 42 });
+  assert.ok(!("source_count" in fields), "source_count must not appear in enrichment fields");
+  assert.ok(!("count_for_color" in fields), "count_for_color must not appear in enrichment fields");
+  console.log("ok: buildVisualAssetEnrichmentFields — no count fields exposed");
+}
+
+// buildVisualAssetMap
+{
+  const assetRows = [
+    ASSET_TEXTURE_IMPORTED,
+    ASSET_TEXTURE_APPROVED,
+    { ...ASSET_TEXTURE_IMPORTED, id: "va-010", catalog_item_id: "cat-002",
+      texture_url_600: "https://example.com/cat2.jpg" },
+  ];
+  const map = buildVisualAssetMap(assetRows);
+  assert.ok(map instanceof Map, "should return Map");
+  assert.equal(map.size, 2, "2 catalog items in map");
+  // cat-001: approved beats imported
+  assert.equal(map.get("cat-001")?.id, "va-002", "cat-001 uses approved asset");
+  // cat-002: only one asset
+  assert.equal(map.get("cat-002")?.id, "va-010", "cat-002 single asset");
+  console.log("ok: buildVisualAssetMap — groups and selects best per catalog item");
+}
+{
+  const map = buildVisualAssetMap([]);
+  assert.equal(map.size, 0, "empty input → empty map");
+  assert.equal(buildVisualAssetMap(null).size, 0, "null input → empty map");
+  console.log("ok: buildVisualAssetMap — edge cases");
+}
+{
+  // Asset with null catalog_item_id should be excluded
+  const withNullCatId = { ...ASSET_TEXTURE_IMPORTED, catalog_item_id: null };
+  const map = buildVisualAssetMap([withNullCatId]);
+  assert.equal(map.size, 0, "null catalog_item_id assets excluded from catalog map");
+  console.log("ok: buildVisualAssetMap — null catalog_item_id excluded");
+}
+
+// buildNonStockVisualAssetMap
+{
+  const nsAssets = [
+    {
+      normalized_color_name: "alabaster", normalized_material_name: "esf",
+      review_status: "imported", asset_kind: "texture", is_primary: false, is_active: true,
+      texture_url_600: "https://example.com/ns1.jpg", source_system: "slabcloud_v2",
+      catalog_item_id: null,
+    },
+    {
+      normalized_color_name: "calacatta gold", normalized_material_name: "cambria",
+      review_status: "imported", asset_kind: "texture", is_primary: false, is_active: true,
+      texture_url_600: "https://example.com/ns2.jpg", source_system: "slabcloud_v2",
+      catalog_item_id: null,
+    },
+  ];
+  const map = buildNonStockVisualAssetMap(nsAssets);
+  assert.ok(map instanceof Map, "should return Map");
+  assert.equal(map.size, 2, "2 non-stock color groups");
+  assert.ok(map.has("alabaster||esf"), "key format correct");
+  assert.ok(map.has("calacatta gold||cambria"), "key format correct for second item");
+  console.log("ok: buildNonStockVisualAssetMap — correct keys and assets");
+}
+
+// Elite 100 card image priority: visual asset URL preferred over representative slab image
+{
+  // Simulate what the route produces: card with both visual asset and representative image
+  const visualEnrichment = buildVisualAssetEnrichmentFields(ASSET_TEXTURE_APPROVED);
+  const card = {
+    catalog_item_id: "cat-001",
+    color_name: "Alabaster",
+    representative_image_url: "https://example.com/slab-photo.jpg",
+    representative_thumbnail_url: "https://example.com/slab-thumb.jpg",
+    ...visualEnrichment,
+  };
+  // Frontend priority: visual_asset_url_600 first, then representative_image_url
+  const displayUrl = card.visual_asset_url_600 || card.visual_asset_url_1024
+    || card.representative_thumbnail_url || card.representative_image_url;
+  assert.equal(
+    displayUrl,
+    ASSET_TEXTURE_APPROVED.texture_url_600,
+    "visual_asset_url_600 is preferred over representative_image_url"
+  );
+  console.log("ok: elite100 card — visual_asset_url_600 preferred over representative slab image");
+}
+
+// Elite 100 card image priority: fallback to representative slab when no visual asset
+{
+  const visualEnrichment = buildVisualAssetEnrichmentFields(null); // no visual asset
+  const card = {
+    catalog_item_id: "cat-001",
+    color_name: "Alabaster",
+    representative_image_url: "https://example.com/slab-photo.jpg",
+    representative_thumbnail_url: "https://example.com/slab-thumb.jpg",
+    ...visualEnrichment,
+  };
+  const displayUrl = card.visual_asset_url_600 || card.visual_asset_url_1024
+    || card.representative_thumbnail_url || card.representative_image_url;
+  assert.equal(
+    displayUrl,
+    "https://example.com/slab-thumb.jpg",
+    "falls back to representative_thumbnail_url when no visual asset"
+  );
+  console.log("ok: elite100 card — fallback to representative slab image when no visual asset");
+}
+
+// count_for_color and v2 display count are never used as inventory authority
+{
+  // Verify the enrichment fields don't include any count-related fields
+  const allEnrichmentKeys = Object.keys(buildVisualAssetEnrichmentFields(ASSET_TEXTURE_IMPORTED));
+  const countKeys = allEnrichmentKeys.filter((k) =>
+    k.includes("count") || k.includes("inventory_count") || k.includes("display_count")
+  );
+  assert.equal(countKeys.length, 0, "enrichment fields must not include any count fields");
+  console.log("ok: count_for_color and v2 display count not used as inventory authority in enrichment");
+}
+
+console.log("\nslabInventoryApi: all visual asset helper tests passed");
+

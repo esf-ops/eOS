@@ -94,6 +94,12 @@ type Elite100Item = {
   representative_thumbnail_url: string | null;
   representative_image_source_inventory_type: string | null;
   representative_image_inventory_id: string | null;
+  visual_asset_url: string | null;
+  visual_asset_url_600: string | null;
+  visual_asset_url_1024: string | null;
+  visual_asset_source: string | null;
+  visual_asset_kind: string | null;
+  visual_asset_review_status: string | null;
   has_inventory: boolean;
   program_status: "elite_100";
 };
@@ -724,7 +730,10 @@ export default function SlabInventoryApp() {
                           colorName: item.color_name,
                           materialName: item.material_name,
                           priceGroup: item.price_group,
-                          representativeImageUrl: item.representative_image_url || item.representative_thumbnail_url,
+                          // Image priority: v2 texture > representative slab photo
+                          representativeImageUrl:
+                            item.visual_asset_url_600 || item.visual_asset_url_1024
+                            || item.representative_image_url || item.representative_thumbnail_url,
                         })}
                       />
                     ))}
@@ -1198,7 +1207,9 @@ function Elite100Section({ group, onOpenItem }: { group: Elite100Group; onOpenIt
 
 function Elite100Card({ item, onOpen }: { item: Elite100Item; onOpen: () => void }) {
   const [imgFailed, setImgFailed] = useState(false);
-  const src = item.representative_thumbnail_url || item.representative_image_url;
+  // Image priority: v2 texture > representative slab photo > placeholder
+  const src = item.visual_asset_url_600 || item.visual_asset_url_1024
+    || item.representative_thumbnail_url || item.representative_image_url;
   const hasImage = Boolean(src) && !imgFailed;
   return (
     <button

@@ -648,3 +648,25 @@ The following are explicitly out of scope until the prerequisite phases are done
 **Tests:** 13 new test suites in `colorProgramMatching.test.mjs`. All 42 pass. `eos:check:local` green.
 
 **Future annual Elite 100 alias batches:** Use the script. It is now safe to re-run at any time — existing rows are detected and skipped. No manual SQL needed.
+
+### Phase 18 — Slab Inventory Visual Asset Cache (2026-06-06)
+
+**Summary:** Write-gated `slab_color_visual_assets` cache table + SlabCloud v2 texture population script + API enrichment for Elite 100 and Non-Stock cards + frontend image priority update.
+
+**Diagnostic baseline:** 741 v2 rows, 291 with texture (39.3%). 27/100 Elite 100 with texture. 264 Non-Stock with texture.
+
+**Deliverables:**
+- `eliteos_slab_color_visual_assets.sql` — draft SQL schema (table + indexes + RLS; manual apply required)
+- `slabCloudVisualAssetCache.js` — pure helpers: `buildVisualAssetRow`, `findExistingVisualAsset`, constants
+- `cacheSlabCloudV2Textures.js` — write-gated cache script (dry-run default; `SLABCLOUD_V2_TEXTURE_CACHE_WRITE_ENABLED=1` to write)
+- `slabInventoryApi.js` — 4 new exports + visual asset enrichment in elite100-programs + non-stock-programs routes
+- `SlabInventoryApp.tsx` — image priority: v2 texture > representative slab photo > placeholder
+- `package.json` — 2 new scripts, `eos:check:local` updated
+
+**Image priority chain:** approved/primary visual asset → imported v2 texture → scored slab photo (Slab >> Remnant, area tiebreaker) → placeholder.
+
+**Safety:** slab_inventory never touched. count_for_color never used. No SlabCloud writebacks. No catalog activation. No Group G. Writes write-gated.
+
+**Tests:** 29 in `slabCloudVisualAssetCache.test.mjs`. 15 new in `slabInventoryApi.test.mjs`. `eos:check:local` green.
+
+**Open gap:** 73 Elite 100 colors still have no v2 texture — need Slabsmith/manufacturer/manual upload workflow in a future phase.

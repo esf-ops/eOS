@@ -912,3 +912,43 @@ Two new exported pure helpers in `slabInventoryApi.js`:
 - `representative_image_inventory_id`
 
 **Tests:** 31 passing in `slabInventoryApi.test.mjs` (was 22). All 42 passing in `colorProgramMatching.test.mjs`. `eos:check:local` green.
+
+---
+
+## Phase 8: Slab Inventory Visual Asset Cache — SlabCloud v2 Texture Layer (2026-06-06)
+
+**Goal:** Build a write-gated `slab_color_visual_assets` cache so slabOS can store and use texture images from SlabCloud v2 without replacing `slab_inventory` as the physical inventory authority.
+
+**Diagnostic baseline:**
+- v2 inventory rows: 741 | rows with texture: 291 (39.3%)
+- Elite 100 with texture: 27/100 (27%) | Non-Stock with texture: 264
+- 73 Elite 100 items still have no texture — needs Slabsmith/manufacturer/manual upload strategy
+
+**Image priority chain (established this phase):**
+1. `approved + is_primary` visual asset for catalog item
+2. `imported` visual asset from slabcloud_v2 (texture)
+3. Best representative verified slab photo (scored: Slab >> Remnant, area tiebreaker)
+4. Initials placeholder
+
+**New files:**
+- `backend-core/supabase/eliteos_slab_color_visual_assets.sql` — SQL draft (manual apply required)
+- `backend-core/src/slabcloud/slabCloudVisualAssetCache.js` — pure helpers (`buildVisualAssetRow`, `findExistingVisualAsset`, constants)
+- `backend-core/src/slabcloud/slabCloudVisualAssetCache.test.mjs` — 29 unit tests
+- `backend-core/src/scripts/slabcloud/cacheSlabCloudV2Textures.js` — write-gated script (dry-run by default)
+
+**Updated files:**
+- `backend-core/src/slabInventory/slabInventoryApi.js` — 4 new exports (`chooseVisualAssetForDisplay`, `buildVisualAssetEnrichmentFields`, `buildVisualAssetMap`, `buildNonStockVisualAssetMap`); both `elite100-programs` and `non-stock-programs` routes enriched
+- `backend-core/src/slabInventory/slabInventoryApi.test.mjs` — 15 new test cases for visual asset helpers and image priority
+- `app-slab-inventory/src/SlabInventoryApp.tsx` — `Elite100Item` type extended; `Elite100Card` and modal hero use visual_asset_url_600 first
+- `package.json` — `eos:slabcloud:v2-texture-cache`, `eos:test:slabcloud-visual-asset-cache` scripts added; `eos:check:local` updated
+
+**Safety:** slab_inventory not touched. count_for_color not used. Writes require `SLABCLOUD_V2_TEXTURE_CACHE_WRITE_ENABLED=1`. No SlabCloud writebacks. No catalog activation changes. No Group G.
+
+**Tests:** 29 passing in `slabCloudVisualAssetCache.test.mjs`. 15 new + all prior in `slabInventoryApi.test.mjs`. `eos:check:local` green.
+
+**Manual next steps:**
+1. Apply SQL: `backend-core/supabase/eliteos_slab_color_visual_assets.sql`
+2. Dry-run: `npm run eos:slabcloud:v2-texture-cache`
+3. Write-enable: `SLABCLOUD_V2_TEXTURE_CACHE_WRITE_ENABLED=1 SLABOS_ORGANIZATION_ID=<org> SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... npm run eos:slabcloud:v2-texture-cache`
+4. Verify Elite 100 cards show `visual_asset_url_600` via GET /api/slab-inventory/elite100-programs
+5. Future: operator `approved + is_primary` promotion for best-quality assets

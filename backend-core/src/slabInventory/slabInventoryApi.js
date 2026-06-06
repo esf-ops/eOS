@@ -297,6 +297,132 @@ export function chooseRepresentativeInventoryImage(invRows, imageMap) {
   };
 }
 
+// ── Visual asset helpers (slab_color_visual_assets cache) ────────────────────
+//
+// These helpers are PRESENTATION ENRICHMENT ONLY.
+// They read from slab_color_visual_assets — never from slab_inventory.
+// No count fields are read or returned.
+
+/**
+ * Image priority scores for visual asset display selection:
+ *   approved + is_primary  → 1150
+ *   approved               → 1000
+ *   imported + is_primary  →  150
+ *   imported               →  100
+ *   texture kind bonus     →   10
+ *   (needs_review, rejected → 0 — never shown)
+ */
+function scoreVisualAsset(asset) {
+  if (!asset) return 0;
+  if (asset.is_active === false) return 0;
+  const status = asset.review_status;
+  if (status !== "approved" && status !== "imported") return 0;
+  const statusScore  = status === "approved" ? 1000 : 100;
+  const primaryScore = asset.is_primary ? 50 : 0;
+  const kindScore    = asset.asset_kind === "texture" ? 10 : 0;
+  return statusScore + primaryScore + kindScore;
+}
+
+/**
+ * Choose the best visual asset to display for a catalog item.
+ * Priority: approved/primary > approved > imported/texture > imported.
+ * Rejected and needs_review assets are excluded.
+ *
+ * @param {Array} assets  Rows from slab_color_visual_assets for one catalog item
+ * @returns {Object|null}
+ */
+export function chooseVisualAssetForDisplay(assets) {
+  const list = Array.isArray(assets) ? assets : [];
+  if (!list.length) return null;
+
+  let best = null;
+  let bestScore = 0;
+  for (const a of list) {
+    const score = scoreVisualAsset(a);
+    if (score > bestScore) {
+      bestScore = score;
+      best = a;
+    }
+  }
+  return bestScore > 0 ? best : null;
+}
+
+/**
+ * Build the visual asset enrichment fields for an API card from the best asset.
+ * Returns null-valued fields when no asset is provided.
+ * Never exposes count fields or inventory authority data.
+ *
+ * @param {Object|null} asset  Best asset from chooseVisualAssetForDisplay()
+ * @returns {Object}
+ */
+export function buildVisualAssetEnrichmentFields(asset) {
+  if (!asset) {
+    return {
+      visual_asset_url:           null,
+      visual_asset_url_600:       null,
+      visual_asset_url_1024:      null,
+      visual_asset_source:        null,
+      visual_asset_kind:          null,
+      visual_asset_review_status: null,
+    };
+  }
+  return {
+    visual_asset_url:
+      asset.texture_url_600 ?? asset.texture_url_1024 ?? asset.original_image_url ?? asset.hero_url ?? null,
+    visual_asset_url_600:       asset.texture_url_600       ?? null,
+    visual_asset_url_1024:      asset.texture_url_1024      ?? null,
+    visual_asset_source:        asset.source_system         ?? null,
+    visual_asset_kind:          asset.asset_kind            ?? null,
+    visual_asset_review_status: asset.review_status         ?? null,
+  };
+}
+
+/**
+ * Build a Map<catalog_item_id → best_visual_asset> from a flat list of asset rows.
+ * Used to enrich Elite 100 cards in the route handler.
+ *
+ * @param {Array} assetRows  Rows from slab_color_visual_assets
+ * @returns {Map<string, Object>}
+ */
+export function buildVisualAssetMap(assetRows) {
+  const byItemId = new Map();
+  for (const a of Array.isArray(assetRows) ? assetRows : []) {
+    if (!a.catalog_item_id) continue;
+    const list = byItemId.get(a.catalog_item_id) ?? [];
+    list.push(a);
+    byItemId.set(a.catalog_item_id, list);
+  }
+  const result = new Map();
+  for (const [itemId, list] of byItemId.entries()) {
+    const best = chooseVisualAssetForDisplay(list);
+    if (best) result.set(itemId, best);
+  }
+  return result;
+}
+
+/**
+ * Build a Map<normColorKey → best_visual_asset> for non-stock cards.
+ * Key format: "{normalized_color_name}||{normalized_material_name}".
+ *
+ * @param {Array} assetRows  Rows from slab_color_visual_assets (catalog_item_id null)
+ * @returns {Map<string, Object>}
+ */
+export function buildNonStockVisualAssetMap(assetRows) {
+  const byKey = new Map();
+  for (const a of Array.isArray(assetRows) ? assetRows : []) {
+    const key = `${a.normalized_color_name ?? ""}||${a.normalized_material_name ?? ""}`;
+    const list = byKey.get(key) ?? [];
+    list.push(a);
+    byKey.set(key, list);
+  }
+  const result = new Map();
+  for (const [key, list] of byKey.entries()) {
+    const best = chooseVisualAssetForDisplay(list);
+    if (best) result.set(key, best);
+  }
+  return result;
+}
+
 /**
  * Compute summary aggregates from a lightweight projection of ACTIVE slab rows.
  *
@@ -1199,6 +1325,33 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
         resolvedAliases
       );
 
+      // Load visual assets from cache (slab_color_visual_assets).
+      // Non-fatal: if table is not installed yet, visual asset fields are null.
+      const catalogItemIds = catalogItemList.map((c) => c.id).filter(Boolean);
+      let visualAssetMap = new Map();
+      if (catalogItemIds.length) {
+        try {
+          let vaQ = supabase
+            .from("slab_color_visual_assets")
+            .select(
+              "catalog_item_id,texture_url_600,texture_url_1024,original_image_url,hero_url,asset_kind,review_status,is_primary,is_active,source_system"
+            )
+            .eq("organization_id", organizationId)
+            .eq("is_active", true)
+            .in("catalog_item_id", catalogItemIds);
+          const { data: vaRows, error: vaErr } = await vaQ;
+          if (vaErr) {
+            if (!isMissingRelationError(vaErr)) throw vaErr;
+            // table not installed yet — skip silently
+          } else {
+            visualAssetMap = buildVisualAssetMap(vaRows ?? []);
+          }
+        } catch (e) {
+          // Visual assets are enrichment only — log but do not fail the route
+          console.warn("[elite100-programs] Visual asset load error (non-fatal):", e?.message);
+        }
+      }
+
       // Enrich each catalog item with image + inventory counts using scored representative selection.
       for (const [, acc] of elite100Map.entries()) {
         // Count verified photos across all matched slabs.
@@ -1263,6 +1416,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
           representative_thumbnail_url: acc.repThumbnail ?? null,
           representative_image_source_inventory_type: acc.repSourceInventoryType ?? null,
           representative_image_inventory_id: acc.repInventoryId ?? null,
+          ...buildVisualAssetEnrichmentFields(visualAssetMap.get(item.id) ?? null),
           has_inventory:
             (acc.slabCount ?? 0) + (acc.remnantCount ?? 0) > 0,
           program_status: "elite_100",
@@ -1554,11 +1708,36 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
       const { data: imgRows } = await imgQ;
       if (imgRows?.length) imageMap = buildImageMap(imgRows);
 
-      // Reuse groupColorPrograms; tag cards as non_stock.
-      const cards = groupColorPrograms(nonStockRows, imageMap).map((card) => ({
-        ...card,
-        program_status: "non_stock",
-      }));
+      // Load non-stock visual assets (catalog_item_id IS NULL) from cache.
+      // Non-fatal: if table not installed, visual asset fields are null.
+      let nonStockVisualMap = new Map();
+      try {
+        const { data: nsVaRows, error: nsVaErr } = await supabase
+          .from("slab_color_visual_assets")
+          .select(
+            "normalized_color_name,normalized_material_name,texture_url_600,texture_url_1024,original_image_url,hero_url,asset_kind,review_status,is_primary,is_active,source_system"
+          )
+          .eq("organization_id", organizationId)
+          .eq("is_active", true)
+          .is("catalog_item_id", null);
+        if (nsVaErr) {
+          if (!isMissingRelationError(nsVaErr)) throw nsVaErr;
+        } else {
+          nonStockVisualMap = buildNonStockVisualAssetMap(nsVaRows ?? []);
+        }
+      } catch (e) {
+        console.warn("[non-stock-programs] Visual asset load error (non-fatal):", e?.message);
+      }
+
+      // Reuse groupColorPrograms; tag cards as non_stock + add visual asset enrichment.
+      const cards = groupColorPrograms(nonStockRows, imageMap).map((card) => {
+        const normKey = `${_normColorName(card.color_name ?? "") ?? ""}||${_normMatName(card.material_name ?? "") ?? ""}`;
+        return {
+          ...card,
+          ...buildVisualAssetEnrichmentFields(nonStockVisualMap.get(normKey) ?? null),
+          program_status: "non_stock",
+        };
+      });
 
       res.json({
         ok: true,
