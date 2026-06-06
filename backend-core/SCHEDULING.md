@@ -169,7 +169,7 @@ See also: `docs/eliteos/moraware-sync-foundation.md`
 
 | Layer | Where it runs | Endpoint / command |
 |-------|---------------|--------------------|
-| Scheduler trigger | Vercel Cron or Cloudflare Worker | `POST /api/internal/slabcloud/hourly-sync` |
+| Scheduler trigger | Vercel Cron or Cloudflare Worker | `GET|POST /api/internal/slabcloud/hourly-sync` |
 | Sync execution | **In-process** (Express route imports `runSlabCloudInventorySync` directly) | Always `inventoryScope: "typed"` |
 | Inventory read | Browser → backend | `GET /api/slab-inventory/elite100-programs`, `/non-stock-programs`, `/all-inventory` |
 
@@ -177,18 +177,28 @@ See also: `docs/eliteos/moraware-sync-foundation.md`
 
 ### Sync endpoint
 
-**Route:** `POST /api/internal/slabcloud/hourly-sync`  
+**Route:** `GET|POST /api/internal/slabcloud/hourly-sync`
+- `GET` — Vercel Cron (sends `Authorization: Bearer <CRON_SECRET>` automatically)
+- `POST` — manual tests, Cloudflare Worker, any HTTP client
+- Other methods → `405 Method Not Allowed`
+
 **File:** `backend-core/src/slabcloud/slabCloudHourlySyncApi.js`
 
 #### Authentication
 Two methods accepted (either satisfies the check):
 
 ```
-x-eos-cron-secret: <EOS_CRON_SECRET>     ← primary (Cloudflare Worker, external callers)
-Authorization: Bearer <EOS_CRON_SECRET>   ← secondary (Vercel Cron native)
+Authorization: Bearer <secret>      ← primary (Vercel Cron native; also any HTTP client)
+x-eos-cron-secret: <secret>         ← custom header (Moraware precedent; Cloudflare Worker)
+x-eliteos-cron-secret: <secret>     ← alias (listed in CORS allowed headers)
 ```
 
-Returns `401` if header missing or wrong. Returns `500` if `EOS_CRON_SECRET` is not configured on the backend.
+Returns `401` if header missing or wrong. Returns `500` if no secret is configured on the backend.
+
+**Server-side secret env var priority:**
+1. `CRON_SECRET` — Vercel's native cron secret (set this in Vercel project env vars; Vercel injects `Authorization: Bearer` automatically on scheduled cron calls)
+2. `EOS_CRON_SECRET` — legacy alias used by existing Moraware endpoints and manual tests
+3. `ELITEOS_CRON_SECRET` — additional alias for future unification
 
 #### Anti-overlap guard
 Before running, the route queries `slabcloud_sync_runs` for any row where:
@@ -216,7 +226,10 @@ Guard failure is non-fatal: logs a warning and proceeds.
 }
 ```
 
-Vercel sends `Authorization: Bearer <EOS_CRON_SECRET>` automatically. Set `EOS_CRON_SECRET` in the Vercel project env vars.
+Vercel Cron:
+- Invokes cron paths with **GET** requests.
+- Automatically adds `Authorization: Bearer <CRON_SECRET>` when `CRON_SECRET` is set in Vercel project env vars.
+- Set `CRON_SECRET` (not `EOS_CRON_SECRET`) in your Vercel project environment variables.
 
 **Important:** Do not activate the cron until the endpoint has been manually tested (see below).
 
@@ -252,7 +265,8 @@ crons = ["0 * * * *"]
 
 | Var | Value |
 |-----|-------|
-| `EOS_CRON_SECRET` | Strong random secret (min 32 chars) |
+| `CRON_SECRET` | Strong random secret — **set this in Vercel project env vars** (Vercel injects `Authorization: Bearer` automatically on cron calls) |
+| `EOS_CRON_SECRET` | Optional — kept for local/manual compatibility (also accepted by Moraware endpoints) |
 | `SLABOS_ORGANIZATION_ID` | `89180433-9fab-4024-bec9-a14d870bd0a8` |
 | `SUPABASE_URL` | Supabase project URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | Service role key (backend only — never in frontend) |
@@ -271,13 +285,17 @@ Optional:
 ### Manual test (required before enabling scheduler)
 
 ```bash
-# Step 1 — dry-run (no writes; safe to run anytime):
+# Step 1 — dry-run via GET (mirrors Vercel Cron; no writes):
+curl -X GET https://<BACKEND_URL>/api/internal/slabcloud/hourly-sync \
+  -H "Authorization: Bearer <YOUR_CRON_SECRET>"
+
+# Step 2 — dry-run via POST (manual / Cloudflare Worker pattern):
 curl -X POST https://<BACKEND_URL>/api/internal/slabcloud/hourly-sync \
   -H "x-eos-cron-secret: <YOUR_EOS_CRON_SECRET>"
 
-# Step 2 — write-enabled (ensure SLABCLOUD_CACHE_WRITE_ENABLED=1 is set on the server):
-curl -X POST https://<BACKEND_URL>/api/internal/slabcloud/hourly-sync \
-  -H "x-eos-cron-secret: <YOUR_EOS_CRON_SECRET>"
+# Step 3 — write-enabled (ensure SLABCLOUD_CACHE_WRITE_ENABLED=1 is set on the server):
+curl -X GET https://<BACKEND_URL>/api/internal/slabcloud/hourly-sync \
+  -H "Authorization: Bearer <YOUR_CRON_SECRET>"
 # Verify: check slabcloud_sync_runs for a new row with status='completed'.
 ```
 

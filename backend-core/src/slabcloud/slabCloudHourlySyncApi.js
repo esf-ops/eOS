@@ -1,12 +1,29 @@
 /**
- * slabCloudHourlySyncApi — POST /api/internal/slabcloud/hourly-sync
+ * slabCloudHourlySyncApi — GET|POST /api/internal/slabcloud/hourly-sync
  *
  * Protected cron endpoint for the hourly typed SlabCloud inventory cache.
  *
  * SECURITY:
- *   - Requires x-eos-cron-secret header matching EOS_CRON_SECRET env var.
+ *   - Requires a cron secret matched against the server-side env var (see below).
  *   - Uses service-role Supabase injected from server context (never created here).
  *   - Never exposes service-role key or sync controls to the browser.
+ *
+ * METHOD COMPATIBILITY:
+ *   - GET  — Vercel Cron calls cron paths with GET + Authorization: Bearer <CRON_SECRET>.
+ *   - POST — Manual tests and external callers (Cloudflare Worker) use POST.
+ *   - All other methods → 405 Method Not Allowed.
+ *
+ * SECRET ENV VAR PRIORITY (server side — readCronSecret()):
+ *   1. CRON_SECRET          — Vercel's native cron secret (set in Vercel project env vars;
+ *                             Vercel injects Authorization: Bearer automatically on cron calls)
+ *   2. EOS_CRON_SECRET      — Legacy alias used by existing Moraware endpoints and manual tests
+ *   3. ELITEOS_CRON_SECRET  — Additional alias for future unification
+ *   If none is set, the endpoint returns 500 and does not run sync.
+ *
+ * SECRET HEADER PRIORITY (incoming request — validateCronSecret()):
+ *   1. Authorization: Bearer <secret>  — Vercel Cron native; also usable from any HTTP client
+ *   2. x-eos-cron-secret               — Custom header (Moraware precedent in this codebase)
+ *   3. x-eliteos-cron-secret           — Alias supported in CORS allowed headers
  *
  * SAFETY (read before extending):
  *   - Always uses SLABCLOUD_INVENTORY_SCOPE=typed (Slab + Remnant lanes).
@@ -25,7 +42,9 @@
  *     (longer, only advisable on a long-lived worker or Vercel Enterprise).
  *
  * ENV VARS (all read at request time, not at module load):
- *   EOS_CRON_SECRET                  required — matched against x-eos-cron-secret header
+ *   CRON_SECRET                      preferred — Vercel native cron secret
+ *   EOS_CRON_SECRET                  fallback — existing alias used by Moraware endpoints
+ *   ELITEOS_CRON_SECRET              fallback — additional alias
  *   SLABOS_ORGANIZATION_ID           preferred org id env var
  *   SLABCLOUD_ORGANIZATION_ID        fallback org id env var
  *   SLABCLOUD_CACHE_WRITE_ENABLED    "1" to write; omit/0 for dry-run
@@ -56,45 +75,70 @@ export const EXTERNAL_SOURCE_SLABCLOUD = "slabcloud";
 // ── Helpers (exported for unit-testing) ──────────────────────────────────────
 
 /**
- * Read the cron secret from env. Returns null if not configured.
+ * Read the expected cron secret from env vars.
+ *
+ * Priority:
+ *   1. CRON_SECRET          — Vercel native (set in Vercel project env; Vercel injects
+ *                             Authorization: Bearer automatically on scheduled cron calls)
+ *   2. EOS_CRON_SECRET      — Existing alias used by Moraware cron endpoints in this repo
+ *   3. ELITEOS_CRON_SECRET  — Additional alias for future unification
+ *
+ * Returns null if none of the three vars is set (non-empty string).
  * Read at request time so tests can override process.env safely.
  */
 export function readCronSecret() {
-  return String(process.env.EOS_CRON_SECRET ?? "").trim() || null;
+  return (
+    String(process.env.CRON_SECRET ?? "").trim() ||
+    String(process.env.EOS_CRON_SECRET ?? "").trim() ||
+    String(process.env.ELITEOS_CRON_SECRET ?? "").trim() ||
+    null
+  );
 }
 
 /**
  * Validate the cron secret from the incoming request.
  *
- * Accepted forms (either satisfies the check):
- *   x-eos-cron-secret: <EOS_CRON_SECRET>         — primary (Cloudflare Worker, external callers)
- *   Authorization: Bearer <EOS_CRON_SECRET>        — secondary (Vercel Cron native behavior)
+ * Accepted incoming header forms (any one satisfies the check):
+ *   Authorization: Bearer <secret>  — Vercel Cron native + universal HTTP clients
+ *   x-eos-cron-secret: <secret>     — Custom header (Moraware precedent in this codebase)
+ *   x-eliteos-cron-secret: <secret> — Alias (listed in CORS allowed headers)
+ *
+ * The expected secret is resolved via readCronSecret() — see priority order there.
  *
  * Returns:
- *   { ok: true }            — header present and correct
- *   { ok: false, status: 401, error: "..." } — missing or wrong header
- *   { ok: false, status: 500, error: "..." } — env var not configured
+ *   { ok: true }                              — header present and matches server secret
+ *   { ok: false, status: 401, error: "..." }  — header missing or value does not match
+ *   { ok: false, status: 500, error: "..." }  — no server-side secret configured
  */
 export function validateCronSecret(req) {
   const expected = readCronSecret();
   if (!expected) {
-    return { ok: false, status: 500, error: "EOS_CRON_SECRET not configured on backend" };
+    return {
+      ok: false,
+      status: 500,
+      error: "No cron secret configured on backend (set CRON_SECRET, EOS_CRON_SECRET, or ELITEOS_CRON_SECRET)",
+    };
   }
 
-  // Primary: custom header (Cloudflare Worker, any HTTP client).
-  const customHeader = String(req?.headers?.["x-eos-cron-secret"] ?? "").trim();
-  if (customHeader && customHeader === expected) {
-    return { ok: true };
-  }
-
-  // Secondary: Vercel Cron sends Authorization: Bearer <secret>.
+  // 1. Authorization: Bearer <secret>  (Vercel Cron native + universal)
   const authHeader = String(req?.headers?.["authorization"] ?? "").trim();
-  const bearerPrefix = "bearer ";
-  if (authHeader.toLowerCase().startsWith(bearerPrefix)) {
-    const bearerToken = authHeader.slice(bearerPrefix.length).trim();
+  if (authHeader.toLowerCase().startsWith("bearer ")) {
+    const bearerToken = authHeader.slice("bearer ".length).trim();
     if (bearerToken && bearerToken === expected) {
       return { ok: true };
     }
+  }
+
+  // 2. x-eos-cron-secret  (Moraware precedent; Cloudflare Worker / manual)
+  const eosHeader = String(req?.headers?.["x-eos-cron-secret"] ?? "").trim();
+  if (eosHeader && eosHeader === expected) {
+    return { ok: true };
+  }
+
+  // 3. x-eliteos-cron-secret  (alias; listed in CORS allowed headers)
+  const eliteosHeader = String(req?.headers?.["x-eliteos-cron-secret"] ?? "").trim();
+  if (eliteosHeader && eliteosHeader === expected) {
+    return { ok: true };
   }
 
   return { ok: false, status: 401, error: "Unauthorized" };
@@ -202,20 +246,26 @@ export function buildHourlySyncResponse({ result, organizationId, startedAt, fin
 // ── Route attachment ──────────────────────────────────────────────────────────
 
 /**
- * Attach POST /api/internal/slabcloud/hourly-sync to the Express app.
+ * Attach GET|POST /api/internal/slabcloud/hourly-sync to the Express app.
  *
- * The route:
- *   1. Validates x-eos-cron-secret against EOS_CRON_SECRET (401/500 if invalid).
- *   2. Resolves organization ID from SLABOS_ORGANIZATION_ID / SLABCLOUD_ORGANIZATION_ID.
- *   3. Runs anti-overlap guard against slabcloud_sync_runs (409 if active run found).
- *   4. Calls runSlabCloudInventorySync directly (no subprocess spawn).
- *   5. Returns JSON sync summary.
+ * GET  — Vercel Cron invokes cron paths with GET + Authorization: Bearer <CRON_SECRET>.
+ * POST — Manual tests, Cloudflare Worker, any HTTP client.
+ * Other methods → 405.
+ *
+ * Handler steps:
+ *   1. Validate cron secret (401/500 if invalid/unconfigured).
+ *   2. Resolve organization ID (500 if missing).
+ *   3. Anti-overlap guard against slabcloud_sync_runs (409 if active run found).
+ *   4. Call runSlabCloudInventorySync directly (no subprocess spawn).
+ *   5. Return JSON sync summary.
  *
  * @param {import("express").Application} app
  * @param {{ getSupabase: () => import("@supabase/supabase-js").SupabaseClient }} opts
  */
 export function attachSlabCloudHourlySyncRoutes(app, { getSupabase }) {
-  app.post("/api/internal/slabcloud/hourly-sync", async (req, res) => {
+  const ROUTE = "/api/internal/slabcloud/hourly-sync";
+
+  async function handler(req, res) {
     // 1. Cron secret gate
     const secretCheck = validateCronSecret(req);
     if (!secretCheck.ok) {
@@ -284,10 +334,6 @@ export function attachSlabCloudHourlySyncRoutes(app, { getSupabase }) {
         organizationId,
         db,
         writeEnabled,
-        // triggered_by is set via runMeta inside runSlabCloudInventorySync.
-        // We pass a custom triggeredBy via the config object is not possible;
-        // instead, slabCloudSync.js sets triggeredBy="script" internally.
-        // The route adds triggered_by to the response for observability.
         fetchers: {},
       });
     } catch (syncErr) {
@@ -307,5 +353,14 @@ export function attachSlabCloudHourlySyncRoutes(app, { getSupabase }) {
     return res.json(
       buildHourlySyncResponse({ result, organizationId, startedAt, finishedAt })
     );
+  }
+
+  // Vercel Cron sends GET; manual tests and Cloudflare Worker use POST.
+  app.get(ROUTE, handler);
+  app.post(ROUTE, handler);
+
+  // Reject all other HTTP methods with 405.
+  app.all(ROUTE, (_req, res) => {
+    res.status(405).json({ ok: false, error: "Method Not Allowed. Use GET or POST." });
   });
 }
