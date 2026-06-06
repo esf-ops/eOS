@@ -952,3 +952,71 @@ Two new exported pure helpers in `slabInventoryApi.js`:
 3. Write-enable: `SLABCLOUD_V2_TEXTURE_CACHE_WRITE_ENABLED=1 SLABOS_ORGANIZATION_ID=<org> SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... npm run eos:slabcloud:v2-texture-cache`
 4. Verify Elite 100 cards show `visual_asset_url_600` via GET /api/slab-inventory/elite100-programs
 5. Future: operator `approved + is_primary` promotion for best-quality assets
+
+## Phase 9: Deep SlabCloud v2 Product Texture Sweep (2026-06-06)
+
+**Goal:** Automatically check each SlabCloud v2 product endpoint (`GET /api/v2/product/{kbyd}?slug=...&mat=...`) for texture hashes that were absent in the bulk inventory response, avoiding any need for manual per-color inspection.
+
+**Pre-sweep state:** 291 visual assets imported, 34 Elite 100 catalog items with texture (34%).
+
+**New pure helpers** added to `slabCloudVisualAssetCache.js`:
+- `extractTextureHashFromProductResponse(raw)` — handles texture as string, array, object, config.texture fallback; never reads slab/count fields
+- `buildProductEndpointCandidates(normalizedRows, opts)` — deduplicates by `product_slug + normalized_material_name`; `onlyMissing=true` default (skips rows with bulk texture); `limit` cap
+- `mergeProductTextureIntoRow(row, hash, url, sweepResult, baseUrl)` — pure merge; sets `raw.texture_discovery_source = "product_endpoint"`, `product_endpoint_url`, `product_response_keys`, `product_texture_value`; never includes count fields
+- `applyDeepSweepTextures(normalizedRows, deepSweepMap, baseUrl)` — annotates all rows with `texture_discovery_source`; upgrades missing-texture rows when product endpoint found a hash; does NOT overwrite existing bulk textures
+
+**New async helper** in `cacheSlabCloudV2Textures.js`:
+- `runDeepSweep(candidates, fetchImpl, baseUrl, companyCode, opts)` — bounded concurrency (default 3), per-request timeout (15 s), continues on error, collects warnings; exported for testing with injected `fetchImpl`
+- `fetchJsonWithTimeout(url, timeoutMs, fetchImpl)` — AbortController-based timeout; public endpoints only, no cookies/auth
+
+**Script flow (updated):**
+1. Fetch bulk v2 inventory (unchanged)
+2. Normalize rows (unchanged)
+3. Load catalog (unchanged)
+4. **[NEW]** If `SLABCLOUD_V2_TEXTURE_DEEP_SWEEP=1`: build candidates → run deep sweep → collect `deepSweepResultsMap`
+5. **[NEW]** `applyDeepSweepTextures(normalizedRows, deepSweepResultsMap)` — enrich rows with product-endpoint textures
+6. `buildVisualAssetPayloads(enrichedRows, ...)` — now processes both bulk and product-endpoint textures
+7. `computeDryRunSummary(payloads, ..., deepSweepStats, elite100TotalCount)` — extended with before/after E100 coverage fields
+
+**New env vars:**
+
+| Var | Default | Purpose |
+|-----|---------|---------|
+| `SLABCLOUD_V2_TEXTURE_DEEP_SWEEP` | off | Enable product endpoint sweep |
+| `SLABCLOUD_V2_TEXTURE_DEEP_SWEEP_LIMIT` | 0 (no cap) | Max product calls |
+| `SLABCLOUD_V2_TEXTURE_DEEP_SWEEP_CONCURRENCY` | 3 | Parallel product calls |
+| `SLABCLOUD_V2_TEXTURE_DEEP_SWEEP_ONLY_MISSING` | 1 | Only call endpoints for rows lacking bulk texture |
+
+**Discovery metadata** in every asset `raw`:
+- `raw.texture_discovery_source` = `"bulk_inventory"` or `"product_endpoint"`
+- `raw.product_endpoint_url` (product-discovered only)
+- `raw.product_response_keys` (product-discovered only)
+- `raw.product_texture_value` (product-discovered only)
+
+**Dry-run summary fields added:**
+`bulk_rows_with_texture`, `deep_sweep_enabled`, `deep_sweep_only_missing`, `product_endpoint_candidates`, `product_endpoint_calls_attempted/succeeded/failed`, `product_endpoint_textures_found`, `product_endpoint_textures_new_to_bulk`, `total_assets_before/after_deep_sweep`, `matched_elite100_assets_before/after_deep_sweep`, `elite100_ids_with_texture_before/after_deep_sweep`, `elite100_still_missing_texture`, `sample_newly_discovered_product_textures`, `sample_failed_product_calls`
+
+**Safety guardrails preserved:**
+- No slab_inventory access. No count_for_color. No v2 display counts as inventory authority.
+- Public endpoints only — no cookies, no auth headers, no image downloads.
+- Product response slab/count fields ignored; only `texture`/`config.texture` extracted.
+- Writes still require `SLABCLOUD_V2_TEXTURE_CACHE_WRITE_ENABLED=1`.
+- Bounded concurrency and per-request timeout.
+- Failed product calls produce warnings and continue — never crashes the run.
+- Existing bulk textures are never overwritten by product endpoint results.
+
+**Tests added:** 39 new test cases in `slabCloudVisualAssetCache.test.mjs` covering:
+`extractTextureHashFromProductResponse` (11), `buildProductEndpointCandidates` (8), `mergeProductTextureIntoRow` (5), `applyDeepSweepTextures` (6), `runDeepSweep` (5 async with mock fetch), `computeDryRunSummary` deep sweep fields (2), `buildVisualAssetPayloads` discovery source (2), safety source scans (4 new).
+Total: 68 tests passing.
+
+**Manual next commands:**
+1. Dry-run with deep sweep: `SLABCLOUD_V2_TEXTURE_DEEP_SWEEP=1 npm run eos:slabcloud:v2-texture-cache`
+2. Write-enabled with deep sweep:
+   ```
+   SLABCLOUD_V2_TEXTURE_CACHE_WRITE_ENABLED=1 \
+   SLABCLOUD_V2_TEXTURE_DEEP_SWEEP=1 \
+   SLABOS_ORGANIZATION_ID=<org> SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
+   npm run eos:slabcloud:v2-texture-cache
+   ```
+3. Verify counts: check `slab_color_visual_assets` row count and Elite 100 `catalog_item_id` coverage
+4. Future: operator manual upload / Slabsmith originals for remaining missing Elite 100 textures

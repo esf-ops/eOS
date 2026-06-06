@@ -19,7 +19,17 @@ import {
   DEFAULT_PUBLIC_SLUG,
   buildVisualAssetRow,
   findExistingVisualAsset,
+  extractTextureHashFromProductResponse,
+  buildProductEndpointCandidates,
+  mergeProductTextureIntoRow,
+  applyDeepSweepTextures,
 } from "./slabCloudVisualAssetCache.js";
+
+import {
+  runDeepSweep,
+  buildVisualAssetPayloads,
+  computeDryRunSummary,
+} from "../scripts/slabcloud/cacheSlabCloudV2Textures.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CACHE_SOURCE = readFileSync(
@@ -326,7 +336,412 @@ await testAsync("findExistingVisualAsset uses is() for null product_slug", async
   assert.ok(wasCalledWithIs, "should call .is('product_slug', null) for null slug");
 });
 
-// ── Safety: source scan for slab_inventory mutations ─────────────────────────
+// ── extractTextureHashFromProductResponse ────────────────────────────────────
+
+console.log("\n  ── extractTextureHashFromProductResponse ──────────────────────");
+
+test("returns null for null input", () => {
+  assert.equal(extractTextureHashFromProductResponse(null), null);
+});
+
+test("returns null for non-object input", () => {
+  assert.equal(extractTextureHashFromProductResponse("string"), null);
+  assert.equal(extractTextureHashFromProductResponse(42), null);
+});
+
+test("extracts texture from top-level string field", () => {
+  const raw = { texture: "abc123def456", Name: "Alabaster", Material: "ESF" };
+  assert.equal(extractTextureHashFromProductResponse(raw), "abc123def456");
+});
+
+test("extracts texture from top-level Texture (PascalCase) string field", () => {
+  const raw = { Texture: "xyz789", name: "Calacatta" };
+  assert.equal(extractTextureHashFromProductResponse(raw), "xyz789");
+});
+
+test("extracts texture from array field — first non-empty string element", () => {
+  const raw = { texture: ["", null, "first-valid-hash", "second-hash"] };
+  assert.equal(extractTextureHashFromProductResponse(raw), "first-valid-hash");
+});
+
+test("extracts texture from array field — object element with hash key", () => {
+  const raw = { texture: [{ hash: "obj-hash-123" }] };
+  assert.equal(extractTextureHashFromProductResponse(raw), "obj-hash-123");
+});
+
+test("extracts texture from object texture field with hash key", () => {
+  const raw = { texture: { hash: "nested-hash-456" } };
+  assert.equal(extractTextureHashFromProductResponse(raw), "nested-hash-456");
+});
+
+test("falls back to config.texture when top-level texture is absent", () => {
+  const raw = { config: { texture: "config-hash-789" }, name: "Marble" };
+  assert.equal(extractTextureHashFromProductResponse(raw), "config-hash-789");
+});
+
+test("returns null when texture field is empty string", () => {
+  const raw = { texture: "", Name: "Alabaster" };
+  assert.equal(extractTextureHashFromProductResponse(raw), null);
+});
+
+test("returns null when no texture field anywhere", () => {
+  const raw = { Name: "Alabaster", Material: "ESF", count: 5, slabs: [] };
+  assert.equal(extractTextureHashFromProductResponse(raw), null);
+});
+
+test("does NOT read slab count or display count — authority guardrail", () => {
+  // The function must only touch texture fields, never count/slab fields
+  const raw = {
+    texture: "valid-hash-aaa",
+    count: 999,
+    Count: 999,
+    slabs: [{ id: "s1" }],
+    display_count: 88,
+  };
+  const result = extractTextureHashFromProductResponse(raw);
+  assert.equal(result, "valid-hash-aaa", "extracts texture correctly");
+  // Verify the function does not return a count value
+  assert.notEqual(result, 999, "must not return count");
+  assert.notEqual(result, 88,  "must not return display_count");
+});
+
+// ── buildProductEndpointCandidates ───────────────────────────────────────────
+
+console.log("\n  ── buildProductEndpointCandidates ─────────────────────────────");
+
+const SAMPLE_ROW_WITH_TEXTURE_A = {
+  product_slug: "alabaster-esf", normalized_material_name: "esf",
+  source_material_name: "ESF", has_texture: true,
+  source_color_name: "Alabaster",
+};
+const SAMPLE_ROW_NO_TEXTURE_B = {
+  product_slug: "calacatta-cambria", normalized_material_name: "cambria",
+  source_material_name: "Cambria", has_texture: false,
+  source_color_name: "Calacatta Gold",
+};
+const SAMPLE_ROW_NO_TEXTURE_C = {
+  product_slug: "nero-marquina-asmi", normalized_material_name: "asmi",
+  source_material_name: "ASMI", has_texture: false,
+  source_color_name: "Nero Marquina",
+};
+const SAMPLE_ROW_NO_SLUG = {
+  product_slug: null, normalized_material_name: "esf",
+  has_texture: false, source_color_name: "No Slug",
+};
+
+test("default onlyMissing=true only returns rows without bulk texture", () => {
+  const candidates = buildProductEndpointCandidates([
+    SAMPLE_ROW_WITH_TEXTURE_A, SAMPLE_ROW_NO_TEXTURE_B, SAMPLE_ROW_NO_TEXTURE_C,
+  ]);
+  assert.equal(candidates.length, 2);
+  assert.ok(candidates.every((c) => !c.has_texture), "all candidates should lack bulk texture");
+});
+
+test("onlyMissing=false includes rows that already have bulk texture", () => {
+  const candidates = buildProductEndpointCandidates([
+    SAMPLE_ROW_WITH_TEXTURE_A, SAMPLE_ROW_NO_TEXTURE_B,
+  ], { onlyMissing: false });
+  assert.equal(candidates.length, 2);
+});
+
+test("deduplicates by slug + normalized_material_name", () => {
+  const dupRow = { ...SAMPLE_ROW_NO_TEXTURE_B }; // same slug + material
+  const candidates = buildProductEndpointCandidates([
+    SAMPLE_ROW_NO_TEXTURE_B, dupRow, SAMPLE_ROW_NO_TEXTURE_C,
+  ]);
+  assert.equal(candidates.length, 2, "duplicate slug+material should be deduplicated");
+});
+
+test("respects limit cap", () => {
+  const candidates = buildProductEndpointCandidates([
+    SAMPLE_ROW_NO_TEXTURE_B, SAMPLE_ROW_NO_TEXTURE_C,
+  ], { limit: 1 });
+  assert.equal(candidates.length, 1, "limit cap should be respected");
+});
+
+test("limit=0 means no cap", () => {
+  const candidates = buildProductEndpointCandidates([
+    SAMPLE_ROW_NO_TEXTURE_B, SAMPLE_ROW_NO_TEXTURE_C,
+  ], { limit: 0 });
+  assert.equal(candidates.length, 2);
+});
+
+test("skips rows without product_slug", () => {
+  const candidates = buildProductEndpointCandidates([SAMPLE_ROW_NO_SLUG, SAMPLE_ROW_NO_TEXTURE_B]);
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0].product_slug, "calacatta-cambria");
+});
+
+test("returns empty array for empty input", () => {
+  assert.deepEqual(buildProductEndpointCandidates([]), []);
+  assert.deepEqual(buildProductEndpointCandidates(null), []);
+});
+
+// ── mergeProductTextureIntoRow ────────────────────────────────────────────────
+
+console.log("\n  ── mergeProductTextureIntoRow ──────────────────────────────────");
+
+test("merges texture hash and computes correct texture URLs", () => {
+  const merged = mergeProductTextureIntoRow(
+    SAMPLE_ROW_NO_TEXTURE_B,
+    "newHash123",
+    "https://slabcloud.com/api/v2/product/kbyd?slug=calacatta-cambria",
+    { responseKeys: ["texture", "name", "slabs"], rawTextureValue: "newHash123" },
+    "https://slabcloud.com"
+  );
+  assert.equal(merged.texture_hash, "newHash123");
+  assert.equal(merged.texture_url_600, "https://slabcloud.com/scdata/textures/600/newHash123.jpg");
+  assert.equal(merged.texture_url_1024, "https://slabcloud.com/scdata/textures/1024/newHash123.jpg");
+  assert.equal(merged.has_texture, true);
+});
+
+test("sets texture_discovery_source = product_endpoint in raw", () => {
+  const merged = mergeProductTextureIntoRow(
+    SAMPLE_ROW_NO_TEXTURE_B, "hash-abc", "https://example.com/url", null
+  );
+  assert.equal(merged.raw?.texture_discovery_source, "product_endpoint");
+});
+
+test("includes product_endpoint_url in raw", () => {
+  const url = "https://slabcloud.com/api/v2/product/kbyd?slug=x";
+  const merged = mergeProductTextureIntoRow(SAMPLE_ROW_NO_TEXTURE_B, "hash-abc", url, null);
+  assert.equal(merged.raw?.product_endpoint_url, url);
+});
+
+test("returns original row unchanged when textureHash is empty", () => {
+  const original = SAMPLE_ROW_NO_TEXTURE_B;
+  assert.strictEqual(mergeProductTextureIntoRow(original, null, null, null), original);
+  assert.strictEqual(mergeProductTextureIntoRow(original, "", null, null), original);
+  assert.strictEqual(mergeProductTextureIntoRow(original, "  ", null, null), original);
+});
+
+test("does NOT include count fields in merged row", () => {
+  const merged = mergeProductTextureIntoRow(
+    { ...SAMPLE_ROW_NO_TEXTURE_B, source_count: 42 }, "hash-xyz", null, null
+  );
+  assert.ok(!("source_count" in merged) || merged.source_count === 42, "source_count is from original row only");
+  // The merged row should not have added count-related fields
+  assert.ok(!("display_count" in merged), "must not add display_count");
+});
+
+// ── applyDeepSweepTextures ────────────────────────────────────────────────────
+
+console.log("\n  ── applyDeepSweepTextures ──────────────────────────────────────");
+
+const SAMPLE_BULK_ROW = {
+  product_slug: "alabaster-esf", normalized_material_name: "esf",
+  source_color_name: "Alabaster", source_material_name: "ESF",
+  has_texture: true, texture_hash: "bulk-hash-abc",
+  texture_url_600: "https://slabcloud.com/scdata/textures/600/bulk-hash-abc.jpg",
+  texture_url_1024: "https://slabcloud.com/scdata/textures/1024/bulk-hash-abc.jpg",
+  raw: { Name: "Alabaster", texture: "bulk-hash-abc" },
+};
+const SAMPLE_NO_TEXTURE_ROW = {
+  product_slug: "calacatta-cambria", normalized_material_name: "cambria",
+  source_color_name: "Calacatta Gold", source_material_name: "Cambria",
+  has_texture: false, texture_hash: null,
+  texture_url_600: null, texture_url_1024: null,
+  raw: { Name: "Calacatta Gold", texture: "" },
+};
+
+test("annotates bulk rows with texture_discovery_source = bulk_inventory", () => {
+  const sweepMap = new Map();
+  const enriched = applyDeepSweepTextures([SAMPLE_BULK_ROW], sweepMap);
+  assert.equal(enriched[0].raw?.texture_discovery_source, "bulk_inventory");
+  assert.equal(enriched[0].texture_hash, "bulk-hash-abc", "bulk texture unchanged");
+});
+
+test("merges product endpoint texture for rows without bulk texture", () => {
+  const sweepMap = new Map([
+    ["calacatta-cambria||cambria", {
+      textureHash: "product-hash-xyz",
+      url: "https://slabcloud.com/api/v2/product/kbyd?slug=calacatta-cambria",
+      responseKeys: ["texture", "name"],
+      rawTextureValue: "product-hash-xyz",
+    }],
+  ]);
+  const enriched = applyDeepSweepTextures([SAMPLE_NO_TEXTURE_ROW], sweepMap);
+  assert.equal(enriched[0].texture_hash, "product-hash-xyz");
+  assert.equal(enriched[0].has_texture, true);
+  assert.equal(enriched[0].raw?.texture_discovery_source, "product_endpoint");
+});
+
+test("does NOT overwrite bulk texture with product endpoint texture", () => {
+  const sweepMap = new Map([
+    ["alabaster-esf||esf", { textureHash: "different-product-hash", url: "https://x.com", responseKeys: [], rawTextureValue: "different-product-hash" }],
+  ]);
+  const enriched = applyDeepSweepTextures([SAMPLE_BULK_ROW], sweepMap);
+  // Bulk row already has texture — should keep it and mark as bulk_inventory
+  assert.equal(enriched[0].texture_hash, "bulk-hash-abc", "bulk texture not overwritten");
+  assert.equal(enriched[0].raw?.texture_discovery_source, "bulk_inventory");
+});
+
+test("handles empty deep sweep map (all rows annotated as bulk_inventory)", () => {
+  const enriched = applyDeepSweepTextures([SAMPLE_BULK_ROW, SAMPLE_NO_TEXTURE_ROW], new Map());
+  assert.equal(enriched[0].raw?.texture_discovery_source, "bulk_inventory");
+  assert.equal(enriched[1].raw?.texture_discovery_source, "bulk_inventory");
+  assert.equal(enriched[1].texture_hash, null, "no-texture row stays null");
+});
+
+test("returns empty array for empty input", () => {
+  assert.deepEqual(applyDeepSweepTextures([], new Map()), []);
+  assert.deepEqual(applyDeepSweepTextures(null, new Map()), []);
+});
+
+// ── runDeepSweep — mock fetch ─────────────────────────────────────────────────
+
+console.log("\n  ── runDeepSweep (mock fetch) ───────────────────────────────────");
+
+await testAsync("runDeepSweep fetches product endpoints for each candidate", async () => {
+  const calls = [];
+  const mockFetch = async (url) => {
+    calls.push(url);
+    return { texture: "discovered-hash-001" };
+  };
+  const candidates = [SAMPLE_ROW_NO_TEXTURE_B];
+  const { results } = await runDeepSweep(candidates, mockFetch, "https://slabcloud.com", "kbyd");
+  assert.equal(calls.length, 1, "should call one product endpoint");
+  assert.ok(calls[0].includes("calacatta-cambria"), "URL should include product slug");
+});
+
+await testAsync("runDeepSweep extracts texture from product response", async () => {
+  const mockFetch = async () => ({ texture: "discovered-hash-002" });
+  const { results } = await runDeepSweep([SAMPLE_ROW_NO_TEXTURE_B], mockFetch, "https://slabcloud.com", "kbyd");
+  const result = results.get("calacatta-cambria||cambria");
+  assert.ok(result, "should have a result for the candidate");
+  assert.equal(result.textureHash, "discovered-hash-002");
+  assert.equal(result.error, null);
+});
+
+await testAsync("runDeepSweep handles failed product endpoint with warning and continues", async () => {
+  let callCount = 0;
+  const mockFetch = async (url) => {
+    callCount++;
+    if (url.includes("calacatta")) throw new Error("Timeout");
+    return { texture: "good-hash-003" };
+  };
+  const { results, warnings } = await runDeepSweep(
+    [SAMPLE_ROW_NO_TEXTURE_B, SAMPLE_ROW_NO_TEXTURE_C],
+    mockFetch, "https://slabcloud.com", "kbyd",
+    { concurrency: 2 }
+  );
+  assert.equal(callCount, 2, "both candidates attempted");
+  assert.equal(warnings.length, 1, "one warning for the failed call");
+  assert.ok(warnings[0].error.includes("Timeout"), "warning includes error message");
+  // Second candidate should still succeed
+  const goodResult = results.get("nero-marquina-asmi||asmi");
+  assert.equal(goodResult?.textureHash, "good-hash-003");
+});
+
+await testAsync("runDeepSweep product response slab count is never used", async () => {
+  const mockFetch = async () => ({
+    texture: "valid-hash",
+    count: 999,
+    slabs: [{ id: "s1", count: 5 }],
+    display_count: 42,
+  });
+  const { results } = await runDeepSweep([SAMPLE_ROW_NO_TEXTURE_B], mockFetch, "https://slabcloud.com", "kbyd");
+  const result = results.get("calacatta-cambria||cambria");
+  // Only textureHash should be populated, not count fields
+  assert.equal(result.textureHash, "valid-hash");
+  assert.ok(!("count" in result), "count must not be in sweep result");
+  assert.ok(!("display_count" in result), "display_count must not be in sweep result");
+});
+
+await testAsync("runDeepSweep respects bounded concurrency", async () => {
+  const inFlightAtOnce = [];
+  let maxInFlight = 0;
+  let activeCount = 0;
+  const mockFetch = async () => {
+    activeCount++;
+    maxInFlight = Math.max(maxInFlight, activeCount);
+    await new Promise((r) => setTimeout(r, 10));
+    activeCount--;
+    return { texture: "hash" };
+  };
+  const candidates = [
+    SAMPLE_ROW_NO_TEXTURE_B,
+    SAMPLE_ROW_NO_TEXTURE_C,
+    { ...SAMPLE_ROW_NO_TEXTURE_B, product_slug: "extra-1", normalized_material_name: "extra1" },
+    { ...SAMPLE_ROW_NO_TEXTURE_C, product_slug: "extra-2", normalized_material_name: "extra2" },
+  ];
+  await runDeepSweep(candidates, mockFetch, "https://slabcloud.com", "kbyd", { concurrency: 2 });
+  assert.ok(maxInFlight <= 2, `max in-flight should be ≤2 (was ${maxInFlight})`);
+});
+
+// ── computeDryRunSummary — deep sweep fields ──────────────────────────────────
+
+console.log("\n  ── computeDryRunSummary — deep sweep fields ────────────────────");
+
+test("computeDryRunSummary includes deep_sweep_enabled=false when no stats provided", () => {
+  const summary = computeDryRunSummary([], 10, 3);
+  assert.equal(summary.deep_sweep_enabled, false);
+  assert.equal(summary.total_v2_rows, 10);
+  assert.equal(summary.rows_with_texture, 3);
+});
+
+test("computeDryRunSummary includes before/after E100 IDs when deep sweep stats provided", () => {
+  const bulkPayload = {
+    catalog_item_id: "cat-001", product_slug: "alabaster-esf", match_method: "exact",
+    source_color_name: "Alabaster", source_material_name: "ESF",
+    texture_hash: "bulk-hash", texture_url_600: null, texture_url_1024: null,
+    raw: { texture_discovery_source: "bulk_inventory" },
+  };
+  const sweepPayload = {
+    catalog_item_id: "cat-002", product_slug: "calacatta-cambria", match_method: "exact",
+    source_color_name: "Calacatta", source_material_name: "Cambria",
+    texture_hash: "product-hash", texture_url_600: null, texture_url_1024: null,
+    raw: { texture_discovery_source: "product_endpoint" },
+  };
+  const stats = {
+    enabled: true, onlyMissing: true, limit: 0,
+    candidateCount: 5, attempted: 5, succeeded: 4, failed: 1,
+    texturesFound: 1, warnings: [{ slug: "x", material: "y", url: "u", error: "e" }],
+  };
+  const summary = computeDryRunSummary([bulkPayload, sweepPayload], 10, 3, stats, 100);
+  assert.equal(summary.deep_sweep_enabled, true);
+  assert.equal(summary.elite100_ids_with_texture_before_deep_sweep, 1, "bulk only had 1 E100");
+  assert.equal(summary.elite100_ids_with_texture_after_deep_sweep, 2, "after sweep has 2");
+  assert.equal(summary.elite100_still_missing_texture, 98, "100 - 2 = 98 still missing");
+  assert.equal(summary.product_endpoint_textures_new_to_bulk, 1);
+  assert.equal(summary.product_endpoint_calls_failed, 1);
+  assert.equal(summary.sample_failed_product_calls.length, 1);
+});
+
+// ── buildVisualAssetPayloads — discovery source annotation ───────────────────
+
+console.log("\n  ── buildVisualAssetPayloads — discovery source in raw ─────────");
+
+test("buildVisualAssetPayloads preserves raw.texture_discovery_source from enriched row", () => {
+  const enrichedRow = {
+    ...SAMPLE_BULK_ROW,
+    raw: { ...SAMPLE_BULK_ROW.raw, texture_discovery_source: "bulk_inventory" },
+  };
+  const payloads = buildVisualAssetPayloads([enrichedRow], "org-001");
+  assert.equal(payloads.length, 1);
+  assert.equal(payloads[0].raw?.texture_discovery_source, "bulk_inventory");
+});
+
+test("buildVisualAssetPayloads preserves product_endpoint source for sweep-enriched row", () => {
+  const sweepEnrichedRow = {
+    ...SAMPLE_NO_TEXTURE_ROW,
+    texture_hash: "product-hash-xyz",
+    texture_url_600: "https://slabcloud.com/scdata/textures/600/product-hash-xyz.jpg",
+    texture_url_1024: "https://slabcloud.com/scdata/textures/1024/product-hash-xyz.jpg",
+    has_texture: true,
+    raw: {
+      ...SAMPLE_NO_TEXTURE_ROW.raw,
+      texture_discovery_source: "product_endpoint",
+      product_endpoint_url: "https://slabcloud.com/api/v2/product/kbyd?slug=calacatta-cambria",
+    },
+  };
+  const payloads = buildVisualAssetPayloads([sweepEnrichedRow], "org-001");
+  assert.equal(payloads.length, 1);
+  assert.equal(payloads[0].raw?.texture_discovery_source, "product_endpoint");
+  assert.ok(payloads[0].raw?.product_endpoint_url?.includes("calacatta"), "product URL preserved");
+});
+
+// ── Safety: source scan (updated) ────────────────────────────────────────────
 
 console.log("\n  ── Safety: source scan ────────────────────────────────────────");
 
@@ -351,6 +766,13 @@ test("cacheSlabCloudV2Textures.js is write-gated by SLABCLOUD_V2_TEXTURE_CACHE_W
   assert.ok(
     SCRIPT_SOURCE.includes("SLABCLOUD_V2_TEXTURE_CACHE_WRITE_ENABLED"),
     "script must check write-enable env var"
+  );
+});
+
+test("cacheSlabCloudV2Textures.js deep sweep gated by SLABCLOUD_V2_TEXTURE_DEEP_SWEEP", () => {
+  assert.ok(
+    SCRIPT_SOURCE.includes("SLABCLOUD_V2_TEXTURE_DEEP_SWEEP"),
+    "script must check deep sweep env var"
   );
 });
 
@@ -389,6 +811,13 @@ test("cacheSlabCloudV2Textures.js is guarded so main() only runs when directly e
   assert.ok(
     SCRIPT_SOURCE.includes("process.argv[1]") && SCRIPT_SOURCE.includes("__filename"),
     "script must guard main() with process.argv[1] === __filename"
+  );
+});
+
+test("cacheSlabCloudV2Textures.js deep sweep uses bounded concurrency", () => {
+  assert.ok(
+    SCRIPT_SOURCE.includes("SLABCLOUD_V2_TEXTURE_DEEP_SWEEP_CONCURRENCY"),
+    "script must respect concurrency setting"
   );
 });
 

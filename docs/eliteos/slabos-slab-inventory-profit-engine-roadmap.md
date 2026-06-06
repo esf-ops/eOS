@@ -670,3 +670,30 @@ The following are explicitly out of scope until the prerequisite phases are done
 **Tests:** 29 in `slabCloudVisualAssetCache.test.mjs`. 15 new in `slabInventoryApi.test.mjs`. `eos:check:local` green.
 
 **Open gap:** 73 Elite 100 colors still have no v2 texture — need Slabsmith/manufacturer/manual upload workflow in a future phase.
+
+### Phase 19 — Deep SlabCloud v2 Product Texture Sweep (2026-06-06)
+
+**Summary:** Optional per-product endpoint sweep that automatically fetches `GET /api/v2/product/kbyd?slug=...&mat=...` for every color that lacked a texture in the bulk inventory response. Avoids manual inspection of every SlabCloud color. Products are presentation enrichment only — typed `slab_inventory` remains the sole inventory authority.
+
+**Pre-sweep baseline:** 291 visual assets, 34 Elite 100 items with texture (34%).
+
+**New pure helpers** (`slabCloudVisualAssetCache.js`):
+`extractTextureHashFromProductResponse`, `buildProductEndpointCandidates`, `mergeProductTextureIntoRow`, `applyDeepSweepTextures`
+
+**New async helpers** (`cacheSlabCloudV2Textures.js`):
+`runDeepSweep` (bounded concurrency, timeout, continue-on-error, injectable fetch for tests), `fetchJsonWithTimeout`
+
+**New env vars:** `SLABCLOUD_V2_TEXTURE_DEEP_SWEEP=1`, `SLABCLOUD_V2_TEXTURE_DEEP_SWEEP_LIMIT`, `SLABCLOUD_V2_TEXTURE_DEEP_SWEEP_CONCURRENCY` (default 3), `SLABCLOUD_V2_TEXTURE_DEEP_SWEEP_ONLY_MISSING` (default 1)
+
+**Discovery metadata in `raw`:** `texture_discovery_source` (`"bulk_inventory"` / `"product_endpoint"`), `product_endpoint_url`, `product_response_keys`, `product_texture_value`
+
+**Safety:**
+- Public endpoints only. No cookies, no auth, no image downloads.
+- Product response slab counts and display counts are never read or stored.
+- Existing bulk textures never overwritten by product endpoint results.
+- Failed product calls produce warnings and continue — never crash the run.
+- All writes still require `SLABCLOUD_V2_TEXTURE_CACHE_WRITE_ENABLED=1`.
+
+**Tests:** 39 new test cases (68 total passing) in `slabCloudVisualAssetCache.test.mjs`.
+
+**Open gap:** Product endpoint sweep may still miss Elite 100 textures that don't exist in SlabCloud at all. Those require Slabsmith originals, manufacturer images, or operator manual upload (supported via `asset_kind = 'manufacturer'` / `'manual_upload'` in the schema).
