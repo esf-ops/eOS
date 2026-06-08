@@ -1061,4 +1061,228 @@ function approx(a: number, b: number, eps = 0.02) {
   assert.match(uiSrc, /Prints under this room/, "PDF-SOURCE-5: helper copy for customer-facing notes field");
 }
 
+// CUSTOM-SINK-DEDUP-1: customer-facing custom sink appears exactly once in Estimate Summary
+// Regression for: same custom line appearing both as "Name · ROOM" (from customerFixtureDetailLines)
+// and as "Name (ROOM)" (from visibleCustomerLines), producing a visual duplicate on the customer PDF.
+{
+  const kitchen = createDefaultRoom("Group Promo");
+  kitchen.name = "KITCHEN";
+  kitchen.calcMode = "Manual Sq Ft";
+  kitchen.direct = { counter: 57, splash: 0 };
+  kitchen.addons["qty-sink"] = 1; // catalog sink cutout
+
+  const { rooms: measured } = calculateAllRoomDrafts([kitchen], "New Construction", "wholesale", 0);
+  const selectedBd = buildSelectedMaterialBreakdown([kitchen], "wholesale");
+  const roomBd = buildCustomerRoomAreaCostBreakdown({
+    roomDrafts: [kitchen],
+    measuredRooms: measured,
+    materialBasis: "wholesale",
+    customLines: [
+      {
+        lineKey: "blanco-sink-kitchen",
+        name: "BLANCO White Double Bowl",
+        quantity: 1,
+        unitPrice: 1500,
+        customerFacing: true,
+        roomName: "KITCHEN",
+        roomId: kitchen.id,
+        category: "Sink"
+      }
+    ]
+  });
+
+  const displayModel = buildCustomerEstimateDisplayModel({
+    selectedBreakdown: selectedBd,
+    measuredRooms: measured,
+    visibleCustomerLines: [
+      {
+        lineKey: "blanco-sink-kitchen",
+        name: "BLANCO White Double Bowl",
+        description: 'Blanco IKON 33" Apron Front Sink - White 402324',
+        qty: 1,
+        roomName: "KITCHEN",
+        lineTotal: 1500
+      }
+    ],
+    internalMaterialFoldDollars: 0,
+    roomAreaBreakdown: roomBd
+  });
+
+  const sinkRows = displayModel.estimateSummaryRows.filter((r) => r.label.includes("BLANCO White Double Bowl"));
+  assert.equal(sinkRows.length, 1, "CUSTOM-SINK-DEDUP-1: custom sink appears exactly once in estimateSummaryRows");
+
+  const summarySum = displayModel.estimateSummaryRows.reduce((s, r) => s + r.displayAmount, 0);
+  assert.equal(summarySum, displayModel.finalRounded, "CUSTOM-SINK-DEDUP-1: no double-count — summary rows sum to finalRounded");
+
+  // Room area totals must reconcile (sink counted once in total)
+  const roomAreaSum =
+    displayModel.roomAreaPrintRows.reduce((s, r) => s + r.displayedAreaTotal, 0) +
+    displayModel.unassignedDisplayTotal;
+  assert.equal(roomAreaSum, displayModel.finalRounded, "CUSTOM-SINK-DEDUP-1: room area totals reconcile to finalRounded");
+}
+
+// CUSTOM-SINK-DEDUP-2: internal-only custom line does not appear as a named summary row
+{
+  const kitchen = createDefaultRoom("Group Promo");
+  kitchen.name = "KITCHEN";
+  kitchen.calcMode = "Manual Sq Ft";
+  kitchen.direct = { counter: 40, splash: 0 };
+
+  const { rooms: measured } = calculateAllRoomDrafts([kitchen], "New Construction", "wholesale", 0);
+  const selectedBd = buildSelectedMaterialBreakdown([kitchen], "wholesale");
+  const roomBd = buildCustomerRoomAreaCostBreakdown({
+    roomDrafts: [kitchen],
+    measuredRooms: measured,
+    materialBasis: "wholesale",
+    customLines: [
+      {
+        lineKey: "internal-fee",
+        name: "Internal handling fee",
+        quantity: 1,
+        unitPrice: 150,
+        customerFacing: false,
+        roomName: "KITCHEN",
+        roomId: kitchen.id,
+        category: "Fee"
+      }
+    ]
+  });
+
+  // Internal-only lines do not reach visibleCustomerLines
+  const displayModel = buildCustomerEstimateDisplayModel({
+    selectedBreakdown: selectedBd,
+    measuredRooms: measured,
+    visibleCustomerLines: [], // internal-only lines are excluded by splitInternalEstimateCustomLines
+    internalMaterialFoldDollars: 150,
+    roomAreaBreakdown: roomBd
+  });
+
+  const namedRows = displayModel.estimateSummaryRows.filter(
+    (r) => !["countertop", "backsplash", "addons", "edge_upgrades"].includes(r.key) && !r.key.startsWith("addon-")
+  );
+  assert.equal(namedRows.length, 0, "CUSTOM-SINK-DEDUP-2: no named summary row for internal-only line");
+  assert.equal(displayModel.finalRounded, displayModel.summaryCounterDisplay + displayModel.summaryBacksplashDisplay, "CUSTOM-SINK-DEDUP-2: finalRounded has no extra line total (internal fold absorbed into material)");
+}
+
+// CUSTOM-SINK-DEDUP-3: two genuinely distinct customer-facing custom lines both appear exactly once
+{
+  const kitchen = createDefaultRoom("Group Promo");
+  kitchen.name = "KITCHEN";
+  kitchen.calcMode = "Manual Sq Ft";
+  kitchen.direct = { counter: 40, splash: 0 };
+
+  const { rooms: measured } = calculateAllRoomDrafts([kitchen], "New Construction", "wholesale", 0);
+  const selectedBd = buildSelectedMaterialBreakdown([kitchen], "wholesale");
+  const roomBd = buildCustomerRoomAreaCostBreakdown({
+    roomDrafts: [kitchen],
+    measuredRooms: measured,
+    materialBasis: "wholesale",
+    customLines: [
+      {
+        lineKey: "sink-a",
+        name: "BLANCO White Double Bowl",
+        quantity: 1,
+        unitPrice: 1500,
+        customerFacing: true,
+        roomName: "KITCHEN",
+        roomId: kitchen.id,
+        category: "Sink"
+      },
+      {
+        lineKey: "faucet-b",
+        name: "Delta Pull-Down Faucet",
+        quantity: 1,
+        unitPrice: 350,
+        customerFacing: true,
+        roomName: "KITCHEN",
+        roomId: kitchen.id,
+        category: "Fixture"
+      }
+    ]
+  });
+
+  const displayModel = buildCustomerEstimateDisplayModel({
+    selectedBreakdown: selectedBd,
+    measuredRooms: measured,
+    visibleCustomerLines: [
+      {
+        lineKey: "sink-a",
+        name: "BLANCO White Double Bowl",
+        description: "Apron Front Sink",
+        qty: 1,
+        roomName: "KITCHEN",
+        lineTotal: 1500
+      },
+      {
+        lineKey: "faucet-b",
+        name: "Delta Pull-Down Faucet",
+        description: "",
+        qty: 1,
+        roomName: "KITCHEN",
+        lineTotal: 350
+      }
+    ],
+    internalMaterialFoldDollars: 0,
+    roomAreaBreakdown: roomBd
+  });
+
+  const sinkRow = displayModel.estimateSummaryRows.find((r) => r.key === "sink-a");
+  const faucetRow = displayModel.estimateSummaryRows.find((r) => r.key === "faucet-b");
+  assert.ok(sinkRow != null, "CUSTOM-SINK-DEDUP-3: sink-a row present");
+  assert.ok(faucetRow != null, "CUSTOM-SINK-DEDUP-3: faucet-b row present");
+
+  const sinkOccurrences = displayModel.estimateSummaryRows.filter((r) => r.label.includes("BLANCO White Double Bowl")).length;
+  const faucetOccurrences = displayModel.estimateSummaryRows.filter((r) => r.label.includes("Delta Pull-Down Faucet")).length;
+  assert.equal(sinkOccurrences, 1, "CUSTOM-SINK-DEDUP-3: BLANCO sink appears exactly once");
+  assert.equal(faucetOccurrences, 1, "CUSTOM-SINK-DEDUP-3: Delta faucet appears exactly once");
+
+  const summarySum = displayModel.estimateSummaryRows.reduce((s, r) => s + r.displayAmount, 0);
+  assert.equal(summarySum, displayModel.finalRounded, "CUSTOM-SINK-DEDUP-3: summary rows sum to finalRounded");
+}
+
+// CUSTOM-SINK-DEDUP-4: room separator in customer line summary label uses · not ()
+{
+  const kitchen = createDefaultRoom("Group Promo");
+  kitchen.name = "Kitchen";
+  kitchen.calcMode = "Manual Sq Ft";
+  kitchen.direct = { counter: 40, splash: 0 };
+
+  const { rooms: measured } = calculateAllRoomDrafts([kitchen], "New Construction", "wholesale", 0);
+  const selectedBd = buildSelectedMaterialBreakdown([kitchen], "wholesale");
+  const roomBd = buildCustomerRoomAreaCostBreakdown({
+    roomDrafts: [kitchen],
+    measuredRooms: measured,
+    materialBasis: "wholesale",
+    customLines: []
+  });
+
+  const displayModel = buildCustomerEstimateDisplayModel({
+    selectedBreakdown: selectedBd,
+    measuredRooms: measured,
+    visibleCustomerLines: [
+      {
+        lineKey: "blanco-sink",
+        name: "BLANCO Sink",
+        description: "Apron Front",
+        qty: 1,
+        roomName: "Kitchen",
+        lineTotal: 1200
+      }
+    ],
+    internalMaterialFoldDollars: 0,
+    roomAreaBreakdown: roomBd
+  });
+
+  const sinkRow = displayModel.estimateSummaryRows.find((r) => r.key === "blanco-sink");
+  assert.ok(sinkRow != null, "CUSTOM-SINK-DEDUP-4: blanco-sink row found");
+  assert.ok(
+    sinkRow!.label.includes(" · Kitchen"),
+    `CUSTOM-SINK-DEDUP-4: label uses '· ROOM' format, got: ${sinkRow!.label}`
+  );
+  assert.ok(
+    !sinkRow!.label.includes("(Kitchen)"),
+    `CUSTOM-SINK-DEDUP-4: label must NOT use '(ROOM)' format, got: ${sinkRow!.label}`
+  );
+}
+
 console.log("verify-internal-estimate-beta-fixes: OK");

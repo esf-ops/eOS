@@ -210,8 +210,9 @@ function buildEstimateSummaryRows(params: {
     { key: "backsplash", label: "Backsplash material", displayAmount: params.summaryBacksplashDisplay }
   ];
 
-  // Specific add-on lines instead of a single generic "Add-ons / fixtures" row.
-  // Catalog add-ons and customer fixture lines are expanded individually.
+  // Specific catalog add-on lines instead of a single generic "Add-ons / fixtures" row.
+  // Customer fixture lines (visibleCustomerLines) are rendered unconditionally below — they must
+  // NOT also be rendered here via customerFixtureDetailLines to avoid printing each line twice.
   if (params.hasAddons) {
     const addonLinesSeen = new Set<string>();
     params.addonDetailLines.forEach((a, idx) => {
@@ -222,15 +223,9 @@ function buildEstimateSummaryRows(params: {
       const label = a.roomName ? `${a.label} · ${a.roomName}` : a.label;
       rows.push({ key, label, displayAmount: a.displayAmount });
     });
-    params.customerFixtureDetailLines.forEach((a, idx) => {
-      if (a.displayAmount <= 0) return;
-      const key = `fixture-${idx}-${a.label}-${a.roomName}`;
-      const label = a.roomName ? `${a.label} · ${a.roomName}` : a.label;
-      rows.push({ key, label, displayAmount: a.displayAmount });
-    });
-    // Fallback: if no individual lines resolved (e.g. all zero), keep generic row to preserve total
-    const specificCount = params.addonDetailLines.filter((a) => a.displayAmount > 0).length +
-      params.customerFixtureDetailLines.filter((a) => a.displayAmount > 0).length;
+    // Fallback: only when no catalog add-on lines resolved — generic row preserves the add-ons total.
+    // Customer fixture lines are not counted here; they appear unconditionally below.
+    const specificCount = params.addonDetailLines.filter((a) => a.displayAmount > 0).length;
     if (specificCount === 0 && params.summaryAddonsDisplay > 0) {
       rows.push({ key: "addons", label: "Add-ons / fixtures", displayAmount: params.summaryAddonsDisplay });
     }
@@ -244,7 +239,7 @@ function buildEstimateSummaryRows(params: {
     if (displayAmount <= 0) return;
     let label = ln.name.trim() || "Custom item";
     if (ln.description?.trim()) label += ` — ${ln.description.trim()}`;
-    if (ln.roomName?.trim()) label += ` (${ln.roomName.trim()})`;
+    if (ln.roomName?.trim()) label += ` · ${ln.roomName.trim()}`;
     if (ln.qty != null && ln.qty !== 1) label += ` × ${ln.qty}`;
     const lineKey = String(ln.lineKey ?? "").trim() || `custom-line-${index}`;
     rows.push({

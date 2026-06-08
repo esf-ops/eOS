@@ -839,4 +839,147 @@ assertEqual(
   );
 }
 
+// 13. CUSTOM-SINK-DEDUP: customer-facing custom sink appears exactly once in Estimate Summary
+//     Regression for: one line appearing twice from two render paths in buildEstimateSummaryRows.
+//     The synthetic model here does not have the duplication bug; the real-code regression test
+//     is in verify-internal-estimate-beta-fixes.ts (CUSTOM-SINK-DEDUP-1…4).
+{
+  const SINK_PRICE = 1500;
+  const CUTOUT_PRICE = 200;
+
+  const m = buildSyntheticDisplayModel({
+    countertopExact: 3530,
+    backsplashExact: 340,
+    addonsExact: CUTOUT_PRICE,
+    customLines: [
+      {
+        lineKey: "blanco-sink-kitchen",
+        name: "BLANCO White Double Bowl",
+        lineTotal: SINK_PRICE
+      }
+    ],
+    measuredRooms: [
+      {
+        name: "KITCHEN",
+        extras: CUTOUT_PRICE,
+        addons: [{ label: "Kitchen Sink Cutout", total: CUTOUT_PRICE }],
+        details: []
+      }
+    ],
+    roomRows: [
+      {
+        isVanity: false,
+        roomTotalExact: 3530 + 340 + CUTOUT_PRICE,
+        materialExact: 3530 + 340,
+        extrasExact: CUTOUT_PRICE,
+        addons: [{ amountExact: CUTOUT_PRICE }]
+      }
+    ]
+  });
+
+  assertDisplayModelInvariants("CUSTOM-SINK-DEDUP", m);
+
+  // Custom sink must appear exactly once — identified by its stable lineKey
+  const sinkRows = m.estimateSummaryRows.filter((r) => r.key === "blanco-sink-kitchen");
+  assertEqual("CUSTOM-SINK-DEDUP: sink row appears exactly once", sinkRows.length, 1);
+  assertEqual("CUSTOM-SINK-DEDUP: sink display amount correct", sinkRows[0].displayAmount, roundCustomerDisplay(SINK_PRICE));
+
+  // Cutout appears in addonDetailLines (the detail section, not as a separate summary row in synthetic model)
+  const cutoutDetail = m.addonDetailLines.filter((a) => a.label === "Kitchen Sink Cutout");
+  assertEqual("CUSTOM-SINK-DEDUP: cutout in addonDetailLines once", cutoutDetail.length, 1);
+
+  // Total must not double-count the sink: counter + backsplash + addons + sink = 5570
+  const expectedTotal =
+    roundCustomerDisplay(3530) + roundCustomerDisplay(340) + roundCustomerDisplay(CUTOUT_PRICE) + roundCustomerDisplay(SINK_PRICE);
+  assertEqual("CUSTOM-SINK-DEDUP: finalRounded not double-counted", m.finalRounded, expectedTotal);
+
+  const summarySum = m.estimateSummaryRows.reduce((s, r) => s + r.displayAmount, 0);
+  assertEqual("CUSTOM-SINK-DEDUP: summary rows sum to finalRounded", summarySum, m.finalRounded);
+}
+
+// 14. CUSTOM-SINK-DEDUP-INTERNAL: internal-only line does not appear as a named summary row
+{
+  // Internal-only lines fold into material — they are absent from customLines (visibleCustomerLines).
+  const m = buildSyntheticDisplayModel({
+    countertopExact: 3530 + 100, // 100 is internal-only fold absorbed into material
+    backsplashExact: 340,
+    addonsExact: 200,
+    customLines: [], // internal-only line is NOT passed as a custom line
+    measuredRooms: [
+      {
+        name: "KITCHEN",
+        extras: 200,
+        addons: [{ label: "Kitchen Sink Cutout", total: 200 }],
+        details: []
+      }
+    ],
+    roomRows: [
+      {
+        isVanity: false,
+        roomTotalExact: 3530 + 100 + 340 + 200,
+        materialExact: 3530 + 100 + 340,
+        extrasExact: 200,
+        addons: [{ amountExact: 200 }]
+      }
+    ]
+  });
+
+  assertDisplayModelInvariants("CUSTOM-SINK-DEDUP-INTERNAL", m);
+  // Only countertop, backsplash, and addons rows — no named customer line row
+  const namedCustom = m.estimateSummaryRows.filter(
+    (r) => !["countertop", "backsplash", "addons", "edge_upgrades"].includes(r.key) && !r.key.startsWith("addon-")
+  );
+  assertEqual("CUSTOM-SINK-DEDUP-INTERNAL: no named customer line for internal-only", namedCustom.length, 0);
+}
+
+// 15. CUSTOM-SINK-DEDUP-TWO: two genuinely distinct customer-facing custom lines both appear
+{
+  const m = buildSyntheticDisplayModel({
+    countertopExact: 3530,
+    backsplashExact: 340,
+    addonsExact: 200,
+    customLines: [
+      { lineKey: "sink-a", name: "BLANCO White Double Bowl", lineTotal: 1500 },
+      { lineKey: "faucet-b", name: "Delta Pull-Down Faucet", lineTotal: 350 }
+    ],
+    measuredRooms: [
+      {
+        name: "KITCHEN",
+        extras: 200,
+        addons: [{ label: "Kitchen Sink Cutout", total: 200 }],
+        details: []
+      }
+    ],
+    roomRows: [
+      {
+        isVanity: false,
+        roomTotalExact: 3530 + 340 + 200,
+        materialExact: 3530 + 340,
+        extrasExact: 200,
+        addons: [{ amountExact: 200 }]
+      }
+    ]
+  });
+
+  assertDisplayModelInvariants("CUSTOM-SINK-DEDUP-TWO", m);
+  // Both distinct customer lines must be in summary, each exactly once
+  const sinkRow = m.estimateSummaryRows.find((r) => r.key === "sink-a");
+  const faucetRow = m.estimateSummaryRows.find((r) => r.key === "faucet-b");
+  assert(sinkRow != null, "CUSTOM-SINK-DEDUP-TWO: sink-a row present");
+  assert(faucetRow != null, "CUSTOM-SINK-DEDUP-TWO: faucet-b row present");
+  assertEqual("CUSTOM-SINK-DEDUP-TWO: sink display amount", sinkRow.displayAmount, roundCustomerDisplay(1500));
+  assertEqual("CUSTOM-SINK-DEDUP-TWO: faucet display amount", faucetRow.displayAmount, roundCustomerDisplay(350));
+  // Neither line appears twice
+  assertEqual(
+    "CUSTOM-SINK-DEDUP-TWO: sink appears exactly once",
+    m.estimateSummaryRows.filter((r) => r.key === "sink-a").length,
+    1
+  );
+  assertEqual(
+    "CUSTOM-SINK-DEDUP-TWO: faucet appears exactly once",
+    m.estimateSummaryRows.filter((r) => r.key === "faucet-b").length,
+    1
+  );
+}
+
 console.log("verifyCustomerEstimatePrintReconciliation: ok");
