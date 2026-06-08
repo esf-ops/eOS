@@ -82,6 +82,8 @@ export const SPECIALTY_EDGE_RATE_PER_LF = 15;
 /**
  * Upgraded edge profile names that incur a $/LF charge.
  * Must mirror `UPGRADED_EDGE_PROFILES` in `app-quote/src/lib/prototypeQuoteMath.ts`.
+ * NOTE: "Dupont" is no longer a selectable option in the UI (removed 2026) but is retained
+ * here so legacy quotes that already have it stored are still billed correctly.
  */
 const UPGRADED_EDGE_PROFILE_NAMES = new Set([
   "Full Bullnose",

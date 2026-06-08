@@ -60,19 +60,20 @@ export const INTERNAL_ESTIMATE_MEASURE_OPTIONS: InternalMeasureOptions = {
 /**
  * Standard edge profiles — included in fabrication, no extra charge.
  * Default is "Eased" (3mm eased edge, most common shop default).
+ * "Large Eased" replaced "Bullnose" as the selectable standard option per Hunter (2026).
  */
-export const STANDARD_EDGE_PROFILES = ["Eased", "Beveled", "Bullnose"] as const;
+export const STANDARD_EDGE_PROFILES = ["Eased", "Beveled", "Large Eased"] as const;
 
 /**
  * Upgraded edge profiles — charged by linear foot via backend calculator.
  * Must stay in sync with `UPGRADED_EDGE_PROFILE_NAMES` in `quoteCalculator.js`.
+ * "Dupont" removed from selectable options per Hunter (2026); kept in backend for legacy billing.
  */
 export const UPGRADED_EDGE_PROFILES = [
   "Full Bullnose",
   "Ogee",
   "Waterfall",
-  "Laminated (mitered)",
-  "Dupont"
+  "Laminated (mitered)"
 ] as const;
 
 export type StandardEdgeProfile = (typeof STANDARD_EDGE_PROFILES)[number];
@@ -1475,7 +1476,7 @@ export type InternalEstimateScopeTotals = {
   exactCounterSqft: number;
   /** Priced countertop SF (chargeable ceil when enabled). */
   chargeableCounterSqft: number;
-  /** Backsplash + FHB SF at exact dimensions (no ceil). */
+  /** Backsplash + FHB chargeable SF (ceil applied, same as countertop). */
   backsplashFhbSqft: number;
   roomFixedDollars: number;
   /** Use tax on countertop material (same basis as live estimate). */

@@ -1,6 +1,6 @@
 /**
  * Regression checks for Internal Estimate beta fixes.
- * Run: npx --yes tsx scripts/verify-internal-estimate-beta-fixes.ts
+ * Run: npx --yes tsx --tsconfig app-internal-estimate/tsconfig.json scripts/verify-internal-estimate-beta-fixes.ts
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -15,6 +15,7 @@ import {
 } from "../backend-core/src/quotes/quoteCalculator.js";
 import {
   chargeableCounterSqftFromExact,
+  chargeableSplashSqftFromExact,
   guidedCornerOverlapDeductionSf,
   guidedCornerOverlapDeductionSfForGroup,
   guidedCornerOverlapSqft,
@@ -52,6 +53,7 @@ import {
   serializeCustomerRoomAreaBreakdown,
   serializeRoomDraftsForInternalUi,
   serializeRoomsForApi,
+  STANDARD_EDGE_PROFILES,
   UPGRADED_EDGE_PREVIEW_RATE_PER_LF,
   UPGRADED_EDGE_PROFILES
 } from "../app-quote/src/lib/prototypeQuoteMath.ts";
@@ -1283,6 +1285,145 @@ function approx(a: number, b: number, eps = 0.02) {
     !sinkRow!.label.includes("(Kitchen)"),
     `CUSTOM-SINK-DEDUP-4: label must NOT use '(ROOM)' format, got: ${sinkRow!.label}`
   );
+}
+
+// ── BACKSPLASH-CEIL-1: chargeableSplashSqftFromExact rounds up correctly ─────
+{
+  assert.strictEqual(chargeableSplashSqftFromExact(7), 7, "BACKSPLASH-CEIL-1: whole SF unchanged");
+  assert.strictEqual(chargeableSplashSqftFromExact(2.944), 3, "BACKSPLASH-CEIL-1: 2.944 → 3");
+  assert.strictEqual(chargeableSplashSqftFromExact(6.01), 7, "BACKSPLASH-CEIL-1: 6.01 → 7");
+  assert.strictEqual(chargeableSplashSqftFromExact(0.1), 1, "BACKSPLASH-CEIL-1: 0.1 → 1");
+}
+
+// ── BACKSPLASH-CEIL-2: buildSelectedMaterialBreakdown applies backsplash ceil ─
+// Uses Manual Sq Ft with a fractional backsplash SF to confirm applyChargeableSplashCeilToRoomRows
+// is wired in and adds the delta to the priced total.
+{
+  const room = createDefaultRoom("Group Promo");
+  room.name = "Kitchen";
+  room.calcMode = "Manual Sq Ft";
+  // Counter 19 sf (whole), backsplash 2.94 sf (fractional → should ceil to 3 sf)
+  room.direct = { counter: 19, splash: 2.94 };
+
+  const bd = buildSelectedMaterialBreakdown([room], "wholesale", {
+    chargeableCounterCeil: true
+  });
+  // At Group Promo $45/sf: 3 sf × $45 = $135
+  const bsDollars = bd.totals.backsplashMaterial;
+  assert.ok(
+    bsDollars >= 135,
+    `BACKSPLASH-CEIL-2: backsplash priced at ≥ $135 (3 sf × $45), got ${bsDollars}`
+  );
+  const totalBsSf = bd.groups.reduce((s, g) => s + g.backsplashSf, 0);
+  assert.ok(
+    totalBsSf >= 3,
+    `BACKSPLASH-CEIL-2: backsplash SF ≥ 3 after ceil, got ${totalBsSf}`
+  );
+}
+
+// ── EDGE-CLEANUP-1: Large Eased is standard, Bullnose gone, Dupont gone ──────
+{
+  assert.ok(
+    (STANDARD_EDGE_PROFILES as readonly string[]).includes("Large Eased"),
+    "EDGE-CLEANUP-1: Large Eased in STANDARD_EDGE_PROFILES"
+  );
+  assert.ok(
+    !(STANDARD_EDGE_PROFILES as readonly string[]).includes("Bullnose"),
+    "EDGE-CLEANUP-1: Bullnose removed from STANDARD_EDGE_PROFILES"
+  );
+  assert.ok(
+    (UPGRADED_EDGE_PROFILES as readonly string[]).includes("Full Bullnose"),
+    "EDGE-CLEANUP-1: Full Bullnose remains in UPGRADED_EDGE_PROFILES"
+  );
+  assert.ok(
+    !(UPGRADED_EDGE_PROFILES as readonly string[]).includes("Dupont"),
+    "EDGE-CLEANUP-1: Dupont removed from selectable UPGRADED_EDGE_PROFILES"
+  );
+}
+
+// ── EDGE-CLEANUP-2: Large Eased not charged as upgraded edge ────────────────
+{
+  const room = createDefaultRoom("Group Promo");
+  room.calcMode = "Manual Sq Ft";
+  room.direct = { counter: 20, splash: 0 };
+  room.edgeProfile = "Large Eased";
+  room.upgradedEdgeLf = 10;
+  const { total } = computeLocalUpgradedEdgeTotal([room]);
+  assert.strictEqual(total, 0, "EDGE-CLEANUP-2: Large Eased is standard — no edge charge");
+}
+
+// ── MANUAL-SF-1: manual countertop SF priced correctly at Group Promo rate ───
+{
+  const room = createDefaultRoom("Group Promo");
+  room.calcMode = "Manual Sq Ft";
+  room.direct = { counter: 20, splash: 0 };
+  const bd = buildSelectedMaterialBreakdown([room], "wholesale", { chargeableCounterCeil: true });
+  // 20 sf (whole) × $45/sf = $900
+  assert.strictEqual(bd.totals.countertopMaterial, 900, "MANUAL-SF-1: 20 sf × $45 = $900");
+  assert.strictEqual(bd.totals.backsplashMaterial, 0, "MANUAL-SF-1: no backsplash entered");
+}
+
+// ── MANUAL-SF-2: manual counter SF fraction ceiled for pricing ────────────────
+{
+  const room = createDefaultRoom("Group Promo");
+  room.calcMode = "Manual Sq Ft";
+  room.direct = { counter: 19.3, splash: 0 };
+  const bd = buildSelectedMaterialBreakdown([room], "wholesale", { chargeableCounterCeil: true });
+  // 19.3 → ceil 20 sf × $45 = $900
+  assert.strictEqual(bd.totals.countertopMaterial, 900, "MANUAL-SF-2: 19.3 sf ceiled to 20 → $900");
+}
+
+// ── MANUAL-SF-3: manual backsplash SF fraction ceiled for pricing ─────────────
+{
+  const room = createDefaultRoom("Group Promo");
+  room.calcMode = "Manual Sq Ft";
+  room.direct = { counter: 20, splash: 2.94 };
+  const bd = buildSelectedMaterialBreakdown([room], "wholesale", { chargeableCounterCeil: true });
+  // 2.94 → ceil 3 sf × $45 = $135
+  assert.ok(bd.totals.backsplashMaterial >= 135, `MANUAL-SF-3: splash ceiled to 3 sf → ≥$135, got ${bd.totals.backsplashMaterial}`);
+}
+
+// ── MANUAL-SF-4: manual room add-ons save and calculate ─────────────────────
+{
+  const room = createDefaultRoom("Group Promo");
+  room.calcMode = "Manual Sq Ft";
+  room.direct = { counter: 15, splash: 0 };
+  room.addons["qty-sink"] = 2;
+  const { totals } = calculateAllRoomDrafts([room], "New Construction", "wholesale", 0, INTERNAL_ESTIMATE_MEASURE_OPTIONS);
+  // 2 sink cutouts × $200 = $400
+  assert.ok(totals.fixed >= 400, `MANUAL-SF-4: 2 sink cutouts → fixed ≥ $400, got ${totals.fixed}`);
+}
+
+// ── MANUAL-SF-5: manual room save / restore preserves direct SF ──────────────
+{
+  const room = createDefaultRoom("Group Promo");
+  room.name = "Bathroom";
+  room.calcMode = "Manual Sq Ft";
+  room.direct = { counter: 12.5, splash: 1.75 };
+
+  const serialized = serializeRoomDraftsForInternalUi([room]);
+  const restored = hydrateRoomDraftsFromInternalUi(serialized);
+
+  assert.strictEqual(restored.length, 1, "MANUAL-SF-5: one room restored");
+  assert.strictEqual(restored[0].calcMode, "Manual Sq Ft", "MANUAL-SF-5: calcMode preserved");
+  assert.strictEqual(restored[0].direct?.counter, 12.5, "MANUAL-SF-5: counter SF preserved");
+  assert.strictEqual(restored[0].direct?.splash, 1.75, "MANUAL-SF-5: splash SF preserved");
+}
+
+// ── MANUAL-SF-6: guided shape rooms not affected by manual SF restore ─────────
+{
+  const guided = createEstimatorRoom("Group Promo");
+  guided.name = "Kitchen";
+  const withGroup = appendGuidedShapeGroup(guided, "straight");
+  if (withGroup.guidedShapeGroups?.[0]) {
+    withGroup.guidedShapeGroups[0].pieces[0].lengthIn = 120;
+    withGroup.guidedShapeGroups[0].pieces[0].depthIn = 25.5;
+    withGroup.guidedShapeGroups[0].pieces[0].addSplash = true;
+  }
+  const serialized = serializeRoomDraftsForInternalUi([withGroup]);
+  const restored = hydrateRoomDraftsFromInternalUi(serialized);
+  assert.strictEqual(restored[0].calcMode, "Guided Shape", "MANUAL-SF-6: guided room still Guided Shape after serialize/restore");
+  assert.ok((restored[0].guidedShapeGroups?.length ?? 0) > 0, "MANUAL-SF-6: guided groups preserved");
 }
 
 console.log("verify-internal-estimate-beta-fixes: OK");

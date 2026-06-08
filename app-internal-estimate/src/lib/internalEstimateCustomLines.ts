@@ -40,9 +40,11 @@ function parseNum(v: string): number {
 /**
  * Classify custom line rows into customer-visible and internal-only buckets in one pass.
  *
- * Rules (preserved exactly from InternalEstimateApp):
+ * Rules:
  *  - Rows with empty name or qty ≤ 0 are ignored.
- *  - "Discount/Credit" rows only count when unitPrice < 0; positive-price Discount/Credit is skipped.
+ *  - "Discount/Credit" rows are always applied as a reduction (negative amount).
+ *    Positive unit price is auto-negated so the estimator can enter "25" and get a $25 credit.
+ *    Zero unit price is skipped.
  *  - All other rows only count when unitPrice ≠ 0.
  *  - Customer-facing rows (customerFacing === true) with a qualifying amount appear in
  *    visibleCustomerLines; their amounts also reduce internalOnlyAdjustDollars.
@@ -67,18 +69,20 @@ export function splitInternalEstimateCustomLines({
     if (!r.name.trim() || q <= 0) continue;
 
     if (r.category === "Discount/Credit") {
-      if (p < 0) {
-        totalAll += q * p;
+      if (p !== 0) {
+        // Auto-negate: estimator may enter a positive credit amount (e.g. "25" → applied as -$25).
+        const discPrice = -Math.abs(p);
+        totalAll += q * discPrice;
         if (r.customerFacing) {
-          totalVisible += q * p;
+          totalVisible += q * discPrice;
           const linkedRoom = r.roomId ? roomDrafts.find((rd) => rd.id === r.roomId) : null;
           visibleCustomerLines.push({
             lineKey: r.id,
             name: r.name.trim(),
             description: r.description.trim(),
             qty: q,
-            unitPrice: p,
-            lineTotal: round2(q * p),
+            unitPrice: discPrice,
+            lineTotal: round2(q * discPrice),
             roomName: (linkedRoom?.name || r.roomName).trim(),
           });
         }

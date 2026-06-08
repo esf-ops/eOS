@@ -113,7 +113,7 @@ const CUSTOM_LINE_PRESETS: Array<{
   { key: "mat", name: "Additional Material Cost", description: "Extra material allowance", category: "Other", unitPrice: "0", customerFacing: true },
   { key: "sink", name: "Custom Sink / Faucet / Fixture", description: "Fixture package", category: "Plumbing fixture", unitPrice: "0", customerFacing: true },
   { key: "labor", name: "Labor / Install Fee", description: "Install or labor line", category: "Labor", unitPrice: "0", customerFacing: true },
-  { key: "disc", name: "Discount / Credit", description: "Uses negative unit price (required for this category).", category: "Discount/Credit", unitPrice: "-100", customerFacing: true },
+  { key: "disc", name: "Discount / Credit", description: "Enter the credit amount — always applied as a reduction.", category: "Discount/Credit", unitPrice: "100", customerFacing: true },
   { key: "other", name: "Other", description: "Miscellaneous", category: "Other", unitPrice: "0", customerFacing: true },
   { key: "internal_fee", name: "Internal-only fee", description: "Uncheck customer-facing so this stays internal in snapshots.", category: "Fee", unitPrice: "0", customerFacing: false }
 ];
@@ -636,21 +636,27 @@ export default function InternalEstimateApp() {
     const engine = apiRooms.length >= 1 ? "rooms" : "legacy";
     const customPassthroughItems: Array<{ description: string; price: number; qty: number }> = [];
     const customLineItems = customLineRows
-      .map((row) => ({
-        lineKey: row.id,
-        name: row.name.trim(),
-        description: row.description.trim(),
-        category: row.category,
-        quantity: num(row.qty) || 1,
-        unitPrice: num(row.unitPrice),
-        customerFacing: row.customerFacing,
-        internalNote: row.internalNote.trim(),
-        roomName: row.roomName.trim(),
-        roomId: row.roomId.trim() || undefined
-      }))
+      .map((row) => {
+        const rawPrice = num(row.unitPrice);
+        // Discount/Credit is always stored as a negative amount in the snapshot so the backend
+        // and display model see a consistent canonical value, regardless of how the user typed it.
+        const unitPrice = row.category === "Discount/Credit" && rawPrice !== 0 ? -Math.abs(rawPrice) : rawPrice;
+        return {
+          lineKey: row.id,
+          name: row.name.trim(),
+          description: row.description.trim(),
+          category: row.category,
+          quantity: num(row.qty) || 1,
+          unitPrice,
+          customerFacing: row.customerFacing,
+          internalNote: row.internalNote.trim(),
+          roomName: row.roomName.trim(),
+          roomId: row.roomId.trim() || undefined
+        };
+      })
       .filter((row) => {
         if (!row.name || row.quantity <= 0) return false;
-        if (row.category === "Discount/Credit") return row.unitPrice < 0;
+        // Discount/Credit is auto-negated above; exclude only when amount is zero.
         return row.unitPrice !== 0;
       });
     let quoteDefaultMaterial: Record<string, unknown> | null = null;
@@ -965,7 +971,7 @@ export default function InternalEstimateApp() {
       const p = num(r.unitPrice);
       if (!r.name.trim() || q <= 0) continue;
       if (r.category === "Discount/Credit") {
-        if (p < 0) customLineSum += q * p;
+        if (p !== 0) customLineSum += q * -Math.abs(p); // auto-negate: positive entry = credit
         continue;
       }
       if (p === 0) continue;
@@ -1446,7 +1452,7 @@ export default function InternalEstimateApp() {
       const p = num(r.unitPrice);
       if (!r.name.trim() || q <= 0) continue;
       if (r.category === "Discount/Credit") {
-        if (p < 0) sum += q * p;
+        if (p !== 0) sum += q * -Math.abs(p); // auto-negate: positive entry = credit
         continue;
       }
       if (p === 0) continue;
@@ -2649,7 +2655,7 @@ export default function InternalEstimateApp() {
                 </button>
               ))}
             </div>
-            <p className="muted small ie-custom-line-presets-hint">Discount lines need a negative unit price.</p>
+            <p className="muted small ie-custom-line-presets-hint">Discount / Credit amounts are always applied as reductions — enter the amount (positive or negative).</p>
               {customLineRows.map((row) => (
                 <div key={row.id} className="grid3" style={{ marginBottom: 10, borderBottom: "1px solid var(--border)", paddingBottom: 10 }}>
                   {!row.customerFacing ? (
@@ -2692,7 +2698,7 @@ export default function InternalEstimateApp() {
                     />
                   </label>
                   <label>
-                    Unit price ($)
+                    {row.category === "Discount/Credit" ? "Credit amount ($, applied as reduction)" : "Unit price ($)"}
                     <input
                       value={row.unitPrice}
                       onChange={(e) =>

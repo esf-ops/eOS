@@ -1,7 +1,7 @@
 import React from "react";
 
-/** Set to false to hide manual square footage entry for beta quoting. Re-enable when needed. */
-const ENABLE_MANUAL_SQUARE_FOOTAGE_ENTRY = false;
+/** Manual square footage entry — enabled for Internal Estimate. */
+const ENABLE_MANUAL_SQUARE_FOOTAGE_ENTRY = true;
 import type {
   EliteProgramColorRow,
   GuidedGroupBacksplashMode,
@@ -277,11 +277,31 @@ export default function RoomScopeBuilder({
     );
   };
 
+  /**
+   * True when a shape group is the auto-created default straight run and has never been touched
+   * (all pieces still have their initial zero dimensions). Clicking a different shape should
+   * replace this default rather than appending a second group beside it.
+   */
+  function isUntouchedDefaultStraightRun(groups: ReturnType<typeof normalizeGuidedShapeRoom>["guidedShapeGroups"]): boolean {
+    return (
+      groups != null &&
+      groups.length === 1 &&
+      groups[0].shapeType === "straight" &&
+      groups[0].pieces.every((p) => p.lengthIn === 0)
+    );
+  }
+
   const appendShapeGroup = (roomId: string, shapeType: GuidedShapeGroupType) => {
     onRoomsChange(
       rooms.map((r) => {
         if (r.id !== roomId) return r;
-        const next = appendGuidedShapeGroup(r, shapeType);
+        const norm = normalizeGuidedShapeRoom(r);
+        // Replace an untouched default straight run instead of appending beside it.
+        const baseRoom =
+          shapeType !== "straight" && isUntouchedDefaultStraightRun(norm.guidedShapeGroups)
+            ? { ...norm, guidedShapeGroups: [], guidedPieces: [] }
+            : norm;
+        const next = appendGuidedShapeGroup(baseRoom, shapeType);
         const gid = next.guidedShapeGroups?.[next.guidedShapeGroups.length - 1]?.id;
         if (gid) setSelectedGroupByRoom((m) => ({ ...m, [roomId]: gid }));
         return next;
@@ -293,7 +313,14 @@ export default function RoomScopeBuilder({
     onRoomsChange(
       rooms.map((r) => {
         if (r.id !== roomId) return r;
-        const next = appendGuidedShapeGroupFromPreset(r, preset);
+        const norm = normalizeGuidedShapeRoom(r);
+        // Replace an untouched default straight run instead of appending beside it.
+        const presetIsNotStraight = preset !== "straight" && preset !== "stove_wall";
+        const baseRoom =
+          presetIsNotStraight && isUntouchedDefaultStraightRun(norm.guidedShapeGroups)
+            ? { ...norm, guidedShapeGroups: [], guidedPieces: [] }
+            : norm;
+        const next = appendGuidedShapeGroupFromPreset(baseRoom, preset);
         const gid = next.guidedShapeGroups?.[next.guidedShapeGroups.length - 1]?.id;
         if (gid) setSelectedGroupByRoom((m) => ({ ...m, [roomId]: gid }));
         return next;
@@ -523,6 +550,14 @@ export default function RoomScopeBuilder({
                         </option>
                       ))}
                     </optgroup>
+                    {/* Show legacy edge value as read-only option so restored quotes don't lose their data */}
+                    {room.edgeProfile &&
+                      !(STANDARD_EDGE_PROFILES as readonly string[]).includes(room.edgeProfile) &&
+                      !(UPGRADED_EDGE_PROFILES as readonly string[]).includes(room.edgeProfile) ? (
+                      <optgroup label="Legacy (update recommended)">
+                        <option value={room.edgeProfile}>{room.edgeProfile} (legacy)</option>
+                      </optgroup>
+                    ) : null}
                   </select>
                 </label>
                 {UPGRADED_EDGE_PROFILES.includes(room.edgeProfile as (typeof UPGRADED_EDGE_PROFILES)[number]) && (
@@ -850,9 +885,12 @@ export default function RoomScopeBuilder({
                       defaults to 25.5″ for counters.
                     </p>
                     <div className="ie-esf-measure-callout muted small">
-                      <strong>eliteOS pricing:</strong> Chargeable counter SF rounds up from exact measured SF. Backsplash uses exact
-                      SF. Use <strong>gross runs</strong> when matching a quote measured by total run length.
+                      <strong>eliteOS pricing:</strong> Counter and backsplash/FHB chargeable SF each round up to the next whole foot
+                      for pricing. Use <strong>gross runs</strong> when matching a quote measured by total run length.
                     </div>
+                    <p className="muted small" style={{ marginTop: 4, marginBottom: 4 }}>
+                      Choose a shape — each button adds a separate area. Use multiple areas for complex layouts (e.g. main U + island).
+                    </p>
                     <div className="ie-shape-group-add-row" role="group" aria-label="Add a shape to this room">
                       <button
                         type="button"

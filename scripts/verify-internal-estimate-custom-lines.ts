@@ -79,14 +79,27 @@ const NO_ROOMS: { id: string; name: string }[] = [];
   assert.strictEqual(r.internalOnlyAdjustDollars, 0, "disc: no hidden adjust");
 }
 
-// ── 6. Discount/Credit with non-negative price → skipped entirely ─────────────
+// ── 6. Discount/Credit with positive price → auto-negated (treated as credit) ──
+// Behavior changed: entering "25" in a Discount/Credit row applies a -$25 credit.
 {
   const r = splitInternalEstimateCustomLines({
-    customLineRows: [row({ name: "Bad Discount", unitPrice: "50", category: "Discount/Credit" })],
+    customLineRows: [row({ name: "Credit", unitPrice: "25", category: "Discount/Credit" })],
     roomDrafts: NO_ROOMS,
   });
-  assert.deepEqual(r.visibleCustomerLines, [], "disc-positive: skipped from visible");
-  assert.strictEqual(r.internalOnlyAdjustDollars, 0, "disc-positive: contributes 0 to adjust");
+  assert.strictEqual(r.visibleCustomerLines.length, 1, "disc-positive: auto-negated → visible");
+  assert.strictEqual(r.visibleCustomerLines[0].lineTotal, -25, "disc-positive: lineTotal is -25");
+  assert.strictEqual(r.visibleCustomerLines[0].unitPrice, -25, "disc-positive: unitPrice is -25");
+  assert.strictEqual(r.internalOnlyAdjustDollars, 0, "disc-positive: no hidden adjust");
+}
+
+// ── 6b. Discount/Credit with zero price → excluded ────────────────────────────
+{
+  const r = splitInternalEstimateCustomLines({
+    customLineRows: [row({ name: "Zero Credit", unitPrice: "0", category: "Discount/Credit" })],
+    roomDrafts: NO_ROOMS,
+  });
+  assert.deepEqual(r.visibleCustomerLines, [], "disc-zero: excluded (zero amount)");
+  assert.strictEqual(r.internalOnlyAdjustDollars, 0, "disc-zero: no adjust");
 }
 
 // ── 7. Zero unit price → excluded from both buckets ──────────────────────────
