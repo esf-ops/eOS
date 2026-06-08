@@ -1885,11 +1885,14 @@ function approx(a: number, b: number, eps = 0.02) {
 // ── ROOM-COMP-6: Source checks — per-room comparison wired in InternalEstimateApp ──
 {
   const appSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/InternalEstimateApp.tsx"), "utf8");
-  assert.match(appSrc, /customerComparisonGroups/, "ROOM-COMP-6: InternalEstimateApp references customerComparisonGroups");
-  assert.match(appSrc, /customerComparisonColorLabels/, "ROOM-COMP-6: InternalEstimateApp references customerComparisonColorLabels");
+  // customerComparisonGroups/ColorLabels and the "Apply to all rooms" shortcut now live in the
+  // extracted CompareGroupsAndNotesStep component; wiring still flows through InternalEstimateApp props.
+  const compareStepSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/components/internal-estimate/CompareGroupsAndNotesStep.tsx"), "utf8");
+  assert.match(compareStepSrc, /customerComparisonGroups/, "ROOM-COMP-6: CompareGroupsAndNotesStep references customerComparisonGroups");
+  assert.match(compareStepSrc, /customerComparisonColorLabels/, "ROOM-COMP-6: CompareGroupsAndNotesStep references customerComparisonColorLabels");
   assert.match(appSrc, /allGroupComparisonRates/, "ROOM-COMP-6: allGroupComparisonRates passed to display model");
   assert.match(appSrc, /isPerRoomMode/, "ROOM-COMP-6: isPerRoomMode used in sticky panel");
-  assert.match(appSrc, /Apply to all rooms/, "ROOM-COMP-6: 'Apply to all rooms' global shortcut present");
+  assert.match(compareStepSrc, /Apply to all rooms/, "ROOM-COMP-6: 'Apply to all rooms' global shortcut present");
 
   const dmSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/lib/customerEstimateDisplayModel.ts"), "utf8");
   assert.match(dmSrc, /isPerRoomMode/, "ROOM-COMP-6: display model exposes isPerRoomMode");
