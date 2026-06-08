@@ -122,6 +122,14 @@ export type RoomDraft = {
   notes: string;
   /** Customer-facing note for this room — prints under the room row on the customer estimate PDF. Internal notes are never printed. */
   customerNote?: string;
+  /**
+   * Per-room customer PDF comparison groups (e.g. ["Group Promo", "Group F"]).
+   * When non-empty, only this room's rows appear in the comparison section for these groups.
+   * Rooms with an empty or absent array are excluded from the comparison section.
+   */
+  customerComparisonGroups?: string[];
+  /** Optional color labels per comparison group for this room (e.g. { "Group F": "Aura Taj" }). */
+  customerComparisonColorLabels?: Record<string, string>;
   /** Per-room use tax (countertop material only). `inherit_project` uses project default %. */
   useTaxMode?: RoomUseTaxMode;
   useTaxPercent?: number;

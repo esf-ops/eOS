@@ -238,10 +238,15 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
 
       {display.roomComparisonTable ? (
         <section className="cep-section cep-section-compact cep-comparison cep-comparison-print">
-          <h2 className="cep-h2 cep-h2-muted">Optional material group comparison</h2>
+          <h2 className="cep-h2 cep-h2-muted">
+            {display.roomComparisonTable.isPerRoomMode
+              ? "Optional material comparison by room"
+              : "Optional material group comparison"}
+          </h2>
           <p className="cep-muted cep-comparison-note">
-            Illustrative only — shows estimated area totals at alternate material tiers with the same scope and
-            add-ons.
+            {display.roomComparisonTable.isPerRoomMode
+              ? "Illustrative only — alternate material tier pricing for the rooms shown. Other rooms use the selected material above."
+              : "Illustrative only — shows estimated area totals at alternate material tiers with the same scope and add-ons."}
           </p>
           <table className="cep-table cep-table-compact cep-table-amounts cep-comparison-table cep-comparison-table-print">
             <thead>
@@ -259,18 +264,24 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
               {display.roomComparisonTable.roomRows.map((row) => (
                 <tr key={row.roomId}>
                   <td>{row.roomDisplayName}</td>
-                  {display.roomComparisonTable!.selectedGroups.map((g) => (
-                    <td key={g.group} className="cep-num cep-amt">
-                      {formatDisplayDollars(row.groupDisplayTotals[g.group] ?? 0)}
-                    </td>
-                  ))}
+                  {display.roomComparisonTable!.selectedGroups.map((g) => {
+                    const isActive = !row.activeGroups || row.activeGroups.includes(g.group);
+                    const amount = row.groupDisplayTotals[g.group];
+                    return (
+                      <td key={g.group} className="cep-num cep-amt">
+                        {isActive && amount != null ? formatDisplayDollars(amount) : "—"}
+                      </td>
+                    );
+                  })}
                 </tr>
               ))}
             </tbody>
             <tfoot>
               <tr>
                 <td>
-                  <strong>Estimated project total</strong>
+                  <strong>
+                    {display.roomComparisonTable.isPerRoomMode ? "Subtotal (shown rooms)" : "Estimated project total"}
+                  </strong>
                 </td>
                 {display.roomComparisonTable.selectedGroups.map((g) => (
                   <td key={g.group} className="cep-num cep-amt">

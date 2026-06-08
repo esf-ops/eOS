@@ -68,8 +68,16 @@ export type CustomerPrintComparisonRoomRow = {
   roomId: string;
   roomDisplayName: string;
   isVanity: boolean;
-  /** Displayed area total per selected comparison group. Key = group name. */
+  /**
+   * Displayed area total per selected comparison group. Key = group name.
+   * In per-room mode, only groups selected for this room are present; absent keys render as em dash.
+   */
   groupDisplayTotals: Record<string, number>;
+  /**
+   * In per-room mode: which groups this room participates in. Used to suppress cells for other columns.
+   * Absent = this room participates in all selectedGroups (legacy global mode).
+   */
+  activeGroups?: string[];
 };
 
 /** Full optional material group comparison table for the customer PDF. */
@@ -79,6 +87,11 @@ export type CustomerPrintComparisonTable = {
   projectDisplayTotals: Record<string, number>;
   /** Selected groups in display order, with optional color labels. */
   selectedGroups: Array<{ group: string; colorLabel?: string }>;
+  /**
+   * True when comparison was built from per-room customerComparisonGroups rather than global selection.
+   * Controls whether cells for non-selected groups show em dash instead of a dollar amount.
+   */
+  isPerRoomMode: boolean;
 };
 
 const FHB_ELECTRICAL_DETAIL_RE = /full-height backsplash electrical cutouts/i;
@@ -334,26 +347,131 @@ function buildRoomAreaPrintRows(params: {
   };
 }
 
+const MATERIAL_GROUP_ORDER = [
+  "Group Promo",
+  "Group A",
+  "Group B",
+  "Group C",
+  "Group D",
+  "Group E",
+  "Group F",
+  "Remnant"
+];
+
+/**
+ * Compute the display total for a single room at a given comparison group rate.
+ * For vanity program rooms the display total is fixed regardless of group.
+ */
+function computeRoomGroupDisplayTotal(
+  room: CustomerRoomAreaCostBreakdown["rooms"][number],
+  ratePerSqft: number,
+  taxPct: number,
+  fixedExtrasExact: number
+): number {
+  if (room.isVanity) {
+    return room.fixedDisplayTotal ?? roundCustomerDisplay(room.roomTotalExact);
+  }
+  const counterMat = round2(room.countertopSf * ratePerSqft);
+  const useTax = taxPct > 0 ? round2(counterMat * (taxPct / 100)) : 0;
+  const backsplashMat = round2(room.backsplashFhbSf * ratePerSqft);
+  return roundCustomerDisplay(round2(counterMat + useTax + backsplashMat + fixedExtrasExact));
+}
+
 /**
  * Build the per-room optional material group comparison table.
- * For vanity program rooms the display total is fixed across all groups.
- * For other rooms, material is re-priced at each group's rate using the rate from comparisonRows.
- * Room add-ons are fixed (unchanged across groups).
+ *
+ * Per-room mode (preferred): when any room in roomAreaBreakdown has customerComparisonGroups set,
+ * each room only shows values for its selected groups. Rooms with no selection are excluded.
+ * Rate lookup uses allGroupComparisonRates for any group combination.
+ *
+ * Legacy global mode: all rooms show the globally-selected comparisonRows groups.
  */
 function buildRoomComparisonTable(params: {
   roomAreaBreakdown: CustomerRoomAreaCostBreakdown | null;
   comparisonRows: InternalEstimateGroupComparisonRow[];
+  allGroupComparisonRates?: InternalEstimateGroupComparisonRow[];
   projectUseTaxPercent: number;
   unassignedDisplayTotal: number;
 }): CustomerPrintComparisonTable | null {
   const { comparisonRows, roomAreaBreakdown } = params;
-  if (!comparisonRows.length || !roomAreaBreakdown?.rooms.length) return null;
+  if (!roomAreaBreakdown?.rooms.length) return null;
+
+  const taxPct = Math.max(0, Number(params.projectUseTaxPercent) || 0);
+
+  // Detect per-room mode: any room has a non-empty customerComparisonGroups
+  const perRoomMode = roomAreaBreakdown.rooms.some((r) => r.customerComparisonGroups?.length);
+
+  if (perRoomMode) {
+    // Rate lookup by group name from allGroupComparisonRates (or fall back to comparisonRows)
+    const rateSource = params.allGroupComparisonRates?.length ? params.allGroupComparisonRates : comparisonRows;
+    const rateByGroup = new Map(rateSource.map((r) => [r.group, r.ratePerSqft]));
+
+    // Union of all groups selected across rooms, in canonical display order
+    const unionGroupSet = new Set<string>();
+    for (const room of roomAreaBreakdown.rooms) {
+      for (const g of room.customerComparisonGroups ?? []) {
+        unionGroupSet.add(g);
+      }
+    }
+    if (!unionGroupSet.size) return null;
+
+    const selectedGroups = MATERIAL_GROUP_ORDER
+      .filter((g) => unionGroupSet.has(g))
+      .map((g) => {
+        // Collect color labels for this group across rooms; use label if exactly one distinct value
+        const labels = new Set(
+          roomAreaBreakdown.rooms
+            .filter((r) => r.customerComparisonGroups?.includes(g))
+            .map((r) => r.customerComparisonColorLabels?.[g]?.trim())
+            .filter(Boolean)
+        );
+        return { group: g, colorLabel: labels.size === 1 ? [...labels][0] : undefined };
+      });
+
+    const roomRows: CustomerPrintComparisonRoomRow[] = [];
+
+    for (const room of roomAreaBreakdown.rooms) {
+      const roomGroups = room.customerComparisonGroups ?? [];
+      if (!roomGroups.length) continue; // excluded from comparison section
+
+      const addonSum = round2(room.addons.reduce((s, a) => s + a.amountExact, 0));
+      const customSum = round2(room.customerCustomLines.reduce((s, c) => s + c.amountExact, 0));
+      const fixedExtrasExact = round2(addonSum + customSum);
+
+      const groupDisplayTotals: Record<string, number> = {};
+      for (const g of roomGroups) {
+        const rate = rateByGroup.get(g);
+        if (rate == null) continue;
+        groupDisplayTotals[g] = computeRoomGroupDisplayTotal(room, rate, taxPct, fixedExtrasExact);
+      }
+
+      roomRows.push({
+        roomId: room.roomId,
+        roomDisplayName: room.displayName,
+        isVanity: room.isVanity,
+        groupDisplayTotals,
+        activeGroups: roomGroups
+      });
+    }
+
+    if (!roomRows.length) return null;
+
+    const projectDisplayTotals: Record<string, number> = {};
+    for (const sg of selectedGroups) {
+      const roomSum = roomRows.reduce((s, r) => s + (r.groupDisplayTotals[sg.group] ?? 0), 0);
+      projectDisplayTotals[sg.group] = round2(roomSum);
+    }
+
+    return { roomRows, projectDisplayTotals, selectedGroups, isPerRoomMode: true };
+  }
+
+  // Legacy global mode: all rooms show globally-selected groups
+  if (!comparisonRows.length) return null;
 
   const selectedGroups = comparisonRows.map((r) => ({
     group: r.group,
     colorLabel: r.comparisonColorLabel
   }));
-  const taxPct = Math.max(0, Number(params.projectUseTaxPercent) || 0);
 
   const roomRows: CustomerPrintComparisonRoomRow[] = [];
 
@@ -364,17 +482,7 @@ function buildRoomComparisonTable(params: {
 
     const groupDisplayTotals: Record<string, number> = {};
     for (const compRow of comparisonRows) {
-      if (room.isVanity) {
-        // Vanity program price is fixed regardless of material group
-        groupDisplayTotals[compRow.group] = room.fixedDisplayTotal ?? roundCustomerDisplay(room.roomTotalExact);
-      } else {
-        const rate = compRow.ratePerSqft;
-        const counterMat = round2(room.countertopSf * rate);
-        const useTax = taxPct > 0 ? round2(counterMat * (taxPct / 100)) : 0;
-        const backsplashMat = round2(room.backsplashFhbSf * rate);
-        const totalExact = round2(counterMat + useTax + backsplashMat + fixedExtrasExact);
-        groupDisplayTotals[compRow.group] = roundCustomerDisplay(totalExact);
-      }
+      groupDisplayTotals[compRow.group] = computeRoomGroupDisplayTotal(room, compRow.ratePerSqft, taxPct, fixedExtrasExact);
     }
 
     roomRows.push({
@@ -391,7 +499,7 @@ function buildRoomComparisonTable(params: {
     projectDisplayTotals[compRow.group] = round2(roomSum + params.unassignedDisplayTotal);
   }
 
-  return { roomRows, projectDisplayTotals, selectedGroups };
+  return { roomRows, projectDisplayTotals, selectedGroups, isPerRoomMode: false };
 }
 
 function buildMaterialScopeGroups(selectedBreakdown: SelectedMaterialBreakdown): CustomerMaterialScopeGroup[] {
@@ -476,9 +584,15 @@ export type BuildCustomerEstimateDisplayModelParams = {
   preparedBy?: string | null;
   /**
    * Already-filtered comparison group rows (from buildInternalEstimateGroupComparison filtered to
-   * customerDisplayGroups). When non-empty, roomComparisonTable is built in the display model.
+   * customerDisplayGroups). When non-empty AND no per-room groups are set, used as legacy global fallback.
    */
   comparisonRows?: InternalEstimateGroupComparisonRow[];
+  /**
+   * All group comparison rates (unfiltered buildInternalEstimateGroupComparison output).
+   * Required for per-room mode so any group combination can be looked up by rate.
+   * When omitted, per-room mode falls back to comparisonRows for rate lookup.
+   */
+  allGroupComparisonRates?: InternalEstimateGroupComparisonRow[];
   /** Project use tax percent — required for per-room comparison pricing. */
   projectUseTaxPercent?: number;
 };
@@ -554,6 +668,7 @@ export function buildCustomerEstimateDisplayModel(
   const roomComparisonTable = buildRoomComparisonTable({
     roomAreaBreakdown: params.roomAreaBreakdown,
     comparisonRows,
+    allGroupComparisonRates: params.allGroupComparisonRates,
     projectUseTaxPercent: Math.max(0, Number(params.projectUseTaxPercent) || 0),
     unassignedDisplayTotal: roomArea.unassignedDisplayTotal
   });

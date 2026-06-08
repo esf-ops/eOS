@@ -1576,4 +1576,338 @@ function approx(a: number, b: number, eps = 0.02) {
   assert.ok(!roundingSrc.includes("Math.round(n / 5) * 5"), "PDF-ROUNDING-LANG-5: no old Math.round nearest-$5");
 }
 
+// ── ROOM-COMP-1: Per-room comparison selection — Room A (Promo+B), Room B (Promo), Room C (none) ──
+{
+  const roomA = createDefaultRoom("Group Promo");
+  roomA.name = "Kitchen";
+  roomA.calcMode = "Manual Sq Ft";
+  roomA.direct = { counter: 40, splash: 8 };
+  roomA.customerComparisonGroups = ["Group Promo", "Group B"];
+
+  const roomB = createDefaultRoom("Group Promo");
+  roomB.name = "Primary Bath";
+  roomB.calcMode = "Manual Sq Ft";
+  roomB.direct = { counter: 12, splash: 4 };
+  roomB.customerComparisonGroups = ["Group Promo"];
+
+  const roomC = createDefaultRoom("Group C");
+  roomC.name = "Pantry";
+  roomC.calcMode = "Manual Sq Ft";
+  roomC.direct = { counter: 8, splash: 0 };
+  // no customerComparisonGroups → excluded from comparison
+
+  const drafts = [roomA, roomB, roomC];
+  const { rooms: measured } = calculateAllRoomDrafts(drafts, "New Construction", "wholesale", 0);
+  const bd = buildCustomerRoomAreaCostBreakdown({
+    roomDrafts: drafts,
+    measuredRooms: measured,
+    materialBasis: "wholesale"
+  });
+
+  // customerComparisonGroups carried through to CustomerRoomAreaCostRow
+  assert.deepEqual(bd.rooms.find((r) => r.roomName === "Kitchen")?.customerComparisonGroups, ["Group Promo", "Group B"], "ROOM-COMP-1: Kitchen row carries customerComparisonGroups");
+  assert.deepEqual(bd.rooms.find((r) => r.roomName === "Primary Bath")?.customerComparisonGroups, ["Group Promo"], "ROOM-COMP-1: Bath row carries customerComparisonGroups");
+  assert.equal(bd.rooms.find((r) => r.roomName === "Pantry")?.customerComparisonGroups, undefined, "ROOM-COMP-1: Pantry row has no customerComparisonGroups");
+
+  const allGroupRates = buildInternalEstimateGroupComparison({
+    countertopSqft: 60,
+    backsplashSqft: 12,
+    roomFixedDollars: 0,
+    customLineDollars: 0,
+    basis: "wholesale"
+  });
+  const selectedBd = buildSelectedMaterialBreakdown(drafts, "wholesale");
+  const displayModel = buildCustomerEstimateDisplayModel({
+    selectedBreakdown: selectedBd,
+    measuredRooms: measured,
+    visibleCustomerLines: [],
+    internalMaterialFoldDollars: 0,
+    roomAreaBreakdown: bd,
+    allGroupComparisonRates: allGroupRates
+  });
+
+  const ct = displayModel.roomComparisonTable;
+  assert.ok(ct != null, "ROOM-COMP-1: comparison table built");
+  assert.equal(ct!.isPerRoomMode, true, "ROOM-COMP-1: per-room mode detected");
+
+  // Only Kitchen and Bath appear in comparison (Pantry excluded)
+  assert.equal(ct!.roomRows.length, 2, "ROOM-COMP-1: 2 rooms in comparison (Pantry excluded)");
+  assert.ok(ct!.roomRows.some((r) => r.roomDisplayName === "Kitchen"), "ROOM-COMP-1: Kitchen in comparison");
+  assert.ok(ct!.roomRows.some((r) => r.roomDisplayName === "Primary Bath"), "ROOM-COMP-1: Bath in comparison");
+  assert.ok(!ct!.roomRows.some((r) => r.roomDisplayName === "Pantry"), "ROOM-COMP-1: Pantry NOT in comparison");
+
+  // Selected groups = union = Promo + B
+  const groupNames = ct!.selectedGroups.map((g) => g.group);
+  assert.ok(groupNames.includes("Group Promo"), "ROOM-COMP-1: Group Promo in selectedGroups");
+  assert.ok(groupNames.includes("Group B"), "ROOM-COMP-1: Group B in selectedGroups");
+
+  // Kitchen has both Promo and B; Bath has only Promo
+  const kitchenRow = ct!.roomRows.find((r) => r.roomDisplayName === "Kitchen");
+  const bathRow = ct!.roomRows.find((r) => r.roomDisplayName === "Primary Bath");
+  assert.ok((kitchenRow!.groupDisplayTotals["Group Promo"] ?? 0) > 0, "ROOM-COMP-1: Kitchen has Promo display total");
+  assert.ok((kitchenRow!.groupDisplayTotals["Group B"] ?? 0) > 0, "ROOM-COMP-1: Kitchen has Group B display total");
+  assert.ok((bathRow!.groupDisplayTotals["Group Promo"] ?? 0) > 0, "ROOM-COMP-1: Bath has Promo display total");
+  assert.equal(bathRow!.groupDisplayTotals["Group B"], undefined, "ROOM-COMP-1: Bath does NOT have Group B display total");
+
+  // Bath activeGroups does NOT include Group B (so cell renders as em dash)
+  assert.deepEqual(bathRow!.activeGroups, ["Group Promo"], "ROOM-COMP-1: Bath activeGroups = [Promo]");
+
+  // Project totals: Group B includes only Kitchen
+  const projPromo = ct!.projectDisplayTotals["Group Promo"] ?? 0;
+  const projB = ct!.projectDisplayTotals["Group B"] ?? 0;
+  assert.ok(projPromo > 0, "ROOM-COMP-1: project Promo total > 0");
+  assert.ok(projB > 0, "ROOM-COMP-1: project Group B total > 0");
+  // Group B total should equal Kitchen-only Group B (not Kitchen+Bath)
+  approx(projB, kitchenRow!.groupDisplayTotals["Group B"] ?? 0, 1);
+}
+
+// ── ROOM-COMP-2: Hosch-style — only Lower Bar has Promo+F ────────────────────
+{
+  const kitchen = createDefaultRoom("Group A");
+  kitchen.name = "Kitchen";
+  kitchen.calcMode = "Manual Sq Ft";
+  kitchen.direct = { counter: 45, splash: 10 };
+  // no customerComparisonGroups
+
+  const pantry = createDefaultRoom("Group A");
+  pantry.name = "Pantry";
+  pantry.calcMode = "Manual Sq Ft";
+  pantry.direct = { counter: 12, splash: 0 };
+  // no customerComparisonGroups
+
+  const primaryBath = createDefaultRoom("Group C");
+  primaryBath.name = "Primary Bath (Double)";
+  primaryBath.calcMode = "Manual Sq Ft";
+  primaryBath.direct = { counter: 28, splash: 6 };
+  // no customerComparisonGroups
+
+  const lowerBar = createDefaultRoom("Group Promo");
+  lowerBar.name = "Bar (Lower Level)";
+  lowerBar.calcMode = "Manual Sq Ft";
+  lowerBar.direct = { counter: 15, splash: 3 };
+  lowerBar.customerComparisonGroups = ["Group Promo", "Group F"];
+
+  const drafts = [kitchen, pantry, primaryBath, lowerBar];
+  const { rooms: measured } = calculateAllRoomDrafts(drafts, "Kitchen", "wholesale", 0);
+  const bd = buildCustomerRoomAreaCostBreakdown({
+    roomDrafts: drafts,
+    measuredRooms: measured,
+    materialBasis: "wholesale"
+  });
+
+  const allGroupRates = buildInternalEstimateGroupComparison({
+    countertopSqft: 100,
+    backsplashSqft: 19,
+    roomFixedDollars: 0,
+    customLineDollars: 0,
+    basis: "wholesale"
+  });
+  const selectedBd = buildSelectedMaterialBreakdown(drafts, "wholesale");
+  const displayModel = buildCustomerEstimateDisplayModel({
+    selectedBreakdown: selectedBd,
+    measuredRooms: measured,
+    visibleCustomerLines: [],
+    internalMaterialFoldDollars: 0,
+    roomAreaBreakdown: bd,
+    allGroupComparisonRates: allGroupRates
+  });
+
+  const ct = displayModel.roomComparisonTable;
+  assert.ok(ct != null, "ROOM-COMP-2 (Hosch): comparison table built");
+  assert.equal(ct!.isPerRoomMode, true, "ROOM-COMP-2 (Hosch): per-room mode");
+
+  // Only Lower Bar appears
+  assert.equal(ct!.roomRows.length, 1, "ROOM-COMP-2 (Hosch): exactly 1 room in comparison (Lower Bar only)");
+  assert.equal(ct!.roomRows[0]!.roomDisplayName, "Bar (Lower Level)", "ROOM-COMP-2 (Hosch): Lower Bar in comparison");
+
+  // Group F column present but NOT for Kitchen/Pantry/Bath (they are not in rowRows)
+  const groupNames = ct!.selectedGroups.map((g) => g.group);
+  assert.ok(groupNames.includes("Group Promo"), "ROOM-COMP-2 (Hosch): Promo in selected groups");
+  assert.ok(groupNames.includes("Group F"), "ROOM-COMP-2 (Hosch): Group F in selected groups");
+
+  // Group F project total = only Lower Bar's Group F value (no other rooms contribute)
+  const lowerBarRow = ct!.roomRows[0]!;
+  const projF = ct!.projectDisplayTotals["Group F"] ?? 0;
+  approx(projF, lowerBarRow.groupDisplayTotals["Group F"] ?? 0, 1);
+
+  // Kitchen, Pantry, Primary Bath not in comparison rows at all
+  assert.ok(!ct!.roomRows.some((r) => r.roomDisplayName === "Kitchen"), "ROOM-COMP-2 (Hosch): Kitchen NOT in comparison");
+  assert.ok(!ct!.roomRows.some((r) => r.roomDisplayName === "Pantry"), "ROOM-COMP-2 (Hosch): Pantry NOT in comparison");
+  assert.ok(!ct!.roomRows.some((r) => r.roomDisplayName.includes("Bath")), "ROOM-COMP-2 (Hosch): Bath NOT in comparison");
+}
+
+// ── ROOM-COMP-3: No rooms with customerComparisonGroups → no comparison table ──
+{
+  const kitchen = createDefaultRoom("Group Promo");
+  kitchen.name = "Kitchen";
+  kitchen.calcMode = "Manual Sq Ft";
+  kitchen.direct = { counter: 40, splash: 8 };
+
+  const { rooms: measured } = calculateAllRoomDrafts([kitchen], "New Construction", "wholesale", 0);
+  const bd = buildCustomerRoomAreaCostBreakdown({
+    roomDrafts: [kitchen],
+    measuredRooms: measured,
+    materialBasis: "wholesale"
+  });
+
+  const allGroupRates = buildInternalEstimateGroupComparison({
+    countertopSqft: 40,
+    backsplashSqft: 8,
+    roomFixedDollars: 0,
+    customLineDollars: 0,
+    basis: "wholesale"
+  });
+  const selectedBd = buildSelectedMaterialBreakdown([kitchen], "wholesale");
+  const displayModel = buildCustomerEstimateDisplayModel({
+    selectedBreakdown: selectedBd,
+    measuredRooms: measured,
+    visibleCustomerLines: [],
+    internalMaterialFoldDollars: 0,
+    roomAreaBreakdown: bd,
+    allGroupComparisonRates: allGroupRates
+    // No comparisonRows (global) either
+  });
+
+  assert.equal(displayModel.roomComparisonTable, null, "ROOM-COMP-3: no comparison table when no rooms and no global selection");
+}
+
+// ── ROOM-COMP-4: Legacy global fallback — comparisonRows without per-room groups ──
+{
+  const kitchen = createDefaultRoom("Group Promo");
+  kitchen.name = "Kitchen";
+  kitchen.calcMode = "Manual Sq Ft";
+  kitchen.direct = { counter: 40, splash: 8 };
+  // No customerComparisonGroups on room (legacy behavior)
+
+  const bath = createDefaultRoom("Group Promo");
+  bath.name = "Bath";
+  bath.calcMode = "Manual Sq Ft";
+  bath.direct = { counter: 12, splash: 0 };
+
+  const drafts = [kitchen, bath];
+  const { rooms: measured } = calculateAllRoomDrafts(drafts, "New Construction", "wholesale", 0);
+  const bd = buildCustomerRoomAreaCostBreakdown({
+    roomDrafts: drafts,
+    measuredRooms: measured,
+    materialBasis: "wholesale"
+  });
+
+  const allGroupRates = buildInternalEstimateGroupComparison({
+    countertopSqft: 52,
+    backsplashSqft: 8,
+    roomFixedDollars: 0,
+    customLineDollars: 0,
+    basis: "wholesale"
+  });
+
+  // Simulate global selection of just Group Promo (legacy global mode)
+  const globalComparisonRows = allGroupRates
+    .filter((r) => r.group === "Group Promo")
+    .map((r) => ({ ...r, comparisonColorLabel: undefined }));
+
+  const selectedBd = buildSelectedMaterialBreakdown(drafts, "wholesale");
+  const displayModel = buildCustomerEstimateDisplayModel({
+    selectedBreakdown: selectedBd,
+    measuredRooms: measured,
+    visibleCustomerLines: [],
+    internalMaterialFoldDollars: 0,
+    roomAreaBreakdown: bd,
+    comparisonRows: globalComparisonRows,
+    allGroupComparisonRates: allGroupRates
+  });
+
+  const ct = displayModel.roomComparisonTable;
+  assert.ok(ct != null, "ROOM-COMP-4: comparison table built in legacy global mode");
+  assert.equal(ct!.isPerRoomMode, false, "ROOM-COMP-4: legacy global mode (not per-room)");
+  assert.equal(ct!.roomRows.length, 2, "ROOM-COMP-4: both rooms shown in global mode");
+  assert.ok(ct!.rowRows === undefined || ct!.roomRows.every((r) => !r.activeGroups), "ROOM-COMP-4: no activeGroups filter in global mode");
+  assert.ok(ct!.roomRows.every((r) => (r.groupDisplayTotals["Group Promo"] ?? 0) > 0), "ROOM-COMP-4: all rooms have Promo total in global mode");
+}
+
+// ── ROOM-COMP-5: Comparison totals only sum rooms that include that group ────
+{
+  const roomX = createDefaultRoom("Group Promo");
+  roomX.name = "Room X";
+  roomX.calcMode = "Manual Sq Ft";
+  roomX.direct = { counter: 20, splash: 0 };
+  roomX.customerComparisonGroups = ["Group Promo", "Group F"];
+
+  const roomY = createDefaultRoom("Group Promo");
+  roomY.name = "Room Y";
+  roomY.calcMode = "Manual Sq Ft";
+  roomY.direct = { counter: 20, splash: 0 };
+  roomY.customerComparisonGroups = ["Group Promo"]; // no Group F
+
+  const drafts = [roomX, roomY];
+  const { rooms: measured } = calculateAllRoomDrafts(drafts, "New Construction", "wholesale", 0);
+  const bd = buildCustomerRoomAreaCostBreakdown({
+    roomDrafts: drafts,
+    measuredRooms: measured,
+    materialBasis: "wholesale"
+  });
+  const allGroupRates = buildInternalEstimateGroupComparison({
+    countertopSqft: 40,
+    backsplashSqft: 0,
+    roomFixedDollars: 0,
+    customLineDollars: 0,
+    basis: "wholesale"
+  });
+  const selectedBd = buildSelectedMaterialBreakdown(drafts, "wholesale");
+  const displayModel = buildCustomerEstimateDisplayModel({
+    selectedBreakdown: selectedBd,
+    measuredRooms: measured,
+    visibleCustomerLines: [],
+    internalMaterialFoldDollars: 0,
+    roomAreaBreakdown: bd,
+    allGroupComparisonRates: allGroupRates
+  });
+
+  const ct = displayModel.roomComparisonTable;
+  assert.ok(ct != null, "ROOM-COMP-5: comparison table built");
+  assert.equal(ct!.isPerRoomMode, true, "ROOM-COMP-5: per-room mode");
+
+  const rowX = ct!.roomRows.find((r) => r.roomDisplayName === "Room X")!;
+  const rowY = ct!.roomRows.find((r) => r.roomDisplayName === "Room Y")!;
+
+  // Project Group F total = Room X only (Room Y does not have Group F)
+  const projF = ct!.projectDisplayTotals["Group F"] ?? 0;
+  approx(projF, rowX.groupDisplayTotals["Group F"] ?? 0, 1);
+
+  // Room Y Group F is absent (em-dash in print) — cell value should be undefined
+  assert.equal(rowY.groupDisplayTotals["Group F"], undefined, "ROOM-COMP-5: Room Y has no Group F value");
+
+  // Project Promo total = Room X + Room Y
+  const projPromo = ct!.projectDisplayTotals["Group Promo"] ?? 0;
+  const expectedPromo = (rowX.groupDisplayTotals["Group Promo"] ?? 0) + (rowY.groupDisplayTotals["Group Promo"] ?? 0);
+  approx(projPromo, expectedPromo, 1);
+}
+
+// ── ROOM-COMP-6: Source checks — per-room comparison wired in InternalEstimateApp ──
+{
+  const appSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/InternalEstimateApp.tsx"), "utf8");
+  assert.match(appSrc, /customerComparisonGroups/, "ROOM-COMP-6: InternalEstimateApp references customerComparisonGroups");
+  assert.match(appSrc, /customerComparisonColorLabels/, "ROOM-COMP-6: InternalEstimateApp references customerComparisonColorLabels");
+  assert.match(appSrc, /allGroupComparisonRates/, "ROOM-COMP-6: allGroupComparisonRates passed to display model");
+  assert.match(appSrc, /isPerRoomMode/, "ROOM-COMP-6: isPerRoomMode used in sticky panel");
+  assert.match(appSrc, /Apply to all rooms/, "ROOM-COMP-6: 'Apply to all rooms' global shortcut present");
+
+  const dmSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/lib/customerEstimateDisplayModel.ts"), "utf8");
+  assert.match(dmSrc, /isPerRoomMode/, "ROOM-COMP-6: display model exposes isPerRoomMode");
+  assert.match(dmSrc, /allGroupComparisonRates/, "ROOM-COMP-6: display model accepts allGroupComparisonRates");
+  assert.match(dmSrc, /perRoomMode/, "ROOM-COMP-6: per-room mode detection in display model");
+  assert.match(dmSrc, /activeGroups/, "ROOM-COMP-6: activeGroups on CustomerPrintComparisonRoomRow");
+
+  const printSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/CustomerEstimatePrint.tsx"), "utf8");
+  assert.match(printSrc, /isPerRoomMode/, "ROOM-COMP-6: CustomerEstimatePrint uses isPerRoomMode for heading");
+  assert.match(printSrc, /Optional material comparison by room/, "ROOM-COMP-6: per-room heading copy present");
+  assert.match(printSrc, /activeGroups/, "ROOM-COMP-6: activeGroups checked for em-dash rendering");
+  assert.match(printSrc, /Subtotal \(shown rooms\)/, "ROOM-COMP-6: per-room footer label");
+
+  const mathSrc = readFileSync(join(repoRoot, "app-quote/src/lib/prototypeQuoteMath.ts"), "utf8");
+  assert.match(mathSrc, /customerComparisonGroups.*string\[\]/, "ROOM-COMP-6: CustomerRoomAreaCostRow.customerComparisonGroups typed");
+
+  const quoteTypesSrc = readFileSync(join(repoRoot, "app-quote/src/lib/quoteTypes.ts"), "utf8");
+  assert.match(quoteTypesSrc, /customerComparisonGroups/, "ROOM-COMP-6: RoomDraft.customerComparisonGroups field present");
+}
+
 console.log("verify-internal-estimate-beta-fixes: OK");

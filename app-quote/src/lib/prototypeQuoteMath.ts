@@ -1153,6 +1153,13 @@ export type CustomerRoomAreaCostRow = {
   fixedDisplayTotal?: number;
   /** Customer-facing note for this room — prints under the room on the customer PDF. Empty string when absent. */
   customerNote: string;
+  /**
+   * Per-room customer PDF comparison groups. Mirrors RoomDraft.customerComparisonGroups.
+   * When non-empty, only this room appears in the comparison table for these groups.
+   */
+  customerComparisonGroups?: string[];
+  /** Per-room optional comparison color labels. Mirrors RoomDraft.customerComparisonColorLabels. */
+  customerComparisonColorLabels?: Record<string, string>;
 };
 
 export type CustomerRoomAreaCostBreakdown = {
@@ -1315,7 +1322,11 @@ export function buildCustomerRoomAreaCostBreakdown(params: {
       customerCustomLines: [],
       roomTotalExact: 0,
       fixedDisplayTotal,
-      customerNote: String(draft?.customerNote ?? "").trim()
+      customerNote: String(draft?.customerNote ?? "").trim(),
+      customerComparisonGroups: draft?.customerComparisonGroups?.length ? [...draft.customerComparisonGroups] : undefined,
+      customerComparisonColorLabels: draft?.customerComparisonColorLabels && Object.keys(draft.customerComparisonColorLabels).length
+        ? { ...draft.customerComparisonColorLabels }
+        : undefined
     });
   }
 
