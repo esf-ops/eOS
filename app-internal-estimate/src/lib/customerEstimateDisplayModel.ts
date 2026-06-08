@@ -234,11 +234,17 @@ function buildEstimateSummaryRows(params: {
   if (params.summaryEdgeDisplay > 0) {
     rows.push({ key: "edge_upgrades", label: "Edge upgrades", displayAmount: params.summaryEdgeDisplay });
   }
+  // Old instructional text that was the preset default — must not print as a customer-facing note.
+  const PLACEHOLDER_DESCRIPTIONS = new Set([
+    "Enter the credit amount — always applied as a reduction.",
+    "Uses negative unit price (required for this category)."
+  ]);
   params.visibleCustomerLines.forEach((ln, index) => {
     const displayAmount = roundCustomerDisplay(Number(ln.lineTotal) || 0);
-    if (displayAmount <= 0) return;
+    if (displayAmount === 0) return; // skip zero; allow negative discount rows
     let label = ln.name.trim() || "Custom item";
-    if (ln.description?.trim()) label += ` — ${ln.description.trim()}`;
+    const descText = ln.description?.trim() || "";
+    if (descText && !PLACEHOLDER_DESCRIPTIONS.has(descText)) label += ` — ${descText}`;
     if (ln.roomName?.trim()) label += ` · ${ln.roomName.trim()}`;
     if (ln.qty != null && ln.qty !== 1) label += ` × ${ln.qty}`;
     const lineKey = String(ln.lineKey ?? "").trim() || `custom-line-${index}`;
@@ -286,12 +292,17 @@ function buildRoomAreaPrintRows(params: {
     return { rows: [], unassignedDisplayTotal: 0, unassignedExact, showRoomBreakdown: false };
   }
 
-  const unassignedDisplay = unassignedExact > 0 ? roundCustomerDisplay(unassignedExact) : 0;
+  // Allow negative unassigned (global Discount / Credit not assigned to a room) — it shows as a
+  // "Project discount / credit" footer row in the room breakdown. Room proportional allocation uses
+  // the positive room subtotal (finalRounded minus the discount) so per-room amounts are natural.
+  const unassignedDisplay = unassignedExact !== 0 ? roundCustomerDisplay(unassignedExact) : 0;
 
   // Separate vanity rooms (fixed display total, immune to fold/rounding inflation) from
   // proportional rooms. The fixed sum is subtracted from targetRoomDisplay before proportional
   // allocation, ensuring the vanity program customer price is never inflated by internal adjustments.
   const fixedTotal = roomRows.reduce((s, r) => s + (r.fixedDisplayTotal ?? 0), 0);
+  // Subtract the unassigned display (which may be negative for global discount) so room proportional
+  // allocation targets the positive room-area portion of the total.
   const targetRoomDisplay = Math.max(0, params.finalRounded - unassignedDisplay);
   const targetProportionalDisplay = Math.max(0, targetRoomDisplay - fixedTotal);
 

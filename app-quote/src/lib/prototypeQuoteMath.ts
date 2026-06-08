@@ -1187,7 +1187,9 @@ function customLineAmountFromInput(row: CustomerRoomAreaCustomLineInput): number
   const p = Number(row.unitPrice) || 0;
   if (!String(row.name ?? "").trim() || q <= 0) return 0;
   if (row.category === "Discount/Credit") {
-    if (p < 0) return round2(q * p);
+    // Auto-negate: estimator may enter a positive credit amount (e.g. "25" → applied as -$25).
+    // Mirrors splitInternalEstimateCustomLines Discount/Credit handling.
+    if (p !== 0) return round2(q * -Math.abs(p));
     return 0;
   }
   if (p === 0) return 0;

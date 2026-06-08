@@ -60,6 +60,8 @@ import {
 import { parseCustomerFacingNoteLines } from "../app-internal-estimate/src/lib/customerFacingNotes.ts";
 import { buildCustomerEstimateDisplayModel } from "../app-internal-estimate/src/lib/customerEstimateDisplayModel.ts";
 import { formatPreparedByDisplayName } from "../app-internal-estimate/src/lib/formatPreparedByName.ts";
+import { roundCustomerDisplay } from "../app-quote/src/lib/customerDisplayRounding.ts";
+import { splitInternalEstimateCustomLines } from "../app-internal-estimate/src/lib/internalEstimateCustomLines.ts";
 
 function approx(a: number, b: number, eps = 0.02) {
   assert.ok(Math.abs(a - b) <= eps, `expected ${b}, got ${a}`);
@@ -908,15 +910,17 @@ function approx(a: number, b: number, eps = 0.02) {
   assert.match(dmSrc, /allocateCustomerDisplayFives/, "display model must use allocateCustomerDisplayFives");
   assert.match(dmSrc, /fixedDisplayTotal/, "display model buildRoomAreaPrintRows must handle fixedDisplayTotal");
 
-  // roundCustomerDisplay must use nearest-$5 (not nearest-$10 ceiling)
+  // roundCustomerDisplay must use ceil-to-$5 for positive (not nearest-$5 Math.round)
   const roundingSrc = readFileSync(join(repoRoot, "app-quote/src/lib/customerDisplayRounding.ts"), "utf8");
-  assert.match(roundingSrc, /Math\.round\(n \/ 5\) \* 5/, "roundCustomerDisplay must be nearest-$5 round");
+  assert.match(roundingSrc, /Math\.ceil\(n \/ 5\) \* 5/, "roundCustomerDisplay must use Math.ceil for ceiling-to-$5");
+  assert.doesNotMatch(roundingSrc, /Math\.round\(n \/ 5\) \* 5/, "roundCustomerDisplay must not use old nearest-$5 Math.round");
   assert.doesNotMatch(roundingSrc, /Math\.ceil\(n \/ 10\) \* 10/, "roundCustomerDisplay must not be nearest-$10 ceil");
 
-  // CustomerEstimatePrint must say nearest $5
+  // CustomerEstimatePrint must NOT mention rounding to the customer
   const printSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/CustomerEstimatePrint.tsx"), "utf8");
-  assert.match(printSrc, /nearest \$5/, "CustomerEstimatePrint copy must say 'nearest $5'");
+  assert.doesNotMatch(printSrc, /nearest \$5/, "CustomerEstimatePrint must not mention 'nearest $5' rounding");
   assert.doesNotMatch(printSrc, /nearest \$10/, "CustomerEstimatePrint must not have old nearest-$10 copy");
+  assert.match(printSrc, /Estimate only/, "CustomerEstimatePrint must retain Estimate only disclaimer");
 }
 
 // ─── CUSTOMER PDF CLEANUP REGRESSION CHECKS ───────────────────────────────
@@ -970,9 +974,10 @@ function approx(a: number, b: number, eps = 0.02) {
   assert.match(printSrc, /Project Notes/, "PDF-STRUCT-1: Project Notes section still present");
   assert.match(printSrc, /customerFacingNoteLines/, "PDF-STRUCT-1: customerFacingNoteLines still rendered");
 
-  // nearest $5 copy preserved
-  assert.match(printSrc, /nearest \$5/, "PDF-STRUCT-1: nearest $5 copy preserved");
+  // No rounding language on customer-facing PDF; only legal disclaimer
+  assert.doesNotMatch(printSrc, /nearest \$5/, "PDF-STRUCT-1: no 'nearest $5' rounding language on customer PDF");
   assert.doesNotMatch(printSrc, /nearest \$10/, "PDF-STRUCT-1: no nearest $10 copy");
+  assert.match(printSrc, /Estimate only/, "PDF-STRUCT-1: legal disclaimer retained");
 }
 
 // PDF-DM-1: display model source — exposes new fields, uses helpers correctly
@@ -1424,6 +1429,151 @@ function approx(a: number, b: number, eps = 0.02) {
   const restored = hydrateRoomDraftsFromInternalUi(serialized);
   assert.strictEqual(restored[0].calcMode, "Guided Shape", "MANUAL-SF-6: guided room still Guided Shape after serialize/restore");
   assert.ok((restored[0].guidedShapeGroups?.length ?? 0) > 0, "MANUAL-SF-6: guided groups preserved");
+}
+
+// ── CEIL-ROUND-1: roundCustomerDisplay uses ceil-to-$5 for positive amounts ───
+{
+  // $342.00: nearest-$5 = $340, ceil-to-$5 = $345
+  assert.strictEqual(roundCustomerDisplay(342), 345, "CEIL-ROUND-1a: 342 → 345 (ceil)");
+  // $3531.15: nearest-$5 = $3530, ceil-to-$5 = $3535
+  assert.strictEqual(roundCustomerDisplay(3531.15), 3535, "CEIL-ROUND-1b: 3531.15 → 3535 (ceil)");
+  // Exact $5 multiples unchanged
+  assert.strictEqual(roundCustomerDisplay(200), 200, "CEIL-ROUND-1c: 200 → 200 (exact)");
+  assert.strictEqual(roundCustomerDisplay(1500), 1500, "CEIL-ROUND-1d: 1500 → 1500 (exact)");
+  // Zero
+  assert.strictEqual(roundCustomerDisplay(0), 0, "CEIL-ROUND-1e: 0 → 0");
+}
+
+// ── CEIL-ROUND-2: negative credits preserved exactly (not rounded) ────────────
+{
+  assert.strictEqual(roundCustomerDisplay(-25), -25, "CEIL-ROUND-2a: -25 → -25 (exact)");
+  assert.strictEqual(roundCustomerDisplay(-5000), -5000, "CEIL-ROUND-2b: -5000 → -5000 (exact)");
+  assert.strictEqual(roundCustomerDisplay(-123.45), -123.45, "CEIL-ROUND-2c: -123.45 preserved exactly");
+}
+
+// ── DISCOUNT-DISPLAY-1: customer-facing Discount/Credit appears in Estimate Summary ──
+{
+  // Build a display model with a customer-facing discount line
+  const emptyBreakdown = buildSelectedMaterialBreakdown([], "wholesale");
+  const discountLine = {
+    lineKey: "disc-display-1",
+    name: "Discount / Credit",
+    description: "No second bowl",
+    qty: 1,
+    unitPrice: -25,
+    lineTotal: -25,
+    roomName: ""
+  };
+  const displayModel = buildCustomerEstimateDisplayModel({
+    selectedBreakdown: emptyBreakdown,
+    measuredRooms: [],
+    visibleCustomerLines: [discountLine],
+    internalMaterialFoldDollars: 0,
+    roomAreaBreakdown: null
+  });
+  // Discount row appears in estimateSummaryRows
+  const discRow = displayModel.estimateSummaryRows.find((r: any) => r.key === "disc-display-1");
+  assert.ok(discRow != null, "DISCOUNT-DISPLAY-1a: discount row present in estimateSummaryRows");
+  assert.strictEqual(discRow.displayAmount, -25, "DISCOUNT-DISPLAY-1b: discount amount = -$25 exactly");
+  // finalRounded = 0 (no material) + (-25) = -25
+  assert.strictEqual(displayModel.finalRounded, -25, "DISCOUNT-DISPLAY-1c: finalRounded reduced by $25");
+  // Summary rows sum to finalRounded
+  const summarySum = displayModel.estimateSummaryRows.reduce((s: number, r: any) => s + r.displayAmount, 0);
+  assert.strictEqual(summarySum, displayModel.finalRounded, "DISCOUNT-DISPLAY-1d: summary rows sum to finalRounded");
+}
+
+// ── DISCOUNT-DISPLAY-2: placeholder description not printed as customer label ──
+{
+  const oldInstructionalText = "Enter the credit amount — always applied as a reduction.";
+  const discountLineWithPlaceholder = {
+    lineKey: "disc-old",
+    name: "Discount / Credit",
+    description: oldInstructionalText, // old saved-quote text, should be suppressed
+    qty: 1,
+    unitPrice: -100,
+    lineTotal: -100,
+    roomName: ""
+  };
+  const emptyBreakdown = buildSelectedMaterialBreakdown([], "wholesale");
+  const displayModel = buildCustomerEstimateDisplayModel({
+    selectedBreakdown: emptyBreakdown,
+    measuredRooms: [],
+    visibleCustomerLines: [discountLineWithPlaceholder],
+    internalMaterialFoldDollars: 0,
+    roomAreaBreakdown: null
+  });
+  const discRow = displayModel.estimateSummaryRows.find((r: any) => r.key === "disc-old");
+  assert.ok(discRow != null, "DISCOUNT-DISPLAY-2a: discount row present");
+  // Label must be "Discount / Credit" — NOT "Discount / Credit — Enter the credit amount..."
+  assert.strictEqual(discRow.label, "Discount / Credit", "DISCOUNT-DISPLAY-2b: placeholder description suppressed from label");
+}
+
+// ── DISCOUNT-DISPLAY-3: real customer note prints in label ─────────────────────
+{
+  const discountWithNote = {
+    lineKey: "disc-note",
+    name: "Discount / Credit",
+    description: "No second bowl in basement bath",
+    qty: 1,
+    unitPrice: -25,
+    lineTotal: -25,
+    roomName: ""
+  };
+  const emptyBreakdown = buildSelectedMaterialBreakdown([], "wholesale");
+  const displayModel = buildCustomerEstimateDisplayModel({
+    selectedBreakdown: emptyBreakdown,
+    measuredRooms: [],
+    visibleCustomerLines: [discountWithNote],
+    internalMaterialFoldDollars: 0,
+    roomAreaBreakdown: null
+  });
+  const discRow = displayModel.estimateSummaryRows.find((r: any) => r.key === "disc-note");
+  assert.ok(discRow != null, "DISCOUNT-DISPLAY-3a: discount row present");
+  assert.strictEqual(
+    discRow.label,
+    "Discount / Credit — No second bowl in basement bath",
+    "DISCOUNT-DISPLAY-3b: real customer note printed in label"
+  );
+}
+
+// ── DISCOUNT-DISPLAY-4: customLineAmountFromInput auto-negates positive Discount/Credit ──
+{
+  // Verify the room breakdown correctly treats positive unitPrice as a credit
+  const emptyBreakdown = buildSelectedMaterialBreakdown([], "wholesale");
+  const roomBreakdown = buildCustomerRoomAreaCostBreakdown({
+    roomDrafts: [],
+    measuredRooms: [],
+    materialBasis: "wholesale",
+    customLines: [
+      {
+        lineKey: "disc-pos",
+        name: "Discount / Credit",
+        quantity: 1,
+        unitPrice: 100, // positive entry — should be auto-negated to -$100
+        customerFacing: true,
+        roomName: "",
+        category: "Discount/Credit"
+      }
+    ]
+  });
+  // unassignedCustomerCustomExact should be -100 (auto-negated), not +100
+  assert.strictEqual(
+    roomBreakdown.unassignedCustomerCustomExact,
+    -100,
+    "DISCOUNT-DISPLAY-4: positive unitPrice in Discount/Credit auto-negated in room breakdown"
+  );
+}
+
+// ── PDF-NO-ROUNDING-LANGUAGE: customer-facing PDF must not mention rounding ───
+{
+  const printSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/CustomerEstimatePrint.tsx"), "utf8");
+  assert.ok(!printSrc.includes("nearest $5"), "PDF-ROUNDING-LANG-1: no 'nearest $5' text in PDF");
+  assert.ok(!printSrc.includes("rounded lines"), "PDF-ROUNDING-LANG-2: no 'rounded lines' text in PDF");
+  assert.ok(printSrc.includes("Estimate only"), "PDF-ROUNDING-LANG-3: legal disclaimer retained");
+
+  const roundingSrc = readFileSync(join(repoRoot, "app-quote/src/lib/customerDisplayRounding.ts"), "utf8");
+  assert.ok(roundingSrc.includes("Math.ceil(n / 5) * 5"), "PDF-ROUNDING-LANG-4: customerDisplayRounding uses Math.ceil");
+  assert.ok(!roundingSrc.includes("Math.round(n / 5) * 5"), "PDF-ROUNDING-LANG-5: no old Math.round nearest-$5");
 }
 
 console.log("verify-internal-estimate-beta-fixes: OK");

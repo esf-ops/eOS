@@ -113,7 +113,7 @@ const CUSTOM_LINE_PRESETS: Array<{
   { key: "mat", name: "Additional Material Cost", description: "Extra material allowance", category: "Other", unitPrice: "0", customerFacing: true },
   { key: "sink", name: "Custom Sink / Faucet / Fixture", description: "Fixture package", category: "Plumbing fixture", unitPrice: "0", customerFacing: true },
   { key: "labor", name: "Labor / Install Fee", description: "Install or labor line", category: "Labor", unitPrice: "0", customerFacing: true },
-  { key: "disc", name: "Discount / Credit", description: "Enter the credit amount — always applied as a reduction.", category: "Discount/Credit", unitPrice: "100", customerFacing: true },
+  { key: "disc", name: "Discount / Credit", description: "", category: "Discount/Credit", unitPrice: "100", customerFacing: true },
   { key: "other", name: "Other", description: "Miscellaneous", category: "Other", unitPrice: "0", customerFacing: true },
   { key: "internal_fee", name: "Internal-only fee", description: "Uncheck customer-facing so this stays internal in snapshots.", category: "Fee", unitPrice: "0", customerFacing: false }
 ];

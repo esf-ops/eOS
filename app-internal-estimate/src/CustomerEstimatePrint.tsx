@@ -40,9 +40,19 @@ export type CustomerEstimatePrintProps = {
   estimateDate: string;
 };
 
-/** Format a pre-rounded customer display dollar amount (no re-rounding). */
+/** Format a pre-rounded customer display dollar amount (no re-rounding). Positive only. */
 function formatDisplayDollars(displayAmount: number): string {
   return `$${Math.max(0, Math.round(displayAmount)).toLocaleString()}`;
+}
+
+/**
+ * Format a customer display dollar amount that may be negative (e.g. Discount / Credit).
+ * Negative amounts display as -$N; positive as $N; zero as $0.
+ */
+function formatDisplayAmount(displayAmount: number): string {
+  const n = Math.round(displayAmount);
+  if (n < 0) return `-$${Math.abs(n).toLocaleString()}`;
+  return `$${Math.max(0, n).toLocaleString()}`;
 }
 
 const BRANCH_LOCATIONS = [
@@ -126,7 +136,7 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
             {display.estimateSummaryRows.map((row) => (
               <tr key={row.key}>
                 <td>{row.label}</td>
-                <td className="cep-amt">{formatDisplayDollars(row.displayAmount)}</td>
+                <td className="cep-amt">{formatDisplayAmount(row.displayAmount)}</td>
               </tr>
             ))}
             <tr className="cep-summary-total-row">
@@ -134,23 +144,20 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
                 <strong>Estimated project total</strong>
               </td>
               <td className="cep-amt cep-summary-total-value">
-                <strong>{formatDisplayDollars(display.finalRounded)}</strong>
+                <strong>{formatDisplayAmount(display.finalRounded)}</strong>
               </td>
             </tr>
           </tbody>
         </table>
-        <p className="cep-muted cep-round-note">
-          Customer-facing amounts round to the nearest $5; <strong>Estimated project total</strong> is the sum of the
-          rounded lines. Estimate only — not a contract.
-        </p>
+        <p className="cep-muted cep-round-note">Estimate only — not a contract.</p>
       </section>
 
       {display.showRoomBreakdown ? (
         <section className="cep-section cep-room-breakdown cep-section-compact">
           <h2 className="cep-h2">Room / area cost breakdown</h2>
           <p className="cep-muted cep-room-breakdown-lead">
-            Estimated cost by room or area so you can compare scope — for example, kitchen now and bath later. Amounts
-            round to the nearest $5 and reconcile with <strong>Estimated project total</strong> above.
+            Estimated cost by room or area so you can compare scope — for example, kitchen now and bath later. Area
+            totals reconcile with <strong>Estimated project total</strong> above.
           </p>
           <table className="cep-table cep-table-compact cep-table-amounts cep-room-breakdown-table">
             <thead>
@@ -200,7 +207,7 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
                       <td colSpan={3} className="cep-room-custom-line">
                         {c.name}
                       </td>
-                      <td className="cep-num cep-amt">{formatDisplayDollars(roundCustomerDisplay(c.amountExact))}</td>
+                      <td className="cep-num cep-amt">{formatDisplayAmount(roundCustomerDisplay(c.amountExact))}</td>
                     </tr>
                   ))}
                   {displayRow.customerNoteLines.length > 0 ? (
@@ -213,11 +220,15 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
                 </React.Fragment>
               ))}
             </tbody>
-            {display.unassignedExact > 0 ? (
+            {display.unassignedExact !== 0 ? (
               <tfoot>
                 <tr>
-                  <td colSpan={3}>Other project items (see Estimate summary)</td>
-                  <td className="cep-num cep-amt">{formatDisplayDollars(display.unassignedDisplayTotal)}</td>
+                  <td colSpan={3}>
+                    {display.unassignedExact < 0
+                      ? "Project discount / credit"
+                      : "Other project items (see Estimate summary)"}
+                  </td>
+                  <td className="cep-num cep-amt">{formatDisplayAmount(display.unassignedDisplayTotal)}</td>
                 </tr>
               </tfoot>
             ) : null}

@@ -23,8 +23,9 @@ const FORBIDDEN_IN_VERIFY = [
 
 function roundCustomerDisplay(amount) {
   const n = Number(amount);
-  if (!Number.isFinite(n) || n <= 0) return 0;
-  return Math.round(n / 5) * 5;
+  if (!Number.isFinite(n) || n === 0) return 0;
+  if (n < 0) return n; // Credits: preserve exact reduction, never penalize customer
+  return Math.ceil(n / 5) * 5;
 }
 
 function roundCustomerDisplayVanity(amount) {
@@ -182,7 +183,8 @@ function prepareRoomPrintRows(roomRows, roomAreaDisplayTotals, roomExtrasExact, 
     }
     rows.push({ displayedMaterial, displayedAddOns, displayedAreaTotal, isVanity: row.isVanity, addonLines });
   });
-  const unassigned = Math.max(0, Math.round(unassignedDisplayTotal ?? 0));
+  // Allow negative unassigned (global Discount / Credit) to appear as project discount row.
+  const unassigned = Math.round(unassignedDisplayTotal ?? 0);
   return { rows, unassigned, areaTotalSum: rows.reduce((s, r) => s + r.displayedAreaTotal, 0) + unassigned };
 }
 
@@ -214,10 +216,12 @@ function buildSyntheticDisplayModel(fixture) {
     estimateSummaryRows.push({ key: "edge_upgrades", label: "Edge upgrades", displayAmount: summaryEdgeDisplay });
   }
   for (const ln of fixture.customLines || []) {
+    const displayAmount = roundCustomerDisplay(ln.lineTotal);
+    if (displayAmount === 0) continue; // skip zero; allow negative discount rows
     estimateSummaryRows.push({
       key: ln.lineKey || `custom-${ln.name}`,
       label: ln.name,
-      displayAmount: roundCustomerDisplay(ln.lineTotal)
+      displayAmount
     });
   }
 
@@ -225,7 +229,8 @@ function buildSyntheticDisplayModel(fixture) {
   const roomRows = fixture.roomRows || [];
   const unassignedExact = round2(fixture.unassignedExact || 0);
 
-  const unassignedDisplay = unassignedExact > 0 ? roundCustomerDisplay(unassignedExact) : 0;
+  // Allow negative unassigned (global Discount / Credit) — negative shows as project discount footer row.
+  const unassignedDisplay = unassignedExact !== 0 ? roundCustomerDisplay(unassignedExact) : 0;
   const targetRoomDisplay = Math.max(0, finalRounded - unassignedDisplay);
 
   // Mirrors buildRoomAreaPrintRows: vanity rooms with fixedDisplayTotal are pinned;
@@ -436,15 +441,18 @@ assertNoCustomerSpecificHardcoding();
 
 // 5. Vanity / program-only
 {
+  // In production, vanityDisplayContribution is pre-rounded to nearest $5 via roundCustomerDisplayVanity,
+  // so countertopExact is already a $5 multiple when it reaches buildSyntheticDisplayModel.
+  // Using 885 (a $5 multiple) here reflects that real-world invariant.
   const m = buildSyntheticDisplayModel({
-    countertopExact: 887,
+    countertopExact: 885,
     backsplashExact: 0,
     addonsExact: 0,
     roomRows: [
       {
         isVanity: true,
-        roomTotalExact: 887,
-        materialExact: 887,
+        roomTotalExact: 885,
+        materialExact: 885,
         extrasExact: 0,
         addons: []
       }
@@ -452,9 +460,9 @@ assertNoCustomerSpecificHardcoding();
     materialScopeGroups: [{ group: "Group 1", displayDollars: null }]
   });
   assertDisplayModelInvariants("vanity-only", m);
-  // 887 → Math.round(887/5)*5 = 885 with nearest-$5 rounding
+  // 885 is already a $5 multiple — both nearest-$5 and ceil-to-$5 give 885
   assertEqual("vanity-only final", m.finalRounded, 885);
-  // Vanity room pins to fixedDisplayTotal = roundCustomerDisplayVanity(887) = 885
+  // Vanity room pins to fixedDisplayTotal = roundCustomerDisplayVanity(885) = 885
   assertEqual("vanity-only room area", m.roomAreaPrintRows[0]?.displayedAreaTotal, 885);
 }
 
@@ -799,22 +807,37 @@ assertEqual(
     join(__dirname, "../../../app-internal-estimate/src/CustomerEstimatePrint.tsx"),
     "utf8"
   );
+  // Customer PDF must NOT mention rounding to the customer
   assert(
-    printSrc.includes("nearest $5"),
-    "CustomerEstimatePrint must say 'nearest $5' (not nearest $10)"
+    !printSrc.includes("nearest $5"),
+    "CustomerEstimatePrint must not mention 'nearest $5' to customers"
   );
   assert(
     !printSrc.includes("nearest $10"),
     "CustomerEstimatePrint must not have old 'nearest $10' copy"
+  );
+  assert(
+    !printSrc.includes("rounded lines"),
+    "CustomerEstimatePrint must not say 'rounded lines'"
+  );
+  // Must retain legal disclaimer
+  assert(
+    printSrc.includes("Estimate only"),
+    "CustomerEstimatePrint must retain 'Estimate only' legal disclaimer"
   );
 
   const roundingSrc = readFileSync(
     join(__dirname, "../../../app-quote/src/lib/customerDisplayRounding.ts"),
     "utf8"
   );
+  // Now uses ceil-to-$5 for positive, preserves negative credits exactly
   assert(
-    roundingSrc.includes("Math.round(n / 5) * 5"),
-    "customerDisplayRounding must use Math.round(n/5)*5 for nearest-$5"
+    roundingSrc.includes("Math.ceil(n / 5) * 5"),
+    "customerDisplayRounding must use Math.ceil(n/5)*5 for ceiling-to-$5"
+  );
+  assert(
+    !roundingSrc.includes("Math.round(n / 5) * 5"),
+    "customerDisplayRounding must not use old nearest-$5 Math.round"
   );
   assert(
     !roundingSrc.includes("Math.ceil(n / 10) * 10"),
@@ -980,6 +1003,216 @@ assertEqual(
     m.estimateSummaryRows.filter((r) => r.key === "faucet-b").length,
     1
   );
+}
+
+// 16. CEIL-ROUNDING: positive amounts round UP to next $5, not nearest $5
+{
+  // $342.00 → nearest-$5 = $340, ceil-to-$5 = $345
+  assertEqual("CEIL-ROUNDING-1: 342 → 345", roundCustomerDisplay(342), 345);
+  // $3531.15 → nearest-$5 = $3530, ceil-to-$5 = $3535
+  assertEqual("CEIL-ROUNDING-2: 3531.15 → 3535", roundCustomerDisplay(3531.15), 3535);
+  // Exact $5 multiples unchanged
+  assertEqual("CEIL-ROUNDING-3: 200 → 200", roundCustomerDisplay(200), 200);
+  assertEqual("CEIL-ROUNDING-4: 1500 → 1500", roundCustomerDisplay(1500), 1500);
+  // Borderline: $3532.49 → ceil → $3535 (not $3530 as nearest-$5 would give)
+  assertEqual("CEIL-ROUNDING-5: 3532.49 → 3535", roundCustomerDisplay(3532.49), 3535);
+  // Zero stays zero
+  assertEqual("CEIL-ROUNDING-6: 0 → 0", roundCustomerDisplay(0), 0);
+  // Negative credits preserved exactly (no ceiling/rounding down of benefit)
+  assertEqual("CEIL-ROUNDING-7: -25 → -25 (exact)", roundCustomerDisplay(-25), -25);
+  assertEqual("CEIL-ROUNDING-8: -5000 → -5000 (exact)", roundCustomerDisplay(-5000), -5000);
+  assertEqual("CEIL-ROUNDING-9: -123.45 → -123.45 (exact)", roundCustomerDisplay(-123.45), -123.45);
+}
+
+// 17. DISCOUNT-PDF: customer-facing Discount/Credit appears in Estimate Summary and reduces finalRounded
+{
+  const COUNTER = 3531.15; // rounds UP: $3,535
+  const SPLASH = 342;      // rounds UP: $345
+  const CUTOUT = 200;
+  const SINK = 1500;
+  const DISCOUNT = -5000;  // preserved exactly: -$5,000
+
+  // Customer-facing discount appears as a custom line with negative lineTotal.
+  // In the room breakdown, the global discount is unassigned (not attributed to any room);
+  // room's roomTotalExact includes only its own positive scope, not the global credit.
+  const m = buildSyntheticDisplayModel({
+    countertopExact: COUNTER,
+    backsplashExact: SPLASH,
+    addonsExact: CUTOUT,
+    customLines: [
+      { lineKey: "blanco-sink", name: "BLANCO White Double Bowl", lineTotal: SINK },
+      { lineKey: "disc-001", name: "Discount / Credit", lineTotal: DISCOUNT }
+    ],
+    measuredRooms: [
+      {
+        name: "KITCHEN",
+        extras: CUTOUT,
+        addons: [{ label: "Kitchen Sink Cutouts", total: CUTOUT }],
+        details: []
+      }
+    ],
+    roomRows: [
+      {
+        isVanity: false,
+        // Room total is the room's own scope (material + cutout + sink), global discount excluded
+        roomTotalExact: COUNTER + SPLASH + CUTOUT + SINK,
+        materialExact: COUNTER + SPLASH,
+        extrasExact: CUTOUT,
+        addons: [{ amountExact: CUTOUT }]
+      }
+    ],
+    unassignedExact: DISCOUNT  // global discount shows as footer row in room breakdown
+  });
+
+  // Sink and discount both appear in Estimate Summary
+  const sinkRow = m.estimateSummaryRows.find((r) => r.key === "blanco-sink");
+  const discRow = m.estimateSummaryRows.find((r) => r.key === "disc-001");
+  assert(sinkRow != null, "DISCOUNT-PDF-1: BLANCO sink row present in Estimate Summary");
+  assert(discRow != null, "DISCOUNT-PDF-2: Discount/Credit row present in Estimate Summary");
+
+  // Sink displays positive (ceil to $5)
+  assertEqual("DISCOUNT-PDF-3: sink displays $1,500", sinkRow.displayAmount, 1500);
+  // Discount preserved exactly negative
+  assertEqual("DISCOUNT-PDF-4: discount displays -$5,000 exactly", discRow.displayAmount, -5000);
+  // Discount appears exactly once
+  assertEqual(
+    "DISCOUNT-PDF-5: discount row appears once",
+    m.estimateSummaryRows.filter((r) => r.key === "disc-001").length,
+    1
+  );
+
+  // Printed positive lines: ceil(3531.15)=3535, ceil(342)=345, 200, 1500 → sum = $5,580
+  const positiveSum =
+    roundCustomerDisplay(COUNTER) + roundCustomerDisplay(SPLASH) + roundCustomerDisplay(CUTOUT) + roundCustomerDisplay(SINK);
+  assertEqual("DISCOUNT-PDF-6: positive lines sum to $5,580", positiveSum, 5580);
+
+  // finalRounded = $5,580 - $5,000 = $580
+  assertEqual("DISCOUNT-PDF-7: finalRounded = $580 after $5,000 credit", m.finalRounded, 580);
+
+  // Summary rows sum to finalRounded
+  const summarySum = m.estimateSummaryRows.reduce((s, r) => s + r.displayAmount, 0);
+  assertEqual("DISCOUNT-PDF-8: summary rows sum to finalRounded", summarySum, m.finalRounded);
+
+  // Invariant: summary rows reconcile
+  assertDisplayModelInvariants("DISCOUNT-PDF", m);
+}
+
+// 18. DISCOUNT-PDF-SMALL: $25 customer-facing credit reduces printed total by $25
+{
+  const COUNTER = 5000;
+  const SPLASH = 500;
+  const DISCOUNT = -25;
+
+  const m = buildSyntheticDisplayModel({
+    countertopExact: COUNTER,
+    backsplashExact: SPLASH,
+    addonsExact: 0,
+    customLines: [
+      { lineKey: "disc-small", name: "Discount / Credit", lineTotal: DISCOUNT }
+    ],
+    roomRows: [
+      {
+        isVanity: false,
+        roomTotalExact: COUNTER + SPLASH + DISCOUNT,
+        materialExact: COUNTER + SPLASH,
+        extrasExact: 0,
+        addons: []
+      }
+    ],
+    unassignedExact: DISCOUNT
+  });
+
+  // Positive lines: $5,000 + $500 = $5,500
+  assertEqual("DISCOUNT-PDF-SMALL-1: counter", roundCustomerDisplay(COUNTER), 5000);
+  assertEqual("DISCOUNT-PDF-SMALL-2: splash", roundCustomerDisplay(SPLASH), 500);
+  // Discount row present and exact
+  const discRow = m.estimateSummaryRows.find((r) => r.key === "disc-small");
+  assert(discRow != null, "DISCOUNT-PDF-SMALL-3: discount row present");
+  assertEqual("DISCOUNT-PDF-SMALL-4: discount = -$25 exactly", discRow.displayAmount, -25);
+  // finalRounded = $5,500 - $25 = $5,475
+  assertEqual("DISCOUNT-PDF-SMALL-5: finalRounded = $5,475", m.finalRounded, 5475);
+  const summarySum = m.estimateSummaryRows.reduce((s, r) => s + r.displayAmount, 0);
+  assertEqual("DISCOUNT-PDF-SMALL-6: summary rows sum to finalRounded", summarySum, m.finalRounded);
+  assertDisplayModelInvariants("DISCOUNT-PDF-SMALL", m);
+}
+
+// 19. DISCOUNT-PDF-NOTE: Discount/Credit description note prints on PDF label; placeholder text does not
+{
+  const printModelSrc = readFileSync(
+    join(__dirname, "../../../app-internal-estimate/src/lib/customerEstimateDisplayModel.ts"),
+    "utf8"
+  );
+  // Placeholder description filter must exist in the display model
+  assert(
+    printModelSrc.includes("PLACEHOLDER_DESCRIPTIONS"),
+    "customerEstimateDisplayModel must filter PLACEHOLDER_DESCRIPTIONS from customer-facing labels"
+  );
+  assert(
+    printModelSrc.includes("Enter the credit amount — always applied as a reduction."),
+    "customerEstimateDisplayModel must list the old instructional placeholder text to filter"
+  );
+  // displayAmount === 0 skip (not <= 0)
+  assert(
+    printModelSrc.includes("displayAmount === 0"),
+    "customerEstimateDisplayModel must use === 0 to allow negative discount rows"
+  );
+
+  // Preset description must be empty (no instructional text saved to saved quotes)
+  const appSrc = readFileSync(
+    join(__dirname, "../../../app-internal-estimate/src/InternalEstimateApp.tsx"),
+    "utf8"
+  );
+  assert(
+    !appSrc.includes("\"Enter the credit amount — always applied as a reduction.\""),
+    "InternalEstimateApp Discount/Credit preset must not have instructional text as default description"
+  );
+}
+
+// 20. DISCOUNT-ROOM-RECONCILE: global discount appears in room breakdown footer; room totals reconcile
+{
+  const COUNTER = 5000;
+  const SPLASH = 500;
+  const DISCOUNT_UNASSIGNED = -500; // global discount, not assigned to a room
+
+  const m = buildSyntheticDisplayModel({
+    countertopExact: COUNTER,
+    backsplashExact: SPLASH,
+    addonsExact: 0,
+    customLines: [
+      { lineKey: "disc-global", name: "Discount / Credit", lineTotal: DISCOUNT_UNASSIGNED }
+    ],
+    roomRows: [
+      {
+        isVanity: false,
+        roomTotalExact: COUNTER + SPLASH,
+        materialExact: COUNTER + SPLASH,
+        extrasExact: 0,
+        addons: []
+      }
+    ],
+    unassignedExact: DISCOUNT_UNASSIGNED
+  });
+
+  // finalRounded: ceil(5000) + ceil(500) + (-500) = 5000 + 500 - 500 = 5000
+  assertEqual("DISCOUNT-ROOM-RECONCILE-1: finalRounded = $5,000", m.finalRounded, 5000);
+
+  // unassignedDisplayTotal = roundCustomerDisplay(-500) = -500 (exact)
+  // targetRoomDisplay = max(0, 5000 - (-500)) = 5500
+  // So room is allocated $5,500 (natural positive total before discount)
+  assertEqual(
+    "DISCOUNT-ROOM-RECONCILE-2: room allocated full positive portion",
+    m.roomAreaPrintRows[0].displayedAreaTotal,
+    5500
+  );
+
+  // Room totals (5500) + unassigned (-500) = 5000 = finalRounded ✓
+  const roomSum = m.roomAreaPrintRows.reduce((s, r) => s + r.displayedAreaTotal, 0);
+  assertEqual(
+    "DISCOUNT-ROOM-RECONCILE-3: roomSum + unassigned = finalRounded",
+    roomSum + m.unassignedDisplayTotal,
+    m.finalRounded
+  );
+  assertDisplayModelInvariants("DISCOUNT-ROOM-RECONCILE", m);
 }
 
 console.log("verifyCustomerEstimatePrintReconciliation: ok");
