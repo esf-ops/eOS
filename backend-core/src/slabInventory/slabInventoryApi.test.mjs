@@ -37,6 +37,13 @@ import {
   summarizeActiveRows
 } from "./slabInventoryApi.js";
 import {
+  countActiveInventoryRows,
+  fetchActiveInventoryRowsPaginated,
+  resolveSummarySyncCoverage,
+  simulateTruncatedActiveFetch,
+  SUMMARY_FETCH_PAGE_SIZE,
+} from "./slabInventorySummaryQueries.js";
+import {
   applyInventorySourceFilter,
   filterRowsByInventorySource,
   INVENTORY_SOURCE_ALL,
@@ -323,6 +330,157 @@ import {
   }
 
   console.log("ok: sync-coverage fields (active_cached vs latest_sync)");
+}
+
+/* ── summary >1000 row cap regression (Supabase default page size) ───────── */
+{
+  const slabcloudRows = Array.from({ length: 1753 }, (_, i) => ({
+    id: `sc-${i}`,
+    color_name: `Color-${i % 50}`,
+    material_name: "ESF Quartz",
+    price_group: i % 2 === 0 ? "B" : "A",
+    last_seen_sync_run_id: "sync-cloud",
+  }));
+  const slabsmithRows = Array.from({ length: 1621 }, (_, i) => ({
+    id: `ss-${i}`,
+    color_name: `Smith-${i % 40}`,
+    material_name: "Demo Stone",
+    price_group: "Remnant",
+    last_seen_sync_run_id: "sync-smith",
+  }));
+  const allRows = [...slabcloudRows, ...slabsmithRows];
+  assert.equal(allRows.length, 3374);
+
+  const truncated = simulateTruncatedActiveFetch(allRows);
+  assert.equal(truncated.length, SUMMARY_FETCH_PAGE_SIZE, "truncated fetch caps at 1000");
+  const wrongSummary = summarizeActiveRows(truncated);
+  assert.equal(wrongSummary.total_active_slabs, 1000, "truncated in-memory summary under-counts");
+
+  /** @type {Record<string, number>} */
+  const exactCounts = {
+    all: 3374,
+    slabcloud: 1753,
+    slabsmith: 1621,
+  };
+
+  function makeMockSummaryDb(rowsByScope) {
+    return {
+      from(table) {
+        /** @type {Record<string, unknown>} */
+        const filters = {};
+        const isCount = { value: false };
+        const range = { from: 0, to: SUMMARY_FETCH_PAGE_SIZE - 1 };
+        const chain = {
+          select(_cols, opts) {
+            if (opts?.head) isCount.value = true;
+            return chain;
+          },
+          eq(col, val) {
+            filters[col] = val;
+            return chain;
+          },
+          neq(col, val) {
+            filters[`neq:${col}`] = val;
+            return chain;
+          },
+          order() {
+            return chain;
+          },
+          range(from, to) {
+            range.from = from;
+            range.to = to;
+            return chain;
+          },
+          limit(n) {
+            filters.limit = n;
+            return chain;
+          },
+          async then(resolve) {
+            if (table === "slabcloud_sync_runs") {
+              const source = filters.external_source ?? "all";
+              const syncId =
+                source === INVENTORY_SOURCE_SLABSMITH
+                  ? "sync-smith"
+                  : source === INVENTORY_SOURCE_SLABCLOUD
+                    ? "sync-cloud"
+                    : "sync-global";
+              resolve({
+                data: [{ id: syncId, status: "completed", slab_upserted_count: rowsByScope[source]?.length ?? 0, external_source: source === "all" ? "slabcloud" : source }],
+                error: null,
+              });
+              return;
+            }
+
+            const source = filters.external_source ?? "all";
+            const pool = rowsByScope[source] ?? [];
+            let matched = pool.filter((r) => r.is_active !== false);
+            if (filters["neq:last_seen_sync_run_id"]) {
+              matched = matched.filter(
+                (r) => r.last_seen_sync_run_id !== filters["neq:last_seen_sync_run_id"]
+              );
+            }
+
+            if (isCount.value) {
+              resolve({ count: matched.length, error: null });
+              return;
+            }
+
+            const page = matched.slice(range.from, range.to + 1);
+            resolve({ data: page, error: null });
+          },
+        };
+        return chain;
+      },
+    };
+  }
+
+  const rowsByScope = {
+    all: allRows,
+    [INVENTORY_SOURCE_SLABCLOUD]: slabcloudRows,
+    [INVENTORY_SOURCE_SLABSMITH]: slabsmithRows,
+  };
+
+  const mockDb = makeMockSummaryDb(rowsByScope);
+  const scopeAll = (q) => q;
+  const scopeCloud = (q) => q.eq("external_source", INVENTORY_SOURCE_SLABCLOUD);
+  const scopeSmith = (q) => q.eq("external_source", INVENTORY_SOURCE_SLABSMITH);
+
+  assert.equal(await countActiveInventoryRows(mockDb, scopeCloud), 1753);
+  assert.equal(await countActiveInventoryRows(mockDb, scopeSmith), 1621);
+  assert.equal(await countActiveInventoryRows(mockDb, scopeAll), 3374);
+
+  const fetchedAll = await fetchActiveInventoryRowsPaginated(mockDb, scopeAll);
+  assert.equal(fetchedAll.length, 3374, "paginated fetch returns all active rows");
+  const fullSummary = summarizeActiveRows(fetchedAll);
+  assert.equal(fullSummary.total_active_slabs, 3374);
+  assert.equal(fullSummary.distinct_colors, 90, "distinct colors across paginated fetch");
+
+  const scopeInventory = (q, _orgId, sourceFilter) => {
+    if (sourceFilter.mode === "single" && sourceFilter.externalSource) {
+      return q.eq("external_source", sourceFilter.externalSource);
+    }
+    return q;
+  };
+
+  const cloudCoverage = await resolveSummarySyncCoverage(
+    mockDb,
+    "org",
+    { mode: "single", externalSource: INVENTORY_SOURCE_SLABCLOUD },
+    scopeInventory
+  );
+  assert.equal(cloudCoverage.coverage_mode, "single_source");
+  assert.equal(cloudCoverage.activeNotSeenCount, 0, "all slabcloud rows seen in latest cloud sync");
+
+  const allCoverage = await resolveSummarySyncCoverage(
+    mockDb,
+    "org",
+    { mode: "all", externalSource: null, resolved: INVENTORY_SOURCE_ALL },
+    scopeInventory
+  );
+  assert.equal(allCoverage.coverage_mode, "all_sources_summed");
+  assert.equal(allCoverage.activeNotSeenCount, 0);
+
+  console.log("ok: summary >1000 row pagination and exact counts");
 }
 
 /* ── COLOR_PROGRAM_PRICE_GROUP_ORDER ────────────────────────────────────── */

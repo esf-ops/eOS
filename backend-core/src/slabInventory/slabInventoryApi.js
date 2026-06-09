@@ -28,6 +28,12 @@ import {
   resolveInventorySourceFilter,
 } from "./slabInventorySourceFilter.js";
 import {
+  countActiveInventoryRows,
+  countActiveNotSeenInSync,
+  fetchActiveInventoryRowsPaginated,
+  resolveSummarySyncCoverage,
+} from "./slabInventorySummaryQueries.js";
+import {
   matchSourceColorWithAliases,
   normalizeColorName as _normColorName,
   normalizeMaterialName as _normMatName,
@@ -37,6 +43,15 @@ export {
   applyInventorySourceFilter,
   resolveInventorySourceFilter,
 } from "./slabInventorySourceFilter.js";
+export {
+  countActiveInventoryRows,
+  countActiveNotSeenInSync,
+  fetchActiveInventoryRowsPaginated,
+  fetchLatestSyncRun,
+  resolveSummarySyncCoverage,
+  simulateTruncatedActiveFetch,
+  SUMMARY_FETCH_PAGE_SIZE,
+} from "./slabInventorySummaryQueries.js";
 
 export const SLAB_INVENTORY_HEAD_SLUG = "slab_inventory";
 
@@ -787,72 +802,50 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
       const supabase = db();
       const organizationId = await orgId(req);
       const sourceFilter = resolveSourceFilter(req);
+      const scope = (q) => scopeInventory(q, organizationId, sourceFilter);
 
-      // Fetch all active rows for aggregates (color/material/price-group distribution).
-      // NEVER selects or sums count_for_color.
-      let activeQ = supabase
-        .from("slab_inventory")
-        .select("color_name,material_name,price_group,last_seen_sync_run_id")
-        .eq("is_active", true);
-      activeQ = scopeInventory(activeQ, organizationId, sourceFilter);
-      const { data: activeRows, error: activeErr } = await activeQ;
-      if (activeErr) {
+      let activeCachedSlabCount;
+      let activeRowList;
+      try {
+        activeCachedSlabCount = await countActiveInventoryRows(supabase, scope);
+        activeRowList = await fetchActiveInventoryRowsPaginated(supabase, scope);
+      } catch (activeErr) {
         if (isMissingRelationError(activeErr)) {
           return res.status(503).json({ ok: false, installed: false, message: "Slab inventory cache not installed." });
         }
         throw activeErr;
       }
 
-      const activeRowList = activeRows ?? [];
-      const activeCachedSlabCount = activeRowList.length;
-
-      // Latest completed (non-dry-run) sync run.
-      let syncQ = supabase
-        .from("slabcloud_sync_runs")
-        .select("id,status,started_at,finished_at,warning_count,slab_upserted_count,image_row_written_count,triggered_by")
-        .neq("status", "dry_run")
-        .order("started_at", { ascending: false })
-        .limit(1);
-      syncQ = scopeInventory(syncQ, organizationId, sourceFilter);
-      const { data: syncRows } = await syncQ;
-      const lastSync = (syncRows && syncRows[0]) || null;
+      const { lastSync, activeNotSeenCount, coverage_mode: coverageMode } =
+        await resolveSummarySyncCoverage(supabase, organizationId, sourceFilter, scopeInventory);
 
       const latestSyncId = lastSync?.id ?? null;
-      // Prefer slab_upserted_count; fall back to null when absent.
       const latestSyncSlabCount =
         lastSync?.slab_upserted_count != null ? Number(lastSync.slab_upserted_count) : null;
 
-      // Active slabs not seen in the latest sync run (v1 does not auto-deactivate these).
-      let activeNotSeenCount = 0;
       /** @type {Array<{id:string,color_name:string|null,material_name:string|null,inventory_id:string|null,rack:string|null,lot:string|null,source_price_group:string|null}>} */
       let activeNotSeenSample = [];
 
-      if (latestSyncId) {
-        activeNotSeenCount = activeRowList.filter(
-          (r) => r.last_seen_sync_run_id !== latestSyncId
-        ).length;
-
-        if (activeNotSeenCount > 0) {
-          // Fetch up to 5 staff-safe sample rows (no raw JSON, no count_for_color).
-          let sampleQ = supabase
-            .from("slab_inventory")
-            .select("id,color_name,material_name,inventory_id,rack,lot,price_group")
-            .eq("is_active", true)
-            .neq("last_seen_sync_run_id", latestSyncId)
-            .order("color_name", { ascending: true, nullsFirst: false })
-            .limit(5);
-          sampleQ = scopeInventory(sampleQ, organizationId, sourceFilter);
-          const { data: sampleRows } = await sampleQ;
-          activeNotSeenSample = (sampleRows ?? []).map((r) => ({
-            id: r.id ?? null,
-            color_name: r.color_name ?? null,
-            material_name: r.material_name ?? null,
-            inventory_id: r.inventory_id ?? null,
-            rack: r.rack ?? null,
-            lot: r.lot ?? null,
-            source_price_group: r.price_group ?? null
-          }));
-        }
+      if (latestSyncId && activeNotSeenCount > 0) {
+        // Sample query is capped at 5 — no pagination issue.
+        let sampleQ = supabase
+          .from("slab_inventory")
+          .select("id,color_name,material_name,inventory_id,rack,lot,price_group")
+          .eq("is_active", true)
+          .neq("last_seen_sync_run_id", latestSyncId)
+          .order("color_name", { ascending: true, nullsFirst: false })
+          .limit(5);
+        sampleQ = scopeInventory(sampleQ, organizationId, sourceFilter);
+        const { data: sampleRows } = await sampleQ;
+        activeNotSeenSample = (sampleRows ?? []).map((r) => ({
+          id: r.id ?? null,
+          color_name: r.color_name ?? null,
+          material_name: r.material_name ?? null,
+          inventory_id: r.inventory_id ?? null,
+          rack: r.rack ?? null,
+          lot: r.lot ?? null,
+          source_price_group: r.price_group ?? null,
+        }));
       }
 
       const summary = summarizeActiveRows(activeRowList);
@@ -866,14 +859,17 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
         ok: true,
         installed: true,
         organization_id: organizationId,
+        active_inventory_source: sourceFilter.resolved,
         summary: {
           ...summary,
-          // Clear naming distinguishing cached total from latest-sync count.
+          // Authoritative totals from exact count queries (not truncated row fetch).
+          total_active_slabs: activeCachedSlabCount,
           active_cached_slab_count: activeCachedSlabCount,
           latest_sync_slab_count: latestSyncSlabCount,
           latest_sync_id: latestSyncId,
           active_not_seen_in_latest_sync_count: activeNotSeenCount,
           active_not_seen_in_latest_sync_sample: activeNotSeenSample,
+          active_not_seen_coverage_mode: coverageMode,
           slabs_with_verified_images: Number(verifiedImages || 0),
           last_sync: lastSync
             ? {
@@ -884,10 +880,11 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
                 warning_count: Number(lastSync.warning_count || 0),
                 slab_upserted_count: lastSync.slab_upserted_count ?? null,
                 image_row_written_count: lastSync.image_row_written_count ?? null,
-                triggered_by: lastSync.triggered_by ?? null
+                triggered_by: lastSync.triggered_by ?? null,
+                external_source: lastSync.external_source ?? null,
               }
-            : null
-        }
+            : null,
+        },
       });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
