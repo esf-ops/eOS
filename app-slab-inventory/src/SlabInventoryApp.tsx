@@ -33,8 +33,6 @@ type Slab = {
   image_source_label?: string | null;
 };
 
-type InventorySourceFilter = "" | "slabcloud" | "slabsmith" | "all";
-
 type LastSync = {
   id: string;
   status: string;
@@ -186,17 +184,7 @@ type MainTab = "elite100" | "non_stock" | "all_inventory";
 
 const DEFAULT_WORKSPACE_NAME = "Elite Stone Fabrication";
 const PAGE_SIZE = 60;
-
-const INVENTORY_SOURCE_OPTIONS: { value: InventorySourceFilter; label: string }[] = [
-  { value: "", label: "Default (env)" },
-  { value: "slabcloud", label: "SlabCloud" },
-  { value: "slabsmith", label: "Slabsmith" },
-  { value: "all", label: "All sources" },
-];
-
-function inventorySourceQuery(source: InventorySourceFilter): string {
-  return source ? `?source=${encodeURIComponent(source)}` : "";
-}
+const SOURCE_PRICE_GROUP_HINT = "Imported price group from the active inventory feed — not slabOS pricing authority.";
 
 /* ─────────────────────────────────────────── utils */
 
@@ -252,6 +240,14 @@ function fmtDate(v: string | null): string {
   const d = new Date(v);
   if (Number.isNaN(d.getTime())) return String(v);
   return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+
+/** Staff-safe label for inventory_source in technical details (no vendor names). */
+function formatInventorySourceLabel(source: string | null | undefined): string | null {
+  const s = String(source ?? "").trim().toLowerCase();
+  if (s === "slabsmith") return "Local inventory";
+  if (s === "slabcloud") return "Legacy sync";
+  return s || null;
 }
 
 /* ─────────────────────────────────────────── icons */
@@ -336,8 +332,6 @@ export default function SlabInventoryApp() {
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [healthOpen, setHealthOpen] = useState(false);
-  const [inventorySource, setInventorySource] = useState<InventorySourceFilter>("");
-  const [activeInventorySource, setActiveInventorySource] = useState<string | null>(null);
 
   const homeBase = useMemo(() => homeLauncherUrl(), []);
   const workspaceLogoUrl = EOS_LOGO_URL || undefined;
@@ -415,23 +409,21 @@ export default function SlabInventoryApp() {
 
   const loadMeta = useCallback(async () => {
     if (!sessionToken) return;
-    const sourceQ = inventorySourceQuery(inventorySource);
     try {
       const [s, f] = await Promise.all([
-        apiGetJson(`/api/slab-inventory/summary${sourceQ}`, sessionToken) as Promise<{ summary?: Summary; installed?: boolean; active_inventory_source?: string }>,
-        apiGetJson(`/api/slab-inventory/filters${sourceQ}`, sessionToken) as Promise<{ filters?: Filters; installed?: boolean }>
+        apiGetJson("/api/slab-inventory/summary", sessionToken) as Promise<{ summary?: Summary; installed?: boolean }>,
+        apiGetJson("/api/slab-inventory/filters", sessionToken) as Promise<{ filters?: Filters; installed?: boolean }>
       ]);
       if (s.installed === false || f.installed === false) { setNotInstalled(true); return; }
       setNotInstalled(false);
       if (s.summary) setSummary(s.summary);
       if (f.filters) setFilters(f.filters);
-      setActiveInventorySource(s.active_inventory_source ?? null);
     } catch (e: unknown) {
       if (e instanceof ApiError && e.status === 403) setErr("Forbidden — you need eliteOS Slab Inventory head access.");
       else if (e instanceof ApiError && e.status === 503) setNotInstalled(true);
       else setErr(e instanceof ApiError ? e.message : String(e));
     }
-  }, [sessionToken, inventorySource]);
+  }, [sessionToken]);
 
   const loadElite100 = useCallback(async () => {
     if (!sessionToken || elite100Loaded) return;
@@ -505,7 +497,6 @@ export default function SlabInventoryApp() {
   /* All Inventory slab loading */
   const buildQuery = useCallback(() => {
     const p = new URLSearchParams();
-    if (inventorySource) p.set("source", inventorySource);
     if (search) p.set("search", search);
     if (fMaterial) p.set("material_name", fMaterial);
     if (fColor) p.set("color_name", fColor);
@@ -517,7 +508,7 @@ export default function SlabInventoryApp() {
     p.set("sort", sort); p.set("direction", direction);
     p.set("limit", String(PAGE_SIZE)); p.set("offset", String(page * PAGE_SIZE));
     return p.toString();
-  }, [inventorySource, search, fMaterial, fColor, fPriceGroup, fThickness, fRack, fDistributor, fImageStatus, sort, direction, page]);
+  }, [search, fMaterial, fColor, fPriceGroup, fThickness, fRack, fDistributor, fImageStatus, sort, direction, page]);
 
   const loadSlabs = useCallback(async () => {
     if (!sessionToken) return;
@@ -544,7 +535,7 @@ export default function SlabInventoryApp() {
     return () => clearTimeout(t);
   }, [searchInput]);
 
-  useEffect(() => { setPage(0); }, [fMaterial, fColor, fPriceGroup, fThickness, fRack, fDistributor, fImageStatus, sort, direction, inventorySource]);
+  useEffect(() => { setPage(0); }, [fMaterial, fColor, fPriceGroup, fThickness, fRack, fDistributor, fImageStatus, sort, direction]);
 
   const resetFilters = () => {
     setSearchInput(""); setSearch(""); setFMaterial(""); setFColor(""); setFPriceGroup("");
@@ -561,10 +552,6 @@ export default function SlabInventoryApp() {
   if (fThickness) activeChips.push({ key: "thickness", label: `Thickness · ${fThickness}`, onClear: () => setFThickness("") });
   if (fRack) activeChips.push({ key: "rack", label: `Rack · ${fRack}`, onClear: () => setFRack("") });
   if (fDistributor) activeChips.push({ key: "distributor", label: `Distributor · ${fDistributor}`, onClear: () => setFDistributor("") });
-  if (inventorySource) {
-    const srcLabel = INVENTORY_SOURCE_OPTIONS.find((o) => o.value === inventorySource)?.label ?? inventorySource;
-    activeChips.push({ key: "source", label: `Source · ${srcLabel}`, onClear: () => setInventorySource("") });
-  }
 
   const rangeStart = total === 0 ? 0 : page * PAGE_SIZE + 1;
   const rangeEnd = Math.min(total, (page + 1) * PAGE_SIZE);
@@ -701,7 +688,7 @@ export default function SlabInventoryApp() {
 
             {notInstalled ? (
               <div className="banner banner-warn" role="status">
-                The slab inventory cache tables are not available yet. Run the SlabCloud cache sync, then reload.
+                The slab inventory cache is not available yet. Run the local inventory sync, then reload.
               </div>
             ) : null}
 
@@ -843,7 +830,7 @@ export default function SlabInventoryApp() {
                       <h1 id="si-page-title" className="page-title">All Inventory</h1>
                       <p className="page-subtitle">
                         Full paginated slab/remnant browser.{" "}
-                        <span className="page-subtitle-note">SlabCloud/Slabsmith is the source of truth.</span>
+                        <span className="page-subtitle-note">Local shop inventory is the source of truth.</span>
                       </p>
                     </div>
                     <div className="page-metrics" aria-label="Inventory summary">
@@ -891,18 +878,6 @@ export default function SlabInventoryApp() {
                       <input type="search" value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="Search color, material, inventory ID, rack, lot…" aria-label="Search slabs" />
                     </div>
                     <div className="search-actions">
-                      <label className="sort-control" title="Debug/QA: override SLAB_INVENTORY_ACTIVE_SOURCE for this session">
-                        <span>Source</span>
-                        <select
-                          value={inventorySource}
-                          onChange={(e) => setInventorySource(e.target.value as InventorySourceFilter)}
-                          aria-label="Inventory source filter"
-                        >
-                          {INVENTORY_SOURCE_OPTIONS.map((o) => (
-                            <option key={o.value || "default"} value={o.value}>{o.label}</option>
-                          ))}
-                        </select>
-                      </label>
                       <label className="sort-control">
                         <span>Sort</span>
                         <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
@@ -951,10 +926,7 @@ export default function SlabInventoryApp() {
 
                 {/* Result meta + health */}
                 <div className="result-meta">
-                  <span>
-                    {busy ? "Loading…" : `Showing ${rangeStart.toLocaleString()}–${rangeEnd.toLocaleString()} of ${total.toLocaleString()}`}
-                    {activeInventorySource ? ` · source=${activeInventorySource}` : null}
-                  </span>
+                  <span>{busy ? "Loading…" : `Showing ${rangeStart.toLocaleString()}–${rangeEnd.toLocaleString()} of ${total.toLocaleString()}`}</span>
                   <span className="result-meta-right">
                     {summary?.last_sync ? (
                       <button type="button" className="health-toggle-btn" onClick={() => setHealthOpen((o) => !o)} aria-expanded={healthOpen}>
@@ -982,7 +954,7 @@ export default function SlabInventoryApp() {
                     </div>
                     {summary.slabs_by_price_group?.length ? (
                       <div className="health-pg">
-                        <p className="health-pg-label">By source price group · imported from SlabCloud</p>
+                        <p className="health-pg-label">By source price group · imported from active inventory feed</p>
                         {summary.slabs_by_price_group.map((g) => (
                           <div key={g.price_group} className="health-pg-row">
                             <span className="pg-badge">{g.price_group}</span>
@@ -1022,7 +994,7 @@ export default function SlabInventoryApp() {
                         <tr>
                           <th>Color</th><th>Material</th><th>Dimensions</th>
                           <th>ID</th><th>Rack</th>
-                          <th title="Source price group — imported from SlabCloud">Source PG</th>
+                          <th title={SOURCE_PRICE_GROUP_HINT}>Source PG</th>
                           <th title="Photo verified by URL check">Photo</th>
                         </tr>
                       </thead>
@@ -1034,7 +1006,7 @@ export default function SlabInventoryApp() {
                             <td>{dimsLabel(s.width_actual_in, s.length_actual_in)}</td>
                             <td>{s.inventory_id ? <code>ID {s.inventory_id}</code> : "—"}</td>
                             <td>{s.rack || "—"}</td>
-                            <td>{s.source_price_group ? <span className="pg-badge" title="Imported from SlabCloud">{s.source_price_group}</span> : "—"}</td>
+                            <td>{s.source_price_group ? <span className="pg-badge" title={SOURCE_PRICE_GROUP_HINT}>{s.source_price_group}</span> : "—"}</td>
                             <td>{s.image_status === "ok" ? <span className="img-ok" aria-label="Verified">✓</span> : "—"}</td>
                           </tr>
                         ))}
@@ -1066,7 +1038,7 @@ export default function SlabInventoryApp() {
 
       <footer className="footer-bar" role="contentinfo">
         <span>eliteOS · Slab Inventory</span>
-        <span className="footer-meta">Read-only · {config.backendBaseUrl} · SlabCloud/Slabsmith is the source of truth</span>
+        <span className="footer-meta">Read-only · {config.backendBaseUrl} · local shop inventory is the source of truth</span>
       </footer>
     </div>
   );
@@ -1126,7 +1098,7 @@ function SlabCard({ slab, onOpen }: { slab: Slab; onOpen: () => void }) {
     <button type="button" className="slab-card" onClick={onOpen} aria-label={`View details: ${slab.color_name ?? "Unnamed"} · ${slab.material_name ?? ""}`}>
       <div className="slab-card-media">
         <SlabThumb src={slab.thumbnail_url || slab.image_url} imageStatus={slab.image_status} colorName={slab.color_name} className="slab-card-img" />
-        {slab.source_price_group ? <span className="slab-card-pg pg-badge" title="Source price group — imported from SlabCloud">{slab.source_price_group}</span> : null}
+        {slab.source_price_group ? <span className="slab-card-pg pg-badge" title={SOURCE_PRICE_GROUP_HINT}>{slab.source_price_group}</span> : null}
         {slab.image_status === "ok" ? <span className="slab-card-verified" role="img" aria-label="Photo verified" /> : null}
         <span className="slab-card-overlay" aria-hidden><span className="slab-card-overlay-hint">View details ›</span></span>
       </div>
@@ -1178,7 +1150,7 @@ function SlabLightbox({ slab, index, count, onClose, onPrev, onNext }: { slab: S
             {slab.source_price_group ? (
               <p className="lightbox-pg">
                 <span className="pg-badge">{slab.source_price_group}</span>
-                <span className="lightbox-pg-label">{slab.source_price_group_label || "Source price group"} · imported from SlabCloud</span>
+                <span className="lightbox-pg-label">{slab.source_price_group_label || "Source price group"} · imported from active inventory feed</span>
               </p>
             ) : null}
           </header>
@@ -1191,7 +1163,9 @@ function SlabLightbox({ slab, index, count, onClose, onPrev, onNext }: { slab: S
             <DetailRow label="Inventory ID" value={slab.inventory_id} mono />
             <DetailRow label="Image status" value={<span className={`img-status img-${slab.image_status}`}>{slab.image_status}</span>} />
             {slab.image_source_label ? <DetailRow label="Image source" value={slab.image_source_label} /> : null}
-            {slab.inventory_source ? <DetailRow label="Inventory source" value={slab.inventory_source} /> : null}
+            {slab.inventory_source ? (
+              <DetailRow label="Inventory source" value={formatInventorySourceLabel(slab.inventory_source)} />
+            ) : null}
             <DetailRow label="Active" value={slab.is_active ? "Yes" : "No"} />
           </div>
           <details className="tech-details">
@@ -1201,7 +1175,7 @@ function SlabLightbox({ slab, index, count, onClose, onPrev, onNext }: { slab: S
             <DetailRow label="Updated" value={fmtDate(slab.updated_at)} />
             {slab.image_url ? <DetailRow label="Image URL" value={<a href={slab.image_url} target="_blank" rel="noreferrer noopener" className="img-link">open</a>} /> : null}
           </details>
-          <p className="lightbox-foot">Read-only · source price group is imported from SlabCloud and is not slabOS pricing authority.</p>
+          <p className="lightbox-foot">Read-only · source price group is imported from the active inventory feed and is not slabOS pricing authority.</p>
         </div>
       </div>
     </div>
@@ -1322,7 +1296,7 @@ function NonStockCard({ item, onOpen }: { item: NonStockItem; onOpen: () => void
           </div>
         )}
         {item.source_price_group && (
-          <span className="pg-badge ns-pg-badge" title="Source price group — imported from SlabCloud">
+          <span className="pg-badge ns-pg-badge" title={SOURCE_PRICE_GROUP_HINT}>
             {item.source_price_group}
           </span>
         )}
@@ -1413,7 +1387,7 @@ function ColorInventoryModal({
                 <span className="cim-stat-label">Remnants</span>
               </div>
             </div>
-            <p className="cim-source-note">Read-only · source price group imported from SlabCloud</p>
+            <p className="cim-source-note">Read-only · source price group imported from active inventory feed</p>
           </div>
         </div>
 
@@ -1485,7 +1459,7 @@ function PhysicalItemCard({ item }: { item: PhysicalItem }) {
         {item.rack && <p className="pi-meta">Rack {item.rack}{item.lot ? ` · Lot ${item.lot}` : ""}</p>}
         {item.inventory_id && <p className="pi-id">ID {item.inventory_id}</p>}
         {item.source_price_group && (
-          <span className="pg-badge pi-pg" title="Source price group — imported from SlabCloud">
+          <span className="pg-badge pi-pg" title={SOURCE_PRICE_GROUP_HINT}>
             {item.source_price_group}
           </span>
         )}

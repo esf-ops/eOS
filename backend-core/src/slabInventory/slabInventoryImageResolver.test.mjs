@@ -104,8 +104,8 @@ import {
 
 /* ── imagePatternDisplayLabel ──────────────────────────────────────────── */
 {
-  assert.equal(imagePatternDisplayLabel(IMAGE_URL_PATTERN_SLABSMITH), "Slabsmith upload");
-  assert.equal(imagePatternDisplayLabel(IMAGE_URL_PATTERN_SLABCLOUD), "SlabCloud URL");
+  assert.equal(imagePatternDisplayLabel(IMAGE_URL_PATTERN_SLABSMITH), "Local inventory image");
+  assert.equal(imagePatternDisplayLabel(IMAGE_URL_PATTERN_SLABCLOUD), "Legacy URL");
   assert.equal(imagePatternDisplayLabel(""), null);
   console.log("ok: imagePatternDisplayLabel");
 }

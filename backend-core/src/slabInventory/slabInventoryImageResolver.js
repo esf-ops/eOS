@@ -143,7 +143,7 @@ export function lookupInventoryImage(imageMap, inventoryRow, sourceFilter) {
  */
 export function imagePatternDisplayLabel(pattern) {
   const p = trimStr(pattern);
-  if (p === IMAGE_URL_PATTERN_SLABSMITH) return "Slabsmith upload";
-  if (p === IMAGE_URL_PATTERN_SLABCLOUD) return "SlabCloud URL";
+  if (p === IMAGE_URL_PATTERN_SLABSMITH) return "Local inventory image";
+  if (p === IMAGE_URL_PATTERN_SLABCLOUD) return "Legacy URL";
   return p || null;
 }

@@ -240,7 +240,7 @@ import {
   const mapped = mapSlabRow(row, img);
   assert.equal(mapped.inventory_source, "slabsmith");
   assert.equal(mapped.image_url_pattern, "slabsmith_local_upload");
-  assert.equal(mapped.image_source_label, "Slabsmith upload");
+  assert.equal(mapped.image_source_label, "Local inventory image");
   console.log("ok: mapSlabRow slabsmith image metadata");
 }
 

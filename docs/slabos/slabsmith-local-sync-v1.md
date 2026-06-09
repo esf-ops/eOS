@@ -150,7 +150,7 @@ Do **not** schedule image upload yet — validate manually with `--limit 5` firs
 
 ## Verifying images in Slab Inventory UI
 
-On **All Inventory**, use the **Source** selector (or `?source=slabsmith` on `/api/slab-inventory/slabs`) to browse Slabsmith rows. Uploaded photos resolve from `slab_images` where `image_url_pattern=slabsmith_local_upload` and `image_status=ok`, joined on `external_slab_id` (Slabsmith `InventoryID`). The slab lightbox **Technical details** panel shows **Image source: Slabsmith upload** when the resolver picked a local upload row. SlabCloud display is unchanged when Source is **SlabCloud** or the env default (`SLAB_INVENTORY_ACTIVE_SOURCE=slabcloud`).
+With `SLAB_INVENTORY_ACTIVE_SOURCE=slabsmith`, **All Inventory** shows local Slabsmith rows automatically (no source selector in the UI). Uploaded photos resolve from `slab_images` where `image_url_pattern=slabsmith_local_upload` and `image_status=ok`, joined on `external_slab_id` (Slabsmith `InventoryID`). The slab lightbox **Technical details** panel shows **Image source: Local inventory image** when the resolver picked a local upload row. Operators can still override via `?source=slabsmith|slabcloud|all` on API routes for admin/debug.
 
 ## Hourly schedule
 
