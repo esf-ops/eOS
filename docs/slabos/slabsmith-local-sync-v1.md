@@ -40,6 +40,7 @@ v1 does **not** connect to Slabsmith SQL. It only reads a file already written b
 3. **config.json** from `config.example.json`:
    - `backendBaseUrl` — deployed backend-core URL
    - `sourceXmlPath` — `C:\slabcloud\sync\slabs.xml`
+   - `imageRootPath` — `C:\slabcloud` (optional; this is the default when omitted)
    - `syncToken` — matches backend `SLABSMITH_SYNC_TOKEN` (set in Vercel/host env, not in git)
    - `logDir` — e.g. `C:\eliteos-slabsmith-sync\logs`
    - `writeEnabled` — `false` until manual send verified
@@ -52,6 +53,7 @@ v1 does **not** connect to Slabsmith SQL. It only reads a file already written b
 | `SUPABASE_URL` | Server-side only |
 | `SUPABASE_SERVICE_ROLE_KEY` | Server-side only |
 | `SLABSMITH_SYNC_ORGANIZATION_ID` or `SLABOS_ORGANIZATION_ID` | Tenant org for writes |
+| Supabase bucket `eliteos-slab-images` | Public-read storage for uploaded slab JPGs (apply `backend-core/supabase/eliteos_slab_images_storage.sql`) |
 
 ## Manual dry-run
 
@@ -69,6 +71,56 @@ node sync-slabs.mjs --config config.json --send
 ```
 
 Expect JSON with `rows_seen`, `inserted`, `updated`, `sync_run_id`, `status`, etc.
+
+## Image manifest (discovery only; no upload)
+
+Slab images live beside the SlabCloud export folder:
+
+- Full: `C:\slabcloud\<SlabID>.jpg`
+- Thumbnail: `C:\slabcloud\<SlabID>_thumb.jpg`
+
+The manifest scans XML `SlabID` values, pairs images case-insensitively, ignores the `sync\` subfolder, and writes JSON under `logDir`:
+
+```powershell
+node sync-images.mjs --config config.json
+```
+
+Or use the flag on the XML connector:
+
+```powershell
+node sync-slabs.mjs --config config.json --image-manifest
+```
+
+Config fields:
+
+| Field | Purpose |
+|-------|---------|
+| `sourceXmlPath` | Same Slabsmith export XML as inventory sync |
+| `imageRootPath` | Folder containing slab JPGs (default `C:\slabcloud`) |
+| `logDir` | Output folder for `image-manifest-<timestamp>.json` |
+
+Console output includes safe counts only (`xml_slab_count`, matched/missing/unmatched samples). **No sync token, no raw XML.**
+
+After reviewing the manifest on Windows, upload images incrementally:
+
+```powershell
+# Preview upload plan (no network upload)
+node sync-images.mjs --config config.json --plan-upload
+
+# Upload first 5 matched pairs only
+node sync-images.mjs --config config.json --upload --limit 5
+
+# Upload one known slab (SlabID from manifest/XML)
+node sync-images.mjs --config config.json --upload --slab-id 3c179475-5052-4b0d-ae38-9f154bf5daf6
+```
+
+Backend endpoint: `POST /api/integrations/slabsmith/inventory/images` (multipart, same sync token as XML ingest).
+
+Upload state is tracked in `logDir/image-upload-state.json` using file size + modified time fingerprints so unchanged pairs are skipped on later runs.
+
+**Before first upload:** create Supabase Storage bucket `eliteos-slab-images` (public read). See `backend-core/supabase/eliteos_slab_images_storage.sql`.
+
+Do **not** schedule image upload yet — validate manually with `--limit 5` first.
 
 ## Hourly schedule
 

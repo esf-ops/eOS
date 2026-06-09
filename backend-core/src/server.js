@@ -22,6 +22,7 @@ import { attachTakeoffWorkspaceRoutes } from "./takeoff/takeoffWorkspaceRoutes.j
 import { attachSlabInventoryRoutes } from "./slabInventory/slabInventoryApi.js";
 import { attachSlabCloudHourlySyncRoutes } from "./slabcloud/slabCloudHourlySyncApi.js";
 import { attachSlabsmithIngestRoutes } from "./slabsmith/slabsmithIngestApi.js";
+import { attachSlabsmithImageUploadRoutes } from "./slabsmith/slabsmithImageUploadApi.js";
 import { collectHeadEnvOriginsForCors } from "./me/headDeploymentUrls.js";
 import { buildMeHeadsPayload } from "./me/launcherHeads.js";
 import { buildTitansTodayPayload, parseTitansTodayQuery } from "./titans/titansToday.js";
@@ -1209,6 +1210,10 @@ attachSlabCloudHourlySyncRoutes(app, {
 });
 
 attachSlabsmithIngestRoutes(app, {
+  getSupabase: supabaseServerClient
+});
+
+attachSlabsmithImageUploadRoutes(app, {
   getSupabase: supabaseServerClient
 });
 

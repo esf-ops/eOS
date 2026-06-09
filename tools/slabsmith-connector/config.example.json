@@ -1,6 +1,7 @@
 {
   "backendBaseUrl": "https://backend-core-six.vercel.app",
   "sourceXmlPath": "C:\\slabcloud\\sync\\slabs.xml",
+  "imageRootPath": "C:\\slabcloud",
   "syncToken": "REPLACE_WITH_TOKEN",
   "logDir": "C:\\eliteos-slabsmith-sync\\logs",
   "writeEnabled": false

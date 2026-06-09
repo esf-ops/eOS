@@ -33,6 +33,31 @@ node sync-slabs.mjs --config config.json --send
 
 Or set `"writeEnabled": true` in `config.json` and run without `--dry-run`.
 
+## Image manifest (discovery only)
+
+Pairs local slab JPGs with XML `SlabID` values. Does **not** upload images.
+
+```powershell
+node sync-images.mjs --config config.json
+```
+
+Equivalent:
+
+```powershell
+node sync-slabs.mjs --config config.json --image-manifest
+```
+
+Writes `image-manifest-<timestamp>.json` under `logDir` and prints summary counts.
+
+## Upload plan / live upload
+
+```powershell
+node sync-images.mjs --config config.json --plan-upload
+node sync-images.mjs --config config.json --upload --limit 5
+```
+
+Tracks `logDir/image-upload-state.json` to skip unchanged file pairs. Never logs sync token or image bytes.
+
 ## Backend endpoint
 
 `POST /api/integrations/slabsmith/inventory/xml`
@@ -40,6 +65,10 @@ Or set `"writeEnabled": true` in `config.json` and run without `--dry-run`.
 Header: `X-EliteOS-Slabsmith-Sync-Token: <token>`
 
 Body: raw XML (`Content-Type: application/xml`) or JSON `{ "xml": "..." }`.
+
+`POST /api/integrations/slabsmith/inventory/images`
+
+Header: same sync token. Body: `multipart/form-data` with `slab_id`, `inventory_id`, `full_image`, `thumb_image`, and file metadata fields.
 
 ## Scheduling
 
@@ -53,8 +82,8 @@ See `install-task-scheduler.example.ps1` for an **disabled-by-default** hourly T
 
 ## What this does / does not do
 
-- **Does:** ingest Slabsmith XML into Supabase `slab_inventory` with `external_source=slabsmith`.
-- **Does not:** connect to Slabsmith SQL, modify SlabCloud rows, delete missing slabs, or upload images (v1).
+- **Does:** ingest Slabsmith XML into Supabase `slab_inventory` with `external_source=slabsmith`; discover local slab JPGs and write an image manifest JSON.
+- **Does not:** connect to Slabsmith SQL, modify SlabCloud rows, delete missing slabs, upload orphan/unmatched images, or schedule automatic image upload (manual `--upload` only).
 - **Does not:** change SlabCloud FTP scripts or production default `SLAB_INVENTORY_ACTIVE_SOURCE=slabcloud`.
 
 ## Future

@@ -1215,3 +1215,17 @@
 | **What is NOT changed** | `slab_inventory` table. Texture cache. Elite 100 UI. Non-Stock tab. `count_for_color`. Quote Library. Internal Estimate. Sales Dashboard. Pricing Admin. Moraware. AI Takeoff. Home Launcher. Shared EliteosTopbar. Group G. No row deletions or inactive marking. |
 | **Next manual steps** | 1. Set `EOS_CRON_SECRET` in Vercel project env vars. 2. Set `SLABOS_ORGANIZATION_ID=89180433-9fab-4024-bec9-a14d870bd0a8`. 3. Set `SLABCLOUD_CACHE_WRITE_ENABLED=1`. 4. Test endpoint manually with curl (dry-run first, then write-enabled). 5. Verify `slabcloud_sync_runs` row is created. 6. Enable Vercel Cron (vercel.json already configured). 7. Monitor first scheduled run. |
 | **Revisit trigger** | When per-color detail fetches are needed hourly (e.g. fine-grained slab dimension changes). Then evaluate long-lived worker vs. Vercel Enterprise `maxDuration: 300`. |
+
+---
+
+### Slabsmith Windows image upload v1
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-06-09 |
+| **Decision** | Slabsmith slab photos upload from the Windows connector to **backend-core only** (`POST /api/integrations/slabsmith/inventory/images`). Backend stores JPEG bytes in Supabase Storage bucket **`eliteos-slab-images`** and upserts existing **`slab_images`** rows with `external_source=slabsmith`, `image_url_pattern=slabsmith_local_upload`, `image_status=ok`. Windows host keeps **no** Supabase service role or storage credentials. |
+| **Why** | SlabCloud URL-guess rows do not cover Slabsmith-local JPGs (`C:\slabcloud\<SlabID>.jpg`). Reusing `slab_images` keeps Slab Inventory read API unchanged; separate pattern avoids colliding with `slabcloud_slab_jpg` rows. Incremental upload with local `image-upload-state.json` avoids re-sending ~1,600 pairs every run. |
+| **Matching** | Images are keyed by XML **SlabID** on disk; inventory match uses **`inventory_id` → slab_inventory.external_slab_id`** (Slabsmith normalizer uses InventoryID as external_slab_id). Missing inventory match returns non-fatal `skipped_no_inventory_match`. |
+| **Safety** | Explicit `--upload` required; `--plan-upload` dry-run; `--limit` / `--slab-id` for staged testing. No orphan/unmatched uploads. Max 10 MB full / 2 MB thumb JPEG. No image upload scheduled yet. `SLAB_INVENTORY_ACTIVE_SOURCE=slabcloud` unchanged. SlabCloud export/file sync untouched. |
+| **Impacted files/docs** | `backend-core/src/slabsmith/slabsmithImageUploadApi.js`, `slabsmithImageStorage.mjs`, `multipartParse.mjs`, `tools/slabsmith-connector/sync-images.mjs`, `image-upload.mjs`, `docs/slabos/slabsmith-local-sync-v1.md`, `backend-core/supabase/eliteos_slab_images_storage.sql`. |
+| **Revisit trigger** | When Slab Inventory default source switches to `slabsmith`; when bucket should be private with signed read URLs; when batch/multi-slab upload is needed for performance. |

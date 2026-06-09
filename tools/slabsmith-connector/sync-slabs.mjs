@@ -8,6 +8,7 @@
  *   node sync-slabs.mjs --config config.json
  *   node sync-slabs.mjs --config config.json --dry-run
  *   node sync-slabs.mjs --config config.json --send
+ *   node sync-slabs.mjs --config config.json --image-manifest
  *
  * Backend call occurs when:
  *   --send is passed, OR
@@ -19,23 +20,39 @@
  * assertion when process.exit() runs before undici/fetch sockets close).
  */
 
-import { createWriteStream, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import http from "node:http";
 import https from "node:https";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import {
+  appendLogLine,
+  inspectSourceXml,
+  loadConfig,
+  validateSyncConfig,
+} from "./connector-shared.mjs";
+import { runImageManifest } from "./sync-images.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SYNC_HEADER = "X-EliteOS-Slabsmith-Sync-Token";
 const INGEST_PATH = "/api/integrations/slabsmith/inventory/xml";
 const DEFAULT_REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
 
+export { loadConfig, inspectSourceXml, appendLogLine } from "./connector-shared.mjs";
+
 /**
  * @param {string[]} argv
  */
 export function parseArgs(argv) {
-  /** @type {{ configPath: string|null, dryRun: boolean, send: boolean, help: boolean }} */
-  const out = { configPath: null, dryRun: false, send: false, help: false };
+  /** @type {{ configPath: string|null, dryRun: boolean, send: boolean, imageManifest: boolean, help: boolean }} */
+  const out = {
+    configPath: null,
+    dryRun: false,
+    send: false,
+    imageManifest: false,
+    help: false,
+  };
   const args = argv.slice(2);
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
@@ -51,6 +68,10 @@ export function parseArgs(argv) {
       out.send = true;
       continue;
     }
+    if (arg === "--image-manifest") {
+      out.imageManifest = true;
+      continue;
+    }
     if (arg === "--config") {
       const next = args[i + 1];
       if (!next || next.startsWith("-")) throw new Error("--config requires a path");
@@ -63,56 +84,9 @@ export function parseArgs(argv) {
   return out;
 }
 
-/**
- * @param {string} configPath
- */
-export function loadConfig(configPath) {
-  const abs = isAbsolute(configPath) ? configPath : resolve(process.cwd(), configPath);
-  if (!existsSync(abs)) {
-    throw new Error(`Config file not found: ${abs}`);
-  }
-  let parsed;
-  try {
-    parsed = JSON.parse(readFileSync(abs, "utf8"));
-  } catch (err) {
-    throw new Error(`Invalid JSON config: ${String(err?.message || err)}`);
-  }
-  return { config: parsed, configPath: abs };
-}
-
-/**
- * @param {Record<string, unknown>} config
- */
+/** @deprecated use validateSyncConfig from connector-shared */
 export function validateConfig(config) {
-  const backendBaseUrl = String(config.backendBaseUrl ?? "").trim().replace(/\/+$/, "");
-  const sourceXmlPath = String(config.sourceXmlPath ?? "").trim();
-  const syncToken = String(config.syncToken ?? "").trim();
-  const logDir = String(config.logDir ?? "").trim();
-  const writeEnabled = config.writeEnabled === true;
-
-  if (!backendBaseUrl) throw new Error("config.backendBaseUrl is required");
-  if (!sourceXmlPath) throw new Error("config.sourceXmlPath is required");
-  if (!syncToken || syncToken === "REPLACE_WITH_TOKEN") {
-    throw new Error("config.syncToken must be set to the backend SLABSMITH_SYNC_TOKEN value");
-  }
-
-  return { backendBaseUrl, sourceXmlPath, syncToken, logDir, writeEnabled };
-}
-
-/**
- * @param {string} sourceXmlPath
- */
-export function inspectSourceXml(sourceXmlPath) {
-  const abs = isAbsolute(sourceXmlPath) ? sourceXmlPath : resolve(process.cwd(), sourceXmlPath);
-  if (!existsSync(abs)) {
-    throw new Error(`Slabsmith XML not found: ${abs}`);
-  }
-  const stat = statSync(abs);
-  return {
-    path: abs,
-    bytes: stat.size,
-    modifiedAt: stat.mtime.toISOString(),
-  };
+  return validateSyncConfig(config);
 }
 
 /**
@@ -260,38 +234,27 @@ export async function postXmlToBackend({
 }
 
 /**
- * Append one log line using a short-lived write (no persistent stream handle).
- * @param {string} logDir
- * @param {string} line
- */
-export function appendLogLine(logDir, line) {
-  if (!logDir) return;
-  try {
-    mkdirSync(logDir, { recursive: true });
-    const file = join(logDir, `sync-${new Date().toISOString().slice(0, 10)}.log`);
-    const stream = createWriteStream(file, { flags: "a" });
-    stream.write(`${line}\n`);
-    stream.end();
-  } catch (err) {
-    console.warn(`[slabsmith-connector] log write failed: ${String(err?.message || err)}`);
-  }
-}
-
-/**
  * @param {string[]} [argv]
- * @param {{ postXmlToBackend?: typeof postXmlToBackend }} [deps]
+ * @param {{ postXmlToBackend?: typeof postXmlToBackend, runImageManifest?: typeof runImageManifest }} [deps]
  */
 export async function runSync(argv = process.argv, deps = {}) {
   const postXml = deps.postXmlToBackend ?? postXmlToBackend;
-  const { configPath, dryRun, send, help } = parseArgs(argv);
+  const imageManifestRunner = deps.runImageManifest ?? runImageManifest;
+  const { configPath, dryRun, send, imageManifest, help } = parseArgs(argv);
+
+  if (imageManifest) {
+    return imageManifestRunner(argv, deps);
+  }
+
   if (help) {
     console.log(`Slabsmith XML connector
 
 Usage:
-  node sync-slabs.mjs --config config.json [--dry-run] [--send]
+  node sync-slabs.mjs --config config.json [--dry-run] [--send] [--image-manifest]
 
-  --dry-run   Validate local XML only (no backend unless --send)
-  --send      Force POST to backend
+  --dry-run         Validate local XML only (no backend unless --send)
+  --send            Force POST to backend
+  --image-manifest  Discover local slab images and write JSON manifest (no upload)
   writeEnabled: true in config also enables send (unless --dry-run without --send)
 `);
     return 0;
@@ -299,7 +262,7 @@ Usage:
 
   const cfgPath = configPath || join(__dirname, "config.json");
   const { config } = loadConfig(cfgPath);
-  const validated = validateConfig(config);
+  const validated = validateSyncConfig(config);
   const callBackend = shouldCallBackend({
     dryRun,
     send,
