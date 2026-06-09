@@ -21,6 +21,21 @@ export function chooseCatalogReferenceImageUrl(asset) {
 }
 
 /**
+ * Highest-resolution catalog reference URL for zoom/lightbox (prefers original over card-sized).
+ * @param {{ texture_url_1024?: string|null, hero_url?: string|null, original_image_url?: string|null, texture_url_600?: string|null }|null|undefined} asset
+ */
+export function chooseCatalogReferenceImageUrlFull(asset) {
+  if (!asset) return null;
+  return (
+    asset.original_image_url ??
+    asset.texture_url_1024 ??
+    asset.hero_url ??
+    asset.texture_url_600 ??
+    null
+  );
+}
+
+/**
  * Staff-safe label for which catalog asset field supplied the reference image.
  * @param {{ texture_url_1024?: string|null, hero_url?: string|null, original_image_url?: string|null, texture_url_600?: string|null }|null|undefined} asset
  */
@@ -44,6 +59,7 @@ export function buildElite100ReferenceImageFields(visualAsset) {
   const reference_image_url = chooseCatalogReferenceImageUrl(asset);
   return {
     reference_image_url,
+    reference_image_url_full: chooseCatalogReferenceImageUrlFull(asset),
     reference_image_url_1024: asset?.texture_url_1024 ?? null,
     reference_image_url_600: asset?.texture_url_600 ?? null,
     reference_image_source: catalogReferenceImageSourceLabel(asset),

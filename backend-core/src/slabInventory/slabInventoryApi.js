@@ -74,6 +74,7 @@ export {
   buildElite100CurrentInventoryImageFields,
   buildElite100ReferenceImageFields,
   chooseCatalogReferenceImageUrl,
+  chooseCatalogReferenceImageUrlFull,
   catalogReferenceImageSourceLabel,
   ELITE100_INVENTORY_MATCH_COLUMNS,
   summarizeElite100CurrentInventory,

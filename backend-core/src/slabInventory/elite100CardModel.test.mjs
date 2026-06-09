@@ -22,6 +22,7 @@ import {
 
   const fields = buildElite100ReferenceImageFields(asset);
   assert.equal(fields.reference_image_url, "https://example.com/1024.jpg");
+  assert.equal(fields.reference_image_url_full, "https://example.com/original.jpg");
   assert.equal(fields.reference_image_source, "catalog_texture_1024");
   assert.equal(fields.reference_image_review_status, "approved");
   console.log("ok: elite100 reference image resolution priority");

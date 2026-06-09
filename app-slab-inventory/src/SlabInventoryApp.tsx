@@ -3,7 +3,7 @@ import { apiGetJson, ApiError } from "@quote-lib/api";
 import { config, EOS_LOGO_URL } from "@quote-lib/config";
 import { getSupabase } from "./lib/supabase";
 import EliteosTopbar from "../../shared/eliteos-ui/EliteosTopbar";
-import type { EliteosTopbarMenuItem } from "../../shared/eliteos-ui/EliteosTopbar";
+import { ZoomImageViewer, type ZoomGalleryItem } from "./ZoomImageViewer";
 
 /* ─────────────────────────────────────────── types */
 
@@ -95,6 +95,7 @@ type Elite100Item = {
   remnant_count: number;
   verified_photo_count: number;
   reference_image_url?: string | null;
+  reference_image_url_full?: string | null;
   reference_image_url_1024?: string | null;
   reference_image_url_600?: string | null;
   reference_image_source?: string | null;
@@ -183,7 +184,13 @@ type ColorModal = {
   materialName: string | null;
   priceGroup?: string | null;
   referenceImageUrl?: string | null;
+  referenceImageUrlFull?: string | null;
   representativeImageUrl?: string | null;
+} | null;
+
+type ImageViewerState = {
+  items: ZoomGalleryItem[];
+  initialIndex: number;
 } | null;
 
 type MainTab = "elite100" | "non_stock" | "all_inventory";
@@ -241,6 +248,52 @@ function dimsLabel(w: number | null, l: number | null): string {
   const wl = w == null ? "?" : Math.round(Number(w));
   const ll = l == null ? "?" : Math.round(Number(l));
   return `${ll}″ × ${wl}″`;
+}
+
+function inventoryViewerSrc(item: PhysicalItem): string | null {
+  return item.image_url || item.thumbnail_url || null;
+}
+
+function inventoryImageCaption(item: PhysicalItem, colorName: string | null): string {
+  const name = colorName || item.color_name || "Slab";
+  let caption = name;
+  if (item.inventory_id) caption += ` — ID ${item.inventory_id}`;
+  const extras: string[] = [];
+  const dims = dimsLabel(item.width_actual_in, item.length_actual_in);
+  if (dims !== "—") extras.push(dims);
+  if (item.rack) extras.push(`Rack ${item.rack}`);
+  if (item.lot) extras.push(`Lot ${item.lot}`);
+  if (extras.length) caption += ` · ${extras.join(" · ")}`;
+  return caption;
+}
+
+function buildInventoryGalleryItems(
+  inventory: ModalInventory,
+  colorName: string | null
+): ZoomGalleryItem[] {
+  if (!inventory) return [];
+  const all = [...inventory.slabs, ...inventory.remnants];
+  return all
+    .map((item) => {
+      const src = inventoryViewerSrc(item);
+      if (!src || item.image_status === "missing") return null;
+      return {
+        src,
+        caption: inventoryImageCaption(item, colorName),
+        alt: colorName || item.color_name || "Inventory slab",
+        itemId: item.id,
+      };
+    })
+    .filter(Boolean) as ZoomGalleryItem[];
+}
+
+function referenceViewerSrc(modal: NonNullable<ColorModal>): string | null {
+  return (
+    modal.referenceImageUrlFull
+    || modal.referenceImageUrl
+    || modal.representativeImageUrl
+    || null
+  );
 }
 
 function fmtDate(v: string | null): string {
@@ -471,7 +524,11 @@ export default function SlabInventoryApp() {
     try {
       if (modal.mode === "elite100" && modal.catalogItemId) {
         const data = (await apiGetJson(`/api/slab-inventory/elite100-programs/${modal.catalogItemId}/inventory`, sessionToken!)) as {
-          catalog_item?: { reference_image_url?: string | null; reference_image_url_1024?: string | null };
+          catalog_item?: {
+            reference_image_url?: string | null;
+            reference_image_url_full?: string | null;
+            reference_image_url_1024?: string | null;
+          };
           slabs?: PhysicalItem[];
           remnants?: PhysicalItem[];
           totals?: { total: number; slab_count: number; remnant_count: number };
@@ -480,8 +537,21 @@ export default function SlabInventoryApp() {
           data.catalog_item?.reference_image_url
           || data.catalog_item?.reference_image_url_1024
           || null;
-        if (refFromApi) {
-          setColorModal((prev) => (prev ? { ...prev, referenceImageUrl: refFromApi } : prev));
+        const refFullFromApi =
+          data.catalog_item?.reference_image_url_full
+          || data.catalog_item?.reference_image_url
+          || data.catalog_item?.reference_image_url_1024
+          || null;
+        if (refFromApi || refFullFromApi) {
+          setColorModal((prev) => (
+            prev
+              ? {
+                  ...prev,
+                  referenceImageUrl: refFromApi ?? prev.referenceImageUrl,
+                  referenceImageUrlFull: refFullFromApi ?? prev.referenceImageUrlFull,
+                }
+              : prev
+          ));
         }
         const slabs = data.slabs ?? [];
         const remnants = data.remnants ?? [];
@@ -764,6 +834,14 @@ export default function SlabInventoryApp() {
                           priceGroup: item.price_group,
                           referenceImageUrl:
                             item.reference_image_url
+                            || item.reference_image_url_1024
+                            || item.reference_image_url_600
+                            || item.visual_asset_url_1024
+                            || item.visual_asset_url_600
+                            || null,
+                          referenceImageUrlFull:
+                            item.reference_image_url_full
+                            || item.reference_image_url
                             || item.reference_image_url_1024
                             || item.reference_image_url_600
                             || item.visual_asset_url_1024
@@ -1366,40 +1444,83 @@ function ColorInventoryModal({
   onClose: () => void;
 }) {
   const [heroImgFailed, setHeroImgFailed] = useState(false);
+  const [imageViewer, setImageViewer] = useState<ImageViewerState>(null);
 
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !imageViewer) onClose();
+    };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [onClose]);
+  }, [onClose, imageViewer]);
 
   const totalSlabs = inventory?.slab_count ?? 0;
   const totalRemnants = inventory?.remnant_count ?? 0;
   const total = inventory?.total ?? 0;
   const hasHeroImg = Boolean(modal.referenceImageUrl ?? modal.representativeImageUrl) && !heroImgFailed;
   const heroSrc = modal.referenceImageUrl ?? modal.representativeImageUrl;
+  const heroViewerSrc = referenceViewerSrc(modal);
+  const inventoryGallery = useMemo(
+    () => buildInventoryGalleryItems(inventory, modal.colorName),
+    [inventory, modal.colorName]
+  );
+
+  const openReferenceViewer = () => {
+    if (!heroViewerSrc) return;
+    const caption = modal.colorName
+      ? `${modal.colorName} reference image`
+      : "Catalog reference image";
+    setImageViewer({
+      items: [{ src: heroViewerSrc, caption, alt: modal.colorName ?? "Catalog reference" }],
+      initialIndex: 0,
+    });
+  };
+
+  const openInventoryViewer = (item: PhysicalItem) => {
+    const src = inventoryViewerSrc(item);
+    if (!src || item.image_status === "missing") return;
+    const index = inventoryGallery.findIndex((g) => g.itemId === item.id);
+    setImageViewer({
+      items: inventoryGallery.length > 0 ? inventoryGallery : [{
+        src,
+        caption: inventoryImageCaption(item, modal.colorName),
+        alt: modal.colorName || item.color_name || "Inventory slab",
+      }],
+      initialIndex: index >= 0 ? index : 0,
+    });
+  };
 
   return (
-    <div className="cim-overlay" role="dialog" aria-modal="true" aria-label={`${modal.colorName ?? "Color"} inventory`} onClick={onClose}>
-      <div className="cim" onClick={(e) => e.stopPropagation()}>
-        <button type="button" className="cim-close" onClick={onClose} aria-label="Close">×</button>
+    <>
+      <div className="cim-overlay" role="dialog" aria-modal="true" aria-label={`${modal.colorName ?? "Color"} inventory`} onClick={onClose}>
+        <div className="cim" onClick={(e) => e.stopPropagation()}>
+          <button type="button" className="cim-close" onClick={onClose} aria-label="Close">×</button>
 
-        {/* Hero: representative image + detail panel */}
-        <div className="cim-hero">
-          <div className="cim-hero-img-wrap">
-            {hasHeroImg ? (
-              <img
-                src={heroSrc!}
-                alt={modal.colorName ?? ""}
-                className="cim-hero-img"
-                onError={() => setHeroImgFailed(true)}
-              />
-            ) : (
-              <div className="cim-hero-placeholder" aria-hidden>
-                <span>{colorInitials(modal.colorName)}</span>
-              </div>
-            )}
-          </div>
+          {/* Hero: reference image + detail panel */}
+          <div className="cim-hero">
+            <div className="cim-hero-img-wrap">
+              {hasHeroImg ? (
+                <button
+                  type="button"
+                  className="cim-hero-img-btn"
+                  onClick={openReferenceViewer}
+                  aria-label={`View full-size reference image for ${modal.colorName ?? "color"}`}
+                  title="View full-size reference image"
+                >
+                  <img
+                    src={heroSrc!}
+                    alt={modal.colorName ?? ""}
+                    className="cim-hero-img"
+                    onError={() => setHeroImgFailed(true)}
+                  />
+                  <span className="cim-hero-zoom-hint" aria-hidden>Click to zoom</span>
+                </button>
+              ) : (
+                <div className="cim-hero-placeholder" aria-hidden>
+                  <span>{colorInitials(modal.colorName)}</span>
+                </div>
+              )}
+            </div>
 
           <div className="cim-detail">
             <p className="cim-eyebrow">
@@ -1451,7 +1572,9 @@ function ColorInventoryModal({
                   <p className="cim-empty">No full slabs currently available.</p>
                 ) : (
                   <div className="cim-item-grid">
-                    {inventory.slabs.map((item) => <PhysicalItemCard key={item.id} item={item} />)}
+                    {inventory.slabs.map((item) => (
+                      <PhysicalItemCard key={item.id} item={item} onImageClick={openInventoryViewer} />
+                    ))}
                   </div>
                 )}
               </section>
@@ -1461,7 +1584,9 @@ function ColorInventoryModal({
                   <p className="cim-empty">No remnants currently available.</p>
                 ) : (
                   <div className="cim-item-grid">
-                    {inventory.remnants.map((item) => <PhysicalItemCard key={item.id} item={item} />)}
+                    {inventory.remnants.map((item) => (
+                      <PhysicalItemCard key={item.id} item={item} onImageClick={openInventoryViewer} />
+                    ))}
                   </div>
                 )}
               </section>
@@ -1475,19 +1600,45 @@ function ColorInventoryModal({
         </div>
       </div>
     </div>
+
+      {imageViewer ? (
+        <ZoomImageViewer
+          items={imageViewer.items}
+          initialIndex={imageViewer.initialIndex}
+          onClose={() => setImageViewer(null)}
+        />
+      ) : null}
+    </>
   );
 }
 
-function PhysicalItemCard({ item }: { item: PhysicalItem }) {
+function PhysicalItemCard({
+  item,
+  onImageClick,
+}: {
+  item: PhysicalItem;
+  onImageClick?: (item: PhysicalItem) => void;
+}) {
   const [imgFailed, setImgFailed] = useState(false);
-  const src = item.thumbnail_url || item.image_url;
-  const hasImage = Boolean(src) && item.image_status !== "missing" && !imgFailed;
+  const thumbSrc = item.thumbnail_url || item.image_url;
+  const hasImage = Boolean(thumbSrc) && item.image_status !== "missing" && !imgFailed;
+  const canZoom = Boolean(inventoryViewerSrc(item)) && item.image_status !== "missing" && !imgFailed;
   const dims = dimsLabel(item.width_actual_in, item.length_actual_in);
   return (
     <div className="pi-card">
       <div className="pi-card-img-wrap">
         {hasImage ? (
-          <img src={src!} alt="" className="pi-card-img" loading="lazy" onError={() => setImgFailed(true)} />
+          <button
+            type="button"
+            className="pi-card-img-btn"
+            onClick={() => onImageClick?.(item)}
+            disabled={!canZoom}
+            aria-label={canZoom ? `View full-size photo${item.inventory_id ? ` for ID ${item.inventory_id}` : ""}` : undefined}
+            title={canZoom ? "View full-size photo" : undefined}
+          >
+            <img src={thumbSrc!} alt="" className="pi-card-img" loading="lazy" onError={() => setImgFailed(true)} />
+            {canZoom ? <span className="pi-card-zoom-hint" aria-hidden>Zoom</span> : null}
+          </button>
         ) : (
           <div className="pi-card-fallback" aria-hidden>
             <span>{colorInitials(item.color_name)}</span>
