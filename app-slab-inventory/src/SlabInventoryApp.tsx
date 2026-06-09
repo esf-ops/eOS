@@ -28,7 +28,12 @@ type Slab = {
   image_url: string | null;
   thumbnail_url: string | null;
   image_status: string;
+  inventory_source?: string | null;
+  image_url_pattern?: string | null;
+  image_source_label?: string | null;
 };
+
+type InventorySourceFilter = "" | "slabcloud" | "slabsmith" | "all";
 
 type LastSync = {
   id: string;
@@ -182,6 +187,17 @@ type MainTab = "elite100" | "non_stock" | "all_inventory";
 const DEFAULT_WORKSPACE_NAME = "Elite Stone Fabrication";
 const PAGE_SIZE = 60;
 
+const INVENTORY_SOURCE_OPTIONS: { value: InventorySourceFilter; label: string }[] = [
+  { value: "", label: "Default (env)" },
+  { value: "slabcloud", label: "SlabCloud" },
+  { value: "slabsmith", label: "Slabsmith" },
+  { value: "all", label: "All sources" },
+];
+
+function inventorySourceQuery(source: InventorySourceFilter): string {
+  return source ? `?source=${encodeURIComponent(source)}` : "";
+}
+
 /* ─────────────────────────────────────────── utils */
 
 function homeLauncherUrl(): string {
@@ -320,6 +336,8 @@ export default function SlabInventoryApp() {
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [healthOpen, setHealthOpen] = useState(false);
+  const [inventorySource, setInventorySource] = useState<InventorySourceFilter>("");
+  const [activeInventorySource, setActiveInventorySource] = useState<string | null>(null);
 
   const homeBase = useMemo(() => homeLauncherUrl(), []);
   const workspaceLogoUrl = EOS_LOGO_URL || undefined;
@@ -397,21 +415,23 @@ export default function SlabInventoryApp() {
 
   const loadMeta = useCallback(async () => {
     if (!sessionToken) return;
+    const sourceQ = inventorySourceQuery(inventorySource);
     try {
       const [s, f] = await Promise.all([
-        apiGetJson("/api/slab-inventory/summary", sessionToken) as Promise<{ summary?: Summary; installed?: boolean }>,
-        apiGetJson("/api/slab-inventory/filters", sessionToken) as Promise<{ filters?: Filters; installed?: boolean }>
+        apiGetJson(`/api/slab-inventory/summary${sourceQ}`, sessionToken) as Promise<{ summary?: Summary; installed?: boolean; active_inventory_source?: string }>,
+        apiGetJson(`/api/slab-inventory/filters${sourceQ}`, sessionToken) as Promise<{ filters?: Filters; installed?: boolean }>
       ]);
       if (s.installed === false || f.installed === false) { setNotInstalled(true); return; }
       setNotInstalled(false);
       if (s.summary) setSummary(s.summary);
       if (f.filters) setFilters(f.filters);
+      setActiveInventorySource(s.active_inventory_source ?? null);
     } catch (e: unknown) {
       if (e instanceof ApiError && e.status === 403) setErr("Forbidden — you need eliteOS Slab Inventory head access.");
       else if (e instanceof ApiError && e.status === 503) setNotInstalled(true);
       else setErr(e instanceof ApiError ? e.message : String(e));
     }
-  }, [sessionToken]);
+  }, [sessionToken, inventorySource]);
 
   const loadElite100 = useCallback(async () => {
     if (!sessionToken || elite100Loaded) return;
@@ -485,6 +505,7 @@ export default function SlabInventoryApp() {
   /* All Inventory slab loading */
   const buildQuery = useCallback(() => {
     const p = new URLSearchParams();
+    if (inventorySource) p.set("source", inventorySource);
     if (search) p.set("search", search);
     if (fMaterial) p.set("material_name", fMaterial);
     if (fColor) p.set("color_name", fColor);
@@ -496,7 +517,7 @@ export default function SlabInventoryApp() {
     p.set("sort", sort); p.set("direction", direction);
     p.set("limit", String(PAGE_SIZE)); p.set("offset", String(page * PAGE_SIZE));
     return p.toString();
-  }, [search, fMaterial, fColor, fPriceGroup, fThickness, fRack, fDistributor, fImageStatus, sort, direction, page]);
+  }, [inventorySource, search, fMaterial, fColor, fPriceGroup, fThickness, fRack, fDistributor, fImageStatus, sort, direction, page]);
 
   const loadSlabs = useCallback(async () => {
     if (!sessionToken) return;
@@ -523,7 +544,7 @@ export default function SlabInventoryApp() {
     return () => clearTimeout(t);
   }, [searchInput]);
 
-  useEffect(() => { setPage(0); }, [fMaterial, fColor, fPriceGroup, fThickness, fRack, fDistributor, fImageStatus, sort, direction]);
+  useEffect(() => { setPage(0); }, [fMaterial, fColor, fPriceGroup, fThickness, fRack, fDistributor, fImageStatus, sort, direction, inventorySource]);
 
   const resetFilters = () => {
     setSearchInput(""); setSearch(""); setFMaterial(""); setFColor(""); setFPriceGroup("");
@@ -540,6 +561,10 @@ export default function SlabInventoryApp() {
   if (fThickness) activeChips.push({ key: "thickness", label: `Thickness · ${fThickness}`, onClear: () => setFThickness("") });
   if (fRack) activeChips.push({ key: "rack", label: `Rack · ${fRack}`, onClear: () => setFRack("") });
   if (fDistributor) activeChips.push({ key: "distributor", label: `Distributor · ${fDistributor}`, onClear: () => setFDistributor("") });
+  if (inventorySource) {
+    const srcLabel = INVENTORY_SOURCE_OPTIONS.find((o) => o.value === inventorySource)?.label ?? inventorySource;
+    activeChips.push({ key: "source", label: `Source · ${srcLabel}`, onClear: () => setInventorySource("") });
+  }
 
   const rangeStart = total === 0 ? 0 : page * PAGE_SIZE + 1;
   const rangeEnd = Math.min(total, (page + 1) * PAGE_SIZE);
@@ -866,6 +891,18 @@ export default function SlabInventoryApp() {
                       <input type="search" value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder="Search color, material, inventory ID, rack, lot…" aria-label="Search slabs" />
                     </div>
                     <div className="search-actions">
+                      <label className="sort-control" title="Debug/QA: override SLAB_INVENTORY_ACTIVE_SOURCE for this session">
+                        <span>Source</span>
+                        <select
+                          value={inventorySource}
+                          onChange={(e) => setInventorySource(e.target.value as InventorySourceFilter)}
+                          aria-label="Inventory source filter"
+                        >
+                          {INVENTORY_SOURCE_OPTIONS.map((o) => (
+                            <option key={o.value || "default"} value={o.value}>{o.label}</option>
+                          ))}
+                        </select>
+                      </label>
                       <label className="sort-control">
                         <span>Sort</span>
                         <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
@@ -914,7 +951,10 @@ export default function SlabInventoryApp() {
 
                 {/* Result meta + health */}
                 <div className="result-meta">
-                  <span>{busy ? "Loading…" : `Showing ${rangeStart.toLocaleString()}–${rangeEnd.toLocaleString()} of ${total.toLocaleString()}`}</span>
+                  <span>
+                    {busy ? "Loading…" : `Showing ${rangeStart.toLocaleString()}–${rangeEnd.toLocaleString()} of ${total.toLocaleString()}`}
+                    {activeInventorySource ? ` · source=${activeInventorySource}` : null}
+                  </span>
                   <span className="result-meta-right">
                     {summary?.last_sync ? (
                       <button type="button" className="health-toggle-btn" onClick={() => setHealthOpen((o) => !o)} aria-expanded={healthOpen}>
@@ -1150,6 +1190,8 @@ function SlabLightbox({ slab, index, count, onClose, onPrev, onNext }: { slab: S
             <DetailRow label="Lot" value={slab.lot} />
             <DetailRow label="Inventory ID" value={slab.inventory_id} mono />
             <DetailRow label="Image status" value={<span className={`img-status img-${slab.image_status}`}>{slab.image_status}</span>} />
+            {slab.image_source_label ? <DetailRow label="Image source" value={slab.image_source_label} /> : null}
+            {slab.inventory_source ? <DetailRow label="Inventory source" value={slab.inventory_source} /> : null}
             <DetailRow label="Active" value={slab.is_active ? "Yes" : "No"} />
           </div>
           <details className="tech-details">
