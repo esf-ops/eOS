@@ -1,26 +1,36 @@
 #!/usr/bin/env node
 /**
- * importSlabsmithInventoryXml.js — Slabsmith XML inventory dry-run import.
+ * importSlabsmithInventoryXml.js — Slabsmith XML inventory import (dry-run + write-gated).
  *
- * Reads a Slabsmith export XML file, normalizes rows, and prints a summary.
- * NO Supabase writes. NO SQL Server connection. NO API routes.
+ * Reads a Slabsmith export XML file, normalizes rows, and either:
+ *   - prints a dry-run summary (default), or
+ *   - persists to Supabase when SLABSMITH_INVENTORY_WRITE_ENABLED=1.
+ *
+ * NO SQL Server connection. NO API routes.
  *
  * Usage:
  *   node backend-core/src/scripts/slabsmith/importSlabsmithInventoryXml.js
  *   node backend-core/src/scripts/slabsmith/importSlabsmithInventoryXml.js --file path/to/slabs.xml
  *
+ * Write mode (requires env):
+ *   SLABSMITH_INVENTORY_WRITE_ENABLED=1
+ *   SUPABASE_URL
+ *   SUPABASE_SERVICE_ROLE_KEY
+ *   SLABOS_ORGANIZATION_ID
+ *   SLABSMITH_SYNC_TRIGGERED_BY=local_script   (optional)
+ *
  * Default file (when --file omitted):
  *   debug/slabsmith/source-samples/slabs.xml  (repo root, gitignored)
  *
- * Sanitized fixture for CI/local smoke:
- *   backend-core/src/slabsmith/fixtures/sample-slabs.xml
- *
  * npm:
  *   npm run eos:slabsmith:import-inventory:dry-run
+ *   npm run eos:slabsmith:import-inventory
  */
+import "dotenv/config";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createClient } from "@supabase/supabase-js";
 
 import {
   SLABSMITH_EXTERNAL_SOURCE,
@@ -28,6 +38,11 @@ import {
   normalizeSlabsmithInventory,
   summarizeSlabsmithRows,
 } from "../../slabsmith/normalizeSlabsmithInventory.js";
+import {
+  isSlabsmithWriteEnabled,
+  persistSlabsmithInventory,
+  SLABSMITH_WRITE_ENV,
+} from "../../slabsmith/slabsmithPersistence.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "../../../..");
@@ -150,6 +165,39 @@ export function formatDryRunReport(summary, meta) {
 }
 
 /**
+ * @param {Record<string, unknown>} result
+ * @param {{ xmlPath: string, usedDefaultPath: boolean }} meta
+ */
+export function formatWriteReport(result, meta) {
+  const lines = [
+    "Slabsmith inventory import — WRITE MODE",
+    "",
+    `XML file: ${meta.xmlPath}`,
+    meta.usedDefaultPath ? "  (default path)" : "  (--file override)",
+    "",
+    `rows_seen: ${result.rows_seen}`,
+    `inserted: ${result.inserted ?? 0}`,
+    `updated: ${result.updated ?? 0}`,
+    `unchanged: ${result.unchanged ?? 0}`,
+    `raw_records_written: ${result.raw_records_written ?? 0}`,
+    `slab_inventory_upserted: ${result.slab_inventory_upserted ?? 0}`,
+    `needs_review: ${result.needs_review ?? 0}`,
+    `sync_run_id: ${result.syncRunId ?? "(none)"}`,
+    `status: ${result.status ?? "(unknown)"}`,
+    `errors: ${result.errors ?? "none"}`,
+  ];
+
+  if (Array.isArray(result.warnings) && result.warnings.length) {
+    lines.push("", "warnings:", ...result.warnings.slice(0, 10).map((w) => `  - ${w}`));
+    if (result.warnings.length > 10) {
+      lines.push(`  … and ${result.warnings.length - 10} more`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+/**
  * @param {Record<string, number> | undefined} counts
  * @returns {string[]}
  */
@@ -174,8 +222,44 @@ export function readAndNormalizeXmlFile(xmlPath) {
   return rows;
 }
 
+/**
+ * Validate write-mode environment. Never prints secret values.
+ */
+export function validateWriteEnv() {
+  /** @type {string[]} */
+  const missing = [];
+  if (!process.env.SUPABASE_URL?.trim()) missing.push("SUPABASE_URL");
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()) missing.push("SUPABASE_SERVICE_ROLE_KEY");
+  if (!(process.env.SLABOS_ORGANIZATION_ID || process.env.SLABCLOUD_ORGANIZATION_ID)?.trim()) {
+    missing.push("SLABOS_ORGANIZATION_ID");
+  }
+  if (missing.length) {
+    throw new Error(
+      `Write mode requires: ${missing.join(", ")}. Set ${SLABSMITH_WRITE_ENV}=1 only when ready to persist.`
+    );
+  }
+}
+
+/**
+ * @returns {import("@supabase/supabase-js").SupabaseClient}
+ */
+export function createWriteSupabaseClient() {
+  validateWriteEnv();
+  return createClient(process.env.SUPABASE_URL.trim(), process.env.SUPABASE_SERVICE_ROLE_KEY.trim(), {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
+
+export function resolveOrganizationId() {
+  return (
+    process.env.SLABOS_ORGANIZATION_ID?.trim() ||
+    process.env.SLABCLOUD_ORGANIZATION_ID?.trim() ||
+    null
+  );
+}
+
 function printMissingFileHelp(requestedPath, usedDefaultPath) {
-  console.error("Slabsmith inventory dry-run — XML file not found.\n");
+  console.error("Slabsmith inventory import — XML file not found.\n");
   console.error(`Path: ${requestedPath}\n`);
 
   if (usedDefaultPath) {
@@ -194,7 +278,7 @@ function printMissingFileHelp(requestedPath, usedDefaultPath) {
 }
 
 function printHelp() {
-  console.log(`Slabsmith inventory XML dry-run
+  console.log(`Slabsmith inventory XML import
 
 Usage:
   node backend-core/src/scripts/slabsmith/importSlabsmithInventoryXml.js [--file <path>]
@@ -203,8 +287,19 @@ Options:
   --file <path>   Slabsmith export XML (default: debug/slabsmith/source-samples/slabs.xml)
   --help, -h      Show this help
 
+Dry-run (default):
+  No Supabase writes unless ${SLABSMITH_WRITE_ENV}=1
+
+Write mode:
+  ${SLABSMITH_WRITE_ENV}=1
+  SUPABASE_URL
+  SUPABASE_SERVICE_ROLE_KEY
+  SLABOS_ORGANIZATION_ID
+  SLABSMITH_SYNC_TRIGGERED_BY=local_script   (optional)
+
 npm:
   npm run eos:slabsmith:import-inventory:dry-run
+  npm run eos:slabsmith:import-inventory
 `);
 }
 
@@ -212,7 +307,7 @@ npm:
  * @param {string[]} argv
  * @returns {Promise<number>} exit code
  */
-export async function runImportDryRun(argv = process.argv) {
+export async function runSlabsmithImport(argv = process.argv) {
   const { filePath: cliPath, help } = parseCliArgs(argv);
   if (help) {
     printHelp();
@@ -221,6 +316,7 @@ export async function runImportDryRun(argv = process.argv) {
 
   const usedDefaultPath = !cliPath;
   const xmlPath = resolveXmlPath(cliPath);
+  const meta = { xmlPath, usedDefaultPath };
 
   if (!existsSync(xmlPath)) {
     printMissingFileHelp(xmlPath, usedDefaultPath);
@@ -229,18 +325,45 @@ export async function runImportDryRun(argv = process.argv) {
 
   try {
     const rows = readAndNormalizeXmlFile(xmlPath);
-    const summary = buildImportDryRunSummary(rows);
-    console.log(formatDryRunReport(summary, { xmlPath, usedDefaultPath }));
-    return 0;
+    const writeEnabled = isSlabsmithWriteEnabled();
+
+    if (!writeEnabled) {
+      const summary = buildImportDryRunSummary(rows);
+      console.log(formatDryRunReport(summary, meta));
+      return 0;
+    }
+
+    validateWriteEnv();
+    const db = createWriteSupabaseClient();
+    const organizationId = resolveOrganizationId();
+    const triggeredBy = process.env.SLABSMITH_SYNC_TRIGGERED_BY?.trim() || "local_script";
+
+    const result = await persistSlabsmithInventory({
+      db,
+      organizationId,
+      normalized: rows,
+      writeEnabled: true,
+      runMeta: { triggeredBy },
+    });
+
+    console.log(formatWriteReport(result, meta));
+    return result.status === "completed" ? 0 : 1;
   } catch (err) {
-    console.error("Slabsmith inventory dry-run failed:");
+    console.error(
+      isSlabsmithWriteEnabled()
+        ? "Slabsmith inventory write failed:"
+        : "Slabsmith inventory dry-run failed:"
+    );
     console.error(String(err?.message || err));
     return 1;
   }
 }
 
+/** @deprecated alias */
+export const runImportDryRun = runSlabsmithImport;
+
 async function main() {
-  const code = await runImportDryRun();
+  const code = await runSlabsmithImport();
   process.exit(code);
 }
 
