@@ -152,6 +152,23 @@ Do **not** schedule image upload yet — validate manually with `--limit 5` firs
 
 With `SLAB_INVENTORY_ACTIVE_SOURCE=slabsmith`, **All Inventory** shows local Slabsmith rows automatically (no source selector in the UI). Uploaded photos resolve from `slab_images` where `image_url_pattern=slabsmith_local_upload` and `image_status=ok`, joined on `external_slab_id` (Slabsmith `InventoryID`). The slab lightbox **Technical details** panel shows **Image source: Local inventory image** when the resolver picked a local upload row. Operators can still override via `?source=slabsmith|slabcloud|all` on API routes for admin/debug.
 
+## Elite 100 catalog ↔ inventory matching
+
+Elite 100 current inventory counts require **exact catalog name match** or an approved row in `slab_color_aliases`. Slabsmith color/material spellings often differ from the Elite 100 catalog (e.g. Promo group ASMI / Q Quartz materials).
+
+**Match report (read-only):**
+
+```bash
+SLABOS_ORGANIZATION_ID=<org-uuid> \
+SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
+SLAB_INVENTORY_ACTIVE_SOURCE=slabsmith \
+npm run eos:slab-inventory:elite100-match-report
+```
+
+Add `--json` for machine-readable output. Unmatched catalog colors list fuzzy inventory candidates — use these to author `slab_color_aliases` (see `importElite100AliasReviews.js`), not hardcoded frontend mappings.
+
+**API debug (staff auth):** `GET /api/slab-inventory/elite100-programs?debug=match` adds `match_debug` on each card plus a summary block.
+
 ## Hourly schedule
 
 Use `install-task-scheduler.example.ps1` as a template. Task name: **eliteOS Slabsmith Inventory Sync**. Example cadence: every 60 minutes. **Leave disabled** until operators validate one manual send and backend counts (`?source=slabsmith` on summary API).

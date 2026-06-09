@@ -73,9 +73,34 @@ export async function fetchActiveInventoryRowsPaginated(
   scopeQuery,
   selectColumns = SUMMARY_ACTIVE_SELECT_COLUMNS
 ) {
+  const { rows } = await fetchActiveInventoryRowsPaginatedWithMeta(
+    db,
+    scopeQuery,
+    selectColumns
+  );
+  return rows;
+}
+
+/**
+ * Paginated active inventory fetch with page metadata (Supabase default cap = 1000).
+ * @param {import("@supabase/supabase-js").SupabaseClient} db
+ * @param {(q: object) => object} scopeQuery
+ * @param {string} [selectColumns]
+ * @returns {Promise<{
+ *   rows: Array<Record<string, unknown>>,
+ *   active_inventory_rows_fetched: number,
+ *   active_inventory_fetch_pages: number,
+ * }>}
+ */
+export async function fetchActiveInventoryRowsPaginatedWithMeta(
+  db,
+  scopeQuery,
+  selectColumns = SUMMARY_ACTIVE_SELECT_COLUMNS
+) {
   /** @type {Array<Record<string, unknown>>} */
   const all = [];
   let offset = 0;
+  let pages = 0;
 
   while (true) {
     let q = db
@@ -90,11 +115,46 @@ export async function fetchActiveInventoryRowsPaginated(
 
     const batch = data ?? [];
     all.push(...batch);
+    pages += 1;
     if (batch.length < SUMMARY_FETCH_PAGE_SIZE) break;
     offset += SUMMARY_FETCH_PAGE_SIZE;
   }
 
-  return all;
+  return {
+    rows: all,
+    active_inventory_rows_fetched: all.length,
+    active_inventory_fetch_pages: pages,
+  };
+}
+
+/**
+ * Verify paginated fetch against exact head count; surface incomplete-fetch warnings.
+ * @param {import("@supabase/supabase-js").SupabaseClient} db
+ * @param {(q: object) => object} scopeQuery
+ * @param {{ rows: Array, active_inventory_rows_fetched: number, active_inventory_fetch_pages: number }} fetchResult
+ */
+export async function verifyActiveInventoryFetchComplete(db, scopeQuery, fetchResult) {
+  const expected = await countActiveInventoryRows(db, scopeQuery);
+  const fetched = fetchResult.active_inventory_rows_fetched;
+  const complete = fetched === expected;
+  /** @type {string|null} */
+  let fetch_warning = null;
+
+  if (!complete) {
+    fetch_warning = `Inventory fetch incomplete: fetched ${fetched} active rows but exact count is ${expected}. Elite 100 matching may be under-counted.`;
+  } else if (
+    fetched === SUMMARY_FETCH_PAGE_SIZE &&
+    expected > SUMMARY_FETCH_PAGE_SIZE &&
+    fetchResult.active_inventory_fetch_pages < 2
+  ) {
+    fetch_warning = `Fetched exactly ${SUMMARY_FETCH_PAGE_SIZE} rows in one page while ${expected} active rows exist — pagination may be broken.`;
+  }
+
+  return {
+    expected_active_count: expected,
+    active_inventory_fetch_complete: complete,
+    fetch_warning,
+  };
 }
 
 /**

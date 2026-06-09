@@ -45,6 +45,15 @@ import {
   summarizeElite100CurrentInventory,
 } from "./elite100CardModel.js";
 import {
+  compactElite100MatchDebug,
+  diagnoseElite100CatalogItem,
+  groupInventoryByColorMaterial,
+} from "./elite100MatchDiagnostics.js";
+import {
+  fetchAllActiveInventoryRowsForElite100Matching,
+  fetchAllActiveInventoryRowsForScope,
+} from "./elite100InventoryFetch.js";
+import {
   buildImageMap,
   imagePatternDisplayLabel,
   lookupInventoryImage,
@@ -71,6 +80,16 @@ export {
 } from "./elite100CardModel.js";
 
 export {
+  aliasesForCatalogItem,
+  buildElite100MatchReport,
+  compactElite100MatchDebug,
+  diagnoseElite100CatalogItem,
+  groupInventoryByColorMaterial,
+  matchInventoryToCatalogItem,
+  suggestFuzzyInventoryCandidates,
+} from "./elite100MatchDiagnostics.js";
+
+export {
   applyInventorySourceFilter,
   resolveInventorySourceFilter,
 } from "./slabInventorySourceFilter.js";
@@ -78,11 +97,18 @@ export {
   countActiveInventoryRows,
   countActiveNotSeenInSync,
   fetchActiveInventoryRowsPaginated,
+  fetchActiveInventoryRowsPaginatedWithMeta,
   fetchLatestSyncRun,
   resolveSummarySyncCoverage,
   simulateTruncatedActiveFetch,
   SUMMARY_FETCH_PAGE_SIZE,
+  verifyActiveInventoryFetchComplete,
 } from "./slabInventorySummaryQueries.js";
+
+export {
+  fetchAllActiveInventoryRowsForElite100Matching,
+  fetchAllActiveInventoryRowsForScope,
+} from "./elite100InventoryFetch.js";
 
 export const SLAB_INVENTORY_HEAD_SLUG = "slab_inventory";
 
@@ -720,20 +746,7 @@ export function buildElite100InventoryMap(invRows, catalogItemList, resolvedAlia
     ])
   );
 
-  // Deduplicate source colors before matching for performance.
-  /** @type {Map<string, { color_name: string|null, material_name: string|null, rows: Array }>} */
-  const uniqueGroups = new Map();
-  for (const r of Array.isArray(invRows) ? invRows : []) {
-    const key = `${r.color_name ?? ""}||${r.material_name ?? ""}`;
-    if (!uniqueGroups.has(key)) {
-      uniqueGroups.set(key, {
-        color_name: r.color_name,
-        material_name: r.material_name,
-        rows: [],
-      });
-    }
-    uniqueGroups.get(key).rows.push(r);
-  }
+  const uniqueGroups = groupInventoryByColorMaterial(invRows);
 
   // Match each unique source color group against the catalog.
   for (const sourceGroup of uniqueGroups.values()) {
@@ -1335,21 +1348,14 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
       }
 
       // Load active inventory from the configured source (same basis as All Inventory).
-      let invQ = supabase
-        .from("slab_inventory")
-        .select(ELITE100_INVENTORY_MATCH_COLUMNS.join(","))
-        .eq("is_active", true);
-      invQ = scopeInventory(invQ, organizationId, sourceFilter);
-      const { data: invRows, error: invErr } = await invQ;
-      if (invErr) {
-        if (isMissingRelationError(invErr)) {
-          return res.status(503).json({
-            ok: false,
-            installed: false,
-            message: "Slab inventory cache not installed.",
-          });
-        }
-        throw invErr;
+      const scopeInv = (q) => scopeInventory(q, organizationId, sourceFilter);
+      const inventoryFetch = await fetchAllActiveInventoryRowsForElite100Matching(
+        supabase,
+        scopeInv
+      );
+      const invRows = inventoryFetch.rows;
+      if (inventoryFetch.fetch_warning) {
+        console.warn("[elite100-programs]", inventoryFetch.fetch_warning);
       }
 
       // Load all org images (avoiding PostgREST URL-length limit).
@@ -1366,6 +1372,23 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
         catalogItemList,
         resolvedAliases
       );
+
+      const includeMatchDebug = trimStr(req.query.debug).toLowerCase() === "match";
+      /** @type {Map<string, ReturnType<typeof diagnoseElite100CatalogItem>>|null} */
+      let matchDebugByCatalogId = null;
+      if (includeMatchDebug) {
+        matchDebugByCatalogId = new Map(
+          catalogItemList.map((item) => [
+            item.id,
+            diagnoseElite100CatalogItem(
+              item,
+              invRows ?? [],
+              catalogItemList,
+              resolvedAliases
+            ),
+          ])
+        );
+      }
 
       // Load visual assets from cache (slab_color_visual_assets).
       // Non-fatal: if table is not installed yet, visual asset fields are null.
@@ -1475,6 +1498,9 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
           program_status: "elite_100",
           _sort_order: item.sort_order ?? 9999,
         };
+        if (matchDebugByCatalogId?.has(item.id)) {
+          card.match_debug = compactElite100MatchDebug(matchDebugByCatalogId.get(item.id));
+        }
         groupsMap.get(pg).push(card);
       }
 
@@ -1488,6 +1514,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
       res.json({
         ok: true,
         installed: true,
+        active_inventory_source: sourceFilter.resolved,
         collection: {
           collection_key: collection.collection_key,
           display_name: collection.display_name,
@@ -1496,6 +1523,23 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
         },
         groups,
         price_group_order: [...COLOR_PROGRAM_PRICE_GROUP_ORDER],
+        ...(includeMatchDebug
+          ? {
+              match_report_summary: {
+                inventory_row_count: invRows.length,
+                catalog_item_count: catalogItemList.length,
+                matched_catalog_count: catalogItemList.filter(
+                  (c) => (elite100Map.get(c.id)?.rows?.length ?? 0) > 0
+                ).length,
+                active_inventory_rows_fetched: inventoryFetch.active_inventory_rows_fetched,
+                expected_active_count: inventoryFetch.expected_active_count,
+                active_inventory_fetch_pages: inventoryFetch.active_inventory_fetch_pages,
+                active_inventory_fetch_complete: inventoryFetch.active_inventory_fetch_complete,
+                fetch_warning: inventoryFetch.fetch_warning,
+                note: "Debug only (?debug=match). Fuzzy candidates are suggestions — not counted as inventory.",
+              },
+            }
+          : {}),
       });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
@@ -1564,21 +1608,15 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
         }));
 
         // Load active inventory from configured source; match to this catalog item in JS.
-        let invQ = supabase
-          .from("slab_inventory")
-          .select(COLOR_INVENTORY_SELECT_COLUMNS.join(","))
-          .eq("is_active", true);
-        invQ = scopeInventory(invQ, organizationId, sourceFilter);
-        const { data: invRows, error: invErr } = await invQ;
-        if (invErr) {
-          if (isMissingRelationError(invErr)) {
-            return res.status(503).json({
-              ok: false,
-              installed: false,
-              message: "Slab inventory cache not installed.",
-            });
-          }
-          throw invErr;
+        const scopeInv = (q) => scopeInventory(q, organizationId, sourceFilter);
+        const inventoryFetch = await fetchAllActiveInventoryRowsForScope(
+          supabase,
+          scopeInv,
+          COLOR_INVENTORY_SELECT_COLUMNS.join(",")
+        );
+        const invRows = inventoryFetch.rows;
+        if (inventoryFetch.fetch_warning) {
+          console.warn("[elite100-inventory]", inventoryFetch.fetch_warning);
         }
 
         // Filter to rows that match this catalog item (exact or alias only).
