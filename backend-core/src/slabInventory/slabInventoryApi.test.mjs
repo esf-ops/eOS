@@ -1220,7 +1220,7 @@ const ASSET_INACTIVE = {
 // buildVisualAssetEnrichmentFields
 {
   const fields = buildVisualAssetEnrichmentFields(ASSET_TEXTURE_APPROVED);
-  assert.equal(fields.visual_asset_url, ASSET_TEXTURE_APPROVED.texture_url_600, "visual_asset_url = texture_url_600");
+  assert.equal(fields.visual_asset_url, ASSET_TEXTURE_APPROVED.texture_url_1024, "visual_asset_url = texture_url_1024");
   assert.equal(fields.visual_asset_url_600, ASSET_TEXTURE_APPROVED.texture_url_600, "visual_asset_url_600");
   assert.equal(fields.visual_asset_url_1024, ASSET_TEXTURE_APPROVED.texture_url_1024, "visual_asset_url_1024");
   assert.equal(fields.visual_asset_source, "slabcloud_v2", "visual_asset_source");
@@ -1301,46 +1301,53 @@ const ASSET_INACTIVE = {
   console.log("ok: buildNonStockVisualAssetMap — correct keys and assets");
 }
 
-// Elite 100 card image priority: visual asset URL preferred over representative slab image
+// Elite 100 card: reference image from catalog only (not live inventory photos)
 {
-  // Simulate what the route produces: card with both visual asset and representative image
-  const visualEnrichment = buildVisualAssetEnrichmentFields(ASSET_TEXTURE_APPROVED);
+  const { buildElite100ReferenceImageFields } = await import("./elite100CardModel.js");
+  const referenceFields = buildElite100ReferenceImageFields(ASSET_TEXTURE_APPROVED);
   const card = {
     catalog_item_id: "cat-001",
     color_name: "Alabaster",
     representative_image_url: "https://example.com/slab-photo.jpg",
     representative_thumbnail_url: "https://example.com/slab-thumb.jpg",
-    ...visualEnrichment,
+    current_inventory_image_url: "https://example.com/slab-photo.jpg",
+    ...referenceFields,
+    has_inventory: true,
+    current_inventory_count: 2,
   };
-  // Frontend priority: visual_asset_url_600 first, then representative_image_url
-  const displayUrl = card.visual_asset_url_600 || card.visual_asset_url_1024
-    || card.representative_thumbnail_url || card.representative_image_url;
+  const cardDisplayUrl = card.reference_image_url;
   assert.equal(
-    displayUrl,
-    ASSET_TEXTURE_APPROVED.texture_url_600,
-    "visual_asset_url_600 is preferred over representative_image_url"
+    cardDisplayUrl,
+    ASSET_TEXTURE_APPROVED.texture_url_1024,
+    "card uses catalog reference_image_url (1024), not inventory slab photo"
   );
-  console.log("ok: elite100 card — visual_asset_url_600 preferred over representative slab image");
+  assert.notEqual(cardDisplayUrl, card.representative_image_url);
+  console.log("ok: elite100 card — reference_image_url from catalog, separate from inventory");
 }
 
-// Elite 100 card image priority: fallback to representative slab when no visual asset
+// Elite 100 card: zero inventory still shows reference image
 {
-  const visualEnrichment = buildVisualAssetEnrichmentFields(null); // no visual asset
+  const { buildElite100ReferenceImageFields } = await import("./elite100CardModel.js");
+  const referenceFields = buildElite100ReferenceImageFields(ASSET_TEXTURE_APPROVED);
   const card = {
-    catalog_item_id: "cat-001",
-    color_name: "Alabaster",
-    representative_image_url: "https://example.com/slab-photo.jpg",
-    representative_thumbnail_url: "https://example.com/slab-thumb.jpg",
-    ...visualEnrichment,
+    ...referenceFields,
+    has_inventory: false,
+    current_inventory_count: 0,
+    representative_image_url: null,
   };
-  const displayUrl = card.visual_asset_url_600 || card.visual_asset_url_1024
-    || card.representative_thumbnail_url || card.representative_image_url;
-  assert.equal(
-    displayUrl,
-    "https://example.com/slab-thumb.jpg",
-    "falls back to representative_thumbnail_url when no visual asset"
-  );
-  console.log("ok: elite100 card — fallback to representative slab image when no visual asset");
+  assert.ok(card.reference_image_url, "reference image present when inventory is zero");
+  assert.equal(card.has_inventory, false);
+  console.log("ok: elite100 card — reference image when zero inventory");
+}
+
+// Elite 100 card: placeholder when no catalog reference and no inventory
+{
+  const { buildElite100ReferenceImageFields } = await import("./elite100CardModel.js");
+  const referenceFields = buildElite100ReferenceImageFields(null);
+  const cardDisplayUrl = referenceFields.reference_image_url
+    || null;
+  assert.equal(cardDisplayUrl, null, "no reference → UI placeholder");
+  console.log("ok: elite100 card — placeholder when no catalog reference");
 }
 
 // count_for_color and v2 display count are never used as inventory authority

@@ -39,6 +39,12 @@ import {
   normalizeMaterialName as _normMatName,
 } from "./colorProgramMatching.js";
 import {
+  buildElite100CurrentInventoryImageFields,
+  buildElite100ReferenceImageFields,
+  ELITE100_INVENTORY_MATCH_COLUMNS,
+  summarizeElite100CurrentInventory,
+} from "./elite100CardModel.js";
+import {
   buildImageMap,
   imagePatternDisplayLabel,
   lookupInventoryImage,
@@ -54,6 +60,15 @@ export {
   PREFERRED_IMAGE_PATTERN,
   SLAB_IMAGE_SELECT_COLUMNS,
 } from "./slabInventoryImageResolver.js";
+
+export {
+  buildElite100CurrentInventoryImageFields,
+  buildElite100ReferenceImageFields,
+  chooseCatalogReferenceImageUrl,
+  catalogReferenceImageSourceLabel,
+  ELITE100_INVENTORY_MATCH_COLUMNS,
+  summarizeElite100CurrentInventory,
+} from "./elite100CardModel.js";
 
 export {
   applyInventorySourceFilter,
@@ -390,7 +405,7 @@ export function buildVisualAssetEnrichmentFields(asset) {
   }
   return {
     visual_asset_url:
-      asset.texture_url_600 ?? asset.texture_url_1024 ?? asset.original_image_url ?? asset.hero_url ?? null,
+      asset.texture_url_1024 ?? asset.hero_url ?? asset.original_image_url ?? asset.texture_url_600 ?? null,
     visual_asset_url_600:       asset.texture_url_600       ?? null,
     visual_asset_url_1024:      asset.texture_url_1024      ?? null,
     visual_asset_source:        asset.source_system         ?? null,
@@ -742,8 +757,9 @@ export function buildElite100InventoryMap(invRows, catalogItemList, resolvedAlia
       const slabId = String(r.external_slab_id ?? "").trim();
       if (slabId) acc.slabIds.push(slabId);
       acc.rows.push(r);
-      if (r.source_inventory_type === "Slab") acc.slabCount += 1;
-      else if (r.source_inventory_type === "Remnant") acc.remnantCount += 1;
+      const t = trimStr(r.source_inventory_type);
+      if (t === "Slab") acc.slabCount += 1;
+      else if (t === "Remnant") acc.remnantCount += 1;
     }
   }
 
@@ -1318,15 +1334,11 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
         });
       }
 
-      // Load typed inventory (minimal projection — no count_for_color).
+      // Load active inventory from the configured source (same basis as All Inventory).
       let invQ = supabase
         .from("slab_inventory")
-        .select(
-          "id,external_source,external_slab_id,color_name,material_name,source_inventory_type"
-        )
-        .eq("is_active", true)
-        .eq("source_inventory_scope", COLOR_PROGRAM_SCOPE)
-        .in("source_inventory_type", ["Slab", "Remnant"]);
+        .select(ELITE100_INVENTORY_MATCH_COLUMNS.join(","))
+        .eq("is_active", true);
       invQ = scopeInventory(invQ, organizationId, sourceFilter);
       const { data: invRows, error: invErr } = await invQ;
       if (invErr) {
@@ -1425,12 +1437,24 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
         const acc = elite100Map.get(item.id) ?? {
           slabCount: 0,
           remnantCount: 0,
+          rows: [],
           verifiedPhotoCount: 0,
           repImage: null,
           repThumbnail: null,
           repSourceInventoryType: null,
           repInventoryId: null,
         };
+
+        const inventorySummary = summarizeElite100CurrentInventory(acc);
+        const referenceFields = buildElite100ReferenceImageFields(
+          visualAssetMap.get(item.id) ?? null
+        );
+        const currentInventoryImages = buildElite100CurrentInventoryImageFields({
+          representative_image_url: acc.repImage ?? null,
+          representative_thumbnail_url: acc.repThumbnail ?? null,
+          representative_image_source_inventory_type: acc.repSourceInventoryType ?? null,
+          representative_image_inventory_id: acc.repInventoryId ?? null,
+        });
 
         const card = {
           catalog_item_id: item.id,
@@ -1439,18 +1463,15 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
           material_name: item.material_name,
           display_name: item.display_name,
           price_group: pg,
-          total_inventory_count:
-            (acc.slabCount ?? 0) + (acc.remnantCount ?? 0),
-          slab_count: acc.slabCount ?? 0,
-          remnant_count: acc.remnantCount ?? 0,
-          verified_photo_count: acc.verifiedPhotoCount ?? 0,
+          ...inventorySummary,
+          ...referenceFields,
+          ...currentInventoryImages,
+          // Legacy fields retained for backward compatibility (reference ≠ inventory).
           representative_image_url: acc.repImage ?? null,
           representative_thumbnail_url: acc.repThumbnail ?? null,
           representative_image_source_inventory_type: acc.repSourceInventoryType ?? null,
           representative_image_inventory_id: acc.repInventoryId ?? null,
           ...buildVisualAssetEnrichmentFields(visualAssetMap.get(item.id) ?? null),
-          has_inventory:
-            (acc.slabCount ?? 0) + (acc.remnantCount ?? 0) > 0,
           program_status: "elite_100",
           _sort_order: item.sort_order ?? 9999,
         };
@@ -1542,13 +1563,11 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
           catalog_material_name: catItem.material_name,
         }));
 
-        // Load typed inventory (all scope-filtered rows — filter by match in JS).
+        // Load active inventory from configured source; match to this catalog item in JS.
         let invQ = supabase
           .from("slab_inventory")
           .select(COLOR_INVENTORY_SELECT_COLUMNS.join(","))
-          .eq("is_active", true)
-          .eq("source_inventory_scope", COLOR_PROGRAM_SCOPE)
-          .in("source_inventory_type", ["Slab", "Remnant"]);
+          .eq("is_active", true);
         invQ = scopeInventory(invQ, organizationId, sourceFilter);
         const { data: invRows, error: invErr } = await invQ;
         if (invErr) {
@@ -1635,6 +1654,30 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
           ? mapped.filter((r) => r.source_inventory_type === "Remnant")
           : [];
 
+        // Catalog reference image (showroom hero) — independent of current stock.
+        let referenceFields = buildElite100ReferenceImageFields(null);
+        try {
+          const { data: vaRows, error: vaErr } = await supabase
+            .from("slab_color_visual_assets")
+            .select(
+              "catalog_item_id,texture_url_600,texture_url_1024,original_image_url,hero_url,asset_kind,review_status,is_primary,is_active,source_system"
+            )
+            .eq("organization_id", organizationId)
+            .eq("is_active", true)
+            .eq("catalog_item_id", catalogItemId);
+          if (vaErr && !isMissingRelationError(vaErr)) throw vaErr;
+          if (vaRows?.length) {
+            referenceFields = buildElite100ReferenceImageFields(
+              chooseVisualAssetForDisplay(vaRows)
+            );
+          }
+        } catch (vaLoadErr) {
+          console.warn(
+            "[elite100-inventory] Visual asset load error (non-fatal):",
+            vaLoadErr?.message
+          );
+        }
+
         res.json({
           ok: true,
           catalog_item: {
@@ -1643,6 +1686,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
             material_name: catItem.material_name,
             display_name: catItem.display_name,
             price_group: catItem.price_group,
+            ...referenceFields,
           },
           totals: {
             total: mapped.length,

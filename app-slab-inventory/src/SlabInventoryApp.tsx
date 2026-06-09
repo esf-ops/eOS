@@ -89,10 +89,17 @@ type Elite100Item = {
   material_name: string | null;
   display_name: string | null;
   price_group: string;
+  current_inventory_count?: number;
   total_inventory_count: number;
   slab_count: number;
   remnant_count: number;
   verified_photo_count: number;
+  reference_image_url?: string | null;
+  reference_image_url_1024?: string | null;
+  reference_image_url_600?: string | null;
+  reference_image_source?: string | null;
+  current_inventory_image_url?: string | null;
+  current_inventory_thumbnail_url?: string | null;
   representative_image_url: string | null;
   representative_thumbnail_url: string | null;
   representative_image_source_inventory_type: string | null;
@@ -175,6 +182,7 @@ type ColorModal = {
   colorName: string | null;
   materialName: string | null;
   priceGroup?: string | null;
+  referenceImageUrl?: string | null;
   representativeImageUrl?: string | null;
 } | null;
 
@@ -462,7 +470,19 @@ export default function SlabInventoryApp() {
     setModalBusy(true);
     try {
       if (modal.mode === "elite100" && modal.catalogItemId) {
-        const data = (await apiGetJson(`/api/slab-inventory/elite100-programs/${modal.catalogItemId}/inventory`, sessionToken!)) as { slabs?: PhysicalItem[]; remnants?: PhysicalItem[]; totals?: { total: number; slab_count: number; remnant_count: number } };
+        const data = (await apiGetJson(`/api/slab-inventory/elite100-programs/${modal.catalogItemId}/inventory`, sessionToken!)) as {
+          catalog_item?: { reference_image_url?: string | null; reference_image_url_1024?: string | null };
+          slabs?: PhysicalItem[];
+          remnants?: PhysicalItem[];
+          totals?: { total: number; slab_count: number; remnant_count: number };
+        };
+        const refFromApi =
+          data.catalog_item?.reference_image_url
+          || data.catalog_item?.reference_image_url_1024
+          || null;
+        if (refFromApi) {
+          setColorModal((prev) => (prev ? { ...prev, referenceImageUrl: refFromApi } : prev));
+        }
         const slabs = data.slabs ?? [];
         const remnants = data.remnants ?? [];
         setModalInventory({ slabs, remnants, total: data.totals?.total ?? slabs.length + remnants.length, slab_count: data.totals?.slab_count ?? slabs.length, remnant_count: data.totals?.remnant_count ?? remnants.length });
@@ -742,10 +762,19 @@ export default function SlabInventoryApp() {
                           colorName: item.color_name,
                           materialName: item.material_name,
                           priceGroup: item.price_group,
-                          // Image priority: v2 texture > representative slab photo
+                          referenceImageUrl:
+                            item.reference_image_url
+                            || item.reference_image_url_1024
+                            || item.reference_image_url_600
+                            || item.visual_asset_url_1024
+                            || item.visual_asset_url_600
+                            || null,
                           representativeImageUrl:
-                            item.visual_asset_url_600 || item.visual_asset_url_1024
-                            || item.representative_image_url || item.representative_thumbnail_url,
+                            item.current_inventory_thumbnail_url
+                            || item.current_inventory_image_url
+                            || item.representative_thumbnail_url
+                            || item.representative_image_url
+                            || null,
                         })}
                       />
                     ))}
@@ -1227,16 +1256,21 @@ function Elite100Section({ group, onOpenItem }: { group: Elite100Group; onOpenIt
 
 function Elite100Card({ item, onOpen }: { item: Elite100Item; onOpen: () => void }) {
   const [imgFailed, setImgFailed] = useState(false);
-  // Image priority: v2 texture > representative slab photo > placeholder
-  const src = item.visual_asset_url_600 || item.visual_asset_url_1024
-    || item.representative_thumbnail_url || item.representative_image_url;
+  const src =
+    item.reference_image_url
+    || item.reference_image_url_1024
+    || item.reference_image_url_600
+    || item.visual_asset_url_1024
+    || item.visual_asset_url_600
+    || null;
   const hasImage = Boolean(src) && !imgFailed;
+  const availableCount = item.current_inventory_count ?? item.total_inventory_count;
   return (
     <button
       type="button"
       className="cp-card"
       onClick={onOpen}
-      aria-label={`${item.color_name ?? "Color"} · ${item.has_inventory ? `${item.slab_count} slabs, ${item.remnant_count} remnants` : "No inventory"} — Open inventory`}
+      aria-label={`${item.color_name ?? "Color"} · ${item.has_inventory ? `${availableCount} current available` : "No current inventory"} — Open color`}
     >
       <div className="cp-card-mat">
         <div className="cp-card-img-wrap">
@@ -1260,11 +1294,17 @@ function Elite100Card({ item, onOpen }: { item: Elite100Item; onOpen: () => void
         {item.material_name ? (
           <p className="cp-card-material">{item.material_name}</p>
         ) : null}
-        {item.has_inventory && (item.slab_count > 0 || item.remnant_count > 0) ? (
+        {item.has_inventory && availableCount > 0 ? (
           <p className="cp-card-meta">
-            {item.slab_count > 0 && <span>{item.slab_count} slab{item.slab_count !== 1 ? "s" : ""}</span>}
-            {item.slab_count > 0 && item.remnant_count > 0 && <span className="cp-dot" aria-hidden> · </span>}
-            {item.remnant_count > 0 && <span>{item.remnant_count} remnant{item.remnant_count !== 1 ? "s" : ""}</span>}
+            <span>{availableCount} current available</span>
+            {(item.slab_count > 0 || item.remnant_count > 0) ? (
+              <>
+                <span className="cp-dot" aria-hidden> · </span>
+                {item.slab_count > 0 ? <span>{item.slab_count} slab{item.slab_count !== 1 ? "s" : ""}</span> : null}
+                {item.slab_count > 0 && item.remnant_count > 0 ? <span className="cp-dot" aria-hidden> · </span> : null}
+                {item.remnant_count > 0 ? <span>{item.remnant_count} remnant{item.remnant_count !== 1 ? "s" : ""}</span> : null}
+              </>
+            ) : null}
           </p>
         ) : (
           <p className="cp-card-no-inv-text">No current inventory</p>
@@ -1336,7 +1376,8 @@ function ColorInventoryModal({
   const totalSlabs = inventory?.slab_count ?? 0;
   const totalRemnants = inventory?.remnant_count ?? 0;
   const total = inventory?.total ?? 0;
-  const hasHeroImg = Boolean(modal.representativeImageUrl) && !heroImgFailed;
+  const hasHeroImg = Boolean(modal.referenceImageUrl ?? modal.representativeImageUrl) && !heroImgFailed;
+  const heroSrc = modal.referenceImageUrl ?? modal.representativeImageUrl;
 
   return (
     <div className="cim-overlay" role="dialog" aria-modal="true" aria-label={`${modal.colorName ?? "Color"} inventory`} onClick={onClose}>
@@ -1348,7 +1389,7 @@ function ColorInventoryModal({
           <div className="cim-hero-img-wrap">
             {hasHeroImg ? (
               <img
-                src={modal.representativeImageUrl!}
+                src={heroSrc!}
                 alt={modal.colorName ?? ""}
                 className="cim-hero-img"
                 onError={() => setHeroImgFailed(true)}
@@ -1387,7 +1428,7 @@ function ColorInventoryModal({
                 <span className="cim-stat-label">Remnants</span>
               </div>
             </div>
-            <p className="cim-source-note">Read-only · source price group imported from active inventory feed</p>
+            <p className="cim-source-note">Read-only · reference image from color catalog · current inventory from local stock</p>
           </div>
         </div>
 
