@@ -36,6 +36,80 @@ import {
   SOURCE_PRICE_GROUP_LABEL,
   summarizeActiveRows
 } from "./slabInventoryApi.js";
+import {
+  applyInventorySourceFilter,
+  filterRowsByInventorySource,
+  INVENTORY_SOURCE_ALL,
+  INVENTORY_SOURCE_SLABCLOUD,
+  INVENTORY_SOURCE_SLABSMITH,
+  normalizeInventorySourceValue,
+  resolveInventorySourceFilter,
+} from "./slabInventorySourceFilter.js";
+
+/* ── inventory source filter ───────────────────────────────────────────── */
+{
+  const unset = resolveInventorySourceFilter({ env: {} });
+  assert.equal(unset.resolved, INVENTORY_SOURCE_ALL, "unset env → all");
+  assert.equal(unset.mode, "all");
+  assert.equal(unset.externalSource, null);
+  assert.equal(unset.invalidInputIgnored, false);
+
+  const envCloud = resolveInventorySourceFilter({
+    env: { SLAB_INVENTORY_ACTIVE_SOURCE: "slabcloud" },
+  });
+  assert.equal(envCloud.resolved, INVENTORY_SOURCE_SLABCLOUD);
+  assert.equal(envCloud.mode, "single");
+  assert.equal(envCloud.externalSource, INVENTORY_SOURCE_SLABCLOUD);
+
+  const envSmith = resolveInventorySourceFilter({
+    env: { SLAB_INVENTORY_ACTIVE_SOURCE: "SLABSMITH" },
+  });
+  assert.equal(envSmith.resolved, INVENTORY_SOURCE_SLABSMITH);
+  assert.equal(envSmith.mode, "single");
+
+  const envAll = resolveInventorySourceFilter({
+    env: { SLAB_INVENTORY_ACTIVE_SOURCE: "all" },
+  });
+  assert.equal(envAll.resolved, INVENTORY_SOURCE_ALL);
+  assert.equal(envAll.mode, "all");
+
+  const invalidEnv = resolveInventorySourceFilter({
+    env: { SLAB_INVENTORY_ACTIVE_SOURCE: "not-a-source" },
+  });
+  assert.equal(invalidEnv.resolved, INVENTORY_SOURCE_ALL, "invalid env → all");
+  assert.equal(invalidEnv.invalidInputIgnored, true);
+
+  const queryOverride = resolveInventorySourceFilter({
+    env: { SLAB_INVENTORY_ACTIVE_SOURCE: "slabcloud" },
+    querySource: "slabsmith",
+  });
+  assert.equal(queryOverride.resolved, INVENTORY_SOURCE_SLABSMITH, "query overrides env");
+
+  assert.equal(normalizeInventorySourceValue("bogus"), null);
+
+  const calls = [];
+  const mockQuery = {
+    eq(col, val) {
+      calls.push([col, val]);
+      return this;
+    },
+  };
+  const filtered = applyInventorySourceFilter(mockQuery, envCloud);
+  assert.equal(filtered, mockQuery);
+  assert.deepEqual(calls, [["external_source", INVENTORY_SOURCE_SLABCLOUD]]);
+
+  const unfiltered = applyInventorySourceFilter(mockQuery, unset);
+  assert.equal(unfiltered, mockQuery);
+  assert.equal(calls.length, 1, "all mode does not add further eq calls");
+
+  const rows = [
+    { id: "1", external_source: "slabcloud" },
+    { id: "2", external_source: "slabsmith" },
+  ];
+  assert.equal(filterRowsByInventorySource(rows, envCloud).length, 1);
+  assert.equal(filterRowsByInventorySource(rows, unset).length, 2);
+  console.log("ok: inventory source filter");
+}
 
 /* ── clamp helpers ─────────────────────────────────────────────────────── */
 {

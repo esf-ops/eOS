@@ -12,6 +12,10 @@
  *   the head check inside the middleware (anti-lockout) but still must be signed in.
  *   Queries are organization_id scoped via resolveOrganizationContext.
  *
+ * Inventory source filter (read routes):
+ *   SLAB_INVENTORY_ACTIVE_SOURCE=slabcloud|slabsmith|all (default: all)
+ *   Optional debug override: ?source=slabcloud|slabsmith|all
+ *
  * Price group rule:
  *   slab_inventory.price_group is the IMPORTED SlabCloud price group only. It is
  *   surfaced as `source_price_group` (label "Source price group"); it is NOT the
@@ -20,10 +24,19 @@
 
 import { resolveOrganizationContext } from "../organizations/organizationContext.js";
 import {
+  applyInventorySourceFilter,
+  resolveInventorySourceFilter,
+} from "./slabInventorySourceFilter.js";
+import {
   matchSourceColorWithAliases,
   normalizeColorName as _normColorName,
   normalizeMaterialName as _normMatName,
 } from "./colorProgramMatching.js";
+
+export {
+  applyInventorySourceFilter,
+  resolveInventorySourceFilter,
+} from "./slabInventorySourceFilter.js";
 
 export const SLAB_INVENTORY_HEAD_SLUG = "slab_inventory";
 
@@ -748,6 +761,14 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
     return organizationId ? query.eq("organization_id", organizationId) : query;
   }
 
+  function resolveSourceFilter(req) {
+    return resolveInventorySourceFilter({ querySource: req.query?.source });
+  }
+
+  function scopeInventory(query, organizationId, sourceFilter) {
+    return applyInventorySourceFilter(scopeOrg(query, organizationId), sourceFilter);
+  }
+
   // GET /api/slab-inventory/summary — counts + last sync metadata (read-only).
   //
   // Coverage fields added to distinguish the active cache from the latest sync:
@@ -765,6 +786,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
       jsonNoStore(res);
       const supabase = db();
       const organizationId = await orgId(req);
+      const sourceFilter = resolveSourceFilter(req);
 
       // Fetch all active rows for aggregates (color/material/price-group distribution).
       // NEVER selects or sums count_for_color.
@@ -772,7 +794,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
         .from("slab_inventory")
         .select("color_name,material_name,price_group,last_seen_sync_run_id")
         .eq("is_active", true);
-      activeQ = scopeOrg(activeQ, organizationId);
+      activeQ = scopeInventory(activeQ, organizationId, sourceFilter);
       const { data: activeRows, error: activeErr } = await activeQ;
       if (activeErr) {
         if (isMissingRelationError(activeErr)) {
@@ -791,7 +813,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
         .neq("status", "dry_run")
         .order("started_at", { ascending: false })
         .limit(1);
-      syncQ = scopeOrg(syncQ, organizationId);
+      syncQ = scopeInventory(syncQ, organizationId, sourceFilter);
       const { data: syncRows } = await syncQ;
       const lastSync = (syncRows && syncRows[0]) || null;
 
@@ -819,7 +841,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
             .neq("last_seen_sync_run_id", latestSyncId)
             .order("color_name", { ascending: true, nullsFirst: false })
             .limit(5);
-          sampleQ = scopeOrg(sampleQ, organizationId);
+          sampleQ = scopeInventory(sampleQ, organizationId, sourceFilter);
           const { data: sampleRows } = await sampleQ;
           activeNotSeenSample = (sampleRows ?? []).map((r) => ({
             id: r.id ?? null,
@@ -837,7 +859,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
 
       // Verified images (status ok), org-scoped.
       let imgQ = supabase.from("slab_images").select("id", { count: "exact", head: true }).eq("image_status", "ok");
-      imgQ = scopeOrg(imgQ, organizationId);
+      imgQ = scopeInventory(imgQ, organizationId, sourceFilter);
       const { count: verifiedImages } = await imgQ;
 
       res.json({
@@ -878,12 +900,13 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
       jsonNoStore(res);
       const supabase = db();
       const organizationId = await orgId(req);
+      const sourceFilter = resolveSourceFilter(req);
 
       let q = supabase
         .from("slab_inventory")
         .select("material_name,color_name,price_group,thickness_nominal,rack,distributor")
         .eq("is_active", true);
-      q = scopeOrg(q, organizationId);
+      q = scopeInventory(q, organizationId, sourceFilter);
       const { data: rows, error } = await q;
       if (error) {
         if (isMissingRelationError(error)) {
@@ -893,7 +916,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
       }
 
       let imgQ = supabase.from("slab_images").select("image_status");
-      imgQ = scopeOrg(imgQ, organizationId);
+      imgQ = scopeInventory(imgQ, organizationId, sourceFilter);
       const { data: imgRows } = await imgQ;
       const imageStatuses = distinctValues(imgRows ?? [], "image_status");
 
@@ -921,10 +944,11 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
       jsonNoStore(res);
       const supabase = db();
       const organizationId = await orgId(req);
+      const sourceFilter = resolveSourceFilter(req);
       const params = parseListParams(req.query);
 
       let q = supabase.from("slab_inventory").select(INVENTORY_SELECT_COLUMNS.join(","), { count: "exact" });
-      q = scopeOrg(q, organizationId);
+      q = scopeInventory(q, organizationId, sourceFilter);
       if (params.is_active !== null) q = q.eq("is_active", params.is_active);
       if (params.material_name) q = q.eq("material_name", params.material_name);
       if (params.color_name) q = q.eq("color_name", params.color_name);
@@ -961,7 +985,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
           .from("slab_images")
           .select("external_slab_id,image_url,thumbnail_url,image_status,image_url_pattern")
           .in("external_slab_id", slabIds);
-        imgQ = scopeOrg(imgQ, organizationId);
+        imgQ = scopeInventory(imgQ, organizationId, sourceFilter);
         const { data: imgRows } = await imgQ;
         imageMap = buildImageMap(imgRows ?? []);
       }
@@ -990,9 +1014,10 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
       if (!isUuid(id)) return res.status(400).json({ ok: false, error: "invalid id" });
       const supabase = db();
       const organizationId = await orgId(req);
+      const sourceFilter = resolveSourceFilter(req);
 
       let q = supabase.from("slab_inventory").select(INVENTORY_SELECT_COLUMNS.join(",")).eq("id", id).limit(1);
-      q = scopeOrg(q, organizationId);
+      q = scopeInventory(q, organizationId, sourceFilter);
       const { data: rows, error } = await q;
       if (error) {
         if (isMissingRelationError(error)) return res.status(503).json({ ok: false, installed: false });
@@ -1008,7 +1033,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
           .from("slab_images")
           .select("external_slab_id,image_url,thumbnail_url,image_status,image_url_pattern")
           .eq("external_slab_id", sid);
-        imgQ = scopeOrg(imgQ, organizationId);
+        imgQ = scopeInventory(imgQ, organizationId, sourceFilter);
         const { data: imgRows } = await imgQ;
         imageMap = buildImageMap(imgRows ?? []);
       }
@@ -1034,6 +1059,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
       jsonNoStore(res);
       const supabase = db();
       const organizationId = await orgId(req);
+      const sourceFilter = resolveSourceFilter(req);
 
       // Fetch all active typed rows (minimal projection for grouping).
       // Never selects or sums count_for_color.
@@ -1043,7 +1069,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
         .eq("is_active", true)
         .eq("source_inventory_scope", COLOR_PROGRAM_SCOPE)
         .in("source_inventory_type", ["Slab", "Remnant"]);
-      q = scopeOrg(q, organizationId);
+      q = scopeInventory(q, organizationId, sourceFilter);
       const { data: rows, error } = await q;
       if (error) {
         if (isMissingRelationError(error)) {
@@ -1060,7 +1086,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
       let imgQ = supabase
         .from("slab_images")
         .select("external_slab_id,image_url,thumbnail_url,image_status,image_url_pattern");
-      imgQ = scopeOrg(imgQ, organizationId);
+      imgQ = scopeInventory(imgQ, organizationId, sourceFilter);
       const { data: imgRows } = await imgQ;
       if (imgRows?.length) imageMap = buildImageMap(imgRows);
 
@@ -1099,6 +1125,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
 
       const supabase = db();
       const organizationId = await orgId(req);
+      const sourceFilter = resolveSourceFilter(req);
       const params = parseColorInventoryParams(req.query);
 
       // Fetch typed rows and match colorKey in JS. Avoids the need to reverse
@@ -1109,7 +1136,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
         .eq("source_inventory_scope", COLOR_PROGRAM_SCOPE)
         .in("source_inventory_type", ["Slab", "Remnant"]);
       if (params.active_only) q = q.eq("is_active", true);
-      q = scopeOrg(q, organizationId);
+      q = scopeInventory(q, organizationId, sourceFilter);
       const { data: rows, error } = await q;
       if (error) {
         if (isMissingRelationError(error)) {
@@ -1142,7 +1169,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
           .from("slab_images")
           .select("external_slab_id,image_url,thumbnail_url,image_status,image_url_pattern")
           .in("external_slab_id", slabIds);
-        imgQ = scopeOrg(imgQ, organizationId);
+        imgQ = scopeInventory(imgQ, organizationId, sourceFilter);
         const { data: imgRows } = await imgQ;
         imageMap = buildImageMap(imgRows ?? []);
       }
@@ -1274,6 +1301,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
       jsonNoStore(res);
       const supabase = db();
       const organizationId = await orgId(req);
+      const sourceFilter = resolveSourceFilter(req);
 
       const { collection, catalogItemList, resolvedAliases } =
         await loadElite100Deps(organizationId);
@@ -1297,7 +1325,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
         .eq("is_active", true)
         .eq("source_inventory_scope", COLOR_PROGRAM_SCOPE)
         .in("source_inventory_type", ["Slab", "Remnant"]);
-      invQ = scopeOrg(invQ, organizationId);
+      invQ = scopeInventory(invQ, organizationId, sourceFilter);
       const { data: invRows, error: invErr } = await invQ;
       if (invErr) {
         if (isMissingRelationError(invErr)) {
@@ -1314,7 +1342,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
       let imgQ = supabase
         .from("slab_images")
         .select("external_slab_id,image_url,thumbnail_url,image_status");
-      imgQ = scopeOrg(imgQ, organizationId);
+      imgQ = scopeInventory(imgQ, organizationId, sourceFilter);
       const { data: imgRows } = await imgQ;
       const imageMap = buildImageMap(imgRows ?? []);
 
@@ -1468,6 +1496,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
 
         const supabase = db();
         const organizationId = await orgId(req);
+        const sourceFilter = resolveSourceFilter(req);
         const typeParam = trimStr(req.query.type ?? "").toLowerCase();
         const type = ["slab", "remnant"].includes(typeParam) ? typeParam : "all";
 
@@ -1516,7 +1545,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
           .eq("is_active", true)
           .eq("source_inventory_scope", COLOR_PROGRAM_SCOPE)
           .in("source_inventory_type", ["Slab", "Remnant"]);
-        invQ = scopeOrg(invQ, organizationId);
+        invQ = scopeInventory(invQ, organizationId, sourceFilter);
         const { data: invRows, error: invErr } = await invQ;
         if (invErr) {
           if (isMissingRelationError(invErr)) {
@@ -1563,7 +1592,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
               "external_slab_id,image_url,thumbnail_url,image_status,image_url_pattern"
             )
             .in("external_slab_id", slabIds);
-          imgQ = scopeOrg(imgQ, organizationId);
+          imgQ = scopeInventory(imgQ, organizationId, sourceFilter);
           const { data: imgRows } = await imgQ;
           imageMap = buildImageMap(imgRows ?? []);
         }
@@ -1639,6 +1668,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
       jsonNoStore(res);
       const supabase = db();
       const organizationId = await orgId(req);
+      const sourceFilter = resolveSourceFilter(req);
 
       // Load Elite 100 catalog (for exclusion). If no collection, everything is
       // Non-Stock, so we skip matching entirely.
@@ -1654,7 +1684,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
         .eq("is_active", true)
         .eq("source_inventory_scope", COLOR_PROGRAM_SCOPE)
         .in("source_inventory_type", ["Slab", "Remnant"]);
-      invQ = scopeOrg(invQ, organizationId);
+      invQ = scopeInventory(invQ, organizationId, sourceFilter);
       const { data: invRows, error: invErr } = await invQ;
       if (invErr) {
         if (isMissingRelationError(invErr)) {
@@ -1704,7 +1734,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
       let imgQ = supabase
         .from("slab_images")
         .select("external_slab_id,image_url,thumbnail_url,image_status");
-      imgQ = scopeOrg(imgQ, organizationId);
+      imgQ = scopeInventory(imgQ, organizationId, sourceFilter);
       const { data: imgRows } = await imgQ;
       if (imgRows?.length) imageMap = buildImageMap(imgRows);
 
