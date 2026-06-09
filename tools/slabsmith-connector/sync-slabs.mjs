@@ -14,15 +14,21 @@
  *   config.writeEnabled === true and --dry-run is NOT passed.
  *
  * Never logs syncToken.
+ *
+ * Exit: sets process.exitCode and lets Node drain handles (avoids Windows libuv
+ * assertion when process.exit() runs before undici/fetch sockets close).
  */
 
-import { existsSync, mkdirSync, readFileSync, statSync, appendFileSync } from "node:fs";
+import { createWriteStream, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import http from "node:http";
+import https from "node:https";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SYNC_HEADER = "X-EliteOS-Slabsmith-Sync-Token";
 const INGEST_PATH = "/api/integrations/slabsmith/inventory/xml";
+const DEFAULT_REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
 
 /**
  * @param {string[]} argv
@@ -119,17 +125,118 @@ export function shouldCallBackend({ dryRun, send, writeEnabled }) {
 }
 
 /**
- * @param {string} logDir
- * @param {string} line
+ * @param {string} text
+ * @param {number} status
  */
-export function appendLogLine(logDir, line) {
-  if (!logDir) return;
+export function parseIngestResponse(text, status) {
   try {
-    mkdirSync(logDir, { recursive: true });
-    const file = join(logDir, `sync-${new Date().toISOString().slice(0, 10)}.log`);
-    appendFileSync(file, `${line}\n`, "utf8");
-  } catch (err) {
-    console.warn(`[slabsmith-connector] log write failed: ${String(err?.message || err)}`);
+    return JSON.parse(text);
+  } catch {
+    return { ok: false, error: text.slice(0, 500) || `HTTP ${status}` };
+  }
+}
+
+/**
+ * POST XML using node:http/https (one-shot request; socket closes on end).
+ * Avoids global fetch/undici keep-alive issues on Windows scheduled tasks.
+ *
+ * @param {object} params
+ */
+export function postXmlWithNodeHttp({
+  backendBaseUrl,
+  syncToken,
+  xml,
+  timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+}) {
+  const url = new URL(`${backendBaseUrl.replace(/\/+$/, "")}${INGEST_PATH}`);
+  const isHttps = url.protocol === "https:";
+  const transport = isHttps ? https : http;
+  const bodyBuffer = Buffer.from(xml, "utf8");
+
+  return new Promise((resolve, reject) => {
+    /** @type {import("node:http").ClientRequest} */
+    let req;
+
+    const onDone = (err, result) => {
+      if (req) req.removeAllListeners();
+      if (err) reject(err);
+      else resolve(result);
+    };
+
+    req = transport.request(
+      {
+        protocol: url.protocol,
+        hostname: url.hostname,
+        port: url.port || (isHttps ? 443 : 80),
+        path: `${url.pathname}${url.search}`,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/xml; charset=utf-8",
+          [SYNC_HEADER]: syncToken,
+          "Content-Length": bodyBuffer.length,
+          Connection: "close",
+        },
+      },
+      (res) => {
+        /** @type {Buffer[]} */
+        const chunks = [];
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("end", () => {
+          const text = Buffer.concat(chunks).toString("utf8");
+          const status = Number(res.statusCode ?? 0);
+          onDone(null, { status, body: parseIngestResponse(text, status) });
+        });
+        res.on("error", (err) => onDone(err));
+      }
+    );
+
+    req.on("error", (err) => onDone(err));
+    req.setTimeout(timeoutMs, () => {
+      req.destroy(new Error(`Request timed out after ${timeoutMs}ms`));
+    });
+    req.write(bodyBuffer);
+    req.end();
+  });
+}
+
+/**
+ * Optional fetch transport (tests). Closes undici global dispatcher when present.
+ * @param {object} params
+ */
+export async function postXmlWithFetch({ backendBaseUrl, syncToken, xml, fetchImpl = fetch }) {
+  const url = `${backendBaseUrl.replace(/\/+$/, "")}${INGEST_PATH}`;
+  const response = await fetchImpl(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/xml; charset=utf-8",
+      [SYNC_HEADER]: syncToken,
+      Connection: "close",
+    },
+    body: xml,
+  });
+
+  const text = await response.text();
+  await closeUndiciDispatcherIfNeeded();
+
+  return {
+    status: response.status,
+    body: parseIngestResponse(text, response.status),
+  };
+}
+
+/**
+ * Close undici keep-alive pool so Node can exit cleanly after fetch (Windows-safe).
+ */
+export async function closeUndiciDispatcherIfNeeded() {
+  try {
+    const undici = await import("undici");
+    if (typeof undici.getGlobalDispatcher !== "function") return;
+    const dispatcher = undici.getGlobalDispatcher();
+    if (dispatcher && typeof dispatcher.close === "function") {
+      await dispatcher.close();
+    }
+  } catch {
+    // undici unavailable or not used
   }
 }
 
@@ -140,33 +247,42 @@ export async function postXmlToBackend({
   backendBaseUrl,
   syncToken,
   xml,
-  fetchImpl = fetch,
+  fetchImpl = null,
+  requestImpl = null,
 }) {
-  const url = `${backendBaseUrl.replace(/\/+$/, "")}${INGEST_PATH}`;
-  const response = await fetchImpl(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/xml; charset=utf-8",
-      [SYNC_HEADER]: syncToken,
-    },
-    body: xml,
-  });
-
-  const text = await response.text();
-  let body;
-  try {
-    body = JSON.parse(text);
-  } catch {
-    body = { ok: false, error: text.slice(0, 500) || `HTTP ${response.status}` };
+  if (typeof requestImpl === "function") {
+    return requestImpl({ backendBaseUrl, syncToken, xml });
   }
+  if (typeof fetchImpl === "function") {
+    return postXmlWithFetch({ backendBaseUrl, syncToken, xml, fetchImpl });
+  }
+  return postXmlWithNodeHttp({ backendBaseUrl, syncToken, xml });
+}
 
-  return { status: response.status, body };
+/**
+ * Append one log line using a short-lived write (no persistent stream handle).
+ * @param {string} logDir
+ * @param {string} line
+ */
+export function appendLogLine(logDir, line) {
+  if (!logDir) return;
+  try {
+    mkdirSync(logDir, { recursive: true });
+    const file = join(logDir, `sync-${new Date().toISOString().slice(0, 10)}.log`);
+    const stream = createWriteStream(file, { flags: "a" });
+    stream.write(`${line}\n`);
+    stream.end();
+  } catch (err) {
+    console.warn(`[slabsmith-connector] log write failed: ${String(err?.message || err)}`);
+  }
 }
 
 /**
  * @param {string[]} [argv]
+ * @param {{ postXmlToBackend?: typeof postXmlToBackend }} [deps]
  */
-export async function runSync(argv = process.argv) {
+export async function runSync(argv = process.argv, deps = {}) {
+  const postXml = deps.postXmlToBackend ?? postXmlToBackend;
   const { configPath, dryRun, send, help } = parseArgs(argv);
   if (help) {
     console.log(`Slabsmith XML connector
@@ -213,7 +329,7 @@ Usage:
   }
 
   log(`posting to ${validated.backendBaseUrl}${INGEST_PATH}`);
-  const { status, body } = await postXmlToBackend({
+  const { status, body } = await postXml({
     backendBaseUrl: validated.backendBaseUrl,
     syncToken: validated.syncToken,
     xml,
@@ -231,11 +347,23 @@ Usage:
   return 0;
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
-  runSync()
-    .then((code) => process.exit(code))
-    .catch((err) => {
-      console.error(`[slabsmith-connector] fatal: ${String(err?.message || err)}`);
-      process.exit(1);
-    });
+/**
+ * CLI entry — set exitCode and allow handles to drain (do not process.exit after fetch).
+ */
+export async function runSyncCli(argv = process.argv) {
+  try {
+    const code = await runSync(argv);
+    process.exitCode = code ?? 0;
+  } catch (err) {
+    console.error(`[slabsmith-connector] fatal: ${String(err?.message || err)}`);
+    process.exitCode = 1;
+  }
+}
+
+const isMain =
+  process.argv[1] &&
+  fileURLToPath(import.meta.url) === resolve(process.argv[1]);
+
+if (isMain) {
+  runSyncCli();
 }
