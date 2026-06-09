@@ -1,0 +1,56 @@
+{
+  "_meta": {
+    "source": "Chris's second fuzzy-match review batch, 2026-06-09",
+    "collection_key": "elite100-2026",
+    "reviewed_by": "Chris",
+    "review_date": "2026-06-09",
+    "approved_count": 4,
+    "rejected_count": 0,
+    "notes": "Finish-suffix and vendor-normalized Slabsmith inventory names. Winterfresh alias already approved in batch #1 (elite100-2026-alias-review-seed.json) — not duplicated here. Out-of-stock catalog colors intentionally left unmatched."
+  },
+
+  "approved_alias_candidates": [
+    {
+      "source_color_name": "Regal Soapstone Matte",
+      "source_material_name": "Stratus",
+      "catalog_color_name": "Regal Soapstone",
+      "catalog_material_name": "Stratus",
+      "price_group": "C",
+      "reason": "Same color; Slabsmith adds Matte finish suffix.",
+      "reviewed_by": "Chris",
+      "review_status": "approved"
+    },
+    {
+      "source_color_name": "Newport",
+      "source_material_name": "Cambria",
+      "catalog_color_name": "Newport Polished",
+      "catalog_material_name": "Cambria",
+      "price_group": "C",
+      "reason": "Same color; catalog includes Polished finish suffix.",
+      "reviewed_by": "Chris",
+      "review_status": "approved"
+    },
+    {
+      "source_color_name": "Delgatie",
+      "source_material_name": "Cambria",
+      "catalog_color_name": "Delgatie Satin",
+      "catalog_material_name": "Cambria",
+      "price_group": "F",
+      "reason": "Same color; catalog includes Satin finish suffix.",
+      "reviewed_by": "Chris",
+      "review_status": "approved"
+    },
+    {
+      "source_color_name": "Bellini",
+      "source_material_name": "Aggranite",
+      "catalog_color_name": "Bellini Honed",
+      "catalog_material_name": "Aggranite",
+      "price_group": "C",
+      "reason": "Same color; catalog includes Honed finish suffix.",
+      "reviewed_by": "Chris",
+      "review_status": "approved"
+    }
+  ],
+
+  "rejected_fuzzy_candidates": []
+}
