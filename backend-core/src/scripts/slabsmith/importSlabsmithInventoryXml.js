@@ -3,7 +3,8 @@
  * importSlabsmithInventoryXml.js — Slabsmith XML inventory import (dry-run + write-gated).
  *
  * Reads a Slabsmith export XML file, normalizes rows, and either:
- *   - prints a dry-run summary (default), or
+ *   - prints a dry-run summary (default),
+ *   - runs read-only Supabase preflight (--preflight), or
  *   - persists to Supabase when SLABSMITH_INVENTORY_WRITE_ENABLED=1.
  *
  * NO SQL Server connection. NO API routes.
@@ -11,6 +12,12 @@
  * Usage:
  *   node backend-core/src/scripts/slabsmith/importSlabsmithInventoryXml.js
  *   node backend-core/src/scripts/slabsmith/importSlabsmithInventoryXml.js --file path/to/slabs.xml
+ *   node backend-core/src/scripts/slabsmith/importSlabsmithInventoryXml.js --preflight
+ *
+ * Preflight mode (read-only Supabase; requires env):
+ *   SUPABASE_URL
+ *   SUPABASE_SERVICE_ROLE_KEY
+ *   SLABOS_ORGANIZATION_ID
  *
  * Write mode (requires env):
  *   SLABSMITH_INVENTORY_WRITE_ENABLED=1
@@ -24,6 +31,7 @@
  *
  * npm:
  *   npm run eos:slabsmith:import-inventory:dry-run
+ *   npm run eos:slabsmith:import-inventory:preflight
  *   npm run eos:slabsmith:import-inventory
  */
 import "dotenv/config";
@@ -43,6 +51,11 @@ import {
   persistSlabsmithInventory,
   SLABSMITH_WRITE_ENV,
 } from "../../slabsmith/slabsmithPersistence.js";
+import {
+  formatPreflightReport,
+  runSlabsmithPreflight,
+  validatePreflightEnv,
+} from "../../slabsmith/slabsmithPreflight.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "../../../..");
@@ -51,17 +64,21 @@ const FIXTURE_XML_PATH = join(REPO_ROOT, "backend-core/src/slabsmith/fixtures/sa
 
 /**
  * @param {string[]} argv
- * @returns {{ filePath: string | null, help: boolean }}
+ * @returns {{ filePath: string | null, help: boolean, preflight: boolean }}
  */
 export function parseCliArgs(argv) {
   const args = argv.slice(2);
-  /** @type {{ filePath: string | null, help: boolean }} */
-  const out = { filePath: null, help: false };
+  /** @type {{ filePath: string | null, help: boolean, preflight: boolean }} */
+  const out = { filePath: null, help: false, preflight: false };
 
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
     if (arg === "--help" || arg === "-h") {
       out.help = true;
+      continue;
+    }
+    if (arg === "--preflight") {
+      out.preflight = true;
       continue;
     }
     if (arg === "--file") {
@@ -245,6 +262,10 @@ export function validateWriteEnv() {
  */
 export function createWriteSupabaseClient() {
   validateWriteEnv();
+  return createSupabaseServiceClient();
+}
+
+export function createSupabaseServiceClient() {
   return createClient(process.env.SUPABASE_URL.trim(), process.env.SUPABASE_SERVICE_ROLE_KEY.trim(), {
     auth: { persistSession: false, autoRefreshToken: false },
   });
@@ -256,6 +277,10 @@ export function resolveOrganizationId() {
     process.env.SLABCLOUD_ORGANIZATION_ID?.trim() ||
     null
   );
+}
+
+export function resolvePreflightOrganizationId() {
+  return process.env.SLABOS_ORGANIZATION_ID?.trim() || null;
 }
 
 function printMissingFileHelp(requestedPath, usedDefaultPath) {
@@ -281,14 +306,20 @@ function printHelp() {
   console.log(`Slabsmith inventory XML import
 
 Usage:
-  node backend-core/src/scripts/slabsmith/importSlabsmithInventoryXml.js [--file <path>]
+  node backend-core/src/scripts/slabsmith/importSlabsmithInventoryXml.js [--file <path>] [--preflight]
 
 Options:
   --file <path>   Slabsmith export XML (default: debug/slabsmith/source-samples/slabs.xml)
+  --preflight     Read-only Supabase table/source readiness check (no mutations)
   --help, -h      Show this help
 
 Dry-run (default):
   No Supabase writes unless ${SLABSMITH_WRITE_ENV}=1
+
+Preflight mode:
+  SUPABASE_URL
+  SUPABASE_SERVICE_ROLE_KEY
+  SLABOS_ORGANIZATION_ID
 
 Write mode:
   ${SLABSMITH_WRITE_ENV}=1
@@ -299,6 +330,7 @@ Write mode:
 
 npm:
   npm run eos:slabsmith:import-inventory:dry-run
+  npm run eos:slabsmith:import-inventory:preflight
   npm run eos:slabsmith:import-inventory
 `);
 }
@@ -308,7 +340,7 @@ npm:
  * @returns {Promise<number>} exit code
  */
 export async function runSlabsmithImport(argv = process.argv) {
-  const { filePath: cliPath, help } = parseCliArgs(argv);
+  const { filePath: cliPath, help, preflight } = parseCliArgs(argv);
   if (help) {
     printHelp();
     return 0;
@@ -325,6 +357,24 @@ export async function runSlabsmithImport(argv = process.argv) {
 
   try {
     const rows = readAndNormalizeXmlFile(xmlPath);
+
+    if (preflight) {
+      validatePreflightEnv();
+      const organizationId = resolvePreflightOrganizationId();
+      if (!organizationId) {
+        throw new Error("Preflight requires SLABOS_ORGANIZATION_ID");
+      }
+      const db = createSupabaseServiceClient();
+      const report = await runSlabsmithPreflight({
+        db,
+        organizationId,
+        incomingRows: rows,
+        summarizeIncoming: summarizeSlabsmithRows,
+      });
+      console.log(formatPreflightReport(report));
+      return report.recommendation.safe_to_write ? 0 : 1;
+    }
+
     const writeEnabled = isSlabsmithWriteEnabled();
 
     if (!writeEnabled) {
@@ -349,11 +399,13 @@ export async function runSlabsmithImport(argv = process.argv) {
     console.log(formatWriteReport(result, meta));
     return result.status === "completed" ? 0 : 1;
   } catch (err) {
-    console.error(
-      isSlabsmithWriteEnabled()
+    const { preflight: isPreflight } = parseCliArgs(argv);
+    const label = isPreflight
+      ? "Slabsmith inventory preflight failed:"
+      : isSlabsmithWriteEnabled()
         ? "Slabsmith inventory write failed:"
-        : "Slabsmith inventory dry-run failed:"
-    );
+        : "Slabsmith inventory dry-run failed:";
+    console.error(label);
     console.error(String(err?.message || err));
     return 1;
   }
