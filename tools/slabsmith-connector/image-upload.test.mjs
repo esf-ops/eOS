@@ -2,21 +2,25 @@
  * image-upload.test.mjs — unit tests for Slabsmith image upload planner/state.
  */
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import {
   buildUploadFingerprint,
+  isLocalFileMissingError,
   isUnchangedUpload,
   isUploadablePair,
   loadUploadState,
   planImageUploads,
+  readImagePairBuffers,
   runImageUploads,
   saveUploadState,
+  uploadImagePair,
 } from "./image-upload.mjs";
 import { buildMultipartUploadBody } from "./image-upload.mjs";
+import { discoverImageManifest } from "./image-manifest.mjs";
 import { runImageManifest } from "./sync-images.mjs";
 
 const SAMPLE_MANIFEST = {
@@ -120,6 +124,29 @@ describe("upload state file", () => {
   });
 });
 
+describe("isLocalFileMissingError", () => {
+  it("detects ENOENT errors", () => {
+    const err = new Error("ENOENT: no such file or directory, open '/tmp/missing.jpg'");
+    err.code = "ENOENT";
+    assert.equal(isLocalFileMissingError(err), true);
+    assert.equal(isLocalFileMissingError(new Error("Invalid sync token")), false);
+  });
+});
+
+describe("readImagePairBuffers", () => {
+  it("returns missing_local when full image disappeared", () => {
+    const slab = SAMPLE_MANIFEST.slabs[0];
+    const result = readImagePairBuffers(slab, () => {
+      const err = new Error(`ENOENT: no such file or directory, open '${slab.full_image.path}'`);
+      err.code = "ENOENT";
+      throw err;
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, "missing_local");
+    assert.equal(result.missing_kind, "full");
+  });
+});
+
 describe("runImageUploads", () => {
   it("dry-run does not call backend", async () => {
     let calls = 0;
@@ -159,6 +186,106 @@ describe("runImageUploads", () => {
     assert.equal(summary.uploaded_count, 1);
     const loaded = loadUploadState(logDir);
     assert.equal(loaded.uploads["abc-123"].last_status, "uploaded");
+  });
+
+  it("skips ENOENT as non-fatal production churn without updating upload state", async () => {
+    const logDir = mkdtempSync(join(tmpdir(), "slabsmith-upload-missing-"));
+    const imageRoot = join(logDir, "images");
+    mkdirSync(imageRoot);
+
+    const fullPath = join(imageRoot, "ABC-123.jpg");
+    const thumbPath = join(imageRoot, "ABC-123_thumb.jpg");
+    writeFileSync(fullPath, Buffer.from([0xff, 0xd8, 0xff, 0x00]));
+    writeFileSync(thumbPath, Buffer.from([0xff, 0xd8, 0xff, 0x01]));
+
+    const manifest = {
+      summary: { missing_full_image_count: 0, unmatched_image_file_count: 0 },
+      slabs: [
+        {
+          slab_id: "ABC-123",
+          inventory_id: "54198",
+          full_image: {
+            path: fullPath,
+            bytes: 4,
+            modified_at: "2026-01-01T00:00:00.000Z",
+          },
+          thumb_image: {
+            path: thumbPath,
+            bytes: 4,
+            modified_at: "2026-01-01T00:00:00.000Z",
+          },
+        },
+      ],
+    };
+
+    const plan = planImageUploads(manifest, null);
+    assert.equal(plan.planned_upload_count, 1);
+
+    unlinkSync(fullPath);
+
+    const summary = await runImageUploads({
+      plan,
+      backendBaseUrl: "https://example.com",
+      syncToken: "secret",
+      logDir,
+      state: { version: 1, uploads: {} },
+      dryRun: false,
+      uploadPair: async (params) => uploadImagePair(params),
+    });
+
+    assert.equal(summary.skipped_missing_during_upload_count, 1);
+    assert.equal(summary.failed_count, 0);
+    assert.equal(summary.uploaded_count, 0);
+    const loadedMissing = loadUploadState(logDir);
+    assert.equal(loadedMissing.uploads["abc-123"], undefined);
+  });
+
+  it("exits cleanly when only missing-local skips occur via runImageManifest", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "slabsmith-upload-exit-"));
+    const imageRoot = join(tmpDir, "images");
+    const logDir = join(tmpDir, "logs");
+    mkdirSync(imageRoot);
+    mkdirSync(logDir);
+
+    const xmlPath = join(tmpDir, "slabs.xml");
+    writeFileSync(
+      xmlPath,
+      `<Slabsmith.dbo.Slabs SlabID="ABC-123" InventoryID="54198" Name="Alpha" Material="Quartz" Type="Slab" />`
+    );
+
+    const fullPath = join(imageRoot, "ABC-123.jpg");
+    const thumbPath = join(imageRoot, "ABC-123_thumb.jpg");
+    writeFileSync(fullPath, Buffer.from([0xff, 0xd8, 0xff, 0x00]));
+    writeFileSync(thumbPath, Buffer.from([0xff, 0xd8, 0xff, 0x01]));
+
+    const configPath = join(tmpDir, "config.json");
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        backendBaseUrl: "https://example.com",
+        syncToken: "test-secret",
+        sourceXmlPath: xmlPath,
+        imageRootPath: imageRoot,
+        logDir,
+      })
+    );
+
+    const code = await runImageManifest(
+      ["node", "sync-images.mjs", "--config", configPath, "--upload"],
+      {
+        discoverImageManifest: (params) => {
+          const manifest = discoverImageManifest(params);
+          try {
+            unlinkSync(fullPath);
+          } catch {
+            // already removed
+          }
+          return manifest;
+        },
+        uploadImagePair: async (params) => uploadImagePair(params),
+      }
+    );
+    assert.equal(code, 0);
   });
 });
 

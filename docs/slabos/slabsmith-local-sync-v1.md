@@ -118,6 +118,19 @@ Backend endpoint: `POST /api/integrations/slabsmith/inventory/images` (multipart
 
 Upload state is tracked in `logDir/image-upload-state.json` using file size + modified time fingerprints so unchanged pairs are skipped on later runs.
 
+### Production churn (files disappearing during upload)
+
+Elite is actively cutting and producing material during the day. A slab JPG that existed when the manifest was built may be gone by the time upload reaches that file (consumed, moved, or refreshed by SlabCloud/SlabSmith).
+
+When a planned full or thumb file is missing at upload time (`ENOENT`), the connector:
+
+- logs `skipped_missing_during_upload_count` (non-fatal)
+- does **not** increment `failed_count`
+- does **not** mark the pair as uploaded in `image-upload-state.json`
+- exits with code **0** if there are no other real failures
+
+Those slabs remain eligible on a later `--upload` run if the files reappear locally.
+
 **Before first upload:** create Supabase Storage bucket `eliteos-slab-images` (public read). See `backend-core/supabase/eliteos_slab_images_storage.sql`.
 
 Do **not** schedule image upload yet — validate manually with `--limit 5` first.

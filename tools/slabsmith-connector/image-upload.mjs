@@ -14,6 +14,56 @@ import { postMultipartWithNodeHttp } from "./image-upload-http.mjs";
 export const IMAGE_UPLOAD_STATE_FILE = "image-upload-state.json";
 export const IMAGE_UPLOAD_ROUTE = "/api/integrations/slabsmith/inventory/images";
 export const UPLOAD_STATE_VERSION = 1;
+const SKIPPED_MISSING_SAMPLE_LIMIT = 10;
+
+/**
+ * @param {unknown} err
+ */
+export function isLocalFileMissingError(err) {
+  if (!err || typeof err !== "object") return false;
+  if (/** @type {NodeJS.ErrnoException} */ (err).code === "ENOENT") return true;
+  const message = String(/** @type {Error} */ (err).message ?? err);
+  return /ENOENT/i.test(message) && /no such file/i.test(message);
+}
+
+/**
+ * Read full + thumb JPEG buffers; returns a non-fatal skip when a local file disappeared.
+ *
+ * @param {object} slab
+ * @param {(path: string) => Buffer} [readFile]
+ */
+export function readImagePairBuffers(slab, readFile = readFileSync) {
+  /** @type {Buffer|null} */
+  let fullBuffer = null;
+  try {
+    fullBuffer = readFile(slab.full_image.path);
+  } catch (err) {
+    if (isLocalFileMissingError(err)) {
+      return {
+        ok: false,
+        reason: "missing_local",
+        missing_kind: "full",
+        path: slab.full_image.path,
+      };
+    }
+    throw err;
+  }
+
+  try {
+    const thumbBuffer = readFile(slab.thumb_image.path);
+    return { ok: true, fullBuffer, thumbBuffer };
+  } catch (err) {
+    if (isLocalFileMissingError(err)) {
+      return {
+        ok: false,
+        reason: "missing_local",
+        missing_kind: "thumb",
+        path: slab.thumb_image.path,
+      };
+    }
+    throw err;
+  }
+}
 
 /**
  * @param {object} slab
@@ -176,9 +226,20 @@ export async function uploadImagePair({
   readFile = readFileSync,
   postMultipart = postMultipartWithNodeHttp,
 }) {
-  const fullBuffer = readFile(slab.full_image.path);
-  const thumbBuffer = readFile(slab.thumb_image.path);
-  const multipart = buildMultipartUploadBody({ slab, fullBuffer, thumbBuffer });
+  const readResult = readImagePairBuffers(slab, readFile);
+  if (!readResult.ok) {
+    return {
+      skippedMissingLocal: true,
+      missing_kind: readResult.missing_kind,
+      path: readResult.path,
+    };
+  }
+
+  const multipart = buildMultipartUploadBody({
+    slab,
+    fullBuffer: readResult.fullBuffer,
+    thumbBuffer: readResult.thumbBuffer,
+  });
 
   const { status, body } = await postMultipart({
     backendBaseUrl,
@@ -206,49 +267,77 @@ export async function runImageUploads({
 }) {
   let uploadedCount = 0;
   let failedCount = 0;
+  let skippedMissingDuringUploadCount = 0;
   /** @type {Array<object>} */
   const failures = [];
+  /** @type {Array<object>} */
+  const skippedMissingSamples = [];
 
   if (dryRun) {
     return {
       planned_upload_count: plan.planned_upload_count,
       skipped_unchanged_count: plan.skipped_unchanged_count,
+      skipped_missing_during_upload_count: 0,
       uploaded_count: 0,
       failed_count: 0,
       missing_image_count: plan.missing_image_count,
       unmatched_image_count: plan.unmatched_image_count,
       dry_run: true,
       failures,
+      skipped_missing_during_upload: [],
     };
   }
 
   for (const slab of plan.uploadable) {
+    const key = String(slab.slab_id).toLowerCase();
     try {
-      const { status, body } = await uploadPair({
+      const result = await uploadPair({
         backendBaseUrl,
         syncToken,
         slab,
       });
 
+      if (result?.skippedMissingLocal) {
+        skippedMissingDuringUploadCount += 1;
+        if (skippedMissingSamples.length < SKIPPED_MISSING_SAMPLE_LIMIT) {
+          skippedMissingSamples.push({
+            slab_id: slab.slab_id,
+            inventory_id: slab.inventory_id,
+            missing_kind: result.missing_kind ?? "unknown",
+          });
+        }
+        continue;
+      }
+
+      const { status, body } = result;
       const ok =
         status < 400 &&
         body?.ok !== false &&
         (body?.status === "uploaded" || body?.status === "skipped_no_inventory_match");
 
-      const key = String(slab.slab_id).toLowerCase();
-      state.uploads[key] = {
-        ...slab.fingerprint,
-        last_upload_at: new Date().toISOString(),
-        last_status: body?.status ?? (ok ? "uploaded" : "failed"),
-        last_http_status: status,
-      };
-
       if (body?.status === "uploaded") {
+        state.uploads[key] = {
+          ...slab.fingerprint,
+          last_upload_at: new Date().toISOString(),
+          last_status: "uploaded",
+          last_http_status: status,
+        };
         uploadedCount += 1;
       } else if (body?.status === "skipped_no_inventory_match") {
-        // Non-fatal; keep going.
+        state.uploads[key] = {
+          ...slab.fingerprint,
+          last_upload_at: new Date().toISOString(),
+          last_status: "skipped_no_inventory_match",
+          last_http_status: status,
+        };
       } else if (!ok) {
         failedCount += 1;
+        state.uploads[key] = {
+          ...slab.fingerprint,
+          last_upload_at: new Date().toISOString(),
+          last_status: body?.status ?? "failed",
+          last_http_status: status,
+        };
         failures.push({
           slab_id: slab.slab_id,
           inventory_id: slab.inventory_id,
@@ -256,6 +345,18 @@ export async function runImageUploads({
         });
       }
     } catch (err) {
+      if (isLocalFileMissingError(err)) {
+        skippedMissingDuringUploadCount += 1;
+        if (skippedMissingSamples.length < SKIPPED_MISSING_SAMPLE_LIMIT) {
+          skippedMissingSamples.push({
+            slab_id: slab.slab_id,
+            inventory_id: slab.inventory_id,
+            missing_kind: "unknown",
+          });
+        }
+        continue;
+      }
+
       failedCount += 1;
       failures.push({
         slab_id: slab.slab_id,
@@ -270,12 +371,14 @@ export async function runImageUploads({
   return {
     planned_upload_count: plan.planned_upload_count,
     skipped_unchanged_count: plan.skipped_unchanged_count,
+    skipped_missing_during_upload_count: skippedMissingDuringUploadCount,
     uploaded_count: uploadedCount,
     failed_count: failedCount,
     missing_image_count: plan.missing_image_count,
     unmatched_image_count: plan.unmatched_image_count,
     dry_run: false,
     failures: failures.slice(0, 10),
+    skipped_missing_during_upload: skippedMissingSamples,
   };
 }
 
@@ -286,11 +389,15 @@ export function formatUploadSummaryLines(summary) {
   return [
     `planned_upload_count=${summary.planned_upload_count}`,
     `skipped_unchanged_count=${summary.skipped_unchanged_count}`,
+    `skipped_missing_during_upload_count=${summary.skipped_missing_during_upload_count ?? 0}`,
     `uploaded_count=${summary.uploaded_count}`,
     `failed_count=${summary.failed_count}`,
     `missing_image_count=${summary.missing_image_count}`,
     `unmatched_image_count=${summary.unmatched_image_count}`,
     summary.dry_run ? "mode=dry-run-plan" : "mode=upload",
+    summary.skipped_missing_during_upload?.length
+      ? `sample_skipped_missing_during_upload=${JSON.stringify(summary.skipped_missing_during_upload)}`
+      : "sample_skipped_missing_during_upload=[]",
     summary.failures?.length
       ? `sample_failures=${JSON.stringify(summary.failures)}`
       : "sample_failures=[]",
