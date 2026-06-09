@@ -35,3 +35,4 @@ tools/moraware-sdk-trace/lib/*.dll
 !tools/moraware-sdk-trace/lib/.gitkeep
 .vercel
 debug/slabsmith/source-samples/
+.env.slabsmith.local
