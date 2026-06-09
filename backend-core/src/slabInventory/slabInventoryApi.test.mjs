@@ -219,6 +219,31 @@ import {
   console.log("ok: mapSlabRow");
 }
 
+/* ── mapSlabRow: Slabsmith image metadata (debug-safe) ─────────────────── */
+{
+  const row = {
+    id: "11111111-1111-4111-8111-111111111111",
+    external_source: "slabsmith",
+    external_slab_id: "INV-100",
+    inventory_id: "INV-100",
+    color_name: "Test",
+    material_name: "Granite",
+    price_group: "A",
+    is_active: true,
+  };
+  const img = {
+    image_url: "https://storage/slab.jpg",
+    thumbnail_url: "https://storage/slab_thumb.jpg",
+    image_status: "ok",
+    image_url_pattern: "slabsmith_local_upload",
+  };
+  const mapped = mapSlabRow(row, img);
+  assert.equal(mapped.inventory_source, "slabsmith");
+  assert.equal(mapped.image_url_pattern, "slabsmith_local_upload");
+  assert.equal(mapped.image_source_label, "Slabsmith upload");
+  console.log("ok: mapSlabRow slabsmith image metadata");
+}
+
 /* ── staff-safe projection excludes count/raw/source-meter fields ──────── */
 {
   for (const banned of ["count_for_color", "raw_json", "usable_a_raw", "usable_d_raw", "width_actual_m", "length_actual_m"]) {
@@ -244,6 +269,18 @@ import {
   assert.equal(map.get("B").image_url, "b.jpg");
   assert.ok(!map.has(""), "empty slab id skipped");
   console.log("ok: buildImageMap");
+}
+
+/* ── buildImageMap prefers slabsmith_local_upload for slabsmith source ─── */
+{
+  const smithFilter = { mode: "single", externalSource: "slabsmith", resolved: "slabsmith" };
+  const rows = [
+    { external_source: "slabsmith", external_slab_id: "INV-1", image_url: "legacy.jpg", image_status: "ok", image_url_pattern: "other" },
+    { external_source: "slabsmith", external_slab_id: "INV-1", image_url: "upload.jpg", image_status: "ok", image_url_pattern: "slabsmith_local_upload" },
+  ];
+  const map = buildImageMap(rows, smithFilter);
+  assert.equal(map.get("INV-1").image_url, "upload.jpg", "prefers slabsmith_local_upload");
+  console.log("ok: buildImageMap slabsmith");
 }
 
 /* ── summarizeActiveRows NEVER sums count_for_color ────────────────────── */

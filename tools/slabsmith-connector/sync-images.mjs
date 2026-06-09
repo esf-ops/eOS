@@ -33,6 +33,7 @@ import {
   loadUploadState,
   planImageUploads,
   runImageUploads,
+  shouldFailUploadRun,
 } from "./image-upload.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -204,7 +205,7 @@ Config:
   }
 
   log(`image sync end started=${startedAt}`);
-  return uploadSummary.failed_count > 0 ? 1 : 0;
+  return shouldFailUploadRun(uploadSummary) ? 1 : 0;
 }
 
 export async function runImageManifestCli(argv = process.argv) {

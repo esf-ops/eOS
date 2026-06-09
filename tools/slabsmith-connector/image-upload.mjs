@@ -16,6 +16,15 @@ export const IMAGE_UPLOAD_ROUTE = "/api/integrations/slabsmith/inventory/images"
 export const UPLOAD_STATE_VERSION = 1;
 const SKIPPED_MISSING_SAMPLE_LIMIT = 10;
 
+/** Outcome buckets for items in plan.uploadable (excludes skipped_unchanged). */
+export const PLANNED_UPLOAD_OUTCOMES = Object.freeze({
+  UPLOADED: "uploaded",
+  SKIPPED_MISSING_LOCAL: "skipped_missing_local",
+  SKIPPED_NO_INVENTORY_MATCH: "skipped_no_inventory_match",
+  SKIPPED_BACKEND_NONFATAL: "skipped_backend_nonfatal",
+  FAILED: "failed",
+});
+
 /**
  * @param {unknown} err
  */
@@ -253,6 +262,82 @@ export async function uploadImagePair({
 }
 
 /**
+ * Classify one planned upload attempt into an explicit outcome bucket.
+ * @param {object} result
+ */
+export function classifyPlannedUploadResult(result) {
+  if (result?.skippedMissingLocal) {
+    return PLANNED_UPLOAD_OUTCOMES.SKIPPED_MISSING_LOCAL;
+  }
+
+  const status = Number(result?.status ?? 0);
+  const body = result?.body ?? {};
+
+  if (status < 400 && body.ok !== false && body.status === "uploaded") {
+    return PLANNED_UPLOAD_OUTCOMES.UPLOADED;
+  }
+  if (status < 400 && body.ok !== false && body.status === "skipped_no_inventory_match") {
+    return PLANNED_UPLOAD_OUTCOMES.SKIPPED_NO_INVENTORY_MATCH;
+  }
+  if (status < 400 && body.ok !== false && body.status) {
+    return PLANNED_UPLOAD_OUTCOMES.SKIPPED_BACKEND_NONFATAL;
+  }
+  return PLANNED_UPLOAD_OUTCOMES.FAILED;
+}
+
+/**
+ * @param {object} summary
+ */
+export function reconcilePlannedUploadOutcomes(summary) {
+  if (summary.dry_run) {
+    return {
+      ...summary,
+      unclassified_planned_count: 0,
+      outcomes_reconciled: true,
+    };
+  }
+
+  const accounted =
+    Number(summary.uploaded_count ?? 0) +
+    Number(summary.skipped_missing_during_upload_count ?? 0) +
+    Number(summary.skipped_no_inventory_match_count ?? 0) +
+    Number(summary.skipped_backend_nonfatal_count ?? 0) +
+    Number(summary.failed_count ?? 0);
+
+  const unclassified = Number(summary.planned_upload_count ?? 0) - accounted;
+
+  return {
+    ...summary,
+    unclassified_planned_count: unclassified,
+    outcomes_reconciled: unclassified === 0,
+  };
+}
+
+/**
+ * @param {object} params
+ */
+export function createEmptyUploadRunSummary(plan, { dryRun = false } = {}) {
+  return {
+    planned_upload_count: plan.planned_upload_count,
+    skipped_unchanged_count: plan.skipped_unchanged_count,
+    skipped_missing_during_upload_count: 0,
+    skipped_no_inventory_match_count: 0,
+    skipped_backend_nonfatal_count: 0,
+    uploaded_count: 0,
+    failed_count: 0,
+    missing_image_count: plan.missing_image_count,
+    unmatched_image_count: plan.unmatched_image_count,
+    dry_run: dryRun,
+    failures: [],
+    skipped_missing_during_upload: [],
+    skipped_no_inventory_match: [],
+    skipped_backend_nonfatal: [],
+    unclassified_planned_count: 0,
+    outcomes_reconciled: dryRun,
+  };
+}
+
+/**
  * @param {object} params
  */
 export async function runImageUploads({
@@ -265,28 +350,11 @@ export async function runImageUploads({
   uploadPair = uploadImagePair,
   saveState = saveUploadState,
 }) {
-  let uploadedCount = 0;
-  let failedCount = 0;
-  let skippedMissingDuringUploadCount = 0;
-  /** @type {Array<object>} */
-  const failures = [];
-  /** @type {Array<object>} */
-  const skippedMissingSamples = [];
-
   if (dryRun) {
-    return {
-      planned_upload_count: plan.planned_upload_count,
-      skipped_unchanged_count: plan.skipped_unchanged_count,
-      skipped_missing_during_upload_count: 0,
-      uploaded_count: 0,
-      failed_count: 0,
-      missing_image_count: plan.missing_image_count,
-      unmatched_image_count: plan.unmatched_image_count,
-      dry_run: true,
-      failures,
-      skipped_missing_during_upload: [],
-    };
+    return reconcilePlannedUploadOutcomes(createEmptyUploadRunSummary(plan, { dryRun: true }));
   }
+
+  const summary = createEmptyUploadRunSummary(plan, { dryRun: false });
 
   for (const slab of plan.uploadable) {
     const key = String(slab.slab_id).toLowerCase();
@@ -297,10 +365,12 @@ export async function runImageUploads({
         slab,
       });
 
-      if (result?.skippedMissingLocal) {
-        skippedMissingDuringUploadCount += 1;
-        if (skippedMissingSamples.length < SKIPPED_MISSING_SAMPLE_LIMIT) {
-          skippedMissingSamples.push({
+      const outcome = classifyPlannedUploadResult(result);
+
+      if (outcome === PLANNED_UPLOAD_OUTCOMES.SKIPPED_MISSING_LOCAL) {
+        summary.skipped_missing_during_upload_count += 1;
+        if (summary.skipped_missing_during_upload.length < SKIPPED_MISSING_SAMPLE_LIMIT) {
+          summary.skipped_missing_during_upload.push({
             slab_id: slab.slab_id,
             inventory_id: slab.inventory_id,
             missing_kind: result.missing_kind ?? "unknown",
@@ -310,45 +380,56 @@ export async function runImageUploads({
       }
 
       const { status, body } = result;
-      const ok =
-        status < 400 &&
-        body?.ok !== false &&
-        (body?.status === "uploaded" || body?.status === "skipped_no_inventory_match");
 
-      if (body?.status === "uploaded") {
+      if (outcome === PLANNED_UPLOAD_OUTCOMES.UPLOADED) {
         state.uploads[key] = {
           ...slab.fingerprint,
           last_upload_at: new Date().toISOString(),
           last_status: "uploaded",
           last_http_status: status,
         };
-        uploadedCount += 1;
-      } else if (body?.status === "skipped_no_inventory_match") {
-        state.uploads[key] = {
-          ...slab.fingerprint,
-          last_upload_at: new Date().toISOString(),
-          last_status: "skipped_no_inventory_match",
-          last_http_status: status,
-        };
-      } else if (!ok) {
-        failedCount += 1;
-        state.uploads[key] = {
-          ...slab.fingerprint,
-          last_upload_at: new Date().toISOString(),
-          last_status: body?.status ?? "failed",
-          last_http_status: status,
-        };
-        failures.push({
-          slab_id: slab.slab_id,
-          inventory_id: slab.inventory_id,
-          error: body?.error ?? `HTTP ${status}`,
-        });
+        summary.uploaded_count += 1;
+        continue;
       }
+
+      if (outcome === PLANNED_UPLOAD_OUTCOMES.SKIPPED_NO_INVENTORY_MATCH) {
+        summary.skipped_no_inventory_match_count += 1;
+        if (summary.skipped_no_inventory_match.length < SKIPPED_MISSING_SAMPLE_LIMIT) {
+          summary.skipped_no_inventory_match.push({
+            slab_id: slab.slab_id,
+            inventory_id: slab.inventory_id,
+            backend_status: body?.status ?? null,
+            message: body?.message ?? null,
+          });
+        }
+        continue;
+      }
+
+      if (outcome === PLANNED_UPLOAD_OUTCOMES.SKIPPED_BACKEND_NONFATAL) {
+        summary.skipped_backend_nonfatal_count += 1;
+        if (summary.skipped_backend_nonfatal.length < SKIPPED_MISSING_SAMPLE_LIMIT) {
+          summary.skipped_backend_nonfatal.push({
+            slab_id: slab.slab_id,
+            inventory_id: slab.inventory_id,
+            backend_status: body?.status ?? null,
+            message: body?.message ?? body?.error ?? null,
+          });
+        }
+        continue;
+      }
+
+      summary.failed_count += 1;
+      summary.failures.push({
+        slab_id: slab.slab_id,
+        inventory_id: slab.inventory_id,
+        error: body?.error ?? `HTTP ${status}`,
+        backend_status: body?.status ?? null,
+      });
     } catch (err) {
       if (isLocalFileMissingError(err)) {
-        skippedMissingDuringUploadCount += 1;
-        if (skippedMissingSamples.length < SKIPPED_MISSING_SAMPLE_LIMIT) {
-          skippedMissingSamples.push({
+        summary.skipped_missing_during_upload_count += 1;
+        if (summary.skipped_missing_during_upload.length < SKIPPED_MISSING_SAMPLE_LIMIT) {
+          summary.skipped_missing_during_upload.push({
             slab_id: slab.slab_id,
             inventory_id: slab.inventory_id,
             missing_kind: "unknown",
@@ -357,8 +438,8 @@ export async function runImageUploads({
         continue;
       }
 
-      failedCount += 1;
-      failures.push({
+      summary.failed_count += 1;
+      summary.failures.push({
         slab_id: slab.slab_id,
         inventory_id: slab.inventory_id,
         error: String(err?.message || err),
@@ -368,18 +449,8 @@ export async function runImageUploads({
 
   saveState(logDir, state);
 
-  return {
-    planned_upload_count: plan.planned_upload_count,
-    skipped_unchanged_count: plan.skipped_unchanged_count,
-    skipped_missing_during_upload_count: skippedMissingDuringUploadCount,
-    uploaded_count: uploadedCount,
-    failed_count: failedCount,
-    missing_image_count: plan.missing_image_count,
-    unmatched_image_count: plan.unmatched_image_count,
-    dry_run: false,
-    failures: failures.slice(0, 10),
-    skipped_missing_during_upload: skippedMissingSamples,
-  };
+  summary.failures = summary.failures.slice(0, 10);
+  return reconcilePlannedUploadOutcomes(summary);
 }
 
 /**
@@ -390,16 +461,34 @@ export function formatUploadSummaryLines(summary) {
     `planned_upload_count=${summary.planned_upload_count}`,
     `skipped_unchanged_count=${summary.skipped_unchanged_count}`,
     `skipped_missing_during_upload_count=${summary.skipped_missing_during_upload_count ?? 0}`,
+    `skipped_no_inventory_match_count=${summary.skipped_no_inventory_match_count ?? 0}`,
+    `skipped_backend_nonfatal_count=${summary.skipped_backend_nonfatal_count ?? 0}`,
     `uploaded_count=${summary.uploaded_count}`,
     `failed_count=${summary.failed_count}`,
+    `unclassified_planned_count=${summary.unclassified_planned_count ?? 0}`,
+    `outcomes_reconciled=${summary.outcomes_reconciled === true}`,
     `missing_image_count=${summary.missing_image_count}`,
     `unmatched_image_count=${summary.unmatched_image_count}`,
     summary.dry_run ? "mode=dry-run-plan" : "mode=upload",
     summary.skipped_missing_during_upload?.length
       ? `sample_skipped_missing_during_upload=${JSON.stringify(summary.skipped_missing_during_upload)}`
       : "sample_skipped_missing_during_upload=[]",
+    summary.skipped_no_inventory_match?.length
+      ? `sample_skipped_no_inventory_match=${JSON.stringify(summary.skipped_no_inventory_match)}`
+      : "sample_skipped_no_inventory_match=[]",
+    summary.skipped_backend_nonfatal?.length
+      ? `sample_skipped_backend_nonfatal=${JSON.stringify(summary.skipped_backend_nonfatal)}`
+      : "sample_skipped_backend_nonfatal=[]",
     summary.failures?.length
       ? `sample_failures=${JSON.stringify(summary.failures)}`
       : "sample_failures=[]",
   ];
+}
+
+/**
+ * @param {object} summary
+ */
+export function shouldFailUploadRun(summary) {
+  if (summary.dry_run) return false;
+  return Number(summary.failed_count ?? 0) > 0 || Number(summary.unclassified_planned_count ?? 0) > 0;
 }

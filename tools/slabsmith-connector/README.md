@@ -56,7 +56,7 @@ node sync-images.mjs --config config.json --plan-upload
 node sync-images.mjs --config config.json --upload --limit 5
 ```
 
-Tracks `logDir/image-upload-state.json` to skip unchanged file pairs. Missing local files during upload (`ENOENT`) are logged as `skipped_missing_during_upload` and are non-fatal — they may upload on a later run if files reappear. Never logs sync token or image bytes.
+Tracks `logDir/image-upload-state.json` to skip unchanged file pairs. Missing local files during upload (`ENOENT`) are logged as `skipped_missing_during_upload`. Backend non-fatal skips such as `skipped_no_inventory_match` are counted separately and sampled in the summary. Upload state is written only after confirmed backend `uploaded` success. Never logs sync token or image bytes.
 
 ## Backend endpoint
 

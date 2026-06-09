@@ -9,12 +9,14 @@ import { describe, it } from "node:test";
 
 import {
   buildUploadFingerprint,
+  classifyPlannedUploadResult,
   isLocalFileMissingError,
   isUnchangedUpload,
   isUploadablePair,
   loadUploadState,
   planImageUploads,
   readImagePairBuffers,
+  reconcilePlannedUploadOutcomes,
   runImageUploads,
   saveUploadState,
   uploadImagePair,
@@ -147,6 +149,46 @@ describe("readImagePairBuffers", () => {
   });
 });
 
+describe("classifyPlannedUploadResult", () => {
+  it("maps backend statuses to explicit outcome buckets", () => {
+    assert.equal(
+      classifyPlannedUploadResult({ status: 200, body: { ok: true, status: "uploaded" } }),
+      "uploaded"
+    );
+    assert.equal(
+      classifyPlannedUploadResult({
+        status: 200,
+        body: { ok: true, status: "skipped_no_inventory_match" },
+      }),
+      "skipped_no_inventory_match"
+    );
+    assert.equal(
+      classifyPlannedUploadResult({ status: 200, body: { ok: true, status: "skipped_future" } }),
+      "skipped_backend_nonfatal"
+    );
+    assert.equal(
+      classifyPlannedUploadResult({ status: 500, body: { ok: false, error: "boom" } }),
+      "failed"
+    );
+  });
+});
+
+describe("reconcilePlannedUploadOutcomes", () => {
+  it("flags unclassified planned uploads", () => {
+    const summary = reconcilePlannedUploadOutcomes({
+      dry_run: false,
+      planned_upload_count: 2,
+      uploaded_count: 1,
+      skipped_missing_during_upload_count: 0,
+      skipped_no_inventory_match_count: 0,
+      skipped_backend_nonfatal_count: 0,
+      failed_count: 0,
+    });
+    assert.equal(summary.unclassified_planned_count, 1);
+    assert.equal(summary.outcomes_reconciled, false);
+  });
+});
+
 describe("runImageUploads", () => {
   it("dry-run does not call backend", async () => {
     let calls = 0;
@@ -184,8 +226,67 @@ describe("runImageUploads", () => {
       }),
     });
     assert.equal(summary.uploaded_count, 1);
+    assert.equal(summary.outcomes_reconciled, true);
+    assert.equal(summary.unclassified_planned_count, 0);
     const loaded = loadUploadState(logDir);
     assert.equal(loaded.uploads["abc-123"].last_status, "uploaded");
+  });
+
+  it("counts skipped_no_inventory_match without writing upload success state", async () => {
+    const logDir = mkdtempSync(join(tmpdir(), "slabsmith-upload-no-inv-"));
+    const plan = planImageUploads(SAMPLE_MANIFEST, null, { limit: 1 });
+    const summary = await runImageUploads({
+      plan,
+      backendBaseUrl: "https://example.com",
+      syncToken: "secret",
+      logDir,
+      state: { version: 1, uploads: {} },
+      dryRun: false,
+      uploadPair: async () => ({
+        status: 200,
+        body: {
+          ok: true,
+          status: "skipped_no_inventory_match",
+          message: "No matching slabsmith slab_inventory row",
+        },
+      }),
+    });
+    assert.equal(summary.skipped_no_inventory_match_count, 1);
+    assert.equal(summary.failed_count, 0);
+    assert.equal(summary.uploaded_count, 0);
+    assert.equal(summary.outcomes_reconciled, true);
+    assert.equal(summary.skipped_no_inventory_match.length, 1);
+    const loaded = loadUploadState(logDir);
+    assert.equal(loaded.uploads["abc-123"], undefined);
+  });
+
+  it("reconciles all planned outcomes across mixed results", async () => {
+    const logDir = mkdtempSync(join(tmpdir(), "slabsmith-upload-mixed-"));
+    const plan = planImageUploads(SAMPLE_MANIFEST, null);
+    let call = 0;
+    const summary = await runImageUploads({
+      plan,
+      backendBaseUrl: "https://example.com",
+      syncToken: "secret",
+      logDir,
+      state: { version: 1, uploads: {} },
+      dryRun: false,
+      uploadPair: async () => {
+        call += 1;
+        if (call === 1) {
+          return { status: 200, body: { ok: true, status: "uploaded" } };
+        }
+        return {
+          status: 200,
+          body: { ok: true, status: "skipped_no_inventory_match" },
+        };
+      },
+    });
+    assert.equal(summary.planned_upload_count, 2);
+    assert.equal(summary.uploaded_count, 1);
+    assert.equal(summary.skipped_no_inventory_match_count, 1);
+    assert.equal(summary.outcomes_reconciled, true);
+    assert.equal(summary.unclassified_planned_count, 0);
   });
 
   it("skips ENOENT as non-fatal production churn without updating upload state", async () => {
@@ -236,6 +337,7 @@ describe("runImageUploads", () => {
     assert.equal(summary.skipped_missing_during_upload_count, 1);
     assert.equal(summary.failed_count, 0);
     assert.equal(summary.uploaded_count, 0);
+    assert.equal(summary.outcomes_reconciled, true);
     const loadedMissing = loadUploadState(logDir);
     assert.equal(loadedMissing.uploads["abc-123"], undefined);
   });

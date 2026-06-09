@@ -38,6 +38,22 @@ import {
   normalizeColorName as _normColorName,
   normalizeMaterialName as _normMatName,
 } from "./colorProgramMatching.js";
+import {
+  buildImageMap,
+  imagePatternDisplayLabel,
+  lookupInventoryImage,
+  SLAB_IMAGE_SELECT_COLUMNS,
+} from "./slabInventoryImageResolver.js";
+
+export {
+  buildImageMap,
+  IMAGE_URL_PATTERN_SLABSMITH,
+  IMAGE_URL_PATTERN_SLABCLOUD,
+  imagePatternDisplayLabel,
+  lookupInventoryImage,
+  PREFERRED_IMAGE_PATTERN,
+  SLAB_IMAGE_SELECT_COLUMNS,
+} from "./slabInventoryImageResolver.js";
 
 export {
   applyInventorySourceFilter,
@@ -58,6 +74,7 @@ export const SLAB_INVENTORY_HEAD_SLUG = "slab_inventory";
 /** Staff-safe columns returned to the internal head. Intentionally explicit (no SELECT *). */
 export const INVENTORY_SELECT_COLUMNS = Object.freeze([
   "id",
+  "external_source",
   "external_slab_id",
   "inventory_id",
   "color_name",
@@ -97,9 +114,6 @@ export const IMAGE_STATUS_VALUES = Object.freeze(["unknown", "ok", "missing", "e
 
 /** UI label for the imported (non-authoritative) SlabCloud price group. */
 export const SOURCE_PRICE_GROUP_LABEL = "Source price group";
-
-/** Image URL pattern preferred when a slab has multiple slab_images rows. */
-const PREFERRED_IMAGE_PATTERN = "slabcloud_slab_jpg";
 
 const DEFAULT_LIMIT = 60;
 const MAX_LIMIT = 200;
@@ -206,32 +220,11 @@ export function mapSlabRow(row, image = null) {
     updated_at: r.updated_at ?? null,
     image_url: img.image_url ?? null,
     thumbnail_url: img.thumbnail_url ?? null,
-    image_status: img.image_status ?? "unknown"
+    image_status: img.image_status ?? "unknown",
+    inventory_source: r.external_source ?? null,
+    image_url_pattern: img.image_url_pattern ?? null,
+    image_source_label: imagePatternDisplayLabel(img.image_url_pattern),
   };
-}
-
-/**
- * Index slab_images rows by external_slab_id, preferring the canonical pattern
- * and an `ok` status when a slab has more than one image row.
- * @param {Array<Record<string, unknown>>} imageRows
- */
-export function buildImageMap(imageRows = []) {
-  /** @type {Map<string, Record<string, unknown>>} */
-  const map = new Map();
-  for (const raw of Array.isArray(imageRows) ? imageRows : []) {
-    const key = trimStr(raw?.external_slab_id);
-    if (!key) continue;
-    const existing = map.get(key);
-    if (!existing) {
-      map.set(key, raw);
-      continue;
-    }
-    const better =
-      (raw?.image_status === "ok" && existing?.image_status !== "ok") ||
-      (raw?.image_url_pattern === PREFERRED_IMAGE_PATTERN && existing?.image_url_pattern !== PREFERRED_IMAGE_PATTERN);
-    if (better) map.set(key, raw);
-  }
-  return map;
 }
 
 /**
@@ -282,7 +275,8 @@ export function scoreRepresentativeInventoryImage(invRow, image) {
  * Deterministic: same inputs → same output.  Never reads count_for_color.
  *
  * @param {Array<Record<string, unknown>>} invRows
- * @param {Map<string, Record<string, unknown>>} imageMap  keyed by external_slab_id
+ * @param {Map<string, Record<string, unknown>>} imageMap
+ * @param {{ mode?: string, externalSource?: string|null, resolved?: string }} [sourceFilter]
  * @returns {{
  *   representative_image_url: string|null,
  *   representative_thumbnail_url: string|null,
@@ -290,7 +284,7 @@ export function scoreRepresentativeInventoryImage(invRow, image) {
  *   representative_image_inventory_id: string|null
  * }}
  */
-export function chooseRepresentativeInventoryImage(invRows, imageMap) {
+export function chooseRepresentativeInventoryImage(invRows, imageMap, sourceFilter = null) {
   let bestRow = null;
   let bestImage = null;
   let bestScore = 0;
@@ -298,7 +292,7 @@ export function chooseRepresentativeInventoryImage(invRows, imageMap) {
   for (const r of Array.isArray(invRows) ? invRows : []) {
     const slabId = String(r?.external_slab_id ?? "").trim();
     if (!slabId) continue;
-    const image = imageMap instanceof Map ? (imageMap.get(slabId) ?? null) : null;
+    const image = lookupInventoryImage(imageMap, r, sourceFilter);
     const score = scoreRepresentativeInventoryImage(r, image);
     if (score > bestScore) {
       bestScore = score;
@@ -525,6 +519,7 @@ const COLOR_PROGRAM_SCOPE = "typed";
  */
 export const COLOR_INVENTORY_SELECT_COLUMNS = Object.freeze([
   "id",
+  "external_source",
   "external_slab_id",
   "inventory_id",
   "color_name",
@@ -591,12 +586,13 @@ export function priceGroupSortIndex(pg) {
  * @param {Array<Record<string, unknown>>} rows
  *   Typed active slab_inventory rows (scope=typed, type in [Slab, Remnant]).
  * @param {Map<string, Record<string, unknown>>} imageMap
- *   Built by buildImageMap(), keyed by external_slab_id.
+ *   Built by buildImageMap() with the same sourceFilter.
+ * @param {{ mode?: string, externalSource?: string|null, resolved?: string }} [sourceFilter]
  * @returns {Array<Record<string, unknown>>} Cards sorted Promo→A→F→other,
  *   then color_name asc within each price group.
  */
-export function groupColorPrograms(rows, imageMap = new Map()) {
-  /** @type {Map<string, { color_name: string|null, material_name: string|null, source_price_group: string|null, slabIds: string[], sampleIds: Array<string|null>, slabCount: number, remnantCount: number }>} */
+export function groupColorPrograms(rows, imageMap = new Map(), sourceFilter = null) {
+  /** @type {Map<string, { color_name: string|null, material_name: string|null, source_price_group: string|null, slabIds: string[], inventoryRows: Array<Record<string, unknown>>, sampleIds: Array<string|null>, slabCount: number, remnantCount: number }>} */
   const groups = new Map();
 
   for (const r of Array.isArray(rows) ? rows : []) {
@@ -607,6 +603,7 @@ export function groupColorPrograms(rows, imageMap = new Map()) {
         material_name: r.material_name ?? null,
         source_price_group: r.price_group ?? null,
         slabIds: [],
+        inventoryRows: [],
         sampleIds: [],
         slabCount: 0,
         remnantCount: 0
@@ -614,7 +611,10 @@ export function groupColorPrograms(rows, imageMap = new Map()) {
     }
     const g = groups.get(colorKey);
     const slabId = trimStr(r.external_slab_id);
-    if (slabId) g.slabIds.push(slabId);
+    if (slabId) {
+      g.slabIds.push(slabId);
+      g.inventoryRows.push(r);
+    }
     if (g.sampleIds.length < 5) g.sampleIds.push(r.id ?? null);
     const t = trimStr(r.source_inventory_type);
     if (t === "Slab") g.slabCount += 1;
@@ -627,8 +627,8 @@ export function groupColorPrograms(rows, imageMap = new Map()) {
     let repImage = null;
     let repThumbnail = null;
     let verifiedCount = 0;
-    for (const slabId of g.slabIds) {
-      const img = imageMap.get(slabId);
+    for (const invRow of g.inventoryRows) {
+      const img = lookupInventoryImage(imageMap, invRow, sourceFilter);
       if (img?.image_status === "ok") {
         verifiedCount += 1;
         if (!repImage) {
@@ -980,14 +980,16 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
       if (slabIds.length) {
         let imgQ = supabase
           .from("slab_images")
-          .select("external_slab_id,image_url,thumbnail_url,image_status,image_url_pattern")
+          .select(SLAB_IMAGE_SELECT_COLUMNS)
           .in("external_slab_id", slabIds);
         imgQ = scopeInventory(imgQ, organizationId, sourceFilter);
         const { data: imgRows } = await imgQ;
-        imageMap = buildImageMap(imgRows ?? []);
+        imageMap = buildImageMap(imgRows ?? [], sourceFilter);
       }
 
-      const mapped = (rows ?? []).map((r) => mapSlabRow(r, imageMap.get(trimStr(r.external_slab_id)) || null));
+      const mapped = (rows ?? []).map((r) =>
+        mapSlabRow(r, lookupInventoryImage(imageMap, r, sourceFilter))
+      );
 
       res.json({
         ok: true,
@@ -1028,16 +1030,16 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
       if (sid) {
         let imgQ = supabase
           .from("slab_images")
-          .select("external_slab_id,image_url,thumbnail_url,image_status,image_url_pattern")
+          .select(SLAB_IMAGE_SELECT_COLUMNS)
           .eq("external_slab_id", sid);
         imgQ = scopeInventory(imgQ, organizationId, sourceFilter);
         const { data: imgRows } = await imgQ;
-        imageMap = buildImageMap(imgRows ?? []);
+        imageMap = buildImageMap(imgRows ?? [], sourceFilter);
       }
 
       res.json({
         ok: true,
-        row: mapSlabRow(row, imageMap.get(sid) || null),
+        row: mapSlabRow(row, lookupInventoryImage(imageMap, row, sourceFilter)),
         source_price_group_label: SOURCE_PRICE_GROUP_LABEL
       });
     } catch (e) {
@@ -1062,7 +1064,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
       // Never selects or sums count_for_color.
       let q = supabase
         .from("slab_inventory")
-        .select("id,external_slab_id,color_name,material_name,price_group,source_inventory_type,source_inventory_scope")
+        .select("id,external_source,external_slab_id,color_name,material_name,price_group,source_inventory_type,source_inventory_scope")
         .eq("is_active", true)
         .eq("source_inventory_scope", COLOR_PROGRAM_SCOPE)
         .in("source_inventory_type", ["Slab", "Remnant"]);
@@ -1082,12 +1084,12 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
       let imageMap = new Map();
       let imgQ = supabase
         .from("slab_images")
-        .select("external_slab_id,image_url,thumbnail_url,image_status,image_url_pattern");
+        .select(SLAB_IMAGE_SELECT_COLUMNS);
       imgQ = scopeInventory(imgQ, organizationId, sourceFilter);
       const { data: imgRows } = await imgQ;
-      if (imgRows?.length) imageMap = buildImageMap(imgRows);
+      if (imgRows?.length) imageMap = buildImageMap(imgRows, sourceFilter);
 
-      const cards = groupColorPrograms(rowList, imageMap);
+      const cards = groupColorPrograms(rowList, imageMap, sourceFilter);
 
       res.json({
         ok: true,
@@ -1164,24 +1166,24 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
       if (slabIds.length) {
         let imgQ = supabase
           .from("slab_images")
-          .select("external_slab_id,image_url,thumbnail_url,image_status,image_url_pattern")
+          .select(SLAB_IMAGE_SELECT_COLUMNS)
           .in("external_slab_id", slabIds);
         imgQ = scopeInventory(imgQ, organizationId, sourceFilter);
         const { data: imgRows } = await imgQ;
-        imageMap = buildImageMap(imgRows ?? []);
+        imageMap = buildImageMap(imgRows ?? [], sourceFilter);
       }
 
       // Apply image_status post-filter (after images are resolved).
       let finalRows = typeFiltered;
       if (params.image_status) {
         finalRows = typeFiltered.filter((r) => {
-          const img = imageMap.get(trimStr(r.external_slab_id));
+          const img = lookupInventoryImage(imageMap, r, sourceFilter);
           return (img?.image_status ?? "unknown") === params.image_status;
         });
       }
 
       const mapped = finalRows.map((r) => {
-        const img = imageMap.get(trimStr(r.external_slab_id)) || null;
+        const img = lookupInventoryImage(imageMap, r, sourceFilter);
         return {
           id: r.id ?? null,
           external_slab_id: r.external_slab_id ?? null,
@@ -1199,6 +1201,9 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
           image_url: img?.image_url ?? null,
           thumbnail_url: img?.thumbnail_url ?? null,
           image_status: img?.image_status ?? "unknown",
+          inventory_source: r.external_source ?? null,
+          image_url_pattern: img?.image_url_pattern ?? null,
+          image_source_label: imagePatternDisplayLabel(img?.image_url_pattern),
           source_public_slug: r.source_public_slug ?? null,
           source_api_company_code: r.source_api_company_code ?? null,
           source_asset_company_code: r.source_asset_company_code ?? null
@@ -1317,7 +1322,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
       let invQ = supabase
         .from("slab_inventory")
         .select(
-          "id,external_slab_id,color_name,material_name,source_inventory_type"
+          "id,external_source,external_slab_id,color_name,material_name,source_inventory_type"
         )
         .eq("is_active", true)
         .eq("source_inventory_scope", COLOR_PROGRAM_SCOPE)
@@ -1338,10 +1343,10 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
       // Load all org images (avoiding PostgREST URL-length limit).
       let imgQ = supabase
         .from("slab_images")
-        .select("external_slab_id,image_url,thumbnail_url,image_status");
+        .select(SLAB_IMAGE_SELECT_COLUMNS);
       imgQ = scopeInventory(imgQ, organizationId, sourceFilter);
       const { data: imgRows } = await imgQ;
-      const imageMap = buildImageMap(imgRows ?? []);
+      const imageMap = buildImageMap(imgRows ?? [], sourceFilter);
 
       // Match inventory to catalog items (exact/alias only).
       const elite100Map = buildElite100InventoryMap(
@@ -1381,10 +1386,12 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
       for (const [, acc] of elite100Map.entries()) {
         // Count verified photos across all matched slabs.
         let verifiedCount = 0;
-        for (const slabId of acc.slabIds) {
-          if (imageMap.get(slabId)?.image_status === "ok") verifiedCount += 1;
+        for (const invRow of acc.rows) {
+          if (lookupInventoryImage(imageMap, invRow, sourceFilter)?.image_status === "ok") {
+            verifiedCount += 1;
+          }
         }
-        const repResult = chooseRepresentativeInventoryImage(acc.rows, imageMap);
+        const repResult = chooseRepresentativeInventoryImage(acc.rows, imageMap, sourceFilter);
         acc.verifiedPhotoCount = verifiedCount;
         acc.repImage = repResult.representative_image_url;
         acc.repThumbnail = repResult.representative_thumbnail_url;
@@ -1585,17 +1592,15 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
         if (slabIds.length) {
           let imgQ = supabase
             .from("slab_images")
-            .select(
-              "external_slab_id,image_url,thumbnail_url,image_status,image_url_pattern"
-            )
+            .select(SLAB_IMAGE_SELECT_COLUMNS)
             .in("external_slab_id", slabIds);
           imgQ = scopeInventory(imgQ, organizationId, sourceFilter);
           const { data: imgRows } = await imgQ;
-          imageMap = buildImageMap(imgRows ?? []);
+          imageMap = buildImageMap(imgRows ?? [], sourceFilter);
         }
 
         const mapRow = (r) => {
-          const img = imageMap.get(trimStr(r.external_slab_id)) ?? null;
+          const img = lookupInventoryImage(imageMap, r, sourceFilter);
           return {
             id: r.id ?? null,
             external_slab_id: r.external_slab_id ?? null,
@@ -1613,6 +1618,9 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
             image_url: img?.image_url ?? null,
             thumbnail_url: img?.thumbnail_url ?? null,
             image_status: img?.image_status ?? "unknown",
+            inventory_source: r.external_source ?? null,
+            image_url_pattern: img?.image_url_pattern ?? null,
+            image_source_label: imagePatternDisplayLabel(img?.image_url_pattern),
             source_public_slug: r.source_public_slug ?? null,
             source_api_company_code: r.source_api_company_code ?? null,
             source_asset_company_code: r.source_asset_company_code ?? null,
@@ -1676,7 +1684,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
       let invQ = supabase
         .from("slab_inventory")
         .select(
-          "id,external_slab_id,color_name,material_name,price_group,source_inventory_type,source_inventory_scope"
+          "id,external_source,external_slab_id,color_name,material_name,price_group,source_inventory_type,source_inventory_scope"
         )
         .eq("is_active", true)
         .eq("source_inventory_scope", COLOR_PROGRAM_SCOPE)
@@ -1730,10 +1738,10 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
       let imageMap = new Map();
       let imgQ = supabase
         .from("slab_images")
-        .select("external_slab_id,image_url,thumbnail_url,image_status");
+        .select(SLAB_IMAGE_SELECT_COLUMNS);
       imgQ = scopeInventory(imgQ, organizationId, sourceFilter);
       const { data: imgRows } = await imgQ;
-      if (imgRows?.length) imageMap = buildImageMap(imgRows);
+      if (imgRows?.length) imageMap = buildImageMap(imgRows, sourceFilter);
 
       // Load non-stock visual assets (catalog_item_id IS NULL) from cache.
       // Non-fatal: if table not installed, visual asset fields are null.
@@ -1757,7 +1765,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
       }
 
       // Reuse groupColorPrograms; tag cards as non_stock + add visual asset enrichment.
-      const cards = groupColorPrograms(nonStockRows, imageMap).map((card) => {
+      const cards = groupColorPrograms(nonStockRows, imageMap, sourceFilter).map((card) => {
         const normKey = `${_normColorName(card.color_name ?? "") ?? ""}||${_normMatName(card.material_name ?? "") ?? ""}`;
         return {
           ...card,

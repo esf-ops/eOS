@@ -129,11 +129,28 @@ When a planned full or thumb file is missing at upload time (`ENOENT`), the conn
 - does **not** mark the pair as uploaded in `image-upload-state.json`
 - exits with code **0** if there are no other real failures
 
+When the backend returns a non-fatal skip (for example `skipped_no_inventory_match` because inventory was consumed before upload), the connector:
+
+- logs `skipped_no_inventory_match_count` (or `skipped_backend_nonfatal_count` for other non-fatal backend statuses)
+- includes compact samples such as `sample_skipped_no_inventory_match`
+- does **not** write upload success state for that slab
+- does **not** increment `failed_count`
+
+Upload summary reconciliation (upload mode):
+
+`planned_upload_count = uploaded_count + skipped_missing_during_upload_count + skipped_no_inventory_match_count + skipped_backend_nonfatal_count + failed_count`
+
+The log also prints `outcomes_reconciled=true` when every planned item is explicitly classified. `skipped_unchanged_count` is separate and reflects pairs skipped before planning because local files match a prior successful upload fingerprint.
+
 Those slabs remain eligible on a later `--upload` run if the files reappear locally.
 
 **Before first upload:** create Supabase Storage bucket `eliteos-slab-images` (public read). See `backend-core/supabase/eliteos_slab_images_storage.sql`.
 
 Do **not** schedule image upload yet — validate manually with `--limit 5` first.
+
+## Verifying images in Slab Inventory UI
+
+On **All Inventory**, use the **Source** selector (or `?source=slabsmith` on `/api/slab-inventory/slabs`) to browse Slabsmith rows. Uploaded photos resolve from `slab_images` where `image_url_pattern=slabsmith_local_upload` and `image_status=ok`, joined on `external_slab_id` (Slabsmith `InventoryID`). The slab lightbox **Technical details** panel shows **Image source: Slabsmith upload** when the resolver picked a local upload row. SlabCloud display is unchanged when Source is **SlabCloud** or the env default (`SLAB_INVENTORY_ACTIVE_SOURCE=slabcloud`).
 
 ## Hourly schedule
 
