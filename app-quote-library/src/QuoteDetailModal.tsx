@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import EmailEstimateModal from "./components/email-estimate/EmailEstimateModal";
 import { apiPatch, apiPost } from "./lib/api";
 import { QuoteFilesBlock } from "./QuoteFilesBlock";
@@ -248,10 +248,17 @@ export function QuoteDetailModal({
     return () => document.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
+  // Derive email defaults unconditionally (before any early return) so hook order stays stable.
+  const header = (detail.header as Record<string, unknown>) || {};
+  const snap = (detail.calculation_snapshot as Record<string, unknown>) || {};
+  const iu = (snap.internal_ui as Record<string, unknown>) || {};
+  const emailDefaultSubject = buildEmailDefaultSubject(header);
+  const emailDefaultTo = pickDefaultToEmail(header, iu);
+  const emailDefaultCc = pickDefaultCcEmail(header, iu);
+
   if (!open) return null;
 
   // ── Derive display values from the detail payload ────────────────────────
-  const header = (detail.header as Record<string, unknown>) || {};
   const mondayBoard = str(header.monday_board_id);
   const mondayItem = str(header.monday_item_id);
   const mondayUrl =
@@ -259,14 +266,8 @@ export function QuoteDetailModal({
       ? `https://monday.com/boards/${encodeURIComponent(mondayBoard)}/pulses/${encodeURIComponent(mondayItem)}`
       : "";
 
-  const snap = (detail.calculation_snapshot as Record<string, unknown>) || {};
-  const iu = (snap.internal_ui as Record<string, unknown>) || {};
-
   const account = displayAccountColumn(header);
   const isInternal = str(header.quote_source) === "internal_quote";
-  const emailDefaultSubject = useMemo(() => buildEmailDefaultSubject(header), [header]);
-  const emailDefaultTo = useMemo(() => pickDefaultToEmail(header, iu), [header, iu]);
-  const emailDefaultCc = useMemo(() => pickDefaultCcEmail(header, iu), [header, iu]);
   const warnings = (
     Array.isArray(detail.warnings) ? (detail.warnings as unknown[]) : []
   ).filter((w): w is string => typeof w === "string");
