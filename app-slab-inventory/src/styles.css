@@ -550,6 +550,35 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 .health-row span { color: var(--eos-ink-muted); }
 .health-row strong { color: var(--eos-ink); font-weight: 600; }
 
+.health-not-seen {
+  flex: 1 1 280px;
+  min-width: 0;
+  padding-top: 4px;
+}
+
+.health-not-seen-label {
+  margin: 0 0 8px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--eos-ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.health-not-seen-sample {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.health-not-seen-sample li {
+  font-size: 0.82rem;
+  color: var(--eos-ink-soft);
+}
+
 .health-pg { flex: 0 1 200px; }
 
 .health-pg-label {

@@ -391,7 +391,6 @@ export default function SlabInventoryApp() {
   const [viewMode, setViewMode] = useState<"grid" | "table">("grid");
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
-  const [reviewOpen, setReviewOpen] = useState(false);
   const [healthOpen, setHealthOpen] = useState(false);
 
   const homeBase = useMemo(() => homeLauncherUrl(), []);
@@ -951,32 +950,6 @@ export default function SlabInventoryApp() {
 
                 {err ? <div className="banner banner-error" role="alert">{err}</div> : null}
 
-                {/* Sync health banner */}
-                {summary ? notSeenCount > 0 ? (
-                  <div className="trust-banner trust-banner-warn" role="alert">
-                    <div className="trust-banner-content">
-                      <span className="trust-banner-dot warn" aria-hidden />
-                      <span><strong>{notSeenCount}</strong> {notSeenCount === 1 ? "slab needs" : "slabs need"} review — active cached slabs not seen in latest sync.</span>
-                      <button type="button" className="trust-banner-btn" onClick={() => setReviewOpen((o) => !o)} aria-expanded={reviewOpen}>{reviewOpen ? "Hide" : "Review"}</button>
-                    </div>
-                    {reviewOpen && summary.active_not_seen_in_latest_sync_sample?.length ? (
-                      <ul className="trust-banner-sample">
-                        {summary.active_not_seen_in_latest_sync_sample.map((row) => (
-                          <li key={row.id ?? row.inventory_id}>
-                            <span className="not-seen-color">{row.color_name || "—"}</span>{" · "}
-                            <span className="not-seen-material">{row.material_name || "—"}</span>
-                            {row.inventory_id ? <> · <code className="not-seen-inv">{row.inventory_id}</code></> : null}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : null}
-                  </div>
-                ) : summary.last_sync ? (
-                  <p className="trust-ok-line" role="status">
-                    <span className="trust-ok-dot" aria-hidden />Inventory cache up to date
-                  </p>
-                ) : null : null}
-
                 {/* Search + filter controls */}
                 <section className="search-section" aria-label="Filters">
                   <div className="search-row">
@@ -1035,9 +1008,9 @@ export default function SlabInventoryApp() {
                 <div className="result-meta">
                   <span>{busy ? "Loading…" : `Showing ${rangeStart.toLocaleString()}–${rangeEnd.toLocaleString()} of ${total.toLocaleString()}`}</span>
                   <span className="result-meta-right">
-                    {summary?.last_sync ? (
+                    {summary?.last_sync || notSeenCount > 0 ? (
                       <button type="button" className="health-toggle-btn" onClick={() => setHealthOpen((o) => !o)} aria-expanded={healthOpen}>
-                        Inventory health {healthOpen ? "▴" : "▾"}
+                        Inventory health{notSeenCount > 0 ? ` (${notSeenCount} need review)` : ""} {healthOpen ? "▴" : "▾"}
                       </button>
                     ) : null}
                     <span className="result-meta-pages">
@@ -1048,17 +1021,43 @@ export default function SlabInventoryApp() {
                   </span>
                 </div>
 
-                {/* Health panel */}
-                {healthOpen && summary?.last_sync ? (
+                {/* Health panel (staff diagnostics — not shown by default) */}
+                {healthOpen && summary ? (
                   <div className="health-panel" role="region" aria-label="Inventory health">
                     <div className="health-panel-inner">
-                      <div className="health-row"><span>Status</span><strong className={`sync-status sync-${summary.last_sync.status}`}>{summary.last_sync.status}</strong></div>
-                      <div className="health-row"><span>Last sync</span><strong>{fmtDate(summary.last_sync.finished_at || summary.last_sync.started_at)}</strong></div>
-                      <div className="health-row"><span>Latest sync count</span><strong>{summary.latest_sync_slab_count != null ? `${Number(summary.latest_sync_slab_count).toLocaleString()} slabs seen` : summary.last_sync.slab_upserted_count != null ? `${Number(summary.last_sync.slab_upserted_count).toLocaleString()} slabs seen` : "—"}</strong></div>
+                      {summary.last_sync ? (
+                        <>
+                          <div className="health-row"><span>Status</span><strong className={`sync-status sync-${summary.last_sync.status}`}>{summary.last_sync.status}</strong></div>
+                          <div className="health-row"><span>Last sync</span><strong>{fmtDate(summary.last_sync.finished_at || summary.last_sync.started_at)}</strong></div>
+                          <div className="health-row"><span>Latest sync count</span><strong>{summary.latest_sync_slab_count != null ? `${Number(summary.latest_sync_slab_count).toLocaleString()} slabs seen` : summary.last_sync.slab_upserted_count != null ? `${Number(summary.last_sync.slab_upserted_count).toLocaleString()} slabs seen` : "—"}</strong></div>
+                          <div className="health-row"><span>Warnings</span><strong>{summary.last_sync.warning_count}</strong></div>
+                        </>
+                      ) : null}
                       <div className="health-row"><span>Active cache</span><strong>{(summary.active_cached_slab_count ?? summary.total_active_slabs).toLocaleString()} slabs</strong></div>
-                      {notSeenCount > 0 ? <div className="health-row"><span>Needs review</span><strong className="count-warn">{notSeenCount} not seen in latest sync</strong></div> : null}
-                      <div className="health-row"><span>Warnings</span><strong>{summary.last_sync.warning_count}</strong></div>
+                      {notSeenCount > 0 ? (
+                        <div className="health-row">
+                          <span>Needs review</span>
+                          <strong className="count-warn">{notSeenCount} not seen in latest sync</strong>
+                        </div>
+                      ) : summary.last_sync ? (
+                        <div className="health-row"><span>Sync coverage</span><strong>All active slabs seen in latest sync</strong></div>
+                      ) : null}
                     </div>
+                    {notSeenCount > 0 && summary.active_not_seen_in_latest_sync_sample?.length ? (
+                      <div className="health-not-seen">
+                        <p className="health-not-seen-label">Sample — not seen in latest sync</p>
+                        <ul className="health-not-seen-sample">
+                          {summary.active_not_seen_in_latest_sync_sample.map((row) => (
+                            <li key={row.id ?? row.inventory_id}>
+                              <span className="not-seen-color">{row.color_name || "—"}</span>
+                              {" · "}
+                              <span className="not-seen-material">{row.material_name || "—"}</span>
+                              {row.inventory_id ? <> · <code className="not-seen-inv">{row.inventory_id}</code></> : null}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
                     {summary.slabs_by_price_group?.length ? (
                       <div className="health-pg">
                         <p className="health-pg-label">By source price group · imported from active inventory feed</p>
