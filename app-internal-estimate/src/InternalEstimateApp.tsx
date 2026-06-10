@@ -41,6 +41,7 @@ import EliteosTopbar from "../../shared/eliteos-ui/EliteosTopbar";
 import type { EliteosTopbarMenuItem } from "../../shared/eliteos-ui/EliteosTopbar";
 import RoomScopeBuilder from "@quote-ui/RoomScopeBuilder";
 import CompareGroupsAndNotesStep from "./components/internal-estimate/CompareGroupsAndNotesStep";
+import EmailEstimateModal from "./components/email-estimate/EmailEstimateModal";
 
 const MATERIAL_GROUPS = [
   "Group Promo",
@@ -367,6 +368,7 @@ export default function InternalEstimateApp() {
   const [familyLatestQuoteId, setFamilyLatestQuoteId] = useState<string | null>(null);
   const [familyLatestQuoteNumber, setFamilyLatestQuoteNumber] = useState<string | null>(null);
   const [startNewQuoteModalOpen, setStartNewQuoteModalOpen] = useState(false);
+  const [emailEstimateModalOpen, setEmailEstimateModalOpen] = useState(false);
   const [restoreBusy, setRestoreBusy] = useState(false);
 
   /** `?quoteId=` hydration — must be declared before `buildSubmitPayload` / save hooks (TDZ if referenced earlier). */
@@ -902,6 +904,41 @@ export default function InternalEstimateApp() {
     if (submitBusy || restoreBusy) return "Save in progress…";
     return null;
   }, [urlQuoteId, sessionToken, hydratedIsCurrentRevision, submitBusy, restoreBusy]);
+
+  const emailEstimateQuoteId = lastSavedQuoteId ?? urlQuoteId;
+
+  const emailEstimateBlockReason = useMemo(() => {
+    if (!sessionToken) return "Sign in to email an estimate.";
+    if (!emailEstimateQuoteId) return "Save this estimate before emailing.";
+    if (hydratedIsCurrentRevision === null) return "Loading quote metadata…";
+    if (hydratedIsCurrentRevision === false) {
+      return "This revision is read-only. Open the latest revision before emailing.";
+    }
+    if (revisionDirty || Boolean(revisionNoteDraft.trim())) {
+      return "Save your changes before emailing the estimate.";
+    }
+    if (submitBusy || restoreBusy) return "Save in progress…";
+    return null;
+  }, [
+    sessionToken,
+    emailEstimateQuoteId,
+    hydratedIsCurrentRevision,
+    revisionDirty,
+    revisionNoteDraft,
+    submitBusy,
+    restoreBusy
+  ]);
+
+  const emailEstimateDefaultSubject = useMemo(() => {
+    const qn = lastSavedQuoteNumber?.trim();
+    const proj = projectName.trim();
+    const cust = customerName.trim();
+    let subject = "Elite Stone Fabrication Estimate";
+    if (qn) subject += ` ${qn}`;
+    if (cust) subject += ` for ${cust}`;
+    else if (proj) subject += ` — ${proj}`;
+    return subject;
+  }, [lastSavedQuoteNumber, projectName, customerName]);
 
   const hasUnsavedWork = useMemo(() => {
     if (urlQuoteId) return revisionDirty || Boolean(revisionNoteDraft.trim());
@@ -3752,6 +3789,18 @@ export default function InternalEstimateApp() {
             >
               Print estimate
             </button>
+            <button
+              type="button"
+              className="btn secondary btn-sm"
+              disabled={!sessionToken}
+              title={
+                emailEstimateBlockReason ??
+                (emailEstimateQuoteId ? "Email customer estimate (dry run)" : "Save before emailing")
+              }
+              onClick={() => setEmailEstimateModalOpen(true)}
+            >
+              Email estimate
+            </button>
             {urlQuoteId ? (
               hydratedIsCurrentRevision === false ? (
                 <button
@@ -3885,6 +3934,18 @@ export default function InternalEstimateApp() {
           </div>
         </div>
       ) : null}
+
+      <EmailEstimateModal
+        open={emailEstimateModalOpen}
+        onClose={() => setEmailEstimateModalOpen(false)}
+        quoteId={emailEstimateQuoteId}
+        sessionToken={sessionToken}
+        blockReason={emailEstimateBlockReason}
+        defaultToEmail={email}
+        defaultSubject={emailEstimateDefaultSubject}
+        quoteNumber={lastSavedQuoteNumber}
+        revisionLabel={hydratedDisplayRevision}
+      />
 
       <footer className="footer-bar" role="contentinfo">
         <strong>eliteOS</strong> · Internal Estimate · {workspaceName} · {new Date().getFullYear()}

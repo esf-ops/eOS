@@ -185,6 +185,135 @@ body {
   margin-top: 16px;
 }
 
+.ie-email-modal-card {
+  width: min(720px, 100%);
+  max-height: min(92vh, 900px);
+  overflow: auto;
+}
+
+.ie-email-modal-header {
+  margin-bottom: 16px;
+}
+
+.ie-email-modal-subtitle {
+  margin: 4px 0 0;
+}
+
+.ie-email-block-reason {
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm, 6px);
+  background: rgba(234, 179, 8, 0.12);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.ie-email-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.ie-email-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.ie-email-field-full {
+  grid-column: 1 / -1;
+}
+
+.ie-email-field input {
+  font-weight: 400;
+}
+
+.ie-email-preview-section {
+  margin-bottom: 12px;
+}
+
+.ie-email-preview-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.ie-email-preview-frame {
+  width: 100%;
+  min-height: 280px;
+  height: 42vh;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: var(--radius-sm, 6px);
+  background: #fff;
+}
+
+.ie-email-preview-placeholder {
+  padding: 24px 16px;
+  border: 1px dashed var(--border, #e2e8f0);
+  border-radius: var(--radius-sm, 6px);
+  text-align: center;
+}
+
+.ie-email-text-preview {
+  margin-top: 8px;
+  font-size: 0.85rem;
+}
+
+.ie-email-text-preview pre {
+  margin: 8px 0 0;
+  padding: 10px;
+  max-height: 120px;
+  overflow: auto;
+  background: var(--surface-muted, #f8fafc);
+  border-radius: var(--radius-sm, 6px);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ie-email-warnings {
+  margin: 12px 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm, 6px);
+  background: rgba(234, 179, 8, 0.1);
+  font-size: 0.88rem;
+}
+
+.ie-email-warnings ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.ie-email-status-msg {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm, 6px);
+  background: rgba(34, 197, 94, 0.12);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.ie-email-error-msg {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm, 6px);
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--danger, #b91c1c);
+}
+
+.ie-email-modal-actions-row {
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+
+.ie-email-dry-run-note {
+  margin: 10px 0 0;
+}
+
 .ie-sticky-actions-inner {
   display: flex;
   flex-wrap: wrap;
