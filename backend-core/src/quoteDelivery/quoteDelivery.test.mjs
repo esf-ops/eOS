@@ -8,10 +8,13 @@ import assert from "node:assert/strict";
 import { wasProviderCalled, sendEstimateEmail } from "../email/emailClient.js";
 import {
   assertCustomerSafeText,
+  auditCustomerSafeText,
   filterCustomerFacingCustomLines,
+  formatCustomerSafeViolationWarning,
   sanitizeSnapshotForCustomer
 } from "./estimateContentSanitizer.js";
 import { buildCustomerEstimateDisplayFromSnapshot } from "./estimateDisplayFromSnapshot.js";
+import { buildEstimateEmailContent } from "./estimateEmailBuilder.js";
 import { buildDeliveryLogRow, insertQuoteDeliveryLog } from "./quoteDeliveryLogs.js";
 import { getQuoteDeliveryEnv } from "./quoteDeliveryEnv.js";
 import {
@@ -234,6 +237,26 @@ function testCustomerSafeTextAssertion() {
   assert.equal(assertCustomerSafeText("Your estimate total is $12,450"), true);
   assert.equal(assertCustomerSafeText("Rate: $70/sf wholesale"), false);
   assert.equal(assertCustomerSafeText('{"internal_ui":{}}'), false);
+
+  // Regression: CSS margin + Prepared by + legitimate area sf labels must not false-positive.
+  const cssHtml =
+    '<h1 style="margin:0 0 8px;">Estimate</h1><p>Prepared by Peg</p><li>35 sf counter</li>';
+  assert.equal(assertCustomerSafeText(cssHtml), true);
+
+  const leakAudit = auditCustomerSafeText("Wholesale rate for Group Promo");
+  assert.equal(leakAudit.ok, false);
+  assert.equal(leakAudit.violations[0].patternId, "wholesale_pricing");
+}
+
+function testBuiltEmailHtmlPassesCustomerSafeAudit() {
+  const display = buildCustomerEstimateDisplayFromSnapshot(internalQuoteRow());
+  const { htmlPreview, textPreview } = buildEstimateEmailContent(display);
+  const htmlAudit = auditCustomerSafeText(htmlPreview);
+  const textAudit = auditCustomerSafeText(textPreview);
+  assert.equal(htmlAudit.ok, true, formatCustomerSafeViolationWarning("HTML", htmlAudit) || "html should be safe");
+  assert.equal(textAudit.ok, true, formatCustomerSafeViolationWarning("Text", textAudit) || "text should be safe");
+  assert.ok(htmlPreview.includes("35 sf counter") || htmlPreview.includes("sf counter"));
+  assert.ok(htmlPreview.includes("Prepared by"));
 }
 
 function testFilterCustomerFacingCustomLines() {
@@ -312,6 +335,10 @@ async function testPreviewDryRun() {
   assert.ok(result.htmlPreview.includes("Estimated project total"));
   assert.ok(!result.htmlPreview.includes("internal_ui"));
   assert.ok(!result.htmlPreview.includes("/sf"));
+  assert.ok(
+    !(result.warnings || []).some((w) => String(w).includes("customer-safe check")),
+    `unexpected customer-safe warning: ${(result.warnings || []).join("; ")}`
+  );
   assert.equal(result.deliveryLogId, "d1111111-1111-4111-8111-111111111111");
   assert.equal(capturedLogs.length, 1);
   assert.equal(capturedLogs[0].status, "preview");
@@ -426,6 +453,7 @@ async function runAll() {
   testRecipientValidation();
   testSanitizerExcludesInternalDetails();
   testCustomerSafeTextAssertion();
+  testBuiltEmailHtmlPassesCustomerSafeAudit();
   testFilterCustomerFacingCustomLines();
   testDisplayFromSnapshotUsesStoredTotal();
   testDeliveryLogRowShape();

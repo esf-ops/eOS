@@ -24,8 +24,39 @@ const INTERNAL_UI_KEYS = new Set([
   "job_info"
 ]);
 
-const RATE_FIELD_RE = /(?:price|rate|markup|margin|cost|wholesale|direct).*?(?:sqft|sf|per)/i;
 const INTERNAL_NOTE_KEYS = new Set(["internalNote", "internal_note", "worksheetNote", "worksheet_note"]);
+
+/** Pricing-rate leaks — intentionally excludes CSS `margin:` and area labels like `35 sf counter`. */
+const PRICING_LEAK_PATTERNS = [
+  { patternId: "dollar_per_sf", re: /\$\s*[\d.,]+\s*\/\s*(?:sqft|sf)\b/i },
+  { patternId: "price_per_sf", re: /\bprice\s+per\s+(?:sqft|sf)\b/i },
+  { patternId: "rate_per_sf", re: /\brate\s+per\s+(?:sqft|sf)\b/i },
+  { patternId: "wholesale_pricing", re: /\bwholesale\s+(?:rate|price|markup)\b/i },
+  { patternId: "direct_pricing", re: /\bdirect\s+(?:rate|price|markup)\b/i },
+  { patternId: "markup_percent_leak", re: /\b(?:dealer|retail|planning)\s+markup\s*[:=]?\s*\d+\s*%/i }
+];
+
+/** Snapshot / worksheet identifiers unlikely in customer prose — word-boundary or JSON-key shaped. */
+const INTERNAL_CONTENT_PATTERNS = [
+  { patternId: "internal_ui", re: /\binternal_ui\b/i, category: "internal_snapshot_key" },
+  { patternId: "internal_estimate_math", re: /\binternal_estimate_math\b/i, category: "internal_snapshot_key" },
+  { patternId: "input_summary", re: /\binputSummary\b/, category: "internal_snapshot_key" },
+  { patternId: "line_item_details", re: /\blineItemDetails\b/, category: "internal_snapshot_key" },
+  { patternId: "room_lines", re: /\broomLines\b/, category: "internal_snapshot_key" },
+  { patternId: "room_measurement_summaries", re: /\broomMeasurementSummaries\b/, category: "internal_snapshot_key" },
+  { patternId: "measurement_source", re: /\bmeasurement_source\b/i, category: "internal_snapshot_key" },
+  { patternId: "quote_input_mode", re: /\bquoteInputMode\b/, category: "internal_snapshot_key" },
+  { patternId: "rule_count", re: /\bruleCount\b/, category: "internal_snapshot_key" },
+  { patternId: "file_checklist", re: /\bfile_checklist\b/i, category: "internal_snapshot_key" },
+  { patternId: "readiness_json_key", re: /["']readiness["']\s*:/, category: "internal_snapshot_key" },
+  { patternId: "internal_note_key", re: /\binternal_note\s*:|"internalNote"\s*:/i, category: "worksheet_diagnostic" },
+  { patternId: "worksheet_note", re: /\bworksheet_note\b|\bworksheetNote\b/i, category: "worksheet_diagnostic" },
+  {
+    patternId: "raw_snapshot_json",
+    re: /"calculation_snapshot"\s*:|"custom_line_items"\s*:/,
+    category: "worksheet_diagnostic"
+  }
+];
 
 /**
  * @param {unknown} line
@@ -141,17 +172,49 @@ function buildRoomSummaries(iu, snapshot, warnings) {
 }
 
 /**
- * Ensure serialized customer content never leaks internal keys or rate fields.
+ * Audit customer-facing HTML/text for leaked internal identifiers or pricing rates.
+ * Returns violation categories/pattern ids only — never matched secret substrings.
+ * @param {string} text
+ */
+export function auditCustomerSafeText(text) {
+  const s = String(text || "");
+  /** @type {Array<{ category: string, patternId: string }>} */
+  const violations = [];
+
+  for (const p of INTERNAL_CONTENT_PATTERNS) {
+    if (p.re.test(s)) {
+      violations.push({ category: p.category, patternId: p.patternId });
+    }
+  }
+  for (const p of PRICING_LEAK_PATTERNS) {
+    if (p.re.test(s)) {
+      violations.push({ category: "pricing_rate_leak", patternId: p.patternId });
+    }
+  }
+
+  return { ok: violations.length === 0, violations };
+}
+
+/**
  * @param {string} text
  */
 export function assertCustomerSafeText(text) {
-  const s = String(text || "");
-  for (const key of INTERNAL_SNAPSHOT_KEYS) {
-    if (s.includes(key)) return false;
+  return auditCustomerSafeText(text).ok;
+}
+
+/**
+ * @param {"HTML"|"Text"} channel
+ * @param {{ ok: boolean, violations: Array<{ category: string, patternId: string }> }} audit
+ */
+export function formatCustomerSafeViolationWarning(channel, audit) {
+  if (audit.ok) return null;
+  const byCategory = new Map();
+  for (const v of audit.violations) {
+    if (!byCategory.has(v.category)) byCategory.set(v.category, []);
+    byCategory.get(v.category).push(v.patternId);
   }
-  if (/\$\s*[\d.]+\s*\/\s*sf/i.test(s)) return false;
-  if (RATE_FIELD_RE.test(s)) return false;
-  return true;
+  const parts = [...byCategory.entries()].map(([cat, ids]) => `${cat}(${ids.join("|")})`);
+  return `${channel} preview failed customer-safe check: ${parts.join("; ")}`;
 }
 
 /**
@@ -163,7 +226,9 @@ export function redactInternalFieldsFromObject(obj) {
   for (const [key, value] of Object.entries(obj)) {
     if (INTERNAL_SNAPSHOT_KEYS.has(key) || INTERNAL_UI_KEYS.has(key)) continue;
     if (INTERNAL_NOTE_KEYS.has(key)) continue;
-    if (typeof value === "string" && RATE_FIELD_RE.test(value)) continue;
+    const isPricingString =
+      PRICING_LEAK_PATTERNS.some((p) => typeof value === "string" && p.re.test(value));
+    if (isPricingString) continue;
     out[key] = value;
   }
   return out;

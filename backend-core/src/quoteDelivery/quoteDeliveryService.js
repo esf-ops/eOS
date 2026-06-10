@@ -4,7 +4,7 @@
 
 import { logAction } from "../auth/auditLog.js";
 import { sendEstimateEmail } from "../email/emailClient.js";
-import { assertCustomerSafeText } from "./estimateContentSanitizer.js";
+import { auditCustomerSafeText, formatCustomerSafeViolationWarning } from "./estimateContentSanitizer.js";
 import { buildCustomerEstimateDisplayFromSnapshot } from "./estimateDisplayFromSnapshot.js";
 import { buildEstimateEmailContent } from "./estimateEmailBuilder.js";
 import { computeSnapshotHash, loadInternalQuoteForDelivery } from "./estimateSnapshotLoader.js";
@@ -145,11 +145,13 @@ export async function runQuoteDelivery(db, req, quoteId, body, options) {
 
   const warnings = [...(display.warnings || []), ...(policyResult.warnings || [])];
 
-  if (!assertCustomerSafeText(emailContent.htmlPreview)) {
-    warnings.push("HTML preview failed customer-safe assertion — review sanitizer output");
+  const htmlAudit = auditCustomerSafeText(emailContent.htmlPreview);
+  if (!htmlAudit.ok) {
+    warnings.push(formatCustomerSafeViolationWarning("HTML", htmlAudit));
   }
-  if (!assertCustomerSafeText(emailContent.textPreview)) {
-    warnings.push("Text preview failed customer-safe assertion — review sanitizer output");
+  const textAudit = auditCustomerSafeText(emailContent.textPreview);
+  if (!textAudit.ok) {
+    warnings.push(formatCustomerSafeViolationWarning("Text", textAudit));
   }
 
   const snapshotHash = computeSnapshotHash(snapshot);
