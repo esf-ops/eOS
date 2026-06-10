@@ -72,6 +72,7 @@
     "eos:test:quote-file-storage": "node backend-core/src/files/quoteFileStoragePath.test.mjs",
     "eos:test:quote-file-service": "node backend-core/src/files/quoteFileService.test.mjs",
     "eos:test:pricing-authority": "node backend-core/src/quotes/pricingAuthority.contract.test.mjs",
+    "eos:test:quote-delivery": "node backend-core/src/quoteDelivery/quoteDelivery.test.mjs",
     "eos:test:takeoff-contract": "node backend-core/src/takeoff/takeoff.contract.test.mjs",
     "eos:test:takeoff-workspace-service": "node backend-core/src/takeoff/takeoffWorkspaceService.test.mjs",
     "eos:test:takeoff-extraction-service": "node backend-core/src/takeoff/takeoffExtractionService.test.mjs",

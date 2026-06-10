@@ -2,6 +2,7 @@ import express from "express";
 
 import { resolveOrganizationContext } from "../organizations/organizationContext.js";
 import { calculateQuote, computePublicConsumerEstimatesByGroup, roundPublicEstimateToNearestTen } from "./quoteCalculator.js";
+import { attachQuoteDeliveryRoutes } from "../quoteDelivery/quoteDeliveryApi.js";
 import { attachInternalQuoteRoutes } from "./internalQuotesApi.js";
 import { attachPartnerQuoteRoutes } from "./partnerQuotesApi.js";
 import { assertInternalQuoteOperator } from "./partnerContext.js";
@@ -274,10 +275,11 @@ export function attachQuoteRoutes(app, { requireAuth, requireRole, requireHeadAc
   attachPartnerQuoteRoutes(app, { requireAuth, requireHeadAccess, getSupabase });
   attachInternalQuoteRoutes(app, { requireAuth, requireHeadAccess, getSupabase });
   attachQuoteLibraryRoutes(app, { requireAuth, requireHeadAccess, getSupabase });
+  attachQuoteDeliveryRoutes(app, { requireAuth, getSupabase });
   attachQuotePricingAdminApi(app, { requireAuth, requireRole, requireHeadAccess, getSupabase });
   attachPricingAdminHeadApi(app, { requireAuth, requireRole, requireHeadAccess, getSupabase });
 
   console.log(
-    "[quotes] mounted POST /api/public-quote/calculate, POST /api/public-quote/submit-measurements, GET/POST /api/partner-quote/*, POST /api/quote/calculate, POST /api/quote/submit, /api/internal-quotes/*, /api/quote-library/*; quote pipeline GET/PATCH /api/quotes/pipeline*; admin quote APIs via quotePricingAdminApi.js; Pricing Admin head via pricingAdminHeadApi.js"
+    "[quotes] mounted POST /api/public-quote/calculate, POST /api/public-quote/submit-measurements, GET/POST /api/partner-quote/*, POST /api/quote/calculate, POST /api/quote/submit, /api/internal-quotes/*, /api/quote-library/*, POST /api/quote-delivery/quotes/:quoteId/preview|send; quote pipeline GET/PATCH /api/quotes/pipeline*; admin quote APIs via quotePricingAdminApi.js; Pricing Admin head via pricingAdminHeadApi.js"
   );
 }

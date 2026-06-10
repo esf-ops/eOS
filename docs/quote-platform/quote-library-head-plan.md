@@ -28,6 +28,8 @@ Run in Supabase SQL editor (additive):
 Creates `quote_handoff_documents` and optional `quote_headers.account_name`.  
 `quote_status_history` already exists in `eos_quote_platform.sql` — do not duplicate.
 
+**Quote Delivery (Phase 1):** `backend-core/supabase/eliteos_quote_delivery_foundation.sql` — `quote_delivery_logs`, `quote_share_links` scaffold. API: `POST /api/quote-delivery/quotes/:quoteId/preview|send` (backend dry-run; shared by Internal Estimate and Quote Library in later UI phases).
+
 ## Known gaps (Stage 1)
 
 - **Internal Estimate `?quoteId=`** — link is wired; **full form hydration from saved quote is not complete** (use Quote Library for read-only detail).

@@ -1229,3 +1229,21 @@
 | **Safety** | Explicit `--upload` required; `--plan-upload` dry-run; `--limit` / `--slab-id` for staged testing. No orphan/unmatched uploads. Max 10 MB full / 2 MB thumb JPEG. No image upload scheduled yet. `SLAB_INVENTORY_ACTIVE_SOURCE=slabcloud` unchanged. SlabCloud export/file sync untouched. |
 | **Impacted files/docs** | `backend-core/src/slabsmith/slabsmithImageUploadApi.js`, `slabsmithImageStorage.mjs`, `multipartParse.mjs`, `tools/slabsmith-connector/sync-images.mjs`, `image-upload.mjs`, `docs/slabos/slabsmith-local-sync-v1.md`, `backend-core/supabase/eliteos_slab_images_storage.sql`. |
 | **Revisit trigger** | When Slab Inventory default source switches to `slabsmith`; when bucket should be private with signed read URLs; when batch/multi-slab upload is needed for performance. |
+
+---
+
+### Quote Delivery Phase 1 (dry-run email foundation)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-06-10 |
+| **Decision** | Add a backend-owned **Quote Delivery** layer at `/api/quote-delivery/quotes/:quoteId/preview` and `/send`. Phase 1 is **dry-run only**: preview builds customer-safe HTML/text from **saved `calculation_snapshot`** data; send returns `blocked: true` unless `QUOTE_EMAIL_SEND_ENABLED=1`. No frontend email logic; no provider secrets in heads. Internal Estimate and Quote Library will call the same API in later phases without cross-importing each other. |
+| **Why** | Staff need to email customer-facing estimates without making Internal Estimate or Quote Library monolithic. Outbound content must not depend on live screen state or current Pricing Admin catalogs. |
+| **Routes** | `POST /api/quote-delivery/quotes/:quoteId/preview`, `POST /api/quote-delivery/quotes/:quoteId/send` — auth + partner block + head grant (`quote` **or** `quote_library`). |
+| **Content** | `estimateDisplayFromSnapshot.js` + `estimateContentSanitizer.js` — excludes `internal_ui`, internal-only custom lines, $/sf rates, worksheet diagnostics. Uses `customer_display_total` when present. |
+| **SQL** | Manual apply: `backend-core/supabase/eliteos_quote_delivery_foundation.sql` — `quote_delivery_logs`, `quote_share_links` scaffold. Backend service role writes only. |
+| **Env** | `QUOTE_EMAIL_SEND_ENABLED=0` (default), `QUOTE_EMAIL_PROVIDER=none`, `QUOTE_EMAIL_FROM`, optional `QUOTE_EMAIL_ALLOWED_DOMAINS`, `QUOTE_EMAIL_FORCE_RECIPIENT`. |
+| **Audit** | `quote_delivery_logs` per attempt; `eos_action_log` action types `quote_estimate_email_preview`, `quote_estimate_email_send_blocked` (audit failure non-blocking). |
+| **Out of scope** | Real email provider (Phase 5), QuickBooks, public/partner quote delivery, PDF attachment, secure link consumption, UI modals. |
+| **Impacted files/docs** | `backend-core/src/quoteDelivery/*`, `backend-core/src/email/emailClient.js`, `backend-core/src/quotes/quoteRoutes.js`, `backend-core/supabase/eliteos_quote_delivery_foundation.sql`, `backend-core/.env.example`, `docs/quote-platform/quote-library-head-plan.md`, this entry. |
+| **Revisit trigger** | When enabling real send in production; when full CustomerEstimatePrint parity from snapshot is required (vs conservative summary); when public/partner quotes need delivery. |
