@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import EmailEstimateModal from "./components/email-estimate/EmailEstimateModal";
 import { apiPatch, apiPost } from "./lib/api";
 import { QuoteFilesBlock } from "./QuoteFilesBlock";
 import {
@@ -102,6 +103,44 @@ function pickDisplayTotal(r: Record<string, unknown>): number {
   return Number(r.grand_total) || 0;
 }
 
+function looksLikeEmail(value: string): boolean {
+  const v = String(value || "").trim();
+  return v.includes("@") && v.includes(".");
+}
+
+function buildEmailDefaultSubject(header: Record<string, unknown>): string {
+  let subject = "Elite Stone Fabrication Estimate";
+  const qn = str(header.quote_number);
+  const cust = str(header.customer_name);
+  const proj = str(header.project_name);
+  if (qn) subject += ` ${qn}`;
+  if (cust) subject += ` for ${cust}`;
+  else if (proj) subject += ` — ${proj}`;
+  return subject;
+}
+
+function pickDefaultToEmail(header: Record<string, unknown>, iu: Record<string, unknown>): string {
+  const customer = str(header.customer_email);
+  if (looksLikeEmail(customer)) return customer;
+  const jobInfo =
+    iu.job_info && typeof iu.job_info === "object" ? (iu.job_info as Record<string, unknown>) : {};
+  const accountContact = str(jobInfo.account_contact_email);
+  if (looksLikeEmail(accountContact)) return accountContact;
+  return customer;
+}
+
+function pickDefaultCcEmail(header: Record<string, unknown>, iu: Record<string, unknown>): string {
+  const salesRep = str(header.sales_rep);
+  if (looksLikeEmail(salesRep)) return salesRep;
+  const jobInfo =
+    iu.job_info && typeof iu.job_info === "object" ? (iu.job_info as Record<string, unknown>) : {};
+  const accountContact = str(jobInfo.account_contact_email);
+  if (looksLikeEmail(accountContact) && accountContact !== pickDefaultToEmail(header, iu)) {
+    return accountContact;
+  }
+  return "";
+}
+
 // ---------------------------------------------------------------------------
 // HandoffDocBlock — moved from QuoteLibraryApp to keep it with modal content.
 // ---------------------------------------------------------------------------
@@ -191,10 +230,12 @@ export function QuoteDetailModal({
   onRevisionSelect
 }: QuoteDetailModalProps) {
   const [showRaw, setShowRaw] = useState(false);
+  const [emailModalOpen, setEmailModalOpen] = useState(false);
 
   // Reset the debug toggle whenever a different quote is opened.
   useEffect(() => {
     setShowRaw(false);
+    setEmailModalOpen(false);
   }, [detailId]);
 
   // Close on Escape key.
@@ -223,6 +264,9 @@ export function QuoteDetailModal({
 
   const account = displayAccountColumn(header);
   const isInternal = str(header.quote_source) === "internal_quote";
+  const emailDefaultSubject = useMemo(() => buildEmailDefaultSubject(header), [header]);
+  const emailDefaultTo = useMemo(() => pickDefaultToEmail(header, iu), [header, iu]);
+  const emailDefaultCc = useMemo(() => pickDefaultCcEmail(header, iu), [header, iu]);
   const warnings = (
     Array.isArray(detail.warnings) ? (detail.warnings as unknown[]) : []
   ).filter((w): w is string => typeof w === "string");
@@ -416,6 +460,31 @@ export function QuoteDetailModal({
                   ↗
                 </span>
               </a>
+
+              <div className="workflow-group">
+                <p className="workflow-group-label">Customer delivery</p>
+                <div className="workflow-row">
+                  {isInternal ? (
+                    <button
+                      type="button"
+                      className="btn secondary"
+                      disabled={!sessionToken}
+                      title={
+                        sessionToken
+                          ? "Preview and dry-run email the customer estimate"
+                          : "Sign in to email an estimate"
+                      }
+                      onClick={() => setEmailModalOpen(true)}
+                    >
+                      Email estimate
+                    </button>
+                  ) : (
+                    <p className="muted small workflow-hint" style={{ margin: 0 }}>
+                      Email estimate is available for internal estimates only.
+                    </p>
+                  )}
+                </div>
+              </div>
 
               <div className="workflow-group">
                 <p className="workflow-group-label">Update status</p>
@@ -982,6 +1051,18 @@ export function QuoteDetailModal({
           </div>
         </div>
       </div>
+
+      <EmailEstimateModal
+        open={emailModalOpen && isInternal}
+        onClose={() => setEmailModalOpen(false)}
+        quoteId={detailId}
+        sessionToken={sessionToken}
+        defaultToEmail={emailDefaultTo}
+        defaultCcEmail={emailDefaultCc}
+        defaultSubject={emailDefaultSubject}
+        quoteNumber={str(header.quote_number) || null}
+        revisionLabel={str(header.revision_label) || null}
+      />
     </>
   );
 }
