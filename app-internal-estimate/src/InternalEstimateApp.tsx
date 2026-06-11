@@ -39,6 +39,7 @@ import { friendlyApiErrorMessage } from "./lib/saveErrorMessage";
 import { getSupabase } from "./lib/supabase";
 import EliteosTopbar from "../../shared/eliteos-ui/EliteosTopbar";
 import type { EliteosTopbarMenuItem } from "../../shared/eliteos-ui/EliteosTopbar";
+import { useWorkflowRailScrollSpy } from "../../shared/eliteos-ui/useWorkflowRailScrollSpy";
 import RoomScopeBuilder from "@quote-ui/RoomScopeBuilder";
 import CompareGroupsAndNotesStep from "./components/internal-estimate/CompareGroupsAndNotesStep";
 import EmailEstimateModal from "./components/email-estimate/EmailEstimateModal";
@@ -325,7 +326,6 @@ export default function InternalEstimateApp() {
   const [roomsSubnavOpen, setRoomsSubnavOpen] = useState(true);
   const [activeRoomNavId, setActiveRoomNavId] = useState<string | null>(null);
   /** Scroll-derived active workflow section (purely visual — no fake state). */
-  const [activeWorkflowSectionId, setActiveWorkflowSectionId] = useState<string | null>(null);
 
   const [accountName, setAccountName] = useState("");
   const [accountPhone, setAccountPhone] = useState("");
@@ -528,42 +528,8 @@ export default function InternalEstimateApp() {
     };
   }, [sessionToken]);
 
-  /**
-   * Scroll-derived active workflow section for the left rail highlight.
-   * Purely presentational — no fake completion state, no new data sources.
-   */
-  useEffect(() => {
-    if (typeof window === "undefined" || typeof IntersectionObserver === "undefined") return;
-    const ids = ["sec-job", "sec-rooms", "sec-visual", "sec-addons", "sec-review", "sec-save"];
-    const targets: HTMLElement[] = [];
-    ids.forEach((id) => {
-      const el = document.getElementById(id);
-      if (el) targets.push(el);
-    });
-    if (targets.length === 0) return;
-    const visibility = new Map<string, number>();
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          const id = (entry.target as HTMLElement).id;
-          visibility.set(id, entry.isIntersecting ? entry.intersectionRatio : 0);
-        }
-        let bestId: string | null = null;
-        let bestRatio = 0;
-        ids.forEach((id) => {
-          const ratio = visibility.get(id) ?? 0;
-          if (ratio > bestRatio) {
-            bestRatio = ratio;
-            bestId = id;
-          }
-        });
-        if (bestId) setActiveWorkflowSectionId(bestId);
-      },
-      { rootMargin: "-35% 0px -50% 0px", threshold: [0.05, 0.25, 0.5, 0.75, 1] }
-    );
-    targets.forEach((el) => observer.observe(el));
-    return () => observer.disconnect();
-  }, [roomDrafts.length]);
+  const workflowSectionIds = useMemo(() => WORKFLOW_SECTIONS.map((s) => s.id), []);
+  const setRailActiveSection = useWorkflowRailScrollSpy(workflowSectionIds, [roomDrafts.length]);
 
   const ensureAccessToken = useCallback(async (): Promise<string | null> => {
     if (!supabase) return null;
@@ -574,12 +540,16 @@ export default function InternalEstimateApp() {
     window.print();
   }, []);
 
-  const scrollToWorkflowSection = useCallback((id: string) => {
-    if (id === "sec-visual") setVisualCanvasExpanded(true);
-    requestAnimationFrame(() => {
-      document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-  }, []);
+  const scrollToWorkflowSection = useCallback(
+    (id: string) => {
+      setRailActiveSection(id);
+      if (id === "sec-visual") setVisualCanvasExpanded(true);
+      requestAnimationFrame(() => {
+        document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    },
+    [setRailActiveSection]
+  );
 
   const scrollToRoomCard = useCallback(
     (roomId: string) => {
@@ -2356,14 +2326,12 @@ export default function InternalEstimateApp() {
           <p className="ie-rail-title" aria-hidden>
             Workflow
           </p>
-          {WORKFLOW_SECTIONS.map((s, i) => {
-            const isActive = activeWorkflowSectionId === s.id;
-            return (
+          {WORKFLOW_SECTIONS.map((s, i) => (
             <React.Fragment key={s.id}>
               <button
                 type="button"
-                className={`ie-rail-link${isActive ? " is-active" : ""}`}
-                aria-current={isActive ? "true" : undefined}
+                className="ie-rail-link"
+                data-ie-rail-section={s.id}
                 onClick={() => scrollToWorkflowSection(s.id)}
               >
                 <span className="ie-rail-link-num" aria-hidden>
@@ -2399,8 +2367,7 @@ export default function InternalEstimateApp() {
                 </div>
               ) : null}
             </React.Fragment>
-            );
-          })}
+          ))}
         </nav>
 
         <main className="ie-main">

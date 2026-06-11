@@ -18,10 +18,9 @@
   flex-wrap: wrap;
   gap: 10px 12px;
   padding: 12px 28px;
-  background: rgba(255, 255, 255, 0.74);
-  backdrop-filter: saturate(180%) blur(14px);
-  -webkit-backdrop-filter: saturate(180%) blur(14px);
+  background: rgba(255, 255, 255, 0.97);
   border-bottom: 1px solid var(--eos-line);
+  contain: paint;
   animation: eliteos-topbar-in 280ms ease-out both;
 }
 

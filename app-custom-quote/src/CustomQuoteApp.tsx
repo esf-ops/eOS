@@ -3,6 +3,7 @@ import { apiPostJson, ApiError } from "@quote-lib/api";
 import { config, EOS_LOGO_URL } from "@quote-lib/config";
 import EliteosTopbar from "../../shared/eliteos-ui/EliteosTopbar";
 import type { EliteosTopbarMenuItem } from "../../shared/eliteos-ui/EliteosTopbar";
+import { useWorkflowRailScrollSpy } from "../../shared/eliteos-ui/useWorkflowRailScrollSpy";
 import { resolveAccessToken } from "../../app-internal-estimate/src/lib/authSession";
 import { getSupabase } from "./lib/supabase";
 
@@ -195,8 +196,6 @@ export default function CustomQuoteApp() {
   const [submitMsg, setSubmitMsg] = useState("");
   const [lastSavedQuoteId, setLastSavedQuoteId] = useState("");
   const [lastSavedQuoteNumber, setLastSavedQuoteNumber] = useState("");
-  const [activeWorkflowSectionId, setActiveWorkflowSectionId] = useState<string | null>("sec-job");
-
   const workspaceName = DEFAULT_WORKSPACE_NAME;
   const workspaceShortId = DEFAULT_WORKSPACE_SHORT;
   const workspaceLogoUrl = EOS_LOGO_URL;
@@ -262,39 +261,18 @@ export default function CustomQuoteApp() {
     };
   }, [sessionToken]);
 
-  useEffect(() => {
-    if (typeof window === "undefined" || typeof IntersectionObserver === "undefined") return;
-    const ids = WORKFLOW_SECTIONS.map((s) => s.id);
-    const targets = ids.map((id) => document.getElementById(id)).filter(Boolean) as HTMLElement[];
-    if (!targets.length) return;
-    const visibility = new Map<string, number>();
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          visibility.set((entry.target as HTMLElement).id, entry.isIntersecting ? entry.intersectionRatio : 0);
-        }
-        let bestId: string | null = null;
-        let bestRatio = 0;
-        ids.forEach((id) => {
-          const ratio = visibility.get(id) ?? 0;
-          if (ratio > bestRatio) {
-            bestRatio = ratio;
-            bestId = id;
-          }
-        });
-        if (bestId) setActiveWorkflowSectionId(bestId);
-      },
-      { rootMargin: "-35% 0px -50% 0px", threshold: [0.05, 0.25, 0.5, 0.75, 1] }
-    );
-    targets.forEach((el) => observer.observe(el));
-    return () => observer.disconnect();
-  }, [sessionToken, accessDenied]);
+  const workflowSectionIds = useMemo(() => WORKFLOW_SECTIONS.map((s) => s.id), []);
+  const setRailActiveSection = useWorkflowRailScrollSpy(workflowSectionIds, [sessionToken, accessDenied]);
 
-  const scrollToWorkflowSection = useCallback((id: string) => {
-    requestAnimationFrame(() => {
-      document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-  }, []);
+  const scrollToWorkflowSection = useCallback(
+    (id: string) => {
+      setRailActiveSection(id);
+      requestAnimationFrame(() => {
+        document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    },
+    [setRailActiveSection]
+  );
 
   const runCalculate = useCallback(async () => {
     if (!supabase) return;
@@ -517,8 +495,8 @@ export default function CustomQuoteApp() {
                 <button
                   key={s.id}
                   type="button"
-                  className={`ie-rail-link${activeWorkflowSectionId === s.id ? " is-active" : ""}`}
-                  aria-current={activeWorkflowSectionId === s.id ? "true" : undefined}
+                  className="ie-rail-link"
+                  data-ie-rail-section={s.id}
                   onClick={() => scrollToWorkflowSection(s.id)}
                 >
                   <span className="ie-rail-link-num" aria-hidden>

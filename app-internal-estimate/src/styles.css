@@ -108,7 +108,6 @@ body {
     radial-gradient(50% 50% at 92% 0%, rgba(225, 220, 243, 0.5), transparent 65%),
     radial-gradient(45% 55% at 100% 100%, rgba(244, 216, 225, 0.45), transparent 70%),
     linear-gradient(180deg, #fbfcfe 0%, #f4f6fb 60%, #eef1f8 100%);
-  background-attachment: fixed;
 }
 
 ::selection {
@@ -152,7 +151,6 @@ body {
   background: rgba(255, 255, 255, 0.96);
   border-top: 1px solid var(--border-strong);
   box-shadow: 0 -6px 24px rgba(15, 23, 42, 0.08);
-  backdrop-filter: blur(10px);
 }
 
 .ie-sticky-actions .btn {
@@ -4767,8 +4765,6 @@ select:focus {
   box-shadow:
     0 -8px 28px rgba(11, 26, 51, 0.08),
     0 -1px 0 rgba(255, 255, 255, 0.5) inset;
-  backdrop-filter: saturate(180%) blur(16px);
-  -webkit-backdrop-filter: saturate(180%) blur(16px);
   padding-top: 12px;
   padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
 }
@@ -5710,8 +5706,6 @@ textarea:focus {
   box-shadow:
     0 -10px 30px rgba(11, 26, 51, 0.10),
     0 -1px 0 rgba(255, 255, 255, 0.6) inset;
-  backdrop-filter: saturate(180%) blur(18px);
-  -webkit-backdrop-filter: saturate(180%) blur(18px);
 }
 
 .ie-sticky-actions-inner {
@@ -8636,5 +8630,23 @@ body {
     max-height: none;
     overflow: visible;
   }
+}
+
+/* ----- Scroll paint stability (pinned chrome + sticky panels) ---------- */
+/*
+ * Fixed backgrounds and backdrop-filter on sticky/fixed bars force full-viewport
+ * recomposites while scrolling. Use opaque surfaces + paint containment instead.
+ */
+.ie-rail,
+.ie-aside-panel,
+.ie-sticky-actions,
+.eliteos-topbar {
+  contain: paint;
+}
+
+.ie-sticky-actions {
+  background: rgba(255, 255, 255, 0.98);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 

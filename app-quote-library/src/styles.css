@@ -99,7 +99,6 @@ body {
     radial-gradient(50% 50% at 92% 0%, rgba(225, 220, 243, 0.5), transparent 65%),
     radial-gradient(45% 55% at 100% 100%, rgba(244, 216, 225, 0.45), transparent 70%),
     linear-gradient(180deg, #fbfcfe 0%, #f4f6fb 60%, #eef1f8 100%);
-  background-attachment: fixed;
   line-height: 1.5;
 }
 
@@ -496,12 +495,10 @@ body {
   gap: 4px;
   margin-bottom: 18px;
   padding: 6px;
-  background: rgba(255, 255, 255, 0.74);
+  background: rgba(255, 255, 255, 0.97);
   border: 1px solid var(--eos-line);
   border-radius: var(--r-md);
   box-shadow: var(--sh-1);
-  backdrop-filter: saturate(180%) blur(10px);
-  -webkit-backdrop-filter: saturate(180%) blur(10px);
 }
 
 .tabs button {
@@ -949,11 +946,16 @@ input[type="checkbox"] {
 
 .ql-table tbody tr {
   cursor: pointer;
-  transition: background var(--eos-dur-1) var(--eos-ease);
 }
 
-.ql-table tbody tr:hover {
-  background: rgba(11, 26, 51, 0.025);
+@media (hover: hover) and (pointer: fine) {
+  .ql-table tbody tr {
+    transition: background var(--eos-dur-1) var(--eos-ease);
+  }
+
+  .ql-table tbody tr:hover {
+    background: rgba(11, 26, 51, 0.025);
+  }
 }
 
 .ql-table tbody tr:focus-within {
