@@ -77,6 +77,16 @@ interface ProviderConfig {
     authenticated:         boolean;
     tokenType:             string | null;
     membershipsCount:      number | null;
+    configuredOrganizationId:            string | null;
+    membershipOrganizationIds:           string[];
+    membershipOrganizations?:            Array<{
+      orgId: string;
+      role:  string | null;
+      name:  string | null;
+      slug:  string | null;
+    }>;
+    configuredOrganizationIdInMemberships?: boolean;
+    recommendedOrganizationId?:            string | null;
     setupError?:           string;
     setupWarning?:         string;
     connectionError?:      string;
@@ -637,7 +647,23 @@ export default function TakeoffPlanFileSection({
                         : providerConfig.exayard.connectionError
                           ? `not authenticated — ${providerConfig.exayard.connectionError}`
                           : "not authenticated"}
-                    {providerConfig.exayard.setupWarning ? ` · ${providerConfig.exayard.setupWarning}` : ""}
+                    {providerConfig.exayard.configuredOrganizationIdInMemberships === false &&
+                      providerConfig.exayard.membershipOrganizationIds.length > 0 && (
+                      <>
+                        {" · configured org not in memberships"}
+                        {providerConfig.exayard.recommendedOrganizationId && (
+                          <> — set EXAYARD_ORGANIZATION_ID={providerConfig.exayard.recommendedOrganizationId}</>
+                        )}
+                      </>
+                    )}
+                    {providerConfig.exayard.configuredOrganizationIdInMemberships === true &&
+                      providerConfig.exayard.configuredOrganizationId && (
+                      <> · org {providerConfig.exayard.configuredOrganizationId}</>
+                    )}
+                    {providerConfig.exayard.setupWarning &&
+                      providerConfig.exayard.configuredOrganizationIdInMemberships !== false && (
+                      <> · {providerConfig.exayard.setupWarning}</>
+                    )}
                   </span>
                 )}
                 {!providerConfig.takeoffAiEnabled && (

@@ -267,6 +267,119 @@ export async function testExayardConnection(options = {}) {
   return /** @type {any} */ (data);
 }
 
+const EXAYARD_ORG_SETUP_WARNING =
+  "Configured Exayard organization ID is missing or not in memberships.";
+
+/**
+ * Parse /me memberships into org IDs and optional name/slug fields (OpenAPI + extras).
+ *
+ * @param {unknown} me
+ */
+export function parseExayardMemberships(me) {
+  const memberships = Array.isArray(me?.memberships) ? me.memberships : [];
+  /** @type {string[]} */
+  const membershipOrganizationIds = [];
+  /** @type {Array<{ orgId: string, role: string|null, name: string|null, slug: string|null }>} */
+  const membershipOrganizations = [];
+
+  for (const m of memberships) {
+    const orgId = String(m?.orgId ?? m?.organizationId ?? "").trim();
+    if (!orgId) continue;
+    membershipOrganizationIds.push(orgId);
+    membershipOrganizations.push({
+      orgId,
+      role: typeof m?.role === "string" ? m.role : null,
+      name:
+        typeof m?.name === "string" ? m.name
+        : typeof m?.organizationName === "string" ? m.organizationName
+        : typeof m?.displayName === "string" ? m.displayName
+        : null,
+      slug:
+        typeof m?.slug === "string" ? m.slug
+        : typeof m?.organizationSlug === "string" ? m.organizationSlug
+        : null,
+    });
+  }
+
+  return { membershipOrganizationIds, membershipOrganizations };
+}
+
+/**
+ * Build org-setup hints for diagnostics (no secrets).
+ *
+ * @param {{
+ *   configuredOrganizationId: string|null,
+ *   membershipOrganizationIds: string[],
+ * }} params
+ */
+export function buildExayardOrganizationSetupHints({
+  configuredOrganizationId,
+  membershipOrganizationIds,
+}) {
+  const configured = configuredOrganizationId ?? null;
+  const ids = membershipOrganizationIds ?? [];
+  const hasMemberships = ids.length > 0;
+  const configuredOrganizationIdInMemberships =
+    Boolean(configured) && hasMemberships && ids.includes(configured);
+
+  /** @type {Record<string, unknown>} */
+  const hints = {
+    configuredOrganizationId: configured,
+    membershipOrganizationIds: ids,
+    configuredOrganizationIdInMemberships,
+    recommendedOrganizationId: null,
+  };
+
+  const missingOrInvalid =
+    !configured ||
+    (hasMemberships && !configuredOrganizationIdInMemberships);
+
+  if (ids.length === 1 && missingOrInvalid) {
+    hints.recommendedOrganizationId = ids[0];
+    hints.setupWarning = EXAYARD_ORG_SETUP_WARNING;
+  } else if (hasMemberships && configured && !configuredOrganizationIdInMemberships) {
+    hints.setupWarning = EXAYARD_ORG_SETUP_WARNING;
+  } else if (!configured) {
+    hints.setupWarning =
+      "EXAYARD_ORGANIZATION_ID is not configured. Set it in backend-core server environment.";
+  }
+
+  return hints;
+}
+
+/**
+ * Assert configured org is present and (when /me memberships exist) included in memberships.
+ * Call before POST /projects and other org-scoped Exayard routes.
+ *
+ * @param {{ fetchFn?: typeof fetch, me?: unknown|null }} [options]
+ * @returns {Promise<string>} validated organization ID
+ */
+export async function validateExayardOrganizationAccess(options = {}) {
+  const { organizationId: configured } = readExayardConfig();
+  if (!configured) {
+    throw exayardSetupError(
+      "EXAYARD_ORGANIZATION_ID is not configured. Set it in backend-core server environment.",
+      { code: "missing_organization_id" }
+    );
+  }
+
+  const me = options.me ?? await testExayardConnection({ fetchFn: options.fetchFn });
+  const { membershipOrganizationIds } = parseExayardMemberships(me);
+
+  if (
+    membershipOrganizationIds.length > 0 &&
+    !membershipOrganizationIds.includes(configured)
+  ) {
+    throw exayardSetupError(
+      "Configured Exayard organization ID is not available to this API key. " +
+      "Use one of the membershipOrganizationIds from /api/takeoff/config.",
+      { code: "invalid_organization_id" }
+    );
+  }
+
+  return configured;
+}
+
 /**
  * Safe diagnostics for GET /api/takeoff/config — never includes API key values.
  *
@@ -285,6 +398,11 @@ export async function getExayardSafeDiagnostics(options = {}) {
     authenticated: false,
     tokenType: null,
     membershipsCount: null,
+    configuredOrganizationId: organizationId ?? null,
+    membershipOrganizationIds: [],
+    membershipOrganizations: [],
+    configuredOrganizationIdInMemberships: false,
+    recommendedOrganizationId: null,
   };
 
   if (!apiKey) {
@@ -295,7 +413,7 @@ export async function getExayardSafeDiagnostics(options = {}) {
 
   if (!organizationId) {
     diagnostics.setupWarning =
-      "EXAYARD_ORGANIZATION_ID is not configured. Connection can be tested, but takeoff routes will require it.";
+      "EXAYARD_ORGANIZATION_ID is not configured. Set it in backend-core server environment.";
   }
 
   const shouldTest = options.testConnection !== false;
@@ -305,7 +423,25 @@ export async function getExayardSafeDiagnostics(options = {}) {
     const me = await testExayardConnection({ fetchFn: options.fetchFn });
     diagnostics.authenticated = true;
     diagnostics.tokenType = typeof me?.tokenType === "string" ? me.tokenType : null;
-    diagnostics.membershipsCount = Array.isArray(me?.memberships) ? me.memberships.length : null;
+
+    const { membershipOrganizationIds, membershipOrganizations } = parseExayardMemberships(me);
+    diagnostics.membershipsCount = membershipOrganizationIds.length;
+    diagnostics.membershipOrganizationIds = membershipOrganizationIds;
+    diagnostics.membershipOrganizations = membershipOrganizations;
+
+    const orgHints = buildExayardOrganizationSetupHints({
+      configuredOrganizationId: organizationId,
+      membershipOrganizationIds,
+    });
+    diagnostics.configuredOrganizationIdInMemberships =
+      orgHints.configuredOrganizationIdInMemberships;
+    diagnostics.recommendedOrganizationId = orgHints.recommendedOrganizationId ?? null;
+
+    if (orgHints.setupWarning) {
+      diagnostics.setupWarning = orgHints.setupWarning;
+    } else {
+      delete diagnostics.setupWarning;
+    }
   } catch (e) {
     diagnostics.authenticated = false;
     diagnostics.connectionError = String(e?.message ?? e);
@@ -335,7 +471,7 @@ function requireExayardOrganizationId() {
  * @param {{ name: string, fetchFn?: typeof fetch }} params
  */
 export async function createExayardProject({ name, fetchFn }) {
-  const organizationId = requireExayardOrganizationId();
+  const organizationId = await validateExayardOrganizationAccess({ fetchFn });
   const { data } = await exayardRequest("/projects", {
     method: "POST",
     body: { organizationId, name },
@@ -621,6 +757,7 @@ export async function runExayardTakeoffWorkflow(params) {
     projectId = created.projectId;
   } else {
     mark("reuse_project");
+    await validateExayardOrganizationAccess({ fetchFn });
   }
 
   mark("create_file_upload");

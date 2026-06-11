@@ -9,14 +9,11 @@ import {
   confirmExayardFileUpload,
   createExayardFileUpload,
   createExayardProject,
-  exayardRequest,
   formatExayardOperatorError,
   getExayardSafeDiagnostics,
   parseExayardProblemJson,
   pollExayardAssessment,
-  proposeExayardAnalysis,
   readExayardConfig,
-  runExayardAnalysis,
   runExayardTakeoffWorkflow,
   uploadExayardFileBytes,
 } from "./exayardClient.mjs";
@@ -84,6 +81,7 @@ function makeWorkflowFetchMock(overrides = {}) {
     pagesDelayPolls = 0,
     failScope = false,
     failRateLimit = false,
+    memberships = [{ orgId: "org_test_123", role: "admin", name: "Test Org", slug: "test-org" }],
   } = overrides;
 
   return async (url, init = {}) => {
@@ -177,7 +175,7 @@ function makeWorkflowFetchMock(overrides = {}) {
       return okJson({ _id: "asmt_1", projectId: "proj_1", status, elements: [{ name: "CT", qty: 42 }] });
     }
     if (url.endsWith("/me")) {
-      return okJson({ clerkUserId: null, tokenType: "api_key", memberships: [] });
+      return okJson({ clerkUserId: null, tokenType: "api_key", memberships });
     }
 
     return {
@@ -410,4 +408,73 @@ await withEnvAsync(BASE_ENV, async () => {
   console.log("ok T15: safe config shape");
 }
 
-console.log("\nexayardClient: all 15 tests passed");
+// T16 — configured org in memberships → no warning
+await withEnvAsync(BASE_ENV, async () => {
+  const diagnostics = await getExayardSafeDiagnostics({
+    fetchFn: makeWorkflowFetchMock({
+      memberships: [{ orgId: "org_test_123", role: "admin" }],
+    }),
+  });
+  assert.equal(diagnostics.configuredOrganizationId, "org_test_123");
+  assert.deepEqual(diagnostics.membershipOrganizationIds, ["org_test_123"]);
+  assert.equal(diagnostics.configuredOrganizationIdInMemberships, true);
+  assert.equal(diagnostics.setupWarning, undefined);
+  console.log("ok T16: configured org in memberships → no warning");
+});
+
+// T17 — configured org missing from memberships → warning + recommended org
+await withEnvAsync(
+  { ...BASE_ENV, EXAYARD_ORGANIZATION_ID: "wrong_eliteos_uuid" },
+  async () => {
+    const diagnostics = await getExayardSafeDiagnostics({
+      fetchFn: makeWorkflowFetchMock({
+        memberships: [{ orgId: "exayard_org_correct", role: "admin", name: "Fab Shop" }],
+      }),
+    });
+    assert.equal(diagnostics.configuredOrganizationIdInMemberships, false);
+    assert.equal(diagnostics.recommendedOrganizationId, "exayard_org_correct");
+    assert.ok(String(diagnostics.setupWarning).includes("missing or not in memberships"));
+    assert.deepEqual(diagnostics.membershipOrganizations, [{
+      orgId: "exayard_org_correct",
+      role: "admin",
+      name: "Fab Shop",
+      slug: null,
+    }]);
+    console.log("ok T17: invalid configured org → warning + recommendedOrganizationId");
+  }
+);
+
+// T18 — project create refuses invalid configured org before POST /projects
+await withEnvAsync(
+  { ...BASE_ENV, EXAYARD_ORGANIZATION_ID: "supabase-not-exayard-id" },
+  async () => {
+    fetchLog = [];
+    const mockFetch = makeWorkflowFetchMock({
+      memberships: [{ orgId: "exayard_real_org", role: "member" }],
+    });
+    await assert.rejects(
+      () => createExayardProject({ name: "Should not create", fetchFn: mockFetch }),
+      (err) => {
+        assert.equal(err.code, "invalid_organization_id");
+        assert.ok(err.message.includes("membershipOrganizationIds from /api/takeoff/config"));
+        return true;
+      }
+    );
+    assert.ok(!fetchLog.some((f) => f.url.includes("/projects") && f.method === "POST"));
+    console.log("ok T18: project create blocked before Exayard POST /projects");
+  }
+);
+
+// T19 — diagnostics never leak API key
+await withEnvAsync({ ...BASE_ENV, EXAYARD_API_KEY: "ey-leak-check-key" }, async () => {
+  const diagnostics = await getExayardSafeDiagnostics({
+    fetchFn: makeWorkflowFetchMock(),
+  });
+  const serialized = JSON.stringify(diagnostics);
+  assert.ok(!serialized.includes("ey-leak-check-key"));
+  assert.ok(!serialized.includes("Authorization"));
+  assert.ok(!serialized.includes("upload.example.com"));
+  console.log("ok T19: no API key or secret leakage in org diagnostics");
+});
+
+console.log("\nexayardClient: all 19 tests passed");

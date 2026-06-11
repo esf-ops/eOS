@@ -63,7 +63,8 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase, he
   //
   // Response shape:
   //   { ok, takeoffAiEnabled, activeProvider, model, hasGeminiKey, hasOpenAiKey,
-  //     hasExayardKey, hasExayardOrganizationId, exayard? }
+  //     hasExayardKey, hasExayardOrganizationId,
+  //     exayard?: { configuredOrganizationId, membershipOrganizationIds, … } }
   //
   app.get("/api/takeoff/config", requireAuth(), guardHead, async (_req, res) => {
     try {
