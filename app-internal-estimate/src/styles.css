@@ -8650,3 +8650,35 @@ body {
   -webkit-backdrop-filter: none;
 }
 
+/* ----- Boot / quote-load shell ---------------------------------------- */
+
+.ie-boot-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 40px 32px;
+  color: var(--eos-ink-muted, #6b7280);
+  font-size: 0.9rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.ie-boot-loading-dot {
+  flex-shrink: 0;
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--eos-accent, #6366f1);
+  animation: ie-boot-loading-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes ie-boot-loading-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.82); }
+  50%       { opacity: 1;    transform: scale(1.1);  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ie-boot-loading-dot { animation: none; opacity: 0.65; }
+}
+

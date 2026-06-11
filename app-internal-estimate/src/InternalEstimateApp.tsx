@@ -261,6 +261,31 @@ function homeLauncherUrl(): string {
   return raw.replace(/\/+$/, "") || "https://www.eliteosfab.com";
 }
 
+/** UUID v1–v5 regex used to validate `?quoteId=` from the URL search string. */
+const QUOTE_ID_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/**
+ * Synchronously read and validate `?quoteId=` from the current URL.
+ * Returns the UUID string when present and valid, otherwise null.
+ * Safe to call on the server (typeof window guard).
+ */
+function readQuoteIdFromSearch(): string | null {
+  if (typeof window === "undefined") return null;
+  const q = new URLSearchParams(window.location.search).get("quoteId");
+  return q && QUOTE_ID_UUID_RE.test(q) ? q : null;
+}
+
+/**
+ * Explicit quote-load lifecycle — avoids overloading `null` to mean both
+ * "not requested" and "still loading".
+ *
+ *  not_requested — no ?quoteId= in the URL
+ *  loading       — quoteId known, API call pending (auth may also be pending)
+ *  loaded        — API returned the quote; form is hydrated
+ *  failed        — API call errored or returned !ok
+ */
+type QuoteHydrationStatus = "not_requested" | "loading" | "loaded" | "failed";
+
 /**
  * Derive a friendly display name from an email address (everything before
  * the `@`, with separators turned into spaces and word casing applied).
@@ -317,6 +342,18 @@ export default function InternalEstimateApp() {
   const [authPassword, setAuthPassword] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  /**
+   * Flips to true once the first `supabase.auth.getSession()` promise resolves.
+   * Starts true when supabase is not configured (no auth possible — treat as resolved).
+   * This gates the initial render so we never paint the wrong workspace shell.
+   */
+  const [sessionResolved, setSessionResolved] = useState<boolean>(() => !getSupabase());
+  /**
+   * Flips to true once auth is resolved AND any pending initial quote hydration
+   * has completed (or is not needed). After it flips it never goes back to false,
+   * so mid-session re-hydrations (e.g. after Save Revision) do not hide the workspace.
+   */
+  const [initialBootDone, setInitialBootDone] = useState(false);
 
   const [roomDrafts, setRoomDrafts] = useState<RoomDraft[]>(() => [createEstimatorRoom("Group Promo")]);
   /** Drag/rotate positions only — never sent to calculator or pricing (see Visual Layout Canvas banner). */
@@ -357,9 +394,15 @@ export default function InternalEstimateApp() {
   const [eliteColors, setEliteColors] = useState<EliteProgramColorRow[]>([]);
   const [colorCatalogWarnings, setColorCatalogWarnings] = useState<string[]>([]);
   const [quoteDefaultCatalogId, setQuoteDefaultCatalogId] = useState("");
-  const [loadedFromLibrary, setLoadedFromLibrary] = useState(false);
+  /**
+   * Explicit quote-load lifecycle replaces the old boolean `loadedFromLibrary`.
+   * Initialized synchronously from the URL so the first render knows whether
+   * we will need to load a quote before showing the workspace.
+   */
+  const [quoteHydrationStatus, setQuoteHydrationStatus] = useState<QuoteHydrationStatus>(
+    () => (readQuoteIdFromSearch() !== null ? "loading" : "not_requested")
+  );
   const [hydrationGaps, setHydrationGaps] = useState<string[]>([]);
-  const [lastSavedQuoteNumber, setLastSavedQuoteNumber] = useState<string | null>(null);
   const [lastSavedQuoteId, setLastSavedQuoteId] = useState<string | null>(null);
 
   const [quoteWorkflowStatus, setQuoteWorkflowStatus] = useState("draft");
@@ -376,17 +419,15 @@ export default function InternalEstimateApp() {
   const [emailEstimateModalOpen, setEmailEstimateModalOpen] = useState(false);
   const [restoreBusy, setRestoreBusy] = useState(false);
 
-  /** `?quoteId=` hydration — must be declared before `buildSubmitPayload` / save hooks (TDZ if referenced earlier). */
-  const [urlQuoteId, setUrlQuoteId] = useState<string | null>(null);
-  useEffect(() => {
-    const q = new URLSearchParams(window.location.search).get("quoteId");
-    if (q && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(q)) {
-      setUrlQuoteId(q);
-    }
-  }, []);
+  /** `?quoteId=` hydration — parsed synchronously so the first render already knows
+   *  whether a quote needs to be loaded. `setUrlQuoteId` is still used post-save to
+   *  update the URL-reflected ID without a page reload. Must be declared before
+   *  `buildSubmitPayload` / save hooks (TDZ if referenced earlier). */
+  const [urlQuoteId, setUrlQuoteId] = useState<string | null>(() => readQuoteIdFromSearch());
 
   useEffect(() => {
     if (!urlQuoteId) {
+      setQuoteHydrationStatus("not_requested");
       setHydratedIsCurrentRevision(null);
       setHydratedDisplayRevision(null);
       setQuoteFamilyRootId(null);
@@ -398,6 +439,7 @@ export default function InternalEstimateApp() {
       setRevisionNoteDraft("");
       return;
     }
+    setQuoteHydrationStatus("loading");
     setHydratedIsCurrentRevision(null);
     setSaveIntent((prev) => (prev === "create" ? "save_revision" : prev));
   }, [urlQuoteId]);
@@ -490,7 +532,11 @@ export default function InternalEstimateApp() {
       setUserMetaName(metaName);
     };
 
-    void supabase.auth.getSession().then(({ data }) => applySession(data.session));
+    void supabase.auth.getSession().then(({ data }) => {
+      applySession(data.session);
+      // Mark session as resolved so the boot gate knows we have our auth answer.
+      if (alive) setSessionResolved(true);
+    });
 
     const { data: sub } = supabase.auth.onAuthStateChange((_evt, sess) => applySession(sess));
 
@@ -527,6 +573,26 @@ export default function InternalEstimateApp() {
       cancelled = true;
     };
   }, [sessionToken]);
+
+  /**
+   * Derived flag — backwards-compat alias used widely in JSX below.
+   * Do not re-add a `useState` for this; it is fully derived from `quoteHydrationStatus`.
+   */
+  const loadedFromLibrary = quoteHydrationStatus === "loaded";
+
+  /**
+   * Initial-boot gate: flips to `true` once we have an auth answer AND any
+   * pending initial quote hydration is either done or unreachable (no session).
+   * After it flips it never resets, so mid-session re-hydrations stay invisible.
+   */
+  useEffect(() => {
+    if (initialBootDone) return;
+    if (!sessionResolved) return;
+    // If there is a quoteId and we have a session token, wait for hydration to finish.
+    const hydrationPending =
+      urlQuoteId !== null && sessionToken !== null && quoteHydrationStatus === "loading";
+    if (!hydrationPending) setInitialBootDone(true);
+  }, [initialBootDone, sessionResolved, sessionToken, urlQuoteId, quoteHydrationStatus]);
 
   const workflowSectionIds = useMemo(() => WORKFLOW_SECTIONS.map((s) => s.id), []);
   const setRailActiveSection = useWorkflowRailScrollSpy(workflowSectionIds, [roomDrafts.length]);
@@ -974,7 +1040,7 @@ export default function InternalEstimateApp() {
         u.searchParams.set("quoteId", qid);
         window.history.replaceState({}, "", `${u.pathname}?${u.searchParams.toString()}${u.hash}`);
         setHydratedIsCurrentRevision(true);
-        setLoadedFromLibrary(true);
+        setQuoteHydrationStatus("loaded");
         setFamilyLatestQuoteId(qid);
         if (qn) setFamilyLatestQuoteNumber(qn);
       } else if (saveMode === "update_existing") {
@@ -1181,7 +1247,7 @@ export default function InternalEstimateApp() {
     setFamilyLatestQuoteId(null);
     setFamilyLatestQuoteNumber(null);
     setRevisionBaselineSig(null);
-    setLoadedFromLibrary(false);
+    setQuoteHydrationStatus("not_requested");
     setLastSavedQuoteId(null);
     setLastSavedQuoteNumber(null);
     setSaveIntent("create");
@@ -2035,10 +2101,13 @@ export default function InternalEstimateApp() {
         setSaveIntent(ic ? "save_revision" : "save_as_new_quote");
         setLastSavedQuoteId(ic ? urlQuoteId : latestRev?.id ?? urlQuoteId);
         setLastSavedQuoteNumber(ic ? qnDisp || null : latestRev?.quote_number ? String(latestRev.quote_number) : qnDisp || null);
-        setLoadedFromLibrary(true);
+        setQuoteHydrationStatus("loaded");
         setHydrationGaps(gaps);
       } catch (e) {
-        if (!cancelled) setHydrationGaps([`Could not load quote: ${e instanceof ApiError ? e.message : String(e)}`]);
+        if (!cancelled) {
+          setHydrationGaps([`Could not load quote: ${e instanceof ApiError ? e.message : String(e)}`]);
+          setQuoteHydrationStatus("failed");
+        }
       }
     })();
     return () => {
@@ -2145,6 +2214,33 @@ export default function InternalEstimateApp() {
       icon: ieProfileIcon
     }
   ];
+
+  // ── Boot / hydration gate ──────────────────────────────────────────────────
+  // Block the full workspace from painting until we have an auth answer AND any
+  // initial quote hydration is either complete or unreachable (not signed in).
+  // `initialBootDone` is a one-way latch so mid-session re-hydrations stay hidden.
+  if (!initialBootDone) {
+    return (
+      <div className="shell page-internal-estimate ie-shell-preview">
+        <div className="ie-no-print">
+          <EliteosTopbar
+            appName="Internal Estimate"
+            organizationName={workspaceName}
+            logoSrc={workspaceLogoUrl ?? EOS_LOGO_URL}
+            homeHref="/"
+            primaryActionSlot={iePrimaryActions}
+          />
+          <div className="ie-shell-body">
+            <div className="ie-boot-loading" role="status" aria-live="polite">
+              <span className="ie-boot-loading-dot" aria-hidden />
+              <span>{urlQuoteId !== null ? "Preparing quote workspace\u2026" : "Loading estimate\u2026"}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  // ── End boot gate ──────────────────────────────────────────────────────────
 
   return (
     <div className={`shell page-internal-estimate${urlQuoteId && loadedFromLibrary ? " ie-shell-loaded" : ""}${sessionToken ? " ie-shell-signed-in" : " ie-shell-preview"}`}>
