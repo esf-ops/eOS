@@ -102,7 +102,8 @@ export interface TakeoffPlanFileSectionProps {
       resultRowId:   string | null;
       summary?:      object | null;
       pageInventory?:     object | null; // v5.4: PageInventory from classification pass
-      dimensionEvidence?: object | null; // v5.5: DimensionEvidence from evidence pass
+      exayardRawCaptured?:  boolean;
+      exayardWorkflow?:     object | null;
     }
   ) => void;
   /**
@@ -144,6 +145,20 @@ const AI_STEP_MSGS: Record<AiStep, string | null> = {
   error:       null,
 };
 
+const EXAYARD_STEP_MSGS: Record<AiStep, string | null> = {
+  idle:        null,
+  sending:     "Starting Exayard workflow v1…",
+  generating:  "Uploading plan and running Exayard analysis…",
+  recomputing: "Polling Exayard assessment status…",
+  done:        "Exayard raw result captured — normalization pending.",
+  error:       null,
+};
+
+function aiStepMessage(step: AiStep, activeProvider: string | null | undefined): string | null {
+  if (activeProvider === "exayard") return EXAYARD_STEP_MSGS[step];
+  return AI_STEP_MSGS[step];
+}
+
 type AiStep = "idle" | "sending" | "generating" | "recomputing" | "done" | "error";
 
 export default function TakeoffPlanFileSection({
@@ -176,6 +191,7 @@ export default function TakeoffPlanFileSection({
   // AI draft generation state (v5)
   const [aiStep, setAiStep] = useState<AiStep>("idle");
   const [aiError, setAiError] = useState<string | null>(null);
+  const [exayardRawCaptured, setExayardRawCaptured] = useState(false);
   const aiTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   // Provider config badge state (v5.9.3) — fetched once per token+workspace load
@@ -206,6 +222,7 @@ export default function TakeoffPlanFileSection({
     setDownloadError(null);
     setAiStep("idle");
     setAiError(null);
+    setExayardRawCaptured(false);
     setProviderConfig(null);
     setArchiveStep("idle");
     setArchiveError(null);
@@ -346,10 +363,12 @@ export default function TakeoffPlanFileSection({
 
     setAiStep("sending");
     setAiError(null);
+    setExayardRawCaptured(false);
 
+    const isExayard = providerConfig?.activeProvider === "exayard";
     // Simulate multi-step progress during the single API call.
-    aiTimersRef.current.push(setTimeout(() => setAiStep("generating"),  3500));
-    aiTimersRef.current.push(setTimeout(() => setAiStep("recomputing"), 9000));
+    aiTimersRef.current.push(setTimeout(() => setAiStep("generating"),  isExayard ? 4000 : 3500));
+    aiTimersRef.current.push(setTimeout(() => setAiStep("recomputing"), isExayard ? 12000 : 9000));
 
     try {
       const res = await labApiPost(
@@ -365,6 +384,8 @@ export default function TakeoffPlanFileSection({
         summary:               object | null;
         pageInventory:         object | null; // v5.4
         dimensionEvidence:     object | null; // v5.5
+        exayardRawCaptured?:   boolean;
+        exayardWorkflow?:      object | null;
       };
 
       // Clear progress timers.
@@ -373,6 +394,7 @@ export default function TakeoffPlanFileSection({
 
       if (res.ok && res.normalizedTakeoffJson) {
         setAiStep("done");
+        setExayardRawCaptured(Boolean(res.exayardRawCaptured));
         onAiDraftGenerated(res.normalizedTakeoffJson, workspace.file.originalFilename, {
           promptVersion: res.promptVersion  ?? null,
           modelUsed:     res.modelUsed      ?? null,
@@ -380,6 +402,8 @@ export default function TakeoffPlanFileSection({
           summary:       res.summary        ?? null,
           pageInventory:     res.pageInventory    ?? null,
           dimensionEvidence: res.dimensionEvidence ?? null,
+          exayardRawCaptured: res.exayardRawCaptured ?? false,
+          exayardWorkflow:    res.exayardWorkflow ?? null,
         });
       } else {
         throw new Error("Server returned an unexpected response");
@@ -391,7 +415,7 @@ export default function TakeoffPlanFileSection({
       setAiStep("error");
       setAiError(msg);
     }
-  }, [takeoffJobId, token, workspace, onAiDraftGenerated]);
+  }, [takeoffJobId, token, workspace, onAiDraftGenerated, providerConfig?.activeProvider]);
 
   // ── Remove / archive plan (v5.9.5) ───────────────────────────────────────
   //
@@ -538,27 +562,39 @@ export default function TakeoffPlanFileSection({
                 {isAiBusy ? (
                   <span className="ai-draft-spinner" aria-hidden>◌</span>
                 ) : aiStep === "done" ? (
-                  "↻ Re-generate AI takeoff draft"
+                  providerConfig?.activeProvider === "exayard"
+                    ? "↻ Re-run Exayard workflow"
+                    : "↻ Re-generate AI takeoff draft"
+                ) : providerConfig?.activeProvider === "exayard" ? (
+                  "✦ Run Exayard takeoff (v1)"
                 ) : (
                   "✦ Generate AI takeoff draft"
                 )}
                 {isAiBusy && (
                   <span className="ai-draft-progress-text">
-                    {AI_STEP_MSGS[aiStep]}
+                    {aiStepMessage(aiStep, providerConfig?.activeProvider)}
                   </span>
                 )}
               </button>
 
               {aiStep === "done" && (
                 <span className="ai-draft-success-note">
-                  AI draft loaded — estimator review required before import.
+                  {exayardRawCaptured || providerConfig?.activeProvider === "exayard"
+                    ? "Exayard raw result captured — normalization pending."
+                    : "AI draft loaded — estimator review required before import."}
                 </span>
               )}
             </div>
 
+            {providerConfig?.activeProvider === "exayard" && aiStep === "idle" && (
+              <p className="ai-draft-hint ai-draft-hint--exayard">
+                Exayard workflow v1: upload plan → analysis → poll assessment. Raw Exayard output is stored; countertop mapping is not applied yet.
+              </p>
+            )}
+
             {isAiBusy && (
               <p className="ai-draft-progress" role="status" aria-live="polite">
-                {AI_STEP_MSGS[aiStep]}
+                {aiStepMessage(aiStep, providerConfig?.activeProvider)}
               </p>
             )}
 
@@ -568,7 +604,7 @@ export default function TakeoffPlanFileSection({
               </p>
             )}
 
-            {(aiStep === "idle" || aiStep === "done") && !isAiBusy && (
+            {(aiStep === "idle" || aiStep === "done") && !isAiBusy && providerConfig?.activeProvider !== "exayard" && (
               <p className="ai-draft-hint">
                 {aiStep === "done"
                   ? "AI draft requires estimator review before quote import. Dimensions are recomputed by eliteOS — AI totals are for reference only."

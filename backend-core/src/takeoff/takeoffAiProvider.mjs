@@ -37,7 +37,7 @@
  *     GEMINI_TAKEOFF_MODEL=gemini-2.5-pro  model name (default: gemini-2.5-pro)
  *     GEMINI_API_KEY=...               Gemini API key (never client-exposed)
  *
- *   Exayard provider (platform API — connection diagnostics in this pass):
+ *   Exayard provider (platform API — workflow v1):
  *     EXAYARD_API_BASE_URL=https://api.exayard.com/v1
  *     EXAYARD_API_KEY=...              Exayard API key (never client-exposed)
  *     EXAYARD_ORGANIZATION_ID=...      Exayard org id for future takeoff routes
@@ -49,6 +49,7 @@ import {
   geminiEvidenceProvider,
 } from "./geminiTakeoffProvider.mjs";
 import { getExayardSafeDiagnostics } from "./exayardClient.mjs";
+import { exayardTakeoffProvider } from "./exayardTakeoffProvider.mjs";
 
 /** All supported provider names. */
 export const SUPPORTED_PROVIDERS = ["openai", "gemini", "exayard"];
@@ -67,14 +68,7 @@ export function getExtractionProvider(providerName) {
     case "gemini":
       return geminiExtractionProvider;
     case "exayard":
-      throw Object.assign(
-        new Error(
-          `Exayard takeoff automation is not wired yet. ` +
-          `Connection diagnostics are available via GET /api/takeoff/config. ` +
-          `LLM extraction providers: openai, gemini.`
-        ),
-        { statusCode: 503, code: "exayard_extraction_not_implemented" }
-      );
+      return exayardTakeoffProvider;
     default:
       throw Object.assign(
         new Error(
@@ -98,6 +92,8 @@ export function getInventoryProvider(providerName) {
   switch (String(providerName ?? "").toLowerCase()) {
     case "gemini":
       return geminiInventoryProvider;
+    case "exayard":
+      return null;
     case "openai":
     default:
       return null; // null → inventory service uses its built-in OpenAI default
@@ -115,6 +111,8 @@ export function getEvidenceProvider(providerName) {
   switch (String(providerName ?? "").toLowerCase()) {
     case "gemini":
       return geminiEvidenceProvider;
+    case "exayard":
+      return null;
     case "openai":
     default:
       return null; // null → evidence service uses its built-in OpenAI default

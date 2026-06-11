@@ -109,17 +109,30 @@ export async function runAiTakeoffExtraction({
     if (!config.enabled) {
       throw extractionError(
         "AI takeoff extraction is not enabled on this server. " +
-        "Set TAKEOFF_AI_ENABLED=1 and OPENAI_API_KEY in the server environment.",
+        "Set TAKEOFF_AI_ENABLED=1 in the server environment.",
         403
       );
     }
     if (!config.apiKey) {
-      const keyVar = config.providerName === "gemini" ? "GEMINI_API_KEY" : "OPENAI_API_KEY";
+      const keyVar =
+        config.providerName === "gemini" ? "GEMINI_API_KEY"
+        : config.providerName === "exayard" ? "EXAYARD_API_KEY"
+        : "OPENAI_API_KEY";
       throw extractionError(
         `${keyVar} is not configured on this server. ` +
         `Set ${keyVar} in the server environment.`,
         503
       );
+    }
+    if (config.providerName === "exayard") {
+      const orgId = String(process.env.EXAYARD_ORGANIZATION_ID ?? "").trim();
+      if (!orgId) {
+        throw extractionError(
+          "EXAYARD_ORGANIZATION_ID is not configured on this server. " +
+          "Set EXAYARD_ORGANIZATION_ID in the server environment.",
+          503
+        );
+      }
     }
     provider = getExtractionProvider(config.providerName);
   }
@@ -213,7 +226,8 @@ export async function runAiTakeoffExtraction({
   //    v5.9: resolve Gemini inventory provider from config when not explicitly injected.
   const effectiveInventoryFn = inventoryProviderFn ?? getInventoryProvider(config?.providerName ?? "openai");
   let pageInventory = null;
-  const shouldRunInventory = inventoryProviderFn != null || !providerFn;
+  const isExayard = config?.providerName === "exayard";
+  const shouldRunInventory = !isExayard && (inventoryProviderFn != null || !providerFn);
   if (shouldRunInventory) {
     try {
       pageInventory = await runPageInventory({
@@ -240,7 +254,7 @@ export async function runAiTakeoffExtraction({
   //     v5.9: resolve Gemini evidence provider from config when not explicitly injected.
   const effectiveEvidenceFn = dimensionEvidenceProviderFn ?? getEvidenceProvider(config?.providerName ?? "openai");
   let dimensionEvidence = null;
-  const shouldRunEvidence = dimensionEvidenceProviderFn != null || !providerFn;
+  const shouldRunEvidence = !isExayard && (dimensionEvidenceProviderFn != null || !providerFn);
   if (shouldRunEvidence) {
     try {
       dimensionEvidence = await runDimensionEvidence({
@@ -274,6 +288,8 @@ export async function runAiTakeoffExtraction({
       apiKey:            config?.apiKey ?? null,
       pageInventory,     // v5.4: passes recommended pages + dimension hints to extraction model
       dimensionEvidence, // v5.5: passes pre-extracted dimension table to anchor run building
+      exayardProjectId:  job.metadata?.exayard?.projectId ?? null,
+      takeoffJobId,
     });
   } catch (providerErr) {
     await setJobStatus(supabase, takeoffJobId, organizationId, {
@@ -283,7 +299,7 @@ export async function runAiTakeoffExtraction({
     throw providerErr;
   }
 
-  const { rawText, parsed, parseError, modelUsed, usage } = providerOutput;
+  const { rawText, parsed, parseError, modelUsed, usage, exayardWorkflow, exayardRaw, exayardRawCaptured } = providerOutput;
 
   // 8. Handle JSON parse failure — still save a partial failure record.
   if (!parsed || parseError) {
@@ -390,6 +406,9 @@ export async function runAiTakeoffExtraction({
     pageInventory:    pageInventory    ?? null, // v5.4: null when inventory was skipped or failed
     dimensionEvidence: dimensionEvidence ?? null, // v5.5: null when evidence was skipped or failed
     qaGate:           qaGate           ?? null, // v5.8: automatic QA gate result
+    exayardWorkflow:  exayardWorkflow  ?? null,
+    exayardRaw:       exayardRaw       ?? null,
+    exayardRawCaptured: Boolean(exayardRawCaptured),
   };
   const augmentedRawAiJson = rawAiJson != null
     ? { ...rawAiJson, _meta: metaEnvelope }
@@ -437,9 +456,20 @@ export async function runAiTakeoffExtraction({
   }
 
   // 12. Update quote_takeoff_jobs: status = 'completed', result_summary with full result.
+  const exayardMeta = exayardWorkflow && typeof exayardWorkflow === "object" ? exayardWorkflow : null;
   await setJobStatus(supabase, takeoffJobId, organizationId, {
     status:       "completed",
     review_status: "needs_review",
+    metadata: exayardMeta?.projectId ? {
+      ...(job.metadata && typeof job.metadata === "object" ? job.metadata : {}),
+      exayard: {
+        projectId:    exayardMeta.projectId,
+        fileId:       exayardMeta.fileId ?? null,
+        assessmentId: exayardMeta.assessmentId ?? null,
+        status:       exayardMeta.status ?? null,
+        updatedAt:    now,
+      },
+    } : job.metadata,
     result_summary: {
       ...summary,
       savedAt:                    now,
@@ -449,6 +479,8 @@ export async function runAiTakeoffExtraction({
       promptVersion:              PROMPT_VERSION,
       usage,
       aiExtraction:               true,
+      exayardRawCaptured:         Boolean(exayardRawCaptured),
+      exayardWorkflow:            exayardWorkflow ?? null,
       normalizedTakeoffJson:      normalized,
       computedMeasurementsJson:   computed,
       validationDiagnosticsJson:  validation,
@@ -476,5 +508,7 @@ export async function runAiTakeoffExtraction({
     pageInventory:             pageInventory    ?? null, // v5.4: null when skipped or failed
     dimensionEvidence:         dimensionEvidence ?? null, // v5.5: null when skipped or failed
     qaGate:                    qaGate           ?? null, // v5.8: automatic QA gate result
+    exayardWorkflow:           exayardWorkflow  ?? null,
+    exayardRawCaptured:        Boolean(exayardRawCaptured),
   };
 }

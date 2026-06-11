@@ -1,32 +1,35 @@
 /**
- * exayardClient — unit tests (connection scaffold).
+ * exayardClient — unit tests (connection + workflow v1).
  *
  * Run: npm run eos:test:takeoff-exayard-client
- *
- * Tests:
- *   1.  TAKEOFF_AI_PROVIDER=exayard selected in readExtractionConfig
- *   2.  Missing EXAYARD_API_KEY → clear setup error
- *   3.  Missing EXAYARD_ORGANIZATION_ID → setup warning (connection still attempted)
- *   4.  Authorization Bearer header sent in mocked fetch
- *   5.  application/problem+json error parsed
- *   6.  API key never appears in diagnostics JSON
- *   7.  Successful /me → authenticated diagnostics
- *   8.  getExtractionProvider("exayard") rejects extraction (not wired)
  */
 import assert from "node:assert/strict";
 import {
+  buildExayardSafeWorkflowMeta,
+  confirmExayardFileUpload,
+  createExayardFileUpload,
+  createExayardProject,
   exayardRequest,
+  formatExayardOperatorError,
   getExayardSafeDiagnostics,
   parseExayardProblemJson,
+  pollExayardAssessment,
+  proposeExayardAnalysis,
   readExayardConfig,
+  runExayardAnalysis,
+  runExayardTakeoffWorkflow,
+  uploadExayardFileBytes,
 } from "./exayardClient.mjs";
+import {
+  exayardTakeoffProvider,
+} from "./exayardTakeoffProvider.mjs";
 import {
   getExtractionProvider,
   readExtractionConfig,
   readSafeProviderConfig,
 } from "./takeoffAiProvider.mjs";
 
-console.log("\nexayardClient — provider scaffold tests\n");
+console.log("\nexayardClient — workflow v1 tests\n");
 
 function withEnv(vars, fn) {
   const saved = {};
@@ -62,212 +65,349 @@ async function withEnvAsync(vars, fn) {
   }
 }
 
-// T1 — exayard selected by TAKEOFF_AI_PROVIDER
-{
-  const cfg = withEnv({
-    TAKEOFF_AI_PROVIDER: "exayard",
-    TAKEOFF_AI_ENABLED: "1",
-    EXAYARD_API_KEY: "ey-test-key-should-not-leak",
-    EXAYARD_ORGANIZATION_ID: "org_abc",
-  }, () => readExtractionConfig());
-
-  assert.equal(cfg.providerName, "exayard", "T1: providerName=exayard");
-  assert.equal(cfg.modelName, "platform", "T1: modelName=platform");
-  assert.equal(cfg.enabled, true, "T1: enabled=true");
-  assert.equal(cfg.apiKey, "ey-test-key-should-not-leak", "T1: reads EXAYARD_API_KEY internally");
-  console.log("ok T1: exayard selected by TAKEOFF_AI_PROVIDER");
-}
-
-// T2 — missing EXAYARD_API_KEY → clear setup error
-await withEnvAsync({
-  TAKEOFF_AI_PROVIDER: "exayard",
-  TAKEOFF_AI_ENABLED: "1",
-  EXAYARD_API_KEY: null,
-  EXAYARD_ORGANIZATION_ID: "org_abc",
-}, async () => {
-  const diagnostics = await getExayardSafeDiagnostics({ testConnection: false });
-  assert.equal(diagnostics.apiKeyPresent, false, "T2: apiKeyPresent=false");
-  assert.ok(
-    String(diagnostics.setupError).includes("EXAYARD_API_KEY"),
-    "T2: setupError mentions EXAYARD_API_KEY"
-  );
-
-  await assert.rejects(
-    () => exayardRequest("/me", { fetchFn: async () => ({ ok: true }) }),
-    (err) => {
-      assert.ok(err.message.includes("EXAYARD_API_KEY"));
-      return true;
-    },
-    "T2: exayardRequest rejects without key"
-  );
-  console.log("ok T2: missing EXAYARD_API_KEY returns clear setup error");
-});
-
-// T3 — missing EXAYARD_ORGANIZATION_ID → setup warning
-await withEnvAsync({
-  TAKEOFF_AI_PROVIDER: "exayard",
-  TAKEOFF_AI_ENABLED: "1",
-  EXAYARD_API_KEY: "ey-test-key",
-  EXAYARD_ORGANIZATION_ID: null,
-}, async () => {
-  const mockFetch = async (url, init) => {
-    assert.equal(url, "https://api.exayard.com/v1/me");
-    return {
-      ok: true,
-      status: 200,
-      text: async () => JSON.stringify({
-        clerkUserId: "user_1",
-        tokenType: "api_key",
-        memberships: [{ orgId: "org_1", role: "admin" }],
-      }),
-      headers: { get: () => "application/json" },
-    };
-  };
-
-  const diagnostics = await getExayardSafeDiagnostics({ fetchFn: mockFetch });
-  assert.equal(diagnostics.organizationIdPresent, false, "T3: organizationIdPresent=false");
-  assert.ok(
-    String(diagnostics.setupWarning).includes("EXAYARD_ORGANIZATION_ID"),
-    "T3: setupWarning mentions EXAYARD_ORGANIZATION_ID"
-  );
-  assert.equal(diagnostics.authenticated, true, "T3: connection test still runs");
-  console.log("ok T3: missing EXAYARD_ORGANIZATION_ID returns setup warning");
-});
-
-// T4 — Authorization header sent in mocked fetch
-await withEnvAsync({
-  EXAYARD_API_KEY: "ey-secret-token-xyz",
+const BASE_ENV = {
+  EXAYARD_API_KEY: "ey-test-key-secret",
+  EXAYARD_ORGANIZATION_ID: "org_test_123",
   EXAYARD_API_BASE_URL: "https://api.exayard.com/v1",
-}, async () => {
-  let capturedAuth = null;
-  let capturedUrl = null;
-  const mockFetch = async (url, init) => {
-    capturedUrl = url;
-    capturedAuth = init?.headers?.Authorization ?? init?.headers?.authorization ?? null;
-    return {
-      ok: true,
-      status: 200,
-      text: async () => JSON.stringify({ clerkUserId: null, tokenType: "api_key", memberships: [] }),
-      headers: { get: () => "application/json" },
-    };
-  };
-
-  await exayardRequest("/me", { fetchFn: mockFetch });
-  assert.equal(capturedUrl, "https://api.exayard.com/v1/me", "T4: calls baseUrl/me");
-  assert.equal(capturedAuth, "Bearer ey-secret-token-xyz", "T4: Authorization Bearer header set");
-  console.log("ok T4: Authorization header sent in mocked fetch");
-});
-
-// T5 — problem+json error parsed
-{
-  const problem = parseExayardProblemJson(
-    JSON.stringify({
-      type: "https://errors.exayard.com/unauthenticated",
-      title: "Unauthenticated",
-      status: 401,
-      detail: "Invalid API key",
-      code: "unauthenticated",
-      request_id: "req_test_123",
-    }),
-    "application/problem+json"
-  );
-  assert.equal(problem?.code, "unauthenticated", "T5: code parsed");
-  assert.equal(problem?.detail, "Invalid API key", "T5: detail parsed");
-
-  await withEnvAsync({ EXAYARD_API_KEY: "ey-bad-key" }, async () => {
-    const mockFetch = async () => ({
-      ok: false,
-      status: 401,
-      text: async () => JSON.stringify({
-        type: "https://errors.exayard.com/unauthenticated",
-        title: "Unauthenticated",
-        status: 401,
-        detail: "Invalid API key",
-        code: "unauthenticated",
-      }),
-      headers: {
-        get: (name) => {
-          if (name.toLowerCase() === "content-type") return "application/problem+json";
-          return null;
-        },
-      },
-    });
-
-    await assert.rejects(
-      () => exayardRequest("/me", { fetchFn: mockFetch }),
-      (err) => {
-        assert.equal(err.problem?.code, "unauthenticated", "T5: err.problem attached");
-        assert.ok(err.message.includes("Invalid API key"), "T5: message includes detail");
-        assert.ok(!err.message.includes("ey-bad-key"), "T5: API key not in error message");
-        return true;
-      }
-    );
-  });
-  console.log("ok T5: problem+json error parsed");
-}
-
-// T6 — API key not in diagnostics
-await withEnvAsync({
   TAKEOFF_AI_PROVIDER: "exayard",
   TAKEOFF_AI_ENABLED: "1",
-  EXAYARD_API_KEY: "ey-ultra-secret-key-999",
-  EXAYARD_ORGANIZATION_ID: "org_xyz",
-}, async () => {
-  const mockFetch = async () => ({
+};
+
+/** @type {Array<{ url: string, method: string, body?: unknown, auth?: string|null }>} */
+let fetchLog = [];
+
+function makeWorkflowFetchMock(overrides = {}) {
+  fetchLog = [];
+  let assessmentPolls = 0;
+  const {
+    assessmentStatusSequence = ["running", "completed"],
+    pagesDelayPolls = 0,
+    failScope = false,
+    failRateLimit = false,
+  } = overrides;
+
+  return async (url, init = {}) => {
+    const method = String(init.method ?? "GET").toUpperCase();
+    let body = null;
+    if (init.body) {
+      try { body = JSON.parse(String(init.body)); } catch { body = init.body; }
+    }
+    const auth = init.headers?.Authorization ?? init.headers?.authorization ?? null;
+    fetchLog.push({ url, method, body, auth });
+
+    if (failRateLimit && url.includes("api.exayard.com") && fetchLog.filter((f) => f.url.includes("api.exayard.com")).length === 1) {
+      return {
+        ok: false,
+        status: 429,
+        text: async () => JSON.stringify({
+          type: "https://errors.exayard.com/rate_limited",
+          title: "Rate limited",
+          status: 429,
+          detail: "Too many requests",
+          code: "rate_limited",
+        }),
+        headers: {
+          get: (n) => {
+            if (String(n).toLowerCase() === "content-type") return "application/problem+json";
+            if (String(n) === "RateLimit") return "10;w=60";
+            return null;
+          },
+        },
+      };
+    }
+
+    if (failScope && url.includes("/analysis/propose")) {
+      return {
+        ok: false,
+        status: 403,
+        text: async () => JSON.stringify({
+          type: "https://errors.exayard.com/insufficient_scope",
+          title: "Insufficient scope",
+          status: 403,
+          detail: "Token lacks projects:write",
+          code: "insufficient_scope",
+        }),
+        headers: { get: () => "application/problem+json" },
+      };
+    }
+
+    if (url === "https://api.exayard.com/v1/projects" && method === "POST") {
+      return okJson({ id: "proj_1", secret: "sec_1" });
+    }
+    if (url === "https://api.exayard.com/v1/files" && method === "POST") {
+      return okJson({
+        fileId: "file_1",
+        uploadUrl: "https://upload.example.com/put-here",
+        r2Key: "r2/key/plan.pdf",
+        expiresAt: Date.now() + 60_000,
+        filename: body?.filename ?? "plan.pdf",
+      });
+    }
+    if (url === "https://upload.example.com/put-here" && method === "PUT") {
+      return { ok: true, status: 200, text: async () => "", headers: { get: () => null } };
+    }
+    if (url === "https://api.exayard.com/v1/files/file_1/confirm" && method === "POST") {
+      return { ok: true, status: 204, text: async () => "", headers: { get: () => null } };
+    }
+    if (url.startsWith("https://api.exayard.com/v1/projects/proj_1/pages")) {
+      if (pagesDelayPolls > 0 && fetchLog.filter((f) => f.url.includes("/pages")).length <= pagesDelayPolls) {
+        return okJson([]);
+      }
+      return okJson([{ _id: "page_1", fileId: "file_1" }]);
+    }
+    if (url.startsWith("https://api.exayard.com/v1/files/file_1")) {
+      return okJson({ _id: "file_1", uploadStatus: "completed", pages: [{ _id: "page_1", fileId: "file_1" }] });
+    }
+    if (url.includes("/analysis/propose")) {
+      return okJson({
+        projectId: "proj_1",
+        pageIds: ["page_1"],
+        fileIds: ["file_1"],
+        elements: [{ id: "el_1", name: "Countertops", category: "area", hexColor: "#3366ff" }],
+        creditEstimate: 1,
+        prompt: body?.prompt,
+      });
+    }
+    if (url.includes("/analysis/run")) {
+      return okJson({ assessmentId: "asmt_1", pageIds: ["page_1"], _uiType: "analysisRunning" });
+    }
+    if (url.includes("/assessments/asmt_1")) {
+      assessmentPolls += 1;
+      const status = assessmentStatusSequence[Math.min(assessmentPolls - 1, assessmentStatusSequence.length - 1)];
+      return okJson({ _id: "asmt_1", projectId: "proj_1", status, elements: [{ name: "CT", qty: 42 }] });
+    }
+    if (url.endsWith("/me")) {
+      return okJson({ clerkUserId: null, tokenType: "api_key", memberships: [] });
+    }
+
+    return {
+      ok: false,
+      status: 404,
+      text: async () => JSON.stringify({ title: "Not found", status: 404, detail: url, code: "not_found", type: "x" }),
+      headers: { get: () => "application/problem+json" },
+    };
+  };
+}
+
+function okJson(data) {
+  return {
     ok: true,
     status: 200,
-    text: async () => JSON.stringify({
-      clerkUserId: "u1",
-      tokenType: "api_key",
-      memberships: [{ orgId: "org_xyz" }, { orgId: "org_other" }],
-    }),
-    headers: {
-      get: (name) => {
-        if (name === "RateLimit") return "100;w=60";
-        if (name === "RateLimit-Policy") return "100;w=60";
-        return "application/json";
-      },
-    },
-  });
+    text: async () => JSON.stringify(data),
+    headers: { get: () => "application/json" },
+  };
+}
 
-  const diagnostics = await getExayardSafeDiagnostics({ fetchFn: mockFetch });
-  const serialized = JSON.stringify(diagnostics);
-  assert.ok(!serialized.includes("ey-ultra-secret-key-999"), "T6: key absent from diagnostics");
-  assert.equal(diagnostics.authenticated, true, "T6: authenticated=true");
-  assert.equal(diagnostics.tokenType, "api_key", "T6: tokenType returned");
-  assert.equal(diagnostics.membershipsCount, 2, "T6: membershipsCount returned");
+// T1 — provider selection
+{
+  const cfg = withEnv(BASE_ENV, () => readExtractionConfig());
+  assert.equal(cfg.providerName, "exayard");
+  assert.equal(getExtractionProvider("exayard"), exayardTakeoffProvider);
+  console.log("ok T1: exayard extraction provider wired");
+}
 
-  const safeConfig = readSafeProviderConfig();
-  const safeSerialized = JSON.stringify(safeConfig);
-  assert.ok(!safeSerialized.includes("ey-ultra-secret-key-999"), "T6: key absent from safe config");
-  assert.equal(safeConfig.hasExayardKey, true, "T6: hasExayardKey=true (boolean only)");
-  console.log("ok T6: API key not included in diagnostics");
+// T2 — missing API key
+await withEnvAsync({ ...BASE_ENV, EXAYARD_API_KEY: null }, async () => {
+  const diagnostics = await getExayardSafeDiagnostics({ testConnection: false });
+  assert.ok(String(diagnostics.setupError).includes("EXAYARD_API_KEY"));
+  console.log("ok T2: missing EXAYARD_API_KEY");
 });
 
-// T7 — readExayardConfig defaults
+// T3 — missing organization id warning
+await withEnvAsync({ ...BASE_ENV, EXAYARD_ORGANIZATION_ID: null }, async () => {
+  const diagnostics = await getExayardSafeDiagnostics({
+    fetchFn: makeWorkflowFetchMock(),
+    testConnection: false,
+  });
+  assert.ok(String(diagnostics.setupWarning).includes("EXAYARD_ORGANIZATION_ID"));
+  console.log("ok T3: missing EXAYARD_ORGANIZATION_ID warning");
+});
+
+// T4 — Authorization header on API calls
+await withEnvAsync(BASE_ENV, async () => {
+  fetchLog = [];
+  const mockFetch = makeWorkflowFetchMock();
+  await createExayardProject({ name: "Test", fetchFn: mockFetch });
+  const apiCall = fetchLog.find((f) => f.url.includes("api.exayard.com/v1/projects"));
+  assert.equal(apiCall?.auth, "Bearer ey-test-key-secret");
+  console.log("ok T4: Authorization header sent");
+});
+
+// T5 — problem+json parsed
 {
-  const cfg = withEnv({
-    EXAYARD_API_BASE_URL: null,
-    EXAYARD_API_KEY: null,
-    EXAYARD_ORGANIZATION_ID: null,
-  }, () => readExayardConfig());
-  assert.equal(cfg.baseUrl, "https://api.exayard.com/v1", "T7: default base URL");
-  assert.equal(cfg.apiKey, null, "T7: null apiKey when unset");
-  console.log("ok T7: readExayardConfig defaults");
+  const problem = parseExayardProblemJson(JSON.stringify({
+    type: "x", title: "Bad", status: 400, detail: "nope", code: "bad_request",
+  }), "application/problem+json");
+  assert.equal(problem?.code, "bad_request");
+  console.log("ok T5: problem+json parsed");
 }
 
-// T8 — getExtractionProvider("exayard") rejects (extraction not wired)
-{
-  assert.throws(
-    () => getExtractionProvider("exayard"),
+// T6 — no API key leakage
+await withEnvAsync({ ...BASE_ENV, EXAYARD_API_KEY: "ey-ultra-secret" }, async () => {
+  const mockFetch = makeWorkflowFetchMock();
+  const result = await runExayardTakeoffWorkflow({
+    fileBuffer: Buffer.from("%PDF-1.4"),
+    mimeType: "application/pdf",
+    filename: "plan.pdf",
+    prompt: "measure countertops",
+    fetchFn: mockFetch,
+    pollConfig: { intervalMs: 1, pagesTimeoutMs: 50, assessmentTimeoutMs: 50 },
+  });
+  const serialized = JSON.stringify(result) + JSON.stringify(buildExayardSafeWorkflowMeta(result));
+  assert.ok(!serialized.includes("ey-ultra-secret"));
+  assert.equal(result.projectId, "proj_1");
+  assert.equal(result.fileId, "file_1");
+  assert.equal(result.assessmentId, "asmt_1");
+  console.log("ok T6: no API key leakage in workflow output");
+});
+
+// T7 — full mocked workflow
+await withEnvAsync(BASE_ENV, async () => {
+  const mockFetch = makeWorkflowFetchMock();
+  const result = await runExayardTakeoffWorkflow({
+    fileBuffer: Buffer.from("%PDF-test"),
+    mimeType: "application/pdf",
+    filename: "kitchen.pdf",
+    prompt: "countertop areas",
+    fetchFn: mockFetch,
+    pollConfig: { intervalMs: 1, pagesTimeoutMs: 100, assessmentTimeoutMs: 100 },
+  });
+  assert.equal(result.status, "completed");
+  assert.ok(fetchLog.some((f) => f.method === "PUT" && f.url.includes("upload.example.com")));
+  assert.ok(fetchLog.some((f) => f.url.includes("/confirm")));
+  assert.ok(fetchLog.some((f) => f.url.includes("/analysis/propose")));
+  assert.ok(fetchLog.some((f) => f.url.includes("/analysis/run")));
+  console.log("ok T7: full mocked create/upload/confirm/analysis/poll workflow");
+});
+
+// T8 — upload URL PUT flow isolated
+await withEnvAsync(BASE_ENV, async () => {
+  let putContentType = null;
+  const mockFetch = async (url, init) => {
+    if (url.includes("upload.example.com")) {
+      putContentType = init.headers?.["Content-Type"] ?? null;
+      return { ok: true, status: 200, text: async () => "", headers: { get: () => null } };
+    }
+    return makeWorkflowFetchMock()(url, init);
+  };
+  const init = await createExayardFileUpload({
+    projectId: "proj_1",
+    filename: "a.pdf",
+    mimeType: "application/pdf",
+    fileSize: 10,
+    fetchFn: mockFetch,
+  });
+  await uploadExayardFileBytes({
+    uploadUrl: init.uploadUrl,
+    fileBuffer: Buffer.from("bytes"),
+    mimeType: "application/pdf",
+    fetchFn: mockFetch,
+  });
+  await confirmExayardFileUpload({ fileId: init.fileId, r2Key: init.r2Key, fetchFn: mockFetch });
+  assert.equal(putContentType, "application/pdf");
+  console.log("ok T8: upload PUT + confirm flow");
+});
+
+// T9 — poll success
+await withEnvAsync(BASE_ENV, async () => {
+  const mockFetch = makeWorkflowFetchMock({ assessmentStatusSequence: ["running", "completed"] });
+  const result = await pollExayardAssessment({
+    assessmentId: "asmt_1",
+    fetchFn: mockFetch,
+    intervalMs: 1,
+    timeoutMs: 200,
+  });
+  assert.equal(result.status, "completed");
+  console.log("ok T9: poll success");
+});
+
+// T10 — poll timeout
+await withEnvAsync(BASE_ENV, async () => {
+  const mockFetch = makeWorkflowFetchMock({ assessmentStatusSequence: ["running", "running"] });
+  await assert.rejects(
+    () => pollExayardAssessment({
+      assessmentId: "asmt_1",
+      fetchFn: mockFetch,
+      intervalMs: 1,
+      timeoutMs: 5,
+    }),
     (err) => {
-      assert.equal(err.statusCode, 503);
-      assert.ok(err.message.includes("not wired"));
+      assert.equal(err.code, "exayard_assessment_timeout");
       return true;
-    },
-    "T8: exayard extraction rejected"
+    }
   );
-  console.log("ok T8: getExtractionProvider(exayard) rejects extraction");
+  console.log("ok T10: poll timeout");
+});
+
+// T11 — insufficient_scope operator message
+{
+  const msg = formatExayardOperatorError({
+    problem: { code: "insufficient_scope", detail: "missing scope" },
+    message: "Exayard API error 403",
+    statusCode: 403,
+  });
+  assert.ok(msg.includes("scope"));
+  console.log("ok T11: insufficient_scope error message");
 }
 
-console.log("\nexayardClient: all 8 tests passed");
+// T12 — rate_limited operator message
+{
+  const msg = formatExayardOperatorError({
+    problem: { code: "rate_limited" },
+    statusCode: 429,
+    rateLimit: "10;w=60",
+    message: "Exayard API error 429",
+  });
+  assert.ok(msg.toLowerCase().includes("rate limit"));
+  console.log("ok T12: rate_limited error message");
+}
+
+// T13 — insufficient_scope from workflow
+await withEnvAsync(BASE_ENV, async () => {
+  await assert.rejects(
+    () => runExayardTakeoffWorkflow({
+      fileBuffer: Buffer.from("pdf"),
+      mimeType: "application/pdf",
+      filename: "plan.pdf",
+      prompt: "measure",
+      fetchFn: makeWorkflowFetchMock({ failScope: true }),
+      pollConfig: { intervalMs: 1, pagesTimeoutMs: 50, assessmentTimeoutMs: 50 },
+    }),
+    (err) => {
+      assert.equal(err.problem?.code, "insufficient_scope");
+      return true;
+    }
+  );
+  console.log("ok T13: insufficient_scope from workflow");
+});
+
+// T14 — exayardTakeoffProvider returns raw captured placeholder
+await withEnvAsync(BASE_ENV, async () => {
+  const mockFetch = makeWorkflowFetchMock();
+  const out = await exayardTakeoffProvider({
+    fileBuffer: Buffer.from("%PDF"),
+    mimeType: "application/pdf",
+    originalFilename: "plan.pdf",
+    promptVersion: "v1",
+    modelName: "platform",
+    apiKey: "ignored",
+    fetchFn: mockFetch,
+    pollConfig: { intervalMs: 1, pagesTimeoutMs: 100, assessmentTimeoutMs: 100 },
+  });
+  assert.equal(out.exayardRawCaptured, true);
+  assert.equal(out.provider, "exayard");
+  assert.equal(out.parsed.rooms.length, 0);
+  assert.ok(out.parsed.projectAssumptions.some((s) => s.includes("normalization pending")));
+  assert.ok(!JSON.stringify(out).includes("ey-test-key-secret"));
+  console.log("ok T14: provider returns raw captured placeholder");
+});
+
+// T15 — safe config shape
+{
+  const result = withEnv(BASE_ENV, () => readSafeProviderConfig());
+  assert.equal(result.hasExayardKey, true);
+  assert.equal(result.hasExayardOrganizationId, true);
+  console.log("ok T15: safe config shape");
+}
+
+console.log("\nexayardClient: all 15 tests passed");
