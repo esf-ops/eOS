@@ -2,6 +2,7 @@ import React from "react";
 import { EOS_LOGO_URL } from "@quote-lib/config";
 import { roundCustomerDisplay } from "@quote-lib/customerDisplayRounding";
 import type { CustomerEstimateDisplayModel } from "./lib/customerEstimateDisplayModel";
+import { formatVanityCustomerPrintSubline } from "./lib/vanityProgramDisplay";
 
 export type CustomerLineItem = {
   lineKey?: string;
@@ -178,7 +179,16 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
                     <td>
                       <strong>{displayRow.displayName}</strong>
                       {displayRow.isVanity ? (
-                        <span className="cep-muted-inline"> · Vanity program</span>
+                        <span className="cep-muted-inline">
+                          {" "}
+                          ·{" "}
+                          {displayRow.vanityProgramLabel ? `${displayRow.vanityProgramLabel} · ` : ""}
+                          {formatVanityCustomerPrintSubline({
+                            materialGroup: displayRow.materialGroup,
+                            colorLabel: displayRow.colorLabel,
+                            projectColorTbd: props.colorTbd
+                          })}
+                        </span>
                       ) : (
                         <span className="cep-muted-inline">
                           {" "}

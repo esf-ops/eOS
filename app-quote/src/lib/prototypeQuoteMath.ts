@@ -1160,6 +1160,10 @@ export type CustomerRoomAreaCostRow = {
   customerComparisonGroups?: string[];
   /** Per-room optional comparison color labels. Mirrors RoomDraft.customerComparisonColorLabels. */
   customerComparisonColorLabels?: Record<string, string>;
+  /** Vanity program SKU code (e.g. 37_S) when room is vanity program. */
+  vanitySku?: string;
+  /** Vanity program sheet label (e.g. 37" Single Bowl Vanity). */
+  vanityProgramLabel?: string;
 };
 
 export type CustomerRoomAreaCostBreakdown = {
@@ -1314,6 +1318,8 @@ export function buildCustomerRoomAreaCostBreakdown(params: {
       colorLabel:
         params.projectColorTbd || !draft?.materialColor?.trim() ? undefined : String(draft.materialColor).trim(),
       isVanity,
+      vanitySku: isVanity && draft?.vanity?.size ? String(draft.vanity.size) : undefined,
+      vanityProgramLabel: isVanity ? String(m.vanityProgram?.label ?? "").trim() || undefined : undefined,
       totalSqft,
       countertopSf,
       backsplashFhbSf,
@@ -2174,6 +2180,21 @@ function hydrateGuidedPieceFromRow(x: Record<string, unknown>): GuidedPiece {
 
 function applyRoomPersistenceFields(base: RoomDraft, r: Record<string, unknown>) {
   if (r.materialCatalogId != null) base.materialCatalogId = String(r.materialCatalogId) || null;
+  if (r.materialGroup != null) base.materialGroup = String(r.materialGroup);
+  if (r.materialColor != null) base.materialColor = String(r.materialColor);
+  if (r.materialSupplier != null) base.materialSupplier = String(r.materialSupplier);
+  if (r.materialType != null) base.materialType = String(r.materialType);
+  if (r.customerNote != null) base.customerNote = String(r.customerNote);
+  if (Array.isArray(r.customerComparisonGroups)) {
+    base.customerComparisonGroups = r.customerComparisonGroups.map((g) => String(g)).filter(Boolean);
+  }
+  if (r.customerComparisonColorLabels && typeof r.customerComparisonColorLabels === "object") {
+    base.customerComparisonColorLabels = Object.fromEntries(
+      Object.entries(r.customerComparisonColorLabels as Record<string, unknown>)
+        .map(([k, v]) => [String(k), String(v ?? "").trim()])
+        .filter(([, v]) => v)
+    );
+  }
   if (r.calcMode != null) base.calcMode = String(r.calcMode) as RoomDraft["calcMode"];
   if (r.guidedLayoutPreset != null) base.guidedLayoutPreset = String(r.guidedLayoutPreset) as RoomDraft["guidedLayoutPreset"];
   const shapeGroups = r.guidedShapeGroups;
@@ -2287,6 +2308,9 @@ export function hydrateRoomDraftsFromEstimateRooms(rows: unknown[]): RoomDraft[]
       const vr = createVanityRoom(mg);
       vr.name = String(r.name || r.room_name || "Vanity");
       vr.notes = r.notes != null ? String(r.notes) : "";
+      if (r.materialColor != null) vr.materialColor = String(r.materialColor);
+      if (r.materialSupplier != null) vr.materialSupplier = String(r.materialSupplier);
+      if (r.materialType != null) vr.materialType = String(r.materialType);
       // Restore persisted fields including isVanityProgram (false = standard countertop mode).
       applyRoomPersistenceFields(vr, r);
       out.push(vr);

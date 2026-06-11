@@ -28,6 +28,10 @@ import {
   detectLikelyBacksplashDoubleCount
 } from "../app-quote/src/lib/guidedShapeMathAudit.ts";
 import {
+  buildVanityProgramDisplayMeta,
+  formatVanityCustomerPrintSubline
+} from "../app-internal-estimate/src/lib/vanityProgramDisplay.ts";
+import {
   priceVanityProgram2026,
   roundCustomerDisplayAddonLine,
   roundCustomerDisplayVanity
@@ -1030,6 +1034,69 @@ function approx(a: number, b: number, eps = 0.02) {
   assert.equal(vanityRow!.isVanity, true, "PDF-DM-VANITY-1: vanity row isVanity");
   assert.equal(vanityRow!.fixedDisplayTotal, 265, "PDF-DM-VANITY-1: vanity fixedDisplayTotal = $265");
   assert.equal(vanityRow!.customerNote, "", "PDF-DM-VANITY-1: vanity customerNote defaults to empty string");
+}
+
+// VANITY-COLOR-1: selected vanity color flows to breakdown + customer print subline
+{
+  const vanity = createVanityRoom("Group Promo");
+  vanity.name = "Primary Bath";
+  vanity.materialColor = "Calacatta Idillio";
+  vanity.vanity.size = "37_S";
+  vanity.vanity.isVanityProgram = true;
+  vanity.vanity.vanitySinkType = "rectangular_white";
+
+  const mVanity = measureRoomDraft(vanity, 40, "direct", 0);
+  const rab = buildCustomerRoomAreaCostBreakdown({
+    roomDrafts: [vanity],
+    measuredRooms: [mVanity],
+    materialBasis: "direct",
+    projectUseTaxPercent: 0
+  });
+  const vanityRow = rab.rooms[0];
+  assert.equal(vanityRow?.colorLabel, "Calacatta Idillio", "VANITY-COLOR-1: colorLabel on vanity breakdown row");
+  assert.equal(vanityRow?.vanitySku, "37_S", "VANITY-COLOR-1: vanitySku captured");
+  assert.match(String(vanityRow?.vanityProgramLabel ?? ""), /37.*Single Bowl/i, "VANITY-COLOR-1: vanityProgramLabel captured");
+
+  const subline = formatVanityCustomerPrintSubline({
+    materialGroup: vanityRow?.materialGroup,
+    colorLabel: vanityRow?.colorLabel
+  });
+  assert.match(subline, /Vanity program/, "VANITY-COLOR-1: subline includes Vanity program");
+  assert.match(subline, /Color: Calacatta Idillio/, "VANITY-COLOR-1: subline includes selected color");
+  assert.match(subline, /Group Promo/, "VANITY-COLOR-1: subline includes price group");
+
+  const printSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/CustomerEstimatePrint.tsx"), "utf8");
+  assert.match(printSrc, /formatVanityCustomerPrintSubline/, "VANITY-COLOR-1: CustomerEstimatePrint uses vanity subline helper");
+  assert.doesNotMatch(printSrc, /isVanity \? \(\s*<span[^>]*> · Vanity program<\/span>/, "VANITY-COLOR-1: vanity-only stub removed");
+}
+
+// VANITY-COLOR-2: vanity color survives serialize → hydrate via estimate_room_drafts
+{
+  const vanity = createVanityRoom("Group A");
+  vanity.name = "Guest Bath";
+  vanity.materialColor = "Misterio";
+  vanity.vanity.size = "61_D";
+  vanity.vanity.isVanityProgram = true;
+
+  const serialized = serializeRoomDraftsForInternalUi([vanity]);
+  const restored = hydrateRoomDraftsFromInternalUi(serialized, null)[0];
+  assert.equal(restored.materialColor, "Misterio", "VANITY-COLOR-2: materialColor restored from drafts");
+  assert.equal(restored.materialGroup, "Group A", "VANITY-COLOR-2: materialGroup restored from drafts");
+  assert.equal(restored.vanity.size, "61_D", "VANITY-COLOR-2: vanity sku restored");
+}
+
+// VANITY-COLOR-3: vanity comparison metadata documents fixed program pricing (no fake group tiers)
+{
+  const meta = buildVanityProgramDisplayMeta({
+    vanitySku: "37_S",
+    vanityLabel: '37" Single Bowl Vanity',
+    selectedColorName: "Promo White",
+    selectedPriceGroup: "Group Promo",
+    comparisonGroups: ["Group Promo", "Group A"],
+    currentResolvedPrice: 265
+  });
+  assert.equal(meta.comparisonPricingStatus, "fixed_program_price_only");
+  assert.equal(meta.selectedColorName, "Promo White");
 }
 
 // PDF-SOURCE-1: no default seeded project notes in InternalEstimateApp

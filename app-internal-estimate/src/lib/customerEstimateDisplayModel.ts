@@ -361,6 +361,11 @@ const MATERIAL_GROUP_ORDER = [
 /**
  * Compute the display total for a single room at a given comparison group rate.
  * For vanity program rooms the display total is fixed regardless of group.
+ *
+ * TODO(vanity-comparison-pricing): Group A–F columns repeat the same vanity program price because
+ * vanity sheet pricing is tier-based (kitchen over/under 35 sf), not material-group $/sqft.
+ * A future resolver should read VanityProgramDisplayMeta and optional group-tier matrix — do not
+ * multiply vanity sf by countertop group rates.
  */
 function computeRoomGroupDisplayTotal(
   room: CustomerRoomAreaCostBreakdown["rooms"][number],

@@ -19,6 +19,8 @@ export type CustomerPrintDisplayRoomRow = {
   materialGroup: string;
   colorLabel?: string;
   isVanity: boolean;
+  vanitySku?: string;
+  vanityProgramLabel?: string;
   totalSqft: number;
   /** Customer-facing material $ for the main row (area total minus add-ons). */
   displayedMaterial: number;
@@ -125,6 +127,8 @@ export function prepareCustomerPrintDisplayRows(
       materialGroup: row.materialGroup,
       colorLabel: row.colorLabel,
       isVanity: row.isVanity,
+      vanitySku: row.vanitySku,
+      vanityProgramLabel: row.vanityProgramLabel,
       totalSqft: row.totalSqft,
       displayedMaterial,
       displayedAddOns,
