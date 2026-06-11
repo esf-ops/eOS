@@ -37,6 +37,7 @@ export async function processCustomQuoteSave(db, opts) {
   const saveBody = {
     customer_name: input.customer_name || null,
     project_name: input.project_name || null,
+    project_address: input.project_address || null,
     city: input.city || null,
     state: input.state || null,
     zip: input.zip || null,

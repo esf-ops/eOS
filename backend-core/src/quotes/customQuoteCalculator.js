@@ -67,6 +67,7 @@ export function normalizeCustomQuoteInput(raw) {
     city: pickStr(body.city),
     state: pickStr(body.state),
     zip: pickStr(body.zip),
+    project_address: pickStr(body.project_address, body.projectAddress),
     sales_rep: pickStr(body.sales_rep, body.salesRep),
     branch: pickStr(body.branch),
     notes: pickStr(body.notes)
