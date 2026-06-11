@@ -10,6 +10,7 @@ import type { RoomDraft } from "@quote-lib/quoteTypes";
 import RoomScopeBuilder from "@quote-ui/RoomScopeBuilder";
 import EliteosTopbar from "../../shared/eliteos-ui/EliteosTopbar";
 import type { EliteosTopbarMenuItem } from "../../shared/eliteos-ui/EliteosTopbar";
+import { useWorkflowRailScrollSpy } from "../../shared/eliteos-ui/useWorkflowRailScrollSpy";
 import VisualLayoutCanvas, {
   visualCanvasSummaryStats,
   visualLayoutKeysForRooms,
@@ -42,7 +43,7 @@ const INTERNAL_BRANCHES = ["Dyersville", "Iowa City", "Lisbon"] as const;
 
 const WORKFLOW_SECTIONS = [
   { id: "sec-job", label: "Job Info" },
-  { id: "sec-material", label: "Custom Material / Slab Cost Variables" },
+  { id: "sec-material", label: "Custom Material" },
   { id: "sec-rooms", label: "Rooms / Areas" },
   { id: "sec-visual", label: "Visual layout" },
   { id: "sec-addons", label: "Add-ons & Custom Items" },
@@ -174,6 +175,13 @@ function money(n: unknown): string {
   return v.toLocaleString("en-US", { style: "currency", currency: "USD" });
 }
 
+/** Same $X.XX display as Internal Estimate sticky/summary panels. */
+function usdCompact(n: unknown): string {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return "—";
+  return `$${v.toFixed(2)}`;
+}
+
 function pct(n: unknown): string {
   const v = Number(n);
   if (!Number.isFinite(v)) return "—";
@@ -237,8 +245,10 @@ export default function CustomQuoteApp() {
   const [submitMsg, setSubmitMsg] = useState("");
   const [lastSavedQuoteId, setLastSavedQuoteId] = useState("");
   const [lastSavedQuoteNumber, setLastSavedQuoteNumber] = useState("");
-  const [activeWorkflowSectionId, setActiveWorkflowSectionId] = useState<string | null>("sec-job");
   const enteredBySeeded = useRef(false);
+
+  const workflowSectionIds = useMemo(() => WORKFLOW_SECTIONS.map((s) => s.id), []);
+  const setRailActiveSection = useWorkflowRailScrollSpy(workflowSectionIds, [roomDrafts.length]);
 
   const scopeSummary = useMemo(
     () => customQuoteScopeSummary(roomDrafts, job.projectType),
@@ -375,34 +385,6 @@ export default function CustomQuoteApp() {
   }, [sessionToken]);
 
   useEffect(() => {
-    if (typeof window === "undefined" || typeof IntersectionObserver === "undefined") return;
-    const ids = WORKFLOW_SECTIONS.map((s) => s.id);
-    const targets = ids.map((id) => document.getElementById(id)).filter(Boolean) as HTMLElement[];
-    if (!targets.length) return;
-    const visibility = new Map<string, number>();
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          visibility.set((entry.target as HTMLElement).id, entry.isIntersecting ? entry.intersectionRatio : 0);
-        }
-        let bestId: string | null = null;
-        let bestRatio = 0;
-        ids.forEach((id) => {
-          const ratio = visibility.get(id) ?? 0;
-          if (ratio > bestRatio) {
-            bestRatio = ratio;
-            bestId = id;
-          }
-        });
-        if (bestId) setActiveWorkflowSectionId(bestId);
-      },
-      { rootMargin: "-35% 0px -50% 0px", threshold: [0.05, 0.25, 0.5, 0.75, 1] }
-    );
-    targets.forEach((el) => observer.observe(el));
-    return () => observer.disconnect();
-  }, [sessionToken, accessDenied]);
-
-  useEffect(() => {
     const valid = visualLayoutKeysForRooms(roomDrafts);
     setVisualLayoutByPieceKey((prev) => {
       const next: Record<string, VisualLayoutEntry> = {};
@@ -414,12 +396,35 @@ export default function CustomQuoteApp() {
     invalidateCalc();
   }, [roomDrafts]);
 
-  const scrollToWorkflowSection = useCallback((id: string) => {
-    if (id === "sec-visual") setVisualCanvasExpanded(true);
-    requestAnimationFrame(() => {
-      document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-  }, []);
+  const scrollToWorkflowSection = useCallback(
+    (id: string) => {
+      setRailActiveSection(id);
+      if (id === "sec-visual") setVisualCanvasExpanded(true);
+      requestAnimationFrame(() => {
+        document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    },
+    [setRailActiveSection]
+  );
+
+  const handleStartNewQuoteClick = useCallback(() => {
+    const dirty = Boolean(calc || job.projectName.trim() || material.colorName.trim() || roomDrafts.length > 1);
+    if (dirty && !window.confirm("Start a new custom quote? Current draft changes will be cleared.")) return;
+    const enteredBy = job.enteredBy;
+    setJob({ ...INITIAL_JOB, enteredBy });
+    setMaterial(INITIAL_MATERIAL);
+    setRoomDrafts([createEstimatorRoom(OFF_PROGRAM_GROUP)]);
+    setCustomLineRows([]);
+    setVisualLayoutByPieceKey({});
+    setVisualCanvasExpanded(false);
+    setCalc(null);
+    setBackendCalcOk(null);
+    setErr("");
+    setSubmitMsg("");
+    setLastSavedQuoteId("");
+    setLastSavedQuoteNumber("");
+    scrollToWorkflowSection("sec-job");
+  }, [calc, job.enteredBy, job.projectName, material.colorName, roomDrafts.length, scrollToWorkflowSection]);
 
   const runCalculate = useCallback(async () => {
     if (!supabase) return;
@@ -496,13 +501,96 @@ export default function CustomQuoteApp() {
     () => userMetaName || deriveDisplayNameFromEmail(userEmail) || "Signed in",
     [userMetaName, userEmail]
   );
+  const userDisplayEmail = userEmail;
+  const userChipSubtitle = useMemo(() => {
+    return userDisplayEmail && userDisplayEmail.toLowerCase() !== userDisplayName.toLowerCase()
+      ? userDisplayEmail
+      : "";
+  }, [userDisplayEmail, userDisplayName]);
+  const userDisplayInitials = useMemo(
+    () => userInitialsFor(userDisplayName, userEmail),
+    [userDisplayName, userEmail]
+  );
+
+  const homeBase = useMemo(() => homeLauncherUrl(), []);
+
+  const cqHomeIcon = (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 11.5L12 4l9 7.5" />
+      <path d="M5 10v10h14V10" />
+      <path d="M10 20v-6h4v6" />
+    </svg>
+  );
+  const cqLibraryIcon = (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4" width="18" height="16" rx="2.5" />
+      <path d="M3 9h18" />
+      <path d="M8 13h6" />
+      <path d="M8 16h8" />
+    </svg>
+  );
+  const cqPlusIcon = (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 5v14" />
+      <path d="M5 12h14" />
+    </svg>
+  );
+  const cqProfileIcon = (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="8" r="3.5" />
+      <path d="M5 20c1.5-3.5 4.2-5 7-5s5.5 1.5 7 5" />
+    </svg>
+  );
+
+  const cqPrimaryActions = (
+    <>
+      <button
+        type="button"
+        className="topbar-action-btn"
+        onClick={handleStartNewQuoteClick}
+        title="Start a new custom quote (clears current draft)"
+      >
+        <span className="topbar-action-btn-icon" aria-hidden>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 5v14" />
+            <path d="M5 12h14" />
+          </svg>
+        </span>
+        <span className="topbar-action-btn-label">Start new quote</span>
+      </button>
+      {!sessionToken ? (
+        <span className="topbar-preview-pill" title="Sign in below to save or calculate">
+          <span className="topbar-preview-pill-dot" aria-hidden />
+          <span>Preview mode</span>
+        </span>
+      ) : null}
+    </>
+  );
 
   const menuItems: EliteosTopbarMenuItem[] = useMemo(
     () => [
-      { label: "Open Home", meta: "eliteOS Launcher", href: homeLauncherUrl() },
-      { label: "Quote Library", meta: "All quotes", href: quoteLibraryUrl() }
+      { label: "Open Home", meta: "eliteOS Launcher", href: homeBase, icon: cqHomeIcon },
+      {
+        label: "Open Quote Library",
+        meta: "Search, statuses, revisions",
+        onClick: () => window.open(`${quoteLibraryUrl()}/`, "_blank", "noopener,noreferrer"),
+        icon: cqLibraryIcon
+      },
+      {
+        label: "Start new quote",
+        meta: "Clears current draft",
+        onClick: () => handleStartNewQuoteClick(),
+        icon: cqPlusIcon
+      },
+      {
+        label: "Profile & preferences",
+        meta: "eliteOS Home",
+        href: `${homeLauncherUrl()}?view=profile`,
+        title: "Profile & preferences",
+        icon: cqProfileIcon
+      }
     ],
-    []
+    [homeBase, handleStartNewQuoteClick]
   );
 
   const fabDefaultHint = FABRICATION_DEFAULT_HINT[material.materialType] ?? 22;
@@ -514,6 +602,7 @@ export default function CustomQuoteApp() {
 
   const warnings = Array.isArray(calc?.warnings) ? (calc.warnings as string[]) : [];
   const sellPrice = calc?.sellPrice != null ? Number(calc.sellPrice) : null;
+  const lastCalcLive = backendCalcOk === true && sellPrice != null;
   const saveDisabled = saveBusy || calcBusy || !calc || backendCalcOk !== true;
 
   if (authBusy) {
@@ -532,11 +621,12 @@ export default function CustomQuoteApp() {
             appName="Custom Quote"
             organizationName={DEFAULT_WORKSPACE_NAME}
             logoSrc={EOS_LOGO_URL}
-            homeHref={homeLauncherUrl()}
+            homeHref="/"
+            primaryActionSlot={cqPrimaryActions}
             userName={userDisplayName}
-            userEmail={userEmail}
-            userSubtitle="Staff · ESF only"
-            initials={userInitialsFor(userDisplayName, userEmail)}
+            userEmail={userDisplayEmail}
+            userSubtitle={userChipSubtitle}
+            initials={userDisplayInitials}
             menuItems={menuItems}
             onSignOut={() => void signOut()}
           />
@@ -545,7 +635,8 @@ export default function CustomQuoteApp() {
             appName="Custom Quote"
             organizationName={DEFAULT_WORKSPACE_NAME}
             logoSrc={EOS_LOGO_URL}
-            homeHref={homeLauncherUrl()}
+            homeHref="/"
+            primaryActionSlot={cqPrimaryActions}
           />
         )}
 
@@ -570,8 +661,8 @@ export default function CustomQuoteApp() {
                   Custom quote <span className="ie-hero-title-accent">workspace</span>
                 </h1>
                 <p className="ie-hero-sub">
-                  Same estimator workflow as Internal Estimate — rooms, layout verification, and custom lines — with
-                  off-program slab cost variables. Saves to Quote Library as <strong>custom_quote</strong>.
+                  Build off-program custom quotes with the same estimator workflow as Internal Estimate — rooms, layout
+                  verification, and custom lines. Saved quotes land in Quote Library as custom_quote.
                 </p>
                 <dl className="ie-hero-stats" aria-label="Live quote context">
                   <div className="ie-hero-stat">
@@ -579,7 +670,7 @@ export default function CustomQuoteApp() {
                     <dd>{roomDrafts.length}</dd>
                   </div>
                   <div className="ie-hero-stat">
-                    <dt>Fab sf</dt>
+                    <dt>Sq ft</dt>
                     <dd>{scopeSummary.projectSqft > 0 ? scopeSummary.projectSqft.toFixed(1) : "—"}</dd>
                   </div>
                   <div className="ie-hero-stat">
@@ -591,8 +682,8 @@ export default function CustomQuoteApp() {
                     <dd>{job.branch || "—"}</dd>
                   </div>
                   <div className="ie-hero-stat ie-hero-stat-mode">
-                    <dt>Sell price</dt>
-                    <dd>{sellPrice != null ? money(sellPrice) : "—"}</dd>
+                    <dt>Mode</dt>
+                    <dd>New custom quote</dd>
                   </div>
                 </dl>
               </div>
@@ -601,6 +692,9 @@ export default function CustomQuoteApp() {
                 <div className="hero-workspace-card">
                   <div className="hero-workspace-mark">
                     <img src={EOS_LOGO_URL} alt="" loading="lazy" />
+                    <span className="hero-workspace-initials" aria-hidden="true" style={{ display: "none" }}>
+                      {DEFAULT_WORKSPACE_SHORT}
+                    </span>
                   </div>
                   <div className="hero-workspace-text">
                     <p className="hero-workspace-name">{DEFAULT_WORKSPACE_NAME}</p>
@@ -634,8 +728,8 @@ export default function CustomQuoteApp() {
                 <button
                   key={s.id}
                   type="button"
-                  className={`ie-rail-link${activeWorkflowSectionId === s.id ? " is-active" : ""}`}
-                  aria-current={activeWorkflowSectionId === s.id ? "true" : undefined}
+                  className="ie-rail-link"
+                  data-ie-rail-section={s.id}
                   onClick={() => scrollToWorkflowSection(s.id)}
                 >
                   <span className="ie-rail-link-num" aria-hidden>
@@ -653,7 +747,9 @@ export default function CustomQuoteApp() {
                   <h2 id="cq-signin-title" className="ie-signin-title">
                     Sign in with your <span className="ie-signin-title-accent">eliteOS</span> account
                   </h2>
-                  <p className="ie-signin-sub">Calculate and Save require an authenticated ESF session.</p>
+                  <p className="ie-signin-sub">
+                    Totals update live while you type, but Calculate and Save need an authenticated session.
+                  </p>
                   <div className="ie-signin-fields">
                     <label>
                       Email
@@ -710,10 +806,10 @@ export default function CustomQuoteApp() {
                   </span>
                   <span className="ie-live-strip-copy">
                     {backendCalcOk === true
-                      ? "Live backend calculation connected. Tap Calculate any time to verify totals."
+                      ? "Live backend calculation connected. Tap Calculate any time to verify line items."
                       : backendCalcOk === false
-                        ? "Live preview for totals — backend Calculate did not connect. Tap Calculate to retry."
-                        : "Backend pricing policy applies at Calculate."}
+                        ? "Live preview for totals — backend Calculate did not connect. Tap Calculate to retry, or sign out and back in if save fails."
+                        : "Live preview while you type. Tap Calculate to validate with eliteOS before save."}
                   </span>
                 </div>
               ) : null}
@@ -1315,87 +1411,77 @@ export default function CustomQuoteApp() {
                   </div>
                   <div className="ie-summary-section ie-summary-hero">
                     <p className="ie-summary-kicker">Sell price</p>
-                    <p className="ie-summary-compact-hero">{sellPrice != null ? money(sellPrice) : "—"}</p>
-                    {backendCalcOk ? (
+                    <p className="ie-summary-compact-hero">{sellPrice != null ? usdCompact(sellPrice) : "—"}</p>
+                    {lastCalcLive && sellPrice != null ? (
                       <p className="ie-summary-hero-sub is-confirmed">
                         <span className="ie-summary-hero-sub-dot" aria-hidden />
-                        Backend-confirmed sell price: <strong>{money(calc?.sellPrice)}</strong>
+                        Backend-confirmed sell price: <strong>{usdCompact(calc?.sellPrice)}</strong>
                       </p>
                     ) : (
                       <p className="ie-summary-hero-sub is-preview">
                         <span className="ie-summary-hero-sub-dot" aria-hidden />
-                        Backend pricing policy applies at Calculate.
+                        Live preview — tap Calculate (signed in) to verify line items.
                       </p>
                     )}
                   </div>
                   <div className="ie-summary-section">
-                    <p className="ie-summary-section-head">Scope (from rooms)</p>
+                    <p className="ie-summary-section-head">Breakdown</p>
                     <div className="summary-rows ie-summary-rows-compact">
                       <div className="summary-row ie-summary-row-compact">
-                        <span>Rooms</span>
-                        <strong>{roomDrafts.length}</strong>
-                      </div>
-                      <div className="summary-row ie-summary-row-compact">
-                        <span>Fab quantity sf</span>
+                        <span>Sq ft (fab quantity)</span>
                         <strong>{scopeSummary.projectSqft.toFixed(2)}</strong>
                       </div>
-                      <div className="summary-row ie-summary-row-compact">
-                        <span>Chargeable counter sf</span>
-                        <strong>{scopeSummary.chargeableCounterSqft.toFixed(2)}</strong>
-                      </div>
-                      <div className="summary-row ie-summary-row-compact">
-                        <span>Splash + FHB sf</span>
-                        <strong>{scopeSummary.backsplashFhbSqft.toFixed(2)}</strong>
-                      </div>
+                      {calc ? (
+                        <>
+                          <div className="summary-row ie-summary-row-compact">
+                            <span>Material</span>
+                            <strong>{usdCompact(calc.materialCost)}</strong>
+                          </div>
+                          <div className="summary-row ie-summary-row-compact">
+                            <span>Freight</span>
+                            <strong>{usdCompact(calc.freightCost)}</strong>
+                          </div>
+                          <div className="summary-row ie-summary-row-compact">
+                            <span>Fabrication</span>
+                            <strong>{usdCompact(calc.fabricationCost)}</strong>
+                          </div>
+                          {Number(calc.installCost) > 0 ? (
+                            <div className="summary-row ie-summary-row-compact">
+                              <span>Install / labor</span>
+                              <strong>{usdCompact(calc.installCost)}</strong>
+                            </div>
+                          ) : null}
+                          {Number(calc.otherCostBasis) > 0 ? (
+                            <div className="summary-row ie-summary-row-compact">
+                              <span>Other</span>
+                              <strong>{usdCompact(calc.otherCostBasis)}</strong>
+                            </div>
+                          ) : null}
+                          <div className="summary-row ie-summary-row-compact">
+                            <span>Total cost basis</span>
+                            <strong>{usdCompact(calc.totalCostBasis)}</strong>
+                          </div>
+                          <div className="summary-row ie-summary-row-compact">
+                            <span>Utilization</span>
+                            <strong>{pct(calc.utilizationPercent)}</strong>
+                          </div>
+                          <div className="summary-row ie-summary-row-compact">
+                            <span>Multiplier</span>
+                            <strong>{Number(calc.multiplier).toFixed(2)}×</strong>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="summary-row ie-summary-row-compact">
+                          <span>Rooms</span>
+                          <strong>{roomDrafts.length}</strong>
+                        </div>
+                      )}
                     </div>
                   </div>
-                  {calc ? (
-                    <div className="ie-summary-section">
-                      <p className="ie-summary-section-head">Cost breakdown</p>
-                      <div className="summary-rows ie-summary-rows-compact">
-                        <div className="summary-row ie-summary-row-compact">
-                          <span>Material</span>
-                          <strong>{money(calc.materialCost)}</strong>
-                        </div>
-                        <div className="summary-row ie-summary-row-compact">
-                          <span>Freight</span>
-                          <strong>{money(calc.freightCost)}</strong>
-                        </div>
-                        <div className="summary-row ie-summary-row-compact">
-                          <span>Fabrication</span>
-                          <strong>{money(calc.fabricationCost)}</strong>
-                        </div>
-                        {Number(calc.installCost) > 0 ? (
-                          <div className="summary-row ie-summary-row-compact">
-                            <span>Install / labor</span>
-                            <strong>{money(calc.installCost)}</strong>
-                          </div>
-                        ) : null}
-                        {Number(calc.otherCostBasis) > 0 ? (
-                          <div className="summary-row ie-summary-row-compact">
-                            <span>Other</span>
-                            <strong>{money(calc.otherCostBasis)}</strong>
-                          </div>
-                        ) : null}
-                        <div className="summary-row ie-summary-row-compact">
-                          <span>Cost basis</span>
-                          <strong>{money(calc.totalCostBasis)}</strong>
-                        </div>
-                        <div className="summary-row ie-summary-row-compact">
-                          <span>Utilization</span>
-                          <strong>{pct(calc.utilizationPercent)}</strong>
-                        </div>
-                        <div className="summary-row ie-summary-row-compact">
-                          <span>Multiplier</span>
-                          <strong>{Number(calc.multiplier).toFixed(2)}×</strong>
-                        </div>
-                      </div>
-                    </div>
-                  ) : null}
                   {warnings.length ? (
                     <div className="ie-summary-section">
                       <p className="ie-summary-section-head">Warnings</p>
-                      <ul className="muted small" style={{ margin: 0, paddingLeft: 16 }}>
+                      <ul className="muted small">
                         {warnings.map((w) => (
                           <li key={w}>{w}</li>
                         ))}
@@ -1408,22 +1494,31 @@ export default function CustomQuoteApp() {
           </div>
         </div>
 
-        {/* IE-style sticky actions — Calculate + Save only; Print/Email disabled v1 */}
         <nav className="ie-sticky-actions" aria-label="Pinned custom quote actions">
           <div className="ie-sticky-actions-inner">
             <div className="ie-sticky-status" aria-live="polite">
               <span
                 className={`ie-sticky-status-pill${
-                  calcBusy ? " is-busy" : backendCalcOk ? " is-confirmed" : sessionToken ? " is-preview" : " is-signed-out"
+                  calcBusy
+                    ? " is-busy"
+                    : lastCalcLive && sellPrice != null
+                      ? " is-confirmed"
+                      : sessionToken
+                        ? " is-preview"
+                        : " is-signed-out"
                 }`}
               >
                 <span className="ie-sticky-status-dot" aria-hidden />
                 <span className="ie-sticky-status-label">
-                  {calcBusy ? "Calculating…" : backendCalcOk ? "Backend confirmed" : sessionToken ? "Live preview" : "Sign in"}
+                  {calcBusy
+                    ? "Calculating…"
+                    : lastCalcLive && sellPrice != null
+                      ? "Backend confirmed"
+                      : "Live preview"}
                 </span>
               </span>
-              <span className="ie-sticky-status-total" aria-label="Sell price">
-                {sellPrice != null ? money(sellPrice) : "—"}
+              <span className="ie-sticky-status-total" aria-label="Current live custom quote total">
+                {sellPrice != null ? usdCompact(sellPrice) : "—"}
               </span>
             </div>
             <div className="ie-sticky-actions-cluster">
@@ -1438,7 +1533,7 @@ export default function CustomQuoteApp() {
               <button
                 type="button"
                 className="btn primary btn-sm"
-                disabled={saveDisabled || accessDenied}
+                disabled={saveDisabled || accessDenied || !sessionToken}
                 title={!calc ? "Calculate first" : undefined}
                 onClick={() => void runSave()}
               >
