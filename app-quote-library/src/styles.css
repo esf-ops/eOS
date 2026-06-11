@@ -1248,11 +1248,9 @@ input[type="checkbox"] {
 .drawer-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(11, 26, 51, 0.4);
+  background: rgba(11, 26, 51, 0.52);
   z-index: 40;
-  backdrop-filter: blur(3px);
-  -webkit-backdrop-filter: blur(3px);
-  animation: drawer-fade var(--eos-dur-2) var(--eos-ease) both;
+  contain: paint;
 }
 
 .drawer {
@@ -1274,18 +1272,12 @@ input[type="checkbox"] {
   overflow: hidden;
 }
 
-@keyframes drawer-fade {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
 @keyframes drawer-slide {
   from { transform: translateX(20px); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .drawer-backdrop,
   .drawer {
     animation: none;
   }
@@ -1303,9 +1295,7 @@ input[type="checkbox"] {
   top: 0;
   z-index: 2;
   padding: 18px 26px 18px;
-  background: rgba(255, 255, 255, 0.94);
-  backdrop-filter: saturate(180%) blur(14px);
-  -webkit-backdrop-filter: saturate(180%) blur(14px);
+  background: #ffffff;
   border-bottom: 1px solid var(--eos-line);
   display: flex;
   flex-direction: column;
@@ -2300,15 +2290,8 @@ input[type="checkbox"] {
   align-items: center;
   justify-content: center;
   padding: 24px 16px;
-  background: rgba(11, 26, 51, 0.45);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-  animation: ql-modal-fade var(--eos-dur-2) var(--eos-ease) both;
-}
-
-@keyframes ql-modal-fade {
-  from { opacity: 0; }
-  to   { opacity: 1; }
+  background: rgba(11, 26, 51, 0.52);
+  contain: paint;
 }
 
 .ql-modal {
@@ -2332,12 +2315,11 @@ input[type="checkbox"] {
 }
 
 @keyframes ql-modal-rise {
-  from { transform: translateY(8px) scale(0.99); opacity: 0; }
-  to   { transform: translateY(0)   scale(1);    opacity: 1; }
+  from { transform: translateY(8px); }
+  to   { transform: translateY(0); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ql-modal-wrap,
   .ql-modal {
     animation: none;
   }
@@ -2346,9 +2328,7 @@ input[type="checkbox"] {
 .ql-modal-header {
   flex-shrink: 0;
   padding: 18px 26px;
-  background: rgba(255, 255, 255, 0.94);
-  backdrop-filter: saturate(180%) blur(14px);
-  -webkit-backdrop-filter: saturate(180%) blur(14px);
+  background: #ffffff;
   border-bottom: 1px solid var(--eos-line);
   display: flex;
   flex-direction: column;
@@ -2404,7 +2384,7 @@ body:has(.ql-modal-wrap) {
   justify-content: center;
   padding: 16px;
   background: rgba(11, 26, 51, 0.55);
-  backdrop-filter: blur(4px);
+  contain: paint;
 }
 
 .ql-email-modal-card {
