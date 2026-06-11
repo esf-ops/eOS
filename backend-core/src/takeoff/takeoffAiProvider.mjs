@@ -23,11 +23,11 @@
  *   parseError        string|null   parse failure reason (null if success)
  *   modelUsed         string        actual model name returned by the API
  *   usage             object        token usage { promptTokens, completionTokens }
- *   provider          string        provider name ("openai" | "gemini")
+ *   provider          string        provider name ("openai" | "gemini" | "exayard")
  *
  * Environment variables:
- *   TAKEOFF_AI_ENABLED=1               must be exactly "1" to enable
- *   TAKEOFF_AI_PROVIDER=openai|gemini  provider name (default: openai)
+ *   TAKEOFF_AI_ENABLED=1                    must be exactly "1" to enable
+ *   TAKEOFF_AI_PROVIDER=openai|gemini|exayard  provider name (default: openai)
  *
  *   OpenAI provider:
  *     TAKEOFF_AI_MODEL=gpt-4o          model name (default: gpt-4o)
@@ -36,6 +36,11 @@
  *   Gemini provider:
  *     GEMINI_TAKEOFF_MODEL=gemini-2.5-pro  model name (default: gemini-2.5-pro)
  *     GEMINI_API_KEY=...               Gemini API key (never client-exposed)
+ *
+ *   Exayard provider (platform API — connection diagnostics in this pass):
+ *     EXAYARD_API_BASE_URL=https://api.exayard.com/v1
+ *     EXAYARD_API_KEY=...              Exayard API key (never client-exposed)
+ *     EXAYARD_ORGANIZATION_ID=...      Exayard org id for future takeoff routes
  */
 import { openAiTakeoffProvider }  from "./openAiTakeoffProvider.mjs";
 import {
@@ -43,9 +48,10 @@ import {
   geminiInventoryProvider,
   geminiEvidenceProvider,
 } from "./geminiTakeoffProvider.mjs";
+import { getExayardSafeDiagnostics } from "./exayardClient.mjs";
 
 /** All supported provider names. */
-export const SUPPORTED_PROVIDERS = ["openai", "gemini"];
+export const SUPPORTED_PROVIDERS = ["openai", "gemini", "exayard"];
 
 /**
  * Get the extraction provider function (pass 3) for the given provider name.
@@ -60,6 +66,15 @@ export function getExtractionProvider(providerName) {
       return openAiTakeoffProvider;
     case "gemini":
       return geminiExtractionProvider;
+    case "exayard":
+      throw Object.assign(
+        new Error(
+          `Exayard takeoff automation is not wired yet. ` +
+          `Connection diagnostics are available via GET /api/takeoff/config. ` +
+          `LLM extraction providers: openai, gemini.`
+        ),
+        { statusCode: 503, code: "exayard_extraction_not_implemented" }
+      );
     default:
       throw Object.assign(
         new Error(
@@ -126,6 +141,9 @@ export function readExtractionConfig() {
   if (providerName === "gemini") {
     modelName = String(process.env.GEMINI_TAKEOFF_MODEL ?? "gemini-2.5-pro").trim() || "gemini-2.5-pro";
     apiKey    = String(process.env.GEMINI_API_KEY ?? "").trim() || null;
+  } else if (providerName === "exayard") {
+    modelName = "platform";
+    apiKey    = String(process.env.EXAYARD_API_KEY ?? "").trim() || null;
   } else {
     // openai (and any unknown provider — getExtractionProvider will reject unknown at call time)
     modelName = String(process.env.TAKEOFF_AI_MODEL ?? "gpt-4o").trim() || "gpt-4o";
@@ -151,10 +169,12 @@ export function readExtractionConfig() {
  *
  * @returns {{
  *   takeoffAiEnabled: boolean,
- *   activeProvider:   "openai" | "gemini" | string,
+ *   activeProvider:   "openai" | "gemini" | "exayard" | string,
  *   model:            string,
  *   hasGeminiKey:     boolean,
  *   hasOpenAiKey:     boolean,
+ *   hasExayardKey:    boolean,
+ *   hasExayardOrganizationId: boolean,
  * }}
  */
 export function readSafeProviderConfig() {
@@ -165,5 +185,22 @@ export function readSafeProviderConfig() {
     model:            cfg.modelName,
     hasGeminiKey:     Boolean(String(process.env.GEMINI_API_KEY ?? "").trim()),
     hasOpenAiKey:     Boolean(String(process.env.OPENAI_API_KEY ?? "").trim()),
+    hasExayardKey:    Boolean(String(process.env.EXAYARD_API_KEY ?? "").trim()),
+    hasExayardOrganizationId: Boolean(String(process.env.EXAYARD_ORGANIZATION_ID ?? "").trim()),
   };
+}
+
+/**
+ * Async extension of readSafeProviderConfig — adds live Exayard connection diagnostics
+ * when TAKEOFF_AI_PROVIDER=exayard. Never returns API key values.
+ *
+ * @param {{ fetchFn?: typeof fetch }} [options]
+ */
+export async function readSafeProviderConfigAsync(options = {}) {
+  const config = readSafeProviderConfig();
+  if (config.activeProvider !== "exayard") {
+    return config;
+  }
+  const exayard = await getExayardSafeDiagnostics({ fetchFn: options.fetchFn });
+  return { ...config, exayard };
 }

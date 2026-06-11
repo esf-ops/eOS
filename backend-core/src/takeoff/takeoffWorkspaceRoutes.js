@@ -37,7 +37,7 @@ import {
   getResultById,
 } from "./takeoffWorkspaceService.mjs";
 import { runAiTakeoffExtraction } from "./takeoffExtractionService.mjs";
-import { readSafeProviderConfig } from "./takeoffAiProvider.mjs";
+import { readSafeProviderConfigAsync } from "./takeoffAiProvider.mjs";
 import { resolveOrganizationContext } from "../organizations/organizationContext.js";
 
 const jsonParser = express.json({ limit: "4mb" }); // TakeoffResult JSON can be large
@@ -62,11 +62,12 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase, he
   // so operators can quickly confirm which backend provider is active.
   //
   // Response shape:
-  //   { ok, takeoffAiEnabled, activeProvider, model, hasGeminiKey, hasOpenAiKey }
+  //   { ok, takeoffAiEnabled, activeProvider, model, hasGeminiKey, hasOpenAiKey,
+  //     hasExayardKey, hasExayardOrganizationId, exayard? }
   //
-  app.get("/api/takeoff/config", requireAuth(), guardHead, (_req, res) => {
+  app.get("/api/takeoff/config", requireAuth(), guardHead, async (_req, res) => {
     try {
-      const config = readSafeProviderConfig();
+      const config = await readSafeProviderConfigAsync();
       return res.json({ ok: true, ...config });
     } catch (e) {
       return res.status(500).json({ ok: false, error: String(e?.message ?? e) });

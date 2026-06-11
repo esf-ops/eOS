@@ -60,6 +60,8 @@ function withEnv(vars, fn) {
   assert.equal(result.model,            "gpt-4o", "T1: model=gpt-4o");
   assert.equal(result.hasOpenAiKey,     true,    "T1: hasOpenAiKey=true");
   assert.equal(result.hasGeminiKey,     false,   "T1: hasGeminiKey=false when no GEMINI_API_KEY");
+  assert.equal(result.hasExayardKey,    false,   "T1: hasExayardKey=false when no EXAYARD_API_KEY");
+  assert.equal(result.hasExayardOrganizationId, false, "T1: hasExayardOrganizationId=false");
   assert.ok(typeof result.takeoffAiEnabled === "boolean", "T1: takeoffAiEnabled is boolean");
   assert.ok(typeof result.activeProvider   === "string",  "T1: activeProvider is string");
   assert.ok(typeof result.model            === "string",  "T1: model is string");
@@ -151,11 +153,42 @@ function withEnv(vars, fn) {
 
   // Verify only expected keys are present
   const outputKeys = Object.keys(result);
-  const allowedKeys = ["takeoffAiEnabled", "activeProvider", "model", "hasGeminiKey", "hasOpenAiKey"];
+  const allowedKeys = [
+    "takeoffAiEnabled",
+    "activeProvider",
+    "model",
+    "hasGeminiKey",
+    "hasOpenAiKey",
+    "hasExayardKey",
+    "hasExayardOrganizationId",
+  ];
   for (const k of outputKeys) {
     assert.ok(allowedKeys.includes(k), `T6: unexpected key "${k}" in safe config output`);
   }
   console.log("ok T6: no API key values in output; only expected keys present");
 }
 
-console.log("\ntakeoffConfig: all 6 tests passed");
+// ── T7. Exayard config shape ───────────────────────────────────────────────
+
+{
+  const FAKE_EXAYARD_KEY = "ey-exayard-should-never-be-in-output";
+  const result = withEnv({
+    TAKEOFF_AI_ENABLED:       "1",
+    TAKEOFF_AI_PROVIDER:      "exayard",
+    EXAYARD_API_KEY:          FAKE_EXAYARD_KEY,
+    EXAYARD_ORGANIZATION_ID:  "org_test",
+    OPENAI_API_KEY:           null,
+    GEMINI_API_KEY:           null,
+  }, () => readSafeProviderConfig());
+
+  assert.equal(result.activeProvider, "exayard", "T7: activeProvider=exayard");
+  assert.equal(result.model, "platform", "T7: model=platform");
+  assert.equal(result.hasExayardKey, true, "T7: hasExayardKey=true");
+  assert.equal(result.hasExayardOrganizationId, true, "T7: hasExayardOrganizationId=true");
+  assert.equal(result.hasOpenAiKey, false, "T7: hasOpenAiKey=false");
+  assert.equal(result.hasGeminiKey, false, "T7: hasGeminiKey=false");
+  assert.ok(!JSON.stringify(result).includes(FAKE_EXAYARD_KEY), "T7: Exayard key absent from output");
+  console.log("ok T7: exayard config shape is correct");
+}
+
+console.log("\ntakeoffConfig: all 7 tests passed");

@@ -83,6 +83,7 @@
     "eos:test:takeoff-qa-gate": "node backend-core/src/takeoff/takeoffQaGate.test.mjs",
     "eos:test:takeoff-gemini-provider": "node backend-core/src/takeoff/geminiTakeoffProvider.test.mjs",
     "eos:test:takeoff-config": "node backend-core/src/takeoff/takeoffConfig.test.mjs",
+    "eos:test:takeoff-exayard-client": "node backend-core/src/takeoff/exayardClient.test.mjs",
     "eos:test:takeoff-evidence-reconciliation": "node backend-core/src/takeoff/takeoffEvidenceRunReconciliation.test.mjs",
     "eos:test:takeoff-fabrication-rules": "node backend-core/src/takeoff/takeoffFabricationRules.test.mjs",
     "eos:test:takeoff-measurement-calc": "node backend-core/src/takeoff/takeoffMeasurementCalc.test.mjs",

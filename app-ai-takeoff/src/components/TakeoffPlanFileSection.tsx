@@ -67,6 +67,20 @@ interface ProviderConfig {
   model:            string;
   hasGeminiKey:     boolean;
   hasOpenAiKey:     boolean;
+  hasExayardKey?:           boolean;
+  hasExayardOrganizationId?: boolean;
+  exayard?: {
+    provider:              string;
+    enabled:               boolean;
+    organizationIdPresent: boolean;
+    apiKeyPresent:         boolean;
+    authenticated:         boolean;
+    tokenType:             string | null;
+    membershipsCount:      number | null;
+    setupError?:           string;
+    setupWarning?:         string;
+    connectionError?:      string;
+  };
 }
 
 export interface TakeoffPlanFileSectionProps {
@@ -567,10 +581,29 @@ export default function TakeoffPlanFileSection({
               <div className="ai-provider-badge" aria-label="Active AI backend provider">
                 <span className="ai-provider-badge-label">Backend provider:</span>
                 <span
-                  className={`ai-provider-badge-pill ai-provider-badge-pill--${providerConfig.activeProvider === "gemini" ? "gemini" : "openai"}`}
+                  className={`ai-provider-badge-pill ai-provider-badge-pill--${
+                    providerConfig.activeProvider === "gemini"
+                      ? "gemini"
+                      : providerConfig.activeProvider === "exayard"
+                        ? "exayard"
+                        : "openai"
+                  }`}
                 >
-                  {providerConfig.activeProvider} · {providerConfig.model}
+                  {providerConfig.activeProvider}
+                  {providerConfig.activeProvider !== "exayard" && ` · ${providerConfig.model}`}
                 </span>
+                {providerConfig.activeProvider === "exayard" && providerConfig.exayard && (
+                  <span className="ai-provider-badge-meta">
+                    {providerConfig.exayard.authenticated
+                      ? `authenticated · ${providerConfig.exayard.tokenType ?? "unknown"}`
+                      : providerConfig.exayard.setupError
+                        ? providerConfig.exayard.setupError
+                        : providerConfig.exayard.connectionError
+                          ? `not authenticated — ${providerConfig.exayard.connectionError}`
+                          : "not authenticated"}
+                    {providerConfig.exayard.setupWarning ? ` · ${providerConfig.exayard.setupWarning}` : ""}
+                  </span>
+                )}
                 {!providerConfig.takeoffAiEnabled && (
                   <span className="ai-provider-badge-warn">
                     AI disabled — set TAKEOFF_AI_ENABLED=1 in backend-core env

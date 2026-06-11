@@ -1100,6 +1100,16 @@ details[open] > .lab-section-summary::before { transform: rotate(90deg); }
   color: var(--eos-success);
   border-color: var(--eos-success-border);
 }
+.ai-provider-badge-pill--exayard {
+  background: var(--eos-accent-soft, #f0f4ff);
+  color: var(--eos-accent, #3b5bdb);
+  border-color: var(--eos-accent-border, #bac8ff);
+}
+.ai-provider-badge-meta {
+  color: var(--eos-ink-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
 .ai-provider-badge-warn {
   color: var(--eos-warn);
   font-size: 11px;
