@@ -88,6 +88,10 @@ const CUSTOM_LINE_PRESETS: Array<{
   { key: "other", name: "Other", description: "Miscellaneous", category: "Other", unitPrice: "0" }
 ];
 
+function pricingModeLabel(mode: "retail" | "wholesale"): string {
+  return mode === "wholesale" ? "Wholesale" : "Retail";
+}
+
 function newRowId(): string {
   return globalThis.crypto?.randomUUID?.() ?? `id-${Math.random().toString(36).slice(2, 11)}`;
 }
@@ -247,6 +251,11 @@ export default function CustomQuoteApp() {
 
   const patchJob = useCallback((key: keyof JobForm, value: string) => {
     setJob((f) => ({ ...f, [key]: value }));
+    invalidateCalc();
+  }, []);
+
+  const patchPricingMode = useCallback((mode: "retail" | "wholesale") => {
+    setMaterial((f) => ({ ...f, pricingMode: mode }));
     invalidateCalc();
   }, []);
 
@@ -562,8 +571,7 @@ export default function CustomQuoteApp() {
                 </h1>
                 <p className="ie-hero-sub">
                   Same estimator workflow as Internal Estimate — rooms, layout verification, and custom lines — with
-                  off-program slab cost variables and markup/uplift pricing. Saves to Quote Library as{" "}
-                  <strong>custom_quote</strong>.
+                  off-program slab cost variables. Saves to Quote Library as <strong>custom_quote</strong>.
                 </p>
                 <dl className="ie-hero-stats" aria-label="Live quote context">
                   <div className="ie-hero-stat">
@@ -575,8 +583,8 @@ export default function CustomQuoteApp() {
                     <dd>{scopeSummary.projectSqft > 0 ? scopeSummary.projectSqft.toFixed(1) : "—"}</dd>
                   </div>
                   <div className="ie-hero-stat">
-                    <dt>Basis</dt>
-                    <dd>{material.pricingMode === "wholesale" ? "Wholesale +15%" : "Retail +25%"}</dd>
+                    <dt>Pricing mode</dt>
+                    <dd>{pricingModeLabel(material.pricingMode)}</dd>
                   </div>
                   <div className="ie-hero-stat">
                     <dt>Branch</dt>
@@ -684,11 +692,31 @@ export default function CustomQuoteApp() {
                     {backendCalcOk === true ? "Backend connected" : backendCalcOk === false ? "Calculate failed" : "Live preview"}
                   </span>
                   <span className="ie-live-strip-copy">
-                    Room sq ft drives fabrication quantity. Custom material variables drive slab/freight cost — not Elite
-                    100 tier $/sf.
+                    Backend pricing policy applies at Calculate. Custom material pricing is calculated from slab, freight,
+                    fabrication, and approved pricing policy.
                   </span>
                 </div>
               ) : null}
+
+              <div className="card ie-card-tight ie-pricing-bar">
+                <span className="ie-pricing-label">Pricing mode</span>
+                <div className="ie-pricing-toggle" role="group" aria-label="Pricing mode">
+                  <button
+                    type="button"
+                    className={material.pricingMode === "wholesale" ? "on" : ""}
+                    onClick={() => patchPricingMode("wholesale")}
+                  >
+                    Wholesale
+                  </button>
+                  <button
+                    type="button"
+                    className={material.pricingMode === "retail" ? "on" : ""}
+                    onClick={() => patchPricingMode("retail")}
+                  >
+                    Retail
+                  </button>
+                </div>
+              </div>
 
               {err ? (
                 <div className="warn-box" role="alert">
@@ -809,12 +837,12 @@ export default function CustomQuoteApp() {
                 <div className="ie-section-head">
                   <h2 className="ie-section-title">Custom Material / Slab Cost Variables</h2>
                   <p className="ie-section-meta">
-                    Off-program slab pricing · Freight · Fabrication defaults · Retail/Wholesale uplift on total cost basis
+                    Off-program slab inputs · Freight · Fabrication shop rate (confirmed at Calculate)
                   </p>
                 </div>
                 <p className="ie-note-quiet" role="note">
                   <span className="ie-note-quiet-dot" aria-hidden />
-                  Sell price = total cost basis × (1 + uplift). Retail +25% · Wholesale +15%. Not gross-margin inversion.
+                  Custom material pricing is calculated from slab, freight, fabrication, and approved pricing policy.
                 </p>
                 <div className="ie-job-groups" style={{ marginTop: 16 }}>
                   <div className="ie-job-group">
@@ -870,7 +898,7 @@ export default function CustomQuoteApp() {
                     </div>
                   </div>
                   <div className="ie-job-group">
-                    <p className="ie-job-group-head">Freight, fabrication &amp; pricing mode</p>
+                    <p className="ie-job-group-head">Freight &amp; fabrication</p>
                     <div className="grid3 ie-job-grid">
                       <label>
                         Freight cost to ESF ($)
@@ -894,25 +922,6 @@ export default function CustomQuoteApp() {
                             </>
                           )}
                         </span>
-                      </label>
-                      <label>
-                        Pricing mode
-                        <div className="ie-pricing-toggle" role="group" aria-label="Pricing mode" style={{ marginTop: 6 }}>
-                          <button
-                            type="button"
-                            className={material.pricingMode === "wholesale" ? "on" : ""}
-                            onClick={() => patchMaterial("pricingMode", "wholesale")}
-                          >
-                            Wholesale (+15%)
-                          </button>
-                          <button
-                            type="button"
-                            className={material.pricingMode === "retail" ? "on" : ""}
-                            onClick={() => patchMaterial("pricingMode", "retail")}
-                          >
-                            Retail (+25%)
-                          </button>
-                        </div>
                       </label>
                     </div>
                   </div>
@@ -1155,7 +1164,7 @@ export default function CustomQuoteApp() {
                 <section id="sec-review" className="card">
                   <div className="ie-section-head">
                     <h2 className="ie-section-title">Review</h2>
-                    <p className="ie-section-meta">Custom quote cost basis · Uplift · Utilization &amp; multiplier warnings</p>
+                    <p className="ie-section-meta">Custom quote cost basis · Pricing mode · Utilization &amp; multiplier warnings</p>
                   </div>
                   {!calc ? (
                     <p className="muted">
@@ -1216,8 +1225,8 @@ export default function CustomQuoteApp() {
                             </td>
                           </tr>
                           <tr>
-                            <td>Uplift ({pct(calc.pricingUpliftPercent)})</td>
-                            <td>{String(calc.pricingMode)}</td>
+                            <td>Pricing mode</td>
+                            <td>{pricingModeLabel(calc.pricingMode === "wholesale" ? "wholesale" : "retail")}</td>
                           </tr>
                           <tr>
                             <td>
@@ -1234,10 +1243,6 @@ export default function CustomQuoteApp() {
                           <tr>
                             <td>Multiplier</td>
                             <td>{Number(calc.multiplier).toFixed(2)}×</td>
-                          </tr>
-                          <tr>
-                            <td>Actual gross margin (reporting)</td>
-                            <td>{pct(calc.actualGrossMarginPercent)}</td>
                           </tr>
                         </tbody>
                       </table>
@@ -1292,11 +1297,11 @@ export default function CustomQuoteApp() {
                     <h2 className="ie-summary-title">Custom quote summary</h2>
                     <p className="ie-summary-mode-pill" data-mode={material.pricingMode}>
                       <span className="ie-summary-mode-dot" aria-hidden />
-                      {material.pricingMode === "wholesale" ? "Wholesale +15%" : "Retail +25%"}
+                      {pricingModeLabel(material.pricingMode)}
                     </p>
                   </div>
                   <div className="ie-summary-section ie-summary-hero">
-                    <p className="ie-summary-kicker">Sell price · uplift on total cost</p>
+                    <p className="ie-summary-kicker">Sell price</p>
                     <p className="ie-summary-compact-hero">{sellPrice != null ? money(sellPrice) : "—"}</p>
                     {backendCalcOk ? (
                       <p className="ie-summary-hero-sub is-confirmed">
@@ -1306,7 +1311,7 @@ export default function CustomQuoteApp() {
                     ) : (
                       <p className="ie-summary-hero-sub is-preview">
                         <span className="ie-summary-hero-sub-dot" aria-hidden />
-                        Tap Calculate for backend-confirmed pricing.
+                        Backend pricing policy applies at Calculate.
                       </p>
                     )}
                   </div>
@@ -1362,10 +1367,6 @@ export default function CustomQuoteApp() {
                         <div className="summary-row ie-summary-row-compact">
                           <span>Cost basis</span>
                           <strong>{money(calc.totalCostBasis)}</strong>
-                        </div>
-                        <div className="summary-row ie-summary-row-compact">
-                          <span>Uplift</span>
-                          <strong>{pct(calc.pricingUpliftPercent)}</strong>
                         </div>
                         <div className="summary-row ie-summary-row-compact">
                           <span>Utilization</span>
