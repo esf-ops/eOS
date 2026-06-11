@@ -31,10 +31,15 @@ export function readExayardPollConfig() {
   const intervalMs = Number(process.env.EXAYARD_POLL_INTERVAL_MS ?? 3000);
   const assessmentTimeoutMs = Number(process.env.EXAYARD_POLL_TIMEOUT_MS ?? 300_000);
   const pagesTimeoutMs = Number(process.env.EXAYARD_PAGES_POLL_TIMEOUT_MS ?? 120_000);
+  const initialAssessmentPollTimeoutMs = Number(process.env.EXAYARD_INITIAL_POLL_TIMEOUT_MS ?? 45_000);
   return {
     intervalMs: Number.isFinite(intervalMs) && intervalMs > 0 ? intervalMs : 3000,
     assessmentTimeoutMs: Number.isFinite(assessmentTimeoutMs) && assessmentTimeoutMs > 0 ? assessmentTimeoutMs : 300_000,
     pagesTimeoutMs: Number.isFinite(pagesTimeoutMs) && pagesTimeoutMs > 0 ? pagesTimeoutMs : 120_000,
+    initialAssessmentPollTimeoutMs:
+      Number.isFinite(initialAssessmentPollTimeoutMs) && initialAssessmentPollTimeoutMs > 0
+        ? initialAssessmentPollTimeoutMs
+        : 45_000,
   };
 }
 
@@ -69,9 +74,15 @@ export function buildExayardSafeWorkflowMeta(workflow) {
     fileId:         w.fileId ?? null,
     assessmentId:   w.assessmentId ?? null,
     status:         w.status ?? null,
+    pausedStep:     w.pausedStep ?? w.failedStep ?? null,
     startedAt:      w.startedAt ?? null,
     completedAt:    w.completedAt ?? null,
     steps:          Array.isArray(w.steps) ? w.steps : [],
+    retryAfterSeconds: w.retryAfterSeconds ?? null,
+    retryAfterAt:      w.retryAfterAt ?? null,
+    exayardCode:       w.exayardCode ?? null,
+    exayardRequestId:  w.exayardRequestId ?? null,
+    assessmentStatus:  w.assessmentStatus ?? null,
   };
 }
 
@@ -152,9 +163,88 @@ export function readExayardRateLimitHeaders(headers) {
   const get = typeof headers?.get === "function" ? (n) => headers.get(n) : () => null;
   const rateLimit = get("RateLimit") ?? get("ratelimit");
   const rateLimitPolicy = get("RateLimit-Policy") ?? get("ratelimit-policy");
+  const retryAfterRaw = get("Retry-After") ?? get("retry-after");
   return {
     rateLimit: rateLimit ?? null,
     rateLimitPolicy: rateLimitPolicy ?? null,
+    retryAfterRaw: retryAfterRaw ?? null,
+  };
+}
+
+/**
+ * Parse retry delay from RFC 9457 problem body or Retry-After header (seconds).
+ *
+ * @param {{ problem?: object, retryAfterRaw?: string|null }} err
+ */
+export function parseExayardRetryAfterSeconds(err) {
+  const problem = err?.problem ?? {};
+  const candidates = [
+    problem.retry_after,
+    problem.retryAfterSeconds,
+    problem.retryAfter,
+  ];
+  for (const c of candidates) {
+    const n = Number(c);
+    if (Number.isFinite(n) && n >= 0) return n;
+  }
+
+  const raw = err?.retryAfterRaw ?? null;
+  if (raw != null) {
+    const asNum = Number(raw);
+    if (Number.isFinite(asNum) && asNum >= 0) return asNum;
+    const asDate = Date.parse(String(raw));
+    if (Number.isFinite(asDate)) {
+      return Math.max(0, Math.ceil((asDate - Date.now()) / 1000));
+    }
+  }
+  return null;
+}
+
+/** @param {unknown} err */
+export function isExayardRateLimitedError(err) {
+  return (
+    err?.statusCode === 429 ||
+    err?.code === "rate_limited" ||
+    err?.problem?.code === "rate_limited"
+  );
+}
+
+/**
+ * @param {Error & { problem?: object, retryAfterRaw?: string|null, statusCode?: number, code?: string }} err
+ */
+export function enrichExayardRateLimitError(err) {
+  if (!isExayardRateLimitedError(err)) return err;
+  const retryAfterSeconds = parseExayardRetryAfterSeconds(err) ?? 60;
+  err.code = err.code ?? err.problem?.code ?? "rate_limited";
+  err.retryAfterSeconds = retryAfterSeconds;
+  err.retryAfterAt = new Date(Date.now() + retryAfterSeconds * 1000).toISOString();
+  err.requestId = err.problem?.request_id ?? err.requestId ?? null;
+  err.name = "ExayardRateLimitedError";
+  return err;
+}
+
+/**
+ * Safe subset of quote_takeoff_jobs.metadata.exayard for API responses.
+ *
+ * @param {unknown} metadata
+ */
+export function pickSafeExayardJobMetadata(metadata) {
+  const ex = metadata && typeof metadata === "object" ? metadata.exayard : null;
+  if (!ex || typeof ex !== "object") return null;
+  return {
+    exayard: {
+      provider:           "exayard",
+      status:             ex.status ?? null,
+      pausedStep:         ex.pausedStep ?? ex.failedStep ?? null,
+      projectId:          ex.projectId ?? null,
+      fileId:             ex.fileId ?? null,
+      assessmentId:       ex.assessmentId ?? null,
+      retryAfterSeconds:  ex.retryAfterSeconds ?? null,
+      retryAfterAt:       ex.retryAfterAt ?? null,
+      exayardCode:        ex.exayardCode ?? null,
+      exayardRequestId:   ex.exayardRequestId ?? null,
+      updatedAt:          ex.updatedAt ?? null,
+    },
   };
 }
 
@@ -200,7 +290,7 @@ async function exayardRequestOnce(path, options = {}) {
   const res = await fetchFn(url, init);
   const text = await res.text();
   const contentType = res.headers?.get?.("content-type") ?? null;
-  const { rateLimit, rateLimitPolicy } = readExayardRateLimitHeaders(res.headers);
+  const { rateLimit, rateLimitPolicy, retryAfterRaw } = readExayardRateLimitHeaders(res.headers);
 
   if (!res.ok) {
     const message = formatExayardHttpError(res.status, text, contentType);
@@ -211,6 +301,8 @@ async function exayardRequestOnce(path, options = {}) {
     err.code = err.problem?.code ?? null;
     err.rateLimit = rateLimit;
     err.rateLimitPolicy = rateLimitPolicy;
+    err.retryAfterRaw = retryAfterRaw;
+    enrichExayardRateLimitError(err);
     throw err;
   }
 
@@ -236,22 +328,24 @@ async function exayardRequestOnce(path, options = {}) {
  *   fetchFn?: typeof fetch,
  *   headers?: Record<string, string>,
  *   maxRetries?: number,
+ *   retryOnRateLimit?: boolean,
  * }} [options]
  */
 export async function exayardRequest(path, options = {}) {
-  const maxRetries = options.maxRetries ?? 3;
+  const maxRetries = options.maxRetries ?? 0;
+  const retryOnRateLimit = options.retryOnRateLimit === true;
   let attempt = 0;
   while (true) {
     try {
       return await exayardRequestOnce(path, options);
     } catch (err) {
       const retryable =
-        err?.statusCode === 429 ||
-        err?.problem?.code === "rate_limited";
+        retryOnRateLimit &&
+        isExayardRateLimitedError(err);
       if (!retryable || attempt >= maxRetries) throw err;
       attempt += 1;
-      const backoffMs = Math.min(30_000, 1000 * (2 ** (attempt - 1)));
-      await sleep(backoffMs);
+      const waitSec = err.retryAfterSeconds ?? Math.min(30, 2 ** attempt);
+      await sleep(Math.min(30_000, Math.max(1000, waitSec * 1000)));
     }
   }
 }
@@ -672,23 +766,62 @@ export async function runExayardAnalysis({ projectId, pageIds, elements, layerNa
 }
 
 /**
- * GET /assessments/{id}
+ * GET /assessments/{id} — single check, no retries on rate limit.
  */
 export async function getExayardAssessment({ assessmentId, fetchFn }) {
-  const { data } = await exayardRequest(`/assessments/${encodeURIComponent(assessmentId)}`, { fetchFn });
+  const { data } = await exayardRequest(`/assessments/${encodeURIComponent(assessmentId)}`, {
+    fetchFn,
+    maxRetries: 0,
+    retryOnRateLimit: false,
+  });
   return data;
 }
 
 /**
- * Poll assessment until terminal status or timeout.
+ * Single assessment status check for resume flows (no poll loop).
  *
- * @param {{ assessmentId: string, fetchFn?: typeof fetch, timeoutMs?: number, intervalMs?: number }} params
+ * @param {{ assessmentId: string, fetchFn?: typeof fetch }} params
+ */
+export async function checkExayardAssessmentOnce({ assessmentId, fetchFn }) {
+  try {
+    const assessment = await getExayardAssessment({ assessmentId, fetchFn });
+    const assessmentStatus = String(assessment?.status ?? "").toLowerCase();
+    if (assessmentStatus && TERMINAL_ASSESSMENT_STATUSES.has(assessmentStatus)) {
+      return { state: "completed", assessment, assessmentStatus };
+    }
+    return { state: "processing", assessment, assessmentStatus };
+  } catch (err) {
+    if (isExayardRateLimitedError(err)) {
+      return {
+        state:             "rate_limited",
+        retryAfterSeconds: err.retryAfterSeconds ?? null,
+        retryAfterAt:      err.retryAfterAt ?? null,
+        exayardCode:       err.code ?? "rate_limited",
+        exayardRequestId:  err.requestId ?? err.problem?.request_id ?? null,
+      };
+    }
+    throw err;
+  }
+}
+
+/**
+ * Poll assessment until terminal, rate limit, or timeout.
+ * In brief mode (default), rate limit / timeout returns waiting metadata — does not throw.
+ *
+ * @param {{
+ *   assessmentId: string,
+ *   fetchFn?: typeof fetch,
+ *   timeoutMs?: number,
+ *   intervalMs?: number,
+ *   mode?: "brief" | "strict",
+ * }} params
  */
 export async function pollExayardAssessment({
   assessmentId,
   fetchFn,
   timeoutMs,
   intervalMs,
+  mode = "brief",
 }) {
   const poll = readExayardPollConfig();
   const deadline = Date.now() + (timeoutMs ?? poll.assessmentTimeoutMs);
@@ -696,21 +829,54 @@ export async function pollExayardAssessment({
   let last = null;
 
   while (Date.now() < deadline) {
-    last = await getExayardAssessment({ assessmentId, fetchFn });
+    try {
+      last = await getExayardAssessment({ assessmentId, fetchFn });
+    } catch (err) {
+      if (isExayardRateLimitedError(err)) {
+        return {
+          completed:         false,
+          waiting:           true,
+          rateLimited:       true,
+          assessmentId,
+          pausedStep:        "poll_assessment",
+          retryAfterSeconds: err.retryAfterSeconds ?? null,
+          retryAfterAt:      err.retryAfterAt ?? null,
+          exayardCode:       err.code ?? "rate_limited",
+          exayardRequestId:  err.requestId ?? err.problem?.request_id ?? null,
+          lastAssessment:    last,
+        };
+      }
+      throw err;
+    }
+
     const status = String(last?.status ?? "").toLowerCase();
     if (status && TERMINAL_ASSESSMENT_STATUSES.has(status)) {
-      return last;
+      return { completed: true, assessment: last, assessmentId };
     }
+
     await sleep(waitMs);
   }
 
-  throw Object.assign(
-    new Error(
-      `Timed out waiting for Exayard assessment ${assessmentId}` +
-      (last?.status ? ` (last status: ${last.status})` : "")
-    ),
-    { statusCode: 504, code: "exayard_assessment_timeout", lastStatus: last?.status ?? null }
-  );
+  if (mode === "strict") {
+    throw Object.assign(
+      new Error(
+        `Timed out waiting for Exayard assessment ${assessmentId}` +
+        (last?.status ? ` (last status: ${last.status})` : "")
+      ),
+      { statusCode: 504, code: "exayard_assessment_timeout", lastStatus: last?.status ?? null }
+    );
+  }
+
+  return {
+    completed:      false,
+    waiting:        true,
+    rateLimited:    false,
+    assessmentId,
+    pausedStep:     "poll_assessment",
+    reason:         "poll_window_exhausted",
+    lastAssessment: last,
+    assessmentStatus: last?.status ?? null,
+  };
 }
 
 /**
@@ -813,28 +979,61 @@ export async function runExayardTakeoffWorkflow(params) {
   });
 
   mark("poll_assessment");
-  const rawAssessment = await pollExayardAssessment({
+  const pollResult = await pollExayardAssessment({
     assessmentId: runResult.assessmentId,
     fetchFn,
-    timeoutMs: poll.assessmentTimeoutMs,
+    timeoutMs: poll.initialAssessmentPollTimeoutMs ?? poll.assessmentTimeoutMs,
     intervalMs: poll.intervalMs,
+    mode: "brief",
   });
 
-  const completedAt = new Date().toISOString();
-  mark("completed");
+  if (pollResult.completed) {
+    const rawAssessment = pollResult.assessment;
+    const completedAt = new Date().toISOString();
+    mark("completed");
+
+    return {
+      provider:       "exayard",
+      projectId,
+      fileId:         uploadInit.fileId,
+      assessmentId:   runResult.assessmentId,
+      status:         rawAssessment?.status ?? "completed",
+      pageIds:        proposal.pageIds,
+      pageCount:      pageIds.length,
+      startedAt,
+      completedAt,
+      steps,
+      rawAssessment,
+      proposal: {
+        creditEstimate: proposal.creditEstimate ?? null,
+        elementCount:   Array.isArray(proposal.elements) ? proposal.elements.length : 0,
+      },
+    };
+  }
+
+  mark("waiting_on_exayard");
+  const waitingAt = new Date().toISOString();
 
   return {
     provider:       "exayard",
     projectId,
     fileId:         uploadInit.fileId,
     assessmentId:   runResult.assessmentId,
-    status:         rawAssessment?.status ?? "unknown",
+    status:         "waiting_on_exayard",
+    pausedStep:     pollResult.pausedStep ?? "poll_assessment",
     pageIds:        proposal.pageIds,
     pageCount:      pageIds.length,
     startedAt,
-    completedAt,
+    completedAt:    null,
     steps,
-    rawAssessment,
+    rawAssessment:  pollResult.lastAssessment ?? null,
+    retryAfterSeconds: pollResult.retryAfterSeconds ?? null,
+    retryAfterAt:      pollResult.retryAfterAt ?? null,
+    exayardCode:       pollResult.exayardCode ?? (pollResult.rateLimited ? "rate_limited" : null),
+    exayardRequestId:  pollResult.exayardRequestId ?? null,
+    assessmentStatus:  pollResult.assessmentStatus ?? pollResult.lastAssessment?.status ?? null,
+    waitingReason:     pollResult.reason ?? (pollResult.rateLimited ? "rate_limited" : "processing"),
+    waitingSince:      waitingAt,
     proposal: {
       creditEstimate: proposal.creditEstimate ?? null,
       elementCount:   Array.isArray(proposal.elements) ? proposal.elements.length : 0,

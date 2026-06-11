@@ -44,6 +44,7 @@ import { QUOTE_FILE_BUCKET }           from "../files/quoteFileStoragePath.mjs";
 import { PROMPT_VERSION }              from "./takeoffExtractionPrompt.mjs";
 import { runPageInventory }            from "./takeoffPageInventoryService.mjs";
 import { runDimensionEvidence }        from "./takeoffDimensionEvidenceService.mjs";
+import { handleExayardWaitingState }   from "./exayardTakeoffResume.mjs";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -299,7 +300,29 @@ export async function runAiTakeoffExtraction({
     throw providerErr;
   }
 
-  const { rawText, parsed, parseError, modelUsed, usage, exayardWorkflow, exayardRaw, exayardRawCaptured } = providerOutput;
+  const {
+    rawText,
+    parsed,
+    parseError,
+    modelUsed,
+    usage,
+    exayardWorkflow,
+    exayardRaw,
+    exayardRawCaptured,
+    exayardWaiting,
+  } = providerOutput;
+
+  if (exayardWaiting) {
+    return handleExayardWaitingState({
+      supabase,
+      organizationId,
+      takeoffJobId,
+      job,
+      file,
+      providerOutput,
+      modelUsed: modelUsed ?? "exayard-platform",
+    });
+  }
 
   // 8. Handle JSON parse failure — still save a partial failure record.
   if (!parsed || parseError) {

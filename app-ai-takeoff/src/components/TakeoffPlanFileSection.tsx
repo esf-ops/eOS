@@ -59,6 +59,14 @@ interface WorkspaceState {
   startedAt: string | null;
   hasSavedResult: boolean;
   file: PlanFileMeta;
+  exayard?: {
+    status:             string | null;
+    assessmentId:       string | null;
+    retryAfterAt:       string | null;
+    retryAfterSeconds:  number | null;
+    exayardCode:        string | null;
+    pausedStep:         string | null;
+  } | null;
 }
 
 interface ProviderConfig {
@@ -143,7 +151,23 @@ function roleLabelFor(role: string): string {
   return FILE_ROLE_OPTIONS.find((r) => r.value === role)?.label ?? role;
 }
 
+function formatRetryAfter(iso: string | null | undefined): string {
+  if (!iso) return "later";
+  try {
+    return new Date(iso).toLocaleString(undefined, {
+      month: "short",
+      day:   "numeric",
+      hour:  "numeric",
+      minute: "2-digit",
+    });
+  } catch {
+    return "later";
+  }
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
+
+type AiStep = "idle" | "sending" | "generating" | "recomputing" | "waiting" | "done" | "error";
 
 // Progress messages shown during AI extraction (timed — one API call, multiple UX steps).
 const AI_STEP_MSGS: Record<AiStep, string | null> = {
@@ -151,6 +175,7 @@ const AI_STEP_MSGS: Record<AiStep, string | null> = {
   sending:     "Sending plan to AI model…",
   generating:  "Generating AI draft…",
   recomputing: "Recomputing with eliteOS…",
+  waiting:     null,
   done:        "Ready for review",
   error:       null,
 };
@@ -160,6 +185,7 @@ const EXAYARD_STEP_MSGS: Record<AiStep, string | null> = {
   sending:     "Starting Exayard workflow v1…",
   generating:  "Uploading plan and running Exayard analysis…",
   recomputing: "Polling Exayard assessment status…",
+  waiting:     "Exayard is still processing this assessment…",
   done:        "Exayard raw result captured — normalization pending.",
   error:       null,
 };
@@ -168,8 +194,6 @@ function aiStepMessage(step: AiStep, activeProvider: string | null | undefined):
   if (activeProvider === "exayard") return EXAYARD_STEP_MSGS[step];
   return AI_STEP_MSGS[step];
 }
-
-type AiStep = "idle" | "sending" | "generating" | "recomputing" | "done" | "error";
 
 export default function TakeoffPlanFileSection({
   takeoffJobId,
@@ -202,6 +226,11 @@ export default function TakeoffPlanFileSection({
   const [aiStep, setAiStep] = useState<AiStep>("idle");
   const [aiError, setAiError] = useState<string | null>(null);
   const [exayardRawCaptured, setExayardRawCaptured] = useState(false);
+  const [exayardWaitingInfo, setExayardWaitingInfo] = useState<{
+    retryAfterAt: string | null;
+    assessmentId: string | null;
+    message:      string | null;
+  } | null>(null);
   const aiTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   // Provider config badge state (v5.9.3) — fetched once per token+workspace load
@@ -233,6 +262,7 @@ export default function TakeoffPlanFileSection({
     setAiStep("idle");
     setAiError(null);
     setExayardRawCaptured(false);
+    setExayardWaitingInfo(null);
     setProviderConfig(null);
     setArchiveStep("idle");
     setArchiveError(null);
@@ -249,6 +279,17 @@ export default function TakeoffPlanFileSection({
       try {
         const res = await labApiGet(`/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}`, token) as WorkspaceState & { ok: boolean };
         setWorkspace(res);
+        if (
+          res.exayard?.status === "waiting_on_exayard" &&
+          res.exayard.assessmentId
+        ) {
+          setAiStep("waiting");
+          setExayardWaitingInfo({
+            retryAfterAt: res.exayard.retryAfterAt ?? null,
+            assessmentId: res.exayard.assessmentId,
+            message:      "Exayard is still processing this assessment.",
+          });
+        }
         onWorkspaceLoaded(res.file.originalFilename);
       } catch (e) {
         const msg = e instanceof LabApiError ? e.message : e instanceof Error ? e.message : "Failed to load workspace.";
@@ -374,6 +415,7 @@ export default function TakeoffPlanFileSection({
     setAiStep("sending");
     setAiError(null);
     setExayardRawCaptured(false);
+    setExayardWaitingInfo(null);
 
     const isExayard = providerConfig?.activeProvider === "exayard";
     // Simulate multi-step progress during the single API call.
@@ -387,20 +429,36 @@ export default function TakeoffPlanFileSection({
         {}
       ) as {
         ok:                    boolean;
-        normalizedTakeoffJson: TakeoffResult;
-        promptVersion:         string | null;
-        modelUsed:             string | null;
-        resultRowId:           string | null;
-        summary:               object | null;
-        pageInventory:         object | null; // v5.4
-        dimensionEvidence:     object | null; // v5.5
+        exayardStatus?:        string;
+        normalizedTakeoffJson?: TakeoffResult;
+        promptVersion?:        string | null;
+        modelUsed?:            string | null;
+        resultRowId?:          string | null;
+        summary?:              object | null;
+        pageInventory?:        object | null;
+        dimensionEvidence?:    object | null;
         exayardRawCaptured?:   boolean;
         exayardWorkflow?:      object | null;
+        retryAfterAt?:         string | null;
+        retryAfterSeconds?:    number | null;
+        message?:              string | null;
+        assessmentId?:         string | null;
+        canResumeExayard?:     boolean;
       };
 
       // Clear progress timers.
       aiTimersRef.current.forEach(clearTimeout);
       aiTimersRef.current = [];
+
+      if (res.ok && res.exayardStatus === "waiting_on_exayard") {
+        setAiStep("waiting");
+        setExayardWaitingInfo({
+          retryAfterAt: res.retryAfterAt ?? (res.exayardWorkflow as { retryAfterAt?: string })?.retryAfterAt ?? null,
+          assessmentId: res.assessmentId ?? (res.exayardWorkflow as { assessmentId?: string })?.assessmentId ?? null,
+          message:      res.message ?? "Exayard is still processing this assessment.",
+        });
+        return;
+      }
 
       if (res.ok && res.normalizedTakeoffJson) {
         setAiStep("done");
@@ -426,6 +484,63 @@ export default function TakeoffPlanFileSection({
       setAiError(msg);
     }
   }, [takeoffJobId, token, workspace, onAiDraftGenerated, providerConfig?.activeProvider]);
+
+  const handleResumeExayard = useCallback(async () => {
+    if (!takeoffJobId || !token || !workspace) return;
+
+    setAiStep("waiting");
+    setAiError(null);
+
+    try {
+      const res = await labApiPost(
+        `/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}/resume-exayard`,
+        token,
+        {}
+      ) as {
+        ok:                   boolean;
+        exayardStatus?:       string;
+        normalizedTakeoffJson?: TakeoffResult;
+        retryAfterAt?:        string | null;
+        message?:             string | null;
+        assessmentId?:        string | null;
+        exayardRawCaptured?:  boolean;
+        promptVersion?:       string | null;
+        modelUsed?:           string | null;
+        resultRowId?:         string | null;
+        summary?:             object | null;
+      };
+
+      if (res.ok && res.exayardStatus === "waiting_on_exayard") {
+        setExayardWaitingInfo({
+          retryAfterAt: res.retryAfterAt ?? null,
+          assessmentId: res.assessmentId ?? exayardWaitingInfo?.assessmentId ?? null,
+          message:      res.message ?? "Exayard is still processing this assessment.",
+        });
+        setAiStep("waiting");
+        return;
+      }
+
+      if (res.ok && res.normalizedTakeoffJson) {
+        setAiStep("done");
+        setExayardRawCaptured(Boolean(res.exayardRawCaptured));
+        setExayardWaitingInfo(null);
+        onAiDraftGenerated(res.normalizedTakeoffJson, workspace.file.originalFilename, {
+          promptVersion: res.promptVersion ?? null,
+          modelUsed:     res.modelUsed ?? null,
+          resultRowId:   res.resultRowId ?? null,
+          summary:       res.summary ?? null,
+          exayardRawCaptured: res.exayardRawCaptured ?? false,
+        });
+        return;
+      }
+
+      throw new Error("Unexpected Exayard resume response");
+    } catch (e) {
+      const msg = e instanceof LabApiError ? e.message : e instanceof Error ? e.message : "Exayard status check failed.";
+      setAiStep("waiting");
+      setAiError(msg);
+    }
+  }, [takeoffJobId, token, workspace, onAiDraftGenerated, exayardWaitingInfo?.assessmentId]);
 
   // ── Remove / archive plan (v5.9.5) ───────────────────────────────────────
   //
@@ -464,6 +579,10 @@ export default function TakeoffPlanFileSection({
 
   const isBusy = uploadStep !== "idle" && uploadStep !== "done" && uploadStep !== "error";
   const isAiBusy = aiStep === "sending" || aiStep === "generating" || aiStep === "recomputing";
+  const canResumeExayard = Boolean(
+    providerConfig?.activeProvider === "exayard" &&
+    (exayardWaitingInfo?.assessmentId || workspace?.exayard?.assessmentId)
+  );
   const canUpload = Boolean(selectedFile) && Boolean(token) && !isBusy;
   const isArchiving = archiveStep === "archiving";
   /** True if the workspace's source file has been archived (shows notice, hides Generate). */
@@ -612,6 +731,34 @@ export default function TakeoffPlanFileSection({
               <p className="ai-draft-error" role="alert">
                 ✗ {aiError}
               </p>
+            )}
+
+            {aiStep === "waiting" && (
+              <div className="ai-draft-waiting" role="status" aria-live="polite">
+                <p className="ai-draft-waiting-msg">
+                  {exayardWaitingInfo?.message ?? "Exayard is still processing this assessment."}
+                  {exayardWaitingInfo?.retryAfterAt && (
+                    <>
+                      {" "}
+                      Try refreshing after {formatRetryAfter(exayardWaitingInfo.retryAfterAt)}.
+                    </>
+                  )}
+                </p>
+                {canResumeExayard && (
+                  <button
+                    type="button"
+                    className="plan-btn plan-btn--secondary ai-draft-resume-btn"
+                    onClick={() => void handleResumeExayard()}
+                  >
+                    Check Exayard status
+                  </button>
+                )}
+                {aiError && (
+                  <p className="ai-draft-warn" role="status">
+                    {aiError}
+                  </p>
+                )}
+              </div>
             )}
 
             {(aiStep === "idle" || aiStep === "done") && !isAiBusy && providerConfig?.activeProvider !== "exayard" && (

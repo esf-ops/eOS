@@ -37,6 +37,7 @@ import {
   getResultById,
 } from "./takeoffWorkspaceService.mjs";
 import { runAiTakeoffExtraction } from "./takeoffExtractionService.mjs";
+import { resumeExayardTakeoff } from "./exayardTakeoffResume.mjs";
 import { readSafeProviderConfigAsync } from "./takeoffAiProvider.mjs";
 import { resolveOrganizationContext } from "../organizations/organizationContext.js";
 
@@ -345,6 +346,39 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase, he
         error: String(e?.message ?? e),
         code,
         ...(e.rawExcerpt != null && { rawExcerpt: e.rawExcerpt }),
+      });
+    }
+  });
+
+  // ── POST /api/takeoff-jobs/:id/resume-exayard ─────────────────────────────
+  //
+  // Single GET /assessments/{id} check for an in-flight Exayard workflow.
+  // Uses stored quote_takeoff_jobs.metadata.exayard.assessmentId.
+  // Returns waiting_on_exayard (non-fatal) or completed raw capture.
+  //
+  app.post("/api/takeoff-jobs/:id/resume-exayard", requireAuth(), guardHead, async (req, res) => {
+    try {
+      const supabase = getSupabase();
+      const orgCtx = await resolveOrganizationContext({ req, supabase, mode: "authenticated" });
+      if (!orgCtx.organizationId) {
+        return res.status(503).json({ ok: false, error: "Organization context not available" });
+      }
+
+      const takeoffJobId = String(req.params.id ?? "").trim();
+      const result = await resumeExayardTakeoff({
+        supabase,
+        organizationId: orgCtx.organizationId,
+        takeoffJobId,
+      });
+
+      return res.json(result);
+    } catch (e) {
+      const status = e.statusCode ?? 500;
+      const code = e.code ?? (status < 500 ? "validation_error" : "server_error");
+      return res.status(status).json({
+        ok:    false,
+        error: String(e?.message ?? e),
+        code,
       });
     }
   });

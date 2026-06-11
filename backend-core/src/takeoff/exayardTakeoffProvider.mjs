@@ -48,33 +48,41 @@ export async function exayardTakeoffProvider(input) {
     pollConfig:        input.pollConfig,
   });
 
+  const safeMeta = buildExayardSafeWorkflowMeta(workflow);
+
   const parsed = {
     schemaVersion: TAKEOFF_SCHEMA_VERSION,
     id:            crypto.randomUUID(),
     status:        "draft",
     rooms:         [],
     confidence:    "low",
-    projectAssumptions: [
-      "Exayard raw result captured — normalization pending.",
-      "Countertop measurements were not mapped into eliteOS TakeoffResult rooms yet.",
-    ],
+    projectAssumptions: workflow.status === "waiting_on_exayard"
+      ? [
+          "Exayard assessment is still processing — raw result not captured yet.",
+          "Use Check Exayard status when the retry window has passed.",
+        ]
+      : [
+          "Exayard raw result captured — normalization pending.",
+          "Countertop measurements were not mapped into eliteOS TakeoffResult rooms yet.",
+        ],
     source: {
       fileName: input.originalFilename ?? null,
       provider: "exayard",
     },
   };
 
-  const safeMeta = buildExayardSafeWorkflowMeta(workflow);
+  const waiting = workflow.status === "waiting_on_exayard";
 
   return {
-    rawText:           JSON.stringify(workflow.rawAssessment ?? workflow),
+    rawText:            JSON.stringify(waiting ? { waiting: true, assessmentId: workflow.assessmentId } : (workflow.rawAssessment ?? workflow)),
     parsed,
-    parseError:        null,
-    modelUsed:         "exayard-platform",
-    usage:             {},
-    provider:          "exayard",
-    exayardWorkflow:   safeMeta,
-    exayardRaw:        workflow.rawAssessment ?? null,
-    exayardRawCaptured: true,
+    parseError:         null,
+    modelUsed:          "exayard-platform",
+    usage:              {},
+    provider:           "exayard",
+    exayardWorkflow:    safeMeta,
+    exayardRaw:         waiting ? null : (workflow.rawAssessment ?? null),
+    exayardRawCaptured: !waiting && Boolean(workflow.rawAssessment),
+    exayardWaiting:     waiting,
   };
 }

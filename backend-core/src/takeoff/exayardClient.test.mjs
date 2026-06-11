@@ -81,6 +81,7 @@ function makeWorkflowFetchMock(overrides = {}) {
     pagesDelayPolls = 0,
     failScope = false,
     failRateLimit = false,
+    rateLimitOnAssessment = false,
     memberships = [{ orgId: "org_test_123", role: "admin", name: "Test Org", slug: "test-org" }],
   } = overrides;
 
@@ -171,6 +172,28 @@ function makeWorkflowFetchMock(overrides = {}) {
     }
     if (url.includes("/assessments/asmt_1")) {
       assessmentPolls += 1;
+      if (rateLimitOnAssessment && assessmentPolls === 1) {
+        return {
+          ok: false,
+          status: 429,
+          text: async () => JSON.stringify({
+            type: "https://errors.exayard.com/rate_limited",
+            title: "Too Many Requests",
+            status: 429,
+            detail: "Rate limit exceeded",
+            code: "rate_limited",
+            retry_after: 120,
+            request_id: "req_rate_test",
+          }),
+          headers: {
+            get: (n) => {
+              if (String(n).toLowerCase() === "content-type") return "application/problem+json";
+              if (String(n) === "Retry-After") return "120";
+              return null;
+            },
+          },
+        };
+      }
       const status = assessmentStatusSequence[Math.min(assessmentPolls - 1, assessmentStatusSequence.length - 1)];
       return okJson({ _id: "asmt_1", projectId: "proj_1", status, elements: [{ name: "CT", qty: 42 }] });
     }
@@ -315,11 +338,12 @@ await withEnvAsync(BASE_ENV, async () => {
     intervalMs: 1,
     timeoutMs: 200,
   });
-  assert.equal(result.status, "completed");
+  assert.equal(result.completed, true);
+  assert.equal(result.assessment.status, "completed");
   console.log("ok T9: poll success");
 });
 
-// T10 — poll timeout
+// T10 — poll timeout (strict mode throws)
 await withEnvAsync(BASE_ENV, async () => {
   const mockFetch = makeWorkflowFetchMock({ assessmentStatusSequence: ["running", "running"] });
   await assert.rejects(
@@ -328,13 +352,14 @@ await withEnvAsync(BASE_ENV, async () => {
       fetchFn: mockFetch,
       intervalMs: 1,
       timeoutMs: 5,
+      mode: "strict",
     }),
     (err) => {
       assert.equal(err.code, "exayard_assessment_timeout");
       return true;
     }
   );
-  console.log("ok T10: poll timeout");
+  console.log("ok T10: poll timeout (strict)");
 });
 
 // T11 — insufficient_scope operator message
@@ -477,4 +502,43 @@ await withEnvAsync({ ...BASE_ENV, EXAYARD_API_KEY: "ey-leak-check-key" }, async 
   console.log("ok T19: no API key or secret leakage in org diagnostics");
 });
 
-console.log("\nexayardClient: all 19 tests passed");
+// T20 — rate_limited during assessment poll → waiting metadata, no throw
+await withEnvAsync(BASE_ENV, async () => {
+  const mockFetch = makeWorkflowFetchMock({ rateLimitOnAssessment: true });
+  const result = await runExayardTakeoffWorkflow({
+    fileBuffer: Buffer.from("%PDF"),
+    mimeType: "application/pdf",
+    filename: "plan.pdf",
+    prompt: "measure",
+    fetchFn: mockFetch,
+    pollConfig: { intervalMs: 1, pagesTimeoutMs: 100, initialAssessmentPollTimeoutMs: 100 },
+  });
+  assert.equal(result.status, "waiting_on_exayard");
+  assert.equal(result.exayardCode, "rate_limited");
+  assert.equal(result.assessmentId, "asmt_1");
+  assert.ok(result.retryAfterAt);
+  assert.equal(result.retryAfterSeconds, 120);
+  assert.equal(result.exayardRequestId, "req_rate_test");
+  const safe = JSON.stringify(result);
+  assert.ok(!safe.includes("ey-test-key-secret"));
+  assert.ok(!safe.includes("upload.example.com"));
+  console.log("ok T20: rate_limited poll returns waiting metadata");
+});
+
+// T21 — brief poll window exhausted → waiting (not fatal)
+await withEnvAsync(BASE_ENV, async () => {
+  const mockFetch = makeWorkflowFetchMock({ assessmentStatusSequence: ["running", "running"] });
+  const pollResult = await pollExayardAssessment({
+    assessmentId: "asmt_1",
+    fetchFn: mockFetch,
+    intervalMs: 1,
+    timeoutMs: 5,
+    mode: "brief",
+  });
+  assert.equal(pollResult.waiting, true);
+  assert.equal(pollResult.completed, false);
+  assert.equal(pollResult.reason, "poll_window_exhausted");
+  console.log("ok T21: brief poll window returns waiting");
+});
+
+console.log("\nexayardClient: all 21 tests passed");

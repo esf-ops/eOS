@@ -35,6 +35,7 @@ import { validateTakeoffResult } from "./takeoffValidator.mjs";
 import { planTakeoffImport } from "./takeoffImportPlanner.mjs";
 import { TAKEOFF_SCHEMA_VERSION } from "./takeoffContract.mjs";
 import { evaluateTakeoffQaGate } from "./takeoffQaGate.mjs";
+import { pickSafeExayardJobMetadata } from "./exayardClient.mjs";
 
 // ── Validation helpers ────────────────────────────────────────────────────────
 
@@ -309,6 +310,7 @@ export async function getTakeoffWorkspace({
     hasSavedResult: Boolean(hasResultRow || hasJobSummary),
     isWorkspace: true,
     file: fileRow ? safeFileSummary(fileRow) : null,
+    exayard: pickSafeExayardJobMetadata(jobRow.metadata)?.exayard ?? null,
   };
 }
 

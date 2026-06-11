@@ -1110,6 +1110,28 @@ details[open] > .lab-section-summary::before { transform: rotate(90deg); }
   font-size: 11px;
   line-height: 1.5;
 }
+.ai-draft-warn {
+  color: var(--eos-warn);
+  font-size: 11px;
+  line-height: 1.5;
+  margin-top: 8px;
+}
+.ai-draft-waiting {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: var(--r-sm);
+  background: var(--eos-info-soft);
+  border: 1px solid var(--eos-info-border);
+}
+.ai-draft-waiting-msg {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--eos-ink);
+}
+.ai-draft-resume-btn {
+  margin-top: 4px;
+}
 .ai-provider-badge-warn {
   color: var(--eos-warn);
   font-size: 11px;
