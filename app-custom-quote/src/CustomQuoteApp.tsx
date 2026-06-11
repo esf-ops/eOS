@@ -583,7 +583,7 @@ export default function CustomQuoteApp() {
                     <dd>{scopeSummary.projectSqft > 0 ? scopeSummary.projectSqft.toFixed(1) : "—"}</dd>
                   </div>
                   <div className="ie-hero-stat">
-                    <dt>Pricing mode</dt>
+                    <dt>Basis</dt>
                     <dd>{pricingModeLabel(material.pricingMode)}</dd>
                   </div>
                   <div className="ie-hero-stat">
@@ -681,19 +681,39 @@ export default function CustomQuoteApp() {
                 </div>
               ) : null}
 
+              {err ? (
+                <div className="warn-box" role="alert">
+                  <strong>Error</strong>
+                  <p style={{ margin: "6px 0 0" }}>{err}</p>
+                </div>
+              ) : null}
+
               {sessionToken ? (
                 <div
-                  className={`ie-live-strip${backendCalcOk === true ? " is-confirmed" : backendCalcOk === false ? " is-warn" : " is-preview"}`}
+                  className={`ie-live-strip${
+                    backendCalcOk === true
+                      ? " is-confirmed"
+                      : backendCalcOk === false
+                        ? " is-warn"
+                        : " is-preview"
+                  }`}
                   role="status"
                   aria-live="polite"
                 >
                   <span className="ie-live-strip-dot" aria-hidden />
                   <span className="ie-live-strip-label">
-                    {backendCalcOk === true ? "Backend connected" : backendCalcOk === false ? "Calculate failed" : "Live preview"}
+                    {backendCalcOk === true
+                      ? "Backend connected"
+                      : backendCalcOk === false
+                        ? "Calculate failed"
+                        : "Live preview"}
                   </span>
                   <span className="ie-live-strip-copy">
-                    Backend pricing policy applies at Calculate. Custom material pricing is calculated from slab, freight,
-                    fabrication, and approved pricing policy.
+                    {backendCalcOk === true
+                      ? "Live backend calculation connected. Tap Calculate any time to verify totals."
+                      : backendCalcOk === false
+                        ? "Live preview for totals — backend Calculate did not connect. Tap Calculate to retry."
+                        : "Backend pricing policy applies at Calculate."}
                   </span>
                 </div>
               ) : null}
@@ -717,13 +737,6 @@ export default function CustomQuoteApp() {
                   </button>
                 </div>
               </div>
-
-              {err ? (
-                <div className="warn-box" role="alert">
-                  <strong>Error</strong>
-                  <p style={{ margin: "6px 0 0" }}>{err}</p>
-                </div>
-              ) : null}
 
               {/* 1 Job Info */}
               <section id="sec-job" className="card">
@@ -1164,7 +1177,7 @@ export default function CustomQuoteApp() {
                 <section id="sec-review" className="card">
                   <div className="ie-section-head">
                     <h2 className="ie-section-title">Review</h2>
-                    <p className="ie-section-meta">Custom quote cost basis · Pricing mode · Utilization &amp; multiplier warnings</p>
+                    <p className="ie-section-meta">Custom quote cost basis · Utilization &amp; multiplier warnings</p>
                   </div>
                   {!calc ? (
                     <p className="muted">
@@ -1306,7 +1319,7 @@ export default function CustomQuoteApp() {
                     {backendCalcOk ? (
                       <p className="ie-summary-hero-sub is-confirmed">
                         <span className="ie-summary-hero-sub-dot" aria-hidden />
-                        Last Calculate: <strong>{money(calc?.sellPrice)}</strong>
+                        Backend-confirmed sell price: <strong>{money(calc?.sellPrice)}</strong>
                       </p>
                     ) : (
                       <p className="ie-summary-hero-sub is-preview">
