@@ -372,6 +372,7 @@ export function attachQuoteLibraryRoutes(app, deps) {
 
       const limit = Math.min(500, Math.max(1, Number.parseInt(String(req.query.limit || "80"), 10) || 80));
       const offset = Math.max(0, Number.parseInt(String(req.query.offset || "0"), 10) || 0);
+      const view = pickStr(req.query.view);
 
       let qb = db.from("quote_headers").select(QUOTE_LIBRARY_LIST_SELECT, { count: "exact" });
       qb = applyQuoteHeaderOrgScope(qb, orgId, hasQuoteHeadersOrg);

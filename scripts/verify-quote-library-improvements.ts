@@ -110,6 +110,15 @@ test("BE-11 list endpoint uses applyQuoteListFilters (no duplicated search block
   assert.match(backendSrc, /qb = applyQuoteListFilters\(qb, req\.query/);
 });
 
+test("BE-12 list endpoint defines view before needs_handoff post-filter", () => {
+  const listHandler = backendSrc.match(
+    /app\.get\("\/api\/quote-library\/quotes"[\s\S]*?app\.post\("\/api\/quote-library\/quotes\/batch\/archive"/
+  );
+  if (!listHandler) throw new Error("quote list handler not found");
+  assert.match(listHandler[0], /const view = pickStr\(req\.query\.view\)/);
+  assert.match(listHandler[0], /if \(view === "needs_handoff"\)/);
+});
+
 console.log("\n── Frontend: QuoteLibraryApp.tsx ────────────────────────────────────");
 
 test("FE-1 formatPersonDisplayName helper exists", () => {
