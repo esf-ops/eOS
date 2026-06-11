@@ -403,6 +403,7 @@ export default function InternalEstimateApp() {
     () => (readQuoteIdFromSearch() !== null ? "loading" : "not_requested")
   );
   const [hydrationGaps, setHydrationGaps] = useState<string[]>([]);
+  const [lastSavedQuoteNumber, setLastSavedQuoteNumber] = useState<string | null>(null);
   const [lastSavedQuoteId, setLastSavedQuoteId] = useState<string | null>(null);
 
   const [quoteWorkflowStatus, setQuoteWorkflowStatus] = useState("draft");
