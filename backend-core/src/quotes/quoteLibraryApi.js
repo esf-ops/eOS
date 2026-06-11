@@ -21,6 +21,11 @@ import {
 } from "../integrations/mondayQuoteSync.js";
 import { restoreInternalQuoteAsNewRevision } from "./internalQuoteRestore.js";
 import { buildMorawareEntryDocPayload, buildQuickBooksEntryDocPayload } from "./quoteLibraryHandoffPayloads.js";
+import {
+  applyQuoteLibrarySearch,
+  quoteAccountFilterOrClause,
+  QUOTE_LIBRARY_LIST_SELECT
+} from "./quoteLibrarySearch.js";
 
 const jsonParser = express.json({ limit: "2mb" });
 
@@ -58,6 +63,8 @@ function deriveAccountName(row) {
   const r = row && typeof row === "object" ? row : {};
   const explicit = pickStr(r.account_name);
   if (explicit) return explicit;
+  const snapAccount = pickStr(r.snapshot_account);
+  if (snapAccount) return snapAccount;
   const snap = r.calculation_snapshot && typeof r.calculation_snapshot === "object" ? r.calculation_snapshot : {};
   const iu = snap.internal_ui && typeof snap.internal_ui === "object" ? snap.internal_ui : {};
   return (
@@ -167,20 +174,19 @@ function applyQuoteListFilters(qb, query, opts = {}) {
 
   const search = pickStr(query.search);
   if (search) {
-    const s = search.replace(/%/g, "").slice(0, 80);
-    const pat = `%${s}%`;
-    try {
-      qb = qb.or(
-        `customer_name.ilike.${pat},project_name.ilike.${pat},project_address.ilike.${pat},quote_number.ilike.${pat},city.ilike.${pat},state.ilike.${pat},zip.ilike.${pat},sales_rep.ilike.${pat},branch.ilike.${pat},quote_status.ilike.${pat}`
-      );
-    } catch { /* ignore */ }
+    qb = applyQuoteLibrarySearch(qb, search);
   }
 
   const account = pickStr(query.account);
   if (account) {
-    const a = account.replace(/%/g, "").slice(0, 80);
-    const pat = `%${a}%`;
-    try { qb = qb.or(`customer_name.ilike.${pat},project_name.ilike.${pat},quote_number.ilike.${pat}`); } catch { /* ignore */ }
+    const clause = quoteAccountFilterOrClause(account);
+    if (clause) {
+      try {
+        qb = qb.or(clause);
+      } catch {
+        /* ignore */
+      }
+    }
   }
 
   const status = pickStr(query.status);
@@ -214,12 +220,24 @@ function applyQuoteListFilters(qb, query, opts = {}) {
  * @returns {number|null}
  */
 function pickSnapshotCustomerDisplayTotal(r) {
+  const fromAlias = Number(r.snapshot_customer_display_total);
+  if (Number.isFinite(fromAlias) && fromAlias > 0) return fromAlias;
   const snap = r.calculation_snapshot;
   if (!snap || typeof snap !== "object") return null;
   const iu = snap.internal_ui;
   if (!iu || typeof iu !== "object") return null;
   const cdt = Number(iu.customer_display_total);
   return Number.isFinite(cdt) && cdt > 0 ? cdt : null;
+}
+
+function pickListRowPricingMode(r) {
+  const fromAlias = pickStr(r.snapshot_pricing_mode);
+  if (fromAlias) return fromAlias;
+  const snap = r.calculation_snapshot;
+  if (!snap || typeof snap !== "object") return null;
+  const iu = snap.internal_ui;
+  if (!iu || typeof iu !== "object") return null;
+  return pickStr(iu.internal_material_basis) || null;
 }
 
 function mapListRow(r, handoffDocsByQuote) {
@@ -256,7 +274,7 @@ function mapListRow(r, handoffDocsByQuote) {
     zip: r.zip,
     quote_source: r.quote_source,
     quote_status: r.quote_status,
-    pricing_mode: r.calculation_snapshot?.internal_ui?.internal_material_basis ?? null,
+    pricing_mode: pickListRowPricingMode(r),
     sales_rep: r.sales_rep,
     branch: r.branch,
     grand_total: r.grand_total,
@@ -355,10 +373,7 @@ export function attachQuoteLibraryRoutes(app, deps) {
       const limit = Math.min(500, Math.max(1, Number.parseInt(String(req.query.limit || "80"), 10) || 80));
       const offset = Math.max(0, Number.parseInt(String(req.query.offset || "0"), 10) || 0);
 
-      const selectCols =
-        "id,quote_number,revision_number,revision_label,quote_family_root_id,is_current_revision,archived_at,quote_source,quote_status,customer_name,customer_email,customer_phone,project_name,project_address,city,state,zip,sales_rep,branch,grand_total,estimated_sqft,created_at,updated_at,calculation_snapshot,prepared_by";
-
-      let qb = db.from("quote_headers").select(selectCols, { count: "exact" });
+      let qb = db.from("quote_headers").select(QUOTE_LIBRARY_LIST_SELECT, { count: "exact" });
       qb = applyQuoteHeaderOrgScope(qb, orgId, hasQuoteHeadersOrg);
 
       const includeArchived =
@@ -382,52 +397,10 @@ export function attachQuoteLibraryRoutes(app, deps) {
         }
       }
 
-      const view = pickStr(req.query.view);
-      if (view === "internal_estimates") qb = qb.eq("quote_source", "internal_quote");
-      else if (view === "public_leads") qb = qb.eq("quote_source", "public_consumer");
-      else if (view === "sold_jobs" || view === "needs_handoff") {
-        qb = qb.or("quote_status.eq.sold,quote_status.eq.won");
-      }
-
-      const my = pickStr(req.query.my);
-      if (my === "1" || my === "true") {
-        const email = pickStr(req.user?.email);
-        const name = pickStr(req.user?.full_name);
-        if (email || name) {
-          const parts = [];
-          if (email) parts.push(`sales_rep.ilike.%${email.slice(0, 48)}%`);
-          if (name) parts.push(`sales_rep.ilike.%${name.slice(0, 48)}%`);
-          if (parts.length) qb = qb.or(parts.join(","));
-        }
-      }
-
-      const search = pickStr(req.query.search);
-      if (search) {
-        const s = search.replace(/%/g, "").slice(0, 80);
-        const pat = `%${s}%`;
-        qb = qb.or(
-          `customer_name.ilike.${pat},project_name.ilike.${pat},project_address.ilike.${pat},quote_number.ilike.${pat},city.ilike.${pat},state.ilike.${pat},zip.ilike.${pat},sales_rep.ilike.${pat},branch.ilike.${pat},quote_status.ilike.${pat}`
-        );
-      }
-
-      const account = pickStr(req.query.account);
-      if (account) {
-        const a = account.replace(/%/g, "").slice(0, 80);
-        const pat = `%${a}%`;
-        qb = qb.or(`customer_name.ilike.${pat},project_name.ilike.${pat},quote_number.ilike.${pat}`);
-      }
-
-      const status = pickStr(req.query.status);
-      if (status) qb = qb.eq("quote_status", status);
-
-      const branch = pickStr(req.query.branch);
-      if (branch) qb = qb.ilike("branch", `%${branch.slice(0, 40)}%`);
-
-      const salesRep = pickStr(req.query.sales_rep);
-      if (salesRep) qb = qb.ilike("sales_rep", `%${salesRep.slice(0, 40)}%`);
-
-      const quoteSource = pickStr(req.query.quote_source);
-      if (quoteSource) qb = qb.eq("quote_source", quoteSource);
+      qb = applyQuoteListFilters(qb, req.query, {
+        userEmail: pickStr(req.user?.email),
+        userName: pickStr(req.user?.full_name)
+      });
 
       const pricingMode = pickStr(req.query.pricing_mode);
       if (pricingMode) {
@@ -438,10 +411,6 @@ export function attachQuoteLibraryRoutes(app, deps) {
         }
       }
 
-      const cf = pickStr(req.query.created_from);
-      if (cf) qb = qb.gte("created_at", cf);
-      const ct = pickStr(req.query.created_to);
-      if (ct) qb = qb.lte("created_at", ct);
       const uf = pickStr(req.query.updated_from);
       if (uf) qb = qb.gte("updated_at", uf);
       const ut = pickStr(req.query.updated_to);

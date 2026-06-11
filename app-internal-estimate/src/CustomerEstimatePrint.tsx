@@ -71,6 +71,9 @@ const BRANCH_LOCATIONS = [
 ] as const;
 
 export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps) {
+  const quoteRef = props.quoteNumber?.trim();
+  if (!quoteRef) return null;
+
   const addrLine = [props.projectAddress, props.city, props.state].filter(Boolean).join(", ");
   const display = props.customerDisplay;
 
@@ -96,7 +99,7 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
           </div>
           <div className="cep-overview-item">
             <dt>Quote / estimate ref.</dt>
-            <dd>{props.quoteNumber?.trim() || "—"}</dd>
+            <dd>{quoteRef}</dd>
           </div>
           <div className="cep-overview-item">
             <dt>Customer</dt>

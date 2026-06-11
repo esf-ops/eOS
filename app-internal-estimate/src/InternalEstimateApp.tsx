@@ -42,6 +42,11 @@ import type { EliteosTopbarMenuItem } from "../../shared/eliteos-ui/EliteosTopba
 import RoomScopeBuilder from "@quote-ui/RoomScopeBuilder";
 import CompareGroupsAndNotesStep from "./components/internal-estimate/CompareGroupsAndNotesStep";
 import EmailEstimateModal from "./components/email-estimate/EmailEstimateModal";
+import {
+  canSaveBeforeCustomerOutput,
+  getCustomerOutputBlockReason,
+  UNSAVED_QUOTE_OUTPUT_MESSAGE
+} from "./lib/quoteOutputGate";
 
 const MATERIAL_GROUPS = [
   "Group Promo",
@@ -403,6 +408,7 @@ export default function InternalEstimateApp() {
   const startNewAfterSaveRef = useRef<
     null | "save_revision" | "update_existing" | "restore" | "save_as_new_quote"
   >(null);
+  const customerOutputAfterSaveRef = useRef<null | "print" | "email">(null);
   // Holds the latest customer-facing display total so buildSubmitPayload can read
   // it at call time without declaring it in its deps array. Writing to a ref in the
   // render body is a standard React escape-hatch for "always up-to-date" values.
@@ -420,6 +426,7 @@ export default function InternalEstimateApp() {
   const [submitBusy, setSubmitBusy] = useState(false);
   const [submitMsg, setSubmitMsg] = useState<string | null>(null);
   const [submitDiagnostic, setSubmitDiagnostic] = useState<string | null>(null);
+  const [customerOutputBlockMsg, setCustomerOutputBlockMsg] = useState<string | null>(null);
   const [backendCalcOk, setBackendCalcOk] = useState<boolean | null>(null);
 
   const lastCalcLive = !usedFallback && apiPartner != null;
@@ -847,6 +854,38 @@ export default function InternalEstimateApp() {
     return computeRevisionBaselineSig() !== revisionBaselineSig;
   }, [revisionBaselineSig, computeRevisionBaselineSig]);
 
+  const effectiveQuoteHeaderId = lastSavedQuoteId ?? urlQuoteId;
+  const effectiveQuoteNumber =
+    lastSavedQuoteNumber?.trim() || familyLatestQuoteNumber?.trim() || null;
+
+  const customerOutputGateInput = useMemo(
+    () => ({
+      sessionToken,
+      quoteHeaderId: effectiveQuoteHeaderId,
+      quoteNumber: effectiveQuoteNumber,
+      hydratedIsCurrentRevision,
+      revisionDirty,
+      revisionNoteDraft,
+      submitBusy,
+      restoreBusy
+    }),
+    [
+      sessionToken,
+      effectiveQuoteHeaderId,
+      effectiveQuoteNumber,
+      hydratedIsCurrentRevision,
+      revisionDirty,
+      revisionNoteDraft,
+      submitBusy,
+      restoreBusy
+    ]
+  );
+
+  const customerOutputBlockReason = useMemo(
+    () => getCustomerOutputBlockReason(customerOutputGateInput),
+    [customerOutputGateInput]
+  );
+
   const saveRevisionBlockReason = useMemo(() => {
     if (!urlQuoteId) return null;
     if (!sessionToken) return "Sign in to save revisions to Quote Library.";
@@ -905,29 +944,9 @@ export default function InternalEstimateApp() {
     return null;
   }, [urlQuoteId, sessionToken, hydratedIsCurrentRevision, submitBusy, restoreBusy]);
 
-  const emailEstimateQuoteId = lastSavedQuoteId ?? urlQuoteId;
+  const emailEstimateQuoteId = effectiveQuoteHeaderId;
 
-  const emailEstimateBlockReason = useMemo(() => {
-    if (!sessionToken) return "Sign in to email an estimate.";
-    if (!emailEstimateQuoteId) return "Save this estimate before emailing.";
-    if (hydratedIsCurrentRevision === null) return "Loading quote metadata…";
-    if (hydratedIsCurrentRevision === false) {
-      return "This revision is read-only. Open the latest revision before emailing.";
-    }
-    if (revisionDirty || Boolean(revisionNoteDraft.trim())) {
-      return "Save your changes before emailing the estimate.";
-    }
-    if (submitBusy || restoreBusy) return "Save in progress…";
-    return null;
-  }, [
-    sessionToken,
-    emailEstimateQuoteId,
-    hydratedIsCurrentRevision,
-    revisionDirty,
-    revisionNoteDraft,
-    submitBusy,
-    restoreBusy
-  ]);
+  const emailEstimateBlockReason = customerOutputBlockReason;
 
   const emailEstimateDefaultSubject = useMemo(() => {
     const qn = lastSavedQuoteNumber?.trim();
@@ -1377,14 +1396,34 @@ export default function InternalEstimateApp() {
         if (Array.isArray(raw.warnings) && raw.warnings.length) {
           setSubmitMsg((prev) => `${prev} ${(raw.warnings as string[]).join(" ")}`);
         }
+        const pendingOutput = customerOutputAfterSaveRef.current;
+        customerOutputAfterSaveRef.current = null;
+        if (pendingOutput) {
+          if (!qn.trim()) {
+            setSubmitMsg(
+              "Save succeeded but no quote number was assigned. Contact support before printing or emailing."
+            );
+            console.error("[internal-estimate] save missing quote_number before customer output", {
+              quoteId: qid || null,
+              pendingOutput
+            });
+          } else {
+            if (pendingOutput === "print") {
+              window.setTimeout(() => window.print(), 0);
+            } else {
+              setEmailEstimateModalOpen(true);
+            }
+          }
+        }
         const after = startNewAfterSaveRef.current;
         if (after === "save_revision" || after === "update_existing" || after === "save_as_new_quote") {
           startNewAfterSaveRef.current = null;
           beginNewQuote();
         }
       } else {
-        startNewAfterSaveRef.current = null;
-        setSubmitMsg(String(raw.error || "Something went wrong while saving."));
+      startNewAfterSaveRef.current = null;
+      customerOutputAfterSaveRef.current = null;
+      setSubmitMsg(String(raw.error || "Something went wrong while saving."));
         setSubmitDiagnostic(JSON.stringify({ route: "POST /api/internal-quotes/save", response: raw }, null, 2));
       }
     } catch (e: unknown) {
@@ -1406,6 +1445,7 @@ export default function InternalEstimateApp() {
         return;
       }
       startNewAfterSaveRef.current = null;
+      customerOutputAfterSaveRef.current = null;
       setSubmitMsg("Save failed unexpectedly. Please try again.");
       setSubmitDiagnostic(String(e));
     } finally {
@@ -1425,6 +1465,47 @@ export default function InternalEstimateApp() {
     applyPostSaveQuoteIdentity,
     beginNewQuote
   ]);
+
+  const requestCustomerOutput = useCallback(
+    (action: "print" | "email") => {
+      setCustomerOutputBlockMsg(null);
+      const block = getCustomerOutputBlockReason(customerOutputGateInput);
+      if (block) {
+        if (canSaveBeforeCustomerOutput(block)) {
+          customerOutputAfterSaveRef.current = action;
+          void handleSubmit(urlQuoteId ? saveIntent : "create");
+          setSubmitMsg(
+            action === "print"
+              ? "Saving this quote before printing…"
+              : "Saving this quote before emailing…"
+          );
+          return;
+        }
+        setCustomerOutputBlockMsg(block);
+        console.warn("[internal-estimate] customer output blocked", {
+          action,
+          quoteHeaderId: effectiveQuoteHeaderId ?? null,
+          quoteNumberPresent: Boolean(effectiveQuoteNumber),
+          reason: block
+        });
+        return;
+      }
+      if (action === "print") {
+        printCustomerEstimate();
+      } else {
+        setEmailEstimateModalOpen(true);
+      }
+    },
+    [
+      customerOutputGateInput,
+      handleSubmit,
+      urlQuoteId,
+      saveIntent,
+      printCustomerEstimate,
+      effectiveQuoteHeaderId,
+      effectiveQuoteNumber
+    ]
+  );
 
   const scopePreview = useMemo(() => {
     const drafts = buildRoomDraftsForCalculate();
@@ -3784,23 +3865,29 @@ export default function InternalEstimateApp() {
             <button
               type="button"
               className="btn secondary btn-sm"
-              onClick={printCustomerEstimate}
-              title="Print customer estimate PDF"
+              disabled={calcBusy || Boolean(customerOutputBlockReason)}
+              title={customerOutputBlockReason ?? "Print customer estimate PDF"}
+              onClick={() => requestCustomerOutput("print")}
             >
               Print estimate
             </button>
             <button
               type="button"
               className="btn secondary btn-sm"
-              disabled={!sessionToken}
+              disabled={calcBusy || Boolean(customerOutputBlockReason)}
               title={
-                emailEstimateBlockReason ??
-                (emailEstimateQuoteId ? "Email customer estimate (dry run)" : "Save before emailing")
+                customerOutputBlockReason ??
+                (emailEstimateQuoteId ? "Email customer estimate (dry run)" : UNSAVED_QUOTE_OUTPUT_MESSAGE)
               }
-              onClick={() => setEmailEstimateModalOpen(true)}
+              onClick={() => requestCustomerOutput("email")}
             >
               Email estimate
             </button>
+            {customerOutputBlockMsg ? (
+              <p className="ie-output-block-msg" role="alert">
+                {customerOutputBlockMsg}
+              </p>
+            ) : null}
             {urlQuoteId ? (
               hydratedIsCurrentRevision === false ? (
                 <button
@@ -3943,7 +4030,7 @@ export default function InternalEstimateApp() {
         blockReason={emailEstimateBlockReason}
         defaultToEmail={email}
         defaultSubject={emailEstimateDefaultSubject}
-        quoteNumber={lastSavedQuoteNumber}
+        quoteNumber={effectiveQuoteNumber}
         revisionLabel={hydratedDisplayRevision}
       />
 
@@ -3952,24 +4039,26 @@ export default function InternalEstimateApp() {
       </footer>
       </div>
 
-      <CustomerEstimatePrint
-        accountName={accountName}
-        customerName={customerName}
-        projectName={projectName}
-        projectAddress={projectAddress}
-        city={city}
-        state={state}
-        branch={branch}
-        salesRep={salesRep}
-        preparedBy={enteredBy}
-        quoteNumber={lastSavedQuoteNumber}
-        primaryGroup={topMaterialGroup}
-        primaryColorLabel={primaryColorLabel}
-        colorTbd={colorTbd}
-        estimateTotalExact={estimateTotalExact}
-        customerDisplay={customerEstimateDisplay}
-        estimateDate={new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}
-      />
+      {effectiveQuoteNumber ? (
+        <CustomerEstimatePrint
+          accountName={accountName}
+          customerName={customerName}
+          projectName={projectName}
+          projectAddress={projectAddress}
+          city={city}
+          state={state}
+          branch={branch}
+          salesRep={salesRep}
+          preparedBy={enteredBy}
+          quoteNumber={effectiveQuoteNumber}
+          primaryGroup={topMaterialGroup}
+          primaryColorLabel={primaryColorLabel}
+          colorTbd={colorTbd}
+          estimateTotalExact={estimateTotalExact}
+          customerDisplay={customerEstimateDisplay}
+          estimateDate={new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}
+        />
+      ) : null}
     </div>
   );
 }

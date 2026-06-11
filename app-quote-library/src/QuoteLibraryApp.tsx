@@ -257,6 +257,7 @@ export default function QuoteLibraryApp() {
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
   const [revisions, setRevisions] = useState<Record<string, unknown>[]>([]);
   const [showArchived, setShowArchived] = useState(false);
+  const [showAllRevisions, setShowAllRevisions] = useState(false);
 
   // Debounce the raw search input → committed search (avoids a fetch on every keystroke).
   useEffect(() => {
@@ -274,19 +275,19 @@ export default function QuoteLibraryApp() {
     tab: TabId; search: string; accountQ: string; status: string;
     quoteSource: string; branch: string; salesRep: string;
     createdFrom: string; createdTo: string; handoffStatus: string;
-    showArchived: boolean;
+    showArchived: boolean; showAllRevisions: boolean;
   };
   const filterStateRef = useRef<FilterSnapshot>({
     tab: "all", search: "", accountQ: "", status: "",
     quoteSource: "", branch: "", salesRep: "",
-    createdFrom: "", createdTo: "", handoffStatus: "", showArchived: false
+    createdFrom: "", createdTo: "", handoffStatus: "", showArchived: false, showAllRevisions: false
   });
   useEffect(() => {
     filterStateRef.current = {
       tab, search, accountQ, status, quoteSource, branch, salesRep,
-      createdFrom, createdTo, handoffStatus, showArchived
+      createdFrom, createdTo, handoffStatus, showArchived, showAllRevisions
     };
-  }, [tab, search, accountQ, status, quoteSource, branch, salesRep, createdFrom, createdTo, handoffStatus, showArchived]);
+  }, [tab, search, accountQ, status, quoteSource, branch, salesRep, createdFrom, createdTo, handoffStatus, showArchived, showAllRevisions]);
 
   const internalBase = useMemo(() => internalEstimateUrl(), []);
   const homeBase = useMemo(() => homeLauncherUrl(), []);
@@ -324,8 +325,9 @@ export default function QuoteLibraryApp() {
     if (createdTo) n += 1;
     if (handoffStatus) n += 1;
     if (showArchived) n += 1;
+    if (showAllRevisions) n += 1;
     return n;
-  }, [searchInput, accountQ, status, quoteSource, branch, salesRep, createdFrom, createdTo, handoffStatus, showArchived]);
+  }, [searchInput, accountQ, status, quoteSource, branch, salesRep, createdFrom, createdTo, handoffStatus, showArchived, showAllRevisions]);
 
   const listContextKey = useMemo(
     () =>
@@ -341,11 +343,12 @@ export default function QuoteLibraryApp() {
         createdTo,
         handoffStatus,
         showArchived,
+        showAllRevisions,
         sort,
         direction,
         pageSize
       }),
-    [tab, search, accountQ, status, quoteSource, branch, salesRep, createdFrom, createdTo, handoffStatus, showArchived, sort, direction, pageSize]
+    [tab, search, accountQ, status, quoteSource, branch, salesRep, createdFrom, createdTo, handoffStatus, showArchived, showAllRevisions, sort, direction, pageSize]
   );
 
   const clearFilters = useCallback(() => {
@@ -360,6 +363,7 @@ export default function QuoteLibraryApp() {
     setCreatedTo("");
     setHandoffStatus("");
     setShowArchived(false);
+    setShowAllRevisions(false);
     setPageOffset(0);
     setSelectedIds(new Set());
   }, []);
@@ -481,6 +485,7 @@ export default function QuoteLibraryApp() {
     if (fs.createdFrom) params.set("created_from", fs.createdFrom);
     if (fs.createdTo) params.set("created_to", fs.createdTo);
     if (fs.showArchived) params.set("include_archived", "1");
+    if (fs.showAllRevisions) params.set("latest_revision_only", "0");
     if (fs.tab === "my") params.set("my", "1");
     if (fs.tab === "internal") params.set("view", "internal_estimates");
     if (fs.tab === "public") params.set("view", "public_leads");
@@ -527,6 +532,7 @@ export default function QuoteLibraryApp() {
       if (createdTo) params.set("created_to", createdTo);
       if (handoffStatus) params.set("handoff_status", handoffStatus);
       if (showArchived) params.set("include_archived", "1");
+      if (showAllRevisions) params.set("latest_revision_only", "0");
       if (tab === "my") params.set("my", "1");
       if (tab === "internal") params.set("view", "internal_estimates");
       if (tab === "public") params.set("view", "public_leads");
@@ -580,6 +586,7 @@ export default function QuoteLibraryApp() {
     sort,
     direction,
     showArchived,
+    showAllRevisions,
     pageSize,
     pageOffset
   ]);
@@ -1108,6 +1115,10 @@ export default function QuoteLibraryApp() {
               <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 22 }}>
                 <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
                 Show archived
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 22 }} title="Include older revisions in the list (default shows latest revision only)">
+                <input type="checkbox" checked={showAllRevisions} onChange={(e) => setShowAllRevisions(e.target.checked)} />
+                Include older revisions
               </label>
               <label>
                 Sort by

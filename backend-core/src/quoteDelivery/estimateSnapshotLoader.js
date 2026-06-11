@@ -10,6 +10,10 @@ import {
   tableHasOrganizationId
 } from "../organizations/organizationContext.js";
 import { isMissingRelationError } from "../quotes/quotePersist.js";
+import {
+  quoteOutputGateLogMeta,
+  validateQuoteReadyForCustomerOutput
+} from "../quotes/quoteOutputGate.js";
 
 function isUuid(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
@@ -63,6 +67,17 @@ export async function loadInternalQuoteForDelivery(db, req, quoteId) {
       httpStatus: 422,
       error: "Quote delivery is only supported for internal estimates in Phase 1",
       code: "unsupported_quote_source"
+    };
+  }
+
+  const outputGate = validateQuoteReadyForCustomerOutput(row);
+  if (!outputGate.ok) {
+    console.warn("[quote-delivery] blocked customer output", quoteOutputGateLogMeta(row, "delivery_load"));
+    return {
+      ok: false,
+      httpStatus: outputGate.httpStatus,
+      error: outputGate.error,
+      code: outputGate.code
     };
   }
 

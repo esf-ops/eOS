@@ -21,9 +21,14 @@ function formatAddress(header) {
  */
 export function buildEstimateEmailContent(display, opts = {}) {
   const h = display.header;
+  const quoteNumber = String(h.quoteNumber ?? "").trim();
+  if (!quoteNumber) {
+    throw new Error("Customer estimate email requires a saved quote number");
+  }
+
   const subject =
     opts.subject?.trim() ||
-    defaultSubject(h.quoteNumber, h.projectName, h.customerName);
+    defaultSubject(quoteNumber, h.projectName, h.customerName);
 
   const htmlPreview = buildHtmlEmail(display);
   const textPreview = buildTextEmail(display);
@@ -43,6 +48,10 @@ function defaultSubject(quoteNumber, projectName, customerName) {
  */
 function buildHtmlEmail(display) {
   const h = display.header;
+  const quoteNumber = String(h.quoteNumber ?? "").trim();
+  if (!quoteNumber) {
+    throw new Error("Customer estimate email requires a saved quote number");
+  }
   const addr = formatAddress(h);
 
   const summaryRows = display.summaryRows
@@ -76,7 +85,7 @@ function buildHtmlEmail(display) {
   <h1 style="font-size:20px;margin:0 0 8px;">Elite Stone Fabrication Estimate</h1>
   <p style="margin:0 0 16px;color:#555;">Customer-facing estimate summary</p>
   <table style="width:100%;border-collapse:collapse;margin-bottom:16px;">
-    <tr><td style="padding:4px 0;color:#666;">Quote #</td><td style="padding:4px 0;">${escHtml(h.quoteNumber || "—")}${h.revisionLabel ? ` (${escHtml(h.revisionLabel)})` : ""}</td></tr>
+    <tr><td style="padding:4px 0;color:#666;">Quote #</td><td style="padding:4px 0;">${escHtml(quoteNumber)}${h.revisionLabel ? ` (${escHtml(h.revisionLabel)})` : ""}</td></tr>
     ${h.customerName ? `<tr><td style="padding:4px 0;color:#666;">Customer</td><td style="padding:4px 0;">${escHtml(h.customerName)}</td></tr>` : ""}
     ${h.projectName ? `<tr><td style="padding:4px 0;color:#666;">Project</td><td style="padding:4px 0;">${escHtml(h.projectName)}</td></tr>` : ""}
     ${addr ? `<tr><td style="padding:4px 0;color:#666;">Location</td><td style="padding:4px 0;">${escHtml(addr)}</td></tr>` : ""}
@@ -98,10 +107,14 @@ function buildHtmlEmail(display) {
  */
 function buildTextEmail(display) {
   const h = display.header;
+  const quoteNumber = String(h.quoteNumber ?? "").trim();
+  if (!quoteNumber) {
+    throw new Error("Customer estimate email requires a saved quote number");
+  }
   const lines = [
     "Elite Stone Fabrication Estimate",
     "================================",
-    h.quoteNumber ? `Quote #: ${h.quoteNumber}${h.revisionLabel ? ` (${h.revisionLabel})` : ""}` : null,
+    `Quote #: ${quoteNumber}${h.revisionLabel ? ` (${h.revisionLabel})` : ""}`,
     h.customerName ? `Customer: ${h.customerName}` : null,
     h.projectName ? `Project: ${h.projectName}` : null,
     formatAddress(h) ? `Location: ${formatAddress(h)}` : null,

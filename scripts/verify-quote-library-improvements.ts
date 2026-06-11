@@ -100,6 +100,16 @@ test("BE-9 HOTFIX: metrics response uses pickStr(req.query.quote_source), not un
 
 const frontendSrc = read("app-quote-library/src/QuoteLibraryApp.tsx");
 
+test("BE-10 quote library search uses applyQuoteLibrarySearch", () => {
+  assert.match(backendSrc, /applyQuoteLibrarySearch/);
+  assert.match(backendSrc, /quoteAccountFilterOrClause/);
+  assert.match(backendSrc, /QUOTE_LIBRARY_LIST_SELECT/);
+});
+
+test("BE-11 list endpoint uses applyQuoteListFilters (no duplicated search block)", () => {
+  assert.match(backendSrc, /qb = applyQuoteListFilters\(qb, req\.query/);
+});
+
 console.log("\n── Frontend: QuoteLibraryApp.tsx ────────────────────────────────────");
 
 test("FE-1 formatPersonDisplayName helper exists", () => {
@@ -210,6 +220,11 @@ function formatPersonDisplayName(raw: unknown): string {
   const formatted = words.map((w: string) => (w[0]?.toUpperCase() ?? "") + w.slice(1).toLowerCase()).join(" ");
   return formatted || s;
 }
+
+test("FE-19 include older revisions filter", () => {
+  assert.match(frontendSrc, /showAllRevisions/);
+  assert.match(frontendSrc, /latest_revision_only", "0"/);
+});
 
 console.log("\n── Runtime: formatPersonDisplayName ─────────────────────────────────");
 

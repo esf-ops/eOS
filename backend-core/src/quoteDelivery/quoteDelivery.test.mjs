@@ -449,6 +449,56 @@ function testAllowedDomainsPolicy() {
   assert.equal(allowed.ok, true);
 }
 
+async function testMissingQuoteNumberBlocksDelivery() {
+  const db = makeMockSupabase({ quoteRow: internalQuoteRow({ quote_number: null }) });
+  const result = await runQuoteDelivery(
+    db,
+    mockReq(),
+    QUOTE_ID,
+    { recipients: [{ email: "jane@example.com", type: "to" }] },
+    { mode: "preview" }
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.httpStatus, 422);
+  assert.equal(result.code, "quote_number_missing");
+  assert.match(result.error, /Save this quote before printing/);
+}
+
+async function testMissingSnapshotBlocksDelivery() {
+  const db = makeMockSupabase({ quoteRow: internalQuoteRow({ calculation_snapshot: null }) });
+  const result = await runQuoteDelivery(
+    db,
+    mockReq(),
+    QUOTE_ID,
+    { recipients: [{ email: "jane@example.com", type: "to" }] },
+    { mode: "preview" }
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.httpStatus, 422);
+  assert.equal(result.code, "calculation_snapshot_missing");
+}
+
+function testEmailHtmlRequiresQuoteNumber() {
+  const display = buildCustomerEstimateDisplayFromSnapshot(
+    internalQuoteRow({ quote_number: null })
+  );
+  assert.throws(() => buildEstimateEmailContent(display), /requires a saved quote number/);
+}
+
+async function testPreviewHtmlIncludesQuoteNumberNotDash() {
+  const db = makeMockSupabase({ quoteRow: internalQuoteRow() });
+  const result = await runQuoteDelivery(
+    db,
+    mockReq(),
+    QUOTE_ID,
+    { recipients: [{ email: "jane@example.com", type: "to" }] },
+    { mode: "preview" }
+  );
+  assert.equal(result.ok, true);
+  assert.ok(result.htmlPreview.includes("ESF-LIS-000042"));
+  assert.ok(!result.htmlPreview.includes("Quote #</td><td style=\"padding:4px 0;\">—"));
+}
+
 async function runAll() {
   testRecipientValidation();
   testSanitizerExcludesInternalDetails();
@@ -463,6 +513,10 @@ async function runAll() {
   await testSendBlockedWhenDisabled();
   await testQuoteNotFound();
   await testWrongQuoteSource();
+  await testMissingQuoteNumberBlocksDelivery();
+  await testMissingSnapshotBlocksDelivery();
+  testEmailHtmlRequiresQuoteNumber();
+  await testPreviewHtmlIncludesQuoteNumberNotDash();
   await testNoProviderCallInDryRun();
   await testLogsGracefulWhenTableMissing();
   console.log("quoteDelivery tests: all passed");
