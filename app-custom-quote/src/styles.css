@@ -37,25 +37,3 @@ input.cq-readonly-default {
   pointer-events: none;
   user-select: none;
 }
-
-/* Match Internal Estimate premium pricing-mode pill (overrides generic .ie-main > .card). */
-.ie-main > .card.ie-card-tight.ie-pricing-bar {
-  display: inline-flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-  width: fit-content;
-  max-width: 100%;
-  margin: 0 0 16px;
-  padding: 10px 14px;
-  border-radius: 999px;
-  background: rgba(11, 26, 51, 0.04);
-  border: 1px solid var(--eos-line);
-  box-shadow: none;
-}
-
-.ie-main > .card.ie-card-tight.ie-pricing-bar:hover {
-  box-shadow: none;
-  transform: none;
-  border-color: var(--eos-line);
-}
