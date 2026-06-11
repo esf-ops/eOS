@@ -18,8 +18,8 @@ import VisualLayoutCanvas, {
 } from "../../app-internal-estimate/src/VisualLayoutCanvas";
 import { resolveAccessToken } from "../../app-internal-estimate/src/lib/authSession";
 import {
-  customQuoteProjectSqftFromRooms,
   customQuoteScopeSummary,
+  resolveCustomQuoteProjectSqft,
   sumCustomQuoteAddonCosts
 } from "./lib/customQuoteScope";
 import { getSupabase } from "./lib/supabase";
@@ -37,6 +37,10 @@ const FABRICATION_DEFAULT_HINT: Record<string, number> = {
   quartzite: 38,
   porcelain: 38
 };
+
+/** Display-only mirrors of backend slab-yield defaults (backend remains source of truth). */
+const DEFAULT_WASTE_FACTOR = 1.2;
+const SLAB_EDGE_TRIM_INCHES = 2;
 
 const INTERNAL_SALES_REPS = ["Casey", "Thera", "MJ", "House", "Direct"] as const;
 const INTERNAL_BRANCHES = ["Dyersville", "Iowa City", "Lisbon"] as const;
@@ -105,9 +109,11 @@ type MaterialForm = {
   slabHeight: string;
   slabSqft: string;
   slabQuantity: string;
+  materialCostInputType: "per_slab" | "per_sqft";
   costPerSqft: string;
   costPerSlab: string;
   freightCostToEsf: string;
+  manualProjectSqft: string;
   pricingMode: "retail" | "wholesale";
 };
 
@@ -215,11 +221,48 @@ const INITIAL_MATERIAL: MaterialForm = {
   slabHeight: "",
   slabSqft: "",
   slabQuantity: "1",
+  materialCostInputType: "per_slab",
   costPerSqft: "",
   costPerSlab: "",
   freightCostToEsf: "0",
+  manualProjectSqft: "",
   pricingMode: "retail"
 };
+
+/** Live, display-only slab-yield preview (backend confirms exact values at Calculate). */
+function deriveSlabYield(material: MaterialForm, projectSqft: number) {
+  const slabSqftOverride = Number(material.slabSqft);
+  const width = Number(material.slabWidth);
+  const height = Number(material.slabHeight);
+  let usableSlabSqftPerSlab = 0;
+  let netW: number | null = null;
+  let netH: number | null = null;
+  if (Number.isFinite(slabSqftOverride) && slabSqftOverride > 0) {
+    usableSlabSqftPerSlab = Math.round(slabSqftOverride * 100) / 100;
+  } else if (Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0) {
+    netW = Math.round((width - SLAB_EDGE_TRIM_INCHES) * 100) / 100;
+    netH = Math.round((height - SLAB_EDGE_TRIM_INCHES) * 100) / 100;
+    if (netW > 0 && netH > 0) {
+      usableSlabSqftPerSlab = Math.round(((netW * netH) / 144) * 100) / 100;
+    }
+  }
+  const enteredSlabQuantity = Number(material.slabQuantity) || 1;
+  const enteredAvailableSlabSqft = Math.round(usableSlabSqftPerSlab * enteredSlabQuantity * 100) / 100;
+  const wasteAdjustedProjectSqft = Math.round(projectSqft * DEFAULT_WASTE_FACTOR * 100) / 100;
+  const slabsRequired =
+    usableSlabSqftPerSlab > 0 ? Math.ceil(wasteAdjustedProjectSqft / usableSlabSqftPerSlab) : 0;
+  const pricedSlabQuantity = Math.max(enteredSlabQuantity, slabsRequired);
+  return {
+    usableSlabSqftPerSlab,
+    netW,
+    netH,
+    enteredSlabQuantity,
+    enteredAvailableSlabSqft,
+    wasteAdjustedProjectSqft,
+    slabsRequired,
+    pricedSlabQuantity
+  };
+}
 
 export default function CustomQuoteApp() {
   const supabase = getSupabase();
@@ -257,6 +300,18 @@ export default function CustomQuoteApp() {
 
   const addonCosts = useMemo(() => sumCustomQuoteAddonCosts(customLineRows), [customLineRows]);
 
+  /** Room measurements win; manual sqft only activates when rooms have no measured area. */
+  const resolvedProject = useMemo(
+    () => resolveCustomQuoteProjectSqft(roomDrafts, job.projectType, Number(material.manualProjectSqft)),
+    [roomDrafts, job.projectType, material.manualProjectSqft]
+  );
+  const manualSqftActive = resolvedProject.source !== "rooms";
+
+  const derivedSlab = useMemo(
+    () => deriveSlabYield(material, resolvedProject.projectSqft),
+    [material, resolvedProject.projectSqft]
+  );
+
   const visualCanvasSummary = useMemo(() => visualCanvasSummaryStats(roomDrafts), [roomDrafts]);
 
   const patchJob = useCallback((key: keyof JobForm, value: string) => {
@@ -282,7 +337,11 @@ export default function CustomQuoteApp() {
   }
 
   const buildPayload = useCallback(() => {
-    const projectSqft = customQuoteProjectSqftFromRooms(roomDrafts, job.projectType);
+    const { projectSqft } = resolveCustomQuoteProjectSqft(
+      roomDrafts,
+      job.projectType,
+      Number(material.manualProjectSqft)
+    );
     const customLineItems = customLineRows
       .filter((r) => r.name.trim())
       .map((r) => ({
@@ -314,6 +373,7 @@ export default function CustomQuoteApp() {
       slabHeight: material.slabHeight ? Number(material.slabHeight) : undefined,
       slabSqft: material.slabSqft ? Number(material.slabSqft) : undefined,
       slabQuantity: Number(material.slabQuantity) || 1,
+      materialCostInputType: material.materialCostInputType,
       costPerSqft: material.costPerSqft ? Number(material.costPerSqft) : undefined,
       costPerSlab: material.costPerSlab ? Number(material.costPerSlab) : undefined,
       freightCostToEsf: Number(material.freightCostToEsf) || 0,
@@ -671,7 +731,7 @@ export default function CustomQuoteApp() {
                   </div>
                   <div className="ie-hero-stat">
                     <dt>Sq ft</dt>
-                    <dd>{scopeSummary.projectSqft > 0 ? scopeSummary.projectSqft.toFixed(1) : "—"}</dd>
+                    <dd>{resolvedProject.projectSqft > 0 ? resolvedProject.projectSqft.toFixed(1) : "—"}</dd>
                   </div>
                   <div className="ie-hero-stat">
                     <dt>Basis</dt>
@@ -978,7 +1038,7 @@ export default function CustomQuoteApp() {
                     </div>
                   </div>
                   <div className="ie-job-group">
-                    <p className="ie-job-group-head">Slab size &amp; cost</p>
+                    <p className="ie-job-group-head">Slab size &amp; quantity</p>
                     <div className="grid3 ie-job-grid">
                       <label>
                         Slab width (in)
@@ -993,17 +1053,74 @@ export default function CustomQuoteApp() {
                         <input type="number" min={0} step={0.01} value={material.slabSqft} onChange={(e) => patchMaterial("slabSqft", e.target.value)} />
                       </label>
                       <label>
-                        Slab quantity
+                        Slab quantity (entered)
                         <input type="number" min={1} value={material.slabQuantity} onChange={(e) => patchMaterial("slabQuantity", e.target.value)} />
                       </label>
                       <label>
-                        Cost per sq ft
-                        <input type="number" min={0} step={0.01} value={material.costPerSqft} onChange={(e) => patchMaterial("costPerSqft", e.target.value)} />
+                        Waste factor
+                        <input readOnly className="cq-readonly-default" value={`${DEFAULT_WASTE_FACTOR.toFixed(2)}×`} aria-readonly="true" />
+                        <span className="cq-fab-rate-hint">Applied to project sq ft for slab yield · confirmed at Calculate</span>
                       </label>
-                      <label>
+                    </div>
+                    <div className="cq-slab-derived" role="group" aria-label="Derived slab yield">
+                      <div className="cq-slab-derived-chip">
+                        <span className="cq-slab-derived-label">Net usable / slab</span>
+                        <span className="cq-slab-derived-value">
+                          {derivedSlab.usableSlabSqftPerSlab > 0 ? `${derivedSlab.usableSlabSqftPerSlab.toFixed(2)} sf` : "—"}
+                        </span>
+                      </div>
+                      <div className="cq-slab-derived-chip">
+                        <span className="cq-slab-derived-label">Entered available</span>
+                        <span className="cq-slab-derived-value">
+                          {derivedSlab.enteredAvailableSlabSqft > 0 ? `${derivedSlab.enteredAvailableSlabSqft.toFixed(2)} sf` : "—"}
+                        </span>
+                      </div>
+                      <div className="cq-slab-derived-chip">
+                        <span className="cq-slab-derived-label">Waste-adjusted sq ft</span>
+                        <span className="cq-slab-derived-value">
+                          {derivedSlab.wasteAdjustedProjectSqft > 0 ? `${derivedSlab.wasteAdjustedProjectSqft.toFixed(2)} sf` : "—"}
+                        </span>
+                      </div>
+                      <div className="cq-slab-derived-chip">
+                        <span className="cq-slab-derived-label">Slabs required</span>
+                        <span className="cq-slab-derived-value">{derivedSlab.slabsRequired || "—"}</span>
+                      </div>
+                      <div className="cq-slab-derived-chip is-priced">
+                        <span className="cq-slab-derived-label">Priced slab qty</span>
+                        <span className="cq-slab-derived-value">{derivedSlab.pricedSlabQuantity || "—"}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="ie-job-group">
+                    <p className="ie-job-group-head">Material cost</p>
+                    <div className="ie-pricing-toggle cq-cost-mode-toggle" role="group" aria-label="Material cost input mode">
+                      <button
+                        type="button"
+                        className={material.materialCostInputType === "per_slab" ? "on" : ""}
+                        onClick={() => patchMaterial("materialCostInputType", "per_slab")}
+                      >
                         Cost per slab
-                        <input type="number" min={0} step={0.01} value={material.costPerSlab} onChange={(e) => patchMaterial("costPerSlab", e.target.value)} />
-                      </label>
+                      </button>
+                      <button
+                        type="button"
+                        className={material.materialCostInputType === "per_sqft" ? "on" : ""}
+                        onClick={() => patchMaterial("materialCostInputType", "per_sqft")}
+                      >
+                        Cost per square foot
+                      </button>
+                    </div>
+                    <div className="grid3 ie-job-grid" style={{ marginTop: 12 }}>
+                      {material.materialCostInputType === "per_slab" ? (
+                        <label>
+                          Cost per slab ($)
+                          <input type="number" min={0} step={0.01} value={material.costPerSlab} onChange={(e) => patchMaterial("costPerSlab", e.target.value)} />
+                        </label>
+                      ) : (
+                        <label>
+                          Cost per sq ft ($)
+                          <input type="number" min={0} step={0.01} value={material.costPerSqft} onChange={(e) => patchMaterial("costPerSqft", e.target.value)} />
+                        </label>
+                      )}
                     </div>
                   </div>
                   <div className="ie-job-group">
@@ -1028,6 +1145,32 @@ export default function CustomQuoteApp() {
                           ) : (
                             <>
                               Default for {material.materialType}: <strong>${fabDefaultHint.toFixed(2)}/sf</strong> — confirmed at Calculate
+                            </>
+                          )}
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+                  <div className="ie-job-group">
+                    <p className="ie-job-group-head">Project sq ft</p>
+                    <div className="grid3 ie-job-grid">
+                      <label>
+                        Manual project sq ft (fallback)
+                        <input
+                          type="number"
+                          min={0}
+                          step={0.01}
+                          value={material.manualProjectSqft}
+                          onChange={(e) => patchMaterial("manualProjectSqft", e.target.value)}
+                          disabled={!manualSqftActive}
+                        />
+                        <span className="cq-fab-rate-hint">
+                          {manualSqftActive ? (
+                            <>Used as project sq ft because no room measurements are entered. Fabrication and slab yield use this value.</>
+                          ) : (
+                            <>
+                              Room measurements drive project sq ft (<strong>{resolvedProject.projectSqft.toFixed(2)} sf</strong>). Manual fallback is
+                              ignored while rooms have measurements.
                             </>
                           )}
                         </span>
@@ -1302,6 +1445,36 @@ export default function CustomQuoteApp() {
                         </thead>
                         <tbody>
                           <tr>
+                            <td>Project sq ft</td>
+                            <td>{Number(calc.projectSqft).toFixed(2)} sf</td>
+                          </tr>
+                          <tr>
+                            <td>Waste-adjusted sq ft</td>
+                            <td>{Number(calc.wasteAdjustedProjectSqft).toFixed(2)} sf</td>
+                          </tr>
+                          <tr>
+                            <td>Net usable / slab</td>
+                            <td>{Number(calc.usableSlabSqftPerSlab).toFixed(2)} sf</td>
+                          </tr>
+                          <tr>
+                            <td>Entered slab qty / available</td>
+                            <td>
+                              {Number(calc.enteredSlabQuantity)} · {Number(calc.enteredAvailableSlabSqft).toFixed(2)} sf
+                            </td>
+                          </tr>
+                          <tr>
+                            <td>Estimated slabs required</td>
+                            <td>{Number(calc.slabsRequired)}</td>
+                          </tr>
+                          <tr>
+                            <td>
+                              <strong>Priced slab quantity</strong>
+                            </td>
+                            <td>
+                              <strong>{Number(calc.pricedSlabQuantity)}</strong>
+                            </td>
+                          </tr>
+                          <tr>
                             <td>Material</td>
                             <td>{money(calc.materialCost)}</td>
                           </tr>
@@ -1310,7 +1483,7 @@ export default function CustomQuoteApp() {
                             <td>{money(calc.freightCost)}</td>
                           </tr>
                           <tr>
-                            <td>Fabrication / shop ({scopeSummary.projectSqft.toFixed(2)} sf)</td>
+                            <td>Fabrication / shop ({Number(calc.projectSqft).toFixed(2)} sf)</td>
                             <td>{money(calc.fabricationCost)}</td>
                           </tr>
                           {Number(calc.installCost) > 0 ? (
@@ -1429,10 +1602,22 @@ export default function CustomQuoteApp() {
                     <div className="summary-rows ie-summary-rows-compact">
                       <div className="summary-row ie-summary-row-compact">
                         <span>Sq ft (fab quantity)</span>
-                        <strong>{scopeSummary.projectSqft.toFixed(2)}</strong>
+                        <strong>{resolvedProject.projectSqft.toFixed(2)}</strong>
                       </div>
                       {calc ? (
                         <>
+                          <div className="summary-row ie-summary-row-compact">
+                            <span>Waste-adjusted sq ft</span>
+                            <strong>{Number(calc.wasteAdjustedProjectSqft).toFixed(2)}</strong>
+                          </div>
+                          <div className="summary-row ie-summary-row-compact">
+                            <span>Slabs required</span>
+                            <strong>{Number(calc.slabsRequired)}</strong>
+                          </div>
+                          <div className="summary-row ie-summary-row-compact">
+                            <span>Priced slab qty</span>
+                            <strong>{Number(calc.pricedSlabQuantity)}</strong>
+                          </div>
                           <div className="summary-row ie-summary-row-compact">
                             <span>Material</span>
                             <strong>{usdCompact(calc.materialCost)}</strong>

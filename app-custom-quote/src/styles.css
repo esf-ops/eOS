@@ -37,3 +37,45 @@ input.cq-readonly-default {
   pointer-events: none;
   user-select: none;
 }
+
+/* Derived slab-yield preview chips (display-only — backend confirms at Calculate). */
+.cq-slab-derived {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.cq-slab-derived-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  min-width: 120px;
+  border: 1px solid var(--border, rgba(15, 23, 42, 0.1));
+  border-radius: 10px;
+  background: var(--eos-bg-soft, #f4f6fb);
+}
+
+.cq-slab-derived-chip.is-priced {
+  border-color: rgba(163, 19, 47, 0.4);
+  background: rgba(163, 19, 47, 0.06);
+}
+
+.cq-slab-derived-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--eos-ink-muted, #6b7280);
+}
+
+.cq-slab-derived-value {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--eos-ink, #111827);
+}
+
+/* Material cost input mode reuses the IE segmented-toggle look. */
+.cq-cost-mode-toggle {
+  margin-top: 4px;
+}

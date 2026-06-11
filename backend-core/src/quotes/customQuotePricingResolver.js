@@ -30,6 +30,15 @@ export const UTILIZATION_WARN_PERCENT = 70;
 export const MULTIPLIER_WARN_THRESHOLD = 2.25;
 
 /**
+ * Slab yield defaults — v1 backend constants (future Pricing Admin ownership).
+ * `DEFAULT_WASTE_FACTOR` inflates measured project sqft before computing slabs
+ * required (seams, breakage, layout loss). `SLAB_EDGE_TRIM_INCHES` is the total
+ * unusable border deducted from each slab dimension (per side trim × 2).
+ */
+export const DEFAULT_WASTE_FACTOR = 1.2;
+export const SLAB_EDGE_TRIM_INCHES = 2;
+
+/**
  * Resolve fabrication rate for material type.
  * Future: read from Pricing Admin policy / material-type table.
  *
@@ -71,6 +80,8 @@ export function buildCustomQuotePricingConfigSnapshot() {
     wholesale_uplift_percent: WHOLESALE_UPLIFT_PERCENT,
     utilization_warn_percent: UTILIZATION_WARN_PERCENT,
     multiplier_warn_threshold: MULTIPLIER_WARN_THRESHOLD,
+    default_waste_factor: DEFAULT_WASTE_FACTOR,
+    slab_edge_trim_inches: SLAB_EDGE_TRIM_INCHES,
     pricing_formula: "sellPrice = totalCostBasis * (1 + pricingUpliftPercent / 100)"
   };
 }

@@ -19,6 +19,25 @@ export function customQuoteProjectSqftFromRooms(roomDrafts: RoomDraft[], project
   return round2(scope.chargeableCounterSqft + scope.backsplashFhbSqft);
 }
 
+/**
+ * Resolve the project square footage that feeds the custom calculator.
+ *
+ * Room/shape measurements always win when present (> 0). The manual sqft value
+ * is a fallback used only when no room measurements exist — this avoids
+ * double-counting and keeps a single, predictable source of truth.
+ */
+export function resolveCustomQuoteProjectSqft(
+  roomDrafts: RoomDraft[],
+  projectType: string,
+  manualSqft: number
+): { projectSqft: number; source: "rooms" | "manual" | "none" } {
+  const roomSqft = customQuoteProjectSqftFromRooms(roomDrafts, projectType);
+  if (roomSqft > 0) return { projectSqft: roomSqft, source: "rooms" };
+  const manual = Number.isFinite(manualSqft) && manualSqft > 0 ? round2(manualSqft) : 0;
+  if (manual > 0) return { projectSqft: manual, source: "manual" };
+  return { projectSqft: 0, source: "none" };
+}
+
 export function customQuoteScopeSummary(roomDrafts: RoomDraft[], projectType: string) {
   const scope = getInternalEstimateScopeTotals(
     roomDrafts,

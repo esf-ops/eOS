@@ -65,7 +65,52 @@ No public or partner routes. Dealer-safe head sets **exclude** `custom_quote`.
 
 ## 5. Pricing model (markup/uplift — not gross-margin math)
 
-**Sell price:**
+### 5.1 Two square footage concepts (do not conflate)
+
+- **projectSqft** — actual measured project scope (room/shape measurements, or a
+  manual fallback when no room measurements exist). Drives **fabrication/install/shop**
+  cost (the labor ESF performs).
+- **slab/yield sqft** — net usable area per slab after edge trim, used to size the
+  **material order** (how many slabs ESF must buy). Drives **material** cost.
+
+Material/freight follow slab coverage; fabrication follows projectSqft. Never
+multiply every cost line by the same square footage.
+
+### 5.2 Slab yield
+
+```
+netSlabWidthInches  = slabWidth  - 2      (skipped when slabSqft override is used)
+netSlabHeightInches = slabHeight - 2
+usableSlabSqftPerSlab = (netW × netH) / 144   OR  slabSqft override (used as-is)
+
+wasteFactor = 1.20 (default backend constant)
+wasteAdjustedProjectSqft = projectSqft × wasteFactor
+
+enteredAvailableSlabSqft = usableSlabSqftPerSlab × enteredSlabQuantity
+slabsRequired = ceil(wasteAdjustedProjectSqft / usableSlabSqftPerSlab)
+pricedSlabQuantity = max(enteredSlabQuantity, slabsRequired)   // never undercharge
+estimatedAdditionalSlabsNeeded = max(0, slabsRequired - enteredSlabQuantity)
+```
+
+Guardrail: if dimensions are used and net width/height ≤ 0 after the 2" trim, the
+calculator returns a `custom_quote_validation` error (no divide-by-zero).
+
+### 5.3 Cost basis
+
+```
+materialCostBasis:
+  per_slab → pricedSlabQuantity × costPerSlab
+  per_sqft → pricedSlabQuantity × usableSlabSqftPerSlab × costPerSqft
+  (materialCostInputType selects exactly one — costs are never summed together)
+
+freightCostBasis = freightCostToEsf            (flat per quote in v1; not per-slab)
+fabricationInstallShopCostBasis = projectSqft × fabricationRate   (NOT slab sqft)
+customCostBasis = installCost + otherCostBasis (from structured custom lines)
+
+totalCostBasis = material + freight + fabrication + custom
+```
+
+### 5.4 Sell price
 
 ```
 sellPrice = totalCostBasis × (1 + pricingUpliftPercent / 100)
@@ -78,18 +123,24 @@ sellPrice = totalCostBasis × (1 + pricingUpliftPercent / 100)
 
 **Do not use:** `sellPrice = cost / (1 - marginPercent)` (true gross-margin inversion).
 
-**Cost basis includes:** material, freight to ESF, fabrication/shop, install/labor, other custom lines.
-
 **Reporting (non-pricing):**
 
 ```
 actualGrossMarginPercent = (sellPrice - totalCostBasis) / sellPrice × 100
 multiplier = sellPrice / totalCostBasis   // first-pass definition; documented in calculator
+utilizationPercent = wasteAdjustedProjectSqft / enteredAvailableSlabSqft × 100
 ```
 
 **Fabrication defaults ($/sf on project sqft):** Quartz $22, Granite $32, Marble/Quartzite/Porcelain $38.
 
-**Review warnings (non-blocking):** utilization > 70%; multiplier < 2.25 (legacy review threshold — distinct from 25% uplift).
+**Review warnings (non-blocking, all saved in `calculation_snapshot`):**
+- `utilizationPercent >= 70` — advisory (review slab yield/seams/layout)
+- `wasteAdjustedProjectSqft > enteredAvailableSlabSqft` — strong advisory (review slab quantity)
+- `estimatedAdditionalSlabsNeeded > 0` — quote priced using `pricedSlabQuantity` slabs
+- `multiplier < 2.25` — legacy review threshold (distinct from 25% uplift)
+
+**Estimator-facing UI** never shows uplift/markup/margin percentages or formula text —
+only `Wholesale` / `Retail`. Backend remains the pricing authority.
 
 ---
 
