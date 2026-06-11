@@ -29,10 +29,14 @@ export async function processCustomQuoteSave(db, opts) {
       material_type: input.materialType,
       supplier_name: input.supplierName,
       pricing_mode: calc.pricingMode,
-      saved_via: "custom_quote_tool"
+      saved_via: "custom_quote_tool",
+      estimate_room_drafts: body.estimateRoomDrafts ?? body.estimate_room_drafts ?? null,
+      custom_line_items: body.customLineItems ?? body.custom_line_items ?? null
     },
     totals: calc.calculationSnapshot
   };
+
+  const rooms = Array.isArray(body.rooms) ? body.rooms : [];
 
   const saveBody = {
     customer_name: input.customer_name || null,
@@ -46,7 +50,8 @@ export async function processCustomQuoteSave(db, opts) {
     notes: input.notes || null,
     material_type: input.materialType,
     color_name: input.colorName,
-    supplier_name: input.supplierName
+    supplier_name: input.supplierName,
+    rooms
   };
 
   const pricingModeLabel = calc.pricingMode === "wholesale" ? "Wholesale" : "Retail";
@@ -67,6 +72,7 @@ export async function processCustomQuoteSave(db, opts) {
     pricingModeLabel,
     headerExtras: {
       estimated_material_group: input.materialType || null,
+      estimated_sqft: calc.projectSqft ?? calc.totals?.estimated_sqft ?? null,
       notes_length: input.notes ? String(input.notes).length : null
     },
     skipMondaySync: true

@@ -1,6 +1,5 @@
 /**
- * Custom Quote — layout overrides on Internal Estimate styles.
- * Base tokens, cards, grids, rail, sticky bar: app-internal-estimate/src/styles.css
+ * Custom Quote — overrides on Internal Estimate styles.
  */
 @import "../../app-internal-estimate/src/styles.css";
 
@@ -8,8 +7,16 @@
   background: linear-gradient(90deg, rgba(163, 19, 47, 0.55), rgba(180, 92, 12, 0.45));
 }
 
-#sec-measure::before {
-  background: linear-gradient(90deg, rgba(108, 79, 207, 0.55), rgba(46, 105, 184, 0.45));
+#sec-rooms::before {
+  background: linear-gradient(90deg, rgba(108, 79, 207, 0.55), rgba(163, 19, 47, 0.5));
+}
+
+#sec-visual::before {
+  background: linear-gradient(90deg, rgba(46, 105, 184, 0.45), rgba(46, 105, 184, 0.15));
+}
+
+#sec-addons::before {
+  background: linear-gradient(90deg, rgba(163, 19, 47, 0.5), rgba(180, 92, 12, 0.4));
 }
 
 .cq-fab-rate-hint {
@@ -19,12 +26,14 @@
   font-weight: 400;
 }
 
-.cq-fab-rate-hint strong {
-  color: var(--eos-ink-mid);
-}
-
 input.cq-readonly-default {
   background: var(--eos-bg-soft, #f4f6fb);
   color: var(--eos-ink-mid);
   cursor: default;
+}
+
+.cq-future-disabled {
+  opacity: 0.55;
+  pointer-events: none;
+  user-select: none;
 }
