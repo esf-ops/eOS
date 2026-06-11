@@ -4,6 +4,7 @@ import { resolveOrganizationContext } from "../organizations/organizationContext
 import { calculateQuote, computePublicConsumerEstimatesByGroup, roundPublicEstimateToNearestTen } from "./quoteCalculator.js";
 import { attachQuoteDeliveryRoutes } from "../quoteDelivery/quoteDeliveryApi.js";
 import { attachInternalQuoteRoutes } from "./internalQuotesApi.js";
+import { attachCustomQuoteRoutes } from "./customQuotesApi.js";
 import { attachPartnerQuoteRoutes } from "./partnerQuotesApi.js";
 import { assertInternalQuoteOperator } from "./partnerContext.js";
 import { attachQuoteLibraryRoutes } from "./quoteLibraryApi.js";
@@ -274,12 +275,13 @@ export function attachQuoteRoutes(app, { requireAuth, requireRole, requireHeadAc
   attachQuotePipelineRoutes(app, { requireAuth, requireRole, requireHeadAccess, getSupabase });
   attachPartnerQuoteRoutes(app, { requireAuth, requireHeadAccess, getSupabase });
   attachInternalQuoteRoutes(app, { requireAuth, requireHeadAccess, getSupabase });
+  attachCustomQuoteRoutes(app, { requireAuth, requireHeadAccess, getSupabase });
   attachQuoteLibraryRoutes(app, { requireAuth, requireHeadAccess, getSupabase });
   attachQuoteDeliveryRoutes(app, { requireAuth, getSupabase });
   attachQuotePricingAdminApi(app, { requireAuth, requireRole, requireHeadAccess, getSupabase });
   attachPricingAdminHeadApi(app, { requireAuth, requireRole, requireHeadAccess, getSupabase });
 
   console.log(
-    "[quotes] mounted POST /api/public-quote/calculate, POST /api/public-quote/submit-measurements, GET/POST /api/partner-quote/*, POST /api/quote/calculate, POST /api/quote/submit, /api/internal-quotes/*, /api/quote-library/*, POST /api/quote-delivery/quotes/:quoteId/preview|send; quote pipeline GET/PATCH /api/quotes/pipeline*; admin quote APIs via quotePricingAdminApi.js; Pricing Admin head via pricingAdminHeadApi.js"
+    "[quotes] mounted POST /api/public-quote/calculate, POST /api/public-quote/submit-measurements, GET/POST /api/partner-quote/*, POST /api/quote/calculate, POST /api/quote/submit, /api/internal-quotes/*, /api/custom-quotes/*, /api/quote-library/*, POST /api/quote-delivery/quotes/:quoteId/preview|send; quote pipeline GET/PATCH /api/quotes/pipeline*; admin quote APIs via quotePricingAdminApi.js; Pricing Admin head via pricingAdminHeadApi.js"
   );
 }

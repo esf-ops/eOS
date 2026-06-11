@@ -158,6 +158,7 @@ const SECURITY_NOTE =
 const LAUNCHER_TOOL_TITLE_BY_SLUG: Record<string, string> = {
   quote: "Estimating Tool",
   quote_library: "Quote Library",
+  custom_quote: "Custom Quote",
   pricing_admin: "Pricing Admin",
   system_admin: "System Admin",
   public_quote: "Public Quote Tool",
@@ -187,6 +188,7 @@ type HeadTint = "navy" | "burgundy" | "violet" | "teal" | "amber" | "slate";
 const HEAD_TINT_BY_SLUG: Record<string, HeadTint> = {
   quote: "burgundy",
   quote_library: "navy",
+  custom_quote: "burgundy",
   pricing_admin: "amber",
   system_admin: "slate",
   public_quote: "teal",

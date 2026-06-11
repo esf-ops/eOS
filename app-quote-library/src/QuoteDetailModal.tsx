@@ -210,6 +210,8 @@ export type QuoteDetailModalProps = {
   sessionToken: string;
   /** Base URL for the Internal Estimate head (e.g. https://internal.eliteosfab.com). */
   internalBase: string;
+  /** Base URL for the Custom Quote head (e.g. https://custom.eliteosfab.com). */
+  customQuoteBase: string;
   /** Close the modal and return to the list. */
   onClose: () => void;
   /** Shared action runner that sets list msg/err state and refreshes data. */
@@ -225,6 +227,7 @@ export function QuoteDetailModal({
   revisions,
   sessionToken,
   internalBase,
+  customQuoteBase,
   onClose,
   runAction,
   onRevisionSelect
@@ -268,6 +271,7 @@ export function QuoteDetailModal({
 
   const account = displayAccountColumn(header);
   const isInternal = str(header.quote_source) === "internal_quote";
+  const isCustomQuote = str(header.quote_source) === "custom_quote";
   const warnings = (
     Array.isArray(detail.warnings) ? (detail.warnings as unknown[]) : []
   ).filter((w): w is string => typeof w === "string");
@@ -450,17 +454,35 @@ export function QuoteDetailModal({
             {/* Workflow */}
             <section className="drawer-block">
               <h3>Workflow</h3>
-              <a
-                href={`${internalBase}?quoteId=${encodeURIComponent(latestRevId)}`}
-                target="_blank"
-                rel="noreferrer"
-                className="btn btn-primary btn-block btn-with-icon"
-              >
-                <span>Open latest in Internal Estimate</span>
-                <span className="btn-arrow" aria-hidden>
-                  ↗
-                </span>
-              </a>
+              {isInternal ? (
+                <a
+                  href={`${internalBase}?quoteId=${encodeURIComponent(latestRevId)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="btn btn-primary btn-block btn-with-icon"
+                >
+                  <span>Open latest in Internal Estimate</span>
+                  <span className="btn-arrow" aria-hidden>
+                    ↗
+                  </span>
+                </a>
+              ) : isCustomQuote ? (
+                <a
+                  href={`${customQuoteBase}?quoteId=${encodeURIComponent(str(header.id || detailId))}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="btn btn-primary btn-block btn-with-icon"
+                >
+                  <span>Open in Custom Quote</span>
+                  <span className="btn-arrow" aria-hidden>
+                    ↗
+                  </span>
+                </a>
+              ) : (
+                <p className="muted small workflow-hint" style={{ margin: 0 }}>
+                  No dedicated quote editor for this source in Quote Library.
+                </p>
+              )}
 
               <div className="workflow-group">
                 <p className="workflow-group-label">Customer delivery</p>
@@ -616,14 +638,22 @@ export function QuoteDetailModal({
 
               <details className="quiet-detail">
                 <summary>Workflow guidance</summary>
-                <p>
-                  <strong>Open latest in Internal Estimate</strong> loads the
-                  full saved snapshot for the latest revision. Use{" "}
-                  <strong>Save revision</strong> there to freeze the current
-                  state and start R2/R3; <strong>Update quote</strong> edits
-                  the latest revision in place; <strong>Restore</strong> copies
-                  an older revision forward as a new latest.
-                </p>
+                {isInternal ? (
+                  <p>
+                    <strong>Open latest in Internal Estimate</strong> loads the
+                    full saved snapshot for the latest revision. Use{" "}
+                    <strong>Save revision</strong> there to freeze the current
+                    state and start R2/R3; <strong>Update quote</strong> edits
+                    the latest revision in place; <strong>Restore</strong> copies
+                    an older revision forward as a new latest.
+                  </p>
+                ) : isCustomQuote ? (
+                  <p>
+                    <strong>Open in Custom Quote</strong> opens the off-program
+                    material worksheet head. Custom quotes do not use Internal
+                    Estimate revision workflow.
+                  </p>
+                ) : null}
                 <p>
                   <strong>After Mark sold,</strong> use{" "}
                   <em>Generate Moraware doc</em> and{" "}

@@ -7,7 +7,8 @@ const SOURCE_LABELS: Record<string, string> = {
   internal_quote: "Internal estimate",
   partner_quote: "Partner quote",
   partner_portal: "Partner quote",
-  public_retail: "Public lead"
+  public_retail: "Public lead",
+  custom_quote: "Custom quote"
 };
 
 export function labelQuoteSource(raw: unknown): string {

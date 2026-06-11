@@ -91,6 +91,7 @@ Status is **conceptual** unless a separate tracker says otherwise. Use the label
 - Internal Quoting / **Internal Estimate** Tool (**`app-internal-estimate`** — separate staff head; auth required)  
 - **Pricing Admin** Tool (**`app-pricing-admin`** — separate head; `pricing_admin` head access + admin/finance/executive role gate on `/api/pricing-admin/*`; distinct from legacy System Admin quote structure APIs)
 - **Quote Library Head** (**`app-quote-library/`** — **`https://quotes.eliteosfab.com`**; plural hostname; `quote_library` head slug; Brain routes `/api/quote-library/*`; account grouping, status workflow, Moraware/QB **entry doc** generation — **no** Moraware/QB writeback automation in v1)  
+- **Custom Quote Head** (**`app-custom-quote/`** — **`HEAD_URL_CUSTOM_QUOTE`**; slug `custom_quote`; ESF-only off-program material quotes; `quote_source: custom_quote`; see `docs/quote-platform/custom-quote-tool-plan.md`)  
 - Partner Quoting Tool  
 - Quote Pipeline / Quote Leads Head  
 - Quote Catalog Admin (normalized catalog programs — future; see `quote-catalog-admin-architecture.md`)  

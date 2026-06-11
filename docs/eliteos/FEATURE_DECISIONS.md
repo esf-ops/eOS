@@ -1247,3 +1247,15 @@
 | **Out of scope** | Real email provider (Phase 5), QuickBooks, public/partner quote delivery, PDF attachment, secure link consumption, UI modals. |
 | **Impacted files/docs** | `backend-core/src/quoteDelivery/*`, `backend-core/src/email/emailClient.js`, `backend-core/src/quotes/quoteRoutes.js`, `backend-core/supabase/eliteos_quote_delivery_foundation.sql`, `backend-core/.env.example`, `docs/quote-platform/quote-library-head-plan.md`, this entry. |
 | **Revisit trigger** | When enabling real send in production; when full CustomerEstimatePrint parity from snapshot is required (vs conservative summary); when public/partner quotes need delivery. |
+
+---
+
+### 85. Custom Quote Tool foundation (off-program material quotes)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-06-11 |
+| **Decision** | **All quotes land in Quote Library** regardless of creation head. **Custom Quote Tool** is a **separate ESF-only internal head** (`app-custom-quote`, slug `custom_quote`) — **not** a third tab inside Internal Estimate. Saves use **`quote_source = custom_quote`** on shared **`quote_headers`** via **`POST /api/custom-quotes/save`** and **`persistQuoteSubmission`** (not `processInternalQuoteSave`). Pricing is **backend-owned** markup/uplift over total cost basis: **Retail = cost × 1.25**, **Wholesale = cost × 1.15** — **not** true gross-margin inversion (`cost / (1 − margin)`). **Dealer Tool** (AI-takeoff-first) is **documented only** in this pass. |
+| **Why** | Staff need off-program / non-Elite-100 quotes without polluting Internal Estimate Direct/Wholesale math or exposing dealer/partner/public surfaces. Unified Quote Library remains the operational hub for every source. |
+| **Impacted files/docs** | `backend-core/src/quotes/customQuoteCalculator.js`, `customQuotePricingResolver.js`, `customQuotesApi.js`, `customQuoteSave.js`, `app-custom-quote/`, `app-quote-library/` (source label/filter/detail), `backend-core/src/auth/eosGovernanceConstants.js`, `backend-core/src/me/launcherHeads.js`, `backend-core/src/me/headDeploymentUrls.js`, `backend-core/src/quotes/quoteSourceConfig.js`, `docs/quote-platform/custom-quote-tool-plan.md`, this entry. |
+| **Revisit trigger** | Pricing Admin owns custom-quote fabrication/uplift/thresholds; Monday board for custom quotes; Custom Quote revision/edit workflow; Dealer Tool AI takeoff implementation. |

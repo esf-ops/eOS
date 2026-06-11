@@ -38,5 +38,7 @@ assert(DEALER_SAFE_HEAD_SLUG_SET.size >= 2, "dealer-safe set should list partner
 // "quote" (Internal Estimate) was intentionally removed from DEALER_SAFE in Partner Quote security hardening v1.
 // dealer_partner users are now blocked from internal estimate routes at both the partner guard AND head-access layer.
 assert(!isDealerSafeHeadSlug("quote"), "quote (Internal Estimate) must not be dealer-safe after hardening");
+assert(isKnownHeadSlug("custom_quote"), "custom_quote is a known head slug");
+assert(!isDealerSafeHeadSlug("custom_quote"), "custom_quote must not be dealer-safe");
 
 console.log("testHeadAccess: constant checks OK.");

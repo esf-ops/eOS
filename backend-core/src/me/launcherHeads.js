@@ -69,6 +69,15 @@ export const HEAD_LAUNCHER_CATALOG = [
     roleNote: "Account-centered quote operations and handoff docs; distinct from Public Quote and Internal Estimate."
   },
   {
+    slug: "custom_quote",
+    label: "eliteOS Custom Quote Head",
+    description: "Off-program / non-Elite-100 material quotes with backend markup/uplift pricing.",
+    category: "Revenue",
+    href: "/custom-quote",
+    roleNote:
+      "ESF internal only — not for dealers, partners, or public users. Saves to Quote Library with quote_source custom_quote."
+  },
+  {
     slug: "production",
     label: "eliteOS Production Head",
     description: "Production pacing and throughput views.",
@@ -219,8 +228,8 @@ function defaultSlugSet(role, userKind) {
 
   const base = new Set(["brain_health"]);
   const roleHints = {
-    sales: ["sales", "quote", "quote_library", "reports"],
-    estimator: ["quote", "quote_library", "reports"],
+    sales: ["sales", "quote", "quote_library", "custom_quote", "reports"],
+    estimator: ["quote", "quote_library", "custom_quote", "reports"],
     accounting: ["finance", "reports", "pricing_admin"],
     production: ["production", "shop_tv", "reports"],
     shop_tv: ["shop_tv"],

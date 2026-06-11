@@ -129,6 +129,11 @@ function internalEstimateUrl(): string {
   return raw.replace(/\/+$/, "") || "https://internal.eliteosfab.com";
 }
 
+function customQuoteUrl(): string {
+  const raw = String(import.meta.env.VITE_HEAD_URL_CUSTOM_QUOTE ?? "").trim();
+  return raw.replace(/\/+$/, "") || "https://custom.eliteosfab.com";
+}
+
 /**
  * eliteOS Home / Launcher canonical URL. Used by the user menu's "Open Home"
  * action. Configurable via `VITE_HEAD_URL_HOME` for staging / local dev;
@@ -290,6 +295,7 @@ export default function QuoteLibraryApp() {
   }, [tab, search, accountQ, status, quoteSource, branch, salesRep, createdFrom, createdTo, handoffStatus, showArchived, showAllRevisions]);
 
   const internalBase = useMemo(() => internalEstimateUrl(), []);
+  const customQuoteBase = useMemo(() => customQuoteUrl(), []);
   const homeBase = useMemo(() => homeLauncherUrl(), []);
 
   const workspaceName = useMemo(() => resolveWorkspaceName(), []);
@@ -1086,6 +1092,7 @@ export default function QuoteLibraryApp() {
                   <option value="public_consumer">Public lead</option>
                   <option value="partner_portal">Partner quote</option>
                   <option value="partner_quote">Partner quote</option>
+                  <option value="custom_quote">Custom quote</option>
                 </select>
               </label>
               <label>
@@ -1403,6 +1410,7 @@ export default function QuoteLibraryApp() {
         revisions={revisions}
         sessionToken={sessionToken ?? ""}
         internalBase={internalBase}
+        customQuoteBase={customQuoteBase}
         onClose={() => setDetailId(null)}
         runAction={runAction}
         onRevisionSelect={setDetailId}

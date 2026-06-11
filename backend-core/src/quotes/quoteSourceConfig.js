@@ -32,6 +32,16 @@ const DEFAULT_ROWS = {
     public_safe: false,
     is_active: true,
     metadata: {}
+  },
+  custom_quote: {
+    quote_source: "custom_quote",
+    display_name: "Custom quote",
+    monday_board_env_key: null,
+    default_pricing_structure_code: null,
+    requires_auth: true,
+    public_safe: false,
+    is_active: true,
+    metadata: { monday_sync_default: "disabled" }
   }
 };
 

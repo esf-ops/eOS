@@ -63,6 +63,7 @@ Optional Vite env: **`VITE_ELITEOS_AUTH_COOKIE_DOMAIN`** — set to `false` to f
 | **Internal Estimate Head (`app-internal-estimate`)** | **`https://internal.eliteosfab.com`** or **`https://estimate.eliteosfab.com`**; until DNS cutover, set **`HEAD_URL_INTERNAL_ESTIMATE`**. **eliteOS Internal Estimate Head** — staff auth required; creates and revises estimates. |
 | **Quote Library Head (`app-quote-library`)** | **`https://quotes.eliteosfab.com`** (plural hostname — not `quote-library.*`); set **`HEAD_URL_QUOTE_LIBRARY`**. **eliteOS Quote Library Head** — staff auth + **`quote_library`** head access; read/update shared **`quote_headers`** (search, account grouping, status workflow, handoff doc generation). Distinct from **Public Quote** (`quote.…`) and **Internal Estimate** (`internal.…`). |
 | **Pricing Admin Head (`app-pricing-admin`)** | **`https://pricing.eliteosfab.com`**; **`HEAD_URL_PRICING_ADMIN`**. **eliteOS Pricing Admin Head** — login + `pricing_admin` head access and route-level role gates on `/api/pricing-admin/*`. |
+| **Custom Quote Head (`app-custom-quote`)** | **`https://custom.eliteosfab.com`** (recommended); set **`HEAD_URL_CUSTOM_QUOTE`**. **eliteOS Custom Quote Head** — ESF-only off-program material quotes; slug **`custom_quote`**; **`quote_source: custom_quote`**. Not dealer/partner/public. |
 | **Sales Dashboard Head (`app-sales`)** | **`https://sales.eliteosfab.com`**; set **`HEAD_URL_SALES`** on Brain and deploy `app-sales` with `VITE_BACKEND_URL`, `VITE_HOME_URL=https://www.eliteosfab.com`, `VITE_SUPABASE_URL`, and `VITE_SUPABASE_ANON_KEY`. **eliteOS Sales Head** — staff auth + `sales` head access. Current status is **scaffolded / deployed preview** until approved account attribution mappings and dashboard parity are complete. |
 | **Org Directory Head (`app-org-directory`)** | **`https://org.eliteosfab.com`** or **`https://org-directory.eliteosfab.com`**; set **`HEAD_URL_ORG_DIRECTORY`**. **eliteOS Org Directory** — planning org chart (departments, seats, reporting lines, recommended head tags). Requires **`org_directory`** head access; does **not** change `user_head_access`. |
 | **eliteOS Brain / API** | https://backend-core-six.vercel.app |
@@ -134,6 +135,14 @@ The homeowner-facing wizard supports (or will support):
 - **Economics:** internal calculator supports **Direct vs Wholesale** material $/sf; **custom add-on lines** are passthrough (no public 25% homeowner markup). Public consumer paths stay on **Direct + planning markup** only.
 - **Snapshots:** saved quotes must retain the pricing inputs used at calculation/save time (`calculation_snapshot`, line items) so later Pricing Admin edits do not rewrite history.
 - **Phase 2 durability:** internal saves use **`save_mode`** (`create`, `update_existing`, `save_revision`, `save_as_new_quote`), ESF numbering (`backend-core/supabase/eliteos_internal_quote_phase2.sql`), and revision columns on **`quote_headers`**. **`calculation_snapshot` is never client-PATCHable** — only replaced via **`POST /api/internal-quotes/save`** recalculation on the **current** revision; historical revision rows stay frozen.
+
+### Custom Quote Tool (staff — off-program material)
+
+- **Frontend:** **`app-custom-quote/`** — separate ESF-only head (slug **`custom_quote`**); **not** bundled with Internal Estimate. See **`docs/quote-platform/custom-quote-tool-plan.md`**.
+- **Persistence:** authenticated **`/api/custom-quotes/*`** saves **`quote_source: custom_quote`** via **`persistQuoteSubmission`** (dedicated save path — **not** `processInternalQuoteSave`).
+- **Economics:** markup/uplift over **total cost basis** (material + freight + fabrication + install/other): Retail **×1.25**, Wholesale **×1.15** — **not** gross-margin inversion math.
+- **Quote Library:** all custom quotes appear in the unified library; open/revise behavior is Custom-Quote-specific (no Internal Estimate deep link).
+- **Dealer Tool / AI takeoff:** documented future direction only (`FEATURE_DECISIONS.md` §85).
 
 ---
 
