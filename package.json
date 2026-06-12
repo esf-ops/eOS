@@ -68,6 +68,7 @@
     "eos:test:slabsmith-preflight": "node backend-core/src/slabsmith/slabsmithPreflight.test.mjs",
     "eos:test:slabsmith-ingest": "node backend-core/src/slabsmith/slabsmithIngestApi.test.mjs",
     "eos:test:slabsmith-image-upload": "node backend-core/src/slabsmith/slabsmithImageUploadApi.test.mjs",
+    "eos:test:slab-inventory-retirement": "node backend-core/src/slabInventory/slabInventoryRetirement.test.mjs",
     "eos:test:slabsmith-connector": "node tools/slabsmith-connector/sync-slabs.test.mjs && node tools/slabsmith-connector/image-manifest.test.mjs && node tools/slabsmith-connector/image-upload.test.mjs",
     "eos:test:quote-file-storage": "node backend-core/src/files/quoteFileStoragePath.test.mjs",
     "eos:test:quote-file-service": "node backend-core/src/files/quoteFileService.test.mjs",

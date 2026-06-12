@@ -4,10 +4,14 @@
  * SCOPE / SAFETY:
  *   - Writes ONLY when SLABSMITH_INVENTORY_WRITE_ENABLED === "1" (exactly).
  *   - Accepts an INJECTED Supabase client (service role). Never creates one.
- *   - NEVER deletes rows.
- *   - NEVER marks slabs inactive.
+ *   - NEVER deletes rows. Retirement is a soft UPDATE (is_active=false) only.
+ *   - Soft-retirement of slabs/remnants missing from the latest successful FULL
+ *     snapshot is gated behind SLAB_INVENTORY_RETIRE_MISSING_ENABLED=1 plus a
+ *     low-count safety guard (see slabInventoryRetirement.js). When the gate is
+ *     off (default), no row is ever marked inactive — original v1 behavior.
  *   - NEVER marks SlabCloud rows inactive or overwrites SlabCloud rows
- *     (unique key includes external_source = "slabsmith").
+ *     (unique key includes external_source = "slabsmith"); retirement is scoped
+ *     to organization_id + external_source=slabsmith + external_company_code.
  *   - NO slab_images writes in v1 (Slabsmith XML export has no image URL pattern).
  *   - All write payloads carry organization_id.
  *
@@ -29,6 +33,18 @@ import {
   TABLE_RAW_RECORDS,
   TABLE_SYNC_RUNS,
 } from "../slabcloud/slabCloudPersistence.js";
+
+import {
+  batchRetireInventoryRows,
+  buildRetirementUpdate,
+  evaluateRetirementSafety,
+  fetchInventoryForSourceScope,
+  INVENTORY_STATUS_ACTIVE,
+  isRetireLowCountOverrideEnabled,
+  isRetireMissingEnabled,
+  planMissingInventoryRetirement,
+  resolveRetireMinRatio,
+} from "../slabInventory/slabInventoryRetirement.js";
 
 export const SLABSMITH_WRITE_ENV = "SLABSMITH_INVENTORY_WRITE_ENABLED";
 
@@ -243,11 +259,15 @@ export function buildSlabsmithRawRecordRows({
  * @param {Record<string, unknown>} rec
  * @param {object} ctx
  */
-export function mapSlabsmithInventoryRow(rec, { organizationId, syncRunId, config, now }) {
+export function mapSlabsmithInventoryRow(
+  rec,
+  { organizationId, syncRunId, config, now, includeRetirementFields = false }
+) {
   const raw = rec.raw_payload && typeof rec.raw_payload === "object" ? rec.raw_payload : {};
   const company = companyOf(config);
   const lengthM = toFiniteNumber(raw[SLABSMITH_ATTR.lengthActual]);
   const widthM = toFiniteNumber(raw[SLABSMITH_ATTR.widthActual]);
+  const ts = now();
 
   return {
     organization_id: organizationId,
@@ -273,12 +293,24 @@ export function mapSlabsmithInventoryRow(rec, { organizationId, syncRunId, confi
     dimension_source: SLABSMITH_DIMENSION_SOURCE,
     is_active: true,
     last_seen_sync_run_id: syncRunId,
-    updated_at: now(),
+    updated_at: ts,
     source_inventory_type: rec.source_inventory_type ?? null,
     source_inventory_scope: rec.source_inventory_scope ?? SLABSMITH_SOURCE_SCOPE,
     source_public_slug: null,
     source_api_company_code: null,
     source_asset_company_code: null,
+    // Retirement audit columns — only written when the retirement migration is
+    // applied AND the flag is on. A seen row is active and any prior retirement
+    // state is cleared (reactivation).
+    ...(includeRetirementFields
+      ? {
+          inventory_status: INVENTORY_STATUS_ACTIVE,
+          last_seen_at: ts,
+          retired_at: null,
+          retired_by_sync_run_id: null,
+          retired_reason: null,
+        }
+      : {}),
   };
 }
 
@@ -292,6 +324,7 @@ export function buildSlabsmithInventoryRows({
   config = {},
   normalized = [],
   now = defaultNow,
+  includeRetirementFields = false,
 }) {
   const ts = now();
   return (Array.isArray(normalized) ? normalized : [])
@@ -302,6 +335,7 @@ export function buildSlabsmithInventoryRows({
         syncRunId,
         config,
         now: () => ts,
+        includeRetirementFields,
       })
     );
 }
@@ -314,6 +348,7 @@ export function buildSlabsmithSyncRunFinalUpdate({
   status = "completed",
   writtenCounts = {},
   changeCounts = {},
+  retirementCounts = null,
   warnings = [],
   error = null,
   now = defaultNow,
@@ -330,6 +365,22 @@ export function buildSlabsmithSyncRunFinalUpdate({
     );
   }
 
+  let deactivatedCount = 0;
+  if (retirementCounts) {
+    deactivatedCount = Number(retirementCounts.retiredMissingCount ?? 0);
+    warnList.push(
+      `retirement: active_upserts=${retirementCounts.activeUpserts ?? 0} ` +
+        `reactivated=${retirementCounts.reactivatedCount ?? 0} ` +
+        `retired_missing=${deactivatedCount} ` +
+        `previous_active=${retirementCounts.previousActiveCount ?? 0} ` +
+        `latest_seen=${retirementCounts.latestSeenCount ?? 0} ` +
+        `skipped_reason=${retirementCounts.skippedRetirementReason ?? "none"}`
+    );
+    if (Array.isArray(retirementCounts.warnings)) {
+      warnList.push(...retirementCounts.warnings);
+    }
+  }
+
   return {
     status: error ? "failed" : status,
     finished_at: now(),
@@ -337,7 +388,7 @@ export function buildSlabsmithSyncRunFinalUpdate({
     slab_upserted_count: writtenCounts.slabInventory ?? 0,
     material_upserted_count: 0,
     image_row_written_count: 0,
-    slab_deactivated_count: 0,
+    slab_deactivated_count: deactivatedCount,
     warning_count: warnList.length,
     warnings: warnList,
     error_message: error ? formatSupabaseError(error) : null,
@@ -356,6 +407,7 @@ export function planSlabsmithPersistence({
   existingInventoryRows = [],
   runMeta = {},
   now = defaultNow,
+  includeRetirementFields = false,
 }) {
   const orgForPayloads = organizationId || SENTINEL_ORG_ID;
   const inputSummary = summarizeSlabsmithPersistenceInput(normalized);
@@ -371,6 +423,7 @@ export function planSlabsmithPersistence({
     config,
     normalized,
     now,
+    includeRetirementFields,
   });
 
   const changeCounts = classifyInventoryChanges(existingInventoryRows, inventoryRows);
@@ -464,6 +517,41 @@ export async function fetchExistingSlabsmithInventory(db, organizationId, compan
 }
 
 /**
+ * Compute the soft-retirement plan for a Slabsmith snapshot against the current
+ * source-scoped inventory. Reads only — no writes. Used by both the dry-run
+ * preview and the write path (called BEFORE the upsert in the write path).
+ *
+ * @param {object} params
+ * @param {import("@supabase/supabase-js").SupabaseClient} params.db
+ * @param {string} params.organizationId
+ * @param {string} params.companyCode
+ * @param {Array<object>} params.normalized
+ */
+export async function computeRetirementPlan({ db, organizationId, companyCode, normalized }) {
+  const seenExternalIds = new Set(
+    (Array.isArray(normalized) ? normalized : [])
+      .map((r) => String(r?.external_slab_id ?? "").trim())
+      .filter(Boolean)
+  );
+
+  const existingRows = await fetchInventoryForSourceScope(db, {
+    organizationId,
+    externalSource: SLABSMITH_EXTERNAL_SOURCE,
+    externalCompanyCode: companyCode,
+  });
+
+  const plan = planMissingInventoryRetirement({ existingRows, seenExternalIds });
+  const safety = evaluateRetirementSafety({
+    previousActiveCount: plan.previousActiveCount,
+    latestSeenCount: seenExternalIds.size,
+    minRatio: resolveRetireMinRatio(),
+    overrideEnabled: isRetireLowCountOverrideEnabled(),
+  });
+
+  return { ...plan, latestSeenCount: seenExternalIds.size, safety };
+}
+
+/**
  * Persist normalized Slabsmith rows into the Supabase inventory cache.
  *
  * @param {object} params
@@ -485,6 +573,7 @@ export async function persistSlabsmithInventory({
   now = defaultNow,
 } = {}) {
   const companyCode = companyOf(config);
+  const retirementEnabled = isRetireMissingEnabled();
 
   // Dry-run: plan without fetching existing rows (treat all as would-insert).
   if (writeEnabled !== true) {
@@ -495,7 +584,41 @@ export async function persistSlabsmithInventory({
       existingInventoryRows: [],
       runMeta,
       now,
+      includeRetirementFields: retirementEnabled,
     });
+
+    // Optional retirement preview — only when a real client + org are supplied.
+    // NEVER writes in dry-run.
+    let retirementPlan = {
+      enabled: retirementEnabled,
+      would_retire_count: 0,
+      reactivated_count: 0,
+      sample_retired_ids: [],
+      previous_active_count: 0,
+      latest_seen_count: new Set(
+        normalized.map((r) => String(r?.external_slab_id ?? "").trim()).filter(Boolean)
+      ).size,
+      skipped_retirement_reason: retirementEnabled ? null : "flag_disabled",
+      warnings: [],
+    };
+    if (retirementEnabled && db && organizationId) {
+      const preview = await computeRetirementPlan({
+        db,
+        organizationId,
+        companyCode,
+        normalized,
+      });
+      retirementPlan = {
+        enabled: true,
+        would_retire_count: preview.retiredMissingCount,
+        reactivated_count: preview.reactivatedCount,
+        sample_retired_ids: preview.sampleRetiredIds,
+        previous_active_count: preview.previousActiveCount,
+        latest_seen_count: preview.latestSeenCount,
+        skipped_retirement_reason: preview.safety.skippedRetirementReason,
+        warnings: preview.safety.warnings,
+      };
+    }
 
     return {
       mode: "dry-run",
@@ -510,6 +633,7 @@ export async function persistSlabsmithInventory({
         unchanged: 0,
       },
       needs_review: plan.inputSummary.needsReview,
+      retirement_plan: retirementPlan,
       warnings: plan.warnings,
       errors: null,
     };
@@ -532,6 +656,7 @@ export async function persistSlabsmithInventory({
     existingInventoryRows: existingRows,
     runMeta,
     now,
+    includeRetirementFields: retirementEnabled,
   });
 
   const syncRunId = await insertReturningId(
@@ -552,6 +677,13 @@ export async function persistSlabsmithInventory({
       last_seen_sync_run_id: syncRunId,
     }));
 
+    // Capture the pre-upsert source-scope snapshot BEFORE mutating inventory so
+    // the retire-diff and reactivation counts reflect the prior active set.
+    let retirement = null;
+    if (retirementEnabled) {
+      retirement = await computeRetirementPlan({ db, organizationId, companyCode, normalized });
+    }
+
     const rawWritten = await batchInsert(db, TABLE_RAW_RECORDS, rawWithRun);
     const inventoryWritten = await batchUpsert(
       db,
@@ -559,6 +691,31 @@ export async function persistSlabsmithInventory({
       inventoryWithRun,
       INVENTORY_CONFLICT_KEY
     );
+
+    // Soft-retire rows missing from this snapshot, only after a successful upsert
+    // and only when the safety guard allows it. Never deletes.
+    let retirementCounts = null;
+    if (retirement) {
+      const { safety } = retirement;
+      let retiredMissingCount = 0;
+      if (safety.allowed) {
+        retiredMissingCount = await batchRetireInventoryRows(
+          db,
+          retirement.retiredIds,
+          buildRetirementUpdate({ syncRunId, now })
+        );
+      }
+      retirementCounts = {
+        activeUpserts: inventoryWritten,
+        reactivatedCount: retirement.reactivatedCount,
+        retiredMissingCount: safety.allowed ? retiredMissingCount : 0,
+        previousActiveCount: retirement.previousActiveCount,
+        latestSeenCount: retirement.latestSeenCount,
+        skippedRetirementReason: safety.skippedRetirementReason,
+        sampleRetiredIds: safety.allowed ? retirement.sampleRetiredIds : [],
+        warnings: safety.warnings,
+      };
+    }
 
     const written = {
       rawRecords: rawWritten,
@@ -569,6 +726,7 @@ export async function persistSlabsmithInventory({
       status: "completed",
       writtenCounts: written,
       changeCounts: plan.changeCounts,
+      retirementCounts,
       warnings: plan.warnings,
       now,
     });
@@ -586,6 +744,16 @@ export async function persistSlabsmithInventory({
       raw_records_written: rawWritten,
       slab_inventory_upserted: inventoryWritten,
       needs_review: plan.inputSummary.needsReview,
+      retired_missing_count: retirementCounts ? retirementCounts.retiredMissingCount : 0,
+      reactivated_count: retirementCounts ? retirementCounts.reactivatedCount : 0,
+      skipped_retirement_reason: retirementCounts
+        ? retirementCounts.skippedRetirementReason
+        : retirementEnabled
+          ? null
+          : "flag_disabled",
+      previous_active_count: retirementCounts ? retirementCounts.previousActiveCount : 0,
+      latest_seen_count: retirementCounts ? retirementCounts.latestSeenCount : 0,
+      sample_retired_ids: retirementCounts ? retirementCounts.sampleRetiredIds : [],
       warnings: finalUpdate.warnings,
       errors: null,
     };

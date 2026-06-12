@@ -190,6 +190,62 @@ describe("buildIngestResponse / sanitizeIngestResponse", () => {
       /must not expose secrets/
     );
   });
+
+  it("surfaces retirement metrics from a write-path persist result", () => {
+    const payload = buildIngestResponse({
+      status: "completed",
+      syncRunId: "abc",
+      rows_seen: 10,
+      inserted: 8,
+      slab_inventory_upserted: 8,
+      retired_missing_count: 2,
+      reactivated_count: 1,
+      previous_active_count: 11,
+      latest_seen_count: 8,
+      skipped_retirement_reason: null,
+      sample_retired_ids: ["GONE-1", "GONE-2"],
+      warnings: [],
+    });
+    assert.equal(payload.retired_missing_count, 2);
+    assert.equal(payload.reactivated_count, 1);
+    assert.equal(payload.previous_active_count, 11);
+    assert.equal(payload.latest_seen_count, 8);
+    assert.equal(payload.skipped_retirement_reason, null);
+    assert.deepEqual(payload.sample_retired_ids, ["GONE-1", "GONE-2"]);
+  });
+
+  it("surfaces retirement preview from a dry-run persist result", () => {
+    const payload = buildIngestResponse({
+      mode: "dry-run",
+      rows_seen: 3,
+      retirement_plan: {
+        enabled: true,
+        would_retire_count: 1,
+        reactivated_count: 0,
+        previous_active_count: 4,
+        latest_seen_count: 3,
+        skipped_retirement_reason: null,
+        sample_retired_ids: ["GONE-9"],
+      },
+      warnings: [],
+    });
+    assert.equal(payload.retired_missing_count, 1, "would_retire surfaces as count");
+    assert.equal(payload.previous_active_count, 4);
+    assert.deepEqual(payload.sample_retired_ids, ["GONE-9"]);
+  });
+
+  it("defaults retirement metrics to zero when absent (back-compat)", () => {
+    const payload = buildIngestResponse({
+      status: "completed",
+      rows_seen: 3,
+      inserted: 3,
+      warnings: [],
+    });
+    assert.equal(payload.retired_missing_count, 0);
+    assert.equal(payload.reactivated_count, 0);
+    assert.equal(payload.skipped_retirement_reason, null);
+    assert.deepEqual(payload.sample_retired_ids, []);
+  });
 });
 
 describe("attachSlabsmithIngestRoutes", () => {

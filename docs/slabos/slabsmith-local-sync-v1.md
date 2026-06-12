@@ -54,6 +54,27 @@ v1 does **not** connect to Slabsmith SQL. It only reads a file already written b
 | `SUPABASE_SERVICE_ROLE_KEY` | Server-side only |
 | `SLABSMITH_SYNC_ORGANIZATION_ID` or `SLABOS_ORGANIZATION_ID` | Tenant org for writes |
 | Supabase bucket `eliteos-slab-images` | Public-read storage for uploaded slab JPGs (apply `backend-core/supabase/eliteos_slab_images_storage.sql`) |
+| `SLAB_INVENTORY_RETIRE_MISSING_ENABLED` | `1` enables soft-retirement of slabs/remnants missing from the latest successful full sync. Off by default. **Apply `backend-core/supabase/eliteos_slab_inventory_retirement_audit.sql` before enabling.** |
+| `SLAB_INVENTORY_RETIRE_MIN_RATIO` | Low-count guard ratio (default `0.8`). Retirement is skipped if the new snapshot has fewer than this fraction of the previously-active rows. |
+| `SLAB_INVENTORY_RETIRE_OVERRIDE_LOW_COUNT` | `1` forces retirement even when the low-count guard would block it. Use with care. |
+
+### Inventory reconciliation (soft-retirement)
+
+Each connector POST is treated as the **complete current XML snapshot**. After a
+successful full sync, slabs/remnants that are no longer present in the snapshot
+are **soft-retired** (`is_active=false`) — never deleted. They are scoped to the
+same `organization_id`, `external_source=slabsmith`, and `external_company_code`,
+so SlabCloud rows and other orgs are never touched. Retired rows keep their
+images, history, raw records, and quote references, and are reactivated
+automatically if they reappear in a later sync.
+
+Retirement only runs when ALL of these hold: the retirement flag is on, the sync
+was a real write (not dry-run/failed/partial), the source identity is
+unambiguous, and the snapshot count clears the low-count guard. The ingest
+response reports `retired_missing_count`, `reactivated_count`,
+`previous_active_count`, `latest_seen_count`, `skipped_retirement_reason`, and
+`sample_retired_ids`. A `--dry-run` send returns a `retirement_plan` preview with
+`would_retire_count` and writes nothing.
 
 ## Manual dry-run
 

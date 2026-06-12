@@ -1045,7 +1045,7 @@ export default function SlabInventoryApp() {
                     </div>
                     {notSeenCount > 0 && summary.active_not_seen_in_latest_sync_sample?.length ? (
                       <div className="health-not-seen">
-                        <p className="health-not-seen-label">Sample — not seen in latest sync</p>
+                        <p className="health-not-seen-label">Sample — active rows not in latest sync (retire-on-missing disabled, or a failed/partial sync)</p>
                         <ul className="health-not-seen-sample">
                           {summary.active_not_seen_in_latest_sync_sample.map((row) => (
                             <li key={row.id ?? row.inventory_id}>

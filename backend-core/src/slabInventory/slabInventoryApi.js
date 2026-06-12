@@ -822,10 +822,11 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
   //   active_not_seen_in_latest_sync_count — active rows whose last_seen_sync_run_id ≠ latest sync id
   //   active_not_seen_in_latest_sync_sample — up to 5 staff-safe sample rows
   //
-  // These counts reflect a known v1 behaviour: slabOS does NOT auto-deactivate slabs
-  // that vanish from the SlabCloud feed (that requires SLABCLOUD_MARK_INACTIVE=1 and
-  // a full uncapped sync). The UI uses these fields to explain the gap clearly without
-  // implying a bug or attempting to fix it automatically.
+  // These counts reflect source behaviour: SlabCloud syncs do NOT auto-deactivate
+  // slabs that vanish from the feed. The Slabsmith XML ingest path DOES soft-retire
+  // missing rows after a successful full sync when SLAB_INVENTORY_RETIRE_MISSING_ENABLED=1
+  // (see slabInventoryRetirement.js); with it off, the gap below is expected, not a bug.
+  // The UI uses these fields to explain the gap clearly without attempting to fix it here.
   app.get("/api/slab-inventory/summary", ...guard, async (req, res) => {
     try {
       jsonNoStore(res);

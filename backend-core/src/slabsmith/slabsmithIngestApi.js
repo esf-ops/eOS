@@ -156,6 +156,11 @@ export function buildIngestResponse(persistResult, meta = {}) {
   const warnings = Array.isArray(persistResult.warnings) ? persistResult.warnings : [];
   const status = persistResult.status ?? persistResult.mode ?? "unknown";
 
+  const retirementPlan =
+    persistResult.retirement_plan && typeof persistResult.retirement_plan === "object"
+      ? persistResult.retirement_plan
+      : null;
+
   return {
     ok: status === "completed",
     organization_id: meta.organizationId ?? null,
@@ -167,6 +172,28 @@ export function buildIngestResponse(persistResult, meta = {}) {
     raw_records_written: Number(persistResult.raw_records_written ?? 0),
     slab_inventory_upserted: Number(persistResult.slab_inventory_upserted ?? 0),
     needs_review: Number(persistResult.needs_review ?? 0),
+    // Retirement reconciliation (soft-retire missing inventory after full sync).
+    retired_missing_count: Number(
+      persistResult.retired_missing_count ?? retirementPlan?.would_retire_count ?? 0
+    ),
+    reactivated_count: Number(
+      persistResult.reactivated_count ?? retirementPlan?.reactivated_count ?? 0
+    ),
+    previous_active_count: Number(
+      persistResult.previous_active_count ?? retirementPlan?.previous_active_count ?? 0
+    ),
+    latest_seen_count: Number(
+      persistResult.latest_seen_count ?? retirementPlan?.latest_seen_count ?? 0
+    ),
+    skipped_retirement_reason:
+      persistResult.skipped_retirement_reason ??
+      retirementPlan?.skipped_retirement_reason ??
+      null,
+    sample_retired_ids: Array.isArray(persistResult.sample_retired_ids)
+      ? persistResult.sample_retired_ids.slice(0, 10)
+      : Array.isArray(retirementPlan?.sample_retired_ids)
+        ? retirementPlan.sample_retired_ids.slice(0, 10)
+        : [],
     sync_run_id: persistResult.syncRunId ?? null,
     status,
     warnings_count: warnings.length,
