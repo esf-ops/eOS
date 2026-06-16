@@ -1,5 +1,10 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import "./eliteosTopbar.css";
+
+const MENU_WIDTH_PX = 248;
+const MENU_CHIP_GAP_PX = 8;
+const MENU_VIEWPORT_PAD_PX = 8;
 
 /**
  * eliteOS shared topbar — the canonical app-shell header.
@@ -101,7 +106,10 @@ export default function EliteosTopbar({
   signOutLabel = "Sign out"
 }: EliteosTopbarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
   const userRef = useRef<HTMLDivElement | null>(null);
+  const chipRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
   const subtitle =
     appName && appName.trim() ? `${appName.trim()} · ${organizationName}` : organizationName;
@@ -110,12 +118,47 @@ export default function EliteosTopbar({
   const hasMenu = Boolean((menuItems && menuItems.length) || onSignOut);
   const brandAriaLabel = `eliteOS${appName && appName.trim() ? ` ${appName.trim()}` : ""} — ${organizationName}`;
 
+  const updateMenuPosition = useCallback(() => {
+    const chip = chipRef.current;
+    if (!chip) return;
+
+    const rect = chip.getBoundingClientRect();
+    let left = rect.right - MENU_WIDTH_PX;
+    left = Math.max(
+      MENU_VIEWPORT_PAD_PX,
+      Math.min(left, window.innerWidth - MENU_WIDTH_PX - MENU_VIEWPORT_PAD_PX)
+    );
+
+    let top = rect.bottom + MENU_CHIP_GAP_PX;
+    const menuHeight = menuRef.current?.offsetHeight ?? 0;
+    if (menuHeight > 0) {
+      const maxTop = window.innerHeight - menuHeight - MENU_VIEWPORT_PAD_PX;
+      top = Math.min(top, Math.max(MENU_VIEWPORT_PAD_PX, maxTop));
+    }
+
+    setMenuPosition({ top, left });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!menuOpen) return;
+    updateMenuPosition();
+    const raf = requestAnimationFrame(updateMenuPosition);
+    window.addEventListener("scroll", updateMenuPosition, true);
+    window.addEventListener("resize", updateMenuPosition);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("scroll", updateMenuPosition, true);
+      window.removeEventListener("resize", updateMenuPosition);
+    };
+  }, [menuOpen, updateMenuPosition]);
+
   useEffect(() => {
     if (!menuOpen) return;
     const onDocClick = (e: MouseEvent) => {
-      if (userRef.current && !userRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
-      }
+      const target = e.target as Node;
+      if (userRef.current?.contains(target)) return;
+      if (menuRef.current?.contains(target)) return;
+      setMenuOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setMenuOpen(false);
@@ -127,6 +170,104 @@ export default function EliteosTopbar({
       document.removeEventListener("keydown", onKey);
     };
   }, [menuOpen]);
+
+  const menuPanel =
+    menuOpen && hasMenu ? (
+      <div
+        ref={menuRef}
+        className="eliteos-topbar-menu eliteos-topbar-menu--portal"
+        role="menu"
+        aria-label="Account menu"
+        style={{ top: menuPosition.top, left: menuPosition.left }}
+      >
+        <div className="eliteos-topbar-menu-header">
+          {userName ? <p className="eliteos-topbar-menu-name">{userName}</p> : null}
+          {userEmail ? <p className="eliteos-topbar-menu-email">{userEmail}</p> : null}
+          <p className="eliteos-topbar-menu-workspace">
+            Workspace · {organizationName} · on eliteOS
+          </p>
+        </div>
+
+        {menuItems && menuItems.length ? (
+          <div className="eliteos-topbar-menu-body">
+            {menuItems.map((item, i) => {
+              const itemClass = `eliteos-topbar-menu-item${
+                item.variant === "danger" ? " eliteos-topbar-menu-item-danger" : ""
+              }`;
+              const inner = (
+                <>
+                  {item.icon ? (
+                    <span className="eliteos-topbar-menu-icon" aria-hidden>
+                      {item.icon}
+                    </span>
+                  ) : null}
+                  <span className="eliteos-topbar-menu-label">
+                    <span>{item.label}</span>
+                    {item.meta ? (
+                      <span className="eliteos-topbar-menu-meta">{item.meta}</span>
+                    ) : null}
+                  </span>
+                </>
+              );
+
+              if (item.href && !item.disabled) {
+                return (
+                  <a
+                    key={i}
+                    href={item.href}
+                    className={itemClass}
+                    role="menuitem"
+                    title={item.title}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      item.onClick?.();
+                    }}
+                  >
+                    {inner}
+                  </a>
+                );
+              }
+
+              return (
+                <button
+                  key={i}
+                  type="button"
+                  className={itemClass}
+                  role="menuitem"
+                  title={item.title}
+                  disabled={item.disabled}
+                  onClick={() => {
+                    setMenuOpen(false);
+                    item.onClick?.();
+                  }}
+                >
+                  {inner}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+
+        {onSignOut ? (
+          <div className="eliteos-topbar-menu-footer">
+            <button
+              type="button"
+              className="eliteos-topbar-menu-item eliteos-topbar-menu-item-danger"
+              role="menuitem"
+              onClick={() => {
+                setMenuOpen(false);
+                onSignOut();
+              }}
+            >
+              <span className="eliteos-topbar-menu-icon" aria-hidden>
+                <SignOutIcon />
+              </span>
+              <span className="eliteos-topbar-menu-label">{signOutLabel}</span>
+            </button>
+          </div>
+        ) : null}
+      </div>
+    ) : null;
 
   const brandInner = (
     <>
@@ -161,6 +302,7 @@ export default function EliteosTopbar({
         {showUserChip ? (
           <div className="eliteos-topbar-user" ref={userRef}>
             <button
+              ref={chipRef}
               type="button"
               className="eliteos-topbar-chip"
               aria-haspopup="menu"
@@ -178,99 +320,13 @@ export default function EliteosTopbar({
               <ChevronIcon />
             </button>
 
-            {menuOpen && hasMenu ? (
-              <div className="eliteos-topbar-menu" role="menu" aria-label="Account menu">
-                <div className="eliteos-topbar-menu-header">
-                  {userName ? <p className="eliteos-topbar-menu-name">{userName}</p> : null}
-                  {userEmail ? <p className="eliteos-topbar-menu-email">{userEmail}</p> : null}
-                  <p className="eliteos-topbar-menu-workspace">
-                    Workspace · {organizationName} · on eliteOS
-                  </p>
-                </div>
-
-                {menuItems && menuItems.length ? (
-                  <div className="eliteos-topbar-menu-body">
-                    {menuItems.map((item, i) => {
-                      const itemClass = `eliteos-topbar-menu-item${
-                        item.variant === "danger" ? " eliteos-topbar-menu-item-danger" : ""
-                      }`;
-                      const inner = (
-                        <>
-                          {item.icon ? (
-                            <span className="eliteos-topbar-menu-icon" aria-hidden>
-                              {item.icon}
-                            </span>
-                          ) : null}
-                          <span className="eliteos-topbar-menu-label">
-                            <span>{item.label}</span>
-                            {item.meta ? (
-                              <span className="eliteos-topbar-menu-meta">{item.meta}</span>
-                            ) : null}
-                          </span>
-                        </>
-                      );
-
-                      if (item.href && !item.disabled) {
-                        return (
-                          <a
-                            key={i}
-                            href={item.href}
-                            className={itemClass}
-                            role="menuitem"
-                            title={item.title}
-                            onClick={() => {
-                              setMenuOpen(false);
-                              item.onClick?.();
-                            }}
-                          >
-                            {inner}
-                          </a>
-                        );
-                      }
-
-                      return (
-                        <button
-                          key={i}
-                          type="button"
-                          className={itemClass}
-                          role="menuitem"
-                          title={item.title}
-                          disabled={item.disabled}
-                          onClick={() => {
-                            setMenuOpen(false);
-                            item.onClick?.();
-                          }}
-                        >
-                          {inner}
-                        </button>
-                      );
-                    })}
-                  </div>
-                ) : null}
-
-                {onSignOut ? (
-                  <div className="eliteos-topbar-menu-footer">
-                    <button
-                      type="button"
-                      className="eliteos-topbar-menu-item eliteos-topbar-menu-item-danger"
-                      role="menuitem"
-                      onClick={() => {
-                        setMenuOpen(false);
-                        onSignOut();
-                      }}
-                    >
-                      <span className="eliteos-topbar-menu-icon" aria-hidden>
-                        <SignOutIcon />
-                      </span>
-                      <span className="eliteos-topbar-menu-label">{signOutLabel}</span>
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
           </div>
         ) : null}
       </div>
+
+      {typeof document !== "undefined" && menuPanel
+        ? createPortal(menuPanel, document.body)
+        : null}
     </header>
   );
 }

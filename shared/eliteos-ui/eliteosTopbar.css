@@ -189,10 +189,6 @@
 /* ----- Dropdown ---------------------------------------------------------- */
 
 .eliteos-topbar-menu {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  z-index: 300;
   width: 248px;
   background: var(--eos-surface);
   border: 1px solid var(--eos-line-strong);
@@ -200,6 +196,12 @@
   box-shadow: 0 8px 32px rgba(11, 26, 51, 0.14), 0 1px 4px rgba(11, 26, 51, 0.06);
   overflow: hidden;
   animation: eliteos-topbar-menu-in 0.12s ease-out;
+}
+
+/* Portaled to document.body so the menu is not clipped by contain:paint on .eliteos-topbar. */
+.eliteos-topbar-menu--portal {
+  position: fixed;
+  z-index: 10000;
 }
 
 @keyframes eliteos-topbar-menu-in {
