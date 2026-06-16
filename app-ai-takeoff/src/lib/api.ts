@@ -96,6 +96,10 @@ export interface TakeoffJobListItem {
     warningCount: number;
     errorCount: number;
   } | null;
+  approvalStatus?: string;
+  approvedAt?: string | null;
+  approvedByUserId?: string | null;
+  canApprove?: boolean;
 }
 
 export interface ListTakeoffJobsResponse {
@@ -129,4 +133,62 @@ export async function listTakeoffJobs(
   const qs = params.toString();
   const path = qs ? `/api/takeoff-jobs?${qs}` : "/api/takeoff-jobs";
   return labApiGet(path, token) as Promise<ListTakeoffJobsResponse>;
+}
+
+export interface SaveTakeoffCorrectionResponse {
+  ok: boolean;
+  takeoffJobId: string;
+  correctionId: string;
+  savedAt: string;
+  reviewStatus: string;
+  approvalStatus?: string;
+  canApprove?: boolean;
+  summary: {
+    countertopExactSf: number;
+    backsplashExactSf: number;
+  };
+}
+
+export interface ApproveTakeoffJobResponse {
+  ok: boolean;
+  takeoffJobId: string;
+  approvedAt: string;
+  approvedByUserId: string | null;
+  reviewStatus: string;
+  approvalStatus?: string;
+  canApprove: boolean;
+  summary: {
+    countertopExactSf: number;
+    backsplashExactSf: number;
+  };
+}
+
+/** Save estimator corrections with audit metadata (resets approval to needs_review). */
+export async function saveTakeoffCorrection(
+  token: string,
+  takeoffJobId: string,
+  body: {
+    takeoffResult: unknown;
+    correctionNotes?: string | null;
+    baseResultId?: string | null;
+  }
+): Promise<SaveTakeoffCorrectionResponse> {
+  return labApiPost(
+    `/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}/corrections`,
+    token,
+    body
+  ) as Promise<SaveTakeoffCorrectionResponse>;
+}
+
+/** Approve the latest reviewed takeoff after server validation + QA gate. Does not create a quote. */
+export async function approveTakeoffJob(
+  token: string,
+  takeoffJobId: string,
+  takeoffResult?: unknown
+): Promise<ApproveTakeoffJobResponse> {
+  return labApiPost(
+    `/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}/approve`,
+    token,
+    takeoffResult ? { takeoffResult } : {}
+  ) as Promise<ApproveTakeoffJobResponse>;
 }

@@ -136,6 +136,11 @@ export default function TakeoffRunInbox({
                     ) : (
                       <span className="takeoff-inbox-count takeoff-inbox-count--muted">No results</span>
                     )}
+                    {job.reviewStatus === "approved" && job.approvedAt ? (
+                      <span className="takeoff-inbox-approved">
+                        Approved {fmtDate(job.approvedAt)}
+                      </span>
+                    ) : null}
                     {modelLabel ? (
                       <span className="takeoff-inbox-model">{modelLabel}</span>
                     ) : null}

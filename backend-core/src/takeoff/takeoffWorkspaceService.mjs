@@ -30,6 +30,7 @@
  *   - storage_path never returned.
  *   - No AI API calls. No quote mutation. No pricing logic.
  */
+import { randomUUID } from "node:crypto";
 import { computeTakeoffMeasurements } from "./takeoffMeasurementCalc.mjs";
 import { validateTakeoffResult } from "./takeoffValidator.mjs";
 import { planTakeoffImport } from "./takeoffImportPlanner.mjs";
@@ -147,7 +148,100 @@ function buildLatestResultMeta(resultRow) {
     reviewStatus: resultRow.review_status ?? "needs_review",
     schemaVersion: resultRow.schema_version ?? null,
     hasNormalizedTakeoffJson: resultRow.normalized_takeoff_json != null,
+    reviewedAt: resultRow.reviewed_at ?? null,
+    reviewedByUserId: resultRow.reviewed_by_user_id ?? null,
     summary: buildResultSummaryCounts(resultRow),
+  };
+}
+
+const RESULT_DETAIL_SELECT_COLS =
+  "id,created_at,review_status,schema_version,normalized_takeoff_json," +
+  "computed_measurements_json,validation_diagnostics_json,import_plan_json," +
+  "raw_ai_result_json,reviewed_by_user_id,reviewed_at";
+
+/** @returns {Promise<Record<string, unknown> | null>} */
+async function loadLatestResultRow(supabase, organizationId, takeoffJobId) {
+  const { data: rows, error } = await supabase
+    .from("quote_takeoff_results")
+    .select(RESULT_DETAIL_SELECT_COLS)
+    .eq("takeoff_job_id", takeoffJobId)
+    .eq("organization_id", organizationId)
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  if (error) {
+    throw Object.assign(new Error(`DB error loading takeoff result: ${error.message}`), {
+      statusCode: 503,
+    });
+  }
+  return rows?.[0] ?? null;
+}
+
+function recomputeTakeoffBundle(takeoffResult) {
+  const computed = computeTakeoffMeasurements(takeoffResult);
+  const validation = validateTakeoffResult(takeoffResult, computed);
+  const importPlan = planTakeoffImport(takeoffResult, computed);
+  return { computed, validation, importPlan };
+}
+
+function computeQaGateForResult(takeoffResult, computed, validation, rawAiJson) {
+  const meta =
+    typeof rawAiJson === "object" && rawAiJson !== null && typeof rawAiJson._meta === "object"
+      ? rawAiJson._meta
+      : {};
+  try {
+    return evaluateTakeoffQaGate({
+      takeoffResult,
+      computedMeasurements: computed,
+      validationDiagnostics: validation,
+      dimensionEvidence: meta.dimensionEvidence ?? null,
+      pageInventory: meta.pageInventory ?? null,
+    });
+  } catch {
+    return null;
+  }
+}
+
+function extractApprovalFields(jobRow, latestResultRow) {
+  const reviewStatus =
+    jobRow.review_status ??
+    latestResultRow?.review_status ??
+    "needs_review";
+  let approvedAt = null;
+  let approvedByUserId = null;
+  if (reviewStatus === "approved") {
+    approvedAt =
+      latestResultRow?.reviewed_at ??
+      jobRow.result_summary?.approvedAt ??
+      jobRow.updated_at ??
+      null;
+    approvedByUserId =
+      latestResultRow?.reviewed_by_user_id ??
+      jobRow.result_summary?.approvedByUserId ??
+      null;
+  }
+  return { reviewStatus, approvalStatus: reviewStatus, approvedAt, approvedByUserId };
+}
+
+function computeCanApprove({ hasSavedResult, validation, qaGate, reviewStatus }) {
+  if (!hasSavedResult) return false;
+  if (reviewStatus === "approved") return false;
+  if (validation?.hasErrors || (validation?.errorCount ?? 0) > 0) return false;
+  if (qaGate?.status === "do_not_import") return false;
+  return true;
+}
+
+function buildResultSummary(takeoffResult, computed, validation, importPlan) {
+  return {
+    countertopExactSf: computed.countertopExactSf,
+    backsplashExactSf: computed.backsplashExactSf,
+    combinedExactSf: computed.combinedExactSf,
+    chargeableCountertopSf: computed.chargeableCountertopSf,
+    chargeableBacksplashSf: computed.chargeableBacksplashSf,
+    roomCount: takeoffResult.rooms.length,
+    errorCount: validation.errorCount,
+    warningCount: validation.warningCount,
+    canImport: importPlan.canImport,
   };
 }
 
@@ -361,24 +455,44 @@ export async function getTakeoffWorkspace({
 
   const resultCount = resultIdRows?.length ?? 0;
   const hasJobSummary = jobHasResultSummary(jobRow);
+  const hasSavedResult = Boolean(resultCount > 0 || hasJobSummary);
 
-  const { data: latestRows } = await supabase
-    .from("quote_takeoff_results")
-    .select(
-      "id,created_at,review_status,schema_version,normalized_takeoff_json," +
-      "computed_measurements_json,validation_diagnostics_json"
-    )
-    .eq("takeoff_job_id", takeoffJobId)
-    .eq("organization_id", organizationId)
-    .order("created_at", { ascending: false })
-    .limit(1);
+  const latestRow = await loadLatestResultRow(supabase, organizationId, takeoffJobId);
+  const latestResult = latestRow ? buildLatestResultMeta(latestRow) : null;
 
-  const latestResult = latestRows?.[0] ? buildLatestResultMeta(latestRows[0]) : null;
+  let canApprove = false;
+  if (hasSavedResult) {
+    const takeoffJson =
+      latestRow?.normalized_takeoff_json ??
+      (hasJobSummary ? jobRow.result_summary.normalizedTakeoffJson : null);
+    const rawJson = latestRow?.raw_ai_result_json ?? null;
+    if (takeoffJson) {
+      try {
+        const { computed, validation } = recomputeTakeoffBundle(takeoffJson);
+        const qaGate = computeQaGateForResult(takeoffJson, computed, validation, rawJson);
+        const approval = extractApprovalFields(jobRow, latestRow);
+        canApprove = computeCanApprove({
+          hasSavedResult,
+          validation,
+          qaGate,
+          reviewStatus: approval.reviewStatus,
+        });
+      } catch {
+        canApprove = false;
+      }
+    }
+  }
+
+  const approval = extractApprovalFields(jobRow, latestRow);
 
   return {
     takeoffJobId,
     status: jobRow.status,
-    reviewStatus: jobRow.review_status ?? "needs_review",
+    reviewStatus: approval.reviewStatus,
+    approvalStatus: approval.approvalStatus,
+    approvedAt: approval.approvedAt,
+    approvedByUserId: approval.approvedByUserId,
+    canApprove,
     sourceType: jobRow.source_type ?? null,
     modelProvider: jobRow.model_provider ?? null,
     modelVersion: jobRow.model_version ?? null,
@@ -386,7 +500,7 @@ export async function getTakeoffWorkspace({
     startedAt: jobRow.started_at ?? jobRow.created_at,
     completedAt: jobRow.completed_at ?? null,
     updatedAt: jobRow.updated_at ?? null,
-    hasSavedResult: Boolean(resultCount > 0 || hasJobSummary),
+    hasSavedResult,
     resultCount: resultCount > 0 ? resultCount : hasJobSummary ? 1 : 0,
     latestResult,
     isWorkspace: true,
@@ -460,8 +574,8 @@ export async function listTakeoffJobs({ supabase, organizationId, query = {} }) 
     const { data: resultRows, error: resultsErr } = await supabase
       .from("quote_takeoff_results")
       .select(
-        "id,takeoff_job_id,created_at,review_status,normalized_takeoff_json," +
-        "computed_measurements_json,validation_diagnostics_json"
+        "id,takeoff_job_id,created_at,review_status,reviewed_at,reviewed_by_user_id," +
+        "normalized_takeoff_json,computed_measurements_json,validation_diagnostics_json"
       )
       .eq("organization_id", organizationId)
       .in("takeoff_job_id", jobIds)
@@ -496,9 +610,17 @@ export async function listTakeoffJobs({ supabase, organizationId, query = {} }) 
             reviewStatus: jobRow.review_status ?? "needs_review",
             schemaVersion: null,
             hasNormalizedTakeoffJson: true,
+            reviewedAt: jobRow.result_summary?.approvedAt ?? null,
+            reviewedByUserId: jobRow.result_summary?.approvedByUserId ?? null,
             summary: null,
           }
         : null;
+
+    const approval = extractApprovalFields(jobRow, latest);
+    const canApprove =
+      resultCount > 0 &&
+      approval.reviewStatus !== "approved" &&
+      (latestMeta?.summary?.errorCount ?? 0) === 0;
 
     const safeFile = fileRow ? safeFileSummary(fileRow) : null;
 
@@ -507,7 +629,11 @@ export async function listTakeoffJobs({ supabase, organizationId, query = {} }) 
       quoteFileId: jobRow.quote_file_id ?? null,
       originalFilename: safeFile?.originalFilename ?? null,
       status: jobRow.status,
-      reviewStatus: jobRow.review_status ?? "needs_review",
+      reviewStatus: approval.reviewStatus,
+      approvalStatus: approval.approvalStatus,
+      approvedAt: approval.approvedAt,
+      approvedByUserId: approval.approvedByUserId,
+      canApprove,
       sourceType: jobRow.source_type ?? null,
       modelProvider: jobRow.model_provider ?? null,
       modelVersion: jobRow.model_version ?? null,
@@ -675,6 +801,362 @@ export async function saveTakeoffResult({
     savedAt: now,
     schemaVersion,
     reviewStatus,
+    summary,
+  };
+}
+
+/**
+ * Save estimator corrections with an audit payload appended to result metadata.
+ *
+ * Inserts a new quote_takeoff_results row and resets job approval to needs_review.
+ * Corrections are stored in raw_ai_result_json._corrections (no dedicated table).
+ *
+ * @param {{ supabase: object, organizationId: string, userId: string|null, takeoffJobId: string, takeoffResult: object, correctionNotes?: string|null, baseResultId?: string|null }} params
+ */
+export async function saveTakeoffCorrection({
+  supabase,
+  organizationId,
+  userId,
+  takeoffJobId,
+  takeoffResult,
+  correctionNotes = null,
+  baseResultId = null,
+}) {
+  if (!isUuid(organizationId)) {
+    throw workspaceError("organizationId must be a valid UUID");
+  }
+  if (!isUuid(takeoffJobId)) {
+    throw workspaceError("takeoffJobId must be a valid UUID");
+  }
+  if (!takeoffResult || typeof takeoffResult !== "object" || Array.isArray(takeoffResult)) {
+    throw workspaceError("takeoffResult must be a TakeoffResult object");
+  }
+  if (!Array.isArray(takeoffResult.rooms)) {
+    throw workspaceError("takeoffResult.rooms must be an array");
+  }
+  if (baseResultId != null && baseResultId !== "" && !isUuid(baseResultId)) {
+    throw workspaceError("baseResultId must be a valid UUID");
+  }
+
+  const jobRow = await loadVerifiedJobRow(supabase, organizationId, takeoffJobId);
+  if (!jobRow) {
+    throw workspaceError("Takeoff job not found", 404);
+  }
+
+  let computed, validation, importPlan;
+  try {
+    ({ computed, validation, importPlan } = recomputeTakeoffBundle(takeoffResult));
+  } catch (e) {
+    throw workspaceError(
+      `Takeoff computation failed: ${e instanceof Error ? e.message : String(e)}`
+    );
+  }
+
+  const latestRow = await loadLatestResultRow(supabase, organizationId, takeoffJobId);
+  const now = new Date().toISOString();
+  const schemaVersion = takeoffResult.schemaVersion ?? TAKEOFF_SCHEMA_VERSION;
+  const summary = buildResultSummary(takeoffResult, computed, validation, importPlan);
+
+  const correctionEntry = {
+    id: randomUUID(),
+    correctedAt: now,
+    correctedByUserId: userId ?? null,
+    notes: correctionNotes ? String(correctionNotes).trim() || null : null,
+    baseResultId:
+      baseResultId && isUuid(baseResultId)
+        ? baseResultId
+        : latestRow?.id ?? null,
+    summary: {
+      countertopExactSf: summary.countertopExactSf,
+      backsplashExactSf: summary.backsplashExactSf,
+      errorCount: summary.errorCount,
+      warningCount: summary.warningCount,
+    },
+  };
+
+  const existingRaw =
+    typeof latestRow?.raw_ai_result_json === "object" && latestRow.raw_ai_result_json !== null
+      ? latestRow.raw_ai_result_json
+      : {};
+  const existingCorrections = Array.isArray(existingRaw._corrections)
+    ? existingRaw._corrections
+    : [];
+  const rawPayload = {
+    ...existingRaw,
+    _corrections: [...existingCorrections, correctionEntry],
+    _meta: {
+      ...(existingRaw._meta ?? {}),
+      lastCorrectionAt: now,
+      lastCorrectedByUserId: userId ?? null,
+    },
+  };
+
+  const resultPayload = {
+    organization_id: organizationId,
+    takeoff_job_id: takeoffJobId,
+    schema_version: schemaVersion,
+    raw_ai_result_json: rawPayload,
+    normalized_takeoff_json: takeoffResult,
+    computed_measurements_json: computed,
+    validation_diagnostics_json: validation,
+    import_plan_json: importPlan,
+    review_status: "needs_review",
+    needs_review: true,
+    reviewed_by_user_id: null,
+    reviewed_at: null,
+  };
+
+  let resultRowId = null;
+  const { data: resultRows, error: resultInsertErr } = await supabase
+    .from("quote_takeoff_results")
+    .insert(resultPayload)
+    .select();
+
+  if (!resultInsertErr && resultRows && resultRows.length > 0) {
+    resultRowId = resultRows[0].id;
+  } else if (resultInsertErr) {
+    const isNotNullViolation =
+      resultInsertErr.code === "23502" ||
+      String(resultInsertErr.message ?? "").includes("null value in column");
+    if (!isNotNullViolation) {
+      throw Object.assign(
+        new Error(`Failed to save takeoff correction: ${resultInsertErr.message}`),
+        { statusCode: 503 }
+      );
+    }
+    console.warn(
+      "[takeoffWorkspace] quote_takeoff_results.quote_id NOT NULL blocked correction insert."
+    );
+  }
+
+  await supabase
+    .from("quote_takeoff_jobs")
+    .update({
+      status: JOB_STATUS_COMPLETED,
+      review_status: "needs_review",
+      updated_at: now,
+      result_summary: {
+        ...summary,
+        savedAt: now,
+        schemaVersion,
+        reviewStatus: "needs_review",
+        approvedAt: null,
+        approvedByUserId: null,
+        lastCorrectionId: correctionEntry.id,
+        normalizedTakeoffJson: takeoffResult,
+        computedMeasurementsJson: computed,
+        validationDiagnosticsJson: validation,
+        importPlanJson: importPlan,
+        resultRowId: resultRowId ?? null,
+      },
+    })
+    .eq("id", takeoffJobId)
+    .eq("organization_id", organizationId);
+
+  return {
+    ok: true,
+    takeoffJobId,
+    correctionId: correctionEntry.id,
+    savedAt: now,
+    schemaVersion,
+    reviewStatus: "needs_review",
+    approvalStatus: "needs_review",
+    canApprove: computeCanApprove({
+      hasSavedResult: true,
+      validation,
+      qaGate: computeQaGateForResult(takeoffResult, computed, validation, rawPayload),
+      reviewStatus: "needs_review",
+    }),
+    correction: correctionEntry,
+    summary,
+  };
+}
+
+/**
+ * Approve the latest reviewed takeoff result after server-side validation + QA gate.
+ *
+ * Does NOT import into Internal Estimate. Does NOT create or update quotes.
+ *
+ * @param {{ supabase: object, organizationId: string, userId: string|null, takeoffJobId: string, takeoffResult?: object|null }} params
+ */
+export async function approveTakeoffJob({
+  supabase,
+  organizationId,
+  userId,
+  takeoffJobId,
+  takeoffResult = null,
+}) {
+  if (!isUuid(organizationId)) {
+    throw workspaceError("organizationId must be a valid UUID");
+  }
+  if (!isUuid(takeoffJobId)) {
+    throw workspaceError("takeoffJobId must be a valid UUID");
+  }
+  if (
+    takeoffResult != null &&
+    (typeof takeoffResult !== "object" || Array.isArray(takeoffResult))
+  ) {
+    throw workspaceError("takeoffResult must be a TakeoffResult object");
+  }
+  if (takeoffResult != null && !Array.isArray(takeoffResult.rooms)) {
+    throw workspaceError("takeoffResult.rooms must be an array");
+  }
+
+  const jobRow = await loadVerifiedJobRow(supabase, organizationId, takeoffJobId);
+  if (!jobRow) {
+    throw workspaceError("Takeoff job not found", 404);
+  }
+
+  const latestRow = await loadLatestResultRow(supabase, organizationId, takeoffJobId);
+  let resolvedResult = takeoffResult;
+  if (!resolvedResult) {
+    if (latestRow?.normalized_takeoff_json) {
+      resolvedResult = latestRow.normalized_takeoff_json;
+    } else {
+      const rs = jobRow.result_summary;
+      if (rs && typeof rs === "object" && rs.normalizedTakeoffJson) {
+        resolvedResult = rs.normalizedTakeoffJson;
+      }
+    }
+  }
+
+  if (!resolvedResult) {
+    throw workspaceError("No saved result found for this takeoff workspace", 404);
+  }
+
+  let computed, validation, importPlan;
+  try {
+    ({ computed, validation, importPlan } = recomputeTakeoffBundle(resolvedResult));
+  } catch (e) {
+    throw workspaceError(
+      `Takeoff computation failed: ${e instanceof Error ? e.message : String(e)}`
+    );
+  }
+
+  const rawJson =
+    typeof latestRow?.raw_ai_result_json === "object" && latestRow.raw_ai_result_json !== null
+      ? latestRow.raw_ai_result_json
+      : {};
+  const qaGate = computeQaGateForResult(resolvedResult, computed, validation, rawJson);
+
+  if (validation.hasErrors || (validation.errorCount ?? 0) > 0) {
+    throw workspaceError("Validation errors must be resolved before approval", 422);
+  }
+  if (qaGate?.status === "do_not_import") {
+    throw workspaceError(
+      qaGate.headline ?? "QA gate blocks approval for this takeoff",
+      422
+    );
+  }
+
+  const now = new Date().toISOString();
+  const schemaVersion = resolvedResult.schemaVersion ?? TAKEOFF_SCHEMA_VERSION;
+  const summary = buildResultSummary(resolvedResult, computed, validation, importPlan);
+  const approvedSnapshot = {
+    approvedAt: now,
+    approvedByUserId: userId ?? null,
+    schemaVersion,
+    qaGateStatus: qaGate?.status ?? null,
+    summary,
+    computedMeasurementsJson: computed,
+    validationDiagnosticsJson: validation,
+    importPlanJson: importPlan,
+  };
+
+  if (latestRow?.id) {
+    const nextRaw = {
+      ...rawJson,
+      _meta: {
+        ...(rawJson._meta ?? {}),
+        approvedSnapshot,
+      },
+    };
+    const { error: updateErr } = await supabase
+      .from("quote_takeoff_results")
+      .update({
+        normalized_takeoff_json: resolvedResult,
+        computed_measurements_json: computed,
+        validation_diagnostics_json: validation,
+        import_plan_json: importPlan,
+        review_status: "approved",
+        needs_review: false,
+        reviewed_by_user_id: userId ?? null,
+        reviewed_at: now,
+        raw_ai_result_json: nextRaw,
+      })
+      .eq("id", latestRow.id)
+      .eq("organization_id", organizationId);
+
+    if (updateErr) {
+      throw Object.assign(
+        new Error(`Failed to approve takeoff result: ${updateErr.message}`),
+        { statusCode: 503 }
+      );
+    }
+  } else {
+    const insertPayload = {
+      organization_id: organizationId,
+      takeoff_job_id: takeoffJobId,
+      schema_version: schemaVersion,
+      raw_ai_result_json: { _meta: { approvedSnapshot } },
+      normalized_takeoff_json: resolvedResult,
+      computed_measurements_json: computed,
+      validation_diagnostics_json: validation,
+      import_plan_json: importPlan,
+      review_status: "approved",
+      needs_review: false,
+      reviewed_by_user_id: userId ?? null,
+      reviewed_at: now,
+    };
+    const { error: insertErr } = await supabase
+      .from("quote_takeoff_results")
+      .insert(insertPayload)
+      .select();
+    if (insertErr) {
+      const isNotNullViolation =
+        insertErr.code === "23502" ||
+        String(insertErr.message ?? "").includes("null value in column");
+      if (!isNotNullViolation) {
+        throw Object.assign(
+          new Error(`Failed to approve takeoff result: ${insertErr.message}`),
+          { statusCode: 503 }
+        );
+      }
+    }
+  }
+
+  await supabase
+    .from("quote_takeoff_jobs")
+    .update({
+      status: JOB_STATUS_COMPLETED,
+      review_status: "approved",
+      updated_at: now,
+      result_summary: {
+        ...summary,
+        savedAt: now,
+        schemaVersion,
+        reviewStatus: "approved",
+        approvedAt: now,
+        approvedByUserId: userId ?? null,
+        qaGateStatus: qaGate?.status ?? null,
+        normalizedTakeoffJson: resolvedResult,
+        computedMeasurementsJson: computed,
+        validationDiagnosticsJson: validation,
+        importPlanJson: importPlan,
+      },
+    })
+    .eq("id", takeoffJobId)
+    .eq("organization_id", organizationId);
+
+  return {
+    ok: true,
+    takeoffJobId,
+    approvedAt: now,
+    approvedByUserId: userId ?? null,
+    reviewStatus: "approved",
+    approvalStatus: "approved",
+    canApprove: false,
+    qaGate,
     summary,
   };
 }
@@ -979,6 +1461,10 @@ async function _legacyV4GetWorkspace(supabase, organizationId, takeoffJobId) {
   return {
     takeoffJobId,
     reviewStatus: meta.takeoffWorkspace.reviewStatus ?? "needs_review",
+    approvalStatus: meta.takeoffWorkspace.reviewStatus ?? "needs_review",
+    approvedAt: null,
+    approvedByUserId: null,
+    canApprove: false,
     startedAt: meta.takeoffWorkspace.startedAt ?? null,
     hasSavedResult: Boolean(meta.takeoffResult),
     resultCount: meta.takeoffResult ? 1 : 0,

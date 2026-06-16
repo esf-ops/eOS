@@ -891,6 +891,23 @@ details[open] > .lab-section-summary::before { transform: rotate(90deg); }
 }
 .save-panel-msg--saved { color: var(--eos-success); }
 .save-panel-msg--error { color: var(--eos-danger); }
+.save-panel-approved {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 12px 24px 0; font-size: 12px; color: var(--eos-ink-mid);
+}
+.save-panel-note { margin: 0 0 8px; font-size: 12px; color: var(--eos-warn); }
+.save-panel-actions--split { display: flex; gap: 10px; flex-wrap: wrap; }
+.save-panel-btn--secondary {
+  background: var(--eos-bg-soft); color: var(--eos-ink);
+  border: 1px solid var(--eos-line-strong);
+}
+.save-panel-btn--secondary:not(:disabled):hover { background: var(--eos-bg); }
+.save-panel-btn--approve { background: var(--eos-success); }
+.save-panel-btn--approve:not(:disabled):hover { background: #15803d; }
+.save-panel-blocked {
+  margin: 0; padding: 0 24px 12px; font-size: 12px; color: var(--eos-warn);
+}
+.takeoff-inbox-approved { font-size: 11px; color: var(--eos-success); font-weight: 600; }
 
 /* ── Auth — topbar right section ─────────────────────────────────────────── */
 .lab-topbar-right {

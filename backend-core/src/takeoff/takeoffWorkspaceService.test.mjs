@@ -28,6 +28,8 @@ import {
   getTakeoffWorkspace,
   listTakeoffJobs,
   saveTakeoffResult,
+  saveTakeoffCorrection,
+  approveTakeoffJob,
   getLatestTakeoffResult,
   listTakeoffResults,
   getResultById,
@@ -82,6 +84,34 @@ function makeJobRow(overrides = {}) {
   };
 }
 
+function makeApprovableTakeoff() {
+  return {
+    schemaVersion: "1.0",
+    status: "reviewed",
+    rooms: [
+      {
+        id: "room-1",
+        name: "Kitchen",
+        areas: [
+          {
+            id: "area-1",
+            name: "Main",
+            backsplashType: "none",
+            runs: [
+              {
+                id: "run-1",
+                label: "Main run",
+                lengthIn: 120,
+                depthIn: 25.5,
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+}
+
 function makeResultRow(overrides = {}) {
   const fixture = buildSpec73Fixture();
   return {
@@ -89,11 +119,14 @@ function makeResultRow(overrides = {}) {
     organization_id: ORG_ID,
     takeoff_job_id: JOB_ID,
     schema_version: "1.0",
+    raw_ai_result_json: { _meta: { provider: "openai", modelUsed: "gpt-4o" } },
     normalized_takeoff_json: fixture,
     computed_measurements_json: { countertopExactSf: 59.96, backsplashExactSf: 6.61 },
-    validation_diagnostics_json: { errorCount: 0, warningCount: 0 },
+    validation_diagnostics_json: { errorCount: 0, warningCount: 0, hasErrors: false },
     import_plan_json: { canImport: true, items: [] },
     review_status: "needs_review",
+    reviewed_by_user_id: null,
+    reviewed_at: null,
     created_at: "2026-06-01T01:00:00.000Z",
     ...overrides,
   };
@@ -1220,6 +1253,226 @@ function makeMockSupabase({
   const listIdx = calls.findIndex((c) => c.method === "get" && c.path === "/api/takeoff-jobs");
   assert.ok(listIdx < detailIdx, "list route registered before :id route");
   console.log("ok: attachTakeoffWorkspaceRoutes — list route auth/head registration");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// saveTakeoffCorrection — stores audit metadata, no storage_path
+// ═══════════════════════════════════════════════════════════════════════════════
+
+{
+  const capturedInserts = [];
+  const { supabase, tableData } = makeMockSupabase({
+    fileRow: makeFileRow(),
+    jobRow: makeJobRow({ review_status: "approved" }),
+    resultRows: [makeResultRow()],
+    capturedInserts,
+  });
+
+  const fixture = buildSpec73Fixture();
+  const result = await saveTakeoffCorrection({
+    supabase,
+    organizationId: ORG_ID,
+    userId: USER_ID,
+    takeoffJobId: JOB_ID,
+    takeoffResult: fixture,
+    correctionNotes: "Adjusted island run depth",
+    baseResultId: RESULT_ID,
+  });
+
+  assert.equal(result.ok, true);
+  assert.ok(result.correctionId, "correctionId returned");
+  assert.equal(result.reviewStatus, "needs_review", "correction resets review status");
+  assert.equal(tableData.quote_takeoff_jobs[0].review_status, "needs_review");
+
+  const correctionInsert = capturedInserts.find(
+    (i) =>
+      i.table === "quote_takeoff_results" &&
+      Array.isArray(i.rows[0]?.raw_ai_result_json?._corrections) &&
+      i.rows[0].raw_ai_result_json._corrections.length === 1
+  );
+  assert.ok(correctionInsert, "correction row inserted with _corrections audit");
+  assert.equal(
+    correctionInsert.rows[0].raw_ai_result_json._corrections[0].notes,
+    "Adjusted island run depth"
+  );
+  assert.ok(!("storagePath" in result), "storage_path not exposed");
+  console.log("ok: saveTakeoffCorrection — audit metadata stored");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// approveTakeoffJob — success, org scope, no result, QA/validation block
+// ═══════════════════════════════════════════════════════════════════════════════
+
+{
+  const approvable = makeApprovableTakeoff();
+  const { supabase, tableData } = makeMockSupabase({
+    fileRow: makeFileRow(),
+    jobRow: makeJobRow(),
+    resultRows: [makeResultRow({ normalized_takeoff_json: approvable })],
+  });
+
+  const result = await approveTakeoffJob({
+    supabase,
+    organizationId: ORG_ID,
+    userId: USER_ID,
+    takeoffJobId: JOB_ID,
+  });
+
+  assert.equal(result.reviewStatus, "approved");
+  assert.equal(result.approvalStatus, "approved");
+  assert.ok(result.approvedAt);
+  assert.equal(result.approvedByUserId, USER_ID);
+  assert.equal(result.canApprove, false);
+  assert.equal(tableData.quote_takeoff_jobs[0].review_status, "approved");
+  assert.equal(tableData.quote_takeoff_results[0].review_status, "approved");
+  assert.equal(tableData.quote_takeoff_results[0].reviewed_by_user_id, USER_ID);
+  assert.ok(tableData.quote_takeoff_results[0].raw_ai_result_json._meta.approvedSnapshot);
+  assert.ok(!("storagePath" in result), "storage_path not exposed");
+  console.log("ok: approveTakeoffJob — marks job and latest result approved");
+}
+
+{
+  const { supabase } = makeMockSupabase({
+    jobRow: makeJobRow(),
+    resultRows: [],
+  });
+
+  await assert.rejects(
+    () => approveTakeoffJob({
+      supabase,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      takeoffJobId: JOB_ID,
+    }),
+    /No saved result/i,
+    "approve without result → 404"
+  );
+  console.log("ok: approveTakeoffJob — no result → 404");
+}
+
+{
+  const { supabase } = makeMockSupabase({
+    jobRow: makeJobRow({ organization_id: OTHER_ORG }),
+    resultRows: [makeResultRow({ organization_id: OTHER_ORG })],
+  });
+
+  await assert.rejects(
+    () => approveTakeoffJob({
+      supabase,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      takeoffJobId: JOB_ID,
+    }),
+    /not found/i,
+    "cross-org approve → 404"
+  );
+  console.log("ok: approveTakeoffJob — cross-org not visible");
+}
+
+{
+  const emptyTakeoff = {
+    schemaVersion: "1.0",
+    status: "reviewed",
+    rooms: [],
+  };
+  const { supabase } = makeMockSupabase({
+    jobRow: makeJobRow(),
+    resultRows: [makeResultRow({ normalized_takeoff_json: emptyTakeoff })],
+  });
+
+  await assert.rejects(
+    () => approveTakeoffJob({
+      supabase,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      takeoffJobId: JOB_ID,
+      takeoffResult: emptyTakeoff,
+    }),
+    (err) => err.statusCode === 422,
+    "approval blocked when takeoff incomplete"
+  );
+  console.log("ok: approveTakeoffJob — incomplete takeoff blocked");
+}
+
+{
+  const { supabase } = makeMockSupabase({
+    jobRow: makeJobRow(),
+    resultRows: [makeResultRow()],
+  });
+
+  await assert.rejects(
+    () => approveTakeoffJob({
+      supabase,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      takeoffJobId: JOB_ID,
+    }),
+    /Validation errors must be resolved/i,
+    "validation errors block approval"
+  );
+  console.log("ok: approveTakeoffJob — validation errors block approval");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// getTakeoffWorkspace / listTakeoffJobs — approved metadata + canApprove
+// ═══════════════════════════════════════════════════════════════════════════════
+
+{
+  const approvedAt = "2026-06-03T12:00:00.000Z";
+  const { supabase } = makeMockSupabase({
+    fileRow: makeFileRow(),
+    jobRow: makeJobRow({
+      review_status: "approved",
+      result_summary: { approvedAt, approvedByUserId: USER_ID },
+    }),
+    resultRows: [
+      makeResultRow({
+        review_status: "approved",
+        reviewed_at: approvedAt,
+        reviewed_by_user_id: USER_ID,
+      }),
+    ],
+  });
+
+  const detail = await getTakeoffWorkspace({
+    supabase,
+    organizationId: ORG_ID,
+    takeoffJobId: JOB_ID,
+  });
+  assert.equal(detail.reviewStatus, "approved");
+  assert.equal(detail.approvedAt, approvedAt);
+  assert.equal(detail.approvedByUserId, USER_ID);
+  assert.equal(detail.canApprove, false);
+
+  const { jobs } = await listTakeoffJobs({ supabase, organizationId: ORG_ID, query: {} });
+  assert.equal(jobs[0].reviewStatus, "approved");
+  assert.equal(jobs[0].approvedAt, approvedAt);
+  assert.equal(jobs[0].canApprove, false);
+  console.log("ok: getTakeoffWorkspace + listTakeoffJobs — approved metadata");
+}
+
+{
+  const { attachTakeoffWorkspaceRoutes } = await import("./takeoffWorkspaceRoutes.js");
+  const calls = [];
+  const mockApp = {};
+  for (const m of ["get", "post"]) {
+    mockApp[m] = (path, ...handlers) => calls.push({ method: m, path, handlerCount: handlers.length });
+  }
+  const authMw = (_req, _res, next) => next();
+  const headAccessMw = (_req, _res, next) => next();
+  attachTakeoffWorkspaceRoutes(mockApp, {
+    requireAuth: () => authMw,
+    getSupabase: () => ({}),
+    headAccess: headAccessMw,
+  });
+
+  for (const path of ["/api/takeoff-jobs/:id/corrections", "/api/takeoff-jobs/:id/approve"]) {
+    const route = calls.find((c) => c.method === "post" && c.path === path);
+    assert.ok(route, `${path} registered`);
+    assert.ok(route.handlerCount >= 2, `${path} includes auth + handler`);
+    assert.ok(route.handlerCount >= 3 || path.includes("approve"), `${path} middleware stack present`);
+  }
+  console.log("ok: attachTakeoffWorkspaceRoutes — correction + approve routes gated");
 }
 
 console.log("\ntakeoffWorkspaceService: all tests passed");

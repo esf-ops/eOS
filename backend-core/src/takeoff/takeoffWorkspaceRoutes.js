@@ -7,6 +7,8 @@
  *   GET  /api/takeoff-jobs                        — list org takeoff jobs (inbox)
  *   GET  /api/takeoff-jobs/:id                    — get workspace status + file metadata
  *   POST /api/takeoff-jobs/:id/results             — save reviewed TakeoffResult (server recomputes)
+ *   POST /api/takeoff-jobs/:id/corrections         — save estimator corrections + audit metadata
+ *   POST /api/takeoff-jobs/:id/approve             — approve latest reviewed takeoff (validated)
  *   GET  /api/takeoff-jobs/:id/results/latest      — load latest saved result
  *   POST /api/takeoff-jobs/:id/generate-ai-draft   — generate AI draft from uploaded plan (v5)
  *
@@ -34,6 +36,8 @@ import {
   getTakeoffWorkspace,
   listTakeoffJobs,
   saveTakeoffResult,
+  saveTakeoffCorrection,
+  approveTakeoffJob,
   getLatestTakeoffResult,
   listTakeoffResults,
   getResultById,
@@ -209,6 +213,78 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase, he
         takeoffJobId,
         takeoffResult,
         reviewStatus: String(reviewStatus ?? "needs_review").trim() || "needs_review",
+      });
+
+      return res.json(result);
+    } catch (e) {
+      const status = e.statusCode ?? 500;
+      const code = status < 500 ? "validation_error" : "server_error";
+      return res.status(status).json({ ok: false, error: String(e?.message ?? e), code });
+    }
+  });
+
+  // ── POST /api/takeoff-jobs/:id/corrections ────────────────────────────────
+  //
+  // Saves estimator corrections with audit metadata appended to result JSON.
+  // Resets approval to needs_review. No quote mutation. No import.
+  //
+  app.post("/api/takeoff-jobs/:id/corrections", requireAuth(), guardHead, jsonParser, async (req, res) => {
+    try {
+      const supabase = getSupabase();
+      const user = req.user;
+
+      const orgCtx = await resolveOrganizationContext({ req, supabase, mode: "authenticated" });
+      if (!orgCtx.organizationId) {
+        return res.status(503).json({ ok: false, error: "Organization context not available" });
+      }
+
+      const takeoffJobId = String(req.params.id ?? "").trim();
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const { takeoffResult, correctionNotes, baseResultId } = body;
+
+      const result = await saveTakeoffCorrection({
+        supabase,
+        organizationId: orgCtx.organizationId,
+        userId: user?.id ?? null,
+        takeoffJobId,
+        takeoffResult,
+        correctionNotes: correctionNotes ?? null,
+        baseResultId: baseResultId ?? null,
+      });
+
+      return res.status(201).json(result);
+    } catch (e) {
+      const status = e.statusCode ?? 500;
+      const code = status < 500 ? "validation_error" : "server_error";
+      return res.status(status).json({ ok: false, error: String(e?.message ?? e), code });
+    }
+  });
+
+  // ── POST /api/takeoff-jobs/:id/approve ────────────────────────────────────
+  //
+  // Validates + QA-gates the latest reviewed takeoff, then marks job/result approved.
+  // Does NOT import into Internal Estimate. Does NOT create or update quotes.
+  //
+  app.post("/api/takeoff-jobs/:id/approve", requireAuth(), guardHead, jsonParser, async (req, res) => {
+    try {
+      const supabase = getSupabase();
+      const user = req.user;
+
+      const orgCtx = await resolveOrganizationContext({ req, supabase, mode: "authenticated" });
+      if (!orgCtx.organizationId) {
+        return res.status(503).json({ ok: false, error: "Organization context not available" });
+      }
+
+      const takeoffJobId = String(req.params.id ?? "").trim();
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const takeoffResult = body.takeoffResult ?? null;
+
+      const result = await approveTakeoffJob({
+        supabase,
+        organizationId: orgCtx.organizationId,
+        userId: user?.id ?? null,
+        takeoffJobId,
+        takeoffResult,
       });
 
       return res.json(result);

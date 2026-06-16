@@ -46,6 +46,7 @@ import TakeoffDiagnosticsPanel from "./components/TakeoffDiagnosticsPanel";
 import TakeoffImportPreview from "./components/TakeoffImportPreview";
 import TakeoffWorkbench from "./components/TakeoffWorkbench";
 import TakeoffPlanFileSection from "./components/TakeoffPlanFileSection";
+import type { WorkspaceReviewMeta } from "./components/TakeoffPlanFileSection";
 import TakeoffBenchmarkPanel from "./components/TakeoffBenchmarkPanel";
 import type { BenchmarkQaContext } from "./components/TakeoffBenchmarkPanel";
 import TakeoffRunHistoryPanel from "./components/TakeoffRunHistoryPanel";
@@ -63,7 +64,7 @@ import { reconcileRunsWithEvidence } from "@takeoff-core/takeoffEvidenceRunRecon
 import { evaluateTakeoffFabricationRules } from "@takeoff-core/takeoffFabricationRules.mjs";
 import { makeTakeoffRun } from "@takeoff-core/takeoffContract.mjs";
 import { getSupabase } from "./lib/supabase";
-import { labApiGet, labApiPost, LabApiError } from "./lib/api";
+import { labApiGet, labApiPost, saveTakeoffCorrection, approveTakeoffJob, LabApiError } from "./lib/api";
 
 // ── Dev-tools flag ─────────────────────────────────────────────────────────
 // Set VITE_TAKEOFF_SHOW_DEV_TOOLS=1 in .env.local to expose JSON workbench,
@@ -143,6 +144,7 @@ export type AreaPatch  = {
 export type RunPatch   = { label?: string; lengthIn?: number; depthIn?: number; assemblyNotes?: string };
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
+type ApproveStatus = "idle" | "approving" | "approved" | "error";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -330,6 +332,9 @@ export default function TakeoffLabApp() {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
+  const [approveStatus, setApproveStatus] = useState<ApproveStatus>("idle");
+  const [approveMsg, setApproveMsg] = useState<string | null>(null);
+  const [workspaceReview, setWorkspaceReview] = useState<WorkspaceReviewMeta | null>(null);
 
   // ── Copy feedback ─────────────────────────────────────────────────────────
   const [copyFeedback, setCopyFeedback] = useState<"summary" | "json" | null>(null);
@@ -443,6 +448,26 @@ export default function TakeoffLabApp() {
     }
   }, [sourceMode, activeState, dimensionEvidence, pageInventory, benchmarkQaContext]);
 
+  const canApproveTakeoff = useMemo(() => {
+    if (!takeoffJobId || !hasActiveSource) return false;
+    if (workspaceReview?.reviewStatus === "approved") return false;
+    if (activeState.validation.hasErrors || (activeState.validation.errorCount ?? 0) > 0) return false;
+    if (qaGate?.status === "do_not_import") return false;
+    return true;
+  }, [takeoffJobId, hasActiveSource, workspaceReview?.reviewStatus, activeState.validation, qaGate?.status]);
+
+  const approveBlockedReason = useMemo(() => {
+    if (!takeoffJobId || !hasActiveSource) return "Load a takeoff workspace first.";
+    if (workspaceReview?.reviewStatus === "approved") return "This takeoff is already approved.";
+    if (activeState.validation.hasErrors || (activeState.validation.errorCount ?? 0) > 0) {
+      return "Resolve validation errors before approval.";
+    }
+    if (qaGate?.status === "do_not_import") {
+      return qaGate.headline ?? "QA gate blocks approval for this takeoff.";
+    }
+    return null;
+  }, [takeoffJobId, hasActiveSource, workspaceReview?.reviewStatus, activeState.validation, qaGate]);
+
   // v6.2: Fabrication rule findings — computed from the current effective draft.
   // Passed to TakeoffQaGatePanel for the dedicated "Fabrication rules" subsection.
   const fabricationFindings = useMemo((): FabricationFinding[] => {
@@ -553,6 +578,9 @@ export default function TakeoffLabApp() {
     setSaveStatus("idle");
     setSaveMsg(null);
     setSavedAt(null);
+    setApproveStatus("idle");
+    setApproveMsg(null);
+    setWorkspaceReview(null);
 
     // ── Source / edit / display state — go to upload-first empty state ────
     setSourceResult(makeSpec73()); // keep computation fallback safe
@@ -581,6 +609,9 @@ export default function TakeoffLabApp() {
     setSaveStatus("idle");
     setSaveMsg(null);
     setSavedAt(null);
+    setApproveStatus("idle");
+    setApproveMsg(null);
+    setWorkspaceReview(null);
     setSourceMode("none");
     setIsEditing(false);
     setResetKey((k) => k + 1);
@@ -773,23 +804,64 @@ export default function TakeoffLabApp() {
   const handleSaveDraft = useCallback(async () => {
     if (!takeoffJobId || !authToken) return;
     setSaveStatus("saving");
-    setSaveMsg("Saving reviewed takeoff…");
+    setSaveMsg(hasEdits ? "Saving reviewed draft with correction audit…" : "Saving reviewed draft…");
     try {
-      const res = await labApiPost(`/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}/results`, authToken, {
-        takeoffResult: effectiveDraft,   // use filtered draft (excluded runs removed)
-        reviewStatus: "needs_review",
-      }) as { ok: boolean; savedAt: string; summary: { countertopExactSf: number; backsplashExactSf: number } };
+      const res = hasEdits
+        ? await saveTakeoffCorrection(authToken, takeoffJobId, {
+            takeoffResult: effectiveDraft,
+            baseResultId: currentResultId,
+          })
+        : await labApiPost(`/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}/results`, authToken, {
+            takeoffResult: effectiveDraft,
+            reviewStatus: "needs_review",
+          }) as { ok: boolean; savedAt: string; summary: { countertopExactSf: number; backsplashExactSf: number } };
       setSaveStatus("saved");
       setSavedAt(res.savedAt);
+      setWorkspaceReview((prev) => ({
+        ...(prev ?? { reviewStatus: "needs_review" }),
+        reviewStatus: "needs_review",
+        approvalStatus: "needs_review",
+        canApprove: true,
+        approvedAt: null,
+        approvedByUserId: null,
+        hasSavedResult: true,
+      }));
+      setHistoryRefreshKey((k) => k + 1);
       setSaveMsg(
-        `Reviewed takeoff saved — ${res.summary.countertopExactSf.toFixed(2)} sf countertop · ${res.summary.backsplashExactSf.toFixed(2)} sf backsplash`
+        `${hasEdits ? "Correction saved" : "Reviewed draft saved"} — ${res.summary.countertopExactSf.toFixed(2)} sf countertop · ${res.summary.backsplashExactSf.toFixed(2)} sf backsplash`
       );
     } catch (e) {
       const msg = e instanceof LabApiError ? e.message : e instanceof Error ? e.message : "Save failed.";
       setSaveStatus("error");
       setSaveMsg(msg);
     }
-  }, [takeoffJobId, authToken, effectiveDraft]);
+  }, [takeoffJobId, authToken, effectiveDraft, hasEdits, currentResultId]);
+
+  const handleApproveTakeoff = useCallback(async () => {
+    if (!takeoffJobId || !authToken || !canApproveTakeoff) return;
+    setApproveStatus("approving");
+    setApproveMsg("Validating and approving takeoff…");
+    try {
+      const res = await approveTakeoffJob(authToken, takeoffJobId, effectiveDraft);
+      setApproveStatus("approved");
+      setWorkspaceReview({
+        reviewStatus: "approved",
+        approvalStatus: "approved",
+        canApprove: false,
+        approvedAt: res.approvedAt,
+        approvedByUserId: res.approvedByUserId,
+        hasSavedResult: true,
+      });
+      setHistoryRefreshKey((k) => k + 1);
+      setApproveMsg(
+        `Takeoff approved — ${res.summary.countertopExactSf.toFixed(2)} sf countertop · ${res.summary.backsplashExactSf.toFixed(2)} sf backsplash. No quote was created.`
+      );
+    } catch (e) {
+      const msg = e instanceof LabApiError ? e.message : e instanceof Error ? e.message : "Approval failed.";
+      setApproveStatus("error");
+      setApproveMsg(msg);
+    }
+  }, [takeoffJobId, authToken, effectiveDraft, canApproveTakeoff]);
 
   // ── Copy actions ──────────────────────────────────────────────────────────
 
@@ -1148,8 +1220,9 @@ export default function TakeoffLabApp() {
                 url.searchParams.set("takeoffJobId", jobId);
                 window.history.replaceState({}, "", url.toString());
               }}
-              onWorkspaceLoaded={(filename) => {
+              onWorkspaceLoaded={(filename, meta) => {
                 setPlanFilename(filename);
+                if (meta) setWorkspaceReview(meta);
               }}
               onAiDraftGenerated={handleAiDraftGenerated}
               onPlanArchived={handleStartNewTakeoff}
@@ -1314,11 +1387,24 @@ export default function TakeoffLabApp() {
             />
           </section>
 
-          {/* ── 5. Save reviewed takeoff ─────────────────────────────────── */}
+          {/* ── 5. Review workflow ───────────────────────────────────────── */}
           {takeoffJobId && authToken && (
             <section className="lab-section">
-              <h2 className="lab-section-title">Save reviewed takeoff</h2>
+              <h2 className="lab-section-title">Review workflow</h2>
               <div className="save-panel lab-card">
+                {workspaceReview?.reviewStatus === "approved" && workspaceReview.approvedAt ? (
+                  <div className="save-panel-approved" role="status">
+                    <span className="status-chip status-approved">Approved</span>
+                    <span>
+                      Approved{" "}
+                      {new Date(workspaceReview.approvedAt).toLocaleString(undefined, {
+                        dateStyle: "short",
+                        timeStyle: "short",
+                      })}
+                      . Ready for future Internal Estimate export — no quote created yet.
+                    </span>
+                  </div>
+                ) : null}
                 {unresolvedCount > 0 && (
                   <div className="save-panel-warning" role="alert">
                     <span className="save-panel-warning-icon">⚠</span>
@@ -1339,10 +1425,16 @@ export default function TakeoffLabApp() {
                 <div className="save-panel-inner">
                   <div className="save-panel-info">
                     <p className="save-panel-desc">
-                      Stores this estimator-reviewed takeoff on the workspace.
-                      It does not create a quote.
-                      Later, reviewed takeoffs will be importable into Internal Estimate.
+                      <strong>Save reviewed draft</strong> stores your in-progress review (correction audit
+                      is recorded when you changed AI values).
+                      <strong> Approve takeoff</strong> marks the workspace approved after server validation —
+                      it does not create a quote or import into Internal Estimate.
                     </p>
+                    {hasEdits ? (
+                      <p className="save-panel-note">
+                        Unsaved edits detected — saving will append a correction audit entry.
+                      </p>
+                    ) : null}
                     {savedAt && (
                       <p className="save-panel-last-saved">
                         Last saved:{" "}
@@ -1350,24 +1442,45 @@ export default function TakeoffLabApp() {
                       </p>
                     )}
                   </div>
-                  <div className="save-panel-actions">
+                  <div className="save-panel-actions save-panel-actions--split">
                     <button
                       type="button"
-                      className="save-panel-btn"
-                      disabled={saveStatus === "saving"}
+                      className="save-panel-btn save-panel-btn--secondary"
+                      disabled={saveStatus === "saving" || approveStatus === "approving"}
                       onClick={() => {
                         if (unresolvedCount > 0) {
                           if (!window.confirm(
-                            `${unresolvedCount} review item${unresolvedCount !== 1 ? "s" : ""} are still unresolved. Save anyway? They should be resolved before import.`
+                            `${unresolvedCount} review item${unresolvedCount !== 1 ? "s" : ""} are still unresolved. Save anyway? They should be resolved before approval.`
                           )) return;
                         }
                         void handleSaveDraft();
                       }}
                     >
-                      {saveStatus === "saving" ? "Saving…" : "Save reviewed takeoff"}
+                      {saveStatus === "saving" ? "Saving…" : "Save reviewed draft"}
+                    </button>
+                    <button
+                      type="button"
+                      className="save-panel-btn save-panel-btn--approve"
+                      disabled={!canApproveTakeoff || approveStatus === "approving" || saveStatus === "saving"}
+                      title={approveBlockedReason ?? undefined}
+                      onClick={() => {
+                        if (unresolvedCount > 0) {
+                          if (!window.confirm(
+                            `${unresolvedCount} review item${unresolvedCount !== 1 ? "s" : ""} are still unresolved. Approve anyway?`
+                          )) return;
+                        }
+                        void handleApproveTakeoff();
+                      }}
+                    >
+                      {approveStatus === "approving" ? "Approving…" : "Approve takeoff"}
                     </button>
                   </div>
                 </div>
+                {!canApproveTakeoff && approveBlockedReason && hasActiveSource ? (
+                  <p className="save-panel-blocked" role="note">
+                    Approval blocked: {approveBlockedReason}
+                  </p>
+                ) : null}
                 {saveMsg && (
                   <p
                     className={`save-panel-msg${saveStatus === "error" ? " save-panel-msg--error" : saveStatus === "saved" ? " save-panel-msg--saved" : ""}`}
@@ -1376,6 +1489,16 @@ export default function TakeoffLabApp() {
                   >
                     {saveStatus === "saved" ? "✓ " : saveStatus === "error" ? "✗ " : ""}
                     {saveMsg}
+                  </p>
+                )}
+                {approveMsg && (
+                  <p
+                    className={`save-panel-msg${approveStatus === "error" ? " save-panel-msg--error" : approveStatus === "approved" ? " save-panel-msg--saved" : ""}`}
+                    role="status"
+                    aria-live="polite"
+                  >
+                    {approveStatus === "approved" ? "✓ " : approveStatus === "error" ? "✗ " : ""}
+                    {approveMsg}
                   </p>
                 )}
               </div>

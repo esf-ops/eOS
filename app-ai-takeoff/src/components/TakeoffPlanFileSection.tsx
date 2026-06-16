@@ -56,8 +56,12 @@ interface PlanFileMeta {
 interface WorkspaceState {
   takeoffJobId: string;
   reviewStatus: string;
-  startedAt: string | null;
+  approvalStatus?: string;
+  approvedAt?: string | null;
+  approvedByUserId?: string | null;
+  canApprove?: boolean;
   hasSavedResult: boolean;
+  startedAt: string | null;
   file: PlanFileMeta;
   exayard?: {
     status:             string | null;
@@ -101,6 +105,15 @@ interface ProviderConfig {
   };
 }
 
+export interface WorkspaceReviewMeta {
+  reviewStatus: string;
+  approvalStatus?: string;
+  canApprove?: boolean;
+  approvedAt?: string | null;
+  approvedByUserId?: string | null;
+  hasSavedResult?: boolean;
+}
+
 export interface TakeoffPlanFileSectionProps {
   /** Current takeoff job ID. Null when no workspace yet. */
   takeoffJobId: string | null;
@@ -109,7 +122,7 @@ export interface TakeoffPlanFileSectionProps {
   /** Called when a new workspace is created after upload. */
   onWorkspaceCreated: (jobId: string, filename: string) => void;
   /** Called when an existing workspace loads (e.g. from URL param). */
-  onWorkspaceLoaded: (filename: string) => void;
+  onWorkspaceLoaded: (filename: string, meta?: WorkspaceReviewMeta) => void;
   /** Called when an AI draft is successfully generated. Parent loads it into the review UI. */
   onAiDraftGenerated: (
     result: TakeoffResult,
@@ -290,7 +303,14 @@ export default function TakeoffPlanFileSection({
             message:      "Exayard is still processing this assessment.",
           });
         }
-        onWorkspaceLoaded(res.file.originalFilename);
+        onWorkspaceLoaded(res.file.originalFilename, {
+          reviewStatus: res.reviewStatus,
+          approvalStatus: res.approvalStatus,
+          canApprove: res.canApprove,
+          approvedAt: res.approvedAt ?? null,
+          approvedByUserId: res.approvedByUserId ?? null,
+          hasSavedResult: res.hasSavedResult,
+        });
       } catch (e) {
         const msg = e instanceof LabApiError ? e.message : e instanceof Error ? e.message : "Failed to load workspace.";
         setLoadError(msg);
