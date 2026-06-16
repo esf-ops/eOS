@@ -12,6 +12,10 @@
 
 import { priceVanityProgram2026FromPayload, VANITY_PROGRAM_YEAR } from "./vanityProgram2026.js";
 import {
+  computeInternalEstimateMaterialUseTaxAmounts,
+  resolveInternalEstimateMaterialTaxPolicy
+} from "./internalEstimateMaterialTaxPolicy.js";
+import {
   applyChargeableCounterCeilToGuidedRows,
   applyChargeableSplashCeilToGuidedRows,
   chargeableCounterSqftFromExact,
@@ -594,6 +598,17 @@ function resolveRoomUseTaxPercentFromRow(room, projectDefaultPercent) {
   return Math.max(0, Number(projectDefaultPercent) || 0);
 }
 
+/** True when room uses 2026 vanity program fixed pricing (excluded from material use tax). */
+function isInternalVanityProgramRoom(room) {
+  if (!room || typeof room !== "object") return false;
+  const rt = String(room.roomType ?? room.room_type ?? "").trim().toLowerCase();
+  if (rt !== "vanity") return false;
+  if (room.isVanityProgram === false || room.is_vanity_program === false) return false;
+  const vanity = room.vanity && typeof room.vanity === "object" ? room.vanity : null;
+  if (vanity?.isVanityProgram === false) return false;
+  return true;
+}
+
 export function calculateVanities(input, rules) {
   const vanities = Array.isArray(input.vanities) ? input.vanities : [];
   const lines = [];
@@ -767,28 +782,31 @@ function sumRoomsWholesale(input, rules) {
   const addOnPart = calculateAddOns({ addOns: input.addOns || {} }, rules);
   const upgradedEdgePart = calculateRoomUpgradedEdges(input.rooms, rules);
   let useTaxAmount = 0;
-  const projectUseTaxPercent = Number(input.useTaxPercent) || 0;
+  let countertopMaterialUseTaxAmount = 0;
+  let backsplashMaterialUseTaxAmount = 0;
+  let materialUseTaxPolicy = null;
   const roomTaxByRoom = [];
   if (String(input.quoteSource) === "internal_quote") {
-    const taxByRoomName = new Map();
+    materialUseTaxPolicy = resolveInternalEstimateMaterialTaxPolicy();
+    let ctPreTax = 0;
+    let bsPreTax = 0;
     for (const row of rows) {
-      if (row.isSplash) continue;
       const roomInput = (input.rooms || []).find(
         (r) => String(r.name || r.room_name || "").trim() === row.roomName
       );
-      if (!roomInput) continue;
-      const pct = resolveRoomUseTaxPercentFromRow(roomInput, projectUseTaxPercent);
-      if (pct <= 0) continue;
-      const prev = taxByRoomName.get(row.roomName) || { base: 0, pct };
-      prev.base = round2(prev.base + row.sf * materialRateForQuote(input, row.group, rules));
-      taxByRoomName.set(row.roomName, prev);
+      if (isInternalVanityProgramRoom(roomInput)) continue;
+      const rate = materialRateForQuote(input, row.group, rules);
+      const sub = round2(row.sf * rate);
+      if (row.isSplash) bsPreTax = round2(bsPreTax + sub);
+      else ctPreTax = round2(ctPreTax + sub);
     }
-    for (const [roomName, { base, pct }] of taxByRoomName) {
-      const tax = round2(base * (pct / 100));
-      useTaxAmount = round2(useTaxAmount + tax);
-      roomTaxByRoom.push({ roomName, percent: pct, baseCountertopMaterial: base, taxAmount: tax });
+    const amounts = computeInternalEstimateMaterialUseTaxAmounts(ctPreTax, bsPreTax, materialUseTaxPolicy);
+    useTaxAmount = amounts.totalMaterialUseTaxAmount;
+    countertopMaterialUseTaxAmount = amounts.countertopMaterialUseTaxAmount;
+    backsplashMaterialUseTaxAmount = amounts.backsplashMaterialUseTaxAmount;
+    if (useTaxAmount > 0) {
+      materialDollars = round2(materialDollars + useTaxAmount);
     }
-    materialDollars += useTaxAmount;
   }
   return {
     counter,
@@ -798,7 +816,10 @@ function sumRoomsWholesale(input, rules) {
     addOnPart,
     upgradedEdgePart,
     useTaxAmount,
-    useTaxPercent: useTaxAmount > 0 ? projectUseTaxPercent : null,
+    useTaxPercent: useTaxAmount > 0 ? materialUseTaxPolicy?.materialUseTaxPercent ?? null : null,
+    countertopMaterialUseTaxAmount,
+    backsplashMaterialUseTaxAmount,
+    materialUseTaxPolicy,
     roomUseTax: roomTaxByRoom,
     roomMeasurementSummaries,
     wholesale: round2(materialDollars + addOnPart.total + upgradedEdgePart.total)
@@ -813,20 +834,31 @@ function legacyWholesale(input, rules) {
   let bs = Number(input.areas?.backsplashSqft) || 0;
   if (isInternal && ct > 0) ct = chargeableCounterSqftFromExact(ct);
   if (isInternal && bs > 0) bs = chargeableSplashSqftFromExact(bs);
-  let countertopMaterial = ct * rate;
+  const ctMaterial = ct * rate;
+  const bsMaterial = bs * rate;
+  let countertopMaterial = ctMaterial;
   let useTaxAmount = 0;
-  const useTaxPercent = Number(input.useTaxPercent) || 0;
-  if (useTaxPercent > 0 && String(input.quoteSource) === "internal_quote") {
-    useTaxAmount = round2(countertopMaterial * (useTaxPercent / 100));
-    countertopMaterial = round2(countertopMaterial + useTaxAmount);
+  let countertopMaterialUseTaxAmount = 0;
+  let backsplashMaterialUseTaxAmount = 0;
+  let materialUseTaxPolicy = null;
+  if (String(input.quoteSource) === "internal_quote") {
+    materialUseTaxPolicy = resolveInternalEstimateMaterialTaxPolicy();
+    const amounts = computeInternalEstimateMaterialUseTaxAmounts(ctMaterial, bsMaterial, materialUseTaxPolicy);
+    useTaxAmount = amounts.totalMaterialUseTaxAmount;
+    countertopMaterialUseTaxAmount = amounts.countertopMaterialUseTaxAmount;
+    backsplashMaterialUseTaxAmount = amounts.backsplashMaterialUseTaxAmount;
+    countertopMaterial = round2(ctMaterial + countertopMaterialUseTaxAmount);
   }
-  const base = countertopMaterial + bs * rate;
+  const base = round2(countertopMaterial + bsMaterial + backsplashMaterialUseTaxAmount);
   const addOnPart = calculateAddOns({ addOns: input.addOns || {} }, rules);
   const vanityPart = calculateVanities(input, rules);
   return {
     wholesale: base + addOnPart.total + vanityPart.total,
     useTaxAmount,
-    useTaxPercent: useTaxPercent > 0 ? useTaxPercent : null,
+    useTaxPercent: useTaxAmount > 0 ? materialUseTaxPolicy?.materialUseTaxPercent ?? null : null,
+    countertopMaterialUseTaxAmount,
+    backsplashMaterialUseTaxAmount,
+    materialUseTaxPolicy,
     materialGroup: g,
     rate,
     areas: { countertopSqft: ct, backsplashSqft: bs },
@@ -1160,18 +1192,41 @@ export async function calculateQuote(rawInput, pricingContext = {}) {
   });
   snapshot.lineItems = lineItems;
   if (String(input.quoteSource) === "internal_quote") {
-    const useTaxPercent = Number(input.useTaxPercent) || 0;
+    const policy = detail.materialUseTaxPolicy ?? resolveInternalEstimateMaterialTaxPolicy();
     const useTaxAmount =
       detail.kind === "rooms"
         ? Number(detail.useTaxAmount) || 0
         : detail.kind === "legacy"
           ? Number(detail.useTaxAmount) || 0
           : 0;
+    const countertopMaterialUseTaxAmount =
+      detail.kind === "rooms"
+        ? Number(detail.countertopMaterialUseTaxAmount) || 0
+        : detail.kind === "legacy"
+          ? Number(detail.countertopMaterialUseTaxAmount) || 0
+          : 0;
+    const backsplashMaterialUseTaxAmount =
+      detail.kind === "rooms"
+        ? Number(detail.backsplashMaterialUseTaxAmount) || 0
+        : detail.kind === "legacy"
+          ? Number(detail.backsplashMaterialUseTaxAmount) || 0
+          : 0;
     snapshot.internal_estimate_math = {
       version: 1,
       internal_material_basis: input.internalMaterialBasis,
       no_partner_or_public_markup_percent: true,
-      use_tax: useTaxPercent > 0 ? { percent: useTaxPercent, amount: useTaxAmount, applied: true } : { percent: 0, amount: 0, applied: false }
+      use_tax:
+        useTaxAmount > 0
+          ? { percent: policy.materialUseTaxPercent, amount: useTaxAmount, applied: true }
+          : { percent: 0, amount: 0, applied: false },
+      material_use_tax: {
+        materialUseTaxPercent: policy.materialUseTaxPercent,
+        materialUseTaxScope: policy.materialUseTaxScope,
+        countertopMaterialUseTaxAmount,
+        backsplashMaterialUseTaxAmount,
+        totalMaterialUseTaxAmount: useTaxAmount,
+        taxPolicySnapshot: policy
+      }
     };
     if (detail.kind === "rooms" && detail.upgradedEdgePart) {
       snapshot.internal_estimate_math.upgraded_edge_pricing = {

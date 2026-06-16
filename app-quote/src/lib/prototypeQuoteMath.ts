@@ -46,15 +46,23 @@ import {
   sumAllGuidedShapeGroups,
   totalGuidedCornerOverlapDeductionSf
 } from "./guidedShapeGroups";
+import {
+  computeInternalEstimateMaterialUseTaxAmounts,
+  resolveInternalEstimateMaterialTaxPolicy,
+  type InternalEstimateMaterialTaxPolicy
+} from "./internalEstimateMaterialTaxPolicy";
 
 /** Internal Estimate measurement options (not used by public quote wizard). */
 export type InternalMeasureOptions = {
   /** Elite rule: ceil final room counter SF for material pricing after all groups/pieces. */
   chargeableCounterCeil?: boolean;
+  /** When true, apply fixed Internal Estimate material use tax policy (counter + backsplash). */
+  internalMaterialUseTax?: boolean;
 };
 
 export const INTERNAL_ESTIMATE_MEASURE_OPTIONS: InternalMeasureOptions = {
-  chargeableCounterCeil: true
+  chargeableCounterCeil: true,
+  internalMaterialUseTax: true
 };
 
 /**
@@ -528,7 +536,27 @@ export function measureRoomDraft(
     chargeableCounterCeil: measureOptions?.chargeableCounterCeil
   });
   let scopedMaterialDollars = materialNoTax.totals.materialSubtotal;
-  if (roomTaxPct > 0) {
+  if (measureOptions?.internalMaterialUseTax) {
+    const policy = resolveInternalEstimateMaterialTaxPolicy();
+    const amounts = computeInternalEstimateMaterialUseTaxAmounts(
+      materialNoTax.totals.countertopMaterial,
+      materialNoTax.totals.backsplashMaterial,
+      policy
+    );
+    if (amounts.totalMaterialUseTaxAmount > 0) {
+      scopedMaterialDollars = round2(scopedMaterialDollars + amounts.totalMaterialUseTaxAmount);
+      roomUseTax = {
+        percent: policy.materialUseTaxPercent,
+        baseCountertopMaterial: amounts.baseCountertopMaterial,
+        baseBacksplashMaterial: amounts.baseBacksplashMaterial,
+        countertopMaterialUseTaxAmount: amounts.countertopMaterialUseTaxAmount,
+        backsplashMaterialUseTaxAmount: amounts.backsplashMaterialUseTaxAmount,
+        taxAmount: amounts.totalMaterialUseTaxAmount,
+        materialUseTaxScope: policy.materialUseTaxScope,
+        applied: true
+      };
+    }
+  } else if (roomTaxPct > 0) {
     const ctBase = materialNoTax.totals.countertopMaterial;
     const taxAmount = round2(ctBase * (roomTaxPct / 100));
     scopedMaterialDollars = round2(scopedMaterialDollars + taxAmount);
@@ -663,19 +691,33 @@ export function buildAllGroupMatrix(totals: RoomEngineTotals) {
 export function buildInternalGroupMatrix(
   totals: RoomEngineTotals,
   materialBasis: "wholesale" | "direct",
-  useTaxPercent = 0
+  useTaxPercent = 0,
+  options?: { internalMaterialUseTax?: boolean }
 ) {
-  const taxPct = Math.max(0, Number(useTaxPercent) || 0);
+  const internalTax = options?.internalMaterialUseTax === true;
+  const policy = internalTax ? resolveInternalEstimateMaterialTaxPolicy() : null;
+  const taxPct = internalTax
+    ? policy!.materialUseTaxPercent
+    : Math.max(0, Number(useTaxPercent) || 0);
   return PROTOTYPE_TIERS.map((t) => {
     const rate = materialRateForInternalBasis(t.n, materialBasis);
     const c = totals.priceableCounter * rate;
     const b = totals.priceableSplash * rate;
-    const useTax = taxPct > 0 ? round2(c * (taxPct / 100)) : 0;
-    const wholesale = round2(c + b + useTax + totals.fixed);
+    let useTaxCounter = 0;
+    let useTaxSplash = 0;
+    if (taxPct > 0) {
+      if (internalTax) {
+        useTaxCounter = round2(c * (taxPct / 100));
+        useTaxSplash = round2(b * (taxPct / 100));
+      } else {
+        useTaxCounter = round2(c * (taxPct / 100));
+      }
+    }
+    const wholesale = round2(c + b + useTaxCounter + useTaxSplash + totals.fixed);
     return {
       group: t.n,
-      counter: round2(c + useTax),
-      backsplash: round2(b),
+      counter: round2(c + useTaxCounter),
+      backsplash: round2(b + useTaxSplash),
       fixed: totals.fixed,
       wholesale,
       retail: wholesale,
@@ -712,7 +754,11 @@ export type SelectedMaterialGroupBlock = {
 export type UseTaxSnapshot = {
   percent: number;
   baseCountertopMaterial: number;
+  baseBacksplashMaterial?: number;
+  countertopMaterialUseTaxAmount?: number;
+  backsplashMaterialUseTaxAmount?: number;
   taxAmount: number;
+  materialUseTaxScope?: "countertop_and_backsplash_material";
   applied: boolean;
 };
 
@@ -727,7 +773,7 @@ export type SelectedMaterialBreakdown = {
     countertopMaterial: number;
     /** Backsplash + full-height sf × group rate (display rollup). */
     backsplashMaterial: number;
-    /** Use tax on countertop material only (folded into customer-facing countertop $). */
+    /** Material use tax folded into countertop / backsplash material $. */
     useTax?: UseTaxSnapshot;
   };
 };
@@ -754,7 +800,7 @@ export function internalEstimateScopedMaterialSubtotal(rooms: RoomDraft[], basis
  * Piece/room-level sf rows for selected-material display — mirrors backend `enumerateRoomMaterialSfRows` grouping.
  * Uses the same $/sf tables as internal estimate math (`materialRateForInternalBasis`); does not apply room fixed add-ons.
  */
-/** Apply use tax to countertop material only (e.g. Lisbon office); does not tax backsplash/add-ons. */
+/** Apply legacy use tax to countertop material only (non–Internal Estimate paths). */
 export function applyUseTaxToMaterialBreakdown(
   breakdown: SelectedMaterialBreakdown,
   useTaxPercent: number
@@ -785,6 +831,66 @@ export function applyUseTaxToMaterialBreakdown(
       countertopMaterial,
       materialSubtotal,
       useTax: { percent: pct, baseCountertopMaterial: base, taxAmount, applied: true }
+    }
+  };
+}
+
+/** Apply Internal Estimate material use tax to countertop + backsplash material (vanity program excluded upstream). */
+export function applyInternalMaterialUseTaxToBreakdown(
+  breakdown: SelectedMaterialBreakdown,
+  policy: InternalEstimateMaterialTaxPolicy = resolveInternalEstimateMaterialTaxPolicy()
+): SelectedMaterialBreakdown {
+  const pct = Math.max(0, Number(policy.materialUseTaxPercent) || 0);
+  const ctBase = breakdown.totals.countertopMaterial;
+  const bsBase = breakdown.totals.backsplashMaterial;
+  const amounts = computeInternalEstimateMaterialUseTaxAmounts(ctBase, bsBase, policy);
+  if (amounts.totalMaterialUseTaxAmount <= 0) {
+    return {
+      ...breakdown,
+      totals: {
+        ...breakdown.totals,
+        useTax: {
+          percent: 0,
+          baseCountertopMaterial: ctBase,
+          baseBacksplashMaterial: bsBase,
+          countertopMaterialUseTaxAmount: 0,
+          backsplashMaterialUseTaxAmount: 0,
+          taxAmount: 0,
+          applied: false
+        }
+      }
+    };
+  }
+  return {
+    groups: breakdown.groups.map((g) => {
+      const gAmounts = computeInternalEstimateMaterialUseTaxAmounts(g.countertopMaterial, g.backsplashMaterial, policy);
+      return {
+        ...g,
+        countertopMaterial: round2(g.countertopMaterial + gAmounts.countertopMaterialUseTaxAmount),
+        backsplashMaterial: round2(g.backsplashMaterial + gAmounts.backsplashMaterialUseTaxAmount),
+        materialSubtotal: round2(
+          g.countertopMaterial +
+            gAmounts.countertopMaterialUseTaxAmount +
+            g.backsplashMaterial +
+            gAmounts.backsplashMaterialUseTaxAmount
+        )
+      };
+    }),
+    totals: {
+      ...breakdown.totals,
+      countertopMaterial: round2(ctBase + amounts.countertopMaterialUseTaxAmount),
+      backsplashMaterial: round2(bsBase + amounts.backsplashMaterialUseTaxAmount),
+      materialSubtotal: round2(ctBase + amounts.countertopMaterialUseTaxAmount + bsBase + amounts.backsplashMaterialUseTaxAmount),
+      useTax: {
+        percent: pct,
+        baseCountertopMaterial: amounts.baseCountertopMaterial,
+        baseBacksplashMaterial: amounts.baseBacksplashMaterial,
+        countertopMaterialUseTaxAmount: amounts.countertopMaterialUseTaxAmount,
+        backsplashMaterialUseTaxAmount: amounts.backsplashMaterialUseTaxAmount,
+        taxAmount: amounts.totalMaterialUseTaxAmount,
+        materialUseTaxScope: policy.materialUseTaxScope,
+        applied: true
+      }
     }
   };
 }
@@ -1057,8 +1163,12 @@ export function buildSelectedMaterialBreakdown(
   materialBasis: "wholesale" | "direct",
   options?: {
     includeRates?: boolean;
+    /** @deprecated Legacy — use internalMaterialUseTax for Internal Estimate. */
     useTaxPercent?: number;
+    /** @deprecated Legacy — use internalMaterialUseTax for Internal Estimate. */
     projectUseTaxPercent?: number;
+    /** Internal Estimate only: fixed 2% on countertop + backsplash material. */
+    internalMaterialUseTax?: boolean;
     chargeableCounterCeil?: boolean;
   }
 ): SelectedMaterialBreakdown {
@@ -1066,6 +1176,24 @@ export function buildSelectedMaterialBreakdown(
     includeRates: options?.includeRates === true,
     chargeableCounterCeil: options?.chargeableCounterCeil
   });
+  const taxableRooms = rooms.filter(
+    (room) => !(room.roomType === "Vanity" && room.vanity.isVanityProgram !== false)
+  );
+  if (options?.internalMaterialUseTax === true) {
+    if (!taxableRooms.length) {
+      built.totals.useTax = {
+        percent: 0,
+        baseCountertopMaterial: built.totals.countertopMaterial,
+        baseBacksplashMaterial: built.totals.backsplashMaterial,
+        countertopMaterialUseTaxAmount: 0,
+        backsplashMaterialUseTaxAmount: 0,
+        taxAmount: 0,
+        applied: false
+      };
+      return built;
+    }
+    return applyInternalMaterialUseTaxToBreakdown(built);
+  }
   const projectDefault = Math.max(0, Number(options?.projectUseTaxPercent ?? options?.useTaxPercent) || 0);
   let taxBase = 0;
   let taxAmount = 0;
@@ -1281,14 +1409,27 @@ export function buildCustomerRoomAreaCostBreakdown(params: {
       materialAmountExact = vanityDisplay;
       fixedDisplayTotal = vanityDisplay;
     } else if (draft) {
-      const pct = resolveRoomUseTaxPercent(draft, projectUseTaxPercent);
-      const sub = buildSelectedMaterialBreakdownCore([draft], basis, {
-        chargeableCounterCeil: params.measureOptions?.chargeableCounterCeil
-      });
-      materialAmountExact = sub.totals.materialSubtotal;
-      if (pct > 0) {
-        const tax = round2(sub.totals.countertopMaterial * (pct / 100));
-        materialAmountExact = round2(materialAmountExact + tax);
+      if (params.measureOptions?.internalMaterialUseTax) {
+        const sub = buildSelectedMaterialBreakdownCore([draft], basis, {
+          chargeableCounterCeil: params.measureOptions?.chargeableCounterCeil
+        });
+        const policy = resolveInternalEstimateMaterialTaxPolicy();
+        const amounts = computeInternalEstimateMaterialUseTaxAmounts(
+          sub.totals.countertopMaterial,
+          sub.totals.backsplashMaterial,
+          policy
+        );
+        materialAmountExact = round2(sub.totals.materialSubtotal + amounts.totalMaterialUseTaxAmount);
+      } else {
+        const pct = resolveRoomUseTaxPercent(draft, projectUseTaxPercent);
+        const sub = buildSelectedMaterialBreakdownCore([draft], basis, {
+          chargeableCounterCeil: params.measureOptions?.chargeableCounterCeil
+        });
+        materialAmountExact = sub.totals.materialSubtotal;
+        if (pct > 0) {
+          const tax = round2(sub.totals.countertopMaterial * (pct / 100));
+          materialAmountExact = round2(materialAmountExact + tax);
+        }
       }
     }
 
@@ -1406,29 +1547,45 @@ export function buildInternalEstimateGroupComparison(params: {
   backsplashSqft: number;
   roomFixedDollars: number;
   customLineDollars: number;
-  /** Project/room use tax % on countertop material at each tier rate (0 = none). */
+  /** @deprecated Legacy — use internalMaterialUseTax for Internal Estimate. */
   useTaxPercent?: number;
+  /** Internal Estimate only: fixed 2% on countertop + backsplash material. */
+  internalMaterialUseTax?: boolean;
   basis: "wholesale" | "direct";
 }): InternalEstimateGroupComparisonRow[] {
   const ct = Number(params.countertopSqft) || 0;
   const bs = Number(params.backsplashSqft) || 0;
   const roomFix = round2(Number(params.roomFixedDollars) || 0);
   const custom = round2(Number(params.customLineDollars) || 0);
-  const taxPct = Math.max(0, Number(params.useTaxPercent) || 0);
+  const internalTax = params.internalMaterialUseTax === true;
+  const policy = internalTax ? resolveInternalEstimateMaterialTaxPolicy() : null;
+  const taxPct = internalTax
+    ? policy!.materialUseTaxPercent
+    : Math.max(0, Number(params.useTaxPercent) || 0);
   const fullExtra = round2(roomFix + custom);
   return PROTOTYPE_TIERS.map((t) => {
     const rate = materialRateForInternalBasis(t.n, params.basis);
     const materialCounter = round2(ct * rate);
-    const useTax = taxPct > 0 ? round2(materialCounter * (taxPct / 100)) : 0;
-    const materialCounterPriced = round2(materialCounter + useTax);
     const materialSplashFhb = round2(bs * rate);
-    const materialTotal = round2(materialCounterPriced + materialSplashFhb);
+    let useTaxCounter = 0;
+    let useTaxSplash = 0;
+    if (taxPct > 0) {
+      if (internalTax) {
+        useTaxCounter = round2(materialCounter * (taxPct / 100));
+        useTaxSplash = round2(materialSplashFhb * (taxPct / 100));
+      } else {
+        useTaxCounter = round2(materialCounter * (taxPct / 100));
+      }
+    }
+    const materialCounterPriced = round2(materialCounter + useTaxCounter);
+    const materialSplashPriced = round2(materialSplashFhb + useTaxSplash);
+    const materialTotal = round2(materialCounterPriced + materialSplashPriced);
     const fullTotal = round2(materialTotal + fullExtra);
     return {
       group: t.n,
       ratePerSqft: rate,
       materialCounter: materialCounterPriced,
-      materialSplashFhb,
+      materialSplashFhb: materialSplashPriced,
       materialTotal,
       fullTotal
     };
@@ -1509,18 +1666,18 @@ export function getInternalEstimateScopeTotals(
   drafts: RoomDraft[],
   projectType: string,
   materialBasis: "wholesale" | "direct" = "wholesale",
-  projectUseTaxPercent = 0,
+  _projectUseTaxPercent = 0,
   measureOptions: InternalMeasureOptions = INTERNAL_ESTIMATE_MEASURE_OPTIONS
 ): InternalEstimateScopeTotals & { measuredRooms: MeasuredRoom[] } {
   const { rooms: measuredRooms, totals } = calculateAllRoomDrafts(
     drafts,
     projectType,
     materialBasis,
-    projectUseTaxPercent,
+    0,
     measureOptions
   );
   const breakdown = buildSelectedMaterialBreakdown(drafts, materialBasis, {
-    projectUseTaxPercent,
+    internalMaterialUseTax: measureOptions.internalMaterialUseTax === true,
     chargeableCounterCeil: measureOptions.chargeableCounterCeil
   });
   return {
@@ -1563,7 +1720,7 @@ export function aggregateComparisonScope(
     drafts,
     projectType,
     options?.materialBasis ?? "wholesale",
-    options?.projectUseTaxPercent ?? 0,
+    0,
     options?.measureOptions ?? INTERNAL_ESTIMATE_MEASURE_OPTIONS
   );
   const groups = new Set<string>();
@@ -1674,19 +1831,19 @@ export function runLocalPrototypeQuote(params: {
   projectType: string;
   /** Internal estimate: sum of structured custom line $ (after validation rules). */
   customLineItemsTotal?: number;
-  /** Use tax % on countertop material only (internal estimate). */
+  /** @deprecated Legacy — Internal Estimate uses internalMaterialUseTax via measure options. */
   useTaxPercent?: number;
 }): LocalQuoteRun {
   const basis = params.internalMaterialBasis ?? "wholesale";
   const roomBasis: "wholesale" | "direct" = params.quoteMode === "internal" ? basis : "wholesale";
-  const useTaxPercent = params.quoteMode === "internal" ? Number(params.useTaxPercent) || 0 : 0;
+  const internalMaterialUseTax = params.quoteMode === "internal";
   const measureOptions: InternalMeasureOptions | undefined =
-    params.quoteMode === "internal" ? { chargeableCounterCeil: true } : undefined;
+    params.quoteMode === "internal" ? INTERNAL_ESTIMATE_MEASURE_OPTIONS : undefined;
   const { rooms: measured, totals } = calculateAllRoomDrafts(
     params.roomDrafts,
     params.projectType,
     roomBasis,
-    useTaxPercent,
+    0,
     measureOptions
   );
   const warnings: string[] = [];
@@ -1802,7 +1959,7 @@ export function runLocalPrototypeQuote(params: {
 
   const allGroupMatrix =
     params.quoteMode === "internal"
-      ? buildInternalGroupMatrix(totals, basis, useTaxPercent)
+      ? buildInternalGroupMatrix(totals, basis, 0, { internalMaterialUseTax: internalMaterialUseTax })
       : buildAllGroupMatrix(totals);
 
   return {

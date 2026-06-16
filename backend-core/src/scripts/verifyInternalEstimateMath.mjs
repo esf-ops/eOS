@@ -8,6 +8,10 @@ import {
   PROTOTYPE_TIER_PRICE_PER_SQFT,
   SPECIALTY_EDGE_RATE_PER_LF
 } from "../quotes/quoteCalculator.js";
+import {
+  INTERNAL_ESTIMATE_MATERIAL_USE_TAX_PERCENT,
+  resolveInternalEstimateMaterialTaxPolicy
+} from "../quotes/internalEstimateMaterialTaxPolicy.js";
 
 function assertNear(label, actual, expected, eps = 0.02) {
   const a = Number(actual);
@@ -15,6 +19,21 @@ function assertNear(label, actual, expected, eps = 0.02) {
   if (!Number.isFinite(a) || !Number.isFinite(e) || Math.abs(a - e) > eps) {
     throw new Error(`${label}: expected ${e}, got ${a}`);
   }
+}
+
+function round2Tax(n) {
+  return Math.round(Number(n) * 100) / 100;
+}
+
+/** Material $ with fixed 2% Internal Estimate use tax on countertop + backsplash bases. */
+function internalTaxedMaterial(ctDollars, bsDollars = 0) {
+  const ct = round2Tax(ctDollars);
+  const bs = round2Tax(bsDollars);
+  return round2Tax(ct + bs + round2Tax(ct * 0.02) + round2Tax(bs * 0.02));
+}
+
+function internalMaterialTotal(counterSf, splashSf, rate) {
+  return internalTaxedMaterial(counterSf * rate, splashSf * rate);
 }
 
 const base = {
@@ -32,8 +51,8 @@ const directPromo = await calculateQuote({ ...base, internalMaterialBasis: "dire
 const wRate = PROTOTYPE_TIER_PRICE_PER_SQFT["Group Promo"];
 const dRate = ESF_DIRECT_PRICE_PER_SQFT["Group Promo"];
 
-assertNear("A wholesale 10 sf Promo", wholesalePromo.totals.retail, 10 * wRate);
-assertNear("A direct 10 sf Promo", directPromo.totals.retail, 10 * dRate);
+assertNear("A wholesale 10 sf Promo", wholesalePromo.totals.retail, internalMaterialTotal(10, 0, wRate));
+assertNear("A direct 10 sf Promo", directPromo.totals.retail, internalMaterialTotal(10, 0, dRate));
 if (wholesalePromo.totals.retail !== wholesalePromo.totals.wholesale) {
   throw new Error("internal_quote wholesale mode: retail should equal wholesale total");
 }
@@ -63,8 +82,8 @@ const bDirect = await calculateQuote(
   },
   {}
 );
-assertNear("B wholesale 10 sf A + 750", bWholesale.totals.retail, 10 * groupAWholesale + 750);
-assertNear("B direct 10 sf A + 750", bDirect.totals.retail, 10 * ESF_DIRECT_PRICE_PER_SQFT["Group A"] + 750);
+assertNear("B wholesale 10 sf A + 750", bWholesale.totals.retail, internalMaterialTotal(10, 0, groupAWholesale) + 750);
+assertNear("B direct 10 sf A + 750", bDirect.totals.retail, internalMaterialTotal(10, 0, ESF_DIRECT_PRICE_PER_SQFT["Group A"]) + 750);
 
 const c = await calculateQuote(
   {
@@ -75,7 +94,7 @@ const c = await calculateQuote(
   },
   {}
 );
-assertNear("C counter+backsplash same rate", c.totals.retail, (6 + 4) * wRate);
+assertNear("C counter+backsplash same rate", c.totals.retail, internalMaterialTotal(6, 4, wRate));
 
 const evil = await calculateQuote(
   {
@@ -86,7 +105,7 @@ const evil = await calculateQuote(
   },
   {}
 );
-assertNear("Markup fields ignored for internal", evil.totals.retail, 10 * wRate);
+assertNear("Markup fields ignored for internal", evil.totals.retail, internalMaterialTotal(10, 0, wRate));
 
 const roomsKitchenMixed = [
   {
@@ -119,7 +138,7 @@ const mixedPiecesWholesale = await calculateQuote(
   {}
 );
 const wF = PROTOTYPE_TIER_PRICE_PER_SQFT["Group F"];
-assertNear("1 mixed pieces one room (Promo + Group F)", mixedPiecesWholesale.totals.retail, 10 * wRate + 10 * wF);
+assertNear("1 mixed pieces one room (Promo + Group F)", mixedPiecesWholesale.totals.retail, internalTaxedMaterial(10 * wRate + 10 * wF));
 
 const mixedPiecesDirect = await calculateQuote(
   {
@@ -133,7 +152,7 @@ const mixedPiecesDirect = await calculateQuote(
   {}
 );
 const dF = ESF_DIRECT_PRICE_PER_SQFT["Group F"];
-assertNear("1b mixed pieces direct book", mixedPiecesDirect.totals.retail, 10 * dRate + 10 * dF);
+assertNear("1b mixed pieces direct book", mixedPiecesDirect.totals.retail, internalTaxedMaterial(10 * dRate + 10 * dF));
 
 const wC = PROTOTYPE_TIER_PRICE_PER_SQFT["Group C"];
 const wE = PROTOTYPE_TIER_PRICE_PER_SQFT["Group E"];
@@ -167,7 +186,7 @@ const splashOv = await calculateQuote(
   {}
 );
 const splashSf = Math.round((120 * 6 * 100) / 144) / 100;
-assertNear("2 backsplash piece override Group E", splashOv.totals.retail, 20 * wC + splashSf * wE);
+assertNear("2 backsplash piece override Group E", splashOv.totals.retail, internalTaxedMaterial(20 * wC, splashSf * wE));
 
 const splitSameGroup = await calculateQuote(
   {
@@ -190,7 +209,7 @@ const splitSameGroup = await calculateQuote(
   {}
 );
 const bsSf8 = Math.round((120 * 8 * 100) / 144) / 100;
-assertNear("3 counter + backsplash same Group C", splitSameGroup.totals.retail, (20 + bsSf8) * wC);
+assertNear("3 counter + backsplash same Group C", splitSameGroup.totals.retail, internalMaterialTotal(20, bsSf8, wC));
 
 const tripCharge = await calculateQuote(
   {
@@ -212,7 +231,7 @@ const tripCharge = await calculateQuote(
   },
   {}
 );
-assertNear("4 trip charge custom line +150", tripCharge.totals.retail, 10 * wRate + 150);
+assertNear("4 trip charge custom line +150", tripCharge.totals.retail, internalMaterialTotal(10, 0, wRate) + 150);
 
 const evilRooms = await calculateQuote(
   {
@@ -227,7 +246,7 @@ const evilRooms = await calculateQuote(
   },
   {}
 );
-assertNear("5 evil markup ignored (rooms engine)", evilRooms.totals.retail, 10 * wRate + 10 * wF);
+assertNear("5 evil markup ignored (rooms engine)", evilRooms.totals.retail, internalTaxedMaterial(10 * wRate + 10 * wF));
 
 // ── Chargeable sqft ceil tests ──────────────────────────────────────────────
 // Counter ceil: 8.3 sf → charges as 9 sf
@@ -262,7 +281,7 @@ const ceilCounterManual83 = await calculateQuote(
   },
   {}
 );
-assertNear("6 counter 8.3 sf ceils to 9 sf", ceilCounterManual83.totals.retail, 9 * wRate);
+assertNear("6 counter 8.3 sf ceils to 9 sf", ceilCounterManual83.totals.retail, internalMaterialTotal(9, 0, wRate));
 
 // Counter ceil: 8.9 sf → charges as 9 sf
 const ceilCounterManual89 = await calculateQuote(
@@ -277,7 +296,7 @@ const ceilCounterManual89 = await calculateQuote(
   },
   {}
 );
-assertNear("7 counter 8.9 sf ceils to 9 sf", ceilCounterManual89.totals.retail, 9 * wRate);
+assertNear("7 counter 8.9 sf ceils to 9 sf", ceilCounterManual89.totals.retail, internalMaterialTotal(9, 0, wRate));
 
 // Backsplash ceil: 2.11 sf → charges as 3 sf
 const ceilSplashManual211 = await calculateQuote(
@@ -292,7 +311,7 @@ const ceilSplashManual211 = await calculateQuote(
   },
   {}
 );
-assertNear("8 backsplash 2.11 sf ceils to 3 sf", ceilSplashManual211.totals.retail, 3 * wRate);
+assertNear("8 backsplash 2.11 sf ceils to 3 sf", ceilSplashManual211.totals.retail, internalMaterialTotal(0, 3, wRate));
 
 // Backsplash ceil: 2.56 sf → charges as 3 sf
 const ceilSplashManual256 = await calculateQuote(
@@ -307,7 +326,7 @@ const ceilSplashManual256 = await calculateQuote(
   },
   {}
 );
-assertNear("9 backsplash 2.56 sf ceils to 3 sf", ceilSplashManual256.totals.retail, 3 * wRate);
+assertNear("9 backsplash 2.56 sf ceils to 3 sf", ceilSplashManual256.totals.retail, internalMaterialTotal(0, 3, wRate));
 
 // Zero sf remains zero
 const ceilZero = await calculateQuote(
@@ -344,7 +363,7 @@ const ceilRoomsSplash = await calculateQuote(
   {}
 );
 // counter: 10 sf (whole); splash: 3.33 → ceils to 4
-assertNear("11 rooms-engine backsplash 3.33 sf ceils to 4 sf", ceilRoomsSplash.totals.retail, (10 + 4) * wRate);
+assertNear("11 rooms-engine backsplash 3.33 sf ceils to 4 sf", ceilRoomsSplash.totals.retail, internalMaterialTotal(10, 4, wRate));
 
 // Rooms-engine, non-guided: counter 8.3 sf + backsplash 2.11 sf — both ceil independently
 const ceilRoomsBoth = await calculateQuote(
@@ -366,7 +385,7 @@ const ceilRoomsBoth = await calculateQuote(
   {}
 );
 // counter 8.3 → 9, backsplash 2.11 → 3
-assertNear("12 rooms-engine counter 8.3→9 + backsplash 2.11→3", ceilRoomsBoth.totals.retail, (9 + 3) * wRate);
+assertNear("12 rooms-engine counter 8.3→9 + backsplash 2.11→3", ceilRoomsBoth.totals.retail, internalMaterialTotal(9, 3, wRate));
 
 // ── Customer-facing print total = sum of rounded visible rows ───────────────
 // These are pure-math tests mirroring the logic in CustomerEstimatePrint.tsx.
@@ -472,7 +491,7 @@ const stdEdge = await calculateQuote(
   },
   {}
 );
-assertNear("EDGE-1 standard Eased edge: no extra charge", stdEdge.totals.retail, 10 * wRate);
+assertNear("EDGE-1 standard Eased edge: no extra charge", stdEdge.totals.retail, internalMaterialTotal(10, 0, wRate));
 if ((stdEdge.warnings || []).some((w) => w.includes("edge"))) {
   throw new Error("EDGE-1: standard edge must not emit edge warnings");
 }
@@ -495,7 +514,7 @@ const upgEdge = await calculateQuote(
   {}
 );
 const expectedEdgeCharge = Math.round(12 * SPECIALTY_EDGE_RATE_PER_LF * 100) / 100;
-assertNear("EDGE-2 Ogee 12 LF: material + edge charge", upgEdge.totals.retail, 10 * wRate + expectedEdgeCharge);
+assertNear("EDGE-2 Ogee 12 LF: material + edge charge", upgEdge.totals.retail, internalMaterialTotal(10, 0, wRate) + expectedEdgeCharge);
 const edgeLine = (upgEdge.lineItems || []).find((l) => l.category === "edge");
 if (!edgeLine) throw new Error("EDGE-2: edge line item missing from lineItems");
 assertNear("EDGE-2 edge line subtotal", edgeLine.line_subtotal, expectedEdgeCharge);
@@ -521,7 +540,7 @@ const upgEdgeNoLf = await calculateQuote(
   },
   {}
 );
-assertNear("EDGE-3 upgraded edge LF=0: no cost added", upgEdgeNoLf.totals.retail, 10 * wRate);
+assertNear("EDGE-3 upgraded edge LF=0: no cost added", upgEdgeNoLf.totals.retail, internalMaterialTotal(10, 0, wRate));
 if (!(upgEdgeNoLf.warnings || []).some((w) => w.includes("edge"))) {
   throw new Error("EDGE-3: upgraded edge with LF=0 must emit a warning");
 }
@@ -548,7 +567,7 @@ const upgEdgeDirect = await calculateQuote(
 );
 const dRatePromo = ESF_DIRECT_PRICE_PER_SQFT["Group Promo"];
 const edgeChargeDirect = Math.round(8 * SPECIALTY_EDGE_RATE_PER_LF * 100) / 100;
-assertNear("EDGE-4 direct mode: no markup, edge charge added", upgEdgeDirect.totals.retail, 10 * dRatePromo + edgeChargeDirect);
+assertNear("EDGE-4 direct mode: no markup, edge charge added", upgEdgeDirect.totals.retail, internalMaterialTotal(10, 0, dRatePromo) + edgeChargeDirect);
 if (upgEdgeDirect.totals.retail !== upgEdgeDirect.totals.wholesale) {
   throw new Error("EDGE-4: internal_quote direct: retail must equal wholesale");
 }
@@ -590,7 +609,7 @@ const multiEdge = await calculateQuote(
   {}
 );
 const multiEdgeCharge = Math.round(10 * SPECIALTY_EDGE_RATE_PER_LF * 100) / 100;
-assertNear("EDGE-6 multi-room: only upgraded room adds charge", multiEdge.totals.retail, 15 * wRate + multiEdgeCharge);
+assertNear("EDGE-6 multi-room: only upgraded room adds charge", multiEdge.totals.retail, internalMaterialTotal(15, 0, wRate) + multiEdgeCharge);
 
 // Pricing Admin / quote_pricing_rules overrides the fallback rate
 // When a rule with item_code "specialty_edge_per_lf" is present, that rate is used.
@@ -612,12 +631,78 @@ const upgEdgeCustomRate = await calculateQuote(
   { rules: [{ item_code: "specialty_edge_per_lf", category: "edge", price: customEdgeRate }] }
 );
 const expectedCustomEdgeCharge = Math.round(5 * customEdgeRate * 100) / 100;
-assertNear("EDGE-7 custom rate from rules: 5 LF × $20 = $100", upgEdgeCustomRate.totals.retail, 10 * wRate + expectedCustomEdgeCharge);
+assertNear("EDGE-7 custom rate from rules: 5 LF × $20 = $100", upgEdgeCustomRate.totals.retail, internalMaterialTotal(10, 0, wRate) + expectedCustomEdgeCharge);
 const snap7 = upgEdgeCustomRate.snapshot?.internal_estimate_math?.upgraded_edge_pricing;
 if (!snap7) throw new Error("EDGE-7: snapshot must include upgraded_edge_pricing");
 assertNear("EDGE-7 snapshot rate_per_lf", snap7.rate_per_lf, customEdgeRate);
 if (snap7.rate_source !== "pricing_rules") {
   throw new Error(`EDGE-7: rate_source must be "pricing_rules" when rule provided, got "${snap7.rate_source}"`);
 }
+
+// ── Internal Estimate material use tax (2% counter + backsplash) ─────────────
+
+const taxPolicy = resolveInternalEstimateMaterialTaxPolicy();
+assertNear("TAX-POLICY percent", taxPolicy.materialUseTaxPercent, INTERNAL_ESTIMATE_MATERIAL_USE_TAX_PERCENT);
+if (taxPolicy.materialUseTaxScope !== "countertop_and_backsplash_material") {
+  throw new Error("TAX-POLICY scope must be countertop_and_backsplash_material");
+}
+
+const taxLegacy = await calculateQuote(
+  {
+    quoteSource: "internal_quote",
+    engine: "legacy",
+    materialGroup: "Group Promo",
+    internalMaterialBasis: "wholesale",
+    areas: { countertopSqft: 10, backsplashSqft: 4 },
+    rooms: [],
+    addOns: {}
+  },
+  {}
+);
+const taxBase = (10 + 4) * wRate;
+const expectedTax = round2Tax(round2Tax(10 * wRate * 0.02) + round2Tax(4 * wRate * 0.02));
+assertNear("TAX-1 legacy counter+backsplash 2%", taxLegacy.totals.retail, internalMaterialTotal(10, 4, wRate));
+const taxSnap = taxLegacy.snapshot?.internal_estimate_math?.material_use_tax;
+if (!taxSnap) throw new Error("TAX-1: snapshot must include material_use_tax");
+assertNear("TAX-1 snapshot counter tax", taxSnap.countertopMaterialUseTaxAmount, 10 * wRate * 0.02);
+assertNear("TAX-1 snapshot backsplash tax", taxSnap.backsplashMaterialUseTaxAmount, 4 * wRate * 0.02);
+assertNear("TAX-1 snapshot total tax", taxSnap.totalMaterialUseTaxAmount, expectedTax);
+
+const taxRooms = await calculateQuote(
+  {
+    quoteSource: "internal_quote",
+    engine: "rooms",
+    internalMaterialBasis: "wholesale",
+    materialGroup: "Group Promo",
+    rooms: [
+      {
+        name: "Kitchen",
+        materialGroup: "Group Promo",
+        countertopSqft: 10,
+        backsplashSqft: 4,
+        addOns: { "qty-sink": 1 }
+      }
+    ],
+    addOns: { "qty-sink": 1 }
+  },
+  {}
+);
+const sinkPrice = 200;
+assertNear("TAX-2 rooms engine tax excludes add-ons", taxRooms.totals.retail, internalMaterialTotal(10, 4, wRate) + sinkPrice);
+
+const taxTrip = await calculateQuote(
+  {
+    quoteSource: "internal_quote",
+    engine: "legacy",
+    materialGroup: "Group Promo",
+    internalMaterialBasis: "wholesale",
+    areas: { countertopSqft: 10, backsplashSqft: 0 },
+    rooms: [],
+    addOns: {},
+    customLineItems: [{ name: "Trip charge", category: "Fee", quantity: 1, unitPrice: 150, customerFacing: true }]
+  },
+  {}
+);
+assertNear("TAX-3 custom fee not taxed", taxTrip.totals.retail, internalMaterialTotal(10, 0, wRate) + 150);
 
 console.log("verifyInternalEstimateMath: ok");

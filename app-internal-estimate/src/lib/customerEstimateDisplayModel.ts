@@ -1,4 +1,8 @@
 import { roundCustomerDisplay } from "@quote-lib/customerDisplayRounding";
+import {
+  computeInternalEstimateMaterialUseTaxAmounts,
+  resolveInternalEstimateMaterialTaxPolicy
+} from "@quote-lib/internalEstimateMaterialTaxPolicy";
 import { round2 } from "@quote-lib/measurementEngine";
 import type {
   CustomerRoomAreaCostBreakdown,
@@ -371,14 +375,25 @@ function computeRoomGroupDisplayTotal(
   room: CustomerRoomAreaCostBreakdown["rooms"][number],
   ratePerSqft: number,
   taxPct: number,
-  fixedExtrasExact: number
+  fixedExtrasExact: number,
+  internalMaterialUseTax?: boolean
 ): number {
   if (room.isVanity) {
     return room.fixedDisplayTotal ?? roundCustomerDisplay(room.roomTotalExact);
   }
   const counterMat = round2(room.countertopSf * ratePerSqft);
-  const useTax = taxPct > 0 ? round2(counterMat * (taxPct / 100)) : 0;
   const backsplashMat = round2(room.backsplashFhbSf * ratePerSqft);
+  if (internalMaterialUseTax) {
+    const amounts = computeInternalEstimateMaterialUseTaxAmounts(
+      counterMat,
+      backsplashMat,
+      resolveInternalEstimateMaterialTaxPolicy()
+    );
+    return roundCustomerDisplay(
+      round2(counterMat + backsplashMat + amounts.totalMaterialUseTaxAmount + fixedExtrasExact)
+    );
+  }
+  const useTax = taxPct > 0 ? round2(counterMat * (taxPct / 100)) : 0;
   return roundCustomerDisplay(round2(counterMat + useTax + backsplashMat + fixedExtrasExact));
 }
 
@@ -396,12 +411,14 @@ function buildRoomComparisonTable(params: {
   comparisonRows: InternalEstimateGroupComparisonRow[];
   allGroupComparisonRates?: InternalEstimateGroupComparisonRow[];
   projectUseTaxPercent: number;
+  internalMaterialUseTax?: boolean;
   unassignedDisplayTotal: number;
 }): CustomerPrintComparisonTable | null {
   const { comparisonRows, roomAreaBreakdown } = params;
   if (!roomAreaBreakdown?.rooms.length) return null;
 
-  const taxPct = Math.max(0, Number(params.projectUseTaxPercent) || 0);
+  const internalMaterialUseTax = params.internalMaterialUseTax === true;
+  const taxPct = internalMaterialUseTax ? 0 : Math.max(0, Number(params.projectUseTaxPercent) || 0);
 
   // Detect per-room mode: any room has a non-empty customerComparisonGroups
   const perRoomMode = roomAreaBreakdown.rooms.some((r) => r.customerComparisonGroups?.length);
@@ -447,7 +464,7 @@ function buildRoomComparisonTable(params: {
       for (const g of roomGroups) {
         const rate = rateByGroup.get(g);
         if (rate == null) continue;
-        groupDisplayTotals[g] = computeRoomGroupDisplayTotal(room, rate, taxPct, fixedExtrasExact);
+        groupDisplayTotals[g] = computeRoomGroupDisplayTotal(room, rate, taxPct, fixedExtrasExact, internalMaterialUseTax);
       }
 
       roomRows.push({
@@ -487,7 +504,13 @@ function buildRoomComparisonTable(params: {
 
     const groupDisplayTotals: Record<string, number> = {};
     for (const compRow of comparisonRows) {
-      groupDisplayTotals[compRow.group] = computeRoomGroupDisplayTotal(room, compRow.ratePerSqft, taxPct, fixedExtrasExact);
+      groupDisplayTotals[compRow.group] = computeRoomGroupDisplayTotal(
+        room,
+        compRow.ratePerSqft,
+        taxPct,
+        fixedExtrasExact,
+        internalMaterialUseTax
+      );
     }
 
     roomRows.push({
@@ -598,8 +621,10 @@ export type BuildCustomerEstimateDisplayModelParams = {
    * When omitted, per-room mode falls back to comparisonRows for rate lookup.
    */
   allGroupComparisonRates?: InternalEstimateGroupComparisonRow[];
-  /** Project use tax percent — required for per-room comparison pricing. */
+  /** @deprecated Legacy — Internal Estimate uses internalMaterialUseTax. */
   projectUseTaxPercent?: number;
+  /** Internal Estimate: fixed 2% on countertop + backsplash for comparison table. */
+  internalMaterialUseTax?: boolean;
 };
 
 /**
@@ -675,6 +700,7 @@ export function buildCustomerEstimateDisplayModel(
     comparisonRows,
     allGroupComparisonRates: params.allGroupComparisonRates,
     projectUseTaxPercent: Math.max(0, Number(params.projectUseTaxPercent) || 0),
+    internalMaterialUseTax: params.internalMaterialUseTax === true,
     unassignedDisplayTotal: roomArea.unassignedDisplayTotal
   });
 

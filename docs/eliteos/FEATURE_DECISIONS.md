@@ -117,10 +117,23 @@
 | Field | Value |
 |-------|--------|
 | **Date** | 2026-05-19 |
-| **Decision** | **Room drafts** persist in `internal_ui.estimate_room_drafts` (add-ons, tear, FHB, catalog color id, guided layout preset) with API `estimate_rooms` still used for Calculate. **Use tax** is optional per room (`useTaxMode`: inherit project / none / percent) on **countertop material only**, folded into that room’s material $ (not a separate PDF line); project `internal_ui.use_tax_percent` is the default for new/inherited rooms. **2026 Vanity Program** is an isolated module (`vanityProgram2026`) with kitchen ≥35 sf / &lt;35 sf tiers, sink upgrades, extra trips; customer vanity display rounds to **nearest $5** (stone rooms stay **$10**). **L/U guided shapes** subtract **corner overlap** (default 25.5″). **Internal-only custom lines** fold into customer material; names never print. **Color TBD** → `internal_ui.color_tbd`. **Customer room/area cost breakdown** snapshotted as `internal_ui.customer_room_area_breakdown`. |
+| **Decision** | **Room drafts** persist in `internal_ui.estimate_room_drafts` (add-ons, tear, FHB, catalog color id, guided layout preset) with API `estimate_rooms` still used for Calculate. **Material use tax** is a fixed **2%** Internal Estimate policy on **countertop and backsplash/FHB material** via `resolveInternalEstimateMaterialTaxPolicy()` — folded into customer material $ (not a separate PDF line); **add-ons, custom lines, labor, fees, and credits excluded**; **2026 Vanity Program fixed prices excluded**. Legacy per-room `useTaxMode` / project `use_tax_percent` (0/2/5/custom) are **retired from the UI**; saved snapshots hydrate safely and recalculate at 2%. **2026 Vanity Program** is an isolated module (`vanityProgram2026`) with kitchen ≥35 sf / &lt;35 sf tiers, sink upgrades, extra trips; customer vanity display rounds to **nearest $5** (stone rooms stay **$10**). **L/U guided shapes** subtract **corner overlap** (default 25.5″). **Internal-only custom lines** fold into customer material; names never print. **Color TBD** → `internal_ui.color_tbd`. **Customer room/area cost breakdown** snapshotted as `internal_ui.customer_room_area_breakdown`. |
 | **Why** | Beta testers reported lost room add-ons/colors on reload, over-counted L/U sf, need Lisbon-style use tax, and internal fee lines leaking to customer PDFs. |
 | **Impacted files/docs** | `app-quote/src/lib/measurementEngine.ts`, `app-quote/src/lib/prototypeQuoteMath.ts`, `app-internal-estimate/`, `backend-core/src/quotes/quoteCalculator.js`, `scripts/verify-internal-estimate-beta-fixes.ts`, `docs/quote-platform/internal-quote-test-plan.md`. |
 | **Revisit trigger** | Per-branch use-tax rules in admin; itemized use-tax on customer PDF; backend room engine parity for all FHB edge cases. |
+
+---
+
+### Supplement — Internal Estimate material use tax normalization (2026-06)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-06-16 |
+| **Decision** | Internal Estimate uses a **fixed 2% material use tax** on **countertop and backsplash/FHB material** via `resolveInternalEstimateMaterialTaxPolicy()` / `internalEstimateMaterialTaxPolicy`. **Excluded:** add-ons, cutouts, custom lines, labor, fees, credits, **2026 Vanity Program fixed prices**. Estimator **0 / 2 / 5 / custom % selector removed**; snapshot stores `material_use_tax` split amounts. Shared `prototypeQuoteMath` paths gate on `internalMaterialUseTax` / `InternalMeasureOptions` so **Public/Partner Quote are unchanged**. |
+| **Why** | Product direction (Eric/Hunter): normalize tax before Out-of-Collection pricing; backsplash material must receive the same 2% as countertop. |
+| **Impacted files/docs** | `app-quote/src/lib/internalEstimateMaterialTaxPolicy.ts`, `app-quote/src/lib/prototypeQuoteMath.ts`, `app-internal-estimate/`, `backend-core/src/quotes/quoteCalculator.js`, `backend-core/src/scripts/verifyInternalEstimateMath.mjs`, `scripts/verify-internal-estimate-beta-fixes.ts`. |
+| **Follow-up backlog** | (1) Vanity quote Group A–F display cleanup. (2) Side splash UI under backsplash (Qty 1 / Qty 2). (3) Customer PDF redesign (cleaner multi-top summary). (4) Out-of-Collection material program premium. (5) Pricing Admin ownership of material use tax policy. |
+| **Revisit trigger** | Branch-specific tax rates; customer-facing tax line item; side splash as first-class scope. |
 
 ---
 

@@ -136,26 +136,34 @@ function approx(a: number, b: number, eps = 0.02) {
   approx(guidedCornerOverlapDeductionSf(uRoom), round2(overlapOne * 2));
 }
 
-// Room-level use tax: Kitchen 5% on 10 sf Promo @ $45/sf → $472.50 material in Kitchen only
+// Room-level material use tax: Kitchen 2% on counter + backsplash (Internal Estimate policy)
 {
   const kitchen = createDefaultRoom("Group Promo");
   kitchen.name = "Kitchen";
   kitchen.calcMode = "Manual Sq Ft";
-  kitchen.direct = { counter: 10, splash: 0 };
-  kitchen.useTaxMode = "percent";
-  kitchen.useTaxPercent = 5;
+  kitchen.direct = { counter: 10, splash: 4 };
   const bath = createDefaultRoom("Group Promo");
   bath.name = "Primary Bath";
   bath.calcMode = "Manual Sq Ft";
   bath.direct = { counter: 12, splash: 0 };
-  bath.useTaxMode = "none";
-  const { rooms: measured } = calculateAllRoomDrafts([kitchen, bath], "New Construction", "wholesale", 0);
-  approx(measured[0].useTax?.taxAmount ?? 0, 22.5);
-  approx(measured[0].selected, 472.5);
-  approx(measured[1].useTax?.applied ?? false, false);
-  approx(measured[1].selected, 540);
-  const taxBd = buildSelectedMaterialBreakdown([kitchen, bath], "wholesale", { projectUseTaxPercent: 0 });
-  approx(taxBd.totals.useTax?.taxAmount ?? 0, 22.5);
+  const { rooms: measured } = calculateAllRoomDrafts(
+    [kitchen, bath],
+    "New Construction",
+    "wholesale",
+    0,
+    { chargeableCounterCeil: true, internalMaterialUseTax: true }
+  );
+  // Kitchen: 10*45 + 4*45 = 630 + 2% (9+3.6) = 642.6
+  approx(measured[0].useTax?.taxAmount ?? 0, 12.6);
+  approx(measured[0].selected, 642.6);
+  approx(measured[1].useTax?.applied ?? false, true);
+  approx(measured[1].selected, 550.8); // 12*45 + 2% on 540 = 10.8
+  const taxBd = buildSelectedMaterialBreakdown([kitchen, bath], "wholesale", {
+    internalMaterialUseTax: true,
+    chargeableCounterCeil: true
+  });
+  approx(taxBd.totals.useTax?.taxAmount ?? 0, 23.4);
+  approx(taxBd.totals.useTax?.percent ?? 0, 2);
 }
 
 // Direct/wholesale — no public markup on internal
@@ -184,8 +192,8 @@ function approx(a: number, b: number, eps = 0.02) {
     },
     {}
   );
-  approx(w.totals.retail, 10 * PROTOTYPE_TIER_PRICE_PER_SQFT["Group Promo"]);
-  approx(d.totals.retail, 10 * ESF_DIRECT_PRICE_PER_SQFT["Group Promo"]);
+  approx(w.totals.retail, round2(10 * PROTOTYPE_TIER_PRICE_PER_SQFT["Group Promo"] * 1.02));
+  approx(d.totals.retail, round2(10 * ESF_DIRECT_PRICE_PER_SQFT["Group Promo"] * 1.02));
 }
 
 // Kitchen + Primary Bath room breakdown reconciles to estimate total
@@ -199,7 +207,8 @@ function approx(a: number, b: number, eps = 0.02) {
   bath.calcMode = "Manual Sq Ft";
   bath.direct = { counter: 12, splash: 4 };
   const drafts = [kitchen, bath];
-  const { rooms: measured } = calculateAllRoomDrafts(drafts, "New Construction", "wholesale", 0);
+  const measureOpts = INTERNAL_ESTIMATE_MEASURE_OPTIONS;
+  const { rooms: measured } = calculateAllRoomDrafts(drafts, "New Construction", "wholesale", 0, measureOpts);
   const quote = runLocalPrototypeQuote({
     quoteMode: "internal",
     internalMaterialBasis: "wholesale",
@@ -215,6 +224,7 @@ function approx(a: number, b: number, eps = 0.02) {
     roomDrafts: drafts,
     measuredRooms: measured,
     materialBasis: "wholesale",
+    measureOptions: measureOpts,
     customLines: []
   });
   assert.equal(bd.rooms.length, 2);
@@ -224,23 +234,22 @@ function approx(a: number, b: number, eps = 0.02) {
   approx(bd.rooms.reduce((s, r) => s + r.roomTotalExact, 0), quote.retail);
 }
 
-// Use tax folded into room material (not separate line)
+// Material use tax folded into room material (not separate line) — Internal Estimate 2% policy
 {
   const room = createDefaultRoom("Group Promo");
   room.name = "Kitchen";
   room.calcMode = "Manual Sq Ft";
   room.direct = { counter: 10, splash: 0 };
-  room.useTaxMode = "percent";
-  room.useTaxPercent = 5;
-  const { rooms: measured } = calculateAllRoomDrafts([room], "New Construction", "wholesale", 0);
+  const measureOpts = { chargeableCounterCeil: true, internalMaterialUseTax: true };
+  const { rooms: measured } = calculateAllRoomDrafts([room], "New Construction", "wholesale", 0, measureOpts);
   const bd = buildCustomerRoomAreaCostBreakdown({
     roomDrafts: [room],
     measuredRooms: measured,
     materialBasis: "wholesale",
-    projectUseTaxPercent: 0,
+    measureOptions: measureOpts,
     customLines: []
   });
-  approx(bd.rooms[0]?.materialAmountExact ?? 0, 472.5);
+  approx(bd.rooms[0]?.materialAmountExact ?? 0, 459);
 }
 
 // Internal-only custom absorbed into room material; customer line stays visible
@@ -534,7 +543,7 @@ function approx(a: number, b: number, eps = 0.02) {
     projectType: "New Construction"
   });
   const matrixRow = live.allGroupMatrix.find((r) => r.group === "Group Promo");
-  approx(matrixRow!.counter, chargeableCounter$);
+  approx(matrixRow!.counter, round2(chargeableCounter$ * 1.02));
   approx(live.mathCheck.countertopSf, 37);
 }
 
@@ -545,14 +554,14 @@ function approx(a: number, b: number, eps = 0.02) {
   room.addons = { "qty-sink": 1, "qty-cook": 1 };
   const scope = aggregateComparisonScope([room], "New Construction", {
     materialBasis: "wholesale",
-    projectUseTaxPercent: 2
+    measureOptions: { chargeableCounterCeil: true, internalMaterialUseTax: true }
   });
   const comp = buildInternalEstimateGroupComparison({
     countertopSqft: scope.countertopSqft,
     backsplashSqft: scope.backsplashSqft,
     roomFixedDollars: scope.addonDollars,
     customLineDollars: 0,
-    useTaxPercent: 2,
+    internalMaterialUseTax: true,
     basis: "wholesale"
   }).find((r) => r.group === "Group Promo");
   const live = runLocalPrototypeQuote({
@@ -563,8 +572,7 @@ function approx(a: number, b: number, eps = 0.02) {
     globalAddOns: {},
     applyGlobalAddOns: false,
     workflowLabel: "Internal",
-    projectType: "New Construction",
-    useTaxPercent: 2
+    projectType: "New Construction"
   });
   const matrixPromo = live.allGroupMatrix.find((r) => r.group === "Group Promo")!;
   approx(comp!.fullTotal, matrixPromo.wholesale, 0.05);
@@ -1013,14 +1021,17 @@ function approx(a: number, b: number, eps = 0.02) {
   kitchen.direct = { counter: 40, splash: 8 };
   (kitchen as typeof kitchen & { customerNote?: string }).customerNote = "Confirm sink base before template.";
 
-  const mKitchen = measureRoomDraft(kitchen, 0, "direct", 0);
+  const mKitchen = measureRoomDraft(kitchen, 0, "direct", 0, {
+    chargeableCounterCeil: true,
+    internalMaterialUseTax: true
+  });
   const mVanity = measureRoomDraft(vanity, 40, "direct", 0);
 
   const rab = buildCustomerRoomAreaCostBreakdown({
     roomDrafts: [kitchen, vanity],
     measuredRooms: [mKitchen, mVanity],
     materialBasis: "direct",
-    projectUseTaxPercent: 0
+    measureOptions: { chargeableCounterCeil: true, internalMaterialUseTax: true }
   });
 
   // Kitchen row customerNote should be propagated
@@ -1111,7 +1122,7 @@ function approx(a: number, b: number, eps = 0.02) {
   const appSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/InternalEstimateApp.tsx"), "utf8");
   assert.match(appSrc, /preparedBy.*enteredBy/, "PDF-SOURCE-2: preparedBy wired from enteredBy");
   assert.match(appSrc, /comparisonRows.*customerEstimateComparisonRows/, "PDF-SOURCE-2: comparisonRows passed to display model");
-  assert.match(appSrc, /projectUseTaxPercent/, "PDF-SOURCE-2: projectUseTaxPercent passed to display model");
+  assert.match(appSrc, /internalMaterialUseTax.*true/, "PDF-SOURCE-2: internalMaterialUseTax passed to display model");
 }
 
 // PDF-SOURCE-3: CustomerEstimatePrint no longer accepts removed props
