@@ -105,6 +105,13 @@ interface ProviderConfig {
   };
 }
 
+export interface PlanFilePreviewMeta {
+  quoteFileId: string;
+  originalFilename: string;
+  mimeType: string | null;
+  status: string;
+}
+
 export interface WorkspaceReviewMeta {
   reviewStatus: string;
   approvalStatus?: string;
@@ -112,6 +119,7 @@ export interface WorkspaceReviewMeta {
   approvedAt?: string | null;
   approvedByUserId?: string | null;
   hasSavedResult?: boolean;
+  file?: PlanFilePreviewMeta;
 }
 
 export interface TakeoffPlanFileSectionProps {
@@ -120,7 +128,7 @@ export interface TakeoffPlanFileSectionProps {
   /** Bearer token for authenticated API calls. Null = not signed in. */
   token: string | null;
   /** Called when a new workspace is created after upload. */
-  onWorkspaceCreated: (jobId: string, filename: string) => void;
+  onWorkspaceCreated: (jobId: string, filename: string, file?: PlanFilePreviewMeta) => void;
   /** Called when an existing workspace loads (e.g. from URL param). */
   onWorkspaceLoaded: (filename: string, meta?: WorkspaceReviewMeta) => void;
   /** Called when an AI draft is successfully generated. Parent loads it into the review UI. */
@@ -162,6 +170,15 @@ function formatDate(iso: string): string {
 
 function roleLabelFor(role: string): string {
   return FILE_ROLE_OPTIONS.find((r) => r.value === role)?.label ?? role;
+}
+
+function toPlanFilePreviewMeta(file: PlanFileMeta): PlanFilePreviewMeta {
+  return {
+    quoteFileId: file.id,
+    originalFilename: file.originalFilename,
+    mimeType: file.mimeType,
+    status: file.status,
+  };
 }
 
 function formatRetryAfter(iso: string | null | undefined): string {
@@ -310,6 +327,7 @@ export default function TakeoffPlanFileSection({
           approvedAt: res.approvedAt ?? null,
           approvedByUserId: res.approvedByUserId ?? null,
           hasSavedResult: res.hasSavedResult,
+          file: toPlanFilePreviewMeta(res.file),
         });
       } catch (e) {
         const msg = e instanceof LabApiError ? e.message : e instanceof Error ? e.message : "Failed to load workspace.";
@@ -396,7 +414,11 @@ export default function TakeoffPlanFileSection({
       setSelectedFile(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
 
-      onWorkspaceCreated(ws.takeoffJobId, ws.file.originalFilename);
+      onWorkspaceCreated(
+        ws.takeoffJobId,
+        ws.file.originalFilename,
+        toPlanFilePreviewMeta(ws.file)
+      );
     } catch (e) {
       const msg = e instanceof LabApiError ? e.message : e instanceof Error ? e.message : "Upload failed.";
       setUploadStep("error");

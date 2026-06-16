@@ -46,7 +46,8 @@ import TakeoffDiagnosticsPanel from "./components/TakeoffDiagnosticsPanel";
 import TakeoffImportPreview from "./components/TakeoffImportPreview";
 import TakeoffWorkbench from "./components/TakeoffWorkbench";
 import TakeoffPlanFileSection from "./components/TakeoffPlanFileSection";
-import type { WorkspaceReviewMeta } from "./components/TakeoffPlanFileSection";
+import type { PlanFilePreviewMeta, WorkspaceReviewMeta } from "./components/TakeoffPlanFileSection";
+import TakeoffPlanPreviewPanel from "./components/TakeoffPlanPreviewPanel";
 import TakeoffBenchmarkPanel from "./components/TakeoffBenchmarkPanel";
 import type { BenchmarkQaContext } from "./components/TakeoffBenchmarkPanel";
 import TakeoffRunHistoryPanel from "./components/TakeoffRunHistoryPanel";
@@ -310,6 +311,7 @@ export default function TakeoffLabApp() {
   // ── Workspace state (file-backed) ────────────────────────────────────────
   const [takeoffJobId, setTakeoffJobId] = useState<string | null>(urlJobId);
   const [planFilename, setPlanFilename] = useState<string | null>(null);
+  const [planFileMeta, setPlanFileMeta] = useState<PlanFilePreviewMeta | null>(null);
 
   // ── Source state (last validated; never mutated by UI edits) ─────────────
   // Initialized to Spec73 as a computation fallback, but sourceMode starts as
@@ -567,6 +569,7 @@ export default function TakeoffLabApp() {
     // ── Parent-owned workspace / source / result state ────────────────────
     setTakeoffJobId(null);       // triggers TakeoffPlanFileSection reset effect
     setPlanFilename(null);
+    setPlanFileMeta(null);
     setAiDraftMeta(null);
     setCurrentResultId(null);
     setPageInventory(null);
@@ -600,6 +603,7 @@ export default function TakeoffLabApp() {
     if (jobId === takeoffJobId) return;
     setTakeoffJobId(jobId);
     setPlanFilename(null);
+    setPlanFileMeta(null);
     setAiDraftMeta(null);
     setCurrentResultId(null);
     setPageInventory(null);
@@ -982,328 +986,10 @@ export default function TakeoffLabApp() {
 
   const { result, computed, validation, importPlan } = activeState;
 
-  return (
-    <div className="shell">
-      {/* ── Top bar ─────────────────────────────────────────────────── */}
-      <header className="topbar" role="banner">
-        <a
-          href={homeBase}
-          className="brand-row brand-row-link"
-          aria-label={`eliteOS AI Takeoff — ${workspaceName}`}
-        >
-          <span className="brand-mark" aria-hidden>
-            {workspaceLogoUrl ? <img src={workspaceLogoUrl} alt="" /> : null}
-          </span>
-          <span className="brand-text">
-            <span className="brand-wordmark">eliteOS</span>
-            <span className="brand-sub">AI Takeoff · {workspaceName}</span>
-          </span>
-        </a>
-        <div className="topbar-actions">
-          <div className="topbar-badges">
-            <span className="badge badge-lab">Review only</span>
-            <span className="badge badge-safe">No quote mutation</span>
-          </div>
-          {authChecked && authToken ? (
-            <div className="topbar-account-wrap" ref={userMenuRef}>
-              <button
-                type="button"
-                className={`topbar-account${userMenuOpen ? " is-open" : ""}`}
-                aria-label="Open account menu"
-                aria-haspopup="menu"
-                aria-expanded={userMenuOpen}
-                onClick={() => setUserMenuOpen((v) => !v)}
-              >
-                <span className="topbar-avatar" aria-hidden>{userDisplayInitials}</span>
-                <span className="topbar-account-text">
-                  <span className="topbar-account-name">{userDisplayName}</span>
-                  {userEmail && userEmail.toLowerCase() !== userDisplayName.toLowerCase() ? (
-                    <span className="topbar-account-role">{userEmail}</span>
-                  ) : null}
-                </span>
-                <span className="topbar-account-caret" aria-hidden>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="6 9 12 15 18 9" />
-                  </svg>
-                </span>
-              </button>
-              {userMenuOpen ? (
-                <div className="user-menu" role="menu" aria-label="Account menu">
-                  <div className="user-menu-header">
-                    <p className="user-menu-name">{userDisplayName}</p>
-                    {userEmail ? <p className="user-menu-email">{userEmail}</p> : null}
-                    <p className="user-menu-workspace">
-                      <span>Workspace ·</span>{" "}
-                      <strong>{workspaceName}</strong>
-                    </p>
-                  </div>
-                  <div className="user-menu-list">
-                    <a
-                      href={homeBase}
-                      className="user-menu-item"
-                      role="menuitem"
-                      onClick={() => setUserMenuOpen(false)}
-                    >
-                      <span className="user-menu-icon" aria-hidden>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M3 11.5L12 4l9 7.5" /><path d="M5 10v10h14V10" /><path d="M10 20v-6h4v6" />
-                        </svg>
-                      </span>
-                      <span className="user-menu-label">
-                        <span>Open Home</span>
-                        <span className="user-menu-meta">eliteOS Launcher</span>
-                      </span>
-                      <span className="user-menu-shortcut" aria-hidden>↗</span>
-                    </a>
-                  </div>
-                  <div className="user-menu-footer">
-                    <button
-                      type="button"
-                      className="user-menu-item user-menu-signout"
-                      role="menuitem"
-                      onClick={() => { setUserMenuOpen(false); void signOut(); }}
-                    >
-                      <span className="user-menu-icon" aria-hidden>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" />
-                        </svg>
-                      </span>
-                      <span className="user-menu-label">Sign out</span>
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-      </header>
+  const showPlanPreviewColumn = Boolean(takeoffJobId && planFileMeta && authToken);
 
-      {/* ── Compact page subheader (replaces dark hero block) ────── */}
-      <div className="takeoff-page-sub" role="region" aria-label="Takeoff session status">
-        <div className="takeoff-page-sub-inner">
-          <div className="takeoff-page-sub-title">
-            <h1 className="takeoff-page-heading">AI Takeoff</h1>
-            <p className="takeoff-page-desc">
-              Review plan dimensions, correct measurements, and save a reviewed takeoff.
-              eliteOS recomputes square footage independently — no quote is created or mutated.
-            </p>
-          </div>
-          {authToken && hasActiveSource && (
-            <div className="hero-pills">
-              <span className={pillClass}>
-                {displayMode === "invalid"  ? "⚠"  :
-                 displayMode === "edited"   ? "✎"  :
-                 displayMode === "ai-draft" ? "✦"  :
-                 displayMode === "file"     ? "📄" :
-                 displayMode === "spec73"   ? "⚙"  : "◎"}{" "}
-                {sourceLabel[displayMode]}
-              </span>
-              {displayMode === "ai-draft" && aiDraftMeta && (
-                <span className="source-pill source-pill--ai-meta">
-                  {aiDraftMeta.promptVersion ?? "?"} · {aiDraftMeta.modelUsed ?? "model unknown"}
-                </span>
-              )}
-              {result.source?.fileName && displayMode !== "file" && displayMode !== "invalid" && displayMode !== "spec73" && (
-                <span className="source-pill source-pill--file">{result.source.fileName}</span>
-              )}
-              {hasEdits && displayMode !== "spec73" && (
-                <span className="source-pill source-pill--edit-note">Edited</span>
-              )}
-              {excludedRunIds.size > 0 && (
-                <span className="source-pill source-pill--excluded">{excludedRunIds.size} run{excludedRunIds.size !== 1 ? "s" : ""} excluded</span>
-              )}
-              {takeoffJobId && (
-                <>
-                  <span className="source-pill source-pill--workspace">Workspace active</span>
-                  <button
-                    type="button"
-                    className="start-new-btn"
-                    onClick={handleStartNewTakeoff}
-                    title="Clear this workspace from the screen and start a fresh takeoff (data is preserved)"
-                  >
-                    ↩ Start new takeoff
-                  </button>
-                </>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* ── Main content ──────────────────────────────────────────── */}
-      <main className="main" role="main">
-        <div className="lab-main-inner">
-
-          {/* ── Sign-in panel (shown only when not authenticated) ─────── */}
-          {authChecked && !authToken && (
-            <section className="auth-panel auth-panel-standalone" aria-label="Sign in">
-              <header className="auth-panel-header">
-                <p className="auth-panel-eyebrow">AI Takeoff · {workspaceName}</p>
-                <h2 className="auth-panel-title">Sign in to continue</h2>
-                <p className="auth-panel-sub">
-                  Sign in with your eliteOS staff account to upload plan files, create workspaces,
-                  and generate AI drafts. Backend head access is enforced on every API call.
-                </p>
-              </header>
-              {!getSupabase() ? (
-                <div className="banner banner-warn" role="alert">
-                  <strong>Supabase is not configured.</strong>{" "}
-                  Set <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code>.
-                </div>
-              ) : null}
-              <div className="field-grid">
-                <div className="field">
-                  <label htmlFor="atl-email">Email</label>
-                  <input
-                    id="atl-email"
-                    type="email"
-                    value={authEmail}
-                    onChange={(e) => setAuthEmail(e.target.value)}
-                    autoComplete="username"
-                    placeholder="you@example.com"
-                    disabled={authBusy || !getSupabase()}
-                    onKeyDown={(e) => e.key === "Enter" && void signIn()}
-                  />
-                </div>
-                <div className="field">
-                  <label htmlFor="atl-password">Password</label>
-                  <input
-                    id="atl-password"
-                    type="password"
-                    value={authPassword}
-                    onChange={(e) => setAuthPassword(e.target.value)}
-                    autoComplete="current-password"
-                    disabled={authBusy || !getSupabase()}
-                    onKeyDown={(e) => e.key === "Enter" && void signIn()}
-                  />
-                </div>
-              </div>
-              {authError ? (
-                <div className="banner banner-error" role="alert" style={{ marginTop: 8 }}>
-                  {authError}
-                </div>
-              ) : null}
-              <button
-                type="button"
-                className="btn primary"
-                style={{ marginTop: 16 }}
-                disabled={authBusy || !authEmail.trim() || !authPassword || !getSupabase()}
-                onClick={() => void signIn()}
-              >
-                {authBusy ? "Signing in…" : "Sign in"}
-              </button>
-              <p className="auth-trust">
-                Authenticated through Supabase. No service-role keys are used in the browser.
-              </p>
-            </section>
-          )}
-
-          {authToken ? (
-            <section className="lab-section">
-              <h2 className="lab-section-title">Takeoff runs</h2>
-              <TakeoffRunInbox
-                token={authToken}
-                selectedJobId={takeoffJobId}
-                refreshKey={historyRefreshKey}
-                onSelectJob={handleSelectRun}
-              />
-            </section>
-          ) : null}
-
-          {/* ── Source plan file (v4) ──────────────────────────────────── */}
-          <section className="lab-section">
-            <h2 className="lab-section-title">Source plan file</h2>
-            <TakeoffPlanFileSection
-              takeoffJobId={takeoffJobId}
-              token={authToken}
-              onWorkspaceCreated={(jobId, filename) => {
-                setTakeoffJobId(jobId);
-                setPlanFilename(filename);
-                setHistoryRefreshKey((k) => k + 1);
-                // Update URL so the workspace survives a reload.
-                const url = new URL(window.location.href);
-                url.searchParams.set("takeoffJobId", jobId);
-                window.history.replaceState({}, "", url.toString());
-              }}
-              onWorkspaceLoaded={(filename, meta) => {
-                setPlanFilename(filename);
-                if (meta) setWorkspaceReview(meta);
-              }}
-              onAiDraftGenerated={handleAiDraftGenerated}
-              onPlanArchived={handleStartNewTakeoff}
-            />
-          </section>
-
-          {/* ── AI extraction run history (v5.3) ──────────────────────── */}
-          {takeoffJobId && authToken && (
-            <section className="lab-section">
-              <h2 className="lab-section-title">AI extraction history</h2>
-              <TakeoffRunHistoryPanel
-                takeoffJobId={takeoffJobId}
-                token={authToken}
-                currentResultId={currentResultId}
-                currentComputed={computed}
-                refreshKey={historyRefreshKey}
-                onLoadRun={handleLoadHistoricalRun}
-              />
-            </section>
-          )}
-
-          {/* JSON workbench — developer-only tool, hidden unless VITE_TAKEOFF_SHOW_DEV_TOOLS=1 */}
-          {showDevTools && (
-          <details className="lab-section lab-section-collapsible lab-section-dev">
-            <summary className="lab-section-summary">
-              <span className="lab-section-title lab-section-title--dev" style={{ margin: 0 }}>JSON workbench</span>
-              <span className="lab-section-summary-note">Developer / demo — paste or load Spec 73 sample</span>
-            </summary>
-            <div style={{ marginTop: 12 }}>
-              <TakeoffWorkbench
-                pastedDraft={pastedDraft}
-                onDraftChange={setPastedDraft}
-                onLoadSample={handleLoadSample}
-                onValidate={handleValidate}
-                onResetAll={handleResetAll}
-                onCopySummary={handleCopySummary}
-                onCopyEditedJson={handleCopyEditedJson}
-                parseError={parseError}
-                copyFeedback={copyFeedback}
-                displayMode={displayMode as "none" | "spec73" | "pasted" | "edited" | "invalid"}
-              />
-            </div>
-          </details>
-          )}
-
-          {/* ── Demo sample notice — shown when Spec 73 is explicitly loaded ── */}
-          {isDemoMode && (
-            <div className="demo-notice" role="note">
-              <span className="demo-notice-badge">Demo sample</span>
-              <span className="demo-notice-text">
-                <strong>Not a real workspace.</strong>{" "}
-                The Spec 73 fixture uses a 41" peninsula depth specific to this test plan.
-                Do not treat this as a template — nonstandard depths must come from the actual plan.{" "}
-                <button
-                  type="button"
-                  className="demo-notice-clear"
-                  onClick={() => {
-                    setSourceResult(makeSpec73());
-                    setEditDraft(makeSpec73());
-                    setSourceMode("none");
-                    setIsEditing(false);
-                    setResetKey((k) => k + 1);
-                    setPastedDraft("");
-                    setParseError(null);
-                  }}
-                >
-                  Clear demo data
-                </button>
-              </span>
-            </div>
-          )}
-
-          {/* ── All measurement sections — only shown when a source is loaded ── */}
-          {hasActiveSource && (
-            <>
-
+  const reviewSections = hasActiveSource ? (
+    <>
           {/* ── 1. Measurement summary ──────────────────────────────────── */}
           <section className="lab-section">
             <h2 className="lab-section-title">Measurement summary</h2>
@@ -1720,7 +1406,353 @@ export default function TakeoffLabApp() {
             )}
           </div>
 
-            </> /* end hasActiveSource */
+
+    </>
+  ) : null;
+
+  return (
+    <div className="shell">
+      {/* ── Top bar ─────────────────────────────────────────────────── */}
+      <header className="topbar" role="banner">
+        <a
+          href={homeBase}
+          className="brand-row brand-row-link"
+          aria-label={`eliteOS AI Takeoff — ${workspaceName}`}
+        >
+          <span className="brand-mark" aria-hidden>
+            {workspaceLogoUrl ? <img src={workspaceLogoUrl} alt="" /> : null}
+          </span>
+          <span className="brand-text">
+            <span className="brand-wordmark">eliteOS</span>
+            <span className="brand-sub">AI Takeoff · {workspaceName}</span>
+          </span>
+        </a>
+        <div className="topbar-actions">
+          <div className="topbar-badges">
+            <span className="badge badge-lab">Review only</span>
+            <span className="badge badge-safe">No quote mutation</span>
+          </div>
+          {authChecked && authToken ? (
+            <div className="topbar-account-wrap" ref={userMenuRef}>
+              <button
+                type="button"
+                className={`topbar-account${userMenuOpen ? " is-open" : ""}`}
+                aria-label="Open account menu"
+                aria-haspopup="menu"
+                aria-expanded={userMenuOpen}
+                onClick={() => setUserMenuOpen((v) => !v)}
+              >
+                <span className="topbar-avatar" aria-hidden>{userDisplayInitials}</span>
+                <span className="topbar-account-text">
+                  <span className="topbar-account-name">{userDisplayName}</span>
+                  {userEmail && userEmail.toLowerCase() !== userDisplayName.toLowerCase() ? (
+                    <span className="topbar-account-role">{userEmail}</span>
+                  ) : null}
+                </span>
+                <span className="topbar-account-caret" aria-hidden>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </span>
+              </button>
+              {userMenuOpen ? (
+                <div className="user-menu" role="menu" aria-label="Account menu">
+                  <div className="user-menu-header">
+                    <p className="user-menu-name">{userDisplayName}</p>
+                    {userEmail ? <p className="user-menu-email">{userEmail}</p> : null}
+                    <p className="user-menu-workspace">
+                      <span>Workspace ·</span>{" "}
+                      <strong>{workspaceName}</strong>
+                    </p>
+                  </div>
+                  <div className="user-menu-list">
+                    <a
+                      href={homeBase}
+                      className="user-menu-item"
+                      role="menuitem"
+                      onClick={() => setUserMenuOpen(false)}
+                    >
+                      <span className="user-menu-icon" aria-hidden>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M3 11.5L12 4l9 7.5" /><path d="M5 10v10h14V10" /><path d="M10 20v-6h4v6" />
+                        </svg>
+                      </span>
+                      <span className="user-menu-label">
+                        <span>Open Home</span>
+                        <span className="user-menu-meta">eliteOS Launcher</span>
+                      </span>
+                      <span className="user-menu-shortcut" aria-hidden>↗</span>
+                    </a>
+                  </div>
+                  <div className="user-menu-footer">
+                    <button
+                      type="button"
+                      className="user-menu-item user-menu-signout"
+                      role="menuitem"
+                      onClick={() => { setUserMenuOpen(false); void signOut(); }}
+                    >
+                      <span className="user-menu-icon" aria-hidden>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" />
+                        </svg>
+                      </span>
+                      <span className="user-menu-label">Sign out</span>
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      </header>
+
+      {/* ── Compact page subheader (replaces dark hero block) ────── */}
+      <div className="takeoff-page-sub" role="region" aria-label="Takeoff session status">
+        <div className="takeoff-page-sub-inner">
+          <div className="takeoff-page-sub-title">
+            <h1 className="takeoff-page-heading">AI Takeoff</h1>
+            <p className="takeoff-page-desc">
+              Review plan dimensions, correct measurements, and save a reviewed takeoff.
+              eliteOS recomputes square footage independently — no quote is created or mutated.
+            </p>
+          </div>
+          {authToken && hasActiveSource && (
+            <div className="hero-pills">
+              <span className={pillClass}>
+                {displayMode === "invalid"  ? "⚠"  :
+                 displayMode === "edited"   ? "✎"  :
+                 displayMode === "ai-draft" ? "✦"  :
+                 displayMode === "file"     ? "📄" :
+                 displayMode === "spec73"   ? "⚙"  : "◎"}{" "}
+                {sourceLabel[displayMode]}
+              </span>
+              {displayMode === "ai-draft" && aiDraftMeta && (
+                <span className="source-pill source-pill--ai-meta">
+                  {aiDraftMeta.promptVersion ?? "?"} · {aiDraftMeta.modelUsed ?? "model unknown"}
+                </span>
+              )}
+              {result.source?.fileName && displayMode !== "file" && displayMode !== "invalid" && displayMode !== "spec73" && (
+                <span className="source-pill source-pill--file">{result.source.fileName}</span>
+              )}
+              {hasEdits && displayMode !== "spec73" && (
+                <span className="source-pill source-pill--edit-note">Edited</span>
+              )}
+              {excludedRunIds.size > 0 && (
+                <span className="source-pill source-pill--excluded">{excludedRunIds.size} run{excludedRunIds.size !== 1 ? "s" : ""} excluded</span>
+              )}
+              {takeoffJobId && (
+                <>
+                  <span className="source-pill source-pill--workspace">Workspace active</span>
+                  <button
+                    type="button"
+                    className="start-new-btn"
+                    onClick={handleStartNewTakeoff}
+                    title="Clear this workspace from the screen and start a fresh takeoff (data is preserved)"
+                  >
+                    ↩ Start new takeoff
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Main content ──────────────────────────────────────────── */}
+      <main className="main" role="main">
+        <div className={`lab-main-inner${takeoffJobId && planFileMeta ? " lab-main-inner--review" : ""}`}>
+
+          {/* ── Sign-in panel (shown only when not authenticated) ─────── */}
+          {authChecked && !authToken && (
+            <section className="auth-panel auth-panel-standalone" aria-label="Sign in">
+              <header className="auth-panel-header">
+                <p className="auth-panel-eyebrow">AI Takeoff · {workspaceName}</p>
+                <h2 className="auth-panel-title">Sign in to continue</h2>
+                <p className="auth-panel-sub">
+                  Sign in with your eliteOS staff account to upload plan files, create workspaces,
+                  and generate AI drafts. Backend head access is enforced on every API call.
+                </p>
+              </header>
+              {!getSupabase() ? (
+                <div className="banner banner-warn" role="alert">
+                  <strong>Supabase is not configured.</strong>{" "}
+                  Set <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code>.
+                </div>
+              ) : null}
+              <div className="field-grid">
+                <div className="field">
+                  <label htmlFor="atl-email">Email</label>
+                  <input
+                    id="atl-email"
+                    type="email"
+                    value={authEmail}
+                    onChange={(e) => setAuthEmail(e.target.value)}
+                    autoComplete="username"
+                    placeholder="you@example.com"
+                    disabled={authBusy || !getSupabase()}
+                    onKeyDown={(e) => e.key === "Enter" && void signIn()}
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="atl-password">Password</label>
+                  <input
+                    id="atl-password"
+                    type="password"
+                    value={authPassword}
+                    onChange={(e) => setAuthPassword(e.target.value)}
+                    autoComplete="current-password"
+                    disabled={authBusy || !getSupabase()}
+                    onKeyDown={(e) => e.key === "Enter" && void signIn()}
+                  />
+                </div>
+              </div>
+              {authError ? (
+                <div className="banner banner-error" role="alert" style={{ marginTop: 8 }}>
+                  {authError}
+                </div>
+              ) : null}
+              <button
+                type="button"
+                className="btn primary"
+                style={{ marginTop: 16 }}
+                disabled={authBusy || !authEmail.trim() || !authPassword || !getSupabase()}
+                onClick={() => void signIn()}
+              >
+                {authBusy ? "Signing in…" : "Sign in"}
+              </button>
+              <p className="auth-trust">
+                Authenticated through Supabase. No service-role keys are used in the browser.
+              </p>
+            </section>
+          )}
+
+          {authToken ? (
+            <section className="lab-section">
+              <h2 className="lab-section-title">Takeoff runs</h2>
+              <TakeoffRunInbox
+                token={authToken}
+                selectedJobId={takeoffJobId}
+                refreshKey={historyRefreshKey}
+                onSelectJob={handleSelectRun}
+              />
+            </section>
+          ) : null}
+
+          {/* ── Source plan file (v4) ──────────────────────────────────── */}
+          <section className="lab-section">
+            <h2 className="lab-section-title">Source plan file</h2>
+            <TakeoffPlanFileSection
+              takeoffJobId={takeoffJobId}
+              token={authToken}
+              onWorkspaceCreated={(jobId, filename, file) => {
+                setTakeoffJobId(jobId);
+                setPlanFilename(filename);
+                setPlanFileMeta(file ?? null);
+                setHistoryRefreshKey((k) => k + 1);
+                // Update URL so the workspace survives a reload.
+                const url = new URL(window.location.href);
+                url.searchParams.set("takeoffJobId", jobId);
+                window.history.replaceState({}, "", url.toString());
+              }}
+              onWorkspaceLoaded={(filename, meta) => {
+                setPlanFilename(filename);
+                if (meta?.file) setPlanFileMeta(meta.file);
+                if (meta) setWorkspaceReview(meta);
+              }}
+              onAiDraftGenerated={handleAiDraftGenerated}
+              onPlanArchived={handleStartNewTakeoff}
+            />
+          </section>
+
+          {/* ── AI extraction run history (v5.3) ──────────────────────── */}
+          {takeoffJobId && authToken && (
+            <section className="lab-section">
+              <h2 className="lab-section-title">AI extraction history</h2>
+              <TakeoffRunHistoryPanel
+                takeoffJobId={takeoffJobId}
+                token={authToken}
+                currentResultId={currentResultId}
+                currentComputed={computed}
+                refreshKey={historyRefreshKey}
+                onLoadRun={handleLoadHistoricalRun}
+              />
+            </section>
+          )}
+
+          {/* JSON workbench — developer-only tool, hidden unless VITE_TAKEOFF_SHOW_DEV_TOOLS=1 */}
+          {showDevTools && (
+          <details className="lab-section lab-section-collapsible lab-section-dev">
+            <summary className="lab-section-summary">
+              <span className="lab-section-title lab-section-title--dev" style={{ margin: 0 }}>JSON workbench</span>
+              <span className="lab-section-summary-note">Developer / demo — paste or load Spec 73 sample</span>
+            </summary>
+            <div style={{ marginTop: 12 }}>
+              <TakeoffWorkbench
+                pastedDraft={pastedDraft}
+                onDraftChange={setPastedDraft}
+                onLoadSample={handleLoadSample}
+                onValidate={handleValidate}
+                onResetAll={handleResetAll}
+                onCopySummary={handleCopySummary}
+                onCopyEditedJson={handleCopyEditedJson}
+                parseError={parseError}
+                copyFeedback={copyFeedback}
+                displayMode={displayMode as "none" | "spec73" | "pasted" | "edited" | "invalid"}
+              />
+            </div>
+          </details>
+          )}
+
+          {/* ── Demo sample notice — shown when Spec 73 is explicitly loaded ── */}
+          {isDemoMode && (
+            <div className="demo-notice" role="note">
+              <span className="demo-notice-badge">Demo sample</span>
+              <span className="demo-notice-text">
+                <strong>Not a real workspace.</strong>{" "}
+                The Spec 73 fixture uses a 41" peninsula depth specific to this test plan.
+                Do not treat this as a template — nonstandard depths must come from the actual plan.{" "}
+                <button
+                  type="button"
+                  className="demo-notice-clear"
+                  onClick={() => {
+                    setSourceResult(makeSpec73());
+                    setEditDraft(makeSpec73());
+                    setSourceMode("none");
+                    setIsEditing(false);
+                    setResetKey((k) => k + 1);
+                    setPastedDraft("");
+                    setParseError(null);
+                  }}
+                >
+                  Clear demo data
+                </button>
+              </span>
+            </div>
+          )}
+
+          {/* ── Plan preview + review workbench (two-column when workspace loaded) ── */}
+          {showPlanPreviewColumn ? (
+            <div className="takeoff-review-layout">
+              <aside className="takeoff-review-preview-col">
+                <TakeoffPlanPreviewPanel
+                  token={authToken}
+                  file={planFileMeta}
+                  refreshKey={takeoffJobId}
+                />
+              </aside>
+              <div className="takeoff-review-main-col">
+                {reviewSections ?? (
+                  <section className="lab-section">
+                    <h2 className="lab-section-title">Review measurements</h2>
+                    <p className="lab-section-desc">
+                      Generate an AI draft above or load a saved result from history to review measurements beside this plan.
+                    </p>
+                  </section>
+                )}
+              </div>
+            </div>
+          ) : (
+            reviewSections
           )}
 
         </div>
