@@ -1,0 +1,9 @@
+{
+  "name": "quote-math-simulator",
+  "private": true,
+  "type": "module",
+  "description": "Generates Internal Estimate quote math audit workbook for Marshal",
+  "dependencies": {
+    "exceljs": "^4.4.0"
+  }
+}
