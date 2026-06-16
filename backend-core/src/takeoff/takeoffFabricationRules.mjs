@@ -66,6 +66,33 @@ const REF_TOTAL_RECONCILE_RE = /\b(to\s+reconcile\s+with|aligns?\s+with\s+refere
 /** No-backsplash indicators in text. */
 const NO_BACKSPLASH_RE = /\bno\s*[-/]?\s*(?:b\/s|b\.s\.|backsplash|bsp|back\s*splash)\b/i;
 
+/**
+ * True when a note declares whole-plan / whole-scope "no stone backsplash".
+ * Partial-scope phrasing (e.g. "no backsplash on open peninsula end") is excluded.
+ *
+ * @param {string} text
+ * @returns {boolean}
+ */
+export function noteDeclaresGlobalNoBacksplash(text) {
+  const t = String(text ?? "").trim();
+  if (!t || !NO_BACKSPLASH_RE.test(t)) return false;
+
+  // Local exclusion from backsplash scope — backsplash may still exist elsewhere on the plan.
+  if (/\bno\s*[-/]?\s*(?:b\/s|b\.s\.|backsplash|bsp|back\s*splash)\s+(?:on|at|along|around|for|near|by)\b/i.test(t)) {
+    return false;
+  }
+  if (/\b(?:open|peninsula|island|end|side|opening).{0,48}\bno\s*[-/]?\s*(?:b\/s|b\.s\.|backsplash|bsp|back\s*splash)\b/i.test(t)) {
+    return false;
+  }
+  if (/\bno\s*[-/]?\s*(?:b\/s|b\.s\.|backsplash|bsp|back\s*splash)\b.{0,48}\b(?:open|peninsula|island|end|side)\b/i.test(t)) {
+    return false;
+  }
+  if (/\bexcluded?\s+from\s+backsplash\b/i.test(t)) {
+    return false;
+  }
+  return true;
+}
+
 /** Positive backsplash keyword (to distinguish from "no b/s" context). */
 const POSITIVE_BS_RE = /(?:^|[^a-z])(?:b\/s|backsplash|splash)\b/i;
 
@@ -325,8 +352,8 @@ export function classifyReferenceTotalUsage(takeoffResult) {
 export function classifyBacksplashRule(takeoffResult, dimensionEvidence = null) {
   const findings = [];
 
-  // Determine if plan indicates no backsplash.
-  const noBsFromNotes = gatherAllNotes(takeoffResult).some((t) => NO_BACKSPLASH_RE.test(t));
+  // Determine if plan indicates no backsplash (whole-plan scope only).
+  const noBsFromNotes = gatherAllNotes(takeoffResult).some((t) => noteDeclaresGlobalNoBacksplash(t));
 
   // Check dimensionEvidence referenceTotals for explicit noBacksplash flag.
   const noBsFromRefTotals = (dimensionEvidence?.referenceTotals ?? []).some(
@@ -383,7 +410,7 @@ export function classifyBacksplashRule(takeoffResult, dimensionEvidence = null) 
   // Check for conflicting positive backsplash notes on other pages.
   const allNotes = gatherAllNotes(takeoffResult);
   const hasPositiveConflict = allNotes.some((t) => {
-    return !NO_BACKSPLASH_RE.test(t) && POSITIVE_BS_RE.test(t);
+    return !noteDeclaresGlobalNoBacksplash(t) && POSITIVE_BS_RE.test(t);
   });
 
   if (hasPositiveConflict && planSaysNoBacksplash && !hasConflict) {

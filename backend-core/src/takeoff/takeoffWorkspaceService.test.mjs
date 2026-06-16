@@ -1399,9 +1399,11 @@ function makeMockSupabase({
 }
 
 {
+  const invalidTakeoff = makeApprovableTakeoff();
+  invalidTakeoff.rooms[0].areas[0].runs[0].lengthIn = 0;
   const { supabase } = makeMockSupabase({
     jobRow: makeJobRow(),
-    resultRows: [makeResultRow()],
+    resultRows: [makeResultRow({ normalized_takeoff_json: invalidTakeoff })],
   });
 
   await assert.rejects(

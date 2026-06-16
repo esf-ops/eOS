@@ -20,9 +20,11 @@ import {
   classifyInferredPieceRule,
   classifyCornerDeductionRule,
   classifyNonstandardDepth,
+  noteDeclaresGlobalNoBacksplash,
   FABRICATION_RULE_CODE,
   FABRICATION_RULE_LEVEL,
 } from "./takeoffFabricationRules.mjs";
+import { buildSpec73Fixture } from "./fixtures/spec73.fixture.mjs";
 
 // ── Test helpers ───────────────────────────────────────────────────────────────
 
@@ -141,6 +143,25 @@ describe("Rule A: Reference total as geometry target", () => {
 // ── Rule B: No-backsplash rules ────────────────────────────────────────────────
 
 describe("Rule B: No-backsplash rules", () => {
+  it("noteDeclaresGlobalNoBacksplash distinguishes global vs partial-scope notes", () => {
+    assert.equal(noteDeclaresGlobalNoBacksplash("no B/S"), true);
+    assert.equal(noteDeclaresGlobalNoBacksplash("No backsplash per plan"), true);
+    assert.equal(noteDeclaresGlobalNoBacksplash("open end — no backsplash on open side"), false);
+    assert.equal(noteDeclaresGlobalNoBacksplash("Peninsula open end has no backsplash"), false);
+    assert.equal(noteDeclaresGlobalNoBacksplash("No backsplash on open peninsula end"), false);
+    assert.equal(noteDeclaresGlobalNoBacksplash("Stove opening excluded from backsplash"), false);
+  });
+
+  it("Spec 73 partial no-backsplash notes do not conflict with structured backsplash", () => {
+    const result = buildSpec73Fixture();
+    const findings = classifyBacksplashRule(result, null);
+    assert.equal(
+      hasCode(findings, FABRICATION_RULE_CODE.BACKSPLASH_SCOPE_CONFLICT),
+      false,
+      "Scoped open-end notes must not trigger whole-plan no-backsplash conflict"
+    );
+  });
+
   it("no-b/s note with computed backsplash 0 passes and emits NO_BACKSPLASH_CONFIRMED", () => {
     const run = makeRun({ label: "Kitchen counter", lengthIn: 80, depthIn: 25.5 });
     const area = makeArea({ runs: [run], backsplashLinearIn: 0 });
