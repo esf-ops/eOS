@@ -12,13 +12,37 @@ npm install
 node buildQuoteMathWorkbook.mjs
 ```
 
-Output:
+**Excel version (preferred):**
 
 ```text
 debug/quote-math-simulator/Internal-Estimate-Quote-Math-Simulator.xlsx
 ```
 
-The `debug/` folder is gitignored — regenerate the workbook after pulling math changes.
+**Google Sheets–compatible version** (use when sharing via Google Drive):
+
+```bash
+node buildGoogleSheetsWorkbook.mjs
+```
+
+```text
+debug/quote-math-simulator/Internal-Estimate-Quote-Math-Simulator-Google-Sheets-Compatible.xlsx
+```
+
+The `debug/` folder is gitignored — regenerate workbooks after pulling math changes.
+
+### Excel vs Google Sheets
+
+| | Excel version | Google Sheets version |
+|---|---------------|----------------------|
+| **When to use** | Local Excel, full features | Upload to Google Drive / open in Google Sheets |
+| **Dropdowns** | Data validation lists | Type values manually (see **Dropdown Lists** tab) |
+| **Named ranges** | Yes (`Const_TaxRate`, etc.) | No — direct `'Constants'!$B$1` refs |
+| **Hidden tabs** | `_Lists`, `_Constants` | Visible **Dropdown Lists**, **Constants** |
+| **Sheet protection** | Yellow inputs unlocked | No protection |
+| **Room Inputs tab** | Included (linked mirror) | Omitted (use Marshal Testing) |
+| **Vanity tier labels** | `Kitchen ≥35 sf` / `<35 sf` | ASCII: `Kitchen over 35 sf` / `under 35 sf` |
+
+The Google Sheets version is intentionally simplified for reliable conversion. Math and tab layout match the Excel workbook; polish features (protection, dropdowns, hidden helpers) are removed.
 
 ## Main tab: Marshal Testing
 
@@ -42,6 +66,9 @@ The `debug/` folder is gitignored — regenerate the workbook after pulling math
 | Customer Summary | Exact vs customer display ($5 rounding) |
 | Scenario Testing | Starter examples |
 | Audit Map | Workbook ↔ code crosswalk |
+| Dropdown Lists | Allowed input values (Google Sheets version only) |
+| Constants | Shared formula constants (Google Sheets version only) |
+| _Lists / _Constants | Hidden support sheets (Excel version only) |
 
 ## Configuration
 

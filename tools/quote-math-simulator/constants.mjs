@@ -118,3 +118,6 @@ export const SINK_UPGRADE = {
 };
 
 export const OUTPUT_PATH = "debug/quote-math-simulator/Internal-Estimate-Quote-Math-Simulator.xlsx";
+
+export const GOOGLE_SHEETS_OUTPUT_PATH =
+  "debug/quote-math-simulator/Internal-Estimate-Quote-Math-Simulator-Google-Sheets-Compatible.xlsx";

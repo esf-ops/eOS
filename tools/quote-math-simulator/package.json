@@ -2,7 +2,11 @@
   "name": "quote-math-simulator",
   "private": true,
   "type": "module",
-  "description": "Generates Internal Estimate quote math audit workbook for Marshal",
+  "scripts": {
+    "build": "node buildQuoteMathWorkbook.mjs",
+    "build:google": "node buildGoogleSheetsWorkbook.mjs",
+    "build:all": "node buildQuoteMathWorkbook.mjs && node buildGoogleSheetsWorkbook.mjs"
+  },
   "dependencies": {
     "exceljs": "^4.4.0"
   }
