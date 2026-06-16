@@ -4,6 +4,7 @@
  * Endpoints:
  *   GET  /api/takeoff/config                       — safe AI provider config (v5.9.3)
  *   POST /api/takeoff-jobs                        — create workspace from uploaded quote file
+ *   GET  /api/takeoff-jobs                        — list org takeoff jobs (inbox)
  *   GET  /api/takeoff-jobs/:id                    — get workspace status + file metadata
  *   POST /api/takeoff-jobs/:id/results             — save reviewed TakeoffResult (server recomputes)
  *   GET  /api/takeoff-jobs/:id/results/latest      — load latest saved result
@@ -31,6 +32,7 @@ import express from "express";
 import {
   createTakeoffWorkspace,
   getTakeoffWorkspace,
+  listTakeoffJobs,
   saveTakeoffResult,
   getLatestTakeoffResult,
   listTakeoffResults,
@@ -108,6 +110,34 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase, he
       });
 
       return res.status(201).json({ ok: true, ...result });
+    } catch (e) {
+      const status = e.statusCode ?? 500;
+      const code = status < 500 ? "validation_error" : "server_error";
+      return res.status(status).json({ ok: false, error: String(e?.message ?? e), code });
+    }
+  });
+
+  // ── GET /api/takeoff-jobs ───────────────────────────────────────────────────
+  //
+  // Lists takeoff jobs for the authenticated organization (newest first).
+  // Query: status, review_status, limit, offset
+  //
+  app.get("/api/takeoff-jobs", requireAuth(), guardHead, async (req, res) => {
+    try {
+      const supabase = getSupabase();
+
+      const orgCtx = await resolveOrganizationContext({ req, supabase, mode: "authenticated" });
+      if (!orgCtx.organizationId) {
+        return res.status(503).json({ ok: false, error: "Organization context not available" });
+      }
+
+      const result = await listTakeoffJobs({
+        supabase,
+        organizationId: orgCtx.organizationId,
+        query: req.query ?? {},
+      });
+
+      return res.json(result);
     } catch (e) {
       const status = e.statusCode ?? 500;
       const code = status < 500 ? "validation_error" : "server_error";

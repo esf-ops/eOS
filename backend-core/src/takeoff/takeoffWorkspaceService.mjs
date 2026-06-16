@@ -117,7 +117,71 @@ function safeFileSummary(row) {
 
 const JOB_SELECT_COLS =
   "id,organization_id,quote_id,quote_file_id,status,review_status,source_type," +
-  "created_by_user_id,metadata,result_summary,created_at,updated_at";
+  "created_by_user_id,model_provider,model_version,metadata,result_summary," +
+  "created_at,updated_at,started_at,completed_at";
+
+/** @param {Record<string, unknown> | null | undefined} resultRow */
+function buildResultSummaryCounts(resultRow) {
+  if (!resultRow) return null;
+  const computed =
+    typeof resultRow.computed_measurements_json === "object" && resultRow.computed_measurements_json !== null
+      ? resultRow.computed_measurements_json
+      : {};
+  const diagnostics =
+    typeof resultRow.validation_diagnostics_json === "object" && resultRow.validation_diagnostics_json !== null
+      ? resultRow.validation_diagnostics_json
+      : {};
+  return {
+    computedCountertopSf: computed.countertopExactSf ?? 0,
+    computedBacksplashSf: computed.backsplashExactSf ?? 0,
+    warningCount: diagnostics.warningCount ?? diagnostics.warnings?.length ?? 0,
+    errorCount: diagnostics.errorCount ?? diagnostics.errors?.length ?? 0,
+  };
+}
+
+/** @param {Record<string, unknown>} resultRow */
+function buildLatestResultMeta(resultRow) {
+  return {
+    id: resultRow.id,
+    createdAt: resultRow.created_at,
+    reviewStatus: resultRow.review_status ?? "needs_review",
+    schemaVersion: resultRow.schema_version ?? null,
+    hasNormalizedTakeoffJson: resultRow.normalized_takeoff_json != null,
+    summary: buildResultSummaryCounts(resultRow),
+  };
+}
+
+function jobHasResultSummary(jobRow) {
+  return (
+    jobRow.result_summary !== null &&
+    typeof jobRow.result_summary === "object" &&
+    Object.keys(jobRow.result_summary).length > 0
+  );
+}
+
+/**
+ * Parse list query params for GET /api/takeoff-jobs.
+ * @param {Record<string, unknown>} [query]
+ */
+export function parseListTakeoffJobsQuery(query = {}) {
+  const status =
+    typeof query.status === "string" && query.status.trim() ? query.status.trim() : null;
+  const reviewStatus =
+    typeof query.review_status === "string" && query.review_status.trim()
+      ? query.review_status.trim()
+      : typeof query.reviewStatus === "string" && query.reviewStatus.trim()
+        ? query.reviewStatus.trim()
+        : null;
+
+  let limit = parseInt(String(query.limit ?? "25"), 10);
+  if (!Number.isFinite(limit) || limit < 1) limit = 25;
+  if (limit > 100) limit = 100;
+
+  let offset = parseInt(String(query.offset ?? "0"), 10);
+  if (!Number.isFinite(offset) || offset < 0) offset = 0;
+
+  return { status, reviewStatus, limit, offset };
+}
 
 /**
  * Load a quote_takeoff_jobs row by ID + org. Returns null if not found (not 403).
@@ -289,28 +353,189 @@ export async function getTakeoffWorkspace({
     fileRow = fileRows?.[0] ?? null;
   }
 
-  // Check for any saved results (from quote_takeoff_results or job.result_summary).
-  const { data: resultRows } = await supabase
+  const { data: resultIdRows } = await supabase
     .from("quote_takeoff_results")
     .select("id")
     .eq("takeoff_job_id", takeoffJobId)
+    .eq("organization_id", organizationId);
+
+  const resultCount = resultIdRows?.length ?? 0;
+  const hasJobSummary = jobHasResultSummary(jobRow);
+
+  const { data: latestRows } = await supabase
+    .from("quote_takeoff_results")
+    .select(
+      "id,created_at,review_status,schema_version,normalized_takeoff_json," +
+      "computed_measurements_json,validation_diagnostics_json"
+    )
+    .eq("takeoff_job_id", takeoffJobId)
+    .eq("organization_id", organizationId)
+    .order("created_at", { ascending: false })
     .limit(1);
 
-  const hasResultRow = resultRows && resultRows.length > 0;
-  const hasJobSummary =
-    jobRow.result_summary !== null &&
-    typeof jobRow.result_summary === "object" &&
-    Object.keys(jobRow.result_summary).length > 0;
+  const latestResult = latestRows?.[0] ? buildLatestResultMeta(latestRows[0]) : null;
 
   return {
     takeoffJobId,
     status: jobRow.status,
     reviewStatus: jobRow.review_status ?? "needs_review",
-    startedAt: jobRow.created_at,
-    hasSavedResult: Boolean(hasResultRow || hasJobSummary),
+    sourceType: jobRow.source_type ?? null,
+    modelProvider: jobRow.model_provider ?? null,
+    modelVersion: jobRow.model_version ?? null,
+    createdByUserId: jobRow.created_by_user_id ?? null,
+    startedAt: jobRow.started_at ?? jobRow.created_at,
+    completedAt: jobRow.completed_at ?? null,
+    updatedAt: jobRow.updated_at ?? null,
+    hasSavedResult: Boolean(resultCount > 0 || hasJobSummary),
+    resultCount: resultCount > 0 ? resultCount : hasJobSummary ? 1 : 0,
+    latestResult,
     isWorkspace: true,
     file: fileRow ? safeFileSummary(fileRow) : null,
     exayard: pickSafeExayardJobMetadata(jobRow.metadata)?.exayard ?? null,
+    processing: {
+      pageProgress: null,
+      asyncStatus: null,
+    },
+  };
+}
+
+/**
+ * List takeoff jobs for an organization (newest first).
+ *
+ * @param {{ supabase: object, organizationId: string, query?: Record<string, unknown> }} params
+ */
+export async function listTakeoffJobs({ supabase, organizationId, query = {} }) {
+  if (!isUuid(organizationId)) {
+    throw workspaceError("organizationId must be a valid UUID");
+  }
+
+  const { status, reviewStatus, limit, offset } = parseListTakeoffJobsQuery(query);
+
+  let jobQuery = supabase
+    .from("quote_takeoff_jobs")
+    .select(JOB_SELECT_COLS)
+    .eq("organization_id", organizationId)
+    .order("created_at", { ascending: false });
+
+  if (status) jobQuery = jobQuery.eq("status", status);
+  if (reviewStatus) jobQuery = jobQuery.eq("review_status", reviewStatus);
+
+  const { data: jobRows, error: jobsErr } = await jobQuery.range(offset, offset + limit - 1);
+
+  if (jobsErr) {
+    throw Object.assign(new Error(`DB error listing takeoff jobs: ${jobsErr.message}`), {
+      statusCode: 503,
+    });
+  }
+
+  const rows = jobRows ?? [];
+  const fileIds = [...new Set(rows.map((j) => j.quote_file_id).filter(Boolean))];
+  /** @type {Record<string, Record<string, unknown>>} */
+  const fileById = {};
+
+  if (fileIds.length > 0) {
+    const { data: fileRows, error: filesErr } = await supabase
+      .from("quote_files")
+      .select(FILE_SELECT_COLS)
+      .in("id", fileIds);
+
+    if (filesErr) {
+      throw Object.assign(new Error(`DB error loading quote files: ${filesErr.message}`), {
+        statusCode: 503,
+      });
+    }
+
+    for (const fr of fileRows ?? []) {
+      fileById[fr.id] = fr;
+    }
+  }
+
+  const jobIds = rows.map((j) => j.id);
+  /** @type {Record<string, Record<string, unknown>>} */
+  const latestByJob = {};
+  /** @type {Record<string, number>} */
+  const countByJob = {};
+
+  if (jobIds.length > 0) {
+    const { data: resultRows, error: resultsErr } = await supabase
+      .from("quote_takeoff_results")
+      .select(
+        "id,takeoff_job_id,created_at,review_status,normalized_takeoff_json," +
+        "computed_measurements_json,validation_diagnostics_json"
+      )
+      .eq("organization_id", organizationId)
+      .in("takeoff_job_id", jobIds)
+      .order("created_at", { ascending: false });
+
+    if (resultsErr) {
+      throw Object.assign(new Error(`DB error loading takeoff results: ${resultsErr.message}`), {
+        statusCode: 503,
+      });
+    }
+
+    for (const rr of resultRows ?? []) {
+      const jid = rr.takeoff_job_id;
+      countByJob[jid] = (countByJob[jid] ?? 0) + 1;
+      if (!latestByJob[jid]) latestByJob[jid] = rr;
+    }
+  }
+
+  const jobs = rows.map((jobRow) => {
+    const fileRow = jobRow.quote_file_id ? fileById[jobRow.quote_file_id] ?? null : null;
+    const latest = latestByJob[jobRow.id] ?? null;
+    const hasJobSummary = jobHasResultSummary(jobRow);
+    let resultCount = countByJob[jobRow.id] ?? 0;
+    if (resultCount === 0 && hasJobSummary) resultCount = 1;
+
+    const latestMeta = latest
+      ? buildLatestResultMeta(latest)
+      : hasJobSummary
+        ? {
+            id: null,
+            createdAt: jobRow.updated_at ?? jobRow.created_at,
+            reviewStatus: jobRow.review_status ?? "needs_review",
+            schemaVersion: null,
+            hasNormalizedTakeoffJson: true,
+            summary: null,
+          }
+        : null;
+
+    const safeFile = fileRow ? safeFileSummary(fileRow) : null;
+
+    return {
+      takeoffJobId: jobRow.id,
+      quoteFileId: jobRow.quote_file_id ?? null,
+      originalFilename: safeFile?.originalFilename ?? null,
+      status: jobRow.status,
+      reviewStatus: jobRow.review_status ?? "needs_review",
+      sourceType: jobRow.source_type ?? null,
+      modelProvider: jobRow.model_provider ?? null,
+      modelVersion: jobRow.model_version ?? null,
+      createdByUserId: jobRow.created_by_user_id ?? null,
+      createdAt: jobRow.created_at,
+      updatedAt: jobRow.updated_at ?? null,
+      startedAt: jobRow.started_at ?? jobRow.created_at ?? null,
+      completedAt: jobRow.completed_at ?? null,
+      latestResultId: latestMeta?.id ?? null,
+      latestResultCreatedAt: latestMeta?.createdAt ?? null,
+      hasNormalizedTakeoffJson: latest
+        ? latest.normalized_takeoff_json != null
+        : hasJobSummary,
+      resultCount,
+      resultSummary: latestMeta?.summary ?? null,
+      file: safeFile,
+    };
+  });
+
+  return {
+    ok: true,
+    jobs,
+    pagination: {
+      limit,
+      offset,
+      count: jobs.length,
+      hasMore: jobs.length === limit,
+    },
   };
 }
 
@@ -756,9 +981,15 @@ async function _legacyV4GetWorkspace(supabase, organizationId, takeoffJobId) {
     reviewStatus: meta.takeoffWorkspace.reviewStatus ?? "needs_review",
     startedAt: meta.takeoffWorkspace.startedAt ?? null,
     hasSavedResult: Boolean(meta.takeoffResult),
+    resultCount: meta.takeoffResult ? 1 : 0,
+    latestResult: null,
     isWorkspace: true,
     legacyV4: true,
     file: safeFileSummary(fr),
+    processing: {
+      pageProgress: null,
+      asyncStatus: null,
+    },
   };
 }
 

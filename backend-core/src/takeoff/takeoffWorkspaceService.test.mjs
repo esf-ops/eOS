@@ -23,8 +23,10 @@ import assert from "node:assert/strict";
 import {
   isUuid,
   workspaceError,
+  parseListTakeoffJobsQuery,
   createTakeoffWorkspace,
   getTakeoffWorkspace,
+  listTakeoffJobs,
   saveTakeoffResult,
   getLatestTakeoffResult,
   listTakeoffResults,
@@ -40,6 +42,9 @@ const JOB_ID     = "b2222222-2222-4222-8222-222222222222";
 const RESULT_ID  = "c3333333-3333-4333-8333-333333333333";
 const USER_ID    = "d4444444-4444-4444-8444-444444444444";
 const OTHER_ORG  = "f5555555-5555-4555-8555-555555555555";
+const JOB_ID_2    = "12222222-2222-4222-8222-222222222222";
+const RESULT_ID_2 = "13333333-3333-4333-8333-333333333333";
+const FILE_ID_2   = "14444444-4444-4444-8444-444444444444";
 
 // ── Mock Supabase factory ─────────────────────────────────────────────────────
 
@@ -102,7 +107,9 @@ function makeResultRow(overrides = {}) {
  */
 function makeMockSupabase({
   fileRow   = null,
+  fileRows  = null,
   jobRow    = null,
+  jobRows   = null,
   resultRows = [],
   jobInsertId    = JOB_ID,
   resultInsertId = RESULT_ID,
@@ -112,8 +119,8 @@ function makeMockSupabase({
   capturedUpdates = [],
 } = {}) {
   const tableData = {
-    quote_files:          fileRow  ? [fileRow]  : [],
-    quote_takeoff_jobs:   jobRow   ? [jobRow]   : [],
+    quote_files:          fileRows ?? (fileRow ? [fileRow] : []),
+    quote_takeoff_jobs:   jobRows ?? (jobRow ? [jobRow] : []),
     quote_takeoff_results: [...resultRows],
     quote_file_events:    [],
   };
@@ -129,7 +136,15 @@ function makeMockSupabase({
   }
 
   function makeBuilder(table, opType, opData) {
-    const state = { eqFilters: [], orderCol: null, orderAsc: true, limitN: null };
+    const state = {
+      eqFilters: [],
+      inFilters: [],
+      orderCol: null,
+      orderAsc: true,
+      limitN: null,
+      rangeFrom: null,
+      rangeTo: null,
+    };
     let wantsSelect = false;
 
     const builder = {
@@ -141,7 +156,16 @@ function makeMockSupabase({
         state.eqFilters.push({ col, val: String(val) });
         return builder;
       },
+      in(col, vals) {
+        state.inFilters.push({ col, vals: (vals ?? []).map((v) => String(v)) });
+        return builder;
+      },
       limit(n) { state.limitN = n; return builder; },
+      range(from, to) {
+        state.rangeFrom = from;
+        state.rangeTo = to;
+        return builder;
+      },
       order(col, opts) {
         state.orderCol = col;
         state.orderAsc = opts?.ascending ?? true;
@@ -151,7 +175,8 @@ function makeMockSupabase({
         // SELECT
         if (opType === "select") {
           let rows = (tableData[table] ?? []).filter((row) =>
-            state.eqFilters.every(({ col, val }) => String(row[col] ?? "") === val)
+            state.eqFilters.every(({ col, val }) => String(row[col] ?? "") === val) &&
+            state.inFilters.every(({ col, vals }) => vals.includes(String(row[col] ?? "")))
           );
           if (state.orderCol) {
             const col = state.orderCol;
@@ -162,7 +187,12 @@ function makeMockSupabase({
               return asc ? (av < bv ? -1 : av > bv ? 1 : 0) : (av > bv ? -1 : av < bv ? 1 : 0);
             });
           }
-          if (state.limitN != null) rows = rows.slice(0, state.limitN);
+          if (state.rangeFrom != null) {
+            const end = state.rangeTo != null ? state.rangeTo + 1 : undefined;
+            rows = rows.slice(state.rangeFrom, end);
+          } else if (state.limitN != null) {
+            rows = rows.slice(0, state.limitN);
+          }
           return resolve({ data: rows, error: null });
         }
 
@@ -443,6 +473,9 @@ function makeMockSupabase({
   assert.equal(result.reviewStatus, "needs_review");
   assert.equal(result.isWorkspace, true);
   assert.equal(result.hasSavedResult, false, "no results yet");
+  assert.equal(result.resultCount, 0, "resultCount zero when no results");
+  assert.equal(result.latestResult, null, "no latestResult when no results");
+  assert.ok(result.processing, "processing placeholder present");
   assert.ok(result.file, "file metadata present");
   assert.equal(result.file.originalFilename, "kitchen_plan.pdf");
   assert.ok(!("storagePath" in result.file), "storage_path not exposed");
@@ -468,6 +501,10 @@ function makeMockSupabase({
   });
 
   assert.equal(result.hasSavedResult, true, "hasSavedResult true when result row exists");
+  assert.equal(result.resultCount, 1, "resultCount reflects result rows");
+  assert.ok(result.latestResult, "latestResult present when result row exists");
+  assert.equal(result.latestResult.id, RESULT_ID, "latestResult id matches");
+  assert.equal(result.latestResult.hasNormalizedTakeoffJson, true, "normalized JSON flagged");
   console.log("ok: getTakeoffWorkspace — hasSavedResult reflects result rows");
 }
 
@@ -1031,6 +1068,158 @@ function makeMockSupabase({
   assert.equal(quoteMutation, false, "no quote_headers mutation");
   assert.equal(inserts.length, 0, "no inserts in list/get operations");
   console.log("ok: listTakeoffResults + getResultById — no quote mutation, no inserts");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// parseListTakeoffJobsQuery
+// ═══════════════════════════════════════════════════════════════════════════════
+
+{
+  const defaults = parseListTakeoffJobsQuery({});
+  assert.equal(defaults.limit, 25);
+  assert.equal(defaults.offset, 0);
+  assert.equal(defaults.status, null);
+
+  const filtered = parseListTakeoffJobsQuery({
+    status: "completed",
+    review_status: "approved",
+    limit: "200",
+    offset: "-1",
+  });
+  assert.equal(filtered.status, "completed");
+  assert.equal(filtered.reviewStatus, "approved");
+  assert.equal(filtered.limit, 100, "limit capped at 100");
+  assert.equal(filtered.offset, 0, "negative offset clamped to 0");
+  console.log("ok: parseListTakeoffJobsQuery");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// listTakeoffJobs — org-scoped, filters, no cross-org leak
+// ═══════════════════════════════════════════════════════════════════════════════
+
+{
+  const jobOld = makeJobRow({
+    id: JOB_ID,
+    status: "pending",
+    review_status: "needs_review",
+    created_at: "2026-06-01T00:00:00.000Z",
+  });
+  const jobNew = makeJobRow({
+    id: JOB_ID_2,
+    quote_file_id: FILE_ID_2,
+    status: "completed",
+    review_status: "approved",
+    model_provider: "openai",
+    model_version: "gpt-4o",
+    created_at: "2026-06-02T00:00:00.000Z",
+    completed_at: "2026-06-02T01:00:00.000Z",
+  });
+  const jobOtherOrg = makeJobRow({
+    id: "99999999-9999-4999-8999-999999999999",
+    organization_id: OTHER_ORG,
+    created_at: "2026-06-03T00:00:00.000Z",
+  });
+
+  const { supabase } = makeMockSupabase({
+    fileRows: [
+      makeFileRow(),
+      makeFileRow({ id: FILE_ID_2, original_filename: "bath_plan.pdf" }),
+    ],
+    jobRows: [jobOld, jobNew, jobOtherOrg],
+    resultRows: [
+      makeResultRow(),
+      makeResultRow({
+        id: RESULT_ID_2,
+        takeoff_job_id: JOB_ID_2,
+        created_at: "2026-06-02T01:30:00.000Z",
+      }),
+    ],
+  });
+
+  const all = await listTakeoffJobs({ supabase, organizationId: ORG_ID, query: {} });
+  assert.equal(all.ok, true);
+  assert.equal(all.jobs.length, 2, "only org jobs returned");
+  assert.equal(all.jobs[0].takeoffJobId, JOB_ID_2, "newest job first");
+  assert.equal(all.jobs[0].originalFilename, "bath_plan.pdf");
+  assert.equal(all.jobs[0].latestResultId, RESULT_ID_2);
+  assert.equal(all.jobs[0].resultCount, 1);
+  assert.equal(all.jobs[0].modelProvider, "openai");
+  assert.ok(all.jobs[0].resultSummary, "result summary on job with result");
+  assert.ok(!("storagePath" in (all.jobs[0].file ?? {})), "storage_path not exposed");
+  assert.ok(!all.jobs.some((j) => j.takeoffJobId === jobOtherOrg.id), "cross-org job excluded");
+
+  const completed = await listTakeoffJobs({
+    supabase,
+    organizationId: ORG_ID,
+    query: { status: "completed" },
+  });
+  assert.equal(completed.jobs.length, 1);
+  assert.equal(completed.jobs[0].takeoffJobId, JOB_ID_2);
+
+  const paged = await listTakeoffJobs({
+    supabase,
+    organizationId: ORG_ID,
+    query: { limit: "1", offset: "1" },
+  });
+  assert.equal(paged.jobs.length, 1);
+  assert.equal(paged.jobs[0].takeoffJobId, JOB_ID, "offset skips newest");
+  console.log("ok: listTakeoffJobs — org scope, filters, pagination, latest result metadata");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// listTakeoffJobs — jobs with no result rows
+// ═══════════════════════════════════════════════════════════════════════════════
+
+{
+  const { supabase } = makeMockSupabase({
+    fileRow: makeFileRow(),
+    jobRow: makeJobRow(),
+    resultRows: [],
+  });
+
+  const { jobs } = await listTakeoffJobs({ supabase, organizationId: ORG_ID, query: {} });
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0].resultCount, 0);
+  assert.equal(jobs[0].latestResultId, null);
+  assert.equal(jobs[0].hasNormalizedTakeoffJson, false);
+  assert.equal(jobs[0].resultSummary, null);
+  console.log("ok: listTakeoffJobs — jobs with no result rows");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// attachTakeoffWorkspaceRoutes — list route registered with auth + head gate
+// ═══════════════════════════════════════════════════════════════════════════════
+
+{
+  const { attachTakeoffWorkspaceRoutes } = await import("./takeoffWorkspaceRoutes.js");
+  const calls = [];
+  /** @type {Function[] | null} */
+  let listRouteHandlers = null;
+  const mockApp = {};
+  for (const m of ["get", "post", "put", "patch", "delete"]) {
+    mockApp[m] = (path, ...handlers) => {
+      calls.push({ method: m, path, handlerCount: handlers.length });
+      if (m === "get" && path === "/api/takeoff-jobs") listRouteHandlers = handlers;
+    };
+  }
+
+  const authMw = (_req, _res, next) => next();
+  const requireAuth = () => authMw;
+  const headAccessMw = (_req, _res, next) => next();
+
+  attachTakeoffWorkspaceRoutes(mockApp, {
+    requireAuth,
+    getSupabase: () => ({}),
+    headAccess: headAccessMw,
+  });
+
+  assert.ok(listRouteHandlers, "GET /api/takeoff-jobs registered");
+  assert.ok(listRouteHandlers.includes(headAccessMw), "list route uses head access middleware");
+  assert.ok(listRouteHandlers.includes(authMw), "list route uses auth middleware");
+  const detailIdx = calls.findIndex((c) => c.method === "get" && c.path === "/api/takeoff-jobs/:id");
+  const listIdx = calls.findIndex((c) => c.method === "get" && c.path === "/api/takeoff-jobs");
+  assert.ok(listIdx < detailIdx, "list route registered before :id route");
+  console.log("ok: attachTakeoffWorkspaceRoutes — list route auth/head registration");
 }
 
 console.log("\ntakeoffWorkspaceService: all tests passed");

@@ -49,6 +49,7 @@ import TakeoffPlanFileSection from "./components/TakeoffPlanFileSection";
 import TakeoffBenchmarkPanel from "./components/TakeoffBenchmarkPanel";
 import type { BenchmarkQaContext } from "./components/TakeoffBenchmarkPanel";
 import TakeoffRunHistoryPanel from "./components/TakeoffRunHistoryPanel";
+import TakeoffRunInbox from "./components/TakeoffRunInbox";
 import TakeoffDebugPanel from "./components/TakeoffDebugPanel";
 import TakeoffQaGatePanel from "./components/TakeoffQaGatePanel";
 import type { QaGateResult, FabricationFinding } from "./components/TakeoffQaGatePanel";
@@ -342,27 +343,33 @@ export default function TakeoffLabApp() {
   /** Per-evidence-dim review state (ignored | reviewed), keyed by dim id or label */
   const [evidenceReviewState, setEvidenceReviewState] = useState<Record<string, "ignored" | "reviewed">>({});
 
-  // ── Load saved result from workspace ─────────────────────────────────────
+  // ── Load saved result when workspace changes ───────────────────────────────
   useEffect(() => {
-    const jobId = urlJobId();
-    if (!jobId || !authToken) return;
+    if (!takeoffJobId || !authToken) return;
     void (async () => {
       try {
-        const res = await labApiGet(`/api/takeoff-jobs/${encodeURIComponent(jobId)}/results/latest`, authToken) as {
+        const res = await labApiGet(
+          `/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}/results/latest`,
+          authToken
+        ) as {
           ok: boolean;
-          normalizedTakeoffJson: TakeoffResult;
-          savedAt: string;
+          normalizedTakeoffJson?: TakeoffResult;
+          savedAt?: string;
         };
         if (res.ok && res.normalizedTakeoffJson) {
           commitSource(res.normalizedTakeoffJson, "file");
-          setSavedAt(res.savedAt);
+          setSavedAt(res.savedAt ?? null);
+        } else {
+          setSourceMode("none");
+          setSavedAt(null);
         }
       } catch {
-        // No saved result yet — that's fine; Lab starts with spec73.
+        setSourceMode("none");
+        setSavedAt(null);
       }
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authToken]); // only on first token resolution
+  }, [takeoffJobId, authToken]);
 
   // ── Derived ───────────────────────────────────────────────────────────────
 
@@ -559,6 +566,31 @@ export default function TakeoffLabApp() {
     setReviewNotes({});
     setEvidenceReviewState({});
   }, [hasEdits]);
+
+  const handleSelectRun = useCallback((jobId: string) => {
+    if (jobId === takeoffJobId) return;
+    setTakeoffJobId(jobId);
+    setPlanFilename(null);
+    setAiDraftMeta(null);
+    setCurrentResultId(null);
+    setPageInventory(null);
+    setDimensionEvidence(null);
+    setBenchmarkQaContext(null);
+    setPastedDraft("");
+    setParseError(null);
+    setSaveStatus("idle");
+    setSaveMsg(null);
+    setSavedAt(null);
+    setSourceMode("none");
+    setIsEditing(false);
+    setResetKey((k) => k + 1);
+    setExcludedRunIds(new Set());
+    setReviewNotes({});
+    setEvidenceReviewState({});
+    const url = new URL(window.location.href);
+    url.searchParams.set("takeoffJobId", jobId);
+    window.history.replaceState({}, "", url.toString());
+  }, [takeoffJobId]);
 
   // ── Edit actions ──────────────────────────────────────────────────────────
 
@@ -1089,6 +1121,18 @@ export default function TakeoffLabApp() {
             </section>
           )}
 
+          {authToken ? (
+            <section className="lab-section">
+              <h2 className="lab-section-title">Takeoff runs</h2>
+              <TakeoffRunInbox
+                token={authToken}
+                selectedJobId={takeoffJobId}
+                refreshKey={historyRefreshKey}
+                onSelectJob={handleSelectRun}
+              />
+            </section>
+          ) : null}
+
           {/* ── Source plan file (v4) ──────────────────────────────────── */}
           <section className="lab-section">
             <h2 className="lab-section-title">Source plan file</h2>
@@ -1098,6 +1142,7 @@ export default function TakeoffLabApp() {
               onWorkspaceCreated={(jobId, filename) => {
                 setTakeoffJobId(jobId);
                 setPlanFilename(filename);
+                setHistoryRefreshKey((k) => k + 1);
                 // Update URL so the workspace survives a reload.
                 const url = new URL(window.location.href);
                 url.searchParams.set("takeoffJobId", jobId);

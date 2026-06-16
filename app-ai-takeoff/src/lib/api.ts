@@ -71,3 +71,62 @@ export async function storagePut(signedUrl: string, file: File): Promise<void> {
     throw new LabApiError(`Storage upload failed: ${detail}`, res.status, null);
   }
 }
+
+export interface TakeoffJobListItem {
+  takeoffJobId: string;
+  quoteFileId: string | null;
+  originalFilename: string | null;
+  status: string;
+  reviewStatus: string;
+  sourceType: string | null;
+  modelProvider: string | null;
+  modelVersion: string | null;
+  createdByUserId: string | null;
+  createdAt: string;
+  updatedAt: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  latestResultId: string | null;
+  latestResultCreatedAt: string | null;
+  hasNormalizedTakeoffJson: boolean;
+  resultCount: number;
+  resultSummary: {
+    computedCountertopSf: number;
+    computedBacksplashSf: number;
+    warningCount: number;
+    errorCount: number;
+  } | null;
+}
+
+export interface ListTakeoffJobsResponse {
+  ok: boolean;
+  jobs: TakeoffJobListItem[];
+  pagination: {
+    limit: number;
+    offset: number;
+    count: number;
+    hasMore: boolean;
+  };
+}
+
+export interface ListTakeoffJobsQuery {
+  status?: string;
+  review_status?: string;
+  limit?: number;
+  offset?: number;
+}
+
+/** List org takeoff jobs (newest first). Organization is resolved server-side. */
+export async function listTakeoffJobs(
+  token: string,
+  query: ListTakeoffJobsQuery = {}
+): Promise<ListTakeoffJobsResponse> {
+  const params = new URLSearchParams();
+  if (query.status) params.set("status", query.status);
+  if (query.review_status) params.set("review_status", query.review_status);
+  if (query.limit != null) params.set("limit", String(query.limit));
+  if (query.offset != null) params.set("offset", String(query.offset));
+  const qs = params.toString();
+  const path = qs ? `/api/takeoff-jobs?${qs}` : "/api/takeoff-jobs";
+  return labApiGet(path, token) as Promise<ListTakeoffJobsResponse>;
+}

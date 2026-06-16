@@ -1599,6 +1599,50 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
   border: 1px solid var(--eos-danger-border);
 }
 
+/* ── Takeoff run inbox (Phase B) ──────────────────────────────────────────── */
+
+.takeoff-inbox { display: flex; flex-direction: column; gap: 12px; }
+.takeoff-inbox-header {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+}
+.takeoff-inbox-refresh { padding: 6px 12px; font-size: 12px; }
+.takeoff-inbox-empty { margin: 0; font-size: 13px; color: var(--eos-ink-muted); }
+.takeoff-inbox-error { margin-top: 0; }
+.takeoff-inbox-list {
+  list-style: none; margin: 0; padding: 0;
+  border: 1px solid var(--eos-line); border-radius: var(--r-md); overflow: hidden;
+}
+.takeoff-inbox-row {
+  display: flex; flex-direction: column; gap: 6px; width: 100%;
+  padding: 12px 14px; text-align: left;
+  background: var(--eos-surface); border: 0; border-bottom: 1px solid var(--eos-line);
+  cursor: pointer;
+}
+.takeoff-inbox-row:last-child { border-bottom: 0; }
+.takeoff-inbox-row:hover { background: var(--eos-surface-soft); }
+.takeoff-inbox-row--selected {
+  background: var(--eos-info-soft);
+  box-shadow: inset 3px 0 0 var(--eos-info);
+}
+.takeoff-inbox-row-main {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+}
+.takeoff-inbox-filename { font-size: 13px; font-weight: 600; color: var(--eos-ink); }
+.takeoff-inbox-meta { font-size: 11px; color: var(--eos-ink-muted); white-space: nowrap; }
+.takeoff-inbox-row-sub {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.takeoff-inbox-chip {
+  display: inline-block; padding: 1px 7px; border-radius: 9999px;
+  font-size: 11px; font-weight: 700; text-transform: lowercase;
+}
+.takeoff-inbox-chip--completed { background: var(--eos-success-soft); color: var(--eos-success); }
+.takeoff-inbox-chip--pending { background: var(--eos-warn-soft); color: var(--eos-warn); }
+.takeoff-inbox-chip--failed { background: var(--eos-danger-soft); color: var(--eos-danger); }
+.takeoff-inbox-count { font-size: 11px; color: var(--eos-ink-mid); }
+.takeoff-inbox-count--muted { color: var(--eos-ink-faint); }
+.takeoff-inbox-model { font-size: 11px; color: var(--eos-ink-muted); }
+
 /* ── Run history panel (v5.3) ─────────────────────────────────────────────── */
 
 .run-history-panel {
