@@ -948,6 +948,8 @@ export function applyOutOfCollectionPremiumToBreakdown(
 ): SelectedMaterialBreakdown {
   const oocPct = resolveOutOfCollectionPremiumPercent(materialBasis);
   let totalPremium = 0;
+  let premiumCounter = 0;
+  let premiumBacksplash = 0;
   const taxPolicy = resolveInternalEstimateMaterialTaxPolicy();
   for (const room of rooms) {
     if (resolveRoomMaterialProgram(room, materialProgramDefault) !== "out_of_collection") continue;
@@ -959,13 +961,28 @@ export function applyOutOfCollectionPremiumToBreakdown(
     );
     const withTax = round2(sub.totals.materialSubtotal + amounts.totalMaterialUseTaxAmount);
     const prem = computeOutOfCollectionPremiumAmounts(withTax, oocPct);
+    if (prem.premiumAmount <= 0) continue;
     totalPremium = round2(totalPremium + prem.premiumAmount);
+    const ctWithTax = round2(sub.totals.countertopMaterial + amounts.countertopMaterialUseTaxAmount);
+    const bsWithTax = round2(sub.totals.backsplashMaterial + amounts.backsplashMaterialUseTaxAmount);
+    if (withTax > 0) {
+      premiumCounter = round2(premiumCounter + prem.premiumAmount * (ctWithTax / withTax));
+      premiumBacksplash = round2(premiumBacksplash + prem.premiumAmount * (bsWithTax / withTax));
+    } else {
+      premiumCounter = round2(premiumCounter + prem.premiumAmount);
+    }
   }
   if (totalPremium <= 0) return breakdown;
+  const splitSum = round2(premiumCounter + premiumBacksplash);
+  if (splitSum !== totalPremium) {
+    premiumCounter = round2(premiumCounter + (totalPremium - splitSum));
+  }
   return {
     ...breakdown,
     totals: {
       ...breakdown.totals,
+      countertopMaterial: round2(breakdown.totals.countertopMaterial + premiumCounter),
+      backsplashMaterial: round2(breakdown.totals.backsplashMaterial + premiumBacksplash),
       materialSubtotal: round2(breakdown.totals.materialSubtotal + totalPremium),
       outOfCollectionPremium: {
         premiumPercent: oocPct,

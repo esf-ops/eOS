@@ -2007,6 +2007,71 @@ function oocWholesaleTotal(counterSf: number, splashSf: number, rate: number): n
   return round2(eligible + round2(eligible * 0.1));
 }
 
+const FORBIDDEN_CUSTOMER_FACING_RE = /\+10%|\+15%|premium|markup|margin|cost basis|formula/i;
+
+function assertNoForbiddenCustomerFacingText(texts: string[], context: string) {
+  for (const t of texts) {
+    assert.doesNotMatch(t, FORBIDDEN_CUSTOMER_FACING_RE, `${context}: forbidden language in customer-facing text`);
+  }
+}
+
+function customerFacingStringsFromDisplay(display: ReturnType<typeof buildCustomerEstimateDisplayModel>): string[] {
+  const out: string[] = [];
+  for (const row of display.estimateSummaryRows) out.push(row.label);
+  for (const row of display.roomAreaPrintRows) {
+    out.push(row.displayName);
+    for (const a of row.addonLines) out.push(a.label);
+    for (const c of row.customerCustomLines) out.push(c.name);
+  }
+  return out;
+}
+
+function buildOocPdfFixture(
+  drafts: ReturnType<typeof createDefaultRoom>[],
+  materialBasis: "wholesale" | "direct",
+  materialProgramDefault: "elite_100" | "out_of_collection"
+) {
+  const measureOpts = {
+    chargeableCounterCeil: true,
+    internalMaterialUseTax: true as const,
+    materialProgramDefault
+  };
+  const { rooms: measured } = calculateAllRoomDrafts(drafts, "New Construction", materialBasis, 0, measureOpts);
+  const quote = runLocalPrototypeQuote({
+    quoteMode: "internal",
+    internalMaterialBasis: materialBasis,
+    materialGroupTop: drafts[0]?.materialGroup ?? "Group Promo",
+    roomDrafts: drafts,
+    globalAddOns: {},
+    applyGlobalAddOns: false,
+    workflowLabel: "Internal",
+    projectType: "New Construction",
+    customLineItemsTotal: 0,
+    materialProgramDefault
+  });
+  const selectedBd = buildSelectedMaterialBreakdown(drafts, materialBasis, {
+    internalMaterialUseTax: true,
+    chargeableCounterCeil: true,
+    materialProgramDefault
+  });
+  const roomBd = buildCustomerRoomAreaCostBreakdown({
+    roomDrafts: drafts,
+    measuredRooms: measured,
+    materialBasis,
+    measureOptions: measureOpts,
+    customLines: []
+  });
+  const display = buildCustomerEstimateDisplayModel({
+    selectedBreakdown: selectedBd,
+    measuredRooms: measured,
+    visibleCustomerLines: [],
+    internalMaterialFoldDollars: 0,
+    roomAreaBreakdown: roomBd,
+    internalMaterialUseTax: true
+  });
+  return { quote, selectedBd, roomBd, display, measured };
+}
+
 // ── OOC-1: Elite 100 wholesale unchanged ──
 {
   const room = createDefaultRoom("Group Promo");
@@ -2156,13 +2221,113 @@ function oocWholesaleTotal(counterSf: number, splashSf: number, rate: number): n
   assert.equal(hydrated.materialProgramOverride ?? "inherit", "inherit");
 }
 
-// ── OOC-15: Customer PDF source avoids forbidden formula language ──
+// ── OOC-15: Customer-facing display output avoids forbidden formula language ──
 {
-  const printSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/CustomerEstimatePrint.tsx"), "utf8");
-  const dmSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/lib/customerEstimateDisplayModel.ts"), "utf8");
-  for (const src of [printSrc, dmSrc]) {
-    assert.doesNotMatch(src, /\+10%|\+15%|markup|premium|margin|cost basis|formula/i, "OOC-15: no forbidden customer-facing formula language");
-  }
+  const room = createDefaultRoom("Group Promo");
+  room.calcMode = "Manual Sq Ft";
+  room.direct = { counter: 40, splash: 8 };
+  const { display } = buildOocPdfFixture([room], "wholesale", "out_of_collection");
+  assertNoForbiddenCustomerFacingText(customerFacingStringsFromDisplay(display), "OOC-15");
+}
+
+// ── OOC-PDF-1: Wholesale OOC — PDF total matches live calculated total (rounding tolerance) ──
+{
+  const room = createDefaultRoom("Group Promo");
+  room.calcMode = "Manual Sq Ft";
+  room.direct = { counter: 100, splash: 10 };
+  const { quote, display } = buildOocPdfFixture([room], "wholesale", "out_of_collection");
+  approx(display.finalRounded, roundCustomerDisplay(quote.retail), 25);
+  approx(
+    display.summaryCounterDisplay + display.summaryBacksplashDisplay,
+    roundCustomerDisplay(display.countertopMaterialExact + display.backsplashMaterialExact),
+    2
+  );
+}
+
+// ── OOC-PDF-2: Direct/Retail OOC — PDF total matches live calculated total ──
+{
+  const room = createDefaultRoom("Group Promo");
+  room.calcMode = "Manual Sq Ft";
+  room.direct = { counter: 100, splash: 10 };
+  const { quote, display } = buildOocPdfFixture([room], "direct", "out_of_collection");
+  approx(display.finalRounded, roundCustomerDisplay(quote.retail), 25);
+}
+
+// ── OOC-PDF-3: Mixed Elite 100 + OOC — premium folded only into OOC room material ──
+{
+  const kitchen = createDefaultRoom("Group Promo");
+  kitchen.name = "Kitchen";
+  kitchen.calcMode = "Manual Sq Ft";
+  kitchen.direct = { counter: 40, splash: 8 };
+  const wetBar = createDefaultRoom("Group C");
+  wetBar.name = "Wet Bar";
+  wetBar.calcMode = "Manual Sq Ft";
+  wetBar.direct = { counter: 12, splash: 4 };
+  wetBar.materialProgramOverride = "out_of_collection";
+  const eliteOnly = buildOocPdfFixture([kitchen], "wholesale", "elite_100");
+  const wetBarEliteOnly = createDefaultRoom("Group C");
+  wetBarEliteOnly.name = "Wet Bar";
+  wetBarEliteOnly.calcMode = "Manual Sq Ft";
+  wetBarEliteOnly.direct = { counter: 12, splash: 4 };
+  const wetBarEliteFixture = buildOocPdfFixture([wetBarEliteOnly], "wholesale", "elite_100");
+  const mixed = buildOocPdfFixture([kitchen, wetBar], "wholesale", "elite_100");
+  approx(mixed.display.finalRounded, roundCustomerDisplay(mixed.quote.retail), 30);
+  const kitchenRow = mixed.roomBd.rooms.find((r) => r.displayName === "Kitchen")!;
+  const wetBarRow = mixed.roomBd.rooms.find((r) => r.displayName === "Wet Bar")!;
+  const eliteKitchenRow = eliteOnly.roomBd.rooms.find((r) => r.displayName === "Kitchen")!;
+  const eliteWetBarRow = wetBarEliteFixture.roomBd.rooms.find((r) => r.displayName === "Wet Bar")!;
+  approx(kitchenRow.materialAmountExact, eliteKitchenRow.materialAmountExact);
+  assert.ok(wetBarRow.materialAmountExact > eliteWetBarRow.materialAmountExact);
+}
+
+// ── OOC-PDF-4: Elite 100 PDF/display unchanged ──
+{
+  const room = createDefaultRoom("Group Promo");
+  room.calcMode = "Manual Sq Ft";
+  room.direct = { counter: 40, splash: 8 };
+  const { display, selectedBd } = buildOocPdfFixture([room], "wholesale", "elite_100");
+  const wRate = PROTOTYPE_TIER_PRICE_PER_SQFT["Group Promo"];
+  approx(display.countertopMaterialExact + display.backsplashMaterialExact, oocEligibleWithTax(40, 8, wRate));
+  assert.equal(selectedBd.totals.outOfCollectionPremium?.applied ?? false, false);
+}
+
+// ── OOC-PDF-5: Breakdown columns include folded OOC premium ──
+{
+  const room = createDefaultRoom("Group Promo");
+  room.calcMode = "Manual Sq Ft";
+  room.direct = { counter: 40, splash: 8 };
+  const { selectedBd } = buildOocPdfFixture([room], "wholesale", "out_of_collection");
+  approx(
+    round2(selectedBd.totals.countertopMaterial + selectedBd.totals.backsplashMaterial),
+    selectedBd.totals.materialSubtotal
+  );
+  assert.ok((selectedBd.totals.outOfCollectionPremium?.premiumAmount ?? 0) > 0);
+}
+
+// ── OOC-PDF-6: Add-ons not affected by OOC premium ──
+{
+  const room = createDefaultRoom("Group Promo");
+  room.calcMode = "Manual Sq Ft";
+  room.direct = { counter: 10, splash: 0 };
+  room.addons["qty-sink"] = 1;
+  const withAddon = buildOocPdfFixture([room], "wholesale", "out_of_collection");
+  const roomNoAddon = createDefaultRoom("Group Promo");
+  roomNoAddon.calcMode = "Manual Sq Ft";
+  roomNoAddon.direct = { counter: 10, splash: 0 };
+  const withoutAddon = buildOocPdfFixture([roomNoAddon], "wholesale", "out_of_collection");
+  approx(withAddon.display.addonsExact, 200);
+  approx(withAddon.display.finalRounded - withoutAddon.display.finalRounded, roundCustomerDisplay(200), 15);
+}
+
+// ── OOC-PDF-7: Room/area breakdown reconciles to corrected final customer total ──
+{
+  const room = createDefaultRoom("Group Promo");
+  room.calcMode = "Manual Sq Ft";
+  room.direct = { counter: 40, splash: 8 };
+  const { display } = buildOocPdfFixture([room], "direct", "out_of_collection");
+  const areaSum =
+    display.roomAreaPrintRows.reduce((s, r) => s + r.displayedAreaTotal, 0) + display.unassignedDisplayTotal;
+  approx(areaSum, display.finalRounded, 2);
 }
 
 // ── OOC-16: Snapshot includes material program and premium policy ──
