@@ -36,3 +36,6 @@ tools/moraware-sdk-trace/lib/*.dll
 .vercel
 debug/slabsmith/source-samples/
 .env.slabsmith.local
+
+# Local Cursor/agent skill files
+.agents/
