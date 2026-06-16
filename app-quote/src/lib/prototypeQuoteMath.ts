@@ -8,6 +8,7 @@ import type {
   GuidedPiece,
   GuidedShapeGroup,
   GuidedShapeGroupType,
+  MaterialProgram,
   MathCheckSnapshot,
   MeasuredRoom,
   PieceShape,
@@ -51,6 +52,16 @@ import {
   resolveInternalEstimateMaterialTaxPolicy,
   type InternalEstimateMaterialTaxPolicy
 } from "./internalEstimateMaterialTaxPolicy";
+import {
+  buildOutOfCollectionRoomSnapshot,
+  computeOutOfCollectionPremiumAmounts,
+  normalizeMaterialProgramDefault,
+  resolveOutOfCollectionPremiumPercent,
+  resolveRoomMaterialProgram,
+  validateOutOfCollectionRooms,
+  type OutOfCollectionRoomSnapshot
+} from "./internalEstimateMaterialProgram";
+import { resolveOutOfCollectionPricingPolicy } from "./internalEstimateOutOfCollectionPolicy";
 
 /** Internal Estimate measurement options (not used by public quote wizard). */
 export type InternalMeasureOptions = {
@@ -58,6 +69,8 @@ export type InternalMeasureOptions = {
   chargeableCounterCeil?: boolean;
   /** When true, apply fixed Internal Estimate material use tax policy (counter + backsplash). */
   internalMaterialUseTax?: boolean;
+  /** Quote-level material program default — enables Out-of-Collection premium when set. */
+  materialProgramDefault?: MaterialProgram;
 };
 
 export const INTERNAL_ESTIMATE_MEASURE_OPTIONS: InternalMeasureOptions = {
@@ -562,6 +575,28 @@ export function measureRoomDraft(
     scopedMaterialDollars = round2(scopedMaterialDollars + taxAmount);
     roomUseTax = { percent: roomTaxPct, baseCountertopMaterial: ctBase, taxAmount, applied: true };
   }
+
+  const materialProgramDefault = normalizeMaterialProgramDefault(measureOptions?.materialProgramDefault);
+  const resolvedMaterialProgram = resolveRoomMaterialProgram(room, materialProgramDefault);
+  let outOfCollectionPremium: MeasuredRoom["outOfCollectionPremium"];
+  if (
+    measureOptions?.internalMaterialUseTax &&
+    measureOptions?.materialProgramDefault &&
+    resolvedMaterialProgram === "out_of_collection"
+  ) {
+    const oocPct = resolveOutOfCollectionPremiumPercent(materialBasis);
+    const premiumResult = computeOutOfCollectionPremiumAmounts(scopedMaterialDollars, oocPct);
+    if (premiumResult.applied) {
+      scopedMaterialDollars = round2(scopedMaterialDollars + premiumResult.premiumAmount);
+      outOfCollectionPremium = {
+        premiumPercent: premiumResult.premiumPercent,
+        eligibleMaterialWithTax: premiumResult.eligibleMaterialWithTax,
+        premiumAmount: premiumResult.premiumAmount,
+        applied: true
+      };
+    }
+  }
+
   selected = round2(scopedMaterialDollars + extras);
   const chargeableCounter = measureOptions?.chargeableCounterCeil
     ? chargeableCounterSqftFromExact(counter)
@@ -616,7 +651,9 @@ export function measureRoomDraft(
     priceableSplash: round2(priceableSplash),
     fixedTotal: round2(fixedTotal),
     vanityTier,
-    useTax: roomUseTax
+    useTax: roomUseTax,
+    resolvedMaterialProgram,
+    outOfCollectionPremium
   };
 }
 
@@ -775,6 +812,12 @@ export type SelectedMaterialBreakdown = {
     backsplashMaterial: number;
     /** Material use tax folded into countertop / backsplash material $. */
     useTax?: UseTaxSnapshot;
+    /** Out-of-Collection premium folded into material subtotal (internal estimate). */
+    outOfCollectionPremium?: {
+      premiumPercent: number;
+      premiumAmount: number;
+      applied: boolean;
+    };
   };
 };
 
@@ -889,6 +932,44 @@ export function applyInternalMaterialUseTaxToBreakdown(
         backsplashMaterialUseTaxAmount: amounts.backsplashMaterialUseTaxAmount,
         taxAmount: amounts.totalMaterialUseTaxAmount,
         materialUseTaxScope: policy.materialUseTaxScope,
+        applied: true
+      }
+    }
+  };
+}
+
+/** Apply Out-of-Collection premium per room on post-tax eligible material (internal estimate). */
+export function applyOutOfCollectionPremiumToBreakdown(
+  breakdown: SelectedMaterialBreakdown,
+  rooms: RoomDraft[],
+  materialBasis: "wholesale" | "direct",
+  materialProgramDefault: MaterialProgram,
+  chargeableCounterCeil?: boolean
+): SelectedMaterialBreakdown {
+  const oocPct = resolveOutOfCollectionPremiumPercent(materialBasis);
+  let totalPremium = 0;
+  const taxPolicy = resolveInternalEstimateMaterialTaxPolicy();
+  for (const room of rooms) {
+    if (resolveRoomMaterialProgram(room, materialProgramDefault) !== "out_of_collection") continue;
+    const sub = buildSelectedMaterialBreakdownCore([room], materialBasis, { chargeableCounterCeil });
+    const amounts = computeInternalEstimateMaterialUseTaxAmounts(
+      sub.totals.countertopMaterial,
+      sub.totals.backsplashMaterial,
+      taxPolicy
+    );
+    const withTax = round2(sub.totals.materialSubtotal + amounts.totalMaterialUseTaxAmount);
+    const prem = computeOutOfCollectionPremiumAmounts(withTax, oocPct);
+    totalPremium = round2(totalPremium + prem.premiumAmount);
+  }
+  if (totalPremium <= 0) return breakdown;
+  return {
+    ...breakdown,
+    totals: {
+      ...breakdown.totals,
+      materialSubtotal: round2(breakdown.totals.materialSubtotal + totalPremium),
+      outOfCollectionPremium: {
+        premiumPercent: oocPct,
+        premiumAmount: totalPremium,
         applied: true
       }
     }
@@ -1170,6 +1251,8 @@ export function buildSelectedMaterialBreakdown(
     /** Internal Estimate only: fixed 2% on countertop + backsplash material. */
     internalMaterialUseTax?: boolean;
     chargeableCounterCeil?: boolean;
+    /** Internal Estimate only: quote-level material program default for OOC premium. */
+    materialProgramDefault?: MaterialProgram;
   }
 ): SelectedMaterialBreakdown {
   const built = buildSelectedMaterialBreakdownCore(rooms, materialBasis, {
@@ -1192,7 +1275,17 @@ export function buildSelectedMaterialBreakdown(
       };
       return built;
     }
-    return applyInternalMaterialUseTaxToBreakdown(built);
+    let withTax = applyInternalMaterialUseTaxToBreakdown(built);
+    if (options.materialProgramDefault) {
+      withTax = applyOutOfCollectionPremiumToBreakdown(
+        withTax,
+        rooms,
+        materialBasis,
+        normalizeMaterialProgramDefault(options.materialProgramDefault),
+        options.chargeableCounterCeil
+      );
+    }
+    return withTax;
   }
   const projectDefault = Math.max(0, Number(options?.projectUseTaxPercent ?? options?.useTaxPercent) || 0);
   let taxBase = 0;
@@ -1420,6 +1513,9 @@ export function buildCustomerRoomAreaCostBreakdown(params: {
           policy
         );
         materialAmountExact = round2(sub.totals.materialSubtotal + amounts.totalMaterialUseTaxAmount);
+        if (m.outOfCollectionPremium?.applied) {
+          materialAmountExact = round2(materialAmountExact + m.outOfCollectionPremium.premiumAmount);
+        }
       } else {
         const pct = resolveRoomUseTaxPercent(draft, projectUseTaxPercent);
         const sub = buildSelectedMaterialBreakdownCore([draft], basis, {
@@ -1833,12 +1929,19 @@ export function runLocalPrototypeQuote(params: {
   customLineItemsTotal?: number;
   /** @deprecated Legacy — Internal Estimate uses internalMaterialUseTax via measure options. */
   useTaxPercent?: number;
+  /** Internal estimate: quote-level material program default. */
+  materialProgramDefault?: MaterialProgram;
 }): LocalQuoteRun {
   const basis = params.internalMaterialBasis ?? "wholesale";
   const roomBasis: "wholesale" | "direct" = params.quoteMode === "internal" ? basis : "wholesale";
   const internalMaterialUseTax = params.quoteMode === "internal";
   const measureOptions: InternalMeasureOptions | undefined =
-    params.quoteMode === "internal" ? INTERNAL_ESTIMATE_MEASURE_OPTIONS : undefined;
+    params.quoteMode === "internal"
+      ? {
+          ...INTERNAL_ESTIMATE_MEASURE_OPTIONS,
+          materialProgramDefault: normalizeMaterialProgramDefault(params.materialProgramDefault)
+        }
+      : undefined;
   const { rooms: measured, totals } = calculateAllRoomDrafts(
     params.roomDrafts,
     params.projectType,
@@ -2041,6 +2144,7 @@ export function createDefaultRoom(materialGroup: string): RoomDraft {
     tear: false,
     raised: "No",
     notes: "",
+    materialProgramOverride: "inherit",
     useTaxMode: "inherit_project",
     useTaxPercent: 0,
     useTaxBase: "countertop_material",
@@ -2183,6 +2287,7 @@ export function serializeRoomsForApi(rooms: RoomDraft[]): Array<Record<string, u
         const row: Record<string, unknown> = {
           name: r.name,
           materialGroup: g,
+          materialProgramOverride: r.materialProgramOverride ?? "inherit",
           materialColor: r.materialColor,
           materialSupplier: r.materialSupplier,
           materialType: r.materialType,
@@ -2255,6 +2360,7 @@ export function serializeRoomsForApi(rooms: RoomDraft[]): Array<Record<string, u
     const row: Record<string, unknown> = {
       name: r.name,
       materialGroup: g,
+      materialProgramOverride: r.materialProgramOverride ?? "inherit",
       materialColor: r.materialColor,
       materialSupplier: r.materialSupplier,
       materialType: r.materialType,
@@ -2338,6 +2444,11 @@ function hydrateGuidedPieceFromRow(x: Record<string, unknown>): GuidedPiece {
 function applyRoomPersistenceFields(base: RoomDraft, r: Record<string, unknown>) {
   if (r.materialCatalogId != null) base.materialCatalogId = String(r.materialCatalogId) || null;
   if (r.materialGroup != null) base.materialGroup = String(r.materialGroup);
+  if (r.materialProgramOverride != null) {
+    base.materialProgramOverride = normalizeMaterialProgramOverride(r.materialProgramOverride);
+  } else if (r.material_program_override != null) {
+    base.materialProgramOverride = normalizeMaterialProgramOverride(r.material_program_override);
+  }
   if (r.materialColor != null) base.materialColor = String(r.materialColor);
   if (r.materialSupplier != null) base.materialSupplier = String(r.materialSupplier);
   if (r.materialType != null) base.materialType = String(r.materialType);
@@ -2528,3 +2639,51 @@ export function hydrateCustomerRoomAreaBreakdown(
   }
   return rebuild();
 }
+
+/** Build Out-of-Collection snapshot for calculation_snapshot / internal_ui at save time. */
+export function buildOutOfCollectionSnapshotFromMeasured(params: {
+  roomDrafts: RoomDraft[];
+  measuredRooms: MeasuredRoom[];
+  materialProgramDefault: MaterialProgram;
+  materialBasis: "wholesale" | "direct";
+}) {
+  const policy = resolveOutOfCollectionPricingPolicy();
+  const premiumPercent = resolveOutOfCollectionPremiumPercent(params.materialBasis, policy);
+  const rooms: OutOfCollectionRoomSnapshot[] = [];
+  let totalPremium = 0;
+  let eligibleTotal = 0;
+  const draftById = new Map(params.roomDrafts.map((d) => [d.id, d]));
+  for (const m of params.measuredRooms) {
+    const draft = draftById.get(m.id);
+    if (!draft || !m.outOfCollectionPremium?.applied) continue;
+    const snap = buildOutOfCollectionRoomSnapshot(
+      draft,
+      params.materialProgramDefault,
+      m.outOfCollectionPremium.eligibleMaterialWithTax,
+      m.outOfCollectionPremium.premiumAmount
+    );
+    if (!snap) continue;
+    rooms.push(snap);
+    totalPremium = round2(totalPremium + snap.premiumAmount);
+    eligibleTotal = round2(eligibleTotal + snap.eligibleMaterialAmount);
+  }
+  return {
+    materialProgramDefault: params.materialProgramDefault,
+    outOfCollectionPremiumPercent: premiumPercent,
+    outOfCollectionPremiumAmount: totalPremium,
+    outOfCollectionEligibleMaterialAmount: eligibleTotal,
+    outOfCollectionPremiumScope: policy.premiumScope,
+    outOfCollectionPolicySnapshot: policy,
+    rooms
+  };
+}
+
+export {
+  validateOutOfCollectionRooms,
+  resolveRoomMaterialProgram,
+  normalizeMaterialProgramDefault,
+  normalizeMaterialProgramOverride,
+  isValidOutOfCollectionPriceGroup,
+  type OutOfCollectionRoomSnapshot
+} from "./internalEstimateMaterialProgram";
+export { resolveOutOfCollectionPricingPolicy } from "./internalEstimateOutOfCollectionPolicy";

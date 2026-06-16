@@ -59,8 +59,13 @@ import {
   serializeRoomsForApi,
   STANDARD_EDGE_PROFILES,
   UPGRADED_EDGE_PREVIEW_RATE_PER_LF,
-  UPGRADED_EDGE_PROFILES
+  UPGRADED_EDGE_PROFILES,
+  validateOutOfCollectionRooms,
+  normalizeMaterialProgramDefault,
+  buildOutOfCollectionSnapshotFromMeasured,
+  resolveRoomMaterialProgram
 } from "../app-quote/src/lib/prototypeQuoteMath.ts";
+import { resolveOutOfCollectionPricingPolicy } from "../app-quote/src/lib/internalEstimateOutOfCollectionPolicy.ts";
 import { parseCustomerFacingNoteLines } from "../app-internal-estimate/src/lib/customerFacingNotes.ts";
 import { buildCustomerEstimateDisplayModel } from "../app-internal-estimate/src/lib/customerEstimateDisplayModel.ts";
 import { formatPreparedByDisplayName } from "../app-internal-estimate/src/lib/formatPreparedByName.ts";
@@ -1989,6 +1994,213 @@ function approx(a: number, b: number, eps = 0.02) {
 
   const quoteTypesSrc = readFileSync(join(repoRoot, "app-quote/src/lib/quoteTypes.ts"), "utf8");
   assert.match(quoteTypesSrc, /customerComparisonGroups/, "ROOM-COMP-6: RoomDraft.customerComparisonGroups field present");
+}
+
+function oocEligibleWithTax(counterSf: number, splashSf: number, rate: number): number {
+  const ct = counterSf * rate;
+  const bs = splashSf * rate;
+  return round2(ct + bs + round2(ct * 0.02) + round2(bs * 0.02));
+}
+
+function oocWholesaleTotal(counterSf: number, splashSf: number, rate: number): number {
+  const eligible = oocEligibleWithTax(counterSf, splashSf, rate);
+  return round2(eligible + round2(eligible * 0.1));
+}
+
+// ── OOC-1: Elite 100 wholesale unchanged ──
+{
+  const room = createDefaultRoom("Group Promo");
+  room.name = "Kitchen";
+  room.calcMode = "Manual Sq Ft";
+  room.direct = { counter: 10, splash: 0 };
+  const opts = { chargeableCounterCeil: true, internalMaterialUseTax: true, materialProgramDefault: "elite_100" as const };
+  const { rooms: measured } = calculateAllRoomDrafts([room], "New Construction", "wholesale", 0, opts);
+  const wRate = PROTOTYPE_TIER_PRICE_PER_SQFT["Group Promo"];
+  approx(measured[0].selected, round2(oocEligibleWithTax(10, 0, wRate)));
+  assert.equal(measured[0].outOfCollectionPremium?.applied ?? false, false);
+}
+
+// ── OOC-2: Elite 100 direct unchanged ──
+{
+  const room = createDefaultRoom("Group Promo");
+  room.calcMode = "Manual Sq Ft";
+  room.direct = { counter: 10, splash: 0 };
+  const opts = { chargeableCounterCeil: true, internalMaterialUseTax: true, materialProgramDefault: "elite_100" as const };
+  const { rooms: measured } = calculateAllRoomDrafts([room], "New Construction", "direct", 0, opts);
+  const dRate = ESF_DIRECT_PRICE_PER_SQFT["Group Promo"];
+  approx(measured[0].selected, round2(oocEligibleWithTax(10, 0, dRate)));
+}
+
+// ── OOC-3: Quote-level OOC wholesale 10% on eligible material ──
+{
+  const room = createDefaultRoom("Group Promo");
+  room.calcMode = "Manual Sq Ft";
+  room.direct = { counter: 10, splash: 0 };
+  const opts = { chargeableCounterCeil: true, internalMaterialUseTax: true, materialProgramDefault: "out_of_collection" as const };
+  const { rooms: measured } = calculateAllRoomDrafts([room], "New Construction", "wholesale", 0, opts);
+  const wRate = PROTOTYPE_TIER_PRICE_PER_SQFT["Group Promo"];
+  approx(measured[0].selected, oocWholesaleTotal(10, 0, wRate));
+  approx(measured[0].outOfCollectionPremium?.premiumAmount ?? 0, round2(oocEligibleWithTax(10, 0, wRate) * 0.1));
+}
+
+// ── OOC-4: Quote-level OOC direct 15% ──
+{
+  const room = createDefaultRoom("Group Promo");
+  room.calcMode = "Manual Sq Ft";
+  room.direct = { counter: 10, splash: 0 };
+  const opts = { chargeableCounterCeil: true, internalMaterialUseTax: true, materialProgramDefault: "out_of_collection" as const };
+  const { rooms: measured } = calculateAllRoomDrafts([room], "New Construction", "direct", 0, opts);
+  const dRate = ESF_DIRECT_PRICE_PER_SQFT["Group Promo"];
+  const eligible = oocEligibleWithTax(10, 0, dRate);
+  approx(measured[0].selected, round2(eligible + round2(eligible * 0.15)));
+}
+
+// ── OOC-5: Mixed quote — premium only on OOC room ──
+{
+  const kitchen = createDefaultRoom("Group Promo");
+  kitchen.name = "Kitchen";
+  kitchen.calcMode = "Manual Sq Ft";
+  kitchen.direct = { counter: 10, splash: 0 };
+  const wetBar = createDefaultRoom("Group C");
+  wetBar.name = "Wet Bar";
+  wetBar.calcMode = "Manual Sq Ft";
+  wetBar.direct = { counter: 8, splash: 0 };
+  const opts = { chargeableCounterCeil: true, internalMaterialUseTax: true, materialProgramDefault: "elite_100" as const };
+  wetBar.materialProgramOverride = "out_of_collection";
+  const wRatePromo = PROTOTYPE_TIER_PRICE_PER_SQFT["Group Promo"];
+  const wRateC = PROTOTYPE_TIER_PRICE_PER_SQFT["Group C"];
+  const { rooms: measured } = calculateAllRoomDrafts([kitchen, wetBar], "New Construction", "wholesale", 0, opts);
+  approx(measured[0].outOfCollectionPremium?.applied ?? false, false);
+  approx(measured[1].outOfCollectionPremium?.applied ?? false, true);
+  const expectedTotal = round2(oocEligibleWithTax(10, 0, wRatePromo) + oocWholesaleTotal(8, 0, wRateC));
+  approx(measured[0].selected + measured[1].selected, expectedTotal);
+}
+
+// ── OOC-6: Room override Elite 100 inside OOC default — no premium ──
+{
+  const room = createDefaultRoom("Group Promo");
+  room.materialProgramOverride = "elite_100";
+  room.calcMode = "Manual Sq Ft";
+  room.direct = { counter: 10, splash: 0 };
+  const opts = { chargeableCounterCeil: true, internalMaterialUseTax: true, materialProgramDefault: "out_of_collection" as const };
+  const { rooms: measured } = calculateAllRoomDrafts([room], "New Construction", "wholesale", 0, opts);
+  assert.equal(measured[0].outOfCollectionPremium?.applied ?? false, false);
+}
+
+// ── OOC-7: Room override OOC inside Elite default — premium applies ──
+{
+  const room = createDefaultRoom("Group D");
+  room.materialProgramOverride = "out_of_collection";
+  room.calcMode = "Manual Sq Ft";
+  room.direct = { counter: 5, splash: 0 };
+  const opts = { chargeableCounterCeil: true, internalMaterialUseTax: true, materialProgramDefault: "elite_100" as const };
+  const { rooms: measured } = calculateAllRoomDrafts([room], "New Construction", "wholesale", 0, opts);
+  assert.equal(measured[0].outOfCollectionPremium?.applied, true);
+}
+
+// ── OOC-8/9: Premium on counter and backsplash/FHB ──
+{
+  const room = createDefaultRoom("Group Promo");
+  room.calcMode = "Manual Sq Ft";
+  room.direct = { counter: 10, splash: 4 };
+  const opts = { chargeableCounterCeil: true, internalMaterialUseTax: true, materialProgramDefault: "out_of_collection" as const };
+  const { rooms: measured } = calculateAllRoomDrafts([room], "New Construction", "wholesale", 0, opts);
+  const wRate = PROTOTYPE_TIER_PRICE_PER_SQFT["Group Promo"];
+  approx(measured[0].selected, oocWholesaleTotal(10, 4, wRate));
+}
+
+// ── OOC-10: Premium excludes add-ons ──
+{
+  const room = createDefaultRoom("Group Promo");
+  room.calcMode = "Manual Sq Ft";
+  room.direct = { counter: 10, splash: 0 };
+  room.addons["qty-sink"] = 1;
+  const opts = { chargeableCounterCeil: true, internalMaterialUseTax: true, materialProgramDefault: "out_of_collection" as const };
+  const { rooms: measured } = calculateAllRoomDrafts([room], "New Construction", "wholesale", 0, opts);
+  const wRate = PROTOTYPE_TIER_PRICE_PER_SQFT["Group Promo"];
+  approx(measured[0].selected, round2(oocWholesaleTotal(10, 0, wRate) + 200));
+}
+
+// ── OOC-11: Vanity program fixed pricing excluded from OOC premium ──
+{
+  const vanity = createVanityRoom("Group Promo");
+  vanity.materialProgramOverride = "out_of_collection";
+  const opts = { chargeableCounterCeil: true, internalMaterialUseTax: true, materialProgramDefault: "out_of_collection" as const };
+  const { rooms: measured } = calculateAllRoomDrafts([vanity], "New Construction", "wholesale", 0, opts);
+  assert.equal(measured[0].outOfCollectionPremium?.applied ?? false, false);
+}
+
+// ── OOC-12: Fixed 2% use tax unchanged with OOC ──
+{
+  const room = createDefaultRoom("Group Promo");
+  room.calcMode = "Manual Sq Ft";
+  room.direct = { counter: 10, splash: 4 };
+  const opts = { chargeableCounterCeil: true, internalMaterialUseTax: true, materialProgramDefault: "out_of_collection" as const };
+  const { rooms: measured } = calculateAllRoomDrafts([room], "New Construction", "wholesale", 0, opts);
+  approx(measured[0].useTax?.taxAmount ?? 0, round2((10 + 4) * PROTOTYPE_TIER_PRICE_PER_SQFT["Group Promo"] * 0.02));
+}
+
+// ── OOC-13: Validation requires comparable price group ──
+{
+  const room = createDefaultRoom("Remnant");
+  room.materialProgramOverride = "out_of_collection";
+  const v = validateOutOfCollectionRooms([room], "elite_100");
+  assert.equal(v.valid, false);
+  assert.match(v.message ?? "", /comparable price group/i);
+}
+
+// ── OOC-14: Hydration defaults to elite_100 / inherit ──
+{
+  const hydrated = hydrateRoomDraftsFromInternalUi(null, [{ name: "Kitchen", materialGroup: "Group Promo", countertopSqft: 10 }])[0];
+  assert.equal(normalizeMaterialProgramDefault(undefined), "elite_100");
+  assert.equal(hydrated.materialProgramOverride ?? "inherit", "inherit");
+}
+
+// ── OOC-15: Customer PDF source avoids forbidden formula language ──
+{
+  const printSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/CustomerEstimatePrint.tsx"), "utf8");
+  const dmSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/lib/customerEstimateDisplayModel.ts"), "utf8");
+  for (const src of [printSrc, dmSrc]) {
+    assert.doesNotMatch(src, /\+10%|\+15%|markup|premium|margin|cost basis|formula/i, "OOC-15: no forbidden customer-facing formula language");
+  }
+}
+
+// ── OOC-16: Snapshot includes material program and premium policy ──
+{
+  const kitchen = createDefaultRoom("Group Promo");
+  kitchen.name = "Kitchen";
+  kitchen.calcMode = "Manual Sq Ft";
+  kitchen.direct = { counter: 10, splash: 0 };
+  const opts = { chargeableCounterCeil: true, internalMaterialUseTax: true, materialProgramDefault: "out_of_collection" as const };
+  const { rooms: measured } = calculateAllRoomDrafts([kitchen], "New Construction", "wholesale", 0, opts);
+  const snap = buildOutOfCollectionSnapshotFromMeasured({
+    roomDrafts: [kitchen],
+    measuredRooms: measured,
+    materialProgramDefault: "out_of_collection",
+    materialBasis: "wholesale"
+  });
+  assert.equal(snap.materialProgramDefault, "out_of_collection");
+  assert.equal(snap.outOfCollectionPremiumPercent, 10);
+  assert.ok(snap.outOfCollectionPremiumAmount > 0);
+  assert.equal(snap.outOfCollectionPremiumScope, "countertop_and_backsplash_material");
+  assert.ok(snap.outOfCollectionPolicySnapshot.policyVersion === 1);
+  assert.equal(snap.rooms.length, 1);
+  const backend = await calculateQuote(
+    {
+      quoteSource: "internal_quote",
+      engine: "rooms",
+      internalMaterialBasis: "wholesale",
+      materialProgramDefault: "out_of_collection",
+      rooms: serializeRoomsForApi([kitchen]),
+      estimateRoomDrafts: serializeRoomDraftsForInternalUi([kitchen]),
+      addOns: {}
+    },
+    {}
+  );
+  const oocSnap = backend.snapshot?.internal_estimate_math?.out_of_collection;
+  assert.ok(oocSnap, "OOC-16: backend snapshot includes out_of_collection");
+  assert.equal(oocSnap.materialProgramDefault, "out_of_collection");
+  assert.equal(oocSnap.outOfCollectionPremiumPercent, 10);
 }
 
 console.log("verify-internal-estimate-beta-fixes: OK");

@@ -8,12 +8,14 @@ import type {
   GuidedOverlapMode,
   GuidedPiece,
   GuidedShapeGroupType,
+  MaterialProgram,
   RoomCalcMode,
   RoomDraft,
   RoomUseTaxMode,
   VanityKitchenTier,
   VanitySinkType
 } from "../lib/quoteTypes";
+import { resolveRoomMaterialProgram } from "../lib/internalEstimateMaterialProgram";
 import { INTERNAL_ESTIMATE_MEASURE_OPTIONS } from "../lib/prototypeQuoteMath";
 import {
   appendGuidedShapeGroup,
@@ -63,6 +65,10 @@ type Props = {
   showRoomUseTax?: boolean;
   /** Internal Estimate: confirm destructive actions and show undo snackbar. */
   enableDestructiveGuards?: boolean;
+  /** Quote-level material program default (Internal Estimate). */
+  materialProgramDefault?: MaterialProgram;
+  /** Show per-room material program override (Internal Estimate). */
+  showMaterialProgram?: boolean;
 };
 
 function updateRoom(rooms: RoomDraft[], id: string, patch: Partial<RoomDraft>): RoomDraft[] {
@@ -162,7 +168,9 @@ export default function RoomScopeBuilder({
   hideRapidLinear = false,
   projectUseTaxPercent = 0,
   showRoomUseTax = false,
-  enableDestructiveGuards = false
+  enableDestructiveGuards = false,
+  materialProgramDefault = "elite_100",
+  showMaterialProgram = false
 }: Props) {
   const [colorQ, setColorQ] = React.useState<Record<string, string>>({});
   const [groupFilter, setGroupFilter] = React.useState<Record<string, string>>({});
@@ -434,6 +442,46 @@ export default function RoomScopeBuilder({
                 </select>
               </label>
             </div>
+
+            {showMaterialProgram ? (
+              <div className="room-material-program-row">
+                <label>
+                  Material program
+                  <select
+                    value={room.materialProgramOverride ?? "inherit"}
+                    onChange={(e) =>
+                      onRoomsChange(
+                        updateRoom(rooms, room.id, {
+                          materialProgramOverride: e.target.value as RoomDraft["materialProgramOverride"]
+                        })
+                      )
+                    }
+                  >
+                    <option value="inherit">Use quote default</option>
+                    <option value="elite_100">Elite 100</option>
+                    <option value="out_of_collection">Out-of-Collection</option>
+                  </select>
+                </label>
+                <p className="muted small room-material-program-summary">
+                  Material:{" "}
+                  {(() => {
+                    const resolved = resolveRoomMaterialProgram(room, materialProgramDefault);
+                    const programLabel =
+                      resolved === "out_of_collection"
+                        ? "Out-of-Collection"
+                        : room.materialProgramOverride === "elite_100"
+                          ? "Elite 100"
+                          : materialProgramDefault === "out_of_collection"
+                            ? "Inherits quote default (Out-of-Collection)"
+                            : "Inherits quote default";
+                    const colorPart = room.materialColor?.trim()
+                      ? room.materialColor.trim()
+                      : "Color TBD";
+                    return `${programLabel} · ${room.materialGroup} · ${colorPart}`;
+                  })()}
+                </p>
+              </div>
+            ) : null}
 
             {eliteProgramColors && eliteProgramColors.length ? (
               <div className="grid3" style={{ marginTop: 10 }}>

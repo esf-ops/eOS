@@ -16,6 +16,14 @@ import {
   resolveInternalEstimateMaterialTaxPolicy
 } from "./internalEstimateMaterialTaxPolicy.js";
 import {
+  computeOutOfCollectionPremiumAmounts,
+  normalizeMaterialProgramDefault,
+  resolveOutOfCollectionPremiumPercent,
+  resolveRoomMaterialProgram,
+  validateOutOfCollectionRooms
+} from "./internalEstimateMaterialProgram.js";
+import { resolveOutOfCollectionPricingPolicy } from "./internalEstimateOutOfCollectionPolicy.js";
+import {
   applyChargeableCounterCeilToGuidedRows,
   applyChargeableSplashCeilToGuidedRows,
   chargeableCounterSqftFromExact,
@@ -216,7 +224,15 @@ export function normalizePrototypeQuoteInput(input) {
         : String(src.retailMethod || src.markup?.method || "Markup Percent"),
     retailFlatAdd: Number(src.retailFlatAdd ?? src.markup?.flatAdd ?? 0) || 0,
     metadata: typeof src.metadata === "object" && src.metadata ? { ...src.metadata } : {},
-    useTaxPercent: Math.max(0, Number(src.useTaxPercent ?? src.use_tax_percent ?? 0) || 0)
+    useTaxPercent: Math.max(0, Number(src.useTaxPercent ?? src.use_tax_percent ?? 0) || 0),
+    materialProgramDefault: normalizeMaterialProgramDefault(
+      src.materialProgramDefault ?? src.material_program_default
+    ),
+    estimateRoomDrafts: Array.isArray(src.estimateRoomDrafts)
+      ? src.estimateRoomDrafts
+      : Array.isArray(src.estimate_room_drafts)
+        ? src.estimate_room_drafts
+        : []
   };
 }
 
@@ -609,6 +625,63 @@ function isInternalVanityProgramRoom(room) {
   return true;
 }
 
+/**
+ * Out-of-Collection premium per room on post-tax eligible material (internal_quote only).
+ * @param {ReturnType<typeof normalizePrototypeQuoteInput>} input
+ * @param {ReadonlyArray<Record<string, unknown>>} rules
+ * @param {ReadonlyArray<{ roomName: string, group: string, sf: number, isSplash: boolean }>} rows
+ * @param {ReturnType<typeof resolveInternalEstimateMaterialTaxPolicy>} materialUseTaxPolicy
+ */
+function computeInternalOutOfCollectionPremium(input, rules, rows, materialUseTaxPolicy) {
+  if (String(input.quoteSource) !== "internal_quote") {
+    return { premiumAmount: 0, rooms: [], eligibleTotal: 0, premiumPercent: 0 };
+  }
+  const materialProgramDefault = normalizeMaterialProgramDefault(input.materialProgramDefault);
+  const drafts = input.estimateRoomDrafts?.length ? input.estimateRoomDrafts : input.rooms;
+  const oocPct = resolveOutOfCollectionPremiumPercent(input.internalMaterialBasis);
+  /** @type {Map<string, { ct: number, bs: number, roomInput: Record<string, unknown>|undefined }>} */
+  const roomMaterial = new Map();
+  for (const row of rows) {
+    const roomInput =
+      (drafts || []).find((r) => String(r.name || r.room_name || "").trim() === row.roomName) ||
+      (input.rooms || []).find((r) => String(r.name || r.room_name || "").trim() === row.roomName);
+    if (isInternalVanityProgramRoom(roomInput)) continue;
+    const rate = materialRateForQuote(input, row.group, rules);
+    const sub = round2(row.sf * rate);
+    if (!roomMaterial.has(row.roomName)) {
+      roomMaterial.set(row.roomName, { ct: 0, bs: 0, roomInput });
+    }
+    const entry = roomMaterial.get(row.roomName);
+    if (row.isSplash) entry.bs = round2(entry.bs + sub);
+    else entry.ct = round2(entry.ct + sub);
+  }
+  let premiumAmount = 0;
+  let eligibleTotal = 0;
+  /** @type {Array<Record<string, unknown>>} */
+  const rooms = [];
+  for (const [roomName, { ct, bs, roomInput }] of roomMaterial) {
+    if (!roomInput) continue;
+    if (resolveRoomMaterialProgram(roomInput, materialProgramDefault) !== "out_of_collection") continue;
+    const amounts = computeInternalEstimateMaterialUseTaxAmounts(ct, bs, materialUseTaxPolicy);
+    const withTax = round2(ct + bs + amounts.totalMaterialUseTaxAmount);
+    const prem = computeOutOfCollectionPremiumAmounts(withTax, oocPct);
+    if (prem.premiumAmount <= 0) continue;
+    premiumAmount = round2(premiumAmount + prem.premiumAmount);
+    eligibleTotal = round2(eligibleTotal + withTax);
+    rooms.push({
+      roomId: String(roomInput.id ?? roomInput.room_id ?? ""),
+      roomName,
+      resolvedMaterialProgram: "out_of_collection",
+      eligibleMaterialAmount: withTax,
+      premiumAmount: prem.premiumAmount,
+      assignedPriceGroup: String(roomInput.materialGroup ?? roomInput.group ?? "").trim(),
+      colorName: roomInput.materialColor ? String(roomInput.materialColor).trim() : undefined,
+      supplierName: roomInput.materialSupplier ? String(roomInput.materialSupplier).trim() : undefined
+    });
+  }
+  return { premiumAmount, rooms, eligibleTotal, premiumPercent: oocPct };
+}
+
 export function calculateVanities(input, rules) {
   const vanities = Array.isArray(input.vanities) ? input.vanities : [];
   const lines = [];
@@ -786,6 +859,7 @@ function sumRoomsWholesale(input, rules) {
   let backsplashMaterialUseTaxAmount = 0;
   let materialUseTaxPolicy = null;
   const roomTaxByRoom = [];
+  let ooc = { premiumAmount: 0, rooms: [], eligibleTotal: 0, premiumPercent: 0 };
   if (String(input.quoteSource) === "internal_quote") {
     materialUseTaxPolicy = resolveInternalEstimateMaterialTaxPolicy();
     let ctPreTax = 0;
@@ -807,6 +881,10 @@ function sumRoomsWholesale(input, rules) {
     if (useTaxAmount > 0) {
       materialDollars = round2(materialDollars + useTaxAmount);
     }
+    ooc = computeInternalOutOfCollectionPremium(input, rules, rows, materialUseTaxPolicy);
+    if (ooc.premiumAmount > 0) {
+      materialDollars = round2(materialDollars + ooc.premiumAmount);
+    }
   }
   return {
     counter,
@@ -822,6 +900,7 @@ function sumRoomsWholesale(input, rules) {
     materialUseTaxPolicy,
     roomUseTax: roomTaxByRoom,
     roomMeasurementSummaries,
+    outOfCollectionPremium: String(input.quoteSource) === "internal_quote" ? ooc : undefined,
     wholesale: round2(materialDollars + addOnPart.total + upgradedEdgePart.total)
   };
 }
@@ -849,7 +928,32 @@ function legacyWholesale(input, rules) {
     backsplashMaterialUseTaxAmount = amounts.backsplashMaterialUseTaxAmount;
     countertopMaterial = round2(ctMaterial + countertopMaterialUseTaxAmount);
   }
-  const base = round2(countertopMaterial + bsMaterial + backsplashMaterialUseTaxAmount);
+  let base = round2(countertopMaterial + bsMaterial + backsplashMaterialUseTaxAmount);
+  let outOfCollectionPremium = { premiumAmount: 0, rooms: [], eligibleTotal: 0, premiumPercent: 0 };
+  if (
+    String(input.quoteSource) === "internal_quote" &&
+    normalizeMaterialProgramDefault(input.materialProgramDefault) === "out_of_collection"
+  ) {
+    const oocPct = resolveOutOfCollectionPremiumPercent(input.internalMaterialBasis);
+    const prem = computeOutOfCollectionPremiumAmounts(base, oocPct);
+    if (prem.premiumAmount > 0) {
+      base = round2(base + prem.premiumAmount);
+      outOfCollectionPremium = {
+        premiumAmount: prem.premiumAmount,
+        eligibleTotal: prem.eligibleMaterialWithTax,
+        premiumPercent: oocPct,
+        rooms: [
+          {
+            roomName: "Project",
+            resolvedMaterialProgram: "out_of_collection",
+            eligibleMaterialAmount: prem.eligibleMaterialWithTax,
+            premiumAmount: prem.premiumAmount,
+            assignedPriceGroup: g
+          }
+        ]
+      };
+    }
+  }
   const addOnPart = calculateAddOns({ addOns: input.addOns || {} }, rules);
   const vanityPart = calculateVanities(input, rules);
   return {
@@ -863,7 +967,8 @@ function legacyWholesale(input, rules) {
     rate,
     areas: { countertopSqft: ct, backsplashSqft: bs },
     addOnPart,
-    vanityPart
+    vanityPart,
+    outOfCollectionPremium
   };
 }
 
@@ -1026,6 +1131,14 @@ function prototypeMirrorRules() {
 export async function calculateQuote(rawInput, pricingContext = {}) {
   const input = normalizePrototypeQuoteInput(rawInput);
   const warnings = [];
+  if (String(input.quoteSource) === "internal_quote") {
+    const roomsForOoc = input.estimateRoomDrafts?.length ? input.estimateRoomDrafts : input.rooms;
+    const oocValidation = validateOutOfCollectionRooms(roomsForOoc, input.materialProgramDefault);
+    if (!oocValidation.valid) {
+      const names = oocValidation.roomNames.join(", ");
+      throw new Error(names ? `${oocValidation.message} (${names})` : String(oocValidation.message));
+    }
+  }
   let resolved = pricingContext;
   if (!resolved?.rules) {
     resolved = await resolvePricingStructure({
@@ -1228,6 +1341,19 @@ export async function calculateQuote(rawInput, pricingContext = {}) {
         taxPolicySnapshot: policy
       }
     };
+    const oocDetail = detail.outOfCollectionPremium;
+    if (oocDetail && Number(oocDetail.premiumAmount) > 0) {
+      const oocPolicy = resolveOutOfCollectionPricingPolicy();
+      snapshot.internal_estimate_math.out_of_collection = {
+        materialProgramDefault: input.materialProgramDefault,
+        outOfCollectionPremiumPercent: Number(oocDetail.premiumPercent) || 0,
+        outOfCollectionPremiumAmount: Number(oocDetail.premiumAmount) || 0,
+        outOfCollectionEligibleMaterialAmount: Number(oocDetail.eligibleTotal) || 0,
+        outOfCollectionPremiumScope: oocPolicy.premiumScope,
+        outOfCollectionPolicySnapshot: oocPolicy,
+        rooms: Array.isArray(oocDetail.rooms) ? oocDetail.rooms : []
+      };
+    }
     if (detail.kind === "rooms" && detail.upgradedEdgePart) {
       snapshot.internal_estimate_math.upgraded_edge_pricing = {
         rate_per_lf: detail.upgradedEdgePart.rate,

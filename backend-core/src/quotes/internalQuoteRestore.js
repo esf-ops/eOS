@@ -41,6 +41,7 @@ export function buildInternalSavePayloadFromQuoteRow(row) {
     engine,
     materialGroup: input.materialGroup || row.estimated_material_group || "Group Promo",
     internalMaterialBasis: iu.internal_material_basis || "wholesale",
+    materialProgramDefault: iu.material_program_default ?? iu.materialProgramDefault ?? "elite_100",
     rooms,
     vanities: iu.vanities || [],
     areas,
@@ -84,6 +85,8 @@ function buildSnapshotToStore(calc, body) {
     internal_ui: {
       quote_workflow: body.quote_workflow ?? null,
       internal_material_basis: body.internalMaterialBasis ?? body.internal_material_basis ?? null,
+      material_program_default:
+        body.materialProgramDefault ?? body.material_program_default ?? "elite_100",
       custom_passthrough_items: body.customPassthroughItems ?? body.custom_pass_through_items ?? [],
       custom_line_items: body.customLineItems ?? body.custom_line_items ?? [],
       quote_default_material: body.quoteDefaultMaterial ?? body.quote_default_material ?? null,

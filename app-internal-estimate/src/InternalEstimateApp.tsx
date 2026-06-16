@@ -22,10 +22,12 @@ import {
   serializeRoomDraftsForInternalUi,
   serializeRoomsForApi,
   serializeVanitiesForApi,
-  UPGRADED_EDGE_PROFILES
+  UPGRADED_EDGE_PROFILES,
+  validateOutOfCollectionRooms,
+  normalizeMaterialProgramDefault
 } from "@quote-lib/prototypeQuoteMath";
 import { INTERNAL_ESTIMATE_MATERIAL_USE_TAX_PERCENT } from "@quote-lib/internalEstimateMaterialTaxPolicy";
-import type { EliteProgramColorRow, QuoteWorkflowMethod, RoomDraft } from "@quote-lib/quoteTypes";
+import type { EliteProgramColorRow, MaterialProgram, QuoteWorkflowMethod, RoomDraft } from "@quote-lib/quoteTypes";
 import CustomerEstimatePrint, { type CustomerLineItem } from "./CustomerEstimatePrint";
 import VisualLayoutCanvas, {
   type VisualLayoutEntry,
@@ -381,6 +383,20 @@ export default function InternalEstimateApp() {
   const [enteredBy, setEnteredBy] = useState("");
   const [colorTbd, setColorTbd] = useState(false);
   const [internalPricingMode, setInternalPricingMode] = useState<"direct" | "wholesale">("wholesale");
+  const [materialProgramDefault, setMaterialProgramDefault] = useState<MaterialProgram>("elite_100");
+  const internalMeasureOptions = useMemo(
+    () => ({ ...INTERNAL_ESTIMATE_MEASURE_OPTIONS, materialProgramDefault }),
+    [materialProgramDefault]
+  );
+  const hasOutOfCollectionRooms = useMemo(
+    () =>
+      roomDrafts.some(
+        (r) =>
+          (materialProgramDefault === "out_of_collection" && (r.materialProgramOverride ?? "inherit") !== "elite_100") ||
+          r.materialProgramOverride === "out_of_collection"
+      ),
+    [roomDrafts, materialProgramDefault]
+  );
   const [customerDisplayGroups, setCustomerDisplayGroups] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(MATERIAL_GROUPS.map((g) => [g, false]))
   );
@@ -674,7 +690,7 @@ export default function InternalEstimateApp() {
         projectType,
         internalPricingMode,
         0,
-        INTERNAL_ESTIMATE_MEASURE_OPTIONS
+        internalMeasureOptions
       );
       countertopSqft = totals.priceableCounter;
       backsplashSqft = round2(totals.splash + totals.fhb);
@@ -726,7 +742,7 @@ export default function InternalEstimateApp() {
         projectType,
         internalPricingMode,
         0,
-        INTERNAL_ESTIMATE_MEASURE_OPTIONS
+        internalMeasureOptions
       );
       totalSfReady = round2(totals.counter + totals.splash + totals.fhb);
     }
@@ -751,6 +767,8 @@ export default function InternalEstimateApp() {
       quoteSource: "internal_quote",
       materialGroup: topMaterialGroup,
       internalMaterialBasis: internalPricingMode,
+      materialProgramDefault,
+      material_program_default: materialProgramDefault,
       customPassthroughItems,
       customLineItems,
       quoteDefaultMaterial,
@@ -779,10 +797,10 @@ export default function InternalEstimateApp() {
             projectType,
             internalPricingMode,
             0,
-            INTERNAL_ESTIMATE_MEASURE_OPTIONS
+            internalMeasureOptions
           ).rooms,
           materialBasis: internalPricingMode,
-          measureOptions: INTERNAL_ESTIMATE_MEASURE_OPTIONS,
+          measureOptions: internalMeasureOptions,
           customLines: customLineRows
             .filter((r) => r.name.trim())
             .map((r) => ({
@@ -841,7 +859,8 @@ export default function InternalEstimateApp() {
     colorTbd,
     customerDisplayGroups,
     comparisonGroupColorLabels,
-    customerFacingNotes
+    customerFacingNotes,
+    materialProgramDefault
   ]);
 
   const computeRevisionBaselineSig = useCallback((): string => {
@@ -1082,7 +1101,8 @@ export default function InternalEstimateApp() {
       applyGlobalAddOns: false,
       workflowLabel: wf,
       projectType,
-      customLineItemsTotal: round2(customLineSum)
+      customLineItemsTotal: round2(customLineSum),
+      materialProgramDefault
     });
     setUsedFallback(true);
     setApiPartner(null);
@@ -1092,7 +1112,8 @@ export default function InternalEstimateApp() {
     topMaterialGroup,
     projectType,
     internalPricingMode,
-    customLineRows
+    customLineRows,
+    materialProgramDefault
   ]);
 
   const handleCalculate = useCallback(async () => {
@@ -1104,6 +1125,14 @@ export default function InternalEstimateApp() {
     setVanityLocalNote(null);
 
     const drafts = buildRoomDraftsForCalculate();
+    const oocValidation = validateOutOfCollectionRooms(drafts, materialProgramDefault);
+    if (!oocValidation.valid) {
+      const names = oocValidation.roomNames.join(", ");
+      setCalcError(names ? `${oocValidation.message} (${names})` : String(oocValidation.message));
+      setCalcBusy(false);
+      return;
+    }
+
     const needsVanityLocal = roomsNeedLocalVanityMath(drafts);
 
     if (needsVanityLocal) {
@@ -1170,7 +1199,7 @@ export default function InternalEstimateApp() {
       setBackendCalcOk(false);
     }
     setCalcBusy(false);
-  }, [sessionToken, buildCalcPayload, buildRoomDraftsForCalculate, runLocalFromDrafts, ensureAccessToken]);
+  }, [sessionToken, buildCalcPayload, buildRoomDraftsForCalculate, runLocalFromDrafts, ensureAccessToken, materialProgramDefault]);
 
   const buildSubmitPayload = useCallback((saveModeOverride?: InternalSaveIntent) => {
     const base = {
@@ -1561,7 +1590,7 @@ export default function InternalEstimateApp() {
       projectType,
       internalPricingMode,
       0,
-      INTERNAL_ESTIMATE_MEASURE_OPTIONS
+      internalMeasureOptions
     );
     const totalSf = round2(totals.priceableCounter + totals.splash + totals.fhb);
     return {
@@ -1629,21 +1658,23 @@ export default function InternalEstimateApp() {
       applyGlobalAddOns: false,
       workflowLabel: wf,
       projectType,
-      customLineItemsTotal: customLinePreviewTotals
+      customLineItemsTotal: customLinePreviewTotals,
+      materialProgramDefault
     });
   }, [
     buildRoomDraftsForCalculate,
     internalPricingMode,
     topMaterialGroup,
     projectType,
-    customLinePreviewTotals
+    customLinePreviewTotals,
+    materialProgramDefault
   ]);
 
   const comparisonScopeMeta = useMemo(
     () =>
       aggregateComparisonScope(roomDrafts, projectType, {
         materialBasis: internalPricingMode,
-        measureOptions: INTERNAL_ESTIMATE_MEASURE_OPTIONS
+        measureOptions: internalMeasureOptions
       }),
     [roomDrafts, projectType, internalPricingMode]
   );
@@ -1707,9 +1738,10 @@ export default function InternalEstimateApp() {
     () =>
       buildSelectedMaterialBreakdown(roomDrafts, internalPricingMode, {
         internalMaterialUseTax: true,
-        chargeableCounterCeil: INTERNAL_ESTIMATE_MEASURE_OPTIONS.chargeableCounterCeil
+        chargeableCounterCeil: internalMeasureOptions.chargeableCounterCeil,
+        materialProgramDefault
       }),
-    [roomDrafts, internalPricingMode]
+    [roomDrafts, internalPricingMode, materialProgramDefault]
   );
 
   const visibleRoomAddons = useMemo(
@@ -1750,7 +1782,7 @@ export default function InternalEstimateApp() {
         roomDrafts,
         measuredRooms: liveEstimate.measuredRooms,
         materialBasis: internalPricingMode,
-        measureOptions: INTERNAL_ESTIMATE_MEASURE_OPTIONS,
+        measureOptions: internalMeasureOptions,
         customLines: customLinesForRoomBreakdown,
         projectColorTbd: colorTbd
       }),
@@ -1967,6 +1999,8 @@ export default function InternalEstimateApp() {
         }
         const imb = String(iu.internal_material_basis || "");
         if (imb === "direct" || imb === "wholesale") setInternalPricingMode(imb);
+        const mpd = iu.material_program_default ?? iu.materialProgramDefault;
+        if (mpd != null) setMaterialProgramDefault(normalizeMaterialProgramDefault(mpd));
         const roomsPayload = iu.estimate_rooms;
         const roomDraftsPayload = iu.estimate_room_drafts;
         if (Array.isArray(roomDraftsPayload) && roomDraftsPayload.length) {
@@ -2523,23 +2557,49 @@ export default function InternalEstimateApp() {
           ) : null}
 
           <div className="card ie-card-tight ie-pricing-bar">
-            <span className="ie-pricing-label">Pricing mode</span>
-            <div className="ie-pricing-toggle" role="group" aria-label="Pricing mode">
-              <button
-                type="button"
-                className={internalPricingMode === "wholesale" ? "on" : ""}
-                onClick={() => setInternalPricingMode("wholesale")}
-              >
-                Wholesale
-              </button>
-              <button
-                type="button"
-                className={internalPricingMode === "direct" ? "on" : ""}
-                onClick={() => setInternalPricingMode("direct")}
-              >
-                Direct / Retail
-              </button>
+            <div className="ie-pricing-bar-row">
+              <span className="ie-pricing-label">Material program default</span>
+              <div className="ie-pricing-toggle" role="group" aria-label="Material program default">
+                <button
+                  type="button"
+                  className={materialProgramDefault === "elite_100" ? "on" : ""}
+                  onClick={() => setMaterialProgramDefault("elite_100")}
+                >
+                  Elite 100
+                </button>
+                <button
+                  type="button"
+                  className={materialProgramDefault === "out_of_collection" ? "on" : ""}
+                  onClick={() => setMaterialProgramDefault("out_of_collection")}
+                >
+                  Out-of-Collection
+                </button>
+              </div>
             </div>
+            <div className="ie-pricing-bar-row">
+              <span className="ie-pricing-label">Pricing mode</span>
+              <div className="ie-pricing-toggle" role="group" aria-label="Pricing mode">
+                <button
+                  type="button"
+                  className={internalPricingMode === "wholesale" ? "on" : ""}
+                  onClick={() => setInternalPricingMode("wholesale")}
+                >
+                  Wholesale
+                </button>
+                <button
+                  type="button"
+                  className={internalPricingMode === "direct" ? "on" : ""}
+                  onClick={() => setInternalPricingMode("direct")}
+                >
+                  Direct / Retail
+                </button>
+              </div>
+            </div>
+            {hasOutOfCollectionRooms ? (
+              <p className="ie-note-quiet ie-ooc-applied-note" role="status">
+                Out-of-Collection material pricing applied. Applies to material only.
+              </p>
+            ) : null}
           </div>
 
           <section id="sec-job" className="card">
@@ -2695,6 +2755,8 @@ export default function InternalEstimateApp() {
               eliteProgramColors={eliteColors}
               hideRapidLinear
               enableDestructiveGuards
+              materialProgramDefault={materialProgramDefault}
+              showMaterialProgram
             />
           </section>
 

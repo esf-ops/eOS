@@ -93,11 +93,19 @@ export type VanitySinkType =
 
 export type RoomUseTaxMode = "inherit_project" | "none" | "percent";
 
+/** Internal Estimate material catalog pricing policy. */
+export type MaterialProgram = "elite_100" | "out_of_collection";
+
+/** Per-room override of quote-level material program default. */
+export type MaterialProgramOverride = "inherit" | "elite_100" | "out_of_collection";
+
 export type RoomDraft = {
   id: string;
   name: string;
   roomType: string;
   materialGroup: string;
+  /** Internal Estimate: inherit quote default or force Elite 100 / Out-of-Collection. */
+  materialProgramOverride?: MaterialProgramOverride;
   /** Selected Elite Program color display name (informational + snapshot). */
   materialColor?: string;
   materialSupplier?: string;
@@ -209,6 +217,15 @@ export type MeasuredRoom = {
     percent: number;
     baseCountertopMaterial: number;
     taxAmount: number;
+    applied: boolean;
+  };
+  /** Resolved material program at measure time (internal estimate snapshot). */
+  resolvedMaterialProgram?: MaterialProgram;
+  /** Out-of-Collection premium on eligible material (post use-tax), internal estimate only. */
+  outOfCollectionPremium?: {
+    premiumPercent: number;
+    eligibleMaterialWithTax: number;
+    premiumAmount: number;
     applied: boolean;
   };
   /** True when this room is priced via Vanity Program (fixed program pricing). False/undefined = countertop pricing. */

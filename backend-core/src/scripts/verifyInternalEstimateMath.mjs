@@ -705,4 +705,47 @@ const taxTrip = await calculateQuote(
 );
 assertNear("TAX-3 custom fee not taxed", taxTrip.totals.retail, internalMaterialTotal(10, 0, wRate) + 150);
 
+function oocWholesaleTotal(ctSf, bsSf, rate) {
+  const eligible = internalMaterialTotal(ctSf, bsSf, rate);
+  return round2Tax(eligible + round2Tax(eligible * 0.1));
+}
+
+const oocRoom = {
+  name: "Kitchen",
+  materialGroup: "Group Promo",
+  materialProgramOverride: "inherit",
+  countertopSqft: 10,
+  backsplashSqft: 0
+};
+const oocWholesale = await calculateQuote(
+  {
+    quoteSource: "internal_quote",
+    engine: "rooms",
+    internalMaterialBasis: "wholesale",
+    materialProgramDefault: "out_of_collection",
+    rooms: [oocRoom],
+    estimateRoomDrafts: [{ ...oocRoom, id: "k1", materialProgramOverride: "inherit" }],
+    addOns: {}
+  },
+  {}
+);
+assertNear("OOC wholesale 10sf", oocWholesale.totals.retail, oocWholesaleTotal(10, 0, wRate));
+const oocSnap = oocWholesale.snapshot?.internal_estimate_math?.out_of_collection;
+if (!oocSnap?.outOfCollectionPremiumAmount) throw new Error("OOC snapshot missing premium");
+
+const eliteUnchanged = await calculateQuote(
+  {
+    quoteSource: "internal_quote",
+    engine: "legacy",
+    materialGroup: "Group Promo",
+    internalMaterialBasis: "wholesale",
+    materialProgramDefault: "elite_100",
+    areas: { countertopSqft: 10, backsplashSqft: 0 },
+    rooms: [],
+    addOns: {}
+  },
+  {}
+);
+assertNear("Elite 100 unchanged", eliteUnchanged.totals.retail, internalMaterialTotal(10, 0, wRate));
+
 console.log("verifyInternalEstimateMath: ok");
