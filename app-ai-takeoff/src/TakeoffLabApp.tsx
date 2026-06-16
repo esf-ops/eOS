@@ -60,6 +60,7 @@ import TakeoffDimensionEvidencePanel from "./components/TakeoffDimensionEvidence
 import type { DimensionEvidence } from "./components/TakeoffDimensionEvidencePanel";
 import TakeoffEvidenceTracePanel from "./components/TakeoffEvidenceTracePanel";
 import TakeoffReviewWorkbench, { countUnresolvedWorkbenchIssues } from "./components/TakeoffReviewWorkbench";
+import TakeoffValidationFixPanel from "./components/TakeoffValidationFixPanel";
 import { reconcileRunsWithEvidence } from "@takeoff-core/takeoffEvidenceRunReconciliation.mjs";
 import { evaluateTakeoffFabricationRules } from "@takeoff-core/takeoffFabricationRules.mjs";
 import { makeTakeoffRun } from "@takeoff-core/takeoffContract.mjs";
@@ -635,6 +636,10 @@ export default function TakeoffLabApp() {
       ...prev,
       rooms: prev.rooms.map((r, ri) => ri !== roomIdx ? r : { ...r, ...patch })
     }));
+  }, []);
+
+  const handleApplyValidationFix = useCallback((nextDraft: TakeoffResult) => {
+    setEditDraft(nextDraft);
   }, []);
 
   const handlePatchArea = useCallback((roomIdx: number, areaIdx: number, patch: AreaPatch) => {
@@ -1373,6 +1378,11 @@ export default function TakeoffLabApp() {
                 </button>
               )}
             </div>
+            <TakeoffValidationFixPanel
+              editDraft={editDraft}
+              validation={validation}
+              onApplyDraft={handleApplyValidationFix}
+            />
             <TakeoffReviewWorkbench
               editDraft={editDraft}
               dimensionEvidence={dimensionEvidence}
@@ -1429,6 +1439,8 @@ export default function TakeoffLabApp() {
                       is recorded when you changed AI values).
                       <strong> Approve takeoff</strong> marks the workspace approved after server validation —
                       it does not create a quote or import into Internal Estimate.
+                      Review status (<code>needs_review</code> / <code>approved</code>) updates automatically
+                      when you save or approve — there is no manual status field.
                     </p>
                     {hasEdits ? (
                       <p className="save-panel-note">

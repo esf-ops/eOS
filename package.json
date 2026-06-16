@@ -91,6 +91,7 @@
     "eos:test:takeoff-exayard-client": "node backend-core/src/takeoff/exayardClient.test.mjs && node backend-core/src/takeoff/exayardTakeoffResume.test.mjs",
     "eos:test:takeoff-evidence-reconciliation": "node backend-core/src/takeoff/takeoffEvidenceRunReconciliation.test.mjs",
     "eos:test:takeoff-fabrication-rules": "node backend-core/src/takeoff/takeoffFabricationRules.test.mjs",
+    "eos:test:takeoff-validation-fixes": "node backend-core/src/takeoff/takeoffValidationFixes.test.mjs",
     "eos:test:takeoff-measurement-calc": "node backend-core/src/takeoff/takeoffMeasurementCalc.test.mjs",
     "eos:test:moraware-report-feed": "node backend-core/src/moraware/reportFeeds/reportFeedParser.test.mjs",
     "eos:test:moraware-report-feed-promotion": "node backend-core/src/moraware/reportFeeds/promoteSalesWorksheetFacts.test.mjs",

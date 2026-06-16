@@ -35,6 +35,10 @@ import {
   getResultById,
 } from "./takeoffWorkspaceService.mjs";
 import { buildSpec73Fixture } from "./fixtures/spec73.fixture.mjs";
+import {
+  applyCutoutExclusionFix,
+  listCutoutExclusionFixes,
+} from "./takeoffValidationFixes.mjs";
 
 // ── Test IDs ──────────────────────────────────────────────────────────────────
 
@@ -1411,6 +1415,42 @@ function makeMockSupabase({
     "validation errors block approval"
   );
   console.log("ok: approveTakeoffJob — validation errors block approval");
+}
+
+{
+  const badTakeoff = makeApprovableTakeoff();
+  badTakeoff.rooms[0].areas[0].exclusions = [{ label: "Undermount sink cutout", sfExcluded: 4.5 }];
+  const fixes = listCutoutExclusionFixes(badTakeoff);
+  assert.equal(fixes.length, 1);
+
+  const { supabase } = makeMockSupabase({
+    fileRow: makeFileRow(),
+    jobRow: makeJobRow(),
+    resultRows: [makeResultRow({ normalized_takeoff_json: badTakeoff })],
+  });
+
+  await assert.rejects(
+    () => approveTakeoffJob({
+      supabase,
+      organizationId: ORG_ID,
+      userId: USER_ID,
+      takeoffJobId: JOB_ID,
+      takeoffResult: badTakeoff,
+    }),
+    /Validation errors must be resolved/i,
+    "approve blocked before cutout fix"
+  );
+
+  const fixedTakeoff = applyCutoutExclusionFix(badTakeoff, fixes[0], "move_to_cutouts");
+  const result = await approveTakeoffJob({
+    supabase,
+    organizationId: ORG_ID,
+    userId: USER_ID,
+    takeoffJobId: JOB_ID,
+    takeoffResult: fixedTakeoff,
+  });
+  assert.equal(result.reviewStatus, "approved", "approve succeeds after cutout fix");
+  console.log("ok: approveTakeoffJob — blocked before cutout fix, passes after fix");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

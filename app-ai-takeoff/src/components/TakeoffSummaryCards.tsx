@@ -32,18 +32,39 @@ function SummaryCard({
   );
 }
 
+function importReadinessCopy(importPlan: TakeoffImportPlan): { value: string; sub: string; accent: "green" | "yellow" | "default" } {
+  const importDisabledNote =
+    "Import to Internal Estimate remains disabled until a future release.";
+
+  if (!importPlan.canImport) {
+    const statusBlocked = importPlan.blockedReason?.includes('set to "reviewed"')
+      || importPlan.blockedReason?.includes("Takeoff status");
+    return {
+      value: "Blocked",
+      accent: "yellow",
+      sub: statusBlocked
+        ? `Approve this takeoff after resolving validation issues. ${importDisabledNote}`
+        : `${importPlan.blockedReason ?? "Resolve validation issues first."} ${importDisabledNote}`,
+    };
+  }
+
+  if (importPlan.warnings.length > 0) {
+    return {
+      value: "Preview only",
+      accent: "yellow",
+      sub: `Import plan mapped with ${importPlan.warnings.length} warning${importPlan.warnings.length !== 1 ? "s" : ""}. ${importDisabledNote}`,
+    };
+  }
+
+  return {
+    value: "Preview only",
+    accent: "default",
+    sub: `Mapped for preview only. ${importDisabledNote}`,
+  };
+}
+
 export default function TakeoffSummaryCards({ computed, importPlan }: Props) {
-  const importReady = importPlan.canImport && importPlan.warnings.length === 0;
-  const importAccent = importPlan.canImport
-    ? importPlan.warnings.length === 0
-      ? "green"
-      : "yellow"
-    : "yellow";
-  const importLabel = importPlan.canImport
-    ? importPlan.warnings.length === 0
-      ? "Ready"
-      : `Ready with ${importPlan.warnings.length} warning${importPlan.warnings.length !== 1 ? "s" : ""}`
-    : "Blocked";
+  const importState = importReadinessCopy(importPlan);
 
   return (
     <div className="summary-grid">
@@ -67,9 +88,9 @@ export default function TakeoffSummaryCards({ computed, importPlan }: Props) {
       />
       <SummaryCard
         label="Import readiness"
-        value={importLabel}
-        accent={importAccent}
-        sub={importPlan.canImport ? "Status: reviewed" : importPlan.blockedReason ?? "—"}
+        value={importState.value}
+        accent={importState.accent}
+        sub={importState.sub}
       />
     </div>
   );

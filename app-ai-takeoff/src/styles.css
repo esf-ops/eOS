@@ -909,6 +909,29 @@ details[open] > .lab-section-summary::before { transform: rotate(90deg); }
 }
 .takeoff-inbox-approved { font-size: 11px; color: var(--eos-success); font-weight: 600; }
 
+/* ── Validation fix panel ──────────────────────────────────────────────────── */
+.validation-fix-panel {
+  margin-bottom: 16px;
+  border: 1px solid var(--eos-warn-border, #f59e0b);
+  background: var(--eos-warn-soft, #fffbeb);
+}
+.validation-fix-header { padding: 16px 20px 0; }
+.validation-fix-title { margin: 0 0 6px; font-size: 14px; font-weight: 700; color: var(--eos-ink); }
+.validation-fix-desc { margin: 0 0 12px; font-size: 12px; color: var(--eos-ink-mid); line-height: 1.5; }
+.validation-fix-list { list-style: none; margin: 0; padding: 0 20px 16px; display: flex; flex-direction: column; gap: 12px; }
+.validation-fix-item {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 12px 14px; border-radius: var(--r-sm);
+  background: var(--eos-surface); border: 1px solid var(--eos-line);
+}
+.validation-fix-item-title { font-size: 13px; font-weight: 700; color: var(--eos-ink); display: block; }
+.validation-fix-item-path {
+  display: block; margin-top: 2px; font-size: 11px; font-family: ui-monospace, monospace; color: var(--eos-ink-muted);
+}
+.validation-fix-item-message { margin: 8px 0 0; font-size: 12px; color: var(--eos-ink-mid); line-height: 1.5; }
+.validation-fix-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.validation-fix-btn { padding: 6px 12px; font-size: 12px; }
+
 /* ── Auth — topbar right section ─────────────────────────────────────────── */
 .lab-topbar-right {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
