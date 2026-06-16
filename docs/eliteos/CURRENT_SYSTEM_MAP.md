@@ -134,7 +134,9 @@ Scripts under `backend-core/supabase/` define install order and intent; **produc
 | **`quote_submission_payloads`** | From `eos_quote_public_internal_partner_foundation.sql` | **Yes** when enabled | Raw/normalized submission bodies | Internal/support; may warn if missing in pipeline UI. |
 | **`quote_forecast_events`** | **Yes** | **Varies** | Forecasting / pipeline analytics | Depends on writers. |
 | **`quote_monday_sync_log`** | **Yes** | **Yes** for public | Monday diagnostics | Internal Monday uses separate board env. |
-| **`quote_files`** | Schema present | **Unknown / partial** | Attachments / takeoff foundation | `eos_quote_takeoff_visual_foundation.sql` exists—confirm apply status. |
+| **`quote_files`** | **Yes** (verified live) | **Yes** (AI Takeoff Lab) | File metadata for takeoff + future quote attachments | Org-scoped; `storage_path` never returned to browser. |
+| **`quote_takeoff_jobs`**, **`quote_takeoff_results`**, **`quote_file_events`** | **Yes** (verified live) | **Yes** (AI Takeoff Lab) | Takeoff job lifecycle, AI result storage, file audit | Nullable `quote_id` on pre-quote Lab flows; RLS enabled, **no policies** — backend service role + Express gates. |
+| **`eliteos-quote-files` bucket** | **Yes** (private) | **Yes** | Plan bytes for takeoff upload | Signed URLs only; not public. |
 
 ### Pricing Admin foundation (newer tables)
 
@@ -160,6 +162,15 @@ Scripts under `backend-core/supabase/` define install order and intent; **produc
 ---
 
 ## 7. Quote platform current state
+
+### AI Takeoff Lab (`app-ai-takeoff`)
+
+- **Live internal head** at **`takeoff.eliteosfab.com`** (slug `ai_takeoff`); staff auth + head access required.
+- **Supabase:** `quote_files`, `quote_takeoff_jobs`, `quote_takeoff_results`, `quote_file_events`, private `eliteos-quote-files` bucket — **verified live**.
+- **Shipped:** run inbox (`GET /api/takeoff-jobs`), rich job detail, correction audit, approve workflow, validation fix panel for cutout-in-exclusions.
+- **Boundaries:** AI **review-only**; **no quote create/mutate**; **Internal Estimate import disabled**; approved takeoff = future handoff only.
+- **Access model:** RLS on tables, **zero policies**; backend service role + Express auth/head gates.
+- **Details:** [`ai-takeoff-foundation.md`](./ai-takeoff-foundation.md), `FEATURE_DECISIONS.md` §87.
 
 ### Public Quote (`app-quote`)
 
@@ -279,7 +290,8 @@ Scripts under `backend-core/supabase/` define install order and intent; **produc
 
 ### Priority 4 — future modules
 
-- Partner Quote Head, AI Takeoff, Moraware sold-job handoff, QuickBooks sold-job workflow, dealer/partner portals (see master head map).
+- **AI Takeoff Lab** (`app-ai-takeoff`) — **live** for internal plan review/approve; Internal Estimate import still **future** (see [`ai-takeoff-foundation.md`](./ai-takeoff-foundation.md)).
+- Partner Quote Head, Moraware sold-job handoff, QuickBooks sold-job workflow, dealer/partner portals (see master head map).
 
 ---
 

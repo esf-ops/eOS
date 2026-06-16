@@ -1300,3 +1300,18 @@
 | **Tests** | `slabInventoryRetirement.test.mjs` (planner, low-count guard, override, payload builders, update-only DB helper, scoped fetch). Extended `slabsmithPersistence.test.mjs` (retire missing, no-retire on failed/dry-run/low-count, override, reactivation, org/source/company scoping, no deletes, sync-run counts). Extended `slabsmithIngestApi.test.mjs` (retirement metrics in response). |
 | **Impacted files/docs** | `backend-core/src/slabInventory/slabInventoryRetirement.js` (+ test), `backend-core/src/slabsmith/slabsmithPersistence.js` (+ test), `backend-core/src/slabsmith/slabsmithIngestApi.js` (+ test), `backend-core/supabase/eliteos_slab_inventory_retirement_audit.sql`, `app-slab-inventory/src/SlabInventoryApp.tsx` (copy), `package.json` (`eos:test:slab-inventory-retirement`), `docs/slabos/slabsmith-local-sync-v1.md`, this entry. |
 | **Revisit trigger** | When SlabCloud full-snapshot syncs (manual or hourly) are ready for the same reconciliation under a separate audit; when a staff-facing retired-inventory view is needed; when blocked low-count syncs should set a `needs_review` status. |
+
+### 87. AI Takeoff Lab — Phase B/C review workflow + validation fix panel (2026-06-16)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-06-16 |
+| **Decision** | **AI Takeoff Lab** (`app-ai-takeoff`, slug `ai_takeoff`) is a **live internal head** for plan upload, AI draft extraction, and **estimator review/approve** — not quote creation. Supabase Phase 1 foundation is **verified live**: `quote_files`, `quote_takeoff_jobs`, `quote_takeoff_results`, `quote_file_events`, private `eliteos-quote-files` bucket. |
+| **Phase B (run inbox)** | `GET /api/takeoff-jobs` org-scoped run list/inbox; richer `GET /api/takeoff-jobs/:id` (approval metadata, result counts, processing placeholders). UI: `TakeoffRunInbox`. |
+| **Phase C (review/approve)** | `POST /api/takeoff-jobs/:id/corrections` appends `_corrections[]` audit in `raw_ai_result_json` and resets approval to `needs_review`. `POST /api/takeoff-jobs/:id/approve` server-recomputes, runs validation + QA gate (`do_not_import` blocks), sets job/result `review_status=approved` — **does not create or mutate quotes**. UI separates **Save reviewed draft** vs **Approve takeoff** (status is automatic; no manual dropdown). |
+| **Validation fix panel** | UI + `takeoffValidationFixes.mjs` for cutout-like labels misplaced in `area.exclusions[]` (`move_to_cutouts`, `move_to_notes`, `remove`) so approval is not blocked on `CUTOUT_DEDUCTED_FROM_MATERIAL` / `CUTOUT_IN_EXCLUSIONS_WARNING` with no fix path. |
+| **Import boundary** | **Internal Estimate import remains disabled.** `planTakeoffImport` is preview-only. Approved takeoff is documented as a **future handoff point**, not a live import. AI output stays **review-only** after extraction. |
+| **Auth / RLS** | RLS **enabled** on takeoff/file tables with **zero policies**. Current architecture: backend **service role** + Express `requireAuth()` + `requireHeadAccess("ai_takeoff")` — not browser-direct Supabase reads. |
+| **Future phases** | Page/PDF preview, async/page progress artifacts, provider/model pipeline hardening, eventual **gated** Internal Estimate import from approved takeoff. |
+| **Impacted files/docs** | `backend-core/src/takeoff/takeoffWorkspaceService.mjs`, `takeoffWorkspaceRoutes.js`, `takeoffValidationFixes.mjs` (+ tests), `app-ai-takeoff/` (inbox, review UI, validation fix panel), `docs/eliteos/ai-takeoff-foundation.md`, this entry. |
+| **Revisit trigger** | When Internal Estimate import slice is approved; when RLS policies replace service-role-only access; when async AI processing or page artifacts ship. |

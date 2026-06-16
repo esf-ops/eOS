@@ -1,8 +1,41 @@
 # AI Takeoff Foundation
 
-**Status:** Foundation built (2026-06-01)  
-**Head:** AI Takeoff Head (planned, `Quote / Revenue` category)  
-**See also:** [`eliteOS-master-head-map.md`](./eliteOS-master-head-map.md) · [`FEATURE_DECISIONS.md`](./FEATURE_DECISIONS.md) entry **48**
+**Status:** Live internal head — Supabase foundation verified live; run inbox, approval workflow, and validation fix panel shipped (2026-06-16)  
+**Head:** AI Takeoff Lab (`app-ai-takeoff`, slug `ai_takeoff`, `Quote / Revenue`) — **`https://takeoff.eliteosfab.com`**  
+**See also:** [`eliteOS-master-head-map.md`](./eliteOS-master-head-map.md) · [`FEATURE_DECISIONS.md`](./FEATURE_DECISIONS.md) entries **48**, **54**, **87**
+
+---
+
+## Current operational status (2026-06-16)
+
+| Area | Status |
+|------|--------|
+| **Head / UI** | `app-ai-takeoff` deployed at `takeoff.eliteosfab.com`; protected by `requireAuth()` + `requireHeadAccess("ai_takeoff")`. |
+| **Supabase tables** | **Verified live:** `quote_files`, `quote_takeoff_jobs`, `quote_takeoff_results`, `quote_file_events` (eliteOS takeoff schema; nullable `quote_id` on pre-quote Lab flows). |
+| **Storage** | **Verified live:** private bucket `eliteos-quote-files`; bytes never returned to browser; downloads via signed URLs only. |
+| **RLS** | Enabled on takeoff/file tables; **no RLS policies yet**. Current architecture: backend **service role** + Express auth/head gates (not browser-direct Supabase reads). |
+| **AI extraction** | Review-only — `review_status` stays `needs_review` after AI draft; server recomputes all sf; no quote mutation. |
+| **Import** | **Disabled.** `planTakeoffImport` runs for preview only. Approved takeoff is a **future handoff point**, not a live Internal Estimate import. |
+
+**Shipped APIs (org from server auth context only):**
+
+| Method | Route | Purpose |
+|--------|-------|---------|
+| GET | `/api/takeoff-jobs` | Org run inbox/list (filters, pagination) |
+| GET | `/api/takeoff-jobs/:id` | Rich job/workspace status (`canApprove`, `approvedAt`, latest result metadata, …) |
+| POST | `/api/takeoff-jobs/:id/results` | Save reviewed draft |
+| POST | `/api/takeoff-jobs/:id/corrections` | Save estimator corrections + `_corrections[]` audit in result JSON |
+| POST | `/api/takeoff-jobs/:id/approve` | Validate + QA-gate + mark job/result approved (no quote create) |
+| GET/POST | `/api/takeoff-jobs/:id/results/*` | Latest, list, by-id (existing) |
+| POST | `/api/takeoff-jobs/:id/generate-ai-draft` | AI extraction (env-gated; not called from docs/tests) |
+
+**Shipped UI workflows:**
+
+- **Takeoff runs inbox** — recent jobs, status/review chips, deep-link `?takeoffJobId=`
+- **Review workflow** — separate **Save reviewed draft** vs **Approve takeoff** (status updates automatically; no manual status dropdown)
+- **Validation fix panel** — one-click fixes for cutout-like labels misplaced in `area.exclusions[]` (move to cutouts/notes or remove)
+
+**Future phases (not started):** page/PDF preview, async/page progress artifacts, provider/model pipeline hardening, gated Internal Estimate import from approved takeoff.
 
 ---
 
@@ -23,7 +56,7 @@ The Internal Estimate beta is a hand-entry quoting tool for staff. AI Takeoff wi
 | Input source | Manual entry by estimator | Structured extraction from plan/PDF |
 | Measurement authority | Estimator | eliteOS recomputed from raw dimensions |
 | Error correction | Estimator adjusts fields | Validator flags discrepancies before import |
-| Release gate | Live beta (staff only) | Foundation only — no UI yet |
+| Release gate | Live beta (staff only) | Live internal head (`ai_takeoff`); import to Internal Estimate **disabled** |
 | Pricing | Uses `quoteCalculator.js` | Does NOT touch pricing — pure measurement |
 
 Keeping them separate means AI Takeoff can be built, tested, and iterated without risking Internal Estimate beta stability.
@@ -608,11 +641,11 @@ See [`quote-files-storage.md`](./quote-files-storage.md) for the full design.
 | `quote_file_events` | Append-only audit trail for file lifecycle and handoff actions |
 | `quote_takeoff_jobs` (extended) | AI processing job, now with nullable `quote_id` for pre-quote flows |
 | `quote_takeoff_results` (extended) | Full contract JSON stored alongside existing sparse measurement rows |
-| `eliteos-quote-files` bucket | Private Supabase Storage bucket (not yet created — draft only) |
+| `eliteos-quote-files` bucket | Private Supabase Storage bucket for all quote/takeoff file bytes |
 | `buildQuoteFileStoragePath()` | Pure helper for deterministic storage path construction |
 | `sanitizeStorageFilename()` | Pure filename sanitizer (path traversal prevention) |
 
-**Status (2026-06-01):** SQL draft written, not applied. Bucket not created. No upload UI. No Supabase writes.
+**Status (2026-06-16):** Tables and bucket **verified live** in production Supabase (eliteOS takeoff schema applied). Upload UI + takeoff job/result writes active via AI Takeoff Lab backend routes. RLS enabled with **zero policies** — access path is service role + Express auth/head gates (see [Current operational status](#current-operational-status-2026-06-16)). Additive SQL drafts in repo are **not required** for core foundation; do not re-apply without an explicit migration ticket.
 
 ---
 

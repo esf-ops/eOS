@@ -64,6 +64,7 @@ Optional Vite env: **`VITE_ELITEOS_AUTH_COOKIE_DOMAIN`** — set to `false` to f
 | **Quote Library Head (`app-quote-library`)** | **`https://quotes.eliteosfab.com`** (plural hostname — not `quote-library.*`); set **`HEAD_URL_QUOTE_LIBRARY`**. **eliteOS Quote Library Head** — staff auth + **`quote_library`** head access; read/update shared **`quote_headers`** (search, account grouping, status workflow, handoff doc generation). Distinct from **Public Quote** (`quote.…`) and **Internal Estimate** (`internal.…`). |
 | **Pricing Admin Head (`app-pricing-admin`)** | **`https://pricing.eliteosfab.com`**; **`HEAD_URL_PRICING_ADMIN`**. **eliteOS Pricing Admin Head** — login + `pricing_admin` head access and route-level role gates on `/api/pricing-admin/*`. |
 | **Custom Quote Head (`app-custom-quote`)** | **`https://custom.eliteosfab.com`** (recommended); set **`HEAD_URL_CUSTOM_QUOTE`**. **eliteOS Custom Quote Head** — ESF-only off-program material quotes; slug **`custom_quote`**; **`quote_source: custom_quote`**. Not dealer/partner/public. |
+| **AI Takeoff Lab Head (`app-ai-takeoff`)** | **`https://takeoff.eliteosfab.com`**; set **`HEAD_URL_AI_TAKEOFF`**. **eliteOS AI Takeoff Lab** — slug **`ai_takeoff`**; plan upload, AI draft extraction (review-only), estimator review/approve workflow. **No quote mutation; Internal Estimate import disabled.** See [`ai-takeoff-foundation.md`](./ai-takeoff-foundation.md). |
 | **Sales Dashboard Head (`app-sales`)** | **`https://sales.eliteosfab.com`**; set **`HEAD_URL_SALES`** on Brain and deploy `app-sales` with `VITE_BACKEND_URL`, `VITE_HOME_URL=https://www.eliteosfab.com`, `VITE_SUPABASE_URL`, and `VITE_SUPABASE_ANON_KEY`. **eliteOS Sales Head** — staff auth + `sales` head access. Current status is **scaffolded / deployed preview** until approved account attribution mappings and dashboard parity are complete. |
 | **Org Directory Head (`app-org-directory`)** | **`https://org.eliteosfab.com`** or **`https://org-directory.eliteosfab.com`**; set **`HEAD_URL_ORG_DIRECTORY`**. **eliteOS Org Directory** — planning org chart (departments, seats, reporting lines, recommended head tags). Requires **`org_directory`** head access; does **not** change `user_head_access`. |
 | **eliteOS Brain / API** | https://backend-core-six.vercel.app |
@@ -142,7 +143,14 @@ The homeowner-facing wizard supports (or will support):
 - **Persistence:** authenticated **`/api/custom-quotes/*`** saves **`quote_source: custom_quote`** via **`persistQuoteSubmission`** (dedicated save path — **not** `processInternalQuoteSave`).
 - **Economics:** markup/uplift over **total cost basis** (material + freight + fabrication + install/other): Retail **×1.25**, Wholesale **×1.15** — **not** gross-margin inversion math.
 - **Quote Library:** all custom quotes appear in the unified library; open/revise behavior is Custom-Quote-specific (no Internal Estimate deep link).
-- **Dealer Tool / AI takeoff:** documented future direction only (`FEATURE_DECISIONS.md` §85).
+
+### AI Takeoff Lab (staff — plan takeoff review)
+
+- **Head:** **`app-ai-takeoff`** at **`takeoff.eliteosfab.com`** (slug `ai_takeoff`). Supabase foundation verified: `quote_files`, `quote_takeoff_jobs`, `quote_takeoff_results`, `quote_file_events`, private `eliteos-quote-files` bucket.
+- **Workflows:** run inbox/list API, rich job detail, correction audit (`POST …/corrections`), approve takeoff (`POST …/approve`), validation fix panel for cutout-in-exclusions issues.
+- **Safety:** AI output is **review-only**; **no quote create/mutate**; **Internal Estimate import disabled** (approved takeoff is a future handoff point only). RLS enabled with **no policies** — service role + Express auth/head gates.
+- **Future:** page/PDF preview, async processing, page artifacts, provider/model hardening, gated Internal Estimate import. Dealer upload remains **future** (`FEATURE_DECISIONS.md` §85).
+- **Details:** [`ai-takeoff-foundation.md`](./ai-takeoff-foundation.md), `FEATURE_DECISIONS.md` §87.
 
 ---
 
