@@ -5,6 +5,8 @@ import type { TakeoffImportPlan } from "@takeoff-core/takeoffImportPlanner.mjs";
 interface Props {
   computed: TakeoffComputedMeasurements;
   importPlan: TakeoffImportPlan;
+  /** Workspace review status when in a saved takeoff job. */
+  reviewStatus?: string | null;
 }
 
 function SummaryCard({
@@ -32,18 +34,28 @@ function SummaryCard({
   );
 }
 
-function importReadinessCopy(importPlan: TakeoffImportPlan): { value: string; sub: string; accent: "green" | "yellow" | "default" } {
-  const importDisabledNote =
-    "Import to Internal Estimate remains disabled until a future release.";
+function importReadinessCopy(
+  importPlan: TakeoffImportPlan,
+  reviewStatus?: string | null
+): { value: string; sub: string; accent: "green" | "yellow" | "default" } {
+  const importDisabledNote = "Internal Estimate import is not enabled yet.";
+
+  if (reviewStatus === "approved") {
+    return {
+      value: "Approved",
+      accent: "green",
+      sub: `Approved for future import — ${importDisabledNote}`,
+    };
+  }
 
   if (!importPlan.canImport) {
     const statusBlocked = importPlan.blockedReason?.includes('set to "reviewed"')
       || importPlan.blockedReason?.includes("Takeoff status");
     return {
-      value: "Blocked",
+      value: "Needs review",
       accent: "yellow",
       sub: statusBlocked
-        ? `Approve this takeoff after resolving validation issues. ${importDisabledNote}`
+        ? `Review, fix issues, then approve this takeoff. ${importDisabledNote}`
         : `${importPlan.blockedReason ?? "Resolve validation issues first."} ${importDisabledNote}`,
     };
   }
@@ -52,19 +64,19 @@ function importReadinessCopy(importPlan: TakeoffImportPlan): { value: string; su
     return {
       value: "Preview only",
       accent: "yellow",
-      sub: `Import plan mapped with ${importPlan.warnings.length} warning${importPlan.warnings.length !== 1 ? "s" : ""}. ${importDisabledNote}`,
+      sub: `Review, fix issues, then approve this takeoff. ${importPlan.warnings.length} import-mapping warning${importPlan.warnings.length !== 1 ? "s" : ""}. ${importDisabledNote}`,
     };
   }
 
   return {
     value: "Preview only",
     accent: "default",
-    sub: `Mapped for preview only. ${importDisabledNote}`,
+    sub: `Review, fix issues, then approve this takeoff. ${importDisabledNote}`,
   };
 }
 
-export default function TakeoffSummaryCards({ computed, importPlan }: Props) {
-  const importState = importReadinessCopy(importPlan);
+export default function TakeoffSummaryCards({ computed, importPlan, reviewStatus }: Props) {
+  const importState = importReadinessCopy(importPlan, reviewStatus);
 
   return (
     <div className="summary-grid">

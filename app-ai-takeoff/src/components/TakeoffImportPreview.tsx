@@ -114,8 +114,8 @@ export default function TakeoffImportPreview({ importPlan }: Props) {
           Import to Internal Estimate — coming later
         </button>
         <span className="import-disabled-note">
-          Import is intentionally disabled in the Lab. Reviewed takeoffs will be importable
-          in a future slice via the "Import from Takeoff" action in Internal Estimate.
+          Import is intentionally disabled in the Lab. Approved takeoffs will be importable
+          in a future slice — Internal Estimate import is not enabled yet.
         </span>
       </div>
     </div>

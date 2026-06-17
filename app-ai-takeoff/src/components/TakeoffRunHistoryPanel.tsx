@@ -54,6 +54,8 @@ export interface TakeoffRunHistoryPanelProps {
   currentResultId: string | null;
   currentComputed: TakeoffComputedMeasurements | null;
   refreshKey?:     number;
+  /** When true, omit the inner panel title (parent supplies section header). */
+  embedded?:       boolean;
   onLoadRun: (
     result:   TakeoffResult,
     meta:     {
@@ -102,6 +104,7 @@ export default function TakeoffRunHistoryPanel({
   currentResultId,
   currentComputed,
   refreshKey = 0,
+  embedded = false,
   onLoadRun,
 }: TakeoffRunHistoryPanelProps) {
   const [runs,      setRuns]      = useState<RunSummary[]>([]);
@@ -193,11 +196,18 @@ export default function TakeoffRunHistoryPanel({
   const refBs = currentComputed?.backsplashExactSf ?? null;
 
   return (
-    <div className="run-history-panel lab-card">
-      <div className="run-history-header">
-        <span className="run-history-title">AI extraction history</span>
-        <span className="run-history-count">{runs.length} run{runs.length !== 1 ? "s" : ""} · newest first</span>
-      </div>
+    <div className={`run-history-panel lab-card${embedded ? " run-history-panel--embedded" : ""}`}>
+      {!embedded ? (
+        <div className="run-history-header">
+          <span className="run-history-title">AI extraction history</span>
+          <span className="run-history-count">{runs.length} run{runs.length !== 1 ? "s" : ""} · newest first</span>
+        </div>
+      ) : currentResultId ? (
+        <p className="run-history-loaded-note" role="status">
+          <span className="run-history-loaded-badge">Currently loaded</span>
+          <span className="run-history-loaded-hint">Switch to another extraction run below if needed.</span>
+        </p>
+      ) : null}
 
       <table className="run-history-table">
         <thead>

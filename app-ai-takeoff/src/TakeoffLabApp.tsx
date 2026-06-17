@@ -993,19 +993,49 @@ export default function TakeoffLabApp() {
   const { result, computed, validation, importPlan } = activeState;
 
   const showPlanPreviewColumn = Boolean(takeoffJobId && planFileMeta && authToken);
+  const isActiveReviewMode = Boolean(takeoffJobId && hasActiveSource && authToken);
+  const hasBlockingValidation = Boolean(
+    hasActiveSource && (validation.hasErrors || (validation.errorCount ?? 0) > 0)
+  );
+  const isTakeoffApproved = workspaceReview?.reviewStatus === "approved";
+  const hasQaBlocker = qaGate?.status === "do_not_import";
 
   const reviewSections = hasActiveSource ? (
     <>
+          {isActiveReviewMode && (
+            <div className="takeoff-active-review-banner" role="status">
+              <div className="takeoff-active-review-banner-main">
+                <h2 className="takeoff-active-review-title">Active takeoff review</h2>
+                <p className="takeoff-active-review-next">
+                  {isTakeoffApproved
+                    ? "Approved for future import — Internal Estimate import is not enabled yet."
+                    : hasBlockingValidation || hasQaBlocker
+                      ? "Fix validation and QA blockers below, then approve this takeoff."
+                      : unresolvedCount > 0
+                        ? "Complete the review checklist, then save and approve."
+                        : "Review measurements beside the plan, then save and approve this takeoff."}
+                </p>
+              </div>
+              {planFilename ? (
+                <p className="takeoff-active-review-file">{planFilename}</p>
+              ) : null}
+            </div>
+          )}
+
           {/* ── 1. Measurement summary ──────────────────────────────────── */}
-          <section className="lab-section">
+          <section className="lab-section lab-section--review-primary">
             <h2 className="lab-section-title">Measurement summary</h2>
-            <TakeoffSummaryCards computed={computed} importPlan={importPlan} />
+            <TakeoffSummaryCards
+              computed={computed}
+              importPlan={importPlan}
+              reviewStatus={workspaceReview?.reviewStatus}
+            />
           </section>
 
           {/* ── 2. Takeoff QA result ─────────────────────────────────────── */}
           {qaGate && (
-            <section className="lab-section">
-              <h2 className="lab-section-title">Takeoff QA result</h2>
+            <section className="lab-section lab-section--review-primary">
+              <h2 className="lab-section-title">QA &amp; blockers</h2>
               <TakeoffQaGatePanel qaGate={qaGate} fabricationFindings={fabricationFindings.length > 0 ? fabricationFindings : undefined} />
             </section>
           )}
@@ -1055,10 +1085,10 @@ export default function TakeoffLabApp() {
           })()}
 
           {/* ── 4. Review measurements (PRIMARY) ─────────────────────────── */}
-          <section className="lab-section">
+          <section className="lab-section lab-section--review-primary">
             <div className="lab-section-header">
               <div>
-                <h2 className="lab-section-title" style={{ margin: 0 }}>Review measurements before saving</h2>
+                <h2 className="lab-section-title" style={{ margin: 0 }}>Review measurements</h2>
                 <p className="lab-section-desc" style={{ marginTop: 4, marginBottom: 0 }}>
                   Edit dimensions, exclude incorrect runs, or mark flagged items reviewed.
                   The measurement totals above update instantly.
@@ -1091,10 +1121,10 @@ export default function TakeoffLabApp() {
 
           {/* ── 5. Review workflow ───────────────────────────────────────── */}
           {takeoffJobId && authToken && (
-            <section className="lab-section">
-              <h2 className="lab-section-title">Review workflow</h2>
+            <section className="lab-section lab-section--review-actions">
+              <h2 className="lab-section-title">Save &amp; approve</h2>
               <div className="save-panel lab-card">
-                {workspaceReview?.reviewStatus === "approved" && workspaceReview.approvedAt ? (
+                {isTakeoffApproved && workspaceReview?.approvedAt ? (
                   <div className="save-panel-approved" role="status">
                     <span className="status-chip status-approved">Approved</span>
                     <span>
@@ -1103,10 +1133,14 @@ export default function TakeoffLabApp() {
                         dateStyle: "short",
                         timeStyle: "short",
                       })}
-                      . Ready for future Internal Estimate export — no quote created yet.
+                      . Approved for future import — Internal Estimate import is not enabled yet.
                     </span>
                   </div>
-                ) : null}
+                ) : (
+                  <div className="save-panel-next-action" role="status">
+                    Review, fix issues, then approve this takeoff.
+                  </div>
+                )}
                 {unresolvedCount > 0 && (
                   <div className="save-panel-warning" role="alert">
                     <span className="save-panel-warning-icon">⚠</span>
@@ -1323,7 +1357,10 @@ export default function TakeoffLabApp() {
           )}
 
           {/* ── Validation diagnostics ───────────────────────────────────── */}
-          <details className="lab-section lab-section-collapsible">
+          <details
+            className="lab-section lab-section-collapsible"
+            open={hasBlockingValidation || undefined}
+          >
             <summary className="lab-section-summary">
               <span className="lab-section-title" style={{ margin: 0 }}>Validation diagnostics</span>
               <span className="lab-section-summary-note">
@@ -1344,9 +1381,11 @@ export default function TakeoffLabApp() {
             <summary className="lab-section-summary">
               <span className="lab-section-title" style={{ margin: 0 }}>Import preview</span>
               <span className="lab-section-summary-note">
-                {importPlan.canImport
-                  ? `${importPlan.rooms.length} room${importPlan.rooms.length !== 1 ? "s" : ""} mapped`
-                  : "blocked — see diagnostics"}
+                {isTakeoffApproved
+                  ? "Approved for future import — not enabled yet"
+                  : importPlan.canImport
+                    ? `${importPlan.rooms.length} room${importPlan.rooms.length !== 1 ? "s" : ""} mapped`
+                    : "blocked — resolve issues first"}
               </span>
             </summary>
             <div style={{ marginTop: 12 }}>
@@ -1501,7 +1540,11 @@ export default function TakeoffLabApp() {
 
       {/* ── Main content ──────────────────────────────────────────── */}
       <main className="main" role="main">
-        <div className={`lab-main-inner${takeoffJobId && planFileMeta ? " lab-main-inner--review" : ""}`}>
+        <div
+          className={`lab-main-inner${
+            showPlanPreviewColumn && hasActiveSource ? " lab-main-inner--active-review" : ""
+          }${takeoffJobId && planFileMeta ? " lab-main-inner--review" : ""}`}
+        >
 
           {/* ── Sign-in panel (shown only when not authenticated) ─────── */}
           {authChecked && !authToken && (
@@ -1567,58 +1610,154 @@ export default function TakeoffLabApp() {
             </section>
           )}
 
+          {/* ── Active review zone (primary when workspace + plan loaded) ── */}
+          {showPlanPreviewColumn ? (
+            <div className="takeoff-active-review-zone">
+              <div className="takeoff-review-layout">
+                <aside className="takeoff-review-preview-col">
+                  <TakeoffPlanPreviewPanel
+                    token={authToken}
+                    file={planFileMeta}
+                    refreshKey={takeoffJobId}
+                  />
+                </aside>
+                <div className="takeoff-review-main-col">
+                  {reviewSections ?? (
+                    <section className="lab-section lab-section--review-primary">
+                      <h2 className="lab-section-title">Review measurements</h2>
+                      <p className="lab-section-desc">
+                        Generate an AI draft from <strong>Source plan file</strong> below, or load a
+                        saved result from <strong>AI extraction history</strong>, to review measurements
+                        beside this plan.
+                      </p>
+                    </section>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {/* ── Takeoff runs inbox ─────────────────────────────────────── */}
           {authToken ? (
-            <section className="lab-section lab-section--card">
-              <h2 className="lab-section-title">Takeoff runs</h2>
-              <TakeoffRunInbox
-                token={authToken}
-                selectedJobId={takeoffJobId}
-                refreshKey={historyRefreshKey}
-                onSelectJob={handleSelectRun}
-              />
-            </section>
+            takeoffJobId ? (
+              <details
+                className="lab-section lab-section-collapsible lab-section--compact"
+                open={false}
+              >
+                <summary className="lab-section-summary">
+                  <span className="lab-section-title" style={{ margin: 0 }}>Takeoff runs</span>
+                  <span className="lab-section-summary-note">
+                    {planFilename ?? "Active workspace"} · switch runs or refresh
+                  </span>
+                </summary>
+                <div className="lab-section-collapsible-body">
+                  <TakeoffRunInbox
+                    token={authToken}
+                    selectedJobId={takeoffJobId}
+                    refreshKey={historyRefreshKey}
+                    onSelectJob={handleSelectRun}
+                  />
+                </div>
+              </details>
+            ) : (
+              <section className="lab-section lab-section--card">
+                <h2 className="lab-section-title">Takeoff runs</h2>
+                <TakeoffRunInbox
+                  token={authToken}
+                  selectedJobId={takeoffJobId}
+                  refreshKey={historyRefreshKey}
+                  onSelectJob={handleSelectRun}
+                />
+              </section>
+            )
           ) : null}
 
           {/* ── Source plan file (v4) ──────────────────────────────────── */}
-          <section className="lab-section">
-            <h2 className="lab-section-title">Source plan file</h2>
-            <TakeoffPlanFileSection
-              takeoffJobId={takeoffJobId}
-              token={authToken}
-              onWorkspaceCreated={(jobId, filename, file) => {
-                setTakeoffJobId(jobId);
-                setPlanFilename(filename);
-                setPlanFileMeta(file ?? null);
-                setHistoryRefreshKey((k) => k + 1);
-                // Update URL so the workspace survives a reload.
-                const url = new URL(window.location.href);
-                url.searchParams.set("takeoffJobId", jobId);
-                window.history.replaceState({}, "", url.toString());
-              }}
-              onWorkspaceLoaded={(filename, meta) => {
-                setPlanFilename(filename);
-                if (meta?.file) setPlanFileMeta(meta.file);
-                if (meta) setWorkspaceReview(meta);
-              }}
-              onAiDraftGenerated={handleAiDraftGenerated}
-              onPlanArchived={handleStartNewTakeoff}
-              onProcessingTerminal={() => setHistoryRefreshKey((k) => k + 1)}
-            />
-          </section>
+          {hasActiveSource && takeoffJobId ? (
+            <details className="lab-section lab-section-collapsible lab-section--compact" open={false}>
+              <summary className="lab-section-summary">
+                <span className="lab-section-title" style={{ margin: 0 }}>Source plan file</span>
+                <span className="lab-section-summary-note">
+                  {planFilename ?? "Plan attached"} · upload, AI draft, or async processing
+                </span>
+              </summary>
+              <div className="lab-section-collapsible-body">
+                <TakeoffPlanFileSection
+                  takeoffJobId={takeoffJobId}
+                  token={authToken}
+                  onWorkspaceCreated={(jobId, filename, file) => {
+                    setTakeoffJobId(jobId);
+                    setPlanFilename(filename);
+                    setPlanFileMeta(file ?? null);
+                    setHistoryRefreshKey((k) => k + 1);
+                    const url = new URL(window.location.href);
+                    url.searchParams.set("takeoffJobId", jobId);
+                    window.history.replaceState({}, "", url.toString());
+                  }}
+                  onWorkspaceLoaded={(filename, meta) => {
+                    setPlanFilename(filename);
+                    if (meta?.file) setPlanFileMeta(meta.file);
+                    if (meta) setWorkspaceReview(meta);
+                  }}
+                  onAiDraftGenerated={handleAiDraftGenerated}
+                  onPlanArchived={handleStartNewTakeoff}
+                  onProcessingTerminal={() => setHistoryRefreshKey((k) => k + 1)}
+                />
+              </div>
+            </details>
+          ) : (
+            <section className="lab-section">
+              <h2 className="lab-section-title">Source plan file</h2>
+              <TakeoffPlanFileSection
+                takeoffJobId={takeoffJobId}
+                token={authToken}
+                onWorkspaceCreated={(jobId, filename, file) => {
+                  setTakeoffJobId(jobId);
+                  setPlanFilename(filename);
+                  setPlanFileMeta(file ?? null);
+                  setHistoryRefreshKey((k) => k + 1);
+                  const url = new URL(window.location.href);
+                  url.searchParams.set("takeoffJobId", jobId);
+                  window.history.replaceState({}, "", url.toString());
+                }}
+                onWorkspaceLoaded={(filename, meta) => {
+                  setPlanFilename(filename);
+                  if (meta?.file) setPlanFileMeta(meta.file);
+                  if (meta) setWorkspaceReview(meta);
+                }}
+                onAiDraftGenerated={handleAiDraftGenerated}
+                onPlanArchived={handleStartNewTakeoff}
+                onProcessingTerminal={() => setHistoryRefreshKey((k) => k + 1)}
+              />
+            </section>
+          )}
 
           {/* ── AI extraction run history (v5.3) ──────────────────────── */}
           {takeoffJobId && authToken && (
-            <section className="lab-section">
-              <h2 className="lab-section-title">AI extraction history</h2>
-              <TakeoffRunHistoryPanel
-                takeoffJobId={takeoffJobId}
-                token={authToken}
-                currentResultId={currentResultId}
-                currentComputed={computed}
-                refreshKey={historyRefreshKey}
-                onLoadRun={handleLoadHistoricalRun}
-              />
-            </section>
+            <details
+              className="lab-section lab-section-collapsible lab-section--compact"
+              open={!currentResultId && !hasActiveSource}
+            >
+              <summary className="lab-section-summary">
+                <span className="lab-section-title" style={{ margin: 0 }}>AI extraction history</span>
+                <span className="lab-section-summary-note">
+                  {currentResultId
+                    ? "Result loaded — expand to switch runs"
+                    : "Load a prior extraction run"}
+                </span>
+              </summary>
+              <div className="lab-section-collapsible-body">
+                <TakeoffRunHistoryPanel
+                  takeoffJobId={takeoffJobId}
+                  token={authToken}
+                  currentResultId={currentResultId}
+                  currentComputed={hasActiveSource ? computed : null}
+                  refreshKey={historyRefreshKey}
+                  embedded
+                  onLoadRun={handleLoadHistoricalRun}
+                />
+              </div>
+            </details>
           )}
 
           {/* JSON workbench — developer-only tool, hidden unless VITE_TAKEOFF_SHOW_DEV_TOOLS=1 */}
@@ -1672,30 +1811,8 @@ export default function TakeoffLabApp() {
             </div>
           )}
 
-          {/* ── Plan preview + review workbench (two-column when workspace loaded) ── */}
-          {showPlanPreviewColumn ? (
-            <div className="takeoff-review-layout">
-              <aside className="takeoff-review-preview-col">
-                <TakeoffPlanPreviewPanel
-                  token={authToken}
-                  file={planFileMeta}
-                  refreshKey={takeoffJobId}
-                />
-              </aside>
-              <div className="takeoff-review-main-col">
-                {reviewSections ?? (
-                  <section className="lab-section">
-                    <h2 className="lab-section-title">Review measurements</h2>
-                    <p className="lab-section-desc">
-                      Generate an AI draft above or load a saved result from history to review measurements beside this plan.
-                    </p>
-                  </section>
-                )}
-              </div>
-            </div>
-          ) : (
-            reviewSections
-          )}
+          {/* ── Review without plan preview (fallback) ───────────────────── */}
+          {hasActiveSource && !showPlanPreviewColumn ? reviewSections : null}
 
         </div>
       </main>

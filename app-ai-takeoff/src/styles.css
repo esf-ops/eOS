@@ -313,6 +313,53 @@ html, body {
 .lab-section--card > .lab-section-title { margin-bottom: 14px; }
 
 /* ── Plan preview + review two-column layout (Phase D) ───────────────────── */
+.takeoff-active-review-zone {
+  margin-bottom: 4px;
+}
+.lab-main-inner--active-review {
+  gap: 16px;
+}
+.takeoff-active-review-banner {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  padding: 14px 16px; margin-bottom: 4px;
+  border-radius: var(--r-md);
+  background: linear-gradient(135deg, var(--lab-accent-soft) 0%, var(--eos-surface) 100%);
+  border: 1px solid var(--lab-accent-border);
+}
+.takeoff-active-review-title {
+  margin: 0 0 4px; font-size: 15px; font-weight: 800; color: var(--eos-ink); letter-spacing: -0.2px;
+}
+.takeoff-active-review-next {
+  margin: 0; font-size: 13px; color: var(--eos-ink-mid); line-height: 1.5; max-width: 52ch;
+}
+.takeoff-active-review-file {
+  margin: 0; font-size: 12px; font-weight: 600; color: var(--eos-ink-muted);
+  padding: 6px 10px; border-radius: var(--r-sm);
+  background: rgba(255,255,255,0.7); border: 1px solid var(--eos-line);
+  max-width: 240px; word-break: break-all;
+}
+.lab-section--review-primary { margin-bottom: 0; }
+.lab-section--review-actions .save-panel {
+  border-color: var(--eos-accent-ring);
+  box-shadow: var(--eos-shadow-sm);
+}
+.save-panel-next-action {
+  margin: 0 0 12px; padding: 10px 12px; border-radius: var(--r-sm);
+  background: var(--eos-warn-soft); border: 1px solid var(--eos-warn-border);
+  font-size: 13px; font-weight: 600; color: var(--eos-warn); line-height: 1.45;
+}
+.lab-section--compact {
+  padding: 12px 16px;
+  background: var(--eos-surface-soft);
+  border-color: var(--eos-line);
+  box-shadow: none;
+}
+.lab-section--compact > .lab-section-summary .lab-section-title {
+  font-size: 12px;
+}
+.lab-section-collapsible-body {
+  margin-top: 12px;
+}
 .takeoff-review-layout {
   display: grid;
   grid-template-columns: minmax(260px, 38%) minmax(0, 1fr);
@@ -1972,6 +2019,21 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
   background: var(--eos-danger-soft); color: var(--eos-danger);
   border: 1px solid var(--eos-danger-border); font-size: 11px; font-weight: 600;
 }
+.run-history-panel--embedded {
+  border: none; box-shadow: none; padding: 0; background: transparent;
+}
+.run-history-loaded-note {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: 0 0 12px; padding: 8px 10px; border-radius: var(--r-sm);
+  background: var(--eos-info-soft); border: 1px solid var(--eos-info-border);
+}
+.run-history-loaded-badge {
+  display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 9999px;
+  font-size: 11px; font-weight: 700; color: var(--eos-info);
+  background: rgba(255,255,255,0.65); border: 1px solid var(--eos-info-border);
+}
+.run-history-loaded-hint { font-size: 12px; color: var(--eos-ink-mid); }
+
 .run-history-loaded-tag {
   font-size: 11px; font-weight: 600; color: var(--eos-success);
   white-space: nowrap;
