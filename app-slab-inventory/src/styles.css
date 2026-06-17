@@ -1239,6 +1239,32 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 }
 .cp-card:hover .cp-card-img { transform: scale(1.16); }
 
+/* Static pilot texture — inset preview, no bleed to card edges */
+.cp-card-texture-wrap {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px;
+  box-sizing: border-box;
+}
+.cp-card-texture-img {
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+  display: block;
+  transition: box-shadow 280ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.cp-card:hover .cp-card-texture-img {
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12);
+}
+
 /* Placeholder tile for colors without images */
 .cp-card-placeholder {
   width: 100%; height: 100%;
@@ -1507,6 +1533,11 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
   object-fit: cover;
   object-position: center;
   display: block;
+}
+.cim-hero-img-contain {
+  object-fit: contain;
+  padding: 12px;
+  box-sizing: border-box;
 }
 .cim-hero-placeholder {
   width: 100%; height: 100%;
@@ -1966,4 +1997,147 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
   .ziv-caption { white-space: normal; }
   .ziv-hint { display: none; }
   .ziv-nav { width: 36px; height: 36px; font-size: 1.35rem; }
+}
+
+/* ─────────────────────────────────────────── Elite 100 texture lightbox (static pilot) */
+
+.etl-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 210;
+  background: rgba(11, 26, 51, 0.54);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(12px, 3vw, 32px);
+}
+
+.etl {
+  position: relative;
+  width: min(920px, 100%);
+  max-height: min(92vh, 900px);
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+  border-radius: 20px;
+  box-shadow: var(--eos-shadow-lg);
+  border: 1px solid var(--eos-line);
+  overflow: hidden;
+  animation: cim-in 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.etl-close {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  z-index: 5;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--eos-line);
+  background: rgba(255, 255, 255, 0.96);
+  color: var(--eos-ink);
+  font-size: 1.3rem;
+  cursor: pointer;
+  box-shadow: var(--eos-shadow-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: inherit;
+  transition: box-shadow 150ms ease;
+}
+.etl-close:hover { box-shadow: var(--eos-shadow); }
+
+.etl-head {
+  flex-shrink: 0;
+  padding: 22px 56px 14px 24px;
+  border-bottom: 1px solid var(--eos-line);
+}
+
+.etl-title {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 650;
+  color: var(--eos-ink);
+  line-height: 1.25;
+}
+
+.etl-pg {
+  margin: 8px 0 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  color: var(--eos-muted);
+}
+
+.etl-img-frame {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(16px, 3vw, 28px);
+  background: #f5f3f0;
+  overflow: auto;
+}
+
+.etl-img {
+  max-width: 100%;
+  max-height: min(62vh, 640px);
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.12);
+  display: block;
+}
+
+.etl-actions {
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px 14px;
+  padding: 14px 20px 18px;
+  border-top: 1px solid var(--eos-line);
+  background: #ffffff;
+}
+
+.etl-open-full {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--eos-accent);
+  text-decoration: none;
+}
+.etl-open-full:hover { text-decoration: underline; }
+
+.etl-view-inv {
+  font-family: inherit;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: #ffffff;
+  background: var(--eos-accent);
+  border: none;
+  border-radius: 999px;
+  padding: 9px 16px;
+  cursor: pointer;
+  transition: filter 150ms ease;
+}
+.etl-view-inv:hover { filter: brightness(1.06); }
+
+@media (max-width: 640px) {
+  .etl-head { padding-right: 52px; }
+  .etl-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .etl-view-inv,
+  .etl-open-full {
+    text-align: center;
+    justify-content: center;
+  }
 }
