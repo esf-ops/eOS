@@ -24,6 +24,27 @@ const ELITE100_TEXTURE_PILOT: Elite100TextureAsset[] = [
     fullUrl: "/material-textures/elite100/full/carrara-royale.jpg",
     source: "manual_static_pilot",
   },
+  {
+    colorName: "Carrara Classic",
+    slug: "carrara-classic",
+    thumbUrl: "/material-textures/elite100/thumb/carrara-classic.jpg",
+    fullUrl: "/material-textures/elite100/full/carrara-classic.jpg",
+    source: "manual_static_pilot",
+  },
+  {
+    colorName: "Bianco Carrara",
+    slug: "bianco-carrara",
+    thumbUrl: "/material-textures/elite100/thumb/bianco-carrara.jpg",
+    fullUrl: "/material-textures/elite100/full/bianco-carrara.jpg",
+    source: "manual_static_pilot",
+  },
+  {
+    colorName: "Bayshore Sand",
+    slug: "bayshore-sand",
+    thumbUrl: "/material-textures/elite100/thumb/bayshore-sand.jpg",
+    fullUrl: "/material-textures/elite100/full/bayshore-sand.jpg",
+    source: "manual_static_pilot",
+  },
 ];
 
 const PILOT_BY_SLUG = new Map(ELITE100_TEXTURE_PILOT.map((asset) => [asset.slug, asset]));
