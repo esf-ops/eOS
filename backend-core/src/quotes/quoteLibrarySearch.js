@@ -114,7 +114,8 @@ export function applyQuoteLibrarySearch(qb, rawSearch) {
 }
 
 /**
- * PostgREST .or() clause for account filter param.
+ * PostgREST .or() clause for account filter param (narrow — not global search).
+ * Matches account_name and snapshot account paths only.
  *
  * @param {string} account
  * @returns {string}
@@ -124,14 +125,107 @@ export function quoteAccountFilterOrClause(account) {
   if (!a) return "";
   const pat = `%${a}%`;
   return [
-    `customer_name.ilike.${pat}`,
     `account_name.ilike.${pat}`,
-    `project_name.ilike.${pat}`,
-    `quote_number.ilike.${pat}`,
-    `quote_number_base.ilike.${pat}`,
     `calculation_snapshot->internal_ui->job_info->>account.ilike.${pat}`,
-    `calculation_snapshot->internal_ui->>account.ilike.${pat}`
+    `calculation_snapshot->internal_ui->>account.ilike.${pat}`,
+    `quote_number.ilike.${pat}`,
+    `quote_number_base.ilike.${pat}`
   ].join(",");
+}
+
+/** PostgREST JSON paths for snapshot account fallback ordering. */
+export const QUOTE_ACCOUNT_SNAPSHOT_SORT_PATHS = [
+  "calculation_snapshot->internal_ui->job_info->>account",
+  "calculation_snapshot->internal_ui->>account"
+];
+
+/**
+ * Compare two rows by derived account name for in-memory sort.
+ * Missing account ("—") sorts after named accounts.
+ *
+ * @param {Record<string, unknown>} rowA
+ * @param {Record<string, unknown>} rowB
+ * @param {boolean} [ascending]
+ * @returns {number}
+ */
+export function compareQuoteAccountNames(rowA, rowB, ascending = true) {
+  const a = deriveQuoteAccountName(rowA);
+  const b = deriveQuoteAccountName(rowB);
+  const aMissing = !a || a === "—";
+  const bMissing = !b || b === "—";
+  if (aMissing && bMissing) return 0;
+  if (aMissing) return 1;
+  if (bMissing) return -1;
+  const cmp = a.localeCompare(b, undefined, { sensitivity: "base" });
+  return ascending ? cmp : -cmp;
+}
+
+/**
+ * Sort list rows by derived account (page-level refinement after DB fetch).
+ *
+ * @param {Record<string, unknown>[]} rows
+ * @param {boolean} [ascending]
+ * @returns {Record<string, unknown>[]}
+ */
+export function sortRowsByDerivedAccount(rows, ascending = true) {
+  return [...rows].sort((a, b) => {
+    const acctCmp = compareQuoteAccountNames(a, b, ascending);
+    if (acctCmp !== 0) return acctCmp;
+    return String(b.updated_at || "").localeCompare(String(a.updated_at || ""));
+  });
+}
+
+/**
+ * Resolve list sort param — Account is not customer_name.
+ *
+ * @param {unknown} sortRaw
+ * @returns {{ kind: "account" } | { kind: "column", column: string }}
+ */
+export function resolveQuoteLibrarySortColumn(sortRaw) {
+  const sort = pickStr(sortRaw) || "updated_at";
+  if (sort === "account") return { kind: "account" };
+  const allowed = ["created_at", "updated_at", "grand_total", "quote_status", "sales_rep", "branch", "customer_name"];
+  if (allowed.includes(sort)) return { kind: "column", column: sort };
+  return { kind: "column", column: "updated_at" };
+}
+
+/**
+ * Apply account sort: account_name, then snapshot paths; missing values last.
+ *
+ * @param {object} qb
+ * @param {boolean} [ascending]
+ * @returns {object}
+ */
+export function applyQuoteLibraryAccountSort(qb, ascending = true) {
+  const opts = { ascending, nullsFirst: false };
+  let next = qb;
+  try {
+    next = next.order("account_name", opts);
+  } catch {
+    /* ignore */
+  }
+  for (const path of QUOTE_ACCOUNT_SNAPSHOT_SORT_PATHS) {
+    try {
+      next = next.order(path, opts);
+    } catch {
+      /* ignore unsupported PostgREST path order */
+    }
+  }
+  return next;
+}
+
+/**
+ * Apply list sort to a Supabase query builder.
+ *
+ * @param {object} qb
+ * @param {unknown} sortRaw
+ * @param {boolean} ascending
+ * @returns {object}
+ */
+export function applyQuoteLibrarySort(qb, sortRaw, ascending) {
+  const resolved = resolveQuoteLibrarySortColumn(sortRaw);
+  if (resolved.kind === "account") return applyQuoteLibraryAccountSort(qb, ascending);
+  return qb.order(resolved.column, { ascending, nullsFirst: false });
 }
 
 /** Lightweight list select — no full calculation_snapshot blob. */

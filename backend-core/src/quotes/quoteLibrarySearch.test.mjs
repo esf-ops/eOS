@@ -11,6 +11,10 @@ import {
   quoteSearchOrClauseForTerm,
   tokenizeQuoteSearchQuery,
   deriveQuoteAccountName,
+  resolveQuoteLibrarySortColumn,
+  applyQuoteLibraryAccountSort,
+  compareQuoteAccountNames,
+  sortRowsByDerivedAccount,
   QUOTE_LIBRARY_LIST_SELECT
 } from "./quoteLibrarySearch.js";
 
@@ -45,6 +49,61 @@ function testAccountFilterIncludesSnapshotAccount() {
   const clause = quoteAccountFilterOrClause("Interior Elements");
   assert.match(clause, /account_name\.ilike/);
   assert.match(clause, /calculation_snapshot->internal_ui->job_info->>account\.ilike/);
+}
+
+function testAccountFilterDoesNotUseCustomerOrProject() {
+  const clause = quoteAccountFilterOrClause("Stenrich");
+  assert.doesNotMatch(clause, /customer_name\.ilike/);
+  assert.doesNotMatch(clause, /project_name\.ilike/);
+}
+
+function testResolveSortAccountIsNotCustomerName() {
+  const resolved = resolveQuoteLibrarySortColumn("account");
+  assert.equal(resolved.kind, "account");
+  const customerResolved = resolveQuoteLibrarySortColumn("customer_name");
+  assert.equal(customerResolved.kind, "column");
+  assert.equal(customerResolved.column, "customer_name");
+}
+
+function testApplyAccountSortOrdersAccountColumns() {
+  const orders = [];
+  const qb = {
+    order(col, opts) {
+      orders.push({ col, opts });
+      return this;
+    }
+  };
+  applyQuoteLibraryAccountSort(qb, true);
+  assert.ok(orders.length >= 1);
+  assert.equal(orders[0].col, "account_name");
+  assert.equal(orders[0].opts.nullsFirst, false);
+  assert.ok(orders.every((o) => o.col !== "customer_name"));
+  assert.ok(orders.some((o) => o.col.includes("job_info")));
+}
+
+function testSortByDerivedAccountUsesSnapshotNotProject() {
+  const rows = [
+    { account_name: null, customer_name: "Homeowner", project_name: "Stenrich", snapshot_account: "D&M", updated_at: "2026-01-02" },
+    { account_name: null, customer_name: "Other", project_name: "Alpha", snapshot_account: "Zebra Co", updated_at: "2026-01-03" }
+  ];
+  const sorted = sortRowsByDerivedAccount(rows, true);
+  assert.equal(deriveQuoteAccountName(sorted[0]), "D&M");
+  assert.equal(deriveQuoteAccountName(sorted[1]), "Zebra Co");
+}
+
+function testMissingAccountSortsAfterNamedAccounts() {
+  const rows = [
+    { account_name: null, project_name: "Stenrich", customer_name: "Homeowner", updated_at: "2026-01-02" },
+    { account_name: "D&M", project_name: "Job A", updated_at: "2026-01-01" }
+  ];
+  const sorted = sortRowsByDerivedAccount(rows, true);
+  assert.equal(deriveQuoteAccountName(sorted[0]), "D&M");
+  assert.equal(deriveQuoteAccountName(sorted[1]), "—");
+}
+
+function testGlobalSearchStillFindsProjectName() {
+  const clause = quoteSearchOrClauseForTerm("Stenrich");
+  assert.match(clause, /project_name\.ilike/);
 }
 
 function testDeriveAccountNameUsesJobInfoNotProject() {
@@ -111,7 +170,13 @@ const tests = [
   ["S5 lightweight list select", testListSelectIsLightweight],
   ["S6 derive account from snapshot alias", testDeriveAccountNameUsesJobInfoNotProject],
   ["S7 derive account from job_info", testDeriveAccountNameDoesNotFallbackToProject],
-  ["S8 missing account does not use project", testDeriveAccountNameMissingAccountShowsDash]
+  ["S8 missing account does not use project", testDeriveAccountNameMissingAccountShowsDash],
+  ["S9 account filter excludes customer/project", testAccountFilterDoesNotUseCustomerOrProject],
+  ["S10 account sort not customer_name", testResolveSortAccountIsNotCustomerName],
+  ["S11 account sort uses account columns", testApplyAccountSortOrdersAccountColumns],
+  ["S12 derived account sort D&M not Stenrich", testSortByDerivedAccountUsesSnapshotNotProject],
+  ["S13 missing account sorts last", testMissingAccountSortsAfterNamedAccounts],
+  ["S14 global search still matches project", testGlobalSearchStillFindsProjectName]
 ];
 
 let failed = 0;

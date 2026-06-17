@@ -25,6 +25,9 @@ import {
   applyQuoteLibrarySearch,
   quoteAccountFilterOrClause,
   deriveQuoteAccountName,
+  applyQuoteLibrarySort,
+  sortRowsByDerivedAccount,
+  resolveQuoteLibrarySortColumn,
   QUOTE_LIBRARY_LIST_SELECT
 } from "./quoteLibrarySearch.js";
 
@@ -413,13 +416,7 @@ export function attachQuoteLibraryRoutes(app, deps) {
 
       const sortRaw = pickStr(req.query.sort) || "updated_at";
       const dir = pickStr(req.query.direction).toLowerCase() === "asc";
-      const sortCol =
-        sortRaw === "account"
-          ? "customer_name"
-          : ["created_at", "updated_at", "grand_total", "quote_status", "sales_rep", "branch", "customer_name"].includes(sortRaw)
-            ? sortRaw
-            : "updated_at";
-      qb = qb.order(sortCol, { ascending: dir });
+      qb = applyQuoteLibrarySort(qb, sortRaw, dir);
       qb = qb.range(offset, offset + limit - 1);
 
       const { data: rows, error, count } = await qb;
@@ -448,6 +445,10 @@ export function attachQuoteLibraryRoutes(app, deps) {
             (r.quote_status === "sold" || r.quote_status === "won") &&
             (r.moraware_doc_status === "none" || r.quickbooks_doc_status === "none")
         );
+      }
+
+      if (resolveQuoteLibrarySortColumn(sortRaw).kind === "account") {
+        mapped = sortRowsByDerivedAccount(mapped, dir);
       }
 
       const totalCount = Number(count ?? 0);
@@ -748,7 +749,9 @@ export function attachQuoteLibraryRoutes(app, deps) {
       let qb = db
         .from("quote_headers")
         .select(
-          "id,quote_number,quote_source,quote_status,customer_name,project_name,branch,sales_rep,grand_total,created_at,updated_at,calculation_snapshot"
+          "id,quote_number,quote_source,quote_status,account_name,customer_name,project_name,branch,sales_rep,grand_total,created_at,updated_at," +
+          "snapshot_account:calculation_snapshot->internal_ui->job_info->>account," +
+          "snapshot_account_legacy:calculation_snapshot->internal_ui->>account"
         )
         .order("updated_at", { ascending: false })
         .limit(1500);

@@ -1175,8 +1175,7 @@ export default function QuoteLibraryApp() {
                 <h2>By account</h2>
               </div>
               <p className="muted" style={{ marginTop: 0 }}>
-                Account grouping uses quote header fields (account name when set, otherwise customer / project). Future identity resolution and
-                sales account mapping will refine this.
+                Account grouping uses account name (header or estimate snapshot). Customer and project/job are separate fields.
               </p>
               <div className="account-grid">
                 {accountGroups.map((g) => (
