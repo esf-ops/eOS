@@ -31,6 +31,7 @@ function fmtDate(iso: string | null): string {
 function statusChipClass(status: string): string {
   if (status === "completed") return "takeoff-inbox-chip takeoff-inbox-chip--completed";
   if (status === "failed") return "takeoff-inbox-chip takeoff-inbox-chip--failed";
+  if (status === "processing") return "takeoff-inbox-chip takeoff-inbox-chip--processing";
   return "takeoff-inbox-chip takeoff-inbox-chip--pending";
 }
 
@@ -73,6 +74,14 @@ export default function TakeoffRunInbox({
   useEffect(() => {
     void loadJobs();
   }, [loadJobs, refreshKey]);
+
+  const hasProcessingJobs = jobs.some((j) => j.status === "processing");
+
+  useEffect(() => {
+    if (!token || !hasProcessingJobs) return;
+    const interval = setInterval(() => void loadJobs(), 5000);
+    return () => clearInterval(interval);
+  }, [token, hasProcessingJobs, loadJobs]);
 
   return (
     <div className="takeoff-inbox">
@@ -127,7 +136,11 @@ export default function TakeoffRunInbox({
                     <span className="takeoff-inbox-meta">{fmtDate(job.createdAt)}</span>
                   </div>
                   <div className="takeoff-inbox-row-sub">
-                    <span className={statusChipClass(job.status)}>{job.status}</span>
+                    <span className={statusChipClass(job.status)} title={job.processing?.phaseLabel ?? undefined}>
+                      {job.status === "processing" && job.processing?.phaseLabel
+                        ? job.processing.phaseLabel
+                        : job.status}
+                    </span>
                     <span className={reviewChipClass(job.reviewStatus)}>{job.reviewStatus}</span>
                     {job.resultCount > 0 ? (
                       <span className="takeoff-inbox-count">

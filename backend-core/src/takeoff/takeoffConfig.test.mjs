@@ -161,6 +161,9 @@ function withEnv(vars, fn) {
     "hasOpenAiKey",
     "hasExayardKey",
     "hasExayardOrganizationId",
+    "takeoffAsyncStubEnabled",
+    "takeoffAsyncWorkerEnabled",
+    "takeoffAsyncStartAllowed",
   ];
   for (const k of outputKeys) {
     assert.ok(allowedKeys.includes(k), `T6: unexpected key "${k}" in safe config output`);
@@ -191,4 +194,35 @@ function withEnv(vars, fn) {
   console.log("ok T7: exayard config shape is correct");
 }
 
-console.log("\ntakeoffConfig: all 7 tests passed");
+// ── T8. Async processing flags (Phase E) ───────────────────────────────────
+
+{
+  const prodNoFlags = withEnv({
+    NODE_ENV: "production",
+    TAKEOFF_ASYNC_STUB: null,
+    TAKEOFF_ASYNC_WORKER_ENABLED: null,
+  }, () => readSafeProviderConfig());
+  assert.equal(prodNoFlags.takeoffAsyncStubEnabled, false, "T8: prod stub off");
+  assert.equal(prodNoFlags.takeoffAsyncWorkerEnabled, false, "T8: prod worker off");
+  assert.equal(prodNoFlags.takeoffAsyncStartAllowed, false, "T8: prod async start blocked");
+
+  const devStub = withEnv({
+    NODE_ENV: "development",
+    TAKEOFF_ASYNC_STUB: "1",
+    TAKEOFF_ASYNC_WORKER_ENABLED: null,
+  }, () => readSafeProviderConfig());
+  assert.equal(devStub.takeoffAsyncStubEnabled, true, "T8: dev stub on");
+  assert.equal(devStub.takeoffAsyncStartAllowed, true, "T8: dev stub allows start");
+
+  const prodWorker = withEnv({
+    NODE_ENV: "production",
+    TAKEOFF_ASYNC_STUB: "1",
+    TAKEOFF_ASYNC_WORKER_ENABLED: "1",
+  }, () => readSafeProviderConfig());
+  assert.equal(prodWorker.takeoffAsyncStubEnabled, false, "T8: prod blocks stub even with flag");
+  assert.equal(prodWorker.takeoffAsyncWorkerEnabled, true, "T8: prod worker on");
+  assert.equal(prodWorker.takeoffAsyncStartAllowed, true, "T8: prod worker allows start");
+  console.log("ok T8: async config flags");
+}
+
+console.log("\ntakeoffConfig: all 8 tests passed");

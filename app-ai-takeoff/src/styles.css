@@ -928,6 +928,30 @@ details[open] > .lab-section-summary::before { transform: rotate(90deg); }
 .plan-file-status-chip--saved {
   background: var(--eos-success-soft); color: var(--eos-success); border: 1px solid var(--eos-success-border);
 }
+.plan-file-status-chip--pipeline.plan-file-status-chip--pending {
+  background: var(--eos-bg-soft); color: var(--eos-ink-muted); border: 1px solid var(--eos-line);
+}
+.plan-file-status-chip--pipeline.plan-file-status-chip--processing {
+  background: var(--eos-info-soft, #e8f4fd); color: var(--eos-info, #1a6fb5); border: 1px solid var(--eos-info-border, #b8daf0);
+}
+.plan-file-status-chip--pipeline.plan-file-status-chip--completed {
+  background: var(--eos-success-soft); color: var(--eos-success); border: 1px solid var(--eos-success-border);
+}
+.plan-file-status-chip--pipeline.plan-file-status-chip--failed {
+  background: var(--eos-danger-soft); color: var(--eos-danger); border: 1px solid var(--eos-danger-border);
+}
+
+.async-process-panel {
+  margin-top: 12px; padding: 12px 14px;
+  border: 1px dashed var(--eos-line); border-radius: var(--r-sm);
+  background: var(--eos-bg-soft);
+}
+.async-process-intro {
+  margin: 0 0 10px; font-size: 12px; color: var(--eos-ink-muted); line-height: 1.5;
+}
+.async-process-status {
+  margin: 0 0 10px; font-size: 13px; color: var(--eos-ink-mid); display: flex; align-items: center; gap: 6px;
+}
 
 .plan-file-note {
   margin: 0; font-size: 12px; color: var(--eos-ink-faint);
@@ -1744,6 +1768,9 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
 }
 .takeoff-inbox-chip--completed { background: var(--eos-success-soft); color: var(--eos-success); }
 .takeoff-inbox-chip--pending { background: var(--eos-warn-soft); color: var(--eos-warn); }
+.takeoff-inbox-chip--processing {
+  background: var(--eos-info-soft, #e8f4fd); color: var(--eos-info, #1a6fb5);
+}
 .takeoff-inbox-chip--failed { background: var(--eos-danger-soft); color: var(--eos-danger); }
 .takeoff-inbox-count { font-size: 11px; color: var(--eos-ink-mid); }
 .takeoff-inbox-count--muted { color: var(--eos-ink-faint); }

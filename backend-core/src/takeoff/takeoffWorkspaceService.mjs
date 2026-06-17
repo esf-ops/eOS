@@ -35,6 +35,7 @@ import { computeTakeoffMeasurements } from "./takeoffMeasurementCalc.mjs";
 import { validateTakeoffResult } from "./takeoffValidator.mjs";
 import { planTakeoffImport } from "./takeoffImportPlanner.mjs";
 import { TAKEOFF_SCHEMA_VERSION } from "./takeoffContract.mjs";
+import { buildProcessingStatus } from "./takeoffProcessOrchestrator.mjs";
 import { evaluateTakeoffQaGate } from "./takeoffQaGate.mjs";
 import { pickSafeExayardJobMetadata } from "./exayardClient.mjs";
 
@@ -118,7 +119,7 @@ function safeFileSummary(row) {
 
 const JOB_SELECT_COLS =
   "id,organization_id,quote_id,quote_file_id,status,review_status,source_type," +
-  "created_by_user_id,model_provider,model_version,metadata,result_summary," +
+  "created_by_user_id,model_provider,model_version,metadata,result_summary,error_message," +
   "created_at,updated_at,started_at,completed_at";
 
 /** @param {Record<string, unknown> | null | undefined} resultRow */
@@ -485,6 +486,10 @@ export async function getTakeoffWorkspace({
 
   const approval = extractApprovalFields(jobRow, latestRow);
 
+  if (String(jobRow.status ?? "") === "processing") {
+    canApprove = false;
+  }
+
   return {
     takeoffJobId,
     status: jobRow.status,
@@ -506,10 +511,8 @@ export async function getTakeoffWorkspace({
     isWorkspace: true,
     file: fileRow ? safeFileSummary(fileRow) : null,
     exayard: pickSafeExayardJobMetadata(jobRow.metadata)?.exayard ?? null,
-    processing: {
-      pageProgress: null,
-      asyncStatus: null,
-    },
+    processing: buildProcessingStatus(jobRow),
+    errorMessage: jobRow.error_message ?? null,
   };
 }
 
@@ -620,6 +623,7 @@ export async function listTakeoffJobs({ supabase, organizationId, query = {} }) 
     const canApprove =
       resultCount > 0 &&
       approval.reviewStatus !== "approved" &&
+      String(jobRow.status ?? "") !== "processing" &&
       (latestMeta?.summary?.errorCount ?? 0) === 0;
 
     const safeFile = fileRow ? safeFileSummary(fileRow) : null;
@@ -650,6 +654,8 @@ export async function listTakeoffJobs({ supabase, organizationId, query = {} }) 
       resultCount,
       resultSummary: latestMeta?.summary ?? null,
       file: safeFile,
+      processing: buildProcessingStatus(jobRow),
+      errorMessage: jobRow.error_message ?? null,
     };
   });
 
@@ -1005,6 +1011,10 @@ export async function approveTakeoffJob({
   const jobRow = await loadVerifiedJobRow(supabase, organizationId, takeoffJobId);
   if (!jobRow) {
     throw workspaceError("Takeoff job not found", 404);
+  }
+
+  if (String(jobRow.status ?? "") === "processing") {
+    throw workspaceError("Takeoff is still processing — wait for completion before approval", 422);
   }
 
   const latestRow = await loadLatestResultRow(supabase, organizationId, takeoffJobId);

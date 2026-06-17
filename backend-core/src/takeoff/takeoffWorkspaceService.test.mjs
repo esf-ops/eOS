@@ -513,11 +513,43 @@ function makeMockSupabase({
   assert.equal(result.resultCount, 0, "resultCount zero when no results");
   assert.equal(result.latestResult, null, "no latestResult when no results");
   assert.ok(result.processing, "processing placeholder present");
+  assert.equal(result.processing.phase, null);
+  assert.equal(result.processing.asyncStatus, null);
   assert.ok(result.file, "file metadata present");
   assert.equal(result.file.originalFilename, "kitchen_plan.pdf");
   assert.ok(!("storagePath" in result.file), "storage_path not exposed");
 
   console.log("ok: getTakeoffWorkspace — success");
+}
+
+{
+  const { supabase } = makeMockSupabase({
+    fileRow: makeFileRow(),
+    jobRow: makeJobRow({
+      status: "processing",
+      metadata: {
+        processing: {
+          runId: "run-abc",
+          phase: "extraction",
+          phaseLabel: "Extracting measurements",
+          pageProgress: { current: 4, total: 6 },
+        },
+      },
+    }),
+  });
+
+  const result = await getTakeoffWorkspace({
+    supabase,
+    organizationId: ORG_ID,
+    takeoffJobId: JOB_ID,
+  });
+
+  assert.equal(result.status, "processing");
+  assert.equal(result.processing.phase, "extraction");
+  assert.equal(result.processing.runId, "run-abc");
+  assert.equal(result.processing.pageProgress?.current, 4);
+  assert.equal(result.canApprove, false, "cannot approve while processing");
+  console.log("ok: getTakeoffWorkspace — processing metadata + approve blocked");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1255,8 +1287,12 @@ function makeMockSupabase({
   assert.ok(listRouteHandlers.includes(authMw), "list route uses auth middleware");
   const detailIdx = calls.findIndex((c) => c.method === "get" && c.path === "/api/takeoff-jobs/:id");
   const listIdx = calls.findIndex((c) => c.method === "get" && c.path === "/api/takeoff-jobs");
+  const processIdx = calls.findIndex(
+    (c) => c.method === "post" && c.path === "/api/takeoff-jobs/:id/process"
+  );
+  assert.ok(processIdx >= 0, "POST /api/takeoff-jobs/:id/process registered");
   assert.ok(listIdx < detailIdx, "list route registered before :id route");
-  console.log("ok: attachTakeoffWorkspaceRoutes — list route auth/head registration");
+  console.log("ok: attachTakeoffWorkspaceRoutes — list + process routes registered");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1417,6 +1453,26 @@ function makeMockSupabase({
     "validation errors block approval"
   );
   console.log("ok: approveTakeoffJob — validation errors block approval");
+}
+
+{
+  const { supabase } = makeMockSupabase({
+    jobRow: makeJobRow({ status: "processing" }),
+    resultRows: [makeResultRow()],
+  });
+
+  await assert.rejects(
+    () =>
+      approveTakeoffJob({
+        supabase,
+        organizationId: ORG_ID,
+        userId: USER_ID,
+        takeoffJobId: JOB_ID,
+      }),
+    /still processing/i,
+    "approve blocked while processing"
+  );
+  console.log("ok: approveTakeoffJob — blocked while processing");
 }
 
 {

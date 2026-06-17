@@ -72,6 +72,20 @@ export async function storagePut(signedUrl: string, file: File): Promise<void> {
   }
 }
 
+export interface TakeoffProcessingStatus {
+  asyncStatus: string | null;
+  phase: string | null;
+  phaseLabel: string | null;
+  pageProgress: { current: number; total: number } | null;
+  runId: string | null;
+  mode: string | null;
+  startedAt: string | null;
+  updatedAt: string | null;
+  completedAt: string | null;
+  error: string | null;
+  attempt: number | null;
+}
+
 export interface TakeoffJobListItem {
   takeoffJobId: string;
   quoteFileId: string | null;
@@ -100,6 +114,8 @@ export interface TakeoffJobListItem {
   approvedAt?: string | null;
   approvedByUserId?: string | null;
   canApprove?: boolean;
+  processing?: TakeoffProcessingStatus;
+  errorMessage?: string | null;
 }
 
 export interface ListTakeoffJobsResponse {
@@ -191,4 +207,29 @@ export async function approveTakeoffJob(
     token,
     takeoffResult ? { takeoffResult } : {}
   ) as Promise<ApproveTakeoffJobResponse>;
+}
+
+export interface StartTakeoffProcessingResponse {
+  ok: boolean;
+  accepted?: boolean;
+  takeoffJobId: string;
+  status: string;
+  reviewStatus?: string;
+  resultRowId?: string | null;
+  processing?: TakeoffProcessingStatus;
+  mode?: string;
+  message?: string;
+  code?: string;
+}
+
+/** Start async takeoff processing (Phase E). Poll GET /api/takeoff-jobs/:id for status. */
+export async function startTakeoffProcessing(
+  token: string,
+  takeoffJobId: string
+): Promise<StartTakeoffProcessingResponse> {
+  return labApiPost(
+    `/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}/process`,
+    token,
+    {}
+  ) as Promise<StartTakeoffProcessingResponse>;
 }

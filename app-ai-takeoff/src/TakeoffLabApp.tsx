@@ -1661,6 +1661,7 @@ export default function TakeoffLabApp() {
               }}
               onAiDraftGenerated={handleAiDraftGenerated}
               onPlanArchived={handleStartNewTakeoff}
+              onProcessingTerminal={() => setHistoryRefreshKey((k) => k + 1)}
             />
           </section>
 

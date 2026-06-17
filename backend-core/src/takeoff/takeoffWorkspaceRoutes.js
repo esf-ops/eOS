@@ -10,6 +10,7 @@
  *   POST /api/takeoff-jobs/:id/corrections         — save estimator corrections + audit metadata
  *   POST /api/takeoff-jobs/:id/approve             — approve latest reviewed takeoff (validated)
  *   GET  /api/takeoff-jobs/:id/results/latest      — load latest saved result
+ *   POST /api/takeoff-jobs/:id/process              — start async processing (Phase E)
  *   POST /api/takeoff-jobs/:id/generate-ai-draft   — generate AI draft from uploaded plan (v5)
  *
  * v5: adds live AI extraction via POST /api/takeoff-jobs/:id/generate-ai-draft.
@@ -43,6 +44,7 @@ import {
   getResultById,
 } from "./takeoffWorkspaceService.mjs";
 import { runAiTakeoffExtraction } from "./takeoffExtractionService.mjs";
+import { startTakeoffProcessing } from "./takeoffProcessOrchestrator.mjs";
 import { resumeExayardTakeoff } from "./exayardTakeoffResume.mjs";
 import { readSafeProviderConfigAsync } from "./takeoffAiProvider.mjs";
 import { resolveOrganizationContext } from "../organizations/organizationContext.js";
@@ -396,6 +398,46 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase, he
       const status = e.statusCode ?? 500;
       const code = status < 500 ? "validation_error" : "server_error";
       return res.status(status).json({ ok: false, error: String(e?.message ?? e), code });
+    }
+  });
+
+  // ── POST /api/takeoff-jobs/:id/process ────────────────────────────────────
+  //
+  // Phase E: start async takeoff processing (DB-backed lifecycle).
+  // Returns 202 when queued; stub mode may complete synchronously in dev/test only.
+  // Production without worker → 503 worker_not_configured.
+  // Poll GET /api/takeoff-jobs/:id for processing status.
+  //
+  app.post("/api/takeoff-jobs/:id/process", requireAuth(), guardHead, async (req, res) => {
+    try {
+      const supabase = getSupabase();
+      const user = req.user;
+
+      const orgCtx = await resolveOrganizationContext({ req, supabase, mode: "authenticated" });
+      if (!orgCtx.organizationId) {
+        return res.status(503).json({ ok: false, error: "Organization context not available" });
+      }
+
+      const takeoffJobId = String(req.params.id ?? "").trim();
+
+      const result = await startTakeoffProcessing({
+        supabase,
+        organizationId: orgCtx.organizationId,
+        userId: user?.id ?? null,
+        takeoffJobId,
+      });
+
+      const httpStatus = result.status === "completed" ? 200 : 202;
+      return res.status(httpStatus).json(result);
+    } catch (e) {
+      const status = e.statusCode ?? 500;
+      const code = e.code ?? (status < 500 ? "validation_error" : "server_error");
+      return res.status(status).json({
+        ok: false,
+        error: String(e?.message ?? e),
+        code,
+        ...(e.processing ? { processing: e.processing } : {}),
+      });
     }
   });
 

@@ -28,7 +28,8 @@
  */
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { TakeoffResult } from "@takeoff-core/takeoffContract.mjs";
-import { labApiGet, labApiPost, storagePut, LabApiError } from "../lib/api";
+import { labApiGet, labApiPost, storagePut, startTakeoffProcessing, LabApiError } from "../lib/api";
+import type { TakeoffProcessingStatus } from "../lib/api";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -55,6 +56,7 @@ interface PlanFileMeta {
 
 interface WorkspaceState {
   takeoffJobId: string;
+  status?: string;
   reviewStatus: string;
   approvalStatus?: string;
   approvedAt?: string | null;
@@ -63,6 +65,8 @@ interface WorkspaceState {
   hasSavedResult: boolean;
   startedAt: string | null;
   file: PlanFileMeta;
+  processing?: TakeoffProcessingStatus;
+  errorMessage?: string | null;
   exayard?: {
     status:             string | null;
     assessmentId:       string | null;
@@ -79,6 +83,9 @@ interface ProviderConfig {
   model:            string;
   hasGeminiKey:     boolean;
   hasOpenAiKey:     boolean;
+  takeoffAsyncStartAllowed?: boolean;
+  takeoffAsyncStubEnabled?: boolean;
+  takeoffAsyncWorkerEnabled?: boolean;
   hasExayardKey?:           boolean;
   hasExayardOrganizationId?: boolean;
   exayard?: {
@@ -151,6 +158,8 @@ export interface TakeoffPlanFileSectionProps {
    * (v5.9.5)
    */
   onPlanArchived: () => void;
+  /** Called when async processing reaches completed or failed (for inbox refresh). */
+  onProcessingTerminal?: () => void;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -232,6 +241,7 @@ export default function TakeoffPlanFileSection({
   onWorkspaceLoaded,
   onAiDraftGenerated,
   onPlanArchived,
+  onProcessingTerminal,
 }: TakeoffPlanFileSectionProps) {
   const [workspace, setWorkspace] = useState<WorkspaceState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -262,6 +272,9 @@ export default function TakeoffPlanFileSection({
     message:      string | null;
   } | null>(null);
   const aiTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  const [asyncBusy, setAsyncBusy] = useState(false);
+  const [asyncError, setAsyncError] = useState<string | null>(null);
 
   // Provider config badge state (v5.9.3) — fetched once per token+workspace load
   const [providerConfig, setProviderConfig] = useState<ProviderConfig | null>(null);
@@ -296,6 +309,8 @@ export default function TakeoffPlanFileSection({
     setProviderConfig(null);
     setArchiveStep("idle");
     setArchiveError(null);
+    setAsyncBusy(false);
+    setAsyncError(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
   }, [takeoffJobId]);
 
@@ -527,6 +542,109 @@ export default function TakeoffPlanFileSection({
     }
   }, [takeoffJobId, token, workspace, onAiDraftGenerated, providerConfig?.activeProvider]);
 
+  const loadLatestResultIntoReview = useCallback(async () => {
+    if (!takeoffJobId || !token || !workspace) return;
+    const latest = await labApiGet(
+      `/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}/results/latest`,
+      token
+    ) as {
+      ok: boolean;
+      normalizedTakeoffJson?: TakeoffResult;
+      resultRowId?: string | null;
+      pageInventory?: object | null;
+      dimensionEvidence?: object | null;
+      promptVersion?: string | null;
+      modelUsed?: string | null;
+    };
+    if (latest.ok && latest.normalizedTakeoffJson) {
+      onAiDraftGenerated(latest.normalizedTakeoffJson, workspace.file.originalFilename, {
+        promptVersion: latest.promptVersion ?? null,
+        modelUsed: latest.modelUsed ?? null,
+        resultRowId: latest.resultRowId ?? null,
+        pageInventory: latest.pageInventory ?? null,
+        dimensionEvidence: latest.dimensionEvidence ?? null,
+      });
+    }
+  }, [takeoffJobId, token, workspace, onAiDraftGenerated]);
+
+  const refreshWorkspaceFromServer = useCallback(async () => {
+    if (!takeoffJobId || !token) return null;
+    const res = await labApiGet(
+      `/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}`,
+      token
+    ) as WorkspaceState & { ok: boolean };
+    setWorkspace(res);
+    return res;
+  }, [takeoffJobId, token]);
+
+  const handleStartAsyncProcessing = useCallback(async () => {
+    if (!takeoffJobId || !token || !workspace) return;
+    setAsyncBusy(true);
+    setAsyncError(null);
+    try {
+      const res = await startTakeoffProcessing(token, takeoffJobId);
+      const ws = await refreshWorkspaceFromServer();
+      if (res.status === "completed" || ws?.status === "completed") {
+        await loadLatestResultIntoReview();
+        onProcessingTerminal?.();
+      } else if (ws?.status === "failed") {
+        setAsyncError(ws.processing?.error ?? ws.errorMessage ?? "Processing failed.");
+        onProcessingTerminal?.();
+      }
+    } catch (e) {
+      const msg = e instanceof LabApiError ? e.message : e instanceof Error ? e.message : "Processing failed.";
+      setAsyncError(msg);
+    } finally {
+      setAsyncBusy(false);
+    }
+  }, [
+    takeoffJobId,
+    token,
+    workspace,
+    refreshWorkspaceFromServer,
+    loadLatestResultIntoReview,
+    onProcessingTerminal,
+  ]);
+
+  // Poll workspace while pipeline status is processing (worker mode).
+  useEffect(() => {
+    if (!takeoffJobId || !token || workspace?.status !== "processing") return;
+
+    let alive = true;
+    const poll = async () => {
+      try {
+        const res = await labApiGet(
+          `/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}`,
+          token
+        ) as WorkspaceState & { ok: boolean };
+        if (!alive) return;
+        setWorkspace(res);
+        if (res.status === "completed") {
+          await loadLatestResultIntoReview();
+          onProcessingTerminal?.();
+        } else if (res.status === "failed") {
+          setAsyncError(res.processing?.error ?? res.errorMessage ?? "Processing failed.");
+          onProcessingTerminal?.();
+        }
+      } catch {
+        /* non-fatal poll error */
+      }
+    };
+
+    void poll();
+    const interval = setInterval(() => void poll(), 4000);
+    return () => {
+      alive = false;
+      clearInterval(interval);
+    };
+  }, [
+    takeoffJobId,
+    token,
+    workspace?.status,
+    loadLatestResultIntoReview,
+    onProcessingTerminal,
+  ]);
+
   const handleResumeExayard = useCallback(async () => {
     if (!takeoffJobId || !token || !workspace) return;
 
@@ -621,6 +739,9 @@ export default function TakeoffPlanFileSection({
 
   const isBusy = uploadStep !== "idle" && uploadStep !== "done" && uploadStep !== "error";
   const isAiBusy = aiStep === "sending" || aiStep === "generating" || aiStep === "recomputing";
+  const pipelineStatus = workspace?.status ?? "pending";
+  const isPipelineProcessing = pipelineStatus === "processing";
+  const showAsyncPanel = Boolean(providerConfig?.takeoffAsyncStartAllowed);
   const canResumeExayard = Boolean(
     providerConfig?.activeProvider === "exayard" &&
     (exayardWaitingInfo?.assessmentId || workspace?.exayard?.assessmentId)
@@ -692,6 +813,9 @@ export default function TakeoffPlanFileSection({
           <div className="plan-file-workspace-meta">
             <span className="plan-file-job-label">Takeoff workspace ID:</span>
             <code className="plan-file-job-id">{workspace.takeoffJobId}</code>
+            <span className={`plan-file-status-chip plan-file-status-chip--pipeline plan-file-status-chip--${pipelineStatus}`}>
+              {pipelineStatus}
+            </span>
             <span className="plan-file-status-chip plan-file-status-chip--review">
               {workspace.reviewStatus}
             </span>
@@ -717,6 +841,53 @@ export default function TakeoffPlanFileSection({
                   This source plan was archived. Saved takeoff runs remain in history.
                   Start a new takeoff or upload another plan.
                 </p>
+              </div>
+            </div>
+          )}
+
+          {/* Async processing (Phase E) — only when server allows async start */}
+          {showAsyncPanel && !isFileArchived && (
+            <div className="async-process-panel">
+              <p className="async-process-intro">
+                {providerConfig?.takeoffAsyncStubEnabled
+                  ? "Dev/test async pipeline (stub fixture — not live AI)."
+                  : "Queue async processing for a background worker (when configured)."}
+              </p>
+              {isPipelineProcessing && (
+                <p className="async-process-status" role="status" aria-live="polite">
+                  <span className="ai-draft-spinner" aria-hidden>◌</span>{" "}
+                  {workspace.processing?.phaseLabel ?? "Processing…"}
+                  {workspace.processing?.pageProgress &&
+                  workspace.processing.pageProgress.total > 0 ? (
+                    <>
+                      {" "}
+                      ({workspace.processing.pageProgress.current}/
+                      {workspace.processing.pageProgress.total})
+                    </>
+                  ) : null}
+                </p>
+              )}
+              {pipelineStatus === "failed" && (asyncError || workspace.errorMessage) && (
+                <p className="plan-file-error plan-file-error--inline" role="alert">
+                  ✗ {asyncError ?? workspace.errorMessage}
+                </p>
+              )}
+              <div className="ai-draft-row">
+                <button
+                  type="button"
+                  className="plan-btn plan-btn--secondary"
+                  disabled={asyncBusy || isPipelineProcessing || isAiBusy}
+                  onClick={() => void handleStartAsyncProcessing()}
+                >
+                  {asyncBusy || isPipelineProcessing
+                    ? "Processing…"
+                    : pipelineStatus === "failed"
+                      ? "Retry async processing"
+                      : "Start async processing"}
+                </button>
+                {pipelineStatus === "completed" && workspace.processing?.mode === "stub" && (
+                  <span className="ai-draft-success-note">Stub processing complete — review result below.</span>
+                )}
               </div>
             </div>
           )}

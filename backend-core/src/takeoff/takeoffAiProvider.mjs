@@ -177,6 +177,7 @@ export function readExtractionConfig() {
  */
 export function readSafeProviderConfig() {
   const cfg = readExtractionConfig();
+  const asyncCfg = readTakeoffAsyncConfigFromEnv();
   return {
     takeoffAiEnabled: cfg.enabled,
     activeProvider:   cfg.providerName,
@@ -185,6 +186,21 @@ export function readSafeProviderConfig() {
     hasOpenAiKey:     Boolean(String(process.env.OPENAI_API_KEY ?? "").trim()),
     hasExayardKey:    Boolean(String(process.env.EXAYARD_API_KEY ?? "").trim()),
     hasExayardOrganizationId: Boolean(String(process.env.EXAYARD_ORGANIZATION_ID ?? "").trim()),
+    takeoffAsyncStubEnabled: asyncCfg.stubEnabled,
+    takeoffAsyncWorkerEnabled: asyncCfg.workerEnabled,
+    takeoffAsyncStartAllowed: asyncCfg.asyncStartAllowed,
+  };
+}
+
+function readTakeoffAsyncConfigFromEnv() {
+  const nodeEnv = String(process.env.NODE_ENV ?? "").trim();
+  const stubFlag = String(process.env.TAKEOFF_ASYNC_STUB ?? "").trim() === "1";
+  const stubEnabled = stubFlag && nodeEnv !== "production";
+  const workerEnabled = String(process.env.TAKEOFF_ASYNC_WORKER_ENABLED ?? "").trim() === "1";
+  return {
+    stubEnabled,
+    workerEnabled,
+    asyncStartAllowed: stubEnabled || workerEnabled,
   };
 }
 
