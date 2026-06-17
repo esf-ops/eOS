@@ -139,6 +139,10 @@ export interface TakeoffPlanFileSectionProps {
   onWorkspaceCreated: (jobId: string, filename: string, file?: PlanFilePreviewMeta) => void;
   /** Called when an existing workspace loads (e.g. from URL param). */
   onWorkspaceLoaded: (filename: string, meta?: WorkspaceReviewMeta) => void;
+  /** Called when workspace fetch begins (deep-link hydration). */
+  onWorkspaceLoadStart?: () => void;
+  /** Called when workspace fetch fails. */
+  onWorkspaceLoadError?: (message: string) => void;
   /** Called when an AI draft is successfully generated. Parent loads it into the review UI. */
   onAiDraftGenerated: (
     result: TakeoffResult,
@@ -241,6 +245,8 @@ export default function TakeoffPlanFileSection({
   token,
   onWorkspaceCreated,
   onWorkspaceLoaded,
+  onWorkspaceLoadStart,
+  onWorkspaceLoadError,
   onAiDraftGenerated,
   onPlanArchived,
   onProcessingTerminal,
@@ -321,6 +327,7 @@ export default function TakeoffPlanFileSection({
   useEffect(() => {
     if (!takeoffJobId || !token) return;
     setLoadError(null);
+    onWorkspaceLoadStart?.();
 
     void (async () => {
       try {
@@ -349,6 +356,7 @@ export default function TakeoffPlanFileSection({
       } catch (e) {
         const msg = e instanceof LabApiError ? e.message : e instanceof Error ? e.message : "Failed to load workspace.";
         setLoadError(msg);
+        onWorkspaceLoadError?.(msg);
       }
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps

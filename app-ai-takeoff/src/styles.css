@@ -98,99 +98,7 @@ html, body {
   border: 1px solid var(--eos-success-border);
 }
 
-/* Legacy local topbar (retained for reference; superseded by EliteosTopbar) */
-.topbar {
-  position: sticky; top: 0; z-index: 40;
-  display: flex; align-items: center; justify-content: space-between; gap: 16px;
-  padding: 12px clamp(16px, 2.4vw, 28px);
-  background: rgba(255,255,255,.86);
-  backdrop-filter: saturate(140%) blur(12px);
-  -webkit-backdrop-filter: saturate(140%) blur(12px);
-  border-bottom: 1px solid var(--eos-line);
-  min-width: 0;
-}
-.brand-row {
-  display: inline-flex; align-items: center; gap: 12px;
-  text-decoration: none; color: inherit; min-width: 0;
-}
-.brand-row-link {
-  border-radius: 10px; padding: 4px 6px;
-  transition: background 140ms ease;
-}
-.brand-row-link:hover { background: rgba(11,26,51,.04); }
-.brand-row-link:focus-visible { outline: 2px solid var(--eos-accent-ring); outline-offset: 2px; }
-.brand-mark {
-  flex-shrink: 0; width: 36px; height: 36px; border-radius: 8px;
-  overflow: hidden; background: var(--eos-accent-soft);
-  display: flex; align-items: center; justify-content: center;
-}
-.brand-mark img { width: 100%; height: 100%; object-fit: contain; }
-.brand-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.brand-wordmark { font-size: 14px; font-weight: 800; letter-spacing: -0.3px; color: var(--eos-accent); line-height: 1.1; }
-.brand-sub { font-size: 11px; color: var(--eos-ink-muted); line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-.topbar-actions { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
-.topbar-badges { display: flex; gap: 6px; flex-wrap: wrap; }
-.badge {
-  display: inline-flex; align-items: center;
-  padding: 2px 8px; border-radius: 9999px;
-  font-size: 11px; font-weight: 600; letter-spacing: 0.02em; white-space: nowrap;
-}
-.badge-lab {
-  background: var(--lab-accent-soft); color: var(--lab-accent);
-  border: 1px solid var(--lab-accent-border);
-}
-.badge-safe {
-  background: var(--eos-success-soft); color: var(--eos-success);
-  border: 1px solid var(--eos-success-border);
-}
-
-/* ── Topbar account / user menu ───────────────────────────────────────────── */
-.topbar-account-wrap { position: relative; }
-.topbar-account {
-  display: flex; align-items: center; gap: 8px;
-  background: none; border: 1px solid var(--eos-line); border-radius: 9999px;
-  padding: 4px 10px 4px 4px; cursor: pointer;
-  font-size: 13px; color: var(--eos-ink); transition: background 120ms;
-}
-.topbar-account:hover, .topbar-account.is-open { background: var(--eos-bg-soft); }
-.topbar-avatar {
-  width: 28px; height: 28px; border-radius: 50%;
-  background: var(--eos-accent); color: #fff;
-  font-size: 11px; font-weight: 700; letter-spacing: 0.02em;
-  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-}
-.topbar-account-text { display: flex; flex-direction: column; line-height: 1.15; }
-.topbar-account-name { font-size: 13px; font-weight: 600; color: var(--eos-ink); }
-.topbar-account-role { font-size: 11px; color: var(--eos-ink-muted); }
-.topbar-account-caret { color: var(--eos-ink-muted); display: flex; align-items: center; }
-
-.user-menu {
-  position: absolute; top: calc(100% + 6px); right: 0; z-index: 200;
-  min-width: 230px; background: var(--eos-surface); border: 1px solid var(--eos-line);
-  border-radius: var(--r-lg); box-shadow: 0 8px 32px rgba(11,26,51,.12), 0 2px 6px rgba(11,26,51,.06);
-  overflow: hidden;
-}
-.user-menu-header { padding: 14px 16px 10px; border-bottom: 1px solid var(--eos-line); }
-.user-menu-name { margin: 0; font-size: 13px; font-weight: 700; color: var(--eos-ink); }
-.user-menu-email { margin: 2px 0 0; font-size: 12px; color: var(--eos-ink-muted); }
-.user-menu-workspace { margin: 4px 0 0; font-size: 11px; color: var(--eos-ink-faint); }
-.user-menu-list { padding: 6px; }
-.user-menu-footer { padding: 6px; border-top: 1px solid var(--eos-line); }
-.user-menu-item {
-  display: flex; align-items: center; gap: 10px;
-  width: 100%; padding: 8px 10px; border-radius: var(--r-sm);
-  background: none; border: none; cursor: pointer; text-decoration: none;
-  font-size: 13px; color: var(--eos-ink); text-align: left; transition: background 100ms;
-}
-.user-menu-item:hover { background: var(--eos-bg-soft); }
-.user-menu-icon { flex-shrink: 0; color: var(--eos-ink-mid); display: flex; }
-.user-menu-label { display: flex; flex-direction: column; gap: 1px; flex: 1; }
-.user-menu-meta { font-size: 11px; color: var(--eos-ink-muted); }
-.user-menu-shortcut { font-size: 12px; color: var(--eos-ink-faint); }
-.user-menu-signout { color: var(--eos-danger); }
-.user-menu-signout:hover { background: var(--eos-danger-soft); }
-.user-menu-signout .user-menu-icon { color: var(--eos-danger); }
+/* Legacy local topbar removed — EliteosTopbar + eliteosTopbar.css is the only shell header. */
 
 /* ── Page hero — aligned with Quote Library ql-hero ───────────────────────── */
 .takeoff-page-hero {
@@ -231,10 +139,6 @@ html, body {
 .takeoff-page-desc {
   margin: 0 0 18px; font-size: 14px; color: var(--eos-ink-mid); line-height: 1.6;
   max-width: 62ch;
-}
-.takeoff-page-hero-aside {
-  padding: 14px 16px; border-radius: var(--r-md);
-  background: var(--eos-bg-soft); border: 1px solid var(--eos-line);
 }
 
 /* Current session card (active review) */
@@ -280,6 +184,44 @@ html, body {
 .takeoff-session-new-btn:hover {
   background: var(--eos-surface); border-color: var(--eos-accent-ring);
   color: var(--eos-accent);
+}
+
+/* Workspace boot — deep-link hydration shell */
+.takeoff-session-card--boot {
+  opacity: 0.92;
+}
+.takeoff-session-filename--loading {
+  color: var(--eos-ink-muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+.takeoff-boot-panel {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; padding: 48px 24px; margin: 8px 0 16px;
+  border-radius: var(--r-lg);
+  background: var(--eos-surface);
+  border: 1px solid var(--eos-line);
+  box-shadow: var(--eos-shadow-sm);
+  text-align: center;
+}
+.takeoff-boot-spinner {
+  width: 28px; height: 28px; border-radius: 50%;
+  border: 3px solid var(--eos-line);
+  border-top-color: var(--lab-accent);
+  animation: takeoff-boot-spin 0.8s linear infinite;
+}
+@keyframes takeoff-boot-spin {
+  to { transform: rotate(360deg); }
+}
+.takeoff-boot-title {
+  margin: 0; font-size: 15px; font-weight: 700; color: var(--eos-ink);
+}
+.takeoff-boot-hint {
+  margin: 0; font-size: 13px; color: var(--eos-ink-muted); max-width: 36ch;
+}
+.takeoff-boot-error { margin: 8px 0 16px; }
+.takeoff-boot-suspended {
+  display: none;
 }
 
 .takeoff-page-aside-label {
@@ -1303,29 +1245,6 @@ details[open] > .lab-section-summary::before { transform: rotate(90deg); }
 .validation-fix-item-message { margin: 8px 0 0; font-size: 12px; color: var(--eos-ink-mid); line-height: 1.5; }
 .validation-fix-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .validation-fix-btn { padding: 6px 12px; font-size: 12px; }
-
-/* ── Auth — topbar right section ─────────────────────────────────────────── */
-.lab-topbar-right {
-  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-}
-
-.auth-topbar-user {
-  display: flex; align-items: center; gap: 8px;
-}
-.auth-topbar-email {
-  font-size: 12px; color: var(--eos-ink-muted); white-space: nowrap;
-  max-width: 200px; overflow: hidden; text-overflow: ellipsis;
-}
-.auth-topbar-signout {
-  padding: 3px 10px; border-radius: 6px; border: 1px solid var(--eos-line-strong);
-  background: var(--eos-surface-soft); color: var(--eos-ink-mid);
-  font-size: 12px; font-weight: 500; cursor: pointer; white-space: nowrap;
-  transition: background 100ms, color 100ms;
-}
-.auth-topbar-signout:hover {
-  background: var(--eos-danger-soft); color: var(--eos-danger);
-  border-color: var(--eos-danger-border);
-}
 
 /* ── Auth — sign-in panel card ───────────────────────────────────────────── */
 .auth-panel {

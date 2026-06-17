@@ -197,6 +197,8 @@ function urlJobId(): string | null {
   } catch { return null; }
 }
 
+type WorkspaceBootState = "idle" | "loading" | "ready" | "error";
+
 // ── Component ──────────────────────────────────────────────────────────────
 
 export default function TakeoffLabApp() {
@@ -308,6 +310,11 @@ export default function TakeoffLabApp() {
   const [takeoffJobId, setTakeoffJobId] = useState<string | null>(urlJobId);
   const [planFilename, setPlanFilename] = useState<string | null>(null);
   const [planFileMeta, setPlanFileMeta] = useState<PlanFilePreviewMeta | null>(null);
+  /** Deep-link boot: avoid upload-first chrome until workspace metadata hydrates. */
+  const [workspaceBoot, setWorkspaceBoot] = useState<WorkspaceBootState>(() =>
+    urlJobId() ? "loading" : "idle"
+  );
+  const [workspaceBootError, setWorkspaceBootError] = useState<string | null>(null);
 
   // ── Source state (last validated; never mutated by UI edits) ─────────────
   // Initialized to Spec73 as a computation fallback, but sourceMode starts as
@@ -384,6 +391,25 @@ export default function TakeoffLabApp() {
 
   /** True when a real source is loaded (uploaded plan, AI draft, pasted JSON, or demo). */
   const hasActiveSource = sourceMode !== "none";
+
+  /** URL or in-app selection points at a persisted workspace (not upload-first empty state). */
+  const isWorkspaceRoute = Boolean(takeoffJobId);
+
+  /**
+   * Workspace hydration in progress — derived from URL takeoffJobId immediately,
+   * not only after async plan metadata / saved result loads.
+   */
+  const isWorkspaceHydrating = isWorkspaceRoute && (
+    !authChecked || (Boolean(authToken) && workspaceBoot === "loading" && !planFileMeta)
+  );
+
+  /** Compact hero + workflow when reviewing a workspace or active measurements. */
+  const useCompactHero = isWorkspaceRoute || Boolean(authToken && hasActiveSource);
+
+  /** Session card once workspace metadata is known (or load failed). */
+  const showSessionCard = Boolean(
+    authToken && isWorkspaceRoute && !isWorkspaceHydrating && (planFileMeta || workspaceBoot === "error")
+  );
 
   /** True when the Spec 73 demo sample is explicitly loaded — show demo badge. */
   const isDemoMode = sourceMode === "spec73";
@@ -593,7 +619,39 @@ export default function TakeoffLabApp() {
     setExcludedRunIds(new Set());
     setReviewNotes({});
     setEvidenceReviewState({});
+    setWorkspaceBoot("idle");
+    setWorkspaceBootError(null);
   }, [hasEdits]);
+
+  const handleWorkspaceLoadStart = useCallback(() => {
+    setWorkspaceBoot("loading");
+    setWorkspaceBootError(null);
+  }, []);
+
+  const handleWorkspaceLoaded = useCallback((filename: string, meta?: WorkspaceReviewMeta) => {
+    setPlanFilename(filename);
+    if (meta?.file) setPlanFileMeta(meta.file);
+    if (meta) setWorkspaceReview(meta);
+    setWorkspaceBoot("ready");
+    setWorkspaceBootError(null);
+  }, []);
+
+  const handleWorkspaceLoadError = useCallback((message: string) => {
+    setWorkspaceBoot("error");
+    setWorkspaceBootError(message);
+  }, []);
+
+  const handleWorkspaceCreated = useCallback((jobId: string, filename: string, file?: PlanFilePreviewMeta) => {
+    setTakeoffJobId(jobId);
+    setPlanFilename(filename);
+    setPlanFileMeta(file ?? null);
+    setHistoryRefreshKey((k) => k + 1);
+    setWorkspaceBoot("ready");
+    setWorkspaceBootError(null);
+    const url = new URL(window.location.href);
+    url.searchParams.set("takeoffJobId", jobId);
+    window.history.replaceState({}, "", url.toString());
+  }, []);
 
   const handleSelectRun = useCallback((jobId: string) => {
     if (jobId === takeoffJobId) return;
@@ -619,6 +677,8 @@ export default function TakeoffLabApp() {
     setExcludedRunIds(new Set());
     setReviewNotes({});
     setEvidenceReviewState({});
+    setWorkspaceBoot("loading");
+    setWorkspaceBootError(null);
     const url = new URL(window.location.href);
     url.searchParams.set("takeoffJobId", jobId);
     window.history.replaceState({}, "", url.toString());
@@ -990,6 +1050,9 @@ export default function TakeoffLabApp() {
 
   const showPlanPreviewColumn = Boolean(takeoffJobId && planFileMeta && authToken);
   const isActiveReviewMode = Boolean(takeoffJobId && hasActiveSource && authToken);
+  const useWorkspaceSourceSection = Boolean(isWorkspaceRoute && takeoffJobId);
+  /** Deep-linked workspace requires sign-in before showing upload-first source UI. */
+  const showSourcePlanSection = Boolean(authToken || !isWorkspaceRoute);
   const hasBlockingValidation = Boolean(
     hasActiveSource && (validation.hasErrors || (validation.errorCount ?? 0) > 0)
   );
@@ -1486,10 +1549,12 @@ export default function TakeoffLabApp() {
       )}
 
       {/* ── Page intro + workflow explainer ───────────────────────── */}
-      <div className={`takeoff-page-hero${authToken && hasActiveSource ? " takeoff-page-hero--compact" : ""}`} role="region" aria-label="AI Takeoff overview">
+      <div className={`takeoff-page-hero${useCompactHero ? " takeoff-page-hero--compact" : ""}`} role="region" aria-label="AI Takeoff overview">
         <div className="takeoff-page-hero-inner">
           <div className="takeoff-page-hero-main">
-            {!hasActiveSource ? (
+            {useCompactHero ? (
+              <h1 className="takeoff-page-heading takeoff-page-heading--compact">AI Takeoff review</h1>
+            ) : (
               <>
                 <p className="takeoff-page-eyebrow">AI Takeoff Lab · {workspaceName}</p>
                 <h1 className="takeoff-page-heading">Review plan measurements before quoting</h1>
@@ -1499,12 +1564,10 @@ export default function TakeoffLabApp() {
                   it does not create quotes or import into Internal Estimate yet.
                 </p>
               </>
-            ) : (
-              <h1 className="takeoff-page-heading takeoff-page-heading--compact">AI Takeoff review</h1>
             )}
-            <TakeoffWorkflowExplainer compact={Boolean(authToken && hasActiveSource)} />
+            <TakeoffWorkflowExplainer compact={useCompactHero} />
           </div>
-          {authToken && hasActiveSource && (
+          {showSessionCard ? (
             <aside className="takeoff-session-card" aria-label="Current session">
               <p className="takeoff-session-label">Current session</p>
               <p className="takeoff-session-filename" title={planFilename ?? result.source?.fileName ?? undefined}>
@@ -1541,7 +1604,12 @@ export default function TakeoffLabApp() {
                 </button>
               ) : null}
             </aside>
-          )}
+          ) : isWorkspaceHydrating ? (
+            <aside className="takeoff-session-card takeoff-session-card--boot" aria-label="Loading session">
+              <p className="takeoff-session-label">Current session</p>
+              <p className="takeoff-session-filename takeoff-session-filename--loading">Loading workspace…</p>
+            </aside>
+          ) : null}
         </div>
       </div>
 
@@ -1552,6 +1620,20 @@ export default function TakeoffLabApp() {
             showPlanPreviewColumn && hasActiveSource ? " lab-main-inner--active-review" : ""
           }${takeoffJobId && planFileMeta ? " lab-main-inner--review" : ""}`}
         >
+
+          {isWorkspaceHydrating ? (
+            <div className="takeoff-boot-panel" role="status" aria-live="polite">
+              <div className="takeoff-boot-spinner" aria-hidden />
+              <p className="takeoff-boot-title">Loading takeoff workspace…</p>
+              <p className="takeoff-boot-hint">Restoring plan file and review state.</p>
+            </div>
+          ) : workspaceBootError ? (
+            <div className="banner banner-error takeoff-boot-error" role="alert">
+              <strong>Could not load workspace.</strong> {workspaceBootError}
+            </div>
+          ) : null}
+
+          <div className={isWorkspaceHydrating ? "takeoff-boot-suspended" : undefined}>
 
           {/* ── Sign-in panel (shown only when not authenticated) ─────── */}
           {authChecked && !authToken && (
@@ -1680,7 +1762,8 @@ export default function TakeoffLabApp() {
           ) : null}
 
           {/* ── Source plan file (v4) ──────────────────────────────────── */}
-          {hasActiveSource && takeoffJobId ? (
+          {showSourcePlanSection ? (
+          useWorkspaceSourceSection ? (
             <details className="lab-section lab-section-collapsible lab-section--compact" open={false}>
               <summary className="lab-section-summary">
                 <span className="lab-section-title" style={{ margin: 0 }}>Source plan file</span>
@@ -1692,20 +1775,10 @@ export default function TakeoffLabApp() {
                 <TakeoffPlanFileSection
                   takeoffJobId={takeoffJobId}
                   token={authToken}
-                  onWorkspaceCreated={(jobId, filename, file) => {
-                    setTakeoffJobId(jobId);
-                    setPlanFilename(filename);
-                    setPlanFileMeta(file ?? null);
-                    setHistoryRefreshKey((k) => k + 1);
-                    const url = new URL(window.location.href);
-                    url.searchParams.set("takeoffJobId", jobId);
-                    window.history.replaceState({}, "", url.toString());
-                  }}
-                  onWorkspaceLoaded={(filename, meta) => {
-                    setPlanFilename(filename);
-                    if (meta?.file) setPlanFileMeta(meta.file);
-                    if (meta) setWorkspaceReview(meta);
-                  }}
+                  onWorkspaceLoadStart={handleWorkspaceLoadStart}
+                  onWorkspaceCreated={handleWorkspaceCreated}
+                  onWorkspaceLoaded={handleWorkspaceLoaded}
+                  onWorkspaceLoadError={handleWorkspaceLoadError}
                   onAiDraftGenerated={handleAiDraftGenerated}
                   onPlanArchived={handleStartNewTakeoff}
                   onProcessingTerminal={() => setHistoryRefreshKey((k) => k + 1)}
@@ -1718,26 +1791,17 @@ export default function TakeoffLabApp() {
               <TakeoffPlanFileSection
                 takeoffJobId={takeoffJobId}
                 token={authToken}
-                onWorkspaceCreated={(jobId, filename, file) => {
-                  setTakeoffJobId(jobId);
-                  setPlanFilename(filename);
-                  setPlanFileMeta(file ?? null);
-                  setHistoryRefreshKey((k) => k + 1);
-                  const url = new URL(window.location.href);
-                  url.searchParams.set("takeoffJobId", jobId);
-                  window.history.replaceState({}, "", url.toString());
-                }}
-                onWorkspaceLoaded={(filename, meta) => {
-                  setPlanFilename(filename);
-                  if (meta?.file) setPlanFileMeta(meta.file);
-                  if (meta) setWorkspaceReview(meta);
-                }}
+                onWorkspaceLoadStart={handleWorkspaceLoadStart}
+                onWorkspaceCreated={handleWorkspaceCreated}
+                onWorkspaceLoaded={handleWorkspaceLoaded}
+                onWorkspaceLoadError={handleWorkspaceLoadError}
                 onAiDraftGenerated={handleAiDraftGenerated}
                 onPlanArchived={handleStartNewTakeoff}
                 onProcessingTerminal={() => setHistoryRefreshKey((k) => k + 1)}
               />
             </section>
-          )}
+          )
+          ) : null}
 
           {/* ── AI extraction run history (v5.3) ──────────────────────── */}
           {takeoffJobId && authToken && (
@@ -1821,6 +1885,7 @@ export default function TakeoffLabApp() {
           {/* ── Review without plan preview (fallback) ───────────────────── */}
           {hasActiveSource && !showPlanPreviewColumn ? reviewSections : null}
 
+          </div>
         </div>
       </main>
 
