@@ -4,8 +4,7 @@ import { config, EOS_LOGO_URL } from "@quote-lib/config";
 import { getSupabase } from "./lib/supabase";
 import EliteosTopbar from "../../shared/eliteos-ui/EliteosTopbar";
 import { ZoomImageViewer, type ZoomGalleryItem } from "./ZoomImageViewer";
-import { Elite100TextureLightbox } from "./Elite100TextureLightbox";
-import { lookupElite100Texture, type Elite100TextureAsset } from "./lib/elite100TextureAssets";
+import { lookupElite100Texture } from "./lib/elite100TextureAssets";
 
 /* ─────────────────────────────────────────── types */
 
@@ -362,14 +361,6 @@ export default function SlabInventoryApp() {
   const [nonStockError, setNonStockError] = useState<string | null>(null);
   const [nonStockLoaded, setNonStockLoaded] = useState(false);
   const [nonStockSearch, setNonStockSearch] = useState("");
-
-  /* Elite 100 static texture lightbox (pilot) */
-  const [textureLightbox, setTextureLightbox] = useState<{
-    texture: Elite100TextureAsset;
-    colorName: string;
-    priceGroup: string | null;
-    inventoryModal: NonNullable<ColorModal>;
-  } | null>(null);
 
   /* Color inventory modal state */
   const [colorModal, setColorModal] = useState<ColorModal>(null);
@@ -834,20 +825,7 @@ export default function SlabInventoryApp() {
                       <Elite100Section
                         key={group.price_group}
                         group={group}
-                        onOpenItem={(item) => {
-                          const inventoryModal = elite100ColorModalFromItem(item);
-                          const texture = lookupElite100Texture(item.color_name, item.color_key);
-                          if (texture) {
-                            setTextureLightbox({
-                              texture,
-                              colorName: item.color_name ?? texture.colorName,
-                              priceGroup: item.price_group,
-                              inventoryModal,
-                            });
-                            return;
-                          }
-                          void openColorModal(inventoryModal);
-                        }}
+                        onOpenItem={(item) => void openColorModal(elite100ColorModalFromItem(item))}
                       />
                     ))}
                   </>
@@ -1118,21 +1096,6 @@ export default function SlabInventoryApp() {
               </div>
             ) : null}
 
-            {/* Elite 100 static texture lightbox (pilot) */}
-            {textureLightbox ? (
-              <Elite100TextureLightbox
-                colorName={textureLightbox.colorName}
-                priceGroup={textureLightbox.priceGroup}
-                texture={textureLightbox.texture}
-                onClose={() => setTextureLightbox(null)}
-                onViewInventory={() => {
-                  const inventoryModal = textureLightbox.inventoryModal;
-                  setTextureLightbox(null);
-                  void openColorModal(inventoryModal);
-                }}
-              />
-            ) : null}
-
             {/* Color Inventory Modal (Elite 100 + Non-Stock) */}
             {colorModal ? (
               <ColorInventoryModal
@@ -1386,27 +1349,22 @@ function Elite100Card({ item, onOpen }: { item: Elite100Item; onOpen: () => void
       || null;
   const hasImage = Boolean(src) && !imgFailed;
   const availableCount = item.current_inventory_count ?? item.total_inventory_count;
-  const openLabel = texture
-    ? "Open material texture"
-    : "Open color";
   return (
     <button
       type="button"
       className="cp-card"
       onClick={onOpen}
-      aria-label={`${item.color_name ?? "Color"} · ${item.has_inventory ? `${availableCount} current available` : "No current inventory"} — ${openLabel}`}
+      aria-label={`${item.color_name ?? "Color"} · ${item.has_inventory ? `${availableCount} current available` : "No current inventory"} — Open color`}
     >
-      <div className="cp-card-mat">
+      <div className={`cp-card-mat${texture ? " cp-card-mat-texture" : ""}`}>
         <div className="cp-card-img-wrap">
           {texture ? (
-            <div className="cp-card-texture-wrap">
-              <img
-                src={texture.thumbUrl}
-                alt={`${item.display_name ?? item.color_name ?? texture.colorName} material texture preview`}
-                loading="lazy"
-                className="cp-card-texture-img"
-              />
-            </div>
+            <img
+              src={texture.thumbUrl}
+              alt={`${item.display_name ?? item.color_name ?? texture.colorName} material texture`}
+              loading="lazy"
+              className="cp-card-img"
+            />
           ) : hasImage ? (
             <img
               src={src!}
@@ -1516,10 +1474,9 @@ function ColorInventoryModal({
   const totalRemnants = inventory?.remnant_count ?? 0;
   const total = inventory?.total ?? 0;
   const catalogHeroSrc = modal.referenceImageUrl ?? modal.representativeImageUrl;
-  const heroSrc = catalogHeroSrc ?? pilotTexture?.thumbUrl ?? null;
+  const heroSrc = pilotTexture?.thumbUrl ?? catalogHeroSrc ?? null;
   const hasHeroImg = Boolean(heroSrc) && !heroImgFailed;
-  const heroUsesPilotOnly = !catalogHeroSrc && Boolean(pilotTexture);
-  const heroViewerSrc = referenceViewerSrc(modal) ?? pilotTexture?.fullUrl ?? null;
+  const heroViewerSrc = pilotTexture?.fullUrl ?? referenceViewerSrc(modal) ?? null;
   const inventoryGallery = useMemo(
     () => buildInventoryGalleryItems(inventory, modal.colorName),
     [inventory, modal.colorName]
@@ -1570,7 +1527,7 @@ function ColorInventoryModal({
                   <img
                     src={heroSrc!}
                     alt={modal.colorName ?? ""}
-                    className={`cim-hero-img${heroUsesPilotOnly ? " cim-hero-img-contain" : ""}`}
+                    className="cim-hero-img"
                     onError={() => setHeroImgFailed(true)}
                   />
                   <span className="cim-hero-zoom-hint" aria-hidden>Click to zoom</span>
