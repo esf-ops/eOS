@@ -93,6 +93,18 @@ function homeLauncherUrl(): string {
   return raw.replace(/\/+$/, "") || "https://www.eliteosfab.com";
 }
 
+const PLAN_FILE_ROLE_LABELS: Record<string, string> = {
+  cabinet_plan: "Cabinet plan",
+  measurement_plan: "Measurement plan",
+  photo: "Photo",
+  other: "Other",
+};
+
+function planFileRoleLabel(role: string | undefined): string {
+  if (!role) return "Plan file";
+  return PLAN_FILE_ROLE_LABELS[role] ?? role.replace(/_/g, " ");
+}
+
 function resolveWorkspaceLogoUrl(): string | null {
   return EOS_LOGO_URL || null;
 }
@@ -974,22 +986,6 @@ export default function TakeoffLabApp() {
   );
 
   // ── Derived display values ────────────────────────────────────────────────
-  const sourceLabel: Record<DisplayMode, string> = {
-    none:      "No source",
-    spec73:    "Spec 73 demo sample",
-    pasted:    "Pasted takeoff JSON",
-    file:      planFilename ? `Plan: ${planFilename}` : "Uploaded plan",
-    "ai-draft": planFilename ? `AI draft: ${planFilename}` : "AI draft",
-    edited:    "Edited draft",
-    invalid:   "Invalid draft",
-  };
-  const pillClass =
-    displayMode === "invalid"   ? "source-pill source-pill--invalid"   :
-    displayMode === "edited"    ? "source-pill source-pill--edited"    :
-    displayMode === "ai-draft"  ? "source-pill source-pill--ai-draft"  :
-    displayMode === "file"      ? "source-pill source-pill--file"      :
-    "source-pill";
-
   const { result, computed, validation, importPlan } = activeState;
 
   const showPlanPreviewColumn = Boolean(takeoffJobId && planFileMeta && authToken);
@@ -1052,32 +1048,29 @@ export default function TakeoffLabApp() {
 
             return (
               <section className="lab-section">
-                <h2 className="lab-section-title">Plan notes &amp; AI review flags</h2>
-                <div className="ai-review-notes lab-card">
-                  <p className="ai-review-notes-intro">
-                    These are notes the AI noticed from the plan. Confirm anything flagged in the Review Workbench before saving.
-                  </p>
-                  {planNotes.length > 0 && (
-                    <>
-                      {reviewFlags.length > 0 && (
-                        <p className="ai-review-notes-category">Plan notes</p>
-                      )}
-                      <ul className="ai-review-notes-list">
-                        {planNotes.map((note, i) => (
-                          <li key={i} className="ai-review-notes-item ai-review-notes-item--info">{note}</li>
-                        ))}
-                      </ul>
-                    </>
-                  )}
+                <h2 className="lab-section-title">Plan notes &amp; AI flags</h2>
+                <div className="ai-review-notes lab-card ai-review-notes--compact">
                   {reviewFlags.length > 0 && (
                     <>
                       <p className="ai-review-notes-category ai-review-notes-category--flags">AI flags — review before saving</p>
-                      <ul className="ai-review-notes-list">
+                      <ul className="ai-review-notes-list ai-review-notes-list--flags">
                         {reviewFlags.map((note, i) => (
                           <li key={i} className="ai-review-notes-item ai-review-notes-item--flag">{note}</li>
                         ))}
                       </ul>
                     </>
+                  )}
+                  {planNotes.length > 0 && (
+                    <details className="ai-review-notes-plan-details" open={reviewFlags.length === 0}>
+                      <summary className="ai-review-notes-plan-summary">
+                        Plan notes ({planNotes.length})
+                      </summary>
+                      <ul className="ai-review-notes-list">
+                        {planNotes.map((note, i) => (
+                          <li key={i} className="ai-review-notes-item ai-review-notes-item--info">{note}</li>
+                        ))}
+                      </ul>
+                    </details>
                   )}
                 </div>
               </section>
@@ -1122,65 +1115,51 @@ export default function TakeoffLabApp() {
           {/* ── 5. Review workflow ───────────────────────────────────────── */}
           {takeoffJobId && authToken && (
             <section className="lab-section lab-section--review-actions">
-              <h2 className="lab-section-title">Save &amp; approve</h2>
-              <div className="save-panel lab-card">
-                {isTakeoffApproved && workspaceReview?.approvedAt ? (
-                  <div className="save-panel-approved" role="status">
-                    <span className="status-chip status-approved">Approved</span>
-                    <span>
-                      Approved{" "}
-                      {new Date(workspaceReview.approvedAt).toLocaleString(undefined, {
-                        dateStyle: "short",
-                        timeStyle: "short",
-                      })}
-                      . Approved for future import — Internal Estimate import is not enabled yet.
-                    </span>
-                  </div>
-                ) : (
-                  <div className="save-panel-next-action" role="status">
-                    Review, fix issues, then approve this takeoff.
-                  </div>
-                )}
-                {unresolvedCount > 0 && (
-                  <div className="save-panel-warning" role="alert">
-                    <span className="save-panel-warning-icon">⚠</span>
-                    <span>
-                      <strong>{unresolvedCount} review item{unresolvedCount !== 1 ? "s" : ""} still unresolved</strong>{" "}
-                      in the workbench checklist. You can save now, but resolve them before import.
-                    </span>
-                  </div>
-                )}
-                {excludedRunIds.size > 0 && (
-                  <div className="save-panel-info-note">
-                    <span className="save-panel-info-icon">ℹ</span>
-                    <span>
-                      {excludedRunIds.size} excluded run{excludedRunIds.size !== 1 ? "s" : ""} will not be saved.
-                    </span>
-                  </div>
-                )}
-                <div className="save-panel-inner">
-                  <div className="save-panel-info">
-                    <p className="save-panel-desc">
-                      <strong>Save reviewed draft</strong> stores your in-progress review (correction audit
-                      is recorded when you changed AI values).
-                      <strong> Approve takeoff</strong> marks the workspace approved after server validation —
-                      it does not create a quote or import into Internal Estimate.
-                      Review status (<code>needs_review</code> / <code>approved</code>) updates automatically
-                      when you save or approve — there is no manual status field.
-                    </p>
-                    {hasEdits ? (
-                      <p className="save-panel-note">
-                        Unsaved edits detected — saving will append a correction audit entry.
-                      </p>
-                    ) : null}
-                    {savedAt && (
-                      <p className="save-panel-last-saved">
-                        Last saved:{" "}
-                        <strong>{new Date(savedAt).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}</strong>
-                      </p>
+              <div
+                className={`save-panel lab-card save-panel--action-bar${
+                  !isTakeoffApproved && (!canApproveTakeoff || hasBlockingValidation || hasQaBlocker)
+                    ? " save-panel--blocked"
+                    : ""
+                }`}
+              >
+                <div className="save-action-bar">
+                  <div className="save-action-bar-status-row">
+                    <div className="save-action-bar-field">
+                      <span className="save-action-bar-label">Status</span>
+                      <span className={`save-status-chip${isTakeoffApproved ? " save-status-chip--approved" : " save-status-chip--review"}`}>
+                        {isTakeoffApproved ? "Approved" : "Needs review"}
+                      </span>
+                    </div>
+                    {!isTakeoffApproved ? (
+                      <div className="save-action-bar-field save-action-bar-field--grow">
+                        <span className="save-action-bar-label">Next step</span>
+                        <span className="save-action-bar-next-text">
+                          {hasBlockingValidation || hasQaBlocker
+                            ? "Resolve validation blockers, then save and approve."
+                            : unresolvedCount > 0
+                              ? "Review flagged items, save, then approve."
+                              : "Save your review, then approve this takeoff."}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="save-action-bar-field save-action-bar-field--grow">
+                        <span className="save-action-bar-next-text save-action-bar-next-text--approved">
+                          Approved for future import — Internal Estimate import is not enabled yet.
+                          {workspaceReview?.approvedAt ? (
+                            <>
+                              {" "}
+                              ({new Date(workspaceReview.approvedAt).toLocaleString(undefined, {
+                                dateStyle: "short",
+                                timeStyle: "short",
+                              })})
+                            </>
+                          ) : null}
+                        </span>
+                      </div>
                     )}
                   </div>
-                  <div className="save-panel-actions save-panel-actions--split">
+
+                  <div className="save-action-bar-buttons">
                     <button
                       type="button"
                       className="save-panel-btn save-panel-btn--secondary"
@@ -1199,7 +1178,7 @@ export default function TakeoffLabApp() {
                     <button
                       type="button"
                       className="save-panel-btn save-panel-btn--approve"
-                      disabled={!canApproveTakeoff || approveStatus === "approving" || saveStatus === "saving"}
+                      disabled={!canApproveTakeoff || approveStatus === "approving" || saveStatus === "saving" || isTakeoffApproved}
                       title={approveBlockedReason ?? undefined}
                       onClick={() => {
                         if (unresolvedCount > 0) {
@@ -1214,7 +1193,33 @@ export default function TakeoffLabApp() {
                     </button>
                   </div>
                 </div>
-                {!canApproveTakeoff && approveBlockedReason && hasActiveSource ? (
+
+                {unresolvedCount > 0 && !isTakeoffApproved && (
+                  <div className="save-panel-info-note">
+                    <span className="save-panel-info-icon">ℹ</span>
+                    <span>
+                      {unresolvedCount} review checklist item{unresolvedCount !== 1 ? "s" : ""} still open — you can save now, but resolve before approval.
+                    </span>
+                  </div>
+                )}
+                {excludedRunIds.size > 0 && (
+                  <div className="save-panel-info-note">
+                    <span className="save-panel-info-icon">ℹ</span>
+                    <span>
+                      {excludedRunIds.size} excluded run{excludedRunIds.size !== 1 ? "s" : ""} will not be saved.
+                    </span>
+                  </div>
+                )}
+                {hasEdits ? (
+                  <p className="save-panel-note">Unsaved edits — saving records a correction audit entry.</p>
+                ) : null}
+                {savedAt ? (
+                  <p className="save-panel-last-saved">
+                    Last saved:{" "}
+                    <strong>{new Date(savedAt).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}</strong>
+                  </p>
+                ) : null}
+                {!canApproveTakeoff && approveBlockedReason && hasActiveSource && !isTakeoffApproved ? (
                   <p className="save-panel-blocked" role="note">
                     Approval blocked: {approveBlockedReason}
                   </p>
@@ -1481,58 +1486,60 @@ export default function TakeoffLabApp() {
       )}
 
       {/* ── Page intro + workflow explainer ───────────────────────── */}
-      <div className="takeoff-page-hero" role="region" aria-label="AI Takeoff overview">
+      <div className={`takeoff-page-hero${authToken && hasActiveSource ? " takeoff-page-hero--compact" : ""}`} role="region" aria-label="AI Takeoff overview">
         <div className="takeoff-page-hero-inner">
           <div className="takeoff-page-hero-main">
-            <p className="takeoff-page-eyebrow">AI Takeoff Lab · {workspaceName}</p>
-            <h1 className="takeoff-page-heading">Review plan measurements before quoting</h1>
-            <p className="takeoff-page-desc">
-              Upload a plan, generate an AI measurement draft, correct what the model missed,
-              and approve a reviewed takeoff for your organization. This tool prepares measurements —
-              it does not create quotes or import into Internal Estimate yet.
-            </p>
-            <TakeoffWorkflowExplainer />
+            {!hasActiveSource ? (
+              <>
+                <p className="takeoff-page-eyebrow">AI Takeoff Lab · {workspaceName}</p>
+                <h1 className="takeoff-page-heading">Review plan measurements before quoting</h1>
+                <p className="takeoff-page-desc">
+                  Upload a plan, generate an AI measurement draft, correct what the model missed,
+                  and approve a reviewed takeoff for your organization. This tool prepares measurements —
+                  it does not create quotes or import into Internal Estimate yet.
+                </p>
+              </>
+            ) : (
+              <h1 className="takeoff-page-heading takeoff-page-heading--compact">AI Takeoff review</h1>
+            )}
+            <TakeoffWorkflowExplainer compact={Boolean(authToken && hasActiveSource)} />
           </div>
           {authToken && hasActiveSource && (
-            <aside className="takeoff-page-hero-aside" aria-label="Current session">
-              <p className="takeoff-page-aside-label">Current session</p>
-              <div className="hero-pills">
-                <span className={pillClass}>
-                  {displayMode === "invalid"  ? "⚠"  :
-                   displayMode === "edited"   ? "✎"  :
-                   displayMode === "ai-draft" ? "✦"  :
-                   displayMode === "file"     ? "📄" :
-                   displayMode === "spec73"   ? "⚙"  : "◎"}{" "}
-                  {sourceLabel[displayMode]}
-                </span>
-                {displayMode === "ai-draft" && aiDraftMeta && (
-                  <span className="source-pill source-pill--ai-meta">
-                    {aiDraftMeta.promptVersion ?? "?"} · {aiDraftMeta.modelUsed ?? "model unknown"}
-                  </span>
-                )}
-                {result.source?.fileName && displayMode !== "file" && displayMode !== "invalid" && displayMode !== "spec73" && (
-                  <span className="source-pill source-pill--file">{result.source.fileName}</span>
-                )}
-                {hasEdits && displayMode !== "spec73" && (
-                  <span className="source-pill source-pill--edit-note">Edited</span>
-                )}
-                {excludedRunIds.size > 0 && (
-                  <span className="source-pill source-pill--excluded">{excludedRunIds.size} run{excludedRunIds.size !== 1 ? "s" : ""} excluded</span>
-                )}
-                {takeoffJobId && (
+            <aside className="takeoff-session-card" aria-label="Current session">
+              <p className="takeoff-session-label">Current session</p>
+              <p className="takeoff-session-filename" title={planFilename ?? result.source?.fileName ?? undefined}>
+                {planFilename ?? result.source?.fileName ?? "Active plan"}
+              </p>
+              <p className="takeoff-session-meta">
+                <span>{planFileRoleLabel(planFileMeta?.fileRole)}</span>
+                {takeoffJobId ? (
                   <>
-                    <span className="source-pill source-pill--workspace">Workspace active</span>
-                    <button
-                      type="button"
-                      className="start-new-btn"
-                      onClick={handleStartNewTakeoff}
-                      title="Clear this workspace from the screen and start a fresh takeoff (data is preserved)"
-                    >
-                      ↩ Start new takeoff
-                    </button>
+                    <span className="takeoff-session-meta-sep" aria-hidden>·</span>
+                    <span className="takeoff-session-workspace">Workspace active</span>
                   </>
-                )}
-              </div>
+                ) : null}
+                {hasEdits ? (
+                  <>
+                    <span className="takeoff-session-meta-sep" aria-hidden>·</span>
+                    <span>Edited</span>
+                  </>
+                ) : null}
+              </p>
+              {displayMode === "ai-draft" && aiDraftMeta ? (
+                <p className="takeoff-session-model">
+                  {aiDraftMeta.promptVersion ?? "?"} · {aiDraftMeta.modelUsed ?? "model unknown"}
+                </p>
+              ) : null}
+              {takeoffJobId ? (
+                <button
+                  type="button"
+                  className="takeoff-session-new-btn"
+                  onClick={handleStartNewTakeoff}
+                  title="Clear this workspace from the screen and start a fresh takeoff (data is preserved)"
+                >
+                  Start new takeoff
+                </button>
+              ) : null}
             </aside>
           )}
         </div>

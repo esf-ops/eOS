@@ -33,9 +33,14 @@ const STEPS = [
   },
 ] as const;
 
-export default function TakeoffWorkflowExplainer() {
+export interface TakeoffWorkflowExplainerProps {
+  /** Shorter layout when an active review session is in progress. */
+  compact?: boolean;
+}
+
+export default function TakeoffWorkflowExplainer({ compact = false }: TakeoffWorkflowExplainerProps) {
   return (
-    <div className="takeoff-workflow" aria-label="AI Takeoff workflow">
+    <div className={`takeoff-workflow${compact ? " takeoff-workflow--compact" : ""}`} aria-label="AI Takeoff workflow">
       <ol className="takeoff-workflow-steps">
         {STEPS.map((step, index) => (
           <li
@@ -47,12 +52,33 @@ export default function TakeoffWorkflowExplainer() {
             </span>
             <div className="takeoff-workflow-step-body">
               <span className="takeoff-workflow-step-label">{step.label}</span>
-              <span className="takeoff-workflow-step-detail">{step.detail}</span>
+              {!compact ? (
+                <span className="takeoff-workflow-step-detail">{step.detail}</span>
+              ) : null}
             </div>
           </li>
         ))}
       </ol>
 
+      {compact ? (
+        <details className="takeoff-workflow-boundaries-wrap">
+          <summary className="takeoff-workflow-boundaries-summary">Safety boundaries</summary>
+          <ul className="takeoff-workflow-boundaries" aria-label="Important boundaries">
+            <li>
+              <strong>No quotes created.</strong> Review-only — no quote creation or mutation.
+            </li>
+            <li>
+              <strong>eliteOS recomputes totals.</strong> AI output is never authoritative.
+            </li>
+            <li>
+              <strong>Human approval required.</strong> Stays <code>needs_review</code> until approved.
+            </li>
+            <li>
+              <strong>Internal Estimate import is not enabled yet.</strong>
+            </li>
+          </ul>
+        </details>
+      ) : (
       <ul className="takeoff-workflow-boundaries" aria-label="Important boundaries">
         <li>
           <strong>No quotes created.</strong> This head reviews measurements only — it does not
@@ -71,6 +97,7 @@ export default function TakeoffWorkflowExplainer() {
           a future import path — they are not pushed into Internal Estimate today.
         </li>
       </ul>
+      )}
     </div>
   );
 }

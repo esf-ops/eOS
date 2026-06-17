@@ -117,6 +117,7 @@ export interface PlanFilePreviewMeta {
   originalFilename: string;
   mimeType: string | null;
   status: string;
+  fileRole?: string;
 }
 
 export interface WorkspaceReviewMeta {
@@ -187,6 +188,7 @@ function toPlanFilePreviewMeta(file: PlanFileMeta): PlanFilePreviewMeta {
     originalFilename: file.originalFilename,
     mimeType: file.mimeType,
     status: file.status,
+    fileRole: file.fileRole,
   };
 }
 

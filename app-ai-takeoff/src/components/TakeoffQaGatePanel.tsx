@@ -82,6 +82,14 @@ export default function TakeoffQaGatePanel({ qaGate, fabricationFindings }: Prop
 
   const { status, severity, headline, summary, topIssues, positiveSignals, reviewChecklist } = qaGate;
 
+  const displayIssues = fabricationFindings?.length
+    ? topIssues.filter((issue) => issue.source !== "fabrication_rule")
+    : topIssues;
+
+  const hasBlockingFabRules = Boolean(
+    fabricationFindings?.some((f) => f.level === "error")
+  );
+
   return (
     <div className={`qa-gate-card lab-card qa-gate-card--${severity}`}>
 
@@ -99,10 +107,10 @@ export default function TakeoffQaGatePanel({ qaGate, fabricationFindings }: Prop
       {/* Summary */}
       <p className="qa-gate-summary">{summary}</p>
 
-      {/* Top issues */}
-      {topIssues.length > 0 && (
+      {/* Top issues (fabrication rules shown separately below) */}
+      {displayIssues.length > 0 && (
         <div className="qa-gate-issues">
-          {topIssues.map((issue, i) => (
+          {displayIssues.map((issue, i) => (
             <div key={i} className={`qa-gate-issue qa-gate-issue--${issue.severity}`}>
               <div className="qa-gate-issue-header">
                 <span className="qa-gate-issue-icon">{issueIcon(issue.severity)}</span>
@@ -140,9 +148,9 @@ export default function TakeoffQaGatePanel({ qaGate, fabricationFindings }: Prop
 
       {/* Fabrication rules subsection (v6.2) */}
       {fabricationFindings && fabricationFindings.length > 0 && (
-        <details className="qa-gate-fab-rules" open>
+        <details className="qa-gate-fab-rules" open={hasBlockingFabRules || undefined}>
           <summary className="qa-gate-fab-rules-title">
-            Fabrication rules ({fabricationFindings.length})
+            Fabrication rules — technical detail ({fabricationFindings.length})
           </summary>
           <ul className="qa-gate-fab-rules-list">
             {fabricationFindings.map((f, i) => {

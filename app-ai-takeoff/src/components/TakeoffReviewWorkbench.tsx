@@ -12,7 +12,7 @@
  * eliteOS recomputes measurement summary from the edited draft in the parent.
  */
 
-import React, { useMemo, useRef } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { reconcileRunsWithEvidence } from "@takeoff-core/takeoffEvidenceRunReconciliation.mjs";
 import { computeAreaSf } from "@takeoff-core/takeoffMeasurementCalc.mjs";
 import type { TakeoffResult, TakeoffArea, TakeoffRun } from "@takeoff-core/takeoffContract.mjs";
@@ -74,7 +74,7 @@ function EvidenceBadge({ link, excluded, isReviewed }: {
     return <span className="rw-badge rw-badge--excluded">excluded</span>;
   }
   if (!link || link.verdict === "exempt") {
-    return <span className="rw-badge rw-badge--muted">n/a</span>;
+    return null;
   }
   if (link.verdict === "supported" && !link.conflicting) {
     return <span className="rw-badge rw-badge--ok">✓ supported</span>;
@@ -332,8 +332,37 @@ interface RunRowProps {
   onSetNote:          (runId: string, note: string) => void;
 }
 
+function RunMeta({ link, excluded, isReviewed, sourcePages }: {
+  link: RunLink | null;
+  excluded: boolean;
+  isReviewed: boolean;
+  sourcePages?: number[];
+}) {
+  if (excluded) return null;
+  const parts: string[] = [];
+  if (sourcePages?.length) {
+    parts.push(`p.${sourcePages.join(",")}`);
+  }
+  if (link && link.verdict !== "exempt") {
+    if (link.verdict === "supported" && !link.conflicting) {
+      if (!isReviewed) parts.push("evidence supported");
+    } else if (isReviewed) {
+      parts.push("reviewed");
+    } else if (link.verdict === "unsupported") {
+      parts.push("no matching plan evidence");
+    } else if (link.verdict === "changed" && link.nearestChanged) {
+      parts.push(`plan dim ${link.nearestChanged.lengthIn}"`);
+    } else if (link.conflicting) {
+      parts.push("evidence conflict");
+    }
+  }
+  if (!parts.length) return null;
+  return <span className="rw-run-meta">{parts.join(" · ")}</span>;
+}
+
 function RunRow({ row, excluded, note, onPatchRun, onToggleExclude, onSetNote }: RunRowProps) {
   const { roomIdx, areaIdx, runIdx, run, link } = row;
+  const [noteOpen, setNoteOpen] = useState(() => Boolean(note.trim()));
 
   const isCounter = (run.pieceType ?? "counter") === "counter";
 
@@ -359,6 +388,7 @@ function RunRow({ row, excluded, note, onPatchRun, onToggleExclude, onSetNote }:
   const ACCEPT_NOTE = "Reviewed and accepted as correct.";
 
   const handleAccept = () => {
+    setNoteOpen(true);
     // Set the reviewer note state (drives checklist resolution)
     onSetNote(run.id, ACCEPT_NOTE);
     // Also bake into run.assemblyNotes so the note survives save/reload
@@ -367,23 +397,41 @@ function RunRow({ row, excluded, note, onPatchRun, onToggleExclude, onSetNote }:
     onPatchRun(roomIdx, areaIdx, runIdx, { assemblyNotes: combined });
   };
 
+  const runSf =
+    isCounter && run.lengthIn > 0 && run.depthIn > 0
+      ? ((run.lengthIn * run.depthIn) / 144).toFixed(2)
+      : null;
+
   return (
     <div className={rowCls} role="row">
-      {/* Label */}
+      {/* Piece */}
       <div className="rw-cell rw-cell--label" role="cell">
         <input
           className="rw-label-input"
           type="text"
           defaultValue={run.label}
           disabled={excluded}
-          aria-label="Run label"
+          aria-label="Piece name"
+          title={run.label}
           onBlur={(e) => {
             const v = e.target.value.trim();
             if (v && v !== run.label) onPatchRun(roomIdx, areaIdx, runIdx, { label: v });
           }}
           onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
         />
-        <span className="rw-piece-type">{run.pieceType ?? "counter"}</span>
+        <div className="rw-label-sub">
+          <span className="rw-piece-type">{run.pieceType ?? "counter"}</span>
+          <RunMeta
+            link={link}
+            excluded={excluded}
+            isReviewed={isReviewed}
+            sourcePages={run.sourcePages}
+          />
+          {!excluded && !isReviewed && link && link.verdict !== "exempt" && (
+            <EvidenceBadge link={link} excluded={excluded} isReviewed={isReviewed} />
+          )}
+        </div>
+        {!excluded && !isReviewed && <EvidenceHint link={link} />}
       </div>
 
       {/* Length */}
@@ -424,16 +472,11 @@ function RunRow({ row, excluded, note, onPatchRun, onToggleExclude, onSetNote }:
         <span className="rw-dim-unit">"</span>
       </div>
 
-      {/* Evidence status */}
-      <div className="rw-cell rw-cell--status" role="cell">
-        <EvidenceBadge link={link} excluded={excluded} isReviewed={isReviewed} />
-        {/* Suppress hint once the estimator has accepted the row */}
-        {!excluded && !isReviewed && <EvidenceHint link={link} />}
-      </div>
-
-      {/* Source pages */}
-      <div className="rw-cell rw-cell--pages" role="cell">
-        {run.sourcePages?.length ? `p.${run.sourcePages.join(",")}` : "—"}
+      {/* SF */}
+      <div className="rw-cell rw-cell--sf" role="cell">
+        <span className="rw-sf-value" title={runSf ? `${runSf} square feet` : undefined}>
+          {runSf ?? "—"}
+        </span>
       </div>
 
       {/* Include/exclude toggle */}
@@ -445,13 +488,12 @@ function RunRow({ row, excluded, note, onPatchRun, onToggleExclude, onSetNote }:
           title={excluded ? "Re-include this run in the total" : "Exclude this run from the total"}
           aria-pressed={excluded}
         >
-          {excluded ? "↩ re-include" : "✓ included"}
+          {excluded ? "Excluded" : "Include"}
         </button>
       </div>
 
-      {/* Review note + Accept action */}
+      {/* Review note */}
       <div className="rw-cell rw-cell--note" role="cell">
-        {/* Accept as correct button — shown when issue exists and no note yet */}
         {hasEvidenceIssue && !note && !excluded && (
           <button
             type="button"
@@ -459,17 +501,27 @@ function RunRow({ row, excluded, note, onPatchRun, onToggleExclude, onSetNote }:
             onClick={handleAccept}
             title="Mark this run as reviewed and accepted without changing its dimensions"
           >
-            Accept as correct
+            Accept
           </button>
         )}
-        <input
-          className="rw-note-input"
-          type="text"
-          value={note}
-          placeholder={hasEvidenceIssue ? "Add note if accepting issue…" : "Note: reason for accepting or changing…"}
-          aria-label="Reviewer note"
-          onChange={(e) => onSetNote(run.id, e.target.value)}
-        />
+        {noteOpen || note ? (
+          <input
+            className="rw-note-input"
+            type="text"
+            value={note}
+            placeholder={hasEvidenceIssue ? "Note why accepted…" : "Reviewer note…"}
+            aria-label="Reviewer note"
+            onChange={(e) => onSetNote(run.id, e.target.value)}
+          />
+        ) : (
+          <button
+            type="button"
+            className="rw-note-toggle"
+            onClick={() => setNoteOpen(true)}
+          >
+            Add note
+          </button>
+        )}
       </div>
     </div>
   );
@@ -770,13 +822,12 @@ export default function TakeoffReviewWorkbench({
 
         {/* Table header */}
         <div className="rw-run-row rw-run-row--header" role="row">
-          <span role="columnheader" className="rw-cell rw-cell--label">Run / piece</span>
+          <span role="columnheader" className="rw-cell rw-cell--label">Piece</span>
           <span role="columnheader" className="rw-cell rw-cell--dim">Length</span>
           <span role="columnheader" className="rw-cell rw-cell--dim">Depth</span>
-          <span role="columnheader" className="rw-cell rw-cell--status">Evidence</span>
-          <span role="columnheader" className="rw-cell rw-cell--pages">Pages</span>
-          <span role="columnheader" className="rw-cell rw-cell--toggle">Include?</span>
-          <span role="columnheader" className="rw-cell rw-cell--note">Reviewer note</span>
+          <span role="columnheader" className="rw-cell rw-cell--sf">SF</span>
+          <span role="columnheader" className="rw-cell rw-cell--toggle">Include</span>
+          <span role="columnheader" className="rw-cell rw-cell--note">Notes</span>
         </div>
 
         {/* Rows grouped by area */}
