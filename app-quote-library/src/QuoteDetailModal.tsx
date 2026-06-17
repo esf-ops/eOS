@@ -359,7 +359,10 @@ export function QuoteDetailModal({
             <h2 className="drawer-title">{account.primary || "—"}</h2>
             {account.subline || account.projectCell ? (
               <p className="drawer-subtitle">
-                {[account.subline, account.projectCell]
+                {[
+                  account.subline ? `Customer: ${account.subline}` : "",
+                  account.projectCell ? `Project: ${account.projectCell}` : ""
+                ]
                   .filter(Boolean)
                   .join(" · ")}
               </p>
@@ -425,7 +428,7 @@ export function QuoteDetailModal({
                   <dd>{str(header.customer_name) || "—"}</dd>
                 </div>
                 <div className="dl-row">
-                  <dt>Project</dt>
+                  <dt>Project / Elite job name</dt>
                   <dd>{str(header.project_name) || "—"}</dd>
                 </div>
                 <div className="dl-row">

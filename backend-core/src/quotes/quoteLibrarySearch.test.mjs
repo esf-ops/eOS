@@ -10,6 +10,7 @@ import {
   quoteAccountFilterOrClause,
   quoteSearchOrClauseForTerm,
   tokenizeQuoteSearchQuery,
+  deriveQuoteAccountName,
   QUOTE_LIBRARY_LIST_SELECT
 } from "./quoteLibrarySearch.js";
 
@@ -33,6 +34,7 @@ function testSearchFieldsIncludeRequiredColumns() {
     "prepared_by",
     "created_by",
     "sales_rep",
+    "calculation_snapshot->internal_ui->job_info->>account",
     "calculation_snapshot->internal_ui->>account"
   ]) {
     assert.match(clause, new RegExp(field.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
@@ -42,7 +44,41 @@ function testSearchFieldsIncludeRequiredColumns() {
 function testAccountFilterIncludesSnapshotAccount() {
   const clause = quoteAccountFilterOrClause("Interior Elements");
   assert.match(clause, /account_name\.ilike/);
-  assert.match(clause, /calculation_snapshot->internal_ui->>account\.ilike/);
+  assert.match(clause, /calculation_snapshot->internal_ui->job_info->>account\.ilike/);
+}
+
+function testDeriveAccountNameUsesJobInfoNotProject() {
+  const row = {
+    account_name: null,
+    customer_name: "Homeowner",
+    project_name: "Stenrich",
+    snapshot_account: "D&M"
+  };
+  assert.equal(deriveQuoteAccountName(row), "D&M");
+}
+
+function testDeriveAccountNameDoesNotFallbackToProject() {
+  const row = {
+    account_name: null,
+    customer_name: "Homeowner",
+    project_name: "Stenrich",
+    snapshot_account: null,
+    calculation_snapshot: {
+      internal_ui: {
+        job_info: { account: "D&M" }
+      }
+    }
+  };
+  assert.equal(deriveQuoteAccountName(row), "D&M");
+}
+
+function testDeriveAccountNameMissingAccountShowsDash() {
+  const row = {
+    account_name: null,
+    customer_name: "Homeowner",
+    project_name: "Stenrich"
+  };
+  assert.equal(deriveQuoteAccountName(row), "—");
 }
 
 function testApplySearchAndsTokens() {
@@ -63,6 +99,7 @@ function testListSelectIsLightweight() {
   assert.match(QUOTE_LIBRARY_LIST_SELECT, /quote_number_base/);
   assert.match(QUOTE_LIBRARY_LIST_SELECT, /created_by/);
   assert.match(QUOTE_LIBRARY_LIST_SELECT, /snapshot_pricing_mode:/);
+  assert.match(QUOTE_LIBRARY_LIST_SELECT, /snapshot_account:calculation_snapshot->internal_ui->job_info->>account/);
   assert.doesNotMatch(QUOTE_LIBRARY_LIST_SELECT, /calculation_snapshot[^->]/);
 }
 
@@ -71,7 +108,10 @@ const tests = [
   ["S2 required search fields", testSearchFieldsIncludeRequiredColumns],
   ["S3 account filter snapshot", testAccountFilterIncludesSnapshotAccount],
   ["S4 AND multi-word tokens", testApplySearchAndsTokens],
-  ["S5 lightweight list select", testListSelectIsLightweight]
+  ["S5 lightweight list select", testListSelectIsLightweight],
+  ["S6 derive account from snapshot alias", testDeriveAccountNameUsesJobInfoNotProject],
+  ["S7 derive account from job_info", testDeriveAccountNameDoesNotFallbackToProject],
+  ["S8 missing account does not use project", testDeriveAccountNameMissingAccountShowsDash]
 ];
 
 let failed = 0;

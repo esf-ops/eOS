@@ -7,6 +7,42 @@ function pickStr(v) {
 }
 
 /**
+ * Resolve dealer/account name from a quote row (list or detail).
+ * Does not fall back to customer or project — those are separate display fields.
+ *
+ * @param {Record<string, unknown>} row
+ * @returns {string}
+ */
+export function deriveQuoteAccountName(row) {
+  const r = row && typeof row === "object" ? row : {};
+  const explicit = pickStr(r.account_name);
+  if (explicit) return explicit;
+  const snapAlias = pickStr(r.snapshot_account) || pickStr(r.snapshot_account_legacy);
+  if (snapAlias) return snapAlias;
+  const snap = r.calculation_snapshot && typeof r.calculation_snapshot === "object" ? r.calculation_snapshot : {};
+  const iu = snap.internal_ui && typeof snap.internal_ui === "object" ? snap.internal_ui : {};
+  const ji = iu.job_info && typeof iu.job_info === "object" ? iu.job_info : {};
+  const fromJobInfo = pickStr(ji.account);
+  if (fromJobInfo) return fromJobInfo;
+  const legacyRoot = pickStr(iu.account);
+  if (legacyRoot) return legacyRoot;
+  return "—";
+}
+
+/**
+ * Account name to persist on quote_headers from an internal estimate save body.
+ *
+ * @param {Record<string, unknown>} body
+ * @returns {string | null}
+ */
+export function resolveAccountNameForPersist(body) {
+  const b = body && typeof body === "object" ? body : {};
+  const ji = b.job_info && typeof b.job_info === "object" ? b.job_info : {};
+  const v = pickStr(b.account_name) || pickStr(b.account) || pickStr(ji.account);
+  return v || null;
+}
+
+/**
  * Split a user search string into safe tokens (max 6 words, 40 chars each).
  *
  * @param {unknown} raw
@@ -46,6 +82,7 @@ export function quoteSearchOrClauseForTerm(term) {
     `prepared_by.ilike.${pat}`,
     `created_by.ilike.${pat}`,
     `branch.ilike.${pat}`,
+    `calculation_snapshot->internal_ui->job_info->>account.ilike.${pat}`,
     `calculation_snapshot->internal_ui->>account.ilike.${pat}`,
     `calculation_snapshot->internal_ui->>project_name.ilike.${pat}`
   ].join(",");
@@ -92,6 +129,7 @@ export function quoteAccountFilterOrClause(account) {
     `project_name.ilike.${pat}`,
     `quote_number.ilike.${pat}`,
     `quote_number_base.ilike.${pat}`,
+    `calculation_snapshot->internal_ui->job_info->>account.ilike.${pat}`,
     `calculation_snapshot->internal_ui->>account.ilike.${pat}`
   ].join(",");
 }
@@ -103,5 +141,6 @@ export const QUOTE_LIBRARY_LIST_SELECT =
   "project_name,project_address,city,state,zip,sales_rep,branch,grand_total,estimated_sqft," +
   "created_at,updated_at,prepared_by,created_by," +
   "snapshot_pricing_mode:calculation_snapshot->internal_ui->>internal_material_basis," +
-  "snapshot_account:calculation_snapshot->internal_ui->>account," +
+  "snapshot_account:calculation_snapshot->internal_ui->job_info->>account," +
+  "snapshot_account_legacy:calculation_snapshot->internal_ui->>account," +
   "snapshot_customer_display_total:calculation_snapshot->internal_ui->>customer_display_total";

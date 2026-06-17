@@ -105,7 +105,7 @@ export function statusFilterLabel(value: string): string {
   return labelQuoteStatus(value);
 }
 
-/** Table: primary account line + optional subline; project cell (empty → show "—"). */
+/** Table: account, customer subline, and project/job — no cross-field fallback. */
 export function displayAccountColumn(r: Record<string, unknown>): {
   primary: string;
   subline: string;
@@ -115,9 +115,8 @@ export function displayAccountColumn(r: Record<string, unknown>): {
   const cust = String(r.customer_name ?? "").trim();
   const proj = String(r.project_name ?? "").trim();
   const n = (s: string) => s.toLowerCase();
-  const primary = acct || cust || proj || "—";
-  const subline = cust && n(cust) !== n(primary) ? cust : "";
-  const projectCell =
-    proj && n(proj) !== n(primary) && n(proj) !== n(cust) ? proj : "";
+  const primary = acct || "—";
+  const subline = cust && n(cust) !== n(acct) ? cust : "";
+  const projectCell = proj || "";
   return { primary, subline, projectCell };
 }

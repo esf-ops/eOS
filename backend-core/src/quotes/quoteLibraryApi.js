@@ -24,6 +24,7 @@ import { buildMorawareEntryDocPayload, buildQuickBooksEntryDocPayload } from "./
 import {
   applyQuoteLibrarySearch,
   quoteAccountFilterOrClause,
+  deriveQuoteAccountName,
   QUOTE_LIBRARY_LIST_SELECT
 } from "./quoteLibrarySearch.js";
 
@@ -60,19 +61,7 @@ function buildInternalEstimateSummary(calc, body, snapshotToStore) {
 }
 
 function deriveAccountName(row) {
-  const r = row && typeof row === "object" ? row : {};
-  const explicit = pickStr(r.account_name);
-  if (explicit) return explicit;
-  const snapAccount = pickStr(r.snapshot_account);
-  if (snapAccount) return snapAccount;
-  const snap = r.calculation_snapshot && typeof r.calculation_snapshot === "object" ? r.calculation_snapshot : {};
-  const iu = snap.internal_ui && typeof snap.internal_ui === "object" ? snap.internal_ui : {};
-  return (
-    pickStr(r.customer_name) ||
-    pickStr(r.project_name) ||
-    pickStr(iu.account) ||
-    "—"
-  );
+  return deriveQuoteAccountName(row);
 }
 
 function displayStatus(raw) {

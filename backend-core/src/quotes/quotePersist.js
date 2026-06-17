@@ -16,6 +16,7 @@ import {
   shouldApplyChargeableCounterCeil
 } from "./roomGuidedMeasurement.js";
 import { buildLeadAssignmentRow } from "./quoteTerritoryAssignment.js";
+import { resolveAccountNameForPersist } from "./quoteLibrarySearch.js";
 
 function countertopAndBacksplashSqftFromRoomRow(r, quoteSource) {
   let ct = Number(r.countertopSqft ?? r.chargeableCountertopSqft ?? r.roomCounter ?? 0) || 0;
@@ -217,6 +218,7 @@ export async function persistQuoteSubmission(db, opts) {
     customer_name: body.customer_name || null,
     customer_email: body.customer_email || null,
     customer_phone: body.customer_phone || null,
+    account_name: resolveAccountNameForPersist(body),
     project_name: body.project_name || null,
     project_address: body.project_address || null,
     city: body.city || null,
@@ -402,7 +404,7 @@ export async function persistQuoteSubmission(db, opts) {
         : null,
       internal_estimate_summary: internalEstimateSummary,
       pricing_mode_label: pricingModeLabel,
-      account_name: body.account ?? body.account_name ?? null,
+      account_name: resolveAccountNameForPersist(body),
       quote_number_base: headerMerged.quote_number_base ?? null,
       revision_label: headerMerged.revision_label ?? null,
       quote_family_root_id: headerMerged.quote_family_root_id ?? null,

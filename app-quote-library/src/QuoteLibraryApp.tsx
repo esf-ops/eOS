@@ -1321,7 +1321,7 @@ export default function QuoteLibraryApp() {
                         </th>
                         <th className="col-num">Quote #</th>
                         <th>Account</th>
-                        <th className="hide-sm">Project</th>
+                        <th className="hide-sm">Project / Job</th>
                         <th className="hide-sm">Location</th>
                         <th>Source</th>
                         <th>Status</th>

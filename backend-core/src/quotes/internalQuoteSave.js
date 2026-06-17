@@ -18,6 +18,7 @@ import {
 } from "../organizations/organizationContext.js";
 import * as esf from "./quoteEsfNumber.js";
 import { generateQuoteNumber, isMissingRelationError, persistQuoteSubmission, replaceQuoteLinesAndRooms } from "./quotePersist.js";
+import { resolveAccountNameForPersist } from "./quoteLibrarySearch.js";
 
 function round2(n) {
   return Math.round(Number(n) * 100) / 100;
@@ -198,6 +199,7 @@ export async function processInternalQuoteSave(params) {
     prepared_by: body.entered_by || body.prepared_by || body.preparedBy,
     customer_name: body.customer_name,
     project_name: body.project_name,
+    account_name: resolveAccountNameForPersist(body),
     city: body.city,
     state: body.state
   };
@@ -294,6 +296,7 @@ export async function processInternalQuoteSave(params) {
       customer_name: persistBody.customer_name ?? null,
       customer_email: persistBody.customer_email ?? null,
       customer_phone: persistBody.customer_phone ?? null,
+      account_name: resolveAccountNameForPersist(persistBody),
       project_name: persistBody.project_name ?? null,
       project_address: persistBody.project_address ?? null,
       city: persistBody.city ?? null,
@@ -366,7 +369,7 @@ export async function processInternalQuoteSave(params) {
       pricing_mode_label: pricingModeLabel,
       revision_label: row.revision_label,
       quote_family_root_id: row.quote_family_root_id || row.id,
-      account_name: persistBody.account ?? persistBody.account_name ?? null,
+      account_name: resolveAccountNameForPersist(persistBody),
       estimated_by_display: estimatorDisplayName
     });
     let mondaySync = { ok: true, skipped: true, status: null, monday_item_id: row.monday_item_id };
