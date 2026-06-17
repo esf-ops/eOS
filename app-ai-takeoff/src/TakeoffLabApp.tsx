@@ -66,6 +66,7 @@ import TakeoffWorkflowExplainer from "./components/TakeoffWorkflowExplainer";
 import { reconcileRunsWithEvidence } from "@takeoff-core/takeoffEvidenceRunReconciliation.mjs";
 import { evaluateTakeoffFabricationRules } from "@takeoff-core/takeoffFabricationRules.mjs";
 import { makeTakeoffRun } from "@takeoff-core/takeoffContract.mjs";
+import { addManualRunToDraft } from "@takeoff-core/takeoffWorkbenchHelpers.mjs";
 import { getSupabase } from "./lib/supabase";
 import { labApiGet, labApiPost, saveTakeoffCorrection, approveTakeoffJob, LabApiError } from "./lib/api";
 import EliteosTopbar from "../../shared/eliteos-ui/EliteosTopbar";
@@ -159,6 +160,19 @@ export type AreaPatch  = {
   backsplashReviewNote?: string;
 };
 export type RunPatch   = { label?: string; lengthIn?: number; depthIn?: number; assemblyNotes?: string };
+
+/** Structured manual piece entry from Review Workbench. */
+export type ManualRunInput = {
+  roomIdx: number;
+  areaLabel?: string;
+  preset?: string;
+  pieceLabel?: string;
+  lengthIn: number;
+  depthIn: number;
+  pageNumber?: string | number | null;
+  note?: string;
+  includeInTakeoff?: boolean;
+};
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 type ApproveStatus = "idle" | "approving" | "approved" | "error";
@@ -440,6 +454,15 @@ export default function TakeoffLabApp() {
     };
   }, [editDraft, excludedRunIds]);
 
+  /** True when saved payload (after exclusions) differs from last loaded source. */
+  const hasSaveableChanges = useMemo(() => {
+    try {
+      return JSON.stringify(effectiveDraft.rooms) !== JSON.stringify(sourceResult.rooms);
+    } catch {
+      return hasEdits || excludedRunIds.size > 0;
+    }
+  }, [effectiveDraft.rooms, sourceResult.rooms, hasEdits, excludedRunIds.size]);
+
   const activeState = useMemo((): ActiveComputedState => {
     try { return computeAll(effectiveDraft); }
     catch { return computeAll(makeSpec73()); }
@@ -475,15 +498,15 @@ export default function TakeoffLabApp() {
 
   const canApproveTakeoff = useMemo(() => {
     if (!takeoffJobId || !hasActiveSource) return false;
-    if (workspaceReview?.reviewStatus === "approved") return false;
+    if (workspaceReview?.reviewStatus === "approved" && !hasSaveableChanges) return false;
     if (activeState.validation.hasErrors || (activeState.validation.errorCount ?? 0) > 0) return false;
     if (qaGate?.status === "do_not_import") return false;
     return true;
-  }, [takeoffJobId, hasActiveSource, workspaceReview?.reviewStatus, activeState.validation, qaGate?.status]);
+  }, [takeoffJobId, hasActiveSource, workspaceReview?.reviewStatus, hasSaveableChanges, activeState.validation, qaGate?.status]);
 
   const approveBlockedReason = useMemo(() => {
     if (!takeoffJobId || !hasActiveSource) return "Load a takeoff workspace first.";
-    if (workspaceReview?.reviewStatus === "approved") return "This takeoff is already approved.";
+    if (workspaceReview?.reviewStatus === "approved" && !hasSaveableChanges) return "This takeoff is already approved.";
     if (activeState.validation.hasErrors || (activeState.validation.errorCount ?? 0) > 0) {
       return "Resolve validation errors before approval.";
     }
@@ -733,14 +756,29 @@ export default function TakeoffLabApp() {
 
   // ── Review workbench handlers (v6.1) ─────────────────────────────────────
 
-  const handleToggleExcludeRun = useCallback((runId: string) => {
+  const handleSetRunIncluded = useCallback((runId: string, included: boolean) => {
     setExcludedRunIds((prev) => {
       const next = new Set(prev);
-      if (next.has(runId)) next.delete(runId);
+      if (included) next.delete(runId);
       else next.add(runId);
       return next;
     });
   }, []);
+
+  const handleAddManualRun = useCallback((input: ManualRunInput) => {
+    try {
+      const { draft, run } = addManualRunToDraft(editDraft, input);
+      setEditDraft(draft);
+      if (input.includeInTakeoff === false) {
+        setExcludedRunIds((prev) => new Set(prev).add(run.id));
+      }
+      if (input.note?.trim()) {
+        setReviewNotes((prev) => ({ ...prev, [run.id]: input.note!.trim() }));
+      }
+    } catch (e) {
+      console.error("Failed to add manual run", e);
+    }
+  }, [editDraft]);
 
   const handleSetReviewNote = useCallback((runId: string, note: string) => {
     setReviewNotes((prev) => ({ ...prev, [runId]: note }));
@@ -869,9 +907,9 @@ export default function TakeoffLabApp() {
   const handleSaveDraft = useCallback(async () => {
     if (!takeoffJobId || !authToken) return;
     setSaveStatus("saving");
-    setSaveMsg(hasEdits ? "Saving reviewed draft with correction audit…" : "Saving reviewed draft…");
+    setSaveMsg(hasSaveableChanges ? "Saving reviewed draft with correction audit…" : "Saving reviewed draft…");
     try {
-      const res = hasEdits
+      const res = hasSaveableChanges
         ? await saveTakeoffCorrection(authToken, takeoffJobId, {
             takeoffResult: effectiveDraft,
             baseResultId: currentResultId,
@@ -893,14 +931,14 @@ export default function TakeoffLabApp() {
       }));
       setHistoryRefreshKey((k) => k + 1);
       setSaveMsg(
-        `${hasEdits ? "Correction saved" : "Reviewed draft saved"} — ${res.summary.countertopExactSf.toFixed(2)} sf countertop · ${res.summary.backsplashExactSf.toFixed(2)} sf backsplash`
+        `${hasSaveableChanges ? "Correction saved" : "Reviewed draft saved"} — ${res.summary.countertopExactSf.toFixed(2)} sf countertop · ${res.summary.backsplashExactSf.toFixed(2)} sf backsplash`
       );
     } catch (e) {
       const msg = e instanceof LabApiError ? e.message : e instanceof Error ? e.message : "Save failed.";
       setSaveStatus("error");
       setSaveMsg(msg);
     }
-  }, [takeoffJobId, authToken, effectiveDraft, hasEdits, currentResultId]);
+  }, [takeoffJobId, authToken, effectiveDraft, hasSaveableChanges, currentResultId]);
 
   const handleApproveTakeoff = useCallback(async () => {
     if (!takeoffJobId || !authToken || !canApproveTakeoff) return;
@@ -1057,6 +1095,8 @@ export default function TakeoffLabApp() {
     hasActiveSource && (validation.hasErrors || (validation.errorCount ?? 0) > 0)
   );
   const isTakeoffApproved = workspaceReview?.reviewStatus === "approved";
+  const approvalStale = Boolean(isTakeoffApproved && hasSaveableChanges);
+  const showApprovedInUi = isTakeoffApproved && !approvalStale;
   const hasQaBlocker = qaGate?.status === "do_not_import";
 
   const reviewSections = hasActiveSource ? (
@@ -1066,9 +1106,11 @@ export default function TakeoffLabApp() {
               <div className="takeoff-active-review-banner-main">
                 <h2 className="takeoff-active-review-title">Active takeoff review</h2>
                 <p className="takeoff-active-review-next">
-                  {isTakeoffApproved
+                  {showApprovedInUi
                     ? "Approved for future import — Internal Estimate import is not enabled yet."
-                    : hasBlockingValidation || hasQaBlocker
+                    : approvalStale
+                      ? "Approved takeoff has unsaved edits — save reviewed draft, then re-approve."
+                      : hasBlockingValidation || hasQaBlocker
                       ? "Fix validation and QA blockers below, then approve this takeoff."
                       : unresolvedCount > 0
                         ? "Complete the review checklist, then save and approve."
@@ -1169,7 +1211,9 @@ export default function TakeoffLabApp() {
               evidenceReviewState={evidenceReviewState}
               onPatchRun={handlePatchRun}
               onPatchArea={handlePatchArea}
-              onToggleExcludeRun={handleToggleExcludeRun}
+              onPatchRoom={handlePatchRoom}
+              onSetRunIncluded={handleSetRunIncluded}
+              onAddManualRun={handleAddManualRun}
               onSetReviewNote={handleSetReviewNote}
               onMarkEvidenceReviewed={handleMarkEvidenceReviewed}
             />
@@ -1180,7 +1224,7 @@ export default function TakeoffLabApp() {
             <section className="lab-section lab-section--review-actions">
               <div
                 className={`save-panel lab-card save-panel--action-bar${
-                  !isTakeoffApproved && (!canApproveTakeoff || hasBlockingValidation || hasQaBlocker)
+                  !showApprovedInUi && (!canApproveTakeoff || hasBlockingValidation || hasQaBlocker)
                     ? " save-panel--blocked"
                     : ""
                 }`}
@@ -1189,11 +1233,11 @@ export default function TakeoffLabApp() {
                   <div className="save-action-bar-status-row">
                     <div className="save-action-bar-field">
                       <span className="save-action-bar-label">Status</span>
-                      <span className={`save-status-chip${isTakeoffApproved ? " save-status-chip--approved" : " save-status-chip--review"}`}>
-                        {isTakeoffApproved ? "Approved" : "Needs review"}
+                      <span className={`save-status-chip${showApprovedInUi ? " save-status-chip--approved" : " save-status-chip--review"}`}>
+                        {showApprovedInUi ? "Approved" : approvalStale ? "Needs re-approval" : "Needs review"}
                       </span>
                     </div>
-                    {!isTakeoffApproved ? (
+                    {!showApprovedInUi ? (
                       <div className="save-action-bar-field save-action-bar-field--grow">
                         <span className="save-action-bar-label">Next step</span>
                         <span className="save-action-bar-next-text">
@@ -1241,7 +1285,7 @@ export default function TakeoffLabApp() {
                     <button
                       type="button"
                       className="save-panel-btn save-panel-btn--approve"
-                      disabled={!canApproveTakeoff || approveStatus === "approving" || saveStatus === "saving" || isTakeoffApproved}
+                      disabled={!canApproveTakeoff || approveStatus === "approving" || saveStatus === "saving" || showApprovedInUi}
                       title={approveBlockedReason ?? undefined}
                       onClick={() => {
                         if (unresolvedCount > 0) {
@@ -1257,7 +1301,7 @@ export default function TakeoffLabApp() {
                   </div>
                 </div>
 
-                {unresolvedCount > 0 && !isTakeoffApproved && (
+                {unresolvedCount > 0 && !showApprovedInUi && (
                   <div className="save-panel-info-note">
                     <span className="save-panel-info-icon">ℹ</span>
                     <span>
@@ -1282,7 +1326,7 @@ export default function TakeoffLabApp() {
                     <strong>{new Date(savedAt).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}</strong>
                   </p>
                 ) : null}
-                {!canApproveTakeoff && approveBlockedReason && hasActiveSource && !isTakeoffApproved ? (
+                {!canApproveTakeoff && approveBlockedReason && hasActiveSource && !showApprovedInUi ? (
                   <p className="save-panel-blocked" role="note">
                     Approval blocked: {approveBlockedReason}
                   </p>
@@ -1449,7 +1493,7 @@ export default function TakeoffLabApp() {
             <summary className="lab-section-summary">
               <span className="lab-section-title" style={{ margin: 0 }}>Import preview</span>
               <span className="lab-section-summary-note">
-                {isTakeoffApproved
+                {showApprovedInUi
                   ? "Approved for future import — not enabled yet"
                   : importPlan.canImport
                     ? `${importPlan.rooms.length} room${importPlan.rooms.length !== 1 ? "s" : ""} mapped`

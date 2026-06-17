@@ -3048,12 +3048,26 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
   background: var(--eos-bg-soft);
   border-bottom: 1px solid var(--eos-line);
 }
-.rw-area-room {
+.rw-area-room-input {
   font-size: 0.72rem;
   font-weight: 600;
   color: var(--eos-ink-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 1px 4px;
+  min-width: 72px;
+  max-width: 160px;
+}
+.rw-area-room-input:hover,
+.rw-area-room-input:focus {
+  color: var(--eos-ink);
+  background: var(--eos-surface);
+  border-color: var(--eos-line-strong);
+  outline: none;
+  text-transform: none;
 }
 .rw-area-sep {
   font-size: 0.72rem;
@@ -3080,7 +3094,7 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
 /* ── Run row ── */
 .rw-run-row {
   display: grid;
-  grid-template-columns: minmax(180px, 2.4fr) 68px 68px 52px 76px minmax(120px, 1.6fr);
+  grid-template-columns: minmax(180px, 2.4fr) 68px 68px 52px minmax(148px, 1.2fr) minmax(120px, 1.6fr);
   align-items: stretch;
   gap: 0;
   border-bottom: 1px solid var(--eos-line);
@@ -3261,6 +3275,132 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
   border-color: var(--eos-success-border);
   border-style: solid;
 }
+
+.rw-include-control {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  width: 100%;
+}
+.rw-include-status {
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: var(--eos-success);
+  line-height: 1.2;
+  text-align: center;
+}
+.rw-include-status--excluded {
+  color: var(--eos-danger);
+}
+.rw-include-segmented {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--r-sm);
+  background: var(--eos-bg-soft);
+  border: 1px solid var(--eos-line);
+}
+.rw-include-seg {
+  border: none;
+  background: transparent;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 4px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--eos-ink-muted);
+}
+.rw-include-seg--active {
+  background: var(--eos-surface);
+  color: var(--eos-ink);
+  box-shadow: var(--eos-shadow-sm);
+}
+.rw-excluded-banner {
+  display: block;
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: var(--eos-danger);
+  margin-bottom: 2px;
+  letter-spacing: 0.02em;
+}
+
+.rw-add-piece {
+  margin-bottom: 14px;
+  padding: 12px 14px 14px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--eos-line);
+  background: var(--eos-bg-soft);
+}
+.rw-add-piece-title {
+  margin: 0 0 4px;
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: var(--eos-ink);
+}
+.rw-add-piece-desc {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--eos-ink-muted);
+  line-height: 1.45;
+}
+.rw-add-piece-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0;
+}
+.rw-add-preset-btn {
+  padding: 5px 10px;
+  border-radius: 9999px;
+  border: 1px solid var(--eos-line-strong);
+  background: var(--eos-surface);
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--eos-ink-mid);
+}
+.rw-add-preset-btn--active {
+  border-color: var(--lab-accent-border);
+  background: var(--lab-accent-soft);
+  color: var(--lab-accent);
+}
+.rw-add-piece-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px 12px;
+  margin-bottom: 10px;
+}
+.rw-add-piece-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--eos-ink-mid);
+}
+.rw-add-piece-grid input,
+.rw-add-piece-grid select {
+  font-size: 0.78rem;
+  padding: 6px 8px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--eos-line-strong);
+  background: var(--eos-surface);
+}
+.rw-add-piece-note { grid-column: span 2; }
+.rw-add-piece-include {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.rw-add-piece-error {
+  margin: 0 0 8px;
+  font-size: 0.72rem;
+  color: var(--eos-danger);
+}
+.rw-add-piece-submit { margin-top: 2px; }
 
 /* ── Accept as correct button ── */
 .rw-accept-btn {

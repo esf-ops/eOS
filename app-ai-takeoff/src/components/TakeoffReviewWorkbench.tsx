@@ -12,12 +12,13 @@
  * eliteOS recomputes measurement summary from the edited draft in the parent.
  */
 
-import React, { useMemo, useRef, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { reconcileRunsWithEvidence } from "@takeoff-core/takeoffEvidenceRunReconciliation.mjs";
 import { computeAreaSf } from "@takeoff-core/takeoffMeasurementCalc.mjs";
 import type { TakeoffResult, TakeoffArea, TakeoffRun } from "@takeoff-core/takeoffContract.mjs";
 import type { DimensionEvidence } from "./TakeoffDimensionEvidencePanel";
-import type { AreaPatch, RunPatch } from "../TakeoffLabApp";
+import type { AreaPatch, RunPatch, RoomPatch, ManualRunInput } from "../TakeoffLabApp";
+import { ADD_PIECE_PRESETS } from "@takeoff-core/takeoffWorkbenchHelpers.mjs";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -57,7 +58,9 @@ export interface TakeoffReviewWorkbenchProps {
   evidenceReviewState: Record<string, "ignored" | "reviewed">;
   onPatchRun:          (roomIdx: number, areaIdx: number, runIdx: number, patch: RunPatch) => void;
   onPatchArea:         (roomIdx: number, areaIdx: number, patch: AreaPatch) => void;
-  onToggleExcludeRun:  (runId: string) => void;
+  onPatchRoom:         (roomIdx: number, patch: RoomPatch) => void;
+  onSetRunIncluded:    (runId: string, included: boolean) => void;
+  onAddManualRun:      (input: ManualRunInput) => void;
   onSetReviewNote:     (runId: string, note: string) => void;
   /** Called from checklist — marks an evidence dim as reviewed so the checklist item clears */
   onMarkEvidenceReviewed: (dimId: string, status: "ignored" | "reviewed") => void;
@@ -126,21 +129,34 @@ interface AreaGroupHeaderProps {
   areaLabel: string;
   roomIdx:   number;
   areaIdx:   number;
+  onPatchRoom: (roomIdx: number, patch: RoomPatch) => void;
   onPatchArea: (roomIdx: number, areaIdx: number, patch: AreaPatch) => void;
 }
 
-function AreaGroupHeader({ roomName, areaLabel, roomIdx, areaIdx, onPatchArea }: AreaGroupHeaderProps) {
-  const inputRef = useRef<HTMLInputElement>(null);
+function AreaGroupHeader({ roomName, areaLabel, roomIdx, areaIdx, onPatchRoom, onPatchArea }: AreaGroupHeaderProps) {
   return (
     <div className="rw-area-header">
-      <span className="rw-area-room">{roomName}</span>
+      <input
+        key={`room-${roomIdx}-${roomName}`}
+        className="rw-area-room-input"
+        type="text"
+        defaultValue={roomName}
+        aria-label={`Room name for ${roomName}`}
+        onBlur={(e) => {
+          const v = e.target.value.trim();
+          if (v && v !== roomName) onPatchRoom(roomIdx, { name: v });
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") { (e.target as HTMLInputElement).blur(); }
+        }}
+      />
       <span className="rw-area-sep">›</span>
       <input
-        ref={inputRef}
+        key={`area-${roomIdx}-${areaIdx}-${areaLabel}`}
         className="rw-area-label-input"
         type="text"
         defaultValue={areaLabel}
-        aria-label={`Area label for ${roomName} › ${areaLabel}`}
+        aria-label={`Area / shape name for ${roomName} › ${areaLabel}`}
         onBlur={(e) => {
           const v = e.target.value.trim();
           if (v && v !== areaLabel) onPatchArea(roomIdx, areaIdx, { label: v });
@@ -328,8 +344,40 @@ interface RunRowProps {
   excluded:           boolean;
   note:               string;
   onPatchRun:         (roomIdx: number, areaIdx: number, runIdx: number, patch: RunPatch) => void;
-  onToggleExclude:    (runId: string) => void;
+  onSetRunIncluded:   (runId: string, included: boolean) => void;
   onSetNote:          (runId: string, note: string) => void;
+}
+
+function IncludeToggle({ included, runId, onSetRunIncluded }: {
+  included: boolean;
+  runId: string;
+  onSetRunIncluded: (runId: string, included: boolean) => void;
+}) {
+  return (
+    <div className="rw-include-control">
+      <span className={`rw-include-status${included ? "" : " rw-include-status--excluded"}`}>
+        {included ? "Included in takeoff" : "Excluded from takeoff"}
+      </span>
+      <div className="rw-include-segmented" role="group" aria-label="Include in takeoff">
+        <button
+          type="button"
+          className={`rw-include-seg${included ? " rw-include-seg--active" : ""}`}
+          aria-pressed={included}
+          onClick={() => { if (!included) onSetRunIncluded(runId, true); }}
+        >
+          Yes
+        </button>
+        <button
+          type="button"
+          className={`rw-include-seg${!included ? " rw-include-seg--active" : ""}`}
+          aria-pressed={!included}
+          onClick={() => { if (included) onSetRunIncluded(runId, false); }}
+        >
+          No
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function RunMeta({ link, excluded, isReviewed, sourcePages }: {
@@ -360,7 +408,7 @@ function RunMeta({ link, excluded, isReviewed, sourcePages }: {
   return <span className="rw-run-meta">{parts.join(" · ")}</span>;
 }
 
-function RunRow({ row, excluded, note, onPatchRun, onToggleExclude, onSetNote }: RunRowProps) {
+function RunRow({ row, excluded, note, onPatchRun, onSetRunIncluded, onSetNote }: RunRowProps) {
   const { roomIdx, areaIdx, runIdx, run, link } = row;
   const [noteOpen, setNoteOpen] = useState(() => Boolean(note.trim()));
 
@@ -406,6 +454,9 @@ function RunRow({ row, excluded, note, onPatchRun, onToggleExclude, onSetNote }:
     <div className={rowCls} role="row">
       {/* Piece */}
       <div className="rw-cell rw-cell--label" role="cell">
+        {excluded ? (
+          <span className="rw-excluded-banner">Excluded from approved takeoff</span>
+        ) : null}
         <input
           className="rw-label-input"
           type="text"
@@ -479,17 +530,13 @@ function RunRow({ row, excluded, note, onPatchRun, onToggleExclude, onSetNote }:
         </span>
       </div>
 
-      {/* Include/exclude toggle */}
+      {/* Include / exclude */}
       <div className="rw-cell rw-cell--toggle" role="cell">
-        <button
-          type="button"
-          className={`rw-exclude-btn${excluded ? " rw-exclude-btn--excluded" : ""}`}
-          onClick={() => onToggleExclude(run.id)}
-          title={excluded ? "Re-include this run in the total" : "Exclude this run from the total"}
-          aria-pressed={excluded}
-        >
-          {excluded ? "Excluded" : "Include"}
-        </button>
+        <IncludeToggle
+          included={!excluded}
+          runId={run.id}
+          onSetRunIncluded={onSetRunIncluded}
+        />
       </div>
 
       {/* Review note */}
@@ -632,6 +679,161 @@ function ReviewChecklist({ items, unusedDims, evidenceReviewState, onMarkEvidenc
   );
 }
 
+// ── Add missing piece (structured v1) ─────────────────────────────────────────
+
+const PRESET_KEYS = ["countertop", "island", "vanity", "backsplash"] as const;
+
+function AddPieceForm({
+  rooms,
+  onAddManualRun,
+}: {
+  rooms: TakeoffResult["rooms"];
+  onAddManualRun: (input: ManualRunInput) => void;
+}) {
+  const [preset, setPreset] = useState<string>("countertop");
+  const [roomIdx, setRoomIdx] = useState(0);
+  const [areaLabel, setAreaLabel] = useState(ADD_PIECE_PRESETS.countertop.defaultAreaLabel);
+  const [pieceLabel, setPieceLabel] = useState(ADD_PIECE_PRESETS.countertop.defaultPieceLabel);
+  const [lengthIn, setLengthIn] = useState("");
+  const [depthIn, setDepthIn] = useState(String(ADD_PIECE_PRESETS.countertop.defaultDepth));
+  const [pageNumber, setPageNumber] = useState("");
+  const [note, setNote] = useState("");
+  const [includeInTakeoff, setIncludeInTakeoff] = useState(true);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const applyPreset = (key: string) => {
+    const p = ADD_PIECE_PRESETS[key] ?? ADD_PIECE_PRESETS.countertop;
+    setPreset(key);
+    setAreaLabel(p.defaultAreaLabel);
+    setPieceLabel(p.defaultPieceLabel);
+    setDepthIn(String(p.defaultDepth));
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const len = parseFloat(lengthIn);
+    const depth = parseFloat(depthIn);
+    if (!rooms.length) {
+      setFormError("Add a room in the draft before adding a piece.");
+      return;
+    }
+    if (!pieceLabel.trim()) {
+      setFormError("Piece name is required.");
+      return;
+    }
+    if (!Number.isFinite(len) || len <= 0) {
+      setFormError("Length must be greater than zero.");
+      return;
+    }
+    if (!Number.isFinite(depth) || depth <= 0) {
+      setFormError("Depth must be greater than zero.");
+      return;
+    }
+    setFormError(null);
+    onAddManualRun({
+      roomIdx,
+      areaLabel: areaLabel.trim(),
+      preset,
+      pieceLabel: pieceLabel.trim(),
+      lengthIn: len,
+      depthIn: depth,
+      pageNumber: pageNumber.trim() || null,
+      note: note.trim() || undefined,
+      includeInTakeoff,
+    });
+    setLengthIn("");
+    setPageNumber("");
+    setNote("");
+    setIncludeInTakeoff(true);
+  };
+
+  if (!rooms.length) return null;
+
+  return (
+    <form className="rw-add-piece" onSubmit={handleSubmit}>
+      <div className="rw-add-piece-head">
+        <h3 className="rw-add-piece-title">Add missing shape / piece</h3>
+        <p className="rw-add-piece-desc">
+          Structured entry for estimator corrections — maps to room, area/shape, and run for future Internal Estimate import.
+        </p>
+      </div>
+      <div className="rw-add-piece-presets">
+        {PRESET_KEYS.map((key) => (
+          <button
+            key={key}
+            type="button"
+            className={`rw-add-preset-btn${preset === key ? " rw-add-preset-btn--active" : ""}`}
+            onClick={() => applyPreset(key)}
+          >
+            {key === "countertop" ? "Countertop run" : key === "backsplash" ? "Backsplash line" : ADD_PIECE_PRESETS[key]?.defaultPieceLabel ?? key}
+          </button>
+        ))}
+      </div>
+      <div className="rw-add-piece-grid">
+        <label>
+          Room
+          <select value={roomIdx} onChange={(e) => setRoomIdx(Number(e.target.value))}>
+            {rooms.map((room, idx) => (
+              <option key={room.id ?? idx} value={idx}>
+                {room.name?.trim() || `Room ${idx + 1}`}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Area / shape name
+          <input type="text" value={areaLabel} onChange={(e) => setAreaLabel(e.target.value)} placeholder="Island, Vanity, Hall Bath…" />
+        </label>
+        <label>
+          Piece / run name
+          <input type="text" value={pieceLabel} onChange={(e) => setPieceLabel(e.target.value)} placeholder="Piece label" />
+        </label>
+        <label>
+          Length (in)
+          <input type="number" step="0.5" min="0" value={lengthIn} onChange={(e) => setLengthIn(e.target.value)} />
+        </label>
+        <label>
+          Depth (in)
+          <input type="number" step="0.5" min="0" value={depthIn} onChange={(e) => setDepthIn(e.target.value)} />
+        </label>
+        <label>
+          Page #
+          <input type="number" min="1" step="1" value={pageNumber} onChange={(e) => setPageNumber(e.target.value)} placeholder="Optional" />
+        </label>
+        <label className="rw-add-piece-note">
+          Review note
+          <input type="text" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional estimator note" />
+        </label>
+        <label className="rw-add-piece-include">
+          <span>In takeoff</span>
+          <div className="rw-include-segmented" role="group" aria-label="Include added piece">
+            <button
+              type="button"
+              className={`rw-include-seg${includeInTakeoff ? " rw-include-seg--active" : ""}`}
+              aria-pressed={includeInTakeoff}
+              onClick={() => setIncludeInTakeoff(true)}
+            >
+              Yes
+            </button>
+            <button
+              type="button"
+              className={`rw-include-seg${!includeInTakeoff ? " rw-include-seg--active" : ""}`}
+              aria-pressed={!includeInTakeoff}
+              onClick={() => setIncludeInTakeoff(false)}
+            >
+              No
+            </button>
+          </div>
+        </label>
+      </div>
+      {formError ? <p className="rw-add-piece-error" role="alert">{formError}</p> : null}
+      <button type="submit" className="btn secondary btn-sm rw-add-piece-submit">
+        Add piece to review
+      </button>
+    </form>
+  );
+}
+
 // ── Main component ─────────────────────────────────────────────────────────────
 
 export default function TakeoffReviewWorkbench({
@@ -642,7 +844,9 @@ export default function TakeoffReviewWorkbench({
   evidenceReviewState,
   onPatchRun,
   onPatchArea,
-  onToggleExcludeRun,
+  onPatchRoom,
+  onSetRunIncluded,
+  onAddManualRun,
   onSetReviewNote,
   onMarkEvidenceReviewed,
 }: TakeoffReviewWorkbenchProps) {
@@ -792,6 +996,8 @@ export default function TakeoffReviewWorkbench({
   return (
     <div className="rw-panel lab-card">
 
+      <AddPieceForm rooms={editDraft.rooms ?? []} onAddManualRun={onAddManualRun} />
+
       {/* ── Summary bar ────────────────────────────────────────────────────── */}
       <div className="rw-summary-bar">
         <span className="rw-summary-item">
@@ -826,7 +1032,7 @@ export default function TakeoffReviewWorkbench({
           <span role="columnheader" className="rw-cell rw-cell--dim">Length</span>
           <span role="columnheader" className="rw-cell rw-cell--dim">Depth</span>
           <span role="columnheader" className="rw-cell rw-cell--sf">SF</span>
-          <span role="columnheader" className="rw-cell rw-cell--toggle">Include</span>
+          <span role="columnheader" className="rw-cell rw-cell--toggle">In takeoff</span>
           <span role="columnheader" className="rw-cell rw-cell--note">Notes</span>
         </div>
 
@@ -841,6 +1047,7 @@ export default function TakeoffReviewWorkbench({
                 areaLabel={group.areaLabel}
                 roomIdx={group.roomIdx}
                 areaIdx={group.areaIdx}
+                onPatchRoom={onPatchRoom}
                 onPatchArea={onPatchArea}
               />
               {group.rows.map((row) => (
@@ -850,7 +1057,7 @@ export default function TakeoffReviewWorkbench({
                   excluded={excludedRunIds.has(row.run.id)}
                   note={reviewNotes[row.run.id] ?? ""}
                   onPatchRun={onPatchRun}
-                  onToggleExclude={onToggleExcludeRun}
+                  onSetRunIncluded={onSetRunIncluded}
                   onSetNote={onSetReviewNote}
                 />
               ))}
