@@ -77,7 +77,28 @@ html, body {
 /* ── Layout ───────────────────────────────────────────────────────────────── */
 .shell { min-height: 100vh; display: flex; flex-direction: column; min-width: 0; }
 
-/* ── Topbar (protected-head) ──────────────────────────────────────────────── */
+/* Shared topbar styles live in shared/eliteos-ui/eliteosTopbar.css */
+.page-ai-takeoff .eliteos-topbar .eliteos-topbar-chip-role {
+  text-transform: none;
+}
+
+.takeoff-topbar-status {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+}
+.takeoff-topbar-pill {
+  display: inline-flex; align-items: center; padding: 2px 8px;
+  border-radius: 9999px; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; white-space: nowrap;
+}
+.takeoff-topbar-pill--lab {
+  background: var(--lab-accent-soft); color: var(--lab-accent);
+  border: 1px solid var(--lab-accent-border);
+}
+.takeoff-topbar-pill--safe {
+  background: var(--eos-success-soft); color: var(--eos-success);
+  border: 1px solid var(--eos-success-border);
+}
+
+/* Legacy local topbar (retained for reference; superseded by EliteosTopbar) */
 .topbar {
   position: sticky; top: 0; z-index: 40;
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
@@ -171,7 +192,93 @@ html, body {
 .user-menu-signout:hover { background: var(--eos-danger-soft); }
 .user-menu-signout .user-menu-icon { color: var(--eos-danger); }
 
-/* ── Page subheader — compact, matches IE/QL layout (replaces dark hero) ─── */
+/* ── Page hero — aligned with Quote Library ql-hero ───────────────────────── */
+.takeoff-page-hero {
+  padding: 16px clamp(16px, 2.4vw, 28px) 4px;
+}
+.takeoff-page-hero-inner {
+  max-width: 1320px; margin: 0 auto;
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
+  gap: 24px; align-items: start;
+  padding: 24px 28px 28px;
+  border-radius: var(--r-xl);
+  background: linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(255,255,255,0.88) 100%);
+  border: 1px solid var(--eos-line);
+  box-shadow: var(--eos-shadow-sm);
+}
+.takeoff-page-hero-main { min-width: 0; }
+.takeoff-page-eyebrow {
+  margin: 0 0 8px; font-size: 12px; font-weight: 600; letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--eos-ink-muted);
+}
+.takeoff-page-heading {
+  margin: 0 0 8px;
+  font-size: clamp(22px, 2.4vw, 28px); font-weight: 800; letter-spacing: -0.4px;
+  color: var(--eos-ink); line-height: 1.15;
+}
+.takeoff-page-desc {
+  margin: 0 0 18px; font-size: 14px; color: var(--eos-ink-mid); line-height: 1.6;
+  max-width: 62ch;
+}
+.takeoff-page-hero-aside {
+  padding: 14px 16px; border-radius: var(--r-md);
+  background: var(--eos-bg-soft); border: 1px solid var(--eos-line);
+}
+.takeoff-page-aside-label {
+  margin: 0 0 10px; font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--eos-ink-muted);
+}
+
+/* Workflow explainer */
+.takeoff-workflow { display: flex; flex-direction: column; gap: 16px; }
+.takeoff-workflow-steps {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px;
+}
+.takeoff-workflow-step {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 12px 12px 11px; border-radius: var(--r-md);
+  background: var(--eos-surface); border: 1px solid var(--eos-line);
+  min-height: 100%;
+}
+.takeoff-workflow-step--future {
+  opacity: 0.72; border-style: dashed; background: var(--eos-bg-soft);
+}
+.takeoff-workflow-step-num {
+  flex-shrink: 0; width: 22px; height: 22px; border-radius: 9999px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 800; color: var(--eos-accent);
+  background: var(--eos-accent-soft); border: 1px solid rgba(163,19,47,0.15);
+}
+.takeoff-workflow-step--future .takeoff-workflow-step-num {
+  color: var(--eos-ink-muted); background: var(--eos-bg-soft); border-color: var(--eos-line);
+}
+.takeoff-workflow-step-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.takeoff-workflow-step-label { font-size: 13px; font-weight: 700; color: var(--eos-ink); line-height: 1.25; }
+.takeoff-workflow-step-detail { font-size: 11px; color: var(--eos-ink-muted); line-height: 1.45; }
+.takeoff-workflow-boundaries {
+  margin: 0; padding: 14px 16px; list-style: none;
+  display: grid; gap: 8px;
+  border-radius: var(--r-md);
+  background: var(--eos-info-soft); border: 1px solid var(--eos-info-border);
+  font-size: 12px; color: var(--eos-ink-mid); line-height: 1.5;
+}
+.takeoff-workflow-boundaries strong { color: var(--eos-ink-soft); font-weight: 700; }
+.takeoff-workflow-boundaries code {
+  font-size: 11px; padding: 1px 5px; border-radius: 4px;
+  background: rgba(255,255,255,0.65); border: 1px solid var(--eos-line);
+}
+
+@media (max-width: 900px) {
+  .takeoff-page-hero-inner { grid-template-columns: 1fr; padding: 20px 18px 22px; }
+  .takeoff-workflow-steps { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 520px) {
+  .takeoff-workflow-steps { grid-template-columns: 1fr; }
+  .takeoff-topbar-status { display: none; }
+}
+
+/* Legacy page subheader (unused — kept for back-compat) */
 .takeoff-page-sub {
   background: var(--eos-surface);
   border-bottom: 1px solid var(--eos-line);
@@ -194,9 +301,16 @@ html, body {
 }
 
 /* ── Main content ─────────────────────────────────────────────────────────── */
-.main { flex: 1 1 auto; width: 100%; padding: clamp(16px, 2vw, 28px) clamp(16px, 2.4vw, 28px) 56px; min-width: 0; }
-.lab-main-inner { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px; }
-.lab-main-inner--review { max-width: 1320px; }
+.main { flex: 1 1 auto; width: 100%; max-width: 1320px; margin: 0 auto; padding: clamp(16px, 2vw, 28px) clamp(16px, 2.4vw, 28px) 56px; min-width: 0; }
+.lab-main-inner { max-width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+.lab-main-inner--review { max-width: 100%; }
+
+.lab-section--card {
+  background: var(--eos-surface); border: 1px solid var(--eos-line);
+  border-radius: var(--r-lg); box-shadow: var(--eos-shadow-sm);
+  padding: 18px 20px 20px;
+}
+.lab-section--card > .lab-section-title { margin-bottom: 14px; }
 
 /* ── Plan preview + review two-column layout (Phase D) ───────────────────── */
 .takeoff-review-layout {
@@ -1731,22 +1845,23 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
 
 /* ── Takeoff run inbox (Phase B) ──────────────────────────────────────────── */
 
-.takeoff-inbox { display: flex; flex-direction: column; gap: 12px; }
+.takeoff-inbox { display: flex; flex-direction: column; gap: 12px; padding-top: 2px; }
 .takeoff-inbox-header {
   display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap;
 }
 .takeoff-inbox-refresh { padding: 6px 12px; font-size: 12px; }
-.takeoff-inbox-empty { margin: 0; font-size: 13px; color: var(--eos-ink-muted); }
+.takeoff-inbox-empty { margin: 0; font-size: 13px; color: var(--eos-ink-muted); padding: 8px 0 4px; }
 .takeoff-inbox-error { margin-top: 0; }
 .takeoff-inbox-list {
   list-style: none; margin: 0; padding: 0;
   border: 1px solid var(--eos-line); border-radius: var(--r-md); overflow: hidden;
+  background: var(--eos-surface);
 }
 .takeoff-inbox-row {
   display: flex; flex-direction: column; gap: 6px; width: 100%;
   padding: 12px 14px; text-align: left;
-  background: var(--eos-surface); border: 0; border-bottom: 1px solid var(--eos-line);
-  cursor: pointer;
+  background: transparent; border: 0; border-bottom: 1px solid var(--eos-line);
+  cursor: pointer; transition: background 120ms ease;
 }
 .takeoff-inbox-row:last-child { border-bottom: 0; }
 .takeoff-inbox-row:hover { background: var(--eos-surface-soft); }
@@ -1763,8 +1878,8 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
 }
 .takeoff-inbox-chip {
-  display: inline-block; padding: 1px 7px; border-radius: 9999px;
-  font-size: 11px; font-weight: 700; text-transform: lowercase;
+  display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 9999px;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.01em;
 }
 .takeoff-inbox-chip--completed { background: var(--eos-success-soft); color: var(--eos-success); }
 .takeoff-inbox-chip--pending { background: var(--eos-warn-soft); color: var(--eos-warn); }

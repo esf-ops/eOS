@@ -62,11 +62,14 @@ import type { DimensionEvidence } from "./components/TakeoffDimensionEvidencePan
 import TakeoffEvidenceTracePanel from "./components/TakeoffEvidenceTracePanel";
 import TakeoffReviewWorkbench, { countUnresolvedWorkbenchIssues } from "./components/TakeoffReviewWorkbench";
 import TakeoffValidationFixPanel from "./components/TakeoffValidationFixPanel";
+import TakeoffWorkflowExplainer from "./components/TakeoffWorkflowExplainer";
 import { reconcileRunsWithEvidence } from "@takeoff-core/takeoffEvidenceRunReconciliation.mjs";
 import { evaluateTakeoffFabricationRules } from "@takeoff-core/takeoffFabricationRules.mjs";
 import { makeTakeoffRun } from "@takeoff-core/takeoffContract.mjs";
 import { getSupabase } from "./lib/supabase";
 import { labApiGet, labApiPost, saveTakeoffCorrection, approveTakeoffJob, LabApiError } from "./lib/api";
+import EliteosTopbar from "../../shared/eliteos-ui/EliteosTopbar";
+import type { EliteosTopbarMenuItem } from "../../shared/eliteos-ui/EliteosTopbar";
 
 // ── Dev-tools flag ─────────────────────────────────────────────────────────
 // Set VITE_TAKEOFF_SHOW_DEV_TOOLS=1 in .env.local to expose JSON workbench,
@@ -190,8 +193,6 @@ export default function TakeoffLabApp() {
   const [authChecked, setAuthChecked] = useState(false);
   const [userEmail, setUserEmail] = useState<string>("");
   const [userMetaName, setUserMetaName] = useState<string>("");
-  const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const userMenuRef = useRef<HTMLDivElement | null>(null);
 
   // Sign-in form
   const [authEmail, setAuthEmail] = useState("");
@@ -260,24 +261,7 @@ export default function TakeoffLabApp() {
     setAuthToken(null);
     setUserEmail("");
     setUserMetaName("");
-    setUserMenuOpen(false);
   }, []);
-
-  /** Close user menu on outside click or Escape. */
-  useEffect(() => {
-    if (!userMenuOpen) return;
-    const onDocClick = (e: MouseEvent) => {
-      if (!userMenuRef.current) return;
-      if (!userMenuRef.current.contains(e.target as Node)) setUserMenuOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setUserMenuOpen(false); };
-    document.addEventListener("mousedown", onDocClick);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDocClick);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [userMenuOpen]);
 
   const userDisplayName = useMemo(
     () => userMetaName || deriveDisplayNameFromEmail(userEmail) || "Signed in",
@@ -967,6 +951,28 @@ export default function TakeoffLabApp() {
   const workspaceLogoUrl = resolveWorkspaceLogoUrl();
   const homeBase        = homeLauncherUrl();
 
+  const takeoffMenuItems: EliteosTopbarMenuItem[] = [
+    {
+      label: "Open Home",
+      meta: "eliteOS Launcher",
+      href: homeBase,
+      icon: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 11.5L12 4l9 7.5" />
+          <path d="M5 10v10h14V10" />
+          <path d="M10 20v-6h4v6" />
+        </svg>
+      ),
+    },
+  ];
+
+  const takeoffStatusSlot = (
+    <div className="takeoff-topbar-status" aria-label="Takeoff lab boundaries">
+      <span className="takeoff-topbar-pill takeoff-topbar-pill--lab">Review only</span>
+      <span className="takeoff-topbar-pill takeoff-topbar-pill--safe">No quote mutation</span>
+    </div>
+  );
+
   // ── Derived display values ────────────────────────────────────────────────
   const sourceLabel: Record<DisplayMode, string> = {
     none:      "No source",
@@ -1411,149 +1417,84 @@ export default function TakeoffLabApp() {
   ) : null;
 
   return (
-    <div className="shell">
-      {/* ── Top bar ─────────────────────────────────────────────────── */}
-      <header className="topbar" role="banner">
-        <a
-          href={homeBase}
-          className="brand-row brand-row-link"
-          aria-label={`eliteOS AI Takeoff — ${workspaceName}`}
-        >
-          <span className="brand-mark" aria-hidden>
-            {workspaceLogoUrl ? <img src={workspaceLogoUrl} alt="" /> : null}
-          </span>
-          <span className="brand-text">
-            <span className="brand-wordmark">eliteOS</span>
-            <span className="brand-sub">AI Takeoff · {workspaceName}</span>
-          </span>
-        </a>
-        <div className="topbar-actions">
-          <div className="topbar-badges">
-            <span className="badge badge-lab">Review only</span>
-            <span className="badge badge-safe">No quote mutation</span>
-          </div>
-          {authChecked && authToken ? (
-            <div className="topbar-account-wrap" ref={userMenuRef}>
-              <button
-                type="button"
-                className={`topbar-account${userMenuOpen ? " is-open" : ""}`}
-                aria-label="Open account menu"
-                aria-haspopup="menu"
-                aria-expanded={userMenuOpen}
-                onClick={() => setUserMenuOpen((v) => !v)}
-              >
-                <span className="topbar-avatar" aria-hidden>{userDisplayInitials}</span>
-                <span className="topbar-account-text">
-                  <span className="topbar-account-name">{userDisplayName}</span>
-                  {userEmail && userEmail.toLowerCase() !== userDisplayName.toLowerCase() ? (
-                    <span className="topbar-account-role">{userEmail}</span>
-                  ) : null}
-                </span>
-                <span className="topbar-account-caret" aria-hidden>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="6 9 12 15 18 9" />
-                  </svg>
-                </span>
-              </button>
-              {userMenuOpen ? (
-                <div className="user-menu" role="menu" aria-label="Account menu">
-                  <div className="user-menu-header">
-                    <p className="user-menu-name">{userDisplayName}</p>
-                    {userEmail ? <p className="user-menu-email">{userEmail}</p> : null}
-                    <p className="user-menu-workspace">
-                      <span>Workspace ·</span>{" "}
-                      <strong>{workspaceName}</strong>
-                    </p>
-                  </div>
-                  <div className="user-menu-list">
-                    <a
-                      href={homeBase}
-                      className="user-menu-item"
-                      role="menuitem"
-                      onClick={() => setUserMenuOpen(false)}
-                    >
-                      <span className="user-menu-icon" aria-hidden>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M3 11.5L12 4l9 7.5" /><path d="M5 10v10h14V10" /><path d="M10 20v-6h4v6" />
-                        </svg>
-                      </span>
-                      <span className="user-menu-label">
-                        <span>Open Home</span>
-                        <span className="user-menu-meta">eliteOS Launcher</span>
-                      </span>
-                      <span className="user-menu-shortcut" aria-hidden>↗</span>
-                    </a>
-                  </div>
-                  <div className="user-menu-footer">
-                    <button
-                      type="button"
-                      className="user-menu-item user-menu-signout"
-                      role="menuitem"
-                      onClick={() => { setUserMenuOpen(false); void signOut(); }}
-                    >
-                      <span className="user-menu-icon" aria-hidden>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" />
-                        </svg>
-                      </span>
-                      <span className="user-menu-label">Sign out</span>
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-      </header>
+    <div className="shell page-ai-takeoff">
+      {authChecked && authToken ? (
+        <EliteosTopbar
+          appName="AI Takeoff"
+          organizationName={workspaceName}
+          logoSrc={workspaceLogoUrl ?? EOS_LOGO_URL}
+          homeHref={homeBase}
+          userName={userDisplayName}
+          userEmail={userEmail}
+          initials={userDisplayInitials}
+          menuItems={takeoffMenuItems}
+          statusSlot={takeoffStatusSlot}
+          onSignOut={() => void signOut()}
+        />
+      ) : (
+        <EliteosTopbar
+          appName="AI Takeoff"
+          organizationName={workspaceName}
+          logoSrc={workspaceLogoUrl ?? EOS_LOGO_URL}
+          homeHref={homeBase}
+          statusSlot={takeoffStatusSlot}
+        />
+      )}
 
-      {/* ── Compact page subheader (replaces dark hero block) ────── */}
-      <div className="takeoff-page-sub" role="region" aria-label="Takeoff session status">
-        <div className="takeoff-page-sub-inner">
-          <div className="takeoff-page-sub-title">
-            <h1 className="takeoff-page-heading">AI Takeoff</h1>
+      {/* ── Page intro + workflow explainer ───────────────────────── */}
+      <div className="takeoff-page-hero" role="region" aria-label="AI Takeoff overview">
+        <div className="takeoff-page-hero-inner">
+          <div className="takeoff-page-hero-main">
+            <p className="takeoff-page-eyebrow">AI Takeoff Lab · {workspaceName}</p>
+            <h1 className="takeoff-page-heading">Review plan measurements before quoting</h1>
             <p className="takeoff-page-desc">
-              Review plan dimensions, correct measurements, and save a reviewed takeoff.
-              eliteOS recomputes square footage independently — no quote is created or mutated.
+              Upload a plan, generate an AI measurement draft, correct what the model missed,
+              and approve a reviewed takeoff for your organization. This tool prepares measurements —
+              it does not create quotes or import into Internal Estimate yet.
             </p>
+            <TakeoffWorkflowExplainer />
           </div>
           {authToken && hasActiveSource && (
-            <div className="hero-pills">
-              <span className={pillClass}>
-                {displayMode === "invalid"  ? "⚠"  :
-                 displayMode === "edited"   ? "✎"  :
-                 displayMode === "ai-draft" ? "✦"  :
-                 displayMode === "file"     ? "📄" :
-                 displayMode === "spec73"   ? "⚙"  : "◎"}{" "}
-                {sourceLabel[displayMode]}
-              </span>
-              {displayMode === "ai-draft" && aiDraftMeta && (
-                <span className="source-pill source-pill--ai-meta">
-                  {aiDraftMeta.promptVersion ?? "?"} · {aiDraftMeta.modelUsed ?? "model unknown"}
+            <aside className="takeoff-page-hero-aside" aria-label="Current session">
+              <p className="takeoff-page-aside-label">Current session</p>
+              <div className="hero-pills">
+                <span className={pillClass}>
+                  {displayMode === "invalid"  ? "⚠"  :
+                   displayMode === "edited"   ? "✎"  :
+                   displayMode === "ai-draft" ? "✦"  :
+                   displayMode === "file"     ? "📄" :
+                   displayMode === "spec73"   ? "⚙"  : "◎"}{" "}
+                  {sourceLabel[displayMode]}
                 </span>
-              )}
-              {result.source?.fileName && displayMode !== "file" && displayMode !== "invalid" && displayMode !== "spec73" && (
-                <span className="source-pill source-pill--file">{result.source.fileName}</span>
-              )}
-              {hasEdits && displayMode !== "spec73" && (
-                <span className="source-pill source-pill--edit-note">Edited</span>
-              )}
-              {excludedRunIds.size > 0 && (
-                <span className="source-pill source-pill--excluded">{excludedRunIds.size} run{excludedRunIds.size !== 1 ? "s" : ""} excluded</span>
-              )}
-              {takeoffJobId && (
-                <>
-                  <span className="source-pill source-pill--workspace">Workspace active</span>
-                  <button
-                    type="button"
-                    className="start-new-btn"
-                    onClick={handleStartNewTakeoff}
-                    title="Clear this workspace from the screen and start a fresh takeoff (data is preserved)"
-                  >
-                    ↩ Start new takeoff
-                  </button>
-                </>
-              )}
-            </div>
+                {displayMode === "ai-draft" && aiDraftMeta && (
+                  <span className="source-pill source-pill--ai-meta">
+                    {aiDraftMeta.promptVersion ?? "?"} · {aiDraftMeta.modelUsed ?? "model unknown"}
+                  </span>
+                )}
+                {result.source?.fileName && displayMode !== "file" && displayMode !== "invalid" && displayMode !== "spec73" && (
+                  <span className="source-pill source-pill--file">{result.source.fileName}</span>
+                )}
+                {hasEdits && displayMode !== "spec73" && (
+                  <span className="source-pill source-pill--edit-note">Edited</span>
+                )}
+                {excludedRunIds.size > 0 && (
+                  <span className="source-pill source-pill--excluded">{excludedRunIds.size} run{excludedRunIds.size !== 1 ? "s" : ""} excluded</span>
+                )}
+                {takeoffJobId && (
+                  <>
+                    <span className="source-pill source-pill--workspace">Workspace active</span>
+                    <button
+                      type="button"
+                      className="start-new-btn"
+                      onClick={handleStartNewTakeoff}
+                      title="Clear this workspace from the screen and start a fresh takeoff (data is preserved)"
+                    >
+                      ↩ Start new takeoff
+                    </button>
+                  </>
+                )}
+              </div>
+            </aside>
           )}
         </div>
       </div>
@@ -1627,7 +1568,7 @@ export default function TakeoffLabApp() {
           )}
 
           {authToken ? (
-            <section className="lab-section">
+            <section className="lab-section lab-section--card">
               <h2 className="lab-section-title">Takeoff runs</h2>
               <TakeoffRunInbox
                 token={authToken}
