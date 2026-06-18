@@ -581,36 +581,6 @@ function SlabMark({ size = 28 }: { size?: number }) {
   );
 }
 
-function isBentoFeaturedHead(slug: string, roadmapSection: boolean): boolean {
-  if (roadmapSection) return false;
-  return slug === "quote" || slug === "quote_library";
-}
-
-/** Small inline icon for empty and error states — presentational only. */
-function StateIcon({ variant = "default" }: { variant?: "default" | "muted" | "warn" }) {
-  const cls = `state-icon${variant === "muted" ? " state-icon-muted" : ""}${variant === "warn" ? " state-icon-warn" : ""}`;
-  return (
-    <div className={cls} aria-hidden>
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-        {variant === "warn" ? (
-          <>
-            <circle cx="12" cy="12" r="9" />
-            <path d="M12 8v5" />
-            <path d="M12 16h.01" />
-          </>
-        ) : (
-          <>
-            <rect x="4" y="4" width="7" height="7" rx="1.5" />
-            <rect x="13" y="4" width="7" height="7" rx="1.5" />
-            <rect x="4" y="13" width="7" height="7" rx="1.5" />
-            <rect x="13" y="13" width="7" height="7" rx="1.5" />
-          </>
-        )}
-      </svg>
-    </div>
-  );
-}
-
 /** Arrow glyph shown inside the primary "Open" affordance. */
 function ArrowOut() {
   return (
@@ -1064,14 +1034,7 @@ export default function App() {
   );
 
   return (
-    <div className={`shell${showShell ? " shell-signed-in" : " shell-signed-out"}`}>
-      {showShell ? (
-        <div className="shell-orbs" aria-hidden>
-          <span className="shell-orb shell-orb-warm" />
-          <span className="shell-orb shell-orb-stone" />
-          <span className="shell-orb shell-orb-maroon" />
-        </div>
-      ) : null}
+    <div className="shell">
       {showShell ? (
         <EliteosTopbar
           organizationName={workspaceName}
@@ -1291,19 +1254,12 @@ export default function App() {
 
             {loadError ? (
               <div className="banner banner-error" role="alert">
-                <span className="banner-error-icon">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden>
-                    <circle cx="12" cy="12" r="9" />
-                    <path d="M12 8v5" />
-                    <path d="M12 16h.01" />
-                  </svg>
-                  <strong>Could not load your tools.</strong>
-                </span>
-                <span>{loadError}</span>
+                <strong>Could not load your tools.</strong>
+                <span style={{ display: "block", marginTop: 4 }}>{loadError}</span>
                 <button
                   type="button"
                   className="btn btn-quiet"
-                  style={{ marginTop: 10, alignSelf: "flex-start" }}
+                  style={{ marginTop: 10 }}
                   onClick={() => void reloadAccess()}
                   disabled={refreshBusy || loadingData}
                 >
@@ -1322,28 +1278,21 @@ export default function App() {
             ) : null}
 
             {loadingData && !headsPayload ? (
-              <>
-                <div className="launcher-loading-status" role="status" aria-live="polite">
-                  <span className="launcher-loading-dot" aria-hidden />
-                  Loading your tools…
-                </div>
-                <div className="card-grid card-grid-available" aria-hidden>
-                  {[0, 1, 2, 3].map((i) => (
-                    <div key={i} className="head-card head-card-available skeleton-card">
-                      <div className="skel skel-icon" />
-                      <div className="skel skel-title" />
-                      <div className="skel skel-line" />
-                      <div className="skel skel-line skel-line-short" />
-                      <div className="skel skel-btn" />
-                    </div>
-                  ))}
-                </div>
-              </>
+              <div className="card-grid card-grid-available" aria-hidden>
+                {[0, 1, 2, 3].map((i) => (
+                  <div key={i} className="head-card head-card-available skeleton-card">
+                    <div className="skel skel-icon" />
+                    <div className="skel skel-title" />
+                    <div className="skel skel-line" />
+                    <div className="skel skel-line skel-line-short" />
+                    <div className="skel skel-btn" />
+                  </div>
+                ))}
+              </div>
             ) : null}
 
             {assignableHeads.length === 0 && headsPayload && !loadingData ? (
               <div className="empty-box launcher-empty" role="status">
-                <StateIcon variant="muted" />
                 {isAdminLike ? (
                   <>
                     <p className="empty-title">No tools are assigned yet.</p>
@@ -1360,7 +1309,6 @@ export default function App() {
 
             {searchActive && searchTotalCount === 0 ? (
               <div className="empty-box launcher-search-empty" role="status">
-                <StateIcon variant="muted" />
                 <p className="empty-title">No tools match your search.</p>
                 <p className="empty-sub">
                   Try a different term, or{" "}
@@ -1424,13 +1372,11 @@ export default function App() {
 
                       const isDefaultHead = prefs.default_landing_head === h.slug;
 
-                      const bentoFeature = isBentoFeaturedHead(h.slug, roadmapSection);
-
                       return (
                         <article
                           key={h.slug}
                           style={{ "--card-delay": `${cardDelayMs}ms` } as React.CSSProperties}
-                          className={`head-card${roadmapSection ? " head-card-roadmap" : " head-card-available"}${bentoFeature ? " head-card-bento-feature" : ""}${inactiveClass}${isDefaultHead ? " head-card-default" : ""} tint-${tint}`}
+                          className={`head-card${roadmapSection ? " head-card-roadmap" : " head-card-available"}${inactiveClass}${isDefaultHead ? " head-card-default" : ""} tint-${tint}`}
                         >
                           <div className="head-card-top">
                             <span className={`head-glyph head-glyph-${tint}`} aria-hidden>
