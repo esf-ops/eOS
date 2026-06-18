@@ -29,6 +29,7 @@
     "eos:audit:field-labels": "node backend-core/src/scripts/auditBrainFieldLabels.js",
     "eos:audit:titans-today": "node backend-core/src/scripts/auditTitanTodayReadiness.js",
     "eos:audit:moraware-ui-coverage": "node backend-core/src/scripts/auditMorawareUICoverageMatrix.js",
+    "eos:audit:product-catalog-assets": "node scripts/audit-product-catalog-assets.mjs",
     "eos:discover:moraware-expanded": "node backend-core/src/scripts/discoverMorawareExpandedCoverage.js",
     "eos:discover:moraware-machines": "node backend-core/src/scripts/discoverMorawareMachinesCalendar.js",
     "eos:discover:moraware-wsdl": "node backend-core/src/scripts/discoverMorawareWsdl.js",
