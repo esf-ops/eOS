@@ -2086,8 +2086,83 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
   max-width: 100%;
   border-radius: 12px;
   box-shadow: var(--eos-shadow);
-  cursor: crosshair;
+  cursor: default;
   background: #ffffff;
+}
+.pv-canvas.drawing { cursor: crosshair; }
+
+.pv-clear-all {
+  width: 100%;
+  margin-top: 4px;
+}
+
+.pv-mask-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pv-mask-card {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--eos-line);
+  background: var(--eos-surface-soft);
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
+}
+
+.pv-mask-card:hover {
+  border-color: var(--eos-line-strong);
+  background: #ffffff;
+}
+
+.pv-mask-card.active {
+  border-color: var(--eos-accent);
+  background: var(--eos-accent-soft);
+  box-shadow: 0 0 0 2px var(--eos-accent-ring);
+}
+
+.pv-mask-card-label {
+  font-size: 0.88rem;
+  font-weight: 650;
+  color: var(--eos-ink);
+}
+
+.pv-mask-card-meta {
+  font-size: 0.76rem;
+  color: var(--eos-ink-muted);
+}
+
+.pv-mask-rename {
+  display: block;
+  margin-top: 6px;
+}
+
+.pv-mask-rename input {
+  width: 100%;
+  font-family: inherit;
+  font-size: 0.84rem;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--eos-line);
+  background: #ffffff;
+  color: var(--eos-ink);
+}
+
+.pv-mask-rename input:focus {
+  outline: none;
+  border-color: var(--eos-accent);
+  box-shadow: 0 0 0 2px var(--eos-accent-ring);
 }
 
 .pv-controls {
