@@ -236,6 +236,106 @@ function drawTextureFill(
   }
 }
 
+function resetCanvasState(ctx: CanvasRenderingContext2D) {
+  ctx.globalCompositeOperation = "source-over";
+  ctx.globalAlpha = 1;
+  ctx.filter = "none";
+}
+
+function buildTextureLayerCanvas(
+  width: number,
+  height: number,
+  pixelPoints: { x: number; y: number }[],
+  texture: HTMLImageElement,
+  mask: VisualizerMask,
+): HTMLCanvasElement | null {
+  const textureLayerCanvas = document.createElement("canvas");
+  textureLayerCanvas.width = width;
+  textureLayerCanvas.height = height;
+  const texCtx = textureLayerCanvas.getContext("2d");
+  if (!texCtx) return null;
+  configureCanvasContext(texCtx);
+  texCtx.save();
+  clipToPolygon(texCtx, pixelPoints);
+  drawTextureFill(texCtx, width, height, pixelPoints, texture, mask);
+  texCtx.restore();
+  resetCanvasState(texCtx);
+  return textureLayerCanvas;
+}
+
+/** Blurred polygon alpha — used only on offscreen layers, never on the main photo canvas. */
+function buildFeatherMaskCanvas(
+  width: number,
+  height: number,
+  pixelPoints: { x: number; y: number }[],
+  feather: number,
+): HTMLCanvasElement | null {
+  const maskCanvas = document.createElement("canvas");
+  maskCanvas.width = width;
+  maskCanvas.height = height;
+  const maskCtx = maskCanvas.getContext("2d");
+  if (!maskCtx) return null;
+
+  maskCtx.fillStyle = "#ffffff";
+  maskCtx.beginPath();
+  tracePolygonPath(maskCtx, pixelPoints);
+  maskCtx.fill();
+  resetCanvasState(maskCtx);
+
+  if (feather <= 0) return maskCanvas;
+
+  const blurredMaskCanvas = document.createElement("canvas");
+  blurredMaskCanvas.width = width;
+  blurredMaskCanvas.height = height;
+  const blurCtx = blurredMaskCanvas.getContext("2d");
+  if (!blurCtx) return maskCanvas;
+
+  blurCtx.filter = `blur(${feather}px)`;
+  blurCtx.drawImage(maskCanvas, 0, 0);
+  resetCanvasState(blurCtx);
+  return blurredMaskCanvas;
+}
+
+/**
+ * Apply feather alpha to the texture overlay offscreen only.
+ * destination-in must never run on the main canvas that holds the base photo.
+ */
+function buildMaskedTextureCanvas(
+  textureLayerCanvas: HTMLCanvasElement,
+  maskCanvas: HTMLCanvasElement,
+): HTMLCanvasElement | null {
+  const maskedTextureCanvas = document.createElement("canvas");
+  maskedTextureCanvas.width = textureLayerCanvas.width;
+  maskedTextureCanvas.height = textureLayerCanvas.height;
+  const maskedCtx = maskedTextureCanvas.getContext("2d");
+  if (!maskedCtx) return null;
+
+  configureCanvasContext(maskedCtx);
+  maskedCtx.drawImage(textureLayerCanvas, 0, 0);
+  maskedCtx.globalCompositeOperation = "destination-in";
+  maskedCtx.drawImage(maskCanvas, 0, 0);
+  resetCanvasState(maskedCtx);
+  return maskedTextureCanvas;
+}
+
+function drawHardEdgeMaskLayer(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  pixelPoints: { x: number; y: number }[],
+  texture: HTMLImageElement,
+  mask: VisualizerMask,
+) {
+  ctx.save();
+  clipToPolygon(ctx, pixelPoints);
+  ctx.globalAlpha = mask.opacity;
+  ctx.globalCompositeOperation = "source-over";
+  ctx.filter = "none";
+  drawTextureFill(ctx, width, height, pixelPoints, texture, mask);
+  ctx.restore();
+  resetCanvasState(ctx);
+}
+
 function drawMaskLayer(
   ctx: CanvasRenderingContext2D,
   width: number,
@@ -247,51 +347,34 @@ function drawMaskLayer(
   const pixelPoints = toPixelPoints(mask.points, width, height);
   const feather = Math.max(0, mask.feather);
 
-  const texCanvas = document.createElement("canvas");
-  texCanvas.width = width;
-  texCanvas.height = height;
-  const texCtx = texCanvas.getContext("2d");
-  if (!texCtx) return;
-  configureCanvasContext(texCtx);
-  texCtx.save();
-  clipToPolygon(texCtx, pixelPoints);
-  drawTextureFill(texCtx, width, height, pixelPoints, texture, mask);
-  texCtx.restore();
+  try {
+    const textureLayerCanvas = buildTextureLayerCanvas(width, height, pixelPoints, texture, mask);
+    if (!textureLayerCanvas) {
+      drawHardEdgeMaskLayer(ctx, width, height, pixelPoints, texture, mask);
+      return;
+    }
 
-  if (feather <= 0) {
+    let overlayCanvas: HTMLCanvasElement = textureLayerCanvas;
+
+    if (feather > 0) {
+      const maskCanvas = buildFeatherMaskCanvas(width, height, pixelPoints, feather);
+      if (maskCanvas) {
+        const maskedTextureCanvas = buildMaskedTextureCanvas(textureLayerCanvas, maskCanvas);
+        if (maskedTextureCanvas) overlayCanvas = maskedTextureCanvas;
+      }
+    }
+
+    // Composite finished overlay onto the main canvas — base photo is already drawn and untouched.
     ctx.save();
+    ctx.globalCompositeOperation = "source-over";
+    ctx.filter = "none";
     ctx.globalAlpha = mask.opacity;
-    ctx.drawImage(texCanvas, 0, 0);
+    ctx.drawImage(overlayCanvas, 0, 0);
     ctx.restore();
-    return;
+    resetCanvasState(ctx);
+  } catch {
+    drawHardEdgeMaskLayer(ctx, width, height, pixelPoints, texture, mask);
   }
-
-  const maskCanvas = document.createElement("canvas");
-  maskCanvas.width = width;
-  maskCanvas.height = height;
-  const maskCtx = maskCanvas.getContext("2d");
-  if (!maskCtx) return;
-  maskCtx.fillStyle = "#ffffff";
-  maskCtx.beginPath();
-  tracePolygonPath(maskCtx, pixelPoints);
-  maskCtx.fill();
-
-  const alphaCanvas = document.createElement("canvas");
-  alphaCanvas.width = width;
-  alphaCanvas.height = height;
-  const alphaCtx = alphaCanvas.getContext("2d");
-  if (!alphaCtx) return;
-  alphaCtx.filter = `blur(${feather}px)`;
-  alphaCtx.drawImage(maskCanvas, 0, 0);
-  alphaCtx.filter = "none";
-
-  ctx.save();
-  ctx.globalAlpha = mask.opacity;
-  ctx.drawImage(texCanvas, 0, 0);
-  ctx.globalCompositeOperation = "destination-in";
-  ctx.drawImage(alphaCanvas, 0, 0);
-  ctx.globalCompositeOperation = "source-over";
-  ctx.restore();
 }
 
 function drawPolygonOutline(
@@ -367,6 +450,7 @@ function renderScene(
 
   ctx.clearRect(0, 0, width, height);
   ctx.drawImage(photo, 0, 0, width, height);
+  resetCanvasState(ctx);
 
   if (renderTextures) {
     for (const mask of masks) {
