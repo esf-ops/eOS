@@ -2602,6 +2602,50 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
   margin-bottom: 16px;
 }
 
+/* Category tabs — four fixed views, no "All" */
+.pc-tab-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--eos-line);
+}
+
+.pc-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px 12px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: transparent;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--eos-ink-muted);
+  cursor: pointer;
+  transition: color 140ms ease, border-color 140ms ease;
+}
+
+.pc-tab:hover { color: var(--eos-ink-soft); }
+.pc-tab.active { color: var(--eos-ink); border-bottom-color: var(--eos-ink); }
+.pc-tab:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.1); border-radius: 4px 4px 0 0; }
+
+.pc-tab-count {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.06);
+  font-variant-numeric: tabular-nums;
+  color: var(--eos-ink-muted);
+}
+
+.pc-tab.active .pc-tab-count {
+  background: rgba(15, 23, 42, 0.1);
+  color: var(--eos-ink-soft);
+}
+
 .pc-category-chips {
   display: flex;
   flex-wrap: wrap;
@@ -2780,6 +2824,37 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 }
 
 .pc-card:hover .pc-card-img { transform: scale(1.06); }
+
+/* Minimal card label — name only */
+.pc-card-name-only {
+  margin: 10px 2px 0;
+  font-size: 0.95rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--eos-ink);
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-align: left;
+}
+
+/* Subtle asset indicator on cards */
+.pc-asset-dot {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid #fff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.18);
+}
+
+.pc-asset-dot.missing { background: #d97706; }
+.pc-asset-dot.partial { background: #2563eb; }
+.pc-asset-dot.complete { background: #16a34a; }
 
 .pc-card-placeholder {
   width: 100%;
@@ -3125,6 +3200,13 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
   font-size: 0.88rem;
   color: var(--eos-ink-mid);
   line-height: 1.55;
+}
+
+.pc-source-text {
+  font-size: 0.82rem;
+  color: var(--eos-ink-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  word-break: break-word;
 }
 
 .pc-thumb-grid {

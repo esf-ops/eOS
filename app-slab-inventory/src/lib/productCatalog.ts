@@ -4,7 +4,7 @@
  * No pricing, quote integration, or backend coupling in this pass.
  */
 
-export type ProductCatalogCategory = "sink" | "faucet" | "specialty_add_on";
+export type ProductCatalogCategory = "sink" | "sink_accessory" | "faucet" | "specialty_add_on";
 
 export type ProductCatalogAssetStatus = "missing" | "partial" | "complete";
 
@@ -23,7 +23,15 @@ export type ProductCatalogVariant = {
 export type ProductCatalogItem = {
   id: string;
   category: ProductCatalogCategory;
+  /** Showroom-friendly display name for cards and modal title */
   name: string;
+  /** Raw workbook product text */
+  originalName?: string;
+  /** Full source line for search and modal reference */
+  sourceDescription?: string;
+  sku?: string;
+  model?: string;
+  specSummary?: string;
   brand?: string;
   series?: string;
   type?: string;
@@ -46,8 +54,6 @@ export type ProductCatalogItem = {
   active: boolean;
 };
 
-export type ProductCatalogCategoryFilter = "all" | ProductCatalogCategory;
-
 export type ProductCatalogTagFilter =
   | "kitchen"
   | "vanity"
@@ -61,8 +67,17 @@ export type ProductCatalogTagFilter =
 
 export type ProductCatalogAssetFilter = "all" | ProductCatalogAssetStatus;
 
+/** Visible catalog tabs — exactly four categories, no "All". */
+export const PRODUCT_CATALOG_TABS: ProductCatalogCategory[] = [
+  "sink",
+  "sink_accessory",
+  "faucet",
+  "specialty_add_on",
+];
+
 export const PRODUCT_CATALOG_CATEGORY_LABELS: Record<ProductCatalogCategory, string> = {
   sink: "Sinks",
+  sink_accessory: "Sink Accessories",
   faucet: "Faucets",
   specialty_add_on: "Specialty Add-ons",
 };
@@ -89,10 +104,15 @@ export function productCatalogHeroImage(
   );
 }
 
-/** Searchable haystack for a catalog item (incl. variants). */
+/** Searchable haystack for a catalog item (incl. variants and source text). */
 export function productCatalogSearchText(item: ProductCatalogItem): string {
   const parts = [
     item.name,
+    item.originalName,
+    item.sourceDescription,
+    item.sku,
+    item.model,
+    item.specSummary,
     item.brand,
     item.series,
     item.type,
@@ -132,7 +152,7 @@ export function productCatalogMatchesTag(item: ProductCatalogItem, tag: ProductC
     case "specialty":
       return item.category === "specialty_add_on";
     case "accessory":
-      return item.type?.toLowerCase().includes("accessory") === true;
+      return item.category === "sink_accessory" || item.type?.toLowerCase().includes("accessory") === true;
     default:
       return true;
   }
@@ -141,7 +161,7 @@ export function productCatalogMatchesTag(item: ProductCatalogItem, tag: ProductC
 export function filterProductCatalogItems(
   items: ProductCatalogItem[],
   opts: {
-    category: ProductCatalogCategoryFilter;
+    category: ProductCatalogCategory;
     search: string;
     tags: ProductCatalogTagFilter[];
     assetStatus: ProductCatalogAssetFilter;
@@ -150,7 +170,7 @@ export function filterProductCatalogItems(
   const q = opts.search.trim().toLowerCase();
   return items.filter((item) => {
     if (!item.active) return false;
-    if (opts.category !== "all" && item.category !== opts.category) return false;
+    if (item.category !== opts.category) return false;
     if (opts.assetStatus !== "all" && item.assetStatus !== opts.assetStatus) return false;
     if (opts.tags.length > 0 && !opts.tags.every((t) => productCatalogMatchesTag(item, t))) return false;
     if (q && !productCatalogSearchText(item).includes(q)) return false;
@@ -161,10 +181,17 @@ export function filterProductCatalogItems(
 export function productCatalogCounts(items: ProductCatalogItem[]) {
   const active = items.filter((i) => i.active);
   return {
-    total: active.length,
     sinks: active.filter((i) => i.category === "sink").length,
+    sinkAccessories: active.filter((i) => i.category === "sink_accessory").length,
     faucets: active.filter((i) => i.category === "faucet").length,
     specialty: active.filter((i) => i.category === "specialty_add_on").length,
     missingAssets: active.filter((i) => i.assetStatus === "missing").length,
   };
+}
+
+export function productCatalogCountForCategory(
+  items: ProductCatalogItem[],
+  category: ProductCatalogCategory
+): number {
+  return items.filter((i) => i.active && i.category === category).length;
 }

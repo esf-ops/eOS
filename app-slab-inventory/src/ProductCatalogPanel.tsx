@@ -4,11 +4,13 @@ import { PRODUCT_CATALOG_ITEMS } from "./lib/productCatalogData";
 import {
   PRODUCT_CATALOG_ASSET_LABELS,
   PRODUCT_CATALOG_CATEGORY_LABELS,
+  PRODUCT_CATALOG_TABS,
   filterProductCatalogItems,
+  productCatalogCountForCategory,
   productCatalogCounts,
   productCatalogHeroImage,
   type ProductCatalogAssetFilter,
-  type ProductCatalogCategoryFilter,
+  type ProductCatalogCategory,
   type ProductCatalogItem,
   type ProductCatalogTagFilter,
   type ProductCatalogVariant,
@@ -27,8 +29,6 @@ const TAG_FILTERS: { id: ProductCatalogTagFilter; label: string }[] = [
   { id: "steel", label: "Steel / Stainless" },
   { id: "single_bowl", label: "Single bowl" },
   { id: "double_bowl", label: "Double bowl" },
-  { id: "faucet", label: "Faucet" },
-  { id: "specialty", label: "Specialty" },
   { id: "accessory", label: "Accessory" },
 ];
 
@@ -42,6 +42,7 @@ const ASSET_FILTERS: { id: ProductCatalogAssetFilter; label: string }[] = [
 function categoryPlaceholderLabel(category: ProductCatalogItem["category"]): string {
   if (category === "faucet") return "Faucet";
   if (category === "specialty_add_on") return "Specialty";
+  if (category === "sink_accessory") return "Accessory";
   return "Sink";
 }
 
@@ -60,6 +61,13 @@ function categoryPlaceholderIcon(category: ProductCatalogItem["category"]) {
       </svg>
     );
   }
+  if (category === "sink_accessory") {
+    return (
+      <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <circle cx="12" cy="12" r="3" /><path d="M12 5V3" /><path d="M12 21v-2" />
+      </svg>
+    );
+  }
   return (
     <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <rect x="3" y="7" width="18" height="12" rx="2" /><path d="M7 7V5h10v2" />
@@ -67,14 +75,8 @@ function categoryPlaceholderIcon(category: ProductCatalogItem["category"]) {
   );
 }
 
-function assetStatusClass(status: ProductCatalogItem["assetStatus"]): string {
-  if (status === "complete") return "pc-asset-badge complete";
-  if (status === "partial") return "pc-asset-badge partial";
-  return "pc-asset-badge missing";
-}
-
 export default function ProductCatalogPanel() {
-  const [category, setCategory] = useState<ProductCatalogCategoryFilter>("all");
+  const [category, setCategory] = useState<ProductCatalogCategory>("sink");
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [tags, setTags] = useState<ProductCatalogTagFilter[]>([]);
@@ -108,10 +110,9 @@ export default function ProductCatalogPanel() {
     setSearch("");
     setTags([]);
     setAssetFilter("all");
-    setCategory("all");
   };
 
-  const hasActiveFilters = category !== "all" || search || tags.length > 0 || assetFilter !== "all";
+  const hasActiveFilters = Boolean(search) || tags.length > 0 || assetFilter !== "all";
 
   return (
     <div className="pc-page">
@@ -119,34 +120,30 @@ export default function ProductCatalogPanel() {
         <div className="pc-header-text">
           <h1 className="pc-title">Product Catalog</h1>
           <p className="pc-subtitle">
-            ESF plumbing & specialty program — sinks, faucets, and add-ons. Display catalog only; not a pricing authority.
+            ESF plumbing & specialty program. Display catalog only — not a pricing authority.
           </p>
         </div>
         <div className="pc-header-stats" aria-label="Catalog summary">
-          <span><strong>{counts.total}</strong> products</span>
-          <span className="pc-stat-sep" aria-hidden>·</span>
-          <span><strong>{counts.missingAssets}</strong> need assets</span>
+          <span><strong>{counts.missingAssets}</strong> products need assets</span>
         </div>
       </header>
 
-      <div className="pc-toolbar">
-        <nav className="pc-category-chips" aria-label="Product categories">
-          {(["all", "sink", "faucet", "specialty_add_on"] as const).map((cat) => (
-            <button
-              key={cat}
-              type="button"
-              className={`pc-chip${category === cat ? " active" : ""}`}
-              onClick={() => setCategory(cat)}
-              aria-pressed={category === cat}
-            >
-              {cat === "all" ? "All" : PRODUCT_CATALOG_CATEGORY_LABELS[cat]}
-              <span className="pc-chip-count">
-                {cat === "all" ? counts.total : cat === "sink" ? counts.sinks : cat === "faucet" ? counts.faucets : counts.specialty}
-              </span>
-            </button>
-          ))}
-        </nav>
+      <nav className="pc-tab-bar" aria-label="Product categories">
+        {PRODUCT_CATALOG_TABS.map((cat) => (
+          <button
+            key={cat}
+            type="button"
+            className={`pc-tab${category === cat ? " active" : ""}`}
+            onClick={() => setCategory(cat)}
+            aria-selected={category === cat}
+          >
+            {PRODUCT_CATALOG_CATEGORY_LABELS[cat]}
+            <span className="pc-tab-count">{productCatalogCountForCategory(PRODUCT_CATALOG_ITEMS, cat)}</span>
+          </button>
+        ))}
+      </nav>
 
+      <div className="pc-toolbar">
         <div className="pc-search-wrap">
           {SEARCH_ICON}
           <input
@@ -154,7 +151,7 @@ export default function ProductCatalogPanel() {
             className="pc-search"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Search name, color, material, catalog #, ESF code…"
+            placeholder="Search name, SKU, material, color, notes…"
             aria-label="Search product catalog"
           />
         </div>
@@ -195,12 +192,12 @@ export default function ProductCatalogPanel() {
           <span className="pc-result-count">{filtered.length} result{filtered.length !== 1 ? "s" : ""}</span>
         </div>
       ) : (
-        <p className="pc-result-meta">{filtered.length} product{filtered.length !== 1 ? "s" : ""}</p>
+        <p className="pc-result-meta">{filtered.length} in {PRODUCT_CATALOG_CATEGORY_LABELS[category]}</p>
       )}
 
       {filtered.length === 0 ? (
         <div className="empty-state pc-empty">
-          <div className="empty-art" aria-hidden>{categoryPlaceholderIcon("sink")}</div>
+          <div className="empty-art" aria-hidden>{categoryPlaceholderIcon(category)}</div>
           <p className="empty-title">No products match these criteria.</p>
           <p className="empty-sub">Try a different search or remove filters.</p>
           {hasActiveFilters ? (
@@ -228,8 +225,7 @@ function ProductCatalogCard({ item, onOpen }: { item: ProductCatalogItem; onOpen
   const [imgFailed, setImgFailed] = useState(false);
   const hero = productCatalogHeroImage(item);
   const hasImage = Boolean(hero) && !imgFailed;
-  const colors = item.availableColors?.slice(0, 5) ?? [];
-  const extraColors = (item.availableColors?.length ?? 0) - colors.length;
+  const showAssetDot = item.assetStatus !== "complete";
 
   return (
     <button type="button" className="pc-card" onClick={onOpen} aria-label={`View ${item.name}`}>
@@ -249,25 +245,16 @@ function ProductCatalogCard({ item, onOpen }: { item: ProductCatalogItem; onOpen
               <span>{categoryPlaceholderLabel(item.category)}</span>
             </div>
           )}
-          <span className={assetStatusClass(item.assetStatus)}>{PRODUCT_CATALOG_ASSET_LABELS[item.assetStatus]}</span>
+          {showAssetDot ? (
+            <span
+              className={`pc-asset-dot ${item.assetStatus}`}
+              title={PRODUCT_CATALOG_ASSET_LABELS[item.assetStatus]}
+              aria-label={PRODUCT_CATALOG_ASSET_LABELS[item.assetStatus]}
+            />
+          ) : null}
         </div>
       </div>
-      <div className="pc-card-body">
-        <p className="pc-card-category">{PRODUCT_CATALOG_CATEGORY_LABELS[item.category]}{item.type ? ` · ${item.type}` : ""}</p>
-        <p className="pc-card-name">{item.name}</p>
-        {item.material ? <p className="pc-card-meta">{item.material}</p> : null}
-        {item.suggestedUse ? <p className="pc-card-meta">{item.suggestedUse}</p> : null}
-        {item.esfCode ? <p className="pc-card-code">ESF {item.esfCode}</p> : null}
-        {colors.length > 0 ? (
-          <div className="pc-color-chips" aria-label="Available colors">
-            {colors.map((c) => (
-              <span key={c} className="pc-color-chip">{c}</span>
-            ))}
-            {extraColors > 0 ? <span className="pc-color-chip more">+{extraColors}</span> : null}
-          </div>
-        ) : null}
-        <p className="pc-display-only">Display catalog only</p>
-      </div>
+      <p className="pc-card-name-only">{item.name}</p>
     </button>
   );
 }
@@ -319,6 +306,10 @@ function ProductCatalogModal({ item, onClose }: { item: ProductCatalogItem; onCl
     setZoomOpen(true);
   };
 
+  const sourceDiffers =
+    item.originalName &&
+    item.originalName.trim().toLowerCase() !== item.name.trim().toLowerCase();
+
   return (
     <>
       <div className="pc-modal-overlay" role="dialog" aria-modal="true" aria-label={`${item.name} details`} onClick={onClose}>
@@ -335,32 +326,42 @@ function ProductCatalogModal({ item, onClose }: { item: ProductCatalogItem; onCl
                 <div className="pc-modal-placeholder" aria-hidden>
                   {categoryPlaceholderIcon(item.category)}
                   <span>{categoryPlaceholderLabel(item.category)}</span>
-                  <p className="pc-modal-placeholder-note">Asset pending — product details available below.</p>
+                  <p className="pc-modal-placeholder-note">Asset pending — details available below.</p>
                 </div>
               )}
-              <span className={assetStatusClass(item.assetStatus)}>{PRODUCT_CATALOG_ASSET_LABELS[item.assetStatus]}</span>
+              <span className={`pc-asset-badge ${item.assetStatus}`}>{PRODUCT_CATALOG_ASSET_LABELS[item.assetStatus]}</span>
             </div>
 
             <div className="pc-modal-info">
               <header className="pc-modal-head">
-                <p className="pc-modal-eyebrow">
-                  {PRODUCT_CATALOG_CATEGORY_LABELS[item.category]}
-                  {item.brand ? ` · ${item.brand}` : ""}
-                  {item.series ? ` · ${item.series}` : ""}
-                </p>
+                <p className="pc-modal-eyebrow">{PRODUCT_CATALOG_CATEGORY_LABELS[item.category]}</p>
                 <h2 className="pc-modal-title">{item.name}</h2>
-                <p className="pc-display-only pc-display-only-modal">Display catalog only · not a pricing authority</p>
+                <p className="pc-display-only pc-display-only-modal">Display catalog only</p>
               </header>
 
               <dl className="pc-detail-grid">
+                {item.brand ? <><dt>Brand</dt><dd>{item.brand}</dd></> : null}
+                {item.series ? <><dt>Series</dt><dd>{item.series}</dd></> : null}
+                {item.type ? <><dt>Type</dt><dd>{item.type}</dd></> : null}
                 {item.material ? <><dt>Material</dt><dd>{item.material}</dd></> : null}
                 {item.suggestedUse ? <><dt>Suggested use</dt><dd>{item.suggestedUse}</dd></> : null}
-                {item.type ? <><dt>Type</dt><dd>{item.type}</dd></> : null}
-                {item.esfCode ? <><dt>ESF#</dt><dd>{item.esfCode}</dd></> : null}
+                {item.specSummary ? <><dt>Specs</dt><dd>{item.specSummary}</dd></> : null}
+                {item.sku ? <><dt>SKU / item #</dt><dd>{item.sku}</dd></> : null}
+                {item.esfCode && item.esfCode !== item.sku ? <><dt>ESF#</dt><dd>{item.esfCode}</dd></> : null}
+                {item.model ? <><dt>Model</dt><dd>{item.model}</dd></> : null}
                 {selectedVariant?.catalogNumber ? (
                   <><dt>Catalog #</dt><dd>{selectedVariant.catalogNumber}</dd></>
                 ) : null}
+                <dt>Asset status</dt>
+                <dd>{PRODUCT_CATALOG_ASSET_LABELS[item.assetStatus]}</dd>
               </dl>
+
+              {sourceDiffers ? (
+                <section className="pc-text-section">
+                  <h3 className="pc-section-title">Source name</h3>
+                  <p className="pc-body-text pc-source-text">{item.originalName}</p>
+                </section>
+              ) : null}
 
               {item.variants && item.variants.length > 0 ? (
                 <section className="pc-variant-section" aria-label="Color and finish options">
@@ -395,7 +396,7 @@ function ProductCatalogModal({ item, onClose }: { item: ProductCatalogItem; onCl
                 </section>
               ) : null}
 
-              {item.description ? (
+              {item.description && item.description !== item.specSummary ? (
                 <section className="pc-text-section">
                   <h3 className="pc-section-title">Description</h3>
                   <p className="pc-body-text">{item.description}</p>
@@ -433,7 +434,7 @@ function ProductCatalogModal({ item, onClose }: { item: ProductCatalogItem; onCl
               ) : null}
 
               {item.sourceSheet ? (
-                <p className="pc-source-note">Source: {item.sourceSheet}</p>
+                <p className="pc-source-note">Workbook: {item.sourceSheet}</p>
               ) : null}
             </div>
           </div>
