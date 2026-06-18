@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ZoomImageViewer, type ZoomGalleryItem } from "./ZoomImageViewer";
-import { PRODUCT_CATALOG_ITEMS } from "./lib/productCatalogData";
+import { getProductCatalogItemsWithAssets } from "./lib/productCatalogAssets";
 import {
   PRODUCT_CATALOG_ASSET_LABELS,
   PRODUCT_CATALOG_CATEGORY_LABELS,
@@ -88,17 +88,19 @@ export default function ProductCatalogPanel() {
     return () => clearTimeout(t);
   }, [searchInput]);
 
-  const counts = useMemo(() => productCatalogCounts(PRODUCT_CATALOG_ITEMS), []);
+  const catalogItems = useMemo(() => getProductCatalogItemsWithAssets(), []);
+
+  const counts = useMemo(() => productCatalogCounts(catalogItems), [catalogItems]);
 
   const filtered = useMemo(
     () =>
-      filterProductCatalogItems(PRODUCT_CATALOG_ITEMS, {
+      filterProductCatalogItems(catalogItems, {
         category,
         search,
         tags,
         assetStatus: assetFilter,
       }),
-    [category, search, tags, assetFilter]
+    [category, search, tags, assetFilter, catalogItems]
   );
 
   const toggleTag = (tag: ProductCatalogTagFilter) => {
@@ -138,7 +140,7 @@ export default function ProductCatalogPanel() {
             aria-selected={category === cat}
           >
             {PRODUCT_CATALOG_CATEGORY_LABELS[cat]}
-            <span className="pc-tab-count">{productCatalogCountForCategory(PRODUCT_CATALOG_ITEMS, cat)}</span>
+            <span className="pc-tab-count">{productCatalogCountForCategory(catalogItems, cat)}</span>
           </button>
         ))}
       </nav>
@@ -435,6 +437,12 @@ function ProductCatalogModal({ item, onClose }: { item: ProductCatalogItem; onCl
 
               {item.sourceSheet ? (
                 <p className="pc-source-note">Workbook: {item.sourceSheet}</p>
+              ) : null}
+              {item.assetSourceNotes ? (
+                <section className="pc-text-section">
+                  <h3 className="pc-section-title">Asset source</h3>
+                  <p className="pc-body-text">{item.assetSourceNotes}</p>
+                </section>
               ) : null}
             </div>
           </div>

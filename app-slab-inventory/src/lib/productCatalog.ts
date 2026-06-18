@@ -50,6 +50,8 @@ export type ProductCatalogItem = {
   finishExampleUrls?: string[];
   specSheetUrl?: string;
   assetStatus: ProductCatalogAssetStatus;
+  /** Curated asset collection notes from productCatalogAssets.ts (not generated workbook). */
+  assetSourceNotes?: string;
   sourceSheet?: string;
   active: boolean;
 };
