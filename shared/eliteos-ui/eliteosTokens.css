@@ -1,0 +1,120 @@
+/* ==========================================================================
+   eliteOS / slabOS design tokens (original)
+   --------------------------------------------------------------------------
+   Presentational only. Consumed by app-home and future heads via import.
+   Does not define components — only custom properties and base resets
+   that tokens depend on. Each head may extend with local overrides.
+   ========================================================================== */
+
+@layer tokens {
+  :root {
+    /* Canvas — warm stone fabrication palette */
+    --eos-canvas: #f7f5f1;
+    --eos-canvas-deep: #ede9e3;
+    --eos-cream: #fffcf8;
+    --eos-parchment: #faf7f2;
+
+    /* Ink hierarchy */
+    --eos-ink: #1a1520;
+    --eos-ink-soft: #2c2638;
+    --eos-ink-mid: #524d5c;
+    --eos-ink-muted: #736e7d;
+    --eos-ink-faint: #9b96a3;
+
+    /* Borders & lines */
+    --eos-line: rgba(26, 21, 32, 0.08);
+    --eos-line-strong: rgba(26, 21, 32, 0.14);
+
+    /* Surfaces */
+    --eos-bg: var(--eos-canvas);
+    --eos-surface: #ffffff;
+    --eos-surface-soft: rgba(255, 252, 248, 0.82);
+    --eos-surface-translucent: rgba(255, 252, 248, 0.68);
+
+    /* Brand anchor — Elite Stone maroon */
+    --eos-accent: #9e1834;
+    --eos-accent-hover: #861228;
+    --eos-accent-active: #6e0f20;
+    --eos-accent-soft: rgba(158, 24, 52, 0.09);
+    --eos-accent-ring: rgba(158, 24, 52, 0.32);
+
+    /* Stone & gold accents (restrained) */
+    --eos-stone-gold: #b8956a;
+    --eos-stone-gold-soft: rgba(184, 149, 106, 0.14);
+    --eos-stone-warm: #d4c4b0;
+
+    /* Ambient orb colors (background decoration) */
+    --eos-orb-warm: rgba(212, 196, 176, 0.45);
+    --eos-orb-rose: rgba(196, 148, 158, 0.28);
+    --eos-orb-maroon: rgba(158, 24, 52, 0.12);
+    --eos-orb-slate: rgba(148, 162, 186, 0.22);
+
+    /* Category tints */
+    --tint-navy-from: #dde6f2;
+    --tint-navy-to: #c9d5e8;
+    --tint-navy-ink: #1e3358;
+
+    --tint-burgundy-from: #f3dde3;
+    --tint-burgundy-to: #e8c4ce;
+    --tint-burgundy-ink: #6e0f20;
+
+    --tint-violet-from: #e8e0f2;
+    --tint-violet-to: #d6cae8;
+    --tint-violet-ink: #4a3278;
+
+    --tint-teal-from: #d6ebe8;
+    --tint-teal-to: #bdded8;
+    --tint-teal-ink: #0f5a52;
+
+    --tint-amber-from: #f5e8d4;
+    --tint-amber-to: #edd4b0;
+    --tint-amber-ink: #6e4810;
+
+    --tint-slate-from: #e6e9ef;
+    --tint-slate-to: #d4dae4;
+    --tint-slate-ink: #3a4558;
+
+    /* Spacing scale */
+    --eos-space-1: 4px;
+    --eos-space-2: 8px;
+    --eos-space-3: 12px;
+    --eos-space-4: 16px;
+    --eos-space-5: 20px;
+    --eos-space-6: 24px;
+    --eos-space-7: 32px;
+    --eos-space-8: 40px;
+    --eos-space-9: 48px;
+
+    /* Radii */
+    --r-sm: 8px;
+    --r-md: 12px;
+    --r-lg: 16px;
+    --r-xl: 20px;
+    --r-2xl: 24px;
+
+    /* Elevation */
+    --sh-1: 0 1px 2px rgba(26, 21, 32, 0.04);
+    --sh-2: 0 4px 16px rgba(26, 21, 32, 0.06);
+    --sh-3: 0 12px 36px rgba(26, 21, 32, 0.08);
+    --sh-card: 0 1px 2px rgba(26, 21, 32, 0.04), 0 6px 22px rgba(26, 21, 32, 0.06);
+    --sh-card-hover: 0 2px 6px rgba(26, 21, 32, 0.06), 0 16px 40px rgba(26, 21, 32, 0.09);
+
+    /* Motion */
+    --eos-ease: cubic-bezier(0.22, 0.68, 0.16, 1);
+    --eos-ease-out: cubic-bezier(0.16, 1, 0.24, 1);
+    --eos-dur-1: 130ms;
+    --eos-dur-2: 200ms;
+    --eos-dur-3: 320ms;
+
+    /* Layout */
+    --eos-content-max: 1180px;
+    --eos-bento-gap: 18px;
+
+    /* Legacy aliases (existing heads reference these) */
+    --elite-action-red: var(--eos-accent);
+    --elite-action-red-mid: var(--eos-accent);
+    --elite-action-red-hover: var(--eos-accent-hover);
+    --elite-action-red-active: var(--eos-accent-active);
+    --elite-focus-ring: var(--eos-accent-ring);
+  }
+}
