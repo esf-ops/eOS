@@ -45,6 +45,55 @@ const ELITE100_TEXTURE_PILOT: Elite100TextureAsset[] = [
     fullUrl: "/material-textures/elite100/full/bayshore-sand.jpg",
     source: "manual_static_pilot",
   },
+  {
+    colorName: "Antique Gray",
+    slug: "antique-gray",
+    thumbUrl: "/material-textures/elite100/thumb/antique-gray.jpg",
+    fullUrl: "/material-textures/elite100/full/antique-gray.jpg",
+    source: "manual_static_pilot",
+  },
+  {
+    colorName: "Sicilia",
+    slug: "sicilia",
+    thumbUrl: "/material-textures/elite100/thumb/sicilia.jpg",
+    fullUrl: "/material-textures/elite100/full/sicilia.jpg",
+    source: "manual_static_pilot",
+  },
+  {
+    colorName: "Classic Grey",
+    slug: "classic-gray",
+    thumbUrl: "/material-textures/elite100/thumb/classic-gray.jpg",
+    fullUrl: "/material-textures/elite100/full/classic-gray.jpg",
+    source: "manual_static_pilot",
+  },
+  {
+    colorName: "White Dove",
+    slug: "white-dove",
+    thumbUrl: "/material-textures/elite100/thumb/white-dove.jpg",
+    fullUrl: "/material-textures/elite100/full/white-dove.jpg",
+    source: "manual_static_pilot",
+  },
+  {
+    colorName: "Silver Pearl",
+    slug: "silver-pearl-polished",
+    thumbUrl: "/material-textures/elite100/thumb/silver-pearl-polished.jpg",
+    fullUrl: "/material-textures/elite100/full/silver-pearl-polished.jpg",
+    source: "manual_static_pilot",
+  },
+  {
+    colorName: "Suede Brown",
+    slug: "suede-brown-polished",
+    thumbUrl: "/material-textures/elite100/thumb/suede-brown-polished.jpg",
+    fullUrl: "/material-textures/elite100/full/suede-brown-polished.jpg",
+    source: "manual_static_pilot",
+  },
+  {
+    colorName: "India Black Pearl",
+    slug: "india-black-pearl-polished",
+    thumbUrl: "/material-textures/elite100/thumb/india-black-pearl-polished.jpg",
+    fullUrl: "/material-textures/elite100/full/india-black-pearl-polished.jpg",
+    source: "manual_static_pilot",
+  },
 ];
 
 const PILOT_BY_SLUG = new Map(ELITE100_TEXTURE_PILOT.map((asset) => [asset.slug, asset]));
