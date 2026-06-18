@@ -106,6 +106,141 @@ export function productCatalogHeroImage(
   );
 }
 
+/** Normalize finish/color names for grouping duplicate variant rows. */
+export function normalizeFinishName(name: string): string {
+  return String(name)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+export type ProductCatalogFinishOption = {
+  /** Stable key from normalizeFinishName(label) */
+  key: string;
+  label: string;
+  variantIds: string[];
+  catalogNumbers: string[];
+  imageUrl?: string;
+  swatchColor?: string;
+};
+
+/** One finish/color option — not one chip per catalog article number. */
+export function getUniqueFinishOptions(item: ProductCatalogItem): ProductCatalogFinishOption[] {
+  if (!item.variants?.length) return [];
+
+  const map = new Map<string, ProductCatalogFinishOption>();
+
+  for (const v of item.variants) {
+    const raw = v.colorName || v.finishName;
+    const key = raw ? normalizeFinishName(raw) : v.catalogNumber ? `cat-${v.catalogNumber}` : v.id;
+    const label = raw || v.catalogNumber || "Option";
+
+    const existing = map.get(key);
+    if (existing) {
+      existing.variantIds.push(v.id);
+      if (v.catalogNumber && !existing.catalogNumbers.includes(v.catalogNumber)) {
+        existing.catalogNumbers.push(v.catalogNumber);
+      }
+      if (!existing.imageUrl && v.imageUrl) existing.imageUrl = v.imageUrl;
+      if (!existing.swatchColor && v.swatchColor) existing.swatchColor = v.swatchColor;
+    } else {
+      map.set(key, {
+        key,
+        label,
+        variantIds: [v.id],
+        catalogNumbers: v.catalogNumber ? [v.catalogNumber] : [],
+        imageUrl: v.imageUrl,
+        swatchColor: v.swatchColor,
+      });
+    }
+  }
+
+  return Array.from(map.values());
+}
+
+/** Variant image for a grouped finish, if any variant in the group has one. */
+export function getVariantImageForFinish(
+  item: ProductCatalogItem,
+  finishKey: string
+): string | undefined {
+  const option = getUniqueFinishOptions(item).find((o) => o.key === finishKey);
+  if (option?.imageUrl) return option.imageUrl;
+
+  const variants =
+    item.variants?.filter((v) => {
+      const raw = v.colorName || v.finishName;
+      const key = raw ? normalizeFinishName(raw) : v.catalogNumber ? `cat-${v.catalogNumber}` : v.id;
+      return key === finishKey;
+    }) ?? [];
+
+  for (const v of variants) {
+    if (v.imageUrl) return v.imageUrl;
+  }
+  return undefined;
+}
+
+export function getCatalogNumbersForFinish(
+  item: ProductCatalogItem,
+  finishKey: string
+): string[] {
+  return getUniqueFinishOptions(item).find((o) => o.key === finishKey)?.catalogNumbers ?? [];
+}
+
+/** All image URLs declared on a catalog item (for runtime load tracking). */
+export function productCatalogImageUrls(item: ProductCatalogItem): string[] {
+  const urls = new Set<string>();
+  const add = (u?: string) => {
+    if (u) urls.add(u);
+  };
+
+  add(item.imageUrl);
+  add(item.installedImageUrl);
+  add(item.diagramUrl);
+  (item.gallery ?? []).forEach(add);
+  (item.comboPhotoUrls ?? []).forEach(add);
+  (item.finishExampleUrls ?? []).forEach(add);
+  (item.variants ?? []).forEach((v) => {
+    add(v.imageUrl);
+    add(v.installedImageUrl);
+    add(v.comboPhotoUrl);
+  });
+
+  return Array.from(urls);
+}
+
+/** Runtime asset status after images attempt to load in the modal. */
+export function productCatalogDisplayAssetStatus(
+  item: ProductCatalogItem,
+  loaded: ReadonlySet<string>,
+  failed: ReadonlySet<string>
+): ProductCatalogAssetStatus {
+  const imageUrls = productCatalogImageUrls(item);
+  const hasLoadedImage = imageUrls.some((u) => loaded.has(u));
+
+  if (!hasLoadedImage) {
+    if (imageUrls.length === 0) return "missing";
+    const allFailed = imageUrls.every((u) => failed.has(u));
+    if (allFailed) return item.specSheetUrl ? "partial" : "missing";
+    return item.assetStatus;
+  }
+
+  const heroLoaded = Boolean(item.imageUrl && loaded.has(item.imageUrl));
+  const finishLoaded = (item.variants ?? []).some((v) => v.imageUrl && loaded.has(v.imageUrl));
+  const diagramLoaded = Boolean(item.diagramUrl && loaded.has(item.diagramUrl));
+  const installedLoaded = Boolean(item.installedImageUrl && loaded.has(item.installedImageUrl));
+  const galleryLoaded =
+    (item.gallery ?? []).some((u) => loaded.has(u)) ||
+    (item.comboPhotoUrls ?? []).some((u) => loaded.has(u));
+
+  if ((heroLoaded || finishLoaded) && (diagramLoaded || installedLoaded || galleryLoaded || item.specSheetUrl)) {
+    return "complete";
+  }
+
+  return "partial";
+}
+
 /** Searchable haystack for a catalog item (incl. variants and source text). */
 export function productCatalogSearchText(item: ProductCatalogItem): string {
   const parts = [

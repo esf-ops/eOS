@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ZoomImageViewer, type ZoomGalleryItem } from "./ZoomImageViewer";
 import { getProductCatalogItemsWithAssets } from "./lib/productCatalogAssets";
 import {
@@ -6,14 +6,18 @@ import {
   PRODUCT_CATALOG_CATEGORY_LABELS,
   PRODUCT_CATALOG_TABS,
   filterProductCatalogItems,
+  getCatalogNumbersForFinish,
+  getUniqueFinishOptions,
+  getVariantImageForFinish,
   productCatalogCountForCategory,
   productCatalogCounts,
+  productCatalogDisplayAssetStatus,
   productCatalogHeroImage,
   type ProductCatalogAssetFilter,
   type ProductCatalogCategory,
+  type ProductCatalogFinishOption,
   type ProductCatalogItem,
   type ProductCatalogTagFilter,
-  type ProductCatalogVariant,
 } from "./lib/productCatalog";
 
 const SEARCH_ICON = (
@@ -73,6 +77,142 @@ function categoryPlaceholderIcon(category: ProductCatalogItem["category"]) {
       <rect x="3" y="7" width="18" height="12" rx="2" /><path d="M7 7V5h10v2" />
     </svg>
   );
+}
+
+type StageThumb = {
+  id: string;
+  url: string;
+  caption: string;
+};
+
+function useCatalogImageTracker() {
+  const [loaded, setLoaded] = useState<Set<string>>(() => new Set());
+  const [failed, setFailed] = useState<Set<string>>(() => new Set());
+
+  const reset = useCallback(() => {
+    setLoaded(new Set());
+    setFailed(new Set());
+  }, []);
+
+  const markLoaded = useCallback((url: string) => {
+    setLoaded((cur) => {
+      if (cur.has(url)) return cur;
+      const next = new Set(cur);
+      next.add(url);
+      return next;
+    });
+  }, []);
+
+  const markFailed = useCallback((url: string) => {
+    setFailed((cur) => {
+      if (cur.has(url)) return cur;
+      const next = new Set(cur);
+      next.add(url);
+      return next;
+    });
+  }, []);
+
+  const isUsable = useCallback(
+    (url?: string) => Boolean(url) && !failed.has(url!),
+    [failed]
+  );
+
+  return { loaded, failed, reset, markLoaded, markFailed, isUsable };
+}
+
+function CatalogImage({
+  src,
+  alt,
+  className,
+  loading,
+  hidden,
+  onLoaded,
+  onFailed,
+}: {
+  src: string;
+  alt: string;
+  className?: string;
+  loading?: "lazy" | "eager";
+  hidden?: boolean;
+  onLoaded: (url: string) => void;
+  onFailed: (url: string) => void;
+}) {
+  const [visible, setVisible] = useState(true);
+
+  if (!visible || hidden) return null;
+
+  return (
+    <img
+      src={src}
+      alt={alt}
+      className={className}
+      loading={loading}
+      onLoad={() => onLoaded(src)}
+      onError={() => {
+        setVisible(false);
+        onFailed(src);
+      }}
+    />
+  );
+}
+
+function buildStageThumbs(
+  item: ProductCatalogItem,
+  finishOptions: ProductCatalogFinishOption[],
+  selectedFinishKey: string | null
+): StageThumb[] {
+  const thumbs: StageThumb[] = [];
+  const seen = new Set<string>();
+
+  const push = (id: string, url: string | undefined, caption: string) => {
+    if (!url || seen.has(url)) return;
+    seen.add(url);
+    thumbs.push({ id, url, caption });
+  };
+
+  push("hero", item.imageUrl, "Product");
+
+  if (selectedFinishKey) {
+    push(
+      `finish-${selectedFinishKey}`,
+      getVariantImageForFinish(item, selectedFinishKey),
+      finishOptions.find((o) => o.key === selectedFinishKey)?.label ?? "Finish"
+    );
+  } else {
+    for (const opt of finishOptions) {
+      push(`finish-${opt.key}`, opt.imageUrl, opt.label);
+    }
+  }
+
+  push("installed", item.installedImageUrl, "Installed");
+  (item.comboPhotoUrls ?? []).forEach((url, i) => push(`combo-${i}`, url, `Combo ${i + 1}`));
+  push("diagram", item.diagramUrl, "Diagram");
+  (item.finishExampleUrls ?? []).forEach((url, i) => push(`finish-ex-${i}`, url, `Finish example ${i + 1}`));
+  (item.gallery ?? []).forEach((url, i) => push(`gallery-${i}`, url, `Gallery ${i + 1}`));
+
+  return thumbs;
+}
+
+function resolveStageUrl(
+  item: ProductCatalogItem,
+  selectedFinishKey: string | null,
+  activeThumbUrl: string | null,
+  isUsable: (url?: string) => boolean
+): string | undefined {
+  if (activeThumbUrl && isUsable(activeThumbUrl)) return activeThumbUrl;
+
+  if (selectedFinishKey) {
+    const finishImage = getVariantImageForFinish(item, selectedFinishKey);
+    if (isUsable(finishImage)) return finishImage;
+  }
+
+  if (isUsable(item.imageUrl)) return item.imageUrl;
+
+  for (const opt of getUniqueFinishOptions(item)) {
+    if (isUsable(opt.imageUrl)) return opt.imageUrl;
+  }
+
+  return undefined;
 }
 
 export default function ProductCatalogPanel() {
@@ -262,17 +402,18 @@ function ProductCatalogCard({ item, onOpen }: { item: ProductCatalogItem; onOpen
 }
 
 function ProductCatalogModal({ item, onClose }: { item: ProductCatalogItem; onClose: () => void }) {
-  const [selectedVariant, setSelectedVariant] = useState<ProductCatalogVariant | null>(
-    item.variants?.[0] ?? null
-  );
-  const [imgFailed, setImgFailed] = useState(false);
+  const finishOptions = useMemo(() => getUniqueFinishOptions(item), [item]);
+  const [selectedFinishKey, setSelectedFinishKey] = useState<string | null>(null);
+  const [activeThumbUrl, setActiveThumbUrl] = useState<string | null>(null);
   const [zoomOpen, setZoomOpen] = useState(false);
   const [zoomIndex, setZoomIndex] = useState(0);
+  const { loaded, failed, reset, markLoaded, markFailed, isUsable } = useCatalogImageTracker();
 
   useEffect(() => {
-    setSelectedVariant(item.variants?.[0] ?? null);
-    setImgFailed(false);
-  }, [item]);
+    setSelectedFinishKey(null);
+    setActiveThumbUrl(null);
+    reset();
+  }, [item, reset]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -282,30 +423,53 @@ function ProductCatalogModal({ item, onClose }: { item: ProductCatalogItem; onCl
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const hero = productCatalogHeroImage(item, selectedVariant);
-  const hasHero = Boolean(hero) && !imgFailed;
+  const stageThumbCandidates = useMemo(
+    () => buildStageThumbs(item, finishOptions, selectedFinishKey),
+    [item, finishOptions, selectedFinishKey]
+  );
 
-  const comboUrls = [
-    ...(item.comboPhotoUrls ?? []),
-    ...(selectedVariant?.comboPhotoUrl ? [selectedVariant.comboPhotoUrl] : []),
-  ].filter(Boolean);
+  const visibleThumbs = useMemo(
+    () => stageThumbCandidates.filter((t) => !failed.has(t.url)),
+    [stageThumbCandidates, failed]
+  );
+
+  const loadedThumbs = useMemo(
+    () => visibleThumbs.filter((t) => loaded.has(t.url)),
+    [visibleThumbs, loaded]
+  );
+
+  const stageUrl = resolveStageUrl(item, selectedFinishKey, activeThumbUrl, isUsable);
+
+  const displayAssetStatus = productCatalogDisplayAssetStatus(item, loaded, failed);
+
+  const selectedFinish = finishOptions.find((o) => o.key === selectedFinishKey) ?? null;
+  const selectedCatalogNumbers = selectedFinishKey
+    ? getCatalogNumbersForFinish(item, selectedFinishKey)
+    : [];
 
   const galleryItems: ZoomGalleryItem[] = useMemo(() => {
-    const urls: { src: string; caption: string }[] = [];
-    if (hero) urls.push({ src: hero, caption: "Product" });
-    if (item.installedImageUrl) urls.push({ src: item.installedImageUrl, caption: "Installed" });
-    if (selectedVariant?.installedImageUrl) urls.push({ src: selectedVariant.installedImageUrl, caption: "Installed" });
-    comboUrls.forEach((u, i) => urls.push({ src: u, caption: `Combo ${i + 1}` }));
-    if (item.diagramUrl) urls.push({ src: item.diagramUrl, caption: "Diagram" });
-    (item.finishExampleUrls ?? []).forEach((u, i) => urls.push({ src: u, caption: `Finish ${i + 1}` }));
-    (item.gallery ?? []).forEach((u, i) => urls.push({ src: u, caption: `Gallery ${i + 1}` }));
-    return urls;
-  }, [hero, item, selectedVariant, comboUrls]);
+    const fromThumbs = loadedThumbs.map((t) => ({ src: t.url, caption: t.caption }));
+    if (fromThumbs.length > 0) return fromThumbs;
+    if (stageUrl) return [{ src: stageUrl, caption: "Product" }];
+    return [];
+  }, [loadedThumbs, stageUrl]);
 
-  const openZoom = (index: number) => {
+  const stageZoomIndex = useMemo(() => {
+    if (!stageUrl) return 0;
+    const idx = galleryItems.findIndex((g) => g.src === stageUrl);
+    return idx >= 0 ? idx : 0;
+  }, [galleryItems, stageUrl]);
+
+  const openZoom = (url?: string) => {
     if (galleryItems.length === 0) return;
-    setZoomIndex(index);
+    const idx = url ? galleryItems.findIndex((g) => g.src === url) : stageZoomIndex;
+    setZoomIndex(idx >= 0 ? idx : 0);
     setZoomOpen(true);
+  };
+
+  const selectFinish = (finishKey: string) => {
+    setSelectedFinishKey(finishKey);
+    setActiveThumbUrl(null);
   };
 
   const sourceDiffers =
@@ -319,19 +483,71 @@ function ProductCatalogModal({ item, onClose }: { item: ProductCatalogItem; onCl
           <button type="button" className="pc-modal-close" onClick={onClose} aria-label="Close">×</button>
 
           <div className="pc-modal-layout">
-            <div className="pc-modal-media">
-              {hasHero ? (
-                <button type="button" className="pc-modal-hero-btn" onClick={() => openZoom(0)} aria-label="Open image viewer">
-                  <img src={hero} alt={item.name} className="pc-modal-hero" onError={() => setImgFailed(true)} />
-                </button>
-              ) : (
-                <div className="pc-modal-placeholder" aria-hidden>
-                  {categoryPlaceholderIcon(item.category)}
-                  <span>{categoryPlaceholderLabel(item.category)}</span>
-                  <p className="pc-modal-placeholder-note">Asset pending — details available below.</p>
+            <div className="pc-modal-gallery">
+              <div className="pc-modal-stage">
+                {stageUrl ? (
+                  <button
+                    type="button"
+                    className="pc-modal-hero-btn"
+                    onClick={() => openZoom(stageUrl)}
+                    aria-label="Open image viewer"
+                  >
+                    <CatalogImage
+                      key={stageUrl}
+                      src={stageUrl}
+                      alt={selectedFinish ? `${item.name} — ${selectedFinish.label}` : item.name}
+                      className="pc-modal-hero"
+                      loading="eager"
+                      onLoaded={markLoaded}
+                      onFailed={markFailed}
+                    />
+                  </button>
+                ) : (
+                  <div className="pc-modal-placeholder" aria-hidden>
+                    {categoryPlaceholderIcon(item.category)}
+                    <span>{categoryPlaceholderLabel(item.category)}</span>
+                    <p className="pc-modal-placeholder-note">Asset pending — select a finish or check back after assets are collected.</p>
+                  </div>
+                )}
+
+                {/* Preload candidate thumbnails; hide failures without showing broken boxes */}
+                <div className="pc-modal-preload" aria-hidden>
+                  {stageThumbCandidates.map((t) => (
+                    <CatalogImage
+                      key={t.id}
+                      src={t.url}
+                      alt=""
+                      hidden={loaded.has(t.url) || failed.has(t.url)}
+                      onLoaded={markLoaded}
+                      onFailed={markFailed}
+                    />
+                  ))}
                 </div>
-              )}
-              <span className={`pc-asset-badge ${item.assetStatus}`}>{PRODUCT_CATALOG_ASSET_LABELS[item.assetStatus]}</span>
+              </div>
+
+              {loadedThumbs.length > 1 ? (
+                <div className="pc-modal-thumbs" aria-label="Product images">
+                  {loadedThumbs.map((t) => {
+                    const active = (activeThumbUrl ?? stageUrl) === t.url;
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        className={`pc-modal-thumb${active ? " active" : ""}`}
+                        onClick={() => setActiveThumbUrl(t.url)}
+                        aria-label={t.caption}
+                        aria-pressed={active}
+                      >
+                        <img src={t.url} alt="" className="pc-modal-thumb-img" />
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+
+              <span className={`pc-asset-badge ${displayAssetStatus}`}>
+                {PRODUCT_CATALOG_ASSET_LABELS[displayAssetStatus]}
+              </span>
             </div>
 
             <div className="pc-modal-info">
@@ -351,37 +567,67 @@ function ProductCatalogModal({ item, onClose }: { item: ProductCatalogItem; onCl
                 {item.sku ? <><dt>SKU / item #</dt><dd>{item.sku}</dd></> : null}
                 {item.esfCode && item.esfCode !== item.sku ? <><dt>ESF#</dt><dd>{item.esfCode}</dd></> : null}
                 {item.model ? <><dt>Model</dt><dd>{item.model}</dd></> : null}
-                {selectedVariant?.catalogNumber ? (
-                  <><dt>Catalog #</dt><dd>{selectedVariant.catalogNumber}</dd></>
+                {selectedFinish && selectedCatalogNumbers.length > 0 ? (
+                  <><dt>Catalog #</dt><dd>{selectedCatalogNumbers.join(", ")}</dd></>
                 ) : null}
                 <dt>Asset status</dt>
-                <dd>{PRODUCT_CATALOG_ASSET_LABELS[item.assetStatus]}</dd>
+                <dd>{PRODUCT_CATALOG_ASSET_LABELS[displayAssetStatus]}</dd>
               </dl>
 
-              {sourceDiffers ? (
-                <section className="pc-text-section">
-                  <h3 className="pc-section-title">Source name</h3>
-                  <p className="pc-body-text pc-source-text">{item.originalName}</p>
-                </section>
-              ) : null}
-
-              {item.variants && item.variants.length > 0 ? (
-                <section className="pc-variant-section" aria-label="Color and finish options">
-                  <h3 className="pc-section-title">Colors & finishes</h3>
-                  <div className="pc-variant-chips">
-                    {item.variants.map((v) => {
-                      const label = v.colorName || v.finishName || v.catalogNumber || "Option";
-                      const active = selectedVariant?.id === v.id;
+              {finishOptions.length > 0 ? (
+                <section className="pc-finish-section" aria-label="Color and finish options">
+                  <h3 className="pc-section-title">Color / finish</h3>
+                  {selectedFinish ? (
+                    <p className="pc-finish-selected">
+                      <strong>{selectedFinish.label}</strong>
+                      {selectedCatalogNumbers.length > 0 ? (
+                        <span className="pc-finish-catalog">Catalog {selectedCatalogNumbers.join(", ")}</span>
+                      ) : null}
+                    </p>
+                  ) : (
+                    <p className="pc-finish-hint">Select a finish to view variant imagery when available.</p>
+                  )}
+                  <div className="pc-finish-swatches">
+                    {finishOptions.map((opt) => {
+                      const active = selectedFinishKey === opt.key;
+                      const swatchImage =
+                        opt.imageUrl && loaded.has(opt.imageUrl) && isUsable(opt.imageUrl)
+                          ? opt.imageUrl
+                          : undefined;
                       return (
                         <button
-                          key={v.id}
+                          key={opt.key}
                           type="button"
-                          className={`pc-variant-chip${active ? " active" : ""}`}
-                          onClick={() => { setSelectedVariant(v); setImgFailed(false); }}
+                          className={`pc-finish-swatch${active ? " active" : ""}`}
+                          onClick={() => selectFinish(opt.key)}
                           aria-pressed={active}
+                          aria-label={opt.label}
                         >
-                          {label}
-                          {v.catalogNumber ? <span className="pc-variant-sku">{v.catalogNumber}</span> : null}
+                          <span
+                            className="pc-finish-swatch-dot"
+                            style={
+                              swatchImage
+                                ? { backgroundImage: `url(${swatchImage})` }
+                                : opt.swatchColor
+                                  ? { backgroundColor: opt.swatchColor }
+                                  : undefined
+                            }
+                          >
+                            {!swatchImage && !opt.swatchColor ? (
+                              <span className="pc-finish-swatch-fallback" aria-hidden />
+                            ) : null}
+                            {opt.imageUrl && !swatchImage ? (
+                              <CatalogImage
+                                src={opt.imageUrl}
+                                alt=""
+                                className="pc-finish-swatch-preload"
+                                hidden={loaded.has(opt.imageUrl) || failed.has(opt.imageUrl)}
+                                onLoaded={markLoaded}
+                                onFailed={markFailed}
+                              />
+                            ) : null}
+                          </span>
+                          <span className="pc-finish-swatch-label">{opt.label}</span>
                         </button>
                       );
                     })}
@@ -395,6 +641,13 @@ function ProductCatalogModal({ item, onClose }: { item: ProductCatalogItem; onCl
                       <span key={c} className="pc-variant-chip static">{c}</span>
                     ))}
                   </div>
+                </section>
+              ) : null}
+
+              {sourceDiffers ? (
+                <section className="pc-text-section">
+                  <h3 className="pc-section-title">Source name</h3>
+                  <p className="pc-body-text pc-source-text">{item.originalName}</p>
                 </section>
               ) : null}
 
@@ -412,22 +665,6 @@ function ProductCatalogModal({ item, onClose }: { item: ProductCatalogItem; onCl
                 </section>
               ) : null}
 
-              {item.installedImageUrl || selectedVariant?.installedImageUrl ? (
-                <ProductImageSection title="Installed picture" urls={[selectedVariant?.installedImageUrl || item.installedImageUrl!]} onOpen={openZoom} galleryOffset={hero ? 1 : 0} />
-              ) : null}
-
-              {comboUrls.length > 0 ? (
-                <ProductImageSection title="Combo photos" urls={comboUrls} onOpen={openZoom} />
-              ) : null}
-
-              {item.diagramUrl ? (
-                <ProductImageSection title="Diagram" urls={[item.diagramUrl]} onOpen={openZoom} />
-              ) : null}
-
-              {(item.finishExampleUrls?.length ?? 0) > 0 ? (
-                <ProductImageSection title="Finish examples" urls={item.finishExampleUrls!} onOpen={openZoom} />
-              ) : null}
-
               {item.specSheetUrl ? (
                 <section className="pc-text-section">
                   <h3 className="pc-section-title">Spec sheet</h3>
@@ -439,10 +676,7 @@ function ProductCatalogModal({ item, onClose }: { item: ProductCatalogItem; onCl
                 <p className="pc-source-note">Workbook: {item.sourceSheet}</p>
               ) : null}
               {item.assetSourceNotes ? (
-                <section className="pc-text-section">
-                  <h3 className="pc-section-title">Asset source</h3>
-                  <p className="pc-body-text">{item.assetSourceNotes}</p>
-                </section>
+                <p className="pc-source-note pc-asset-source-note">{item.assetSourceNotes}</p>
               ) : null}
             </div>
           </div>
@@ -457,31 +691,5 @@ function ProductCatalogModal({ item, onClose }: { item: ProductCatalogItem; onCl
         />
       ) : null}
     </>
-  );
-}
-
-function ProductImageSection({
-  title,
-  urls,
-  onOpen,
-  galleryOffset = 0,
-}: {
-  title: string;
-  urls: string[];
-  onOpen: (index: number) => void;
-  galleryOffset?: number;
-}) {
-  if (!urls.length) return null;
-  return (
-    <section className="pc-gallery-section">
-      <h3 className="pc-section-title">{title}</h3>
-      <div className="pc-thumb-grid">
-        {urls.map((url, i) => (
-          <button key={url + i} type="button" className="pc-thumb-btn" onClick={() => onOpen(galleryOffset + i)} aria-label={`${title} ${i + 1}`}>
-            <img src={url} alt="" loading="lazy" className="pc-thumb" />
-          </button>
-        ))}
-      </div>
-    </section>
   );
 }
