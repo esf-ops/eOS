@@ -5,6 +5,7 @@ import { getSupabase } from "./lib/supabase";
 import EliteosTopbar from "../../shared/eliteos-ui/EliteosTopbar";
 import { ZoomImageViewer, type ZoomGalleryItem } from "./ZoomImageViewer";
 import { lookupElite100Texture } from "./lib/elite100TextureAssets";
+import { MaterialPhotoVisualizer } from "./MaterialPhotoVisualizer";
 
 /* ─────────────────────────────────────────── types */
 
@@ -194,7 +195,7 @@ type ImageViewerState = {
   initialIndex: number;
 } | null;
 
-type MainTab = "elite100" | "non_stock" | "all_inventory";
+type MainTab = "elite100" | "non_stock" | "all_inventory" | "visualizer";
 
 /* ─────────────────────────────────────────── constants */
 
@@ -774,6 +775,14 @@ export default function SlabInventoryApp() {
               >
                 All Inventory
               </button>
+              <button
+                type="button"
+                className={`tab-btn${activeTab === "visualizer" ? " active" : ""}`}
+                onClick={() => setActiveTab("visualizer")}
+                aria-selected={activeTab === "visualizer"}
+              >
+                Photo Visualizer
+              </button>
             </nav>
 
             {notInstalled ? (
@@ -896,6 +905,11 @@ export default function SlabInventoryApp() {
                   </>
                 )}
               </div>
+            ) : null}
+
+            {/* ── Photo Visualizer tab (client-side prototype) ── */}
+            {activeTab === "visualizer" ? (
+              <MaterialPhotoVisualizer />
             ) : null}
 
             {/* ── All Inventory tab ── */}

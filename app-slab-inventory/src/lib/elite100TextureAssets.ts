@@ -120,6 +120,11 @@ function normalizeSlug(value: string | null | undefined): string {
     .replace(/^-|-$/g, "");
 }
 
+/** All static pilot textures (read-only) — for visualizer pickers and similar UIs. */
+export function listElite100TextureAssets(): readonly Elite100TextureAsset[] {
+  return ELITE100_TEXTURE_PILOT;
+}
+
 /** Resolve a static pilot texture by color name and/or catalog color_key slug. */
 export function lookupElite100Texture(
   colorName: string | null | undefined,
