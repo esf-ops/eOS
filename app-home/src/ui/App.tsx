@@ -1066,13 +1066,6 @@ export default function App() {
   return (
     <div className={`shell${showShell ? " shell-signed-in" : " shell-signed-out"}`}>
       {showShell ? (
-        <div className="shell-orbs" aria-hidden>
-          <span className="shell-orb shell-orb-warm" />
-          <span className="shell-orb shell-orb-stone" />
-          <span className="shell-orb shell-orb-maroon" />
-        </div>
-      ) : null}
-      {showShell ? (
         <EliteosTopbar
           organizationName={workspaceName}
           logoSrc={workspaceLogoUrl}
@@ -1330,11 +1323,17 @@ export default function App() {
                 <div className="card-grid card-grid-available" aria-hidden>
                   {[0, 1, 2, 3].map((i) => (
                     <div key={i} className="head-card head-card-available skeleton-card">
-                      <div className="skel skel-icon" />
-                      <div className="skel skel-title" />
-                      <div className="skel skel-line" />
-                      <div className="skel skel-line skel-line-short" />
-                      <div className="skel skel-btn" />
+                      <div className="head-card-top">
+                        <div className="skel skel-icon" />
+                      </div>
+                      <div className="head-card-body">
+                        <div className="skel skel-title" />
+                        <div className="skel skel-line" />
+                        <div className="skel skel-line skel-line-short" />
+                      </div>
+                      <div className="head-card-actions">
+                        <div className="skel skel-btn" />
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1384,6 +1383,7 @@ export default function App() {
                   key={section}
                   className={`launcher-section${roadmapSection ? " launcher-section-roadmap" : " launcher-section-available"}`}
                   aria-label={section}
+                  style={{ "--section-delay": roadmapSection ? "180ms" : "40ms" } as React.CSSProperties}
                 >
                   <div
                     className="section-head"
@@ -1447,28 +1447,32 @@ export default function App() {
                               ))}
                             </div>
                           </div>
-                          <p className="head-card-eyebrow">{headCategoryFor(h.slug)}</p>
-                          <h3 className="head-card-title">{cardTitle}</h3>
-                          <p className={roadmapSection ? "desc desc-roadmap" : "desc"}>{h.description}</p>
-                          {showUrl && url ? (
-                            <p className="url-subtle" title={url}>
-                              {url}
-                            </p>
-                          ) : null}
-                          {canNavigate ? (
-                            <button type="button" className="btn btn-open head-open-btn" onClick={openHead}>
-                              <span>{openLabel}</span>
-                              <ArrowOut />
-                            </button>
-                          ) : null}
-                          {!canNavigate && !roadmapSection ? (
-                            <p className="card-foot muted-note">
-                              {url ? "Ask your admin for access to open this tool." : null}
-                            </p>
-                          ) : null}
-                          {roadmapSection ? (
-                            <p className="card-foot muted-note">On the roadmap — not available to open yet.</p>
-                          ) : null}
+                          <div className="head-card-body">
+                            <p className="head-card-eyebrow">{headCategoryFor(h.slug)}</p>
+                            <h3 className="head-card-title">{cardTitle}</h3>
+                            <p className={roadmapSection ? "desc desc-roadmap" : "desc"}>{h.description}</p>
+                            {showUrl && url ? (
+                              <p className="url-subtle" title={url}>
+                                {url}
+                              </p>
+                            ) : null}
+                          </div>
+                          <div className="head-card-actions">
+                            {canNavigate ? (
+                              <button type="button" className="btn btn-open head-open-btn" onClick={openHead}>
+                                <span>{openLabel}</span>
+                                <ArrowOut />
+                              </button>
+                            ) : null}
+                            {!canNavigate && !roadmapSection ? (
+                              <p className="card-foot muted-note">
+                                {url ? "Ask your admin for access to open this tool." : null}
+                              </p>
+                            ) : null}
+                            {roadmapSection ? (
+                              <p className="card-foot muted-note">On the roadmap — not available to open yet.</p>
+                            ) : null}
+                          </div>
                         </article>
                       );
                     })}
