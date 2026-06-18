@@ -49,6 +49,10 @@ export type ProductCatalogItem = {
   diagramUrl?: string;
   finishExampleUrls?: string[];
   specSheetUrl?: string;
+  /** Finish slug → public URL (from asset overrides). */
+  finishImageUrls?: Record<string, string>;
+  /** Default finish slug for modal selection (hero stays `imageUrl`). */
+  defaultFinishKey?: string;
   assetStatus: ProductCatalogAssetStatus;
   /** Curated asset collection notes from productCatalogAssets.ts (not generated workbook). */
   assetSourceNotes?: string;
@@ -90,20 +94,33 @@ export const PRODUCT_CATALOG_ASSET_LABELS: Record<ProductCatalogAssetStatus, str
   complete: "Assets complete",
 };
 
-/** Best hero image for a product (variant override optional). */
+/** Best hero image for a product (variant/finish override optional). Never uses installed shots. */
 export function productCatalogHeroImage(
   item: ProductCatalogItem,
-  variant?: ProductCatalogVariant | null
+  variant?: ProductCatalogVariant | null,
+  finishKey?: string | null
 ): string | undefined {
+  if (finishKey) {
+    const finishImage = getFinishImageForFinish(item, finishKey);
+    if (finishImage) return finishImage;
+  }
   return (
     variant?.imageUrl ||
-    variant?.installedImageUrl ||
     item.imageUrl ||
-    item.installedImageUrl ||
     item.gallery?.[0] ||
     item.comboPhotoUrls?.[0] ||
     item.variants?.find((v) => v.imageUrl)?.imageUrl
   );
+}
+
+/** Slug key for finish/color labels — matches public asset filenames (e.g. cafe-brown). */
+export function finishKeyFromLabel(name: string): string {
+  return String(name)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
 }
 
 /** Normalize finish/color names for grouping duplicate variant rows. */
@@ -117,7 +134,7 @@ export function normalizeFinishName(name: string): string {
 }
 
 export type ProductCatalogFinishOption = {
-  /** Stable key from normalizeFinishName(label) */
+  /** Stable slug key (finishKeyFromLabel) for finishImageUrls lookup */
   key: string;
   label: string;
   variantIds: string[];
@@ -134,24 +151,30 @@ export function getUniqueFinishOptions(item: ProductCatalogItem): ProductCatalog
 
   for (const v of item.variants) {
     const raw = v.colorName || v.finishName;
-    const key = raw ? normalizeFinishName(raw) : v.catalogNumber ? `cat-${v.catalogNumber}` : v.id;
+    const groupKey = raw ? normalizeFinishName(raw) : v.catalogNumber ? `cat-${v.catalogNumber}` : v.id;
+    const slugKey = raw ? finishKeyFromLabel(raw) : v.catalogNumber ? `cat-${v.catalogNumber}` : v.id;
     const label = raw || v.catalogNumber || "Option";
 
-    const existing = map.get(key);
+    const finishOverrideUrl = item.finishImageUrls?.[slugKey];
+    const variantUrl = v.imageUrl;
+
+    const existing = map.get(groupKey);
     if (existing) {
       existing.variantIds.push(v.id);
       if (v.catalogNumber && !existing.catalogNumbers.includes(v.catalogNumber)) {
         existing.catalogNumbers.push(v.catalogNumber);
       }
-      if (!existing.imageUrl && v.imageUrl) existing.imageUrl = v.imageUrl;
+      if (!existing.imageUrl) {
+        existing.imageUrl = finishOverrideUrl ?? variantUrl;
+      }
       if (!existing.swatchColor && v.swatchColor) existing.swatchColor = v.swatchColor;
     } else {
-      map.set(key, {
-        key,
+      map.set(groupKey, {
+        key: slugKey,
         label,
         variantIds: [v.id],
         catalogNumbers: v.catalogNumber ? [v.catalogNumber] : [],
-        imageUrl: v.imageUrl,
+        imageUrl: finishOverrideUrl ?? variantUrl,
         swatchColor: v.swatchColor,
       });
     }
@@ -160,25 +183,40 @@ export function getUniqueFinishOptions(item: ProductCatalogItem): ProductCatalog
   return Array.from(map.values());
 }
 
-/** Variant image for a grouped finish, if any variant in the group has one. */
-export function getVariantImageForFinish(
+/**
+ * Finish image resolution priority:
+ * 1. finishImageUrls[finishKey]
+ * 2. variant imageUrl for matching finish group
+ * 3. undefined (caller may fall back to product imageUrl)
+ */
+export function getFinishImageForFinish(
   item: ProductCatalogItem,
   finishKey: string
 ): string | undefined {
+  if (item.finishImageUrls?.[finishKey]) return item.finishImageUrls[finishKey];
+
   const option = getUniqueFinishOptions(item).find((o) => o.key === finishKey);
   if (option?.imageUrl) return option.imageUrl;
 
   const variants =
     item.variants?.filter((v) => {
       const raw = v.colorName || v.finishName;
-      const key = raw ? normalizeFinishName(raw) : v.catalogNumber ? `cat-${v.catalogNumber}` : v.id;
-      return key === finishKey;
+      const slugKey = raw ? finishKeyFromLabel(raw) : v.catalogNumber ? `cat-${v.catalogNumber}` : v.id;
+      return slugKey === finishKey;
     }) ?? [];
 
   for (const v of variants) {
     if (v.imageUrl) return v.imageUrl;
   }
   return undefined;
+}
+
+/** @deprecated Use getFinishImageForFinish — kept for call-site compatibility. */
+export function getVariantImageForFinish(
+  item: ProductCatalogItem,
+  finishKey: string
+): string | undefined {
+  return getFinishImageForFinish(item, finishKey);
 }
 
 export function getCatalogNumbersForFinish(
@@ -198,6 +236,7 @@ export function productCatalogImageUrls(item: ProductCatalogItem): string[] {
   add(item.imageUrl);
   add(item.installedImageUrl);
   add(item.diagramUrl);
+  Object.values(item.finishImageUrls ?? {}).forEach(add);
   (item.gallery ?? []).forEach(add);
   (item.comboPhotoUrls ?? []).forEach(add);
   (item.finishExampleUrls ?? []).forEach(add);
@@ -227,14 +266,16 @@ export function productCatalogDisplayAssetStatus(
   }
 
   const heroLoaded = Boolean(item.imageUrl && loaded.has(item.imageUrl));
-  const finishLoaded = (item.variants ?? []).some((v) => v.imageUrl && loaded.has(v.imageUrl));
+  const finishLoaded =
+    Object.values(item.finishImageUrls ?? {}).some((u) => loaded.has(u)) ||
+    (item.variants ?? []).some((v) => v.imageUrl && loaded.has(v.imageUrl));
   const diagramLoaded = Boolean(item.diagramUrl && loaded.has(item.diagramUrl));
   const installedLoaded = Boolean(item.installedImageUrl && loaded.has(item.installedImageUrl));
   const galleryLoaded =
     (item.gallery ?? []).some((u) => loaded.has(u)) ||
     (item.comboPhotoUrls ?? []).some((u) => loaded.has(u));
 
-  if ((heroLoaded || finishLoaded) && (diagramLoaded || installedLoaded || galleryLoaded || item.specSheetUrl)) {
+  if ((heroLoaded || finishLoaded) && (item.specSheetUrl || installedLoaded || diagramLoaded || galleryLoaded)) {
     return "complete";
   }
 

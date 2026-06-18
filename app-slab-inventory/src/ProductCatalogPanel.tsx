@@ -7,8 +7,8 @@ import {
   PRODUCT_CATALOG_TABS,
   filterProductCatalogItems,
   getCatalogNumbersForFinish,
+  getFinishImageForFinish,
   getUniqueFinishOptions,
-  getVariantImageForFinish,
   productCatalogCountForCategory,
   productCatalogCounts,
   productCatalogDisplayAssetStatus,
@@ -175,7 +175,7 @@ function buildStageThumbs(
   if (selectedFinishKey) {
     push(
       `finish-${selectedFinishKey}`,
-      getVariantImageForFinish(item, selectedFinishKey),
+      getFinishImageForFinish(item, selectedFinishKey),
       finishOptions.find((o) => o.key === selectedFinishKey)?.label ?? "Finish"
     );
   } else {
@@ -202,7 +202,7 @@ function resolveStageUrl(
   if (activeThumbUrl && isUsable(activeThumbUrl)) return activeThumbUrl;
 
   if (selectedFinishKey) {
-    const finishImage = getVariantImageForFinish(item, selectedFinishKey);
+    const finishImage = getFinishImageForFinish(item, selectedFinishKey);
     if (isUsable(finishImage)) return finishImage;
   }
 

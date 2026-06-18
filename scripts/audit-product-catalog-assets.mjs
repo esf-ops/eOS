@@ -109,6 +109,22 @@ function parseOverridesFromTs(content) {
       }
     }
 
+    const finishBlock = chunk.match(/finishImageUrls:\s*\{([\s\S]*?)\}/);
+    if (finishBlock) {
+      for (const m of finishBlock[1].matchAll(/"?([^":\s]+)"?:\s*`([^`]+)`/g)) {
+        (override.assets ||= []).push({ assetType: "finish", variantId: m[1], url: m[2] });
+      }
+    }
+
+    const defaultFinish = chunk.match(/defaultFinishKey:\s*"([^"]+)"/)?.[1];
+    if (defaultFinish) {
+      (override.assets ||= []).push({
+        assetType: "default_finish_key",
+        variantId: defaultFinish,
+        url: "",
+      });
+    }
+
     overrides.push(override);
   }
 
@@ -130,8 +146,9 @@ function buildRows(overrides) {
   const rows = [];
   for (const o of overrides) {
     for (const asset of o.assets || []) {
+      if (asset.assetType === "default_finish_key") continue;
       const localPath = publicUrlToLocalPath(asset.url);
-      const exists = fs.existsSync(localPath);
+      const exists = asset.url ? fs.existsSync(localPath) : false;
       rows.push({
         productId: o.productId,
         assetType: asset.assetType,
