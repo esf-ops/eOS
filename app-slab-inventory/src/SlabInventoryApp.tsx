@@ -6,6 +6,7 @@ import EliteosTopbar from "../../shared/eliteos-ui/EliteosTopbar";
 import { ZoomImageViewer, type ZoomGalleryItem } from "./ZoomImageViewer";
 import { lookupElite100Texture } from "./lib/elite100TextureAssets";
 import { MaterialPhotoVisualizer } from "./MaterialPhotoVisualizer";
+import ProductCatalogPanel from "./ProductCatalogPanel";
 
 /* ─────────────────────────────────────────── types */
 
@@ -195,7 +196,7 @@ type ImageViewerState = {
   initialIndex: number;
 } | null;
 
-type MainTab = "elite100" | "non_stock" | "all_inventory" | "visualizer";
+type MainTab = "elite100" | "non_stock" | "all_inventory" | "visualizer" | "product_catalog";
 
 /* ─────────────────────────────────────────── constants */
 
@@ -783,6 +784,14 @@ export default function SlabInventoryApp() {
               >
                 Photo Visualizer
               </button>
+              <button
+                type="button"
+                className={`tab-btn${activeTab === "product_catalog" ? " active" : ""}`}
+                onClick={() => setActiveTab("product_catalog")}
+                aria-selected={activeTab === "product_catalog"}
+              >
+                Product Catalog
+              </button>
             </nav>
 
             {notInstalled ? (
@@ -910,6 +919,11 @@ export default function SlabInventoryApp() {
             {/* ── Photo Visualizer tab (client-side prototype) ── */}
             {activeTab === "visualizer" ? (
               <MaterialPhotoVisualizer />
+            ) : null}
+
+            {/* ── Product Catalog tab (display-only, static data) ── */}
+            {activeTab === "product_catalog" ? (
+              <ProductCatalogPanel />
             ) : null}
 
             {/* ── All Inventory tab ── */}

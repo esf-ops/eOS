@@ -39,3 +39,4 @@ debug/slabsmith/source-samples/
 
 # Local Cursor/agent skill files
 .agents/
+_local/
