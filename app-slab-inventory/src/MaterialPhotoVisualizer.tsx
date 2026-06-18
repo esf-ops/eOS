@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import {
   listElite100TextureAssets,
   type Elite100TextureAsset,
@@ -6,6 +6,7 @@ import {
 
 type NormPoint = { nx: number; ny: number };
 type TextureRenderMode = "cover" | "repeat";
+type WorkspaceMode = "drawing" | "editing" | "preview";
 
 type MaskSettings = {
   textureSlug: string;
@@ -13,12 +14,14 @@ type MaskSettings = {
   textureMode: TextureRenderMode;
   textureScale: number;
   textureRotation: number;
+  feather: number;
 };
 
 export type VisualizerMask = {
   id: string;
   label: string;
   points: NormPoint[];
+  visible: boolean;
 } & MaskSettings;
 
 type SceneInput = {
@@ -29,11 +32,13 @@ type SceneInput = {
   isDrawing: boolean;
   activeMaskId: string | null;
   showMaskOutlines: boolean;
+  renderTextures: boolean;
 };
 
 const RENDER_TEXTURE_CACHE = new Map<string, HTMLImageElement>();
 const COVER_SCALE_DEFAULT = 1;
 const REPEAT_SCALE_DEFAULT = 0.55;
+const DEFAULT_FEATHER = 6;
 const LABEL_PRESETS = ["Countertop 1", "Countertop 2", "Island", "Backsplash"];
 
 function defaultLabelForIndex(index: number): string {
@@ -48,6 +53,7 @@ function defaultMaskSettings(textures: readonly Elite100TextureAsset[]): MaskSet
     textureMode: "cover",
     textureScale: COVER_SCALE_DEFAULT,
     textureRotation: 0,
+    feather: DEFAULT_FEATHER,
   };
 }
 
@@ -58,6 +64,17 @@ function maskToSettings(mask: VisualizerMask): MaskSettings {
     textureMode: mask.textureMode,
     textureScale: mask.textureScale,
     textureRotation: mask.textureRotation,
+    feather: mask.feather,
+  };
+}
+
+function cloneMask(mask: VisualizerMask): VisualizerMask {
+  return {
+    ...mask,
+    id: crypto.randomUUID(),
+    label: `${mask.label} copy`,
+    points: mask.points.map((p) => ({ ...p })),
+    visible: true,
   };
 }
 
@@ -122,13 +139,17 @@ function polygonBounds(points: { x: number; y: number }[]) {
   return { minX, minY, maxX, maxY, w: maxX - minX, h: maxY - minY };
 }
 
-function clipToPolygon(ctx: CanvasRenderingContext2D, pixelPoints: { x: number; y: number }[]) {
-  ctx.beginPath();
+function tracePolygonPath(ctx: CanvasRenderingContext2D, pixelPoints: { x: number; y: number }[]) {
   pixelPoints.forEach((p, i) => {
     if (i === 0) ctx.moveTo(p.x, p.y);
     else ctx.lineTo(p.x, p.y);
   });
   ctx.closePath();
+}
+
+function clipToPolygon(ctx: CanvasRenderingContext2D, pixelPoints: { x: number; y: number }[]) {
+  ctx.beginPath();
+  tracePolygonPath(ctx, pixelPoints);
   ctx.clip();
 }
 
@@ -136,7 +157,6 @@ function drawCoverTexture(
   ctx: CanvasRenderingContext2D,
   texture: HTMLImageElement,
   pixelPoints: { x: number; y: number }[],
-  opacity: number,
   scale: number,
   rotationDeg: number,
 ) {
@@ -152,7 +172,6 @@ function drawCoverTexture(
   const drawH = texH * coverScale;
 
   ctx.save();
-  ctx.globalAlpha = opacity;
   ctx.translate(centerX, centerY);
   ctx.rotate((rotationDeg * Math.PI) / 180);
   ctx.drawImage(texture, -drawW / 2, -drawH / 2, drawW, drawH);
@@ -165,7 +184,6 @@ function drawRepeatTexture(
   pixelPoints: { x: number; y: number }[],
   canvasW: number,
   canvasH: number,
-  opacity: number,
   scale: number,
   rotationDeg: number,
 ) {
@@ -183,7 +201,6 @@ function drawRepeatTexture(
   const coverH = Math.max(bounds.h, canvasH) * 1.75;
 
   ctx.save();
-  ctx.globalAlpha = opacity;
   ctx.translate(center.x, center.y);
   ctx.rotate((rotationDeg * Math.PI) / 180);
   ctx.translate(-center.x, -center.y);
@@ -196,28 +213,16 @@ function drawRepeatTexture(
   ctx.restore();
 }
 
-function drawMaskedTexture(
+function drawTextureFill(
   ctx: CanvasRenderingContext2D,
   width: number,
   height: number,
-  points: NormPoint[],
+  pixelPoints: { x: number; y: number }[],
   texture: HTMLImageElement,
   settings: MaskSettings,
 ) {
-  if (points.length < 3) return;
-  const pixelPoints = toPixelPoints(points, width, height);
-  ctx.save();
-  clipToPolygon(ctx, pixelPoints);
-
   if (settings.textureMode === "cover") {
-    drawCoverTexture(
-      ctx,
-      texture,
-      pixelPoints,
-      settings.opacity,
-      settings.textureScale,
-      settings.textureRotation,
-    );
+    drawCoverTexture(ctx, texture, pixelPoints, settings.textureScale, settings.textureRotation);
   } else {
     drawRepeatTexture(
       ctx,
@@ -225,11 +230,67 @@ function drawMaskedTexture(
       pixelPoints,
       width,
       height,
-      settings.opacity,
       settings.textureScale,
       settings.textureRotation,
     );
   }
+}
+
+function drawMaskLayer(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  mask: VisualizerMask,
+  texture: HTMLImageElement,
+) {
+  if (mask.points.length < 3) return;
+  const pixelPoints = toPixelPoints(mask.points, width, height);
+  const feather = Math.max(0, mask.feather);
+
+  const texCanvas = document.createElement("canvas");
+  texCanvas.width = width;
+  texCanvas.height = height;
+  const texCtx = texCanvas.getContext("2d");
+  if (!texCtx) return;
+  configureCanvasContext(texCtx);
+  texCtx.save();
+  clipToPolygon(texCtx, pixelPoints);
+  drawTextureFill(texCtx, width, height, pixelPoints, texture, mask);
+  texCtx.restore();
+
+  if (feather <= 0) {
+    ctx.save();
+    ctx.globalAlpha = mask.opacity;
+    ctx.drawImage(texCanvas, 0, 0);
+    ctx.restore();
+    return;
+  }
+
+  const maskCanvas = document.createElement("canvas");
+  maskCanvas.width = width;
+  maskCanvas.height = height;
+  const maskCtx = maskCanvas.getContext("2d");
+  if (!maskCtx) return;
+  maskCtx.fillStyle = "#ffffff";
+  maskCtx.beginPath();
+  tracePolygonPath(maskCtx, pixelPoints);
+  maskCtx.fill();
+
+  const alphaCanvas = document.createElement("canvas");
+  alphaCanvas.width = width;
+  alphaCanvas.height = height;
+  const alphaCtx = alphaCanvas.getContext("2d");
+  if (!alphaCtx) return;
+  alphaCtx.filter = `blur(${feather}px)`;
+  alphaCtx.drawImage(maskCanvas, 0, 0);
+  alphaCtx.filter = "none";
+
+  ctx.save();
+  ctx.globalAlpha = mask.opacity;
+  ctx.drawImage(texCanvas, 0, 0);
+  ctx.globalCompositeOperation = "destination-in";
+  ctx.drawImage(alphaCanvas, 0, 0);
+  ctx.globalCompositeOperation = "source-over";
   ctx.restore();
 }
 
@@ -238,13 +299,18 @@ function drawPolygonOutline(
   points: NormPoint[],
   width: number,
   height: number,
-  opts: { active: boolean; closed: boolean; label?: string },
+  opts: { active: boolean; closed: boolean; label?: string; dimmed?: boolean },
 ) {
   const pixelPoints = toPixelPoints(points, width, height);
   if (pixelPoints.length === 0) return;
 
   ctx.save();
-  ctx.strokeStyle = opts.active ? "rgba(163, 19, 47, 0.95)" : "rgba(15, 23, 42, 0.45)";
+  const dimmed = opts.dimmed ?? false;
+  ctx.strokeStyle = opts.active
+    ? "rgba(163, 19, 47, 0.95)"
+    : dimmed
+      ? "rgba(15, 23, 42, 0.22)"
+      : "rgba(15, 23, 42, 0.45)";
   ctx.lineWidth = opts.active ? Math.max(2, width / 500) : Math.max(1.5, width / 700);
   ctx.setLineDash(opts.closed ? [] : [8, 6]);
   ctx.beginPath();
@@ -296,25 +362,29 @@ function renderScene(
     isDrawing,
     activeMaskId,
     showMaskOutlines,
+    renderTextures,
   } = input;
 
   ctx.clearRect(0, 0, width, height);
   ctx.drawImage(photo, 0, 0, width, height);
 
-  for (const mask of masks) {
-    const texture = textureImages.get(mask.textureSlug);
-    if (texture) {
-      drawMaskedTexture(ctx, width, height, mask.points, texture, mask);
+  if (renderTextures) {
+    for (const mask of masks) {
+      if (!mask.visible) continue;
+      const texture = textureImages.get(mask.textureSlug);
+      if (texture) drawMaskLayer(ctx, width, height, mask, texture);
     }
   }
 
   if (showMaskOutlines) {
     for (const mask of masks) {
+      if (!mask.visible) continue;
       const isActive = mask.id === activeMaskId && !isDrawing;
       drawPolygonOutline(ctx, mask.points, width, height, {
         active: isActive,
         closed: true,
         label: isActive ? mask.label : undefined,
+        dimmed: !isActive,
       });
     }
   }
@@ -340,11 +410,26 @@ function fitCanvasSize(
   };
 }
 
+function exportFilename(masks: VisualizerMask[], textures: readonly Elite100TextureAsset[]): string {
+  const visible = masks.filter((mask) => mask.visible);
+  const primary = textures.find((t) => t.slug === visible[0]?.textureSlug);
+  const slug = primary?.slug ?? "preview";
+  const date = new Date().toISOString().slice(0, 10);
+  return `eliteos-visualizer-${slug}-${date}.jpg`;
+}
+
+function workspaceModeLabel(mode: WorkspaceMode): string {
+  if (mode === "drawing") return "Drawing";
+  if (mode === "editing") return "Editing";
+  return "Preview";
+}
+
 export function MaterialPhotoVisualizer() {
   const textures = useMemo(() => listElite100TextureAssets(), []);
   const workspaceRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const replaceInputRef = useRef<HTMLInputElement>(null);
 
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [photoImage, setPhotoImage] = useState<HTMLImageElement | null>(null);
@@ -357,11 +442,24 @@ export function MaterialPhotoVisualizer() {
   const [textureImages, setTextureImages] = useState<Map<string, HTMLImageElement>>(new Map());
   const [textureLoadError, setTextureLoadError] = useState<string | null>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
+  const [showBefore, setShowBefore] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
 
   const activeMask = useMemo(
     () => masks.find((mask) => mask.id === activeMaskId) ?? null,
     [masks, activeMaskId],
   );
+
+  const visibleMasks = useMemo(
+    () => masks.filter((mask) => mask.visible),
+    [masks],
+  );
+
+  const workspaceMode: WorkspaceMode = useMemo(() => {
+    if (isDrawing) return "drawing";
+    if (activeMaskId) return "editing";
+    return "preview";
+  }, [isDrawing, activeMaskId]);
 
   const controlSettings = useMemo(() => {
     if (activeMask && !isDrawing) return maskToSettings(activeMask);
@@ -388,15 +486,17 @@ export function MaterialPhotoVisualizer() {
 
   const statusHint = useMemo(() => {
     if (!photoImage) return "Upload a kitchen photo to begin.";
+    if (showBefore) return "Before view — original photo only. Toggle After to see stone overlays.";
     if (isDrawing) {
-      if (draftPoints.length === 0) return `Drawing ${draftLabel}. Click around the surface to mark points.`;
-      if (draftPoints.length < 3) return `Drawing ${draftLabel}. Add at least 3 points, then complete the mask.`;
-      return `Drawing ${draftLabel}. Complete the mask or add more points.`;
+      if (draftPoints.length === 0) return `Drawing ${draftLabel}. Click around the countertop edge.`;
+      if (draftPoints.length < 3) return `Drawing ${draftLabel}. Add at least 3 points, then complete the surface.`;
+      return `Drawing ${draftLabel}. Complete when the outline looks right, or undo a point.`;
     }
-    if (masks.length === 0) return "Click Add mask to mark your first countertop zone.";
-    if (activeMask) return `Select material and blend for ${activeMask.label}, or add another mask.`;
-    return `${masks.length} mask${masks.length !== 1 ? "s" : ""} completed. Select a mask to adjust material and blend.`;
-  }, [photoImage, isDrawing, draftPoints.length, draftLabel, masks.length, activeMask]);
+    if (visibleMasks.length === 0 && masks.length > 0) return "All surfaces are hidden. Show a surface to preview stone.";
+    if (masks.length === 0) return "Add a surface to mark your first countertop zone.";
+    if (activeMask) return `Editing ${activeMask.label}. Adjust material, blend, and edge softness.`;
+    return `${visibleMasks.length} visible surface${visibleMasks.length !== 1 ? "s" : ""}. Select a zone to edit.`;
+  }, [photoImage, showBefore, isDrawing, draftPoints.length, draftLabel, masks.length, visibleMasks.length, activeMask]);
 
   const applySettings = useCallback((patch: Partial<MaskSettings>) => {
     if (isDrawing || !activeMaskId) {
@@ -417,13 +517,14 @@ export function MaterialPhotoVisualizer() {
     setActiveMaskId(null);
     setDraftPoints([]);
     setIsDrawing(true);
+    setShowBefore(false);
     setDefaultSettings(defaultMaskSettings(textures));
   }, [textures]);
 
   const handleUpload = useCallback(async (file: File | null) => {
     if (!file) return;
     if (!file.type.startsWith("image/")) {
-      setPhotoError("Please choose an image file (JPEG, PNG, etc.).");
+      setPhotoError("Please choose a JPG or PNG kitchen photo.");
       return;
     }
     setPhotoError(null);
@@ -443,6 +544,13 @@ export function MaterialPhotoVisualizer() {
       setPhotoUrl(null);
     }
   }, [revokePhotoUrl, resetMaskState]);
+
+  const handleDrop = useCallback((event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setDragOver(false);
+    const file = event.dataTransfer.files?.[0] ?? null;
+    void handleUpload(file);
+  }, [handleUpload]);
 
   useEffect(() => () => {
     revokePhotoUrl(photoUrl);
@@ -490,8 +598,8 @@ export function MaterialPhotoVisualizer() {
     const workspace = workspaceRef.current;
 
     const updateSize = () => {
-      const maxW = Math.max(280, workspace.clientWidth - 2);
-      const maxH = Math.max(240, Math.min(720, window.innerHeight * 0.58));
+      const maxW = Math.max(320, workspace.clientWidth - 32);
+      const maxH = Math.max(320, Math.min(780, window.innerHeight * 0.62));
       setCanvasSize(fitCanvasSize(photoImage.naturalWidth, photoImage.naturalHeight, maxW, maxH));
     };
 
@@ -510,9 +618,10 @@ export function MaterialPhotoVisualizer() {
       draftPoints,
       isDrawing,
       activeMaskId,
-      showMaskOutlines: isDrawing || activeMaskId !== null,
+      showMaskOutlines: !showBefore && (isDrawing || activeMaskId !== null),
+      renderTextures: !showBefore,
     };
-  }, [photoImage, masks, textureImages, draftPoints, isDrawing, activeMaskId]);
+  }, [photoImage, masks, textureImages, draftPoints, isDrawing, activeMaskId, showBefore]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -536,8 +645,21 @@ export function MaterialPhotoVisualizer() {
     renderScene(ctx, logicalW, logicalH, input);
   }, [photoImage, canvasSize, buildSceneInput]);
 
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || !isDrawing) return;
+      setDraftPoints([]);
+      if (masks.length > 0) {
+        setIsDrawing(false);
+        setActiveMaskId(masks[masks.length - 1]?.id ?? null);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [isDrawing, masks]);
+
   const handleCanvasClick = useCallback((event: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!photoImage || !isDrawing || canvasSize.width < 1) return;
+    if (!photoImage || !isDrawing || showBefore || canvasSize.width < 1) return;
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
     const x = ((event.clientX - rect.left) / rect.width) * canvasSize.width;
@@ -546,7 +668,7 @@ export function MaterialPhotoVisualizer() {
       ...prev,
       { nx: x / canvasSize.width, ny: y / canvasSize.height },
     ]);
-  }, [photoImage, isDrawing, canvasSize]);
+  }, [photoImage, isDrawing, showBefore, canvasSize]);
 
   const completeMask = useCallback(() => {
     if (draftPoints.length < 3) return;
@@ -554,6 +676,7 @@ export function MaterialPhotoVisualizer() {
       id: crypto.randomUUID(),
       label: draftLabel,
       points: draftPoints,
+      visible: true,
       ...defaultSettings,
     };
     setMasks((prev) => [...prev, newMask]);
@@ -566,6 +689,7 @@ export function MaterialPhotoVisualizer() {
     if (activeMask && !isDrawing) {
       setDefaultSettings(maskToSettings(activeMask));
     }
+    setShowBefore(false);
     setIsDrawing(true);
     setDraftPoints([]);
     setActiveMaskId(null);
@@ -575,22 +699,41 @@ export function MaterialPhotoVisualizer() {
     setDraftPoints((prev) => prev.slice(0, -1));
   }, []);
 
-  const deleteSelectedMask = useCallback(() => {
-    if (!activeMaskId) return;
+  const deleteMask = useCallback((maskId: string) => {
     setMasks((prev) => {
-      const next = prev.filter((mask) => mask.id !== activeMaskId);
-      setActiveMaskId(next[next.length - 1]?.id ?? null);
+      const next = prev.filter((mask) => mask.id !== maskId);
+      setActiveMaskId((current) => {
+        if (current !== maskId) return current;
+        return next[next.length - 1]?.id ?? null;
+      });
       return next;
     });
     setIsDrawing(false);
     setDraftPoints([]);
-  }, [activeMaskId]);
+  }, []);
 
   const clearAllMasks = useCallback(() => {
     setMasks([]);
     setActiveMaskId(null);
     setDraftPoints([]);
     setIsDrawing(true);
+    setShowBefore(false);
+  }, []);
+
+  const duplicateMask = useCallback((maskId: string) => {
+    const source = masks.find((mask) => mask.id === maskId);
+    if (!source) return;
+    const copy = cloneMask(source);
+    setMasks((prev) => [...prev, copy]);
+    setActiveMaskId(copy.id);
+    setIsDrawing(false);
+    setDraftPoints([]);
+  }, [masks]);
+
+  const toggleMaskVisible = useCallback((maskId: string) => {
+    setMasks((prev) => prev.map((mask) => (
+      mask.id === maskId ? { ...mask, visible: !mask.visible } : mask
+    )));
   }, []);
 
   const updateMaskLabel = useCallback((maskId: string, label: string) => {
@@ -603,6 +746,7 @@ export function MaterialPhotoVisualizer() {
     setActiveMaskId(maskId);
     setIsDrawing(false);
     setDraftPoints([]);
+    setShowBefore(false);
   }, []);
 
   const handleTextureModeChange = useCallback((mode: TextureRenderMode) => {
@@ -613,7 +757,7 @@ export function MaterialPhotoVisualizer() {
   }, [applySettings]);
 
   const downloadPreview = useCallback(() => {
-    if (!photoImage || masks.length === 0) return;
+    if (!photoImage || visibleMasks.length === 0) return;
     const oc = document.createElement("canvas");
     oc.width = photoImage.naturalWidth;
     oc.height = photoImage.naturalHeight;
@@ -628,21 +772,22 @@ export function MaterialPhotoVisualizer() {
       isDrawing: false,
       activeMaskId: null,
       showMaskOutlines: false,
+      renderTextures: true,
     });
 
     const link = document.createElement("a");
-    link.download = "countertop-visualizer-preview.jpg";
+    link.download = exportFilename(masks, textures);
     link.href = oc.toDataURL("image/jpeg", 0.92);
     link.click();
-  }, [photoImage, masks, textureImages]);
+  }, [photoImage, visibleMasks.length, masks, textureImages, textures]);
 
-  const controlsEnabled = Boolean(photoImage && (isDrawing || activeMaskId));
-  const canComplete = isDrawing && draftPoints.length >= 3;
+  const controlsEnabled = Boolean(photoImage && !showBefore && (isDrawing || activeMaskId));
+  const canComplete = isDrawing && draftPoints.length >= 3 && !showBefore;
   const canUndo = isDrawing && draftPoints.length > 0;
-  const canAddAnother = photoImage && !isDrawing;
-  const canDeleteSelected = Boolean(activeMaskId && !isDrawing);
+  const canAddAnother = photoImage && !isDrawing && !showBefore;
   const canClearAll = masks.length > 0 || draftPoints.length > 0 || isDrawing;
-  const canDownload = masks.length > 0 && masks.every((mask) => textureImages.has(mask.textureSlug));
+  const canDownload = visibleMasks.length > 0
+    && visibleMasks.every((mask) => textureImages.has(mask.textureSlug));
 
   return (
     <div className="pv-page">
@@ -651,65 +796,117 @@ export function MaterialPhotoVisualizer() {
           <p className="pv-eyebrow">Internal prototype</p>
           <h2 className="pv-title">Photo Visualizer</h2>
           <p className="pv-sub">
-            Mark countertop zones in a kitchen photo and preview mapped Elite 100 stone textures. All processing stays in your browser.
+            Upload a kitchen photo, mark countertop surfaces, and preview Elite 100 stone textures — entirely in your browser.
           </p>
-        </div>
-        <div className="pv-header-actions">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            className="sr-only"
-            onChange={(e) => void handleUpload(e.target.files?.[0] ?? null)}
-          />
-          <button
-            type="button"
-            className="btn primary"
-            onClick={() => fileInputRef.current?.click()}
-          >
-            Upload photo
-          </button>
         </div>
       </header>
 
       {photoError ? <div className="banner banner-error pv-banner" role="alert">{photoError}</div> : null}
       {textureLoadError ? <div className="banner banner-warn pv-banner" role="status">{textureLoadError}</div> : null}
 
-      <p className="pv-status" role="status">{statusHint}</p>
-
       <div className="pv-layout">
-        <div className="pv-workspace-wrap">
-          <div className="pv-workspace" ref={workspaceRef}>
-            {!photoImage ? (
-              <div className="pv-empty">
-                <div className="pv-empty-art" aria-hidden>
-                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="5" width="18" height="14" rx="2" />
-                    <circle cx="8.5" cy="10" r="1.4" />
-                    <path d="M21 16l-5.2-5.2a1.6 1.6 0 0 0-2.2 0L9 14.6 7.5 13" />
+        <div className="pv-stage-column">
+          {!photoImage ? (
+            <div
+              className={`pv-dropzone${dragOver ? " drag-over" : ""}`}
+              onDragEnter={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={(e) => { e.preventDefault(); setDragOver(false); }}
+              onDrop={handleDrop}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/*"
+                className="sr-only"
+                onChange={(e) => void handleUpload(e.target.files?.[0] ?? null)}
+              />
+              <div className="pv-dropzone-inner">
+                <div className="pv-dropzone-art" aria-hidden>
+                  <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 16V4" />
+                    <path d="m7 9 5-5 5 5" />
+                    <rect x="3" y="14" width="18" height="6" rx="2" />
                   </svg>
                 </div>
-                <p className="pv-empty-title">Upload a kitchen photo to begin.</p>
-                <p className="pv-empty-sub">JPEG or PNG from your computer. Nothing is uploaded to a server.</p>
-                <button type="button" className="btn secondary" onClick={() => fileInputRef.current?.click()}>
+                <h3 className="pv-dropzone-title">Upload a kitchen photo</h3>
+                <p className="pv-dropzone-sub">Drag and drop a JPG or PNG here, or choose a file from your computer.</p>
+                <button type="button" className="btn primary" onClick={() => fileInputRef.current?.click()}>
                   Choose image
                 </button>
+                <p className="pv-dropzone-note">Nothing is uploaded to a server. Processing stays on this device.</p>
               </div>
-            ) : (
-              <canvas
-                ref={canvasRef}
-                className={`pv-canvas${isDrawing ? " drawing" : ""}`}
-                onClick={handleCanvasClick}
-                role="img"
-                aria-label="Kitchen photo visualizer canvas"
-              />
-            )}
-          </div>
+            </div>
+          ) : (
+            <>
+              <div className="pv-stage-toolbar">
+                <div className="pv-stage-toolbar-left">
+                  <span className={`pv-mode-pill mode-${workspaceMode}`}>{workspaceModeLabel(workspaceMode)}</span>
+                  <p className="pv-stage-status" role="status">{statusHint}</p>
+                </div>
+                <div className="pv-stage-toolbar-right">
+                  <div className="pv-compare-toggle" role="group" aria-label="Before and after">
+                    <button
+                      type="button"
+                      className={`pv-compare-btn${showBefore ? " active" : ""}`}
+                      onClick={() => setShowBefore(true)}
+                    >
+                      Before
+                    </button>
+                    <button
+                      type="button"
+                      className={`pv-compare-btn${!showBefore ? " active" : ""}`}
+                      onClick={() => setShowBefore(false)}
+                    >
+                      After
+                    </button>
+                  </div>
+                  <input
+                    ref={replaceInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/*"
+                    className="sr-only"
+                    onChange={(e) => void handleUpload(e.target.files?.[0] ?? null)}
+                  />
+                  <button type="button" className="btn secondary btn-sm" onClick={() => replaceInputRef.current?.click()}>
+                    Replace photo
+                  </button>
+                </div>
+              </div>
+
+              <div className="pv-stage" ref={workspaceRef}>
+                <canvas
+                  ref={canvasRef}
+                  className={`pv-canvas${isDrawing && !showBefore ? " drawing" : ""}`}
+                  onClick={handleCanvasClick}
+                  role="img"
+                  aria-label="Kitchen photo visualizer canvas"
+                />
+                {isDrawing && !showBefore ? (
+                  <div className="pv-draw-hint" aria-live="polite">
+                    Click around the countertop edge. Use Undo if needed. Complete when finished. Press Escape to cancel.
+                  </div>
+                ) : null}
+              </div>
+            </>
+          )}
         </div>
 
         <aside className="pv-controls" aria-label="Visualizer controls">
+          <section className="pv-panel pv-panel-export">
+            <button
+              type="button"
+              className="btn primary pv-download-btn"
+              disabled={!canDownload}
+              onClick={downloadPreview}
+            >
+              Download preview
+            </button>
+            <p className="pv-panel-hint">Exports visible surfaces at full photo resolution (After view).</p>
+          </section>
+
           <section className="pv-panel">
-            <h3 className="pv-panel-title">Masks</h3>
+            <h3 className="pv-panel-title">Surfaces</h3>
             <div className="pv-btn-row">
               <button type="button" className="btn secondary btn-sm" disabled={!canComplete} onClick={completeMask}>
                 Complete mask
@@ -722,28 +919,63 @@ export function MaterialPhotoVisualizer() {
               <button type="button" className="btn secondary btn-sm" disabled={!canAddAnother} onClick={startAnotherMask}>
                 Add another mask
               </button>
-              <button type="button" className="btn secondary btn-sm" disabled={!canDeleteSelected} onClick={deleteSelectedMask}>
-                Delete selected
-              </button>
             </div>
             <button type="button" className="btn secondary btn-sm pv-clear-all" disabled={!canClearAll} onClick={clearAllMasks}>
               Clear all masks
             </button>
             {masks.length > 0 ? (
-              <ul className="pv-mask-list" aria-label="Completed masks">
+              <ul className="pv-zone-list" aria-label="Countertop surfaces">
                 {masks.map((mask) => {
                   const texture = textures.find((t) => t.slug === mask.textureSlug);
                   const isActive = mask.id === activeMaskId && !isDrawing;
                   return (
-                    <li key={mask.id}>
+                    <li key={mask.id} className={`pv-zone-item${isActive ? " active" : ""}${mask.visible ? "" : " hidden-zone"}`}>
                       <button
                         type="button"
-                        className={`pv-mask-card${isActive ? " active" : ""}`}
+                        className="pv-zone-main"
                         onClick={() => selectMask(mask.id)}
                       >
-                        <span className="pv-mask-card-label">{mask.label}</span>
-                        <span className="pv-mask-card-meta">{texture?.colorName ?? "Texture"}</span>
+                        <span className="pv-zone-swatch" aria-hidden>
+                          {texture ? (
+                            <img src={pickerImageUrl(texture)} alt="" loading="lazy" />
+                          ) : (
+                            <span className="pv-zone-swatch-fallback">—</span>
+                          )}
+                        </span>
+                        <span className="pv-zone-copy">
+                          <span className="pv-zone-label">{mask.label}</span>
+                          <span className="pv-zone-meta">{texture?.colorName ?? "No texture"}</span>
+                        </span>
                       </button>
+                      <div className="pv-zone-actions">
+                        <button
+                          type="button"
+                          className="pv-zone-action"
+                          aria-label={mask.visible ? `Hide ${mask.label}` : `Show ${mask.label}`}
+                          title={mask.visible ? "Hide surface" : "Show surface"}
+                          onClick={() => toggleMaskVisible(mask.id)}
+                        >
+                          {mask.visible ? "Hide" : "Show"}
+                        </button>
+                        <button
+                          type="button"
+                          className="pv-zone-action"
+                          aria-label={`Duplicate ${mask.label}`}
+                          title="Duplicate surface"
+                          onClick={() => duplicateMask(mask.id)}
+                        >
+                          Copy
+                        </button>
+                        <button
+                          type="button"
+                          className="pv-zone-action danger"
+                          aria-label={`Delete ${mask.label}`}
+                          title="Delete surface"
+                          onClick={() => deleteMask(mask.id)}
+                        >
+                          Delete
+                        </button>
+                      </div>
                       {isActive ? (
                         <label className="pv-mask-rename">
                           <span className="sr-only">Rename {mask.label}</span>
@@ -760,7 +992,7 @@ export function MaterialPhotoVisualizer() {
                 })}
               </ul>
             ) : (
-              <p className="pv-panel-hint">No completed masks yet.</p>
+              <p className="pv-panel-hint">No surfaces yet. Complete your first mask to add it here.</p>
             )}
           </section>
 
@@ -768,10 +1000,10 @@ export function MaterialPhotoVisualizer() {
             <h3 className="pv-panel-title">Elite 100 texture</h3>
             <p className="pv-panel-hint">
               {isDrawing
-                ? "New masks inherit the texture selected below."
+                ? "New surfaces inherit the texture selected below."
                 : activeMask
                   ? `Applies to ${activeMask.label}.`
-                  : "Select a mask or start drawing to choose a texture."}
+                  : "Select a surface or start drawing to choose a texture."}
             </p>
             <div className="pv-texture-grid" role="listbox" aria-label="Elite 100 textures">
               {textures.map((texture) => (
@@ -845,18 +1077,19 @@ export function MaterialPhotoVisualizer() {
               />
               <span className="pv-slider-val">{controlSettings.textureRotation}°</span>
             </label>
-          </section>
-
-          <section className="pv-panel">
-            <button
-              type="button"
-              className="btn primary"
-              disabled={!canDownload}
-              onClick={downloadPreview}
-            >
-              Download preview
-            </button>
-            <p className="pv-panel-hint">Exports all masks at full photo resolution.</p>
+            <label className="pv-slider">
+              <span>Soft edge</span>
+              <input
+                type="range"
+                min={0}
+                max={24}
+                step={1}
+                value={controlSettings.feather}
+                disabled={!controlsEnabled}
+                onChange={(e) => applySettings({ feather: Number(e.target.value) })}
+              />
+              <span className="pv-slider-val">{controlSettings.feather}px</span>
+            </label>
           </section>
         </aside>
       </div>
