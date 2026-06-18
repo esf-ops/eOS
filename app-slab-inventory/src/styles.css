@@ -2126,6 +2126,43 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
   gap: 8px;
 }
 
+.pv-mode-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.pv-mode-btn {
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--eos-line);
+  background: var(--eos-surface-soft);
+  color: var(--eos-ink-soft);
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease;
+}
+
+.pv-mode-btn:hover:not(:disabled) {
+  border-color: var(--eos-line-strong);
+  background: #ffffff;
+}
+
+.pv-mode-btn.active {
+  border-color: var(--eos-accent);
+  background: var(--eos-accent-soft);
+  color: var(--eos-accent);
+  box-shadow: 0 0 0 2px var(--eos-accent-ring);
+}
+
+.pv-mode-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .pv-texture-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

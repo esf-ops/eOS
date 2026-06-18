@@ -5,17 +5,31 @@ import {
 } from "./lib/elite100TextureAssets";
 
 type NormPoint = { nx: number; ny: number };
+type TextureRenderMode = "cover" | "repeat";
 
 type RenderInput = {
   photo: HTMLImageElement;
   points: NormPoint[];
   maskClosed: boolean;
-  texture: HTMLImageElement | null;
+  renderTextureImage: HTMLImageElement | null;
   opacity: number;
   scale: number;
   rotationDeg: number;
+  textureMode: TextureRenderMode;
   showOutline: boolean;
 };
+
+const RENDER_TEXTURE_CACHE = new Map<string, HTMLImageElement>();
+
+/** Picker cards only — never use for canvas overlay or export. */
+function pickerImageUrl(texture: Elite100TextureAsset): string {
+  return texture.thumbUrl;
+}
+
+/** Full-resolution asset for canvas overlay and download export. */
+function renderTextureUrl(texture: Elite100TextureAsset): string {
+  return texture.fullUrl;
+}
 
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -24,6 +38,19 @@ function loadImage(src: string): Promise<HTMLImageElement> {
     img.onerror = () => reject(new Error(`Failed to load image: ${src}`));
     img.src = src;
   });
+}
+
+async function loadRenderTexture(url: string): Promise<HTMLImageElement> {
+  const cached = RENDER_TEXTURE_CACHE.get(url);
+  if (cached) return cached;
+  const img = await loadImage(url);
+  RENDER_TEXTURE_CACHE.set(url, img);
+  return img;
+}
+
+function configureCanvasContext(ctx: CanvasRenderingContext2D) {
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
 }
 
 function toPixelPoints(points: NormPoint[], width: number, height: number) {
@@ -49,7 +76,46 @@ function polygonBounds(points: { x: number; y: number }[]) {
   return { minX, minY, maxX, maxY, w: maxX - minX, h: maxY - minY };
 }
 
-function drawTiledTexture(
+function clipToPolygon(ctx: CanvasRenderingContext2D, pixelPoints: { x: number; y: number }[]) {
+  ctx.beginPath();
+  pixelPoints.forEach((p, i) => {
+    if (i === 0) ctx.moveTo(p.x, p.y);
+    else ctx.lineTo(p.x, p.y);
+  });
+  ctx.closePath();
+  ctx.clip();
+}
+
+/** object-fit: cover over the polygon bounding box — one continuous stone surface. */
+function drawCoverTexture(
+  ctx: CanvasRenderingContext2D,
+  texture: HTMLImageElement,
+  pixelPoints: { x: number; y: number }[],
+  opacity: number,
+  scale: number,
+  rotationDeg: number,
+) {
+  const bounds = polygonBounds(pixelPoints);
+  const centerX = bounds.minX + bounds.w / 2;
+  const centerY = bounds.minY + bounds.h / 2;
+  const texW = texture.naturalWidth;
+  const texH = texture.naturalHeight;
+  if (texW < 1 || texH < 1) return;
+
+  const coverScale = Math.max(bounds.w / texW, bounds.h / texH) * scale;
+  const drawW = texW * coverScale;
+  const drawH = texH * coverScale;
+
+  ctx.save();
+  ctx.globalAlpha = opacity;
+  ctx.translate(centerX, centerY);
+  ctx.rotate((rotationDeg * Math.PI) / 180);
+  ctx.drawImage(texture, -drawW / 2, -drawH / 2, drawW, drawH);
+  ctx.restore();
+}
+
+/** Optional repeat mode — tiles the full-res texture at a larger scale. */
+function drawRepeatTexture(
   ctx: CanvasRenderingContext2D,
   texture: HTMLImageElement,
   pixelPoints: { x: number; y: number }[],
@@ -61,11 +127,16 @@ function drawTiledTexture(
 ) {
   const bounds = polygonBounds(pixelPoints);
   const center = polygonCentroid(pixelPoints);
-  const base = Math.min(canvasW, canvasH) * scale;
-  const tileW = Math.max(8, base);
-  const tileH = Math.max(8, (texture.naturalHeight / texture.naturalWidth) * tileW);
-  const coverW = Math.max(bounds.w, canvasW) * 1.5;
-  const coverH = Math.max(bounds.h, canvasH) * 1.5;
+  const texW = texture.naturalWidth;
+  const texH = texture.naturalHeight;
+  if (texW < 1 || texH < 1) return;
+
+  const aspect = texH / texW;
+  const base = Math.max(canvasW, canvasH) * scale;
+  const tileW = Math.max(48, base);
+  const tileH = Math.max(48, tileW * aspect);
+  const coverW = Math.max(bounds.w, canvasW) * 1.75;
+  const coverH = Math.max(bounds.h, canvasH) * 1.75;
 
   ctx.save();
   ctx.globalAlpha = opacity;
@@ -81,29 +152,69 @@ function drawTiledTexture(
   ctx.restore();
 }
 
+function drawMaskedTexture(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  input: Pick<RenderInput, "points" | "renderTextureImage" | "opacity" | "scale" | "rotationDeg" | "textureMode">,
+) {
+  const { points, renderTextureImage, opacity, scale, rotationDeg, textureMode } = input;
+  if (!renderTextureImage || points.length < 3) return;
+
+  const pixelPoints = toPixelPoints(points, width, height);
+  ctx.save();
+  clipToPolygon(ctx, pixelPoints);
+
+  if (textureMode === "cover") {
+    drawCoverTexture(ctx, renderTextureImage, pixelPoints, opacity, scale, rotationDeg);
+  } else {
+    drawRepeatTexture(
+      ctx,
+      renderTextureImage,
+      pixelPoints,
+      width,
+      height,
+      opacity,
+      scale,
+      rotationDeg,
+    );
+  }
+  ctx.restore();
+}
+
 function renderScene(
   ctx: CanvasRenderingContext2D,
   width: number,
   height: number,
   input: RenderInput,
 ) {
-  const { photo, points, maskClosed, texture, opacity, scale, rotationDeg, showOutline } = input;
+  configureCanvasContext(ctx);
+  const {
+    photo,
+    points,
+    maskClosed,
+    renderTextureImage,
+    opacity,
+    scale,
+    rotationDeg,
+    textureMode,
+    showOutline,
+  } = input;
+
   ctx.clearRect(0, 0, width, height);
   ctx.drawImage(photo, 0, 0, width, height);
 
   const pixelPoints = toPixelPoints(points, width, height);
 
-  if (maskClosed && texture && pixelPoints.length >= 3) {
-    ctx.save();
-    ctx.beginPath();
-    pixelPoints.forEach((p, i) => {
-      if (i === 0) ctx.moveTo(p.x, p.y);
-      else ctx.lineTo(p.x, p.y);
+  if (maskClosed && renderTextureImage && pixelPoints.length >= 3) {
+    drawMaskedTexture(ctx, width, height, {
+      points,
+      renderTextureImage,
+      opacity,
+      scale,
+      rotationDeg,
+      textureMode,
     });
-    ctx.closePath();
-    ctx.clip();
-    drawTiledTexture(ctx, texture, pixelPoints, width, height, opacity, scale, rotationDeg);
-    ctx.restore();
   }
 
   if (showOutline && pixelPoints.length > 0) {
@@ -146,6 +257,9 @@ function fitCanvasSize(
   };
 }
 
+const COVER_SCALE_DEFAULT = 1;
+const REPEAT_SCALE_DEFAULT = 0.55;
+
 export function MaterialPhotoVisualizer() {
   const textures = useMemo(() => listElite100TextureAssets(), []);
   const workspaceRef = useRef<HTMLDivElement>(null);
@@ -158,11 +272,12 @@ export function MaterialPhotoVisualizer() {
   const [points, setPoints] = useState<NormPoint[]>([]);
   const [maskClosed, setMaskClosed] = useState(false);
   const [selectedSlug, setSelectedSlug] = useState<string | null>(textures[0]?.slug ?? null);
-  const [textureImage, setTextureImage] = useState<HTMLImageElement | null>(null);
+  const [renderTextureImage, setRenderTextureImage] = useState<HTMLImageElement | null>(null);
   const [textureError, setTextureError] = useState<string | null>(null);
   const [textureLoading, setTextureLoading] = useState(false);
   const [opacity, setOpacity] = useState(0.82);
-  const [scale, setScale] = useState(0.28);
+  const [textureMode, setTextureMode] = useState<TextureRenderMode>("cover");
+  const [scale, setScale] = useState(COVER_SCALE_DEFAULT);
   const [rotationDeg, setRotationDeg] = useState(0);
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
 
@@ -170,6 +285,13 @@ export function MaterialPhotoVisualizer() {
     () => textures.find((t) => t.slug === selectedSlug) ?? null,
     [textures, selectedSlug],
   );
+
+  const scaleConfig = useMemo(() => {
+    if (textureMode === "cover") {
+      return { min: 0.5, max: 2.5, step: 0.01, label: "Zoom" };
+    }
+    return { min: 0.25, max: 1.5, step: 0.01, label: "Tile size" };
+  }, [textureMode]);
 
   const statusHint = useMemo(() => {
     if (!photoImage) return "Upload a kitchen photo to begin.";
@@ -179,10 +301,12 @@ export function MaterialPhotoVisualizer() {
       return "Add more points or complete the mask when the outline looks right.";
     }
     if (!selectedTexture) return "Choose an Elite 100 texture.";
-    if (textureLoading) return "Loading texture…";
+    if (textureLoading) return "Loading full-resolution texture…";
     if (textureError) return textureError;
-    return "Adjust opacity, scale, and rotation to blend the stone into your photo.";
-  }, [photoImage, maskClosed, points.length, selectedTexture, textureLoading, textureError]);
+    return textureMode === "cover"
+      ? "Cover surface fills the countertop with one continuous stone image. Adjust zoom, opacity, and rotation."
+      : "Repeat texture tiles the full-res image. Increase tile size to reduce visible seams.";
+  }, [photoImage, maskClosed, points.length, selectedTexture, textureLoading, textureError, textureMode]);
 
   const revokePhotoUrl = useCallback((url: string | null) => {
     if (url) URL.revokeObjectURL(url);
@@ -219,22 +343,32 @@ export function MaterialPhotoVisualizer() {
 
   useEffect(() => {
     if (!selectedTexture) {
-      setTextureImage(null);
+      setRenderTextureImage(null);
       setTextureError(null);
       return;
     }
+
+    const url = renderTextureUrl(selectedTexture);
+    const cached = RENDER_TEXTURE_CACHE.get(url);
+    if (cached) {
+      setRenderTextureImage(cached);
+      setTextureError(null);
+      setTextureLoading(false);
+      return;
+    }
+
     let alive = true;
     setTextureLoading(true);
     setTextureError(null);
-    loadImage(selectedTexture.fullUrl)
+    loadRenderTexture(url)
       .then((img) => {
         if (!alive) return;
-        setTextureImage(img);
+        setRenderTextureImage(img);
       })
       .catch(() => {
         if (!alive) return;
-        setTextureImage(null);
-        setTextureError(`Could not load texture for ${selectedTexture.colorName}.`);
+        setRenderTextureImage(null);
+        setTextureError(`Could not load full texture for ${selectedTexture.colorName}.`);
       })
       .finally(() => {
         if (alive) setTextureLoading(false);
@@ -258,36 +392,64 @@ export function MaterialPhotoVisualizer() {
     return () => ro.disconnect();
   }, [photoImage]);
 
+  const buildRenderInput = useCallback((): RenderInput | null => {
+    if (!photoImage) return null;
+    return {
+      photo: photoImage,
+      points,
+      maskClosed,
+      renderTextureImage: maskClosed ? renderTextureImage : null,
+      opacity,
+      scale,
+      rotationDeg,
+      textureMode,
+      showOutline: !maskClosed && points.length > 0,
+    };
+  }, [
+    photoImage,
+    points,
+    maskClosed,
+    renderTextureImage,
+    opacity,
+    scale,
+    rotationDeg,
+    textureMode,
+  ]);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !photoImage || canvasSize.width < 1) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    canvas.width = canvasSize.width;
-    canvas.height = canvasSize.height;
+    const input = buildRenderInput();
+    if (!input) return;
 
-    renderScene(ctx, canvas.width, canvas.height, {
-      photo: photoImage,
-      points,
-      maskClosed,
-      texture: maskClosed ? textureImage : null,
-      opacity,
-      scale,
-      rotationDeg,
-      showOutline: !maskClosed && points.length > 0,
-    });
-  }, [photoImage, canvasSize, points, maskClosed, textureImage, opacity, scale, rotationDeg]);
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const logicalW = canvasSize.width;
+    const logicalH = canvasSize.height;
+
+    canvas.width = Math.round(logicalW * dpr);
+    canvas.height = Math.round(logicalH * dpr);
+    canvas.style.width = `${logicalW}px`;
+    canvas.style.height = `${logicalH}px`;
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    renderScene(ctx, logicalW, logicalH, input);
+  }, [photoImage, canvasSize, buildRenderInput]);
 
   const handleCanvasClick = useCallback((event: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!photoImage || maskClosed) return;
+    if (!photoImage || maskClosed || canvasSize.width < 1) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
-    const x = ((event.clientX - rect.left) / rect.width) * canvas.width;
-    const y = ((event.clientY - rect.top) / rect.height) * canvas.height;
-    setPoints((prev) => [...prev, { nx: x / canvas.width, ny: y / canvas.height }]);
-  }, [photoImage, maskClosed]);
+    const x = ((event.clientX - rect.left) / rect.width) * canvasSize.width;
+    const y = ((event.clientY - rect.top) / rect.height) * canvasSize.height;
+    setPoints((prev) => [
+      ...prev,
+      { nx: x / canvasSize.width, ny: y / canvasSize.height },
+    ]);
+  }, [photoImage, maskClosed, canvasSize]);
 
   const completeMask = useCallback(() => {
     if (points.length >= 3) setMaskClosed(true);
@@ -298,31 +460,49 @@ export function MaterialPhotoVisualizer() {
     setMaskClosed(false);
   }, []);
 
+  const handleTextureModeChange = useCallback((mode: TextureRenderMode) => {
+    setTextureMode(mode);
+    setScale(mode === "cover" ? COVER_SCALE_DEFAULT : REPEAT_SCALE_DEFAULT);
+  }, []);
+
   const downloadPreview = useCallback(() => {
-    if (!photoImage || !maskClosed || points.length < 3) return;
+    if (!photoImage || !maskClosed || points.length < 3 || !renderTextureImage) return;
     const oc = document.createElement("canvas");
     oc.width = photoImage.naturalWidth;
     oc.height = photoImage.naturalHeight;
     const ctx = oc.getContext("2d");
     if (!ctx) return;
+
     renderScene(ctx, oc.width, oc.height, {
       photo: photoImage,
       points,
       maskClosed: true,
-      texture: textureImage,
+      renderTextureImage,
       opacity,
       scale,
       rotationDeg,
+      textureMode,
       showOutline: false,
     });
+
     const link = document.createElement("a");
     link.download = `countertop-visualizer-${selectedTexture?.slug ?? "preview"}.jpg`;
     link.href = oc.toDataURL("image/jpeg", 0.92);
     link.click();
-  }, [photoImage, maskClosed, points, textureImage, opacity, scale, rotationDeg, selectedTexture?.slug]);
+  }, [
+    photoImage,
+    maskClosed,
+    points,
+    renderTextureImage,
+    opacity,
+    scale,
+    rotationDeg,
+    textureMode,
+    selectedTexture?.slug,
+  ]);
 
   const canComplete = photoImage && !maskClosed && points.length >= 3;
-  const canDownload = photoImage && maskClosed && points.length >= 3 && textureImage;
+  const canDownload = photoImage && maskClosed && points.length >= 3 && renderTextureImage;
 
   return (
     <div className="pv-page">
@@ -378,7 +558,6 @@ export function MaterialPhotoVisualizer() {
               <canvas
                 ref={canvasRef}
                 className="pv-canvas"
-                style={{ width: canvasSize.width, height: canvasSize.height }}
                 onClick={handleCanvasClick}
                 role="img"
                 aria-label="Kitchen photo visualizer canvas"
@@ -423,6 +602,24 @@ export function MaterialPhotoVisualizer() {
 
           <section className="pv-panel">
             <h3 className="pv-panel-title">Blend</h3>
+            <div className="pv-mode-row" role="group" aria-label="Texture mode">
+              <button
+                type="button"
+                className={`pv-mode-btn${textureMode === "cover" ? " active" : ""}`}
+                disabled={!maskClosed}
+                onClick={() => handleTextureModeChange("cover")}
+              >
+                Cover surface
+              </button>
+              <button
+                type="button"
+                className={`pv-mode-btn${textureMode === "repeat" ? " active" : ""}`}
+                disabled={!maskClosed}
+                onClick={() => handleTextureModeChange("repeat")}
+              >
+                Repeat texture
+              </button>
+            </div>
             <label className="pv-slider">
               <span>Opacity</span>
               <input
@@ -437,12 +634,12 @@ export function MaterialPhotoVisualizer() {
               <span className="pv-slider-val">{Math.round(opacity * 100)}%</span>
             </label>
             <label className="pv-slider">
-              <span>Scale</span>
+              <span>{scaleConfig.label}</span>
               <input
                 type="range"
-                min={0.08}
-                max={1.2}
-                step={0.01}
+                min={scaleConfig.min}
+                max={scaleConfig.max}
+                step={scaleConfig.step}
                 value={scale}
                 disabled={!maskClosed}
                 onChange={(e) => setScale(Number(e.target.value))}
@@ -473,7 +670,7 @@ export function MaterialPhotoVisualizer() {
             >
               Download preview
             </button>
-            <p className="pv-panel-hint">Exports a full-resolution JPEG from your original photo.</p>
+            <p className="pv-panel-hint">Exports a full-resolution JPEG using the full texture asset.</p>
           </section>
         </aside>
       </div>
@@ -507,7 +704,7 @@ function TexturePickerButton({
         <span className="pv-texture-fallback" aria-hidden>{texture.colorName.slice(0, 2)}</span>
       ) : (
         <img
-          src={texture.thumbUrl}
+          src={pickerImageUrl(texture)}
           alt=""
           loading="lazy"
           onError={() => setThumbFailed(true)}
