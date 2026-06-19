@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { CALENDAR_SCHEDULE_COLUMN_ALIASES } from "./calendarScheduleConstants.js";
+import { normalizeSpaces } from "./parseCsv.js";
 
 function buildMapUrl(address) {
   const parts = [address?.line1, address?.line2, address?.city, address?.state, address?.postalCode]
@@ -15,22 +16,31 @@ function cleanText(v) {
   return String(v).replace(/\u00A0/g, " ").trim();
 }
 
+/** Normalize raw CSV keys (NBSP, trailing spaces) before field lookup. */
+export function normalizeCalendarRawRow(rawRow) {
+  if (!rawRow || typeof rawRow !== "object") return {};
+  const out = {};
+  for (const [key, value] of Object.entries(rawRow)) {
+    out[normalizeSpaces(key)] = value;
+  }
+  return out;
+}
+
 /**
  * @param {Record<string, unknown>} rawRow
  * @param {readonly string[]} aliases
  */
 export function pickCalendarField(rawRow, aliases) {
-  if (!rawRow || typeof rawRow !== "object") return "";
-  const row = /** @type {Record<string, unknown>} */ (rawRow);
+  const row = normalizeCalendarRawRow(rawRow);
   for (const key of aliases) {
     const direct = cleanText(row[key]);
     if (direct) return direct;
   }
   const lowerMap = new Map(
-    Object.entries(row).map(([k, v]) => [String(k).trim().toLowerCase(), v])
+    Object.entries(row).map(([k, v]) => [normalizeSpaces(k).toLowerCase(), v])
   );
   for (const key of aliases) {
-    const v = lowerMap.get(String(key).trim().toLowerCase());
+    const v = lowerMap.get(normalizeSpaces(key).toLowerCase());
     const t = cleanText(v);
     if (t) return t;
   }
@@ -61,23 +71,55 @@ function parseSqft(raw) {
   return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
+function mergeUniqueNotes(parts) {
+  const seen = new Set();
+  const out = [];
+  for (const part of parts) {
+    const t = cleanText(part);
+    if (!t) continue;
+    const key = t.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(t);
+  }
+  return out.join(" · ") || null;
+}
+
+function pickContactPhone(rawRow) {
+  return (
+    pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.cell) ||
+    pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.phone1) ||
+    pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.phone2) ||
+    ""
+  );
+}
+
+/**
+ * Install Dashboard stop grouping key (view 222 contract).
+ * Activity Date + Sched Time + Assigned To + Activity Type + Job Name
+ *
+ * @param {Record<string, unknown>} fields
+ */
+export function buildCalendarScheduleGroupKey(fields) {
+  return [
+    cleanText(fields.calendar_date),
+    cleanText(fields.scheduled_start_time),
+    cleanText(fields.truck_or_crew_name),
+    cleanText(fields.activity_type || fields.activity_type_name),
+    cleanText(fields.job_name).toLowerCase()
+  ].join("|");
+}
+
 /**
  * @param {object} params
  */
 export function buildCalendarScheduleRowHash(params) {
-  const parts = [
-    params.calendar_date,
-    params.scheduled_start_time,
-    params.truck_or_crew_name,
-    params.moraware_job_id || params.job_id,
-    params.job_name,
-    params.activity_type_name || params.activity_type
-  ].map((x) => cleanText(x));
-  return createHash("sha256").update(parts.join("|")).digest("hex");
+  return createHash("sha256").update(buildCalendarScheduleGroupKey(params)).digest("hex");
 }
 
 /**
  * Map one enriched report-feed row into moraware_calendar_schedule_rows insert payload.
+ * Worksheet-line dedupe happens in aggregateCalendarScheduleRows() during promotion.
  *
  * @param {object} params
  * @param {Record<string, unknown>} params.rawRow
@@ -91,22 +133,23 @@ export function buildCalendarScheduleRowHash(params) {
  */
 export function mapCalendarScheduleRow(params) {
   const {
-    rawRow,
+    rawRow: rawInput,
     organizationId,
     reportFeedId = null,
     reportRunId = null,
     sourceViewId = null,
     jobId = null,
-    accountId = null,
     identityStatus = "needs_identity_review"
   } = params;
 
-  const calendarDate =
-    parseCalendarDate(pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.calendarDate)) ||
-    parseCalendarDate(pickCalendarField(rawRow, ["Date"]));
+  const rawRow = normalizeCalendarRawRow(rawInput);
 
+  const calendarDate = parseCalendarDate(pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.calendarDate));
   const truckOrCrew =
     pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.truckOrCrewName) || null;
+  const activityType = pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.activityType) || null;
+  const jobNotes = pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.jobNotes);
+  const addressNotes = pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.addressNotes);
 
   const mapped = {
     organization_id: organizationId,
@@ -125,11 +168,8 @@ export function mapCalendarScheduleRow(params) {
     assigned_resource_name:
       pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.assignedResourceName) || truckOrCrew,
     truck_or_crew_name: truckOrCrew,
-    activity_type: pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.activityType) || null,
-    activity_type_name:
-      pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.activityTypeName) ||
-      pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.activityType) ||
-      null,
+    activity_type: activityType,
+    activity_type_name: activityType,
     activity_status: pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.activityStatus) || null,
     job_id: jobId || null,
     moraware_job_id: jobId || null,
@@ -143,9 +183,28 @@ export function mapCalendarScheduleRow(params) {
     sqft: parseSqft(pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.sqft)),
     material: pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.material) || null,
     color: pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.color) || null,
-    install_type: pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.installType) || null,
-    notes: pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.notes) || null,
-    raw_payload: rawRow ?? {},
+    install_type: activityType,
+    notes: mergeUniqueNotes([jobNotes, addressNotes]),
+    raw_payload: {
+      ...rawRow,
+      job_status: pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.jobStatus) || null,
+      job_activity: pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.jobActivity) || null,
+      job_creation_date:
+        pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.jobCreationDate) || null,
+      job_salesperson: pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.jobSalesperson) || null,
+      account_salesperson:
+        pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.accountSalesperson) || null,
+      address_line2: pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.addressLine2) || null,
+      phone1: pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.phone1) || null,
+      phone2: pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.phone2) || null,
+      cell: pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.cell) || null,
+      email: pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.email) || null,
+      worksheet_edge: pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.edge) || null,
+      worksheet_room: pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.room) || null,
+      worksheet_form_name: pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.formName) || null,
+      worksheet_thickness: pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.thickness) || null,
+      activity_count: pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.activityCount) || null
+    },
     identity_status: identityStatus,
     is_active: true,
     synced_at: new Date().toISOString(),
@@ -156,6 +215,77 @@ export function mapCalendarScheduleRow(params) {
 
   mapped.row_hash = buildCalendarScheduleRowHash(mapped);
   return mapped;
+}
+
+/**
+ * Aggregate worksheet-line duplicates into one Install Dashboard schedule stop.
+ *
+ * @param {ReturnType<typeof mapCalendarScheduleRow>[]} mappedRows
+ */
+export function aggregateCalendarScheduleRows(mappedRows) {
+  /** @type {Map<string, { base: ReturnType<typeof mapCalendarScheduleRow>, sqftSum: number, colors: Set<string>, rooms: Set<string>, edges: Set<string>, worksheetLines: object[], sourceRowCount: number }>} */
+  const groups = new Map();
+
+  for (const row of mappedRows) {
+    const key = buildCalendarScheduleGroupKey(row);
+    if (!groups.has(key)) {
+      groups.set(key, {
+        base: { ...row, raw_payload: { ...(row.raw_payload ?? {}) } },
+        sqftSum: 0,
+        colors: new Set(),
+        rooms: new Set(),
+        edges: new Set(),
+        worksheetLines: [],
+        sourceRowCount: 0
+      });
+    }
+
+    const group = groups.get(key);
+    group.sourceRowCount += 1;
+
+    const sqft = row.sqft != null ? Number(row.sqft) : 0;
+    if (Number.isFinite(sqft) && sqft > 0) group.sqftSum += sqft;
+
+    const color = cleanText(row.color);
+    if (color) group.colors.add(color);
+
+    const raw = row.raw_payload ?? {};
+    const room = cleanText(raw.worksheet_room);
+    if (room) group.rooms.add(room);
+    const edge = cleanText(raw.worksheet_edge);
+    if (edge) group.edges.add(edge);
+
+    group.worksheetLines.push({
+      room: room || null,
+      color: color || null,
+      sqft: row.sqft != null ? Number(row.sqft) : null,
+      edge: edge || null,
+      formName: cleanText(raw.worksheet_form_name) || null,
+      thickness: cleanText(raw.worksheet_thickness) || null
+    });
+  }
+
+  return [...groups.values()].map((group) => {
+    const out = {
+      ...group.base,
+      sqft: group.sqftSum > 0 ? group.sqftSum : group.base.sqft,
+      color: [...group.colors].join(", ") || group.base.color,
+      notes: group.base.notes,
+      raw_payload: {
+        ...(group.base.raw_payload ?? {}),
+        aggregated: {
+          sourceRowCount: group.sourceRowCount,
+          rooms: [...group.rooms],
+          colors: [...group.colors],
+          edges: [...group.edges],
+          worksheetLines: group.worksheetLines,
+          worksheetSqftTotal: group.sqftSum > 0 ? group.sqftSum : null
+        }
+      }
+    };
+    out.row_hash = buildCalendarScheduleRowHash(out);
+    return out;
+  });
 }
 
 function parseSchedTimeTo24h(raw) {
@@ -204,9 +334,12 @@ function buildJobWarnings(job) {
 export function calendarScheduleRowToInstallJob(row, sequence) {
   const calendarDate = cleanText(row.calendar_date);
   const truckOrCrew = cleanText(row.truck_or_crew_name) || null;
+  const raw = /** @type {Record<string, unknown>} */ (row.raw_payload ?? {});
+  const aggregated = /** @type {Record<string, unknown>} */ (raw.aggregated ?? {});
+
   const addr = {
     line1: cleanText(row.address_line1),
-    line2: "",
+    line2: cleanText(raw.address_line2),
     city: cleanText(row.city),
     state: cleanText(row.state),
     postalCode: cleanText(row.postal_code),
@@ -214,14 +347,39 @@ export function calendarScheduleRowToInstallJob(row, sequence) {
     longitude: null
   };
 
+  const rooms = Array.isArray(aggregated.rooms)
+    ? aggregated.rooms.map((r) => cleanText(r)).filter(Boolean)
+    : cleanText(raw.worksheet_room)
+      ? [cleanText(raw.worksheet_room)]
+      : [];
+
+  const colors = Array.isArray(aggregated.colors)
+    ? aggregated.colors.map((c) => cleanText(c)).filter(Boolean)
+    : cleanText(row.color)
+      ? cleanText(row.color)
+          .split(",")
+          .map((c) => c.trim())
+          .filter(Boolean)
+      : [];
+
+  const edges = Array.isArray(aggregated.edges)
+    ? aggregated.edges.map((e) => cleanText(e)).filter(Boolean)
+    : cleanText(raw.worksheet_edge)
+      ? [cleanText(raw.worksheet_edge)]
+      : [];
+
+  const contactName = cleanText(row.customer_name) || cleanText(row.account_name) || "";
+  const contactPhone =
+    cleanText(raw.cell) || cleanText(raw.phone1) || cleanText(raw.phone2) || pickContactPhone(raw);
+  const contactEmail = cleanText(raw.email);
+
   const job = {
     id: cleanText(row.moraware_job_id || row.job_id || row.id) || `calendar-${sequence}`,
     morawareJobId: cleanText(row.moraware_job_id || row.job_id) || null,
     scheduledStart: scheduledStartIso(calendarDate, row.scheduled_start_time),
     scheduledEnd: scheduledStartIso(calendarDate, row.scheduled_end_time),
     sequence,
-    customerName:
-      cleanText(row.customer_name) || cleanText(row.account_name) || cleanText(row.job_name) || "—",
+    customerName: contactName || cleanText(row.job_name) || "—",
     accountName: cleanText(row.account_name) || "—",
     jobName: cleanText(row.job_name) || "—",
     status: cleanText(row.activity_status) || null,
@@ -230,16 +388,16 @@ export function calendarScheduleRowToInstallJob(row, sequence) {
     address: addr,
     mapUrl: buildMapUrl(addr),
     contact: {
-      name: cleanText(row.customer_name) || "",
-      phone: "",
-      email: ""
+      name: contactName,
+      phone: contactPhone,
+      email: contactEmail
     },
     scope: {
       sqft: row.sqft != null ? Number(row.sqft) : null,
-      rooms: [],
+      rooms,
       material: cleanText(row.material),
-      color: cleanText(row.color),
-      edge: "",
+      color: colors.join(", "),
+      edge: edges.join(", "),
       backsplash: "",
       sinkNotes: "",
       cutoutNotes: "",

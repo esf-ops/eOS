@@ -24,9 +24,19 @@ import {
 import {
   mapCalendarScheduleRow,
   calendarScheduleRowToInstallJob,
-  computeMissingFieldCounts
+  computeMissingFieldCounts,
+  aggregateCalendarScheduleRows,
+  buildCalendarScheduleGroupKey,
+  normalizeCalendarRawRow,
+  pickCalendarField
 } from "../moraware/reportFeeds/mapCalendarScheduleRow.js";
+import {
+  CALENDAR_SCHEDULE_EXPECTED_COLUMNS,
+  CALENDAR_SCHEDULE_CORE_COLUMN_HASH,
+  CALENDAR_SCHEDULE_VIEW_ID
+} from "../moraware/reportFeeds/calendarScheduleConstants.js";
 import { parseCsvReportRows } from "../moraware/reportFeeds/parseCsv.js";
+import { profileReportColumns, validateHeaderContract } from "../moraware/reportFeeds/profileColumns.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const fixtureDir = join(__dirname, "../../test/fixtures/moraware-report-feeds");
@@ -168,46 +178,111 @@ function testIsInstallLikeActivityUsesNormalizedType() {
   );
 }
 
-function testCalendarScheduleRowMapsToInstallJobCard() {
+function testView222ExpectedHeadersMatchFixture() {
   const parsed = parseCsvReportRows(calendarCsv);
-  const rawRow = parsed.rows[0];
-  const mapped = mapCalendarScheduleRow({
-    rawRow,
-    organizationId: FAKE_ORG,
-    jobId: "37780",
-    sourceViewId: 146
-  });
-  assert.equal(mapped.calendar_date, "2026-06-19");
-  assert.equal(mapped.truck_or_crew_name, "Truck A");
-  assert.equal(mapped.job_name, "Skogman Kitchen");
-
-  const job = calendarScheduleRowToInstallJob(mapped, 1);
-  assert.equal(job.truckOrCrewName, "Truck A");
-  assert.equal(job.customerName, "Skogman Homes");
-  assert.equal(job.address.line1, "123 Oak St");
-  assert.equal(job.scope.sqft, 42.5);
-  assert.match(job.scheduledStart ?? "", /2026-06-19T08:00:00/);
+  assert.equal(parsed.headers.length, CALENDAR_SCHEDULE_EXPECTED_COLUMNS.length);
+  for (const expected of CALENDAR_SCHEDULE_EXPECTED_COLUMNS) {
+    assert.ok(parsed.headers.includes(expected), `missing header: ${expected}`);
+  }
+  const profile = profileReportColumns(parsed);
+  const validation = validateHeaderContract(
+    profile,
+    CALENDAR_SCHEDULE_EXPECTED_COLUMNS,
+    CALENDAR_SCHEDULE_CORE_COLUMN_HASH
+  );
+  assert.equal(validation.ok, true, JSON.stringify(validation));
+  assert.equal(CALENDAR_SCHEDULE_VIEW_ID, 222);
 }
 
-function testMultipleTrucksAppearInCrewPicker() {
+function testNbspHeaderNormalizationMatchesExpectedContract() {
   const parsed = parseCsvReportRows(calendarCsv);
-  const rows = parsed.rows.map((rawRow, i) =>
+  const dirtyHeaders = parsed.headers.map((h, i) =>
+    i === 0 ? `${h}\u00A0 ` : h
+  );
+  const dirtyRow = {};
+  for (let i = 0; i < dirtyHeaders.length; i++) {
+    dirtyRow[dirtyHeaders[i]] = parsed.rows[0][parsed.headers[i]];
+  }
+  const normalized = normalizeCalendarRawRow(dirtyRow);
+  assert.equal(
+    pickCalendarField(normalized, ["Job Activity"]),
+    pickCalendarField(parsed.rows[0], ["Job Activity"])
+  );
+}
+
+function mapAllFixtureLines() {
+  const parsed = parseCsvReportRows(calendarCsv);
+  return parsed.rows.map((rawRow, i) =>
     mapCalendarScheduleRow({
       rawRow,
       organizationId: FAKE_ORG,
       jobId: `job-${i}`,
-      sourceViewId: 146
+      sourceViewId: CALENDAR_SCHEDULE_VIEW_ID
     })
   );
+}
 
-  const labels = new Set(rows.map((r) => r.truck_or_crew_name));
-  assert.equal(labels.size, 3);
+function testCalendarScheduleRowMapsToInstallJobCard() {
+  const [mapped] = aggregateCalendarScheduleRows(mapAllFixtureLines());
+  assert.equal(mapped.calendar_date, "2026-06-19");
+  assert.equal(mapped.truck_or_crew_name, "Truck A");
+  assert.equal(mapped.job_name, "Sample Kitchen Job");
+  assert.equal(mapped.sqft, 42.5);
+
+  const job = calendarScheduleRowToInstallJob(mapped, 1);
+  assert.equal(job.truckOrCrewName, "Truck A");
+  assert.equal(job.customerName, "Jane Sample");
+  assert.equal(job.accountName, "Sample Builders LLC");
+  assert.equal(job.address.line1, "123 Oak St");
+  assert.equal(job.address.line2, "Unit 2");
+  assert.equal(job.contact.phone, "319-555-0101");
+  assert.equal(job.contact.email, "jane@example.com");
+  assert.equal(job.scope.sqft, 42.5);
+  assert.deepEqual(job.scope.rooms, ["Kitchen", "Island"]);
+  assert.ok(job.scope.color.includes("Cloud White"));
+  assert.ok(job.scope.color.includes("Midnight Black"));
+  assert.match(job.scheduledStart ?? "", /2026-06-19T08:00:00/);
+}
+
+function testDuplicateWorksheetRowsAggregateToOneStop() {
+  const lines = mapAllFixtureLines();
+  assert.equal(lines.length, 3);
+  const aggregated = aggregateCalendarScheduleRows(lines);
+  assert.equal(aggregated.length, 2);
+  const kitchen = aggregated.find((r) => r.job_name === "Sample Kitchen Job");
+  assert.ok(kitchen);
+  assert.equal(
+    buildCalendarScheduleGroupKey(kitchen),
+    buildCalendarScheduleGroupKey(lines[0])
+  );
+  assert.equal(kitchen.raw_payload?.aggregated?.sourceRowCount, 2);
+}
+
+function testSqftSumsAcrossWorksheetLines() {
+  const aggregated = aggregateCalendarScheduleRows(mapAllFixtureLines());
+  const kitchen = aggregated.find((r) => r.job_name === "Sample Kitchen Job");
+  assert.equal(kitchen?.sqft, 42.5);
+  assert.equal(kitchen?.raw_payload?.aggregated?.worksheetSqftTotal, 42.5);
+}
+
+function testMultipleColorsAndRoomsCollected() {
+  const kitchen = aggregateCalendarScheduleRows(mapAllFixtureLines()).find(
+    (r) => r.job_name === "Sample Kitchen Job"
+  );
+  assert.deepEqual(kitchen?.raw_payload?.aggregated?.rooms, ["Kitchen", "Island"]);
+  assert.deepEqual(kitchen?.raw_payload?.aggregated?.colors, ["Cloud White", "Midnight Black"]);
+  const job = calendarScheduleRowToInstallJob(kitchen, 1);
+  assert.deepEqual(job.scope.rooms, ["Kitchen", "Island"]);
+}
+
+function testMultipleTrucksAppearInCrewPicker() {
+  const aggregated = aggregateCalendarScheduleRows(mapAllFixtureLines());
+  const labels = new Set(aggregated.map((r) => r.truck_or_crew_name));
+  assert.equal(labels.size, 2);
   assert.ok(labels.has("Truck A"));
   assert.ok(labels.has("Truck B"));
-  assert.ok(labels.has("Truck D"));
-
   const crews = [...labels].map((label) => crewFromAssignedLabel(label));
-  assert.equal(crews.length, 3);
+  assert.equal(crews.length, 2);
 }
 
 function testCalendarReadReturnsWarningWhenNoRowsForDate() {
@@ -313,7 +388,12 @@ const tests = [
   ["type null when missing", testNormalizeActivityTypeReturnsNullWhenMissing],
   ["normalize row tolerates missing optional fields", testNormalizeInstallJobRowMissingOptionalFieldsDoNotThrow],
   ["install-like uses normalized type", testIsInstallLikeActivityUsesNormalizedType],
+  ["view 222 expected headers match fixture", testView222ExpectedHeadersMatchFixture],
+  ["NBSP header normalization matches contract", testNbspHeaderNormalizationMatchesExpectedContract],
   ["calendar schedule row maps to install job card", testCalendarScheduleRowMapsToInstallJobCard],
+  ["duplicate worksheet rows aggregate to one stop", testDuplicateWorksheetRowsAggregateToOneStop],
+  ["sqft sums across worksheet lines", testSqftSumsAcrossWorksheetLines],
+  ["multiple colors and rooms collected", testMultipleColorsAndRoomsCollected],
   ["multiple trucks appear in crew picker", testMultipleTrucksAppearInCrewPicker],
   ["no calendar rows returns warning not crash", testCalendarReadReturnsWarningWhenNoRowsForDate],
   ["fallback to brain_job_activities still works", testFallbackToBrainActivitiesWhenCalendarUnavailable],

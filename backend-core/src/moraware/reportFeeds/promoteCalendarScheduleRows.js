@@ -1,10 +1,16 @@
 /**
  * Promote moraware_report_raw_rows from a calendar_schedule_rows feed into
  * moraware_calendar_schedule_rows. Backend-only; dry-run by default.
+ *
+ * View 222 exports repeat worksheet lines for the same scheduled stop; this
+ * module aggregates them before insert.
  */
 
 import { CALENDAR_SCHEDULE_REPORT_TYPE } from "./calendarScheduleConstants.js";
-import { mapCalendarScheduleRow } from "./mapCalendarScheduleRow.js";
+import {
+  aggregateCalendarScheduleRows,
+  mapCalendarScheduleRow
+} from "./mapCalendarScheduleRow.js";
 
 function isMissingRelationError(err) {
   const msg = String(err?.message ?? err ?? "").toLowerCase();
@@ -53,7 +59,7 @@ export async function promoteCalendarScheduleRowsFromRun(supabase, reportRunId, 
   const { data: rawRows, error: rawErr } = await query;
   if (rawErr) throw rawErr;
 
-  const mapped = [];
+  const lineMapped = [];
   for (const row of rawRows ?? []) {
     const payload = mapCalendarScheduleRow({
       rawRow: row.raw_row ?? {},
@@ -66,14 +72,18 @@ export async function promoteCalendarScheduleRowsFromRun(supabase, reportRunId, 
       identityStatus: row.identity_status ?? "needs_identity_review"
     });
     if (!payload.calendar_date) continue;
-    mapped.push(payload);
+    lineMapped.push(payload);
   }
+
+  const mapped = aggregateCalendarScheduleRows(lineMapped);
 
   if (!apply) {
     return {
       ok: true,
       dryRun: true,
+      rawWorksheetLineCount: lineMapped.length,
       wouldPromote: mapped.length,
+      aggregatedFrom: lineMapped.length,
       sample: mapped.slice(0, 3)
     };
   }
@@ -111,5 +121,12 @@ export async function promoteCalendarScheduleRowsFromRun(supabase, reportRunId, 
     .update({ status: "promoted", finished_at: new Date().toISOString() })
     .eq("id", reportRunId);
 
-  return { ok: true, dryRun: false, promoted, skippedUnmappedDate: (rawRows?.length ?? 0) - mapped.length };
+  return {
+    ok: true,
+    dryRun: false,
+    promoted,
+    rawWorksheetLineCount: lineMapped.length,
+    aggregatedFrom: lineMapped.length,
+    skippedUnmappedDate: (rawRows?.length ?? 0) - lineMapped.length
+  };
 }

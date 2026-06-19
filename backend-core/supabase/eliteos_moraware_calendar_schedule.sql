@@ -75,10 +75,10 @@ create index if not exists idx_moraware_calendar_schedule_rows_org_truck_date
 --   organization_id, name, moraware_view_id, report_type, export_path, expected_columns, cadence, notes
 -- ) values (
 --   '00000000-0000-0000-0000-000000000000',
---   'Moraware Install Calendar Schedule',
---   146,
+--   'Moraware Install Calendar Schedule (view 222)',
+--   222,
 --   'calendar_schedule_rows',
---   '/sys/calendar',
+--   '/sys/report/?view=222&spreadsheet=1&exportType=AllPages&table=Report',
 --   '[]'::jsonb,
 --   'manual',
 --   'Discover exact Moraware calendar export/view id and column contract before production ingest.'
