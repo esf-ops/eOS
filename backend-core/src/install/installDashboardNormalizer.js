@@ -110,7 +110,7 @@ export function buildMapUrl(address) {
 
 function buildJobWarnings(job) {
   const warnings = [];
-  if (!job.address?.line1 && !job.address?.city) warnings.push("Missing address");
+  if (!job.address?.line1 && !job.address?.city) warnings.push("Address missing");
   if (!job.scheduledStart) warnings.push("Missing scheduled time");
   if (!job.contact?.phone && !job.contact?.email && !job.contact?.name) warnings.push("Missing contact");
   if (job.scope?.sqft == null) warnings.push("Missing sqft");
@@ -185,7 +185,7 @@ export function normalizeInstallJobRow(input) {
     scheduledStart,
     scheduledEnd: null,
     sequence,
-    customerName: String(job?.account_name ?? job?.job_name ?? "").trim() || "—",
+    customerName: String(job?.account_name ?? "").trim() || contactName || "—",
     accountName: String(job?.account_name ?? "").trim() || "—",
     jobName: String(job?.job_name ?? "").trim() || "—",
     status,
@@ -195,7 +195,8 @@ export function normalizeInstallJobRow(input) {
     contact: {
       name: contactName,
       phone,
-      email
+      email,
+      allPhones: phone ? [phone] : []
     },
     scope: {
       sqft: Number.isFinite(sqft) ? sqft : null,
@@ -226,7 +227,7 @@ export function normalizeInstallJobRow(input) {
     normalized.riskFlags = ["Data audit: incomplete install-day mapping"];
   }
 
-  return normalized;
+  return finalizeInstallJobCard(normalized);
 }
 
 export function crewFromAssignedLabel(label, branch = "") {
@@ -242,4 +243,134 @@ export function crewFromAssignedLabel(label, branch = "") {
     truckName: name,
     branch: branch || ""
   };
+}
+
+/** Default Install Dashboard field/template crews (ordered). */
+export const INSTALL_DASHBOARD_ALLOWED_CREW_LABELS = Object.freeze([
+  "Truck A",
+  "Truck B",
+  "Truck C",
+  "Truck D",
+  "Truck H",
+  "Kyle",
+  "Template A Ron",
+  "Template B Alan",
+  "Template - Dyersville"
+]);
+
+export function normalizeInstallDashboardCrewLabel(label) {
+  return String(label ?? "").trim().replace(/\s+/g, " ");
+}
+
+export function isInstallDashboardAllowedCrew(label) {
+  const norm = normalizeInstallDashboardCrewLabel(label).toLowerCase();
+  if (!norm || norm === "unassigned") return false;
+  return INSTALL_DASHBOARD_ALLOWED_CREW_LABELS.some(
+    (allowed) => allowed.toLowerCase() === norm
+  );
+}
+
+/** @param {{ id: string, name: string, truckName?: string, branch?: string }[]} crews */
+export function sortInstallDashboardCrews(crews) {
+  const order = new Map(
+    INSTALL_DASHBOARD_ALLOWED_CREW_LABELS.map((name, index) => [name.toLowerCase(), index])
+  );
+  return [...crews].sort((a, b) => {
+    const ai = order.get(normalizeInstallDashboardCrewLabel(a.name).toLowerCase()) ?? 999;
+    const bi = order.get(normalizeInstallDashboardCrewLabel(b.name).toLowerCase()) ?? 999;
+    if (ai !== bi) return ai - bi;
+    return a.name.localeCompare(b.name);
+  });
+}
+
+/** @param {Record<string, unknown>[]} rows */
+export function filterInstallDashboardCalendarRows(rows) {
+  const totalRowCount = rows.length;
+  const allowedRows = rows.filter((row) => isInstallDashboardAllowedCrew(row.truck_or_crew_name));
+  return {
+    rows: allowedRows,
+    totalRowCount,
+    excludedRowCount: totalRowCount - allowedRows.length
+  };
+}
+
+export function buildFormattedAddress(address) {
+  const a = address ?? {};
+  const line1 = String(a.line1 ?? "").trim();
+  const line2 = String(a.line2 ?? "").trim();
+  const cityState = [a.city, a.state].map((x) => String(x ?? "").trim()).filter(Boolean).join(", ");
+  const postalCode = String(a.postalCode ?? "").trim();
+  const locality = [cityState, postalCode].filter(Boolean).join(" ");
+  const parts = [line1, line2, locality].filter(Boolean);
+  return parts.join(" · ");
+}
+
+function dedupePhones(values) {
+  const seen = new Set();
+  const out = [];
+  for (const value of values) {
+    const phone = String(value ?? "").trim();
+    if (!phone) continue;
+    const key = phone.replace(/[^\d+]/g, "");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(phone);
+  }
+  return out;
+}
+
+/**
+ * @param {{ name?: string, phone?: string, email?: string, allPhones?: string[] }} contact
+ */
+export function buildInstallContactPhones(contact) {
+  const allPhones = dedupePhones([
+    ...(Array.isArray(contact?.allPhones) ? contact.allPhones : []),
+    contact?.phone
+  ]);
+  return {
+    primaryPhone: allPhones[0] ?? "",
+    allPhones
+  };
+}
+
+/**
+ * Enrich an install job card with field-facing display fields.
+ * stopName/displayStopName always prefer Moraware job_name over contact/account text.
+ * @param {Record<string, unknown>} job
+ */
+export function finalizeInstallJobCard(job) {
+  const jobName = String(job.jobName ?? "").trim() || "Untitled job";
+  const accountName = String(job.accountName ?? "").trim();
+  const contactName = String(job.contact?.name ?? "").trim();
+  const { primaryPhone, allPhones } = buildInstallContactPhones(
+    /** @type {{ phone?: string, allPhones?: string[] }} */ (job.contact ?? {})
+  );
+  const formattedAddress = buildFormattedAddress(job.address);
+
+  const finalized = {
+    ...job,
+    stopName: jobName,
+    displayStopName: jobName,
+    contactName,
+    accountName: accountName || "—",
+    customerName: accountName || contactName || "—",
+    primaryPhone,
+    allPhones,
+    formattedAddress,
+    contact: {
+      ...(job.contact ?? {}),
+      name: contactName,
+      phone: primaryPhone,
+      allPhones
+    }
+  };
+
+  if (!formattedAddress && !(finalized.warnings ?? []).some((w) => /address/i.test(String(w)))) {
+    finalized.warnings = [...(finalized.warnings ?? []), "Address missing"];
+  }
+  if (!primaryPhone && !(finalized.warnings ?? []).some((w) => /phone/i.test(String(w)))) {
+    finalized.warnings = [...(finalized.warnings ?? []), "No phone on file"];
+  }
+
+  return finalized;
 }

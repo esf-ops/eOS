@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import { finalizeInstallJobCard } from "../../install/installDashboardNormalizer.js";
 import { CALENDAR_SCHEDULE_COLUMN_ALIASES } from "./calendarScheduleConstants.js";
 import { normalizeSpaces } from "./parseCsv.js";
 
@@ -92,6 +93,20 @@ function pickContactPhone(rawRow) {
     pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.phone2) ||
     ""
   );
+}
+
+function dedupeContactPhones(values) {
+  const seen = new Set();
+  const out = [];
+  for (const value of values) {
+    const phone = cleanText(value);
+    if (!phone) continue;
+    const key = phone.replace(/[^\d+]/g, "");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(phone);
+  }
+  return out;
 }
 
 /**
@@ -343,9 +358,9 @@ function scheduledStartIso(calendarDate, schedTime) {
 
 function buildJobWarnings(job) {
   const warnings = [];
-  if (!job.address?.line1 && !job.address?.city) warnings.push("Missing address");
+  if (!job.address?.line1 && !job.address?.city) warnings.push("Address missing");
   if (!job.scheduledStart) warnings.push("Missing scheduled time");
-  if (!job.contact?.phone && !job.contact?.email && !job.contact?.name) warnings.push("Missing contact");
+  if (!job.contact?.name && !job.contact?.email && !job.contact?.phone) warnings.push("Missing contact");
   if (job.scope?.sqft == null) warnings.push("Missing sqft");
   if (!job.scope?.material && !job.scope?.color) warnings.push("Missing material/color");
   if (!job.truckOrCrewName) warnings.push("Missing crew/truck");
@@ -396,9 +411,15 @@ export function calendarScheduleRowToInstallJob(row, sequence) {
       ? [cleanText(raw.worksheet_edge)]
       : [];
 
-  const contactName = cleanText(row.customer_name) || cleanText(row.account_name) || "";
-  const contactPhone =
-    cleanText(raw.cell) || cleanText(raw.phone1) || cleanText(raw.phone2) || pickContactPhone(raw);
+  const contactName = cleanText(row.customer_name) || "";
+  const accountName = cleanText(row.account_name) || "—";
+  const allPhones = dedupeContactPhones([
+    cleanText(raw.cell),
+    cleanText(raw.phone1),
+    cleanText(raw.phone2),
+    pickContactPhone(raw)
+  ]);
+  const primaryPhone = allPhones[0] || "";
   const contactEmail = cleanText(raw.email);
 
   const job = {
@@ -407,8 +428,8 @@ export function calendarScheduleRowToInstallJob(row, sequence) {
     scheduledStart: scheduledStartIso(calendarDate, row.scheduled_start_time),
     scheduledEnd: scheduledStartIso(calendarDate, row.scheduled_end_time),
     sequence,
-    customerName: contactName || cleanText(row.job_name) || "—",
-    accountName: cleanText(row.account_name) || "—",
+    customerName: accountName !== "—" ? accountName : contactName || "—",
+    accountName,
     jobName: cleanText(row.job_name) || "—",
     status: cleanText(row.activity_status) || null,
     activityType: cleanText(row.activity_type_name || row.activity_type) || null,
@@ -416,9 +437,10 @@ export function calendarScheduleRowToInstallJob(row, sequence) {
     address: addr,
     mapUrl: buildMapUrl(addr),
     contact: {
-      name: contactName,
-      phone: contactPhone,
-      email: contactEmail
+      name: contactName || accountName,
+      phone: primaryPhone,
+      email: contactEmail,
+      allPhones
     },
     scope: {
       sqft: row.sqft != null ? Number(row.sqft) : null,
@@ -439,7 +461,7 @@ export function calendarScheduleRowToInstallJob(row, sequence) {
 
   job.warnings = buildJobWarnings(job);
   if (job.warnings.length) job.riskFlags = ["Data audit: incomplete install-day mapping"];
-  return job;
+  return finalizeInstallJobCard(job);
 }
 
 /** @param {ReturnType<typeof calendarScheduleRowToInstallJob>[]} jobs */

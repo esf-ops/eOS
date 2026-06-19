@@ -3,12 +3,14 @@
   --eos-ink-soft: #1e2b48;
   --eos-ink-mid: #475067;
   --eos-ink-muted: #6b7892;
+  --eos-ink-faint: #94a0b8;
   --eos-line: rgba(11, 26, 51, 0.08);
   --eos-line-strong: rgba(11, 26, 51, 0.14);
   --eos-bg: #f6f7fb;
   --eos-surface: #ffffff;
   --eos-accent: #a3132f;
   --eos-accent-soft: rgba(163, 19, 47, 0.08);
+  --eos-accent-ring: rgba(163, 19, 47, 0.35);
   --eos-warn: #7a4a10;
   --eos-warn-soft: rgba(180, 92, 12, 0.12);
   --eos-warn-border: rgba(180, 92, 12, 0.24);
@@ -17,7 +19,10 @@
   --eos-success: #0c6e3a;
   --r-md: 12px;
   --r-lg: 18px;
+  --sh-1: 0 1px 2px rgba(11, 26, 51, 0.04);
   --sh-card: 0 1px 2px rgba(11, 26, 51, 0.04), 0 8px 26px rgba(11, 26, 51, 0.06);
+  --eos-dur-1: 160ms;
+  --eos-ease: cubic-bezier(0.22, 1, 0.36, 1);
   --font: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
@@ -42,10 +47,11 @@ body {
 }
 
 .main {
+  flex: 1;
   width: 100%;
   max-width: 720px;
   margin: 0 auto;
-  padding: 16px 16px calc(24px + env(safe-area-inset-bottom, 0px));
+  padding: 20px 16px calc(28px + env(safe-area-inset-bottom, 0px));
 }
 
 .page-title {
@@ -128,6 +134,36 @@ body {
   border-radius: var(--r-md);
   background: rgba(46, 105, 184, 0.06);
   border: 1px solid rgba(46, 105, 184, 0.18);
+}
+
+.crew-picker {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  margin-bottom: 14px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.crew-chip {
+  flex: 0 0 auto;
+  appearance: none;
+  border: 1px solid var(--eos-line-strong);
+  background: var(--eos-surface);
+  color: var(--eos-ink-soft);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.crew-chip-active {
+  background: var(--eos-accent);
+  border-color: var(--eos-accent);
+  color: #fff;
 }
 
 .field {
@@ -274,7 +310,7 @@ body {
 }
 
 .job-card {
-  padding: 16px;
+  padding: 18px 16px 16px;
   border-radius: var(--r-lg);
   background: var(--eos-surface);
   border: 1px solid var(--eos-line);
@@ -287,7 +323,7 @@ body {
   justify-content: space-between;
   align-items: center;
   gap: 8px;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 
 .stop-badge {
@@ -303,23 +339,98 @@ body {
 }
 
 .job-time {
-  font-size: 0.92rem;
+  font-size: 1rem;
   font-weight: 700;
   color: var(--eos-ink-soft);
 }
 
 .job-title {
-  margin: 0 0 4px;
-  font-size: 1.05rem;
-  letter-spacing: -0.01em;
+  margin: 0 0 10px;
+  font-size: clamp(1.2rem, 4.8vw, 1.45rem);
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  color: var(--eos-ink);
 }
 
-.job-sub,
-.job-address,
-.scope-line {
-  margin: 0 0 10px;
+.job-address-block {
+  margin-bottom: 12px;
+}
+
+.job-address-line {
+  margin: 0;
+  color: var(--eos-ink-mid);
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+.job-address-missing {
+  margin: 0 0 12px;
+  color: var(--eos-warn);
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.job-contact-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: rgba(11, 26, 51, 0.03);
+  border: 1px solid var(--eos-line);
+}
+
+.job-contact-label,
+.job-meta-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--eos-ink-muted);
+}
+
+.job-contact-name {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--eos-ink-soft);
+}
+
+.job-phone-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.job-phone-link,
+.job-email-link {
+  color: var(--eos-accent);
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.job-contact-empty {
+  color: var(--eos-ink-muted);
+  font-size: 0.88rem;
+}
+
+.job-account-line {
+  margin: 0 0 8px;
   color: var(--eos-ink-mid);
   font-size: 0.88rem;
+}
+
+.scope-line,
+.activity-line {
+  margin: 0 0 8px;
+  color: var(--eos-ink-mid);
+  font-size: 0.88rem;
+}
+
+.activity-line {
+  color: var(--eos-ink-muted);
+  font-size: 0.82rem;
 }
 
 .job-actions {
@@ -342,6 +453,12 @@ body {
   background: var(--eos-warn-soft);
   border: 1px solid var(--eos-warn-border);
   color: var(--eos-warn);
+}
+
+.chip-muted {
+  background: rgba(11, 26, 51, 0.04);
+  border: 1px solid var(--eos-line);
+  color: var(--eos-ink-muted);
 }
 
 .chip-risk {

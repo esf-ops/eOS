@@ -22,10 +22,17 @@ type InstallJob = {
   scheduledStart?: string | null;
   scheduledEnd?: string | null;
   sequence?: number;
+  stopName?: string;
+  displayStopName?: string;
   customerName?: string;
   accountName?: string;
   jobName?: string;
+  contactName?: string;
   status?: string;
+  activityType?: string;
+  primaryPhone?: string;
+  allPhones?: string[];
+  formattedAddress?: string;
   address?: {
     line1?: string;
     line2?: string;
@@ -34,7 +41,7 @@ type InstallJob = {
     postalCode?: string;
   };
   mapUrl?: string;
-  contact?: { name?: string; phone?: string; email?: string };
+  contact?: { name?: string; phone?: string; email?: string; allPhones?: string[] };
   scope?: {
     sqft?: number | null;
     rooms?: string[];
@@ -64,6 +71,8 @@ type InstallDayPayload = {
     selectedDate?: string;
     calendarFeedConfigured?: boolean;
     calendarRowCount?: number;
+    installDashboardRowCount?: number;
+    excludedRowCount?: number;
     brainActivityCount?: number;
     missingFieldCounts?: Record<string, number>;
     fallbackFrom?: string;
@@ -142,27 +151,55 @@ function formatDateLabel(isoDate: string): string {
   return d.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
 }
 
-function formatAddress(job: InstallJob): string {
+function formatAddressLines(job: InstallJob): { line1: string; line2: string; locality: string; hasAddress: boolean } {
   const a = job.address ?? {};
-  const parts = [a.line1, a.line2, [a.city, a.state].filter(Boolean).join(", "), a.postalCode]
-    .map((x) => String(x ?? "").trim())
-    .filter(Boolean);
-  return parts.join(" · ") || "Address not available";
+  const line1 = String(a.line1 ?? "").trim();
+  const line2 = String(a.line2 ?? "").trim();
+  const cityState = [a.city, a.state].map((x) => String(x ?? "").trim()).filter(Boolean).join(", ");
+  const postalCode = String(a.postalCode ?? "").trim();
+  const locality = [cityState, postalCode].filter(Boolean).join(" ");
+  return {
+    line1,
+    line2,
+    locality,
+    hasAddress: Boolean(line1 || line2 || locality)
+  };
+}
+
+function stopTitleFor(job: InstallJob): string {
+  return (
+    String(job.displayStopName ?? job.stopName ?? job.jobName ?? "").trim() || "Untitled job"
+  );
+}
+
+function phonesFor(job: InstallJob): string[] {
+  const listed = Array.isArray(job.allPhones)
+    ? job.allPhones
+    : Array.isArray(job.contact?.allPhones)
+      ? job.contact.allPhones
+      : [];
+  const deduped = [...listed.map((p) => String(p ?? "").trim()).filter(Boolean)];
+  const primary = String(job.primaryPhone ?? job.contact?.phone ?? "").trim();
+  if (primary && !deduped.includes(primary)) deduped.unshift(primary);
+  return deduped;
+}
+
+function telHref(phone: string): string {
+  return `tel:${phone.replace(/[^\d+]/g, "")}`;
 }
 
 function scopeSummary(scope: InstallJob["scope"]): string {
-  if (!scope) return "Scope details pending sync";
+  if (!scope) return "";
   const bits: string[] = [];
   if (scope.sqft != null) bits.push(`${scope.sqft} sq ft`);
   if (scope.material) bits.push(scope.material);
   if (scope.color) bits.push(scope.color);
   if (scope.edge) bits.push(scope.edge);
-  if (scope.backsplash) bits.push(`Backsplash: ${scope.backsplash}`);
-  if (scope.sinkNotes) bits.push(`Sink: ${scope.sinkNotes}`);
-  if (scope.cutoutNotes) bits.push(`Cutouts: ${scope.cutoutNotes}`);
-  if (scope.waterfall) bits.push("Waterfall");
-  if (scope.fullHeightSplash) bits.push("Full-height splash");
-  return bits.length ? bits.join(" · ") : "Scope details pending sync";
+  return bits.length ? bits.join(" · ") : "";
+}
+
+function activitySummary(job: InstallJob): string {
+  return [job.activityType, job.status].map((x) => String(x ?? "").trim()).filter(Boolean).join(" · ");
 }
 
 function isManagerRole(role: string): boolean {
@@ -311,6 +348,12 @@ export default function InstallDashboardApp() {
     () => userInitialsFor(userMetaName, userEmail),
     [userMetaName, userEmail]
   );
+  const chipSubtitle =
+    userRole && userRole.trim()
+      ? userRole.replace(/_/g, " ")
+      : userDisplayEmail && userDisplayEmail.toLowerCase() !== userDisplayName.toLowerCase()
+        ? userDisplayEmail
+        : "";
 
   const jobs = day?.jobs ?? [];
   const dayWarnings = day?.warnings ?? [];
@@ -321,6 +364,9 @@ export default function InstallDashboardApp() {
     ? [
         day?.meta?.selectedDate ? `Date: ${day.meta.selectedDate}` : null,
         day?.meta?.calendarRowCount != null ? `Calendar rows: ${day.meta.calendarRowCount}` : null,
+        day?.meta?.excludedRowCount != null && day.meta.excludedRowCount > 0
+          ? `Excluded rows: ${day.meta.excludedRowCount}`
+          : null,
         day?.meta?.brainActivityCount != null ? `Brain activities: ${day.meta.brainActivityCount}` : null,
         formatMissingFieldSummary(day?.meta?.missingFieldCounts) || null
       ]
@@ -367,7 +413,7 @@ export default function InstallDashboardApp() {
           homeHref="/"
           userName={userDisplayName}
           userEmail={userDisplayEmail}
-          userSubtitle={userRole ? userRole.replace(/_/g, " ") : userDisplayEmail}
+          userSubtitle={chipSubtitle}
           initials={userDisplayInitials}
           menuItems={menuItems}
           onSignOut={() => void signOut()}
@@ -381,7 +427,7 @@ export default function InstallDashboardApp() {
         />
       )}
 
-      <main className="main">
+      <main className="main" role="main">
         {!supabase ? (
           <div className="banner banner-warn" role="alert">
             Supabase is not configured. Set <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code>.
@@ -446,6 +492,25 @@ export default function InstallDashboardApp() {
               {debugMetaLine ? <p className="meta-line meta-debug">{debugMetaLine}</p> : null}
             </header>
 
+            {crews.length > 1 ? (
+              <section className="crew-picker" aria-label="Select crew or truck">
+                {crews.map((crew) => {
+                  const active = selectedCrewId === crew.id;
+                  return (
+                    <button
+                      key={crew.id}
+                      type="button"
+                      className={active ? "crew-chip crew-chip-active" : "crew-chip"}
+                      aria-pressed={active}
+                      onClick={() => setSelectedCrewId(crew.id)}
+                    >
+                      {crew.truckName || crew.name}
+                    </button>
+                  );
+                })}
+              </section>
+            ) : null}
+
             {managerMode ? (
               <section className="manager-bar" aria-label="Manager preview controls">
                 <label className="field field-inline">
@@ -500,32 +565,80 @@ export default function InstallDashboardApp() {
             <div className="job-list">
               {jobs.map((job) => {
                 const expanded = expandedJobId === job.id;
-                const phone = String(job.contact?.phone ?? "").trim();
+                const title = stopTitleFor(job);
+                const addressLines = formatAddressLines(job);
+                const phoneList = phonesFor(job);
+                const primaryPhone = phoneList[0] ?? "";
                 const mapUrl = String(job.mapUrl ?? "").trim();
+                const contactName = String(job.contactName ?? job.contact?.name ?? "").trim();
+                const accountLabel = String(job.accountName ?? job.customerName ?? "").trim();
+                const scopeLine = scopeSummary(job.scope);
+                const activityLine = activitySummary(job);
                 return (
                   <article key={job.id} className="job-card">
                     <div className="job-card-head">
                       <span className="stop-badge">Stop {job.sequence ?? "—"}</span>
                       <span className="job-time">{formatTime(job.scheduledStart)}</span>
                     </div>
-                    <h2 className="job-title">{job.customerName || job.jobName || "Untitled job"}</h2>
-                    <p className="job-sub">{job.jobName}</p>
-                    <p className="job-address">{formatAddress(job)}</p>
+
+                    <h2 className="job-title">{title}</h2>
+
+                    {addressLines.hasAddress ? (
+                      <div className="job-address-block">
+                        {addressLines.line1 ? <p className="job-address-line">{addressLines.line1}</p> : null}
+                        {addressLines.line2 ? <p className="job-address-line">{addressLines.line2}</p> : null}
+                        {addressLines.locality ? (
+                          <p className="job-address-line">{addressLines.locality}</p>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <p className="job-address-missing">Address missing</p>
+                    )}
+
+                    <div className="job-contact-block">
+                      <span className="job-contact-label">Contact</span>
+                      {contactName ? <span className="job-contact-name">{contactName}</span> : null}
+                      {phoneList.length ? (
+                        <div className="job-phone-list">
+                          {phoneList.map((phone) => (
+                            <a key={phone} className="job-phone-link" href={telHref(phone)}>
+                              {phone}
+                            </a>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="job-contact-empty">No phone on file</span>
+                      )}
+                      {job.contact?.email ? (
+                        <a className="job-email-link" href={`mailto:${job.contact.email}`}>
+                          {job.contact.email}
+                        </a>
+                      ) : null}
+                    </div>
+
+                    {accountLabel && accountLabel !== "—" ? (
+                      <p className="job-account-line">
+                        <span className="job-meta-label">Account</span> {accountLabel}
+                      </p>
+                    ) : null}
+
+                    {scopeLine ? <p className="scope-line">{scopeLine}</p> : null}
+                    {activityLine ? <p className="activity-line">{activityLine}</p> : null}
 
                     <div className="job-actions">
                       {mapUrl ? (
-                        <a className="btn btn-secondary btn-sm" href={mapUrl} target="_blank" rel="noreferrer">
+                        <a className="btn btn-primary btn-sm" href={mapUrl} target="_blank" rel="noreferrer">
                           Open map
                         </a>
                       ) : (
-                        <span className="chip chip-warn">Missing address</span>
+                        <span className="chip chip-warn">Address missing</span>
                       )}
-                      {phone ? (
-                        <a className="btn btn-secondary btn-sm" href={`tel:${phone.replace(/[^\d+]/g, "")}`}>
-                          Call {job.contact?.name || "contact"}
+                      {primaryPhone ? (
+                        <a className="btn btn-secondary btn-sm" href={telHref(primaryPhone)}>
+                          Call{contactName ? ` ${contactName.split(" ")[0]}` : ""}
                         </a>
                       ) : (
-                        <span className="chip chip-warn">No phone</span>
+                        <span className="chip chip-muted">No phone on file</span>
                       )}
                       <button
                         type="button"
@@ -533,11 +646,9 @@ export default function InstallDashboardApp() {
                         aria-expanded={expanded}
                         onClick={() => setExpandedJobId(expanded ? null : job.id)}
                       >
-                        {expanded ? "Hide details" : "View notes/details"}
+                        {expanded ? "Hide details" : "Notes/details"}
                       </button>
                     </div>
-
-                    <p className="scope-line">{scopeSummary(job.scope)}</p>
 
                     {(job.warnings?.length ?? 0) > 0 ? (
                       <ul className="job-warnings">
@@ -562,16 +673,16 @@ export default function InstallDashboardApp() {
                     {expanded ? (
                       <div className="job-details">
                         <dl className="detail-dl">
+                          <dt>Job name</dt>
+                          <dd>{job.jobName || title}</dd>
                           <dt>Status</dt>
                           <dd>{job.status || "—"}</dd>
+                          <dt>Activity</dt>
+                          <dd>{job.activityType || "—"}</dd>
                           <dt>Moraware job</dt>
                           <dd>{job.morawareJobId || "—"}</dd>
-                          <dt>Contact</dt>
-                          <dd>
-                            {[job.contact?.name, job.contact?.phone, job.contact?.email]
-                              .filter(Boolean)
-                              .join(" · ") || "—"}
-                          </dd>
+                          <dt>Address</dt>
+                          <dd>{job.formattedAddress || "—"}</dd>
                         </dl>
                         {job.notes?.length ? (
                           <div className="notes-block">

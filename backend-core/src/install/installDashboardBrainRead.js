@@ -1,8 +1,10 @@
 import {
   crewFromAssignedLabel,
   extractAssignedLabel,
+  isInstallDashboardAllowedCrew,
   isInstallLikeActivity,
-  normalizeInstallJobRow
+  normalizeInstallJobRow,
+  sortInstallDashboardCrews
 } from "./installDashboardNormalizer.js";
 import { buildFixtureInstallDay, FIXTURE_CREWS } from "./installDashboardFixtures.js";
 import {
@@ -131,6 +133,7 @@ export async function loadInstallDayFromBrainActivities(supabase, opts) {
   for (const activity of installActs) {
     const jobId = String(activity.job_id ?? "");
     const assigned = extractAssignedLabel(activity.raw_json) || "Unassigned";
+    if (!isInstallDashboardAllowedCrew(assigned)) continue;
     const bucket = crewBuckets.get(assigned) ?? { label: assigned, jobs: [] };
     bucket.jobs.push(
       normalizeInstallJobRow({
@@ -150,9 +153,13 @@ export async function loadInstallDayFromBrainActivities(supabase, opts) {
     jobs: bucket.jobs
   }));
 
-  let selected = crewEntries[0] ?? null;
+  const sortedCrewEntries = sortInstallDashboardCrews(crewEntries.map((entry) => entry.crew))
+    .map((crew) => crewEntries.find((entry) => entry.crew.id === crew.id))
+    .filter(Boolean);
+
+  let selected = sortedCrewEntries[0] ?? null;
   if (opts.crewId) {
-    selected = crewEntries.find((e) => e.crew.id === opts.crewId) ?? selected;
+    selected = sortedCrewEntries.find((e) => e.crew.id === opts.crewId) ?? selected;
   }
 
   if (!selected) {
@@ -160,7 +167,7 @@ export async function loadInstallDayFromBrainActivities(supabase, opts) {
       date: opts.date,
       crew: null,
       jobs: [],
-      warnings: ["No crew buckets could be built from install activities"],
+      warnings: ["No allowed install/template crew activities for this date"],
       meta: {
         source: "brain_job_activities",
         fixtureMode: false,
@@ -173,7 +180,7 @@ export async function loadInstallDayFromBrainActivities(supabase, opts) {
   }
 
   const dayWarnings = [];
-  if (crewEntries.length > 1 && !opts.crewId) {
+  if (sortedCrewEntries.length > 1 && !opts.crewId) {
     dayWarnings.push("Multiple crews/trucks scheduled — select a crew to narrow the route");
   }
 
@@ -188,7 +195,8 @@ export async function loadInstallDayFromBrainActivities(supabase, opts) {
       selectedDate: opts.date,
       brainActivityCount,
       calendarRowCount: 0,
-      availableCrewCount: crewEntries.length,
+      availableCrewCount: sortedCrewEntries.length,
+      allowedCrewCount: sortedCrewEntries.length,
       missingFieldCounts: computeMissingFieldCounts(selected.jobs)
     }
   };
@@ -273,10 +281,12 @@ export async function loadInstallCrews(supabase, opts) {
   const labels = new Set();
   for (const row of activities ?? []) {
     if (!isInstallLikeActivity(row)) continue;
-    labels.add(extractAssignedLabel(row.raw_json) || "Unassigned");
+    const assigned = extractAssignedLabel(row.raw_json) || "Unassigned";
+    if (!isInstallDashboardAllowedCrew(assigned)) continue;
+    labels.add(assigned);
   }
 
-  const crews = [...labels].map((label) => crewFromAssignedLabel(label));
+  const crews = sortInstallDashboardCrews([...labels].map((label) => crewFromAssignedLabel(label)));
   if (!crews.length && allowFixtureFallback()) {
     return { date, crews: FIXTURE_CREWS.map((c) => ({ ...c })), meta: { source: "fixture" } };
   }

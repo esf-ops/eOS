@@ -1,4 +1,8 @@
-import { crewFromAssignedLabel } from "./installDashboardNormalizer.js";
+import {
+  crewFromAssignedLabel,
+  filterInstallDashboardCalendarRows,
+  sortInstallDashboardCrews
+} from "./installDashboardNormalizer.js";
 import {
   calendarScheduleRowToInstallJob,
   computeMissingFieldCounts
@@ -68,10 +72,13 @@ function bucketJobsByCrew(rows, crewId) {
     buckets.set(label, list);
   }
 
-  const crewEntries = [...buckets.entries()].map(([label, jobs]) => ({
+  let crewEntries = [...buckets.entries()].map(([label, jobs]) => ({
     crew: crewFromAssignedLabel(label),
     jobs
   }));
+  crewEntries = sortInstallDashboardCrews(crewEntries.map((entry) => entry.crew))
+    .map((crew) => crewEntries.find((entry) => entry.crew.id === crew.id))
+    .filter(Boolean);
 
   let selected = crewEntries[0] ?? null;
   if (crewId) selected = crewEntries.find((e) => e.crew.id === crewId) ?? selected;
@@ -148,18 +155,25 @@ export async function loadInstallDayFromCalendarSchedule(supabase, opts) {
   }
 
   const rows = data ?? [];
-  baseMeta.calendarRowCount = rows.length;
+  const filtered = filterInstallDashboardCalendarRows(rows);
+  baseMeta.calendarRowCount = filtered.totalRowCount;
+  baseMeta.installDashboardRowCount = filtered.rows.length;
+  baseMeta.excludedRowCount = filtered.excludedRowCount;
 
-  if (!rows.length) {
+  if (!filtered.rows.length) {
+    const warnings =
+      filtered.totalRowCount > 0
+        ? ["No allowed install/template crew rows for selected date"]
+        : ["Calendar schedule rows not available for selected date"];
     return {
       ok: true,
       used: false,
-      warnings: ["Calendar schedule rows not available for selected date"],
+      warnings,
       meta: baseMeta
     };
   }
 
-  const { crewEntries, selected } = bucketJobsByCrew(rows, opts.crewId ?? null);
+  const { crewEntries, selected } = bucketJobsByCrew(filtered.rows, opts.crewId ?? null);
   if (!selected) {
     return {
       ok: true,
@@ -188,6 +202,7 @@ export async function loadInstallDayFromCalendarSchedule(supabase, opts) {
       source: "calendar_schedule_feed",
       fixtureMode: false,
       availableCrewCount: crewEntries.length,
+      allowedCrewCount: crewEntries.length,
       missingFieldCounts
     }
   };
@@ -222,13 +237,21 @@ export async function loadCalendarScheduleCrews(supabase, opts) {
     };
   }
 
+  const filtered = filterInstallDashboardCalendarRows(data);
   const labels = new Set();
-  for (const row of data) {
+  for (const row of filtered.rows) {
     labels.add(String(row.truck_or_crew_name ?? "").trim() || "Unassigned");
   }
+  const crews = sortInstallDashboardCrews([...labels].map((label) => crewFromAssignedLabel(label)));
   return {
     date: opts.date,
-    crews: [...labels].map((label) => crewFromAssignedLabel(label)),
-    meta: { source: "calendar_schedule_feed", calendarFeedConfigured: true, calendarRowCount: data.length }
+    crews,
+    meta: {
+      source: "calendar_schedule_feed",
+      calendarFeedConfigured: true,
+      calendarRowCount: filtered.totalRowCount,
+      installDashboardRowCount: filtered.rows.length,
+      excludedRowCount: filtered.excludedRowCount
+    }
   };
 }

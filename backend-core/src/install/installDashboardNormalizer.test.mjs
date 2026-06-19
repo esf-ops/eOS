@@ -19,7 +19,11 @@ import {
   normalizeActivityStatus,
   normalizeActivityType,
   normalizeInstallJobRow,
-  crewFromAssignedLabel
+  crewFromAssignedLabel,
+  INSTALL_DASHBOARD_ALLOWED_CREW_LABELS,
+  isInstallDashboardAllowedCrew,
+  filterInstallDashboardCalendarRows,
+  sortInstallDashboardCrews
 } from "./installDashboardNormalizer.js";
 import {
   mapCalendarScheduleRow,
@@ -165,7 +169,7 @@ function testNormalizeInstallJobRowMissingOptionalFieldsDoNotThrow() {
   assert.equal(row.activityType, null);
   assert.ok(row.warnings.includes("Missing activity status"));
   assert.ok(row.warnings.includes("Missing activity type"));
-  assert.ok(row.warnings.includes("Missing address"));
+  assert.ok(row.warnings.includes("Address missing"));
 }
 
 function testIsInstallLikeActivityUsesNormalizedType() {
@@ -230,11 +234,17 @@ function testCalendarScheduleRowMapsToInstallJobCard() {
   assert.equal(mapped.sqft, 42.5);
 
   const job = calendarScheduleRowToInstallJob(mapped, 1);
-  assert.equal(job.truckOrCrewName, "Truck A");
-  assert.equal(job.customerName, "Jane Sample");
+  assert.equal(job.displayStopName, "Sample Kitchen Job");
+  assert.equal(job.stopName, "Sample Kitchen Job");
+  assert.equal(job.jobName, "Sample Kitchen Job");
+  assert.notEqual(job.displayStopName, job.contactName);
+  assert.equal(job.contactName, "Jane Sample");
+  assert.equal(job.customerName, "Sample Builders LLC");
   assert.equal(job.accountName, "Sample Builders LLC");
   assert.equal(job.address.line1, "123 Oak St");
   assert.equal(job.address.line2, "Unit 2");
+  assert.equal(job.primaryPhone, "319-555-0101");
+  assert.deepEqual(job.allPhones, ["319-555-0101", "319-555-0100"]);
   assert.equal(job.contact.phone, "319-555-0101");
   assert.equal(job.contact.email, "jane@example.com");
   assert.equal(job.scope.sqft, 42.5);
@@ -242,6 +252,7 @@ function testCalendarScheduleRowMapsToInstallJobCard() {
   assert.ok(job.scope.color.includes("Cloud White"));
   assert.ok(job.scope.color.includes("Midnight Black"));
   assert.match(job.scheduledStart ?? "", /2026-06-19T08:00:00/);
+  assert.ok(job.formattedAddress.includes("123 Oak St"));
 }
 
 function testDuplicateWorksheetRowsAggregateToOneStop() {
@@ -352,6 +363,91 @@ function testFallbackToBrainActivitiesWhenCalendarUnavailable() {
   });
 }
 
+function testAllowedCrewFilterIncludesOnlyFieldCrews() {
+  for (const crew of INSTALL_DASHBOARD_ALLOWED_CREW_LABELS) {
+    assert.equal(isInstallDashboardAllowedCrew(crew), true, crew);
+  }
+  assert.equal(isInstallDashboardAllowedCrew("Brayden / Saw Program"), false);
+  assert.equal(isInstallDashboardAllowedCrew("Saw Program"), false);
+  assert.equal(isInstallDashboardAllowedCrew("Shop Production"), false);
+}
+
+function testAllowedCrewFilterExcludesNonAllowlistedRows() {
+  const rows = [
+    { truck_or_crew_name: "Truck A" },
+    { truck_or_crew_name: "Truck B" },
+    { truck_or_crew_name: "Brayden / Saw Program" },
+    { truck_or_crew_name: "Template - Dyersville" }
+  ];
+  const filtered = filterInstallDashboardCalendarRows(rows);
+  assert.equal(filtered.totalRowCount, 4);
+  assert.equal(filtered.rows.length, 3);
+  assert.equal(filtered.excludedRowCount, 1);
+}
+
+function testAllowedCrewsSortInConfiguredOrder() {
+  const crews = sortInstallDashboardCrews([
+    crewFromAssignedLabel("Template - Dyersville"),
+    crewFromAssignedLabel("Truck C"),
+    crewFromAssignedLabel("Truck A")
+  ]);
+  assert.deepEqual(
+    crews.map((c) => c.name),
+    ["Truck A", "Truck C", "Template - Dyersville"]
+  );
+}
+
+function testJobNameIsPrimaryStopTitleNotContactName() {
+  const job = calendarScheduleRowToInstallJob(
+    {
+      calendar_date: "2026-06-22",
+      scheduled_start_time: "08:00",
+      truck_or_crew_name: "Truck A",
+      job_name: "Meyer, Bill##",
+      customer_name: "Bill Meyer",
+      account_name: "Meyer, Bill##",
+      address_line1: "310 Palisades Rd",
+      city: "Mt. Vernon",
+      state: "IA",
+      postal_code: "52314",
+      activity_status: "Confirmed",
+      activity_type_name: "Install - Quartz Basic",
+      sqft: 12,
+      material: "Quartz",
+      color: "Moonflakes",
+      raw_payload: { phone1: "319-555-0100" }
+    },
+    1
+  );
+  assert.equal(job.displayStopName, "Meyer, Bill##");
+  assert.equal(job.contactName, "Bill Meyer");
+  assert.notEqual(job.displayStopName, job.contactName);
+}
+
+function testMissingPhoneAndAddressWarnings() {
+  const job = calendarScheduleRowToInstallJob(
+    {
+      calendar_date: "2026-06-22",
+      scheduled_start_time: "08:00",
+      truck_or_crew_name: "Truck A",
+      job_name: "No Contact Job",
+      customer_name: "",
+      account_name: "",
+      address_line1: "",
+      city: "",
+      activity_status: "Confirmed",
+      activity_type_name: "Install",
+      sqft: 10,
+      material: "Quartz",
+      color: "White",
+      raw_payload: {}
+    },
+    1
+  );
+  assert.ok(job.warnings.some((w) => /address/i.test(w)));
+  assert.ok(job.warnings.some((w) => /phone/i.test(w)));
+}
+
 function testMissingFieldCountsForCalendarJobs() {
   const job = calendarScheduleRowToInstallJob(
     {
@@ -397,6 +493,11 @@ const tests = [
   ["multiple trucks appear in crew picker", testMultipleTrucksAppearInCrewPicker],
   ["no calendar rows returns warning not crash", testCalendarReadReturnsWarningWhenNoRowsForDate],
   ["fallback to brain_job_activities still works", testFallbackToBrainActivitiesWhenCalendarUnavailable],
+  ["allowed crew filter includes only field crews", testAllowedCrewFilterIncludesOnlyFieldCrews],
+  ["allowed crew filter excludes non-allowlisted rows", testAllowedCrewFilterExcludesNonAllowlistedRows],
+  ["allowed crews sort in configured order", testAllowedCrewsSortInConfiguredOrder],
+  ["job_name is primary stop title not contact name", testJobNameIsPrimaryStopTitleNotContactName],
+  ["missing phone and address warnings", testMissingPhoneAndAddressWarnings],
   ["missing field counts for calendar jobs", testMissingFieldCountsForCalendarJobs]
 ];
 
