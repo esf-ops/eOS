@@ -178,7 +178,10 @@ export async function fetchReportFeedArtifacts(params) {
 
   if (!webSession.ok) {
     console.log("Moraware web login failed before report export fetch.");
-    if (webSession.attempts?.length) {
+    if (webSession.lastAttempt) {
+      console.log("Last login attempt diagnostics (safe/redacted):");
+      console.log(JSON.stringify(webSession.lastAttempt, null, 2));
+    } else if (webSession.attempts?.length) {
       console.log(`  login attempts: ${JSON.stringify(webSession.attempts)}`);
     }
     return {
@@ -186,7 +189,8 @@ export async function fetchReportFeedArtifacts(params) {
       error: webSession.error ?? "auth_failed",
       stage: webSession.stage ?? "web_login",
       detail: webSession.detail,
-      webBase
+      webBase,
+      lastAttempt: webSession.lastAttempt ?? null
     };
   }
 

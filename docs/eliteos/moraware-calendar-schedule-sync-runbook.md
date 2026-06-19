@@ -43,7 +43,12 @@ Never commit this file. Never log secret values.
 | `MORAWARE_USERNAME` | Moraware login |
 | `MORAWARE_PASSWORD` | Moraware login |
 | `MORAWARE_ACCOUNT_ID` | Optional; same as Brain worker if required |
-| `MORAWARE_WEB_BASE_URL` | Optional override for web UI origin used for form login + report GET (derived from `MORAWARE_API_URL` when omitted) |
+| `MORAWARE_WEB_BASE_URL` | Optional override for web UI origin used for form login + report GET |
+| `MORAWARE_WEB_LOGIN_PATH` | Optional login page path override (default tries `/sys/login`, `/sys/login.aspx`, `/d.aspx`, …) |
+| `MORAWARE_WEB_USERNAME_FIELD` | Optional override when auto-detect picks wrong username input |
+| `MORAWARE_WEB_PASSWORD_FIELD` | Optional override for password input name |
+| `MORAWARE_WEB_ACCOUNT_FIELD` | Optional account/company field when tenant requires it |
+| `MORAWARE_WEB_LOGIN_SUCCESS_PATH` | Optional post-login verification GET (default `/sys/report/?view=222`) |
 | `MORAWARE_DEFAULT_ORGANIZATION_ID` | eliteOS org UUID |
 | `SUPABASE_URL` | Supabase project URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | Service role (worker only) |

@@ -180,6 +180,10 @@ export async function runCalendarScheduleSync(deps = {}) {
     });
     await writeArtifactBundle(artifactDir, { summary });
     printSummary(summary);
+    if (fetchResult.lastAttempt) {
+      console.log("Web login last attempt (safe/redacted):");
+      console.log(JSON.stringify(fetchResult.lastAttempt, null, 2));
+    }
     if (fetchResult.urls?.csvUrl) logLine("CSV URL (redacted):", fetchResult.urls.csvUrl);
     if (fetchResult.status != null) logLine("CSV HTTP status:", fetchResult.status);
     if (fetchResult.contentType) logLine("CSV content-type:", fetchResult.contentType);
