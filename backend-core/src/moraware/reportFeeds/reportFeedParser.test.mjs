@@ -893,6 +893,12 @@ async function testCalendarSchedulePromotionDryRunAllowsLegacyDrift() {
         limit() {
           return api;
         },
+        range() {
+          if (table === "moraware_report_raw_rows") {
+            return Promise.resolve({ data: [], error: null });
+          }
+          return Promise.resolve({ data: [], error: null });
+        },
         maybeSingle() {
           if (table === "moraware_report_runs") {
             return Promise.resolve({
@@ -918,12 +924,6 @@ async function testCalendarSchedulePromotionDryRunAllowsLegacyDrift() {
             });
           }
           return Promise.resolve({ data: null, error: null });
-        },
-        then(onFulfilled, onRejected) {
-          if (table === "moraware_report_raw_rows") {
-            return Promise.resolve({ data: [], error: null }).then(onFulfilled, onRejected);
-          }
-          return Promise.resolve({ data: [], error: null }).then(onFulfilled, onRejected);
         }
       };
       return api;

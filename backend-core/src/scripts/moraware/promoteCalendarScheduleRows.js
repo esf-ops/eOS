@@ -169,7 +169,9 @@ async function main() {
   }
 
   if (dryRun) {
-    console.log("Calendar raw rows read:              ", result.calendarRawRowsRead ?? 0);
+    const pageNote =
+      (result.rawRowFetchPages ?? 0) > 1 ? ` (${result.rawRowFetchPages} pages)` : "";
+    console.log("Calendar raw rows read:              ", `${result.calendarRawRowsRead ?? 0}${pageNote}`);
     console.log("Promotable calendar lines:           ", result.promotableLineCount ?? 0);
     console.log("Schedule stops planned:              ", result.scheduleStopsPlanned ?? result.wouldPromote ?? 0);
     if ((result.skippedMissingRequired ?? 0) > 0) {
@@ -196,7 +198,9 @@ async function main() {
     return;
   }
 
-  console.log("Calendar raw rows read:              ", result.calendarRawRowsRead ?? 0);
+  const pageNote =
+    (result.rawRowFetchPages ?? 0) > 1 ? ` (${result.rawRowFetchPages} pages)` : "";
+  console.log("Calendar raw rows read:              ", `${result.calendarRawRowsRead ?? 0}${pageNote}`);
   console.log("Promotable calendar lines:           ", result.promotableLineCount ?? 0);
   console.log("Schedule stops promoted:             ", result.scheduleStopsPromoted ?? result.promoted ?? 0);
   if ((result.skippedMissingRequired ?? 0) > 0) {

@@ -15,9 +15,42 @@ import {
 } from "./mapCalendarScheduleRow.js";
 import { isSchemaDriftBlocking } from "./schemaDriftPolicy.js";
 
+const RAW_ROWS_PAGE_SIZE = 1000;
+
+const RAW_ROW_SELECT =
+  "id, row_number, row_hash, raw_row, account_id, job_id, account_name, job_name, identity_status";
+
 function isMissingRelationError(err) {
   const msg = String(err?.message ?? err ?? "").toLowerCase();
   return msg.includes("does not exist") || String(err?.code ?? "") === "42P01";
+}
+
+/**
+ * Fetch all moraware_report_raw_rows for a run (Supabase/PostgREST default limit is 1,000).
+ * @param {import("@supabase/supabase-js").SupabaseClient} supabase
+ * @param {string} reportRunId
+ */
+export async function fetchAllReportRawRowsForRun(supabase, reportRunId) {
+  const all = [];
+  let from = 0;
+  let pages = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from("moraware_report_raw_rows")
+      .select(RAW_ROW_SELECT)
+      .eq("report_run_id", reportRunId)
+      .order("row_number", { ascending: true })
+      .range(from, from + RAW_ROWS_PAGE_SIZE - 1);
+    if (error) throw error;
+    pages += 1;
+    if (!data?.length) break;
+    all.push(...data);
+    if (data.length < RAW_ROWS_PAGE_SIZE) break;
+    from += RAW_ROWS_PAGE_SIZE;
+  }
+
+  return { rows: all, pages };
 }
 
 /**
@@ -52,18 +85,16 @@ export async function promoteCalendarScheduleRowsFromRun(supabase, reportRunId, 
     return { ok: false, error: "schema_drift_blocks_promotion", detail: run.schema_drift };
   }
 
-  const { data: rawRows, error: rawErr } = await supabase
-    .from("moraware_report_raw_rows")
-    .select("id, row_number, row_hash, raw_row, account_id, job_id, account_name, job_name, identity_status")
-    .eq("report_run_id", reportRunId)
-    .order("row_number", { ascending: true });
-  if (rawErr) throw rawErr;
+  const { rows: rawRows, pages: rawRowFetchPages } = await fetchAllReportRawRowsForRun(
+    supabase,
+    reportRunId
+  );
 
-  const calendarRawRowsRead = rawRows?.length ?? 0;
+  const calendarRawRowsRead = rawRows.length;
   let skippedMissingRequired = 0;
   const lineMapped = [];
 
-  for (const row of rawRows ?? []) {
+  for (const row of rawRows) {
     const payload = mapCalendarScheduleRow({
       rawRow: row.raw_row ?? {},
       organizationId: run.organization_id,
@@ -86,6 +117,7 @@ export async function promoteCalendarScheduleRowsFromRun(supabase, reportRunId, 
 
   const baseResult = {
     calendarRawRowsRead,
+    rawRowFetchPages,
     promotableLineCount: lineMapped.length,
     scheduleStopsPlanned,
     skippedMissingRequired,

@@ -14,7 +14,10 @@ import {
   buildCalendarScheduleGroupKey,
   mapCalendarScheduleRow
 } from "./mapCalendarScheduleRow.js";
-import { promoteCalendarScheduleRowsFromRun } from "./promoteCalendarScheduleRows.js";
+import {
+  fetchAllReportRawRowsForRun,
+  promoteCalendarScheduleRowsFromRun
+} from "./promoteCalendarScheduleRows.js";
 import { shouldPromoteReportRun } from "./shouldPromoteReportRun.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -23,13 +26,13 @@ const calendarScheduleFixtureCsv = readFileSync(join(fixtureDir, "calendar-sched
 
 const FAKE_ORG = "00000000-0000-0000-0000-000000000001";
 
-function calendarRawRowFromFixture(index, identityStatus) {
+function calendarRawRowFromFixture(index, identityStatus, rowNumber = index + 1) {
   const parsed = parseCsvReportRows(calendarScheduleFixtureCsv);
-  const rawRow = parsed.rows[index];
+  const rawRow = parsed.rows[index % parsed.rows.length];
   return {
-    id: `raw-${index}`,
-    row_number: index + 1,
-    row_hash: `hash-${index}`,
+    id: `raw-${rowNumber}`,
+    row_number: rowNumber,
+    row_hash: `hash-${rowNumber}`,
     raw_row: rawRow,
     account_id: null,
     job_id: null,
@@ -42,6 +45,7 @@ function calendarRawRowFromFixture(index, identityStatus) {
 function makePromotionSupabase(rawRows, opts = {}) {
   let runUpdatePayload = null;
   let insertCount = 0;
+  const rangeCalls = [];
 
   const supabase = {
     from(table) {
@@ -57,6 +61,14 @@ function makePromotionSupabase(rawRows, opts = {}) {
         },
         limit() {
           return api;
+        },
+        range(from, to) {
+          if (table === "moraware_report_raw_rows") {
+            rangeCalls.push({ from, to });
+            const data = rawRows.slice(from, to + 1);
+            return Promise.resolve({ data, error: null });
+          }
+          return Promise.resolve({ data: [], error: null });
         },
         update(payload) {
           if (table === "moraware_report_runs") {
@@ -102,21 +114,13 @@ function makePromotionSupabase(rawRows, opts = {}) {
             return Promise.resolve({ data: null, error: null });
           }
           return Promise.resolve({ data: null, error: null });
-        },
-        then(onFulfilled, onRejected) {
-          if (table === "moraware_report_raw_rows") {
-            return Promise.resolve({ data: rawRows, error: null }).then(onFulfilled, onRejected);
-          }
-          if (table === "moraware_report_runs" && runUpdatePayload) {
-            return Promise.resolve({ error: null }).then(onFulfilled, onRejected);
-          }
-          return Promise.resolve({ data: [], error: null }).then(onFulfilled, onRejected);
         }
       };
       return api;
     },
     getRunUpdatePayload: () => runUpdatePayload,
-    getInsertCount: () => insertCount
+    getInsertCount: () => insertCount,
+    getRangeCalls: () => rangeCalls
   };
 
   return supabase;
@@ -198,6 +202,36 @@ async function testApplyPromotesRowsWithoutMatchedIdentity() {
   assert.equal(supabase.getRunUpdatePayload()?.status, "promoted");
 }
 
+async function testFetchAllReportRawRowsPaginatesBeyondOneThousand() {
+  const rawRows = Array.from({ length: 1500 }, (_, i) =>
+    calendarRawRowFromFixture(i % 3, "needs_identity_review", i + 1)
+  );
+  const supabase = makePromotionSupabase(rawRows);
+
+  const fetched = await fetchAllReportRawRowsForRun(supabase, "run-1");
+  assert.equal(fetched.rows.length, 1500);
+  assert.equal(fetched.pages, 2);
+  assert.deepEqual(supabase.getRangeCalls(), [
+    { from: 0, to: 999 },
+    { from: 1000, to: 1999 }
+  ]);
+}
+
+async function testPromotionReadsMoreThanOneThousandRawRows() {
+  const rawRows = Array.from({ length: 1500 }, (_, i) =>
+    calendarRawRowFromFixture(i % 3, "needs_identity_review", i + 1)
+  );
+  const supabase = makePromotionSupabase(rawRows);
+  const result = await promoteCalendarScheduleRowsFromRun(supabase, "run-1", { apply: false });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.calendarRawRowsRead, 1500);
+  assert.equal(result.rawRowFetchPages, 2);
+  assert.equal(result.promotableLineCount, 1500);
+  assert.ok(result.scheduleStopsPlanned > 0);
+  assert.equal(supabase.getRangeCalls().length, 2);
+}
+
 function testSalesWorksheetPromotionStillRequiresValidatedStatus() {
   const gate = shouldPromoteReportRun({
     runStatus: "needs_review",
@@ -216,6 +250,8 @@ const tests = [
   ["zero stops apply does not mark run promoted", testZeroStopsApplyDoesNotMarkRunPromoted],
   ["zero stops apply allow-empty leaves status unchanged", testZeroStopsApplyAllowEmptyDoesNotMarkPromoted],
   ["apply promotes rows without matched identity", testApplyPromotesRowsWithoutMatchedIdentity],
+  ["fetchAllReportRawRows paginates beyond 1000", testFetchAllReportRawRowsPaginatesBeyondOneThousand],
+  ["promotion reads more than 1000 raw rows", testPromotionReadsMoreThanOneThousandRawRows],
   ["sales worksheet promotion still requires validated status", testSalesWorksheetPromotionStillRequiresValidatedStatus]
 ];
 
