@@ -86,6 +86,19 @@ type CrewsPayload = {
   meta?: { source?: string };
 };
 
+const DEFAULT_WORKSPACE_SHORT = "ESF";
+
+function workspaceInitials(name: string): string {
+  return (
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w[0]?.toUpperCase() ?? "")
+      .join("") || "ES"
+  );
+}
+
 function homeLauncherUrl(): string {
   const raw = String(import.meta.env.VITE_HEAD_URL_HOME ?? "").trim();
   return raw.replace(/\/+$/, "") || "https://www.eliteosfab.com";
@@ -125,12 +138,12 @@ function formatTime(iso: string | null | undefined): string {
   return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
-function formatDataSourceLabel(source: string | undefined): string {
+function formatFeedSourceLabel(source: string | undefined): string {
   switch (source) {
     case "calendar_schedule_feed":
-      return "Moraware calendar schedule feed";
+      return "Moraware calendar feed";
     case "brain_job_activities":
-      return "Brain job activities (fallback)";
+      return "Brain activities fallback";
     case "fixture":
       return "Sample data";
     default:
@@ -138,11 +151,60 @@ function formatDataSourceLabel(source: string | undefined): string {
   }
 }
 
-function formatMissingFieldSummary(counts: Record<string, number> | undefined): string {
-  if (!counts) return "";
-  const total = Object.values(counts).reduce((n, v) => n + (v ?? 0), 0);
-  if (!total) return "No missing-field gaps";
-  return `${total} missing-field gap(s)`;
+function addDaysToIsoDate(isoDate: string, delta: number): string {
+  const d = new Date(`${isoDate}T12:00:00`);
+  d.setDate(d.getDate() + delta);
+  return d.toISOString().slice(0, 10);
+}
+
+function cityLabelFor(job: InstallJob): string {
+  const city = String(job.address?.city ?? "").trim();
+  const state = String(job.address?.state ?? "").trim();
+  return [city, state].filter(Boolean).join(", ") || "Location pending";
+}
+
+function computeDayOverview(jobs: InstallJob[]) {
+  const totalSqft = jobs.reduce((sum, job) => sum + (job.scope?.sqft ?? 0), 0);
+  const cities = [
+    ...new Set(jobs.map((job) => String(job.address?.city ?? "").trim()).filter(Boolean))
+  ];
+  const missingAddress = jobs.filter((job) => !formatAddressLines(job).hasAddress).length;
+  const missingPhone = jobs.filter((job) => phonesFor(job).length === 0).length;
+  const lastStop = jobs[jobs.length - 1];
+  return {
+    totalSqft: totalSqft > 0 ? totalSqft : null,
+    cities,
+    missingAddress,
+    missingPhone,
+    firstStopTime: jobs[0]?.scheduledStart ?? null,
+    lastStopTime: lastStop?.scheduledStart ?? null
+  };
+}
+
+function formatFeedStatusLine(
+  jobs: InstallJob[],
+  meta: InstallDayPayload["meta"] | undefined,
+  fixtureMode: boolean
+): { summary: string; details: string } {
+  const source = formatFeedSourceLabel(meta?.source);
+  const fieldStops = jobs.length;
+  const excluded = meta?.excludedRowCount ?? 0;
+  const summaryParts = [
+    source,
+    `${fieldStops} field stop${fieldStops === 1 ? "" : "s"}`,
+    excluded > 0 ? `${excluded} non-field rows filtered` : null,
+    fixtureMode ? "fixture mode" : null
+  ].filter(Boolean);
+  const detailsParts = [
+    meta?.selectedDate ? `date=${meta.selectedDate}` : null,
+    meta?.calendarRowCount != null ? `calendar_rows=${meta.calendarRowCount}` : null,
+    meta?.installDashboardRowCount != null ? `field_rows=${meta.installDashboardRowCount}` : null,
+    meta?.brainActivityCount != null ? `brain_activities=${meta.brainActivityCount}` : null
+  ].filter(Boolean);
+  return {
+    summary: summaryParts.join(" · "),
+    details: detailsParts.join(" · ")
+  };
 }
 
 function formatDateLabel(isoDate: string): string {
@@ -202,11 +264,6 @@ function activitySummary(job: InstallJob): string {
   return [job.activityType, job.status].map((x) => String(x ?? "").trim()).filter(Boolean).join(" · ");
 }
 
-function isManagerRole(role: string): boolean {
-  const r = role.trim().toLowerCase();
-  return r === "admin" || r === "super_admin" || r === "executive";
-}
-
 function todayInputValue(): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Chicago" }).format(new Date());
 }
@@ -217,6 +274,8 @@ export default function InstallDashboardApp() {
   const [userEmail, setUserEmail] = useState("");
   const [userMetaName, setUserMetaName] = useState("");
   const [userRole, setUserRole] = useState("");
+  const [userJobTitle, setUserJobTitle] = useState("");
+  const [userDepartment, setUserDepartment] = useState("");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
@@ -229,8 +288,7 @@ export default function InstallDashboardApp() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
-
-  const managerMode = isManagerRole(userRole);
+  const [highlightStopId, setHighlightStopId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!supabase) return;
@@ -259,8 +317,14 @@ export default function InstallDashboardApp() {
     let cancelled = false;
     (async () => {
       try {
-        const me = (await apiGet("/api/me", sessionToken)) as { user?: { role?: string } };
-        if (!cancelled) setUserRole(String(me?.user?.role ?? "").trim());
+        const me = (await apiGet("/api/me", sessionToken)) as {
+          user?: { role?: string; job_title?: string; department?: string };
+        };
+        if (!cancelled) {
+          setUserRole(String(me?.user?.role ?? "").trim());
+          setUserJobTitle(String(me?.user?.job_title ?? "").trim());
+          setUserDepartment(String(me?.user?.department ?? "").trim());
+        }
       } catch {
         /* non-fatal */
       }
@@ -348,31 +412,37 @@ export default function InstallDashboardApp() {
     () => userInitialsFor(userMetaName, userEmail),
     [userMetaName, userEmail]
   );
-  const chipSubtitle =
-    userRole && userRole.trim()
-      ? userRole.replace(/_/g, " ")
-      : userDisplayEmail && userDisplayEmail.toLowerCase() !== userDisplayName.toLowerCase()
-        ? userDisplayEmail
-        : "";
+  const chipSubtitle = useMemo(() => {
+    const roleTitle = (userJobTitle || userDepartment || userRole || "").trim();
+    if (roleTitle) return roleTitle.replace(/_/g, " ");
+    if (userDisplayEmail && userDisplayEmail.toLowerCase() !== userDisplayName.toLowerCase()) {
+      return userDisplayEmail;
+    }
+    return "";
+  }, [userDepartment, userDisplayEmail, userDisplayName, userJobTitle, userRole]);
 
   const jobs = day?.jobs ?? [];
   const dayWarnings = day?.warnings ?? [];
   const warningCount = dayWarnings.length + jobs.reduce((n, j) => n + (j.warnings?.length ?? 0), 0);
   const firstStop = jobs[0];
-  const dataSource = formatDataSourceLabel(day?.meta?.source);
-  const debugMetaLine = managerMode
-    ? [
-        day?.meta?.selectedDate ? `Date: ${day.meta.selectedDate}` : null,
-        day?.meta?.calendarRowCount != null ? `Calendar rows: ${day.meta.calendarRowCount}` : null,
-        day?.meta?.excludedRowCount != null && day.meta.excludedRowCount > 0
-          ? `Excluded rows: ${day.meta.excludedRowCount}`
-          : null,
-        day?.meta?.brainActivityCount != null ? `Brain activities: ${day.meta.brainActivityCount}` : null,
-        formatMissingFieldSummary(day?.meta?.missingFieldCounts) || null
-      ]
-        .filter(Boolean)
-        .join(" · ")
-    : "";
+  const dayOverview = useMemo(() => computeDayOverview(jobs), [jobs]);
+  const feedStatus = useMemo(
+    () => formatFeedStatusLine(jobs, day?.meta, Boolean(day?.meta?.fixtureMode)),
+    [day?.meta, jobs]
+  );
+  const crewLabel = day?.crew?.truckName || day?.crew?.name || "Select crew";
+  const firstStopMapUrl = String(firstStop?.mapUrl ?? "").trim();
+
+  const scrollToStop = useCallback((jobId: string) => {
+    setHighlightStopId(jobId);
+    const el = document.getElementById(`stop-${jobId}`);
+    el?.scrollIntoView({ behavior: "smooth", block: "start" });
+    window.setTimeout(() => setHighlightStopId(null), 1800);
+  }, []);
+
+  const shiftDate = useCallback((delta: number) => {
+    setSelectedDate((current) => addDaysToIsoDate(current, delta));
+  }, []);
 
   const menuItems: EliteosTopbarMenuItem[] = [
     {
@@ -435,9 +505,14 @@ export default function InstallDashboardApp() {
         ) : null}
 
         {!sessionToken ? (
-          <section className="auth-panel" aria-label="Sign in">
-            <h1 className="page-title">Install Dashboard</h1>
-            <p className="page-sub">Installer Day View — read-only schedule and field-ready job details.</p>
+          <section className="auth-panel auth-panel-standalone" aria-label="Sign in">
+            <header className="auth-panel-header">
+              <p className="auth-panel-eyebrow">Install Dashboard · {DEFAULT_WORKSPACE_NAME}</p>
+              <h2 className="auth-panel-title">Sign in to continue</h2>
+              <p className="auth-panel-sub">
+                Read-only install day view for field crews. Use your eliteOS staff account.
+              </p>
+            </header>
             <div className="field-grid">
               <label className="field">
                 Email
@@ -464,79 +539,155 @@ export default function InstallDashboardApp() {
           </section>
         ) : (
           <>
-            <header className="day-summary">
-              <p className="eyebrow">Installer Day View · Read-only</p>
-              <h1 className="page-title">{formatDateLabel(selectedDate)}</h1>
-              <div className="summary-grid">
-                <div className="summary-stat">
-                  <span className="summary-label">Crew / truck</span>
-                  <strong>{day?.crew?.truckName || day?.crew?.name || "Not assigned"}</strong>
+            <section className="id-hero" aria-labelledby="id-hero-title">
+              <div className="id-hero-aurora" aria-hidden />
+              <div className="id-hero-grid">
+                <div className="id-hero-main">
+                  <p className="hero-eyebrow">Installer day view · Read-only</p>
+                  <h1 id="id-hero-title" className="hero-title">
+                    {formatDateLabel(selectedDate)}
+                  </h1>
+                  <p className="hero-sub">
+                    {crewLabel}
+                    {jobs.length ? ` · ${jobs.length} stop${jobs.length === 1 ? "" : "s"}` : " · No stops loaded"}
+                    {dayOverview.cities.length
+                      ? ` · ${dayOverview.cities.slice(0, 3).join(", ")}${dayOverview.cities.length > 3 ? "…" : ""}`
+                      : ""}
+                  </p>
+                  <div className="hero-stats">
+                    <div className="hero-stat">
+                      <span className="hero-stat-label">Stops</span>
+                      <span className="hero-stat-value">{jobs.length}</span>
+                    </div>
+                    <div className="hero-stat">
+                      <span className="hero-stat-label">First stop</span>
+                      <span className="hero-stat-value">
+                        {firstStop ? formatTime(firstStop.scheduledStart) : "—"}
+                      </span>
+                    </div>
+                    <div className="hero-stat">
+                      <span className="hero-stat-label">Last stop</span>
+                      <span className="hero-stat-value">
+                        {jobs.length > 1 ? formatTime(dayOverview.lastStopTime) : "—"}
+                      </span>
+                    </div>
+                    <div className="hero-stat">
+                      <span className="hero-stat-label">Total sq ft</span>
+                      <span className="hero-stat-value">
+                        {dayOverview.totalSqft != null ? dayOverview.totalSqft : "—"}
+                      </span>
+                    </div>
+                  </div>
+                  <p className="feed-status">{feedStatus.summary}</p>
+                  {feedStatus.details ? <p className="feed-status-details">{feedStatus.details}</p> : null}
                 </div>
-                <div className="summary-stat">
-                  <span className="summary-label">Stops</span>
-                  <strong>{jobs.length}</strong>
-                </div>
-                <div className="summary-stat">
-                  <span className="summary-label">First stop</span>
-                  <strong>{firstStop ? formatTime(firstStop.scheduledStart) : "—"}</strong>
-                </div>
-                <div className="summary-stat">
-                  <span className="summary-label">Warnings</span>
-                  <strong className={warningCount ? "text-warn" : ""}>{warningCount}</strong>
-                </div>
-              </div>
-              <p className="meta-line">
-                Data source: {dataSource}
-                {day?.meta?.fixtureMode ? " (fixture mode)" : ""}
-              </p>
-              {debugMetaLine ? <p className="meta-line meta-debug">{debugMetaLine}</p> : null}
-            </header>
 
-            {crews.length > 1 ? (
-              <section className="crew-picker" aria-label="Select crew or truck">
-                {crews.map((crew) => {
-                  const active = selectedCrewId === crew.id;
-                  return (
-                    <button
-                      key={crew.id}
-                      type="button"
-                      className={active ? "crew-chip crew-chip-active" : "crew-chip"}
-                      aria-pressed={active}
-                      onClick={() => setSelectedCrewId(crew.id)}
+                <aside className="id-route-panel" aria-label="Route overview">
+                  <h2 className="id-route-title">Route overview</h2>
+                  {jobs.length ? (
+                    <div className="id-route-strip">
+                      {jobs.map((job) => {
+                        const active = highlightStopId === job.id;
+                        return (
+                          <button
+                            key={job.id}
+                            type="button"
+                            className={active ? "id-route-stop id-route-stop-active" : "id-route-stop"}
+                            onClick={() => scrollToStop(job.id)}
+                          >
+                            <span className="id-route-dot" aria-hidden />
+                            <span className="id-route-meta">
+                              <span className="id-route-time">
+                                Stop {job.sequence ?? "—"} · {formatTime(job.scheduledStart)}
+                              </span>
+                              <span className="id-route-city">{cityLabelFor(job)}</span>
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="id-route-empty">No stops scheduled for this crew and date.</p>
+                  )}
+                  {firstStopMapUrl ? (
+                    <a
+                      className="btn btn-secondary btn-sm"
+                      href={firstStopMapUrl}
+                      target="_blank"
+                      rel="noreferrer"
                     >
-                      {crew.truckName || crew.name}
-                    </button>
-                  );
-                })}
-              </section>
-            ) : null}
+                      Open first stop map
+                    </a>
+                  ) : null}
+                </aside>
+              </div>
+            </section>
 
-            {managerMode ? (
-              <section className="manager-bar" aria-label="Manager preview controls">
-                <label className="field field-inline">
-                  Date
-                  <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} />
-                </label>
-                <label className="field field-inline">
-                  Crew / truck
-                  <select
-                    value={selectedCrewId}
-                    onChange={(e) => setSelectedCrewId(e.target.value)}
-                    disabled={!crews.length}
-                  >
-                    {!crews.length ? <option value="">No crews loaded</option> : null}
-                    {crews.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.truckName || c.name}
-                        {c.branch ? ` · ${c.branch}` : ""}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void loadDay()}>
-                  Load day
+            <section className="field-controls" aria-label="Day controls">
+              <div className="field-controls-group">
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-day-nav"
+                  disabled={busy}
+                  onClick={() => shiftDate(-1)}
+                >
+                  Previous
                 </button>
-              </section>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-day-nav"
+                  disabled={busy}
+                  onClick={() => setSelectedDate(todayInputValue())}
+                >
+                  Today
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-day-nav"
+                  disabled={busy}
+                  onClick={() => shiftDate(1)}
+                >
+                  Next
+                </button>
+              </div>
+              <label className="field">
+                Date
+                <input
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => setSelectedDate(e.target.value)}
+                />
+              </label>
+              <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void loadDay()}>
+                {busy ? "Loading…" : "Load day"}
+              </button>
+            </section>
+
+            {crews.length > 0 ? (
+              <div className="crew-picker-wrap">
+                <p className="crew-picker-label">Crew / truck</p>
+                <section className="crew-picker" aria-label="Select crew or truck">
+                  {crews.map((crew) => {
+                    const active = selectedCrewId === crew.id;
+                    const countLabel =
+                      active && jobs.length ? (
+                        <span className="crew-chip-count"> · {jobs.length}</span>
+                      ) : null;
+                    return (
+                      <button
+                        key={crew.id}
+                        type="button"
+                        className={active ? "crew-chip crew-chip-active" : "crew-chip"}
+                        aria-pressed={active}
+                        onClick={() => setSelectedCrewId(crew.id)}
+                      >
+                        {crew.truckName || crew.name}
+                        {countLabel}
+                      </button>
+                    );
+                  })}
+                </section>
+              </div>
             ) : null}
 
             {err ? (
@@ -553,154 +704,249 @@ export default function InstallDashboardApp() {
               </ul>
             ) : null}
 
-            {busy && !jobs.length ? <p className="loading">Loading today&apos;s route…</p> : null}
+            <div className="dash-layout">
+              <div className="dash-main">
+                {busy && !jobs.length ? <p className="loading">Loading today&apos;s route…</p> : null}
 
-            {!busy && !err && !jobs.length ? (
-              <section className="empty-state">
-                <h2>No install jobs for this day</h2>
-                <p>Try another date{managerMode ? " or crew" : ""}, or check Moraware sync coverage.</p>
-              </section>
-            ) : null}
+                {!busy && !err && !jobs.length ? (
+                  <section className="empty-state">
+                    <h2>No install jobs for this day</h2>
+                    <p>Try another date or crew, or check Moraware sync coverage.</p>
+                  </section>
+                ) : null}
 
-            <div className="job-list">
-              {jobs.map((job) => {
-                const expanded = expandedJobId === job.id;
-                const title = stopTitleFor(job);
-                const addressLines = formatAddressLines(job);
-                const phoneList = phonesFor(job);
-                const primaryPhone = phoneList[0] ?? "";
-                const mapUrl = String(job.mapUrl ?? "").trim();
-                const contactName = String(job.contactName ?? job.contact?.name ?? "").trim();
-                const accountLabel = String(job.accountName ?? job.customerName ?? "").trim();
-                const scopeLine = scopeSummary(job.scope);
-                const activityLine = activitySummary(job);
-                return (
-                  <article key={job.id} className="job-card">
-                    <div className="job-card-head">
-                      <span className="stop-badge">Stop {job.sequence ?? "—"}</span>
-                      <span className="job-time">{formatTime(job.scheduledStart)}</span>
-                    </div>
-
-                    <h2 className="job-title">{title}</h2>
-
-                    {addressLines.hasAddress ? (
-                      <div className="job-address-block">
-                        {addressLines.line1 ? <p className="job-address-line">{addressLines.line1}</p> : null}
-                        {addressLines.line2 ? <p className="job-address-line">{addressLines.line2}</p> : null}
-                        {addressLines.locality ? (
-                          <p className="job-address-line">{addressLines.locality}</p>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <p className="job-address-missing">Address missing</p>
-                    )}
-
-                    <div className="job-contact-block">
-                      <span className="job-contact-label">Contact</span>
-                      {contactName ? <span className="job-contact-name">{contactName}</span> : null}
-                      {phoneList.length ? (
-                        <div className="job-phone-list">
-                          {phoneList.map((phone) => (
-                            <a key={phone} className="job-phone-link" href={telHref(phone)}>
-                              {phone}
-                            </a>
-                          ))}
-                        </div>
-                      ) : (
-                        <span className="job-contact-empty">No phone on file</span>
-                      )}
-                      {job.contact?.email ? (
-                        <a className="job-email-link" href={`mailto:${job.contact.email}`}>
-                          {job.contact.email}
-                        </a>
-                      ) : null}
-                    </div>
-
-                    {accountLabel && accountLabel !== "—" ? (
-                      <p className="job-account-line">
-                        <span className="job-meta-label">Account</span> {accountLabel}
-                      </p>
-                    ) : null}
-
-                    {scopeLine ? <p className="scope-line">{scopeLine}</p> : null}
-                    {activityLine ? <p className="activity-line">{activityLine}</p> : null}
-
-                    <div className="job-actions">
-                      {mapUrl ? (
-                        <a className="btn btn-primary btn-sm" href={mapUrl} target="_blank" rel="noreferrer">
-                          Open map
-                        </a>
-                      ) : (
-                        <span className="chip chip-warn">Address missing</span>
-                      )}
-                      {primaryPhone ? (
-                        <a className="btn btn-secondary btn-sm" href={telHref(primaryPhone)}>
-                          Call{contactName ? ` ${contactName.split(" ")[0]}` : ""}
-                        </a>
-                      ) : (
-                        <span className="chip chip-muted">No phone on file</span>
-                      )}
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm"
-                        aria-expanded={expanded}
-                        onClick={() => setExpandedJobId(expanded ? null : job.id)}
+                <div className="job-list">
+                  {jobs.map((job) => {
+                    const expanded = expandedJobId === job.id;
+                    const highlighted = highlightStopId === job.id;
+                    const title = stopTitleFor(job);
+                    const addressLines = formatAddressLines(job);
+                    const phoneList = phonesFor(job);
+                    const primaryPhone = phoneList[0] ?? "";
+                    const mapUrl = String(job.mapUrl ?? "").trim();
+                    const contactName = String(job.contactName ?? job.contact?.name ?? "").trim();
+                    const accountLabel = String(job.accountName ?? job.customerName ?? "").trim();
+                    const scopeLine = scopeSummary(job.scope);
+                    const activityLine = activitySummary(job);
+                    return (
+                      <article
+                        key={job.id}
+                        id={`stop-${job.id}`}
+                        className={highlighted ? "job-card job-card-highlight" : "job-card"}
                       >
-                        {expanded ? "Hide details" : "Notes/details"}
-                      </button>
-                    </div>
+                        <div className="job-card-head">
+                          <span className="stop-badge">Stop {job.sequence ?? "—"}</span>
+                          <span className="job-time">{formatTime(job.scheduledStart)}</span>
+                        </div>
 
-                    {(job.warnings?.length ?? 0) > 0 ? (
-                      <ul className="job-warnings">
-                        {job.warnings!.map((w) => (
-                          <li key={w} className="chip chip-warn">
-                            {w}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : null}
+                        <h2 className="job-title">{title}</h2>
 
-                    {(job.riskFlags?.length ?? 0) > 0 ? (
-                      <ul className="job-risks">
-                        {job.riskFlags!.map((r) => (
-                          <li key={r} className="chip chip-risk">
-                            {r}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : null}
-
-                    {expanded ? (
-                      <div className="job-details">
-                        <dl className="detail-dl">
-                          <dt>Job name</dt>
-                          <dd>{job.jobName || title}</dd>
-                          <dt>Status</dt>
-                          <dd>{job.status || "—"}</dd>
-                          <dt>Activity</dt>
-                          <dd>{job.activityType || "—"}</dd>
-                          <dt>Moraware job</dt>
-                          <dd>{job.morawareJobId || "—"}</dd>
-                          <dt>Address</dt>
-                          <dd>{job.formattedAddress || "—"}</dd>
-                        </dl>
-                        {job.notes?.length ? (
-                          <div className="notes-block">
-                            <h3>Notes</h3>
-                            <ul>
-                              {job.notes.map((n, i) => (
-                                <li key={`${job.id}-note-${i}`}>{n}</li>
-                              ))}
-                            </ul>
+                        {addressLines.hasAddress ? (
+                          <div className="job-address-block">
+                            {addressLines.line1 ? (
+                              <p className="job-address-line">{addressLines.line1}</p>
+                            ) : null}
+                            {addressLines.line2 ? (
+                              <p className="job-address-line">{addressLines.line2}</p>
+                            ) : null}
+                            {addressLines.locality ? (
+                              <p className="job-address-line">{addressLines.locality}</p>
+                            ) : null}
                           </div>
                         ) : (
-                          <p className="muted">No notes on file.</p>
+                          <p className="job-address-missing">Address missing</p>
                         )}
-                      </div>
-                    ) : null}
-                  </article>
-                );
-              })}
+
+                        <div className="job-contact-block">
+                          <span className="job-contact-label">Contact</span>
+                          {contactName ? <span className="job-contact-name">{contactName}</span> : null}
+                          {phoneList.length ? (
+                            <div className="job-phone-list">
+                              {phoneList.map((phone) => (
+                                <a key={phone} className="job-phone-chip" href={telHref(phone)}>
+                                  {phone}
+                                </a>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="job-contact-empty">No phone on file</span>
+                          )}
+                          {job.contact?.email ? (
+                            <a className="job-email-link" href={`mailto:${job.contact.email}`}>
+                              {job.contact.email}
+                            </a>
+                          ) : null}
+                        </div>
+
+                        {accountLabel && accountLabel !== "—" ? (
+                          <p className="job-account-line">
+                            <span className="job-meta-label">Account</span> {accountLabel}
+                          </p>
+                        ) : null}
+
+                        {scopeLine ? <p className="scope-line">{scopeLine}</p> : null}
+                        {activityLine ? <p className="activity-line">{activityLine}</p> : null}
+
+                        <div className="job-actions">
+                          {mapUrl ? (
+                            <a className="btn btn-primary btn-sm" href={mapUrl} target="_blank" rel="noreferrer">
+                              Open map
+                            </a>
+                          ) : (
+                            <span className="chip chip-warn">Address missing</span>
+                          )}
+                          {primaryPhone ? (
+                            <a className="btn btn-secondary btn-sm" href={telHref(primaryPhone)}>
+                              Call{contactName ? ` ${contactName.split(" ")[0]}` : ""}
+                            </a>
+                          ) : (
+                            <span className="chip chip-muted">No phone on file</span>
+                          )}
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            aria-expanded={expanded}
+                            onClick={() => setExpandedJobId(expanded ? null : job.id)}
+                          >
+                            {expanded ? "Hide details" : "Notes/details"}
+                          </button>
+                        </div>
+
+                        {(job.warnings?.length ?? 0) > 0 ? (
+                          <ul className="job-warnings">
+                            {job.warnings!.map((w) => (
+                              <li key={w} className="chip chip-warn">
+                                {w}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
+
+                        {(job.riskFlags?.length ?? 0) > 0 ? (
+                          <ul className="job-risks">
+                            {job.riskFlags!.map((r) => (
+                              <li key={r} className="chip chip-risk">
+                                {r}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
+
+                        {expanded ? (
+                          <div className="job-details">
+                            <dl className="detail-dl">
+                              <dt>Job name</dt>
+                              <dd>{job.jobName || title}</dd>
+                              <dt>Status</dt>
+                              <dd>{job.status || "—"}</dd>
+                              <dt>Activity</dt>
+                              <dd>{job.activityType || "—"}</dd>
+                              <dt>Moraware job</dt>
+                              <dd>{job.morawareJobId || "—"}</dd>
+                              <dt>Address</dt>
+                              <dd>{job.formattedAddress || "—"}</dd>
+                            </dl>
+                            {job.notes?.length ? (
+                              <div className="notes-block">
+                                <h3>Notes</h3>
+                                <ul>
+                                  {job.notes.map((n, i) => (
+                                    <li key={`${job.id}-note-${i}`}>{n}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            ) : (
+                              <p className="muted">No notes on file.</p>
+                            )}
+                          </div>
+                        ) : null}
+                      </article>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <aside className="dash-rail" aria-label="Day summary">
+                <div className="rail-card">
+                  <h2>Day summary</h2>
+                  <ul className="rail-stat-list">
+                    <li>
+                      <span>Crew</span>
+                      <strong>{crewLabel}</strong>
+                    </li>
+                    <li>
+                      <span>Stops</span>
+                      <strong>{jobs.length}</strong>
+                    </li>
+                    <li>
+                      <span>Total sq ft</span>
+                      <strong>{dayOverview.totalSqft ?? "—"}</strong>
+                    </li>
+                    <li>
+                      <span>Areas</span>
+                      <strong>{dayOverview.cities.length ? dayOverview.cities.join(", ") : "—"}</strong>
+                    </li>
+                    <li>
+                      <span>Warnings</span>
+                      <strong className={warningCount ? "text-warn" : ""}>{warningCount}</strong>
+                    </li>
+                    <li>
+                      <span>Missing address</span>
+                      <strong className={dayOverview.missingAddress ? "text-warn" : ""}>
+                        {dayOverview.missingAddress}
+                      </strong>
+                    </li>
+                    <li>
+                      <span>Missing phone</span>
+                      <strong className={dayOverview.missingPhone ? "text-warn" : ""}>
+                        {dayOverview.missingPhone}
+                      </strong>
+                    </li>
+                  </ul>
+                </div>
+
+                <div className="rail-card rail-actions">
+                  <h2>Quick actions</h2>
+                  {firstStopMapUrl ? (
+                    <a
+                      className="btn btn-primary"
+                      href={firstStopMapUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Open first stop map
+                    </a>
+                  ) : (
+                    <span className="chip chip-muted">No map available</span>
+                  )}
+                  {firstStop && phonesFor(firstStop)[0] ? (
+                    <a className="btn btn-secondary" href={telHref(phonesFor(firstStop)[0])}>
+                      Call first stop
+                    </a>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    disabled={busy}
+                    onClick={() => {
+                      void loadCrews();
+                      void loadDay();
+                    }}
+                  >
+                    Refresh day
+                  </button>
+                </div>
+
+                <div className="rail-card">
+                  <h2>Workspace</h2>
+                  <p className="hero-sub" style={{ margin: 0, fontSize: "0.92rem" }}>
+                    {DEFAULT_WORKSPACE_NAME}
+                  </p>
+                  <p className="feed-status" style={{ marginTop: 10 }}>
+                    {DEFAULT_WORKSPACE_SHORT} · {workspaceInitials(DEFAULT_WORKSPACE_NAME)}
+                  </p>
+                </div>
+              </aside>
             </div>
           </>
         )}
