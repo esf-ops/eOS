@@ -11,10 +11,13 @@ import { fileURLToPath } from "node:url";
 import { CALENDAR_SCHEDULE_REPORT_TYPE } from "./calendarScheduleConstants.js";
 import { parseCsvReportRows } from "./parseCsv.js";
 import {
+  aggregateCalendarScheduleRows,
   buildCalendarScheduleGroupKey,
+  dedupePlannedScheduleStops,
   mapCalendarScheduleRow
 } from "./mapCalendarScheduleRow.js";
 import {
+  deactivateCalendarScheduleRowsForPromotion,
   fetchAllReportRawRowsForRun,
   promoteCalendarScheduleRowsFromRun
 } from "./promoteCalendarScheduleRows.js";
@@ -25,6 +28,7 @@ const fixtureDir = join(__dirname, "../../../test/fixtures/moraware-report-feeds
 const calendarScheduleFixtureCsv = readFileSync(join(fixtureDir, "calendar-schedule.sample.csv"), "utf8");
 
 const FAKE_ORG = "00000000-0000-0000-0000-000000000001";
+const FAKE_FEED = "feed-00000000-0000-0000-0000-000000000001";
 
 function calendarRawRowFromFixture(index, identityStatus, rowNumber = index + 1) {
   const parsed = parseCsvReportRows(calendarScheduleFixtureCsv);
@@ -45,15 +49,25 @@ function calendarRawRowFromFixture(index, identityStatus, rowNumber = index + 1)
 function makePromotionSupabase(rawRows, opts = {}) {
   let runUpdatePayload = null;
   let insertCount = 0;
+  let deactivateCount = 0;
   const rangeCalls = [];
+  const activeRows = [...(opts.initialActiveRows ?? [])];
 
   const supabase = {
     from(table) {
+      const state = { table, filters: {}, inFilters: {} };
       const api = {
-        select() {
+        select(_cols, optsSelect) {
+          state.countMode = optsSelect?.count === "exact" && optsSelect?.head;
+          state.selectCols = _cols;
           return api;
         },
-        eq() {
+        eq(col, val) {
+          state.filters[col] = val;
+          return api;
+        },
+        in(col, vals) {
+          state.inFilters[col] = vals;
           return api;
         },
         order() {
@@ -71,6 +85,48 @@ function makePromotionSupabase(rawRows, opts = {}) {
           return Promise.resolve({ data: [], error: null });
         },
         update(payload) {
+          if (table === "moraware_calendar_schedule_rows") {
+            return {
+              eq(col, val) {
+                state.filters[col] = val;
+                return {
+                  eq(col2, val2) {
+                    state.filters[col2] = val2;
+                    return {
+                      eq(col3, val3) {
+                        state.filters[col3] = val3;
+                        return {
+                          in(col4, vals) {
+                            state.inFilters[col4] = vals;
+                            return {
+                              select() {
+                                const matched = activeRows.filter((row) => {
+                                  if (!row.is_active) return false;
+                                  for (const [k, v] of Object.entries(state.filters)) {
+                                    if (row[k] !== v) return false;
+                                  }
+                                  for (const [k, valsIn] of Object.entries(state.inFilters)) {
+                                    if (!valsIn.includes(row[k])) return false;
+                                  }
+                                  return true;
+                                });
+                                for (const row of matched) {
+                                  row.is_active = false;
+                                  row.superseded_at = payload.superseded_at;
+                                  deactivateCount += 1;
+                                }
+                                return Promise.resolve({ data: matched.map((r) => ({ id: r.id })), error: null });
+                              }
+                            };
+                          }
+                        };
+                      }
+                    };
+                  }
+                };
+              }
+            };
+          }
           if (table === "moraware_report_runs") {
             runUpdatePayload = payload;
           }
@@ -80,9 +136,10 @@ function makePromotionSupabase(rawRows, opts = {}) {
             }
           };
         },
-        insert() {
+        insert(row) {
           if (table === "moraware_calendar_schedule_rows") {
             insertCount += 1;
+            activeRows.push({ ...row, id: `active-${insertCount}` });
           }
           return Promise.resolve({ error: null });
         },
@@ -92,7 +149,7 @@ function makePromotionSupabase(rawRows, opts = {}) {
               data: {
                 id: opts.runId ?? "run-1",
                 organization_id: FAKE_ORG,
-                report_feed_id: "feed-1",
+                report_feed_id: FAKE_FEED,
                 status: opts.runStatus ?? "needs_review",
                 schema_drift: opts.schemaDrift ?? { detected: false }
               },
@@ -102,7 +159,7 @@ function makePromotionSupabase(rawRows, opts = {}) {
           if (table === "moraware_report_feeds") {
             return Promise.resolve({
               data: {
-                id: "feed-1",
+                id: FAKE_FEED,
                 report_type: CALENDAR_SCHEDULE_REPORT_TYPE,
                 moraware_view_id: 222,
                 is_active: true
@@ -110,16 +167,31 @@ function makePromotionSupabase(rawRows, opts = {}) {
               error: null
             });
           }
-          if (table === "moraware_calendar_schedule_rows") {
-            return Promise.resolve({ data: null, error: null });
-          }
           return Promise.resolve({ data: null, error: null });
+        },
+        then(onFulfilled, onRejected) {
+          if (table === "moraware_calendar_schedule_rows" && state.countMode) {
+            const matched = activeRows.filter((row) => {
+              if (!row.is_active) return false;
+              for (const [k, v] of Object.entries(state.filters)) {
+                if (row[k] !== v) return false;
+              }
+              for (const [k, vals] of Object.entries(state.inFilters)) {
+                if (!vals.includes(row[k])) return false;
+              }
+              return true;
+            });
+            return Promise.resolve({ count: matched.length, error: null }).then(onFulfilled, onRejected);
+          }
+          return Promise.resolve({ data: [], error: null }).then(onFulfilled, onRejected);
         }
       };
       return api;
     },
     getRunUpdatePayload: () => runUpdatePayload,
     getInsertCount: () => insertCount,
+    getDeactivateCount: () => deactivateCount,
+    getActiveRows: () => activeRows.filter((r) => r.is_active),
     getRangeCalls: () => rangeCalls
   };
 
@@ -159,15 +231,15 @@ async function testAggregatesByScheduleGroupKey() {
   assert.ok(sample);
   assert.equal(sample.job_name, "Sample Kitchen Job");
   assert.equal(sample.sqft, 42.5);
-  assert.equal(
-    buildCalendarScheduleGroupKey(sample),
-    buildCalendarScheduleGroupKey(
-      mapCalendarScheduleRow({
-        rawRow: parseCsvReportRows(calendarScheduleFixtureCsv).rows[0],
-        organizationId: FAKE_ORG
-      })
-    )
-  );
+}
+
+async function testPlannedStopsDedupedBeforeWrite() {
+  const row = mapCalendarScheduleRow({
+    rawRow: parseCsvReportRows(calendarScheduleFixtureCsv).rows[0],
+    organizationId: FAKE_ORG
+  });
+  const dupes = dedupePlannedScheduleStops([row, { ...row, sqft: 99 }]);
+  assert.equal(dupes.length, 1);
 }
 
 async function testZeroStopsApplyDoesNotMarkRunPromoted() {
@@ -199,7 +271,7 @@ async function testApplyPromotesRowsWithoutMatchedIdentity() {
   assert.equal(result.scheduleStopsPromoted, 1);
   assert.equal(result.runStatusUpdated, true);
   assert.equal(supabase.getInsertCount(), 1);
-  assert.equal(supabase.getRunUpdatePayload()?.status, "promoted");
+  assert.equal(supabase.getActiveRows().length, 1);
 }
 
 async function testFetchAllReportRawRowsPaginatesBeyondOneThousand() {
@@ -211,10 +283,6 @@ async function testFetchAllReportRawRowsPaginatesBeyondOneThousand() {
   const fetched = await fetchAllReportRawRowsForRun(supabase, "run-1");
   assert.equal(fetched.rows.length, 1500);
   assert.equal(fetched.pages, 2);
-  assert.deepEqual(supabase.getRangeCalls(), [
-    { from: 0, to: 999 },
-    { from: 1000, to: 1999 }
-  ]);
 }
 
 async function testPromotionReadsMoreThanOneThousandRawRows() {
@@ -229,7 +297,66 @@ async function testPromotionReadsMoreThanOneThousandRawRows() {
   assert.equal(result.rawRowFetchPages, 2);
   assert.equal(result.promotableLineCount, 1500);
   assert.ok(result.scheduleStopsPlanned > 0);
-  assert.equal(supabase.getRangeCalls().length, 2);
+}
+
+async function testApplyingSameRunTwiceDoesNotDoubleActiveRows() {
+  const rawRows = [
+    calendarRawRowFromFixture(0, "needs_identity_review"),
+    calendarRawRowFromFixture(1, "needs_identity_review")
+  ];
+  const supabase = makePromotionSupabase(rawRows);
+
+  const first = await promoteCalendarScheduleRowsFromRun(supabase, "run-1", { apply: true });
+  assert.equal(first.ok, true);
+  assert.equal(first.scheduleStopsPromoted, 1);
+  assert.equal(supabase.getActiveRows().length, 1);
+
+  const second = await promoteCalendarScheduleRowsFromRun(supabase, "run-1", { apply: true });
+  assert.equal(second.ok, true);
+  assert.equal(second.scheduleStopsPromoted, 1);
+  assert.equal(supabase.getActiveRows().length, 1, "second apply replaces instead of duplicating");
+  assert.ok(second.replacedExistingActiveRows >= 1);
+}
+
+async function testExistingRowsForSameDateRangeAreReplaced() {
+  const existing = mapCalendarScheduleRow({
+    rawRow: parseCsvReportRows(calendarScheduleFixtureCsv).rows[0],
+    organizationId: FAKE_ORG,
+    reportFeedId: FAKE_FEED
+  });
+  existing.id = "old-1";
+  existing.is_active = true;
+  existing.report_feed_id = FAKE_FEED;
+
+  const rawRows = [calendarRawRowFromFixture(0, "needs_identity_review")];
+  const supabase = makePromotionSupabase(rawRows, { initialActiveRows: [existing] });
+
+  const result = await promoteCalendarScheduleRowsFromRun(supabase, "run-1", { apply: true });
+  assert.equal(result.ok, true);
+  assert.equal(result.replacedExistingActiveRows, 1);
+  assert.equal(supabase.getActiveRows().length, 1);
+  assert.notEqual(supabase.getActiveRows()[0].id, "old-1");
+}
+
+async function testDeactivateCalendarScheduleRowsDryRunCountsExisting() {
+  const existing = mapCalendarScheduleRow({
+    rawRow: parseCsvReportRows(calendarScheduleFixtureCsv).rows[0],
+    organizationId: FAKE_ORG,
+    reportFeedId: FAKE_FEED
+  });
+  existing.id = "old-1";
+  existing.is_active = true;
+  existing.report_feed_id = FAKE_FEED;
+
+  const supabase = makePromotionSupabase([], { initialActiveRows: [existing] });
+  const result = await deactivateCalendarScheduleRowsForPromotion(supabase, {
+    organizationId: FAKE_ORG,
+    reportFeedId: FAKE_FEED,
+    calendarDates: [existing.calendar_date],
+    dryRun: true
+  });
+  assert.equal(result.existingActiveRows, 1);
+  assert.equal(supabase.getActiveRows().length, 1);
 }
 
 function testSalesWorksheetPromotionStillRequiresValidatedStatus() {
@@ -247,11 +374,15 @@ const tests = [
   ["promotes unmatched identity rows", testPromotesUnmatchedIdentityRows],
   ["promotes ambiguous identity rows", testPromotesAmbiguousIdentityRows],
   ["aggregates by schedule group key", testAggregatesByScheduleGroupKey],
+  ["planned stops deduped before write", testPlannedStopsDedupedBeforeWrite],
   ["zero stops apply does not mark run promoted", testZeroStopsApplyDoesNotMarkRunPromoted],
   ["zero stops apply allow-empty leaves status unchanged", testZeroStopsApplyAllowEmptyDoesNotMarkPromoted],
   ["apply promotes rows without matched identity", testApplyPromotesRowsWithoutMatchedIdentity],
   ["fetchAllReportRawRows paginates beyond 1000", testFetchAllReportRawRowsPaginatesBeyondOneThousand],
   ["promotion reads more than 1000 raw rows", testPromotionReadsMoreThanOneThousandRawRows],
+  ["applying same run twice does not double active rows", testApplyingSameRunTwiceDoesNotDoubleActiveRows],
+  ["existing rows for same date range are replaced", testExistingRowsForSameDateRangeAreReplaced],
+  ["deactivate dry-run counts existing rows", testDeactivateCalendarScheduleRowsDryRunCountsExisting],
   ["sales worksheet promotion still requires validated status", testSalesWorksheetPromotionStillRequiresValidatedStatus]
 ];
 

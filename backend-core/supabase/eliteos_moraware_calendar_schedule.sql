@@ -57,7 +57,7 @@ create table if not exists public.moraware_calendar_schedule_rows (
 );
 
 comment on table public.moraware_calendar_schedule_rows is
-  'Promoted Moraware calendar/install schedule rows for Install Dashboard day view. Read is_active=true only.';
+  'Promoted Moraware calendar/install schedule rows for Install Dashboard day view. Read is_active=true only. Promotion replaces rows per organization_id + report_feed_id + calendar_date before insert (see promoteCalendarScheduleRows.js).';
 
 create unique index if not exists uq_moraware_calendar_schedule_rows_one_active
   on public.moraware_calendar_schedule_rows(organization_id, row_hash)

@@ -104,11 +104,14 @@ export function buildCalendarScheduleGroupKey(fields) {
   return [
     cleanText(fields.calendar_date),
     cleanText(fields.scheduled_start_time),
-    cleanText(fields.truck_or_crew_name),
+    cleanText(fields.truck_or_crew_name) || "Unassigned",
     cleanText(fields.activity_type || fields.activity_type_name),
     cleanText(fields.job_name).toLowerCase()
   ].join("|");
 }
+
+/** Public alias for schedule-stop identity used in promotion idempotency. */
+export const buildCalendarScheduleStopKey = buildCalendarScheduleGroupKey;
 
 /**
  * @param {object} params
@@ -292,6 +295,25 @@ export function aggregateCalendarScheduleRows(mappedRows) {
     out.row_hash = buildCalendarScheduleRowHash(out);
     return out;
   });
+}
+
+/**
+ * Safety dedupe: one planned stop per schedule-stop key before write.
+ * @param {ReturnType<typeof mapCalendarScheduleRow>[]} plannedStops
+ */
+export function dedupePlannedScheduleStops(plannedStops) {
+  const byKey = new Map();
+  for (const row of plannedStops) {
+    byKey.set(buildCalendarScheduleGroupKey(row), row);
+  }
+  return [...byKey.values()];
+}
+
+/**
+ * @param {ReturnType<typeof mapCalendarScheduleRow>[]} plannedStops
+ */
+export function collectCalendarDatesFromStops(plannedStops) {
+  return [...new Set(plannedStops.map((row) => cleanText(row.calendar_date)).filter(Boolean))].sort();
 }
 
 function parseSchedTimeTo24h(raw) {

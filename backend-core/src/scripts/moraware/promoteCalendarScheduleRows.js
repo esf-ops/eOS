@@ -7,7 +7,7 @@
  *
  * Modes:
  *   (default)       Dry-run: prints plan, no writes.
- *   --apply         Apply: supersedes prior active rows by row_hash, inserts aggregated stops.
+ *   --apply         Apply: deactivates existing rows for affected calendar dates, then inserts.
  *   --allow-empty   With --apply only: allow apply even when zero stops would be promoted.
  *
  * Required env vars:
@@ -174,6 +174,12 @@ async function main() {
     console.log("Calendar raw rows read:              ", `${result.calendarRawRowsRead ?? 0}${pageNote}`);
     console.log("Promotable calendar lines:           ", result.promotableLineCount ?? 0);
     console.log("Schedule stops planned:              ", result.scheduleStopsPlanned ?? result.wouldPromote ?? 0);
+    if ((result.wouldReplaceExistingActiveRows ?? 0) > 0) {
+      console.log("Existing active rows to replace:     ", result.wouldReplaceExistingActiveRows);
+    }
+    if ((result.calendarDatesAffected ?? 0) > 0) {
+      console.log("Calendar dates affected:             ", result.calendarDatesAffected);
+    }
     if ((result.skippedMissingRequired ?? 0) > 0) {
       console.log("Rows skipped (missing required fields):", result.skippedMissingRequired);
     }
@@ -203,6 +209,9 @@ async function main() {
   console.log("Calendar raw rows read:              ", `${result.calendarRawRowsRead ?? 0}${pageNote}`);
   console.log("Promotable calendar lines:           ", result.promotableLineCount ?? 0);
   console.log("Schedule stops promoted:             ", result.scheduleStopsPromoted ?? result.promoted ?? 0);
+  if ((result.replacedExistingActiveRows ?? 0) > 0) {
+    console.log("Existing active rows replaced:       ", result.replacedExistingActiveRows);
+  }
   if ((result.skippedMissingRequired ?? 0) > 0) {
     console.log("Rows skipped (missing required fields):", result.skippedMissingRequired);
   }

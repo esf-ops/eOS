@@ -5,17 +5,24 @@
  * View 222 is the schedule source of truth. Promotion does NOT require HTML/API
  * identity matching (identity_status=matched). Rows promote when Activity Date
  * and Job Name are present; worksheet lines aggregate into one Install stop.
+ *
+ * Idempotency: before insert, deactivate existing active rows for the same
+ * organization_id + report_feed_id + affected calendar_date values, then insert
+ * freshly planned stops. Re-applying the same run replaces rows instead of duplicating.
  */
 
 import { CALENDAR_SCHEDULE_REPORT_TYPE } from "./calendarScheduleConstants.js";
 import {
   aggregateCalendarScheduleRows,
+  collectCalendarDatesFromStops,
+  dedupePlannedScheduleStops,
   isCalendarScheduleRowPromotable,
   mapCalendarScheduleRow
 } from "./mapCalendarScheduleRow.js";
 import { isSchemaDriftBlocking } from "./schemaDriftPolicy.js";
 
 const RAW_ROWS_PAGE_SIZE = 1000;
+const CALENDAR_DATE_CHUNK_SIZE = 100;
 
 const RAW_ROW_SELECT =
   "id, row_number, row_hash, raw_row, account_id, job_id, account_name, job_name, identity_status";
@@ -23,6 +30,14 @@ const RAW_ROW_SELECT =
 function isMissingRelationError(err) {
   const msg = String(err?.message ?? err ?? "").toLowerCase();
   return msg.includes("does not exist") || String(err?.code ?? "") === "42P01";
+}
+
+function chunkArray(items, size) {
+  const chunks = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
 }
 
 /**
@@ -51,6 +66,60 @@ export async function fetchAllReportRawRowsForRun(supabase, reportRunId) {
   }
 
   return { rows: all, pages };
+}
+
+/**
+ * Deactivate existing active schedule rows for org/feed on affected calendar dates.
+ * @param {import("@supabase/supabase-js").SupabaseClient} supabase
+ * @param {{ organizationId: string, reportFeedId: string, calendarDates: string[], dryRun?: boolean }} params
+ */
+export async function deactivateCalendarScheduleRowsForPromotion(supabase, params) {
+  const { organizationId, reportFeedId, calendarDates, dryRun = false } = params;
+  if (!calendarDates.length) {
+    return { deactivated: 0, calendarDatesAffected: [] };
+  }
+
+  if (dryRun) {
+    let existingCount = 0;
+    for (const chunk of chunkArray(calendarDates, CALENDAR_DATE_CHUNK_SIZE)) {
+      const { count, error } = await supabase
+        .from("moraware_calendar_schedule_rows")
+        .select("id", { count: "exact", head: true })
+        .eq("organization_id", organizationId)
+        .eq("report_feed_id", reportFeedId)
+        .eq("is_active", true)
+        .in("calendar_date", chunk);
+      if (error) throw error;
+      existingCount += count ?? 0;
+    }
+    return {
+      deactivated: 0,
+      existingActiveRows: existingCount,
+      calendarDatesAffected: calendarDates
+    };
+  }
+
+  let deactivated = 0;
+  const now = new Date().toISOString();
+  for (const chunk of chunkArray(calendarDates, CALENDAR_DATE_CHUNK_SIZE)) {
+    const { data, error } = await supabase
+      .from("moraware_calendar_schedule_rows")
+      .update({ is_active: false, superseded_at: now, updated_at: now })
+      .eq("organization_id", organizationId)
+      .eq("report_feed_id", reportFeedId)
+      .eq("is_active", true)
+      .in("calendar_date", chunk)
+      .select("id");
+    if (error) {
+      if (isMissingRelationError(error)) {
+        return { deactivated: 0, calendarDatesAffected: calendarDates, tableMissing: true };
+      }
+      throw error;
+    }
+    deactivated += data?.length ?? 0;
+  }
+
+  return { deactivated, calendarDatesAffected: calendarDates };
 }
 
 /**
@@ -112,17 +181,28 @@ export async function promoteCalendarScheduleRowsFromRun(supabase, reportRunId, 
     lineMapped.push(payload);
   }
 
-  const mapped = aggregateCalendarScheduleRows(lineMapped);
-  const scheduleStopsPlanned = mapped.length;
+  const aggregated = aggregateCalendarScheduleRows(lineMapped);
+  const plannedStops = dedupePlannedScheduleStops(aggregated);
+  const scheduleStopsPlanned = plannedStops.length;
+  const calendarDatesAffected = collectCalendarDatesFromStops(plannedStops);
+  const duplicatePlannedStopKeys = aggregated.length - plannedStops.length;
 
   const baseResult = {
     calendarRawRowsRead,
     rawRowFetchPages,
     promotableLineCount: lineMapped.length,
     scheduleStopsPlanned,
+    calendarDatesAffected: calendarDatesAffected.length,
+    duplicatePlannedStopKeys,
     skippedMissingRequired,
     warnings: []
   };
+
+  if (duplicatePlannedStopKeys > 0) {
+    baseResult.warnings.push(
+      `Removed ${duplicatePlannedStopKeys} duplicate planned stop key(s) before write.`
+    );
+  }
 
   if (scheduleStopsPlanned === 0) {
     baseResult.warnings.push("No schedule stops planned — check Activity Date and Job Name on raw rows.");
@@ -135,13 +215,22 @@ export async function promoteCalendarScheduleRowsFromRun(supabase, reportRunId, 
     }
   }
 
+  const replacePlan = await deactivateCalendarScheduleRowsForPromotion(supabase, {
+    organizationId: run.organization_id,
+    reportFeedId: run.report_feed_id,
+    calendarDates: calendarDatesAffected,
+    dryRun: true
+  });
+
   if (!apply) {
     return {
       ok: true,
       dryRun: true,
       wouldPromote: scheduleStopsPlanned,
-      sample: mapped.slice(0, 3),
-      ...baseResult
+      wouldReplaceExistingActiveRows: replacePlan.existingActiveRows ?? 0,
+      sample: plannedStops.slice(0, 3),
+      ...baseResult,
+      ...replacePlan
     };
   }
 
@@ -151,28 +240,28 @@ export async function promoteCalendarScheduleRowsFromRun(supabase, reportRunId, 
       dryRun: false,
       promoted: 0,
       runStatusUpdated: false,
+      replacedExistingActiveRows: 0,
       ...baseResult
     };
   }
 
+  const replaceResult = await deactivateCalendarScheduleRowsForPromotion(supabase, {
+    organizationId: run.organization_id,
+    reportFeedId: run.report_feed_id,
+    calendarDates: calendarDatesAffected,
+    dryRun: false
+  });
+
+  if (replaceResult.tableMissing) {
+    return {
+      ok: false,
+      error: "calendar_schedule_table_not_installed",
+      detail: "moraware_calendar_schedule_rows"
+    };
+  }
+
   let promoted = 0;
-  for (const row of mapped) {
-    const { data: existing } = await supabase
-      .from("moraware_calendar_schedule_rows")
-      .select("id")
-      .eq("organization_id", row.organization_id)
-      .eq("row_hash", row.row_hash)
-      .eq("is_active", true)
-      .limit(1)
-      .maybeSingle();
-
-    if (existing?.id) {
-      await supabase
-        .from("moraware_calendar_schedule_rows")
-        .update({ is_active: false, superseded_at: new Date().toISOString() })
-        .eq("id", existing.id);
-    }
-
+  for (const row of plannedStops) {
     const { error: insErr } = await supabase.from("moraware_calendar_schedule_rows").insert(row);
     if (insErr) {
       if (isMissingRelationError(insErr)) {
@@ -189,6 +278,7 @@ export async function promoteCalendarScheduleRowsFromRun(supabase, reportRunId, 
       error: "zero_stops_promoted",
       promoted: 0,
       runStatusUpdated: false,
+      replacedExistingActiveRows: replaceResult.deactivated ?? 0,
       ...baseResult
     };
   }
@@ -204,6 +294,7 @@ export async function promoteCalendarScheduleRowsFromRun(supabase, reportRunId, 
     promoted,
     scheduleStopsPromoted: promoted,
     runStatusUpdated: true,
+    replacedExistingActiveRows: replaceResult.deactivated ?? 0,
     ...baseResult
   };
 }
