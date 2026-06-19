@@ -6,8 +6,9 @@
  * aggregates worksheet-line duplicates, and promotes into moraware_calendar_schedule_rows.
  *
  * Modes:
- *   (default)   Dry-run: prints plan, no writes.
- *   --apply     Apply: supersedes prior active rows by row_hash, inserts aggregated stops.
+ *   (default)       Dry-run: prints plan, no writes.
+ *   --apply         Apply: supersedes prior active rows by row_hash, inserts aggregated stops.
+ *   --allow-empty   With --apply only: allow apply even when zero stops would be promoted.
  *
  * Required env vars:
  *   MORAWARE_REPORT_RUN_ID (or --run-id)
@@ -17,10 +18,8 @@
  * For --apply, also required:
  *   SUPABASE_WRITE_ENABLED=1
  *
- * Safe output:
- * - Prints counts and sample stop summaries (date, truck, job name, sqft).
- * - Does not print raw customer row payloads, credentials, or secrets.
- * - Default is always dry-run — pass --apply to write.
+ * Calendar promotion does NOT require identity_status=matched. View 222 rows promote
+ * when Activity Date and Job Name are present on the raw CSV row.
  */
 import "dotenv/config";
 
@@ -118,6 +117,12 @@ function printBlockedResult(result) {
     case "calendar_schedule_table_not_installed":
       console.log("  Apply backend-core/supabase/eliteos_moraware_calendar_schedule.sql first.");
       break;
+    case "zero_stops_promoted":
+      console.log("  No schedule stops would be promoted for this run.");
+      console.log(`  Calendar raw rows read: ${result.calendarRawRowsRead ?? 0}`);
+      console.log(`  Rows skipped (missing Activity Date or Job Name): ${result.skippedMissingRequired ?? 0}`);
+      console.log("  Apply was not committed. Pass --allow-empty only if an empty promotion is intentional.");
+      break;
     default:
       break;
   }
@@ -125,16 +130,22 @@ function printBlockedResult(result) {
 
 async function main() {
   const applyFlag = args.includes("--apply");
+  const allowEmptyFlag = args.includes("--allow-empty");
   const runId = requiredInput("MORAWARE_REPORT_RUN_ID", getArg("run-id"), "run-id");
 
   const dryRun = !applyFlag;
-  const modeLabel = dryRun ? "DRY-RUN (no writes)" : "APPLY (writes enabled)";
+  const modeLabel = dryRun
+    ? "DRY-RUN (no writes)"
+    : allowEmptyFlag
+      ? "APPLY (writes enabled, --allow-empty)"
+      : "APPLY (writes enabled)";
 
   console.log("Moraware report-feed — promote calendar schedule rows");
   console.log(`  Run ID:   ${runId}`);
   console.log(`  Target:   moraware_calendar_schedule_rows`);
   console.log(`  Feed:     ${CALENDAR_SCHEDULE_REPORT_TYPE} only`);
   console.log(`  Mode:     ${modeLabel}`);
+  console.log("  Identity: not required (view 222 schedule rows promote on calendar fields)");
   console.log();
 
   if (applyFlag && env("SUPABASE_WRITE_ENABLED") !== "1") {
@@ -147,7 +158,10 @@ async function main() {
 
   const db = dryRun ? createReadClient() : createWriteCapableClient();
 
-  const result = await promoteCalendarScheduleRowsFromRun(db, runId, { apply: applyFlag });
+  const result = await promoteCalendarScheduleRowsFromRun(db, runId, {
+    apply: applyFlag,
+    allowEmpty: allowEmptyFlag
+  });
 
   if (!result.ok) {
     printBlockedResult(result);
@@ -155,9 +169,12 @@ async function main() {
   }
 
   if (dryRun) {
-    console.log("Rows read (matched worksheet lines):", result.rawWorksheetLineCount ?? 0);
-    console.log("Worksheet lines aggregated from:   ", result.aggregatedFrom ?? 0);
-    console.log("Schedule stops planned:            ", result.wouldPromote ?? 0);
+    console.log("Calendar raw rows read:              ", result.calendarRawRowsRead ?? 0);
+    console.log("Promotable calendar lines:           ", result.promotableLineCount ?? 0);
+    console.log("Schedule stops planned:              ", result.scheduleStopsPlanned ?? result.wouldPromote ?? 0);
+    if ((result.skippedMissingRequired ?? 0) > 0) {
+      console.log("Rows skipped (missing required fields):", result.skippedMissingRequired);
+    }
     console.log();
     if ((result.sample?.length ?? 0) > 0) {
       console.log("Sample planned stops (up to 3):");
@@ -165,9 +182,9 @@ async function main() {
         console.log(`  ${formatStopSample(row, i)}`);
       }
       console.log();
-    } else {
+    } else if ((result.scheduleStopsPlanned ?? 0) === 0) {
       console.log("WARNING: No calendar schedule stops would be promoted for this run.");
-      console.log("  Check that raw rows have Activity Date and identity_status=matched.");
+      console.log("  Check that raw rows include Activity Date and Job Name.");
       console.log();
     }
     console.log("DRY-RUN complete — no writes performed.");
@@ -179,15 +196,19 @@ async function main() {
     return;
   }
 
-  console.log("Rows read (matched worksheet lines):", result.rawWorksheetLineCount ?? 0);
-  console.log("Worksheet lines aggregated from:   ", result.aggregatedFrom ?? 0);
-  console.log("Schedule stops promoted:           ", result.promoted ?? 0);
-  if ((result.skippedUnmappedDate ?? 0) > 0) {
-    console.log("WARNING: Rows skipped (missing Activity Date):", result.skippedUnmappedDate);
+  console.log("Calendar raw rows read:              ", result.calendarRawRowsRead ?? 0);
+  console.log("Promotable calendar lines:           ", result.promotableLineCount ?? 0);
+  console.log("Schedule stops promoted:             ", result.scheduleStopsPromoted ?? result.promoted ?? 0);
+  if ((result.skippedMissingRequired ?? 0) > 0) {
+    console.log("Rows skipped (missing required fields):", result.skippedMissingRequired);
   }
   console.log();
-  console.log('Run status set to "promoted".');
-  console.log("Install Dashboard can now read moraware_calendar_schedule_rows for promoted dates.");
+  if (result.runStatusUpdated) {
+    console.log('Run status set to "promoted".');
+    console.log("Install Dashboard can now read moraware_calendar_schedule_rows for promoted dates.");
+  } else {
+    console.log('Run status unchanged (--allow-empty with zero promoted stops).');
+  }
 }
 
 main().catch((err) => {

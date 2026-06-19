@@ -117,6 +117,11 @@ export function buildCalendarScheduleRowHash(params) {
   return createHash("sha256").update(buildCalendarScheduleGroupKey(params)).digest("hex");
 }
 
+/** Whether a mapped row has the minimum calendar schedule fields for promotion. */
+export function isCalendarScheduleRowPromotable(mapped) {
+  return Boolean(cleanText(mapped?.calendar_date) && cleanText(mapped?.job_name));
+}
+
 /**
  * Map one enriched report-feed row into moraware_calendar_schedule_rows insert payload.
  * Worksheet-line dedupe happens in aggregateCalendarScheduleRows() during promotion.
@@ -145,8 +150,9 @@ export function mapCalendarScheduleRow(params) {
   const rawRow = normalizeCalendarRawRow(rawInput);
 
   const calendarDate = parseCalendarDate(pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.calendarDate));
-  const truckOrCrew =
+  const truckOrCrewRaw =
     pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.truckOrCrewName) || null;
+  const truckOrCrew = truckOrCrewRaw || "Unassigned";
   const activityType = pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.activityType) || null;
   const jobNotes = pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.jobNotes);
   const addressNotes = pickCalendarField(rawRow, CALENDAR_SCHEDULE_COLUMN_ALIASES.addressNotes);

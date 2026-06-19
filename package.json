@@ -97,7 +97,7 @@
     "eos:test:takeoff-process-orchestrator": "node backend-core/src/takeoff/takeoffProcessOrchestrator.test.mjs",
     "eos:test:takeoff-measurement-calc": "node backend-core/src/takeoff/takeoffMeasurementCalc.test.mjs",
     "eos:test:takeoff-workbench-helpers": "node backend-core/src/takeoff/takeoffWorkbenchHelpers.test.mjs",
-    "eos:test:moraware-report-feed": "node backend-core/src/moraware/reportFeeds/reportFeedParser.test.mjs",
+    "eos:test:moraware-report-feed": "node backend-core/src/moraware/reportFeeds/reportFeedParser.test.mjs && node backend-core/src/moraware/reportFeeds/promoteCalendarScheduleRows.test.mjs",
     "eos:test:moraware-report-feed-promotion": "node backend-core/src/moraware/reportFeeds/promoteSalesWorksheetFacts.test.mjs",
     "eos:test:moraware-report-feed-persistence": "node backend-core/src/moraware/reportFeeds/reportFeedPersistence.test.mjs",
     "eos:test:moraware-report-feed-promote-persistence": "node backend-core/src/moraware/reportFeeds/reportFeedPromotePersistence.test.mjs",
