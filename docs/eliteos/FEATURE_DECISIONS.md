@@ -1315,3 +1315,16 @@
 | **Future phases** | Page/PDF preview, async/page progress artifacts, provider/model pipeline hardening, eventual **gated** Internal Estimate import from approved takeoff. |
 | **Impacted files/docs** | `backend-core/src/takeoff/takeoffWorkspaceService.mjs`, `takeoffWorkspaceRoutes.js`, `takeoffValidationFixes.mjs` (+ tests), `app-ai-takeoff/` (inbox, review UI, validation fix panel), `docs/eliteos/ai-takeoff-foundation.md`, this entry. |
 | **Revisit trigger** | When Internal Estimate import slice is approved; when RLS policies replace service-role-only access; when async AI processing or page artifacts ship. |
+
+### 88. Install Dashboard v1 — read-only Installer Day View (2026-06-11)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-06-11 |
+| **Decision** | Ship a protected **Install Dashboard** head (`app-install-dashboard`, slug **`install_dashboard`**) as a **read-only**, mobile-first **Installer Day View** before any scheduling optimizer or Moraware writeback. Brain routes **`GET /api/install-dashboard/today`**, **`/day`**, and **`/crews`** normalize install-day job cards from Moraware Brain cache (`brain_job_activities`, `brain_job_addresses`, `brain_jobs`, operational summary) with conservative field mapping and explicit **warnings** for missing data. When Brain data is unavailable or incomplete, non-production environments may fall back to labeled **fixture** payloads (`INSTALL_DASHBOARD_USE_FIXTURES` / `INSTALL_DASHBOARD_FIXTURE_FALLBACK`). |
+| **Why** | Gives field crews immediate daily-route value, validates Moraware install-day data quality, and creates the foundation for future scheduling intelligence without pretending mapping is final. |
+| **Scope (v1)** | Read-only list/cards: schedule order, crew/truck label (best-effort from activity `raw_json`), address, map/call links, scope summary placeholders, notes, warning/risk chips. **Manager preview** (admin / super_admin / executive): pick date + crew. **Not in v1:** schedule editing, drag/drop dispatch, route optimization, AI scheduling, installer status updates, photo uploads, Moraware writeback. |
+| **Auth** | `requireAuth()` + `requireHeadAccess("install_dashboard")` on every route. Launcher visibility is not authorization. Frontend uses Supabase anon key + user JWT only — **no** Moraware credentials or service role in the browser. |
+| **Registration** | Added `install_dashboard` to `EOS_HEAD_SLUGS`, launcher catalog (**title: Install Dashboard**), `HEAD_URL_INSTALL_DASHBOARD`, installer role default grant, Home dev URL fallback (`localhost:5189`). Legacy slug `install` remains reserved for future scheduling head work. |
+| **Impacted files/docs** | `app-install-dashboard/*`, `backend-core/src/install/*`, `server.js`, `eosGovernanceConstants.js`, `launcherHeads.js`, `headDeploymentUrls.js`, `testHeadAccess.js`, `app-home/src/lib/config.ts`, `app-home/src/ui/App.tsx`, root `package.json`, `SYSTEM_BLUEPRINT.md`, `eliteOS-master-head-map.md`, this entry. |
+| **Revisit trigger** | Field status updates, photo uploads, route optimization, Moraware writeback, dedicated crew/truck mapping tables, or when `install` scheduling head ships. |

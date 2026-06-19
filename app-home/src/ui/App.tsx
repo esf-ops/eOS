@@ -168,6 +168,7 @@ const LAUNCHER_TOOL_TITLE_BY_SLUG: Record<string, string> = {
   production: "Production Dashboard",
   shop_tv: "Shop Floor TV",
   install: "Install",
+  install_dashboard: "Install Dashboard",
   purchasing: "Purchasing",
   customer_service: "Customer Service",
   hr: "HR",
@@ -198,6 +199,7 @@ const HEAD_TINT_BY_SLUG: Record<string, HeadTint> = {
   production: "navy",
   shop_tv: "slate",
   install: "amber",
+  install_dashboard: "amber",
   purchasing: "amber",
   customer_service: "teal",
   hr: "violet",
@@ -232,6 +234,7 @@ const HEAD_CATEGORY_BY_SLUG: Record<string, string> = {
   production: "Production",
   shop_tv: "Production",
   install: "Production",
+  install_dashboard: "Field",
   purchasing: "Production",
   customer_service: "Customer",
   hr: "Admin",
@@ -355,6 +358,7 @@ function HeadGlyph({ slug }: { slug: string }) {
         </svg>
       );
     case "install":
+    case "install_dashboard":
       return (
         <svg {...common}>
           <path d="M14 4l6 6-3 3-3-3-7 7H4v-3l7-7-3-3 3-3Z" />

@@ -138,9 +138,10 @@ Status is **conceptual** unless a separate tracker says otherwise. Use the label
 
 ### Install / Field
 
-- Install Head  
-- Install Schedule Head  
-- Field Crew Head  
+- **Install Dashboard Head** (**`app-install-dashboard/`** — env **`HEAD_URL_INSTALL_DASHBOARD`**; slug **`install_dashboard`**; Brain routes **`GET /api/install-dashboard/*`**; **read-only v1**) — mobile-first **Installer Day View** for daily route, job details, notes, and field-ready information. Reads Moraware install-day signals from Brain cache (`brain_job_activities`, `brain_job_addresses`, related tables) with optional fixture fallback in non-production. **No** schedule editing, route optimization, or Moraware writeback. Distinct from future **Install Schedule Head** / scheduling optimizer work.  
+- Install Head *(future — scheduling boards; slug `install`)*  
+- Install Schedule Head *(future — optimization / dispatch)*  
+- Field Crew Head *(future)*  
 - Service / Warranty Head  
 - Customer Service / Exception Head  
 - Customer Experience Head  

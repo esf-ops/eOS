@@ -16,6 +16,7 @@ const SLUG_TO_ENV_KEYS = Object.freeze({
   production: ["HEAD_URL_PRODUCTION"],
   shop_tv: ["HEAD_URL_SHOP_TV"],
   install: ["HEAD_URL_INSTALL"],
+  install_dashboard: ["HEAD_URL_INSTALL_DASHBOARD"],
   purchasing: ["HEAD_URL_PURCHASING"],
   customer_service: ["HEAD_URL_CUSTOMER_SERVICE"],
   hr: ["HEAD_URL_HR"],

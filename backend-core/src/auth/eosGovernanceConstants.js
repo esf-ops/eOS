@@ -14,6 +14,7 @@ export const EOS_HEAD_SLUGS = Object.freeze([
   "production",
   "shop_tv",
   "install",
+  "install_dashboard", // Install Dashboard v1 — read-only installer day view
   "purchasing",
   "customer_service",
   "hr",

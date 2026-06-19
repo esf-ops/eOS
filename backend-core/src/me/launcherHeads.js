@@ -92,6 +92,14 @@ export const HEAD_LAUNCHER_CATALOG = [
     href: "/shop-tv"
   },
   {
+    slug: "install_dashboard",
+    label: "Install Dashboard",
+    description: "Daily install route, job details, notes, and field-ready information.",
+    category: "Field",
+    href: "/install-dashboard",
+    roleNote: "Read-only Installer Day View — no schedule editing or Moraware writeback in v1."
+  },
+  {
     slug: "install",
     label: "eliteOS Install Head",
     description: "Install scheduling and install-day boards.",
@@ -233,7 +241,7 @@ function defaultSlugSet(role, userKind) {
     accounting: ["finance", "reports", "pricing_admin"],
     production: ["production", "shop_tv", "reports"],
     shop_tv: ["shop_tv"],
-    installer: ["install"],
+    installer: ["install_dashboard", "install"],
     purchasing: ["purchasing"],
     finance: ["finance", "reports", "pricing_admin"],
     dealer_admin: ["partner_quote", "dealer_resources", "quote"],

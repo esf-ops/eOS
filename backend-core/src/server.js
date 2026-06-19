@@ -20,6 +20,7 @@ import { attachQuoteRoutes } from "./quotes/quoteRoutes.js";
 import { attachQuoteFileRoutes } from "./files/quoteFileRoutes.js";
 import { attachTakeoffWorkspaceRoutes } from "./takeoff/takeoffWorkspaceRoutes.js";
 import { attachSlabInventoryRoutes } from "./slabInventory/slabInventoryApi.js";
+import { attachInstallDashboardRoutes } from "./install/installDashboardApi.js";
 import { attachSlabCloudHourlySyncRoutes } from "./slabcloud/slabCloudHourlySyncApi.js";
 import { attachSlabsmithIngestRoutes } from "./slabsmith/slabsmithIngestApi.js";
 import { attachSlabsmithImageUploadRoutes } from "./slabsmith/slabsmithImageUploadApi.js";
@@ -1200,6 +1201,12 @@ attachTakeoffWorkspaceRoutes(app, {
 });
 
 attachSlabInventoryRoutes(app, {
+  requireAuth,
+  requireHeadAccess,
+  getSupabase: supabaseServerClient
+});
+
+attachInstallDashboardRoutes(app, {
   requireAuth,
   requireHeadAccess,
   getSupabase: supabaseServerClient
