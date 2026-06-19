@@ -32,8 +32,47 @@ function digRawField(raw, keys) {
   return "";
 }
 
+/**
+ * status_name || activity_status || raw_json status || job_status || null
+ * @param {Record<string, unknown>|null|undefined} activity
+ * @param {Record<string, unknown>|null|undefined} [job]
+ */
+export function normalizeActivityStatus(activity, job = null) {
+  const statusName = String(activity?.status_name ?? "").trim();
+  const activityStatus = String(activity?.activity_status ?? "").trim();
+  const rawStatus = digRawField(activity?.raw_json, [
+    "status_name",
+    "Status Name",
+    "status",
+    "Status",
+    "activity_status",
+    "Activity Status"
+  ]);
+  const jobStatus = String(job?.job_status ?? "").trim();
+  return statusName || activityStatus || rawStatus || jobStatus || null;
+}
+
+/**
+ * activity_type_name || activity_type || raw_json type || null
+ * @param {Record<string, unknown>|null|undefined} activity
+ */
+export function normalizeActivityType(activity) {
+  const typeName = String(activity?.activity_type_name ?? "").trim();
+  const activityType = String(activity?.activity_type ?? "").trim();
+  const rawType = digRawField(activity?.raw_json, [
+    "activity_type_name",
+    "Activity Type Name",
+    "activity_type",
+    "Activity Type",
+    "type",
+    "Type"
+  ]);
+  return typeName || activityType || rawType || null;
+}
+
 export function isInstallLikeActivity(row) {
   const blob = [
+    normalizeActivityType(row),
     row?.activity_type,
     row?.activity_type_name,
     row?.description,
@@ -137,6 +176,9 @@ export function normalizeInstallJobRow(input) {
     longitude: null
   };
 
+  const status = normalizeActivityStatus(activity, job);
+  const activityType = normalizeActivityType(activity);
+
   const normalized = {
     id: jobId || String(activity?.id ?? ""),
     morawareJobId: jobId,
@@ -146,7 +188,8 @@ export function normalizeInstallJobRow(input) {
     customerName: String(job?.account_name ?? job?.job_name ?? "").trim() || "—",
     accountName: String(job?.account_name ?? "").trim() || "—",
     jobName: String(job?.job_name ?? "").trim() || "—",
-    status: String(activity?.activity_status_name ?? activity?.activity_status ?? job?.job_status ?? "").trim() || "Scheduled",
+    status,
+    activityType,
     address: addrObj,
     mapUrl: buildMapUrl(addrObj),
     contact: {
@@ -174,6 +217,8 @@ export function normalizeInstallJobRow(input) {
   if (!extractAssignedLabel(activity?.raw_json)) {
     normalized.warnings.push("Missing crew/truck assignment on activity");
   }
+  if (!status) normalized.warnings.push("Missing activity status");
+  if (!activityType) normalized.warnings.push("Missing activity type");
 
   normalized.warnings = [...new Set([...normalized.warnings, ...buildJobWarnings(normalized)])];
 

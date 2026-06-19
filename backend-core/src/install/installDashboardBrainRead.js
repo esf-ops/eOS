@@ -6,6 +6,13 @@ import {
 } from "./installDashboardNormalizer.js";
 import { buildFixtureInstallDay, FIXTURE_CREWS } from "./installDashboardFixtures.js";
 
+/** Real Supabase columns for brain_job_activities — do not reference activity_status_name. */
+export const BRAIN_JOB_ACTIVITIES_SELECT =
+  "id, job_id, activity_index, activity_type, activity_type_name, activity_status, status_id, status_name, phase_name, phase_id, start_date, sched_time, duration, description, notes, raw_json";
+
+export const BRAIN_JOB_ACTIVITIES_CREWS_SELECT =
+  "raw_json, activity_type, activity_type_name, activity_status, status_name, description, phase_name";
+
 function useFixtureMode() {
   const v = String(process.env.INSTALL_DASHBOARD_USE_FIXTURES ?? "").trim().toLowerCase();
   return v === "1" || v === "true" || v === "yes";
@@ -21,13 +28,17 @@ function allowFixtureFallback() {
 
 async function fetchMapByJobIds(supabase, table, jobIds, columns) {
   if (!jobIds.length) return new Map();
-  const { data, error } = await supabase.from(table).select(columns).in("job_id", jobIds);
-  if (error) throw error;
-  const map = new Map();
-  for (const row of data ?? []) {
-    map.set(String(row.job_id), row);
+  try {
+    const { data, error } = await supabase.from(table).select(columns).in("job_id", jobIds);
+    if (error) return new Map();
+    const map = new Map();
+    for (const row of data ?? []) {
+      map.set(String(row.job_id), row);
+    }
+    return map;
+  } catch {
+    return new Map();
   }
-  return map;
 }
 
 /**
@@ -41,9 +52,7 @@ export async function loadInstallDayPayload(supabase, opts) {
 
   const { data: activities, error: actErr } = await supabase
     .from("brain_job_activities")
-    .select(
-      "id, job_id, activity_type, activity_type_name, activity_status, activity_status_name, phase_name, start_date, sched_time, description, notes, raw_json"
-    )
+    .select(BRAIN_JOB_ACTIVITIES_SELECT)
     .eq("start_date", opts.date)
     .order("sched_time", { ascending: true, nullsFirst: false });
 
@@ -168,7 +177,7 @@ export async function loadInstallCrews(supabase, date) {
 
   const { data: activities, error } = await supabase
     .from("brain_job_activities")
-    .select("raw_json, activity_type, activity_type_name, description, phase_name")
+    .select(BRAIN_JOB_ACTIVITIES_CREWS_SELECT)
     .eq("start_date", date);
 
   if (error) {

@@ -22,6 +22,7 @@
     "eos:sync:retry-failed": "node backend-core/src/scripts/retryFailedMorawareJobs.js",
     "eos:auth:test-login": "node backend-core/src/scripts/testAuthLogin.js",
     "eos:test:head-access": "node backend-core/src/scripts/testHeadAccess.js",
+    "eos:test:install-dashboard": "node backend-core/src/install/installDashboardNormalizer.test.mjs",
     "eos:audit:coverage": "node backend-core/src/scripts/auditBrainCoverage.js",
     "eos:audit:operational": "node backend-core/src/scripts/auditOperationalCoverage.js",
     "eos:audit:operational-expansion": "node backend-core/src/scripts/auditOperationalExpansionCoverage.js",
