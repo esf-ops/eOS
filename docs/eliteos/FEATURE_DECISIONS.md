@@ -1329,3 +1329,13 @@
 | **Registration** | Added `install_dashboard` to `EOS_HEAD_SLUGS`, launcher catalog (**title: Install Dashboard**), `HEAD_URL_INSTALL_DASHBOARD`, installer role default grant, Home dev URL fallback (`localhost:5189`). Legacy slug `install` remains reserved for future scheduling head work. |
 | **Impacted files/docs** | `app-install-dashboard/*`, `backend-core/src/install/*`, `backend-core/src/moraware/reportFeeds/calendarScheduleConstants.js`, `mapCalendarScheduleRow.js`, `promoteCalendarScheduleRows.js`, `backend-core/supabase/eliteos_moraware_calendar_schedule.sql`, `server.js`, `eosGovernanceConstants.js`, `launcherHeads.js`, `headDeploymentUrls.js`, `testHeadAccess.js`, `app-home/src/lib/config.ts`, `app-home/src/ui/App.tsx`, root `package.json`, `SYSTEM_BLUEPRINT.md`, `eliteOS-master-head-map.md`, this entry. |
 | **Revisit trigger** | After first successful calendar feed promotion for Elite; field status updates, photo uploads, route optimization, Moraware writeback, dedicated crew/truck mapping tables, or when `install` scheduling head ships. |
+
+### 89. Calendar schedule feed — daily worker sync (view 222, Install Dashboard)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-06-11 |
+| **Decision** | Automate Moraware **view 222** (`calendar_schedule_rows`) on the DigitalOcean worker: **fetch → stage → promote** via `syncCalendarScheduleFeed.js`, scheduled daily **4:30 AM America/Chicago** (`eliteos-calendar-schedule-sync.timer`). Uses existing Moraware API session + HTTP GET report URLs (`fetchReportFeedArtifacts`). Credentials and Supabase service role live in **`/etc/eliteos/moraware-worker.env`** only. Failed fetch/stage/promotion **must not** deactivate existing **`moraware_calendar_schedule_rows`** active rows. Install Dashboard remains **read-only** (no UI or writeback changes in this pass). |
+| **Why** | Manual CSV staging validated the promotion path (~12k rows); automation removes operator dependency on local debug CSV files while preserving idempotent replace-before-insert promotion. |
+| **Impacted files/docs** | `fetchReportFeedArtifacts.js`, `syncCalendarScheduleFeed.js`, `deploy/moraware-worker/run-calendar-schedule-sync.sh`, `deploy/moraware-worker/systemd/eliteos-calendar-schedule-sync.{service,timer}`, `moraware-worker.env.example`, `docs/eliteos/moraware-calendar-schedule-sync-runbook.md`, `package.json`, tests. |
+| **Revisit trigger** | Before automating other report feeds (sales worksheet); before changing Moraware view 222 column contract; before headless browser download. |

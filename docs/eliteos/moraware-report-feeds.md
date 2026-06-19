@@ -128,7 +128,7 @@ Replace the manual workflow (“save CSV to disk + save HTML to disk + run local
 The fetch layer **must hand off** to the existing path — no parallel ingestion lane:
 
 ```
-fetchReportFeedArtifacts (future)
+fetchReportFeedArtifacts (implemented: `backend-core/src/moraware/reportFeeds/fetchReportFeedArtifacts.js`)
   → processReportFeedLocal({ csvText, htmlText, … })
   → persistReportFeedRun (staging)
   → optional promoteReportFeedFacts (MORAWARE_REPORT_FEED_PROMOTE=1)
@@ -140,7 +140,7 @@ fetchReportFeedArtifacts (future)
 - **Same contract** — `processReportFeedLocal`, `persistReportFeedRun`, `shouldPromoteReportRun`, and `promoteReportFeedFacts` remain unchanged; the fetch module only supplies text + metadata instead of disk reads.
 - **Same gates** — `SUPABASE_WRITE_ENABLED=1` for staging; `MORAWARE_REPORT_FEED_PROMOTE=1` for prepared facts; run must reach `validated` before promotion.
 
-Planned module name: `fetchReportFeedArtifacts` (location TBD — see credential model below).
+Planned module name: `fetchReportFeedArtifacts` — **implemented** at `backend-core/src/moraware/reportFeeds/fetchReportFeedArtifacts.js`. Install Dashboard calendar schedule uses `syncCalendarScheduleFeed.js` + DigitalOcean systemd timer; see **`docs/eliteos/moraware-calendar-schedule-sync-runbook.md`**.
 
 ### 2. Credential model (decision placeholder)
 

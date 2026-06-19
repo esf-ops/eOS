@@ -1,0 +1,10 @@
+[Unit]
+Description=Run eliteOS Moraware calendar schedule sync daily (US Central 4:30 AM)
+
+[Timer]
+OnCalendar=*-*-* 04:30:00 America/Chicago
+Persistent=true
+Unit=eliteos-calendar-schedule-sync.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,21 @@
+[Unit]
+Description=eliteOS Moraware calendar schedule sync (view 222, one-shot)
+Documentation=file:///opt/eliteos/eOS/docs/eliteos/moraware-calendar-schedule-sync-runbook.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=eliteos
+Group=eliteos
+WorkingDirectory=/opt/eliteos/eOS
+EnvironmentFile=/etc/eliteos/moraware-worker.env
+ExecStart=/opt/eliteos/eOS/deploy/moraware-worker/run-calendar-schedule-sync.sh
+StandardOutput=append:/var/log/eliteos/calendar-schedule-sync.log
+StandardError=append:/var/log/eliteos/calendar-schedule-sync.log
+
+# Typical run: fetch + stage + promote for ~12k worksheet lines
+TimeoutStartSec=1800
+
+[Install]
+WantedBy=multi-user.target
