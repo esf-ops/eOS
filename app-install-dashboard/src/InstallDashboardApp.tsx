@@ -135,6 +135,8 @@ function formatMissingFieldSummary(counts: Record<string, number> | undefined): 
   if (!total) return "No missing-field gaps";
   return `${total} missing-field gap(s)`;
 }
+
+function formatDateLabel(isoDate: string): string {
   const d = new Date(`${isoDate}T12:00:00`);
   if (Number.isNaN(d.getTime())) return isoDate;
   return d.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
