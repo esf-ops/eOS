@@ -180,6 +180,11 @@ export async function runCalendarScheduleSync(deps = {}) {
     });
     await writeArtifactBundle(artifactDir, { summary });
     printSummary(summary);
+    if (fetchResult.urls?.csvUrl) logLine("CSV URL (redacted):", fetchResult.urls.csvUrl);
+    if (fetchResult.status != null) logLine("CSV HTTP status:", fetchResult.status);
+    if (fetchResult.contentType) logLine("CSV content-type:", fetchResult.contentType);
+    if (fetchResult.bodyPreview) logLine("CSV body preview:", fetchResult.bodyPreview);
+    if (fetchResult.authMode) logLine("Auth mode:", fetchResult.authMode);
     return { ok: false, summary };
   }
 

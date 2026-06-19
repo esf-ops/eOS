@@ -8,11 +8,14 @@ Daily automated fetch → stage → promote for Moraware **view 222** (`calendar
 
 ## What runs
 
+Report exports (`/sys/report/?view=222…`) require **Moraware web session cookies** from a form login. The XML API `sessionId` alone does **not** authorize CSV/HTML export URLs.
+
 | Step | Module |
 |------|--------|
-| 1. Fetch CSV + HTML | `fetchReportFeedArtifacts.js` (Moraware API session + GET report URLs) |
-| 2. Parse + stage | `processReportFeedLocal` → `persistReportFeedRun` |
-| 3. Promote | `promoteCalendarScheduleRowsFromRun` (`--apply`, replace-before-insert) |
+| 1. Web login + cookie jar | `morawareWebSession.js` (`establishMorawareWebSession`) |
+| 2. Fetch CSV + HTML | `fetchReportFeedArtifacts.js` (GET with `Cookie` header) |
+| 3. Parse + stage | `processReportFeedLocal` → `persistReportFeedRun` |
+| 4. Promote | `promoteCalendarScheduleRowsFromRun` (`--apply`, replace-before-insert) |
 
 **Manual / timer command:**
 
@@ -40,7 +43,7 @@ Never commit this file. Never log secret values.
 | `MORAWARE_USERNAME` | Moraware login |
 | `MORAWARE_PASSWORD` | Moraware login |
 | `MORAWARE_ACCOUNT_ID` | Optional; same as Brain worker if required |
-| `MORAWARE_WEB_BASE_URL` | Optional override for report GET host (derived from API URL if omitted) |
+| `MORAWARE_WEB_BASE_URL` | Optional override for web UI origin used for form login + report GET (derived from `MORAWARE_API_URL` when omitted) |
 | `MORAWARE_DEFAULT_ORGANIZATION_ID` | eliteOS org UUID |
 | `SUPABASE_URL` | Supabase project URL |
 | `SUPABASE_SERVICE_ROLE_KEY` | Service role (worker only) |

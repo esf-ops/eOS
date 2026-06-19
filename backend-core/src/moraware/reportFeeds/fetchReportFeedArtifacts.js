@@ -1,13 +1,24 @@
 /**
- * Governed Moraware report-feed download (server-side HTTP + API session).
+ * Governed Moraware report-feed download (server-side HTTP + web session cookies).
  *
- * Uses MorawareClient sessionCreate (XML API) then GETs saved-report CSV + HTML
- * URLs with sessionId query param. Returns text for processReportFeedLocal().
+ * Moraware saved-report CSV/HTML under /sys/report/ require browser-style session cookies
+ * from a web form login. XML API sessionId alone is insufficient for those URLs.
+ *
+ * Pipeline:
+ *   establishMorawareWebSession (form POST + cookie jar)
+ *   → GET report CSV + HTML with Cookie header
  *
  * Backend/worker only — never import from frontend code.
  */
 
 import { MorawareClient } from "../../../../src/morawareClient.js";
+import {
+  buildCookieHeader,
+  establishMorawareWebSession,
+  looksLikeMorawareLoginHtml,
+  morawareWebFetch,
+  redactResponseSnippet
+} from "./morawareWebSession.js";
 
 const DEFAULT_FETCH_TIMEOUT_MS = 120_000;
 
@@ -16,12 +27,14 @@ export function deriveMorawareWebBaseFromApiUrl(apiUrl, webBaseOverride = "") {
   if (envBase) return envBase.replace(/\/$/, "");
   try {
     const u = new URL(String(apiUrl ?? "").trim());
-    const pathname = u.pathname || "";
-    if (/\/api\/?$/i.test(pathname)) {
-      const trimmed = pathname.replace(/\/api\/?$/i, "").replace(/\/$/, "");
-      return `${u.origin}${trimmed}` || u.origin;
+    let pathname = u.pathname || "";
+    if (/api\.aspx$/i.test(pathname)) {
+      pathname = pathname.replace(/\/api\.aspx$/i, "");
+    } else if (/\/api\/?$/i.test(pathname)) {
+      pathname = pathname.replace(/\/api\/?$/i, "");
     }
-    return u.origin;
+    pathname = pathname.replace(/\/$/, "");
+    return `${u.origin}${pathname}` || u.origin;
   } catch {
     return "";
   }
@@ -36,7 +49,7 @@ export function appendMorawareSessionId(url, sessionId) {
 }
 
 /**
- * @param {{ webBase: string, viewId: number|string, csvExportPath?: string, htmlReportPath?: string, sessionId: string }} params
+ * @param {{ webBase: string, viewId: number|string, csvExportPath?: string, htmlReportPath?: string, sessionId?: string }} params
  */
 export function buildReportFeedUrls(params) {
   const base = String(params.webBase ?? "").replace(/\/$/, "");
@@ -45,10 +58,13 @@ export function buildReportFeedUrls(params) {
     params.csvExportPath ||
     `/sys/report/?view=${viewId}&spreadsheet=1&exportType=AllPages&table=Report`;
   const htmlPath = params.htmlReportPath || `/sys/report/?view=${viewId}`;
-  const csvUrl = appendMorawareSessionId(`${base}${csvPath.startsWith("/") ? csvPath : `/${csvPath}`}`, params.sessionId);
+  const csvUrl = appendMorawareSessionId(
+    `${base}${csvPath.startsWith("/") ? csvPath : `/${csvPath}`}`,
+    params.sessionId ?? ""
+  );
   const htmlUrl = appendMorawareSessionId(
     `${base}${htmlPath.startsWith("/") ? htmlPath : `/${htmlPath}`}`,
-    params.sessionId
+    params.sessionId ?? ""
   );
   return { csvUrl, htmlUrl };
 }
@@ -58,9 +74,7 @@ export function redactMorawareSessionId(url) {
 }
 
 export function looksLikeMorawareLoginPage(text) {
-  const sample = String(text ?? "").slice(0, 6000).toLowerCase();
-  if (!sample.includes("login") && !sample.includes("sign in")) return false;
-  return sample.includes("password") || sample.includes("username") || sample.includes("log in");
+  return looksLikeMorawareLoginHtml(text);
 }
 
 export function looksLikeCsvExport(text, contentType = "") {
@@ -84,36 +98,35 @@ export function estimateCsvDataRowCount(csvText) {
   return Math.max(0, lines.length - 1);
 }
 
+function logFetchDiagnostic(stage, httpResult, url, authMode) {
+  const redactedUrl = redactMorawareSessionId(url);
+  console.log(`Moraware report fetch diagnostic [${stage}]`);
+  console.log(`  auth mode: ${authMode ?? "unknown"}`);
+  console.log(`  url: ${redactedUrl}`);
+  console.log(`  http status: ${httpResult?.status ?? "—"}`);
+  console.log(`  content-type: ${httpResult?.contentType || "—"}`);
+  if (httpResult?.text && (looksLikeMorawareLoginPage(httpResult.text) || httpResult.status === 401 || httpResult.status === 403)) {
+    console.log(`  body preview: ${redactResponseSnippet(httpResult.text, 120)}`);
+  }
+}
+
 /**
  * @param {string} url
- * @param {{ timeoutMs?: number, fetchFn?: typeof fetch }} [opts]
+ * @param {{
+ *   timeoutMs?: number,
+ *   jar?: import("./morawareWebSession.js").MorawareCookieJar,
+ *   referer?: string,
+ *   fetchFn?: typeof morawareWebFetch
+ * }} [opts]
  */
 export async function fetchMorawareReportHttpGet(url, opts = {}) {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS;
-  const fetchFn = opts.fetchFn ?? fetch;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetchFn(url, {
-      method: "GET",
-      headers: {
-        accept: "text/html,application/xhtml+xml,text/csv,application/csv,*/*",
-        "user-agent": "eliteOS-report-feed/1.0"
-      },
-      signal: controller.signal,
-      redirect: "follow"
-    });
-    const text = await res.text();
-    return {
-      ok: res.ok,
-      status: res.status,
-      statusText: res.statusText,
-      contentType: res.headers.get("content-type") ?? "",
-      text
-    };
-  } finally {
-    clearTimeout(timeout);
-  }
+  const fetchImpl = opts.fetchFn ?? morawareWebFetch;
+  return fetchImpl(url, {
+    timeoutMs,
+    jar: opts.jar,
+    headers: opts.referer ? { referer: opts.referer } : undefined
+  });
 }
 
 function classifyFetchFailure(stage, httpResult) {
@@ -122,7 +135,7 @@ function classifyFetchFailure(stage, httpResult) {
   if (looksLikeMorawareLoginPage(httpResult.text)) return "auth_failed";
   if (!httpResult.ok) return "fetch_failed";
   if (stage === "csv" && !looksLikeCsvExport(httpResult.text, httpResult.contentType)) {
-    return "empty_export";
+    return looksLikeMorawareLoginPage(httpResult.text) ? "auth_failed" : "empty_export";
   }
   if (stage === "html" && looksLikeMorawareLoginPage(httpResult.text)) return "auth_failed";
   if (stage === "html" && String(httpResult.text ?? "").trim().length < 200) return "empty_export";
@@ -136,6 +149,7 @@ function classifyFetchFailure(stage, httpResult) {
  *   htmlReportPath?: string,
  *   morawareClient?: MorawareClient,
  *   fetchImpl?: typeof fetchMorawareReportHttpGet,
+ *   webSession?: Awaited<ReturnType<typeof establishMorawareWebSession>>,
  *   timeoutMs?: number
  * }} params
  */
@@ -146,21 +160,42 @@ export async function fetchReportFeedArtifacts(params) {
   }
 
   const client = params.morawareClient ?? new MorawareClient();
-  let sessionId = "";
-  try {
-    sessionId = await client.ensureSession();
-  } catch (err) {
-    return {
-      ok: false,
-      error: "auth_failed",
-      stage: "session",
-      detail: String(err?.message || err)
-    };
-  }
-
   const webBase = deriveMorawareWebBaseFromApiUrl(client.baseUrl);
   if (!webBase) {
     return { ok: false, error: "web_base_missing", stage: "init" };
+  }
+
+  let webSession = params.webSession;
+  if (!webSession) {
+    webSession = await establishMorawareWebSession({
+      webBase,
+      userName: client.userName,
+      password: client.password,
+      accountId: client.accountId,
+      timeoutMs: params.timeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS
+    });
+  }
+
+  if (!webSession.ok) {
+    console.log("Moraware web login failed before report export fetch.");
+    if (webSession.attempts?.length) {
+      console.log(`  login attempts: ${JSON.stringify(webSession.attempts)}`);
+    }
+    return {
+      ok: false,
+      error: webSession.error ?? "auth_failed",
+      stage: webSession.stage ?? "web_login",
+      detail: webSession.detail,
+      webBase
+    };
+  }
+
+  // Optional: also attach XML API sessionId when available (some tenants accept both).
+  let apiSessionId = "";
+  try {
+    apiSessionId = await client.ensureSession();
+  } catch {
+    apiSessionId = "";
   }
 
   const { csvUrl, htmlUrl } = buildReportFeedUrls({
@@ -168,16 +203,22 @@ export async function fetchReportFeedArtifacts(params) {
     viewId,
     csvExportPath: params.csvExportPath,
     htmlReportPath: params.htmlReportPath,
-    sessionId
+    sessionId: apiSessionId
   });
 
   const fetchImpl = params.fetchImpl ?? fetchMorawareReportHttpGet;
   const timeoutMs = params.timeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS;
+  const authMode = webSession.authMode ?? "web_cookie";
+  const jar = webSession.jar;
+  const htmlReferer = `${webBase}/sys/report/?view=${viewId}`;
 
   let csvResult;
-  let htmlResult;
   try {
-    csvResult = await fetchImpl(csvUrl, { timeoutMs });
+    csvResult = await fetchImpl(csvUrl, {
+      timeoutMs,
+      jar,
+      referer: htmlReferer
+    });
   } catch (err) {
     const aborted = err?.name === "AbortError";
     return {
@@ -185,9 +226,13 @@ export async function fetchReportFeedArtifacts(params) {
       error: aborted ? "timeout" : "fetch_failed",
       stage: "csv",
       detail: String(err?.message || err),
+      authMode,
+      cookieNames: [...(jar?.keys?.() ?? [])],
       urls: { csvUrl: redactMorawareSessionId(csvUrl), htmlUrl: redactMorawareSessionId(htmlUrl) }
     };
   }
+
+  logFetchDiagnostic("csv", csvResult, csvUrl, authMode);
 
   const csvFailure = classifyFetchFailure("csv", csvResult);
   if (csvFailure) {
@@ -196,7 +241,11 @@ export async function fetchReportFeedArtifacts(params) {
       error: csvFailure,
       stage: "csv",
       status: csvResult.status,
+      contentType: csvResult.contentType,
+      bodyPreview: redactResponseSnippet(csvResult.text, 120),
       detail: csvResult.statusText || undefined,
+      authMode,
+      cookieNames: [...(jar?.keys?.() ?? [])],
       urls: { csvUrl: redactMorawareSessionId(csvUrl), htmlUrl: redactMorawareSessionId(htmlUrl) }
     };
   }
@@ -207,12 +256,18 @@ export async function fetchReportFeedArtifacts(params) {
       ok: false,
       error: "empty_export",
       stage: "csv",
+      authMode,
       urls: { csvUrl: redactMorawareSessionId(csvUrl), htmlUrl: redactMorawareSessionId(htmlUrl) }
     };
   }
 
+  let htmlResult;
   try {
-    htmlResult = await fetchImpl(htmlUrl, { timeoutMs });
+    htmlResult = await fetchImpl(htmlUrl, {
+      timeoutMs,
+      jar,
+      referer: htmlReferer
+    });
   } catch (err) {
     const aborted = err?.name === "AbortError";
     return {
@@ -220,9 +275,12 @@ export async function fetchReportFeedArtifacts(params) {
       error: aborted ? "timeout" : "fetch_failed",
       stage: "html",
       detail: String(err?.message || err),
+      authMode,
       urls: { csvUrl: redactMorawareSessionId(csvUrl), htmlUrl: redactMorawareSessionId(htmlUrl) }
     };
   }
+
+  logFetchDiagnostic("html", htmlResult, htmlUrl, authMode);
 
   const htmlFailure = classifyFetchFailure("html", htmlResult);
   if (htmlFailure) {
@@ -231,7 +289,10 @@ export async function fetchReportFeedArtifacts(params) {
       error: htmlFailure,
       stage: "html",
       status: htmlResult.status,
+      contentType: htmlResult.contentType,
+      bodyPreview: redactResponseSnippet(htmlResult.text, 120),
       detail: htmlResult.statusText || undefined,
+      authMode,
       urls: { csvUrl: redactMorawareSessionId(csvUrl), htmlUrl: redactMorawareSessionId(htmlUrl) }
     };
   }
@@ -251,6 +312,8 @@ export async function fetchReportFeedArtifacts(params) {
       morawareViewId: viewId,
       fetchedAt: new Date().toISOString(),
       sourceHost,
+      authMode,
+      cookieNames: [...(jar?.keys?.() ?? [])],
       csvByteLength: csvResult.text.length,
       htmlByteLength: htmlResult.text.length,
       csvRowCount
@@ -261,3 +324,5 @@ export async function fetchReportFeedArtifacts(params) {
     }
   };
 }
+
+export { buildCookieHeader };
