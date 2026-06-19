@@ -11,6 +11,7 @@ import {
   aggregateCalendarScheduleRows,
   mapCalendarScheduleRow
 } from "./mapCalendarScheduleRow.js";
+import { isSchemaDriftBlocking } from "./schemaDriftPolicy.js";
 
 function isMissingRelationError(err) {
   const msg = String(err?.message ?? err ?? "").toLowerCase();
@@ -45,8 +46,8 @@ export async function promoteCalendarScheduleRowsFromRun(supabase, reportRunId, 
   if (!feed || feed.report_type !== CALENDAR_SCHEDULE_REPORT_TYPE) {
     return { ok: false, error: "not_calendar_schedule_feed" };
   }
-  if (run.schema_drift?.detected) {
-    return { ok: false, error: "schema_drift_blocks_promotion" };
+  if (isSchemaDriftBlocking(run.schema_drift)) {
+    return { ok: false, error: "schema_drift_blocks_promotion", detail: run.schema_drift };
   }
 
   let query = supabase

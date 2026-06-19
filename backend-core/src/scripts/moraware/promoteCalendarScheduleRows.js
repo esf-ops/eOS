@@ -107,7 +107,13 @@ function printBlockedResult(result) {
       console.log("  Use eos:moraware:promote-report-run-matched-facts for worksheet facts.");
       break;
     case "schema_drift_blocks_promotion":
-      console.log("  Fix header/schema drift on the feed run before promoting.");
+      console.log("  Fix missing core expected columns before promoting.");
+      if (result.detail?.unexpectedHeaders?.length && !(result.detail?.missingHeaders?.length)) {
+        console.log(
+          "  If this run only has extra First Install columns, promotion should now proceed."
+        );
+        console.log("  Re-run dry-run after deploying the schema drift policy update.");
+      }
       break;
     case "calendar_schedule_table_not_installed":
       console.log("  Apply backend-core/supabase/eliteos_moraware_calendar_schedule.sql first.");

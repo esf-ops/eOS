@@ -10,12 +10,14 @@
  *
  * Promotion blocks hard on:
  *   - status !== 'validated'
- *   - schema drift detected
+ *   - blocking schema drift (missing core columns or header hash mismatch)
  *   - header hash mismatch (if both hashes present)
  *   - any ambiguous_identity rows
  *   - any duplicate row hashes (duplicatePreparedFacts in enrichment)
  *   - zero data rows
  */
+
+import { isSchemaDriftBlocking } from "./schemaDriftPolicy.js";
 
 /**
  * @param {object} processResult   - Return value of processReportFeedLocal
@@ -36,7 +38,7 @@ export function shouldPromoteReportRun(processResult) {
     };
   }
 
-  if (schemaDrift?.detected) {
+  if (isSchemaDriftBlocking(schemaDrift)) {
     return {
       ok: false,
       reason: "schema_drift_detected",

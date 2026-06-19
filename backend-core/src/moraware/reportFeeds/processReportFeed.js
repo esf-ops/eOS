@@ -4,6 +4,7 @@ import { parseReportHtmlIdentityRows } from "./parseReportHtml.js";
 import { buildIdentityMapFromHtmlRows } from "./buildIdentityMap.js";
 import { enrichReportRowsWithIdentity, IDENTITY_STATUS } from "./enrichReportRows.js";
 import { computeHeaderHash } from "./hashUtils.js";
+import { buildSchemaDrift } from "./schemaDriftPolicy.js";
 
 export { IDENTITY_STATUS };
 
@@ -37,20 +38,11 @@ export function processReportFeedLocal(params) {
     reportType
   });
 
-  const schemaDrift =
-    expectedColumnHash && profile.headerHash !== expectedColumnHash
-      ? {
-          detected: true,
-          observedHash: profile.headerHash,
-          expectedHash: expectedColumnHash
-        }
-      : headerValidation.missingHeaders.length || headerValidation.unexpectedHeaders.length
-        ? {
-            detected: true,
-            missingHeaders: headerValidation.missingHeaders,
-            unexpectedHeaders: headerValidation.unexpectedHeaders
-          }
-        : { detected: false };
+  const schemaDrift = buildSchemaDrift({
+    expectedColumnHash,
+    profile,
+    headerValidation
+  });
 
   const runStatus = schemaDrift.detected
     ? "needs_review"
@@ -90,6 +82,7 @@ export function computeExpectedColumnHash(expectedColumns) {
 
 export { parseCsvReportRows } from "./parseCsv.js";
 export { profileReportColumns, validateHeaderContract } from "./profileColumns.js";
+export { buildSchemaDrift, isSchemaDriftBlocking } from "./schemaDriftPolicy.js";
 export { parseReportHtmlIdentityRows } from "./parseReportHtml.js";
 export { buildIdentityMapFromHtmlRows } from "./buildIdentityMap.js";
 export { enrichReportRowsWithIdentity, buildExtraDiscriminators } from "./enrichReportRows.js";

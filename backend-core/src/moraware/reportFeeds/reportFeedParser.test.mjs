@@ -24,12 +24,22 @@ import {
   SALES_WORKSHEET_HISTORY_FACTS_EXPECTED_COLUMN_HASH,
   SALES_WORKSHEET_HISTORY_FACTS_REPORT_TYPE
 } from "./processReportFeed.js";
+import {
+  CALENDAR_SCHEDULE_EXPECTED_COLUMNS,
+  CALENDAR_SCHEDULE_REPORT_TYPE
+} from "./calendarScheduleConstants.js";
+import {
+  buildSchemaDrift,
+  isSchemaDriftBlocking
+} from "./schemaDriftPolicy.js";
+import { promoteCalendarScheduleRowsFromRun } from "./promoteCalendarScheduleRows.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const fixtureDir = join(__dirname, "../../../test/fixtures/moraware-report-feeds");
 const csvFixture = readFileSync(join(fixtureDir, "sales-worksheet-facts.sample.csv"), "utf8");
 const htmlFixture = readFileSync(join(fixtureDir, "sales-worksheet-facts.sample.html"), "utf8");
 const historyFixtureCsv = readFileSync(join(fixtureDir, "sales-worksheet-history-facts.sample.csv"), "utf8");
+const calendarScheduleFixtureCsv = readFileSync(join(fixtureDir, "calendar-schedule.sample.csv"), "utf8");
 
 // Fixture layout:
 // Row 0: North Branch - Sample Builders LLC | Kitchen Remodel Phase A | Countertop Form | Kitchen
@@ -323,7 +333,7 @@ function testRowHashWorksheetDiscrimination() {
     "row-hash: worksheet-line discriminators produce distinct hashes for same job");
 }
 
-function run() {
+async function run() {
   testCsvParse();
   testColumnProfile();
   testHeaderHashStable();
@@ -356,6 +366,15 @@ function run() {
   testView220CollisionFix_IdenticalRowsSameHash();
   testView219HashUnchangedByCollisionFix();
   testComputeRowHashWithExtraDiscriminators();
+
+  // ── View 222: Calendar schedule rows ─────────────────────────────────────────
+
+  testCalendarScheduleExtraColumnsAllowedWithNullHash();
+  testCalendarScheduleMissingSqftBlocks();
+  testCalendarScheduleMissingActivityDateBlocks();
+  testCalendarScheduleLegacyUnexpectedOnlyDriftNotBlockingPromotion();
+  await testCalendarSchedulePromotionDryRunAllowsLegacyDrift();
+  testSalesWorksheetExtraColumnStillBlocksWithLockedHash();
 
   console.log("reportFeedParser.test.mjs: ok");
 }
@@ -732,4 +751,211 @@ function testComputeRowHashWithExtraDiscriminators() {
   );
 }
 
-run();
+function csvFromHeadersAndRows(headers, rows) {
+  const escape = (value) => {
+    const s = String(value ?? "");
+    return s.includes(",") || s.includes('"') ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const lines = [headers.map(escape).join(",")];
+  for (const row of rows) {
+    lines.push(headers.map((header) => escape(row[header] ?? "")).join(","));
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function buildCalendarScheduleCsvWithExtraInstallColumns() {
+  const parsed = parseCsvReportRows(calendarScheduleFixtureCsv);
+  const extraHeaders = [
+    "First Install - Quartz Basic in Job Status",
+    "First Install - Quartz Basic in Job Date"
+  ];
+  const headers = [...parsed.headers, ...extraHeaders];
+  const rows = parsed.rows.map((row) => {
+    const out = { ...row };
+    for (const header of extraHeaders) out[header] = "";
+    return out;
+  });
+  return csvFromHeadersAndRows(headers, rows);
+}
+
+function testCalendarScheduleExtraColumnsAllowedWithNullHash() {
+  const csvText = buildCalendarScheduleCsvWithExtraInstallColumns();
+  const result = processReportFeedLocal({
+    csvText,
+    htmlText: htmlFixture,
+    organizationId: "00000000-0000-0000-0000-000000000001",
+    reportType: CALENDAR_SCHEDULE_REPORT_TYPE,
+    expectedColumns: CALENDAR_SCHEDULE_EXPECTED_COLUMNS,
+    expectedColumnHash: null,
+    morawareViewId: 222
+  });
+
+  assert.equal(result.headerValidation.missingHeaders.length, 0, "calendar: no missing core headers");
+  assert.ok(result.headerValidation.unexpectedHeaders.length >= 2, "calendar: extra First Install headers reported");
+  assert.equal(result.schemaDrift.detected, false, "calendar: extra columns do not mark schema drift");
+  assert.ok(Array.isArray(result.schemaDrift.extraHeaders), "calendar: extra headers recorded for diagnostics");
+  assert.equal(result.runStatus, "validated", "calendar: run validates with null expected hash");
+  assert.equal(result.promotionPreview.wouldPromote, true, "calendar: promotion preview allowed");
+}
+
+function testCalendarScheduleMissingSqftBlocks() {
+  const parsed = parseCsvReportRows(calendarScheduleFixtureCsv);
+  const headers = parsed.headers.filter((h) => h !== "Job Worksheet - Sq.Ft.");
+  const rows = parsed.rows.map((row) => {
+    const out = { ...row };
+    delete out["Job Worksheet - Sq.Ft."];
+    return out;
+  });
+  const csvText = csvFromHeadersAndRows(headers, rows);
+  const result = processReportFeedLocal({
+    csvText,
+    htmlText: htmlFixture,
+    organizationId: "00000000-0000-0000-0000-000000000001",
+    reportType: CALENDAR_SCHEDULE_REPORT_TYPE,
+    expectedColumns: CALENDAR_SCHEDULE_EXPECTED_COLUMNS,
+    expectedColumnHash: null,
+    morawareViewId: 222
+  });
+
+  assert.ok(
+    result.headerValidation.missingHeaders.includes("Job Worksheet - Sq.Ft."),
+    "calendar: missing sqft header reported"
+  );
+  assert.equal(result.schemaDrift.detected, true, "calendar: missing core header blocks");
+  assert.equal(result.runStatus, "needs_review", "calendar: missing sqft → needs_review");
+}
+
+function testCalendarScheduleMissingActivityDateBlocks() {
+  const parsed = parseCsvReportRows(calendarScheduleFixtureCsv);
+  const headers = parsed.headers.filter((h) => h !== "Activity Date");
+  const rows = parsed.rows.map((row) => {
+    const out = { ...row };
+    delete out["Activity Date"];
+    return out;
+  });
+  const csvText = csvFromHeadersAndRows(headers, rows);
+  const result = processReportFeedLocal({
+    csvText,
+    htmlText: htmlFixture,
+    organizationId: "00000000-0000-0000-0000-000000000001",
+    reportType: CALENDAR_SCHEDULE_REPORT_TYPE,
+    expectedColumns: CALENDAR_SCHEDULE_EXPECTED_COLUMNS,
+    expectedColumnHash: null,
+    morawareViewId: 222
+  });
+
+  assert.ok(
+    result.headerValidation.missingHeaders.includes("Activity Date"),
+    "calendar: missing Activity Date reported"
+  );
+  assert.equal(result.schemaDrift.detected, true, "calendar: missing Activity Date blocks");
+  assert.equal(result.runStatus, "needs_review", "calendar: missing Activity Date → needs_review");
+}
+
+function testCalendarScheduleLegacyUnexpectedOnlyDriftNotBlockingPromotion() {
+  const legacyDrift = {
+    detected: true,
+    missingHeaders: [],
+    unexpectedHeaders: ["First Install - Quartz Basic in Job Status"]
+  };
+  assert.equal(isSchemaDriftBlocking(legacyDrift), false, "calendar: legacy unexpected-only drift is non-blocking");
+
+  const rebuilt = buildSchemaDrift({
+    expectedColumnHash: null,
+    profile: { headerHash: "abc" },
+    headerValidation: {
+      missingHeaders: [],
+      unexpectedHeaders: ["First Install - Quartz Basic in Job Status"]
+    }
+  });
+  assert.equal(rebuilt.detected, false, "calendar: rebuilt drift allows extras");
+  assert.ok(rebuilt.extraHeaders?.length === 1, "calendar: rebuilt drift keeps extra header list");
+}
+
+async function testCalendarSchedulePromotionDryRunAllowsLegacyDrift() {
+  const legacyDrift = {
+    detected: true,
+    missingHeaders: [],
+    unexpectedHeaders: ["First Install - Quartz Basic in Job Status"]
+  };
+  const supabase = {
+    from(table) {
+      const api = {
+        select() {
+          return api;
+        },
+        eq() {
+          return api;
+        },
+        order() {
+          return api;
+        },
+        limit() {
+          return api;
+        },
+        maybeSingle() {
+          if (table === "moraware_report_runs") {
+            return Promise.resolve({
+              data: {
+                id: "run-1",
+                organization_id: "org-1",
+                report_feed_id: "feed-1",
+                status: "needs_review",
+                schema_drift: legacyDrift
+              },
+              error: null
+            });
+          }
+          if (table === "moraware_report_feeds") {
+            return Promise.resolve({
+              data: {
+                id: "feed-1",
+                report_type: CALENDAR_SCHEDULE_REPORT_TYPE,
+                moraware_view_id: 222,
+                is_active: true
+              },
+              error: null
+            });
+          }
+          return Promise.resolve({ data: null, error: null });
+        },
+        then(onFulfilled, onRejected) {
+          if (table === "moraware_report_raw_rows") {
+            return Promise.resolve({ data: [], error: null }).then(onFulfilled, onRejected);
+          }
+          return Promise.resolve({ data: [], error: null }).then(onFulfilled, onRejected);
+        }
+      };
+      return api;
+    }
+  };
+
+  const result = await promoteCalendarScheduleRowsFromRun(supabase, "run-1", { apply: false });
+  assert.equal(result.ok, true, "calendar promote dry-run: allowed with legacy unexpected-only drift");
+  assert.equal(result.dryRun, true, "calendar promote dry-run: dry-run mode");
+}
+
+function testSalesWorksheetExtraColumnStillBlocksWithLockedHash() {
+  const parsed = parseCsvReportRows(csvFixture);
+  const headers = [...parsed.headers, "Totally Unexpected Column"];
+  const rows = parsed.rows.map((row) => ({ ...row, "Totally Unexpected Column": "x" }));
+  const csvText = csvFromHeadersAndRows(headers, rows);
+  const expectedHash = computeExpectedColumnHash(SALES_WORKSHEET_FACTS_EXPECTED_COLUMNS);
+  const result = processReportFeedLocal({
+    csvText,
+    htmlText: htmlFixture,
+    organizationId: "00000000-0000-0000-0000-000000000001",
+    reportType: "sales_worksheet_facts",
+    expectedColumns: SALES_WORKSHEET_FACTS_EXPECTED_COLUMNS,
+    expectedColumnHash: expectedHash,
+    morawareViewId: 219
+  });
+
+  assert.equal(result.schemaDrift.detected, true, "sales worksheet: extra column with locked hash blocks");
+  assert.equal(result.runStatus, "needs_review", "sales worksheet: extra column → needs_review");
+}
+
+run().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
