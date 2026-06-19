@@ -224,7 +224,7 @@ export async function loadCalendarScheduleCrews(supabase, opts) {
 
   const { data, error } = await supabase
     .from("moraware_calendar_schedule_rows")
-    .select("truck_or_crew_name")
+    .select("truck_or_crew_name, sqft")
     .eq("organization_id", opts.organizationId)
     .eq("calendar_date", opts.date)
     .eq("is_active", true);
@@ -238,11 +238,30 @@ export async function loadCalendarScheduleCrews(supabase, opts) {
   }
 
   const filtered = filterInstallDashboardCalendarRows(data);
+  /** @type {Map<string, { stopCount: number, totalSqft: number }>} */
+  const crewStats = new Map();
+  for (const row of filtered.rows) {
+    const label = String(row.truck_or_crew_name ?? "").trim() || "Unassigned";
+    const stat = crewStats.get(label) ?? { stopCount: 0, totalSqft: 0 };
+    stat.stopCount += 1;
+    const sqft = row.sqft != null ? Number(row.sqft) : 0;
+    if (Number.isFinite(sqft) && sqft > 0) stat.totalSqft += sqft;
+    crewStats.set(label, stat);
+  }
   const labels = new Set();
   for (const row of filtered.rows) {
     labels.add(String(row.truck_or_crew_name ?? "").trim() || "Unassigned");
   }
-  const crews = sortInstallDashboardCrews([...labels].map((label) => crewFromAssignedLabel(label)));
+  const crews = sortInstallDashboardCrews([...labels].map((label) => crewFromAssignedLabel(label))).map(
+    (crew) => {
+      const stat = crewStats.get(crew.name) ?? { stopCount: 0, totalSqft: 0 };
+      return {
+        ...crew,
+        stopCount: stat.stopCount,
+        totalSqft: stat.totalSqft > 0 ? stat.totalSqft : null
+      };
+    }
+  );
   return {
     date: opts.date,
     crews,

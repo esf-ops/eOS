@@ -9,11 +9,46 @@ const EOS_LOGO_URL =
 
 const DEFAULT_WORKSPACE_NAME = "Elite Stone Fabrication";
 
+type SmartBadge = {
+  label: string;
+  tone: "ok" | "info" | "warning" | "critical";
+};
+
+type SmartBrief = {
+  severity: "ok" | "info" | "warning" | "critical";
+  badges: SmartBadge[];
+  highlights: string[];
+  missingFields: string[];
+};
+
+type SmartSummary = {
+  callAheadCount?: number;
+  accessNoteCount?: number;
+  missingPhoneCount?: number;
+  missingAddressCount?: number;
+  largeJobCount?: number;
+  specialInstallCount?: number;
+  siteAccessCount?: number;
+  laborNoteCount?: number;
+  premiumMaterialCount?: number;
+  criticalCount?: number;
+  warningCount?: number;
+  totalStops?: number;
+  totalSqft?: number | null;
+  firstStopTime?: string | null;
+  lastStopTime?: string | null;
+  cityCount?: number;
+  cities?: string[];
+  fieldAlertCount?: number;
+};
+
 type Crew = {
   id: string;
   name: string;
   truckName?: string;
   branch?: string;
+  stopCount?: number;
+  totalSqft?: number | null;
 };
 
 type InstallJob = {
@@ -57,6 +92,7 @@ type InstallJob = {
   notes?: string[];
   warnings?: string[];
   riskFlags?: string[];
+  smartBrief?: SmartBrief;
 };
 
 type InstallDayPayload = {
@@ -76,6 +112,7 @@ type InstallDayPayload = {
     brainActivityCount?: number;
     missingFieldCounts?: Record<string, number>;
     fallbackFrom?: string;
+    smartSummary?: SmartSummary;
   };
 };
 
@@ -163,22 +200,72 @@ function cityLabelFor(job: InstallJob): string {
   return [city, state].filter(Boolean).join(", ") || "Location pending";
 }
 
-function computeDayOverview(jobs: InstallJob[]) {
+function computeDayOverview(jobs: InstallJob[], smartSummary?: SmartSummary) {
   const totalSqft = jobs.reduce((sum, job) => sum + (job.scope?.sqft ?? 0), 0);
   const cities = [
     ...new Set(jobs.map((job) => String(job.address?.city ?? "").trim()).filter(Boolean))
   ];
-  const missingAddress = jobs.filter((job) => !formatAddressLines(job).hasAddress).length;
-  const missingPhone = jobs.filter((job) => phonesFor(job).length === 0).length;
+  const missingAddress =
+    smartSummary?.missingAddressCount ??
+    jobs.filter((job) => !formatAddressLines(job).hasAddress).length;
+  const missingPhone =
+    smartSummary?.missingPhoneCount ?? jobs.filter((job) => phonesFor(job).length === 0).length;
   const lastStop = jobs[jobs.length - 1];
+  const fieldAlerts =
+    smartSummary?.fieldAlertCount ??
+    jobs.filter((job) => job.smartBrief && job.smartBrief.severity !== "ok").length;
   return {
-    totalSqft: totalSqft > 0 ? totalSqft : null,
-    cities,
+    totalSqft: smartSummary?.totalSqft ?? (totalSqft > 0 ? totalSqft : null),
+    cities: smartSummary?.cities?.length ? smartSummary.cities : cities,
     missingAddress,
     missingPhone,
-    firstStopTime: jobs[0]?.scheduledStart ?? null,
-    lastStopTime: lastStop?.scheduledStart ?? null
+    firstStopTime: smartSummary?.firstStopTime ?? jobs[0]?.scheduledStart ?? null,
+    lastStopTime: smartSummary?.lastStopTime ?? lastStop?.scheduledStart ?? null,
+    fieldAlerts,
+    specialInstallCount: smartSummary?.specialInstallCount ?? 0
   };
+}
+
+function buildHeadsUpLines(summary: SmartSummary | undefined): string[] {
+  if (!summary) return [];
+  const lines: string[] = [];
+  if ((summary.callAheadCount ?? 0) > 0) {
+    lines.push(`${summary.callAheadCount} call-ahead stop${summary.callAheadCount === 1 ? "" : "s"}`);
+  }
+  if ((summary.accessNoteCount ?? 0) > 0) {
+    lines.push(`${summary.accessNoteCount} access note${summary.accessNoteCount === 1 ? "" : "s"}`);
+  }
+  if ((summary.siteAccessCount ?? 0) > 0) {
+    lines.push(`${summary.siteAccessCount} site access note${summary.siteAccessCount === 1 ? "" : "s"}`);
+  }
+  if ((summary.missingPhoneCount ?? 0) > 0) {
+    lines.push(`${summary.missingPhoneCount} missing phone${summary.missingPhoneCount === 1 ? "" : "s"}`);
+  }
+  if ((summary.missingAddressCount ?? 0) > 0) {
+    lines.push(`${summary.missingAddressCount} missing address${summary.missingAddressCount === 1 ? "" : "s"}`);
+  }
+  if ((summary.largeJobCount ?? 0) > 0) {
+    lines.push(`${summary.largeJobCount} large job${summary.largeJobCount === 1 ? "" : "s"}`);
+  }
+  if ((summary.specialInstallCount ?? 0) > 0) {
+    lines.push(
+      `${summary.specialInstallCount} large/specialty install${summary.specialInstallCount === 1 ? "" : "s"}`
+    );
+  }
+  if ((summary.laborNoteCount ?? 0) > 0) {
+    lines.push(`${summary.laborNoteCount} labor note${summary.laborNoteCount === 1 ? "" : "s"}`);
+  }
+  return lines;
+}
+
+function crewChipLabel(crew: Crew, active: boolean, activeJobCount: number, activeSqft: number | null): string {
+  const name = crew.truckName || crew.name;
+  const stopCount = active ? activeJobCount : crew.stopCount;
+  const sqft = active ? activeSqft : crew.totalSqft;
+  const parts = [name];
+  if (stopCount != null && stopCount > 0) parts.push(`${stopCount} stop${stopCount === 1 ? "" : "s"}`);
+  if (sqft != null && sqft > 0) parts.push(`${sqft} sq ft`);
+  return parts.join(" · ");
 }
 
 function formatFeedStatusLine(
@@ -422,10 +509,12 @@ export default function InstallDashboardApp() {
   }, [userDepartment, userDisplayEmail, userDisplayName, userJobTitle, userRole]);
 
   const jobs = day?.jobs ?? [];
+  const smartSummary = day?.meta?.smartSummary;
   const dayWarnings = day?.warnings ?? [];
   const warningCount = dayWarnings.length + jobs.reduce((n, j) => n + (j.warnings?.length ?? 0), 0);
   const firstStop = jobs[0];
-  const dayOverview = useMemo(() => computeDayOverview(jobs), [jobs]);
+  const dayOverview = useMemo(() => computeDayOverview(jobs, smartSummary), [jobs, smartSummary]);
+  const headsUpLines = useMemo(() => buildHeadsUpLines(smartSummary), [smartSummary]);
   const feedStatus = useMemo(
     () => formatFeedStatusLine(jobs, day?.meta, Boolean(day?.meta?.fixtureMode)),
     [day?.meta, jobs]
@@ -580,6 +669,21 @@ export default function InstallDashboardApp() {
                   </div>
                   <p className="feed-status">{feedStatus.summary}</p>
                   {feedStatus.details ? <p className="feed-status-details">{feedStatus.details}</p> : null}
+
+                  <div className="id-heads-up-panel" aria-label="Today's heads up">
+                    <h2 className="id-heads-up-title">Today&apos;s heads up</h2>
+                    {headsUpLines.length ? (
+                      <ul className="id-heads-up-list">
+                        {headsUpLines.map((line) => (
+                          <li key={line}>{line}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="id-heads-up-ready">
+                        All stops look ready from available Moraware data.
+                      </p>
+                    )}
+                  </div>
                 </div>
 
                 <aside className="id-route-panel" aria-label="Route overview">
@@ -669,10 +773,6 @@ export default function InstallDashboardApp() {
                 <section className="crew-picker" aria-label="Select crew or truck">
                   {crews.map((crew) => {
                     const active = selectedCrewId === crew.id;
-                    const countLabel =
-                      active && jobs.length ? (
-                        <span className="crew-chip-count"> · {jobs.length}</span>
-                      ) : null;
                     return (
                       <button
                         key={crew.id}
@@ -681,8 +781,7 @@ export default function InstallDashboardApp() {
                         aria-pressed={active}
                         onClick={() => setSelectedCrewId(crew.id)}
                       >
-                        {crew.truckName || crew.name}
-                        {countLabel}
+                        {crewChipLabel(crew, active, jobs.length, dayOverview.totalSqft)}
                       </button>
                     );
                   })}
@@ -784,6 +883,30 @@ export default function InstallDashboardApp() {
                           </p>
                         ) : null}
 
+                        {job.smartBrief && job.smartBrief.badges.length > 0 ? (
+                          <section
+                            className={`job-heads-up job-heads-up-${job.smartBrief.severity}`}
+                            aria-label="Heads up"
+                          >
+                            <div className="job-heads-up-head">
+                              <span className="job-heads-up-label">Heads up</span>
+                              {job.smartBrief.highlights[0] ? (
+                                <span className="job-heads-up-lead">{job.smartBrief.highlights[0]}</span>
+                              ) : null}
+                            </div>
+                            <div className="smart-badge-row">
+                              {job.smartBrief.badges.map((badge) => (
+                                <span
+                                  key={badge.label}
+                                  className={`smart-badge smart-badge-${badge.tone}`}
+                                >
+                                  {badge.label}
+                                </span>
+                              ))}
+                            </div>
+                          </section>
+                        ) : null}
+
                         {scopeLine ? <p className="scope-line">{scopeLine}</p> : null}
                         {activityLine ? <p className="activity-line">{activityLine}</p> : null}
 
@@ -867,6 +990,21 @@ export default function InstallDashboardApp() {
               </div>
 
               <aside className="dash-rail" aria-label="Day summary">
+                <div className="rail-card rail-heads-up">
+                  <h2>Field alerts</h2>
+                  {headsUpLines.length ? (
+                    <ul className="rail-heads-up-list">
+                      {headsUpLines.map((line) => (
+                        <li key={line}>{line}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="rail-heads-up-ready">
+                      All stops look ready from available Moraware data.
+                    </p>
+                  )}
+                </div>
+
                 <div className="rail-card">
                   <h2>Day summary</h2>
                   <ul className="rail-stat-list">
@@ -883,8 +1021,26 @@ export default function InstallDashboardApp() {
                       <strong>{dayOverview.totalSqft ?? "—"}</strong>
                     </li>
                     <li>
+                      <span>First stop</span>
+                      <strong>{firstStop ? formatTime(dayOverview.firstStopTime) : "—"}</strong>
+                    </li>
+                    <li>
+                      <span>Last stop</span>
+                      <strong>{jobs.length > 1 ? formatTime(dayOverview.lastStopTime) : "—"}</strong>
+                    </li>
+                    <li>
                       <span>Areas</span>
                       <strong>{dayOverview.cities.length ? dayOverview.cities.join(", ") : "—"}</strong>
+                    </li>
+                    <li>
+                      <span>Field alerts</span>
+                      <strong className={dayOverview.fieldAlerts ? "text-warn" : ""}>
+                        {dayOverview.fieldAlerts}
+                      </strong>
+                    </li>
+                    <li>
+                      <span>Special installs</span>
+                      <strong>{dayOverview.specialInstallCount || "—"}</strong>
                     </li>
                     <li>
                       <span>Warnings</span>

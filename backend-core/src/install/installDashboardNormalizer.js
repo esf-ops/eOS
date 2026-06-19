@@ -3,6 +3,8 @@
  * Mapping is intentionally conservative — unknown fields become warnings, not guesses.
  */
 
+import { buildInstallSmartBrief } from "./installDashboardSmartBrief.js";
+
 const CHICAGO_TZ = "America/Chicago";
 
 export function todayDateInChicago(now = new Date()) {
@@ -371,6 +373,8 @@ export function finalizeInstallJobCard(job) {
   if (!primaryPhone && !(finalized.warnings ?? []).some((w) => /phone/i.test(String(w)))) {
     finalized.warnings = [...(finalized.warnings ?? []), "No phone on file"];
   }
+
+  finalized.smartBrief = buildInstallSmartBrief(finalized);
 
   return finalized;
 }

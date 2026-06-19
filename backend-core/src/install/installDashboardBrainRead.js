@@ -12,6 +12,7 @@ import {
   loadInstallDayFromCalendarSchedule
 } from "./installDashboardCalendarRead.js";
 import { computeMissingFieldCounts } from "../moraware/reportFeeds/mapCalendarScheduleRow.js";
+import { enrichInstallDayPayload } from "./installDashboardSmartBrief.js";
 
 /** Real Supabase columns for brain_job_activities — do not reference activity_status_name. */
 export const BRAIN_JOB_ACTIVITIES_SELECT =
@@ -217,18 +218,18 @@ export async function loadInstallDayPayload(supabase, opts) {
       calendarRowCount: 0,
       brainActivityCount: 0
     };
-    return fixture;
+    return enrichInstallDayPayload(fixture);
   }
 
   const calendarAttempt = await loadInstallDayFromCalendarSchedule(supabase, opts);
   if (calendarAttempt.used) {
-    return {
+    return enrichInstallDayPayload({
       date: calendarAttempt.date,
       crew: calendarAttempt.crew,
       jobs: calendarAttempt.jobs,
       warnings: calendarAttempt.warnings ?? [],
       meta: calendarAttempt.meta
-    };
+    });
   }
 
   const brainPayload = await loadInstallDayFromBrainActivities(supabase, opts);
@@ -239,7 +240,7 @@ export async function loadInstallDayPayload(supabase, opts) {
     fallbackWarnings.unshift("Falling back to generic brain_job_activities");
   }
 
-  return {
+  return enrichInstallDayPayload({
     ...brainPayload,
     warnings: [...new Set(fallbackWarnings.filter(Boolean))],
     meta: {
@@ -248,7 +249,7 @@ export async function loadInstallDayPayload(supabase, opts) {
       source: "brain_job_activities",
       fallbackFrom: "calendar_schedule_feed"
     }
-  };
+  });
 }
 
 /**
