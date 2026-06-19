@@ -7,7 +7,7 @@
  *   GET /api/install-dashboard/crews?date=YYYY-MM-DD
  *
  * Auth: requireAuth() + requireHeadAccess("install_dashboard")
- * Data: Brain Moraware cache (brain_job_activities + related tables) with optional fixture fallback.
+ * Data: Moraware calendar schedule rows when available, else brain_job_activities, else fixture in dev.
  * No Moraware writeback, no schedule mutation, no route optimization.
  */
 
@@ -16,6 +16,7 @@ import {
   parseIsoDateParam,
   todayDateInChicago
 } from "./installDashboardNormalizer.js";
+import { resolveOrganizationContext } from "../organizations/organizationContext.js";
 
 export const INSTALL_DASHBOARD_HEAD_SLUG = "install_dashboard";
 
@@ -42,9 +43,22 @@ export function attachInstallDashboardRoutes(app, { requireAuth, requireHeadAcce
   const guard = [requireAuth(), headAccess];
   const db = () => getSupabase();
 
+  async function orgId(req) {
+    try {
+      const ctx = await resolveOrganizationContext({ req, supabase: db(), mode: "authenticated" });
+      return ctx.organizationId || null;
+    } catch {
+      return null;
+    }
+  }
+
   async function respondDay(req, res, date, crewId) {
     jsonNoStore(res);
-    const payload = await loadInstallDayPayload(db(), { date, crewId });
+    const payload = await loadInstallDayPayload(db(), {
+      date,
+      crewId,
+      organizationId: await orgId(req)
+    });
     res.json({ ok: true, ...payload });
   }
 
@@ -75,7 +89,10 @@ export function attachInstallDashboardRoutes(app, { requireAuth, requireHeadAcce
     try {
       jsonNoStore(res);
       const date = parseIsoDateParam(req.query?.date) || todayDateInChicago();
-      const payload = await loadInstallCrews(db(), date);
+      const payload = await loadInstallCrews(db(), {
+        date,
+        organizationId: await orgId(req)
+      });
       res.json({ ok: true, ...payload });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });

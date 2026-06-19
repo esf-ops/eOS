@@ -58,7 +58,16 @@ type InstallDayPayload = {
   crew?: Crew | null;
   jobs?: InstallJob[];
   warnings?: string[];
-  meta?: { source?: string; fixtureMode?: boolean };
+  meta?: {
+    source?: string;
+    fixtureMode?: boolean;
+    selectedDate?: string;
+    calendarFeedConfigured?: boolean;
+    calendarRowCount?: number;
+    brainActivityCount?: number;
+    missingFieldCounts?: Record<string, number>;
+    fallbackFrom?: string;
+  };
 };
 
 type CrewsPayload = {
@@ -107,7 +116,25 @@ function formatTime(iso: string | null | undefined): string {
   return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
-function formatDateLabel(isoDate: string): string {
+function formatDataSourceLabel(source: string | undefined): string {
+  switch (source) {
+    case "calendar_schedule_feed":
+      return "Moraware calendar schedule feed";
+    case "brain_job_activities":
+      return "Brain job activities (fallback)";
+    case "fixture":
+      return "Sample data";
+    default:
+      return "Brain cache";
+  }
+}
+
+function formatMissingFieldSummary(counts: Record<string, number> | undefined): string {
+  if (!counts) return "";
+  const total = Object.values(counts).reduce((n, v) => n + (v ?? 0), 0);
+  if (!total) return "No missing-field gaps";
+  return `${total} missing-field gap(s)`;
+}
   const d = new Date(`${isoDate}T12:00:00`);
   if (Number.isNaN(d.getTime())) return isoDate;
   return d.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
@@ -287,7 +314,17 @@ export default function InstallDashboardApp() {
   const dayWarnings = day?.warnings ?? [];
   const warningCount = dayWarnings.length + jobs.reduce((n, j) => n + (j.warnings?.length ?? 0), 0);
   const firstStop = jobs[0];
-  const dataSource = day?.meta?.source === "fixture" ? "Sample data" : "Brain cache";
+  const dataSource = formatDataSourceLabel(day?.meta?.source);
+  const debugMetaLine = managerMode
+    ? [
+        day?.meta?.selectedDate ? `Date: ${day.meta.selectedDate}` : null,
+        day?.meta?.calendarRowCount != null ? `Calendar rows: ${day.meta.calendarRowCount}` : null,
+        day?.meta?.brainActivityCount != null ? `Brain activities: ${day.meta.brainActivityCount}` : null,
+        formatMissingFieldSummary(day?.meta?.missingFieldCounts) || null
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : "";
 
   const menuItems: EliteosTopbarMenuItem[] = [
     {
@@ -404,6 +441,7 @@ export default function InstallDashboardApp() {
                 Data source: {dataSource}
                 {day?.meta?.fixtureMode ? " (fixture mode)" : ""}
               </p>
+              {debugMetaLine ? <p className="meta-line meta-debug">{debugMetaLine}</p> : null}
             </header>
 
             {managerMode ? (

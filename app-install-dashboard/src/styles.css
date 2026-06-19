@@ -108,9 +108,14 @@ body {
 }
 
 .meta-line {
-  margin: 12px 0 0;
-  font-size: 0.78rem;
-  color: var(--eos-ink-muted);
+  margin: 0.35rem 0 0;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.meta-debug {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.75rem;
 }
 
 .manager-bar {

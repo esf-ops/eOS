@@ -5,6 +5,11 @@ import {
   normalizeInstallJobRow
 } from "./installDashboardNormalizer.js";
 import { buildFixtureInstallDay, FIXTURE_CREWS } from "./installDashboardFixtures.js";
+import {
+  loadCalendarScheduleCrews,
+  loadInstallDayFromCalendarSchedule
+} from "./installDashboardCalendarRead.js";
+import { computeMissingFieldCounts } from "../moraware/reportFeeds/mapCalendarScheduleRow.js";
 
 /** Real Supabase columns for brain_job_activities — do not reference activity_status_name. */
 export const BRAIN_JOB_ACTIVITIES_SELECT =
@@ -43,23 +48,27 @@ async function fetchMapByJobIds(supabase, table, jobIds, columns) {
 
 /**
  * @param {import("@supabase/supabase-js").SupabaseClient} supabase
- * @param {{ date: string, crewId?: string|null }} opts
+ * @param {{ date: string, crewId?: string|null, organizationId?: string|null }} opts
  */
-export async function loadInstallDayPayload(supabase, opts) {
-  if (useFixtureMode()) {
-    return buildFixtureInstallDay(opts.date, opts.crewId ?? null);
-  }
-
+export async function loadInstallDayFromBrainActivities(supabase, opts) {
   const { data: activities, error: actErr } = await supabase
     .from("brain_job_activities")
     .select(BRAIN_JOB_ACTIVITIES_SELECT)
     .eq("start_date", opts.date)
     .order("sched_time", { ascending: true, nullsFirst: false });
 
+  const brainActivityCount = activities?.length ?? 0;
+
   if (actErr) {
     if (allowFixtureFallback()) {
       const fixture = buildFixtureInstallDay(opts.date, opts.crewId ?? null);
       fixture.warnings = [`Brain read failed — showing fixture fallback: ${actErr.message}`];
+      fixture.meta = {
+        ...(fixture.meta ?? {}),
+        source: "fixture",
+        selectedDate: opts.date,
+        brainActivityCount: 0
+      };
       return fixture;
     }
     throw actErr;
@@ -76,7 +85,14 @@ export async function loadInstallDayPayload(supabase, opts) {
       crew: null,
       jobs: [],
       warnings: ["No install activities found for this date in Brain cache"],
-      meta: { source: "brain", fixtureMode: false }
+      meta: {
+        source: "brain_job_activities",
+        fixtureMode: false,
+        selectedDate: opts.date,
+        brainActivityCount,
+        calendarRowCount: 0,
+        missingFieldCounts: {}
+      }
     };
   }
 
@@ -111,10 +127,8 @@ export async function loadInstallDayPayload(supabase, opts) {
 
   /** @type {Map<string, { label: string, jobs: ReturnType<typeof normalizeInstallJobRow>[] }>} */
   const crewBuckets = new Map();
-  let seq = 0;
 
   for (const activity of installActs) {
-    seq += 1;
     const jobId = String(activity.job_id ?? "");
     const assigned = extractAssignedLabel(activity.raw_json) || "Unassigned";
     const bucket = crewBuckets.get(assigned) ?? { label: assigned, jobs: [] };
@@ -147,7 +161,14 @@ export async function loadInstallDayPayload(supabase, opts) {
       crew: null,
       jobs: [],
       warnings: ["No crew buckets could be built from install activities"],
-      meta: { source: "brain", fixtureMode: false }
+      meta: {
+        source: "brain_job_activities",
+        fixtureMode: false,
+        selectedDate: opts.date,
+        brainActivityCount,
+        calendarRowCount: 0,
+        missingFieldCounts: {}
+      }
     };
   }
 
@@ -162,17 +183,79 @@ export async function loadInstallDayPayload(supabase, opts) {
     jobs: selected.jobs,
     warnings: dayWarnings,
     meta: {
-      source: "brain",
+      source: "brain_job_activities",
       fixtureMode: false,
-      availableCrewCount: crewEntries.length
+      selectedDate: opts.date,
+      brainActivityCount,
+      calendarRowCount: 0,
+      availableCrewCount: crewEntries.length,
+      missingFieldCounts: computeMissingFieldCounts(selected.jobs)
     }
   };
 }
 
-/** @param {import("@supabase/supabase-js").SupabaseClient} supabase */
-export async function loadInstallCrews(supabase, date) {
+/**
+ * @param {import("@supabase/supabase-js").SupabaseClient} supabase
+ * @param {{ date: string, crewId?: string|null, organizationId?: string|null }} opts
+ */
+export async function loadInstallDayPayload(supabase, opts) {
+  if (useFixtureMode()) {
+    const fixture = buildFixtureInstallDay(opts.date, opts.crewId ?? null);
+    fixture.meta = {
+      ...(fixture.meta ?? {}),
+      source: "fixture",
+      selectedDate: opts.date,
+      calendarFeedConfigured: false,
+      calendarRowCount: 0,
+      brainActivityCount: 0
+    };
+    return fixture;
+  }
+
+  const calendarAttempt = await loadInstallDayFromCalendarSchedule(supabase, opts);
+  if (calendarAttempt.used) {
+    return {
+      date: calendarAttempt.date,
+      crew: calendarAttempt.crew,
+      jobs: calendarAttempt.jobs,
+      warnings: calendarAttempt.warnings ?? [],
+      meta: calendarAttempt.meta
+    };
+  }
+
+  const brainPayload = await loadInstallDayFromBrainActivities(supabase, opts);
+  const fallbackWarnings = [...(calendarAttempt.warnings ?? []), ...(brainPayload.warnings ?? [])];
+  if (calendarAttempt.meta?.calendarFeedConfigured === false) {
+    fallbackWarnings.unshift("Falling back to generic brain_job_activities");
+  } else if ((calendarAttempt.meta?.calendarRowCount ?? 0) === 0) {
+    fallbackWarnings.unshift("Falling back to generic brain_job_activities");
+  }
+
+  return {
+    ...brainPayload,
+    warnings: [...new Set(fallbackWarnings.filter(Boolean))],
+    meta: {
+      ...(brainPayload.meta ?? {}),
+      ...(calendarAttempt.meta ?? {}),
+      source: "brain_job_activities",
+      fallbackFrom: "calendar_schedule_feed"
+    }
+  };
+}
+
+/**
+ * @param {import("@supabase/supabase-js").SupabaseClient} supabase
+ * @param {{ date: string, organizationId?: string|null }} opts
+ */
+export async function loadInstallCrews(supabase, opts) {
+  const date = opts.date;
   if (useFixtureMode()) {
     return { date, crews: FIXTURE_CREWS.map((c) => ({ ...c })), meta: { source: "fixture" } };
+  }
+
+  const calendarCrews = await loadCalendarScheduleCrews(supabase, opts);
+  if (calendarCrews.crews.length) {
+    return calendarCrews;
   }
 
   const { data: activities, error } = await supabase
@@ -198,7 +281,14 @@ export async function loadInstallCrews(supabase, date) {
     return { date, crews: FIXTURE_CREWS.map((c) => ({ ...c })), meta: { source: "fixture" } };
   }
 
-  return { date, crews, meta: { source: "brain" } };
+  return {
+    date,
+    crews,
+    meta: {
+      source: "brain_job_activities",
+      calendarFeedConfigured: calendarCrews.meta?.calendarFeedConfigured ?? false
+    }
+  };
 }
 
 export { useFixtureMode, allowFixtureFallback };
