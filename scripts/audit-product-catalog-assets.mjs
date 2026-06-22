@@ -31,12 +31,14 @@ const OUT_CSV = path.join(OUT_DIR, "product-catalog-asset-audit.csv");
 const OUT_MD = path.join(OUT_DIR, "product-catalog-asset-audit.md");
 
 const RECOMMENDED_SOURCE = {
+  "blanco-blanco-diamond-50-50-regular-divide":
+    "BLANCO Diamond 50/50 Regular Divide — assets under blanco-blanco-diamond-50-50/.",
+  "blanco-blanco-diamond-50-50-low-divide":
+    "BLANCO Diamond 50/50 Low Divide — assets under blanco-blanco-diamond-50-50-low-divide-sinks/.",
   "blanco-blanco-diamond-60-40-sinks-regular-divide":
     "BLANCO Diamond 60/40 Regular Divide — assets under blanco-blanco-diamond-60-40-sinks/.",
   "blanco-blanco-diamond-60-40-sinks-low-divide":
     "BLANCO Diamond 60/40 Low Divide — assets under blanco-blanco-diamond-60-40-low-divide-sinks/.",
-  "blanco-blanco-diamond-50-50":
-    "Official BLANCO Diamond product page and spec sheet (manufacturer hero, diagram, finish swatches — no pricing pages).",
   "blanco-blanco-precis-super-single-sinks":
     "Official BLANCO Precis Super Single product page and spec sheet.",
   "faucet-delta-9176-cz-pr-dst":

@@ -73,24 +73,23 @@ function blancoSinkFinishImageUrls(productId: string, opts?: { includeTruffle?: 
 /** Batch 1 — intended asset paths (files may not exist yet). */
 const PRODUCT_CATALOG_ASSET_OVERRIDES: ProductCatalogAssetOverride[] = [
   {
-    productId: "blanco-blanco-diamond-50-50",
+    productId: "blanco-blanco-diamond-50-50-regular-divide",
     imageUrl: `${sinkBase("blanco-blanco-diamond-50-50")}/hero.jpg`,
     installedImageUrl: `${sinkBase("blanco-blanco-diamond-50-50")}/installed.jpg`,
     specSheetUrl: specSheetUrl("blanco-blanco-diamond-50-50"),
     defaultFinishKey: "cafe-brown",
-    finishImageUrls: {
-      "cafe-brown": `${sinkBase("blanco-blanco-diamond-50-50")}/cafe-brown.jpg`,
-      anthracite: `${sinkBase("blanco-blanco-diamond-50-50")}/anthracite.jpg`,
-      white: `${sinkBase("blanco-blanco-diamond-50-50")}/white.jpg`,
-      truffle: `${sinkBase("blanco-blanco-diamond-50-50")}/truffle.jpg`,
-      cinder: `${sinkBase("blanco-blanco-diamond-50-50")}/cinder.jpg`,
-      "coal-black": `${sinkBase("blanco-blanco-diamond-50-50")}/coal-black.jpg`,
-      "soft-white": `${sinkBase("blanco-blanco-diamond-50-50")}/soft-white.jpg`,
-      gray: `${sinkBase("blanco-blanco-diamond-50-50")}/volcano-gray.jpg`,
-      "volcano-gray": `${sinkBase("blanco-blanco-diamond-50-50")}/volcano-gray.jpg`,
-    },
+    finishImageUrls: blancoSinkFinishImageUrls("blanco-blanco-diamond-50-50"),
     sourceNotes:
-      "Source: official BLANCO Diamond product pages and spec sheets. Use manufacturer hero, diagram, and finish swatches — not third-party pricing pages.",
+      "Source: official BLANCO Diamond 50/50 Regular Divide product pages and spec sheets.",
+  },
+  {
+    productId: "blanco-blanco-diamond-50-50-low-divide",
+    imageUrl: `${sinkBase("blanco-blanco-diamond-50-50-low-divide-sinks")}/hero.jpg`,
+    specSheetUrl: specSheetUrl("blanco-blanco-diamond-50-50-low-divide-sinks"),
+    defaultFinishKey: "cafe-brown",
+    finishImageUrls: blancoSinkFinishImageUrls("blanco-blanco-diamond-50-50-low-divide-sinks"),
+    sourceNotes:
+      "Source: official BLANCO Diamond 50/50 Low Divide product pages and spec sheets.",
   },
   {
     productId: "blanco-blanco-precis-super-single-sinks",

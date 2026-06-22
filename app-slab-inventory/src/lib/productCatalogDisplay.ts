@@ -19,6 +19,34 @@ export type ProductCatalogDisplaySplit = {
   variantCatalogNumbers: ReadonlySet<string>;
 };
 
+/** BLANCO Diamond 50/50 — regular divide catalog articles */
+const DIAMOND_5050_REGULAR_CATALOG = new Set([
+  "440182",
+  "440184",
+  "440185",
+  "441286",
+  "441470",
+  "442913",
+  "443068",
+  "443105",
+]);
+
+/** BLANCO Diamond 50/50 — low divide catalog articles */
+const DIAMOND_5050_LOW_CATALOG = new Set([
+  "440218",
+  "440220",
+  "440221",
+  "441285",
+  "442071",
+  "442072",
+  "442074",
+  "442075",
+  "442078",
+  "442914",
+  "443069",
+  "443106",
+]);
+
 /** BLANCO Diamond 60/40 — regular (standard) divide catalog articles */
 const DIAMOND_6040_REGULAR_CATALOG = new Set([
   "440177",
@@ -50,6 +78,20 @@ const DIAMOND_6040_LOW_CATALOG = new Set([
 ]);
 
 export const PRODUCT_CATALOG_DISPLAY_SPLITS: ProductCatalogDisplaySplit[] = [
+  {
+    displayId: "blanco-blanco-diamond-50-50-regular-divide",
+    sourceProductId: "blanco-blanco-diamond-50-50",
+    displayName: "DIAMOND 50/50 Regular Divide",
+    specSummary: "Model 50/50 · Regular Divide",
+    variantCatalogNumbers: DIAMOND_5050_REGULAR_CATALOG,
+  },
+  {
+    displayId: "blanco-blanco-diamond-50-50-low-divide",
+    sourceProductId: "blanco-blanco-diamond-50-50",
+    displayName: "DIAMOND 50/50 Low Divide",
+    specSummary: "Model 50/50 · Low Divide",
+    variantCatalogNumbers: DIAMOND_5050_LOW_CATALOG,
+  },
   {
     displayId: "blanco-blanco-diamond-60-40-sinks-regular-divide",
     sourceProductId: "blanco-blanco-diamond-60-40-sinks",
