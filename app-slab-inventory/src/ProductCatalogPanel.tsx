@@ -156,39 +156,41 @@ function CatalogImage({
   );
 }
 
-function buildStageThumbs(
+function collectFinishImageUrls(
   item: ProductCatalogItem,
-  finishOptions: ProductCatalogFinishOption[],
-  selectedFinishKey: string | null
+  finishOptions: ProductCatalogFinishOption[]
+): Set<string> {
+  const urls = new Set<string>();
+  if (item.imageUrl) urls.add(item.imageUrl);
+  Object.values(item.finishImageUrls ?? {}).forEach((url) => urls.add(url));
+  for (const opt of finishOptions) {
+    if (opt.imageUrl) urls.add(opt.imageUrl);
+  }
+  return urls;
+}
+
+/** Supporting media only — excludes hero and finish-selector images. */
+function buildSupportingGalleryThumbs(
+  item: ProductCatalogItem,
+  finishOptions: ProductCatalogFinishOption[]
 ): StageThumb[] {
+  const finishUrls = collectFinishImageUrls(item, finishOptions);
   const thumbs: StageThumb[] = [];
   const seen = new Set<string>();
 
   const push = (id: string, url: string | undefined, caption: string) => {
-    if (!url || seen.has(url)) return;
+    if (!url || seen.has(url) || finishUrls.has(url)) return;
     seen.add(url);
     thumbs.push({ id, url, caption });
   };
 
-  push("hero", item.imageUrl, "Product");
-
-  if (selectedFinishKey) {
-    push(
-      `finish-${selectedFinishKey}`,
-      getFinishImageForFinish(item, selectedFinishKey),
-      finishOptions.find((o) => o.key === selectedFinishKey)?.label ?? "Finish"
-    );
-  } else {
-    for (const opt of finishOptions) {
-      push(`finish-${opt.key}`, opt.imageUrl, opt.label);
-    }
-  }
-
   push("installed", item.installedImageUrl, "Installed");
-  (item.comboPhotoUrls ?? []).forEach((url, i) => push(`combo-${i}`, url, `Combo ${i + 1}`));
   push("diagram", item.diagramUrl, "Diagram");
-  (item.finishExampleUrls ?? []).forEach((url, i) => push(`finish-ex-${i}`, url, `Finish example ${i + 1}`));
+  (item.comboPhotoUrls ?? []).forEach((url, i) => push(`combo-${i}`, url, `Combo ${i + 1}`));
   (item.gallery ?? []).forEach((url, i) => push(`gallery-${i}`, url, `Gallery ${i + 1}`));
+  (item.finishExampleUrls ?? []).forEach((url, i) =>
+    push(`finish-ex-${i}`, url, `Finish example ${i + 1}`)
+  );
 
   return thumbs;
 }
@@ -196,10 +198,10 @@ function buildStageThumbs(
 function resolveStageUrl(
   item: ProductCatalogItem,
   selectedFinishKey: string | null,
-  activeThumbUrl: string | null,
+  activeGalleryUrl: string | null,
   isUsable: (url?: string) => boolean
 ): string | undefined {
-  if (activeThumbUrl && isUsable(activeThumbUrl)) return activeThumbUrl;
+  if (activeGalleryUrl && isUsable(activeGalleryUrl)) return activeGalleryUrl;
 
   if (selectedFinishKey) {
     const finishImage = getFinishImageForFinish(item, selectedFinishKey);
@@ -404,14 +406,14 @@ function ProductCatalogCard({ item, onOpen }: { item: ProductCatalogItem; onOpen
 function ProductCatalogModal({ item, onClose }: { item: ProductCatalogItem; onClose: () => void }) {
   const finishOptions = useMemo(() => getUniqueFinishOptions(item), [item]);
   const [selectedFinishKey, setSelectedFinishKey] = useState<string | null>(null);
-  const [activeThumbUrl, setActiveThumbUrl] = useState<string | null>(null);
+  const [activeGalleryUrl, setActiveGalleryUrl] = useState<string | null>(null);
   const [zoomOpen, setZoomOpen] = useState(false);
   const [zoomIndex, setZoomIndex] = useState(0);
   const { loaded, failed, reset, markLoaded, markFailed, isUsable } = useCatalogImageTracker();
 
   useEffect(() => {
     setSelectedFinishKey(null);
-    setActiveThumbUrl(null);
+    setActiveGalleryUrl(null);
     reset();
   }, [item, reset]);
 
@@ -423,22 +425,26 @@ function ProductCatalogModal({ item, onClose }: { item: ProductCatalogItem; onCl
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const stageThumbCandidates = useMemo(
-    () => buildStageThumbs(item, finishOptions, selectedFinishKey),
-    [item, finishOptions, selectedFinishKey]
+  const supportingGalleryCandidates = useMemo(
+    () => buildSupportingGalleryThumbs(item, finishOptions),
+    [item, finishOptions]
   );
 
-  const visibleThumbs = useMemo(
-    () => stageThumbCandidates.filter((t) => !failed.has(t.url)),
-    [stageThumbCandidates, failed]
+  const finishPreloadUrls = useMemo(() => {
+    const urls = new Set<string>();
+    if (item.imageUrl) urls.add(item.imageUrl);
+    for (const opt of finishOptions) {
+      if (opt.imageUrl) urls.add(opt.imageUrl);
+    }
+    return [...urls];
+  }, [item.imageUrl, finishOptions]);
+
+  const loadedSupportingThumbs = useMemo(
+    () => supportingGalleryCandidates.filter((t) => loaded.has(t.url) && !failed.has(t.url)),
+    [supportingGalleryCandidates, loaded, failed]
   );
 
-  const loadedThumbs = useMemo(
-    () => visibleThumbs.filter((t) => loaded.has(t.url)),
-    [visibleThumbs, loaded]
-  );
-
-  const stageUrl = resolveStageUrl(item, selectedFinishKey, activeThumbUrl, isUsable);
+  const stageUrl = resolveStageUrl(item, selectedFinishKey, activeGalleryUrl, isUsable);
 
   const displayAssetStatus = productCatalogDisplayAssetStatus(item, loaded, failed);
 
@@ -448,11 +454,28 @@ function ProductCatalogModal({ item, onClose }: { item: ProductCatalogItem; onCl
     : [];
 
   const galleryItems: ZoomGalleryItem[] = useMemo(() => {
-    const fromThumbs = loadedThumbs.map((t) => ({ src: t.url, caption: t.caption }));
-    if (fromThumbs.length > 0) return fromThumbs;
-    if (stageUrl) return [{ src: stageUrl, caption: "Product" }];
-    return [];
-  }, [loadedThumbs, stageUrl]);
+    const items: ZoomGalleryItem[] = [];
+    const seen = new Set<string>();
+
+    const add = (src: string | undefined, caption: string) => {
+      if (!src || seen.has(src) || failed.has(src) || !loaded.has(src)) return;
+      seen.add(src);
+      items.push({ src, caption });
+    };
+
+    add(item.imageUrl, "Product");
+    for (const opt of finishOptions) {
+      add(opt.imageUrl, opt.label);
+    }
+    for (const t of loadedSupportingThumbs) {
+      add(t.url, t.caption);
+    }
+
+    if (items.length === 0 && stageUrl && loaded.has(stageUrl)) {
+      items.push({ src: stageUrl, caption: selectedFinish?.label ?? "Product" });
+    }
+    return items;
+  }, [item.imageUrl, finishOptions, loadedSupportingThumbs, loaded, failed, stageUrl, selectedFinish?.label]);
 
   const stageZoomIndex = useMemo(() => {
     if (!stageUrl) return 0;
@@ -469,7 +492,7 @@ function ProductCatalogModal({ item, onClose }: { item: ProductCatalogItem; onCl
 
   const selectFinish = (finishKey: string) => {
     setSelectedFinishKey(finishKey);
-    setActiveThumbUrl(null);
+    setActiveGalleryUrl(null);
   };
 
   const sourceDiffers =
@@ -510,9 +533,19 @@ function ProductCatalogModal({ item, onClose }: { item: ProductCatalogItem; onCl
                   </div>
                 )}
 
-                {/* Preload candidate thumbnails; hide failures without showing broken boxes */}
+                {/* Preload finish + supporting images; failures stay hidden */}
                 <div className="pc-modal-preload" aria-hidden>
-                  {stageThumbCandidates.map((t) => (
+                  {finishPreloadUrls.map((url) => (
+                    <CatalogImage
+                      key={`finish-${url}`}
+                      src={url}
+                      alt=""
+                      hidden={loaded.has(url) || failed.has(url)}
+                      onLoaded={markLoaded}
+                      onFailed={markFailed}
+                    />
+                  ))}
+                  {supportingGalleryCandidates.map((t) => (
                     <CatalogImage
                       key={t.id}
                       src={t.url}
@@ -525,16 +558,16 @@ function ProductCatalogModal({ item, onClose }: { item: ProductCatalogItem; onCl
                 </div>
               </div>
 
-              {loadedThumbs.length > 1 ? (
-                <div className="pc-modal-thumbs" aria-label="Product images">
-                  {loadedThumbs.map((t) => {
-                    const active = (activeThumbUrl ?? stageUrl) === t.url;
+              {loadedSupportingThumbs.length > 0 ? (
+                <div className="pc-modal-thumbs" aria-label="Supporting product images">
+                  {loadedSupportingThumbs.map((t) => {
+                    const active = activeGalleryUrl === t.url;
                     return (
                       <button
                         key={t.id}
                         type="button"
                         className={`pc-modal-thumb${active ? " active" : ""}`}
-                        onClick={() => setActiveThumbUrl(t.url)}
+                        onClick={() => setActiveGalleryUrl(t.url)}
                         aria-label={t.caption}
                         aria-pressed={active}
                       >
