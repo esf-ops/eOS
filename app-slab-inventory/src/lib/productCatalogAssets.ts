@@ -92,6 +92,35 @@ const PRODUCT_CATALOG_ASSET_OVERRIDES: ProductCatalogAssetOverride[] = [
       "Source: official BLANCO Diamond 50/50 Low Divide product pages and spec sheets.",
   },
   {
+    productId: "blanco-blanco-precis-50-50-sinks",
+    imageUrl: `${sinkBase("blanco-blanco-precis-50-50-sinks")}/hero.jpg`,
+    specSheetUrl: specSheetUrl("blanco-blanco-precis-50-50-sinks"),
+    defaultFinishKey: "cafe-brown",
+    finishImageUrls: blancoSinkFinishImageUrls("blanco-blanco-precis-50-50-sinks"),
+    sourceNotes:
+      "Source: official BLANCO Precis 50/50 product pages and spec sheets.",
+  },
+  {
+    productId: "blanco-blanco-precis-60-40-sinks-regular-divide",
+    imageUrl: `${sinkBase("blanco-blanco-precis-60-40-sinks-regular-divide")}/hero.jpg`,
+    installedImageUrl: `${sinkBase("blanco-blanco-precis-60-40-sinks-regular-divide")}/installed.jpg`,
+    specSheetUrl: specSheetUrl("blanco-blanco-precis-60-40-sinks-regular-divide"),
+    defaultFinishKey: "white",
+    finishImageUrls: blancoSinkFinishImageUrls("blanco-blanco-precis-60-40-sinks-regular-divide"),
+    sourceNotes:
+      "Source: official BLANCO Precis 60/40 Regular Divide product pages and spec sheets.",
+  },
+  {
+    productId: "blanco-blanco-precis-60-40-sinks-low-divide",
+    imageUrl: `${sinkBase("blanco-blanco-precis-60-40-sinks-low-divide")}/hero.jpg`,
+    installedImageUrl: `${sinkBase("blanco-blanco-precis-60-40-sinks-low-divide")}/installed.jpg`,
+    specSheetUrl: specSheetUrl("blanco-blanco-precis-60-40-sinks-low-divide"),
+    defaultFinishKey: "white",
+    finishImageUrls: blancoSinkFinishImageUrls("blanco-blanco-precis-60-40-sinks-low-divide"),
+    sourceNotes:
+      "Source: official BLANCO Precis 60/40 Low Divide product pages and spec sheets.",
+  },
+  {
     productId: "blanco-blanco-precis-super-single-sinks",
     imageUrl: `${sinkBase("blanco-blanco-precis-super-single-sinks")}/hero.jpg`,
     specSheetUrl: specSheetUrl("blanco-blanco-precis-super-single-sinks"),

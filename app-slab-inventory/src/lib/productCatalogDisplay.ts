@@ -77,6 +77,29 @@ const DIAMOND_6040_LOW_CATALOG = new Set([
   "443102",
 ]);
 
+/** BLANCO Precis 60/40 — regular divide catalog articles */
+const PRECIS_6040_REGULAR_CATALOG = new Set([
+  "441125",
+  "441128",
+  "441129",
+  "441296",
+  "441479",
+  "442925",
+  "443080",
+  "443117",
+]);
+
+/** BLANCO Precis 60/40 — low divide catalog articles */
+const PRECIS_6040_LOW_CATALOG = new Set([
+  "442521",
+  "442522",
+  "442524",
+  "442525",
+  "442528",
+  "443081",
+  "443118",
+]);
+
 export const PRODUCT_CATALOG_DISPLAY_SPLITS: ProductCatalogDisplaySplit[] = [
   {
     displayId: "blanco-blanco-diamond-50-50-regular-divide",
@@ -105,6 +128,20 @@ export const PRODUCT_CATALOG_DISPLAY_SPLITS: ProductCatalogDisplaySplit[] = [
     displayName: "DIAMOND 60/40 Low Divide",
     specSummary: "Model 60/40 · Low Divide",
     variantCatalogNumbers: DIAMOND_6040_LOW_CATALOG,
+  },
+  {
+    displayId: "blanco-blanco-precis-60-40-sinks-regular-divide",
+    sourceProductId: "blanco-blanco-precis-60-40-sinks",
+    displayName: "PRECIS 60/40 Regular Divide",
+    specSummary: "Model 60/40 · Regular Divide",
+    variantCatalogNumbers: PRECIS_6040_REGULAR_CATALOG,
+  },
+  {
+    displayId: "blanco-blanco-precis-60-40-sinks-low-divide",
+    sourceProductId: "blanco-blanco-precis-60-40-sinks",
+    displayName: "PRECIS 60/40 Low Divide",
+    specSummary: "Model 60/40 · Low Divide",
+    variantCatalogNumbers: PRECIS_6040_LOW_CATALOG,
   },
 ];
 

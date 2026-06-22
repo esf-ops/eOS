@@ -35,6 +35,12 @@ const RECOMMENDED_SOURCE = {
     "BLANCO Diamond 50/50 Regular Divide — assets under blanco-blanco-diamond-50-50/.",
   "blanco-blanco-diamond-50-50-low-divide":
     "BLANCO Diamond 50/50 Low Divide — assets under blanco-blanco-diamond-50-50-low-divide-sinks/.",
+  "blanco-blanco-precis-50-50-sinks":
+    "BLANCO Precis 50/50 — assets under blanco-blanco-precis-50-50-sinks/.",
+  "blanco-blanco-precis-60-40-sinks-regular-divide":
+    "BLANCO Precis 60/40 Regular Divide — assets under blanco-blanco-precis-60-40-sinks-regular-divide/.",
+  "blanco-blanco-precis-60-40-sinks-low-divide":
+    "BLANCO Precis 60/40 Low Divide — assets under blanco-blanco-precis-60-40-sinks-low-divide/.",
   "blanco-blanco-diamond-60-40-sinks-regular-divide":
     "BLANCO Diamond 60/40 Regular Divide — assets under blanco-blanco-diamond-60-40-sinks/.",
   "blanco-blanco-diamond-60-40-sinks-low-divide":
