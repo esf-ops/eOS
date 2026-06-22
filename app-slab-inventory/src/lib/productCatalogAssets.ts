@@ -76,12 +76,17 @@ const PRODUCT_CATALOG_ASSET_OVERRIDES: ProductCatalogAssetOverride[] = [
   {
     productId: "blanco-blanco-precis-super-single-sinks",
     imageUrl: `${sinkBase("blanco-blanco-precis-super-single-sinks")}/hero.jpg`,
-    diagramUrl: `${sinkBase("blanco-blanco-precis-super-single-sinks")}/diagram.jpg`,
     specSheetUrl: specSheetUrl("blanco-blanco-precis-super-single-sinks"),
-    variantImageUrls: {
-      "blanco-precis-super-single-sinks-440147": `${sinkBase("blanco-blanco-precis-super-single-sinks")}/anthracite.jpg`,
-      "blanco-precis-super-single-sinks-440150": `${sinkBase("blanco-blanco-precis-super-single-sinks")}/white.jpg`,
-      "blanco-precis-super-single-sinks-441297": `${sinkBase("blanco-blanco-precis-super-single-sinks")}/truffle.jpg`,
+    defaultFinishKey: "coal-black",
+    finishImageUrls: {
+      anthracite: `${sinkBase("blanco-blanco-precis-super-single-sinks")}/anthracite.jpg`,
+      white: `${sinkBase("blanco-blanco-precis-super-single-sinks")}/white.jpg`,
+      truffle: `${sinkBase("blanco-blanco-precis-super-single-sinks")}/truffle.jpg`,
+      cinder: `${sinkBase("blanco-blanco-precis-super-single-sinks")}/cinder.jpg`,
+      "coal-black": `${sinkBase("blanco-blanco-precis-super-single-sinks")}/coal-black.jpg`,
+      "soft-white": `${sinkBase("blanco-blanco-precis-super-single-sinks")}/soft-white.jpg`,
+      gray: `${sinkBase("blanco-blanco-precis-super-single-sinks")}/volcano-gray.jpg`,
+      "volcano-gray": `${sinkBase("blanco-blanco-precis-super-single-sinks")}/volcano-gray.jpg`,
     },
     sourceNotes:
       "Source: official BLANCO Precis Super Single product pages and spec sheets.",
