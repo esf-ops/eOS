@@ -53,6 +53,8 @@ export type ProductCatalogItem = {
   finishImageUrls?: Record<string, string>;
   /** Default finish slug for modal selection (hero stays `imageUrl`). */
   defaultFinishKey?: string;
+  /** Generated catalog product id when this row is a presentation split */
+  catalogSourceId?: string;
   assetStatus: ProductCatalogAssetStatus;
   /** Curated asset collection notes from productCatalogAssets.ts (not generated workbook). */
   assetSourceNotes?: string;
@@ -288,6 +290,7 @@ export function productCatalogSearchText(item: ProductCatalogItem): string {
     item.name,
     item.originalName,
     item.sourceDescription,
+    item.catalogSourceId,
     item.sku,
     item.model,
     item.specSummary,

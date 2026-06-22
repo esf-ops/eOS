@@ -14,6 +14,7 @@
  * No pricing, quote integration, or backend coupling.
  */
 import { PRODUCT_CATALOG_ITEMS } from "./productCatalogData";
+import { applyProductCatalogDisplaySplits } from "./productCatalogDisplay";
 import {
   finishKeyFromLabel,
   type ProductCatalogAssetStatus,
@@ -49,6 +50,24 @@ function faucetBase(productId: string) {
 
 function specSheetUrl(productId: string) {
   return `/product-catalog/spec-sheets/${productId}/${productId}.pdf`;
+}
+
+function blancoSinkFinishImageUrls(productId: string, opts?: { includeTruffle?: boolean }) {
+  const base = sinkBase(productId);
+  const urls: Record<string, string> = {
+    "cafe-brown": `${base}/cafe-brown.jpg`,
+    anthracite: `${base}/anthracite.jpg`,
+    white: `${base}/white.jpg`,
+    cinder: `${base}/cinder.jpg`,
+    "coal-black": `${base}/coal-black.jpg`,
+    "soft-white": `${base}/soft-white.jpg`,
+    gray: `${base}/volcano-gray.jpg`,
+    "volcano-gray": `${base}/volcano-gray.jpg`,
+  };
+  if (opts?.includeTruffle !== false && productId !== "blanco-blanco-super-single") {
+    urls.truffle = `${base}/truffle.jpg`;
+  }
+  return urls;
 }
 
 /** Batch 1 — intended asset paths (files may not exist yet). */
@@ -111,23 +130,22 @@ const PRODUCT_CATALOG_ASSET_OVERRIDES: ProductCatalogAssetOverride[] = [
       "Source: official BLANCO Super Single product pages and spec sheets.",
   },
   {
-    productId: "blanco-blanco-diamond-60-40-sinks",
+    productId: "blanco-blanco-diamond-60-40-sinks-regular-divide",
     imageUrl: `${sinkBase("blanco-blanco-diamond-60-40-sinks")}/hero.jpg`,
     specSheetUrl: specSheetUrl("blanco-blanco-diamond-60-40-sinks"),
     defaultFinishKey: "white",
-    finishImageUrls: {
-      "cafe-brown": `${sinkBase("blanco-blanco-diamond-60-40-sinks")}/cafe-brown.jpg`,
-      anthracite: `${sinkBase("blanco-blanco-diamond-60-40-sinks")}/anthracite.jpg`,
-      white: `${sinkBase("blanco-blanco-diamond-60-40-sinks")}/white.jpg`,
-      truffle: `${sinkBase("blanco-blanco-diamond-60-40-sinks")}/truffle.jpg`,
-      cinder: `${sinkBase("blanco-blanco-diamond-60-40-sinks")}/cinder.jpg`,
-      "coal-black": `${sinkBase("blanco-blanco-diamond-60-40-sinks")}/coal-black.jpg`,
-      "soft-white": `${sinkBase("blanco-blanco-diamond-60-40-sinks")}/soft-white.jpg`,
-      gray: `${sinkBase("blanco-blanco-diamond-60-40-sinks")}/volcano-gray.jpg`,
-      "volcano-gray": `${sinkBase("blanco-blanco-diamond-60-40-sinks")}/volcano-gray.jpg`,
-    },
+    finishImageUrls: blancoSinkFinishImageUrls("blanco-blanco-diamond-60-40-sinks"),
     sourceNotes:
-      "Source: official BLANCO Diamond 60/40 product pages and spec sheets.",
+      "Source: official BLANCO Diamond 60/40 Regular Divide product pages and spec sheets.",
+  },
+  {
+    productId: "blanco-blanco-diamond-60-40-sinks-low-divide",
+    imageUrl: `${sinkBase("blanco-blanco-diamond-60-40-low-divide-sinks")}/hero.jpg`,
+    specSheetUrl: specSheetUrl("blanco-blanco-diamond-60-40-low-divide-sinks"),
+    defaultFinishKey: "white",
+    finishImageUrls: blancoSinkFinishImageUrls("blanco-blanco-diamond-60-40-low-divide-sinks"),
+    sourceNotes:
+      "Source: official BLANCO Diamond 60/40 Low Divide product pages and spec sheets.",
   },
   {
     productId: "faucet-delta-9176-cz-pr-dst",
@@ -262,9 +280,10 @@ export function mergeProductCatalogAssets(item: ProductCatalogItem): ProductCata
   return merged;
 }
 
-/** All catalog items with asset overrides applied (use in UI instead of raw generated data). */
+/** All catalog items with asset overrides and presentation splits applied. */
 export function getProductCatalogItemsWithAssets(): ProductCatalogItem[] {
-  return PRODUCT_CATALOG_ITEMS.map(mergeProductCatalogAssets);
+  const merged = PRODUCT_CATALOG_ITEMS.map(mergeProductCatalogAssets);
+  return applyProductCatalogDisplaySplits(merged, mergeProductCatalogAssets);
 }
 
 export { finishKeyFromLabel as variantSlug } from "./productCatalog";

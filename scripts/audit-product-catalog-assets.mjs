@@ -24,12 +24,17 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 const OVERRIDES_TS = path.join(ROOT, "app-slab-inventory/src/lib/productCatalogAssets.ts");
+const DISPLAY_SPLITS_TS = path.join(ROOT, "app-slab-inventory/src/lib/productCatalogDisplay.ts");
 const PUBLIC_DIR = path.join(ROOT, "app-slab-inventory/public");
 const OUT_DIR = path.join(ROOT, "_local/catalog-source/asset-audit");
 const OUT_CSV = path.join(OUT_DIR, "product-catalog-asset-audit.csv");
 const OUT_MD = path.join(OUT_DIR, "product-catalog-asset-audit.md");
 
 const RECOMMENDED_SOURCE = {
+  "blanco-blanco-diamond-60-40-sinks-regular-divide":
+    "BLANCO Diamond 60/40 Regular Divide — assets under blanco-blanco-diamond-60-40-sinks/.",
+  "blanco-blanco-diamond-60-40-sinks-low-divide":
+    "BLANCO Diamond 60/40 Low Divide — assets under blanco-blanco-diamond-60-40-low-divide-sinks/.",
   "blanco-blanco-diamond-50-50":
     "Official BLANCO Diamond product page and spec sheet (manufacturer hero, diagram, finish swatches — no pricing pages).",
   "blanco-blanco-precis-super-single-sinks":
@@ -45,10 +50,28 @@ const RECOMMENDED_SOURCE = {
 };
 
 function expandTemplateHelpers(text) {
-  return text
+  const finishKeys = [
+    "cafe-brown", "anthracite", "white", "truffle", "cinder", "coal-black",
+    "soft-white", "gray", "volcano-gray",
+  ];
+
+  let expanded = text
     .replace(/\$\{sinkBase\("([^"]+)"\)\}/g, "/product-catalog/sinks/$1")
     .replace(/\$\{faucetBase\("([^"]+)"\)\}/g, "/product-catalog/faucets/$1")
     .replace(/specSheetUrl\("([^"]+)"\)/g, "/product-catalog/spec-sheets/$1/$1.pdf");
+
+  expanded = expanded.replace(
+    /finishImageUrls:\s*blancoSinkFinishImageUrls\("([^"]+)"\)/g,
+    (_match, productId) => {
+      const lines = finishKeys.map((key) => {
+        const file = key === "gray" || key === "volcano-gray" ? "volcano-gray.jpg" : `${key}.jpg`;
+        return `      "${key}": \`/product-catalog/sinks/${productId}/${file}\`,`;
+      });
+      return `finishImageUrls: {\n${lines.join("\n")}\n    }`;
+    }
+  );
+
+  return expanded;
 }
 
 function parseOverridesFromTs(content) {
@@ -131,6 +154,24 @@ function parseOverridesFromTs(content) {
   return overrides;
 }
 
+function parseDisplaySplitsFromTs(content) {
+  const splits = [];
+  const block = content.match(
+    /export const PRODUCT_CATALOG_DISPLAY_SPLITS[^=]*=\s*\[([\s\S]*?)\n\];/
+  );
+  if (!block) return splits;
+
+  for (const chunk of block[1].split(/\n  \},?\n/)) {
+    const displayId = chunk.match(/displayId:\s*"([^"]+)"/)?.[1];
+    const sourceProductId = chunk.match(/sourceProductId:\s*"([^"]+)"/)?.[1];
+    const displayName = chunk.match(/displayName:\s*"([^"]+)"/)?.[1];
+    if (displayId && sourceProductId) {
+      splits.push({ displayId, sourceProductId, displayName: displayName || "" });
+    }
+  }
+  return splits;
+}
+
 function publicUrlToLocalPath(publicUrl) {
   const rel = String(publicUrl || "").replace(/^\//, "");
   return path.join(PUBLIC_DIR, rel);
@@ -142,15 +183,19 @@ function csvEscape(v) {
   return s;
 }
 
-function buildRows(overrides) {
+function buildRows(overrides, displaySplits) {
+  const splitByDisplayId = new Map(displaySplits.map((s) => [s.displayId, s]));
   const rows = [];
   for (const o of overrides) {
+    const split = splitByDisplayId.get(o.productId);
     for (const asset of o.assets || []) {
       if (asset.assetType === "default_finish_key") continue;
       const localPath = publicUrlToLocalPath(asset.url);
       const exists = asset.url ? fs.existsSync(localPath) : false;
       rows.push({
         productId: o.productId,
+        catalogSourceId: split?.sourceProductId || "",
+        displayName: split?.displayName || "",
         assetType: asset.assetType,
         variantId: asset.variantId || "",
         expectedPublicUrl: asset.url,
@@ -158,7 +203,11 @@ function buildRows(overrides) {
         exists: exists ? "yes" : "no",
         sourceNotes: o.sourceNotes,
         recommendedSource: RECOMMENDED_SOURCE[o.productId] || "",
-        notes: exists ? "" : "File not on disk yet — collect from recommended source and save to expectedLocalPath.",
+        notes: exists
+          ? split
+            ? `Display split from generated ${split.sourceProductId}.`
+            : ""
+          : "File not on disk yet — collect from recommended source and save to expectedLocalPath.",
       });
     }
   }
@@ -191,8 +240,9 @@ function summarize(rows) {
 
 function toCsv(rows) {
   const cols = [
-    "productId", "assetType", "variantId", "expectedPublicUrl", "expectedLocalPath",
-    "exists", "sourceNotes", "recommendedSource", "notes",
+    "productId", "catalogSourceId", "displayName", "assetType", "variantId",
+    "expectedPublicUrl", "expectedLocalPath", "exists", "sourceNotes",
+    "recommendedSource", "notes",
   ];
   return [
     cols.join(","),
@@ -201,13 +251,16 @@ function toCsv(rows) {
 }
 
 function toMarkdown(rows, summary, generatedAt) {
-  let md = `# Product Catalog — Batch 1 Asset Audit
+  let md = `# Product Catalog — Asset Audit
 
 > **Generated:** ${generatedAt}  
 > **Overrides source:** \`app-slab-inventory/src/lib/productCatalogAssets.ts\`  
+> **Display splits:** \`app-slab-inventory/src/lib/productCatalogDisplay.ts\`  
 > **Public root:** \`app-slab-inventory/public/\`
 
 Missing files are **expected** until assets are collected manually. No downloads or scraping performed.
+
+Display split products (e.g. Diamond 60/40 Regular/Low Divide) use stable display IDs while generated catalog data keeps a single source row.
 
 ## Summary
 
@@ -232,7 +285,13 @@ Missing files are **expected** until assets are collected manually. No downloads
 
   for (const [productId, productRows] of Object.entries(byProduct)) {
     const found = productRows.filter((r) => r.exists === "yes").length;
-    md += `### ${productId} (${found}/${productRows.length} on disk)\n\n`;
+    const splitLabel = productRows[0]?.catalogSourceId
+      ? ` — split from \`${productRows[0].catalogSourceId}\``
+      : "";
+    md += `### ${productId} (${found}/${productRows.length} on disk)${splitLabel}\n\n`;
+    if (productRows[0]?.displayName) {
+      md += `**Display name:** ${productRows[0].displayName}\n\n`;
+    }
     if (productRows[0]?.recommendedSource) {
       md += `**Recommended source:** ${productRows[0].recommendedSource}\n\n`;
     }
@@ -261,7 +320,10 @@ function main() {
   }
 
   const overrides = parseOverridesFromTs(fs.readFileSync(OVERRIDES_TS, "utf8"));
-  const rows = buildRows(overrides);
+  const displaySplits = fs.existsSync(DISPLAY_SPLITS_TS)
+    ? parseDisplaySplitsFromTs(fs.readFileSync(DISPLAY_SPLITS_TS, "utf8"))
+    : [];
+  const rows = buildRows(overrides, displaySplits);
   const summary = summarize(rows);
   const generatedAt = new Date().toISOString();
 
@@ -269,7 +331,8 @@ function main() {
   fs.writeFileSync(OUT_CSV, toCsv(rows));
   fs.writeFileSync(OUT_MD, toMarkdown(rows, summary, generatedAt));
 
-  console.log("Product Catalog asset audit (Batch 1 overrides)");
+  console.log("Product Catalog asset audit");
+  console.log(`  Display splits:        ${displaySplits.length}`);
   console.log(`  Products audited:     ${Object.keys(summary.byProduct).length}`);
   console.log(`  Total expected assets: ${summary.total}`);
   console.log(`  Found on disk:         ${summary.found}`);
