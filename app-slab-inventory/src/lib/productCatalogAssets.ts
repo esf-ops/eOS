@@ -176,6 +176,63 @@ const PRODUCT_CATALOG_ASSET_OVERRIDES: ProductCatalogAssetOverride[] = [
       "Source: official BLANCO Diamond 60/40 Low Divide product pages and spec sheets.",
   },
   {
+    productId: "blanco-blanco-diamond-small-bar-sinks",
+    imageUrl: `${sinkBase("blanco-blanco-diamond-small-bar-sinks")}/hero.jpg`,
+    specSheetUrl: specSheetUrl("blanco-blanco-diamond-small-bar-sinks"),
+    defaultFinishKey: "cafe-brown",
+    finishImageUrls: blancoSinkFinishImageUrls("blanco-blanco-diamond-small-bar-sinks"),
+    sourceNotes:
+      "Source: official BLANCO Diamond Small Bar product pages and spec sheets.",
+  },
+  {
+    productId: "blanco-blanco-precis-21-sinks",
+    imageUrl: `${sinkBase("blanco-blanco-precis-21-sinks")}/hero.jpg`,
+    specSheetUrl: specSheetUrl("blanco-blanco-precis-21-sinks"),
+    defaultFinishKey: "cafe-brown",
+    finishImageUrls: blancoSinkFinishImageUrls("blanco-blanco-precis-21-sinks"),
+    sourceNotes:
+      "Source: official BLANCO Precis 21 product pages and spec sheets.",
+  },
+  {
+    productId: "blanco-blanco-precis-24-sink",
+    imageUrl: `${sinkBase("blanco-blanco-precis-24-sink")}/hero.jpg`,
+    installedImageUrl: `${sinkBase("blanco-blanco-precis-24-sink")}/installed.jpg`,
+    specSheetUrl: specSheetUrl("blanco-blanco-precis-24-sink"),
+    defaultFinishKey: "cafe-brown",
+    finishImageUrls: blancoSinkFinishImageUrls("blanco-blanco-precis-24-sink"),
+    sourceNotes:
+      "Source: official BLANCO Precis 24 product pages and spec sheets.",
+  },
+  {
+    productId: "blanco-blanco-precis-27-sinks",
+    imageUrl: `${sinkBase("blanco-blanco-precis-27-sinks")}/hero.jpg`,
+    installedImageUrl: `${sinkBase("blanco-blanco-precis-27-sinks")}/installed.jpg`,
+    specSheetUrl: specSheetUrl("blanco-blanco-precis-27-sinks"),
+    defaultFinishKey: "cafe-brown",
+    finishImageUrls: blancoSinkFinishImageUrls("blanco-blanco-precis-27-sinks"),
+    sourceNotes:
+      "Source: official BLANCO Precis 27 product pages and spec sheets.",
+  },
+  {
+    productId: "blanco-blanco-precis-30-single-bowl",
+    imageUrl: `${sinkBase("blanco-blanco-precis-30-single-bowl")}/hero.jpg`,
+    installedImageUrl: `${sinkBase("blanco-blanco-precis-30-single-bowl")}/installed.jpg`,
+    specSheetUrl: specSheetUrl("blanco-blanco-precis-30-single-bowl"),
+    defaultFinishKey: "cafe-brown",
+    finishImageUrls: blancoSinkFinishImageUrls("blanco-blanco-precis-30-single-bowl"),
+    sourceNotes:
+      "Source: official BLANCO Precis 30 Single Bowl product pages and spec sheets.",
+  },
+  {
+    productId: "blanco-blanco-precis-bar-sinks",
+    imageUrl: `${sinkBase("blanco-blanco-precis-bar-sinks")}/hero.jpg`,
+    specSheetUrl: specSheetUrl("blanco-blanco-precis-bar-sinks"),
+    defaultFinishKey: "cafe-brown",
+    finishImageUrls: blancoSinkFinishImageUrls("blanco-blanco-precis-bar-sinks"),
+    sourceNotes:
+      "Source: official BLANCO Precis Bar product pages and spec sheets.",
+  },
+  {
     productId: "faucet-delta-9176-cz-pr-dst",
     imageUrl: `${faucetBase("faucet-delta-9176-cz-pr-dst")}/hero.jpg`,
     diagramUrl: `${faucetBase("faucet-delta-9176-cz-pr-dst")}/diagram.jpg`,

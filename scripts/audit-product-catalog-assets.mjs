@@ -45,6 +45,18 @@ const RECOMMENDED_SOURCE = {
     "BLANCO Diamond 60/40 Regular Divide — assets under blanco-blanco-diamond-60-40-sinks/.",
   "blanco-blanco-diamond-60-40-sinks-low-divide":
     "BLANCO Diamond 60/40 Low Divide — assets under blanco-blanco-diamond-60-40-low-divide-sinks/.",
+  "blanco-blanco-diamond-small-bar-sinks":
+    "BLANCO Diamond Small Bar — assets under blanco-blanco-diamond-small-bar-sinks/.",
+  "blanco-blanco-precis-21-sinks":
+    "BLANCO Precis 21 — assets under blanco-blanco-precis-21-sinks/.",
+  "blanco-blanco-precis-24-sink":
+    "BLANCO Precis 24 — assets under blanco-blanco-precis-24-sink/.",
+  "blanco-blanco-precis-27-sinks":
+    "BLANCO Precis 27 — assets under blanco-blanco-precis-27-sinks/.",
+  "blanco-blanco-precis-30-single-bowl":
+    "BLANCO Precis 30 Single Bowl — assets under blanco-blanco-precis-30-single-bowl/.",
+  "blanco-blanco-precis-bar-sinks":
+    "BLANCO Precis Bar — assets under blanco-blanco-precis-bar-sinks/.",
   "blanco-blanco-precis-super-single-sinks":
     "Official BLANCO Precis Super Single product page and spec sheet.",
   "faucet-delta-9176-cz-pr-dst":
