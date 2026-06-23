@@ -174,7 +174,8 @@ export async function runQuoteDelivery(db, req, quoteId, body, options) {
       html: emailContent.htmlPreview,
       text: emailContent.textPreview,
       from: env.fromAddress,
-      provider: env.provider
+      provider: env.provider,
+      replyTo: emailContent.replyTo
     });
     if (sendResult.ok && !sendResult.skipped) {
       status = "sent";

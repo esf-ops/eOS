@@ -14,7 +14,7 @@ import {
   sanitizeSnapshotForCustomer
 } from "./estimateContentSanitizer.js";
 import { buildCustomerEstimateDisplayFromSnapshot } from "./estimateDisplayFromSnapshot.js";
-import { buildEstimateEmailContent } from "./estimateEmailBuilder.js";
+import { buildEstimateEmailContent, pickReplyToEmail } from "./estimateEmailBuilder.js";
 import { buildDeliveryLogRow, insertQuoteDeliveryLog } from "./quoteDeliveryLogs.js";
 import { getQuoteDeliveryEnv } from "./quoteDeliveryEnv.js";
 import {
@@ -257,6 +257,46 @@ function testBuiltEmailHtmlPassesCustomerSafeAudit() {
   assert.equal(textAudit.ok, true, formatCustomerSafeViolationWarning("Text", textAudit) || "text should be safe");
   assert.ok(htmlPreview.includes("35 sf counter") || htmlPreview.includes("sf counter"));
   assert.ok(htmlPreview.includes("Prepared by"));
+  assert.ok(htmlPreview.includes("Peg Reid"));
+  assert.ok(!htmlPreview.includes("peg.reid@eliteosfab.com"));
+}
+
+function testBrandedEmailTemplateSections() {
+  const display = buildCustomerEstimateDisplayFromSnapshot(internalQuoteRow());
+  const { htmlPreview, textPreview, subject } = buildEstimateEmailContent(display);
+
+  assert.match(subject, /^Elite Stone Fabrication Estimate — ESF-LIS-000042 — Kitchen Remodel$/);
+  assert.ok(htmlPreview.includes("Elite Stone Fabrication Estimate"));
+  assert.ok(htmlPreview.includes("elitestonefabrication.com"));
+  assert.ok(htmlPreview.includes("www.elitestonefabrication.com"));
+  assert.ok(htmlPreview.includes("Lisbon, IA"));
+  assert.ok(htmlPreview.includes("319-455-4200"));
+  assert.ok(htmlPreview.includes("$12,450"));
+  assert.ok(htmlPreview.includes("Estimated project total"));
+  assert.ok(htmlPreview.includes("planning purposes"));
+  assert.ok(htmlPreview.includes("field verification"));
+  assert.ok(htmlPreview.includes("Areas &amp; rooms") || htmlPreview.includes("Areas & rooms"));
+  assert.ok(htmlPreview.includes("Kitchen"));
+  assert.ok(htmlPreview.includes("Visible sink"));
+
+  assert.ok(textPreview.includes("ELITE STONE FABRICATION"));
+  assert.ok(textPreview.includes("Estimated project total: $12,450"));
+  assert.ok(textPreview.includes("Areas & rooms"));
+  assert.ok(textPreview.includes("PLANNING ESTIMATE"));
+  assert.ok(textPreview.includes("www.elitestonefabrication.com"));
+  assert.ok(textPreview.includes("Prepared by: Peg Reid"));
+}
+
+function testReplyToFromPreparedByEmail() {
+  const display = buildCustomerEstimateDisplayFromSnapshot(internalQuoteRow());
+  assert.equal(pickReplyToEmail(display), "peg.reid@eliteosfab.com");
+  const { replyTo } = buildEstimateEmailContent(display);
+  assert.equal(replyTo, "peg.reid@eliteosfab.com");
+
+  const noEmailDisplay = buildCustomerEstimateDisplayFromSnapshot(
+    internalQuoteRow({ prepared_by: "Peg Reid" })
+  );
+  assert.equal(pickReplyToEmail(noEmailDisplay), null);
 }
 
 function testFilterCustomerFacingCustomLines() {
@@ -330,6 +370,8 @@ async function testPreviewDryRun() {
   assert.equal(result.quoteNumber, "ESF-LIS-000042");
   assert.equal(result.revisionLabel, "R2");
   assert.ok(result.htmlPreview.includes("Elite Stone Fabrication Estimate"));
+  assert.ok(result.htmlPreview.includes("www.elitestonefabrication.com"));
+  assert.ok(result.htmlPreview.includes("planning purposes"));
   assert.ok(result.htmlPreview.includes("Visible sink"));
   assert.ok(!result.htmlPreview.includes("Internal adjustment"));
   assert.ok(result.htmlPreview.includes("Estimated project total"));
@@ -526,7 +568,8 @@ async function testResendSendUsesApiWithMockFetch() {
     html: "<p>Estimate</p>",
     text: "Estimate",
     from: "Elite Stone Fabrication <quotes@eliteosfab.com>",
-    provider: "resend"
+    provider: "resend",
+    replyTo: "peg.reid@eliteosfab.com"
   });
 
   assert.equal(result.ok, true);
@@ -538,6 +581,7 @@ async function testResendSendUsesApiWithMockFetch() {
   assert.deepEqual(capturedBody.to, ["customer@example.com"]);
   assert.deepEqual(capturedBody.cc, ["rep@eliteosfab.com"]);
   assert.equal(capturedBody.from, "Elite Stone Fabrication <quotes@eliteosfab.com>");
+  assert.equal(capturedBody.reply_to, "peg.reid@eliteosfab.com");
 
   globalThis.fetch = prevFetch;
   if (prevKey != null) process.env.RESEND_API_KEY = prevKey;
@@ -558,9 +602,13 @@ async function testSendWithResendEnabledLogsIntendedRecipientsWhenForced() {
 
   const prevFetch = globalThis.fetch;
   let sentTo = [];
+  let sentReplyTo = null;
+  let sentHtml = "";
   globalThis.fetch = async (_url, opts) => {
     const body = JSON.parse(String(opts?.body || "{}"));
     sentTo = body.to || [];
+    sentReplyTo = body.reply_to ?? null;
+    sentHtml = String(body.html || "");
     return { ok: true, status: 200, json: async () => ({ id: "msg_forced" }) };
   };
 
@@ -582,6 +630,9 @@ async function testSendWithResendEnabledLogsIntendedRecipientsWhenForced() {
   assert.equal(result.ok, true);
   assert.equal(result.status, "sent");
   assert.deepEqual(sentTo, ["ops@eliteosfab.com"]);
+  assert.equal(sentReplyTo, "peg.reid@eliteosfab.com");
+  assert.ok(sentHtml.includes("Elite Stone Fabrication Estimate"));
+  assert.ok(sentHtml.includes("$12,450"));
   assert.equal(capturedLogs.length, 1);
   assert.deepEqual(capturedLogs[0].recipients, [{ email: "ops@eliteosfab.com", type: "to" }]);
   assert.deepEqual(capturedLogs[0].metadata.intended_recipients, [
@@ -652,6 +703,8 @@ async function runAll() {
   testSanitizerExcludesInternalDetails();
   testCustomerSafeTextAssertion();
   testBuiltEmailHtmlPassesCustomerSafeAudit();
+  testBrandedEmailTemplateSections();
+  testReplyToFromPreparedByEmail();
   testFilterCustomerFacingCustomLines();
   testDisplayFromSnapshotUsesStoredTotal();
   testDeliveryLogRowShape();

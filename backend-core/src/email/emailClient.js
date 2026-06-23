@@ -15,7 +15,7 @@ function getResendApiKey() {
 }
 
 /**
- * @param {{ to: string[], cc?: string[], subject: string, html: string, text: string, from: string }} params
+ * @param {{ to: string[], cc?: string[], subject: string, html: string, text: string, from: string, replyTo?: string | null }} params
  */
 async function sendViaResend(params) {
   const apiKey = getResendApiKey();
@@ -56,13 +56,15 @@ async function sendViaResend(params) {
     };
   }
 
+  const replyTo = String(params.replyTo || "").trim().toLowerCase();
   const payload = {
     from,
     to,
     subject,
     html: String(params.html || ""),
     ...(params.text ? { text: String(params.text) } : {}),
-    ...(cc.length ? { cc } : {})
+    ...(cc.length ? { cc } : {}),
+    ...(replyTo ? { reply_to: replyTo } : {})
   };
 
   try {
@@ -111,7 +113,7 @@ async function sendViaResend(params) {
 }
 
 /**
- * @param {{ to: string[], cc?: string[], subject: string, html: string, text: string, from: string, provider: string }} params
+ * @param {{ to: string[], cc?: string[], subject: string, html: string, text: string, from: string, provider: string, replyTo?: string | null }} params
  */
 export async function sendEstimateEmail(params) {
   const provider = String(params.provider || "none").toLowerCase();
