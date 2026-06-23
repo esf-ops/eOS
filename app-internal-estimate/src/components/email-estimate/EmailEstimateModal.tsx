@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   buildRecipientsPayload,
@@ -18,7 +18,46 @@ export type EmailEstimateModalProps = {
   defaultSubject: string;
   quoteNumber: string | null;
   revisionLabel: string | null;
+  /** When true, loads server preview once when the modal opens (post-save email flow). */
+  autoPreviewOnOpen?: boolean;
 };
+
+function describePdfAttachmentStatus(res: QuoteDeliveryResponse): string {
+  if (res.pdfEnabled === false) {
+    return "PDF attachment disabled on server (QUOTE_EMAIL_PDF_ENABLED is off).";
+  }
+  const pdf = res.pdfAttachment;
+  if (!pdf) return "PDF attachment status unknown — click Preview to load delivery metadata.";
+  if (pdf.generated && pdf.filename) {
+    return `PDF attachment available: ${pdf.filename} (${pdf.byteLength?.toLocaleString() ?? "0"} bytes). Attached on real send when enabled.`;
+  }
+  if (pdf.reason === "no_print_snapshot") {
+    return "PDF unavailable — this quote has no saved print snapshot. Save or update the estimate again.";
+  }
+  if (pdf.reason === "pdf_disabled") {
+    return "PDF attachment disabled on server.";
+  }
+  if (pdf.reason === "pdf_render_failed") {
+    return "PDF could not be generated on the server — email can still be sent without attachment.";
+  }
+  if (pdf.reason === "print_snapshot_reconciliation_mismatch") {
+    return "PDF unavailable — saved print snapshot does not match customer display total.";
+  }
+  if (pdf.skipped) {
+    return `PDF not generated (${pdf.reason ?? "skipped"}).`;
+  }
+  return "Click Preview to check PDF attachment metadata.";
+}
+
+function describeSendMode(res: QuoteDeliveryResponse | null): string {
+  if (!res) {
+    return "Dry-run mode expected — click Preview to load server delivery settings.";
+  }
+  if (res.sendEnabled === false || res.dryRun || res.blocked) {
+    return "Dry-run mode — no email will be sent from this environment.";
+  }
+  return "Live send enabled — Send will deliver email through the configured provider.";
+}
 
 export default function EmailEstimateModal(props: EmailEstimateModalProps) {
   const {
@@ -30,7 +69,8 @@ export default function EmailEstimateModal(props: EmailEstimateModalProps) {
     defaultToEmail,
     defaultSubject,
     quoteNumber,
-    revisionLabel
+    revisionLabel,
+    autoPreviewOnOpen = false
   } = props;
 
   const [toField, setToField] = useState("");
@@ -44,6 +84,8 @@ export default function EmailEstimateModal(props: EmailEstimateModalProps) {
   const [previewBusy, setPreviewBusy] = useState(false);
   const [sendBusy, setSendBusy] = useState(false);
   const [lastPreviewAt, setLastPreviewAt] = useState<string | null>(null);
+  const [deliveryMeta, setDeliveryMeta] = useState<QuoteDeliveryResponse | null>(null);
+  const autoPreviewRanRef = useRef(false);
 
   useEffect(() => {
     if (!open) return;
@@ -56,9 +98,12 @@ export default function EmailEstimateModal(props: EmailEstimateModalProps) {
     setStatusMsg(null);
     setErrorMsg(null);
     setLastPreviewAt(null);
+    setDeliveryMeta(null);
+    autoPreviewRanRef.current = false;
   }, [open, defaultToEmail, defaultSubject]);
 
   const applyResponse = useCallback((res: QuoteDeliveryResponse) => {
+    setDeliveryMeta(res);
     if (res.subject) setSubject(res.subject);
     if (res.htmlPreview) setHtmlPreview(res.htmlPreview);
     if (res.textPreview) setTextPreview(res.textPreview);
@@ -75,24 +120,36 @@ export default function EmailEstimateModal(props: EmailEstimateModalProps) {
     };
   }, [toField, ccField, subject]);
 
-  const handlePreview = useCallback(async () => {
-    if (!quoteId || !sessionToken || blockReason) return;
+  const runPreview = useCallback(async () => {
+    if (!quoteId || !sessionToken || blockReason) return false;
     setPreviewBusy(true);
     setErrorMsg(null);
-    setStatusMsg(null);
     try {
       const res = await previewEstimateEmail(quoteId, sessionToken, buildPayload());
       if (!res.ok) throw new Error(res.error || "Preview failed");
       applyResponse(res);
       setLastPreviewAt(new Date().toLocaleString());
       setStatusMsg("Preview loaded from server.");
+      return true;
     } catch (e) {
       const info = friendlyApiErrorMessage(e, "/api/quote-delivery", "save");
       setErrorMsg(info.userMessage);
+      return false;
     } finally {
       setPreviewBusy(false);
     }
   }, [quoteId, sessionToken, blockReason, buildPayload, applyResponse]);
+
+  useEffect(() => {
+    if (!open || !autoPreviewOnOpen || blockReason || !quoteId || !sessionToken) return;
+    if (autoPreviewRanRef.current) return;
+    autoPreviewRanRef.current = true;
+    void runPreview();
+  }, [open, autoPreviewOnOpen, blockReason, quoteId, sessionToken, runPreview]);
+
+  const handlePreview = useCallback(async () => {
+    await runPreview();
+  }, [runPreview]);
 
   const handleSendDryRun = useCallback(async () => {
     if (!quoteId || !sessionToken || blockReason) return;
@@ -155,6 +212,12 @@ export default function EmailEstimateModal(props: EmailEstimateModalProps) {
           </>
         ) : (
           <>
+            <div className="ie-email-delivery-status" role="status">
+              <strong>Delivery status</strong>
+              <p className="muted small">{describeSendMode(deliveryMeta)}</p>
+              <p className="muted small">{describePdfAttachmentStatus(deliveryMeta ?? {})}</p>
+            </div>
+
             <div className="ie-email-form-grid">
               <label className="ie-email-field">
                 <span>To</span>
@@ -256,11 +319,6 @@ export default function EmailEstimateModal(props: EmailEstimateModalProps) {
                 Cancel
               </button>
             </div>
-            <p className="muted small ie-email-dry-run-note">
-              Email sending is disabled in this environment. Send runs a server-side dry run only. When PDF
-              attachment generation is enabled on the server, the customer estimate PDF from the last saved quote
-              revision is attached on real sends when available.
-            </p>
           </>
         )}
       </div>

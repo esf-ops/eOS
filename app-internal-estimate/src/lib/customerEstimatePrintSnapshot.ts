@@ -27,6 +27,14 @@ export type CustomerEstimatePrintSnapshot = {
   display: CustomerEstimateDisplayModel;
 };
 
+/** Header fields for a print snapshot — quote number may be filled server-side on first create save. */
+export type CustomerEstimatePrintSnapshotHeaderInput = Omit<
+  CustomerEstimatePrintSnapshotHeader,
+  "quoteNumber"
+> & {
+  quoteNumber?: string | null;
+};
+
 export function buildCustomerEstimatePrintSnapshot(params: {
   display: CustomerEstimateDisplayModel;
   header: CustomerEstimatePrintSnapshotHeader;
@@ -35,15 +43,40 @@ export function buildCustomerEstimatePrintSnapshot(params: {
   if (!quoteNumber) {
     throw new Error("Customer print snapshot requires a saved quote number");
   }
-  const finalRounded = Math.round(Number(params.display.finalRounded) || 0);
+  return buildCustomerEstimatePrintSnapshotCore(params.display, {
+    ...params.header,
+    quoteNumber
+  });
+}
+
+/**
+ * Build a print snapshot for save payloads before a quote number exists (create flow).
+ * Server patches header.quoteNumber after ESF allocation.
+ */
+export function buildCustomerEstimatePrintSnapshotForSave(params: {
+  display: CustomerEstimateDisplayModel;
+  header: CustomerEstimatePrintSnapshotHeaderInput;
+}): CustomerEstimatePrintSnapshot {
+  const quoteNumber = String(params.header.quoteNumber ?? "").trim();
+  return buildCustomerEstimatePrintSnapshotCore(params.display, {
+    ...params.header,
+    quoteNumber
+  });
+}
+
+function buildCustomerEstimatePrintSnapshotCore(
+  display: CustomerEstimateDisplayModel,
+  header: CustomerEstimatePrintSnapshotHeader
+): CustomerEstimatePrintSnapshot {
+  const finalRounded = Math.round(Number(display.finalRounded) || 0);
   return {
     version: CUSTOMER_ESTIMATE_PRINT_SNAPSHOT_VERSION,
     finalRounded,
     header: {
-      ...params.header,
-      quoteNumber
+      ...header,
+      quoteNumber: String(header.quoteNumber ?? "").trim()
     },
-    display: JSON.parse(JSON.stringify(params.display)) as CustomerEstimateDisplayModel
+    display: JSON.parse(JSON.stringify(display)) as CustomerEstimateDisplayModel
   };
 }
 

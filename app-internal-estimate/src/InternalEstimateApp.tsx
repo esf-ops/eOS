@@ -39,6 +39,7 @@ import { QuoteFilesPanel } from "./QuoteFilesPanel";
 import { buildCustomerEstimateDisplayModel } from "./lib/customerEstimateDisplayModel";
 import {
   buildCustomerEstimatePrintSnapshot,
+  buildCustomerEstimatePrintSnapshotForSave,
   type CustomerEstimatePrintSnapshot
 } from "./lib/customerEstimatePrintSnapshot";
 import { splitInternalEstimateCustomLines } from "./lib/internalEstimateCustomLines";
@@ -430,6 +431,7 @@ export default function InternalEstimateApp() {
   const [familyLatestQuoteNumber, setFamilyLatestQuoteNumber] = useState<string | null>(null);
   const [startNewQuoteModalOpen, setStartNewQuoteModalOpen] = useState(false);
   const [emailEstimateModalOpen, setEmailEstimateModalOpen] = useState(false);
+  const [emailEstimateAutoPreview, setEmailEstimateAutoPreview] = useState(false);
   const [restoreBusy, setRestoreBusy] = useState(false);
 
   /** `?quoteId=` hydration — parsed synchronously so the first render already knows
@@ -471,6 +473,10 @@ export default function InternalEstimateApp() {
   //  because customerDisplayTotal is const-declared 558 lines below the useCallback.)
   const customerDisplayTotalRef = useRef(0);
   const customerPrintSnapshotRef = useRef<CustomerEstimatePrintSnapshot | null>(null);
+  const customerEstimateDisplayRef = useRef(
+    null as ReturnType<typeof buildCustomerEstimateDisplayModel> | null
+  );
+  const pendingEmailModalAfterSaveRef = useRef(false);
 
   const [calcBusy, setCalcBusy] = useState(false);
   const [calcError, setCalcError] = useState<string | null>(null);
@@ -1199,7 +1205,6 @@ export default function InternalEstimateApp() {
     const base = {
       ...buildCalcPayload(),
       customerDisplayTotal: customerDisplayTotalRef.current,
-      customerEstimatePrintSnapshot: customerPrintSnapshotRef.current ?? undefined,
       customer_name: customerName.trim() || null,
       customer_email: email.trim() || null,
       customer_phone: phone.trim() || null,
@@ -1401,7 +1406,36 @@ export default function InternalEstimateApp() {
     setPendingSubmitIntent(intent);
     setSubmitMsg(null);
     setSubmitDiagnostic(null);
-    const payload = buildSubmitPayload(urlQuoteId ? intent : undefined);
+    const payload = buildSubmitPayload(urlQuoteId ? intent : undefined) as Record<string, unknown>;
+    const displayForSave = customerEstimateDisplayRef.current;
+    if (displayForSave) {
+      try {
+        payload.customerEstimatePrintSnapshot = buildCustomerEstimatePrintSnapshotForSave({
+          display: displayForSave,
+          header: {
+            estimateDate: new Date().toLocaleDateString(undefined, {
+              year: "numeric",
+              month: "long",
+              day: "numeric"
+            }),
+            quoteNumber: effectiveQuoteNumber || lastSavedQuoteNumber || undefined,
+            accountName: accountName.trim() || null,
+            customerName: customerName.trim() || null,
+            projectName: projectName.trim() || null,
+            projectAddress: projectAddress.trim() || null,
+            city: city.trim() || null,
+            state: state.trim() || null,
+            branch: branch.trim() || null,
+            salesRep: salesRep.trim() || null,
+            primaryGroup: topMaterialGroup || null,
+            primaryColorLabel: primaryColorLabel || null,
+            colorTbd: colorTbd
+          }
+        });
+      } catch (e) {
+        console.warn("[internal-estimate] customer print snapshot for save failed", e);
+      }
+    }
 
     try {
       if (!sessionToken) {
@@ -1472,7 +1506,7 @@ export default function InternalEstimateApp() {
             if (pendingOutput === "print") {
               window.setTimeout(() => window.print(), 0);
             } else {
-              setEmailEstimateModalOpen(true);
+              pendingEmailModalAfterSaveRef.current = true;
             }
           }
         }
@@ -1524,7 +1558,33 @@ export default function InternalEstimateApp() {
     updateQuoteBlockReason,
     submitBusy,
     applyPostSaveQuoteIdentity,
-    beginNewQuote
+    beginNewQuote,
+    effectiveQuoteNumber,
+    lastSavedQuoteNumber,
+    accountName,
+    customerName,
+    projectName,
+    projectAddress,
+    city,
+    state,
+    branch,
+    salesRep,
+    topMaterialGroup,
+    primaryColorLabel,
+    colorTbd
+  ]);
+
+  useEffect(() => {
+    if (!pendingEmailModalAfterSaveRef.current) return;
+    if (customerOutputBlockReason) return;
+    pendingEmailModalAfterSaveRef.current = false;
+    setEmailEstimateAutoPreview(true);
+    setEmailEstimateModalOpen(true);
+  }, [
+    customerOutputBlockReason,
+    effectiveQuoteHeaderId,
+    effectiveQuoteNumber,
+    hydratedIsCurrentRevision
   ]);
 
   const requestCustomerOutput = useCallback(
@@ -1554,6 +1614,7 @@ export default function InternalEstimateApp() {
       if (action === "print") {
         printCustomerEstimate();
       } else {
+        setEmailEstimateAutoPreview(false);
         setEmailEstimateModalOpen(true);
       }
     },
@@ -1796,8 +1857,8 @@ export default function InternalEstimateApp() {
    * Add-ons use measuredRooms[].extras (matches stickyLiveRollup), not addons[] alone.
    */
   const customerEstimateDisplay = useMemo(
-    () =>
-      buildCustomerEstimateDisplayModel({
+    () => {
+      const display = buildCustomerEstimateDisplayModel({
         selectedBreakdown: selectedMaterialBreakdown,
         measuredRooms: liveEstimate.measuredRooms,
         visibleCustomerLines: visibleCustomerLines.map((ln) => ({
@@ -1816,7 +1877,10 @@ export default function InternalEstimateApp() {
         comparisonRows: customerEstimateComparisonRows,
         allGroupComparisonRates: internalGroupComparison,
         internalMaterialUseTax: true
-      }),
+      });
+      customerEstimateDisplayRef.current = display;
+      return display;
+    },
     [
       selectedMaterialBreakdown,
       liveEstimate.measuredRooms,
@@ -4128,7 +4192,10 @@ export default function InternalEstimateApp() {
 
       <EmailEstimateModal
         open={emailEstimateModalOpen}
-        onClose={() => setEmailEstimateModalOpen(false)}
+        onClose={() => {
+          setEmailEstimateModalOpen(false);
+          setEmailEstimateAutoPreview(false);
+        }}
         quoteId={emailEstimateQuoteId}
         sessionToken={sessionToken}
         blockReason={emailEstimateBlockReason}
@@ -4136,6 +4203,7 @@ export default function InternalEstimateApp() {
         defaultSubject={emailEstimateDefaultSubject}
         quoteNumber={effectiveQuoteNumber}
         revisionLabel={hydratedDisplayRevision}
+        autoPreviewOnOpen={emailEstimateAutoPreview}
       />
 
       <footer className="footer-bar" role="contentinfo">

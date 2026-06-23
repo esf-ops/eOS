@@ -20,7 +20,8 @@ import { buildCustomerEstimatePdfAttachment, renderHtmlToPdfBytes } from "./cust
 import {
   buildCustomerEstimatePdfFilename,
   loadPrintSnapshotFromQuoteRow,
-  parseCustomerEstimatePrintSnapshot
+  parseCustomerEstimatePrintSnapshot,
+  patchPrintSnapshotQuoteNumber
 } from "./customerEstimatePrintSnapshot.js";
 import { buildDeliveryLogRow, insertQuoteDeliveryLog } from "./quoteDeliveryLogs.js";
 import { getQuoteDeliveryEnv } from "./quoteDeliveryEnv.js";
@@ -788,6 +789,30 @@ function testPrintSnapshotParseAndFilename() {
   assert.equal(loaded.reconciled, true);
 }
 
+function testPatchPrintSnapshotQuoteNumberForCreateSave() {
+  const snapStore = {
+    internal_ui: {
+      customer_display_total: 12450,
+      customer_estimate_print_snapshot: makePrintSnapshot({
+        header: { ...makePrintSnapshot().header, quoteNumber: "" }
+      })
+    }
+  };
+  patchPrintSnapshotQuoteNumber(snapStore, "ESF-LIS-000099");
+  const ps = snapStore.internal_ui.customer_estimate_print_snapshot;
+  assert.equal(ps.header.quoteNumber, "ESF-LIS-000099");
+  const row = internalQuoteRow({
+    quote_number: "ESF-LIS-000099",
+    calculation_snapshot: {
+      materialGroup: "Group Promo",
+      internal_ui: snapStore.internal_ui
+    }
+  });
+  const loaded = loadPrintSnapshotFromQuoteRow(row);
+  assert.ok(loaded?.snapshot);
+  assert.equal(loaded.snapshot.header.quoteNumber, "ESF-LIS-000099");
+}
+
 function testPrintHtmlCustomerSafe() {
   const snap = makePrintSnapshot();
   const html = buildCustomerEstimatePrintHtml(snap);
@@ -935,6 +960,7 @@ async function runAll() {
   await testMissingSnapshotBlocksDelivery();
   testEmailHtmlRequiresQuoteNumber();
   testPrintSnapshotParseAndFilename();
+  testPatchPrintSnapshotQuoteNumberForCreateSave();
   testPrintHtmlCustomerSafe();
   await testPreviewReturnsPdfMetadataOnly();
   await testLegacyQuoteWithoutPrintSnapshotWarns();

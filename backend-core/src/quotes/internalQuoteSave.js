@@ -11,6 +11,7 @@
  */
 
 import { buildMondayQuotePayload, syncQuoteToMonday } from "../integrations/mondayQuoteSync.js";
+import { patchPrintSnapshotQuoteNumber } from "../quoteDelivery/customerEstimatePrintSnapshot.js";
 import {
   mergeRowOrganizationId,
   organizationScopeOrFilter,
@@ -238,7 +239,7 @@ export async function processInternalQuoteSave(params) {
       quoteNumber,
       quoteSource: "internal_quote",
       quoteStatus,
-      snapshotToStore,
+      snapshotToStore: patchPrintSnapshotQuoteNumber(snapshotToStore, quoteNumber),
       estimatesByGroup: null,
       assignment: null,
       publicResponsePayload: null,
@@ -309,7 +310,7 @@ export async function processInternalQuoteSave(params) {
       prepared_by: persistBody.prepared_by ?? null,
       valid_days: Number(persistBody.valid_days) || 30,
       notes_length: persistBody.notes ? String(persistBody.notes).length : null,
-      calculation_snapshot: snapshotToStore,
+      calculation_snapshot: patchPrintSnapshotQuoteNumber(snapshotToStore, row.quote_number),
       revision_note: noteFromBody(body) != null ? noteFromBody(body) : row.revision_note,
       updated_at: new Date().toISOString()
     };
@@ -447,7 +448,7 @@ export async function processInternalQuoteSave(params) {
       quoteNumber,
       quoteSource: "internal_quote",
       quoteStatus,
-      snapshotToStore,
+      snapshotToStore: patchPrintSnapshotQuoteNumber(snapshotToStore, quoteNumber),
       estimatesByGroup: null,
       assignment: null,
       publicResponsePayload: null,

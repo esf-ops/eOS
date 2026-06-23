@@ -281,6 +281,7 @@ export async function runQuoteDelivery(db, req, quoteId, body, options) {
     ok: true,
     dryRun: sendBlocked,
     sendEnabled: env.sendEnabled,
+    pdfEnabled: env.pdfEnabled,
     quoteId: row.id,
     quoteNumber: row.quote_number ?? null,
     revisionLabel: row.revision_label ?? null,

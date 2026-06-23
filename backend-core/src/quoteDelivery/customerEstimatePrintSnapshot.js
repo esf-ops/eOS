@@ -43,6 +43,27 @@ export function buildCustomerEstimatePdfFilename(quoteNumber, revisionLabel) {
 }
 
 /**
+ * @param {Record<string, unknown>} snapshotToStore
+ * @param {string|null|undefined} quoteNumber
+ */
+export function patchPrintSnapshotQuoteNumber(snapshotToStore, quoteNumber) {
+  const qn = String(quoteNumber ?? "").trim();
+  if (!qn || !snapshotToStore || typeof snapshotToStore !== "object") return snapshotToStore;
+  const iu = snapshotToStore.internal_ui;
+  if (!iu || typeof iu !== "object") return snapshotToStore;
+  const ps = iu.customer_estimate_print_snapshot;
+  if (!ps || typeof ps !== "object") return snapshotToStore;
+  iu.customer_estimate_print_snapshot = {
+    ...ps,
+    header: {
+      ...(ps.header && typeof ps.header === "object" ? ps.header : {}),
+      quoteNumber: qn
+    }
+  };
+  return snapshotToStore;
+}
+
+/**
  * @param {Record<string, unknown>} row quote_headers row
  */
 export function loadPrintSnapshotFromQuoteRow(row) {
