@@ -449,6 +449,154 @@ function testAllowedDomainsPolicy() {
   assert.equal(allowed.ok, true);
 }
 
+function testForceRecipientOverridesDeliveryTarget() {
+  const env = { allowedDomains: [], forceRecipient: "ops@eliteosfab.com" };
+  const result = applyRecipientPolicy(
+    [
+      { email: "customer@example.com", type: "to" },
+      { email: "cc@example.com", type: "cc" }
+    ],
+    env
+  );
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.recipients, [{ email: "ops@eliteosfab.com", type: "to" }]);
+  assert.deepEqual(result.intendedRecipients, [
+    { email: "customer@example.com", type: "to" },
+    { email: "cc@example.com", type: "cc" }
+  ]);
+  assert.ok((result.warnings || []).some((w) => String(w).includes("ops@eliteosfab.com")));
+}
+
+function testResendProviderEnvSelection() {
+  const prev = {
+    send: process.env.QUOTE_EMAIL_SEND_ENABLED,
+    provider: process.env.QUOTE_EMAIL_PROVIDER,
+    from: process.env.QUOTE_EMAIL_FROM
+  };
+  process.env.QUOTE_EMAIL_PROVIDER = "resend";
+  process.env.QUOTE_EMAIL_FROM = "Elite Stone Fabrication <quotes@eliteosfab.com>";
+  const env = getQuoteDeliveryEnv();
+  assert.equal(env.provider, "resend");
+  assert.equal(env.fromAddress, "Elite Stone Fabrication <quotes@eliteosfab.com>");
+  process.env.QUOTE_EMAIL_SEND_ENABLED = prev.send;
+  process.env.QUOTE_EMAIL_PROVIDER = prev.provider;
+  process.env.QUOTE_EMAIL_FROM = prev.from;
+}
+
+async function testResendMissingApiKeyFailsSafely() {
+  const prevKey = process.env.RESEND_API_KEY;
+  delete process.env.RESEND_API_KEY;
+  const result = await sendEstimateEmail({
+    to: ["test@example.com"],
+    subject: "Test estimate",
+    html: "<p>Hi</p>",
+    text: "Hi",
+    from: "quotes@eliteosfab.com",
+    provider: "resend"
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.skipped, false);
+  assert.match(result.error || "", /RESEND_API_KEY/i);
+  assert.equal(wasProviderCalled(result), false);
+  if (prevKey != null) process.env.RESEND_API_KEY = prevKey;
+}
+
+async function testResendSendUsesApiWithMockFetch() {
+  const prevKey = process.env.RESEND_API_KEY;
+  process.env.RESEND_API_KEY = "re_test_mock_key_for_unit_tests";
+  const prevFetch = globalThis.fetch;
+  let capturedUrl = "";
+  let capturedBody = null;
+  let authHeader = "";
+  globalThis.fetch = async (url, opts) => {
+    capturedUrl = String(url);
+    authHeader = String(opts?.headers?.Authorization || "");
+    capturedBody = JSON.parse(String(opts?.body || "{}"));
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ id: "msg_resend_test_123" })
+    };
+  };
+
+  const result = await sendEstimateEmail({
+    to: ["customer@example.com"],
+    cc: ["rep@eliteosfab.com"],
+    subject: "Elite Stone Fabrication Estimate",
+    html: "<p>Estimate</p>",
+    text: "Estimate",
+    from: "Elite Stone Fabrication <quotes@eliteosfab.com>",
+    provider: "resend"
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.provider, "resend");
+  assert.equal(result.messageId, "msg_resend_test_123");
+  assert.equal(wasProviderCalled(result), true);
+  assert.equal(capturedUrl, "https://api.resend.com/emails");
+  assert.ok(authHeader.startsWith("Bearer "));
+  assert.deepEqual(capturedBody.to, ["customer@example.com"]);
+  assert.deepEqual(capturedBody.cc, ["rep@eliteosfab.com"]);
+  assert.equal(capturedBody.from, "Elite Stone Fabrication <quotes@eliteosfab.com>");
+
+  globalThis.fetch = prevFetch;
+  if (prevKey != null) process.env.RESEND_API_KEY = prevKey;
+  else delete process.env.RESEND_API_KEY;
+}
+
+async function testSendWithResendEnabledLogsIntendedRecipientsWhenForced() {
+  const prev = {
+    send: process.env.QUOTE_EMAIL_SEND_ENABLED,
+    provider: process.env.QUOTE_EMAIL_PROVIDER,
+    force: process.env.QUOTE_EMAIL_FORCE_RECIPIENT,
+    key: process.env.RESEND_API_KEY
+  };
+  process.env.QUOTE_EMAIL_SEND_ENABLED = "1";
+  process.env.QUOTE_EMAIL_PROVIDER = "resend";
+  process.env.QUOTE_EMAIL_FORCE_RECIPIENT = "ops@eliteosfab.com";
+  process.env.RESEND_API_KEY = "re_test_mock_key";
+
+  const prevFetch = globalThis.fetch;
+  let sentTo = [];
+  globalThis.fetch = async (_url, opts) => {
+    const body = JSON.parse(String(opts?.body || "{}"));
+    sentTo = body.to || [];
+    return { ok: true, status: 200, json: async () => ({ id: "msg_forced" }) };
+  };
+
+  const capturedLogs = [];
+  const db = makeMockSupabase({ quoteRow: internalQuoteRow(), capturedLogs });
+  const result = await runQuoteDelivery(
+    db,
+    mockReq(),
+    QUOTE_ID,
+    {
+      recipients: [
+        { email: "customer@example.com", type: "to" },
+        { email: "cc@example.com", type: "cc" }
+      ]
+    },
+    { mode: "send" }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.status, "sent");
+  assert.deepEqual(sentTo, ["ops@eliteosfab.com"]);
+  assert.equal(capturedLogs.length, 1);
+  assert.deepEqual(capturedLogs[0].recipients, [{ email: "ops@eliteosfab.com", type: "to" }]);
+  assert.deepEqual(capturedLogs[0].metadata.intended_recipients, [
+    { email: "customer@example.com", type: "to" },
+    { email: "cc@example.com", type: "cc" }
+  ]);
+
+  globalThis.fetch = prevFetch;
+  process.env.QUOTE_EMAIL_SEND_ENABLED = prev.send;
+  process.env.QUOTE_EMAIL_PROVIDER = prev.provider;
+  process.env.QUOTE_EMAIL_FORCE_RECIPIENT = prev.force;
+  if (prev.key != null) process.env.RESEND_API_KEY = prev.key;
+  else delete process.env.RESEND_API_KEY;
+}
+
 async function testMissingQuoteNumberBlocksDelivery() {
   const db = makeMockSupabase({ quoteRow: internalQuoteRow({ quote_number: null }) });
   const result = await runQuoteDelivery(
@@ -509,6 +657,8 @@ async function runAll() {
   testDeliveryLogRowShape();
   testEnvDefaults();
   testAllowedDomainsPolicy();
+  testForceRecipientOverridesDeliveryTarget();
+  testResendProviderEnvSelection();
   await testPreviewDryRun();
   await testSendBlockedWhenDisabled();
   await testQuoteNotFound();
@@ -518,6 +668,9 @@ async function runAll() {
   testEmailHtmlRequiresQuoteNumber();
   await testPreviewHtmlIncludesQuoteNumberNotDash();
   await testNoProviderCallInDryRun();
+  await testResendMissingApiKeyFailsSafely();
+  await testResendSendUsesApiWithMockFetch();
+  await testSendWithResendEnabledLogsIntendedRecipientsWhenForced();
   await testLogsGracefulWhenTableMissing();
   console.log("quoteDelivery tests: all passed");
 }

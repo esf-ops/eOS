@@ -1352,3 +1352,13 @@
 | **Optional comparison (customer PDF)** | Per room/material option, customer-safe rows when applicable: countertop material, 4-inch backsplash material, full-height backsplash material, add-ons/fixtures, room total. No $/sf rates, markup, premium, OOC, material-use-tax formulas, or internal diagnostics. Selected quote total, live summary, PDF summary, room breakdown, and optional comparison totals must reconcile. |
 | **Impacted files** | `app-internal-estimate/*`, `app-quote/src/lib/prototypeQuoteMath.ts`, `app-quote/src/ui/RoomScopeBuilder.tsx`, `backend-core/src/quotes/quoteCalculator.js`, `backend-core/src/quotes/internalQuotesApi.js`, regression scripts under `scripts/` and `backend-core/src/scripts/`. |
 | **Revisit trigger** | Dedicated OOC head; further Internal Estimate UX pass; customer PDF template redesign. |
+
+### 91. Quote Delivery — Resend email provider (backend-only, env-gated)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-06-23 |
+| **Decision** | Wire **Resend** as the backend quote delivery email provider when `QUOTE_EMAIL_PROVIDER=resend`. API key lives in **`RESEND_API_KEY`** (server env only). Sender uses **`QUOTE_EMAIL_FROM`** (verified `eliteosfab.com` domain). Real outbound email remains gated by **`QUOTE_EMAIL_SEND_ENABLED=1`**; preview never sends. **`QUOTE_EMAIL_FORCE_RECIPIENT`** redirects all real sends to a single test inbox while preserving intended recipients in `quote_delivery_logs.metadata`. |
+| **Deferred** | Microsoft Graph / Outlook send; PDF attachments in email; account picker / recipient autofill UI. |
+| **Impacted files** | `backend-core/src/email/emailClient.js`, `backend-core/.env.example`, `backend-core/src/quoteDelivery/quoteDelivery.test.mjs`, this entry. |
+| **Revisit trigger** | Production send rollout; PDF attachment pipeline; Outlook integration. |
