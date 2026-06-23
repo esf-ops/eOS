@@ -169,6 +169,8 @@ export type RoomDraft = {
     vanityEligibilityNote?: string;
     vanityProgramYear?: number;
     outsideProgram?: boolean;
+    /** Optional vertical side splash pieces (4″ × vanity depth) — None / Qty 1 / Qty 2. */
+    sideSplashQty?: 0 | 1 | 2;
   };
 };
 

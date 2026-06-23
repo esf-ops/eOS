@@ -11,6 +11,7 @@
  */
 
 import { priceVanityProgram2026FromPayload, VANITY_PROGRAM_YEAR } from "./vanityProgram2026.js";
+import { priceVanitySideSplashFromPayload } from "./vanitySideSplash.js";
 import {
   computeInternalEstimateMaterialUseTaxAmounts,
   resolveInternalEstimateMaterialTaxPolicy
@@ -644,10 +645,17 @@ export function calculateVanities(input, rules) {
   const lines = [];
   let total = 0;
   const qualifyingSf = Number(input.qualifyingKitchenCounterSf ?? input.qualifying_kitchen_counter_sf ?? 0) || 0;
+  const internalQuote = String(input.quoteSource) === "internal_quote";
   for (const v of vanities) {
     const code = String(v.code || v.sizeCode || "").trim();
     const qty = Number(v.qty) || 0;
     if (!code || qty <= 0) continue;
+    const materialGroup = String(v.materialGroup || v.material_group || "Group Promo").trim();
+    const rate = materialRateForQuote(
+      input,
+      materialGroup,
+      rules
+    );
     const programYear = Number(v.programYear ?? v.vanityProgramYear) || 0;
     if (programYear === VANITY_PROGRAM_YEAR || v.vanityProgramYear === VANITY_PROGRAM_YEAR) {
       const priced = priceVanityProgram2026FromPayload(v, qualifyingSf);
@@ -662,6 +670,23 @@ export function calculateVanities(input, rules) {
           line_subtotal: lineSubtotal,
           vanity_program: priced
         });
+        const sideSplash = priceVanitySideSplashFromPayload({
+          vanity: v.vanity && typeof v.vanity === "object" ? v.vanity : { sideSplashQty: v.sideSplashQty },
+          materialGroup,
+          ratePerSqft: rate,
+          chargeableCeil: internalQuote,
+          internalMaterialUseTax: internalQuote
+        });
+        if (sideSplash) {
+          total += sideSplash.materialExact;
+          lines.push({
+            item_code: "SIDE_SPLASH",
+            item_name: sideSplash.label,
+            quantity: sideSplash.qty,
+            unit_price: round2(sideSplash.materialExact / sideSplash.qty),
+            line_subtotal: sideSplash.materialExact
+          });
+        }
         continue;
       }
     }

@@ -37,6 +37,10 @@ import {
   roundCustomerDisplayVanity
 } from "../app-quote/src/lib/vanityProgram2026.ts";
 import {
+  priceVanitySideSplash,
+  resolveVanitySideSplashQty
+} from "../app-quote/src/lib/vanitySideSplash.ts";
+import {
   buildCustomerRoomAreaCostBreakdown,
   buildSelectedMaterialBreakdown,
   calculateAllRoomDrafts,
@@ -2347,6 +2351,110 @@ function buildOocPdfFixture(
   }
   const wRate = PROTOTYPE_TIER_PRICE_PER_SQFT["Group Promo"];
   approx(backend.totals.retail, round2(oocEligibleWithTax(10, 0, wRate)));
+}
+
+// SIDE-SPLASH-1: vanity program room — side splash Qty 1 priced as backsplash material + use tax
+{
+  const vanity = createVanityRoom("Group Promo");
+  vanity.vanity.size = "37_S";
+  vanity.vanity.vanitySinkType = "oval_white";
+  vanity.vanity.sideSplashQty = 1;
+  const measured = measureRoomDraft(vanity, 40, "direct", 0, INTERNAL_ESTIMATE_MEASURE_OPTIONS);
+  const sideAddon = measured.addons.find((a) => String(a.label).includes("Side splash"));
+  assert.ok(sideAddon, "SIDE-SPLASH-1: side splash addon on measured room");
+  const sfPer = chargeableSplashSqftFromExact((22.5 * 4) / 144);
+  const expected = priceVanitySideSplash(vanity, "direct", (g, b) =>
+    b === "direct" ? ESF_DIRECT_PRICE_PER_SQFT[g] ?? 70 : PROTOTYPE_TIER_PRICE_PER_SQFT[g] ?? 45,
+    {
+      chargeableCounterCeil: true,
+      internalMaterialUseTax: true
+    }
+  );
+  assert.ok(expected, "SIDE-SPLASH-1: priceVanitySideSplash returned pricing");
+  approx(sideAddon!.total, expected!.materialExact, 0.01);
+  assert.equal(measured.selected, round2((measured.vanityProgram?.exactTotal ?? 0) + expected!.materialExact), "SIDE-SPLASH-1: selected includes program + side splash");
+}
+
+// SIDE-SPLASH-2: side splash Qty 2 prices twice (chargeable sf per piece)
+{
+  const vanity = createVanityRoom("Group Promo");
+  vanity.vanity.size = "37_S";
+  vanity.vanity.sideSplashQty = 2;
+  const one = priceVanitySideSplash(
+    { ...vanity, vanity: { ...vanity.vanity, sideSplashQty: 1 } },
+    "direct",
+    (g) => ESF_DIRECT_PRICE_PER_SQFT[g] ?? 70,
+    { chargeableCounterCeil: true, internalMaterialUseTax: true }
+  );
+  const two = priceVanitySideSplash(vanity, "direct", (g) => ESF_DIRECT_PRICE_PER_SQFT[g] ?? 70, {
+    chargeableCounterCeil: true,
+    internalMaterialUseTax: true
+  });
+  assert.ok(one && two, "SIDE-SPLASH-2: pricing helper returned");
+  approx(two!.materialExact, round2(one!.materialExact * 2), 0.02);
+  const measured = measureRoomDraft(vanity, 40, "direct", 0, INTERNAL_ESTIMATE_MEASURE_OPTIONS);
+  const sideAddon = measured.addons.find((a) => String(a.label).includes("Side splash"));
+  assert.match(String(sideAddon?.label ?? ""), /×2|Side splash/, "SIDE-SPLASH-2: customer label reflects qty 2");
+}
+
+// SIDE-SPLASH-LEGACY: legacy sideSplash boolean hydrates to qty 1 without double counting
+{
+  const legacy = createVanityRoom("Group Promo");
+  legacy.vanity.size = "37_S";
+  (legacy.vanity as Record<string, unknown>).sideSplash = true;
+  const [normalized] = normalizeInternalEstimateRoomDrafts([legacy]);
+  assert.equal(normalized.vanity.sideSplashQty, 1, "SIDE-SPLASH-LEGACY: normalized to sideSplashQty 1");
+  const m1 = measureRoomDraft(normalized, 40, "direct", 0, INTERNAL_ESTIMATE_MEASURE_OPTIONS);
+  normalized.vanity.sideSplashQty = 1;
+  const m2 = measureRoomDraft(normalized, 40, "direct", 0, INTERNAL_ESTIMATE_MEASURE_OPTIONS);
+  approx(m1.extras, m2.extras, 0.01, "SIDE-SPLASH-LEGACY: legacy boolean does not double-count vs explicit qty 1");
+}
+
+// VANITY-MODE-1: standard countertop vanity uses normal material group pricing
+{
+  const standard = createVanityRoom("Group A");
+  standard.vanity.isVanityProgram = false;
+  standard.calcMode = "Manual Sq Ft";
+  standard.direct = { counter: 8, splash: 2 };
+  const measured = measureRoomDraft(standard, 0, "direct", 0, INTERNAL_ESTIMATE_MEASURE_OPTIONS);
+  assert.notEqual(measured.isVanityProgram, true, "VANITY-MODE-1: not flagged as vanity program");
+  const bd = buildSelectedMaterialBreakdown([standard], "direct", {
+    internalMaterialUseTax: true,
+    chargeableCounterCeil: true
+  });
+  assert.ok(bd.totals.countertopMaterial > 0, "VANITY-MODE-1: countertop material in breakdown");
+  assert.ok(bd.totals.backsplashMaterial > 0, "VANITY-MODE-1: backsplash material in breakdown");
+}
+
+// VANITY-MODE-2: vanity program room excluded from Group A–F sf breakdown
+{
+  const program = createVanityRoom("Group Promo");
+  program.vanity.size = "37_S";
+  const bd = buildSelectedMaterialBreakdown([program], "direct", {
+    internalMaterialUseTax: true,
+    chargeableCounterCeil: true
+  });
+  assert.equal(bd.totals.countertopMaterial, 0, "VANITY-MODE-2: program vanity not in countertop material rollup");
+  assert.equal(bd.totals.backsplashMaterial, 0, "VANITY-MODE-2: program vanity not in backsplash material rollup");
+}
+
+// PDF-VANITY-SPLASH-1: customer breakdown pins program display; side splash is addon line only
+{
+  const vanity = createVanityRoom("Group Promo");
+  vanity.vanity.size = "37_S";
+  vanity.vanity.vanitySinkType = "rectangular_white";
+  vanity.vanity.sideSplashQty = 1;
+  const measured = measureRoomDraft(vanity, 40, "direct", 0, INTERNAL_ESTIMATE_MEASURE_OPTIONS);
+  const bd = buildCustomerRoomAreaCostBreakdown({
+    roomDrafts: [vanity],
+    measuredRooms: [measured],
+    materialBasis: "direct",
+    measureOptions: INTERNAL_ESTIMATE_MEASURE_OPTIONS
+  });
+  const row = bd.rooms[0];
+  assert.equal(row.fixedDisplayTotal, measured.vanityProgram?.displayTotal, "PDF-VANITY-SPLASH-1: fixed display is program only");
+  assert.ok(row.addons.some((a) => a.label.includes("Side splash")), "PDF-VANITY-SPLASH-1: side splash addon line");
+  assert.equal(row.materialAmountExact, row.fixedDisplayTotal, "PDF-VANITY-SPLASH-1: material line is program display not sf math");
 }
 
 console.log("verify-internal-estimate-beta-fixes: OK");

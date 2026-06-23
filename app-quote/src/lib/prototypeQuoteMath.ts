@@ -27,6 +27,7 @@ import {
   VANITY_PROGRAM_YEAR,
   type VanityProgram2026Result
 } from "./vanityProgram2026";
+import { priceVanitySideSplash, resolveVanitySideSplashQty } from "./vanitySideSplash";
 import {
   chargeableCounterSqftFromExact,
   chargeableSplashSqftFromExact,
@@ -249,6 +250,35 @@ function sumRoomAddons(room: RoomDraft): { extras: number; addons: MeasuredRoom[
   return { extras, addons, lines };
 }
 
+function appendVanitySideSplashToMeasure(
+  room: RoomDraft,
+  materialBasis: "wholesale" | "direct",
+  measureOptions?: InternalMeasureOptions,
+  ctx: {
+    extras: number;
+    selected: number;
+    addons: MeasuredRoom["addons"];
+    details: string[];
+  }
+): void {
+  if (room.roomType !== "Vanity") return;
+  const priced = priceVanitySideSplash(room, materialBasis, materialRateForInternalBasis, {
+    chargeableCounterCeil: measureOptions?.chargeableCounterCeil,
+    internalMaterialUseTax: measureOptions?.internalMaterialUseTax
+  });
+  if (!priced) return;
+  const addon = {
+    label: priced.label,
+    qty: priced.qty,
+    price: round2(priced.materialExact / priced.qty),
+    total: priced.materialExact
+  };
+  ctx.extras = round2(ctx.extras + priced.materialExact);
+  ctx.selected = round2(ctx.selected + priced.materialExact);
+  ctx.addons.push(addon);
+  ctx.details.push(`${priced.label}: $${priced.materialExact.toFixed(2)}`);
+}
+
 /** Resolve use tax % for a room (countertop material only). */
 export function resolveRoomUseTaxPercent(room: RoomDraft, projectDefaultPercent: number): number {
   const mode = room.useTaxMode ?? "inherit_project";
@@ -313,6 +343,12 @@ export function serializeVanitiesForApi(rooms: RoomDraft[], qualifyingKitchenCou
       extraTrips: Math.max(0, Math.floor(Number(r.vanity.vanityExtraTrips) || 0)),
       outsideProgram: Boolean(r.vanity.outsideProgram),
       roomName: r.name,
+      materialGroup: r.materialGroup || "Group Promo",
+      sideSplashQty: resolveVanitySideSplashQty(r.vanity),
+      vanity: {
+        depth: r.vanity.depth,
+        sideSplashQty: resolveVanitySideSplashQty(r.vanity)
+      },
       exactTotal: priced?.exactTotal ?? 0,
       displayTotal: priced?.displayTotal ?? 0
     });
@@ -416,6 +452,11 @@ export function measureRoomDraft(
         details.push(`${data.name}: ESF Non-Stock Remnant ${sf.toFixed(2)} sf × $55 + $100 cutout + bowl × ${q}`);
       }
     }
+    const programAddons: MeasuredRoom["addons"] = [];
+    const splashCtx = { extras, selected, addons: programAddons, details };
+    appendVanitySideSplashToMeasure(room, materialBasis, measureOptions, splashCtx);
+    extras = splashCtx.extras;
+    selected = splashCtx.selected;
     priceableCounter = 0;
     priceableSplash = 0;
     const totalSfV = round2(counter + splash + fhb);
@@ -434,7 +475,7 @@ export function measureRoomDraft(
       vanityTotal: round2(vanityTotal),
       details,
       notes,
-      addons: [],
+      addons: programAddons,
       priceableCounter: 0,
       priceableSplash: 0,
       fixedTotal: round2(fixedTotal),
@@ -574,6 +615,11 @@ export function measureRoomDraft(
   }
   priceableCounter = chargeableCounter;
   priceableSplash = chargeableSplash;
+  const roomAddons = [...add.addons];
+  const splashCtx = { extras, selected, addons: roomAddons, details };
+  appendVanitySideSplashToMeasure(room, materialBasis, measureOptions, splashCtx);
+  extras = splashCtx.extras;
+  selected = splashCtx.selected;
   fixedTotal = extras;
 
   const totalSf = round2(counter + splash + fhb);
@@ -596,7 +642,7 @@ export function measureRoomDraft(
     vanityTotal: round2(vanityTotal),
     details,
     notes,
-    addons: add.addons,
+    addons: roomAddons,
     priceableCounter: round2(priceableCounter),
     priceableSplash: round2(priceableSplash),
     fixedTotal: round2(fixedTotal),
@@ -2495,6 +2541,9 @@ function applyRoomPersistenceFields(base: RoomDraft, r: Record<string, unknown>)
     if (vv.vanityExtraTrips != null) base.vanity.vanityExtraTrips = Math.max(0, Math.floor(Number(vv.vanityExtraTrips)) || 0);
     if (vv.outsideProgram != null) base.vanity.outsideProgram = Boolean(vv.outsideProgram);
     if (vv.vanityEligibilityNote != null) base.vanity.vanityEligibilityNote = String(vv.vanityEligibilityNote);
+    if (vv.sideSplashQty != null || vv.sideSplash != null || vv.hasSideSplash != null) {
+      base.vanity.sideSplashQty = resolveVanitySideSplashQty(vv as RoomDraft["vanity"]);
+    }
   }
   if (r.linear && typeof r.linear === "object") {
     const ln = r.linear as Record<string, unknown>;
@@ -2538,7 +2587,11 @@ export function normalizeInternalEstimateRoomDrafts(rooms: RoomDraft[]): RoomDra
     return {
       ...room,
       addons,
-      materialProgramOverride: "inherit"
+      materialProgramOverride: "inherit",
+      vanity: {
+        ...room.vanity,
+        sideSplashQty: resolveVanitySideSplashQty(room.vanity)
+      }
     };
   });
 }

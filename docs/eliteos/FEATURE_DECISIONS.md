@@ -132,7 +132,7 @@
 | **Decision** | Internal Estimate uses a **fixed 2% material use tax** on **countertop and backsplash/FHB material** via `resolveInternalEstimateMaterialTaxPolicy()` / `internalEstimateMaterialTaxPolicy`. **Excluded:** add-ons, cutouts, custom lines, labor, fees, credits, **2026 Vanity Program fixed prices**. Estimator **0 / 2 / 5 / custom % selector removed**; snapshot stores `material_use_tax` split amounts. Shared `prototypeQuoteMath` paths gate on `internalMaterialUseTax` / `InternalMeasureOptions` so **Public/Partner Quote are unchanged**. |
 | **Why** | Product direction (Eric/Hunter): normalize tax before Out-of-Collection pricing; backsplash material must receive the same 2% as countertop. |
 | **Impacted files/docs** | `app-quote/src/lib/internalEstimateMaterialTaxPolicy.ts`, `app-quote/src/lib/prototypeQuoteMath.ts`, `app-internal-estimate/`, `backend-core/src/quotes/quoteCalculator.js`, `backend-core/src/scripts/verifyInternalEstimateMath.mjs`, `scripts/verify-internal-estimate-beta-fixes.ts`. |
-| **Follow-up backlog** | (1) Vanity quote Group A–F display cleanup. (2) Side splash UI under backsplash (Qty 1 / Qty 2). (3) Customer PDF redesign (cleaner multi-top summary). (4) ~~Out-of-Collection material program premium~~ **shipped 2026-06** — see supplement below. (5) Pricing Admin ownership of material use tax policy and OOC premium rates. |
+| **Follow-up backlog** | (1) ~~Vanity quote Group A–F display cleanup~~ **shipped 2026-06** — see supplement below. (2) ~~Side splash UI under backsplash (Qty 1 / Qty 2)~~ **shipped 2026-06** — see supplement below. (3) Customer PDF redesign (cleaner multi-top summary). (4) ~~Out-of-Collection material program premium~~ **shipped 2026-06** — see supplement below. (5) Pricing Admin ownership of material use tax policy and OOC premium rates. |
 | **Revisit trigger** | Branch-specific tax rates; customer-facing tax line item; side splash as first-class scope. |
 
 ---
@@ -146,6 +146,18 @@
 | **Why** | Eric-approved simple OOC model: comparable Elite 100 group + fixed premium by pricing mode; estimators assign outside color to a comparable group. |
 | **Impacted files/docs** | `app-quote/src/lib/internalEstimateMaterialProgram.ts`, `internalEstimateOutOfCollectionPolicy.ts`, `prototypeQuoteMath.ts`, `app-internal-estimate/`, `backend-core/src/quotes/quoteCalculator.js`, `scripts/verify-internal-estimate-beta-fixes.ts`, `backend-core/src/scripts/verifyInternalEstimateMath.mjs`. |
 | **Revisit trigger** | Pricing Admin ownership of OOC premium rates; customer-facing OOC line item on PDF. |
+
+---
+
+### Supplement — Internal Estimate vanity program mode + side splash quantity (2026-06)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-06-23 |
+| **Decision** | Vanity rooms explicitly choose **2026 Vanity Program** (fixed sheet pricing) vs **Standard countertop pricing** (normal material group / square-foot logic). In program mode, price group and color are **display/selection** fields — Group A–F $/sf does not drive the program total. **Side splash** uses quantity **None / Qty 1 / Qty 2** on `vanity.sideSplashQty`, priced as **4″ × vanity depth** backsplash material at the room group rate (chargeable sf + 2% material use tax on internal quotes). Legacy `sideSplash` / `hasSideSplash` / count fields normalize to `sideSplashQty` on hydrate without double counting. Customer PDF shows program fixed display total on the material line; side splash appears only as a named addon when selected. No customer-facing $/sf, markup, or tax formula language. |
+| **Why** | Estimators confused Group A–F controls with vanity program fixed pricing; side splash entry was ambiguous. |
+| **Impacted files/docs** | `app-quote/src/lib/vanitySideSplash.ts`, `app-quote/src/lib/prototypeQuoteMath.ts`, `app-quote/src/ui/RoomScopeBuilder.tsx`, `app-internal-estimate/` (display model unchanged path), `backend-core/src/quotes/vanitySideSplash.js`, `backend-core/src/quotes/quoteCalculator.js`, `scripts/verify-internal-estimate-beta-fixes.ts`. |
+| **Revisit trigger** | Pricing Admin ownership of side splash dimensions/rates; itemized side splash on customer PDF scope table. |
 
 ---
 

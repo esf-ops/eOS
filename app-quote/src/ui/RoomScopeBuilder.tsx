@@ -42,6 +42,7 @@ import {
   VANITY_PRICING
 } from "../lib/prototypeQuoteMath";
 import { VANITY_PROGRAM_2026_RATES, VANITY_PROGRAM_YEAR } from "../lib/vanityProgram2026";
+import { resolveVanitySideSplashQty } from "../lib/vanitySideSplash";
 import { buildGuidedShapeMathAudit, detectLikelyBacksplashDoubleCount } from "../lib/guidedShapeMathAudit";
 import {
   depthPatchForGuidedPieceTypeChange,
@@ -429,7 +430,14 @@ export default function RoomScopeBuilder({
                 </select>
               </label>
                 <label>
-                  Price group (required for this room)
+                  {room.roomType === "Vanity" && room.vanity.isVanityProgram !== false
+                    ? "Color / display group"
+                    : "Price group (required for this room)"}
+                  {room.roomType === "Vanity" && room.vanity.isVanityProgram !== false ? (
+                    <span className="ie-field-hint">
+                      For customer display and color selection — Vanity Program uses fixed sheet pricing, not Group $/sf.
+                    </span>
+                  ) : null}
                   <select
                   value={room.materialGroup}
                   onChange={(e) => onRoomsChange(updateRoom(rooms, room.id, { materialGroup: e.target.value }))}
@@ -561,8 +569,17 @@ export default function RoomScopeBuilder({
                   </select>
                 </label>
                 <p className="muted small" style={{ gridColumn: "1 / -1", marginTop: 0 }}>
-                  <strong>Room material</strong> applies to countertop and backsplash pieces in this room. Backsplash inherits the
-                  room color unless you set a piece override (advanced).
+                  {room.roomType === "Vanity" && room.vanity.isVanityProgram !== false ? (
+                    <>
+                      <strong>Vanity Program color</strong> — selection and display only. Program pricing uses the 2026
+                      vanity sheet, not Group A–F square-foot rates.
+                    </>
+                  ) : (
+                    <>
+                      <strong>Room material</strong> applies to countertop and backsplash pieces in this room. Backsplash inherits the
+                      room color unless you set a piece override (advanced).
+                    </>
+                  )}
                 </p>
               </div>
             ) : null}
@@ -640,20 +657,62 @@ export default function RoomScopeBuilder({
             {room.roomType === "Vanity" ? (
               <div className="room-vanity-mode-bar" style={{ marginTop: 12, marginBottom: 4 }}>
                 <label style={{ fontWeight: 600 }}>
-                  Vanity pricing
+                  Vanity pricing mode
                   <select
                     value={room.vanity.isVanityProgram !== false ? "program" : "standard"}
+                    onChange={(e) => {
+                      const isProgram = e.target.value === "program";
+                      const vanityPatch = {
+                        ...room.vanity,
+                        isVanityProgram: isProgram,
+                        ...(isProgram
+                          ? {
+                              vanityProgramYear: VANITY_PROGRAM_YEAR,
+                              source:
+                                room.vanity.source === "ESF Non-Stock Remnant"
+                                  ? room.vanity.source
+                                  : "Promo / Stock 100 Remnant"
+                            }
+                          : {})
+                      };
+                      const roomPatch: Partial<RoomDraft> = { vanity: vanityPatch };
+                      if (isProgram) {
+                        roomPatch.calcMode = "Manual Sq Ft";
+                        roomPatch.direct = { counter: 0, splash: 0 };
+                        roomPatch.guidedPieces = [];
+                        roomPatch.fhbMode = "Off";
+                        roomPatch.fhbDirectSf = 0;
+                        roomPatch.fhbPieces = [];
+                      }
+                      onRoomsChange(updateRoom(rooms, room.id, roomPatch));
+                    }}
+                  >
+                    <option value="standard">Standard countertop pricing</option>
+                    <option value="program">2026 Vanity Program</option>
+                  </select>
+                </label>
+              </div>
+            ) : null}
+
+            {room.roomType === "Vanity" ? (
+              <div className="grid3" style={{ marginTop: 8 }}>
+                <label>
+                  Side splash
+                  <span className="ie-field-hint">Vertical 4″ pieces at vanity sides — priced as backsplash material.</span>
+                  <select
+                    value={resolveVanitySideSplashQty(room.vanity)}
                     onChange={(e) =>
                       onRoomsChange(
                         updateRoomNested(rooms, room.id, "vanity", {
                           ...room.vanity,
-                          isVanityProgram: e.target.value === "program"
+                          sideSplashQty: Number(e.target.value) as 0 | 1 | 2
                         })
                       )
                     }
                   >
-                    <option value="standard">Standard countertop (material + dimensions)</option>
-                    <option value="program">2026 Vanity Program (opt-in)</option>
+                    <option value={0}>None</option>
+                    <option value={1}>Qty 1</option>
+                    <option value={2}>Qty 2</option>
                   </select>
                 </label>
               </div>
@@ -662,7 +721,8 @@ export default function RoomScopeBuilder({
             {room.roomType === "Vanity" && room.vanity.isVanityProgram !== false ? (
               <div className="room-vanity-block">
                 <p className="muted small">
-                  2026 Vanity Program — 22.5″ standard depth. Promo / Elite 100 remnants. Customer display rounds to nearest $5.
+                  2026 Vanity Program — fixed sheet pricing (22.5″ standard depth). Promo / Elite 100 remnants. Customer display
+                  rounds to nearest $5. Rear backsplash is included; side splash is optional above.
                 </p>
                 <div className="grid3">
                   <label>
