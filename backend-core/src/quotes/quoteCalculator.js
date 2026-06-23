@@ -18,9 +18,7 @@ import {
 import {
   computeOutOfCollectionPremiumAmounts,
   normalizeMaterialProgramDefault,
-  resolveOutOfCollectionPremiumPercent,
-  resolveRoomMaterialProgram,
-  validateOutOfCollectionRooms
+  resolveOutOfCollectionPremiumPercent
 } from "./internalEstimateMaterialProgram.js";
 import { resolveOutOfCollectionPricingPolicy } from "./internalEstimateOutOfCollectionPolicy.js";
 import {
@@ -225,9 +223,10 @@ export function normalizePrototypeQuoteInput(input) {
     retailFlatAdd: Number(src.retailFlatAdd ?? src.markup?.flatAdd ?? 0) || 0,
     metadata: typeof src.metadata === "object" && src.metadata ? { ...src.metadata } : {},
     useTaxPercent: Math.max(0, Number(src.useTaxPercent ?? src.use_tax_percent ?? 0) || 0),
-    materialProgramDefault: normalizeMaterialProgramDefault(
-      src.materialProgramDefault ?? src.material_program_default
-    ),
+    materialProgramDefault:
+      String(src.quoteSource || src.quote_source || "") === "internal_quote"
+        ? "elite_100"
+        : normalizeMaterialProgramDefault(src.materialProgramDefault ?? src.material_program_default),
     estimateRoomDrafts: Array.isArray(src.estimateRoomDrafts)
       ? src.estimateRoomDrafts
       : Array.isArray(src.estimate_room_drafts)
@@ -636,50 +635,8 @@ function computeInternalOutOfCollectionPremium(input, rules, rows, materialUseTa
   if (String(input.quoteSource) !== "internal_quote") {
     return { premiumAmount: 0, rooms: [], eligibleTotal: 0, premiumPercent: 0 };
   }
-  const materialProgramDefault = normalizeMaterialProgramDefault(input.materialProgramDefault);
-  const drafts = input.estimateRoomDrafts?.length ? input.estimateRoomDrafts : input.rooms;
-  const oocPct = resolveOutOfCollectionPremiumPercent(input.internalMaterialBasis);
-  /** @type {Map<string, { ct: number, bs: number, roomInput: Record<string, unknown>|undefined }>} */
-  const roomMaterial = new Map();
-  for (const row of rows) {
-    const roomInput =
-      (drafts || []).find((r) => String(r.name || r.room_name || "").trim() === row.roomName) ||
-      (input.rooms || []).find((r) => String(r.name || r.room_name || "").trim() === row.roomName);
-    if (isInternalVanityProgramRoom(roomInput)) continue;
-    const rate = materialRateForQuote(input, row.group, rules);
-    const sub = round2(row.sf * rate);
-    if (!roomMaterial.has(row.roomName)) {
-      roomMaterial.set(row.roomName, { ct: 0, bs: 0, roomInput });
-    }
-    const entry = roomMaterial.get(row.roomName);
-    if (row.isSplash) entry.bs = round2(entry.bs + sub);
-    else entry.ct = round2(entry.ct + sub);
-  }
-  let premiumAmount = 0;
-  let eligibleTotal = 0;
-  /** @type {Array<Record<string, unknown>>} */
-  const rooms = [];
-  for (const [roomName, { ct, bs, roomInput }] of roomMaterial) {
-    if (!roomInput) continue;
-    if (resolveRoomMaterialProgram(roomInput, materialProgramDefault) !== "out_of_collection") continue;
-    const amounts = computeInternalEstimateMaterialUseTaxAmounts(ct, bs, materialUseTaxPolicy);
-    const withTax = round2(ct + bs + amounts.totalMaterialUseTaxAmount);
-    const prem = computeOutOfCollectionPremiumAmounts(withTax, oocPct);
-    if (prem.premiumAmount <= 0) continue;
-    premiumAmount = round2(premiumAmount + prem.premiumAmount);
-    eligibleTotal = round2(eligibleTotal + withTax);
-    rooms.push({
-      roomId: String(roomInput.id ?? roomInput.room_id ?? ""),
-      roomName,
-      resolvedMaterialProgram: "out_of_collection",
-      eligibleMaterialAmount: withTax,
-      premiumAmount: prem.premiumAmount,
-      assignedPriceGroup: String(roomInput.materialGroup ?? roomInput.group ?? "").trim(),
-      colorName: roomInput.materialColor ? String(roomInput.materialColor).trim() : undefined,
-      supplierName: roomInput.materialSupplier ? String(roomInput.materialSupplier).trim() : undefined
-    });
-  }
-  return { premiumAmount, rooms, eligibleTotal, premiumPercent: oocPct };
+  // Internal Estimate uses Elite 100 only — stale room/quote OOC fields do not charge premium.
+  return { premiumAmount: 0, rooms: [], eligibleTotal: 0, premiumPercent: 0 };
 }
 
 export function calculateVanities(input, rules) {
@@ -1131,14 +1088,6 @@ function prototypeMirrorRules() {
 export async function calculateQuote(rawInput, pricingContext = {}) {
   const input = normalizePrototypeQuoteInput(rawInput);
   const warnings = [];
-  if (String(input.quoteSource) === "internal_quote") {
-    const roomsForOoc = input.estimateRoomDrafts?.length ? input.estimateRoomDrafts : input.rooms;
-    const oocValidation = validateOutOfCollectionRooms(roomsForOoc, input.materialProgramDefault);
-    if (!oocValidation.valid) {
-      const names = oocValidation.roomNames.join(", ");
-      throw new Error(names ? `${oocValidation.message} (${names})` : String(oocValidation.message));
-    }
-  }
   let resolved = pricingContext;
   if (!resolved?.rules) {
     resolved = await resolvePricingStructure({
