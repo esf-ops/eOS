@@ -2457,4 +2457,14 @@ function buildOocPdfFixture(
   assert.equal(row.materialAmountExact, row.fixedDisplayTotal, "PDF-VANITY-SPLASH-1: material line is program display not sf math");
 }
 
+// UI-SPLASH-VIS-1: side splash sits in early vanity controls bar (before edge profile / color catalog scroll)
+{
+  const src = readFileSync(join(repoRoot, "app-quote/src/ui/RoomScopeBuilder.tsx"), "utf8");
+  assert.match(src, /room-vanity-controls-bar/, "UI-SPLASH-VIS-1: vanity controls bar class");
+  assert.ok(src.includes("Qty 1"), "UI-SPLASH-VIS-1: Qty 1 option label");
+  const controlsIdx = src.indexOf("room-vanity-controls-bar");
+  const edgeIdx = src.indexOf("Edge profile");
+  assert.ok(controlsIdx > 0 && edgeIdx > controlsIdx, "UI-SPLASH-VIS-1: controls bar before edge profile section");
+}
+
 console.log("verify-internal-estimate-beta-fixes: OK");

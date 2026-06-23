@@ -95,9 +95,17 @@ function overlapModeOptionLabel(mode: GuidedOverlapMode): string {
   }
 }
 
+function isVanityRoomType(roomType: string): boolean {
+  return String(roomType || "").trim().toLowerCase() === "vanity";
+}
+
+function isVanityProgramMode(room: RoomDraft): boolean {
+  return isVanityRoomType(room.roomType) && room.vanity.isVanityProgram !== false;
+}
+
 function roomTotalsPreview(room: RoomDraft): { counter: number; splashFhb: number; total: number } {
   // Vanity Program rooms have fixed pricing; standard-mode vanity rooms price as countertop.
-  if (room.roomType === "Vanity" && room.vanity.isVanityProgram !== false) return { counter: 0, splashFhb: 0, total: 0 };
+  if (isVanityProgramMode(room)) return { counter: 0, splashFhb: 0, total: 0 };
   let c = 0;
   let s = 0;
   let f = 0;
@@ -416,8 +424,13 @@ export default function RoomScopeBuilder({
                     const patch: Partial<RoomDraft> = { roomType: nextType };
                     // When changing TO Vanity for the first time, default to standard countertop
                     // pricing so the estimator must explicitly opt in to the Vanity Program.
-                    if (nextType === "Vanity" && room.roomType !== "Vanity") {
-                      patch.vanity = { ...room.vanity, isVanityProgram: false };
+                    if (isVanityRoomType(nextType) && !isVanityRoomType(room.roomType)) {
+                      patch.roomType = "Vanity";
+                      patch.vanity = {
+                        ...room.vanity,
+                        isVanityProgram: false,
+                        sideSplashQty: resolveVanitySideSplashQty(room.vanity)
+                      };
                     }
                     onRoomsChange(updateRoom(rooms, room.id, patch));
                   }}
@@ -430,10 +443,10 @@ export default function RoomScopeBuilder({
                 </select>
               </label>
                 <label>
-                  {room.roomType === "Vanity" && room.vanity.isVanityProgram !== false
+                  {isVanityProgramMode(room)
                     ? "Color / display group"
                     : "Price group (required for this room)"}
-                  {room.roomType === "Vanity" && room.vanity.isVanityProgram !== false ? (
+                  {isVanityProgramMode(room) ? (
                     <span className="ie-field-hint">
                       For customer display and color selection — Vanity Program uses fixed sheet pricing, not Group $/sf.
                     </span>
@@ -450,6 +463,66 @@ export default function RoomScopeBuilder({
                 </select>
               </label>
             </div>
+
+            {isVanityRoomType(room.roomType) ? (
+              <div className="room-vanity-mode-bar room-vanity-controls-bar" style={{ marginTop: 12, marginBottom: 4 }}>
+                <label className="room-vanity-mode-select" style={{ fontWeight: 600 }}>
+                  Vanity pricing mode
+                  <select
+                    value={room.vanity.isVanityProgram !== false ? "program" : "standard"}
+                    onChange={(e) => {
+                      const isProgram = e.target.value === "program";
+                      const vanityPatch = {
+                        ...room.vanity,
+                        isVanityProgram: isProgram,
+                        ...(isProgram
+                          ? {
+                              vanityProgramYear: VANITY_PROGRAM_YEAR,
+                              source:
+                                room.vanity.source === "ESF Non-Stock Remnant"
+                                  ? room.vanity.source
+                                  : "Promo / Stock 100 Remnant"
+                            }
+                          : {})
+                      };
+                      const roomPatch: Partial<RoomDraft> = { vanity: vanityPatch };
+                      if (isProgram) {
+                        roomPatch.calcMode = "Manual Sq Ft";
+                        roomPatch.direct = { counter: 0, splash: 0 };
+                        roomPatch.guidedPieces = [];
+                        roomPatch.fhbMode = "Off";
+                        roomPatch.fhbDirectSf = 0;
+                        roomPatch.fhbPieces = [];
+                      }
+                      onRoomsChange(updateRoom(rooms, room.id, roomPatch));
+                    }}
+                  >
+                    <option value="standard">Standard countertop pricing</option>
+                    <option value="program">2026 Vanity Program</option>
+                  </select>
+                </label>
+                <label className="room-vanity-side-splash" style={{ fontWeight: 600 }}>
+                  Side splash
+                  <select
+                    aria-label="Side splash quantity"
+                    value={resolveVanitySideSplashQty(room.vanity)}
+                    onChange={(e) =>
+                      onRoomsChange(
+                        updateRoomNested(rooms, room.id, "vanity", {
+                          ...room.vanity,
+                          sideSplashQty: Number(e.target.value) as 0 | 1 | 2
+                        })
+                      )
+                    }
+                  >
+                    <option value={0}>None</option>
+                    <option value={1}>Qty 1</option>
+                    <option value={2}>Qty 2</option>
+                  </select>
+                  <span className="ie-field-hint">Vertical 4″ side pieces — priced as backsplash material.</span>
+                </label>
+              </div>
+            ) : null}
 
             {showMaterialProgram ? (
               <div className="room-material-program-row">
@@ -569,7 +642,7 @@ export default function RoomScopeBuilder({
                   </select>
                 </label>
                 <p className="muted small" style={{ gridColumn: "1 / -1", marginTop: 0 }}>
-                  {room.roomType === "Vanity" && room.vanity.isVanityProgram !== false ? (
+                  {isVanityProgramMode(room) ? (
                     <>
                       <strong>Vanity Program color</strong> — selection and display only. Program pricing uses the 2026
                       vanity sheet, not Group A–F square-foot rates.
@@ -654,75 +727,11 @@ export default function RoomScopeBuilder({
               )}
             </div>
 
-            {room.roomType === "Vanity" ? (
-              <div className="room-vanity-mode-bar" style={{ marginTop: 12, marginBottom: 4 }}>
-                <label style={{ fontWeight: 600 }}>
-                  Vanity pricing mode
-                  <select
-                    value={room.vanity.isVanityProgram !== false ? "program" : "standard"}
-                    onChange={(e) => {
-                      const isProgram = e.target.value === "program";
-                      const vanityPatch = {
-                        ...room.vanity,
-                        isVanityProgram: isProgram,
-                        ...(isProgram
-                          ? {
-                              vanityProgramYear: VANITY_PROGRAM_YEAR,
-                              source:
-                                room.vanity.source === "ESF Non-Stock Remnant"
-                                  ? room.vanity.source
-                                  : "Promo / Stock 100 Remnant"
-                            }
-                          : {})
-                      };
-                      const roomPatch: Partial<RoomDraft> = { vanity: vanityPatch };
-                      if (isProgram) {
-                        roomPatch.calcMode = "Manual Sq Ft";
-                        roomPatch.direct = { counter: 0, splash: 0 };
-                        roomPatch.guidedPieces = [];
-                        roomPatch.fhbMode = "Off";
-                        roomPatch.fhbDirectSf = 0;
-                        roomPatch.fhbPieces = [];
-                      }
-                      onRoomsChange(updateRoom(rooms, room.id, roomPatch));
-                    }}
-                  >
-                    <option value="standard">Standard countertop pricing</option>
-                    <option value="program">2026 Vanity Program</option>
-                  </select>
-                </label>
-              </div>
-            ) : null}
-
-            {room.roomType === "Vanity" ? (
-              <div className="grid3" style={{ marginTop: 8 }}>
-                <label>
-                  Side splash
-                  <span className="ie-field-hint">Vertical 4″ pieces at vanity sides — priced as backsplash material.</span>
-                  <select
-                    value={resolveVanitySideSplashQty(room.vanity)}
-                    onChange={(e) =>
-                      onRoomsChange(
-                        updateRoomNested(rooms, room.id, "vanity", {
-                          ...room.vanity,
-                          sideSplashQty: Number(e.target.value) as 0 | 1 | 2
-                        })
-                      )
-                    }
-                  >
-                    <option value={0}>None</option>
-                    <option value={1}>Qty 1</option>
-                    <option value={2}>Qty 2</option>
-                  </select>
-                </label>
-              </div>
-            ) : null}
-
-            {room.roomType === "Vanity" && room.vanity.isVanityProgram !== false ? (
+            {isVanityProgramMode(room) ? (
               <div className="room-vanity-block">
                 <p className="muted small">
                   2026 Vanity Program — fixed sheet pricing (22.5″ standard depth). Promo / Elite 100 remnants. Customer display
-                  rounds to nearest $5. Rear backsplash is included; side splash is optional above.
+                  rounds to nearest $5. Rear backsplash is included; configure side splash above.
                 </p>
                 <div className="grid3">
                   <label>
@@ -1619,7 +1628,7 @@ export default function RoomScopeBuilder({
               </>
             )}
 
-            {showRoomUseTax && room.roomType !== "Vanity" ? (
+            {showRoomUseTax && !isVanityRoomType(room.roomType) ? (
               <div className="room-use-tax-block" style={{ marginTop: 12 }}>
                 <p className="muted small" style={{ margin: "0 0 8px" }}>
                   Use tax applies to <strong>countertop material in this room only</strong> (folded into customer material amount).
