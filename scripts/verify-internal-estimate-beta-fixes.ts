@@ -2465,6 +2465,8 @@ function buildOocPdfFixture(
   const controlsIdx = src.indexOf("room-vanity-controls-bar");
   const edgeIdx = src.indexOf("Edge profile");
   assert.ok(controlsIdx > 0 && edgeIdx > controlsIdx, "UI-SPLASH-VIS-1: controls bar before edge profile section");
+  assert.match(src, /function RoomField/, "UI-FORM-1: RoomField helper for label/control/hint order");
+  assert.match(src, /room-field-hint/, "UI-FORM-1: helper text uses room-field-hint below controls");
 }
 
 console.log("verify-internal-estimate-beta-fixes: OK");

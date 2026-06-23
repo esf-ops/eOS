@@ -7178,39 +7178,41 @@ textarea:focus {
   border-color: var(--eos-accent);
 }
 
-/* Vanity mode bar */
+/* Vanity program controls */
 
-.ie-main .room-vanity-mode-bar {
-  display: flex;
-  align-items: flex-end;
-  gap: 12px 16px;
-  padding: 10px 12px;
+.ie-main .room-vanity-controls-bar {
+  margin-top: 12px;
+  padding: 12px 14px 14px;
   border-radius: 12px;
-  background:
-    linear-gradient(180deg, rgba(244, 235, 248, 0.6) 0%, rgba(252, 250, 254, 0.6) 100%);
-  border: 1px solid rgba(74, 41, 96, 0.16);
-  flex-wrap: wrap;
+  background: linear-gradient(180deg, rgba(244, 235, 248, 0.55) 0%, rgba(252, 250, 254, 0.65) 100%);
+  border: 1px solid rgba(74, 41, 96, 0.14);
 }
 
-.ie-main .room-vanity-controls-bar label.room-vanity-side-splash,
-.ie-main .room-vanity-controls-bar label.room-vanity-mode-select {
-  flex: 1 1 200px;
-  min-width: 0;
-  margin: 0;
-}
-
-.ie-main .room-vanity-controls-bar label.room-vanity-side-splash select {
-  min-width: 140px;
-}
-
-.ie-main .room-vanity-mode-bar::before {
-  content: "Vanity mode";
-  font-size: 0.6rem;
+.ie-main .room-vanity-controls-eyebrow {
+  margin: 0 0 10px;
+  font-size: 0.62rem;
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: #4a2960;
-  margin-right: 2px;
+}
+
+.ie-main .room-vanity-controls-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+  align-items: start;
+}
+
+@media (max-width: 640px) {
+  .ie-main .room-vanity-controls-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Legacy class — keep for older markup references; controls bar no longer uses flex ::before */
+.ie-main .room-vanity-mode-bar::before {
+  content: none;
 }
 
 .ie-main .room-vanity-mode-bar .btn,
@@ -7238,6 +7240,67 @@ textarea:focus {
   border-radius: 2px;
   background: linear-gradient(90deg, rgba(74, 41, 96, 0.32), rgba(74, 41, 96, 0.06));
   opacity: 0.7;
+}
+
+/* Room card form rhythm — label → control → hint below */
+.ie-main .room-builder .room-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+}
+
+.ie-main .room-builder .room-field-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-secondary, var(--eos-ink-muted));
+  line-height: 1.3;
+}
+
+.ie-main .room-builder .room-field-hint {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 400;
+  line-height: 1.35;
+  color: var(--color-text-muted, #666);
+  margin: 0;
+}
+
+.ie-main .room-builder .room-field input,
+.ie-main .room-builder .room-field select {
+  width: 100%;
+  min-height: 42px;
+  box-sizing: border-box;
+}
+
+.ie-main .room-builder .room-identity-grid,
+.ie-main .room-builder .room-color-catalog-grid,
+.ie-main .room-builder .room-edge-grid {
+  align-items: start;
+}
+
+.ie-main .room-builder .room-field-span-all {
+  grid-column: 1 / -1;
+}
+
+.ie-main .room-builder .room-section-subtitle {
+  margin: 0 0 12px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--eos-ink-muted, #5c6578);
+}
+
+.ie-main .room-builder .room-color-catalog-section {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(11, 26, 51, 0.08);
+}
+
+.ie-main .room-builder .room-edge-section {
+  margin-top: 12px;
 }
 
 /* Measure mode toggle */

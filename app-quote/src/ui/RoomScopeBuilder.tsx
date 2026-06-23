@@ -80,6 +80,27 @@ function updateRoomNested<K extends keyof RoomDraft>(rooms: RoomDraft[], id: str
   return rooms.map((r) => (r.id === id ? { ...r, [key]: val } : r));
 }
 
+/** Label → control → optional hint (hint below control for aligned form rows). */
+function RoomField({
+  label,
+  hint,
+  className,
+  children
+}: {
+  label: string;
+  hint?: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={className ? `room-field ${className}` : "room-field"}>
+      <span className="room-field-label">{label}</span>
+      {children}
+      {hint ? <span className="room-field-hint">{hint}</span> : null}
+    </div>
+  );
+}
+
 function overlapModeOptionLabel(mode: GuidedOverlapMode): string {
   switch (mode) {
     case "none":
@@ -407,16 +428,14 @@ export default function RoomScopeBuilder({
               ) : null}
             </div>
 
-            <div className="grid3">
-              <label>
-                Name
+            <div className="grid3 room-identity-grid">
+              <RoomField label="Name">
                 <input
                   value={room.name}
                   onChange={(e) => onRoomsChange(updateRoom(rooms, room.id, { name: e.target.value }))}
                 />
-              </label>
-              <label>
-                Type
+              </RoomField>
+              <RoomField label="Type">
                 <select
                   value={room.roomType}
                   onChange={(e) => {
@@ -441,17 +460,18 @@ export default function RoomScopeBuilder({
                     </option>
                   ))}
                 </select>
-              </label>
-                <label>
-                  {isVanityProgramMode(room)
-                    ? "Color / display group"
-                    : "Price group (required for this room)"}
-                  {isVanityProgramMode(room) ? (
-                    <span className="ie-field-hint">
-                      For customer display and color selection — Vanity Program uses fixed sheet pricing, not Group $/sf.
-                    </span>
-                  ) : null}
-                  <select
+              </RoomField>
+              <RoomField
+                label={
+                  isVanityProgramMode(room) ? "Color / display group" : "Price group (required for this room)"
+                }
+                hint={
+                  isVanityProgramMode(room)
+                    ? "For customer display and color selection — Vanity Program uses fixed sheet pricing, not Group $/sf."
+                    : undefined
+                }
+              >
+                <select
                   value={room.materialGroup}
                   onChange={(e) => onRoomsChange(updateRoom(rooms, room.id, { materialGroup: e.target.value }))}
                 >
@@ -461,66 +481,70 @@ export default function RoomScopeBuilder({
                     </option>
                   ))}
                 </select>
-              </label>
+              </RoomField>
             </div>
 
             {isVanityRoomType(room.roomType) ? (
-              <div className="room-vanity-mode-bar room-vanity-controls-bar" style={{ marginTop: 12, marginBottom: 4 }}>
-                <label className="room-vanity-mode-select" style={{ fontWeight: 600 }}>
-                  Vanity pricing mode
-                  <select
-                    value={room.vanity.isVanityProgram !== false ? "program" : "standard"}
-                    onChange={(e) => {
-                      const isProgram = e.target.value === "program";
-                      const vanityPatch = {
-                        ...room.vanity,
-                        isVanityProgram: isProgram,
-                        ...(isProgram
-                          ? {
-                              vanityProgramYear: VANITY_PROGRAM_YEAR,
-                              source:
-                                room.vanity.source === "ESF Non-Stock Remnant"
-                                  ? room.vanity.source
-                                  : "Promo / Stock 100 Remnant"
-                            }
-                          : {})
-                      };
-                      const roomPatch: Partial<RoomDraft> = { vanity: vanityPatch };
-                      if (isProgram) {
-                        roomPatch.calcMode = "Manual Sq Ft";
-                        roomPatch.direct = { counter: 0, splash: 0 };
-                        roomPatch.guidedPieces = [];
-                        roomPatch.fhbMode = "Off";
-                        roomPatch.fhbDirectSf = 0;
-                        roomPatch.fhbPieces = [];
-                      }
-                      onRoomsChange(updateRoom(rooms, room.id, roomPatch));
-                    }}
-                  >
-                    <option value="standard">Standard countertop pricing</option>
-                    <option value="program">2026 Vanity Program</option>
-                  </select>
-                </label>
-                <label className="room-vanity-side-splash" style={{ fontWeight: 600 }}>
-                  Side splash
-                  <select
-                    aria-label="Side splash quantity"
-                    value={resolveVanitySideSplashQty(room.vanity)}
-                    onChange={(e) =>
-                      onRoomsChange(
-                        updateRoomNested(rooms, room.id, "vanity", {
+              <div className="room-vanity-controls-bar">
+                <p className="room-vanity-controls-eyebrow">Vanity program options</p>
+                <div className="room-vanity-controls-grid">
+                  <RoomField label="Vanity pricing mode" className="room-vanity-mode-select">
+                    <select
+                      value={room.vanity.isVanityProgram !== false ? "program" : "standard"}
+                      onChange={(e) => {
+                        const isProgram = e.target.value === "program";
+                        const vanityPatch = {
                           ...room.vanity,
-                          sideSplashQty: Number(e.target.value) as 0 | 1 | 2
-                        })
-                      )
-                    }
+                          isVanityProgram: isProgram,
+                          ...(isProgram
+                            ? {
+                                vanityProgramYear: VANITY_PROGRAM_YEAR,
+                                source:
+                                  room.vanity.source === "ESF Non-Stock Remnant"
+                                    ? room.vanity.source
+                                    : "Promo / Stock 100 Remnant"
+                              }
+                            : {})
+                        };
+                        const roomPatch: Partial<RoomDraft> = { vanity: vanityPatch };
+                        if (isProgram) {
+                          roomPatch.calcMode = "Manual Sq Ft";
+                          roomPatch.direct = { counter: 0, splash: 0 };
+                          roomPatch.guidedPieces = [];
+                          roomPatch.fhbMode = "Off";
+                          roomPatch.fhbDirectSf = 0;
+                          roomPatch.fhbPieces = [];
+                        }
+                        onRoomsChange(updateRoom(rooms, room.id, roomPatch));
+                      }}
+                    >
+                      <option value="standard">Standard countertop pricing</option>
+                      <option value="program">2026 Vanity Program</option>
+                    </select>
+                  </RoomField>
+                  <RoomField
+                    label="Side splash"
+                    hint="Vertical 4″ side pieces — priced as backsplash material."
+                    className="room-vanity-side-splash"
                   >
-                    <option value={0}>None</option>
-                    <option value={1}>Qty 1</option>
-                    <option value={2}>Qty 2</option>
-                  </select>
-                  <span className="ie-field-hint">Vertical 4″ side pieces — priced as backsplash material.</span>
-                </label>
+                    <select
+                      aria-label="Side splash quantity"
+                      value={resolveVanitySideSplashQty(room.vanity)}
+                      onChange={(e) =>
+                        onRoomsChange(
+                          updateRoomNested(rooms, room.id, "vanity", {
+                            ...room.vanity,
+                            sideSplashQty: Number(e.target.value) as 0 | 1 | 2
+                          })
+                        )
+                      }
+                    >
+                      <option value={0}>None</option>
+                      <option value={1}>Qty 1</option>
+                      <option value={2}>Qty 2</option>
+                    </select>
+                  </RoomField>
+                </div>
               </div>
             ) : null}
 
@@ -565,17 +589,17 @@ export default function RoomScopeBuilder({
             ) : null}
 
             {eliteProgramColors && eliteProgramColors.length ? (
-              <div className="grid3" style={{ marginTop: 10 }}>
-                <label style={{ gridColumn: "1 / -1" }}>
-                  Room color (optional — use &quot;Color TBD&quot; in notes if needed)
+              <div className="room-color-catalog-section">
+                <p className="room-section-subtitle">Room color &amp; catalog</p>
+                <div className="grid3 room-color-catalog-grid">
+                <RoomField label="Room color (optional — use &quot;Color TBD&quot; in notes if needed)" className="room-field-span-all">
                   <input
                     value={colorQ[room.id] ?? ""}
                     onChange={(e) => setColorQ((m) => ({ ...m, [room.id]: e.target.value }))}
                     placeholder="Type to filter catalog, then pick a row below"
                   />
-                </label>
-                <label>
-                  Price group filter
+                </RoomField>
+                <RoomField label="Price group filter">
                   <select
                     value={groupFilter[room.id] ?? "__all__"}
                     onChange={(e) => setGroupFilter((m) => ({ ...m, [room.id]: e.target.value }))}
@@ -587,9 +611,8 @@ export default function RoomScopeBuilder({
                       </option>
                     ))}
                   </select>
-                </label>
-                <label>
-                  Pick catalog color (optional)
+                </RoomField>
+                <RoomField label="Pick catalog color (optional)">
                   <select
                     value={room.materialCatalogId || ""}
                     onChange={(e) => {
@@ -640,8 +663,8 @@ export default function RoomScopeBuilder({
                         </option>
                       ))}
                   </select>
-                </label>
-                <p className="muted small" style={{ gridColumn: "1 / -1", marginTop: 0 }}>
+                </RoomField>
+                <p className="room-field-hint room-field-span-all">
                   {isVanityProgramMode(room) ? (
                     <>
                       <strong>Vanity Program color</strong> — selection and display only. Program pricing uses the 2026
@@ -654,11 +677,12 @@ export default function RoomScopeBuilder({
                     </>
                   )}
                 </p>
+                </div>
               </div>
             ) : null}
 
-            <div style={{ marginTop: 10 }}>
-              <div className="grid3" style={{ alignItems: "end" }}>
+            <div className="room-edge-section">
+              <div className="grid3 room-edge-grid">
                 <label>
                   Edge profile
                   <select
@@ -984,15 +1008,13 @@ export default function RoomScopeBuilder({
                       placeholder="Optional"
                     />
                   </label>
-                  <label>
-                    Customer-facing room notes
-                    <span className="ie-field-hint">Prints under this room on the customer estimate.</span>
+                  <RoomField label="Customer-facing room notes" hint="Prints under this room on the customer estimate.">
                     <input
                       value={room.customerNote ?? ""}
                       onChange={(e) => onRoomsChange(updateRoom(rooms, room.id, { customerNote: e.target.value }))}
                       placeholder="Optional"
                     />
-                  </label>
+                  </RoomField>
                 </div>
 
                 {room.calcMode === "Guided Shape" ? (
