@@ -476,6 +476,8 @@ export default function InternalEstimateApp() {
   const customerEstimateDisplayRef = useRef(
     null as ReturnType<typeof buildCustomerEstimateDisplayModel> | null
   );
+  // primaryColorLabel is const-declared below save hooks; read via ref to avoid TDZ in deps.
+  const primaryColorLabelRef = useRef("");
   const pendingEmailModalAfterSaveRef = useRef(false);
 
   const [calcBusy, setCalcBusy] = useState(false);
@@ -1428,7 +1430,7 @@ export default function InternalEstimateApp() {
             branch: branch.trim() || null,
             salesRep: salesRep.trim() || null,
             primaryGroup: topMaterialGroup || null,
-            primaryColorLabel: primaryColorLabel || null,
+            primaryColorLabel: primaryColorLabelRef.current || null,
             colorTbd: colorTbd
           }
         });
@@ -1570,7 +1572,6 @@ export default function InternalEstimateApp() {
     branch,
     salesRep,
     topMaterialGroup,
-    primaryColorLabel,
     colorTbd
   ]);
 
@@ -1786,6 +1787,7 @@ export default function InternalEstimateApp() {
     ];
     return roomColors.length === 1 ? roomColors[0] : roomColors.length > 1 ? "Multiple room colors" : "";
   }, [colorTbd, quoteDefaultCatalogId, eliteColors, roomDrafts]);
+  primaryColorLabelRef.current = primaryColorLabel;
 
   const estimateTotalExact = partRetail ?? 0;
 
