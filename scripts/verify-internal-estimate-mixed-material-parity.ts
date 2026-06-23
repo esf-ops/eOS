@@ -13,7 +13,9 @@ import {
 } from "../app-quote/src/lib/measurementEngine.ts";
 import {
   buildSelectedMaterialBreakdown,
+  calculateAllRoomDrafts,
   createDefaultRoom,
+  INTERNAL_ESTIMATE_MEASURE_OPTIONS,
   measureRoomDraft,
   mergeRoomDraftsIntoGlobalAddOns,
   newId,
@@ -119,8 +121,18 @@ function approxEq(a: number, b: number, eps = 0.02): boolean {
     }
   ];
   const qs = qualifyingSfFromRoomDrafts([room]);
-  const m = measureRoomDraft(room, qs, "wholesale");
-  const bd = buildSelectedMaterialBreakdown([room], "wholesale");
+  const { rooms: measured } = calculateAllRoomDrafts(
+    [room],
+    "Kitchen",
+    "wholesale",
+    0,
+    INTERNAL_ESTIMATE_MEASURE_OPTIONS
+  );
+  const m = measured[0];
+  const bd = buildSelectedMaterialBreakdown([room], "wholesale", {
+    internalMaterialUseTax: true,
+    chargeableCounterCeil: true
+  });
   const customAll = 400;
   const visibleCustom = 150;
   const internalOnly = 250;
@@ -138,21 +150,22 @@ function approxEq(a: number, b: number, eps = 0.02): boolean {
     customLineItemsTotal: customAll
   });
 
-  const expectedFull = bd.totals.materialSubtotal + m.extras + customAll;
+  const expectedFull = m.selected + customAll;
   assert.ok(
     approxEq(lr.wholesale, expectedFull),
     `Case3 wholesale ${lr.wholesale} vs ${expectedFull}`
   );
   assert.ok(
-    approxEq(lr.wholesale - internalOnly, bd.totals.materialSubtotal + m.extras + visibleCustom),
+    approxEq(lr.wholesale - internalOnly, m.selected + visibleCustom),
     "Case3 customer-visible line subset should match total minus internal-only adjustment"
   );
 }
 
-// mergeRoomDraftsIntoGlobalAddOns mirrors catalog + tear + FHB outlets when scope exists.
+// mergeRoomDraftsIntoGlobalAddOns mirrors catalog + tear; legacy fhbOutlets does not merge into qty-outlet.
 {
   const room = createDefaultRoom("Group Promo");
   room.addons["qty-sink"] = 2;
+  room.addons["qty-outlet"] = 2;
   room.tear = true;
   room.fhbMode = "Manual Sq Ft";
   room.fhbDirectSf = 8;
@@ -160,7 +173,7 @@ function approxEq(a: number, b: number, eps = 0.02): boolean {
   const merged = mergeRoomDraftsIntoGlobalAddOns([room]);
   assert.equal(merged["qty-sink"], 2);
   assert.equal(merged.tearout, 1);
-  assert.equal(merged["qty-outlet"], 3);
+  assert.equal(merged["qty-outlet"], 2);
 }
 
 console.log("verify-internal-estimate-mixed-material-parity: OK");

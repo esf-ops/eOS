@@ -45,9 +45,11 @@ import {
   createEstimatorRoom,
   createVanityRoom,
   INTERNAL_ESTIMATE_MEASURE_OPTIONS,
+  INTERNAL_ESTIMATE_ELITE_100_PROGRAM,
   hydrateCustomerRoomAreaBreakdown,
   hydrateRoomDraftsFromInternalUi,
   mergeRoomDraftsIntoGlobalAddOns,
+  normalizeInternalEstimateRoomDrafts,
   aggregateComparisonScope,
   buildInternalEstimateGroupComparison,
   measureRoomDraft,
@@ -60,12 +62,8 @@ import {
   STANDARD_EDGE_PROFILES,
   UPGRADED_EDGE_PREVIEW_RATE_PER_LF,
   UPGRADED_EDGE_PROFILES,
-  validateOutOfCollectionRooms,
-  normalizeMaterialProgramDefault,
-  buildOutOfCollectionSnapshotFromMeasured,
-  resolveRoomMaterialProgram
+  normalizeMaterialProgramDefault
 } from "../app-quote/src/lib/prototypeQuoteMath.ts";
-import { resolveOutOfCollectionPricingPolicy } from "../app-quote/src/lib/internalEstimateOutOfCollectionPolicy.ts";
 import { parseCustomerFacingNoteLines } from "../app-internal-estimate/src/lib/customerFacingNotes.ts";
 import { buildCustomerEstimateDisplayModel } from "../app-internal-estimate/src/lib/customerEstimateDisplayModel.ts";
 import { formatPreparedByDisplayName } from "../app-internal-estimate/src/lib/formatPreparedByName.ts";
@@ -961,7 +959,7 @@ function approx(a: number, b: number, eps = 0.02) {
   assert.doesNotMatch(printSrc, /Quoted material breakdown/i, "PDF-STRUCT-1: Quoted Material Breakdown section removed");
   assert.doesNotMatch(printSrc, /cep-breakdown/, "PDF-STRUCT-1: Quoted Material Breakdown container removed");
   assert.doesNotMatch(printSrc, /materialScopeGroups/, "PDF-STRUCT-1: materialScopeGroups not rendered in print");
-  assert.doesNotMatch(printSrc, /Add-ons \/ fixtures/, "PDF-STRUCT-1: separate Add-ons / Fixtures section removed");
+  assert.doesNotMatch(printSrc, /<h2[^>]*>Add-ons \/ fixtures/i, "PDF-STRUCT-1: separate Add-ons / Fixtures section removed");
   assert.doesNotMatch(printSrc, /Total sf/i, "PDF-STRUCT-1: Total SF column removed from room table");
   assert.doesNotMatch(printSrc, /displayRow\.totalSqft/, "PDF-STRUCT-1: totalSqft not rendered in room table");
   assert.doesNotMatch(printSrc, /scope reference.*not a second/, "PDF-STRUCT-1: internal scope reference copy removed");
@@ -979,9 +977,11 @@ function approx(a: number, b: number, eps = 0.02) {
   // Customer-facing room notes render
   assert.match(printSrc, /customerNoteLines/, "PDF-STRUCT-1: customerNoteLines rendered under room");
 
-  // Comparison table uses display model
+  // Comparison table uses display model itemized room blocks
   assert.match(printSrc, /display\.roomComparisonTable/, "PDF-STRUCT-1: comparison uses display.roomComparisonTable");
-  assert.match(printSrc, /groupDisplayTotals/, "PDF-STRUCT-1: per-room group totals rendered");
+  assert.match(printSrc, /roomBlocks/, "PDF-STRUCT-1: per-room comparison blocks rendered");
+  assert.match(printSrc, /backsplashDisplay/, "PDF-STRUCT-1: backsplash line item in comparison");
+  assert.match(printSrc, /fhbDisplay/, "PDF-STRUCT-1: FHB line item in comparison");
   assert.match(printSrc, /projectDisplayTotals/, "PDF-STRUCT-1: project total per group rendered");
 
   // Prepared by uses display model name
@@ -1004,6 +1004,8 @@ function approx(a: number, b: number, eps = 0.02) {
   assert.match(dmSrc, /roomComparisonTable/, "PDF-DM-1: display model exposes roomComparisonTable");
   assert.match(dmSrc, /CustomerPrintComparisonTable/, "PDF-DM-1: CustomerPrintComparisonTable type defined");
   assert.match(dmSrc, /CustomerPrintComparisonRoomRow/, "PDF-DM-1: CustomerPrintComparisonRoomRow type defined");
+  assert.match(dmSrc, /CustomerPrintComparisonGroupBlock/, "PDF-DM-1: CustomerPrintComparisonGroupBlock type defined");
+  assert.match(dmSrc, /roomBlocks/, "PDF-DM-1: roomBlocks built for itemized comparison");
   assert.match(dmSrc, /formatPreparedByDisplayName/, "PDF-DM-1: formatPreparedByDisplayName imported and used");
   // Summary rows expand specific addon lines; generic row only as fallback when no specific lines exist
   assert.match(dmSrc, /addonDetailLines/, "PDF-DM-1: addonDetailLines expanded in summary rows");
@@ -1986,7 +1988,7 @@ function approx(a: number, b: number, eps = 0.02) {
   const printSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/CustomerEstimatePrint.tsx"), "utf8");
   assert.match(printSrc, /isPerRoomMode/, "ROOM-COMP-6: CustomerEstimatePrint uses isPerRoomMode for heading");
   assert.match(printSrc, /Optional material comparison by room/, "ROOM-COMP-6: per-room heading copy present");
-  assert.match(printSrc, /activeGroups/, "ROOM-COMP-6: activeGroups checked for em-dash rendering");
+  assert.match(printSrc, /roomBlocks/, "ROOM-COMP-6: itemized roomBlocks rendered in comparison");
   assert.match(printSrc, /Subtotal \(shown rooms\)/, "ROOM-COMP-6: per-room footer label");
 
   const mathSrc = readFileSync(join(repoRoot, "app-quote/src/lib/prototypeQuoteMath.ts"), "utf8");
@@ -2000,11 +2002,6 @@ function oocEligibleWithTax(counterSf: number, splashSf: number, rate: number): 
   const ct = counterSf * rate;
   const bs = splashSf * rate;
   return round2(ct + bs + round2(ct * 0.02) + round2(bs * 0.02));
-}
-
-function oocWholesaleTotal(counterSf: number, splashSf: number, rate: number): number {
-  const eligible = oocEligibleWithTax(counterSf, splashSf, rate);
-  return round2(eligible + round2(eligible * 0.1));
 }
 
 const FORBIDDEN_CUSTOMER_FACING_RE = /\+10%|\+15%|premium|markup|margin|cost basis|formula/i;
@@ -2096,260 +2093,242 @@ function buildOocPdfFixture(
   approx(measured[0].selected, round2(oocEligibleWithTax(10, 0, dRate)));
 }
 
-// ── OOC-3: Quote-level OOC wholesale 10% on eligible material ──
+// ── OOC-REMOVED-1: Stale quote-level OOC default — no premium (Elite 100 only) ──
 {
   const room = createDefaultRoom("Group Promo");
   room.calcMode = "Manual Sq Ft";
   room.direct = { counter: 10, splash: 0 };
-  const opts = { chargeableCounterCeil: true, internalMaterialUseTax: true, materialProgramDefault: "out_of_collection" as const };
+  const opts = {
+    chargeableCounterCeil: true,
+    internalMaterialUseTax: true,
+    materialProgramDefault: "elite_100" as const
+  };
   const { rooms: measured } = calculateAllRoomDrafts([room], "New Construction", "wholesale", 0, opts);
   const wRate = PROTOTYPE_TIER_PRICE_PER_SQFT["Group Promo"];
-  approx(measured[0].selected, oocWholesaleTotal(10, 0, wRate));
-  approx(measured[0].outOfCollectionPremium?.premiumAmount ?? 0, round2(oocEligibleWithTax(10, 0, wRate) * 0.1));
-}
-
-// ── OOC-4: Quote-level OOC direct 15% ──
-{
-  const room = createDefaultRoom("Group Promo");
-  room.calcMode = "Manual Sq Ft";
-  room.direct = { counter: 10, splash: 0 };
-  const opts = { chargeableCounterCeil: true, internalMaterialUseTax: true, materialProgramDefault: "out_of_collection" as const };
-  const { rooms: measured } = calculateAllRoomDrafts([room], "New Construction", "direct", 0, opts);
-  const dRate = ESF_DIRECT_PRICE_PER_SQFT["Group Promo"];
-  const eligible = oocEligibleWithTax(10, 0, dRate);
-  approx(measured[0].selected, round2(eligible + round2(eligible * 0.15)));
-}
-
-// ── OOC-5: Mixed quote — premium only on OOC room ──
-{
-  const kitchen = createDefaultRoom("Group Promo");
-  kitchen.name = "Kitchen";
-  kitchen.calcMode = "Manual Sq Ft";
-  kitchen.direct = { counter: 10, splash: 0 };
-  const wetBar = createDefaultRoom("Group C");
-  wetBar.name = "Wet Bar";
-  wetBar.calcMode = "Manual Sq Ft";
-  wetBar.direct = { counter: 8, splash: 0 };
-  const opts = { chargeableCounterCeil: true, internalMaterialUseTax: true, materialProgramDefault: "elite_100" as const };
-  wetBar.materialProgramOverride = "out_of_collection";
-  const wRatePromo = PROTOTYPE_TIER_PRICE_PER_SQFT["Group Promo"];
-  const wRateC = PROTOTYPE_TIER_PRICE_PER_SQFT["Group C"];
-  const { rooms: measured } = calculateAllRoomDrafts([kitchen, wetBar], "New Construction", "wholesale", 0, opts);
-  approx(measured[0].outOfCollectionPremium?.applied ?? false, false);
-  approx(measured[1].outOfCollectionPremium?.applied ?? false, true);
-  const expectedTotal = round2(oocEligibleWithTax(10, 0, wRatePromo) + oocWholesaleTotal(8, 0, wRateC));
-  approx(measured[0].selected + measured[1].selected, expectedTotal);
-}
-
-// ── OOC-6: Room override Elite 100 inside OOC default — no premium ──
-{
-  const room = createDefaultRoom("Group Promo");
-  room.materialProgramOverride = "elite_100";
-  room.calcMode = "Manual Sq Ft";
-  room.direct = { counter: 10, splash: 0 };
-  const opts = { chargeableCounterCeil: true, internalMaterialUseTax: true, materialProgramDefault: "out_of_collection" as const };
-  const { rooms: measured } = calculateAllRoomDrafts([room], "New Construction", "wholesale", 0, opts);
+  approx(measured[0].selected, round2(oocEligibleWithTax(10, 0, wRate)));
   assert.equal(measured[0].outOfCollectionPremium?.applied ?? false, false);
 }
 
-// ── OOC-7: Room override OOC inside Elite default — premium applies ──
+// ── OOC-REMOVED-2: Room override out_of_collection ignored after normalization ──
 {
   const room = createDefaultRoom("Group D");
   room.materialProgramOverride = "out_of_collection";
   room.calcMode = "Manual Sq Ft";
   room.direct = { counter: 5, splash: 0 };
-  const opts = { chargeableCounterCeil: true, internalMaterialUseTax: true, materialProgramDefault: "elite_100" as const };
-  const { rooms: measured } = calculateAllRoomDrafts([room], "New Construction", "wholesale", 0, opts);
-  assert.equal(measured[0].outOfCollectionPremium?.applied, true);
-}
-
-// ── OOC-8/9: Premium on counter and backsplash/FHB ──
-{
-  const room = createDefaultRoom("Group Promo");
-  room.calcMode = "Manual Sq Ft";
-  room.direct = { counter: 10, splash: 4 };
-  const opts = { chargeableCounterCeil: true, internalMaterialUseTax: true, materialProgramDefault: "out_of_collection" as const };
-  const { rooms: measured } = calculateAllRoomDrafts([room], "New Construction", "wholesale", 0, opts);
-  const wRate = PROTOTYPE_TIER_PRICE_PER_SQFT["Group Promo"];
-  approx(measured[0].selected, oocWholesaleTotal(10, 4, wRate));
-}
-
-// ── OOC-10: Premium excludes add-ons ──
-{
-  const room = createDefaultRoom("Group Promo");
-  room.calcMode = "Manual Sq Ft";
-  room.direct = { counter: 10, splash: 0 };
-  room.addons["qty-sink"] = 1;
-  const opts = { chargeableCounterCeil: true, internalMaterialUseTax: true, materialProgramDefault: "out_of_collection" as const };
-  const { rooms: measured } = calculateAllRoomDrafts([room], "New Construction", "wholesale", 0, opts);
-  const wRate = PROTOTYPE_TIER_PRICE_PER_SQFT["Group Promo"];
-  approx(measured[0].selected, round2(oocWholesaleTotal(10, 0, wRate) + 200));
-}
-
-// ── OOC-11: Vanity program fixed pricing excluded from OOC premium ──
-{
-  const vanity = createVanityRoom("Group Promo");
-  vanity.materialProgramOverride = "out_of_collection";
-  const opts = { chargeableCounterCeil: true, internalMaterialUseTax: true, materialProgramDefault: "out_of_collection" as const };
-  const { rooms: measured } = calculateAllRoomDrafts([vanity], "New Construction", "wholesale", 0, opts);
+  const [normalized] = normalizeInternalEstimateRoomDrafts([room]);
+  assert.equal(normalized.materialProgramOverride, "inherit");
+  const opts = {
+    chargeableCounterCeil: true,
+    internalMaterialUseTax: true,
+    materialProgramDefault: "elite_100" as const
+  };
+  const { rooms: measured } = calculateAllRoomDrafts([normalized], "New Construction", "wholesale", 0, opts);
   assert.equal(measured[0].outOfCollectionPremium?.applied ?? false, false);
+  const wRate = PROTOTYPE_TIER_PRICE_PER_SQFT["Group D"];
+  approx(measured[0].selected, round2(oocEligibleWithTax(5, 0, wRate)));
 }
 
-// ── OOC-12: Fixed 2% use tax unchanged with OOC ──
+// ── OOC-HYDRATE-1: Stale OOC fields hydrate/recalculate without premium ──
 {
-  const room = createDefaultRoom("Group Promo");
-  room.calcMode = "Manual Sq Ft";
-  room.direct = { counter: 10, splash: 4 };
-  const opts = { chargeableCounterCeil: true, internalMaterialUseTax: true, materialProgramDefault: "out_of_collection" as const };
-  const { rooms: measured } = calculateAllRoomDrafts([room], "New Construction", "wholesale", 0, opts);
-  approx(measured[0].useTax?.taxAmount ?? 0, round2((10 + 4) * PROTOTYPE_TIER_PRICE_PER_SQFT["Group Promo"] * 0.02));
+  const hydrated = hydrateRoomDraftsFromInternalUi(
+    [
+      {
+        id: "r1",
+        name: "Kitchen",
+        materialGroup: "Group Promo",
+        calcMode: "Manual Sq Ft",
+        direct: { counter: 10, splash: 4 },
+        materialProgramOverride: "out_of_collection"
+      }
+    ],
+    null
+  )[0];
+  assert.equal(hydrated.materialProgramOverride, "inherit");
+  const opts = {
+    ...INTERNAL_ESTIMATE_MEASURE_OPTIONS,
+    materialProgramDefault: INTERNAL_ESTIMATE_ELITE_100_PROGRAM
+  };
+  const { rooms: measured } = calculateAllRoomDrafts([hydrated], "New Construction", "wholesale", 0, opts);
+  assert.equal(measured[0].outOfCollectionPremium?.applied ?? false, false);
+  const wRate = PROTOTYPE_TIER_PRICE_PER_SQFT["Group Promo"];
+  approx(measured[0].selected, round2(oocEligibleWithTax(10, 4, wRate)));
 }
 
-// ── OOC-13: Validation requires comparable price group ──
-{
-  const room = createDefaultRoom("Remnant");
-  room.materialProgramOverride = "out_of_collection";
-  const v = validateOutOfCollectionRooms([room], "elite_100");
-  assert.equal(v.valid, false);
-  assert.match(v.message ?? "", /comparable price group/i);
-}
-
-// ── OOC-14: Hydration defaults to elite_100 / inherit ──
-{
-  const hydrated = hydrateRoomDraftsFromInternalUi(null, [{ name: "Kitchen", materialGroup: "Group Promo", countertopSqft: 10 }])[0];
-  assert.equal(normalizeMaterialProgramDefault(undefined), "elite_100");
-  assert.equal(hydrated.materialProgramOverride ?? "inherit", "inherit");
-}
-
-// ── OOC-15: Customer-facing display output avoids forbidden formula language ──
-{
-  const room = createDefaultRoom("Group Promo");
-  room.calcMode = "Manual Sq Ft";
-  room.direct = { counter: 40, splash: 8 };
-  const { display } = buildOocPdfFixture([room], "wholesale", "out_of_collection");
-  assertNoForbiddenCustomerFacingText(customerFacingStringsFromDisplay(display), "OOC-15");
-}
-
-// ── OOC-PDF-1: Wholesale OOC — PDF total matches live calculated total (rounding tolerance) ──
-{
-  const room = createDefaultRoom("Group Promo");
-  room.calcMode = "Manual Sq Ft";
-  room.direct = { counter: 100, splash: 10 };
-  const { quote, display } = buildOocPdfFixture([room], "wholesale", "out_of_collection");
-  approx(display.finalRounded, roundCustomerDisplay(quote.retail), 25);
-  approx(
-    display.summaryCounterDisplay + display.summaryBacksplashDisplay,
-    roundCustomerDisplay(display.countertopMaterialExact + display.backsplashMaterialExact),
-    2
-  );
-}
-
-// ── OOC-PDF-2: Direct/Retail OOC — PDF total matches live calculated total ──
-{
-  const room = createDefaultRoom("Group Promo");
-  room.calcMode = "Manual Sq Ft";
-  room.direct = { counter: 100, splash: 10 };
-  const { quote, display } = buildOocPdfFixture([room], "direct", "out_of_collection");
-  approx(display.finalRounded, roundCustomerDisplay(quote.retail), 25);
-}
-
-// ── OOC-PDF-3: Mixed Elite 100 + OOC — premium folded only into OOC room material ──
-{
-  const kitchen = createDefaultRoom("Group Promo");
-  kitchen.name = "Kitchen";
-  kitchen.calcMode = "Manual Sq Ft";
-  kitchen.direct = { counter: 40, splash: 8 };
-  const wetBar = createDefaultRoom("Group C");
-  wetBar.name = "Wet Bar";
-  wetBar.calcMode = "Manual Sq Ft";
-  wetBar.direct = { counter: 12, splash: 4 };
-  wetBar.materialProgramOverride = "out_of_collection";
-  const eliteOnly = buildOocPdfFixture([kitchen], "wholesale", "elite_100");
-  const wetBarEliteOnly = createDefaultRoom("Group C");
-  wetBarEliteOnly.name = "Wet Bar";
-  wetBarEliteOnly.calcMode = "Manual Sq Ft";
-  wetBarEliteOnly.direct = { counter: 12, splash: 4 };
-  const wetBarEliteFixture = buildOocPdfFixture([wetBarEliteOnly], "wholesale", "elite_100");
-  const mixed = buildOocPdfFixture([kitchen, wetBar], "wholesale", "elite_100");
-  approx(mixed.display.finalRounded, roundCustomerDisplay(mixed.quote.retail), 30);
-  const kitchenRow = mixed.roomBd.rooms.find((r) => r.displayName === "Kitchen")!;
-  const wetBarRow = mixed.roomBd.rooms.find((r) => r.displayName === "Wet Bar")!;
-  const eliteKitchenRow = eliteOnly.roomBd.rooms.find((r) => r.displayName === "Kitchen")!;
-  const eliteWetBarRow = wetBarEliteFixture.roomBd.rooms.find((r) => r.displayName === "Wet Bar")!;
-  approx(kitchenRow.materialAmountExact, eliteKitchenRow.materialAmountExact);
-  assert.ok(wetBarRow.materialAmountExact > eliteWetBarRow.materialAmountExact);
-}
-
-// ── OOC-PDF-4: Elite 100 PDF/display unchanged ──
+// ── OOC-REMOVED-3: Customer-facing display avoids forbidden formula language ──
 {
   const room = createDefaultRoom("Group Promo");
   room.calcMode = "Manual Sq Ft";
   room.direct = { counter: 40, splash: 8 };
-  const { display, selectedBd } = buildOocPdfFixture([room], "wholesale", "elite_100");
+  const { display } = buildOocPdfFixture([room], "wholesale", "elite_100");
+  assertNoForbiddenCustomerFacingText(customerFacingStringsFromDisplay(display), "OOC-REMOVED-3");
+}
+
+// ── OOC-REMOVED-4: Elite 100 PDF/display unchanged — no folded OOC premium ──
+{
+  const room = createDefaultRoom("Group Promo");
+  room.calcMode = "Manual Sq Ft";
+  room.direct = { counter: 40, splash: 8 };
+  const { display, selectedBd, quote } = buildOocPdfFixture([room], "wholesale", "elite_100");
   const wRate = PROTOTYPE_TIER_PRICE_PER_SQFT["Group Promo"];
   approx(display.countertopMaterialExact + display.backsplashMaterialExact, oocEligibleWithTax(40, 8, wRate));
   assert.equal(selectedBd.totals.outOfCollectionPremium?.applied ?? false, false);
+  approx(display.finalRounded, roundCustomerDisplay(quote.retail), 25);
 }
 
-// ── OOC-PDF-5: Breakdown columns include folded OOC premium ──
+// ── OUTLET-MIGRATE-1: legacy fhbOutlets migrates into qty-outlet when catalog empty ──
 {
   const room = createDefaultRoom("Group Promo");
-  room.calcMode = "Manual Sq Ft";
-  room.direct = { counter: 40, splash: 8 };
-  const { selectedBd } = buildOocPdfFixture([room], "wholesale", "out_of_collection");
-  approx(
-    round2(selectedBd.totals.countertopMaterial + selectedBd.totals.backsplashMaterial),
-    selectedBd.totals.materialSubtotal
+  room.fhbOutlets = 5;
+  const [normalized] = normalizeInternalEstimateRoomDrafts([room]);
+  assert.equal(normalized.addons["qty-outlet"], 5);
+  const m = measureRoomDraft(normalized, 0, "wholesale", 0, INTERNAL_ESTIMATE_MEASURE_OPTIONS);
+  approx(m.extras, 150);
+}
+
+// ── OUTLET-MIGRATE-2: both legacy and catalog — use max, not sum ──
+{
+  const room = createDefaultRoom("Group Promo");
+  room.fhbOutlets = 5;
+  room.addons["qty-outlet"] = 3;
+  const [normalized] = normalizeInternalEstimateRoomDrafts([room]);
+  assert.equal(normalized.addons["qty-outlet"], 5);
+  const m = measureRoomDraft(normalized, 0, "wholesale", 0, INTERNAL_ESTIMATE_MEASURE_OPTIONS);
+  approx(m.extras, 150);
+}
+
+// ── HUNTER-1: Group F selected + Group B comparison — FHB + outlet add-ons in both options ──
+{
+  const bar = createDefaultRoom("Group F");
+  bar.name = "Bar";
+  bar.calcMode = "Manual Sq Ft";
+  bar.direct = { counter: 20, splash: 4 };
+  bar.fhbMode = "Manual Sq Ft";
+  bar.fhbDirectSf = 12;
+  bar.addons["qty-outlet"] = 4;
+  bar.customerComparisonGroups = ["Group F", "Group B"];
+
+  const drafts = [bar];
+  const { rooms: measured } = calculateAllRoomDrafts(
+    drafts,
+    "New Construction",
+    "wholesale",
+    0,
+    INTERNAL_ESTIMATE_MEASURE_OPTIONS
   );
-  assert.ok((selectedBd.totals.outOfCollectionPremium?.premiumAmount ?? 0) > 0);
+  const bd = buildCustomerRoomAreaCostBreakdown({
+    roomDrafts: drafts,
+    measuredRooms: measured,
+    materialBasis: "wholesale",
+    measureOptions: INTERNAL_ESTIMATE_MEASURE_OPTIONS
+  });
+  const outletAddon = bd.rooms[0].addons.find((a) => /outlet cutout/i.test(a.label));
+  assert.ok(outletAddon, "HUNTER-1: qty-outlet line present on selected Group F");
+  approx(outletAddon!.amountExact, 120);
+
+  const allGroupRates = buildInternalEstimateGroupComparison({
+    countertopSqft: 20,
+    backsplashSqft: 16,
+    roomFixedDollars: 120,
+    customLineDollars: 0,
+    basis: "wholesale"
+  });
+  const selectedBd = buildSelectedMaterialBreakdown(drafts, "wholesale", {
+    internalMaterialUseTax: true,
+    chargeableCounterCeil: true,
+    materialProgramDefault: INTERNAL_ESTIMATE_ELITE_100_PROGRAM
+  });
+  const display = buildCustomerEstimateDisplayModel({
+    selectedBreakdown: selectedBd,
+    measuredRooms: measured,
+    visibleCustomerLines: [],
+    internalMaterialFoldDollars: 0,
+    roomAreaBreakdown: bd,
+    allGroupComparisonRates: allGroupRates,
+    internalMaterialUseTax: true
+  });
+  const ct = display.roomComparisonTable;
+  assert.ok(ct != null, "HUNTER-1: comparison table built");
+  const roomBlock = ct!.roomBlocks.find((r) => r.roomDisplayName === "Bar");
+  assert.ok(roomBlock, "HUNTER-1: Bar in comparison blocks");
+  const blockF = roomBlock!.groupBlocks.find((g) => g.group === "Group F");
+  const blockB = roomBlock!.groupBlocks.find((g) => g.group === "Group B");
+  assert.ok(blockF && blockB, "HUNTER-1: Group F and Group B blocks present");
+  assert.ok(blockF.fhbDisplay > 0, "HUNTER-1: FHB visible for Group F");
+  assert.ok(blockB.fhbDisplay > 0, "HUNTER-1: FHB visible for Group B");
+  assert.equal(blockF.addonsDisplay, blockB.addonsDisplay, "HUNTER-1: outlet add-ons match across options");
+  assert.ok(blockF.addonsDisplay > 0, "HUNTER-1: outlet add-ons displayed");
 }
 
-// ── OOC-PDF-6: Add-ons not affected by OOC premium ──
+// ── CASEY-1: optional Group A comparison itemizes backsplash and FHB separately ──
 {
-  const room = createDefaultRoom("Group Promo");
-  room.calcMode = "Manual Sq Ft";
-  room.direct = { counter: 10, splash: 0 };
-  room.addons["qty-sink"] = 1;
-  const withAddon = buildOocPdfFixture([room], "wholesale", "out_of_collection");
-  const roomNoAddon = createDefaultRoom("Group Promo");
-  roomNoAddon.calcMode = "Manual Sq Ft";
-  roomNoAddon.direct = { counter: 10, splash: 0 };
-  const withoutAddon = buildOocPdfFixture([roomNoAddon], "wholesale", "out_of_collection");
-  approx(withAddon.display.addonsExact, 200);
-  approx(withAddon.display.finalRounded - withoutAddon.display.finalRounded, roundCustomerDisplay(200), 15);
+  const kitchen = createDefaultRoom("Group A");
+  kitchen.name = "Kitchen";
+  kitchen.calcMode = "Manual Sq Ft";
+  kitchen.direct = { counter: 40, splash: 8 };
+  kitchen.fhbMode = "Manual Sq Ft";
+  kitchen.fhbDirectSf = 6;
+  kitchen.customerComparisonGroups = ["Group A"];
+
+  const drafts = [kitchen];
+  const { rooms: measured } = calculateAllRoomDrafts(
+    drafts,
+    "New Construction",
+    "wholesale",
+    0,
+    INTERNAL_ESTIMATE_MEASURE_OPTIONS
+  );
+  const bd = buildCustomerRoomAreaCostBreakdown({
+    roomDrafts: drafts,
+    measuredRooms: measured,
+    materialBasis: "wholesale",
+    measureOptions: INTERNAL_ESTIMATE_MEASURE_OPTIONS
+  });
+  const allGroupRates = buildInternalEstimateGroupComparison({
+    countertopSqft: 40,
+    backsplashSqft: 14,
+    roomFixedDollars: 0,
+    customLineDollars: 0,
+    basis: "wholesale"
+  });
+  const selectedBd = buildSelectedMaterialBreakdown(drafts, "wholesale", {
+    internalMaterialUseTax: true,
+    chargeableCounterCeil: true,
+    materialProgramDefault: INTERNAL_ESTIMATE_ELITE_100_PROGRAM
+  });
+  const display = buildCustomerEstimateDisplayModel({
+    selectedBreakdown: selectedBd,
+    measuredRooms: measured,
+    visibleCustomerLines: [],
+    internalMaterialFoldDollars: 0,
+    roomAreaBreakdown: bd,
+    allGroupComparisonRates: allGroupRates,
+    internalMaterialUseTax: true
+  });
+  const ct = display.roomComparisonTable;
+  assert.ok(ct != null, "CASEY-1: comparison table built");
+  const roomBlock = ct!.roomBlocks[0];
+  const blockA = roomBlock.groupBlocks.find((g) => g.group === "Group A");
+  assert.ok(blockA, "CASEY-1: Group A block present");
+  assert.ok(blockA!.backsplashDisplay > 0, "CASEY-1: 4-inch backsplash row has display $");
+  assert.ok(blockA!.fhbDisplay > 0, "CASEY-1: full-height backsplash row has display $");
+  approx(
+    blockA!.countertopDisplay + blockA!.backsplashDisplay + blockA!.fhbDisplay + (blockA!.addonsDisplay || 0),
+    blockA!.roomTotalDisplay,
+    10
+  );
+  assertNoForbiddenCustomerFacingText(
+    ["4-inch backsplash material", "Full-height backsplash material", "Countertop material"],
+    "CASEY-1"
+  );
 }
 
-// ── OOC-PDF-7: Room/area breakdown reconciles to corrected final customer total ──
-{
-  const room = createDefaultRoom("Group Promo");
-  room.calcMode = "Manual Sq Ft";
-  room.direct = { counter: 40, splash: 8 };
-  const { display } = buildOocPdfFixture([room], "direct", "out_of_collection");
-  const areaSum =
-    display.roomAreaPrintRows.reduce((s, r) => s + r.displayedAreaTotal, 0) + display.unassignedDisplayTotal;
-  approx(areaSum, display.finalRounded, 2);
-}
-
-// ── OOC-16: Snapshot includes material program and premium policy ──
+// ── OOC-REMOVED-5: Backend internal quote forces elite_100 — no OOC snapshot premium ──
 {
   const kitchen = createDefaultRoom("Group Promo");
   kitchen.name = "Kitchen";
   kitchen.calcMode = "Manual Sq Ft";
   kitchen.direct = { counter: 10, splash: 0 };
-  const opts = { chargeableCounterCeil: true, internalMaterialUseTax: true, materialProgramDefault: "out_of_collection" as const };
-  const { rooms: measured } = calculateAllRoomDrafts([kitchen], "New Construction", "wholesale", 0, opts);
-  const snap = buildOutOfCollectionSnapshotFromMeasured({
-    roomDrafts: [kitchen],
-    measuredRooms: measured,
-    materialProgramDefault: "out_of_collection",
-    materialBasis: "wholesale"
-  });
-  assert.equal(snap.materialProgramDefault, "out_of_collection");
-  assert.equal(snap.outOfCollectionPremiumPercent, 10);
-  assert.ok(snap.outOfCollectionPremiumAmount > 0);
-  assert.equal(snap.outOfCollectionPremiumScope, "countertop_and_backsplash_material");
-  assert.ok(snap.outOfCollectionPolicySnapshot.policyVersion === 1);
-  assert.equal(snap.rooms.length, 1);
+  kitchen.materialProgramOverride = "out_of_collection";
   const backend = await calculateQuote(
     {
       quoteSource: "internal_quote",
@@ -2363,9 +2342,11 @@ function buildOocPdfFixture(
     {}
   );
   const oocSnap = backend.snapshot?.internal_estimate_math?.out_of_collection;
-  assert.ok(oocSnap, "OOC-16: backend snapshot includes out_of_collection");
-  assert.equal(oocSnap.materialProgramDefault, "out_of_collection");
-  assert.equal(oocSnap.outOfCollectionPremiumPercent, 10);
+  if (oocSnap?.outOfCollectionPremiumAmount > 0) {
+    throw new Error("OOC-REMOVED-5: backend must not apply OOC premium on internal_quote");
+  }
+  const wRate = PROTOTYPE_TIER_PRICE_PER_SQFT["Group Promo"];
+  approx(backend.totals.retail, round2(oocEligibleWithTax(10, 0, wRate)));
 }
 
 console.log("verify-internal-estimate-beta-fixes: OK");

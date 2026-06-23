@@ -1339,3 +1339,16 @@
 | **Why** | Manual CSV staging validated the promotion path (~12k rows); automation removes operator dependency on local debug CSV files while preserving idempotent replace-before-insert promotion. |
 | **Impacted files/docs** | `morawareWebSession.js`, `fetchReportFeedArtifacts.js`, `syncCalendarScheduleFeed.js`, `deploy/moraware-worker/run-calendar-schedule-sync.sh`, `deploy/moraware-worker/systemd/eliteos-calendar-schedule-sync.{service,timer}`, `moraware-worker.env.example`, `docs/eliteos/moraware-calendar-schedule-sync-runbook.md`, `package.json`, tests. |
 | **Revisit trigger** | Before automating other report feeds (sales worksheet); before changing Moraware view 222 column contract; before headless browser download. |
+
+### 90. Internal Estimate stabilization — OOC removal, outlet consolidation, comparison itemization (2026-06-23)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-06-23 |
+| **Decision** | Surgical Internal Estimate stabilization pass: remove Out-of-Collection (OOC) from the Internal Estimate user experience; consolidate electrical outlet cutouts under catalog add-on `qty-outlet`; itemize backsplash vs full-height backsplash in optional material comparisons on customer PDF output. |
+| **OOC** | OOC selector/card and room-level overrides removed from Internal Estimate UI. New and recalculated estimates use **Elite 100 only** (`material_program_default: elite_100` on save/calculate). Stale OOC fields on legacy quotes are normalized/ignored on hydrate/recalculate — no OOC premium applies. OOC helper modules and DB fields remain for a future dedicated head; historical snapshots may still contain OOC metadata as read-only history. |
+| **Electrical outlets** | FHB electrical cutout input removed/hidden wherever `RoomScopeBuilder` would show it. **Electrical Outlet Cutouts** (`qty-outlet`) under room add-ons is the single source of truth for pricing and customer output. Legacy `fhbOutlets` hydrates for backward compatibility: if `fhbOutlets > 0` and `qty-outlet` is empty/zero, migrate to `qty-outlet`; if both exist, use the **larger** quantity (not the sum). Separate `fhbOutlets` pricing and post-pricing merge into global add-ons removed. |
+| **Backsplash / FHB display** | Total math unchanged. Display itemization allocates combined chargeable backsplash/FHB material dollars proportionally when needed; uses separate values only when totals reconcile exactly. |
+| **Optional comparison (customer PDF)** | Per room/material option, customer-safe rows when applicable: countertop material, 4-inch backsplash material, full-height backsplash material, add-ons/fixtures, room total. No $/sf rates, markup, premium, OOC, material-use-tax formulas, or internal diagnostics. Selected quote total, live summary, PDF summary, room breakdown, and optional comparison totals must reconcile. |
+| **Impacted files** | `app-internal-estimate/*`, `app-quote/src/lib/prototypeQuoteMath.ts`, `app-quote/src/ui/RoomScopeBuilder.tsx`, `backend-core/src/quotes/quoteCalculator.js`, `backend-core/src/quotes/internalQuotesApi.js`, regression scripts under `scripts/` and `backend-core/src/scripts/`. |
+| **Revisit trigger** | Dedicated OOC head; further Internal Estimate UX pass; customer PDF template redesign. |

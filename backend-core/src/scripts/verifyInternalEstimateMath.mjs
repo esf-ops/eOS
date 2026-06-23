@@ -705,11 +705,7 @@ const taxTrip = await calculateQuote(
 );
 assertNear("TAX-3 custom fee not taxed", taxTrip.totals.retail, internalMaterialTotal(10, 0, wRate) + 150);
 
-function oocWholesaleTotal(ctSf, bsSf, rate) {
-  const eligible = internalMaterialTotal(ctSf, bsSf, rate);
-  return round2Tax(eligible + round2Tax(eligible * 0.1));
-}
-
+// Stale out_of_collection payloads normalize to elite_100 — no OOC premium on internal quotes.
 const oocRoom = {
   name: "Kitchen",
   materialGroup: "Group Promo",
@@ -729,9 +725,11 @@ const oocWholesale = await calculateQuote(
   },
   {}
 );
-assertNear("OOC wholesale 10sf", oocWholesale.totals.retail, oocWholesaleTotal(10, 0, wRate));
+assertNear("stale OOC normalizes to elite 100", oocWholesale.totals.retail, internalMaterialTotal(10, 0, wRate));
 const oocSnap = oocWholesale.snapshot?.internal_estimate_math?.out_of_collection;
-if (!oocSnap?.outOfCollectionPremiumAmount) throw new Error("OOC snapshot missing premium");
+if (oocSnap?.outOfCollectionPremiumAmount) {
+  throw new Error("OOC premium must not apply after internal quote normalization");
+}
 
 const eliteUnchanged = await calculateQuote(
   {
