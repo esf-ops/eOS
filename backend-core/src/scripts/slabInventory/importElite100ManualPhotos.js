@@ -361,7 +361,7 @@ async function main() {
     console.error("── Import blocked — unsafe matches detected ──");
     console.error(JSON.stringify({ blockers: summary.blockers }, null, 2));
     console.error(
-      "Resolve conflicts/unmatched files or provide ELITE100_PHOTO_MATCH_MAP overrides before writing."
+      "Resolve catalog_color_missing, conflicts, ambiguous, or unmatched files or provide ELITE100_PHOTO_MATCH_MAP overrides before writing."
     );
     if (WRITE_ENABLED) process.exit(1);
   }
@@ -369,7 +369,7 @@ async function main() {
   if (!WRITE_ENABLED) {
     console.log("Dry-run complete. No uploads or DB writes performed.");
     console.log("To apply: ELITE100_MANUAL_PHOTO_WRITE_ENABLED=1 + Supabase creds + SLABOS_ORGANIZATION_ID");
-    console.log("Apply is blocked until all files are safe matches (no conflicts, ambiguous, or unmatched).");
+    console.log("Apply is blocked until all files are safe matches (no catalog_color_missing, conflicts, ambiguous, or unmatched).");
     return;
   }
 

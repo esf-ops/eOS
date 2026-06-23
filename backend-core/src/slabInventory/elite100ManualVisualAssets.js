@@ -165,8 +165,48 @@ export const ELITE100_MATCH_STATUS = Object.freeze({
   SAFE: "safe",
   UNMATCHED: "unmatched",
   GLOBAL_INDEX_NAME_CONFLICT: "global_index_name_conflict",
+  CATALOG_COLOR_MISSING: "catalog_color_missing",
   AMBIGUOUS: "ambiguous",
 });
+
+/** Chris-approved photo filename → catalog color aliases (from elite100-2026-alias-review-seed). */
+export const ELITE100_PHOTO_FILENAME_COLOR_ALIASES = Object.freeze([
+  { source_color_name: "Winter Fresh", catalog_color_name: "Winterfresh" },
+  { source_color_name: "Belfast Grey", catalog_color_name: "Belfast Gray" },
+  { source_color_name: "Classic Gray", catalog_color_name: "Classic Grey" },
+  { source_color_name: "Costal Tide", catalog_color_name: "Coastal Tide" },
+  { source_color_name: "Regal D Oro", catalog_color_name: "Regal D'Oro" },
+  { source_color_name: "Skys The Limit", catalog_color_name: "Sky's the Limit" },
+  { source_color_name: "Larvik", catalog_color_name: "Larvic" },
+  { source_color_name: "Whitendale", catalog_color_name: "Whitenedale" },
+]);
+
+/**
+ * Build lookup: normalized filename color token → catalog item (from approved aliases).
+ * @param {Array} aliasRows `{ source_color_name, catalog_color_name }`
+ * @param {Array} catalogItems
+ */
+export function buildPhotoFilenameAliasLookup(aliasRows, catalogItems) {
+  const byNormColor = new Map(
+    (catalogItems ?? []).map((c) => [
+      c.normalized_color_name ?? normalizeColorName(c.color_name),
+      catalogItemFromDbRow(c),
+    ])
+  );
+  const lookup = new Map();
+  for (const row of aliasRows ?? []) {
+    const sourceNorm = normalizeColorName(row.source_color_name);
+    const catalogNorm = normalizeColorName(row.catalog_color_name);
+    const catalogItem = byNormColor.get(catalogNorm);
+    if (!sourceNorm || !catalogItem) continue;
+    lookup.set(sourceNorm, {
+      catalogItem,
+      catalog_color_name: catalogItem.color_name,
+      source_color_name: row.source_color_name,
+    });
+  }
+  return lookup;
+}
 
 function prepareCatalogContext(catalogItems, fixtureFlat = []) {
   const byId = new Map((catalogItems ?? []).map((c) => [c.id, catalogItemFromDbRow(c)]));
@@ -214,13 +254,13 @@ function resolveCatalogItem(hit, ctx) {
   );
 }
 
-function collectNameMatches(parsed, ctx) {
+function collectNameMatches(parsed, ctx, photoAliasLookup) {
   const tokens = extractFilenameColorTokens(parsed);
   const seen = new Set();
   const matches = [];
 
   const tryAdd = (item, method) => {
-    if (!item?.id && !item?.color_name) return;
+    if (!item?.color_name) return;
     const resolved = item.id ? ctx.byId.get(item.id) ?? catalogItemFromDbRow(item) : item;
     const key = resolved.id ?? `${resolved.normalized_color_name}||${resolved.normalized_material_name}`;
     if (seen.has(key)) return;
@@ -236,6 +276,11 @@ function collectNameMatches(parsed, ctx) {
   if (tokens.normalized) {
     const colorHit = ctx.byNormColor.get(tokens.normalized) ?? ctx.fixtureByNormColor.get(tokens.normalized);
     if (colorHit) tryAdd(resolveCatalogItem(colorHit, ctx), "color_name");
+  }
+
+  if (tokens.normalized && photoAliasLookup?.has(tokens.normalized)) {
+    const aliasHit = photoAliasLookup.get(tokens.normalized);
+    tryAdd(aliasHit.catalogItem, "photo_filename_alias");
   }
 
   return matches;
@@ -335,20 +380,29 @@ function matchResult({
  *
  * Priority:
  *   1. explicit mapping override
- *   2. color slug / color name (strong filename tokens)
- *   3. price-group + sort order when compatible
- *   4. global index only when filename color tokens agree
+ *   2. color slug / color name / approved photo filename alias
+ *   3. price-group + sort order (index-only filenames only)
+ *   4. global index (index-only filenames only — batch numbers are not catalog positions)
+ *
+ * When the filename includes a clear color name, that name is the source of truth.
+ * Global index is never used as a fallback for named photos.
  *
  * @param {string} filename
  * @param {Array} catalogItems
  * @param {Array} [fixtureFlat]
  * @param {Object} [opts]
  * @param {Map<string, Object>} [opts.matchMap] source_filename → catalog item
+ * @param {Map<string, Object>} [opts.photoAliasLookup] normalized filename color → alias hit
  */
 export function matchPhotoToCatalogItem(filename, catalogItems, fixtureFlat = [], opts = {}) {
   const parsed = parsePhotoFilename(filename);
   const ctx = prepareCatalogContext(catalogItems, fixtureFlat);
   const basename = path.basename(String(filename ?? ""));
+
+  const photoAliasLookup =
+    opts.photoAliasLookup instanceof Map
+      ? opts.photoAliasLookup
+      : buildPhotoFilenameAliasLookup(ELITE100_PHOTO_FILENAME_COLOR_ALIASES, catalogItems);
 
   const matchMap = opts.matchMap instanceof Map ? opts.matchMap : null;
   if (matchMap?.has(basename)) {
@@ -362,7 +416,10 @@ export function matchPhotoToCatalogItem(filename, catalogItems, fixtureFlat = []
     });
   }
 
-  const nameMatches = collectNameMatches(parsed, ctx);
+  const tokens = extractFilenameColorTokens(parsed);
+  const hasColorToken = Boolean(tokens.normalized || tokens.slug);
+
+  const nameMatches = collectNameMatches(parsed, ctx, photoAliasLookup);
   if (nameMatches.length > 1) {
     return matchResult({
       matchMethod: "ambiguous",
@@ -374,12 +431,35 @@ export function matchPhotoToCatalogItem(filename, catalogItems, fixtureFlat = []
   }
   if (nameMatches.length === 1) {
     const hit = nameMatches[0];
+    const confidenceByMethod = {
+      color_slug: 0.95,
+      color_name: 0.9,
+      photo_filename_alias: 0.92,
+    };
     return matchResult({
       catalogItem: hit.catalogItem,
       matchMethod: hit.matchMethod,
       matchStatus: ELITE100_MATCH_STATUS.SAFE,
-      confidence: hit.matchMethod === "color_slug" ? 0.95 : 0.9,
+      confidence: confidenceByMethod[hit.matchMethod] ?? 0.9,
       parsed,
+    });
+  }
+
+  if (hasColorToken) {
+    const aliasHint = photoAliasLookup?.get(tokens.normalized);
+    return matchResult({
+      matchMethod: "catalog_color_missing",
+      matchStatus: ELITE100_MATCH_STATUS.CATALOG_COLOR_MISSING,
+      parsed,
+      warnings: ["catalog_color_missing"],
+      candidates: aliasHint
+        ? [{
+          filename_color: tokens.normalized || tokens.slug,
+          suggested_catalog_color: aliasHint.catalog_color_name,
+        }]
+        : [{
+          filename_color: tokens.normalized || tokens.slug,
+        }],
     });
   }
 
@@ -389,9 +469,7 @@ export function matchPhotoToCatalogItem(filename, catalogItems, fixtureFlat = []
     );
     if (fixtureHit) {
       const catalogItem = resolveCatalogItem(fixtureHit, ctx);
-      const tokens = extractFilenameColorTokens(parsed);
-      const compatible = colorNamesCompatible(tokens.normalized, catalogItem?.normalized_color_name);
-      if (catalogItem && compatible !== false) {
+      if (catalogItem) {
         return matchResult({
           catalogItem,
           matchMethod: "group_sort",
@@ -403,41 +481,7 @@ export function matchPhotoToCatalogItem(filename, catalogItems, fixtureFlat = []
     }
   }
 
-  const tokens = extractFilenameColorTokens(parsed);
-  const hasColorToken = Boolean(tokens.normalized || tokens.slug);
-
   if (parsed.globalIndex != null) {
-    const indexHit = ctx.byGlobal.get(parsed.globalIndex) ?? ctx.fixtureByGlobal.get(parsed.globalIndex);
-    const catalogItem = resolveCatalogItem(indexHit, ctx);
-
-    if (catalogItem && hasColorToken) {
-      const slugMatch = tokens.slug && tokens.slug === catalogItem.product_slug;
-      const nameMatch = colorNamesCompatible(tokens.normalized, catalogItem.normalized_color_name);
-      if (slugMatch || nameMatch === true) {
-        return matchResult({
-          catalogItem,
-          matchMethod: "global_index",
-          matchStatus: ELITE100_MATCH_STATUS.SAFE,
-          confidence: 0.85,
-          parsed,
-        });
-      }
-      return matchResult({
-        matchMethod: "global_index_name_conflict",
-        matchStatus: ELITE100_MATCH_STATUS.GLOBAL_INDEX_NAME_CONFLICT,
-        parsed,
-        warnings: ["global_index_name_conflict"],
-        conflictCatalogItem: catalogItem,
-        candidates: [{
-          catalogItem,
-          matchMethod: "global_index",
-          filename_color: tokens.normalized || tokens.slug,
-        }],
-      });
-    }
-  }
-
-  if (!hasColorToken && parsed.globalIndex != null) {
     return matchResult({
       matchMethod: "none",
       matchStatus: ELITE100_MATCH_STATUS.UNMATCHED,
@@ -466,6 +510,16 @@ export function assessImportPlanSafety(entries) {
         filename_color: extractFilenameColorTokens(entry.parsed).normalized
           || extractFilenameColorTokens(entry.parsed).slug,
         conflict_color: entry.conflictCatalogItem?.color_name ?? null,
+        global_index: entry.parsed?.globalIndex ?? null,
+      });
+    } else if (entry.matchStatus === ELITE100_MATCH_STATUS.CATALOG_COLOR_MISSING) {
+      const tokens = extractFilenameColorTokens(entry.parsed);
+      const aliasHint = entry.candidates?.[0]?.suggested_catalog_color ?? null;
+      blockers.push({
+        filename: label,
+        reason: "catalog_color_missing",
+        filename_color: tokens.normalized || tokens.slug || null,
+        suggested_catalog_color: aliasHint,
         global_index: entry.parsed?.globalIndex ?? null,
       });
     } else if (entry.matchStatus === ELITE100_MATCH_STATUS.AMBIGUOUS) {
@@ -575,6 +629,7 @@ export function buildManualVisualAssetRow({
       matchMethod === "global_index" ||
       matchMethod === "color_slug" ||
       matchMethod === "color_name" ||
+      matchMethod === "photo_filename_alias" ||
       matchMethod === "group_sort"
       ? "manual"
       : "none",
@@ -608,6 +663,7 @@ export function formatManualPhotoDryRunEntry(entry) {
     match_method: entry.matchMethod ?? null,
     filename_color: tokens?.normalized || tokens?.slug || null,
     conflict_color: entry.conflictCatalogItem?.color_name ?? null,
+    suggested_catalog_color: entry.candidates?.[0]?.suggested_catalog_color ?? null,
     global_index: entry.parsed?.globalIndex ?? null,
     source_file: entry.fullPath ?? entry.filename ?? null,
     planned_thumb_path: entry.storagePaths?.thumbPath ?? null,
@@ -629,6 +685,9 @@ export function computeManualPhotoDryRunSummary(entries) {
   const conflicts = list.filter(
     (e) => e.matchStatus === ELITE100_MATCH_STATUS.GLOBAL_INDEX_NAME_CONFLICT
   );
+  const catalogColorMissing = list.filter(
+    (e) => e.matchStatus === ELITE100_MATCH_STATUS.CATALOG_COLOR_MISSING
+  );
   const ambiguous = list.filter((e) => e.matchStatus === ELITE100_MATCH_STATUS.AMBIGUOUS);
   const unmatched = list.filter((e) => e.matchStatus === ELITE100_MATCH_STATUS.UNMATCHED);
   const oversized = list.filter((e) => e.warnings?.includes("source_oversized"));
@@ -640,6 +699,7 @@ export function computeManualPhotoDryRunSummary(entries) {
     safe_matches: safeMatches.length,
     mapping_override_matches: mappingOverrides.length,
     conflicts: conflicts.length,
+    catalog_color_missing: catalogColorMissing.length,
     ambiguous: ambiguous.length,
     unmatched: unmatched.length,
     oversized_sources: oversized.length,
@@ -648,6 +708,7 @@ export function computeManualPhotoDryRunSummary(entries) {
     write_block_reasons: [...new Set(safety.blockers.map((b) => b.reason))],
     safe_matches_list: safeMatches.map(formatManualPhotoDryRunEntry),
     conflicts_list: conflicts.map(formatManualPhotoDryRunEntry),
+    catalog_color_missing_list: catalogColorMissing.map(formatManualPhotoDryRunEntry),
     ambiguous_list: ambiguous.map(formatManualPhotoDryRunEntry),
     unmatched_list: unmatched.map(formatManualPhotoDryRunEntry),
     mapping_override_list: mappingOverrides.map(formatManualPhotoDryRunEntry),

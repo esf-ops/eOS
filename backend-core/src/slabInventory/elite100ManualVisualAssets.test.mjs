@@ -17,6 +17,7 @@ import {
   extractFilenameColorTokens,
   parsePhotoMatchMapContent,
   buildPhotoMatchMapLookup,
+  buildPhotoFilenameAliasLookup,
   slugifyElite100ColorName,
   ELITE100_MANUAL_SOURCE_SYSTEM,
   ELITE100_MATCH_STATUS,
@@ -89,12 +90,51 @@ test("matchPhotoToCatalogItem resolves India Black Pearl at index 100", () => {
   assert.notEqual(m.catalogItem.color_name, "Skara Brae");
 });
 
-test("matchPhotoToCatalogItem flags global_index_name_conflict", () => {
+test("matchPhotoToCatalogItem reports catalog_color_missing for unknown filename color", () => {
   const m = matchPhotoToCatalogItem("79. Not Regal Arabescato_79.jpg", fullCatalog, flat);
-  assert.equal(m.matchStatus, ELITE100_MATCH_STATUS.GLOBAL_INDEX_NAME_CONFLICT);
-  assert.equal(m.matchMethod, "global_index_name_conflict");
-  assert.equal(m.conflictCatalogItem.color_name, "Regal Arabescato Gold");
-  assert.ok(m.warnings.includes("global_index_name_conflict"));
+  assert.equal(m.matchStatus, ELITE100_MATCH_STATUS.CATALOG_COLOR_MISSING);
+  assert.equal(m.matchMethod, "catalog_color_missing");
+  assert.ok(m.warnings.includes("catalog_color_missing"));
+  assert.equal(m.catalogItem, null);
+});
+
+test("matchPhotoToCatalogItem resolves Whitendale via approved photo alias", () => {
+  const m = matchPhotoToCatalogItem("81. Whitendale_81.jpg", fullCatalog, flat);
+  assert.equal(m.matchStatus, ELITE100_MATCH_STATUS.SAFE);
+  assert.equal(m.matchMethod, "photo_filename_alias");
+  assert.equal(m.catalogItem.color_name, "Whitenedale");
+  assert.notEqual(m.catalogItem.color_name, "Solitaj");
+});
+
+test("matchPhotoToCatalogItem resolves Skys The Limit via approved photo alias", () => {
+  const m = matchPhotoToCatalogItem("85. Skys_The_Limit_85.jpg", fullCatalog, flat);
+  assert.equal(m.matchStatus, ELITE100_MATCH_STATUS.SAFE);
+  assert.equal(m.matchMethod, "photo_filename_alias");
+  assert.equal(m.catalogItem.color_name, "Sky's the Limit");
+  assert.notEqual(m.catalogItem.color_name, "Granada Beige");
+});
+
+test("matchPhotoToCatalogItem resolves Classic Gray via approved photo alias", () => {
+  const m = matchPhotoToCatalogItem("92. Classic Gray.jpg", fullCatalog, flat);
+  assert.equal(m.matchStatus, ELITE100_MATCH_STATUS.SAFE);
+  assert.equal(m.matchMethod, "photo_filename_alias");
+  assert.equal(m.catalogItem.color_name, "Classic Grey");
+  assert.notEqual(m.catalogItem.color_name, "Everleigh");
+});
+
+test("matchPhotoToCatalogItem never uses global index when filename has color name", () => {
+  const m = matchPhotoToCatalogItem("81. Unknown Color Name_81.jpg", fullCatalog, flat);
+  assert.equal(m.matchStatus, ELITE100_MATCH_STATUS.CATALOG_COLOR_MISSING);
+  assert.equal(m.catalogItem, null);
+});
+
+test("buildPhotoFilenameAliasLookup maps approved aliases to catalog items", () => {
+  const lookup = buildPhotoFilenameAliasLookup(
+    [{ source_color_name: "Whitendale", catalog_color_name: "Whitenedale" }],
+    fullCatalog
+  );
+  assert.ok(lookup.has("whitendale"));
+  assert.equal(lookup.get("whitendale").catalogItem.color_name, "Whitenedale");
 });
 
 test("matchPhotoToCatalogItem by color slug", () => {
@@ -129,8 +169,9 @@ test("assessImportPlanSafety blocks conflicts and unmatched", () => {
     },
     {
       filename: "missing.jpg",
-      matchStatus: ELITE100_MATCH_STATUS.UNMATCHED,
-      catalogItem: null,
+      matchStatus: ELITE100_MATCH_STATUS.CATALOG_COLOR_MISSING,
+      parsed: { globalIndex: 81, colorText: "Unknown" },
+      candidates: [{ filename_color: "unknown" }],
     },
   ];
   const safety = assessImportPlanSafety(plan);
