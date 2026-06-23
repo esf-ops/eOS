@@ -56,6 +56,10 @@ import {
   getCustomerOutputBlockReason,
   UNSAVED_QUOTE_OUTPUT_MESSAGE
 } from "./lib/quoteOutputGate";
+import {
+  resolveDefaultEnteredBy,
+  shouldAutoApplyEnteredBy
+} from "./lib/enteredByDefaults";
 
 const MATERIAL_GROUPS = [
   "Group Promo",
@@ -301,15 +305,6 @@ type QuoteHydrationStatus = "not_requested" | "loading" | "loaded" | "failed";
  *
  * No backend call required — works off `session.user.email` only.
  */
-function deriveDisplayNameFromEmail(email: string): string {
-  const e = String(email || "").trim();
-  if (!e) return "";
-  const local = e.includes("@") ? e.split("@")[0] : e;
-  const words = local.replace(/[._-]+/g, " ").split(/\s+/).filter(Boolean);
-  if (!words.length) return e;
-  return words.map((w) => w[0]?.toUpperCase() + w.slice(1).toLowerCase()).join(" ");
-}
-
 function userInitialsFor(name: string, email: string): string {
   const n = String(name || "").trim();
   if (n) {
@@ -479,6 +474,9 @@ export default function InternalEstimateApp() {
   // primaryColorLabel is const-declared below save hooks; read via ref to avoid TDZ in deps.
   const primaryColorLabelRef = useRef("");
   const pendingEmailModalAfterSaveRef = useRef(false);
+  /** When false, fresh quotes auto-sync Entered by from the signed-in user. */
+  const enteredByUserEditedRef = useRef(false);
+  const defaultEnteredByRef = useRef("");
 
   const [calcBusy, setCalcBusy] = useState(false);
   const [calcError, setCalcError] = useState<string | null>(null);
@@ -1312,6 +1310,8 @@ export default function InternalEstimateApp() {
     setCustomerDisplayGroups(Object.fromEntries(MATERIAL_GROUPS.map((g) => [g, false])));
     setComparisonGroupColorLabels(Object.fromEntries(MATERIAL_GROUPS.map((g) => [g, ""])));
     setCustomerFacingNotes("");
+    enteredByUserEditedRef.current = false;
+    setEnteredBy(defaultEnteredByRef.current);
     const u = new URL(window.location.href);
     u.searchParams.delete("quoteId");
     window.history.replaceState({}, "", `${u.pathname}${u.search}${u.hash}`);
@@ -2016,9 +2016,14 @@ export default function InternalEstimateApp() {
    * future System Admin link / preferences page can read it.
    */
   void userId;
-  const userDisplayName = useMemo(
-    () => userMetaName || deriveDisplayNameFromEmail(userEmail) || "Signed in",
+  const defaultEnteredBy = useMemo(
+    () => resolveDefaultEnteredBy(userMetaName, userEmail),
     [userMetaName, userEmail]
+  );
+  defaultEnteredByRef.current = defaultEnteredBy;
+  const userDisplayName = useMemo(
+    () => defaultEnteredBy || "Signed in",
+    [defaultEnteredBy]
   );
   const userDisplayEmail = userEmail;
   const userChipSubtitle = useMemo(() => {
@@ -2034,12 +2039,10 @@ export default function InternalEstimateApp() {
   );
 
   useEffect(() => {
-    if (!supabase || !sessionToken) return;
-    void supabase.auth.getSession().then(({ data }) => {
-      const em = data.session?.user?.email;
-      if (em) setEnteredBy((prev) => (prev.trim() ? prev : em));
-    });
-  }, [sessionToken, supabase]);
+    if (!sessionToken || !defaultEnteredBy) return;
+    if (!shouldAutoApplyEnteredBy(urlQuoteId, enteredByUserEditedRef.current)) return;
+    setEnteredBy(defaultEnteredBy);
+  }, [sessionToken, urlQuoteId, defaultEnteredBy]);
 
   useEffect(() => {
     hydrationRanRef.current = false;
@@ -2094,7 +2097,10 @@ export default function InternalEstimateApp() {
         setState(String(q.state ?? ""));
         if (q.branch) setBranch(String(q.branch));
         if (q.sales_rep) setSalesRep(String(q.sales_rep));
-        if (q.entered_by) setEnteredBy(String(q.entered_by));
+        if (q.entered_by) {
+          enteredByUserEditedRef.current = true;
+          setEnteredBy(String(q.entered_by));
+        }
         if (q.project_type) setProjectType(String(q.project_type));
         const snap = (q.calculation_snapshot as Record<string, unknown>) || {};
         const iu = (snap.internal_ui as Record<string, unknown>) || {};
@@ -2780,7 +2786,14 @@ export default function InternalEstimateApp() {
                   </label>
                   <label>
                     Entered by
-                    <input value={enteredBy} onChange={(e) => setEnteredBy(e.target.value)} placeholder="Defaults from sign-in" />
+                    <input
+                      value={enteredBy}
+                      onChange={(e) => {
+                        enteredByUserEditedRef.current = true;
+                        setEnteredBy(e.target.value);
+                      }}
+                      placeholder="Defaults from sign-in"
+                    />
                   </label>
                   {/* Color TBD is captured per-room in the Room builder — no project-wide toggle needed */}
                   <p className="muted small" style={{ margin: 0 }}>
