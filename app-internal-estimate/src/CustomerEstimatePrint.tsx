@@ -261,49 +261,79 @@ export default function CustomerEstimatePrint(props: CustomerEstimatePrintProps)
               ? "Illustrative only — alternate material tier pricing for the rooms shown. Other rooms use the selected material above."
               : "Illustrative only — shows estimated area totals at alternate material tiers with the same scope and add-ons."}
           </p>
-          <table className="cep-table cep-table-compact cep-table-amounts cep-comparison-table cep-comparison-table-print">
-            <thead>
-              <tr>
-                <th>Room / area</th>
-                {display.roomComparisonTable.selectedGroups.map((g) => (
-                  <th key={g.group} className="cep-num">
-                    {g.group}
-                    {g.colorLabel ? <span className="cep-muted-inline"> · {g.colorLabel}</span> : null}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {display.roomComparisonTable.roomRows.map((row) => (
-                <tr key={row.roomId}>
-                  <td>{row.roomDisplayName}</td>
-                  {display.roomComparisonTable!.selectedGroups.map((g) => {
-                    const isActive = !row.activeGroups || row.activeGroups.includes(g.group);
-                    const amount = row.groupDisplayTotals[g.group];
-                    return (
-                      <td key={g.group} className="cep-num cep-amt">
-                        {isActive && amount != null ? formatDisplayDollars(amount) : "—"}
-                      </td>
-                    );
-                  })}
-                </tr>
+          {display.roomComparisonTable.roomBlocks.map((roomBlock) => (
+            <div key={roomBlock.roomId} className="cep-comparison-room-block">
+              <h3 className="cep-h3">{roomBlock.roomDisplayName}</h3>
+              {roomBlock.groupBlocks.map((groupBlock) => (
+                <div key={`${roomBlock.roomId}-${groupBlock.group}`} className="cep-comparison-group-block">
+                  <p className="cep-comparison-group-heading">
+                    <strong>{groupBlock.group}</strong>
+                    {groupBlock.colorLabel ? (
+                      <span className="cep-muted-inline"> · {groupBlock.colorLabel}</span>
+                    ) : null}
+                  </p>
+                  <table className="cep-table cep-table-compact cep-table-amounts cep-comparison-detail-table">
+                    <tbody>
+                      {groupBlock.countertopDisplay > 0 ? (
+                        <tr>
+                          <td>Countertop material</td>
+                          <td className="cep-num cep-amt">
+                            {formatDisplayDollars(groupBlock.countertopDisplay)}
+                          </td>
+                        </tr>
+                      ) : null}
+                      {groupBlock.backsplashDisplay > 0 ? (
+                        <tr>
+                          <td>4-inch backsplash material</td>
+                          <td className="cep-num cep-amt">
+                            {formatDisplayDollars(groupBlock.backsplashDisplay)}
+                          </td>
+                        </tr>
+                      ) : null}
+                      {groupBlock.fhbDisplay > 0 ? (
+                        <tr>
+                          <td>Full-height backsplash material</td>
+                          <td className="cep-num cep-amt">
+                            {formatDisplayDollars(groupBlock.fhbDisplay)}
+                          </td>
+                        </tr>
+                      ) : null}
+                      {groupBlock.addonsDisplay > 0 ? (
+                        <tr>
+                          <td>Add-ons / fixtures</td>
+                          <td className="cep-num cep-amt">
+                            {formatDisplayDollars(groupBlock.addonsDisplay)}
+                          </td>
+                        </tr>
+                      ) : null}
+                      <tr className="cep-comparison-room-total-row">
+                        <td><strong>Room total</strong></td>
+                        <td className="cep-num cep-amt">
+                          <strong>{formatDisplayDollars(groupBlock.roomTotalDisplay)}</strong>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
               ))}
-            </tbody>
-            <tfoot>
-              <tr>
-                <td>
-                  <strong>
-                    {display.roomComparisonTable.isPerRoomMode ? "Subtotal (shown rooms)" : "Estimated project total"}
-                  </strong>
-                </td>
-                {display.roomComparisonTable.selectedGroups.map((g) => (
-                  <td key={g.group} className="cep-num cep-amt">
-                    <strong>{formatDisplayDollars(display.roomComparisonTable!.projectDisplayTotals[g.group] ?? 0)}</strong>
-                  </td>
-                ))}
-              </tr>
-            </tfoot>
-          </table>
+            </div>
+          ))}
+          <div className="cep-comparison-project-totals">
+            <p className="cep-comparison-project-totals-label">
+              <strong>
+                {display.roomComparisonTable.isPerRoomMode ? "Subtotal (shown rooms)" : "Estimated project total"}
+              </strong>
+            </p>
+            {display.roomComparisonTable.selectedGroups.map((g) => (
+              <p key={g.group} className="cep-comparison-project-total-line">
+                {g.group}
+                {g.colorLabel ? ` · ${g.colorLabel}` : ""}:{" "}
+                <strong>
+                  {formatDisplayDollars(display.roomComparisonTable!.projectDisplayTotals[g.group] ?? 0)}
+                </strong>
+              </p>
+            ))}
+          </div>
         </section>
       ) : null}
 

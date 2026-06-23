@@ -67,7 +67,25 @@ export type CustomerVanityScopeNote = {
   note: string;
 };
 
-/** Per-room row in the optional material group comparison table. */
+/** Per-room material option with itemized customer-safe comparison lines. */
+export type CustomerPrintComparisonGroupBlock = {
+  group: string;
+  colorLabel?: string;
+  countertopDisplay: number;
+  backsplashDisplay: number;
+  fhbDisplay: number;
+  addonsDisplay: number;
+  roomTotalDisplay: number;
+};
+
+export type CustomerPrintComparisonRoomBlock = {
+  roomId: string;
+  roomDisplayName: string;
+  isVanity: boolean;
+  groupBlocks: CustomerPrintComparisonGroupBlock[];
+};
+
+/** Per-room row in the optional material group comparison table (legacy matrix footer). */
 export type CustomerPrintComparisonRoomRow = {
   roomId: string;
   roomDisplayName: string;
@@ -86,6 +104,8 @@ export type CustomerPrintComparisonRoomRow = {
 
 /** Full optional material group comparison table for the customer PDF. */
 export type CustomerPrintComparisonTable = {
+  /** Itemized comparison blocks per room and material option (customer PDF). */
+  roomBlocks: CustomerPrintComparisonRoomBlock[];
   roomRows: CustomerPrintComparisonRoomRow[];
   /** Estimated project total per selected group (sum of room totals + unassigned). */
   projectDisplayTotals: Record<string, number>;
@@ -215,6 +235,7 @@ export function buildCustomerAddonDetailLines(measuredRooms: MeasuredRoom[]): Cu
 function buildEstimateSummaryRows(params: {
   summaryCounterDisplay: number;
   summaryBacksplashDisplay: number;
+  summaryFhbDisplay: number;
   summaryAddonsDisplay: number;
   summaryEdgeDisplay: number;
   hasAddons: boolean;
@@ -223,9 +244,22 @@ function buildEstimateSummaryRows(params: {
   visibleCustomerLines: CustomerEstimateDisplayLineItem[];
 }): CustomerEstimateSummaryRow[] {
   const rows: CustomerEstimateSummaryRow[] = [
-    { key: "countertop", label: "Countertop material", displayAmount: params.summaryCounterDisplay },
-    { key: "backsplash", label: "Backsplash material", displayAmount: params.summaryBacksplashDisplay }
+    { key: "countertop", label: "Countertop material", displayAmount: params.summaryCounterDisplay }
   ];
+  if (params.summaryBacksplashDisplay > 0) {
+    rows.push({
+      key: "backsplash",
+      label: "4-inch backsplash material",
+      displayAmount: params.summaryBacksplashDisplay
+    });
+  }
+  if (params.summaryFhbDisplay > 0) {
+    rows.push({
+      key: "fhb",
+      label: "Full-height backsplash material",
+      displayAmount: params.summaryFhbDisplay
+    });
+  }
 
   // Specific catalog add-on lines instead of a single generic "Add-ons / fixtures" row.
   // Customer fixture lines (visibleCustomerLines) are rendered unconditionally below — they must
@@ -362,6 +396,121 @@ const MATERIAL_GROUP_ORDER = [
   "Remnant"
 ];
 
+function splitExactBySfWeights(totalExact: number, weights: number[]): number[] {
+  const w = weights.map((x) => Math.max(0, Number(x) || 0));
+  const sum = w.reduce((a, b) => a + b, 0);
+  if (totalExact <= 0 || sum <= 0) return w.map(() => 0);
+  return w.map((wei) => round2(totalExact * (wei / sum)));
+}
+
+function resolveRoomSplashAndFhbSf(room: CustomerRoomAreaCostBreakdown["rooms"][number]): {
+  backsplashSf: number;
+  fhbSf: number;
+} {
+  const combined = round2(Number(room.backsplashFhbSf) || 0);
+  const backsplashSf = round2(Number(room.backsplashSf) || (room.fhbSf == null ? combined : 0));
+  const fhbSf = round2(Number(room.fhbSf) || 0);
+  if (room.backsplashSf == null && room.fhbSf == null && combined > 0) {
+    return { backsplashSf: combined, fhbSf: 0 };
+  }
+  return { backsplashSf, fhbSf };
+}
+
+type ComparisonComponentsExact = {
+  countertop: number;
+  backsplash: number;
+  fhb: number;
+  addons: number;
+  roomTotal: number;
+};
+
+function computeComparisonGroupComponentsExact(
+  room: CustomerRoomAreaCostBreakdown["rooms"][number],
+  ratePerSqft: number,
+  fixedExtrasExact: number,
+  internalMaterialUseTax: boolean
+): ComparisonComponentsExact {
+  const addons = round2(fixedExtrasExact);
+  if (room.isVanity) {
+    return { countertop: 0, backsplash: 0, fhb: 0, addons, roomTotal: round2(room.roomTotalExact) };
+  }
+
+  const { backsplashSf, fhbSf } = resolveRoomSplashAndFhbSf(room);
+  const counterMat = round2(room.countertopSf * ratePerSqft);
+  const backsplashMat = round2(backsplashSf * ratePerSqft);
+  const fhbMat = round2(fhbSf * ratePerSqft);
+  const splashFhbMat = round2(backsplashMat + fhbMat);
+
+  let counterTotal = counterMat;
+  let backsplashTotal = backsplashMat;
+  let fhbTotal = fhbMat;
+
+  if (internalMaterialUseTax) {
+    const policy = resolveInternalEstimateMaterialTaxPolicy();
+    const amounts = computeInternalEstimateMaterialUseTaxAmounts(counterMat, splashFhbMat, policy);
+    counterTotal = round2(counterMat + amounts.countertopMaterialUseTaxAmount);
+    const splashFhbWithTax = round2(splashFhbMat + amounts.backsplashMaterialUseTaxAmount);
+    if (splashFhbMat > 0) {
+      const parts = splitExactBySfWeights(splashFhbWithTax, [backsplashMat, fhbMat]);
+      backsplashTotal = parts[0];
+      fhbTotal = parts[1];
+    } else {
+      backsplashTotal = 0;
+      fhbTotal = 0;
+    }
+  }
+
+  return {
+    countertop: counterTotal,
+    backsplash: backsplashTotal,
+    fhb: fhbTotal,
+    addons,
+    roomTotal: round2(counterTotal + backsplashTotal + fhbTotal + addons)
+  };
+}
+
+function comparisonGroupDisplayAmounts(components: ComparisonComponentsExact): {
+  countertopDisplay: number;
+  backsplashDisplay: number;
+  fhbDisplay: number;
+  addonsDisplay: number;
+  roomTotalDisplay: number;
+} {
+  const roomTotalDisplay = roundCustomerDisplay(components.roomTotal);
+  const displays = allocateCustomerDisplayFives(
+    [components.countertop, components.backsplash, components.fhb, components.addons],
+    roomTotalDisplay
+  );
+  return {
+    countertopDisplay: displays[0] ?? 0,
+    backsplashDisplay: displays[1] ?? 0,
+    fhbDisplay: displays[2] ?? 0,
+    addonsDisplay: displays[3] ?? 0,
+    roomTotalDisplay
+  };
+}
+
+function buildComparisonGroupBlock(
+  room: CustomerRoomAreaCostBreakdown["rooms"][number],
+  group: string,
+  colorLabel: string | undefined,
+  ratePerSqft: number,
+  fixedExtrasExact: number,
+  internalMaterialUseTax: boolean
+): CustomerPrintComparisonGroupBlock {
+  const exact = computeComparisonGroupComponentsExact(room, ratePerSqft, fixedExtrasExact, internalMaterialUseTax);
+  const display = comparisonGroupDisplayAmounts(exact);
+  return {
+    group,
+    colorLabel,
+    countertopDisplay: display.countertopDisplay,
+    backsplashDisplay: display.backsplashDisplay,
+    fhbDisplay: display.fhbDisplay,
+    addonsDisplay: display.addonsDisplay,
+    roomTotalDisplay: display.roomTotalDisplay
+  };
+}
+
 /**
  * Compute the display total for a single room at a given comparison group rate.
  * For vanity program rooms the display total is fixed regardless of group.
@@ -381,20 +530,23 @@ function computeRoomGroupDisplayTotal(
   if (room.isVanity) {
     return room.fixedDisplayTotal ?? roundCustomerDisplay(room.roomTotalExact);
   }
+  const { backsplashSf, fhbSf } = resolveRoomSplashAndFhbSf(room);
   const counterMat = round2(room.countertopSf * ratePerSqft);
-  const backsplashMat = round2(room.backsplashFhbSf * ratePerSqft);
+  const backsplashMat = round2(backsplashSf * ratePerSqft);
+  const fhbMat = round2(fhbSf * ratePerSqft);
+  const splashFhbMat = round2(backsplashMat + fhbMat);
   if (internalMaterialUseTax) {
     const amounts = computeInternalEstimateMaterialUseTaxAmounts(
       counterMat,
-      backsplashMat,
+      splashFhbMat,
       resolveInternalEstimateMaterialTaxPolicy()
     );
     return roundCustomerDisplay(
-      round2(counterMat + backsplashMat + amounts.totalMaterialUseTaxAmount + fixedExtrasExact)
+      round2(counterMat + splashFhbMat + amounts.totalMaterialUseTaxAmount + fixedExtrasExact)
     );
   }
   const useTax = taxPct > 0 ? round2(counterMat * (taxPct / 100)) : 0;
-  return roundCustomerDisplay(round2(counterMat + useTax + backsplashMat + fixedExtrasExact));
+  return roundCustomerDisplay(round2(counterMat + useTax + splashFhbMat + fixedExtrasExact));
 }
 
 /**
@@ -451,6 +603,7 @@ function buildRoomComparisonTable(params: {
       });
 
     const roomRows: CustomerPrintComparisonRoomRow[] = [];
+    const roomBlocks: CustomerPrintComparisonRoomBlock[] = [];
 
     for (const room of roomAreaBreakdown.rooms) {
       const roomGroups = room.customerComparisonGroups ?? [];
@@ -461,10 +614,21 @@ function buildRoomComparisonTable(params: {
       const fixedExtrasExact = round2(addonSum + customSum);
 
       const groupDisplayTotals: Record<string, number> = {};
+      const groupBlocks: CustomerPrintComparisonGroupBlock[] = [];
       for (const g of roomGroups) {
         const rate = rateByGroup.get(g);
         if (rate == null) continue;
-        groupDisplayTotals[g] = computeRoomGroupDisplayTotal(room, rate, taxPct, fixedExtrasExact, internalMaterialUseTax);
+        const colorLabel = room.customerComparisonColorLabels?.[g]?.trim() || undefined;
+        const block = buildComparisonGroupBlock(
+          room,
+          g,
+          colorLabel,
+          rate,
+          fixedExtrasExact,
+          internalMaterialUseTax
+        );
+        groupBlocks.push(block);
+        groupDisplayTotals[g] = block.roomTotalDisplay;
       }
 
       roomRows.push({
@@ -473,6 +637,12 @@ function buildRoomComparisonTable(params: {
         isVanity: room.isVanity,
         groupDisplayTotals,
         activeGroups: roomGroups
+      });
+      roomBlocks.push({
+        roomId: room.roomId,
+        roomDisplayName: room.displayName,
+        isVanity: room.isVanity,
+        groupBlocks
       });
     }
 
@@ -484,7 +654,7 @@ function buildRoomComparisonTable(params: {
       projectDisplayTotals[sg.group] = round2(roomSum);
     }
 
-    return { roomRows, projectDisplayTotals, selectedGroups, isPerRoomMode: true };
+    return { roomBlocks, roomRows, projectDisplayTotals, selectedGroups, isPerRoomMode: true };
   }
 
   // Legacy global mode: all rooms show globally-selected groups
@@ -496,6 +666,7 @@ function buildRoomComparisonTable(params: {
   }));
 
   const roomRows: CustomerPrintComparisonRoomRow[] = [];
+  const roomBlocks: CustomerPrintComparisonRoomBlock[] = [];
 
   for (const room of roomAreaBreakdown.rooms) {
     const addonSum = round2(room.addons.reduce((s, a) => s + a.amountExact, 0));
@@ -503,14 +674,18 @@ function buildRoomComparisonTable(params: {
     const fixedExtrasExact = round2(addonSum + customSum);
 
     const groupDisplayTotals: Record<string, number> = {};
+    const groupBlocks: CustomerPrintComparisonGroupBlock[] = [];
     for (const compRow of comparisonRows) {
-      groupDisplayTotals[compRow.group] = computeRoomGroupDisplayTotal(
+      const block = buildComparisonGroupBlock(
         room,
+        compRow.group,
+        compRow.comparisonColorLabel,
         compRow.ratePerSqft,
-        taxPct,
         fixedExtrasExact,
         internalMaterialUseTax
       );
+      groupBlocks.push(block);
+      groupDisplayTotals[compRow.group] = block.roomTotalDisplay;
     }
 
     roomRows.push({
@@ -518,6 +693,12 @@ function buildRoomComparisonTable(params: {
       roomDisplayName: room.displayName,
       isVanity: room.isVanity,
       groupDisplayTotals
+    });
+    roomBlocks.push({
+      roomId: room.roomId,
+      roomDisplayName: room.displayName,
+      isVanity: room.isVanity,
+      groupBlocks
     });
   }
 
@@ -527,7 +708,7 @@ function buildRoomComparisonTable(params: {
     projectDisplayTotals[compRow.group] = round2(roomSum + params.unassignedDisplayTotal);
   }
 
-  return { roomRows, projectDisplayTotals, selectedGroups, isPerRoomMode: false };
+  return { roomBlocks, roomRows, projectDisplayTotals, selectedGroups, isPerRoomMode: false };
 }
 
 function buildMaterialScopeGroups(selectedBreakdown: SelectedMaterialBreakdown): CustomerMaterialScopeGroup[] {
@@ -658,9 +839,24 @@ export function buildCustomerEstimateDisplayModel(
   const addonsExact = round2(params.measuredRooms.reduce((s, r) => s + (Number(r.extras) || 0), 0));
   const hasAddons = addonsExact !== 0;
 
+  const backsplashCombinedExact = round2(params.selectedBreakdown.totals.backsplashMaterial);
+  const bsSf = params.selectedBreakdown.totals.backsplashSf;
+  const fhbSf = params.selectedBreakdown.totals.fhbSf;
+  const backsplashCombinedDisplay = roundCustomerDisplay(backsplashCombinedExact);
+  let summaryBacksplashDisplay = backsplashCombinedDisplay;
+  let summaryFhbDisplay = 0;
+  if (fhbSf > 0 && bsSf > 0 && backsplashCombinedExact > 0) {
+    const parts = splitExactBySfWeights(backsplashCombinedExact, [bsSf, fhbSf]);
+    const displayParts = allocateCustomerDisplayFives(parts, backsplashCombinedDisplay);
+    summaryBacksplashDisplay = displayParts[0] ?? 0;
+    summaryFhbDisplay = displayParts[1] ?? 0;
+  } else if (fhbSf > 0 && bsSf <= 0) {
+    summaryBacksplashDisplay = 0;
+    summaryFhbDisplay = backsplashCombinedDisplay;
+  }
+
   const upgradedEdgeExact = round2(Math.max(0, Number(params.upgradedEdgeTotalExact) || 0));
   const summaryCounterDisplay = roundCustomerDisplay(countertopMaterialExact);
-  const summaryBacksplashDisplay = roundCustomerDisplay(backsplashMaterialExact);
   const summaryAddonsDisplay = hasAddons ? roundCustomerDisplay(addonsExact) : 0;
   const summaryEdgeDisplay = upgradedEdgeExact > 0 ? roundCustomerDisplay(upgradedEdgeExact) : 0;
   const summaryVisibleLinesDisplay = params.visibleCustomerLines.reduce(
@@ -680,6 +876,7 @@ export function buildCustomerEstimateDisplayModel(
   const estimateSummaryRows = buildEstimateSummaryRows({
     summaryCounterDisplay,
     summaryBacksplashDisplay,
+    summaryFhbDisplay,
     summaryAddonsDisplay,
     summaryEdgeDisplay,
     hasAddons,
