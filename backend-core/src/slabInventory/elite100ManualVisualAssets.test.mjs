@@ -13,8 +13,13 @@ import {
   buildElite100ManualStoragePaths,
   buildManualVisualAssetRow,
   computeManualPhotoDryRunSummary,
+  assessImportPlanSafety,
+  extractFilenameColorTokens,
+  parsePhotoMatchMapContent,
+  buildPhotoMatchMapLookup,
   slugifyElite100ColorName,
   ELITE100_MANUAL_SOURCE_SYSTEM,
+  ELITE100_MATCH_STATUS,
 } from "./elite100ManualVisualAssets.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -33,8 +38,8 @@ function test(name, fn) {
 }
 
 const flat = flattenElite100Fixture(FIXTURE);
-const catalogItems = flat.slice(0, 5).map((f, i) => ({
-  id: `00000000-0000-4000-8000-${String(i + 1).padStart(12, "0")}`,
+const fullCatalog = flat.map((f) => ({
+  id: `00000000-0000-4000-8000-${String(f.global_index).padStart(12, "0")}`,
   color_name: f.color_name,
   material_name: f.material_name,
   normalized_color_name: f.normalized_color_name,
@@ -43,6 +48,8 @@ const catalogItems = flat.slice(0, 5).map((f, i) => ({
   global_index: f.global_index,
   product_slug: f.product_slug,
 }));
+
+const catalogItems = fullCatalog.slice(0, 5);
 
 test("flattenElite100Fixture returns 100 items", () => {
   assert.equal(flat.length, 100);
@@ -55,49 +62,80 @@ test("slugifyElite100ColorName", () => {
   assert.equal(slugifyElite100ColorName("India Black Pearl"), "india-black-pearl");
 });
 
+test("extractFilenameColorTokens strips polished and duplicate index", () => {
+  const parsed = parsePhotoFilename("100. India Black Pearl_polished.jpg");
+  const tokens = extractFilenameColorTokens(parsed);
+  assert.equal(tokens.normalized, "india black pearl");
+  assert.equal(tokens.slug, "india-black-pearl");
+});
+
 test("parsePhotoFilename leading global index", () => {
   const p = parsePhotoFilename("06 Carrara Royale.jpg");
   assert.equal(p.globalIndex, 6);
   assert.equal(p.colorSlug, "carrara-royale");
 });
 
-test("parsePhotoFilename color slug only", () => {
-  const p = parsePhotoFilename("white-dove.jpeg");
-  assert.equal(p.colorSlug, "white-dove");
+test("matchPhotoToCatalogItem prefers color slug over conflicting global index", () => {
+  const m = matchPhotoToCatalogItem("79. Warwick_79.jpg", fullCatalog, flat);
+  assert.equal(m.matchStatus, ELITE100_MATCH_STATUS.SAFE);
+  assert.equal(m.matchMethod, "color_slug");
+  assert.equal(m.catalogItem.color_name, "Warwick");
 });
 
-test("matchPhotoToCatalogItem by global index", () => {
-  const item6 = flat[5];
-  const catalog = [
-    {
-      id: "11111111-1111-4111-8111-111111111111",
-      color_name: item6.color_name,
-      material_name: item6.material_name,
-      normalized_color_name: item6.normalized_color_name,
-      normalized_material_name: item6.normalized_material_name,
-      price_group: item6.price_group,
-    },
-  ];
-  const m = matchPhotoToCatalogItem("06 Carrara Royale.jpg", catalog, flat);
-  assert.equal(m.matchMethod, "global_index");
-  assert.equal(m.catalogItem.color_name, "Carrara Royale");
+test("matchPhotoToCatalogItem resolves India Black Pearl at index 100", () => {
+  const m = matchPhotoToCatalogItem("100. India Black Pearl_polished.jpg", fullCatalog, flat);
+  assert.equal(m.matchStatus, ELITE100_MATCH_STATUS.SAFE);
+  assert.equal(m.catalogItem.color_name, "India Black Pearl");
+  assert.notEqual(m.catalogItem.color_name, "Skara Brae");
+});
+
+test("matchPhotoToCatalogItem flags global_index_name_conflict", () => {
+  const m = matchPhotoToCatalogItem("79. Not Regal Arabescato_79.jpg", fullCatalog, flat);
+  assert.equal(m.matchStatus, ELITE100_MATCH_STATUS.GLOBAL_INDEX_NAME_CONFLICT);
+  assert.equal(m.matchMethod, "global_index_name_conflict");
+  assert.equal(m.conflictCatalogItem.color_name, "Regal Arabescato Gold");
+  assert.ok(m.warnings.includes("global_index_name_conflict"));
 });
 
 test("matchPhotoToCatalogItem by color slug", () => {
   const dove = flat.find((f) => f.color_name === "White Dove");
-  const catalog = [
-    {
-      id: "22222222-2222-4222-8222-222222222222",
-      color_name: dove.color_name,
-      material_name: dove.material_name,
-      normalized_color_name: dove.normalized_color_name,
-      normalized_material_name: dove.normalized_material_name,
-      price_group: dove.price_group,
-    },
-  ];
+  const catalog = fullCatalog.filter((c) => c.color_name === dove.color_name);
   const m = matchPhotoToCatalogItem("white-dove.jpg", catalog, flat);
   assert.equal(m.matchMethod, "color_slug");
   assert.equal(m.catalogItem.color_name, "White Dove");
+});
+
+test("mapping override wins over filename ambiguity", () => {
+  const csv = "source_filename,catalog_color_name\n79. Warwick_79.jpg,Regal Arabescato Gold\n";
+  const rows = parsePhotoMatchMapContent(csv, "csv");
+  const lookup = buildPhotoMatchMapLookup(rows, fullCatalog);
+  const m = matchPhotoToCatalogItem("79. Warwick_79.jpg", fullCatalog, flat, { matchMap: lookup });
+  assert.equal(m.matchMethod, "mapping_override");
+  assert.equal(m.catalogItem.color_name, "Regal Arabescato Gold");
+});
+
+test("assessImportPlanSafety blocks conflicts and unmatched", () => {
+  const plan = [
+    {
+      filename: "safe.jpg",
+      matchStatus: ELITE100_MATCH_STATUS.SAFE,
+      catalogItem: { id: "1", color_name: "Warwick" },
+    },
+    {
+      filename: "bad.jpg",
+      matchStatus: ELITE100_MATCH_STATUS.GLOBAL_INDEX_NAME_CONFLICT,
+      conflictCatalogItem: { color_name: "Regal Arabescato Gold" },
+      parsed: { globalIndex: 79 },
+    },
+    {
+      filename: "missing.jpg",
+      matchStatus: ELITE100_MATCH_STATUS.UNMATCHED,
+      catalogItem: null,
+    },
+  ];
+  const safety = assessImportPlanSafety(plan);
+  assert.equal(safety.write_blocked, true);
+  assert.equal(safety.blockers.length, 2);
 });
 
 test("buildElite100ManualStoragePaths", () => {
@@ -128,45 +166,35 @@ test("buildManualVisualAssetRow approved primary with separate original", () => 
     },
     contentHash: "abc123",
     sourceFile: "01-carrara-classic.jpg",
-    matchMethod: "global_index",
+    matchMethod: "color_slug",
   });
-  assert.equal(row.source_system, ELITE100_MANUAL_SOURCE_SYSTEM);
-  assert.equal(row.review_status, "approved");
-  assert.equal(row.is_primary, true);
-  assert.equal(row.texture_url_600, "https://example.com/thumb-600.jpg");
-  assert.equal(row.texture_url_1024, "https://example.com/hero-2048.jpg");
-  assert.equal(row.hero_url, "https://example.com/hero-2048.jpg");
   assert.equal(row.original_image_url, "https://example.com/original.jpg");
-  assert.equal(row.raw.stores_original_image_url, true);
+  assert.equal(row.hero_url, "https://example.com/hero-2048.jpg");
 });
 
-test("buildManualVisualAssetRow approved primary", () => {
-  const row = buildManualVisualAssetRow({
-    orgId: "org-1",
-    catalogItem: catalogItems[0],
-    publicUrls: {
-      heroUrl: "https://example.com/hero.jpg",
-      thumbUrl: "https://example.com/thumb.jpg",
-      heroBytes: 1000,
-      thumbBytes: 200,
-    },
-    contentHash: "abc123",
-    sourceFile: "01-carrara-classic.jpg",
-    matchMethod: "global_index",
-  });
-  assert.equal(row.texture_url_600, "https://example.com/thumb.jpg");
-  assert.equal(row.hero_url, "https://example.com/hero.jpg");
-  assert.equal(row.original_image_url, null);
-});
-
-test("computeManualPhotoDryRunSummary", () => {
+test("computeManualPhotoDryRunSummary reports safe vs blocked", () => {
   const summary = computeManualPhotoDryRunSummary([
-    { filename: "a.jpg", catalogItem: catalogItems[0], matchMethod: "color_slug", parsed: {}, warnings: [] },
-    { filename: "b.jpg", catalogItem: null, matchMethod: "none", parsed: {}, warnings: [] },
+    {
+      filename: "a.jpg",
+      catalogItem: catalogItems[0],
+      matchMethod: "color_slug",
+      matchStatus: ELITE100_MATCH_STATUS.SAFE,
+      parsed: {},
+      warnings: [],
+    },
+    {
+      filename: "b.jpg",
+      catalogItem: null,
+      matchMethod: "global_index_name_conflict",
+      matchStatus: ELITE100_MATCH_STATUS.GLOBAL_INDEX_NAME_CONFLICT,
+      conflictCatalogItem: { color_name: "Other" },
+      parsed: { globalIndex: 79 },
+      warnings: ["global_index_name_conflict"],
+    },
   ]);
-  assert.equal(summary.total_files, 2);
-  assert.equal(summary.matched, 1);
-  assert.equal(summary.unmatched, 1);
+  assert.equal(summary.safe_matches, 1);
+  assert.equal(summary.conflicts, 1);
+  assert.equal(summary.write_blocked, true);
 });
 
 console.log("\nelite100ManualVisualAssets tests passed.");

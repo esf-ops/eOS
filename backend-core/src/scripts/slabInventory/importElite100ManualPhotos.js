@@ -31,7 +31,7 @@
  *   SUPABASE_URL                         required for catalog match + writes
  *   SUPABASE_SERVICE_ROLE_KEY            required for writes
  *   ELITE100_FIXTURE_PATH                optional fixture for global index matching
- *   ELITE100_MANUAL_HERO_MAX_PX          default 2048 (processed hero long edge)
+ *   ELITE100_PHOTO_MATCH_MAP              optional CSV/JSON explicit filename → catalog mapping
  *   ELITE100_MANUAL_THUMB_MAX_PX         default 600
  */
 
@@ -58,6 +58,9 @@ import {
   formatManualPhotoDryRunEntry,
   hashPhotoContent,
   contentTypeForPhotoExtension,
+  parsePhotoMatchMapContent,
+  buildPhotoMatchMapLookup,
+  assessImportPlanSafety,
 } from "../../slabInventory/elite100ManualVisualAssets.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -76,6 +79,7 @@ const SOURCE_DIR =
 const FIXTURE_PATH =
   process.env.ELITE100_FIXTURE_PATH ||
   path.join(__dirname, "../../slabInventory/fixtures/elite100-2026.json");
+const MATCH_MAP_PATH = process.env.ELITE100_PHOTO_MATCH_MAP || null;
 const HERO_MAX_PX = Math.max(400, parseInt(process.env.ELITE100_MANUAL_HERO_MAX_PX || "2048", 10));
 const THUMB_MAX_PX = Math.max(200, parseInt(process.env.ELITE100_MANUAL_THUMB_MAX_PX || "600", 10));
 const HAS_SUPABASE = Boolean(SUPABASE_URL && SUPABASE_KEY && ORG_ID);
@@ -233,33 +237,45 @@ export async function writeManualVisualAssetRow(supabase, payload) {
   return { action: "updated", id: existing.id };
 }
 
-export async function buildImportPlan({ sourceDir, catalogItems, fixtureFlat, orgId, heroMaxPx }) {
+function loadPhotoMatchMap(catalogItems) {
+  if (!MATCH_MAP_PATH) return null;
+  if (!fs.existsSync(MATCH_MAP_PATH)) {
+    throw new Error(`ELITE100_PHOTO_MATCH_MAP not found: ${MATCH_MAP_PATH}`);
+  }
+  const content = fs.readFileSync(MATCH_MAP_PATH, "utf8");
+  const format = MATCH_MAP_PATH.toLowerCase().endsWith(".json") ? "json" : "csv";
+  const rows = parsePhotoMatchMapContent(content, format);
+  return buildPhotoMatchMapLookup(rows, catalogItems);
+}
+
+export async function buildImportPlan({ sourceDir, catalogItems, fixtureFlat, orgId, heroMaxPx, matchMap }) {
   const files = listLocalPhotos(sourceDir);
   return files.map((filename) => {
     const fullPath = path.join(sourceDir, filename);
-    const { catalogItem, matchMethod, confidence, parsed } = matchPhotoToCatalogItem(
-      filename,
-      catalogItems,
-      fixtureFlat
-    );
+    const match = matchPhotoToCatalogItem(filename, catalogItems, fixtureFlat, { matchMap });
+    const { catalogItem, matchMethod, matchStatus, confidence, parsed, warnings: matchWarnings, conflictCatalogItem, candidates } = match;
     const originalExt = path.extname(filename).toLowerCase() || ".jpg";
-    const storagePaths = catalogItem?.id
-      ? buildElite100ManualStoragePaths(orgId, catalogItem.id, catalogItem.product_slug, {
-          heroMaxPx,
-          originalExt,
-        })
-      : null;
+    const storagePaths =
+      catalogItem?.id && matchStatus === "safe"
+        ? buildElite100ManualStoragePaths(orgId, catalogItem.id, catalogItem.product_slug, {
+            heroMaxPx,
+            originalExt,
+          })
+        : null;
     const stat = fs.existsSync(fullPath) ? fs.statSync(fullPath) : null;
-    const warnings = [];
+    const warnings = [...(matchWarnings ?? [])];
     if (stat && stat.size > 15 * 1024 * 1024) warnings.push("source_oversized");
 
     return {
       filename,
       fullPath,
-      catalogItem,
+      catalogItem: matchStatus === "safe" ? catalogItem : null,
       matchMethod,
+      matchStatus,
       confidence,
       parsed,
+      conflictCatalogItem,
+      candidates,
       storagePaths,
       warnings,
       sourceBytes: stat?.size ?? null,
@@ -276,6 +292,7 @@ async function main() {
   console.log(`  Org ID:            ${ORG_ID ?? "(not provided)"}`);
   console.log(`  Has Supabase:      ${HAS_SUPABASE}`);
   console.log(`  Write enabled:     ${WRITE_ENABLED}`);
+  console.log(`  Match map:         ${MATCH_MAP_PATH ?? "(none)"}`);
   console.log(`  Hero max px:       ${HERO_MAX_PX}`);
   console.log(`  Thumb max px:      ${THUMB_MAX_PX}`);
   console.log(`  sips available:    ${hasSips()}`);
@@ -315,12 +332,15 @@ async function main() {
     }));
   }
 
+  const matchMap = loadPhotoMatchMap(catalogItems);
+
   const plan = await buildImportPlan({
     sourceDir: SOURCE_DIR,
     catalogItems,
     fixtureFlat,
     orgId: ORG_ID,
     heroMaxPx: HERO_MAX_PX,
+    matchMap,
   });
 
   if (!plan.length) {
@@ -337,9 +357,19 @@ async function main() {
   }
   console.log("");
 
+  if (summary.write_blocked) {
+    console.error("── Import blocked — unsafe matches detected ──");
+    console.error(JSON.stringify({ blockers: summary.blockers }, null, 2));
+    console.error(
+      "Resolve conflicts/unmatched files or provide ELITE100_PHOTO_MATCH_MAP overrides before writing."
+    );
+    if (WRITE_ENABLED) process.exit(1);
+  }
+
   if (!WRITE_ENABLED) {
     console.log("Dry-run complete. No uploads or DB writes performed.");
     console.log("To apply: ELITE100_MANUAL_PHOTO_WRITE_ENABLED=1 + Supabase creds + SLABOS_ORGANIZATION_ID");
+    console.log("Apply is blocked until all files are safe matches (no conflicts, ambiguous, or unmatched).");
     return;
   }
 
