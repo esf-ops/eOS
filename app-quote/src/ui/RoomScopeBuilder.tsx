@@ -1466,15 +1466,6 @@ export default function RoomScopeBuilder({
                       />
                     </label>
                   ) : null}
-                  <label>
-                    FHB electrical cutouts ($30 ea)
-                    <input
-                      type="number"
-                      min={0}
-                      value={room.fhbOutlets || ""}
-                      onChange={(e) => onRoomsChange(updateRoom(rooms, room.id, { fhbOutlets: Number(e.target.value) || 0 }))}
-                    />
-                  </label>
                 </div>
 
                 {room.fhbMode === "Guided Shape" ? (

@@ -249,28 +249,6 @@ function sumRoomAddons(room: RoomDraft): { extras: number; addons: MeasuredRoom[
   return { extras, addons, lines };
 }
 
-/** Full-height backsplash sf used for FHB outlet charges — mirrors `measureRoomDraft` (non-vanity). */
-function totalFhbScopeSfForOutletCharges(room: RoomDraft): number {
-  if (room.roomType === "Vanity" && room.vanity.isVanityProgram !== false) return 0;
-  let fhb = 0;
-  if (room.calcMode === "Guided Shape") {
-    const norm = normalizeGuidedShapeRoom(room);
-    const g = sumAllGuidedShapeGroups(norm);
-    fhb += g.fhb;
-  }
-  if (room.fhbMode === "Manual Sq Ft") fhb += Number(room.fhbDirectSf) || 0;
-  if (room.fhbMode === "Guided Shape") {
-    const fh = sumGuidedPiecesByType(room.fhbPieces);
-    fhb += fh.fhb + fh.counter;
-  }
-  return fhb;
-}
-
-/**
- * Aggregate per-room catalog add-ons + tear + FHB electrical outlets into backend `addOns`
- * (`PROTOTYPE_ADDON_UNIT_PRICES` / `calculateAddOns`). Keeps internal calculate/save payloads aligned
- * with live `measureRoomDraft` room extras when `applyGlobalAddOns` is false in the preview runner.
- */
 /** Resolve use tax % for a room (countertop material only). */
 export function resolveRoomUseTaxPercent(room: RoomDraft, projectDefaultPercent: number): number {
   const mode = room.useTaxMode ?? "inherit_project";
@@ -353,12 +331,6 @@ export function mergeRoomDraftsIntoGlobalAddOns(rooms: RoomDraft[]): Record<stri
     }
     if (room.tear) {
       acc.tearout = (acc.tearout || 0) + 1;
-    }
-    if (totalFhbScopeSfForOutletCharges(room) > 0) {
-      const out = Math.max(0, Math.floor(room.fhbOutlets) || 0);
-      if (out > 0) {
-        acc["qty-outlet"] = (acc["qty-outlet"] || 0) + out;
-      }
     }
   }
   return acc;
@@ -529,11 +501,6 @@ export function measureRoomDraft(
   }
   if (fhb > 0) {
     notes.push("Full-height backsplash selected — confirm outlet/switch count and placement before template.");
-    const out = Math.max(0, Math.floor(room.fhbOutlets) || 0);
-    if (out) {
-      extras += out * 30;
-      details.push(`Full-height backsplash electrical cutouts × ${out} @ $30`);
-    }
   }
 
   if (room.raised === "Yes") {
@@ -578,24 +545,7 @@ export function measureRoomDraft(
 
   const materialProgramDefault = normalizeMaterialProgramDefault(measureOptions?.materialProgramDefault);
   const resolvedMaterialProgram = resolveRoomMaterialProgram(room, materialProgramDefault);
-  let outOfCollectionPremium: MeasuredRoom["outOfCollectionPremium"];
-  if (
-    measureOptions?.internalMaterialUseTax &&
-    measureOptions?.materialProgramDefault &&
-    resolvedMaterialProgram === "out_of_collection"
-  ) {
-    const oocPct = resolveOutOfCollectionPremiumPercent(materialBasis);
-    const premiumResult = computeOutOfCollectionPremiumAmounts(scopedMaterialDollars, oocPct);
-    if (premiumResult.applied) {
-      scopedMaterialDollars = round2(scopedMaterialDollars + premiumResult.premiumAmount);
-      outOfCollectionPremium = {
-        premiumPercent: premiumResult.premiumPercent,
-        eligibleMaterialWithTax: premiumResult.eligibleMaterialWithTax,
-        premiumAmount: premiumResult.premiumAmount,
-        applied: true
-      };
-    }
-  }
+  const outOfCollectionPremium: MeasuredRoom["outOfCollectionPremium"] = undefined;
 
   selected = round2(scopedMaterialDollars + extras);
   const chargeableCounter = measureOptions?.chargeableCounterCeil
@@ -1293,7 +1243,10 @@ export function buildSelectedMaterialBreakdown(
       return built;
     }
     let withTax = applyInternalMaterialUseTaxToBreakdown(built);
-    if (options.materialProgramDefault) {
+    if (
+      options.materialProgramDefault &&
+      normalizeMaterialProgramDefault(options.materialProgramDefault) === "out_of_collection"
+    ) {
       withTax = applyOutOfCollectionPremiumToBreakdown(
         withTax,
         rooms,
@@ -1377,6 +1330,10 @@ export type CustomerRoomAreaCostRow = {
   isVanity: boolean;
   totalSqft: number;
   countertopSf: number;
+  /** Chargeable 4-inch backsplash sf (allocated from combined splash/FHB ceil when needed). */
+  backsplashSf: number;
+  /** Chargeable full-height backsplash sf (allocated from combined splash/FHB ceil when needed). */
+  fhbSf: number;
   backsplashFhbSf: number;
   /** Stone + backsplash + use tax on countertop for this area (excludes room add-ons). */
   materialAmountExact: number;
@@ -1504,9 +1461,20 @@ export function buildCustomerRoomAreaCostBreakdown(params: {
     const countertopSf = round2(
       Number(m.chargeableCounter ?? m.priceableCounter ?? m.counter) || 0
     );
-    const backsplashFhbSf = isVanity
-      ? round2((Number(m.splash) || 0) + (Number(m.fhb) || 0))
-      : round2(Number(m.chargeableSplash ?? m.priceableSplash ?? (Number(m.splash) || 0) + (Number(m.fhb) || 0)));
+    const exactSplashSf = round2(Number(m.splash) || 0);
+    const exactFhbSf = round2(Number(m.fhb) || 0);
+    const chargeableSplashFhbSf = isVanity
+      ? round2(exactSplashSf + exactFhbSf)
+      : round2(Number(m.chargeableSplash ?? m.priceableSplash ?? exactSplashSf + exactFhbSf));
+    const exactSplashFhbSf = round2(exactSplashSf + exactFhbSf);
+    let backsplashSf = exactSplashSf;
+    let fhbSf = exactFhbSf;
+    if (!isVanity && exactSplashFhbSf > 0 && chargeableSplashFhbSf > exactSplashFhbSf) {
+      const ratio = chargeableSplashFhbSf / exactSplashFhbSf;
+      backsplashSf = round2(exactSplashSf * ratio);
+      fhbSf = round2(exactFhbSf * ratio);
+    }
+    const backsplashFhbSf = round2(chargeableSplashFhbSf);
     const totalSqft = round2(Number(m.totalSf) || countertopSf + backsplashFhbSf);
 
     let materialAmountExact = 0;
@@ -1530,9 +1498,6 @@ export function buildCustomerRoomAreaCostBreakdown(params: {
           policy
         );
         materialAmountExact = round2(sub.totals.materialSubtotal + amounts.totalMaterialUseTaxAmount);
-        if (m.outOfCollectionPremium?.applied) {
-          materialAmountExact = round2(materialAmountExact + m.outOfCollectionPremium.premiumAmount);
-        }
       } else {
         const pct = resolveRoomUseTaxPercent(draft, projectUseTaxPercent);
         const sub = buildSelectedMaterialBreakdownCore([draft], basis, {
@@ -1576,6 +1541,8 @@ export function buildCustomerRoomAreaCostBreakdown(params: {
       vanityProgramLabel: isVanity ? String(m.vanityProgram?.label ?? "").trim() || undefined : undefined,
       totalSqft,
       countertopSf,
+      backsplashSf,
+      fhbSf,
       backsplashFhbSf,
       materialAmountExact,
       addons,
@@ -2553,6 +2520,29 @@ function applyRoomPersistenceFields(base: RoomDraft, r: Record<string, unknown>)
   }
 }
 
+/** Internal Estimate material program — Elite 100 only (OOC deferred to future head). */
+export const INTERNAL_ESTIMATE_ELITE_100_PROGRAM: MaterialProgram = "elite_100";
+
+/**
+ * Normalize stale Internal Estimate room drafts after hydration: Elite 100 only,
+ * migrate legacy FHB outlet qty into catalog add-on `qty-outlet` (max, not sum).
+ */
+export function normalizeInternalEstimateRoomDrafts(rooms: RoomDraft[]): RoomDraft[] {
+  return rooms.map((room) => {
+    const addons = { ...(room.addons || {}) };
+    const legacyOutlets = Math.max(0, Math.floor(Number(room.fhbOutlets)) || 0);
+    const catalogOutlets = Math.max(0, Math.floor(Number(addons["qty-outlet"])) || 0);
+    if (legacyOutlets > 0) {
+      addons["qty-outlet"] = Math.max(legacyOutlets, catalogOutlets);
+    }
+    return {
+      ...room,
+      addons,
+      materialProgramOverride: "inherit"
+    };
+  });
+}
+
 /** Prefer `estimate_room_drafts` when present; otherwise rebuild from API `estimate_rooms`. */
 export function hydrateRoomDraftsFromInternalUi(
   roomDrafts: unknown,
@@ -2576,9 +2566,11 @@ export function hydrateRoomDraftsFromInternalUi(
       });
       out.push(base.calcMode === "Guided Shape" ? normalizeGuidedShapeRoom(base) : base);
     }
-    return out.length ? out : [createDefaultRoom("Group Promo")];
+    return normalizeInternalEstimateRoomDrafts(out.length ? out : [createDefaultRoom("Group Promo")]);
   }
-  return normalizeGuidedShapeRooms(hydrateRoomDraftsFromEstimateRooms(Array.isArray(estimateRooms) ? estimateRooms : []));
+  return normalizeInternalEstimateRoomDrafts(
+    hydrateRoomDraftsFromEstimateRooms(Array.isArray(estimateRooms) ? estimateRooms : [])
+  );
 }
 
 /** Rebuild room drafts from an eliteOS `estimate_rooms` / API rooms array (hydration). */
@@ -2633,7 +2625,7 @@ export function hydrateRoomDraftsFromEstimateRooms(rows: unknown[]): RoomDraft[]
     }
     out.push(base.calcMode === "Guided Shape" ? normalizeGuidedShapeRoom(base) : base);
   }
-  return out.length ? out : [createDefaultRoom("Group Promo")];
+  return normalizeInternalEstimateRoomDrafts(out.length ? out : [createDefaultRoom("Group Promo")]);
 }
 
 /** Persist customer room/area breakdown on save for stable reprints. */
