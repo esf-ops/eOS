@@ -62,10 +62,11 @@ export function validateImageBuffer(buffer, maxBytes, label) {
  * @param {string} bucket
  * @param {string} path
  * @param {Buffer} buffer
+ * @param {string} [contentType="image/jpeg"]
  */
-export async function uploadPublicJpeg(db, bucket, path, buffer) {
+export async function uploadPublicFile(db, bucket, path, buffer, contentType = "image/jpeg") {
   const { error } = await db.storage.from(bucket).upload(path, buffer, {
-    contentType: "image/jpeg",
+    contentType,
     upsert: true,
     cacheControl: "3600",
   });
@@ -74,4 +75,14 @@ export async function uploadPublicJpeg(db, bucket, path, buffer) {
   }
   const { data } = db.storage.from(bucket).getPublicUrl(path);
   return String(data?.publicUrl ?? "").trim() || null;
+}
+
+/**
+ * @param {import("@supabase/supabase-js").SupabaseClient} db
+ * @param {string} bucket
+ * @param {string} path
+ * @param {Buffer} buffer
+ */
+export async function uploadPublicJpeg(db, bucket, path, buffer) {
+  return uploadPublicFile(db, bucket, path, buffer, "image/jpeg");
 }
