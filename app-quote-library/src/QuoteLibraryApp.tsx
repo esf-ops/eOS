@@ -790,8 +790,24 @@ export default function QuoteLibraryApp() {
       const archived = Number(res.archived_count ?? 0);
       const skipped = Number(res.skipped_count ?? 0);
       const failed = Number(res.failed_count ?? 0);
+      const results = Array.isArray(res.results)
+        ? (res.results as Array<Record<string, unknown>>)
+        : [];
       setSelectedIds(new Set());
-      setMsg(`Batch archive complete: ${archived} archived, ${skipped} skipped, ${failed} failed.`);
+      if (archived === 0 && failed > 0) {
+        const firstFail = results.find((r) => str(r.status) === "failed");
+        throw new Error(String(firstFail?.reason || res.error || "Archive failed"));
+      }
+      if (archived === 0 && skipped > 0) {
+        const reasons = results
+          .filter((r) => str(r.status) === "skipped")
+          .map((r) => str(r.reason) || "skipped")
+          .slice(0, 3)
+          .join(", ");
+        setErr(`No quotes archived (${skipped} skipped: ${reasons || "see server response"}).`);
+      } else {
+        setMsg(`Batch archive complete: ${archived} archived, ${skipped} skipped, ${failed} failed.`);
+      }
       await refreshListAndDetail();
     } catch (e: unknown) {
       setErr(String((e as Error)?.message || e));

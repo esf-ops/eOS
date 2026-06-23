@@ -30,6 +30,11 @@ import {
   resolveQuoteLibrarySortColumn,
   QUOTE_LIBRARY_LIST_SELECT
 } from "./quoteLibrarySearch.js";
+import {
+  resolveQuoteFamilyRootId,
+  softArchiveQuoteFamily,
+  summarizeArchiveResults
+} from "./quoteLibraryArchive.js";
 
 const jsonParser = express.json({ limit: "2mb" });
 
@@ -491,7 +496,7 @@ export function attachQuoteLibraryRoutes(app, deps) {
       const { orgId, hasQuoteHeadersOrg } = await loadOrgScope(db, req);
       let qb = db
         .from("quote_headers")
-        .select("id,quote_number,quote_status,quote_source,is_current_revision,archived_at")
+        .select("id,quote_number,quote_status,quote_source,is_current_revision,archived_at,quote_family_root_id")
         .in("id", ids);
       qb = applyQuoteHeaderOrgScope(qb, orgId, hasQuoteHeadersOrg);
       const { data: rows, error } = await qb;
@@ -499,55 +504,29 @@ export function attachQuoteLibraryRoutes(app, deps) {
       const byId = new Map((rows || []).map((r) => [String(r.id), r]));
       const userRef = pickStr(req.user?.email) || pickStr(req.user?.id);
       const results = [];
+      const processedRoots = new Set();
       for (const id of ids) {
         const cur = byId.get(id);
         if (!cur) {
           results.push({ id, status: "failed", reason: "not_found_or_not_authorized" });
           continue;
         }
-        if (cur.archived_at) {
-          results.push({ id, quote_number: cur.quote_number, status: "skipped", reason: "already_archived" });
-          continue;
-        }
-        if (cur.is_current_revision === false) {
-          results.push({ id, quote_number: cur.quote_number, status: "skipped", reason: "historical_revision" });
-          continue;
-        }
-        const st = String(cur.quote_status || "");
-        if ((st === "sold" || st === "won") && (!force || !elevated)) {
-          results.push({
-            id,
-            quote_number: cur.quote_number,
-            status: "skipped",
-            reason: "sold_or_won_requires_admin_force"
-          });
-          continue;
-        }
-        const archivedAt = new Date().toISOString();
-        const { error: uErr } = await db
-          .from("quote_headers")
-          .update({
-            archived_at: archivedAt,
-            archived_by: userRef,
-            quote_status: "archived",
-            updated_at: archivedAt
-          })
-          .eq("id", id);
-        if (uErr) {
-          results.push({ id, quote_number: cur.quote_number, status: "failed", reason: uErr.message });
-          continue;
-        }
-        await safeSelect(db, () =>
-          db.from("quote_status_history").insert({
-            quote_id: id,
-            old_status: st,
-            new_status: "archived",
-            changed_by: userRef,
-            metadata: { source: "quote_library_batch_archive", force }
-          })
-        );
-        results.push({ id, quote_number: cur.quote_number, status: "archived" });
+        const root = resolveQuoteFamilyRootId(cur);
+        if (processedRoots.has(root)) continue;
+        processedRoots.add(root);
+        const summary = await softArchiveQuoteFamily(db, cur, {
+          orgId,
+          hasQuoteHeadersOrg,
+          applyOrgScope: (q) => applyQuoteHeaderOrgScope(q, orgId, hasQuoteHeadersOrg),
+          userRef,
+          force,
+          elevated,
+          source: "quote_library_batch_archive",
+          safeSelect
+        });
+        results.push(...summary.results);
       }
+      const payload = summarizeArchiveResults(results);
       await logAction({
         user: req.user,
         head: "quote_library",
@@ -556,20 +535,14 @@ export function attachQuoteLibraryRoutes(app, deps) {
         entityId: null,
         metadata: {
           requested_count: ids.length,
-          archived_count: results.filter((r) => r.status === "archived").length,
-          skipped_count: results.filter((r) => r.status === "skipped").length,
-          failed_count: results.filter((r) => r.status === "failed").length,
+          archived_count: payload.archived_count,
+          skipped_count: payload.skipped_count,
+          failed_count: payload.failed_count,
           force
         },
         req
       });
-      res.json({
-        ok: true,
-        results,
-        archived_count: results.filter((r) => r.status === "archived").length,
-        skipped_count: results.filter((r) => r.status === "skipped").length,
-        failed_count: results.filter((r) => r.status === "failed").length
-      });
+      res.json({ ok: true, ...payload });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
     }
@@ -1061,7 +1034,13 @@ export function attachQuoteLibraryRoutes(app, deps) {
       const force = Boolean(req.body?.force);
       const db = getSupabase();
       const { orgId, hasQuoteHeadersOrg } = await loadOrgScope(db, req);
-      let qb = db.from("quote_headers").select("id,quote_status,quote_source").eq("id", id).limit(1);
+      let qb = db
+        .from("quote_headers")
+        .select(
+          "id,quote_number,quote_status,quote_source,is_current_revision,archived_at,quote_family_root_id"
+        )
+        .eq("id", id)
+        .limit(1);
       qb = applyQuoteHeaderOrgScope(qb, orgId, hasQuoteHeadersOrg);
       const { data: rows, error: e0 } = await qb;
       if (e0) throw e0;
@@ -1075,26 +1054,26 @@ export function attachQuoteLibraryRoutes(app, deps) {
           quote_status: st
         });
       }
+      const elevated = ["admin", "super_admin"].includes(String(req.user?.role || "").toLowerCase());
       const userRef = pickStr(req.user?.email) || pickStr(req.user?.id);
-      const { error: uErr } = await db
-        .from("quote_headers")
-        .update({
-          archived_at: new Date().toISOString(),
-          archived_by: userRef,
-          quote_status: "archived",
-          updated_at: new Date().toISOString()
-        })
-        .eq("id", id);
-      if (uErr) throw uErr;
-      await safeSelect(db, () =>
-        db.from("quote_status_history").insert({
-          quote_id: id,
-          old_status: st,
-          new_status: "archived",
-          changed_by: userRef,
-          metadata: { source: "quote_library_archive", force }
-        })
-      );
+      const summary = await softArchiveQuoteFamily(db, cur, {
+        orgId,
+        hasQuoteHeadersOrg,
+        applyOrgScope: (q) => applyQuoteHeaderOrgScope(q, orgId, hasQuoteHeadersOrg),
+        userRef,
+        force,
+        elevated,
+        source: "quote_library_archive",
+        safeSelect
+      });
+      if (summary.archived_count === 0 && summary.failed_count > 0) {
+        const firstFail = summary.results.find((r) => r.status === "failed");
+        return res.status(500).json({
+          ok: false,
+          error: String(firstFail?.reason || "Archive failed"),
+          ...summary
+        });
+      }
       try {
         await logAction({
           user: req.user,
@@ -1102,13 +1081,19 @@ export function attachQuoteLibraryRoutes(app, deps) {
           actionType: "quote_archive",
           entityType: "quote_header",
           entityId: id,
-          metadata: { force },
+          metadata: { force, quote_family_root_id: resolveQuoteFamilyRootId(cur), ...summary },
           req
         });
       } catch {
         /* optional */
       }
-      res.json({ ok: true, id, archived: true });
+      res.json({
+        ok: true,
+        id,
+        archived: summary.archived_count > 0,
+        quote_family_root_id: resolveQuoteFamilyRootId(cur),
+        ...summary
+      });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
     }

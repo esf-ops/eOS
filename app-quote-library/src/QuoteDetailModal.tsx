@@ -272,6 +272,7 @@ export function QuoteDetailModal({
   const account = displayAccountColumn(header);
   const isInternal = str(header.quote_source) === "internal_quote";
   const isCustomQuote = str(header.quote_source) === "custom_quote";
+  const isArchived = Boolean(header.archived_at) || str(header.quote_status) === "archived";
   const warnings = (
     Array.isArray(detail.warnings) ? (detail.warnings as unknown[]) : []
   ).filter((w): w is string => typeof w === "string");
@@ -579,24 +580,34 @@ export function QuoteDetailModal({
                   <button
                     type="button"
                     className="btn secondary"
+                    disabled={isArchived}
                     onClick={() => {
                       if (
                         !window.confirm(
-                          "Soft-archive this quote? It will be hidden from default totals until Show archived is enabled."
+                          "Soft-archive this quote family? All revisions will be hidden from the default library until Show archived is enabled."
                         )
                       ) {
                         return;
                       }
                       void runAction("Archived", async () => {
-                        await apiPost(
+                        const res = (await apiPost(
                           `/api/quote-library/quotes/${detailId}/archive`,
                           sessionToken,
                           { confirm: true }
-                        );
+                        )) as Record<string, unknown>;
+                        if (res.ok !== true) {
+                          throw new Error(String(res.error || "Archive failed"));
+                        }
+                        const archivedCount = Number(res.archived_count ?? 0);
+                        onClose();
+                        if (archivedCount > 1) {
+                          return `Archived ${archivedCount} revision(s) in this quote family.`;
+                        }
+                        return "Quote archived.";
                       });
                     }}
                   >
-                    Archive
+                    {isArchived ? "Archived" : "Archive"}
                   </button>
                   <button
                     type="button"
