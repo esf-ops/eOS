@@ -8,67 +8,35 @@ import {
   buildCustomerEstimatePdfFilename,
   loadPrintSnapshotFromQuoteRow
 } from "./customerEstimatePrintSnapshot.js";
-
-/**
- * @returns {Promise<string|null>}
- */
-async function resolveChromiumExecutablePath() {
-  const fromEnv = String(process.env.PUPPETEER_EXECUTABLE_PATH || "").trim();
-  if (fromEnv) return fromEnv;
-
-  const fs = await import("node:fs");
-  const macChrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-  if (process.platform === "darwin" && fs.existsSync(macChrome)) return macChrome;
-
-  try {
-    const chromium = await import("@sparticuz/chromium");
-    const path = await chromium.default.executablePath();
-    if (path && fs.existsSync(path)) return path;
-  } catch {
-    /* optional dependency or unsupported platform */
-  }
-
-  return null;
-}
+import { resolveChromiumLaunchConfig } from "./chromiumLaunchConfig.js";
 
 /**
  * @param {string} html
- * @returns {Promise<{ ok: true, buffer: Buffer } | { ok: false, error: string }>}
+ * @returns {Promise<{ ok: true, buffer: Buffer } | { ok: false, reason: string, error: string }>}
  */
 export async function renderHtmlToPdfBytes(html) {
-  const macChrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-  const executablePath = await resolveChromiumExecutablePath();
-  if (!executablePath) {
+  const launchConfig = await resolveChromiumLaunchConfig();
+  if (!launchConfig.ok) {
     return {
       ok: false,
-      error: "PDF renderer unavailable — set PUPPETEER_EXECUTABLE_PATH or install Chromium dependencies"
+      reason: launchConfig.reason,
+      error: launchConfig.error
     };
   }
 
   let browser;
   try {
-    const puppeteer = await import("puppeteer-core");
-    let launchArgs = ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"];
-    const useSparticuzArgs = executablePath !== macChrome;
-    if (useSparticuzArgs) {
-      try {
-        const chromium = await import("@sparticuz/chromium");
-        if (Array.isArray(chromium.default.args)) {
-          launchArgs = chromium.default.args;
-        }
-      } catch {
-        /* use default args */
-      }
-    }
-
-    browser = await puppeteer.default.launch({
-      executablePath,
-      headless: true,
-      args: launchArgs,
-      timeout: 20000
+    const puppeteerMod = await import("puppeteer-core");
+    const puppeteer = puppeteerMod.default ?? puppeteerMod;
+    browser = await puppeteer.launch({
+      executablePath: launchConfig.executablePath,
+      headless: launchConfig.headless,
+      args: launchConfig.args,
+      defaultViewport: launchConfig.defaultViewport,
+      timeout: 30000
     });
     const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: "domcontentloaded", timeout: 20000 });
+    await page.setContent(html, { waitUntil: "domcontentloaded", timeout: 30000 });
     const pdfUint8 = await page.pdf({
       format: "Letter",
       printBackground: true,
@@ -76,7 +44,13 @@ export async function renderHtmlToPdfBytes(html) {
     });
     return { ok: true, buffer: Buffer.from(pdfUint8) };
   } catch (e) {
-    return { ok: false, error: String(e?.message || e) };
+    const error = String(e?.message || e);
+    console.warn("[quote-delivery-pdf] chromium launch or render failed", {
+      reason: "launch_failed",
+      mode: launchConfig.mode,
+      error
+    });
+    return { ok: false, reason: "launch_failed", error };
   } finally {
     if (browser) {
       try {
@@ -149,10 +123,18 @@ export async function buildCustomerEstimatePdfAttachment(params) {
 
   const pdfResult = await renderHtmlToPdfBytes(html);
   if (!pdfResult.ok) {
+    const reason =
+      pdfResult.reason === "chromium_executable_unavailable" || pdfResult.reason === "launch_failed"
+        ? pdfResult.reason
+        : "pdf_render_failed";
+    console.warn("[quote-delivery-pdf] attachment skipped", {
+      reason,
+      error: pdfResult.error
+    });
     return {
       ok: false,
       skipped: true,
-      reason: "pdf_render_failed",
+      reason,
       error: pdfResult.error,
       filename,
       byteLength: 0

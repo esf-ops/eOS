@@ -17,6 +17,7 @@ import { buildCustomerEstimateDisplayFromSnapshot } from "./estimateDisplayFromS
 import { buildEstimateEmailContent, pickReplyToEmail } from "./estimateEmailBuilder.js";
 import { buildCustomerEstimatePrintHtml } from "./customerEstimatePrintHtml.js";
 import { buildCustomerEstimatePdfAttachment, renderHtmlToPdfBytes } from "./customerEstimatePdfBuilder.js";
+import { resolveChromiumLaunchConfig } from "./chromiumLaunchConfig.js";
 import {
   buildCustomerEstimatePdfFilename,
   loadPrintSnapshotFromQuoteRow,
@@ -872,6 +873,45 @@ async function testPdfBuilderDisabledSafely() {
   assert.equal(result.reason, "pdf_disabled");
 }
 
+async function testChromiumLaunchConfigServerlessUsesSparticuz() {
+  const prev = {
+    vercel: process.env.VERCEL,
+    path: process.env.PUPPETEER_EXECUTABLE_PATH
+  };
+  process.env.VERCEL = "1";
+  delete process.env.PUPPETEER_EXECUTABLE_PATH;
+
+  const config = await resolveChromiumLaunchConfig();
+  assert.equal(config.ok, true);
+  assert.equal(config.mode, "sparticuz");
+  assert.ok(String(config.executablePath || "").length > 0);
+  assert.ok(Array.isArray(config.args) && config.args.length > 0);
+
+  if (prev.vercel != null) process.env.VERCEL = prev.vercel;
+  else delete process.env.VERCEL;
+  if (prev.path != null) process.env.PUPPETEER_EXECUTABLE_PATH = prev.path;
+  else delete process.env.PUPPETEER_EXECUTABLE_PATH;
+}
+
+async function testChromiumLaunchConfigEnvOverridesServerless() {
+  const prev = {
+    vercel: process.env.VERCEL,
+    path: process.env.PUPPETEER_EXECUTABLE_PATH
+  };
+  process.env.VERCEL = "1";
+  process.env.PUPPETEER_EXECUTABLE_PATH = "/custom/chromium-for-test";
+
+  const config = await resolveChromiumLaunchConfig();
+  assert.equal(config.ok, true);
+  assert.equal(config.mode, "env_executable");
+  assert.equal(config.executablePath, "/custom/chromium-for-test");
+
+  if (prev.vercel != null) process.env.VERCEL = prev.vercel;
+  else delete process.env.VERCEL;
+  if (prev.path != null) process.env.PUPPETEER_EXECUTABLE_PATH = prev.path;
+  else delete process.env.PUPPETEER_EXECUTABLE_PATH;
+}
+
 async function testPdfRenderProducesValidBytesWhenAvailable() {
   const html = buildCustomerEstimatePrintHtml(makePrintSnapshot());
   const result = await renderHtmlToPdfBytes(html);
@@ -881,6 +921,61 @@ async function testPdfRenderProducesValidBytesWhenAvailable() {
   }
   assert.ok(result.buffer.length > 100);
   assert.equal(result.buffer.subarray(0, 4).toString("utf8"), "%PDF");
+}
+
+async function testPdfLaunchFailureDoesNotBlockEmailSend() {
+  const prev = {
+    send: process.env.QUOTE_EMAIL_SEND_ENABLED,
+    pdf: process.env.QUOTE_EMAIL_PDF_ENABLED,
+    provider: process.env.QUOTE_EMAIL_PROVIDER,
+    force: process.env.QUOTE_EMAIL_FORCE_RECIPIENT,
+    key: process.env.RESEND_API_KEY,
+    puppeteerPath: process.env.PUPPETEER_EXECUTABLE_PATH,
+    vercel: process.env.VERCEL
+  };
+  process.env.QUOTE_EMAIL_SEND_ENABLED = "1";
+  process.env.QUOTE_EMAIL_PDF_ENABLED = "1";
+  process.env.QUOTE_EMAIL_PROVIDER = "resend";
+  process.env.RESEND_API_KEY = "re_test_mock_key";
+  process.env.VERCEL = "1";
+  process.env.PUPPETEER_EXECUTABLE_PATH = "/nonexistent/chromium-binary-for-test";
+
+  const prevFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ id: "msg_pdf_launch_fail" })
+  });
+
+  const db = makeMockSupabase({ quoteRow: internalQuoteRow() });
+  const result = await runQuoteDelivery(
+    db,
+    mockReq(),
+    QUOTE_ID,
+    { recipients: [{ email: "customer@example.com", type: "to" }] },
+    { mode: "send" }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.status, "sent");
+  assert.equal(result.pdfAttachment?.generated, false);
+  assert.ok(
+    result.pdfAttachment?.reason === "launch_failed" ||
+      result.pdfAttachment?.reason === "chromium_executable_unavailable"
+  );
+  assert.ok((result.warnings || []).some((w) => String(w).includes("PDF attachment skipped")));
+
+  globalThis.fetch = prevFetch;
+  process.env.QUOTE_EMAIL_SEND_ENABLED = prev.send;
+  process.env.QUOTE_EMAIL_PDF_ENABLED = prev.pdf;
+  process.env.QUOTE_EMAIL_PROVIDER = prev.provider;
+  process.env.QUOTE_EMAIL_FORCE_RECIPIENT = prev.force;
+  if (prev.key != null) process.env.RESEND_API_KEY = prev.key;
+  else delete process.env.RESEND_API_KEY;
+  if (prev.puppeteerPath != null) process.env.PUPPETEER_EXECUTABLE_PATH = prev.puppeteerPath;
+  else delete process.env.PUPPETEER_EXECUTABLE_PATH;
+  if (prev.vercel != null) process.env.VERCEL = prev.vercel;
+  else delete process.env.VERCEL;
 }
 
 async function testResendReceivesAttachmentWhenPdfEnabled() {
@@ -965,7 +1060,10 @@ async function runAll() {
   await testPreviewReturnsPdfMetadataOnly();
   await testLegacyQuoteWithoutPrintSnapshotWarns();
   await testPdfBuilderDisabledSafely();
+  await testChromiumLaunchConfigServerlessUsesSparticuz();
+  await testChromiumLaunchConfigEnvOverridesServerless();
   await testPdfRenderProducesValidBytesWhenAvailable();
+  await testPdfLaunchFailureDoesNotBlockEmailSend();
   await testPreviewHtmlIncludesQuoteNumberNotDash();
   await testNoProviderCallInDryRun();
   await testResendMissingApiKeyFailsSafely();

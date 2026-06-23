@@ -198,8 +198,17 @@ export async function runQuoteDelivery(db, req, quoteId, body, options) {
       warnings.push(
         "Customer PDF attachment skipped — saved print snapshot does not match customer display total."
       );
-    } else if (pdfResult.skipped && pdfResult.reason === "pdf_render_failed") {
-      warnings.push(`Customer PDF attachment skipped — ${pdfResult.error || "renderer unavailable"}`);
+    } else if (
+      pdfResult.skipped &&
+      (pdfResult.reason === "pdf_render_failed" ||
+        pdfResult.reason === "launch_failed" ||
+        pdfResult.reason === "chromium_executable_unavailable")
+    ) {
+      console.warn("[quote-delivery] pdf attachment skipped", {
+        reason: pdfResult.reason,
+        error: pdfResult.error ? String(pdfResult.error).slice(0, 240) : null
+      });
+      warnings.push(`Customer PDF attachment skipped — ${pdfResult.error || pdfResult.reason || "renderer unavailable"}`);
     } else if (pdfResult.skipped && pdfResult.reason === "customer_safe_violation") {
       warnings.push("Customer PDF attachment skipped — print HTML failed customer-safe audit.");
     }

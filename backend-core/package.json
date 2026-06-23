@@ -12,12 +12,14 @@
     "start": "node src/server.js"
   },
   "dependencies": {
+    "@sparticuz/chromium": "^133.0.0",
     "@supabase/supabase-js": "^2.105.3",
     "axios": "^1.16.0",
     "cors": "^2.8.5",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "fast-xml-parser": "^5.7.3",
+    "puppeteer-core": "^24.43.1",
     "xlsx": "^0.18.5"
   }
 }

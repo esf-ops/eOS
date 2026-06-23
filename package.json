@@ -155,10 +155,10 @@
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "fast-xml-parser": "^5.7.3",
+    "puppeteer-core": "^24.43.1",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "pdfjs-dist": "^6.0.227",
-    "puppeteer-core": "^24.43.1"
+    "pdfjs-dist": "^6.0.227"
   }
 }
