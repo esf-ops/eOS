@@ -2441,6 +2441,101 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
   overflow: auto;
 }
 
+.pv-texture-stats {
+  margin: 0 0 10px;
+  font-size: 0.72rem;
+  color: var(--eos-ink-muted);
+}
+
+.pv-texture-selected {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 8px;
+  border: 1px solid var(--eos-line);
+  border-radius: 12px;
+  background: #fafbfc;
+}
+
+.pv-texture-selected-media {
+  flex: 0 0 56px;
+  width: 56px;
+}
+
+.pv-texture-selected-media img,
+.pv-texture-selected-media .pv-texture-fallback {
+  width: 56px;
+  aspect-ratio: 6 / 5;
+  border-radius: 8px;
+}
+
+.pv-texture-selected-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pv-texture-selected-copy strong {
+  font-size: 0.82rem;
+  color: var(--eos-ink);
+  line-height: 1.25;
+}
+
+.pv-texture-selected-copy span {
+  font-size: 0.72rem;
+  color: var(--eos-ink-muted);
+  line-height: 1.25;
+}
+
+.pv-texture-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.pv-texture-search,
+.pv-texture-group-filter {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--eos-line);
+  border-radius: 10px;
+  font: inherit;
+  font-size: 0.82rem;
+  color: var(--eos-ink);
+  background: #fff;
+}
+
+.pv-texture-group-filter {
+  min-width: 112px;
+}
+
+.pv-texture-filter-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 0.78rem;
+  color: var(--eos-ink-soft);
+  cursor: pointer;
+}
+
+.pv-texture-filter-check input {
+  accent-color: var(--eos-accent);
+}
+
+.pv-texture-missing {
+  font-size: 0.68rem;
+  color: var(--eos-ink-faint);
+  font-style: italic;
+}
+
+.pv-texture-btn.no-image {
+  opacity: 0.72;
+}
+
 .pv-texture-btn {
   display: flex;
   flex-direction: column;

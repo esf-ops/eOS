@@ -581,7 +581,7 @@ export default function SlabInventoryApp() {
   /* Load tab data when switching */
   useEffect(() => {
     if (!sessionToken) return;
-    if (activeTab === "elite100" && !elite100Loaded) void loadElite100();
+    if ((activeTab === "elite100" || activeTab === "visualizer") && !elite100Loaded) void loadElite100();
     else if (activeTab === "non_stock" && !nonStockLoaded) void loadNonStock();
     else if (activeTab === "all_inventory") void loadMeta();
   }, [activeTab, sessionToken, elite100Loaded, nonStockLoaded, loadElite100, loadNonStock, loadMeta]);
@@ -918,7 +918,12 @@ export default function SlabInventoryApp() {
 
             {/* ── Photo Visualizer tab (client-side prototype) ── */}
             {activeTab === "visualizer" ? (
-              <MaterialPhotoVisualizer />
+              <MaterialPhotoVisualizer
+                groups={elite100Data?.groups ?? null}
+                priceGroupOrder={elite100Data?.price_group_order ?? []}
+                loading={elite100Busy && !elite100Loaded}
+                error={elite100Error}
+              />
             ) : null}
 
             {/* ── Product Catalog tab (display-only, static data) ── */}

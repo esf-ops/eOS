@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import {
-  listElite100TextureAssets,
-  type Elite100TextureAsset,
-} from "./lib/elite100TextureAssets";
+  buildElite100VisualizerTextures,
+  filterElite100VisualizerTextures,
+  firstSelectableVisualizerTexture,
+  type Elite100VisualizerGroup,
+  type Elite100VisualizerTexture,
+} from "./lib/elite100VisualizerTextures";
 
 type NormPoint = { nx: number; ny: number };
 type TextureRenderMode = "cover" | "repeat";
@@ -46,9 +49,9 @@ function defaultLabelForIndex(index: number): string {
   return `Countertop ${index + 1}`;
 }
 
-function defaultMaskSettings(textures: readonly Elite100TextureAsset[]): MaskSettings {
+function defaultMaskSettings(textures: readonly Elite100VisualizerTexture[]): MaskSettings {
   return {
-    textureSlug: textures[0]?.slug ?? "",
+    textureSlug: firstSelectableVisualizerTexture([...textures])?.slug ?? "",
     opacity: 0.82,
     textureMode: "cover",
     textureScale: COVER_SCALE_DEFAULT,
@@ -78,20 +81,20 @@ function cloneMask(mask: VisualizerMask): VisualizerMask {
   };
 }
 
-function pickerImageUrl(texture: Elite100TextureAsset): string {
+function pickerImageUrl(texture: Elite100VisualizerTexture): string | null {
   return texture.thumbUrl;
 }
 
-function renderTextureUrl(texture: Elite100TextureAsset): string {
+function renderTextureUrl(texture: Elite100VisualizerTexture): string | null {
   return texture.fullUrl;
 }
 
 function textureUrlForSlug(
-  textures: readonly Elite100TextureAsset[],
+  textures: readonly Elite100VisualizerTexture[],
   slug: string,
 ): string | null {
   const asset = textures.find((t) => t.slug === slug);
-  return asset ? renderTextureUrl(asset) : null;
+  return asset?.hasImage ? renderTextureUrl(asset) : null;
 }
 
 function loadImage(src: string): Promise<HTMLImageElement> {
@@ -494,7 +497,7 @@ function fitCanvasSize(
   };
 }
 
-function exportFilename(masks: VisualizerMask[], textures: readonly Elite100TextureAsset[]): string {
+function exportFilename(masks: VisualizerMask[], textures: readonly Elite100VisualizerTexture[]): string {
   const visible = masks.filter((mask) => mask.visible);
   const primary = textures.find((t) => t.slug === visible[0]?.textureSlug);
   const slug = primary?.slug ?? "preview";
@@ -508,8 +511,26 @@ function workspaceModeLabel(mode: WorkspaceMode): string {
   return "Preview";
 }
 
-export function MaterialPhotoVisualizer() {
-  const textures = useMemo(() => listElite100TextureAssets(), []);
+export type MaterialPhotoVisualizerProps = {
+  groups?: Elite100VisualizerGroup[] | null;
+  priceGroupOrder?: string[];
+  loading?: boolean;
+  error?: string | null;
+};
+
+export function MaterialPhotoVisualizer({
+  groups = null,
+  priceGroupOrder = [],
+  loading = false,
+  error = null,
+}: MaterialPhotoVisualizerProps) {
+  const textures = useMemo(
+    () => buildElite100VisualizerTextures(groups, priceGroupOrder),
+    [groups, priceGroupOrder],
+  );
+  const [textureSearch, setTextureSearch] = useState("");
+  const [textureGroupFilter, setTextureGroupFilter] = useState("all");
+  const [hasImageOnly, setHasImageOnly] = useState(true);
   const workspaceRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -549,6 +570,41 @@ export function MaterialPhotoVisualizer() {
     if (activeMask && !isDrawing) return maskToSettings(activeMask);
     return defaultSettings;
   }, [activeMask, isDrawing, defaultSettings]);
+
+  const filteredTextures = useMemo(
+    () => filterElite100VisualizerTextures(textures, {
+      search: textureSearch,
+      priceGroup: textureGroupFilter,
+      hasImageOnly,
+    }),
+    [textures, textureSearch, textureGroupFilter, hasImageOnly],
+  );
+
+  const selectedTexture = useMemo(
+    () => textures.find((t) => t.slug === controlSettings.textureSlug) ?? null,
+    [textures, controlSettings.textureSlug],
+  );
+
+  const textureGroupOptions = useMemo(() => {
+    const seen = new Set<string>();
+    for (const texture of textures) seen.add(texture.priceGroup);
+    const ordered = priceGroupOrder.filter((g) => seen.has(g));
+    for (const g of seen) {
+      if (!ordered.includes(g)) ordered.push(g);
+    }
+    return ordered;
+  }, [textures, priceGroupOrder]);
+
+  useEffect(() => {
+    if (textures.length === 0) return;
+    setDefaultSettings((prev) => {
+      const current = textures.find((t) => t.slug === prev.textureSlug);
+      if (current?.hasImage && current.fullUrl) return prev;
+      const first = firstSelectableVisualizerTexture(textures);
+      if (!first) return prev;
+      return { ...prev, textureSlug: first.slug };
+    });
+  }, [textures]);
 
   const neededTextureSlugs = useMemo(() => {
     const slugs = new Set(masks.map((mask) => mask.textureSlug));
@@ -670,7 +726,7 @@ export function MaterialPhotoVisualizer() {
       }
       setTextureImages(next);
       if (failed.length > 0) {
-        setTextureLoadError("Some full-resolution textures could not be loaded.");
+        setTextureLoadError("Some Elite 100 display textures could not be loaded.");
       }
     });
 
@@ -886,6 +942,7 @@ export function MaterialPhotoVisualizer() {
       </header>
 
       {photoError ? <div className="banner banner-error pv-banner" role="alert">{photoError}</div> : null}
+      {error ? <div className="banner banner-error pv-banner" role="alert">{error}</div> : null}
       {textureLoadError ? <div className="banner banner-warn pv-banner" role="status">{textureLoadError}</div> : null}
 
       <div className="pv-layout">
@@ -1083,23 +1140,97 @@ export function MaterialPhotoVisualizer() {
           <section className="pv-panel">
             <h3 className="pv-panel-title">Elite 100 texture</h3>
             <p className="pv-panel-hint">
-              {isDrawing
-                ? "New surfaces inherit the texture selected below."
-                : activeMask
-                  ? `Applies to ${activeMask.label}.`
-                  : "Select a surface or start drawing to choose a texture."}
+              {loading
+                ? "Loading Elite 100 colors…"
+                : isDrawing
+                  ? "New surfaces inherit the texture selected below."
+                  : activeMask
+                    ? `Applies to ${activeMask.label}.`
+                    : "Select a surface or start drawing to choose a texture."}
             </p>
-            <div className="pv-texture-grid" role="listbox" aria-label="Elite 100 textures">
-              {textures.map((texture) => (
-                <TexturePickerButton
-                  key={texture.slug}
-                  texture={texture}
-                  selected={controlSettings.textureSlug === texture.slug}
-                  disabled={!controlsEnabled}
-                  onSelect={() => applySettings({ textureSlug: texture.slug })}
-                />
-              ))}
+            {!loading && textures.length > 0 ? (
+              <p className="pv-texture-stats" role="status">
+                {textures.filter((t) => t.hasImage).length} with image
+                {textures.length !== textures.filter((t) => t.hasImage).length
+                  ? ` · ${textures.length} total colors`
+                  : ""}
+              </p>
+            ) : null}
+            {selectedTexture ? (
+              <div className="pv-texture-selected" aria-live="polite">
+                <div className="pv-texture-selected-media">
+                  {selectedTexture.thumbUrl ? (
+                    <img src={selectedTexture.thumbUrl} alt="" loading="lazy" />
+                  ) : (
+                    <span className="pv-texture-fallback" aria-hidden>
+                      {selectedTexture.colorName.slice(0, 2)}
+                    </span>
+                  )}
+                </div>
+                <div className="pv-texture-selected-copy">
+                  <strong>{selectedTexture.colorName}</strong>
+                  {selectedTexture.materialName ? (
+                    <span>{selectedTexture.materialName}</span>
+                  ) : null}
+                  {!selectedTexture.hasImage ? (
+                    <span className="pv-texture-missing">No image yet</span>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+            <div className="pv-texture-toolbar">
+              <input
+                type="search"
+                className="pv-texture-search"
+                placeholder="Search colors…"
+                value={textureSearch}
+                onChange={(e) => setTextureSearch(e.target.value)}
+                aria-label="Search Elite 100 colors"
+                disabled={loading || textures.length === 0}
+              />
+              <select
+                className="pv-texture-group-filter"
+                value={textureGroupFilter}
+                onChange={(e) => setTextureGroupFilter(e.target.value)}
+                aria-label="Filter by price group"
+                disabled={loading || textures.length === 0}
+              >
+                <option value="all">All groups</option>
+                {textureGroupOptions.map((group) => (
+                  <option key={group} value={group}>
+                    Group {group}
+                  </option>
+                ))}
+              </select>
             </div>
+            <label className="pv-texture-filter-check">
+              <input
+                type="checkbox"
+                checked={hasImageOnly}
+                onChange={(e) => setHasImageOnly(e.target.checked)}
+                disabled={loading || textures.length === 0}
+              />
+              <span>Only colors with images</span>
+            </label>
+            {loading ? (
+              <p className="pv-panel-hint">Loading Elite 100 catalog textures…</p>
+            ) : textures.length === 0 ? (
+              <p className="pv-panel-hint">No Elite 100 colors available. Open the Elite 100 tab to load the collection.</p>
+            ) : filteredTextures.length === 0 ? (
+              <p className="pv-panel-hint">No colors match your search. Try clearing filters.</p>
+            ) : (
+              <div className="pv-texture-grid" role="listbox" aria-label="Elite 100 textures">
+                {filteredTextures.map((texture) => (
+                  <TexturePickerButton
+                    key={texture.slug}
+                    texture={texture}
+                    selected={controlSettings.textureSlug === texture.slug}
+                    disabled={!controlsEnabled || !texture.hasImage}
+                    onSelect={() => applySettings({ textureSlug: texture.slug })}
+                  />
+                ))}
+              </div>
+            )}
           </section>
 
           <section className="pv-panel">
@@ -1187,33 +1318,37 @@ function TexturePickerButton({
   disabled,
   onSelect,
 }: {
-  texture: Elite100TextureAsset;
+  texture: Elite100VisualizerTexture;
   selected: boolean;
   disabled: boolean;
   onSelect: () => void;
 }) {
   const [thumbFailed, setThumbFailed] = useState(false);
+  const thumbUrl = pickerImageUrl(texture);
   return (
     <button
       type="button"
       role="option"
       aria-selected={selected}
-      className={`pv-texture-btn${selected ? " selected" : ""}`}
+      className={`pv-texture-btn${selected ? " selected" : ""}${!texture.hasImage ? " no-image" : ""}`}
       disabled={disabled}
       onClick={onSelect}
-      title={texture.colorName}
+      title={texture.hasImage ? texture.colorName : `${texture.colorName} — no image yet`}
     >
-      {thumbFailed ? (
-        <span className="pv-texture-fallback" aria-hidden>{texture.colorName.slice(0, 2)}</span>
-      ) : (
+      {thumbUrl && !thumbFailed ? (
         <img
-          src={pickerImageUrl(texture)}
+          src={thumbUrl}
           alt=""
           loading="lazy"
           onError={() => setThumbFailed(true)}
         />
+      ) : (
+        <span className="pv-texture-fallback" aria-hidden>{texture.colorName.slice(0, 2)}</span>
       )}
       <span className="pv-texture-name">{texture.colorName}</span>
+      {!texture.hasImage ? (
+        <span className="pv-texture-missing">No image</span>
+      ) : null}
     </button>
   );
 }
