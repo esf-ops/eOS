@@ -13,7 +13,7 @@ function envBool(name, defaultFalse = false) {
   return v === "1" || v.toLowerCase() === "true" || v.toLowerCase() === "yes";
 }
 
-/** @returns {{ sendEnabled: boolean, provider: string, fromAddress: string, allowedDomains: string[], forceRecipient: string|null }} */
+/** @returns {{ sendEnabled: boolean, pdfEnabled: boolean, provider: string, fromAddress: string, allowedDomains: string[], forceRecipient: string|null }} */
 export function getQuoteDeliveryEnv() {
   const allowedRaw = envStr("QUOTE_EMAIL_ALLOWED_DOMAINS", "");
   const allowedDomains = allowedRaw
@@ -25,6 +25,7 @@ export function getQuoteDeliveryEnv() {
 
   return {
     sendEnabled: envBool("QUOTE_EMAIL_SEND_ENABLED", false),
+    pdfEnabled: envBool("QUOTE_EMAIL_PDF_ENABLED", false),
     provider: envStr("QUOTE_EMAIL_PROVIDER", "none").toLowerCase(),
     fromAddress: envStr("QUOTE_EMAIL_FROM", "estimates@eliteosfab.com"),
     allowedDomains,

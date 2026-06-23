@@ -1359,6 +1359,17 @@
 |-------|--------|
 | **Date** | 2026-06-23 |
 | **Decision** | Wire **Resend** as the backend quote delivery email provider when `QUOTE_EMAIL_PROVIDER=resend`. API key lives in **`RESEND_API_KEY`** (server env only). Sender uses **`QUOTE_EMAIL_FROM`** (verified `eliteosfab.com` domain). Real outbound email remains gated by **`QUOTE_EMAIL_SEND_ENABLED=1`**; preview never sends. **`QUOTE_EMAIL_FORCE_RECIPIENT`** redirects all real sends to a single test inbox while preserving intended recipients in `quote_delivery_logs.metadata`. |
-| **Deferred** | Microsoft Graph / Outlook send; PDF attachments in email; account picker / recipient autofill UI. |
+| **Deferred** | Microsoft Graph / Outlook send; account picker / recipient autofill UI. |
 | **Impacted files** | `backend-core/src/email/emailClient.js`, `backend-core/.env.example`, `backend-core/src/quoteDelivery/quoteDelivery.test.mjs`, this entry. |
-| **Revisit trigger** | Production send rollout; PDF attachment pipeline; Outlook integration. |
+| **Revisit trigger** | Production send rollout; Outlook integration. |
+
+### 92. Quote Delivery — customer PDF email attachment (frozen print snapshot, env-gated)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-06-23 |
+| **Decision** | Quote delivery may attach a **customer-facing estimate PDF** on real Resend sends when **`QUOTE_EMAIL_PDF_ENABLED=1`** (default off), **`QUOTE_EMAIL_SEND_ENABLED=1`**, and the quote has a frozen **`internal_ui.customer_estimate_print_snapshot`** from Internal Estimate save. The snapshot is a customer-safe serializable subset of **`CustomerEstimateDisplayModel`** plus print header fields; **`finalRounded` must equal `customer_display_total`** at save. PDF is generated server-side from print HTML (Chromium via `puppeteer-core`); **no live `calculateQuote`** in delivery. Legacy quotes without a print snapshot send email **without attachment** and log a warning. Preview returns PDF metadata only (no base64). Browser **`window.print()`** on `CustomerEstimatePrint` is unchanged. Generated PDFs are **not** auto-uploaded to `quote_files` in this pass. |
+| **Env** | `QUOTE_EMAIL_PDF_ENABLED`, optional `PUPPETEER_EXECUTABLE_PATH` for local Chromium. |
+| **Reconciliation** | Email/PDF attachment reflects the **last saved revision** snapshot, not unsaved IE edits. |
+| **Impacted files** | `app-internal-estimate/src/lib/customerEstimatePrintSnapshot.ts`, `InternalEstimateApp.tsx`, `backend-core/src/quotes/internalQuotesApi.js`, `backend-core/src/quoteDelivery/customerEstimatePrintSnapshot.js`, `customerEstimatePrintHtml.js`, `customerEstimatePdfBuilder.js`, `quoteDeliveryService.js`, `emailClient.js`, `quoteDeliveryEnv.js`, email modals, this entry. |
+| **Revisit trigger** | Auto-upload to `quote_files`; PDF template redesign; serverless Chromium hosting constraints. |

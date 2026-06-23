@@ -24,6 +24,13 @@ export type QuoteDeliveryResponse = {
   recipients?: DeliveryRecipient[];
   htmlPreview?: string;
   textPreview?: string;
+  pdfAttachment?: {
+    generated?: boolean;
+    skipped?: boolean;
+    filename?: string | null;
+    byteLength?: number;
+    reason?: string;
+  };
   warnings?: string[];
   deliveryLogId?: string | null;
   deliveryLogSkipped?: boolean;

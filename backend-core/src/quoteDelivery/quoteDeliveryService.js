@@ -6,6 +6,7 @@ import { logAction } from "../auth/auditLog.js";
 import { sendEstimateEmail } from "../email/emailClient.js";
 import { auditCustomerSafeText, formatCustomerSafeViolationWarning } from "./estimateContentSanitizer.js";
 import { buildCustomerEstimateDisplayFromSnapshot } from "./estimateDisplayFromSnapshot.js";
+import { buildCustomerEstimatePdfAttachment } from "./customerEstimatePdfBuilder.js";
 import { buildEstimateEmailContent } from "./estimateEmailBuilder.js";
 import { computeSnapshotHash, loadInternalQuoteForDelivery } from "./estimateSnapshotLoader.js";
 import { buildDeliveryLogRow, insertQuoteDeliveryLog } from "./quoteDeliveryLogs.js";
@@ -161,12 +162,58 @@ export async function runQuoteDelivery(db, req, quoteId, body, options) {
 
   const isPreview = options.mode === "preview";
   const sendBlocked = !env.sendEnabled || isPreview;
+  const shouldGeneratePdf = env.pdfEnabled && (isPreview || (!sendBlocked && env.sendEnabled));
+
+  /** @type {{ generated: boolean, skipped: boolean, filename: string|null, byteLength: number, reason: string, error?: string|null }} */
+  let pdfAttachmentMeta = {
+    generated: false,
+    skipped: true,
+    filename: null,
+    byteLength: 0,
+    reason: env.pdfEnabled ? "not_requested" : "pdf_disabled"
+  };
+  let pdfBuffer = null;
+
+  if (shouldGeneratePdf) {
+    const pdfResult = await buildCustomerEstimatePdfAttachment({
+      row,
+      pdfEnabled: true,
+      revisionLabel: row.revision_label
+    });
+    pdfAttachmentMeta = {
+      generated: pdfResult.ok && !pdfResult.skipped,
+      skipped: Boolean(pdfResult.skipped),
+      filename: pdfResult.filename ?? null,
+      byteLength: pdfResult.byteLength ?? 0,
+      reason: pdfResult.reason ?? "unknown",
+      error: pdfResult.error ?? null
+    };
+    if (pdfResult.ok && pdfResult.buffer) {
+      pdfBuffer = pdfResult.buffer;
+    } else if (pdfResult.skipped && pdfResult.reason === "no_print_snapshot") {
+      warnings.push(
+        "Customer PDF attachment skipped — this quote has no saved print snapshot. Save or revise the estimate to enable PDF attachments."
+      );
+    } else if (pdfResult.skipped && pdfResult.reason === "print_snapshot_reconciliation_mismatch") {
+      warnings.push(
+        "Customer PDF attachment skipped — saved print snapshot does not match customer display total."
+      );
+    } else if (pdfResult.skipped && pdfResult.reason === "pdf_render_failed") {
+      warnings.push(`Customer PDF attachment skipped — ${pdfResult.error || "renderer unavailable"}`);
+    } else if (pdfResult.skipped && pdfResult.reason === "customer_safe_violation") {
+      warnings.push("Customer PDF attachment skipped — print HTML failed customer-safe audit.");
+    }
+  }
 
   let status = isPreview ? "preview" : env.sendEnabled ? "queued" : "blocked";
   let providerMessageId = null;
   let sendError = null;
 
   if (!isPreview && env.sendEnabled) {
+    const attachments =
+      env.pdfEnabled && pdfBuffer && pdfAttachmentMeta.filename
+        ? [{ filename: pdfAttachmentMeta.filename, content: pdfBuffer }]
+        : undefined;
     const sendResult = await sendEstimateEmail({
       to: toList,
       cc: ccList,
@@ -175,7 +222,8 @@ export async function runQuoteDelivery(db, req, quoteId, body, options) {
       text: emailContent.textPreview,
       from: env.fromAddress,
       provider: env.provider,
-      replyTo: emailContent.replyTo
+      replyTo: emailContent.replyTo,
+      attachments
     });
     if (sendResult.ok && !sendResult.skipped) {
       status = "sent";
@@ -208,6 +256,8 @@ export async function runQuoteDelivery(db, req, quoteId, body, options) {
     metadata: {
       dry_run: sendBlocked,
       send_enabled: env.sendEnabled,
+      pdf_enabled: env.pdfEnabled,
+      pdf_attachment: pdfAttachmentMeta,
       mode: options.mode,
       intended_recipients: policyResult.intendedRecipients ?? effectiveRecipients,
       warnings
@@ -240,6 +290,13 @@ export async function runQuoteDelivery(db, req, quoteId, body, options) {
     recipients: effectiveRecipients,
     htmlPreview: emailContent.htmlPreview,
     textPreview: emailContent.textPreview,
+    pdfAttachment: {
+      generated: pdfAttachmentMeta.generated,
+      skipped: pdfAttachmentMeta.skipped,
+      filename: pdfAttachmentMeta.filename,
+      byteLength: pdfAttachmentMeta.byteLength,
+      reason: pdfAttachmentMeta.reason
+    },
     warnings,
     deliveryLogId: logResult.deliveryLogId ?? null,
     deliveryLogSkipped: Boolean(logResult.skipped),

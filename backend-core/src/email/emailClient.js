@@ -15,7 +15,27 @@ function getResendApiKey() {
 }
 
 /**
- * @param {{ to: string[], cc?: string[], subject: string, html: string, text: string, from: string, replyTo?: string | null }} params
+ * @param {{ filename: string, content: Buffer | Uint8Array | string }} attachment
+ */
+function normalizeResendAttachment(attachment) {
+  const filename = String(attachment.filename || "").trim();
+  if (!filename) return null;
+  const raw = attachment.content;
+  let content;
+  if (Buffer.isBuffer(raw)) {
+    content = raw.toString("base64");
+  } else if (raw instanceof Uint8Array) {
+    content = Buffer.from(raw).toString("base64");
+  } else if (typeof raw === "string") {
+    content = raw;
+  } else {
+    return null;
+  }
+  return { filename, content };
+}
+
+/**
+ * @param {{ to: string[], cc?: string[], subject: string, html: string, text: string, from: string, replyTo?: string | null, attachments?: Array<{ filename: string, content: Buffer | Uint8Array | string }> }} params
  */
 async function sendViaResend(params) {
   const apiKey = getResendApiKey();
@@ -57,6 +77,9 @@ async function sendViaResend(params) {
   }
 
   const replyTo = String(params.replyTo || "").trim().toLowerCase();
+  const attachments = (params.attachments || [])
+    .map(normalizeResendAttachment)
+    .filter(Boolean);
   const payload = {
     from,
     to,
@@ -64,7 +87,8 @@ async function sendViaResend(params) {
     html: String(params.html || ""),
     ...(params.text ? { text: String(params.text) } : {}),
     ...(cc.length ? { cc } : {}),
-    ...(replyTo ? { reply_to: replyTo } : {})
+    ...(replyTo ? { reply_to: replyTo } : {}),
+    ...(attachments.length ? { attachments } : {})
   };
 
   try {
@@ -113,7 +137,7 @@ async function sendViaResend(params) {
 }
 
 /**
- * @param {{ to: string[], cc?: string[], subject: string, html: string, text: string, from: string, provider: string, replyTo?: string | null }} params
+ * @param {{ to: string[], cc?: string[], subject: string, html: string, text: string, from: string, provider: string, replyTo?: string | null, attachments?: Array<{ filename: string, content: Buffer | Uint8Array | string }> }} params
  */
 export async function sendEstimateEmail(params) {
   const provider = String(params.provider || "none").toLowerCase();

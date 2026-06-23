@@ -247,7 +247,9 @@ export default function EmailEstimateModal(props: EmailEstimateModalProps) {
           </button>
         </div>
         <p className="muted small ql-email-dry-run-note">
-          Email sending is disabled in this environment. Send runs a server-side dry run only.
+          Email sending is disabled in this environment. Send runs a server-side dry run only. When PDF
+          attachment generation is enabled on the server, the customer estimate PDF from the last saved quote
+          revision is attached on real sends when available.
         </p>
       </div>
     </div>

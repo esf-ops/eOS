@@ -153,6 +153,35 @@ export function attachInternalQuoteRoutes(app, deps) {
       const organizationContext = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
       const calc = await calculateQuote({ ...body, quoteSource: "internal_quote" }, { db });
       const userEmail = String(req.user?.email || req.user?.id || "unknown");
+
+      const customerDisplayTotal = (() => {
+        const cdt = Number(body.customerDisplayTotal ?? body.customer_display_total);
+        return Number.isFinite(cdt) && cdt > 0 ? Math.round(cdt) : null;
+      })();
+      const printSnapshotRaw =
+        body.customerEstimatePrintSnapshot ?? body.customer_estimate_print_snapshot ?? null;
+      if (printSnapshotRaw != null && typeof printSnapshotRaw !== "object") {
+        return res.status(400).json({
+          ok: false,
+          error: "customer_estimate_print_snapshot must be an object when provided"
+        });
+      }
+      if (printSnapshotRaw) {
+        const finalRounded = Math.round(Number(printSnapshotRaw.finalRounded));
+        if (!Number.isFinite(finalRounded) || finalRounded <= 0) {
+          return res.status(400).json({
+            ok: false,
+            error: "customer_estimate_print_snapshot.finalRounded is invalid"
+          });
+        }
+        if (customerDisplayTotal != null && finalRounded !== customerDisplayTotal) {
+          return res.status(400).json({
+            ok: false,
+            error: `customer_estimate_print_snapshot.finalRounded (${finalRounded}) must equal customer_display_total (${customerDisplayTotal})`
+          });
+        }
+      }
+
       const snapshotToStore = {
         ...calc.snapshot,
         internal_ui_version: 1,
@@ -201,10 +230,9 @@ export function attachInternalQuoteRoutes(app, deps) {
             body.customerRoomAreaBreakdown ?? body.customer_room_area_breakdown ?? null,
           /** Customer-facing Estimated project total = sum of rounded visible Estimate Summary rows.
            * Matches CustomerEstimatePrint.finalRounded. Preferred by Quote Library over grand_total. */
-          customer_display_total: (() => {
-            const cdt = Number(body.customerDisplayTotal ?? body.customer_display_total);
-            return Number.isFinite(cdt) && cdt > 0 ? cdt : null;
-          })()
+          customer_display_total: customerDisplayTotal,
+          customer_estimate_print_snapshot:
+            printSnapshotRaw && typeof printSnapshotRaw === "object" ? printSnapshotRaw : null
         }
       };
       const internalEstimateSummary = buildInternalEstimateSummary(calc, body, snapshotToStore);

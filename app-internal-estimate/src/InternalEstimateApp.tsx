@@ -37,6 +37,10 @@ import VisualLayoutCanvas, {
 import { resolveAccessToken } from "./lib/authSession";
 import { QuoteFilesPanel } from "./QuoteFilesPanel";
 import { buildCustomerEstimateDisplayModel } from "./lib/customerEstimateDisplayModel";
+import {
+  buildCustomerEstimatePrintSnapshot,
+  type CustomerEstimatePrintSnapshot
+} from "./lib/customerEstimatePrintSnapshot";
 import { splitInternalEstimateCustomLines } from "./lib/internalEstimateCustomLines";
 import { friendlyApiErrorMessage } from "./lib/saveErrorMessage";
 import { getSupabase } from "./lib/supabase";
@@ -466,6 +470,7 @@ export default function InternalEstimateApp() {
   // (Declaring it in the deps array caused a TDZ crash in the production bundle
   //  because customerDisplayTotal is const-declared 558 lines below the useCallback.)
   const customerDisplayTotalRef = useRef(0);
+  const customerPrintSnapshotRef = useRef<CustomerEstimatePrintSnapshot | null>(null);
 
   const [calcBusy, setCalcBusy] = useState(false);
   const [calcError, setCalcError] = useState<string | null>(null);
@@ -1194,6 +1199,7 @@ export default function InternalEstimateApp() {
     const base = {
       ...buildCalcPayload(),
       customerDisplayTotal: customerDisplayTotalRef.current,
+      customerEstimatePrintSnapshot: customerPrintSnapshotRef.current ?? undefined,
       customer_name: customerName.trim() || null,
       customer_email: email.trim() || null,
       customer_phone: phone.trim() || null,
@@ -1828,6 +1834,54 @@ export default function InternalEstimateApp() {
   const customerDisplayTotal = customerEstimateDisplay.finalRounded;
   // Keep ref in sync so buildSubmitPayload reads the fresh value at save time.
   customerDisplayTotalRef.current = customerDisplayTotal;
+
+  useEffect(() => {
+    if (!effectiveQuoteNumber?.trim()) {
+      customerPrintSnapshotRef.current = null;
+      return;
+    }
+    try {
+      customerPrintSnapshotRef.current = buildCustomerEstimatePrintSnapshot({
+        display: customerEstimateDisplay,
+        header: {
+          estimateDate: new Date().toLocaleDateString(undefined, {
+            year: "numeric",
+            month: "long",
+            day: "numeric"
+          }),
+          quoteNumber: effectiveQuoteNumber.trim(),
+          accountName: accountName.trim() || null,
+          customerName: customerName.trim() || null,
+          projectName: projectName.trim() || null,
+          projectAddress: projectAddress.trim() || null,
+          city: city.trim() || null,
+          state: state.trim() || null,
+          branch: branch.trim() || null,
+          salesRep: salesRep.trim() || null,
+          primaryGroup: topMaterialGroup || null,
+          primaryColorLabel: primaryColorLabel || null,
+          colorTbd: colorTbd
+        }
+      });
+    } catch (e) {
+      console.warn("[internal-estimate] customer print snapshot build failed", e);
+      customerPrintSnapshotRef.current = null;
+    }
+  }, [
+    customerEstimateDisplay,
+    effectiveQuoteNumber,
+    accountName,
+    customerName,
+    projectName,
+    projectAddress,
+    city,
+    state,
+    branch,
+    salesRep,
+    topMaterialGroup,
+    primaryColorLabel,
+    colorTbd
+  ]);
 
   /** Matches customer print Quoted Material Breakdown + vanity + room extras + custom lines + edge — same basis as live total. */
   const stickyLiveRollup = useMemo(() => {

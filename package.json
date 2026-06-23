@@ -148,6 +148,7 @@
     "lint": "node --check src/index.js && node --check src/morawareClient.js && node --check src/morawareDiscovery.js && node --check src/morawareJobFormsSdk.js && node --check src/firehose.js && node --check src/normalize.js && node --check src/router.js && node --check src/heads/debug.js"
   },
   "dependencies": {
+    "@sparticuz/chromium": "^133.0.0",
     "@supabase/supabase-js": "^2.105.3",
     "axios": "^1.16.0",
     "cors": "^2.8.5",
@@ -157,6 +158,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "pdfjs-dist": "^6.0.227"
+    "pdfjs-dist": "^6.0.227",
+    "puppeteer-core": "^24.43.1"
   }
 }

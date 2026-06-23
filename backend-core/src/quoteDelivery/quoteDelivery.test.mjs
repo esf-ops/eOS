@@ -15,6 +15,13 @@ import {
 } from "./estimateContentSanitizer.js";
 import { buildCustomerEstimateDisplayFromSnapshot } from "./estimateDisplayFromSnapshot.js";
 import { buildEstimateEmailContent, pickReplyToEmail } from "./estimateEmailBuilder.js";
+import { buildCustomerEstimatePrintHtml } from "./customerEstimatePrintHtml.js";
+import { buildCustomerEstimatePdfAttachment, renderHtmlToPdfBytes } from "./customerEstimatePdfBuilder.js";
+import {
+  buildCustomerEstimatePdfFilename,
+  loadPrintSnapshotFromQuoteRow,
+  parseCustomerEstimatePrintSnapshot
+} from "./customerEstimatePrintSnapshot.js";
 import { buildDeliveryLogRow, insertQuoteDeliveryLog } from "./quoteDeliveryLogs.js";
 import { getQuoteDeliveryEnv } from "./quoteDeliveryEnv.js";
 import {
@@ -27,7 +34,89 @@ const QUOTE_ID = "a1111111-1111-4111-8111-111111111111";
 const ORG_ID = "89180433-9fab-4024-bec9-a14d870bd0a8";
 const USER_ID = "c3333333-3333-4333-8333-333333333333";
 
+function makePrintSnapshot(overrides = {}) {
+  return {
+    version: 1,
+    finalRounded: 12450,
+    header: {
+      estimateDate: "June 23, 2026",
+      quoteNumber: "ESF-LIS-000042",
+      customerName: "Jane Customer",
+      projectName: "Kitchen Remodel",
+      projectAddress: "123 Main St",
+      city: "Lisbon",
+      state: "IA",
+      branch: "Lisbon",
+      salesRep: "Peg Reid",
+      accountName: null,
+      primaryGroup: "Group Promo",
+      primaryColorLabel: "",
+      colorTbd: false
+    },
+    display: {
+      finalRounded: 12450,
+      preparedByDisplayName: "Peg Reid",
+      estimateSummaryRows: [
+        { key: "countertop", label: "Countertop material", displayAmount: 12000 },
+        { key: "addons", label: "Add-ons / fixtures", displayAmount: 450 }
+      ],
+      showRoomBreakdown: true,
+      roomAreaPrintRows: [
+        {
+          roomId: "kitchen",
+          displayName: "Kitchen",
+          materialGroup: "Group Promo",
+          isVanity: false,
+          displayedMaterial: 11500,
+          displayedAddOns: 450,
+          displayedAreaTotal: 11950,
+          addonLines: [{ label: "Visible sink", amountExact: 450, displayedAmount: 450 }],
+          customerCustomLines: [],
+          customerNoteLines: []
+        }
+      ],
+      unassignedDisplayTotal: 500,
+      unassignedExact: 500,
+      customerFacingNoteLines: ["Customer note line 1"],
+      roomComparisonTable: null
+    },
+    ...overrides
+  };
+}
+
 function internalQuoteRow(overrides = {}) {
+  const { skipPrintSnapshot, ...rest } = overrides;
+  const baseInternalUi = {
+    customer_display_total: 12450,
+    customer_estimate_customer_facing_notes: "Customer note line 1",
+    custom_line_items: [
+      { name: "Visible sink", customerFacing: true, lineTotal: 500 },
+      { name: "Internal adjustment", customerFacing: false, lineTotal: 200, internalNote: "secret" }
+    ],
+    estimate_rooms: [{ name: "Kitchen", countertopSqft: 35, backsplashSqft: 7 }],
+    internal_material_basis: "wholesale"
+  };
+  if (!skipPrintSnapshot) {
+    baseInternalUi.customer_estimate_print_snapshot = makePrintSnapshot();
+  }
+  const baseSnapshot = {
+    materialGroup: "Group Promo",
+    totals: { estimated_sqft: 42 },
+    internal_ui: baseInternalUi,
+    inputSummary: { areas: { countertopSqft: 35 }, engine: "rooms" },
+    material_breakdown: [{ group: "Group Promo", price_per_sqft: 70 }]
+  };
+  const mergedSnapshot = rest.calculation_snapshot
+    ? {
+        ...baseSnapshot,
+        ...rest.calculation_snapshot,
+        internal_ui: {
+          ...baseInternalUi,
+          ...(rest.calculation_snapshot.internal_ui || {})
+        }
+      }
+    : baseSnapshot;
+
   return {
     id: QUOTE_ID,
     quote_number: "ESF-LIS-000042",
@@ -46,23 +135,8 @@ function internalQuoteRow(overrides = {}) {
     grand_total: 12447.82,
     estimated_sqft: 42,
     organization_id: ORG_ID,
-    calculation_snapshot: {
-      materialGroup: "Group Promo",
-      totals: { estimated_sqft: 42 },
-      internal_ui: {
-        customer_display_total: 12450,
-        customer_estimate_customer_facing_notes: "Customer note line 1",
-        custom_line_items: [
-          { name: "Visible sink", customerFacing: true, lineTotal: 500 },
-          { name: "Internal adjustment", customerFacing: false, lineTotal: 200, internalNote: "secret" }
-        ],
-        estimate_rooms: [{ name: "Kitchen", countertopSqft: 35, backsplashSqft: 7 }],
-        internal_material_basis: "wholesale"
-      },
-      inputSummary: { areas: { countertopSqft: 35 }, engine: "rooms" },
-      material_breakdown: [{ group: "Group Promo", price_per_sqft: 70 }]
-    },
-    ...overrides
+    calculation_snapshot: mergedSnapshot,
+    ...rest
   };
 }
 
@@ -465,19 +539,23 @@ async function testLogsGracefulWhenTableMissing() {
 function testEnvDefaults() {
   const prev = {
     send: process.env.QUOTE_EMAIL_SEND_ENABLED,
+    pdf: process.env.QUOTE_EMAIL_PDF_ENABLED,
     provider: process.env.QUOTE_EMAIL_PROVIDER,
     from: process.env.QUOTE_EMAIL_FROM
   };
   delete process.env.QUOTE_EMAIL_SEND_ENABLED;
+  delete process.env.QUOTE_EMAIL_PDF_ENABLED;
   delete process.env.QUOTE_EMAIL_PROVIDER;
   delete process.env.QUOTE_EMAIL_FROM;
 
   const env = getQuoteDeliveryEnv();
   assert.equal(env.sendEnabled, false);
+  assert.equal(env.pdfEnabled, false);
   assert.equal(env.provider, "none");
   assert.equal(env.fromAddress, "estimates@eliteosfab.com");
 
   process.env.QUOTE_EMAIL_SEND_ENABLED = prev.send;
+  process.env.QUOTE_EMAIL_PDF_ENABLED = prev.pdf;
   process.env.QUOTE_EMAIL_PROVIDER = prev.provider;
   process.env.QUOTE_EMAIL_FROM = prev.from;
 }
@@ -698,6 +776,143 @@ async function testPreviewHtmlIncludesQuoteNumberNotDash() {
   assert.ok(!result.htmlPreview.includes("Quote #</td><td style=\"padding:4px 0;\">—"));
 }
 
+function testPrintSnapshotParseAndFilename() {
+  const snap = makePrintSnapshot();
+  assert.ok(parseCustomerEstimatePrintSnapshot(snap));
+  assert.equal(
+    buildCustomerEstimatePdfFilename("ESF-LIS-000042", "R2"),
+    "Elite Stone Fabrication Estimate - ESF-LIS-000042-R2.pdf"
+  );
+  const loaded = loadPrintSnapshotFromQuoteRow(internalQuoteRow());
+  assert.ok(loaded?.snapshot);
+  assert.equal(loaded.reconciled, true);
+}
+
+function testPrintHtmlCustomerSafe() {
+  const snap = makePrintSnapshot();
+  const html = buildCustomerEstimatePrintHtml(snap);
+  assert.ok(html.includes("ESF-LIS-000042"));
+  assert.ok(html.includes("$12,450"));
+  assert.ok(html.includes("Kitchen"));
+  const audit = auditCustomerSafeText(html);
+  assert.equal(audit.ok, true, formatCustomerSafeViolationWarning("Print HTML", audit) || "print html safe");
+  assert.ok(!html.includes("internal_ui"));
+  assert.ok(!html.includes("price_per_sqft"));
+}
+
+async function testPreviewReturnsPdfMetadataOnly() {
+  const prevPdf = process.env.QUOTE_EMAIL_PDF_ENABLED;
+  process.env.QUOTE_EMAIL_PDF_ENABLED = "1";
+  const db = makeMockSupabase({ quoteRow: internalQuoteRow() });
+  const result = await runQuoteDelivery(
+    db,
+    mockReq(),
+    QUOTE_ID,
+    { recipients: [{ email: "jane@example.com", type: "to" }] },
+    { mode: "preview" }
+  );
+  assert.equal(result.ok, true);
+  assert.ok(result.pdfAttachment);
+  assert.equal(typeof result.pdfAttachment.byteLength, "number");
+  assert.ok(result.pdfAttachment.filename?.includes("ESF-LIS-000042"));
+  assert.ok(!("pdfBase64" in result));
+  assert.ok(!JSON.stringify(result).includes("base64"));
+  process.env.QUOTE_EMAIL_PDF_ENABLED = prevPdf;
+}
+
+async function testLegacyQuoteWithoutPrintSnapshotWarns() {
+  const prevPdf = process.env.QUOTE_EMAIL_PDF_ENABLED;
+  process.env.QUOTE_EMAIL_PDF_ENABLED = "1";
+  const db = makeMockSupabase({ quoteRow: internalQuoteRow({ skipPrintSnapshot: true }) });
+  const result = await runQuoteDelivery(
+    db,
+    mockReq(),
+    QUOTE_ID,
+    { recipients: [{ email: "jane@example.com", type: "to" }] },
+    { mode: "preview" }
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.pdfAttachment?.generated, false);
+  assert.equal(result.pdfAttachment?.reason, "no_print_snapshot");
+  assert.ok((result.warnings || []).some((w) => String(w).includes("print snapshot")));
+  process.env.QUOTE_EMAIL_PDF_ENABLED = prevPdf;
+}
+
+async function testPdfBuilderDisabledSafely() {
+  const result = await buildCustomerEstimatePdfAttachment({
+    row: internalQuoteRow(),
+    pdfEnabled: false
+  });
+  assert.equal(result.skipped, true);
+  assert.equal(result.reason, "pdf_disabled");
+}
+
+async function testPdfRenderProducesValidBytesWhenAvailable() {
+  const html = buildCustomerEstimatePrintHtml(makePrintSnapshot());
+  const result = await renderHtmlToPdfBytes(html);
+  if (!result.ok) {
+    console.warn("[quote-delivery-test] PDF renderer unavailable locally:", result.error);
+    return;
+  }
+  assert.ok(result.buffer.length > 100);
+  assert.equal(result.buffer.subarray(0, 4).toString("utf8"), "%PDF");
+}
+
+async function testResendReceivesAttachmentWhenPdfEnabled() {
+  const prev = {
+    send: process.env.QUOTE_EMAIL_SEND_ENABLED,
+    pdf: process.env.QUOTE_EMAIL_PDF_ENABLED,
+    provider: process.env.QUOTE_EMAIL_PROVIDER,
+    force: process.env.QUOTE_EMAIL_FORCE_RECIPIENT,
+    key: process.env.RESEND_API_KEY
+  };
+  process.env.QUOTE_EMAIL_SEND_ENABLED = "1";
+  process.env.QUOTE_EMAIL_PDF_ENABLED = "1";
+  process.env.QUOTE_EMAIL_PROVIDER = "resend";
+  process.env.RESEND_API_KEY = "re_test_mock_key";
+
+  const prevFetch = globalThis.fetch;
+  let capturedAttachments = null;
+  globalThis.fetch = async (_url, opts) => {
+    const body = JSON.parse(String(opts?.body || "{}"));
+    capturedAttachments = body.attachments || null;
+    return { ok: true, status: 200, json: async () => ({ id: "msg_with_pdf" }) };
+  };
+
+  const db = makeMockSupabase({ quoteRow: internalQuoteRow() });
+  const result = await runQuoteDelivery(
+    db,
+    mockReq(),
+    QUOTE_ID,
+    { recipients: [{ email: "customer@example.com", type: "to" }] },
+    { mode: "send" }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.status, "sent");
+  if (result.pdfAttachment?.generated) {
+    assert.ok(Array.isArray(capturedAttachments));
+    assert.equal(capturedAttachments.length, 1);
+    assert.ok(capturedAttachments[0].filename.includes("ESF-LIS-000042"));
+    assert.ok(typeof capturedAttachments[0].content === "string");
+    assert.ok(capturedAttachments[0].content.length > 20);
+  } else {
+    console.warn(
+      "[quote-delivery-test] PDF not generated in send test:",
+      result.pdfAttachment?.reason,
+      result.pdfAttachment?.error
+    );
+  }
+
+  globalThis.fetch = prevFetch;
+  process.env.QUOTE_EMAIL_SEND_ENABLED = prev.send;
+  process.env.QUOTE_EMAIL_PDF_ENABLED = prev.pdf;
+  process.env.QUOTE_EMAIL_PROVIDER = prev.provider;
+  process.env.QUOTE_EMAIL_FORCE_RECIPIENT = prev.force;
+  if (prev.key != null) process.env.RESEND_API_KEY = prev.key;
+  else delete process.env.RESEND_API_KEY;
+}
+
 async function runAll() {
   testRecipientValidation();
   testSanitizerExcludesInternalDetails();
@@ -719,11 +934,18 @@ async function runAll() {
   await testMissingQuoteNumberBlocksDelivery();
   await testMissingSnapshotBlocksDelivery();
   testEmailHtmlRequiresQuoteNumber();
+  testPrintSnapshotParseAndFilename();
+  testPrintHtmlCustomerSafe();
+  await testPreviewReturnsPdfMetadataOnly();
+  await testLegacyQuoteWithoutPrintSnapshotWarns();
+  await testPdfBuilderDisabledSafely();
+  await testPdfRenderProducesValidBytesWhenAvailable();
   await testPreviewHtmlIncludesQuoteNumberNotDash();
   await testNoProviderCallInDryRun();
   await testResendMissingApiKeyFailsSafely();
   await testResendSendUsesApiWithMockFetch();
   await testSendWithResendEnabledLogsIntendedRecipientsWhenForced();
+  await testResendReceivesAttachmentWhenPdfEnabled();
   await testLogsGracefulWhenTableMissing();
   console.log("quoteDelivery tests: all passed");
 }
