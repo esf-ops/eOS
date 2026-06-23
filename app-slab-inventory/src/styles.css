@@ -1206,11 +1206,11 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 .cp-card:focus-visible { outline: none; }
 .cp-card:focus-visible .cp-card-mat { outline: 2px solid var(--eos-accent); outline-offset: 3px; }
 
-/* Media frame — full-bleed image, border/shadow/radius on the mat */
+/* Media frame — full-bleed image, border/shadow on top-rounded media area */
 .cp-card-mat {
   background: #ffffff;
   border: 1px solid #e8ecf0;
-  border-radius: 20px;
+  border-radius: 20px 20px 0 0;
   padding: 0;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05), 0 2px 10px rgba(15, 23, 42, 0.04);
   transition: box-shadow 280ms cubic-bezier(0.4, 0, 0.2, 1), border-color 200ms ease;
@@ -1222,13 +1222,14 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
   border-color: #cdd5e0;
 }
 
-/* Stone image — 6:5 landscape, edge-to-edge within the mat (clipped by mat radius) */
+/* Stone image — 6:5 landscape, edge-to-edge; top corners clipped by wrapper radius */
 .cp-card-img-wrap {
   aspect-ratio: 6 / 5;
   width: 100%;
-  border-radius: 0;
+  border-radius: 18px 18px 0 0;
   overflow: hidden;
   background: #f5f3f0;
+  isolation: isolate;
 }
 .cp-card-img {
   width: 100%; height: 100%;
@@ -1240,11 +1241,9 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 .cp-card:hover .cp-card-img { transform: scale(1.16); }
 .cp-card:focus-visible .cp-card-img { transform: scale(1.03); }
 
-/* Legacy hook — same full-bleed treatment as all Elite 100 cards */
-.cp-card-mat-texture,
-.cp-card-mat-texture .cp-card-img-wrap {
+/* Legacy hook — full-bleed only; inherits rounded top corners from .cp-card-img-wrap */
+.cp-card-mat-texture {
   padding: 0;
-  border-radius: 0;
 }
 
 /* Placeholder tile for colors without images */
