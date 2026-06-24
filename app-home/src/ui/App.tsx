@@ -5,6 +5,7 @@ import { EOS_LOGO_URL, resolveHeadLaunchUrl, sanitizeLauncherLaunchUrl } from ".
 import { supabase } from "../lib/supabase";
 import ProfileView from "./ProfileView";
 import type { UserPreferences } from "./ProfileView";
+import HomeRevealSection from "./HomeRevealSection";
 import EliteosTopbar from "../../../shared/eliteos-ui/EliteosTopbar";
 import type { EliteosTopbarMenuItem } from "../../../shared/eliteos-ui/EliteosTopbar";
 
@@ -248,6 +249,99 @@ const HEAD_CATEGORY_BY_SLUG: Record<string, string> = {
 
 function headCategoryFor(slug: string): string {
   return HEAD_CATEGORY_BY_SLUG[slug] ?? "Platform";
+}
+
+/** Presentational business grouping for available tools — display order/sections only. */
+type BusinessGroupLabel =
+  | "Quote Platform"
+  | "Inventory"
+  | "Operations"
+  | "Admin"
+  | "Platform"
+  | "Other";
+
+const BUSINESS_GROUP_ORDER: BusinessGroupLabel[] = [
+  "Quote Platform",
+  "Inventory",
+  "Operations",
+  "Admin",
+  "Platform",
+  "Other"
+];
+
+const HEAD_BUSINESS_GROUP_BY_SLUG: Record<string, BusinessGroupLabel> = {
+  quote: "Quote Platform",
+  quote_library: "Quote Platform",
+  custom_quote: "Quote Platform",
+  public_quote: "Quote Platform",
+  partner_quote: "Quote Platform",
+  dealer_resources: "Quote Platform",
+  ai_takeoff: "Quote Platform",
+  slab_inventory: "Inventory",
+  executive: "Operations",
+  sales: "Operations",
+  production: "Operations",
+  shop_tv: "Operations",
+  install: "Operations",
+  install_dashboard: "Operations",
+  purchasing: "Operations",
+  customer_service: "Operations",
+  marketing: "Operations",
+  pricing_admin: "Admin",
+  system_admin: "Admin",
+  hr: "Admin",
+  finance: "Admin",
+  org_directory: "Platform",
+  brain_health: "Platform",
+  safety: "Platform",
+  reports: "Platform"
+};
+
+function businessGroupFor(slug: string): BusinessGroupLabel {
+  return HEAD_BUSINESS_GROUP_BY_SLUG[slug] ?? "Other";
+}
+
+function groupAvailableByBusiness(items: HeadCard[]): Array<{ label: BusinessGroupLabel; items: HeadCard[] }> {
+  const buckets = new Map<BusinessGroupLabel, HeadCard[]>();
+  for (const label of BUSINESS_GROUP_ORDER) buckets.set(label, []);
+  for (const h of items) {
+    const g = businessGroupFor(h.slug);
+    buckets.get(g)!.push(h);
+  }
+  return BUSINESS_GROUP_ORDER.map((label) => ({ label, items: buckets.get(label)! })).filter(
+    (g) => g.items.length > 0
+  );
+}
+
+const CARD_STAGGER_BASE = 100;
+const CARD_STAGGER_STEP = 28;
+const CARD_STAGGER_CAP_MS = 420;
+
+function cardEnterDelayMs(index: number, sectionBase: number): number {
+  return Math.min(sectionBase + index * CARD_STAGGER_STEP, CARD_STAGGER_CAP_MS);
+}
+
+type DisplayBadge = { text: string; tier: "primary" | "secondary" };
+
+/** Up to two status badges — critical access state is never dropped. */
+function resolveDisplayBadges(head: HeadCard, roadmapSection: boolean): DisplayBadge[] {
+  const all = resolveCardBadges(head, roadmapSection);
+  if (all.length <= 2) {
+    return all.map((text, i) => ({ text, tier: i === 0 ? "primary" : "secondary" }));
+  }
+  if (all.includes("Not assigned")) {
+    return [{ text: "Not assigned", tier: "primary" }];
+  }
+  const rank: Record<string, number> = {
+    "Coming soon": 0,
+    Public: 1,
+    Live: 2,
+    Preview: 2,
+    Available: 2,
+    Admin: 3
+  };
+  const sorted = [...all].sort((a, b) => (rank[a] ?? 9) - (rank[b] ?? 9));
+  return sorted.slice(0, 2).map((text, i) => ({ text, tier: i === 0 ? "primary" : "secondary" }));
 }
 
 /**
@@ -621,6 +715,7 @@ export default function App() {
 
   // Account dropdown open/close state is owned by the shared EliteosTopbar.
   const heroRef = useRef<HTMLElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Profile & Preferences view state
   const [view, setView] = useState<"launcher" | "profile">(() => {
@@ -796,6 +891,36 @@ export default function App() {
     return () => window.removeEventListener("popstate", handlePop);
   }, []);
 
+  // Home-only search shortcuts: "/" focuses finder; Escape clears when search is focused.
+  useEffect(() => {
+    if (view !== "launcher" || !session?.access_token) return;
+    function onKeyDown(e: KeyboardEvent) {
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName ?? "";
+      const isEditable =
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        Boolean(target?.isContentEditable);
+
+      if (e.key === "/" && !isEditable && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      }
+      if (
+        e.key === "Escape" &&
+        searchQuery &&
+        document.activeElement === searchInputRef.current
+      ) {
+        e.preventDefault();
+        setSearchQuery("");
+        searchInputRef.current?.blur();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [view, session?.access_token, searchQuery]);
+
   async function submitLogin(ev: React.FormEvent) {
     ev.preventDefault();
     setAuthError("");
@@ -935,12 +1060,25 @@ export default function App() {
           const title = launcherCardTitle(h).toLowerCase();
           const desc = String(h.description ?? "").toLowerCase();
           const cat = headCategoryFor(h.slug).toLowerCase();
+          const group = businessGroupFor(h.slug).toLowerCase();
           const pills = resolveCardBadges(h, roadmap).join(" ").toLowerCase();
-          return title.includes(q) || desc.includes(q) || cat.includes(q) || pills.includes(q);
+          return (
+            title.includes(q) ||
+            desc.includes(q) ||
+            cat.includes(q) ||
+            group.includes(q) ||
+            pills.includes(q)
+          );
         })
       };
     });
   }, [grouped, searchQuery]);
+
+  const availableBusinessGroups = useMemo(() => {
+    const available =
+      filteredGrouped.find((g) => g.section === "Available Tools")?.items ?? [];
+    return groupAvailableByBusiness(available);
+  }, [filteredGrouped]);
 
   const searchActive = searchQuery.trim().length > 0;
   const searchTotalCount = filteredGrouped.reduce((s, g) => s + g.items.length, 0);
@@ -1014,26 +1152,34 @@ export default function App() {
         </svg>
       </span>
       <input
+        ref={searchInputRef}
         type="search"
         className="launcher-search-input"
-        placeholder="Find a head…"
+        placeholder="Find a tool…"
         value={searchQuery}
         onChange={(e) => setSearchQuery(e.target.value)}
-        aria-label="Find a head"
+        aria-label="Find a tool"
         autoComplete="off"
       />
       {searchQuery ? (
         <button
           type="button"
           className="launcher-search-clear"
-          onClick={() => setSearchQuery("")}
+          onClick={() => {
+            setSearchQuery("");
+            searchInputRef.current?.focus();
+          }}
           aria-label="Clear search"
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
             <path d="M18 6L6 18M6 6l12 12" />
           </svg>
         </button>
-      ) : null}
+      ) : (
+        <kbd className="launcher-search-kbd" aria-hidden>
+          /
+        </kbd>
+      )}
     </div>
   );
 
@@ -1285,7 +1431,11 @@ export default function App() {
               <div className="card-grid card-grid-available" aria-hidden>
                 {[0, 1, 2, 3].map((i) => (
                   <div key={i} className="head-card head-card-available skeleton-card">
-                    <div className="skel skel-icon" />
+                    <div className="head-card-top">
+                      <div className="skel skel-icon" />
+                      <div className="skel skel-pill" />
+                    </div>
+                    <div className="skel skel-eyebrow" />
                     <div className="skel skel-title" />
                     <div className="skel skel-line" />
                     <div className="skel skel-line skel-line-short" />
@@ -1313,117 +1463,195 @@ export default function App() {
 
             {searchActive && searchTotalCount === 0 ? (
               <div className="empty-box launcher-search-empty" role="status">
-                <p className="empty-title">No tools match your search.</p>
+                <p className="empty-title">No tools match &ldquo;{searchQuery.trim()}&rdquo;</p>
                 <p className="empty-sub">
-                  Try a different term, or{" "}
+                  Try a different name, category, or status — or{" "}
                   <button
                     type="button"
                     className="btn btn-ghost launcher-search-reset"
-                    onClick={() => setSearchQuery("")}
+                    onClick={() => {
+                      setSearchQuery("");
+                      searchInputRef.current?.focus();
+                    }}
                   >
-                    clear the search
+                    clear search
                   </button>
                   .
                 </p>
               </div>
             ) : null}
 
+            {availableBusinessGroups.length > 0 ? (
+              <HomeRevealSection
+                className="launcher-section launcher-section-available"
+                aria-label="Available Tools"
+                delayMs={60}
+              >
+                <div
+                  className="section-head"
+                  style={{ "--section-head-delay": "60ms" } as React.CSSProperties}
+                >
+                  <h2 className="section-title">Available Tools</h2>
+                  <span className="section-count">
+                    {availableBusinessGroups.reduce((n, g) => n + g.items.length, 0)}
+                  </span>
+                </div>
+                <p className="section-lede">
+                  Production tools you can open when assigned. Each destination still enforces Brain permissions.
+                </p>
+                {availableBusinessGroups.map((group, groupIdx) => {
+                  let cardOffset = 0;
+                  for (let i = 0; i < groupIdx; i++) {
+                    cardOffset += availableBusinessGroups[i].items.length;
+                  }
+                  return (
+                    <div key={group.label} className="launcher-tool-group">
+                      <h3 className="tool-group-label">{group.label}</h3>
+                      <div className="card-grid card-grid-available">
+                        {group.items.map((h, idx) => {
+                          const globalIdx = cardOffset + idx;
+                          const url = pickLaunchUrl(h);
+                          const canNavigate = Boolean(h.enabled && url);
+                          const inactiveClass = !canNavigate ? " is-muted" : "";
+                          const badges = resolveDisplayBadges(h, false);
+                          const cardTitle = launcherCardTitle(h);
+                          const showUrl = shouldShowUrlOnCard(url);
+                          const openLabel = h.slug === "public_quote" ? "Open public site" : "Open tool";
+                          const tint = headTintFor(h.slug);
+                          const cardDelayMs = cardEnterDelayMs(globalIdx, CARD_STAGGER_BASE);
+                          const isDefaultHead = prefs.default_landing_head === h.slug;
+
+                          function openHead() {
+                            if (!canNavigate || !url) return;
+                            if (prefs.open_heads_in_new_tab) {
+                              window.open(url, "_blank", "noopener,noreferrer");
+                            } else {
+                              window.location.href = url;
+                            }
+                          }
+
+                          return (
+                            <article
+                              key={h.slug}
+                              style={{ "--card-delay": `${cardDelayMs}ms` } as React.CSSProperties}
+                              className={`head-card head-card-available${inactiveClass}${isDefaultHead ? " head-card-default" : ""} tint-${tint}`}
+                            >
+                              <div className="head-card-shine" aria-hidden />
+                              <div className="head-card-top">
+                                <span className={`head-glyph head-glyph-${tint}`} aria-hidden>
+                                  <HeadGlyph slug={h.slug} />
+                                </span>
+                                <div className="pill-row" aria-label="Status">
+                                  {isDefaultHead ? (
+                                    <span className="pill pill-default" title="Your default tool">
+                                      Default
+                                    </span>
+                                  ) : null}
+                                  {badges.map(({ text, tier }) => (
+                                    <span
+                                      key={`${h.slug}-${text}`}
+                                      className={`${pillClass(text)}${tier === "secondary" ? " pill-secondary" : ""}`}
+                                    >
+                                      {text}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                              <p className="head-card-eyebrow">{headCategoryFor(h.slug)}</p>
+                              <h3 className="head-card-title">{cardTitle}</h3>
+                              <p className="desc">{h.description}</p>
+                              {showUrl && url ? (
+                                <p className="url-subtle" title={url}>
+                                  {url}
+                                </p>
+                              ) : null}
+                              {canNavigate ? (
+                                <button type="button" className="btn btn-open head-open-btn" onClick={openHead}>
+                                  <span>{openLabel}</span>
+                                  <ArrowOut />
+                                </button>
+                              ) : (
+                                <p className="card-foot muted-note">
+                                  {url ? "Ask your admin for access to open this tool." : null}
+                                </p>
+                              )}
+                            </article>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </HomeRevealSection>
+            ) : null}
+
             {filteredGrouped.map(({ section, items }) => {
-              if (!items.length) return null;
-              const roadmapSection = section === "Coming Soon Tools";
+              if (section !== "Coming Soon Tools" || !items.length) return null;
+              const roadmapSection = true;
               return (
-                <section
+                <HomeRevealSection
                   key={section}
-                  className={`launcher-section${roadmapSection ? " launcher-section-roadmap" : " launcher-section-available"}`}
+                  className="launcher-section launcher-section-roadmap"
                   aria-label={section}
+                  delayMs={180}
                 >
                   <div
                     className="section-head"
-                    style={{ "--section-head-delay": roadmapSection ? "200ms" : "60ms" } as React.CSSProperties}
+                    style={{ "--section-head-delay": "200ms" } as React.CSSProperties}
                   >
                     <h2 className="section-title">{section}</h2>
                     <span className="section-count">{items.length}</span>
                   </div>
-                  {roadmapSection ? (
-                    <p className="section-lede">
-                      Planned tools live here until a production launch link is configured on the Brain.
-                    </p>
-                  ) : (
-                    <p className="section-lede">
-                      Production tools you can open when assigned. Each destination still enforces Brain permissions.
-                    </p>
-                  )}
-                  <div className={roadmapSection ? "card-grid card-grid-roadmap" : "card-grid card-grid-available"}>
+                  <p className="section-lede">
+                    Planned tools live here until a production launch link is configured on the Brain.
+                  </p>
+                  <div className="card-grid card-grid-roadmap">
                     {items.map((h, idx) => {
                       const url = pickLaunchUrl(h);
-                      const canNavigate = Boolean(h.enabled && url && !roadmapSection);
-                      const inactiveClass = !canNavigate ? " is-muted" : "";
-                      const pills = resolveCardBadges(h, roadmapSection);
+                      const pills = resolveDisplayBadges(h, roadmapSection);
                       const cardTitle = launcherCardTitle(h);
                       const showUrl = shouldShowUrlOnCard(url);
-                      const openLabel = h.slug === "public_quote" ? "Open public site" : "Open tool";
                       const tint = headTintFor(h.slug);
-                      const cardDelayMs = roadmapSection ? 220 + idx * 25 : 120 + idx * 35;
-
-                      function openHead() {
-                        if (!canNavigate || !url) return;
-                        if (prefs.open_heads_in_new_tab) {
-                          window.open(url, "_blank", "noopener,noreferrer");
-                        } else {
-                          window.location.href = url;
-                        }
-                      }
-
+                      const cardDelayMs = cardEnterDelayMs(idx, 200);
                       const isDefaultHead = prefs.default_landing_head === h.slug;
 
                       return (
                         <article
                           key={h.slug}
                           style={{ "--card-delay": `${cardDelayMs}ms` } as React.CSSProperties}
-                          className={`head-card${roadmapSection ? " head-card-roadmap" : " head-card-available"}${inactiveClass}${isDefaultHead ? " head-card-default" : ""} tint-${tint}`}
+                          className={`head-card head-card-roadmap tint-${tint}${isDefaultHead ? " head-card-default" : ""}`}
                         >
                           <div className="head-card-top">
                             <span className={`head-glyph head-glyph-${tint}`} aria-hidden>
                               <HeadGlyph slug={h.slug} />
                             </span>
                             <div className="pill-row" aria-label="Status">
-                              {isDefaultHead ? (
-                                <span className="pill pill-default" title="Your default tool">Default</span>
-                              ) : null}
-                              {pills.map((t, pi) => (
-                                <span key={`${h.slug}-${pi}-${t}`} className={pillClass(t)}>
-                                  {t}
+                              {pills.map(({ text, tier }) => (
+                                <span
+                                  key={`${h.slug}-${text}`}
+                                  className={`${pillClass(text)}${tier === "secondary" ? " pill-secondary" : ""}`}
+                                >
+                                  {text}
                                 </span>
                               ))}
                             </div>
                           </div>
                           <p className="head-card-eyebrow">{headCategoryFor(h.slug)}</p>
                           <h3 className="head-card-title">{cardTitle}</h3>
-                          <p className={roadmapSection ? "desc desc-roadmap" : "desc"}>{h.description}</p>
+                          <p className="desc desc-roadmap">{h.description}</p>
                           {showUrl && url ? (
                             <p className="url-subtle" title={url}>
                               {url}
                             </p>
                           ) : null}
-                          {canNavigate ? (
-                            <button type="button" className="btn btn-open head-open-btn" onClick={openHead}>
-                              <span>{openLabel}</span>
-                              <ArrowOut />
-                            </button>
-                          ) : null}
-                          {!canNavigate && !roadmapSection ? (
-                            <p className="card-foot muted-note">
-                              {url ? "Ask your admin for access to open this tool." : null}
-                            </p>
-                          ) : null}
-                          {roadmapSection ? (
-                            <p className="card-foot muted-note">On the roadmap — not available to open yet.</p>
-                          ) : null}
+                          <p className="card-foot muted-note card-foot-roadmap">
+                            On the roadmap — not available to open yet.
+                          </p>
                         </article>
                       );
                     })}
                   </div>
-                </section>
+                </HomeRevealSection>
               );
             })}
 
