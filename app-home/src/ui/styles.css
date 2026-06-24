@@ -70,11 +70,17 @@
   --sh-3: 0 10px 32px rgba(11, 26, 51, 0.08);
   --sh-card: 0 1px 2px rgba(11, 26, 51, 0.04), 0 8px 26px rgba(11, 26, 51, 0.06);
   --sh-card-hover: 0 2px 4px rgba(11, 26, 51, 0.06), 0 14px 38px rgba(11, 26, 51, 0.10);
+  --sh-card-lift:
+    0 4px 10px rgba(11, 26, 51, 0.07),
+    0 18px 44px rgba(11, 26, 51, 0.11),
+    0 0 0 1px rgba(163, 19, 47, 0.10);
 
   /* Motion */
   --eos-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --eos-ease-premium: cubic-bezier(0.22, 0.61, 0.36, 1);
   --eos-dur-1: 140ms;
   --eos-dur-2: 220ms;
+  --eos-dur-lift: 260ms;
 
   /* Compatibility — legacy variables some existing rules may reference */
   --elite-action-red: var(--eos-accent);
@@ -109,9 +115,10 @@ body {
   z-index: -1;
   pointer-events: none;
   background:
-    radial-gradient(60% 50% at 12% 4%, rgba(212, 226, 247, 0.55), transparent 60%),
-    radial-gradient(50% 50% at 92% 0%, rgba(225, 220, 243, 0.5), transparent 65%),
-    radial-gradient(45% 55% at 100% 100%, rgba(244, 216, 225, 0.45), transparent 70%);
+    radial-gradient(68% 55% at 8% 2%, rgba(212, 226, 247, 0.62), transparent 62%),
+    radial-gradient(55% 48% at 94% 0%, rgba(225, 220, 243, 0.55), transparent 68%),
+    radial-gradient(50% 60% at 100% 100%, rgba(244, 216, 225, 0.48), transparent 72%),
+    radial-gradient(40% 40% at 50% 55%, rgba(255, 255, 255, 0.35), transparent 70%);
 }
 
 ::selection {
@@ -194,6 +201,12 @@ a {
   padding: 32px 28px 56px;
 }
 
+/* Launcher canvas — wider, more breathable OS dashboard feel */
+.main.launcher-main {
+  max-width: 1280px;
+  padding: 36px 36px 72px;
+}
+
 /* ----- Hero -------------------------------------------------------------- */
 
 .hero {
@@ -205,7 +218,7 @@ a {
     linear-gradient(180deg, rgba(255, 255, 255, 0.94) 0%, rgba(255, 255, 255, 0.82) 100%);
   border: 1px solid var(--eos-line);
   box-shadow: var(--sh-2);
-  margin-bottom: 28px;
+  margin-bottom: 32px;
   animation: hero-in 480ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
   animation-delay: 40ms;
 }
@@ -436,11 +449,20 @@ a {
 /* ----- Sections ---------------------------------------------------------- */
 
 .launcher-section {
-  margin-top: 32px;
+  margin-top: 36px;
 }
 
 .launcher-section-available:first-of-type {
-  margin-top: 4px;
+  margin-top: 8px;
+}
+
+.launcher-section-roadmap {
+  margin-top: 44px;
+  padding: 26px 26px 10px;
+  border-radius: var(--r-xl);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.58) 0%, rgba(255, 255, 255, 0.32) 100%);
+  border: 1px solid var(--eos-line);
+  box-shadow: var(--sh-1);
 }
 
 /* One-shot scroll reveal wrapper */
@@ -466,22 +488,51 @@ a {
   }
 }
 
-/* Business category sub-groups within Available Tools */
+/* Business category sub-groups — intentional surfaces, not floating cards */
 .launcher-tool-group {
-  margin-top: 22px;
+  margin-top: 28px;
+  padding: 22px 22px 24px;
+  border-radius: var(--r-xl);
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.78) 0%,
+    rgba(255, 255, 255, 0.52) 100%
+  );
+  border: 1px solid var(--eos-line);
+  box-shadow: var(--sh-1);
+  position: relative;
 }
 
 .launcher-tool-group:first-of-type {
   margin-top: 0;
 }
 
+.launcher-tool-group + .launcher-tool-group {
+  margin-top: 32px;
+}
+
 .tool-group-label {
-  margin: 0 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 16px;
+  padding-bottom: 12px;
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--eos-ink-faint);
+  color: var(--eos-ink-muted);
+  border-bottom: 1px solid var(--eos-line);
+}
+
+.tool-group-label::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 3px;
+  height: 14px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, var(--eos-accent) 0%, rgba(163, 19, 47, 0.45) 100%);
+  opacity: 0.55;
 }
 
 .section-head {
@@ -521,7 +572,7 @@ a {
 }
 
 .section-lede {
-  margin: 0 0 18px;
+  margin: 0 0 22px;
   max-width: 56ch;
   font-size: 0.88rem;
   line-height: 1.55;
@@ -535,8 +586,8 @@ a {
 }
 
 .card-grid-available {
-  grid-template-columns: repeat(auto-fill, minmax(286px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 18px;
   align-items: stretch;
 }
 
@@ -686,12 +737,19 @@ a {
   box-shadow: var(--sh-card);
   overflow: hidden;
   isolation: isolate;
+  transform: translateY(0) scale(1);
+  transform-origin: center center;
   transition:
-    transform var(--eos-dur-2) var(--eos-ease),
-    box-shadow var(--eos-dur-2) var(--eos-ease),
-    border-color var(--eos-dur-2) var(--eos-ease);
+    transform var(--eos-dur-lift) var(--eos-ease-premium),
+    box-shadow var(--eos-dur-lift) var(--eos-ease-premium),
+    border-color var(--eos-dur-lift) var(--eos-ease-premium);
   animation: card-enter 340ms var(--eos-ease) both;
   animation-delay: var(--card-delay, 0ms);
+}
+
+.head-card-available:hover,
+.head-card-available:focus-within {
+  z-index: 2;
 }
 
 /* Subtle surface shine on hover — hover only, no continuous loop */
@@ -714,7 +772,7 @@ a {
 
 .head-card-available:hover .head-card-shine,
 .head-card-available:focus-within .head-card-shine {
-  opacity: 0.35;
+  opacity: 0.28;
 }
 
 @keyframes card-enter {
@@ -751,8 +809,22 @@ a {
     animation: none !important;
   }
 
-  .head-card-shine {
+  .head-card-shine,
+  .head-glyph::after {
     display: none;
+  }
+
+  .head-card-available:hover,
+  .head-card-available:focus-within,
+  .head-card-roadmap:hover {
+    transform: none;
+  }
+
+  .head-card-available:hover .head-glyph,
+  .head-card-available:focus-within .head-glyph,
+  .head-card-available:hover .head-glyph svg,
+  .head-card-available:focus-within .head-glyph svg {
+    transform: none;
   }
 }
 
@@ -773,16 +845,16 @@ a {
 
 .head-card-available:hover,
 .head-card-available:focus-within {
-  transform: translateY(-3px);
-  box-shadow: var(--sh-card-hover);
-  border-color: rgba(163, 19, 47, 0.18);
+  transform: translateY(-4px) scale(1.015);
+  box-shadow: var(--sh-card-lift);
+  border-color: rgba(163, 19, 47, 0.26);
 }
 
 /* Reveal the top-edge accent stripe on hover / keyboard-focus */
 .head-card-available:hover::after,
 .head-card-available:focus-within::after {
   border-top-color: var(--eos-accent);
-  opacity: 0.28;
+  opacity: 0.42;
 }
 
 .head-card-available.is-muted {
@@ -798,11 +870,13 @@ a {
   opacity: 0.92;
 }
 
-.head-card-roadmap:hover {
-  background: rgba(255, 255, 255, 0.88);
-  border-color: rgba(11, 26, 51, 0.24);
+.head-card-roadmap:hover,
+.head-card-roadmap:focus-within {
+  background: rgba(255, 255, 255, 0.9);
+  border-color: rgba(11, 26, 51, 0.22);
   transform: translateY(-1px);
   box-shadow: var(--sh-1);
+  z-index: 1;
 }
 
 .head-card-top {
@@ -814,6 +888,7 @@ a {
 }
 
 .head-glyph {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -821,6 +896,53 @@ a {
   height: 38px;
   border-radius: var(--r-md);
   flex: 0 0 auto;
+  overflow: hidden;
+  transform: translateY(0) scale(1) rotate(0deg);
+  transition:
+    transform var(--eos-dur-lift) var(--eos-ease-premium),
+    box-shadow var(--eos-dur-lift) var(--eos-ease-premium);
+}
+
+.head-glyph svg {
+  position: relative;
+  z-index: 1;
+  transition: transform var(--eos-dur-lift) var(--eos-ease-premium);
+}
+
+/* One-shot shine sweep across the icon tile on card hover */
+.head-glyph::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(
+    115deg,
+    transparent 28%,
+    rgba(255, 255, 255, 0.62) 50%,
+    transparent 72%
+  );
+  transform: translateX(-130%);
+  transition: transform 480ms var(--eos-ease-premium);
+  z-index: 2;
+}
+
+.head-card-available:hover .head-glyph,
+.head-card-available:focus-within .head-glyph {
+  transform: translateY(-1px) scale(1.08) rotate(-2deg);
+  box-shadow:
+    0 4px 14px rgba(11, 26, 51, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+
+.head-card-available:hover .head-glyph svg,
+.head-card-available:focus-within .head-glyph svg {
+  transform: translateY(-0.5px);
+}
+
+.head-card-available:hover .head-glyph::after,
+.head-card-available:focus-within .head-glyph::after {
+  transform: translateX(130%);
 }
 
 .head-glyph-navy {
@@ -1571,10 +1693,10 @@ a {
 
 .footer-bar {
   text-align: center;
-  padding: 28px 16px 36px;
+  padding: 32px 16px 40px;
   border-top: 1px solid var(--eos-line);
-  background: rgba(255, 255, 255, 0.42);
-  margin-top: 24px;
+  background: rgba(255, 255, 255, 0.48);
+  margin-top: 32px;
 }
 
 .footer-line {
@@ -1679,6 +1801,25 @@ a {
   .main {
     padding: 20px 16px 40px;
   }
+
+  .main.launcher-main {
+    padding: 20px 16px 48px;
+  }
+
+  .launcher-tool-group {
+    padding: 16px 14px 18px;
+    margin-top: 22px;
+  }
+
+  .launcher-tool-group + .launcher-tool-group {
+    margin-top: 24px;
+  }
+
+  .launcher-section-roadmap {
+    padding: 18px 16px 8px;
+    margin-top: 32px;
+  }
+
   .hero {
     padding: 28px 22px 24px;
     border-radius: var(--r-lg);
@@ -1700,6 +1841,19 @@ a {
     grid-template-columns: 1fr 1fr;
     gap: 12px;
   }
+
+  /* Narrow viewports — lift only, no scale magnification */
+  .head-card-available:hover,
+  .head-card-available:focus-within {
+    transform: translateY(-2px);
+    z-index: 1;
+  }
+
+  .head-card-available:hover .head-glyph,
+  .head-card-available:focus-within .head-glyph {
+    transform: translateY(-1px) scale(1.05) rotate(-1deg);
+  }
+
   .auth-panel {
     padding: 24px;
   }
@@ -1722,6 +1876,29 @@ a {
     grid-template-columns: 1fr;
   }
   /* .eliteos-topbar-sub hides on narrow screens via the shared app-shell stylesheet. */
+}
+
+/* Touch / coarse pointer — avoid cramped magnification in single-column layouts */
+@media (hover: none), (pointer: coarse) {
+  .head-card-available:hover,
+  .head-card-available:focus-within {
+    transform: translateY(-2px);
+    z-index: 1;
+  }
+
+  .head-card-available:hover .head-glyph,
+  .head-card-available:focus-within .head-glyph {
+    transform: scale(1.04);
+  }
+
+  .head-card-available:hover .head-glyph svg,
+  .head-card-available:focus-within .head-glyph svg {
+    transform: none;
+  }
+
+  .head-glyph::after {
+    display: none;
+  }
 }
 
 /* ----- Print ------------------------------------------------------------- */
