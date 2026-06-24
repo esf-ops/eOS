@@ -134,6 +134,7 @@ a {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  overflow-x: clip;
 }
 
 /* ----- Top bar ----------------------------------------------------------- */
@@ -735,24 +736,54 @@ a {
   flex-direction: column;
   height: 100%;
   border-radius: var(--r-lg);
+  /* Opacity-only entrance — never toggle animation on hover (causes flash) */
+  animation: card-enter 340ms var(--eos-ease) forwards;
+  animation-delay: var(--card-delay, 0ms);
+}
+
+/* Available cards: outer shell keeps a stable hover hitbox; surface moves visually */
+.head-card-available {
+  overflow: visible;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  isolation: isolate;
+}
+
+.head-card-surface {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  height: 100%;
+  min-height: 196px;
+  padding: 18px 18px 16px;
+  border-radius: var(--r-lg);
   background: var(--eos-surface);
   border: 1px solid var(--eos-line);
   box-shadow: var(--sh-card);
   overflow: hidden;
-  isolation: isolate;
   transform: translate3d(0, 0, 0) scale(1);
   transform-origin: center center;
-  backface-visibility: hidden;
   transition:
     transform var(--eos-dur-lift) var(--eos-ease-premium),
     box-shadow var(--eos-dur-lift) var(--eos-ease-premium),
     border-color var(--eos-dur-lift) var(--eos-ease-premium);
-  /* Opacity-only entrance — transform must stay free for hover lift */
-  animation: card-enter 340ms var(--eos-ease) both;
-  animation-delay: var(--card-delay, 0ms);
 }
 
-/* Subtle surface shine on hover — hover only, no continuous loop */
+.head-card-surface::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  border-top: 3px solid transparent;
+  opacity: 0.8;
+  transition: border-color var(--eos-dur-lift) var(--eos-ease-premium), opacity var(--eos-dur-lift) var(--eos-ease-premium);
+}
+
+/* Subtle surface shine — pointer-events none, visual only */
 .head-card-shine {
   position: absolute;
   inset: 0;
@@ -809,15 +840,9 @@ a {
     display: none;
   }
 
-  .card-grid-available .head-card.head-card-available:hover,
-  .card-grid-available .head-card.head-card-available:focus-within,
-  .head-card-roadmap:hover,
-  .head-card-roadmap:focus-within {
+  .card-grid-available .head-card.head-card-available:hover .head-card-surface,
+  .card-grid-available .head-card.head-card-available:focus-within .head-card-surface {
     transform: none;
-  }
-
-  .card-grid-available .head-card.head-card-available:hover,
-  .card-grid-available .head-card.head-card-available:focus-within {
     box-shadow: var(--sh-card-lift);
     border-color: rgba(163, 19, 47, 0.30);
   }
@@ -827,6 +852,15 @@ a {
   .card-grid-available .head-card.head-card-available:hover .head-glyph svg,
   .card-grid-available .head-card.head-card-available:focus-within .head-glyph svg {
     transform: none;
+  }
+
+  .head-card-roadmap:hover,
+  .head-card-roadmap:focus-within {
+    transform: none;
+  }
+
+  .head-card {
+    opacity: 1;
   }
 
   .btn-open:hover:not(:disabled) {
@@ -844,12 +878,7 @@ a {
   opacity: 0.8;
 }
 
-.head-card-available {
-  padding: 18px 18px 16px;
-  min-height: 196px;
-}
-
-.head-card-available.is-muted {
+.head-card-available.is-muted .head-card-surface {
   opacity: 0.82;
 }
 
@@ -860,6 +889,12 @@ a {
   border: 1px dashed rgba(11, 26, 51, 0.16);
   box-shadow: none;
   opacity: 0.92;
+  overflow: hidden;
+  transition:
+    transform var(--eos-dur-lift) var(--eos-ease-premium),
+    box-shadow var(--eos-dur-lift) var(--eos-ease-premium),
+    border-color var(--eos-dur-lift) var(--eos-ease-premium),
+    background var(--eos-dur-lift) var(--eos-ease-premium);
 }
 
 .head-card-roadmap:hover,
@@ -1692,12 +1727,18 @@ a {
 /* Skeleton cards while heads are loading */
 .skeleton-card {
   pointer-events: none;
+  overflow: visible;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+}
+
+.skeleton-card .head-card-surface {
+  pointer-events: none;
   border-color: var(--eos-line);
   background: rgba(255, 255, 255, 0.7);
   min-height: 196px;
-  padding: 18px 18px 16px;
-  display: flex;
-  flex-direction: column;
 }
 
 .skeleton-card .head-card-top {
@@ -1787,28 +1828,31 @@ a {
 }
 
 /* ==========================================================================
-   Launcher card lift — canonical (wins over entrance animation on desktop)
+   Launcher card lift — stable hitbox on outer shell, motion on inner surface
    ========================================================================== */
 
-@media (min-width: 721px) {
+@media (min-width: 721px) and (hover: hover) and (pointer: fine) {
   .card-grid-available .head-card.head-card-available:hover,
   .card-grid-available .head-card.head-card-available:focus-within {
-    animation: none;
     z-index: 4;
-    transform: translate3d(0, -5px, 0) scale(1.018);
+  }
+
+  .card-grid-available .head-card.head-card-available:hover .head-card-surface,
+  .card-grid-available .head-card.head-card-available:focus-within .head-card-surface {
+    transform: translate3d(0, -4px, 0) scale(1.012);
     box-shadow: var(--sh-card-lift);
     border-color: rgba(163, 19, 47, 0.30);
   }
 
-  .card-grid-available .head-card.head-card-available:hover::after,
-  .card-grid-available .head-card.head-card-available:focus-within::after {
+  .card-grid-available .head-card.head-card-available:hover .head-card-surface::after,
+  .card-grid-available .head-card.head-card-available:focus-within .head-card-surface::after {
     border-top-color: var(--eos-accent);
     opacity: 0.48;
   }
 
   .card-grid-available .head-card.head-card-available:hover .head-card-shine,
   .card-grid-available .head-card.head-card-available:focus-within .head-card-shine {
-    opacity: 0.32;
+    opacity: 0.30;
     transform: translateX(35%);
   }
 }
@@ -1837,13 +1881,36 @@ a {
 @media (max-width: 820px) {
   .hero-grid {
     grid-template-columns: 1fr;
-    gap: 22px;
+    gap: 18px;
+  }
+  .hero {
+    padding: 24px 20px 20px;
+    margin-bottom: 24px;
+  }
+  .hero-title {
+    font-size: clamp(1.4rem, 5vw, 1.75rem);
+  }
+  .hero-motto {
+    font-size: 0.92rem;
+    margin-top: 8px;
+  }
+  .hero-positioning {
+    font-size: 0.86rem;
+    margin-top: 4px;
+  }
+  .hero-stats {
+    margin-top: 16px;
+    padding-top: 14px;
+    gap: 12px 16px;
+  }
+  .hero-stat-value {
+    font-size: 1.2rem;
   }
   .hero-workspace {
     flex-direction: row;
     text-align: left;
-    padding: 14px 16px;
-    gap: 14px;
+    padding: 12px 14px;
+    gap: 12px;
     align-items: center;
   }
   .hero-workspace-eyebrow {
@@ -1868,60 +1935,92 @@ a {
 @media (max-width: 720px) {
   /* .eliteos-topbar padding is handled by the shared app-shell stylesheet. */
   .main {
-    padding: 20px 16px 40px;
+    padding: 16px 14px 36px;
   }
 
   .main.launcher-main {
-    padding: 20px 16px 48px;
+    padding: 16px 14px 40px;
   }
 
   .launcher-tool-group {
-    padding: 16px 14px 18px;
-    margin-top: 22px;
+    padding: 14px 12px 16px;
+    margin-top: 18px;
+    background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.72) 0%,
+      rgba(255, 255, 255, 0.48) 100%
+    );
+    box-shadow: none;
+    border-color: rgba(11, 26, 51, 0.07);
   }
 
   .launcher-tool-group + .launcher-tool-group {
-    margin-top: 24px;
+    margin-top: 20px;
+  }
+
+  .tool-group-label {
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+    font-size: 0.66rem;
+  }
+
+  .launcher-section-available > .section-head {
+    margin-bottom: 16px;
   }
 
   .launcher-section-roadmap {
-    padding: 18px 16px 8px;
-    margin-top: 32px;
+    padding: 16px 12px 6px;
+    margin-top: 28px;
+    background: rgba(255, 255, 255, 0.42);
   }
 
   .hero {
-    padding: 28px 22px 24px;
+    padding: 20px 16px 18px;
     border-radius: var(--r-lg);
+    margin-bottom: 20px;
   }
+
+  .hero-eyebrow {
+    margin-bottom: 8px;
+    font-size: 0.64rem;
+  }
+
   .hero-stats {
-    gap: 14px 18px;
+    gap: 12px 14px;
+    margin-top: 14px;
+    padding-top: 12px;
   }
   .hero-stat-divider {
     display: none;
   }
   .hero-stat {
-    min-width: 84px;
+    min-width: 72px;
   }
+  .hero-stat-value {
+    font-size: 1.1rem;
+  }
+  .hero-stat-label {
+    font-size: 0.68rem;
+  }
+
   .card-grid-available {
     grid-template-columns: 1fr;
-    gap: 14px;
-  }
-  .card-grid-roadmap {
-    grid-template-columns: 1fr 1fr;
     gap: 12px;
   }
-
-  /* Narrow viewports — lift only, no scale magnification */
-  .card-grid-available .head-card.head-card-available:hover,
-  .card-grid-available .head-card.head-card-available:focus-within {
-    animation: none;
-    transform: translate3d(0, -2px, 0);
-    z-index: 2;
+  .card-grid-roadmap {
+    grid-template-columns: 1fr;
+    gap: 10px;
   }
 
-  .card-grid-available .head-card.head-card-available:hover .head-glyph,
-  .card-grid-available .head-card.head-card-available:focus-within .head-glyph {
-    transform: translate3d(0, -1px, 0) scale(1.05) rotate(-1deg);
+  .head-card-surface {
+    min-height: 0;
+  }
+
+  .head-open-btn,
+  .btn-open {
+    min-height: 44px;
+    padding-top: 12px;
+    padding-bottom: 12px;
   }
 
   .auth-panel {
@@ -1936,8 +2035,16 @@ a {
 @media (max-width: 560px) {
   .topbar-search-wrap {
     order: 10;
-    flex-basis: 100%;
+    flex: 1 1 100%;
+    width: 100%;
     max-width: 100%;
+    min-width: 0;
+  }
+
+  .launcher-search-input {
+    padding-top: 10px;
+    padding-bottom: 10px;
+    font-size: 0.9rem;
   }
 }
 
@@ -1948,18 +2055,24 @@ a {
   /* .eliteos-topbar-sub hides on narrow screens via the shared app-shell stylesheet. */
 }
 
-/* Touch / coarse pointer — avoid cramped magnification in single-column layouts */
+/* Touch / coarse pointer — no desktop hover scale; tap feedback only */
 @media (hover: none), (pointer: coarse) {
-  .card-grid-available .head-card.head-card-available:hover,
-  .card-grid-available .head-card.head-card-available:focus-within {
-    animation: none;
-    transform: translate3d(0, -2px, 0);
-    z-index: 2;
+  .card-grid-available .head-card.head-card-available:hover .head-card-surface,
+  .card-grid-available .head-card.head-card-available:focus-within .head-card-surface {
+    transform: none;
+    box-shadow: var(--sh-card);
+    border-color: var(--eos-line);
+  }
+
+  .card-grid-available .head-card.head-card-available:hover .head-card-shine,
+  .card-grid-available .head-card.head-card-available:focus-within .head-card-shine {
+    opacity: 0;
+    transform: translateX(-40%);
   }
 
   .card-grid-available .head-card.head-card-available:hover .head-glyph,
   .card-grid-available .head-card.head-card-available:focus-within .head-glyph {
-    transform: scale(1.04);
+    transform: none;
   }
 
   .card-grid-available .head-card.head-card-available:hover .head-glyph svg,
@@ -1969,6 +2082,16 @@ a {
 
   .head-glyph::after {
     display: none;
+  }
+
+  .card-grid-available .head-card.head-card-available:active .head-card-surface {
+    transform: scale(0.992);
+    border-color: rgba(163, 19, 47, 0.22);
+    box-shadow: var(--sh-1);
+  }
+
+  .btn-open:active:not(:disabled) {
+    transform: scale(0.98);
   }
 }
 

@@ -1431,15 +1431,17 @@ export default function App() {
               <div className="card-grid card-grid-available" aria-hidden>
                 {[0, 1, 2, 3].map((i) => (
                   <div key={i} className="head-card head-card-available skeleton-card">
-                    <div className="head-card-top">
-                      <div className="skel skel-icon" />
-                      <div className="skel skel-pill" />
+                    <div className="head-card-surface">
+                      <div className="head-card-top">
+                        <div className="skel skel-icon" />
+                        <div className="skel skel-pill" />
+                      </div>
+                      <div className="skel skel-eyebrow" />
+                      <div className="skel skel-title" />
+                      <div className="skel skel-line" />
+                      <div className="skel skel-line skel-line-short" />
+                      <div className="skel skel-btn" />
                     </div>
-                    <div className="skel skel-eyebrow" />
-                    <div className="skel skel-title" />
-                    <div className="skel skel-line" />
-                    <div className="skel skel-line skel-line-short" />
-                    <div className="skel skel-btn" />
                   </div>
                 ))}
               </div>
@@ -1533,45 +1535,47 @@ export default function App() {
                               style={{ "--card-delay": `${cardDelayMs}ms` } as React.CSSProperties}
                               className={`head-card head-card-available${inactiveClass}${isDefaultHead ? " head-card-default" : ""} tint-${tint}`}
                             >
-                              <div className="head-card-shine" aria-hidden />
-                              <div className="head-card-top">
-                                <span className={`head-glyph head-glyph-${tint}`} aria-hidden>
-                                  <HeadGlyph slug={h.slug} />
-                                </span>
-                                <div className="pill-row" aria-label="Status">
-                                  {isDefaultHead ? (
-                                    <span className="pill pill-default" title="Your default tool">
-                                      Default
-                                    </span>
-                                  ) : null}
-                                  {badges.map(({ text, tier }) => (
-                                    <span
-                                      key={`${h.slug}-${text}`}
-                                      className={`${pillClass(text)}${tier === "secondary" ? " pill-secondary" : ""}`}
-                                    >
-                                      {text}
-                                    </span>
-                                  ))}
+                              <div className="head-card-surface">
+                                <div className="head-card-shine" aria-hidden />
+                                <div className="head-card-top">
+                                  <span className={`head-glyph head-glyph-${tint}`} aria-hidden>
+                                    <HeadGlyph slug={h.slug} />
+                                  </span>
+                                  <div className="pill-row" aria-label="Status">
+                                    {isDefaultHead ? (
+                                      <span className="pill pill-default" title="Your default tool">
+                                        Default
+                                      </span>
+                                    ) : null}
+                                    {badges.map(({ text, tier }) => (
+                                      <span
+                                        key={`${h.slug}-${text}`}
+                                        className={`${pillClass(text)}${tier === "secondary" ? " pill-secondary" : ""}`}
+                                      >
+                                        {text}
+                                      </span>
+                                    ))}
+                                  </div>
                                 </div>
+                                <p className="head-card-eyebrow">{headCategoryFor(h.slug)}</p>
+                                <h3 className="head-card-title">{cardTitle}</h3>
+                                <p className="desc">{h.description}</p>
+                                {showUrl && url ? (
+                                  <p className="url-subtle" title={url}>
+                                    {url}
+                                  </p>
+                                ) : null}
+                                {canNavigate ? (
+                                  <button type="button" className="btn btn-open head-open-btn" onClick={openHead}>
+                                    <span>{openLabel}</span>
+                                    <ArrowOut />
+                                  </button>
+                                ) : (
+                                  <p className="card-foot muted-note">
+                                    {url ? "Ask your admin for access to open this tool." : null}
+                                  </p>
+                                )}
                               </div>
-                              <p className="head-card-eyebrow">{headCategoryFor(h.slug)}</p>
-                              <h3 className="head-card-title">{cardTitle}</h3>
-                              <p className="desc">{h.description}</p>
-                              {showUrl && url ? (
-                                <p className="url-subtle" title={url}>
-                                  {url}
-                                </p>
-                              ) : null}
-                              {canNavigate ? (
-                                <button type="button" className="btn btn-open head-open-btn" onClick={openHead}>
-                                  <span>{openLabel}</span>
-                                  <ArrowOut />
-                                </button>
-                              ) : (
-                                <p className="card-foot muted-note">
-                                  {url ? "Ask your admin for access to open this tool." : null}
-                                </p>
-                              )}
                             </article>
                           );
                         })}
