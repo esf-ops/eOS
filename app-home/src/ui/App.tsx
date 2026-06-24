@@ -1496,9 +1496,6 @@ export default function App() {
                     {availableBusinessGroups.reduce((n, g) => n + g.items.length, 0)}
                   </span>
                 </div>
-                <p className="section-lede">
-                  Production tools you can open when assigned. Each destination still enforces Brain permissions.
-                </p>
                 {availableBusinessGroups.map((group, groupIdx) => {
                   let cardOffset = 0;
                   for (let i = 0; i < groupIdx; i++) {
