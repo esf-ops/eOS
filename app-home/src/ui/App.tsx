@@ -8,8 +8,8 @@ import type { UserPreferences } from "./ProfileView";
 import EliteosTopbar from "../../../shared/eliteos-ui/EliteosTopbar";
 import type { EliteosTopbarMenuItem } from "../../../shared/eliteos-ui/EliteosTopbar";
 import HomeCommandCenterHero, {
-  type CommandCenterOrbitHead,
   type CommandCenterPulseChip,
+  type CommandCenterSceneHead,
 } from "./HomeCommandCenterHero";
 import HomeLauncherCard from "./HomeLauncherCard";
 
@@ -258,14 +258,6 @@ function headCategoryFor(slug: string): string {
   return HEAD_CATEGORY_BY_SLUG[slug] ?? "Platform";
 }
 
-const COMMAND_CENTER_ORBIT_PRIORITY = [
-  "quote",
-  "quote_library",
-  "slab_inventory",
-  "install_dashboard",
-  "pricing_admin",
-] as const;
-
 function buildCommandCenterPulseChips(
   availableHeads: HeadCard[],
 ): CommandCenterPulseChip[] {
@@ -298,20 +290,36 @@ function buildCommandCenterPulseChips(
   ];
 }
 
-function buildCommandCenterOrbitHeads(availableHeads: HeadCard[]): CommandCenterOrbitHead[] {
+function buildCommandCenterSceneHeads(availableHeads: HeadCard[]): CommandCenterSceneHead[] {
   const bySlug = new Map(availableHeads.map((h) => [h.slug, h]));
-  const orbit: CommandCenterOrbitHead[] = [];
-  for (const slug of COMMAND_CENTER_ORBIT_PRIORITY) {
+  const enabledSlugs = new Set(
+    availableHeads.filter((h) => h.enabled).map((h) => h.slug),
+  );
+
+  const layout: Array<{
+    slug: string;
+    slot: CommandCenterSceneHead["slot"];
+    depth: CommandCenterSceneHead["depth"];
+  }> = [
+    { slug: "quote", slot: "slot-a", depth: "background" },
+    { slug: "quote_library", slot: "slot-b", depth: "midground" },
+    { slug: "slab_inventory", slot: "slot-c", depth: "background" },
+    { slug: "install_dashboard", slot: "slot-d", depth: "midground" },
+    { slug: "pricing_admin", slot: "slot-e", depth: "foreground" },
+  ];
+
+  return layout.map(({ slug, slot, depth }) => {
     const head = bySlug.get(slug);
-    if (!head || !head.enabled) continue;
-    orbit.push({
+    return {
       slug,
-      title: launcherCardTitle(head),
+      slot,
+      depth,
+      title: head ? launcherCardTitle(head) : (LAUNCHER_TOOL_TITLE_BY_SLUG[slug] ?? slug),
       category: headCategoryFor(slug),
       tint: headTintFor(slug),
-    });
-  }
-  return orbit.slice(0, 5);
+      isAssigned: enabledSlugs.has(slug),
+    };
+  });
 }
 
 const AVAILABLE_SORT_PRIORITY = [
@@ -789,8 +797,8 @@ export default function App() {
     [availableToolHeads],
   );
 
-  const commandCenterOrbitHeads = useMemo(
-    () => buildCommandCenterOrbitHeads(availableToolHeads),
+  const commandCenterSceneHeads = useMemo(
+    () => buildCommandCenterSceneHeads(availableToolHeads),
     [availableToolHeads],
   );
 
@@ -1054,9 +1062,10 @@ export default function App() {
               workspaceInits={workspaceInits}
               headsLoaded={Boolean(headsPayload)}
               pulseChips={commandCenterPulseChips}
-              orbitHeads={commandCenterOrbitHeads}
+              sceneHeads={commandCenterSceneHeads}
             />
 
+            <div className="home-cc-launcher-body">
             {loadError ? (
               <div className="banner banner-error" role="alert">
                 <strong>Could not load your tools.</strong>
@@ -1247,6 +1256,7 @@ export default function App() {
                 ) : null}
               </div>
             </details>
+            </div>
           </div>
         )}
       </main>
