@@ -7,11 +7,6 @@ import ProfileView from "./ProfileView";
 import type { UserPreferences } from "./ProfileView";
 import EliteosTopbar from "../../../shared/eliteos-ui/EliteosTopbar";
 import type { EliteosTopbarMenuItem } from "../../../shared/eliteos-ui/EliteosTopbar";
-import HomeCommandCenterHero, {
-  type CommandCenterPulseChip,
-  type CommandCenterSceneHead,
-} from "./HomeCommandCenterHero";
-import HomeLauncherCard from "./HomeLauncherCard";
 
 function readOAuthErrorFromBrowser(): string | null {
   if (typeof window === "undefined") return null;
@@ -174,7 +169,6 @@ const LAUNCHER_TOOL_TITLE_BY_SLUG: Record<string, string> = {
   shop_tv: "Shop Floor TV",
   install: "Install",
   install_dashboard: "Install Dashboard",
-  slab_inventory: "Slab Inventory",
   purchasing: "Purchasing",
   customer_service: "Customer Service",
   hr: "HR",
@@ -206,7 +200,6 @@ const HEAD_TINT_BY_SLUG: Record<string, HeadTint> = {
   shop_tv: "slate",
   install: "amber",
   install_dashboard: "amber",
-  slab_inventory: "teal",
   purchasing: "amber",
   customer_service: "teal",
   hr: "violet",
@@ -242,7 +235,6 @@ const HEAD_CATEGORY_BY_SLUG: Record<string, string> = {
   shop_tv: "Production",
   install: "Production",
   install_dashboard: "Field",
-  slab_inventory: "Inventory",
   purchasing: "Production",
   customer_service: "Customer",
   hr: "Admin",
@@ -258,68 +250,194 @@ function headCategoryFor(slug: string): string {
   return HEAD_CATEGORY_BY_SLUG[slug] ?? "Platform";
 }
 
-function buildCommandCenterPulseChips(
-  availableHeads: HeadCard[],
-): CommandCenterPulseChip[] {
-  const enabledSlugs = new Set(
-    availableHeads.filter((h) => h.enabled).map((h) => h.slug),
-  );
-  const hasAny = (...slugs: string[]) => slugs.some((s) => enabledSlugs.has(s));
-
-  return [
-    {
-      id: "quote",
-      label: "Quote Platform",
-      status: hasAny("quote", "quote_library", "custom_quote") ? "ready" : "roadmap",
-    },
-    {
-      id: "inventory",
-      label: "Inventory",
-      status: hasAny("slab_inventory") ? "ready" : "roadmap",
-    },
-    {
-      id: "install",
-      label: "Install",
-      status: hasAny("install_dashboard", "install") ? "ready" : "roadmap",
-    },
-    {
-      id: "admin",
-      label: "Admin",
-      status: hasAny("pricing_admin", "system_admin") ? "ready" : "roadmap",
-    },
-  ];
-}
-
-function buildCommandCenterSceneHeads(availableHeads: HeadCard[]): CommandCenterSceneHead[] {
-  const bySlug = new Map(availableHeads.map((h) => [h.slug, h]));
-  const enabledSlugs = new Set(
-    availableHeads.filter((h) => h.enabled).map((h) => h.slug),
-  );
-
-  const layout: Array<{
-    slug: string;
-    slot: CommandCenterSceneHead["slot"];
-    depth: CommandCenterSceneHead["depth"];
-  }> = [
-    { slug: "quote", slot: "slot-a", depth: "background" },
-    { slug: "quote_library", slot: "slot-b", depth: "midground" },
-    { slug: "slab_inventory", slot: "slot-c", depth: "background" },
-    { slug: "install_dashboard", slot: "slot-d", depth: "midground" },
-    { slug: "pricing_admin", slot: "slot-e", depth: "foreground" },
-  ];
-
-  return layout.map(({ slug, slot, depth }) => {
-    const head = bySlug.get(slug);
-    return {
-      slug,
-      slot,
-      depth,
-      title: head ? launcherCardTitle(head) : (LAUNCHER_TOOL_TITLE_BY_SLUG[slug] ?? slug),
-      category: headCategoryFor(slug),
-      tint: headTintFor(slug),
-      isAssigned: enabledSlugs.has(slug),
-    };
-  });
+/**
+ * Inline SVG glyph for each head. Stroke-based, currentColor, no external icon font.
+ * Falls back to a neutral grid glyph when slug is unknown.
+ */
+function HeadGlyph({ slug }: { slug: string }) {
+  const common = {
+    width: 22,
+    height: 22,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.7,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    "aria-hidden": true
+  };
+  switch (slug) {
+    case "quote":
+      return (
+        <svg {...common}>
+          <path d="M4 19l4-1 11-11a1.8 1.8 0 0 0 0-2.5l-.5-.5a1.8 1.8 0 0 0-2.5 0L5 15l-1 4Z" />
+          <path d="M14.5 6.5l3 3" />
+        </svg>
+      );
+    case "quote_library":
+      return (
+        <svg {...common}>
+          <path d="M5 4h11a2 2 0 0 1 2 2v14l-4-2-4 2-4-2-4 2V6a2 2 0 0 1 2-2Z" />
+          <path d="M9 8h6" />
+          <path d="M9 12h4" />
+        </svg>
+      );
+    case "pricing_admin":
+      return (
+        <svg {...common}>
+          <path d="M3 12V5a2 2 0 0 1 2-2h7l9 9-9 9-9-9Z" />
+          <circle cx="8" cy="8" r="1.6" />
+        </svg>
+      );
+    case "system_admin":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06A2 2 0 1 1 4.28 16.93l.06-.06A1.7 1.7 0 0 0 4.68 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06A2 2 0 1 1 7.07 4.28l.06.06a1.7 1.7 0 0 0 1.87.34h.07a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9v.07a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1Z" />
+        </svg>
+      );
+    case "public_quote":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="9" />
+          <path d="M3 12h18" />
+          <path d="M12 3a13 13 0 0 1 0 18a13 13 0 0 1 0-18Z" />
+        </svg>
+      );
+    case "partner_quote":
+      return (
+        <svg {...common}>
+          <path d="M3 10l4-4 4 4 4-4 4 4-4 4-4-4-4 4-4-4Z" />
+          <path d="M11 14l3 3" />
+        </svg>
+      );
+    case "dealer_resources":
+      return (
+        <svg {...common}>
+          <path d="M4 5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2V5Z" />
+          <path d="M8 7h8" />
+          <path d="M8 11h6" />
+        </svg>
+      );
+    case "executive":
+      return (
+        <svg {...common}>
+          <path d="M4 19h16" />
+          <path d="M7 16V9" />
+          <path d="M12 16V5" />
+          <path d="M17 16v-5" />
+        </svg>
+      );
+    case "brain_health":
+      return (
+        <svg {...common}>
+          <path d="M3 12h4l2-5 4 10 2-5h6" />
+        </svg>
+      );
+    case "sales":
+      return (
+        <svg {...common}>
+          <path d="M3 17l6-6 4 4 8-9" />
+          <path d="M14 6h7v7" />
+        </svg>
+      );
+    case "production":
+      return (
+        <svg {...common}>
+          <path d="M3 7l9-4 9 4-9 4-9-4Z" />
+          <path d="M3 12l9 4 9-4" />
+          <path d="M3 17l9 4 9-4" />
+        </svg>
+      );
+    case "shop_tv":
+      return (
+        <svg {...common}>
+          <rect x="3" y="5" width="18" height="12" rx="2" />
+          <path d="M8 21h8" />
+          <path d="M12 17v4" />
+        </svg>
+      );
+    case "install":
+    case "install_dashboard":
+      return (
+        <svg {...common}>
+          <path d="M14 4l6 6-3 3-3-3-7 7H4v-3l7-7-3-3 3-3Z" />
+        </svg>
+      );
+    case "purchasing":
+      return (
+        <svg {...common}>
+          <path d="M3 4h2l2 12h12l2-8H7" />
+          <circle cx="9" cy="20" r="1.4" />
+          <circle cx="18" cy="20" r="1.4" />
+        </svg>
+      );
+    case "customer_service":
+      return (
+        <svg {...common}>
+          <path d="M21 11.5a8.5 8.5 0 1 1-3.4-6.8" />
+          <path d="M21 4v5h-5" />
+          <path d="M8 13a4 4 0 0 0 8 0" />
+        </svg>
+      );
+    case "hr":
+      return (
+        <svg {...common}>
+          <circle cx="9" cy="8" r="3" />
+          <path d="M3 20a6 6 0 0 1 12 0" />
+          <circle cx="17" cy="9" r="2.4" />
+          <path d="M15 20a4 4 0 0 1 6-3.5" />
+        </svg>
+      );
+    case "safety":
+      return (
+        <svg {...common}>
+          <path d="M12 3l8 3v6a8 8 0 0 1-8 9 8 8 0 0 1-8-9V6l8-3Z" />
+          <path d="M9 12l2 2 4-4" />
+        </svg>
+      );
+    case "marketing":
+      return (
+        <svg {...common}>
+          <path d="M3 11l16-7v16L3 13v-2Z" />
+          <path d="M7 13v6" />
+        </svg>
+      );
+    case "finance":
+      return (
+        <svg {...common}>
+          <path d="M12 2v20" />
+          <path d="M17 6.5a4 4 0 0 0-4-2.5h-2a3 3 0 0 0 0 6h2a3 3 0 0 1 0 6h-2a4 4 0 0 1-4-2.5" />
+        </svg>
+      );
+    case "reports":
+      return (
+        <svg {...common}>
+          <path d="M5 3h10l4 4v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" />
+          <path d="M14 3v5h5" />
+          <path d="M8 14h8" />
+          <path d="M8 18h5" />
+        </svg>
+      );
+    case "org_directory":
+      return (
+        <svg {...common}>
+          <rect x="3" y="4" width="18" height="16" rx="2" />
+          <path d="M7 9h10" />
+          <path d="M7 13h7" />
+          <path d="M7 17h4" />
+        </svg>
+      );
+    default:
+      return (
+        <svg {...common}>
+          <rect x="4" y="4" width="7" height="7" rx="1.5" />
+          <rect x="13" y="4" width="7" height="7" rx="1.5" />
+          <rect x="4" y="13" width="7" height="7" rx="1.5" />
+          <rect x="13" y="13" width="7" height="7" rx="1.5" />
+        </svg>
+      );
+  }
 }
 
 const AVAILABLE_SORT_PRIORITY = [
@@ -467,6 +585,26 @@ function SlabMark({ size = 28 }: { size?: number }) {
   );
 }
 
+/** Arrow glyph shown inside the primary "Open" affordance. */
+function ArrowOut() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M7 17L17 7" />
+      <path d="M8 7h9v9" />
+    </svg>
+  );
+}
+
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [accessToken, setAccessToken] = useState("");
@@ -482,6 +620,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
 
   // Account dropdown open/close state is owned by the shared EliteosTopbar.
+  const heroRef = useRef<HTMLElement>(null);
 
   // Profile & Preferences view state
   const [view, setView] = useState<"launcher" | "profile">(() => {
@@ -749,6 +888,22 @@ export default function App() {
     setInvitePwErr("");
   }
 
+  function handleHeroPointerMove(e: React.PointerEvent<HTMLElement>) {
+    if (e.pointerType === "touch") return;
+    const el = heroRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * 100;
+    const y = ((e.clientY - rect.top) / rect.height) * 100;
+    el.style.setProperty("--spotlight-x", `${x}%`);
+    el.style.setProperty("--spotlight-y", `${y}%`);
+    el.style.setProperty("--spotlight-opacity", "1");
+  }
+
+  function handleHeroPointerLeave() {
+    heroRef.current?.style.setProperty("--spotlight-opacity", "0");
+  }
+
   const assignableHeads = useMemo(() => {
     const hs = headsPayload?.heads ?? [];
     return hs.filter((h) => h.slug !== "public_quote" && h.enabled);
@@ -786,21 +941,6 @@ export default function App() {
       };
     });
   }, [grouped, searchQuery]);
-
-  const availableToolHeads = useMemo(
-    () => grouped.find((g) => g.section === "Available Tools")?.items ?? [],
-    [grouped],
-  );
-
-  const commandCenterPulseChips = useMemo(
-    () => buildCommandCenterPulseChips(availableToolHeads),
-    [availableToolHeads],
-  );
-
-  const commandCenterSceneHeads = useMemo(
-    () => buildCommandCenterSceneHeads(availableToolHeads),
-    [availableToolHeads],
-  );
 
   const searchActive = searchQuery.trim().length > 0;
   const searchTotalCount = filteredGrouped.reduce((s, g) => s + g.items.length, 0);
@@ -1049,23 +1189,73 @@ export default function App() {
             onSave={savePreferences}
           />
         ) : (
-          <div className="home-cc-launcher">
-            <HomeCommandCenterHero
-              workspaceName={workspaceName}
-              heroGreeting={heroGreeting}
-              heroIdentityValue={heroIdentityValue}
-              heroIdentityLabel={heroIdentityLabel}
-              availableCount={headsPayload ? availableCount : null}
-              roadmapCount={headsPayload ? roadmapCount : null}
-              workspaceLogoUrl={workspaceLogoUrl}
-              workspaceLogoIsFallback={workspaceLogoIsFallback}
-              workspaceInits={workspaceInits}
-              headsLoaded={Boolean(headsPayload)}
-              pulseChips={commandCenterPulseChips}
-              sceneHeads={commandCenterSceneHeads}
-            />
+          <>
+            <section
+              className="hero"
+              aria-labelledby="hero-greeting"
+              ref={heroRef}
+              onPointerMove={handleHeroPointerMove}
+              onPointerLeave={handleHeroPointerLeave}
+            >
+              <div className="hero-grid">
+                <div className="hero-inner">
+                  <p className="hero-eyebrow">Workspace · {workspaceName}</p>
+                  <h1 id="hero-greeting" className="hero-title">{heroGreeting}</h1>
+                  <p className="hero-motto">Keep the Titans running well.</p>
+                  <p className="hero-positioning">
+                    One operating layer for quotes, pricing, partners, sales, production, and shop flow.
+                  </p>
+                  <div className="hero-stats" role="list">
+                    <div className="hero-stat" role="listitem">
+                      <span className="hero-stat-value">
+                        {!headsPayload ? "—" : availableCount}
+                      </span>
+                      <span className="hero-stat-label">
+                        {!headsPayload || availableCount === 1 ? "Tool available" : "Tools available"}
+                      </span>
+                    </div>
+                    <div className="hero-stat-divider" aria-hidden />
+                    <div className="hero-stat" role="listitem">
+                      <span className="hero-stat-value">
+                        {!headsPayload ? "—" : roadmapCount}
+                      </span>
+                      <span className="hero-stat-label">On the roadmap</span>
+                    </div>
+                    <div className="hero-stat-divider" aria-hidden />
+                    <div className="hero-stat" role="listitem">
+                      <span className="hero-stat-value">{heroIdentityValue}</span>
+                      <span className="hero-stat-label">{heroIdentityLabel}</span>
+                    </div>
+                  </div>
+                </div>
+                <aside
+                  className="hero-workspace"
+                  aria-label={`Workspace: ${workspaceName}`}
+                >
+                  <span className="hero-workspace-eyebrow">Workspace</span>
+                  <div className="hero-workspace-frame">
+                    {workspaceLogoUrl ? (
+                      <img
+                        src={workspaceLogoUrl}
+                        alt={workspaceLogoIsFallback ? "" : `${workspaceName} logo`}
+                        className="hero-workspace-logo"
+                        loading="lazy"
+                        decoding="async"
+                      />
+                    ) : (
+                      <span className="hero-workspace-initials" aria-hidden>{workspaceInits}</span>
+                    )}
+                  </div>
+                  <div className="hero-workspace-name">{workspaceName}</div>
+                  <div className="hero-workspace-meta">
+                    <span className="hero-workspace-platform">on eliteOS</span>
+                  </div>
+                </aside>
+              </div>
+              <div className="hero-aurora" aria-hidden />
+              <div className="hero-spotlight" aria-hidden />
+            </section>
 
-            <div className="home-cc-launcher-body">
             {loadError ? (
               <div className="banner banner-error" role="alert">
                 <strong>Could not load your tools.</strong>
@@ -1167,6 +1357,7 @@ export default function App() {
                     {items.map((h, idx) => {
                       const url = pickLaunchUrl(h);
                       const canNavigate = Boolean(h.enabled && url && !roadmapSection);
+                      const inactiveClass = !canNavigate ? " is-muted" : "";
                       const pills = resolveCardBadges(h, roadmapSection);
                       const cardTitle = launcherCardTitle(h);
                       const showUrl = shouldShowUrlOnCard(url);
@@ -1186,23 +1377,49 @@ export default function App() {
                       const isDefaultHead = prefs.default_landing_head === h.slug;
 
                       return (
-                        <HomeLauncherCard
+                        <article
                           key={h.slug}
-                          slug={h.slug}
-                          cardTitle={cardTitle}
-                          category={headCategoryFor(h.slug)}
-                          description={h.description}
-                          tint={tint}
-                          pills={pills.map((text) => ({ text, className: pillClass(text) }))}
-                          isDefaultHead={isDefaultHead}
-                          canNavigate={canNavigate}
-                          roadmapSection={roadmapSection}
-                          openLabel={openLabel}
-                          showUrl={showUrl}
-                          url={url}
-                          cardDelayMs={cardDelayMs}
-                          onOpen={openHead}
-                        />
+                          style={{ "--card-delay": `${cardDelayMs}ms` } as React.CSSProperties}
+                          className={`head-card${roadmapSection ? " head-card-roadmap" : " head-card-available"}${inactiveClass}${isDefaultHead ? " head-card-default" : ""} tint-${tint}`}
+                        >
+                          <div className="head-card-top">
+                            <span className={`head-glyph head-glyph-${tint}`} aria-hidden>
+                              <HeadGlyph slug={h.slug} />
+                            </span>
+                            <div className="pill-row" aria-label="Status">
+                              {isDefaultHead ? (
+                                <span className="pill pill-default" title="Your default tool">Default</span>
+                              ) : null}
+                              {pills.map((t, pi) => (
+                                <span key={`${h.slug}-${pi}-${t}`} className={pillClass(t)}>
+                                  {t}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                          <p className="head-card-eyebrow">{headCategoryFor(h.slug)}</p>
+                          <h3 className="head-card-title">{cardTitle}</h3>
+                          <p className={roadmapSection ? "desc desc-roadmap" : "desc"}>{h.description}</p>
+                          {showUrl && url ? (
+                            <p className="url-subtle" title={url}>
+                              {url}
+                            </p>
+                          ) : null}
+                          {canNavigate ? (
+                            <button type="button" className="btn btn-open head-open-btn" onClick={openHead}>
+                              <span>{openLabel}</span>
+                              <ArrowOut />
+                            </button>
+                          ) : null}
+                          {!canNavigate && !roadmapSection ? (
+                            <p className="card-foot muted-note">
+                              {url ? "Ask your admin for access to open this tool." : null}
+                            </p>
+                          ) : null}
+                          {roadmapSection ? (
+                            <p className="card-foot muted-note">On the roadmap — not available to open yet.</p>
+                          ) : null}
+                        </article>
                       );
                     })}
                   </div>
@@ -1256,8 +1473,7 @@ export default function App() {
                 ) : null}
               </div>
             </details>
-            </div>
-          </div>
+          </>
         )}
       </main>
 
