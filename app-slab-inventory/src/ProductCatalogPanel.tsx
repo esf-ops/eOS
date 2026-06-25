@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ZoomImageViewer, type ZoomGalleryItem } from "./ZoomImageViewer";
 import { getProductCatalogItemsWithAssets } from "./lib/productCatalogAssets";
 import {
-  PRODUCT_CATALOG_ASSET_LABELS,
   PRODUCT_CATALOG_CATEGORY_LABELS,
   PRODUCT_CATALOG_TABS,
   defaultFinishKeyForItem,
@@ -10,11 +9,8 @@ import {
   getCatalogNumbersForFinish,
   getUniqueFinishOptions,
   productCatalogCountForCategory,
-  productCatalogCounts,
-  productCatalogDisplayAssetStatus,
   productCatalogHeroImage,
   resolveProductCatalogStageUrl,
-  type ProductCatalogAssetFilter,
   type ProductCatalogCategory,
   type ProductCatalogFinishOption,
   type ProductCatalogItem,
@@ -35,13 +31,6 @@ const TAG_FILTERS: { id: ProductCatalogTagFilter; label: string }[] = [
   { id: "single_bowl", label: "Single bowl" },
   { id: "double_bowl", label: "Double bowl" },
   { id: "accessory", label: "Accessory" },
-];
-
-const ASSET_FILTERS: { id: ProductCatalogAssetFilter; label: string }[] = [
-  { id: "all", label: "All assets" },
-  { id: "missing", label: "Missing" },
-  { id: "partial", label: "Partial" },
-  { id: "complete", label: "Complete" },
 ];
 
 function categoryPlaceholderLabel(category: ProductCatalogItem["category"]): string {
@@ -201,7 +190,6 @@ export default function ProductCatalogPanel() {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [tags, setTags] = useState<ProductCatalogTagFilter[]>([]);
-  const [assetFilter, setAssetFilter] = useState<ProductCatalogAssetFilter>("all");
   const [selected, setSelected] = useState<ProductCatalogItem | null>(null);
 
   useEffect(() => {
@@ -211,17 +199,15 @@ export default function ProductCatalogPanel() {
 
   const catalogItems = useMemo(() => getProductCatalogItemsWithAssets(), []);
 
-  const counts = useMemo(() => productCatalogCounts(catalogItems), [catalogItems]);
-
   const filtered = useMemo(
     () =>
       filterProductCatalogItems(catalogItems, {
         category,
         search,
         tags,
-        assetStatus: assetFilter,
+        assetStatus: "all",
       }),
-    [category, search, tags, assetFilter, catalogItems]
+    [category, search, tags, catalogItems]
   );
 
   const toggleTag = (tag: ProductCatalogTagFilter) => {
@@ -232,10 +218,9 @@ export default function ProductCatalogPanel() {
     setSearchInput("");
     setSearch("");
     setTags([]);
-    setAssetFilter("all");
   };
 
-  const hasActiveFilters = Boolean(search) || tags.length > 0 || assetFilter !== "all";
+  const hasActiveFilters = Boolean(search) || tags.length > 0;
 
   return (
     <div className="pc-page">
@@ -245,9 +230,6 @@ export default function ProductCatalogPanel() {
           <p className="pc-subtitle">
             ESF plumbing & specialty program. Display catalog only — not a pricing authority.
           </p>
-        </div>
-        <div className="pc-header-stats" aria-label="Catalog summary">
-          <span><strong>{counts.missingAssets}</strong> products need assets</span>
         </div>
       </header>
 
@@ -294,19 +276,6 @@ export default function ProductCatalogPanel() {
             </button>
           ))}
         </div>
-        <div className="pc-asset-filters" aria-label="Asset status filter">
-          {ASSET_FILTERS.map((f) => (
-            <button
-              key={f.id}
-              type="button"
-              className={`pc-filter-chip pc-asset-filter${assetFilter === f.id ? " on" : ""}`}
-              onClick={() => setAssetFilter(f.id)}
-              aria-pressed={assetFilter === f.id}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
       </div>
 
       {hasActiveFilters ? (
@@ -348,7 +317,6 @@ function ProductCatalogCard({ item, onOpen }: { item: ProductCatalogItem; onOpen
   const [imgFailed, setImgFailed] = useState(false);
   const hero = productCatalogHeroImage(item);
   const hasImage = Boolean(hero) && !imgFailed;
-  const showAssetDot = item.assetStatus !== "complete";
 
   return (
     <button type="button" className="pc-card" onClick={onOpen} aria-label={`View ${item.name}`}>
@@ -368,13 +336,6 @@ function ProductCatalogCard({ item, onOpen }: { item: ProductCatalogItem; onOpen
               <span>{categoryPlaceholderLabel(item.category)}</span>
             </div>
           )}
-          {showAssetDot ? (
-            <span
-              className={`pc-asset-dot ${item.assetStatus}`}
-              title={PRODUCT_CATALOG_ASSET_LABELS[item.assetStatus]}
-              aria-label={PRODUCT_CATALOG_ASSET_LABELS[item.assetStatus]}
-            />
-          ) : null}
         </div>
       </div>
       <p className="pc-card-name-only">{item.name}</p>
@@ -425,8 +386,6 @@ function ProductCatalogModal({ item, onClose }: { item: ProductCatalogItem; onCl
   );
 
   const stageUrl = resolveProductCatalogStageUrl(item, selectedFinishKey, activeGalleryUrl, isUsable);
-
-  const displayAssetStatus = productCatalogDisplayAssetStatus(item, loaded, failed);
 
   const selectedFinish = finishOptions.find((o) => o.key === selectedFinishKey) ?? null;
   const selectedCatalogNumbers = selectedFinishKey
@@ -557,10 +516,6 @@ function ProductCatalogModal({ item, onClose }: { item: ProductCatalogItem; onCl
                   })}
                 </div>
               ) : null}
-
-              <span className={`pc-asset-badge ${displayAssetStatus}`}>
-                {PRODUCT_CATALOG_ASSET_LABELS[displayAssetStatus]}
-              </span>
             </div>
 
             <div className="pc-modal-info">
@@ -583,8 +538,6 @@ function ProductCatalogModal({ item, onClose }: { item: ProductCatalogItem; onCl
                 {selectedFinish && selectedCatalogNumbers.length > 0 ? (
                   <><dt>Catalog #</dt><dd>{selectedCatalogNumbers.join(", ")}</dd></>
                 ) : null}
-                <dt>Asset status</dt>
-                <dd>{PRODUCT_CATALOG_ASSET_LABELS[displayAssetStatus]}</dd>
               </dl>
 
               {finishOptions.length > 0 ? (
@@ -683,13 +636,6 @@ function ProductCatalogModal({ item, onClose }: { item: ProductCatalogItem; onCl
                   <h3 className="pc-section-title">Spec sheet</h3>
                   <a href={item.specSheetUrl} target="_blank" rel="noreferrer noopener" className="pc-spec-link">View spec sheet</a>
                 </section>
-              ) : null}
-
-              {item.sourceSheet ? (
-                <p className="pc-source-note">Workbook: {item.sourceSheet}</p>
-              ) : null}
-              {item.assetSourceNotes ? (
-                <p className="pc-source-note pc-asset-source-note">{item.assetSourceNotes}</p>
               ) : null}
             </div>
           </div>

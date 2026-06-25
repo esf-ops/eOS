@@ -14,7 +14,7 @@
  * No pricing, quote integration, or backend coupling.
  */
 import { PRODUCT_CATALOG_ITEMS } from "./productCatalogData";
-import { applyProductCatalogDisplaySplits } from "./productCatalogDisplay";
+import { applyProductCatalogDisplaySplits, applyProductCatalogDisplayNames } from "./productCatalogDisplay";
 import {
   finishKeyFromLabel,
   type ProductCatalogAssetStatus,
@@ -358,7 +358,8 @@ export function mergeProductCatalogAssets(item: ProductCatalogItem): ProductCata
 /** All catalog items with asset overrides and presentation splits applied. */
 export function getProductCatalogItemsWithAssets(): ProductCatalogItem[] {
   const merged = PRODUCT_CATALOG_ITEMS.map(mergeProductCatalogAssets);
-  return applyProductCatalogDisplaySplits(merged, mergeProductCatalogAssets);
+  const named = applyProductCatalogDisplayNames(merged);
+  return applyProductCatalogDisplaySplits(named, mergeProductCatalogAssets);
 }
 
 export { finishKeyFromLabel as variantSlug } from "./productCatalog";

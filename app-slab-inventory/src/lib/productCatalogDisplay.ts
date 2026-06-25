@@ -149,6 +149,19 @@ const SPLIT_SOURCE_IDS = new Set(
   PRODUCT_CATALOG_DISPLAY_SPLITS.map((s) => s.sourceProductId)
 );
 
+/** Showroom-friendly names when generated catalog text is too generic. */
+export const PRODUCT_CATALOG_DISPLAY_NAME_OVERRIDES: Readonly<Record<string, string>> = {
+  "blanco-blanco-super-single": "Diamond Super Single",
+};
+
+export function applyProductCatalogDisplayNames(items: ProductCatalogItem[]): ProductCatalogItem[] {
+  return items.map((item) => {
+    const displayName = PRODUCT_CATALOG_DISPLAY_NAME_OVERRIDES[item.id];
+    if (!displayName) return item;
+    return { ...item, name: displayName };
+  });
+}
+
 function filterVariants(
   variants: ProductCatalogVariant[] | undefined,
   catalogNumbers: ReadonlySet<string>

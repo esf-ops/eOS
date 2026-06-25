@@ -2672,21 +2672,6 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
   line-height: 1.55;
 }
 
-.pc-header-stats {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 0.84rem;
-  color: var(--eos-ink-muted);
-  white-space: nowrap;
-}
-
-.pc-header-stats strong {
-  color: var(--eos-ink);
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-
 .pc-stat-sep { color: var(--eos-ink-faint); }
 
 .pc-toolbar {
@@ -2814,8 +2799,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
   margin-bottom: 12px;
 }
 
-.pc-filter-group,
-.pc-asset-filters {
+.pc-filter-group {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -2942,22 +2926,6 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
   text-align: left;
 }
 
-/* Subtle asset indicator on cards */
-.pc-asset-dot {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  border: 1.5px solid #fff;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.18);
-}
-
-.pc-asset-dot.missing { background: #d97706; }
-.pc-asset-dot.partial { background: #2563eb; }
-.pc-asset-dot.complete { background: #16a34a; }
-
 .pc-card-placeholder {
   position: absolute;
   inset: 0;
@@ -2975,37 +2943,6 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-}
-
-.pc-asset-badge {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  padding: 4px 8px;
-  border-radius: 6px;
-  font-size: 0.62rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  backdrop-filter: blur(4px);
-}
-
-.pc-asset-badge.missing {
-  background: rgba(255, 251, 235, 0.94);
-  color: #92400e;
-  border: 1px solid #fcd34d;
-}
-
-.pc-asset-badge.partial {
-  background: rgba(239, 246, 255, 0.94);
-  color: #1e40af;
-  border: 1px solid #bfdbfe;
-}
-
-.pc-asset-badge.complete {
-  background: rgba(240, 253, 244, 0.94);
-  color: #15803d;
-  border: 1px solid #bbf7d0;
 }
 
 .pc-card-body {
@@ -3231,13 +3168,6 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
   display: block;
 }
 
-.pc-modal-gallery .pc-asset-badge {
-  position: absolute;
-  bottom: 12px;
-  right: 12px;
-  top: auto;
-}
-
 .pc-modal-placeholder {
   display: flex;
   flex-direction: column;
@@ -3261,12 +3191,6 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
   font-size: 0.82rem;
   color: var(--eos-ink-muted);
   max-width: 28ch;
-}
-
-.pc-modal-media .pc-asset-badge {
-  top: auto;
-  bottom: 12px;
-  right: 12px;
 }
 
 .pc-modal-info {
@@ -3429,12 +3353,6 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
   font-weight: 700;
 }
 
-.pc-asset-source-note {
-  margin-top: 12px;
-  font-style: italic;
-  max-width: 42ch;
-}
-
 .pc-variant-chips {
   display: flex;
   flex-wrap: wrap;
@@ -3520,5 +3438,4 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 
 @media (max-width: 640px) {
   .pc-grid { grid-template-columns: 1fr; }
-  .pc-header-stats { width: 100%; }
 }
