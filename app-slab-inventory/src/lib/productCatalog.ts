@@ -103,6 +103,21 @@ export const PRODUCT_CATALOG_CATEGORY_LABELS: Record<ProductCatalogCategory, str
   specialty_add_on: "Specialty Add-ons",
 };
 
+/** Public showroom tab labels (Accessories vs Sink Accessories). */
+export const PUBLIC_PRODUCT_CATALOG_TAB_LABELS: Record<ProductCatalogCategory, string> = {
+  sink: "Sinks",
+  sink_accessory: "Accessories",
+  faucet: "Faucets",
+  specialty_add_on: "Specialty",
+};
+
+/** Fixed public tabs — Specialty is appended only when catalog-ready items exist. */
+export const PUBLIC_PRODUCT_CATALOG_TAB_ORDER: ProductCatalogCategory[] = [
+  "sink",
+  "faucet",
+  "sink_accessory",
+];
+
 export const PRODUCT_CATALOG_ASSET_LABELS: Record<ProductCatalogAssetStatus, string> = {
   missing: "Missing assets",
   partial: "Partial assets",
@@ -468,6 +483,14 @@ export function productCatalogCountForCategory(
     if (opts?.catalogReadyOnly && opts.isReady && !opts.isReady(i)) return false;
     return true;
   }).length;
+}
+
+export function publicProductCatalogTabsForItems(items: ProductCatalogItem[]): ProductCatalogCategory[] {
+  const tabs = [...PUBLIC_PRODUCT_CATALOG_TAB_ORDER];
+  if (productCatalogCountForCategory(items, "specialty_add_on") > 0) {
+    tabs.push("specialty_add_on");
+  }
+  return tabs;
 }
 
 export type ProductCatalogManufacturerGroup = {

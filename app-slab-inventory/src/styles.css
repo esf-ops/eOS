@@ -3485,3 +3485,193 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 @media (max-width: 640px) {
   .pc-grid { grid-template-columns: 1fr; }
 }
+
+/* ── Public Product Catalog (embeddable / Arreya) ─────────────────── */
+
+.pc-public-page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, #f7f9fc 0%, #eef2f7 100%);
+  color: var(--eos-ink);
+}
+
+.pc-public-header {
+  padding: clamp(20px, 3vw, 36px) clamp(16px, 4vw, 48px) clamp(16px, 2vw, 24px);
+  border-bottom: 1px solid var(--eos-line);
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(8px);
+}
+
+.pc-public-brand {
+  display: flex;
+  align-items: center;
+  gap: clamp(14px, 2vw, 22px);
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.pc-public-logo {
+  width: clamp(52px, 6vw, 72px);
+  height: clamp(52px, 6vw, 72px);
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.pc-public-logo-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: clamp(52px, 6vw, 72px);
+  height: clamp(52px, 6vw, 72px);
+  border-radius: 14px;
+  background: var(--eos-navy);
+  color: #fff;
+  font-weight: 800;
+  font-size: 1.1rem;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+
+.pc-public-brand-text {
+  min-width: 0;
+}
+
+.pc-public-title {
+  margin: 0 0 4px;
+  font-size: clamp(1.25rem, 2.8vw, 2rem);
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  color: var(--eos-ink);
+}
+
+.pc-public-subtitle {
+  margin: 0;
+  font-size: clamp(0.92rem, 1.6vw, 1.05rem);
+  color: var(--eos-ink-mid);
+}
+
+.pc-public-main {
+  flex: 1;
+  width: min(1400px, 100%);
+  margin: 0 auto;
+  padding: clamp(16px, 3vw, 32px) clamp(16px, 4vw, 48px) clamp(32px, 4vw, 56px);
+}
+
+.pc-public-tabs {
+  margin-bottom: clamp(16px, 2vw, 24px);
+}
+
+.pc-public-footer {
+  padding: 16px clamp(16px, 4vw, 48px) 24px;
+  text-align: center;
+  font-size: 0.78rem;
+  color: var(--eos-ink-faint);
+  border-top: 1px solid var(--eos-line);
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.pc-public-footer p {
+  margin: 0;
+}
+
+/* Kiosk / Arreya display mode — larger touch targets, less chrome motion */
+.pc-public-kiosk .pc-public-header {
+  padding-top: clamp(24px, 2.5vh, 40px);
+  padding-bottom: clamp(18px, 2vh, 28px);
+}
+
+.pc-public-kiosk .pc-public-title {
+  font-size: clamp(1.5rem, 3.2vw, 2.35rem);
+}
+
+.pc-public-kiosk .pc-public-subtitle {
+  font-size: clamp(1rem, 1.8vw, 1.2rem);
+}
+
+.pc-public-kiosk .pc-tab {
+  padding: 14px 22px;
+  font-size: 1.05rem;
+  min-height: 52px;
+}
+
+.pc-public-kiosk .pc-tab-count {
+  font-size: 0.85rem;
+  padding: 3px 10px;
+}
+
+.pc-public-kiosk .pc-search {
+  font-size: 1.05rem;
+  padding: 14px 14px 14px 44px;
+  min-height: 52px;
+}
+
+.pc-public-kiosk .pc-manufacturer-heading {
+  font-size: clamp(1.15rem, 2vw, 1.45rem);
+  margin-bottom: 16px;
+}
+
+.pc-public-kiosk .pc-grid {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+  gap: clamp(18px, 2vw, 28px);
+}
+
+.pc-public-kiosk .pc-card-mat {
+  padding: 14px;
+  border-radius: 20px;
+}
+
+.pc-public-kiosk .pc-card-media {
+  aspect-ratio: 5 / 4;
+  padding: 16px;
+}
+
+.pc-public-kiosk .pc-card-name {
+  font-size: clamp(1rem, 1.5vw, 1.15rem);
+}
+
+.pc-public-kiosk .pc-card-meta,
+.pc-public-kiosk .pc-card-code {
+  font-size: 0.9rem;
+}
+
+.pc-public-kiosk .pc-card:hover {
+  transform: none;
+}
+
+.pc-public-kiosk .pc-card:hover .pc-card-img {
+  transform: none;
+}
+
+.pc-public-kiosk .pc-modal-close {
+  width: 48px;
+  height: 48px;
+  font-size: 1.75rem;
+}
+
+.pc-public-kiosk .pc-finish-swatch {
+  min-width: 72px;
+}
+
+.pc-public-kiosk .pc-finish-swatch-dot {
+  width: 52px;
+  height: 52px;
+}
+
+.pc-public-kiosk .pc-modal-thumb {
+  width: 72px;
+  height: 72px;
+}
+
+.pc-public-kiosk .pc-public-footer {
+  font-size: 0.85rem;
+  padding-bottom: clamp(20px, 3vh, 36px);
+}
+
+@media (min-width: 1200px) {
+  .pc-public-kiosk .pc-grid {
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  }
+}
+
