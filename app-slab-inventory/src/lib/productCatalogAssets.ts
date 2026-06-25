@@ -172,8 +172,51 @@ const PRODUCT_CATALOG_ASSET_OVERRIDES: ProductCatalogAssetOverride[] = [
   },
   {
     productId: "kansas-1512um18-2",
-    sourceNotes:
-      "Source: KDC showroom PDF / Kansas Winsinks program references first; supplement with manufacturer cut sheets if available.",
+    sourceNotes: "Kansas Sinks Program",
+  },
+  {
+    productId: "kansas-2317um18-4",
+    sourceNotes: "Kansas Sinks Program",
+  },
+  {
+    productId: "kansas-3018um16-6",
+    sourceNotes: "Kansas Sinks Program",
+  },
+  {
+    productId: "kansas-3018um18ada-9",
+    sourceNotes: "Kansas Sinks Program",
+  },
+  {
+    productId: "kansas-3218um16-60-40-14",
+    sourceNotes: "Kansas Sinks Program",
+  },
+  {
+    productId: "kansas-3218um18-60-40-17",
+    sourceNotes: "Kansas Sinks Program",
+  },
+  {
+    productId: "kansas-3218um18-ss-18",
+    sourceNotes: "Kansas Sinks Program",
+  },
+  {
+    productId: "kansas-vc1512-oval-white-34",
+    sourceNotes: "Kansas Sinks Program",
+  },
+  {
+    productId: "kansas-vc1613-oval-white-36",
+    sourceNotes: "Kansas Sinks Program",
+  },
+  {
+    productId: "kansas-vc1638-rect-white-37",
+    sourceNotes: "Kansas Sinks Program",
+  },
+  {
+    productId: "kansas-vc1912-rect-white-39",
+    sourceNotes: "Kansas Sinks Program",
+  },
+  {
+    productId: "kansas-ws32-ss-wsum18-41",
+    sourceNotes: "Kansas Sinks Program",
   },
 ];
 
