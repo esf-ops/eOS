@@ -24,12 +24,43 @@ export const BLANCO_FINISH_LEGACY_SPACED: Partial<Record<string, string>> = {
   "volcano-gray": "volcano gray.png",
 };
 
+export const INTEOS_WORKSTATION_SINK_ID = "blanco-inteos-33-workstation";
+
 export function blancoSinkPublicBase(productId: string) {
   return `/product-catalog/sinks/${productId}`;
 }
 
+export function isInteosWorkstationSink(productId: string) {
+  return productId === INTEOS_WORKSTATION_SINK_ID;
+}
+
+/** Hero-first modal/card default (Inteos) vs coal-black-first (standard BLANCO sinks). */
+export function isHeroFirstSinkPresentation(productId: string) {
+  return isInteosWorkstationSink(productId);
+}
+
+export function usesSinkFolderResolver(productId: string, category?: string) {
+  if (category !== "sink") return false;
+  if (productId.startsWith("blanco-blanco-")) return true;
+  if (isInteosWorkstationSink(productId)) return true;
+  return false;
+}
+
+/** @deprecated Use usesSinkFolderResolver */
+export function isBlancoCatalogSinkId(productId: string, category?: string) {
+  return usesSinkFolderResolver(productId, category);
+}
+
 export function blancoSinkHeroCandidates(productId: string): string[] {
   const base = blancoSinkPublicBase(productId);
+  if (isInteosWorkstationSink(productId)) {
+    return [
+      `${base}/hero.png`,
+      `${base}/hero.jpg`,
+      `${base}/coal-black.png`,
+      `${base}/coal black.png`,
+    ];
+  }
   return [`${base}/coal-black.png`, `${base}/coal black.png`, `${base}/hero.png`];
 }
 
@@ -64,18 +95,22 @@ export function blancoSinkInstalledUrl(productId: string) {
   return `${blancoSinkPublicBase(productId)}/installed.jpg`;
 }
 
-export function isBlancoCatalogSinkId(productId: string, category?: string) {
-  return category === "sink" && productId.startsWith("blanco-blanco-");
+/** Installed lifestyle shots — may include installed2/installed3 when present on disk. */
+export function blancoSinkInstalledGalleryUrls(productId: string): string[] {
+  const base = blancoSinkPublicBase(productId);
+  return [`${base}/installed.jpg`, `${base}/installed2.jpg`, `${base}/installed3.jpg`];
 }
 
 /** Auto-assign hero + finish URLs from `/product-catalog/sinks/<item.id>/`. */
 export function resolveBlancoSinkFolderAssets(productId: string, category?: string) {
-  if (!isBlancoCatalogSinkId(productId, category)) return null;
+  if (!usesSinkFolderResolver(productId, category)) return null;
+  const heroFirst = isHeroFirstSinkPresentation(productId);
   return {
     imageUrl: blancoSinkHeroUrl(productId),
     finishImageUrls: blancoSinkFinishImageUrls(productId),
-    defaultFinishKey: "coal-black" as const,
+    defaultFinishKey: heroFirst ? undefined : ("coal-black" as const),
     installedImageUrl: blancoSinkInstalledUrl(productId),
+    installedGalleryUrls: blancoSinkInstalledGalleryUrls(productId),
     specSheetUrl: blancoSinkSpecSheetUrl(productId),
   };
 }

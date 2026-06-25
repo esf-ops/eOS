@@ -8,6 +8,7 @@ import {
   blancoSinkFinishCandidates,
   blancoSinkHeroCandidates,
   isBlancoCatalogSinkId,
+  isHeroFirstSinkPresentation,
 } from "./productCatalogBlancoSinkAssets";
 
 export type ProductCatalogCategory = "sink" | "sink_accessory" | "faucet" | "specialty_add_on";
@@ -51,6 +52,8 @@ export type ProductCatalogItem = {
   imageUrl?: string;
   gallery?: string[];
   installedImageUrl?: string;
+  /** Installed lifestyle shots (installed.jpg, installed2.jpg, …) for modal thumbnails. */
+  installedGalleryUrls?: string[];
   comboPhotoUrls?: string[];
   diagramUrl?: string;
   finishExampleUrls?: string[];
@@ -255,6 +258,8 @@ export function getCatalogNumbersForFinish(
 
 /** Default finish slug when opening the product modal. */
 export function defaultFinishKeyForItem(item: ProductCatalogItem): string | null {
+  if (isHeroFirstSinkPresentation(item.id)) return null;
+
   const preferred = item.defaultFinishKey?.trim();
   const options = getUniqueFinishOptions(item);
   if (preferred && options.some((o) => o.key === preferred)) return preferred;
@@ -310,6 +315,7 @@ export function productCatalogImageUrls(item: ProductCatalogItem): string[] {
 
   add(item.imageUrl);
   add(item.installedImageUrl);
+  (item.installedGalleryUrls ?? []).forEach(add);
   add(item.diagramUrl);
   Object.values(item.finishImageUrls ?? {}).forEach(add);
   (item.gallery ?? []).forEach(add);

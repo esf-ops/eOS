@@ -47,6 +47,10 @@ const RECOMMENDED_SOURCE = {
     "BLANCO Diamond 60/40 Low Divide — assets under blanco-blanco-diamond-60-40-sinks-low-divide/.",
   "blanco-blanco-liven-laundry-12-depth":
     "BLANCO Liven Laundry 12\" Depth — assets under blanco-blanco-liven-laundry-12-depth/.",
+  "blanco-blanco-ikon-apron-front-single-bowl":
+    "BLANCO Ikon Apron Front Single Bowl — assets under blanco-blanco-ikon-apron-front-single-bowl/.",
+  "blanco-inteos-33-workstation":
+    "BLANCO Inteos 33\" Workstation — assets under blanco-inteos-33-workstation/ (hero.png default).",
   "blanco-blanco-diamond-small-bar-sinks":
     "BLANCO Diamond Small Bar — assets under blanco-blanco-diamond-small-bar-sinks/.",
   "blanco-blanco-precis-21-sinks":
@@ -120,15 +124,27 @@ const BLANCO_FINISH_PNG_BY_KEY = {
   "volcano-gray": "volcano-gray.png",
 };
 
+const INTEOS_WORKSTATION_SINK_ID = "blanco-inteos-33-workstation";
+
+function usesSinkFolderResolver(productId) {
+  return productId.startsWith("blanco-blanco-") || productId === INTEOS_WORKSTATION_SINK_ID;
+}
+
 /** Mirror resolveBlancoSinkFolderAssets() for audit rows when overrides are sourceNotes-only. */
 function synthesizeBlancoSinkFolderAssets(productId) {
-  if (!productId.startsWith("blanco-blanco-")) return [];
+  if (!usesSinkFolderResolver(productId)) return [];
   const base = `/product-catalog/sinks/${productId}`;
+  const isInteos = productId === INTEOS_WORKSTATION_SINK_ID;
   const assets = [
-    { assetType: "hero", url: `${base}/coal-black.png` },
+    { assetType: "hero", url: isInteos ? `${base}/hero.png` : `${base}/coal-black.png` },
     { assetType: "installed", url: `${base}/installed.jpg` },
+    { assetType: "installed", url: `${base}/installed2.jpg` },
+    { assetType: "installed", url: `${base}/installed3.jpg` },
     { assetType: "spec_sheet", url: `/product-catalog/spec-sheets/${productId}/${productId}.pdf` },
   ];
+  if (isInteos) {
+    assets.splice(1, 0, { assetType: "hero_fallback", url: `${base}/hero.jpg` });
+  }
   for (const [finishKey, filename] of Object.entries(BLANCO_FINISH_PNG_BY_KEY)) {
     assets.push({ assetType: "finish", variantId: finishKey, url: `${base}/${filename}` });
   }
@@ -213,7 +229,7 @@ function parseOverridesFromTs(content) {
   }
 
   for (const override of overrides) {
-    if (!override.productId.startsWith("blanco-blanco-")) continue;
+    if (!usesSinkFolderResolver(override.productId)) continue;
     const synthesized = synthesizeBlancoSinkFolderAssets(override.productId);
     const existingUrls = new Set((override.assets || []).map((a) => a.url));
     for (const asset of synthesized) {
@@ -223,11 +239,13 @@ function parseOverridesFromTs(content) {
       }
     }
     if (!override.assets?.some((a) => a.assetType === "default_finish_key")) {
-      (override.assets ||= []).push({
-        assetType: "default_finish_key",
-        variantId: "coal-black",
-        url: "",
-      });
+      if (override.productId !== INTEOS_WORKSTATION_SINK_ID) {
+        (override.assets ||= []).push({
+          assetType: "default_finish_key",
+          variantId: "coal-black",
+          url: "",
+        });
+      }
     }
   }
 

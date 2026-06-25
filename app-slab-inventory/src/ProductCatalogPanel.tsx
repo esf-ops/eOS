@@ -194,7 +194,14 @@ function buildSupportingGalleryThumbs(
     thumbs.push({ id, url, caption });
   };
 
-  push("installed", item.installedImageUrl, "Installed");
+  const installedUrls = item.installedGalleryUrls?.length
+    ? item.installedGalleryUrls
+    : item.installedImageUrl
+      ? [item.installedImageUrl]
+      : [];
+  installedUrls.forEach((url, i) => {
+    push(`installed-${i}`, url, i === 0 ? "Installed" : `Installed ${i + 1}`);
+  });
   push("diagram", item.diagramUrl, "Diagram");
   (item.comboPhotoUrls ?? []).forEach((url, i) => push(`combo-${i}`, url, `Combo ${i + 1}`));
   (item.gallery ?? []).forEach((url, i) => push(`gallery-${i}`, url, `Gallery ${i + 1}`));

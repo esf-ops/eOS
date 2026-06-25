@@ -32,6 +32,7 @@ export type ProductCatalogAssetOverride = {
   imageUrl?: string;
   gallery?: string[];
   installedImageUrl?: string;
+  installedGalleryUrls?: string[];
   comboPhotoUrls?: string[];
   diagramUrl?: string;
   finishExampleUrls?: string[];
@@ -140,6 +141,16 @@ const PRODUCT_CATALOG_ASSET_OVERRIDES: ProductCatalogAssetOverride[] = [
       "Source: official BLANCO Liven Laundry product pages and spec sheets.",
   },
   {
+    productId: "blanco-blanco-ikon-apron-front-single-bowl",
+    sourceNotes:
+      "Source: official BLANCO Ikon Apron Front Single Bowl product pages and spec sheets.",
+  },
+  {
+    productId: "blanco-inteos-33-workstation",
+    sourceNotes:
+      "Source: official BLANCO Inteos 33\" Workstation product pages and spec sheets.",
+  },
+  {
     productId: "faucet-delta-9176-cz-pr-dst",
     imageUrl: `${faucetBase("faucet-delta-9176-cz-pr-dst")}/hero.jpg`,
     diagramUrl: `${faucetBase("faucet-delta-9176-cz-pr-dst")}/diagram.jpg`,
@@ -205,6 +216,7 @@ function computeAssetStatusFromUrls(item: Pick<
   ProductCatalogItem,
   | "imageUrl"
   | "installedImageUrl"
+  | "installedGalleryUrls"
   | "diagramUrl"
   | "specSheetUrl"
   | "gallery"
@@ -217,6 +229,7 @@ function computeAssetStatusFromUrls(item: Pick<
   const urls = [
     item.imageUrl,
     item.installedImageUrl,
+    ...(item.installedGalleryUrls ?? []),
     item.diagramUrl,
     item.specSheetUrl,
     ...finishUrls,
@@ -232,7 +245,8 @@ function computeAssetStatusFromUrls(item: Pick<
   const hasFinishImages =
     finishUrls.length > 0 || (item.variants ?? []).some((v) => v.imageUrl);
   const hasSpec = Boolean(item.specSheetUrl);
-  const hasInstalled = Boolean(item.installedImageUrl);
+  const hasInstalled =
+    Boolean(item.installedImageUrl) || (item.installedGalleryUrls ?? []).length > 0;
 
   if (hasHero && hasFinishImages && hasSpec) return "complete";
   if (hasHero || hasFinishImages || hasSpec || hasInstalled) return "partial";
@@ -257,6 +271,7 @@ export function mergeProductCatalogAssets(item: ProductCatalogItem): ProductCata
           finishImageUrls: folderAssets.finishImageUrls,
           defaultFinishKey: folderAssets.defaultFinishKey,
           installedImageUrl: folderAssets.installedImageUrl,
+          installedGalleryUrls: folderAssets.installedGalleryUrls,
           specSheetUrl: folderAssets.specSheetUrl,
         }
       : {}),
@@ -272,6 +287,7 @@ export function mergeProductCatalogAssets(item: ProductCatalogItem): ProductCata
     imageUrl: override.imageUrl ?? item.imageUrl,
     gallery: override.gallery ?? item.gallery,
     installedImageUrl: override.installedImageUrl ?? item.installedImageUrl,
+    installedGalleryUrls: override.installedGalleryUrls ?? item.installedGalleryUrls,
     comboPhotoUrls: override.comboPhotoUrls ?? item.comboPhotoUrls,
     diagramUrl: override.diagramUrl ?? item.diagramUrl,
     finishExampleUrls: override.finishExampleUrls ?? item.finishExampleUrls,

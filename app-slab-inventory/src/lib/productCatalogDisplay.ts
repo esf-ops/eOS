@@ -191,6 +191,7 @@ function stripMergedAssets(item: ProductCatalogItem): ProductCatalogItem {
     imageUrl: undefined,
     gallery: undefined,
     installedImageUrl: undefined,
+    installedGalleryUrls: undefined,
     comboPhotoUrls: undefined,
     diagramUrl: undefined,
     finishExampleUrls: undefined,
