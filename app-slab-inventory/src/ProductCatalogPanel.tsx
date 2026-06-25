@@ -7,9 +7,10 @@ import {
   defaultFinishKeyForItem,
   filterProductCatalogItems,
   getCatalogNumbersForFinish,
+  getFinishImageCandidatesForFinish,
+  getProductHeroImageCandidates,
   getUniqueFinishOptions,
   productCatalogCountForCategory,
-  productCatalogHeroImage,
   resolveProductCatalogStageUrl,
   type ProductCatalogCategory,
   type ProductCatalogFinishOption,
@@ -112,6 +113,7 @@ function useCatalogImageTracker() {
 
 function CatalogImage({
   src,
+  srcCandidates,
   alt,
   className,
   loading,
@@ -119,7 +121,8 @@ function CatalogImage({
   onLoaded,
   onFailed,
 }: {
-  src: string;
+  src?: string;
+  srcCandidates?: string[];
   alt: string;
   className?: string;
   loading?: "lazy" | "eager";
@@ -127,20 +130,38 @@ function CatalogImage({
   onLoaded: (url: string) => void;
   onFailed: (url: string) => void;
 }) {
-  const [visible, setVisible] = useState(true);
+  const candidates = useMemo(() => {
+    const list = srcCandidates?.length ? srcCandidates : src ? [src] : [];
+    return [...new Set(list)];
+  }, [src, srcCandidates]);
 
-  if (!visible || hidden) return null;
+  const [candidateIndex, setCandidateIndex] = useState(0);
+  const [exhausted, setExhausted] = useState(false);
+
+  useEffect(() => {
+    setCandidateIndex(0);
+    setExhausted(false);
+  }, [candidates.join("|")]);
+
+  const currentSrc = candidates[candidateIndex];
+
+  if (exhausted || hidden || !currentSrc) return null;
 
   return (
     <img
-      src={src}
+      src={currentSrc}
       alt={alt}
       className={className}
       loading={loading}
-      onLoad={() => onLoaded(src)}
+      onLoad={() => onLoaded(currentSrc)}
       onError={() => {
-        setVisible(false);
-        onFailed(src);
+        if (candidateIndex + 1 < candidates.length) {
+          onFailed(currentSrc);
+          setCandidateIndex((i) => i + 1);
+          return;
+        }
+        setExhausted(true);
+        onFailed(candidates[0] ?? currentSrc);
       }}
     />
   );
@@ -151,10 +172,9 @@ function collectFinishImageUrls(
   finishOptions: ProductCatalogFinishOption[]
 ): Set<string> {
   const urls = new Set<string>();
-  if (item.imageUrl) urls.add(item.imageUrl);
-  Object.values(item.finishImageUrls ?? {}).forEach((url) => urls.add(url));
+  for (const url of getProductHeroImageCandidates(item)) urls.add(url);
   for (const opt of finishOptions) {
-    if (opt.imageUrl) urls.add(opt.imageUrl);
+    for (const url of getFinishImageCandidatesForFinish(item, opt.key)) urls.add(url);
   }
   return urls;
 }
@@ -314,21 +334,27 @@ export default function ProductCatalogPanel() {
 }
 
 function ProductCatalogCard({ item, onOpen }: { item: ProductCatalogItem; onOpen: () => void }) {
-  const [imgFailed, setImgFailed] = useState(false);
-  const hero = productCatalogHeroImage(item);
-  const hasImage = Boolean(hero) && !imgFailed;
+  const heroCandidates = useMemo(() => getProductHeroImageCandidates(item), [item]);
+  const [showPlaceholder, setShowPlaceholder] = useState(false);
+
+  useEffect(() => {
+    setShowPlaceholder(false);
+  }, [heroCandidates.join("|")]);
+
+  const hasHero = heroCandidates.length > 0 && !showPlaceholder;
 
   return (
     <button type="button" className="pc-card" onClick={onOpen} aria-label={`View ${item.name}`}>
       <div className="pc-card-mat">
         <div className="pc-card-media">
-          {hasImage ? (
-            <img
-              src={hero}
+          {hasHero ? (
+            <CatalogImage
+              srcCandidates={heroCandidates}
               alt={item.name}
-              loading="lazy"
               className="pc-card-img"
-              onError={() => setImgFailed(true)}
+              loading="lazy"
+              onLoaded={() => {}}
+              onFailed={() => setShowPlaceholder(true)}
             />
           ) : (
             <div className="pc-card-placeholder" aria-hidden>
@@ -372,13 +398,19 @@ function ProductCatalogModal({ item, onClose }: { item: ProductCatalogItem; onCl
 
   const finishPreloadUrls = useMemo(() => {
     const urls = new Set<string>();
-    Object.values(item.finishImageUrls ?? {}).forEach((url) => urls.add(url));
-    if (item.imageUrl) urls.add(item.imageUrl);
+    for (const url of getProductHeroImageCandidates(item)) urls.add(url);
     for (const opt of finishOptions) {
-      if (opt.imageUrl) urls.add(opt.imageUrl);
+      for (const url of getFinishImageCandidatesForFinish(item, opt.key)) urls.add(url);
     }
     return [...urls];
-  }, [item.imageUrl, item.finishImageUrls, finishOptions]);
+  }, [item, finishOptions]);
+
+  const stageCandidates = useMemo(() => {
+    if (activeGalleryUrl) return [activeGalleryUrl];
+    const finishKey = selectedFinishKey ?? item.defaultFinishKey ?? null;
+    if (finishKey) return getFinishImageCandidatesForFinish(item, finishKey);
+    return getProductHeroImageCandidates(item);
+  }, [item, selectedFinishKey, activeGalleryUrl]);
 
   const loadedSupportingThumbs = useMemo(
     () => supportingGalleryCandidates.filter((t) => loaded.has(t.url) && !failed.has(t.url)),
@@ -386,6 +418,10 @@ function ProductCatalogModal({ item, onClose }: { item: ProductCatalogItem; onCl
   );
 
   const stageUrl = resolveProductCatalogStageUrl(item, selectedFinishKey, activeGalleryUrl, isUsable);
+
+  const stageExhausted =
+    stageCandidates.length > 0 && stageCandidates.every((url) => failed.has(url));
+  const showStageImage = stageCandidates.length > 0 && !stageExhausted;
 
   const selectedFinish = finishOptions.find((o) => o.key === selectedFinishKey) ?? null;
   const selectedCatalogNumbers = selectedFinishKey
@@ -447,7 +483,7 @@ function ProductCatalogModal({ item, onClose }: { item: ProductCatalogItem; onCl
           <div className="pc-modal-layout">
             <div className="pc-modal-gallery">
               <div className="pc-modal-stage">
-                {stageUrl ? (
+                {showStageImage ? (
                   <button
                     type="button"
                     className="pc-modal-hero-btn"
@@ -455,8 +491,8 @@ function ProductCatalogModal({ item, onClose }: { item: ProductCatalogItem; onCl
                     aria-label="Open image viewer"
                   >
                     <CatalogImage
-                      key={stageUrl}
-                      src={stageUrl}
+                      key={stageCandidates.join("|")}
+                      srcCandidates={stageCandidates}
                       alt={selectedFinish ? `${item.name} — ${selectedFinish.label}` : item.name}
                       className="pc-modal-hero"
                       loading="eager"
@@ -556,10 +592,10 @@ function ProductCatalogModal({ item, onClose }: { item: ProductCatalogItem; onCl
                   <div className="pc-finish-swatches">
                     {finishOptions.map((opt) => {
                       const active = selectedFinishKey === opt.key;
-                      const swatchImage =
-                        opt.imageUrl && loaded.has(opt.imageUrl) && isUsable(opt.imageUrl)
-                          ? opt.imageUrl
-                          : undefined;
+                      const swatchCandidates = getFinishImageCandidatesForFinish(item, opt.key);
+                      const swatchImage = swatchCandidates.find(
+                        (url) => loaded.has(url) && isUsable(url)
+                      );
                       return (
                         <button
                           key={opt.key}
@@ -582,12 +618,14 @@ function ProductCatalogModal({ item, onClose }: { item: ProductCatalogItem; onCl
                             {!swatchImage && !opt.swatchColor ? (
                               <span className="pc-finish-swatch-fallback" aria-hidden />
                             ) : null}
-                            {opt.imageUrl && !swatchImage ? (
+                            {swatchCandidates.length > 0 && !swatchImage ? (
                               <CatalogImage
-                                src={opt.imageUrl}
+                                srcCandidates={swatchCandidates}
                                 alt=""
                                 className="pc-finish-swatch-preload"
-                                hidden={loaded.has(opt.imageUrl) || failed.has(opt.imageUrl)}
+                                hidden={swatchCandidates.every(
+                                  (url) => loaded.has(url) || failed.has(url)
+                                )}
                                 onLoaded={markLoaded}
                                 onFailed={markFailed}
                               />

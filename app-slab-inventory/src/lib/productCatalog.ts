@@ -4,6 +4,12 @@
  * No pricing, quote integration, or backend coupling in this pass.
  */
 
+import {
+  blancoSinkFinishCandidates,
+  blancoSinkHeroCandidates,
+  isBlancoCatalogSinkId,
+} from "./productCatalogBlancoSinkAssets";
+
 export type ProductCatalogCategory = "sink" | "sink_accessory" | "faucet" | "specialty_add_on";
 
 export type ProductCatalogAssetStatus = "missing" | "partial" | "complete";
@@ -185,6 +191,25 @@ export function getUniqueFinishOptions(item: ProductCatalogItem): ProductCatalog
   return Array.from(map.values());
 }
 
+export function getFinishImageCandidatesForFinish(
+  item: ProductCatalogItem,
+  finishKey: string
+): string[] {
+  if (isBlancoCatalogSinkId(item.id, item.category)) {
+    return blancoSinkFinishCandidates(item.id, finishKey);
+  }
+  const single = getFinishImageForFinish(item, finishKey);
+  return single ? [single] : [];
+}
+
+export function getProductHeroImageCandidates(item: ProductCatalogItem): string[] {
+  if (isBlancoCatalogSinkId(item.id, item.category)) {
+    return blancoSinkHeroCandidates(item.id);
+  }
+  const hero = productCatalogHeroImage(item);
+  return hero ? [hero] : [];
+}
+
 /**
  * Finish image resolution priority:
  * 1. finishImageUrls[finishKey]
@@ -255,22 +280,22 @@ export function resolveProductCatalogStageUrl(
   const finishKey = selectedFinishKey ?? item.defaultFinishKey ?? null;
 
   if (finishKey) {
-    const finishImage = getFinishImageForFinish(item, finishKey);
-    if (finishImage && isUrlAllowed(finishImage)) {
-      return finishImage;
+    for (const url of getFinishImageCandidatesForFinish(item, finishKey)) {
+      if (isUrlAllowed(url)) return url;
     }
-    // A finish is active — never substitute the static product hero (often a different finish).
     if (selectedFinishKey ?? item.defaultFinishKey) {
       return undefined;
     }
   }
 
-  if (isUrlAllowed(item.imageUrl)) {
-    return item.imageUrl;
+  for (const url of getProductHeroImageCandidates(item)) {
+    if (isUrlAllowed(url)) return url;
   }
 
   for (const opt of getUniqueFinishOptions(item)) {
-    if (isUrlAllowed(opt.imageUrl)) return opt.imageUrl;
+    for (const url of getFinishImageCandidatesForFinish(item, opt.key)) {
+      if (isUrlAllowed(url)) return url;
+    }
   }
 
   return undefined;

@@ -16,6 +16,11 @@
 import { PRODUCT_CATALOG_ITEMS } from "./productCatalogData";
 import { applyProductCatalogDisplaySplits, applyProductCatalogDisplayNames } from "./productCatalogDisplay";
 import {
+  blancoSinkFinishCandidates,
+  blancoSinkHeroCandidates,
+  resolveBlancoSinkFolderAssets,
+} from "./productCatalogBlancoSinkAssets";
+import {
   finishKeyFromLabel,
   type ProductCatalogAssetStatus,
   type ProductCatalogItem,
@@ -52,175 +57,87 @@ function specSheetUrl(productId: string) {
   return `/product-catalog/spec-sheets/${productId}/${productId}.pdf`;
 }
 
-/** BLANCO composite sink finish keys → on-disk PNG filenames (source asset convention). */
-const BLANCO_FINISH_PNG_BY_KEY: Record<string, string> = {
-  "cafe-brown": "cafe.png",
-  anthracite: "anthracite.png",
-  white: "white.png",
-  truffle: "truffle.png",
-  cinder: "cinder.png",
-  "coal-black": "coal-black.png",
-  "soft-white": "soft-white.png",
-  gray: "volcano-gray.png",
-  "volcano-gray": "volcano-gray.png",
-};
-
-function blancoSinkHeroUrl(productId: string) {
-  return `${sinkBase(productId)}/coal-black.png`;
-}
-
-function blancoSinkFinishImageUrls(productId: string): Record<string, string> {
-  const base = sinkBase(productId);
-  const urls: Record<string, string> = {};
-  for (const [key, filename] of Object.entries(BLANCO_FINISH_PNG_BY_KEY)) {
-    urls[key] = `${base}/${filename}`;
-  }
-  return urls;
-}
-
-/** Batch 1 — intended asset paths (files may not exist yet). */
+/** Batch 1 — source notes and non-BLANCO asset paths. BLANCO sink image URLs resolve from item.id folders. */
 const PRODUCT_CATALOG_ASSET_OVERRIDES: ProductCatalogAssetOverride[] = [
   {
     productId: "blanco-blanco-diamond-50-50-regular-divide",
-    imageUrl: blancoSinkHeroUrl("blanco-blanco-diamond-50-50"),
-    installedImageUrl: `${sinkBase("blanco-blanco-diamond-50-50")}/installed.jpg`,
-    specSheetUrl: specSheetUrl("blanco-blanco-diamond-50-50"),
-    defaultFinishKey: "coal-black",
-    finishImageUrls: blancoSinkFinishImageUrls("blanco-blanco-diamond-50-50"),
     sourceNotes:
       "Source: official BLANCO Diamond 50/50 Regular Divide product pages and spec sheets.",
   },
   {
     productId: "blanco-blanco-diamond-50-50-low-divide",
-    imageUrl: blancoSinkHeroUrl("blanco-blanco-diamond-50-50-low-divide-sinks"),
-    specSheetUrl: specSheetUrl("blanco-blanco-diamond-50-50-low-divide-sinks"),
-    defaultFinishKey: "coal-black",
-    finishImageUrls: blancoSinkFinishImageUrls("blanco-blanco-diamond-50-50-low-divide-sinks"),
     sourceNotes:
       "Source: official BLANCO Diamond 50/50 Low Divide product pages and spec sheets.",
   },
   {
     productId: "blanco-blanco-precis-50-50-sinks",
-    imageUrl: blancoSinkHeroUrl("blanco-blanco-precis-50-50-sinks"),
-    specSheetUrl: specSheetUrl("blanco-blanco-precis-50-50-sinks"),
-    defaultFinishKey: "coal-black",
-    finishImageUrls: blancoSinkFinishImageUrls("blanco-blanco-precis-50-50-sinks"),
     sourceNotes:
       "Source: official BLANCO Precis 50/50 product pages and spec sheets.",
   },
   {
     productId: "blanco-blanco-precis-60-40-sinks-regular-divide",
-    imageUrl: blancoSinkHeroUrl("blanco-blanco-precis-60-40-sinks-regular-divide"),
-    installedImageUrl: `${sinkBase("blanco-blanco-precis-60-40-sinks-regular-divide")}/installed.jpg`,
-    specSheetUrl: specSheetUrl("blanco-blanco-precis-60-40-sinks-regular-divide"),
-    defaultFinishKey: "coal-black",
-    finishImageUrls: blancoSinkFinishImageUrls("blanco-blanco-precis-60-40-sinks-regular-divide"),
     sourceNotes:
       "Source: official BLANCO Precis 60/40 Regular Divide product pages and spec sheets.",
   },
   {
     productId: "blanco-blanco-precis-60-40-sinks-low-divide",
-    imageUrl: blancoSinkHeroUrl("blanco-blanco-precis-60-40-sinks-low-divide"),
-    installedImageUrl: `${sinkBase("blanco-blanco-precis-60-40-sinks-low-divide")}/installed.jpg`,
-    specSheetUrl: specSheetUrl("blanco-blanco-precis-60-40-sinks-low-divide"),
-    defaultFinishKey: "coal-black",
-    finishImageUrls: blancoSinkFinishImageUrls("blanco-blanco-precis-60-40-sinks-low-divide"),
     sourceNotes:
       "Source: official BLANCO Precis 60/40 Low Divide product pages and spec sheets.",
   },
   {
     productId: "blanco-blanco-precis-super-single-sinks",
-    imageUrl: blancoSinkHeroUrl("blanco-blanco-precis-super-single-sinks"),
-    specSheetUrl: specSheetUrl("blanco-blanco-precis-super-single-sinks"),
-    defaultFinishKey: "coal-black",
-    finishImageUrls: blancoSinkFinishImageUrls("blanco-blanco-precis-super-single-sinks"),
     sourceNotes:
       "Source: official BLANCO Precis Super Single product pages and spec sheets.",
   },
   {
     productId: "blanco-blanco-super-single",
-    imageUrl: blancoSinkHeroUrl("blanco-blanco-super-single"),
-    installedImageUrl: `${sinkBase("blanco-blanco-super-single")}/installed.jpg`,
-    specSheetUrl: specSheetUrl("blanco-blanco-super-single"),
-    defaultFinishKey: "coal-black",
-    finishImageUrls: blancoSinkFinishImageUrls("blanco-blanco-super-single"),
     sourceNotes:
       "Source: official BLANCO Super Single product pages and spec sheets.",
   },
   {
     productId: "blanco-blanco-diamond-60-40-sinks-regular-divide",
-    imageUrl: blancoSinkHeroUrl("blanco-blanco-diamond-60-40-sinks"),
-    specSheetUrl: specSheetUrl("blanco-blanco-diamond-60-40-sinks"),
-    defaultFinishKey: "coal-black",
-    finishImageUrls: blancoSinkFinishImageUrls("blanco-blanco-diamond-60-40-sinks"),
     sourceNotes:
       "Source: official BLANCO Diamond 60/40 Regular Divide product pages and spec sheets.",
   },
   {
     productId: "blanco-blanco-diamond-60-40-sinks-low-divide",
-    imageUrl: blancoSinkHeroUrl("blanco-blanco-diamond-60-40-low-divide-sinks"),
-    specSheetUrl: specSheetUrl("blanco-blanco-diamond-60-40-low-divide-sinks"),
-    defaultFinishKey: "coal-black",
-    finishImageUrls: blancoSinkFinishImageUrls("blanco-blanco-diamond-60-40-low-divide-sinks"),
     sourceNotes:
       "Source: official BLANCO Diamond 60/40 Low Divide product pages and spec sheets.",
   },
   {
     productId: "blanco-blanco-diamond-small-bar-sinks",
-    imageUrl: blancoSinkHeroUrl("blanco-blanco-diamond-small-bar-sinks"),
-    specSheetUrl: specSheetUrl("blanco-blanco-diamond-small-bar-sinks"),
-    defaultFinishKey: "coal-black",
-    finishImageUrls: blancoSinkFinishImageUrls("blanco-blanco-diamond-small-bar-sinks"),
     sourceNotes:
       "Source: official BLANCO Diamond Small Bar product pages and spec sheets.",
   },
   {
     productId: "blanco-blanco-precis-21-sinks",
-    imageUrl: blancoSinkHeroUrl("blanco-blanco-precis-21-sinks"),
-    specSheetUrl: specSheetUrl("blanco-blanco-precis-21-sinks"),
-    defaultFinishKey: "coal-black",
-    finishImageUrls: blancoSinkFinishImageUrls("blanco-blanco-precis-21-sinks"),
     sourceNotes:
       "Source: official BLANCO Precis 21 product pages and spec sheets.",
   },
   {
     productId: "blanco-blanco-precis-24-sink",
-    imageUrl: blancoSinkHeroUrl("blanco-blanco-precis-24-sink"),
-    installedImageUrl: `${sinkBase("blanco-blanco-precis-24-sink")}/installed.jpg`,
-    specSheetUrl: specSheetUrl("blanco-blanco-precis-24-sink"),
-    defaultFinishKey: "coal-black",
-    finishImageUrls: blancoSinkFinishImageUrls("blanco-blanco-precis-24-sink"),
     sourceNotes:
       "Source: official BLANCO Precis 24 product pages and spec sheets.",
   },
   {
     productId: "blanco-blanco-precis-27-sinks",
-    imageUrl: blancoSinkHeroUrl("blanco-blanco-precis-27-sinks"),
-    installedImageUrl: `${sinkBase("blanco-blanco-precis-27-sinks")}/installed.jpg`,
-    specSheetUrl: specSheetUrl("blanco-blanco-precis-27-sinks"),
-    defaultFinishKey: "coal-black",
-    finishImageUrls: blancoSinkFinishImageUrls("blanco-blanco-precis-27-sinks"),
     sourceNotes:
       "Source: official BLANCO Precis 27 product pages and spec sheets.",
   },
   {
     productId: "blanco-blanco-precis-30-single-bowl",
-    imageUrl: blancoSinkHeroUrl("blanco-blanco-precis-30-single-bowl"),
-    installedImageUrl: `${sinkBase("blanco-blanco-precis-30-single-bowl")}/installed.jpg`,
-    specSheetUrl: specSheetUrl("blanco-blanco-precis-30-single-bowl"),
-    defaultFinishKey: "coal-black",
-    finishImageUrls: blancoSinkFinishImageUrls("blanco-blanco-precis-30-single-bowl"),
     sourceNotes:
       "Source: official BLANCO Precis 30 Single Bowl product pages and spec sheets.",
   },
   {
     productId: "blanco-blanco-precis-bar-sinks",
-    imageUrl: blancoSinkHeroUrl("blanco-blanco-precis-bar-sinks"),
-    specSheetUrl: specSheetUrl("blanco-blanco-precis-bar-sinks"),
-    defaultFinishKey: "coal-black",
-    finishImageUrls: blancoSinkFinishImageUrls("blanco-blanco-precis-bar-sinks"),
     sourceNotes:
       "Source: official BLANCO Precis Bar product pages and spec sheets.",
+  },
+  {
+    productId: "blanco-blanco-liven-laundry-12-depth",
+    sourceNotes:
+      "Source: official BLANCO Liven Laundry product pages and spec sheets.",
   },
   {
     productId: "faucet-delta-9176-cz-pr-dst",
@@ -327,8 +244,23 @@ function computeAssetStatusFromUrls(item: Pick<
  * Override fields win when present; variant images merge by variant id.
  */
 export function mergeProductCatalogAssets(item: ProductCatalogItem): ProductCatalogItem {
-  const override = getProductCatalogAssetOverride(item.id);
-  if (!override) return item;
+  const folderAssets = resolveBlancoSinkFolderAssets(item.id, item.category);
+  const explicit = getProductCatalogAssetOverride(item.id);
+  if (!folderAssets && !explicit) return item;
+
+  const override = {
+    ...folderAssets,
+    ...explicit,
+    ...(folderAssets
+      ? {
+          imageUrl: folderAssets.imageUrl,
+          finishImageUrls: folderAssets.finishImageUrls,
+          defaultFinishKey: folderAssets.defaultFinishKey,
+          installedImageUrl: folderAssets.installedImageUrl,
+          specSheetUrl: folderAssets.specSheetUrl,
+        }
+      : {}),
+  };
 
   const variants = mergeVariants(
     item.variants,
@@ -363,3 +295,10 @@ export function getProductCatalogItemsWithAssets(): ProductCatalogItem[] {
 }
 
 export { finishKeyFromLabel as variantSlug } from "./productCatalog";
+export {
+  blancoSinkFinishCandidates,
+  blancoSinkFinishImageUrls,
+  blancoSinkHeroCandidates,
+  blancoSinkHeroUrl,
+  resolveBlancoSinkFolderAssets,
+} from "./productCatalogBlancoSinkAssets";

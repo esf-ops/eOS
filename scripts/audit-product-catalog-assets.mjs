@@ -32,9 +32,9 @@ const OUT_MD = path.join(OUT_DIR, "product-catalog-asset-audit.md");
 
 const RECOMMENDED_SOURCE = {
   "blanco-blanco-diamond-50-50-regular-divide":
-    "BLANCO Diamond 50/50 Regular Divide — assets under blanco-blanco-diamond-50-50/.",
+    "BLANCO Diamond 50/50 Regular Divide — assets under blanco-blanco-diamond-50-50-regular-divide/.",
   "blanco-blanco-diamond-50-50-low-divide":
-    "BLANCO Diamond 50/50 Low Divide — assets under blanco-blanco-diamond-50-50-low-divide-sinks/.",
+    "BLANCO Diamond 50/50 Low Divide — assets under blanco-blanco-diamond-50-50-low-divide/.",
   "blanco-blanco-precis-50-50-sinks":
     "BLANCO Precis 50/50 — assets under blanco-blanco-precis-50-50-sinks/.",
   "blanco-blanco-precis-60-40-sinks-regular-divide":
@@ -42,9 +42,11 @@ const RECOMMENDED_SOURCE = {
   "blanco-blanco-precis-60-40-sinks-low-divide":
     "BLANCO Precis 60/40 Low Divide — assets under blanco-blanco-precis-60-40-sinks-low-divide/.",
   "blanco-blanco-diamond-60-40-sinks-regular-divide":
-    "BLANCO Diamond 60/40 Regular Divide — assets under blanco-blanco-diamond-60-40-sinks/.",
+    "BLANCO Diamond 60/40 Regular Divide — assets under blanco-blanco-diamond-60-40-sinks-regular-divide/.",
   "blanco-blanco-diamond-60-40-sinks-low-divide":
-    "BLANCO Diamond 60/40 Low Divide — assets under blanco-blanco-diamond-60-40-low-divide-sinks/.",
+    "BLANCO Diamond 60/40 Low Divide — assets under blanco-blanco-diamond-60-40-sinks-low-divide/.",
+  "blanco-blanco-liven-laundry-12-depth":
+    "BLANCO Liven Laundry 12\" Depth — assets under blanco-blanco-liven-laundry-12-depth/.",
   "blanco-blanco-diamond-small-bar-sinks":
     "BLANCO Diamond Small Bar — assets under blanco-blanco-diamond-small-bar-sinks/.",
   "blanco-blanco-precis-21-sinks":
@@ -104,6 +106,33 @@ function expandTemplateHelpers(text) {
   );
 
   return expanded;
+}
+
+const BLANCO_FINISH_PNG_BY_KEY = {
+  "cafe-brown": "cafe.png",
+  anthracite: "anthracite.png",
+  white: "white.png",
+  truffle: "truffle.png",
+  cinder: "cinder.png",
+  "coal-black": "coal-black.png",
+  "soft-white": "soft-white.png",
+  gray: "volcano-gray.png",
+  "volcano-gray": "volcano-gray.png",
+};
+
+/** Mirror resolveBlancoSinkFolderAssets() for audit rows when overrides are sourceNotes-only. */
+function synthesizeBlancoSinkFolderAssets(productId) {
+  if (!productId.startsWith("blanco-blanco-")) return [];
+  const base = `/product-catalog/sinks/${productId}`;
+  const assets = [
+    { assetType: "hero", url: `${base}/coal-black.png` },
+    { assetType: "installed", url: `${base}/installed.jpg` },
+    { assetType: "spec_sheet", url: `/product-catalog/spec-sheets/${productId}/${productId}.pdf` },
+  ];
+  for (const [finishKey, filename] of Object.entries(BLANCO_FINISH_PNG_BY_KEY)) {
+    assets.push({ assetType: "finish", variantId: finishKey, url: `${base}/${filename}` });
+  }
+  return assets;
 }
 
 function parseOverridesFromTs(content) {
@@ -181,6 +210,25 @@ function parseOverridesFromTs(content) {
     }
 
     overrides.push(override);
+  }
+
+  for (const override of overrides) {
+    if (!override.productId.startsWith("blanco-blanco-")) continue;
+    const synthesized = synthesizeBlancoSinkFolderAssets(override.productId);
+    const existingUrls = new Set((override.assets || []).map((a) => a.url));
+    for (const asset of synthesized) {
+      if (!existingUrls.has(asset.url)) {
+        (override.assets ||= []).push(asset);
+        existingUrls.add(asset.url);
+      }
+    }
+    if (!override.assets?.some((a) => a.assetType === "default_finish_key")) {
+      (override.assets ||= []).push({
+        assetType: "default_finish_key",
+        variantId: "coal-black",
+        url: "",
+      });
+    }
   }
 
   return overrides;
