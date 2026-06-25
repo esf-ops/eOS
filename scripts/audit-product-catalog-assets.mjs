@@ -74,17 +74,29 @@ function expandTemplateHelpers(text) {
     "cafe-brown", "anthracite", "white", "truffle", "cinder", "coal-black",
     "soft-white", "gray", "volcano-gray",
   ];
+  const finishPngByKey = {
+    "cafe-brown": "cafe.png",
+    anthracite: "anthracite.png",
+    white: "white.png",
+    truffle: "truffle.png",
+    cinder: "cinder.png",
+    "coal-black": "coal-black.png",
+    "soft-white": "soft-white.png",
+    gray: "volcano-gray.png",
+    "volcano-gray": "volcano-gray.png",
+  };
 
   let expanded = text
     .replace(/\$\{sinkBase\("([^"]+)"\)\}/g, "/product-catalog/sinks/$1")
     .replace(/\$\{faucetBase\("([^"]+)"\)\}/g, "/product-catalog/faucets/$1")
-    .replace(/specSheetUrl\("([^"]+)"\)/g, "/product-catalog/spec-sheets/$1/$1.pdf");
+    .replace(/specSheetUrl\("([^"]+)"\)/g, "/product-catalog/spec-sheets/$1/$1.pdf")
+    .replace(/blancoSinkHeroUrl\("([^"]+)"\)/g, "/product-catalog/sinks/$1/coal-black.png");
 
   expanded = expanded.replace(
     /finishImageUrls:\s*blancoSinkFinishImageUrls\("([^"]+)"\)/g,
     (_match, productId) => {
       const lines = finishKeys.map((key) => {
-        const file = key === "gray" || key === "volcano-gray" ? "volcano-gray.jpg" : `${key}.jpg`;
+        const file = finishPngByKey[key] || `${key}.png`;
         return `      "${key}": \`/product-catalog/sinks/${productId}/${file}\`,`;
       });
       return `finishImageUrls: {\n${lines.join("\n")}\n    }`;

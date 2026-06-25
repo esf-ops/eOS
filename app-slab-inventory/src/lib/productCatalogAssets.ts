@@ -52,20 +52,28 @@ function specSheetUrl(productId: string) {
   return `/product-catalog/spec-sheets/${productId}/${productId}.pdf`;
 }
 
-function blancoSinkFinishImageUrls(productId: string, opts?: { includeTruffle?: boolean }) {
+/** BLANCO composite sink finish keys → on-disk PNG filenames (source asset convention). */
+const BLANCO_FINISH_PNG_BY_KEY: Record<string, string> = {
+  "cafe-brown": "cafe.png",
+  anthracite: "anthracite.png",
+  white: "white.png",
+  truffle: "truffle.png",
+  cinder: "cinder.png",
+  "coal-black": "coal-black.png",
+  "soft-white": "soft-white.png",
+  gray: "volcano-gray.png",
+  "volcano-gray": "volcano-gray.png",
+};
+
+function blancoSinkHeroUrl(productId: string) {
+  return `${sinkBase(productId)}/coal-black.png`;
+}
+
+function blancoSinkFinishImageUrls(productId: string): Record<string, string> {
   const base = sinkBase(productId);
-  const urls: Record<string, string> = {
-    "cafe-brown": `${base}/cafe-brown.jpg`,
-    anthracite: `${base}/anthracite.jpg`,
-    white: `${base}/white.jpg`,
-    cinder: `${base}/cinder.jpg`,
-    "coal-black": `${base}/coal-black.jpg`,
-    "soft-white": `${base}/soft-white.jpg`,
-    gray: `${base}/volcano-gray.jpg`,
-    "volcano-gray": `${base}/volcano-gray.jpg`,
-  };
-  if (opts?.includeTruffle !== false && productId !== "blanco-blanco-super-single") {
-    urls.truffle = `${base}/truffle.jpg`;
+  const urls: Record<string, string> = {};
+  for (const [key, filename] of Object.entries(BLANCO_FINISH_PNG_BY_KEY)) {
+    urls[key] = `${base}/${filename}`;
   }
   return urls;
 }
@@ -74,7 +82,7 @@ function blancoSinkFinishImageUrls(productId: string, opts?: { includeTruffle?: 
 const PRODUCT_CATALOG_ASSET_OVERRIDES: ProductCatalogAssetOverride[] = [
   {
     productId: "blanco-blanco-diamond-50-50-regular-divide",
-    imageUrl: `${sinkBase("blanco-blanco-diamond-50-50")}/coal-black.jpg`,
+    imageUrl: blancoSinkHeroUrl("blanco-blanco-diamond-50-50"),
     installedImageUrl: `${sinkBase("blanco-blanco-diamond-50-50")}/installed.jpg`,
     specSheetUrl: specSheetUrl("blanco-blanco-diamond-50-50"),
     defaultFinishKey: "coal-black",
@@ -84,7 +92,7 @@ const PRODUCT_CATALOG_ASSET_OVERRIDES: ProductCatalogAssetOverride[] = [
   },
   {
     productId: "blanco-blanco-diamond-50-50-low-divide",
-    imageUrl: `${sinkBase("blanco-blanco-diamond-50-50-low-divide-sinks")}/coal-black.jpg`,
+    imageUrl: blancoSinkHeroUrl("blanco-blanco-diamond-50-50-low-divide-sinks"),
     specSheetUrl: specSheetUrl("blanco-blanco-diamond-50-50-low-divide-sinks"),
     defaultFinishKey: "coal-black",
     finishImageUrls: blancoSinkFinishImageUrls("blanco-blanco-diamond-50-50-low-divide-sinks"),
@@ -93,7 +101,7 @@ const PRODUCT_CATALOG_ASSET_OVERRIDES: ProductCatalogAssetOverride[] = [
   },
   {
     productId: "blanco-blanco-precis-50-50-sinks",
-    imageUrl: `${sinkBase("blanco-blanco-precis-50-50-sinks")}/coal-black.jpg`,
+    imageUrl: blancoSinkHeroUrl("blanco-blanco-precis-50-50-sinks"),
     specSheetUrl: specSheetUrl("blanco-blanco-precis-50-50-sinks"),
     defaultFinishKey: "coal-black",
     finishImageUrls: blancoSinkFinishImageUrls("blanco-blanco-precis-50-50-sinks"),
@@ -102,7 +110,7 @@ const PRODUCT_CATALOG_ASSET_OVERRIDES: ProductCatalogAssetOverride[] = [
   },
   {
     productId: "blanco-blanco-precis-60-40-sinks-regular-divide",
-    imageUrl: `${sinkBase("blanco-blanco-precis-60-40-sinks-regular-divide")}/coal-black.jpg`,
+    imageUrl: blancoSinkHeroUrl("blanco-blanco-precis-60-40-sinks-regular-divide"),
     installedImageUrl: `${sinkBase("blanco-blanco-precis-60-40-sinks-regular-divide")}/installed.jpg`,
     specSheetUrl: specSheetUrl("blanco-blanco-precis-60-40-sinks-regular-divide"),
     defaultFinishKey: "coal-black",
@@ -112,7 +120,7 @@ const PRODUCT_CATALOG_ASSET_OVERRIDES: ProductCatalogAssetOverride[] = [
   },
   {
     productId: "blanco-blanco-precis-60-40-sinks-low-divide",
-    imageUrl: `${sinkBase("blanco-blanco-precis-60-40-sinks-low-divide")}/coal-black.jpg`,
+    imageUrl: blancoSinkHeroUrl("blanco-blanco-precis-60-40-sinks-low-divide"),
     installedImageUrl: `${sinkBase("blanco-blanco-precis-60-40-sinks-low-divide")}/installed.jpg`,
     specSheetUrl: specSheetUrl("blanco-blanco-precis-60-40-sinks-low-divide"),
     defaultFinishKey: "coal-black",
@@ -122,44 +130,26 @@ const PRODUCT_CATALOG_ASSET_OVERRIDES: ProductCatalogAssetOverride[] = [
   },
   {
     productId: "blanco-blanco-precis-super-single-sinks",
-    imageUrl: `${sinkBase("blanco-blanco-precis-super-single-sinks")}/coal-black.jpg`,
+    imageUrl: blancoSinkHeroUrl("blanco-blanco-precis-super-single-sinks"),
     specSheetUrl: specSheetUrl("blanco-blanco-precis-super-single-sinks"),
     defaultFinishKey: "coal-black",
-    finishImageUrls: {
-      anthracite: `${sinkBase("blanco-blanco-precis-super-single-sinks")}/anthracite.jpg`,
-      white: `${sinkBase("blanco-blanco-precis-super-single-sinks")}/white.jpg`,
-      truffle: `${sinkBase("blanco-blanco-precis-super-single-sinks")}/truffle.jpg`,
-      cinder: `${sinkBase("blanco-blanco-precis-super-single-sinks")}/cinder.jpg`,
-      "coal-black": `${sinkBase("blanco-blanco-precis-super-single-sinks")}/coal-black.jpg`,
-      "soft-white": `${sinkBase("blanco-blanco-precis-super-single-sinks")}/soft-white.jpg`,
-      gray: `${sinkBase("blanco-blanco-precis-super-single-sinks")}/volcano-gray.jpg`,
-      "volcano-gray": `${sinkBase("blanco-blanco-precis-super-single-sinks")}/volcano-gray.jpg`,
-    },
+    finishImageUrls: blancoSinkFinishImageUrls("blanco-blanco-precis-super-single-sinks"),
     sourceNotes:
       "Source: official BLANCO Precis Super Single product pages and spec sheets.",
   },
   {
     productId: "blanco-blanco-super-single",
-    imageUrl: `${sinkBase("blanco-blanco-super-single")}/coal-black.jpg`,
+    imageUrl: blancoSinkHeroUrl("blanco-blanco-super-single"),
     installedImageUrl: `${sinkBase("blanco-blanco-super-single")}/installed.jpg`,
     specSheetUrl: specSheetUrl("blanco-blanco-super-single"),
     defaultFinishKey: "coal-black",
-    finishImageUrls: {
-      "cafe-brown": `${sinkBase("blanco-blanco-super-single")}/cafe-brown.jpg`,
-      anthracite: `${sinkBase("blanco-blanco-super-single")}/anthracite.jpg`,
-      white: `${sinkBase("blanco-blanco-super-single")}/white.jpg`,
-      cinder: `${sinkBase("blanco-blanco-super-single")}/cinder.jpg`,
-      "coal-black": `${sinkBase("blanco-blanco-super-single")}/coal-black.jpg`,
-      "soft-white": `${sinkBase("blanco-blanco-super-single")}/soft-white.jpg`,
-      gray: `${sinkBase("blanco-blanco-super-single")}/volcano-gray.jpg`,
-      "volcano-gray": `${sinkBase("blanco-blanco-super-single")}/volcano-gray.jpg`,
-    },
+    finishImageUrls: blancoSinkFinishImageUrls("blanco-blanco-super-single"),
     sourceNotes:
       "Source: official BLANCO Super Single product pages and spec sheets.",
   },
   {
     productId: "blanco-blanco-diamond-60-40-sinks-regular-divide",
-    imageUrl: `${sinkBase("blanco-blanco-diamond-60-40-sinks")}/coal-black.jpg`,
+    imageUrl: blancoSinkHeroUrl("blanco-blanco-diamond-60-40-sinks"),
     specSheetUrl: specSheetUrl("blanco-blanco-diamond-60-40-sinks"),
     defaultFinishKey: "coal-black",
     finishImageUrls: blancoSinkFinishImageUrls("blanco-blanco-diamond-60-40-sinks"),
@@ -168,7 +158,7 @@ const PRODUCT_CATALOG_ASSET_OVERRIDES: ProductCatalogAssetOverride[] = [
   },
   {
     productId: "blanco-blanco-diamond-60-40-sinks-low-divide",
-    imageUrl: `${sinkBase("blanco-blanco-diamond-60-40-low-divide-sinks")}/coal-black.jpg`,
+    imageUrl: blancoSinkHeroUrl("blanco-blanco-diamond-60-40-low-divide-sinks"),
     specSheetUrl: specSheetUrl("blanco-blanco-diamond-60-40-low-divide-sinks"),
     defaultFinishKey: "coal-black",
     finishImageUrls: blancoSinkFinishImageUrls("blanco-blanco-diamond-60-40-low-divide-sinks"),
@@ -177,7 +167,7 @@ const PRODUCT_CATALOG_ASSET_OVERRIDES: ProductCatalogAssetOverride[] = [
   },
   {
     productId: "blanco-blanco-diamond-small-bar-sinks",
-    imageUrl: `${sinkBase("blanco-blanco-diamond-small-bar-sinks")}/coal-black.jpg`,
+    imageUrl: blancoSinkHeroUrl("blanco-blanco-diamond-small-bar-sinks"),
     specSheetUrl: specSheetUrl("blanco-blanco-diamond-small-bar-sinks"),
     defaultFinishKey: "coal-black",
     finishImageUrls: blancoSinkFinishImageUrls("blanco-blanco-diamond-small-bar-sinks"),
@@ -186,7 +176,7 @@ const PRODUCT_CATALOG_ASSET_OVERRIDES: ProductCatalogAssetOverride[] = [
   },
   {
     productId: "blanco-blanco-precis-21-sinks",
-    imageUrl: `${sinkBase("blanco-blanco-precis-21-sinks")}/coal-black.jpg`,
+    imageUrl: blancoSinkHeroUrl("blanco-blanco-precis-21-sinks"),
     specSheetUrl: specSheetUrl("blanco-blanco-precis-21-sinks"),
     defaultFinishKey: "coal-black",
     finishImageUrls: blancoSinkFinishImageUrls("blanco-blanco-precis-21-sinks"),
@@ -195,7 +185,7 @@ const PRODUCT_CATALOG_ASSET_OVERRIDES: ProductCatalogAssetOverride[] = [
   },
   {
     productId: "blanco-blanco-precis-24-sink",
-    imageUrl: `${sinkBase("blanco-blanco-precis-24-sink")}/coal-black.jpg`,
+    imageUrl: blancoSinkHeroUrl("blanco-blanco-precis-24-sink"),
     installedImageUrl: `${sinkBase("blanco-blanco-precis-24-sink")}/installed.jpg`,
     specSheetUrl: specSheetUrl("blanco-blanco-precis-24-sink"),
     defaultFinishKey: "coal-black",
@@ -205,7 +195,7 @@ const PRODUCT_CATALOG_ASSET_OVERRIDES: ProductCatalogAssetOverride[] = [
   },
   {
     productId: "blanco-blanco-precis-27-sinks",
-    imageUrl: `${sinkBase("blanco-blanco-precis-27-sinks")}/coal-black.jpg`,
+    imageUrl: blancoSinkHeroUrl("blanco-blanco-precis-27-sinks"),
     installedImageUrl: `${sinkBase("blanco-blanco-precis-27-sinks")}/installed.jpg`,
     specSheetUrl: specSheetUrl("blanco-blanco-precis-27-sinks"),
     defaultFinishKey: "coal-black",
@@ -215,7 +205,7 @@ const PRODUCT_CATALOG_ASSET_OVERRIDES: ProductCatalogAssetOverride[] = [
   },
   {
     productId: "blanco-blanco-precis-30-single-bowl",
-    imageUrl: `${sinkBase("blanco-blanco-precis-30-single-bowl")}/coal-black.jpg`,
+    imageUrl: blancoSinkHeroUrl("blanco-blanco-precis-30-single-bowl"),
     installedImageUrl: `${sinkBase("blanco-blanco-precis-30-single-bowl")}/installed.jpg`,
     specSheetUrl: specSheetUrl("blanco-blanco-precis-30-single-bowl"),
     defaultFinishKey: "coal-black",
@@ -225,7 +215,7 @@ const PRODUCT_CATALOG_ASSET_OVERRIDES: ProductCatalogAssetOverride[] = [
   },
   {
     productId: "blanco-blanco-precis-bar-sinks",
-    imageUrl: `${sinkBase("blanco-blanco-precis-bar-sinks")}/coal-black.jpg`,
+    imageUrl: blancoSinkHeroUrl("blanco-blanco-precis-bar-sinks"),
     specSheetUrl: specSheetUrl("blanco-blanco-precis-bar-sinks"),
     defaultFinishKey: "coal-black",
     finishImageUrls: blancoSinkFinishImageUrls("blanco-blanco-precis-bar-sinks"),

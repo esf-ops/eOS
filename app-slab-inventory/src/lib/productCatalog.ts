@@ -228,6 +228,54 @@ export function getCatalogNumbersForFinish(
   return getUniqueFinishOptions(item).find((o) => o.key === finishKey)?.catalogNumbers ?? [];
 }
 
+/** Default finish slug when opening the product modal. */
+export function defaultFinishKeyForItem(item: ProductCatalogItem): string | null {
+  const preferred = item.defaultFinishKey?.trim();
+  const options = getUniqueFinishOptions(item);
+  if (preferred && options.some((o) => o.key === preferred)) return preferred;
+  if (preferred && item.finishImageUrls?.[preferred]) return preferred;
+  return options[0]?.key ?? preferred ?? null;
+}
+
+/**
+ * Large modal preview URL.
+ * Priority: active gallery thumb → selected/default finish image → product hero.
+ * When a finish is explicitly selected, never substitute a different finish hero.
+ */
+export function resolveProductCatalogStageUrl(
+  item: ProductCatalogItem,
+  selectedFinishKey: string | null,
+  activeGalleryUrl: string | null,
+  isUrlAllowed: (url?: string) => boolean
+): string | undefined {
+  if (activeGalleryUrl && isUrlAllowed(activeGalleryUrl)) {
+    return activeGalleryUrl;
+  }
+
+  const finishKey = selectedFinishKey ?? item.defaultFinishKey ?? null;
+
+  if (finishKey) {
+    const finishImage = getFinishImageForFinish(item, finishKey);
+    if (finishImage && isUrlAllowed(finishImage)) {
+      return finishImage;
+    }
+    // A finish is active — never substitute the static product hero (often a different finish).
+    if (selectedFinishKey ?? item.defaultFinishKey) {
+      return undefined;
+    }
+  }
+
+  if (isUrlAllowed(item.imageUrl)) {
+    return item.imageUrl;
+  }
+
+  for (const opt of getUniqueFinishOptions(item)) {
+    if (isUrlAllowed(opt.imageUrl)) return opt.imageUrl;
+  }
+
+  return undefined;
+}
+
 /** All image URLs declared on a catalog item (for runtime load tracking). */
 export function productCatalogImageUrls(item: ProductCatalogItem): string[] {
   const urls = new Set<string>();

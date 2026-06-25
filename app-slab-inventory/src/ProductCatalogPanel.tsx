@@ -5,14 +5,15 @@ import {
   PRODUCT_CATALOG_ASSET_LABELS,
   PRODUCT_CATALOG_CATEGORY_LABELS,
   PRODUCT_CATALOG_TABS,
+  defaultFinishKeyForItem,
   filterProductCatalogItems,
   getCatalogNumbersForFinish,
-  getFinishImageForFinish,
   getUniqueFinishOptions,
   productCatalogCountForCategory,
   productCatalogCounts,
   productCatalogDisplayAssetStatus,
   productCatalogHeroImage,
+  resolveProductCatalogStageUrl,
   type ProductCatalogAssetFilter,
   type ProductCatalogCategory,
   type ProductCatalogFinishOption,
@@ -193,28 +194,6 @@ function buildSupportingGalleryThumbs(
   );
 
   return thumbs;
-}
-
-function resolveStageUrl(
-  item: ProductCatalogItem,
-  selectedFinishKey: string | null,
-  activeGalleryUrl: string | null,
-  isUsable: (url?: string) => boolean
-): string | undefined {
-  if (activeGalleryUrl && isUsable(activeGalleryUrl)) return activeGalleryUrl;
-
-  if (selectedFinishKey) {
-    const finishImage = getFinishImageForFinish(item, selectedFinishKey);
-    if (isUsable(finishImage)) return finishImage;
-  }
-
-  if (isUsable(item.imageUrl)) return item.imageUrl;
-
-  for (const opt of getUniqueFinishOptions(item)) {
-    if (isUsable(opt.imageUrl)) return opt.imageUrl;
-  }
-
-  return undefined;
 }
 
 export default function ProductCatalogPanel() {
@@ -412,7 +391,7 @@ function ProductCatalogModal({ item, onClose }: { item: ProductCatalogItem; onCl
   const { loaded, failed, reset, markLoaded, markFailed, isUsable } = useCatalogImageTracker();
 
   useEffect(() => {
-    setSelectedFinishKey(null);
+    setSelectedFinishKey(defaultFinishKeyForItem(item));
     setActiveGalleryUrl(null);
     reset();
   }, [item, reset]);
@@ -432,19 +411,20 @@ function ProductCatalogModal({ item, onClose }: { item: ProductCatalogItem; onCl
 
   const finishPreloadUrls = useMemo(() => {
     const urls = new Set<string>();
+    Object.values(item.finishImageUrls ?? {}).forEach((url) => urls.add(url));
     if (item.imageUrl) urls.add(item.imageUrl);
     for (const opt of finishOptions) {
       if (opt.imageUrl) urls.add(opt.imageUrl);
     }
     return [...urls];
-  }, [item.imageUrl, finishOptions]);
+  }, [item.imageUrl, item.finishImageUrls, finishOptions]);
 
   const loadedSupportingThumbs = useMemo(
     () => supportingGalleryCandidates.filter((t) => loaded.has(t.url) && !failed.has(t.url)),
     [supportingGalleryCandidates, loaded, failed]
   );
 
-  const stageUrl = resolveStageUrl(item, selectedFinishKey, activeGalleryUrl, isUsable);
+  const stageUrl = resolveProductCatalogStageUrl(item, selectedFinishKey, activeGalleryUrl, isUsable);
 
   const displayAssetStatus = productCatalogDisplayAssetStatus(item, loaded, failed);
 
@@ -618,7 +598,7 @@ function ProductCatalogModal({ item, onClose }: { item: ProductCatalogItem; onCl
                       ) : null}
                     </p>
                   ) : (
-                    <p className="pc-finish-hint">Select a finish to view variant imagery when available.</p>
+                    <p className="pc-finish-hint">Select a finish to view variant imagery.</p>
                   )}
                   <div className="pc-finish-swatches">
                     {finishOptions.map((opt) => {
