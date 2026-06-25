@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ZoomImageViewer, type ZoomGalleryItem } from "./ZoomImageViewer";
 import { getProductCatalogItemsWithAssets } from "./lib/productCatalogAssets";
 import {
+  filterCatalogReadyItems,
+} from "./lib/productCatalogReady";
+import {
   PRODUCT_CATALOG_CATEGORY_LABELS,
   PRODUCT_CATALOG_TABS,
   defaultFinishKeyForItem,
@@ -10,13 +13,17 @@ import {
   getFinishImageCandidatesForFinish,
   getProductHeroImageCandidates,
   getUniqueFinishOptions,
+  groupProductCatalogByManufacturer,
   productCatalogCountForCategory,
+  productCatalogUsesManufacturerGrouping,
   resolveProductCatalogStageUrl,
   type ProductCatalogCategory,
   type ProductCatalogFinishOption,
   type ProductCatalogItem,
   type ProductCatalogTagFilter,
 } from "./lib/productCatalog";
+
+const DEV_SHOW_ALL_STORAGE_KEY = "eliteos-pc-show-all-generated";
 
 const SEARCH_ICON = (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -218,6 +225,14 @@ export default function ProductCatalogPanel() {
   const [search, setSearch] = useState("");
   const [tags, setTags] = useState<ProductCatalogTagFilter[]>([]);
   const [selected, setSelected] = useState<ProductCatalogItem | null>(null);
+  const [showAllGenerated, setShowAllGenerated] = useState(() => {
+    if (!import.meta.env.DEV) return false;
+    try {
+      return localStorage.getItem(DEV_SHOW_ALL_STORAGE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
 
   useEffect(() => {
     const t = setTimeout(() => setSearch(searchInput.trim()), 250);
@@ -226,16 +241,41 @@ export default function ProductCatalogPanel() {
 
   const catalogItems = useMemo(() => getProductCatalogItemsWithAssets(), []);
 
+  const showroomItems = useMemo(
+    () => (showAllGenerated ? catalogItems : filterCatalogReadyItems(catalogItems)),
+    [catalogItems, showAllGenerated]
+  );
+
   const filtered = useMemo(
     () =>
-      filterProductCatalogItems(catalogItems, {
+      filterProductCatalogItems(showroomItems, {
         category,
         search,
         tags,
         assetStatus: "all",
       }),
-    [category, search, tags, catalogItems]
+    [category, search, tags, showroomItems]
   );
+
+  const manufacturerGroups = useMemo(() => {
+    if (!productCatalogUsesManufacturerGrouping(category)) return null;
+    return groupProductCatalogByManufacturer(filtered);
+  }, [category, filtered]);
+
+  const toggleShowAllGenerated = () => {
+    setShowAllGenerated((cur) => {
+      const next = !cur;
+      if (import.meta.env.DEV) {
+        try {
+          if (next) localStorage.setItem(DEV_SHOW_ALL_STORAGE_KEY, "1");
+          else localStorage.removeItem(DEV_SHOW_ALL_STORAGE_KEY);
+        } catch {
+          /* ignore */
+        }
+      }
+      return next;
+    });
+  };
 
   const toggleTag = (tag: ProductCatalogTagFilter) => {
     setTags((cur) => (cur.includes(tag) ? cur.filter((t) => t !== tag) : [...cur, tag]));
@@ -270,7 +310,9 @@ export default function ProductCatalogPanel() {
             aria-selected={category === cat}
           >
             {PRODUCT_CATALOG_CATEGORY_LABELS[cat]}
-            <span className="pc-tab-count">{productCatalogCountForCategory(catalogItems, cat)}</span>
+            <span className="pc-tab-count">
+              {productCatalogCountForCategory(showroomItems, cat)}
+            </span>
           </button>
         ))}
       </nav>
@@ -317,13 +359,34 @@ export default function ProductCatalogPanel() {
       {filtered.length === 0 ? (
         <div className="empty-state pc-empty">
           <div className="empty-art" aria-hidden>{categoryPlaceholderIcon(category)}</div>
-          <p className="empty-title">No products match these criteria.</p>
-          <p className="empty-sub">Try a different search or remove filters.</p>
+          <p className="empty-title">
+            {hasActiveFilters
+              ? "No catalog-ready products found for this filter."
+              : "No catalog-ready products in this category yet."}
+          </p>
+          <p className="empty-sub">
+            {hasActiveFilters
+              ? "Try a different search or remove filters."
+              : "Check back as new products are added to the showroom catalog."}
+          </p>
           {hasActiveFilters ? (
             <div className="empty-actions">
               <button type="button" className="btn secondary btn-sm" onClick={clearFilters}>Clear filters</button>
             </div>
           ) : null}
+        </div>
+      ) : manufacturerGroups ? (
+        <div className="pc-manufacturer-catalog">
+          {manufacturerGroups.map((group) => (
+            <section key={group.brand} className="pc-manufacturer-section" aria-label={group.brand}>
+              <h2 className="pc-manufacturer-heading">{group.brand}</h2>
+              <div className="pc-grid">
+                {group.items.map((item) => (
+                  <ProductCatalogCard key={item.id} item={item} onOpen={() => setSelected(item)} />
+                ))}
+              </div>
+            </section>
+          ))}
         </div>
       ) : (
         <div className="pc-grid">
@@ -332,6 +395,14 @@ export default function ProductCatalogPanel() {
           ))}
         </div>
       )}
+
+      {import.meta.env.DEV ? (
+        <p className="pc-dev-toggle-wrap">
+          <button type="button" className="pc-dev-toggle" onClick={toggleShowAllGenerated}>
+            {showAllGenerated ? "Show catalog-ready only" : "Show all workbook products (dev)"}
+          </button>
+        </p>
+      ) : null}
 
       {selected ? (
         <ProductCatalogModal item={selected} onClose={() => setSelected(null)} />

@@ -460,7 +460,47 @@ export function productCatalogCounts(items: ProductCatalogItem[]) {
 
 export function productCatalogCountForCategory(
   items: ProductCatalogItem[],
-  category: ProductCatalogCategory
+  category: ProductCatalogCategory,
+  opts?: { catalogReadyOnly?: boolean; isReady?: (item: ProductCatalogItem) => boolean }
 ): number {
-  return items.filter((i) => i.active && i.category === category).length;
+  return items.filter((i) => {
+    if (!i.active || i.category !== category) return false;
+    if (opts?.catalogReadyOnly && opts.isReady && !opts.isReady(i)) return false;
+    return true;
+  }).length;
+}
+
+export type ProductCatalogManufacturerGroup = {
+  brand: string;
+  items: ProductCatalogItem[];
+};
+
+const MANUFACTURER_GROUP_CATEGORIES = new Set<ProductCatalogCategory>(["sink", "faucet"]);
+
+export function productCatalogUsesManufacturerGrouping(category: ProductCatalogCategory): boolean {
+  return MANUFACTURER_GROUP_CATEGORIES.has(category);
+}
+
+/** Group catalog-ready items by brand (A→Z), products sorted by display name within each group. */
+export function groupProductCatalogByManufacturer(
+  items: ProductCatalogItem[]
+): ProductCatalogManufacturerGroup[] {
+  const byBrand = new Map<string, ProductCatalogItem[]>();
+
+  for (const item of items) {
+    const brand = item.brand?.trim() || "Other";
+    const list = byBrand.get(brand) ?? [];
+    list.push(item);
+    byBrand.set(brand, list);
+  }
+
+  const sortName = (a: ProductCatalogItem, b: ProductCatalogItem) =>
+    a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+
+  return [...byBrand.entries()]
+    .sort(([a], [b]) => a.localeCompare(b, undefined, { sensitivity: "base" }))
+    .map(([brand, groupItems]) => ({
+      brand,
+      items: [...groupItems].sort(sortName),
+    }));
 }

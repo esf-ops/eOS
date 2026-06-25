@@ -251,10 +251,11 @@ function computeAssetStatusFromUrls(item: Pick<
  * Override fields win when present; variant images merge by variant id.
  */
 export function mergeProductCatalogAssets(item: ProductCatalogItem): ProductCatalogItem {
-  const folderAssets =
-    resolveBlancoSinkFolderAssets(item.id, item.category) ??
-    resolveHeroOnlySinkFolderAssets(item.id, item.category);
   const explicit = getProductCatalogAssetOverride(item.id);
+  const folderAssets = explicit
+    ? resolveBlancoSinkFolderAssets(item.id, item.category) ??
+      resolveHeroOnlySinkFolderAssets(item.id, item.category)
+    : null;
   if (!folderAssets && !explicit) return item;
 
   const override = {

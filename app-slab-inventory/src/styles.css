@@ -2852,6 +2852,47 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
   gap: 24px;
 }
 
+.pc-manufacturer-catalog {
+  display: flex;
+  flex-direction: column;
+  gap: 36px;
+}
+
+.pc-manufacturer-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.pc-manufacturer-heading {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--eos-ink);
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--eos-line);
+}
+
+.pc-dev-toggle-wrap {
+  margin: 28px 0 0;
+  text-align: center;
+}
+
+.pc-dev-toggle {
+  border: none;
+  background: transparent;
+  font-size: 0.72rem;
+  color: var(--eos-ink-faint);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.pc-dev-toggle:hover {
+  color: var(--eos-ink-muted);
+}
+
 @media (min-width: 1200px) {
   .pc-grid { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
 }
