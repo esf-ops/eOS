@@ -16,6 +16,7 @@ export function getProductCatalogDisplayImageCandidates(item: ProductCatalogItem
     if (url?.trim()) urls.add(url.trim());
   };
 
+  // Hero resolver order (e.g. Kansas hero.jpg → hero.png) — any candidate counts as catalog-ready.
   for (const url of getProductHeroImageCandidates(item)) add(url);
   add(item.imageUrl);
   for (const url of Object.values(item.finishImageUrls ?? {})) add(url);

@@ -127,6 +127,7 @@ function CatalogImage({
   hidden,
   onLoaded,
   onFailed,
+  onAllCandidatesFailed,
 }: {
   src?: string;
   srcCandidates?: string[];
@@ -135,7 +136,10 @@ function CatalogImage({
   loading?: "lazy" | "eager";
   hidden?: boolean;
   onLoaded: (url: string) => void;
-  onFailed: (url: string) => void;
+  /** Called when an individual candidate URL fails (may retry next candidate). */
+  onFailed?: (url: string) => void;
+  /** Called only after every candidate URL has failed. */
+  onAllCandidatesFailed?: () => void;
 }) {
   const candidates = useMemo(() => {
     const list = srcCandidates?.length ? srcCandidates : src ? [src] : [];
@@ -163,12 +167,13 @@ function CatalogImage({
       onLoad={() => onLoaded(currentSrc)}
       onError={() => {
         if (candidateIndex + 1 < candidates.length) {
-          onFailed(currentSrc);
+          onFailed?.(currentSrc);
           setCandidateIndex((i) => i + 1);
           return;
         }
         setExhausted(true);
-        onFailed(candidates[0] ?? currentSrc);
+        onFailed?.(candidates[0] ?? currentSrc);
+        onAllCandidatesFailed?.();
       }}
     />
   );
@@ -431,8 +436,8 @@ function ProductCatalogCard({ item, onOpen }: { item: ProductCatalogItem; onOpen
               alt={item.name}
               className="pc-card-img"
               loading="lazy"
-              onLoaded={() => {}}
-              onFailed={() => setShowPlaceholder(true)}
+              onLoaded={() => setShowPlaceholder(false)}
+              onAllCandidatesFailed={() => setShowPlaceholder(true)}
             />
           ) : (
             <div className="pc-card-placeholder" aria-hidden>
