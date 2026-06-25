@@ -10,6 +10,10 @@ import {
   isBlancoCatalogSinkId,
   isHeroFirstSinkPresentation,
 } from "./productCatalogBlancoSinkAssets";
+import {
+  heroOnlySinkHeroCandidates,
+  isHeroOnlyCatalogSinkId,
+} from "./productCatalogHeroOnlySinkAssets";
 
 export type ProductCatalogCategory = "sink" | "sink_accessory" | "faucet" | "specialty_add_on";
 
@@ -209,6 +213,9 @@ export function getProductHeroImageCandidates(item: ProductCatalogItem): string[
   if (isBlancoCatalogSinkId(item.id, item.category)) {
     return blancoSinkHeroCandidates(item.id);
   }
+  if (isHeroOnlyCatalogSinkId(item.id, item.category)) {
+    return heroOnlySinkHeroCandidates(item.id);
+  }
   const hero = productCatalogHeroImage(item);
   return hero ? [hero] : [];
 }
@@ -258,7 +265,9 @@ export function getCatalogNumbersForFinish(
 
 /** Default finish slug when opening the product modal. */
 export function defaultFinishKeyForItem(item: ProductCatalogItem): string | null {
-  if (isHeroFirstSinkPresentation(item.id)) return null;
+  if (isHeroFirstSinkPresentation(item.id) || isHeroOnlyCatalogSinkId(item.id, item.category)) {
+    return null;
+  }
 
   const preferred = item.defaultFinishKey?.trim();
   const options = getUniqueFinishOptions(item);

@@ -20,6 +20,7 @@ import {
   blancoSinkHeroCandidates,
   resolveBlancoSinkFolderAssets,
 } from "./productCatalogBlancoSinkAssets";
+import { resolveHeroOnlySinkFolderAssets } from "./productCatalogHeroOnlySinkAssets";
 import {
   finishKeyFromLabel,
   type ProductCatalogAssetStatus,
@@ -45,10 +46,6 @@ export type ProductCatalogAssetOverride = {
   variantImageUrls?: Record<string, string>;
   sourceNotes?: string;
 };
-
-function sinkBase(productId: string) {
-  return `/product-catalog/sinks/${productId}`;
-}
 
 function faucetBase(productId: string) {
   return `/product-catalog/faucets/${productId}`;
@@ -175,10 +172,6 @@ const PRODUCT_CATALOG_ASSET_OVERRIDES: ProductCatalogAssetOverride[] = [
   },
   {
     productId: "kansas-1512um18-2",
-    imageUrl: `${sinkBase("kansas-1512um18-2")}/hero.jpg`,
-    diagramUrl: `${sinkBase("kansas-1512um18-2")}/diagram.jpg`,
-    installedImageUrl: `${sinkBase("kansas-1512um18-2")}/installed.jpg`,
-    specSheetUrl: specSheetUrl("kansas-1512um18-2"),
     sourceNotes:
       "Source: KDC showroom PDF / Kansas Winsinks program references first; supplement with manufacturer cut sheets if available.",
   },
@@ -258,7 +251,9 @@ function computeAssetStatusFromUrls(item: Pick<
  * Override fields win when present; variant images merge by variant id.
  */
 export function mergeProductCatalogAssets(item: ProductCatalogItem): ProductCatalogItem {
-  const folderAssets = resolveBlancoSinkFolderAssets(item.id, item.category);
+  const folderAssets =
+    resolveBlancoSinkFolderAssets(item.id, item.category) ??
+    resolveHeroOnlySinkFolderAssets(item.id, item.category);
   const explicit = getProductCatalogAssetOverride(item.id);
   if (!folderAssets && !explicit) return item;
 
@@ -268,11 +263,19 @@ export function mergeProductCatalogAssets(item: ProductCatalogItem): ProductCata
     ...(folderAssets
       ? {
           imageUrl: folderAssets.imageUrl,
-          finishImageUrls: folderAssets.finishImageUrls,
-          defaultFinishKey: folderAssets.defaultFinishKey,
-          installedImageUrl: folderAssets.installedImageUrl,
-          installedGalleryUrls: folderAssets.installedGalleryUrls,
           specSheetUrl: folderAssets.specSheetUrl,
+          ...(folderAssets.finishImageUrls !== undefined
+            ? { finishImageUrls: folderAssets.finishImageUrls }
+            : {}),
+          ...(folderAssets.defaultFinishKey !== undefined
+            ? { defaultFinishKey: folderAssets.defaultFinishKey }
+            : {}),
+          ...(folderAssets.installedImageUrl !== undefined
+            ? { installedImageUrl: folderAssets.installedImageUrl }
+            : {}),
+          ...(folderAssets.installedGalleryUrls !== undefined
+            ? { installedGalleryUrls: folderAssets.installedGalleryUrls }
+            : {}),
         }
       : {}),
   };
@@ -318,3 +321,9 @@ export {
   blancoSinkHeroUrl,
   resolveBlancoSinkFolderAssets,
 } from "./productCatalogBlancoSinkAssets";
+export {
+  heroOnlySinkHeroCandidates,
+  heroOnlySinkHeroUrl,
+  isHeroOnlyCatalogSinkId,
+  resolveHeroOnlySinkFolderAssets,
+} from "./productCatalogHeroOnlySinkAssets";

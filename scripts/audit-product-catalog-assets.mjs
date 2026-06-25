@@ -72,7 +72,7 @@ const RECOMMENDED_SOURCE = {
   "faucet-moen-7864srs":
     "Official Moen 7864SRS Sleek product page and spec docs.",
   "kansas-1512um18-2":
-    "KDC showroom PDF / pdf-source-map and Winsinks program first; official vendor cut sheet if found.",
+    "Kansas Sinks 1512UM18 — hero under kansas-1512um18-2/ (hero.jpg).",
 };
 
 function expandTemplateHelpers(text) {
@@ -128,6 +128,21 @@ const INTEOS_WORKSTATION_SINK_ID = "blanco-inteos-33-workstation";
 
 function usesSinkFolderResolver(productId) {
   return productId.startsWith("blanco-blanco-") || productId === INTEOS_WORKSTATION_SINK_ID;
+}
+
+function isHeroOnlyCatalogSinkId(productId) {
+  return productId.startsWith("kansas-");
+}
+
+/** Mirror resolveHeroOnlySinkFolderAssets() for Kansas hero-only sinks. */
+function synthesizeHeroOnlySinkFolderAssets(productId) {
+  if (!isHeroOnlyCatalogSinkId(productId)) return [];
+  const base = `/product-catalog/sinks/${productId}`;
+  return [
+    { assetType: "hero", url: `${base}/hero.jpg` },
+    { assetType: "hero_fallback", url: `${base}/hero.png` },
+    { assetType: "spec_sheet", url: `/product-catalog/spec-sheets/${productId}/${productId}.pdf` },
+  ];
 }
 
 /** Mirror resolveBlancoSinkFolderAssets() for audit rows when overrides are sourceNotes-only. */
@@ -245,6 +260,18 @@ function parseOverridesFromTs(content) {
           variantId: "coal-black",
           url: "",
         });
+      }
+    }
+  }
+
+  for (const override of overrides) {
+    if (!isHeroOnlyCatalogSinkId(override.productId)) continue;
+    const synthesized = synthesizeHeroOnlySinkFolderAssets(override.productId);
+    const existingUrls = new Set((override.assets || []).map((a) => a.url));
+    for (const asset of synthesized) {
+      if (!existingUrls.has(asset.url)) {
+        (override.assets ||= []).push(asset);
+        existingUrls.add(asset.url);
       }
     }
   }
