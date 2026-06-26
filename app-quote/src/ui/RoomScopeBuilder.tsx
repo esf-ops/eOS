@@ -51,6 +51,22 @@ import {
   STANDARD_BACKSPLASH_HEIGHT_IN,
   STANDARD_COUNTER_DEPTH_IN
 } from "../lib/measurementEngine";
+import {
+  applyTakeoffPiecePatch,
+  convertImportedPieceToManual,
+  createManualPieceAfterImport,
+  duplicateTakeoffPiece,
+  excludeImportedPieceFromQuote,
+  resolveTakeoffImportState,
+  restoreTakeoffOriginalDimensions,
+  roomTakeoffVerificationBadge,
+  splitTakeoffPiece,
+  takeoffImportStateLabel,
+} from "../lib/takeoffImportMeasurements";
+import type { TakeoffImportRoomVerification } from "../lib/quoteTypes";
+import {
+  ensureTakeoffOriginalDimensions,
+} from "../lib/takeoffImportMeasurements";
 
 type Props = {
   rooms: RoomDraft[];
@@ -72,6 +88,15 @@ type Props = {
   showMaterialProgram?: boolean;
   /** Show AI Takeoff import source badges on imported rooms/pieces. */
   showTakeoffImportBadges?: boolean;
+  /** Enable takeoff piece actions + room verification (Internal Estimate). */
+  enableTakeoffImportEditor?: boolean;
+  /** Optional quote-level takeoff context for traceability drawer. */
+  takeoffTraceabilityContext?: {
+    sourcePlanName?: string | null;
+    approvedBy?: string | null;
+    approvedAt?: string | null;
+    suggestedAddOns?: Array<{ type: string; label: string; quantity?: number }>;
+  };
 };
 
 function updateRoom(rooms: RoomDraft[], id: string, patch: Partial<RoomDraft>): RoomDraft[] {
@@ -95,17 +120,34 @@ function takeoffReviewStatusLabel(status?: string): string {
 function TakeoffImportBadge({
   source,
   compact = false,
+  piece,
 }: {
   source?: RoomDraft["takeoffImportSource"];
   compact?: boolean;
+  piece?: GuidedPiece;
 }) {
-  if (!source?.importedFromTakeoff) return null;
-  const page = source.sourcePage ?? source.sourcePages?.[0];
+  if (!source?.importedFromTakeoff && !piece?.takeoffImportSource?.importedFromTakeoff) return null;
+  const src = piece?.takeoffImportSource ?? source;
+  if (!src?.importedFromTakeoff) return null;
+  const page = src.sourcePage ?? src.sourcePages?.[0];
+  const importState = piece ? resolveTakeoffImportState(piece) : src.importState ?? "imported_unmodified";
+  const stateClass =
+    importState === "imported_edited"
+      ? " takeoff-import-badge--edited"
+      : importState === "imported_excluded"
+        ? " takeoff-import-badge--excluded"
+        : importState === "manually_added_after_import"
+          ? " takeoff-import-badge--manual"
+          : "";
   return (
-    <span className={`takeoff-import-badge${compact ? " takeoff-import-badge--compact" : ""}`} title="Imported from reviewed AI Takeoff">
-      AI Takeoff
+    <span
+      className={`takeoff-import-badge${compact ? " takeoff-import-badge--compact" : ""}${stateClass}`}
+      title="Imported from reviewed AI Takeoff"
+    >
+      {takeoffImportStateLabel(importState)}
       {page != null ? ` · p.${page}` : ""}
-      {!compact && source.reviewStatus ? ` · ${takeoffReviewStatusLabel(source.reviewStatus)}` : ""}
+      {!compact && importState === "imported_edited" ? " · edited" : null}
+      {!compact && src.reviewStatus && importState === "imported_unmodified" ? ` · ${takeoffReviewStatusLabel(src.reviewStatus)}` : null}
     </span>
   );
 }
@@ -231,8 +273,11 @@ export default function RoomScopeBuilder({
   enableDestructiveGuards = false,
   materialProgramDefault = "elite_100",
   showMaterialProgram = false,
-  showTakeoffImportBadges = false
+  showTakeoffImportBadges = false,
+  enableTakeoffImportEditor = false,
+  takeoffTraceabilityContext,
 }: Props) {
+  const [takeoffTraceOpen, setTakeoffTraceOpen] = React.useState<Record<string, boolean>>({});
   const [colorQ, setColorQ] = React.useState<Record<string, string>>({});
   const [groupFilter, setGroupFilter] = React.useState<Record<string, string>>({});
   const [pieceOverridesOpen, setPieceOverridesOpen] = React.useState<Record<string, boolean>>({});
@@ -282,28 +327,114 @@ export default function RoomScopeBuilder({
         const arr = [...r.fhbPieces];
         const idx = arr.findIndex((p) => p.id === pieceId);
         if (idx < 0) return r;
-        arr[idx] = { ...arr[idx], ...patch };
+        const merged = enableTakeoffImportEditor && arr[idx].takeoffImportSource?.importedFromTakeoff
+          ? applyTakeoffPiecePatch(arr[idx], patch)
+          : { ...arr[idx], ...patch };
+        arr[idx] = merged;
         return { ...r, fhbPieces: arr };
       }
       const norm = normalizeGuidedShapeRoom(r);
       const groups = (norm.guidedShapeGroups || []).map((g) => ({
         ...g,
-        pieces: g.pieces.map((p) => (p.id === pieceId ? { ...p, ...patch } : p))
+        pieces: g.pieces.map((p) => {
+          if (p.id !== pieceId) return p;
+          return enableTakeoffImportEditor && p.takeoffImportSource?.importedFromTakeoff
+            ? applyTakeoffPiecePatch(p, patch)
+            : { ...p, ...patch };
+        }),
       }));
       return normalizeGuidedShapeRoom({ ...norm, guidedShapeGroups: groups });
     });
     onRoomsChange(next);
   };
 
+  const updateRoomVerification = (roomId: string, patch: Partial<TakeoffImportRoomVerification>) => {
+    onRoomsChange(
+      rooms.map((r) =>
+        r.id === roomId
+          ? {
+              ...r,
+              takeoffImportVerification: { ...(r.takeoffImportVerification ?? {}), ...patch },
+            }
+          : r
+      )
+    );
+  };
+
+  const replaceGuidedPiece = (roomId: string, pieceId: string, replacement: GuidedPiece | GuidedPiece[]) => {
+    onRoomsChange(
+      rooms.map((r) => {
+        if (r.id !== roomId) return r;
+        const norm = normalizeGuidedShapeRoom(r);
+        const groups = (norm.guidedShapeGroups || []).map((g) => {
+          const idx = g.pieces.findIndex((p) => p.id === pieceId);
+          if (idx < 0) return g;
+          const nextPieces = Array.isArray(replacement)
+            ? [...g.pieces.slice(0, idx), ...replacement, ...g.pieces.slice(idx + 1)]
+            : g.pieces.map((p) => (p.id === pieceId ? replacement : p));
+          return { ...g, pieces: nextPieces };
+        });
+        return normalizeGuidedShapeRoom({ ...norm, guidedShapeGroups: groups });
+      })
+    );
+  };
+
+  const runTakeoffPieceAction = (
+    roomId: string,
+    pieceId: string,
+    action: "duplicate" | "split" | "exclude" | "restore" | "manual"
+  ) => {
+    const room = rooms.find((r) => r.id === roomId);
+    if (!room) return;
+    const norm = normalizeGuidedShapeRoom(room);
+    const piece = norm.guidedPieces.find((p) => p.id === pieceId);
+    if (!piece?.takeoffImportSource?.importedFromTakeoff) return;
+    if (action === "duplicate") {
+      const copy = duplicateTakeoffPiece(piece, newId());
+      onRoomsChange(
+        rooms.map((r) => {
+          if (r.id !== roomId) return r;
+          const n = normalizeGuidedShapeRoom(r);
+          const groups = (n.guidedShapeGroups || []).map((g) =>
+            g.pieces.some((p) => p.id === pieceId) ? { ...g, pieces: [...g.pieces, copy] } : g
+          );
+          return normalizeGuidedShapeRoom({ ...n, guidedShapeGroups: groups });
+        })
+      );
+      return;
+    }
+    if (action === "split") {
+      const result = splitTakeoffPiece(piece, newId());
+      if (!result) return;
+      replaceGuidedPiece(roomId, pieceId, [result.original, result.split]);
+      return;
+    }
+    if (action === "exclude") {
+      replaceGuidedPiece(roomId, pieceId, excludeImportedPieceFromQuote(piece));
+      return;
+    }
+    if (action === "restore") {
+      replaceGuidedPiece(roomId, pieceId, restoreTakeoffOriginalDimensions(piece));
+      return;
+    }
+    if (action === "manual") {
+      replaceGuidedPiece(roomId, pieceId, convertImportedPieceToManual(piece));
+    }
+  };
+
   const addPiece = (roomId: string, list: "guided" | "fhb", groupId?: string) => {
-    const piece: GuidedPiece = {
-      id: newId(),
-      pieceType: list === "fhb" ? "fhb" : "counter",
-      name: list === "fhb" ? "Full height section" : "Counter section",
-      lengthIn: 0,
-      depthIn: list === "fhb" ? 18 : STANDARD_COUNTER_DEPTH_IN,
-      shape: "rect"
-    };
+    const room = rooms.find((r) => r.id === roomId);
+    const piece: GuidedPiece = createManualPieceAfterImport(
+      {
+        id: newId(),
+        pieceType: list === "fhb" ? "fhb" : "counter",
+        name: list === "fhb" ? "Full height section" : "Counter section",
+        lengthIn: 0,
+        depthIn: list === "fhb" ? 18 : STANDARD_COUNTER_DEPTH_IN,
+        shape: "rect",
+      },
+      Boolean(enableTakeoffImportEditor && room?.takeoffImportSource?.importedFromTakeoff)
+    );
     onRoomsChange(
       rooms.map((r) => {
         if (r.id !== roomId) return r;
@@ -454,6 +585,15 @@ export default function RoomScopeBuilder({
               <div className="room-card-head-title-wrap">
                 <h3 className="room-card-title">Room / Area</h3>
                 {showTakeoffImportBadges ? <TakeoffImportBadge source={room.takeoffImportSource} /> : null}
+                {enableTakeoffImportEditor && room.takeoffImportSource?.importedFromTakeoff ? (
+                  <span className={`ie-takeoff-room-badge ie-takeoff-room-badge--${roomTakeoffVerificationBadge(room)}`}>
+                    {roomTakeoffVerificationBadge(room) === "complete"
+                      ? "Verified"
+                      : roomTakeoffVerificationBadge(room) === "partial"
+                        ? "Review in progress"
+                        : "Needs review"}
+                  </span>
+                ) : null}
               </div>
               {rooms.length > 1 ? (
                 <button type="button" className="btn secondary btn-danger-quiet" onClick={() => removeRoom(room.id)}>
@@ -517,6 +657,84 @@ export default function RoomScopeBuilder({
                 </select>
               </RoomField>
             </div>
+
+            {enableTakeoffImportEditor && room.takeoffImportSource?.importedFromTakeoff ? (
+              <div className="ie-takeoff-room-verify card-lite">
+                <p className="ie-takeoff-room-verify-title">Imported room verification</p>
+                <div className="ie-takeoff-room-verify-toggles">
+                  <label className="check">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(room.takeoffImportVerification?.measurementsVerified)}
+                      onChange={(e) => updateRoomVerification(room.id, { measurementsVerified: e.target.checked })}
+                    />
+                    Measurements verified
+                  </label>
+                  <label className="check">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(room.takeoffImportVerification?.addonsReviewed)}
+                      onChange={(e) => updateRoomVerification(room.id, { addonsReviewed: e.target.checked })}
+                    />
+                    Add-ons reviewed
+                  </label>
+                  <label className="check">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(room.takeoffImportVerification?.notesReviewed)}
+                      onChange={(e) => updateRoomVerification(room.id, { notesReviewed: e.target.checked })}
+                    />
+                    Notes reviewed
+                  </label>
+                </div>
+                <label className="ie-takeoff-room-verify-note">
+                  Estimator note (optional)
+                  <textarea
+                    rows={2}
+                    value={room.takeoffImportVerification?.estimatorNote ?? ""}
+                    onChange={(e) => updateRoomVerification(room.id, { estimatorNote: e.target.value })}
+                    placeholder="Field verification notes for this imported room"
+                  />
+                </label>
+                <details
+                  className="ie-takeoff-trace"
+                  open={Boolean(takeoffTraceOpen[room.id])}
+                  onToggle={(e) =>
+                    setTakeoffTraceOpen((prev) => ({ ...prev, [room.id]: (e.target as HTMLDetailsElement).open }))
+                  }
+                >
+                  <summary className="ie-takeoff-trace-toggle">Source traceability</summary>
+                  <dl className="ie-takeoff-trace-grid">
+                    <div><dt>Takeoff job</dt><dd>{room.takeoffImportSource?.takeoffJobId ?? "—"}</dd></div>
+                    <div><dt>Plan</dt><dd>{room.takeoffImportSource?.sourcePlanName ?? takeoffTraceabilityContext?.sourcePlanName ?? "—"}</dd></div>
+                    <div><dt>Approved by</dt><dd>{room.takeoffImportSource?.approvedBy ?? takeoffTraceabilityContext?.approvedBy ?? "—"}</dd></div>
+                  </dl>
+                  <ul className="ie-takeoff-trace-pieces muted small">
+                    {normalizeGuidedShapeRoom(room).guidedPieces
+                      .filter((p) => p.takeoffImportSource?.importedFromTakeoff)
+                      .map((p) => {
+                        const orig = ensureTakeoffOriginalDimensions(p);
+                        return (
+                          <li key={p.id}>
+                            <strong>{p.name}</strong>
+                            {p.takeoffImportSource?.sourcePage != null ? ` · p.${p.takeoffImportSource.sourcePage}` : ""}
+                            {" · imported "}
+                            {orig.lengthIn}×{orig.depthIn}″
+                            {" · current "}
+                            {p.lengthIn}×{p.depthIn}″
+                            {p.takeoffImportSource?.importState === "imported_excluded" ? " · excluded" : ""}
+                          </li>
+                        );
+                      })}
+                  </ul>
+                  {(takeoffTraceabilityContext?.suggestedAddOns?.length ?? 0) > 0 ? (
+                    <p className="muted small ie-takeoff-trace-addons">
+                      Suggested add-ons: {takeoffTraceabilityContext!.suggestedAddOns!.map((a) => a.label).join(", ")}
+                    </p>
+                  ) : null}
+                </details>
+              </div>
+            ) : null}
 
             {isVanityRoomType(room.roomType) ? (
               <div className="room-vanity-controls-bar">
@@ -1149,7 +1367,16 @@ export default function RoomScopeBuilder({
                               <div key={p.id} className="piece-row grid3 ie-piece-row-simple">
                                 {showTakeoffImportBadges && p.takeoffImportSource?.importedFromTakeoff ? (
                                   <div className="piece-takeoff-badge-row">
-                                    <TakeoffImportBadge source={p.takeoffImportSource} compact />
+                                    <TakeoffImportBadge source={p.takeoffImportSource} piece={p} compact />
+                                  </div>
+                                ) : null}
+                                {enableTakeoffImportEditor && p.takeoffImportSource?.importedFromTakeoff ? (
+                                  <div className="piece-takeoff-actions">
+                                    <button type="button" className="btn secondary btn-sm" onClick={() => runTakeoffPieceAction(room.id, p.id, "duplicate")}>Duplicate</button>
+                                    <button type="button" className="btn secondary btn-sm" onClick={() => runTakeoffPieceAction(room.id, p.id, "split")}>Split</button>
+                                    <button type="button" className="btn secondary btn-sm" onClick={() => runTakeoffPieceAction(room.id, p.id, "exclude")}>Exclude</button>
+                                    <button type="button" className="btn secondary btn-sm" onClick={() => runTakeoffPieceAction(room.id, p.id, "restore")}>Restore imported</button>
+                                    <button type="button" className="btn secondary btn-sm" onClick={() => runTakeoffPieceAction(room.id, p.id, "manual")}>Convert to manual</button>
                                   </div>
                                 ) : null}
                                 <label>

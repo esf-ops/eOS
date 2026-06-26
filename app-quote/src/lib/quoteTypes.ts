@@ -15,6 +15,18 @@ export type PieceShape = "rect" | "tri";
 export type GuidedPieceType = "counter" | "splash" | "fhb";
 
 /** Metadata preserved when a room/piece was imported from reviewed AI Takeoff. */
+export type TakeoffImportState =
+  | "imported_unmodified"
+  | "imported_edited"
+  | "imported_excluded"
+  | "manually_added_after_import";
+
+export type TakeoffImportOriginalDimensions = {
+  lengthIn: number;
+  depthIn: number;
+  shape?: PieceShape;
+};
+
 export type TakeoffImportSourceMeta = {
   importedFromTakeoff: boolean;
   takeoffJobId?: string | null;
@@ -22,6 +34,22 @@ export type TakeoffImportSourceMeta = {
   sourcePage?: number | null;
   sourcePages?: number[];
   reviewStatus?: "approved" | "edited" | "manual_added" | "reviewed";
+  /** v6.2 — edit tracking for imported measurements. */
+  importState?: TakeoffImportState;
+  originalDimensions?: TakeoffImportOriginalDimensions;
+  excludedFromQuote?: boolean;
+  sourcePlanName?: string | null;
+  approvedBy?: string | null;
+  approvedAt?: string | null;
+  sourceNotes?: string | null;
+};
+
+/** Per-room estimator verification after AI Takeoff import (v6.2). */
+export type TakeoffImportRoomVerification = {
+  measurementsVerified?: boolean;
+  addonsReviewed?: boolean;
+  notesReviewed?: boolean;
+  estimatorNote?: string;
 };
 
 export type GuidedPiece = {
@@ -186,6 +214,8 @@ export type RoomDraft = {
   };
   /** Present when room originated from reviewed AI Takeoff import. */
   takeoffImportSource?: TakeoffImportSourceMeta;
+  /** Estimator verification toggles for imported rooms (v6.2). */
+  takeoffImportVerification?: TakeoffImportRoomVerification;
 };
 
 export type MeasuredRoom = {

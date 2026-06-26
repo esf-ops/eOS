@@ -1404,3 +1404,12 @@
 | **Decision** | Internal Estimate takeoff imports expose a **receipt panel** (plan, approver, snapshot version, CT/BS/FHBS totals, read-only snapshot drawer), **source badges** on imported rooms/pieces, a **completion checklist** (account, project, branch/sales, pricing mode, material per room, add-ons/notes ack, measurements), and **draft-only detach** via `POST /api/internal-quotes/:id/detach-takeoff-import` that removes imported rooms while preserving `takeoff_import.auditEvents` and **not** deleting the source takeoff job. Save/calculate persist `internal_ui.takeoff_import` and emit audit events: `takeoff_import_started/succeeded/failed`, `takeoff_import_detached`, `quote_calculated_from_takeoff_import`, `quote_saved_from_takeoff_import`. No pricing math changes; no auto material/color selection. |
 | **Impacted files** | `internalQuoteTakeoffDetach.mjs`, `internalQuoteTakeoffImportChecklist.mjs`, `internalQuoteTakeoffAudit.mjs`, `internalQuotesApi.js`, `TakeoffImportReceiptPanel.tsx`, `TakeoffImportCompletionChecklist.tsx`, `RoomScopeBuilder.tsx`, `InternalEstimateApp.tsx`, tests, this entry. |
 | **Revisit trigger** | Server-side enforcement of checklist before save; takeoff re-import after detach; cross-head deep links without `VITE_AI_TAKEOFF_HEAD_URL`. |
+
+### 95. AI Takeoff import — editable measurements with source traceability (v6.2, 2026-06-26)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-06-26 |
+| **Decision** | Imported AI Takeoff measurements remain **fully editable** as normal Internal Estimate guided shapes. **`takeoffImportSource`** on rooms/pieces preserves job/snapshot/page metadata, **`originalDimensions`**, and **`importState`** (`imported_unmodified`, `imported_edited`, `imported_excluded`, `manually_added_after_import`). Estimators get imported-vs-current SF deltas, per-room verification toggles, piece actions (duplicate/split/exclude/restore/convert-to-manual), and traceability UI — **without** changing pricing math or auto-assigning material/color/pricing. |
+| **Impacted files** | `takeoffImportMeasurements.mjs/ts`, `takeoffImportPayload.mjs`, `RoomScopeBuilder.tsx`, `TakeoffMeasurementComparisonPanel.tsx`, `prototypeQuoteMath.ts`, checklist modules, tests, this entry. |
+| **Revisit trigger** | Server-side block when delta exceeds threshold; bi-directional sync of edited dims back to takeoff job. |

@@ -6,6 +6,8 @@
  * @module internalQuoteTakeoffImportChecklist
  */
 
+import { roomTakeoffVerificationComplete } from "../takeoff/takeoffImportMeasurements.mjs";
+
 /**
  * @param {{
  *   accountName?: string,
@@ -78,6 +80,11 @@ export function evaluateTakeoffImportCompletionChecklist(params) {
   const notesComplete = notesReviewed || Boolean(String(customerFacingNotes).trim());
   const hasMeasurements = totalSf > 0;
 
+  const importedRoomsForVerify = roomDrafts.filter((r) => r?.takeoffImportSource?.importedFromTakeoff);
+  const roomsVerified =
+    importedRoomsForVerify.length === 0 ||
+    importedRoomsForVerify.every((r) => roomTakeoffVerificationComplete(r));
+
   /** @type {Array<{ key: string, label: string, complete: boolean, detail?: string }>} */
   const items = [
     { key: "account", label: "Account / contact", complete: hasAccount },
@@ -97,6 +104,15 @@ export function evaluateTakeoffImportCompletionChecklist(params) {
       detail: suggestedAddOnCount > 0 ? `${suggestedAddOnCount} suggested from takeoff` : undefined,
     },
     { key: "notes", label: "Customer notes reviewed", complete: notesComplete },
+    {
+      key: "room_verification",
+      label: "Imported rooms verified",
+      complete: roomsVerified,
+      detail:
+        importedRoomsForVerify.length > 0
+          ? `${importedRoomsForVerify.filter((r) => roomTakeoffVerificationComplete(r)).length}/${importedRoomsForVerify.length} rooms`
+          : undefined,
+    },
     { key: "measurements", label: "Measurements present", complete: hasMeasurements },
   ];
 

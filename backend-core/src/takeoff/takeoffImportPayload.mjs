@@ -16,6 +16,7 @@ import {
   evaluateTakeoffApprovalGate,
 } from "./takeoffApprovalGate.mjs";
 import { emptyReviewState, normalizeReviewState } from "./takeoffReviewStatus.mjs";
+import { buildTakeoffSourceMetaForImport } from "./takeoffImportMeasurements.mjs";
 
 export const TAKEOFF_IMPORT_SCHEMA_VERSION = "takeoff_import_v1";
 
@@ -275,14 +276,19 @@ export function takeoffImportPayloadToRoomDrafts(payload) {
 
   for (const room of payload.rooms ?? []) {
     const roomSourcePages = room.sourcePages ?? [];
-    const roomSource = {
-      importedFromTakeoff: true,
+    const roomSource = buildTakeoffSourceMetaForImport({
       takeoffJobId: jobId,
       takeoffSnapshotId: snapshotId,
       sourcePages: roomSourcePages,
-      sourcePage: roomSourcePages[0] ?? null,
+      sourcePlanName: payload.sourceFileName ?? null,
+      approvedBy: payload.approvedBy ?? null,
+      approvedAt: payload.approvedAt ?? null,
+      lengthIn: 0,
+      depthIn: 0,
       reviewStatus: "approved",
-    };
+    });
+    delete roomSource.originalDimensions;
+    roomSource.importState = "imported_unmodified";
 
     const groups = room.guidedShapeGroups ?? [];
     const pieceMetaByLabel = new Map(
@@ -303,20 +309,28 @@ export function takeoffImportPayloadToRoomDrafts(payload) {
         backsplashMode: g.backsplashMode ?? "include",
         pieces: (g.pieces ?? []).map((p) => {
           const meta = pieceMetaByLabel.get(String(p.label));
+          const lengthIn = p.lengthIn;
+          const depthIn = p.depthIn;
           return {
             id: `p-${p.label}`,
             name: p.label,
             pieceType: p.pieceType,
-            lengthIn: p.lengthIn,
-            depthIn: p.depthIn,
+            lengthIn,
+            depthIn,
             shape: p.shape ?? "rect",
-            takeoffImportSource: {
-              importedFromTakeoff: true,
+            takeoffImportSource: buildTakeoffSourceMetaForImport({
               takeoffJobId: jobId,
               takeoffSnapshotId: snapshotId,
+              sourcePages: roomSourcePages,
+              sourcePlanName: payload.sourceFileName ?? null,
+              approvedBy: payload.approvedBy ?? null,
+              approvedAt: payload.approvedAt ?? null,
+              lengthIn,
+              depthIn,
+              shape: p.shape ?? "rect",
               sourcePage: meta?.sourcePage ?? roomSourcePages[0] ?? null,
               reviewStatus: meta?.reviewStatus ?? "approved",
-            },
+            }),
           };
         }),
       })),

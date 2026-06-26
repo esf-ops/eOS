@@ -2456,7 +2456,7 @@ function hydrateGuidedPieceFromRow(x: Record<string, unknown>): GuidedPiece {
   const pieceType: GuidedPiece["pieceType"] = tRaw === "splash" ? "splash" : tRaw === "fhb" ? "fhb" : "counter";
   const sh = String(x.shape || "rect").toLowerCase() === "tri" ? "tri" : "rect";
   return {
-    id: newId(),
+    id: String(x.id || newId()),
     pieceType,
     name: String(x.name || "Piece"),
     lengthIn: Number(x.lengthIn ?? x.l ?? 0) || 0,
@@ -2535,6 +2535,15 @@ function applyRoomPersistenceFields(base: RoomDraft, r: Record<string, unknown>)
   if (r.upgradedEdgeLf != null) base.upgradedEdgeLf = Math.max(0, Number(r.upgradedEdgeLf) || 0);
   if (r.takeoffImportSource && typeof r.takeoffImportSource === "object") {
     base.takeoffImportSource = r.takeoffImportSource as RoomDraft["takeoffImportSource"];
+  }
+  if (r.takeoffImportVerification && typeof r.takeoffImportVerification === "object") {
+    const v = r.takeoffImportVerification as Record<string, unknown>;
+    base.takeoffImportVerification = {
+      measurementsVerified: Boolean(v.measurementsVerified),
+      addonsReviewed: Boolean(v.addonsReviewed),
+      notesReviewed: Boolean(v.notesReviewed),
+      estimatorNote: v.estimatorNote != null ? String(v.estimatorNote) : undefined,
+    };
   }
   const v = r.vanity;
   if (v && typeof v === "object") {

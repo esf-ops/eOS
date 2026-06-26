@@ -8921,3 +8921,132 @@ body {
   margin-bottom: -0.25rem;
 }
 
+.ie-takeoff-compare {
+  margin: 0 0 1rem;
+  padding: 1rem 1.15rem;
+}
+.ie-takeoff-compare-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+.ie-takeoff-compare-warn {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #b45309;
+}
+.ie-takeoff-compare-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+.ie-takeoff-compare-table th,
+.ie-takeoff-compare-table td {
+  padding: 0.35rem 0.5rem;
+  text-align: left;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+.ie-takeoff-delta-changed {
+  font-weight: 650;
+  color: #b45309;
+}
+.ie-takeoff-room-verify {
+  margin: 0 0 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px dashed rgba(46, 105, 184, 0.25);
+  border-radius: 8px;
+  background: rgba(245, 249, 255, 0.6);
+}
+.ie-takeoff-room-verify-title {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--eos-muted, #667);
+}
+.ie-takeoff-room-verify-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  margin-bottom: 0.5rem;
+}
+.ie-takeoff-room-verify-note textarea {
+  width: 100%;
+  margin-top: 0.25rem;
+}
+.ie-takeoff-room-badge {
+  font-size: 0.68rem;
+  font-weight: 650;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.ie-takeoff-room-badge--complete {
+  color: #1a7f37;
+  background: rgba(26, 127, 55, 0.1);
+  border: 1px solid rgba(26, 127, 55, 0.25);
+}
+.ie-takeoff-room-badge--partial {
+  color: #b45309;
+  background: rgba(180, 83, 9, 0.1);
+  border: 1px solid rgba(180, 83, 9, 0.25);
+}
+.ie-takeoff-room-badge--pending {
+  color: #1e4a8a;
+  background: rgba(46, 105, 184, 0.1);
+  border: 1px solid rgba(46, 105, 184, 0.22);
+}
+.ie-main .takeoff-import-badge--edited {
+  color: #b45309;
+  background: rgba(180, 83, 9, 0.12);
+  border-color: rgba(180, 83, 9, 0.28);
+}
+.ie-main .takeoff-import-badge--excluded {
+  color: #666;
+  background: rgba(120, 120, 120, 0.12);
+  border-color: rgba(120, 120, 120, 0.25);
+  text-decoration: line-through;
+}
+.ie-main .takeoff-import-badge--manual {
+  color: #5b21b6;
+  background: rgba(91, 33, 182, 0.1);
+  border-color: rgba(91, 33, 182, 0.22);
+}
+.ie-main .piece-takeoff-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.25rem;
+}
+.ie-takeoff-trace {
+  margin-top: 0.75rem;
+}
+.ie-takeoff-trace-toggle {
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.ie-takeoff-trace-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: 0.35rem 0.75rem;
+  margin: 0.5rem 0;
+  font-size: 0.8rem;
+}
+.ie-takeoff-trace-grid dt {
+  margin: 0;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  color: var(--eos-muted, #667);
+}
+.ie-takeoff-trace-grid dd { margin: 0; }
+.ie-takeoff-trace-pieces {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+

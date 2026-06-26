@@ -15,7 +15,7 @@
 | **Storage** | **Verified live:** private bucket `eliteos-quote-files`; bytes never returned to browser; downloads via signed URLs only. |
 | **RLS** | Enabled on takeoff/file tables; **no RLS policies yet**. Current architecture: backend **service role** + Express auth/head gates (not browser-direct Supabase reads). |
 | **AI extraction** | Review-only — `review_status` stays `needs_review` after AI draft; server recomputes all sf; no quote mutation. |
-| **Import** | **Enabled (approved snapshots only).** `buildTakeoffImportPayload` → `POST /api/internal-quotes/import-from-takeoff` creates Internal Estimate **draft** with preloaded rooms/shapes. Raw AI output never imports. Estimator completes job info + materials before save. **v6.1:** IE shows import receipt, completion checklist, source badges, draft-only detach (`POST /api/internal-quotes/:id/detach-takeoff-import`). |
+| **Import** | **Enabled (approved snapshots only).** … **v6.1:** IE receipt, checklist, badges, detach. **v6.2:** editable imported measurements with `originalDimensions` + `importState`, imported-vs-current delta panel, per-room verification, piece actions (duplicate/split/exclude/restore/convert-to-manual). |
 
 **Shipped APIs (org from server auth context only):**
 
@@ -38,7 +38,7 @@
 - **Validation fix panel** — one-click fixes for cutout-like labels misplaced in `area.exclusions[]` (move to cutouts/notes or remove)
 
 - **Import readiness panel** — approval blockers, room completeness checklist, import preview with IE required fields
-- **Internal Estimate import** — enabled when `approved_for_import`; opens IE draft with takeoff receipt, checklist, and room/piece source badges (v6.1)
+- **Internal Estimate import** — enabled when `approved_for_import`; opens IE draft with takeoff receipt, checklist, measurement comparison, editable imported rooms with source traceability (v6.2)
 
 **Future phases (not started):** page/PDF preview hardening, async/page progress artifacts, auto material/color suggestions from takeoff notes.
 

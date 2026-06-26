@@ -4,6 +4,7 @@
  */
 
 import type { RoomDraft } from "@quote-lib/quoteTypes";
+import { roomTakeoffVerificationComplete } from "@quote-lib/takeoffImportMeasurements";
 
 export interface TakeoffImportChecklistItem {
   key: string;
@@ -89,6 +90,11 @@ export function evaluateTakeoffImportCompletionChecklist(params: {
   const notesComplete = notesReviewed || Boolean(String(customerFacingNotes).trim());
   const hasMeasurements = totalSf > 0;
 
+  const importedRoomsForVerify = roomDrafts.filter((r) => r?.takeoffImportSource?.importedFromTakeoff);
+  const roomsVerified =
+    importedRoomsForVerify.length === 0 ||
+    importedRoomsForVerify.every((r) => roomTakeoffVerificationComplete(r));
+
   const items: TakeoffImportChecklistItem[] = [
     { key: "account", label: "Account / contact", complete: hasAccount },
     { key: "project", label: "Project info", complete: hasProject },
@@ -107,6 +113,15 @@ export function evaluateTakeoffImportCompletionChecklist(params: {
       detail: suggestedAddOnCount > 0 ? `${suggestedAddOnCount} suggested from takeoff` : undefined,
     },
     { key: "notes", label: "Customer notes reviewed", complete: notesComplete },
+    {
+      key: "room_verification",
+      label: "Imported rooms verified",
+      complete: roomsVerified,
+      detail:
+        importedRoomsForVerify.length > 0
+          ? `${importedRoomsForVerify.filter((r) => roomTakeoffVerificationComplete(r)).length}/${importedRoomsForVerify.length} rooms`
+          : undefined,
+    },
     { key: "measurements", label: "Measurements present", complete: hasMeasurements },
   ];
 

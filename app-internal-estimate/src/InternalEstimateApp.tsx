@@ -43,6 +43,10 @@ import TakeoffImportReceiptPanel, {
   type TakeoffImportReceiptMeta,
 } from "./components/internal-estimate/TakeoffImportReceiptPanel";
 import TakeoffImportCompletionChecklist from "./components/internal-estimate/TakeoffImportCompletionChecklist";
+import TakeoffMeasurementComparisonPanel from "./components/internal-estimate/TakeoffMeasurementComparisonPanel";
+import {
+  computeTakeoffMeasurementDeltas,
+} from "@quote-lib/takeoffImportMeasurements";
 import {
   evaluateTakeoffImportCompletionChecklist,
   isActiveTakeoffImport,
@@ -969,6 +973,11 @@ export default function InternalEstimateApp() {
     takeoffNotesReviewed,
     customerFacingNotes,
   ]);
+
+  const takeoffMeasurementDeltas = useMemo(() => {
+    if (!takeoffImportMeta || !isActiveTakeoffImport(takeoffImportMeta)) return null;
+    return computeTakeoffMeasurementDeltas(roomDrafts);
+  }, [takeoffImportMeta, roomDrafts]);
 
   const handleDetachTakeoffImport = useCallback(async () => {
     if (!urlQuoteId || !sessionToken) return;
@@ -2721,6 +2730,9 @@ export default function InternalEstimateApp() {
             detachBusy={takeoffDetachBusy}
             detachError={takeoffDetachError}
           />
+          {takeoffMeasurementDeltas ? (
+            <TakeoffMeasurementComparisonPanel deltas={takeoffMeasurementDeltas} />
+          ) : null}
           {takeoffImportChecklist ? (
             <TakeoffImportCompletionChecklist
               items={takeoffImportChecklist.items}
@@ -3081,6 +3093,17 @@ export default function InternalEstimateApp() {
               hideRapidLinear
               enableDestructiveGuards
               showTakeoffImportBadges={Boolean(takeoffImportMeta && isActiveTakeoffImport(takeoffImportMeta))}
+              enableTakeoffImportEditor={Boolean(takeoffImportMeta && isActiveTakeoffImport(takeoffImportMeta))}
+              takeoffTraceabilityContext={
+                takeoffImportMeta && isActiveTakeoffImport(takeoffImportMeta)
+                  ? {
+                      sourcePlanName: takeoffImportMeta.sourceFileName,
+                      approvedBy: takeoffImportMeta.approvedBy,
+                      approvedAt: takeoffImportMeta.approvedAt,
+                      suggestedAddOns: takeoffImportMeta.suggestedAddOns,
+                    }
+                  : undefined
+              }
             />
           </section>
 
