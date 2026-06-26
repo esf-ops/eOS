@@ -96,23 +96,38 @@ function makeApprovableTakeoff() {
       {
         id: "room-1",
         name: "Kitchen",
+        roomType: "Kitchen",
         areas: [
           {
             id: "area-1",
-            name: "Main",
-            backsplashType: "none",
+            label: "Main",
+            backsplashIncluded: true,
+            backsplashScope: "stone",
             runs: [
               {
                 id: "run-1",
                 label: "Main run",
                 lengthIn: 120,
                 depthIn: 25.5,
+                pieceType: "counter",
               },
             ],
           },
         ],
       },
     ],
+  };
+}
+
+function makeCompleteReviewState(takeoff) {
+  const roomCompleteness = {};
+  for (const room of takeoff?.rooms ?? []) roomCompleteness[room.id] = true;
+  return {
+    excludedRunIds: [],
+    flagResolutions: {},
+    roomCompleteness,
+    referenceTotalAcks: {},
+    evidenceAcks: {},
   };
 }
 
@@ -1356,10 +1371,11 @@ function makeMockSupabase({
     organizationId: ORG_ID,
     userId: USER_ID,
     takeoffJobId: JOB_ID,
+    reviewState: makeCompleteReviewState(approvable),
   });
 
   assert.equal(result.reviewStatus, "approved");
-  assert.equal(result.approvalStatus, "approved");
+  assert.equal(result.approvalStatus, "approved_for_import");
   assert.ok(result.approvedAt);
   assert.equal(result.approvedByUserId, USER_ID);
   assert.equal(result.canApprove, false);
@@ -1449,7 +1465,7 @@ function makeMockSupabase({
       userId: USER_ID,
       takeoffJobId: JOB_ID,
     }),
-    /Validation errors must be resolved/i,
+    /validation error/i,
     "validation errors block approval"
   );
   console.log("ok: approveTakeoffJob — validation errors block approval");
@@ -1495,7 +1511,7 @@ function makeMockSupabase({
       takeoffJobId: JOB_ID,
       takeoffResult: badTakeoff,
     }),
-    /Validation errors must be resolved/i,
+    /validation error/i,
     "approve blocked before cutout fix"
   );
 
@@ -1506,6 +1522,7 @@ function makeMockSupabase({
     userId: USER_ID,
     takeoffJobId: JOB_ID,
     takeoffResult: fixedTakeoff,
+    reviewState: makeCompleteReviewState(fixedTakeoff),
   });
   assert.equal(result.reviewStatus, "approved", "approve succeeds after cutout fix");
   console.log("ok: approveTakeoffJob — blocked before cutout fix, passes after fix");

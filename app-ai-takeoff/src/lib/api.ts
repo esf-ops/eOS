@@ -187,6 +187,7 @@ export async function saveTakeoffCorrection(
     takeoffResult: unknown;
     correctionNotes?: string | null;
     baseResultId?: string | null;
+    reviewState?: unknown;
   }
 ): Promise<SaveTakeoffCorrectionResponse> {
   return labApiPost(
@@ -200,13 +201,30 @@ export async function saveTakeoffCorrection(
 export async function approveTakeoffJob(
   token: string,
   takeoffJobId: string,
-  takeoffResult?: unknown
+  body?: {
+    takeoffResult?: unknown;
+    reviewState?: unknown;
+    dimensionEvidence?: unknown;
+  }
 ): Promise<ApproveTakeoffJobResponse> {
   return labApiPost(
     `/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}/approve`,
     token,
-    takeoffResult ? { takeoffResult } : {}
+    body ?? {}
   ) as Promise<ApproveTakeoffJobResponse>;
+}
+
+/** Create Internal Estimate draft from approved takeoff. */
+export async function importInternalEstimateFromTakeoff(
+  token: string,
+  takeoffJobId: string
+): Promise<{ ok: boolean; quoteId: string; quote_number: string; takeoffJobId: string }> {
+  return labApiPost("/api/internal-quotes/import-from-takeoff", token, { takeoffJobId }) as Promise<{
+    ok: boolean;
+    quoteId: string;
+    quote_number: string;
+    takeoffJobId: string;
+  }>;
 }
 
 export interface StartTakeoffProcessingResponse {

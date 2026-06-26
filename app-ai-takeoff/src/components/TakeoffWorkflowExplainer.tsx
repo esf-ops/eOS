@@ -28,8 +28,7 @@ const STEPS = [
   {
     key: "import",
     label: "Import to Internal Estimate",
-    detail: "Planned — not enabled in this release.",
-    future: true,
+    detail: "Approved takeoff creates a draft quote with verified rooms/shapes — estimator completes job info and materials before save.",
   },
 ] as const;
 
@@ -93,8 +92,8 @@ export default function TakeoffWorkflowExplainer({ compact = false }: TakeoffWor
           an estimator explicitly approves it.
         </li>
         <li>
-          <strong>Internal Estimate import is not enabled yet.</strong> Approved takeoffs are stored for
-          a future import path — they are not pushed into Internal Estimate today.
+          <strong>Import uses approved snapshots only.</strong> Internal Estimate drafts preload verified
+          rooms/shapes — estimators complete account, project, and material fields before quote save.
         </li>
       </ul>
       )}

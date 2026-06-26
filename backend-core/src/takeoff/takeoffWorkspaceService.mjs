@@ -38,6 +38,9 @@ import { TAKEOFF_SCHEMA_VERSION } from "./takeoffContract.mjs";
 import { buildProcessingStatus } from "./takeoffProcessOrchestrator.mjs";
 import { evaluateTakeoffQaGate } from "./takeoffQaGate.mjs";
 import { pickSafeExayardJobMetadata } from "./exayardClient.mjs";
+import { evaluateTakeoffApprovalGate } from "./takeoffApprovalGate.mjs";
+import { buildTakeoffImportPayload } from "./takeoffImportPayload.mjs";
+import { loadReviewStateFromRaw, normalizeReviewState } from "./takeoffReviewStatus.mjs";
 
 // ── Validation helpers ────────────────────────────────────────────────────────
 
@@ -224,12 +227,36 @@ function extractApprovalFields(jobRow, latestResultRow) {
   return { reviewStatus, approvalStatus: reviewStatus, approvedAt, approvedByUserId };
 }
 
-function computeCanApprove({ hasSavedResult, validation, qaGate, reviewStatus }) {
+function computeCanApprove({
+  hasSavedResult,
+  validation,
+  qaGate,
+  reviewStatus,
+  takeoffResult = null,
+  computed = null,
+  reviewState = null,
+  dimensionEvidence = null,
+  hasUnsavedEdits = false,
+}) {
   if (!hasSavedResult) return false;
   if (reviewStatus === "approved") return false;
-  if (validation?.hasErrors || (validation?.errorCount ?? 0) > 0) return false;
-  if (qaGate?.status === "do_not_import") return false;
-  return true;
+  if (!takeoffResult) {
+    if (validation?.hasErrors || (validation?.errorCount ?? 0) > 0) return false;
+    if (qaGate?.status === "do_not_import") return false;
+    return true;
+  }
+  const gate = evaluateTakeoffApprovalGate({
+    takeoffResult,
+    computed,
+    validation,
+    qaGate,
+    dimensionEvidence,
+    reviewState,
+    hasSavedResult,
+    hasUnsavedEdits,
+    reviewStatus,
+  });
+  return gate.canApprove;
 }
 
 function buildResultSummary(takeoffResult, computed, validation, importPlan) {
@@ -472,11 +499,20 @@ export async function getTakeoffWorkspace({
         const { computed, validation } = recomputeTakeoffBundle(takeoffJson);
         const qaGate = computeQaGateForResult(takeoffJson, computed, validation, rawJson);
         const approval = extractApprovalFields(jobRow, latestRow);
+        const reviewState = loadReviewStateFromRaw(rawJson);
+        const dimEvidence =
+          typeof rawJson?._meta?.dimensionEvidence === "object"
+            ? rawJson._meta.dimensionEvidence
+            : null;
         canApprove = computeCanApprove({
           hasSavedResult,
           validation,
           qaGate,
           reviewStatus: approval.reviewStatus,
+          takeoffResult: takeoffJson,
+          computed,
+          reviewState,
+          dimensionEvidence: dimEvidence,
         });
       } catch {
         canApprove = false;
@@ -827,6 +863,7 @@ export async function saveTakeoffCorrection({
   takeoffResult,
   correctionNotes = null,
   baseResultId = null,
+  reviewState = null,
 }) {
   if (!isUuid(organizationId)) {
     throw workspaceError("organizationId must be a valid UUID");
@@ -894,6 +931,9 @@ export async function saveTakeoffCorrection({
       ...(existingRaw._meta ?? {}),
       lastCorrectionAt: now,
       lastCorrectedByUserId: userId ?? null,
+      ...(reviewState != null
+        ? { reviewState: normalizeReviewState(reviewState) }
+        : {}),
     },
   };
 
@@ -991,6 +1031,8 @@ export async function approveTakeoffJob({
   userId,
   takeoffJobId,
   takeoffResult = null,
+  reviewState = null,
+  dimensionEvidence = null,
 }) {
   if (!isUuid(organizationId)) {
     throw workspaceError("organizationId must be a valid UUID");
@@ -1049,12 +1091,32 @@ export async function approveTakeoffJob({
       : {};
   const qaGate = computeQaGateForResult(resolvedResult, computed, validation, rawJson);
 
-  if (validation.hasErrors || (validation.errorCount ?? 0) > 0) {
-    throw workspaceError("Validation errors must be resolved before approval", 422);
-  }
-  if (qaGate?.status === "do_not_import") {
+  const rs =
+    reviewState != null
+      ? normalizeReviewState(reviewState)
+      : loadReviewStateFromRaw(rawJson);
+  const dimEvidence =
+    dimensionEvidence ??
+    (typeof rawJson?._meta?.dimensionEvidence === "object"
+      ? rawJson._meta.dimensionEvidence
+      : null);
+
+  const approvalGate = evaluateTakeoffApprovalGate({
+    takeoffResult: resolvedResult,
+    computed,
+    validation,
+    qaGate,
+    dimensionEvidence: dimEvidence,
+    reviewState: rs,
+    hasSavedResult: true,
+    hasUnsavedEdits: false,
+    reviewStatus: jobRow.review_status ?? "needs_review",
+  });
+
+  if (!approvalGate.canApprove) {
+    const first = approvalGate.blockers[0];
     throw workspaceError(
-      qaGate.headline ?? "QA gate blocks approval for this takeoff",
+      first?.message ?? "Approval blockers must be resolved before approval",
       422
     );
   }
@@ -1071,6 +1133,24 @@ export async function approveTakeoffJob({
     computedMeasurementsJson: computed,
     validationDiagnosticsJson: validation,
     importPlanJson: importPlan,
+    reviewState: rs,
+    approvalGate,
+    importPayload: buildTakeoffImportPayload({
+      takeoffJobId,
+      takeoffResultId: latestRow?.id ?? null,
+      takeoffResult: resolvedResult,
+      reviewState: rs,
+      computed,
+      validation,
+      qaGate,
+      dimensionEvidence: dimEvidence,
+      sourceFileName: null,
+      approvedBy: userId ?? null,
+      approvedAt: now,
+      createdBy: userId ?? null,
+      reviewStatus: "approved",
+      requireApproved: false,
+    }),
   };
 
   if (latestRow?.id) {
@@ -1164,10 +1244,14 @@ export async function approveTakeoffJob({
     approvedAt: now,
     approvedByUserId: userId ?? null,
     reviewStatus: "approved",
-    approvalStatus: "approved",
+    approvalStatus: "approved_for_import",
+    workflowStatus: "approved_for_import",
     canApprove: false,
+    canImport: true,
     qaGate,
+    approvalGate,
     summary,
+    importPayload: approvedSnapshot.importPayload,
   };
 }
 
@@ -1205,7 +1289,7 @@ export async function getLatestTakeoffResult({
     .select(
       "id,organization_id,schema_version,normalized_takeoff_json," +
       "computed_measurements_json,validation_diagnostics_json," +
-      "import_plan_json,review_status,created_at"
+      "import_plan_json,review_status,created_at,raw_ai_result_json"
     )
     .eq("takeoff_job_id", takeoffJobId)
     .order("created_at", { ascending: false })
@@ -1261,6 +1345,9 @@ export async function getLatestTakeoffResult({
     computedMeasurementsJson: freshComputed,
     validationDiagnosticsJson: savedResult.validation_diagnostics_json,
     importPlanJson: savedResult.import_plan_json,
+    reviewState: loadReviewStateFromRaw(savedResult.raw_ai_result_json),
+    importPayload:
+      savedResult.raw_ai_result_json?._meta?.approvedSnapshot?.importPayload ?? null,
     file: fileRow ? safeFileSummary(fileRow) : null,
   };
 }

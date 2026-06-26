@@ -15,7 +15,7 @@
 | **Storage** | **Verified live:** private bucket `eliteos-quote-files`; bytes never returned to browser; downloads via signed URLs only. |
 | **RLS** | Enabled on takeoff/file tables; **no RLS policies yet**. Current architecture: backend **service role** + Express auth/head gates (not browser-direct Supabase reads). |
 | **AI extraction** | Review-only — `review_status` stays `needs_review` after AI draft; server recomputes all sf; no quote mutation. |
-| **Import** | **Disabled.** `planTakeoffImport` runs for preview only. Approved takeoff is a **future handoff point**, not a live Internal Estimate import. |
+| **Import** | **Enabled (approved snapshots only).** `buildTakeoffImportPayload` → `POST /api/internal-quotes/import-from-takeoff` creates Internal Estimate **draft** with preloaded rooms/shapes. Raw AI output never imports. Estimator completes job info + materials before save. **v6.1:** IE shows import receipt, completion checklist, source badges, draft-only detach (`POST /api/internal-quotes/:id/detach-takeoff-import`). |
 
 **Shipped APIs (org from server auth context only):**
 
@@ -25,7 +25,9 @@
 | GET | `/api/takeoff-jobs/:id` | Rich job/workspace status (`canApprove`, `approvedAt`, latest result metadata, …) |
 | POST | `/api/takeoff-jobs/:id/results` | Save reviewed draft |
 | POST | `/api/takeoff-jobs/:id/corrections` | Save estimator corrections + `_corrections[]` audit in result JSON |
-| POST | `/api/takeoff-jobs/:id/approve` | Validate + QA-gate + mark job/result approved (no quote create) |
+| POST | `/api/takeoff-jobs/:id/approve` | Approval gate + mark approved + store `takeoff_import_v1` snapshot (no quote create) |
+| POST | `/api/internal-quotes/import-from-takeoff` | Create Internal Estimate draft from approved takeoff (auth + internal quote head) |
+| POST | `/api/internal-quotes/:id/detach-takeoff-import` | Draft-only: remove imported rooms, mark import detached, preserve audit (v6.1) |
 | GET/POST | `/api/takeoff-jobs/:id/results/*` | Latest, list, by-id (existing) |
 | POST | `/api/takeoff-jobs/:id/generate-ai-draft` | AI extraction (env-gated; not called from docs/tests) |
 
@@ -35,7 +37,10 @@
 - **Review workflow** — separate **Save reviewed draft** vs **Approve takeoff** (status updates automatically; no manual status dropdown)
 - **Validation fix panel** — one-click fixes for cutout-like labels misplaced in `area.exclusions[]` (move to cutouts/notes or remove)
 
-**Future phases (not started):** page/PDF preview, async/page progress artifacts, provider/model pipeline hardening, gated Internal Estimate import from approved takeoff.
+- **Import readiness panel** — approval blockers, room completeness checklist, import preview with IE required fields
+- **Internal Estimate import** — enabled when `approved_for_import`; opens IE draft with takeoff receipt, checklist, and room/piece source badges (v6.1)
+
+**Future phases (not started):** page/PDF preview hardening, async/page progress artifacts, auto material/color suggestions from takeoff notes.
 
 ---
 

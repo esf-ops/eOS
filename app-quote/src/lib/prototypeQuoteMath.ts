@@ -2467,7 +2467,10 @@ function hydrateGuidedPieceFromRow(x: Record<string, unknown>): GuidedPiece {
     materialGroup: x.materialGroup != null ? String(x.materialGroup) : undefined,
     materialColor: x.materialColor != null ? String(x.materialColor) : undefined,
     materialSupplier: x.materialSupplier != null ? String(x.materialSupplier) : undefined,
-    materialType: x.materialType != null ? String(x.materialType) : undefined
+    materialType: x.materialType != null ? String(x.materialType) : undefined,
+    ...(x.takeoffImportSource && typeof x.takeoffImportSource === "object"
+      ? { takeoffImportSource: x.takeoffImportSource as RoomDraft["takeoffImportSource"] }
+      : {}),
   };
 }
 
@@ -2530,6 +2533,9 @@ function applyRoomPersistenceFields(base: RoomDraft, r: Record<string, unknown>)
   if (r.useTaxBase != null) base.useTaxBase = "countertop_material";
   if (r.edgeProfile != null) base.edgeProfile = String(r.edgeProfile);
   if (r.upgradedEdgeLf != null) base.upgradedEdgeLf = Math.max(0, Number(r.upgradedEdgeLf) || 0);
+  if (r.takeoffImportSource && typeof r.takeoffImportSource === "object") {
+    base.takeoffImportSource = r.takeoffImportSource as RoomDraft["takeoffImportSource"];
+  }
   const v = r.vanity;
   if (v && typeof v === "object") {
     const vv = v as Record<string, unknown>;

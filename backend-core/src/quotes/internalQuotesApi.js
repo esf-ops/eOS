@@ -26,6 +26,13 @@ import { validateInternalQuotePatchContext } from "./internalQuotePatchPolicy.js
 import { processInternalQuoteSave } from "./internalQuoteSave.js";
 import { restoreInternalQuoteAsNewRevision } from "./internalQuoteRestore.js";
 import { generateQuoteNumber, isMissingRelationError } from "./quotePersist.js";
+import { importInternalEstimateFromTakeoff } from "./internalQuoteTakeoffImport.mjs";
+import { detachTakeoffImportFromQuote } from "./internalQuoteTakeoffDetach.mjs";
+import {
+  appendTakeoffImportAuditEvent,
+  takeoffImportContextFromSaveBody,
+} from "./internalQuoteTakeoffAudit.mjs";
+import { isActiveTakeoffImport } from "./internalQuoteTakeoffImportChecklist.mjs";
 
 
 const jsonParser = express.json({ limit: "2mb" });
@@ -70,6 +77,28 @@ function applyQuoteHeaderOrgScope(qb, orgId, hasQuoteHeadersOrg) {
   if (!orgId || !hasQuoteHeadersOrg) return qb;
   const filt = organizationScopeOrFilter(orgId);
   return filt ? qb.or(filt) : qb;
+}
+
+async function loadExistingTakeoffImport(db, quoteId, orgId, hasQuoteHeadersOrg) {
+  if (!isUuid(quoteId)) return null;
+  let qb = db
+    .from("quote_headers")
+    .select("calculation_snapshot")
+    .eq("id", quoteId)
+    .eq("quote_source", "internal_quote")
+    .limit(1);
+  qb = applyQuoteHeaderOrgScope(qb, orgId, hasQuoteHeadersOrg);
+  const { data, error } = await qb;
+  if (error || !data?.[0]) return null;
+  const snap = data[0].calculation_snapshot;
+  const iu = snap?.internal_ui;
+  return iu?.takeoff_import ?? null;
+}
+
+function resolveTakeoffImportBlock(body, existingTakeoffImport) {
+  const incoming = body.takeoff_import ?? body.takeoffImport ?? null;
+  if (incoming && typeof incoming === "object") return incoming;
+  return existingTakeoffImport ?? null;
 }
 
 function listRow(r) {
@@ -127,18 +156,26 @@ export function attachInternalQuoteRoutes(app, deps) {
       const db = getSupabase();
       const body = req.body && typeof req.body === "object" ? req.body : {};
       const calc = await calculateQuote({ ...body, quoteSource: "internal_quote" }, { db });
+      const takeoffCtx = takeoffImportContextFromSaveBody(body);
       await logAction({
         user: req.user,
         head: "quote",
-        actionType: "internal_quote_calculated",
+        actionType: takeoffCtx ? "quote_calculated_from_takeoff_import" : "internal_quote_calculated",
         entityType: "quote_calculation",
-        entityId: null,
-        metadata: {
-          engine: body.engine ?? null,
-          estimated_sqft: calc.totals?.estimated_sqft ?? null,
-          internal_material_basis: body.internalMaterialBasis ?? body.internal_material_basis ?? null
-        },
-        req
+        entityId: body.quote_id ?? body.quoteId ?? null,
+        metadata: takeoffCtx
+          ? {
+              ...takeoffCtx,
+              engine: body.engine ?? null,
+              estimated_sqft: calc.totals?.estimated_sqft ?? null,
+              internal_material_basis: body.internalMaterialBasis ?? body.internal_material_basis ?? null,
+            }
+          : {
+              engine: body.engine ?? null,
+              estimated_sqft: calc.totals?.estimated_sqft ?? null,
+              internal_material_basis: body.internalMaterialBasis ?? body.internal_material_basis ?? null,
+            },
+        req,
       });
       res.json({ ok: true, ...calc });
     } catch (e) {
@@ -151,6 +188,25 @@ export function attachInternalQuoteRoutes(app, deps) {
       const db = getSupabase();
       const body = req.body && typeof req.body === "object" ? req.body : {};
       const organizationContext = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
+      const orgId = organizationContext.organizationId;
+      const hasQuoteHeadersOrg = orgId ? await tableHasOrganizationId(db, "quote_headers") : false;
+      const existingQuoteId = String(body.quote_id ?? body.quoteId ?? "").trim();
+      const existingTakeoffImport =
+        existingQuoteId && isUuid(existingQuoteId)
+          ? await loadExistingTakeoffImport(db, existingQuoteId, orgId, hasQuoteHeadersOrg)
+          : null;
+      let takeoffImportBlock = resolveTakeoffImportBlock(body, existingTakeoffImport);
+      const takeoffChecklist =
+        body.takeoff_import_checklist ?? body.takeoffImportChecklist ?? null;
+      if (isActiveTakeoffImport(takeoffImportBlock)) {
+        takeoffImportBlock = appendTakeoffImportAuditEvent(takeoffImportBlock, {
+          type: "quote_saved_from_takeoff_import",
+          userId: req.user?.id ?? null,
+          userEmail: String(req.user?.email || req.user?.id || "unknown"),
+          metadata: { quoteId: existingQuoteId || null },
+        });
+      }
+
       const calc = await calculateQuote({ ...body, quoteSource: "internal_quote" }, { db });
       const userEmail = String(req.user?.email || req.user?.id || "unknown");
 
@@ -232,8 +288,10 @@ export function attachInternalQuoteRoutes(app, deps) {
            * Matches CustomerEstimatePrint.finalRounded. Preferred by Quote Library over grand_total. */
           customer_display_total: customerDisplayTotal,
           customer_estimate_print_snapshot:
-            printSnapshotRaw && typeof printSnapshotRaw === "object" ? printSnapshotRaw : null
-        }
+            printSnapshotRaw && typeof printSnapshotRaw === "object" ? printSnapshotRaw : null,
+          takeoff_import: takeoffImportBlock,
+          takeoff_import_checklist: takeoffChecklist,
+        },
       };
       const internalEstimateSummary = buildInternalEstimateSummary(calc, body, snapshotToStore);
       const estimatorDisplayName = await resolveEstimatorDisplayNameFromDb(db, req, body);
@@ -697,7 +755,136 @@ export function attachInternalQuoteRoutes(app, deps) {
     }
   });
 
+  app.post("/api/internal-quotes/import-from-takeoff", ...stack, jsonParser, async (req, res) => {
+    try {
+      const db = getSupabase();
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const takeoffJobId = String(body.takeoffJobId ?? body.takeoff_job_id ?? "").trim();
+      const takeoffResultId = String(body.takeoffResultId ?? body.takeoff_result_id ?? "").trim() || null;
+
+      if (!isUuid(takeoffJobId)) {
+        return res.status(400).json({ ok: false, error: "takeoffJobId must be a valid UUID" });
+      }
+
+      const organizationContext = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
+      if (!organizationContext.organizationId) {
+        return res.status(503).json({ ok: false, error: "Organization context not available" });
+      }
+
+      await logAction({
+        user: req.user,
+        head: "quote",
+        actionType: "takeoff_import_started",
+        entityType: "quote_takeoff_job",
+        entityId: takeoffJobId,
+        metadata: { takeoff_job_id: takeoffJobId, takeoff_result_id: takeoffResultId },
+        req,
+      });
+
+      let result;
+      try {
+        result = await importInternalEstimateFromTakeoff({
+          db,
+          organizationId: organizationContext.organizationId,
+          userId: req.user?.id ?? null,
+          userEmail: String(req.user?.email || req.user?.id || "unknown"),
+          takeoffJobId,
+          takeoffResultId,
+          organizationContext,
+        });
+      } catch (importErr) {
+        await logAction({
+          user: req.user,
+          head: "quote",
+          actionType: "takeoff_import_failed",
+          entityType: "quote_takeoff_job",
+          entityId: takeoffJobId,
+          metadata: {
+            takeoff_job_id: takeoffJobId,
+            error: String(importErr?.message || importErr),
+            status_code: importErr?.statusCode ?? 500,
+          },
+          req,
+        });
+        throw importErr;
+      }
+
+      await logAction({
+        user: req.user,
+        head: "quote",
+        actionType: "takeoff_import_succeeded",
+        entityType: "quote_header",
+        entityId: result.quoteId,
+        metadata: {
+          takeoff_job_id: takeoffJobId,
+          takeoff_snapshot_id: result.takeoffSnapshotId,
+          quote_number: result.quote_number,
+        },
+        req,
+      });
+      await logAction({
+        user: req.user,
+        head: "quote",
+        actionType: "internal_quote_imported_from_takeoff",
+        entityType: "quote_header",
+        entityId: result.quoteId,
+        metadata: {
+          takeoff_job_id: takeoffJobId,
+          takeoff_snapshot_id: result.takeoffSnapshotId,
+          quote_number: result.quote_number,
+        },
+        req,
+      });
+
+      res.status(201).json(result);
+    } catch (e) {
+      const status = e.statusCode ?? 500;
+      res.status(status).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  app.post("/api/internal-quotes/:id/detach-takeoff-import", ...stack, jsonParser, async (req, res) => {
+    try {
+      const db = getSupabase();
+      const quoteId = String(req.params.id ?? "").trim();
+      if (!isUuid(quoteId)) {
+        return res.status(400).json({ ok: false, error: "quote id must be a valid UUID" });
+      }
+
+      const organizationContext = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
+      if (!organizationContext.organizationId) {
+        return res.status(503).json({ ok: false, error: "Organization context not available" });
+      }
+
+      const result = await detachTakeoffImportFromQuote({
+        db,
+        organizationId: organizationContext.organizationId,
+        quoteId,
+        userId: req.user?.id ?? null,
+        userEmail: String(req.user?.email || req.user?.id || "unknown"),
+      });
+
+      await logAction({
+        user: req.user,
+        head: "quote",
+        actionType: "takeoff_import_detached",
+        entityType: "quote_header",
+        entityId: quoteId,
+        metadata: {
+          takeoff_job_id: result.takeoffJobId,
+          removed_room_count: result.removedRoomCount,
+        },
+        req,
+      });
+
+      res.json(result);
+    } catch (e) {
+      const status = e.statusCode ?? 500;
+      res.status(status).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
   console.log(
-    "[quotes] mounted /api/internal-quotes/* (calculate, save, list, material-colors, get, patch, duplicate, revisions, restore-as-revision)"
+    "[quotes] mounted /api/internal-quotes/* (calculate, save, list, material-colors, get, patch, duplicate, revisions, restore-as-revision, import-from-takeoff, detach-takeoff-import)"
   );
 }

@@ -3687,3 +3687,24 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
   font-size: 0.78rem;
 }
 .save-panel-info-icon { flex-shrink: 0; font-size: 0.88rem; }
+
+/* ── Import readiness + room completeness (v5.8/v6.0) ── */
+.import-readiness { margin-top: 0; }
+.import-readiness--blocked { border-left: 3px solid var(--eos-warn); }
+.import-readiness--ready { border-left: 3px solid var(--eos-success); }
+.import-readiness-header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 8px; }
+.import-readiness-chip { font-size: 0.72rem; font-weight: 600; padding: 3px 8px; border-radius: 999px; background: var(--eos-surface-muted); }
+.import-readiness-blockers-title { font-weight: 600; font-size: 0.82rem; margin: 8px 0 4px; }
+.import-readiness-list { margin: 0 0 8px 1.1rem; font-size: 0.78rem; }
+.import-readiness-group-label { font-size: 0.72rem; font-weight: 600; color: var(--eos-ink-muted); margin-top: 6px; }
+.room-completeness-title { margin: 0 0 4px; font-size: 0.95rem; }
+.room-completeness-header { display: flex; justify-content: space-between; align-items: center; }
+.room-completeness-list { list-style: none; margin: 10px 0; padding: 0; }
+.room-completeness-item { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--eos-border); }
+.room-completeness-meta { display: flex; flex-wrap: wrap; gap: 8px; font-size: 0.75rem; color: var(--eos-ink-muted); }
+.room-completeness-add { display: flex; gap: 8px; margin-top: 10px; }
+.btn-import-enabled { background: var(--eos-brand); color: #fff; border: none; padding: 8px 14px; border-radius: var(--r-sm); font-weight: 600; cursor: pointer; }
+.btn-import-enabled:disabled { opacity: 0.5; cursor: not-allowed; }
+.import-result-msg { display: block; margin-top: 8px; font-size: 0.78rem; }
+.import-addons-list { margin: 4px 0 0 1.1rem; font-size: 0.78rem; }
+.import-ie-required-list { margin: 4px 0 0 1.1rem; font-size: 0.78rem; }

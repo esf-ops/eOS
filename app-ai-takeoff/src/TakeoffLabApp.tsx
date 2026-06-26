@@ -28,7 +28,7 @@
  * Core lab features (spec73, paste JSON, edit) are available without auth.
  * File upload, workspace save/load, AI extraction require an authenticated session.
  *
- * Hard boundary: Import to Internal Estimate remains disabled.
+ * v6.0: Reviewed takeoff → Internal Estimate draft import (approved snapshots only).
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buildSpec73Fixture } from "@takeoff-core/fixtures/spec73.fixture.mjs";
@@ -36,6 +36,8 @@ import { computeTakeoffMeasurements } from "@takeoff-core/takeoffMeasurementCalc
 import { validateTakeoffResult } from "@takeoff-core/takeoffValidator.mjs";
 import { planTakeoffImport } from "@takeoff-core/takeoffImportPlanner.mjs";
 import { evaluateTakeoffQaGate } from "@takeoff-core/takeoffQaGate.mjs";
+import { evaluateTakeoffApprovalGate } from "@takeoff-core/takeoffApprovalGate.mjs";
+import { deriveTakeoffWorkflowStatus, workflowStatusLabel } from "@takeoff-core/takeoffReviewStatus.mjs";
 import type { TakeoffResult, TakeoffArea, TakeoffRun } from "@takeoff-core/takeoffContract.mjs";
 import type { TakeoffComputedMeasurements } from "@takeoff-core/takeoffMeasurementCalc.mjs";
 import type { TakeoffValidationResult } from "@takeoff-core/takeoffValidator.mjs";
@@ -44,6 +46,8 @@ import TakeoffSummaryCards from "./components/TakeoffSummaryCards";
 import TakeoffRoomsReview from "./components/TakeoffRoomsReview";
 import TakeoffDiagnosticsPanel from "./components/TakeoffDiagnosticsPanel";
 import TakeoffImportPreview from "./components/TakeoffImportPreview";
+import TakeoffImportReadinessPanel from "./components/TakeoffImportReadinessPanel";
+import TakeoffRoomCompletenessPanel from "./components/TakeoffRoomCompletenessPanel";
 import TakeoffWorkbench from "./components/TakeoffWorkbench";
 import TakeoffPlanFileSection from "./components/TakeoffPlanFileSection";
 import type { PlanFilePreviewMeta, WorkspaceReviewMeta } from "./components/TakeoffPlanFileSection";
@@ -65,10 +69,10 @@ import TakeoffValidationFixPanel from "./components/TakeoffValidationFixPanel";
 import TakeoffWorkflowExplainer from "./components/TakeoffWorkflowExplainer";
 import { reconcileRunsWithEvidence } from "@takeoff-core/takeoffEvidenceRunReconciliation.mjs";
 import { evaluateTakeoffFabricationRules } from "@takeoff-core/takeoffFabricationRules.mjs";
-import { makeTakeoffRun } from "@takeoff-core/takeoffContract.mjs";
+import { makeTakeoffRun, makeTakeoffRoom } from "@takeoff-core/takeoffContract.mjs";
 import { addManualRunToDraft } from "@takeoff-core/takeoffWorkbenchHelpers.mjs";
 import { getSupabase } from "./lib/supabase";
-import { labApiGet, labApiPost, saveTakeoffCorrection, approveTakeoffJob, LabApiError } from "./lib/api";
+import { labApiGet, labApiPost, saveTakeoffCorrection, approveTakeoffJob, importInternalEstimateFromTakeoff, LabApiError } from "./lib/api";
 import EliteosTopbar from "../../shared/eliteos-ui/EliteosTopbar";
 import type { EliteosTopbarMenuItem } from "../../shared/eliteos-ui/EliteosTopbar";
 
@@ -92,6 +96,13 @@ function homeLauncherUrl(): string {
     (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_HEAD_URL_HOME ?? ""
   ).trim();
   return raw.replace(/\/+$/, "") || "https://www.eliteosfab.com";
+}
+
+function internalEstimateUrl(): string {
+  const raw = String(
+    (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_HEAD_URL_INTERNAL_ESTIMATE ?? ""
+  ).trim();
+  return raw.replace(/\/+$/, "") || "https://internal.eliteosfab.com";
 }
 
 const PLAN_FILE_ROLE_LABELS: Record<string, string> = {
@@ -367,6 +378,14 @@ export default function TakeoffLabApp() {
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
   /** Per-evidence-dim review state (ignored | reviewed), keyed by dim id or label */
   const [evidenceReviewState, setEvidenceReviewState] = useState<Record<string, "ignored" | "reviewed">>({});
+  const [roomCompleteness, setRoomCompleteness] = useState<Record<string, boolean>>({});
+  const [flagResolutions, setFlagResolutions] = useState<Record<string, { action: "resolved" | "ignored"; note: string; at?: string; userId?: string }>>({});
+  const [referenceTotalAcks, setReferenceTotalAcks] = useState<Record<string, boolean>>({});
+  const [evidenceAcks, setEvidenceAcks] = useState<Record<string, boolean>>({});
+  const [importJobStatus, setImportJobStatus] = useState<"idle" | "importing" | "done" | "error">("idle");
+  const [importJobMsg, setImportJobMsg] = useState<string | null>(null);
+  const [approvedImportPayload, setApprovedImportPayload] = useState<object | null>(null);
+  const [takeoffImportStatus, setTakeoffImportStatus] = useState<string | null>(null);
 
   // ── Load saved result when workspace changes ───────────────────────────────
   useEffect(() => {
@@ -380,10 +399,40 @@ export default function TakeoffLabApp() {
           ok: boolean;
           normalizedTakeoffJson?: TakeoffResult;
           savedAt?: string;
+          reviewState?: {
+            excludedRunIds?: string[];
+            roomCompleteness?: Record<string, boolean>;
+            flagResolutions?: Record<string, { action: "resolved" | "ignored"; note: string }>;
+            referenceTotalAcks?: Record<string, boolean>;
+            evidenceAcks?: Record<string, boolean>;
+            reviewNotes?: Record<string, string>;
+            evidenceReviewState?: Record<string, "ignored" | "reviewed">;
+          };
+          importPayload?: object | null;
+          reviewStatus?: string;
         };
         if (res.ok && res.normalizedTakeoffJson) {
           commitSource(res.normalizedTakeoffJson, "file");
           setSavedAt(res.savedAt ?? null);
+          if (res.reviewState) {
+            setExcludedRunIds(new Set(res.reviewState.excludedRunIds ?? []));
+            setRoomCompleteness(res.reviewState.roomCompleteness ?? {});
+            setFlagResolutions(res.reviewState.flagResolutions ?? {});
+            setReferenceTotalAcks(res.reviewState.referenceTotalAcks ?? {});
+            setEvidenceAcks(res.reviewState.evidenceAcks ?? {});
+            if (res.reviewState.reviewNotes) setReviewNotes(res.reviewState.reviewNotes);
+            if (res.reviewState.evidenceReviewState) setEvidenceReviewState(res.reviewState.evidenceReviewState);
+          }
+          if (res.importPayload) setApprovedImportPayload(res.importPayload);
+          if (res.reviewStatus === "approved") {
+            setWorkspaceReview((prev) => ({
+              ...(prev ?? { reviewStatus: "approved" }),
+              reviewStatus: "approved",
+              approvalStatus: "approved_for_import",
+              canApprove: false,
+              hasSavedResult: true,
+            }));
+          }
         } else {
           setSourceMode("none");
           setSavedAt(null);
@@ -496,25 +545,81 @@ export default function TakeoffLabApp() {
     }
   }, [sourceMode, activeState, dimensionEvidence, pageInventory, benchmarkQaContext]);
 
+  const buildReviewState = useCallback(() => ({
+    excludedRunIds: [...excludedRunIds],
+    flagResolutions,
+    roomCompleteness,
+    referenceTotalAcks,
+    evidenceAcks,
+    reviewNotes,
+    evidenceReviewState,
+  }), [excludedRunIds, flagResolutions, roomCompleteness, referenceTotalAcks, evidenceAcks, reviewNotes, evidenceReviewState]);
+
+  const approvalGate = useMemo(() => {
+    if (!hasActiveSource) return null;
+    try {
+      return evaluateTakeoffApprovalGate({
+        takeoffResult: effectiveDraft,
+        computed: activeState.computed,
+        validation: activeState.validation,
+        qaGate,
+        dimensionEvidence: dimensionEvidence ?? null,
+        reviewState: buildReviewState(),
+        hasSavedResult: Boolean(savedAt || workspaceReview?.hasSavedResult),
+        hasUnsavedEdits: hasSaveableChanges,
+        reviewStatus: workspaceReview?.reviewStatus ?? "needs_review",
+        importStatus: takeoffImportStatus,
+      });
+    } catch {
+      return null;
+    }
+  }, [
+    hasActiveSource,
+    effectiveDraft,
+    activeState,
+    qaGate,
+    dimensionEvidence,
+    buildReviewState,
+    savedAt,
+    workspaceReview,
+    hasSaveableChanges,
+    takeoffImportStatus,
+  ]);
+
+  const workflowStatus = useMemo(
+    () => approvalGate?.workflowStatus ?? deriveTakeoffWorkflowStatus({
+      reviewStatus: workspaceReview?.reviewStatus ?? "needs_review",
+      hasSavedResult: Boolean(savedAt),
+      importStatus: takeoffImportStatus,
+      hasUnsavedEdits: hasSaveableChanges,
+      approvalGate,
+    }),
+    [approvalGate, workspaceReview, savedAt, takeoffImportStatus, hasSaveableChanges]
+  );
+
+  const workflowLabel = useMemo(
+    () => workflowStatusLabel(workflowStatus, { hasBlockers: (approvalGate?.blockers.length ?? 0) > 0 }),
+    [workflowStatus, approvalGate]
+  );
+
   const canApproveTakeoff = useMemo(() => {
     if (!takeoffJobId || !hasActiveSource) return false;
     if (workspaceReview?.reviewStatus === "approved" && !hasSaveableChanges) return false;
-    if (activeState.validation.hasErrors || (activeState.validation.errorCount ?? 0) > 0) return false;
-    if (qaGate?.status === "do_not_import") return false;
-    return true;
-  }, [takeoffJobId, hasActiveSource, workspaceReview?.reviewStatus, hasSaveableChanges, activeState.validation, qaGate?.status]);
+    return Boolean(approvalGate?.canApprove);
+  }, [takeoffJobId, hasActiveSource, workspaceReview?.reviewStatus, hasSaveableChanges, approvalGate]);
+
+  const canImportToEstimate = useMemo(() => {
+    if (takeoffImportStatus === "imported") return false;
+    return Boolean(approvalGate?.canImport);
+  }, [approvalGate, takeoffImportStatus]);
 
   const approveBlockedReason = useMemo(() => {
     if (!takeoffJobId || !hasActiveSource) return "Load a takeoff workspace first.";
     if (workspaceReview?.reviewStatus === "approved" && !hasSaveableChanges) return "This takeoff is already approved.";
-    if (activeState.validation.hasErrors || (activeState.validation.errorCount ?? 0) > 0) {
-      return "Resolve validation errors before approval.";
-    }
-    if (qaGate?.status === "do_not_import") {
-      return qaGate.headline ?? "QA gate blocks approval for this takeoff.";
-    }
+    const first = approvalGate?.blockers?.[0];
+    if (first) return first.message;
     return null;
-  }, [takeoffJobId, hasActiveSource, workspaceReview?.reviewStatus, activeState.validation, qaGate]);
+  }, [takeoffJobId, hasActiveSource, workspaceReview?.reviewStatus, hasSaveableChanges, approvalGate]);
 
   // v6.2: Fabrication rule findings — computed from the current effective draft.
   // Passed to TakeoffQaGatePanel for the dedicated "Fabrication rules" subsection.
@@ -551,9 +656,41 @@ export default function TakeoffLabApp() {
     setExcludedRunIds(new Set());
     setReviewNotes({});
     setEvidenceReviewState({});
+    setRoomCompleteness({});
+    setFlagResolutions({});
+    setReferenceTotalAcks({});
+    setEvidenceAcks({});
   }
 
-  // ── Workbench actions ─────────────────────────────────────────────────────
+  useEffect(() => {
+    setRoomCompleteness((prev) => {
+      const next = { ...prev };
+      for (const room of editDraft.rooms ?? []) {
+        if (next[room.id] === undefined) next[room.id] = false;
+      }
+      return next;
+    });
+  }, [editDraft.rooms]);
+
+  const handleSetRoomComplete = useCallback((roomId: string, complete: boolean) => {
+    setRoomCompleteness((prev) => ({ ...prev, [roomId]: complete }));
+  }, []);
+
+  const handleAddRoom = useCallback((name: string) => {
+    const room = makeTakeoffRoom({
+      name,
+      roomType: "Kitchen",
+      areas: [{
+        id: `area-${Date.now()}`,
+        label: "Main",
+        runs: [],
+        backsplashIncluded: true,
+        backsplashScope: "stone",
+      }],
+    });
+    setEditDraft((prev) => ({ ...prev, rooms: [...(prev.rooms ?? []), room] }));
+    setRoomCompleteness((prev) => ({ ...prev, [room.id]: false }));
+  }, []);
 
   const handleLoadSample = useCallback(() => {
     setPastedDraft(spec73Json);
@@ -642,6 +779,14 @@ export default function TakeoffLabApp() {
     setExcludedRunIds(new Set());
     setReviewNotes({});
     setEvidenceReviewState({});
+    setRoomCompleteness({});
+    setFlagResolutions({});
+    setReferenceTotalAcks({});
+    setEvidenceAcks({});
+    setImportJobStatus("idle");
+    setImportJobMsg(null);
+    setApprovedImportPayload(null);
+    setTakeoffImportStatus(null);
     setWorkspaceBoot("idle");
     setWorkspaceBootError(null);
   }, [hasEdits]);
@@ -909,10 +1054,12 @@ export default function TakeoffLabApp() {
     setSaveStatus("saving");
     setSaveMsg(hasSaveableChanges ? "Saving reviewed draft with correction audit…" : "Saving reviewed draft…");
     try {
+      const reviewStatePayload = buildReviewState();
       const res = hasSaveableChanges
         ? await saveTakeoffCorrection(authToken, takeoffJobId, {
             takeoffResult: effectiveDraft,
             baseResultId: currentResultId,
+            reviewState: reviewStatePayload,
           })
         : await labApiPost(`/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}/results`, authToken, {
             takeoffResult: effectiveDraft,
@@ -938,33 +1085,58 @@ export default function TakeoffLabApp() {
       setSaveStatus("error");
       setSaveMsg(msg);
     }
-  }, [takeoffJobId, authToken, effectiveDraft, hasSaveableChanges, currentResultId]);
+  }, [takeoffJobId, authToken, effectiveDraft, hasSaveableChanges, currentResultId, buildReviewState]);
 
   const handleApproveTakeoff = useCallback(async () => {
     if (!takeoffJobId || !authToken || !canApproveTakeoff) return;
     setApproveStatus("approving");
     setApproveMsg("Validating and approving takeoff…");
     try {
-      const res = await approveTakeoffJob(authToken, takeoffJobId, effectiveDraft);
+      const res = await approveTakeoffJob(authToken, takeoffJobId, {
+        takeoffResult: effectiveDraft,
+        reviewState: buildReviewState(),
+        dimensionEvidence: dimensionEvidence ?? undefined,
+      });
       setApproveStatus("approved");
       setWorkspaceReview({
         reviewStatus: "approved",
-        approvalStatus: "approved",
+        approvalStatus: "approved_for_import",
         canApprove: false,
         approvedAt: res.approvedAt,
         approvedByUserId: res.approvedByUserId,
         hasSavedResult: true,
       });
+      if ((res as { importPayload?: object }).importPayload) {
+        setApprovedImportPayload((res as { importPayload?: object }).importPayload ?? null);
+      }
       setHistoryRefreshKey((k) => k + 1);
       setApproveMsg(
-        `Takeoff approved — ${res.summary.countertopExactSf.toFixed(2)} sf countertop · ${res.summary.backsplashExactSf.toFixed(2)} sf backsplash. No quote was created.`
+        `Takeoff approved for import — ${res.summary.countertopExactSf.toFixed(2)} sf countertop · ${res.summary.backsplashExactSf.toFixed(2)} sf backsplash.`
       );
     } catch (e) {
       const msg = e instanceof LabApiError ? e.message : e instanceof Error ? e.message : "Approval failed.";
       setApproveStatus("error");
       setApproveMsg(msg);
     }
-  }, [takeoffJobId, authToken, effectiveDraft, canApproveTakeoff]);
+  }, [takeoffJobId, authToken, effectiveDraft, canApproveTakeoff, buildReviewState, dimensionEvidence]);
+
+  const handleImportToInternalEstimate = useCallback(async () => {
+    if (!takeoffJobId || !authToken || !canImportToEstimate) return;
+    setImportJobStatus("importing");
+    setImportJobMsg(null);
+    try {
+      const res = await importInternalEstimateFromTakeoff(authToken, takeoffJobId);
+      setImportJobStatus("done");
+      setTakeoffImportStatus("imported");
+      setImportJobMsg(`Draft ${res.quote_number} created — opening Internal Estimate…`);
+      const url = `${internalEstimateUrl()}/?quoteId=${encodeURIComponent(res.quoteId)}&fromTakeoff=${encodeURIComponent(takeoffJobId)}`;
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (e) {
+      const msg = e instanceof LabApiError ? e.message : e instanceof Error ? e.message : "Import failed.";
+      setImportJobStatus("error");
+      setImportJobMsg(msg);
+    }
+  }, [takeoffJobId, authToken, canImportToEstimate]);
 
   // ── Copy actions ──────────────────────────────────────────────────────────
 
@@ -1078,8 +1250,8 @@ export default function TakeoffLabApp() {
 
   const takeoffStatusSlot = (
     <div className="takeoff-topbar-status" aria-label="Takeoff lab boundaries">
-      <span className="takeoff-topbar-pill takeoff-topbar-pill--lab">Review only</span>
-      <span className="takeoff-topbar-pill takeoff-topbar-pill--safe">No quote mutation</span>
+      <span className="takeoff-topbar-pill takeoff-topbar-pill--lab">Review → Import</span>
+      <span className="takeoff-topbar-pill takeoff-topbar-pill--safe">Approved snapshots only</span>
     </div>
   );
 
@@ -1096,7 +1268,7 @@ export default function TakeoffLabApp() {
   );
   const isTakeoffApproved = workspaceReview?.reviewStatus === "approved";
   const approvalStale = Boolean(isTakeoffApproved && hasSaveableChanges);
-  const showApprovedInUi = isTakeoffApproved && !approvalStale;
+  const showApprovedInUi = workflowStatus === "approved_for_import" && !approvalStale;
   const hasQaBlocker = qaGate?.status === "do_not_import";
 
   const reviewSections = hasActiveSource ? (
@@ -1107,7 +1279,7 @@ export default function TakeoffLabApp() {
                 <h2 className="takeoff-active-review-title">Active takeoff review</h2>
                 <p className="takeoff-active-review-next">
                   {showApprovedInUi
-                    ? "Approved for future import — Internal Estimate import is not enabled yet."
+                    ? "Approved for import — create an Internal Estimate draft with verified measurements."
                     : approvalStale
                       ? "Approved takeoff has unsaved edits — save reviewed draft, then re-approve."
                       : hasBlockingValidation || hasQaBlocker
@@ -1219,6 +1391,31 @@ export default function TakeoffLabApp() {
             />
           </section>
 
+          {/* ── Room completeness checklist ──────────────────────────────── */}
+          <section className="lab-section lab-section--review-primary">
+            <TakeoffRoomCompletenessPanel
+              editDraft={editDraft}
+              roomCompleteness={roomCompleteness}
+              onSetRoomComplete={handleSetRoomComplete}
+              onPatchRoom={handlePatchRoom}
+              onAddRoom={handleAddRoom}
+            />
+          </section>
+
+          {/* ── Import readiness ─────────────────────────────────────────── */}
+          {approvalGate && (
+            <section className="lab-section lab-section--review-primary">
+              <h2 className="lab-section-title">Import readiness</h2>
+              <TakeoffImportReadinessPanel
+                blockers={approvalGate.blockers}
+                canApprove={canApproveTakeoff}
+                canImport={canImportToEstimate}
+                workflowStatus={workflowStatus}
+                workflowLabel={workflowLabel}
+              />
+            </section>
+          )}
+
           {/* ── 5. Review workflow ───────────────────────────────────────── */}
           {takeoffJobId && authToken && (
             <section className="lab-section lab-section--review-actions">
@@ -1234,7 +1431,7 @@ export default function TakeoffLabApp() {
                     <div className="save-action-bar-field">
                       <span className="save-action-bar-label">Status</span>
                       <span className={`save-status-chip${showApprovedInUi ? " save-status-chip--approved" : " save-status-chip--review"}`}>
-                        {showApprovedInUi ? "Approved" : approvalStale ? "Needs re-approval" : "Needs review"}
+                        {showApprovedInUi ? "Approved for Import" : approvalStale ? "Needs re-approval" : workflowLabel}
                       </span>
                     </div>
                     {!showApprovedInUi ? (
@@ -1251,7 +1448,7 @@ export default function TakeoffLabApp() {
                     ) : (
                       <div className="save-action-bar-field save-action-bar-field--grow">
                         <span className="save-action-bar-next-text save-action-bar-next-text--approved">
-                          Approved for future import — Internal Estimate import is not enabled yet.
+                          Approved — import into Internal Estimate when ready.
                           {workspaceReview?.approvedAt ? (
                             <>
                               {" "}
@@ -1494,14 +1691,26 @@ export default function TakeoffLabApp() {
               <span className="lab-section-title" style={{ margin: 0 }}>Import preview</span>
               <span className="lab-section-summary-note">
                 {showApprovedInUi
-                  ? "Approved for future import — not enabled yet"
+                  ? canImportToEstimate
+                    ? "Ready to import"
+                    : takeoffImportStatus === "imported"
+                      ? "Already imported"
+                      : "Approved — resolve any stale edits"
                   : importPlan.canImport
                     ? `${importPlan.rooms.length} room${importPlan.rooms.length !== 1 ? "s" : ""} mapped`
                     : "blocked — resolve issues first"}
               </span>
             </summary>
             <div style={{ marginTop: 12 }}>
-              <TakeoffImportPreview importPlan={importPlan} />
+              <TakeoffImportPreview
+                importPlan={importPlan}
+                importPayload={approvedImportPayload as Parameters<typeof TakeoffImportPreview>[0]["importPayload"]}
+                canImport={canImportToEstimate}
+                importBlockedReason={approvalGate?.blockers?.[0]?.message ?? importPlan.blockedReason ?? null}
+                onImport={handleImportToInternalEstimate}
+                importStatus={importJobStatus}
+                importMessage={importJobMsg}
+              />
             </div>
           </details>
 

@@ -242,7 +242,7 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase, he
 
       const takeoffJobId = String(req.params.id ?? "").trim();
       const body = req.body && typeof req.body === "object" ? req.body : {};
-      const { takeoffResult, correctionNotes, baseResultId } = body;
+      const { takeoffResult, correctionNotes, baseResultId, reviewState } = body;
 
       const result = await saveTakeoffCorrection({
         supabase,
@@ -252,6 +252,7 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase, he
         takeoffResult,
         correctionNotes: correctionNotes ?? null,
         baseResultId: baseResultId ?? null,
+        reviewState: reviewState ?? null,
       });
 
       return res.status(201).json(result);
@@ -280,6 +281,8 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase, he
       const takeoffJobId = String(req.params.id ?? "").trim();
       const body = req.body && typeof req.body === "object" ? req.body : {};
       const takeoffResult = body.takeoffResult ?? null;
+      const reviewState = body.reviewState ?? null;
+      const dimensionEvidence = body.dimensionEvidence ?? null;
 
       const result = await approveTakeoffJob({
         supabase,
@@ -287,6 +290,8 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase, he
         userId: user?.id ?? null,
         takeoffJobId,
         takeoffResult,
+        reviewState,
+        dimensionEvidence,
       });
 
       return res.json(result);

@@ -70,6 +70,8 @@ type Props = {
   materialProgramDefault?: MaterialProgram;
   /** Show per-room material program override (Internal Estimate). */
   showMaterialProgram?: boolean;
+  /** Show AI Takeoff import source badges on imported rooms/pieces. */
+  showTakeoffImportBadges?: boolean;
 };
 
 function updateRoom(rooms: RoomDraft[], id: string, patch: Partial<RoomDraft>): RoomDraft[] {
@@ -78,6 +80,34 @@ function updateRoom(rooms: RoomDraft[], id: string, patch: Partial<RoomDraft>): 
 
 function updateRoomNested<K extends keyof RoomDraft>(rooms: RoomDraft[], id: string, key: K, val: RoomDraft[K]): RoomDraft[] {
   return rooms.map((r) => (r.id === id ? { ...r, [key]: val } : r));
+}
+
+function takeoffReviewStatusLabel(status?: string): string {
+  switch (status) {
+    case "manual_added": return "Manual added";
+    case "edited": return "Edited";
+    case "reviewed": return "Reviewed";
+    case "approved":
+    default: return "Reviewed";
+  }
+}
+
+function TakeoffImportBadge({
+  source,
+  compact = false,
+}: {
+  source?: RoomDraft["takeoffImportSource"];
+  compact?: boolean;
+}) {
+  if (!source?.importedFromTakeoff) return null;
+  const page = source.sourcePage ?? source.sourcePages?.[0];
+  return (
+    <span className={`takeoff-import-badge${compact ? " takeoff-import-badge--compact" : ""}`} title="Imported from reviewed AI Takeoff">
+      AI Takeoff
+      {page != null ? ` · p.${page}` : ""}
+      {!compact && source.reviewStatus ? ` · ${takeoffReviewStatusLabel(source.reviewStatus)}` : ""}
+    </span>
+  );
 }
 
 /** Label → control → optional hint (hint below control for aligned form rows). */
@@ -200,7 +230,8 @@ export default function RoomScopeBuilder({
   showRoomUseTax = false,
   enableDestructiveGuards = false,
   materialProgramDefault = "elite_100",
-  showMaterialProgram = false
+  showMaterialProgram = false,
+  showTakeoffImportBadges = false
 }: Props) {
   const [colorQ, setColorQ] = React.useState<Record<string, string>>({});
   const [groupFilter, setGroupFilter] = React.useState<Record<string, string>>({});
@@ -420,7 +451,10 @@ export default function RoomScopeBuilder({
         return (
           <div key={room.id} id={roomEditorDomId(room.id)} className="room-card-lite card">
             <div className="room-card-head">
-              <h3 className="room-card-title">Room / Area</h3>
+              <div className="room-card-head-title-wrap">
+                <h3 className="room-card-title">Room / Area</h3>
+                {showTakeoffImportBadges ? <TakeoffImportBadge source={room.takeoffImportSource} /> : null}
+              </div>
               {rooms.length > 1 ? (
                 <button type="button" className="btn secondary btn-danger-quiet" onClick={() => removeRoom(room.id)}>
                   Remove room
@@ -1113,6 +1147,11 @@ export default function RoomScopeBuilder({
                             </div>
                             {grp.pieces.map((p) => (
                               <div key={p.id} className="piece-row grid3 ie-piece-row-simple">
+                                {showTakeoffImportBadges && p.takeoffImportSource?.importedFromTakeoff ? (
+                                  <div className="piece-takeoff-badge-row">
+                                    <TakeoffImportBadge source={p.takeoffImportSource} compact />
+                                  </div>
+                                ) : null}
                                 <label>
                                   Run label
                                   <input

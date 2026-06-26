@@ -1385,3 +1385,22 @@
 | **Reconciliation** | Email/PDF attachment reflects the **last saved revision** snapshot, not unsaved IE edits. |
 | **Impacted files** | `app-internal-estimate/src/lib/customerEstimatePrintSnapshot.ts`, `InternalEstimateApp.tsx`, `backend-core/src/quotes/internalQuotesApi.js`, `backend-core/src/quoteDelivery/customerEstimatePrintSnapshot.js`, `customerEstimatePrintHtml.js`, `customerEstimatePdfBuilder.js`, `quoteDeliveryService.js`, `emailClient.js`, `quoteDeliveryEnv.js`, email modals, this entry. |
 | **Revisit trigger** | Auto-upload to `quote_files`; PDF template redesign; serverless Chromium hosting constraints. |
+
+### 93. AI Takeoff — reviewed takeoff import to Internal Estimate draft (v5.8–v6.0, 2026-06-26)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-06-26 |
+| **Decision** | AI Takeoff import uses **reviewed/approved takeoff snapshots only** (`takeoff_import_v1` via `takeoffImportPayload.mjs`). Raw AI output cannot mutate quotes. Estimator approval gate (`takeoffApprovalGate.mjs`) blocks approval when dimensions, backsplash scope, room completeness, evidence reconciliation, or QA flags remain unresolved. **`POST /api/internal-quotes/import-from-takeoff`** creates an Internal Estimate **draft** (`quote_status=draft`) with `estimate_room_drafts` preloaded from the approved snapshot; account/project/branch/salesperson/pricing/material/color fields remain TBD until estimator completion before quote save. Cutouts are **suggested add-ons**, not material sf deductions. Waterfall/full-height panels import only with explicit reviewed dimensions. |
+| **Workflow statuses** | UI/API layer: `ai_draft` → `needs_review` → `review_complete` → `approved_for_import` → `imported`. DB `review_status` remains `needs_review` / `approved`; import completion tracked in job `metadata.importStatus`. |
+| **Impacted files** | `takeoffReviewStatus.mjs`, `takeoffApprovalGate.mjs`, `takeoffImportPayload.mjs`, `internalQuoteTakeoffImport.mjs`, `takeoffWorkspaceService.mjs`, `internalQuotesApi.js`, `app-ai-takeoff/`, `app-internal-estimate/`, tests, this entry. |
+| **Revisit trigger** | Auto-fill material/color from takeoff notes; bidirectional takeoff↔quote sync; RLS policies on takeoff tables. |
+
+### 94. AI Takeoff import hardening — receipt, detach, checklist (v6.1, 2026-06-26)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-06-26 |
+| **Decision** | Internal Estimate takeoff imports expose a **receipt panel** (plan, approver, snapshot version, CT/BS/FHBS totals, read-only snapshot drawer), **source badges** on imported rooms/pieces, a **completion checklist** (account, project, branch/sales, pricing mode, material per room, add-ons/notes ack, measurements), and **draft-only detach** via `POST /api/internal-quotes/:id/detach-takeoff-import` that removes imported rooms while preserving `takeoff_import.auditEvents` and **not** deleting the source takeoff job. Save/calculate persist `internal_ui.takeoff_import` and emit audit events: `takeoff_import_started/succeeded/failed`, `takeoff_import_detached`, `quote_calculated_from_takeoff_import`, `quote_saved_from_takeoff_import`. No pricing math changes; no auto material/color selection. |
+| **Impacted files** | `internalQuoteTakeoffDetach.mjs`, `internalQuoteTakeoffImportChecklist.mjs`, `internalQuoteTakeoffAudit.mjs`, `internalQuotesApi.js`, `TakeoffImportReceiptPanel.tsx`, `TakeoffImportCompletionChecklist.tsx`, `RoomScopeBuilder.tsx`, `InternalEstimateApp.tsx`, tests, this entry. |
+| **Revisit trigger** | Server-side enforcement of checklist before save; takeoff re-import after detach; cross-head deep links without `VITE_AI_TAKEOFF_HEAD_URL`. |

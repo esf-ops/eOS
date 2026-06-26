@@ -1,8 +1,28 @@
 import React from "react";
 import type { TakeoffImportPlan, ImportPlanRoom, ImportPlanGroup } from "@takeoff-core/takeoffImportPlanner.mjs";
 
+interface ImportPayloadPreview {
+  totals?: {
+    countertopSqft?: number;
+    standardBacksplashSqft?: number;
+    highBacksplashSqft?: number;
+    fullHeightBacksplashSqft?: number;
+    combinedSqft?: number;
+  };
+  suggestedAddOns?: Array<{ type: string; label: string; quantity: number; reviewRequired?: boolean }>;
+  importWarnings?: Array<{ level?: string; message: string }>;
+  unresolvedWarnings?: Array<{ message: string }>;
+}
+
 interface Props {
   importPlan: TakeoffImportPlan;
+  importPayload?: ImportPayloadPreview | null;
+  canImport?: boolean;
+  importBlockedReason?: string | null;
+  onImport?: () => void;
+  importStatus?: "idle" | "importing" | "done" | "error";
+  importMessage?: string | null;
+  workflowStatus?: string;
 }
 
 function ShapeGroupRow({ group }: { group: ImportPlanGroup }) {
@@ -58,20 +78,33 @@ function RoomImportCard({ room }: { room: ImportPlanRoom }) {
   );
 }
 
-export default function TakeoffImportPreview({ importPlan }: Props) {
+export default function TakeoffImportPreview({
+  importPlan,
+  importPayload = null,
+  canImport = false,
+  importBlockedReason = null,
+  onImport,
+  importStatus = "idle",
+  importMessage = null,
+}: Props) {
+  const totals = importPayload?.totals;
+  const ctSf = totals?.countertopSqft ?? importPlan.computedSf.countertopExactSf;
+  const stdBs = totals?.standardBacksplashSqft ?? importPlan.computedSf.backsplashExactSf;
+  const highBs = totals?.highBacksplashSqft ?? 0;
+  const fhbSf = totals?.fullHeightBacksplashSqft ?? 0;
+  const combined = totals?.combinedSqft ?? importPlan.computedSf.combinedExactSf;
+
   return (
     <div className="lab-card import-preview">
-      {/* Status bar */}
-      <div className={`import-status-bar ${importPlan.canImport ? "import-status--ready" : "import-status--blocked"}`}>
-        <span className="import-status-icon">{importPlan.canImport ? "✓" : "✗"}</span>
+      <div className={`import-status-bar ${canImport ? "import-status--ready" : "import-status--blocked"}`}>
+        <span className="import-status-icon">{canImport ? "✓" : "✗"}</span>
         <span className="import-status-text">
-          {importPlan.canImport
-            ? `Import plan ready — ${importPlan.rooms.length} room${importPlan.rooms.length !== 1 ? "s" : ""} mapped to RoomScopeBuilder-compatible groups`
-            : importPlan.blockedReason}
+          {canImport
+            ? `Import ready — ${importPlan.rooms.length} room${importPlan.rooms.length !== 1 ? "s" : ""} will preload into Internal Estimate as a draft`
+            : importBlockedReason ?? importPlan.blockedReason ?? "Resolve approval blockers before import"}
         </span>
       </div>
 
-      {/* Rooms */}
       {importPlan.rooms.length > 0 && (
         <div className="import-rooms-list">
           {importPlan.rooms.map((room, i) => (
@@ -80,43 +113,94 @@ export default function TakeoffImportPreview({ importPlan }: Props) {
         </div>
       )}
 
-      {/* Computed sf */}
       <div className="import-sf-summary">
         <span className="import-sf-item">
-          Countertop: <strong>{importPlan.computedSf.countertopExactSf.toFixed(2)} sf</strong>
+          Countertop: <strong>{ctSf.toFixed(2)} sf</strong>
         </span>
         <span className="import-sf-sep" />
         <span className="import-sf-item">
-          Backsplash: <strong>{importPlan.computedSf.backsplashExactSf.toFixed(2)} sf</strong>
+          Std backsplash: <strong>{stdBs.toFixed(2)} sf</strong>
         </span>
+        {highBs > 0 && (
+          <>
+            <span className="import-sf-sep" />
+            <span className="import-sf-item">
+              High BS: <strong>{highBs.toFixed(2)} sf</strong>
+            </span>
+          </>
+        )}
+        {fhbSf > 0 && (
+          <>
+            <span className="import-sf-sep" />
+            <span className="import-sf-item">
+              Full-height BS: <strong>{fhbSf.toFixed(2)} sf</strong>
+            </span>
+          </>
+        )}
         <span className="import-sf-sep" />
         <span className="import-sf-item">
-          Combined: <strong>{importPlan.computedSf.combinedExactSf.toFixed(2)} sf</strong>
+          Combined: <strong>{combined.toFixed(2)} sf</strong>
         </span>
       </div>
 
-      {/* Plan-level warnings */}
-      {importPlan.warnings.length > 0 && (
+      {(importPayload?.suggestedAddOns?.length ?? 0) > 0 && (
+        <div className="import-addons-preview">
+          <div className="import-plan-warnings-label">Suggested add-ons / cutouts (not material deductions)</div>
+          <ul className="import-addons-list">
+            {importPayload!.suggestedAddOns!.map((a, i) => (
+              <li key={i}>
+                <span className="import-addon-type">{a.type}</span> {a.label}
+                {a.reviewRequired ? " (review)" : ""}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="import-ie-required">
+        <div className="import-plan-warnings-label">Internal Estimate will still require</div>
+        <ul className="import-ie-required-list">
+          <li>Account &amp; project info</li>
+          <li>Branch &amp; salesperson</li>
+          <li>Pricing mode</li>
+          <li>Material group &amp; color</li>
+          <li>Add-ons &amp; notes before quote save</li>
+        </ul>
+      </div>
+
+      {(importPlan.warnings.length > 0 || (importPayload?.importWarnings?.length ?? 0) > 0) && (
         <div className="import-plan-warnings">
           <div className="import-plan-warnings-label">Import warnings</div>
-          {importPlan.warnings.map((w, i) => (
+          {[...importPlan.warnings, ...(importPayload?.importWarnings ?? [])].map((w, i) => (
             <div key={i} className="import-plan-warning-row">
-              <span className={`import-warn-level import-warn--${w.level}`}>{w.level.toUpperCase()}</span>
+              <span className={`import-warn-level import-warn--${w.level ?? "warning"}`}>
+                {(w.level ?? "warning").toUpperCase()}
+              </span>
               <span>{w.message}</span>
             </div>
           ))}
         </div>
       )}
 
-      {/* Disabled import button */}
       <div className="import-action-row">
-        <button className="btn-import-disabled" disabled aria-disabled="true">
-          Import to Internal Estimate — coming later
+        <button
+          type="button"
+          className={canImport ? "btn-import-enabled" : "btn-import-disabled"}
+          disabled={!canImport || importStatus === "importing" || !onImport}
+          onClick={onImport}
+        >
+          {importStatus === "importing"
+            ? "Creating Internal Estimate draft…"
+            : "Import to Internal Estimate"}
         </button>
-        <span className="import-disabled-note">
-          Import is intentionally disabled in the Lab. Approved takeoffs will be importable
-          in a future slice — Internal Estimate import is not enabled yet.
-        </span>
+        {!canImport && (
+          <span className="import-disabled-note">
+            Only reviewed and approved takeoffs can import. Raw AI drafts never mutate quotes.
+          </span>
+        )}
+        {importMessage && (
+          <span className={`import-result-msg import-result-msg--${importStatus}`}>{importMessage}</span>
+        )}
       </div>
     </div>
   );

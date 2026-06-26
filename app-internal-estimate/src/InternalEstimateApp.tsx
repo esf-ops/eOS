@@ -36,7 +36,17 @@ import VisualLayoutCanvas, {
 } from "./VisualLayoutCanvas";
 import { resolveAccessToken } from "./lib/authSession";
 import { QuoteFilesPanel } from "./QuoteFilesPanel";
-import { buildCustomerEstimateDisplayModel } from "./lib/customerEstimateDisplayModel";
+import {
+  buildCustomerEstimateDisplayModel
+} from "./lib/customerEstimateDisplayModel";
+import TakeoffImportReceiptPanel, {
+  type TakeoffImportReceiptMeta,
+} from "./components/internal-estimate/TakeoffImportReceiptPanel";
+import TakeoffImportCompletionChecklist from "./components/internal-estimate/TakeoffImportCompletionChecklist";
+import {
+  evaluateTakeoffImportCompletionChecklist,
+  isActiveTakeoffImport,
+} from "./lib/takeoffImportChecklist";
 import {
   buildCustomerEstimatePrintSnapshot,
   buildCustomerEstimatePrintSnapshotForSave,
@@ -287,6 +297,20 @@ function readQuoteIdFromSearch(): string | null {
   return q && QUOTE_ID_UUID_RE.test(q) ? q : null;
 }
 
+function readAiTakeoffHeadUrl(): string | null {
+  const raw = String(
+    (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_AI_TAKEOFF_HEAD_URL ?? ""
+  ).trim();
+  return raw || null;
+}
+
+function readFromTakeoffFromSearch(): string | null {
+  if (typeof window === "undefined") return null;
+  const q = new URLSearchParams(window.location.search).get("fromTakeoff");
+  return q && QUOTE_ID_UUID_RE.test(q) ? q : null;
+}
+
+
 /**
  * Explicit quote-load lifecycle — avoids overloading `null` to mean both
  * "not requested" and "still loading".
@@ -434,6 +458,12 @@ export default function InternalEstimateApp() {
    *  update the URL-reflected ID without a page reload. Must be declared before
    *  `buildSubmitPayload` / save hooks (TDZ if referenced earlier). */
   const [urlQuoteId, setUrlQuoteId] = useState<string | null>(() => readQuoteIdFromSearch());
+  const [urlFromTakeoffId, setUrlFromTakeoffId] = useState<string | null>(() => readFromTakeoffFromSearch());
+  const [takeoffImportMeta, setTakeoffImportMeta] = useState<TakeoffImportReceiptMeta | null>(null);
+  const [takeoffAddonsReviewed, setTakeoffAddonsReviewed] = useState(false);
+  const [takeoffNotesReviewed, setTakeoffNotesReviewed] = useState(false);
+  const [takeoffDetachBusy, setTakeoffDetachBusy] = useState(false);
+  const [takeoffDetachError, setTakeoffDetachError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!urlQuoteId) {
@@ -840,7 +870,16 @@ export default function InternalEstimateApp() {
         account: accountName.trim() || null,
         account_contact_phone: accountPhone.trim() || null,
         account_contact_email: accountEmail.trim() || null
-      }
+      },
+      ...(takeoffImportMeta && isActiveTakeoffImport(takeoffImportMeta)
+        ? {
+            takeoff_import: takeoffImportMeta,
+            takeoff_import_checklist: {
+              addonsReviewed: takeoffAddonsReviewed,
+              notesReviewed: takeoffNotesReviewed,
+            },
+          }
+        : {}),
     };
   }, [
     buildRoomDraftsForCalculate,
@@ -867,8 +906,124 @@ export default function InternalEstimateApp() {
     customerDisplayGroups,
     comparisonGroupColorLabels,
     customerFacingNotes,
-    INTERNAL_ESTIMATE_ELITE_100_PROGRAM
+    INTERNAL_ESTIMATE_ELITE_100_PROGRAM,
+    takeoffImportMeta,
+    takeoffAddonsReviewed,
+    takeoffNotesReviewed,
   ]);
+
+  const takeoffImportChecklist = useMemo(() => {
+    if (!takeoffImportMeta || !isActiveTakeoffImport(takeoffImportMeta)) return null;
+    const drafts = roomDrafts;
+    let totalSf = 0;
+    if (drafts.length) {
+      const { totals } = calculateAllRoomDrafts(
+        drafts,
+        projectType,
+        internalPricingMode,
+        0,
+        internalMeasureOptions
+      );
+      totalSf = round2(totals.counter + totals.splash + totals.fhb);
+    }
+    return evaluateTakeoffImportCompletionChecklist({
+      accountName,
+      accountPhone,
+      accountEmail,
+      customerName,
+      projectName,
+      projectAddress,
+      city,
+      state,
+      branch,
+      salesRep,
+      internalPricingMode,
+      roomDrafts: drafts,
+      colorTbd,
+      quoteDefaultCatalogId,
+      suggestedAddOnCount: takeoffImportMeta.suggestedAddOns?.length ?? 0,
+      addonsReviewed: takeoffAddonsReviewed,
+      customerFacingNotes,
+      notesReviewed: takeoffNotesReviewed,
+      totalSf,
+    });
+  }, [
+    takeoffImportMeta,
+    roomDrafts,
+    projectType,
+    internalPricingMode,
+    internalMeasureOptions,
+    accountName,
+    accountPhone,
+    accountEmail,
+    customerName,
+    projectName,
+    projectAddress,
+    city,
+    state,
+    branch,
+    salesRep,
+    colorTbd,
+    quoteDefaultCatalogId,
+    takeoffAddonsReviewed,
+    takeoffNotesReviewed,
+    customerFacingNotes,
+  ]);
+
+  const handleDetachTakeoffImport = useCallback(async () => {
+    if (!urlQuoteId || !sessionToken) return;
+    if (!window.confirm("Remove imported takeoff rooms from this draft? Manual rooms are kept. The source takeoff job is not deleted.")) {
+      return;
+    }
+    setTakeoffDetachBusy(true);
+    setTakeoffDetachError(null);
+    try {
+      const token = await ensureAccessToken();
+      if (!token) throw new Error("Session expired — sign in again.");
+      const raw = (await apiPostJson(
+        `/api/internal-quotes/${urlQuoteId}/detach-takeoff-import`,
+        token,
+        {}
+      )) as Record<string, unknown>;
+      if (raw.ok !== true) throw new Error(String(raw.error || "Detach failed"));
+      hydrationRanRef.current = false;
+      setQuoteHydrationStatus("loading");
+      const reload = (await apiGetJson(`/api/internal-quotes/${urlQuoteId}`, token)) as Record<string, unknown>;
+      if (reload.ok === true && reload.quote) {
+        hydrationRanRef.current = true;
+        const q = reload.quote as Record<string, unknown>;
+        const snap = (q.calculation_snapshot as Record<string, unknown>) || {};
+        const iu = (snap.internal_ui as Record<string, unknown>) || {};
+        const ti = iu.takeoff_import as Record<string, unknown> | undefined;
+        if (ti) {
+          setTakeoffImportMeta((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  status: ti.status != null ? String(ti.status) : "detached",
+                  auditEvents: Array.isArray(ti.auditEvents)
+                    ? (ti.auditEvents as TakeoffImportReceiptMeta["auditEvents"])
+                    : prev.auditEvents,
+                }
+              : null
+          );
+        }
+        const roomDraftsPayload = iu.estimate_room_drafts;
+        const roomsPayload = iu.estimate_rooms;
+        if (Array.isArray(roomDraftsPayload) && roomDraftsPayload.length) {
+          setRoomDrafts(hydrateRoomDraftsFromInternalUi(roomDraftsPayload, roomsPayload));
+        } else {
+          setRoomDrafts([createEstimatorRoom("Group Promo")]);
+        }
+        setQuoteHydrationStatus("loaded");
+        setSubmitMsg("Imported takeoff removed from this draft.");
+      }
+    } catch (e) {
+      setTakeoffDetachError(friendlyApiErrorMessage(e, "detach-takeoff-import", "remove imported takeoff").userMessage);
+    } finally {
+      setTakeoffDetachBusy(false);
+    }
+  }, [urlQuoteId, sessionToken, ensureAccessToken]);
 
   const computeRevisionBaselineSig = useCallback((): string => {
     const p = buildCalcPayload();
@@ -2104,6 +2259,54 @@ export default function InternalEstimateApp() {
         if (q.project_type) setProjectType(String(q.project_type));
         const snap = (q.calculation_snapshot as Record<string, unknown>) || {};
         const iu = (snap.internal_ui as Record<string, unknown>) || {};
+        const takeoffImport = iu.takeoff_import;
+        if (takeoffImport && typeof takeoffImport === "object") {
+          const ti = takeoffImport as Record<string, unknown>;
+          const totalsRaw = ti.totals && typeof ti.totals === "object" ? (ti.totals as Record<string, unknown>) : {};
+          setTakeoffImportMeta({
+            status: ti.status != null ? String(ti.status) : "active",
+            schemaVersion: ti.schemaVersion != null ? String(ti.schemaVersion) : null,
+            takeoffJobId: ti.takeoffJobId != null ? String(ti.takeoffJobId) : urlFromTakeoffId,
+            takeoffSnapshotId: ti.takeoffSnapshotId != null ? String(ti.takeoffSnapshotId) : null,
+            sourceFileName: ti.sourceFileName != null ? String(ti.sourceFileName) : null,
+            approvedBy: ti.approvedBy != null ? String(ti.approvedBy) : null,
+            approvedAt: ti.approvedAt != null ? String(ti.approvedAt) : null,
+            importedAt: ti.importedAt != null ? String(ti.importedAt) : null,
+            importedBy: ti.importedBy != null ? String(ti.importedBy) : null,
+            importedRoomIds: Array.isArray(ti.importedRoomIds)
+              ? ti.importedRoomIds.map((id) => String(id))
+              : undefined,
+            totals: {
+              countertopSqft: Number(totalsRaw.countertopSqft) || undefined,
+              standardBacksplashSqft: Number(totalsRaw.standardBacksplashSqft) || undefined,
+              highBacksplashSqft: Number(totalsRaw.highBacksplashSqft) || undefined,
+              fullHeightBacksplashSqft: Number(totalsRaw.fullHeightBacksplashSqft) || undefined,
+              combinedSqft: Number(totalsRaw.combinedSqft) || undefined,
+            },
+            suggestedAddOns: Array.isArray(ti.suggestedAddOns)
+              ? (ti.suggestedAddOns as TakeoffImportReceiptMeta["suggestedAddOns"])
+              : undefined,
+            importWarnings: Array.isArray(ti.importWarnings)
+              ? (ti.importWarnings as TakeoffImportReceiptMeta["importWarnings"])
+              : undefined,
+            snapshot: ti.snapshot ?? null,
+            auditEvents: Array.isArray(ti.auditEvents)
+              ? (ti.auditEvents as TakeoffImportReceiptMeta["auditEvents"])
+              : undefined,
+          });
+          const tic = iu.takeoff_import_checklist;
+          if (tic && typeof tic === "object") {
+            const checklist = tic as Record<string, unknown>;
+            if (checklist.addonsReviewed != null) setTakeoffAddonsReviewed(Boolean(checklist.addonsReviewed));
+            if (checklist.notesReviewed != null) setTakeoffNotesReviewed(Boolean(checklist.notesReviewed));
+          }
+        } else if (urlFromTakeoffId) {
+          setTakeoffImportMeta({ takeoffJobId: urlFromTakeoffId, status: "active" });
+        } else {
+          setTakeoffImportMeta(null);
+          setTakeoffAddonsReviewed(false);
+          setTakeoffNotesReviewed(false);
+        }
         const ji = iu.job_info;
         if (ji && typeof ji === "object") {
           const j = ji as Record<string, unknown>;
@@ -2508,6 +2711,33 @@ export default function InternalEstimateApp() {
           </div>
         </section>
 
+      {takeoffImportMeta && isActiveTakeoffImport(takeoffImportMeta) ? (
+        <>
+          <TakeoffImportReceiptPanel
+            meta={takeoffImportMeta}
+            takeoffLabUrl={readAiTakeoffHeadUrl() ?? undefined}
+            quoteStatus={quoteWorkflowStatus}
+            onDetach={urlQuoteId ? handleDetachTakeoffImport : undefined}
+            detachBusy={takeoffDetachBusy}
+            detachError={takeoffDetachError}
+          />
+          {takeoffImportChecklist ? (
+            <TakeoffImportCompletionChecklist
+              items={takeoffImportChecklist.items}
+              score={takeoffImportChecklist.score}
+              readyToCalculate={takeoffImportChecklist.readyToCalculate}
+              addonsReviewed={takeoffAddonsReviewed}
+              onMarkAddonsReviewed={setTakeoffAddonsReviewed}
+              onMarkNotesReviewed={setTakeoffNotesReviewed}
+              notesReviewed={takeoffNotesReviewed}
+              suggestedAddOnCount={takeoffImportMeta.suggestedAddOns?.length ?? 0}
+            />
+          ) : null}
+        </>
+      ) : takeoffImportMeta?.status === "detached" ? (
+        <TakeoffImportReceiptPanel meta={takeoffImportMeta} />
+      ) : null}
+
       {urlQuoteId ? (
         <div
           className={`ie-url-banner${hydratedIsCurrentRevision === false ? " is-older-rev" : loadedFromLibrary ? " is-loaded" : " is-loading"}`}
@@ -2850,6 +3080,7 @@ export default function InternalEstimateApp() {
               eliteProgramColors={eliteColors}
               hideRapidLinear
               enableDestructiveGuards
+              showTakeoffImportBadges={Boolean(takeoffImportMeta && isActiveTakeoffImport(takeoffImportMeta))}
             />
           </section>
 

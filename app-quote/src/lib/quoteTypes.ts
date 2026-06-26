@@ -14,6 +14,16 @@ export type PieceShape = "rect" | "tri";
 
 export type GuidedPieceType = "counter" | "splash" | "fhb";
 
+/** Metadata preserved when a room/piece was imported from reviewed AI Takeoff. */
+export type TakeoffImportSourceMeta = {
+  importedFromTakeoff: boolean;
+  takeoffJobId?: string | null;
+  takeoffSnapshotId?: string | null;
+  sourcePage?: number | null;
+  sourcePages?: number[];
+  reviewStatus?: "approved" | "edited" | "manual_added" | "reviewed";
+};
+
 export type GuidedPiece = {
   id: string;
   pieceType: GuidedPieceType;
@@ -29,6 +39,8 @@ export type GuidedPiece = {
   materialColor?: string;
   materialSupplier?: string;
   materialType?: string;
+  /** Present when piece originated from reviewed AI Takeoff import. */
+  takeoffImportSource?: TakeoffImportSourceMeta;
 };
 
 export type EliteProgramColorRow = {
@@ -172,6 +184,8 @@ export type RoomDraft = {
     /** Optional vertical side splash pieces (4″ × vanity depth) — None / Qty 1 / Qty 2. */
     sideSplashQty?: 0 | 1 | 2;
   };
+  /** Present when room originated from reviewed AI Takeoff import. */
+  takeoffImportSource?: TakeoffImportSourceMeta;
 };
 
 export type MeasuredRoom = {

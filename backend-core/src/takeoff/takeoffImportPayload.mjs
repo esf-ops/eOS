@@ -1,0 +1,356 @@
+/**
+ * takeoffImportPayload — approved takeoff snapshot for Internal Estimate import (v5.9).
+ *
+ * Builds schemaVersion takeoff_import_v1 from reviewed takeoff + review state.
+ * Raw AI output is never authoritative — only included, reviewed pieces import.
+ *
+ * @module takeoffImportPayload
+ */
+
+import { computeTakeoffMeasurements } from "./takeoffMeasurementCalc.mjs";
+import { planTakeoffImport } from "./takeoffImportPlanner.mjs";
+import { TAKEOFF_STATUS } from "./takeoffContract.mjs";
+import {
+  applyReviewFiltersToTakeoffResult,
+  classifyBacksplashTotals,
+  evaluateTakeoffApprovalGate,
+} from "./takeoffApprovalGate.mjs";
+import { emptyReviewState, normalizeReviewState } from "./takeoffReviewStatus.mjs";
+
+export const TAKEOFF_IMPORT_SCHEMA_VERSION = "takeoff_import_v1";
+
+const CUTOUT_KEYWORDS = /\b(sink|cooktop|faucet|cord\s*hole|cutout|cook\s*top)\b/i;
+
+function round2(n) {
+  return Math.round(Number(n) * 100) / 100;
+}
+
+function sfFromRun(lengthIn, depthIn) {
+  const l = Number(lengthIn) || 0;
+  const d = Number(depthIn) || 0;
+  if (l <= 0 || d <= 0) return 0;
+  return round2((l * d) / 144);
+}
+
+function resolvePieceType(run) {
+  if (run.pieceType === "splash" || run.isBacksplash) return "splash";
+  if (run.pieceType === "fhb") return "fhb";
+  return "counter";
+}
+
+function backsplashMetaForRun(run, area) {
+  const pt = resolvePieceType(run);
+  if (pt === "counter") {
+    if ((area.backsplashScope === "no_stone" || area.backsplashScope === "tile_by_others")) {
+      return { scope: area.backsplashScope, heightIn: 0, linearIn: 0, sqft: 0, type: "none" };
+    }
+    return null;
+  }
+  const h = Number(run.depthIn) || area.backsplashHeightIn || 4;
+  let type = "standard";
+  if (pt === "fhb" || h >= 48) type = "full_height";
+  else if (h > 4.5) type = "high";
+  return {
+    scope: area.backsplashScope ?? "stone",
+    heightIn: h,
+    linearIn: Number(run.lengthIn) || 0,
+    sqft: sfFromRun(run.lengthIn, run.depthIn),
+    type,
+  };
+}
+
+function collectSuggestedAddOns(takeoffResult) {
+  /** @type {Array<{ type: string, label: string, quantity: number, sourceNote: string, reviewRequired: boolean }>} */
+  const addOns = [];
+  const seen = new Set();
+
+  for (const room of takeoffResult.rooms ?? []) {
+    for (const area of room.areas ?? []) {
+      for (const note of [...(area.notes ?? []), ...(area.assumptions ?? []), ...(room.notes ?? [])]) {
+        if (!CUTOUT_KEYWORDS.test(note)) continue;
+        const key = note.trim().toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        let type = "fabrication_note";
+        if (/sink/i.test(note)) type = "sink_cutout";
+        else if (/cooktop|cook top/i.test(note)) type = "cooktop_cutout";
+        else if (/faucet/i.test(note)) type = "faucet_cutout";
+        else if (/cord/i.test(note)) type = "cord_hole";
+        addOns.push({
+          type,
+          label: note.trim().slice(0, 120),
+          quantity: 1,
+          sourceNote: note.trim(),
+          reviewRequired: false,
+        });
+      }
+      for (const ex of area.exclusions ?? []) {
+        const label = typeof ex === "string" ? ex : String(ex?.label ?? ex?.note ?? "");
+        if (!label || !CUTOUT_KEYWORDS.test(label)) continue;
+        const key = `ex:${label.trim().toLowerCase()}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        addOns.push({
+          type: "fabrication_note",
+          label: label.trim(),
+          quantity: 1,
+          sourceNote: label.trim(),
+          reviewRequired: true,
+        });
+      }
+    }
+  }
+  return addOns;
+}
+
+/**
+ * Build the approved import payload. Throws if approval gate blockers remain.
+ *
+ * @param {{
+ *   takeoffJobId: string,
+ *   takeoffResultId?: string|null,
+ *   takeoffResult: object,
+ *   reviewState?: object|null,
+ *   computed?: object|null,
+ *   validation?: object|null,
+ *   qaGate?: object|null,
+ *   dimensionEvidence?: object|null,
+ *   sourceFileName?: string|null,
+ *   approvedBy?: string|null,
+ *   approvedAt?: string|null,
+ *   createdBy?: string|null,
+ *   requireApproved?: boolean,
+ *   reviewStatus?: string|null,
+ * }} params
+ */
+export function buildTakeoffImportPayload(params) {
+  const {
+    takeoffJobId,
+    takeoffResultId = null,
+    takeoffResult,
+    reviewState = null,
+    computed = null,
+    validation = null,
+    qaGate = null,
+    dimensionEvidence = null,
+    sourceFileName = null,
+    approvedBy = null,
+    approvedAt = null,
+    createdBy = null,
+    requireApproved = true,
+    reviewStatus = "approved",
+  } = params;
+
+  const rs = reviewState ? normalizeReviewState(reviewState) : emptyReviewState();
+  const gate = evaluateTakeoffApprovalGate({
+    takeoffResult,
+    computed,
+    validation,
+    qaGate,
+    dimensionEvidence,
+    reviewState: rs,
+    hasSavedResult: true,
+    hasUnsavedEdits: false,
+    reviewStatus,
+  });
+
+  if (requireApproved && reviewStatus !== "approved") {
+    throw new Error("Takeoff must be approved before building import payload.");
+  }
+  if (gate.blockers.length > 0) {
+    const first = gate.blockers[0];
+    throw new Error(first.message ?? "Approval blockers prevent import payload.");
+  }
+
+  const filtered = applyReviewFiltersToTakeoffResult(takeoffResult, rs);
+  const importReady = {
+    ...filtered,
+    status: TAKEOFF_STATUS.APPROVED,
+  };
+
+  const freshComputed = computed ?? computeTakeoffMeasurements(importReady);
+  const bsTotals = classifyBacksplashTotals(importReady, rs);
+  const importPlan = planTakeoffImport(importReady, freshComputed);
+  const suggestedAddOns = collectSuggestedAddOns(importReady);
+
+  /** @type {import('./takeoffImportPayload.mjs').TakeoffImportPayloadV1} */
+  const payload = {
+    schemaVersion: TAKEOFF_IMPORT_SCHEMA_VERSION,
+    takeoffJobId,
+    takeoffResultId,
+    sourceFileName,
+    approvedBy,
+    approvedAt,
+    totals: {
+      countertopSqft: bsTotals.countertopSqft,
+      standardBacksplashSqft: bsTotals.standardBacksplashSqft,
+      highBacksplashSqft: bsTotals.highBacksplashSqft,
+      fullHeightBacksplashSqft: bsTotals.fullHeightBacksplashSqft,
+      combinedSqft: bsTotals.combinedSqft,
+      chargeableCountertopSqft: freshComputed.chargeableCountertopSf,
+      chargeableBacksplashSqft: freshComputed.chargeableBacksplashSf,
+    },
+    rooms: [],
+    suggestedAddOns,
+    unresolvedWarnings: (validation?.diagnostics ?? [])
+      .filter((d) => d.level === "warning")
+      .map((d) => ({ code: d.code, message: d.message, path: d.path ?? null })),
+    importWarnings: importPlan.warnings.map((w) => ({
+      code: w.code,
+      level: w.level,
+      message: w.message,
+      path: w.path ?? null,
+    })),
+    audit: {
+      createdBy,
+      createdAt: approvedAt ?? new Date().toISOString(),
+      approvedBy,
+      approvedAt,
+    },
+  };
+
+  for (const room of importReady.rooms ?? []) {
+    const planRoom = importPlan.rooms.find((pr) => pr.roomId === room.id);
+    /** @type {import('./takeoffImportPayload.mjs').TakeoffImportRoom} */
+    const importRoom = {
+      name: room.name,
+      type: room.roomType ?? room.type ?? null,
+      sourcePages: room.sourcePages ?? [],
+      pieces: [],
+      suggestedAddOns: suggestedAddOns.filter((a) =>
+        a.sourceNote.toLowerCase().includes(String(room.name).toLowerCase())
+      ),
+    };
+
+    for (let ai = 0; ai < (room.areas ?? []).length; ai++) {
+      const area = room.areas[ai];
+      for (let ri = 0; ri < (area.runs ?? []).length; ri++) {
+        const run = area.runs[ri];
+        const pt = resolvePieceType(run);
+        const isWaterfall =
+          pt === "fhb" ||
+          String(run.label ?? "").toLowerCase().includes("waterfall");
+        if (isWaterfall) {
+          const len = Number(run.lengthIn) || 0;
+          const dep = Number(run.depthIn) || 0;
+          if (len <= 0 || dep <= 0) continue;
+        }
+
+        importRoom.pieces.push({
+          name: run.label,
+          pieceType: pt,
+          shapeType: run.shape ?? "rect",
+          lengthIn: Number(run.lengthIn) || 0,
+          depthIn: Number(run.depthIn) || 0,
+          sqft: sfFromRun(run.lengthIn, run.depthIn),
+          chargeableSqft: sfFromRun(run.lengthIn, run.depthIn),
+          includedInTakeoff: true,
+          sourcePage: run.sourcePage ?? area.sourcePages?.[0] ?? null,
+          sourceEvidenceIds: run.sourceEvidenceIds ?? [],
+          reviewStatus: "approved",
+          backsplash: backsplashMetaForRun(run, area),
+        });
+      }
+    }
+
+    if (planRoom?.guidedShapeGroups?.length) {
+      importRoom.guidedShapeGroups = planRoom.guidedShapeGroups;
+    }
+
+    payload.rooms.push(importRoom);
+  }
+
+  return payload;
+}
+
+/**
+ * Convert import payload → Internal Estimate estimate_room_drafts shape.
+ *
+ * @param {TakeoffImportPayloadV1} payload
+ */
+export function takeoffImportPayloadToRoomDrafts(payload) {
+  const drafts = [];
+  const jobId = payload.takeoffJobId ?? null;
+  const snapshotId = payload.takeoffResultId ?? null;
+
+  for (const room of payload.rooms ?? []) {
+    const roomSourcePages = room.sourcePages ?? [];
+    const roomSource = {
+      importedFromTakeoff: true,
+      takeoffJobId: jobId,
+      takeoffSnapshotId: snapshotId,
+      sourcePages: roomSourcePages,
+      sourcePage: roomSourcePages[0] ?? null,
+      reviewStatus: "approved",
+    };
+
+    const groups = room.guidedShapeGroups ?? [];
+    const pieceMetaByLabel = new Map(
+      (room.pieces ?? []).map((p) => [String(p.name), p])
+    );
+
+    drafts.push({
+      id: `takeoff-${room.name.replace(/\s+/g, "-").toLowerCase()}-${drafts.length}`,
+      name: room.name,
+      roomType: room.type ?? "Kitchen",
+      calcMode: "Guided Shape",
+      takeoffImportSource: roomSource,
+      guidedShapeGroups: groups.map((g) => ({
+        id: g.label.replace(/\s+/g, "-").toLowerCase(),
+        name: g.label,
+        shapeType: g.shapeType,
+        overlapMode: g.overlapMode ?? "none",
+        backsplashMode: g.backsplashMode ?? "include",
+        pieces: (g.pieces ?? []).map((p) => {
+          const meta = pieceMetaByLabel.get(String(p.label));
+          return {
+            id: `p-${p.label}`,
+            name: p.label,
+            pieceType: p.pieceType,
+            lengthIn: p.lengthIn,
+            depthIn: p.depthIn,
+            shape: p.shape ?? "rect",
+            takeoffImportSource: {
+              importedFromTakeoff: true,
+              takeoffJobId: jobId,
+              takeoffSnapshotId: snapshotId,
+              sourcePage: meta?.sourcePage ?? roomSourcePages[0] ?? null,
+              reviewStatus: meta?.reviewStatus ?? "approved",
+            },
+          };
+        }),
+      })),
+      addons: {},
+      notes: "",
+      materialGroup: null,
+      catalogColorId: null,
+    });
+  }
+  return drafts;
+}
+
+/**
+ * @typedef {Object} TakeoffImportPayloadV1
+ * @property {string} schemaVersion
+ * @property {string} takeoffJobId
+ * @property {string|null} takeoffResultId
+ * @property {string|null} sourceFileName
+ * @property {string|null} approvedBy
+ * @property {string|null} approvedAt
+ * @property {object} totals
+ * @property {TakeoffImportRoom[]} rooms
+ * @property {object[]} suggestedAddOns
+ * @property {object[]} unresolvedWarnings
+ * @property {object[]} importWarnings
+ * @property {object} audit
+ */
+
+/**
+ * @typedef {Object} TakeoffImportRoom
+ * @property {string} name
+ * @property {string|null} type
+ * @property {number[]} sourcePages
+ * @property {object[]} pieces
+ * @property {object[]} [guidedShapeGroups]
+ * @property {object[]} [suggestedAddOns]
+ */
