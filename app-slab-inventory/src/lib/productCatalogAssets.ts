@@ -218,6 +218,34 @@ const PRODUCT_CATALOG_ASSET_OVERRIDES: ProductCatalogAssetOverride[] = [
     productId: "kansas-ws32-ss-wsum18-41",
     sourceNotes: "Kansas Sinks Program",
   },
+  {
+    productId: "kansas-3221um16-60-40-21",
+    sourceNotes: "Kansas Sinks Program",
+  },
+  {
+    productId: "kansas-3221um18-60-40-22",
+    sourceNotes: "Kansas Sinks Program",
+  },
+  {
+    productId: "kansas-3221um18r-40-60-23",
+    sourceNotes: "Kansas Sinks Program",
+  },
+  {
+    productId: "kansas-1518um18-3",
+    sourceNotes: "Kansas Sinks Program",
+  },
+  {
+    productId: "kansas-r10-ss-bl-r103219um18black-24",
+    sourceNotes: "Kansas Sinks Program",
+  },
+  {
+    productId: "kansas-r15-50-50um18-27",
+    sourceNotes: "Kansas Sinks Program",
+  },
+  {
+    productId: "kansas-r15-60-40um18-28",
+    sourceNotes: "Kansas Sinks Program",
+  },
 ];
 
 const OVERRIDE_BY_ID = new Map(
