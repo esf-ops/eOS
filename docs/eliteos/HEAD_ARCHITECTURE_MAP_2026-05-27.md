@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-27  
 **Phase:** Stabilization / refinement (analysis only)  
-**Related:** [STABILIZATION_PLAN_2026-05-27.md](./STABILIZATION_PLAN_2026-05-27.md) · [MONOLITH_EXTRACTION_INVENTORY_2026-05-27.md](./MONOLITH_EXTRACTION_INVENTORY_2026-05-27.md) · [STABILIZATION_QA_LOG_2026-05-27.md](./STABILIZATION_QA_LOG_2026-05-27.md) · [FEATURE_DECISIONS.md](./FEATURE_DECISIONS.md)
+**Related:** [STABILIZATION_PLAN_2026-05-27.md](./STABILIZATION_PLAN_2026-05-27.md) · [MONOLITH_EXTRACTION_INVENTORY_2026-05-27.md](./MONOLITH_EXTRACTION_INVENTORY_2026-05-27.md) · [STABILIZATION_QA_LOG_2026-05-27.md](./STABILIZATION_QA_LOG_2026-05-27.md) · [FEATURE_DECISIONS.md](./FEATURE_DECISIONS.md) · [SHARED_UI_ARCHITECTURE.md](./SHARED_UI_ARCHITECTURE.md)
 
 ---
 
@@ -17,6 +17,12 @@
 | **Home / Profile & Preferences** | User-owned display preferences and identity surface; not permission source of truth. |
 
 **Header/shell rule:** Workspace name, user chip, and menu links should **look and behave consistently** across protected heads, but **permission truth stays on the Brain**. Do not build a large shared component library until small extractions prove stable ([MONOLITH_EXTRACTION_INVENTORY_2026-05-27.md](./MONOLITH_EXTRACTION_INVENTORY_2026-05-27.md)).
+
+### Shared UI architecture (Phase 0)
+
+Component inventory, head ownership boundaries, admin-configurable settings map, Account Directory future model, go-live guardrails, and phased roadmap live in **[SHARED_UI_ARCHITECTURE.md](./SHARED_UI_ARCHITECTURE.md)**. Contribution rules: **[SHARED_UI_CONTRIBUTING.md](./SHARED_UI_CONTRIBUTING.md)**.
+
+Phase 0 is **docs only** — no shared CSS imports into production heads and no Internal Estimate / Quote Library refactors before Elite 100 go-live.
 
 ---
 
@@ -694,3 +700,4 @@ Post-deploy: confirm `GET /api/sales/kpi-v1` and `dashboard-foundation` not 404;
 | Date | Change |
 |------|--------|
 | 2026-05-27 | Initial head-by-head map for six stabilization heads |
+| 2026-06-29 | Added Shared UI architecture pointer (Phase 0 docs) |
