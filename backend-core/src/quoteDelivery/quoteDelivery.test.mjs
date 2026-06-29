@@ -785,6 +785,14 @@ function testPrintSnapshotParseAndFilename() {
     buildCustomerEstimatePdfFilename("ESF-LIS-000042", "R2"),
     "Elite Stone Fabrication Estimate - ESF-LIS-000042-R2.pdf"
   );
+  assert.equal(
+    buildCustomerEstimatePdfFilename("ESF-DYER-000098-R2", "R2"),
+    "Elite Stone Fabrication Estimate - ESF-DYER-000098-R2.pdf"
+  );
+  assert.equal(
+    buildCustomerEstimatePdfFilename("ESF-DYER-000098-R2", null),
+    "Elite Stone Fabrication Estimate - ESF-DYER-000098-R2.pdf"
+  );
   const loaded = loadPrintSnapshotFromQuoteRow(internalQuoteRow());
   assert.ok(loaded?.snapshot);
   assert.equal(loaded.reconciled, true);
@@ -832,6 +840,18 @@ function testPrintHtmlUsesSharedCustomerEstimateDocument() {
   assert.ok(html.includes("cep-estimate-summary"));
   assert.ok(html.includes("Estimated project total"));
   assert.ok(!html.includes("border-bottom:1px solid #cbd5e1"), "legacy inline-style HTML builder removed");
+}
+
+function testPrintHtmlEmbedsSharedPrintAndPdfCss() {
+  const html = buildCustomerEstimatePrintHtml(makePrintSnapshot());
+  assert.ok(html.includes("@media print"), "backend HTML embeds shared @media print CSS");
+  assert.ok(html.includes("cep-comparison-print"), "backend HTML includes compact print overrides");
+  assert.ok(html.includes("grid-template-columns:repeat(3,1fr)") || html.includes("repeat(3, 1fr)"),
+    "backend HTML includes footer grid safeguards");
+  assert.ok(html.includes("size: letter portrait"), "backend HTML uses browser-matched @page size");
+  assert.ok(html.includes("margin: 0.32in 0.38in"), "backend HTML uses browser-matched @page margins");
+  assert.ok(html.includes("cep-branches"), "footer branch block present");
+  assert.ok(html.includes("cep-sig-line-inline"), "signature rows present");
 }
 
 async function testPreviewReturnsPdfMetadataOnly() {
@@ -1066,6 +1086,7 @@ async function runAll() {
   testPatchPrintSnapshotQuoteNumberForCreateSave();
   testPrintHtmlCustomerSafe();
   testPrintHtmlUsesSharedCustomerEstimateDocument();
+  testPrintHtmlEmbedsSharedPrintAndPdfCss();
   await testPreviewReturnsPdfMetadataOnly();
   await testLegacyQuoteWithoutPrintSnapshotWarns();
   await testPdfBuilderDisabledSafely();

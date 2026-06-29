@@ -40,7 +40,8 @@ export async function renderHtmlToPdfBytes(html) {
     const pdfUint8 = await page.pdf({
       format: "Letter",
       printBackground: true,
-      margin: { top: "0.45in", right: "0.45in", bottom: "0.45in", left: "0.45in" }
+      preferCSSPageSize: true,
+      margin: { top: "0", right: "0", bottom: "0", left: "0" }
     });
     return { ok: true, buffer: Buffer.from(pdfUint8) };
   } catch (e) {

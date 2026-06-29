@@ -38,8 +38,16 @@ export function printSnapshotMatchesCustomerDisplayTotal(snapshot, customerDispl
 export function buildCustomerEstimatePdfFilename(quoteNumber, revisionLabel) {
   const qn = String(quoteNumber ?? "").trim();
   const rev = String(revisionLabel ?? "").trim();
-  const suffix = rev ? `-${rev}` : "";
-  return `Elite Stone Fabrication Estimate - ${qn}${suffix}.pdf`;
+  if (!qn) return "Elite Stone Fabrication Estimate.pdf";
+  if (!rev) {
+    return `Elite Stone Fabrication Estimate - ${qn}.pdf`;
+  }
+  const normalizedRev = rev.startsWith("-") ? rev.slice(1) : rev;
+  const revSuffix = rev.startsWith("-") ? rev : `-${rev}`;
+  if (qn.endsWith(revSuffix) || qn.endsWith(`-${normalizedRev}`) || qn.endsWith(normalizedRev)) {
+    return `Elite Stone Fabrication Estimate - ${qn}.pdf`;
+  }
+  return `Elite Stone Fabrication Estimate - ${qn}${revSuffix}.pdf`;
 }
 
 /**

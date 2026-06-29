@@ -1,0 +1,75 @@
+/**
+ * PDF-only layout safeguards (embedded in backend Chromium HTML).
+ * Prevents footer/branch columns from collapsing to letter-by-letter wraps.
+ */
+.customer-estimate-print {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.cep-closing {
+  width: 100%;
+  max-width: 100%;
+}
+
+.cep-footer-terms-sig {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.cep-signature-block {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.cep-sig-line-inline {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.cep-sig-role {
+  white-space: nowrap;
+  word-break: normal;
+}
+
+.cep-branches {
+  width: 100%;
+  max-width: 100%;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  box-sizing: border-box;
+}
+
+.cep-branch {
+  min-width: 0;
+  white-space: normal;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+.cep-branch strong,
+.cep-branch span {
+  display: block;
+  white-space: normal;
+  word-break: normal;
+}
+
+.cep-website {
+  width: 100%;
+  white-space: nowrap;
+}
+
+.cep-table {
+  width: 100%;
+  table-layout: auto;
+}
+
+.cep-overview-grid {
+  width: 100%;
+  box-sizing: border-box;
+}
