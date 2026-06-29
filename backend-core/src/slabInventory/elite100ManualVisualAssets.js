@@ -136,8 +136,10 @@ function catalogItemFromDbRow(row) {
 /** Strip finish suffixes and duplicate trailing index numbers from filename color tokens. */
 export function extractFilenameColorTokens(parsed) {
   let text = String(parsed?.colorText ?? "").trim();
-  text = text.replace(/\b(polished|leathered|honed|brushed)\b/gi, "").trim();
+  text = text.replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
+  text = text.replace(/\b(polished|leathered|honed|brushed|matte|satin)\b/gi, "").trim();
   text = text.replace(/\s+\d{1,3}$/, "").trim();
+  text = text.replace(/[\s\-_]+$/g, "").trim();
 
   let slug = slugifyElite100ColorName(text);
   if (parsed?.globalIndex != null) {
@@ -167,6 +169,8 @@ export const ELITE100_MATCH_STATUS = Object.freeze({
   GLOBAL_INDEX_NAME_CONFLICT: "global_index_name_conflict",
   CATALOG_COLOR_MISSING: "catalog_color_missing",
   AMBIGUOUS: "ambiguous",
+  INVALID_INDEX: "invalid_index",
+  DUPLICATE_TARGET: "duplicate_target",
 });
 
 /** Chris-approved photo filename → catalog color aliases (from elite100-2026-alias-review-seed). */
@@ -179,6 +183,12 @@ export const ELITE100_PHOTO_FILENAME_COLOR_ALIASES = Object.freeze([
   { source_color_name: "Skys The Limit", catalog_color_name: "Sky's the Limit" },
   { source_color_name: "Larvik", catalog_color_name: "Larvic" },
   { source_color_name: "Whitendale", catalog_color_name: "Whitenedale" },
+  // Approved in elite100-2026-alias-review-seed-batch2.json (finish-suffix / vendor spellings)
+  { source_color_name: "Regal Soapstone Matte", catalog_color_name: "Regal Soapstone" },
+  { source_color_name: "Newport", catalog_color_name: "Newport Polished" },
+  { source_color_name: "Bellini", catalog_color_name: "Bellini Honed" },
+  { source_color_name: "Calacatta Zenith", catalog_color_name: "Zenith" },
+  { source_color_name: "Aura Taj", catalog_color_name: "Aurataj" },
 ]);
 
 /**
@@ -416,6 +426,13 @@ export function matchPhotoToCatalogItem(filename, catalogItems, fixtureFlat = []
     });
   }
 
+  const indexCatalogItem = parsed.globalIndex != null
+    ? resolveCatalogItem(
+        ctx.byGlobal.get(parsed.globalIndex) ?? ctx.fixtureByGlobal.get(parsed.globalIndex),
+        ctx
+      )
+    : null;
+
   const tokens = extractFilenameColorTokens(parsed);
   const hasColorToken = Boolean(tokens.normalized || tokens.slug);
 
@@ -429,19 +446,109 @@ export function matchPhotoToCatalogItem(filename, catalogItems, fixtureFlat = []
       candidates: nameMatches,
     });
   }
+
   if (nameMatches.length === 1) {
     const hit = nameMatches[0];
+    const nameItem = hit.catalogItem;
     const confidenceByMethod = {
       color_slug: 0.95,
       color_name: 0.9,
       photo_filename_alias: 0.92,
+      mapping_override: 1,
     };
+
+    if (parsed.globalIndex != null) {
+      if (!indexCatalogItem) {
+        return matchResult({
+          matchMethod: "invalid_index",
+          matchStatus: ELITE100_MATCH_STATUS.INVALID_INDEX,
+          parsed,
+          warnings: ["invalid_index"],
+          candidates: [{
+            name_match_color: nameItem.color_name,
+            suggested_global_index: nameItem.global_index ?? null,
+          }],
+        });
+      }
+
+      const indexKey =
+        indexCatalogItem.id ??
+        `${indexCatalogItem.normalized_color_name}||${indexCatalogItem.normalized_material_name}`;
+      const nameKey =
+        nameItem.id ??
+        `${nameItem.normalized_color_name}||${nameItem.normalized_material_name}`;
+
+      if (indexKey !== nameKey) {
+        return matchResult({
+          matchMethod: "global_index_name_conflict",
+          matchStatus: ELITE100_MATCH_STATUS.GLOBAL_INDEX_NAME_CONFLICT,
+          parsed,
+          warnings: ["global_index_name_conflict"],
+          conflictCatalogItem: indexCatalogItem,
+          candidates: [{
+            name_match_color: nameItem.color_name,
+            name_match_global_index: nameItem.global_index ?? null,
+            index_catalog_color: indexCatalogItem.color_name,
+            index_global_index: parsed.globalIndex,
+          }],
+        });
+      }
+
+      return matchResult({
+        catalogItem: nameItem,
+        matchMethod: hit.matchMethod,
+        matchStatus: ELITE100_MATCH_STATUS.SAFE,
+        confidence: confidenceByMethod[hit.matchMethod] ?? 0.98,
+        parsed,
+        indexCatalogItem,
+      });
+    }
+
     return matchResult({
-      catalogItem: hit.catalogItem,
+      catalogItem: nameItem,
       matchMethod: hit.matchMethod,
       matchStatus: ELITE100_MATCH_STATUS.SAFE,
-      confidence: confidenceByMethod[hit.matchMethod] ?? 0.9,
+      confidence: confidenceByMethod[hit.matchMethod] ?? 0.85,
       parsed,
+    });
+  }
+
+  if (parsed.globalIndex != null) {
+    if (!indexCatalogItem) {
+      return matchResult({
+        matchMethod: "invalid_index",
+        matchStatus: ELITE100_MATCH_STATUS.INVALID_INDEX,
+        parsed,
+        warnings: ["invalid_index"],
+      });
+    }
+
+    if (hasColorToken) {
+      const aliasHint = photoAliasLookup?.get(tokens.normalized);
+      return matchResult({
+        matchMethod: "catalog_color_missing",
+        matchStatus: ELITE100_MATCH_STATUS.CATALOG_COLOR_MISSING,
+        parsed,
+        warnings: ["catalog_color_missing"],
+        conflictCatalogItem: indexCatalogItem,
+        candidates: aliasHint
+          ? [{
+            filename_color: tokens.normalized || tokens.slug,
+            suggested_catalog_color: aliasHint.catalog_color_name,
+            index_catalog_color: indexCatalogItem.color_name,
+          }]
+          : [{
+            filename_color: tokens.normalized || tokens.slug,
+            index_catalog_color: indexCatalogItem.color_name,
+          }],
+      });
+    }
+
+    return matchResult({
+      matchMethod: "none",
+      matchStatus: ELITE100_MATCH_STATUS.UNMATCHED,
+      parsed,
+      warnings: ["index_only_filename"],
     });
   }
 
@@ -497,6 +604,33 @@ export function matchPhotoToCatalogItem(filename, catalogItems, fixtureFlat = []
   });
 }
 
+export function applyBatchDuplicateTargets(entries) {
+  const list = Array.isArray(entries) ? entries : [];
+  const byCatalogId = new Map();
+
+  for (const entry of list) {
+    if (entry.matchStatus !== ELITE100_MATCH_STATUS.SAFE || !entry.catalogItem?.id) continue;
+    const id = entry.catalogItem.id;
+    if (!byCatalogId.has(id)) byCatalogId.set(id, []);
+    byCatalogId.get(id).push(entry);
+  }
+
+  for (const group of byCatalogId.values()) {
+    if (group.length <= 1) continue;
+    const peerNames = group.map((e) => e.filename ?? e.fullPath ?? "unknown");
+    for (const entry of group) {
+      entry.matchStatus = ELITE100_MATCH_STATUS.DUPLICATE_TARGET;
+      entry.matchMethod = "duplicate_target";
+      entry.warnings = [...new Set([...(entry.warnings ?? []), "duplicate_target"])];
+      entry.duplicatePeers = peerNames.filter(
+        (name) => name !== (entry.filename ?? entry.fullPath ?? "unknown")
+      );
+    }
+  }
+
+  return list;
+}
+
 export function assessImportPlanSafety(entries) {
   const list = Array.isArray(entries) ? entries : [];
   const blockers = [];
@@ -510,7 +644,23 @@ export function assessImportPlanSafety(entries) {
         filename_color: extractFilenameColorTokens(entry.parsed).normalized
           || extractFilenameColorTokens(entry.parsed).slug,
         conflict_color: entry.conflictCatalogItem?.color_name ?? null,
+        name_match_color: entry.candidates?.[0]?.name_match_color ?? null,
         global_index: entry.parsed?.globalIndex ?? null,
+      });
+    } else if (entry.matchStatus === ELITE100_MATCH_STATUS.INVALID_INDEX) {
+      blockers.push({
+        filename: label,
+        reason: "invalid_index",
+        global_index: entry.parsed?.globalIndex ?? null,
+        suggested_global_index: entry.candidates?.[0]?.suggested_global_index ?? null,
+      });
+    } else if (entry.matchStatus === ELITE100_MATCH_STATUS.DUPLICATE_TARGET) {
+      blockers.push({
+        filename: label,
+        reason: "duplicate_target",
+        catalog_item_id: entry.catalogItem?.id ?? null,
+        catalog_color_name: entry.catalogItem?.color_name ?? null,
+        duplicate_peers: entry.duplicatePeers ?? [],
       });
     } else if (entry.matchStatus === ELITE100_MATCH_STATUS.CATALOG_COLOR_MISSING) {
       const tokens = extractFilenameColorTokens(entry.parsed);
@@ -648,27 +798,70 @@ export function buildManualVisualAssetRow({
 }
 
 /**
- * Summarize dry-run / pre-write results.
+ * Human-readable audit row for dry-run review.
  */
-export function formatManualPhotoDryRunEntry(entry) {
+export function formatManualPhotoAuditRow(entry) {
   const catalog = entry.catalogItem;
   const tokens = entry.parsed ? extractFilenameColorTokens(entry.parsed) : null;
+  const indexCatalog =
+    entry.indexCatalogItem ??
+    entry.conflictCatalogItem ??
+    (entry.candidates?.[0]?.index_catalog_color
+      ? { color_name: entry.candidates[0].index_catalog_color, global_index: entry.parsed?.globalIndex }
+      : null);
+
+  let plannedAction = "blocked";
+  let blockerReason = entry.matchStatus ?? ELITE100_MATCH_STATUS.UNMATCHED;
+  if (entry.matchStatus === ELITE100_MATCH_STATUS.SAFE && catalog?.id) {
+    plannedAction = "upload";
+    blockerReason = "";
+  } else if (entry.matchStatus === ELITE100_MATCH_STATUS.DUPLICATE_TARGET) {
+    blockerReason = `duplicate_target:${(entry.duplicatePeers ?? []).join("|")}`;
+  } else if (entry.matchStatus === ELITE100_MATCH_STATUS.GLOBAL_INDEX_NAME_CONFLICT) {
+    blockerReason = `number_name_conflict:index=${entry.parsed?.globalIndex ?? "?"}→${entry.conflictCatalogItem?.color_name ?? "?"} vs name→${entry.candidates?.[0]?.name_match_color ?? "?"}`;
+  }
+
   return {
-    match_status: entry.matchStatus ?? ELITE100_MATCH_STATUS.UNMATCHED,
-    safe_match: entry.matchStatus === ELITE100_MATCH_STATUS.SAFE && Boolean(catalog?.id),
-    matched: Boolean(catalog?.id) && entry.matchStatus === ELITE100_MATCH_STATUS.SAFE,
-    catalog_item_id: catalog?.id ?? null,
-    color_name: catalog?.color_name ?? null,
-    material_name: catalog?.material_name ?? null,
+    source_filename: entry.filename ?? path.basename(String(entry.fullPath ?? "")),
+    parsed_index: entry.parsed?.globalIndex ?? null,
+    parsed_name: tokens?.raw || entry.parsed?.colorText || null,
+    matched_catalog_index: catalog?.global_index ?? entry.candidates?.[0]?.name_match_global_index ?? null,
+    index_catalog_index: indexCatalog?.global_index ?? entry.parsed?.globalIndex ?? null,
+    index_catalog_color_name: indexCatalog?.color_name ?? entry.conflictCatalogItem?.color_name ?? null,
+    matched_catalog_color_name: catalog?.color_name ?? null,
+    matched_catalog_item_id: catalog?.id ?? null,
     match_method: entry.matchMethod ?? null,
-    filename_color: tokens?.normalized || tokens?.slug || null,
-    conflict_color: entry.conflictCatalogItem?.color_name ?? null,
-    suggested_catalog_color: entry.candidates?.[0]?.suggested_catalog_color ?? null,
-    global_index: entry.parsed?.globalIndex ?? null,
-    source_file: entry.fullPath ?? entry.filename ?? null,
+    confidence: entry.confidence ?? null,
+    planned_action: plannedAction,
+    blocker_reason: blockerReason,
     planned_thumb_path: entry.storagePaths?.thumbPath ?? null,
     planned_hero_path: entry.storagePaths?.heroPath ?? null,
     planned_original_path: entry.storagePaths?.originalPath ?? null,
+  };
+}
+
+export function printManualPhotoAuditTable(entries) {
+  const rows = (entries ?? []).map(formatManualPhotoAuditRow);
+  console.log("\n── Photo match audit ──");
+  console.table(rows);
+  return rows;
+}
+
+/**
+ * Summarize dry-run / pre-write results.
+ */
+export function formatManualPhotoDryRunEntry(entry) {
+  return {
+    ...formatManualPhotoAuditRow(entry),
+    match_status: entry.matchStatus ?? ELITE100_MATCH_STATUS.UNMATCHED,
+    safe_match: entry.matchStatus === ELITE100_MATCH_STATUS.SAFE && Boolean(entry.catalogItem?.id),
+    matched: Boolean(entry.catalogItem?.id) && entry.matchStatus === ELITE100_MATCH_STATUS.SAFE,
+    material_name: entry.catalogItem?.material_name ?? null,
+    filename_color: entry.parsed ? extractFilenameColorTokens(entry.parsed).normalized : null,
+    conflict_color: entry.conflictCatalogItem?.color_name ?? null,
+    suggested_catalog_color: entry.candidates?.[0]?.suggested_catalog_color ?? null,
+    duplicate_peers: entry.duplicatePeers ?? [],
+    source_file: entry.fullPath ?? entry.filename ?? null,
     stores_original_image_url: Boolean(entry.storagePaths?.originalPath),
     db_field_for_original_url: "original_image_url",
     source_bytes: entry.sourceBytes ?? null,
@@ -690,6 +883,8 @@ export function computeManualPhotoDryRunSummary(entries) {
   );
   const ambiguous = list.filter((e) => e.matchStatus === ELITE100_MATCH_STATUS.AMBIGUOUS);
   const unmatched = list.filter((e) => e.matchStatus === ELITE100_MATCH_STATUS.UNMATCHED);
+  const invalidIndex = list.filter((e) => e.matchStatus === ELITE100_MATCH_STATUS.INVALID_INDEX);
+  const duplicateTargets = list.filter((e) => e.matchStatus === ELITE100_MATCH_STATUS.DUPLICATE_TARGET);
   const oversized = list.filter((e) => e.warnings?.includes("source_oversized"));
   const needsResize = list.filter((e) => e.warnings?.includes("needs_resize"));
   const safety = assessImportPlanSafety(list);
@@ -702,6 +897,8 @@ export function computeManualPhotoDryRunSummary(entries) {
     catalog_color_missing: catalogColorMissing.length,
     ambiguous: ambiguous.length,
     unmatched: unmatched.length,
+    invalid_index: invalidIndex.length,
+    duplicate_targets: duplicateTargets.length,
     oversized_sources: oversized.length,
     needs_resize: needsResize.length,
     write_blocked: safety.write_blocked,
@@ -711,8 +908,11 @@ export function computeManualPhotoDryRunSummary(entries) {
     catalog_color_missing_list: catalogColorMissing.map(formatManualPhotoDryRunEntry),
     ambiguous_list: ambiguous.map(formatManualPhotoDryRunEntry),
     unmatched_list: unmatched.map(formatManualPhotoDryRunEntry),
+    invalid_index_list: invalidIndex.map(formatManualPhotoDryRunEntry),
+    duplicate_targets_list: duplicateTargets.map(formatManualPhotoDryRunEntry),
     mapping_override_list: mappingOverrides.map(formatManualPhotoDryRunEntry),
     blockers: safety.blockers,
+    audit_rows: list.map(formatManualPhotoAuditRow),
     entries: list.map(formatManualPhotoDryRunEntry),
   };
 }

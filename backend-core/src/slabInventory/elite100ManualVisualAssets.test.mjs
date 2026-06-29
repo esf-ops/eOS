@@ -14,6 +14,8 @@ import {
   buildManualVisualAssetRow,
   computeManualPhotoDryRunSummary,
   assessImportPlanSafety,
+  applyBatchDuplicateTargets,
+  formatManualPhotoAuditRow,
   extractFilenameColorTokens,
   parsePhotoMatchMapContent,
   buildPhotoMatchMapLookup,
@@ -70,24 +72,106 @@ test("extractFilenameColorTokens strips polished and duplicate index", () => {
   assert.equal(tokens.slug, "india-black-pearl");
 });
 
+test("extractFilenameColorTokens resolves hyphenated slug filenames via aliases", () => {
+  const bellini = extractFilenameColorTokens(parsePhotoFilename("bellini-honed.jpg"));
+  assert.equal(bellini.normalized, "bellini");
+  const classic = extractFilenameColorTokens(parsePhotoFilename("classic-gray.jpg"));
+  assert.equal(classic.normalized, "classic gray");
+  const warm = extractFilenameColorTokens(parsePhotoFilename("warm-and-fuzzy.jpg"));
+  assert.equal(warm.normalized, "warm and fuzzy");
+});
+
 test("parsePhotoFilename leading global index", () => {
   const p = parsePhotoFilename("06 Carrara Royale.jpg");
   assert.equal(p.globalIndex, 6);
   assert.equal(p.colorSlug, "carrara-royale");
 });
 
-test("matchPhotoToCatalogItem prefers color slug over conflicting global index", () => {
-  const m = matchPhotoToCatalogItem("79. Warwick_79.jpg", fullCatalog, flat);
+test("matchPhotoToCatalogItem cross-validates index and name when both agree", () => {
+  const m = matchPhotoToCatalogItem("31. Warwick_31.jpg", fullCatalog, flat);
   assert.equal(m.matchStatus, ELITE100_MATCH_STATUS.SAFE);
   assert.equal(m.matchMethod, "color_slug");
   assert.equal(m.catalogItem.color_name, "Warwick");
+  assert.equal(m.catalogItem.global_index, 31);
 });
 
-test("matchPhotoToCatalogItem resolves India Black Pearl at index 100", () => {
-  const m = matchPhotoToCatalogItem("100. India Black Pearl_polished.jpg", fullCatalog, flat);
+test("matchPhotoToCatalogItem blocks when index and name disagree", () => {
+  const m = matchPhotoToCatalogItem("79. Warwick_79.jpg", fullCatalog, flat);
+  assert.equal(m.matchStatus, ELITE100_MATCH_STATUS.GLOBAL_INDEX_NAME_CONFLICT);
+  assert.equal(m.matchMethod, "global_index_name_conflict");
+  assert.equal(m.catalogItem, null);
+  assert.equal(m.conflictCatalogItem.color_name, "Regal Arabescato Gold");
+});
+
+test("matchPhotoToCatalogItem reports invalid_index when catalog index is missing", () => {
+  const flatNo50 = flat.filter((f) => f.global_index !== 50);
+  const catalogNo50 = fullCatalog.filter((c) => c.global_index !== 50);
+  const m = matchPhotoToCatalogItem("50. Unknown Color_50.jpg", catalogNo50, flatNo50);
+  assert.equal(m.matchStatus, ELITE100_MATCH_STATUS.INVALID_INDEX);
+});
+
+test("matchPhotoToCatalogItem resolves India Black Pearl when index and name agree", () => {
+  const idx = flat.find((f) => f.color_name === "India Black Pearl")?.global_index;
+  const m = matchPhotoToCatalogItem(`${idx}. India Black Pearl_${idx}.jpg`, fullCatalog, flat);
   assert.equal(m.matchStatus, ELITE100_MATCH_STATUS.SAFE);
   assert.equal(m.catalogItem.color_name, "India Black Pearl");
-  assert.notEqual(m.catalogItem.color_name, "Skara Brae");
+});
+
+test("matchPhotoToCatalogItem resolves Regal Soapstone Matte via approved alias", () => {
+  const m = matchPhotoToCatalogItem("36. Regal_Soapstone_Matte_36.jpg", fullCatalog, flat);
+  assert.equal(m.matchStatus, ELITE100_MATCH_STATUS.GLOBAL_INDEX_NAME_CONFLICT);
+  assert.equal(m.matchMethod, "global_index_name_conflict");
+});
+
+test("matchPhotoToCatalogItem resolves Newport via approved alias when index agrees", () => {
+  const idx = flat.find((f) => f.color_name === "Newport Polished")?.global_index;
+  const m = matchPhotoToCatalogItem(`${idx}. Newport_${idx}.jpg`, fullCatalog, flat);
+  assert.equal(m.matchStatus, ELITE100_MATCH_STATUS.SAFE);
+  assert.equal(m.matchMethod, "photo_filename_alias");
+  assert.equal(m.catalogItem.color_name, "Newport Polished");
+});
+
+test("matchPhotoToCatalogItem name-only match uses lower confidence", () => {
+  const m = matchPhotoToCatalogItem("white-dove.jpg", fullCatalog, flat);
+  assert.equal(m.matchStatus, ELITE100_MATCH_STATUS.SAFE);
+  assert.equal(m.matchMethod, "color_slug");
+  assert.ok(m.confidence <= 0.95);
+});
+
+test("applyBatchDuplicateTargets blocks duplicate catalog targets", () => {
+  const plan = [
+    {
+      filename: "a.jpg",
+      matchStatus: ELITE100_MATCH_STATUS.SAFE,
+      catalogItem: { id: "same-id", color_name: "India Black Pearl" },
+      warnings: [],
+    },
+    {
+      filename: "b.jpg",
+      matchStatus: ELITE100_MATCH_STATUS.SAFE,
+      catalogItem: { id: "same-id", color_name: "India Black Pearl" },
+      warnings: [],
+    },
+  ];
+  applyBatchDuplicateTargets(plan);
+  assert.equal(plan[0].matchStatus, ELITE100_MATCH_STATUS.DUPLICATE_TARGET);
+  assert.equal(plan[1].matchStatus, ELITE100_MATCH_STATUS.DUPLICATE_TARGET);
+});
+
+test("formatManualPhotoAuditRow keeps parsed index/name for mapping override", () => {
+  const csv = "source_filename,catalog_color_name\n79. Warwick_79.jpg,Regal Arabescato Gold\n";
+  const rows = parsePhotoMatchMapContent(csv, "csv");
+  const lookup = buildPhotoMatchMapLookup(rows, fullCatalog);
+  const m = matchPhotoToCatalogItem("79. Warwick_79.jpg", fullCatalog, flat, { matchMap: lookup });
+  const audit = formatManualPhotoAuditRow({
+    filename: "79. Warwick_79.jpg",
+    ...m,
+    catalogItem: m.catalogItem,
+  });
+  assert.equal(audit.parsed_index, 79);
+  assert.match(audit.parsed_name, /Warwick/i);
+  assert.equal(audit.match_method, "mapping_override");
+  assert.equal(audit.planned_action, "upload");
 });
 
 test("matchPhotoToCatalogItem reports catalog_color_missing for unknown filename color", () => {
@@ -98,28 +182,28 @@ test("matchPhotoToCatalogItem reports catalog_color_missing for unknown filename
   assert.equal(m.catalogItem, null);
 });
 
-test("matchPhotoToCatalogItem resolves Whitendale via approved photo alias", () => {
-  const m = matchPhotoToCatalogItem("81. Whitendale_81.jpg", fullCatalog, flat);
+test("matchPhotoToCatalogItem resolves Whitendale via approved photo alias when index agrees", () => {
+  const idx = flat.find((f) => f.color_name === "Whitenedale")?.global_index;
+  const m = matchPhotoToCatalogItem(`${idx}. Whitendale_${idx}.jpg`, fullCatalog, flat);
   assert.equal(m.matchStatus, ELITE100_MATCH_STATUS.SAFE);
   assert.equal(m.matchMethod, "photo_filename_alias");
   assert.equal(m.catalogItem.color_name, "Whitenedale");
-  assert.notEqual(m.catalogItem.color_name, "Solitaj");
 });
 
-test("matchPhotoToCatalogItem resolves Skys The Limit via approved photo alias", () => {
-  const m = matchPhotoToCatalogItem("85. Skys_The_Limit_85.jpg", fullCatalog, flat);
+test("matchPhotoToCatalogItem resolves Skys The Limit via approved photo alias when index agrees", () => {
+  const idx = flat.find((f) => f.color_name === "Sky's the Limit")?.global_index;
+  const m = matchPhotoToCatalogItem(`${idx}. Skys_The_Limit_${idx}.jpg`, fullCatalog, flat);
   assert.equal(m.matchStatus, ELITE100_MATCH_STATUS.SAFE);
   assert.equal(m.matchMethod, "photo_filename_alias");
   assert.equal(m.catalogItem.color_name, "Sky's the Limit");
-  assert.notEqual(m.catalogItem.color_name, "Granada Beige");
 });
 
-test("matchPhotoToCatalogItem resolves Classic Gray via approved photo alias", () => {
-  const m = matchPhotoToCatalogItem("92. Classic Gray.jpg", fullCatalog, flat);
+test("matchPhotoToCatalogItem resolves Classic Gray via approved photo alias when index agrees", () => {
+  const idx = flat.find((f) => f.color_name === "Classic Grey")?.global_index;
+  const m = matchPhotoToCatalogItem(`${idx}. Classic Gray.jpg`, fullCatalog, flat);
   assert.equal(m.matchStatus, ELITE100_MATCH_STATUS.SAFE);
   assert.equal(m.matchMethod, "photo_filename_alias");
   assert.equal(m.catalogItem.color_name, "Classic Grey");
-  assert.notEqual(m.catalogItem.color_name, "Everleigh");
 });
 
 test("matchPhotoToCatalogItem never uses global index when filename has color name", () => {

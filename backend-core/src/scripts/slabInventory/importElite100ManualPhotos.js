@@ -61,6 +61,8 @@ import {
   parsePhotoMatchMapContent,
   buildPhotoMatchMapLookup,
   assessImportPlanSafety,
+  applyBatchDuplicateTargets,
+  printManualPhotoAuditTable,
 } from "../../slabInventory/elite100ManualVisualAssets.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -250,10 +252,20 @@ function loadPhotoMatchMap(catalogItems) {
 
 export async function buildImportPlan({ sourceDir, catalogItems, fixtureFlat, orgId, heroMaxPx, matchMap }) {
   const files = listLocalPhotos(sourceDir);
-  return files.map((filename) => {
+  const plan = files.map((filename) => {
     const fullPath = path.join(sourceDir, filename);
     const match = matchPhotoToCatalogItem(filename, catalogItems, fixtureFlat, { matchMap });
-    const { catalogItem, matchMethod, matchStatus, confidence, parsed, warnings: matchWarnings, conflictCatalogItem, candidates } = match;
+    const {
+      catalogItem,
+      matchMethod,
+      matchStatus,
+      confidence,
+      parsed,
+      warnings: matchWarnings,
+      conflictCatalogItem,
+      candidates,
+      indexCatalogItem,
+    } = match;
     const originalExt = path.extname(filename).toLowerCase() || ".jpg";
     const storagePaths =
       catalogItem?.id && matchStatus === "safe"
@@ -275,12 +287,15 @@ export async function buildImportPlan({ sourceDir, catalogItems, fixtureFlat, or
       confidence,
       parsed,
       conflictCatalogItem,
+      indexCatalogItem,
       candidates,
       storagePaths,
       warnings,
       sourceBytes: stat?.size ?? null,
     };
   });
+
+  return applyBatchDuplicateTargets(plan);
 }
 
 async function main() {
@@ -350,11 +365,20 @@ async function main() {
 
   const summary = computeManualPhotoDryRunSummary(plan);
   console.log("── Dry-run summary ──");
-  console.log(JSON.stringify(summary, null, 2));
-  console.log("\n── Planned uploads (all files) ──");
-  for (const entry of plan) {
-    console.log(JSON.stringify(formatManualPhotoDryRunEntry(entry), null, 2));
-  }
+  console.log(JSON.stringify({
+    total_files: summary.total_files,
+    safe_matches: summary.safe_matches,
+    conflicts: summary.conflicts,
+    catalog_color_missing: summary.catalog_color_missing,
+    ambiguous: summary.ambiguous,
+    unmatched: summary.unmatched,
+    invalid_index: summary.invalid_index,
+    duplicate_targets: summary.duplicate_targets,
+    oversized_sources: summary.oversized_sources,
+    write_blocked: summary.write_blocked,
+    write_block_reasons: summary.write_block_reasons,
+  }, null, 2));
+  printManualPhotoAuditTable(plan);
   console.log("");
 
   if (summary.write_blocked) {
