@@ -47,6 +47,7 @@
   width: 108px;
   height: auto;
   flex-shrink: 0;
+  display: block;
 }
 
 .cep-title {

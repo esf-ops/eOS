@@ -852,6 +852,8 @@ function testPrintHtmlEmbedsSharedPrintAndPdfCss() {
   assert.ok(html.includes("margin: 0.32in 0.38in"), "backend HTML uses browser-matched @page margins");
   assert.ok(html.includes("cep-branches"), "footer branch block present");
   assert.ok(html.includes("cep-sig-line-inline"), "signature rows present");
+  assert.ok(html.includes("data:image/png;base64,"), "logo embedded as bundled data URI for PDF parity");
+  assert.ok(html.includes("class=\"cep-logo\""), "header logo element present");
 }
 
 async function testPreviewReturnsPdfMetadataOnly() {

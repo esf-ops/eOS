@@ -8,6 +8,13 @@
   box-sizing: border-box;
 }
 
+.cep-logo {
+  width: 88px;
+  height: auto;
+  display: block;
+  flex-shrink: 0;
+}
+
 .cep-closing {
   width: 100%;
   max-width: 100%;

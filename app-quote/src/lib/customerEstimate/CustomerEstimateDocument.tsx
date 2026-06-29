@@ -1,6 +1,6 @@
 import React from "react";
-import { EOS_LOGO_URL } from "../config";
 import { roundCustomerDisplay } from "../customerDisplayRounding";
+import { CUSTOMER_ESTIMATE_DOCUMENT_LOGO_SRC } from "./documentLogo";
 import { CUSTOMER_ESTIMATE_BRANCH_LOCATIONS } from "./documentConstants";
 import type { CustomerEstimateDocumentProps } from "./documentProps";
 import { formatDisplayAmount, formatDisplayDollars } from "./formatters";
@@ -21,7 +21,7 @@ export default function CustomerEstimateDocument(props: CustomerEstimateDocument
   return (
     <div className="customer-estimate-print" aria-hidden="true">
       <header className="cep-header">
-        <img className="cep-logo" src={EOS_LOGO_URL} alt="Elite Stone Fabrication" />
+        <img className="cep-logo" src={CUSTOMER_ESTIMATE_DOCUMENT_LOGO_SRC} alt="Elite Stone Fabrication" />
         <div className="cep-header-text">
           <h1 className="cep-title">Elite Stone Fabrication Estimate</h1>
           <p className="cep-date">{props.estimateDate}</p>
