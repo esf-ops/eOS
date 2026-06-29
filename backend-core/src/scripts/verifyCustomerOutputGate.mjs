@@ -15,6 +15,7 @@ function read(rel) {
 
 const ieApp = read("app-internal-estimate/src/InternalEstimateApp.tsx");
 const iePrint = read("app-internal-estimate/src/CustomerEstimatePrint.tsx");
+const ieDocument = read("app-quote/src/lib/customerEstimate/CustomerEstimateDocument.tsx");
 const ieGate = read("app-internal-estimate/src/lib/quoteOutputGate.ts");
 const deliveryLoader = read("backend-core/src/quoteDelivery/estimateSnapshotLoader.js");
 const emailBuilder = read("backend-core/src/quoteDelivery/estimateEmailBuilder.js");
@@ -23,8 +24,9 @@ assert.match(ieGate, /Save this quote before printing, emailing, or sending it/)
 assert.match(ieApp, /requestCustomerOutput/);
 assert.match(ieApp, /customerOutputAfterSaveRef/);
 assert.match(ieApp, /effectiveQuoteNumber \? \(/);
-assert.match(iePrint, /if \(!quoteRef\) return null/);
-assert.doesNotMatch(iePrint, /quoteNumber\?\.trim\(\) \|\| "—"/);
+assert.match(ieDocument, /if \(!quoteRef\) return null/);
+assert.doesNotMatch(ieDocument, /quoteNumber\?\.trim\(\) \|\| "—"/);
+assert.match(iePrint, /CustomerEstimateDocument/);
 assert.match(deliveryLoader, /validateQuoteReadyForCustomerOutput/);
 assert.match(emailBuilder, /requires a saved quote number/);
 

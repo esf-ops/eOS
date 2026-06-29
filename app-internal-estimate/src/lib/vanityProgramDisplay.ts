@@ -1,11 +1,13 @@
 /**
- * Vanity Program — customer print labels and future comparison-pricing metadata.
+ * Vanity program customer print labels and future comparison-pricing metadata.
  *
  * PRICING NOTE (2026): Vanity program totals use fixed tier sheet prices (kitchen over/under 35 sf),
  * not Group A–F $/sqft tiers. The optional material comparison table therefore repeats the same
  * vanity display total for every group column until a dedicated vanity comparison resolver exists.
  * Do not infer Group A–F vanity prices from countertop rates.
  */
+
+export { formatVanityCustomerPrintSubline } from "@quote-lib/customerEstimate/vanityPrintSubline";
 
 /** Read-only snapshot for a future vanity comparison pricing resolver (not wired yet). */
 export type VanityProgramDisplayMeta = {
@@ -42,25 +44,4 @@ export function buildVanityProgramDisplayMeta(input: {
         : null,
     comparisonPricingStatus: "fixed_program_price_only"
   };
-}
-
-/**
- * Customer PDF subline for vanity program rooms, e.g.
- * `Vanity program · Color: Calacatta · Group Promo`
- */
-export function formatVanityCustomerPrintSubline(params: {
-  materialGroup?: string | null;
-  colorLabel?: string | null;
-  projectColorTbd?: boolean;
-}): string {
-  const parts: string[] = ["Vanity program"];
-  const color = params.colorLabel?.trim();
-  if (color) {
-    parts.push(`Color: ${color}`);
-  } else if (params.projectColorTbd) {
-    parts.push("Color TBD");
-  }
-  const group = params.materialGroup?.trim();
-  if (group) parts.push(group);
-  return parts.join(" · ");
 }

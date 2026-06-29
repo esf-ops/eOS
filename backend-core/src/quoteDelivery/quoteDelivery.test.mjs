@@ -826,6 +826,14 @@ function testPrintHtmlCustomerSafe() {
   assert.ok(!html.includes("price_per_sqft"));
 }
 
+function testPrintHtmlUsesSharedCustomerEstimateDocument() {
+  const html = buildCustomerEstimatePrintHtml(makePrintSnapshot());
+  assert.ok(html.includes("cep-header"), "shared renderer uses cep-* document classes");
+  assert.ok(html.includes("cep-estimate-summary"));
+  assert.ok(html.includes("Estimated project total"));
+  assert.ok(!html.includes("border-bottom:1px solid #cbd5e1"), "legacy inline-style HTML builder removed");
+}
+
 async function testPreviewReturnsPdfMetadataOnly() {
   const prevPdf = process.env.QUOTE_EMAIL_PDF_ENABLED;
   process.env.QUOTE_EMAIL_PDF_ENABLED = "1";
@@ -1057,6 +1065,7 @@ async function runAll() {
   testPrintSnapshotParseAndFilename();
   testPatchPrintSnapshotQuoteNumberForCreateSave();
   testPrintHtmlCustomerSafe();
+  testPrintHtmlUsesSharedCustomerEstimateDocument();
   await testPreviewReturnsPdfMetadataOnly();
   await testLegacyQuoteWithoutPrintSnapshotWarns();
   await testPdfBuilderDisabledSafely();
