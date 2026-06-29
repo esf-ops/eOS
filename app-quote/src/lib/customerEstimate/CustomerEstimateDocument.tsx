@@ -1,7 +1,7 @@
 import React from "react";
 import { roundCustomerDisplay } from "../customerDisplayRounding";
 import { CUSTOMER_ESTIMATE_DOCUMENT_LOGO_SRC } from "./documentLogo";
-import { CUSTOMER_ESTIMATE_BRANCH_LOCATIONS } from "./documentConstants";
+import { CUSTOMER_ESTIMATE_BRANCH_LOCATIONS, CUSTOMER_ESTIMATE_TERMS_ITEMS, CUSTOMER_ESTIMATE_WEBSITE } from "./documentConstants";
 import type { CustomerEstimateDocumentProps } from "./documentProps";
 import { formatDisplayAmount, formatDisplayDollars } from "./formatters";
 import { formatVanityCustomerPrintSubline } from "./vanityPrintSubline";
@@ -290,10 +290,9 @@ export default function CustomerEstimateDocument(props: CustomerEstimateDocument
           <div className="cep-terms-box">
             <h2 className="cep-terms-title">Terms &amp; conditions</h2>
             <ul className="cep-terms-list">
-              <li>This estimate is valid for 30 days from the date shown unless otherwise noted in writing.</li>
-              <li>Final pricing may change after field measure, material selection, template, and plan review.</li>
-              <li>Payment terms, deposits, and schedule are confirmed in the signed customer agreement.</li>
-              <li>Natural stone and quartz may vary in color, veining, and pattern; samples are representative only.</li>
+              {CUSTOMER_ESTIMATE_TERMS_ITEMS.map((term) => (
+                <li key={term}>{term}</li>
+              ))}
             </ul>
           </div>
 
@@ -324,7 +323,7 @@ export default function CustomerEstimateDocument(props: CustomerEstimateDocument
           ))}
         </div>
 
-        <p className="cep-website">www.elitestonefabrication.com</p>
+        <p className="cep-website">{CUSTOMER_ESTIMATE_WEBSITE}</p>
       </footer>
     </div>
   );

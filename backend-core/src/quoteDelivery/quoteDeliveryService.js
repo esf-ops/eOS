@@ -140,20 +140,7 @@ export async function runQuoteDelivery(db, req, quoteId, body, options) {
     includeComparisonTable: Boolean(body.includeComparisonTable)
   });
 
-  const emailContent = buildEstimateEmailContent(display, {
-    subject: body.subject != null ? String(body.subject) : undefined
-  });
-
   const warnings = [...(display.warnings || []), ...(policyResult.warnings || [])];
-
-  const htmlAudit = auditCustomerSafeText(emailContent.htmlPreview);
-  if (!htmlAudit.ok) {
-    warnings.push(formatCustomerSafeViolationWarning("HTML", htmlAudit));
-  }
-  const textAudit = auditCustomerSafeText(emailContent.textPreview);
-  if (!textAudit.ok) {
-    warnings.push(formatCustomerSafeViolationWarning("Text", textAudit));
-  }
 
   const snapshotHash = computeSnapshotHash(snapshot);
   const effectiveRecipients = policyResult.recipients;
@@ -212,6 +199,23 @@ export async function runQuoteDelivery(db, req, quoteId, body, options) {
     } else if (pdfResult.skipped && pdfResult.reason === "customer_safe_violation") {
       warnings.push("Customer PDF attachment skipped — print HTML failed customer-safe audit.");
     }
+  }
+
+  const pdfAttached = Boolean(pdfBuffer && pdfAttachmentMeta.filename && pdfAttachmentMeta.generated);
+
+  const emailContent = buildEstimateEmailContent(display, {
+    subject: body.subject != null ? String(body.subject) : undefined,
+    pdfAttached,
+    pdfFilename: pdfAttachmentMeta.filename
+  });
+
+  const htmlAudit = auditCustomerSafeText(emailContent.htmlPreview);
+  if (!htmlAudit.ok) {
+    warnings.push(formatCustomerSafeViolationWarning("HTML", htmlAudit));
+  }
+  const textAudit = auditCustomerSafeText(emailContent.textPreview);
+  if (!textAudit.ok) {
+    warnings.push(formatCustomerSafeViolationWarning("Text", textAudit));
   }
 
   let status = isPreview ? "preview" : env.sendEnabled ? "queued" : "blocked";

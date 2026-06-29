@@ -326,12 +326,12 @@ function testCustomerSafeTextAssertion() {
 
 function testBuiltEmailHtmlPassesCustomerSafeAudit() {
   const display = buildCustomerEstimateDisplayFromSnapshot(internalQuoteRow());
-  const { htmlPreview, textPreview } = buildEstimateEmailContent(display);
+  const { htmlPreview, textPreview } = buildEstimateEmailContent(display, { pdfAttached: true });
   const htmlAudit = auditCustomerSafeText(htmlPreview);
   const textAudit = auditCustomerSafeText(textPreview);
   assert.equal(htmlAudit.ok, true, formatCustomerSafeViolationWarning("HTML", htmlAudit) || "html should be safe");
   assert.equal(textAudit.ok, true, formatCustomerSafeViolationWarning("Text", textAudit) || "text should be safe");
-  assert.ok(htmlPreview.includes("35 sf counter") || htmlPreview.includes("sf counter"));
+  assert.ok(htmlPreview.includes("Countertop material"));
   assert.ok(htmlPreview.includes("Prepared by"));
   assert.ok(htmlPreview.includes("Peg Reid"));
   assert.ok(!htmlPreview.includes("peg.reid@eliteosfab.com"));
@@ -339,28 +339,49 @@ function testBuiltEmailHtmlPassesCustomerSafeAudit() {
 
 function testBrandedEmailTemplateSections() {
   const display = buildCustomerEstimateDisplayFromSnapshot(internalQuoteRow());
-  const { htmlPreview, textPreview, subject } = buildEstimateEmailContent(display);
+  const { htmlPreview, textPreview, subject } = buildEstimateEmailContent(display, { pdfAttached: true });
 
-  assert.match(subject, /^Elite Stone Fabrication Estimate — ESF-LIS-000042 — Kitchen Remodel$/);
-  assert.ok(htmlPreview.includes("Elite Stone Fabrication Estimate"));
+  assert.match(subject, /^Elite Stone Fabrication Estimate — Kitchen Remodel — ESF-LIS-000042$/);
+  assert.ok(htmlPreview.includes("Elite Stone Fabrication"));
   assert.ok(htmlPreview.includes("elitestonefabrication.com"));
   assert.ok(htmlPreview.includes("www.elitestonefabrication.com"));
   assert.ok(htmlPreview.includes("Lisbon, IA"));
   assert.ok(htmlPreview.includes("319-455-4200"));
   assert.ok(htmlPreview.includes("$12,450"));
   assert.ok(htmlPreview.includes("Estimated project total"));
-  assert.ok(htmlPreview.includes("planning purposes"));
-  assert.ok(htmlPreview.includes("field verification"));
-  assert.ok(htmlPreview.includes("Areas &amp; rooms") || htmlPreview.includes("Areas & rooms"));
-  assert.ok(htmlPreview.includes("Kitchen"));
-  assert.ok(htmlPreview.includes("Visible sink"));
+  assert.ok(htmlPreview.includes("Estimate breakdown"));
+  assert.ok(htmlPreview.includes("Countertop material"));
+  assert.ok(htmlPreview.includes("Add-ons / fixtures"));
+  assert.ok(htmlPreview.includes("Quote summary"));
+  assert.ok(htmlPreview.includes("See attached PDF for the detailed estimate"));
+  assert.ok(htmlPreview.includes("3.5% transaction fee"));
+  assert.ok(!htmlPreview.includes("price_per_sqft"));
 
   assert.ok(textPreview.includes("ELITE STONE FABRICATION"));
   assert.ok(textPreview.includes("Estimated project total: $12,450"));
-  assert.ok(textPreview.includes("Areas & rooms"));
-  assert.ok(textPreview.includes("PLANNING ESTIMATE"));
+  assert.ok(textPreview.includes("Countertop material"));
+  assert.ok(textPreview.includes("See attached PDF for the detailed estimate"));
+  assert.ok(textPreview.includes("3.5% transaction fee"));
   assert.ok(textPreview.includes("www.elitestonefabrication.com"));
   assert.ok(textPreview.includes("Prepared by: Peg Reid"));
+}
+
+function testEmailAttachmentCalloutReflectsPdfMetadata() {
+  const display = buildCustomerEstimateDisplayFromSnapshot(internalQuoteRow());
+  const attached = buildEstimateEmailContent(display, { pdfAttached: true });
+  assert.ok(attached.htmlPreview.includes("See attached PDF for the detailed estimate"));
+  assert.ok(attached.textPreview.includes("See attached PDF for the detailed estimate"));
+
+  const skipped = buildEstimateEmailContent(display, { pdfAttached: false });
+  assert.ok(!skipped.htmlPreview.includes("See attached PDF for the detailed estimate"));
+  assert.ok(skipped.htmlPreview.includes("A detailed estimate is available from Elite Stone Fabrication"));
+  assert.ok(skipped.textPreview.includes("A detailed estimate is available from Elite Stone Fabrication"));
+}
+
+function testPrintDocumentIncludesPaymentTerms() {
+  const html = buildCustomerEstimatePrintHtml(makePrintSnapshot());
+  assert.ok(html.includes("3.5% transaction fee"));
+  assert.ok(html.includes("cash, check, ACH, or debit card"));
 }
 
 function testReplyToFromPreparedByEmail() {
@@ -445,12 +466,12 @@ async function testPreviewDryRun() {
   assert.equal(result.sendEnabled, false);
   assert.equal(result.quoteNumber, "ESF-LIS-000042");
   assert.equal(result.revisionLabel, "R2");
-  assert.ok(result.htmlPreview.includes("Elite Stone Fabrication Estimate"));
+  assert.ok(result.htmlPreview.includes("Elite Stone Fabrication"));
   assert.ok(result.htmlPreview.includes("www.elitestonefabrication.com"));
-  assert.ok(result.htmlPreview.includes("planning purposes"));
-  assert.ok(result.htmlPreview.includes("Visible sink"));
+  assert.ok(result.htmlPreview.includes("Countertop material"));
   assert.ok(!result.htmlPreview.includes("Internal adjustment"));
   assert.ok(result.htmlPreview.includes("Estimated project total"));
+  assert.ok(result.htmlPreview.includes("3.5% transaction fee"));
   assert.ok(!result.htmlPreview.includes("internal_ui"));
   assert.ok(!result.htmlPreview.includes("/sf"));
   assert.ok(
@@ -872,7 +893,8 @@ async function testPreviewReturnsPdfMetadataOnly() {
   assert.equal(typeof result.pdfAttachment.byteLength, "number");
   assert.ok(result.pdfAttachment.filename?.includes("ESF-LIS-000042"));
   assert.ok(!("pdfBase64" in result));
-  assert.ok(!JSON.stringify(result).includes("base64"));
+  // Email HTML embeds the logo as a data URI; preview must not return PDF attachment bytes/base64.
+  assert.ok(!JSON.stringify(result.pdfAttachment).includes("base64"));
   process.env.QUOTE_EMAIL_PDF_ENABLED = prevPdf;
 }
 
@@ -1069,6 +1091,8 @@ async function runAll() {
   testCustomerSafeTextAssertion();
   testBuiltEmailHtmlPassesCustomerSafeAudit();
   testBrandedEmailTemplateSections();
+  testEmailAttachmentCalloutReflectsPdfMetadata();
+  testPrintDocumentIncludesPaymentTerms();
   testReplyToFromPreparedByEmail();
   testFilterCustomerFacingCustomLines();
   testDisplayFromSnapshotUsesStoredTotal();

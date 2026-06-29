@@ -1,5 +1,5 @@
 /**
- * Shared customer estimate document branding (print/PDF + TS consumers).
+ * Shared customer estimate branding strings (email + print/PDF).
  * Payment language should be confirmed with company/payment processor policy before broad rollout.
  */
 
@@ -23,7 +23,7 @@ export const CUSTOMER_ESTIMATE_BRANCH_LOCATIONS = [
     city: "Dyersville, IA",
     lines: ["819 9th Street SE, Suite A", "Dyersville, IA 52040", "319-640-3710"]
   }
-] as const;
+];
 
 export const CUSTOMER_ESTIMATE_TERMS_ITEMS = [
   "This estimate is valid for 30 days from the date shown unless otherwise noted in writing.",
@@ -31,4 +31,4 @@ export const CUSTOMER_ESTIMATE_TERMS_ITEMS = [
   "Payment terms, deposits, and schedule are confirmed in the signed customer agreement.",
   CUSTOMER_ESTIMATE_PAYMENT_CARD_FEE_NOTE,
   "Natural stone and quartz may vary in color, veining, and pattern; samples are representative only."
-] as const;
+];

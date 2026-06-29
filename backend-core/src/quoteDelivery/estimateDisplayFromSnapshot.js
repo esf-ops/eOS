@@ -69,6 +69,13 @@ export function buildCustomerEstimateDisplayFromSnapshot(header, options = {}) {
 
   const preparedBy = str(header.prepared_by) || str(snapshot.internal_ui?.entered_by) || null;
 
+  const printEmailData = extractPrintSnapshotEmailData(snapshot.internal_ui);
+
+  const emailBreakdownRows =
+    printEmailData?.breakdownRows?.length
+      ? printEmailData.breakdownRows
+      : buildLegacyEmailBreakdownRows(summaryRows);
+
   return {
     header: {
       quoteNumber: str(header.quote_number),
@@ -84,16 +91,84 @@ export function buildCustomerEstimateDisplayFromSnapshot(header, options = {}) {
       branch: str(header.branch),
       salesRep: str(header.sales_rep),
       preparedBy,
+      preparedByDisplayName: printEmailData?.preparedByDisplayName || preparedBy,
+      estimateDate: printEmailData?.estimateDate || null,
       estimatedSqft: num(header.estimated_sqft) ?? sanitized.estimatedSqft,
       materialGroup: sanitized.materialGroup || str(header.estimated_material_group)
     },
     estimateTotal: customerDisplayTotal,
     estimateTotalFormatted: customerDisplayTotal != null ? formatMoney(customerDisplayTotal) : null,
     summaryRows,
+    emailBreakdownRows,
+    comparisonNote: printEmailData?.comparisonNote || null,
     roomSummaries: sanitized.roomSummaries,
     customerFacingNotes: sanitized.customerFacingNotes,
     showRoomBreakdown: sanitized.roomSummaries.length > 0,
     warnings,
     includeComparisonTable: Boolean(options.includeComparisonTable)
+  };
+}
+
+function isProjectTotalRow(row) {
+  const label = String(row?.label ?? "").trim().toLowerCase();
+  const key = String(row?.key ?? "").trim().toLowerCase();
+  return key === "project_total" || label.includes("estimated project total");
+}
+
+/**
+ * @param {Array<{ key?: string, label?: string, displayAmount?: number, displayFormatted?: string }>} summaryRows
+ */
+function buildLegacyEmailBreakdownRows(summaryRows) {
+  if (!Array.isArray(summaryRows)) return [];
+  return summaryRows
+    .filter((row) => row && !isProjectTotalRow(row))
+    .map((row) => ({
+      key: str(row.key) || str(row.label) || "row",
+      label: str(row.label) || "Line item",
+      displayAmount: num(row.displayAmount),
+      displayFormatted: row.displayFormatted || formatMoney(row.displayAmount)
+    }));
+}
+
+/**
+ * @param {Record<string, unknown>|null|undefined} internalUi
+ */
+function extractPrintSnapshotEmailData(internalUi) {
+  if (!internalUi || typeof internalUi !== "object") return null;
+  const raw = internalUi.customer_estimate_print_snapshot;
+  if (!raw || typeof raw !== "object") return null;
+
+  const snapHeader = raw.header && typeof raw.header === "object" ? raw.header : {};
+  const display = raw.display && typeof raw.display === "object" ? raw.display : {};
+
+  const breakdownRows = [];
+  if (Array.isArray(display.estimateSummaryRows)) {
+    for (const row of display.estimateSummaryRows) {
+      if (!row || typeof row !== "object") continue;
+      if (isProjectTotalRow(row)) continue;
+      const label = str(row.label);
+      if (!label) continue;
+      breakdownRows.push({
+        key: str(row.key) || label,
+        label,
+        displayAmount: num(row.displayAmount),
+        displayFormatted: formatMoney(row.displayAmount)
+      });
+    }
+  }
+
+  let comparisonNote = null;
+  const comparison = display.roomComparisonTable;
+  if (comparison && typeof comparison === "object" && Array.isArray(comparison.roomBlocks) && comparison.roomBlocks.length) {
+    comparisonNote = comparison.isPerRoomMode
+      ? "Optional alternate material comparisons are summarized in the detailed estimate."
+      : "Optional material group comparisons are summarized in the detailed estimate.";
+  }
+
+  return {
+    estimateDate: str(snapHeader.estimateDate),
+    preparedByDisplayName: str(display.preparedByDisplayName),
+    breakdownRows,
+    comparisonNote
   };
 }
