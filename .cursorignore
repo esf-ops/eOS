@@ -1,0 +1,7 @@
+debug/
+**/node_modules/
+**/dist/
+_local/
+.vercel/
+coverage/
+*.log
