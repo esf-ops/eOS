@@ -3,6 +3,11 @@
  * UI-only — does not change approval gate logic.
  */
 
+import {
+  blockerFocusTarget,
+  blockerPrimaryActionLabel,
+} from "../../../backend-core/src/takeoff/roomVerificationView.mjs";
+
 /** @typedef {"import"|"approve"|"save"|"room_blockers"|"verify_room"|"next_room"|"continue_review"} ReviewActionPhase */
 
 /** @typedef {{
@@ -11,6 +16,8 @@
  *   disabled?: boolean,
  *   loading?: boolean,
  *   title?: string,
+ *   roomId?: string,
+ *   focusTarget?: object|null,
  * }} ReviewPrimaryAction */
 
 /**
@@ -25,13 +32,16 @@
  *   saveStatus: string,
  *   approveStatus: string,
  *   importStatus: string,
- *   activeRooms: Array<{ roomId: string, roomName: string }>,
+ *   activeRooms: Array<{ roomId: string, roomName: string, roomIdx?: number }>,
  *   roomCompleteness: Record<string, boolean>,
  *   excludedRoomIds: Set<string>|string[],
  *   selectedRoomId: string|null,
- *   selectedRoomVerify: { ok: boolean, blockers: Array<{ code?: string, message?: string }> }|null,
- *   hasGlobalBlockers: boolean,
- *   globalBlockerCount: number,
+ *   selectedRoomVerify: {
+ *     ok: boolean,
+ *     roomBlockers?: Array<{ code?: string, message?: string, areaIdx?: number, runId?: string }>,
+ *     globalBlockers?: Array<{ code?: string, message?: string }>,
+ *     blockers?: Array<{ code?: string, message?: string }>,
+ *   }|null,
  * }} input
  */
 export function deriveReviewActionPath(input) {
@@ -63,7 +73,12 @@ export function deriveReviewActionPath(input) {
     null;
 
   const selectedVerified = selectedRoom ? Boolean(input.roomCompleteness[selectedRoom.roomId]) : false;
-  const verify = input.selectedRoomVerify ?? { ok: false, blockers: [] };
+  const verify = input.selectedRoomVerify ?? { ok: false, roomBlockers: [], globalBlockers: [] };
+  const roomBlockers =
+    verify.roomBlockers ??
+    verify.blockers ??
+    [];
+  const globalBlockers = verify.globalBlockers ?? [];
 
   /** @type {ReviewPrimaryAction} */
   const baseContinue = {
@@ -160,16 +175,13 @@ export function deriveReviewActionPath(input) {
 
   // ── Per-room review ───────────────────────────────────────────────────────
   if (selectedRoom && !selectedVerified) {
-    const localBlockers = verify.blockers ?? [];
-    const blockerCount =
-      localBlockers.length > 0
-        ? localBlockers.length
-        : input.hasGlobalBlockers
-          ? Math.max(1, input.globalBlockerCount)
-          : 0;
-
-    if (blockerCount > 0 || input.hasGlobalBlockers) {
-      const count = localBlockers.length > 0 ? localBlockers.length : input.globalBlockerCount || 1;
+    if (roomBlockers.length > 0) {
+      const first = roomBlockers[0];
+      const count = roomBlockers.length;
+      const focusTarget = blockerFocusTarget(first, {
+        roomIdx: selectedRoom.roomIdx,
+        roomId: selectedRoom.roomId,
+      });
       return {
         phase: "room_blockers",
         statusMessage: `${selectedRoom.roomName} has ${count} item${count !== 1 ? "s" : ""} to review before verification.`,
@@ -179,13 +191,15 @@ export function deriveReviewActionPath(input) {
           roomName: selectedRoom.roomName,
           verified: false,
           blockerCount: count,
+          globalBlockerCount: globalBlockers.length,
         },
         nextRoomNeedingReview,
         primaryAction: {
-          label: localBlockers.length > 0 ? "Review room issue" : "Review items to resolve",
+          label: blockerPrimaryActionLabel(first),
           action: "focus_blockers",
           disabled: false,
-          title: localBlockers.map((b) => b.message).join(" "),
+          title: roomBlockers.map((b) => b.message).join(" "),
+          focusTarget,
         },
         secondaryAction: nextRoomNeedingReview && nextRoomNeedingReview.roomId !== selectedRoom.roomId
           ? {
@@ -198,20 +212,27 @@ export function deriveReviewActionPath(input) {
     }
 
     if (verify.ok) {
+      const globalNote =
+        globalBlockers.length > 0
+          ? ` ${globalBlockers.length} global review item${globalBlockers.length !== 1 ? "s" : ""} remain before approval.`
+          : "";
       return {
         phase: "verify_room",
-        statusMessage: `${selectedRoom.roomName} is ready to verify.`,
+        statusMessage: `${selectedRoom.roomName} is ready to verify.${globalNote}`.trim(),
         roomProgress,
         selectedRoom: {
           roomId: selectedRoom.roomId,
           roomName: selectedRoom.roomName,
           verified: false,
+          blockerCount: 0,
+          globalBlockerCount: globalBlockers.length,
         },
         nextRoomNeedingReview,
         primaryAction: {
           label: "Mark room verified",
           action: "verify_room",
           disabled: false,
+          roomId: selectedRoom.roomId,
         },
         secondaryAction: nextRoomNeedingReview && nextRoomNeedingReview.roomId !== selectedRoom.roomId
           ? {

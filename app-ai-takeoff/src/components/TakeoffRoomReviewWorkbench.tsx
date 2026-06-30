@@ -7,10 +7,11 @@ import EosStatusPill from "@eliteos-ui/EosStatusPill";
 import React, { useCallback, useMemo, useState } from "react";
 import type { TakeoffResult, TakeoffArea, TakeoffRun } from "@takeoff-core/takeoffContract.mjs";
 import {
-  canMarkRoomVerified,
   formatBacksplashScopeLabel,
   formatPieceTypeLabel,
+  deriveRoomVerificationBlockers,
 } from "@takeoff-core/reviewedTakeoffMath.mjs";
+import { buildRoomVerificationView } from "@takeoff-core/roomVerificationView.mjs";
 import {
   ADD_PIECE_PRESETS,
   ROOM_TYPE_OPTIONS,
@@ -87,6 +88,7 @@ function formatSf(n: number): string {
 function verificationTone(status: string): "success" | "warn" | "info" | "neutral" {
   if (status === "verified") return "success";
   if (status === "needs_review") return "warn";
+  if (status === "ready_to_verify") return "info";
   if (status === "excluded") return "neutral";
   return "info";
 }
@@ -99,6 +101,8 @@ function verificationLabel(status: string): string {
       return "Excluded";
     case "needs_review":
       return "Needs review";
+    case "ready_to_verify":
+      return "Ready to verify";
     default:
       return "In progress";
   }
@@ -123,8 +127,8 @@ export interface TakeoffRoomReviewWorkbenchProps {
   manualRoomIds: Set<string>;
   roomCompleteness: Record<string, boolean>;
   selectedRoomId: string | null;
-  roomBlockerIds?: Set<string>;
-  hasGlobalBlockers?: boolean;
+  approvalBlockers?: Array<{ code?: string; message?: string; path?: string | null }>;
+  mathConsistencyIssues?: Array<{ code?: string; message?: string }>;
   onSelectRoom: (roomId: string | null) => void;
   onSetRoomComplete: (roomId: string, complete: boolean) => void;
   onSetRoomExcluded: (roomId: string, excluded: boolean) => void;
@@ -240,7 +244,17 @@ function PieceEditorCard({
   };
 
   return (
-    <div className={`takeoff-room-piece-card${excluded ? " takeoff-room-piece-card--excluded" : ""}`}>
+    <div
+      className={`takeoff-room-piece-card${excluded ? " takeoff-room-piece-card--excluded" : ""}`}
+      id={`takeoff-blocker-piece-${run.id}`}
+      data-blocker-code={
+        !excluded &&
+        (run.pieceType ?? "counter") === "counter" &&
+        ((Number(run.lengthIn) || 0) <= 0 || (Number(run.depthIn) || 0) <= 0)
+          ? "MISSING_RUN_DIMENSIONS"
+          : undefined
+      }
+    >
       {!editing ? (
         <>
           <div className="takeoff-room-piece-card-head">
@@ -432,7 +446,11 @@ function AreaBacksplashEditor({
 
   if (!editing) {
     return (
-      <div className="takeoff-room-area-bs-card">
+      <div
+        className="takeoff-room-area-bs-card"
+        id={`takeoff-blocker-backsplash-${roomIdx}-${areaIdx}`}
+        data-blocker-code="BACKSPLASH_SCOPE_UNRESOLVED"
+      >
         <div className="takeoff-room-area-bs-display">
           <span className="takeoff-room-area-bs-label">Area backsplash</span>
           <span className="takeoff-room-area-bs-value">
@@ -613,8 +631,8 @@ export default function TakeoffRoomReviewWorkbench({
   manualRoomIds,
   roomCompleteness,
   selectedRoomId,
-  roomBlockerIds,
-  hasGlobalBlockers = false,
+  approvalBlockers = [],
+  mathConsistencyIssues = [],
   onSelectRoom,
   onSetRoomComplete,
   onSetRoomExcluded,
@@ -648,23 +666,37 @@ export default function TakeoffRoomReviewWorkbench({
       .map((rr) => {
         const room = roomById.get(rr.roomId);
         if (!room) return null;
+        const view = buildRoomVerificationView(rr, {
+          approvalBlockers,
+          mathConsistencyIssues,
+        });
+        const roomBlockers = deriveRoomVerificationBlockers(rr);
         const status = deriveRoomVerificationStatus(room, {
           excludedRoomIds,
           roomCompleteness,
-          hasUnresolvedBlockers: Boolean(roomBlockerIds?.has(room.id)),
+          hasRoomBlockers: roomBlockers.length > 0,
         });
-        const verify = canMarkRoomVerified(rr, { hasGlobalBlockers });
-        return { ...rr, room, status, verifyBlockers: verify.blockers, canVerify: verify.ok };
+        return {
+          ...rr,
+          room,
+          status,
+          verifyBlockers: [...view.roomBlockers, ...view.roomApprovalBlockers],
+          globalBlockers: view.globalBlockers,
+          roomBlockerCount: view.roomBlockerCount,
+          canVerify: view.canVerify,
+        };
       })
       .filter(Boolean) as Array<
         ReviewedRoom & {
           room: NonNullable<ReturnType<typeof roomById.get>>;
           status: string;
-          verifyBlockers: Array<{ code: string; message: string }>;
+          verifyBlockers: Array<{ code: string; message: string; scope?: string }>;
+          globalBlockers: Array<{ code: string; message: string; scope?: string }>;
+          roomBlockerCount: number;
           canVerify: boolean;
         }
       >;
-  }, [reviewedRooms, excludedRoomIds, roomById, roomCompleteness, roomBlockerIds, hasGlobalBlockers]);
+  }, [reviewedRooms, excludedRoomIds, roomById, roomCompleteness, approvalBlockers, mathConsistencyIssues]);
 
   const excludedRooms = useMemo(() => {
     return (editDraft.rooms ?? [])
@@ -849,7 +881,11 @@ export default function TakeoffRoomReviewWorkbench({
                 type="button"
                 className="btn primary btn-sm"
                 disabled={selected.status === "verified" || !selected.canVerify}
-                title={!selected.canVerify ? selected.verifyBlockers.map((b) => b.message).join(" ") : undefined}
+                title={
+                  !selected.canVerify
+                    ? selected.verifyBlockers.map((b) => b.message).join(" ")
+                    : undefined
+                }
                 onClick={() => onSetRoomComplete(selected.roomId, true)}
               >
                 Mark room verified
@@ -857,12 +893,22 @@ export default function TakeoffRoomReviewWorkbench({
             </div>
           </div>
 
-          {!selected.canVerify && selected.verifyBlockers.length > 0 ? (
+          {(!selected.canVerify && selected.verifyBlockers.length > 0) ||
+          selected.globalBlockers.length > 0 ? (
             <div className="takeoff-room-verify-blockers" id="takeoff-room-verify-blockers" role="note">
-              <span className="takeoff-room-verify-blockers-label">Before verifying:</span>
+              <span className="takeoff-room-verify-blockers-label">
+                {selected.canVerify ? "Before approval:" : "Before verifying:"}
+              </span>
               <ul>
-                {selected.verifyBlockers.map((b) => (
-                  <li key={b.code}>{b.message}</li>
+                {selected.verifyBlockers.map((b, i) => (
+                  <li key={`room-${b.code}-${i}`} data-blocker-code={b.code}>
+                    {b.message}
+                  </li>
+                ))}
+                {selected.globalBlockers.map((b, i) => (
+                  <li key={`global-${b.code}-${i}`} data-blocker-code={b.code} className="takeoff-room-verify-blocker-global">
+                    {b.message}
+                  </li>
                 ))}
               </ul>
             </div>
@@ -877,7 +923,12 @@ export default function TakeoffRoomReviewWorkbench({
                 .filter(({ run }) => !excludedRunIds.has(run.id));
 
               return (
-                <div key={area.id ?? areaMeta.areaIdx} className="takeoff-room-area-block">
+                <div
+                  key={area.id ?? areaMeta.areaIdx}
+                  className="takeoff-room-area-block"
+                  id={`takeoff-blocker-area-${selected.roomIdx}-${areaMeta.areaIdx}`}
+                  data-blocker-code={areaMeta.needsReview ? "EMPTY_AREA" : undefined}
+                >
                   <div className="takeoff-room-area-head">
                     <span className="takeoff-room-area-label">{areaMeta.label}</span>
                     {areaMeta.needsReview ? (

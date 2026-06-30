@@ -8,6 +8,7 @@ export interface ReviewActionBarPrimaryAction {
   loading?: boolean;
   title?: string;
   roomId?: string;
+  focusTarget?: { elementId?: string; blockerCode?: string; kind?: string } | null;
 }
 
 export interface ReviewActionBarSecondaryAction {
@@ -23,6 +24,7 @@ export interface TakeoffReviewActionBarProps {
   selectedRoomName: string | null;
   selectedRoomVerified: boolean;
   unresolvedBlockerCount: number;
+  globalBlockerCount?: number;
   primaryAction: ReviewActionBarPrimaryAction;
   secondaryAction?: ReviewActionBarSecondaryAction | null;
   onPrimaryAction: (action: ReviewActionBarPrimaryAction) => void;
@@ -40,6 +42,7 @@ export default function TakeoffReviewActionBar({
   selectedRoomName,
   selectedRoomVerified,
   unresolvedBlockerCount,
+  globalBlockerCount = 0,
   primaryAction,
   secondaryAction,
   onPrimaryAction,
@@ -64,7 +67,12 @@ export default function TakeoffReviewActionBar({
             </EosStatusPill>
             {unresolvedBlockerCount > 0 ? (
               <span className="takeoff-review-action-bar-blockers">
-                {unresolvedBlockerCount} blocker{unresolvedBlockerCount !== 1 ? "s" : ""}
+                {unresolvedBlockerCount} room blocker{unresolvedBlockerCount !== 1 ? "s" : ""}
+              </span>
+            ) : null}
+            {globalBlockerCount > 0 ? (
+              <span className="takeoff-review-action-bar-blockers takeoff-review-action-bar-blockers--global">
+                {globalBlockerCount} global item{globalBlockerCount !== 1 ? "s" : ""}
               </span>
             ) : null}
           </div>

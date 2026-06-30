@@ -163,16 +163,18 @@ export function isRoomIncludedInTakeoff(roomId, excludedRoomIds) {
  * @param {{
  *   excludedRoomIds?: Set<string>,
  *   roomCompleteness?: Record<string, boolean>,
+ *   hasRoomBlockers?: boolean,
  *   hasUnresolvedBlockers?: boolean,
  * }} ctx
  */
 export function deriveRoomVerificationStatus(room, ctx = {}) {
   const excluded = ctx.excludedRoomIds ?? new Set();
   const completeness = ctx.roomCompleteness ?? {};
+  const hasRoomBlockers = ctx.hasRoomBlockers ?? ctx.hasUnresolvedBlockers ?? false;
   if (excluded.has(room.id)) return "excluded";
   if (completeness[room.id]) return "verified";
-  if (ctx.hasUnresolvedBlockers) return "needs_review";
-  return "in_progress";
+  if (hasRoomBlockers) return "needs_review";
+  return "ready_to_verify";
 }
 
 /**

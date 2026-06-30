@@ -591,6 +591,8 @@ export function deriveRoomVerificationBlockers(reviewedRoom) {
       blockers.push({
         code: "EMPTY_AREA",
         message: `Area "${area.label}" needs review — add a piece or mark not in scope.`,
+        areaIdx: area.areaIdx,
+        areaId: area.areaId,
       });
     }
     if (
@@ -601,6 +603,8 @@ export function deriveRoomVerificationBlockers(reviewedRoom) {
       blockers.push({
         code: "BACKSPLASH_SCOPE_UNRESOLVED",
         message: `Confirm backsplash scope for "${area.label}".`,
+        areaIdx: area.areaIdx,
+        areaId: area.areaId,
       });
     }
   }
@@ -613,6 +617,9 @@ export function deriveRoomVerificationBlockers(reviewedRoom) {
         blockers.push({
           code: "MISSING_RUN_DIMENSIONS",
           message: `Piece "${piece.label}" is missing length or depth.`,
+          areaIdx: area.areaIdx,
+          runId: piece.runId,
+          runIdx: piece.runIdx,
         });
       }
     }
@@ -622,18 +629,11 @@ export function deriveRoomVerificationBlockers(reviewedRoom) {
 }
 
 /**
- * Whether a room can be marked verified.
+ * Whether a room can be marked verified (room blockers only — global approval items are separate).
  *
  * @param {object} reviewedRoom
- * @param {{ hasGlobalBlockers?: boolean }} [opts]
  */
-export function canMarkRoomVerified(reviewedRoom, opts = {}) {
-  if (opts.hasGlobalBlockers) {
-    return {
-      ok: false,
-      blockers: [{ code: "GLOBAL_BLOCKERS", message: "Resolve Items to review before verifying rooms." }],
-    };
-  }
+export function canMarkRoomVerified(reviewedRoom) {
   const blockers = deriveRoomVerificationBlockers(reviewedRoom);
   return { ok: blockers.length === 0, blockers };
 }

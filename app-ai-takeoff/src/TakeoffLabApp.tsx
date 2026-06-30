@@ -43,6 +43,7 @@ import {
   validateReviewedTakeoffConsistency,
   canMarkRoomVerified,
 } from "@takeoff-core/reviewedTakeoffMath.mjs";
+import { buildRoomVerificationView } from "@takeoff-core/roomVerificationView.mjs";
 import type { TakeoffResult, TakeoffArea, TakeoffRun } from "@takeoff-core/takeoffContract.mjs";
 import type { TakeoffComputedMeasurements } from "@takeoff-core/takeoffMeasurementCalc.mjs";
 import type { TakeoffValidationResult } from "@takeoff-core/takeoffValidator.mjs";
@@ -785,9 +786,7 @@ export default function TakeoffLabApp() {
     if (complete) {
       const roomMath = reviewedMath?.activeRooms?.find((r) => r.roomId === roomId);
       if (roomMath) {
-        const verify = canMarkRoomVerified(roomMath, {
-          hasGlobalBlockers: false,
-        });
+        const verify = canMarkRoomVerified(roomMath);
         if (!verify.ok) return;
       }
     }
@@ -1555,31 +1554,21 @@ export default function TakeoffLabApp() {
     []
   );
 
-  const roomBlockerIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const b of approvalGate?.blockers ?? []) {
-      const path = String(b.path ?? "");
-      const room = (editDraft.rooms ?? []).find(
-        (r) => path.includes(r.id) || path.includes(`rooms.${r.id}`)
-      );
-      if (room) ids.add(room.id);
-      for (const r of editDraft.rooms ?? []) {
-        if (b.message?.includes(r.name)) ids.add(r.id);
-      }
-    }
-    return ids;
-  }, [approvalGate, editDraft.rooms]);
-
-  const hasGlobalReviewBlockers = Boolean(
-    (approvalGate?.blockers?.length ?? 0) > 0 || !mathConsistency.ok
-  );
-
   const selectedRoomVerify = useMemo(() => {
     if (!selectedRoomId || !reviewedMath) return null;
     const roomMath = reviewedMath.activeRooms.find((r) => r.roomId === selectedRoomId);
     if (!roomMath) return null;
-    return canMarkRoomVerified(roomMath, { hasGlobalBlockers: hasGlobalReviewBlockers });
-  }, [selectedRoomId, reviewedMath, hasGlobalReviewBlockers]);
+    const view = buildRoomVerificationView(roomMath, {
+      approvalBlockers: approvalGate?.blockers ?? [],
+      mathConsistencyIssues: mathConsistency.ok ? [] : mathConsistency.issues,
+    });
+    return {
+      ok: view.canVerify,
+      roomBlockers: view.roomBlockers,
+      globalBlockers: view.globalBlockers,
+      displayBlockers: view.displayBlockers,
+    };
+  }, [selectedRoomId, reviewedMath, approvalGate?.blockers, mathConsistency]);
 
   const reviewActionPath = useMemo(() => {
     if (!hasActiveSource) return null;
@@ -1597,13 +1586,12 @@ export default function TakeoffLabApp() {
       activeRooms: (reviewedMath?.activeRooms ?? []).map((r) => ({
         roomId: r.roomId,
         roomName: r.roomName,
+        roomIdx: r.roomIdx,
       })),
       roomCompleteness,
       excludedRoomIds,
       selectedRoomId,
       selectedRoomVerify,
-      hasGlobalBlockers: hasGlobalReviewBlockers,
-      globalBlockerCount: (approvalGate?.blockers?.length ?? 0) + unresolvedCount,
     });
   }, [
     hasActiveSource,
@@ -1622,9 +1610,6 @@ export default function TakeoffLabApp() {
     excludedRoomIds,
     selectedRoomId,
     selectedRoomVerify,
-    hasGlobalReviewBlockers,
-    approvalGate?.blockers?.length,
-    unresolvedCount,
   ]);
 
   const showReviewActionBar = Boolean(
@@ -1643,19 +1628,26 @@ export default function TakeoffLabApp() {
           if (targetId) void handleSetRoomComplete(targetId, true);
           break;
         }
-        case "focus_blockers":
-          if (hasGlobalReviewBlockers) {
-            document.getElementById("takeoff-items-to-review")?.scrollIntoView({
-              behavior: "smooth",
-              block: "start",
-            });
-          } else {
-            document.getElementById("takeoff-room-verify-blockers")?.scrollIntoView({
-              behavior: "smooth",
-              block: "center",
-            });
+        case "focus_blockers": {
+          const focusTarget = reviewActionPath?.primaryAction?.focusTarget as
+            | { elementId?: string; blockerCode?: string }
+            | null
+            | undefined;
+          const targetEl = focusTarget?.elementId
+            ? document.getElementById(focusTarget.elementId)
+            : null;
+          if (targetEl) {
+            targetEl.scrollIntoView({ behavior: "smooth", block: "center" });
+            targetEl.classList.add("takeoff-blocker-highlight");
+            window.setTimeout(() => targetEl.classList.remove("takeoff-blocker-highlight"), 2200);
+            break;
           }
+          document.getElementById("takeoff-room-verify-blockers")?.scrollIntoView({
+            behavior: "smooth",
+            block: "center",
+          });
           break;
+        }
         case "next_room": {
           const targetId = roomId ?? reviewActionPath?.nextRoomNeedingReview?.roomId ?? null;
           if (targetId) setSelectedRoomId(targetId);
@@ -1699,7 +1691,7 @@ export default function TakeoffLabApp() {
     [
       selectedRoomId,
       handleSetRoomComplete,
-      hasGlobalReviewBlockers,
+      reviewActionPath?.primaryAction?.focusTarget,
       reviewActionPath?.nextRoomNeedingReview?.roomId,
       handleSaveDraft,
       handleApproveTakeoff,
@@ -1893,8 +1885,8 @@ export default function TakeoffLabApp() {
             manualRoomIds={manualRoomIds}
             roomCompleteness={roomCompleteness}
             selectedRoomId={selectedRoomId}
-            roomBlockerIds={roomBlockerIds}
-            hasGlobalBlockers={(approvalGate?.blockers?.length ?? 0) > 0 || !mathConsistency.ok}
+            approvalBlockers={approvalGate?.blockers ?? []}
+            mathConsistencyIssues={mathConsistency.ok ? [] : mathConsistency.issues}
             onSelectRoom={setSelectedRoomId}
             onSetRoomComplete={handleSetRoomComplete}
             onSetRoomExcluded={handleSetRoomExcluded}
@@ -2597,7 +2589,8 @@ export default function TakeoffLabApp() {
           roomProgressLabel={reviewActionPath.roomProgress.label}
           selectedRoomName={reviewActionPath.selectedRoom?.roomName ?? null}
           selectedRoomVerified={Boolean(reviewActionPath.selectedRoom?.verified)}
-          unresolvedBlockerCount={(approvalGate?.blockers?.length ?? 0) + unresolvedCount}
+          unresolvedBlockerCount={reviewActionPath.selectedRoom?.blockerCount ?? 0}
+          globalBlockerCount={reviewActionPath.selectedRoom?.globalBlockerCount ?? 0}
           primaryAction={reviewActionPath.primaryAction}
           secondaryAction={reviewActionPath.secondaryAction}
           onPrimaryAction={(action) => executeReviewPathAction(action.action, action.roomId)}

@@ -612,6 +612,16 @@ html, body {
 }
 .takeoff-room-verify-blockers-label { font-weight: 650; display: block; margin-bottom: 4px; }
 .takeoff-room-verify-blockers ul { margin: 0; padding-left: 1.1rem; }
+.takeoff-room-verify-blocker-global { color: var(--eos-text-muted); }
+
+.takeoff-blocker-highlight {
+  outline: 2px solid var(--eos-accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--eos-accent-soft);
+  transition: outline-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.takeoff-review-action-bar-blockers--global { color: var(--eos-text-muted); }
 
 .takeoff-room-piece-card {
   padding: 12px 14px; border-radius: var(--r-md);

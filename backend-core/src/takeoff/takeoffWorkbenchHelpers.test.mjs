@@ -163,6 +163,14 @@ function testRoomVerificationStatus() {
   const room = makeTakeoffRoom({ id: "r1", name: "Kitchen" });
   assert.equal(deriveRoomVerificationStatus(room, { excludedRoomIds: new Set(["r1"]) }), "excluded");
   assert.equal(deriveRoomVerificationStatus(room, { roomCompleteness: { r1: true } }), "verified");
+  assert.equal(
+    deriveRoomVerificationStatus(room, { hasRoomBlockers: true }),
+    "needs_review"
+  );
+  assert.equal(
+    deriveRoomVerificationStatus(room, { hasRoomBlockers: false }),
+    "ready_to_verify"
+  );
 }
 
 function testIsRoomIncludedInTakeoff() {

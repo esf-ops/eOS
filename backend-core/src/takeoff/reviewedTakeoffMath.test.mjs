@@ -259,6 +259,40 @@ function testAddPieceToEmptyAreaClearsBlocker() {
   assert.equal(verify.ok, true);
 }
 
+function testNoStoneBacksplashClearsVerificationBlocker() {
+  const draft = {
+    ...buildSpec73Fixture(),
+    rooms: [
+      makeTakeoffRoom({
+        name: "Kitchen",
+        areas: [
+          makeTakeoffArea({
+            label: "Perimeter counters",
+            backsplashScope: "needs_review",
+            backsplashLinearIn: 96,
+            runs: [
+              makeTakeoffRun({ label: "Run A", lengthIn: 96, depthIn: 25.5, pieceType: "counter" }),
+            ],
+          }),
+        ],
+      }),
+    ],
+  };
+  const unresolved = computeReviewedTakeoffMath(draft, {}).activeRooms[0];
+  assert.ok(
+    deriveRoomVerificationBlockers(unresolved).some((b) => b.code === "BACKSPLASH_SCOPE_UNRESOLVED")
+  );
+
+  draft.rooms[0].areas[0].backsplashScope = "no_stone";
+  draft.rooms[0].areas[0].backsplashLinearIn = 0;
+  const resolved = computeReviewedTakeoffMath(draft, {}).activeRooms[0];
+  assert.equal(canMarkRoomVerified(resolved).ok, true);
+  assert.equal(
+    findUnresolvedScopeItems(draft, {}).some((i) => i.code === "BACKSPLASH_SCOPE_UNRESOLVED"),
+    false
+  );
+}
+
 const tests = [
   testSpec73RoomBsMatchesSummary,
   testAreaLevelBacksplashAttributedToRoom,
@@ -276,6 +310,7 @@ const tests = [
   testExcludeRestoreSyncsAllPieces,
   testRoomVerificationBlockedForEmptyArea,
   testAddPieceToEmptyAreaClearsBlocker,
+  testNoStoneBacksplashClearsVerificationBlocker,
 ];
 
 let passed = 0;
