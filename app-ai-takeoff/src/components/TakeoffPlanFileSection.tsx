@@ -26,10 +26,19 @@
  *   - OPENAI_API_KEY never in client code.
  *   - No quote mutation.
  */
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useImperativeHandle, useRef, useState, forwardRef } from "react";
 import type { TakeoffResult } from "@takeoff-core/takeoffContract.mjs";
-import { labApiGet, labApiPost, storagePut, startTakeoffProcessing, LabApiError } from "../lib/api";
+import {
+  labApiGet,
+  labApiPost,
+  storagePut,
+  startTakeoffProcessing,
+  generateAiTakeoffDraft,
+  submitTakeoffIssueReport,
+  LabApiError,
+} from "../lib/api";
 import type { TakeoffProcessingStatus } from "../lib/api";
+import { mapAiGenerateError, isGenerateInFlight } from "../lib/takeoffGenerateErrors.mjs";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -165,6 +174,17 @@ export interface TakeoffPlanFileSectionProps {
   onPlanArchived: () => void;
   /** Called when async processing reaches completed or failed (for inbox refresh). */
   onProcessingTerminal?: () => void;
+  /** Called when AI generation busy/failed state changes (for primary CTA). */
+  onGenerationStateChange?: (state: {
+    busy: boolean;
+    failed: boolean;
+    phaseLabel: string | null;
+  }) => void;
+}
+
+export interface TakeoffPlanFileSectionHandle {
+  generateAiDraft: () => Promise<void>;
+  isGenerating: boolean;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -212,14 +232,15 @@ function formatRetryAfter(iso: string | null | undefined): string {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-type AiStep = "idle" | "sending" | "generating" | "recomputing" | "waiting" | "done" | "error";
+type AiStep = "idle" | "sending" | "generating" | "recomputing" | "polling" | "waiting" | "done" | "error";
 
 // Progress messages shown during AI extraction (timed — one API call, multiple UX steps).
 const AI_STEP_MSGS: Record<AiStep, string | null> = {
   idle:        null,
   sending:     "Sending plan to AI model…",
-  generating:  "Generating AI draft…",
+  generating:  "Generating AI takeoff…",
   recomputing: "Recomputing with eliteOS…",
+  polling:     "Generating AI takeoff…",
   waiting:     null,
   done:        "Ready for review",
   error:       null,
@@ -240,17 +261,22 @@ function aiStepMessage(step: AiStep, activeProvider: string | null | undefined):
   return AI_STEP_MSGS[step];
 }
 
-export default function TakeoffPlanFileSection({
-  takeoffJobId,
-  token,
-  onWorkspaceCreated,
-  onWorkspaceLoaded,
-  onWorkspaceLoadStart,
-  onWorkspaceLoadError,
-  onAiDraftGenerated,
-  onPlanArchived,
-  onProcessingTerminal,
-}: TakeoffPlanFileSectionProps) {
+export default forwardRef<TakeoffPlanFileSectionHandle, TakeoffPlanFileSectionProps>(
+  function TakeoffPlanFileSection(
+    {
+      takeoffJobId,
+      token,
+      onWorkspaceCreated,
+      onWorkspaceLoaded,
+      onWorkspaceLoadStart,
+      onWorkspaceLoadError,
+      onAiDraftGenerated,
+      onPlanArchived,
+      onProcessingTerminal,
+      onGenerationStateChange,
+    },
+    ref
+  ) {
   const [workspace, setWorkspace] = useState<WorkspaceState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -273,6 +299,8 @@ export default function TakeoffPlanFileSection({
   // AI draft generation state (v5)
   const [aiStep, setAiStep] = useState<AiStep>("idle");
   const [aiError, setAiError] = useState<string | null>(null);
+  const [aiErrorView, setAiErrorView] = useState<ReturnType<typeof mapAiGenerateError> | null>(null);
+  const [issueReportStatus, setIssueReportStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [exayardRawCaptured, setExayardRawCaptured] = useState(false);
   const [exayardWaitingInfo, setExayardWaitingInfo] = useState<{
     retryAfterAt: string | null;
@@ -280,6 +308,8 @@ export default function TakeoffPlanFileSection({
     message:      string | null;
   } | null>(null);
   const aiTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const generationFlowRef = useRef(false);
+  const generateInFlightRef = useRef(false);
 
   const [asyncBusy, setAsyncBusy] = useState(false);
   const [asyncError, setAsyncError] = useState<string | null>(null);
@@ -312,6 +342,8 @@ export default function TakeoffPlanFileSection({
     setDownloadError(null);
     setAiStep("idle");
     setAiError(null);
+    setAiErrorView(null);
+    setIssueReportStatus("idle");
     setExayardRawCaptured(false);
     setExayardWaitingInfo(null);
     setProviderConfig(null);
@@ -472,86 +504,6 @@ export default function TakeoffPlanFileSection({
 
   // ── AI draft generation (v5) ─────────────────────────────────────────────
 
-  const handleGenerateAiDraft = useCallback(async () => {
-    if (!takeoffJobId || !token || !workspace) return;
-
-    // Clear any previous timers.
-    aiTimersRef.current.forEach(clearTimeout);
-    aiTimersRef.current = [];
-
-    setAiStep("sending");
-    setAiError(null);
-    setExayardRawCaptured(false);
-    setExayardWaitingInfo(null);
-
-    const isExayard = providerConfig?.activeProvider === "exayard";
-    // Simulate multi-step progress during the single API call.
-    aiTimersRef.current.push(setTimeout(() => setAiStep("generating"),  isExayard ? 4000 : 3500));
-    aiTimersRef.current.push(setTimeout(() => setAiStep("recomputing"), isExayard ? 12000 : 9000));
-
-    try {
-      const res = await labApiPost(
-        `/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}/generate-ai-draft`,
-        token,
-        {}
-      ) as {
-        ok:                    boolean;
-        exayardStatus?:        string;
-        normalizedTakeoffJson?: TakeoffResult;
-        promptVersion?:        string | null;
-        modelUsed?:            string | null;
-        resultRowId?:          string | null;
-        summary?:              object | null;
-        pageInventory?:        object | null;
-        dimensionEvidence?:    object | null;
-        exayardRawCaptured?:   boolean;
-        exayardWorkflow?:      object | null;
-        retryAfterAt?:         string | null;
-        retryAfterSeconds?:    number | null;
-        message?:              string | null;
-        assessmentId?:         string | null;
-        canResumeExayard?:     boolean;
-      };
-
-      // Clear progress timers.
-      aiTimersRef.current.forEach(clearTimeout);
-      aiTimersRef.current = [];
-
-      if (res.ok && res.exayardStatus === "waiting_on_exayard") {
-        setAiStep("waiting");
-        setExayardWaitingInfo({
-          retryAfterAt: res.retryAfterAt ?? (res.exayardWorkflow as { retryAfterAt?: string })?.retryAfterAt ?? null,
-          assessmentId: res.assessmentId ?? (res.exayardWorkflow as { assessmentId?: string })?.assessmentId ?? null,
-          message:      res.message ?? "Exayard is still processing this assessment.",
-        });
-        return;
-      }
-
-      if (res.ok && res.normalizedTakeoffJson) {
-        setAiStep("done");
-        setExayardRawCaptured(Boolean(res.exayardRawCaptured));
-        onAiDraftGenerated(res.normalizedTakeoffJson, workspace.file.originalFilename, {
-          promptVersion: res.promptVersion  ?? null,
-          modelUsed:     res.modelUsed      ?? null,
-          resultRowId:   res.resultRowId    ?? null,
-          summary:       res.summary        ?? null,
-          pageInventory:     res.pageInventory    ?? null,
-          dimensionEvidence: res.dimensionEvidence ?? null,
-          exayardRawCaptured: res.exayardRawCaptured ?? false,
-          exayardWorkflow:    res.exayardWorkflow ?? null,
-        });
-      } else {
-        throw new Error("Server returned an unexpected response");
-      }
-    } catch (e) {
-      aiTimersRef.current.forEach(clearTimeout);
-      aiTimersRef.current = [];
-      const msg = e instanceof LabApiError ? e.message : e instanceof Error ? e.message : "AI extraction failed.";
-      setAiStep("error");
-      setAiError(msg);
-    }
-  }, [takeoffJobId, token, workspace, onAiDraftGenerated, providerConfig?.activeProvider]);
-
   const loadLatestResultIntoReview = useCallback(async () => {
     if (!takeoffJobId || !token || !workspace) return;
     const latest = await labApiGet(
@@ -586,6 +538,127 @@ export default function TakeoffPlanFileSection({
     setWorkspace(res);
     return res;
   }, [takeoffJobId, token]);
+
+  const handleGenerateAiDraft = useCallback(async () => {
+    if (!takeoffJobId || !token || !workspace) return;
+    if (generateInFlightRef.current) return;
+
+    generateInFlightRef.current = true;
+    generationFlowRef.current = true;
+
+    aiTimersRef.current.forEach(clearTimeout);
+    aiTimersRef.current = [];
+
+    setAiStep("sending");
+    setAiError(null);
+    setAiErrorView(null);
+    setIssueReportStatus("idle");
+    setExayardRawCaptured(false);
+    setExayardWaitingInfo(null);
+
+    const endpoint = `/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}/generate-ai-draft`;
+    const errorCtx = {
+      endpoint,
+      jobId: takeoffJobId,
+      provider: providerConfig?.activeProvider ?? null,
+      model: providerConfig?.model ?? null,
+    };
+
+    const isExayard = providerConfig?.activeProvider === "exayard";
+    aiTimersRef.current.push(setTimeout(() => setAiStep("generating"), isExayard ? 4000 : 3500));
+    aiTimersRef.current.push(setTimeout(() => setAiStep("recomputing"), isExayard ? 12000 : 9000));
+
+    try {
+      const res = await generateAiTakeoffDraft(token, takeoffJobId);
+
+      aiTimersRef.current.forEach(clearTimeout);
+      aiTimersRef.current = [];
+
+      if ("accepted" in res && res.accepted) {
+        setAiStep("polling");
+        const ws = await refreshWorkspaceFromServer();
+        if (ws?.status === "completed") {
+          await loadLatestResultIntoReview();
+          setAiStep("done");
+          generationFlowRef.current = false;
+          generateInFlightRef.current = false;
+          return;
+        }
+        if (ws?.status === "failed") {
+          throw new Error(ws.processing?.error ?? ws.errorMessage ?? "Generation failed");
+        }
+        return;
+      }
+
+      if (res.ok && res.exayardStatus === "waiting_on_exayard") {
+        setAiStep("waiting");
+        setExayardWaitingInfo({
+          retryAfterAt: res.retryAfterAt ?? (res.exayardWorkflow as { retryAfterAt?: string })?.retryAfterAt ?? null,
+          assessmentId: res.assessmentId ?? (res.exayardWorkflow as { assessmentId?: string })?.assessmentId ?? null,
+          message: res.message ?? "Exayard is still processing this assessment.",
+        });
+        generationFlowRef.current = false;
+        generateInFlightRef.current = false;
+        return;
+      }
+
+      if (res.ok && res.normalizedTakeoffJson) {
+        setAiStep("done");
+        setExayardRawCaptured(Boolean(res.exayardRawCaptured));
+        onAiDraftGenerated(res.normalizedTakeoffJson as TakeoffResult, workspace.file.originalFilename, {
+          promptVersion: res.promptVersion ?? null,
+          modelUsed: res.modelUsed ?? null,
+          resultRowId: res.resultRowId ?? null,
+          summary: res.summary ?? null,
+          pageInventory: res.pageInventory ?? null,
+          dimensionEvidence: res.dimensionEvidence ?? null,
+          exayardRawCaptured: res.exayardRawCaptured ?? false,
+          exayardWorkflow: res.exayardWorkflow ?? null,
+        });
+        generationFlowRef.current = false;
+        generateInFlightRef.current = false;
+      } else {
+        throw new Error("Server returned an unexpected response");
+      }
+    } catch (e) {
+      aiTimersRef.current.forEach(clearTimeout);
+      aiTimersRef.current = [];
+      const view = mapAiGenerateError(e, errorCtx);
+      setAiStep("error");
+      setAiError(view.body);
+      setAiErrorView(view);
+      generationFlowRef.current = false;
+      generateInFlightRef.current = false;
+    }
+  }, [
+    takeoffJobId,
+    token,
+    workspace,
+    onAiDraftGenerated,
+    providerConfig?.activeProvider,
+    providerConfig?.model,
+    refreshWorkspaceFromServer,
+    loadLatestResultIntoReview,
+  ]);
+
+  const handleReportGenerationIssue = useCallback(async () => {
+    if (!takeoffJobId || !token || !aiErrorView) return;
+    setIssueReportStatus("sending");
+    try {
+      const details = Object.entries(aiErrorView.advanced)
+        .map(([k, v]) => `${k}: ${v}`)
+        .join("\n");
+      await submitTakeoffIssueReport(token, takeoffJobId, {
+        category: "other",
+        note:
+          `AI takeoff generation failed.\n\n${aiErrorView.title}\n${aiErrorView.body}\n\nAdvanced:\n${details}`,
+        sourcePage: "generate_ai_draft",
+      });
+      setIssueReportStatus("sent");
+    } catch {
+      setIssueReportStatus("error");
+    }
+  }, [takeoffJobId, token, aiErrorView]);
 
   const handleStartAsyncProcessing = useCallback(async () => {
     if (!takeoffJobId || !token || !workspace) return;
@@ -630,11 +703,36 @@ export default function TakeoffPlanFileSection({
         if (!alive) return;
         setWorkspace(res);
         if (res.status === "completed") {
+          if (generationFlowRef.current) {
+            setAiStep("done");
+            generationFlowRef.current = false;
+            generateInFlightRef.current = false;
+          }
           await loadLatestResultIntoReview();
           onProcessingTerminal?.();
         } else if (res.status === "failed") {
-          setAsyncError(res.processing?.error ?? res.errorMessage ?? "Processing failed.");
+          if (generationFlowRef.current) {
+            const endpoint = `/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}/generate-ai-draft`;
+            const view = mapAiGenerateError(
+              new Error(res.processing?.error ?? res.errorMessage ?? "Generation failed"),
+              {
+                endpoint,
+                jobId: takeoffJobId,
+                provider: providerConfig?.activeProvider ?? null,
+                model: providerConfig?.model ?? null,
+              }
+            );
+            setAiStep("error");
+            setAiError(view.body);
+            setAiErrorView(view);
+            generationFlowRef.current = false;
+            generateInFlightRef.current = false;
+          } else {
+            setAsyncError(res.processing?.error ?? res.errorMessage ?? "Processing failed.");
+          }
           onProcessingTerminal?.();
+        } else if (generationFlowRef.current && res.processing?.phaseLabel) {
+          setAiStep("polling");
         }
       } catch {
         /* non-fatal poll error */
@@ -653,7 +751,28 @@ export default function TakeoffPlanFileSection({
     workspace?.status,
     loadLatestResultIntoReview,
     onProcessingTerminal,
+    providerConfig?.activeProvider,
+    providerConfig?.model,
   ]);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      generateAiDraft: () => handleGenerateAiDraft(),
+      isGenerating: isGenerateInFlight(aiStep) || generateInFlightRef.current,
+    }),
+    [handleGenerateAiDraft, aiStep]
+  );
+
+  useEffect(() => {
+    const busy = isGenerateInFlight(aiStep) || generateInFlightRef.current;
+    const failed = aiStep === "error" || workspace?.status === "failed";
+    const phaseLabel =
+      aiStep === "polling"
+        ? workspace?.processing?.phaseLabel ?? "Generating AI takeoff…"
+        : aiStepMessage(aiStep, providerConfig?.activeProvider);
+    onGenerationStateChange?.({ busy, failed, phaseLabel });
+  }, [aiStep, workspace?.status, workspace?.processing?.phaseLabel, providerConfig?.activeProvider, onGenerationStateChange]);
 
   const handleResumeExayard = useCallback(async () => {
     if (!takeoffJobId || !token || !workspace) return;
@@ -748,7 +867,7 @@ export default function TakeoffPlanFileSection({
   // ── Render ────────────────────────────────────────────────────────────────
 
   const isBusy = uploadStep !== "idle" && uploadStep !== "done" && uploadStep !== "error";
-  const isAiBusy = aiStep === "sending" || aiStep === "generating" || aiStep === "recomputing";
+  const isAiBusy = isGenerateInFlight(aiStep);
   const pipelineStatus = workspace?.status ?? "pending";
   const isPipelineProcessing = pipelineStatus === "processing";
   const showAsyncPanel = Boolean(providerConfig?.takeoffAsyncStartAllowed);
@@ -902,57 +1021,88 @@ export default function TakeoffPlanFileSection({
             </div>
           )}
 
-          {/* AI draft generation (v5) — hidden for archived files */}
-          {!isFileArchived && <div className="ai-draft-panel">
-            <div className="ai-draft-row">
-              <button
-                type="button"
-                className={`plan-btn plan-btn--ai${isAiBusy ? " plan-btn--ai-busy" : ""}`}
-                disabled={isAiBusy}
-                onClick={() => void handleGenerateAiDraft()}
-              >
-                {isAiBusy ? (
-                  <span className="ai-draft-spinner" aria-hidden>◌</span>
-                ) : aiStep === "done" ? (
-                  providerConfig?.activeProvider === "exayard"
-                    ? "↻ Re-run Exayard workflow"
-                    : "↻ Re-generate AI takeoff draft"
-                ) : providerConfig?.activeProvider === "exayard" ? (
-                  "✦ Run Exayard takeoff (v1)"
-                ) : (
-                  "✦ Generate AI takeoff draft"
-                )}
-                {isAiBusy && (
-                  <span className="ai-draft-progress-text">
-                    {aiStepMessage(aiStep, providerConfig?.activeProvider)}
-                  </span>
-                )}
-              </button>
+          {/* AI generation status — primary CTA lives in workflow status card */}
+          {!isFileArchived && (
+            <div className="ai-draft-panel">
+            {isAiBusy && (
+              <p className="ai-draft-progress" role="status" aria-live="polite">
+                <span className="ai-draft-spinner" aria-hidden>◌</span>{" "}
+                {aiStep === "polling" && workspace?.processing?.phaseLabel
+                  ? workspace.processing.phaseLabel
+                  : aiStepMessage(aiStep, providerConfig?.activeProvider)}
+                {workspace?.processing?.pageProgress &&
+                workspace.processing.pageProgress.total > 0 ? (
+                  <>
+                    {" "}
+                    ({workspace.processing.pageProgress.current}/
+                    {workspace.processing.pageProgress.total})
+                  </>
+                ) : null}
+              </p>
+            )}
 
-              {aiStep === "done" && (
-                <span className="ai-draft-success-note">
-                  {exayardRawCaptured || providerConfig?.activeProvider === "exayard"
-                    ? "Exayard raw result captured — normalization pending."
-                    : "AI draft loaded — estimator review required before import."}
-                </span>
-              )}
-            </div>
+            {aiStep === "done" && (
+              <p className="ai-draft-success-note" role="status">
+                {exayardRawCaptured || providerConfig?.activeProvider === "exayard"
+                  ? "Exayard raw result captured — normalization pending."
+                  : "AI draft loaded — estimator review required before import."}
+              </p>
+            )}
+
+            {aiStep === "error" && aiErrorView && (
+              <div className="ai-generation-error" role="alert">
+                <p className="ai-generation-error-title">{aiErrorView.title}</p>
+                <p className="ai-generation-error-body">{aiErrorView.body}</p>
+                <div className="ai-generation-error-actions">
+                  {aiErrorView.canRetry && (
+                    <button
+                      type="button"
+                      className="plan-btn plan-btn--primary"
+                      disabled={isAiBusy}
+                      onClick={() => void handleGenerateAiDraft()}
+                    >
+                      Try again
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="plan-btn plan-btn--secondary"
+                    disabled={issueReportStatus === "sending" || issueReportStatus === "sent"}
+                    onClick={() => void handleReportGenerationIssue()}
+                  >
+                    {issueReportStatus === "sending"
+                      ? "Reporting…"
+                      : issueReportStatus === "sent"
+                        ? "Report sent"
+                        : "Report issue"}
+                  </button>
+                </div>
+                {issueReportStatus === "error" && (
+                  <p className="ai-generation-error-report-fail">Could not send report — try again later.</p>
+                )}
+                <details className="ai-generation-error-advanced">
+                  <summary>Advanced</summary>
+                  <dl>
+                    {Object.entries(aiErrorView.advanced).map(([key, value]) => (
+                      <div key={key} className="ai-generation-error-advanced-row">
+                        <dt>{key}</dt>
+                        <dd>{value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </details>
+              </div>
+            )}
+
+            {workspace?.status === "failed" && aiStep !== "error" && !isAiBusy && (
+              <p className="ai-draft-error" role="status">
+                Generation failed — needs retry. Use <strong>Generate AI takeoff</strong> above to try again.
+              </p>
+            )}
 
             {providerConfig?.activeProvider === "exayard" && aiStep === "idle" && (
               <p className="ai-draft-hint ai-draft-hint--exayard">
                 Exayard workflow v1: upload plan → analysis → poll assessment. Raw Exayard output is stored; countertop mapping is not applied yet.
-              </p>
-            )}
-
-            {isAiBusy && (
-              <p className="ai-draft-progress" role="status" aria-live="polite">
-                {aiStepMessage(aiStep, providerConfig?.activeProvider)}
-              </p>
-            )}
-
-            {aiStep === "error" && aiError && (
-              <p className="ai-draft-error" role="alert">
-                ✗ {aiError}
               </p>
             )}
 
@@ -1050,7 +1200,8 @@ export default function TakeoffPlanFileSection({
                 )}
               </div>
             )}
-          </div>}
+          </div>
+          )}
         </div>
       ) : loadError ? (
         <p className="plan-file-error">Failed to load workspace: {loadError}</p>
@@ -1125,4 +1276,4 @@ export default function TakeoffPlanFileSection({
       )}
     </div>
   );
-}
+});

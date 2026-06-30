@@ -99,6 +99,8 @@
     "eos:test:takeoff-fabrication-rules": "node backend-core/src/takeoff/takeoffFabricationRules.test.mjs",
     "eos:test:takeoff-validation-fixes": "node backend-core/src/takeoff/takeoffValidationFixes.test.mjs",
     "eos:test:takeoff-process-orchestrator": "node backend-core/src/takeoff/takeoffProcessOrchestrator.test.mjs",
+    "eos:test:takeoff-generation-orchestrator": "node backend-core/src/takeoff/takeoffGenerationOrchestrator.test.mjs",
+    "eos:test:takeoff-generate-errors": "node app-ai-takeoff/src/lib/takeoffGenerateErrors.test.mjs",
     "eos:test:takeoff-measurement-calc": "node backend-core/src/takeoff/takeoffMeasurementCalc.test.mjs",
     "eos:test:takeoff-workbench-helpers": "node backend-core/src/takeoff/takeoffWorkbenchHelpers.test.mjs",
     "eos:test:reviewed-takeoff-math": "node backend-core/src/takeoff/reviewedTakeoffMath.test.mjs",

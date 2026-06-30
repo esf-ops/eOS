@@ -178,7 +178,7 @@ async function updateJob(supabase, takeoffJobId, organizationId, fields) {
     .eq("organization_id", organizationId);
 }
 
-function mergeProcessingMeta(existingMeta, processingPatch) {
+export function mergeProcessingMeta(existingMeta, processingPatch) {
   const base = typeof existingMeta === "object" && existingMeta !== null ? existingMeta : {};
   const prev =
     typeof base.processing === "object" && base.processing !== null ? base.processing : {};

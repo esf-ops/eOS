@@ -1671,6 +1671,63 @@ details[open] > .lab-section-summary::before { transform: rotate(90deg); }
   font-weight: 500;
 }
 
+.ai-generation-error {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--eos-danger) 35%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--eos-danger) 6%, white);
+}
+
+.ai-generation-error-title {
+  margin: 0 0 6px;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.ai-generation-error-body {
+  margin: 0 0 10px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.ai-generation-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.ai-generation-error-report-fail {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--eos-danger);
+}
+
+.ai-generation-error-advanced {
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.ai-generation-error-advanced-row {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 8px;
+  margin: 4px 0;
+}
+
+.ai-generation-error-advanced-row dt {
+  margin: 0;
+  opacity: 0.75;
+}
+
+.ai-generation-error-advanced-row dd {
+  margin: 0;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
 .ai-draft-hint {
   margin: 0;
   font-size: 12px;

@@ -137,6 +137,8 @@ export function deriveWorkflowGuidance(input: {
   approveStatus: string;
   importStatus: string;
   showApprovedInUi: boolean;
+  generationInFlight?: boolean;
+  generationFailed?: boolean;
 }): {
   statusLabel: string;
   statusHint: string;
@@ -157,6 +159,8 @@ export function deriveWorkflowGuidance(input: {
     approveStatus,
     importStatus,
     showApprovedInUi,
+    generationInFlight = false,
+    generationFailed = false,
   } = input;
 
   const statusLabel = unifiedStatusLabel(workflowStatus, { approvalStale });
@@ -172,6 +176,27 @@ export function deriveWorkflowGuidance(input: {
       };
 
     case "generate":
+      if (generationInFlight) {
+        return {
+          statusLabel: "Generating",
+          statusHint: "AI is extracting measurements from your plan.",
+          nextAction: "This usually takes a few minutes — keep this tab open.",
+          primaryCta: {
+            label: "Generating…",
+            action: "generate",
+            disabled: true,
+            loading: true,
+          },
+        };
+      }
+      if (generationFailed) {
+        return {
+          statusLabel: "Needs retry",
+          statusHint: "Generation failed — your plan is still attached.",
+          nextAction: "Try generating again, or report the issue if it keeps failing.",
+          primaryCta: { label: "Try again", action: "generate" },
+        };
+      }
       return {
         statusLabel: UNIFIED_STATUS_LABELS.draft,
         statusHint: "Plan attached — run AI extraction when ready.",

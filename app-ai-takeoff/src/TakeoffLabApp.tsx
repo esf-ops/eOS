@@ -61,7 +61,11 @@ import TakeoffBetaQaPanel from "./components/TakeoffBetaQaPanel";
 import TakeoffImportReadinessPanel from "./components/TakeoffImportReadinessPanel";
 import TakeoffWorkbench from "./components/TakeoffWorkbench";
 import TakeoffPlanFileSection from "./components/TakeoffPlanFileSection";
-import type { PlanFilePreviewMeta, WorkspaceReviewMeta } from "./components/TakeoffPlanFileSection";
+import type {
+  PlanFilePreviewMeta,
+  WorkspaceReviewMeta,
+  TakeoffPlanFileSectionHandle,
+} from "./components/TakeoffPlanFileSection";
 import TakeoffPlanPreviewPanel from "./components/TakeoffPlanPreviewPanel";
 import TakeoffBenchmarkPanel from "./components/TakeoffBenchmarkPanel";
 import type { BenchmarkQaContext } from "./components/TakeoffBenchmarkPanel";
@@ -447,7 +451,10 @@ export default function TakeoffLabApp() {
   const [copyFeedback, setCopyFeedback] = useState<"summary" | "json" | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const planSectionRef = useRef<HTMLDivElement>(null);
+  const planFileSectionRef = useRef<TakeoffPlanFileSectionHandle>(null);
   const importPreviewRef = useRef<TakeoffImportPreviewHandle>(null);
+  const [generationBusy, setGenerationBusy] = useState(false);
+  const [generationFailed, setGenerationFailed] = useState(false);
 
   // ── Review workbench state (v6.1) ─────────────────────────────────────────
   /** Run IDs excluded by the estimator — filtered from computation but kept in editDraft */
@@ -1407,6 +1414,7 @@ export default function TakeoffLabApp() {
     setHistoryRefreshKey((k) => k + 1);
     setPageInventory((meta.pageInventory    as PageInventory    | null) ?? null);
     setDimensionEvidence((meta.dimensionEvidence as DimensionEvidence | null) ?? null);
+    setGenerationFailed(false);
   }, []);
 
   // ── Handle loading a historical run from run history panel (v5.3) ─────────
@@ -1506,6 +1514,8 @@ export default function TakeoffLabApp() {
         approveStatus,
         importStatus: importJobStatus,
         showApprovedInUi,
+        generationInFlight: generationBusy,
+        generationFailed,
       }),
     [
       currentWorkflowStep,
@@ -1521,15 +1531,27 @@ export default function TakeoffLabApp() {
       approveStatus,
       importJobStatus,
       showApprovedInUi,
+      generationBusy,
+      generationFailed,
     ]
+  );
+
+  const handleGenerationStateChange = useCallback(
+    (state: { busy: boolean; failed: boolean }) => {
+      setGenerationBusy(state.busy);
+      setGenerationFailed(state.failed);
+    },
+    []
   );
 
   const handlePrimaryWorkflowAction = useCallback(
     (action: PrimaryCtaConfig["action"]) => {
       switch (action) {
         case "upload":
-        case "generate":
           planSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+          break;
+        case "generate":
+          void planFileSectionRef.current?.generateAiDraft();
           break;
         case "save":
           if (unresolvedCount > 0) {
@@ -2068,6 +2090,7 @@ export default function TakeoffLabApp() {
       {workflowStatusCard}
       <div ref={planSectionRef}>
         <TakeoffPlanFileSection
+          ref={planFileSectionRef}
           takeoffJobId={takeoffJobId}
           token={authToken}
           onWorkspaceLoadStart={handleWorkspaceLoadStart}
@@ -2077,6 +2100,7 @@ export default function TakeoffLabApp() {
           onAiDraftGenerated={handleAiDraftGenerated}
           onPlanArchived={handleStartNewTakeoff}
           onProcessingTerminal={() => setHistoryRefreshKey((k) => k + 1)}
+          onGenerationStateChange={handleGenerationStateChange}
         />
       </div>
     </div>

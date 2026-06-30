@@ -81,6 +81,7 @@ async function setJobStatus(supabase, takeoffJobId, organizationId, fields) {
  *   takeoffJobId: string,
  *   providerFn?: Function|null,          optional override for testing
  *   configOverride?: object|null         optional config override for testing
+ *   onPhase?: (phase: string) => Promise<void>|void  optional progress hook for async generation
  * }} params
  */
 export async function runAiTakeoffExtraction({
@@ -92,6 +93,7 @@ export async function runAiTakeoffExtraction({
   configOverride          = null,
   inventoryProviderFn     = null,  // v5.4: injectable for testing; null = use default OpenAI call
   dimensionEvidenceProviderFn = null, // v5.5: injectable for testing; null = use default OpenAI call
+  onPhase                 = null,
 }) {
   // 1. Validate inputs.
   if (!isUuid(organizationId)) {
@@ -191,6 +193,7 @@ export async function runAiTakeoffExtraction({
 
   // 5. Set job status = 'processing'.
   await setJobStatus(supabase, takeoffJobId, organizationId, { status: "processing" });
+  if (onPhase) await onPhase("download");
 
   // 6. Download file bytes from private Supabase Storage (service-role key — no client access).
   const bucketName  = file.storage_bucket ?? QUOTE_FILE_BUCKET;
@@ -230,6 +233,7 @@ export async function runAiTakeoffExtraction({
   const isExayard = config?.providerName === "exayard";
   const shouldRunInventory = !isExayard && (inventoryProviderFn != null || !providerFn);
   if (shouldRunInventory) {
+    if (onPhase) await onPhase("page_inventory");
     try {
       pageInventory = await runPageInventory({
         fileBuffer,
@@ -257,6 +261,7 @@ export async function runAiTakeoffExtraction({
   let dimensionEvidence = null;
   const shouldRunEvidence = !isExayard && (dimensionEvidenceProviderFn != null || !providerFn);
   if (shouldRunEvidence) {
+    if (onPhase) await onPhase("dimension_evidence");
     try {
       dimensionEvidence = await runDimensionEvidence({
         fileBuffer,
@@ -280,6 +285,7 @@ export async function runAiTakeoffExtraction({
   // 7. Call AI provider with file bytes (+ inventory + evidence context if available).
   let providerOutput;
   try {
+    if (onPhase) await onPhase("extraction");
     providerOutput = await provider({
       fileBuffer,
       mimeType:          file.mime_type ?? "",
@@ -370,6 +376,7 @@ export async function runAiTakeoffExtraction({
   // 10. Server-side recompute — AI totals are NEVER used for pricing.
   let computed, validation, importPlan, qaGate;
   try {
+    if (onPhase) await onPhase("normalize");
     computed    = computeTakeoffMeasurements(normalized);
     validation  = validateTakeoffResult(normalized, computed, dimensionEvidence);
     importPlan  = planTakeoffImport(normalized, computed);
@@ -415,6 +422,7 @@ export async function runAiTakeoffExtraction({
   //     review_status is ALWAYS 'needs_review' — AI never auto-approved.
   //     raw_ai_result_json stores the model's original output plus a _meta envelope
   //     containing promptVersion, modelUsed, and savedAt for run-history queries.
+  if (onPhase) await onPhase("persist");
   let rawAiJson = null;
   if (rawText) {
     try { rawAiJson = JSON.parse(rawText); } catch { rawAiJson = { _raw: rawText.slice(0, 5000) }; }

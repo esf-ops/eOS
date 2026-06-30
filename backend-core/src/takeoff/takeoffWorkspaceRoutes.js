@@ -44,6 +44,10 @@ import {
   getResultById,
 } from "./takeoffWorkspaceService.mjs";
 import { runAiTakeoffExtraction } from "./takeoffExtractionService.mjs";
+import {
+  readTakeoffGenerateConfig,
+  startAiTakeoffGeneration,
+} from "./takeoffGenerationOrchestrator.mjs";
 import { startTakeoffProcessing } from "./takeoffProcessOrchestrator.mjs";
 import { resumeExayardTakeoff } from "./exayardTakeoffResume.mjs";
 import { readSafeProviderConfigAsync } from "./takeoffAiProvider.mjs";
@@ -484,10 +488,14 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase, he
   // Does NOT import into a quote. Does NOT enable the Internal Estimate import button.
   // review_status is ALWAYS 'needs_review' — AI output is never auto-approved.
   //
-  // Response:
+  // Response (sync 200):
   //   { ok: true, takeoffJobId, savedAt, schemaVersion, reviewStatus,
   //     normalizedTakeoffJson, computedMeasurementsJson, validationDiagnosticsJson,
   //     importPlanJson, summary, modelUsed, promptVersion, usage }
+  //
+  // Response (async 202 — Vercel production default):
+  //   { ok: true, accepted: true, takeoffJobId, runId, status: "processing", processing, mode: "ai_generate" }
+  //   Poll GET /api/takeoff-jobs/:id until status is completed | failed, then GET /results/latest.
   //
   app.post("/api/takeoff-jobs/:id/generate-ai-draft", requireAuth(), guardHead, async (req, res) => {
     try {
@@ -500,6 +508,32 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase, he
       }
 
       const takeoffJobId = String(req.params.id ?? "").trim();
+      const generateConfig = readTakeoffGenerateConfig();
+
+      if (generateConfig.asyncEnabled) {
+        const accepted = await startAiTakeoffGeneration({
+          supabase,
+          organizationId: orgCtx.organizationId,
+          userId: user?.id ?? null,
+          takeoffJobId,
+        });
+
+        await recordTakeoffBetaMetric({
+          db: supabase,
+          organizationId: orgCtx.organizationId,
+          takeoffJobId,
+          eventType: "ai_takeoff_generation_queued",
+          userId: user?.id ?? null,
+          userEmail: String(user?.email || user?.id || "unknown"),
+          metadata: {
+            runId: accepted.runId ?? null,
+            mode: accepted.mode ?? "ai_generate",
+          },
+          req,
+        }).catch(() => {});
+
+        return res.status(202).json(accepted);
+      }
 
       const result = await runAiTakeoffExtraction({
         supabase,
@@ -531,6 +565,7 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase, he
         error: String(e?.message ?? e),
         code,
         ...(e.rawExcerpt != null && { rawExcerpt: e.rawExcerpt }),
+        ...(e.processing ? { processing: e.processing } : {}),
       });
     }
   });

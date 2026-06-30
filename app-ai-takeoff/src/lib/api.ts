@@ -8,12 +8,22 @@ import { backendBaseUrl } from "./config";
 export class LabApiError extends Error {
   status: number;
   body: unknown;
-  constructor(message: string, status: number, body: unknown) {
+  headers: Record<string, string>;
+  constructor(message: string, status: number, body: unknown, headers: Record<string, string> = {}) {
     super(message);
     this.name = "LabApiError";
     this.status = status;
     this.body = body;
+    this.headers = headers;
   }
+}
+
+function responseHeaders(res: Response): Record<string, string> {
+  const out: Record<string, string> = {};
+  res.headers.forEach((value, key) => {
+    out[key.toLowerCase()] = value;
+  });
+  return out;
 }
 
 function joinUrl(path: string): string {
@@ -25,12 +35,13 @@ async function parseResponse(res: Response): Promise<unknown> {
   const text = await res.text();
   let json: unknown = null;
   try { json = JSON.parse(text); } catch { /* ignore */ }
+  const headers = responseHeaders(res);
   if (!res.ok) {
     const msg =
       typeof json === "object" && json && "error" in json
         ? String((json as { error?: string }).error)
         : text.slice(0, 200);
-    throw new LabApiError(msg || `HTTP ${res.status}`, res.status, json ?? text);
+    throw new LabApiError(msg || `HTTP ${res.status}`, res.status, json ?? text, headers);
   }
   return json;
 }
@@ -298,4 +309,89 @@ export async function startTakeoffProcessing(
     token,
     {}
   ) as Promise<StartTakeoffProcessingResponse>;
+}
+
+export interface GenerateAiTakeoffDraftSyncResponse {
+  ok: boolean;
+  accepted?: false;
+  takeoffJobId: string;
+  normalizedTakeoffJson?: unknown;
+  promptVersion?: string | null;
+  modelUsed?: string | null;
+  resultRowId?: string | null;
+  summary?: object | null;
+  pageInventory?: object | null;
+  dimensionEvidence?: object | null;
+  exayardRawCaptured?: boolean;
+  exayardWorkflow?: object | null;
+  exayardStatus?: string;
+  retryAfterAt?: string | null;
+  retryAfterSeconds?: number | null;
+  message?: string | null;
+  assessmentId?: string | null;
+  canResumeExayard?: boolean;
+}
+
+export interface GenerateAiTakeoffDraftAsyncResponse {
+  ok: boolean;
+  accepted: true;
+  takeoffJobId: string;
+  runId: string;
+  status: string;
+  processing?: TakeoffProcessingStatus;
+  mode?: string;
+  message?: string;
+}
+
+export type GenerateAiTakeoffDraftResponse =
+  | GenerateAiTakeoffDraftSyncResponse
+  | GenerateAiTakeoffDraftAsyncResponse;
+
+/**
+ * Start AI takeoff generation. Returns sync result (200) or async accepted payload (202).
+ * On network failure throws LabApiError with response headers when available.
+ */
+export async function generateAiTakeoffDraft(
+  token: string,
+  takeoffJobId: string
+): Promise<GenerateAiTakeoffDraftResponse> {
+  const t = token.trim();
+  if (!t) throw new LabApiError("Sign in required", 401, null);
+
+  const path = `/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}/generate-ai-draft`;
+  let res: Response;
+  try {
+    res = await fetch(joinUrl(path), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${t}`,
+      },
+      body: JSON.stringify({}),
+    });
+  } catch (e) {
+    if (e instanceof TypeError) {
+      throw e;
+    }
+    throw e;
+  }
+
+  const text = await res.text();
+  let json: unknown = null;
+  try { json = JSON.parse(text); } catch { /* ignore */ }
+  const headers = responseHeaders(res);
+
+  if (res.status === 202) {
+    return json as GenerateAiTakeoffDraftAsyncResponse;
+  }
+
+  if (!res.ok) {
+    const msg =
+      typeof json === "object" && json && "error" in json
+        ? String((json as { error?: string }).error)
+        : text.slice(0, 200);
+    throw new LabApiError(msg || `HTTP ${res.status}`, res.status, json ?? text, headers);
+  }
+
+  return json as GenerateAiTakeoffDraftSyncResponse;
 }
