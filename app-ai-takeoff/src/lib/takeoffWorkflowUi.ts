@@ -117,10 +117,20 @@ export function stepTaskTitle(step: WorkflowStep): string {
 
 export interface PrimaryCtaConfig {
   label: string;
-  action: "upload" | "generate" | "save" | "approve" | "import" | "none";
+  action:
+    | "upload"
+    | "generate"
+    | "save"
+    | "approve"
+    | "import"
+    | "verify_room"
+    | "focus_blockers"
+    | "next_room"
+    | "none";
   disabled?: boolean;
   loading?: boolean;
   title?: string;
+  roomId?: string;
 }
 
 export function deriveWorkflowGuidance(input: {
@@ -180,7 +190,7 @@ export function deriveWorkflowGuidance(input: {
         return {
           statusLabel: "Generating",
           statusHint: "AI is extracting measurements from your plan.",
-          nextAction: "This usually takes a few minutes — keep this tab open.",
+          nextAction: "Progress updates automatically while generation runs.",
           primaryCta: {
             label: "Generating…",
             action: "generate",

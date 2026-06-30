@@ -289,6 +289,177 @@ html, body {
 }
 .takeoff-primary-status-footer .save-panel-msg { margin: 0; }
 
+.takeoff-generation-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--eos-accent, #4f46e5) 6%, white);
+  border: 1px solid color-mix(in srgb, var(--eos-accent, #4f46e5) 18%, transparent);
+}
+
+.takeoff-generation-progress--failed {
+  background: color-mix(in srgb, var(--eos-danger) 6%, white);
+  border-color: color-mix(in srgb, var(--eos-danger) 25%, transparent);
+}
+
+.takeoff-generation-progress-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.takeoff-generation-progress-phase {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--eos-ink-mid);
+}
+
+.takeoff-generation-progress-step {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--eos-ink-faint);
+}
+
+.takeoff-generation-progress-bar {
+  position: relative;
+  height: 8px;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--eos-ink-faint) 18%, white);
+  overflow: hidden;
+}
+
+.takeoff-generation-progress-bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #6366f1, #4f46e5);
+  transition: width 0.35s ease;
+}
+
+.takeoff-generation-progress-bar--indeterminate .takeoff-generation-progress-bar-fill {
+  width: 40% !important;
+  animation: takeoff-progress-indeterminate 1.4s ease-in-out infinite;
+}
+
+.takeoff-generation-progress--failed .takeoff-generation-progress-bar-fill {
+  background: var(--eos-danger);
+  width: 100% !important;
+}
+
+@keyframes takeoff-progress-indeterminate {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(260%); }
+}
+
+.takeoff-generation-progress-helper,
+.takeoff-generation-progress-long {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--eos-ink-faint);
+  line-height: 1.45;
+}
+
+.takeoff-generation-progress-long {
+  color: var(--eos-ink-mid);
+}
+
+.page-ai-takeoff--review-actions .main {
+  padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px));
+}
+
+.takeoff-review-action-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  border-top: 1px solid var(--eos-line);
+  background: color-mix(in srgb, var(--eos-surface, #fff) 92%, transparent);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.08);
+}
+
+.takeoff-review-action-bar-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.takeoff-review-action-bar-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 280px;
+}
+
+.takeoff-review-action-bar-progress {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--eos-ink-mid);
+  letter-spacing: 0.01em;
+}
+
+.takeoff-review-action-bar-message {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--eos-ink);
+  line-height: 1.35;
+}
+
+.takeoff-review-action-bar-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+  color: var(--eos-ink-faint);
+}
+
+.takeoff-review-action-bar-room strong {
+  color: var(--eos-ink);
+}
+
+.takeoff-review-action-bar-blockers {
+  color: var(--eos-danger);
+  font-weight: 600;
+}
+
+.takeoff-review-action-bar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  flex: 0 0 auto;
+}
+
+.takeoff-review-action-bar-primary {
+  min-width: 180px;
+}
+
+@media (max-width: 720px) {
+  .takeoff-review-action-bar-inner {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .takeoff-review-action-bar-actions {
+    justify-content: stretch;
+  }
+  .takeoff-review-action-bar-primary,
+  .takeoff-review-action-bar-secondary {
+    width: 100%;
+  }
+}
+
 /* Items to review */
 .takeoff-items-review-title {
   margin: 0 0 10px; font-size: 0.95rem; font-weight: 650;

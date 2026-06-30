@@ -87,3 +87,46 @@ export function mapAiGenerateError(err, ctx) {
 export function isGenerateInFlight(aiStep) {
   return aiStep === "sending" || aiStep === "generating" || aiStep === "recomputing" || aiStep === "polling";
 }
+
+/**
+ * Friendly copy when async generation fails after starting (job status failed).
+ *
+ * @param {unknown} err
+ * @param {{
+ *   endpoint: string,
+ *   jobId: string|null,
+ *   provider?: string|null,
+ *   model?: string|null,
+ *   phase?: string|null,
+ * }} ctx
+ * @returns {AiGenerateErrorView}
+ */
+export function mapGenerationFinishError(err, ctx) {
+  const timestamp = new Date().toISOString();
+  const advanced = {
+    timestamp,
+    endpoint: ctx.endpoint,
+    jobId: ctx.jobId ?? "—",
+    provider: ctx.provider ?? "—",
+    model: ctx.model ?? "—",
+    phase: ctx.phase ?? "—",
+  };
+
+  if (err && typeof err === "object" && err.name === "LabApiError") {
+    const apiErr = /** @type {{ status?: number, message?: string, headers?: Record<string, string> }} */ (err);
+    advanced.httpStatus = String(apiErr.status ?? "—");
+    if (apiErr.headers?.["x-vercel-error"]) {
+      advanced["X-Vercel-Error"] = apiErr.headers["x-vercel-error"];
+    }
+    if (apiErr.message) advanced.rawMessage = apiErr.message.slice(0, 500);
+  } else {
+    advanced.rawMessage = err instanceof Error ? err.message.slice(0, 500) : String(err ?? "unknown");
+  }
+
+  return {
+    title: "AI takeoff could not finish",
+    body: "The plan stayed saved. Try again, or report the issue if it keeps happening.",
+    canRetry: true,
+    advanced,
+  };
+}

@@ -54,6 +54,8 @@ export interface TakeoffRunHistoryPanelProps {
   currentResultId: string | null;
   currentComputed: TakeoffComputedMeasurements | null;
   refreshKey?:     number;
+  /** Skip list fetch while async generation is active on the current workspace. */
+  pauseBackgroundRefresh?: boolean;
   /** When true, omit the inner panel title (parent supplies section header). */
   embedded?:       boolean;
   onLoadRun: (
@@ -104,6 +106,7 @@ export default function TakeoffRunHistoryPanel({
   currentResultId,
   currentComputed,
   refreshKey = 0,
+  pauseBackgroundRefresh = false,
   embedded = false,
   onLoadRun,
 }: TakeoffRunHistoryPanelProps) {
@@ -115,8 +118,8 @@ export default function TakeoffRunHistoryPanel({
 
   // Fetch run history when job ID, token, or refreshKey changes.
   useEffect(() => {
-    if (!takeoffJobId || !token) {
-      setLoading(false);
+    if (!takeoffJobId || !token || pauseBackgroundRefresh) {
+      if (pauseBackgroundRefresh) setLoading(false);
       return;
     }
     setLoading(true);
@@ -136,7 +139,7 @@ export default function TakeoffRunHistoryPanel({
         setLoading(false);
       }
     })();
-  }, [takeoffJobId, token, refreshKey]);
+  }, [takeoffJobId, token, refreshKey, pauseBackgroundRefresh]);
 
   const handleLoad = useCallback(async (run: RunSummary) => {
     if (!run.id || !token) return;

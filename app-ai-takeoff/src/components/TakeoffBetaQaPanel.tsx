@@ -4,29 +4,38 @@ import { fetchTakeoffBetaQaSummary } from "../lib/api";
 
 interface Props {
   authToken: string;
+  refreshKey?: number;
+  pauseBackgroundRefresh?: boolean;
 }
 
 function fmtSf(n: number) {
   return `${Number(n).toFixed(2)} sf`;
 }
 
-export default function TakeoffBetaQaPanel({ authToken }: Props) {
+export default function TakeoffBetaQaPanel({
+  authToken,
+  refreshKey = 0,
+  pauseBackgroundRefresh = false,
+}: Props) {
   const [rows, setRows] = useState<TakeoffBetaQaRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!authToken) return;
+    if (!authToken || pauseBackgroundRefresh) return;
     setLoading(true);
     void fetchTakeoffBetaQaSummary(authToken, 25)
       .then((res) => setRows(res.rows ?? []))
       .catch((e) => setError(e instanceof Error ? e.message : "Could not load QA summary"))
       .finally(() => setLoading(false));
-  }, [authToken]);
+  }, [authToken, refreshKey, pauseBackgroundRefresh]);
 
   return (
     <div className="takeoff-beta-qa">
       <p className="muted small">Staff-only beta QA — latest imported takeoff quotes for this org.</p>
+      {pauseBackgroundRefresh ? (
+        <p className="muted small">QA refresh paused while AI takeoff is generating.</p>
+      ) : null}
       {loading ? <p className="muted small">Loading…</p> : null}
       {error ? <p className="error small">{error}</p> : null}
       {!loading && !error && rows.length === 0 ? (

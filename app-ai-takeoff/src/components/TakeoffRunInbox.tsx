@@ -11,6 +11,8 @@ export interface TakeoffRunInboxProps {
   token: string;
   selectedJobId: string | null;
   refreshKey?: number;
+  /** Pause list polling while async generation is active. */
+  pauseBackgroundRefresh?: boolean;
   onSelectJob: (jobId: string) => void;
 }
 
@@ -45,6 +47,7 @@ export default function TakeoffRunInbox({
   token,
   selectedJobId,
   refreshKey = 0,
+  pauseBackgroundRefresh = false,
   onSelectJob,
 }: TakeoffRunInboxProps) {
   const [jobs, setJobs] = useState<TakeoffJobListItem[]>([]);
@@ -72,16 +75,17 @@ export default function TakeoffRunInbox({
   }, [token]);
 
   useEffect(() => {
+    if (pauseBackgroundRefresh) return;
     void loadJobs();
-  }, [loadJobs, refreshKey]);
+  }, [loadJobs, refreshKey, pauseBackgroundRefresh]);
 
   const hasProcessingJobs = jobs.some((j) => j.status === "processing");
 
   useEffect(() => {
-    if (!token || !hasProcessingJobs) return;
-    const interval = setInterval(() => void loadJobs(), 5000);
+    if (!token || !hasProcessingJobs || pauseBackgroundRefresh) return;
+    const interval = setInterval(() => void loadJobs(), 10000);
     return () => clearInterval(interval);
-  }, [token, hasProcessingJobs, loadJobs]);
+  }, [token, hasProcessingJobs, loadJobs, pauseBackgroundRefresh]);
 
   return (
     <div className="takeoff-inbox">

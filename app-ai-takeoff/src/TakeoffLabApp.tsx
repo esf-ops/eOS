@@ -94,6 +94,8 @@ import { evaluateTakeoffFabricationRules } from "@takeoff-core/takeoffFabricatio
 import { makeTakeoffRun, makeTakeoffRoom } from "@takeoff-core/takeoffContract.mjs";
 import { addManualRunToDraft, moveRunToRoom, filterReviewStateFromDraft, removeRunFromDraft, removeRoomFromDraft } from "@takeoff-core/takeoffWorkbenchHelpers.mjs";
 import TakeoffRoomReviewWorkbench from "./components/TakeoffRoomReviewWorkbench";
+import TakeoffReviewActionBar from "./components/TakeoffReviewActionBar";
+import { deriveReviewActionPath } from "./lib/reviewActionPath.mjs";
 import { getSupabase } from "./lib/supabase";
 import {
   labApiGet,
@@ -455,6 +457,8 @@ export default function TakeoffLabApp() {
   const importPreviewRef = useRef<TakeoffImportPreviewHandle>(null);
   const [generationBusy, setGenerationBusy] = useState(false);
   const [generationFailed, setGenerationFailed] = useState(false);
+  const [generationProgress, setGenerationProgress] = useState<import("./components/TakeoffPrimaryStatusCard").GenerationProgressDisplay | null>(null);
+  const [generationElapsedMs, setGenerationElapsedMs] = useState(0);
 
   // ── Review workbench state (v6.1) ─────────────────────────────────────────
   /** Run IDs excluded by the estimator — filtered from computation but kept in editDraft */
@@ -1537,22 +1541,130 @@ export default function TakeoffLabApp() {
   );
 
   const handleGenerationStateChange = useCallback(
-    (state: { busy: boolean; failed: boolean }) => {
+    (state: {
+      busy: boolean;
+      failed: boolean;
+      progress: import("./components/TakeoffPrimaryStatusCard").GenerationProgressDisplay | null;
+      elapsedMs: number;
+    }) => {
       setGenerationBusy(state.busy);
       setGenerationFailed(state.failed);
+      setGenerationProgress(state.busy || state.failed ? state.progress : null);
+      setGenerationElapsedMs(state.elapsedMs);
     },
     []
   );
 
-  const handlePrimaryWorkflowAction = useCallback(
-    (action: PrimaryCtaConfig["action"]) => {
+  const roomBlockerIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const b of approvalGate?.blockers ?? []) {
+      const path = String(b.path ?? "");
+      const room = (editDraft.rooms ?? []).find(
+        (r) => path.includes(r.id) || path.includes(`rooms.${r.id}`)
+      );
+      if (room) ids.add(room.id);
+      for (const r of editDraft.rooms ?? []) {
+        if (b.message?.includes(r.name)) ids.add(r.id);
+      }
+    }
+    return ids;
+  }, [approvalGate, editDraft.rooms]);
+
+  const hasGlobalReviewBlockers = Boolean(
+    (approvalGate?.blockers?.length ?? 0) > 0 || !mathConsistency.ok
+  );
+
+  const selectedRoomVerify = useMemo(() => {
+    if (!selectedRoomId || !reviewedMath) return null;
+    const roomMath = reviewedMath.activeRooms.find((r) => r.roomId === selectedRoomId);
+    if (!roomMath) return null;
+    return canMarkRoomVerified(roomMath, { hasGlobalBlockers: hasGlobalReviewBlockers });
+  }, [selectedRoomId, reviewedMath, hasGlobalReviewBlockers]);
+
+  const reviewActionPath = useMemo(() => {
+    if (!hasActiveSource) return null;
+    return deriveReviewActionPath({
+      workflowStatus,
+      showApprovedInUi,
+      approvalStale,
+      canApprove: canApproveTakeoff,
+      canImport: canImportToEstimate,
+      savedAt,
+      hasSaveableChanges,
+      saveStatus,
+      approveStatus,
+      importStatus: importJobStatus,
+      activeRooms: (reviewedMath?.activeRooms ?? []).map((r) => ({
+        roomId: r.roomId,
+        roomName: r.roomName,
+      })),
+      roomCompleteness,
+      excludedRoomIds,
+      selectedRoomId,
+      selectedRoomVerify,
+      hasGlobalBlockers: hasGlobalReviewBlockers,
+      globalBlockerCount: (approvalGate?.blockers?.length ?? 0) + unresolvedCount,
+    });
+  }, [
+    hasActiveSource,
+    workflowStatus,
+    showApprovedInUi,
+    approvalStale,
+    canApproveTakeoff,
+    canImportToEstimate,
+    savedAt,
+    hasSaveableChanges,
+    saveStatus,
+    approveStatus,
+    importJobStatus,
+    reviewedMath?.activeRooms,
+    roomCompleteness,
+    excludedRoomIds,
+    selectedRoomId,
+    selectedRoomVerify,
+    hasGlobalReviewBlockers,
+    approvalGate?.blockers?.length,
+    unresolvedCount,
+  ]);
+
+  const showReviewActionBar = Boolean(
+    hasActiveSource &&
+    reviewActionPath &&
+    (currentWorkflowStep === "review" ||
+      currentWorkflowStep === "approve" ||
+      currentWorkflowStep === "import")
+  );
+
+  const executeReviewPathAction = useCallback(
+    (action: string, roomId?: string) => {
       switch (action) {
-        case "upload":
-          planSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        case "verify_room": {
+          const targetId = roomId ?? selectedRoomId;
+          if (targetId) void handleSetRoomComplete(targetId, true);
           break;
-        case "generate":
-          void planFileSectionRef.current?.generateAiDraft();
+        }
+        case "focus_blockers":
+          if (hasGlobalReviewBlockers) {
+            document.getElementById("takeoff-items-to-review")?.scrollIntoView({
+              behavior: "smooth",
+              block: "start",
+            });
+          } else {
+            document.getElementById("takeoff-room-verify-blockers")?.scrollIntoView({
+              behavior: "smooth",
+              block: "center",
+            });
+          }
           break;
+        case "next_room": {
+          const targetId = roomId ?? reviewActionPath?.nextRoomNeedingReview?.roomId ?? null;
+          if (targetId) setSelectedRoomId(targetId);
+          document.getElementById("takeoff-room-workbench")?.scrollIntoView({
+            behavior: "smooth",
+            block: "start",
+          });
+          break;
+        }
         case "save":
           if (unresolvedCount > 0) {
             if (
@@ -1584,23 +1696,73 @@ export default function TakeoffLabApp() {
           break;
       }
     },
-    [unresolvedCount, handleSaveDraft, handleApproveTakeoff]
+    [
+      selectedRoomId,
+      handleSetRoomComplete,
+      hasGlobalReviewBlockers,
+      reviewActionPath?.nextRoomNeedingReview?.roomId,
+      handleSaveDraft,
+      handleApproveTakeoff,
+      unresolvedCount,
+    ]
   );
 
-  const roomBlockerIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const b of approvalGate?.blockers ?? []) {
-      const path = String(b.path ?? "");
-      const room = (editDraft.rooms ?? []).find(
-        (r) => path.includes(r.id) || path.includes(`rooms.${r.id}`)
-      );
-      if (room) ids.add(room.id);
-      for (const r of editDraft.rooms ?? []) {
-        if (b.message?.includes(r.name)) ids.add(r.id);
+  const effectiveWorkflowGuidance = useMemo(() => {
+    if (!showReviewActionBar || !reviewActionPath) return workflowGuidance;
+    const pa = reviewActionPath.primaryAction;
+    return {
+      ...workflowGuidance,
+      statusHint: reviewActionPath.roomProgress.label,
+      nextAction: reviewActionPath.statusMessage,
+      primaryCta: {
+        label: pa.label,
+        action: pa.action as PrimaryCtaConfig["action"],
+        disabled: pa.disabled,
+        loading: pa.loading,
+        title: pa.title,
+        roomId: pa.roomId,
+      },
+    };
+  }, [workflowGuidance, showReviewActionBar, reviewActionPath]);
+
+  const handlePrimaryWorkflowAction = useCallback(
+    (action: PrimaryCtaConfig["action"]) => {
+      switch (action) {
+        case "upload":
+          planSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+          break;
+        case "generate":
+          void planFileSectionRef.current?.generateAiDraft();
+          break;
+        case "verify_room":
+        case "focus_blockers":
+        case "next_room":
+          executeReviewPathAction(action);
+          break;
+        case "save":
+          if (unresolvedCount > 0) {
+            if (
+              !window.confirm(
+                `${unresolvedCount} review item${unresolvedCount !== 1 ? "s" : ""} are still unresolved. Save anyway? They should be resolved before approval.`
+              )
+            ) {
+              return;
+            }
+          }
+          executeReviewPathAction("save");
+          break;
+        case "approve":
+          executeReviewPathAction("approve");
+          break;
+        case "import":
+          executeReviewPathAction("import");
+          break;
+        default:
+          break;
       }
-    }
-    return ids;
-  }, [approvalGate, editDraft.rooms]);
+    },
+    [unresolvedCount, executeReviewPathAction]
+  );
 
   const workflowSecondaryActions = useMemo(() => {
     const actions: Array<{ label: string; onClick: () => void }> = [];
@@ -1686,16 +1848,18 @@ export default function TakeoffLabApp() {
   const workflowStatusCard = (
     <TakeoffPrimaryStatusCard
       taskTitle={stepTaskTitle(currentWorkflowStep)}
-      statusLabel={workflowGuidance.statusLabel}
-      statusHint={workflowGuidance.statusHint}
-      nextAction={workflowGuidance.nextAction}
+      statusLabel={effectiveWorkflowGuidance.statusLabel}
+      statusHint={effectiveWorkflowGuidance.statusHint}
+      nextAction={effectiveWorkflowGuidance.nextAction}
       primaryCta={{
-        ...workflowGuidance.primaryCta,
-        title: workflowGuidance.primaryCta.action === "approve" ? approveBlockedReason ?? undefined : undefined,
+        ...effectiveWorkflowGuidance.primaryCta,
+        title: effectiveWorkflowGuidance.primaryCta.action === "approve" ? approveBlockedReason ?? undefined : effectiveWorkflowGuidance.primaryCta.title,
       }}
       onPrimaryAction={handlePrimaryWorkflowAction}
       secondaryActions={workflowSecondaryActions}
       footerNotes={hasActiveSource || takeoffJobId ? workflowStatusFooter : undefined}
+      generationProgress={generationBusy || generationFailed ? generationProgress : null}
+      generationElapsedMs={generationElapsedMs}
     />
   );
 
@@ -1992,6 +2156,7 @@ export default function TakeoffLabApp() {
                   currentResultId={currentResultId}
                   currentComputed={computed}
                   refreshKey={historyRefreshKey}
+                  pauseBackgroundRefresh={generationBusy}
                   embedded
                   onLoadRun={handleLoadHistoricalRun}
                 />
@@ -2048,7 +2213,11 @@ export default function TakeoffLabApp() {
                 <span className="lab-section-title" style={{ margin: 0 }}>Beta QA dashboard</span>
               </summary>
               <div style={{ marginTop: 12 }}>
-                <TakeoffBetaQaPanel authToken={authToken} />
+                <TakeoffBetaQaPanel
+                  authToken={authToken}
+                  refreshKey={historyRefreshKey}
+                  pauseBackgroundRefresh={generationBusy}
+                />
               </div>
             </details>
           ) : null}
@@ -2093,6 +2262,7 @@ export default function TakeoffLabApp() {
           ref={planFileSectionRef}
           takeoffJobId={takeoffJobId}
           token={authToken}
+          enableJobPolling
           onWorkspaceLoadStart={handleWorkspaceLoadStart}
           onWorkspaceCreated={handleWorkspaceCreated}
           onWorkspaceLoaded={handleWorkspaceLoaded}
@@ -2109,7 +2279,7 @@ export default function TakeoffLabApp() {
   const taskPanelContent = hasActiveSource ? reviewSections : uploadGenerateTaskPanel;
 
   return (
-    <div className="shell page-ai-takeoff">
+    <div className={`shell page-ai-takeoff${showReviewActionBar ? " page-ai-takeoff--review-actions" : ""}`}>
       {authChecked && authToken ? (
         <EliteosTopbar
           appName="AI Takeoff"
@@ -2274,6 +2444,7 @@ export default function TakeoffLabApp() {
                     token={authToken}
                     selectedJobId={takeoffJobId}
                     refreshKey={historyRefreshKey}
+                    pauseBackgroundRefresh={generationBusy}
                     onSelectJob={handleSelectRun}
                   />
                 </div>
@@ -2285,6 +2456,7 @@ export default function TakeoffLabApp() {
                   token={authToken}
                   selectedJobId={takeoffJobId}
                   refreshKey={historyRefreshKey}
+                  pauseBackgroundRefresh={generationBusy}
                   onSelectJob={handleSelectRun}
                 />
               </section>
@@ -2354,6 +2526,7 @@ export default function TakeoffLabApp() {
                   currentResultId={currentResultId}
                   currentComputed={hasActiveSource ? computed : null}
                   refreshKey={historyRefreshKey}
+                  pauseBackgroundRefresh={generationBusy}
                   embedded
                   onLoadRun={handleLoadHistoricalRun}
                 />
@@ -2416,6 +2589,21 @@ export default function TakeoffLabApp() {
           </div>
         </div>
       </main>
+
+      {showReviewActionBar && reviewActionPath ? (
+        <TakeoffReviewActionBar
+          visible
+          statusMessage={reviewActionPath.statusMessage}
+          roomProgressLabel={reviewActionPath.roomProgress.label}
+          selectedRoomName={reviewActionPath.selectedRoom?.roomName ?? null}
+          selectedRoomVerified={Boolean(reviewActionPath.selectedRoom?.verified)}
+          unresolvedBlockerCount={(approvalGate?.blockers?.length ?? 0) + unresolvedCount}
+          primaryAction={reviewActionPath.primaryAction}
+          secondaryAction={reviewActionPath.secondaryAction}
+          onPrimaryAction={(action) => executeReviewPathAction(action.action, action.roomId)}
+          onSecondaryAction={(action) => executeReviewPathAction(action.action, action.roomId)}
+        />
+      ) : null}
 
       <footer className="footer-bar" role="contentinfo">
         <span>eliteOS · AI Takeoff</span>

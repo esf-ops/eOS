@@ -699,7 +699,7 @@ export default function TakeoffRoomReviewWorkbench({
   }, [selected, excludedRunIds, manualRunIds]);
 
   return (
-    <div className="takeoff-room-workbench">
+    <div className="takeoff-room-workbench" id="takeoff-room-workbench">
       <div className="takeoff-room-workbench-head">
         <div>
           <h3 className="takeoff-room-workbench-title">Review rooms &amp; dimensions</h3>
@@ -858,7 +858,7 @@ export default function TakeoffRoomReviewWorkbench({
           </div>
 
           {!selected.canVerify && selected.verifyBlockers.length > 0 ? (
-            <div className="takeoff-room-verify-blockers" role="note">
+            <div className="takeoff-room-verify-blockers" id="takeoff-room-verify-blockers" role="note">
               <span className="takeoff-room-verify-blockers-label">Before verifying:</span>
               <ul>
                 {selected.verifyBlockers.map((b) => (

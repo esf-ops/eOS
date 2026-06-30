@@ -38,7 +38,9 @@ import {
   LabApiError,
 } from "../lib/api";
 import type { TakeoffProcessingStatus } from "../lib/api";
-import { mapAiGenerateError, isGenerateInFlight } from "../lib/takeoffGenerateErrors.mjs";
+import { mapAiGenerateError, mapGenerationFinishError, isGenerateInFlight } from "../lib/takeoffGenerateErrors.mjs";
+import { deriveGenerationProgress, generationElapsedMs as computeGenerationElapsedMs } from "../lib/takeoffGenerationProgress.mjs";
+import { createJobStatusPoller } from "../lib/takeoffGenerationPoll.mjs";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -174,12 +176,17 @@ export interface TakeoffPlanFileSectionProps {
   onPlanArchived: () => void;
   /** Called when async processing reaches completed or failed (for inbox refresh). */
   onProcessingTerminal?: () => void;
-  /** Called when AI generation busy/failed state changes (for primary CTA). */
+  /** Called when AI generation busy/failed state changes (for primary CTA + progress). */
   onGenerationStateChange?: (state: {
     busy: boolean;
     failed: boolean;
-    phaseLabel: string | null;
+    processing: TakeoffProcessingStatus | null;
+    progress: ReturnType<typeof deriveGenerationProgress> | null;
+    startedAt: string | null;
+    elapsedMs: number;
   }) => void;
+  /** When false, this instance does not poll job status (avoid duplicate polls). */
+  enableJobPolling?: boolean;
 }
 
 export interface TakeoffPlanFileSectionHandle {
@@ -230,6 +237,53 @@ function formatRetryAfter(iso: string | null | undefined): string {
   }
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function loadLatestResultWithRetry(
+  token: string,
+  takeoffJobId: string,
+  filename: string,
+  onLoaded: TakeoffPlanFileSectionProps["onAiDraftGenerated"]
+): Promise<boolean> {
+  const delays = [500, 1500];
+  for (let attempt = 0; attempt < delays.length + 1; attempt += 1) {
+    try {
+      const latest = await labApiGet(
+        `/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}/results/latest`,
+        token
+      ) as {
+        ok: boolean;
+        normalizedTakeoffJson?: TakeoffResult;
+        resultRowId?: string | null;
+        pageInventory?: object | null;
+        dimensionEvidence?: object | null;
+        promptVersion?: string | null;
+        modelUsed?: string | null;
+      };
+      if (latest.ok && latest.normalizedTakeoffJson) {
+        onLoaded(latest.normalizedTakeoffJson, filename, {
+          promptVersion: latest.promptVersion ?? null,
+          modelUsed: latest.modelUsed ?? null,
+          resultRowId: latest.resultRowId ?? null,
+          pageInventory: latest.pageInventory ?? null,
+          dimensionEvidence: latest.dimensionEvidence ?? null,
+        });
+        return true;
+      }
+    } catch (e) {
+      const is404 = e instanceof LabApiError && e.status === 404;
+      if (is404 && attempt < delays.length) {
+        await sleep(delays[attempt] ?? 1500);
+        continue;
+      }
+      throw e;
+    }
+  }
+  return false;
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 type AiStep = "idle" | "sending" | "generating" | "recomputing" | "polling" | "waiting" | "done" | "error";
@@ -274,6 +328,7 @@ export default forwardRef<TakeoffPlanFileSectionHandle, TakeoffPlanFileSectionPr
       onPlanArchived,
       onProcessingTerminal,
       onGenerationStateChange,
+      enableJobPolling = false,
     },
     ref
   ) {
@@ -310,6 +365,10 @@ export default forwardRef<TakeoffPlanFileSectionHandle, TakeoffPlanFileSectionPr
   const aiTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const generationFlowRef = useRef(false);
   const generateInFlightRef = useRef(false);
+  const jobPollerRef = useRef<ReturnType<typeof createJobStatusPoller> | null>(null);
+  const generationStartedAtRef = useRef<number | null>(null);
+  const workspaceRef = useRef<WorkspaceState | null>(null);
+  workspaceRef.current = workspace;
 
   const [asyncBusy, setAsyncBusy] = useState(false);
   const [asyncError, setAsyncError] = useState<string | null>(null);
@@ -505,29 +564,11 @@ export default forwardRef<TakeoffPlanFileSectionHandle, TakeoffPlanFileSectionPr
   // ── AI draft generation (v5) ─────────────────────────────────────────────
 
   const loadLatestResultIntoReview = useCallback(async () => {
-    if (!takeoffJobId || !token || !workspace) return;
-    const latest = await labApiGet(
-      `/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}/results/latest`,
-      token
-    ) as {
-      ok: boolean;
-      normalizedTakeoffJson?: TakeoffResult;
-      resultRowId?: string | null;
-      pageInventory?: object | null;
-      dimensionEvidence?: object | null;
-      promptVersion?: string | null;
-      modelUsed?: string | null;
-    };
-    if (latest.ok && latest.normalizedTakeoffJson) {
-      onAiDraftGenerated(latest.normalizedTakeoffJson, workspace.file.originalFilename, {
-        promptVersion: latest.promptVersion ?? null,
-        modelUsed: latest.modelUsed ?? null,
-        resultRowId: latest.resultRowId ?? null,
-        pageInventory: latest.pageInventory ?? null,
-        dimensionEvidence: latest.dimensionEvidence ?? null,
-      });
-    }
-  }, [takeoffJobId, token, workspace, onAiDraftGenerated]);
+    if (!takeoffJobId || !token) return false;
+    const ws = workspaceRef.current;
+    if (!ws) return false;
+    return loadLatestResultWithRetry(token, takeoffJobId, ws.file.originalFilename, onAiDraftGenerated);
+  }, [takeoffJobId, token, onAiDraftGenerated]);
 
   const refreshWorkspaceFromServer = useCallback(async () => {
     if (!takeoffJobId || !token) return null;
@@ -576,12 +617,14 @@ export default forwardRef<TakeoffPlanFileSectionHandle, TakeoffPlanFileSectionPr
 
       if ("accepted" in res && res.accepted) {
         setAiStep("polling");
+        generationStartedAtRef.current = Date.now();
         const ws = await refreshWorkspaceFromServer();
         if (ws?.status === "completed") {
           await loadLatestResultIntoReview();
           setAiStep("done");
           generationFlowRef.current = false;
           generateInFlightRef.current = false;
+          onProcessingTerminal?.();
           return;
         }
         if (ws?.status === "failed") {
@@ -689,37 +732,55 @@ export default forwardRef<TakeoffPlanFileSectionHandle, TakeoffPlanFileSectionPr
     onProcessingTerminal,
   ]);
 
-  // Poll workspace while pipeline status is processing (worker mode).
+  // Poll active job status with backoff — only on the designated poll owner instance.
   useEffect(() => {
-    if (!takeoffJobId || !token || workspace?.status !== "processing") return;
+    if (!enableJobPolling || !takeoffJobId || !token) return;
+    const shouldPoll =
+      workspace?.status === "processing" &&
+      (generationFlowRef.current ||
+        workspace.processing?.mode === "ai_generate" ||
+        workspace.processing?.mode === "worker" ||
+        workspace.processing?.mode === "stub");
+    if (!shouldPoll) return;
 
-    let alive = true;
-    const poll = async () => {
-      try {
+    jobPollerRef.current?.stop();
+    const startedAtMs =
+      generationStartedAtRef.current ??
+      (workspace.processing?.startedAt ? Date.parse(workspace.processing.startedAt) : Date.now());
+    generationStartedAtRef.current = startedAtMs;
+
+    const poller = createJobStatusPoller({
+      startedAtMs,
+      poll: async () => {
         const res = await labApiGet(
           `/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}`,
           token
         ) as WorkspaceState & { ok: boolean };
-        if (!alive) return;
         setWorkspace(res);
+
         if (res.status === "completed") {
           if (generationFlowRef.current) {
+            await loadLatestResultIntoReview();
             setAiStep("done");
             generationFlowRef.current = false;
             generateInFlightRef.current = false;
+            generationStartedAtRef.current = null;
           }
-          await loadLatestResultIntoReview();
           onProcessingTerminal?.();
-        } else if (res.status === "failed") {
+          return "completed";
+        }
+
+        if (res.status === "failed") {
           if (generationFlowRef.current) {
             const endpoint = `/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}/generate-ai-draft`;
-            const view = mapAiGenerateError(
+            const view = mapGenerationFinishError(
               new Error(res.processing?.error ?? res.errorMessage ?? "Generation failed"),
               {
                 endpoint,
                 jobId: takeoffJobId,
                 provider: providerConfig?.activeProvider ?? null,
                 model: providerConfig?.model ?? null,
+                phase: res.processing?.phase ?? null,
               }
             );
             setAiStep("error");
@@ -727,33 +788,29 @@ export default forwardRef<TakeoffPlanFileSectionHandle, TakeoffPlanFileSectionPr
             setAiErrorView(view);
             generationFlowRef.current = false;
             generateInFlightRef.current = false;
+            generationStartedAtRef.current = null;
           } else {
             setAsyncError(res.processing?.error ?? res.errorMessage ?? "Processing failed.");
           }
           onProcessingTerminal?.();
-        } else if (generationFlowRef.current && res.processing?.phaseLabel) {
-          setAiStep("polling");
+          return "failed";
         }
-      } catch {
-        /* non-fatal poll error */
-      }
-    };
 
-    void poll();
-    const interval = setInterval(() => void poll(), 4000);
+        if (generationFlowRef.current) setAiStep("polling");
+        return "continue";
+      },
+    });
+    jobPollerRef.current = poller;
+
     return () => {
-      alive = false;
-      clearInterval(interval);
+      poller.stop();
+      if (jobPollerRef.current === poller) jobPollerRef.current = null;
     };
-  }, [
-    takeoffJobId,
-    token,
-    workspace?.status,
-    loadLatestResultIntoReview,
-    onProcessingTerminal,
-    providerConfig?.activeProvider,
-    providerConfig?.model,
-  ]);
+  // Stable deps only — callbacks read refs / latest closure via loadLatestResultIntoReview identity.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enableJobPolling, takeoffJobId, token, workspace?.status, workspace?.processing?.mode]);
+
+  useEffect(() => () => jobPollerRef.current?.stop(), []);
 
   useImperativeHandle(
     ref,
@@ -764,15 +821,55 @@ export default forwardRef<TakeoffPlanFileSectionHandle, TakeoffPlanFileSectionPr
     [handleGenerateAiDraft, aiStep]
   );
 
+  const [elapsedMsLive, setElapsedMsLive] = useState(0);
+
   useEffect(() => {
     const busy = isGenerateInFlight(aiStep) || generateInFlightRef.current;
     const failed = aiStep === "error" || workspace?.status === "failed";
-    const phaseLabel =
-      aiStep === "polling"
-        ? workspace?.processing?.phaseLabel ?? "Generating AI takeoff…"
-        : aiStepMessage(aiStep, providerConfig?.activeProvider);
-    onGenerationStateChange?.({ busy, failed, phaseLabel });
-  }, [aiStep, workspace?.status, workspace?.processing?.phaseLabel, providerConfig?.activeProvider, onGenerationStateChange]);
+    const processing = workspace?.processing ?? null;
+    const startedAt = processing?.startedAt ?? null;
+    const progress = busy || failed
+      ? deriveGenerationProgress(processing, failed ? "failed" : workspace?.status ?? "processing")
+      : null;
+    const fromMeta = startedAt ? computeGenerationElapsedMs(startedAt) : 0;
+    const fromLocal = generationStartedAtRef.current
+      ? Math.max(0, Date.now() - generationStartedAtRef.current)
+      : 0;
+    const elapsedMs = busy ? Math.max(fromMeta, fromLocal, elapsedMsLive) : Math.max(fromMeta, fromLocal);
+    onGenerationStateChange?.({
+      busy,
+      failed,
+      processing,
+      progress,
+      startedAt,
+      elapsedMs,
+    });
+  }, [
+    aiStep,
+    workspace?.status,
+    workspace?.processing,
+    onGenerationStateChange,
+    elapsedMsLive,
+  ]);
+
+  useEffect(() => {
+    const busy = isGenerateInFlight(aiStep) || generateInFlightRef.current;
+    if (!busy) {
+      setElapsedMsLive(0);
+      return;
+    }
+    const tick = () => {
+      const startedAt = workspaceRef.current?.processing?.startedAt ?? null;
+      const fromMeta = startedAt ? computeGenerationElapsedMs(startedAt) : 0;
+      const fromLocal = generationStartedAtRef.current
+        ? Math.max(0, Date.now() - generationStartedAtRef.current)
+        : 0;
+      setElapsedMsLive(Math.max(fromMeta, fromLocal));
+    };
+    tick();
+    const id = setInterval(tick, 2000);
+    return () => clearInterval(id);
+  }, [aiStep, workspace?.processing?.startedAt]);
 
   const handleResumeExayard = useCallback(async () => {
     if (!takeoffJobId || !token || !workspace) return;
@@ -1021,26 +1118,9 @@ export default forwardRef<TakeoffPlanFileSectionHandle, TakeoffPlanFileSectionPr
             </div>
           )}
 
-          {/* AI generation status — primary CTA lives in workflow status card */}
+          {/* AI generation status — progress lives in the primary status card */}
           {!isFileArchived && (
             <div className="ai-draft-panel">
-            {isAiBusy && (
-              <p className="ai-draft-progress" role="status" aria-live="polite">
-                <span className="ai-draft-spinner" aria-hidden>◌</span>{" "}
-                {aiStep === "polling" && workspace?.processing?.phaseLabel
-                  ? workspace.processing.phaseLabel
-                  : aiStepMessage(aiStep, providerConfig?.activeProvider)}
-                {workspace?.processing?.pageProgress &&
-                workspace.processing.pageProgress.total > 0 ? (
-                  <>
-                    {" "}
-                    ({workspace.processing.pageProgress.current}/
-                    {workspace.processing.pageProgress.total})
-                  </>
-                ) : null}
-              </p>
-            )}
-
             {aiStep === "done" && (
               <p className="ai-draft-success-note" role="status">
                 {exayardRawCaptured || providerConfig?.activeProvider === "exayard"

@@ -24,7 +24,7 @@ export default function TakeoffItemsToReviewPanel({ blockers, suggestedAddOns = 
   const total = totalReviewItemCount(grouped);
 
   return (
-    <EosSectionCard className="takeoff-items-review lab-card">
+    <EosSectionCard className="takeoff-items-review lab-card" id="takeoff-items-to-review">
       <h3 className="takeoff-items-review-title">Items to review</h3>
 
       {total === 0 ? (

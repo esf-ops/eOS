@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mapAiGenerateError, isGenerateInFlight } from "./takeoffGenerateErrors.mjs";
+import { mapAiGenerateError, mapGenerationFinishError, isGenerateInFlight } from "./takeoffGenerateErrors.mjs";
 
 class LabApiError extends Error {
   constructor(message, status, body, headers = {}) {
@@ -47,6 +47,20 @@ class LabApiError extends Error {
   assert.equal(isGenerateInFlight("idle"), false);
   assert.equal(isGenerateInFlight("error"), false);
   console.log("ok: isGenerateInFlight");
+}
+
+{
+  const view = mapGenerationFinishError(new Error("provider timeout"), {
+    endpoint: "/api/takeoff-jobs/x/generate-ai-draft",
+    jobId: "job-1",
+    phase: "extraction",
+    provider: "gemini",
+    model: "gemini-2.5-pro",
+  });
+  assert.equal(view.title, "AI takeoff could not finish");
+  assert.match(view.body, /plan stayed saved/i);
+  assert.equal(view.advanced.phase, "extraction");
+  console.log("ok: mapGenerationFinishError");
 }
 
 console.log("takeoffGenerateErrors.test.mjs: all passed");
