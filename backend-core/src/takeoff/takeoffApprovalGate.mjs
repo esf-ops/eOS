@@ -6,6 +6,11 @@
  * @module takeoffApprovalGate
  */
 
+import {
+  computeReviewedTakeoffMath,
+  findUnresolvedScopeItems,
+  validateReviewedTakeoffConsistency,
+} from "./reviewedTakeoffMath.mjs";
 import { reconcileRunsWithEvidence } from "./takeoffEvidenceRunReconciliation.mjs";
 import { evaluateTakeoffFabricationRules } from "./takeoffFabricationRules.mjs";
 import { computeAreaSf } from "./takeoffMeasurementCalc.mjs";
@@ -364,6 +369,31 @@ export function evaluateTakeoffApprovalGate({
           )
         );
       }
+    }
+  } catch {
+    /* non-fatal */
+  }
+
+  // Reviewed takeoff math consistency + unresolved scope (generic, not plan-specific)
+  try {
+    const math = computeReviewedTakeoffMath(takeoffResult, rs);
+    const consistency = validateReviewedTakeoffConsistency(math);
+    for (const issue of consistency.issues) {
+      blockers.push(
+        blocker(issue.code, issue.message, issue.path ?? null, issue.category ?? "validation")
+      );
+    }
+
+    const scopeItems = findUnresolvedScopeItems(takeoffResult, rs, validation);
+    for (const item of scopeItems) {
+      if (item.code.startsWith("MATH_CONSISTENCY_")) continue;
+      const dup = blockers.some(
+        (b) => b.code === item.code && (b.path === item.path || b.message === item.message)
+      );
+      if (dup) continue;
+      blockers.push(
+        blocker(item.code, item.message, item.path ?? null, item.category ?? "rooms")
+      );
     }
   } catch {
     /* non-fatal */

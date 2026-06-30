@@ -18,6 +18,7 @@ import {
   isRoomIncludedInTakeoff,
   isRunIncludedInTakeoff,
   moveRunToRoom,
+  removeRunFromDraft,
   patchAreaLabel,
   patchRoomFields,
   patchRoomName,
@@ -169,6 +170,26 @@ function testIsRoomIncludedInTakeoff() {
   assert.equal(isRoomIncludedInTakeoff("r2", new Set(["r1"])), true);
 }
 
+function testComputeRoomSubtotalsIncludesAreaBacksplash() {
+  const draft = buildSpec73Fixture();
+  const room = draft.rooms[0];
+  const sub = computeRoomSubtotals(room, new Set());
+  assert.ok(sub.backsplashDisplaySf > 0, "room subtotals must include area-level backsplash");
+  assert.ok(sub.backsplashDisplaySf >= sub.backsplashSf);
+}
+
+function testRemoveRunFromDraft() {
+  const { draft, run } = addManualRunToDraft(buildSpec73Fixture(), {
+    roomIdx: 0,
+    preset: "countertop",
+    lengthIn: 48,
+    depthIn: 25.5,
+  });
+  const next = removeRunFromDraft(draft, run.id);
+  const found = next.rooms.some((r) => r.areas.some((a) => a.runs.some((rn) => rn.id === run.id)));
+  assert.equal(found, false);
+}
+
 const tests = [
   ["W1 patch room name persists", testPatchRoomNamePersists],
   ["W2 patch area label persists", testPatchAreaLabelPersists],
@@ -182,6 +203,8 @@ const tests = [
   ["W10 patch room type persists", testPatchRoomTypePersists],
   ["W11 room verification status", testRoomVerificationStatus],
   ["W12 is room included", testIsRoomIncludedInTakeoff],
+  ["W13 room subtotals include area backsplash", testComputeRoomSubtotalsIncludesAreaBacksplash],
+  ["W14 remove run from draft", testRemoveRunFromDraft],
 ];
 
 let failed = 0;

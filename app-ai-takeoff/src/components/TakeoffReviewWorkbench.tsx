@@ -15,6 +15,11 @@
 import React, { useMemo, useState } from "react";
 import { reconcileRunsWithEvidence } from "@takeoff-core/takeoffEvidenceRunReconciliation.mjs";
 import { computeAreaSf } from "@takeoff-core/takeoffMeasurementCalc.mjs";
+import {
+  buildAllPiecesDisplayIndex,
+  formatBacksplashScopeLabel,
+  formatPieceTypeLabel,
+} from "@takeoff-core/reviewedTakeoffMath.mjs";
 import type { TakeoffResult, TakeoffArea, TakeoffRun } from "@takeoff-core/takeoffContract.mjs";
 import type { DimensionEvidence } from "./TakeoffDimensionEvidencePanel";
 import type { AreaPatch, RunPatch, RoomPatch, ManualRunInput } from "../TakeoffLabApp";
@@ -54,12 +59,21 @@ export interface TakeoffReviewWorkbenchProps {
   editDraft:           TakeoffResult;
   dimensionEvidence:   DimensionEvidence | null;
   excludedRunIds:      Set<string>;
+  excludedRoomIds?:    Set<string>;
+  manualRunIds?:       Set<string>;
   reviewNotes:         Record<string, string>;
   evidenceReviewState: Record<string, "ignored" | "reviewed">;
+  /** Shared reviewed-takeoff math for totals and friendly labels */
+  reviewedTotals?: {
+    countertopSqft: number;
+    totalBacksplashSqft: number;
+    combinedSqft: number;
+  } | null;
   onPatchRun:          (roomIdx: number, areaIdx: number, runIdx: number, patch: RunPatch) => void;
   onPatchArea:         (roomIdx: number, areaIdx: number, patch: AreaPatch) => void;
   onPatchRoom:         (roomIdx: number, patch: RoomPatch) => void;
   onSetRunIncluded:    (runId: string, included: boolean) => void;
+  onRemoveManualRun?:  (runId: string) => void;
   onAddManualRun:      (input: ManualRunInput) => void;
   onSetReviewNote:     (runId: string, note: string) => void;
   /** Called from checklist — marks an evidence dim as reviewed so the checklist item clears */
@@ -172,11 +186,11 @@ function AreaGroupHeader({ roomName, areaLabel, roomIdx, areaIdx, onPatchRoom, o
 // ── Backsplash area row ────────────────────────────────────────────────────────
 
 const BS_SCOPE_OPTIONS = [
-  { value: "needs_review",   label: "Needs review (select scope)" },
-  { value: "standard",       label: "Standard backsplash" },
+  { value: "needs_review",   label: "Needs review" },
+  { value: "standard",       label: "4\" backsplash" },
   { value: "full_height",    label: "Full-height backsplash" },
   { value: "no_stone",       label: "No stone backsplash" },
-  { value: "tile_by_others", label: "Tile by others / exclude from stone" },
+  { value: "tile_by_others", label: "No stone backsplash (tile by others)" },
 ] as const;
 
 interface BacksplashAreaRowProps {
@@ -184,18 +198,17 @@ interface BacksplashAreaRowProps {
   roomIdx:           number;
   areaIdx:           number;
   aiProvidedBsTotal: number;
+  scopeLabel:        string;
   onPatchArea:       (roomIdx: number, areaIdx: number, patch: AreaPatch) => void;
 }
 
-function BacksplashAreaRow({ area, roomIdx, areaIdx, aiProvidedBsTotal, onPatchArea }: BacksplashAreaRowProps) {
+function BacksplashAreaRow({ area, roomIdx, areaIdx, aiProvidedBsTotal, scopeLabel, onPatchArea }: BacksplashAreaRowProps) {
+  const [editing, setEditing] = useState(false);
   const scope = (area.backsplashScope ?? "needs_review") as string;
   const showInputs = scope !== "no_stone" && scope !== "tile_by_others";
 
-  // Compute live BS sf for display
   const { backsplashSf } = computeAreaSf(area);
 
-  // Show the "Use AI total" hint when: AI provided a total, no manual sf is set yet,
-  // no linear inches are set, and scope doesn't explicitly exclude BS.
   const showAiHint =
     aiProvidedBsTotal > 0 &&
     showInputs &&
@@ -220,9 +233,18 @@ function BacksplashAreaRow({ area, roomIdx, areaIdx, aiProvidedBsTotal, onPatchA
     });
   };
 
-  const scopeNote =
-    scope === "no_stone"      ? " (no stone BS)" :
-    scope === "tile_by_others" ? " (tile, not stone)" : "";
+  if (!editing) {
+    return (
+      <div className="rw-bs-row rw-bs-row--display">
+        <span className="rw-bs-label">Backsplash</span>
+        <span className="rw-bs-display-scope">{scopeLabel}</span>
+        <span className="rw-bs-computed">= {backsplashSf.toFixed(2)} sf</span>
+        <button type="button" className="btn secondary btn-sm" onClick={() => setEditing(true)}>
+          Edit backsplash
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="rw-bs-row">
@@ -302,7 +324,7 @@ function BacksplashAreaRow({ area, roomIdx, areaIdx, aiProvidedBsTotal, onPatchA
       )}
 
       <span className="rw-bs-computed">
-        = {backsplashSf.toFixed(2)} sf{scopeNote}
+        = {backsplashSf.toFixed(2)} sf
       </span>
 
       {showAiHint && (
@@ -333,6 +355,10 @@ function BacksplashAreaRow({ area, roomIdx, areaIdx, aiProvidedBsTotal, onPatchA
           aria-label="Backsplash reviewer note"
         />
       </label>
+
+      <button type="button" className="btn secondary btn-sm" onClick={() => setEditing(false)}>
+        Done editing
+      </button>
     </div>
   );
 }
@@ -342,40 +368,67 @@ function BacksplashAreaRow({ area, roomIdx, areaIdx, aiProvidedBsTotal, onPatchA
 interface RunRowProps {
   row:                WorkbenchRow;
   excluded:           boolean;
+  isManual:           boolean;
+  pieceTypeLabel:     string;
+  statusLabel:        string;
   note:               string;
   onPatchRun:         (roomIdx: number, areaIdx: number, runIdx: number, patch: RunPatch) => void;
   onSetRunIncluded:   (runId: string, included: boolean) => void;
+  onRemoveManualRun?: (runId: string) => void;
   onSetNote:          (runId: string, note: string) => void;
 }
 
-function IncludeToggle({ included, runId, onSetRunIncluded }: {
-  included: boolean;
+function PieceActionControl({
+  runId,
+  excluded,
+  isManual,
+  onSetRunIncluded,
+  onRemoveManualRun,
+}: {
   runId: string;
+  excluded: boolean;
+  isManual: boolean;
   onSetRunIncluded: (runId: string, included: boolean) => void;
+  onRemoveManualRun?: (runId: string) => void;
 }) {
-  return (
-    <div className="rw-include-control">
-      <span className={`rw-include-status${included ? "" : " rw-include-status--excluded"}`}>
-        {included ? "Included in takeoff" : "Excluded from takeoff"}
-      </span>
-      <div className="rw-include-segmented" role="group" aria-label="Include in takeoff">
+  if (isManual) {
+    return (
+      <div className="rw-include-control">
+        <span className="rw-include-status">Manual piece</span>
         <button
           type="button"
-          className={`rw-include-seg${included ? " rw-include-seg--active" : ""}`}
-          aria-pressed={included}
-          onClick={() => { if (!included) onSetRunIncluded(runId, true); }}
+          className="btn secondary btn-sm"
+          onClick={() => onRemoveManualRun?.(runId)}
         >
-          Yes
-        </button>
-        <button
-          type="button"
-          className={`rw-include-seg${!included ? " rw-include-seg--active" : ""}`}
-          aria-pressed={!included}
-          onClick={() => { if (included) onSetRunIncluded(runId, false); }}
-        >
-          No
+          Remove piece
         </button>
       </div>
+    );
+  }
+  if (excluded) {
+    return (
+      <div className="rw-include-control">
+        <span className="rw-include-status rw-include-status--excluded">Excluded from takeoff</span>
+        <button
+          type="button"
+          className="btn secondary btn-sm"
+          onClick={() => onSetRunIncluded(runId, true)}
+        >
+          Restore
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="rw-include-control">
+      <span className="rw-include-status">Included in takeoff</span>
+      <button
+        type="button"
+        className="btn secondary btn-sm"
+        onClick={() => onSetRunIncluded(runId, false)}
+      >
+        Exclude from takeoff
+      </button>
     </div>
   );
 }
@@ -408,7 +461,18 @@ function RunMeta({ link, excluded, isReviewed, sourcePages }: {
   return <span className="rw-run-meta">{parts.join(" · ")}</span>;
 }
 
-function RunRow({ row, excluded, note, onPatchRun, onSetRunIncluded, onSetNote }: RunRowProps) {
+function RunRow({
+  row,
+  excluded,
+  isManual,
+  pieceTypeLabel,
+  statusLabel,
+  note,
+  onPatchRun,
+  onSetRunIncluded,
+  onRemoveManualRun,
+  onSetNote,
+}: RunRowProps) {
   const { roomIdx, areaIdx, runIdx, run, link } = row;
   const [noteOpen, setNoteOpen] = useState(() => Boolean(note.trim()));
 
@@ -455,7 +519,9 @@ function RunRow({ row, excluded, note, onPatchRun, onSetRunIncluded, onSetNote }
       {/* Piece */}
       <div className="rw-cell rw-cell--label" role="cell">
         {excluded ? (
-          <span className="rw-excluded-banner">Excluded from approved takeoff</span>
+          <span className="rw-excluded-banner">{statusLabel}</span>
+        ) : isManual ? (
+          <span className="rw-manual-banner">Manual piece</span>
         ) : null}
         <input
           className="rw-label-input"
@@ -471,7 +537,7 @@ function RunRow({ row, excluded, note, onPatchRun, onSetRunIncluded, onSetNote }
           onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
         />
         <div className="rw-label-sub">
-          <span className="rw-piece-type">{run.pieceType ?? "counter"}</span>
+          <span className="rw-piece-type">{pieceTypeLabel}</span>
           <RunMeta
             link={link}
             excluded={excluded}
@@ -530,12 +596,14 @@ function RunRow({ row, excluded, note, onPatchRun, onSetRunIncluded, onSetNote }
         </span>
       </div>
 
-      {/* Include / exclude */}
+      {/* Include / exclude / remove */}
       <div className="rw-cell rw-cell--toggle" role="cell">
-        <IncludeToggle
-          included={!excluded}
+        <PieceActionControl
           runId={run.id}
+          excluded={excluded}
+          isManual={isManual}
           onSetRunIncluded={onSetRunIncluded}
+          onRemoveManualRun={onRemoveManualRun}
         />
       </div>
 
@@ -840,16 +908,36 @@ export default function TakeoffReviewWorkbench({
   editDraft,
   dimensionEvidence,
   excludedRunIds,
+  excludedRoomIds = new Set(),
+  manualRunIds = new Set(),
   reviewNotes,
   evidenceReviewState,
+  reviewedTotals = null,
   onPatchRun,
   onPatchArea,
   onPatchRoom,
   onSetRunIncluded,
+  onRemoveManualRun,
   onAddManualRun,
   onSetReviewNote,
   onMarkEvidenceReviewed,
 }: TakeoffReviewWorkbenchProps) {
+
+  const reviewStateForDisplay = useMemo(
+    () => ({
+      excludedRunIds: [...excludedRunIds],
+      excludedRoomIds: [...excludedRoomIds],
+      manualRunIds: [...manualRunIds],
+    }),
+    [excludedRunIds, excludedRoomIds, manualRunIds]
+  );
+
+  const displayIndex = useMemo(
+    () => buildAllPiecesDisplayIndex(editDraft, reviewStateForDisplay),
+    [editDraft, reviewStateForDisplay]
+  );
+
+  const totals = reviewedTotals ?? displayIndex.totals;
 
   // ── Build flat run rows ────────────────────────────────────────────────────
 
@@ -914,22 +1002,39 @@ export default function TakeoffReviewWorkbench({
 
   const groups = useMemo<AreaGroup[]>(() => {
     const map = new Map<string, AreaGroup>();
+    for (let ri = 0; ri < (editDraft?.rooms ?? []).length; ri++) {
+      const room = editDraft.rooms[ri];
+      if (excludedRoomIds.has(room.id)) continue;
+      for (let ai = 0; ai < (room?.areas ?? []).length; ai++) {
+        const area = room.areas[ai];
+        const key = `${ri}:${ai}`;
+        map.set(key, {
+          key,
+          roomIdx: ri,
+          areaIdx: ai,
+          roomName: room.name ?? `Room ${ri + 1}`,
+          areaLabel: area.label ?? `Area ${ai + 1}`,
+          rows: [],
+        });
+      }
+    }
     for (const row of rowsWithLinks) {
+      if (excludedRoomIds.has(editDraft.rooms[row.roomIdx]?.id ?? "")) continue;
       const key = `${row.roomIdx}:${row.areaIdx}`;
       if (!map.has(key)) {
         map.set(key, {
           key,
-          roomIdx:   row.roomIdx,
-          areaIdx:   row.areaIdx,
-          roomName:  row.roomName,
+          roomIdx: row.roomIdx,
+          areaIdx: row.areaIdx,
+          roomName: row.roomName,
           areaLabel: row.areaLabel,
-          rows:      [],
+          rows: [],
         });
       }
       map.get(key)!.rows.push(row);
     }
     return [...map.values()];
-  }, [rowsWithLinks]);
+  }, [rowsWithLinks, editDraft, excludedRoomIds]);
 
   // ── Checklist ─────────────────────────────────────────────────────────────
 
@@ -983,12 +1088,12 @@ export default function TakeoffReviewWorkbench({
     ];
   }, [reconciliation, rowsWithLinks, excludedRunIds, reviewNotes, evidenceReviewState]);
 
-  // ── No evidence / no runs guard ───────────────────────────────────────────
+  const areaCount = groups.length;
 
-  if (rows.length === 0) {
+  if (areaCount === 0 && rows.length === 0) {
     return (
       <div className="rw-panel lab-card">
-        <p className="rw-empty">No runs found in the current draft.</p>
+        <p className="rw-empty">No rooms or pieces in the current draft.</p>
       </div>
     );
   }
@@ -1000,8 +1105,11 @@ export default function TakeoffReviewWorkbench({
 
       {/* ── Summary bar ────────────────────────────────────────────────────── */}
       <div className="rw-summary-bar">
+        <span className="rw-summary-item rw-summary-item--totals">
+          CT {totals.countertopSqft.toFixed(2)} sf · Backsplash {totals.totalBacksplashSqft.toFixed(2)} sf · Combined {totals.combinedSqft.toFixed(2)} sf
+        </span>
         <span className="rw-summary-item">
-          {rows.length} run{rows.length !== 1 ? "s" : ""} total
+          {rows.length} piece{rows.length !== 1 ? "s" : ""} in table
         </span>
         {excludedRunIds.size > 0 && (
           <span className="rw-summary-item rw-summary-item--excluded">
@@ -1040,6 +1148,10 @@ export default function TakeoffReviewWorkbench({
         {groups.map((group) => {
           const area = editDraft.rooms[group.roomIdx]?.areas[group.areaIdx];
           const aiProvidedBsTotal = Number(editDraft.aiProvidedTotals?.backsplashExactSf ?? 0);
+          const areaMeta = displayIndex.areaByKey.get(group.key);
+          const scopeLabel =
+            areaMeta?.backsplashScopeLabel ??
+            formatBacksplashScopeLabel(area?.backsplashScope, area?.backsplashHeightIn);
           return (
             <React.Fragment key={group.key}>
               <AreaGroupHeader
@@ -1050,26 +1162,42 @@ export default function TakeoffReviewWorkbench({
                 onPatchRoom={onPatchRoom}
                 onPatchArea={onPatchArea}
               />
-              {group.rows.map((row) => (
-                <RunRow
-                  key={row.run.id}
-                  row={row}
-                  excluded={excludedRunIds.has(row.run.id)}
-                  note={reviewNotes[row.run.id] ?? ""}
-                  onPatchRun={onPatchRun}
-                  onSetRunIncluded={onSetRunIncluded}
-                  onSetNote={onSetReviewNote}
-                />
-              ))}
-              {area && (
+              {group.rows.length === 0 && areaMeta?.needsReview ? (
+                <div className="rw-area-empty-note muted small">Needs review — no included pieces in this area yet.</div>
+              ) : null}
+              {group.rows.map((row) => {
+                const pieceMeta = displayIndex.pieceByRunId.get(row.run.id);
+                const isManual = manualRunIds.has(row.run.id) || Boolean(pieceMeta?.isManual);
+                const excluded = excludedRunIds.has(row.run.id);
+                return (
+                  <RunRow
+                    key={row.run.id}
+                    row={row}
+                    excluded={excluded}
+                    isManual={isManual}
+                    pieceTypeLabel={
+                      pieceMeta?.pieceTypeLabel ??
+                      formatPieceTypeLabel(row.run.pieceType, Boolean(row.run.isBacksplash))
+                    }
+                    statusLabel={pieceMeta?.statusLabel ?? (excluded ? "Excluded from takeoff" : "Included in takeoff")}
+                    note={reviewNotes[row.run.id] ?? ""}
+                    onPatchRun={onPatchRun}
+                    onSetRunIncluded={onSetRunIncluded}
+                    onRemoveManualRun={onRemoveManualRun}
+                    onSetNote={onSetReviewNote}
+                  />
+                );
+              })}
+              {area ? (
                 <BacksplashAreaRow
                   area={area}
                   roomIdx={group.roomIdx}
                   areaIdx={group.areaIdx}
                   aiProvidedBsTotal={aiProvidedBsTotal}
+                  scopeLabel={scopeLabel}
                   onPatchArea={onPatchArea}
                 />
-              )}
+              ) : null}
             </React.Fragment>
           );
         })}

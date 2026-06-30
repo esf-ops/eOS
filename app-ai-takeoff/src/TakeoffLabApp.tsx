@@ -38,6 +38,10 @@ import { planTakeoffImport } from "@takeoff-core/takeoffImportPlanner.mjs";
 import { evaluateTakeoffQaGate } from "@takeoff-core/takeoffQaGate.mjs";
 import { evaluateTakeoffApprovalGate } from "@takeoff-core/takeoffApprovalGate.mjs";
 import { deriveTakeoffWorkflowStatus } from "@takeoff-core/takeoffReviewStatus.mjs";
+import {
+  computeReviewedTakeoffMath,
+  validateReviewedTakeoffConsistency,
+} from "@takeoff-core/reviewedTakeoffMath.mjs";
 import type { TakeoffResult, TakeoffArea, TakeoffRun } from "@takeoff-core/takeoffContract.mjs";
 import type { TakeoffComputedMeasurements } from "@takeoff-core/takeoffMeasurementCalc.mjs";
 import type { TakeoffValidationResult } from "@takeoff-core/takeoffValidator.mjs";
@@ -83,7 +87,7 @@ import {
 import { reconcileRunsWithEvidence } from "@takeoff-core/takeoffEvidenceRunReconciliation.mjs";
 import { evaluateTakeoffFabricationRules } from "@takeoff-core/takeoffFabricationRules.mjs";
 import { makeTakeoffRun, makeTakeoffRoom } from "@takeoff-core/takeoffContract.mjs";
-import { addManualRunToDraft, moveRunToRoom, filterReviewStateFromDraft } from "@takeoff-core/takeoffWorkbenchHelpers.mjs";
+import { addManualRunToDraft, moveRunToRoom, filterReviewStateFromDraft, removeRunFromDraft, removeRoomFromDraft } from "@takeoff-core/takeoffWorkbenchHelpers.mjs";
 import TakeoffRoomReviewWorkbench from "./components/TakeoffRoomReviewWorkbench";
 import { getSupabase } from "./lib/supabase";
 import {
@@ -440,6 +444,8 @@ export default function TakeoffLabApp() {
   /** Run IDs excluded by the estimator — filtered from computation but kept in editDraft */
   const [excludedRunIds, setExcludedRunIds] = useState<Set<string>>(() => new Set());
   const [excludedRoomIds, setExcludedRoomIds] = useState<Set<string>>(() => new Set());
+  const [manualRunIds, setManualRunIds] = useState<Set<string>>(() => new Set());
+  const [manualRoomIds, setManualRoomIds] = useState<Set<string>>(() => new Set());
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   /** Per-run reviewer notes keyed by run.id */
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
@@ -474,6 +480,8 @@ export default function TakeoffLabApp() {
           reviewState?: {
             excludedRunIds?: string[];
             excludedRoomIds?: string[];
+            manualRunIds?: string[];
+            manualRoomIds?: string[];
             roomCompleteness?: Record<string, boolean>;
             flagResolutions?: Record<string, { action: "resolved" | "ignored"; note: string }>;
             referenceTotalAcks?: Record<string, boolean>;
@@ -494,6 +502,8 @@ export default function TakeoffLabApp() {
           if (res.reviewState) {
             setExcludedRunIds(new Set(res.reviewState.excludedRunIds ?? []));
             setExcludedRoomIds(new Set(res.reviewState.excludedRoomIds ?? []));
+            setManualRunIds(new Set(res.reviewState.manualRunIds ?? []));
+            setManualRoomIds(new Set(res.reviewState.manualRoomIds ?? []));
             setRoomCompleteness(res.reviewState.roomCompleteness ?? {});
             setFlagResolutions(res.reviewState.flagResolutions ?? {});
             setReferenceTotalAcks(res.reviewState.referenceTotalAcks ?? {});
@@ -608,19 +618,38 @@ export default function TakeoffLabApp() {
   const buildReviewState = useCallback(() => ({
     excludedRunIds: [...excludedRunIds],
     excludedRoomIds: [...excludedRoomIds],
+    manualRunIds: [...manualRunIds],
+    manualRoomIds: [...manualRoomIds],
     flagResolutions,
     roomCompleteness,
     referenceTotalAcks,
     evidenceAcks,
     reviewNotes,
     evidenceReviewState,
-  }), [excludedRunIds, excludedRoomIds, flagResolutions, roomCompleteness, referenceTotalAcks, evidenceAcks, reviewNotes, evidenceReviewState]);
+  }), [excludedRunIds, excludedRoomIds, manualRunIds, manualRoomIds, flagResolutions, roomCompleteness, referenceTotalAcks, evidenceAcks, reviewNotes, evidenceReviewState]);
+
+  const reviewedMath = useMemo(() => {
+    if (!hasActiveSource) return null;
+    try {
+      return computeReviewedTakeoffMath(editDraft, buildReviewState());
+    } catch {
+      return null;
+    }
+  }, [hasActiveSource, editDraft, buildReviewState]);
+
+  const mathConsistency = useMemo(() => {
+    if (!reviewedMath) return { ok: true, issues: [] as Array<{ code: string; message: string }> };
+    const importTotals = approvedImportPayload && typeof approvedImportPayload === "object"
+      ? (approvedImportPayload as { totals?: Record<string, number> }).totals ?? null
+      : null;
+    return validateReviewedTakeoffConsistency(reviewedMath, importTotals);
+  }, [reviewedMath, approvedImportPayload]);
 
   const approvalGate = useMemo(() => {
     if (!hasActiveSource) return null;
     try {
       return evaluateTakeoffApprovalGate({
-        takeoffResult: effectiveDraft,
+        takeoffResult: editDraft,
         computed: activeState.computed,
         validation: activeState.validation,
         qaGate,
@@ -636,7 +665,7 @@ export default function TakeoffLabApp() {
     }
   }, [
     hasActiveSource,
-    effectiveDraft,
+    editDraft,
     activeState,
     qaGate,
     dimensionEvidence,
@@ -711,6 +740,8 @@ export default function TakeoffLabApp() {
     // Reset review workbench state for each new source load.
     setExcludedRunIds(new Set());
     setExcludedRoomIds(new Set());
+    setManualRunIds(new Set());
+    setManualRoomIds(new Set());
     setSelectedRoomId(null);
     setReviewNotes({});
     setEvidenceReviewState({});
@@ -765,8 +796,29 @@ export default function TakeoffLabApp() {
       }],
     });
     setEditDraft((prev) => ({ ...prev, rooms: [...(prev.rooms ?? []), room] }));
+    setManualRoomIds((prev) => new Set(prev).add(room.id));
     setRoomCompleteness((prev) => ({ ...prev, [room.id]: false }));
     setSelectedRoomId(room.id);
+  }, []);
+
+  const handleRemoveManualRoom = useCallback((roomId: string) => {
+    setEditDraft((prev) => removeRoomFromDraft(prev, roomId));
+    setManualRoomIds((prev) => {
+      const next = new Set(prev);
+      next.delete(roomId);
+      return next;
+    });
+    setExcludedRoomIds((prev) => {
+      const next = new Set(prev);
+      next.delete(roomId);
+      return next;
+    });
+    setRoomCompleteness((prev) => {
+      const next = { ...prev };
+      delete next[roomId];
+      return next;
+    });
+    setSelectedRoomId((cur) => (cur === roomId ? null : cur));
   }, []);
 
   const handleLoadSample = useCallback(() => {
@@ -855,6 +907,8 @@ export default function TakeoffLabApp() {
     // ── Review workbench state ────────────────────────────────────────────
     setExcludedRunIds(new Set());
     setExcludedRoomIds(new Set());
+    setManualRunIds(new Set());
+    setManualRoomIds(new Set());
     setSelectedRoomId(null);
     setReviewNotes({});
     setEvidenceReviewState({});
@@ -923,6 +977,8 @@ export default function TakeoffLabApp() {
     setResetKey((k) => k + 1);
     setExcludedRunIds(new Set());
     setExcludedRoomIds(new Set());
+    setManualRunIds(new Set());
+    setManualRoomIds(new Set());
     setSelectedRoomId(null);
     setReviewNotes({});
     setEvidenceReviewState({});
@@ -995,6 +1051,7 @@ export default function TakeoffLabApp() {
     try {
       const { draft, run } = addManualRunToDraft(editDraft, input);
       setEditDraft(draft);
+      setManualRunIds((prev) => new Set(prev).add(run.id));
       if (input.includeInTakeoff === false) {
         setExcludedRunIds((prev) => new Set(prev).add(run.id));
       }
@@ -1005,6 +1062,20 @@ export default function TakeoffLabApp() {
       console.error("Failed to add manual run", e);
     }
   }, [editDraft]);
+
+  const handleRemoveManualRun = useCallback((runId: string) => {
+    setEditDraft((prev) => removeRunFromDraft(prev, runId));
+    setManualRunIds((prev) => {
+      const next = new Set(prev);
+      next.delete(runId);
+      return next;
+    });
+    setExcludedRunIds((prev) => {
+      const next = new Set(prev);
+      next.delete(runId);
+      return next;
+    });
+  }, []);
 
   const handleSetReviewNote = useCallback((runId: string, note: string) => {
     setReviewNotes((prev) => ({ ...prev, [runId]: note }));
@@ -1593,7 +1664,10 @@ export default function TakeoffLabApp() {
       {workflowStatusCard}
 
       {(currentWorkflowStep === "review" || currentWorkflowStep === "import") && (
-        <TakeoffMeasurementSummarySimple computed={computed} />
+        <TakeoffMeasurementSummarySimple
+          computed={computed}
+          consistencyOk={mathConsistency.ok}
+        />
       )}
 
       {currentWorkflowStep === "review" && approvalGate ? (
@@ -1607,19 +1681,25 @@ export default function TakeoffLabApp() {
         <>
           <TakeoffRoomReviewWorkbench
             editDraft={editDraft}
+            reviewedRooms={reviewedMath?.activeRooms ?? []}
+            unassignedItems={reviewedMath?.unassignedItems ?? []}
             excludedRunIds={excludedRunIds}
             excludedRoomIds={excludedRoomIds}
+            manualRunIds={manualRunIds}
+            manualRoomIds={manualRoomIds}
             roomCompleteness={roomCompleteness}
             selectedRoomId={selectedRoomId}
             roomBlockerIds={roomBlockerIds}
             onSelectRoom={setSelectedRoomId}
             onSetRoomComplete={handleSetRoomComplete}
             onSetRoomExcluded={handleSetRoomExcluded}
+            onRemoveManualRoom={handleRemoveManualRoom}
             onPatchRoom={handlePatchRoom}
             onAddRoom={handleAddRoom}
             onPatchRun={handlePatchRun}
             onPatchArea={handlePatchArea}
             onSetRunIncluded={handleSetRunIncluded}
+            onRemoveManualRun={handleRemoveManualRun}
             onMoveRun={handleMoveRun}
             onAddManualRun={handleAddManualRun}
           />
@@ -1638,12 +1718,20 @@ export default function TakeoffLabApp() {
                 editDraft={editDraft}
                 dimensionEvidence={dimensionEvidence}
                 excludedRunIds={excludedRunIds}
+                excludedRoomIds={excludedRoomIds}
+                manualRunIds={manualRunIds}
+                reviewedTotals={reviewedMath ? {
+                  countertopSqft: reviewedMath.countertopSqft,
+                  totalBacksplashSqft: reviewedMath.totalBacksplashSqft,
+                  combinedSqft: reviewedMath.combinedSqft,
+                } : null}
                 reviewNotes={reviewNotes}
                 evidenceReviewState={evidenceReviewState}
                 onPatchRun={handlePatchRun}
                 onPatchArea={handlePatchArea}
                 onPatchRoom={handlePatchRoom}
                 onSetRunIncluded={handleSetRunIncluded}
+                onRemoveManualRun={handleRemoveManualRun}
                 onAddManualRun={handleAddManualRun}
                 onSetReviewNote={handleSetReviewNote}
                 onMarkEvidenceReviewed={handleMarkEvidenceReviewed}
@@ -1795,6 +1883,28 @@ export default function TakeoffLabApp() {
               </div>
             </details>
           )}
+
+          <details className="lab-section lab-section-collapsible">
+            <summary className="lab-section-summary">
+              <span className="lab-section-title" style={{ margin: 0 }}>Math consistency</span>
+            </summary>
+            <div style={{ marginTop: 12 }}>
+              {mathConsistency.ok ? (
+                <p className="muted small">Room subtotals match measurement summary and import preview totals.</p>
+              ) : (
+                <ul className="takeoff-math-consistency-list">
+                  {mathConsistency.issues.map((issue) => (
+                    <li key={issue.code}>{issue.message}</li>
+                  ))}
+                </ul>
+              )}
+              {reviewedMath ? (
+                <p className="muted small" style={{ marginTop: 8 }}>
+                  Room sums: CT {reviewedMath.roomSubtotalSums.countertopSqft.toFixed(2)} sf · Backsplash {reviewedMath.roomSubtotalSums.backsplashSqft.toFixed(2)} sf · Combined {reviewedMath.roomSubtotalSums.combinedSqft.toFixed(2)} sf
+                </p>
+              ) : null}
+            </div>
+          </details>
 
           <details className="lab-section lab-section-collapsible">
             <summary className="lab-section-summary">

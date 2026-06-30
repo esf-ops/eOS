@@ -3,7 +3,8 @@
  */
 
 import { makeTakeoffRun, makeTakeoffArea } from "./takeoffContract.mjs";
-import { computeTakeoffMeasurements, sfFromRun } from "./takeoffMeasurementCalc.mjs";
+import { computeTakeoffMeasurements } from "./takeoffMeasurementCalc.mjs";
+import { computeRoomSubtotalsFromMath } from "./reviewedTakeoffMath.mjs";
 
 function normLabel(value) {
   return String(value ?? "").trim().toLowerCase();
@@ -55,19 +56,7 @@ export function filterReviewStateFromDraft(takeoffResult, reviewState = {}) {
  * @param {Set<string>} excludedRunIds
  */
 export function computeRoomSubtotals(room, excludedRunIds = new Set()) {
-  let countertopSf = 0;
-  let backsplashSf = 0;
-  let pieceCount = 0;
-  for (const area of room.areas ?? []) {
-    for (const run of area.runs ?? []) {
-      if (excludedRunIds.has(run.id)) continue;
-      pieceCount += 1;
-      const sf = sfFromRun(Number(run.lengthIn) || 0, Number(run.depthIn) || 0, run.shape);
-      if (run.pieceType === "splash" || run.isBacksplash) backsplashSf += sf;
-      else countertopSf += sf;
-    }
-  }
-  return { countertopSf, backsplashSf, pieceCount };
+  return computeRoomSubtotalsFromMath(room, excludedRunIds);
 }
 
 /**
@@ -412,4 +401,36 @@ export function computeTotalsExcludingRuns(draft, excludedRunIds) {
  */
 export function isRunIncludedInTakeoff(runId, excludedRunIds) {
   return !excludedRunIds.has(runId);
+}
+
+/**
+ * Hard-remove a run from the draft (manual pieces only).
+ *
+ * @param {import("./takeoffContract.mjs").TakeoffResult} draft
+ * @param {string} runId
+ */
+export function removeRunFromDraft(draft, runId) {
+  return {
+    ...draft,
+    rooms: (draft.rooms ?? []).map((room) => ({
+      ...room,
+      areas: (room.areas ?? []).map((area) => ({
+        ...area,
+        runs: (area.runs ?? []).filter((run) => run.id !== runId),
+      })),
+    })),
+  };
+}
+
+/**
+ * Hard-remove a room from the draft (manual rooms only).
+ *
+ * @param {import("./takeoffContract.mjs").TakeoffResult} draft
+ * @param {string} roomId
+ */
+export function removeRoomFromDraft(draft, roomId) {
+  return {
+    ...draft,
+    rooms: (draft.rooms ?? []).filter((room) => room.id !== roomId),
+  };
 }

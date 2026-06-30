@@ -101,6 +101,7 @@
     "eos:test:takeoff-process-orchestrator": "node backend-core/src/takeoff/takeoffProcessOrchestrator.test.mjs",
     "eos:test:takeoff-measurement-calc": "node backend-core/src/takeoff/takeoffMeasurementCalc.test.mjs",
     "eos:test:takeoff-workbench-helpers": "node backend-core/src/takeoff/takeoffWorkbenchHelpers.test.mjs",
+    "eos:test:reviewed-takeoff-math": "node backend-core/src/takeoff/reviewedTakeoffMath.test.mjs",
     "eos:test:takeoff-approval-gate": "node backend-core/src/takeoff/takeoffApprovalGate.test.mjs",
     "eos:test:takeoff-import-payload": "node backend-core/src/takeoff/takeoffImportPayload.test.mjs",
     "eos:test:takeoff-import-measurements": "node backend-core/src/takeoff/takeoffImportMeasurements.test.mjs",

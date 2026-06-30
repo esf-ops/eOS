@@ -400,6 +400,37 @@ html, body {
 .takeoff-excluded-rooms-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .takeoff-excluded-rooms-list li { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 0.84rem; }
 
+.takeoff-measurement-summary-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.takeoff-calc-help-btn {
+  border: none; background: none; color: var(--eos-accent); font-size: 0.78rem; font-weight: 650;
+  cursor: pointer; text-decoration: underline; padding: 0;
+}
+.takeoff-calc-help-panel {
+  margin-bottom: 10px; padding: 10px 12px; border-radius: var(--r-md);
+  background: var(--eos-bg-soft); border: 1px solid var(--eos-line);
+}
+.takeoff-calc-help-list { margin: 0; padding-left: 1.1rem; display: grid; gap: 4px; }
+.takeoff-math-warn { margin: 0 0 8px; color: var(--eos-warn); }
+.takeoff-math-consistency-list { margin: 0; padding-left: 1.1rem; color: var(--eos-warn); }
+
+.takeoff-unassigned-title { margin: 0 0 4px; font-size: 0.95rem; font-weight: 700; }
+.takeoff-unassigned-list { margin: 8px 0 0; padding-left: 1.1rem; }
+
+.takeoff-room-areas { display: flex; flex-direction: column; gap: 14px; }
+.takeoff-room-area-block { display: flex; flex-direction: column; gap: 8px; }
+.takeoff-room-area-head { display: flex; align-items: center; gap: 8px; }
+.takeoff-room-area-label { font-weight: 700; font-size: 0.88rem; }
+.takeoff-room-area-bs-row { padding-left: 2px; }
+.takeoff-room-area-needs-review {
+  padding: 10px 12px; border-radius: var(--r-md);
+  background: var(--eos-warn-soft); border: 1px solid var(--eos-warn-border);
+}
+.takeoff-room-area-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.takeoff-room-add-piece-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; margin-top: 8px; }
+.takeoff-room-piece-type { display: block; }
+.takeoff-room-piece-bs { display: block; }
+.takeoff-room-piece-manual-tag { font-size: 0.68rem; font-weight: 700; color: var(--eos-info); }
+
 @media (max-width: 960px) {
   .takeoff-review-layout { grid-template-columns: 1fr; }
   .takeoff-review-preview-col { position: static; max-height: none; }
@@ -3523,6 +3554,24 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
   margin-bottom: 2px;
   letter-spacing: 0.02em;
 }
+.rw-manual-banner {
+  display: block;
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: var(--eos-info);
+  margin-bottom: 2px;
+  letter-spacing: 0.02em;
+}
+.rw-bs-row--display { align-items: center; }
+.rw-bs-display-scope { font-size: 0.84rem; color: var(--eos-ink-mid); }
+.rw-area-empty-note {
+  padding: 6px 10px;
+  margin: 0 0 6px;
+  background: var(--eos-warn-soft);
+  border-radius: var(--r-sm);
+  font-size: 0.78rem;
+}
+.rw-summary-item--totals { font-weight: 650; }
 
 .rw-add-piece {
   margin-bottom: 14px;

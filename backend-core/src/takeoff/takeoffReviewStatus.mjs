@@ -105,6 +105,8 @@ export function emptyReviewState() {
   return {
     excludedRunIds: [],
     excludedRoomIds: [],
+    manualRunIds: [],
+    manualRoomIds: [],
     flagResolutions: {},
     roomCompleteness: {},
     referenceTotalAcks: {},
@@ -126,6 +128,12 @@ export function normalizeReviewState(rs) {
       : [],
     excludedRoomIds: Array.isArray(r.excludedRoomIds)
       ? r.excludedRoomIds.map(String)
+      : [],
+    manualRunIds: Array.isArray(r.manualRunIds)
+      ? r.manualRunIds.map(String)
+      : [],
+    manualRoomIds: Array.isArray(r.manualRoomIds)
+      ? r.manualRoomIds.map(String)
       : [],
     flagResolutions:
       r.flagResolutions && typeof r.flagResolutions === "object" && !Array.isArray(r.flagResolutions)
@@ -170,6 +178,8 @@ export function normalizeReviewState(rs) {
  * @typedef {Object} TakeoffReviewState
  * @property {string[]} excludedRunIds
  * @property {string[]} excludedRoomIds
+ * @property {string[]} manualRunIds — estimator-added pieces (hard remove, not exclude)
+ * @property {string[]} manualRoomIds — estimator-added rooms (hard remove when safe)
  * @property {Record<string, FlagResolution>} flagResolutions
  * @property {Record<string, boolean>} roomCompleteness
  * @property {Record<string, boolean>} referenceTotalAcks
