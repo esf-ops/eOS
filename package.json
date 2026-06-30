@@ -104,6 +104,7 @@
     "eos:test:takeoff-approval-gate": "node backend-core/src/takeoff/takeoffApprovalGate.test.mjs",
     "eos:test:takeoff-import-payload": "node backend-core/src/takeoff/takeoffImportPayload.test.mjs",
     "eos:test:takeoff-import-measurements": "node backend-core/src/takeoff/takeoffImportMeasurements.test.mjs",
+    "eos:test:takeoff-import-workflow": "node backend-core/src/takeoff/takeoffImportWorkflow.test.mjs",
     "eos:test:internal-quote-takeoff-import": "node backend-core/src/quotes/internalQuoteTakeoffImport.test.mjs",
     "eos:test:internal-quote-takeoff-checklist": "node backend-core/src/quotes/internalQuoteTakeoffImportChecklist.test.mjs",
     "eos:test:internal-quote-takeoff-detach": "node backend-core/src/quotes/internalQuoteTakeoffDetach.test.mjs",

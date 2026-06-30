@@ -29,7 +29,15 @@ console.log("\ninternalQuoteTakeoffImportChecklist — tests\n");
     branch: "HQ",
     salesRep: "Pat",
     internalPricingMode: "wholesale",
-    roomDrafts: [{ materialGroup: "Group 1", takeoffImportSource: { importedFromTakeoff: true } }],
+    roomDrafts: [{
+      materialGroup: "Group 1",
+      takeoffImportSource: { importedFromTakeoff: true },
+      takeoffImportVerification: {
+        measurementsVerified: true,
+        addonsReviewed: true,
+        notesReviewed: true,
+      },
+    }],
     colorTbd: false,
     totalSf: 40,
     addonsReviewed: true,

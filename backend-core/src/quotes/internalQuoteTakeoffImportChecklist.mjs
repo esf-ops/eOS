@@ -7,6 +7,7 @@
  */
 
 import { roomTakeoffVerificationComplete } from "../takeoff/takeoffImportMeasurements.mjs";
+import { allSuggestedAddOnsReviewed } from "../takeoff/takeoffImportWorkflow.mjs";
 
 /**
  * @param {{
@@ -26,6 +27,7 @@ import { roomTakeoffVerificationComplete } from "../takeoff/takeoffImportMeasure
  *   quoteDefaultCatalogId?: string|null,
  *   suggestedAddOnCount?: number,
  *   addonsReviewed?: boolean,
+ *   suggestedAddOnReviews?: Array<{ key: string, status: string }>,
  *   customerFacingNotes?: string,
  *   notesReviewed?: boolean,
  *   totalSf?: number,
@@ -49,6 +51,7 @@ export function evaluateTakeoffImportCompletionChecklist(params) {
     quoteDefaultCatalogId = null,
     suggestedAddOnCount = 0,
     addonsReviewed = false,
+    suggestedAddOnReviews = [],
     customerFacingNotes = "",
     notesReviewed = false,
     totalSf = 0,
@@ -76,7 +79,9 @@ export function evaluateTakeoffImportCompletionChecklist(params) {
     return Boolean(quoteDefaultCatalogId) && !colorTbd;
   });
 
-  const addonsComplete = suggestedAddOnCount === 0 || addonsReviewed;
+  const addonsComplete =
+    suggestedAddOnCount === 0 ||
+    (addonsReviewed && allSuggestedAddOnsReviewed(suggestedAddOnReviews));
   const notesComplete = notesReviewed || Boolean(String(customerFacingNotes).trim());
   const hasMeasurements = totalSf > 0;
 

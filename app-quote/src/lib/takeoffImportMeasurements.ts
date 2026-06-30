@@ -315,6 +315,18 @@ export function roomTakeoffVerificationComplete(room: RoomDraft): boolean {
   return Boolean(v?.measurementsVerified && v?.addonsReviewed && v?.notesReviewed);
 }
 
+export function importedRoomMaterialSelected(
+  room: RoomDraft,
+  colorTbd: boolean,
+  quoteDefaultCatalogId: string | null
+): boolean {
+  const group = String(room.materialGroup ?? "").trim();
+  const catalog = String(room.materialCatalogId ?? "").trim();
+  if (group && !colorTbd) return true;
+  if (catalog) return true;
+  return Boolean(quoteDefaultCatalogId) && !colorTbd;
+}
+
 export function roomTakeoffVerificationBadge(room: RoomDraft): "complete" | "partial" | "pending" {
   if (!room.takeoffImportSource?.importedFromTakeoff) return "complete";
   const v = room.takeoffImportVerification ?? {};

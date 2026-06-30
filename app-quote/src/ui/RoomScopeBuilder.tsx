@@ -63,6 +63,7 @@ import {
   splitTakeoffPiece,
   takeoffImportStateLabel,
 } from "../lib/takeoffImportMeasurements";
+import { importedRoomMaterialSelected } from "../lib/takeoffImportMeasurements";
 import type { TakeoffImportRoomVerification } from "../lib/quoteTypes";
 import {
   ensureTakeoffOriginalDimensions,
@@ -97,6 +98,13 @@ type Props = {
     approvedAt?: string | null;
     suggestedAddOns?: Array<{ type: string; label: string; quantity?: number }>;
   };
+  /** Compact table for faster imported measurement review (v6.3). */
+  compactTakeoffTable?: boolean;
+  colorTbd?: boolean;
+  quoteDefaultCatalogId?: string | null;
+  onMarkRoomVerified?: (roomId: string) => void;
+  onMarkAllImportedRoomsVerified?: () => void;
+  canMarkAllImportedRoomsVerified?: boolean;
 };
 
 function updateRoom(rooms: RoomDraft[], id: string, patch: Partial<RoomDraft>): RoomDraft[] {
@@ -276,6 +284,12 @@ export default function RoomScopeBuilder({
   showTakeoffImportBadges = false,
   enableTakeoffImportEditor = false,
   takeoffTraceabilityContext,
+  compactTakeoffTable = false,
+  colorTbd = true,
+  quoteDefaultCatalogId = null,
+  onMarkRoomVerified,
+  onMarkAllImportedRoomsVerified,
+  canMarkAllImportedRoomsVerified = false,
 }: Props) {
   const [takeoffTraceOpen, setTakeoffTraceOpen] = React.useState<Record<string, boolean>>({});
   const [colorQ, setColorQ] = React.useState<Record<string, string>>({});
@@ -572,6 +586,17 @@ export default function RoomScopeBuilder({
         <button type="button" className="btn secondary" onClick={addRoom}>
           + Add room
         </button>
+        {enableTakeoffImportEditor && onMarkAllImportedRoomsVerified ? (
+          <button
+            type="button"
+            className="btn secondary btn-sm"
+            disabled={!canMarkAllImportedRoomsVerified}
+            title={canMarkAllImportedRoomsVerified ? undefined : "Resolve measurement delta warnings (>2 sf) before marking all verified"}
+            onClick={onMarkAllImportedRoomsVerified}
+          >
+            Mark all imported rooms verified
+          </button>
+        ) : null}
         <span className="muted small">
           {rooms.length} room{rooms.length === 1 ? "" : "s"}
         </span>
@@ -579,6 +604,11 @@ export default function RoomScopeBuilder({
 
       {rooms.map((room) => {
         const prev = roomTotalsPreview(room);
+        const isImportedRoom = Boolean(room.takeoffImportSource?.importedFromTakeoff);
+        const materialMissing =
+          enableTakeoffImportEditor &&
+          isImportedRoom &&
+          !importedRoomMaterialSelected(room, colorTbd, quoteDefaultCatalogId);
         return (
           <div key={room.id} id={roomEditorDomId(room.id)} className="room-card-lite card">
             <div className="room-card-head">
@@ -595,11 +625,26 @@ export default function RoomScopeBuilder({
                   </span>
                 ) : null}
               </div>
-              {rooms.length > 1 ? (
-                <button type="button" className="btn secondary btn-danger-quiet" onClick={() => removeRoom(room.id)}>
-                  Remove room
-                </button>
-              ) : null}
+              <div className="room-card-head-actions">
+                {isImportedRoom ? (
+                  <span className="ie-takeoff-room-subtotal muted small">
+                    Room subtotal: <strong>{prev.total.toFixed(2)} sf</strong>
+                  </span>
+                ) : null}
+                {materialMissing ? (
+                  <span className="ie-takeoff-material-warn">Material / color required</span>
+                ) : null}
+                {enableTakeoffImportEditor && isImportedRoom && onMarkRoomVerified ? (
+                  <button type="button" className="btn secondary btn-sm" onClick={() => onMarkRoomVerified(room.id)}>
+                    Mark room verified
+                  </button>
+                ) : null}
+                {rooms.length > 1 ? (
+                  <button type="button" className="btn secondary btn-danger-quiet" onClick={() => removeRoom(room.id)}>
+                    Remove room
+                  </button>
+                ) : null}
+              </div>
             </div>
 
             <div className="grid3 room-identity-grid">
@@ -733,6 +778,73 @@ export default function RoomScopeBuilder({
                     </p>
                   ) : null}
                 </details>
+              </div>
+            ) : null}
+
+            {enableTakeoffImportEditor && compactTakeoffTable && isImportedRoom ? (
+              <div className="ie-takeoff-compact-wrap">
+                <p className="ie-takeoff-compact-title">Imported measurements — compact edit</p>
+                <table className="ie-takeoff-compact-table">
+                  <thead>
+                    <tr>
+                      <th>Run</th>
+                      <th>Length (in)</th>
+                      <th>Depth (in)</th>
+                      <th>4″ splash</th>
+                      <th>SF</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {normalizeGuidedShapeRoom(room).guidedPieces.map((p) => {
+                      const sf = sfFromGuidedPiece(p.lengthIn, p.depthIn, p.shape);
+                      const state = resolveTakeoffImportState(p);
+                      return (
+                        <tr key={p.id} className={p.takeoffImportSource?.importState === "imported_excluded" ? "is-excluded" : undefined}>
+                          <td>
+                            <input
+                              className="ie-takeoff-compact-input"
+                              value={p.name}
+                              onChange={(e) => setPiece(room.id, p.id, { name: e.target.value }, "guided")}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="number"
+                              className="ie-takeoff-compact-input"
+                              value={p.lengthIn || ""}
+                              onChange={(e) => setPiece(room.id, p.id, { lengthIn: Number(e.target.value) || 0 }, "guided")}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="number"
+                              className="ie-takeoff-compact-input"
+                              value={p.depthIn || ""}
+                              onChange={(e) => setPiece(room.id, p.id, { depthIn: Number(e.target.value) || 0 }, "guided")}
+                            />
+                          </td>
+                          <td>
+                            {p.pieceType === "counter" ? (
+                              <input
+                                type="checkbox"
+                                checked={Boolean(p.addSplash)}
+                                onChange={(e) => setPiece(room.id, p.id, { addSplash: e.target.checked }, "guided")}
+                              />
+                            ) : (
+                              "—"
+                            )}
+                          </td>
+                          <td>{sf.toFixed(2)}</td>
+                          <td>{takeoffImportStateLabel(state)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <p className="muted small ie-takeoff-compact-subtotal">
+                  Room subtotal updates live: <strong>{prev.total.toFixed(2)} sf</strong>
+                </p>
               </div>
             ) : null}
 

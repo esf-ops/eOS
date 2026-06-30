@@ -31,6 +31,7 @@ interface Props {
   onDetach?: () => void;
   detachBusy?: boolean;
   detachError?: string | null;
+  onOpenSourceDrawer?: () => void;
 }
 
 function fmtSf(n?: number) {
@@ -54,6 +55,7 @@ export default function TakeoffImportReceiptPanel({
   onDetach,
   detachBusy = false,
   detachError = null,
+  onOpenSourceDrawer,
 }: Props) {
   const [snapshotOpen, setSnapshotOpen] = useState(false);
   const detached = meta.status === "detached";
@@ -101,6 +103,11 @@ export default function TakeoffImportReceiptPanel({
       )}
 
       <div className="ie-takeoff-receipt-actions">
+        {onOpenSourceDrawer ? (
+          <button type="button" className="btn primary btn-sm" onClick={onOpenSourceDrawer}>
+            Review plan side-by-side
+          </button>
+        ) : null}
         {meta.takeoffJobId && takeoffLabUrl ? (
           <a className="btn secondary btn-sm" href={`${takeoffLabUrl}/?takeoffJobId=${encodeURIComponent(meta.takeoffJobId)}`} target="_blank" rel="noopener noreferrer">
             Open source takeoff

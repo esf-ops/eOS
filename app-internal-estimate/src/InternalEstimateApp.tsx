@@ -44,9 +44,20 @@ import TakeoffImportReceiptPanel, {
 } from "./components/internal-estimate/TakeoffImportReceiptPanel";
 import TakeoffImportCompletionChecklist from "./components/internal-estimate/TakeoffImportCompletionChecklist";
 import TakeoffMeasurementComparisonPanel from "./components/internal-estimate/TakeoffMeasurementComparisonPanel";
+import TakeoffQuoteReadinessSummary from "./components/internal-estimate/TakeoffQuoteReadinessSummary";
+import TakeoffSuggestedAddOnsReviewPanel from "./components/internal-estimate/TakeoffSuggestedAddOnsReviewPanel";
+import TakeoffSourcePlanDrawer from "./components/internal-estimate/TakeoffSourcePlanDrawer";
 import {
   computeTakeoffMeasurementDeltas,
 } from "@quote-lib/takeoffImportMeasurements";
+import {
+  canMarkAllImportedRoomsVerified,
+  evaluateTakeoffQuoteReadiness,
+  initSuggestedAddOnReviews,
+  markAllImportedRoomsVerified,
+  markRoomFullyVerified,
+  type TakeoffSuggestedAddOnReview,
+} from "./lib/takeoffImportWorkflow";
 import {
   evaluateTakeoffImportCompletionChecklist,
   isActiveTakeoffImport,
@@ -468,6 +479,9 @@ export default function InternalEstimateApp() {
   const [takeoffNotesReviewed, setTakeoffNotesReviewed] = useState(false);
   const [takeoffDetachBusy, setTakeoffDetachBusy] = useState(false);
   const [takeoffDetachError, setTakeoffDetachError] = useState<string | null>(null);
+  const [takeoffSuggestedAddOnReviews, setTakeoffSuggestedAddOnReviews] = useState<TakeoffSuggestedAddOnReview[]>([]);
+  const [takeoffCompactTable, setTakeoffCompactTable] = useState(true);
+  const [takeoffSourceDrawerOpen, setTakeoffSourceDrawerOpen] = useState(false);
 
   useEffect(() => {
     if (!urlQuoteId) {
@@ -881,6 +895,8 @@ export default function InternalEstimateApp() {
             takeoff_import_checklist: {
               addonsReviewed: takeoffAddonsReviewed,
               notesReviewed: takeoffNotesReviewed,
+              suggestedAddOnReviews: takeoffSuggestedAddOnReviews,
+              compactTakeoffTable: takeoffCompactTable,
             },
           }
         : {}),
@@ -914,6 +930,8 @@ export default function InternalEstimateApp() {
     takeoffImportMeta,
     takeoffAddonsReviewed,
     takeoffNotesReviewed,
+    takeoffSuggestedAddOnReviews,
+    takeoffCompactTable,
   ]);
 
   const takeoffImportChecklist = useMemo(() => {
@@ -947,6 +965,7 @@ export default function InternalEstimateApp() {
       quoteDefaultCatalogId,
       suggestedAddOnCount: takeoffImportMeta.suggestedAddOns?.length ?? 0,
       addonsReviewed: takeoffAddonsReviewed,
+      suggestedAddOnReviews: takeoffSuggestedAddOnReviews,
       customerFacingNotes,
       notesReviewed: takeoffNotesReviewed,
       totalSf,
@@ -971,6 +990,7 @@ export default function InternalEstimateApp() {
     quoteDefaultCatalogId,
     takeoffAddonsReviewed,
     takeoffNotesReviewed,
+    takeoffSuggestedAddOnReviews,
     customerFacingNotes,
   ]);
 
@@ -978,6 +998,56 @@ export default function InternalEstimateApp() {
     if (!takeoffImportMeta || !isActiveTakeoffImport(takeoffImportMeta)) return null;
     return computeTakeoffMeasurementDeltas(roomDrafts);
   }, [takeoffImportMeta, roomDrafts]);
+
+  const takeoffQuoteReadiness = useMemo(() => {
+    if (!takeoffImportMeta || !isActiveTakeoffImport(takeoffImportMeta) || !takeoffImportChecklist) return null;
+    const accountComplete = takeoffImportChecklist.items.find((i) => i.key === "account")?.complete ?? false;
+    const projectComplete = takeoffImportChecklist.items.find((i) => i.key === "project")?.complete ?? false;
+    const materialComplete = takeoffImportChecklist.items.find((i) => i.key === "material")?.complete ?? false;
+    return evaluateTakeoffQuoteReadiness({
+      hasActiveImport: true,
+      roomDrafts,
+      measurementDeltas: takeoffMeasurementDeltas,
+      colorTbd,
+      quoteDefaultCatalogId,
+      accountComplete,
+      projectComplete,
+      materialComplete,
+      addonsReviewed: takeoffAddonsReviewed,
+      notesReviewed: takeoffNotesReviewed,
+      readyToCalculate: takeoffImportChecklist.readyToCalculate,
+      suggestedAddOnReviews: takeoffSuggestedAddOnReviews,
+    });
+  }, [
+    takeoffImportMeta,
+    takeoffImportChecklist,
+    roomDrafts,
+    takeoffMeasurementDeltas,
+    colorTbd,
+    quoteDefaultCatalogId,
+    takeoffAddonsReviewed,
+    takeoffNotesReviewed,
+    takeoffSuggestedAddOnReviews,
+  ]);
+
+  const handleMarkRoomVerified = useCallback((roomId: string) => {
+    setRoomDrafts((prev) => prev.map((r) => (r.id === roomId ? markRoomFullyVerified(r) : r)));
+  }, []);
+
+  const handleMarkAllImportedRoomsVerified = useCallback(() => {
+    if (!takeoffMeasurementDeltas || !canMarkAllImportedRoomsVerified(roomDrafts, takeoffMeasurementDeltas.exceedsThreshold)) {
+      return;
+    }
+    setRoomDrafts((prev) => markAllImportedRoomsVerified(prev));
+  }, [roomDrafts, takeoffMeasurementDeltas]);
+
+  useEffect(() => {
+    if (!takeoffImportMeta?.suggestedAddOns?.length) {
+      setTakeoffSuggestedAddOnReviews([]);
+      return;
+    }
+    setTakeoffSuggestedAddOnReviews((prev) => initSuggestedAddOnReviews(takeoffImportMeta.suggestedAddOns, prev));
+  }, [takeoffImportMeta?.takeoffJobId, takeoffImportMeta?.suggestedAddOns?.length]);
 
   const handleDetachTakeoffImport = useCallback(async () => {
     if (!urlQuoteId || !sessionToken) return;
@@ -2308,6 +2378,10 @@ export default function InternalEstimateApp() {
             const checklist = tic as Record<string, unknown>;
             if (checklist.addonsReviewed != null) setTakeoffAddonsReviewed(Boolean(checklist.addonsReviewed));
             if (checklist.notesReviewed != null) setTakeoffNotesReviewed(Boolean(checklist.notesReviewed));
+            if (Array.isArray(checklist.suggestedAddOnReviews)) {
+              setTakeoffSuggestedAddOnReviews(checklist.suggestedAddOnReviews as TakeoffSuggestedAddOnReview[]);
+            }
+            if (checklist.compactTakeoffTable != null) setTakeoffCompactTable(Boolean(checklist.compactTakeoffTable));
           }
         } else if (urlFromTakeoffId) {
           setTakeoffImportMeta({ takeoffJobId: urlFromTakeoffId, status: "active" });
@@ -2729,10 +2803,30 @@ export default function InternalEstimateApp() {
             onDetach={urlQuoteId ? handleDetachTakeoffImport : undefined}
             detachBusy={takeoffDetachBusy}
             detachError={takeoffDetachError}
+            onOpenSourceDrawer={() => setTakeoffSourceDrawerOpen(true)}
           />
+          {takeoffQuoteReadiness ? (
+            <TakeoffQuoteReadinessSummary
+              items={takeoffQuoteReadiness.items}
+              readyToCalculate={takeoffQuoteReadiness.readyToCalculate}
+            />
+          ) : null}
           {takeoffMeasurementDeltas ? (
             <TakeoffMeasurementComparisonPanel deltas={takeoffMeasurementDeltas} />
           ) : null}
+          <TakeoffSuggestedAddOnsReviewPanel
+            reviews={takeoffSuggestedAddOnReviews}
+            onChange={(next) => {
+              setTakeoffSuggestedAddOnReviews(next);
+              setTakeoffAddonsReviewed(true);
+            }}
+            onAllReviewed={() => {
+              setTakeoffSuggestedAddOnReviews((prev) =>
+                prev.map((r) => (r.status === "pending" ? { ...r, status: "ignored" } : r))
+              );
+              setTakeoffAddonsReviewed(true);
+            }}
+          />
           {takeoffImportChecklist ? (
             <TakeoffImportCompletionChecklist
               items={takeoffImportChecklist.items}
@@ -2748,6 +2842,15 @@ export default function InternalEstimateApp() {
         </>
       ) : takeoffImportMeta?.status === "detached" ? (
         <TakeoffImportReceiptPanel meta={takeoffImportMeta} />
+      ) : null}
+
+      {takeoffImportMeta && isActiveTakeoffImport(takeoffImportMeta) ? (
+        <TakeoffSourcePlanDrawer
+          open={takeoffSourceDrawerOpen}
+          onClose={() => setTakeoffSourceDrawerOpen(false)}
+          meta={takeoffImportMeta}
+          takeoffLabUrl={readAiTakeoffHeadUrl() ?? undefined}
+        />
       ) : null}
 
       {urlQuoteId ? (
@@ -3085,6 +3188,16 @@ export default function InternalEstimateApp() {
                 {colorCatalogWarnings.join(" ")} Select a material group manually below.
               </div>
             ) : null}
+            {takeoffImportMeta && isActiveTakeoffImport(takeoffImportMeta) ? (
+              <label className="ie-takeoff-compact-toggle check">
+                <input
+                  type="checkbox"
+                  checked={takeoffCompactTable}
+                  onChange={(e) => setTakeoffCompactTable(e.target.checked)}
+                />
+                Compact imported measurement table
+              </label>
+            ) : null}
             <RoomScopeBuilder
               rooms={roomDrafts}
               onRoomsChange={setRoomDrafts}
@@ -3104,6 +3217,15 @@ export default function InternalEstimateApp() {
                     }
                   : undefined
               }
+              compactTakeoffTable={takeoffCompactTable}
+              colorTbd={colorTbd}
+              quoteDefaultCatalogId={quoteDefaultCatalogId}
+              onMarkRoomVerified={handleMarkRoomVerified}
+              onMarkAllImportedRoomsVerified={handleMarkAllImportedRoomsVerified}
+              canMarkAllImportedRoomsVerified={Boolean(
+                takeoffMeasurementDeltas &&
+                  canMarkAllImportedRoomsVerified(roomDrafts, takeoffMeasurementDeltas.exceedsThreshold)
+              )}
             />
           </section>
 

@@ -1413,3 +1413,12 @@
 | **Decision** | Imported AI Takeoff measurements remain **fully editable** as normal Internal Estimate guided shapes. **`takeoffImportSource`** on rooms/pieces preserves job/snapshot/page metadata, **`originalDimensions`**, and **`importState`** (`imported_unmodified`, `imported_edited`, `imported_excluded`, `manually_added_after_import`). Estimators get imported-vs-current SF deltas, per-room verification toggles, piece actions (duplicate/split/exclude/restore/convert-to-manual), and traceability UI — **without** changing pricing math or auto-assigning material/color/pricing. |
 | **Impacted files** | `takeoffImportMeasurements.mjs/ts`, `takeoffImportPayload.mjs`, `RoomScopeBuilder.tsx`, `TakeoffMeasurementComparisonPanel.tsx`, `prototypeQuoteMath.ts`, checklist modules, tests, this entry. |
 | **Revisit trigger** | Server-side block when delta exceeds threshold; bi-directional sync of edited dims back to takeoff job. |
+
+### 96. AI Takeoff import — estimator review speed polish (v6.3, 2026-06-26)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-06-26 |
+| **Decision** | Imported AI Takeoff measurements are optimized for **estimator review speed** while material/pricing authority remains inside Internal Estimate. v6.3 adds compact measurement table mode, live room subtotals, mark-room / mark-all verified (blocked when >2 sf deltas), quote readiness summary, source plan side drawer, per-room material warnings, and per-suggested-add-on review states (`accepted` / `ignored` / `needs_follow_up`) persisted in `takeoff_import_checklist`. No pricing math or auto material/color selection. |
+| **Impacted files** | `takeoffImportWorkflow.mjs/ts`, `RoomScopeBuilder.tsx`, `TakeoffQuoteReadinessSummary.tsx`, `TakeoffSuggestedAddOnsReviewPanel.tsx`, `TakeoffSourcePlanDrawer.tsx`, `InternalEstimateApp.tsx`, tests, this entry. |
+| **Revisit trigger** | Auto-apply accepted add-ons to room `addons` map; embedded plan PDF preview in IE drawer. |

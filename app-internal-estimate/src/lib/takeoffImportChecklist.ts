@@ -5,6 +5,7 @@
 
 import type { RoomDraft } from "@quote-lib/quoteTypes";
 import { roomTakeoffVerificationComplete } from "@quote-lib/takeoffImportMeasurements";
+import { allSuggestedAddOnsReviewed } from "./takeoffImportWorkflow";
 
 export interface TakeoffImportChecklistItem {
   key: string;
@@ -36,6 +37,7 @@ export function evaluateTakeoffImportCompletionChecklist(params: {
   quoteDefaultCatalogId?: string | null;
   suggestedAddOnCount?: number;
   addonsReviewed?: boolean;
+  suggestedAddOnReviews?: Array<{ key: string; status: string }>;
   customerFacingNotes?: string;
   notesReviewed?: boolean;
   totalSf?: number;
@@ -57,6 +59,7 @@ export function evaluateTakeoffImportCompletionChecklist(params: {
     quoteDefaultCatalogId = null,
     suggestedAddOnCount = 0,
     addonsReviewed = false,
+    suggestedAddOnReviews = [],
     customerFacingNotes = "",
     notesReviewed = false,
     totalSf = 0,
@@ -86,7 +89,9 @@ export function evaluateTakeoffImportCompletionChecklist(params: {
     return Boolean(quoteDefaultCatalogId) && !colorTbd;
   });
 
-  const addonsComplete = suggestedAddOnCount === 0 || addonsReviewed;
+  const addonsComplete =
+    suggestedAddOnCount === 0 ||
+    (addonsReviewed && allSuggestedAddOnsReviewed(suggestedAddOnReviews as { key: string; status: string }[]));
   const notesComplete = notesReviewed || Boolean(String(customerFacingNotes).trim());
   const hasMeasurements = totalSf > 0;
 

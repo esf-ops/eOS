@@ -237,3 +237,11 @@ export function roomTakeoffVerificationComplete(room) {
   if (!room.takeoffImportSource?.importedFromTakeoff) return true;
   return Boolean(v?.measurementsVerified && v?.addonsReviewed && v?.notesReviewed);
 }
+
+export function importedRoomMaterialSelected(room, colorTbd, quoteDefaultCatalogId) {
+  const group = String(room?.materialGroup ?? "").trim();
+  const catalog = String(room?.materialCatalogId ?? "").trim();
+  if (group && !colorTbd) return true;
+  if (catalog) return true;
+  return Boolean(quoteDefaultCatalogId) && !colorTbd;
+}

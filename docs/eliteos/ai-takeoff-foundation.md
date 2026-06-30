@@ -15,7 +15,7 @@
 | **Storage** | **Verified live:** private bucket `eliteos-quote-files`; bytes never returned to browser; downloads via signed URLs only. |
 | **RLS** | Enabled on takeoff/file tables; **no RLS policies yet**. Current architecture: backend **service role** + Express auth/head gates (not browser-direct Supabase reads). |
 | **AI extraction** | Review-only — `review_status` stays `needs_review` after AI draft; server recomputes all sf; no quote mutation. |
-| **Import** | **Enabled (approved snapshots only).** … **v6.1:** IE receipt, checklist, badges, detach. **v6.2:** editable imported measurements with `originalDimensions` + `importState`, imported-vs-current delta panel, per-room verification, piece actions (duplicate/split/exclude/restore/convert-to-manual). |
+| **Import** | **Enabled (approved snapshots only).** … **v6.1:** IE receipt, checklist, badges, detach. **v6.2:** editable measurements with deltas and verification. **v6.3:** compact review table, quote readiness summary, source plan drawer, material warnings, suggested add-on review states. |
 
 **Shipped APIs (org from server auth context only):**
 
