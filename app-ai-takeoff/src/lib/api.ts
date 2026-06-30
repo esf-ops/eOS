@@ -124,7 +124,9 @@ export interface TakeoffJobListItem {
   approvalStatus?: string;
   approvedAt?: string | null;
   approvedByUserId?: string | null;
-  canApprove?: boolean;
+  // canApprove is intentionally absent from the list response — the lightweight list
+  // check did not run the full approval gate, disagreeing with the detail and approve
+  // endpoints. Use GET /api/takeoff-jobs/:id for authoritative canApprove.
   processing?: TakeoffProcessingStatus;
   errorMessage?: string | null;
 }
@@ -174,6 +176,22 @@ export interface SaveTakeoffCorrectionResponse {
     countertopExactSf: number;
     backsplashExactSf: number;
   };
+}
+
+export interface ApprovalBlockerItem {
+  code: string;
+  message: string;
+  path: string | null;
+  category?: string;
+}
+
+/** Structured 422 response from POST /api/takeoff-jobs/:id/approve */
+export interface ApproveBlockedError {
+  ok: false;
+  error: string;
+  code: "approval_decisions_required" | "approval_hard_blockers" | "validation_error";
+  hardBlockers: ApprovalBlockerItem[];
+  estimatorDecisionsRequired: ApprovalBlockerItem[];
 }
 
 export interface ApproveTakeoffJobResponse {

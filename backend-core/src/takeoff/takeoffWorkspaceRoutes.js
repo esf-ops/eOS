@@ -320,6 +320,17 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase, he
     } catch (e) {
       const status = e.statusCode ?? 500;
       const code = status < 500 ? "validation_error" : "server_error";
+      // When the approval gate rejects, include structured blocker details so the
+      // frontend can render decision cards instead of a raw error string.
+      if (e.approvalBlockers) {
+        return res.status(status).json({
+          ok: false,
+          error: String(e?.message ?? e),
+          code: e.approvalBlockers.code ?? code,
+          hardBlockers: e.approvalBlockers.hardBlockers ?? [],
+          estimatorDecisionsRequired: e.approvalBlockers.estimatorDecisionsRequired ?? [],
+        });
+      }
       return res.status(status).json({ ok: false, error: String(e?.message ?? e), code });
     }
   });

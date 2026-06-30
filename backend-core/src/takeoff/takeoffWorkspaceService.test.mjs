@@ -1562,7 +1562,10 @@ function makeMockSupabase({
   const { jobs } = await listTakeoffJobs({ supabase, organizationId: ORG_ID, query: {} });
   assert.equal(jobs[0].reviewStatus, "approved");
   assert.equal(jobs[0].approvedAt, approvedAt);
-  assert.equal(jobs[0].canApprove, false);
+  // canApprove is intentionally absent from the list response — the lightweight list
+  // check disagreed with the full gate. Use GET /api/takeoff-jobs/:id for authoritative state.
+  assert.equal(Object.prototype.hasOwnProperty.call(jobs[0], "canApprove"), false,
+    "list response must not include canApprove (unreliable lightweight check removed)");
   console.log("ok: getTakeoffWorkspace + listTakeoffJobs — approved metadata");
 }
 

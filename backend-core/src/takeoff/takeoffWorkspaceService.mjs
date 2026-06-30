@@ -41,6 +41,7 @@ import { pickSafeExayardJobMetadata } from "./exayardClient.mjs";
 import { evaluateTakeoffApprovalGate } from "./takeoffApprovalGate.mjs";
 import { buildTakeoffImportPayload } from "./takeoffImportPayload.mjs";
 import { loadReviewStateFromRaw, normalizeReviewState } from "./takeoffReviewStatus.mjs";
+import { ESTIMATOR_DECISION_CODES, HARD_BLOCKER_CODES } from "./takeoffWorkflowState.mjs";
 
 // ── Validation helpers ────────────────────────────────────────────────────────
 
@@ -489,31 +490,62 @@ export async function getTakeoffWorkspace({
   const latestResult = latestRow ? buildLatestResultMeta(latestRow) : null;
 
   let canApprove = false;
+  let approvalBlockers = null;
   if (hasSavedResult) {
     const takeoffJson =
       latestRow?.normalized_takeoff_json ??
       (hasJobSummary ? jobRow.result_summary.normalizedTakeoffJson : null);
     const rawJson = latestRow?.raw_ai_result_json ?? null;
-    if (takeoffJson) {
+    if (!takeoffJson) {
+      // Legacy path: job has a result row but no normalized JSON.
+      // Fall back to basic validation-only check (matches old computeCanApprove behavior).
+      try {
+        const { validation } = recomputeTakeoffBundle(takeoffJson);
+        const qaGate = computeQaGateForResult(takeoffJson, null, validation, rawJson);
+        if (!(validation?.hasErrors || (validation?.errorCount ?? 0) > 0) &&
+            qaGate?.status !== "do_not_import") {
+          canApprove = true;
+        }
+      } catch {
+        canApprove = false;
+      }
+    } else {
       try {
         const { computed, validation } = recomputeTakeoffBundle(takeoffJson);
         const qaGate = computeQaGateForResult(takeoffJson, computed, validation, rawJson);
         const approval = extractApprovalFields(jobRow, latestRow);
         const reviewState = loadReviewStateFromRaw(rawJson);
         const dimEvidence =
-          typeof rawJson?._meta?.dimensionEvidence === "object"
+          typeof rawJson?._meta?.dimensionEvidence === "object" && rawJson._meta.dimensionEvidence !== null
             ? rawJson._meta.dimensionEvidence
             : null;
-        canApprove = computeCanApprove({
-          hasSavedResult,
-          validation,
-          qaGate,
-          reviewStatus: approval.reviewStatus,
+        const gate = evaluateTakeoffApprovalGate({
           takeoffResult: takeoffJson,
           computed,
-          reviewState,
+          validation,
+          qaGate,
           dimensionEvidence: dimEvidence,
+          reviewState,
+          hasSavedResult,
+          hasUnsavedEdits: false,
+          reviewStatus: approval.reviewStatus,
         });
+        canApprove = gate.canApprove;
+        // Expose classified blockers so the frontend can render decision cards
+        // on workspace load without waiting for a 422 from the approve endpoint.
+        if (!gate.canApprove && gate.blockers.length > 0) {
+          approvalBlockers = {
+            hardBlockers: gate.blockers.filter((b) => HARD_BLOCKER_CODES.has(b.code)),
+            estimatorDecisionsRequired: gate.blockers
+              .filter((b) => ESTIMATOR_DECISION_CODES.has(b.code))
+              .map((b) => ({
+                code: b.code,
+                message: b.message,
+                path: b.path ?? null,
+                category: b.category ?? "review",
+              })),
+          };
+        }
       } catch {
         canApprove = false;
       }
@@ -534,6 +566,7 @@ export async function getTakeoffWorkspace({
     approvedAt: approval.approvedAt,
     approvedByUserId: approval.approvedByUserId,
     canApprove,
+    approvalBlockers,
     sourceType: jobRow.source_type ?? null,
     modelProvider: jobRow.model_provider ?? null,
     modelVersion: jobRow.model_version ?? null,
@@ -656,11 +689,10 @@ export async function listTakeoffJobs({ supabase, organizationId, query = {} }) 
         : null;
 
     const approval = extractApprovalFields(jobRow, latest);
-    const canApprove =
-      resultCount > 0 &&
-      approval.reviewStatus !== "approved" &&
-      String(jobRow.status ?? "") !== "processing" &&
-      (latestMeta?.summary?.errorCount ?? 0) === 0;
+    // canApprove is intentionally omitted from the list response. A list-level check
+    // (no gate evaluation) disagreed with the detail endpoint and the approve endpoint,
+    // causing the frontend to show "Approve takeoff" for jobs the server would reject.
+    // Use GET /api/takeoff-jobs/:id (detail) for authoritative canApprove.
 
     const safeFile = fileRow ? safeFileSummary(fileRow) : null;
 
@@ -673,7 +705,6 @@ export async function listTakeoffJobs({ supabase, organizationId, query = {} }) 
       approvalStatus: approval.approvalStatus,
       approvedAt: approval.approvedAt,
       approvedByUserId: approval.approvedByUserId,
-      canApprove,
       sourceType: jobRow.source_type ?? null,
       modelProvider: jobRow.model_provider ?? null,
       modelVersion: jobRow.model_version ?? null,
@@ -1114,11 +1145,35 @@ export async function approveTakeoffJob({
   });
 
   if (!approvalGate.canApprove) {
-    const first = approvalGate.blockers[0];
-    throw workspaceError(
-      first?.message ?? "Approval blockers must be resolved before approval",
+    // Classify blockers so the frontend can render actionable decision cards rather
+    // than just displaying a raw error string.
+    const hardBlockers = approvalGate.blockers.filter(
+      (b) => !ESTIMATOR_DECISION_CODES.has(b.code) && !HARD_BLOCKER_CODES.has(b.code)
+        ? true  // unknown codes are hard blockers by default
+        : HARD_BLOCKER_CODES.has(b.code)
+    );
+    const estimatorDecisionsRequired = approvalGate.blockers
+      .filter((b) => ESTIMATOR_DECISION_CODES.has(b.code))
+      .map((b) => ({
+        code: b.code,
+        message: b.message,
+        path: b.path ?? null,
+        category: b.category ?? "review",
+      }));
+    const allMessages = approvalGate.blockers.map((b) => b.message).join("; ");
+    const err = workspaceError(
+      allMessages || "Approval blockers must be resolved before approval",
       422
     );
+    err.approvalBlockers = {
+      ok: false,
+      code: estimatorDecisionsRequired.length > 0 && hardBlockers.length === 0
+        ? "approval_decisions_required"
+        : "approval_hard_blockers",
+      hardBlockers,
+      estimatorDecisionsRequired,
+    };
+    throw err;
   }
 
   const now = new Date().toISOString();
@@ -1336,6 +1391,12 @@ export async function getLatestTakeoffResult({
     fileRow = fileRows?.[0] ?? null;
   }
 
+  const rawJson = savedResult.raw_ai_result_json ?? null;
+  const dimensionEvidence =
+    typeof rawJson?._meta?.dimensionEvidence === "object" && rawJson._meta.dimensionEvidence !== null
+      ? rawJson._meta.dimensionEvidence
+      : null;
+
   return {
     takeoffJobId,
     savedAt: savedResult.created_at,
@@ -1345,9 +1406,12 @@ export async function getLatestTakeoffResult({
     computedMeasurementsJson: freshComputed,
     validationDiagnosticsJson: savedResult.validation_diagnostics_json,
     importPlanJson: savedResult.import_plan_json,
-    reviewState: loadReviewStateFromRaw(savedResult.raw_ai_result_json),
-    importPayload:
-      savedResult.raw_ai_result_json?._meta?.approvedSnapshot?.importPayload ?? null,
+    reviewState: loadReviewStateFromRaw(rawJson),
+    importPayload: rawJson?._meta?.approvedSnapshot?.importPayload ?? null,
+    // Returned so the frontend can evaluate the same approval gate as the server.
+    // Without dimensionEvidence, EVIDENCE_RECONCILIATION blockers are invisible to
+    // the local gate, causing canApprove=true on the client while the server returns false.
+    dimensionEvidence,
     file: fileRow ? safeFileSummary(fileRow) : null,
   };
 }

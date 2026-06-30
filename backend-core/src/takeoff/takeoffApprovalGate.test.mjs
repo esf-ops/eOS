@@ -283,4 +283,222 @@ function evaluate(result, reviewState, opts = {}) {
   console.log("ok: T10 workflow state: reference mismatch = estimator decision");
 }
 
+// ── Kitchen HAR regression fixture ─────────────────────────────────────────
+//
+// Mirrors the job 6376dea4 scenario from the HAR:
+//   - Kitchen room verified, saved
+//   - Reviewed total ~34.69 sf (run at 96" × 25.5" depth)
+//   - No backsplash
+//   - dimensionEvidence dimension says 150" (unsupported → EVIDENCE_RECONCILIATION)
+//   - No flagResolutions
+//
+// Expected (before fix):
+//   - frontend gate (dimensionEvidence: null) → canApprove true  ← THE BUG
+//   - server gate (dimensionEvidence loaded)  → canApprove false ← CORRECT
+//
+// Expected (after fix — getLatestTakeoffResult returns dimensionEvidence):
+//   - both gates agree → canApprove false until decision accepted
+//
+// T11 — Kitchen HAR: gate with dimensionEvidence=null misses EVIDENCE_RECONCILIATION
+{
+  const result = {
+    schemaVersion: "1",
+    status: "reviewed",
+    rooms: [
+      makeRoom("kitchen-1", "Kitchen", [
+        // 96" × 25.5" depth ≈ 17 sf countertop
+        makeTakeoffRun({ id: "run-wall", label: "Wall", lengthIn: 96, depthIn: 25.5, pieceType: "counter" }),
+      ], { backsplashIncluded: false, backsplashScope: "none" }),
+    ],
+  };
+  const rs = completeReviewState(["kitchen-1"]);
+
+  // Without dimensionEvidence, reconciliation never runs → no EVIDENCE_RECONCILIATION blocker
+  const gateNoEvidence = evaluate(result, rs, { dimensionEvidence: null });
+  assert.equal(gateNoEvidence.canApprove, true, "T11 no evidence → canApprove true (the old bug state)");
+  assert.ok(
+    !gateNoEvidence.blockers.some((b) => b.code === "EVIDENCE_RECONCILIATION"),
+    "T11 no EVIDENCE_RECONCILIATION without dimensionEvidence"
+  );
+
+  // With dimensionEvidence that contradicts the run (150" evidence vs 96" run)
+  const dimensionEvidence = {
+    dimensions: [
+      { id: "dim-1", category: "countertop_run", confidence: "high", lengthIn: 150, label: "Wall" },
+    ],
+  };
+  const gateWithEvidence = evaluate(result, rs, { dimensionEvidence });
+  assert.equal(gateWithEvidence.canApprove, false, "T11 with evidence → canApprove false");
+  assert.ok(
+    gateWithEvidence.blockers.some((b) => b.code === "EVIDENCE_RECONCILIATION"),
+    "T11 EVIDENCE_RECONCILIATION fires with mismatched dimensionEvidence"
+  );
+  console.log("ok: T11 Kitchen HAR: dimensionEvidence=null vs loaded changes canApprove");
+}
+
+// T12 — EVIDENCE_RECONCILIATION decision key produced by workflowState matches key consumed by gate
+{
+  const { buildTakeoffWorkflowState, ESTIMATOR_DECISION_CODES } = await import("./takeoffWorkflowState.mjs");
+
+  // Gate produces EVIDENCE_RECONCILIATION blocker (no path).
+  const gate = {
+    blockers: [{ code: "EVIDENCE_RECONCILIATION", message: "2 issues remain.", path: null, category: "evidence" }],
+    canApprove: false,
+    canImport: false,
+  };
+
+  // Workflow state builds the decision card with a resolution descriptor.
+  const state = buildTakeoffWorkflowState({
+    approvalGate: gate,
+    reviewedMath: { activeRooms: [{ roomId: "kitchen-1", roomName: "Kitchen" }] },
+    reviewState: { excludedRoomIds: [], roomCompleteness: { "kitchen-1": true } },
+    selectedRoomId: "kitchen-1",
+    hasSaveableChanges: false,
+    saveStatus: "idle",
+    hasSavedResult: true,
+    reviewStatus: "needs_review",
+    importStatus: null,
+  });
+
+  assert.equal(state.estimatorDecisionsRequired.length, 1, "T12 one decision required");
+  const decision = state.estimatorDecisionsRequired[0];
+  assert.equal(decision.code, "EVIDENCE_RECONCILIATION", "T12 decision code");
+  assert.equal(decision.resolution.type, "flagResolution", "T12 resolution type is flagResolution");
+  assert.equal(decision.resolution.code, "EVIDENCE_RECONCILIATION", "T12 resolution code matches blocker code");
+  assert.equal(decision.resolution.path, null, "T12 resolution path is null (no path for global reconciliation)");
+
+  // The key written by handleResolveFlagDecision is: path ? `${code}::${path}` : code
+  const writtenKey = decision.resolution.path
+    ? `${decision.resolution.code}::${decision.resolution.path}`
+    : decision.resolution.code;
+  assert.equal(writtenKey, "EVIDENCE_RECONCILIATION", "T12 written flagResolution key matches gate's isFlagResolved key");
+
+  // Verify: writing this key into flagResolutions clears the blocker.
+  const { evaluateTakeoffApprovalGate: evalGate } = await import("./takeoffApprovalGate.mjs");
+  const result = {
+    schemaVersion: "1",
+    status: "reviewed",
+    rooms: [
+      makeRoom("kitchen-1", "Kitchen", [
+        makeTakeoffRun({ id: "run-wall", label: "Wall", lengthIn: 96, depthIn: 25.5, pieceType: "counter" }),
+      ], { backsplashIncluded: false, backsplashScope: "none" }),
+    ],
+  };
+  const dimensionEvidence = {
+    dimensions: [
+      { id: "dim-1", category: "countertop_run", confidence: "high", lengthIn: 150, label: "Wall" },
+    ],
+  };
+  const rsWithResolution = {
+    ...completeReviewState(["kitchen-1"]),
+    flagResolutions: {
+      [writtenKey]: { action: "resolved", note: "Reviewed and accepted by estimator." },
+    },
+  };
+  const computed = (await import("./takeoffMeasurementCalc.mjs")).computeTakeoffMeasurements(result);
+  const validation = (await import("./takeoffValidator.mjs")).validateTakeoffResult(result, computed);
+  const gateAfterAccept = evalGate({
+    takeoffResult: result,
+    computed,
+    validation,
+    qaGate: { status: "ready_for_review", topIssues: [] },
+    dimensionEvidence,
+    reviewState: rsWithResolution,
+    hasSavedResult: true,
+    hasUnsavedEdits: false,
+    reviewStatus: "needs_review",
+  });
+  assert.equal(gateAfterAccept.canApprove, true, "T12 canApprove true after flagResolution accepted");
+  assert.ok(
+    !gateAfterAccept.blockers.some((b) => b.code === "EVIDENCE_RECONCILIATION"),
+    "T12 EVIDENCE_RECONCILIATION cleared after accept"
+  );
+  console.log("ok: T12 EVIDENCE_RECONCILIATION decision key round-trips through gate");
+}
+
+// T13 — Kitchen HAR full workflow: list/detail/frontend/approve all agree
+{
+  const { buildTakeoffWorkflowState } = await import("./takeoffWorkflowState.mjs");
+  const { evaluateTakeoffApprovalGate: evalGate } = await import("./takeoffApprovalGate.mjs");
+
+  const result = {
+    schemaVersion: "1",
+    status: "reviewed",
+    rooms: [
+      makeRoom("kitchen-1", "Kitchen", [
+        makeTakeoffRun({ id: "run-wall", label: "Wall", lengthIn: 96, depthIn: 25.5, pieceType: "counter" }),
+      ], { backsplashIncluded: false, backsplashScope: "none" }),
+    ],
+  };
+  const dimensionEvidence = {
+    dimensions: [
+      { id: "dim-1", category: "countertop_run", confidence: "high", lengthIn: 150, label: "Wall" },
+    ],
+  };
+  const rs = completeReviewState(["kitchen-1"]);
+  const computed = (await import("./takeoffMeasurementCalc.mjs")).computeTakeoffMeasurements(result);
+  const validation = (await import("./takeoffValidator.mjs")).validateTakeoffResult(result, computed);
+
+  // Server gate (has dimensionEvidence, as in detail/approve endpoints)
+  const serverGate = evalGate({
+    takeoffResult: result, computed, validation,
+    qaGate: { status: "ready_for_review", topIssues: [] },
+    dimensionEvidence, reviewState: rs,
+    hasSavedResult: true, hasUnsavedEdits: false, reviewStatus: "needs_review",
+  });
+  assert.equal(serverGate.canApprove, false, "T13 server gate: canApprove false");
+
+  // Frontend gate (WITH dimensionEvidence — as after the fix where results/latest returns it)
+  const frontendGate = evalGate({
+    takeoffResult: result, computed, validation,
+    qaGate: { status: "ready_for_review", topIssues: [] },
+    dimensionEvidence, reviewState: rs,
+    hasSavedResult: true, hasUnsavedEdits: false, reviewStatus: "needs_review",
+  });
+  assert.equal(frontendGate.canApprove, false, "T13 frontend gate with evidence: canApprove false");
+  assert.deepEqual(
+    serverGate.canApprove, frontendGate.canApprove,
+    "T13 server and frontend gates agree"
+  );
+
+  // WorkflowState sees the decision
+  const ws = buildTakeoffWorkflowState({
+    approvalGate: frontendGate,
+    reviewedMath: { activeRooms: [{ roomId: "kitchen-1", roomName: "Kitchen" }] },
+    reviewState: { excludedRoomIds: [], roomCompleteness: { "kitchen-1": true } },
+    selectedRoomId: "kitchen-1",
+    hasSaveableChanges: false, saveStatus: "idle",
+    hasSavedResult: true, reviewStatus: "needs_review", importStatus: null,
+  });
+  assert.equal(ws.canApprove, false, "T13 workflowState.canApprove false");
+  assert.equal(ws.estimatorDecisionsRequired.length, 1, "T13 one estimator decision shown");
+  assert.equal(ws.primaryAction?.type, "review_decisions", "T13 primaryAction is review_decisions, not approve");
+
+  // After accepting the decision, canApprove becomes true
+  const rsAccepted = {
+    ...rs,
+    flagResolutions: {
+      EVIDENCE_RECONCILIATION: { action: "resolved", note: "Reviewed and accepted by estimator." },
+    },
+  };
+  const gateAccepted = evalGate({
+    takeoffResult: result, computed, validation,
+    qaGate: { status: "ready_for_review", topIssues: [] },
+    dimensionEvidence, reviewState: rsAccepted,
+    hasSavedResult: true, hasUnsavedEdits: false, reviewStatus: "needs_review",
+  });
+  assert.equal(gateAccepted.canApprove, true, "T13 canApprove true after accept");
+  const wsAccepted = buildTakeoffWorkflowState({
+    approvalGate: gateAccepted,
+    reviewedMath: { activeRooms: [{ roomId: "kitchen-1", roomName: "Kitchen" }] },
+    reviewState: { excludedRoomIds: [], roomCompleteness: { "kitchen-1": true } },
+    selectedRoomId: "kitchen-1",
+    hasSaveableChanges: false, saveStatus: "idle",
+    hasSavedResult: true, reviewStatus: "needs_review", importStatus: null,
+  });
+  assert.equal(wsAccepted.canApprove, true, "T13 workflowState.canApprove true after accept");
+  assert.equal(wsAccepted.primaryAction?.type, "approve", "T13 primaryAction is approve after accept");
+  console.log("ok: T13 Kitchen HAR full workflow: list/detail/frontend agree, approve fires only after accept");
+}
+
 console.log("\nAll takeoffApprovalGate tests passed.\n");

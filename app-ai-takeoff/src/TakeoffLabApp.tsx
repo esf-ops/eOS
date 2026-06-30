@@ -110,6 +110,8 @@ import {
   submitTakeoffFeedback,
   submitTakeoffIssueReport,
   LabApiError,
+  type ApproveBlockedError,
+  type ApprovalBlockerItem,
 } from "./lib/api";
 import EliteosTopbar from "../../shared/eliteos-ui/EliteosTopbar";
 import type { EliteosTopbarMenuItem } from "../../shared/eliteos-ui/EliteosTopbar";
@@ -449,6 +451,9 @@ export default function TakeoffLabApp() {
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [approveStatus, setApproveStatus] = useState<ApproveStatus>("idle");
   const [approveMsg, setApproveMsg] = useState<string | null>(null);
+  // When the approve endpoint returns a structured 422, store the parsed blocker details
+  // so they can be rendered as actionable decision cards rather than a raw error string.
+  const [serverApprovalBlockers, setServerApprovalBlockers] = useState<ApproveBlockedError | null>(null);
   const [workspaceReview, setWorkspaceReview] = useState<WorkspaceReviewMeta | null>(null);
 
   // ── Copy feedback ─────────────────────────────────────────────────────────
@@ -513,10 +518,19 @@ export default function TakeoffLabApp() {
           };
           importPayload?: object | null;
           reviewStatus?: string;
+          // Server now returns dimensionEvidence so the local approval gate can evaluate
+          // EVIDENCE_RECONCILIATION blockers — matching the server-side gate exactly.
+          dimensionEvidence?: object | null;
         };
         if (res.ok && res.normalizedTakeoffJson) {
           commitSource(res.normalizedTakeoffJson, "file");
           setSavedAt(res.savedAt ?? null);
+          // Load dimensionEvidence from the saved result so the local gate evaluation
+          // matches the server gate. Without this, EVIDENCE_RECONCILIATION blockers are
+          // invisible to the frontend gate, causing canApprove=true when server says false.
+          if (res.dimensionEvidence) {
+            setDimensionEvidence(res.dimensionEvidence as DimensionEvidence);
+          }
           if (reviewStartedRef.current !== takeoffJobId) {
             reviewStartedRef.current = takeoffJobId;
             void recordTakeoffReviewStarted(authToken, takeoffJobId).catch(() => {});
@@ -791,6 +805,25 @@ export default function TakeoffLabApp() {
     if (takeoffImportStatus === "imported") return false;
     return Boolean(workflowState?.canImport);
   }, [workflowState, takeoffImportStatus]);
+
+  // ── Dev-only: log canApprove disagreements ─────────────────────────────────
+  // These states should be impossible once dimensionEvidence is loaded correctly.
+  // Log them in development so any remaining source-of-truth bugs surface immediately.
+  if (import.meta.env.DEV && takeoffJobId && hasActiveSource) {
+    const serverSaysCanApprove = workspaceReview?.canApprove;
+    const localSaysCanApprove = canApproveTakeoff;
+    if (serverSaysCanApprove !== undefined && serverSaysCanApprove !== localSaysCanApprove) {
+      console.warn(
+        `[AI Takeoff][dev] canApprove disagreement for ${takeoffJobId}:`,
+        `server detail=${serverSaysCanApprove}`,
+        `frontend workflow=${localSaysCanApprove}`,
+        `approvalGate=${approvalGate?.canApprove}`,
+        `workflowState=${workflowState?.canApprove}`,
+        `dimensionEvidence=${dimensionEvidence != null ? "loaded" : "null"}`,
+        `blockers=${approvalGate?.blockers?.map((b) => b.code).join(",") ?? "none"}`
+      );
+    }
+  }
 
   const approveBlockedReason = useMemo(() => {
     if (!takeoffJobId || !hasActiveSource) return "Load a takeoff workspace first.";
@@ -1325,11 +1358,16 @@ export default function TakeoffLabApp() {
           }) as { ok: boolean; savedAt: string; summary: { countertopExactSf: number; backsplashExactSf: number } };
       setSaveStatus("saved");
       setSavedAt(res.savedAt);
+      // Clear any 422 server blockers so the UI reflects the fresh save state.
+      setServerApprovalBlockers(null);
       setWorkspaceReview((prev) => ({
         ...(prev ?? { reviewStatus: "needs_review" }),
         reviewStatus: "needs_review",
         approvalStatus: "needs_review",
-        canApprove: true,
+        // Use server's canApprove from the save response when available; it reflects the
+        // full gate. Fallback to true only when the lightweight save path doesn't return it
+        // (the local gate will still enforce correctness via workflowState.canApprove).
+        canApprove: (res as { canApprove?: boolean }).canApprove ?? true,
         approvedAt: null,
         approvedByUserId: null,
         hasSavedResult: true,
@@ -1365,6 +1403,7 @@ export default function TakeoffLabApp() {
     if (!takeoffJobId || !authToken || !canApproveTakeoff) return;
     setApproveStatus("approving");
     setApproveMsg("Validating and approving takeoff…");
+    setServerApprovalBlockers(null);
     try {
       const res = await approveTakeoffJob(authToken, takeoffJobId, {
         takeoffResult: effectiveDraft,
@@ -1372,6 +1411,7 @@ export default function TakeoffLabApp() {
         dimensionEvidence: dimensionEvidence ?? undefined,
       });
       setApproveStatus("approved");
+      setServerApprovalBlockers(null);
       setWorkspaceReview({
         reviewStatus: "approved",
         approvalStatus: "approved_for_import",
@@ -1388,6 +1428,21 @@ export default function TakeoffLabApp() {
         `Takeoff approved for import — ${res.summary.countertopExactSf.toFixed(2)} sf countertop · ${res.summary.backsplashExactSf.toFixed(2)} sf backsplash.`
       );
     } catch (e) {
+      // Parse structured 422 — render decision cards instead of a raw error string.
+      if (e instanceof LabApiError && e.status === 422) {
+        const body = e.body as Partial<ApproveBlockedError> | null;
+        if (body && (body.estimatorDecisionsRequired?.length || body.hardBlockers?.length)) {
+          setServerApprovalBlockers(body as ApproveBlockedError);
+          setApproveStatus("error");
+          setApproveMsg(null);
+          // Scroll to the decision cards that were just populated.
+          window.setTimeout(() => {
+            const card = document.querySelector(".takeoff-decision-card, .takeoff-final-review");
+            if (card) card.scrollIntoView({ behavior: "smooth", block: "center" });
+          }, 50);
+          return;
+        }
+      }
       const msg = e instanceof LabApiError ? e.message : e instanceof Error ? e.message : "Approval failed.";
       setApproveStatus("error");
       setApproveMsg(msg);
@@ -1816,6 +1871,7 @@ export default function TakeoffLabApp() {
       handleSaveDraft,
       handleApproveTakeoff,
       unresolvedCount,
+      canApproveTakeoff,
     ]
   );
 
@@ -2078,6 +2134,67 @@ export default function TakeoffLabApp() {
               </div>
             </div>
           ))}
+        </div>
+      ) : null}
+
+      {/* ── Server approval blockers (422 fallback repair path) ─────────── */}
+      {/* Shown when the approve endpoint rejected with structured blocker details  */}
+      {/* that the local gate missed (e.g. dimensionEvidence loaded after approval  */}
+      {/* attempt). After accepting, local gate re-evaluates and clears these too.  */}
+      {currentWorkflowStep === "review" &&
+      serverApprovalBlockers &&
+      serverApprovalBlockers.estimatorDecisionsRequired.length > 0 &&
+      (!workflowState || workflowState.estimatorDecisionsRequired.length === 0) ? (
+        <div className="takeoff-final-review" role="region" aria-label="Server approval decisions">
+          <h3 className="takeoff-final-review-heading">
+            Final review — {serverApprovalBlockers.estimatorDecisionsRequired.length} server-side decision{serverApprovalBlockers.estimatorDecisionsRequired.length !== 1 ? "s" : ""} required
+          </h3>
+          <p className="muted small" style={{ marginBottom: 12 }}>
+            The server rejected approval. Accept each decision below to proceed.
+          </p>
+          {serverApprovalBlockers.estimatorDecisionsRequired.map((blocker: ApprovalBlockerItem) => {
+            // Build a minimal decision compatible with handleAcceptDecision
+            const decision = {
+              resolution:
+                blocker.code === "EVIDENCE_RECONCILIATION" ||
+                !blocker.code.startsWith("REFERENCE_TOTAL_")
+                  ? {
+                      type: "flagResolution" as const,
+                      code: blocker.code,
+                      path: blocker.path ?? null,
+                      defaultNote: "Reviewed and accepted by estimator.",
+                    }
+                  : { type: "referenceTotalAck" as const, key: blocker.code },
+            };
+            const acceptLabel =
+              blocker.code === "EVIDENCE_RECONCILIATION"
+                ? "Mark evidence reviewed"
+                : blocker.code.startsWith("REFERENCE_TOTAL_")
+                ? "Accept reviewed total"
+                : "Accept and continue";
+            return (
+              <div
+                key={blocker.code + (blocker.path ?? "")}
+                className="takeoff-decision-card"
+                data-decision-code={blocker.code}
+              >
+                <p className="takeoff-decision-card-title">{blocker.code.replace(/_/g, " ").toLowerCase().replace(/^\w/, (c) => c.toUpperCase())}</p>
+                <p className="takeoff-decision-card-body muted small">{blocker.message}</p>
+                <div className="takeoff-decision-card-actions">
+                  <button
+                    type="button"
+                    className="btn primary btn-sm"
+                    onClick={() => {
+                      handleAcceptDecision(decision);
+                      setServerApprovalBlockers(null);
+                    }}
+                  >
+                    {acceptLabel}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       ) : null}
 
