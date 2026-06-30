@@ -1267,6 +1267,22 @@ export default function TakeoffLabApp() {
     }
   }, [takeoffJobId, authToken, effectiveDraft, hasSaveableChanges, currentResultId, buildReviewState]);
 
+  // Auto-save when all included rooms are verified and there are unsaved edits.
+  // This removes the "click Save separately after verification" friction for the normal path.
+  useEffect(() => {
+    if (!hasActiveSource || !takeoffJobId || !authToken) return;
+    if (!hasSaveableChanges || saveStatus !== "idle") return;
+    const includedRoomIds = (reviewedMath?.activeRooms ?? [])
+      .filter((r) => !excludedRoomIds.has(r.roomId))
+      .map((r) => r.roomId);
+    if (includedRoomIds.length === 0) return;
+    const allVerified = includedRoomIds.every((id) => roomCompleteness[id]);
+    if (allVerified) {
+      void handleSaveDraft();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomCompleteness]);
+
   const handleApproveTakeoff = useCallback(async () => {
     if (!takeoffJobId || !authToken || !canApproveTakeoff) return;
     setApproveStatus("approving");
@@ -1866,13 +1882,6 @@ export default function TakeoffLabApp() {
         />
       )}
 
-      {currentWorkflowStep === "review" && approvalGate ? (
-        <TakeoffItemsToReviewPanel
-          blockers={approvalGate.blockers}
-          suggestedAddOns={suggestedAddOnsForReview}
-        />
-      ) : null}
-
       {currentWorkflowStep === "review" ? (
         <>
           <TakeoffRoomReviewWorkbench
@@ -1900,10 +1909,72 @@ export default function TakeoffLabApp() {
             onMoveRun={handleMoveRun}
             onAddManualRun={handleAddManualRun}
           />
+        </>
+      ) : null}
+
+      {currentWorkflowStep === "import" ? (
+        <>
+          {importJobStatus !== "done" ? (
+            <div className="takeoff-import-ready-note" role="note">
+              <p className="takeoff-import-ready-note-title">Approved and ready to import</p>
+              <p className="takeoff-import-ready-note-body muted small">
+                Internal Estimate will still require account, branch, salesperson, pricing mode, material/color, and add-ons before quote save.
+              </p>
+            </div>
+          ) : null}
+          <TakeoffImportPreview
+            ref={importPreviewRef}
+            importPlan={importPlan}
+            importPayload={approvedImportPayload as Parameters<typeof TakeoffImportPreview>[0]["importPayload"]}
+            canImport={canImportToEstimate}
+            importBlockedReason={approvalGate?.blockers?.[0]?.message ?? importPlan.blockedReason ?? null}
+            onImport={handleImportToInternalEstimate}
+            onImportCancelled={handleImportCancelled}
+            onReportIssue={() => setIssueReportOpen(true)}
+            importStatus={importJobStatus}
+            importMessage={importJobMsg}
+            hideImportButton
+          />
+          {importJobStatus === "done" && takeoffJobId ? (
+            <TakeoffFeedbackForm
+              quoteId={importedQuoteId}
+              onSubmit={handleSubmitTakeoffFeedback}
+              busy={feedbackBusy}
+              submitted={feedbackSubmitted}
+            />
+          ) : null}
+        </>
+      ) : null}
+
+      <details className="takeoff-advanced lab-section lab-section-collapsible">
+        <summary className="lab-section-summary">
+          <span className="lab-section-title" style={{ margin: 0 }}>Advanced details</span>
+          <span className="lab-section-summary-note">Diagnostics, history, and technical metadata</span>
+        </summary>
+        <div className="takeoff-advanced-body">
+          {/* ── Items to review (moved from main flow) ─────────────────── */}
+          {approvalGate ? (
+            <details className="lab-section lab-section-collapsible">
+              <summary className="lab-section-summary">
+                <span className="lab-section-title" style={{ margin: 0 }}>Items to review</span>
+                <span className="lab-section-summary-note">
+                  Approval blockers and scope items
+                </span>
+              </summary>
+              <div style={{ marginTop: 12 }}>
+                <TakeoffItemsToReviewPanel
+                  blockers={approvalGate.blockers}
+                  suggestedAddOns={suggestedAddOnsForReview}
+                />
+              </div>
+            </details>
+          ) : null}
+
+          {/* ── All pieces (moved from main flow — audit/diagnostic use) ── */}
           <details className="lab-section lab-section-collapsible takeoff-all-pieces">
             <summary className="lab-section-summary">
               <span className="lab-section-title" style={{ margin: 0 }}>All pieces</span>
-              <span className="lab-section-summary-note">Full measurement table</span>
+              <span className="lab-section-summary-note">Full measurement table — read-only audit</span>
             </summary>
             <div style={{ marginTop: 12 }}>
               <TakeoffValidationFixPanel
@@ -1935,41 +2006,7 @@ export default function TakeoffLabApp() {
               />
             </div>
           </details>
-        </>
-      ) : null}
 
-      {currentWorkflowStep === "import" ? (
-        <>
-          <TakeoffImportPreview
-            ref={importPreviewRef}
-            importPlan={importPlan}
-            importPayload={approvedImportPayload as Parameters<typeof TakeoffImportPreview>[0]["importPayload"]}
-            canImport={canImportToEstimate}
-            importBlockedReason={approvalGate?.blockers?.[0]?.message ?? importPlan.blockedReason ?? null}
-            onImport={handleImportToInternalEstimate}
-            onImportCancelled={handleImportCancelled}
-            onReportIssue={() => setIssueReportOpen(true)}
-            importStatus={importJobStatus}
-            importMessage={importJobMsg}
-            hideImportButton
-          />
-          {importJobStatus === "done" && takeoffJobId ? (
-            <TakeoffFeedbackForm
-              quoteId={importedQuoteId}
-              onSubmit={handleSubmitTakeoffFeedback}
-              busy={feedbackBusy}
-              submitted={feedbackSubmitted}
-            />
-          ) : null}
-        </>
-      ) : null}
-
-      <details className="takeoff-advanced lab-section lab-section-collapsible">
-        <summary className="lab-section-summary">
-          <span className="lab-section-title" style={{ margin: 0 }}>Advanced details</span>
-          <span className="lab-section-summary-note">Diagnostics, history, and technical metadata</span>
-        </summary>
-        <div className="takeoff-advanced-body">
           {qaGate ? (
             <details className="lab-section lab-section-collapsible">
               <summary className="lab-section-summary">
@@ -2214,6 +2251,53 @@ export default function TakeoffLabApp() {
             </details>
           ) : null}
 
+          {/* ── Takeoff runs (moved from outer page) ──────────────────── */}
+          {takeoffJobId && authToken ? (
+            <details className="lab-section lab-section-collapsible">
+              <summary className="lab-section-summary">
+                <span className="lab-section-title" style={{ margin: 0 }}>Takeoff runs</span>
+                <span className="lab-section-summary-note">
+                  {planFilename ?? "Active workspace"} · switch runs or refresh
+                </span>
+              </summary>
+              <div className="lab-section-collapsible-body">
+                <TakeoffRunInbox
+                  token={authToken}
+                  selectedJobId={takeoffJobId}
+                  refreshKey={historyRefreshKey}
+                  pauseBackgroundRefresh={generationBusy}
+                  onSelectJob={handleSelectRun}
+                />
+              </div>
+            </details>
+          ) : null}
+
+          {/* ── AI extraction history (moved from outer page) ──────────── */}
+          {takeoffJobId && authToken ? (
+            <details className="lab-section lab-section-collapsible">
+              <summary className="lab-section-summary">
+                <span className="lab-section-title" style={{ margin: 0 }}>AI extraction history</span>
+                <span className="lab-section-summary-note">
+                  {currentResultId
+                    ? "Result loaded — expand to switch runs"
+                    : "Load a prior extraction run"}
+                </span>
+              </summary>
+              <div className="lab-section-collapsible-body">
+                <TakeoffRunHistoryPanel
+                  takeoffJobId={takeoffJobId}
+                  token={authToken}
+                  currentResultId={currentResultId}
+                  currentComputed={hasActiveSource ? computed : null}
+                  refreshKey={historyRefreshKey}
+                  pauseBackgroundRefresh={generationBusy}
+                  embedded
+                  onLoadRun={handleLoadHistoricalRun}
+                />
+              </div>
+            </details>
+          ) : null}
+
           {showDevTools ? (
             <>
               <details className="lab-section lab-section-collapsible lab-section-dev">
@@ -2419,7 +2503,9 @@ export default function TakeoffLabApp() {
           {!showPlanPreviewColumn && taskPanelContent}
 
           {/* ── Takeoff runs inbox ─────────────────────────────────────── */}
-          {authToken ? (
+          {/* When a workspace is active, runs live inside Advanced. Show the
+              standalone job-picker here only when no job is loaded yet. */}
+          {authToken && !hasActiveSource ? (
             takeoffJobId ? (
               <details
                 className="lab-section lab-section-collapsible lab-section--compact"
@@ -2497,11 +2583,13 @@ export default function TakeoffLabApp() {
           )
           ) : null}
 
-          {/* ── AI extraction run history (v5.3) ──────────────────────── */}
-          {takeoffJobId && authToken && (
+          {/* ── AI extraction run history ──────────────────────────────── */}
+          {/* When a workspace is active, history lives inside Advanced.
+              Show standalone here only when no active draft is loaded. */}
+          {takeoffJobId && authToken && !hasActiveSource && (
             <details
               className="lab-section lab-section-collapsible lab-section--compact"
-              open={!currentResultId && !hasActiveSource}
+              open={!currentResultId}
             >
               <summary className="lab-section-summary">
                 <span className="lab-section-title" style={{ margin: 0 }}>AI extraction history</span>
@@ -2516,7 +2604,7 @@ export default function TakeoffLabApp() {
                   takeoffJobId={takeoffJobId}
                   token={authToken}
                   currentResultId={currentResultId}
-                  currentComputed={hasActiveSource ? computed : null}
+                  currentComputed={null}
                   refreshKey={historyRefreshKey}
                   pauseBackgroundRefresh={generationBusy}
                   embedded

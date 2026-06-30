@@ -623,6 +623,15 @@ html, body {
 
 .takeoff-review-action-bar-blockers--global { color: var(--eos-text-muted); }
 
+.takeoff-import-ready-note {
+  padding: 12px 14px;
+  border-radius: var(--r-md);
+  background: var(--eos-success-soft);
+  border: 1px solid var(--eos-success-border, var(--eos-success));
+  margin-bottom: 8px;
+}
+.takeoff-import-ready-note-title { font-weight: 650; margin: 0 0 4px; }
+
 .takeoff-room-piece-card {
   padding: 12px 14px; border-radius: var(--r-md);
   border: 1px solid var(--eos-line); background: var(--eos-surface);
