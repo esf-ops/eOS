@@ -47,18 +47,21 @@ function sfFromRun(lengthIn, depthIn) {
  * @param {import('./takeoffReviewStatus.mjs').TakeoffReviewState} reviewState
  */
 export function applyReviewFiltersToTakeoffResult(takeoffResult, reviewState) {
-  const excluded = new Set(reviewState?.excludedRunIds ?? []);
-  if (excluded.size === 0) return takeoffResult;
+  const excludedRuns = new Set(reviewState?.excludedRunIds ?? []);
+  const excludedRooms = new Set(reviewState?.excludedRoomIds ?? []);
+  if (excludedRuns.size === 0 && excludedRooms.size === 0) return takeoffResult;
 
   return {
     ...takeoffResult,
-    rooms: (takeoffResult.rooms ?? []).map((room) => ({
-      ...room,
-      areas: (room.areas ?? []).map((area) => ({
-        ...area,
-        runs: (area.runs ?? []).filter((r) => !excluded.has(r.id)),
+    rooms: (takeoffResult.rooms ?? [])
+      .filter((room) => !excludedRooms.has(room.id))
+      .map((room) => ({
+        ...room,
+        areas: (room.areas ?? []).map((area) => ({
+          ...area,
+          runs: (area.runs ?? []).filter((r) => !excludedRuns.has(r.id)),
+        })),
       })),
-    })),
   };
 }
 

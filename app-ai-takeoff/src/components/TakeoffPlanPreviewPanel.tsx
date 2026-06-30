@@ -133,9 +133,19 @@ export default function TakeoffPlanPreviewPanel({
 
   return (
     <section className="plan-preview-panel lab-card" aria-label="Plan preview">
-      <header className="plan-preview-header">
-        <h2 className="plan-preview-title">Plan preview</h2>
-        <p className="plan-preview-filename">{file.originalFilename}</p>
+      <header className="plan-preview-header plan-preview-header--toolbar">
+        <div>
+          <h2 className="plan-preview-title">Plan preview</h2>
+          <p className="plan-preview-filename">{file.originalFilename}</p>
+        </div>
+        <button
+          type="button"
+          className="btn secondary btn-sm plan-preview-open-btn"
+          disabled={opening || !token}
+          onClick={() => void handleOpenPlan()}
+        >
+          {opening ? "Opening…" : "Open plan"}
+        </button>
       </header>
 
       {loading ? (

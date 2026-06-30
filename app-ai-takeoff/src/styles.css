@@ -321,6 +321,90 @@ html, body {
   font-size: 0.72rem; font-weight: 700; text-transform: none; letter-spacing: 0;
 }
 
+/* Room-first review workbench */
+.takeoff-room-workbench { display: flex; flex-direction: column; gap: 14px; }
+.takeoff-room-workbench-title { margin: 0 0 4px; font-size: 1rem; font-weight: 700; }
+.takeoff-room-workbench-desc { margin: 0; }
+.takeoff-room-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+.takeoff-room-card {
+  text-align: left;
+  border: 1px solid var(--eos-line);
+  border-radius: var(--r-lg);
+  background: var(--eos-surface);
+  padding: 12px 14px;
+  cursor: pointer;
+  box-shadow: var(--sh-card);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.takeoff-room-card:hover { border-color: var(--eos-accent-border); }
+.takeoff-room-card--selected {
+  border-color: var(--eos-accent);
+  box-shadow: 0 0 0 1px rgba(163, 19, 47, 0.12);
+}
+.takeoff-room-card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.takeoff-room-card-name { font-size: 0.95rem; font-weight: 700; color: var(--eos-ink); }
+.takeoff-room-card-metrics { margin: 0 0 4px; font-size: 0.8rem; color: var(--eos-ink-mid); }
+.takeoff-room-card-type { margin: 0; font-size: 0.72rem; color: var(--eos-ink-muted); text-transform: capitalize; }
+.takeoff-room-add-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.takeoff-room-add-input { flex: 1 1 180px; min-width: 140px; }
+.takeoff-room-input, .takeoff-room-select {
+  width: 100%;
+  border: 1px solid var(--eos-line);
+  border-radius: var(--r-sm);
+  padding: 0.45rem 0.55rem;
+  font-size: 0.84rem;
+  background: var(--eos-surface);
+  color: var(--eos-ink);
+}
+.takeoff-room-detail { display: flex; flex-direction: column; gap: 12px; }
+.takeoff-room-detail-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.takeoff-room-detail-title { margin: 0; font-size: 1.05rem; font-weight: 700; }
+.takeoff-room-detail-sub { margin: 0.25rem 0 0; font-size: 0.84rem; color: var(--eos-ink-mid); }
+.takeoff-room-detail-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.takeoff-room-detail-edit-name { display: flex; flex-wrap: wrap; gap: 8px; }
+.takeoff-room-detail-name-input { min-width: 180px; flex: 1 1 180px; }
+.takeoff-room-pieces { display: flex; flex-direction: column; gap: 8px; }
+.takeoff-room-piece {
+  border: 1px solid var(--eos-line);
+  border-radius: var(--r-sm);
+  padding: 10px 12px;
+  background: var(--eos-surface-soft);
+}
+.takeoff-room-piece--excluded { opacity: 0.65; }
+.takeoff-room-piece-main { display: flex; flex-direction: column; gap: 2px; }
+.takeoff-room-piece-label { font-weight: 650; font-size: 0.88rem; }
+.takeoff-room-piece-dim { font-size: 0.8rem; color: var(--eos-ink-mid); }
+.takeoff-room-piece-meta { display: flex; gap: 8px; margin-top: 4px; }
+.takeoff-room-page-badge {
+  font-size: 0.68rem; font-weight: 700; padding: 0.1rem 0.4rem;
+  border-radius: 999px; background: var(--eos-info-soft); color: var(--eos-info);
+}
+.takeoff-room-piece-excluded-tag { font-size: 0.68rem; font-weight: 700; color: var(--eos-warn); }
+.takeoff-room-piece-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px;
+}
+.takeoff-room-field { margin: 0; }
+.takeoff-room-field-label { display: block; font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--eos-ink-muted); margin-bottom: 4px; }
+.takeoff-room-piece-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; align-items: center; }
+.takeoff-room-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 0.82rem; }
+.takeoff-room-add-piece { margin-top: 8px; }
+.takeoff-room-add-piece-label { display: block; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; color: var(--eos-ink-muted); margin-bottom: 6px; }
+.takeoff-room-add-piece-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+.takeoff-excluded-rooms summary { cursor: pointer; font-size: 0.84rem; font-weight: 650; color: var(--eos-ink-mid); }
+.takeoff-excluded-rooms-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.takeoff-excluded-rooms-list li { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 0.84rem; }
+
+@media (max-width: 960px) {
+  .takeoff-review-layout { grid-template-columns: 1fr; }
+  .takeoff-review-preview-col { position: static; max-height: none; }
+}
+
 /* Workflow explainer (legacy — kept for reference) */
 .takeoff-workflow { display: flex; flex-direction: column; gap: 16px; }
 .takeoff-workflow-steps {
@@ -422,9 +506,31 @@ html, body {
 }
 
 /* ── Main content ─────────────────────────────────────────────────────────── */
-.main { flex: 1 1 auto; width: 100%; max-width: 1320px; margin: 0 auto; padding: clamp(16px, 2vw, 28px) clamp(16px, 2.4vw, 28px) 56px; min-width: 0; }
-.lab-main-inner { max-width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
-.lab-main-inner--review { max-width: 100%; }
+.main { flex: 1 1 auto; width: 100%; max-width: none; margin: 0 auto; padding: clamp(16px, 2vw, 28px) clamp(16px, 2.4vw, 32px) 56px; min-width: 0; }
+.page-ai-takeoff .takeoff-page-hero-inner { max-width: none; }
+.takeoff-review-layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 46%) minmax(0, 54%);
+  gap: clamp(16px, 2vw, 24px);
+  align-items: start;
+}
+.takeoff-review-preview-col {
+  min-width: 0;
+  position: sticky;
+  top: 72px;
+  align-self: start;
+  max-height: calc(100vh - 88px);
+}
+.takeoff-review-preview-col .plan-preview-panel {
+  min-height: min(78vh, 920px);
+  display: flex;
+  flex-direction: column;
+}
+.takeoff-review-preview-col .plan-preview-frame--pdf .plan-preview-object,
+.takeoff-review-preview-col .plan-preview-frame--pdf .plan-preview-iframe {
+  height: min(72vh, 860px);
+}
+.takeoff-review-main-col { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
 
 .lab-section--card {
   background: var(--eos-surface); border: 1px solid var(--eos-line);
@@ -515,17 +621,17 @@ html, body {
 .lab-section-collapsible-body {
   margin-top: 12px;
 }
-.takeoff-review-layout {
-  display: grid;
-  grid-template-columns: minmax(260px, 38%) minmax(0, 1fr);
-  gap: 20px;
-  align-items: start;
-}
-.takeoff-review-preview-col { min-width: 0; position: sticky; top: 12px; }
-.takeoff-review-main-col { min-width: 0; display: flex; flex-direction: column; gap: 24px; }
+.lab-main-inner { max-width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+.lab-main-inner--review { max-width: 100%; }
 
 .plan-preview-panel { padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; }
 .plan-preview-header { display: flex; flex-direction: column; gap: 4px; }
+.plan-preview-header--toolbar {
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
 .plan-preview-title { margin: 0; font-size: 14px; font-weight: 800; color: var(--eos-ink); }
 .plan-preview-filename { margin: 0; font-size: 12px; color: var(--eos-ink-muted); word-break: break-all; }
 .plan-preview-state { margin: 0; font-size: 13px; color: var(--eos-ink-muted); line-height: 1.5; }

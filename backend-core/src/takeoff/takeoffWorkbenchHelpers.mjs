@@ -3,10 +3,187 @@
  */
 
 import { makeTakeoffRun, makeTakeoffArea } from "./takeoffContract.mjs";
-import { computeTakeoffMeasurements } from "./takeoffMeasurementCalc.mjs";
+import { computeTakeoffMeasurements, sfFromRun } from "./takeoffMeasurementCalc.mjs";
 
 function normLabel(value) {
   return String(value ?? "").trim().toLowerCase();
+}
+
+export const ROOM_TYPE_OPTIONS = Object.freeze([
+  "Kitchen",
+  "Bathroom",
+  "Laundry",
+  "Bar",
+  "Pantry",
+  "Vanity",
+  "Office",
+  "Other",
+]);
+
+/**
+ * Apply excluded rooms + runs for totals/import (mirrors approval gate filter).
+ *
+ * @param {import("./takeoffContract.mjs").TakeoffResult} takeoffResult
+ * @param {{ excludedRunIds?: Set<string>|string[], excludedRoomIds?: Set<string>|string[] }} reviewState
+ */
+export function filterReviewStateFromDraft(takeoffResult, reviewState = {}) {
+  const excludedRuns =
+    reviewState.excludedRunIds instanceof Set
+      ? reviewState.excludedRunIds
+      : new Set(reviewState.excludedRunIds ?? []);
+  const excludedRooms =
+    reviewState.excludedRoomIds instanceof Set
+      ? reviewState.excludedRoomIds
+      : new Set(reviewState.excludedRoomIds ?? []);
+  if (!excludedRuns.size && !excludedRooms.size) return takeoffResult;
+  return {
+    ...takeoffResult,
+    rooms: (takeoffResult.rooms ?? [])
+      .filter((room) => !excludedRooms.has(room.id))
+      .map((room) => ({
+        ...room,
+        areas: (room.areas ?? []).map((area) => ({
+          ...area,
+          runs: (area.runs ?? []).filter((run) => !excludedRuns.has(run.id)),
+        })),
+      })),
+  };
+}
+
+/**
+ * @param {import("./takeoffContract.mjs").TakeoffRoom} room
+ * @param {Set<string>} excludedRunIds
+ */
+export function computeRoomSubtotals(room, excludedRunIds = new Set()) {
+  let countertopSf = 0;
+  let backsplashSf = 0;
+  let pieceCount = 0;
+  for (const area of room.areas ?? []) {
+    for (const run of area.runs ?? []) {
+      if (excludedRunIds.has(run.id)) continue;
+      pieceCount += 1;
+      const sf = sfFromRun(Number(run.lengthIn) || 0, Number(run.depthIn) || 0, run.shape);
+      if (run.pieceType === "splash" || run.isBacksplash) backsplashSf += sf;
+      else countertopSf += sf;
+    }
+  }
+  return { countertopSf, backsplashSf, pieceCount };
+}
+
+/**
+ * @param {import("./takeoffContract.mjs").TakeoffResult} draft
+ * @param {string} runId
+ * @param {number} targetRoomIdx
+ * @param {string} [areaLabel]
+ */
+export function moveRunToRoom(draft, runId, targetRoomIdx, areaLabel) {
+  let movedRun = null;
+  let source = null;
+  const roomsAfterRemove = (draft.rooms ?? []).map((room, ri) => ({
+    ...room,
+    areas: (room.areas ?? []).map((area, ai) => {
+      const idx = (area.runs ?? []).findIndex((r) => r.id === runId);
+      if (idx < 0) return area;
+      movedRun = area.runs[idx];
+      source = { roomIdx: ri, areaIdx: ai, runIdx: idx };
+      return {
+        ...area,
+        runs: area.runs.filter((r) => r.id !== runId),
+      };
+    }),
+  }));
+  if (!movedRun) return draft;
+
+  const targetRoom = roomsAfterRemove[targetRoomIdx];
+  if (!targetRoom) return draft;
+
+  const label =
+    String(areaLabel ?? "").trim() ||
+    (movedRun.pieceType === "splash" || movedRun.isBacksplash ? "Backsplash" : "Main");
+  let areaIdx = findAreaIndexByLabel(targetRoom, label);
+  let nextRooms = roomsAfterRemove;
+
+  if (areaIdx < 0 && (targetRoom.areas?.length ?? 0) > 0) {
+    areaIdx = 0;
+  } else if (areaIdx < 0) {
+    const preset =
+      movedRun.pieceType === "splash" || movedRun.isBacksplash
+        ? ADD_PIECE_PRESETS.backsplash
+        : ADD_PIECE_PRESETS.countertop;
+    const newArea = makeTakeoffArea({
+      label,
+      areaType: preset.areaType,
+      runs: [],
+    });
+    nextRooms = roomsAfterRemove.map((room, ri) =>
+      ri !== targetRoomIdx ? room : { ...room, areas: [...(room.areas ?? []), newArea] }
+    );
+    areaIdx = nextRooms[targetRoomIdx].areas.length - 1;
+  }
+
+  return {
+    ...draft,
+    rooms: nextRooms.map((room, ri) =>
+      ri !== targetRoomIdx
+        ? room
+        : {
+            ...room,
+            areas: room.areas.map((area, ai) =>
+              ai !== areaIdx ? area : { ...area, runs: [...(area.runs ?? []), movedRun] }
+            ),
+          }
+    ),
+  };
+}
+
+/**
+ * @param {import("./takeoffContract.mjs").TakeoffResult} draft
+ * @param {number} roomIdx
+ * @param {Partial<{ name: string, roomType: string }>} patch
+ */
+export function patchRoomFields(draft, roomIdx, patch) {
+  return {
+    ...draft,
+    rooms: draft.rooms.map((room, ri) => (ri !== roomIdx ? room : { ...room, ...patch })),
+  };
+}
+
+/**
+ * Whether excluded rooms/runs are omitted from computed totals.
+ *
+ * @param {import("./takeoffContract.mjs").TakeoffResult} draft
+ * @param {{ excludedRunIds?: Set<string>, excludedRoomIds?: Set<string> }} reviewState
+ */
+export function computeTotalsWithReviewState(draft, reviewState = {}) {
+  const effective = filterReviewStateFromDraft(draft, reviewState);
+  return computeTakeoffMeasurements(effective);
+}
+
+/**
+ * @param {string} roomId
+ * @param {Set<string>} excludedRoomIds
+ */
+export function isRoomIncludedInTakeoff(roomId, excludedRoomIds) {
+  return !excludedRoomIds.has(roomId);
+}
+
+/**
+ * Room verification label for UI.
+ *
+ * @param {import("./takeoffContract.mjs").TakeoffRoom} room
+ * @param {{
+ *   excludedRoomIds?: Set<string>,
+ *   roomCompleteness?: Record<string, boolean>,
+ *   hasUnresolvedBlockers?: boolean,
+ * }} ctx
+ */
+export function deriveRoomVerificationStatus(room, ctx = {}) {
+  const excluded = ctx.excludedRoomIds ?? new Set();
+  const completeness = ctx.roomCompleteness ?? {};
+  if (excluded.has(room.id)) return "excluded";
+  if (completeness[room.id]) return "verified";
+  if (ctx.hasUnresolvedBlockers) return "needs_review";
+  return "in_progress";
 }
 
 /**
@@ -226,8 +403,7 @@ export function addManualRunToDraft(draft, input) {
  * @param {Set<string>} excludedRunIds
  */
 export function computeTotalsExcludingRuns(draft, excludedRunIds) {
-  const effective = filterExcludedRunsFromDraft(draft, excludedRunIds);
-  return computeTakeoffMeasurements(effective);
+  return computeTotalsWithReviewState(draft, { excludedRunIds });
 }
 
 /**

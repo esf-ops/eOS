@@ -9,10 +9,17 @@ import {
   ADD_PIECE_PRESETS,
   addManualRunToDraft,
   buildManualRunFromInput,
+  computeRoomSubtotals,
   computeTotalsExcludingRuns,
+  computeTotalsWithReviewState,
+  deriveRoomVerificationStatus,
   filterExcludedRunsFromDraft,
+  filterReviewStateFromDraft,
+  isRoomIncludedInTakeoff,
   isRunIncludedInTakeoff,
+  moveRunToRoom,
   patchAreaLabel,
+  patchRoomFields,
   patchRoomName,
 } from "./takeoffWorkbenchHelpers.mjs";
 
@@ -116,6 +123,52 @@ function testAddManualRunCreatesAreaWhenMissing() {
   assert.equal(next.rooms[0].areas[0].runs[0].id, run.id);
 }
 
+function testExcludedRoomDoesNotCount() {
+  const run = makeTakeoffRun({ label: "Island", lengthIn: 120, depthIn: 25.5, pieceType: "counter" });
+  const room = makeTakeoffRoom({
+    id: "room-kitchen",
+    name: "Kitchen",
+    areas: [makeTakeoffArea({ label: "Island", areaType: "island", runs: [run] })],
+  });
+  const draft = { ...buildSpec73Fixture(), rooms: [room] };
+  const included = computeTotalsWithReviewState(draft, { excludedRoomIds: new Set() }).countertopExactSf;
+  const excluded = computeTotalsWithReviewState(draft, { excludedRoomIds: new Set(["room-kitchen"]) }).countertopExactSf;
+  assert.ok(included > excluded);
+  assert.equal(filterReviewStateFromDraft(draft, { excludedRoomIds: new Set(["room-kitchen"]) }).rooms.length, 0);
+}
+
+function testMoveRunToAnotherRoom() {
+  const run = makeTakeoffRun({ id: "run-move", label: "Vanity", lengthIn: 60, depthIn: 22 });
+  const draft = {
+    ...buildSpec73Fixture(),
+    rooms: [
+      makeTakeoffRoom({ id: "r1", name: "Kitchen", areas: [makeTakeoffArea({ label: "Main", runs: [run] })] }),
+      makeTakeoffRoom({ id: "r2", name: "Bath", areas: [makeTakeoffArea({ label: "Vanity", runs: [] })] }),
+    ],
+  };
+  const next = moveRunToRoom(draft, "run-move", 1);
+  assert.equal(next.rooms[0].areas[0].runs.length, 0);
+  assert.equal(next.rooms[1].areas[0].runs.length, 1);
+  assert.equal(next.rooms[1].areas[0].runs[0].id, "run-move");
+}
+
+function testPatchRoomTypePersists() {
+  const draft = buildSpec73Fixture();
+  const next = patchRoomFields(draft, 0, { roomType: "Bathroom" });
+  assert.equal(next.rooms[0].roomType, "Bathroom");
+}
+
+function testRoomVerificationStatus() {
+  const room = makeTakeoffRoom({ id: "r1", name: "Kitchen" });
+  assert.equal(deriveRoomVerificationStatus(room, { excludedRoomIds: new Set(["r1"]) }), "excluded");
+  assert.equal(deriveRoomVerificationStatus(room, { roomCompleteness: { r1: true } }), "verified");
+}
+
+function testIsRoomIncludedInTakeoff() {
+  assert.equal(isRoomIncludedInTakeoff("r1", new Set(["r1"])), false);
+  assert.equal(isRoomIncludedInTakeoff("r2", new Set(["r1"])), true);
+}
+
 const tests = [
   ["W1 patch room name persists", testPatchRoomNamePersists],
   ["W2 patch area label persists", testPatchAreaLabelPersists],
@@ -124,6 +177,11 @@ const tests = [
   ["W5 include/exclude stable", testIncludeExcludeStable],
   ["W6 manual run preset mapping", testManualRunUsesPresetNotProjectName],
   ["W7 add run creates area", testAddManualRunCreatesAreaWhenMissing],
+  ["W8 excluded room does not count", testExcludedRoomDoesNotCount],
+  ["W9 move run to another room", testMoveRunToAnotherRoom],
+  ["W10 patch room type persists", testPatchRoomTypePersists],
+  ["W11 room verification status", testRoomVerificationStatus],
+  ["W12 is room included", testIsRoomIncludedInTakeoff],
 ];
 
 let failed = 0;

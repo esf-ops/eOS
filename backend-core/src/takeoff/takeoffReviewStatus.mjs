@@ -104,6 +104,7 @@ export function loadReviewStateFromRaw(rawJson) {
 export function emptyReviewState() {
   return {
     excludedRunIds: [],
+    excludedRoomIds: [],
     flagResolutions: {},
     roomCompleteness: {},
     referenceTotalAcks: {},
@@ -122,6 +123,9 @@ export function normalizeReviewState(rs) {
   return {
     excludedRunIds: Array.isArray(r.excludedRunIds)
       ? r.excludedRunIds.map(String)
+      : [],
+    excludedRoomIds: Array.isArray(r.excludedRoomIds)
+      ? r.excludedRoomIds.map(String)
       : [],
     flagResolutions:
       r.flagResolutions && typeof r.flagResolutions === "object" && !Array.isArray(r.flagResolutions)
@@ -165,6 +169,7 @@ export function normalizeReviewState(rs) {
 /**
  * @typedef {Object} TakeoffReviewState
  * @property {string[]} excludedRunIds
+ * @property {string[]} excludedRoomIds
  * @property {Record<string, FlagResolution>} flagResolutions
  * @property {Record<string, boolean>} roomCompleteness
  * @property {Record<string, boolean>} referenceTotalAcks

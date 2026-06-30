@@ -54,7 +54,6 @@ import TakeoffFeedbackForm from "@eliteos-ui/TakeoffFeedbackForm";
 import TakeoffIssueReportModal from "@eliteos-ui/TakeoffIssueReportModal";
 import TakeoffBetaQaPanel from "./components/TakeoffBetaQaPanel";
 import TakeoffImportReadinessPanel from "./components/TakeoffImportReadinessPanel";
-import TakeoffRoomCompletenessPanel from "./components/TakeoffRoomCompletenessPanel";
 import TakeoffWorkbench from "./components/TakeoffWorkbench";
 import TakeoffPlanFileSection from "./components/TakeoffPlanFileSection";
 import type { PlanFilePreviewMeta, WorkspaceReviewMeta } from "./components/TakeoffPlanFileSection";
@@ -84,7 +83,8 @@ import {
 import { reconcileRunsWithEvidence } from "@takeoff-core/takeoffEvidenceRunReconciliation.mjs";
 import { evaluateTakeoffFabricationRules } from "@takeoff-core/takeoffFabricationRules.mjs";
 import { makeTakeoffRun, makeTakeoffRoom } from "@takeoff-core/takeoffContract.mjs";
-import { addManualRunToDraft } from "@takeoff-core/takeoffWorkbenchHelpers.mjs";
+import { addManualRunToDraft, moveRunToRoom, filterReviewStateFromDraft } from "@takeoff-core/takeoffWorkbenchHelpers.mjs";
+import TakeoffRoomReviewWorkbench from "./components/TakeoffRoomReviewWorkbench";
 import { getSupabase } from "./lib/supabase";
 import {
   labApiGet,
@@ -257,6 +257,11 @@ export default function TakeoffLabApp() {
   const [authChecked, setAuthChecked] = useState(false);
   const [userEmail, setUserEmail] = useState<string>("");
   const [userMetaName, setUserMetaName] = useState<string>("");
+  const [userProfile, setUserProfile] = useState<{ role: string; jobTitle: string; department: string }>({
+    role: "",
+    jobTitle: "",
+    department: "",
+  });
 
   // Sign-in form
   const [authEmail, setAuthEmail] = useState("");
@@ -325,7 +330,40 @@ export default function TakeoffLabApp() {
     setAuthToken(null);
     setUserEmail("");
     setUserMetaName("");
+    setUserProfile({ role: "", jobTitle: "", department: "" });
   }, []);
+
+  useEffect(() => {
+    if (!authToken) {
+      setUserProfile({ role: "", jobTitle: "", department: "" });
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const me = (await labApiGet("/api/me", authToken)) as {
+          user?: { role?: string; job_title?: string | null; department?: string | null };
+        };
+        if (cancelled) return;
+        setUserProfile({
+          role: String(me?.user?.role ?? "").trim(),
+          jobTitle: String(me?.user?.job_title ?? "").trim(),
+          department: String(me?.user?.department ?? "").trim(),
+        });
+      } catch {
+        /* non-fatal — subtitle falls back to email */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authToken]);
+
+  const userChipSubtitle = useMemo(() => {
+    const roleTitle = (userProfile.jobTitle || userProfile.department || userProfile.role || "").trim();
+    if (roleTitle) return roleTitle;
+    return userEmail;
+  }, [userProfile, userEmail]);
 
   const userDisplayName = useMemo(
     () => userMetaName || deriveDisplayNameFromEmail(userEmail) || "Signed in",
@@ -401,6 +439,8 @@ export default function TakeoffLabApp() {
   // ── Review workbench state (v6.1) ─────────────────────────────────────────
   /** Run IDs excluded by the estimator — filtered from computation but kept in editDraft */
   const [excludedRunIds, setExcludedRunIds] = useState<Set<string>>(() => new Set());
+  const [excludedRoomIds, setExcludedRoomIds] = useState<Set<string>>(() => new Set());
+  const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   /** Per-run reviewer notes keyed by run.id */
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
   /** Per-evidence-dim review state (ignored | reviewed), keyed by dim id or label */
@@ -433,6 +473,7 @@ export default function TakeoffLabApp() {
           savedAt?: string;
           reviewState?: {
             excludedRunIds?: string[];
+            excludedRoomIds?: string[];
             roomCompleteness?: Record<string, boolean>;
             flagResolutions?: Record<string, { action: "resolved" | "ignored"; note: string }>;
             referenceTotalAcks?: Record<string, boolean>;
@@ -452,6 +493,7 @@ export default function TakeoffLabApp() {
           }
           if (res.reviewState) {
             setExcludedRunIds(new Set(res.reviewState.excludedRunIds ?? []));
+            setExcludedRoomIds(new Set(res.reviewState.excludedRoomIds ?? []));
             setRoomCompleteness(res.reviewState.roomCompleteness ?? {});
             setFlagResolutions(res.reviewState.flagResolutions ?? {});
             setReferenceTotalAcks(res.reviewState.referenceTotalAcks ?? {});
@@ -518,27 +560,17 @@ export default function TakeoffLabApp() {
    * so the estimator can see and re-include excluded runs.
    */
   const effectiveDraft = useMemo((): TakeoffResult => {
-    if (excludedRunIds.size === 0) return editDraft;
-    return {
-      ...editDraft,
-      rooms: editDraft.rooms.map((room) => ({
-        ...room,
-        areas: room.areas.map((area: TakeoffArea) => ({
-          ...area,
-          runs: area.runs.filter((run: TakeoffRun) => !excludedRunIds.has(run.id)),
-        })),
-      })),
-    };
-  }, [editDraft, excludedRunIds]);
+    return filterReviewStateFromDraft(editDraft, { excludedRunIds, excludedRoomIds });
+  }, [editDraft, excludedRunIds, excludedRoomIds]);
 
   /** True when saved payload (after exclusions) differs from last loaded source. */
   const hasSaveableChanges = useMemo(() => {
     try {
       return JSON.stringify(effectiveDraft.rooms) !== JSON.stringify(sourceResult.rooms);
     } catch {
-      return hasEdits || excludedRunIds.size > 0;
+      return hasEdits || excludedRunIds.size > 0 || excludedRoomIds.size > 0;
     }
-  }, [effectiveDraft.rooms, sourceResult.rooms, hasEdits, excludedRunIds.size]);
+  }, [effectiveDraft.rooms, sourceResult.rooms, hasEdits, excludedRunIds.size, excludedRoomIds.size]);
 
   const activeState = useMemo((): ActiveComputedState => {
     try { return computeAll(effectiveDraft); }
@@ -575,13 +607,14 @@ export default function TakeoffLabApp() {
 
   const buildReviewState = useCallback(() => ({
     excludedRunIds: [...excludedRunIds],
+    excludedRoomIds: [...excludedRoomIds],
     flagResolutions,
     roomCompleteness,
     referenceTotalAcks,
     evidenceAcks,
     reviewNotes,
     evidenceReviewState,
-  }), [excludedRunIds, flagResolutions, roomCompleteness, referenceTotalAcks, evidenceAcks, reviewNotes, evidenceReviewState]);
+  }), [excludedRunIds, excludedRoomIds, flagResolutions, roomCompleteness, referenceTotalAcks, evidenceAcks, reviewNotes, evidenceReviewState]);
 
   const approvalGate = useMemo(() => {
     if (!hasActiveSource) return null;
@@ -677,6 +710,8 @@ export default function TakeoffLabApp() {
     setResetKey((k) => k + 1);
     // Reset review workbench state for each new source load.
     setExcludedRunIds(new Set());
+    setExcludedRoomIds(new Set());
+    setSelectedRoomId(null);
     setReviewNotes({});
     setEvidenceReviewState({});
     setRoomCompleteness({});
@@ -699,10 +734,28 @@ export default function TakeoffLabApp() {
     setRoomCompleteness((prev) => ({ ...prev, [roomId]: complete }));
   }, []);
 
-  const handleAddRoom = useCallback((name: string) => {
+  const handleSetRoomExcluded = useCallback((roomId: string, excluded: boolean) => {
+    setExcludedRoomIds((prev) => {
+      const next = new Set(prev);
+      if (excluded) {
+        next.add(roomId);
+        setRoomCompleteness((rc) => ({ ...rc, [roomId]: false }));
+        setSelectedRoomId((cur) => (cur === roomId ? null : cur));
+      } else {
+        next.delete(roomId);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleMoveRun = useCallback((runId: string, targetRoomIdx: number) => {
+    setEditDraft((prev) => moveRunToRoom(prev, runId, targetRoomIdx));
+  }, []);
+
+  const handleAddRoom = useCallback((name: string, roomType = "Kitchen") => {
     const room = makeTakeoffRoom({
       name,
-      roomType: "Kitchen",
+      roomType,
       areas: [{
         id: `area-${Date.now()}`,
         label: "Main",
@@ -713,6 +766,7 @@ export default function TakeoffLabApp() {
     });
     setEditDraft((prev) => ({ ...prev, rooms: [...(prev.rooms ?? []), room] }));
     setRoomCompleteness((prev) => ({ ...prev, [room.id]: false }));
+    setSelectedRoomId(room.id);
   }, []);
 
   const handleLoadSample = useCallback(() => {
@@ -800,6 +854,8 @@ export default function TakeoffLabApp() {
 
     // ── Review workbench state ────────────────────────────────────────────
     setExcludedRunIds(new Set());
+    setExcludedRoomIds(new Set());
+    setSelectedRoomId(null);
     setReviewNotes({});
     setEvidenceReviewState({});
     setRoomCompleteness({});
@@ -866,6 +922,8 @@ export default function TakeoffLabApp() {
     setIsEditing(false);
     setResetKey((k) => k + 1);
     setExcludedRunIds(new Set());
+    setExcludedRoomIds(new Set());
+    setSelectedRoomId(null);
     setReviewNotes({});
     setEvidenceReviewState({});
     setWorkspaceBoot("loading");
@@ -1418,6 +1476,21 @@ export default function TakeoffLabApp() {
     [unresolvedCount, handleSaveDraft, handleApproveTakeoff]
   );
 
+  const roomBlockerIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const b of approvalGate?.blockers ?? []) {
+      const path = String(b.path ?? "");
+      const room = (editDraft.rooms ?? []).find(
+        (r) => path.includes(r.id) || path.includes(`rooms.${r.id}`)
+      );
+      if (room) ids.add(room.id);
+      for (const r of editDraft.rooms ?? []) {
+        if (b.message?.includes(r.name)) ids.add(r.id);
+      }
+    }
+    return ids;
+  }, [approvalGate, editDraft.rooms]);
+
   const workflowSecondaryActions = useMemo(() => {
     const actions: Array<{ label: string; onClick: () => void }> = [];
     if (takeoffJobId && authToken) {
@@ -1519,64 +1592,69 @@ export default function TakeoffLabApp() {
     <div className="takeoff-task-panel">
       {workflowStatusCard}
 
-      {(currentWorkflowStep === "review" || currentWorkflowStep === "approve") && (
-        <>
-          <TakeoffMeasurementSummarySimple computed={computed} />
-          {approvalGate ? (
-            <TakeoffItemsToReviewPanel
-              blockers={approvalGate.blockers}
-              suggestedAddOns={suggestedAddOnsForReview}
-            />
-          ) : null}
-          <section className="lab-section lab-section--review-primary">
-            <TakeoffRoomCompletenessPanel
-              editDraft={editDraft}
-              roomCompleteness={roomCompleteness}
-              onSetRoomComplete={handleSetRoomComplete}
-              onPatchRoom={handlePatchRoom}
-              onAddRoom={handleAddRoom}
-            />
-          </section>
-          <section className="lab-section lab-section--review-primary">
-            <div className="lab-section-header">
-              <div>
-                <h2 className="lab-section-title" style={{ margin: 0 }}>Measurement review</h2>
-                <p className="lab-section-desc" style={{ marginTop: 4, marginBottom: 0 }}>
-                  Edit dimensions, exclude incorrect runs, or mark flagged items reviewed.
-                </p>
-              </div>
-              {hasEdits && (
-                <button className="btn-edit-action btn-edit-action--reset" onClick={handleResetEdits} type="button">
-                  Reset edits
-                </button>
-              )}
-            </div>
-            <TakeoffValidationFixPanel
-              editDraft={editDraft}
-              validation={validation}
-              onApplyDraft={handleApplyValidationFix}
-            />
-            <TakeoffReviewWorkbench
-              editDraft={editDraft}
-              dimensionEvidence={dimensionEvidence}
-              excludedRunIds={excludedRunIds}
-              reviewNotes={reviewNotes}
-              evidenceReviewState={evidenceReviewState}
-              onPatchRun={handlePatchRun}
-              onPatchArea={handlePatchArea}
-              onPatchRoom={handlePatchRoom}
-              onSetRunIncluded={handleSetRunIncluded}
-              onAddManualRun={handleAddManualRun}
-              onSetReviewNote={handleSetReviewNote}
-              onMarkEvidenceReviewed={handleMarkEvidenceReviewed}
-            />
-          </section>
-        </>
+      {(currentWorkflowStep === "review" || currentWorkflowStep === "import") && (
+        <TakeoffMeasurementSummarySimple computed={computed} />
       )}
 
-      {currentWorkflowStep === "import" && (
+      {currentWorkflowStep === "review" && approvalGate ? (
+        <TakeoffItemsToReviewPanel
+          blockers={approvalGate.blockers}
+          suggestedAddOns={suggestedAddOnsForReview}
+        />
+      ) : null}
+
+      {currentWorkflowStep === "review" ? (
         <>
-          <TakeoffMeasurementSummarySimple computed={computed} />
+          <TakeoffRoomReviewWorkbench
+            editDraft={editDraft}
+            excludedRunIds={excludedRunIds}
+            excludedRoomIds={excludedRoomIds}
+            roomCompleteness={roomCompleteness}
+            selectedRoomId={selectedRoomId}
+            roomBlockerIds={roomBlockerIds}
+            onSelectRoom={setSelectedRoomId}
+            onSetRoomComplete={handleSetRoomComplete}
+            onSetRoomExcluded={handleSetRoomExcluded}
+            onPatchRoom={handlePatchRoom}
+            onAddRoom={handleAddRoom}
+            onPatchRun={handlePatchRun}
+            onPatchArea={handlePatchArea}
+            onSetRunIncluded={handleSetRunIncluded}
+            onMoveRun={handleMoveRun}
+            onAddManualRun={handleAddManualRun}
+          />
+          <details className="lab-section lab-section-collapsible takeoff-all-pieces">
+            <summary className="lab-section-summary">
+              <span className="lab-section-title" style={{ margin: 0 }}>All pieces</span>
+              <span className="lab-section-summary-note">Full measurement table</span>
+            </summary>
+            <div style={{ marginTop: 12 }}>
+              <TakeoffValidationFixPanel
+                editDraft={editDraft}
+                validation={validation}
+                onApplyDraft={handleApplyValidationFix}
+              />
+              <TakeoffReviewWorkbench
+                editDraft={editDraft}
+                dimensionEvidence={dimensionEvidence}
+                excludedRunIds={excludedRunIds}
+                reviewNotes={reviewNotes}
+                evidenceReviewState={evidenceReviewState}
+                onPatchRun={handlePatchRun}
+                onPatchArea={handlePatchArea}
+                onPatchRoom={handlePatchRoom}
+                onSetRunIncluded={handleSetRunIncluded}
+                onAddManualRun={handleAddManualRun}
+                onSetReviewNote={handleSetReviewNote}
+                onMarkEvidenceReviewed={handleMarkEvidenceReviewed}
+              />
+            </div>
+          </details>
+        </>
+      ) : null}
+
+      {currentWorkflowStep === "import" ? (
+        <>
           <TakeoffImportPreview
             ref={importPreviewRef}
             importPlan={importPlan}
@@ -1599,7 +1677,7 @@ export default function TakeoffLabApp() {
             />
           ) : null}
         </>
-      )}
+      ) : null}
 
       <details className="takeoff-advanced lab-section lab-section-collapsible">
         <summary className="lab-section-summary">
@@ -1887,6 +1965,7 @@ export default function TakeoffLabApp() {
           homeHref={homeBase}
           userName={userDisplayName}
           userEmail={userEmail}
+          userSubtitle={userChipSubtitle}
           initials={userDisplayInitials}
           menuItems={takeoffMenuItems}
           statusSlot={takeoffStatusSlot}

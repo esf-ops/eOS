@@ -61,7 +61,6 @@ export function deriveCurrentWorkflowStep(input: {
 
   if (workflowStatus === "imported") return "import";
   if (workflowStatus === "approved_for_import" && !approvalStale) return "import";
-  if (workflowStatus === "review_complete" || approvalStale) return "approve";
   if (hasActiveSource) return "review";
   if (hasPlanFile) return "generate";
   return "upload";
@@ -83,10 +82,9 @@ export function isWorkflowStepComplete(
       return input.hasActiveSource;
     case "review":
       return (
-        input.workflowStatus === "review_complete" ||
         input.workflowStatus === "approved_for_import" ||
         input.workflowStatus === "imported" ||
-        input.approvalStale
+        input.workflowStatus === "review_complete"
       );
     case "approve":
       return (
@@ -107,7 +105,7 @@ export function stepTaskTitle(step: WorkflowStep): string {
     case "generate":
       return "Generate AI takeoff";
     case "review":
-      return "Review dimensions";
+      return "Review rooms & dimensions";
     case "approve":
       return "Approve takeoff";
     case "import":
@@ -185,25 +183,36 @@ export function deriveWorkflowGuidance(input: {
       const statusHint =
         reviewItems > 0
           ? `${reviewItems} item${reviewItems !== 1 ? "s" : ""} need review before approval.`
-          : hasBlockingValidation || hasQaBlocker
-            ? "Resolve validation issues before saving."
-            : "Measurements look ready — save your reviewed dimensions.";
+          : canApprove && !hasBlockingValidation && !hasQaBlocker
+            ? "Ready to approve."
+            : hasBlockingValidation || hasQaBlocker
+              ? "Fix items before approval."
+              : "Confirm each room's scope and dimensions.";
       const nextAction =
-        reviewItems > 0
-          ? "Fix or acknowledge the highlighted items, then save reviewed dimensions."
-          : hasBlockingValidation || hasQaBlocker
-            ? "Resolve blockers in the review table, then save reviewed dimensions."
-            : "Confirm measurements beside the plan, then save reviewed dimensions.";
+        canApprove && reviewItems === 0 && !hasBlockingValidation && !hasQaBlocker
+          ? "All rooms verified — approve this takeoff to unlock import."
+          : reviewItems > 0
+            ? "Fix or acknowledge highlighted items, then save reviewed dimensions."
+            : "AI found these rooms. Confirm the scope, verify dimensions, and add anything missing before approval.";
+      const readyToApprove =
+        canApprove && reviewItems === 0 && !hasBlockingValidation && !hasQaBlocker && !showApprovedInUi;
       return {
-        statusLabel,
+        statusLabel: readyToApprove ? UNIFIED_STATUS_LABELS.review_complete : statusLabel,
         statusHint,
         nextAction,
-        primaryCta: {
-          label: saveStatus === "saving" ? "Saving…" : "Save reviewed dimensions",
-          action: "save",
-          disabled: saveStatus === "saving" || approveStatus === "approving",
-          loading: saveStatus === "saving",
-        },
+        primaryCta: readyToApprove
+          ? {
+              label: approveStatus === "approving" ? "Approving…" : "Approve takeoff",
+              action: "approve",
+              disabled: approveStatus === "approving" || saveStatus === "saving",
+              loading: approveStatus === "approving",
+            }
+          : {
+              label: saveStatus === "saving" ? "Saving…" : "Save reviewed dimensions",
+              action: "save",
+              disabled: saveStatus === "saving" || approveStatus === "approving",
+              loading: saveStatus === "saving",
+            },
       };
     }
 

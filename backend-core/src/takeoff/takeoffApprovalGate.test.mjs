@@ -109,6 +109,18 @@ function evaluate(result, reviewState, opts = {}) {
   console.log("ok: T4 excluded runs filtered");
 }
 
+// T4b — excluded rooms removed from payload filter
+{
+  const result = baseResult();
+  result.rooms.push(makeRoom("r2", "Wrong Room", [
+    makeTakeoffRun({ id: "runX", label: "Ghost", lengthIn: 48, depthIn: 25.5, pieceType: "counter" }),
+  ]));
+  const filtered = applyReviewFiltersToTakeoffResult(result, { excludedRoomIds: ["r2"] });
+  assert.equal(filtered.rooms.length, 1, "T4b excluded room filtered");
+  assert.equal(filtered.rooms[0].id, "r1", "T4b active room kept");
+  console.log("ok: T4b excluded rooms filtered");
+}
+
 // T5 — backsplash totals separated
 {
   const result = baseResult();
