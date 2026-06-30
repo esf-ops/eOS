@@ -212,13 +212,9 @@ export function deriveReviewActionPath(input) {
     }
 
     if (verify.ok) {
-      const globalNote =
-        globalBlockers.length > 0
-          ? ` ${globalBlockers.length} global review item${globalBlockers.length !== 1 ? "s" : ""} remain before approval.`
-          : "";
       return {
         phase: "verify_room",
-        statusMessage: `${selectedRoom.roomName} is ready to verify.${globalNote}`.trim(),
+        statusMessage: `${selectedRoom.roomName} is ready to verify.`,
         roomProgress,
         selectedRoom: {
           roomId: selectedRoom.roomId,
@@ -229,11 +225,12 @@ export function deriveReviewActionPath(input) {
         },
         nextRoomNeedingReview,
         primaryAction: {
-          label: "Mark room verified",
+          label: `Mark ${selectedRoom.roomName} verified`,
           action: "verify_room",
           disabled: false,
           roomId: selectedRoom.roomId,
         },
+        // Only show "next room" secondary when there is a different room to go to
         secondaryAction: nextRoomNeedingReview && nextRoomNeedingReview.roomId !== selectedRoom.roomId
           ? {
               label: `Next: ${nextRoomNeedingReview.roomName}`,
@@ -247,19 +244,27 @@ export function deriveReviewActionPath(input) {
 
   // ── Continue room-by-room ─────────────────────────────────────────────────
   if (nextRoomNeedingReview) {
+    // Avoid "Go to Kitchen" when Kitchen is already the selected room.
+    const nextIsDifferent = nextRoomNeedingReview.roomId !== selectedRoom?.roomId;
     return {
       phase: "next_room",
-      statusMessage: `Continue reviewing rooms — ${roomProgress.label}.`,
+      statusMessage: `Review rooms — ${roomProgress.label}.`,
       roomProgress,
       selectedRoom: selectedRoom
         ? { roomId: selectedRoom.roomId, roomName: selectedRoom.roomName, verified: selectedVerified }
         : null,
       nextRoomNeedingReview,
-      primaryAction: {
-        label: `Go to ${nextRoomNeedingReview.roomName}`,
-        action: "next_room",
-        roomId: nextRoomNeedingReview.roomId,
-      },
+      primaryAction: nextIsDifferent
+        ? {
+            label: `Go to ${nextRoomNeedingReview.roomName}`,
+            action: "next_room",
+            roomId: nextRoomNeedingReview.roomId,
+          }
+        : {
+            label: `Review ${nextRoomNeedingReview.roomName}`,
+            action: "next_room",
+            roomId: nextRoomNeedingReview.roomId,
+          },
       secondaryAction: null,
     };
   }

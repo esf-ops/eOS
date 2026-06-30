@@ -882,31 +882,27 @@ export default function TakeoffRoomReviewWorkbench({
                 className="btn primary btn-sm"
                 disabled={selected.status === "verified" || !selected.canVerify}
                 title={
-                  !selected.canVerify
-                    ? selected.verifyBlockers.map((b) => b.message).join(" ")
-                    : undefined
+                  selected.status === "verified"
+                    ? "Already verified"
+                    : !selected.canVerify && selected.verifyBlockers.length > 0
+                      ? selected.verifyBlockers.map((b) => b.message).join(" ")
+                      : undefined
                 }
                 onClick={() => onSetRoomComplete(selected.roomId, true)}
               >
-                Mark room verified
+                {selected.status === "verified"
+                  ? `${selected.roomName} verified`
+                  : `Mark ${selected.roomName} verified`}
               </button>
             </div>
           </div>
 
-          {(!selected.canVerify && selected.verifyBlockers.length > 0) ||
-          selected.globalBlockers.length > 0 ? (
+          {!selected.canVerify && selected.verifyBlockers.length > 0 ? (
             <div className="takeoff-room-verify-blockers" id="takeoff-room-verify-blockers" role="note">
-              <span className="takeoff-room-verify-blockers-label">
-                {selected.canVerify ? "Before approval:" : "Before verifying:"}
-              </span>
+              <span className="takeoff-room-verify-blockers-label">Before verifying:</span>
               <ul>
                 {selected.verifyBlockers.map((b, i) => (
                   <li key={`room-${b.code}-${i}`} data-blocker-code={b.code}>
-                    {b.message}
-                  </li>
-                ))}
-                {selected.globalBlockers.map((b, i) => (
-                  <li key={`global-${b.code}-${i}`} data-blocker-code={b.code} className="takeoff-room-verify-blocker-global">
                     {b.message}
                   </li>
                 ))}

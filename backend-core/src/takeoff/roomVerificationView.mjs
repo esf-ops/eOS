@@ -8,6 +8,19 @@
 import { deriveRoomVerificationBlockers } from "./reviewedTakeoffMath.mjs";
 
 /**
+ * Approval-gate codes that are purely workflow-level and must never be shown as
+ * room verification blockers. Showing them there creates circular states like
+ * "Room is not marked complete — therefore you cannot mark it complete."
+ */
+const WORKFLOW_ONLY_CODES = new Set([
+  "ROOM_INCOMPLETE",      // circular: this IS the unverified state
+  "UNSAVED_EDITS",        // save action; not a room dimension issue
+  "NO_SAVED_RESULT",      // save action; not a room dimension issue
+  "NO_ROOMS",             // global structural issue
+  "EVIDENCE_RECONCILIATION", // global evidence review; not room verification
+]);
+
+/**
  * @param {{ code?: string, message?: string, path?: string|null }} blocker
  * @param {{ scope?: "room"|"global" }} [opts]
  */
@@ -67,12 +80,16 @@ function dedupeBlocker(existing, candidate) {
  * }} [opts]
  */
 export function buildRoomVerificationView(reviewedRoom, opts = {}) {
+  // Room-specific blockers: only scope issues the estimator can resolve in this room.
   const roomBlockers = deriveRoomVerificationBlockers(reviewedRoom).map((b) => ({
     ...b,
     scope: "room",
   }));
 
-  const roomApprovalRaw = filterRoomApprovalBlockers(opts.approvalBlockers ?? [], reviewedRoom);
+  // Room-scoped approval-gate blockers (e.g. BACKSPLASH_NEEDS_REVIEW, MISSING_RUN_DIMENSIONS)
+  // that are not already in roomBlockers and are not workflow-only codes.
+  const roomApprovalRaw = filterRoomApprovalBlockers(opts.approvalBlockers ?? [], reviewedRoom)
+    .filter((b) => !WORKFLOW_ONLY_CODES.has(String(b.code ?? "")));
   /** @type {Array<object>} */
   const roomApprovalBlockers = [];
   for (const b of roomApprovalRaw) {
@@ -88,9 +105,15 @@ export function buildRoomVerificationView(reviewedRoom, opts = {}) {
     }
   }
 
+  // Global/workflow blockers: shown separately (sticky footer, approval panel).
+  // These must NOT appear in "Before verifying" — they belong to the approve/save step.
   /** @type {Array<object>} */
   const globalBlockers = [];
-  for (const b of filterGlobalApprovalBlockersForRoom(opts.approvalBlockers ?? [], reviewedRoom)) {
+  for (const b of (opts.approvalBlockers ?? [])) {
+    // Skip room-matched non-workflow blockers (already handled above)
+    const isRoomScoped = approvalBlockerAppliesToRoom(b, reviewedRoom) &&
+      !WORKFLOW_ONLY_CODES.has(String(b.code ?? ""));
+    if (isRoomScoped) continue;
     globalBlockers.push({
       code: String(b.code ?? "APPROVAL_BLOCKER"),
       message: formatBlockerDisplayMessage(b, { scope: "global" }),
@@ -108,8 +131,13 @@ export function buildRoomVerificationView(reviewedRoom, opts = {}) {
     });
   }
 
+  // canVerify is based ONLY on room-specific blockers.
+  // Approval-gate and workflow concerns must not block room verification —
+  // those require the approve/save action, not "Mark room verified".
+  const canVerify = roomBlockers.length === 0;
+  const roomBlockerCount = roomBlockers.length;
+
   const displayBlockers = [...roomBlockers, ...roomApprovalBlockers, ...globalBlockers];
-  const roomBlockerCount = roomBlockers.length + roomApprovalBlockers.length;
 
   return {
     roomBlockers,
@@ -118,8 +146,8 @@ export function buildRoomVerificationView(reviewedRoom, opts = {}) {
     displayBlockers,
     roomBlockerCount,
     globalBlockerCount: globalBlockers.length,
-    canVerify: roomBlockerCount === 0,
-    firstRoomBlocker: roomBlockers[0] ?? roomApprovalBlockers[0] ?? null,
+    canVerify,
+    firstRoomBlocker: roomBlockers[0] ?? null,
     firstActionableBlocker: roomBlockers[0] ?? roomApprovalBlockers[0] ?? globalBlockers[0] ?? null,
   };
 }

@@ -1,3 +1,6 @@
+/**
+ * Run: node app-ai-takeoff/src/lib/reviewActionPath.test.mjs
+ */
 import assert from "node:assert/strict";
 import { deriveReviewActionPath } from "./reviewActionPath.mjs";
 
@@ -6,8 +9,8 @@ const rooms = [
   { roomId: "r2", roomName: "Primary Bath", roomIdx: 1 },
 ];
 
-{
-  const path = deriveReviewActionPath({
+function makeBase(overrides = {}) {
+  return {
     workflowStatus: "needs_review",
     showApprovedInUi: false,
     approvalStale: false,
@@ -22,197 +25,172 @@ const rooms = [
     roomCompleteness: { r1: false, r2: false },
     excludedRoomIds: new Set(),
     selectedRoomId: "r1",
+    selectedRoomVerify: { ok: true, roomBlockers: [], globalBlockers: [] },
+    ...overrides,
+  };
+}
+
+// ── State B: room has blockers ────────────────────────────────────────────────
+{
+  const path = deriveReviewActionPath(makeBase({
     selectedRoomVerify: {
       ok: false,
-      roomBlockers: [{ code: "MISSING_RUN_DIMENSIONS", message: "Fix depth" }],
+      roomBlockers: [{ code: "MISSING_RUN_DIMENSIONS", message: "Fix depth", areaIdx: 0 }],
       globalBlockers: [],
     },
-  });
+  }));
   assert.equal(path.phase, "room_blockers");
   assert.match(path.statusMessage, /Kitchen has 1 item/);
   assert.equal(path.primaryAction.action, "focus_blockers");
   assert.equal(path.primaryAction.label, "Review missing dimensions");
   assert.ok(path.primaryAction.focusTarget?.elementId);
-  console.log("ok: room blockers message and specific CTA");
+  console.log("ok: State B — room blockers, specific CTA");
 }
 
+// ── State C: room ready to verify (no blockers, not yet verified) ─────────────
 {
-  const path = deriveReviewActionPath({
-    workflowStatus: "needs_review",
-    showApprovedInUi: false,
-    approvalStale: false,
-    canApprove: false,
-    canImport: false,
-    savedAt: null,
-    hasSaveableChanges: false,
-    saveStatus: "idle",
-    approveStatus: "idle",
-    importStatus: "idle",
-    activeRooms: rooms,
-    roomCompleteness: { r1: false, r2: false },
-    excludedRoomIds: new Set(),
-    selectedRoomId: "r1",
+  const path = deriveReviewActionPath(makeBase());
+  assert.equal(path.phase, "verify_room");
+  assert.match(path.statusMessage, /Kitchen is ready to verify/);
+  assert.equal(path.primaryAction.action, "verify_room");
+  assert.equal(path.primaryAction.label, "Mark Kitchen verified");
+  assert.equal(path.primaryAction.roomId, "r1");
+  console.log("ok: State C — ready to verify, room-specific CTA");
+}
+
+// ── State C: ready to verify even when ROOM_INCOMPLETE in globalBlockers ──────
+{
+  const path = deriveReviewActionPath(makeBase({
+    selectedRoomVerify: {
+      ok: true,   // canVerify is room-blockers-only — ROOM_INCOMPLETE excluded
+      roomBlockers: [],
+      globalBlockers: [
+        { code: "ROOM_INCOMPLETE", message: "Room \"Kitchen\" is not marked complete.", scope: "global" },
+      ],
+    },
+  }));
+  assert.equal(path.phase, "verify_room");
+  assert.equal(path.primaryAction.label, "Mark Kitchen verified");
+  assert.notEqual(path.primaryAction.label, "Review room issue");
+  console.log("ok: ROOM_INCOMPLETE in globalBlockers does not block verify_room phase");
+}
+
+// ── State C: ready to verify even when UNSAVED_EDITS is present ───────────────
+{
+  const path = deriveReviewActionPath(makeBase({
     selectedRoomVerify: {
       ok: true,
       roomBlockers: [],
-      globalBlockers: [{ code: "EVIDENCE_RECONCILIATION", message: "Global review item: 1 evidence issue." }],
+      globalBlockers: [
+        { code: "UNSAVED_EDITS", message: "Global review item: Save your measurement edits." },
+      ],
     },
-  });
+  }));
   assert.equal(path.phase, "verify_room");
-  assert.match(path.statusMessage, /ready to verify/i);
-  assert.equal(path.primaryAction.label, "Mark room verified");
-  assert.notEqual(path.primaryAction.label, "Review room issue");
+  assert.equal(path.primaryAction.label, "Mark Kitchen verified");
   assert.equal(path.selectedRoom?.blockerCount, 0);
   assert.equal(path.selectedRoom?.globalBlockerCount, 1);
-  console.log("ok: verify room ready despite global items");
+  console.log("ok: UNSAVED_EDITS does not block verify_room phase");
 }
 
+// ── State D→E: all rooms verified, unsaved ────────────────────────────────────
 {
-  const path = deriveReviewActionPath({
-    workflowStatus: "needs_review",
-    showApprovedInUi: false,
-    approvalStale: false,
-    canApprove: false,
-    canImport: false,
-    savedAt: null,
-    hasSaveableChanges: false,
-    saveStatus: "idle",
-    approveStatus: "idle",
-    importStatus: "idle",
-    activeRooms: rooms,
-    roomCompleteness: { r1: false, r2: false },
-    excludedRoomIds: new Set(),
-    selectedRoomId: "r1",
-    selectedRoomVerify: {
-      ok: true,
-      roomBlockers: [],
-      globalBlockers: [],
-    },
-  });
-  assert.equal(path.phase, "verify_room");
-  assert.match(path.statusMessage, /ready to verify/i);
-  assert.equal(path.primaryAction.label, "Mark room verified");
-  console.log("ok: verify room ready");
-}
-
-{
-  const path = deriveReviewActionPath({
-    workflowStatus: "needs_review",
-    showApprovedInUi: false,
-    approvalStale: false,
-    canApprove: true,
-    canImport: false,
-    savedAt: "2026-01-01T00:00:00.000Z",
-    hasSaveableChanges: false,
-    saveStatus: "idle",
-    approveStatus: "idle",
-    importStatus: "idle",
-    activeRooms: rooms,
-    roomCompleteness: { r1: true, r2: true },
-    excludedRoomIds: new Set(),
-    selectedRoomId: "r2",
-    selectedRoomVerify: { ok: true, roomBlockers: [], globalBlockers: [] },
-  });
-  assert.equal(path.phase, "approve");
-  assert.equal(path.primaryAction.action, "approve");
-  console.log("ok: approve when saved and verified");
-}
-
-{
-  const path = deriveReviewActionPath({
-    workflowStatus: "needs_review",
-    showApprovedInUi: false,
-    approvalStale: false,
-    canApprove: false,
-    canImport: false,
-    savedAt: null,
+  const path = deriveReviewActionPath(makeBase({
     hasSaveableChanges: true,
-    saveStatus: "idle",
-    approveStatus: "idle",
-    importStatus: "idle",
-    activeRooms: rooms,
     roomCompleteness: { r1: true, r2: true },
-    excludedRoomIds: new Set(),
-    selectedRoomId: "r1",
     selectedRoomVerify: { ok: true, roomBlockers: [], globalBlockers: [] },
-  });
+  }));
   assert.equal(path.phase, "save");
   assert.equal(path.primaryAction.action, "save");
-  console.log("ok: save when all verified unsaved");
+  assert.equal(path.primaryAction.label, "Save reviewed dimensions");
+  console.log("ok: State E — all verified unsaved → save");
 }
 
+// ── State F→G: saved and clear → approve ─────────────────────────────────────
 {
-  const path = deriveReviewActionPath({
+  const path = deriveReviewActionPath(makeBase({
+    canApprove: true,
+    savedAt: "2026-01-01T00:00:00.000Z",
+    roomCompleteness: { r1: true, r2: true },
+    selectedRoomVerify: { ok: true, roomBlockers: [], globalBlockers: [] },
+  }));
+  assert.equal(path.phase, "approve");
+  assert.equal(path.primaryAction.action, "approve");
+  assert.equal(path.primaryAction.label, "Approve takeoff");
+  console.log("ok: State G — saved and clear → approve");
+}
+
+// ── State H→I: approved, can import ──────────────────────────────────────────
+{
+  const path = deriveReviewActionPath(makeBase({
     workflowStatus: "approved_for_import",
     showApprovedInUi: true,
-    approvalStale: false,
     canApprove: false,
     canImport: true,
     savedAt: "2026-01-01T00:00:00.000Z",
-    hasSaveableChanges: false,
-    saveStatus: "idle",
     approveStatus: "approved",
-    importStatus: "idle",
-    activeRooms: rooms,
     roomCompleteness: { r1: true, r2: true },
-    excludedRoomIds: new Set(),
-    selectedRoomId: "r1",
     selectedRoomVerify: { ok: true, roomBlockers: [], globalBlockers: [] },
-  });
+  }));
   assert.equal(path.phase, "import");
   assert.equal(path.primaryAction.action, "import");
-  console.log("ok: import when approved");
+  assert.equal(path.primaryAction.label, "Import to Internal Estimate");
+  console.log("ok: State I — approved → import");
 }
 
+// ── Room progress tracking ────────────────────────────────────────────────────
 {
-  const path = deriveReviewActionPath({
-    workflowStatus: "needs_review",
-    showApprovedInUi: false,
-    approvalStale: false,
-    canApprove: false,
-    canImport: false,
-    savedAt: null,
-    hasSaveableChanges: false,
-    saveStatus: "idle",
-    approveStatus: "idle",
-    importStatus: "idle",
-    activeRooms: rooms,
+  const path = deriveReviewActionPath(makeBase({
     roomCompleteness: { r1: true, r2: false },
-    excludedRoomIds: new Set(),
     selectedRoomId: "r1",
     selectedRoomVerify: { ok: true, roomBlockers: [], globalBlockers: [] },
-  });
+  }));
   assert.equal(path.roomProgress.verified, 1);
   assert.equal(path.roomProgress.total, 2);
   assert.equal(path.nextRoomNeedingReview?.roomId, "r2");
-  console.log("ok: room progress and next room");
+  console.log("ok: room progress counter and nextRoomNeedingReview");
 }
 
+// ── "Go to Kitchen" prevention when Kitchen already selected ──────────────────
 {
-  const path = deriveReviewActionPath({
-    workflowStatus: "needs_review",
-    showApprovedInUi: false,
-    approvalStale: false,
-    canApprove: false,
-    canImport: false,
-    savedAt: null,
-    hasSaveableChanges: false,
-    saveStatus: "idle",
-    approveStatus: "idle",
-    importStatus: "idle",
-    activeRooms: rooms,
-    roomCompleteness: { r1: false, r2: false },
-    excludedRoomIds: new Set(),
-    selectedRoomId: "r1",
+  // next_room phase only fires if verify.ok = false; after the fix this should
+  // never happen for a room with no blockers. But if it did, ensure label differs.
+  const path = deriveReviewActionPath(makeBase({
+    selectedRoomVerify: { ok: true, roomBlockers: [], globalBlockers: [] },
+  }));
+  // With ok=true, we get verify_room — never next_room showing same room
+  assert.notEqual(path.phase, "next_room");
+  assert.notEqual(path.primaryAction.label, "Go to Kitchen");
+  console.log("ok: no 'Go to Kitchen' when Kitchen is ready to verify");
+}
+
+// ── Backsplash blocker CTA is specific ───────────────────────────────────────
+{
+  const path = deriveReviewActionPath(makeBase({
     selectedRoomVerify: {
-      ok: true,
-      roomBlockers: [],
+      ok: false,
+      roomBlockers: [
+        { code: "BACKSPLASH_SCOPE_UNRESOLVED", message: "Confirm backsplash scope for \"Countertop\".", areaIdx: 0 },
+      ],
       globalBlockers: [],
     },
-  });
+  }));
+  assert.equal(path.phase, "room_blockers");
+  assert.equal(path.primaryAction.label, "Confirm backsplash scope");
+  assert.equal(path.primaryAction.action, "focus_blockers");
+  console.log("ok: backsplash blocker → 'Confirm backsplash scope' CTA");
+}
+
+// ── State C: secondary action is null when no other room needs review ─────────
+{
+  const path = deriveReviewActionPath(makeBase({
+    activeRooms: [{ roomId: "r1", roomName: "Kitchen", roomIdx: 0 }],
+    roomCompleteness: { r1: false },
+    selectedRoomVerify: { ok: true, roomBlockers: [], globalBlockers: [] },
+  }));
   assert.equal(path.phase, "verify_room");
-  assert.notEqual(path.primaryAction.label, "Review room issue");
-  console.log("ok: no Review room issue when no blockers");
+  assert.equal(path.secondaryAction, null, "no secondary when only one room");
+  console.log("ok: no secondary action when only one room");
 }
 
 console.log("reviewActionPath.test.mjs: all passed");
