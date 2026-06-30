@@ -1,12 +1,13 @@
 /**
  * TakeoffRoomReviewWorkbench — room-first estimator review after AI generation.
- * Display-first room cards with selected-room detail editing.
+ * Selected room detail is the primary editing surface for dimensions and scope.
  */
 import EosSectionCard from "@eliteos-ui/EosSectionCard";
 import EosStatusPill from "@eliteos-ui/EosStatusPill";
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import type { TakeoffResult, TakeoffArea, TakeoffRun } from "@takeoff-core/takeoffContract.mjs";
 import {
+  canMarkRoomVerified,
   formatBacksplashScopeLabel,
   formatPieceTypeLabel,
 } from "@takeoff-core/reviewedTakeoffMath.mjs";
@@ -22,15 +23,32 @@ const PIECE_TYPE_OPTIONS = [
   { id: "island", label: "Island", preset: "island" },
   { id: "vanity", label: "Vanity top", preset: "vanity" },
   { id: "backsplash", label: "Backsplash line", preset: "backsplash" },
-  { id: "waterfall", label: "Waterfall panel", preset: "countertop" },
+  { id: "waterfall", label: "Waterfall panel", preset: "waterfall" },
   { id: "other", label: "Other", preset: "countertop" },
 ] as const;
+
+const BS_SCOPE_OPTIONS = [
+  { value: "needs_review", label: "Needs review" },
+  { value: "standard", label: "4\" backsplash" },
+  { value: "full_height", label: "Full-height backsplash" },
+  { value: "no_stone", label: "No stone backsplash" },
+  { value: "tile_by_others", label: "No stone backsplash (tile by others)" },
+] as const;
+
+const PRESET_TO_CONTRACT: Record<string, { pieceType: string; isBacksplash: boolean }> = {
+  countertop: { pieceType: "counter", isBacksplash: false },
+  island: { pieceType: "counter", isBacksplash: false },
+  vanity: { pieceType: "counter", isBacksplash: false },
+  backsplash: { pieceType: "splash", isBacksplash: true },
+  waterfall: { pieceType: "fhb", isBacksplash: false },
+};
 
 type ReviewedRoom = {
   roomId: string;
   roomIdx: number;
   roomName: string;
   roomType?: string;
+  unknown?: boolean;
   manual?: boolean;
   countertopSf: number;
   backsplashDisplaySf: number;
@@ -49,6 +67,7 @@ type ReviewedRoom = {
       runId: string;
       runIdx: number;
       label: string;
+      pieceType: string;
       pieceTypeLabel: string;
       lengthIn: number;
       depthIn: number;
@@ -85,6 +104,15 @@ function verificationLabel(status: string): string {
   }
 }
 
+function presetFromRun(run: TakeoffRun): string {
+  if (run.pieceType === "splash" || run.isBacksplash) return "backsplash";
+  if (run.pieceType === "fhb") return "waterfall";
+  const label = String(run.label ?? "").toLowerCase();
+  if (label.includes("island")) return "island";
+  if (label.includes("vanity")) return "vanity";
+  return "countertop";
+}
+
 export interface TakeoffRoomReviewWorkbenchProps {
   editDraft: TakeoffResult;
   reviewedRooms: ReviewedRoom[];
@@ -96,6 +124,7 @@ export interface TakeoffRoomReviewWorkbenchProps {
   roomCompleteness: Record<string, boolean>;
   selectedRoomId: string | null;
   roomBlockerIds?: Set<string>;
+  hasGlobalBlockers?: boolean;
   onSelectRoom: (roomId: string | null) => void;
   onSetRoomComplete: (roomId: string, complete: boolean) => void;
   onSetRoomExcluded: (roomId: string, excluded: boolean) => void;
@@ -110,7 +139,23 @@ export interface TakeoffRoomReviewWorkbenchProps {
   onAddManualRun: (input: ManualRunInput) => void;
 }
 
-function PieceCard({
+type PieceEditDraft = {
+  label: string;
+  preset: string;
+  lengthIn: string;
+  depthIn: string;
+  sourcePage: string;
+  included: boolean;
+};
+
+type AreaBsEditDraft = {
+  backsplashScope: string;
+  backsplashHeightIn: string;
+  backsplashLinearIn: string;
+  backsplashManualSf: string;
+};
+
+function PieceEditorCard({
   roomIdx,
   areaIdx,
   runIdx,
@@ -119,7 +164,6 @@ function PieceCard({
   pieceMeta,
   excluded,
   isManual,
-  editing,
   roomOptions,
   onPatchRun,
   onSetRunIncluded,
@@ -134,207 +178,427 @@ function PieceCard({
   pieceMeta?: ReviewedRoom["areas"][0]["pieces"][0];
   excluded: boolean;
   isManual: boolean;
-  editing: boolean;
   roomOptions: Array<{ idx: number; name: string }>;
   onPatchRun: TakeoffRoomReviewWorkbenchProps["onPatchRun"];
   onSetRunIncluded: TakeoffRoomReviewWorkbenchProps["onSetRunIncluded"];
   onRemoveManualRun: TakeoffRoomReviewWorkbenchProps["onRemoveManualRun"];
   onMoveRun: TakeoffRoomReviewWorkbenchProps["onMoveRun"];
 }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<PieceEditDraft>(() => ({
+    label: run.label,
+    preset: presetFromRun(run),
+    lengthIn: String(run.lengthIn ?? ""),
+    depthIn: String(run.depthIn ?? ""),
+    sourcePage: run.sourcePages?.[0] != null ? String(run.sourcePages[0]) : "",
+    included: !excluded,
+  }));
+
+  const resetDraft = useCallback(() => {
+    setDraft({
+      label: run.label,
+      preset: presetFromRun(run),
+      lengthIn: String(run.lengthIn ?? ""),
+      depthIn: String(run.depthIn ?? ""),
+      sourcePage: run.sourcePages?.[0] != null ? String(run.sourcePages[0]) : "",
+      included: !excluded,
+    });
+  }, [run, excluded]);
+
   const sf = pieceMeta?.sfExact ?? ((Number(run.lengthIn) || 0) * (Number(run.depthIn) || 0)) / 144;
-  const sourcePage = run.sourcePages?.[0];
   const pieceTypeLabel =
-    pieceMeta?.pieceTypeLabel ??
-    formatPieceTypeLabel(run.pieceType, Boolean(run.isBacksplash));
+    pieceMeta?.pieceTypeLabel ?? formatPieceTypeLabel(run.pieceType, Boolean(run.isBacksplash));
   const bsLabel =
     pieceMeta?.backsplashLabel ??
     (run.pieceType === "splash" || run.isBacksplash
       ? formatBacksplashScopeLabel(area.backsplashScope, run.depthIn ?? area.backsplashHeightIn)
       : null);
+  const sourcePage = run.sourcePages?.[0];
+
+  const handleSave = () => {
+    const contract = PRESET_TO_CONTRACT[draft.preset] ?? PRESET_TO_CONTRACT.countertop;
+    const len = Number(draft.lengthIn);
+    const depth = Number(draft.depthIn);
+    const pageNum = draft.sourcePage.trim() ? Number(draft.sourcePage) : NaN;
+    onPatchRun(roomIdx, areaIdx, runIdx, {
+      label: draft.label.trim() || run.label,
+      lengthIn: Number.isFinite(len) ? len : 0,
+      depthIn: Number.isFinite(depth) ? depth : 0,
+      pieceType: contract.pieceType,
+      isBacksplash: contract.isBacksplash,
+      ...(Number.isFinite(pageNum) && pageNum > 0 ? { sourcePages: [pageNum] } : {}),
+    });
+    if (draft.included !== !excluded) {
+      onSetRunIncluded(run.id, draft.included);
+    }
+    setEditing(false);
+  };
+
+  const handleCancel = () => {
+    resetDraft();
+    setEditing(false);
+  };
 
   return (
-    <div className={`takeoff-room-piece${excluded ? " takeoff-room-piece--excluded" : ""}`}>
-      <div className="takeoff-room-piece-main">
-        <span className="takeoff-room-piece-label">{run.label}</span>
-        <span className="takeoff-room-piece-type muted small">{pieceTypeLabel}</span>
-        {!editing ? (
-          <span className="takeoff-room-piece-dim">
-            {Number(run.lengthIn) || 0}" × {Number(run.depthIn) || 0}" · {formatSf(sf)} sf
+    <div className={`takeoff-room-piece-card${excluded ? " takeoff-room-piece-card--excluded" : ""}`}>
+      {!editing ? (
+        <>
+          <div className="takeoff-room-piece-card-head">
+            <div className="takeoff-room-piece-card-title-row">
+              <span className="takeoff-room-piece-label">{run.label}</span>
+              {excluded ? (
+                <EosStatusPill tone="neutral">Excluded</EosStatusPill>
+              ) : isManual ? (
+                <EosStatusPill tone="info">Manual</EosStatusPill>
+              ) : (
+                <EosStatusPill tone="success">Included</EosStatusPill>
+              )}
+            </div>
+            <span className="takeoff-room-piece-type">{pieceTypeLabel}</span>
+            <span className="takeoff-room-piece-dim">
+              {Number(run.lengthIn) || 0}" × {Number(run.depthIn) || 0}" · {formatSf(sf)} sf
+            </span>
+            {bsLabel ? (
+              <span className="takeoff-room-piece-bs muted small">Backsplash: {bsLabel}</span>
+            ) : null}
+            <div className="takeoff-room-piece-meta">
+              {sourcePage ? <span className="takeoff-room-page-badge">p.{sourcePage}</span> : null}
+            </div>
+          </div>
+          <div className="takeoff-room-piece-card-actions">
+            <button type="button" className="btn secondary btn-sm" onClick={() => setEditing(true)}>
+              Edit
+            </button>
+            {isManual ? (
+              <button type="button" className="btn secondary btn-sm" onClick={() => onRemoveManualRun(run.id)}>
+                Remove piece
+              </button>
+            ) : excluded ? (
+              <button type="button" className="btn secondary btn-sm" onClick={() => onSetRunIncluded(run.id, true)}>
+                Restore
+              </button>
+            ) : (
+              <button type="button" className="btn secondary btn-sm" onClick={() => onSetRunIncluded(run.id, false)}>
+                Exclude from takeoff
+              </button>
+            )}
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="takeoff-room-piece-edit-grid">
+            <label className="field takeoff-room-field">
+              <span className="takeoff-room-field-label">Piece name</span>
+              <input
+                className="takeoff-room-input"
+                type="text"
+                value={draft.label}
+                onChange={(e) => setDraft((d) => ({ ...d, label: e.target.value }))}
+              />
+            </label>
+            <label className="field takeoff-room-field">
+              <span className="takeoff-room-field-label">Piece type</span>
+              <select
+                className="takeoff-room-select"
+                value={draft.preset}
+                onChange={(e) => {
+                  const preset = e.target.value;
+                  const p = ADD_PIECE_PRESETS[preset as keyof typeof ADD_PIECE_PRESETS];
+                  setDraft((d) => ({
+                    ...d,
+                    preset,
+                    depthIn: String(p?.defaultDepth ?? d.depthIn),
+                  }));
+                }}
+              >
+                {PIECE_TYPE_OPTIONS.map((opt) => (
+                  <option key={opt.id} value={opt.preset}>{opt.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field takeoff-room-field">
+              <span className="takeoff-room-field-label">Length</span>
+              <input
+                className="takeoff-room-input"
+                type="number"
+                min={0}
+                step={0.25}
+                value={draft.lengthIn}
+                onChange={(e) => setDraft((d) => ({ ...d, lengthIn: e.target.value }))}
+              />
+            </label>
+            <label className="field takeoff-room-field">
+              <span className="takeoff-room-field-label">Depth</span>
+              <input
+                className="takeoff-room-input"
+                type="number"
+                min={0}
+                step={0.25}
+                value={draft.depthIn}
+                onChange={(e) => setDraft((d) => ({ ...d, depthIn: e.target.value }))}
+              />
+            </label>
+            <label className="field takeoff-room-field">
+              <span className="takeoff-room-field-label">Source page</span>
+              <input
+                className="takeoff-room-input"
+                type="number"
+                min={1}
+                step={1}
+                value={draft.sourcePage}
+                onChange={(e) => setDraft((d) => ({ ...d, sourcePage: e.target.value }))}
+                placeholder="Optional"
+              />
+            </label>
+            <label className="field takeoff-room-field">
+              <span className="takeoff-room-field-label">Move to room</span>
+              <select
+                className="takeoff-room-select"
+                value={roomIdx}
+                onChange={(e) => {
+                  const target = Number(e.target.value);
+                  if (target !== roomIdx) onMoveRun(run.id, target);
+                }}
+              >
+                {roomOptions.map((opt) => (
+                  <option key={opt.idx} value={opt.idx}>{opt.name}</option>
+                ))}
+              </select>
+            </label>
+            <label className="takeoff-room-toggle takeoff-room-field">
+              <input
+                type="checkbox"
+                checked={draft.included}
+                onChange={(e) => setDraft((d) => ({ ...d, included: e.target.checked }))}
+              />
+              <span>Include in takeoff</span>
+            </label>
+          </div>
+          <div className="takeoff-room-piece-card-actions">
+            <button type="button" className="btn primary btn-sm" onClick={handleSave}>
+              Save
+            </button>
+            <button type="button" className="btn secondary btn-sm" onClick={handleCancel}>
+              Cancel
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function AreaBacksplashEditor({
+  area,
+  areaMeta,
+  roomIdx,
+  areaIdx,
+  onPatchArea,
+}: {
+  area: TakeoffArea;
+  areaMeta: ReviewedRoom["areas"][0];
+  roomIdx: number;
+  areaIdx: number;
+  onPatchArea: TakeoffRoomReviewWorkbenchProps["onPatchArea"];
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<AreaBsEditDraft>(() => ({
+    backsplashScope: area.backsplashScope ?? "needs_review",
+    backsplashHeightIn: String(area.backsplashHeightIn ?? 4),
+    backsplashLinearIn: String(area.backsplashLinearIn ?? ""),
+    backsplashManualSf: String(area.backsplashManualSf ?? ""),
+  }));
+
+  const scopeLabel =
+    areaMeta.backsplashScopeLabel ??
+    formatBacksplashScopeLabel(area.backsplashScope, area.backsplashHeightIn);
+  const showInputs =
+    draft.backsplashScope !== "no_stone" && draft.backsplashScope !== "tile_by_others";
+
+  const handleSave = () => {
+    const patch: AreaPatch = {
+      backsplashScope: draft.backsplashScope,
+      backsplashHeightIn: Number(draft.backsplashHeightIn) || 4,
+      backsplashLinearIn: Number(draft.backsplashLinearIn) || 0,
+      backsplashManualSf: Number(draft.backsplashManualSf) || 0,
+    };
+    if (patch.backsplashScope === "no_stone" || patch.backsplashScope === "tile_by_others") {
+      patch.backsplashManualSf = 0;
+      patch.backsplashLinearIn = 0;
+    }
+    onPatchArea(roomIdx, areaIdx, patch);
+    setEditing(false);
+  };
+
+  if (!editing) {
+    return (
+      <div className="takeoff-room-area-bs-card">
+        <div className="takeoff-room-area-bs-display">
+          <span className="takeoff-room-area-bs-label">Area backsplash</span>
+          <span className="takeoff-room-area-bs-value">
+            {scopeLabel}
+            {(areaMeta.backsplashDisplaySf ?? 0) > 0 ? ` · ${formatSf(areaMeta.backsplashDisplaySf ?? 0)} sf` : ""}
           </span>
-        ) : null}
-        {bsLabel ? (
-          <span className="takeoff-room-piece-bs muted small">Backsplash: {bsLabel}</span>
-        ) : null}
-      </div>
-
-      {editing ? (
-        <div className="takeoff-room-piece-edit-grid">
-          <label className="field takeoff-room-field">
-            <span className="takeoff-room-field-label">Piece</span>
-            <input
-              className="takeoff-room-input"
-              type="text"
-              value={run.label}
-              onChange={(e) => onPatchRun(roomIdx, areaIdx, runIdx, { label: e.target.value })}
-            />
-          </label>
-          <label className="field takeoff-room-field">
-            <span className="takeoff-room-field-label">Length</span>
-            <input
-              className="takeoff-room-input"
-              type="number"
-              min={0}
-              step={0.25}
-              value={run.lengthIn ?? ""}
-              onChange={(e) => onPatchRun(roomIdx, areaIdx, runIdx, { lengthIn: Number(e.target.value) || 0 })}
-            />
-          </label>
-          <label className="field takeoff-room-field">
-            <span className="takeoff-room-field-label">Depth</span>
-            <input
-              className="takeoff-room-input"
-              type="number"
-              min={0}
-              step={0.25}
-              value={run.depthIn ?? ""}
-              onChange={(e) => onPatchRun(roomIdx, areaIdx, runIdx, { depthIn: Number(e.target.value) || 0 })}
-            />
-          </label>
-          <label className="field takeoff-room-field">
-            <span className="takeoff-room-field-label">Move to room</span>
-            <select
-              className="takeoff-room-select"
-              value={roomIdx}
-              onChange={(e) => {
-                const target = Number(e.target.value);
-                if (target !== roomIdx) onMoveRun(run.id, target);
-              }}
-            >
-              {roomOptions.map((opt) => (
-                <option key={opt.idx} value={opt.idx}>{opt.name}</option>
-              ))}
-            </select>
-          </label>
+          {(areaMeta.backsplashLinearIn ?? 0) > 0 ? (
+            <span className="muted small">
+              {areaMeta.backsplashLinearIn}" linear × {area.backsplashHeightIn ?? 4}" height
+            </span>
+          ) : null}
         </div>
-      ) : null}
-
-      <div className="takeoff-room-piece-meta">
-        {sourcePage ? <span className="takeoff-room-page-badge">p.{sourcePage}</span> : null}
-        {excluded ? <span className="takeoff-room-piece-excluded-tag">Excluded</span> : null}
-        {isManual ? <span className="takeoff-room-piece-manual-tag">Manual</span> : null}
+        <button type="button" className="btn secondary btn-sm" onClick={() => setEditing(true)}>
+          Edit backsplash
+        </button>
       </div>
+    );
+  }
 
-      <div className="takeoff-room-piece-actions">
-        {isManual ? (
-          <button
-            type="button"
-            className="btn secondary btn-sm"
-            onClick={() => onRemoveManualRun(run.id)}
+  return (
+    <div className="takeoff-room-area-bs-card takeoff-room-area-bs-card--edit">
+      <div className="takeoff-room-piece-edit-grid">
+        <label className="field takeoff-room-field">
+          <span className="takeoff-room-field-label">Backsplash scope</span>
+          <select
+            className="takeoff-room-select"
+            value={draft.backsplashScope}
+            onChange={(e) => setDraft((d) => ({ ...d, backsplashScope: e.target.value }))}
           >
-            Remove piece
-          </button>
-        ) : excluded ? (
-          <button
-            type="button"
-            className="btn secondary btn-sm"
-            onClick={() => onSetRunIncluded(run.id, true)}
-          >
-            Restore
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="btn secondary btn-sm"
-            onClick={() => onSetRunIncluded(run.id, false)}
-          >
-            Exclude from takeoff
-          </button>
-        )}
+            {BS_SCOPE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </label>
+        {showInputs ? (
+          <>
+            <label className="field takeoff-room-field">
+              <span className="takeoff-room-field-label">Height (in)</span>
+              <input
+                className="takeoff-room-input"
+                type="number"
+                min={0}
+                step={0.5}
+                value={draft.backsplashHeightIn}
+                onChange={(e) => setDraft((d) => ({ ...d, backsplashHeightIn: e.target.value }))}
+              />
+            </label>
+            <label className="field takeoff-room-field">
+              <span className="takeoff-room-field-label">Linear (in)</span>
+              <input
+                className="takeoff-room-input"
+                type="number"
+                min={0}
+                step={1}
+                value={draft.backsplashLinearIn}
+                onChange={(e) => setDraft((d) => ({ ...d, backsplashLinearIn: e.target.value }))}
+              />
+            </label>
+            <label className="field takeoff-room-field">
+              <span className="takeoff-room-field-label">Manual sf</span>
+              <input
+                className="takeoff-room-input"
+                type="number"
+                min={0}
+                step={0.01}
+                value={draft.backsplashManualSf}
+                onChange={(e) => setDraft((d) => ({ ...d, backsplashManualSf: e.target.value }))}
+              />
+            </label>
+          </>
+        ) : null}
+      </div>
+      <div className="takeoff-room-piece-card-actions">
+        <button type="button" className="btn primary btn-sm" onClick={handleSave}>Save</button>
+        <button type="button" className="btn secondary btn-sm" onClick={() => setEditing(false)}>Cancel</button>
       </div>
     </div>
   );
 }
 
-function AddPieceForm({
+function AddPiecePanel({
   roomIdx,
-  areaIdx,
+  roomName,
   areaLabel,
   onAddManualRun,
+  onClose,
 }: {
   roomIdx: number;
-  areaIdx?: number;
+  roomName: string;
   areaLabel?: string;
   onAddManualRun: TakeoffRoomReviewWorkbenchProps["onAddManualRun"];
+  onClose?: () => void;
 }) {
-  const [preset, setPreset] = useState("countertop");
+  const [preset, setPreset] = useState(areaLabel ? "countertop" : "countertop");
   const [lengthIn, setLengthIn] = useState("");
   const [depthIn, setDepthIn] = useState(String(ADD_PIECE_PRESETS.countertop.defaultDepth));
   const [pieceLabel, setPieceLabel] = useState("Countertop run");
+  const [pageNumber, setPageNumber] = useState("");
 
   const selectedPreset = PIECE_TYPE_OPTIONS.find((o) => o.preset === preset) ?? PIECE_TYPE_OPTIONS[0];
 
+  const handleAdd = () => {
+    const len = Number(lengthIn);
+    if (!(len > 0)) return;
+    onAddManualRun({
+      roomIdx,
+      areaLabel,
+      preset: selectedPreset.preset,
+      pieceLabel,
+      lengthIn: len,
+      depthIn: Number(depthIn) || ADD_PIECE_PRESETS.countertop.defaultDepth,
+      pageNumber: pageNumber.trim() || null,
+      includeInTakeoff: true,
+    });
+    setLengthIn("");
+    setPageNumber("");
+    onClose?.();
+  };
+
   return (
-    <div className="takeoff-room-add-piece-form">
-      <label className="field takeoff-room-field">
-        <span className="takeoff-room-field-label">Piece type</span>
-        <select
-          className="takeoff-room-select"
-          value={preset}
-          onChange={(e) => {
-            const opt = PIECE_TYPE_OPTIONS.find((o) => o.preset === e.target.value) ?? PIECE_TYPE_OPTIONS[0];
-            setPreset(opt.preset);
-            setPieceLabel(opt.label);
-            setDepthIn(String(ADD_PIECE_PRESETS[opt.preset as keyof typeof ADD_PIECE_PRESETS]?.defaultDepth ?? 25.5));
-          }}
-        >
-          {PIECE_TYPE_OPTIONS.map((opt) => (
-            <option key={opt.id} value={opt.preset}>{opt.label}</option>
-          ))}
-        </select>
-      </label>
-      <label className="field takeoff-room-field">
-        <span className="takeoff-room-field-label">Length (required)</span>
-        <input
-          className="takeoff-room-input"
-          type="number"
-          min={0}
-          step={0.25}
-          value={lengthIn}
-          onChange={(e) => setLengthIn(e.target.value)}
-        />
-      </label>
-      <label className="field takeoff-room-field">
-        <span className="takeoff-room-field-label">Depth</span>
-        <input
-          className="takeoff-room-input"
-          type="number"
-          min={0}
-          step={0.25}
-          value={depthIn}
-          onChange={(e) => setDepthIn(e.target.value)}
-        />
-      </label>
-      <button
-        type="button"
-        className="btn primary btn-sm"
-        disabled={!(Number(lengthIn) > 0)}
-        onClick={() => {
-          const len = Number(lengthIn);
-          if (!(len > 0)) return;
-          onAddManualRun({
-            roomIdx,
-            areaLabel,
-            preset: selectedPreset.preset,
-            pieceLabel,
-            lengthIn: len,
-            depthIn: Number(depthIn) || ADD_PIECE_PRESETS.countertop.defaultDepth,
-            includeInTakeoff: true,
-          });
-          setLengthIn("");
-        }}
-      >
-        Add piece
-      </button>
+    <div className="takeoff-room-add-piece-panel">
+      <h5 className="takeoff-room-add-piece-panel-title">
+        Add piece to {roomName}{areaLabel ? ` · ${areaLabel}` : ""}
+      </h5>
+      <div className="takeoff-room-add-piece-type-row">
+        {PIECE_TYPE_OPTIONS.map((opt) => (
+          <button
+            key={opt.id}
+            type="button"
+            className={`btn secondary btn-sm${preset === opt.preset ? " takeoff-room-type-btn--active" : ""}`}
+            onClick={() => {
+              setPreset(opt.preset);
+              setPieceLabel(opt.label);
+              setDepthIn(String(ADD_PIECE_PRESETS[opt.preset as keyof typeof ADD_PIECE_PRESETS]?.defaultDepth ?? 25.5));
+            }}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+      <div className="takeoff-room-piece-edit-grid">
+        <label className="field takeoff-room-field">
+          <span className="takeoff-room-field-label">Piece name</span>
+          <input className="takeoff-room-input" type="text" value={pieceLabel} onChange={(e) => setPieceLabel(e.target.value)} />
+        </label>
+        <label className="field takeoff-room-field">
+          <span className="takeoff-room-field-label">Length (required)</span>
+          <input className="takeoff-room-input" type="number" min={0} step={0.25} value={lengthIn} onChange={(e) => setLengthIn(e.target.value)} />
+        </label>
+        <label className="field takeoff-room-field">
+          <span className="takeoff-room-field-label">Depth</span>
+          <input className="takeoff-room-input" type="number" min={0} step={0.25} value={depthIn} onChange={(e) => setDepthIn(e.target.value)} />
+        </label>
+        <label className="field takeoff-room-field">
+          <span className="takeoff-room-field-label">Source page</span>
+          <input className="takeoff-room-input" type="number" min={1} step={1} value={pageNumber} onChange={(e) => setPageNumber(e.target.value)} placeholder="Optional" />
+        </label>
+      </div>
+      <div className="takeoff-room-piece-card-actions">
+        <button type="button" className="btn primary btn-sm" disabled={!(Number(lengthIn) > 0)} onClick={handleAdd}>
+          Add piece
+        </button>
+        {onClose ? (
+          <button type="button" className="btn secondary btn-sm" onClick={onClose}>Cancel</button>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -350,6 +614,7 @@ export default function TakeoffRoomReviewWorkbench({
   roomCompleteness,
   selectedRoomId,
   roomBlockerIds,
+  hasGlobalBlockers = false,
   onSelectRoom,
   onSetRoomComplete,
   onSetRoomExcluded,
@@ -365,9 +630,11 @@ export default function TakeoffRoomReviewWorkbench({
 }: TakeoffRoomReviewWorkbenchProps) {
   const [newRoomName, setNewRoomName] = useState("");
   const [newRoomType, setNewRoomType] = useState("Kitchen");
-  const [editingRoomId, setEditingRoomId] = useState<string | null>(null);
+  const [editingRoomMeta, setEditingRoomMeta] = useState(false);
   const [showExcludedRooms, setShowExcludedRooms] = useState(false);
-  const [addPieceAreaIdx, setAddPieceAreaIdx] = useState<number | null>(null);
+  const [addPieceAreaLabel, setAddPieceAreaLabel] = useState<string | null>(null);
+  const [showAddPiece, setShowAddPiece] = useState(false);
+  const [showExcludedPieces, setShowExcludedPieces] = useState(false);
 
   const roomById = useMemo(() => {
     const map = new Map<string, (typeof editDraft.rooms)[0]>();
@@ -386,10 +653,18 @@ export default function TakeoffRoomReviewWorkbench({
           roomCompleteness,
           hasUnresolvedBlockers: Boolean(roomBlockerIds?.has(room.id)),
         });
-        return { ...rr, room, status };
+        const verify = canMarkRoomVerified(rr, { hasGlobalBlockers });
+        return { ...rr, room, status, verifyBlockers: verify.blockers, canVerify: verify.ok };
       })
-      .filter(Boolean) as Array<ReviewedRoom & { room: NonNullable<ReturnType<typeof roomById.get>>; status: string }>;
-  }, [reviewedRooms, excludedRoomIds, roomById, roomCompleteness, roomBlockerIds]);
+      .filter(Boolean) as Array<
+        ReviewedRoom & {
+          room: NonNullable<ReturnType<typeof roomById.get>>;
+          status: string;
+          verifyBlockers: Array<{ code: string; message: string }>;
+          canVerify: boolean;
+        }
+      >;
+  }, [reviewedRooms, excludedRoomIds, roomById, roomCompleteness, roomBlockerIds, hasGlobalBlockers]);
 
   const excludedRooms = useMemo(() => {
     return (editDraft.rooms ?? [])
@@ -407,7 +682,21 @@ export default function TakeoffRoomReviewWorkbench({
     [activeRooms]
   );
 
-  const isEditing = selected ? editingRoomId === selected.roomId : false;
+  const excludedPiecesInRoom = useMemo(() => {
+    if (!selected) return [];
+    const out: Array<{ run: TakeoffRun; areaIdx: number; runIdx: number; label: string }> = [];
+    for (const areaMeta of selected.areas) {
+      const area = selected.room.areas[areaMeta.areaIdx];
+      if (!area) continue;
+      for (let runIdx = 0; runIdx < (area.runs ?? []).length; runIdx++) {
+        const run = area.runs[runIdx];
+        if (excludedRunIds.has(run.id) && !manualRunIds.has(run.id)) {
+          out.push({ run, areaIdx: areaMeta.areaIdx, runIdx, label: run.label });
+        }
+      }
+    }
+    return out;
+  }, [selected, excludedRunIds, manualRunIds]);
 
   return (
     <div className="takeoff-room-workbench">
@@ -415,7 +704,7 @@ export default function TakeoffRoomReviewWorkbench({
         <div>
           <h3 className="takeoff-room-workbench-title">Review rooms &amp; dimensions</h3>
           <p className="takeoff-room-workbench-desc muted small">
-            AI found these rooms. Confirm the scope, verify dimensions, and add anything missing before approval.
+            Select a room beside the plan, edit pieces, add missing scope, and mark each room verified.
           </p>
         </div>
       </div>
@@ -471,12 +760,7 @@ export default function TakeoffRoomReviewWorkbench({
             }
           }}
         />
-        <select
-          className="takeoff-room-select"
-          value={newRoomType}
-          onChange={(e) => setNewRoomType(e.target.value)}
-          aria-label="New room type"
-        >
+        <select className="takeoff-room-select" value={newRoomType} onChange={(e) => setNewRoomType(e.target.value)} aria-label="New room type">
           {ROOM_TYPE_OPTIONS.map((t) => (
             <option key={t} value={t}>{t}</option>
           ))}
@@ -496,21 +780,13 @@ export default function TakeoffRoomReviewWorkbench({
       </div>
 
       {excludedRooms.length > 0 ? (
-        <details
-          className="takeoff-excluded-rooms"
-          open={showExcludedRooms}
-          onToggle={(e) => setShowExcludedRooms((e.target as HTMLDetailsElement).open)}
-        >
+        <details className="takeoff-excluded-rooms" open={showExcludedRooms} onToggle={(e) => setShowExcludedRooms((e.target as HTMLDetailsElement).open)}>
           <summary>Excluded rooms ({excludedRooms.length})</summary>
           <ul className="takeoff-excluded-rooms-list">
             {excludedRooms.map(({ room }) => (
               <li key={room.id}>
                 <span>{room.name}</span>
-                <button
-                  type="button"
-                  className="btn secondary btn-sm"
-                  onClick={() => onSetRoomExcluded(room.id, false)}
-                >
+                <button type="button" className="btn secondary btn-sm" onClick={() => onSetRoomExcluded(room.id, false)}>
                   Restore room
                 </button>
               </li>
@@ -520,10 +796,10 @@ export default function TakeoffRoomReviewWorkbench({
       ) : null}
 
       {selected ? (
-        <EosSectionCard className="takeoff-room-detail lab-card">
+        <EosSectionCard className="takeoff-room-detail lab-card takeoff-room-detail--editor">
           <div className="takeoff-room-detail-head">
-            <div>
-              {isEditing ? (
+            <div className="takeoff-room-detail-head-main">
+              {editingRoomMeta ? (
                 <div className="takeoff-room-detail-edit-name">
                   <input
                     className="takeoff-room-input takeoff-room-detail-name-input"
@@ -540,45 +816,40 @@ export default function TakeoffRoomReviewWorkbench({
                       <option key={t} value={t}>{t}</option>
                     ))}
                   </select>
+                  <button type="button" className="btn secondary btn-sm" onClick={() => setEditingRoomMeta(false)}>Done</button>
                 </div>
               ) : (
                 <>
-                  <h4 className="takeoff-room-detail-title">{selected.roomName}</h4>
+                  <div className="takeoff-room-detail-title-row">
+                    <h4 className="takeoff-room-detail-title">{selected.roomName}</h4>
+                    <EosStatusPill tone={verificationTone(selected.status)}>
+                      {verificationLabel(selected.status)}
+                    </EosStatusPill>
+                  </div>
                   <p className="takeoff-room-detail-sub">
                     {selected.roomType ?? "Room"} · CT {formatSf(selected.countertopSf)} sf · Backsplash {formatSf(selected.backsplashDisplaySf)} sf
                   </p>
+                  <button type="button" className="btn-link btn-sm takeoff-room-edit-meta-btn" onClick={() => setEditingRoomMeta(true)}>
+                    Edit room name / type
+                  </button>
                 </>
               )}
             </div>
             <div className="takeoff-room-detail-actions">
-              <button
-                type="button"
-                className="btn secondary btn-sm"
-                onClick={() => setEditingRoomId(isEditing ? null : selected.roomId)}
-              >
-                {isEditing ? "Done editing" : "Edit room"}
-              </button>
               {manualRoomIds.has(selected.roomId) && onRemoveManualRoom ? (
-                <button
-                  type="button"
-                  className="btn secondary btn-sm"
-                  onClick={() => onRemoveManualRoom(selected.roomId)}
-                >
+                <button type="button" className="btn secondary btn-sm" onClick={() => onRemoveManualRoom(selected.roomId)}>
                   Remove room
                 </button>
               ) : (
-                <button
-                  type="button"
-                  className="btn secondary btn-sm"
-                  onClick={() => onSetRoomExcluded(selected.roomId, true)}
-                >
-                  Exclude room from takeoff
+                <button type="button" className="btn secondary btn-sm" onClick={() => onSetRoomExcluded(selected.roomId, true)}>
+                  Exclude room
                 </button>
               )}
               <button
                 type="button"
                 className="btn primary btn-sm"
-                disabled={selected.status === "verified"}
+                disabled={selected.status === "verified" || !selected.canVerify}
+                title={!selected.canVerify ? selected.verifyBlockers.map((b) => b.message).join(" ") : undefined}
                 onClick={() => onSetRoomComplete(selected.roomId, true)}
               >
                 Mark room verified
@@ -586,10 +857,25 @@ export default function TakeoffRoomReviewWorkbench({
             </div>
           </div>
 
+          {!selected.canVerify && selected.verifyBlockers.length > 0 ? (
+            <div className="takeoff-room-verify-blockers" role="note">
+              <span className="takeoff-room-verify-blockers-label">Before verifying:</span>
+              <ul>
+                {selected.verifyBlockers.map((b) => (
+                  <li key={b.code}>{b.message}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
           <div className="takeoff-room-areas">
             {selected.areas.map((areaMeta) => {
               const area = selected.room.areas[areaMeta.areaIdx];
               if (!area) return null;
+              const includedPieces = (area.runs ?? [])
+                .map((run, runIdx) => ({ run, runIdx }))
+                .filter(({ run }) => !excludedRunIds.has(run.id));
+
               return (
                 <div key={area.id ?? areaMeta.areaIdx} className="takeoff-room-area-block">
                   <div className="takeoff-room-area-head">
@@ -601,18 +887,13 @@ export default function TakeoffRoomReviewWorkbench({
                     ) : null}
                   </div>
 
-                  {(areaMeta.areaLevelBacksplashSf ?? 0) > 0 ? (
-                    <div className="takeoff-room-area-bs-row muted small">
-                      {areaMeta.backsplashScopeLabel} · {formatSf(areaMeta.areaLevelBacksplashSf ?? 0)} sf
-                      {(areaMeta.backsplashLinearIn ?? 0) > 0
-                        ? ` · ${areaMeta.backsplashLinearIn}" linear × ${area.backsplashHeightIn ?? 4}" height`
-                        : ""}
-                    </div>
-                  ) : areaMeta.backsplashScopeLabel && areaMeta.backsplashDisplaySf === 0 ? (
-                    <div className="takeoff-room-area-bs-row muted small">
-                      {areaMeta.backsplashScopeLabel}
-                    </div>
-                  ) : null}
+                  <AreaBacksplashEditor
+                    area={area}
+                    areaMeta={areaMeta}
+                    roomIdx={selected.roomIdx}
+                    areaIdx={areaMeta.areaIdx}
+                    onPatchArea={onPatchArea}
+                  />
 
                   {areaMeta.needsReview ? (
                     <div className="takeoff-room-area-needs-review">
@@ -621,7 +902,10 @@ export default function TakeoffRoomReviewWorkbench({
                         <button
                           type="button"
                           className="btn secondary btn-sm"
-                          onClick={() => setAddPieceAreaIdx(areaMeta.areaIdx)}
+                          onClick={() => {
+                            setAddPieceAreaLabel(areaMeta.label);
+                            setShowAddPiece(true);
+                          }}
                         >
                           Add piece to this area
                         </button>
@@ -638,25 +922,14 @@ export default function TakeoffRoomReviewWorkbench({
                           Mark not in scope
                         </button>
                       </div>
-                      {addPieceAreaIdx === areaMeta.areaIdx ? (
-                        <AddPieceForm
-                          roomIdx={selected.roomIdx}
-                          areaIdx={areaMeta.areaIdx}
-                          areaLabel={areaMeta.label}
-                          onAddManualRun={(input) => {
-                            onAddManualRun(input);
-                            setAddPieceAreaIdx(null);
-                          }}
-                        />
-                      ) : null}
                     </div>
                   ) : null}
 
                   <div className="takeoff-room-pieces">
-                    {(area.runs ?? []).map((run, runIdx) => {
+                    {includedPieces.map(({ run, runIdx }) => {
                       const pieceMeta = areaMeta.pieces.find((p) => p.runId === run.id);
                       return (
-                        <PieceCard
+                        <PieceEditorCard
                           key={run.id}
                           roomIdx={selected.roomIdx}
                           areaIdx={areaMeta.areaIdx}
@@ -664,9 +937,8 @@ export default function TakeoffRoomReviewWorkbench({
                           run={run}
                           area={area}
                           pieceMeta={pieceMeta}
-                          excluded={excludedRunIds.has(run.id)}
+                          excluded={false}
                           isManual={manualRunIds.has(run.id)}
-                          editing={isEditing}
                           roomOptions={roomOptions}
                           onPatchRun={onPatchRun}
                           onSetRunIncluded={onSetRunIncluded}
@@ -681,12 +953,55 @@ export default function TakeoffRoomReviewWorkbench({
             })}
           </div>
 
-          {isEditing && addPieceAreaIdx == null ? (
-            <div className="takeoff-room-add-piece">
-              <span className="takeoff-room-add-piece-label">Add piece to {selected.roomName}</span>
-              <AddPieceForm roomIdx={selected.roomIdx} onAddManualRun={onAddManualRun} />
-            </div>
+          {excludedPiecesInRoom.length > 0 ? (
+            <details
+              className="takeoff-excluded-pieces"
+              open={showExcludedPieces}
+              onToggle={(e) => setShowExcludedPieces((e.target as HTMLDetailsElement).open)}
+            >
+              <summary>Excluded pieces ({excludedPiecesInRoom.length})</summary>
+              <ul className="takeoff-excluded-pieces-list">
+                {excludedPiecesInRoom.map(({ run, areaIdx, runIdx, label }) => (
+                  <li key={run.id}>
+                    <span>{label}</span>
+                    <button type="button" className="btn secondary btn-sm" onClick={() => onSetRunIncluded(run.id, true)}>
+                      Restore
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </details>
           ) : null}
+
+          <div className="takeoff-room-add-piece-section">
+            {!showAddPiece && addPieceAreaLabel == null ? (
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={() => {
+                  setShowAddPiece(true);
+                  setAddPieceAreaLabel(null);
+                }}
+              >
+                Add piece to this room
+              </button>
+            ) : (
+              <AddPiecePanel
+                roomIdx={selected.roomIdx}
+                roomName={selected.roomName}
+                areaLabel={addPieceAreaLabel ?? undefined}
+                onAddManualRun={(input) => {
+                  onAddManualRun(input);
+                  setShowAddPiece(false);
+                  setAddPieceAreaLabel(null);
+                }}
+                onClose={() => {
+                  setShowAddPiece(false);
+                  setAddPieceAreaLabel(null);
+                }}
+              />
+            )}
+          </div>
         </EosSectionCard>
       ) : null}
     </div>

@@ -239,6 +239,13 @@ export const ADD_PIECE_PRESETS = {
     pieceType: "splash",
     defaultDepth: 4,
   },
+  waterfall: {
+    defaultAreaLabel: "Waterfall",
+    defaultPieceLabel: "Waterfall panel",
+    areaType: "countertop",
+    pieceType: "fhb",
+    defaultDepth: 25.5,
+  },
 };
 
 /**

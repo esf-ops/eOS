@@ -431,6 +431,50 @@ html, body {
 .takeoff-room-piece-bs { display: block; }
 .takeoff-room-piece-manual-tag { font-size: 0.68rem; font-weight: 700; color: var(--eos-info); }
 
+.takeoff-room-detail--editor { gap: 16px; }
+.takeoff-room-detail-title-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.takeoff-room-edit-meta-btn { margin-top: 4px; padding: 0; border: none; background: none; color: var(--eos-accent); font-size: 0.78rem; cursor: pointer; text-decoration: underline; }
+.takeoff-room-verify-blockers {
+  padding: 10px 12px; border-radius: var(--r-md);
+  background: var(--eos-warn-soft); border: 1px solid var(--eos-warn-border);
+  font-size: 0.82rem;
+}
+.takeoff-room-verify-blockers-label { font-weight: 650; display: block; margin-bottom: 4px; }
+.takeoff-room-verify-blockers ul { margin: 0; padding-left: 1.1rem; }
+
+.takeoff-room-piece-card {
+  padding: 12px 14px; border-radius: var(--r-md);
+  border: 1px solid var(--eos-line); background: var(--eos-surface);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.takeoff-room-piece-card--excluded { opacity: 0.72; background: var(--eos-bg-soft); }
+.takeoff-room-piece-card-head { display: flex; flex-direction: column; gap: 4px; }
+.takeoff-room-piece-card-title-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.takeoff-room-piece-card-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.takeoff-room-area-bs-card {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 10px 12px; border-radius: var(--r-md);
+  background: var(--eos-bg-soft); border: 1px solid var(--eos-line);
+}
+.takeoff-room-area-bs-card--edit { flex-direction: column; align-items: stretch; }
+.takeoff-room-area-bs-display { display: flex; flex-direction: column; gap: 2px; }
+.takeoff-room-area-bs-label { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; color: var(--eos-ink-muted); }
+.takeoff-room-area-bs-value { font-size: 0.86rem; color: var(--eos-ink-mid); }
+
+.takeoff-room-add-piece-section { margin-top: 4px; padding-top: 12px; border-top: 1px solid var(--eos-line); }
+.takeoff-room-add-piece-panel {
+  padding: 12px 14px; border-radius: var(--r-md);
+  border: 1px solid var(--eos-line); background: var(--eos-bg-soft);
+}
+.takeoff-room-add-piece-panel-title { margin: 0 0 10px; font-size: 0.9rem; font-weight: 650; }
+.takeoff-room-add-piece-type-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.takeoff-room-type-btn--active { border-color: var(--eos-accent); background: var(--eos-accent-soft); }
+
+.takeoff-excluded-pieces summary { cursor: pointer; font-size: 0.84rem; font-weight: 650; color: var(--eos-ink-mid); margin-top: 8px; }
+.takeoff-excluded-pieces-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.takeoff-excluded-pieces-list li { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 0.84rem; }
+
 @media (max-width: 960px) {
   .takeoff-review-layout { grid-template-columns: 1fr; }
   .takeoff-review-preview-col { position: static; max-height: none; }

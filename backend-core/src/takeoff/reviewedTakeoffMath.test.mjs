@@ -18,6 +18,8 @@ import {
   areaNeedsReview,
   buildAllPiecesDisplayIndex,
   allPiecesDisplayUsesFriendlyLabels,
+  deriveRoomVerificationBlockers,
+  canMarkRoomVerified,
 } from "./reviewedTakeoffMath.mjs";
 
 function testSpec73RoomBsMatchesSummary() {
@@ -188,6 +190,75 @@ function testAllPiecesRemovedManualDoesNotCount() {
   assert.ok(before > after);
 }
 
+function testRoomEditUpdatesAllPiecesAndTotals() {
+  const draft = buildSpec73Fixture();
+  const runId = draft.rooms[0].areas[0].runs[0].id;
+  const rs = {};
+  const beforeIndex = buildAllPiecesDisplayIndex(draft, rs);
+  const beforePiece = beforeIndex.pieceByRunId.get(runId);
+  const beforeTotals = beforeIndex.totals.countertopSqft;
+
+  const nextDraft = structuredClone(draft);
+  nextDraft.rooms[0].areas[0].runs[0].lengthIn = (Number(beforePiece.lengthIn) || 0) + 24;
+
+  const afterIndex = buildAllPiecesDisplayIndex(nextDraft, rs);
+  const afterPiece = afterIndex.pieceByRunId.get(runId);
+  assert.ok(afterPiece.lengthIn > beforePiece.lengthIn);
+  assert.ok(afterIndex.totals.countertopSqft >= beforeTotals);
+}
+
+function testExcludeRestoreSyncsAllPieces() {
+  const draft = buildSpec73Fixture();
+  const runId = draft.rooms[0].areas[0].runs[0].id;
+  const excluded = buildAllPiecesDisplayIndex(draft, { excludedRunIds: [runId] });
+  assert.equal(excluded.pieceByRunId.get(runId)?.action, "restore");
+  assert.equal(excluded.pieceByRunId.get(runId)?.statusLabel, "Excluded from takeoff");
+
+  const restored = buildAllPiecesDisplayIndex(draft, { excludedRunIds: [] });
+  assert.equal(restored.pieceByRunId.get(runId)?.action, "exclude");
+}
+
+function testRoomVerificationBlockedForEmptyArea() {
+  const draft = {
+    ...buildSpec73Fixture(),
+    rooms: [
+      makeTakeoffRoom({
+        name: "Laundry",
+        areas: [makeTakeoffArea({ label: "Countertop", areaType: "countertop", runs: [] })],
+      }),
+    ],
+  };
+  const math = computeReviewedTakeoffMath(draft, {});
+  const room = math.activeRooms[0];
+  const blockers = deriveRoomVerificationBlockers(room);
+  assert.ok(blockers.some((b) => b.code === "EMPTY_AREA"));
+  const verify = canMarkRoomVerified(room);
+  assert.equal(verify.ok, false);
+}
+
+function testAddPieceToEmptyAreaClearsBlocker() {
+  const draft = {
+    ...buildSpec73Fixture(),
+    rooms: [
+      makeTakeoffRoom({
+        name: "Laundry",
+        areas: [makeTakeoffArea({ label: "Countertop", areaType: "countertop", runs: [] })],
+      }),
+    ],
+  };
+  const { draft: withPiece } = addManualRunToDraft(draft, {
+    roomIdx: 0,
+    areaLabel: "Countertop",
+    preset: "countertop",
+    lengthIn: 60,
+    depthIn: 25.5,
+  });
+  const math = computeReviewedTakeoffMath(withPiece, {});
+  const room = math.activeRooms[0];
+  const verify = canMarkRoomVerified(room);
+  assert.equal(verify.ok, true);
+}
+
 const tests = [
   testSpec73RoomBsMatchesSummary,
   testAreaLevelBacksplashAttributedToRoom,
@@ -201,6 +272,10 @@ const tests = [
   testAllPiecesManualRemoveAction,
   testAllPiecesExcludeRestoreActions,
   testAllPiecesRemovedManualDoesNotCount,
+  testRoomEditUpdatesAllPiecesAndTotals,
+  testExcludeRestoreSyncsAllPieces,
+  testRoomVerificationBlockedForEmptyArea,
+  testAddPieceToEmptyAreaClearsBlocker,
 ];
 
 let passed = 0;

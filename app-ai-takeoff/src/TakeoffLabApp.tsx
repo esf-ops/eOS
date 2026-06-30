@@ -41,6 +41,7 @@ import { deriveTakeoffWorkflowStatus } from "@takeoff-core/takeoffReviewStatus.m
 import {
   computeReviewedTakeoffMath,
   validateReviewedTakeoffConsistency,
+  canMarkRoomVerified,
 } from "@takeoff-core/reviewedTakeoffMath.mjs";
 import type { TakeoffResult, TakeoffArea, TakeoffRun } from "@takeoff-core/takeoffContract.mjs";
 import type { TakeoffComputedMeasurements } from "@takeoff-core/takeoffMeasurementCalc.mjs";
@@ -199,7 +200,15 @@ export type AreaPatch  = {
   backsplashScope?: string;
   backsplashReviewNote?: string;
 };
-export type RunPatch   = { label?: string; lengthIn?: number; depthIn?: number; assemblyNotes?: string };
+export type RunPatch   = {
+  label?: string;
+  lengthIn?: number;
+  depthIn?: number;
+  assemblyNotes?: string;
+  pieceType?: string;
+  isBacksplash?: boolean;
+  sourcePages?: number[];
+};
 
 /** Structured manual piece entry from Review Workbench. */
 export type ManualRunInput = {
@@ -762,8 +771,17 @@ export default function TakeoffLabApp() {
   }, [editDraft.rooms]);
 
   const handleSetRoomComplete = useCallback((roomId: string, complete: boolean) => {
+    if (complete) {
+      const roomMath = reviewedMath?.activeRooms?.find((r) => r.roomId === roomId);
+      if (roomMath) {
+        const verify = canMarkRoomVerified(roomMath, {
+          hasGlobalBlockers: false,
+        });
+        if (!verify.ok) return;
+      }
+    }
     setRoomCompleteness((prev) => ({ ...prev, [roomId]: complete }));
-  }, []);
+  }, [reviewedMath]);
 
   const handleSetRoomExcluded = useCallback((roomId: string, excluded: boolean) => {
     setExcludedRoomIds((prev) => {
@@ -1690,6 +1708,7 @@ export default function TakeoffLabApp() {
             roomCompleteness={roomCompleteness}
             selectedRoomId={selectedRoomId}
             roomBlockerIds={roomBlockerIds}
+            hasGlobalBlockers={(approvalGate?.blockers?.length ?? 0) > 0 || !mathConsistency.ok}
             onSelectRoom={setSelectedRoomId}
             onSetRoomComplete={handleSetRoomComplete}
             onSetRoomExcluded={handleSetRoomExcluded}

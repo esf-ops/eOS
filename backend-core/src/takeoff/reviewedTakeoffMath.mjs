@@ -570,6 +570,75 @@ export function allPiecesDisplayUsesFriendlyLabels(index, scopeLabel) {
 }
 
 /**
+ * Blockers that prevent marking a room verified in the room-first workbench.
+ *
+ * @param {object} reviewedRoom — entry from computeReviewedTakeoffMath().activeRooms
+ */
+export function deriveRoomVerificationBlockers(reviewedRoom) {
+  /** @type {Array<{ code: string, message: string }>} */
+  const blockers = [];
+  if (!reviewedRoom) return blockers;
+
+  if (reviewedRoom.unknown) {
+    blockers.push({
+      code: "UNKNOWN_ROOM",
+      message: "Assign this room a proper name before verification.",
+    });
+  }
+
+  for (const area of reviewedRoom.areas ?? []) {
+    if (area.needsReview) {
+      blockers.push({
+        code: "EMPTY_AREA",
+        message: `Area "${area.label}" needs review — add a piece or mark not in scope.`,
+      });
+    }
+    if (
+      !area.notInScope &&
+      area.backsplashScopeLabel === "Needs review" &&
+      (area.backsplashDisplaySf ?? 0) > 0
+    ) {
+      blockers.push({
+        code: "BACKSPLASH_SCOPE_UNRESOLVED",
+        message: `Confirm backsplash scope for "${area.label}".`,
+      });
+    }
+  }
+
+  for (const area of reviewedRoom.areas ?? []) {
+    for (const piece of area.pieces ?? []) {
+      if (piece.excluded) continue;
+      const pt = String(piece.pieceType ?? "counter");
+      if (pt === "counter" && (piece.lengthIn <= 0 || piece.depthIn <= 0)) {
+        blockers.push({
+          code: "MISSING_RUN_DIMENSIONS",
+          message: `Piece "${piece.label}" is missing length or depth.`,
+        });
+      }
+    }
+  }
+
+  return blockers;
+}
+
+/**
+ * Whether a room can be marked verified.
+ *
+ * @param {object} reviewedRoom
+ * @param {{ hasGlobalBlockers?: boolean }} [opts]
+ */
+export function canMarkRoomVerified(reviewedRoom, opts = {}) {
+  if (opts.hasGlobalBlockers) {
+    return {
+      ok: false,
+      blockers: [{ code: "GLOBAL_BLOCKERS", message: "Resolve Items to review before verifying rooms." }],
+    };
+  }
+  const blockers = deriveRoomVerificationBlockers(reviewedRoom);
+  return { ok: blockers.length === 0, blockers };
+}
+
+/**
  * Room subtotals for a single room (used by workbench when full math object unavailable).
  *
  * @param {import("./takeoffContract.mjs").TakeoffRoom} room
