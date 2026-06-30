@@ -44,6 +44,7 @@ import {
   canMarkRoomVerified,
 } from "@takeoff-core/reviewedTakeoffMath.mjs";
 import { buildRoomVerificationView } from "@takeoff-core/roomVerificationView.mjs";
+import { buildTakeoffWorkflowState } from "@takeoff-core/takeoffWorkflowState.mjs";
 import type { TakeoffResult, TakeoffArea, TakeoffRun } from "@takeoff-core/takeoffContract.mjs";
 import type { TakeoffComputedMeasurements } from "@takeoff-core/takeoffMeasurementCalc.mjs";
 import type { TakeoffValidationResult } from "@takeoff-core/takeoffValidator.mjs";
@@ -708,24 +709,97 @@ export default function TakeoffLabApp() {
     [approvalGate, workspaceReview, savedAt, takeoffImportStatus, hasSaveableChanges]
   );
 
+  // ── Canonical workflow state ────────────────────────────────────────────────
+  // Single source of truth for blocker classification, canApprove, canImport,
+  // and the global primaryAction (save / review_decisions / approve / import).
+  // Consumes the already-evaluated approvalGate so nothing is re-computed.
+  const workflowState = useMemo(() => {
+    if (!hasActiveSource) return null;
+    return buildTakeoffWorkflowState({
+      approvalGate: approvalGate ?? null,
+      reviewedMath: reviewedMath ?? null,
+      reviewState: {
+        excludedRoomIds: [...excludedRoomIds],
+        roomCompleteness,
+      },
+      selectedRoomId,
+      hasSaveableChanges,
+      saveStatus,
+      hasSavedResult: Boolean(savedAt || workspaceReview?.hasSavedResult),
+      reviewStatus: workspaceReview?.reviewStatus ?? "needs_review",
+      importStatus: takeoffImportStatus,
+    });
+  }, [
+    hasActiveSource,
+    approvalGate,
+    reviewedMath,
+    excludedRoomIds,
+    roomCompleteness,
+    selectedRoomId,
+    hasSaveableChanges,
+    saveStatus,
+    savedAt,
+    workspaceReview,
+    takeoffImportStatus,
+  ]);
+
+  // Resolution handlers — update review state so the gate re-evaluates and
+  // the corresponding blocker disappears on next render.
+  const handleAcceptReferenceMismatch = useCallback((code: string) => {
+    setReferenceTotalAcks((prev) => ({ ...prev, [code]: true }));
+  }, []);
+
+  const handleResolveFlagDecision = useCallback(
+    (code: string, path: string | null, note: string) => {
+      const key = path ? `${code}::${path}` : code;
+      setFlagResolutions((prev) => ({
+        ...prev,
+        [key]: { action: "resolved" as const, note, at: new Date().toISOString() },
+      }));
+    },
+    []
+  );
+
+  const handleAcceptDecision = useCallback(
+    (decision: { resolution: { type: string; key?: string; code?: string; path?: string | null; defaultNote?: string } }) => {
+      const r = decision.resolution;
+      if (r.type === "referenceTotalAck" && r.key) {
+        handleAcceptReferenceMismatch(r.key);
+      } else if (r.type === "flagResolution") {
+        handleResolveFlagDecision(
+          r.code ?? "",
+          r.path ?? null,
+          r.defaultNote ?? "Reviewed and accepted by estimator."
+        );
+      }
+    },
+    [handleAcceptReferenceMismatch, handleResolveFlagDecision]
+  );
+
   const canApproveTakeoff = useMemo(() => {
     if (!takeoffJobId || !hasActiveSource) return false;
     if (workspaceReview?.reviewStatus === "approved" && !hasSaveableChanges) return false;
-    return Boolean(approvalGate?.canApprove);
-  }, [takeoffJobId, hasActiveSource, workspaceReview?.reviewStatus, hasSaveableChanges, approvalGate]);
+    // Use canonical workflow state canApprove so diagnostics-only blockers don't block.
+    return Boolean(workflowState?.canApprove);
+  }, [takeoffJobId, hasActiveSource, workspaceReview?.reviewStatus, hasSaveableChanges, workflowState]);
 
   const canImportToEstimate = useMemo(() => {
     if (takeoffImportStatus === "imported") return false;
-    return Boolean(approvalGate?.canImport);
-  }, [approvalGate, takeoffImportStatus]);
+    return Boolean(workflowState?.canImport);
+  }, [workflowState, takeoffImportStatus]);
 
   const approveBlockedReason = useMemo(() => {
     if (!takeoffJobId || !hasActiveSource) return "Load a takeoff workspace first.";
     if (workspaceReview?.reviewStatus === "approved" && !hasSaveableChanges) return "This takeoff is already approved.";
+    // Show hard blockers first; then pending decisions; then all gate blockers as fallback.
+    const firstHard = workflowState?.hardBlockers?.[0];
+    if (firstHard) return firstHard.message;
+    const firstDecision = workflowState?.estimatorDecisionsRequired?.[0];
+    if (firstDecision) return `${firstDecision.title} — accept to proceed.`;
     const first = approvalGate?.blockers?.[0];
     if (first) return first.message;
     return null;
-  }, [takeoffJobId, hasActiveSource, workspaceReview?.reviewStatus, hasSaveableChanges, approvalGate]);
+  }, [takeoffJobId, hasActiveSource, workspaceReview?.reviewStatus, hasSaveableChanges, workflowState, approvalGate]);
 
   // v6.2: Fabrication rule findings — computed from the current effective draft.
   // Passed to TakeoffQaGatePanel for the dedicated "Fabrication rules" subsection.
@@ -1608,6 +1682,7 @@ export default function TakeoffLabApp() {
       excludedRoomIds,
       selectedRoomId,
       selectedRoomVerify,
+      pendingDecisionCount: workflowState?.pendingDecisionCount ?? 0,
     });
   }, [
     hasActiveSource,
@@ -1626,6 +1701,7 @@ export default function TakeoffLabApp() {
     excludedRoomIds,
     selectedRoomId,
     selectedRoomVerify,
+    workflowState?.pendingDecisionCount,
   ]);
 
   const showReviewActionBar = Boolean(
@@ -1671,6 +1747,16 @@ export default function TakeoffLabApp() {
             behavior: "smooth",
             block: "start",
           });
+          break;
+        }
+        case "review_decisions": {
+          // Scroll to the first decision card in the normal review section.
+          const firstCard = document.querySelector(".takeoff-decision-card");
+          if (firstCard) {
+            firstCard.scrollIntoView({ behavior: "smooth", block: "center" });
+            (firstCard as HTMLElement).classList.add("takeoff-blocker-highlight");
+            window.setTimeout(() => (firstCard as HTMLElement).classList.remove("takeoff-blocker-highlight"), 2200);
+          }
           break;
         }
         case "save":
@@ -1944,6 +2030,36 @@ export default function TakeoffLabApp() {
             />
           ) : null}
         </>
+      ) : null}
+
+      {/* ── Final review decisions (estimator decisions before approval) ─── */}
+      {currentWorkflowStep === "review" &&
+      workflowState &&
+      workflowState.estimatorDecisionsRequired.length > 0 ? (
+        <div className="takeoff-final-review" role="region" aria-label="Final review decisions">
+          <h3 className="takeoff-final-review-heading">
+            Final review — {workflowState.pendingDecisionCount} decision{workflowState.pendingDecisionCount !== 1 ? "s" : ""} before approval
+          </h3>
+          {workflowState.estimatorDecisionsRequired.map((decision) => (
+            <div
+              key={decision.code}
+              className="takeoff-decision-card"
+              data-decision-code={decision.code}
+            >
+              <p className="takeoff-decision-card-title">{decision.title}</p>
+              <p className="takeoff-decision-card-body muted small">{decision.body}</p>
+              <div className="takeoff-decision-card-actions">
+                <button
+                  type="button"
+                  className="btn primary btn-sm"
+                  onClick={() => handleAcceptDecision(decision)}
+                >
+                  {decision.acceptLabel}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
       ) : null}
 
       <details className="takeoff-advanced lab-section lab-section-collapsible">

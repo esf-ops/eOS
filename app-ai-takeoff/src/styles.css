@@ -632,6 +632,37 @@ html, body {
 }
 .takeoff-import-ready-note-title { font-weight: 650; margin: 0 0 4px; }
 
+/* Final review decision cards */
+.takeoff-final-review {
+  margin-bottom: 12px;
+}
+.takeoff-final-review-heading {
+  font-size: 0.875rem;
+  font-weight: 650;
+  margin: 0 0 10px;
+  color: var(--eos-text);
+}
+.takeoff-decision-card {
+  background: var(--eos-warn-soft, #fffbeb);
+  border: 1px solid var(--eos-warn-border, #f59e0b);
+  border-radius: var(--r-md);
+  padding: 12px 14px;
+  margin-bottom: 8px;
+}
+.takeoff-decision-card-title {
+  font-weight: 600;
+  margin: 0 0 4px;
+  font-size: 0.875rem;
+}
+.takeoff-decision-card-body {
+  margin: 0 0 10px;
+}
+.takeoff-decision-card-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .takeoff-room-piece-card {
   padding: 12px 14px; border-radius: var(--r-md);
   border: 1px solid var(--eos-line); background: var(--eos-surface);

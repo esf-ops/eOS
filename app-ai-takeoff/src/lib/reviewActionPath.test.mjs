@@ -193,4 +193,54 @@ function makeBase(overrides = {}) {
   console.log("ok: no secondary action when only one room");
 }
 
+// ── review_decisions phase: all verified + saved + pending decisions ───────────
+{
+  const path = deriveReviewActionPath(makeBase({
+    activeRooms: [{ roomId: "r1", roomName: "Kitchen", roomIdx: 0 }],
+    roomCompleteness: { r1: true },
+    savedAt: "2026-06-01T00:00:00Z",
+    hasSaveableChanges: false,
+    canApprove: false,          // workflow state canApprove = false (decisions pending)
+    pendingDecisionCount: 1,    // one reference mismatch outstanding
+    selectedRoomVerify: { ok: true, roomBlockers: [], globalBlockers: [] },
+  }));
+  assert.equal(path.phase, "review_decisions", "review_decisions phase");
+  assert.match(path.statusMessage, /1 decision required/);
+  assert.equal(path.primaryAction.action, "review_decisions");
+  console.log("ok: review_decisions phase — 1 decision required before approval");
+}
+
+// ── review_decisions: approve phase NOT shown when decisions pending ───────────
+{
+  // Even if canApprove somehow passes, decisions pending keeps us in review_decisions
+  const path = deriveReviewActionPath(makeBase({
+    activeRooms: [{ roomId: "r1", roomName: "Kitchen", roomIdx: 0 }],
+    roomCompleteness: { r1: true },
+    savedAt: "2026-06-01T00:00:00Z",
+    hasSaveableChanges: false,
+    canApprove: true,           // workflow state says true (after diagnostics reclassified)
+    pendingDecisionCount: 2,    // but 2 decisions still pending
+    selectedRoomVerify: { ok: true, roomBlockers: [], globalBlockers: [] },
+  }));
+  assert.equal(path.phase, "review_decisions", "review_decisions takes priority over approve");
+  assert.match(path.primaryAction.label, /Review 2 decisions/);
+  console.log("ok: review_decisions takes priority over approve when decisions pending");
+}
+
+// ── After accepting decisions, approve phase shown ─────────────────────────────
+{
+  const path = deriveReviewActionPath(makeBase({
+    activeRooms: [{ roomId: "r1", roomName: "Kitchen", roomIdx: 0 }],
+    roomCompleteness: { r1: true },
+    savedAt: "2026-06-01T00:00:00Z",
+    hasSaveableChanges: false,
+    canApprove: true,
+    pendingDecisionCount: 0,    // all decisions accepted
+    selectedRoomVerify: { ok: true, roomBlockers: [], globalBlockers: [] },
+  }));
+  assert.equal(path.phase, "approve", "approve phase after decisions cleared");
+  assert.equal(path.primaryAction.action, "approve");
+  console.log("ok: approve phase shown after all decisions accepted");
+}
+
 console.log("reviewActionPath.test.mjs: all passed");

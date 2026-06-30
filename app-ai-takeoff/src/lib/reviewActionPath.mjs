@@ -8,7 +8,7 @@ import {
   blockerPrimaryActionLabel,
 } from "../../../backend-core/src/takeoff/roomVerificationView.mjs";
 
-/** @typedef {"import"|"approve"|"save"|"room_blockers"|"verify_room"|"next_room"|"continue_review"} ReviewActionPhase */
+/** @typedef {"import"|"approve"|"review_decisions"|"save"|"room_blockers"|"verify_room"|"next_room"|"continue_review"} ReviewActionPhase */
 
 /** @typedef {{
  *   label: string,
@@ -42,6 +42,7 @@ import {
  *     globalBlockers?: Array<{ code?: string, message?: string }>,
  *     blockers?: Array<{ code?: string, message?: string }>,
  *   }|null,
+ *   pendingDecisionCount?: number,
  * }} input
  */
 export function deriveReviewActionPath(input) {
@@ -122,6 +123,32 @@ export function deriveReviewActionPath(input) {
         : null,
       nextRoomNeedingReview,
       primaryAction: { label: "Imported", action: "none", disabled: true },
+      secondaryAction: null,
+    };
+  }
+
+  // ── Final review decisions (all verified + saved, decisions pending) ─────
+  const pendingDecisions = input.pendingDecisionCount ?? 0;
+  if (
+    allRoomsVerified &&
+    !reviewNotSaved &&
+    pendingDecisions > 0 &&
+    !input.showApprovedInUi &&
+    !input.approvalStale
+  ) {
+    return {
+      phase: "review_decisions",
+      statusMessage: `${pendingDecisions} decision${pendingDecisions !== 1 ? "s" : ""} required before approval.`,
+      roomProgress,
+      selectedRoom: selectedRoom
+        ? { roomId: selectedRoom.roomId, roomName: selectedRoom.roomName, verified: selectedVerified }
+        : null,
+      nextRoomNeedingReview,
+      primaryAction: {
+        label: pendingDecisions === 1 ? "Accept and continue" : `Review ${pendingDecisions} decisions`,
+        action: "review_decisions",
+        disabled: false,
+      },
       secondaryAction: null,
     };
   }
