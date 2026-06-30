@@ -265,16 +265,34 @@ export async function importInternalEstimateFromTakeoff({
       revision_label: "R1",
       quote_number_base,
       is_current_revision: true,
-      source_takeoff_job_id: takeoffJobId,
-      source_takeoff_snapshot_id: snapshotId,
+      // source_takeoff_job_id and source_takeoff_snapshot_id are set via a
+      // best-effort UPDATE below so the INSERT does not fail when the
+      // eliteos_takeoff_import_traceability migration has not yet been applied.
+      // Traceability is always preserved in calculation_snapshot.internal_ui.takeoff_import.
     },
   });
 
+  // Set quote_family_root_id now that we have the new quoteId.
   await db
     .from("quote_headers")
     .update({
       quote_family_root_id: quoteId,
       updated_at: now,
+    })
+    .eq("id", quoteId)
+    .eq("quote_source", "internal_quote");
+
+  // Best-effort: write takeoff traceability FK columns introduced by
+  // eliteos_takeoff_import_traceability.sql. This silently no-ops (PostgREST
+  // returns an error we intentionally ignore) when the migration has not yet
+  // been applied; the data is already preserved in the calculation_snapshot JSONB.
+  // Once the migration is applied and the server restarts, these columns are
+  // automatically populated on every subsequent import.
+  await db
+    .from("quote_headers")
+    .update({
+      source_takeoff_job_id: takeoffJobId,
+      source_takeoff_snapshot_id: snapshotId,
     })
     .eq("id", quoteId)
     .eq("quote_source", "internal_quote");

@@ -884,7 +884,17 @@ export function attachInternalQuoteRoutes(app, deps) {
       res.status(201).json(result);
     } catch (e) {
       const status = e.statusCode ?? 500;
-      res.status(status).json({ ok: false, error: String(e?.message || e) });
+      const rawMessage = String(e?.message || e);
+      // Surface schema-mismatch errors from PostgREST with a clear, actionable message.
+      const isSchemaMismatch =
+        rawMessage.includes("schema cache") ||
+        rawMessage.includes("Could not find the") ||
+        rawMessage.includes("column") ||
+        (e?.code === "PGRST204" || e?.code === "42703");
+      const errorMessage = isSchemaMismatch
+        ? "Internal Estimate import schema is out of date — apply the eliteos_takeoff_import_traceability migration and restart the backend, then retry."
+        : rawMessage;
+      res.status(status).json({ ok: false, error: errorMessage });
     }
   });
 
