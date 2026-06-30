@@ -682,7 +682,8 @@ export default function TakeoffLabApp() {
         reviewStatus: workspaceReview?.reviewStatus ?? "needs_review",
         importStatus: takeoffImportStatus,
       });
-    } catch {
+    } catch (err) {
+      console.error("[AI Takeoff] evaluateTakeoffApprovalGate threw — gate is null until resolved:", err);
       return null;
     }
   }, [
@@ -778,10 +779,13 @@ export default function TakeoffLabApp() {
 
   const canApproveTakeoff = useMemo(() => {
     if (!takeoffJobId || !hasActiveSource) return false;
+    // Gate must have evaluated — null means it threw (silent catch). Block until gate succeeds.
+    // This fixes the regression where null gate → workflowState.canApprove = true (no blockers).
+    if (approvalGate === null) return false;
     if (workspaceReview?.reviewStatus === "approved" && !hasSaveableChanges) return false;
     // Use canonical workflow state canApprove so diagnostics-only blockers don't block.
     return Boolean(workflowState?.canApprove);
-  }, [takeoffJobId, hasActiveSource, workspaceReview?.reviewStatus, hasSaveableChanges, workflowState]);
+  }, [takeoffJobId, hasActiveSource, approvalGate, workspaceReview?.reviewStatus, hasSaveableChanges, workflowState]);
 
   const canImportToEstimate = useMemo(() => {
     if (takeoffImportStatus === "imported") return false;
@@ -791,15 +795,15 @@ export default function TakeoffLabApp() {
   const approveBlockedReason = useMemo(() => {
     if (!takeoffJobId || !hasActiveSource) return "Load a takeoff workspace first.";
     if (workspaceReview?.reviewStatus === "approved" && !hasSaveableChanges) return "This takeoff is already approved.";
-    // Show hard blockers first; then pending decisions; then all gate blockers as fallback.
+    // Gate null means evaluation threw — surface that so the estimator knows to reload.
+    if (approvalGate === null) return "Approval gate did not evaluate — check console and try reloading.";
+    // Hard blockers first (must be fixed), then estimator decisions (must be accepted).
     const firstHard = workflowState?.hardBlockers?.[0];
     if (firstHard) return firstHard.message;
     const firstDecision = workflowState?.estimatorDecisionsRequired?.[0];
     if (firstDecision) return `${firstDecision.title} — accept to proceed.`;
-    const first = approvalGate?.blockers?.[0];
-    if (first) return first.message;
     return null;
-  }, [takeoffJobId, hasActiveSource, workspaceReview?.reviewStatus, hasSaveableChanges, workflowState, approvalGate]);
+  }, [takeoffJobId, hasActiveSource, approvalGate, workspaceReview?.reviewStatus, hasSaveableChanges, workflowState]);
 
   // v6.2: Fabrication rule findings — computed from the current effective draft.
   // Passed to TakeoffQaGatePanel for the dedicated "Fabrication rules" subsection.
@@ -1772,6 +1776,20 @@ export default function TakeoffLabApp() {
           void handleSaveDraft();
           break;
         case "approve":
+          if (!canApproveTakeoff) {
+            // Workflow state says approval is blocked — scroll to the first decision card
+            // so the estimator sees what needs to be resolved.
+            const firstBlockerCard = document.querySelector(".takeoff-decision-card, .save-panel-blocked");
+            if (firstBlockerCard) {
+              firstBlockerCard.scrollIntoView({ behavior: "smooth", block: "center" });
+              (firstBlockerCard as HTMLElement).classList.add("takeoff-blocker-highlight");
+              window.setTimeout(
+                () => (firstBlockerCard as HTMLElement).classList.remove("takeoff-blocker-highlight"),
+                2200
+              );
+            }
+            return;
+          }
           if (unresolvedCount > 0) {
             if (
               !window.confirm(
@@ -1831,6 +1849,7 @@ export default function TakeoffLabApp() {
         case "verify_room":
         case "focus_blockers":
         case "next_room":
+        case "review_decisions":
           executeReviewPathAction(action);
           break;
         case "save":

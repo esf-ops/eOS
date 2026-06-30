@@ -192,6 +192,9 @@ export function buildTakeoffWorkflowState(input) {
     importStatus,
   } = input;
 
+  // A null gate means evaluation failed (threw) — treat as blocking until the gate succeeds.
+  // This fixes a regression where null gate → no blockers → canApprove incorrectly true.
+  const gateAvailable = approvalGate != null;
   const gateBlockers = approvalGate?.blockers ?? [];
   const excludedRoomIds = new Set(reviewState?.excludedRoomIds ?? []);
   const roomCompleteness = reviewState?.roomCompleteness ?? {};
@@ -264,7 +267,9 @@ export function buildTakeoffWorkflowState(input) {
   // ── canApprove (canonical — diagnostics do NOT block) ────────────────────
   // The gate's own canApprove blocks on ALL gate blockers including diagnostics.
   // Here we only block on hard blockers and pending decisions.
+  // gateAvailable MUST be true — a null gate (evaluation failed) always blocks approval.
   const canApprove =
+    gateAvailable &&
     hardBlockers.length === 0 &&
     estimatorDecisionsRequired.length === 0 &&
     reviewStatus !== "approved" &&

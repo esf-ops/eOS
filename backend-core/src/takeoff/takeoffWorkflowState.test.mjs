@@ -370,4 +370,63 @@ function baseInput(overrides = {}) {
   console.log("ok: T18 no included rooms — NO_ROOMS is hard blocker");
 }
 
+// ── T19: Null gate → canApprove must be false (regression guard) ──────────────
+// Root cause: when evaluateTakeoffApprovalGate() throws, the useMemo catch returns null.
+// Old canApproveTakeoff used approvalGate?.canApprove (undefined → false) so it was safe.
+// New canApproveTakeoff uses workflowState.canApprove which was true when gate is null
+// (no blockers → no hard blockers, no decisions → canApprove = true). Fixed by adding
+// gateAvailable check in canApprove computation.
+
+{
+  const state = buildTakeoffWorkflowState(
+    baseInput({
+      approvalGate: null,         // gate threw — treated as null by catch block
+      hasSavedResult: true,
+      hasSaveableChanges: false,
+      reviewStatus: "needs_review",
+      reviewState: { excludedRoomIds: [], roomCompleteness: { "kitchen-1": true } },
+    })
+  );
+
+  assert.equal(state.canApprove, false,
+    "T19 null gate must produce canApprove=false (regression: null gate must not enable approve)");
+  assert.equal(state.canImport, false, "T19 null gate canImport=false");
+  assert.equal(state.hardBlockers.length, 0, "T19 null gate has no hard blockers (they came from gate)");
+  assert.equal(state.estimatorDecisionsRequired.length, 0, "T19 null gate has no decisions");
+  console.log("ok: T19 null gate → canApprove false (regression guard)");
+}
+
+// ── T20: EVIDENCE_RECONCILIATION is classified as estimator decision, not hard blocker ─
+
+{
+  const state = buildTakeoffWorkflowState(
+    baseInput({
+      approvalGate: makeGate(["EVIDENCE_RECONCILIATION"]),
+    })
+  );
+
+  assert.equal(state.hardBlockers.length, 0, "T20 EVIDENCE_RECONCILIATION is not a hard blocker");
+  assert.equal(state.estimatorDecisionsRequired.length, 1, "T20 EVIDENCE_RECONCILIATION is a decision");
+  assert.equal(state.estimatorDecisionsRequired[0].code, "EVIDENCE_RECONCILIATION", "T20 correct decision code");
+  assert.equal(state.canApprove, false, "T20 pending decision blocks canApprove");
+  assert.equal(state.pendingDecisionCount, 1, "T20 pendingDecisionCount = 1");
+  console.log("ok: T20 EVIDENCE_RECONCILIATION → estimator decision, not hard blocker");
+}
+
+// ── T21: After EVIDENCE_RECONCILIATION is resolved (gate cleared it), canApprove = true ─
+
+{
+  // When flagResolutions clears EVIDENCE_RECONCILIATION, the gate won't emit it.
+  // Simulate by passing a gate with no blockers (as if reconciliation was cleared).
+  const state = buildTakeoffWorkflowState(
+    baseInput({
+      approvalGate: makeGate([]),   // gate cleared reconciliation via flagResolutions
+    })
+  );
+
+  assert.equal(state.estimatorDecisionsRequired.length, 0, "T21 no pending decisions after resolution");
+  assert.equal(state.canApprove, true, "T21 canApprove true after decision resolved");
+  console.log("ok: T21 cleared reconciliation decision → canApprove true");
+}
+
 console.log("\ntakeoffWorkflowState.test.mjs: all passed\n");
