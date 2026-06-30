@@ -1,0 +1,65 @@
+/**
+ * eliteOS canonical design tokens (Phase 1).
+ * Source of truth: app-home/src/ui/styles.css — see docs/eliteos/eliteos-ui-direction.md
+ */
+
+:root {
+  /* Core neutrals */
+  --eos-ink: #0b1a33;
+  --eos-ink-soft: #1e2b48;
+  --eos-ink-mid: #475067;
+  --eos-ink-muted: #6b7892;
+  --eos-ink-faint: #94a0b8;
+  --eos-line: rgba(11, 26, 51, 0.08);
+  --eos-line-strong: rgba(11, 26, 51, 0.14);
+
+  /* Surfaces */
+  --eos-bg: #f6f7fb;
+  --eos-bg-soft: #eef2f8;
+  --eos-surface: #ffffff;
+  --eos-surface-soft: rgba(255, 255, 255, 0.78);
+  --eos-surface-translucent: rgba(255, 255, 255, 0.6);
+
+  /* Brand accent */
+  --eos-accent: #a3132f;
+  --eos-accent-hover: #8e0f28;
+  --eos-accent-active: #79091e;
+  --eos-accent-soft: rgba(163, 19, 47, 0.08);
+  --eos-accent-ring: rgba(163, 19, 47, 0.35);
+
+  /* Status */
+  --eos-success: #0c6e3a;
+  --eos-success-soft: rgba(16, 122, 61, 0.10);
+  --eos-success-border: rgba(16, 122, 61, 0.22);
+  --eos-info: #1e4c92;
+  --eos-info-soft: rgba(46, 105, 184, 0.10);
+  --eos-info-border: rgba(46, 105, 184, 0.22);
+  --eos-warn: #7a4a10;
+  --eos-warn-soft: rgba(180, 92, 12, 0.10);
+  --eos-warn-border: rgba(180, 92, 12, 0.24);
+  --eos-danger: #a3132f;
+  --eos-danger-soft: rgba(163, 19, 47, 0.08);
+  --eos-danger-border: rgba(163, 19, 47, 0.24);
+
+  /* Radii */
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 18px;
+  --r-xl: 22px;
+
+  /* Shadows */
+  --sh-1: 0 1px 2px rgba(11, 26, 51, 0.04);
+  --sh-2: 0 4px 14px rgba(11, 26, 51, 0.06);
+  --sh-3: 0 10px 32px rgba(11, 26, 51, 0.08);
+  --sh-card: 0 1px 2px rgba(11, 26, 51, 0.04), 0 8px 26px rgba(11, 26, 51, 0.06);
+  --sh-card-hover: 0 2px 4px rgba(11, 26, 51, 0.06), 0 14px 38px rgba(11, 26, 51, 0.10);
+  --eos-shadow-sm: var(--sh-card);
+  --eos-shadow: var(--sh-card-hover);
+
+  /* Motion */
+  --eos-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --eos-ease-premium: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --eos-dur-1: 140ms;
+  --eos-dur-2: 220ms;
+  --eos-dur-lift: 260ms;
+}

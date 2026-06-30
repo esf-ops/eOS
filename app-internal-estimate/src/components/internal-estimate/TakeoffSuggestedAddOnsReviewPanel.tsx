@@ -1,3 +1,5 @@
+import EosPanelHead from "../../../../shared/eliteos-ui/EosPanelHead";
+import EosSectionCard from "../../../../shared/eliteos-ui/EosSectionCard";
 import React from "react";
 import type { TakeoffSuggestedAddOnReview, TakeoffSuggestedAddOnReviewStatus } from "../../lib/takeoffImportWorkflow";
 import { ADDON_CATALOG } from "@quote-lib/prototypeQuoteMath";
@@ -30,13 +32,11 @@ export default function TakeoffSuggestedAddOnsReviewPanel({ reviews, onChange, o
   const allDone = reviews.every((r) => r.status !== "pending");
 
   return (
-    <div className="ie-takeoff-addon-review card">
-      <div className="ie-takeoff-addon-review-head">
-        <h2 className="ie-section-title" style={{ margin: 0 }}>Suggested add-ons / cutouts from takeoff</h2>
-        <p className="muted small" style={{ margin: "0.25rem 0 0" }}>
-          Cutouts are fabrication add-ons — not material square footage deductions.
-        </p>
-      </div>
+    <EosSectionCard className="ie-takeoff-addon-review eos-takeoff-panel">
+      <EosPanelHead
+        title="Suggested add-ons / cutouts from takeoff"
+        subtitle="Cutouts are fabrication add-ons — not material square footage deductions."
+      />
       <ul className="ie-takeoff-addon-review-list">
         {reviews.map((review) => (
           <li key={review.key} className={`ie-takeoff-addon-review-item ie-takeoff-addon-review-item--${review.status}`}>
@@ -78,10 +78,12 @@ export default function TakeoffSuggestedAddOnsReviewPanel({ reviews, onChange, o
         ))}
       </ul>
       {onAllReviewed && !allDone ? (
-        <button type="button" className="btn secondary btn-sm" onClick={onAllReviewed}>
-          Mark all reviewed (ignored)
-        </button>
+        <div className="eos-action-row">
+          <button type="button" className="btn secondary btn-sm" onClick={onAllReviewed}>
+            Mark all reviewed (ignored)
+          </button>
+        </div>
       ) : null}
-    </div>
+    </EosSectionCard>
   );
 }

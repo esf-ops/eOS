@@ -1,3 +1,6 @@
+import EosAlertBanner from "../../../../shared/eliteos-ui/EosAlertBanner";
+import EosPanelHead from "../../../../shared/eliteos-ui/EosPanelHead";
+import EosSectionCard from "../../../../shared/eliteos-ui/EosSectionCard";
 import React from "react";
 import type { TakeoffMeasurementDeltaResult } from "@quote-lib/takeoffImportMeasurements";
 
@@ -31,7 +34,7 @@ function Row({
       <th scope="row">{label}</th>
       <td>{fmtSf(imported)}</td>
       <td>{fmtSf(current)}</td>
-      <td className={Math.abs(delta) > 0.001 ? "ie-takeoff-delta-changed" : undefined}>{fmtDelta(delta)}</td>
+      <td className={Math.abs(delta) > 0.001 ? "ie-takeoff-delta-changed eos-takeoff-delta-changed" : undefined}>{fmtDelta(delta)}</td>
     </tr>
   );
 }
@@ -39,16 +42,14 @@ function Row({
 export default function TakeoffMeasurementComparisonPanel({ deltas }: Props) {
   const { imported, current, delta, exceedsThreshold, thresholdSf } = deltas;
   return (
-    <div className="ie-takeoff-compare card">
-      <div className="ie-takeoff-compare-head">
-        <h2 className="ie-section-title" style={{ margin: 0 }}>Imported vs current measurements</h2>
-        {exceedsThreshold ? (
-          <span className="ie-takeoff-compare-warn" role="status">
-            Delta exceeds {thresholdSf} sf — review edited measurements
-          </span>
-        ) : null}
-      </div>
-      <table className="ie-takeoff-compare-table">
+    <EosSectionCard className="ie-takeoff-compare eos-takeoff-panel">
+      <EosPanelHead title="Imported vs current measurements" />
+      {exceedsThreshold ? (
+        <EosAlertBanner tone="warn" className="ie-takeoff-compare-warn">
+          Delta exceeds {thresholdSf} sf — review edited measurements
+        </EosAlertBanner>
+      ) : null}
+      <table className="ie-takeoff-compare-table eos-takeoff-table">
         <thead>
           <tr>
             <th scope="col" />
@@ -65,6 +66,6 @@ export default function TakeoffMeasurementComparisonPanel({ deltas }: Props) {
           <Row label="Combined" imported={imported.combinedSqft} current={current.combinedSqft} delta={delta.combinedSqft} />
         </tbody>
       </table>
-    </div>
+    </EosSectionCard>
   );
 }

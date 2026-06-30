@@ -37,18 +37,21 @@ import { validateTakeoffResult } from "@takeoff-core/takeoffValidator.mjs";
 import { planTakeoffImport } from "@takeoff-core/takeoffImportPlanner.mjs";
 import { evaluateTakeoffQaGate } from "@takeoff-core/takeoffQaGate.mjs";
 import { evaluateTakeoffApprovalGate } from "@takeoff-core/takeoffApprovalGate.mjs";
-import { deriveTakeoffWorkflowStatus, workflowStatusLabel } from "@takeoff-core/takeoffReviewStatus.mjs";
+import { deriveTakeoffWorkflowStatus } from "@takeoff-core/takeoffReviewStatus.mjs";
 import type { TakeoffResult, TakeoffArea, TakeoffRun } from "@takeoff-core/takeoffContract.mjs";
 import type { TakeoffComputedMeasurements } from "@takeoff-core/takeoffMeasurementCalc.mjs";
 import type { TakeoffValidationResult } from "@takeoff-core/takeoffValidator.mjs";
 import type { TakeoffImportPlan } from "@takeoff-core/takeoffImportPlanner.mjs";
-import TakeoffSummaryCards from "./components/TakeoffSummaryCards";
+import TakeoffMeasurementSummarySimple from "./components/TakeoffMeasurementSummarySimple";
+import TakeoffWorkflowStepper from "./components/TakeoffWorkflowStepper";
+import TakeoffPrimaryStatusCard from "./components/TakeoffPrimaryStatusCard";
+import TakeoffItemsToReviewPanel from "./components/TakeoffItemsToReviewPanel";
 import TakeoffRoomsReview from "./components/TakeoffRoomsReview";
 import TakeoffDiagnosticsPanel from "./components/TakeoffDiagnosticsPanel";
-import TakeoffImportPreview from "./components/TakeoffImportPreview";
-import TakeoffBetaBanner from "./components/TakeoffBetaBanner";
-import TakeoffFeedbackForm from "./components/TakeoffFeedbackForm";
-import TakeoffIssueReportModal from "./components/TakeoffIssueReportModal";
+import TakeoffImportPreview, { type TakeoffImportPreviewHandle } from "./components/TakeoffImportPreview";
+import TakeoffBetaBanner from "@eliteos-ui/TakeoffBetaBanner";
+import TakeoffFeedbackForm from "@eliteos-ui/TakeoffFeedbackForm";
+import TakeoffIssueReportModal from "@eliteos-ui/TakeoffIssueReportModal";
 import TakeoffBetaQaPanel from "./components/TakeoffBetaQaPanel";
 import TakeoffImportReadinessPanel from "./components/TakeoffImportReadinessPanel";
 import TakeoffRoomCompletenessPanel from "./components/TakeoffRoomCompletenessPanel";
@@ -70,7 +73,14 @@ import type { DimensionEvidence } from "./components/TakeoffDimensionEvidencePan
 import TakeoffEvidenceTracePanel from "./components/TakeoffEvidenceTracePanel";
 import TakeoffReviewWorkbench, { countUnresolvedWorkbenchIssues } from "./components/TakeoffReviewWorkbench";
 import TakeoffValidationFixPanel from "./components/TakeoffValidationFixPanel";
-import TakeoffWorkflowExplainer from "./components/TakeoffWorkflowExplainer";
+import {
+  deriveCurrentWorkflowStep,
+  deriveWorkflowGuidance,
+  isWorkflowStepComplete,
+  stepTaskTitle,
+  unifiedStatusLabel,
+  type PrimaryCtaConfig,
+} from "./lib/takeoffWorkflowUi";
 import { reconcileRunsWithEvidence } from "@takeoff-core/takeoffEvidenceRunReconciliation.mjs";
 import { evaluateTakeoffFabricationRules } from "@takeoff-core/takeoffFabricationRules.mjs";
 import { makeTakeoffRun, makeTakeoffRoom } from "@takeoff-core/takeoffContract.mjs";
@@ -385,6 +395,8 @@ export default function TakeoffLabApp() {
   // ── Copy feedback ─────────────────────────────────────────────────────────
   const [copyFeedback, setCopyFeedback] = useState<"summary" | "json" | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const planSectionRef = useRef<HTMLDivElement>(null);
+  const importPreviewRef = useRef<TakeoffImportPreviewHandle>(null);
 
   // ── Review workbench state (v6.1) ─────────────────────────────────────────
   /** Run IDs excluded by the estimator — filtered from computation but kept in editDraft */
@@ -488,14 +500,6 @@ export default function TakeoffLabApp() {
    */
   const isWorkspaceHydrating = isWorkspaceRoute && (
     !authChecked || (Boolean(authToken) && workspaceBoot === "loading" && !planFileMeta)
-  );
-
-  /** Compact hero + workflow when reviewing a workspace or active measurements. */
-  const useCompactHero = isWorkspaceRoute || Boolean(authToken && hasActiveSource);
-
-  /** Session card once workspace metadata is known (or load failed). */
-  const showSessionCard = Boolean(
-    authToken && isWorkspaceRoute && !isWorkspaceHydrating && (planFileMeta || workspaceBoot === "error")
   );
 
   /** True when the Spec 73 demo sample is explicitly loaded — show demo badge. */
@@ -619,11 +623,6 @@ export default function TakeoffLabApp() {
       approvalGate,
     }),
     [approvalGate, workspaceReview, savedAt, takeoffImportStatus, hasSaveableChanges]
-  );
-
-  const workflowLabel = useMemo(
-    () => workflowStatusLabel(workflowStatus, { hasBlockers: (approvalGate?.blockers.length ?? 0) > 0 }),
-    [workflowStatus, approvalGate]
   );
 
   const canApproveTakeoff = useMemo(() => {
@@ -1306,14 +1305,6 @@ export default function TakeoffLabApp() {
     },
   ];
 
-  const takeoffStatusSlot = (
-    <div className="takeoff-topbar-status" aria-label="Takeoff lab boundaries">
-      <span className="takeoff-topbar-pill takeoff-topbar-pill--lab">Review → Import</span>
-      <span className="takeoff-topbar-pill takeoff-topbar-pill--safe">Approved snapshots only</span>
-      <span className="takeoff-topbar-pill takeoff-topbar-pill--beta">Beta</span>
-    </div>
-  );
-
   // ── Derived display values ────────────────────────────────────────────────
   const { result, computed, validation, importPlan } = activeState;
 
@@ -1321,7 +1312,7 @@ export default function TakeoffLabApp() {
   const isActiveReviewMode = Boolean(takeoffJobId && hasActiveSource && authToken);
   const useWorkspaceSourceSection = Boolean(isWorkspaceRoute && takeoffJobId);
   /** Deep-linked workspace requires sign-in before showing upload-first source UI. */
-  const showSourcePlanSection = Boolean(authToken || !isWorkspaceRoute);
+  const showSourcePlanSectionBase = Boolean(authToken || !isWorkspaceRoute);
   const hasBlockingValidation = Boolean(
     hasActiveSource && (validation.hasErrors || (validation.errorCount ?? 0) > 0)
   );
@@ -1330,104 +1321,228 @@ export default function TakeoffLabApp() {
   const showApprovedInUi = workflowStatus === "approved_for_import" && !approvalStale;
   const hasQaBlocker = qaGate?.status === "do_not_import";
 
-  const reviewSections = hasActiveSource ? (
+  const currentWorkflowStep = useMemo(
+    () =>
+      deriveCurrentWorkflowStep({
+        hasPlanFile: Boolean(planFileMeta),
+        hasActiveSource,
+        workflowStatus,
+        approvalStale,
+      }),
+    [planFileMeta, hasActiveSource, workflowStatus, approvalStale]
+  );
+
+  const workflowStepComplete = useCallback(
+    (step: Parameters<typeof isWorkflowStepComplete>[0]) =>
+      isWorkflowStepComplete(step, {
+        hasPlanFile: Boolean(planFileMeta),
+        hasActiveSource,
+        workflowStatus,
+        approvalStale,
+      }),
+    [planFileMeta, hasActiveSource, workflowStatus, approvalStale]
+  );
+
+  const workflowGuidance = useMemo(
+    () =>
+      deriveWorkflowGuidance({
+        step: currentWorkflowStep,
+        workflowStatus,
+        approvalStale,
+        blockerCount: approvalGate?.blockers.length ?? 0,
+        unresolvedWorkbenchCount: unresolvedCount,
+        hasBlockingValidation,
+        hasQaBlocker,
+        canApprove: canApproveTakeoff,
+        canImport: canImportToEstimate,
+        saveStatus,
+        approveStatus,
+        importStatus: importJobStatus,
+        showApprovedInUi,
+      }),
+    [
+      currentWorkflowStep,
+      workflowStatus,
+      approvalStale,
+      approvalGate,
+      unresolvedCount,
+      hasBlockingValidation,
+      hasQaBlocker,
+      canApproveTakeoff,
+      canImportToEstimate,
+      saveStatus,
+      approveStatus,
+      importJobStatus,
+      showApprovedInUi,
+    ]
+  );
+
+  const handlePrimaryWorkflowAction = useCallback(
+    (action: PrimaryCtaConfig["action"]) => {
+      switch (action) {
+        case "upload":
+        case "generate":
+          planSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+          break;
+        case "save":
+          if (unresolvedCount > 0) {
+            if (
+              !window.confirm(
+                `${unresolvedCount} review item${unresolvedCount !== 1 ? "s" : ""} are still unresolved. Save anyway? They should be resolved before approval.`
+              )
+            ) {
+              return;
+            }
+          }
+          void handleSaveDraft();
+          break;
+        case "approve":
+          if (unresolvedCount > 0) {
+            if (
+              !window.confirm(
+                `${unresolvedCount} review item${unresolvedCount !== 1 ? "s" : ""} are still unresolved. Approve anyway?`
+              )
+            ) {
+              return;
+            }
+          }
+          void handleApproveTakeoff();
+          break;
+        case "import":
+          importPreviewRef.current?.openImportConfirm();
+          break;
+        default:
+          break;
+      }
+    },
+    [unresolvedCount, handleSaveDraft, handleApproveTakeoff]
+  );
+
+  const workflowSecondaryActions = useMemo(() => {
+    const actions: Array<{ label: string; onClick: () => void }> = [];
+    if (takeoffJobId && authToken) {
+      actions.push({ label: "Report issue", onClick: () => setIssueReportOpen(true) });
+    }
+    if (takeoffJobId) {
+      actions.push({ label: "Start new takeoff", onClick: handleStartNewTakeoff });
+    }
+    return actions;
+  }, [takeoffJobId, authToken, handleStartNewTakeoff]);
+
+  const workflowStatusFooter = (
     <>
-          {isActiveReviewMode && (
-            <div className="takeoff-active-review-banner" role="status">
-              <div className="takeoff-active-review-banner-main">
-                <h2 className="takeoff-active-review-title">Active takeoff review</h2>
-                <p className="takeoff-active-review-next">
-                  {showApprovedInUi
-                    ? "Approved for import — create an Internal Estimate draft with verified measurements."
-                    : approvalStale
-                      ? "Approved takeoff has unsaved edits — save reviewed draft, then re-approve."
-                      : hasBlockingValidation || hasQaBlocker
-                      ? "Fix validation and QA blockers below, then approve this takeoff."
-                      : unresolvedCount > 0
-                        ? "Complete the review checklist, then save and approve."
-                        : "Review measurements beside the plan, then save and approve this takeoff."}
-                </p>
-              </div>
-              {planFilename ? (
-                <p className="takeoff-active-review-file">{planFilename}</p>
-              ) : null}
-              {takeoffJobId && authToken ? (
-                <button type="button" className="btn secondary btn-sm" onClick={() => setIssueReportOpen(true)}>
-                  Report takeoff issue
-                </button>
-              ) : null}
-            </div>
-          )}
+      {hasEdits ? (
+        <p className="save-panel-note">Unsaved edits — saving records a correction audit entry.</p>
+      ) : null}
+      {savedAt ? (
+        <p className="save-panel-last-saved">
+          Last saved:{" "}
+          <strong>
+            {new Date(savedAt).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}
+          </strong>
+        </p>
+      ) : null}
+      {!canApproveTakeoff && approveBlockedReason && hasActiveSource && !showApprovedInUi ? (
+        <p className="save-panel-blocked" role="note">
+          Approval blocked: {approveBlockedReason}
+        </p>
+      ) : null}
+      {saveMsg ? (
+        <p
+          className={`save-panel-msg${saveStatus === "error" ? " save-panel-msg--error" : saveStatus === "saved" ? " save-panel-msg--saved" : ""}`}
+          role="status"
+          aria-live="polite"
+        >
+          {saveStatus === "saved" ? "✓ " : saveStatus === "error" ? "✗ " : ""}
+          {saveMsg}
+        </p>
+      ) : null}
+      {approveMsg ? (
+        <p
+          className={`save-panel-msg${approveStatus === "error" ? " save-panel-msg--error" : approveStatus === "approved" ? " save-panel-msg--saved" : ""}`}
+          role="status"
+          aria-live="polite"
+        >
+          {approveStatus === "approved" ? "✓ " : approveStatus === "error" ? "✗ " : ""}
+          {approveMsg}
+        </p>
+      ) : null}
+      {importJobMsg ? (
+        <p
+          className={`save-panel-msg${importJobStatus === "error" ? " save-panel-msg--error" : importJobStatus === "done" ? " save-panel-msg--saved" : ""}`}
+          role="status"
+          aria-live="polite"
+        >
+          {importJobMsg}
+        </p>
+      ) : null}
+    </>
+  );
 
-          <TakeoffBetaBanner />
+  const suggestedAddOnsForReview =
+    (approvedImportPayload as { suggestedAddOns?: Array<{ label: string; reviewRequired?: boolean }> } | null)
+      ?.suggestedAddOns ?? [];
 
-          {/* ── 1. Measurement summary ──────────────────────────────────── */}
+  /** Upload/generate steps embed plan file controls in the task panel. */
+  const embedPlanInTaskPanel =
+    Boolean(authToken) &&
+    !isWorkspaceHydrating &&
+    (currentWorkflowStep === "upload" || currentWorkflowStep === "generate");
+
+  const showSourcePlanSection = showSourcePlanSectionBase && !embedPlanInTaskPanel && !hasActiveSource;
+
+  const takeoffStatusSlot = authToken ? (
+    <span className="takeoff-topbar-pill takeoff-topbar-pill--status takeoff-topbar-pill--lab">
+      {hasActiveSource || takeoffJobId
+        ? unifiedStatusLabel(workflowStatus, { approvalStale })
+        : "Draft"}
+    </span>
+  ) : null;
+
+  const workflowStatusCard = (
+    <TakeoffPrimaryStatusCard
+      taskTitle={stepTaskTitle(currentWorkflowStep)}
+      statusLabel={workflowGuidance.statusLabel}
+      statusHint={workflowGuidance.statusHint}
+      nextAction={workflowGuidance.nextAction}
+      primaryCta={{
+        ...workflowGuidance.primaryCta,
+        title: workflowGuidance.primaryCta.action === "approve" ? approveBlockedReason ?? undefined : undefined,
+      }}
+      onPrimaryAction={handlePrimaryWorkflowAction}
+      secondaryActions={workflowSecondaryActions}
+      footerNotes={hasActiveSource || takeoffJobId ? workflowStatusFooter : undefined}
+    />
+  );
+
+  const reviewSections = hasActiveSource ? (
+    <div className="takeoff-task-panel">
+      {workflowStatusCard}
+
+      {(currentWorkflowStep === "review" || currentWorkflowStep === "approve") && (
+        <>
+          <TakeoffMeasurementSummarySimple computed={computed} />
+          {approvalGate ? (
+            <TakeoffItemsToReviewPanel
+              blockers={approvalGate.blockers}
+              suggestedAddOns={suggestedAddOnsForReview}
+            />
+          ) : null}
           <section className="lab-section lab-section--review-primary">
-            <h2 className="lab-section-title">Measurement summary</h2>
-            <TakeoffSummaryCards
-              computed={computed}
-              importPlan={importPlan}
-              reviewStatus={workspaceReview?.reviewStatus}
+            <TakeoffRoomCompletenessPanel
+              editDraft={editDraft}
+              roomCompleteness={roomCompleteness}
+              onSetRoomComplete={handleSetRoomComplete}
+              onPatchRoom={handlePatchRoom}
+              onAddRoom={handleAddRoom}
             />
           </section>
-
-          {/* ── 2. Takeoff QA result ─────────────────────────────────────── */}
-          {qaGate && (
-            <section className="lab-section lab-section--review-primary">
-              <h2 className="lab-section-title">QA &amp; blockers</h2>
-              <TakeoffQaGatePanel qaGate={qaGate} fabricationFindings={fabricationFindings.length > 0 ? fabricationFindings : undefined} />
-            </section>
-          )}
-
-          {/* ── 3. Plan notes & AI review flags ──────────────────────────── */}
-          {(() => {
-            const notes = gatherReviewNotes(result);
-            if (notes.length === 0) return null;
-
-            // Separate notes into categories by heuristic keywords
-            const flagKeywords = /\b(assumed?|unclear|uncertain|ambiguous|estimate|inferred?|to reconcile|duplicate|missing|conflict|review|check|verify|note:|warning|caution)\b/i;
-            const planNotes   = notes.filter((n) => !flagKeywords.test(n));
-            const reviewFlags = notes.filter((n) =>  flagKeywords.test(n));
-
-            return (
-              <section className="lab-section">
-                <h2 className="lab-section-title">Plan notes &amp; AI flags</h2>
-                <div className="ai-review-notes lab-card ai-review-notes--compact">
-                  {reviewFlags.length > 0 && (
-                    <>
-                      <p className="ai-review-notes-category ai-review-notes-category--flags">AI flags — review before saving</p>
-                      <ul className="ai-review-notes-list ai-review-notes-list--flags">
-                        {reviewFlags.map((note, i) => (
-                          <li key={i} className="ai-review-notes-item ai-review-notes-item--flag">{note}</li>
-                        ))}
-                      </ul>
-                    </>
-                  )}
-                  {planNotes.length > 0 && (
-                    <details className="ai-review-notes-plan-details" open={reviewFlags.length === 0}>
-                      <summary className="ai-review-notes-plan-summary">
-                        Plan notes ({planNotes.length})
-                      </summary>
-                      <ul className="ai-review-notes-list">
-                        {planNotes.map((note, i) => (
-                          <li key={i} className="ai-review-notes-item ai-review-notes-item--info">{note}</li>
-                        ))}
-                      </ul>
-                    </details>
-                  )}
-                </div>
-              </section>
-            );
-          })()}
-
-          {/* ── 4. Review measurements (PRIMARY) ─────────────────────────── */}
           <section className="lab-section lab-section--review-primary">
             <div className="lab-section-header">
               <div>
-                <h2 className="lab-section-title" style={{ margin: 0 }}>Review measurements</h2>
+                <h2 className="lab-section-title" style={{ margin: 0 }}>Measurement review</h2>
                 <p className="lab-section-desc" style={{ marginTop: 4, marginBottom: 0 }}>
                   Edit dimensions, exclude incorrect runs, or mark flagged items reviewed.
-                  The measurement totals above update instantly.
                 </p>
               </div>
               {hasEdits && (
@@ -1456,202 +1571,145 @@ export default function TakeoffLabApp() {
               onMarkEvidenceReviewed={handleMarkEvidenceReviewed}
             />
           </section>
+        </>
+      )}
 
-          {/* ── Room completeness checklist ──────────────────────────────── */}
-          <section className="lab-section lab-section--review-primary">
-            <TakeoffRoomCompletenessPanel
-              editDraft={editDraft}
-              roomCompleteness={roomCompleteness}
-              onSetRoomComplete={handleSetRoomComplete}
-              onPatchRoom={handlePatchRoom}
-              onAddRoom={handleAddRoom}
+      {currentWorkflowStep === "import" && (
+        <>
+          <TakeoffMeasurementSummarySimple computed={computed} />
+          <TakeoffImportPreview
+            ref={importPreviewRef}
+            importPlan={importPlan}
+            importPayload={approvedImportPayload as Parameters<typeof TakeoffImportPreview>[0]["importPayload"]}
+            canImport={canImportToEstimate}
+            importBlockedReason={approvalGate?.blockers?.[0]?.message ?? importPlan.blockedReason ?? null}
+            onImport={handleImportToInternalEstimate}
+            onImportCancelled={handleImportCancelled}
+            onReportIssue={() => setIssueReportOpen(true)}
+            importStatus={importJobStatus}
+            importMessage={importJobMsg}
+            hideImportButton
+          />
+          {importJobStatus === "done" && takeoffJobId ? (
+            <TakeoffFeedbackForm
+              quoteId={importedQuoteId}
+              onSubmit={handleSubmitTakeoffFeedback}
+              busy={feedbackBusy}
+              submitted={feedbackSubmitted}
             />
-          </section>
+          ) : null}
+        </>
+      )}
 
-          {/* ── Import readiness ─────────────────────────────────────────── */}
-          {approvalGate && (
-            <section className="lab-section lab-section--review-primary">
-              <h2 className="lab-section-title">Import readiness</h2>
-              <TakeoffImportReadinessPanel
-                blockers={approvalGate.blockers}
-                canApprove={canApproveTakeoff}
-                canImport={canImportToEstimate}
-                workflowStatus={workflowStatus}
-                workflowLabel={workflowLabel}
-              />
-            </section>
-          )}
-
-          {/* ── 5. Review workflow ───────────────────────────────────────── */}
-          {takeoffJobId && authToken && (
-            <section className="lab-section lab-section--review-actions">
-              <div
-                className={`save-panel lab-card save-panel--action-bar${
-                  !showApprovedInUi && (!canApproveTakeoff || hasBlockingValidation || hasQaBlocker)
-                    ? " save-panel--blocked"
-                    : ""
-                }`}
-              >
-                <div className="save-action-bar">
-                  <div className="save-action-bar-status-row">
-                    <div className="save-action-bar-field">
-                      <span className="save-action-bar-label">Status</span>
-                      <span className={`save-status-chip${showApprovedInUi ? " save-status-chip--approved" : " save-status-chip--review"}`}>
-                        {showApprovedInUi ? "Approved for Import" : approvalStale ? "Needs re-approval" : workflowLabel}
-                      </span>
-                    </div>
-                    {!showApprovedInUi ? (
-                      <div className="save-action-bar-field save-action-bar-field--grow">
-                        <span className="save-action-bar-label">Next step</span>
-                        <span className="save-action-bar-next-text">
-                          {hasBlockingValidation || hasQaBlocker
-                            ? "Resolve validation blockers, then save and approve."
-                            : unresolvedCount > 0
-                              ? "Review flagged items, save, then approve."
-                              : "Save your review, then approve this takeoff."}
-                        </span>
-                      </div>
-                    ) : (
-                      <div className="save-action-bar-field save-action-bar-field--grow">
-                        <span className="save-action-bar-next-text save-action-bar-next-text--approved">
-                          Approved — import into Internal Estimate when ready.
-                          {workspaceReview?.approvedAt ? (
-                            <>
-                              {" "}
-                              ({new Date(workspaceReview.approvedAt).toLocaleString(undefined, {
-                                dateStyle: "short",
-                                timeStyle: "short",
-                              })})
-                            </>
-                          ) : null}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="save-action-bar-buttons">
-                    <button
-                      type="button"
-                      className="save-panel-btn save-panel-btn--secondary"
-                      disabled={saveStatus === "saving" || approveStatus === "approving"}
-                      onClick={() => {
-                        if (unresolvedCount > 0) {
-                          if (!window.confirm(
-                            `${unresolvedCount} review item${unresolvedCount !== 1 ? "s" : ""} are still unresolved. Save anyway? They should be resolved before approval.`
-                          )) return;
-                        }
-                        void handleSaveDraft();
-                      }}
-                    >
-                      {saveStatus === "saving" ? "Saving…" : "Save reviewed draft"}
-                    </button>
-                    <button
-                      type="button"
-                      className="save-panel-btn save-panel-btn--approve"
-                      disabled={!canApproveTakeoff || approveStatus === "approving" || saveStatus === "saving" || showApprovedInUi}
-                      title={approveBlockedReason ?? undefined}
-                      onClick={() => {
-                        if (unresolvedCount > 0) {
-                          if (!window.confirm(
-                            `${unresolvedCount} review item${unresolvedCount !== 1 ? "s" : ""} are still unresolved. Approve anyway?`
-                          )) return;
-                        }
-                        void handleApproveTakeoff();
-                      }}
-                    >
-                      {approveStatus === "approving" ? "Approving…" : "Approve takeoff"}
-                    </button>
-                  </div>
-                </div>
-
-                {unresolvedCount > 0 && !showApprovedInUi && (
-                  <div className="save-panel-info-note">
-                    <span className="save-panel-info-icon">ℹ</span>
-                    <span>
-                      {unresolvedCount} review checklist item{unresolvedCount !== 1 ? "s" : ""} still open — you can save now, but resolve before approval.
-                    </span>
-                  </div>
-                )}
-                {excludedRunIds.size > 0 && (
-                  <div className="save-panel-info-note">
-                    <span className="save-panel-info-icon">ℹ</span>
-                    <span>
-                      {excludedRunIds.size} excluded run{excludedRunIds.size !== 1 ? "s" : ""} will not be saved.
-                    </span>
-                  </div>
-                )}
-                {hasEdits ? (
-                  <p className="save-panel-note">Unsaved edits — saving records a correction audit entry.</p>
-                ) : null}
-                {savedAt ? (
-                  <p className="save-panel-last-saved">
-                    Last saved:{" "}
-                    <strong>{new Date(savedAt).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}</strong>
-                  </p>
-                ) : null}
-                {!canApproveTakeoff && approveBlockedReason && hasActiveSource && !showApprovedInUi ? (
-                  <p className="save-panel-blocked" role="note">
-                    Approval blocked: {approveBlockedReason}
-                  </p>
-                ) : null}
-                {saveMsg && (
-                  <p
-                    className={`save-panel-msg${saveStatus === "error" ? " save-panel-msg--error" : saveStatus === "saved" ? " save-panel-msg--saved" : ""}`}
-                    role="status"
-                    aria-live="polite"
-                  >
-                    {saveStatus === "saved" ? "✓ " : saveStatus === "error" ? "✗ " : ""}
-                    {saveMsg}
-                  </p>
-                )}
-                {approveMsg && (
-                  <p
-                    className={`save-panel-msg${approveStatus === "error" ? " save-panel-msg--error" : approveStatus === "approved" ? " save-panel-msg--saved" : ""}`}
-                    role="status"
-                    aria-live="polite"
-                  >
-                    {approveStatus === "approved" ? "✓ " : approveStatus === "error" ? "✗ " : ""}
-                    {approveMsg}
-                  </p>
-                )}
-              </div>
-            </section>
-          )}
-
-          {/* ════════════════════════════════════════════════════════════════
-              SECONDARY PANELS — collapsed by default
-              All panels below are for reference or debugging. They do not
-              affect the review workflow above.
-              ════════════════════════════════════════════════════════════════ */}
-          <div className="lab-secondary-group">
-            <p className="lab-secondary-group-label">Technical details</p>
-
-          {/* ── Evidence trace (auto-opens when issues exist) ─────────────── */}
-          {dimensionEvidence && (
-            <details
-              className="lab-section lab-section-collapsible"
-              open={hasEvidenceIssues || undefined}
-            >
+      <details className="takeoff-advanced lab-section lab-section-collapsible">
+        <summary className="lab-section-summary">
+          <span className="lab-section-title" style={{ margin: 0 }}>Advanced details</span>
+          <span className="lab-section-summary-note">Diagnostics, history, and technical metadata</span>
+        </summary>
+        <div className="takeoff-advanced-body">
+          {qaGate ? (
+            <details className="lab-section lab-section-collapsible">
               <summary className="lab-section-summary">
-                <span className="lab-section-title" style={{ margin: 0 }}>Evidence trace</span>
-                <span className="lab-section-summary-note">
-                  {fullReconciliation?.checksRan
-                    ? unresolvedCount > 0
-                      ? `${unresolvedCount} issue${unresolvedCount !== 1 ? "s" : ""} — check workbench checklist`
-                      : "all clear"
-                    : "per-run traceability to dimension evidence"}
-                </span>
+                <span className="lab-section-title" style={{ margin: 0 }}>QA signals &amp; checklist</span>
               </summary>
               <div style={{ marginTop: 12 }}>
-                <p className="lab-section-desc">
-                  Each final run traced against extracted dimension evidence. Use action buttons to apply evidence values or mark unused evidence reviewed.
-                </p>
+                <TakeoffQaGatePanel qaGate={qaGate} fabricationFindings={fabricationFindings.length > 0 ? fabricationFindings : undefined} />
+              </div>
+            </details>
+          ) : null}
+
+          {(() => {
+            const notes = gatherReviewNotes(result);
+            if (notes.length === 0) return null;
+            return (
+              <details className="lab-section lab-section-collapsible">
+                <summary className="lab-section-summary">
+                  <span className="lab-section-title" style={{ margin: 0 }}>Plan notes &amp; AI flags</span>
+                </summary>
+                <div style={{ marginTop: 12 }}>
+                  <ul className="ai-review-notes-list">
+                    {notes.map((note, i) => (
+                      <li key={i} className="ai-review-notes-item">{note}</li>
+                    ))}
+                  </ul>
+                </div>
+              </details>
+            );
+          })()}
+
+          {approvalGate && currentWorkflowStep !== "import" ? (
+            <details className="lab-section lab-section-collapsible">
+              <summary className="lab-section-summary">
+                <span className="lab-section-title" style={{ margin: 0 }}>Import readiness detail</span>
+              </summary>
+              <div style={{ marginTop: 12 }}>
+                <TakeoffImportReadinessPanel
+                  blockers={approvalGate.blockers}
+                  canApprove={canApproveTakeoff}
+                  canImport={canImportToEstimate}
+                  workflowStatus={workflowStatus}
+                  workflowLabel={unifiedStatusLabel(workflowStatus, { approvalStale })}
+                />
+              </div>
+            </details>
+          ) : null}
+
+          {currentWorkflowStep !== "import" ? (
+            <details className="lab-section lab-section-collapsible">
+              <summary className="lab-section-summary">
+                <span className="lab-section-title" style={{ margin: 0 }}>Import preview</span>
+              </summary>
+              <div style={{ marginTop: 12 }}>
+                <TakeoffImportPreview
+                  importPlan={importPlan}
+                  importPayload={approvedImportPayload as Parameters<typeof TakeoffImportPreview>[0]["importPayload"]}
+                  canImport={canImportToEstimate}
+                  importBlockedReason={approvalGate?.blockers?.[0]?.message ?? importPlan.blockedReason ?? null}
+                  onImport={handleImportToInternalEstimate}
+                  onImportCancelled={handleImportCancelled}
+                  onReportIssue={() => setIssueReportOpen(true)}
+                  importStatus={importJobStatus}
+                  importMessage={importJobMsg}
+                />
+              </div>
+            </details>
+          ) : null}
+
+          <details className="lab-section lab-section-collapsible">
+            <summary className="lab-section-summary">
+              <span className="lab-section-title" style={{ margin: 0 }}>Technical metadata</span>
+              <span className="lab-section-summary-note">
+                Schema v{result.schemaVersion}
+                {takeoffJobId ? ` · Workspace ${takeoffJobId.slice(0, 8)}…` : ""}
+              </span>
+            </summary>
+            <div style={{ marginTop: 12 }} className="lab-footer-note">
+              <span className="lab-footer-schema">Schema v{result.schemaVersion}</span>
+              {displayMode === "ai-draft" && aiDraftMeta ? (
+                <span className="lab-footer-safe">
+                  Provider: {aiDraftMeta.promptVersion ?? "?"} · {aiDraftMeta.modelUsed ?? "model unknown"}
+                </span>
+              ) : null}
+              {takeoffJobId ? (
+                <span className="lab-footer-safe">
+                  Workspace: <code className="lab-footer-job-id">{takeoffJobId}</code>
+                </span>
+              ) : null}
+            </div>
+          </details>
+
+          {dimensionEvidence && (
+            <details className="lab-section lab-section-collapsible">
+              <summary className="lab-section-summary">
+                <span className="lab-section-title" style={{ margin: 0 }}>Evidence tracing</span>
+              </summary>
+              <div style={{ marginTop: 12 }}>
                 <TakeoffEvidenceTracePanel
                   result={editDraft}
                   dimensionEvidence={dimensionEvidence}
                   actions={{
-                    onUseEvidenceValue:     handlePatchRunById,
-                    onAddEvidenceAsRun:     handleAddEvidenceAsRun,
+                    onUseEvidenceValue: handlePatchRunById,
+                    onAddEvidenceAsRun: handleAddEvidenceAsRun,
                     onMarkEvidenceReviewed: handleMarkEvidenceReviewed,
                     evidenceReviewState,
                   }}
@@ -1660,35 +1718,89 @@ export default function TakeoffLabApp() {
             </details>
           )}
 
-          {/* ── Rooms, areas & runs (legacy tree view) ───────────────────── */}
           <details className="lab-section lab-section-collapsible">
             <summary className="lab-section-summary">
-              <span className="lab-section-title" style={{ margin: 0 }}>Rooms, areas &amp; runs</span>
-              <span className="lab-section-summary-note">Tree view — use Review Workbench above for editing</span>
+              <span className="lab-section-title" style={{ margin: 0 }}>Validation diagnostics</span>
             </summary>
             <div style={{ marginTop: 12 }}>
-              <div className="lab-section-header" style={{ marginBottom: 8 }}>
-                <div className="edit-mode-controls">
-                  {hasEdits && (
-                    <button className="btn-edit-action btn-edit-action--reset" onClick={handleResetEdits} type="button">
-                      Reset edits
-                    </button>
-                  )}
-                  <button
-                    className={`btn-edit-toggle${isEditing ? " btn-edit-toggle--active" : ""}`}
-                    onClick={() => setIsEditing((v) => !v)}
-                    type="button"
-                  >
-                    {isEditing ? "✓ Done editing" : "✎ Edit measurements"}
-                  </button>
-                </div>
+              <TakeoffDiagnosticsPanel validation={validation} />
+            </div>
+          </details>
+
+          {takeoffJobId && authToken ? (
+            <details className="lab-section lab-section-collapsible">
+              <summary className="lab-section-summary">
+                <span className="lab-section-title" style={{ margin: 0 }}>Source plan file</span>
+                <span className="lab-section-summary-note">
+                  {planFilename ?? "Plan attached"} · upload or re-run AI extraction
+                </span>
+              </summary>
+              <div style={{ marginTop: 12 }}>
+                <TakeoffPlanFileSection
+                  takeoffJobId={takeoffJobId}
+                  token={authToken}
+                  onWorkspaceLoadStart={handleWorkspaceLoadStart}
+                  onWorkspaceCreated={handleWorkspaceCreated}
+                  onWorkspaceLoaded={handleWorkspaceLoaded}
+                  onWorkspaceLoadError={handleWorkspaceLoadError}
+                  onAiDraftGenerated={handleAiDraftGenerated}
+                  onPlanArchived={handleStartNewTakeoff}
+                  onProcessingTerminal={() => setHistoryRefreshKey((k) => k + 1)}
+                />
               </div>
-              {isEditing && (
-                <div className="edit-mode-banner">
-                  <span className="edit-mode-banner-icon">✎</span>
-                  <span>Edit mode — changes update totals instantly. Use Review Workbench above for run-level edits.</span>
-                </div>
-              )}
+            </details>
+          ) : null}
+
+          {takeoffJobId && authToken ? (
+            <details className="lab-section lab-section-collapsible">
+              <summary className="lab-section-summary">
+                <span className="lab-section-title" style={{ margin: 0 }}>Run history</span>
+              </summary>
+              <div style={{ marginTop: 12 }}>
+                <TakeoffRunHistoryPanel
+                  takeoffJobId={takeoffJobId}
+                  token={authToken}
+                  currentResultId={currentResultId}
+                  currentComputed={computed}
+                  refreshKey={historyRefreshKey}
+                  embedded
+                  onLoadRun={handleLoadHistoricalRun}
+                />
+              </div>
+            </details>
+          ) : null}
+
+          {pageInventory ? (
+            <details className="lab-section lab-section-collapsible">
+              <summary className="lab-section-summary">
+                <span className="lab-section-title" style={{ margin: 0 }}>Page inventory</span>
+              </summary>
+              <div style={{ marginTop: 12 }}>
+                <TakeoffPageInventoryPanel inventory={pageInventory} />
+              </div>
+            </details>
+          ) : null}
+
+          {dimensionEvidence ? (
+            <details className="lab-section lab-section-collapsible">
+              <summary className="lab-section-summary">
+                <span className="lab-section-title" style={{ margin: 0 }}>Dimension evidence</span>
+              </summary>
+              <div style={{ marginTop: 12 }}>
+                <TakeoffDimensionEvidencePanel
+                  evidence={dimensionEvidence}
+                  computed={computed}
+                  validation={validation}
+                />
+              </div>
+            </details>
+          ) : null}
+
+          <details className="lab-section lab-section-collapsible">
+            <summary className="lab-section-summary">
+              <span className="lab-section-title" style={{ margin: 0 }}>Rooms tree view</span>
+            </summary>
+            <div style={{ marginTop: 12 }}>
               <TakeoffRoomsReview
                 key={resetKey}
                 result={result}
@@ -1701,102 +1813,10 @@ export default function TakeoffLabApp() {
             </div>
           </details>
 
-          {/* ── Page inventory ───────────────────────────────────────────── */}
-          {pageInventory && (
-            <details className="lab-section lab-section-collapsible">
-              <summary className="lab-section-summary">
-                <span className="lab-section-title" style={{ margin: 0 }}>Page inventory</span>
-                <span className="lab-section-summary-note">Plan page classification</span>
-              </summary>
-              <div style={{ marginTop: 12 }}>
-                <TakeoffPageInventoryPanel inventory={pageInventory} />
-              </div>
-            </details>
-          )}
-
-          {/* ── Dimension evidence ───────────────────────────────────────── */}
-          {dimensionEvidence && (
-            <details className="lab-section lab-section-collapsible">
-              <summary className="lab-section-summary">
-                <span className="lab-section-title" style={{ margin: 0 }}>Dimension evidence</span>
-                <span className="lab-section-summary-note">Raw extracted dimensions from plan</span>
-              </summary>
-              <div style={{ marginTop: 12 }}>
-                <TakeoffDimensionEvidencePanel
-                  evidence={dimensionEvidence}
-                  computed={computed}
-                  validation={validation}
-                />
-              </div>
-            </details>
-          )}
-
-          {/* ── Validation diagnostics ───────────────────────────────────── */}
-          <details
-            className="lab-section lab-section-collapsible"
-            open={hasBlockingValidation || undefined}
-          >
-            <summary className="lab-section-summary">
-              <span className="lab-section-title" style={{ margin: 0 }}>Validation diagnostics</span>
-              <span className="lab-section-summary-note">
-                {validation.errorCount > 0
-                  ? `${validation.errorCount} error${validation.errorCount !== 1 ? "s" : ""}, ${validation.warningCount} warning${validation.warningCount !== 1 ? "s" : ""}`
-                  : validation.warningCount > 0
-                  ? `${validation.warningCount} warning${validation.warningCount !== 1 ? "s" : ""}`
-                  : "no errors"}
-              </span>
-            </summary>
-            <div style={{ marginTop: 12 }}>
-              <TakeoffDiagnosticsPanel validation={validation} />
-            </div>
-          </details>
-
-          {/* ── Import preview ───────────────────────────────────────────── */}
-          <details className="lab-section lab-section-collapsible">
-            <summary className="lab-section-summary">
-              <span className="lab-section-title" style={{ margin: 0 }}>Import preview</span>
-              <span className="lab-section-summary-note">
-                {showApprovedInUi
-                  ? canImportToEstimate
-                    ? "Ready to import"
-                    : takeoffImportStatus === "imported"
-                      ? "Already imported"
-                      : "Approved — resolve any stale edits"
-                  : importPlan.canImport
-                    ? `${importPlan.rooms.length} room${importPlan.rooms.length !== 1 ? "s" : ""} mapped`
-                    : "blocked — resolve issues first"}
-              </span>
-            </summary>
-            <div style={{ marginTop: 12 }}>
-              <TakeoffImportPreview
-                importPlan={importPlan}
-                importPayload={approvedImportPayload as Parameters<typeof TakeoffImportPreview>[0]["importPayload"]}
-                canImport={canImportToEstimate}
-                importBlockedReason={approvalGate?.blockers?.[0]?.message ?? importPlan.blockedReason ?? null}
-                onImport={handleImportToInternalEstimate}
-                onImportCancelled={handleImportCancelled}
-                onReportIssue={() => setIssueReportOpen(true)}
-                importStatus={importJobStatus}
-                importMessage={importJobMsg}
-              />
-              {importJobStatus === "done" && takeoffJobId ? (
-                <TakeoffFeedbackForm
-                  quoteId={importedQuoteId}
-                  onSubmit={handleSubmitTakeoffFeedback}
-                  busy={feedbackBusy}
-                  submitted={feedbackSubmitted}
-                />
-              ) : null}
-            </div>
-          </details>
-
-          </div>{/* end lab-secondary-group */}
-
           {authToken ? (
             <details className="lab-section lab-section-collapsible">
               <summary className="lab-section-summary">
                 <span className="lab-section-title" style={{ margin: 0 }}>Beta QA dashboard</span>
-                <span className="lab-section-summary-note">Staff-only imported takeoff metrics</span>
               </summary>
               <div style={{ marginTop: 12 }}>
                 <TakeoffBetaQaPanel authToken={authToken} />
@@ -1804,65 +1824,58 @@ export default function TakeoffLabApp() {
             </details>
           ) : null}
 
-          {/* ── Developer / benchmark tools (dev-only) ───────────────────── */}
-          {showDevTools && (
-          <details className="lab-section lab-section-collapsible lab-section-dev">
-            <summary className="lab-section-summary">
-              <span className="lab-section-title lab-section-title--dev" style={{ margin: 0 }}>Developer / benchmark tools</span>
-              <span className="lab-section-summary-note">Internal model testing only</span>
-            </summary>
-            <div style={{ marginTop: 12 }}>
-              <div className="dev-tools-notice" role="note">
-                Benchmark presets are for internal model testing only.
-                Estimator review should use the Review Workbench above.
-                {benchmarkQaContext && (
-                  <span className="dev-tools-active-badge"> · Benchmark active: {benchmarkQaContext.label}</span>
-                )}
-              </div>
-              <TakeoffBenchmarkPanel
-                computed={computed}
-                dimensionEvidence={dimensionEvidence}
-                validation={validation}
-                onBenchmarkEvaluated={setBenchmarkQaContext}
-              />
-            </div>
-          </details>
-          )}
-
-          {/* ── Debug JSON (dev-only) ─────────────────────────────────────── */}
-          {showDevTools && (
-          <section className="lab-section">
-            <TakeoffDebugPanel
-              result={result}
-              computed={computed}
-              validation={validation}
-              importPlan={importPlan}
-              pageInventory={pageInventory}
-              dimensionEvidence={dimensionEvidence}
-            />
-          </section>
-          )}
-
-          {/* Footer note */}
-          <div className="lab-footer-note">
-            <span className="lab-footer-schema">Schema v{result.schemaVersion}</span>
-            <span className="lab-footer-status">
-              Status: <strong className={`status-chip status-${result.status}`}>{result.status}</strong>
-            </span>
-            {takeoffJobId ? (
-              <span className="lab-footer-safe">
-                Workspace: <code className="lab-footer-job-id">{takeoffJobId}</code>
-              </span>
-            ) : (
-              <span className="lab-footer-safe">
-                Computations are deterministic and local.
-              </span>
-            )}
-          </div>
-
-
-    </>
+          {showDevTools ? (
+            <>
+              <details className="lab-section lab-section-collapsible lab-section-dev">
+                <summary className="lab-section-summary">
+                  <span className="lab-section-title lab-section-title--dev" style={{ margin: 0 }}>Developer / benchmark tools</span>
+                </summary>
+                <div style={{ marginTop: 12 }}>
+                  <TakeoffBenchmarkPanel
+                    computed={computed}
+                    dimensionEvidence={dimensionEvidence}
+                    validation={validation}
+                    onBenchmarkEvaluated={setBenchmarkQaContext}
+                  />
+                </div>
+              </details>
+              <section className="lab-section">
+                <TakeoffDebugPanel
+                  result={result}
+                  computed={computed}
+                  validation={validation}
+                  importPlan={importPlan}
+                  pageInventory={pageInventory}
+                  dimensionEvidence={dimensionEvidence}
+                />
+              </section>
+            </>
+          ) : null}
+        </div>
+      </details>
+    </div>
   ) : null;
+
+  const uploadGenerateTaskPanel = embedPlanInTaskPanel ? (
+    <div className="takeoff-task-panel">
+      {workflowStatusCard}
+      <div ref={planSectionRef}>
+        <TakeoffPlanFileSection
+          takeoffJobId={takeoffJobId}
+          token={authToken}
+          onWorkspaceLoadStart={handleWorkspaceLoadStart}
+          onWorkspaceCreated={handleWorkspaceCreated}
+          onWorkspaceLoaded={handleWorkspaceLoaded}
+          onWorkspaceLoadError={handleWorkspaceLoadError}
+          onAiDraftGenerated={handleAiDraftGenerated}
+          onPlanArchived={handleStartNewTakeoff}
+          onProcessingTerminal={() => setHistoryRefreshKey((k) => k + 1)}
+        />
+      </div>
+    </div>
+  ) : null;
+
+  const taskPanelContent = hasActiveSource ? reviewSections : uploadGenerateTaskPanel;
 
   return (
     <div className="shell page-ai-takeoff">
@@ -1889,68 +1902,19 @@ export default function TakeoffLabApp() {
         />
       )}
 
-      {/* ── Page intro + workflow explainer ───────────────────────── */}
-      <div className={`takeoff-page-hero${useCompactHero ? " takeoff-page-hero--compact" : ""}`} role="region" aria-label="AI Takeoff overview">
+      {/* ── Page intro + workflow stepper ─────────────────────────── */}
+      <div className="takeoff-page-hero takeoff-page-hero--compact" role="region" aria-label="AI Takeoff overview">
         <div className="takeoff-page-hero-inner">
           <div className="takeoff-page-hero-main">
-            {useCompactHero ? (
-              <h1 className="takeoff-page-heading takeoff-page-heading--compact">AI Takeoff review</h1>
-            ) : (
-              <>
-                <p className="takeoff-page-eyebrow">AI Takeoff Lab · {workspaceName}</p>
-                <h1 className="takeoff-page-heading">Review plan measurements before quoting</h1>
-                <p className="takeoff-page-desc">
-                  Upload a plan, generate an AI measurement draft, correct what the model missed,
-                  and approve a reviewed takeoff for your organization. This tool prepares measurements —
-                  it does not create quotes or import into Internal Estimate yet.
-                </p>
-              </>
-            )}
-            <TakeoffWorkflowExplainer compact={useCompactHero} />
+            <h1 className="takeoff-page-heading takeoff-page-heading--compact">AI Takeoff</h1>
+            <TakeoffBetaBanner compact />
+            {authToken && !isWorkspaceHydrating ? (
+              <TakeoffWorkflowStepper
+                currentStep={currentWorkflowStep}
+                isStepComplete={workflowStepComplete}
+              />
+            ) : null}
           </div>
-          {showSessionCard ? (
-            <aside className="takeoff-session-card" aria-label="Current session">
-              <p className="takeoff-session-label">Current session</p>
-              <p className="takeoff-session-filename" title={planFilename ?? result.source?.fileName ?? undefined}>
-                {planFilename ?? result.source?.fileName ?? "Active plan"}
-              </p>
-              <p className="takeoff-session-meta">
-                <span>{planFileRoleLabel(planFileMeta?.fileRole)}</span>
-                {takeoffJobId ? (
-                  <>
-                    <span className="takeoff-session-meta-sep" aria-hidden>·</span>
-                    <span className="takeoff-session-workspace">Workspace active</span>
-                  </>
-                ) : null}
-                {hasEdits ? (
-                  <>
-                    <span className="takeoff-session-meta-sep" aria-hidden>·</span>
-                    <span>Edited</span>
-                  </>
-                ) : null}
-              </p>
-              {displayMode === "ai-draft" && aiDraftMeta ? (
-                <p className="takeoff-session-model">
-                  {aiDraftMeta.promptVersion ?? "?"} · {aiDraftMeta.modelUsed ?? "model unknown"}
-                </p>
-              ) : null}
-              {takeoffJobId ? (
-                <button
-                  type="button"
-                  className="takeoff-session-new-btn"
-                  onClick={handleStartNewTakeoff}
-                  title="Clear this workspace from the screen and start a fresh takeoff (data is preserved)"
-                >
-                  Start new takeoff
-                </button>
-              ) : null}
-            </aside>
-          ) : isWorkspaceHydrating ? (
-            <aside className="takeoff-session-card takeoff-session-card--boot" aria-label="Loading session">
-              <p className="takeoff-session-label">Current session</p>
-              <p className="takeoff-session-filename takeoff-session-filename--loading">Loading workspace…</p>
-            </aside>
-          ) : null}
         </div>
       </div>
 
@@ -1958,7 +1922,7 @@ export default function TakeoffLabApp() {
       <main className="main" role="main">
         <div
           className={`lab-main-inner${
-            showPlanPreviewColumn && hasActiveSource ? " lab-main-inner--active-review" : ""
+            showPlanPreviewColumn ? " lab-main-inner--active-review" : ""
           }${takeoffJobId && planFileMeta ? " lab-main-inner--review" : ""}`}
         >
 
@@ -2052,20 +2016,13 @@ export default function TakeoffLabApp() {
                   />
                 </aside>
                 <div className="takeoff-review-main-col">
-                  {reviewSections ?? (
-                    <section className="lab-section lab-section--review-primary">
-                      <h2 className="lab-section-title">Review measurements</h2>
-                      <p className="lab-section-desc">
-                        Generate an AI draft from <strong>Source plan file</strong> below, or load a
-                        saved result from <strong>AI extraction history</strong>, to review measurements
-                        beside this plan.
-                      </p>
-                    </section>
-                  )}
+                  {taskPanelContent}
                 </div>
               </div>
             </div>
           ) : null}
+
+          {!showPlanPreviewColumn && taskPanelContent}
 
           {/* ── Takeoff runs inbox ─────────────────────────────────────── */}
           {authToken ? (
@@ -2224,8 +2181,6 @@ export default function TakeoffLabApp() {
           )}
 
           {/* ── Review without plan preview (fallback) ───────────────────── */}
-          {hasActiveSource && !showPlanPreviewColumn ? reviewSections : null}
-
           </div>
         </div>
       </main>

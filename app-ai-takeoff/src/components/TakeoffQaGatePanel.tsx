@@ -193,8 +193,7 @@ export default function TakeoffQaGatePanel({ qaGate, fabricationFindings }: Prop
           </span>
         )}
         <span className="qa-gate-footer-note">
-          Import to Internal Estimate is not yet enabled in v5.8.
-          This QA result is for estimator review guidance only.
+          Import creates an Internal Estimate draft after approval. This QA result is for estimator review guidance only.
         </span>
       </div>
     </div>

@@ -1,3 +1,5 @@
+import EosPanelHead from "../../../../shared/eliteos-ui/EosPanelHead";
+import EosSectionCard from "../../../../shared/eliteos-ui/EosSectionCard";
 import React from "react";
 
 export interface TakeoffImportChecklistItem {
@@ -29,17 +31,16 @@ export default function TakeoffImportCompletionChecklist({
   suggestedAddOnCount,
 }: Props) {
   return (
-    <div className="ie-takeoff-checklist card">
-      <div className="ie-takeoff-checklist-head">
-        <h2 className="ie-section-title" style={{ margin: 0 }}>Import completion checklist</h2>
-        <span className={`ie-takeoff-checklist-score${readyToCalculate ? " is-ready" : ""}`}>
-          {score}% · {readyToCalculate ? "Ready to calculate" : "Complete required fields"}
-        </span>
-      </div>
-      <ul className="ie-takeoff-checklist-list">
+    <EosSectionCard className="ie-takeoff-checklist eos-takeoff-panel">
+      <EosPanelHead
+        title="Import completion checklist"
+        status={`${score}% · ${readyToCalculate ? "Ready to calculate" : "Complete required fields"}`}
+        statusTone={readyToCalculate ? "success" : "warn"}
+      />
+      <ul className="ie-takeoff-checklist-list eos-checklist-list">
         {items.map((item) => (
-          <li key={item.key} className={`ie-takeoff-checklist-item${item.complete ? " is-done" : ""}`}>
-            <span className="ie-takeoff-checklist-mark" aria-hidden>{item.complete ? "✓" : "○"}</span>
+          <li key={item.key} className={`ie-takeoff-checklist-item eos-checklist-item${item.complete ? " is-done" : ""}`}>
+            <span className="ie-takeoff-checklist-mark eos-checklist-mark" aria-hidden>{item.complete ? "✓" : "○"}</span>
             <span className="ie-takeoff-checklist-label">{item.label}</span>
             {item.detail ? <span className="muted small">{item.detail}</span> : null}
           </li>
@@ -55,6 +56,6 @@ export default function TakeoffImportCompletionChecklist({
         <input type="checkbox" checked={notesReviewed} onChange={(e) => onMarkNotesReviewed(e.target.checked)} />
         Customer notes reviewed
       </label>
-    </div>
+    </EosSectionCard>
   );
 }

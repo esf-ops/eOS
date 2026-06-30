@@ -1,11 +1,12 @@
 import React, { useState } from "react";
-import type { TakeoffFeedbackPayload } from "../../lib/takeoffBeta";
+import type { TakeoffFeedbackPayload } from "./takeoffBetaCopy";
 
 interface Props {
   onSubmit: (payload: TakeoffFeedbackPayload) => Promise<void>;
   quoteId?: string | null;
   busy?: boolean;
   submitted?: boolean;
+  title?: string;
 }
 
 function YesNoRow({
@@ -20,11 +21,15 @@ function YesNoRow({
   disabled?: boolean;
 }) {
   return (
-    <div className="ie-takeoff-feedback-row">
+    <div className="eos-feedback-row takeoff-feedback-row ie-takeoff-feedback-row">
       <span>{label}</span>
-      <div className="ie-takeoff-feedback-yesno">
-        <button type="button" className={value === true ? "active" : ""} disabled={disabled} onClick={() => onChange(true)}>Yes</button>
-        <button type="button" className={value === false ? "active" : ""} disabled={disabled} onClick={() => onChange(false)}>No</button>
+      <div className="eos-feedback-yesno takeoff-feedback-yesno ie-takeoff-feedback-yesno">
+        <button type="button" className={value === true ? "active" : ""} disabled={disabled} onClick={() => onChange(true)}>
+          Yes
+        </button>
+        <button type="button" className={value === false ? "active" : ""} disabled={disabled} onClick={() => onChange(false)}>
+          No
+        </button>
       </div>
     </div>
   );
@@ -35,6 +40,7 @@ export default function TakeoffFeedbackForm({
   quoteId = null,
   busy = false,
   submitted = false,
+  title = "How was this AI takeoff?",
 }: Props) {
   const [helpful, setHelpful] = useState<boolean | null>(null);
   const [editedMeasurements, setEditedMeasurements] = useState<boolean | null>(null);
@@ -45,10 +51,7 @@ export default function TakeoffFeedbackForm({
   const [error, setError] = useState<string | null>(null);
 
   const complete =
-    helpful != null &&
-    editedMeasurements != null &&
-    missedRooms != null &&
-    misreadBacksplash != null;
+    helpful != null && editedMeasurements != null && missedRooms != null && misreadBacksplash != null;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -70,21 +73,25 @@ export default function TakeoffFeedbackForm({
   }
 
   if (submitted) {
-    return <p className="muted small ie-takeoff-feedback-done" role="status">Thanks — beta feedback recorded.</p>;
+    return (
+      <div className="eos-feedback-form takeoff-feedback takeoff-feedback--done ie-takeoff-feedback" role="status">
+        <p className="muted small">Thanks — beta feedback recorded.</p>
+      </div>
+    );
   }
 
   return (
-    <form className="ie-takeoff-feedback" onSubmit={handleSubmit}>
-      <p className="ie-takeoff-feedback-title">Beta feedback — how was this AI takeoff?</p>
+    <form className="eos-feedback-form takeoff-feedback ie-takeoff-feedback" onSubmit={handleSubmit}>
+      <p className="eos-feedback-title takeoff-feedback-title ie-takeoff-feedback-title">{title}</p>
       <YesNoRow label="Was the AI takeoff helpful?" value={helpful} onChange={setHelpful} disabled={busy} />
       <YesNoRow label="Did you edit measurements?" value={editedMeasurements} onChange={setEditedMeasurements} disabled={busy} />
       <YesNoRow label="Did AI miss rooms or pieces?" value={missedRooms} onChange={setMissedRooms} disabled={busy} />
       <YesNoRow label="Did AI misread backsplash?" value={misreadBacksplash} onChange={setMisreadBacksplash} disabled={busy} />
-      <label className="ie-takeoff-feedback-note">
+      <label className="takeoff-feedback-note ie-takeoff-feedback-note">
         <span>Optional note</span>
         <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} disabled={busy} />
       </label>
-      <label className="ie-takeoff-feedback-time">
+      <label className="takeoff-feedback-time ie-takeoff-feedback-time">
         <span>Estimated time saved (minutes)</span>
         <input type="number" min={0} step={1} value={timeSaved} onChange={(e) => setTimeSaved(e.target.value)} disabled={busy} />
       </label>

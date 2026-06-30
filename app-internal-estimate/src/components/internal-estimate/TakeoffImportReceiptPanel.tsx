@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { TAKEOFF_BETA_LABEL } from "../../lib/takeoffBeta";
+import TakeoffBetaBanner from "../../../../shared/eliteos-ui/TakeoffBetaBanner";
 
 export type TakeoffImportReceiptMeta = {
   status?: "active" | "detached" | string;
@@ -65,19 +65,14 @@ export default function TakeoffImportReceiptPanel({
   const canDetach = quoteStatus === "draft" && !detached && Boolean(onDetach);
 
   return (
-    <div className={`ie-takeoff-receipt${detached ? " ie-takeoff-receipt--detached" : ""}`} role="status">
-      {!detached ? (
-        <div className="ie-takeoff-beta-banner" role="note">
-          <span className="ie-takeoff-beta-badge">Beta</span>
-          <span>{TAKEOFF_BETA_LABEL}</span>
-        </div>
-      ) : null}
-      <div className="ie-takeoff-receipt-head">
+    <div className={`ie-takeoff-receipt eos-takeoff-receipt${detached ? " ie-takeoff-receipt--detached eos-takeoff-receipt--detached" : ""}`} role="status">
+      {!detached ? <TakeoffBetaBanner /> : null}
+      <div className="ie-takeoff-receipt-head eos-takeoff-receipt-head eos-panel-head">
         <div>
-          <p className="ie-takeoff-receipt-title">
+          <p className="ie-takeoff-receipt-title eos-takeoff-receipt-title eos-panel-title">
             {detached ? "Takeoff import detached" : "Imported from reviewed AI Takeoff"}
           </p>
-          <p className="ie-takeoff-receipt-sub muted small">
+          <p className="ie-takeoff-receipt-sub eos-panel-subtitle muted small">
             Measurements came from an approved takeoff snapshot — not raw AI output.
           </p>
         </div>
@@ -88,7 +83,7 @@ export default function TakeoffImportReceiptPanel({
         ) : null}
       </div>
 
-      <dl className="ie-takeoff-receipt-grid">
+      <dl className="ie-takeoff-receipt-grid eos-dl-grid">
         <div><dt>Plan</dt><dd>{meta.sourceFileName ?? "—"}</dd></div>
         <div><dt>Approved by</dt><dd>{meta.approvedBy ?? "—"}</dd></div>
         <div><dt>Approved at</dt><dd>{fmtWhen(meta.approvedAt)}</dd></div>
@@ -97,7 +92,7 @@ export default function TakeoffImportReceiptPanel({
         <div><dt>Imported</dt><dd>{fmtWhen(meta.importedAt)}</dd></div>
       </dl>
 
-      <div className="ie-takeoff-receipt-totals">
+      <div className="ie-takeoff-receipt-totals eos-inline-totals">
         <span>CT {fmtSf(meta.totals?.countertopSqft)}</span>
         <span>Std BS {fmtSf(meta.totals?.standardBacksplashSqft)}</span>
         <span>High BS {fmtSf(meta.totals?.highBacksplashSqft)}</span>
@@ -111,7 +106,7 @@ export default function TakeoffImportReceiptPanel({
         </p>
       )}
 
-      <div className="ie-takeoff-receipt-actions">
+      <div className="ie-takeoff-receipt-actions eos-action-row">
         {onOpenSourceDrawer ? (
           <button type="button" className="btn primary btn-sm" onClick={onOpenSourceDrawer}>
             Review plan side-by-side

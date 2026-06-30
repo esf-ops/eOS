@@ -229,7 +229,99 @@ html, body {
   text-transform: uppercase; color: var(--eos-ink-muted);
 }
 
-/* Workflow explainer */
+/* Workflow stepper (simplified) */
+.takeoff-wf-stepper { margin-top: 12px; }
+.takeoff-wf-stepper-list {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 4px;
+}
+.takeoff-wf-stepper-item {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px 4px 4px; border-radius: 999px;
+  font-size: 12px; font-weight: 650; color: var(--eos-ink-mid);
+  background: var(--eos-surface-soft); border: 1px solid var(--eos-line);
+}
+.takeoff-wf-stepper-item--complete {
+  color: var(--eos-success); border-color: var(--eos-success-border);
+  background: var(--eos-success-soft);
+}
+.takeoff-wf-stepper-item--current {
+  color: var(--eos-ink); border-color: var(--eos-accent);
+  background: var(--eos-accent-soft); box-shadow: 0 0 0 1px rgba(163,19,47,0.08);
+}
+.takeoff-wf-stepper-item--future { opacity: 0.55; }
+.takeoff-wf-stepper-marker {
+  width: 20px; height: 20px; border-radius: 999px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 800;
+  background: var(--eos-surface); border: 1px solid var(--eos-line);
+}
+.takeoff-wf-stepper-item--complete .takeoff-wf-stepper-marker {
+  background: var(--eos-success-soft); border-color: var(--eos-success-border); color: var(--eos-success);
+}
+.takeoff-wf-stepper-item--current .takeoff-wf-stepper-marker {
+  background: var(--eos-accent); border-color: var(--eos-accent); color: #fff;
+}
+.takeoff-wf-stepper-label { line-height: 1.2; }
+
+/* Primary status card */
+.takeoff-primary-status { display: flex; flex-direction: column; gap: 12px; }
+.takeoff-primary-status-step {
+  margin: 0 0 4px; font-size: 1.05rem; font-weight: 700; color: var(--eos-ink);
+}
+.takeoff-primary-status-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
+}
+.takeoff-primary-status-hint { font-size: 0.84rem; color: var(--eos-ink-mid); }
+.takeoff-primary-status-next {
+  margin: 0; font-size: 0.88rem; color: var(--eos-ink-mid); line-height: 1.45;
+}
+.takeoff-primary-status-actions {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+}
+.takeoff-primary-status-cta { min-width: 180px; }
+.takeoff-primary-status-secondary {
+  opacity: 0.85; font-weight: 550;
+}
+.takeoff-primary-status-footer {
+  display: flex; flex-direction: column; gap: 6px;
+  font-size: 0.82rem; color: var(--eos-ink-muted);
+}
+.takeoff-primary-status-footer .save-panel-msg { margin: 0; }
+
+/* Items to review */
+.takeoff-items-review-title {
+  margin: 0 0 10px; font-size: 0.95rem; font-weight: 650;
+}
+.takeoff-items-review-empty {
+  margin: 0; font-size: 0.86rem; color: var(--eos-success); font-weight: 600;
+}
+.takeoff-items-review-groups { display: flex; flex-direction: column; gap: 12px; }
+.takeoff-items-review-group-label {
+  font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.04em; color: var(--eos-ink-muted); margin-bottom: 4px;
+}
+.takeoff-items-review-list {
+  margin: 0; padding-left: 1.1rem; font-size: 0.84rem; color: var(--eos-ink-mid);
+}
+.takeoff-measurement-summary-title {
+  margin: 0 0 10px; font-size: 0.95rem; font-weight: 650;
+}
+.takeoff-task-panel {
+  display: flex; flex-direction: column; gap: 16px;
+}
+.takeoff-advanced > summary {
+  cursor: pointer; font-size: 0.88rem; font-weight: 650; color: var(--eos-ink-mid);
+  padding: 10px 0;
+}
+.takeoff-advanced-body {
+  display: flex; flex-direction: column; gap: 12px; padding-top: 4px;
+}
+.takeoff-topbar-pill--status {
+  font-size: 0.72rem; font-weight: 700; text-transform: none; letter-spacing: 0;
+}
+
+/* Workflow explainer (legacy — kept for reference) */
 .takeoff-workflow { display: flex; flex-direction: column; gap: 16px; }
 .takeoff-workflow-steps {
   list-style: none; margin: 0; padding: 0;
@@ -3709,72 +3801,5 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
 .import-addons-list { margin: 4px 0 0 1.1rem; font-size: 0.78rem; }
 .import-ie-required-list { margin: 4px 0 0 1.1rem; font-size: 0.78rem; }
 
-/* v6.4 — controlled beta labeling, feedback, issue reporting, QA */
-.takeoff-beta-banner {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  margin-bottom: 10px;
-  border-radius: var(--r-sm);
-  background: rgba(180, 83, 9, 0.08);
-  border: 1px solid rgba(180, 83, 9, 0.22);
-  font-size: 0.8rem;
-  color: var(--eos-ink);
-}
-.takeoff-beta-banner--compact { margin: 10px 12px 0; }
-.takeoff-beta-badge {
-  font-size: 0.65rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #b45309;
-  background: rgba(180, 83, 9, 0.15);
-  padding: 2px 6px;
-  border-radius: 999px;
-}
 .takeoff-topbar-pill--beta { background: rgba(180, 83, 9, 0.12); color: #b45309; }
-.takeoff-modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.45);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  padding: 16px;
-}
-.takeoff-modal {
-  background: var(--eos-surface, #fff);
-  border-radius: var(--r-md, 8px);
-  padding: 16px 18px;
-  max-width: 440px;
-  width: 100%;
-  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.18);
-}
-.takeoff-modal h3 { margin: 0 0 8px; font-size: 1rem; }
-.takeoff-modal label { display: block; margin-top: 10px; font-size: 0.78rem; }
-.takeoff-modal select,
-.takeoff-modal textarea,
-.takeoff-modal input { width: 100%; margin-top: 4px; }
-.takeoff-modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
 .takeoff-import-confirm-check { display: flex; gap: 8px; align-items: flex-start; margin-top: 12px; font-size: 0.82rem; }
-.takeoff-feedback { margin-top: 12px; padding: 12px; border: 1px solid var(--eos-border); border-radius: var(--r-sm); }
-.takeoff-feedback-title { margin: 0 0 8px; font-weight: 600; font-size: 0.88rem; }
-.takeoff-feedback-row { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 6px 0; font-size: 0.8rem; }
-.takeoff-feedback-yesno { display: flex; gap: 6px; }
-.takeoff-feedback-yesno button {
-  border: 1px solid var(--eos-border);
-  background: var(--eos-surface, #fff);
-  border-radius: var(--r-sm);
-  padding: 4px 10px;
-  cursor: pointer;
-  font-size: 0.75rem;
-}
-.takeoff-feedback-yesno button.active { background: var(--eos-brand); color: #fff; border-color: var(--eos-brand); }
-.takeoff-feedback-note textarea,
-.takeoff-feedback-time input { width: 100%; margin-top: 4px; }
-.takeoff-beta-qa-table-wrap { overflow-x: auto; margin-top: 8px; }
-.takeoff-beta-qa-table { width: 100%; border-collapse: collapse; font-size: 0.72rem; }
-.takeoff-beta-qa-table th,
-.takeoff-beta-qa-table td { border-bottom: 1px solid var(--eos-border); padding: 6px 8px; text-align: left; }

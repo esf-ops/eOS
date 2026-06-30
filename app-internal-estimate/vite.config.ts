@@ -15,7 +15,8 @@ export default defineConfig({
   resolve: {
     alias: {
       "@quote-lib": path.resolve(repoRoot, "app-quote/src/lib"),
-      "@quote-ui": path.resolve(repoRoot, "app-quote/src/ui")
+      "@quote-ui": path.resolve(repoRoot, "app-quote/src/ui"),
+      "@eliteos-ui": path.resolve(repoRoot, "shared/eliteos-ui")
     }
   }
 });

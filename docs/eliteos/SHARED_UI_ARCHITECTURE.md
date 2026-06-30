@@ -249,8 +249,9 @@ The following areas are **frozen** for shared UI / refactor work until Elite 100
 
 - `shared/eliteos-ui/tokens.css` (canonical `--eos-*` from Home)
 - `shared/eliteos-ui/primitives.css` (Button, Card, Pill, FormField layout, ErrorBanner)
-- `workspaceIdentity.ts`, `userDisplay.ts`, `topbarMenuItems.ts`
-- Pilot import: **Pricing Admin only** first; verify visual parity
+- `shared/eliteos-ui/takeoffWorkflow.css` (AI Takeoff + IE imported takeoff panels — pilot)
+- Presentational takeoff components: `TakeoffBetaBanner`, `TakeoffFeedbackForm`, `TakeoffIssueReportModal`, `EosSectionCard`, `EosPanelHead`, `EosStatusPill`, `EosMetricCard`
+- Pilot import: **AI Takeoff + Internal Estimate imported takeoff surfaces**; see [SHARED_UI_TAKEOFF_IMPLEMENTATION_NOTE.md](./SHARED_UI_TAKEOFF_IMPLEMENTATION_NOTE.md)
 - No workflow behavior changes
 
 ### Phase 2 — Shared app shell / session

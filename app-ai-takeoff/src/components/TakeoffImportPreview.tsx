@@ -1,6 +1,6 @@
-import React, { useState } from "react";
+import React, { forwardRef, useImperativeHandle, useState } from "react";
 import type { TakeoffImportPlan, ImportPlanRoom, ImportPlanGroup } from "@takeoff-core/takeoffImportPlanner.mjs";
-import { TAKEOFF_BETA_IMPORT_CONFIRMATION_TEXT, TAKEOFF_BETA_LABEL } from "../lib/takeoffBeta";
+import { TAKEOFF_BETA_LABEL, TAKEOFF_BETA_IMPORT_CONFIRMATION_TEXT } from "../lib/takeoffBeta";
 
 interface ImportPayloadPreview {
   totals?: {
@@ -26,6 +26,12 @@ interface Props {
   importStatus?: "idle" | "importing" | "done" | "error";
   importMessage?: string | null;
   workflowStatus?: string;
+  /** Hide duplicate import button when parent status card owns the primary CTA. */
+  hideImportButton?: boolean;
+}
+
+export interface TakeoffImportPreviewHandle {
+  openImportConfirm: () => void;
 }
 
 function ShapeGroupRow({ group }: { group: ImportPlanGroup }) {
@@ -81,19 +87,31 @@ function RoomImportCard({ room }: { room: ImportPlanRoom }) {
   );
 }
 
-export default function TakeoffImportPreview({
-  importPlan,
-  importPayload = null,
-  canImport = false,
-  importBlockedReason = null,
-  onImport,
-  onImportCancelled,
-  onReportIssue,
-  importStatus = "idle",
-  importMessage = null,
-}: Props) {
+const TakeoffImportPreview = forwardRef<TakeoffImportPreviewHandle, Props>(function TakeoffImportPreview(
+  {
+    importPlan,
+    importPayload = null,
+    canImport = false,
+    importBlockedReason = null,
+    onImport,
+    onImportCancelled,
+    onReportIssue,
+    importStatus = "idle",
+    importMessage = null,
+    hideImportButton = false,
+  },
+  ref
+) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmChecked, setConfirmChecked] = useState(false);
+
+  useImperativeHandle(ref, () => ({
+    openImportConfirm: () => {
+      if (!canImport || !onImport) return;
+      setConfirmChecked(false);
+      setConfirmOpen(true);
+    },
+  }), [canImport, onImport]);
 
   const totals = importPayload?.totals;
   const ctSf = totals?.countertopSqft ?? importPlan.computedSf.countertopExactSf;
@@ -103,12 +121,7 @@ export default function TakeoffImportPreview({
   const combined = totals?.combinedSqft ?? importPlan.computedSf.combinedExactSf;
 
   return (
-    <div className="lab-card import-preview">
-      <div className="takeoff-beta-banner takeoff-beta-banner--compact" role="note">
-        <span className="takeoff-beta-badge">Beta</span>
-        <span>{TAKEOFF_BETA_LABEL}</span>
-      </div>
-
+    <div className="lab-card import-preview eos-section-card">
       <div className={`import-status-bar ${canImport ? "import-status--ready" : "import-status--blocked"}`}>
         <span className="import-status-icon">{canImport ? "✓" : "✗"}</span>
         <span className="import-status-text">
@@ -196,6 +209,7 @@ export default function TakeoffImportPreview({
       )}
 
       <div className="import-action-row">
+        {!hideImportButton ? (
         <button
           type="button"
           className={canImport ? "btn-import-enabled" : "btn-import-disabled"}
@@ -210,6 +224,7 @@ export default function TakeoffImportPreview({
             ? "Creating Internal Estimate draft…"
             : "Import to Internal Estimate"}
         </button>
+        ) : null}
         {onReportIssue ? (
           <button type="button" className="btn secondary btn-sm" onClick={onReportIssue}>
             Report takeoff issue
@@ -226,11 +241,11 @@ export default function TakeoffImportPreview({
       </div>
 
       {confirmOpen ? (
-        <div className="takeoff-modal-backdrop" role="presentation" onClick={() => {
+        <div className="eos-modal-backdrop takeoff-modal-backdrop" role="presentation" onClick={() => {
           setConfirmOpen(false);
           onImportCancelled?.();
         }}>
-          <div className="takeoff-modal" role="dialog" aria-labelledby="takeoff-import-confirm-title" onClick={(e) => e.stopPropagation()}>
+          <div className="eos-modal takeoff-modal" role="dialog" aria-labelledby="takeoff-import-confirm-title" onClick={(e) => e.stopPropagation()}>
             <h3 id="takeoff-import-confirm-title">Confirm Internal Estimate import</h3>
             <p className="muted small">{TAKEOFF_BETA_LABEL}</p>
             <label className="takeoff-import-confirm-check">
@@ -241,7 +256,7 @@ export default function TakeoffImportPreview({
               />
               <span>{TAKEOFF_BETA_IMPORT_CONFIRMATION_TEXT}</span>
             </label>
-            <div className="takeoff-modal-actions">
+            <div className="eos-modal-actions takeoff-modal-actions">
               <button
                 type="button"
                 className="btn secondary btn-sm"
@@ -269,4 +284,6 @@ export default function TakeoffImportPreview({
       ) : null}
     </div>
   );
-}
+});
+
+export default TakeoffImportPreview;

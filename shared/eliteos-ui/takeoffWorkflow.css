@@ -1,0 +1,388 @@
+/**
+ * Shared takeoff workflow panel styles (AI Takeoff + Internal Estimate).
+ * Aliases ie-takeoff-* and import-* classes to eos patterns where possible.
+ */
+
+/* ── Receipt / import context panel ───────────────────────────────────────── */
+.eos-takeoff-receipt,
+.ie-takeoff-receipt {
+  border: 1px solid var(--eos-info-border, rgba(46, 105, 184, 0.22));
+  border-radius: var(--r-lg, 18px);
+  padding: 1rem 1.15rem;
+  background: linear-gradient(180deg, rgba(46, 105, 184, 0.06) 0%, var(--eos-surface, #fff) 100%);
+  box-shadow: var(--sh-card);
+}
+
+.ie-takeoff-receipt--detached,
+.eos-takeoff-receipt--detached {
+  border-color: var(--eos-line, rgba(11, 26, 51, 0.08));
+  background: var(--eos-surface-soft, rgba(255, 255, 255, 0.78));
+  opacity: 0.92;
+}
+
+.ie-takeoff-receipt-head,
+.eos-takeoff-receipt-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.ie-takeoff-receipt-title,
+.eos-takeoff-receipt-title {
+  margin: 0;
+  font-size: 0.98rem;
+  font-weight: 650;
+  color: var(--eos-ink, #0b1a33);
+}
+
+.ie-takeoff-receipt-sub,
+.eos-takeoff-receipt-sub {
+  margin: 0.25rem 0 0;
+}
+
+/* ── Compare table ────────────────────────────────────────────────────────── */
+.eos-takeoff-compare,
+.ie-takeoff-compare {
+  margin-top: 0.75rem;
+}
+
+.ie-takeoff-compare-head,
+.eos-takeoff-compare-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.65rem;
+}
+
+.ie-takeoff-compare-warn,
+.eos-takeoff-compare-warn {
+  font-size: 0.78rem;
+  font-weight: 650;
+  color: var(--eos-warn, #7a4a10);
+}
+
+.eos-takeoff-table,
+.ie-takeoff-compare-table,
+.takeoff-beta-qa-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.eos-takeoff-table th,
+.eos-takeoff-table td,
+.ie-takeoff-compare-table th,
+.ie-takeoff-compare-table td,
+.takeoff-beta-qa-table th,
+.takeoff-beta-qa-table td {
+  border-bottom: 1px solid var(--eos-line, rgba(11, 26, 51, 0.08));
+  padding: 0.45rem 0.55rem;
+  text-align: left;
+}
+
+.eos-takeoff-table th,
+.ie-takeoff-compare-table th,
+.takeoff-beta-qa-table th {
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--eos-ink-muted, #6b7892);
+  background: rgba(11, 26, 51, 0.02);
+}
+
+.ie-takeoff-delta-changed,
+.eos-takeoff-delta-changed {
+  color: var(--eos-warn, #7a4a10);
+  font-weight: 650;
+}
+
+/* ── Readiness / checklist panels ─────────────────────────────────────────── */
+.eos-takeoff-panel,
+.ie-takeoff-readiness,
+.ie-takeoff-checklist,
+.ie-takeoff-addon-review,
+.ie-takeoff-compare.card,
+.ie-takeoff-checklist.card,
+.ie-takeoff-readiness.card,
+.ie-takeoff-addon-review.card {
+  margin-top: 0.75rem;
+  padding: 1rem 1.15rem;
+  border: 1px solid var(--eos-line, rgba(11, 26, 51, 0.08));
+  border-radius: var(--r-lg, 18px);
+  background: var(--eos-surface, #fff);
+  box-shadow: var(--sh-card);
+}
+
+.ie-takeoff-readiness-head,
+.ie-takeoff-checklist-head,
+.ie-takeoff-addon-review-head,
+.eos-takeoff-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.65rem;
+}
+
+.ie-takeoff-readiness-pill,
+.ie-takeoff-checklist-score {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+  color: var(--eos-warn, #7a4a10);
+  background: var(--eos-warn-soft, rgba(180, 92, 12, 0.10));
+  border: 1px solid var(--eos-warn-border, rgba(180, 92, 12, 0.24));
+}
+
+.ie-takeoff-readiness-pill.is-ready,
+.ie-takeoff-checklist-score.is-ready {
+  color: var(--eos-success, #0c6e3a);
+  background: var(--eos-success-soft, rgba(16, 122, 61, 0.10));
+  border-color: var(--eos-success-border, rgba(16, 122, 61, 0.22));
+}
+
+.ie-takeoff-checklist-ack {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-top: 0.65rem;
+  font-size: 0.84rem;
+  color: var(--eos-ink-mid, #475067);
+}
+
+/* ── Add-on review items ──────────────────────────────────────────────────── */
+.ie-takeoff-addon-review-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.ie-takeoff-addon-review-item {
+  border: 1px solid var(--eos-line, rgba(11, 26, 51, 0.08));
+  border-radius: var(--r-sm, 8px);
+  padding: 0.65rem 0.75rem;
+  background: var(--eos-surface-soft, rgba(255, 255, 255, 0.78));
+}
+
+.ie-takeoff-addon-review-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin-bottom: 0.45rem;
+}
+
+/* ── Drawer ───────────────────────────────────────────────────────────────── */
+.ie-takeoff-drawer-backdrop,
+.eos-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.35);
+  border: none;
+  padding: 0;
+  z-index: 120;
+  cursor: pointer;
+}
+
+.ie-takeoff-drawer,
+.eos-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(360px, 92vw);
+  z-index: 121;
+  background: var(--eos-surface, #fff);
+  border-left: 1px solid var(--eos-line, rgba(11, 26, 51, 0.08));
+  box-shadow: -8px 0 32px rgba(11, 26, 51, 0.12);
+  padding: 1rem 1.1rem;
+  overflow-y: auto;
+}
+
+.ie-takeoff-drawer-head,
+.eos-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.65rem;
+}
+
+.ie-takeoff-drawer-title,
+.eos-drawer-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 650;
+}
+
+.ie-takeoff-drawer-actions,
+.eos-drawer-actions {
+  margin-top: 0.75rem;
+}
+
+/* ── Import readiness (AI Takeoff) ────────────────────────────────────────── */
+.import-readiness.eos-section-card,
+.import-readiness.lab-card {
+  padding: 0;
+  overflow: hidden;
+}
+.import-readiness-header,
+.eos-import-readiness-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--eos-line, rgba(11, 26, 51, 0.08));
+  background: rgba(11, 26, 51, 0.02);
+}
+
+.import-readiness--ready .import-readiness-header {
+  background: linear-gradient(180deg, rgba(16, 122, 61, 0.06) 0%, transparent 100%);
+}
+
+.import-readiness--blocked .import-readiness-header {
+  background: linear-gradient(180deg, rgba(180, 92, 12, 0.06) 0%, transparent 100%);
+}
+
+.import-readiness-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  border: 1px solid transparent;
+}
+
+.import-readiness-blockers {
+  padding: 0.75rem 1rem 1rem;
+}
+
+.import-readiness-blockers-title {
+  font-weight: 650;
+  font-size: 0.82rem;
+  margin: 0 0 0.35rem;
+}
+
+.import-readiness-list {
+  margin: 0 0 0.5rem 1.1rem;
+  padding: 0;
+  font-size: 0.8rem;
+  color: var(--eos-ink-mid, #475067);
+}
+
+.import-readiness-group-label {
+  font-size: 0.72rem;
+  font-weight: 650;
+  color: var(--eos-ink-muted, #6b7892);
+  margin-top: 0.5rem;
+}
+
+.import-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.65rem 0.85rem;
+  font-size: 0.82rem;
+  border-bottom: 1px solid var(--eos-line, rgba(11, 26, 51, 0.08));
+}
+
+.import-status--ready {
+  background: var(--eos-success-soft, rgba(16, 122, 61, 0.10));
+  color: var(--eos-success, #0c6e3a);
+}
+
+.import-status--blocked {
+  background: var(--eos-warn-soft, rgba(180, 92, 12, 0.10));
+  color: var(--eos-warn, #7a4a10);
+}
+
+/* ── Room/source badges ─────────────────────────────────────────────────────── */
+.ie-takeoff-room-badge,
+.eos-source-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.1rem 0.45rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.ie-takeoff-room-badge--complete,
+.eos-source-badge--success {
+  color: var(--eos-success, #0c6e3a);
+  background: var(--eos-success-soft);
+  border: 1px solid var(--eos-success-border);
+}
+
+.ie-takeoff-room-badge--partial,
+.eos-source-badge--warn {
+  color: var(--eos-warn, #7a4a10);
+  background: var(--eos-warn-soft);
+  border: 1px solid var(--eos-warn-border);
+}
+
+.ie-takeoff-room-badge--pending,
+.eos-source-badge--info {
+  color: var(--eos-info, #1e4c92);
+  background: var(--eos-info-soft);
+  border: 1px solid var(--eos-info-border);
+}
+
+.ie-takeoff-material-warn,
+.eos-material-warn {
+  font-size: 0.68rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--eos-warn, #7a4a10);
+  background: var(--eos-warn-soft);
+  border: 1px solid var(--eos-warn-border);
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+}
+
+/* ── Active review banner ─────────────────────────────────────────────────── */
+.takeoff-active-review-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 1rem 1.15rem;
+  border-radius: var(--r-lg, 18px);
+  border: 1px solid var(--eos-info-border, rgba(46, 105, 184, 0.22));
+  background: linear-gradient(180deg, rgba(46, 105, 184, 0.08) 0%, var(--eos-surface, #fff) 100%);
+  box-shadow: var(--sh-card);
+}
+
+.takeoff-active-review-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 650;
+}
+
+.takeoff-active-review-next {
+  margin: 0.35rem 0 0;
+  font-size: 0.84rem;
+  color: var(--eos-ink-mid, #475067);
+}
+
+.takeoff-beta-qa-table-wrap {
+  overflow-x: auto;
+  margin-top: 0.5rem;
+}

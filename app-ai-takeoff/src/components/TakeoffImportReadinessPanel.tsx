@@ -1,3 +1,5 @@
+import EosSectionCard from "@eliteos-ui/EosSectionCard";
+import EosStatusPill from "@eliteos-ui/EosStatusPill";
 import React from "react";
 
 export interface ApprovalBlocker {
@@ -29,6 +31,13 @@ const CATEGORY_LABELS: Record<string, string> = {
   waterfall: "Waterfall panels",
 };
 
+function workflowTone(status: string): "success" | "warn" | "info" | "neutral" {
+  if (status === "approved_for_import" || status === "imported") return "success";
+  if (status.includes("blocked") || status.includes("needs")) return "warn";
+  if (status.includes("review")) return "info";
+  return "neutral";
+}
+
 export default function TakeoffImportReadinessPanel({
   blockers,
   canApprove,
@@ -43,21 +52,19 @@ export default function TakeoffImportReadinessPanel({
     return acc;
   }, {});
 
+  const modifiers = blockers.length ? " import-readiness--blocked" : " import-readiness--ready";
+
   return (
-    <div className={`import-readiness lab-card${blockers.length ? " import-readiness--blocked" : " import-readiness--ready"}`}>
-      <div className="import-readiness-header">
-        <span className={`import-readiness-chip import-readiness-chip--${workflowStatus.replace(/_/g, "-")}`}>
-          {workflowLabel}
+    <EosSectionCard className={`import-readiness lab-card${modifiers}`}>
+      <div className="import-readiness-header eos-import-readiness-head">
+        <EosStatusPill tone={workflowTone(workflowStatus)}>{workflowLabel}</EosStatusPill>
+        <span className="muted small">
+          {canImport
+            ? "Ready to import into Internal Estimate"
+            : canApprove
+              ? "All blockers resolved — save and approve"
+              : `${blockers.length} blocker${blockers.length !== 1 ? "s" : ""} before approval`}
         </span>
-        {canImport ? (
-          <span className="import-readiness-ready-text">Ready to import into Internal Estimate</span>
-        ) : canApprove ? (
-          <span className="import-readiness-ready-text">All blockers resolved — save and approve</span>
-        ) : (
-          <span className="import-readiness-blocked-text">
-            {blockers.length} blocker{blockers.length !== 1 ? "s" : ""} before approval
-          </span>
-        )}
       </div>
 
       {blockers.length > 0 && (
@@ -76,11 +83,11 @@ export default function TakeoffImportReadinessPanel({
         </div>
       )}
 
-      {canImport && (
-        <p className="import-readiness-hint muted small">
+      {canImport ? (
+        <p className="import-readiness-hint muted small" style={{ padding: "0 1rem 1rem" }}>
           Account, project, branch, salesperson, pricing mode, and material/color selections will still be required in Internal Estimate before quote save.
         </p>
-      )}
-    </div>
+      ) : null}
+    </EosSectionCard>
   );
 }

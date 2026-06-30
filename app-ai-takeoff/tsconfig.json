@@ -17,8 +17,9 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "paths": {
-      "@takeoff-core/*": ["../backend-core/src/takeoff/*"]
+      "@takeoff-core/*": ["../backend-core/src/takeoff/*"],
+      "@eliteos-ui/*": ["../shared/eliteos-ui/*"]
     }
   },
-  "include": ["src"]
+  "include": ["src", "../shared/eliteos-ui/**/*.ts", "../shared/eliteos-ui/**/*.tsx"]
 }

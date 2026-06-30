@@ -47,8 +47,8 @@ import TakeoffMeasurementComparisonPanel from "./components/internal-estimate/Ta
 import TakeoffQuoteReadinessSummary from "./components/internal-estimate/TakeoffQuoteReadinessSummary";
 import TakeoffSuggestedAddOnsReviewPanel from "./components/internal-estimate/TakeoffSuggestedAddOnsReviewPanel";
 import TakeoffSourcePlanDrawer from "./components/internal-estimate/TakeoffSourcePlanDrawer";
-import TakeoffFeedbackForm from "./components/internal-estimate/TakeoffFeedbackForm";
-import TakeoffIssueReportModal from "./components/internal-estimate/TakeoffIssueReportModal";
+import TakeoffFeedbackForm from "../../shared/eliteos-ui/TakeoffFeedbackForm";
+import TakeoffIssueReportModal from "../../shared/eliteos-ui/TakeoffIssueReportModal";
 import { submitTakeoffFeedback, submitTakeoffIssueReport } from "./lib/takeoffBetaApi";
 import {
   computeTakeoffMeasurementDeltas,
