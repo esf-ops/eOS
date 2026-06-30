@@ -15,7 +15,7 @@
 | **Storage** | **Verified live:** private bucket `eliteos-quote-files`; bytes never returned to browser; downloads via signed URLs only. |
 | **RLS** | Enabled on takeoff/file tables; **no RLS policies yet**. Current architecture: backend **service role** + Express auth/head gates (not browser-direct Supabase reads). |
 | **AI extraction** | Review-only — `review_status` stays `needs_review` after AI draft; server recomputes all sf; no quote mutation. |
-| **Import** | **Enabled (approved snapshots only).** … **v6.1:** IE receipt, checklist, badges, detach. **v6.2:** editable measurements with deltas and verification. **v6.3:** compact review table, quote readiness summary, source plan drawer, material warnings, suggested add-on review states. |
+| **Import** | **Enabled (approved snapshots only).** … **v6.1:** IE receipt, checklist, badges, detach. **v6.2:** editable measurements with deltas and verification. **v6.3:** compact review table, quote readiness summary, source plan drawer, material warnings, suggested add-on review states. **v6.4:** controlled internal beta — explicit beta labeling, import confirmation gate, estimator feedback, issue reporting, workflow metrics, staff QA summary. |
 
 **Shipped APIs (org from server auth context only):**
 
@@ -26,8 +26,13 @@
 | POST | `/api/takeoff-jobs/:id/results` | Save reviewed draft |
 | POST | `/api/takeoff-jobs/:id/corrections` | Save estimator corrections + `_corrections[]` audit in result JSON |
 | POST | `/api/takeoff-jobs/:id/approve` | Approval gate + mark approved + store `takeoff_import_v1` snapshot (no quote create) |
-| POST | `/api/internal-quotes/import-from-takeoff` | Create Internal Estimate draft from approved takeoff (auth + internal quote head) |
+| POST | `/api/internal-quotes/import-from-takeoff` | Create Internal Estimate draft from approved takeoff (auth + internal quote head; requires `betaImportConfirmed`) |
 | POST | `/api/internal-quotes/:id/detach-takeoff-import` | Draft-only: remove imported rooms, mark import detached, preserve audit (v6.1) |
+| POST | `/api/takeoff-jobs/:id/review-started` | Record `ai_takeoff_review_started` metric (v6.4) |
+| POST | `/api/takeoff-jobs/:id/import-cancelled` | Record `ai_takeoff_import_cancelled` when estimator dismisses import confirm (v6.4) |
+| POST | `/api/takeoff-jobs/:id/feedback` | Estimator beta feedback (`helpful`, edits, misses, backsplash, note, time saved) (v6.4) |
+| POST | `/api/takeoff-jobs/:id/issue-report` | Report takeoff issue with category + note (v6.4) |
+| GET | `/api/takeoff-beta/qa-summary` | Staff-only latest imported takeoff quotes with deltas + feedback/issue counts (v6.4) |
 | GET/POST | `/api/takeoff-jobs/:id/results/*` | Latest, list, by-id (existing) |
 | POST | `/api/takeoff-jobs/:id/generate-ai-draft` | AI extraction (env-gated; not called from docs/tests) |
 

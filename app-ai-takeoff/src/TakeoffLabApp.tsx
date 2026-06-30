@@ -46,6 +46,10 @@ import TakeoffSummaryCards from "./components/TakeoffSummaryCards";
 import TakeoffRoomsReview from "./components/TakeoffRoomsReview";
 import TakeoffDiagnosticsPanel from "./components/TakeoffDiagnosticsPanel";
 import TakeoffImportPreview from "./components/TakeoffImportPreview";
+import TakeoffBetaBanner from "./components/TakeoffBetaBanner";
+import TakeoffFeedbackForm from "./components/TakeoffFeedbackForm";
+import TakeoffIssueReportModal from "./components/TakeoffIssueReportModal";
+import TakeoffBetaQaPanel from "./components/TakeoffBetaQaPanel";
 import TakeoffImportReadinessPanel from "./components/TakeoffImportReadinessPanel";
 import TakeoffRoomCompletenessPanel from "./components/TakeoffRoomCompletenessPanel";
 import TakeoffWorkbench from "./components/TakeoffWorkbench";
@@ -72,7 +76,18 @@ import { evaluateTakeoffFabricationRules } from "@takeoff-core/takeoffFabricatio
 import { makeTakeoffRun, makeTakeoffRoom } from "@takeoff-core/takeoffContract.mjs";
 import { addManualRunToDraft } from "@takeoff-core/takeoffWorkbenchHelpers.mjs";
 import { getSupabase } from "./lib/supabase";
-import { labApiGet, labApiPost, saveTakeoffCorrection, approveTakeoffJob, importInternalEstimateFromTakeoff, LabApiError } from "./lib/api";
+import {
+  labApiGet,
+  labApiPost,
+  saveTakeoffCorrection,
+  approveTakeoffJob,
+  importInternalEstimateFromTakeoff,
+  recordTakeoffReviewStarted,
+  recordTakeoffImportCancelled,
+  submitTakeoffFeedback,
+  submitTakeoffIssueReport,
+  LabApiError,
+} from "./lib/api";
 import EliteosTopbar from "../../shared/eliteos-ui/EliteosTopbar";
 import type { EliteosTopbarMenuItem } from "../../shared/eliteos-ui/EliteosTopbar";
 
@@ -386,6 +401,11 @@ export default function TakeoffLabApp() {
   const [importJobMsg, setImportJobMsg] = useState<string | null>(null);
   const [approvedImportPayload, setApprovedImportPayload] = useState<object | null>(null);
   const [takeoffImportStatus, setTakeoffImportStatus] = useState<string | null>(null);
+  const [importedQuoteId, setImportedQuoteId] = useState<string | null>(null);
+  const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
+  const [feedbackBusy, setFeedbackBusy] = useState(false);
+  const [issueReportOpen, setIssueReportOpen] = useState(false);
+  const reviewStartedRef = useRef<string | null>(null);
 
   // ── Load saved result when workspace changes ───────────────────────────────
   useEffect(() => {
@@ -414,6 +434,10 @@ export default function TakeoffLabApp() {
         if (res.ok && res.normalizedTakeoffJson) {
           commitSource(res.normalizedTakeoffJson, "file");
           setSavedAt(res.savedAt ?? null);
+          if (reviewStartedRef.current !== takeoffJobId) {
+            reviewStartedRef.current = takeoffJobId;
+            void recordTakeoffReviewStarted(authToken, takeoffJobId).catch(() => {});
+          }
           if (res.reviewState) {
             setExcludedRunIds(new Set(res.reviewState.excludedRunIds ?? []));
             setRoomCompleteness(res.reviewState.roomCompleteness ?? {});
@@ -1125,9 +1149,13 @@ export default function TakeoffLabApp() {
     setImportJobStatus("importing");
     setImportJobMsg(null);
     try {
-      const res = await importInternalEstimateFromTakeoff(authToken, takeoffJobId);
+      const res = await importInternalEstimateFromTakeoff(authToken, takeoffJobId, {
+        betaImportConfirmed: true,
+      });
       setImportJobStatus("done");
       setTakeoffImportStatus("imported");
+      setImportedQuoteId(res.quoteId);
+      setFeedbackSubmitted(false);
       setImportJobMsg(`Draft ${res.quote_number} created — opening Internal Estimate…`);
       const url = `${internalEstimateUrl()}/?quoteId=${encodeURIComponent(res.quoteId)}&fromTakeoff=${encodeURIComponent(takeoffJobId)}`;
       window.open(url, "_blank", "noopener,noreferrer");
@@ -1137,6 +1165,36 @@ export default function TakeoffLabApp() {
       setImportJobMsg(msg);
     }
   }, [takeoffJobId, authToken, canImportToEstimate]);
+
+  const handleImportCancelled = useCallback(() => {
+    if (!takeoffJobId || !authToken) return;
+    void recordTakeoffImportCancelled(authToken, takeoffJobId, "confirmation_dismissed").catch(() => {});
+  }, [takeoffJobId, authToken]);
+
+  const handleSubmitTakeoffFeedback = useCallback(
+    async (payload: Parameters<typeof submitTakeoffFeedback>[2]) => {
+      if (!takeoffJobId || !authToken) return;
+      setFeedbackBusy(true);
+      try {
+        await submitTakeoffFeedback(authToken, takeoffJobId, {
+          ...payload,
+          quoteId: payload.quoteId ?? importedQuoteId,
+        });
+        setFeedbackSubmitted(true);
+      } finally {
+        setFeedbackBusy(false);
+      }
+    },
+    [takeoffJobId, authToken, importedQuoteId]
+  );
+
+  const handleSubmitTakeoffIssue = useCallback(
+    async (payload: Parameters<typeof submitTakeoffIssueReport>[2]) => {
+      if (!takeoffJobId || !authToken) return;
+      await submitTakeoffIssueReport(authToken, takeoffJobId, payload);
+    },
+    [takeoffJobId, authToken]
+  );
 
   // ── Copy actions ──────────────────────────────────────────────────────────
 
@@ -1252,6 +1310,7 @@ export default function TakeoffLabApp() {
     <div className="takeoff-topbar-status" aria-label="Takeoff lab boundaries">
       <span className="takeoff-topbar-pill takeoff-topbar-pill--lab">Review → Import</span>
       <span className="takeoff-topbar-pill takeoff-topbar-pill--safe">Approved snapshots only</span>
+      <span className="takeoff-topbar-pill takeoff-topbar-pill--beta">Beta</span>
     </div>
   );
 
@@ -1292,8 +1351,15 @@ export default function TakeoffLabApp() {
               {planFilename ? (
                 <p className="takeoff-active-review-file">{planFilename}</p>
               ) : null}
+              {takeoffJobId && authToken ? (
+                <button type="button" className="btn secondary btn-sm" onClick={() => setIssueReportOpen(true)}>
+                  Report takeoff issue
+                </button>
+              ) : null}
             </div>
           )}
+
+          <TakeoffBetaBanner />
 
           {/* ── 1. Measurement summary ──────────────────────────────────── */}
           <section className="lab-section lab-section--review-primary">
@@ -1708,13 +1774,35 @@ export default function TakeoffLabApp() {
                 canImport={canImportToEstimate}
                 importBlockedReason={approvalGate?.blockers?.[0]?.message ?? importPlan.blockedReason ?? null}
                 onImport={handleImportToInternalEstimate}
+                onImportCancelled={handleImportCancelled}
+                onReportIssue={() => setIssueReportOpen(true)}
                 importStatus={importJobStatus}
                 importMessage={importJobMsg}
               />
+              {importJobStatus === "done" && takeoffJobId ? (
+                <TakeoffFeedbackForm
+                  quoteId={importedQuoteId}
+                  onSubmit={handleSubmitTakeoffFeedback}
+                  busy={feedbackBusy}
+                  submitted={feedbackSubmitted}
+                />
+              ) : null}
             </div>
           </details>
 
           </div>{/* end lab-secondary-group */}
+
+          {authToken ? (
+            <details className="lab-section lab-section-collapsible">
+              <summary className="lab-section-summary">
+                <span className="lab-section-title" style={{ margin: 0 }}>Beta QA dashboard</span>
+                <span className="lab-section-summary-note">Staff-only imported takeoff metrics</span>
+              </summary>
+              <div style={{ marginTop: 12 }}>
+                <TakeoffBetaQaPanel authToken={authToken} />
+              </div>
+            </details>
+          ) : null}
 
           {/* ── Developer / benchmark tools (dev-only) ───────────────────── */}
           {showDevTools && (
@@ -2146,6 +2234,16 @@ export default function TakeoffLabApp() {
         <span>eliteOS · AI Takeoff</span>
         <span className="footer-meta">Authorized staff only — backend authorization is the source of truth.</span>
       </footer>
+
+      {takeoffJobId && authToken ? (
+        <TakeoffIssueReportModal
+          open={issueReportOpen}
+          onClose={() => setIssueReportOpen(false)}
+          onSubmit={handleSubmitTakeoffIssue}
+          quoteId={importedQuoteId}
+          sourcePage="ai_takeoff_review"
+        />
+      ) : null}
     </div>
   );
 }

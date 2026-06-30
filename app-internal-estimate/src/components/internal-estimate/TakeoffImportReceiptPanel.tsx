@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { TAKEOFF_BETA_LABEL } from "../../lib/takeoffBeta";
 
 export type TakeoffImportReceiptMeta = {
   status?: "active" | "detached" | string;
@@ -32,6 +33,7 @@ interface Props {
   detachBusy?: boolean;
   detachError?: string | null;
   onOpenSourceDrawer?: () => void;
+  onReportIssue?: () => void;
 }
 
 function fmtSf(n?: number) {
@@ -56,6 +58,7 @@ export default function TakeoffImportReceiptPanel({
   detachBusy = false,
   detachError = null,
   onOpenSourceDrawer,
+  onReportIssue,
 }: Props) {
   const [snapshotOpen, setSnapshotOpen] = useState(false);
   const detached = meta.status === "detached";
@@ -63,6 +66,12 @@ export default function TakeoffImportReceiptPanel({
 
   return (
     <div className={`ie-takeoff-receipt${detached ? " ie-takeoff-receipt--detached" : ""}`} role="status">
+      {!detached ? (
+        <div className="ie-takeoff-beta-banner" role="note">
+          <span className="ie-takeoff-beta-badge">Beta</span>
+          <span>{TAKEOFF_BETA_LABEL}</span>
+        </div>
+      ) : null}
       <div className="ie-takeoff-receipt-head">
         <div>
           <p className="ie-takeoff-receipt-title">
@@ -106,6 +115,11 @@ export default function TakeoffImportReceiptPanel({
         {onOpenSourceDrawer ? (
           <button type="button" className="btn primary btn-sm" onClick={onOpenSourceDrawer}>
             Review plan side-by-side
+          </button>
+        ) : null}
+        {onReportIssue ? (
+          <button type="button" className="btn secondary btn-sm" onClick={onReportIssue}>
+            Report takeoff issue
           </button>
         ) : null}
         {meta.takeoffJobId && takeoffLabUrl ? (

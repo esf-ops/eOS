@@ -5,6 +5,7 @@
  */
 import assert from "node:assert/strict";
 import { isTakeoffImportDraftComplete } from "./internalQuoteTakeoffImport.mjs";
+import { assertBetaImportConfirmed } from "../takeoff/takeoffBetaService.mjs";
 
 console.log("\ninternalQuoteTakeoffImport — tests\n");
 
@@ -78,6 +79,13 @@ console.log("\ninternalQuoteTakeoffImport — tests\n");
   assert.ok(block.auditEvents.some((e) => e.type === "takeoff_import_started"));
   assert.ok(block.auditEvents.some((e) => e.type === "takeoff_import_succeeded"));
   console.log("ok: T4 import audit event types");
+}
+
+// T5 — v6.4 beta import confirmation gate (API layer; approval gate unchanged)
+{
+  assert.throws(() => assertBetaImportConfirmed({}), /confirmation required/i);
+  assert.doesNotThrow(() => assertBetaImportConfirmed({ betaImportConfirmed: true }));
+  console.log("ok: T5 beta import confirmation required before import API proceeds");
 }
 
 console.log("\nAll internalQuoteTakeoffImport tests passed.\n");

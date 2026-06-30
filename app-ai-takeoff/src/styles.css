@@ -3708,3 +3708,73 @@ details.qa-gate-fab-rules[open] .qa-gate-fab-rules-title::before { content: "▾
 .import-result-msg { display: block; margin-top: 8px; font-size: 0.78rem; }
 .import-addons-list { margin: 4px 0 0 1.1rem; font-size: 0.78rem; }
 .import-ie-required-list { margin: 4px 0 0 1.1rem; font-size: 0.78rem; }
+
+/* v6.4 — controlled beta labeling, feedback, issue reporting, QA */
+.takeoff-beta-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  border-radius: var(--r-sm);
+  background: rgba(180, 83, 9, 0.08);
+  border: 1px solid rgba(180, 83, 9, 0.22);
+  font-size: 0.8rem;
+  color: var(--eos-ink);
+}
+.takeoff-beta-banner--compact { margin: 10px 12px 0; }
+.takeoff-beta-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #b45309;
+  background: rgba(180, 83, 9, 0.15);
+  padding: 2px 6px;
+  border-radius: 999px;
+}
+.takeoff-topbar-pill--beta { background: rgba(180, 83, 9, 0.12); color: #b45309; }
+.takeoff-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+}
+.takeoff-modal {
+  background: var(--eos-surface, #fff);
+  border-radius: var(--r-md, 8px);
+  padding: 16px 18px;
+  max-width: 440px;
+  width: 100%;
+  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.18);
+}
+.takeoff-modal h3 { margin: 0 0 8px; font-size: 1rem; }
+.takeoff-modal label { display: block; margin-top: 10px; font-size: 0.78rem; }
+.takeoff-modal select,
+.takeoff-modal textarea,
+.takeoff-modal input { width: 100%; margin-top: 4px; }
+.takeoff-modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+.takeoff-import-confirm-check { display: flex; gap: 8px; align-items: flex-start; margin-top: 12px; font-size: 0.82rem; }
+.takeoff-feedback { margin-top: 12px; padding: 12px; border: 1px solid var(--eos-border); border-radius: var(--r-sm); }
+.takeoff-feedback-title { margin: 0 0 8px; font-weight: 600; font-size: 0.88rem; }
+.takeoff-feedback-row { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 6px 0; font-size: 0.8rem; }
+.takeoff-feedback-yesno { display: flex; gap: 6px; }
+.takeoff-feedback-yesno button {
+  border: 1px solid var(--eos-border);
+  background: var(--eos-surface, #fff);
+  border-radius: var(--r-sm);
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 0.75rem;
+}
+.takeoff-feedback-yesno button.active { background: var(--eos-brand); color: #fff; border-color: var(--eos-brand); }
+.takeoff-feedback-note textarea,
+.takeoff-feedback-time input { width: 100%; margin-top: 4px; }
+.takeoff-beta-qa-table-wrap { overflow-x: auto; margin-top: 8px; }
+.takeoff-beta-qa-table { width: 100%; border-collapse: collapse; font-size: 0.72rem; }
+.takeoff-beta-qa-table th,
+.takeoff-beta-qa-table td { border-bottom: 1px solid var(--eos-border); padding: 6px 8px; text-align: left; }

@@ -8503,3 +8503,70 @@ body {
   border-radius: 999px;
 }
 
+/* v6.4 — takeoff beta receipt, feedback, issue reporting */
+.ie-takeoff-beta-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.75rem;
+  border-radius: var(--r-sm);
+  background: rgba(180, 83, 9, 0.08);
+  border: 1px solid rgba(180, 83, 9, 0.22);
+  font-size: 0.82rem;
+}
+.ie-takeoff-beta-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #b45309;
+  background: rgba(180, 83, 9, 0.15);
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+}
+.ie-takeoff-feedback {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-elevated, #fff);
+}
+.ie-takeoff-feedback-title { margin: 0 0 0.5rem; font-weight: 600; }
+.ie-takeoff-feedback-row { display: flex; justify-content: space-between; gap: 0.75rem; align-items: center; padding: 0.35rem 0; font-size: 0.85rem; }
+.ie-takeoff-feedback-yesno { display: flex; gap: 0.35rem; }
+.ie-takeoff-feedback-yesno button {
+  border: 1px solid var(--border);
+  background: var(--surface, #fff);
+  border-radius: var(--r-sm);
+  padding: 0.2rem 0.55rem;
+  cursor: pointer;
+  font-size: 0.78rem;
+}
+.ie-takeoff-feedback-yesno button.active { background: var(--brand); color: #fff; border-color: var(--brand); }
+.ie-takeoff-feedback-note textarea,
+.ie-takeoff-feedback-time input { width: 100%; margin-top: 0.25rem; }
+.ie-takeoff-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1200;
+  padding: 1rem;
+}
+.ie-takeoff-modal {
+  background: var(--surface, #fff);
+  border-radius: var(--r-md);
+  padding: 1rem 1.1rem;
+  max-width: 440px;
+  width: 100%;
+  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.18);
+}
+.ie-takeoff-modal h3 { margin: 0 0 0.5rem; }
+.ie-takeoff-modal label { display: block; margin-top: 0.65rem; font-size: 0.82rem; }
+.ie-takeoff-modal select,
+.ie-takeoff-modal textarea,
+.ie-takeoff-modal input { width: 100%; margin-top: 0.25rem; }
+.ie-takeoff-modal-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.85rem; }
+

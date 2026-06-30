@@ -1422,3 +1422,12 @@
 | **Decision** | Imported AI Takeoff measurements are optimized for **estimator review speed** while material/pricing authority remains inside Internal Estimate. v6.3 adds compact measurement table mode, live room subtotals, mark-room / mark-all verified (blocked when >2 sf deltas), quote readiness summary, source plan side drawer, per-room material warnings, and per-suggested-add-on review states (`accepted` / `ignored` / `needs_follow_up`) persisted in `takeoff_import_checklist`. No pricing math or auto material/color selection. |
 | **Impacted files** | `takeoffImportWorkflow.mjs/ts`, `RoomScopeBuilder.tsx`, `TakeoffQuoteReadinessSummary.tsx`, `TakeoffSuggestedAddOnsReviewPanel.tsx`, `TakeoffSourcePlanDrawer.tsx`, `InternalEstimateApp.tsx`, tests, this entry. |
 | **Revisit trigger** | Auto-apply accepted add-ons to room `addons` map; embedded plan PDF preview in IE drawer. |
+
+### 97. AI Takeoff import — controlled internal beta with verification, feedback, and metrics (v6.4, 2026-06-26)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-06-26 |
+| **Decision** | AI Takeoff → Internal Estimate import enters **controlled internal beta**. UI shows “AI-assisted takeoff beta — estimator verification required.” Import still requires approved snapshots only; **`betaImportConfirmed: true`** is required on `POST /api/internal-quotes/import-from-takeoff`. Estimators can submit lightweight feedback and categorized issue reports (stored on `quote_takeoff_jobs.metadata.takeoff_beta` with `quote_id` / `source_takeoff_job_id`). Durable workflow metrics (`ai_takeoff_*` events) log to `eos_action_log` with stage durations when timestamps exist. Staff QA summary (`GET /api/takeoff-beta/qa-summary`, ai_takeoff head) lists recent imported quotes with imported vs current CT/BS deltas. No pricing math, auto material/color, unapproved import, or source job deletion changes. |
+| **Impacted files** | `takeoffBetaService.mjs`, `takeoffWorkspaceRoutes.js`, `internalQuotesApi.js`, `TakeoffImportPreview.tsx`, `TakeoffImportReceiptPanel.tsx`, `TakeoffLabApp.tsx`, `InternalEstimateApp.tsx`, tests, this entry. |
+| **Revisit trigger** | Dedicated analytics head; cross-org beta dashboard; bi-directional takeoff job sync from IE edits. |

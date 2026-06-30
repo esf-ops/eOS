@@ -47,6 +47,9 @@ import TakeoffMeasurementComparisonPanel from "./components/internal-estimate/Ta
 import TakeoffQuoteReadinessSummary from "./components/internal-estimate/TakeoffQuoteReadinessSummary";
 import TakeoffSuggestedAddOnsReviewPanel from "./components/internal-estimate/TakeoffSuggestedAddOnsReviewPanel";
 import TakeoffSourcePlanDrawer from "./components/internal-estimate/TakeoffSourcePlanDrawer";
+import TakeoffFeedbackForm from "./components/internal-estimate/TakeoffFeedbackForm";
+import TakeoffIssueReportModal from "./components/internal-estimate/TakeoffIssueReportModal";
+import { submitTakeoffFeedback, submitTakeoffIssueReport } from "./lib/takeoffBetaApi";
 import {
   computeTakeoffMeasurementDeltas,
 } from "@quote-lib/takeoffImportMeasurements";
@@ -479,6 +482,10 @@ export default function InternalEstimateApp() {
   const [takeoffNotesReviewed, setTakeoffNotesReviewed] = useState(false);
   const [takeoffDetachBusy, setTakeoffDetachBusy] = useState(false);
   const [takeoffDetachError, setTakeoffDetachError] = useState<string | null>(null);
+  const [takeoffFeedbackSubmitted, setTakeoffFeedbackSubmitted] = useState(false);
+  const [takeoffFeedbackBusy, setTakeoffFeedbackBusy] = useState(false);
+  const [takeoffIssueReportOpen, setTakeoffIssueReportOpen] = useState(false);
+  const [takeoffShowFeedbackAfterSave, setTakeoffShowFeedbackAfterSave] = useState(false);
   const [takeoffSuggestedAddOnReviews, setTakeoffSuggestedAddOnReviews] = useState<TakeoffSuggestedAddOnReview[]>([]);
   const [takeoffCompactTable, setTakeoffCompactTable] = useState(true);
   const [takeoffSourceDrawerOpen, setTakeoffSourceDrawerOpen] = useState(false);
@@ -1104,6 +1111,38 @@ export default function InternalEstimateApp() {
     }
   }, [urlQuoteId, sessionToken, ensureAccessToken]);
 
+  const handleSubmitTakeoffFeedback = useCallback(
+    async (payload: Parameters<typeof submitTakeoffFeedback>[2]) => {
+      const jobId = takeoffImportMeta?.takeoffJobId;
+      if (!jobId) return;
+      const token = await ensureAccessToken();
+      if (!token) return;
+      setTakeoffFeedbackBusy(true);
+      try {
+        await submitTakeoffFeedback(token, jobId, {
+          ...payload,
+          quoteId: payload.quoteId ?? urlQuoteId,
+        });
+        setTakeoffFeedbackSubmitted(true);
+        setTakeoffShowFeedbackAfterSave(false);
+      } finally {
+        setTakeoffFeedbackBusy(false);
+      }
+    },
+    [takeoffImportMeta?.takeoffJobId, ensureAccessToken, urlQuoteId]
+  );
+
+  const handleSubmitTakeoffIssue = useCallback(
+    async (payload: Parameters<typeof submitTakeoffIssueReport>[2]) => {
+      const jobId = takeoffImportMeta?.takeoffJobId;
+      if (!jobId) return;
+      const token = await ensureAccessToken();
+      if (!token) return;
+      await submitTakeoffIssueReport(token, jobId, payload);
+    },
+    [takeoffImportMeta?.takeoffJobId, ensureAccessToken]
+  );
+
   const computeRevisionBaselineSig = useCallback((): string => {
     const p = buildCalcPayload();
     return JSON.stringify({
@@ -1713,6 +1752,9 @@ export default function InternalEstimateApp() {
               : true;
         applyPostSaveQuoteIdentity(qid, qn, revLab, isCurrent, sm);
         const savedLabel = qn || (revLab ? `revision ${revLab}` : "quote");
+        if (takeoffImportMeta && isActiveTakeoffImport(takeoffImportMeta)) {
+          setTakeoffShowFeedbackAfterSave(true);
+        }
         if (sm === "save_revision") {
           setSubmitMsg(`Saved as ${savedLabel}. This is now the latest revision.`);
         } else if (sm === "update_existing") {
@@ -2804,6 +2846,7 @@ export default function InternalEstimateApp() {
             detachBusy={takeoffDetachBusy}
             detachError={takeoffDetachError}
             onOpenSourceDrawer={() => setTakeoffSourceDrawerOpen(true)}
+            onReportIssue={() => setTakeoffIssueReportOpen(true)}
           />
           {takeoffQuoteReadiness ? (
             <TakeoffQuoteReadinessSummary
@@ -2839,6 +2882,14 @@ export default function InternalEstimateApp() {
               suggestedAddOnCount={takeoffImportMeta.suggestedAddOns?.length ?? 0}
             />
           ) : null}
+          {(takeoffShowFeedbackAfterSave || urlFromTakeoffId) && !takeoffFeedbackSubmitted ? (
+            <TakeoffFeedbackForm
+              quoteId={urlQuoteId}
+              onSubmit={handleSubmitTakeoffFeedback}
+              busy={takeoffFeedbackBusy}
+              submitted={takeoffFeedbackSubmitted}
+            />
+          ) : null}
         </>
       ) : takeoffImportMeta?.status === "detached" ? (
         <TakeoffImportReceiptPanel meta={takeoffImportMeta} />
@@ -2850,6 +2901,15 @@ export default function InternalEstimateApp() {
           onClose={() => setTakeoffSourceDrawerOpen(false)}
           meta={takeoffImportMeta}
           takeoffLabUrl={readAiTakeoffHeadUrl() ?? undefined}
+        />
+      ) : null}
+
+      {takeoffImportMeta?.takeoffJobId ? (
+        <TakeoffIssueReportModal
+          open={takeoffIssueReportOpen}
+          onClose={() => setTakeoffIssueReportOpen(false)}
+          onSubmit={handleSubmitTakeoffIssue}
+          quoteId={urlQuoteId}
         />
       ) : null}
 

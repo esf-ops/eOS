@@ -48,6 +48,14 @@ import { startTakeoffProcessing } from "./takeoffProcessOrchestrator.mjs";
 import { resumeExayardTakeoff } from "./exayardTakeoffResume.mjs";
 import { readSafeProviderConfigAsync } from "./takeoffAiProvider.mjs";
 import { resolveOrganizationContext } from "../organizations/organizationContext.js";
+import {
+  TAKEOFF_BETA_LABEL,
+  TAKEOFF_ISSUE_CATEGORIES,
+  buildTakeoffBetaQaSummary,
+  recordTakeoffBetaMetric,
+  submitTakeoffFeedback,
+  submitTakeoffIssueReport,
+} from "./takeoffBetaService.mjs";
 
 const jsonParser = express.json({ limit: "4mb" }); // TakeoffResult JSON can be large
 
@@ -294,6 +302,16 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase, he
         dimensionEvidence,
       });
 
+      await recordTakeoffBetaMetric({
+        db: supabase,
+        organizationId: orgCtx.organizationId,
+        takeoffJobId,
+        eventType: "ai_takeoff_approved_for_import",
+        userId: user?.id ?? null,
+        userEmail: String(user?.email || user?.id || "unknown"),
+        req,
+      }).catch(() => {});
+
       return res.json(result);
     } catch (e) {
       const status = e.statusCode ?? 500;
@@ -490,6 +508,20 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase, he
         takeoffJobId,
       });
 
+      await recordTakeoffBetaMetric({
+        db: supabase,
+        organizationId: orgCtx.organizationId,
+        takeoffJobId,
+        eventType: "ai_takeoff_draft_generated",
+        userId: user?.id ?? null,
+        userEmail: String(user?.email || user?.id || "unknown"),
+        metadata: {
+          modelUsed: result?.modelUsed ?? null,
+          promptVersion: result?.promptVersion ?? null,
+        },
+        req,
+      }).catch(() => {});
+
       return res.json(result);
     } catch (e) {
       const status = e.statusCode ?? 500;
@@ -533,6 +565,142 @@ export function attachTakeoffWorkspaceRoutes(app, { requireAuth, getSupabase, he
         error: String(e?.message ?? e),
         code,
       });
+    }
+  });
+
+  // ── POST /api/takeoff-jobs/:id/review-started ─────────────────────────────
+  // Auth + org job ownership only — reachable from AI Takeoff and IE beta flows.
+  app.post("/api/takeoff-jobs/:id/review-started", requireAuth(), async (req, res) => {
+    try {
+      const supabase = getSupabase();
+      const user = req.user;
+      const orgCtx = await resolveOrganizationContext({ req, supabase, mode: "authenticated" });
+      if (!orgCtx.organizationId) {
+        return res.status(503).json({ ok: false, error: "Organization context not available" });
+      }
+      const takeoffJobId = String(req.params.id ?? "").trim();
+      const metric = await recordTakeoffBetaMetric({
+        db: supabase,
+        organizationId: orgCtx.organizationId,
+        takeoffJobId,
+        eventType: "ai_takeoff_review_started",
+        userId: user?.id ?? null,
+        userEmail: String(user?.email || user?.id || "unknown"),
+        req,
+      });
+      return res.json({ ok: true, ...metric });
+    } catch (e) {
+      const status = e.statusCode ?? 500;
+      return res.status(status).json({ ok: false, error: String(e?.message ?? e) });
+    }
+  });
+
+  // ── POST /api/takeoff-jobs/:id/import-cancelled ───────────────────────────
+  app.post("/api/takeoff-jobs/:id/import-cancelled", requireAuth(), jsonParser, async (req, res) => {
+    try {
+      const supabase = getSupabase();
+      const user = req.user;
+      const orgCtx = await resolveOrganizationContext({ req, supabase, mode: "authenticated" });
+      if (!orgCtx.organizationId) {
+        return res.status(503).json({ ok: false, error: "Organization context not available" });
+      }
+      const takeoffJobId = String(req.params.id ?? "").trim();
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const metric = await recordTakeoffBetaMetric({
+        db: supabase,
+        organizationId: orgCtx.organizationId,
+        takeoffJobId,
+        eventType: "ai_takeoff_import_cancelled",
+        userId: user?.id ?? null,
+        userEmail: String(user?.email || user?.id || "unknown"),
+        metadata: { reason: body.reason ?? null },
+        req,
+      });
+      return res.json({ ok: true, ...metric });
+    } catch (e) {
+      const status = e.statusCode ?? 500;
+      return res.status(status).json({ ok: false, error: String(e?.message ?? e) });
+    }
+  });
+
+  // ── POST /api/takeoff-jobs/:id/feedback ───────────────────────────────────
+  app.post("/api/takeoff-jobs/:id/feedback", requireAuth(), jsonParser, async (req, res) => {
+    try {
+      const supabase = getSupabase();
+      const user = req.user;
+      const orgCtx = await resolveOrganizationContext({ req, supabase, mode: "authenticated" });
+      if (!orgCtx.organizationId) {
+        return res.status(503).json({ ok: false, error: "Organization context not available" });
+      }
+      const takeoffJobId = String(req.params.id ?? "").trim();
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const result = await submitTakeoffFeedback({
+        db: supabase,
+        organizationId: orgCtx.organizationId,
+        takeoffJobId,
+        userId: user?.id ?? null,
+        userEmail: String(user?.email || user?.id || "unknown"),
+        quoteId: body.quoteId ?? body.quote_id ?? null,
+        helpful: body.helpful,
+        editedMeasurements: body.editedMeasurements ?? body.edited_measurements,
+        missedRooms: body.missedRooms ?? body.missed_rooms,
+        misreadBacksplash: body.misreadBacksplash ?? body.misread_backsplash,
+        note: body.note,
+        estimatedTimeSavedMinutes: body.estimatedTimeSavedMinutes ?? body.estimated_time_saved_minutes,
+        req,
+      });
+      return res.status(201).json(result);
+    } catch (e) {
+      const status = e.statusCode ?? 500;
+      return res.status(status).json({ ok: false, error: String(e?.message ?? e) });
+    }
+  });
+
+  // ── POST /api/takeoff-jobs/:id/issue-report ───────────────────────────────
+  app.post("/api/takeoff-jobs/:id/issue-report", requireAuth(), jsonParser, async (req, res) => {
+    try {
+      const supabase = getSupabase();
+      const user = req.user;
+      const orgCtx = await resolveOrganizationContext({ req, supabase, mode: "authenticated" });
+      if (!orgCtx.organizationId) {
+        return res.status(503).json({ ok: false, error: "Organization context not available" });
+      }
+      const takeoffJobId = String(req.params.id ?? "").trim();
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const result = await submitTakeoffIssueReport({
+        db: supabase,
+        organizationId: orgCtx.organizationId,
+        takeoffJobId,
+        userId: user?.id ?? null,
+        userEmail: String(user?.email || user?.id || "unknown"),
+        quoteId: body.quoteId ?? body.quote_id ?? null,
+        category: body.category,
+        note: body.note,
+        sourcePage: body.sourcePage ?? body.source_page,
+        sourcePiece: body.sourcePiece ?? body.source_piece,
+        req,
+      });
+      return res.status(201).json(result);
+    } catch (e) {
+      const status = e.statusCode ?? 500;
+      return res.status(status).json({ ok: false, error: String(e?.message ?? e) });
+    }
+  });
+
+  // ── GET /api/takeoff-beta/qa-summary ──────────────────────────────────────
+  app.get("/api/takeoff-beta/qa-summary", requireAuth(), guardHead, async (req, res) => {
+    try {
+      const supabase = getSupabase();
+      const orgCtx = await resolveOrganizationContext({ req, supabase, mode: "authenticated" });
+      if (!orgCtx.organizationId) {
+        return res.status(503).json({ ok: false, error: "Organization context not available" });
+      }
+      const limit = Number(req.query?.limit ?? 25);
+      const summary = await buildTakeoffBetaQaSummary(supabase, orgCtx.organizationId, { limit });
+      return res.json({ ...summary, betaLabel: TAKEOFF_BETA_LABEL, issueCategories: TAKEOFF_ISSUE_CATEGORIES });
+    } catch (e) {
+      const status = e.statusCode ?? 500;
+      return res.status(status).json({ ok: false, error: String(e?.message ?? e) });
     }
   });
 }

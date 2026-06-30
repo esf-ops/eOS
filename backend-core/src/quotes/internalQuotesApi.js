@@ -29,6 +29,10 @@ import { generateQuoteNumber, isMissingRelationError } from "./quotePersist.js";
 import { importInternalEstimateFromTakeoff } from "./internalQuoteTakeoffImport.mjs";
 import { detachTakeoffImportFromQuote } from "./internalQuoteTakeoffDetach.mjs";
 import {
+  assertBetaImportConfirmed,
+  recordTakeoffBetaMetric,
+} from "../takeoff/takeoffBetaService.mjs";
+import {
   appendTakeoffImportAuditEvent,
   takeoffImportContextFromSaveBody,
 } from "./internalQuoteTakeoffAudit.mjs";
@@ -351,6 +355,22 @@ export function attachInternalQuoteRoutes(app, deps) {
           },
           req
         });
+        if (isActiveTakeoffImport(takeoffImportBlock)) {
+          const takeoffJobId = takeoffImportBlock?.takeoffJobId ?? null;
+          if (takeoffJobId && orgId) {
+            await recordTakeoffBetaMetric({
+              db,
+              organizationId: orgId,
+              takeoffJobId,
+              eventType: "ai_takeoff_quote_saved",
+              userId: req.user?.id ?? null,
+              userEmail: userEmail,
+              quoteId,
+              metadata: { quote_number: quoteNumber, save_mode: saveMode || null },
+              req,
+            }).catch(() => {});
+          }
+        }
         res.json({
           ok: true,
           quoteId,
@@ -766,6 +786,16 @@ export function attachInternalQuoteRoutes(app, deps) {
         return res.status(400).json({ ok: false, error: "takeoffJobId must be a valid UUID" });
       }
 
+      try {
+        assertBetaImportConfirmed(body);
+      } catch (confirmErr) {
+        return res.status(confirmErr.statusCode ?? 422).json({
+          ok: false,
+          error: String(confirmErr?.message || confirmErr),
+          code: confirmErr.code ?? "beta_import_confirmation_required",
+        });
+      }
+
       const organizationContext = await resolveOrganizationContext({ req, supabase: db, mode: "authenticated" });
       if (!organizationContext.organizationId) {
         return res.status(503).json({ ok: false, error: "Organization context not available" });
@@ -835,6 +865,21 @@ export function attachInternalQuoteRoutes(app, deps) {
         },
         req,
       });
+
+      await recordTakeoffBetaMetric({
+        db,
+        organizationId: organizationContext.organizationId,
+        takeoffJobId,
+        eventType: "ai_takeoff_import_confirmed",
+        userId: req.user?.id ?? null,
+        userEmail: String(req.user?.email || req.user?.id || "unknown"),
+        quoteId: result.quoteId,
+        metadata: {
+          quote_number: result.quote_number,
+          takeoff_snapshot_id: result.takeoffSnapshotId,
+        },
+        req,
+      }).catch(() => {});
 
       res.status(201).json(result);
     } catch (e) {

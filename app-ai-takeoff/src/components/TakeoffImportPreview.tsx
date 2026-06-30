@@ -1,5 +1,6 @@
-import React from "react";
+import React, { useState } from "react";
 import type { TakeoffImportPlan, ImportPlanRoom, ImportPlanGroup } from "@takeoff-core/takeoffImportPlanner.mjs";
+import { TAKEOFF_BETA_IMPORT_CONFIRMATION_TEXT, TAKEOFF_BETA_LABEL } from "../lib/takeoffBeta";
 
 interface ImportPayloadPreview {
   totals?: {
@@ -20,6 +21,8 @@ interface Props {
   canImport?: boolean;
   importBlockedReason?: string | null;
   onImport?: () => void;
+  onImportCancelled?: () => void;
+  onReportIssue?: () => void;
   importStatus?: "idle" | "importing" | "done" | "error";
   importMessage?: string | null;
   workflowStatus?: string;
@@ -84,9 +87,14 @@ export default function TakeoffImportPreview({
   canImport = false,
   importBlockedReason = null,
   onImport,
+  onImportCancelled,
+  onReportIssue,
   importStatus = "idle",
   importMessage = null,
 }: Props) {
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmChecked, setConfirmChecked] = useState(false);
+
   const totals = importPayload?.totals;
   const ctSf = totals?.countertopSqft ?? importPlan.computedSf.countertopExactSf;
   const stdBs = totals?.standardBacksplashSqft ?? importPlan.computedSf.backsplashExactSf;
@@ -96,6 +104,11 @@ export default function TakeoffImportPreview({
 
   return (
     <div className="lab-card import-preview">
+      <div className="takeoff-beta-banner takeoff-beta-banner--compact" role="note">
+        <span className="takeoff-beta-badge">Beta</span>
+        <span>{TAKEOFF_BETA_LABEL}</span>
+      </div>
+
       <div className={`import-status-bar ${canImport ? "import-status--ready" : "import-status--blocked"}`}>
         <span className="import-status-icon">{canImport ? "✓" : "✗"}</span>
         <span className="import-status-text">
@@ -187,12 +200,21 @@ export default function TakeoffImportPreview({
           type="button"
           className={canImport ? "btn-import-enabled" : "btn-import-disabled"}
           disabled={!canImport || importStatus === "importing" || !onImport}
-          onClick={onImport}
+          onClick={() => {
+            if (!canImport || !onImport) return;
+            setConfirmChecked(false);
+            setConfirmOpen(true);
+          }}
         >
           {importStatus === "importing"
             ? "Creating Internal Estimate draft…"
             : "Import to Internal Estimate"}
         </button>
+        {onReportIssue ? (
+          <button type="button" className="btn secondary btn-sm" onClick={onReportIssue}>
+            Report takeoff issue
+          </button>
+        ) : null}
         {!canImport && (
           <span className="import-disabled-note">
             Only reviewed and approved takeoffs can import. Raw AI drafts never mutate quotes.
@@ -202,6 +224,49 @@ export default function TakeoffImportPreview({
           <span className={`import-result-msg import-result-msg--${importStatus}`}>{importMessage}</span>
         )}
       </div>
+
+      {confirmOpen ? (
+        <div className="takeoff-modal-backdrop" role="presentation" onClick={() => {
+          setConfirmOpen(false);
+          onImportCancelled?.();
+        }}>
+          <div className="takeoff-modal" role="dialog" aria-labelledby="takeoff-import-confirm-title" onClick={(e) => e.stopPropagation()}>
+            <h3 id="takeoff-import-confirm-title">Confirm Internal Estimate import</h3>
+            <p className="muted small">{TAKEOFF_BETA_LABEL}</p>
+            <label className="takeoff-import-confirm-check">
+              <input
+                type="checkbox"
+                checked={confirmChecked}
+                onChange={(e) => setConfirmChecked(e.target.checked)}
+              />
+              <span>{TAKEOFF_BETA_IMPORT_CONFIRMATION_TEXT}</span>
+            </label>
+            <div className="takeoff-modal-actions">
+              <button
+                type="button"
+                className="btn secondary btn-sm"
+                onClick={() => {
+                  setConfirmOpen(false);
+                  onImportCancelled?.();
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn primary btn-sm"
+                disabled={!confirmChecked || importStatus === "importing"}
+                onClick={() => {
+                  setConfirmOpen(false);
+                  onImport?.();
+                }}
+              >
+                Create draft
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

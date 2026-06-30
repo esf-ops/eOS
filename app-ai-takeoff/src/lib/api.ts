@@ -217,13 +217,61 @@ export async function approveTakeoffJob(
 /** Create Internal Estimate draft from approved takeoff. */
 export async function importInternalEstimateFromTakeoff(
   token: string,
-  takeoffJobId: string
+  takeoffJobId: string,
+  options?: { betaImportConfirmed?: boolean }
 ): Promise<{ ok: boolean; quoteId: string; quote_number: string; takeoffJobId: string }> {
-  return labApiPost("/api/internal-quotes/import-from-takeoff", token, { takeoffJobId }) as Promise<{
+  return labApiPost("/api/internal-quotes/import-from-takeoff", token, {
+    takeoffJobId,
+    betaImportConfirmed: options?.betaImportConfirmed ?? false,
+  }) as Promise<{
     ok: boolean;
     quoteId: string;
     quote_number: string;
     takeoffJobId: string;
+  }>;
+}
+
+export async function recordTakeoffReviewStarted(token: string, takeoffJobId: string): Promise<void> {
+  await labApiPost(`/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}/review-started`, token, {});
+}
+
+export async function recordTakeoffImportCancelled(
+  token: string,
+  takeoffJobId: string,
+  reason?: string
+): Promise<void> {
+  await labApiPost(`/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}/import-cancelled`, token, {
+    reason: reason ?? null,
+  });
+}
+
+export async function submitTakeoffFeedback(
+  token: string,
+  takeoffJobId: string,
+  body: import("./takeoffBeta").TakeoffFeedbackPayload
+): Promise<{ ok: boolean }> {
+  return labApiPost(`/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}/feedback`, token, body) as Promise<{
+    ok: boolean;
+  }>;
+}
+
+export async function submitTakeoffIssueReport(
+  token: string,
+  takeoffJobId: string,
+  body: import("./takeoffBeta").TakeoffIssueReportPayload
+): Promise<{ ok: boolean }> {
+  return labApiPost(`/api/takeoff-jobs/${encodeURIComponent(takeoffJobId)}/issue-report`, token, body) as Promise<{
+    ok: boolean;
+  }>;
+}
+
+export async function fetchTakeoffBetaQaSummary(
+  token: string,
+  limit = 25
+): Promise<{ ok: boolean; rows: import("./takeoffBeta").TakeoffBetaQaRow[] }> {
+  return labApiGet(`/api/takeoff-beta/qa-summary?limit=${encodeURIComponent(String(limit))}`, token) as Promise<{
+    ok: boolean;
+    rows: import("./takeoffBeta").TakeoffBetaQaRow[];
   }>;
 }
 
