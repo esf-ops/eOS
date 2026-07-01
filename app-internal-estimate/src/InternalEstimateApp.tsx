@@ -2891,7 +2891,9 @@ export default function InternalEstimateApp() {
             />
           ) : null}
         </>
-      ) : takeoffImportMeta?.status === "detached" ? (
+      ) : (takeoffImportMeta?.status === "detached" || takeoffImportMeta?.status === "imported") ? (
+        // "imported"  — normal import path; show receipt only, no checklist/workbench.
+        // "detached"  — user removed the live link; show receipt in read-only state.
         <TakeoffImportReceiptPanel meta={takeoffImportMeta} />
       ) : null}
 

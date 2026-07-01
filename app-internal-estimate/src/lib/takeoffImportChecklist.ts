@@ -17,7 +17,10 @@ export interface TakeoffImportChecklistItem {
 export function isActiveTakeoffImport(takeoffImport: unknown): boolean {
   if (!takeoffImport || typeof takeoffImport !== "object") return false;
   const ti = takeoffImport as Record<string, unknown>;
-  return ti.status !== "detached" && Boolean(ti.takeoffJobId);
+  // "detached"  — user explicitly removed the import link; receipt panel only.
+  // "imported"  — standard import; receipt panel only, no checklist/workbench.
+  // anything else (legacy "active") — full checklist/workbench mode.
+  return ti.status !== "detached" && ti.status !== "imported" && Boolean(ti.takeoffJobId);
 }
 
 export function evaluateTakeoffImportCompletionChecklist(params: {

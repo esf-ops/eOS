@@ -296,11 +296,15 @@ export function takeoffImportPayloadToRoomDrafts(payload) {
     );
 
     drafts.push({
+      // --- identity ---
       id: `takeoff-${room.name.replace(/\s+/g, "-").toLowerCase()}-${drafts.length}`,
       name: room.name,
       roomType: room.type ?? "Kitchen",
+
+      // --- native IE calc mode ---
       calcMode: "Guided Shape",
-      takeoffImportSource: roomSource,
+
+      // --- shape data ---
       guidedShapeGroups: groups.map((g) => ({
         id: g.label.replace(/\s+/g, "-").toLowerCase(),
         name: g.label,
@@ -318,6 +322,8 @@ export function takeoffImportPayloadToRoomDrafts(payload) {
             lengthIn,
             depthIn,
             shape: p.shape ?? "rect",
+            // addSplash is intentionally omitted for counter pieces: backsplash is
+            // represented via explicit "Backsplash" shapeType groups (equivalent math).
             takeoffImportSource: buildTakeoffSourceMetaForImport({
               takeoffJobId: jobId,
               takeoffSnapshotId: snapshotId,
@@ -334,10 +340,50 @@ export function takeoffImportPayloadToRoomDrafts(payload) {
           };
         }),
       })),
-      addons: {},
+      // guidedPieces is re-derived from guidedShapeGroups by normalizeGuidedShapeRoom()
+      // on IE hydration — no need to duplicate here.
+
+      // --- native IE full-height backsplash fields ---
+      fhbMode: "Off",
+      fhbDirectSf: 0,
+      fhbOutlets: 0,
+      fhbPieces: [],
+
+      // --- native IE legacy linear/direct fields (unused in Guided Shape mode) ---
+      linear: { wallFt: 0, splashIn: 4, islandL: 0, islandW: 0 },
+      direct: { counter: 0, splash: 0 },
+
+      // --- native IE room-level flags ---
+      tear: false,
+      raised: "No",
       notes: "",
+      addons: {},
+
+      // --- native IE material fields (estimator fills in before calculate) ---
       materialGroup: null,
-      catalogColorId: null,
+      materialProgramOverride: "inherit",
+
+      // --- native IE tax fields ---
+      useTaxMode: "inherit_project",
+      useTaxPercent: 0,
+      useTaxBase: "countertop_material",
+
+      // --- native IE vanity defaults (not a vanity room, but field is required) ---
+      vanity: {
+        size: "none",
+        source: "Promo / Stock 100 Remnant",
+        depth: 22.5,
+        qty: 1,
+        programSink: 0,
+        bowl: 0,
+        isVanityProgram: true,
+        vanitySinkType: "oval_white",
+        vanityExtraTrips: 0,
+        outsideProgram: false,
+      },
+
+      // --- takeoff traceability (extra, not required for IE math) ---
+      takeoffImportSource: roomSource,
     });
   }
   return drafts;

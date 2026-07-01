@@ -185,7 +185,9 @@ export async function importInternalEstimateFromTakeoff({
 
   let takeoffImportBlock = {
     schemaVersion: importPayload.schemaVersion,
-    status: "active",
+    // "imported" = traceability preserved, no active checklist/workbench in IE.
+    // The IE shows only the TakeoffImportReceiptPanel for this status.
+    status: "imported",
     takeoffJobId,
     takeoffSnapshotId: snapshotId,
     sourceFileName: fileName,
@@ -217,24 +219,17 @@ export async function importInternalEstimateFromTakeoff({
     ...calc.snapshot,
     internal_ui_version: 1,
     internal_ui: {
-      quote_workflow: "takeoff_import_draft",
+      // null so IE uses its own INTERNAL_ESTIMATE_WORKFLOW constant unmodified.
+      quote_workflow: null,
       internal_material_basis: null,
       material_program_default: "elite_100",
       estimate_room_drafts: roomDrafts,
       estimate_rooms: calcBody.rooms,
       color_tbd: true,
       takeoff_import: takeoffImportBlock,
-      takeoff_import_checklist: {
-        account: false,
-        project: false,
-        branch: false,
-        salesperson: false,
-        pricing_mode: false,
-        material: false,
-        addons: false,
-        notes: false,
-        ready_to_calculate: false,
-      },
+      // No takeoff_import_checklist — the checklist/workbench panels in IE are
+      // driven by isActiveTakeoffImport (status === "imported" → false) so they
+      // never show. Traceability lives entirely in takeoff_import above.
     },
   };
 
