@@ -57,6 +57,26 @@ If `QB_COMPANY_FILE` is unset, QuickBooks uses the **currently open** company fi
 | `QB_MAX_RETURNED` | `100` | Iterator page size |
 | `QB_EXPORTS_ROOT` | `{root}\exports` | Export base directory |
 | `QB_LOGS_ROOT` | `{root}\logs` | Log directory |
+| `QB_DEBUG_ROOT` | `{root}\debug` | Debug output root (failed outbound QBXML requests) |
+| `QB_ENTITIES` | *(empty = all)* | Comma-separated entity filter, e.g. `accounts,classes,sales-reps,terms,estimates` |
+| `QB_ESTIMATE_CHUNK_START_YEAR` | `2000` | Earliest year for estimate monthly fallback chunks |
+
+### Selective entity run (fix/debug without full extract)
+
+```powershell
+$env:QB_ENTITIES = "accounts,classes,sales-reps,terms,estimates"
+.\run-extract.ps1
+```
+
+## Failed-request diagnostics
+
+When an entity query fails (XML parse error, non-zero `statusCode`, or `ProcessRequest` exception), the connector writes the **exact outbound QBXML request** to:
+
+```
+debug/failed-requests/{entity}-{label}-{timestamp}.xml
+```
+
+Only failed entities are captured — successful customer/invoice payloads are not written to debug.
 
 ## Output layout
 
@@ -95,24 +115,26 @@ Logs are written to `logs/{runId}.log`.
 
 ## Entities extracted
 
-| Entity | QBXML request | Iterator |
+| Entity | QBXML request | Strategy |
 |--------|---------------|----------|
-| Company | `CompanyQueryRq` | No |
-| Customers & jobs | `CustomerQueryRq` | Yes |
-| Invoices (+ lines) | `InvoiceQueryRq` + `IncludeLineItems` | Yes |
-| Items | `ItemQueryRq` | Yes |
-| Receive payments | `ReceivePaymentQueryRq` | Yes |
-| Vendors | `VendorQueryRq` | Yes |
-| Bills | `BillQueryRq` | Yes |
-| Purchase orders | `PurchaseOrderQueryRq` | Yes |
-| Accounts | `AccountQueryRq` | Yes |
-| Classes | `ClassQueryRq` | Yes |
-| Sales reps | `SalesRepQueryRq` | Yes |
-| Terms | `TermsQueryRq` | Yes |
-| Estimates (+ lines) | `EstimateQueryRq` + `IncludeLineItems` | Yes |
-| Sales orders (+ lines) | `SalesOrderQueryRq` + `IncludeLineItems` | Yes |
+| Company | `CompanyQueryRq` | Single request |
+| Customers & jobs | `CustomerQueryRq` | Iterator (`MaxReturned=100`) |
+| Invoices (+ lines) | `InvoiceQueryRq` + `IncludeLineItems` | Iterator |
+| Items | `ItemQueryRq` | Iterator |
+| Receive payments | `ReceivePaymentQueryRq` | Iterator |
+| Vendors | `VendorQueryRq` | Iterator |
+| Bills | `BillQueryRq` | Iterator |
+| Purchase orders | `PurchaseOrderQueryRq` | Iterator |
+| Accounts | `AccountQueryRq` + `ActiveStatus` | Simple list (no iterator) |
+| Classes | `ClassQueryRq` + `ActiveStatus` | Simple list (no iterator) |
+| Sales reps | `SalesRepQueryRq` | Simple list (no iterator) |
+| Terms | `StandardTermsQueryRq` + `DateDrivenTermsQueryRq` | Two simple queries under `terms/` |
+| Estimates | `EstimateQueryRq` | Iterator, then fallback without line items, then monthly date chunks |
+| Sales orders (+ lines) | `SalesOrderQueryRq` + `IncludeLineItems` | Iterator |
 
-Large queries use `iterator="Start"` then `iterator="Continue"` with the returned `iteratorID` until `iteratorRemainingCount` is `0`.
+Large iterator queries use `iterator="Start"` then `iterator="Continue"` with the returned `iteratorID` until `iteratorRemainingCount` is `0`.
+
+**Estimates fallback order:** (1) `IncludeLineItems=true`, (2) `IncludeLineItems=false`, (3) monthly `TxnDateRangeFilter` chunks from `QB_ESTIMATE_CHUNK_START_YEAR` through the current month.
 
 ## Security notes
 
