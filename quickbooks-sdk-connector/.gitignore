@@ -9,3 +9,11 @@ debug/failed-requests/*.xml
 !debug/failed-requests/.gitkeep
 *.user
 .vs/
+
+# Local QuickBooks exports/logs - never commit financial data
+exports/
+logs/
+bin/
+obj/
+*.log
+*.zip
