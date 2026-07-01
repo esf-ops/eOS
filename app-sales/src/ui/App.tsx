@@ -9,6 +9,7 @@ import SalesIntelligenceView from "./SalesIntelligenceView";
 import QuotePipelinePanel from "./QuotePipelinePanel";
 import KpiV1Panel from "./KpiV1Panel";
 import BentoDashboardView from "./BentoDashboardView";
+import SalesQueryPanel from "./SalesQueryPanel";
 import EliteosTopbar from "../../../shared/eliteos-ui/EliteosTopbar";
 import type { EliteosTopbarMenuItem } from "../../../shared/eliteos-ui/EliteosTopbar";
 import "./sales-intelligence.css";
@@ -130,12 +131,13 @@ function buildLegacyFilterQuery(f: FilterState): string {
   return p.toString();
 }
 
-type SalesTab = "command_center" | "quote_pipeline" | "kpi_history" | "intelligence";
+type SalesTab = "command_center" | "quote_pipeline" | "kpi_history" | "query" | "intelligence";
 
 const TABS: ReadonlyArray<{ id: SalesTab; label: string; planning?: boolean }> = [
   { id: "command_center", label: "Command center" },
   { id: "quote_pipeline", label: "Quote pipeline" },
   { id: "kpi_history", label: "KPI history" },
+  { id: "query", label: "Ask Sales Data" },
   { id: "intelligence", label: "Legacy intelligence" }
 ];
 
@@ -553,6 +555,8 @@ export default function App() {
             {salesTab === "quote_pipeline" ? <QuotePipelinePanel token={token} /> : null}
 
             {salesTab === "kpi_history" ? <KpiV1Panel token={token} /> : null}
+
+            {salesTab === "query" ? <SalesQueryPanel token={token} onLoadError={onPiLoadError} /> : null}
 
             {salesTab === "intelligence" ? (
               <>

@@ -86,6 +86,7 @@
     "eos:test:custom-quote": "node backend-core/src/quotes/customQuoteCalculator.test.mjs",
     "eos:test:customer-output-gate": "node backend-core/src/scripts/verifyCustomerOutputGate.mjs && node backend-core/src/quotes/quoteOutputGate.test.mjs",
     "eos:test:entered-by-defaults": "node app-internal-estimate/src/lib/enteredByDefaults.test.mjs",
+    "eos:test:sales-query": "node backend-core/src/scripts/verifyMorawareSalesQuery.mjs && node app-sales/src/lib/salesQueryParser.test.mjs",
     "eos:test:takeoff-contract": "node backend-core/src/takeoff/takeoff.contract.test.mjs",
     "eos:test:takeoff-workspace-service": "node backend-core/src/takeoff/takeoffWorkspaceService.test.mjs",
     "eos:test:takeoff-extraction-service": "node backend-core/src/takeoff/takeoffExtractionService.test.mjs",

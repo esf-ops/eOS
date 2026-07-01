@@ -291,3 +291,95 @@ export type JobAttribution = {
 };
 
 export type JobRowWithAttribution = JobRow & { attribution?: JobAttribution };
+
+// ── Ask Sales Data / Moraware query explorer ───────────────────────────────
+
+export type SalesMorawareQueryFilters = {
+  date_from?: string | null;
+  date_to?: string | null;
+  account?: string | null;
+  salesperson?: string | null;
+  text?: string | null;
+  tags?: string[];
+  min_sqft?: number | null;
+  max_sqft?: number | null;
+  missing_sqft?: boolean;
+  limit?: number;
+};
+
+export type SalesMorawareQueryFilterChip = {
+  key: string;
+  label: string;
+};
+
+export type SalesMorawareQuerySummary = {
+  job_count: number;
+  jobs_with_sqft: number;
+  total_sqft: number;
+  avg_sqft_per_job: number;
+  missing_sqft_count: number;
+};
+
+export type SalesMorawareQueryTopAccount = {
+  account: string;
+  job_count: number;
+  total_sqft: number;
+};
+
+export type SalesMorawareQueryTopSalesperson = {
+  salesperson: string;
+  job_count: number;
+  total_sqft: number;
+};
+
+export type SalesMorawareQueryTagBreakdown = {
+  tag: string;
+  label: string;
+  job_count: number;
+};
+
+export type SalesMorawareQueryRow = {
+  job_id: string | null;
+  job_name: string | null;
+  account: string | null;
+  salesperson: string | null;
+  date: string | null;
+  worksheet_sqft: number | null;
+  sqft_found: boolean;
+  matched_tags: string[];
+  match_reason: string | null;
+  notes_excerpt: string | null;
+};
+
+export type SalesMorawareQueryMeta = {
+  extraction_status?: string;
+  sync_note?: string | null;
+  fallback_used?: boolean;
+  used_import_group_id?: string | null;
+  latest_import_group_id?: string | null;
+  latest_import_group_complete?: boolean | null;
+  facts_rows_loaded?: number;
+};
+
+export type SalesMorawareQuerySuccess = {
+  ok: true;
+  source: "moraware";
+  query?: string | null;
+  summary: SalesMorawareQuerySummary;
+  filters_applied: SalesMorawareQueryFilterChip[];
+  top_accounts: SalesMorawareQueryTopAccount[];
+  top_salespeople: SalesMorawareQueryTopSalesperson[];
+  tag_breakdown: SalesMorawareQueryTagBreakdown[];
+  total_count: number;
+  rows: SalesMorawareQueryRow[];
+  meta?: SalesMorawareQueryMeta;
+};
+
+export type SalesMorawareQueryUnavailable = {
+  ok: false;
+  source: "moraware";
+  unavailable: true;
+  message: string;
+};
+
+export type SalesMorawareQueryResponse = SalesMorawareQuerySuccess | SalesMorawareQueryUnavailable;

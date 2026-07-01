@@ -3,6 +3,7 @@
  * Mirrors Executive job/sqft patterns: `worksheet_sqft` Rollup currency fields are intentionally null until Quote Platform feeds revenue.
  */
 
+import express from "express";
 import { isApplicationRole } from "../auth/eosGovernanceConstants.js";
 import {
   ACTIVE_SALES_REPS,
@@ -16,6 +17,13 @@ import {
 import { loadLatestCompleteImportGroup } from "../moraware/morawareSyncHealth.js";
 import { buildCompanyWideSqftActuals, buildProductionReportReconciliation, extractSqftFromMorawareJob } from "./morawareSqftActuals.js";
 import { normalizeAccountNameWithoutLocationPrefix } from "./salesAccountNameNormalizer.js";
+import {
+  executeMorawareSalesQuery,
+  extractNotesExcerptFromRawPayload,
+  normalizeMorawareQueryFilters
+} from "./morawareSalesQuery.js";
+
+const salesJsonParser = express.json({ limit: "256kb" });
 
 /** Roles that may call `/api/sales/*` when also granted head `sales` (admin bypass unchanged). */
 export const SALES_API_ROLES = Object.freeze(["admin", "executive", "sales", "finance", "marketing"]);
@@ -3507,6 +3515,137 @@ export async function salesDashboardSummaryHandler(req, supabaseGetter) {
 
 // ── End Sales Dashboard Summary ───────────────────────────────────────────
 
+async function fetchMorawareJobEnrichmentMap(supabase, organizationId, sourceJobIds) {
+  /** @type {Map<string, { job_name: string|null, notes_excerpt: string|null }>} */
+  const map = new Map();
+  const ids = [...new Set(sourceJobIds.map((x) => String(x ?? "").trim()).filter(Boolean))];
+  if (!ids.length) return map;
+
+  for (const part of chunkArray(ids, 200)) {
+    let q = supabase
+      .from("brain_moraware_jobs")
+      .select("source_job_id,job_name,raw_payload")
+      .eq("organization_id", organizationId)
+      .in("source_job_id", part);
+    const { data, error } = await q;
+    if (error) {
+      if (isMissingRelationError(error)) return map;
+      throw error;
+    }
+    for (const row of data ?? []) {
+      const key = String(row.source_job_id ?? "").trim();
+      if (!key) continue;
+      map.set(key, {
+        job_name: String(row.job_name ?? "").trim() || null,
+        notes_excerpt: extractNotesExcerptFromRawPayload(row.raw_payload) || null
+      });
+    }
+  }
+  return map;
+}
+
+/**
+ * POST /api/sales/query — read-only deterministic Moraware query explorer.
+ * Loads prepared facts, enriches job names/notes from brain_moraware_jobs, filters in memory.
+ */
+export async function salesMorawareQueryHandler(req, supabaseGetter) {
+  const supabase = supabaseGetter();
+  const organizationId = resolveSalesOrganizationId(req);
+  if (!organizationId) {
+    return { status: 400, body: { ok: false, error: "Sales query requires organization_id context." } };
+  }
+
+  const body = req.body && typeof req.body === "object" ? req.body : {};
+  const source = String(body.source ?? "moraware").trim().toLowerCase();
+  if (source !== "moraware") {
+    return { status: 400, body: { ok: false, error: `Unsupported query source "${source}". Only "moraware" is available in v1.` } };
+  }
+
+  const filters = normalizeMorawareQueryFilters(body.filters ?? {});
+
+  let syncHealth;
+  try {
+    syncHealth = await loadLatestMorawareGroup(supabase, organizationId);
+  } catch (e) {
+    return {
+      status: 200,
+      body: {
+        ok: false,
+        source: "moraware",
+        unavailable: true,
+        message: `Moraware sync health unavailable: ${String(e?.message ?? e)}`
+      }
+    };
+  }
+
+  let factsResult;
+  try {
+    factsResult = await fetchLatestPreparedSalesJobFacts(supabase, organizationId, syncHealth);
+  } catch (e) {
+    return {
+      status: 200,
+      body: {
+        ok: false,
+        source: "moraware",
+        unavailable: true,
+        message: `Moraware prepared facts unavailable: ${String(e?.message ?? e)}`
+      }
+    };
+  }
+
+  if (!factsResult.available || !factsResult.rows?.length) {
+    return {
+      status: 200,
+      body: {
+        ok: false,
+        source: "moraware",
+        unavailable: true,
+        message: factsResult.warning || "Moraware data is not available yet."
+      }
+    };
+  }
+
+  let enrichmentMap = new Map();
+  try {
+    enrichmentMap = await fetchMorawareJobEnrichmentMap(
+      supabase,
+      organizationId,
+      factsResult.rows.map((r) => r.source_job_id)
+    );
+  } catch {
+    enrichmentMap = new Map();
+  }
+
+  const queryResult = executeMorawareSalesQuery(factsResult.rows, filters, enrichmentMap);
+
+  return {
+    status: 200,
+    body: {
+      ok: true,
+      source: "moraware",
+      query: String(body.query ?? "").trim() || null,
+      summary: queryResult.summary,
+      filters_applied: queryResult.filters_applied,
+      top_accounts: queryResult.top_accounts,
+      top_salespeople: queryResult.top_salespeople,
+      tag_breakdown: queryResult.tag_breakdown,
+      total_count: queryResult.total_count,
+      rows: queryResult.rows,
+      meta: {
+        extraction_status: "ok",
+        sync_note: factsResult.warning ?? null,
+        fallback_used: Boolean(factsResult.fallback_used),
+        used_import_group_id: factsResult.used_import_group_id ?? factsResult.diagnostics?.source_import_group_id ?? null,
+        latest_import_group_id: factsResult.latest_import_group_id ?? syncHealth?.latest_group?.import_group_id ?? null,
+        latest_import_group_complete: factsResult.latest_import_group_complete ?? syncHealth?.latest_group?.complete ?? null,
+        facts_rows_loaded: factsResult.rows.length
+      }
+    }
+  };
+}
+
+// ── End Moraware Sales Query ──────────────────────────────────────────────
+
 /**
  * Register Sales Head read routes. Matches Executive pattern: requireAuth → requireRole (admin bypass) → head access.
  * @param {import("express").Application} app
@@ -3530,7 +3669,7 @@ export function attachSalesHeadRoutes(app, { requireAuth, requireRole, requireHe
   console.log(
     "[sales] mounted GET /api/sales/{summary,salesperson-performance,account-performance,trend,jobs,filters," +
     "dashboard-foundation,production-reconciliation,performance-intelligence,debug,kpi-v1} " +
-    "+ GET /api/sales-dashboard/summary (requireAuth + SALES_API_ROLES + sales head)"
+    "+ GET /api/sales-dashboard/summary + POST /api/sales/query (requireAuth + SALES_API_ROLES + sales head)"
   );
 
   app.get("/api/sales/summary", requireAuth(), requireRole(roleList), headAccessSales, execSales(salesSummaryHandler));
@@ -3587,5 +3726,13 @@ export function attachSalesHeadRoutes(app, { requireAuth, requireRole, requireHe
     requireRole(roleList),
     headAccessSales,
     execSales(salesDashboardSummaryHandler)
+  );
+  app.post(
+    "/api/sales/query",
+    requireAuth(),
+    requireRole(roleList),
+    headAccessSales,
+    salesJsonParser,
+    execSales(salesMorawareQueryHandler)
   );
 }

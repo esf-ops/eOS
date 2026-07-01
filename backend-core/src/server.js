@@ -1664,6 +1664,7 @@ if (shouldStartLocalHttpServer()) {
     console.log("- GET /api/sales/debug");
     console.log("- GET /api/sales/kpi-v1");
     console.log("- GET /api/sales-dashboard/summary");
+    console.log("- POST /api/sales/query");
     console.log("- GET /api/admin/users  (alias: GET /api/system-admin/users)");
     console.log("- GET /api/admin/sales-account-mapping/schema-health");
     console.log("- GET /api/admin/sales-account-mapping/suggestions");
