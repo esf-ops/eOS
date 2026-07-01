@@ -745,11 +745,16 @@ import {
   for (const c of routeCalls) {
     assert.equal(c.method, "get", `route ${c.path} must be GET (read-only) — got ${c.method}`);
   }
+  const allGetCalls = calls.filter((c) => c.method === "get" && c.path.startsWith("/api/"));
+  for (const c of allGetCalls) {
+    assert.equal(c.method, "get", `route ${c.path} must be GET (read-only) — got ${c.method}`);
+  }
   // No mutating verbs anywhere.
   for (const verb of ["post", "put", "patch", "delete"]) {
     assert.equal(calls.filter((c) => c.method === verb).length, 0, `no ${verb} routes registered`);
   }
   const paths = new Set(routeCalls.map((c) => c.path));
+  const allPaths = new Set(allGetCalls.map((c) => c.path));
   for (const expected of [
     "/api/slab-inventory/summary",
     "/api/slab-inventory/filters",
@@ -759,11 +764,12 @@ import {
     "/api/slab-inventory/colors/:colorKey/inventory",
     "/api/slab-inventory/elite100-programs",
     "/api/slab-inventory/elite100-programs/:catalogItemId/inventory",
-    "/api/slab-inventory/non-stock-programs"
+    "/api/slab-inventory/non-stock-programs",
   ]) {
     assert.ok(paths.has(expected), `route ${expected} registered`);
   }
-  console.log("ok: read-only route shape (GET only, 9 routes including Elite 100 + Non-Stock)");
+  assert.ok(allPaths.has("/api/public/elite100-showroom"), "public elite100 showroom route registered");
+  console.log("ok: read-only route shape (GET only, 10 routes including Elite 100 + Non-Stock + public showroom)");
 }
 
 /* ── buildElite100InventoryMap — only exact/alias matches counted ─────── */

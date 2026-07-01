@@ -4177,3 +4177,126 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
   }
 }
 
+/* ── Public Elite 100 showroom (embeddable / Arreya) ─────────────────── */
+
+.e100-public-page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, #f7f9fc 0%, #eef2f7 100%);
+  color: var(--eos-ink);
+}
+
+.e100-public-header {
+  padding: clamp(20px, 3vw, 36px) clamp(16px, 4vw, 48px) clamp(16px, 2vw, 24px);
+  border-bottom: 1px solid var(--eos-line);
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(8px);
+}
+
+.e100-public-brand {
+  display: flex;
+  align-items: center;
+  gap: clamp(14px, 2vw, 22px);
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.e100-public-logo {
+  width: clamp(52px, 6vw, 72px);
+  height: clamp(52px, 6vw, 72px);
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.e100-public-logo-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: clamp(52px, 6vw, 72px);
+  height: clamp(52px, 6vw, 72px);
+  border-radius: 14px;
+  background: var(--eos-navy);
+  color: #fff;
+  font-weight: 800;
+  font-size: 1.1rem;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+
+.e100-public-brand-text {
+  min-width: 0;
+}
+
+.e100-public-title {
+  margin: 0 0 4px;
+  font-size: clamp(1.25rem, 2.8vw, 2rem);
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+.e100-public-subtitle {
+  margin: 0;
+  font-size: clamp(0.92rem, 1.6vw, 1.05rem);
+  color: var(--eos-ink-mid);
+}
+
+.e100-public-main {
+  flex: 1;
+  width: min(1400px, 100%);
+  margin: 0 auto;
+  padding: clamp(16px, 3vw, 32px) clamp(16px, 4vw, 48px) clamp(32px, 4vw, 56px);
+}
+
+.e100-public-sections {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(24px, 3vw, 40px);
+}
+
+.e100-public-footer {
+  padding: 16px clamp(16px, 4vw, 48px) clamp(20px, 3vh, 32px);
+  border-top: 1px solid var(--eos-line);
+  text-align: center;
+  font-size: 0.78rem;
+  color: var(--eos-ink-muted);
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.e100-public-footer p {
+  margin: 0;
+}
+
+.e100-public-loading {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.e100-public-kiosk .e100-public-title {
+  font-size: clamp(1.5rem, 3.2vw, 2.35rem);
+}
+
+.e100-public-kiosk .e100-public-subtitle {
+  font-size: clamp(1rem, 1.8vw, 1.2rem);
+}
+
+.e100-public-kiosk .e100-scroll-btn {
+  width: 48px;
+  height: 48px;
+  font-size: 1.75rem;
+}
+
+.e100-public-kiosk .cp-card {
+  min-width: var(--e100-card-width, 400px);
+}
+
+.e100-section-kiosk .e100-section-title {
+  font-size: clamp(1.15rem, 2vw, 1.45rem);
+}
+
+.e100-public-kiosk .e100-public-footer {
+  font-size: 0.85rem;
+}
+

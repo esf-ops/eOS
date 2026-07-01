@@ -23,6 +23,7 @@
  */
 
 import { resolveOrganizationContext } from "../organizations/organizationContext.js";
+import { resolveOrgId } from "../slabcloud/slabCloudHourlySyncApi.js";
 import {
   applyInventorySourceFilter,
   resolveInventorySourceFilter,
@@ -1329,53 +1330,52 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
   // Only exact and approved-alias inventory matches contribute to counts.
   // Fuzzy / unmatched inventory is excluded (those belong in Non-Stock).
   // Group G is never returned. No count_for_color is read or summed.
-  app.get("/api/slab-inventory/elite100-programs", ...guard, async (req, res) => {
-    try {
-      jsonNoStore(res);
-      const supabase = db();
-      const organizationId = await orgId(req);
-      const sourceFilter = resolveSourceFilter(req);
+  async function sendElite100ProgramsResponse(req, res, organizationId, opts = {}) {
+    const supabase = db();
+    const sourceFilter = resolveSourceFilter(req);
+    const publicShowroom = opts.publicShowroom === true;
 
-      const { collection, catalogItemList, resolvedAliases } =
-        await loadElite100Deps(organizationId);
+    const { collection, catalogItemList, resolvedAliases } =
+      await loadElite100Deps(organizationId);
 
-      if (!collection) {
-        return res.json({
-          ok: true,
-          collection: null,
-          groups: [],
-          price_group_order: [...COLOR_PROGRAM_PRICE_GROUP_ORDER],
-          note: "No active Elite 100 collection found for this organization.",
-        });
-      }
+    if (!collection) {
+      return res.json({
+        ok: true,
+        collection: null,
+        groups: [],
+        price_group_order: [...COLOR_PROGRAM_PRICE_GROUP_ORDER],
+        note: "No active Elite 100 collection found for this organization.",
+      });
+    }
 
-      // Load active inventory from the configured source (same basis as All Inventory).
-      const scopeInv = (q) => scopeInventory(q, organizationId, sourceFilter);
-      const inventoryFetch = await fetchAllActiveInventoryRowsForElite100Matching(
-        supabase,
-        scopeInv
-      );
-      const invRows = inventoryFetch.rows;
-      if (inventoryFetch.fetch_warning) {
-        console.warn("[elite100-programs]", inventoryFetch.fetch_warning);
-      }
+    // Load active inventory from the configured source (same basis as All Inventory).
+    const scopeInv = (q) => scopeInventory(q, organizationId, sourceFilter);
+    const inventoryFetch = await fetchAllActiveInventoryRowsForElite100Matching(
+      supabase,
+      scopeInv
+    );
+    const invRows = inventoryFetch.rows;
+    if (inventoryFetch.fetch_warning) {
+      console.warn("[elite100-programs]", inventoryFetch.fetch_warning);
+    }
 
-      // Load all org images (avoiding PostgREST URL-length limit).
-      let imgQ = supabase
-        .from("slab_images")
-        .select(SLAB_IMAGE_SELECT_COLUMNS);
-      imgQ = scopeInventory(imgQ, organizationId, sourceFilter);
-      const { data: imgRows } = await imgQ;
-      const imageMap = buildImageMap(imgRows ?? [], sourceFilter);
+    // Load all org images (avoiding PostgREST URL-length limit).
+    let imgQ = supabase
+      .from("slab_images")
+      .select(SLAB_IMAGE_SELECT_COLUMNS);
+    imgQ = scopeInventory(imgQ, organizationId, sourceFilter);
+    const { data: imgRows } = await imgQ;
+    const imageMap = buildImageMap(imgRows ?? [], sourceFilter);
 
-      // Match inventory to catalog items (exact/alias only).
-      const elite100Map = buildElite100InventoryMap(
-        invRows ?? [],
-        catalogItemList,
-        resolvedAliases
-      );
+    // Match inventory to catalog items (exact/alias only).
+    const elite100Map = buildElite100InventoryMap(
+      invRows ?? [],
+      catalogItemList,
+      resolvedAliases
+    );
 
-      const includeMatchDebug = trimStr(req.query.debug).toLowerCase() === "match";
+    const includeMatchDebug =
+      !publicShowroom && trimStr(req.query.debug).toLowerCase() === "match";
       /** @type {Map<string, ReturnType<typeof diagnoseElite100CatalogItem>>|null} */
       let matchDebugByCatalogId = null;
       if (includeMatchDebug) {
@@ -1513,36 +1513,64 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
         ),
       }));
 
-      res.json({
-        ok: true,
-        installed: true,
-        active_inventory_source: sourceFilter.resolved,
-        collection: {
-          collection_key: collection.collection_key,
-          display_name: collection.display_name,
-          collection_year: collection.collection_year ?? null,
-          is_active: collection.is_active,
-        },
-        groups,
-        price_group_order: [...COLOR_PROGRAM_PRICE_GROUP_ORDER],
-        ...(includeMatchDebug
-          ? {
-              match_report_summary: {
-                inventory_row_count: invRows.length,
-                catalog_item_count: catalogItemList.length,
-                matched_catalog_count: catalogItemList.filter(
-                  (c) => (elite100Map.get(c.id)?.rows?.length ?? 0) > 0
-                ).length,
-                active_inventory_rows_fetched: inventoryFetch.active_inventory_rows_fetched,
-                expected_active_count: inventoryFetch.expected_active_count,
-                active_inventory_fetch_pages: inventoryFetch.active_inventory_fetch_pages,
-                active_inventory_fetch_complete: inventoryFetch.active_inventory_fetch_complete,
-                fetch_warning: inventoryFetch.fetch_warning,
-                note: "Debug only (?debug=match). Fuzzy candidates are suggestions — not counted as inventory.",
-              },
-            }
-          : {}),
-      });
+    return res.json({
+      ok: true,
+      installed: true,
+      active_inventory_source: sourceFilter.resolved,
+      collection: {
+        collection_key: collection.collection_key,
+        display_name: collection.display_name,
+        collection_year: collection.collection_year ?? null,
+        is_active: collection.is_active,
+      },
+      groups,
+      price_group_order: [...COLOR_PROGRAM_PRICE_GROUP_ORDER],
+      ...(includeMatchDebug
+        ? {
+            match_report_summary: {
+              inventory_row_count: invRows.length,
+              catalog_item_count: catalogItemList.length,
+              matched_catalog_count: catalogItemList.filter(
+                (c) => (elite100Map.get(c.id)?.rows?.length ?? 0) > 0
+              ).length,
+              active_inventory_rows_fetched: inventoryFetch.active_inventory_rows_fetched,
+              expected_active_count: inventoryFetch.expected_active_count,
+              active_inventory_fetch_pages: inventoryFetch.active_inventory_fetch_pages,
+              active_inventory_fetch_complete: inventoryFetch.active_inventory_fetch_complete,
+              fetch_warning: inventoryFetch.fetch_warning,
+              note: "Debug only (?debug=match). Fuzzy candidates are suggestions — not counted as inventory.",
+            },
+          }
+        : {}),
+    });
+  }
+
+  app.get("/api/slab-inventory/elite100-programs", ...guard, async (req, res) => {
+    try {
+      jsonNoStore(res);
+      const organizationId = await orgId(req);
+      await sendElite100ProgramsResponse(req, res, organizationId);
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
+  // GET /api/public/elite100-showroom
+  //
+  // Public read-only Elite 100 carousel payload for digital signage / Arreya embeds.
+  // No auth. Org is resolved from SLABOS_ORGANIZATION_ID (or SLABCLOUD_ORGANIZATION_ID).
+  // Same card shape as elite100-programs; debug query params are ignored.
+  app.get("/api/public/elite100-showroom", async (req, res) => {
+    try {
+      jsonNoStore(res);
+      const organizationId = resolveOrgId();
+      if (!organizationId) {
+        return res.status(503).json({
+          ok: false,
+          error: "Elite 100 public showroom is not configured (SLABOS_ORGANIZATION_ID).",
+        });
+      }
+      await sendElite100ProgramsResponse(req, res, organizationId, { publicShowroom: true });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
     }
@@ -1872,6 +1900,6 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
   });
 
   console.log(
-    "[slab-inventory-head] mounted GET /api/slab-inventory/summary, /filters, /slabs, /slabs/:id, /color-programs, /colors/:colorKey/inventory, /elite100-programs, /elite100-programs/:catalogItemId/inventory, /non-stock-programs (read-only)"
+    "[slab-inventory-head] mounted GET /api/slab-inventory/summary, /filters, /slabs, /slabs/:id, /color-programs, /colors/:colorKey/inventory, /elite100-programs, /elite100-programs/:catalogItemId/inventory, /non-stock-programs, GET /api/public/elite100-showroom (read-only)"
   );
 }
