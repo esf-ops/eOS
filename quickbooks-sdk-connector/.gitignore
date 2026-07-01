@@ -1,0 +1,9 @@
+bin/
+obj/
+exports/*/
+!exports/.gitkeep
+logs/*.log
+logs/*.txt
+!logs/.gitkeep
+*.user
+.vs/
