@@ -4,6 +4,9 @@ import {
   computeLetterGrade,
   formatWeekLabel,
   gradeTrend,
+  isManagerRole,
+  isWorkforceManager,
+  MANAGER_ROLES,
   sumWeightedMistakes,
   weekEndForWeekStart,
   weekStartForIsoDate
@@ -40,5 +43,23 @@ assert.equal(gradeTrend("C", "A"), "down");
 assert.equal(gradeTrend("B", "B"), "flat");
 
 assert.ok(formatWeekLabel("2026-06-30", "2026-07-06").includes("Jun"));
+
+assert.ok(MANAGER_ROLES instanceof Set);
+assert.equal(isManagerRole("admin"), true);
+assert.equal(isManagerRole("executive"), true);
+assert.equal(isManagerRole("hr"), true);
+assert.equal(isManagerRole("super_admin"), true);
+assert.equal(isManagerRole("viewer"), false);
+assert.equal(isManagerRole("sales"), false);
+assert.equal(isManagerRole(undefined), false);
+assert.equal(isManagerRole(null), false);
+assert.equal(isManagerRole(""), false);
+
+assert.equal(isWorkforceManager({ role: "admin" }), true);
+assert.equal(isWorkforceManager({ role: "viewer" }), false);
+assert.equal(isWorkforceManager(undefined), false);
+assert.equal(isWorkforceManager(null), false);
+assert.equal(isWorkforceManager({}), false);
+assert.doesNotThrow(() => isWorkforceManager({ role: undefined }));
 
 console.log("workforceGradeEngine.test.mjs: ok");

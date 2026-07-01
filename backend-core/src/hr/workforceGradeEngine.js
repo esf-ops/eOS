@@ -19,13 +19,20 @@ export const DEFAULT_SEVERITY_WEIGHTS = Object.freeze({
   major: 3
 });
 
-export const MANAGER_ROLES = Object.freeze(["admin", "executive", "hr", "super_admin"]);
+export const MANAGER_ROLES = new Set(["admin", "executive", "hr", "super_admin"]);
 
 /**
- * @param {{ role?: string }} user
+ * @param {string|null|undefined} role
+ */
+export function isManagerRole(role) {
+  return MANAGER_ROLES.has(String(role ?? "").trim().toLowerCase());
+}
+
+/**
+ * @param {{ role?: string|null }|null|undefined} user
  */
 export function isWorkforceManager(user) {
-  return MANAGER_ROLES.has(String(user?.role ?? "").trim());
+  return isManagerRole(user?.role);
 }
 
 /**

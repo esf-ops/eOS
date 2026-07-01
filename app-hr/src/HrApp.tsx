@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { apiGet, apiPatch, apiPost, ApiError } from "./lib/api";
+import { apiGet, apiPatch, apiPost } from "./lib/api";
+import { hrApiErrorMessage, isHrManagerRole } from "./lib/hrRoles";
 import { getSupabase } from "./lib/supabase";
 import EliteosTopbar from "../../shared/eliteos-ui/EliteosTopbar";
 import type { EliteosTopbarMenuItem } from "../../shared/eliteos-ui/EliteosTopbar";
@@ -221,7 +222,9 @@ export default function HrApp() {
     };
   }, [sessionToken]);
 
-  const canManageCategories = Boolean(dashboard?.canManageCategories ?? dashboard?.manager);
+  const canManageCategories = Boolean(
+    dashboard?.canManageCategories ?? dashboard?.manager ?? isHrManagerRole(userRole)
+  );
 
   const loadDashboard = useCallback(async () => {
     if (!sessionToken) return;
@@ -231,7 +234,7 @@ export default function HrApp() {
       const res = (await apiGet("/api/hr/workforce/dashboard", sessionToken)) as DashboardPayload;
       setDashboard(res);
     } catch (e: unknown) {
-      setErr(e instanceof ApiError ? e.message : String(e));
+      setErr(hrApiErrorMessage(e, "Unable to load HR workforce data."));
     } finally {
       setBusy(false);
     }
@@ -271,7 +274,7 @@ export default function HrApp() {
         )) as { snapshots?: Snapshot[] };
         setSnapshots(res.snapshots ?? []);
       } catch (e: unknown) {
-        setErr(e instanceof ApiError ? e.message : String(e));
+        setErr(hrApiErrorMessage(e, "Unable to load HR workforce data."));
       }
     },
     [sessionToken]
@@ -361,7 +364,7 @@ export default function HrApp() {
         void loadWeekMistakes(logEmployeeId, dashboard?.weekStart);
       }
     } catch (e: unknown) {
-      setErr(e instanceof ApiError ? e.message : String(e));
+      setErr(hrApiErrorMessage(e, "Unable to load HR workforce data."));
     } finally {
       setLogBusy(false);
     }
@@ -386,7 +389,7 @@ export default function HrApp() {
       setNewCategoryName("");
       void loadCategories();
     } catch (e: unknown) {
-      setErr(e instanceof ApiError ? e.message : String(e));
+      setErr(hrApiErrorMessage(e, "Unable to load HR workforce data."));
     } finally {
       setCatBusy(false);
     }
@@ -401,7 +404,7 @@ export default function HrApp() {
         });
         void loadCategories();
       } catch (e: unknown) {
-        setErr(e instanceof ApiError ? e.message : String(e));
+        setErr(hrApiErrorMessage(e, "Unable to load HR workforce data."));
       }
     },
     [sessionToken, loadCategories]

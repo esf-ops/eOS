@@ -41,6 +41,22 @@ function jsonNoStore(res) {
   res.set("Cache-Control", "no-store");
 }
 
+const HR_CLIENT_ERRORS = Object.freeze({
+  load: "Unable to load HR workforce data.",
+  save: "Unable to save HR workforce data.",
+  categories: "Unable to update mistake categories."
+});
+
+/**
+ * @param {import("express").Response} res
+ * @param {unknown} e
+ * @param {string} [clientMessage]
+ */
+function respondServerError(res, e, clientMessage = HR_CLIENT_ERRORS.load) {
+  console.error("[hr-workforce]", e);
+  res.status(500).json({ ok: false, error: clientMessage });
+}
+
 function pickStr(v) {
   return String(v ?? "").trim();
 }
@@ -409,7 +425,7 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
         rows
       });
     } catch (e) {
-      res.status(500).json({ ok: false, error: String(e?.message || e) });
+      respondServerError(res, e, HR_CLIENT_ERRORS.load);
     }
   });
 
@@ -457,7 +473,7 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
 
       res.json({ ok: true, weekStart, mistakes: data ?? [], schemaReady: true });
     } catch (e) {
-      res.status(500).json({ ok: false, error: String(e?.message || e) });
+      respondServerError(res, e, HR_CLIENT_ERRORS.load);
     }
   });
 
@@ -548,7 +564,7 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
 
       res.status(201).json({ ok: true, mistake: data });
     } catch (e) {
-      res.status(500).json({ ok: false, error: String(e?.message || e) });
+      respondServerError(res, e, HR_CLIENT_ERRORS.save);
     }
   });
 
@@ -599,7 +615,7 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
 
       res.json({ ok: true, employeeKey, snapshots, schemaReady: true });
     } catch (e) {
-      res.status(500).json({ ok: false, error: String(e?.message || e) });
+      respondServerError(res, e, HR_CLIENT_ERRORS.load);
     }
   });
 
@@ -627,7 +643,7 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
 
       res.json({ ok: true, categories: data ?? [], schemaReady: true });
     } catch (e) {
-      res.status(500).json({ ok: false, error: String(e?.message || e) });
+      respondServerError(res, e, HR_CLIENT_ERRORS.load);
     }
   });
 
@@ -660,7 +676,7 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
       if (error) throw error;
       res.status(201).json({ ok: true, category: data });
     } catch (e) {
-      res.status(500).json({ ok: false, error: String(e?.message || e) });
+      respondServerError(res, e, HR_CLIENT_ERRORS.categories);
     }
   });
 
@@ -695,7 +711,7 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
       if (!data) return res.status(404).json({ ok: false, error: "Category not found." });
       res.json({ ok: true, category: data });
     } catch (e) {
-      res.status(500).json({ ok: false, error: String(e?.message || e) });
+      respondServerError(res, e, HR_CLIENT_ERRORS.categories);
     }
   });
 
@@ -725,7 +741,7 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
         }))
       });
     } catch (e) {
-      res.status(500).json({ ok: false, error: String(e?.message || e) });
+      respondServerError(res, e, HR_CLIENT_ERRORS.load);
     }
   });
 }
