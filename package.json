@@ -39,6 +39,7 @@
     "eos:moraware:generate-tiny-snapshot": "node backend-core/src/scripts/moraware/generateTinySnapshot.js",
     "eos:moraware:import-snapshot": "node backend-core/src/scripts/moraware/importSnapshotToBrain.js",
     "eos:moraware:run-scheduled-pipeline": "node backend-core/src/scripts/moraware/runScheduledMorawarePipeline.js",
+    "eos:test:moraware-pipeline": "node backend-core/src/scripts/moraware/runScheduledMorawarePipeline.test.mjs",
     "eos:moraware:verify-tiny-mapping": "node backend-core/src/scripts/moraware/verifyTinySnapshotMapping.mjs",
     "eos:moraware:report-feed-poc": "node backend-core/src/scripts/moraware/importReportFeedPoc.js",
     "eos:slabcloud:inventory-poc": "node backend-core/src/scripts/slabcloud/importSlabCloudInventoryPoc.js",

@@ -1769,6 +1769,18 @@ async function loadLatestMorawareGroup(supabase, organizationId) {
     groupRows = group.data || [];
   }
   const groupSummary = summarizeMorawareImportGroupRows(groupRows, latestRun);
+
+  // When the latest group is incomplete, find the most recent complete group so
+  // the Sales Dashboard can fall back to it instead of returning NOT AVAILABLE.
+  let latestCompleteGroupForFallback = null;
+  if (importGroupId && !groupSummary.complete) {
+    try {
+      latestCompleteGroupForFallback = await loadLatestCompleteImportGroup(supabase, organizationId);
+    } catch {
+      // Non-fatal — dashboard will show NOT AVAILABLE if no fallback available
+    }
+  }
+
   const lastSuccessAgeSeconds = lastSuccess?.finished_at
     ? Math.max(0, Math.round((Date.now() - Date.parse(String(lastSuccess.finished_at))) / 1000))
     : null;
@@ -1807,6 +1819,9 @@ async function loadLatestMorawareGroup(supabase, organizationId) {
           total_row_counts: groupSummary.totalRowCounts
         }
       : null,
+    // Populated only when latest_group is incomplete — used by fetchLatestPreparedSalesJobFacts
+    // to serve yesterday's complete data instead of returning NOT AVAILABLE.
+    latest_complete_group: latestCompleteGroupForFallback,
     last_success_age_seconds: lastSuccessAgeSeconds
   };
 }
@@ -1887,27 +1902,53 @@ async function fetchLatestCompleteMorawareJobs(supabase, organizationId, syncHea
 async function fetchLatestPreparedSalesJobFacts(supabase, organizationId, syncHealth) {
   const pageSize = 1000;
   const group = syncHealth.latest_group;
-  const importGroupId = String(group?.import_group_id ?? "").trim();
+  const latestGroupId = String(group?.import_group_id ?? "").trim();
+
+  // Resolve the effective group: fall back to the last complete group when the
+  // latest group is still in-progress (incomplete). This ensures the Sales Dashboard
+  // shows yesterday's data instead of NOT AVAILABLE during a daily re-import.
+  let effectiveGroupId = latestGroupId;
+  let fallbackUsed = false;
+  let fallbackGroup = null;
+
   if (group?.import_group_id && group.complete === false) {
-    return {
-      rows: [],
-      available: false,
-      warning: "Latest Moraware group is incomplete; prepared Sales facts were not used.",
-      diagnostics: {
-        rows_scanned: 0,
-        query_page_count: 0,
-        source_group_complete: false,
-        source_import_group_id: importGroupId || null,
-        source_sync_run_count: 0,
-        scoped_to_latest_complete_group: false,
-        used_precomputed_rollup: false
-      }
-    };
+    fallbackGroup = syncHealth.latest_complete_group ?? null;
+    const fallbackId = String(fallbackGroup?.import_group_id ?? "").trim();
+    if (fallbackId) {
+      effectiveGroupId = fallbackId;
+      fallbackUsed = true;
+    } else {
+      // No complete fallback — return NOT AVAILABLE with clear diagnostic
+      return {
+        rows: [],
+        available: false,
+        fallback_used: false,
+        latest_import_group_id: latestGroupId || null,
+        latest_import_group_complete: false,
+        used_import_group_id: null,
+        warning:
+          "Latest Moraware group is incomplete and no previous complete group is available; prepared Sales facts were not used.",
+        diagnostics: {
+          rows_scanned: 0,
+          query_page_count: 0,
+          source_group_complete: false,
+          source_import_group_id: latestGroupId || null,
+          source_sync_run_count: 0,
+          scoped_to_latest_complete_group: false,
+          used_precomputed_rollup: false
+        }
+      };
+    }
   }
-  if (!importGroupId) {
+
+  if (!effectiveGroupId) {
     return {
       rows: [],
       available: false,
+      fallback_used: false,
+      latest_import_group_id: null,
+      latest_import_group_complete: null,
+      used_import_group_id: null,
       warning: "No latest complete import group is available for prepared Sales facts.",
       diagnostics: {
         rows_scanned: 0,
@@ -1920,6 +1961,7 @@ async function fetchLatestPreparedSalesJobFacts(supabase, organizationId, syncHe
       }
     };
   }
+
   const rows = [];
   let queryPageCount = 0;
   try {
@@ -1931,7 +1973,7 @@ async function fetchLatestPreparedSalesJobFacts(supabase, organizationId, syncHe
           "sync_run_id,source_job_id,source_account_id,account_name,status_name,process_name,salesperson_name,created_at_source,modified_at_source,scheduled_at_source,completed_at_source,install_at_source,worksheet_sqft,sqft_found,report_month_created,report_month_completed,report_month_install"
         )
         .eq("organization_id", organizationId)
-        .eq("import_group_id", importGroupId)
+        .eq("import_group_id", effectiveGroupId)
         .order("created_at_source", { ascending: true, nullsFirst: false })
         .range(from, from + pageSize - 1);
       queryPageCount += 1;
@@ -1946,12 +1988,16 @@ async function fetchLatestPreparedSalesJobFacts(supabase, organizationId, syncHe
       return {
         rows: [],
         available: false,
+        fallback_used: fallbackUsed,
+        latest_import_group_id: latestGroupId || null,
+        latest_import_group_complete: Boolean(group?.complete),
+        used_import_group_id: effectiveGroupId,
         warning: "Prepared Sales Moraware facts table is not installed yet.",
         diagnostics: {
           rows_scanned: 0,
           query_page_count: queryPageCount,
           source_group_complete: Boolean(group?.complete),
-          source_import_group_id: importGroupId,
+          source_import_group_id: effectiveGroupId,
           source_sync_run_count: 0,
           scoped_to_latest_complete_group: false,
           used_precomputed_rollup: false
@@ -1960,19 +2006,38 @@ async function fetchLatestPreparedSalesJobFacts(supabase, organizationId, syncHe
     }
     throw e;
   }
+
   const available = rows.length > 0;
+
+  let warning = null;
+  if (!available) {
+    warning = "Prepared Sales Moraware facts have not been built for the latest complete import group.";
+  } else if (fallbackUsed) {
+    const fallbackDate = String(fallbackGroup?.finished_at ?? fallbackGroup?.started_at ?? "").slice(0, 10) || null;
+    warning = fallbackDate
+      ? `Latest Moraware import is incomplete; showing data from the last complete import (${fallbackDate}).`
+      : "Latest Moraware import is incomplete; showing data from the last complete import.";
+  }
+
   return {
     rows,
     available,
-    warning: available ? null : "Prepared Sales Moraware facts have not been built for the latest complete import group.",
+    fallback_used: fallbackUsed,
+    latest_import_group_id: latestGroupId || null,
+    latest_import_group_complete: group?.import_group_id ? Boolean(group.complete) : null,
+    used_import_group_id: effectiveGroupId,
+    warning,
     diagnostics: {
       rows_scanned: rows.length,
       query_page_count: queryPageCount,
-      source_group_complete: Boolean(group?.complete),
-      source_import_group_id: importGroupId,
+      source_group_complete: fallbackUsed ? true : Boolean(group?.complete),
+      source_import_group_id: effectiveGroupId,
       source_sync_run_count: Array.isArray(group?.successful_sync_run_ids) ? group.successful_sync_run_ids.length : 0,
       scoped_to_latest_complete_group: true,
-      used_precomputed_rollup: available
+      used_precomputed_rollup: available,
+      fallback_used: fallbackUsed,
+      latest_import_group_id: latestGroupId || null,
+      latest_import_group_complete: group?.import_group_id ? Boolean(group.complete) : null
     }
   };
 }
@@ -2039,7 +2104,13 @@ async function fetchSalesAliasRows(supabase) {
 
 async function loadCompactSalesAttributionCoverage(supabase, { organizationId, syncHealth }) {
   const startedAt = Date.now();
-  const importGroupId = String(syncHealth?.latest_group?.import_group_id ?? "").trim();
+  // Use the fallback complete group when the latest is incomplete
+  const latestGroup = syncHealth?.latest_group;
+  const effectiveCoverageGroup =
+    latestGroup?.complete === false && syncHealth?.latest_complete_group?.import_group_id
+      ? syncHealth.latest_complete_group
+      : latestGroup;
+  const importGroupId = String(effectiveCoverageGroup?.import_group_id ?? "").trim();
   const diagnostics = {
     attribution_used_account_rollups: false,
     attribution_account_rollups_count: 0,
@@ -2047,7 +2118,7 @@ async function loadCompactSalesAttributionCoverage(supabase, { organizationId, s
     used_precomputed_summary: false,
     warning: null
   };
-  if (!importGroupId || syncHealth?.latest_group?.complete === false) {
+  if (!importGroupId || effectiveCoverageGroup?.complete === false) {
     diagnostics.warning = "Latest complete import group is unavailable; compact attribution coverage skipped.";
     return {
       source: "sales_moraware_account_rollups_plus_sales_account_aliases",
@@ -2969,9 +3040,17 @@ async function fetchKpiMorawareActuals(supabase, organizationId, startDate, endD
 
   const latestGroupId = syncHealth.latest_group?.import_group_id ?? null;
   const latestGroupComplete = syncHealth.latest_group?.complete ?? null;
-  const syncNote = latestGroupId
-    ? `Import group ${latestGroupId} (${latestGroupComplete ? "complete" : "incomplete"})`
-    : "No Moraware import group found.";
+  const usedGroupId = facts.used_import_group_id ?? latestGroupId;
+  const fallbackUsed = Boolean(facts.fallback_used);
+
+  let syncNote;
+  if (fallbackUsed && facts.warning) {
+    syncNote = facts.warning;
+  } else {
+    syncNote = latestGroupId
+      ? `Import group ${latestGroupId} (${latestGroupComplete ? "complete" : "incomplete"})`
+      : "No Moraware import group found.";
+  }
 
   const morawareLastSuccess =
     syncHealth.latest_group?.completed_at ?? syncHealth.last_success?.finished_at ?? null;
@@ -3006,6 +3085,10 @@ async function fetchKpiMorawareActuals(supabase, organizationId, startDate, endD
     },
     extractionStatus: actuals.extraction_status,
     syncNote,
+    fallbackUsed,
+    latestImportGroupId: latestGroupId,
+    latestImportGroupComplete: latestGroupComplete,
+    usedImportGroupId: usedGroupId,
     morawareLastSuccess,
     syncHealth
   };
@@ -3096,6 +3179,10 @@ export async function salesKpiV1Handler(req, supabaseGetter) {
             trust: "company_wide_actuals",
             extraction_status: morawareResult.extractionStatus,
             sync_note: morawareResult.syncNote,
+            fallback_used: morawareResult.fallbackUsed ?? false,
+            latest_import_group_id: morawareResult.latestImportGroupId ?? null,
+            latest_import_group_complete: morawareResult.latestImportGroupComplete ?? null,
+            used_import_group_id: morawareResult.usedImportGroupId ?? null,
             periods: morawareResult.periods,
             totals: morawareResult.totals
           }

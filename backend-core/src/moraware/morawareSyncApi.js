@@ -594,6 +594,36 @@ export function attachMorawareSyncRoutes(app, deps) {
     }
   });
 
+  // Internal: lightweight group health for worker auto-resume preflight.
+  // Auth: x-moraware-sync-secret or x-eos-cron-secret (same as import/rebuild).
+  app.get("/api/internal/moraware-sync/group-health", async (req, res) => {
+    if (!requireImportSecret(req, res)) return;
+    const organizationId = resolveOrganizationId(req);
+    try {
+      const { loadMorawareSyncOverview } = await import("./morawareSyncHealth.js");
+      const db = getSupabase();
+      const overview = await loadMorawareSyncOverview(db, organizationId);
+      const latestGroup = overview.latest_import_group;
+      const latestCompleteGroup = overview.latest_complete_import_group;
+      const incompleteLatest = Boolean(latestGroup) && latestGroup.complete === false;
+      const missingChunkIndices = incompleteLatest ? (latestGroup.missing_chunk_indices ?? []) : [];
+      const firstMissingChunk = missingChunkIndices.length > 0 ? missingChunkIndices[0] : null;
+      res.json({
+        ok: true,
+        organization_id: organizationId,
+        latest_group: latestGroup,
+        latest_complete_group: latestCompleteGroup,
+        incomplete_latest_group: incompleteLatest,
+        missing_chunk_count: missingChunkIndices.length,
+        first_missing_chunk: firstMissingChunk,
+        resume_group_id: incompleteLatest ? (latestGroup.import_group_id ?? null) : null,
+        resume_start_chunk_index: firstMissingChunk
+      });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
   app.get("/api/moraware-sync/status", ...healthStack, async (req, res) => {
     try {
       const db = getSupabase();

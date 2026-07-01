@@ -16,6 +16,7 @@ const GENERATE_SCRIPT = path.join(REPO_ROOT, "backend-core/src/scripts/moraware/
 const IMPORT_SCRIPT = path.join(REPO_ROOT, "backend-core/src/scripts/moraware/importSnapshotToBrain.js");
 const DEFAULT_SNAPSHOT_FILE = "debug/moraware/baseline-2026/baseline-2026-moraware-snapshot.json";
 const DEFAULT_SUMMARY_FILE = "debug/moraware/baseline-2026/baseline-2026-summary.json";
+const LOCK_FILE = path.join(REPO_ROOT, "debug/moraware/.pipeline.lock");
 const BLOCKING_CAP_KEYS = Object.freeze(["jobs", "job_activities", "job_forms"]);
 
 function todayYmd() {
@@ -264,6 +265,196 @@ async function preflight({ skipGenerate, pipelineDryRun }) {
   }
 }
 
+// ── Lock file ─────────────────────────────────────────────────────────────────
+// Prevents two pipeline processes from running concurrently on the same worker.
+// Uses a PID file so a stale lock left by a crashed process is auto-cleared.
+
+/** @returns {Promise<boolean>} true if lock acquired, false if another process owns it */
+export async function acquireLockFile(logger) {
+  await fs.mkdir(path.dirname(LOCK_FILE), { recursive: true });
+  try {
+    const existing = JSON.parse(await fs.readFile(LOCK_FILE, "utf8"));
+    const lockedPid = Number(existing?.pid);
+    const lockStartedAt = String(existing?.startedAt ?? "");
+    if (lockedPid && Number.isFinite(lockedPid)) {
+      try {
+        process.kill(lockedPid, 0); // Probe only — throws if process is gone
+        const ageMinutes = lockStartedAt
+          ? Math.round((Date.now() - Date.parse(lockStartedAt)) / 60000)
+          : null;
+        await logger.log("pipeline_already_running", {
+          locked_by_pid: lockedPid,
+          lock_started_at: lockStartedAt || null,
+          age_minutes: ageMinutes
+        });
+        console.error(
+          `Moraware pipeline already running (PID ${lockedPid}` +
+            (ageMinutes != null ? `, started ${ageMinutes}m ago` : "") +
+            `). Exiting.`
+        );
+        return false;
+      } catch {
+        // PID is gone — stale lock, proceed
+        await logger.log("stale_lock_removed", {
+          locked_by_pid: lockedPid,
+          lock_started_at: lockStartedAt || null
+        });
+        console.warn(`Removing stale lock file from PID ${lockedPid} (process not running).`);
+      }
+    }
+  } catch {
+    // File doesn't exist or not parseable — no lock held
+  }
+  await fs.writeFile(LOCK_FILE, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }), "utf8");
+  return true;
+}
+
+export async function releaseLockFile() {
+  try {
+    await fs.unlink(LOCK_FILE);
+  } catch {
+    // Nothing to do if file is already gone
+  }
+}
+
+// ── Group-health preflight (auto-resume) ─────────────────────────────────────
+
+/** Call GET /api/internal/moraware-sync/group-health using the import secret. */
+export async function fetchGroupHealth(secret, organizationId) {
+  const url = `${backendBase()}/api/internal/moraware-sync/group-health`;
+  const res = await fetch(url, {
+    headers: {
+      "x-eos-cron-secret": secret,
+      ...(organizationId ? { "x-organization-id": organizationId } : {})
+    }
+  });
+  const text = await res.text();
+  let parsed = null;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error(`Group health HTTP ${res.status}: ${text.slice(0, 200)}`);
+  }
+  if (!res.ok) throw new Error(`Group health HTTP ${res.status}: ${parsed?.error ?? text.slice(0, 200)}`);
+  return parsed;
+}
+
+/**
+ * Inspect the latest Moraware import group and, if incomplete, configure
+ * MORAWARE_IMPORT_RESUME_GROUP_ID / MORAWARE_IMPORT_START_CHUNK_INDEX so the
+ * existing import step picks up where it stopped.
+ *
+ * Skipped when:
+ * - MORAWARE_IMPORT_RESUME_GROUP_ID is already set (manual resume)
+ * - dry-run mode
+ * - latest group is complete (nothing to resume)
+ * - snapshot file is missing (can't resume without it; fresh generate will run)
+ *
+ * @returns {{ autoResumed: boolean, resumeGroupId?: string, startChunkIndex?: number,
+ *             missingChunkCount?: number, snapshotMissing?: boolean, skipped?: boolean }}
+ */
+export async function detectAndApplyAutoResume(logger, snapshotFile) {
+  // Skip if a manual resume is already configured
+  if (isResumeImport()) {
+    await logger.log("auto_resume_skipped", { reason: "MORAWARE_IMPORT_RESUME_GROUP_ID_already_set" });
+    return { autoResumed: false, skipped: true };
+  }
+
+  let secret;
+  let organizationId;
+  try {
+    secret = pickSecret();
+    organizationId = requiredEnv("MORAWARE_DEFAULT_ORGANIZATION_ID");
+  } catch (e) {
+    await logger.log("auto_resume_skipped", { reason: "missing_credentials", error: String(e?.message || e) });
+    return { autoResumed: false, skipped: true };
+  }
+
+  let health;
+  try {
+    health = await fetchGroupHealth(secret, organizationId);
+  } catch (e) {
+    await logger.log("auto_resume_health_check_failed", {
+      error: String(e?.message || e),
+      note: "Proceeding with fresh generate+import."
+    });
+    return { autoResumed: false };
+  }
+
+  const latestGroup = health?.latest_group;
+  const latestGroupId = latestGroup?.import_group_id ?? null;
+
+  await logger.log("auto_resume_preflight", {
+    latest_group_id: latestGroupId,
+    latest_group_complete: latestGroup?.complete ?? null,
+    expected_chunk_count: latestGroup?.expected_chunk_count ?? null,
+    successful_chunks: latestGroup?.successful_chunks ?? null,
+    failed_chunks: latestGroup?.failed_chunks ?? null,
+    missing_chunk_count: health?.missing_chunk_count ?? null,
+    first_missing_chunk: health?.first_missing_chunk ?? null,
+    latest_complete_group_id: health?.latest_complete_group?.import_group_id ?? null
+  });
+
+  if (!health?.incomplete_latest_group || !health?.resume_group_id) {
+    return { autoResumed: false };
+  }
+
+  const resumeGroupId = String(health.resume_group_id);
+  const startChunkIndex = Number(health.resume_start_chunk_index ?? health.first_missing_chunk ?? 0);
+
+  if (!startChunkIndex || startChunkIndex < 2) {
+    await logger.log("auto_resume_skipped", {
+      reason: "first_missing_chunk_is_chunk_1_or_unknown",
+      resume_group_id: resumeGroupId,
+      first_missing_chunk: startChunkIndex || null,
+      note: "Cannot safely resume from chunk 1 — starting fresh import instead."
+    });
+    return { autoResumed: false };
+  }
+
+  // Verify the snapshot file still exists on this worker
+  const snapshotPath = path.resolve(REPO_ROOT, snapshotFile);
+  try {
+    await fs.access(snapshotPath);
+  } catch {
+    await logger.log("auto_resume_skipped_no_snapshot", {
+      reason: "snapshot_file_not_found",
+      resume_group_id: resumeGroupId,
+      start_chunk_index: startChunkIndex,
+      snapshot_path: snapshotPath,
+      missing_chunk_count: health.missing_chunk_count ?? null,
+      note: "Snapshot is missing from this worker — a fresh generate+import will run. The Sales Dashboard will use the last complete group until this import finishes."
+    });
+    return { autoResumed: false, snapshotMissing: true };
+  }
+
+  // Apply the resume — mutate process.env so child scripts inherit the values
+  process.env.MORAWARE_IMPORT_RESUME_GROUP_ID = resumeGroupId;
+  process.env.MORAWARE_IMPORT_START_CHUNK_INDEX = String(startChunkIndex);
+
+  await logger.log("auto_resume_triggered", {
+    resume_group_id: resumeGroupId,
+    start_chunk_index: startChunkIndex,
+    missing_chunk_count: health.missing_chunk_count ?? null,
+    snapshot_path: snapshotPath,
+    latest_complete_group_id: health.latest_complete_group?.import_group_id ?? null,
+    latest_complete_group_finished_at: health.latest_complete_group?.finished_at ?? null
+  });
+
+  console.log(
+    `[auto-resume] Incomplete import group ${resumeGroupId} detected ` +
+      `(${health.missing_chunk_count} missing chunks, first=${startChunkIndex}). ` +
+      `Resuming instead of starting fresh.`
+  );
+
+  return {
+    autoResumed: true,
+    resumeGroupId,
+    startChunkIndex,
+    missingChunkCount: health.missing_chunk_count ?? null
+  };
+}
+
 function runShouldRebuildSelfTest() {
   const cases = [
     { pipelineDryRun: true, importOk: true, want: false },
@@ -283,24 +474,49 @@ function runShouldRebuildSelfTest() {
 async function main() {
   const pipelineDryRun = readPipelineDryRunAtStartup();
   applyPipelineDefaults();
-  const skipGenerate = shouldSkipGenerate();
   const logger = createLogger();
-  const organizationId = requiredEnv("MORAWARE_DEFAULT_ORGANIZATION_ID");
   const pipelineStartedAt = Date.now();
 
-  await logger.log("pipeline_start", {
-    mode: process.env.MORAWARE_SNAPSHOT_MODE,
-    organization_id: organizationId,
-    dry_run: pipelineDryRun,
-    pipeline_dry_run: pipelineDryRun,
-    skip_generate: skipGenerate,
-    resume_group_id: String(process.env.MORAWARE_IMPORT_RESUME_GROUP_ID ?? "").trim() || null,
-    start_chunk_index: String(process.env.MORAWARE_IMPORT_START_CHUNK_INDEX ?? "").trim() || null,
-    snapshot_file: process.env.MORAWARE_SYNC_IMPORT_FILE,
-    log_path: path.relative(REPO_ROOT, logger.logPath)
-  });
+  // Acquire lock before doing anything else.
+  // Exits cleanly (exit code 0) if another process already holds the lock.
+  const lockAcquired = await acquireLockFile(logger);
+  if (!lockAcquired) {
+    process.exitCode = 0;
+    return;
+  }
 
   try {
+    const organizationId = requiredEnv("MORAWARE_DEFAULT_ORGANIZATION_ID");
+
+    // Auto-resume preflight: detect incomplete latest group and configure resume
+    // env vars before shouldSkipGenerate() is evaluated.
+    // Only runs for live (non-dry-run) scheduled invocations, not manual resumes.
+    let autoResumeResult = { autoResumed: false };
+    if (!pipelineDryRun) {
+      autoResumeResult = await detectAndApplyAutoResume(
+        logger,
+        process.env.MORAWARE_SYNC_IMPORT_FILE || DEFAULT_SNAPSHOT_FILE
+      );
+    }
+
+    // shouldSkipGenerate() re-reads MORAWARE_IMPORT_RESUME_GROUP_ID which may have
+    // just been set by detectAndApplyAutoResume above.
+    const skipGenerate = shouldSkipGenerate();
+
+    await logger.log("pipeline_start", {
+      mode: process.env.MORAWARE_SNAPSHOT_MODE,
+      organization_id: organizationId,
+      dry_run: pipelineDryRun,
+      pipeline_dry_run: pipelineDryRun,
+      skip_generate: skipGenerate,
+      resume_group_id: String(process.env.MORAWARE_IMPORT_RESUME_GROUP_ID ?? "").trim() || null,
+      start_chunk_index: String(process.env.MORAWARE_IMPORT_START_CHUNK_INDEX ?? "").trim() || null,
+      auto_resume: autoResumeResult.autoResumed,
+      auto_resume_missing_chunks: autoResumeResult.missingChunkCount ?? null,
+      snapshot_file: process.env.MORAWARE_SYNC_IMPORT_FILE,
+      log_path: path.relative(REPO_ROOT, logger.logPath)
+    });
+
     await preflight({ skipGenerate, pipelineDryRun });
 
     if (!skipGenerate) {
@@ -310,7 +526,11 @@ async function main() {
       await assertSnapshotCapWarningsAllowed(logger);
     } else {
       await logger.log("generate_skipped", {
-        reason: isResumeImport() ? "resume_import" : "MORAWARE_PIPELINE_SKIP_GENERATE",
+        reason: autoResumeResult.autoResumed
+          ? "auto_resume"
+          : isResumeImport()
+            ? "resume_import"
+            : "MORAWARE_PIPELINE_SKIP_GENERATE",
         dry_run: pipelineDryRun
       });
       const snapshotPath = path.resolve(REPO_ROOT, process.env.MORAWARE_SYNC_IMPORT_FILE || DEFAULT_SNAPSHOT_FILE);
@@ -359,6 +579,7 @@ async function main() {
       account_rollups_upserted: rebuild.account_rollups_upserted,
       query_page_count: rebuild.query_page_count,
       compute_ms: rebuild.compute_ms,
+      auto_resumed: autoResumeResult.autoResumed,
       total_duration_ms: Date.now() - pipelineStartedAt,
       verification: {
         prepared_status: rebuild.status,
@@ -373,6 +594,8 @@ async function main() {
       total_duration_ms: Date.now() - pipelineStartedAt
     });
     throw e;
+  } finally {
+    await releaseLockFile();
   }
 }
 
