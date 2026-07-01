@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" role="img" aria-label="Warm wood kitchen sample">
+  <defs>
+    <linearGradient id="wood" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#c4a574"/>
+      <stop offset="100%" stop-color="#8b6914"/>
+    </linearGradient>
+    <linearGradient id="counter2" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#b8a898"/>
+      <stop offset="100%" stop-color="#8a7a6a"/>
+    </linearGradient>
+  </defs>
+  <rect width="1600" height="1000" fill="#f5ebe0"/>
+  <rect x="0" y="700" width="1600" height="300" fill="#e8d5c4"/>
+  <rect x="60" y="160" width="1480" height="640" rx="6" fill="url(#wood)" stroke="#6b4f1d" stroke-width="4"/>
+  <rect x="100" y="500" width="1420" height="36" fill="#a08050" opacity="0.5"/>
+  <rect x="60" y="560" width="1480" height="52" fill="url(#counter2)"/>
+  <rect x="200" y="220" width="400" height="260" fill="#87ceeb" opacity="0.2"/>
+  <rect x="900" y="220" width="500" height="260" fill="#87ceeb" opacity="0.2"/>
+  <circle cx="200" cy="100" r="70" fill="#fde68a" opacity="0.75"/>
+  <text x="60" y="80" fill="#78350f" font-family="system-ui,sans-serif" font-size="28" font-weight="600">Warm wood kitchen</text>
+</svg>

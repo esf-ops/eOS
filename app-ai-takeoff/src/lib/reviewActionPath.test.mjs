@@ -243,4 +243,75 @@ function makeBase(overrides = {}) {
   console.log("ok: approve phase shown after all decisions accepted");
 }
 
+// ── REGRESSION: save succeeds → stale/unsaved must clear ─────────────────────
+// Observed production bug: after clicking "Save reviewed dimensions" and receiving
+// "Correction saved — 41.70 sf countertop · 17.58 sf backsplash", the UI still
+// showed "Unsaved edits" and "Approval blocked: computed totals are stale."
+// Root cause: setSourceResult(effectiveDraft) was missing in handleSaveDraft, so
+// hasSaveableChanges stayed true → reviewNotSaved stayed true → phase stuck on save.
+//
+// This test pins the expected phase after a successful save completes.
+{
+  // Kitchen room verified, save just completed (savedAt present, hasSaveableChanges false).
+  const pathAfterSave = deriveReviewActionPath(makeBase({
+    activeRooms: [{ roomId: "r1", roomName: "Kitchen", roomIdx: 0 }],
+    roomCompleteness: { r1: true },
+    savedAt: "2026-07-01T10:00:00.000Z",
+    hasSaveableChanges: false,       // key: setSourceResult(effectiveDraft) cleared this
+    saveStatus: "saved",
+    canApprove: true,                // gate cleared: no UNSAVED_EDITS, no decisions
+    pendingDecisionCount: 0,
+    selectedRoomVerify: { ok: true, roomBlockers: [], globalBlockers: [] },
+  }));
+  assert.notEqual(pathAfterSave.phase, "save",
+    "REGRESSION: phase must not be 'save' after successful save with no new edits");
+  assert.equal(pathAfterSave.phase, "approve",
+    "REGRESSION: phase must be 'approve' when saved + verified + no decisions pending");
+  assert.equal(pathAfterSave.primaryAction.action, "approve",
+    "REGRESSION: primary action must be 'approve' after save clears stale state");
+  assert.ok(
+    !(/stale|unsaved/i).test(pathAfterSave.statusMessage ?? ""),
+    `REGRESSION: status message must not mention stale/unsaved after successful save (got: "${pathAfterSave.statusMessage}")`
+  );
+  console.log("ok: REGRESSION — save success clears stale state, phase advances to approve");
+}
+
+// ── REGRESSION: save succeeded, decisions still pending ───────────────────────
+{
+  const pathWithDecisions = deriveReviewActionPath(makeBase({
+    activeRooms: [{ roomId: "r1", roomName: "Kitchen", roomIdx: 0 }],
+    roomCompleteness: { r1: true },
+    savedAt: "2026-07-01T10:00:00.000Z",
+    hasSaveableChanges: false,
+    saveStatus: "saved",
+    canApprove: false,               // blocked by pending decisions
+    pendingDecisionCount: 1,
+    selectedRoomVerify: { ok: true, roomBlockers: [], globalBlockers: [] },
+  }));
+  assert.notEqual(pathWithDecisions.phase, "save",
+    "REGRESSION: phase must not remain 'save' when saved but decisions pending");
+  assert.equal(pathWithDecisions.phase, "review_decisions",
+    "REGRESSION: phase must be 'review_decisions' when saved but decisions remain");
+  console.log("ok: REGRESSION — save success + pending decisions → review_decisions phase");
+}
+
+// ── REGRESSION: hasSaveableChanges true = stale, even with savedAt ────────────
+// Guard test: confirms that hasSaveableChanges: true still produces 'save' phase.
+// If setSourceResult is accidentally reverted, this test catches the regression.
+{
+  const pathStillStale = deriveReviewActionPath(makeBase({
+    activeRooms: [{ roomId: "r1", roomName: "Kitchen", roomIdx: 0 }],
+    roomCompleteness: { r1: true },
+    savedAt: "2026-07-01T10:00:00.000Z",
+    hasSaveableChanges: true,        // stale: sourceResult not committed after save
+    saveStatus: "saved",
+    canApprove: true,
+    pendingDecisionCount: 0,
+    selectedRoomVerify: { ok: true, roomBlockers: [], globalBlockers: [] },
+  }));
+  assert.equal(pathStillStale.phase, "save",
+    "Guard: hasSaveableChanges:true must keep phase at 'save' (reviewNotSaved stays true)");
+  console.log("ok: Guard — hasSaveableChanges:true keeps save phase (confirms fix is needed)");
+}
+
 console.log("reviewActionPath.test.mjs: all passed");

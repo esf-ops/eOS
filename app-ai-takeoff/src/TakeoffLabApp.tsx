@@ -1358,6 +1358,11 @@ export default function TakeoffLabApp() {
           }) as { ok: boolean; savedAt: string; summary: { countertopExactSf: number; backsplashExactSf: number } };
       setSaveStatus("saved");
       setSavedAt(res.savedAt);
+      // Commit the saved draft as the new source baseline so hasSaveableChanges
+      // becomes false. Without this, sourceResult keeps the pre-edit snapshot
+      // and hasSaveableChanges stays true → UNSAVED_EDITS blocker persists →
+      // approval gate never clears → workflow is stuck on "Save reviewed dimensions".
+      setSourceResult(effectiveDraft);
       // Clear any 422 server blockers so the UI reflects the fresh save state.
       setServerApprovalBlockers(null);
       setWorkspaceReview((prev) => ({
