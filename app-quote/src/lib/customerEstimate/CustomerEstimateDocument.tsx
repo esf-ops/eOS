@@ -16,7 +16,6 @@ export default function CustomerEstimateDocument(props: CustomerEstimateDocument
 
   const addrLine = [props.projectAddress, props.city, props.state].filter(Boolean).join(", ");
   const display = props.customerDisplay;
-  const preparedByLabel = display.preparedByDisplayName || props.preparedBy || "—";
 
   return (
     <div className="customer-estimate-print" aria-hidden="true">
@@ -62,10 +61,6 @@ export default function CustomerEstimateDocument(props: CustomerEstimateDocument
           <div className="cep-overview-item">
             <dt>Salesperson</dt>
             <dd>{props.salesRep || "—"}</dd>
-          </div>
-          <div className="cep-overview-item">
-            <dt>Prepared by</dt>
-            <dd>{preparedByLabel}</dd>
           </div>
         </dl>
       </section>

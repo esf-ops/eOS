@@ -988,8 +988,13 @@ function approx(a: number, b: number, eps = 0.02) {
   assert.match(printSrc, /fhbDisplay/, "PDF-STRUCT-1: FHB line item in comparison");
   assert.match(printSrc, /projectDisplayTotals/, "PDF-STRUCT-1: project total per group rendered");
 
-  // Prepared by uses display model name
-  assert.match(printSrc, /preparedByDisplayName/, "PDF-STRUCT-1: preparedByDisplayName used from display model");
+  // Customer-facing print/PDF omits Prepared by; display model still stores it internally
+  const docSrc = readFileSync(
+    join(repoRoot, "app-quote/src/lib/customerEstimate/CustomerEstimateDocument.tsx"),
+    "utf8"
+  );
+  assert.doesNotMatch(docSrc, /Prepared by/, "PDF-STRUCT-1: Prepared by removed from customer document");
+  assert.match(docSrc, /Salesperson/, "PDF-STRUCT-1: Salesperson remains on customer document");
 
   // Project notes still present (rendered conditionally)
   assert.match(printSrc, /Project Notes/, "PDF-STRUCT-1: Project Notes section still present");

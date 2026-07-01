@@ -358,8 +358,7 @@ function testBuiltEmailHtmlPassesCustomerSafeAudit() {
   assert.equal(htmlAudit.ok, true, formatCustomerSafeViolationWarning("HTML", htmlAudit) || "html should be safe");
   assert.equal(textAudit.ok, true, formatCustomerSafeViolationWarning("Text", textAudit) || "text should be safe");
   assert.ok(htmlPreview.includes("Countertop material"));
-  assert.ok(htmlPreview.includes("Prepared by"));
-  assert.ok(htmlPreview.includes("Peg Reid"));
+  assert.ok(!htmlPreview.includes("Prepared by"));
   assert.ok(!htmlPreview.includes("peg.reid@eliteosfab.com"));
 }
 
@@ -389,7 +388,7 @@ function testBrandedEmailTemplateSections() {
   assert.ok(textPreview.includes("See attached PDF for the detailed estimate"));
   assert.ok(textPreview.includes("3.5% transaction fee"));
   assert.ok(textPreview.includes("www.elitestonefabrication.com"));
-  assert.ok(textPreview.includes("Prepared by: Peg Reid"));
+  assert.ok(!textPreview.includes("Prepared by"));
   assert.match(htmlPreview, /<img[^>]+src="https:\/\//);
   assert.ok(!htmlPreview.includes("data:image"), "email logo must not use data URI");
   assert.ok(!htmlPreview.includes('src="/'), "email logo must not use relative path");
@@ -429,6 +428,21 @@ function testPrintDocumentIncludesPaymentTerms() {
   const html = buildCustomerEstimatePrintHtml(makePrintSnapshot());
   assert.ok(html.includes("3.5% transaction fee"));
   assert.ok(html.includes("cash, check, ACH, or debit card"));
+}
+
+function testCustomerFacingOutputsOmitPreparedBy() {
+  const row = internalQuoteRow();
+  const display = buildCustomerEstimateDisplayFromSnapshot(row);
+  assert.ok(display.header.preparedBy, "internal display model retains preparedBy");
+  assert.ok(display.header.preparedByDisplayName, "internal display model retains preparedByDisplayName");
+
+  const { htmlPreview, textPreview } = buildEstimateEmailContent(display, { pdfAttached: true });
+  assert.ok(!htmlPreview.includes("Prepared by"), "email HTML must not show Prepared by");
+  assert.ok(!textPreview.includes("Prepared by"), "email text must not show Prepared by");
+
+  const printHtml = buildCustomerEstimatePrintHtml(makePrintSnapshot());
+  assert.ok(!printHtml.includes("Prepared by"), "print/PDF HTML must not show Prepared by");
+  assert.ok(printHtml.includes("Salesperson"), "salesperson remains on customer print");
 }
 
 function testReplyToFromPreparedByEmail() {
@@ -1199,6 +1213,7 @@ async function runAll() {
   testQuoteDeliveryEmailUiCopyModule();
   testQuoteEmailLogoUrlEnvResolution();
   testEmailAttachmentCalloutReflectsPdfMetadata();
+  testCustomerFacingOutputsOmitPreparedBy();
   testPrintDocumentIncludesPaymentTerms();
   testReplyToFromPreparedByEmail();
   testFilterCustomerFacingCustomLines();

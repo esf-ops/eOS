@@ -59,16 +59,6 @@ function projectOrAccountLabel(header) {
 }
 
 /**
- * @param {ReturnType<import("./estimateDisplayFromSnapshot.js").buildCustomerEstimateDisplayFromSnapshot>["header"]} header
- */
-function formatPreparedByLabel(header) {
-  const prepared = String(header.preparedByDisplayName ?? header.preparedBy ?? "").trim();
-  if (!prepared) return null;
-  if (isEmailLike(prepared) && header.salesRep) return header.salesRep;
-  return prepared;
-}
-
-/**
  * @param {ReturnType<import("./estimateDisplayFromSnapshot.js").buildCustomerEstimateDisplayFromSnapshot>} display
  */
 export function pickReplyToEmail(display) {
@@ -171,7 +161,6 @@ function buildHtmlEmail(display, opts = {}) {
   }
 
   const quoteRef = formatQuoteRef(h);
-  const preparedByLabel = formatPreparedByLabel(h);
   const totalFormatted = display.estimateTotalFormatted || "—";
   const projectLabel = projectOrAccountLabel(h);
   const pdfAttached = Boolean(opts.pdfAttached);
@@ -305,7 +294,6 @@ function buildHtmlEmail(display, opts = {}) {
                 ${buildDetailRow("Account", h.accountName)}
                 ${buildDetailRow("Customer", h.customerName)}
                 ${buildDetailRow("Branch", h.branch)}
-                ${buildDetailRow("Prepared by", preparedByLabel)}
                 ${buildDetailRow("Estimate date", h.estimateDate)}
                 ${buildDetailRow("Salesperson", h.salesRep)}
               </table>
@@ -366,7 +354,6 @@ function buildTextEmail(display, opts = {}) {
     throw new Error("Customer estimate email requires a saved quote number");
   }
 
-  const preparedByLabel = formatPreparedByLabel(h);
   const quoteRef = formatQuoteRef(h);
   const projectLabel = projectOrAccountLabel(h);
   const pdfAttached = Boolean(opts.pdfAttached);
@@ -395,9 +382,8 @@ function buildTextEmail(display, opts = {}) {
     h.accountName ? `Account: ${h.accountName}` : null,
     h.customerName ? `Customer: ${h.customerName}` : null,
     h.branch ? `Branch: ${h.branch}` : null,
-    preparedByLabel ? `Prepared by: ${preparedByLabel}` : null,
-    h.estimateDate ? `Estimate date: ${h.estimateDate}` : null,
     h.salesRep ? `Salesperson: ${h.salesRep}` : null,
+    h.estimateDate ? `Estimate date: ${h.estimateDate}` : null,
     "",
     "Estimate breakdown",
     "------------------"
