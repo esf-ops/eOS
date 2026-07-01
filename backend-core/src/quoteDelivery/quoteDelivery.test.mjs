@@ -4,6 +4,9 @@
  * Run: npm run eos:test:quote-delivery
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { wasProviderCalled, sendEstimateEmail } from "../email/emailClient.js";
 import {
@@ -35,6 +38,29 @@ import {
 const QUOTE_ID = "a1111111-1111-4111-8111-111111111111";
 const ORG_ID = "89180433-9fab-4024-bec9-a14d870bd0a8";
 const USER_ID = "c3333333-3333-4333-8333-333333333333";
+const TEST_DIR = dirname(fileURLToPath(import.meta.url));
+
+function readRepo(rel) {
+  return readFileSync(join(TEST_DIR, "../../..", rel), "utf8");
+}
+
+function testQuoteDeliveryRouteAccessPolicy() {
+  const apiSrc = readRepo("backend-core/src/quoteDelivery/quoteDeliveryApi.js");
+  assert.ok(apiSrc.includes("requireAuth()"), "quote delivery routes require auth");
+  assert.ok(!apiSrc.includes("requireRole"), "quote delivery must not gate on application role");
+  assert.ok(apiSrc.includes('"quote"'), "Internal Estimate head slug quote is allowed");
+  assert.ok(apiSrc.includes('"quote_library"'), "Quote Library head slug is allowed");
+  assert.ok(apiSrc.includes("actionableGrantSet"), "non-admin users require explicit head grants");
+  assert.ok(apiSrc.includes("assertInternalQuoteOperator"), "dealer_partner users are blocked");
+}
+
+function testQuoteDeliveryEmailDefaultsModule() {
+  const src = readRepo("app-quote/src/lib/quoteDeliveryEmailDefaults.ts");
+  assert.ok(src.includes("pickDefaultToEmail"));
+  assert.ok(src.includes("pickDefaultCcEmail"));
+  assert.ok(src.includes("customerEmail"));
+  assert.ok(src.includes("preparedBy"));
+}
 
 function makePrintSnapshot(overrides = {}) {
   return {
@@ -1097,6 +1123,8 @@ async function runAll() {
   testFilterCustomerFacingCustomLines();
   testDisplayFromSnapshotUsesStoredTotal();
   testDeliveryLogRowShape();
+  testQuoteDeliveryRouteAccessPolicy();
+  testQuoteDeliveryEmailDefaultsModule();
   testEnvDefaults();
   testAllowedDomainsPolicy();
   testForceRecipientOverridesDeliveryTarget();

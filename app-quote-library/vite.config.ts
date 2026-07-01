@@ -11,5 +11,10 @@ export default defineConfig({
   server: {
     port: 5183,
     fs: { allow: [repoRoot] }
+  },
+  resolve: {
+    alias: {
+      "@quote-lib": path.resolve(repoRoot, "app-quote/src/lib")
+    }
   }
 });

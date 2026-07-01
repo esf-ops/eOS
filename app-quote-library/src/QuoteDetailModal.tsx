@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { pickDefaultCcEmail, pickDefaultToEmail } from "@quote-lib/quoteDeliveryEmailDefaults";
 import EmailEstimateModal from "./components/email-estimate/EmailEstimateModal";
 import { apiPatch, apiPost } from "./lib/api";
 import { QuoteFilesBlock } from "./QuoteFilesBlock";
@@ -103,11 +104,6 @@ function pickDisplayTotal(r: Record<string, unknown>): number {
   return Number(r.grand_total) || 0;
 }
 
-function looksLikeEmail(value: string): boolean {
-  const v = String(value || "").trim();
-  return v.includes("@") && v.includes(".");
-}
-
 function buildEmailDefaultSubject(header: Record<string, unknown>): string {
   let subject = "Elite Stone Fabrication Estimate";
   const qn = str(header.quote_number);
@@ -119,26 +115,22 @@ function buildEmailDefaultSubject(header: Record<string, unknown>): string {
   return subject;
 }
 
-function pickDefaultToEmail(header: Record<string, unknown>, iu: Record<string, unknown>): string {
-  const customer = str(header.customer_email);
-  if (looksLikeEmail(customer)) return customer;
+function pickQuoteLibraryDefaultToEmail(header: Record<string, unknown>, iu: Record<string, unknown>): string {
   const jobInfo =
     iu.job_info && typeof iu.job_info === "object" ? (iu.job_info as Record<string, unknown>) : {};
-  const accountContact = str(jobInfo.account_contact_email);
-  if (looksLikeEmail(accountContact)) return accountContact;
-  return customer;
+  return pickDefaultToEmail({
+    customerEmail: str(header.customer_email),
+    accountContactEmail: str(jobInfo.account_contact_email)
+  });
 }
 
-function pickDefaultCcEmail(header: Record<string, unknown>, iu: Record<string, unknown>): string {
-  const salesRep = str(header.sales_rep);
-  if (looksLikeEmail(salesRep)) return salesRep;
-  const jobInfo =
-    iu.job_info && typeof iu.job_info === "object" ? (iu.job_info as Record<string, unknown>) : {};
-  const accountContact = str(jobInfo.account_contact_email);
-  if (looksLikeEmail(accountContact) && accountContact !== pickDefaultToEmail(header, iu)) {
-    return accountContact;
-  }
-  return "";
+function pickQuoteLibraryDefaultCcEmail(header: Record<string, unknown>, iu: Record<string, unknown>): string {
+  const toEmail = pickQuoteLibraryDefaultToEmail(header, iu);
+  return pickDefaultCcEmail({
+    salesRep: str(header.sales_rep),
+    preparedBy: str(header.prepared_by),
+    toEmail
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -256,8 +248,8 @@ export function QuoteDetailModal({
   const snap = (detail.calculation_snapshot as Record<string, unknown>) || {};
   const iu = (snap.internal_ui as Record<string, unknown>) || {};
   const emailDefaultSubject = buildEmailDefaultSubject(header);
-  const emailDefaultTo = pickDefaultToEmail(header, iu);
-  const emailDefaultCc = pickDefaultCcEmail(header, iu);
+  const emailDefaultTo = pickQuoteLibraryDefaultToEmail(header, iu);
+  const emailDefaultCc = pickQuoteLibraryDefaultCcEmail(header, iu);
 
   if (!open) return null;
 

@@ -19,7 +19,8 @@ const HEAD_ACCESS_DENIED = Object.freeze({
 const QUOTE_DELIVERY_HEADS = new Set(["quote", "quote_library"]);
 
 /**
- * Allow Internal Estimate (`quote`) or Quote Library (`quote_library`) head grants.
+ * Internal Estimate uses head slug `quote` (not a separate `internal_estimate` slug).
+ * Quote Library uses `quote_library`. Either grant allows preview/send.
  * @param {{ getSupabase: () => import("@supabase/supabase-js").SupabaseClient }} options
  */
 function requireQuoteDeliveryHeadAccess(options = {}) {

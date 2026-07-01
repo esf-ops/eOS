@@ -79,6 +79,7 @@ import { useWorkflowRailScrollSpy } from "../../shared/eliteos-ui/useWorkflowRai
 import RoomScopeBuilder from "@quote-ui/RoomScopeBuilder";
 import CompareGroupsAndNotesStep from "./components/internal-estimate/CompareGroupsAndNotesStep";
 import EmailEstimateModal from "./components/email-estimate/EmailEstimateModal";
+import { pickDefaultCcEmail, pickDefaultToEmail } from "@quote-lib/quoteDeliveryEmailDefaults";
 import {
   canSaveBeforeCustomerOutput,
   getCustomerOutputBlockReason,
@@ -1296,6 +1297,26 @@ export default function InternalEstimateApp() {
     else if (proj) subject += ` — ${proj}`;
     return subject;
   }, [lastSavedQuoteNumber, projectName, customerName]);
+
+  const emailEstimateDefaultTo = useMemo(
+    () =>
+      pickDefaultToEmail({
+        customerEmail: email,
+        accountContactEmail: accountEmail
+      }),
+    [email, accountEmail]
+  );
+
+  const emailEstimateDefaultCc = useMemo(
+    () =>
+      pickDefaultCcEmail({
+        salesRep,
+        enteredBy,
+        sessionUserEmail: userEmail,
+        toEmail: emailEstimateDefaultTo
+      }),
+    [salesRep, enteredBy, userEmail, emailEstimateDefaultTo]
+  );
 
   const hasUnsavedWork = useMemo(() => {
     if (urlQuoteId) return revisionDirty || Boolean(revisionNoteDraft.trim());
@@ -4652,7 +4673,8 @@ export default function InternalEstimateApp() {
         quoteId={emailEstimateQuoteId}
         sessionToken={sessionToken}
         blockReason={emailEstimateBlockReason}
-        defaultToEmail={email}
+        defaultToEmail={emailEstimateDefaultTo}
+        defaultCcEmail={emailEstimateDefaultCc}
         defaultSubject={emailEstimateDefaultSubject}
         quoteNumber={effectiveQuoteNumber}
         revisionLabel={hydratedDisplayRevision}

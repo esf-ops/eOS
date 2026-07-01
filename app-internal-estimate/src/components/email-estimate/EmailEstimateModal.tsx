@@ -15,6 +15,7 @@ export type EmailEstimateModalProps = {
   sessionToken: string | null;
   blockReason: string | null;
   defaultToEmail: string;
+  defaultCcEmail?: string;
   defaultSubject: string;
   quoteNumber: string | null;
   revisionLabel: string | null;
@@ -67,6 +68,7 @@ export default function EmailEstimateModal(props: EmailEstimateModalProps) {
     sessionToken,
     blockReason,
     defaultToEmail,
+    defaultCcEmail = "",
     defaultSubject,
     quoteNumber,
     revisionLabel,
@@ -90,7 +92,7 @@ export default function EmailEstimateModal(props: EmailEstimateModalProps) {
   useEffect(() => {
     if (!open) return;
     setToField(defaultToEmail.trim());
-    setCcField("");
+    setCcField(defaultCcEmail.trim());
     setSubject(defaultSubject.trim());
     setHtmlPreview(null);
     setTextPreview(null);
@@ -100,7 +102,7 @@ export default function EmailEstimateModal(props: EmailEstimateModalProps) {
     setLastPreviewAt(null);
     setDeliveryMeta(null);
     autoPreviewRanRef.current = false;
-  }, [open, defaultToEmail, defaultSubject]);
+  }, [open, defaultToEmail, defaultCcEmail, defaultSubject]);
 
   const applyResponse = useCallback((res: QuoteDeliveryResponse) => {
     setDeliveryMeta(res);
