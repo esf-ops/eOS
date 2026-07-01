@@ -10,6 +10,7 @@ import {
   formatBacksplashScopeLabel,
   formatPieceTypeLabel,
   deriveRoomVerificationBlockers,
+  isFhbsArea,
 } from "@takeoff-core/reviewedTakeoffMath.mjs";
 import { buildRoomVerificationView } from "@takeoff-core/roomVerificationView.mjs";
 import {
@@ -407,18 +408,23 @@ function AreaBacksplashEditor({
   areaMeta,
   roomIdx,
   areaIdx,
+  isFhbs,
   onPatchArea,
 }: {
   area: TakeoffArea;
   areaMeta: ReviewedRoom["areas"][0];
   roomIdx: number;
   areaIdx: number;
+  isFhbs?: boolean;
   onPatchArea: TakeoffRoomReviewWorkbenchProps["onPatchArea"];
 }) {
   const [editing, setEditing] = useState(false);
+  // For FHBS areas, default the scope editor to full_height so the estimator
+  // doesn't have to change a "Needs review" dropdown before entering dimensions.
+  const defaultScope = area.backsplashScope ?? (isFhbs ? "full_height" : "needs_review");
   const [draft, setDraft] = useState<AreaBsEditDraft>(() => ({
-    backsplashScope: area.backsplashScope ?? "needs_review",
-    backsplashHeightIn: String(area.backsplashHeightIn ?? 4),
+    backsplashScope: defaultScope,
+    backsplashHeightIn: String(area.backsplashHeightIn ?? (isFhbs ? 36 : 4)),
     backsplashLinearIn: String(area.backsplashLinearIn ?? ""),
     backsplashManualSf: String(area.backsplashManualSf ?? ""),
   }));
@@ -527,6 +533,167 @@ function AreaBacksplashEditor({
         <button type="button" className="btn primary btn-sm" onClick={handleSave}>Save</button>
         <button type="button" className="btn secondary btn-sm" onClick={() => setEditing(false)}>Cancel</button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Focused card for FHBS areas that need dimensions or scope decision.
+ * Replaces the generic "needsReview" block for full-height backsplash areas.
+ */
+function FhbsNeedsReviewCard({
+  roomIdx,
+  areaIdx,
+  onPatchArea,
+}: {
+  roomIdx: number;
+  areaIdx: number;
+  onPatchArea: TakeoffRoomReviewWorkbenchProps["onPatchArea"];
+}) {
+  const [mode, setMode] = useState<"linear" | "manual" | null>(null);
+  const [linearIn, setLinearIn] = useState("");
+  const [heightIn, setHeightIn] = useState("36");
+  const [manualSf, setManualSf] = useState("");
+
+  const handleApplyLinear = () => {
+    const l = Number(linearIn);
+    const h = Number(heightIn) || 36;
+    if (l > 0) {
+      onPatchArea(roomIdx, areaIdx, {
+        backsplashScope: "full_height",
+        backsplashLinearIn: l,
+        backsplashHeightIn: h,
+        backsplashManualSf: 0,
+      });
+      setMode(null);
+      setLinearIn("");
+    }
+  };
+
+  const handleApplyManual = () => {
+    const sf = Number(manualSf);
+    if (sf > 0) {
+      onPatchArea(roomIdx, areaIdx, {
+        backsplashScope: "full_height",
+        backsplashManualSf: sf,
+        backsplashLinearIn: 0,
+      });
+      setMode(null);
+      setManualSf("");
+    }
+  };
+
+  const handleNotInScope = () => {
+    onPatchArea(roomIdx, areaIdx, {
+      backsplashScope: "no_stone",
+      backsplashLinearIn: 0,
+      backsplashManualSf: 0,
+      backsplashReviewNote: "FHBS marked not in scope by estimator",
+    });
+  };
+
+  return (
+    <div className="takeoff-fhbs-review-card">
+      <p className="takeoff-fhbs-review-title">Full-height backsplash needs dimensions</p>
+      <p className="muted small">
+        AI detected a full-height backsplash area but no dimensions were confirmed.
+        Enter dimensions to include it, or mark not in scope to exclude.
+      </p>
+
+      {mode === "linear" ? (
+        <div className="takeoff-fhbs-review-inputs">
+          <label className="field takeoff-room-field">
+            <span className="takeoff-room-field-label">Linear (in)</span>
+            <input
+              className="takeoff-room-input"
+              type="number"
+              min={1}
+              step={1}
+              autoFocus
+              value={linearIn}
+              onChange={(e) => setLinearIn(e.target.value)}
+              placeholder="e.g. 120"
+            />
+          </label>
+          <label className="field takeoff-room-field">
+            <span className="takeoff-room-field-label">Height (in)</span>
+            <input
+              className="takeoff-room-input"
+              type="number"
+              min={1}
+              step={0.5}
+              value={heightIn}
+              onChange={(e) => setHeightIn(e.target.value)}
+            />
+          </label>
+          <div className="takeoff-room-piece-card-actions">
+            <button
+              type="button"
+              className="btn primary btn-sm"
+              disabled={!(Number(linearIn) > 0)}
+              onClick={handleApplyLinear}
+            >
+              Apply FHBS dimensions
+            </button>
+            <button type="button" className="btn secondary btn-sm" onClick={() => setMode(null)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : mode === "manual" ? (
+        <div className="takeoff-fhbs-review-inputs">
+          <label className="field takeoff-room-field">
+            <span className="takeoff-room-field-label">Square feet</span>
+            <input
+              className="takeoff-room-input"
+              type="number"
+              min={0.01}
+              step={0.01}
+              autoFocus
+              value={manualSf}
+              onChange={(e) => setManualSf(e.target.value)}
+              placeholder="e.g. 40.00"
+            />
+          </label>
+          <div className="takeoff-room-piece-card-actions">
+            <button
+              type="button"
+              className="btn primary btn-sm"
+              disabled={!(Number(manualSf) > 0)}
+              onClick={handleApplyManual}
+            >
+              Apply FHBS square feet
+            </button>
+            <button type="button" className="btn secondary btn-sm" onClick={() => setMode(null)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="takeoff-fhbs-review-actions">
+          <button
+            type="button"
+            className="btn secondary btn-sm"
+            onClick={() => setMode("linear")}
+          >
+            Enter linear inches + height
+          </button>
+          <button
+            type="button"
+            className="btn secondary btn-sm"
+            onClick={() => setMode("manual")}
+          >
+            Enter square feet directly
+          </button>
+          <button
+            type="button"
+            className="btn secondary btn-sm"
+            onClick={handleNotInScope}
+          >
+            Mark not in scope
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -939,37 +1106,46 @@ export default function TakeoffRoomReviewWorkbench({
                     areaMeta={areaMeta}
                     roomIdx={selected.roomIdx}
                     areaIdx={areaMeta.areaIdx}
+                    isFhbs={isFhbsArea(area)}
                     onPatchArea={onPatchArea}
                   />
 
                   {areaMeta.needsReview ? (
-                    <div className="takeoff-room-area-needs-review">
-                      <p className="muted small">No included pieces or backsplash in this area yet.</p>
-                      <div className="takeoff-room-area-actions">
-                        <button
-                          type="button"
-                          className="btn secondary btn-sm"
-                          onClick={() => {
-                            setAddPieceAreaLabel(areaMeta.label);
-                            setShowAddPiece(true);
-                          }}
-                        >
-                          Add piece to this area
-                        </button>
-                        <button
-                          type="button"
-                          className="btn secondary btn-sm"
-                          onClick={() =>
-                            onPatchArea(selected.roomIdx, areaMeta.areaIdx, {
-                              backsplashScope: "no_stone",
-                              backsplashReviewNote: "Marked not in scope by estimator",
-                            })
-                          }
-                        >
-                          Mark not in scope
-                        </button>
+                    isFhbsArea(area) ? (
+                      <FhbsNeedsReviewCard
+                        roomIdx={selected.roomIdx}
+                        areaIdx={areaMeta.areaIdx}
+                        onPatchArea={onPatchArea}
+                      />
+                    ) : (
+                      <div className="takeoff-room-area-needs-review">
+                        <p className="muted small">No included pieces or backsplash in this area yet.</p>
+                        <div className="takeoff-room-area-actions">
+                          <button
+                            type="button"
+                            className="btn secondary btn-sm"
+                            onClick={() => {
+                              setAddPieceAreaLabel(areaMeta.label);
+                              setShowAddPiece(true);
+                            }}
+                          >
+                            Add piece to this area
+                          </button>
+                          <button
+                            type="button"
+                            className="btn secondary btn-sm"
+                            onClick={() =>
+                              onPatchArea(selected.roomIdx, areaMeta.areaIdx, {
+                                backsplashScope: "no_stone",
+                                backsplashReviewNote: "Marked not in scope by estimator",
+                              })
+                            }
+                          >
+                            Mark not in scope
+                          </button>
+                        </div>
                       </div>
-                    </div>
+                    )
                   ) : null}
 
                   <div className="takeoff-room-pieces">

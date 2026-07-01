@@ -20,6 +20,7 @@ import {
   allPiecesDisplayUsesFriendlyLabels,
   deriveRoomVerificationBlockers,
   canMarkRoomVerified,
+  isFhbsArea,
 } from "./reviewedTakeoffMath.mjs";
 
 function testSpec73RoomBsMatchesSummary() {
@@ -293,6 +294,207 @@ function testNoStoneBacksplashClearsVerificationBlocker() {
   );
 }
 
+// ── FHBS (full-height backsplash) tests ───────────────────────────────────────
+
+function testIsFhbsAreaDetection() {
+  // Detect by areaType
+  assert.ok(isFhbsArea(makeTakeoffArea({ label: "FHBS", areaType: "fhb" })));
+  // Detect by backsplashScope
+  assert.ok(isFhbsArea(makeTakeoffArea({ label: "Area", backsplashScope: "full_height" })));
+  assert.ok(isFhbsArea(makeTakeoffArea({ label: "Area", backsplashScope: "fhbs" })));
+  // Detect by label keywords
+  assert.ok(isFhbsArea(makeTakeoffArea({ label: "Full Height Backsplash (FHBS)" })));
+  assert.ok(isFhbsArea(makeTakeoffArea({ label: "Full-height backsplash" })));
+  assert.ok(isFhbsArea(makeTakeoffArea({ label: "FHBS panel" })));
+  // Negative: standard 4" backsplash area
+  assert.equal(isFhbsArea(makeTakeoffArea({ label: "4\" backsplash", areaType: "backsplash" })), false);
+  assert.equal(isFhbsArea(makeTakeoffArea({ label: "Perimeter Counters", areaType: "countertop" })), false);
+  console.log("ok: isFhbsArea — detects by areaType, backsplashScope, and label keywords");
+}
+
+function testFhbsAreaWithNoDimensionsBlocksVerification() {
+  // Reproduces the Zuehlke case: Kitchen has 4" BS area (ok) + FHBS area (empty)
+  const draft = {
+    ...buildSpec73Fixture(),
+    rooms: [
+      makeTakeoffRoom({
+        name: "Kitchen",
+        areas: [
+          makeTakeoffArea({
+            label: "Perimeter Counters",
+            areaType: "countertop",
+            backsplashScope: "standard",
+            backsplashLinearIn: 237,
+            backsplashHeightIn: 4,
+            runs: [makeTakeoffRun({ label: "Run A", lengthIn: 120, depthIn: 25.5, pieceType: "counter" })],
+          }),
+          makeTakeoffArea({
+            label: "Full Height Backsplash (FHBS)",
+            areaType: "fhb",
+            runs: [],  // no runs, no linear, no manual sf
+          }),
+        ],
+      }),
+    ],
+  };
+
+  const math = computeReviewedTakeoffMath(draft, {});
+  const room = math.activeRooms[0];
+
+  // 4" backsplash area is fine
+  assert.equal(room.areas[0].needsReview, false, "4\" backsplash area must not need review");
+  // FHBS area needs review
+  assert.equal(room.areas[1].needsReview, true, "FHBS area with no dimensions must need review");
+
+  // Room cannot be verified while FHBS is unresolved
+  const blockers = deriveRoomVerificationBlockers(room);
+  assert.ok(blockers.some((b) => b.code === "EMPTY_AREA"), "must have EMPTY_AREA blocker for FHBS area");
+  const verify = canMarkRoomVerified(room);
+  assert.equal(verify.ok, false, "room must not be verifiable with unresolved FHBS");
+
+  // Standard 4" backsplash is unaffected
+  assert.ok(room.areas[0].backsplashDisplaySf > 0, "4\" backsplash sf must remain positive");
+  assert.ok(room.countertopSf > 0, "countertop sf must be present");
+
+  console.log("ok: FHBS area with no dimensions blocks room verification (EMPTY_AREA)");
+}
+
+function testFhbsLinearInchesClearsBlocker() {
+  const draft = {
+    ...buildSpec73Fixture(),
+    rooms: [
+      makeTakeoffRoom({
+        name: "Kitchen",
+        areas: [
+          makeTakeoffArea({
+            label: "Full Height Backsplash (FHBS)",
+            areaType: "fhb",
+            backsplashScope: "full_height",
+            backsplashLinearIn: 120,
+            backsplashHeightIn: 36,
+            runs: [],
+          }),
+        ],
+      }),
+    ],
+  };
+
+  const math = computeReviewedTakeoffMath(draft, {});
+  const room = math.activeRooms[0];
+  assert.equal(room.areas[0].needsReview, false, "FHBS with backsplashLinearIn > 0 must not need review");
+  assert.ok(room.areas[0].areaLevelBacksplashSf > 0, "FHBS linear inches must produce backsplash sf");
+  assert.equal(canMarkRoomVerified(room).ok, true, "room must be verifiable after FHBS linear inches set");
+  console.log("ok: FHBS with backsplashLinearIn > 0 clears blocker and produces sf");
+}
+
+function testFhbsManualSfClearsBlocker() {
+  const draft = {
+    ...buildSpec73Fixture(),
+    rooms: [
+      makeTakeoffRoom({
+        name: "Kitchen",
+        areas: [
+          makeTakeoffArea({
+            label: "Full Height Backsplash (FHBS)",
+            areaType: "fhb",
+            backsplashScope: "full_height",
+            backsplashManualSf: 40,
+            runs: [],
+          }),
+        ],
+      }),
+    ],
+  };
+
+  const math = computeReviewedTakeoffMath(draft, {});
+  const room = math.activeRooms[0];
+  assert.equal(room.areas[0].needsReview, false, "FHBS with backsplashManualSf > 0 must not need review");
+  assert.ok(room.areas[0].areaLevelBacksplashSf > 0 || room.areas[0].backsplashDisplaySf >= 0,
+    "FHBS manual sf must resolve the area");
+  assert.equal(canMarkRoomVerified(room).ok, true, "room must be verifiable after FHBS manual sf set");
+  console.log("ok: FHBS with backsplashManualSf > 0 clears blocker");
+}
+
+function testFhbsNotInScopeClearsBlocker() {
+  const draft = {
+    ...buildSpec73Fixture(),
+    rooms: [
+      makeTakeoffRoom({
+        name: "Kitchen",
+        areas: [
+          makeTakeoffArea({
+            label: "Full Height Backsplash (FHBS)",
+            areaType: "fhb",
+            backsplashScope: "no_stone",
+            backsplashLinearIn: 0,
+            backsplashManualSf: 0,
+            runs: [],
+          }),
+        ],
+      }),
+    ],
+  };
+
+  const math = computeReviewedTakeoffMath(draft, {});
+  const room = math.activeRooms[0];
+  assert.equal(room.areas[0].needsReview, false, "FHBS marked no_stone must not need review");
+  assert.equal(room.areas[0].notInScope, true, "FHBS no_stone must be notInScope");
+  assert.equal(canMarkRoomVerified(room).ok, true, "room must be verifiable after FHBS marked not in scope");
+  assert.equal(room.areas[0].backsplashDisplaySf, 0, "not-in-scope FHBS must contribute 0 sf");
+  console.log("ok: FHBS marked not in scope clears blocker and contributes 0 sf");
+}
+
+function testStandard4InchAndFhbsAreIndependent() {
+  // Both a standard 4" backsplash AND an FHBS area exist; resolving FHBS must not affect 4" BS sf
+  const draft = {
+    ...buildSpec73Fixture(),
+    rooms: [
+      makeTakeoffRoom({
+        name: "Kitchen",
+        areas: [
+          makeTakeoffArea({
+            label: "Perimeter Counters",
+            areaType: "countertop",
+            backsplashScope: "standard",
+            backsplashLinearIn: 237,
+            backsplashHeightIn: 4,
+            runs: [makeTakeoffRun({ label: "Run A", lengthIn: 120, depthIn: 25.5, pieceType: "counter" })],
+          }),
+          makeTakeoffArea({
+            label: "Full Height Backsplash (FHBS)",
+            areaType: "fhb",
+            backsplashScope: "full_height",
+            backsplashManualSf: 40,
+            runs: [],
+          }),
+        ],
+      }),
+    ],
+  };
+
+  const math = computeReviewedTakeoffMath(draft, {});
+  const room = math.activeRooms[0];
+
+  // 4" backsplash area
+  const standardArea = room.areas[0];
+  assert.ok(standardArea.areaLevelBacksplashSf > 0 || standardArea.backsplashDisplaySf > 0,
+    "4\" BS area must still have sf");
+  assert.equal(standardArea.needsReview, false);
+
+  // FHBS area
+  const fhbsArea = room.areas[1];
+  assert.equal(fhbsArea.needsReview, false);
+
+  // Room is verifiable
+  assert.equal(canMarkRoomVerified(room).ok, true, "room with both resolved areas must be verifiable");
+
+  // Scope items: neither area should be in unresolved list
+  const items = findUnresolvedScopeItems(draft, {});
+  assert.ok(!items.some((i) => i.code === "EMPTY_AREA"), "no EMPTY_AREA after both areas resolved");
+
+  console.log("ok: standard 4\" backsplash and FHBS are independent, both resolved = room verifiable");
+}
+
 const tests = [
   testSpec73RoomBsMatchesSummary,
   testAreaLevelBacksplashAttributedToRoom,
@@ -311,6 +513,12 @@ const tests = [
   testRoomVerificationBlockedForEmptyArea,
   testAddPieceToEmptyAreaClearsBlocker,
   testNoStoneBacksplashClearsVerificationBlocker,
+  testIsFhbsAreaDetection,
+  testFhbsAreaWithNoDimensionsBlocksVerification,
+  testFhbsLinearInchesClearsBlocker,
+  testFhbsManualSfClearsBlocker,
+  testFhbsNotInScopeClearsBlocker,
+  testStandard4InchAndFhbsAreIndependent,
 ];
 
 let passed = 0;

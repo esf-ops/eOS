@@ -43,6 +43,27 @@ function isNoStoneScope(area) {
   return area.backsplashScope === "no_stone" || area.backsplashScope === "tile_by_others";
 }
 
+/**
+ * Whether an area represents a full-height backsplash (FHBS).
+ * Detected by explicit areaType, backsplashScope, or label keywords.
+ *
+ * @param {import("./takeoffContract.mjs").TakeoffArea} area
+ */
+export function isFhbsArea(area) {
+  const lbl = String(area?.label ?? "").toLowerCase();
+  const scope = String(area?.backsplashScope ?? "").toLowerCase();
+  return (
+    area?.areaType === "fhb" ||
+    scope === "full_height" ||
+    scope === "fhbs" ||
+    lbl.includes("full height") ||
+    lbl.includes("full-height") ||
+    lbl.includes("fhbs") ||
+    lbl.startsWith("fhb ") ||
+    lbl.endsWith(" fhb")
+  );
+}
+
 function isUnknownRoom(room) {
   const name = String(room?.name ?? "").trim().toLowerCase();
   const type = String(room?.roomType ?? room?.type ?? "").trim().toLowerCase();

@@ -161,4 +161,84 @@ function completeRs(roomIds) {
   console.log("ok: T5 added pieces included");
 }
 
+// T6 — FHBS area with backsplashLinearIn: contributes to import totals
+{
+  const result = {
+    schemaVersion: "1",
+    status: "approved",
+    rooms: [{
+      id: "r1",
+      name: "Kitchen",
+      areas: [
+        {
+          id: "a1",
+          label: "Perimeter Counters",
+          areaType: "countertop",
+          backsplashScope: "standard",
+          backsplashLinearIn: 0,
+          runs: [
+            makeTakeoffRun({ id: "c1", label: "Run A", lengthIn: 120, depthIn: 25.5, pieceType: "counter" }),
+            makeTakeoffRun({ id: "bs1", label: "4in BS", lengthIn: 120, depthIn: 4, pieceType: "splash" }),
+          ],
+        },
+        {
+          id: "a2",
+          label: "Full Height Backsplash (FHBS)",
+          areaType: "fhb",
+          backsplashScope: "full_height",
+          backsplashLinearIn: 120,
+          backsplashHeightIn: 36,
+          runs: [],
+        },
+      ],
+    }],
+  };
+  const payload = approvedPayload(result, completeRs(["r1"]));
+  // FHBS sf must be counted in totals (via computeTakeoffMeasurements / classifyBacksplashTotals)
+  const totalBs = payload.totals.standardBacksplashSqft + payload.totals.fullHeightBacksplashSqft;
+  assert.ok(totalBs > 0, "T6 total backsplash includes FHBS sf");
+  // 4" BS pieces present
+  assert.ok(payload.rooms[0].pieces.some((p) => p.pieceType === "splash"), "T6 standard BS piece present");
+  console.log("ok: T6 FHBS with backsplashLinearIn contributes to import totals");
+}
+
+// T7 — FHBS marked not in scope: excluded from import sf, no pieces
+{
+  const result = {
+    schemaVersion: "1",
+    status: "approved",
+    rooms: [{
+      id: "r1",
+      name: "Kitchen",
+      areas: [
+        {
+          id: "a1",
+          label: "Perimeter Counters",
+          areaType: "countertop",
+          backsplashScope: "standard",
+          runs: [
+            makeTakeoffRun({ id: "c1", label: "Run A", lengthIn: 120, depthIn: 25.5, pieceType: "counter" }),
+            makeTakeoffRun({ id: "bs1", label: "4in BS", lengthIn: 120, depthIn: 4, pieceType: "splash" }),
+          ],
+        },
+        {
+          id: "a2",
+          label: "Full Height Backsplash (FHBS)",
+          areaType: "fhb",
+          backsplashScope: "no_stone",   // estimator chose not in scope
+          backsplashLinearIn: 0,
+          backsplashManualSf: 0,
+          runs: [],
+        },
+      ],
+    }],
+  };
+  const payload = approvedPayload(result, completeRs(["r1"]));
+  // FHBS must not add sf when no_stone
+  assert.equal(payload.totals.fullHeightBacksplashSqft, 0, "T7 FHBS no_stone contributes 0 sf");
+  // Standard 4" BS unaffected
+  assert.ok(payload.totals.standardBacksplashSqft > 0, "T7 standard BS sf unaffected");
+  console.log("ok: T7 FHBS marked not in scope → 0 sf, standard BS unaffected");
+}
+
 console.log("\nAll takeoffImportPayload tests passed.\n");

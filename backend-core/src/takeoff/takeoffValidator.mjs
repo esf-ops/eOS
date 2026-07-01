@@ -128,7 +128,8 @@ function validateArea(area, areaPath, dimensionEvidence = null) {
   const ds = [];
   const runs = area.runs ?? [];
 
-  if (runs.length === 0 && !(area.backsplashLinearIn > 0) && !(area.backsplashManualSf > 0)) {
+  const isNotInScope = area.backsplashScope === "no_stone" || area.backsplashScope === "tile_by_others";
+  if (!isNotInScope && runs.length === 0 && !(area.backsplashLinearIn > 0) && !(area.backsplashManualSf > 0)) {
     ds.push(diag(WARNING, C.EMPTY_AREA, `Area "${area.label}": no runs and no backsplash linear inches defined.`, areaPath));
   }
 

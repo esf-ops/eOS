@@ -673,6 +673,24 @@ export default function TakeoffLabApp() {
     }
   }, [hasActiveSource, editDraft, buildReviewState]);
 
+  // Retroactively downgrade room verification status when reviewedMath reveals that a
+  // previously-verified room now has blockers (e.g. an FHBS area was added after the
+  // room was marked verified, or review state loaded from server is stale).
+  // This prevents "Kitchen VERIFIED" from coexisting with an active approval blocker.
+  useEffect(() => {
+    if (!reviewedMath) return;
+    setRoomCompleteness((prev) => {
+      const toDowngrade = (reviewedMath.activeRooms ?? [])
+        .filter((room) => prev[room.roomId] && !canMarkRoomVerified(room).ok)
+        .map((room) => room.roomId);
+      if (toDowngrade.length === 0) return prev;
+      const next = { ...prev };
+      for (const id of toDowngrade) next[id] = false;
+      return next;
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reviewedMath]);
+
   const mathConsistency = useMemo(() => {
     if (!reviewedMath) return { ok: true, issues: [] as Array<{ code: string; message: string }> };
     const importTotals = approvedImportPayload && typeof approvedImportPayload === "object"

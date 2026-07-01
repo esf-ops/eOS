@@ -94,7 +94,14 @@ function backsplashNeedsReview(area) {
   if (!hasSplashRuns && !hasLinear && !hasManual) return false;
 
   if (area.backsplashIncluded === false) return false;
-  if (area.backsplashScope === "stone" || area.backsplashScope === "standard") return false;
+  // Any explicit scope other than null/"needs_review" means the estimator confirmed the decision.
+  // Return false so approved scopes (full_height, standard, stone, high, custom_height, fhbs)
+  // do not generate a BACKSPLASH_NEEDS_REVIEW blocker.
+  const CONFIRMED_SCOPES = new Set([
+    "stone", "standard", "standard_4",
+    "full_height", "fhbs", "high", "custom_height",
+  ]);
+  if (CONFIRMED_SCOPES.has(area.backsplashScope)) return false;
 
   // Explicit reviewer note on area resolves ambiguity.
   const notes = [...(area.notes ?? []), ...(area.assumptions ?? [])].join(" ");

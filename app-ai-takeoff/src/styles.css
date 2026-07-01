@@ -597,6 +597,19 @@ html, body {
   background: var(--eos-warn-soft); border: 1px solid var(--eos-warn-border);
 }
 .takeoff-room-area-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+
+/* FHBS (full-height backsplash) needs-review card */
+.takeoff-fhbs-review-card {
+  padding: 12px 14px; border-radius: var(--r-md);
+  background: var(--eos-warn-soft); border: 1px solid var(--eos-warn-border);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.takeoff-fhbs-review-title {
+  font-weight: 650; font-size: 0.875rem; margin: 0;
+  color: var(--eos-warn-fg, #92400e);
+}
+.takeoff-fhbs-review-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.takeoff-fhbs-review-inputs { display: flex; flex-direction: column; gap: 8px; }
 .takeoff-room-add-piece-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; margin-top: 8px; }
 .takeoff-room-piece-type { display: block; }
 .takeoff-room-piece-bs { display: block; }
