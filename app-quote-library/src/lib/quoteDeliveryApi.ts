@@ -15,6 +15,9 @@ export type QuoteDeliveryResponse = {
   dryRun?: boolean;
   blocked?: boolean;
   sendEnabled?: boolean;
+  pdfEnabled?: boolean;
+  provider?: string;
+  forceRecipient?: string | null;
   quoteId?: string;
   quoteNumber?: string | null;
   revisionLabel?: string | null;
@@ -24,6 +27,13 @@ export type QuoteDeliveryResponse = {
   recipients?: DeliveryRecipient[];
   htmlPreview?: string;
   textPreview?: string;
+  pdfAttachment?: {
+    generated?: boolean;
+    skipped?: boolean;
+    filename?: string | null;
+    byteLength?: number;
+    reason?: string;
+  };
   warnings?: string[];
   deliveryLogId?: string | null;
   deliveryLogSkipped?: boolean;

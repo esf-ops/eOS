@@ -1,5 +1,11 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 
+import {
+  describeQuoteDeliveryPdfWarning,
+  describeQuoteDeliverySendMode,
+  quoteDeliverySendButtonLabel,
+  quoteDeliverySendSuccessMessage
+} from "@quote-lib/quoteDeliveryEmailUi";
 import { ApiError } from "../../lib/api";
 import {
   buildRecipientsPayload,
@@ -50,6 +56,8 @@ export default function EmailEstimateModal(props: EmailEstimateModalProps) {
   const [previewBusy, setPreviewBusy] = useState(false);
   const [sendBusy, setSendBusy] = useState(false);
   const [lastPreviewAt, setLastPreviewAt] = useState<string | null>(null);
+  const [deliveryMeta, setDeliveryMeta] = useState<QuoteDeliveryResponse | null>(null);
+  const autoPreviewRanRef = useRef(false);
 
   useEffect(() => {
     if (!open) return;
@@ -62,9 +70,12 @@ export default function EmailEstimateModal(props: EmailEstimateModalProps) {
     setStatusMsg(null);
     setErrorMsg(null);
     setLastPreviewAt(null);
+    setDeliveryMeta(null);
+    autoPreviewRanRef.current = false;
   }, [open, defaultToEmail, defaultCcEmail, defaultSubject]);
 
   const applyResponse = useCallback((res: QuoteDeliveryResponse) => {
+    setDeliveryMeta(res);
     if (res.subject) setSubject(res.subject);
     if (res.htmlPreview) setHtmlPreview(res.htmlPreview);
     if (res.textPreview) setTextPreview(res.textPreview);
@@ -81,8 +92,8 @@ export default function EmailEstimateModal(props: EmailEstimateModalProps) {
     };
   }, [toField, ccField, subject]);
 
-  const handlePreview = useCallback(async () => {
-    if (!quoteId || !sessionToken) return;
+  const runPreview = useCallback(async () => {
+    if (!quoteId || !sessionToken) return false;
     setPreviewBusy(true);
     setErrorMsg(null);
     setStatusMsg(null);
@@ -92,14 +103,27 @@ export default function EmailEstimateModal(props: EmailEstimateModalProps) {
       applyResponse(res);
       setLastPreviewAt(new Date().toLocaleString());
       setStatusMsg("Preview loaded from server.");
+      return true;
     } catch (e) {
       setErrorMsg(formatApiError(e));
+      return false;
     } finally {
       setPreviewBusy(false);
     }
   }, [quoteId, sessionToken, buildPayload, applyResponse]);
 
-  const handleSendDryRun = useCallback(async () => {
+  useEffect(() => {
+    if (!open || !quoteId || !sessionToken) return;
+    if (autoPreviewRanRef.current) return;
+    autoPreviewRanRef.current = true;
+    void runPreview();
+  }, [open, quoteId, sessionToken, runPreview]);
+
+  const handlePreview = useCallback(async () => {
+    await runPreview();
+  }, [runPreview]);
+
+  const handleSend = useCallback(async () => {
     if (!quoteId || !sessionToken) return;
     setSendBusy(true);
     setErrorMsg(null);
@@ -108,11 +132,7 @@ export default function EmailEstimateModal(props: EmailEstimateModalProps) {
       const res = await sendEstimateEmail(quoteId, sessionToken, buildPayload());
       if (!res.ok) throw new Error(res.error || "Send failed");
       applyResponse(res);
-      if (res.blocked || res.dryRun || res.sendEnabled === false) {
-        setStatusMsg("Dry run complete — no email was sent.");
-      } else {
-        setStatusMsg("Send request completed.");
-      }
+      setStatusMsg(quoteDeliverySendSuccessMessage(res));
     } catch (e) {
       setErrorMsg(formatApiError(e));
     } finally {
@@ -126,6 +146,9 @@ export default function EmailEstimateModal(props: EmailEstimateModalProps) {
     quoteNumber != null
       ? `${quoteNumber}${revisionLabel ? ` (${revisionLabel})` : ""}`
       : null;
+
+  const sendModeMessage = describeQuoteDeliverySendMode(deliveryMeta);
+  const pdfWarning = describeQuoteDeliveryPdfWarning(deliveryMeta);
 
   return (
     <div
@@ -143,6 +166,12 @@ export default function EmailEstimateModal(props: EmailEstimateModalProps) {
             Email estimate
           </h3>
           {titleSuffix ? <p className="muted small ql-email-modal-subtitle">{titleSuffix}</p> : null}
+        </div>
+
+        <div className="ql-email-delivery-status" role="status">
+          <strong>Delivery status</strong>
+          <p className="muted small">{sendModeMessage}</p>
+          {pdfWarning ? <p className="muted small ql-email-pdf-warning">{pdfWarning}</p> : null}
         </div>
 
         <div className="ql-email-form-grid">
@@ -238,19 +267,14 @@ export default function EmailEstimateModal(props: EmailEstimateModalProps) {
             type="button"
             className="btn primary"
             disabled={previewBusy || sendBusy || !toField.trim()}
-            onClick={() => void handleSendDryRun()}
+            onClick={() => void handleSend()}
           >
-            {sendBusy ? "Sending…" : "Send (dry run)"}
+            {quoteDeliverySendButtonLabel(deliveryMeta, sendBusy)}
           </button>
           <button type="button" className="btn ghost" disabled={previewBusy || sendBusy} onClick={onClose}>
             Cancel
           </button>
         </div>
-        <p className="muted small ql-email-dry-run-note">
-          Email sending is disabled in this environment. Send runs a server-side dry run only. When PDF
-          attachment generation is enabled on the server, the customer estimate PDF from the last saved quote
-          revision is attached on real sends when available.
-        </p>
       </div>
     </div>
   );

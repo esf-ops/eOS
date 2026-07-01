@@ -4519,7 +4519,7 @@ export default function InternalEstimateApp() {
               disabled={calcBusy || Boolean(customerOutputBlockReason)}
               title={
                 customerOutputBlockReason ??
-                (emailEstimateQuoteId ? "Email customer estimate (dry run)" : UNSAVED_QUOTE_OUTPUT_MESSAGE)
+                (emailEstimateQuoteId ? "Email customer estimate" : UNSAVED_QUOTE_OUTPUT_MESSAGE)
               }
               onClick={() => requestCustomerOutput("email")}
             >

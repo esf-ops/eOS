@@ -490,7 +490,7 @@ export function QuoteDetailModal({
                       disabled={!sessionToken}
                       title={
                         sessionToken
-                          ? "Preview and dry-run email the customer estimate"
+                          ? "Preview and email the customer estimate"
                           : "Sign in to email an estimate"
                       }
                       onClick={() => setEmailModalOpen(true)}

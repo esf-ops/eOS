@@ -4,36 +4,17 @@
  * The attached PDF remains the official detailed estimate.
  */
 
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-
 import {
   CUSTOMER_ESTIMATE_BRANCH_LOCATIONS,
   CUSTOMER_ESTIMATE_PAYMENT_CARD_FEE_NOTE,
   CUSTOMER_ESTIMATE_WEBSITE,
   CUSTOMER_ESTIMATE_WEBSITE_URL
 } from "./customerEstimateBrandingConstants.js";
+import { getQuoteDeliveryEnv } from "./quoteDeliveryEnv.js";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-const LOGO_FALLBACK_URL =
-  "https://www.elitestonefabrication.com/wp-content/uploads/2021/09/cropped-ESF-Horizontal-Logo-500x150-px_09_09.png";
-
-function resolveLogoSrc() {
-  try {
-    const logoPath = join(
-      __dirname,
-      "../../../app-quote/src/lib/customerEstimate/assets/esf-horizontal-logo.png"
-    );
-    const bytes = readFileSync(logoPath);
-    return `data:image/png;base64,${bytes.toString("base64")}`;
-  } catch {
-    return LOGO_FALLBACK_URL;
-  }
+function resolveEmailLogoSrc() {
+  return getQuoteDeliveryEnv().logoUrl;
 }
-
-const LOGO_SRC = resolveLogoSrc();
 
 const BRAND_RED = "#b91c1c";
 const BRAND_RED_SOFT = "#fef2f2";
@@ -194,6 +175,7 @@ function buildHtmlEmail(display, opts = {}) {
   const totalFormatted = display.estimateTotalFormatted || "—";
   const projectLabel = projectOrAccountLabel(h);
   const pdfAttached = Boolean(opts.pdfAttached);
+  const logoSrc = escHtml(resolveEmailLogoSrc());
 
   const heroContext = [
     h.projectName ? { label: "Project", value: h.projectName } : null,
@@ -284,7 +266,7 @@ function buildHtmlEmail(display, opts = {}) {
               <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse;">
                 <tr>
                   <td style="padding:24px 28px 20px 28px;">
-                    <img src="${LOGO_SRC}" alt="Elite Stone Fabrication" width="132" style="display:block;border:0;outline:none;text-decoration:none;width:132px;height:auto;" />
+                    <img src="${logoSrc}" alt="Elite Stone Fabrication" width="132" height="40" style="display:block;border:0;outline:none;text-decoration:none;width:132px;height:auto;max-width:132px;" />
                   </td>
                 </tr>
               </table>

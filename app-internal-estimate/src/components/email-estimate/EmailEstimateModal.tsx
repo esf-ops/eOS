@@ -1,6 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import {
+  describeQuoteDeliveryPdfWarning,
+  describeQuoteDeliverySendMode,
+  quoteDeliverySendButtonLabel,
+  quoteDeliverySendSuccessMessage
+} from "@quote-lib/quoteDeliveryEmailUi";
+import {
   buildRecipientsPayload,
   previewEstimateEmail,
   sendEstimateEmail,
@@ -22,43 +28,6 @@ export type EmailEstimateModalProps = {
   /** When true, loads server preview once when the modal opens (post-save email flow). */
   autoPreviewOnOpen?: boolean;
 };
-
-function describePdfAttachmentStatus(res: QuoteDeliveryResponse): string {
-  if (res.pdfEnabled === false) {
-    return "PDF attachment disabled on server (QUOTE_EMAIL_PDF_ENABLED is off).";
-  }
-  const pdf = res.pdfAttachment;
-  if (!pdf) return "PDF attachment status unknown — click Preview to load delivery metadata.";
-  if (pdf.generated && pdf.filename) {
-    return `PDF attachment available: ${pdf.filename} (${pdf.byteLength?.toLocaleString() ?? "0"} bytes). Attached on real send when enabled.`;
-  }
-  if (pdf.reason === "no_print_snapshot") {
-    return "PDF unavailable — this quote has no saved print snapshot. Save or update the estimate again.";
-  }
-  if (pdf.reason === "pdf_disabled") {
-    return "PDF attachment disabled on server.";
-  }
-  if (pdf.reason === "pdf_render_failed") {
-    return "PDF could not be generated on the server — email can still be sent without attachment.";
-  }
-  if (pdf.reason === "print_snapshot_reconciliation_mismatch") {
-    return "PDF unavailable — saved print snapshot does not match customer display total.";
-  }
-  if (pdf.skipped) {
-    return `PDF not generated (${pdf.reason ?? "skipped"}).`;
-  }
-  return "Click Preview to check PDF attachment metadata.";
-}
-
-function describeSendMode(res: QuoteDeliveryResponse | null): string {
-  if (!res) {
-    return "Dry-run mode expected — click Preview to load server delivery settings.";
-  }
-  if (res.sendEnabled === false || res.dryRun || res.blocked) {
-    return "Dry-run mode — no email will be sent from this environment.";
-  }
-  return "Live send enabled — Send will deliver email through the configured provider.";
-}
 
 export default function EmailEstimateModal(props: EmailEstimateModalProps) {
   const {
@@ -153,7 +122,7 @@ export default function EmailEstimateModal(props: EmailEstimateModalProps) {
     await runPreview();
   }, [runPreview]);
 
-  const handleSendDryRun = useCallback(async () => {
+  const handleSend = useCallback(async () => {
     if (!quoteId || !sessionToken || blockReason) return;
     setSendBusy(true);
     setErrorMsg(null);
@@ -162,11 +131,7 @@ export default function EmailEstimateModal(props: EmailEstimateModalProps) {
       const res = await sendEstimateEmail(quoteId, sessionToken, buildPayload());
       if (!res.ok) throw new Error(res.error || "Send failed");
       applyResponse(res);
-      if (res.blocked || res.dryRun || res.sendEnabled === false) {
-        setStatusMsg("Dry run complete — no email was sent.");
-      } else {
-        setStatusMsg("Send request completed.");
-      }
+      setStatusMsg(quoteDeliverySendSuccessMessage(res));
     } catch (e) {
       const info = friendlyApiErrorMessage(e, "/api/quote-delivery", "save");
       setErrorMsg(info.userMessage);
@@ -181,6 +146,9 @@ export default function EmailEstimateModal(props: EmailEstimateModalProps) {
     quoteNumber != null
       ? `${quoteNumber}${revisionLabel ? ` (${revisionLabel})` : ""}`
       : null;
+
+  const sendModeMessage = describeQuoteDeliverySendMode(deliveryMeta);
+  const pdfWarning = describeQuoteDeliveryPdfWarning(deliveryMeta);
 
   return (
     <div
@@ -216,8 +184,8 @@ export default function EmailEstimateModal(props: EmailEstimateModalProps) {
           <>
             <div className="ie-email-delivery-status" role="status">
               <strong>Delivery status</strong>
-              <p className="muted small">{describeSendMode(deliveryMeta)}</p>
-              <p className="muted small">{describePdfAttachmentStatus(deliveryMeta ?? {})}</p>
+              <p className="muted small">{sendModeMessage}</p>
+              {pdfWarning ? <p className="muted small ie-email-pdf-warning">{pdfWarning}</p> : null}
             </div>
 
             <div className="ie-email-form-grid">
@@ -313,9 +281,9 @@ export default function EmailEstimateModal(props: EmailEstimateModalProps) {
                 type="button"
                 className="btn primary"
                 disabled={previewBusy || sendBusy || !toField.trim()}
-                onClick={() => void handleSendDryRun()}
+                onClick={() => void handleSend()}
               >
-                {sendBusy ? "Sending…" : "Send (dry run)"}
+                {quoteDeliverySendButtonLabel(deliveryMeta, sendBusy)}
               </button>
               <button type="button" className="btn ghost" disabled={previewBusy || sendBusy} onClick={onClose}>
                 Cancel

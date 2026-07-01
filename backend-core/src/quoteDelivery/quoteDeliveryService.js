@@ -148,7 +148,8 @@ export async function runQuoteDelivery(db, req, quoteId, body, options) {
   const ccList = effectiveRecipients.filter((r) => r.type === "cc").map((r) => r.email);
 
   const isPreview = options.mode === "preview";
-  const sendBlocked = !env.sendEnabled || isPreview;
+  const environmentDryRun = !env.sendEnabled;
+  const sendBlocked = environmentDryRun || isPreview;
   const shouldGeneratePdf = env.pdfEnabled && (isPreview || (!sendBlocked && env.sendEnabled));
 
   /** @type {{ generated: boolean, skipped: boolean, filename: string|null, byteLength: number, reason: string, error?: string|null }} */
@@ -268,6 +269,7 @@ export async function runQuoteDelivery(db, req, quoteId, body, options) {
     error: sendError,
     metadata: {
       dry_run: sendBlocked,
+      environment_dry_run: environmentDryRun,
       send_enabled: env.sendEnabled,
       pdf_enabled: env.pdfEnabled,
       pdf_attachment: pdfAttachmentMeta,
@@ -292,9 +294,11 @@ export async function runQuoteDelivery(db, req, quoteId, body, options) {
 
   const baseResponse = {
     ok: true,
-    dryRun: sendBlocked,
+    dryRun: environmentDryRun,
     sendEnabled: env.sendEnabled,
     pdfEnabled: env.pdfEnabled,
+    provider: env.provider,
+    forceRecipient: env.forceRecipient,
     quoteId: row.id,
     quoteNumber: row.quote_number ?? null,
     revisionLabel: row.revision_label ?? null,

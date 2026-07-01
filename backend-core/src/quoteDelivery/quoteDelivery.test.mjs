@@ -28,7 +28,7 @@ import {
   patchPrintSnapshotQuoteNumber
 } from "./customerEstimatePrintSnapshot.js";
 import { buildDeliveryLogRow, insertQuoteDeliveryLog } from "./quoteDeliveryLogs.js";
-import { getQuoteDeliveryEnv } from "./quoteDeliveryEnv.js";
+import { getQuoteDeliveryEnv, resolveQuoteEmailLogoUrl } from "./quoteDeliveryEnv.js";
 import {
   applyRecipientPolicy,
   runQuoteDelivery,
@@ -390,6 +390,27 @@ function testBrandedEmailTemplateSections() {
   assert.ok(textPreview.includes("3.5% transaction fee"));
   assert.ok(textPreview.includes("www.elitestonefabrication.com"));
   assert.ok(textPreview.includes("Prepared by: Peg Reid"));
+  assert.match(htmlPreview, /<img[^>]+src="https:\/\//);
+  assert.ok(!htmlPreview.includes("data:image"), "email logo must not use data URI");
+  assert.ok(!htmlPreview.includes('src="/'), "email logo must not use relative path");
+}
+
+function testEmailHtmlUsesAbsoluteHttpsLogoUrl() {
+  const prevLogo = process.env.QUOTE_EMAIL_LOGO_URL;
+  process.env.QUOTE_EMAIL_LOGO_URL = "https://cdn.example.com/esf-logo.png";
+  const display = buildCustomerEstimateDisplayFromSnapshot(internalQuoteRow());
+  const { htmlPreview } = buildEstimateEmailContent(display, { pdfAttached: true });
+  assert.ok(htmlPreview.includes('src="https://cdn.example.com/esf-logo.png"'));
+  assert.ok(!htmlPreview.includes("data:image/png;base64"));
+  process.env.QUOTE_EMAIL_LOGO_URL = prevLogo;
+}
+
+function testQuoteDeliveryEmailUiCopyModule() {
+  const src = readRepo("app-quote/src/lib/quoteDeliveryEmailUi.ts");
+  assert.ok(src.includes("This estimate will be emailed to the selected recipients"));
+  assert.ok(src.includes("Email sending is in dry-run mode for this environment"));
+  assert.ok(src.includes("Test mode: all emails are redirected to"));
+  assert.ok(!src.includes("Email sending is disabled in this environment"));
 }
 
 function testEmailAttachmentCalloutReflectsPdfMetadata() {
@@ -510,6 +531,63 @@ async function testPreviewDryRun() {
 
   process.env.QUOTE_EMAIL_SEND_ENABLED = prevSend;
   process.env.QUOTE_EMAIL_PROVIDER = prevProvider;
+}
+
+async function testPreviewReportsLiveSendWhenEnabled() {
+  const prevSend = process.env.QUOTE_EMAIL_SEND_ENABLED;
+  const prevProvider = process.env.QUOTE_EMAIL_PROVIDER;
+  const prevForce = process.env.QUOTE_EMAIL_FORCE_RECIPIENT;
+  process.env.QUOTE_EMAIL_SEND_ENABLED = "1";
+  process.env.QUOTE_EMAIL_PROVIDER = "resend";
+  delete process.env.QUOTE_EMAIL_FORCE_RECIPIENT;
+
+  const db = makeMockSupabase({ quoteRow: internalQuoteRow() });
+  const result = await runQuoteDelivery(
+    db,
+    mockReq(),
+    QUOTE_ID,
+    { recipients: [{ email: "jane@example.com", type: "to" }] },
+    { mode: "preview" }
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.sendEnabled, true);
+  assert.equal(result.dryRun, false, "preview must not report environment dry-run when send is enabled");
+  assert.equal(result.forceRecipient, null);
+
+  process.env.QUOTE_EMAIL_SEND_ENABLED = prevSend;
+  process.env.QUOTE_EMAIL_PROVIDER = prevProvider;
+  process.env.QUOTE_EMAIL_FORCE_RECIPIENT = prevForce;
+}
+
+async function testPreviewReportsForceRecipient() {
+  const prevForce = process.env.QUOTE_EMAIL_FORCE_RECIPIENT;
+  const prevSend = process.env.QUOTE_EMAIL_SEND_ENABLED;
+  process.env.QUOTE_EMAIL_FORCE_RECIPIENT = "ops@eliteosfab.com";
+  process.env.QUOTE_EMAIL_SEND_ENABLED = "1";
+
+  const db = makeMockSupabase({ quoteRow: internalQuoteRow() });
+  const result = await runQuoteDelivery(
+    db,
+    mockReq(),
+    QUOTE_ID,
+    { recipients: [{ email: "jane@example.com", type: "to" }] },
+    { mode: "preview" }
+  );
+
+  assert.equal(result.forceRecipient, "ops@eliteosfab.com");
+  assert.ok((result.warnings || []).some((w) => String(w).includes("ops@eliteosfab.com")));
+
+  process.env.QUOTE_EMAIL_FORCE_RECIPIENT = prevForce;
+  process.env.QUOTE_EMAIL_SEND_ENABLED = prevSend;
+}
+
+function testQuoteEmailLogoUrlEnvResolution() {
+  const prevLogo = process.env.QUOTE_EMAIL_LOGO_URL;
+  process.env.QUOTE_EMAIL_LOGO_URL = "https://assets.example.com/logo.png";
+  assert.equal(getQuoteDeliveryEnv().logoUrl, "https://assets.example.com/logo.png");
+  assert.equal(resolveQuoteEmailLogoUrl("http://insecure.example/logo.png").startsWith("https://"), true);
+  process.env.QUOTE_EMAIL_LOGO_URL = prevLogo;
 }
 
 async function testSendBlockedWhenDisabled() {
@@ -1117,6 +1195,9 @@ async function runAll() {
   testCustomerSafeTextAssertion();
   testBuiltEmailHtmlPassesCustomerSafeAudit();
   testBrandedEmailTemplateSections();
+  testEmailHtmlUsesAbsoluteHttpsLogoUrl();
+  testQuoteDeliveryEmailUiCopyModule();
+  testQuoteEmailLogoUrlEnvResolution();
   testEmailAttachmentCalloutReflectsPdfMetadata();
   testPrintDocumentIncludesPaymentTerms();
   testReplyToFromPreparedByEmail();
@@ -1130,6 +1211,8 @@ async function runAll() {
   testForceRecipientOverridesDeliveryTarget();
   testResendProviderEnvSelection();
   await testPreviewDryRun();
+  await testPreviewReportsLiveSendWhenEnabled();
+  await testPreviewReportsForceRecipient();
   await testSendBlockedWhenDisabled();
   await testQuoteNotFound();
   await testWrongQuoteSource();

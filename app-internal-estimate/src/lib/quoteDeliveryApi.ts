@@ -15,6 +15,9 @@ export type QuoteDeliveryResponse = {
   dryRun?: boolean;
   blocked?: boolean;
   sendEnabled?: boolean;
+  pdfEnabled?: boolean;
+  provider?: string;
+  forceRecipient?: string | null;
   quoteId?: string;
   quoteNumber?: string | null;
   revisionLabel?: string | null;
@@ -31,7 +34,6 @@ export type QuoteDeliveryResponse = {
     byteLength?: number;
     reason?: string;
   };
-  pdfEnabled?: boolean;
   warnings?: string[];
   deliveryLogId?: string | null;
   deliveryLogSkipped?: boolean;

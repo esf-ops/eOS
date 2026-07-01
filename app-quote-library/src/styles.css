@@ -2405,6 +2405,25 @@ body:has(.ql-modal-wrap) {
   margin: 4px 0 0;
 }
 
+.ql-email-delivery-status {
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border, #e2e8f0);
+  background: var(--surface-muted, #f8fafc);
+}
+
+.ql-email-delivery-status strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 0.8125rem;
+}
+
+.ql-email-pdf-warning {
+  margin-top: 6px;
+  color: #92400e;
+}
+
 .ql-email-form-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

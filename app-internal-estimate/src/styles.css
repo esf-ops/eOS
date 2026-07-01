@@ -206,6 +206,25 @@ body {
   font-weight: 600;
 }
 
+.ie-email-delivery-status {
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm, 6px);
+  border: 1px solid var(--border, #e2e8f0);
+  background: var(--surface-muted, #f8fafc);
+}
+
+.ie-email-delivery-status strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 0.8125rem;
+}
+
+.ie-email-pdf-warning {
+  margin-top: 6px;
+  color: #92400e;
+}
+
 .ie-email-form-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
