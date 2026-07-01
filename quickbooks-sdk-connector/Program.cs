@@ -19,6 +19,15 @@ internal static class Program
         logger.Info($"QBXML version: {settings.QbXmlVersion}, MaxReturned: {settings.MaxReturned}");
         logger.Info("This tool performs query-only QBXML requests. It does not create, edit, or delete QuickBooks records.");
 
+        if (settings.SelectedEntities != null && settings.SelectedEntities.Count > 0)
+        {
+            logger.Info("QB_ENTITIES filter: " + string.Join(", ", settings.SelectedEntities));
+        }
+        else
+        {
+            logger.Info("QB_ENTITIES filter: (all entities)");
+        }
+
         if (!string.IsNullOrWhiteSpace(settings.CompanyFile))
         {
             logger.Info($"Company file: {settings.CompanyFile}");

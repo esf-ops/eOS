@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 
 namespace EliteOS.QuickBooksSdkConnector.Configuration;
 
@@ -10,9 +12,12 @@ internal sealed class ConnectorSettings
     public string CompanyFile { get; }
     public string QbXmlVersion { get; }
     public int MaxReturned { get; }
+    public int EstimateChunkStartYear { get; }
     public string ProjectRoot { get; }
     public string ExportsRoot { get; }
     public string LogsRoot { get; }
+    public string DebugRoot { get; }
+    public IReadOnlyList<string> SelectedEntities { get; }
 
     public ConnectorSettings()
     {
@@ -22,8 +27,40 @@ internal sealed class ConnectorSettings
         CompanyFile = GetEnv("QB_COMPANY_FILE", string.Empty);
         QbXmlVersion = GetEnv("QBXML_VERSION", "13.0");
         MaxReturned = ParseInt(GetEnv("QB_MAX_RETURNED", "100"), 100);
+        EstimateChunkStartYear = ParseInt(GetEnv("QB_ESTIMATE_CHUNK_START_YEAR", "2000"), 2000);
         ExportsRoot = GetEnv("QB_EXPORTS_ROOT", Path.Combine(ProjectRoot, "exports"));
         LogsRoot = GetEnv("QB_LOGS_ROOT", Path.Combine(ProjectRoot, "logs"));
+        DebugRoot = GetEnv("QB_DEBUG_ROOT", Path.Combine(ProjectRoot, "debug"));
+        SelectedEntities = ParseEntityFilter(GetEnv("QB_ENTITIES", string.Empty));
+    }
+
+    public bool IncludesEntity(string entityType)
+    {
+        if (SelectedEntities == null || SelectedEntities.Count == 0)
+        {
+            return true;
+        }
+
+        return SelectedEntities.Contains(NormalizeEntityName(entityType));
+    }
+
+    public static string NormalizeEntityName(string entityType)
+    {
+        return (entityType ?? string.Empty).Trim().ToLowerInvariant();
+    }
+
+    private static IReadOnlyList<string> ParseEntityFilter(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return Array.Empty<string>();
+        }
+
+        return raw
+            .Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(NormalizeEntityName)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private static string ResolveProjectRoot()

@@ -36,26 +36,31 @@ internal sealed class ExportCoordinator
             _processor,
             _logger,
             _settings.QbXmlVersion,
-            _settings.MaxReturned);
+            _settings.MaxReturned,
+            _settings.DebugRoot);
+
+        var termsHandler = new TermsQueryHandler(runner, _logger);
+        var estimateHandler = new EstimateQueryHandler(runner, _logger, _settings);
+
+        var definitions = EntityCatalog.All
+            .Where(definition => _settings.IncludesEntity(definition.EntityType))
+            .ToList();
+
+        if (definitions.Count == 0)
+        {
+            _logger.Warn("No entities selected. Check QB_ENTITIES or leave it unset to export all entities.");
+        }
+        else if (_settings.SelectedEntities != null && _settings.SelectedEntities.Count > 0)
+        {
+            _logger.Info("Selected entities: " + string.Join(", ", definitions.Select(d => d.EntityType)));
+        }
 
         var entityResults = new List<EntityExtractResult>();
-        foreach (var definition in EntityCatalog.All)
+        foreach (var definition in definitions)
         {
             try
             {
-                var outputDirectory = Path.Combine(exportDirectory, definition.OutputFolder);
-                EntityExtractResult result;
-
-                if (definition.UseIterator)
-                {
-                    result = runner.RunPaginatedQuery(definition, outputDirectory);
-                }
-                else
-                {
-                    result = runner.RunSingleQuery(definition, exportDirectory, "company");
-                }
-
-                entityResults.Add(result);
+                entityResults.Add(RunEntity(definition, exportDirectory, runner, termsHandler, estimateHandler));
             }
             catch (Exception ex)
             {
@@ -82,6 +87,9 @@ internal sealed class ExportCoordinator
             QbXmlVersion = _settings.QbXmlVersion,
             CompanyFile = string.IsNullOrWhiteSpace(_settings.CompanyFile) ? "(currently open company file)" : _settings.CompanyFile,
             MaxReturned = _settings.MaxReturned,
+            SelectedEntities = _settings.SelectedEntities == null || _settings.SelectedEntities.Count == 0
+                ? new List<string> { "all" }
+                : _settings.SelectedEntities.ToList(),
             ExportDirectory = exportDirectory,
             Entities = entityResults,
             Errors = CollectTopLevelErrors(entityResults)
@@ -93,6 +101,31 @@ internal sealed class ExportCoordinator
         _logger.Info($"Manifest written: {manifestPath}");
 
         return manifest;
+    }
+
+    private EntityExtractResult RunEntity(
+        EntityExtractDefinition definition,
+        string exportDirectory,
+        IteratorQueryRunner runner,
+        TermsQueryHandler termsHandler,
+        EstimateQueryHandler estimateHandler)
+    {
+        var outputDirectory = Path.Combine(exportDirectory, definition.OutputFolder);
+
+        switch (definition.QueryStrategy)
+        {
+            case EntityQueryStrategy.SingleRequest:
+                return runner.RunSingleQuery(definition, exportDirectory, "company");
+            case EntityQueryStrategy.SimpleList:
+                return runner.RunSimpleListQuery(definition, outputDirectory);
+            case EntityQueryStrategy.TermsSplit:
+                return termsHandler.Run(definition, outputDirectory);
+            case EntityQueryStrategy.EstimatesWithFallback:
+                return estimateHandler.Run(definition, outputDirectory);
+            case EntityQueryStrategy.IteratorPaginated:
+            default:
+                return runner.RunPaginatedQuery(definition, outputDirectory);
+        }
     }
 
     private static IList<string> CollectTopLevelErrors(IEnumerable<EntityExtractResult> entityResults)
@@ -111,6 +144,7 @@ internal sealed class SyncRunManifest
     public string QbXmlVersion { get; set; }
     public string CompanyFile { get; set; }
     public int MaxReturned { get; set; }
+    public IList<string> SelectedEntities { get; set; } = new List<string>();
     public string ExportDirectory { get; set; }
     public IList<EntityExtractResult> Entities { get; set; } = new List<EntityExtractResult>();
     public IList<string> Errors { get; set; } = new List<string>();
@@ -126,7 +160,7 @@ internal static class EntityCatalog
             RequestTag = "CompanyQueryRq",
             ResponseTagSuffix = "QueryRs",
             OutputFolder = ".",
-            UseIterator = false
+            QueryStrategy = EntityQueryStrategy.SingleRequest
         },
         new EntityExtractDefinition
         {
@@ -134,7 +168,7 @@ internal static class EntityCatalog
             RequestTag = "CustomerQueryRq",
             ResponseTagSuffix = "QueryRs",
             OutputFolder = "customers",
-            UseIterator = true
+            QueryStrategy = EntityQueryStrategy.IteratorPaginated
         },
         new EntityExtractDefinition
         {
@@ -144,7 +178,7 @@ internal static class EntityCatalog
             OutputFolder = "invoices",
             InnerElements = "<IncludeLineItems>true</IncludeLineItems>",
             ExtractLineItems = true,
-            UseIterator = true
+            QueryStrategy = EntityQueryStrategy.IteratorPaginated
         },
         new EntityExtractDefinition
         {
@@ -152,7 +186,7 @@ internal static class EntityCatalog
             RequestTag = "ItemQueryRq",
             ResponseTagSuffix = "QueryRs",
             OutputFolder = "items",
-            UseIterator = true
+            QueryStrategy = EntityQueryStrategy.IteratorPaginated
         },
         new EntityExtractDefinition
         {
@@ -160,7 +194,7 @@ internal static class EntityCatalog
             RequestTag = "ReceivePaymentQueryRq",
             ResponseTagSuffix = "QueryRs",
             OutputFolder = "payments",
-            UseIterator = true
+            QueryStrategy = EntityQueryStrategy.IteratorPaginated
         },
         new EntityExtractDefinition
         {
@@ -168,7 +202,7 @@ internal static class EntityCatalog
             RequestTag = "VendorQueryRq",
             ResponseTagSuffix = "QueryRs",
             OutputFolder = "vendors",
-            UseIterator = true
+            QueryStrategy = EntityQueryStrategy.IteratorPaginated
         },
         new EntityExtractDefinition
         {
@@ -176,7 +210,7 @@ internal static class EntityCatalog
             RequestTag = "BillQueryRq",
             ResponseTagSuffix = "QueryRs",
             OutputFolder = "bills",
-            UseIterator = true
+            QueryStrategy = EntityQueryStrategy.IteratorPaginated
         },
         new EntityExtractDefinition
         {
@@ -184,7 +218,7 @@ internal static class EntityCatalog
             RequestTag = "PurchaseOrderQueryRq",
             ResponseTagSuffix = "QueryRs",
             OutputFolder = "purchase-orders",
-            UseIterator = true
+            QueryStrategy = EntityQueryStrategy.IteratorPaginated
         },
         new EntityExtractDefinition
         {
@@ -192,7 +226,8 @@ internal static class EntityCatalog
             RequestTag = "AccountQueryRq",
             ResponseTagSuffix = "QueryRs",
             OutputFolder = "accounts",
-            UseIterator = true
+            InnerElements = "<ActiveStatus>All</ActiveStatus>",
+            QueryStrategy = EntityQueryStrategy.SimpleList
         },
         new EntityExtractDefinition
         {
@@ -200,7 +235,8 @@ internal static class EntityCatalog
             RequestTag = "ClassQueryRq",
             ResponseTagSuffix = "QueryRs",
             OutputFolder = "classes",
-            UseIterator = true
+            InnerElements = "<ActiveStatus>All</ActiveStatus>",
+            QueryStrategy = EntityQueryStrategy.SimpleList
         },
         new EntityExtractDefinition
         {
@@ -208,15 +244,15 @@ internal static class EntityCatalog
             RequestTag = "SalesRepQueryRq",
             ResponseTagSuffix = "QueryRs",
             OutputFolder = "sales-reps",
-            UseIterator = true
+            QueryStrategy = EntityQueryStrategy.SimpleList
         },
         new EntityExtractDefinition
         {
             EntityType = "terms",
-            RequestTag = "TermsQueryRq",
+            RequestTag = "StandardTermsQueryRq",
             ResponseTagSuffix = "QueryRs",
             OutputFolder = "terms",
-            UseIterator = true
+            QueryStrategy = EntityQueryStrategy.TermsSplit
         },
         new EntityExtractDefinition
         {
@@ -225,7 +261,7 @@ internal static class EntityCatalog
             ResponseTagSuffix = "QueryRs",
             OutputFolder = "estimates",
             InnerElements = "<IncludeLineItems>true</IncludeLineItems>",
-            UseIterator = true
+            QueryStrategy = EntityQueryStrategy.EstimatesWithFallback
         },
         new EntityExtractDefinition
         {
@@ -234,7 +270,7 @@ internal static class EntityCatalog
             ResponseTagSuffix = "QueryRs",
             OutputFolder = "sales-orders",
             InnerElements = "<IncludeLineItems>true</IncludeLineItems>",
-            UseIterator = true
+            QueryStrategy = EntityQueryStrategy.IteratorPaginated
         }
     };
 }

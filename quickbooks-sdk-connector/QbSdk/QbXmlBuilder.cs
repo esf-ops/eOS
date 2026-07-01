@@ -25,7 +25,8 @@ internal static class QbXmlBuilder
         string requestId,
         string iteratorMode,
         string iteratorId,
-        string innerElements)
+        string innerElements,
+        bool includeOwnerId = true)
     {
         var request = new StringBuilder();
         request.Append("<");
@@ -45,7 +46,11 @@ internal static class QbXmlBuilder
         request.Append(maxReturned);
         request.Append("</MaxReturned>");
         request.Append(innerElements ?? string.Empty);
-        request.Append("<OwnerID>0</OwnerID>");
+        if (includeOwnerId)
+        {
+            request.Append("<OwnerID>0</OwnerID>");
+        }
+
         request.Append("</");
         request.Append(requestTag);
         request.Append(">");

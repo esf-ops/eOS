@@ -5,5 +5,7 @@ exports/*/
 logs/*.log
 logs/*.txt
 !logs/.gitkeep
+debug/failed-requests/*.xml
+!debug/failed-requests/.gitkeep
 *.user
 .vs/

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Xml.Linq;
+using EliteOS.QuickBooksSdkConnector.Export;
 using EliteOS.QuickBooksSdkConnector.Logging;
 using EliteOS.QuickBooksSdkConnector.Normalization;
 
@@ -14,26 +15,33 @@ internal sealed class IteratorQueryRunner
     private readonly FileLogger _logger;
     private readonly string _qbXmlVersion;
     private readonly int _maxReturned;
+    private readonly string _debugRoot;
 
     public IteratorQueryRunner(
         QbRequestProcessor processor,
         FileLogger logger,
         string qbXmlVersion,
-        int maxReturned)
+        int maxReturned,
+        string debugRoot)
     {
         _processor = processor;
         _logger = logger;
         _qbXmlVersion = qbXmlVersion;
         _maxReturned = maxReturned;
+        _debugRoot = debugRoot;
     }
 
-    public EntityExtractResult RunPaginatedQuery(EntityExtractDefinition definition, string outputDirectory)
+    public EntityExtractResult RunPaginatedQuery(
+        EntityExtractDefinition definition,
+        string outputDirectory,
+        int startingBatchNumber = 0,
+        bool includeOwnerId = true)
     {
         Directory.CreateDirectory(outputDirectory);
 
         var startedAt = DateTime.UtcNow;
         var errors = new List<string>();
-        var batchCount = 0;
+        var batchCount = startingBatchNumber;
         var recordCount = 0;
         var requestCounter = 0;
         var iteratorId = string.Empty;
@@ -50,8 +58,10 @@ internal sealed class IteratorQueryRunner
                 requestId,
                 iteratorMode,
                 iteratorMode == "Continue" ? iteratorId : null,
-                definition.InnerElements);
+                definition.InnerElements,
+                includeOwnerId);
 
+            var requestLabel = $"batch-{requestCounter:D3}-{iteratorMode.ToLowerInvariant()}";
             _logger.Info(
                 $"[{definition.EntityType}] Sending batch {requestCounter} ({iteratorMode}, MaxReturned={_maxReturned})");
 
@@ -65,6 +75,7 @@ internal sealed class IteratorQueryRunner
                 var message = $"[{definition.EntityType}] ProcessRequest failed on batch {requestCounter}: {ex.Message}";
                 _logger.Error(message, ex);
                 errors.Add(message);
+                RecordFailedRequest(definition.EntityType, requestLabel, requestXml);
                 break;
             }
 
@@ -81,6 +92,7 @@ internal sealed class IteratorQueryRunner
                     $"[{definition.EntityType}] batch {batchCount} statusCode={parsed.StatusCode} message={parsed.StatusMessage}";
                 _logger.Warn(message);
                 errors.Add(message);
+                RecordFailedRequest(definition.EntityType, requestLabel, requestXml);
                 break;
             }
 
@@ -114,6 +126,7 @@ internal sealed class IteratorQueryRunner
             if (string.IsNullOrWhiteSpace(parsed.IteratorId))
             {
                 errors.Add($"[{definition.EntityType}] iteratorRemainingCount={parsed.IteratorRemainingCount} but iteratorID was missing.");
+                RecordFailedRequest(definition.EntityType, requestLabel, requestXml);
                 break;
             }
 
@@ -126,8 +139,73 @@ internal sealed class IteratorQueryRunner
             EntityType = definition.EntityType,
             StartedAt = startedAt,
             CompletedAt = DateTime.UtcNow,
-            BatchCount = batchCount,
+            BatchCount = batchCount - startingBatchNumber,
             RecordCount = recordCount,
+            Errors = errors
+        };
+    }
+
+    public EntityExtractResult RunSimpleListQuery(EntityExtractDefinition definition, string outputDirectory)
+    {
+        Directory.CreateDirectory(outputDirectory);
+
+        var startedAt = DateTime.UtcNow;
+        var errors = new List<string>();
+        var requestXml = QbXmlBuilder.BuildSingleQuery(
+            definition.RequestTag,
+            _qbXmlVersion,
+            $"{definition.EntityType}-1",
+            definition.InnerElements);
+
+        _logger.Info($"[{definition.EntityType}] Sending simple list query (no iterator)");
+
+        string responseXml;
+        try
+        {
+            responseXml = _processor.ProcessRequest(requestXml);
+        }
+        catch (Exception ex)
+        {
+            var message = $"[{definition.EntityType}] ProcessRequest failed: {ex.Message}";
+            _logger.Error(message, ex);
+            errors.Add(message);
+            RecordFailedRequest(definition.EntityType, "simple-list", requestXml);
+            return FailedResult(definition.EntityType, startedAt, errors);
+        }
+
+        var parsed = QbXmlResponseParser.Parse(responseXml, definition.ResponseTagSuffix);
+        var rawPath = Path.Combine(outputDirectory, "batch-001.xml");
+        File.WriteAllText(rawPath, parsed.RawXml, System.Text.Encoding.UTF8);
+
+        if (!parsed.IsSuccess)
+        {
+            var message =
+                $"[{definition.EntityType}] statusCode={parsed.StatusCode} message={parsed.StatusMessage}";
+            _logger.Warn(message);
+            errors.Add(message);
+            RecordFailedRequest(definition.EntityType, "simple-list", requestXml);
+        }
+
+        var normalizedRecords = parsed.RetElements
+            .Select(QbXmlToJsonNormalizer.ToDictionary)
+            .ToList();
+
+        var jsonPath = Path.Combine(outputDirectory, "batch-001.json");
+        WriteJson(jsonPath, new
+        {
+            entityType = definition.EntityType,
+            batchNumber = 1,
+            recordCount = normalizedRecords.Count,
+            records = normalizedRecords
+        });
+
+        return new EntityExtractResult
+        {
+            EntityType = definition.EntityType,
+            StartedAt = startedAt,
+            CompletedAt = DateTime.UtcNow,
+            BatchCount = 1,
+            RecordCount = normalizedRecords.Count,
             Errors = errors
         };
     }
@@ -156,15 +234,8 @@ internal sealed class IteratorQueryRunner
             var message = $"[{definition.EntityType}] ProcessRequest failed: {ex.Message}";
             _logger.Error(message, ex);
             errors.Add(message);
-            return new EntityExtractResult
-            {
-                EntityType = definition.EntityType,
-                StartedAt = startedAt,
-                CompletedAt = DateTime.UtcNow,
-                BatchCount = 0,
-                RecordCount = 0,
-                Errors = errors
-            };
+            RecordFailedRequest(definition.EntityType, outputStem, requestXml);
+            return FailedResult(definition.EntityType, startedAt, errors);
         }
 
         var parsed = QbXmlResponseParser.Parse(responseXml, definition.ResponseTagSuffix);
@@ -177,6 +248,7 @@ internal sealed class IteratorQueryRunner
                 $"[{definition.EntityType}] statusCode={parsed.StatusCode} message={parsed.StatusMessage}";
             _logger.Warn(message);
             errors.Add(message);
+            RecordFailedRequest(definition.EntityType, outputStem, requestXml);
         }
 
         var normalizedRecords = parsed.RetElements
@@ -200,6 +272,38 @@ internal sealed class IteratorQueryRunner
             RecordCount = normalizedRecords.Count,
             Errors = errors
         };
+    }
+
+    public static void ClearOutputDirectory(string outputDirectory)
+    {
+        if (!Directory.Exists(outputDirectory))
+        {
+            return;
+        }
+
+        foreach (var file in Directory.GetFiles(outputDirectory))
+        {
+            File.Delete(file);
+        }
+    }
+
+    private static EntityExtractResult FailedResult(string entityType, DateTime startedAt, IList<string> errors)
+    {
+        return new EntityExtractResult
+        {
+            EntityType = entityType,
+            StartedAt = startedAt,
+            CompletedAt = DateTime.UtcNow,
+            BatchCount = 0,
+            RecordCount = 0,
+            Errors = errors
+        };
+    }
+
+    private void RecordFailedRequest(string entityType, string requestLabel, string requestXml)
+    {
+        FailedRequestDiagnostics.Write(_debugRoot, entityType, requestLabel, requestXml);
+        _logger.Warn($"[{entityType}] Wrote failed outbound request to debug/failed-requests ({requestLabel})");
     }
 
     private static void WriteInvoiceLines(string outputDirectory, int batchNumber, IList<XElement> retElements)
@@ -231,25 +335,4 @@ internal sealed class IteratorQueryRunner
     {
         JsonSerializationHelper.WriteIndentedJson(path, payload);
     }
-}
-
-internal sealed class EntityExtractDefinition
-{
-    public string EntityType { get; set; }
-    public string RequestTag { get; set; }
-    public string ResponseTagSuffix { get; set; }
-    public string OutputFolder { get; set; }
-    public string InnerElements { get; set; }
-    public bool ExtractLineItems { get; set; }
-    public bool UseIterator { get; set; }
-}
-
-internal sealed class EntityExtractResult
-{
-    public string EntityType { get; set; }
-    public DateTime StartedAt { get; set; }
-    public DateTime CompletedAt { get; set; }
-    public int BatchCount { get; set; }
-    public int RecordCount { get; set; }
-    public IList<string> Errors { get; set; } = new List<string>();
 }
