@@ -161,27 +161,37 @@ function prepareRoomPrintRows(roomRows, roomAreaDisplayTotals, roomExtrasExact, 
     const displayedAreaTotal = Math.max(0, Math.round(roomAreaDisplayTotals[idx] ?? 0));
     const catalogAddonSum = row.addons.reduce((s, a) => s + a.amountExact, 0);
     const roomExtras = round2(roomExtrasExact[idx] != null ? Number(roomExtrasExact[idx]) : catalogAddonSum);
-    const otherExtras = round2(Math.max(0, roomExtras - catalogAddonSum));
     const addonLines = row.addons.map((a) => ({
       label: a.label || "",
       amountExact: a.amountExact,
       displayedAmount: roundCustomerDisplayAddonLine(a.amountExact)
     }));
-    if (otherExtras > 0) {
-      addonLines.push({
-        amountExact: otherExtras,
-        displayedAmount: roundCustomerDisplayAddonLine(otherExtras)
-      });
-    }
     let displayedAddOns = addonLines.reduce((s, a) => s + a.displayedAmount, 0);
-    if (displayedAddOns === 0 && roomExtras > 0) {
+    const customDisplaySum = (row.customerCustomLines || []).reduce(
+      (s, c) => s + roundCustomerDisplay(c.amountExact),
+      0
+    );
+    displayedAddOns += customDisplaySum;
+    if (
+      displayedAddOns === 0 &&
+      roomExtras > 0 &&
+      row.addons.length === 0 &&
+      (row.customerCustomLines || []).length === 0
+    ) {
       displayedAddOns = roundCustomerDisplay(roomExtras);
     }
     let displayedMaterial = displayedAreaTotal - displayedAddOns;
     if (displayedMaterial < 0) {
-      displayedMaterial = roundCustomerDisplay(row.materialAmountExact + row.customSum);
+      displayedMaterial = roundCustomerDisplay(row.materialAmountExact);
     }
-    rows.push({ displayedMaterial, displayedAddOns, displayedAreaTotal, isVanity: row.isVanity, addonLines });
+    rows.push({
+      displayedMaterial,
+      displayedAddOns,
+      displayedAreaTotal,
+      isVanity: row.isVanity,
+      addonLines,
+      customerCustomLines: row.customerCustomLines || []
+    });
   });
   // Allow negative unassigned (global Discount / Credit) to appear as project discount row.
   const unassigned = Math.round(unassignedDisplayTotal ?? 0);
@@ -262,6 +272,7 @@ function buildSyntheticDisplayModel(fixture) {
       addons: r.addons,
       materialAmountExact: r.materialExact,
       customSum: r.customSum || 0,
+      customerCustomLines: r.customerCustomLines || [],
       isVanity: r.isVanity
     })),
     roomAreaDisplayTotals,
@@ -1213,6 +1224,41 @@ assertEqual(
     m.finalRounded
   );
   assertDisplayModelInvariants("DISCOUNT-ROOM-RECONCILE", m);
+}
+
+// Room custom add-on: material column excludes customer custom lines; add-ons column includes them
+{
+  const materialExact = 2220;
+  const customExact = 900;
+  const roomTotalExact = materialExact + customExact;
+  const m = buildSyntheticDisplayModel({
+    countertopExact: materialExact,
+    backsplashExact: 0,
+    addonsExact: 0,
+    customLines: [
+      {
+        lineKey: "room-custom-labor",
+        name: "Waterfall Labor",
+        lineTotal: customExact
+      }
+    ],
+    roomRows: [
+      {
+        isVanity: false,
+        roomTotalExact,
+        materialExact,
+        customSum: customExact,
+        extrasExact: 0,
+        addons: [],
+        customerCustomLines: [{ lineKey: "room-custom-labor", name: "Waterfall Labor", amountExact: customExact }]
+      }
+    ]
+  });
+  assertDisplayModelInvariants("room-custom-add-on", m);
+  const row = m.roomAreaPrintRows[0];
+  assertEqual("room-custom-add-on material", row.displayedMaterial, 2220);
+  assertEqual("room-custom-add-on add-ons", row.displayedAddOns, 900);
+  assertEqual("room-custom-add-on area total", row.displayedAreaTotal, 3120);
 }
 
 console.log("verifyCustomerEstimatePrintReconciliation: ok");

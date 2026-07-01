@@ -79,7 +79,7 @@
     "eos:test:quote-file-service": "node backend-core/src/files/quoteFileService.test.mjs",
     "eos:test:pricing-authority": "node backend-core/src/quotes/pricingAuthority.contract.test.mjs",
     "eos:build:customer-estimate-document": "npm run build:customer-estimate-document --prefix app-quote",
-    "eos:test:quote-delivery": "npm run eos:build:customer-estimate-document && node backend-core/src/quoteDelivery/quoteDelivery.test.mjs && node backend-core/src/quoteDelivery/customerEstimatePrintSnapshotSave.test.mjs",
+    "eos:test:quote-delivery": "npm run eos:build:customer-estimate-document && node backend-core/src/quoteDelivery/quoteDelivery.test.mjs && node backend-core/src/quoteDelivery/customerEstimatePrintSnapshotSave.test.mjs && node backend-core/src/scripts/customerPrintDisplayAggregation.test.mjs",
     "eos:test:quote-output-gate": "node backend-core/src/quotes/quoteOutputGate.test.mjs",
     "eos:test:quote-library-search": "node backend-core/src/quotes/quoteLibrarySearch.test.mjs && node backend-core/src/quotes/quoteLibraryArchive.test.mjs",
     "eos:test:custom-quote": "node backend-core/src/quotes/customQuoteCalculator.test.mjs",

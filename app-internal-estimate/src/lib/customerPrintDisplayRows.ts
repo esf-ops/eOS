@@ -61,9 +61,11 @@ export type PrepareCustomerPrintDisplayRowsResult = {
 };
 
 function fallbackMaterialDisplay(row: CustomerRoomAreaCostRow): number {
-  const customExact = row.customerCustomLines.reduce((s, c) => s + c.amountExact, 0);
-  const materialExact = round2(row.materialAmountExact + customExact);
-  return roundCustomerDisplay(materialExact);
+  return roundCustomerDisplay(round2(row.materialAmountExact));
+}
+
+function sumCustomerCustomDisplay(row: CustomerRoomAreaCostRow): number {
+  return row.customerCustomLines.reduce((s, c) => s + roundCustomerDisplay(c.amountExact), 0);
 }
 
 /**
@@ -85,23 +87,21 @@ export function prepareCustomerPrintDisplayRows(
     const roomExtrasExact = round2(
       params.roomExtrasExact?.[idx] != null ? Number(params.roomExtrasExact[idx]) : catalogAddonSum
     );
-    const otherExtras = round2(Math.max(0, roomExtrasExact - catalogAddonSum));
 
     const addonLines: CustomerPrintDisplayAddonLine[] = row.addons.map((a) => ({
       label: a.label,
       amountExact: a.amountExact,
       displayedAmount: roundCustomerDisplayAddonLine(a.amountExact)
     }));
-    if (otherExtras > 0) {
-      addonLines.push({
-        label: "Additional room extras",
-        amountExact: otherExtras,
-        displayedAmount: roundCustomerDisplayAddonLine(otherExtras)
-      });
-    }
 
-    let displayedAddOns = addonLines.reduce((s, a) => s + a.displayedAmount, 0);
-    if (displayedAddOns === 0 && roomExtrasExact > 0) {
+    let displayedAddOns =
+      addonLines.reduce((s, a) => s + a.displayedAmount, 0) + sumCustomerCustomDisplay(row);
+    if (
+      displayedAddOns === 0 &&
+      roomExtrasExact > 0 &&
+      row.addons.length === 0 &&
+      row.customerCustomLines.length === 0
+    ) {
       displayedAddOns = roundCustomerDisplay(roomExtrasExact);
     }
 

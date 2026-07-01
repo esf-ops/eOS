@@ -2474,4 +2474,106 @@ function buildOocPdfFixture(
   assert.match(src, /room-field-hint/, "UI-FORM-1: helper text uses room-field-hint below controls");
 }
 
+// ROOM-AGG-1: customer custom lines belong in add-ons column; selected comparison reconciles
+{
+  const measureOpts = { chargeableCounterCeil: true, internalMaterialUseTax: true };
+  const bathroom = createDefaultRoom("Group Promo");
+  bathroom.name = "BATHROOM";
+  bathroom.calcMode = "Manual Sq Ft";
+  bathroom.direct = { counter: 37, splash: 0 };
+  bathroom.customerComparisonGroups = ["Group Promo", "Group A"];
+
+  const { rooms: measured } = calculateAllRoomDrafts([bathroom], "New Construction", "wholesale", 0, measureOpts);
+  measured[0].extras = 200;
+
+  const customLine = {
+    lineKey: "room-custom-labor",
+    name: "Waterfall Labor",
+    description: "Miscellaneous · BATHROOM",
+    quantity: 1,
+    unitPrice: 900,
+    customerFacing: true,
+    roomName: "BATHROOM",
+    roomId: bathroom.id,
+    category: "Labor"
+  };
+
+  const roomBd = buildCustomerRoomAreaCostBreakdown({
+    roomDrafts: [bathroom],
+    measuredRooms: measured,
+    materialBasis: "wholesale",
+    measureOptions: measureOpts,
+    customLines: [customLine]
+  });
+
+  const selectedBd = buildSelectedMaterialBreakdown([bathroom], "wholesale", measureOpts);
+  const allGroupRates = buildInternalEstimateGroupComparison({
+    countertopSqft: Number(measured[0].counter) || 0,
+    backsplashSqft: 0,
+    roomFixedDollars: Number(measured[0].extras) || 0,
+    customLineDollars: 900,
+    basis: "wholesale",
+    internalMaterialUseTax: true
+  });
+
+  const displayModel = buildCustomerEstimateDisplayModel({
+    selectedBreakdown: selectedBd,
+    measuredRooms: measured,
+    visibleCustomerLines: [
+      {
+        lineKey: customLine.lineKey,
+        name: customLine.name,
+        description: customLine.description,
+        qty: 1,
+        roomName: bathroom.name,
+        lineTotal: 900
+      }
+    ],
+    internalMaterialFoldDollars: 0,
+    roomAreaBreakdown: roomBd,
+    allGroupComparisonRates: allGroupRates,
+    internalMaterialUseTax: true
+  });
+
+  const printRow = displayModel.roomAreaPrintRows[0];
+  assert.ok(printRow, "ROOM-AGG-1: room print row exists");
+  assert.equal(
+    printRow.displayedMaterial + printRow.displayedAddOns,
+    printRow.displayedAreaTotal,
+    "ROOM-AGG-1: material + add-ons = area total"
+  );
+  assert.ok(printRow.displayedAddOns >= 900, "ROOM-AGG-1: add-ons include customer custom line");
+  assert.ok(
+    printRow.displayedMaterial < printRow.displayedAreaTotal,
+    "ROOM-AGG-1: material excludes custom/add-on amounts"
+  );
+  assert.equal(printRow.customerCustomLines.length, 1, "ROOM-AGG-1: custom line retained for detail row");
+
+  const summarySum = displayModel.estimateSummaryRows.reduce((s, r) => s + r.displayAmount, 0);
+  assert.equal(summarySum, displayModel.finalRounded, "ROOM-AGG-1: estimate summary reconciles");
+
+  const roomAreaSum =
+    displayModel.roomAreaPrintRows.reduce((s, r) => s + r.displayedAreaTotal, 0) +
+    displayModel.unassignedDisplayTotal;
+  assert.equal(roomAreaSum, displayModel.finalRounded, "ROOM-AGG-1: room area totals reconcile");
+
+  const ct = displayModel.roomComparisonTable;
+  assert.ok(ct, "ROOM-AGG-1: comparison table present");
+  const roomBlock = ct!.roomBlocks.find((r) => r.roomDisplayName === "BATHROOM");
+  assert.ok(roomBlock, "ROOM-AGG-1: bathroom comparison block");
+  const promoBlock = roomBlock!.groupBlocks.find((g) => g.group === "Group Promo");
+  assert.ok(promoBlock, "ROOM-AGG-1: Group Promo comparison block");
+  assert.equal(
+    promoBlock!.roomTotalDisplay,
+    printRow.displayedAreaTotal,
+    "ROOM-AGG-1: selected Group Promo comparison matches room area total"
+  );
+  const promoParts =
+    (promoBlock!.countertopDisplay ?? 0) +
+    (promoBlock!.backsplashDisplay ?? 0) +
+    (promoBlock!.fhbDisplay ?? 0) +
+    (promoBlock!.addonsDisplay ?? 0);
+  assert.equal(promoParts, promoBlock!.roomTotalDisplay, "ROOM-AGG-1: comparison line items sum to room total");
+}
+
 console.log("verify-internal-estimate-beta-fixes: OK");

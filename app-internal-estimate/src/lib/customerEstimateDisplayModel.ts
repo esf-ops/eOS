@@ -403,6 +403,21 @@ function splitExactBySfWeights(totalExact: number, weights: number[]): number[] 
   return w.map((wei) => round2(totalExact * (wei / sum)));
 }
 
+function scaleExactPartsToTarget(parts: number[], target: number): number[] {
+  const cleaned = parts.map((p) => round2(Math.max(0, Number(p) || 0)));
+  const sum = round2(cleaned.reduce((a, b) => a + b, 0));
+  const goal = round2(Math.max(0, Number(target) || 0));
+  if (goal <= 0) return cleaned.map(() => 0);
+  if (sum <= 0) {
+    const out = cleaned.map(() => 0);
+    out[0] = goal;
+    return out;
+  }
+  if (Math.abs(sum - goal) <= 0.005) return cleaned;
+  const factor = goal / sum;
+  return cleaned.map((p) => round2(p * factor));
+}
+
 function resolveRoomSplashAndFhbSf(room: CustomerRoomAreaCostBreakdown["rooms"][number]): {
   backsplashSf: number;
   fhbSf: number;
@@ -426,6 +441,7 @@ type ComparisonComponentsExact = {
 
 function computeComparisonGroupComponentsExact(
   room: CustomerRoomAreaCostBreakdown["rooms"][number],
+  group: string,
   ratePerSqft: number,
   fixedExtrasExact: number,
   internalMaterialUseTax: boolean
@@ -455,6 +471,22 @@ function computeComparisonGroupComponentsExact(
       backsplashTotal = parts[0];
       fhbTotal = parts[1];
     } else {
+      backsplashTotal = 0;
+      fhbTotal = 0;
+    }
+  }
+
+  // Selected material group: mirror saved room material (fold/other extras/internal absorb rules).
+  if (group === room.materialGroup) {
+    const materialExact = round2(room.materialAmountExact);
+    const rateMaterialSum = round2(counterTotal + backsplashTotal + fhbTotal);
+    if (rateMaterialSum > 0 && Math.abs(rateMaterialSum - materialExact) > 0.005) {
+      [counterTotal, backsplashTotal, fhbTotal] = scaleExactPartsToTarget(
+        [counterTotal, backsplashTotal, fhbTotal],
+        materialExact
+      );
+    } else if (rateMaterialSum <= 0 && materialExact > 0) {
+      counterTotal = materialExact;
       backsplashTotal = 0;
       fhbTotal = 0;
     }
@@ -498,7 +530,13 @@ function buildComparisonGroupBlock(
   fixedExtrasExact: number,
   internalMaterialUseTax: boolean
 ): CustomerPrintComparisonGroupBlock {
-  const exact = computeComparisonGroupComponentsExact(room, ratePerSqft, fixedExtrasExact, internalMaterialUseTax);
+  const exact = computeComparisonGroupComponentsExact(
+    room,
+    group,
+    ratePerSqft,
+    fixedExtrasExact,
+    internalMaterialUseTax
+  );
   const display = comparisonGroupDisplayAmounts(exact);
   return {
     group,
