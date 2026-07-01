@@ -6,6 +6,10 @@ import EliteosTopbar from "../../shared/eliteos-ui/EliteosTopbar";
 import { ZoomImageViewer, type ZoomGalleryItem } from "./ZoomImageViewer";
 import { lookupElite100Texture } from "./lib/elite100TextureAssets";
 import { MaterialPhotoVisualizer } from "./MaterialPhotoVisualizer";
+import {
+  Elite100ShowroomSection,
+  type Elite100ShowroomItem,
+} from "./lib/elite100Showroom";
 import ProductCatalogPanel from "./ProductCatalogPanel";
 
 /* ─────────────────────────────────────────── types */
@@ -85,38 +89,7 @@ type SortKey = "color" | "material" | "inventory_id" | "rack" | "updated_at";
 
 /* ── Elite 100 types ── */
 
-type Elite100Item = {
-  catalog_item_id: string;
-  color_key: string;
-  color_name: string | null;
-  material_name: string | null;
-  display_name: string | null;
-  price_group: string;
-  current_inventory_count?: number;
-  total_inventory_count: number;
-  slab_count: number;
-  remnant_count: number;
-  verified_photo_count: number;
-  reference_image_url?: string | null;
-  reference_image_url_full?: string | null;
-  reference_image_url_1024?: string | null;
-  reference_image_url_600?: string | null;
-  reference_image_source?: string | null;
-  current_inventory_image_url?: string | null;
-  current_inventory_thumbnail_url?: string | null;
-  representative_image_url: string | null;
-  representative_thumbnail_url: string | null;
-  representative_image_source_inventory_type: string | null;
-  representative_image_inventory_id: string | null;
-  visual_asset_url: string | null;
-  visual_asset_url_600: string | null;
-  visual_asset_url_1024: string | null;
-  visual_asset_source: string | null;
-  visual_asset_kind: string | null;
-  visual_asset_review_status: string | null;
-  has_inventory: boolean;
-  program_status: "elite_100";
-};
+type Elite100Item = Elite100ShowroomItem;
 
 type Elite100Group = { price_group: string; items: Elite100Item[] };
 
@@ -840,7 +813,7 @@ export default function SlabInventoryApp() {
                       </p>
                     </div>
                     {elite100Data.groups.map((group) => (
-                      <Elite100Section
+                      <Elite100ShowroomSection
                         key={group.price_group}
                         group={group}
                         onOpenItem={(item) => void openColorModal(elite100ColorModalFromItem(item))}
@@ -1326,116 +1299,6 @@ function elite100ColorModalFromItem(item: Elite100Item): NonNullable<ColorModal>
       || item.representative_image_url
       || null,
   };
-}
-
-function Elite100Section({ group, onOpenItem }: { group: Elite100Group; onOpenItem: (item: Elite100Item) => void }) {
-  const railRef = useRef<HTMLDivElement>(null);
-  const scroll = (dir: -1 | 1) => {
-    const rail = railRef.current;
-    if (!rail) return;
-    // Read actual card width from first child + gap (24px) so scroll step stays in sync
-    // with whatever --e100-card-width resolves to at the current viewport.
-    const firstItem = rail.firstElementChild as HTMLElement | null;
-    const cardW = firstItem ? firstItem.offsetWidth + 24 : 424;
-    rail.scrollBy({ left: dir * cardW * 2, behavior: "smooth" });
-  };
-  return (
-    <section className="e100-section" aria-labelledby={`e100-group-${group.price_group}`}>
-      <div className="e100-section-head">
-        <div className="e100-section-title-row">
-          <span className={`e100-group-badge${group.price_group === "Promo" ? " promo" : ""}`} aria-hidden>
-            {group.price_group === "Promo" ? "P" : group.price_group}
-          </span>
-          <h2 id={`e100-group-${group.price_group}`} className="e100-section-title">
-            {group.price_group === "Promo" ? "Group Promo" : `Group ${group.price_group}`}
-          </h2>
-          <span className="e100-section-count">{group.items.length} color{group.items.length !== 1 ? "s" : ""}</span>
-        </div>
-        <div className="e100-section-controls" aria-label="Scroll carousel">
-          <button type="button" className="e100-scroll-btn" onClick={() => scroll(-1)} aria-label="Scroll left">‹</button>
-          <button type="button" className="e100-scroll-btn" onClick={() => scroll(1)} aria-label="Scroll right">›</button>
-        </div>
-      </div>
-      <div className="e100-rail-wrap">
-        <div className="e100-rail" ref={railRef} role="list" aria-label={`Group ${group.price_group} colors`}>
-          {group.items.map((item) => (
-            <div key={item.catalog_item_id} role="listitem">
-              <Elite100Card item={item} onOpen={() => onOpenItem(item)} />
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function Elite100Card({ item, onOpen }: { item: Elite100Item; onOpen: () => void }) {
-  const [imgFailed, setImgFailed] = useState(false);
-  const texture = lookupElite100Texture(item.color_name, item.color_key);
-  const src = texture
-    ? null
-    : item.reference_image_url
-      || item.reference_image_url_1024
-      || item.reference_image_url_600
-      || item.visual_asset_url_1024
-      || item.visual_asset_url_600
-      || null;
-  const hasImage = Boolean(src) && !imgFailed;
-  const availableCount = item.current_inventory_count ?? item.total_inventory_count;
-  return (
-    <button
-      type="button"
-      className="cp-card"
-      onClick={onOpen}
-      aria-label={`${item.color_name ?? "Color"} · ${item.has_inventory ? `${availableCount} current available` : "No current inventory"} — Open color`}
-    >
-      <div className={`cp-card-mat${texture ? " cp-card-mat-texture" : ""}`}>
-        <div className="cp-card-img-wrap">
-          {texture ? (
-            <img
-              src={texture.thumbUrl}
-              alt={`${item.display_name ?? item.color_name ?? texture.colorName} material texture`}
-              loading="lazy"
-              className="cp-card-img"
-            />
-          ) : hasImage ? (
-            <img
-              src={src!}
-              alt={item.display_name ?? item.color_name ?? ""}
-              loading="lazy"
-              className="cp-card-img"
-              onError={() => setImgFailed(true)}
-            />
-          ) : (
-            <div className="cp-card-placeholder" aria-hidden>
-              <span>{colorInitials(item.color_name)}</span>
-            </div>
-          )}
-        </div>
-      </div>
-      <div className="cp-card-body">
-        <p className="cp-card-name">{item.color_name || "—"}</p>
-        {item.material_name ? (
-          <p className="cp-card-material">{item.material_name}</p>
-        ) : null}
-        {item.has_inventory && availableCount > 0 ? (
-          <p className="cp-card-meta">
-            <span>{availableCount} current available</span>
-            {(item.slab_count > 0 || item.remnant_count > 0) ? (
-              <>
-                <span className="cp-dot" aria-hidden> · </span>
-                {item.slab_count > 0 ? <span>{item.slab_count} slab{item.slab_count !== 1 ? "s" : ""}</span> : null}
-                {item.slab_count > 0 && item.remnant_count > 0 ? <span className="cp-dot" aria-hidden> · </span> : null}
-                {item.remnant_count > 0 ? <span>{item.remnant_count} remnant{item.remnant_count !== 1 ? "s" : ""}</span> : null}
-              </>
-            ) : null}
-          </p>
-        ) : (
-          <p className="cp-card-no-inv-text">No current inventory</p>
-        )}
-      </div>
-    </button>
-  );
 }
 
 /* ─────────────────────────────────────────── Non-Stock components */
