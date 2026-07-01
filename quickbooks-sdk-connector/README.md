@@ -1,6 +1,6 @@
 # EliteOS QuickBooks SDK Connector
 
-Read-only local extractor for **QuickBooks Desktop** using the official **QBXML Request Processor** (`QBXMLRP2Lib.RequestProcessor2`).
+Read-only local extractor for **QuickBooks Desktop** using the official **QBXML Request Processor** via late-bound COM (`QBXMLRP2.RequestProcessor`).
 
 This tool **only issues query requests**. It does not create, edit, delete, or modify any QuickBooks records, and it does not write to Supabase.
 
@@ -26,7 +26,7 @@ cd C:\eliteOS\quickbooks-sdk-connector
 dotnet build EliteOS.QuickBooksSdkConnector.csproj -c Release
 ```
 
-The project references the registered COM type library `QBXMLRP2Lib` (GUID `17960609-0F97-4E49-A601-F548F86BDFF4`). Build must run on Windows with the SDK installed.
+Build on the Windows VM with Visual Studio Build Tools or the .NET Framework 4.8 SDK. No compile-time COM reference is required; the connector creates the Request Processor at runtime from ProgID `QBXMLRP2.RequestProcessor`.
 
 ## Run
 
