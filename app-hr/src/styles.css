@@ -1,0 +1,544 @@
+/* ==========================================================================
+   eliteOS HR Head — workforce quality grading
+   Shared protected-head shell + eliteOS design tokens + shared UI primitives.
+   ========================================================================== */
+
+@import "../../shared/eliteos-ui/tokens.css";
+@import "../../shared/eliteos-ui/eliteosTopbar.css";
+@import "../../shared/eliteos-ui/primitives.css";
+
+:root {
+  --font: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: var(--font);
+  color: var(--eos-ink);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  background: linear-gradient(180deg, #fbfcfe 0%, #f4f6fb 60%, #eef1f8 100%);
+}
+
+.shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.eliteos-topbar .eliteos-topbar-chip-role {
+  text-transform: none;
+}
+
+.main {
+  flex: 1;
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px 24px calc(48px + env(safe-area-inset-bottom, 0px));
+}
+
+/* ----- Hero ------------------------------------------------------------- */
+
+.hr-hero {
+  position: relative;
+  overflow: hidden;
+  padding: 28px 28px 24px;
+  border-radius: var(--r-xl);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(255, 255, 255, 0.84) 100%);
+  border: 1px solid var(--eos-line);
+  box-shadow: var(--sh-2);
+  margin-bottom: 20px;
+}
+
+.hr-hero-aurora {
+  position: absolute;
+  inset: -20% -10% auto auto;
+  width: 58%;
+  height: 140%;
+  pointer-events: none;
+  background:
+    radial-gradient(40% 50% at 80% 30%, rgba(163, 19, 47, 0.11), transparent 70%),
+    radial-gradient(36% 50% at 40% 60%, rgba(46, 105, 184, 0.14), transparent 70%);
+  filter: blur(2px);
+  opacity: 0.85;
+  z-index: 0;
+}
+
+.hr-hero-grid {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(200px, 260px);
+  gap: 24px;
+  align-items: center;
+}
+
+.hero-eyebrow {
+  margin: 0 0 10px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--eos-ink-muted);
+}
+
+.hero-title {
+  margin: 0;
+  font-size: clamp(1.55rem, 2.6vw, 2.15rem);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.12;
+}
+
+.hero-sub {
+  margin: 10px 0 0;
+  color: var(--eos-ink-muted);
+  max-width: 52ch;
+}
+
+.hr-week-label {
+  margin: 14px 0 0;
+  font-size: 0.88rem;
+  color: var(--eos-ink-mid);
+}
+
+.hr-my-grade-card {
+  padding: 20px;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--eos-line);
+  background: var(--eos-surface);
+  box-shadow: var(--sh-card);
+  text-align: center;
+}
+
+.hr-my-grade-label {
+  font-size: 0.72rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--eos-ink-muted);
+  margin-bottom: 8px;
+}
+
+.hr-my-grade-meta {
+  margin-top: 10px;
+  font-size: 0.82rem;
+  color: var(--eos-ink-muted);
+}
+
+/* ----- Grade badges ----------------------------------------------------- */
+
+.hr-grade-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  font-size: 2.4rem;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  border: 3px solid transparent;
+}
+
+.hr-grade-badge--sm {
+  width: 52px;
+  height: 52px;
+  font-size: 1.35rem;
+}
+
+.hr-grade-badge--a {
+  color: var(--eos-success);
+  background: var(--eos-success-soft);
+  border-color: var(--eos-success-border);
+}
+
+.hr-grade-badge--b {
+  color: var(--eos-info);
+  background: var(--eos-info-soft);
+  border-color: var(--eos-info-border);
+}
+
+.hr-grade-badge--c,
+.hr-grade-badge--d {
+  color: var(--eos-warn);
+  background: var(--eos-warn-soft);
+  border-color: var(--eos-warn-border);
+}
+
+.hr-grade-badge--f {
+  color: var(--eos-accent);
+  background: var(--eos-accent-soft);
+  border-color: var(--eos-danger-border);
+}
+
+.hr-grade-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-weight: 800;
+  font-size: 0.9rem;
+}
+
+.hr-grade-chip--a {
+  background: var(--eos-success-soft);
+  color: var(--eos-success);
+}
+
+.hr-grade-chip--b {
+  background: var(--eos-info-soft);
+  color: var(--eos-info);
+}
+
+.hr-grade-chip--c,
+.hr-grade-chip--d {
+  background: var(--eos-warn-soft);
+  color: var(--eos-warn);
+}
+
+.hr-grade-chip--f {
+  background: var(--eos-accent-soft);
+  color: var(--eos-accent);
+}
+
+/* ----- Tabs ------------------------------------------------------------- */
+
+.hr-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.hr-tab {
+  appearance: none;
+  border: 1px solid var(--eos-line-strong);
+  background: var(--eos-surface);
+  border-radius: 999px;
+  padding: 8px 16px;
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--eos-ink-mid);
+  cursor: pointer;
+  transition: background var(--eos-dur-1) var(--eos-ease);
+}
+
+.hr-tab--active {
+  background: var(--eos-accent);
+  border-color: var(--eos-accent);
+  color: #fff;
+}
+
+.hr-panel {
+  margin-top: 16px;
+}
+
+.hr-summary-grid {
+  margin-bottom: 16px;
+}
+
+/* ----- Table ------------------------------------------------------------ */
+
+.hr-grade-table-wrap {
+  overflow-x: auto;
+}
+
+.hr-grade-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.hr-grade-table th {
+  text-align: left;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--eos-ink-muted);
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--eos-line);
+}
+
+.hr-grade-table td {
+  padding: 12px;
+  border-bottom: 1px solid var(--eos-line);
+  vertical-align: middle;
+}
+
+.hr-grade-table tr.is-selected td {
+  background: rgba(163, 19, 47, 0.04);
+}
+
+.hr-employee-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hr-employee-cell span {
+  font-size: 0.78rem;
+  color: var(--eos-ink-muted);
+}
+
+/* ----- Detail / mistakes ------------------------------------------------ */
+
+.hr-detail-panel {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--eos-line);
+}
+
+.hr-mistake-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.hr-mistake-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+  color: var(--eos-ink-muted);
+}
+
+.hr-mistake-sev {
+  text-transform: capitalize;
+  font-weight: 600;
+}
+
+.hr-mistake-desc {
+  margin: 6px 0 0;
+  font-size: 0.86rem;
+  color: var(--eos-ink-mid);
+}
+
+.hr-empty {
+  color: var(--eos-ink-muted);
+  font-size: 0.88rem;
+}
+
+/* ----- History ---------------------------------------------------------- */
+
+.hr-history-select {
+  max-width: 320px;
+  margin-bottom: 16px;
+}
+
+.hr-history-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.hr-history-card {
+  padding: 14px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--eos-line);
+  background: var(--eos-bg);
+}
+
+.hr-history-week {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--eos-ink-mid);
+  margin-bottom: 8px;
+}
+
+.hr-history-meta {
+  margin-top: 8px;
+  font-size: 0.82rem;
+  color: var(--eos-ink-muted);
+}
+
+.hr-history-cats {
+  margin: 8px 0 0;
+  padding-left: 1rem;
+  font-size: 0.75rem;
+  color: var(--eos-ink-muted);
+}
+
+/* ----- Categories ------------------------------------------------------- */
+
+.hr-cat-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  margin-bottom: 16px;
+}
+
+.hr-cat-add .field {
+  flex: 1;
+  min-width: 200px;
+}
+
+.hr-cat-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.hr-cat-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--eos-line);
+}
+
+.hr-cat-list li.is-inactive span {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+
+/* ----- Forms / auth ----------------------------------------------------- */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--eos-ink-mid);
+  min-width: 0;
+}
+
+.field input,
+.field select,
+.field textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--eos-line-strong);
+  background: #fff;
+  font: inherit;
+  color: var(--eos-ink);
+}
+
+.field-grid {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.hr-log-grid {
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+
+.hr-field-full {
+  grid-column: 1 / -1;
+}
+
+.hr-action-row {
+  display: flex;
+  gap: 10px;
+}
+
+.auth-panel {
+  max-width: 480px;
+  padding: 24px;
+  border-radius: var(--r-xl);
+  background: var(--eos-surface);
+  border: 1px solid var(--eos-line);
+  box-shadow: var(--sh-card);
+}
+
+.auth-panel-eyebrow {
+  margin: 0 0 8px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--eos-ink-muted);
+}
+
+.auth-panel-title {
+  margin: 0 0 8px;
+  font-size: 1.35rem;
+}
+
+.auth-panel-sub {
+  margin: 0;
+  color: var(--eos-ink-muted);
+  font-size: 0.92rem;
+}
+
+.btn {
+  appearance: none;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  padding: 12px 16px;
+  min-height: 44px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--eos-accent);
+  color: #fff;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--eos-accent-hover);
+}
+
+.btn-secondary {
+  background: #fff;
+  border-color: var(--eos-line-strong);
+  color: var(--eos-ink-soft);
+}
+
+.btn-sm {
+  padding: 8px 12px;
+  min-height: 36px;
+  font-size: 0.82rem;
+}
+
+.banner {
+  padding: 12px 14px;
+  border-radius: var(--r-sm);
+  margin-bottom: 12px;
+  font-size: 0.88rem;
+}
+
+.banner-error {
+  background: var(--eos-danger-soft);
+  border: 1px solid var(--eos-danger-border);
+  color: var(--eos-accent);
+}
+
+@media (max-width: 768px) {
+  .hr-hero-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .main {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+}

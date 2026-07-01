@@ -120,7 +120,7 @@ export const HEAD_LAUNCHER_CATALOG = [
     category: "Service",
     href: "/customer-service"
   },
-  { slug: "hr", label: "eliteOS HR Head", description: "People operations.", category: "People", href: "/hr" },
+  { slug: "hr", label: "eliteOS HR Head", description: "Workforce quality grading — supervisor-logged mistakes and weekly letter grades.", category: "People", href: "/hr" },
   {
     slug: "safety",
     label: "eliteOS Safety Head",

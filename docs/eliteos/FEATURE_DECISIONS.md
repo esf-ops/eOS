@@ -1431,3 +1431,16 @@
 | **Decision** | AI Takeoff → Internal Estimate import enters **controlled internal beta**. UI shows “AI-assisted takeoff beta — estimator verification required.” Import still requires approved snapshots only; **`betaImportConfirmed: true`** is required on `POST /api/internal-quotes/import-from-takeoff`. Estimators can submit lightweight feedback and categorized issue reports (stored on `quote_takeoff_jobs.metadata.takeoff_beta` with `quote_id` / `source_takeoff_job_id`). Durable workflow metrics (`ai_takeoff_*` events) log to `eos_action_log` with stage durations when timestamps exist. Staff QA summary (`GET /api/takeoff-beta/qa-summary`, ai_takeoff head) lists recent imported quotes with imported vs current CT/BS deltas. No pricing math, auto material/color, unapproved import, or source job deletion changes. |
 | **Impacted files** | `takeoffBetaService.mjs`, `takeoffWorkspaceRoutes.js`, `internalQuotesApi.js`, `TakeoffImportPreview.tsx`, `TakeoffImportReceiptPanel.tsx`, `TakeoffLabApp.tsx`, `InternalEstimateApp.tsx`, tests, this entry. |
 | **Revisit trigger** | Dedicated analytics head; cross-org beta dashboard; bi-directional takeoff job sync from IE edits. |
+
+### 98. HR Head v1 — workforce quality grading (2026-07-01)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-01 |
+| **Decision** | Ship **`app-hr`** as the first slice of the **eliteOS HR Head** (`hr` slug). Supervisors/managers (`admin`, `executive`, `hr`, `super_admin`) log mistakes via `POST /api/hr/workforce/mistakes`. All users with `hr` head access see the grading dashboard (employees filtered server-side to self). Letter grades are computed live for the **current ISO week (Monday start, America/Chicago default)** and **reset weekly** to grade A / zero mistakes; raw mistake rows and **`workforce_grade_week_snapshots`** are retained for performance reviews. Categories are org-scoped and add-as-you-go. Uses shared `EliteosTopbar`, `EosSectionCard`, `EosMetricCard`, and `primitives.css`. |
+| **Why** | Leadership needs a simple, auditable way to track employee mistakes with weekly accountability without losing historical data for reviews. Supervisor logging keeps v1 honest and avoids premature auto-detection from incomplete takeoff/ops signals. |
+| **Security / tenancy** | All routes: `requireAuth()` + `requireHeadAccess("hr")`. Writes scoped by `organization_id` from `resolveOrganizationContext`. Mistake logs write to `eos_action_log` via `logAction`. No service role or secrets in the browser bundle. |
+| **SQL** | Manual apply: `backend-core/supabase/eliteos_workforce_quality_v1.sql` |
+| **Deploy** | Set `HEAD_URL_HR` on backend-core (e.g. `https://hr.eliteosfab.com`). Grant `hr` head access to managers and employees who should see grades. |
+| **Impacted files/docs** | `app-hr/`, `backend-core/src/hr/`, `backend-core/src/server.js`, `backend-core/src/me/launcherHeads.js`, root `package.json`, this entry. |
+| **Revisit trigger** | Auto-detected mistakes from takeoff/QC; severity-weighted grading in UI; employee acknowledgment workflow; configurable grade thresholds admin UI. |
