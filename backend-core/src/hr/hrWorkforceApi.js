@@ -1,18 +1,9 @@
 /**
  * eliteOS HR Head — Workforce Quality API (supervisor-logged mistakes + weekly grades).
  *
- * Routes:
- *   GET  /api/hr/workforce/dashboard
- *   GET  /api/hr/workforce/mistakes
- *   POST /api/hr/workforce/mistakes
- *   GET  /api/hr/workforce/history
- *   GET  /api/hr/workforce/categories
- *   POST /api/hr/workforce/categories
- *   PATCH /api/hr/workforce/categories/:id
- *
  * Auth: requireAuth() + requireHeadAccess("hr")
- * Managers (admin, executive, hr, super_admin) log mistakes and see all employees.
- * Other users see only their own grades and history.
+ * Any user with HR head access may view the team dashboard and log mistakes.
+ * Category admin remains manager-only (admin, executive, hr, super_admin).
  */
 
 import express from "express";
@@ -32,6 +23,14 @@ import {
   weekEndForWeekStart,
   weekStartForIsoDate
 } from "./workforceGradeEngine.js";
+import { parseWorkforceEmployeeKey } from "./workforceRoster.js";
+import {
+  ensureTestRosterMembers,
+  loadWorkforceTeam,
+  workforceRefFromDbRow,
+  workforceRefToDbColumns,
+  workforceSnapshotKey
+} from "./workforceTeamLoad.js";
 import { resolveOrganizationContext } from "../organizations/organizationContext.js";
 
 export const HR_HEAD_SLUG = "hr";
@@ -50,6 +49,26 @@ function isMissingTableError(error) {
   const msg = String(error?.message ?? "").toLowerCase();
   const code = String(error?.code ?? "");
   return code === "42P01" || (msg.includes("relation") && msg.includes("does not exist"));
+}
+
+/**
+ * @param {Record<string, unknown>} body
+ */
+function parseEmployeeRefFromBody(body) {
+  const key = pickStr(body?.employee_key ?? body?.employeeKey);
+  if (key) {
+    const parsed = parseWorkforceEmployeeKey(key);
+    if (parsed) return parsed;
+  }
+  const rosterId = pickStr(body?.employee_roster_id ?? body?.employeeRosterId);
+  if (rosterId) return { source: "roster", id: rosterId };
+  const userId = pickStr(body?.employee_user_id ?? body?.employeeUserId ?? body?.employee_id ?? body?.employeeId);
+  if (!userId) return null;
+  const source = pickStr(body?.employee_source ?? body?.employeeSource);
+  if (source === "roster") return { source: "roster", id: userId };
+  const fromKey = parseWorkforceEmployeeKey(userId);
+  if (fromKey) return fromKey;
+  return { source: "user", id: userId };
 }
 
 /**
@@ -138,7 +157,7 @@ async function closePastWeekSnapshots(db, organizationId, settings) {
   try {
     const { data, error } = await db
       .from("workforce_mistakes")
-      .select("employee_user_id, week_start, severity, category_label")
+      .select("employee_user_id, employee_roster_id, week_start, severity, category_label")
       .eq("organization_id", organizationId)
       .lt("week_start", currentWeekStart);
     if (error) {
@@ -154,20 +173,29 @@ async function closePastWeekSnapshots(db, organizationId, settings) {
   /** @type {Map<string, Array<object>>} */
   const byKey = new Map();
   for (const m of mistakes) {
-    const key = `${m.employee_user_id}::${m.week_start}`;
+    const ref = workforceRefFromDbRow(m);
+    if (!ref) continue;
+    const key = `${workforceSnapshotKey(ref)}::${m.week_start}`;
     if (!byKey.has(key)) byKey.set(key, []);
     byKey.get(key).push(m);
   }
 
   for (const [key, rows] of byKey) {
-    const [employeeUserId, weekStart] = key.split("::");
-    const { data: existing } = await db
+    const [refKey, weekStart] = key.split("::");
+    const [source, id] = refKey.split(":");
+    const ref = { source, id };
+    const cols = workforceRefToDbColumns(ref);
+
+    let existingQ = db
       .from("workforce_grade_week_snapshots")
       .select("id")
       .eq("organization_id", organizationId)
-      .eq("employee_user_id", employeeUserId)
-      .eq("week_start", weekStart)
-      .maybeSingle();
+      .eq("week_start", weekStart);
+    existingQ =
+      ref.source === "roster"
+        ? existingQ.eq("employee_roster_id", ref.id)
+        : existingQ.eq("employee_user_id", ref.id);
+    const { data: existing } = await existingQ.maybeSingle();
     if (existing?.id) continue;
 
     const count = rows.length;
@@ -175,7 +203,7 @@ async function closePastWeekSnapshots(db, organizationId, settings) {
     const letterGrade = computeLetterGrade(count, settings.grade_thresholds);
     await db.from("workforce_grade_week_snapshots").insert({
       organization_id: organizationId,
-      employee_user_id: employeeUserId,
+      ...cols,
       week_start: weekStart,
       mistake_count: count,
       weighted_mistake_count: weighted,
@@ -183,28 +211,6 @@ async function closePastWeekSnapshots(db, organizationId, settings) {
       category_breakdown: buildCategoryBreakdown(rows)
     });
   }
-}
-
-/**
- * @param {import("@supabase/supabase-js").SupabaseClient} db
- * @param {string} organizationId
- * @param {string|null} filterEmployeeId
- */
-async function loadActiveEmployees(db, organizationId, filterEmployeeId = null) {
-  let q = db
-    .from("user_profiles")
-    .select("id, full_name, email, role, job_title, department, is_active")
-    .eq("is_active", true)
-    .order("full_name", { ascending: true });
-  if (filterEmployeeId) q = q.eq("id", filterEmployeeId);
-  else q = q.eq("organization_id", organizationId);
-
-  const { data, error } = await q;
-  if (error) {
-    if (isMissingTableError(error)) return [];
-    throw error;
-  }
-  return data ?? [];
 }
 
 /**
@@ -226,12 +232,8 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
   const guard = [requireAuth(), headAccess];
   const db = () => getSupabase();
 
-  async function orgContext(req) {
-    return resolveOrganizationContext({ req, supabase: db(), mode: "authenticated" });
-  }
-
   async function orgId(req) {
-    const ctx = await orgContext(req);
+    const ctx = await resolveOrganizationContext({ req, supabase: db(), mode: "authenticated" });
     return ctx.organizationId || null;
   }
 
@@ -244,9 +246,10 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
         return res.status(400).json({ ok: false, error: "Organization context required." });
       }
 
-      const manager = isWorkforceManager(user);
+      const canManageCategories = isWorkforceManager(user);
       const settings = await loadGradeSettings(db(), organizationId);
       await ensureDefaultCategory(db(), organizationId);
+      await ensureTestRosterMembers(db(), organizationId);
       await closePastWeekSnapshots(db(), organizationId, settings);
 
       const tz = settings.timezone;
@@ -254,17 +257,13 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
       const currentWeekStart = weekStartForIsoDate(todayIsoInTimezone(new Date(), tz), weekStartDay);
       const currentWeekEnd = weekEndForWeekStart(currentWeekStart);
 
-      const employees = await loadActiveEmployees(
-        db(),
-        organizationId,
-        manager ? null : String(user?.id ?? "")
-      );
+      const team = await loadWorkforceTeam(db(), organizationId);
+      const teamKeys = new Set(team.map((m) => m.employeeKey));
 
-      const employeeIds = employees.map((e) => e.id).filter(Boolean);
-      if (!employeeIds.length) {
+      if (!team.length) {
         return res.json({
           ok: true,
-          manager,
+          canManageCategories,
           weekStart: currentWeekStart,
           weekEnd: currentWeekEnd,
           weekLabel: formatWeekLabel(currentWeekStart, currentWeekEnd),
@@ -277,48 +276,71 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
       try {
         const { data, error } = await db()
           .from("workforce_mistakes")
-          .select("id, employee_user_id, severity, category_label, occurred_at, description")
+          .select(
+            "id, employee_user_id, employee_roster_id, severity, category_label, occurred_at, description"
+          )
           .eq("organization_id", organizationId)
-          .eq("week_start", currentWeekStart)
-          .in("employee_user_id", employeeIds);
+          .eq("week_start", currentWeekStart);
         if (error) {
           if (isMissingTableError(error)) {
             return res.json({
               ok: true,
-              manager,
+              canManageCategories,
               weekStart: currentWeekStart,
               weekEnd: currentWeekEnd,
               weekLabel: formatWeekLabel(currentWeekStart, currentWeekEnd),
-              rows: [],
+              rows: team.map((m) => ({
+                employeeKey: m.employeeKey,
+                employeeId: m.employeeId,
+                employeeSource: m.employeeSource,
+                fullName: m.fullName,
+                email: m.email,
+                role: m.role,
+                jobTitle: m.jobTitle,
+                department: m.department,
+                isTest: m.isTest,
+                letterGrade: "A",
+                mistakeCount: 0,
+                weightedMistakeCount: 0,
+                priorLetterGrade: null,
+                trend: "neutral",
+                recentMistakes: []
+              })),
               schemaReady: false,
-              warning: "Apply backend-core/supabase/eliteos_workforce_quality_v1.sql to enable grading."
+              warning:
+                "Apply eliteos_workforce_quality_v1.sql and eliteos_workforce_quality_roster_v1.sql to persist mistakes."
             });
           }
           throw error;
         }
-        currentMistakes = data ?? [];
+        currentMistakes = (data ?? []).filter((m) => {
+          const ref = workforceRefFromDbRow(m);
+          return ref && teamKeys.has(workforceSnapshotKey(ref));
+        });
       } catch (e) {
         if (isMissingTableError(e)) {
           return res.json({
             ok: true,
-            manager,
+            canManageCategories,
             weekStart: currentWeekStart,
             weekEnd: currentWeekEnd,
             weekLabel: formatWeekLabel(currentWeekStart, currentWeekEnd),
             rows: [],
             schemaReady: false,
-            warning: "Apply backend-core/supabase/eliteos_workforce_quality_v1.sql to enable grading."
+            warning: "Apply workforce quality SQL migrations to enable grading."
           });
         }
         throw e;
       }
 
       /** @type {Map<string, object[]>} */
-      const mistakesByEmployee = new Map();
+      const mistakesByKey = new Map();
       for (const m of currentMistakes) {
-        const uid = String(m.employee_user_id);
-        if (!mistakesByEmployee.has(uid)) mistakesByEmployee.set(uid, []);
-        mistakesByEmployee.get(uid).push(m);
+        const ref = workforceRefFromDbRow(m);
+        if (!ref) continue;
+        const k = workforceSnapshotKey(ref);
+        if (!mistakesByKey.has(k)) mistakesByKey.set(k, []);
+        mistakesByKey.get(k).push(m);
       }
 
       const priorWeekStart = weekStartForIsoDate(
@@ -333,27 +355,32 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
       let priorSnapshots = [];
       const { data: snapData, error: snapErr } = await db()
         .from("workforce_grade_week_snapshots")
-        .select("employee_user_id, letter_grade")
+        .select("employee_user_id, employee_roster_id, letter_grade")
         .eq("organization_id", organizationId)
-        .eq("week_start", priorWeekStart)
-        .in("employee_user_id", employeeIds);
+        .eq("week_start", priorWeekStart);
       if (!snapErr) priorSnapshots = snapData ?? [];
 
-      const priorByEmployee = new Map(priorSnapshots.map((s) => [String(s.employee_user_id), s.letter_grade]));
+      const priorByKey = new Map();
+      for (const s of priorSnapshots) {
+        const ref = workforceRefFromDbRow(s);
+        if (ref) priorByKey.set(workforceSnapshotKey(ref), s.letter_grade);
+      }
 
-      const rows = employees.map((emp) => {
-        const uid = String(emp.id);
-        const mistakes = mistakesByEmployee.get(uid) ?? [];
+      const rows = team.map((m) => {
+        const mistakes = mistakesByKey.get(m.employeeKey) ?? [];
         const mistakeCount = mistakes.length;
         const letterGrade = computeLetterGrade(mistakeCount, settings.grade_thresholds);
-        const priorGrade = priorByEmployee.get(uid) ?? null;
+        const priorGrade = priorByKey.get(m.employeeKey) ?? null;
         return {
-          employeeId: uid,
-          fullName: pickStr(emp.full_name) || pickStr(emp.email) || uid,
-          email: pickStr(emp.email),
-          role: pickStr(emp.role),
-          jobTitle: pickStr(emp.job_title),
-          department: pickStr(emp.department),
+          employeeKey: m.employeeKey,
+          employeeId: m.employeeId,
+          employeeSource: m.employeeSource,
+          fullName: m.fullName,
+          email: m.email,
+          role: m.role,
+          jobTitle: m.jobTitle,
+          department: m.department,
+          isTest: m.isTest,
           letterGrade,
           mistakeCount,
           weightedMistakeCount: sumWeightedMistakes(mistakes, settings.severity_weights),
@@ -373,7 +400,7 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
 
       res.json({
         ok: true,
-        manager,
+        canManageCategories,
         schemaReady: true,
         weekStart: currentWeekStart,
         weekEnd: currentWeekEnd,
@@ -389,12 +416,10 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
   app.get("/api/hr/workforce/mistakes", ...guard, async (req, res) => {
     try {
       jsonNoStore(res);
-      const user = req.user;
       const organizationId = await orgId(req);
       if (!organizationId) return res.status(400).json({ ok: false, error: "Organization context required." });
 
-      const manager = isWorkforceManager(user);
-      const employeeId = pickStr(req.query?.employee_id ?? req.query?.employeeId);
+      const employeeKey = pickStr(req.query?.employee_key ?? req.query?.employeeKey ?? req.query?.employee_id);
       const weekStartParam = pickStr(req.query?.week_start ?? req.query?.weekStart);
 
       const settings = await loadGradeSettings(db(), organizationId);
@@ -403,21 +428,24 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
         weekStartParam ||
         weekStartForIsoDate(todayIsoInTimezone(new Date(), tz), settings.week_start_day);
 
-      const targetEmployeeId = manager ? employeeId || null : String(user?.id ?? "");
-      if (!manager && employeeId && employeeId !== targetEmployeeId) {
-        return res.status(403).json({ ok: false, error: "You may only view your own mistakes." });
-      }
-
       let q = db()
         .from("workforce_mistakes")
         .select(
-          "id, employee_user_id, logged_by_user_id, category_id, category_label, severity, description, occurred_at, week_start, created_at"
+          "id, employee_user_id, employee_roster_id, logged_by_user_id, category_id, category_label, severity, description, occurred_at, week_start, created_at"
         )
         .eq("organization_id", organizationId)
         .eq("week_start", weekStart)
         .order("occurred_at", { ascending: false });
 
-      if (targetEmployeeId) q = q.eq("employee_user_id", targetEmployeeId);
+      const parsed = employeeKey ? parseWorkforceEmployeeKey(employeeKey) : null;
+      if (parsed) {
+        const cols = workforceRefToDbColumns(parsed);
+        q =
+          parsed.source === "roster"
+            ? q.eq("employee_roster_id", parsed.id)
+            : q.eq("employee_user_id", parsed.id);
+        void cols;
+      }
 
       const { data, error } = await q;
       if (error) {
@@ -437,23 +465,19 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
     try {
       jsonNoStore(res);
       const user = req.user;
-      if (!isWorkforceManager(user)) {
-        return res.status(403).json({ ok: false, error: "Only supervisors and managers may log mistakes." });
-      }
-
       const organizationId = await orgId(req);
       if (!organizationId) return res.status(400).json({ ok: false, error: "Organization context required." });
 
       const body = req.body ?? {};
-      const employeeUserId = pickStr(body.employee_user_id ?? body.employeeUserId);
+      const employeeRef = parseEmployeeRefFromBody(body);
       const categoryId = pickStr(body.category_id ?? body.categoryId) || null;
       let categoryLabel = pickStr(body.category_label ?? body.categoryLabel);
       const severity = pickStr(body.severity) || "minor";
       const description = pickStr(body.description) || null;
       const occurredAtRaw = pickStr(body.occurred_at ?? body.occurredAt);
 
-      if (!employeeUserId) {
-        return res.status(400).json({ ok: false, error: "employee_user_id is required." });
+      if (!employeeRef) {
+        return res.status(400).json({ ok: false, error: "employee_key or employee_id is required." });
       }
       if (!["minor", "moderate", "major"].includes(severity)) {
         return res.status(400).json({ ok: false, error: "severity must be minor, moderate, or major." });
@@ -485,7 +509,7 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
 
       const row = {
         organization_id: organizationId,
-        employee_user_id: employeeUserId,
+        ...workforceRefToDbColumns(employeeRef),
         logged_by_user_id: String(user.id),
         category_id: categoryId,
         category_label: categoryLabel,
@@ -500,7 +524,8 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
         if (isMissingTableError(error)) {
           return res.status(503).json({
             ok: false,
-            error: "Workforce quality tables not installed. Apply eliteos_workforce_quality_v1.sql."
+            error:
+              "Workforce quality tables not installed. Apply eliteos_workforce_quality_v1.sql and eliteos_workforce_quality_roster_v1.sql."
           });
         }
         throw error;
@@ -514,7 +539,7 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
         entityId: data?.id,
         entityLabel: categoryLabel,
         metadata: {
-          employee_user_id: employeeUserId,
+          employee_key: workforceSnapshotKey(employeeRef),
           severity,
           week_start: weekStart
         },
@@ -530,32 +555,36 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
   app.get("/api/hr/workforce/history", ...guard, async (req, res) => {
     try {
       jsonNoStore(res);
-      const user = req.user;
       const organizationId = await orgId(req);
       if (!organizationId) return res.status(400).json({ ok: false, error: "Organization context required." });
 
-      const manager = isWorkforceManager(user);
-      const employeeId = pickStr(req.query?.employee_id ?? req.query?.employeeId);
+      const employeeKey = pickStr(req.query?.employee_key ?? req.query?.employeeKey ?? req.query?.employee_id);
       const weeks = Math.min(52, Math.max(1, Number(req.query?.weeks) || 12));
 
-      const targetEmployeeId = manager ? employeeId || String(user?.id ?? "") : String(user?.id ?? "");
-      if (!targetEmployeeId) {
-        return res.status(400).json({ ok: false, error: "employee_id required." });
+      if (!employeeKey) {
+        return res.status(400).json({ ok: false, error: "employee_key is required." });
       }
-      if (!manager && employeeId && employeeId !== targetEmployeeId) {
-        return res.status(403).json({ ok: false, error: "You may only view your own history." });
+
+      const parsed = parseWorkforceEmployeeKey(employeeKey);
+      if (!parsed) {
+        return res.status(400).json({ ok: false, error: "Invalid employee_key." });
       }
 
       await closePastWeekSnapshots(db(), organizationId, await loadGradeSettings(db(), organizationId));
 
-      const { data, error } = await db()
+      let q = db()
         .from("workforce_grade_week_snapshots")
         .select("*")
         .eq("organization_id", organizationId)
-        .eq("employee_user_id", targetEmployeeId)
         .order("week_start", { ascending: false })
         .limit(weeks);
 
+      q =
+        parsed.source === "roster"
+          ? q.eq("employee_roster_id", parsed.id)
+          : q.eq("employee_user_id", parsed.id);
+
+      const { data, error } = await q;
       if (error) {
         if (isMissingTableError(error)) {
           return res.json({ ok: true, snapshots: [], schemaReady: false });
@@ -568,7 +597,7 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
         weekLabel: formatWeekLabel(s.week_start, weekEndForWeekStart(s.week_start))
       }));
 
-      res.json({ ok: true, employeeId: targetEmployeeId, snapshots, schemaReady: true });
+      res.json({ ok: true, employeeKey, snapshots, schemaReady: true });
     } catch (e) {
       res.status(500).json({ ok: false, error: String(e?.message || e) });
     }
@@ -677,23 +706,22 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
       const organizationId = await orgId(req);
       if (!organizationId) return res.status(400).json({ ok: false, error: "Organization context required." });
 
-      const manager = isWorkforceManager(user);
-      const employees = await loadActiveEmployees(
-        db(),
-        organizationId,
-        manager ? null : String(user?.id ?? "")
-      );
+      await ensureTestRosterMembers(db(), organizationId);
+      const team = await loadWorkforceTeam(db(), organizationId);
 
       res.json({
         ok: true,
-        manager,
-        employees: employees.map((e) => ({
-          id: e.id,
-          fullName: pickStr(e.full_name) || pickStr(e.email),
-          email: pickStr(e.email),
-          role: pickStr(e.role),
-          jobTitle: pickStr(e.job_title),
-          department: pickStr(e.department)
+        canManageCategories: isWorkforceManager(user),
+        employees: team.map((m) => ({
+          id: m.employeeId,
+          employeeKey: m.employeeKey,
+          employeeSource: m.employeeSource,
+          fullName: m.fullName,
+          email: m.email,
+          role: m.role,
+          jobTitle: m.jobTitle,
+          department: m.department,
+          isTest: m.isTest
         }))
       });
     } catch (e) {

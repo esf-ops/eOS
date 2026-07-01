@@ -17,12 +17,15 @@ const DEFAULT_WORKSPACE_NAME = "Elite Stone Fabrication";
 type TabId = "dashboard" | "log" | "history" | "categories";
 
 type GradeRow = {
+  employeeKey: string;
   employeeId: string;
+  employeeSource: string;
   fullName: string;
   email: string;
   role: string;
   jobTitle: string;
   department: string;
+  isTest?: boolean;
   letterGrade: string;
   mistakeCount: number;
   weightedMistakeCount: number;
@@ -32,6 +35,7 @@ type GradeRow = {
 
 type DashboardPayload = {
   ok?: boolean;
+  canManageCategories?: boolean;
   manager?: boolean;
   weekStart?: string;
   weekEnd?: string;
@@ -43,11 +47,14 @@ type DashboardPayload = {
 
 type Employee = {
   id: string;
+  employeeKey: string;
+  employeeSource: string;
   fullName: string;
   email: string;
   role: string;
   jobTitle: string;
   department: string;
+  isTest?: boolean;
 };
 
 type Category = {
@@ -214,7 +221,7 @@ export default function HrApp() {
     };
   }, [sessionToken]);
 
-  const isManager = Boolean(dashboard?.manager);
+  const canManageCategories = Boolean(dashboard?.canManageCategories ?? dashboard?.manager);
 
   const loadDashboard = useCallback(async () => {
     if (!sessionToken) return;
@@ -259,7 +266,7 @@ export default function HrApp() {
       if (!sessionToken || !employeeId) return;
       try {
         const res = (await apiGet(
-          `/api/hr/workforce/history?employee_id=${encodeURIComponent(employeeId)}&weeks=12`,
+          `/api/hr/workforce/history?employee_key=${encodeURIComponent(employeeId)}&weeks=12`,
           sessionToken
         )) as { snapshots?: Snapshot[] };
         setSnapshots(res.snapshots ?? []);
@@ -276,7 +283,7 @@ export default function HrApp() {
       try {
         const weekQ = weekStart ? `&week_start=${encodeURIComponent(weekStart)}` : "";
         const res = (await apiGet(
-          `/api/hr/workforce/mistakes?employee_id=${encodeURIComponent(employeeId)}${weekQ}`,
+          `/api/hr/workforce/mistakes?employee_key=${encodeURIComponent(employeeId)}${weekQ}`,
           sessionToken
         )) as { mistakes?: Mistake[] };
         setWeekMistakes(res.mistakes ?? []);
@@ -295,8 +302,10 @@ export default function HrApp() {
   }, [sessionToken, loadDashboard, loadEmployees, loadCategories]);
 
   useEffect(() => {
-    if (!historyEmployeeId && userId) setHistoryEmployeeId(userId);
-  }, [historyEmployeeId, userId]);
+    if (!historyEmployeeId && employees[0]?.employeeKey) {
+      setHistoryEmployeeId(employees[0].employeeKey);
+    }
+  }, [historyEmployeeId, employees]);
 
   useEffect(() => {
     if (tab === "history" && historyEmployeeId) void loadHistory(historyEmployeeId);
@@ -340,7 +349,7 @@ export default function HrApp() {
     setErr(null);
     try {
       await apiPost("/api/hr/workforce/mistakes", sessionToken, {
-        employee_user_id: logEmployeeId,
+        employee_key: logEmployeeId,
         category_id: logCategoryId || null,
         severity: logSeverity,
         description: logDescription.trim() || null
@@ -416,10 +425,10 @@ export default function HrApp() {
     return "";
   }, [userDepartment, userDisplayEmail, userDisplayName, userJobTitle, userRole]);
 
-  const myRow = useMemo(
-    () => dashboard?.rows?.find((r) => r.employeeId === userId) ?? null,
-    [dashboard?.rows, userId]
-  );
+  const myRow = useMemo(() => {
+    const userKey = userId ? `user:${userId}` : "";
+    return dashboard?.rows?.find((r) => r.employeeKey === userKey) ?? null;
+  }, [dashboard?.rows, userId]);
 
   const teamAvgMistakes = useMemo(() => {
     const rows = dashboard?.rows ?? [];
@@ -453,11 +462,11 @@ export default function HrApp() {
     }
   ];
 
-  const tabs: { id: TabId; label: string; managerOnly?: boolean }[] = [
+  const tabs: { id: TabId; label: string; adminOnly?: boolean }[] = [
     { id: "dashboard", label: "Grades" },
-    { id: "log", label: "Log mistake", managerOnly: true },
+    { id: "log", label: "Log mistake" },
     { id: "history", label: "History" },
-    { id: "categories", label: "Categories", managerOnly: true }
+    { id: "categories", label: "Categories", adminOnly: true }
   ];
 
   return (
@@ -491,7 +500,7 @@ export default function HrApp() {
               <p className="auth-panel-eyebrow">eliteOS · HR Head</p>
               <h1 className="auth-panel-title">Workforce quality grading</h1>
               <p className="auth-panel-sub">
-                Sign in with your eliteOS account. Supervisors log mistakes; everyone sees weekly letter grades.
+                Sign in with your eliteOS account. Log mistakes and view weekly letter grades for your team.
               </p>
             </div>
             <div className="field-grid">
@@ -531,8 +540,8 @@ export default function HrApp() {
                   <p className="hero-eyebrow">Internal tool · HR Head</p>
                   <h1 className="hero-title">Workforce quality grading</h1>
                   <p className="hero-sub">
-                    Weekly letter grades reset every Monday. Supervisors log mistakes daily; history is kept for
-                    performance reviews.
+                    Weekly letter grades reset every Monday. Anyone with HR Head access can log mistakes;
+                    history is kept for performance reviews.
                   </p>
                   {dashboard?.weekLabel ? (
                     <p className="hr-week-label">
@@ -559,7 +568,7 @@ export default function HrApp() {
 
             <nav className="hr-tabs" aria-label="HR sections">
               {tabs
-                .filter((t) => !t.managerOnly || isManager)
+                .filter((t) => !t.adminOnly || canManageCategories)
                 .map((t) => (
                   <button
                     key={t.id}
@@ -578,7 +587,7 @@ export default function HrApp() {
                   <EosMetricCard
                     label="Team members"
                     value={String(dashboard?.rows?.length ?? 0)}
-                    sub={isManager ? "Active employees in your org" : "Your profile"}
+                    sub={canManageCategories ? "Active employees in your org" : "Team roster"}
                   />
                   <EosMetricCard
                     label="Avg mistakes / person"
@@ -614,12 +623,19 @@ export default function HrApp() {
                       <tbody>
                         {(dashboard?.rows ?? []).map((row) => (
                           <tr
-                            key={row.employeeId}
-                            className={selectedEmployeeId === row.employeeId ? "is-selected" : ""}
+                            key={row.employeeKey}
+                            className={selectedEmployeeId === row.employeeKey ? "is-selected" : ""}
                           >
                             <td>
                               <div className="hr-employee-cell">
-                                <strong>{row.fullName}</strong>
+                                <strong>
+                                  {row.fullName}
+                                  {row.isTest ? (
+                                    <span className="hr-test-badge" title="Test team member">
+                                      test
+                                    </span>
+                                  ) : null}
+                                </strong>
                                 <span>{row.jobTitle || row.department || row.role || row.email}</span>
                               </div>
                             </td>
@@ -640,11 +656,11 @@ export default function HrApp() {
                                 className="btn btn-secondary btn-sm"
                                 onClick={() =>
                                   setSelectedEmployeeId(
-                                    selectedEmployeeId === row.employeeId ? null : row.employeeId
+                                    selectedEmployeeId === row.employeeKey ? null : row.employeeKey
                                   )
                                 }
                               >
-                                {selectedEmployeeId === row.employeeId ? "Hide" : "Details"}
+                                {selectedEmployeeId === row.employeeKey ? "Hide" : "Details"}
                               </button>
                             </td>
                           </tr>
@@ -658,7 +674,7 @@ export default function HrApp() {
                       <EosPanelHead
                         title="This week's mistakes"
                         subtitle={
-                          dashboard?.rows?.find((r) => r.employeeId === selectedEmployeeId)?.fullName ?? ""
+                          dashboard?.rows?.find((r) => r.employeeKey === selectedEmployeeId)?.fullName ?? ""
                         }
                       />
                       {weekMistakes.length === 0 ? (
@@ -683,11 +699,11 @@ export default function HrApp() {
               </>
             ) : null}
 
-            {tab === "log" && isManager ? (
+            {tab === "log" ? (
               <EosSectionCard className="hr-panel">
                 <EosPanelHead
                   title="Log a mistake"
-                  subtitle="Supervisor entry — counts toward the employee's current week grade"
+                  subtitle="Any HR Head user can log — counts toward the employee's current week grade"
                 />
                 {logSuccess ? <EosAlertBanner tone="success">{logSuccess}</EosAlertBanner> : null}
                 <div className="field-grid hr-log-grid">
@@ -696,8 +712,9 @@ export default function HrApp() {
                     <select value={logEmployeeId} onChange={(e) => setLogEmployeeId(e.target.value)}>
                       <option value="">Select employee…</option>
                       {employees.map((e) => (
-                        <option key={e.id} value={e.id}>
+                        <option key={e.employeeKey} value={e.employeeKey}>
                           {e.fullName}
+                          {e.isTest ? " (test)" : ""}
                         </option>
                       ))}
                     </select>
@@ -752,21 +769,20 @@ export default function HrApp() {
                   title="Performance history"
                   subtitle="Frozen weekly snapshots — for reviews and trend analysis"
                 />
-                {isManager ? (
-                  <label className="field hr-history-select">
-                    Employee
-                    <select
-                      value={historyEmployeeId}
-                      onChange={(e) => setHistoryEmployeeId(e.target.value)}
-                    >
-                      {employees.map((e) => (
-                        <option key={e.id} value={e.id}>
-                          {e.fullName}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ) : null}
+                <label className="field hr-history-select">
+                  Employee
+                  <select
+                    value={historyEmployeeId}
+                    onChange={(e) => setHistoryEmployeeId(e.target.value)}
+                  >
+                    {employees.map((e) => (
+                      <option key={e.employeeKey} value={e.employeeKey}>
+                        {e.fullName}
+                        {e.isTest ? " (test)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 {snapshots.length === 0 ? (
                   <p className="hr-empty">No closed weeks yet. Snapshots appear after each Monday reset.</p>
                 ) : (
@@ -796,7 +812,7 @@ export default function HrApp() {
               </EosSectionCard>
             ) : null}
 
-            {tab === "categories" && isManager ? (
+            {tab === "categories" && canManageCategories ? (
               <EosSectionCard className="hr-panel">
                 <EosPanelHead
                   title="Mistake categories"

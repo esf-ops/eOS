@@ -290,6 +290,20 @@ body {
   color: var(--eos-ink-muted);
 }
 
+.hr-test-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0.1rem 0.35rem;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--eos-info);
+  background: var(--eos-info-soft);
+  vertical-align: middle;
+}
+
 /* ----- Detail / mistakes ------------------------------------------------ */
 
 .hr-detail-panel {
