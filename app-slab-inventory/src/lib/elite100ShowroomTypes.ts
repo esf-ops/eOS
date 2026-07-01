@@ -56,6 +56,10 @@ export function colorInitials(name: string | null): string {
   return n.slice(0, 2).toUpperCase();
 }
 
+export function currentlyAvailableLabel(count: number): string {
+  return `${count} Currently Available`;
+}
+
 export function elite100CardImageSrc(item: Elite100ShowroomItem): string | null {
   return (
     item.reference_image_url

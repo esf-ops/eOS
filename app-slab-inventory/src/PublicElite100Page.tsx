@@ -1,14 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { EOS_LOGO_URL } from "@quote-lib/config";
-import { lookupElite100Texture } from "./lib/elite100TextureAssets";
 import {
   Elite100ShowroomSection,
   type Elite100ShowroomItem,
 } from "./lib/elite100Showroom";
-import { elite100CardImageSrcFull } from "./lib/elite100ShowroomTypes";
 import { fetchPublicElite100Showroom } from "./lib/publicElite100Api";
 import { isKioskOrArreyaMode } from "./lib/publicElite100Route";
-import { ZoomImageViewer } from "./ZoomImageViewer";
+import { PublicElite100ColorLightbox } from "./lib/PublicElite100ColorLightbox";
 
 export default function PublicElite100Page() {
   const kiosk = useMemo(() => isKioskOrArreyaMode(), []);
@@ -64,18 +62,6 @@ export default function PublicElite100Page() {
     [data],
   );
 
-  const viewerItems = useMemo(() => {
-    if (!selected) return [];
-    const texture = lookupElite100Texture(selected.color_name, selected.color_key);
-    const src = texture?.fullUrl ?? elite100CardImageSrcFull(selected);
-    if (!src) return [];
-    return [{
-      src,
-      caption: selected.color_name ?? "Elite 100 color",
-      alt: selected.color_name ?? "Elite 100 color",
-    }];
-  }, [selected]);
-
   const rootClass = ["e100-public-page", kiosk ? "e100-public-kiosk" : ""].filter(Boolean).join(" ");
 
   return (
@@ -120,7 +106,7 @@ export default function PublicElite100Page() {
                   key={group.price_group}
                   group={group}
                   kiosk={kiosk}
-                  onOpenItem={kiosk ? undefined : setSelected}
+                  onOpenItem={setSelected}
                 />
               ) : null
             ))}
@@ -132,10 +118,10 @@ export default function PublicElite100Page() {
         <p>Elite Stone Fabrication · Elite 100 showroom · Display only</p>
       </footer>
 
-      {selected && viewerItems.length > 0 ? (
-        <ZoomImageViewer
-          items={viewerItems}
-          initialIndex={0}
+      {selected ? (
+        <PublicElite100ColorLightbox
+          item={selected}
+          kiosk={kiosk}
           onClose={() => setSelected(null)}
         />
       ) : null}

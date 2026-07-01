@@ -2,11 +2,13 @@ import { useRef, useState } from "react";
 import { lookupElite100Texture } from "./elite100TextureAssets";
 import {
   colorInitials,
+  currentlyAvailableLabel,
   type Elite100ShowroomGroup,
   type Elite100ShowroomItem,
 } from "./elite100ShowroomTypes";
 
 export type { Elite100ShowroomGroup, Elite100ShowroomItem, Elite100ShowroomData } from "./elite100ShowroomTypes";
+export { currentlyAvailableLabel } from "./elite100ShowroomTypes";
 
 export function Elite100ShowroomSection({
   group,
@@ -113,7 +115,7 @@ export function Elite100ShowroomCard({
         {showInventoryMeta ? (
           item.has_inventory && availableCount > 0 ? (
             <p className="cp-card-meta">
-              <span>{availableCount} current available</span>
+              <span>{currentlyAvailableLabel(availableCount)}</span>
               {(item.slab_count > 0 || item.remnant_count > 0) ? (
                 <>
                   <span className="cp-dot" aria-hidden> · </span>
@@ -140,7 +142,7 @@ export function Elite100ShowroomCard({
       type="button"
       className="cp-card"
       onClick={onOpen}
-      aria-label={`${item.color_name ?? "Color"} · ${item.has_inventory ? `${availableCount} current available` : "No current inventory"} — Open color`}
+      aria-label={`${item.color_name ?? "Color"} · ${item.has_inventory ? currentlyAvailableLabel(availableCount) : "No current inventory"} — Open color`}
     >
       {inner}
     </button>
