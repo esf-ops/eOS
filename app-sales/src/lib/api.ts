@@ -39,6 +39,7 @@ type ApiFetchOptions = {
   method?: string;
   body?: unknown;
   headers?: Record<string, string>;
+  signal?: AbortSignal;
 };
 
 export async function apiFetch(path: string, options: ApiFetchOptions) {
@@ -61,7 +62,7 @@ export async function apiFetch(path: string, options: ApiFetchOptions) {
   const attemptedUrl = joinBackendUrl(path);
   let res: Response;
   try {
-    res = await fetch(attemptedUrl, { method, headers, body });
+    res = await fetch(attemptedUrl, { method, headers, body, signal: options.signal });
   } catch (e: unknown) {
     const msg = String((e as Error)?.message || e);
     throw new ApiError(networkFailureMessage(msg, attemptedUrl), 0, { cause: msg }, attemptedUrl, path);

@@ -4,30 +4,16 @@ import { apiFetch } from "../lib/api";
 import { config } from "../lib/config";
 import { supabase } from "../lib/supabase";
 import type { MeResp } from "../lib/types";
-import type { SalesDashboardTab } from "../lib/salesDashboardTypes";
-import { readInitialTabFromUrl } from "../lib/salesDashboardApi";
-import SalesCommandCenterView from "./SalesCommandCenterView";
-import QuotePipelinePanel from "./QuotePipelinePanel";
-import SalesCommandCenterPanel from "./SalesCommandCenterPanel";
-import SalesPerformancePanel from "./SalesPerformancePanel";
-import SalesForecastingPanel from "./SalesForecastingPanel";
-import SalesProductionFlowPanel from "./SalesProductionFlowPanel";
-import SalesAccountsPanel from "./SalesAccountsPanel";
-import SalesColorsMaterialsPanel from "./SalesColorsMaterialsPanel";
-import SalesDataQualityPanel from "./SalesDataQualityPanel";
+import SalesAppHero from "./sales-dashboard/SalesAppHero";
 import { SalesDashboardProvider } from "./sales-dashboard/SalesDashboardContext";
 import SalesDetailDrawer from "./sales-dashboard/SalesDetailDrawer";
-import SalesQueryPanel from "./SalesQueryPanel";
+import SalesTabBar from "./sales-dashboard/SalesTabBar";
+import SalesTabPanels from "./sales-dashboard/SalesTabPanels";
 import "./sales-dashboard.css";
+import "./command-center.css";
 import EliteosTopbar from "../../../shared/eliteos-ui/EliteosTopbar";
 import type { EliteosTopbarMenuItem } from "../../../shared/eliteos-ui/EliteosTopbar";
 import "./sales-intelligence.css";
-
-/**
- * Command Center uses the live GET /api/sales/dashboard bento cockpit.
- * Legacy views remain importable for rollback if needed.
- */
-const COMMAND_CENTER_VIEW: "live" | "legacy" = "live";
 
 /**
  * eliteOS Sales Head — protected-head shell.
@@ -102,23 +88,7 @@ function userInitialsFor(name: string, email: string): string {
   return "ES";
 }
 
-type SalesTab = SalesDashboardTab;
-
-const TABS: ReadonlyArray<{ id: SalesTab; label: string }> = [
-  { id: "command_center", label: "Command Center" },
-  { id: "sales_performance", label: "Sales Performance" },
-  { id: "forecasting", label: "Forecasting" },
-  { id: "quote_pipeline", label: "Quote Pipeline" },
-  { id: "production_flow", label: "Production Flow" },
-  { id: "accounts", label: "Accounts" },
-  { id: "colors_materials", label: "Colors / Materials" },
-  { id: "data_explorer", label: "Data Explorer" },
-  { id: "data_quality", label: "Data Quality" }
-];
-
 export default function App() {
-  const [salesTab, setSalesTab] = useState<SalesTab>(() => readInitialTabFromUrl("command_center"));
-
   const [session, setSession] = useState<Session | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -398,127 +368,17 @@ export default function App() {
           </>
         ) : (
           <>
-            <section className="eos-hero" aria-labelledby="sales-hero-title">
-              <div className="eos-hero-aurora" aria-hidden />
-              <div className="eos-hero-grid">
-                <div className="eos-hero-main">
-                  <p className="eos-hero-eyebrow">Internal tool · Sales Dashboard</p>
-                  <h1 id="sales-hero-title" className="eos-hero-title">
-                    Sales Command Center
-                  </h1>
-                  <p className="eos-hero-sub">
-                    Executive cockpit for <strong>Moraware production</strong>,{" "}
-                    <strong>Quote Library pipeline</strong>, <strong>forecast signals</strong>, and{" "}
-                    <strong>Elite 100 mix</strong> — synced through eliteOS Brain, filterable and drillable in one place.
-                  </p>
-                  <div className="eos-hero-chips">
-                    <span className="eos-hero-chip eos-hero-chip--info">
-                      <strong>Source ·</strong> Moraware sync · Quote Library
-                    </span>
-                    <span className="eos-hero-chip eos-hero-chip--warn">
-                      <strong>Trust ·</strong> Branch / rep gated by approved Sales Account Mapping
-                    </span>
-                    <span className="eos-hero-chip">
-                      <strong>API ·</strong> <code>{config.backendBaseUrl || "(same origin)"}</code>
-                    </span>
-                  </div>
-                </div>
-
-                <aside className="eos-hero-workspace" aria-label={`Workspace · ${workspaceName}`}>
-                  <p className="eos-hero-workspace-eyebrow">Workspace</p>
-                  <div className="eos-hero-workspace-card">
-                    <div className="eos-hero-workspace-mark">
-                      <img
-                        src={workspaceLogoUrl}
-                        alt=""
-                        loading="lazy"
-                        onError={(e) => {
-                          (e.currentTarget as HTMLImageElement).style.display = "none";
-                          const fallback = (e.currentTarget.parentElement as HTMLElement | null)?.querySelector(
-                            ".eos-hero-workspace-initials"
-                          ) as HTMLElement | null;
-                          if (fallback) fallback.style.display = "flex";
-                        }}
-                      />
-                      <span
-                        className="eos-hero-workspace-initials"
-                        aria-hidden="true"
-                        style={{ display: "none" }}
-                      >
-                        {workspaceInitialsValue}
-                      </span>
-                    </div>
-                    <div className="eos-hero-workspace-text">
-                      <p className="eos-hero-workspace-name">{workspaceName}</p>
-                      <p className="eos-hero-workspace-meta">
-                        <span>on </span>
-                        <span className="eos-hero-workspace-platform">eliteOS</span>
-                        <span className="eos-hero-workspace-sep" aria-hidden>·</span>
-                        <span>{workspaceShortId}</span>
-                      </p>
-                    </div>
-                  </div>
-                </aside>
-              </div>
-            </section>
-
             {loadError && !accessForbidden ? (
               <div className="eos-banner" role="alert" style={{ whiteSpace: "pre-wrap" }}>
                 {loadError}
               </div>
             ) : null}
 
-            <nav className="eos-tabbar" aria-label="Sales Head views">
-              {TABS.map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  className={`eos-tab${salesTab === t.id ? " is-on" : ""}`}
-                  aria-current={salesTab === t.id ? "page" : undefined}
-                  onClick={() => setSalesTab(t.id)}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </nav>
-
-            <SalesDashboardProvider token={token} tab={salesTab} onTabChange={setSalesTab} onLoadError={onPiLoadError}>
+            <SalesDashboardProvider token={token} onLoadError={onPiLoadError}>
+              <SalesAppHero />
+              <SalesTabBar />
               <SalesDetailDrawer />
-              {salesTab === "command_center" ? (
-                COMMAND_CENTER_VIEW === "live" ? (
-                  <SalesCommandCenterPanel />
-                ) : (
-                  <SalesCommandCenterView token={token} onLoadError={onPiLoadError} />
-                )
-              ) : null}
-              {salesTab === "sales_performance" ? <SalesPerformancePanel /> : null}
-              {salesTab === "forecasting" ? <SalesForecastingPanel /> : null}
-              {salesTab === "quote_pipeline" ? (
-                <div className="sd-card-wrap">
-                  <header className="sd-panel-head">
-                    <div>
-                      <h2 className="sd-panel-title">Quote Pipeline</h2>
-                      <p className="sd-panel-sub">Live Quote Library pipeline — same panel and API as before, aligned with the Sales Head shell.</p>
-                    </div>
-                  </header>
-                  <QuotePipelinePanel token={token} />
-                </div>
-              ) : null}
-              {salesTab === "production_flow" ? <SalesProductionFlowPanel /> : null}
-              {salesTab === "accounts" ? <SalesAccountsPanel /> : null}
-              {salesTab === "colors_materials" ? <SalesColorsMaterialsPanel /> : null}
-              {salesTab === "data_explorer" ? (
-                <div className="sd-card-wrap">
-                  <header className="sd-panel-head">
-                    <div>
-                      <h2 className="sd-panel-title">Data Explorer</h2>
-                      <p className="sd-panel-sub">Ask Sales Data — natural-language Moraware query explorer. Parser and API unchanged.</p>
-                    </div>
-                  </header>
-                  <SalesQueryPanel token={token} onLoadError={onPiLoadError} />
-                </div>
-              ) : null}
-              {salesTab === "data_quality" ? <SalesDataQualityPanel /> : null}
+              <SalesTabPanels token={token} onLoadError={onPiLoadError} />
             </SalesDashboardProvider>
           </>
         )}

@@ -36,6 +36,7 @@ import {
 
 type Ctx = {
   filters: DashboardFilters;
+  activeTab: SalesDashboardTab;
   setFilters: React.Dispatch<React.SetStateAction<DashboardFilters>>;
   patchFilters: (patch: Partial<DashboardFilters>) => void;
   clearFilter: (param: string) => void;
@@ -104,45 +105,44 @@ function buildColorSummaryText(d: ColorDetail): string {
 
 export function SalesDashboardProvider({
   token,
-  tab,
-  onTabChange,
   onLoadError,
   children
 }: {
   token: string;
-  tab: SalesDashboardTab;
-  onTabChange?: (tab: SalesDashboardTab) => void;
   onLoadError: (msg: string) => void;
   children: React.ReactNode;
 }) {
-  const urlInitRef = useRef(false);
+  const urlHydratedRef = useRef(false);
+  const dataRef = useRef<SalesDashboardResponse | null>(null);
+  const fetchSeqRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
+  const onLoadErrorRef = useRef(onLoadError);
+  onLoadErrorRef.current = onLoadError;
+
   const [filters, setFilters] = useState<DashboardFilters>(() => {
     if (typeof window !== "undefined") {
-      return parseFiltersFromSearchParams(window.location.search, tab);
+      return parseFiltersFromSearchParams(window.location.search, "command_center");
     }
-    return { ...DEFAULT_DASHBOARD_FILTERS, tab };
+    return { ...DEFAULT_DASHBOARD_FILTERS };
   });
-  const dataRef = useRef<SalesDashboardResponse | null>(null);
   const [data, setData] = useState<SalesDashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [reloadNonce, setReloadNonce] = useState(0);
   const [detail, setDetail] = useState<DetailSelection>(null);
   const [copyMsg, setCopyMsg] = useState("");
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
   const [userSavedViews, setUserSavedViews] = useState<UserSavedView[]>(() => loadUserSavedViews());
   const [executiveSummaryOpen, setExecutiveSummaryOpen] = useState(true);
 
-  useEffect(() => {
-    setFilters((f) => ({ ...f, tab }));
-  }, [tab]);
+  const requestKey = useMemo(() => filtersToQueryString(filters), [filters]);
+  const fetchKey = useMemo(() => `${requestKey}#${reloadNonce}`, [requestKey, reloadNonce]);
 
   useEffect(() => {
-    if (urlInitRef.current) return;
-    urlInitRef.current = true;
-    const fromUrl = parseFiltersFromSearchParams(window.location.search, tab);
-    if (fromUrl.tab !== tab) onTabChange?.(fromUrl.tab);
+    if (urlHydratedRef.current) return;
+    urlHydratedRef.current = true;
     for (const view of ALL_BUILTIN_VIEWS) {
-      if (filtersMatchView(fromUrl, view.filters)) {
+      if (filtersMatchView(filters, view.filters)) {
         setActiveViewId(view.id);
         break;
       }
@@ -152,38 +152,57 @@ export function SalesDashboardProvider({
 
   useEffect(() => {
     syncFiltersToBrowserUrl(filters);
-    if (filters.tab !== tab) onTabChange?.(filters.tab);
-  }, [filters, tab, onTabChange]);
-
-  const queryString = useMemo(() => filtersToQueryString(filters), [filters]);
-
-  const load = useCallback(async () => {
-    if (!token) return;
-    setRefreshing(true);
-    if (!dataRef.current) setLoading(true);
-    try {
-      const json = (await apiFetch(`/api/sales/dashboard?${queryString}`, { token })) as SalesDashboardResponse;
-      if (!json.ok) throw new Error("Dashboard request failed");
-      setData(json);
-      dataRef.current = json;
-      onLoadError("");
-    } catch (e) {
-      const msg = e instanceof ApiError ? e.message : String((e as Error)?.message ?? e);
-      onLoadError(msg);
-      setData(null);
-      dataRef.current = null;
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [token, queryString, onLoadError]);
+  }, [requestKey, filters]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (!token) {
+      setLoading(false);
+      return;
+    }
+
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
+    const seq = ++fetchSeqRef.current;
+
+    setRefreshing(true);
+    if (!dataRef.current) setLoading(true);
+
+    void (async () => {
+      try {
+        const json = (await apiFetch(`/api/sales/dashboard?${requestKey}`, {
+          token,
+          signal: ac.signal
+        })) as SalesDashboardResponse;
+        if (seq !== fetchSeqRef.current || ac.signal.aborted) return;
+        if (!json.ok) throw new Error("Dashboard request failed");
+        setData(json);
+        dataRef.current = json;
+        onLoadErrorRef.current("");
+      } catch (e) {
+        if (ac.signal.aborted) return;
+        const msg = e instanceof ApiError ? e.message : String((e as Error)?.message ?? e);
+        onLoadErrorRef.current(msg);
+        setData(null);
+        dataRef.current = null;
+      } finally {
+        if (seq === fetchSeqRef.current) {
+          setLoading(false);
+          setRefreshing(false);
+        }
+      }
+    })();
+
+    return () => {
+      ac.abort();
+    };
+  }, [token, fetchKey]);
 
   const patchFilters = useCallback((patch: Partial<DashboardFilters>) => {
-    setFilters((f) => ({ ...f, ...patch, page: patch.page ?? 1 }));
+    setFilters((f) => {
+      const next = { ...f, ...patch, page: patch.page ?? 1 };
+      return next;
+    });
     setActiveViewId(null);
   }, []);
 
@@ -193,33 +212,28 @@ export function SalesDashboardProvider({
   }, []);
 
   const resetFilters = useCallback(() => {
-    setFilters({ ...DEFAULT_DASHBOARD_FILTERS, tab: filters.tab });
+    setFilters((f) => ({ ...DEFAULT_DASHBOARD_FILTERS, tab: f.tab }));
     setActiveViewId(null);
-  }, [filters.tab]);
+  }, []);
+
+  const setTab = useCallback((t: SalesDashboardTab) => {
+    setFilters((f) => (f.tab === t ? f : { ...f, tab: t, page: 1 }));
+    setActiveViewId(null);
+  }, []);
 
   const resetToDefaultView = useCallback(() => {
     setFilters({ ...DEFAULT_DASHBOARD_FILTERS, tab: "command_center" });
     setActiveViewId("preset_today_command");
-    onTabChange?.("command_center");
-  }, [onTabChange]);
+  }, []);
 
-  const setTab = useCallback(
-    (t: SalesDashboardTab) => {
-      setFilters((f) => ({ ...f, tab: t }));
-      onTabChange?.(t);
-    },
-    [onTabChange]
-  );
+  const applyView = useCallback((view: DashboardViewDefinition) => {
+    setFilters({ ...DEFAULT_DASHBOARD_FILTERS, ...view.filters, page: 1 });
+    setActiveViewId(view.id);
+  }, []);
 
-  const applyView = useCallback(
-    (view: DashboardViewDefinition) => {
-      const merged = { ...DEFAULT_DASHBOARD_FILTERS, ...view.filters, page: 1 };
-      setFilters(merged);
-      setActiveViewId(view.id);
-      if (merged.tab) onTabChange?.(merged.tab);
-    },
-    [onTabChange]
-  );
+  const reload = useCallback(() => {
+    setReloadNonce((n) => n + 1);
+  }, []);
 
   const saveCurrentView = useCallback(
     (label: string) => {
@@ -303,22 +317,18 @@ export function SalesDashboardProvider({
     [exportDashboardCsv]
   );
 
-  const navigateDataQualityIssue = useCallback(
-    (issue: DataQualityIssue) => {
-      const patch = { ...issue.filterPatch, page: 1 } as Partial<DashboardFilters>;
-      if (issue.navigateTab) patch.tab = issue.navigateTab;
-      setFilters((f) => ({ ...f, ...patch, tab: patch.tab ?? f.tab }));
-      setActiveViewId(null);
-      if (patch.tab) onTabChange?.(patch.tab);
-      const sampleAccount = issue.samples?.find((s) => s && typeof s === "object" && "account" in s) as
-        | { account?: string }
-        | undefined;
-      if (sampleAccount?.account && issue.navigateTab === "accounts") {
-        setDetail({ type: "account", key: sampleAccount.account.trim().toLowerCase(), label: sampleAccount.account });
-      }
-    },
-    [onTabChange]
-  );
+  const navigateDataQualityIssue = useCallback((issue: DataQualityIssue) => {
+    const patch = { ...issue.filterPatch, page: 1 } as Partial<DashboardFilters>;
+    if (issue.navigateTab) patch.tab = issue.navigateTab;
+    setFilters((f) => ({ ...f, ...patch, tab: patch.tab ?? f.tab }));
+    setActiveViewId(null);
+    const sampleAccount = issue.samples?.find((s) => s && typeof s === "object" && "account" in s) as
+      | { account?: string }
+      | undefined;
+    if (sampleAccount?.account && issue.navigateTab === "accounts") {
+      setDetail({ type: "account", key: sampleAccount.account.trim().toLowerCase(), label: sampleAccount.account });
+    }
+  }, []);
 
   const copyIssueSamples = useCallback(
     async (issue: DataQualityIssue) => {
@@ -343,6 +353,7 @@ export function SalesDashboardProvider({
 
   const value: Ctx = {
     filters,
+    activeTab: filters.tab,
     setFilters,
     patchFilters,
     clearFilter,
@@ -351,7 +362,7 @@ export function SalesDashboardProvider({
     data,
     loading,
     refreshing,
-    reload: load,
+    reload,
     detail,
     openAccountDetail,
     openColorDetail,
