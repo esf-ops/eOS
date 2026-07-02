@@ -276,6 +276,14 @@ export type SalesDashboardResponse = {
   executiveSummary?: ExecutiveSummary;
 };
 
+export type DashboardDetailResponse = {
+  ok: boolean;
+  type: "account" | "color";
+  id: string;
+  detail: AccountDetail | ColorDetail | null;
+  meta?: { cacheHit?: boolean; debugTiming?: Record<string, number> };
+};
+
 export type DetailSelection =
   | { type: "account"; key: string; label: string }
   | { type: "color"; key: string; label: string }

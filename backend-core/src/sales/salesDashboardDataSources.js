@@ -10,6 +10,11 @@ import { dateInInclusiveRange } from "./salesDashboardFilters.js";
 import { buildSalesIntelligenceBundle } from "./salesIntelligenceFacts.js";
 import { configureSalesColorCatalog } from "./salesColorClassification.js";
 import { loadSalesColorCatalog } from "./salesColorCatalogLoader.js";
+import {
+  buildDashboardCacheKey,
+  getCachedDashboardSources,
+  setCachedDashboardSources
+} from "./salesDashboardCache.js";
 
 const PAGE = 1000;
 
@@ -300,9 +305,18 @@ export function partitionJobsByRange(enrichedRows, currentRange, priorRange) {
   return { current, prior };
 }
 
-export async function loadDashboardDataSources(supabase, organizationId) {
-  const [syncHealth, mappings, quotes] = await Promise.all([
-    loadMorawareSyncHealth(supabase, organizationId),
+export async function loadDashboardDataSources(supabase, organizationId, options = {}) {
+  void options;
+
+  const syncHealth = await loadMorawareSyncHealth(supabase, organizationId);
+  const cacheKey = buildDashboardCacheKey(organizationId, syncHealth);
+  const cached = getCachedDashboardSources(cacheKey);
+  if (cached) {
+    configureSalesColorCatalog(cached.colorCatalog);
+    return { ...cached, _cacheHit: true, _cacheKey: cacheKey };
+  }
+
+  const [mappings, quotes] = await Promise.all([
     loadApprovedSalesAttributionMappings(supabase),
     loadQuoteHeaders(supabase, organizationId)
   ]);
@@ -336,7 +350,7 @@ export async function loadDashboardDataSources(supabase, organizationId) {
     colorCatalog
   });
 
-  return {
+  const sources = {
     organizationId,
     syncHealth,
     mappings,
@@ -349,6 +363,11 @@ export async function loadDashboardDataSources(supabase, organizationId) {
     forecasts,
     activities,
     calendarRows,
-    colorCatalog
+    colorCatalog,
+    _cacheHit: false,
+    _cacheKey: cacheKey
   };
+
+  setCachedDashboardSources(cacheKey, sources);
+  return sources;
 }

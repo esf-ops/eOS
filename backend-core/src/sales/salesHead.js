@@ -23,6 +23,7 @@ import {
   normalizeMorawareQueryFilters
 } from "./morawareSalesQuery.js";
 import { salesDashboardHandler } from "./salesDashboardApi.js";
+import { salesDashboardDetailHandler } from "./salesDashboardDetailApi.js";
 
 const salesJsonParser = express.json({ limit: "256kb" });
 
@@ -3692,6 +3693,13 @@ export function attachSalesHeadRoutes(app, { requireAuth, requireRole, requireHe
   app.get("/api/sales/jobs", requireAuth(), requireRole(roleList), headAccessSales, execSales(salesJobsHandler));
   app.get("/api/sales/filters", requireAuth(), requireRole(roleList), headAccessSales, execSales(salesFiltersHandler));
   app.get("/api/sales/dashboard", requireAuth(), requireRole(roleList), headAccessSales, execSales(salesDashboardHandler));
+  app.get(
+    "/api/sales/dashboard/detail",
+    requireAuth(),
+    requireRole(roleList),
+    headAccessSales,
+    execSales(salesDashboardDetailHandler)
+  );
   app.get(
     "/api/sales/dashboard-foundation",
     requireAuth(),

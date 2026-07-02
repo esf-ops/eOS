@@ -269,8 +269,22 @@ export function parseDashboardFilters(query = {}) {
     sortBy,
     sortDir,
     page,
-    pageSize
+    pageSize,
+    ...parseDashboardRequestOptions(query)
   };
+}
+
+/**
+ * Payload / cache request options (not row filters).
+ * @param {Record<string, unknown>} query
+ */
+export function parseDashboardRequestOptions(query = {}) {
+  const modeRaw = str(query.mode).toLowerCase();
+  const mode = modeRaw === "tab" || modeRaw === "full" ? modeRaw : "overview";
+  const includeDetails = bool(query.includeDetails);
+  const loadProfileRaw = str(query.loadProfile).toLowerCase();
+  const loadProfile = loadProfileRaw === "full" ? "full" : "overview";
+  return { mode, includeDetails, loadProfile };
 }
 
 /**

@@ -341,8 +341,14 @@ export function buildIntelligenceFromSources(sources, organizationId) {
 
 /**
  * Compute full dashboard payload from intelligence bundle + filters.
+ * @param {object} bundle
+ * @param {ReturnType<import("./salesDashboardFilters.js").parseDashboardFilters>} filters
+ * @param {{ includeDetails?: boolean }} [options]
  */
-export function computeDashboardFromIntelligence(bundle, filters) {
+export function computeDashboardFromIntelligence(bundle, filters, options = {}) {
+  const includeDetails = Boolean(options.includeDetails);
+  const payloadMode = options.payloadMode ?? "full";
+  const isOverview = payloadMode === "overview";
   const rows = bundle.worksheetMaterial ?? [];
   const shapedJobs = bundle.productionJobs.map((p) => enrichedJobShape(p));
   const jobsWithColor = attachIntelligenceFieldsToJobs(shapedJobs, rows);
@@ -508,9 +514,9 @@ export function computeDashboardFromIntelligence(bundle, filters) {
     },
     salesPerformance: {
       monthlyYoY,
-      repSummary,
+      repSummary: isOverview ? repSummary.slice(0, 15) : repSummary,
       branchSummary: production.productionByBranch,
-      accountRows: sortRows(accountSummary.allAccounts, filters.sortBy, filters.sortDir),
+      accountRows: isOverview ? [] : sortRows(accountSummary.allAccounts, filters.sortBy, filters.sortDir),
       accountSummary: accountSummary.topAccounts,
       activeAccountCount: accountSummary.activeAccountCount,
       producedSqftTrend: production.producedSqftTrend
@@ -524,7 +530,7 @@ export function computeDashboardFromIntelligence(bundle, filters) {
       forecastByMonth: forecast.forecastByMonth ?? [],
       forecastByRep: forecast.forecastByRep ?? [],
       forecastByBranch: summarizeForecastByBranch(bundle.forecastFacts),
-      quoteForecastRows: bundle.forecastFacts.slice(0, 100),
+      quoteForecastRows: isOverview ? [] : bundle.forecastFacts.slice(0, 100),
       next30: forecastWindowSummary(forecastEventsForWindows(bundle.forecastFacts), currentRange.end, 30),
       next60: forecastWindowSummary(forecastEventsForWindows(bundle.forecastFacts), currentRange.end, 60),
       next90: forecastWindowSummary(forecastEventsForWindows(bundle.forecastFacts), currentRange.end, 90),
@@ -557,29 +563,38 @@ export function computeDashboardFromIntelligence(bundle, filters) {
       lowEliteAdoption: accountSummary.allAccounts.filter((a) => (a.eliteShare ?? 100) < 25 && (a.currentSqft ?? 0) >= 50).slice(0, 25),
       highOutOfCollection: accountSummary.allAccounts.filter((a) => (a.outShare ?? 0) >= 40 && (a.currentSqft ?? 0) >= 50).slice(0, 25)
     },
-    colorsMaterials: { ...colorMix, colorRows: colorAnalytics.colorRows?.slice(0, 100) ?? [] },
-    dataExplorer: {
-      paginatedRows: paginateRows(
-        sortRows(
-          filteredCurrent.map(mapExplorerRow),
-          filters.sortBy,
-          filters.sortDir
-        ),
-        filters.page,
-        filters.pageSize
-      )
-    },
+    colorsMaterials: { ...colorMix, colorRows: colorAnalytics.colorRows?.slice(0, isOverview ? 25 : 100) ?? [] },
+    dataExplorer: isOverview
+      ? undefined
+      : {
+          paginatedRows: paginateRows(
+            sortRows(
+              filteredCurrent.map(mapExplorerRow),
+              filters.sortBy,
+              filters.sortDir
+            ),
+            filters.page,
+            filters.pageSize
+          )
+        },
     dataQuality: dataQualityPayload,
-    detailPanels: {
-      accounts: buildAccountDetailIndex(
-        pickAccountsForDetailIndex(accountSummary.allAccounts, filters, 100),
-        filteredCurrent,
-        bundle.quoteFacts,
-        bundle.forecastFacts,
-        colorAnalytics
-      ),
-      colors: buildColorDetailIndex(colorAnalytics, filteredCurrent, bundle.worksheetMeta?.rows ?? [])
-    },
+    detailPanels: includeDetails
+      ? {
+          accounts: buildAccountDetailIndex(
+            pickAccountsForDetailIndex(accountSummary.allAccounts, filters, 100),
+            filteredCurrent,
+            bundle.quoteFacts,
+            bundle.forecastFacts,
+            colorAnalytics
+          ),
+          colors: buildColorDetailIndex(
+            colorAnalytics,
+            filteredCurrent,
+            bundle.worksheetMeta?.rows ?? [],
+            { limit: 100 }
+          )
+        }
+      : { accounts: {}, colors: {} },
     metrics: {
       produced_sqft: metricValue(currentSqft),
       prior_sqft: metricValue(priorSqft),

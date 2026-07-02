@@ -476,4 +476,51 @@ import { buildMonthlyYoYTrend } from "./salesProductionSummary.js";
   console.log("ok: pickAccountsForDetailIndex bounds detail panels");
 }
 
+{
+  const { parseDashboardRequestOptions } = await import("./salesDashboardFilters.js");
+  const opts = parseDashboardRequestOptions({ mode: "overview", includeDetails: "0" });
+  assert.equal(opts.mode, "overview");
+  assert.equal(opts.includeDetails, false);
+  console.log("ok: parseDashboardRequestOptions");
+}
+
+{
+  const { sliceDashboardPayload } = await import("./salesDashboardPayload.js");
+  const full = {
+    meta: { tab: "command_center" },
+    filterOptions: {},
+    savedViews: [],
+    metrics: {},
+    commandCenter: { kpis: [{ id: "produced_sqft", value: 100 }], charts: {} },
+    salesPerformance: { repSummary: Array.from({ length: 30 }, (_, i) => ({ salesperson: `R${i}` })), monthlyYoY: [] },
+    forecasting: {},
+    quotePipeline: { quoteCount: 1 },
+    productionFlow: { producedSqft: 100 },
+    accounts: { topAccounts: [] },
+    colorsMaterials: { colorRows: Array.from({ length: 50 }, (_, i) => ({ color: `C${i}`, sqft: i })), eliteShare: 10 },
+    dataQuality: { issues: Array.from({ length: 20 }, (_, i) => ({ title: `I${i}` })) },
+    detailPanels: { accounts: { a: { account: "A" } }, colors: { k: { color: "X" } } }
+  };
+  const sliced = sliceDashboardPayload(full, { mode: "overview", includeDetails: false });
+  assert.equal(Object.keys(sliced.detailPanels?.accounts ?? {}).length, 0);
+  assert.ok((sliced.salesPerformance?.repSummary?.length ?? 0) <= 15);
+  assert.ok((sliced.colorsMaterials?.colorRows?.length ?? 0) <= 25);
+  assert.ok(JSON.stringify(sliced).length < JSON.stringify(full).length);
+  console.log("ok: sliceDashboardPayload overview");
+}
+
+{
+  const { buildDashboardCacheKey, setCachedDashboardSources, getCachedDashboardSources, resetDashboardCache } = await import(
+    "./salesDashboardCache.js"
+  );
+  resetDashboardCache();
+  const key = buildDashboardCacheKey("org-1", { latestGroupId: "g1", lastSyncAt: "2026-01-01" });
+  assert.ok(key.includes("org-1"));
+  setCachedDashboardSources(key, { organizationId: "org-1", facts: { rows: [] } });
+  const hit = getCachedDashboardSources(key);
+  assert.equal(hit?.organizationId, "org-1");
+  resetDashboardCache();
+  console.log("ok: dashboard cache hit/miss");
+}
+
 console.log("salesDashboard.test.mjs — all passed");

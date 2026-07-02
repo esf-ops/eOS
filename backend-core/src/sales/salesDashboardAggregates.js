@@ -8,10 +8,10 @@ import { buildSalesIntelligenceBundle, finalizeIntelligenceBundle } from "./sale
 /**
  * Build full dashboard response sections from loaded sources + filters.
  */
-export function buildSalesDashboardResponse({ sources, filters }) {
+export function buildSalesDashboardResponse({ sources, filters, includeDetails = false, payloadMode = "full" }) {
   const organizationId = sources.organizationId ?? sources.facts?.organizationId ?? "";
   const bundle = finalizeIntelligenceBundle(buildSalesIntelligenceBundle({ ...sources, organizationId }), filters);
-  const response = computeDashboardFromIntelligence(bundle, filters);
+  const response = computeDashboardFromIntelligence(bundle, filters, { includeDetails, payloadMode });
 
   response.commandCenter.bentoCards = buildBentoCards(response);
   response.commandCenter.charts = {

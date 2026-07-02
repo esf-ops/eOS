@@ -33,7 +33,7 @@ function setIf(p: URLSearchParams, key: string, value: string | number | boolean
   else p.set(key, String(value));
 }
 
-export function filtersToQueryString(filters: DashboardFilters): string {
+export function filtersToQueryString(filters: DashboardFilters, extra?: Record<string, string | boolean | undefined>): string {
   const p = new URLSearchParams();
   p.set("tab", filters.tab);
   p.set("quickRange", filters.quickRange);
@@ -76,6 +76,30 @@ export function filtersToQueryString(filters: DashboardFilters): string {
   setIf(p, "sortDir", filters.sortDir);
   setIf(p, "page", filters.page);
   setIf(p, "pageSize", filters.pageSize);
+  if (extra) {
+    for (const [key, value] of Object.entries(extra)) {
+      setIf(p, key, value as string | number | boolean | undefined | null);
+    }
+  }
+  return p.toString();
+}
+
+/** Overview payload — Command Center initial load. */
+export function overviewQueryString(filters: DashboardFilters): string {
+  return filtersToQueryString(filters, { mode: "overview", loadProfile: "overview", includeDetails: false, tab: "command_center" });
+}
+
+/** Tab-scoped payload — lazy tab fetch. */
+export function tabQueryString(filters: DashboardFilters, tab: SalesDashboardTab): string {
+  return filtersToQueryString({ ...filters, tab }, { mode: "tab", loadProfile: "full", includeDetails: false });
+}
+
+/** Detail drawer fetch — preserves active filters for org scope + date window. */
+export function detailQueryString(filters: DashboardFilters, type: "account" | "color", id: string): string {
+  const base = filtersToQueryString(filters);
+  const p = new URLSearchParams(base);
+  p.set("type", type);
+  p.set("id", id);
   return p.toString();
 }
 

@@ -1,6 +1,8 @@
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { ApiError, apiFetch } from "../../lib/api";
+import { detailQueryString } from "../../lib/salesDashboardApi";
+import type { AccountDetail, ColorDetail, DashboardDetailResponse } from "../../lib/salesDashboardTypes";
 import { useSalesDashboard } from "./SalesDashboardContext";
-import type { AccountDetail, ColorDetail } from "../../lib/salesDashboardTypes";
 
 function fmtSqft(n: number | null | undefined) {
   return `${Math.round(Number(n) || 0).toLocaleString()} sqft`;
@@ -13,12 +15,52 @@ function fmtPct(n: number | null | undefined) {
 }
 
 export default function SalesDetailDrawer() {
-  const { detail, closeDetail, data, copyAccountSummary, copyColorSummary, copyMsg } = useSalesDashboard();
+  const { detail, closeDetail, filters, token, copyAccountSummary, copyColorSummary, copyMsg } = useSalesDashboard();
+  const [detailData, setDetailData] = useState<AccountDetail | ColorDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState("");
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (!detail || !token) {
+      setDetailData(null);
+      setDetailError("");
+      return;
+    }
+
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
+    setDetailLoading(true);
+    setDetailError("");
+    setDetailData(null);
+
+    void (async () => {
+      try {
+        const qs = detailQueryString(filters, detail.type, detail.key);
+        const json = (await apiFetch(`/api/sales/dashboard/detail?${qs}`, {
+          token,
+          signal: ac.signal
+        })) as DashboardDetailResponse;
+        if (ac.signal.aborted) return;
+        if (!json.ok) throw new Error("Detail request failed");
+        setDetailData(json.detail);
+      } catch (e) {
+        if (ac.signal.aborted) return;
+        const msg = e instanceof ApiError ? e.message : String((e as Error)?.message ?? e);
+        setDetailError(msg);
+      } finally {
+        if (!ac.signal.aborted) setDetailLoading(false);
+      }
+    })();
+
+    return () => ac.abort();
+  }, [detail, filters, token]);
+
   if (!detail) return null;
 
-  const panels = data?.detailPanels;
-  const account = detail.type === "account" ? panels?.accounts?.[detail.key] : null;
-  const color = detail.type === "color" ? panels?.colors?.[detail.key] : null;
+  const account = detail.type === "account" ? (detailData as AccountDetail | null) : null;
+  const color = detail.type === "color" ? (detailData as ColorDetail | null) : null;
 
   return (
     <>
@@ -44,10 +86,16 @@ export default function SalesDetailDrawer() {
           </div>
         </header>
         <div className="sd-drawer-body">
+          {detailLoading ? <p className="sd-muted">Loading detail…</p> : null}
+          {detailError ? <p className="sd-muted">{detailError}</p> : null}
           {detail.type === "account" && account ? <AccountDetailBody d={account} /> : null}
-          {detail.type === "account" && !account ? <p className="sd-muted">No detail available for this account in the current filter set.</p> : null}
+          {detail.type === "account" && !detailLoading && !account && !detailError ? (
+            <p className="sd-muted">No detail available for this account in the current filter set.</p>
+          ) : null}
           {detail.type === "color" && color ? <ColorDetailBody d={color} /> : null}
-          {detail.type === "color" && !color ? <p className="sd-muted">No detail available for this color in the current filter set.</p> : null}
+          {detail.type === "color" && !detailLoading && !color && !detailError ? (
+            <p className="sd-muted">No detail available for this color in the current filter set.</p>
+          ) : null}
         </div>
       </aside>
     </>

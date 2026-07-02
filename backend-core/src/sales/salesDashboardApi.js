@@ -6,9 +6,19 @@ import { parseDashboardFilters } from "./salesDashboardFilters.js";
 import { loadDashboardDataSources, resolveDashboardOrganizationId } from "./salesDashboardDataSources.js";
 import { buildSalesDashboardResponse } from "./salesDashboardAggregates.js";
 import { buildDashboardInsights, buildInsightSummaryText, buildExecutiveSummary } from "./salesDashboardInsights.js";
+import { sliceDashboardPayload } from "./salesDashboardPayload.js";
+import { createDashboardTimer, isDashboardTimingEnabled } from "./salesDashboardTiming.js";
+import {
+  buildMetricsCacheKey,
+  getCachedDashboardMetrics,
+  setCachedDashboardMetrics
+} from "./salesDashboardCache.js";
 
 export async function salesDashboardHandler(req, supabaseGetter) {
+  const timer = createDashboardTimer();
   const supabase = supabaseGetter();
+  timer.mark("auth_org_resolve");
+
   const organizationId = resolveDashboardOrganizationId(req);
   if (!organizationId) {
     return { status: 400, body: { ok: false, error: "Sales dashboard requires organization_id context." } };
@@ -19,9 +29,26 @@ export async function salesDashboardHandler(req, supabaseGetter) {
     return { status: 400, body: { ok: false, error: filters.error } };
   }
 
+  const { mode, includeDetails, loadProfile } = filters;
+
   try {
-    const sources = await loadDashboardDataSources(supabase, organizationId);
-    const body = buildSalesDashboardResponse({ sources, filters });
+    const sources = await loadDashboardDataSources(supabase, organizationId, { loadProfile });
+    timer.mark("load_dashboard_sources");
+
+    const metricsKey = buildMetricsCacheKey(sources, filters, mode);
+    let body = getCachedDashboardMetrics(metricsKey);
+    if (body) {
+      timer.mark("build_metrics_cache_hit");
+    } else {
+      body = buildSalesDashboardResponse({
+        sources,
+        filters,
+        includeDetails,
+        payloadMode: mode
+      });
+      timer.mark("build_metrics");
+      setCachedDashboardMetrics(metricsKey, body);
+    }
 
     const kpisFlat = {
       currentSqft: body.commandCenter.kpis.find((k) => k.id === "produced_sqft")?.value,
@@ -49,14 +76,29 @@ export async function salesDashboardHandler(req, supabaseGetter) {
       forecast: body.forecasting,
       production: body.productionFlow
     });
+    timer.mark("build_insights");
+
+    const sliced = sliceDashboardPayload(body, { mode, tab: filters.tab, includeDetails });
+    timer.mark("slice_payload");
+
+    const debugTiming = timer.finish();
+    if (sliced.meta) {
+      sliced.meta.cacheHit = Boolean(sources._cacheHit);
+      if (isDashboardTimingEnabled()) {
+        sliced.meta.debugTiming = debugTiming;
+      }
+    }
+
+    const responseBody = {
+      ok: true,
+      organization_id: organizationId,
+      ...sliced
+    };
+    timer.mark("serialize_ready");
 
     return {
       status: 200,
-      body: {
-        ok: true,
-        organization_id: organizationId,
-        ...body
-      }
+      body: responseBody
     };
   } catch (e) {
     return {

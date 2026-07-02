@@ -132,11 +132,26 @@ export function pickAccountsForDetailIndex(accounts, filters, limit = 100) {
  * @param {object} colorAnalytics
  * @param {Array<object>} currentJobs
  * @param {Array<object>} worksheetRows
+ * @param {{ limit?: number, onlyKeys?: Set<string> }} [opts]
  */
-export function buildColorDetailIndex(colorAnalytics, currentJobs, worksheetRows) {
+export function buildColorDetailIndex(colorAnalytics, currentJobs, worksheetRows, opts = {}) {
+  const limit = opts.limit ?? Infinity;
+  const onlyKeys = opts.onlyKeys ?? null;
+  const rows = (colorAnalytics?.colorRows ?? []).slice(0, limit);
   const index = {};
-  for (const row of colorAnalytics?.colorRows ?? []) {
+
+  const worksheetCountByKey = new Map();
+  if (worksheetRows.length && rows.length) {
+    for (const w of worksheetRows) {
+      const k = `${String(w.color ?? "").trim()}|||${String(w.stone ?? "").trim()}`;
+      if (onlyKeys && !onlyKeys.has(k)) continue;
+      worksheetCountByKey.set(k, (worksheetCountByKey.get(k) || 0) + 1);
+    }
+  }
+
+  for (const row of rows) {
     const k = row.key;
+    if (onlyKeys && !onlyKeys.has(k)) continue;
     const relatedJobs = currentJobs
       .filter((j) => `${String(j.color ?? "").trim()}|||${String(j.stone ?? "").trim()}` === k)
       .slice(0, 20)
@@ -166,12 +181,38 @@ export function buildColorDetailIndex(colorAnalytics, currentJobs, worksheetRows
       ...row,
       topAccounts,
       relatedJobs,
-      worksheetRowCount: worksheetRows.filter(
-        (w) => `${String(w.color ?? "").trim()}|||${String(w.stone ?? "").trim()}` === k
-      ).length
+      worksheetRowCount: worksheetCountByKey.get(k) ?? 0
     };
   }
   return index;
+}
+
+/**
+ * Build one account detail panel on demand.
+ */
+export function buildSingleAccountDetail(accountName, accounts, currentJobs, quotes, forecasts, colorAnalytics) {
+  const target = normKey(accountName);
+  const acct =
+    accounts.find((a) => normKey(a.account) === target) ??
+    accounts.find((a) => normKey(a.account).includes(target) || target.includes(normKey(a.account)));
+  if (!acct) return null;
+  const index = buildAccountDetailIndex([acct], currentJobs, quotes, forecasts, colorAnalytics);
+  return index[normKey(acct.account)] ?? null;
+}
+
+/**
+ * Build one color detail panel on demand.
+ */
+export function buildSingleColorDetail(colorKey, colorAnalytics, currentJobs, worksheetRows) {
+  const row = (colorAnalytics?.colorRows ?? []).find((r) => r.key === colorKey);
+  if (!row) return null;
+  const index = buildColorDetailIndex(
+    { ...colorAnalytics, colorRows: [row] },
+    currentJobs,
+    worksheetRows,
+    { onlyKeys: new Set([colorKey]) }
+  );
+  return index[colorKey] ?? null;
 }
 
 /**

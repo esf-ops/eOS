@@ -3,8 +3,10 @@ import { ApiError, apiFetch } from "../../lib/api";
 import {
   clearFilterParam,
   filtersToQueryString,
+  overviewQueryString,
   parseFiltersFromSearchParams,
-  syncFiltersToBrowserUrl
+  syncFiltersToBrowserUrl,
+  tabQueryString
 } from "../../lib/salesDashboardApi";
 import {
   collectExportRows,
@@ -35,6 +37,7 @@ import {
 } from "../../lib/salesDashboardTypes";
 
 type Ctx = {
+  token: string;
   filters: DashboardFilters;
   activeTab: SalesDashboardTab;
   setFilters: React.Dispatch<React.SetStateAction<DashboardFilters>>;
@@ -44,6 +47,7 @@ type Ctx = {
   setTab: (tab: SalesDashboardTab) => void;
   data: SalesDashboardResponse | null;
   loading: boolean;
+  tabLoading: boolean;
   refreshing: boolean;
   reload: () => void;
   detail: DetailSelection;
@@ -73,6 +77,27 @@ type Ctx = {
 };
 
 const SalesDashboardContext = createContext<Ctx | null>(null);
+
+function mergeDashboardData(
+  overview: SalesDashboardResponse,
+  tabPatch: Partial<SalesDashboardResponse> | null
+): SalesDashboardResponse {
+  if (!tabPatch) return overview;
+  return {
+    ...overview,
+    ...tabPatch,
+    meta: { ...overview.meta, ...tabPatch.meta },
+    commandCenter: tabPatch.commandCenter ?? overview.commandCenter,
+    salesPerformance: { ...overview.salesPerformance, ...tabPatch.salesPerformance },
+    forecasting: { ...overview.forecasting, ...tabPatch.forecasting },
+    quotePipeline: { ...overview.quotePipeline, ...tabPatch.quotePipeline },
+    productionFlow: { ...overview.productionFlow, ...tabPatch.productionFlow },
+    accounts: { ...overview.accounts, ...tabPatch.accounts },
+    colorsMaterials: { ...overview.colorsMaterials, ...tabPatch.colorsMaterials },
+    dataQuality: tabPatch.dataQuality ?? overview.dataQuality,
+    dataExplorer: tabPatch.dataExplorer ?? overview.dataExplorer
+  };
+}
 
 function fmtSqft(n: number | null | undefined) {
   return `${Math.round(Number(n) || 0).toLocaleString()} sqft`;
@@ -113,9 +138,11 @@ export function SalesDashboardProvider({
   children: React.ReactNode;
 }) {
   const urlHydratedRef = useRef(false);
-  const dataRef = useRef<SalesDashboardResponse | null>(null);
-  const fetchSeqRef = useRef(0);
-  const abortRef = useRef<AbortController | null>(null);
+  const overviewRef = useRef<SalesDashboardResponse | null>(null);
+  const overviewAbortRef = useRef<AbortController | null>(null);
+  const tabAbortRef = useRef<AbortController | null>(null);
+  const overviewSeqRef = useRef(0);
+  const tabSeqRef = useRef(0);
   const onLoadErrorRef = useRef(onLoadError);
   onLoadErrorRef.current = onLoadError;
 
@@ -125,8 +152,11 @@ export function SalesDashboardProvider({
     }
     return { ...DEFAULT_DASHBOARD_FILTERS };
   });
-  const [data, setData] = useState<SalesDashboardResponse | null>(null);
+  const [overviewData, setOverviewData] = useState<SalesDashboardResponse | null>(null);
+  const [tabCache, setTabCache] = useState<Partial<Record<SalesDashboardTab, Partial<SalesDashboardResponse>>>>({});
+  const [loadedTabs, setLoadedTabs] = useState<Set<SalesDashboardTab>>(() => new Set(["command_center"]));
   const [loading, setLoading] = useState(true);
+  const [tabLoading, setTabLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [reloadNonce, setReloadNonce] = useState(0);
   const [detail, setDetail] = useState<DetailSelection>(null);
@@ -135,8 +165,24 @@ export function SalesDashboardProvider({
   const [userSavedViews, setUserSavedViews] = useState<UserSavedView[]>(() => loadUserSavedViews());
   const [executiveSummaryOpen, setExecutiveSummaryOpen] = useState(true);
 
-  const requestKey = useMemo(() => filtersToQueryString(filters), [filters]);
-  const fetchKey = useMemo(() => `${requestKey}#${reloadNonce}`, [requestKey, reloadNonce]);
+  const filterKey = useMemo(() => {
+    const { tab: _tab, page: _page, ...rest } = filters;
+    return filtersToQueryString({ ...rest, tab: "command_center", page: 1 });
+  }, [filters]);
+
+  const overviewFetchKey = useMemo(() => `${filterKey}#overview#${reloadNonce}`, [filterKey, reloadNonce]);
+  const activeTab = filters.tab;
+
+  const tabFetchKey = useMemo(() => {
+    if (activeTab === "command_center") return null;
+    return `${tabQueryString(filters, activeTab)}#${reloadNonce}`;
+  }, [filters, activeTab, reloadNonce]);
+
+  const data = useMemo(() => {
+    if (!overviewData) return null;
+    if (activeTab === "command_center") return overviewData;
+    return mergeDashboardData(overviewData, tabCache[activeTab] ?? null);
+  }, [overviewData, tabCache, activeTab]);
 
   useEffect(() => {
     if (urlHydratedRef.current) return;
@@ -152,7 +198,12 @@ export function SalesDashboardProvider({
 
   useEffect(() => {
     syncFiltersToBrowserUrl(filters);
-  }, [requestKey, filters]);
+  }, [filters]);
+
+  useEffect(() => {
+    setTabCache({});
+    setLoadedTabs(new Set(["command_center"]));
+  }, [filterKey, reloadNonce]);
 
   useEffect(() => {
     if (!token) {
@@ -160,43 +211,73 @@ export function SalesDashboardProvider({
       return;
     }
 
-    abortRef.current?.abort();
+    overviewAbortRef.current?.abort();
     const ac = new AbortController();
-    abortRef.current = ac;
-    const seq = ++fetchSeqRef.current;
+    overviewAbortRef.current = ac;
+    const seq = ++overviewSeqRef.current;
 
     setRefreshing(true);
-    if (!dataRef.current) setLoading(true);
+    if (!overviewRef.current) setLoading(true);
 
     void (async () => {
       try {
-        const json = (await apiFetch(`/api/sales/dashboard?${requestKey}`, {
+        const json = (await apiFetch(`/api/sales/dashboard?${overviewQueryString(filters)}`, {
           token,
           signal: ac.signal
         })) as SalesDashboardResponse;
-        if (seq !== fetchSeqRef.current || ac.signal.aborted) return;
+        if (seq !== overviewSeqRef.current || ac.signal.aborted) return;
         if (!json.ok) throw new Error("Dashboard request failed");
-        setData(json);
-        dataRef.current = json;
+        setOverviewData(json);
+        overviewRef.current = json;
         onLoadErrorRef.current("");
       } catch (e) {
         if (ac.signal.aborted) return;
         const msg = e instanceof ApiError ? e.message : String((e as Error)?.message ?? e);
         onLoadErrorRef.current(msg);
-        setData(null);
-        dataRef.current = null;
+        setOverviewData(null);
+        overviewRef.current = null;
       } finally {
-        if (seq === fetchSeqRef.current) {
+        if (seq === overviewSeqRef.current) {
           setLoading(false);
           setRefreshing(false);
         }
       }
     })();
 
-    return () => {
-      ac.abort();
-    };
-  }, [token, fetchKey]);
+    return () => ac.abort();
+  }, [token, overviewFetchKey]);
+
+  useEffect(() => {
+    if (!token || !tabFetchKey || activeTab === "command_center") return;
+    if (tabCache[activeTab]) return;
+
+    tabAbortRef.current?.abort();
+    const ac = new AbortController();
+    tabAbortRef.current = ac;
+    const seq = ++tabSeqRef.current;
+    setTabLoading(true);
+
+    void (async () => {
+      try {
+        const json = (await apiFetch(`/api/sales/dashboard?${tabFetchKey.split("#")[0]}`, {
+          token,
+          signal: ac.signal
+        })) as SalesDashboardResponse;
+        if (seq !== tabSeqRef.current || ac.signal.aborted) return;
+        if (!json.ok) throw new Error("Dashboard tab request failed");
+        setTabCache((prev) => ({ ...prev, [activeTab]: json }));
+        setLoadedTabs((prev) => new Set(prev).add(activeTab));
+      } catch (e) {
+        if (ac.signal.aborted) return;
+        const msg = e instanceof ApiError ? e.message : String((e as Error)?.message ?? e);
+        onLoadErrorRef.current(msg);
+      } finally {
+        if (seq === tabSeqRef.current) setTabLoading(false);
+      }
+    })();
+
+    return () => ac.abort();
+  }, [token, tabFetchKey, activeTab, tabCache]);
 
   const patchFilters = useCallback((patch: Partial<DashboardFilters>) => {
     setFilters((f) => {
@@ -352,8 +433,9 @@ export function SalesDashboardProvider({
   const closeDetail = useCallback(() => setDetail(null), []);
 
   const value: Ctx = {
+    token,
     filters,
-    activeTab: filters.tab,
+    activeTab,
     setFilters,
     patchFilters,
     clearFilter,
@@ -361,6 +443,7 @@ export function SalesDashboardProvider({
     setTab,
     data,
     loading,
+    tabLoading,
     refreshing,
     reload,
     detail,
