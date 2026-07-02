@@ -9,7 +9,7 @@ import { summarizeQuotePipeline, findQuotedNotProduced } from "./salesQuotePipel
 import { summarizeForecasts, forecastWindowSummary } from "./salesForecastingSummary.js";
 import { summarizeProduction, buildMonthlyYoYTrend } from "./salesProductionSummary.js";
 import { ACTIVE_SALES_REPS } from "./salesAttribution.js";
-import { attachWorksheetFieldsToJobs, buildColorAnalytics } from "./salesDashboardWorksheetEnrichment.js";
+import { attachIntelligenceFieldsToJobs, buildColorAnalyticsFromIntelligenceRows } from "./salesIntelligenceFacts.js";
 import {
   buildAccountDetailIndex,
   buildColorDetailIndex,
@@ -36,12 +36,13 @@ function accountKey(row) {
  * Build full dashboard response sections from loaded sources + filters.
  */
 export function buildSalesDashboardResponse({ sources, filters }) {
-  const { enrichedFacts, worksheet, quotes, forecasts, syncHealth, facts } = sources;
+  const { enrichedFacts, worksheet, intelligenceRows, quotes, forecasts, syncHealth, facts } = sources;
   const currentRange = filters.dateRange;
   const priorRange = filters.priorRange;
 
-  const jobsWithWorksheet = attachWorksheetFieldsToJobs(enrichedFacts, worksheet.rows || []);
-  const colorAnalytics = buildColorAnalytics(worksheet.rows || [], currentRange, priorRange);
+  const rows = intelligenceRows ?? [];
+  const jobsWithWorksheet = attachIntelligenceFieldsToJobs(enrichedFacts, rows);
+  const colorAnalytics = buildColorAnalyticsFromIntelligenceRows(rows, currentRange, priorRange);
   const accountShareMap = new Map((colorAnalytics.accountColorShares || []).map((a) => [a.accountKey, a]));
 
   const currentJobs = [];
@@ -60,17 +61,30 @@ export function buildSalesDashboardResponse({ sources, filters }) {
   const yoySqft = currentSqft - priorSqft;
   const yoyPct = pct(currentSqft, priorSqft);
 
-  const worksheetInRange = (worksheet.rows || []).filter((r) => {
-    const d = String(r.job_creation_date ?? "").slice(0, 10);
+  const worksheetInRange = rows.filter((r) => {
+    const d = String(r.report_date ?? r.job_creation_date ?? "").slice(0, 10);
     return d >= currentRange.start && d <= currentRange.end;
   });
   const colorMix = colorAnalytics.worksheetAvailable
     ? {
         ...aggregateColorMixFromAnalytics(colorAnalytics, filteredCurrent),
         colorTrendsByMonth: colorAnalytics.colorTrendsByMonth,
-        worksheetEnriched: true
+        worksheetEnriched: true,
+        intelligenceDiagnostics: {
+          jobFactSqft: filteredCurrent.reduce((s, j) => s + sqft(j), 0),
+          worksheetClassifiedSqft: colorAnalytics.colorRows.reduce((s, r) => s + r.sqft, 0)
+        }
       }
-    : { ...aggregateColorMix(worksheetInRange.length ? worksheetInRange : filteredCurrent), worksheetEnriched: false };
+    : {
+        ...aggregateColorMix(
+          worksheetInRange.map((r) => ({
+            color: r.color_raw,
+            stone: r.stone,
+            total_worksheet_sqft: r.worksheet_sqft
+          }))
+        ),
+        worksheetEnriched: false
+      };
 
   const quotePipeline = summarizeQuotePipeline(quotes, currentRange);
   const forecast = summarizeForecasts(forecasts, currentRange);

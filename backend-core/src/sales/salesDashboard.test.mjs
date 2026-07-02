@@ -44,19 +44,108 @@ import { buildMonthlyYoYTrend } from "./salesProductionSummary.js";
 
 // Worksheet enrichment + color analytics
 {
+  const { parseFlexibleDashboardDate, buildSalesIntelligenceRows, buildColorAnalyticsFromIntelligenceRows } =
+    await import("./salesIntelligenceFacts.js");
   const { attachWorksheetFieldsToJobs, buildColorAnalytics } = await import("./salesDashboardWorksheetEnrichment.js");
-  const jobs = attachWorksheetFieldsToJobs(
-    [{ source_job_id: "1", account_name: "Fox", created_at_source: "2026-05-01", worksheet_sqft: 50, reportDate: "2026-05-01" }],
-    [{ job_id: "1", color: "Antique Gray", stone: "ESF", total_worksheet_sqft: 50, job_creation_date: "2026-05-01", account_name: "Fox" }]
-  );
-  assert.equal(jobs[0].colorCollectionStatus, "elite100");
-  const analytics = buildColorAnalytics(
-    [{ color: "Antique Gray", stone: "ESF", total_worksheet_sqft: 100, job_creation_date: "2026-05-01", account_name: "Fox" }],
-    { start: "2026-01-01", end: "2026-12-31" },
-    { start: "2025-01-01", end: "2025-12-31" }
-  );
+
+  assert.equal(parseFlexibleDashboardDate("3/3/2026"), "2026-03-03");
+  assert.equal(parseFlexibleDashboardDate("1/7/2026"), "2026-01-07");
+  assert.equal(parseFlexibleDashboardDate("2026-05-01"), "2026-05-01");
+  console.log("ok: parseFlexibleDashboardDate (M/D/YYYY + ISO)");
+
+  const worksheetRows = [
+    {
+      id: "ws-1",
+      job_id: "1",
+      color: "Antique Gray",
+      stone: "ESF",
+      total_worksheet_sqft: 50,
+      job_creation_date: "5/1/2026",
+      account_name: "Fox"
+    },
+    {
+      id: "ws-2",
+      job_id: "1",
+      color: "Antique Gray",
+      stone: "ESF",
+      total_worksheet_sqft: 50,
+      job_creation_date: "5/1/2026",
+      account_name: "Fox"
+    }
+  ];
+  const jobs = [
+    { source_job_id: "1", account_name: "Fox", created_at_source: "2026-05-01", worksheet_sqft: 100, reportDate: "2026-05-01" }
+  ];
+  const intelligenceRows = buildSalesIntelligenceRows({
+    organizationId: "org",
+    enrichedFacts: jobs,
+    worksheetRows
+  });
+  assert.equal(intelligenceRows.length, 2);
+  assert.equal(intelligenceRows.reduce((s, r) => s + r.worksheet_sqft, 0), 100);
+
+  const enriched = attachWorksheetFieldsToJobs(jobs, worksheetRows, "org");
+  assert.equal(enriched[0].colorCollectionStatus, "elite100");
+
+  const analytics = buildColorAnalyticsFromIntelligenceRows(intelligenceRows, { start: "2026-01-01", end: "2026-12-31" }, { start: "2025-01-01", end: "2025-12-31" });
   assert.ok(analytics.topEliteColors.length >= 1);
+  assert.ok(analytics.colorRows.reduce((s, r) => s + r.sqft, 0) > 0);
+
+  const legacyAnalytics = buildColorAnalytics(
+    [{ color: "Antique Gray", stone: "ESF", total_worksheet_sqft: 100, job_creation_date: "5/1/2026", account_name: "Fox", id: "x" }],
+    { start: "2026-01-01", end: "2026-12-31" },
+    { start: "2025-01-01", end: "2025-12-31" },
+    "org"
+  );
+  assert.ok(legacyAnalytics.topEliteColors.length >= 1);
   console.log("ok: worksheet enrichment + color analytics");
+}
+
+{
+  const { buildSalesIntelligenceRows, buildColorAnalyticsFromIntelligenceRows } = await import("./salesIntelligenceFacts.js");
+  const { buildSalesDashboardResponse } = await import("./salesDashboardAggregates.js");
+
+  const enrichedFacts = [
+    { source_job_id: "j1", account_name: "Fox", created_at_source: "2026-05-01", worksheet_sqft: 200, reportDate: "2026-05-01", attributionStatus: "approved_mapped", normalizedSalesperson: "Casey" }
+  ];
+  const worksheetRows = [
+    { id: "a", job_id: "j1", color: "Antique Gray", stone: "ESF", total_worksheet_sqft: 120, job_creation_date: "5/1/2026", account_name: "Fox" },
+    { id: "b", job_id: "j1", color: "Mystery Stone", stone: "Brand X", total_worksheet_sqft: 80, job_creation_date: "5/1/2026", account_name: "Fox" }
+  ];
+  const intelligenceRows = buildSalesIntelligenceRows({ organizationId: "org", enrichedFacts, worksheetRows });
+  const unknown = intelligenceRows.find((r) => r.color_raw === "Mystery Stone");
+  assert.equal(unknown?.collection_status, "out_of_collection");
+
+  const filters = parseDashboardFilters({ quickRange: "ytd", tab: "command_center" });
+  const body = buildSalesDashboardResponse({
+    sources: {
+      enrichedFacts,
+      intelligenceRows,
+      worksheet: { rows: worksheetRows, available: true },
+      quotes: [],
+      forecasts: [],
+      syncHealth: { latestGroupComplete: true, lastSyncAt: "2026-05-01" },
+      facts: { available: true, rows: enrichedFacts }
+    },
+    filters
+  });
+
+  assert.equal(body.commandCenter.kpis.find((k) => k.id === "produced_sqft")?.value, 200);
+  assert.ok((body.colorsMaterials?.eliteShare ?? 0) > 0);
+  assert.ok((body.colorsMaterials?.colorRows?.length ?? 0) > 0);
+  assert.ok((body.colorsMaterials?.totalSqft ?? 0) > 0);
+  console.log("ok: dashboard color rows + stable production total");
+}
+
+{
+  const { buildSalesIntelligenceRows } = await import("./salesIntelligenceFacts.js");
+  const rows = buildSalesIntelligenceRows({
+    organizationId: "org",
+    enrichedFacts: [],
+    worksheetRows: [{ id: "dup", row_hash: "h1", color: "Antique Gray", stone: "ESF", total_worksheet_sqft: 50, job_creation_date: "5/1/2026" }]
+  });
+  assert.equal(rows.length, 1);
+  console.log("ok: no double-counting worksheet rows");
 }
 
 {

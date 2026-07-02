@@ -7,6 +7,7 @@ import { loadApprovedSalesAttributionMappings, classifySalesJob } from "./salesA
 import { normalizeAccountNameWithoutLocationPrefix } from "./salesAccountNameNormalizer.js";
 import { dashboardReportDateForMorawareJob } from "./morawareSqftActuals.js";
 import { dateInInclusiveRange } from "./salesDashboardFilters.js";
+import { buildSalesIntelligenceRows } from "./salesIntelligenceFacts.js";
 
 const PAGE = 1000;
 
@@ -148,7 +149,7 @@ export async function loadWorksheetColorRows(supabase, organizationId) {
     while (true) {
       let q = supabase
         .from("moraware_prepared_sales_worksheet_facts")
-        .select("account_name,color,stone,room,total_worksheet_sqft,job_creation_date,job_salesperson,branch_or_process,job_id,job_name,job_status")
+        .select("id,row_hash,account_name,color,stone,room,total_worksheet_sqft,job_creation_date,job_salesperson,branch_or_process,job_id,job_name,job_status")
         .eq("is_active", true)
         .order("job_creation_date", { ascending: true })
         .range(from, from + PAGE - 1);
@@ -159,7 +160,6 @@ export async function loadWorksheetColorRows(supabase, organizationId) {
       rows.push(...data);
       if (data.length < PAGE) break;
       from += PAGE;
-      if (from >= 15000) break;
     }
     return { rows, available: rows.length > 0 };
   } catch (e) {
@@ -262,12 +262,19 @@ export async function loadDashboardDataSources(supabase, organizationId) {
 
   const enrichedFacts = facts.rows.map((f) => enrichPreparedFactRow(f, mappings, aliasByNorm));
 
+  const intelligenceRows = buildSalesIntelligenceRows({
+    organizationId,
+    enrichedFacts,
+    worksheetRows: worksheet.rows
+  });
+
   return {
     syncHealth,
     mappings,
     facts,
     enrichedFacts,
     worksheet,
+    intelligenceRows,
     quotes,
     forecasts
   };
