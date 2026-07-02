@@ -902,7 +902,12 @@ export function buildCustomerEstimateDisplayModel(
     0
   );
   const finalRounded =
-    summaryCounterDisplay + summaryBacksplashDisplay + summaryAddonsDisplay + summaryEdgeDisplay + summaryVisibleLinesDisplay;
+    summaryCounterDisplay +
+    summaryBacksplashDisplay +
+    summaryFhbDisplay +
+    summaryAddonsDisplay +
+    summaryEdgeDisplay +
+    summaryVisibleLinesDisplay;
 
   const roomExtrasExactByRoomId: Record<string, number> = {};
   for (const r of params.measuredRooms) {

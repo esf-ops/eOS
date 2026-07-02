@@ -32,6 +32,25 @@ export function printSnapshotMatchesCustomerDisplayTotal(snapshot, customerDispl
 }
 
 /**
+ * Estimate Summary rows must sum to finalRounded (customer-facing reconciliation).
+ *
+ * @param {Record<string, unknown>} snapshot
+ */
+export function printSnapshotSummaryRowsReconcile(snapshot) {
+  const finalRounded = Math.round(Number(snapshot?.finalRounded));
+  if (!Number.isFinite(finalRounded) || finalRounded <= 0) return false;
+  const display = snapshot.display && typeof snapshot.display === "object" ? snapshot.display : null;
+  const rows = display?.estimateSummaryRows;
+  if (!Array.isArray(rows) || rows.length === 0) return true;
+  const summarySum = rows.reduce((sum, row) => {
+    if (!row || typeof row !== "object") return sum;
+    const amount = Math.round(Number(row.displayAmount));
+    return sum + (Number.isFinite(amount) ? amount : 0);
+  }, 0);
+  return summarySum === finalRounded;
+}
+
+/**
  * @param {string} quoteNumber
  * @param {string|null|undefined} revisionLabel
  */
@@ -84,8 +103,16 @@ export function loadPrintSnapshotFromQuoteRow(row) {
   const snap = parseCustomerEstimatePrintSnapshot(iu?.customer_estimate_print_snapshot);
   if (!snap) return null;
   const cdt = Number(iu?.customer_display_total);
-  if (!printSnapshotMatchesCustomerDisplayTotal(snap, cdt)) {
-    return { snapshot: snap, reconciled: false, customerDisplayTotal: cdt };
+  const cdtReconciled = printSnapshotMatchesCustomerDisplayTotal(snap, cdt);
+  const summaryReconciled = printSnapshotSummaryRowsReconcile(snap);
+  if (!cdtReconciled || !summaryReconciled) {
+    return {
+      snapshot: snap,
+      reconciled: false,
+      customerDisplayTotal: cdt,
+      summaryReconciled,
+      cdtReconciled
+    };
   }
   return { snapshot: snap, reconciled: true, customerDisplayTotal: cdt };
 }

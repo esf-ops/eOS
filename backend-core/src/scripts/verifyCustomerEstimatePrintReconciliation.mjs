@@ -201,6 +201,7 @@ function prepareRoomPrintRows(roomRows, roomAreaDisplayTotals, roomExtrasExact, 
 function buildSyntheticDisplayModel(fixture) {
   const summaryCounterDisplay = roundCustomerDisplay(fixture.countertopExact);
   const summaryBacksplashDisplay = roundCustomerDisplay(fixture.backsplashExact);
+  const summaryFhbDisplay = roundCustomerDisplay(Number(fixture.fhbExact) || 0);
   const summaryAddonsDisplay = fixture.addonsExact > 0 ? roundCustomerDisplay(fixture.addonsExact) : 0;
   const upgradedEdgeExact = Number(fixture.upgradedEdgeExact) || 0;
   const summaryEdgeDisplay = upgradedEdgeExact > 0 ? roundCustomerDisplay(upgradedEdgeExact) : 0;
@@ -209,12 +210,24 @@ function buildSyntheticDisplayModel(fixture) {
     0
   );
   const finalRounded =
-    summaryCounterDisplay + summaryBacksplashDisplay + summaryAddonsDisplay + summaryEdgeDisplay + summaryCustomDisplay;
+    summaryCounterDisplay +
+    summaryBacksplashDisplay +
+    summaryFhbDisplay +
+    summaryAddonsDisplay +
+    summaryEdgeDisplay +
+    summaryCustomDisplay;
 
   const estimateSummaryRows = [
     { key: "countertop", label: "Countertop material", displayAmount: summaryCounterDisplay },
     { key: "backsplash", label: "Backsplash material", displayAmount: summaryBacksplashDisplay }
   ];
+  if (summaryFhbDisplay > 0) {
+    estimateSummaryRows.push({
+      key: "fhb",
+      label: "Full-height backsplash material",
+      displayAmount: summaryFhbDisplay
+    });
+  }
   if (fixture.addonsExact > 0) {
     estimateSummaryRows.push({
       key: "addons",
@@ -620,11 +633,11 @@ assertEqual(
   assertEqual("normalized note lines", noteLines.length, 4);
 
   const printSrc = readFileSync(
-    join(__dirname, "../../../app-internal-estimate/src/CustomerEstimatePrint.tsx"),
+    join(__dirname, "../../../app-quote/src/lib/customerEstimate/CustomerEstimateDocument.tsx"),
     "utf8"
   );
-  assert(printSrc.includes("Project Notes"), "CustomerEstimatePrint must render Project Notes heading");
-  assert(printSrc.includes("customerFacingNoteLines"), "CustomerEstimatePrint must use display.customerFacingNoteLines");
+  assert(printSrc.includes("Project Notes"), "CustomerEstimateDocument must render Project Notes heading");
+  assert(printSrc.includes("customerFacingNoteLines"), "CustomerEstimateDocument must use display.customerFacingNoteLines");
 }
 
 // 10. Upgraded edge display — adds "Edge upgrades" row and is included in finalRounded
@@ -815,26 +828,26 @@ assertEqual(
 // 12. Customer print copy and rounding convention assertions
 {
   const printSrc = readFileSync(
-    join(__dirname, "../../../app-internal-estimate/src/CustomerEstimatePrint.tsx"),
+    join(__dirname, "../../../app-quote/src/lib/customerEstimate/CustomerEstimateDocument.tsx"),
     "utf8"
   );
   // Customer PDF must NOT mention rounding to the customer
   assert(
     !printSrc.includes("nearest $5"),
-    "CustomerEstimatePrint must not mention 'nearest $5' to customers"
+    "CustomerEstimateDocument must not mention 'nearest $5' to customers"
   );
   assert(
     !printSrc.includes("nearest $10"),
-    "CustomerEstimatePrint must not have old 'nearest $10' copy"
+    "CustomerEstimateDocument must not have old 'nearest $10' copy"
   );
   assert(
     !printSrc.includes("rounded lines"),
-    "CustomerEstimatePrint must not say 'rounded lines'"
+    "CustomerEstimateDocument must not say 'rounded lines'"
   );
   // Must retain legal disclaimer
   assert(
     printSrc.includes("Estimate only"),
-    "CustomerEstimatePrint must retain 'Estimate only' legal disclaimer"
+    "CustomerEstimateDocument must retain 'Estimate only' legal disclaimer"
   );
 
   const roundingSrc = readFileSync(
@@ -1259,6 +1272,54 @@ assertEqual(
   assertEqual("room-custom-add-on material", row.displayedMaterial, 2220);
   assertEqual("room-custom-add-on add-ons", row.displayedAddOns, 900);
   assertEqual("room-custom-add-on area total", row.displayedAreaTotal, 3120);
+}
+
+// FHBS-only material: summary FHBS line must be included in finalRounded and room allocation.
+{
+  const measuredRooms = [
+    {
+      name: "Kitchen",
+      extras: 350,
+      addons: [
+        { label: "Kitchen Sink Cutouts", total: 200 },
+        { label: "Electrical Outlet Cutouts", total: 150 }
+      ],
+      details: []
+    }
+  ];
+  const m = buildSyntheticDisplayModel({
+    countertopExact: 2950,
+    backsplashExact: 0,
+    fhbExact: 2605,
+    addonsExact: 350,
+    measuredRooms,
+    customLines: [
+      { lineKey: "window-sill", name: "Window Sill Labor — Miscellaneous", lineTotal: 100 },
+      { lineKey: "edge-polish", name: "Flat Polished appliance edge — Miscellaneous", lineTotal: 150 }
+    ],
+    roomRows: [
+      {
+        isVanity: false,
+        roomTotalExact: 5905,
+        materialExact: 5555,
+        extrasExact: 350,
+        addons: [{ amountExact: 200 }, { amountExact: 150 }]
+      }
+    ],
+    unassignedExact: 250
+  });
+  assertDisplayModelInvariants("fhb-only-summary-reconcile", m);
+  assertEqual("fhb-only-summary-reconcile final", m.finalRounded, 6155);
+  assert(
+    m.estimateSummaryRows.some((r) => r.key === "fhb" && r.displayAmount === 2605),
+    "fhb-only: FHBS summary row present"
+  );
+  const roomSum = m.roomAreaPrintRows.reduce((s, r) => s + r.displayedAreaTotal, 0);
+  assertEqual(
+    "fhb-only: roomSum + unassigned = finalRounded",
+    roomSum + m.unassignedDisplayTotal,
+    m.finalRounded
+  );
 }
 
 console.log("verifyCustomerEstimatePrintReconciliation: ok");

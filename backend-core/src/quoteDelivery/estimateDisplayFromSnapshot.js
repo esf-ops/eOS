@@ -76,6 +76,18 @@ export function buildCustomerEstimateDisplayFromSnapshot(header, options = {}) {
       ? printEmailData.breakdownRows
       : buildLegacyEmailBreakdownRows(summaryRows);
 
+  if (printEmailData?.breakdownRows?.length && customerDisplayTotal != null) {
+    const breakdownSum = printEmailData.breakdownRows.reduce(
+      (sum, row) => sum + (num(row.displayAmount) ?? 0),
+      0
+    );
+    if (breakdownSum !== customerDisplayTotal) {
+      warnings.push(
+        `Saved estimate summary lines ($${breakdownSum.toLocaleString("en-US")}) do not match customer display total ($${customerDisplayTotal.toLocaleString("en-US")}). Re-save the quote to refresh customer delivery output.`
+      );
+    }
+  }
+
   return {
     header: {
       quoteNumber: str(header.quote_number),
