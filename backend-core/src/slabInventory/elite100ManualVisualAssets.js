@@ -215,7 +215,9 @@ export const ELITE100_PHOTO_FILENAME_COLOR_ALIASES = Object.freeze([
   { source_color_name: "Newport", catalog_color_name: "Newport Polished" },
   { source_color_name: "Bellini", catalog_color_name: "Bellini Honed" },
   { source_color_name: "Calacatta Zenith", catalog_color_name: "Zenith" },
+  { source_color_name: "Calacatta Athena", catalog_color_name: "Athena" },
   { source_color_name: "Aura Taj", catalog_color_name: "Aurataj" },
+  { source_color_name: "Granda Beige", catalog_color_name: "Granada Beige" },
 ]);
 
 /**
@@ -430,6 +432,8 @@ function matchResult({
  * @param {Object} [opts]
  * @param {Map<string, Object>} [opts.matchMap] source_filename → catalog item
  * @param {Map<string, Object>} [opts.photoAliasLookup] normalized filename color → alias hit
+ * @param {boolean} [opts.strictIndexValidation] When true, block named files whose leading
+ *   number disagrees with catalog global index. Default false — batch/display numbers are metadata only.
  */
 export function matchPhotoToCatalogItem(filename, catalogItems, fixtureFlat = [], opts = {}) {
   const parsed = parsePhotoFilename(filename);
@@ -484,7 +488,9 @@ export function matchPhotoToCatalogItem(filename, catalogItems, fixtureFlat = []
       mapping_override: 1,
     };
 
-    if (parsed.globalIndex != null && !parsed.variantSuffix && opts.skipIndexCrossValidation !== true) {
+    const strictIndex = opts.strictIndexValidation === true;
+
+    if (parsed.globalIndex != null && !parsed.variantSuffix && strictIndex) {
       if (!indexCatalogItem) {
         return matchResult({
           matchMethod: "invalid_index",
@@ -1010,7 +1016,7 @@ export function indexExistingManualVisualAssets(rows) {
     const raw = row.raw ?? {};
     const variantKey = raw.variant_key ?? null;
     const sourceFilename = raw.source_filename ?? null;
-    if (sourceFilename && row.texture_hash) {
+    if (sourceFilename) {
       hashByFilename.set(sourceFilename, row);
     }
 
@@ -1251,6 +1257,55 @@ export function formatImportV2SummaryText(summary) {
   return lines.join("\n");
 }
 
+/** Score filenames competing for the same new primary insert (higher wins). */
+export function scoreDuplicatePrimaryFilename(filename) {
+  const name = String(filename ?? "").toLowerCase();
+  let score = 0;
+  if (/corrected|white.?balance|final.?edit|revised|v2|v3/.test(name)) score += 100;
+  if (/[_-]\d{1,3}(?:[a-z])?\.(jpg|jpeg|png|webp|tif|tiff)$/.test(name)) score += 10;
+  if (/\d{1,3}\.\s/.test(name)) score += 5;
+  score -= name.length * 0.01;
+  return score;
+}
+
+/**
+ * When multiple base files would INSERT for the same catalog color (no existing primary),
+ * keep one deterministic winner and mark peers as duplicate primary candidates (CONFLICT).
+ */
+export function resolveDuplicateBaseInsertCandidates(plan, existingIndex) {
+  const list = Array.isArray(plan) ? plan : [];
+  const insertGroups = new Map();
+
+  for (const entry of list) {
+    if (entry.importAction !== ELITE100_IMPORT_ACTION.INSERT) continue;
+    if (!entry.catalogItem?.id || entry.variantKey) continue;
+    if (existingIndex.primaryByCatalogId.has(entry.catalogItem.id)) continue;
+    const id = entry.catalogItem.id;
+    if (!insertGroups.has(id)) insertGroups.set(id, []);
+    insertGroups.get(id).push(entry);
+  }
+
+  for (const group of insertGroups.values()) {
+    if (group.length <= 1) continue;
+    const sorted = [...group].sort((a, b) => {
+      const scoreDiff = scoreDuplicatePrimaryFilename(b.filename) - scoreDuplicatePrimaryFilename(a.filename);
+      if (scoreDiff !== 0) return scoreDiff;
+      return String(a.filename).localeCompare(String(b.filename));
+    });
+    const winner = sorted[0];
+    for (const entry of sorted.slice(1)) {
+      entry.importAction = ELITE100_IMPORT_ACTION.CONFLICT;
+      entry.warnings = [
+        ...(entry.warnings ?? []),
+        "duplicate_primary_candidate",
+        `duplicate_of:${winner.filename}`,
+      ];
+    }
+  }
+
+  return list;
+}
+
 /** Apply v2 enrichment + actions to a matched import plan. */
 export function finalizeImportPlanV2(plan, existingAssets, opts = {}) {
   const existingIndex = indexExistingManualVisualAssets(existingAssets);
@@ -1258,5 +1313,6 @@ export function finalizeImportPlanV2(plan, existingAssets, opts = {}) {
   for (const entry of list) {
     enrichImportPlanEntryV2(entry, existingIndex, opts);
   }
+  resolveDuplicateBaseInsertCandidates(list, existingIndex);
   return list;
 }

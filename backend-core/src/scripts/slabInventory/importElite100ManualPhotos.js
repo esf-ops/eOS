@@ -28,8 +28,8 @@
  *   - New base photos → INSERT; A-suffix dual-finish → INSERT_VARIANT
  *   - Does not overwrite existing assets unless ELITE100_MANUAL_PHOTO_FORCE_OVERWRITE=1
  *   - Apply blocked on CONFLICT / UNMATCHED / AMBIGUOUS rows
- *   - Manifest: debug/elite100/photo-import-v2-manifest.json
- *   - Summary:  debug/elite100/photo-import-v2-summary.txt
+ *   - Does not compare filename batch numbers against catalog index (default)
+ *   - Optional strict mode: ELITE100_MANUAL_PHOTO_STRICT_INDEX=1
  *
  * Environment:
  *   ELITE100_MANUAL_PHOTO_WRITE_ENABLED  "1" to upload + insert (default dry-run)
@@ -98,6 +98,7 @@ const HERO_MAX_PX = Math.max(400, parseInt(process.env.ELITE100_MANUAL_HERO_MAX_
 const THUMB_MAX_PX = Math.max(200, parseInt(process.env.ELITE100_MANUAL_THUMB_MAX_PX || "600", 10));
 const HAS_SUPABASE = Boolean(SUPABASE_URL && SUPABASE_KEY && ORG_ID);
 const FORCE_OVERWRITE = process.env.ELITE100_MANUAL_PHOTO_FORCE_OVERWRITE === "1";
+const STRICT_INDEX = process.env.ELITE100_MANUAL_PHOTO_STRICT_INDEX === "1";
 const REPO_ROOT = path.resolve(__dirname, "../../../..");
 const DEBUG_ELITE100_DIR = path.join(REPO_ROOT, "debug", "elite100");
 const V2_MANIFEST_PATH = path.join(DEBUG_ELITE100_DIR, "photo-import-v2-manifest.json");
@@ -333,11 +334,22 @@ function loadPhotoMatchMap(catalogItems) {
   return buildPhotoMatchMapLookup(rows, catalogItems);
 }
 
-export async function buildImportPlan({ sourceDir, catalogItems, fixtureFlat, orgId, heroMaxPx, matchMap }) {
+export async function buildImportPlan({
+  sourceDir,
+  catalogItems,
+  fixtureFlat,
+  orgId,
+  heroMaxPx,
+  matchMap,
+  strictIndexValidation = false,
+}) {
   const files = listLocalPhotos(sourceDir);
   const plan = files.map((filename) => {
     const fullPath = path.join(sourceDir, filename);
-    const match = matchPhotoToCatalogItem(filename, catalogItems, fixtureFlat, { matchMap });
+    const match = matchPhotoToCatalogItem(filename, catalogItems, fixtureFlat, {
+      matchMap,
+      strictIndexValidation,
+    });
     const {
       catalogItem,
       matchMethod,
@@ -389,7 +401,7 @@ export async function buildImportPlan({ sourceDir, catalogItems, fixtureFlat, or
     };
   });
 
-  return applyBatchDuplicateTargets(plan);
+  return plan;
 }
 
 async function main() {
@@ -404,7 +416,8 @@ async function main() {
   console.log(`  Match map:         ${MATCH_MAP_PATH ?? "(none)"}`);
   console.log(`  Hero max px:       ${HERO_MAX_PX}`);
   console.log(`  Thumb max px:      ${THUMB_MAX_PX}`);
-  console.log(`  sips available:    ${hasSips()}`);
+  console.log(`  Force overwrite:   ${FORCE_OVERWRITE}`);
+  console.log(`  Strict index:      ${STRICT_INDEX} (batch numbers block on catalog index mismatch when true)`);
   console.log("───────────────────────────────────────────────────────");
   console.log("  AUTHORITY REMINDER:");
   console.log("  slab_color_visual_assets is PRESENTATION ENRICHMENT ONLY.");
@@ -459,6 +472,7 @@ async function main() {
     orgId: ORG_ID,
     heroMaxPx: HERO_MAX_PX,
     matchMap,
+    strictIndexValidation: STRICT_INDEX,
   });
 
   finalizeImportPlanV2(plan, existingAssets, {

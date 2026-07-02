@@ -28,6 +28,8 @@ import {
   buildVariantDisplayName,
   resolveImportAction,
   indexExistingManualVisualAssets,
+  enrichImportPlanEntryV2,
+  resolveDuplicateBaseInsertCandidates,
 } from "./elite100ManualVisualAssets.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -100,12 +102,27 @@ test("matchPhotoToCatalogItem cross-validates index and name when both agree", (
   assert.equal(m.catalogItem.global_index, 31);
 });
 
-test("matchPhotoToCatalogItem blocks when index and name disagree", () => {
-  const m = matchPhotoToCatalogItem("79. Warwick_79.jpg", fullCatalog, flat);
+test("matchPhotoToCatalogItem blocks when index and name disagree (strict index mode)", () => {
+  const m = matchPhotoToCatalogItem("79. Warwick_79.jpg", fullCatalog, flat, {
+    strictIndexValidation: true,
+  });
   assert.equal(m.matchStatus, ELITE100_MATCH_STATUS.GLOBAL_INDEX_NAME_CONFLICT);
   assert.equal(m.matchMethod, "global_index_name_conflict");
   assert.equal(m.catalogItem, null);
   assert.equal(m.conflictCatalogItem.color_name, "Regal Arabescato Gold");
+});
+
+test("matchPhotoToCatalogItem resolves Lakedale by name without index conflict (default mode)", () => {
+  const m = matchPhotoToCatalogItem("1. Lakedale_01.jpg", fullCatalog, flat);
+  assert.equal(m.matchStatus, ELITE100_MATCH_STATUS.SAFE);
+  assert.equal(m.catalogItem.color_name, "Lakedale");
+  assert.equal(m.parsed.globalIndex, 1);
+});
+
+test("matchPhotoToCatalogItem resolves Warwick by name without index conflict (default mode)", () => {
+  const m = matchPhotoToCatalogItem("79. Warwick_79.jpg", fullCatalog, flat);
+  assert.equal(m.matchStatus, ELITE100_MATCH_STATUS.SAFE);
+  assert.equal(m.catalogItem.color_name, "Warwick");
 });
 
 test("matchPhotoToCatalogItem reports invalid_index when catalog index is missing", () => {
@@ -122,10 +139,17 @@ test("matchPhotoToCatalogItem resolves India Black Pearl when index and name agr
   assert.equal(m.catalogItem.color_name, "India Black Pearl");
 });
 
-test("matchPhotoToCatalogItem resolves Regal Soapstone Matte via approved alias", () => {
+test("matchPhotoToCatalogItem resolves Regal Soapstone Matte via approved alias (default mode)", () => {
   const m = matchPhotoToCatalogItem("36. Regal_Soapstone_Matte_36.jpg", fullCatalog, flat);
+  assert.equal(m.matchStatus, ELITE100_MATCH_STATUS.SAFE);
+  assert.equal(m.catalogItem.color_name, "Regal Soapstone");
+});
+
+test("matchPhotoToCatalogItem Regal Soapstone Matte conflicts in strict index mode when index disagrees", () => {
+  const m = matchPhotoToCatalogItem("36. Regal_Soapstone_Matte_36.jpg", fullCatalog, flat, {
+    strictIndexValidation: true,
+  });
   assert.equal(m.matchStatus, ELITE100_MATCH_STATUS.GLOBAL_INDEX_NAME_CONFLICT);
-  assert.equal(m.matchMethod, "global_index_name_conflict");
 });
 
 test("matchPhotoToCatalogItem resolves Newport via approved alias when index agrees", () => {
@@ -416,7 +440,7 @@ test("variant import does not overwrite base primary asset slot", () => {
   assert.equal(existingIndex.primaryByCatalogId.get(wiscon.id)?.id, "base-id");
 });
 
-test("resolveImportAction skips by source filename even when match would conflict", () => {
+test("resolveImportAction skips when primary exists for catalog even if source filename differs", () => {
   const lakedale = fullCatalog.find((c) => c.color_name === "Lakedale");
   const existingIndex = indexExistingManualVisualAssets([
     {
@@ -424,29 +448,133 @@ test("resolveImportAction skips by source filename even when match would conflic
       source_system: ELITE100_MANUAL_SOURCE_SYSTEM,
       is_primary: true,
       texture_hash: "existing-hash",
-      raw: { source_filename: "1. Lakedale_01.jpg" },
+      raw: { source_filename: "98. Lakedale_original.jpg" },
     },
   ]);
   const entry = {
     filename: "1. Lakedale_01.jpg",
-    matchStatus: ELITE100_MATCH_STATUS.GLOBAL_INDEX_NAME_CONFLICT,
-    catalogItem: null,
+    matchStatus: ELITE100_MATCH_STATUS.SAFE,
+    catalogItem: lakedale,
     variantKey: null,
+    contentHash: "different-hash",
   };
   assert.equal(resolveImportAction(entry, existingIndex), ELITE100_IMPORT_ACTION.SKIP_EXISTING);
 });
 
-test("number name mismatch blocks apply for new files without variant suffix", () => {
-  const m = matchPhotoToCatalogItem("79. Warwick_79.jpg", fullCatalog, flat);
-  assert.equal(m.matchStatus, ELITE100_MATCH_STATUS.GLOBAL_INDEX_NAME_CONFLICT);
+test("duplicate base insert candidates block all but deterministic winner", () => {
+  const antique = fullCatalog.find((c) => c.color_name === "Antique Gray");
   const existingIndex = indexExistingManualVisualAssets([]);
+  const plan = [
+    {
+      filename: "90. Antique Gray.jpg",
+      matchStatus: ELITE100_MATCH_STATUS.SAFE,
+      catalogItem: antique,
+      variantKey: null,
+      importAction: ELITE100_IMPORT_ACTION.INSERT,
+      warnings: [],
+    },
+    {
+      filename: "90. Antique_Gray_90.jpg",
+      matchStatus: ELITE100_MATCH_STATUS.SAFE,
+      catalogItem: antique,
+      variantKey: null,
+      importAction: ELITE100_IMPORT_ACTION.INSERT,
+      warnings: [],
+    },
+  ];
+  resolveDuplicateBaseInsertCandidates(plan, existingIndex);
+  const actions = plan.map((e) => e.importAction);
+  assert.equal(actions.filter((a) => a === ELITE100_IMPORT_ACTION.INSERT).length, 1);
+  assert.equal(actions.filter((a) => a === ELITE100_IMPORT_ACTION.CONFLICT).length, 1);
+});
+
+test("duplicate base files skip when color already has primary asset", () => {
+  const antique = fullCatalog.find((c) => c.color_name === "Antique Gray");
+  const existingIndex = indexExistingManualVisualAssets([
+    {
+      catalog_item_id: antique.id,
+      source_system: ELITE100_MANUAL_SOURCE_SYSTEM,
+      is_primary: true,
+      texture_hash: "existing",
+      raw: {},
+    },
+  ]);
+  for (const filename of ["90. Antique Gray.jpg", "90. Antique_Gray_90.jpg"]) {
+    const entry = {
+      filename,
+      matchStatus: ELITE100_MATCH_STATUS.SAFE,
+      catalogItem: antique,
+      variantKey: null,
+    };
+    enrichImportPlanEntryV2(entry, existingIndex, {});
+    assert.equal(entry.importAction, ELITE100_IMPORT_ACTION.SKIP_EXISTING);
+  }
+});
+
+test("Calacatta Athena filename alias resolves to Athena catalog color", () => {
+  const m = matchPhotoToCatalogItem("20. Calacatta_Athena_20.jpg", fullCatalog, flat);
+  assert.equal(m.matchStatus, ELITE100_MATCH_STATUS.SAFE);
+  assert.equal(m.matchMethod, "photo_filename_alias");
+  assert.equal(m.catalogItem.color_name, "Athena");
+  assert.equal(m.parsed.globalIndex, 20);
+});
+
+test("Calacatta Athena alias does not steal unrelated Calacatta color matches", () => {
+  const lucent = matchPhotoToCatalogItem("80. Calacatta_Lucent_80.jpg", fullCatalog, flat);
+  assert.equal(lucent.matchStatus, ELITE100_MATCH_STATUS.SAFE);
+  assert.equal(lucent.catalogItem.color_name, "Calacatta Lucent");
+  assert.notEqual(lucent.catalogItem.color_name, "Athena");
+});
+
+test("Calacatta Athena resolves to INSERT or SKIP_EXISTING not CONFLICT", () => {
+  const athena = fullCatalog.find((c) => c.color_name === "Athena");
+  const m = matchPhotoToCatalogItem("20. Calacatta_Athena_20.jpg", fullCatalog, flat);
+  const emptyIndex = indexExistingManualVisualAssets([]);
   const entry = {
-    filename: "79. Warwick_79.jpg",
+    filename: "20. Calacatta_Athena_20.jpg",
     matchStatus: m.matchStatus,
-    catalogItem: null,
+    matchMethod: m.matchMethod,
+    catalogItem: m.catalogItem,
+    parsed: m.parsed,
     variantKey: null,
+    originalExt: ".jpg",
   };
-  assert.equal(resolveImportAction(entry, existingIndex), ELITE100_IMPORT_ACTION.CONFLICT);
+  enrichImportPlanEntryV2(entry, emptyIndex, { orgId: "org-1", heroMaxPx: 2048 });
+  assert.equal(entry.importAction, ELITE100_IMPORT_ACTION.INSERT);
+
+  const withPrimary = indexExistingManualVisualAssets([
+    {
+      catalog_item_id: athena.id,
+      source_system: ELITE100_MANUAL_SOURCE_SYSTEM,
+      is_primary: true,
+      texture_hash: "existing",
+      raw: {},
+    },
+  ]);
+  const skipEntry = { ...entry, importAction: undefined };
+  enrichImportPlanEntryV2(skipEntry, withPrimary, { orgId: "org-1", heroMaxPx: 2048 });
+  assert.equal(skipEntry.importAction, ELITE100_IMPORT_ACTION.SKIP_EXISTING);
+});
+
+test("leathered A variants still resolve as INSERT_VARIANT after Calacatta Athena alias", () => {
+  for (const filename of [
+    "77A. Wiscon_White_Leathered_77A.jpg",
+    "98A. Silver_Pearl_Leathered_98A.jpg",
+    "99A. Suede_Brown_Leathered_99A.jpg",
+    "100A. India_Black_Pearl_Leathered_100A.jpg",
+  ]) {
+    const m = matchPhotoToCatalogItem(filename, fullCatalog, flat);
+    assert.equal(m.matchStatus, ELITE100_MATCH_STATUS.SAFE, filename);
+    const entry = {
+      filename,
+      matchStatus: m.matchStatus,
+      catalogItem: m.catalogItem,
+      parsed: m.parsed,
+      originalExt: ".jpg",
+    };
+    enrichImportPlanEntryV2(entry, indexExistingManualVisualAssets([]), { orgId: "org-1", heroMaxPx: 2048 });
+    assert.equal(entry.importAction, ELITE100_IMPORT_ACTION.INSERT_VARIANT, filename);
+  }
 });
 
 console.log("\nelite100ManualVisualAssets tests passed.");
