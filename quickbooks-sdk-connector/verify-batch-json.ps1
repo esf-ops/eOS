@@ -233,9 +233,12 @@ class QbJsonVerify
         $cscPath = "${env:SystemRoot}\Microsoft.NET\Framework\v4.0.30319\csc.exe"
     }
     if (-not (Test-Path $cscPath)) {
-        Write-Warning "csc.exe not found at expected Framework paths. Trying dotnet-script fallback."
-        # Fallback: compile and run as a dotnet script using .NET 6+ csc
-        $cscPath = (Get-Command csc -ErrorAction SilentlyContinue)?.Source
+        Write-Warning "csc.exe not found at expected Framework paths. Trying Get-Command fallback."
+        $cscCommand = Get-Command csc.exe -ErrorAction SilentlyContinue
+        $cscPath = $null
+        if ($cscCommand) {
+            $cscPath = $cscCommand.Source
+        }
     }
 
     if (-not $cscPath -or -not (Test-Path $cscPath)) {
@@ -303,6 +306,10 @@ class QbJsonVerify
     Write-Host "(Contents safe to inspect — contains only FAKE_ placeholder data, not real QuickBooks records.)"
 
     exit $exitCode
+}
+catch {
+    Write-Error "Verification failed: $($_.Exception.Message)"
+    exit 1
 }
 finally {
     if (Test-Path $testSrc) { Remove-Item $testSrc -Force -ErrorAction SilentlyContinue }
