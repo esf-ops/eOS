@@ -119,11 +119,15 @@ import { buildMonthlyYoYTrend } from "./salesProductionSummary.js";
   const filters = parseDashboardFilters({ quickRange: "ytd", tab: "command_center" });
   const body = buildSalesDashboardResponse({
     sources: {
+      organizationId: "org",
       enrichedFacts,
       intelligenceRows,
       worksheet: { rows: worksheetRows, available: true },
-      quotes: [],
+      quotes: [{ id: "q1", quote_status: "Open", grand_total: 5000, customer_name: "Fox", created_at: "2026-05-01" }],
       forecasts: [],
+      activities: [],
+      calendarRows: [],
+      mappings: { aliasesByNormMoraware: new Map() },
       syncHealth: { latestGroupComplete: true, lastSyncAt: "2026-05-01" },
       facts: { available: true, rows: enrichedFacts }
     },
@@ -134,7 +138,73 @@ import { buildMonthlyYoYTrend } from "./salesProductionSummary.js";
   assert.ok((body.colorsMaterials?.eliteShare ?? 0) > 0);
   assert.ok((body.colorsMaterials?.colorRows?.length ?? 0) > 0);
   assert.ok((body.colorsMaterials?.totalSqft ?? 0) > 0);
+  assert.ok(body.meta.dataCoverage?.worksheetFacts?.rows > 0);
+  assert.ok(body.salesPerformance.repSummary.length >= 1);
+  assert.ok(body.quotePipeline.quoteCount >= 1);
+  assert.equal(body.productionFlow.backlogSummary?.status ?? "unavailable", "unavailable");
   console.log("ok: dashboard color rows + stable production total");
+}
+
+{
+  const { buildSalesIntelligenceBundle, finalizeIntelligenceBundle, buildForecastFacts, buildQuoteFacts } = await import("./salesIntelligenceFacts.js");
+  const quotes = [{ id: "q1", quote_status: "Open", grand_total: 1000, customer_name: "Fox", created_at: "2026-05-01" }];
+  const forecastFacts = buildForecastFacts(
+    [{ quote_id: "q1", event_type: "forecast", event_at: "2026-05-15T00:00:00Z", forecast_value: 5000, probability_percent: 50 }],
+    buildQuoteFacts(quotes),
+    "org"
+  );
+  assert.equal(forecastFacts[0].status, "included");
+  assert.ok(forecastFacts[0].forecast_value > 0);
+
+  const bundle = finalizeIntelligenceBundle(
+    buildSalesIntelligenceBundle({
+      organizationId: "org",
+      enrichedFacts: [{ source_job_id: "j1", account_name: "Fox", created_at_source: "2026-05-01", worksheet_sqft: 100, reportDate: "2026-05-01", attributionStatus: "approved_mapped", normalizedSalesperson: "Casey" }],
+      worksheet: { rows: [{ id: "w1", job_id: "j1", color: "Antique Gray", stone: "ESF", total_worksheet_sqft: 50, job_creation_date: "5/1/2026", account_name: "Fox" }], available: true },
+      quotes,
+      forecasts: [{ quote_id: "q1", event_type: "forecast", event_at: "2026-05-15T00:00:00Z", forecast_value: 5000, probability_percent: 50 }],
+      mappings: { aliasesByNormMoraware: new Map() },
+      syncHealth: { latestGroupComplete: true },
+      facts: { available: true },
+      activities: [],
+      calendarRows: []
+    }),
+    parseDashboardFilters({ quickRange: "ytd" })
+  );
+  assert.ok(bundle.accountFacts.length >= 1);
+  assert.ok(bundle.accountFacts[0].currentSqft > 0);
+  console.log("ok: account facts current/prior from intelligence bundle");
+}
+
+{
+  const { buildSalesIntelligenceBundle, finalizeIntelligenceBundle } = await import("./salesIntelligenceFacts.js");
+  const { computeDashboardFromIntelligence } = await import("./salesDashboardMetrics.js");
+  const filters = parseDashboardFilters({ quickRange: "ytd", tab: "command_center" });
+  const bundle = finalizeIntelligenceBundle(
+    buildSalesIntelligenceBundle({
+      organizationId: "org",
+      enrichedFacts: [
+        { source_job_id: "j1", account_name: "Fox", created_at_source: "2026-05-01", worksheet_sqft: 200, reportDate: "2026-05-01", attributionStatus: "approved_mapped", normalizedSalesperson: "Casey", branch: "Lisbon" },
+        { source_job_id: "j2", account_name: "Fox", created_at_source: "2025-05-01", worksheet_sqft: 150, reportDate: "2025-05-01", attributionStatus: "approved_mapped", normalizedSalesperson: "Casey", branch: "Lisbon" }
+      ],
+      worksheet: { rows: [], available: false },
+      quotes: [],
+      forecasts: [],
+      mappings: { aliasesByNormMoraware: new Map() },
+      syncHealth: { latestGroupComplete: true, lastSyncAt: "2026-05-01" },
+      facts: { available: true },
+      activities: [],
+      calendarRows: []
+    }),
+    filters
+  );
+  const dash = computeDashboardFromIntelligence(bundle, filters);
+  assert.ok(dash.salesPerformance.monthlyYoY.some((m) => m.currentSqft > 0));
+  assert.ok(dash.salesPerformance.monthlyYoY.some((m) => m.priorSqft > 0));
+  assert.ok(dash.commandCenter.kpis.find((k) => k.id === "yoy_pct"));
+  assert.ok(dash.meta.dataCoverage);
+  assert.ok(Array.isArray(dash.meta.dataCoverage.caveats));
+  console.log("ok: YoY + data coverage from intelligence layer");
 }
 
 {

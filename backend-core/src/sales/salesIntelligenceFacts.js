@@ -1,12 +1,24 @@
 /**
- * Canonical sales intelligence rows — joins synced job facts with worksheet color/material facts.
- * Reads existing Supabase tables only; no new sync.
+ * Canonical sales intelligence layer — all dashboard domains from synced Supabase data.
+ * Reads existing tables only; no new sync; no mutations.
  */
 
 import { classifySalesColor } from "./salesColorClassification.js";
 import { normalizeAccountNameWithoutLocationPrefix } from "./salesAccountNameNormalizer.js";
 import { dashboardReportDateForMorawareJob } from "./morawareSqftActuals.js";
 import { dateInInclusiveRange } from "./salesDashboardFilters.js";
+
+export function metricUnavailable(reason) {
+  return { value: null, status: "unavailable", reason: String(reason ?? "Data unavailable") };
+}
+
+export function metricValue(value, reason) {
+  if (value == null || (typeof value === "object" && value.status === "unavailable")) {
+    return metricUnavailable(reason ?? value?.reason ?? "Data unavailable");
+  }
+  if (typeof value === "object" && "value" in value) return value;
+  return { value, status: "available" };
+}
 
 function normKey(s) {
   return String(s ?? "").trim().toLowerCase();
@@ -58,8 +70,65 @@ export function parseFlexibleDashboardDate(raw) {
 }
 
 function sqftVal(row) {
-  const n = Number(row?.worksheet_sqft ?? row?.total_worksheet_sqft ?? 0);
+  const n = Number(row?.worksheet_sqft ?? row?.total_worksheet_sqft ?? row?.job_sqft ?? 0);
   return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function normalizeColorLabel(raw) {
+  const s = String(raw ?? "").trim();
+  if (!s) return null;
+  return s.replace(/\s+/g, " ");
+}
+
+function materialProgramSignal(colorRaw, stoneRaw, roomRaw) {
+  const blob = `${colorRaw} ${stoneRaw} ${roomRaw}`.toLowerCase();
+  if (/\bremnant\b/.test(blob)) return "remnant";
+  if (/\bspecial scope\b/.test(blob)) return "special_scope";
+  if (/\bprogram\b/.test(blob)) return "program";
+  return "standard";
+}
+
+/**
+ * A. Production/job facts from sales_moraware_job_facts (+ attribution).
+ */
+export function buildProductionJobFacts({ organizationId, enrichedFacts = [], syncHealth, factsMeta }) {
+  return enrichedFacts.map((job) => ({
+    organization_id: organizationId,
+    job_id: normJobId(job.source_job_id),
+    job_name: String(job.job_name ?? job.source_job_id ?? "").trim() || null,
+    job_status: String(job.status_name ?? job.job_status ?? "").trim() || null,
+    job_creation_date: String(job.created_at_source ?? "").slice(0, 10) || null,
+    report_date: String(job.reportDate ?? dashboardReportDateForMorawareJob(job) ?? "").slice(0, 10) || null,
+    account_raw: String(job.account_name ?? "").trim() || null,
+    account_canonical: job.canonicalAccountName ?? null,
+    salesperson_raw: String(job.salesperson_name ?? "").trim() || null,
+    assigned_rep: job.assignedSalesperson ?? job.normalizedSalesperson ?? null,
+    normalized_salesperson: job.normalizedSalesperson ?? null,
+    branch: job.branch ?? null,
+    worksheet_sqft: sqftVal(job),
+    source_table: "sales_moraware_job_facts",
+    import_group_id: factsMeta?.importGroupId ?? syncHealth?.latestGroupId ?? null,
+    latest_sync_at: syncHealth?.lastSyncAt ?? null,
+    attribution_status: job.attributionStatus ?? null,
+    process_name: job.process_name ?? null
+  }));
+}
+
+/**
+ * B. Worksheet/material facts — one row per worksheet line (deduped).
+ */
+export function buildWorksheetMaterialFacts(params) {
+  const rows = buildWorksheetMaterialFactsInternal(params);
+  return rows.map((r) => ({
+    ...r,
+    color_normalized: normalizeColorLabel(r.color_raw),
+    material_program_signal: materialProgramSignal(r.color_raw, r.stone, r.room)
+  }));
+}
+
+/** Alias used across dashboard loaders */
+export function buildSalesIntelligenceRows(params) {
+  return buildWorksheetMaterialFacts(params);
 }
 
 /**
@@ -97,46 +166,7 @@ export function buildJobFactIndexes(enrichedFacts = []) {
   return { byJobId, byAccountDateName };
 }
 
-/**
- * Match one worksheet row to a prepared job fact row.
- * @returns {{ job: object|null, method: "job_id"|"account_date_job_name"|"account_date"|null }}
- */
-export function matchWorksheetRowToJob(wsRow, indexes) {
-  const jobId = normJobId(wsRow.job_id);
-  if (jobId && indexes.byJobId.has(jobId)) {
-    const jobs = indexes.byJobId.get(jobId);
-    return { job: jobs[0], method: "job_id" };
-  }
-
-  const acct = normKey(normalizeAccountNameWithoutLocationPrefix(wsRow.account_name) || wsRow.account_name);
-  const d =
-    parseFlexibleDashboardDate(wsRow.job_creation_date) ||
-    parseFlexibleDashboardDate(wsRow.reportDate) ||
-    null;
-  const name = normJobName(wsRow.job_name);
-
-  if (acct && d && name) {
-    const k = `${acct}|||${d}|||${name}`;
-    const jobs = indexes.byAccountDateName.get(k);
-    if (jobs?.length) return { job: jobs[0], method: "account_date_job_name" };
-  }
-
-  if (acct && d) {
-    const jobs = indexes.byAccountDateName.get(`${acct}|||${d}`);
-    if (jobs?.length === 1) return { job: jobs[0], method: "account_date" };
-  }
-
-  return { job: null, method: null };
-}
-
-/**
- * Build canonical intelligence rows — one row per active worksheet fact (never double-counted).
- * @param {object} params
- * @param {string} params.organizationId
- * @param {Array<object>} params.enrichedFacts
- * @param {Array<object>} params.worksheetRows
- */
-export function buildSalesIntelligenceRows({ organizationId, enrichedFacts = [], worksheetRows = [] }) {
+function buildWorksheetMaterialFactsInternal({ organizationId, enrichedFacts = [], worksheetRows = [] }) {
   const indexes = buildJobFactIndexes(enrichedFacts);
   const seen = new Set();
   const rows = [];
@@ -194,6 +224,38 @@ export function buildSalesIntelligenceRows({ organizationId, enrichedFacts = [],
   }
 
   return rows;
+}
+
+/**
+ * Match one worksheet row to a prepared job fact row.
+ * @returns {{ job: object|null, method: "job_id"|"account_date_job_name"|"account_date"|null }}
+ */
+export function matchWorksheetRowToJob(wsRow, indexes) {
+  const jobId = normJobId(wsRow.job_id);
+  if (jobId && indexes.byJobId.has(jobId)) {
+    const jobs = indexes.byJobId.get(jobId);
+    return { job: jobs[0], method: "job_id" };
+  }
+
+  const acct = normKey(normalizeAccountNameWithoutLocationPrefix(wsRow.account_name) || wsRow.account_name);
+  const d =
+    parseFlexibleDashboardDate(wsRow.job_creation_date) ||
+    parseFlexibleDashboardDate(wsRow.reportDate) ||
+    null;
+  const name = normJobName(wsRow.job_name);
+
+  if (acct && d && name) {
+    const k = `${acct}|||${d}|||${name}`;
+    const jobs = indexes.byAccountDateName.get(k);
+    if (jobs?.length) return { job: jobs[0], method: "account_date_job_name" };
+  }
+
+  if (acct && d) {
+    const jobs = indexes.byAccountDateName.get(`${acct}|||${d}`);
+    if (jobs?.length === 1) return { job: jobs[0], method: "account_date" };
+  }
+
+  return { job: null, method: null };
 }
 
 /**
@@ -450,4 +512,381 @@ export function topUnmatchedJobsBySqft(intelligenceRows, limit = 10) {
     byKey.set(k, slot);
   }
   return [...byKey.values()].sort((a, b) => b.sqft - a.sqft).slice(0, limit);
+}
+
+function quoteStatusFlags(status) {
+  const s = String(status ?? "").toLowerCase();
+  return {
+    is_open: /open|pending|sent|review/.test(s),
+    is_won: /won|accepted|approved|sold/.test(s),
+    is_lost: /lost|declined|cancel/.test(s),
+    is_draft: /draft/.test(s)
+  };
+}
+
+/**
+ * D. Quote facts from quote_headers.
+ */
+export function buildQuoteFacts(quotes = []) {
+  return quotes.map((q) => ({
+    quote_id: q.id,
+    quote_number: q.quote_number ?? null,
+    quote_source: q.quote_source ?? null,
+    customer_account: q.customer_name ?? null,
+    project_name: q.project_name ?? null,
+    status: q.quote_status ?? null,
+    created_date: String(q.created_at ?? "").slice(0, 10) || null,
+    updated_at: q.updated_at ?? null,
+    quote_value: Number(q.grand_total ?? q.subtotal) || 0,
+    estimated_sqft: Number(q.estimated_sqft) || 0,
+    sales_rep: q.sales_rep ?? null,
+    branch: q.branch ?? null,
+    partner_account_id: q.partner_account_id ?? null,
+    source_table: "quote_headers",
+    ...quoteStatusFlags(q.quote_status)
+  }));
+}
+
+/**
+ * E. Forecast facts — org-scoped via organization_id or quote_headers linkage.
+ */
+export function buildForecastFacts(forecastRows = [], quoteFacts = [], organizationId = "") {
+  const quoteById = new Map(quoteFacts.map((q) => [String(q.quote_id), q]));
+  const orgQuoteIds = new Set(quoteFacts.map((q) => String(q.quote_id)));
+
+  return forecastRows.map((e) => {
+    const quoteId = String(e.quote_id ?? "");
+    const linkedQuote = quoteById.get(quoteId) ?? null;
+    const hasOrg = String(e.organization_id ?? "").trim() === String(organizationId).trim();
+    const linkedToOrgQuote = orgQuoteIds.has(quoteId);
+    const included = hasOrg || linkedToOrgQuote;
+
+    return {
+      forecast_id: e.id ?? null,
+      quote_id: e.quote_id,
+      event_type: e.event_type ?? null,
+      forecast_date: String(e.event_at ?? e.forecast_date ?? e.created_at ?? "").slice(0, 10) || null,
+      sales_rep: e.sales_rep ?? linkedQuote?.sales_rep ?? null,
+      branch: e.branch ?? linkedQuote?.branch ?? null,
+      quote_value: Number(e.quote_value) || linkedQuote?.quote_value || 0,
+      probability_percent: Number(e.probability_percent) || 0,
+      forecast_value: Number(e.forecast_value) || 0,
+      forecast_sqft: Number(e.forecast_sqft ?? e.estimated_sqft) || linkedQuote?.estimated_sqft || 0,
+      linked_account: linkedQuote?.customer_account ?? null,
+      organization_id: e.organization_id ?? (linkedToOrgQuote ? organizationId : null),
+      status: included ? "included" : "excluded_missing_org",
+      reason: included ? null : "Missing quote_forecast_events.organization_id and no org quote_headers match"
+    };
+  });
+}
+
+/**
+ * C. Account facts — production + color + quote + forecast rollup.
+ */
+export function buildAccountFacts({ productionJobs = [], worksheetMaterial = [], quoteFacts = [], forecastFacts = [], currentRange, priorRange }) {
+  const curMap = new Map();
+  const priMap = new Map();
+
+  for (const j of productionJobs) {
+    const d = String(j.report_date ?? "").slice(0, 10);
+    const k = normKey(j.account_canonical || j.account_raw);
+    if (!k) continue;
+    if (currentRange && dateInInclusiveRange(d, currentRange)) {
+      const slot = curMap.get(k) || {
+        account: j.account_canonical || j.account_raw,
+        account_raw: j.account_raw,
+        branch: j.branch,
+        assigned_rep: j.assigned_rep,
+        currentSqft: 0,
+        jobCount: 0,
+        lastJobDate: "",
+        attribution_status: j.attribution_status
+      };
+      slot.currentSqft += j.worksheet_sqft;
+      slot.jobCount += 1;
+      if (d > slot.lastJobDate) slot.lastJobDate = d;
+      curMap.set(k, slot);
+    }
+    if (priorRange && dateInInclusiveRange(d, priorRange)) {
+      priMap.set(k, { priorSqft: (priMap.get(k)?.priorSqft ?? 0) + j.worksheet_sqft, priorJobCount: (priMap.get(k)?.priorJobCount ?? 0) + 1 });
+    }
+  }
+
+  const colorByAccount = new Map();
+  for (const w of worksheetMaterial) {
+    const d = String(w.report_date ?? w.job_creation_date ?? "").slice(0, 10);
+    if (currentRange && !dateInInclusiveRange(d, currentRange)) continue;
+    const k = normKey(w.account_canonical || w.account_raw);
+    if (!k) continue;
+    const slot = colorByAccount.get(k) || { eliteSqft: 0, outSqft: 0, unknownSqft: 0, totalSqft: 0 };
+    slot.totalSqft += w.worksheet_sqft;
+    if (w.collection_status === "elite100") slot.eliteSqft += w.worksheet_sqft;
+    else if (w.color_raw) slot.outSqft += w.worksheet_sqft;
+    else slot.unknownSqft += w.worksheet_sqft;
+    colorByAccount.set(k, slot);
+  }
+
+  const quoteByAccount = new Map();
+  for (const q of quoteFacts) {
+    const k = normKey(q.customer_account);
+    if (!k) continue;
+    quoteByAccount.set(k, (quoteByAccount.get(k) || 0) + 1);
+  }
+
+  const forecastByAccount = new Map();
+  for (const f of forecastFacts.filter((x) => x.status === "included")) {
+    const k = normKey(f.linked_account);
+    if (!k) continue;
+    forecastByAccount.set(k, (forecastByAccount.get(k) || 0) + (f.forecast_value || 0));
+  }
+
+  const keys = new Set([...curMap.keys(), ...priMap.keys()]);
+  const accounts = [];
+  for (const k of keys) {
+    const c = curMap.get(k) || { account: k, currentSqft: 0, jobCount: 0 };
+    const p = priMap.get(k) || { priorSqft: 0 };
+    const color = colorByAccount.get(k) || {};
+    const yoySqft = (c.currentSqft || 0) - (p.priorSqft || 0);
+    accounts.push({
+      account: c.account || k,
+      account_raw: c.account_raw ?? c.account,
+      branch: c.branch ?? null,
+      assigned_rep: c.assigned_rep ?? null,
+      currentSqft: c.currentSqft || 0,
+      priorSqft: p.priorSqft || 0,
+      yoySqft,
+      yoyPct: p.priorSqft > 0 ? (yoySqft / p.priorSqft) * 100 : null,
+      jobCount: c.jobCount || 0,
+      lastJobDate: c.lastJobDate || null,
+      attribution_status: c.attribution_status ?? null,
+      quoteCount: quoteByAccount.get(k) || 0,
+      forecastValue: forecastByAccount.get(k) || 0,
+      eliteShare: color.totalSqft > 0 ? (color.eliteSqft / color.totalSqft) * 100 : null,
+      outShare: color.totalSqft > 0 ? (color.outSqft / color.totalSqft) * 100 : null,
+      unknownShare: color.totalSqft > 0 ? (color.unknownSqft / color.totalSqft) * 100 : null,
+      isDormant: (p.priorSqft || 0) >= 100 && (c.currentSqft || 0) === 0
+    });
+  }
+  return accounts;
+}
+
+/**
+ * F. Production flow / install signals (honest availability).
+ */
+export function buildProductionFlowFacts({ productionJobs = [], activities = [], calendarRows = [], currentRange }) {
+  const availableSignals = [];
+  const missingSignals = [];
+
+  let activeJobCount = 0;
+  let completedJobCount = 0;
+  for (const j of productionJobs) {
+    const d = String(j.report_date ?? "").slice(0, 10);
+    if (currentRange && !dateInInclusiveRange(d, currentRange)) continue;
+    const st = String(j.job_status ?? "").toLowerCase();
+    if (/complete|closed|done/.test(st)) completedJobCount += 1;
+    else activeJobCount += 1;
+  }
+  if (productionJobs.length) availableSignals.push("job_status_from_sales_moraware_job_facts");
+
+  let calendarRowsInRange = 0;
+  if (calendarRows.length) {
+    availableSignals.push("moraware_calendar_schedule_rows");
+    for (const row of calendarRows) {
+      const d = String(row.calendar_date ?? "").slice(0, 10);
+      if (currentRange && dateInInclusiveRange(d, currentRange)) calendarRowsInRange += 1;
+    }
+  } else {
+    missingSignals.push("moraware_calendar_schedule_rows not loaded or empty");
+  }
+
+  let scheduledInstallCount = 0;
+  if (activities.length) {
+    availableSignals.push("brain_moraware_job_activities");
+    scheduledInstallCount = activities.filter((a) => a.scheduled_date).length;
+  } else {
+    missingSignals.push("brain_moraware_job_activities not loaded or empty");
+  }
+
+  return {
+    activeJobCount,
+    completedJobCount,
+    scheduledInstallCount,
+    calendarRowsInRange,
+    availableSignals,
+    missingSignals,
+    installSummary:
+      calendarRowsInRange > 0
+        ? { rowsInRange: calendarRowsInRange, source: "moraware_calendar_schedule_rows" }
+        : metricUnavailable("No calendar schedule rows in selected date range"),
+    backlogReason: "Production backlog not normalized in synced tables",
+    capacityReason: "Capacity utilization not normalized in synced tables"
+  };
+}
+
+/**
+ * G. Data quality fact candidates.
+ */
+export function buildDataQualityFacts({ productionJobs = [], worksheetMaterial = [], mappings, syncHealth, forecastFacts = [] }) {
+  const issues = [];
+  const unmapped = productionJobs.filter((j) => j.attribution_status !== "approved_mapped");
+  if (unmapped.length) {
+    issues.push({ type: "unmapped_account", count: unmapped.length, sqftImpact: unmapped.reduce((s, j) => s + j.worksheet_sqft, 0) });
+  }
+  const missingSqft = productionJobs.filter((j) => j.worksheet_sqft <= 0);
+  if (missingSqft.length) issues.push({ type: "missing_sqft", count: missingSqft.length });
+  const missingRep = productionJobs.filter((j) => !j.assigned_rep && !j.normalized_salesperson);
+  if (missingRep.length) issues.push({ type: "missing_salesperson", count: missingRep.length });
+  const unmatchedWs = worksheetMaterial.filter((w) => !w.join_method);
+  if (unmatchedWs.length) issues.push({ type: "unmatched_worksheet_rows", count: unmatchedWs.length, sqftImpact: unmatchedWs.reduce((s, w) => s + w.worksheet_sqft, 0) });
+  const missingOrgForecasts = forecastFacts.filter((f) => f.status === "excluded_missing_org");
+  if (missingOrgForecasts.length) issues.push({ type: "forecast_missing_org", count: missingOrgForecasts.length });
+  if (syncHealth?.latestGroupComplete === false) issues.push({ type: "sync_incomplete", count: 1 });
+  const excludedDates = worksheetMaterial.filter((w) => !w.job_creation_date && w.color_raw);
+  if (excludedDates.length) issues.push({ type: "date_parse_excluded", count: excludedDates.length });
+
+  return {
+    issueCandidates: issues,
+    aliasCount: mappings?.aliasesByNormMoraware?.size ?? 0,
+    assignmentCount: mappings?.assignments?.length ?? 0
+  };
+}
+
+function ymdRangeFromRows(rows, field) {
+  const dates = rows.map((r) => String(r[field] ?? "").slice(0, 10)).filter(Boolean).sort();
+  if (!dates.length) return { min: null, max: null };
+  return { min: dates[0], max: dates[dates.length - 1] };
+}
+
+/**
+ * Full intelligence bundle for dashboard metrics layer.
+ */
+export function buildSalesIntelligenceBundle(sources) {
+  const {
+    organizationId,
+    enrichedFacts = [],
+    worksheet,
+    quotes = [],
+    forecasts = [],
+    mappings,
+    syncHealth,
+    facts,
+    activities = [],
+    calendarRows = []
+  } = sources;
+
+  const worksheetRows = worksheet?.rows ?? [];
+  const productionJobs = buildProductionJobFacts({ organizationId, enrichedFacts, syncHealth, factsMeta: facts });
+  const worksheetMaterial = buildWorksheetMaterialFacts({ organizationId, enrichedFacts, worksheetRows });
+  const quoteFacts = buildQuoteFacts(quotes);
+  const forecastFacts = buildForecastFacts(forecasts, quoteFacts, organizationId);
+
+  const joinDiagnostics = summarizeIntelligenceJoinDiagnostics({
+    enrichedFacts,
+    worksheetRows,
+    intelligenceRows: worksheetMaterial
+  });
+
+  return {
+    organizationId,
+    productionJobs,
+    worksheetMaterial,
+    quoteFacts,
+    forecastFacts,
+    accountFacts: [],
+    productionFlow: {},
+    dataQuality: {},
+    syncHealth,
+    factsMeta: facts,
+    worksheetMeta: { rows: worksheetRows, available: worksheet.available ?? worksheetRows.length > 0 },
+    mappings,
+    joinDiagnostics,
+    activities,
+    calendarRows,
+    _buildAccountFacts: (currentRange, priorRange) =>
+      buildAccountFacts({ productionJobs, worksheetMaterial, quoteFacts, forecastFacts, currentRange, priorRange })
+  };
+}
+
+/** Attach account facts and production flow once date ranges known. */
+export function finalizeIntelligenceBundle(bundle, filters) {
+  return {
+    ...bundle,
+    accountFacts: bundle._buildAccountFacts(filters.dateRange, filters.priorRange),
+    productionFlow: buildProductionFlowFacts({
+      productionJobs: bundle.productionJobs,
+      activities: bundle.activities ?? [],
+      calendarRows: bundle.calendarRows ?? [],
+      currentRange: filters.dateRange
+    }),
+    dataQuality: buildDataQualityFacts({
+      productionJobs: bundle.productionJobs,
+      worksheetMaterial: bundle.worksheetMaterial,
+      mappings: bundle.mappings,
+      syncHealth: bundle.syncHealth,
+      forecastFacts: bundle.forecastFacts
+    })
+  };
+}
+
+/**
+ * meta.dataCoverage report for API response.
+ */
+export function buildDataCoverageReport(bundle, computed = {}) {
+  const quotes = bundle.quoteFacts ?? [];
+  const forecasts = bundle.forecastFacts ?? [];
+  const open = quotes.filter((q) => q.is_open).length;
+  const won = quotes.filter((q) => q.is_won).length;
+  const lost = quotes.filter((q) => q.is_lost).length;
+  const draft = quotes.filter((q) => q.is_draft).length;
+  const forecastsWithOrg = forecasts.filter((f) => f.status === "included").length;
+  const forecastsMissingOrg = forecasts.filter((f) => f.status === "excluded_missing_org").length;
+
+  const caveats = [];
+  if (forecastsMissingOrg > 0 && forecastsWithOrg === 0) {
+    caveats.push("Forecast metrics unavailable: quote_forecast_events lack organization_id and quote linkage");
+  }
+  if (bundle.joinDiagnostics?.worksheetSqftUnmatched > 0) {
+    caveats.push("Worksheet sqft exceeds matched job sqft for some rows — line-level vs job rollup difference");
+  }
+  if (computed.colorMix?.totalSqft != null && computed.production?.producedSqft != null) {
+    const jobSqft = computed.production.producedSqft;
+    const wsSqft = computed.colorMix.totalSqft;
+    if (Math.abs(jobSqft - wsSqft) / Math.max(jobSqft, 1) > 0.25) {
+      caveats.push("Job production sqft and worksheet classified sqft differ — both reported honestly");
+    }
+  }
+
+  return {
+    jobFacts: {
+      rows: bundle.productionJobs?.length ?? 0,
+      sqft: bundle.productionJobs?.reduce((s, j) => s + j.worksheet_sqft, 0) ?? 0,
+      dateRange: ymdRangeFromRows(bundle.productionJobs ?? [], "report_date")
+    },
+    worksheetFacts: {
+      rows: bundle.worksheetMeta?.rows?.length ?? 0,
+      sqft: bundle.joinDiagnostics?.worksheetSqft ?? 0,
+      rowsWithColor: bundle.joinDiagnostics?.worksheetRowsWithColor ?? 0,
+      rowsWithRoom: bundle.joinDiagnostics?.worksheetRowsWithRoom ?? 0,
+      rowsWithStone: bundle.joinDiagnostics?.worksheetRowsWithStone ?? 0
+    },
+    quotes: { rows: quotes.length, open, won, lost, draft },
+    forecasts: { rows: forecasts.length, rowsWithOrg: forecastsWithOrg, rowsMissingOrg: forecastsMissingOrg },
+    accounts: {
+      aliases: bundle.dataQuality?.aliasCount ?? bundle.mappings?.aliasesByNormMoraware?.size ?? 0,
+      assignments: bundle.dataQuality?.assignmentCount ?? 0,
+      unmapped: bundle.dataQuality?.issueCandidates?.find((i) => i.type === "unmapped_account")?.count ?? 0
+    },
+    colorClassification: {
+      classifiedSqft: bundle.joinDiagnostics?.classifiedWorksheetSqft ?? computed.colorMix?.totalSqft ?? null,
+      eliteSqft: bundle.joinDiagnostics?.elite100WorksheetSqft ?? computed.colorMix?.eliteSqft ?? null,
+      oocSqft: bundle.joinDiagnostics?.outOfCollectionWorksheetSqft ?? computed.colorMix?.outSqft ?? null,
+      unknownSqft: bundle.joinDiagnostics?.unknownWorksheetSqft ?? computed.colorMix?.unknownSqft ?? null
+    },
+    productionFlow: {
+      availableSignals: bundle.productionFlow?.availableSignals ?? [],
+      missingSignals: bundle.productionFlow?.missingSignals ?? []
+    },
+    confidenceScore: computed.dataConfidence ?? null,
+    caveats
+  };
 }

@@ -15,15 +15,17 @@ import "dotenv/config";
 import { createClient } from "@supabase/supabase-js";
 import { loadDashboardDataSources, resolveDashboardOrganizationId, partitionJobsByRange } from "../sales/salesDashboardDataSources.js";
 import { parseDashboardFilters } from "../sales/salesDashboardFilters.js";
-import { buildSalesDashboardResponse } from "../sales/salesDashboardAggregates.js";
 import { buildDashboardInsights, buildExecutiveSummary } from "../sales/salesDashboardInsights.js";
 import {
   buildColorAnalyticsFromIntelligenceRows,
+  buildSalesIntelligenceBundle,
+  finalizeIntelligenceBundle,
   parseFlexibleDashboardDate,
   summarizeIntelligenceJoinDiagnostics,
   topUnmatchedJobsBySqft,
   topWorksheetColorsBySqft
 } from "../sales/salesIntelligenceFacts.js";
+import { computeDashboardFromIntelligence } from "../sales/salesDashboardMetrics.js";
 
 function pickStr(v) {
   return v != null ? String(v).trim() : "";
@@ -131,7 +133,13 @@ async function main() {
   const supabase = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
 
   const sources = await loadDashboardDataSources(supabase, organizationId);
-  const { syncHealth, facts, enrichedFacts, worksheet, intelligenceRows, quotes, forecasts, mappings } = sources;
+  const { syncHealth, facts, enrichedFacts, worksheet, quotes, forecasts, mappings, activities, calendarRows } = sources;
+
+  const filtersParsed = parseDashboardFilters({ quickRange: "ytd", tab: "command_center" });
+  const intelligenceBundle = finalizeIntelligenceBundle(
+    buildSalesIntelligenceBundle({ ...sources, organizationId }),
+    filtersParsed
+  );
 
   const jobRange = ymdRange(facts.rows);
   const wsRange = ymdRange(worksheet.rows, "job_creation_date", (v) => parseFlexibleDashboardDate(v) || pickStr(v).slice(0, 10));
@@ -139,13 +147,8 @@ async function main() {
   const wsWithStone = worksheet.rows.filter((r) => pickStr(r.stone)).length;
   const wsWithRoom = worksheet.rows.filter((r) => pickStr(r.room)).length;
 
-  const joinDiagnostics = summarizeIntelligenceJoinDiagnostics({
-    enrichedFacts,
-    worksheetRows: worksheet.rows,
-    intelligenceRows
-  });
-
-  const filtersParsed = parseDashboardFilters({ quickRange: "ytd", tab: "command_center" });
+  const joinDiagnostics = intelligenceBundle.joinDiagnostics;
+  const intelligenceRows = intelligenceBundle.worksheetMaterial;
   const { current: currentJobs } = partitionJobsByRange(enrichedFacts, filtersParsed.dateRange, filtersParsed.priorRange);
 
   const colorAnalytics = buildColorAnalyticsFromIntelligenceRows(
@@ -179,15 +182,14 @@ async function main() {
   const quoteCount = await countTable(supabase, "quote_headers", organizationId);
   const forecastCount = await countTable(supabase, "quote_forecast_events", organizationId);
 
-  const dashboardBody = buildSalesDashboardResponse({ sources, filters: filtersParsed });
-  const kpisFlat = {
-    currentSqft: dashboardBody.commandCenter.kpis.find((k) => k.id === "produced_sqft")?.value,
-    priorSqft: dashboardBody.salesPerformance.monthlyYoY.reduce((s, m) => s + (m.priorSqft || 0), 0) || null,
-    yoyPct: dashboardBody.commandCenter.kpis.find((k) => k.id === "yoy_pct")?.value,
-    unknownColorShare: dashboardBody.colorsMaterials?.unknownShare
-  };
+  const dashboardBody = computeDashboardFromIntelligence(intelligenceBundle, filtersParsed);
   dashboardBody.commandCenter.insights = buildDashboardInsights({
-    kpis: kpisFlat,
+    kpis: {
+      currentSqft: dashboardBody.commandCenter.kpis.find((k) => k.id === "produced_sqft")?.value,
+      priorSqft: dashboardBody.salesPerformance.monthlyYoY.reduce((s, m) => s + (m.priorSqft || 0), 0) || null,
+      yoyPct: dashboardBody.commandCenter.kpis.find((k) => k.id === "yoy_pct")?.value,
+      unknownColorShare: dashboardBody.colorsMaterials?.unknownShare
+    },
     repSummary: dashboardBody.salesPerformance.repSummary,
     accountSummary: dashboardBody.accounts,
     colorMix: dashboardBody.colorsMaterials,
@@ -196,7 +198,11 @@ async function main() {
     production: dashboardBody.productionFlow
   });
   dashboardBody.executiveSummary = buildExecutiveSummary({
-    kpis: kpisFlat,
+    kpis: {
+      currentSqft: dashboardBody.commandCenter.kpis.find((k) => k.id === "produced_sqft")?.value,
+      yoyPct: dashboardBody.commandCenter.kpis.find((k) => k.id === "yoy_pct")?.value,
+      unknownColorShare: dashboardBody.colorsMaterials?.unknownShare
+    },
     repSummary: dashboardBody.salesPerformance.repSummary,
     accountSummary: dashboardBody.accounts,
     colorMix: dashboardBody.colorsMaterials,
@@ -235,7 +241,14 @@ async function main() {
       latestGroupId: syncHealth?.latestGroupId ?? null
     },
     quotes: { loadedForDashboard: quotes.length, tableCount: quoteCount.count, tableError: quoteCount.error },
-    forecasts: { loadedForDashboard: forecasts.length, tableCount: forecastCount.count, tableError: forecastCount.error },
+    forecasts: {
+      loadedForDashboard: intelligenceBundle.forecastFacts.filter((f) => f.status === "included").length,
+      tableCount: forecastCount.count,
+      tableError: forecastCount.error,
+      rowsMissingOrg: intelligenceBundle.forecastFacts.filter((f) => f.status === "excluded_missing_org").length
+    },
+    productionFlow: dashboardBody.meta.dataCoverage?.productionFlow,
+    dataCoverage: dashboardBody.meta.dataCoverage,
     attributionMappings: {
       aliasRows: mappingCounts.aliases,
       assignmentRows: mappingCounts.assignments,
@@ -244,7 +257,7 @@ async function main() {
     currentPeriodYtd: {
       jobCount: currentJobs.length,
       totalSqft: Math.round(totalCurrentSqft),
-      dashboardProducedSqft: kpisFlat.currentSqft,
+      dashboardProducedSqft: dashboardBody.commandCenter.kpis.find((k) => k.id === "produced_sqft")?.value,
       worksheetClassifiedSqft: Math.round(colorAnalytics.colorRows.reduce((s, r) => s + r.sqft, 0)),
       dashboardClassifiedSqft: payloadSummary.bounded.classifiedSqft,
       dashboardEliteSharePct: payloadSummary.bounded.eliteShare,
@@ -298,9 +311,17 @@ async function main() {
   console.log(`  Latest sync: ${report.sync.lastSyncAt ?? "—"}`);
   console.log(`  Latest import group complete: ${report.sync.latestGroupComplete ? "yes" : "no"}`);
 
-  console.log("\nQuote Library / forecast");
-  console.log(`  Quote headers (table / loaded): ${report.quotes.tableCount ?? "?"} / ${report.quotes.loadedForDashboard}`);
-  console.log(`  Forecast events (table / loaded): ${report.forecasts.tableCount ?? "?"} / ${report.forecasts.loadedForDashboard}`);
+  console.log("\nForecast events");
+  console.log(`  Table / org-scoped loaded: ${report.forecasts.tableCount ?? "?"} / ${report.forecasts.loadedForDashboard}`);
+  console.log(`  Missing organization_id: ${report.forecasts.rowsMissingOrg ?? 0}`);
+
+  console.log("\nProduction flow signals");
+  console.log(`  Available: ${(report.productionFlow?.availableSignals ?? []).join(", ") || "—"}`);
+  console.log(`  Missing: ${(report.productionFlow?.missingSignals ?? []).join(", ") || "—"}`);
+
+  console.log("\nData coverage caveats");
+  for (const c of report.dataCoverage?.caveats ?? []) console.log(`  · ${c}`);
+  if (!(report.dataCoverage?.caveats ?? []).length) console.log("  (none)");
 
   console.log("\nAccount mappings");
   console.log(`  Aliases: ${report.attributionMappings.aliasRows ?? "—"}`);

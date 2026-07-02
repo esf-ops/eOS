@@ -7,7 +7,7 @@ import { loadApprovedSalesAttributionMappings, classifySalesJob } from "./salesA
 import { normalizeAccountNameWithoutLocationPrefix } from "./salesAccountNameNormalizer.js";
 import { dashboardReportDateForMorawareJob } from "./morawareSqftActuals.js";
 import { dateInInclusiveRange } from "./salesDashboardFilters.js";
-import { buildSalesIntelligenceRows } from "./salesIntelligenceFacts.js";
+import { buildSalesIntelligenceBundle } from "./salesIntelligenceFacts.js";
 
 const PAGE = 1000;
 
@@ -187,13 +187,64 @@ export async function loadQuoteHeaders(supabase, organizationId) {
   }
 }
 
-export async function loadForecastEvents(supabase, organizationId) {
+export async function loadForecastEvents(supabase, organizationId, quoteIds = []) {
+  try {
+    const cols =
+      "id,quote_id,event_type,event_at,sales_rep,branch,quote_value,probability_percent,forecast_value,organization_id,metadata";
+    let rows = [];
+    let q = supabase.from("quote_forecast_events").select(cols).order("event_at", { ascending: false }).limit(5000);
+    if (organizationId) q = q.eq("organization_id", organizationId);
+    const { data, error } = await q;
+    if (error) throw error;
+    rows = data ?? [];
+
+    if (!rows.length && quoteIds.length) {
+      const { data: linked, error: linkErr } = await supabase
+        .from("quote_forecast_events")
+        .select(cols)
+        .in("quote_id", quoteIds.slice(0, 500))
+        .order("event_at", { ascending: false })
+        .limit(5000);
+      if (!linkErr && linked?.length) rows = linked;
+    }
+
+    return rows.map((e) => ({
+      ...e,
+      created_at: e.event_at,
+      forecast_date: e.event_at,
+      forecast_sqft: e.metadata?.forecast_sqft ?? e.metadata?.estimated_sqft ?? null
+    }));
+  } catch (e) {
+    if (isMissingRelationError(e)) return [];
+    throw e;
+  }
+}
+
+export async function loadJobActivities(supabase, organizationId) {
   try {
     let q = supabase
-      .from("quote_forecast_events")
-      .select("quote_id,event_type,sales_rep,branch,quote_value,probability_percent,forecast_value,created_at")
-      .order("created_at", { ascending: false })
-      .limit(2000);
+      .from("brain_moraware_job_activities")
+      .select("source_job_id,source_activity_id,activity_type_name,phase_name,scheduled_date,status_name")
+      .order("scheduled_date", { ascending: false })
+      .limit(5000);
+    if (organizationId) q = q.eq("organization_id", organizationId);
+    const { data, error } = await q;
+    if (error) throw error;
+    return data ?? [];
+  } catch (e) {
+    if (isMissingRelationError(e)) return [];
+    throw e;
+  }
+}
+
+export async function loadCalendarScheduleRows(supabase, organizationId) {
+  try {
+    let q = supabase
+      .from("moraware_calendar_schedule_rows")
+      .select("id,calendar_date,job_id,moraware_job_id,job_name,account_name,sqft,activity_type,activity_status,truck_or_crew_name,is_active")
+      .eq("is_active", true)
+      .order("calendar_date", { ascending: false })
+      .limit(5000);
     if (organizationId) q = q.eq("organization_id", organizationId);
     const { data, error } = await q;
     if (error) throw error;
@@ -248,34 +299,49 @@ export function partitionJobsByRange(enrichedRows, currentRange, priorRange) {
 }
 
 export async function loadDashboardDataSources(supabase, organizationId) {
-  const [syncHealth, mappings, quotes, forecasts] = await Promise.all([
+  const [syncHealth, mappings, quotes] = await Promise.all([
     loadMorawareSyncHealth(supabase, organizationId),
     loadApprovedSalesAttributionMappings(supabase),
-    loadQuoteHeaders(supabase, organizationId),
-    loadForecastEvents(supabase, organizationId)
+    loadQuoteHeaders(supabase, organizationId)
   ]);
 
-  const facts = await loadPreparedJobFacts(supabase, organizationId, syncHealth);
-  const worksheet = await loadWorksheetColorRows(supabase, organizationId);
+  const quoteIds = quotes.map((q) => q.id).filter(Boolean);
+  const [forecasts, facts, worksheet, activities, calendarRows] = await Promise.all([
+    loadForecastEvents(supabase, organizationId, quoteIds),
+    loadPreparedJobFacts(supabase, organizationId, syncHealth),
+    loadWorksheetColorRows(supabase, organizationId),
+    loadJobActivities(supabase, organizationId),
+    loadCalendarScheduleRows(supabase, organizationId)
+  ]);
 
   const aliasByNorm = mappings?.aliasesByNormMoraware ?? new Map();
-
   const enrichedFacts = facts.rows.map((f) => enrichPreparedFactRow(f, mappings, aliasByNorm));
 
-  const intelligenceRows = buildSalesIntelligenceRows({
+  const intelligenceBundle = buildSalesIntelligenceBundle({
     organizationId,
-    enrichedFacts,
-    worksheetRows: worksheet.rows
-  });
-
-  return {
     syncHealth,
     mappings,
     facts,
     enrichedFacts,
     worksheet,
-    intelligenceRows,
     quotes,
-    forecasts
+    forecasts,
+    activities,
+    calendarRows
+  });
+
+  return {
+    organizationId,
+    syncHealth,
+    mappings,
+    facts,
+    enrichedFacts,
+    worksheet,
+    intelligenceRows: intelligenceBundle.worksheetMaterial,
+    intelligenceBundle,
+    quotes,
+    forecasts,
+    activities,
+    calendarRows
   };
 }
