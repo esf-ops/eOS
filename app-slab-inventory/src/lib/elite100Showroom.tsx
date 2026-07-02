@@ -51,7 +51,7 @@ export function Elite100ShowroomSection({
       <div className="e100-rail-wrap">
         <div className="e100-rail" ref={railRef} role="list" aria-label={`Group ${group.price_group} colors`}>
           {group.items.map((item) => (
-            <div key={item.catalog_item_id} role="listitem">
+            <div key={item.color_key} role="listitem">
               <Elite100ShowroomCard item={item} onOpen={onOpenItem ? () => onOpenItem(item) : undefined} />
             </div>
           ))}

@@ -84,17 +84,19 @@ export function parsePhotoFilename(filename) {
   const cleaned = base.replace(/[_]+/g, " ").trim();
 
   let globalIndex = null;
-  const leadingNum = cleaned.match(/^(\d{1,3})\s*[-.]?\s*(.*)$/);
+  let variantSuffix = null;
+  const leadingNum = cleaned.match(/^(\d{1,3})([A-Za-z])?(?:\s+|[-_.]\s*|\s*[-_.]|$)(.*)$/);
   if (leadingNum) {
     const n = parseInt(leadingNum[1], 10);
     if (Number.isFinite(n) && n >= 1 && n <= 100) {
       globalIndex = n;
+      variantSuffix = leadingNum[2] ? leadingNum[2].toUpperCase() : null;
     }
   }
 
   let groupPrefix = null;
   let groupSort = null;
-  let remainder = leadingNum ? leadingNum[2].trim() : cleaned;
+  let remainder = leadingNum ? leadingNum[3].trim() : cleaned;
 
   const promoMatch = remainder.match(/^Promo\s*[-.]?\s*(\d{1,2})?\s*(.*)$/i);
   if (promoMatch) {
@@ -110,9 +112,13 @@ export function parsePhotoFilename(filename) {
     }
   }
 
+  const parsedFinish = extractFilenameFinish(remainder);
+
   return {
     base,
     globalIndex,
+    variantSuffix,
+    parsedFinish,
     groupPrefix,
     groupSort,
     colorText: remainder,
@@ -133,12 +139,33 @@ function catalogItemFromDbRow(row) {
   };
 }
 
+/** Finish words recognized in Elite 100 photo filenames. */
+export const ELITE100_FILENAME_FINISH_WORDS = Object.freeze([
+  "polished",
+  "leathered",
+  "honed",
+  "brushed",
+  "matte",
+  "satin",
+]);
+
+/** Detect finish from filename color text (before normalization strips it). */
+export function extractFilenameFinish(colorText) {
+  const text = String(colorText ?? "");
+  for (const word of ELITE100_FILENAME_FINISH_WORDS) {
+    if (new RegExp(`\\b${word}\\b`, "i").test(text)) {
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    }
+  }
+  return null;
+}
+
 /** Strip finish suffixes and duplicate trailing index numbers from filename color tokens. */
 export function extractFilenameColorTokens(parsed) {
   let text = String(parsed?.colorText ?? "").trim();
   text = text.replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
   text = text.replace(/\b(polished|leathered|honed|brushed|matte|satin)\b/gi, "").trim();
-  text = text.replace(/\s+\d{1,3}$/, "").trim();
+  text = text.replace(/\s+\d{1,3}[A-Za-z]?$/, "").trim();
   text = text.replace(/[\s\-_]+$/g, "").trim();
 
   let slug = slugifyElite100ColorName(text);
@@ -457,7 +484,7 @@ export function matchPhotoToCatalogItem(filename, catalogItems, fixtureFlat = []
       mapping_override: 1,
     };
 
-    if (parsed.globalIndex != null) {
+    if (parsed.globalIndex != null && !parsed.variantSuffix && opts.skipIndexCrossValidation !== true) {
       if (!indexCatalogItem) {
         return matchResult({
           matchMethod: "invalid_index",
@@ -610,6 +637,7 @@ export function applyBatchDuplicateTargets(entries) {
 
   for (const entry of list) {
     if (entry.matchStatus !== ELITE100_MATCH_STATUS.SAFE || !entry.catalogItem?.id) continue;
+    if (entry.variantKey || entry.parsed?.variantSuffix) continue;
     const id = entry.catalogItem.id;
     if (!byCatalogId.has(id)) byCatalogId.set(id, []);
     byCatalogId.get(id).push(entry);
@@ -698,7 +726,9 @@ export function buildElite100ManualStoragePaths(orgId, catalogItemId, productSlu
   const safeSlug = slugifyElite100ColorName(productSlug) || "unknown-color";
   const heroMaxPx = Math.max(400, Number(opts.heroMaxPx) || 2048);
   const originalExt = String(opts.originalExt ?? ".jpg").toLowerCase();
-  const folder = `org/${safeOrg}/elite100-visual/${safeSlug}-${String(catalogItemId ?? "unlinked").slice(0, 8)}`;
+  const variantKey = opts.variantKey ? String(opts.variantKey).trim() : "";
+  const slugSegment = variantKey ? `${safeSlug}--${slugifyElite100ColorName(variantKey)}` : safeSlug;
+  const folder = `org/${safeOrg}/elite100-visual/${slugSegment}-${String(catalogItemId ?? "unlinked").slice(0, 8)}`;
   return {
     thumbPath: `${folder}/thumb-600.jpg`,
     heroPath: `${folder}/hero-${heroMaxPx}.jpg`,
@@ -742,6 +772,11 @@ export function buildManualVisualAssetRow({
   contentHash,
   sourceFile,
   matchMethod,
+  variantKey = null,
+  variantSuffix = null,
+  finish = null,
+  proposedDisplayName = null,
+  isPrimary = true,
 }) {
   if (!orgId || !catalogItem?.id) return null;
   if (!publicUrls?.heroUrl) return null;
@@ -750,6 +785,8 @@ export function buildManualVisualAssetRow({
   const displayHeroUrl = publicUrls.heroUrl;
   const displayThumbUrl = publicUrls.thumbUrl ?? displayHeroUrl;
   const fullResUrl = publicUrls.originalUrl ?? null;
+  const baseSlug = catalogItem.product_slug ?? slugifyElite100ColorName(catalogItem.color_name);
+  const productSlug = variantKey ? `${baseSlug}--${slugifyElite100ColorName(variantKey)}` : baseSlug;
 
   return {
     organization_id: orgId,
@@ -758,12 +795,12 @@ export function buildManualVisualAssetRow({
     source_public_slug: null,
     source_api_company_code: null,
     source_asset_company_code: null,
-    source_color_name: catalogItem.color_name,
+    source_color_name: proposedDisplayName ?? catalogItem.color_name,
     source_material_name: catalogItem.material_name ?? null,
     normalized_color_name: catalogItem.normalized_color_name,
     normalized_material_name: catalogItem.normalized_material_name ?? null,
     source_price_group: catalogItem.price_group ?? null,
-    product_slug: catalogItem.product_slug ?? slugifyElite100ColorName(catalogItem.color_name),
+    product_slug: productSlug,
     texture_hash: contentHash ?? null,
     texture_url_600: displayThumbUrl,
     texture_url_1024: displayHeroUrl,
@@ -772,7 +809,7 @@ export function buildManualVisualAssetRow({
     hero_url: displayHeroUrl,
     asset_kind: ELITE100_MANUAL_ASSET_KIND,
     review_status: ELITE100_MANUAL_REVIEW_STATUS,
-    is_primary: true,
+    is_primary: Boolean(isPrimary),
     is_active: true,
     confidence_score: null,
     match_method: matchMethod === "mapping_override" ||
@@ -792,6 +829,12 @@ export function buildManualVisualAssetRow({
       storage_original_path: publicUrls.storageOriginalPath ?? null,
       stores_original_image_url: Boolean(fullResUrl),
       match_method: matchMethod ?? null,
+      display_variant: Boolean(variantKey),
+      variant_key: variantKey ?? null,
+      variant_suffix: variantSuffix ?? null,
+      finish: finish ?? null,
+      proposed_display_name: proposedDisplayName ?? null,
+      base_catalog_color_name: catalogItem.color_name ?? null,
     },
     last_seen_at: now,
   };
@@ -915,4 +958,305 @@ export function computeManualPhotoDryRunSummary(entries) {
     audit_rows: list.map(formatManualPhotoAuditRow),
     entries: list.map(formatManualPhotoDryRunEntry),
   };
+}
+
+// ── V2 import plan (batch scan, skip existing, dual-finish variants) ─────────
+
+export const ELITE100_IMPORT_ACTION = Object.freeze({
+  SKIP_EXISTING: "SKIP_EXISTING",
+  INSERT: "INSERT",
+  INSERT_VARIANT: "INSERT_VARIANT",
+  CONFLICT: "CONFLICT",
+  UNMATCHED: "UNMATCHED",
+  AMBIGUOUS: "AMBIGUOUS",
+});
+
+/** Stable variant key for dual-finish photos (e.g. leathered-a). */
+export function buildElite100VariantKey({ variantSuffix, finish }) {
+  if (!variantSuffix) return null;
+  const suffix = String(variantSuffix).trim().toLowerCase();
+  const finishPart = finish ? slugifyElite100ColorName(finish) : "finish";
+  return `${finishPart}-${suffix}`;
+}
+
+/** Showroom display name for a dual-finish variant card. */
+export function buildVariantDisplayName(baseColorName, finish) {
+  const base = String(baseColorName ?? "").trim() || "Color";
+  if (!finish) return `${base} - Alternate Finish`;
+  const normalized = String(finish).trim().toLowerCase();
+  if (normalized === "leathered") return `${base} - Leathered`;
+  if (normalized === "honed") return `${base} - Honed`;
+  if (normalized === "polished") return `${base} - Polished`;
+  if (normalized === "brushed") return `${base} - Brushed`;
+  if (normalized === "matte") return `${base} - Matte`;
+  if (normalized === "satin") return `${base} - Satin`;
+  return `${base} - ${finish}`;
+}
+
+/**
+ * Index existing manual visual assets for skip/overwrite decisions.
+ * @param {Array} rows  Existing slab_color_visual_assets rows
+ */
+export function indexExistingManualVisualAssets(rows) {
+  const primaryByCatalogId = new Map();
+  const variantByKey = new Map();
+  const hashByFilename = new Map();
+
+  for (const row of rows ?? []) {
+    if (row.source_system && row.source_system !== ELITE100_MANUAL_SOURCE_SYSTEM) continue;
+    const catalogId = row.catalog_item_id;
+    if (!catalogId) continue;
+
+    const raw = row.raw ?? {};
+    const variantKey = raw.variant_key ?? null;
+    const sourceFilename = raw.source_filename ?? null;
+    if (sourceFilename && row.texture_hash) {
+      hashByFilename.set(sourceFilename, row);
+    }
+
+    if (variantKey || raw.display_variant === true) {
+      variantByKey.set(`${catalogId}::${variantKey ?? row.product_slug ?? row.id}`, row);
+      continue;
+    }
+
+    if (row.is_primary) {
+      primaryByCatalogId.set(catalogId, row);
+    }
+  }
+
+  return { primaryByCatalogId, variantByKey, hashByFilename };
+}
+
+function matchStatusToImportAction(matchStatus) {
+  switch (matchStatus) {
+    case ELITE100_MATCH_STATUS.GLOBAL_INDEX_NAME_CONFLICT:
+    case ELITE100_MATCH_STATUS.INVALID_INDEX:
+    case ELITE100_MATCH_STATUS.CATALOG_COLOR_MISSING:
+    case ELITE100_MATCH_STATUS.DUPLICATE_TARGET:
+      return ELITE100_IMPORT_ACTION.CONFLICT;
+    case ELITE100_MATCH_STATUS.AMBIGUOUS:
+      return ELITE100_IMPORT_ACTION.AMBIGUOUS;
+    case ELITE100_MATCH_STATUS.UNMATCHED:
+    default:
+      return ELITE100_IMPORT_ACTION.UNMATCHED;
+  }
+}
+
+/**
+ * Resolve v2 import action for one matched file.
+ * @param {Object} entry  Plan entry after matching
+ * @param {Object} existingIndex  From indexExistingManualVisualAssets
+ * @param {Object} [opts]
+ * @param {boolean} [opts.forceOverwrite=false]
+ */
+export function resolveImportAction(entry, existingIndex, opts = {}) {
+  const forceOverwrite = opts.forceOverwrite === true;
+  const label = entry.filename ?? path.basename(String(entry.fullPath ?? ""));
+
+  const existingByFilename = existingIndex.hashByFilename.get(label) ?? null;
+  if (existingByFilename && !forceOverwrite) {
+    entry.existingAsset = existingByFilename;
+    entry.existingAssetExists = true;
+    return ELITE100_IMPORT_ACTION.SKIP_EXISTING;
+  }
+
+  if (entry.matchStatus !== ELITE100_MATCH_STATUS.SAFE || !entry.catalogItem?.id) {
+    return matchStatusToImportAction(entry.matchStatus);
+  }
+
+  const catalogId = entry.catalogItem.id;
+  const variantKey = entry.variantKey ?? null;
+  const existingPrimary = existingIndex.primaryByCatalogId.get(catalogId) ?? null;
+  const existingVariant = variantKey
+    ? existingIndex.variantByKey.get(`${catalogId}::${variantKey}`) ?? null
+    : null;
+
+  entry.existingAsset = existingVariant ?? existingPrimary ?? existingByFilename ?? null;
+  entry.existingAssetExists = Boolean(entry.existingAsset);
+
+  if (variantKey) {
+    if (existingVariant) {
+      if (existingVariant.texture_hash === entry.contentHash || !forceOverwrite) {
+        return ELITE100_IMPORT_ACTION.SKIP_EXISTING;
+      }
+      return ELITE100_IMPORT_ACTION.CONFLICT;
+    }
+    return ELITE100_IMPORT_ACTION.INSERT_VARIANT;
+  }
+
+  if (existingPrimary || existingByFilename) {
+    if (!forceOverwrite) return ELITE100_IMPORT_ACTION.SKIP_EXISTING;
+    if (existingPrimary?.texture_hash === entry.contentHash) return ELITE100_IMPORT_ACTION.SKIP_EXISTING;
+    return ELITE100_IMPORT_ACTION.CONFLICT;
+  }
+
+  return ELITE100_IMPORT_ACTION.INSERT;
+}
+
+/** Enrich a v2 plan entry with variant metadata and import action. */
+export function enrichImportPlanEntryV2(entry, existingIndex, opts = {}) {
+  const parsed = entry.parsed ?? {};
+  const finish = parsed.parsedFinish ?? extractFilenameFinish(parsed.colorText);
+  const variantSuffix = parsed.variantSuffix ?? null;
+  const variantKey = variantSuffix
+    ? buildElite100VariantKey({ variantSuffix, finish })
+    : null;
+
+  entry.finish = finish;
+  entry.variantSuffix = variantSuffix;
+  entry.variantKey = variantKey;
+  entry.proposedDisplayName = variantKey
+    ? buildVariantDisplayName(entry.catalogItem?.color_name, finish)
+    : entry.catalogItem?.color_name ?? null;
+
+  if (entry.catalogItem?.id && entry.matchStatus === ELITE100_MATCH_STATUS.SAFE) {
+    const baseSlug = entry.catalogItem.product_slug ?? slugifyElite100ColorName(entry.catalogItem.color_name);
+    const storageSlug = variantKey ? `${baseSlug}--${slugifyElite100ColorName(variantKey)}` : baseSlug;
+    entry.storagePaths = buildElite100ManualStoragePaths(
+      opts.orgId,
+      entry.catalogItem.id,
+      storageSlug,
+      { heroMaxPx: opts.heroMaxPx, originalExt: entry.originalExt ?? ".jpg", variantKey }
+    );
+  }
+
+  entry.importAction = resolveImportAction(entry, existingIndex, opts);
+  return entry;
+}
+
+/** Format one v2 manifest row. */
+export function formatImportV2ManifestRow(entry) {
+  return {
+    filename: entry.filename ?? path.basename(String(entry.fullPath ?? "")),
+    parsed_number: entry.parsed?.globalIndex ?? null,
+    parsed_variant_suffix: entry.variantSuffix ?? entry.parsed?.variantSuffix ?? null,
+    parsed_finish: entry.finish ?? entry.parsed?.parsedFinish ?? null,
+    matched_base_color: entry.catalogItem?.color_name ?? null,
+    matched_catalog_item_id: entry.catalogItem?.id ?? null,
+    proposed_display_name: entry.proposedDisplayName ?? null,
+    variant_key: entry.variantKey ?? null,
+    existing_asset_exists: Boolean(entry.existingAssetExists),
+    existing_asset_id: entry.existingAsset?.id ?? null,
+    action: entry.importAction ?? ELITE100_IMPORT_ACTION.UNMATCHED,
+    match_method: entry.matchMethod ?? null,
+    match_status: entry.matchStatus ?? null,
+    blocker_detail: entry.warnings?.join(", ") ?? null,
+    planned_thumb_path: entry.storagePaths?.thumbPath ?? null,
+    planned_hero_path: entry.storagePaths?.heroPath ?? null,
+  };
+}
+
+/** Summarize v2 import plan for manifest + summary file. */
+export function computeImportV2Summary(entries) {
+  const list = Array.isArray(entries) ? entries : [];
+  const byAction = (action) => list.filter((e) => e.importAction === action);
+
+  const inserts = byAction(ELITE100_IMPORT_ACTION.INSERT);
+  const insertVariants = byAction(ELITE100_IMPORT_ACTION.INSERT_VARIANT);
+  const skips = byAction(ELITE100_IMPORT_ACTION.SKIP_EXISTING);
+  const conflicts = byAction(ELITE100_IMPORT_ACTION.CONFLICT);
+  const unmatched = byAction(ELITE100_IMPORT_ACTION.UNMATCHED);
+  const ambiguous = byAction(ELITE100_IMPORT_ACTION.AMBIGUOUS);
+
+  const applyBlocked = conflicts.length + unmatched.length + ambiguous.length > 0;
+
+  return {
+    total_files: list.length,
+    skip_existing: skips.length,
+    insert: inserts.length,
+    insert_variant: insertVariants.length,
+    conflict: conflicts.length,
+    unmatched: unmatched.length,
+    ambiguous: ambiguous.length,
+    apply_blocked: applyBlocked,
+    apply_allowed: !applyBlocked,
+    rows: list.map(formatImportV2ManifestRow),
+    insert_rows: inserts.map(formatImportV2ManifestRow),
+    insert_variant_rows: insertVariants.map(formatImportV2ManifestRow),
+    skip_existing_rows: skips.map(formatImportV2ManifestRow),
+    conflict_rows: conflicts.map(formatImportV2ManifestRow),
+    unmatched_rows: unmatched.map(formatImportV2ManifestRow),
+    ambiguous_rows: ambiguous.map(formatImportV2ManifestRow),
+  };
+}
+
+/** Human-readable v2 summary text for debug/elite100/photo-import-v2-summary.txt */
+export function formatImportV2SummaryText(summary) {
+  const lines = [
+    "Elite 100 Manual Photo Import V2 — Dry Run Summary",
+    "===================================================",
+    `Total files scanned:     ${summary.total_files}`,
+    `SKIP_EXISTING:           ${summary.skip_existing}`,
+    `INSERT:                  ${summary.insert}`,
+    `INSERT_VARIANT:          ${summary.insert_variant}`,
+    `CONFLICT:                ${summary.conflict}`,
+    `UNMATCHED:               ${summary.unmatched}`,
+    `AMBIGUOUS:               ${summary.ambiguous}`,
+    "",
+    `Apply allowed:           ${summary.apply_allowed ? "YES" : "NO"}`,
+    "",
+  ];
+
+  if (summary.insert_rows.length) {
+    lines.push("── New inserts ──");
+    for (const row of summary.insert_rows) {
+      lines.push(`  INSERT  ${row.filename} → ${row.matched_base_color}`);
+    }
+    lines.push("");
+  }
+
+  if (summary.insert_variant_rows.length) {
+    lines.push("── New dual-finish variants ──");
+    for (const row of summary.insert_variant_rows) {
+      lines.push(`  INSERT_VARIANT  ${row.filename} → ${row.proposed_display_name} (${row.variant_key})`);
+    }
+    lines.push("");
+  }
+
+  if (summary.skip_existing_rows.length) {
+    lines.push(`── Skipped existing (${summary.skip_existing_rows.length} files) ──`);
+    for (const row of summary.skip_existing_rows.slice(0, 20)) {
+      lines.push(`  SKIP_EXISTING  ${row.filename} → ${row.matched_base_color ?? row.proposed_display_name ?? "?"}`);
+    }
+    if (summary.skip_existing_rows.length > 20) {
+      lines.push(`  … and ${summary.skip_existing_rows.length - 20} more`);
+    }
+    lines.push("");
+  }
+
+  if (summary.conflict_rows.length) {
+    lines.push("── Conflicts (block apply) ──");
+    for (const row of summary.conflict_rows) {
+      lines.push(`  CONFLICT  ${row.filename} — ${row.blocker_detail ?? row.match_status ?? "conflict"}`);
+    }
+    lines.push("");
+  }
+
+  if (summary.unmatched_rows.length) {
+    lines.push("── Unmatched (block apply) ──");
+    for (const row of summary.unmatched_rows) {
+      lines.push(`  UNMATCHED  ${row.filename}`);
+    }
+    lines.push("");
+  }
+
+  if (summary.ambiguous_rows.length) {
+    lines.push("── Ambiguous (block apply) ──");
+    for (const row of summary.ambiguous_rows) {
+      lines.push(`  AMBIGUOUS  ${row.filename}`);
+    }
+    lines.push("");
+  }
+
+  return lines.join("\n");
+}
+
+/** Apply v2 enrichment + actions to a matched import plan. */
+export function finalizeImportPlanV2(plan, existingAssets, opts = {}) {
+  const existingIndex = indexExistingManualVisualAssets(existingAssets);
+  const list = Array.isArray(plan) ? plan : [];
+  for (const entry of list) {
+    enrichImportPlanEntryV2(entry, existingIndex, opts);
+  }
+  return list;
 }

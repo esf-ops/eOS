@@ -88,6 +88,83 @@ export function buildElite100CurrentInventoryImageFields(rep) {
   };
 }
 
+const ELITE100_MANUAL_SOURCE = "elite100_manual_local";
+
+/** True when a visual asset row is a dual-finish showroom variant (not the base primary). */
+export function isElite100FinishVariantAsset(asset) {
+  if (!asset || asset.is_active === false) return false;
+  if (asset.review_status !== "approved" && asset.review_status !== "imported") return false;
+  if (asset.source_system !== ELITE100_MANUAL_SOURCE) return false;
+  const raw = asset.raw ?? {};
+  if (raw.display_variant === true) return true;
+  if (raw.variant_key) return true;
+  return asset.is_primary === false && String(asset.product_slug ?? "").includes("--");
+}
+
+/** Build visual asset URL fields from one asset row (presentation only). */
+export function buildElite100VisualAssetFields(asset) {
+  if (!asset) {
+    return {
+      visual_asset_url: null,
+      visual_asset_url_600: null,
+      visual_asset_url_1024: null,
+      visual_asset_source: null,
+      visual_asset_kind: null,
+      visual_asset_review_status: null,
+    };
+  }
+  return {
+    visual_asset_url:
+      asset.texture_url_1024 ?? asset.hero_url ?? asset.original_image_url ?? asset.texture_url_600 ?? null,
+    visual_asset_url_600: asset.texture_url_600 ?? null,
+    visual_asset_url_1024: asset.texture_url_1024 ?? null,
+    visual_asset_source: asset.source_system ?? null,
+    visual_asset_kind: asset.asset_kind ?? null,
+    visual_asset_review_status: asset.review_status ?? null,
+  };
+}
+
+/**
+ * Build a separate showroom card for a dual-finish variant asset.
+ * Shares inventory counts with the base catalog color; image comes from the variant asset.
+ */
+export function buildElite100FinishVariantCard(baseCard, variantAsset) {
+  const raw = variantAsset.raw ?? {};
+  const variantKey = raw.variant_key ?? null;
+  const finish = raw.finish ?? null;
+  const displayName =
+    raw.proposed_display_name ??
+    variantAsset.source_color_name ??
+    (finish ? `${baseCard.color_name} - ${finish}` : `${baseCard.color_name} - Alternate Finish`);
+
+  return {
+    ...baseCard,
+    color_key: variantKey ? `${baseCard.color_key}--${variantKey}` : `${baseCard.color_key}--variant`,
+    color_name: displayName,
+    display_name: displayName,
+    is_finish_variant: true,
+    variant_key: variantKey,
+    base_color_name: baseCard.color_name,
+    base_catalog_item_id: baseCard.catalog_item_id,
+    ...buildElite100ReferenceImageFields(variantAsset),
+    ...buildElite100VisualAssetFields(variantAsset),
+  };
+}
+
+/**
+ * Collect finish-variant assets for one catalog item (sorted for stable carousel order).
+ * @param {Array} assets
+ */
+export function listElite100FinishVariantAssets(assets) {
+  return (Array.isArray(assets) ? assets : [])
+    .filter(isElite100FinishVariantAsset)
+    .sort((a, b) => {
+      const ak = a.raw?.variant_key ?? a.product_slug ?? "";
+      const bk = b.raw?.variant_key ?? b.product_slug ?? "";
+      return String(ak).localeCompare(String(bk));
+    });
+}
+
 /**
  * Count live inventory rows matched to a catalog item.
  * @param {{ rows?: Array, slabCount?: number, remnantCount?: number }} acc

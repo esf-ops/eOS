@@ -23,6 +23,11 @@ import {
   slugifyElite100ColorName,
   ELITE100_MANUAL_SOURCE_SYSTEM,
   ELITE100_MATCH_STATUS,
+  ELITE100_IMPORT_ACTION,
+  buildElite100VariantKey,
+  buildVariantDisplayName,
+  resolveImportAction,
+  indexExistingManualVisualAssets,
 } from "./elite100ManualVisualAssets.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -320,6 +325,128 @@ test("computeManualPhotoDryRunSummary reports safe vs blocked", () => {
   assert.equal(summary.safe_matches, 1);
   assert.equal(summary.conflicts, 1);
   assert.equal(summary.write_blocked, true);
+});
+
+test("parsePhotoFilename extracts variant A suffix and finish", () => {
+  const p = parsePhotoFilename("77A_Wiscon_White_Leathered_77A.jpg");
+  assert.equal(p.globalIndex, 77);
+  assert.equal(p.variantSuffix, "A");
+  assert.equal(p.parsedFinish, "Leathered");
+  const tokens = extractFilenameColorTokens(p);
+  assert.equal(tokens.normalized, "wiscon white");
+});
+
+test("matchPhotoToCatalogItem resolves 77A Wiscon White variant by name (skips index cross-validation)", () => {
+  const m = matchPhotoToCatalogItem("77A_Wiscon_White_Leathered_77A.jpg", fullCatalog, flat);
+  assert.equal(m.matchStatus, ELITE100_MATCH_STATUS.SAFE);
+  assert.equal(m.catalogItem.color_name, "Wiscon White");
+  assert.equal(m.parsed.variantSuffix, "A");
+});
+
+test("buildElite100VariantKey and display name for leathered variant", () => {
+  assert.equal(buildElite100VariantKey({ variantSuffix: "A", finish: "Leathered" }), "leathered-a");
+  assert.equal(buildVariantDisplayName("Wiscon White", "Leathered"), "Wiscon White - Leathered");
+});
+
+test("resolveImportAction skips existing primary base asset", () => {
+  const catalogId = fullCatalog[0].id;
+  const existingIndex = indexExistingManualVisualAssets([
+    {
+      catalog_item_id: catalogId,
+      source_system: ELITE100_MANUAL_SOURCE_SYSTEM,
+      is_primary: true,
+      texture_hash: "abc",
+      raw: { source_filename: "01.jpg" },
+    },
+  ]);
+  const entry = {
+    filename: "01.jpg",
+    matchStatus: ELITE100_MATCH_STATUS.SAFE,
+    catalogItem: fullCatalog[0],
+    variantKey: null,
+    contentHash: "abc",
+  };
+  assert.equal(resolveImportAction(entry, existingIndex), ELITE100_IMPORT_ACTION.SKIP_EXISTING);
+});
+
+test("resolveImportAction insert variant when no existing variant row", () => {
+  const wiscon = fullCatalog.find((c) => c.color_name === "Wiscon White");
+  const variantKey = buildElite100VariantKey({ variantSuffix: "A", finish: "Leathered" });
+  const existingIndex = indexExistingManualVisualAssets([
+    {
+      catalog_item_id: wiscon.id,
+      source_system: ELITE100_MANUAL_SOURCE_SYSTEM,
+      is_primary: true,
+      texture_hash: "base-hash",
+      raw: { source_filename: "33.jpg" },
+    },
+  ]);
+  const entry = {
+    filename: "77A_Wiscon_White_Leathered_77A.jpg",
+    matchStatus: ELITE100_MATCH_STATUS.SAFE,
+    catalogItem: wiscon,
+    variantKey,
+    contentHash: "variant-hash",
+  };
+  assert.equal(resolveImportAction(entry, existingIndex), ELITE100_IMPORT_ACTION.INSERT_VARIANT);
+});
+
+test("variant import does not overwrite base primary asset slot", () => {
+  const wiscon = fullCatalog.find((c) => c.color_name === "Wiscon White");
+  const variantKey = buildElite100VariantKey({ variantSuffix: "A", finish: "Leathered" });
+  const existingIndex = indexExistingManualVisualAssets([
+    {
+      id: "base-id",
+      catalog_item_id: wiscon.id,
+      source_system: ELITE100_MANUAL_SOURCE_SYSTEM,
+      is_primary: true,
+      texture_hash: "base-hash",
+      product_slug: "wiscon-white",
+      raw: {},
+    },
+  ]);
+  const entry = {
+    filename: "77A_Wiscon_White_Leathered_77A.jpg",
+    matchStatus: ELITE100_MATCH_STATUS.SAFE,
+    catalogItem: wiscon,
+    variantKey,
+    contentHash: "new-variant",
+  };
+  assert.equal(resolveImportAction(entry, existingIndex), ELITE100_IMPORT_ACTION.INSERT_VARIANT);
+  assert.equal(existingIndex.primaryByCatalogId.get(wiscon.id)?.id, "base-id");
+});
+
+test("resolveImportAction skips by source filename even when match would conflict", () => {
+  const lakedale = fullCatalog.find((c) => c.color_name === "Lakedale");
+  const existingIndex = indexExistingManualVisualAssets([
+    {
+      catalog_item_id: lakedale.id,
+      source_system: ELITE100_MANUAL_SOURCE_SYSTEM,
+      is_primary: true,
+      texture_hash: "existing-hash",
+      raw: { source_filename: "1. Lakedale_01.jpg" },
+    },
+  ]);
+  const entry = {
+    filename: "1. Lakedale_01.jpg",
+    matchStatus: ELITE100_MATCH_STATUS.GLOBAL_INDEX_NAME_CONFLICT,
+    catalogItem: null,
+    variantKey: null,
+  };
+  assert.equal(resolveImportAction(entry, existingIndex), ELITE100_IMPORT_ACTION.SKIP_EXISTING);
+});
+
+test("number name mismatch blocks apply for new files without variant suffix", () => {
+  const m = matchPhotoToCatalogItem("79. Warwick_79.jpg", fullCatalog, flat);
+  assert.equal(m.matchStatus, ELITE100_MATCH_STATUS.GLOBAL_INDEX_NAME_CONFLICT);
+  const existingIndex = indexExistingManualVisualAssets([]);
+  const entry = {
+    filename: "79. Warwick_79.jpg",
+    matchStatus: m.matchStatus,
+    catalogItem: null,
+    variantKey: null,
+  };
+  assert.equal(resolveImportAction(entry, existingIndex), ELITE100_IMPORT_ACTION.CONFLICT);
 });
 
 console.log("\nelite100ManualVisualAssets tests passed.");

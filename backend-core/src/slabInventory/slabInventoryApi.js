@@ -41,8 +41,10 @@ import {
 } from "./colorProgramMatching.js";
 import {
   buildElite100CurrentInventoryImageFields,
+  buildElite100FinishVariantCard,
   buildElite100ReferenceImageFields,
   ELITE100_INVENTORY_MATCH_COLUMNS,
+  listElite100FinishVariantAssets,
   summarizeElite100CurrentInventory,
 } from "./elite100CardModel.js";
 import {
@@ -73,11 +75,14 @@ export {
 
 export {
   buildElite100CurrentInventoryImageFields,
+  buildElite100FinishVariantCard,
   buildElite100ReferenceImageFields,
   chooseCatalogReferenceImageUrl,
   chooseCatalogReferenceImageUrlFull,
   catalogReferenceImageSourceLabel,
   ELITE100_INVENTORY_MATCH_COLUMNS,
+  isElite100FinishVariantAsset,
+  listElite100FinishVariantAssets,
   summarizeElite100CurrentInventory,
 } from "./elite100CardModel.js";
 
@@ -463,6 +468,22 @@ export function buildVisualAssetMap(assetRows) {
     if (best) result.set(itemId, best);
   }
   return result;
+}
+
+/**
+ * Build a Map<catalog_item_id → all active visual assets> for variant expansion.
+ * @param {Array} assetRows
+ * @returns {Map<string, Array>}
+ */
+export function buildVisualAssetsByCatalogId(assetRows) {
+  const byItemId = new Map();
+  for (const a of Array.isArray(assetRows) ? assetRows : []) {
+    if (!a.catalog_item_id) continue;
+    const list = byItemId.get(a.catalog_item_id) ?? [];
+    list.push(a);
+    byItemId.set(a.catalog_item_id, list);
+  }
+  return byItemId;
 }
 
 /**
@@ -1396,12 +1417,13 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
       // Non-fatal: if table is not installed yet, visual asset fields are null.
       const catalogItemIds = catalogItemList.map((c) => c.id).filter(Boolean);
       let visualAssetMap = new Map();
+      let visualAssetsByCatalogId = new Map();
       if (catalogItemIds.length) {
         try {
           let vaQ = supabase
             .from("slab_color_visual_assets")
             .select(
-              "catalog_item_id,texture_url_600,texture_url_1024,original_image_url,hero_url,asset_kind,review_status,is_primary,is_active,source_system"
+              "id,catalog_item_id,product_slug,texture_url_600,texture_url_1024,original_image_url,hero_url,asset_kind,review_status,is_primary,is_active,source_system,source_color_name,raw"
             )
             .eq("organization_id", organizationId)
             .eq("is_active", true)
@@ -1411,6 +1433,7 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
             if (!isMissingRelationError(vaErr)) throw vaErr;
             // table not installed yet — skip silently
           } else {
+            visualAssetsByCatalogId = buildVisualAssetsByCatalogId(vaRows ?? []);
             visualAssetMap = buildVisualAssetMap(vaRows ?? []);
           }
         } catch (e) {
@@ -1504,6 +1527,15 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
           card.match_debug = compactElite100MatchDebug(matchDebugByCatalogId.get(item.id));
         }
         groupsMap.get(pg).push(card);
+
+        const variantAssets = listElite100FinishVariantAssets(
+          visualAssetsByCatalogId.get(item.id) ?? []
+        );
+        for (const variantAsset of variantAssets) {
+          groupsMap.get(pg).push(
+            buildElite100FinishVariantCard(card, variantAsset)
+          );
+        }
       }
 
       const groups = COLOR_PROGRAM_PRICE_GROUP_ORDER.map((pg) => ({

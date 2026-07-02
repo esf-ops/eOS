@@ -30,6 +30,11 @@ export type Elite100ShowroomItem = {
   visual_asset_review_status: string | null;
   has_inventory: boolean;
   program_status: "elite_100";
+  /** Dual-finish showroom variant (same catalog color, separate visual card). */
+  is_finish_variant?: boolean;
+  variant_key?: string | null;
+  base_color_name?: string | null;
+  base_catalog_item_id?: string | null;
 };
 
 export type Elite100ShowroomGroup = {

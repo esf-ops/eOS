@@ -11,17 +11,25 @@
  *   - Uploads resized display JPEGs (thumb + hero) plus full-resolution originals.
  *   - Original bytes are uploaded unchanged (no resize/recompress).
  *
- * Usage (dry-run — match + summary only):
+ * Usage (dry-run — match + summary only; writes debug/elite100/photo-import-v2-manifest.json):
  *   ELITE100_PHOTO_SOURCE_DIR="$HOME/Desktop/Elite 100 Slab Photos/0. Final Edits" \
  *     npm run eos:elite100:import-manual-photos
  *
- * Usage (write — upload + DB insert):
+ * Usage (write — upload + DB insert; only INSERT / INSERT_VARIANT rows):
  *   ELITE100_MANUAL_PHOTO_WRITE_ENABLED=1 \
  *   ELITE100_PHOTO_SOURCE_DIR="$HOME/Desktop/Elite 100 Slab Photos/0. Final Edits" \
  *   SLABOS_ORGANIZATION_ID=<org-uuid> \
  *   SUPABASE_URL=https://... \
  *   SUPABASE_SERVICE_ROLE_KEY=... \
  *   npm run eos:elite100:import-manual-photos
+ *
+ * V2 behavior:
+ *   - Scans entire source folder; existing imports → SKIP_EXISTING
+ *   - New base photos → INSERT; A-suffix dual-finish → INSERT_VARIANT
+ *   - Does not overwrite existing assets unless ELITE100_MANUAL_PHOTO_FORCE_OVERWRITE=1
+ *   - Apply blocked on CONFLICT / UNMATCHED / AMBIGUOUS rows
+ *   - Manifest: debug/elite100/photo-import-v2-manifest.json
+ *   - Summary:  debug/elite100/photo-import-v2-summary.txt
  *
  * Environment:
  *   ELITE100_MANUAL_PHOTO_WRITE_ENABLED  "1" to upload + insert (default dry-run)
@@ -50,11 +58,15 @@ import {
   ELITE100_PHOTO_EXTENSIONS,
   ELITE100_MANUAL_MAX_HERO_BYTES,
   ELITE100_MANUAL_MAX_THUMB_BYTES,
+  ELITE100_IMPORT_ACTION,
   flattenElite100Fixture,
   matchPhotoToCatalogItem,
   buildElite100ManualStoragePaths,
   buildManualVisualAssetRow,
   computeManualPhotoDryRunSummary,
+  computeImportV2Summary,
+  formatImportV2SummaryText,
+  finalizeImportPlanV2,
   formatManualPhotoDryRunEntry,
   hashPhotoContent,
   contentTypeForPhotoExtension,
@@ -85,6 +97,11 @@ const MATCH_MAP_PATH = process.env.ELITE100_PHOTO_MATCH_MAP || null;
 const HERO_MAX_PX = Math.max(400, parseInt(process.env.ELITE100_MANUAL_HERO_MAX_PX || "2048", 10));
 const THUMB_MAX_PX = Math.max(200, parseInt(process.env.ELITE100_MANUAL_THUMB_MAX_PX || "600", 10));
 const HAS_SUPABASE = Boolean(SUPABASE_URL && SUPABASE_KEY && ORG_ID);
+const FORCE_OVERWRITE = process.env.ELITE100_MANUAL_PHOTO_FORCE_OVERWRITE === "1";
+const REPO_ROOT = path.resolve(__dirname, "../../../..");
+const DEBUG_ELITE100_DIR = path.join(REPO_ROOT, "debug", "elite100");
+const V2_MANIFEST_PATH = path.join(DEBUG_ELITE100_DIR, "photo-import-v2-manifest.json");
+const V2_SUMMARY_PATH = path.join(DEBUG_ELITE100_DIR, "photo-import-v2-summary.txt");
 
 function listLocalPhotos(dir) {
   if (!fs.existsSync(dir)) return [];
@@ -167,13 +184,39 @@ function processPhotoBuffers(sourcePath, tmpDir) {
   return { heroBuf, thumbBuf, originalBuf, warnings, sourceBytes: sourceStat.size };
 }
 
-async function findExistingManualVisualAsset(supabase, orgId, catalogItemId) {
+async function loadExistingManualVisualAssets(supabase, orgId) {
+  const { data, error } = await supabase
+    .from("slab_color_visual_assets")
+    .select("id, catalog_item_id, texture_hash, is_primary, product_slug, source_system, raw")
+    .eq("organization_id", orgId)
+    .eq("source_system", ELITE100_MANUAL_SOURCE_SYSTEM)
+    .eq("is_active", true);
+  if (error) throw new Error(`Existing manual visual asset load error: ${error.message}`);
+  return data ?? [];
+}
+
+async function findExistingManualVisualAsset(supabase, orgId, catalogItemId, payload = null) {
+  const variantKey = payload?.raw?.variant_key ?? null;
+  if (variantKey && payload?.product_slug) {
+    const { data, error } = await supabase
+      .from("slab_color_visual_assets")
+      .select("id, texture_hash, is_primary, updated_at, product_slug")
+      .eq("organization_id", orgId)
+      .eq("source_system", ELITE100_MANUAL_SOURCE_SYSTEM)
+      .eq("catalog_item_id", catalogItemId)
+      .eq("product_slug", payload.product_slug)
+      .limit(1);
+    if (error) throw new Error(`Manual variant visual asset lookup error: ${error.message}`);
+    return data?.[0] ?? null;
+  }
+
   const { data, error } = await supabase
     .from("slab_color_visual_assets")
     .select("id, texture_hash, is_primary, updated_at")
     .eq("organization_id", orgId)
     .eq("source_system", ELITE100_MANUAL_SOURCE_SYSTEM)
     .eq("catalog_item_id", catalogItemId)
+    .eq("is_primary", true)
     .limit(1);
   if (error) throw new Error(`Manual visual asset lookup error: ${error.message}`);
   return data?.[0] ?? null;
@@ -195,15 +238,29 @@ async function demoteOtherPrimaries(supabase, orgId, catalogItemId, keepId = nul
  * Write one manual visual asset row (SELECT-then-INSERT/UPDATE).
  * Exported for tests.
  */
-export async function writeManualVisualAssetRow(supabase, payload) {
+export async function writeManualVisualAssetRow(supabase, payload, opts = {}) {
+  const forceOverwrite = opts.forceOverwrite === true;
+  const isVariant = Boolean(payload.raw?.variant_key);
+
   const existing = await findExistingManualVisualAsset(
     supabase,
     payload.organization_id,
-    payload.catalog_item_id
+    payload.catalog_item_id,
+    payload
   );
 
+  if (existing) {
+    const hashChanged = existing.texture_hash !== payload.texture_hash;
+    if (!hashChanged) return { action: "skipped", id: existing.id };
+    if (!forceOverwrite) {
+      return { action: "skipped", id: existing.id, reason: "existing_asset_preserved" };
+    }
+  }
+
   if (!existing) {
-    await demoteOtherPrimaries(supabase, payload.organization_id, payload.catalog_item_id);
+    if (!isVariant) {
+      await demoteOtherPrimaries(supabase, payload.organization_id, payload.catalog_item_id);
+    }
     const { data, error } = await supabase
       .from("slab_color_visual_assets")
       .insert(payload)
@@ -213,8 +270,34 @@ export async function writeManualVisualAssetRow(supabase, payload) {
     return { action: "inserted", id: data?.id ?? null };
   }
 
-  const hashChanged = existing.texture_hash !== payload.texture_hash;
-  if (!hashChanged) return { action: "skipped", id: existing.id };
+  if (isVariant) {
+    if (!forceOverwrite) {
+      return { action: "skipped", id: existing.id, reason: "variant_overwrite_blocked" };
+    }
+    const { error } = await supabase
+      .from("slab_color_visual_assets")
+      .update({
+        texture_hash: payload.texture_hash,
+        texture_url_600: payload.texture_url_600,
+        texture_url_1024: payload.texture_url_1024,
+        original_image_url: payload.original_image_url,
+        thumbnail_url: payload.thumbnail_url,
+        hero_url: payload.hero_url,
+        review_status: payload.review_status,
+        is_active: true,
+        match_method: payload.match_method,
+        raw: payload.raw,
+        last_seen_at: payload.last_seen_at,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", existing.id);
+    if (error) throw new Error(`Manual variant visual asset update error: ${error.message}`);
+    return { action: "updated", id: existing.id };
+  }
+
+  if (!forceOverwrite) {
+    return { action: "skipped", id: existing.id, reason: "base_overwrite_blocked" };
+  }
 
   await demoteOtherPrimaries(supabase, payload.organization_id, payload.catalog_item_id, existing.id);
   const { error } = await supabase
@@ -278,9 +361,19 @@ export async function buildImportPlan({ sourceDir, catalogItems, fixtureFlat, or
     const warnings = [...(matchWarnings ?? [])];
     if (stat && stat.size > 15 * 1024 * 1024) warnings.push("source_oversized");
 
+    let contentHash = null;
+    if (stat && stat.size <= 80 * 1024 * 1024) {
+      try {
+        contentHash = hashPhotoContent(fs.readFileSync(fullPath));
+      } catch {
+        // non-fatal for dry-run planning
+      }
+    }
+
     return {
       filename,
       fullPath,
+      originalExt,
       catalogItem: matchStatus === "safe" ? catalogItem : null,
       matchMethod,
       matchStatus,
@@ -292,6 +385,7 @@ export async function buildImportPlan({ sourceDir, catalogItems, fixtureFlat, or
       storagePaths,
       warnings,
       sourceBytes: stat?.size ?? null,
+      contentHash,
     };
   });
 
@@ -349,6 +443,15 @@ async function main() {
 
   const matchMap = loadPhotoMatchMap(catalogItems);
 
+  let existingAssets = [];
+  if (HAS_SUPABASE) {
+    const supabaseForLoad = createClient(SUPABASE_URL, SUPABASE_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    existingAssets = await loadExistingManualVisualAssets(supabaseForLoad, ORG_ID);
+    console.log(`Loaded ${existingAssets.length} existing manual visual assets from Supabase.\n`);
+  }
+
   const plan = await buildImportPlan({
     sourceDir: SOURCE_DIR,
     catalogItems,
@@ -358,42 +461,89 @@ async function main() {
     matchMap,
   });
 
+  finalizeImportPlanV2(plan, existingAssets, {
+    orgId: ORG_ID,
+    heroMaxPx: HERO_MAX_PX,
+    forceOverwrite: FORCE_OVERWRITE,
+  });
+
   if (!plan.length) {
     console.log("No image files found in source directory.");
     process.exit(0);
   }
 
+  const v2Summary = computeImportV2Summary(plan);
+  fs.mkdirSync(DEBUG_ELITE100_DIR, { recursive: true });
+  fs.writeFileSync(
+    V2_MANIFEST_PATH,
+    JSON.stringify(
+      {
+        generated_at: new Date().toISOString(),
+        source_dir: SOURCE_DIR,
+        org_id: ORG_ID,
+        write_enabled: WRITE_ENABLED,
+        force_overwrite: FORCE_OVERWRITE,
+        summary: {
+          total_files: v2Summary.total_files,
+          skip_existing: v2Summary.skip_existing,
+          insert: v2Summary.insert,
+          insert_variant: v2Summary.insert_variant,
+          conflict: v2Summary.conflict,
+          unmatched: v2Summary.unmatched,
+          ambiguous: v2Summary.ambiguous,
+          apply_allowed: v2Summary.apply_allowed,
+        },
+        rows: v2Summary.rows,
+      },
+      null,
+      2
+    )
+  );
+  fs.writeFileSync(V2_SUMMARY_PATH, formatImportV2SummaryText(v2Summary));
+
   const summary = computeManualPhotoDryRunSummary(plan);
-  console.log("── Dry-run summary ──");
+  console.log("── V2 dry-run summary ──");
   console.log(JSON.stringify({
-    total_files: summary.total_files,
-    safe_matches: summary.safe_matches,
-    conflicts: summary.conflicts,
-    catalog_color_missing: summary.catalog_color_missing,
-    ambiguous: summary.ambiguous,
-    unmatched: summary.unmatched,
-    invalid_index: summary.invalid_index,
-    duplicate_targets: summary.duplicate_targets,
-    oversized_sources: summary.oversized_sources,
-    write_blocked: summary.write_blocked,
-    write_block_reasons: summary.write_block_reasons,
+    total_files: v2Summary.total_files,
+    skip_existing: v2Summary.skip_existing,
+    insert: v2Summary.insert,
+    insert_variant: v2Summary.insert_variant,
+    conflict: v2Summary.conflict,
+    unmatched: v2Summary.unmatched,
+    ambiguous: v2Summary.ambiguous,
+    apply_allowed: v2Summary.apply_allowed,
+    manifest: V2_MANIFEST_PATH,
+    summary_file: V2_SUMMARY_PATH,
   }, null, 2));
   printManualPhotoAuditTable(plan);
   console.log("");
 
-  if (summary.write_blocked) {
-    console.error("── Import blocked — unsafe matches detected ──");
-    console.error(JSON.stringify({ blockers: summary.blockers }, null, 2));
-    console.error(
-      "Resolve catalog_color_missing, conflicts, ambiguous, or unmatched files or provide ELITE100_PHOTO_MATCH_MAP overrides before writing."
-    );
+  if (!v2Summary.apply_allowed) {
+    console.error("── Import blocked — resolve CONFLICT / UNMATCHED / AMBIGUOUS rows ──");
+    if (v2Summary.conflict_rows.length) {
+      console.error("Conflicts:", v2Summary.conflict_rows.map((r) => r.filename).join(", "));
+    }
+    if (v2Summary.unmatched_rows.length) {
+      console.error("Unmatched:", v2Summary.unmatched_rows.map((r) => r.filename).join(", "));
+    }
+    if (v2Summary.ambiguous_rows.length) {
+      console.error("Ambiguous:", v2Summary.ambiguous_rows.map((r) => r.filename).join(", "));
+    }
+    console.error(`Review ${V2_SUMMARY_PATH} before applying.`);
     if (WRITE_ENABLED) process.exit(1);
+  }
+
+  if (summary.write_blocked && v2Summary.apply_allowed) {
+    // Legacy safety check — v2 apply_allowed takes precedence when only skips + inserts remain
+    console.warn("  ⚠ Legacy match blockers present but v2 apply is allowed (likely all blockers are SKIP_EXISTING).");
   }
 
   if (!WRITE_ENABLED) {
     console.log("Dry-run complete. No uploads or DB writes performed.");
+    console.log(`Manifest: ${V2_MANIFEST_PATH}`);
+    console.log(`Summary:  ${V2_SUMMARY_PATH}`);
     console.log("To apply: ELITE100_MANUAL_PHOTO_WRITE_ENABLED=1 + Supabase creds + SLABOS_ORGANIZATION_ID");
-    console.log("Apply is blocked until all files are safe matches (no catalog_color_missing, conflicts, ambiguous, or unmatched).");
+    console.log("Apply uploads only INSERT and INSERT_VARIANT rows; existing assets are preserved.");
     return;
   }
 
@@ -410,6 +560,16 @@ async function main() {
 
   try {
     for (const entry of plan) {
+      if (
+        entry.importAction !== ELITE100_IMPORT_ACTION.INSERT &&
+        entry.importAction !== ELITE100_IMPORT_ACTION.INSERT_VARIANT
+      ) {
+        if (entry.importAction === ELITE100_IMPORT_ACTION.SKIP_EXISTING) {
+          results.skipped += 1;
+        }
+        continue;
+      }
+
       if (!entry.catalogItem?.id) {
         console.warn(`  skip unmatched: ${entry.filename}`);
         results.skipped += 1;
@@ -447,6 +607,7 @@ async function main() {
         results.originals_uploaded += 1;
 
         const contentHash = hashPhotoContent(originalBuf);
+        const isVariant = entry.importAction === ELITE100_IMPORT_ACTION.INSERT_VARIANT;
         const payload = buildManualVisualAssetRow({
           orgId: ORG_ID,
           catalogItem: entry.catalogItem,
@@ -462,6 +623,11 @@ async function main() {
           contentHash,
           sourceFile: entry.filename,
           matchMethod: entry.matchMethod,
+          variantKey: entry.variantKey ?? null,
+          variantSuffix: entry.variantSuffix ?? null,
+          finish: entry.finish ?? null,
+          proposedDisplayName: entry.proposedDisplayName ?? null,
+          isPrimary: !isVariant,
         });
 
         payload.raw = {
@@ -472,9 +638,12 @@ async function main() {
           storage_original_path: entry.storagePaths.originalPath,
         };
 
-        const writeResult = await writeManualVisualAssetRow(supabase, payload);
+        const writeResult = await writeManualVisualAssetRow(supabase, payload, {
+          forceOverwrite: FORCE_OVERWRITE,
+        });
         results[writeResult.action === "inserted" ? "inserted" : writeResult.action === "updated" ? "updated" : "skipped"] += 1;
-        console.log(`  ✓ ${entry.filename} → ${entry.catalogItem.color_name} (${writeResult.action})`);
+        const label = isVariant ? entry.proposedDisplayName : entry.catalogItem.color_name;
+        console.log(`  ✓ ${entry.filename} → ${label} (${writeResult.action}${isVariant ? ", variant" : ""})`);
       } catch (e) {
         results.failed += 1;
         console.error(`  ✗ ${entry.filename}: ${e.message}`);
