@@ -3,25 +3,31 @@ import type { Session } from "@supabase/supabase-js";
 import { apiFetch } from "../lib/api";
 import { config } from "../lib/config";
 import { supabase } from "../lib/supabase";
-import type { FiltersResponse, MeResp } from "../lib/types";
+import type { MeResp } from "../lib/types";
+import type { SalesDashboardTab } from "../lib/salesDashboardTypes";
+import { readInitialTabFromUrl } from "../lib/salesDashboardApi";
 import SalesCommandCenterView from "./SalesCommandCenterView";
-import SalesIntelligenceView from "./SalesIntelligenceView";
 import QuotePipelinePanel from "./QuotePipelinePanel";
-import KpiV1Panel from "./KpiV1Panel";
-import BentoDashboardView from "./BentoDashboardView";
+import SalesCommandCenterPanel from "./SalesCommandCenterPanel";
+import SalesPerformancePanel from "./SalesPerformancePanel";
+import SalesForecastingPanel from "./SalesForecastingPanel";
+import SalesProductionFlowPanel from "./SalesProductionFlowPanel";
+import SalesAccountsPanel from "./SalesAccountsPanel";
+import SalesColorsMaterialsPanel from "./SalesColorsMaterialsPanel";
+import SalesDataQualityPanel from "./SalesDataQualityPanel";
+import { SalesDashboardProvider } from "./sales-dashboard/SalesDashboardContext";
+import SalesDetailDrawer from "./sales-dashboard/SalesDetailDrawer";
 import SalesQueryPanel from "./SalesQueryPanel";
+import "./sales-dashboard.css";
 import EliteosTopbar from "../../../shared/eliteos-ui/EliteosTopbar";
 import type { EliteosTopbarMenuItem } from "../../../shared/eliteos-ui/EliteosTopbar";
 import "./sales-intelligence.css";
 
 /**
- * Command Center tab content selector.
- *
- * Phase 1 bento command center is the default. The legacy
- * `SalesCommandCenterView` remains imported and fully functional — flip this
- * constant to `"legacy"` to instantly restore it with no other code changes.
+ * Command Center uses the live GET /api/sales/dashboard bento cockpit.
+ * Legacy views remain importable for rollback if needed.
  */
-const COMMAND_CENTER_VIEW: "bento" | "legacy" = "bento";
+const COMMAND_CENTER_VIEW: "live" | "legacy" = "live";
 
 /**
  * eliteOS Sales Head — protected-head shell.
@@ -96,54 +102,22 @@ function userInitialsFor(name: string, email: string): string {
   return "ES";
 }
 
-type FilterState = {
-  salespeopleCsv: string;
-  account: string;
-  jobStatus: string;
-  process: string;
-  materialColor: string;
-  city: string;
-  minSqft: string;
-  maxSqft: string;
-};
+type SalesTab = SalesDashboardTab;
 
-const EMPTY_FILTERS: FilterState = {
-  salespeopleCsv: "",
-  account: "",
-  jobStatus: "",
-  process: "",
-  materialColor: "",
-  city: "",
-  minSqft: "",
-  maxSqft: ""
-};
-
-function buildLegacyFilterQuery(f: FilterState): string {
-  const p = new URLSearchParams();
-  if (f.salespeopleCsv.trim()) p.set("salesperson", f.salespeopleCsv.trim());
-  if (f.account.trim()) p.set("account", f.account.trim());
-  if (f.jobStatus.trim()) p.set("jobStatus", f.jobStatus.trim());
-  if (f.process.trim()) p.set("process", f.process.trim());
-  if (f.materialColor.trim()) p.set("materialColor", f.materialColor.trim());
-  if (f.city.trim()) p.set("city", f.city.trim());
-  if (f.minSqft.trim()) p.set("minSqft", f.minSqft.trim());
-  if (f.maxSqft.trim()) p.set("maxSqft", f.maxSqft.trim());
-  return p.toString();
-}
-
-type SalesTab = "command_center" | "quote_pipeline" | "kpi_history" | "query" | "intelligence";
-
-const TABS: ReadonlyArray<{ id: SalesTab; label: string; planning?: boolean }> = [
-  { id: "command_center", label: "Command center" },
-  { id: "quote_pipeline", label: "Quote pipeline" },
-  { id: "kpi_history", label: "KPI history" },
-  { id: "query", label: "Ask Sales Data" },
-  { id: "intelligence", label: "Legacy intelligence" }
+const TABS: ReadonlyArray<{ id: SalesTab; label: string }> = [
+  { id: "command_center", label: "Command Center" },
+  { id: "sales_performance", label: "Sales Performance" },
+  { id: "forecasting", label: "Forecasting" },
+  { id: "quote_pipeline", label: "Quote Pipeline" },
+  { id: "production_flow", label: "Production Flow" },
+  { id: "accounts", label: "Accounts" },
+  { id: "colors_materials", label: "Colors / Materials" },
+  { id: "data_explorer", label: "Data Explorer" },
+  { id: "data_quality", label: "Data Quality" }
 ];
 
 export default function App() {
-  const [advFiltersOpen, setAdvFiltersOpen] = useState(false);
-  const [salesTab, setSalesTab] = useState<SalesTab>("command_center");
+  const [salesTab, setSalesTab] = useState<SalesTab>(() => readInitialTabFromUrl("command_center"));
 
   const [session, setSession] = useState<Session | null>(null);
   const [email, setEmail] = useState("");
@@ -153,14 +127,6 @@ export default function App() {
   const [authBootstrapError, setAuthBootstrapError] = useState("");
   const [me, setMe] = useState<MeResp | null>(null);
   const [loadError, setLoadError] = useState("");
-
-  const [draftFilters, setDraftFilters] = useState<FilterState>({ ...EMPTY_FILTERS });
-  const [appliedFilters, setAppliedFilters] = useState<FilterState>({ ...EMPTY_FILTERS });
-  const [filtersMeta, setFiltersMeta] = useState<FiltersResponse | null>(null);
-
-  // Account dropdown open/close state is owned by the shared EliteosTopbar.
-
-  const legacyFilterQuery = useMemo(() => buildLegacyFilterQuery(appliedFilters), [appliedFilters]);
 
   const onPiLoadError = useCallback((msg: string) => {
     setLoadError(msg);
@@ -192,7 +158,6 @@ export default function App() {
 
       if (evt === "SIGNED_OUT" || !tok) {
         setMe(null);
-        setFiltersMeta(null);
         setLoadError("");
         return;
       }
@@ -208,22 +173,6 @@ export default function App() {
   }, []);
 
   const token = session?.access_token?.trim() ?? "";
-
-  useEffect(() => {
-    if (!token) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const fm = (await apiFetch("/api/sales/filters", { token })) as FiltersResponse;
-        if (!cancelled) setFiltersMeta(fm);
-      } catch {
-        if (!cancelled) setFiltersMeta(null);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [token, session?.user?.id]);
 
   useEffect(() => {
     if (!token) return;
@@ -257,15 +206,6 @@ export default function App() {
 
   function signOut() {
     void supabase.auth.signOut();
-  }
-
-  function applyFiltersClick() {
-    setAppliedFilters({ ...draftFilters });
-  }
-
-  function clearFilters() {
-    setDraftFilters({ ...EMPTY_FILTERS });
-    setAppliedFilters({ ...EMPTY_FILTERS });
   }
 
   const sessionEmail = session?.user?.email ?? "";
@@ -464,13 +404,12 @@ export default function App() {
                 <div className="eos-hero-main">
                   <p className="eos-hero-eyebrow">Internal tool · Sales Dashboard</p>
                   <h1 id="sales-hero-title" className="eos-hero-title">
-                    Sales performance command center
+                    Sales Command Center
                   </h1>
                   <p className="eos-hero-sub">
-                    One leadership view for <strong>Moraware production actuals</strong>, the{" "}
-                    <strong>Quote Library pipeline</strong>, planned <strong>KPI history</strong>, and{" "}
-                    <strong>data trust</strong>. Moraware records the work, Quote Library records the quotes —
-                    Sales explains and compares those facts without mutating them.
+                    Executive cockpit for <strong>Moraware production</strong>,{" "}
+                    <strong>Quote Library pipeline</strong>, <strong>forecast signals</strong>, and{" "}
+                    <strong>Elite 100 mix</strong> — synced through eliteOS Brain, filterable and drillable in one place.
                   </p>
                   <div className="eos-hero-chips">
                     <span className="eos-hero-chip eos-hero-chip--info">
@@ -539,144 +478,48 @@ export default function App() {
                   onClick={() => setSalesTab(t.id)}
                 >
                   {t.label}
-                  {t.planning ? <span className="eos-tab-badge">Planning</span> : null}
                 </button>
               ))}
             </nav>
 
-            {salesTab === "command_center" ? (
-              COMMAND_CENTER_VIEW === "bento" ? (
-                <BentoDashboardView token={token} onLoadError={onPiLoadError} />
-              ) : (
-                <SalesCommandCenterView token={token} onLoadError={onPiLoadError} />
-              )
-            ) : null}
-
-            {salesTab === "quote_pipeline" ? <QuotePipelinePanel token={token} /> : null}
-
-            {salesTab === "kpi_history" ? <KpiV1Panel token={token} /> : null}
-
-            {salesTab === "query" ? <SalesQueryPanel token={token} onLoadError={onPiLoadError} /> : null}
-
-            {salesTab === "intelligence" ? (
-              <>
-                <button
-                  type="button"
-                  className="btn"
-                  style={{ marginBottom: "0.75rem" }}
-                  onClick={() => setAdvFiltersOpen((o) => !o)}
-                >
-                  {advFiltersOpen ? "Hide advanced Brain filters" : "Show advanced Brain filters"}
-                </button>
-                {advFiltersOpen ? (
-                  <div
-                    className="sales-controls"
-                    style={{
-                      marginBottom: "1rem",
-                      border: "1px solid #e2e8f0",
-                      borderRadius: 10,
-                      padding: "1rem",
-                      background: "#fff"
-                    }}
-                  >
-                    <p className="muted" style={{ marginTop: 0, fontSize: "0.85rem" }}>
-                      Optional Moraware/Brain row filters (status, city, etc.). Apply to Performance Intelligence and Jobs tab.
-                    </p>
-                    <label>
-                      <span>Moraware salesperson (csv)</span>
-                      <input
-                        list="salesperson-list"
-                        value={draftFilters.salespeopleCsv}
-                        onChange={(e) => setDraftFilters((f) => ({ ...f, salespeopleCsv: e.target.value }))}
-                        placeholder="Exact Moraware names"
-                      />
-                      <datalist id="salesperson-list">
-                        {(filtersMeta?.salespeople ?? []).map((x) => (
-                          <option key={x} value={x} />
-                        ))}
-                      </datalist>
-                    </label>
-                    <label>
-                      <span>Account contains</span>
-                      <input
-                        list="account-list"
-                        value={draftFilters.account}
-                        onChange={(e) => setDraftFilters((f) => ({ ...f, account: e.target.value }))}
-                      />
-                      <datalist id="account-list">
-                        {(filtersMeta?.accounts ?? []).slice(0, 200).map((x) => (
-                          <option key={x} value={x} />
-                        ))}
-                      </datalist>
-                    </label>
-                    <label>
-                      <span>Status</span>
-                      <select
-                        value={draftFilters.jobStatus}
-                        onChange={(e) => setDraftFilters((f) => ({ ...f, jobStatus: e.target.value }))}
-                      >
-                        <option value="">Any</option>
-                        {(filtersMeta?.statuses ?? []).map((s) => (
-                          <option key={s} value={s}>
-                            {s}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      <span>Process</span>
-                      <input
-                        value={draftFilters.process}
-                        onChange={(e) => setDraftFilters((f) => ({ ...f, process: e.target.value }))}
-                        placeholder="job_status substring"
-                      />
-                    </label>
-                    <label>
-                      <span>Material / color</span>
-                      <input
-                        value={draftFilters.materialColor}
-                        onChange={(e) => setDraftFilters((f) => ({ ...f, materialColor: e.target.value }))}
-                      />
-                    </label>
-                    <label>
-                      <span>City</span>
-                      <input
-                        value={draftFilters.city}
-                        onChange={(e) => setDraftFilters((f) => ({ ...f, city: e.target.value }))}
-                      />
-                    </label>
-                    <label>
-                      <span>Min Sq.Ft.</span>
-                      <input
-                        value={draftFilters.minSqft}
-                        onChange={(e) => setDraftFilters((f) => ({ ...f, minSqft: e.target.value }))}
-                      />
-                    </label>
-                    <label>
-                      <span>Max Sq.Ft.</span>
-                      <input
-                        value={draftFilters.maxSqft}
-                        onChange={(e) => setDraftFilters((f) => ({ ...f, maxSqft: e.target.value }))}
-                      />
-                    </label>
-                    <div className="sales-controls-filter-actions">
-                      <button type="button" className="btn btn-primary" onClick={applyFiltersClick}>
-                        Apply Brain filters
-                      </button>
-                      <button type="button" className="btn" onClick={clearFilters}>
-                        Clear Brain filters
-                      </button>
+            <SalesDashboardProvider token={token} tab={salesTab} onTabChange={setSalesTab} onLoadError={onPiLoadError}>
+              <SalesDetailDrawer />
+              {salesTab === "command_center" ? (
+                COMMAND_CENTER_VIEW === "live" ? (
+                  <SalesCommandCenterPanel />
+                ) : (
+                  <SalesCommandCenterView token={token} onLoadError={onPiLoadError} />
+                )
+              ) : null}
+              {salesTab === "sales_performance" ? <SalesPerformancePanel /> : null}
+              {salesTab === "forecasting" ? <SalesForecastingPanel /> : null}
+              {salesTab === "quote_pipeline" ? (
+                <div className="sd-card-wrap">
+                  <header className="sd-panel-head">
+                    <div>
+                      <h2 className="sd-panel-title">Quote Pipeline</h2>
+                      <p className="sd-panel-sub">Live Quote Library pipeline — same panel and API as before, aligned with the Sales Head shell.</p>
                     </div>
-                  </div>
-                ) : null}
-                <SalesIntelligenceView
-                  token={token}
-                  me={me}
-                  legacyFilterQuery={legacyFilterQuery}
-                  onLoadError={onPiLoadError}
-                />
-              </>
-            ) : null}
+                  </header>
+                  <QuotePipelinePanel token={token} />
+                </div>
+              ) : null}
+              {salesTab === "production_flow" ? <SalesProductionFlowPanel /> : null}
+              {salesTab === "accounts" ? <SalesAccountsPanel /> : null}
+              {salesTab === "colors_materials" ? <SalesColorsMaterialsPanel /> : null}
+              {salesTab === "data_explorer" ? (
+                <div className="sd-card-wrap">
+                  <header className="sd-panel-head">
+                    <div>
+                      <h2 className="sd-panel-title">Data Explorer</h2>
+                      <p className="sd-panel-sub">Ask Sales Data — natural-language Moraware query explorer. Parser and API unchanged.</p>
+                    </div>
+                  </header>
+                  <SalesQueryPanel token={token} onLoadError={onPiLoadError} />
+                </div>
+              ) : null}
+              {salesTab === "data_quality" ? <SalesDataQualityPanel /> : null}
+            </SalesDashboardProvider>
           </>
         )}
       </main>

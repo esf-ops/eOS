@@ -383,3 +383,127 @@ export type SalesMorawareQueryUnavailable = {
 };
 
 export type SalesMorawareQueryResponse = SalesMorawareQuerySuccess | SalesMorawareQueryUnavailable;
+
+/** GET /api/sales/dashboard — Sales Command Center */
+export type SalesDashboardKpi = {
+  id: string;
+  label: string;
+  value: number | string | null;
+  format?: "sqft" | "currency" | "percent" | "count" | "datetime";
+  delta?: number | null;
+};
+
+export type SalesDashboardInsight = {
+  id: string;
+  severity: "positive" | "warn" | "info";
+  text: string;
+};
+
+export type SalesDashboardAccountRow = {
+  account: string;
+  branch?: string;
+  normalizedSalesperson?: string;
+  currentSqft: number;
+  priorSqft: number;
+  yoySqft?: number;
+  yoyPct?: number | null;
+  focusScore?: number;
+  focusReasons?: string[];
+  jobCount?: number;
+  lastJobDate?: string | null;
+  attributionStatus?: string;
+  quoteCount?: number;
+};
+
+export type SalesDashboardRepRow = {
+  salesperson: string;
+  isActiveRep?: boolean;
+  currentSqft: number;
+  priorSqft: number;
+  yoySqft: number;
+  yoyPct: number | null;
+  jobCount: number;
+  accountCount: number;
+  topAccounts?: Array<{ account: string; totalSqft: number }>;
+};
+
+export type SalesDashboardResponse = {
+  ok: boolean;
+  organization_id?: string;
+  meta?: {
+    tab?: string;
+    currentDateRange?: { start: string; end: string; quickRange?: string };
+    priorYearComparisonRange?: { start: string; end: string };
+    latestMorawareSync?: string | null;
+    latestQuoteSave?: string | null;
+    latestProductionUpdate?: string | null;
+    rowCount?: number;
+    filteredRowCount?: number;
+    unmappedAccountCount?: number;
+    unknownColorCount?: number;
+    dataConfidenceScore?: number;
+  };
+  filterOptions?: {
+    salespeople?: string[];
+    branches?: string[];
+    accounts?: string[];
+    jobStatuses?: string[];
+    quoteStatuses?: string[];
+  };
+  savedViews?: Array<{ id: string; label: string; params: Record<string, string> }>;
+  commandCenter?: {
+    kpis?: SalesDashboardKpi[];
+    bentoCards?: Array<{ id: string; title: string; type: string; span?: string }>;
+    charts?: Record<string, unknown>;
+    insights?: SalesDashboardInsight[];
+  };
+  salesPerformance?: {
+    monthlyYoY?: Array<{ month: string; currentSqft: number; priorSqft: number; yoySqft: number; yoyPct: number | null }>;
+    repSummary?: SalesDashboardRepRow[];
+    branchSummary?: Array<{ branch: string; sqft: number }>;
+    accountSummary?: SalesDashboardAccountRow[];
+  };
+  forecasting?: {
+    forecastCards?: Array<{ label: string; value: number }>;
+    forecastByMonth?: Array<{ month: string; value: number }>;
+    forecastByRep?: Array<{ rep: string; value: number }>;
+    quoteForecastRows?: unknown[];
+    next30?: { days: number; forecastValue: number; forecastSqft: number };
+  };
+  quotePipeline?: {
+    quoteCount?: number;
+    openQuoteCount?: number;
+    openPipelineValue?: number;
+    quoteStatusSummary?: Array<{ status: string; count: number }>;
+    quotedNotProducedRows?: Array<{ account: string; quoteCount: number; quoteValue: number }>;
+  };
+  productionFlow?: {
+    producedSqft?: number;
+    jobCount?: number;
+    producedSqftTrend?: Array<{ month: string; sqft: number }>;
+    productionByBranch?: Array<{ branch: string; sqft: number }>;
+  };
+  accounts?: {
+    activeAccountCount?: number;
+    topAccounts?: SalesDashboardAccountRow[];
+    attentionAccounts?: SalesDashboardAccountRow[];
+    dormantAccounts?: SalesDashboardAccountRow[];
+    growthAccounts?: SalesDashboardAccountRow[];
+    declineAccounts?: SalesDashboardAccountRow[];
+  };
+  colorsMaterials?: {
+    eliteShare?: number;
+    outShare?: number;
+    unknownShare?: number;
+    eliteGroupBreakdown?: Array<{ group: string; sqft: number; share: number }>;
+    manufacturerBreakdown?: Array<{ manufacturer: string; sqft: number; share: number }>;
+    topOutOfCollectionColors?: Array<{ color: string; material: string; sqft: number }>;
+    unknownColorRows?: Array<{ color: string; sqft: number }>;
+  };
+  dataExplorer?: {
+    paginatedRows?: { total: number; page: number; pageSize: number; rows: unknown[] };
+  };
+  dataQuality?: Record<string, unknown>;
+  insightSummaryText?: string;
+};
+

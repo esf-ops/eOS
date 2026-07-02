@@ -22,6 +22,7 @@ import {
   extractNotesExcerptFromRawPayload,
   normalizeMorawareQueryFilters
 } from "./morawareSalesQuery.js";
+import { salesDashboardHandler } from "./salesDashboardApi.js";
 
 const salesJsonParser = express.json({ limit: "256kb" });
 
@@ -3668,7 +3669,7 @@ export function attachSalesHeadRoutes(app, { requireAuth, requireRole, requireHe
 
   console.log(
     "[sales] mounted GET /api/sales/{summary,salesperson-performance,account-performance,trend,jobs,filters," +
-    "dashboard-foundation,production-reconciliation,performance-intelligence,debug,kpi-v1} " +
+    "dashboard,dashboard-foundation,production-reconciliation,performance-intelligence,debug,kpi-v1} " +
     "+ GET /api/sales-dashboard/summary + POST /api/sales/query (requireAuth + SALES_API_ROLES + sales head)"
   );
 
@@ -3690,6 +3691,7 @@ export function attachSalesHeadRoutes(app, { requireAuth, requireRole, requireHe
   app.get("/api/sales/trend", requireAuth(), requireRole(roleList), headAccessSales, execSales(salesTrendHandler));
   app.get("/api/sales/jobs", requireAuth(), requireRole(roleList), headAccessSales, execSales(salesJobsHandler));
   app.get("/api/sales/filters", requireAuth(), requireRole(roleList), headAccessSales, execSales(salesFiltersHandler));
+  app.get("/api/sales/dashboard", requireAuth(), requireRole(roleList), headAccessSales, execSales(salesDashboardHandler));
   app.get(
     "/api/sales/dashboard-foundation",
     requireAuth(),

@@ -163,7 +163,7 @@
     "eos:build:hr": "npm run build --prefix app-hr",
     "eos:build:all-heads": "npm run eos:build:brain-health && npm run eos:build:executive && npm run eos:build:system-admin && npm run eos:build:org-directory && npm run eos:build:sales && npm run eos:build:home && npm run eos:build:quote-library && npm run eos:build:partner-quote && npm run eos:build:slab-inventory && npm run eos:build:hr",
     "eos:analyze:sales-inputs": "node backend-core/src/scripts/analyzeSalesAccountAttributionInputs.js",
-    "eos:sales:crosswalk-suggestions": "node backend-core/src/scripts/buildSalesAccountCrosswalkSuggestions.js",
+    "eos:sales:diagnose-data": "node backend-core/src/scripts/diagnoseSalesDashboardData.mjs",
     "eos:sales:reconcile-sqft": "node backend-core/src/scripts/reconcileSalesSqftReportToBrain.js",
     "eos:sales:attribution-dry-run": "node backend-core/src/scripts/importSalesAttributionData.js",
     "eos:sales:demote-auto-approved": "node backend-core/src/scripts/demoteAutoApprovedSalesAliases.js",

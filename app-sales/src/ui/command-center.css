@@ -1,0 +1,392 @@
+/* Sales Command Center — bright bento layout (Home Launcher / Stripe-inspired) */
+
+.scc-root {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  padding-bottom: 2rem;
+}
+
+.scc-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.scc-title {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: var(--eos-ink);
+}
+
+.scc-subtitle {
+  margin: 0.35rem 0 0;
+  max-width: 52rem;
+  font-size: 0.92rem;
+  color: var(--eos-ink-muted);
+  line-height: 1.55;
+}
+
+.scc-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.scc-btn {
+  appearance: none;
+  border: 1px solid var(--eos-line);
+  background: var(--eos-surface);
+  color: var(--eos-ink-soft);
+  border-radius: 10px;
+  padding: 0.45rem 0.85rem;
+  font-size: 0.82rem;
+  font-weight: 550;
+  cursor: pointer;
+  transition: box-shadow var(--eos-dur-1) var(--eos-ease), border-color var(--eos-dur-1) var(--eos-ease);
+}
+
+.scc-btn:hover:not(:disabled) {
+  box-shadow: var(--eos-shadow-sm);
+  border-color: var(--eos-line-strong);
+}
+
+.scc-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.scc-btn--primary {
+  background: var(--eos-accent);
+  border-color: var(--eos-accent);
+  color: #fff;
+}
+
+.scc-btn--ghost {
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.scc-freshness {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.65rem 0.9rem;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid var(--eos-line);
+  font-size: 0.8rem;
+  color: var(--eos-ink-mid);
+  box-shadow: var(--eos-shadow-sm);
+}
+
+.scc-freshness-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--eos-warn);
+  margin-right: 0.25rem;
+}
+
+.scc-freshness-dot[data-confidence="high"] {
+  background: var(--eos-success);
+}
+
+.scc-freshness-sep {
+  opacity: 0.45;
+}
+
+.scc-filter-bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.75rem;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--eos-line);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--eos-shadow-sm);
+}
+
+.scc-filter-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.scc-filter-inputs select,
+.scc-filter-inputs input {
+  border: 1px solid var(--eos-line);
+  border-radius: 10px;
+  padding: 0.4rem 0.65rem;
+  font-size: 0.82rem;
+  background: #fff;
+  color: var(--eos-ink);
+  min-width: 8rem;
+}
+
+.scc-chip {
+  appearance: none;
+  border: 1px solid var(--eos-line);
+  background: #fff;
+  color: var(--eos-ink-mid);
+  border-radius: 999px;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.78rem;
+  font-weight: 550;
+  cursor: pointer;
+  transition: all var(--eos-dur-1) var(--eos-ease);
+}
+
+.scc-chip.is-on {
+  background: var(--eos-accent-soft);
+  border-color: rgba(163, 19, 47, 0.25);
+  color: var(--eos-accent);
+}
+
+.scc-chip--soft {
+  background: rgba(246, 247, 251, 0.9);
+}
+
+.scc-saved-views {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.scc-insights {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.scc-insight {
+  padding: 0.75rem 1rem;
+  border-radius: 12px;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  border: 1px solid var(--eos-line);
+  background: #fff;
+  box-shadow: var(--eos-shadow-sm);
+}
+
+.scc-insight--positive {
+  border-left: 3px solid var(--eos-success);
+}
+
+.scc-insight--warn {
+  border-left: 3px solid var(--eos-warn);
+}
+
+.scc-insight--info {
+  border-left: 3px solid var(--eos-info);
+}
+
+.scc-kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  gap: 0.65rem;
+}
+
+.scc-kpi-card {
+  padding: 0.85rem 0.95rem;
+  border-radius: 14px;
+  background: #fff;
+  border: 1px solid var(--eos-line);
+  box-shadow: var(--eos-shadow-sm);
+}
+
+.scc-kpi-label {
+  margin: 0;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--eos-ink-faint);
+  font-weight: 600;
+}
+
+.scc-kpi-value {
+  margin: 0.25rem 0 0;
+  font-size: 1.05rem;
+  font-weight: 650;
+  color: var(--eos-ink);
+  letter-spacing: -0.02em;
+}
+
+.scc-kpi-delta {
+  margin: 0.2rem 0 0;
+  font-size: 0.75rem;
+  color: var(--eos-ink-muted);
+}
+
+.scc-kpi-delta--up {
+  color: var(--eos-success);
+}
+
+.scc-kpi-delta--down {
+  color: var(--eos-danger);
+}
+
+.scc-bento {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 0.85rem;
+}
+
+.scc-bento-card {
+  grid-column: span 4;
+  padding: 1rem 1.05rem 1.1rem;
+  border-radius: 18px;
+  background: #fff;
+  border: 1px solid var(--eos-line);
+  box-shadow: var(--eos-shadow-sm);
+  min-width: 0;
+}
+
+.scc-bento-card h3 {
+  margin: 0 0 0.65rem;
+  font-size: 0.92rem;
+  font-weight: 650;
+  color: var(--eos-ink);
+}
+
+.scc-bento-card--hero {
+  grid-column: span 8;
+  background: linear-gradient(180deg, #fff 0%, rgba(253, 242, 244, 0.35) 100%);
+}
+
+.scc-bento-card--wide {
+  grid-column: span 8;
+}
+
+.scc-chart {
+  width: 100%;
+  min-height: 200px;
+}
+
+.scc-chart--sm {
+  min-height: 180px;
+}
+
+.scc-card-meta {
+  margin: 0.5rem 0 0;
+  font-size: 0.78rem;
+  color: var(--eos-ink-muted);
+}
+
+.scc-table-wrap {
+  overflow: auto;
+  max-height: 240px;
+}
+
+.scc-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.scc-table th {
+  text-align: left;
+  padding: 0.35rem 0.4rem;
+  color: var(--eos-ink-faint);
+  font-weight: 600;
+  border-bottom: 1px solid var(--eos-line);
+}
+
+.scc-table td {
+  padding: 0.4rem 0.4rem;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.6);
+  color: var(--eos-ink-soft);
+}
+
+.scc-link {
+  appearance: none;
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--eos-accent);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.scc-link:hover {
+  text-decoration: underline;
+}
+
+.scc-reasons {
+  font-size: 0.72rem;
+  color: var(--eos-ink-muted);
+}
+
+.scc-skeleton-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  gap: 0.75rem;
+}
+
+.scc-skeleton-card {
+  height: 8rem;
+  border-radius: 16px;
+  background: linear-gradient(90deg, #eef2f8 0%, #f8fafc 50%, #eef2f8 100%);
+  background-size: 200% 100%;
+  animation: scc-shimmer 1.2s ease-in-out infinite;
+}
+
+@keyframes scc-shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+.scc-empty {
+  padding: 3rem 1.5rem;
+  text-align: center;
+  border-radius: 18px;
+  background: #fff;
+  border: 1px dashed var(--eos-line-strong);
+  color: var(--eos-ink-muted);
+}
+
+.scc-tab-scaffold {
+  padding: 2rem 1.25rem;
+  border-radius: 18px;
+  background: #fff;
+  border: 1px solid var(--eos-line);
+  box-shadow: var(--eos-shadow-sm);
+}
+
+.scc-tab-scaffold-title {
+  margin: 0 0 0.5rem;
+  font-size: 1.15rem;
+  font-weight: 650;
+  color: var(--eos-ink);
+}
+
+.scc-tab-scaffold-desc {
+  margin: 0;
+  max-width: 40rem;
+  color: var(--eos-ink-muted);
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+
+@media (max-width: 960px) {
+  .scc-bento-card,
+  .scc-bento-card--hero,
+  .scc-bento-card--wide {
+    grid-column: span 12;
+  }
+
+  .scc-filter-bar {
+    position: static;
+  }
+}
