@@ -142,6 +142,57 @@ Large iterator queries use `iterator="Start"` then `iterator="Continue"` with th
 - Run only on the trusted Windows VM with SDK access.
 - No Supabase or network upload is performed by this tool.
 
+## Verifying batch JSON output (post-serializer fix)
+
+After building and before running a full QuickBooks extract, confirm the JSON
+serializer writes real record bodies, not C# anonymous-object `.ToString()` strings.
+
+### Quick build-time verification (no QB connection required)
+
+```powershell
+cd C:\eliteOS\quickbooks-sdk-connector
+.\verify-batch-json.ps1
+```
+
+This script compiles and runs a self-contained test with fake data, asserting:
+- Top-level value is a JSON **object** (not a string).
+- `records` is a JSON **array**.
+- Output does **not** contain `System.Collections.Generic`.
+- Output does **not** contain `System.Object`.
+
+All checks must pass before running a full extract.
+
+### Post-run structural spot-check
+
+After a real extract completes, inspect one batch file from any entity:
+
+```powershell
+# Replace the timestamp with the actual run folder name
+$batchFile = "C:\eliteOS\quickbooks-sdk-connector\exports\YYYY-MM-DD-HHMMSS\customers\batch-001.json"
+$content = Get-Content $batchFile -Raw | ConvertFrom-Json
+
+# Must be an object with a records array, not a string
+Write-Host "Top type:  $($content.GetType().Name)"        # Should: PSCustomObject
+Write-Host "entityType: $($content.entityType)"           # Should: customers
+Write-Host "recordCount: $($content.recordCount)"         # Should: 100 (or MaxReturned)
+Write-Host "records length: $($content.records.Count)"    # Must match recordCount
+Write-Host "First record type: $($content.records[0].GetType().Name)" # Should: PSCustomObject
+
+# Confirm no .NET type names leaked into the file
+if (Get-Content $batchFile -Raw | Select-String "System.Collections.Generic") {
+    Write-Host "FAIL: serializer bug still present — re-build and verify"
+} else {
+    Write-Host "PASS: no .NET type names found"
+}
+```
+
+The `backend-core` Phase 1 preview tool also confirms readiness — once the serializer
+is fixed and the extract is re-run, the preview output should show:
+- `selfReportedOnlyFileCount=0` for every entity
+- No "not ingest-ready" warnings
+
+Until both gates pass, the export is **not suitable for Phase 2 staging**.
+
 ## Exit codes
 
 | Code | Meaning |

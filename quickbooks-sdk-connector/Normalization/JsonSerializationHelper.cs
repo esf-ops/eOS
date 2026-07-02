@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 
@@ -84,7 +85,31 @@ internal static class JsonSerializationHelper
                 writer.WriteEndArray();
                 break;
             default:
-                writer.WriteStringValue(Convert.ToString(value));
+                // Defensive fallback: use reflection to serialize any POCO or anonymous type
+                // as a real JSON object rather than falling through to Convert.ToString(),
+                // which produces a useless C# `.ToString()` string in the output.
+                // Anonymous types always have at least one public instance property, so this
+                // correctly handles `new { entityType = ..., records = ... }` shapes.
+                // True primitives that didn't match the cases above (e.g. float, uint) are
+                // serialized as strings via Convert.ToString as a safe last resort.
+                var type = value.GetType();
+                var properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+                if (properties.Length > 0)
+                {
+                    writer.WriteStartObject();
+                    foreach (var prop in properties)
+                    {
+                        writer.WritePropertyName(prop.Name);
+                        WriteValue(writer, prop.GetValue(value));
+                    }
+
+                    writer.WriteEndObject();
+                }
+                else
+                {
+                    writer.WriteStringValue(Convert.ToString(value));
+                }
+
                 break;
         }
     }

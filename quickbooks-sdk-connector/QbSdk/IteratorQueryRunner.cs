@@ -102,12 +102,12 @@ internal sealed class IteratorQueryRunner
             recordCount += normalizedRecords.Count;
 
             var jsonPath = Path.Combine(outputDirectory, $"{batchStem}.json");
-            WriteJson(jsonPath, new
+            WriteJson(jsonPath, new Dictionary<string, object>
             {
-                entityType = definition.EntityType,
-                batchNumber = batchCount,
-                recordCount = normalizedRecords.Count,
-                records = normalizedRecords
+                ["entityType"] = definition.EntityType,
+                ["batchNumber"] = batchCount,
+                ["recordCount"] = normalizedRecords.Count,
+                ["records"] = normalizedRecords,
             });
 
             if (definition.ExtractLineItems)
@@ -191,12 +191,12 @@ internal sealed class IteratorQueryRunner
             .ToList();
 
         var jsonPath = Path.Combine(outputDirectory, "batch-001.json");
-        WriteJson(jsonPath, new
+        WriteJson(jsonPath, new Dictionary<string, object>
         {
-            entityType = definition.EntityType,
-            batchNumber = 1,
-            recordCount = normalizedRecords.Count,
-            records = normalizedRecords
+            ["entityType"] = definition.EntityType,
+            ["batchNumber"] = 1,
+            ["recordCount"] = normalizedRecords.Count,
+            ["records"] = normalizedRecords,
         });
 
         return new EntityExtractResult
@@ -256,11 +256,11 @@ internal sealed class IteratorQueryRunner
             .ToList();
 
         var jsonPath = Path.Combine(outputDirectory, $"{outputStem}.json");
-        WriteJson(jsonPath, new
+        WriteJson(jsonPath, new Dictionary<string, object>
         {
-            entityType = definition.EntityType,
-            recordCount = normalizedRecords.Count,
-            records = normalizedRecords
+            ["entityType"] = definition.EntityType,
+            ["recordCount"] = normalizedRecords.Count,
+            ["records"] = normalizedRecords,
         });
 
         return new EntityExtractResult
@@ -322,12 +322,12 @@ internal sealed class IteratorQueryRunner
         Directory.CreateDirectory(linesDirectory);
 
         var jsonPath = Path.Combine(linesDirectory, $"batch-{batchNumber:D3}.json");
-        WriteJson(jsonPath, new
+        WriteJson(jsonPath, new Dictionary<string, object>
         {
-            entityType = "invoice-lines",
-            batchNumber = batchNumber,
-            recordCount = lineItems.Count,
-            records = lineItems
+            ["entityType"] = "invoice-lines",
+            ["batchNumber"] = batchNumber,
+            ["recordCount"] = lineItems.Count,
+            ["records"] = lineItems,
         });
     }
 
