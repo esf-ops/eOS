@@ -230,7 +230,8 @@ export function buildDataQualityIssues({
   colorAnalytics,
   syncHealth,
   dataConfidence,
-  worksheet
+  worksheet,
+  intelligenceQuality
 }) {
   const issues = [];
 
@@ -332,6 +333,35 @@ export function buildDataQualityIssues({
       suggestedFix: "Wait for sync completion or use last complete group fallback.",
       samples: [{ lastSync: syncHealth.lastSyncAt }]
     });
+  }
+
+  for (const cand of intelligenceQuality?.issueCandidates ?? []) {
+    if (cand.type === "forecast_missing_org") {
+      issues.push({
+        id: "forecast_missing_org",
+        type: "forecast_missing_org",
+        severity: "medium",
+        title: "Forecast events missing organization scope",
+        count: cand.count,
+        sqftImpact: 0,
+        owner: "Quote forecast pipeline",
+        suggestedFix: "Backfill quote_forecast_events.organization_id or ensure quote_headers linkage.",
+        samples: []
+      });
+    }
+    if (cand.type === "unmatched_worksheet_rows") {
+      issues.push({
+        id: "unmatched_worksheet_rows",
+        type: "unmatched_worksheet_rows",
+        severity: "medium",
+        title: "Worksheet rows not joined to job facts",
+        count: cand.count,
+        sqftImpact: cand.sqftImpact ?? 0,
+        owner: "Moraware worksheet promotion",
+        suggestedFix: "Verify job_id on moraware_prepared_sales_worksheet_facts matches sales_moraware_job_facts.source_job_id.",
+        samples: []
+      });
+    }
   }
 
   return {
