@@ -344,6 +344,7 @@ const FAKE_MANIFEST = {
   assert.equal(result.recordCount, 2);
   assert.equal(result.shape, "csharp-object-string (recordCount=2)");
   assert.equal(result.warning, null);
+  assert.equal(result.selfReportedOnly, true);
   console.log("ok: extractRecordCountFromBatchJson recognizes C# anonymous-object string shape");
 }
 
@@ -356,6 +357,7 @@ const FAKE_MANIFEST = {
   assert.equal(result.recordCount, 1);
   assert.equal(result.shape, "csharp-object-string (recordCount=1)");
   assert.equal(result.warning, null);
+  assert.equal(result.selfReportedOnly, true);
 
   const shape = buildJsonShapeSummary(csharpString, "terms");
   assert.equal(shape.kind, "csharp-object-string");

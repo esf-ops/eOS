@@ -53,13 +53,14 @@ function captureConsoleLog(fn) {
     manifestErrorCount: 0,
     unreadableFileCount: 0,
     unrecognizedShapeFileCount: 0,
+    selfReportedOnlyFileCount: 0,
   });
 
   assert.equal(
     line,
     "  sales-orders: inManifest=true folderExists=true manifestBatchCount=310 manifestRecordCount=30989 " +
       "discoveredJsonFileCount=310 discoveredRecordCount=30989 manifestErrorCount=0 unreadableFileCount=0 " +
-      "unrecognizedShapeFileCount=0"
+      "unrecognizedShapeFileCount=0 selfReportedOnlyFileCount=0"
   );
   assert.match(line, /discoveredJsonFileCount=310 discoveredRecordCount=30989/);
   console.log("ok: formatEntitySummaryLine separates every field with exactly one space");
@@ -77,6 +78,7 @@ function captureConsoleLog(fn) {
     manifestErrorCount: 0,
     unreadableFileCount: 0,
     unrecognizedShapeFileCount: 0,
+    selfReportedOnlyFileCount: 0,
   });
 
   assert.doesNotMatch(line, /[a-zA-Z]+@[a-zA-Z]+\.[a-zA-Z]+/); // no email-shaped content
@@ -111,6 +113,7 @@ function captureConsoleLog(fn) {
         manifestErrorCount: 0,
         unreadableFileCount: 0,
         unrecognizedShapeFileCount: 0,
+        selfReportedOnlyFileCount: 0,
       },
     },
     missingFolders: [],
@@ -150,6 +153,7 @@ function captureConsoleLog(fn) {
         manifestErrorCount: 0,
         unreadableFileCount: 0,
         unrecognizedShapeFileCount: 0,
+        selfReportedOnlyFileCount: 0,
       },
     },
     missingFolders: [],
@@ -164,7 +168,7 @@ function captureConsoleLog(fn) {
     salesOrdersLine,
     "  sales-orders: inManifest=true folderExists=true manifestBatchCount=310 manifestRecordCount=30989 " +
       "discoveredJsonFileCount=310 discoveredRecordCount=30989 manifestErrorCount=0 unreadableFileCount=0 " +
-      "unrecognizedShapeFileCount=0"
+      "unrecognizedShapeFileCount=0 selfReportedOnlyFileCount=0"
   );
   console.log("ok: printSummary logs a correctly spaced sales-orders line (the actual CLI output path)");
 }

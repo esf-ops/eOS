@@ -438,7 +438,7 @@ const IGNORED_ARRAY_KEYS = new Set(["errors", "Errors", "warnings", "Warnings", 
  * @param {unknown} data
  * @param {string|null} [entityFolderName] Known entity folder name (e.g. "customers"),
  *   used to select the right `*Ret` tag rule when the payload is XML text.
- * @returns {{ recordCount: number, shape: string, warning: string|null }}
+ * @returns {{ recordCount: number, shape: string, warning: string|null, selfReportedOnly?: true }}
  */
 export function extractRecordCountFromBatchJson(data, entityFolderName = null) {
   if (typeof data === "string") {
@@ -450,6 +450,7 @@ export function extractRecordCountFromBatchJson(data, entityFolderName = null) {
         recordCount: innerResult.recordCount,
         shape: `string-json > ${innerResult.shape}`,
         warning: innerResult.warning,
+        ...(innerResult.selfReportedOnly ? { selfReportedOnly: true } : undefined),
       };
     }
 
@@ -458,6 +459,7 @@ export function extractRecordCountFromBatchJson(data, entityFolderName = null) {
         recordCount: inspected.recordCount,
         shape: `csharp-object-string (recordCount=${inspected.recordCount})`,
         warning: null,
+        selfReportedOnly: true,
       };
     }
 

@@ -114,7 +114,7 @@ export async function listExportSubfolders(exportFolderPath) {
  *
  * @param {string} exportFolderPath
  * @param {string} entityFolderName
- * @returns {Promise<{ exists: boolean, jsonFileCount: number, recordCount: number, unreadableFileCount: number, unrecognizedShapeFileCount: number }>}
+ * @returns {Promise<{ exists: boolean, jsonFileCount: number, recordCount: number, unreadableFileCount: number, unrecognizedShapeFileCount: number, selfReportedOnlyFileCount: number }>}
  */
 export async function readEntityBatchFiles(exportFolderPath, entityFolderName) {
   const folderPath = path.join(exportFolderPath, entityFolderName);
@@ -129,6 +129,7 @@ export async function readEntityBatchFiles(exportFolderPath, entityFolderName) {
       recordCount: 0,
       unreadableFileCount: 0,
       unrecognizedShapeFileCount: 0,
+      selfReportedOnlyFileCount: 0,
     };
   }
 
@@ -140,6 +141,7 @@ export async function readEntityBatchFiles(exportFolderPath, entityFolderName) {
   let recordCount = 0;
   let unreadableFileCount = 0;
   let unrecognizedShapeFileCount = 0;
+  let selfReportedOnlyFileCount = 0;
 
   for (const fileName of jsonFileNames) {
     const filePath = path.join(folderPath, fileName);
@@ -150,12 +152,14 @@ export async function readEntityBatchFiles(exportFolderPath, entityFolderName) {
       continue;
     }
 
-    const { recordCount: fileRecordCount, warning } = extractRecordCountFromBatchJson(
+    const { recordCount: fileRecordCount, warning, selfReportedOnly } = extractRecordCountFromBatchJson(
       readResult.data,
       entityFolderName
     );
     recordCount += fileRecordCount;
-    if (warning) {
+    if (selfReportedOnly) {
+      selfReportedOnlyFileCount += 1;
+    } else if (warning) {
       unrecognizedShapeFileCount += 1;
     }
   }
@@ -166,6 +170,7 @@ export async function readEntityBatchFiles(exportFolderPath, entityFolderName) {
     recordCount,
     unreadableFileCount,
     unrecognizedShapeFileCount,
+    selfReportedOnlyFileCount,
   };
 }
 

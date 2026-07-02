@@ -279,4 +279,21 @@ function fakeBatchFile(entityType, batchNumber, recordCount) {
   console.log("ok: readEntityBatchFiles counts real C# anonymous-object string batch shape, no leaks");
 }
 
+// ── readEntityBatchFiles: csharp-object-string increments selfReportedOnlyFileCount ─
+{
+  const dir = await makeTempExportFolder();
+  const csharpString =
+    "{ entityType = invoices, batchNumber = 1, recordCount = 100, records = System.Collections.Generic.List`1[System.Collections.Generic.Dictionary`2[System.String,System.Object]] }";
+  await writeJson(path.join(dir, "invoices", "batch-001.json"), csharpString);
+
+  const result = await readEntityBatchFiles(dir, "invoices");
+  assert.equal(result.exists, true);
+  assert.equal(result.jsonFileCount, 1);
+  assert.equal(result.recordCount, 100);
+  assert.equal(result.selfReportedOnlyFileCount, 1);
+  assert.equal(result.unrecognizedShapeFileCount, 0);
+  assert.equal(result.unreadableFileCount, 0);
+  console.log("ok: readEntityBatchFiles increments selfReportedOnlyFileCount for csharp-object-string batch");
+}
+
 console.log("\nAll quickBooksExportReader tests passed.");

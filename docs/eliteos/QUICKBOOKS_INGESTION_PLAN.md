@@ -65,28 +65,52 @@ decodes and strips UTF-8/UTF-16LE/UTF-16BE BOMs (and stray leading control chara
 before parsing, so the reader/preview tool tolerates this without any changes needed
 on the Windows VM connector.
 
-**Known connector bug (handled on the reader side; needs a connector fix later):**
-real archived batch files (`customers/batch-001.json`, `terms/date-driven-terms.json`,
-etc.) parse as a top-level JSON **string** instead of a JSON object/array. Likely root
-cause: `quickbooks-sdk-connector/Normalization/JsonSerializationHelper.cs`'s `WriteValue`
-switch has no case for a plain C# anonymous object — the `payload` passed by
+**Current archive status — extraction counts confirmed, but archive is NOT staging-ready.**
+
+The archived export at `~/eliteos-local-archive/quickbooks-20260701/full-success`
+(run ID `20260701-185251-3b5132b7`) proves the connector's entity coverage and
+self-reported record counts (262,654 across 14 entity types, 0 errors). However, every
+batch file contains only a C# anonymous-object `.ToString()` string rather than actual
+record bodies. For example, `customers/batch-001.json` (192 bytes, claiming 100 records)
+contains:
+
+```
+"{ entityType = customers, batchNumber = 1, recordCount = 100, records = System.Collections.Generic.List`1[...] }"
+```
+
+The `records` field holds the .NET type name, not the serialized records. The actual
+customer, invoice, and financial data was never written to disk. **This archive cannot
+feed Phase 2 staging.** The preview tool now correctly identifies this condition:
+`selfReportedOnlyFileCount > 0` for every entity, with a per-entity warning
+`[entity] N batch file(s) contain only a self-reported count, not materialized records
+(connector serialization bug: record bodies were not serialized to disk) — not ingest-ready`.
+
+**Root cause (connector-side, not yet fixed):**
+`quickbooks-sdk-connector/Normalization/JsonSerializationHelper.cs`'s `WriteValue`
+switch has no case for a plain C# anonymous object. The payload passed by
 `IteratorQueryRunner.WriteJson`/`RunSingleQuery` (`new { entityType, batchNumber,
-recordCount, records }`) doesn't match `IDictionary<string, object>`, `IDictionary`, or
-`IEnumerable`, so it falls into the `default: writer.WriteStringValue(Convert.ToString(value))`
-branch and gets serialized as a single JSON string containing the object's default
-`.ToString()` text (or, depending on the exact payload shape, a string that itself
-re-parses to JSON or contains raw QBXML) instead of a real JSON object. **This has not
-been changed yet** — fixing it belongs in a future connector patch (e.g. give the
-anonymous payload a `Dictionary<string, object>`/`IDictionary` shape, or add an
-anonymous-type case to `WriteValue` via reflection) and should be re-verified against a
-fresh archived export before relying on it.
-`backend-core/src/quickbooks/quickBooksJsonFileReader.js` works around this today on
-the read side only: `extractRecordCountFromBatchJson`/`buildJsonShapeSummary` detect a
-top-level string payload and, without ever logging its content, (1) retry `JSON.parse`
-if it looks like re-encoded JSON (starts with `{`, `[`, or `"`), (2) count QuickBooks
-`*Ret` elements structurally by tag name if it looks like XML (starts with `<`), using
-a per-entity tag map (e.g. `CustomerRet`, `InvoiceRet`, `Item*Ret`), or (3) return a
-record count of `0` with a safe warning if the string is neither.
+recordCount, records }`) does not match `IDictionary<string, object>`, `IDictionary`,
+or `IEnumerable`, so it falls through to
+`default: writer.WriteStringValue(Convert.ToString(value))` and the object's `.ToString()`
+representation is written as a JSON string instead of a real JSON object.
+
+**Required connector fix before Phase 2:** Change the payload type passed to
+`WriteIndentedJson` from an anonymous type to `IDictionary<string, object>`, e.g.:
+
+```csharp
+WriteIndentedJson(filePath, new Dictionary<string, object>
+{
+    ["entityType"] = entityType,
+    ["batchNumber"] = batchNumber,
+    ["recordCount"] = records.Count,
+    ["records"] = records,
+});
+```
+
+After fixing and re-running, verify one batch file is a real JSON object (not a
+192-byte string) before proceeding to Phase 2. The Phase 1 preview tool will
+automatically show `selfReportedOnlyFileCount=0` and no not-ingest-ready warnings once
+the connector serializer is corrected.
 
 **Never commit real QuickBooks export data.** `quickbooks-sdk-connector/exports/` and
 `quickbooks-sdk-connector/logs/` are git-ignored. Test fixtures for the reader/summary

@@ -50,6 +50,7 @@ export function formatEntitySummaryLine(entityType, entitySummary) {
     `manifestErrorCount=${entitySummary.manifestErrorCount}`,
     `unreadableFileCount=${entitySummary.unreadableFileCount}`,
     `unrecognizedShapeFileCount=${entitySummary.unrecognizedShapeFileCount}`,
+    `selfReportedOnlyFileCount=${entitySummary.selfReportedOnlyFileCount}`,
   ];
 
   return `  ${entityType}: ${tokens.join(" ")}`;

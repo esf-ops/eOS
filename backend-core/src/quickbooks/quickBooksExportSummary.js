@@ -58,6 +58,7 @@ export function buildQuickBooksExportSummary(exportReadResult) {
       recordCount: 0,
       unreadableFileCount: 0,
       unrecognizedShapeFileCount: 0,
+      selfReportedOnlyFileCount: 0,
     };
 
     if (!folderResult.exists) {
@@ -76,6 +77,8 @@ export function buildQuickBooksExportSummary(exportReadResult) {
     }
     totalDiscoveredRecordCount += folderResult.recordCount;
 
+    const selfReportedOnlyFileCount = folderResult.selfReportedOnlyFileCount ?? 0;
+
     perEntity[folderName] = {
       inManifest: Boolean(manifestEntity),
       folderExists: folderResult.exists,
@@ -86,6 +89,7 @@ export function buildQuickBooksExportSummary(exportReadResult) {
       discoveredRecordCount: folderResult.recordCount,
       unreadableFileCount: folderResult.unreadableFileCount ?? 0,
       unrecognizedShapeFileCount: folderResult.unrecognizedShapeFileCount ?? 0,
+      selfReportedOnlyFileCount,
     };
 
     if (
@@ -110,6 +114,13 @@ export function buildQuickBooksExportSummary(exportReadResult) {
     if (folderResult.unrecognizedShapeFileCount > 0) {
       warnings.push(
         `[${folderName}] ${folderResult.unrecognizedShapeFileCount} batch JSON file(s) had an unrecognized/ambiguous record shape`
+      );
+    }
+
+    if (selfReportedOnlyFileCount > 0) {
+      warnings.push(
+        `[${folderName}] ${selfReportedOnlyFileCount} batch file(s) contain only a self-reported count, not materialized records` +
+          ` (connector serialization bug: record bodies were not serialized to disk) — not ingest-ready`
       );
     }
   }

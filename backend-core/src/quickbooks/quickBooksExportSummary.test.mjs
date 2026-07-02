@@ -206,7 +206,56 @@ function fakeBatchFile(entityType, batchNumber, recordCount) {
   assert.doesNotMatch(serialized, /Fake Test Customer/);
   assert.doesNotMatch(serialized, /555-000-0000/);
   assert.doesNotMatch(serialized, /1234\.56/);
+  assert.equal(summary.perEntity.customers.selfReportedOnlyFileCount, 0);
   console.log("ok: summary never contains raw record fields");
+}
+
+// ── csharp-object-string batch produces not-ingest-ready warning ──────────────
+{
+  const dir = await makeTempExportFolder();
+  await writeJson(
+    path.join(dir, "manifest.json"),
+    fakeManifest({
+      Entities: [{ EntityType: "bills", BatchCount: 1, RecordCount: 100, Errors: [] }],
+    })
+  );
+  const csharpString =
+    "{ entityType = bills, batchNumber = 1, recordCount = 100, records = System.Collections.Generic.List`1[System.Object] }";
+  await writeJson(path.join(dir, "bills", "batch-001.json"), csharpString);
+
+  const readResult = await readQuickBooksExport(dir);
+  const summary = buildQuickBooksExportSummary(readResult);
+
+  assert.equal(summary.perEntity.bills.selfReportedOnlyFileCount, 1);
+  assert.equal(summary.perEntity.bills.discoveredRecordCount, 100);
+  const warning = summary.warnings.find((w) => /bills.*self-reported.*not ingest-ready/i.test(w));
+  assert.ok(warning, `expected a not-ingest-ready warning for bills; got: ${JSON.stringify(summary.warnings)}`);
+  const serialized = JSON.stringify(summary);
+  assert.doesNotMatch(serialized, /System\.Collections/);
+  assert.doesNotMatch(serialized, /System\.Object/);
+  console.log("ok: csharp-object-string batch produces selfReportedOnlyFileCount and not-ingest-ready warning");
+}
+
+// ── manifest RecordCount mismatch with discovered materialized records fires warning ─
+{
+  const dir = await makeTempExportFolder();
+  await writeJson(
+    path.join(dir, "manifest.json"),
+    fakeManifest({
+      Entities: [{ EntityType: "vendors", BatchCount: 1, RecordCount: 10, Errors: [] }],
+    })
+  );
+  // Only 3 real records on disk — manifest says 10
+  await writeJson(path.join(dir, "vendors", "batch-001.json"), fakeBatchFile("vendors", 1, 3));
+
+  const readResult = await readQuickBooksExport(dir);
+  const summary = buildQuickBooksExportSummary(readResult);
+
+  assert.equal(summary.perEntity.vendors.manifestRecordCount, 10);
+  assert.equal(summary.perEntity.vendors.discoveredRecordCount, 3);
+  const mismatchWarning = summary.warnings.find((w) => /vendors.*10.*3|vendors.*does not match/i.test(w));
+  assert.ok(mismatchWarning, `expected a mismatch warning for vendors; got: ${JSON.stringify(summary.warnings)}`);
+  console.log("ok: manifest RecordCount mismatch with discovered records fires mismatch warning");
 }
 
 console.log("\nAll quickBooksExportSummary tests passed.");
