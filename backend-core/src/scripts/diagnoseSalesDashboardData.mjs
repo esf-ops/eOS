@@ -26,6 +26,7 @@ import {
   topWorksheetColorsBySqft
 } from "../sales/salesIntelligenceFacts.js";
 import { computeDashboardFromIntelligence } from "../sales/salesDashboardMetrics.js";
+import { compareColorClassificationImpact } from "../sales/salesColorClassification.js";
 
 function pickStr(v) {
   return v != null ? String(v).trim() : "";
@@ -133,7 +134,7 @@ async function main() {
   const supabase = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
 
   const sources = await loadDashboardDataSources(supabase, organizationId);
-  const { syncHealth, facts, enrichedFacts, worksheet, quotes, forecasts, mappings, activities, calendarRows } = sources;
+  const { syncHealth, facts, enrichedFacts, worksheet, quotes, forecasts, mappings, activities, calendarRows, colorCatalog } = sources;
 
   const filtersParsed = parseDashboardFilters({ quickRange: "ytd", tab: "command_center" });
   const intelligenceBundle = finalizeIntelligenceBundle(
@@ -213,6 +214,8 @@ async function main() {
 
   const payloadSummary = summarizeDashboardPayload(dashboardBody, filtersParsed);
 
+  const colorClassificationComparison = compareColorClassificationImpact(intelligenceRows, colorCatalog);
+
   const report = {
     organizationId,
     morawareJobFacts: {
@@ -273,6 +276,7 @@ async function main() {
     })),
     topUnmappedAccountsBySqft: topUnmappedAccounts,
     topUnmatchedWorksheetJobsBySqft: topUnmatched,
+    colorClassificationComparison,
     dashboardPayloadSanity: payloadSummary
   };
 
@@ -342,6 +346,28 @@ async function main() {
   console.log("\nTop raw worksheet colors by sqft");
   for (const c of report.topRawWorksheetColorsBySqft) console.log(`  · ${c.color}: ${Math.round(c.sqft).toLocaleString()} sqft`);
   if (!report.topRawWorksheetColorsBySqft.length) console.log("  (none)");
+
+  const cc = report.colorClassificationComparison;
+  console.log("\nColor classification (fixture-only → Supabase catalog + normalization)");
+  console.log(`  Catalog source: ${cc.catalogSource} (${cc.catalogItemCount} items)`);
+  console.log(`  Classified sqft — before: ${Math.round(cc.before.totalSqft).toLocaleString()} → after: ${Math.round(cc.after.totalSqft).toLocaleString()}`);
+  console.log(`  Elite 100 sqft — before: ${Math.round(cc.before.eliteSqft).toLocaleString()} (${cc.before.eliteShare.toFixed(2)}%) → after: ${Math.round(cc.after.eliteSqft).toLocaleString()} (${cc.after.eliteShare.toFixed(2)}%)`);
+  console.log(`  Unknown sqft — before: ${Math.round(cc.before.unknownSqft).toLocaleString()} (${cc.before.unknownShare.toFixed(2)}%) → after: ${Math.round(cc.after.unknownSqft).toLocaleString()} (${cc.after.unknownShare.toFixed(2)}%)`);
+  console.log(`  Out-of-collection sqft — before: ${Math.round(cc.before.outSqft).toLocaleString()} → after: ${Math.round(cc.after.outSqft).toLocaleString()}`);
+  console.log("\n  Top newly matched colors (fixture-only → Elite 100):");
+  for (const c of cc.topNewlyMatchedColors.slice(0, 10)) {
+    console.log(`    · ${c.color}${c.stone ? ` / ${c.stone}` : ""}: ${Math.round(c.sqft).toLocaleString()} sqft (${c.match_reason})`);
+  }
+  if (!cc.topNewlyMatchedColors.length) console.log("    (none)");
+  console.log("\n  Top still-unmatched colors:");
+  for (const c of cc.topStillUnmatchedColors.slice(0, 10)) {
+    console.log(`    · ${c.color}${c.stone ? ` / ${c.stone}` : ""}: ${Math.round(c.sqft).toLocaleString()} sqft (${c.match_reason})`);
+  }
+  if (!cc.topStillUnmatchedColors.length) console.log("    (none)");
+  console.log("\n  Matches by reason/confidence (after, by sqft):");
+  for (const r of cc.matchesByReasonAfter.slice(0, 10)) {
+    console.log(`    · ${r.reason}: ${Math.round(r.sqft).toLocaleString()} sqft`);
+  }
 
   console.log("\nTop unknown colors by sqft (YTD classified)");
   for (const c of report.topUnknownColorsBySqft) console.log(`  · ${c.color}: ${Math.round(c.sqft).toLocaleString()} sqft`);

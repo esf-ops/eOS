@@ -266,7 +266,74 @@ import { buildMonthlyYoYTrend } from "./salesProductionSummary.js";
   console.log("ok: detectDormantAccounts threshold");
 }
 
-// Elite 100 classification
+// Elite 100 classification + Moraware normalization
+{
+  resetElite100CatalogCache();
+  const {
+    classifySalesColor,
+    classifySalesColorFixtureOnly,
+    compareColorClassificationImpact
+  } = await import("./salesColorClassification.js");
+  const {
+    stripThicknessPrefix,
+    stripFinishSuffix,
+    normalizeMorawareColorLabel,
+    isExcludedColorNoise
+  } = await import("./salesColorNormalization.js");
+  const { loadElite100CatalogItems } = await import("./elite100CatalogFixture.js");
+
+  assert.equal(stripThicknessPrefix("3cm Pacific Antique Gray"), "Pacific Antique Gray");
+  assert.equal(stripThicknessPrefix("2 cm Moonflakes"), "Moonflakes");
+  assert.equal(stripFinishSuffix("antique gray polished"), "antique gray");
+  assert.equal(normalizeMorawareColorLabel("3cm Pacific Antique Gray Polished"), "pacific antique gray");
+  console.log("ok: Moraware color normalization");
+
+  const catalog = loadElite100CatalogItems();
+  const clsSuffix = classifySalesColor("Pacific Antique Gray", "ESF", { catalogItems: catalog, aliases: [] });
+  assert.equal(clsSuffix.collectionStatus, "elite100");
+  assert.ok(String(clsSuffix.match_reason).startsWith("vendor_suffix_exact"));
+  console.log("ok: vendor prefix exact remainder match");
+
+  const clsThickness = classifySalesColor("3cm Antique Gray", "ESF", { catalogItems: catalog, aliases: [] });
+  assert.equal(clsThickness.collectionStatus, "elite100");
+  console.log("ok: thickness stripping");
+
+  const clsFinish = classifySalesColor("Antique Gray Polished", "ESF", { catalogItems: catalog, aliases: [] });
+  assert.equal(clsFinish.collectionStatus, "elite100");
+  console.log("ok: finish suffix stripping");
+
+  const clsAsmi = classifySalesColor("ASMI Moonflakes", "ASMI", { catalogItems: catalog, aliases: [] });
+  assert.equal(clsAsmi.collectionStatus, "elite100");
+  console.log("ok: ASMI Moonflakes vendor suffix");
+
+  const clsCambria = classifySalesColor("Cambria Warwick", "Cambria", { catalogItems: catalog, aliases: [] });
+  assert.equal(clsCambria.collectionStatus, "elite100");
+  console.log("ok: Cambria Warwick vendor suffix");
+
+  const clsFake = classifySalesColor("Pental Bianco Aspen", "Pental", { catalogItems: catalog, aliases: [] });
+  assert.notEqual(clsFake.collectionStatus, "elite100");
+  console.log("ok: non-catalog color remains unmatched");
+
+  for (const noise of ["Remnant tagged at shop", "See below", "Shop only warehouse"]) {
+    const n = classifySalesColor(noise, "ESF", { catalogItems: catalog, aliases: [] });
+    assert.notEqual(n.collectionStatus, "elite100");
+    assert.ok(isExcludedColorNoise(noise, "ESF"));
+  }
+  console.log("ok: remnant/shop/see below blocked from Elite 100");
+
+  const before = classifySalesColorFixtureOnly("Pacific Antique Gray", "ESF");
+  assert.notEqual(before.collectionStatus, "elite100");
+  const after = classifySalesColor("Pacific Antique Gray", "ESF", { catalogItems: catalog, aliases: [] });
+  assert.equal(after.collectionStatus, "elite100");
+  const impact = compareColorClassificationImpact(
+    [{ color_raw: "Pacific Antique Gray", stone: "ESF", worksheet_sqft: 100 }],
+    { items: catalog, aliases: [], source: "fixture_elite100_2026", itemCount: catalog.length }
+  );
+  assert.ok(impact.after.eliteSqft > impact.before.eliteSqft);
+  console.log("ok: compareColorClassificationImpact before/after");
+}
+
+// Elite 100 classification (fixture exact match)
 {
   resetElite100CatalogCache();
   const cls = classifySalesColor("Antique Gray", "ESF");

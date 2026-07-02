@@ -4,6 +4,7 @@
  */
 
 import { classifySalesColor } from "./salesColorClassification.js";
+import { normalizeMorawareColorLabel } from "./salesColorNormalization.js";
 import { normalizeAccountNameWithoutLocationPrefix } from "./salesAccountNameNormalizer.js";
 import { dashboardReportDateForMorawareJob } from "./morawareSqftActuals.js";
 import { dateInInclusiveRange } from "./salesDashboardFilters.js";
@@ -121,7 +122,7 @@ export function buildWorksheetMaterialFacts(params) {
   const rows = buildWorksheetMaterialFactsInternal(params);
   return rows.map((r) => ({
     ...r,
-    color_normalized: normalizeColorLabel(r.color_raw),
+    color_normalized: r.color_raw ? normalizeMorawareColorLabel(r.color_raw) : null,
     material_program_signal: materialProgramSignal(r.color_raw, r.stone, r.room)
   }));
 }
@@ -166,10 +167,13 @@ export function buildJobFactIndexes(enrichedFacts = []) {
   return { byJobId, byAccountDateName };
 }
 
-function buildWorksheetMaterialFactsInternal({ organizationId, enrichedFacts = [], worksheetRows = [] }) {
+function buildWorksheetMaterialFactsInternal({ organizationId, enrichedFacts = [], worksheetRows = [], colorCatalog }) {
   const indexes = buildJobFactIndexes(enrichedFacts);
   const seen = new Set();
   const rows = [];
+  const classifyOpts = colorCatalog?.items?.length
+    ? { catalogItems: colorCatalog.items, aliases: colorCatalog.aliases ?? [] }
+    : {};
 
   for (const ws of worksheetRows) {
     const dedupeKey = String(ws.id ?? ws.row_hash ?? "").trim() || JSON.stringify([ws.job_id, ws.color, ws.room, ws.total_worksheet_sqft, ws.job_creation_date]);
@@ -182,7 +186,7 @@ function buildWorksheetMaterialFactsInternal({ organizationId, enrichedFacts = [
     const { job, method } = matchWorksheetRowToJob(ws, indexes);
     const colorRaw = String(ws.color ?? "").trim();
     const stone = String(ws.stone ?? "").trim();
-    const cls = classifySalesColor(colorRaw, stone);
+    const cls = classifySalesColor(colorRaw, stone, classifyOpts);
     const collectionStatus =
       cls.collectionStatus === "elite100" ? "elite100" : colorRaw ? "out_of_collection" : "unknown";
 
@@ -212,6 +216,8 @@ function buildWorksheetMaterialFactsInternal({ organizationId, enrichedFacts = [
       elite_group: cls.eliteGroup ?? null,
       collection_status: collectionStatus,
       match_confidence: cls.confidence ?? null,
+      match_reason: cls.match_reason ?? cls.matchMethod ?? null,
+      catalog_source: cls.catalogSource ?? colorCatalog?.source ?? null,
       stone: stone || null,
       edge: ws.edge ?? null,
       worksheet_sqft: wsSqft,
@@ -771,12 +777,18 @@ export function buildSalesIntelligenceBundle(sources) {
     syncHealth,
     facts,
     activities = [],
-    calendarRows = []
+    calendarRows = [],
+    colorCatalog
   } = sources;
 
   const worksheetRows = worksheet?.rows ?? [];
   const productionJobs = buildProductionJobFacts({ organizationId, enrichedFacts, syncHealth, factsMeta: facts });
-  const worksheetMaterial = buildWorksheetMaterialFacts({ organizationId, enrichedFacts, worksheetRows });
+  const worksheetMaterial = buildWorksheetMaterialFacts({
+    organizationId,
+    enrichedFacts,
+    worksheetRows,
+    colorCatalog
+  });
   const quoteFacts = buildQuoteFacts(quotes);
   const forecastFacts = buildForecastFacts(forecasts, quoteFacts, organizationId);
 
@@ -802,6 +814,7 @@ export function buildSalesIntelligenceBundle(sources) {
     joinDiagnostics,
     activities,
     calendarRows,
+    colorCatalog: colorCatalog ?? null,
     _buildAccountFacts: (currentRange, priorRange) =>
       buildAccountFacts({ productionJobs, worksheetMaterial, quoteFacts, forecastFacts, currentRange, priorRange })
   };
@@ -877,6 +890,8 @@ export function buildDataCoverageReport(bundle, computed = {}) {
       unmapped: bundle.dataQuality?.issueCandidates?.find((i) => i.type === "unmapped_account")?.count ?? 0
     },
     colorClassification: {
+      catalogSource: bundle.colorCatalog?.source ?? "fixture_elite100_2026",
+      catalogItemCount: bundle.colorCatalog?.itemCount ?? null,
       classifiedSqft: bundle.joinDiagnostics?.classifiedWorksheetSqft ?? computed.colorMix?.totalSqft ?? null,
       eliteSqft: bundle.joinDiagnostics?.elite100WorksheetSqft ?? computed.colorMix?.eliteSqft ?? null,
       oocSqft: bundle.joinDiagnostics?.outOfCollectionWorksheetSqft ?? computed.colorMix?.outSqft ?? null,

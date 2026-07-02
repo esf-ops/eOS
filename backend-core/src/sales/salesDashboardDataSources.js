@@ -8,6 +8,8 @@ import { normalizeAccountNameWithoutLocationPrefix } from "./salesAccountNameNor
 import { dashboardReportDateForMorawareJob } from "./morawareSqftActuals.js";
 import { dateInInclusiveRange } from "./salesDashboardFilters.js";
 import { buildSalesIntelligenceBundle } from "./salesIntelligenceFacts.js";
+import { configureSalesColorCatalog } from "./salesColorClassification.js";
+import { loadSalesColorCatalog } from "./salesColorCatalogLoader.js";
 
 const PAGE = 1000;
 
@@ -306,13 +308,16 @@ export async function loadDashboardDataSources(supabase, organizationId) {
   ]);
 
   const quoteIds = quotes.map((q) => q.id).filter(Boolean);
-  const [forecasts, facts, worksheet, activities, calendarRows] = await Promise.all([
+  const [forecasts, facts, worksheet, activities, calendarRows, colorCatalog] = await Promise.all([
     loadForecastEvents(supabase, organizationId, quoteIds),
     loadPreparedJobFacts(supabase, organizationId, syncHealth),
     loadWorksheetColorRows(supabase, organizationId),
     loadJobActivities(supabase, organizationId),
-    loadCalendarScheduleRows(supabase, organizationId)
+    loadCalendarScheduleRows(supabase, organizationId),
+    loadSalesColorCatalog(supabase, organizationId)
   ]);
+
+  configureSalesColorCatalog(colorCatalog);
 
   const aliasByNorm = mappings?.aliasesByNormMoraware ?? new Map();
   const enrichedFacts = facts.rows.map((f) => enrichPreparedFactRow(f, mappings, aliasByNorm));
@@ -327,7 +332,8 @@ export async function loadDashboardDataSources(supabase, organizationId) {
     quotes,
     forecasts,
     activities,
-    calendarRows
+    calendarRows,
+    colorCatalog
   });
 
   return {
@@ -342,6 +348,7 @@ export async function loadDashboardDataSources(supabase, organizationId) {
     quotes,
     forecasts,
     activities,
-    calendarRows
+    calendarRows,
+    colorCatalog
   };
 }
