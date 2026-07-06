@@ -29,6 +29,12 @@ export type CustomerPrintDisplayRoomRow = {
   customerNoteLines: string[];
 };
 
+export type CustomerPrintComparisonExtraLine = {
+  key: string;
+  label: string;
+  displayAmount: number;
+};
+
 export type CustomerPrintComparisonGroupBlock = {
   group: string;
   colorLabel?: string;
@@ -36,6 +42,7 @@ export type CustomerPrintComparisonGroupBlock = {
   backsplashDisplay: number;
   fhbDisplay: number;
   addonsDisplay: number;
+  extraLines?: CustomerPrintComparisonExtraLine[];
   roomTotalDisplay: number;
 };
 

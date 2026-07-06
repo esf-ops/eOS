@@ -8,6 +8,8 @@ import assert from "node:assert/strict";
 import {
   patchPrintSnapshotQuoteNumber,
   parseCustomerEstimatePrintSnapshot,
+  printSnapshotComparisonReconciles,
+  printSnapshotComparisonHasExtraLineMetadata,
   printSnapshotMatchesCustomerDisplayTotal,
   printSnapshotSummaryRowsReconcile
 } from "./customerEstimatePrintSnapshot.js";
@@ -81,6 +83,107 @@ function testFhbSnapshotSummaryRowsReconcile() {
   assert.equal(printSnapshotMatchesCustomerDisplayTotal(snap, 6155), true);
 }
 
+function testComparisonSnapshotIncludesProjectMiscLines() {
+  const snap = {
+    version: 1,
+    finalRounded: 4095,
+    header: {
+      estimateDate: "July 6, 2026",
+      quoteNumber: "ESF-LIS-000099",
+      customerName: "Customer",
+      projectName: "Kitchen"
+    },
+    display: {
+      finalRounded: 4095,
+      estimateSummaryRows: [
+        { key: "countertop", label: "Countertop material", displayAmount: 3745 },
+        { key: "addon-0", label: "Kitchen Sink Cutouts · Kitchen", displayAmount: 200 },
+        { key: "popup-outlet", label: "Pop Up Outlet — Miscellaneous", displayAmount: 150 }
+      ],
+      preparedByDisplayName: "Rep",
+      showRoomBreakdown: true,
+      customerFacingNoteLines: [],
+      roomComparisonTable: {
+        roomBlocks: [
+          {
+            roomId: "kitchen",
+            roomDisplayName: "Kitchen",
+            isVanity: false,
+            groupBlocks: [
+              {
+                group: "Group A",
+                countertopDisplay: 4365,
+                backsplashDisplay: 0,
+                fhbDisplay: 0,
+                addonsDisplay: 350,
+                extraLines: [
+                  { key: "addon-0", label: "Kitchen Sink Cutouts", displayAmount: 200 },
+                  { key: "popup-outlet", label: "Pop Up Outlet — Miscellaneous", displayAmount: 150 }
+                ],
+                roomTotalDisplay: 4715
+              }
+            ]
+          }
+        ],
+        roomRows: [],
+        projectDisplayTotals: { "Group A": 4715 },
+        selectedGroups: [{ group: "Group A" }],
+        isPerRoomMode: true
+      }
+    }
+  };
+  assert.equal(printSnapshotComparisonReconciles(snap), true);
+}
+
+function testStaleComparisonSnapshotMissingExtraLineMetadata() {
+  const snap = {
+    version: 1,
+    finalRounded: 4095,
+    header: {
+      estimateDate: "July 6, 2026",
+      quoteNumber: "ESF-LIS-000099",
+      customerName: "Customer",
+      projectName: "Kitchen"
+    },
+    display: {
+      finalRounded: 4095,
+      estimateSummaryRows: [
+        { key: "countertop", label: "Countertop material", displayAmount: 3745 },
+        { key: "addon-0", label: "Kitchen Sink Cutouts · Kitchen", displayAmount: 200 },
+        { key: "popup-outlet", label: "Pop Up Outlet — Miscellaneous", displayAmount: 150 }
+      ],
+      preparedByDisplayName: "Rep",
+      showRoomBreakdown: true,
+      customerFacingNoteLines: [],
+      roomComparisonTable: {
+        roomBlocks: [
+          {
+            roomId: "kitchen",
+            roomDisplayName: "Kitchen",
+            isVanity: false,
+            groupBlocks: [
+              {
+                group: "Group A",
+                countertopDisplay: 4365,
+                backsplashDisplay: 0,
+                fhbDisplay: 0,
+                addonsDisplay: 200,
+                roomTotalDisplay: 4565
+              }
+            ]
+          }
+        ],
+        roomRows: [],
+        projectDisplayTotals: { "Group A": 4565 },
+        selectedGroups: [{ group: "Group A" }],
+        isPerRoomMode: true
+      }
+    }
+  };
+  assert.equal(printSnapshotComparisonReconciles(snap), true);
+  assert.equal(printSnapshotComparisonHasExtraLineMetadata(snap), false);
+}
+
 function testStaleFhbSnapshotFailsSummaryReconciliation() {
   const snap = {
     version: 1,
@@ -114,5 +217,7 @@ function testStaleFhbSnapshotFailsSummaryReconciliation() {
 testPreSaveSnapshotReconcilesWithCustomerDisplayTotal();
 testPatchQuoteNumberMakesSnapshotDeliverable();
 testFhbSnapshotSummaryRowsReconcile();
+testComparisonSnapshotIncludesProjectMiscLines();
+testStaleComparisonSnapshotMissingExtraLineMetadata();
 testStaleFhbSnapshotFailsSummaryReconciliation();
 console.log("customerEstimatePrintSnapshotSave: all tests passed");

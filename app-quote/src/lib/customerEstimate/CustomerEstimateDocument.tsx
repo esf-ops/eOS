@@ -230,14 +230,23 @@ export default function CustomerEstimateDocument(props: CustomerEstimateDocument
                           </td>
                         </tr>
                       ) : null}
-                      {groupBlock.addonsDisplay > 0 ? (
-                        <tr>
-                          <td>Add-ons / fixtures</td>
-                          <td className="cep-num cep-amt">
-                            {formatDisplayDollars(groupBlock.addonsDisplay)}
-                          </td>
-                        </tr>
-                      ) : null}
+                      {groupBlock.extraLines?.length
+                        ? groupBlock.extraLines.map((line) => (
+                            <tr key={`${groupBlock.group}-${line.key}`}>
+                              <td>{line.label}</td>
+                              <td className="cep-num cep-amt">
+                                {formatDisplayDollars(line.displayAmount)}
+                              </td>
+                            </tr>
+                          ))
+                        : groupBlock.addonsDisplay > 0 ? (
+                            <tr>
+                              <td>Add-ons / fixtures</td>
+                              <td className="cep-num cep-amt">
+                                {formatDisplayDollars(groupBlock.addonsDisplay)}
+                              </td>
+                            </tr>
+                          ) : null}
                       <tr className="cep-comparison-room-total-row">
                         <td><strong>Room total</strong></td>
                         <td className="cep-num cep-amt">

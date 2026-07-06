@@ -129,6 +129,16 @@ export function snapshotToDocumentProps(
               backsplashDisplay: asNumber(g?.backsplashDisplay),
               fhbDisplay: asNumber(g?.fhbDisplay),
               addonsDisplay: asNumber(g?.addonsDisplay),
+              extraLines: Array.isArray(g?.extraLines)
+                ? g.extraLines.map((line) => {
+                    const row = asRecord(line);
+                    return {
+                      key: asString(row?.key, "extra"),
+                      label: asString(row?.label),
+                      displayAmount: asNumber(row?.displayAmount)
+                    };
+                  })
+                : undefined,
               roomTotalDisplay: asNumber(g?.roomTotalDisplay)
             };
           })

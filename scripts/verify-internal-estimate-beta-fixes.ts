@@ -69,7 +69,10 @@ import {
   normalizeMaterialProgramDefault
 } from "../app-quote/src/lib/prototypeQuoteMath.ts";
 import { parseCustomerFacingNoteLines } from "../app-internal-estimate/src/lib/customerFacingNotes.ts";
-import { buildCustomerEstimateDisplayModel } from "../app-internal-estimate/src/lib/customerEstimateDisplayModel.ts";
+import {
+  buildCustomerEstimateDisplayModel,
+  comparisonGroupDisplayedPartsSum
+} from "../app-internal-estimate/src/lib/customerEstimateDisplayModel.ts";
 import { formatPreparedByDisplayName } from "../app-internal-estimate/src/lib/formatPreparedByName.ts";
 import { roundCustomerDisplay } from "../app-quote/src/lib/customerDisplayRounding.ts";
 import { splitInternalEstimateCustomLines } from "../app-internal-estimate/src/lib/internalEstimateCustomLines.ts";
@@ -80,13 +83,16 @@ function approx(a: number, b: number, eps = 0.02) {
 
 // Customer print uses pre-rounded display amounts from customerDisplay model.
 {
-  const printSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/CustomerEstimatePrint.tsx"), "utf8");
+  const printSrc = readFileSync(
+    join(repoRoot, "app-quote/src/lib/customerEstimate/CustomerEstimateDocument.tsx"),
+    "utf8"
+  );
   assert.match(
     printSrc,
     /display\.estimateSummaryRows/,
-    "CustomerEstimatePrint must render estimate summary from customerDisplay model"
+    "CustomerEstimateDocument must render estimate summary from customerDisplay model"
   );
-  assert.match(printSrc, /roundCustomerDisplay/, "CustomerEstimatePrint must use customer display rounding helpers");
+  assert.match(printSrc, /formatDisplayDollars/, "CustomerEstimateDocument must format customer display dollars");
 }
 
 // Manual sqft room add-ons + persistence
@@ -731,7 +737,7 @@ function approx(a: number, b: number, eps = 0.02) {
   assert.match(displaySrc, /customerFixtureDetailLines/, "display model exposes customer fixture detail lines");
   assert.match(displaySrc, /lineKey/, "display model uses stable line keys");
 
-  const printSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/CustomerEstimatePrint.tsx"), "utf8");
+  const printSrc = readFileSync(join(repoRoot, "app-quote/src/lib/customerEstimate/CustomerEstimateDocument.tsx"), "utf8");
   // Comparison color labels now come through display.roomComparisonTable.selectedGroups[].colorLabel
   assert.match(printSrc, /colorLabel/, "customer print shows optional comparison color labels via selectedGroups");
   // customerFixtureDetailLines are now handled in the display model's estimateSummaryRows, not rendered directly
@@ -793,7 +799,7 @@ function approx(a: number, b: number, eps = 0.02) {
   assert.match(displaySrc, /customerFacingNoteLines/, "display model exposes normalized project note lines");
   assert.match(displaySrc, /parseCustomerFacingNoteLines/, "display model normalizes raw notes");
 
-  const printSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/CustomerEstimatePrint.tsx"), "utf8");
+  const printSrc = readFileSync(join(repoRoot, "app-quote/src/lib/customerEstimate/CustomerEstimateDocument.tsx"), "utf8");
   assert.match(printSrc, /Project Notes/, "customer print renders Project Notes section");
   assert.match(printSrc, /customerFacingNoteLines/, "customer print reads normalized note lines from display model");
 
@@ -936,7 +942,7 @@ function approx(a: number, b: number, eps = 0.02) {
   assert.doesNotMatch(roundingSrc, /Math\.ceil\(n \/ 10\) \* 10/, "roundCustomerDisplay must not be nearest-$10 ceil");
 
   // CustomerEstimatePrint must NOT mention rounding to the customer
-  const printSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/CustomerEstimatePrint.tsx"), "utf8");
+  const printSrc = readFileSync(join(repoRoot, "app-quote/src/lib/customerEstimate/CustomerEstimateDocument.tsx"), "utf8");
   assert.doesNotMatch(printSrc, /nearest \$5/, "CustomerEstimatePrint must not mention 'nearest $5' rounding");
   assert.doesNotMatch(printSrc, /nearest \$10/, "CustomerEstimatePrint must not have old nearest-$10 copy");
   assert.match(printSrc, /Estimate only/, "CustomerEstimatePrint must retain Estimate only disclaimer");
@@ -956,7 +962,7 @@ function approx(a: number, b: number, eps = 0.02) {
 
 // PDF-STRUCT-1: CustomerEstimatePrint source checks — removed sections + structure
 {
-  const printSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/CustomerEstimatePrint.tsx"), "utf8");
+  const printSrc = readFileSync(join(repoRoot, "app-quote/src/lib/customerEstimate/CustomerEstimateDocument.tsx"), "utf8");
 
   // Removed sections
   assert.doesNotMatch(printSrc, /Scope summary/i, "PDF-STRUCT-1: Scope Summary section removed");
@@ -1092,7 +1098,7 @@ function approx(a: number, b: number, eps = 0.02) {
   assert.match(subline, /Color: Calacatta Idillio/, "VANITY-COLOR-1: subline includes selected color");
   assert.match(subline, /Group Promo/, "VANITY-COLOR-1: subline includes price group");
 
-  const printSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/CustomerEstimatePrint.tsx"), "utf8");
+  const printSrc = readFileSync(join(repoRoot, "app-quote/src/lib/customerEstimate/CustomerEstimateDocument.tsx"), "utf8");
   assert.match(printSrc, /formatVanityCustomerPrintSubline/, "VANITY-COLOR-1: CustomerEstimatePrint uses vanity subline helper");
   assert.doesNotMatch(printSrc, /isVanity \? \(\s*<span[^>]*> · Vanity program<\/span>/, "VANITY-COLOR-1: vanity-only stub removed");
 }
@@ -1143,7 +1149,7 @@ function approx(a: number, b: number, eps = 0.02) {
 
 // PDF-SOURCE-3: CustomerEstimatePrint no longer accepts removed props
 {
-  const printSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/CustomerEstimatePrint.tsx"), "utf8");
+  const printSrc = readFileSync(join(repoRoot, "app-quote/src/lib/customerEstimate/CustomerEstimateDocument.tsx"), "utf8");
   assert.doesNotMatch(printSrc, /measuredRooms.*MeasuredRoom/, "PDF-SOURCE-3: measuredRooms prop removed from CustomerEstimatePrint");
   assert.doesNotMatch(printSrc, /selectedBreakdown.*SelectedMaterialBreakdown/, "PDF-SOURCE-3: selectedBreakdown prop removed from CustomerEstimatePrint");
 }
@@ -1660,7 +1666,7 @@ function approx(a: number, b: number, eps = 0.02) {
 
 // ── PDF-NO-ROUNDING-LANGUAGE: customer-facing PDF must not mention rounding ───
 {
-  const printSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/CustomerEstimatePrint.tsx"), "utf8");
+  const printSrc = readFileSync(join(repoRoot, "app-quote/src/lib/customerEstimate/CustomerEstimateDocument.tsx"), "utf8");
   assert.ok(!printSrc.includes("nearest $5"), "PDF-ROUNDING-LANG-1: no 'nearest $5' text in PDF");
   assert.ok(!printSrc.includes("rounded lines"), "PDF-ROUNDING-LANG-2: no 'rounded lines' text in PDF");
   assert.ok(printSrc.includes("Estimate only"), "PDF-ROUNDING-LANG-3: legal disclaimer retained");
@@ -1994,7 +2000,7 @@ function approx(a: number, b: number, eps = 0.02) {
   assert.match(dmSrc, /perRoomMode/, "ROOM-COMP-6: per-room mode detection in display model");
   assert.match(dmSrc, /activeGroups/, "ROOM-COMP-6: activeGroups on CustomerPrintComparisonRoomRow");
 
-  const printSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/CustomerEstimatePrint.tsx"), "utf8");
+  const printSrc = readFileSync(join(repoRoot, "app-quote/src/lib/customerEstimate/CustomerEstimateDocument.tsx"), "utf8");
   assert.match(printSrc, /isPerRoomMode/, "ROOM-COMP-6: CustomerEstimatePrint uses isPerRoomMode for heading");
   assert.match(printSrc, /Optional material comparison by room/, "ROOM-COMP-6: per-room heading copy present");
   assert.match(printSrc, /roomBlocks/, "ROOM-COMP-6: itemized roomBlocks rendered in comparison");
@@ -2568,12 +2574,111 @@ function buildOocPdfFixture(
     printRow.displayedAreaTotal,
     "ROOM-AGG-1: selected Group Promo comparison matches room area total"
   );
-  const promoParts =
-    (promoBlock!.countertopDisplay ?? 0) +
-    (promoBlock!.backsplashDisplay ?? 0) +
-    (promoBlock!.fhbDisplay ?? 0) +
-    (promoBlock!.addonsDisplay ?? 0);
+  const promoParts = comparisonGroupDisplayedPartsSum(promoBlock!);
   assert.equal(promoParts, promoBlock!.roomTotalDisplay, "ROOM-AGG-1: comparison line items sum to room total");
+}
+
+// COMPARISON-PROJECT-MISC-1: project-level customer custom lines appear in optional comparison totals
+{
+  const kitchen = createDefaultRoom("Group D");
+  kitchen.name = "Kitchen";
+  kitchen.calcMode = "Manual Sq Ft";
+  kitchen.direct = { counter: 35, splash: 0 };
+  kitchen.customerComparisonGroups = ["Group A", "Group B", "Group C"];
+
+  const { rooms: measured } = calculateAllRoomDrafts(
+    [kitchen],
+    "New Construction",
+    "wholesale",
+    0,
+    INTERNAL_ESTIMATE_MEASURE_OPTIONS
+  );
+  measured[0].extras = 200;
+  measured[0].addons = [{ label: "Kitchen Sink Cutouts", total: 200 }];
+
+  const popUpLine = {
+    lineKey: "popup-outlet",
+    name: "Pop Up Outlet",
+    description: "Miscellaneous",
+    quantity: 1,
+    unitPrice: 150,
+    customerFacing: true,
+    roomName: "",
+    category: "Miscellaneous"
+  };
+
+  const roomBd = buildCustomerRoomAreaCostBreakdown({
+    roomDrafts: [kitchen],
+    measuredRooms: measured,
+    materialBasis: "wholesale",
+    measureOptions: INTERNAL_ESTIMATE_MEASURE_OPTIONS,
+    customLines: [popUpLine]
+  });
+  assert.equal(roomBd.unassignedCustomerCustomExact, 150, "COMPARISON-PROJECT-MISC-1: Pop Up Outlet is project-level");
+
+  const selectedBd = buildSelectedMaterialBreakdown([kitchen], "wholesale", {
+    internalMaterialUseTax: true,
+    chargeableCounterCeil: true,
+    materialProgramDefault: INTERNAL_ESTIMATE_ELITE_100_PROGRAM
+  });
+  const allGroupRates = buildInternalEstimateGroupComparison({
+    countertopSqft: 35,
+    backsplashSqft: 0,
+    roomFixedDollars: 200,
+    customLineDollars: 150,
+    basis: "wholesale",
+    internalMaterialUseTax: true
+  });
+
+  const visibleCustomerLines = [
+    {
+      lineKey: popUpLine.lineKey,
+      name: popUpLine.name,
+      description: popUpLine.description,
+      qty: 1,
+      lineTotal: 150
+    }
+  ];
+
+  const displayModel = buildCustomerEstimateDisplayModel({
+    selectedBreakdown: selectedBd,
+    measuredRooms: measured,
+    visibleCustomerLines,
+    internalMaterialFoldDollars: 0,
+    roomAreaBreakdown: roomBd,
+    allGroupComparisonRates: allGroupRates,
+    internalMaterialUseTax: true
+  });
+
+  const summarySum = displayModel.estimateSummaryRows.reduce((s, r) => s + r.displayAmount, 0);
+  assert.equal(summarySum, displayModel.finalRounded, "COMPARISON-PROJECT-MISC-1: selected summary reconciles");
+
+  const ct = displayModel.roomComparisonTable;
+  assert.ok(ct, "COMPARISON-PROJECT-MISC-1: comparison table present");
+  const roomBlock = ct!.roomBlocks[0];
+  assert.ok(roomBlock, "COMPARISON-PROJECT-MISC-1: kitchen comparison block");
+
+  for (const groupName of ["Group A", "Group B", "Group C"]) {
+    const block = roomBlock.groupBlocks.find((g) => g.group === groupName);
+    assert.ok(block, `COMPARISON-PROJECT-MISC-1: ${groupName} block present`);
+    assert.ok(block!.extraLines.length >= 2, `COMPARISON-PROJECT-MISC-1: ${groupName} itemizes extras`);
+    const sinkLine = block!.extraLines.find((line) => /kitchen sink cutouts/i.test(line.label));
+    const popUpRow = block!.extraLines.find((line) => /pop up outlet/i.test(line.label));
+    assert.ok(sinkLine, `COMPARISON-PROJECT-MISC-1: ${groupName} shows sink cutout line`);
+    assert.equal(sinkLine!.displayAmount, 200, `COMPARISON-PROJECT-MISC-1: ${groupName} sink cutout amount`);
+    assert.ok(popUpRow, `COMPARISON-PROJECT-MISC-1: ${groupName} shows Pop Up Outlet line`);
+    assert.equal(popUpRow!.displayAmount, 150, `COMPARISON-PROJECT-MISC-1: ${groupName} Pop Up Outlet amount`);
+    assert.equal(
+      comparisonGroupDisplayedPartsSum(block!),
+      block!.roomTotalDisplay,
+      `COMPARISON-PROJECT-MISC-1: ${groupName} comparison rows reconcile`
+    );
+    assert.equal(
+      (block!.extraLines.reduce((s, line) => s + line.displayAmount, 0)),
+      350,
+      `COMPARISON-PROJECT-MISC-1: ${groupName} includes $200 + $150 extras`
+    );
+  }
 }
 
 console.log("verify-internal-estimate-beta-fixes: OK");

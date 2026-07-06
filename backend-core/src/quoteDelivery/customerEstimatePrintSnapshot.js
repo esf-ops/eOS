@@ -51,6 +51,68 @@ export function printSnapshotSummaryRowsReconcile(snapshot) {
 }
 
 /**
+ * Optional comparison blocks must reconcile displayed line items to room totals.
+ *
+ * @param {Record<string, unknown>} snapshot
+ */
+export function printSnapshotComparisonReconciles(snapshot) {
+  const display = snapshot.display && typeof snapshot.display === "object" ? snapshot.display : null;
+  const table = display?.roomComparisonTable;
+  if (!table || typeof table !== "object") return true;
+  const roomBlocks = table.roomBlocks;
+  if (!Array.isArray(roomBlocks) || roomBlocks.length === 0) return true;
+
+  for (const roomBlock of roomBlocks) {
+    if (!roomBlock || typeof roomBlock !== "object") continue;
+    const groupBlocks = roomBlock.groupBlocks;
+    if (!Array.isArray(groupBlocks)) continue;
+    for (const groupBlock of groupBlocks) {
+      if (!groupBlock || typeof groupBlock !== "object") continue;
+      const material =
+        Math.round(Number(groupBlock.countertopDisplay) || 0) +
+        Math.round(Number(groupBlock.backsplashDisplay) || 0) +
+        Math.round(Number(groupBlock.fhbDisplay) || 0);
+      let extras = Math.round(Number(groupBlock.addonsDisplay) || 0);
+      if (Array.isArray(groupBlock.extraLines) && groupBlock.extraLines.length > 0) {
+        extras = groupBlock.extraLines.reduce((sum, line) => {
+          if (!line || typeof line !== "object") return sum;
+          const amount = Math.round(Number(line.displayAmount));
+          return sum + (Number.isFinite(amount) ? amount : 0);
+        }, 0);
+      }
+      const roomTotal = Math.round(Number(groupBlock.roomTotalDisplay) || 0);
+      if (material + extras !== roomTotal) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Comparison blocks with add-ons must carry itemized extraLines (post–project-misc fix).
+ *
+ * @param {Record<string, unknown>} snapshot
+ */
+export function printSnapshotComparisonHasExtraLineMetadata(snapshot) {
+  const display = snapshot.display && typeof snapshot.display === "object" ? snapshot.display : null;
+  const table = display?.roomComparisonTable;
+  if (!table || typeof table !== "object") return true;
+  const roomBlocks = table.roomBlocks;
+  if (!Array.isArray(roomBlocks) || roomBlocks.length === 0) return true;
+
+  for (const roomBlock of roomBlocks) {
+    if (!roomBlock || typeof roomBlock !== "object") continue;
+    const groupBlocks = roomBlock.groupBlocks;
+    if (!Array.isArray(groupBlocks)) continue;
+    for (const groupBlock of groupBlocks) {
+      if (!groupBlock || typeof groupBlock !== "object") continue;
+      const addonsDisplay = Math.round(Number(groupBlock.addonsDisplay) || 0);
+      if (addonsDisplay > 0 && !Array.isArray(groupBlock.extraLines)) return false;
+    }
+  }
+  return true;
+}
+
+/**
  * @param {string} quoteNumber
  * @param {string|null|undefined} revisionLabel
  */
@@ -105,13 +167,17 @@ export function loadPrintSnapshotFromQuoteRow(row) {
   const cdt = Number(iu?.customer_display_total);
   const cdtReconciled = printSnapshotMatchesCustomerDisplayTotal(snap, cdt);
   const summaryReconciled = printSnapshotSummaryRowsReconcile(snap);
-  if (!cdtReconciled || !summaryReconciled) {
+  const comparisonReconciled = printSnapshotComparisonReconciles(snap);
+  const comparisonMetadataOk = printSnapshotComparisonHasExtraLineMetadata(snap);
+  if (!cdtReconciled || !summaryReconciled || !comparisonReconciled || !comparisonMetadataOk) {
     return {
       snapshot: snap,
       reconciled: false,
       customerDisplayTotal: cdt,
       summaryReconciled,
-      cdtReconciled
+      cdtReconciled,
+      comparisonReconciled,
+      comparisonMetadataOk
     };
   }
   return { snapshot: snap, reconciled: true, customerDisplayTotal: cdt };
