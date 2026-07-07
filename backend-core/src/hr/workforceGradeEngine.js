@@ -13,6 +13,124 @@ export const DEFAULT_GRADE_THRESHOLDS = Object.freeze([
   { grade: "D", maxMistakes: 10 }
 ]);
 
+/** Stricter thresholds for zero-goal incident counts (matches weekly ops grading). */
+export const SECTION_ZERO_GOAL_THRESHOLDS = Object.freeze([
+  { grade: "A", maxMistakes: 0 },
+  { grade: "B", maxMistakes: 1 },
+  { grade: "C", maxMistakes: 4 }
+]);
+
+/**
+ * @param {number} incidentCount
+ * @param {Array<{ grade: string, maxMistakes: number }>} [thresholds]
+ */
+export function computeSectionCountGrade(incidentCount, thresholds = SECTION_ZERO_GOAL_THRESHOLDS) {
+  return computeLetterGrade(incidentCount, thresholds);
+}
+
+/**
+ * Grade days metric where lower is better (goal = max acceptable days).
+ * @param {number|null|undefined} actualDays
+ * @param {number|null|undefined} goalDays
+ */
+export function computeSectionDaysGrade(actualDays, goalDays) {
+  const actual = Number(actualDays);
+  const goal = Number(goalDays);
+  if (!Number.isFinite(actual) || !Number.isFinite(goal)) return null;
+  if (actual <= goal) return "A";
+  if (actual <= goal + 1) return "B";
+  if (actual <= goal + 3) return "C";
+  return "F";
+}
+
+/**
+ * Grade production metric where higher is better (goal = weekly SF target).
+ * @param {number|null|undefined} actualSf
+ * @param {number|null|undefined} goalSf
+ */
+export function computeSectionProductionGrade(actualSf, goalSf) {
+  const actual = Number(actualSf);
+  const goal = Number(goalSf);
+  if (!Number.isFinite(actual) || !Number.isFinite(goal) || goal <= 0) return null;
+  const pct = actual / goal;
+  if (pct >= 1) return "A";
+  if (pct >= 0.95) return "B";
+  if (pct >= 0.85) return "C";
+  return "F";
+}
+
+/**
+ * Grade hours/downtime where lower is better.
+ * @param {number|null|undefined} actualHours
+ * @param {number|null|undefined} goalHours
+ */
+export function computeSectionHoursGrade(actualHours, goalHours = 0) {
+  return computeSectionCountGrade(actualHours, SECTION_ZERO_GOAL_THRESHOLDS);
+}
+
+/**
+ * @param {object} section
+ * @param {number} incidentCount
+ * @param {{ actualNumeric?: number|null, actualDisplay?: string|null }} [weekValue]
+ */
+export function computeSectionLetterGrade(section, incidentCount, weekValue = {}) {
+  if (!section?.gradingEnabled) return null;
+
+  const kind = String(section.metricKind ?? "count");
+  const goal = section.goalNumeric;
+
+  if (kind === "count") {
+    return computeSectionCountGrade(incidentCount);
+  }
+
+  const actualNumeric = weekValue.actualNumeric;
+
+  if (kind === "days") {
+    return computeSectionDaysGrade(actualNumeric, goal);
+  }
+  if (kind === "production") {
+    return computeSectionProductionGrade(actualNumeric, goal);
+  }
+  if (kind === "hours") {
+    const hours = actualNumeric != null ? actualNumeric : incidentCount;
+    return computeSectionHoursGrade(hours, goal ?? 0);
+  }
+  if (kind === "currency") {
+    return null;
+  }
+
+  return computeSectionCountGrade(incidentCount);
+}
+
+/**
+ * @param {object} section
+ * @param {number} incidentCount
+ * @param {{ actualNumeric?: number|null, actualDisplay?: string|null }} [weekValue]
+ */
+export function formatSectionActualDisplay(section, incidentCount, weekValue = {}) {
+  if (weekValue.actualDisplay) return String(weekValue.actualDisplay);
+
+  const kind = String(section.metricKind ?? "count");
+  const numeric = weekValue.actualNumeric;
+
+  if (kind === "currency" && numeric != null) {
+    return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(numeric);
+  }
+  if (kind === "production" && numeric != null) {
+    const daily = Math.round(numeric / 5);
+    return `${numeric.toLocaleString()}sf weekly / ${daily.toLocaleString()}sf daily`;
+  }
+  if (kind === "days" && numeric != null) {
+    return `${numeric} days`;
+  }
+  if (kind === "hours") {
+    const hrs = numeric != null ? numeric : incidentCount;
+    return `${hrs}hrs`;
+  }
+
+  return String(Math.max(0, incidentCount));
+}
+
 export const DEFAULT_SEVERITY_WEIGHTS = Object.freeze({
   minor: 1,
   moderate: 2,
