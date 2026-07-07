@@ -416,7 +416,7 @@ async function loadScorecardPayload(db, organizationId, weekStart, settings) {
     priorGrades.set(String(s.section_id), s.letter_grade);
   }
 
-  const { rows, overallGrade } = buildScorecardRows(
+  const { rows, overallGrade, executiveSummary, narrative } = buildScorecardRows(
     sections,
     mistakeData,
     weekValues,
@@ -427,6 +427,8 @@ async function loadScorecardPayload(db, organizationId, weekStart, settings) {
     sections,
     rows,
     overallGrade,
+    executiveSummary,
+    narrative,
     mistakes: mistakeData,
     weekValues
   };
@@ -682,6 +684,8 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
         weekLabel,
         weekOptions,
         overallGrade: payload.overallGrade,
+        executiveSummary: payload.executiveSummary,
+        narrative: payload.narrative,
         rows: payload.rows,
         mistakes: (payload.mistakes ?? []).map(mapIncidentRow)
       });
@@ -1334,11 +1338,15 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
       const reportText = buildScorecardReportText(payload.rows, {
         weekLabel,
         overallGrade: payload.overallGrade,
+        executiveSummary: payload.executiveSummary,
+        narrative: payload.narrative,
         mistakesSummary
       });
       const reportHtml = buildScorecardReportHtml(payload.rows, {
         weekLabel,
         overallGrade: payload.overallGrade,
+        executiveSummary: payload.executiveSummary,
+        narrative: payload.narrative,
         mistakesSummary
       });
 

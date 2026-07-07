@@ -21,13 +21,15 @@ export const SECTION_ZERO_GOAL_THRESHOLDS = Object.freeze([
 ]);
 
 /**
- * Goal-0 count sections: 0=A, 1-2=C, 3+=F
+ * Count-based mistake sections: 0=A, 1=B, 2=C, 3=D, 4+=F
  * @param {number} incidentCount
  */
 export function computeZeroGoalCountGrade(incidentCount) {
   const count = Math.max(0, Number(incidentCount) || 0);
   if (count === 0) return "A";
-  if (count <= 2) return "C";
+  if (count === 1) return "B";
+  if (count === 2) return "C";
+  if (count === 3) return "D";
   return "F";
 }
 
@@ -380,6 +382,33 @@ export function gradeTrend(current, prior) {
   if (c > p) return "up";
   if (c < p) return "down";
   return "flat";
+}
+
+/**
+ * @param {string} name
+ */
+export function shortSectionName(name) {
+  const raw = String(name ?? "").trim();
+  if (!raw) return "Section";
+  const induced = raw.split(/ induced/i)[0]?.trim();
+  if (induced && induced.length < raw.length) return induced;
+  const slash = raw.split("/")[0]?.trim();
+  if (slash && slash.length <= 28) return slash;
+  return raw.length > 28 ? `${raw.slice(0, 26)}…` : raw;
+}
+
+/**
+ * @param {string} name
+ * @param {string|null} current
+ * @param {string|null} prior
+ * @param {string} [trend]
+ */
+export function formatGradeTrendDisplay(name, current, prior, trend = "neutral") {
+  const short = shortSectionName(name);
+  if (!current) return `${short}: —`;
+  if (!prior) return `${short}: ${current}`;
+  const arrow = trend === "up" ? "↑" : trend === "down" ? "↓" : "→";
+  return `${short}: ${current} ${arrow} last week ${prior}`;
 }
 
 /**
