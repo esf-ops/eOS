@@ -31,9 +31,9 @@ export function computeZeroGoalCountGrade(incidentCount) {
   return "F";
 }
 
-/** @deprecated */
-export function computeSectionCountGrade(incidentCount, thresholds = SECTION_ZERO_GOAL_THRESHOLDS) {
-  return computeLetterGrade(incidentCount, thresholds);
+/** @deprecated Use computeZeroGoalCountGrade for ops scorecard count sections. */
+export function computeSectionCountGrade(incidentCount) {
+  return computeZeroGoalCountGrade(incidentCount);
 }
 
 /**
@@ -61,14 +61,17 @@ export function computeProductionWeeklyGrade(weeklySf) {
 }
 
 /**
- * Downtime hours: 0=A, 1-4=C, 5+=F
+ * Shop machinery downtime hours:
+ * 0–2 = A, >2–4 = B, >4–6 = C, >6–8 = D, >8 = F
  * @param {number|null|undefined} hours
  */
 export function computeDowntimeHoursGrade(hours) {
   const h = Number(hours);
   if (!Number.isFinite(h)) return null;
-  if (h === 0) return "A";
-  if (h <= 4) return "C";
+  if (h <= 2) return "A";
+  if (h <= 4) return "B";
+  if (h <= 6) return "C";
+  if (h <= 8) return "D";
   return "F";
 }
 

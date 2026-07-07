@@ -866,6 +866,169 @@ body {
   line-height: 1.5;
 }
 
+.hr-report-html {
+  margin: 0;
+}
+
+.hr-report-doc {
+  display: grid;
+  gap: 18px;
+}
+
+.hr-report-doc-head h2 {
+  margin: 6px 0 0;
+  font-size: 1.25rem;
+}
+
+.hr-report-kicker {
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--eos-ink-muted);
+}
+
+.hr-report-block {
+  padding: 16px;
+  border: 1px solid var(--eos-line);
+  border-radius: var(--r-lg);
+  background: #fff;
+}
+
+.hr-report-block h3 {
+  margin: 0 0 12px;
+  font-size: 0.95rem;
+}
+
+.hr-report-overall {
+  text-align: center;
+}
+
+.hr-report-overall-grade {
+  display: flex;
+  justify-content: center;
+}
+
+.hr-report-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.hr-report-card {
+  padding: 12px;
+  border: 1px solid var(--eos-line);
+  border-radius: var(--r-md);
+  background: var(--eos-surface-muted);
+}
+
+.hr-report-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.hr-report-card-head h4 {
+  margin: 0;
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+.hr-report-card-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  margin: 0;
+}
+
+.hr-report-card-metrics dt {
+  margin: 0;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--eos-ink-muted);
+}
+
+.hr-report-card-metrics dd {
+  margin: 4px 0 0;
+  font-weight: 650;
+  font-size: 0.82rem;
+}
+
+.hr-report-grade {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-weight: 800;
+  font-size: 0.82rem;
+}
+
+.hr-report-grade--a {
+  background: var(--eos-success-soft);
+  color: var(--eos-success);
+}
+
+.hr-report-grade--b {
+  background: var(--eos-info-soft);
+  color: var(--eos-info);
+}
+
+.hr-report-grade--c,
+.hr-report-grade--d {
+  background: var(--eos-warn-soft);
+  color: var(--eos-warn);
+}
+
+.hr-report-grade--f {
+  background: var(--eos-accent-soft);
+  color: var(--eos-accent);
+}
+
+.hr-report-status {
+  font-size: 0.78rem;
+  font-weight: 650;
+  color: var(--eos-ink-mid);
+}
+
+.hr-report-note {
+  margin: 10px 0 0;
+  font-size: 0.75rem;
+  color: var(--eos-ink-muted);
+}
+
+.hr-report-empty {
+  margin: 0;
+  color: var(--eos-ink-muted);
+  font-size: 0.84rem;
+}
+
+.hr-report-mistake-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.hr-report-mistake-list li {
+  padding: 10px 12px;
+  border-radius: var(--r-sm);
+  background: var(--eos-surface-muted);
+  font-size: 0.82rem;
+}
+
+.hr-report-mistake-list span {
+  display: block;
+  margin-top: 4px;
+  color: var(--eos-ink-muted);
+}
+
 .hr-modal-backdrop {
   position: fixed;
   inset: 0;
@@ -921,13 +1084,20 @@ body {
   .eliteos-topbar,
   .hr-scorecard-actions,
   .hr-section-card-foot,
-  .hr-modal-backdrop {
+  .hr-modal-backdrop,
+  .hr-mistakes-log,
+  .hr-scorecard-section {
     display: none !important;
   }
 
   .hr-report-panel {
     border: none;
     padding: 0;
+  }
+
+  .hr-report-block,
+  .hr-report-card {
+    break-inside: avoid;
   }
 }
 

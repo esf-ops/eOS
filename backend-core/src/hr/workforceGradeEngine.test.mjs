@@ -6,6 +6,7 @@ import {
   computeLetterGrade,
   computeOverallCompanyGrade,
   computeProductionWeeklyGrade,
+  computeSectionCountGrade,
   computeZeroGoalCountGrade,
   formatScorecardReportLine,
   formatSectionActualDisplay,
@@ -38,8 +39,17 @@ assert.equal(computeProductionWeeklyGrade(8801), "B");
 assert.equal(computeProductionWeeklyGrade(8000), "F");
 
 assert.equal(computeDowntimeHoursGrade(0), "A");
-assert.equal(computeDowntimeHoursGrade(4), "C");
-assert.equal(computeDowntimeHoursGrade(10), "F");
+assert.equal(computeDowntimeHoursGrade(2), "A");
+assert.equal(computeDowntimeHoursGrade(2.1), "B");
+assert.equal(computeDowntimeHoursGrade(4), "B");
+assert.equal(computeDowntimeHoursGrade(5), "C");
+assert.equal(computeDowntimeHoursGrade(6), "C");
+assert.equal(computeDowntimeHoursGrade(7), "D");
+assert.equal(computeDowntimeHoursGrade(8), "D");
+assert.equal(computeDowntimeHoursGrade(9), "F");
+
+assert.equal(computeSectionCountGrade(1), "C");
+assert.equal(computeSectionCountGrade(3), "F");
 
 const productionSection = {
   metricKind: "production",

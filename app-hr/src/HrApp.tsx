@@ -11,7 +11,7 @@ const EOS_LOGO_URL =
 
 const DEFAULT_WORKSPACE_NAME = "Elite Stone Fabrication";
 
-type WeekOption = { weekStart: string; weekEnd: string; weekLabel: string };
+type WeekOption = { weekStart: string; weekEnd: string; weekLabel: string; isCurrentWeek?: boolean };
 
 type WeekValue = {
   actualNumeric?: number | null;
@@ -106,7 +106,7 @@ function isCountSection(kind: string): boolean {
 }
 
 function isMetricTotalSection(row: SectionRow): boolean {
-  return row.isMetricTotal === true || ["days", "currency", "production"].includes(row.metricKind);
+  return row.isMetricTotal === true || ["days", "currency", "production", "hours"].includes(row.metricKind);
 }
 
 function metricActionLabel(kind: string): string {
@@ -145,6 +145,7 @@ export default function HrApp() {
   const [scorecard, setScorecard] = useState<ScorecardPayload | null>(null);
   const [selectedWeekStart, setSelectedWeekStart] = useState("");
   const [reportText, setReportText] = useState("");
+  const [reportHtml, setReportHtml] = useState("");
   const [reportBusy, setReportBusy] = useState(false);
 
   const [mistakesLog, setMistakesLog] = useState<MistakeLogWeek[]>([]);
@@ -497,8 +498,9 @@ export default function HrApp() {
     try {
       const res = (await apiPost("/api/hr/workforce/report/generate", sessionToken, {
         week_start: scorecard?.weekStart ?? selectedWeekStart
-      })) as { reportText?: string; overallGrade?: string | null };
+      })) as { reportText?: string; reportHtml?: string; overallGrade?: string | null };
       setReportText(res.reportText ?? "");
+      setReportHtml(res.reportHtml ?? "");
       setSuccess(`Weekly report frozen. Overall grade: ${res.overallGrade ?? "—"}`);
     } catch (e: unknown) {
       setErr(hrApiErrorMessage(e, "Unable to generate weekly report."));
@@ -613,11 +615,6 @@ export default function HrApp() {
         {variant === "grade" && isCountSection(row.metricKind) ? (
           <button type="button" className="btn btn-primary btn-sm" onClick={() => openMistakeModal(row)}>
             + Log Mistake
-          </button>
-        ) : null}
-        {variant === "grade" && row.metricKind === "hours" ? (
-          <button type="button" className="btn btn-secondary btn-sm" onClick={() => openMetricModal(row)}>
-            {metricActionLabel(row.metricKind)}
           </button>
         ) : null}
         {variant === "metric" ? (
@@ -750,7 +747,7 @@ export default function HrApp() {
                   <select value={selectedWeekStart} onChange={(e) => setSelectedWeekStart(e.target.value)} disabled={busy}>
                     {weekOptions.map((w) => (
                       <option key={w.weekStart} value={w.weekStart}>
-                        {w.weekLabel}
+                        {w.isCurrentWeek ? `Current week · ${w.weekLabel}` : w.weekLabel}
                       </option>
                     ))}
                   </select>
@@ -786,10 +783,14 @@ export default function HrApp() {
               ) : null}
             </div>
 
-            {reportText ? (
+            {reportText || reportHtml ? (
               <section className="hr-report-panel">
                 <h2 className="hr-report-title">Weekly report</h2>
-                <pre className="hr-report-text">{reportText}</pre>
+                {reportHtml ? (
+                  <div className="hr-report-html" dangerouslySetInnerHTML={{ __html: reportHtml }} />
+                ) : (
+                  <pre className="hr-report-text">{reportText}</pre>
+                )}
               </section>
             ) : null}
 
