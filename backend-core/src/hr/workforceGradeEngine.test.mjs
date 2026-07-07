@@ -25,9 +25,10 @@ assert.equal(computeLetterGrade(1), "A");
 assert.equal(computeLetterGrade(2), "B");
 
 assert.equal(computeZeroGoalCountGrade(0), "A");
-assert.equal(computeZeroGoalCountGrade(1), "C");
+assert.equal(computeZeroGoalCountGrade(1), "B");
 assert.equal(computeZeroGoalCountGrade(2), "C");
-assert.equal(computeZeroGoalCountGrade(3), "F");
+assert.equal(computeZeroGoalCountGrade(3), "D");
+assert.equal(computeZeroGoalCountGrade(4), "F");
 assert.equal(computeZeroGoalCountGrade(13), "F");
 
 assert.equal(computeLeadTimeMedianGrade(14), "A");
@@ -48,8 +49,9 @@ assert.equal(computeDowntimeHoursGrade(7), "D");
 assert.equal(computeDowntimeHoursGrade(8), "D");
 assert.equal(computeDowntimeHoursGrade(9), "F");
 
-assert.equal(computeSectionCountGrade(1), "C");
-assert.equal(computeSectionCountGrade(3), "F");
+assert.equal(computeSectionCountGrade(1), "B");
+assert.equal(computeSectionCountGrade(3), "D");
+assert.equal(computeSectionCountGrade(4), "F");
 
 const productionSection = {
   metricKind: "production",

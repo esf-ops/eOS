@@ -19,6 +19,22 @@ type WeekValue = {
   valuePayload?: Record<string, unknown>;
 };
 
+type ExecutiveSummary = {
+  overallGrade?: string | null;
+  overallPerformanceLabel?: string | null;
+  gradeCounts?: { A: number; B: number; C: number; D: number; F: number };
+  totalMistakes?: number;
+  worstPerformingArea?: string | null;
+  quoteVolume?: number | null;
+  quoteVolumeDisplay?: string | null;
+  productionSf?: number | null;
+  productionGoalSf?: number | null;
+  productionDisplay?: string | null;
+  medianLeadTime?: number | null;
+  medianLeadTimeGoal?: number | null;
+  medianLeadTimeDisplay?: string | null;
+};
+
 type SectionRow = {
   sectionId: string;
   name: string;
@@ -31,7 +47,9 @@ type SectionRow = {
   isMetricTotal?: boolean;
   actualDisplay: string;
   letterGrade: string | null;
+  priorLetterGrade?: string | null;
   trend: string;
+  trendLabel?: string | null;
   weekValue?: WeekValue;
 };
 
@@ -56,6 +74,8 @@ type ScorecardPayload = {
   weekLabel?: string;
   weekOptions?: WeekOption[];
   overallGrade?: string | null;
+  executiveSummary?: ExecutiveSummary;
+  narrative?: string;
   rows?: SectionRow[];
   warning?: string;
   schemaReady?: boolean;
@@ -119,6 +139,17 @@ function metricActionLabel(kind: string): string {
 
 function payloadFromWeekValue(row: SectionRow): Record<string, unknown> {
   return row.weekValue?.valuePayload ?? {};
+}
+
+function formatCurrency(value: number | null | undefined, fallback = "—"): string {
+  if (value == null || !Number.isFinite(value)) return fallback;
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value);
+}
+
+function trendClass(trend: string): string {
+  if (trend === "up") return "hr-section-trend--up";
+  if (trend === "down") return "hr-section-trend--down";
+  return "hr-section-trend--flat";
 }
 
 function GradeChip({ grade }: { grade: string | null }) {
@@ -532,6 +563,9 @@ export default function HrApp() {
   const gradeRows = rows.filter((row) => !isMetricTotalSection(row));
   const metricRows = rows.filter((row) => isMetricTotalSection(row));
   const weekOptions = scorecard?.weekOptions ?? [];
+  const executiveSummary = scorecard?.executiveSummary;
+  const narrative = scorecard?.narrative ?? "";
+  const gradeCounts = executiveSummary?.gradeCounts ?? { A: 0, B: 0, C: 0, D: 0, F: 0 };
 
   const selectedWeekLog = useMemo(() => {
     const ws = scorecard?.weekStart ?? selectedWeekStart;
@@ -575,6 +609,9 @@ export default function HrApp() {
         <h2>{row.name}</h2>
         <GradeChip grade={row.letterGrade} />
       </header>
+      {row.trendLabel && row.gradingEnabled ? (
+        <p className={`hr-section-trend ${trendClass(row.trend)}`}>{row.trendLabel}</p>
+      ) : null}
       <dl className="hr-section-metrics">
         <div>
           <dt>Goal</dt>
@@ -766,6 +803,46 @@ export default function HrApp() {
             {scorecard?.warning ? <EosAlertBanner tone="warn">{scorecard.warning}</EosAlertBanner> : null}
             {err ? <div className="banner banner-error">{err}</div> : null}
             {success ? <EosAlertBanner tone="success">{success}</EosAlertBanner> : null}
+
+            {executiveSummary ? (
+              <section className="hr-exec-summary">
+                <h2 className="hr-scorecard-section-title">Executive Summary</h2>
+                <div className="hr-exec-summary-grid">
+                  <article className="hr-exec-stat hr-exec-stat--hero">
+                    <span>Overall Grade</span>
+                    <GradeChip grade={executiveSummary.overallGrade ?? scorecard?.overallGrade ?? null} />
+                  </article>
+                  <article className="hr-exec-stat"><span>A grades</span><strong>{gradeCounts.A}</strong></article>
+                  <article className="hr-exec-stat"><span>B grades</span><strong>{gradeCounts.B}</strong></article>
+                  <article className="hr-exec-stat"><span>C grades</span><strong>{gradeCounts.C}</strong></article>
+                  <article className="hr-exec-stat"><span>D grades</span><strong>{gradeCounts.D}</strong></article>
+                  <article className="hr-exec-stat"><span>F grades</span><strong>{gradeCounts.F}</strong></article>
+                  <article className="hr-exec-stat"><span>Total mistakes</span><strong>{executiveSummary.totalMistakes ?? 0}</strong></article>
+                  <article className="hr-exec-stat"><span>Worst area</span><strong>{executiveSummary.worstPerformingArea ?? "—"}</strong></article>
+                  <article className="hr-exec-stat">
+                    <span>Quote volume</span>
+                    <strong>{executiveSummary.quoteVolumeDisplay ?? formatCurrency(executiveSummary.quoteVolume ?? null)}</strong>
+                  </article>
+                  <article className="hr-exec-stat">
+                    <span>Production SF</span>
+                    <strong>
+                      {executiveSummary.productionDisplay ??
+                        (executiveSummary.productionSf != null
+                          ? `${executiveSummary.productionSf.toLocaleString()} SF`
+                          : "—")}
+                    </strong>
+                  </article>
+                  <article className="hr-exec-stat">
+                    <span>Median lead time</span>
+                    <strong>
+                      {executiveSummary.medianLeadTimeDisplay ??
+                        (executiveSummary.medianLeadTime != null ? `${executiveSummary.medianLeadTime} days` : "—")}
+                    </strong>
+                  </article>
+                </div>
+                {narrative ? <p className="hr-exec-narrative">{narrative}</p> : null}
+              </section>
+            ) : null}
 
             <div className="hr-scorecard-actions">
               <button type="button" className="btn btn-primary" disabled={reportBusy || busy} onClick={() => void generateReport()}>

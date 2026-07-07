@@ -6,12 +6,14 @@
 import {
   computeOverallCompanyGrade,
   computeSectionLetterGrade,
+  formatGradeTrendDisplay,
   formatScorecardReportLine,
   formatSectionActualDisplay,
   formatWeekLabel,
   gradeTrend,
   normalizeValuePayload,
   shiftWeekStart,
+  shortSectionName,
   todayIsoInTimezone,
   weekEndForWeekStart,
   weekStartForIsoDate
@@ -78,6 +80,7 @@ export function buildScorecardRows(sections, mistakes, weekValues, priorGrades =
     const quickCount = readQuickCount(weekValue);
     const letterGrade = computeSectionLetterGrade(section, incidentCount, weekValue);
     const priorGrade = priorGrades.get(section.sectionId) ?? null;
+    const trend = letterGrade ? gradeTrend(letterGrade, priorGrade) : "neutral";
 
     return {
       ...section,
@@ -88,17 +91,173 @@ export function buildScorecardRows(sections, mistakes, weekValues, priorGrades =
       actualDisplay: formatSectionActualDisplay(section, incidentCount, weekValue),
       letterGrade,
       priorLetterGrade: priorGrade,
-      trend: letterGrade ? gradeTrend(letterGrade, priorGrade) : "neutral",
+      trend,
+      trendLabel: letterGrade ? formatGradeTrendDisplay(section.name, letterGrade, priorGrade, trend) : null,
       weekValue
     };
   });
 
   rows.sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
 
+  const overallGrade = computeOverallCompanyGrade(rows);
+  const insights = buildScorecardInsights(rows, overallGrade);
+
   return {
     rows,
-    overallGrade: computeOverallCompanyGrade(rows)
+    overallGrade,
+    executiveSummary: insights.executiveSummary,
+    narrative: insights.narrative
   };
+}
+
+const GRADE_SCORE = Object.freeze({ A: 4, B: 3, C: 2, D: 1, F: 0 });
+
+/**
+ * @param {Array<object>} rows
+ */
+export function computeOverallGradeAverage(rows) {
+  const graded = (rows ?? []).filter((r) => r.letterGrade && r.gradingEnabled !== false);
+  if (!graded.length) return null;
+  return (
+    graded.reduce((sum, r) => sum + (GRADE_SCORE[String(r.letterGrade).toUpperCase()] ?? 0), 0) / graded.length
+  );
+}
+
+/**
+ * @param {Array<object>} rows
+ * @param {string|null} overallGrade
+ */
+export function formatOverallPerformanceLabel(rows, overallGrade) {
+  const avg = computeOverallGradeAverage(rows);
+  if (avg == null || !overallGrade) return overallGrade ?? "—";
+
+  const bands = {
+    A: [3.5, 4],
+    B: [2.5, 3.5],
+    C: [1.5, 2.5],
+    D: [0.5, 1.5],
+    F: [0, 0.5]
+  };
+  const band = bands[String(overallGrade).toUpperCase()];
+  if (!band) return overallGrade;
+  const [lo, hi] = band;
+  const span = hi - lo || 1;
+  const pos = (avg - lo) / span;
+  if (pos >= 0.65) return `${overallGrade}+`;
+  if (pos <= 0.35) return `${overallGrade}-`;
+  return overallGrade;
+}
+
+/**
+ * @param {Array<object>} rows
+ */
+function findRowByMetricKind(rows, kind) {
+  return rows.find((row) => String(row.metricKind) === kind) ?? null;
+}
+
+/**
+ * @param {object|null} row
+ */
+function readMetricNumber(row, payloadKey) {
+  if (!row) return null;
+  const payload = normalizeValuePayload(row.weekValue?.valuePayload);
+  const raw = payload[payloadKey] ?? row.weekValue?.actualNumeric;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * @param {Array<object>} rows
+ * @param {string|null} overallGrade
+ */
+export function buildExecutiveSummary(rows, overallGrade) {
+  /** @type {Record<string, number>} */
+  const gradeCounts = { A: 0, B: 0, C: 0, D: 0, F: 0 };
+  for (const row of rows ?? []) {
+    if (!row.letterGrade || row.gradingEnabled === false) continue;
+    const key = String(row.letterGrade).toUpperCase();
+    if (key in gradeCounts) gradeCounts[key] += 1;
+  }
+
+  const totalMistakes = (rows ?? [])
+    .filter((row) => String(row.metricKind) === "count")
+    .reduce((sum, row) => sum + Math.max(0, Number(row.incidentCount) || 0), 0);
+
+  const gradedRows = (rows ?? []).filter((row) => row.letterGrade && row.gradingEnabled !== false);
+  const worstRow = [...gradedRows].sort((a, b) => {
+    const ga = GRADE_SCORE[String(a.letterGrade).toUpperCase()] ?? 5;
+    const gb = GRADE_SCORE[String(b.letterGrade).toUpperCase()] ?? 5;
+    if (ga !== gb) return ga - gb;
+    return (Number(b.incidentCount) || 0) - (Number(a.incidentCount) || 0);
+  })[0];
+
+  const productionRow = findRowByMetricKind(rows, "production");
+  const leadTimeRow = findRowByMetricKind(rows, "days");
+  const quoteRow = findRowByMetricKind(rows, "currency");
+
+  return {
+    overallGrade: overallGrade ?? null,
+    overallPerformanceLabel: formatOverallPerformanceLabel(rows, overallGrade),
+    gradeCounts,
+    totalMistakes,
+    worstPerformingArea: worstRow?.name ?? null,
+    quoteVolume: readMetricNumber(quoteRow, "currency"),
+    quoteVolumeDisplay: quoteRow?.actualDisplay ?? null,
+    productionSf: readMetricNumber(productionRow, "weekly_sf"),
+    productionGoalSf: productionRow?.goalNumeric ?? null,
+    productionDisplay: productionRow?.actualDisplay ?? null,
+    medianLeadTime: readMetricNumber(leadTimeRow, "median_days"),
+    medianLeadTimeGoal: leadTimeRow?.goalNumeric ?? null,
+    medianLeadTimeDisplay: leadTimeRow?.actualDisplay ?? null
+  };
+}
+
+/**
+ * @param {Array<object>} rows
+ * @param {object} summary
+ */
+export function buildWeeklyNarrative(rows, summary) {
+  const performance = summary.overallPerformanceLabel ?? summary.overallGrade ?? "—";
+  const worstNames = [...(rows ?? [])]
+    .filter((row) => row.letterGrade && row.gradingEnabled !== false)
+    .sort((a, b) => {
+      const ga = GRADE_SCORE[String(a.letterGrade).toUpperCase()] ?? 5;
+      const gb = GRADE_SCORE[String(b.letterGrade).toUpperCase()] ?? 5;
+      if (ga !== gb) return ga - gb;
+      return (Number(b.incidentCount) || 0) - (Number(a.incidentCount) || 0);
+    })
+    .slice(0, 3)
+    .map((row) => shortSectionName(row.name));
+
+  const parts = [`Overall performance was ${performance} this week.`];
+
+  if (worstNames.length) {
+    parts.push(`The biggest issues were ${worstNames.join(", ")}.`);
+  }
+
+  if (summary.productionSf != null) {
+    const goal = summary.productionGoalSf != null ? summary.productionGoalSf.toLocaleString("en-US") : "goal";
+    parts.push(
+      `Production was ${summary.productionSf.toLocaleString("en-US")} SF against a ${goal} SF goal.`
+    );
+  }
+
+  if (summary.medianLeadTime != null) {
+    const goal = summary.medianLeadTimeGoal != null ? summary.medianLeadTimeGoal : "goal";
+    parts.push(`Median lead time was ${summary.medianLeadTime} days against a ${goal} day goal.`);
+  }
+
+  return parts.join(" ");
+}
+
+/**
+ * @param {Array<object>} rows
+ * @param {string|null} overallGrade
+ */
+export function buildScorecardInsights(rows, overallGrade) {
+  const executiveSummary = buildExecutiveSummary(rows, overallGrade);
+  const narrative = buildWeeklyNarrative(rows, executiveSummary);
+  return { executiveSummary, narrative };
 }
 
 /**
@@ -144,15 +303,29 @@ export function buildQuickCountLogEntry(section, quickCount, weekStart) {
 
 /**
  * @param {Array<object>} rows
- * @param {{ weekLabel?: string, overallGrade?: string|null, mistakesSummary?: Array<object> }} [meta]
+ * @param {{ weekLabel?: string, overallGrade?: string|null, mistakesSummary?: Array<object>, executiveSummary?: object, narrative?: string }} [meta]
  */
 export function buildScorecardReportText(rows, meta = {}) {
   const gradeRows = rows.filter((row) => !isMetricTotalSection(row));
   const metricRows = rows.filter((row) => isMetricTotalSection(row));
+  const summary = meta.executiveSummary ?? buildExecutiveSummary(rows, meta.overallGrade ?? null);
   const lines = [];
 
   if (meta.weekLabel) lines.push(meta.weekLabel, "");
-  lines.push(`Overall Grade: ${meta.overallGrade ?? "—"}`, "", "Grades", "");
+  lines.push("Executive Summary", "");
+  lines.push(`Overall Grade: ${summary.overallGrade ?? meta.overallGrade ?? "—"}`);
+  lines.push(`A grades: ${summary.gradeCounts?.A ?? 0}`);
+  lines.push(`B grades: ${summary.gradeCounts?.B ?? 0}`);
+  lines.push(`C grades: ${summary.gradeCounts?.C ?? 0}`);
+  lines.push(`D grades: ${summary.gradeCounts?.D ?? 0}`);
+  lines.push(`F grades: ${summary.gradeCounts?.F ?? 0}`);
+  lines.push(`Total mistakes: ${summary.totalMistakes ?? 0}`);
+  lines.push(`Worst performing area: ${summary.worstPerformingArea ?? "—"}`);
+  lines.push(`Quote volume: ${summary.quoteVolumeDisplay ?? summary.quoteVolume ?? "—"}`);
+  lines.push(`Production SF: ${summary.productionDisplay ?? summary.productionSf ?? "—"}`);
+  lines.push(`Median lead time: ${summary.medianLeadTimeDisplay ?? summary.medianLeadTime ?? "—"}`);
+  lines.push("");
+  lines.push(meta.narrative ?? buildWeeklyNarrative(rows, summary), "", "Grades", "");
 
   for (const row of gradeRows) {
     lines.push(formatScorecardReportLine(row, row));
@@ -206,12 +379,16 @@ function buildReportRowCards(sectionTitle, sectionRows) {
         ? `<span class="hr-report-status">${escapeHtml(gradeLabel)}</span>`
         : reportGradeCell(row.letterGrade);
       const goalNote = isCurrency ? `<p class="hr-report-note">Goal pending finalization</p>` : "";
+      const trendLine = row.trendLabel
+        ? `<p class="hr-report-trend">${escapeHtml(row.trendLabel)}</p>`
+        : "";
 
       return `<article class="hr-report-card">
   <header class="hr-report-card-head">
     <h4>${escapeHtml(row.name)}</h4>
     ${gradeHtml}
   </header>
+  ${trendLine}
   <dl class="hr-report-card-metrics">
     <div><dt>Actual</dt><dd>${escapeHtml(row.actualDisplay ?? "—")}</dd></div>
     <div><dt>Goal</dt><dd>${escapeHtml(row.goalDisplay ?? "—")}</dd></div>
@@ -225,14 +402,50 @@ function buildReportRowCards(sectionTitle, sectionRows) {
   return `<section class="hr-report-block"><h3>${escapeHtml(sectionTitle)}</h3><div class="hr-report-card-grid">${cards}</div></section>`;
 }
 
+function buildExecutiveSummaryHtml(summary, narrative) {
+  const s = summary ?? {};
+  const counts = s.gradeCounts ?? {};
+  const quote =
+    s.quoteVolume != null
+      ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(s.quoteVolume))
+      : s.quoteVolumeDisplay ?? "—";
+  const production =
+    s.productionSf != null ? `${Number(s.productionSf).toLocaleString("en-US")} SF` : s.productionDisplay ?? "—";
+  const leadTime =
+    s.medianLeadTime != null ? `${s.medianLeadTime} days` : s.medianLeadTimeDisplay ?? "—";
+
+  return `<section class="hr-report-block hr-report-exec">
+    <h3>Executive Summary</h3>
+    <div class="hr-report-exec-grid">
+      <article class="hr-report-exec-stat hr-report-exec-stat--hero">
+        <span>Overall Grade</span>
+        <strong>${reportGradeCell(s.overallGrade ?? null)}</strong>
+      </article>
+      <article class="hr-report-exec-stat"><span>A grades</span><strong>${counts.A ?? 0}</strong></article>
+      <article class="hr-report-exec-stat"><span>B grades</span><strong>${counts.B ?? 0}</strong></article>
+      <article class="hr-report-exec-stat"><span>C grades</span><strong>${counts.C ?? 0}</strong></article>
+      <article class="hr-report-exec-stat"><span>D grades</span><strong>${counts.D ?? 0}</strong></article>
+      <article class="hr-report-exec-stat"><span>F grades</span><strong>${counts.F ?? 0}</strong></article>
+      <article class="hr-report-exec-stat"><span>Total mistakes</span><strong>${s.totalMistakes ?? 0}</strong></article>
+      <article class="hr-report-exec-stat"><span>Worst area</span><strong>${escapeHtml(s.worstPerformingArea ?? "—")}</strong></article>
+      <article class="hr-report-exec-stat"><span>Quote volume</span><strong>${escapeHtml(quote)}</strong></article>
+      <article class="hr-report-exec-stat"><span>Production SF</span><strong>${escapeHtml(production)}</strong></article>
+      <article class="hr-report-exec-stat"><span>Median lead time</span><strong>${escapeHtml(leadTime)}</strong></article>
+    </div>
+    <p class="hr-report-narrative">${escapeHtml(narrative ?? "")}</p>
+  </section>`;
+}
+
 /**
  * @param {Array<object>} rows
- * @param {{ weekLabel?: string, overallGrade?: string|null, mistakesSummary?: Array<object> }} meta
+ * @param {{ weekLabel?: string, overallGrade?: string|null, mistakesSummary?: Array<object>, executiveSummary?: object, narrative?: string }} meta
  */
 export function buildScorecardReportHtml(rows, meta = {}) {
   const gradeRows = rows.filter((row) => !isMetricTotalSection(row));
   const metricRows = rows.filter((row) => isMetricTotalSection(row));
   const mistakes = meta.mistakesSummary ?? [];
+  const summary = meta.executiveSummary ?? buildExecutiveSummary(rows, meta.overallGrade ?? null);
+  const narrative = meta.narrative ?? buildWeeklyNarrative(rows, summary);
 
   const mistakeItems = mistakes.length
     ? `<ul class="hr-report-mistake-list">${mistakes
@@ -252,10 +465,7 @@ export function buildScorecardReportHtml(rows, meta = {}) {
     <p class="hr-report-kicker">eliteOS · Weekly Operations Scorecard</p>
     <h2>${escapeHtml(meta.weekLabel ?? "Weekly Report")}</h2>
   </header>
-  <section class="hr-report-block hr-report-overall">
-    <h3>Overall Grade</h3>
-    <div class="hr-report-overall-grade">${reportGradeCell(meta.overallGrade ?? null)}</div>
-  </section>
+  ${buildExecutiveSummaryHtml(summary, narrative)}
   ${buildReportRowCards("Grades", gradeRows)}
   ${buildReportRowCards("Totals / Metrics", metricRows)}
   <section class="hr-report-block">

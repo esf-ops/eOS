@@ -643,6 +643,76 @@ body {
   font-weight: 700;
 }
 
+.hr-exec-summary {
+  margin-bottom: 24px;
+  padding: 18px;
+  border: 1px solid var(--eos-line);
+  border-radius: var(--r-lg);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.96) 100%);
+  box-shadow: var(--sh-card);
+}
+
+.hr-exec-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.hr-exec-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--eos-line);
+  border-radius: var(--r-md);
+  background: #fff;
+}
+
+.hr-exec-stat span {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--eos-ink-muted);
+}
+
+.hr-exec-stat strong {
+  font-size: 0.92rem;
+  line-height: 1.35;
+}
+
+.hr-exec-stat--hero {
+  grid-column: span 1;
+}
+
+.hr-exec-narrative {
+  margin: 16px 0 0;
+  padding: 14px 16px;
+  border-radius: var(--r-md);
+  background: var(--eos-surface-muted);
+  color: var(--eos-ink-mid);
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+
+.hr-section-trend {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 650;
+  color: var(--eos-ink-muted);
+}
+
+.hr-section-trend--up {
+  color: var(--eos-success);
+}
+
+.hr-section-trend--down {
+  color: var(--eos-accent);
+}
+
+.hr-section-trend--flat {
+  color: var(--eos-ink-mid);
+}
+
 .hr-quick-count {
   padding: 10px 12px;
   border-radius: var(--r-sm);
@@ -905,6 +975,55 @@ body {
   text-align: center;
 }
 
+.hr-report-exec-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.hr-report-exec-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--eos-line);
+  border-radius: var(--r-sm);
+  background: var(--eos-surface-muted);
+}
+
+.hr-report-exec-stat span {
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--eos-ink-muted);
+}
+
+.hr-report-exec-stat strong {
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+.hr-report-exec-stat--hero {
+  grid-column: 1 / -1;
+  align-items: center;
+  text-align: center;
+}
+
+.hr-report-narrative {
+  margin: 14px 0 0;
+  padding: 12px 14px;
+  border-radius: var(--r-sm);
+  background: var(--eos-surface-muted);
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+.hr-report-trend {
+  margin: 0 0 8px;
+  font-size: 0.74rem;
+  color: var(--eos-ink-muted);
+}
+
 .hr-report-overall-grade {
   display: flex;
   justify-content: center;
@@ -1086,7 +1205,8 @@ body {
   .hr-section-card-foot,
   .hr-modal-backdrop,
   .hr-mistakes-log,
-  .hr-scorecard-section {
+  .hr-scorecard-section,
+  .hr-exec-summary {
     display: none !important;
   }
 
