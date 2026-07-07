@@ -56,3 +56,7 @@ export function apiPost(path: string, token: string, payload: unknown) {
 export function apiPatch(path: string, token: string, payload: unknown) {
   return apiFetch(path, token, { method: "PATCH", body: JSON.stringify(payload) });
 }
+
+export function apiDelete(path: string, token: string) {
+  return apiFetch(path, token, { method: "DELETE" });
+}

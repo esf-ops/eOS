@@ -1,10 +1,5 @@
 -- eliteOS Workforce Quality — scorecard workflow columns (additive)
--- Manual apply: Supabase SQL editor → paste → run once (IF NOT EXISTS safe).
---
--- Prerequisites (apply first if not already applied):
---   backend-core/supabase/eliteos_workforce_quality_v1.sql
---   backend-core/supabase/eliteos_workforce_quality_roster_v1.sql
---   backend-core/supabase/eliteos_workforce_quality_sections_v1.sql
+-- Apply after eliteos_workforce_quality_sections_v1.sql
 
 alter table public.workforce_mistakes
   add column if not exists job_customer text;
