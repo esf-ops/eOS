@@ -1,5 +1,11 @@
 -- eliteOS Workforce Quality — section-based weekly grading (additive)
--- Apply after eliteos_workforce_quality_v1.sql and eliteos_workforce_quality_roster_v1.sql
+-- Manual apply: Supabase SQL editor → paste → run once (IF NOT EXISTS safe).
+--
+-- Prerequisites (apply first if not already applied):
+--   backend-core/supabase/eliteos_workforce_quality_v1.sql
+--   backend-core/supabase/eliteos_workforce_quality_roster_v1.sql
+
+create extension if not exists pgcrypto;
 
 -- ── Grading sections (org-scoped operational areas) ───────────────────────────
 
@@ -75,3 +81,57 @@ comment on table public.workforce_section_week_values is
   'Manual weekly metric entry for non-count sections (production SF, lead times, etc.).';
 comment on table public.workforce_section_week_snapshots is
   'Frozen letter grade per section per closed week.';
+
+-- ── Default ESF operational sections (idempotent seed) ────────────────────────
+
+insert into public.workforce_grading_sections (
+  id,
+  organization_id,
+  name,
+  goal_display,
+  goal_numeric,
+  metric_kind,
+  grading_enabled,
+  sort_order,
+  unit_label,
+  is_active
+)
+select
+  v.id,
+  o.id,
+  v.name,
+  v.goal_display,
+  v.goal_numeric,
+  v.metric_kind,
+  v.grading_enabled,
+  v.sort_order,
+  v.unit_label,
+  true
+from public.organizations o
+cross join (
+  values
+    ('b2000001-0001-4001-8001-000000000001'::uuid, 'Office induced service calls/remakes', '0', 0::numeric, 'count', true, 10, null::text),
+    ('b2000001-0001-4001-8001-000000000002'::uuid, 'Templating induced service calls/remakes', '0', 0::numeric, 'count', true, 20, null::text),
+    ('b2000001-0001-4001-8001-000000000003'::uuid, 'Template/Install lead times', '14', 14::numeric, 'days', true, 30, 'days'),
+    ('b2000001-0001-4001-8001-000000000004'::uuid, 'Outside partner remakes', '0', 0::numeric, 'count', true, 40, null::text),
+    ('b2000001-0001-4001-8001-000000000005'::uuid, 'Outside partner missed quality control inspections', '0', 0::numeric, 'count', true, 50, null::text),
+    ('b2000001-0001-4001-8001-000000000006'::uuid, 'Programming induced remakes/service calls', '0', 0::numeric, 'count', true, 60, null::text),
+    ('b2000001-0001-4001-8001-000000000007'::uuid, 'Weekly quoting value', 'TBD', null::numeric, 'currency', false, 70, 'USD'),
+    ('b2000001-0001-4001-8001-000000000008'::uuid, 'Plumbing accessories non billable service calls', '0', 0::numeric, 'count', true, 80, null::text),
+    ('b2000001-0001-4001-8001-000000000009'::uuid, 'Shop induced remakes/service calls', '0', 0::numeric, 'count', true, 90, null::text),
+    ('b2000001-0001-4001-8001-000000000010'::uuid, 'Weekly/daily shop production', '9,250sf weekly / 1,850sf daily', 9250::numeric, 'production', true, 100, 'sf weekly'),
+    ('b2000001-0001-4001-8001-000000000011'::uuid, 'Shop machinery down time', '0', 0::numeric, 'hours', true, 110, 'hrs'),
+    ('b2000001-0001-4001-8001-000000000012'::uuid, 'ESF non billable service calls', '0', 0::numeric, 'count', true, 120, null::text),
+    ('b2000001-0001-4001-8001-000000000013'::uuid, 'Installation induced service calls/remakes', '0', 0::numeric, 'count', true, 130, null::text)
+) as v(id, name, goal_display, goal_numeric, metric_kind, grading_enabled, sort_order, unit_label)
+where o.organization_key = 'elite_stone_fabrication'
+on conflict (id) do update set
+  name = excluded.name,
+  goal_display = excluded.goal_display,
+  goal_numeric = excluded.goal_numeric,
+  metric_kind = excluded.metric_kind,
+  grading_enabled = excluded.grading_enabled,
+  sort_order = excluded.sort_order,
+  unit_label = excluded.unit_label,
+  is_active = excluded.is_active,
+  updated_at = now();
