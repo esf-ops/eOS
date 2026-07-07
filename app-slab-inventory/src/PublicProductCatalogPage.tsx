@@ -23,6 +23,16 @@ import {
   categoryPlaceholderIcon,
 } from "./productCatalogShowroom";
 
+export type PublicProductCatalogPageProps = {
+  /** When set, only this category is shown and tab navigation is hidden. */
+  lockedCategory?: ProductCatalogCategory;
+  hideCategoryTabs?: boolean;
+  pageTitle?: string;
+  pageSubtitle?: string;
+  metaDescription?: string;
+  rootClassName?: string;
+};
+
 const SEARCH_ICON = (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
     <circle cx="11" cy="11" r="7" /><path d="M21 21l-3.5-3.5" />
@@ -35,7 +45,14 @@ function readInitialCategory(tabs: ProductCatalogCategory[]): ProductCatalogCate
   return tabs[0] ?? "sink";
 }
 
-export default function PublicProductCatalogPage() {
+export default function PublicProductCatalogPage({
+  lockedCategory,
+  hideCategoryTabs = false,
+  pageTitle = "Elite Stone Fabrication Product Catalog",
+  pageSubtitle = "Sinks, faucets, and accessories",
+  metaDescription = "Elite Stone Fabrication product catalog — sinks, faucets, and accessories showroom.",
+  rootClassName,
+}: PublicProductCatalogPageProps = {}) {
   const kiosk = useMemo(() => isKioskOrArreyaMode(), []);
   const catalogItems = useMemo(
     () => filterCatalogReadyItems(getProductCatalogItemsWithAssets()),
@@ -43,13 +60,18 @@ export default function PublicProductCatalogPage() {
   );
   const tabs = useMemo(() => publicProductCatalogTabsForItems(catalogItems), [catalogItems]);
 
-  const [category, setCategory] = useState<ProductCatalogCategory>(() => readInitialCategory(tabs));
+  const [category, setCategory] = useState<ProductCatalogCategory>(() => {
+    if (lockedCategory) return lockedCategory;
+    return readInitialCategory(tabs);
+  });
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<ProductCatalogItem | null>(null);
 
   useEffect(() => {
-    document.title = "Product Catalog · Elite Stone Fabrication";
+    document.title = lockedCategory === "faucet"
+      ? "Faucets · Elite Stone Fabrication"
+      : "Product Catalog · Elite Stone Fabrication";
 
     let meta = document.querySelector('meta[name="robots"]');
     if (!meta) {
@@ -65,11 +87,8 @@ export default function PublicProductCatalogPage() {
       desc.setAttribute("name", "description");
       document.head.appendChild(desc);
     }
-    desc.setAttribute(
-      "content",
-      "Elite Stone Fabrication product catalog — sinks, faucets, and accessories showroom."
-    );
-  }, []);
+    desc.setAttribute("content", metaDescription);
+  }, [lockedCategory, metaDescription]);
 
   useEffect(() => {
     const t = setTimeout(() => setSearch(searchInput.trim()), 250);
@@ -77,35 +96,45 @@ export default function PublicProductCatalogPage() {
   }, [searchInput]);
 
   useEffect(() => {
+    if (lockedCategory) {
+      setCategory(lockedCategory);
+      return;
+    }
     if (!tabs.includes(category)) {
       setCategory(tabs[0] ?? "sink");
     }
-  }, [tabs, category]);
+  }, [tabs, category, lockedCategory]);
 
   const setCategoryWithUrl = useCallback((cat: ProductCatalogCategory) => {
+    if (lockedCategory) return;
     setCategory(cat);
     const url = new URL(window.location.href);
     url.searchParams.set("tab", publicCatalogTabQueryValue(cat));
     window.history.replaceState(null, "", url.toString());
-  }, []);
+  }, [lockedCategory]);
 
   const filtered = useMemo(
     () =>
       filterProductCatalogItems(catalogItems, {
-        category,
+        category: lockedCategory ?? category,
         search,
         tags: [],
         assetStatus: "all",
       }),
-    [catalogItems, category, search]
+    [catalogItems, category, lockedCategory, search]
   );
 
+  const displayCategory = lockedCategory ?? category;
   const manufacturerGroups = useMemo(() => {
-    if (!productCatalogUsesManufacturerGrouping(category)) return null;
+    if (!productCatalogUsesManufacturerGrouping(displayCategory)) return null;
     return groupProductCatalogByManufacturer(filtered);
-  }, [category, filtered]);
+  }, [displayCategory, filtered]);
 
-  const rootClass = ["pc-public-page", kiosk ? "pc-public-kiosk" : ""].filter(Boolean).join(" ");
+  const rootClass = [
+    "pc-public-page",
+    kiosk ? "pc-public-kiosk" : "",
+    rootClassName ?? "",
+  ].filter(Boolean).join(" ");
 
   return (
     <div className={rootClass}>
@@ -117,27 +146,29 @@ export default function PublicProductCatalogPage() {
             <span className="pc-public-logo-mark" aria-hidden>ESF</span>
           )}
           <div className="pc-public-brand-text">
-            <h1 className="pc-public-title">Elite Stone Fabrication Product Catalog</h1>
-            <p className="pc-public-subtitle">Sinks, faucets, and accessories</p>
+            <h1 className="pc-public-title">{pageTitle}</h1>
+            <p className="pc-public-subtitle">{pageSubtitle}</p>
           </div>
         </div>
       </header>
 
       <main className="pc-public-main">
-        <nav className="pc-tab-bar pc-public-tabs" aria-label="Product categories">
-          {tabs.map((cat) => (
-            <button
-              key={cat}
-              type="button"
-              className={`pc-tab${category === cat ? " active" : ""}`}
-              onClick={() => setCategoryWithUrl(cat)}
-              aria-selected={category === cat}
-            >
-              {PUBLIC_PRODUCT_CATALOG_TAB_LABELS[cat]}
-              <span className="pc-tab-count">{productCatalogCountForCategory(catalogItems, cat)}</span>
-            </button>
-          ))}
-        </nav>
+        {!hideCategoryTabs ? (
+          <nav className="pc-tab-bar pc-public-tabs" aria-label="Product categories">
+            {tabs.map((cat) => (
+              <button
+                key={cat}
+                type="button"
+                className={`pc-tab${category === cat ? " active" : ""}`}
+                onClick={() => setCategoryWithUrl(cat)}
+                aria-selected={category === cat}
+              >
+                {PUBLIC_PRODUCT_CATALOG_TAB_LABELS[cat]}
+                <span className="pc-tab-count">{productCatalogCountForCategory(catalogItems, cat)}</span>
+              </button>
+            ))}
+          </nav>
+        ) : null}
 
         <div className="pc-toolbar">
           <div className="pc-search-wrap">
@@ -154,13 +185,13 @@ export default function PublicProductCatalogPage() {
         </div>
 
         <p className="pc-result-meta">
-          {filtered.length} {PUBLIC_PRODUCT_CATALOG_TAB_LABELS[category].toLowerCase()}
+          {filtered.length} {PUBLIC_PRODUCT_CATALOG_TAB_LABELS[displayCategory].toLowerCase()}
           {search ? ` matching “${search}”` : ""}
         </p>
 
         {filtered.length === 0 ? (
           <div className="empty-state pc-empty">
-            <div className="empty-art" aria-hidden>{categoryPlaceholderIcon(category)}</div>
+            <div className="empty-art" aria-hidden>{categoryPlaceholderIcon(displayCategory)}</div>
             <p className="empty-title">No products found</p>
             <p className="empty-sub">
               {search ? "Try a different search term." : "Check back as new products are added to the showroom."}
