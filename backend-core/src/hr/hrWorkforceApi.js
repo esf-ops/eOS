@@ -30,8 +30,10 @@ import { ensureDefaultGradingSections, mapSectionRow } from "./workforceGradingS
 import {
   buildMetricValueFromBody,
   buildQuickCountLogEntry,
+  buildScorecardReportHtml,
   buildScorecardReportText,
   buildScorecardRows,
+  buildScorecardWeekOptions,
   effectiveIncidentCount,
   mapIncidentRow,
   mapWeekValueRow,
@@ -628,9 +630,7 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
 
       const weekStart = resolveRequestedWeekStart(req, settings);
       const { weekEnd, weekLabel } = scorecardWeekMeta(weekStart);
-      const weekOptions = listRecentWeekStarts(weekStart, settings.timezone, settings.week_start_day, 8).map(
-        (ws) => scorecardWeekMeta(ws)
-      );
+      const weekOptions = await buildScorecardWeekOptions(db(), organizationId, settings, isMissingTableError);
 
       let payload;
       try {
@@ -1327,7 +1327,20 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
       }
 
       await upsertWeekSnapshots(db(), organizationId, weekStart, payload.rows);
-      const reportText = buildScorecardReportText(payload.rows);
+      const mistakesSummary = (payload.mistakes ?? []).map((m) => {
+        const section = payload.sections.find((s) => s.sectionId === String(m.section_id));
+        return mapIncidentRow({ ...m, section_name: section?.name ?? null });
+      });
+      const reportText = buildScorecardReportText(payload.rows, {
+        weekLabel,
+        overallGrade: payload.overallGrade,
+        mistakesSummary
+      });
+      const reportHtml = buildScorecardReportHtml(payload.rows, {
+        weekLabel,
+        overallGrade: payload.overallGrade,
+        mistakesSummary
+      });
 
       await logAction({
         user,
@@ -1352,6 +1365,7 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
         weekLabel,
         overallGrade: payload.overallGrade,
         reportText,
+        reportHtml,
         rows: payload.rows
       });
     } catch (e) {

@@ -215,5 +215,5 @@ export function mapSectionRow(section) {
 /** Metric/total sections shown under Totals / Metrics (not count-based grade cards). */
 export function isMetricTotalSection(section) {
   const kind = String(section?.metricKind ?? section?.metric_kind ?? "count");
-  return kind === "days" || kind === "currency" || kind === "production";
+  return kind === "days" || kind === "currency" || kind === "production" || kind === "hours";
 }
