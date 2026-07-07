@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { apiGet, apiPost } from "./lib/api";
+import { apiDelete, apiGet, apiPatch, apiPost } from "./lib/api";
 import { hrApiErrorMessage } from "./lib/hrRoles";
 import { getSupabase } from "./lib/supabase";
 import EliteosTopbar from "../../shared/eliteos-ui/EliteosTopbar";
@@ -13,13 +13,10 @@ const DEFAULT_WORKSPACE_NAME = "Elite Stone Fabrication";
 
 type WeekOption = { weekStart: string; weekEnd: string; weekLabel: string };
 
-type IncidentRow = {
-  id: string;
-  occurredAt: string;
-  severity: string;
-  jobCustomer: string | null;
-  personInvolved: string | null;
-  description: string | null;
+type WeekValue = {
+  actualNumeric?: number | null;
+  actualDisplay?: string | null;
+  valuePayload?: Record<string, unknown>;
 };
 
 type SectionRow = {
@@ -29,11 +26,29 @@ type SectionRow = {
   metricKind: string;
   gradingEnabled: boolean;
   incidentCount: number;
+  detailMistakeCount?: number;
+  quickCount?: number | null;
+  isMetricTotal?: boolean;
   actualDisplay: string;
   letterGrade: string | null;
   trend: string;
-  recentIncidents: IncidentRow[];
+  weekValue?: WeekValue;
 };
+
+type MistakeLogEntry = {
+  id: string;
+  entryKind?: string;
+  sectionId: string;
+  sectionName?: string | null;
+  weekStart?: string | null;
+  occurredAt: string;
+  severity: string | null;
+  jobCustomer: string | null;
+  personInvolved: string | null;
+  description: string | null;
+};
+
+type MistakeLogWeek = WeekOption & { mistakes: MistakeLogEntry[] };
 
 type ScorecardPayload = {
   ok?: boolean;
@@ -46,7 +61,7 @@ type ScorecardPayload = {
   schemaReady?: boolean;
 };
 
-type ModalKind = "mistake" | "metric" | null;
+type ModalKind = "mistake" | "metric" | "editMistake" | null;
 
 function homeLauncherUrl(): string {
   const raw = String(import.meta.env.VITE_HEAD_URL_HOME ?? "").trim();
@@ -80,8 +95,18 @@ function formatDateTime(iso: string): string {
   return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
 function isCountSection(kind: string): boolean {
   return kind === "count";
+}
+
+function isMetricTotalSection(row: SectionRow): boolean {
+  return row.isMetricTotal === true || ["days", "currency", "production"].includes(row.metricKind);
 }
 
 function metricActionLabel(kind: string): string {
@@ -90,6 +115,15 @@ function metricActionLabel(kind: string): string {
   if (kind === "production") return "Update Production";
   if (kind === "hours") return "Update Downtime";
   return "Update Metric";
+}
+
+function payloadFromWeekValue(row: SectionRow): Record<string, unknown> {
+  return row.weekValue?.valuePayload ?? {};
+}
+
+function GradeChip({ grade }: { grade: string | null }) {
+  if (!grade) return <span className="hr-grade-chip hr-grade-chip--neutral">—</span>;
+  return <span className={`hr-grade-chip hr-grade-chip--${grade.toLowerCase()}`}>{grade}</span>;
 }
 
 export default function HrApp() {
@@ -113,9 +147,17 @@ export default function HrApp() {
   const [reportText, setReportText] = useState("");
   const [reportBusy, setReportBusy] = useState(false);
 
+  const [mistakesLog, setMistakesLog] = useState<MistakeLogWeek[]>([]);
+  const [priorWeeksOpen, setPriorWeeksOpen] = useState(false);
+  const [logBusy, setLogBusy] = useState(false);
+
   const [modalKind, setModalKind] = useState<ModalKind>(null);
   const [activeSection, setActiveSection] = useState<SectionRow | null>(null);
+  const [editingMistake, setEditingMistake] = useState<MistakeLogEntry | null>(null);
   const [saveBusy, setSaveBusy] = useState(false);
+
+  const [quickCounts, setQuickCounts] = useState<Record<string, string>>({});
+  const [quickSaveBusy, setQuickSaveBusy] = useState<Record<string, boolean>>({});
 
   const [mistakeDate, setMistakeDate] = useState("");
   const [mistakeJob, setMistakeJob] = useState("");
@@ -175,6 +217,22 @@ export default function HrApp() {
     };
   }, [sessionToken]);
 
+  const loadMistakesLog = useCallback(async () => {
+    if (!sessionToken) return;
+    setLogBusy(true);
+    try {
+      const weekQ = selectedWeekStart ? `?week_start=${encodeURIComponent(selectedWeekStart)}&weeks=8` : "?weeks=8";
+      const res = (await apiGet(`/api/hr/workforce/mistakes/log${weekQ}`, sessionToken)) as {
+        weeks?: MistakeLogWeek[];
+      };
+      setMistakesLog(res.weeks ?? []);
+    } catch {
+      setMistakesLog([]);
+    } finally {
+      setLogBusy(false);
+    }
+  }, [sessionToken, selectedWeekStart]);
+
   const loadScorecard = useCallback(async () => {
     if (!sessionToken) return;
     setBusy(true);
@@ -184,12 +242,22 @@ export default function HrApp() {
       const res = (await apiGet(`/api/hr/workforce/dashboard${weekQ}`, sessionToken)) as ScorecardPayload;
       setScorecard(res);
       if (!selectedWeekStart && res.weekStart) setSelectedWeekStart(res.weekStart);
+
+      const nextQuick: Record<string, string> = {};
+      for (const row of res.rows ?? []) {
+        if (isCountSection(row.metricKind)) {
+          const saved = row.quickCount ?? row.incidentCount ?? 0;
+          nextQuick[row.sectionId] = String(saved);
+        }
+      }
+      setQuickCounts(nextQuick);
+      await loadMistakesLog();
     } catch (e: unknown) {
       setErr(hrApiErrorMessage(e, "Unable to load weekly scorecard."));
     } finally {
       setBusy(false);
     }
-  }, [sessionToken, selectedWeekStart]);
+  }, [sessionToken, selectedWeekStart, loadMistakesLog]);
 
   useEffect(() => {
     if (!sessionToken) return;
@@ -221,10 +289,18 @@ export default function HrApp() {
     if (supabase) await supabase.auth.signOut();
     setSessionToken(null);
     setScorecard(null);
+    setMistakesLog([]);
   }, [supabase]);
+
+  const closeModal = () => {
+    setModalKind(null);
+    setActiveSection(null);
+    setEditingMistake(null);
+  };
 
   const openMistakeModal = (section: SectionRow) => {
     setActiveSection(section);
+    setEditingMistake(null);
     setModalKind("mistake");
     setMistakeDate(new Date().toISOString().slice(0, 10));
     setMistakeJob("");
@@ -234,21 +310,33 @@ export default function HrApp() {
     setMistakeNotes("");
   };
 
+  const openEditMistakeModal = (mistake: MistakeLogEntry) => {
+    setEditingMistake(mistake);
+    setActiveSection(null);
+    setModalKind("editMistake");
+    setMistakeDate(mistake.occurredAt.slice(0, 10));
+    setMistakeJob(mistake.jobCustomer ?? "");
+    setMistakeDescription(mistake.description ?? "");
+    setMistakeSeverity(mistake.severity ?? "minor");
+    setMistakePerson(mistake.personInvolved ?? "");
+    setMistakeNotes("");
+  };
+
   const openMetricModal = (section: SectionRow) => {
     setActiveSection(section);
     setModalKind("metric");
-    setMetricMedian("");
-    setMetricAverage("");
-    setMetricCurrency("");
-    setMetricWeeklySf("");
-    setMetricDailySf("");
-    setMetricHours("");
+    const payload = payloadFromWeekValue(section);
+    setMetricMedian(payload.median_days != null ? String(payload.median_days) : "");
+    setMetricAverage(payload.average_days != null ? String(payload.average_days) : "");
+    setMetricCurrency(payload.currency != null ? String(payload.currency) : "");
+    setMetricWeeklySf(payload.weekly_sf != null ? String(payload.weekly_sf) : "");
+    setMetricDailySf(payload.daily_sf != null ? String(payload.daily_sf) : "");
+    setMetricHours(payload.hours != null ? String(payload.hours) : section.incidentCount != null ? String(section.incidentCount) : "");
   };
 
-  const closeModal = () => {
-    setModalKind(null);
-    setActiveSection(null);
-  };
+  const refreshAfterChange = useCallback(async () => {
+    await loadScorecard();
+  }, [loadScorecard]);
 
   const submitMistake = useCallback(async () => {
     if (!sessionToken || !activeSection) return;
@@ -266,7 +354,7 @@ export default function HrApp() {
       });
       setSuccess(`Mistake logged for ${activeSection.name}.`);
       closeModal();
-      void loadScorecard();
+      await refreshAfterChange();
     } catch (e: unknown) {
       setErr(hrApiErrorMessage(e, "Unable to log mistake."));
     } finally {
@@ -281,8 +369,84 @@ export default function HrApp() {
     mistakeSeverity,
     mistakePerson,
     mistakeNotes,
-    loadScorecard
+    refreshAfterChange
   ]);
+
+  const submitEditMistake = useCallback(async () => {
+    if (!sessionToken || !editingMistake) return;
+    setSaveBusy(true);
+    setErr(null);
+    try {
+      await apiPatch(`/api/hr/workforce/mistakes/${editingMistake.id}`, sessionToken, {
+        occurred_at: mistakeDate ? `${mistakeDate}T12:00:00.000Z` : undefined,
+        job_customer: mistakeJob.trim() || null,
+        description: mistakeDescription.trim() || null,
+        severity: mistakeSeverity,
+        person_involved: mistakePerson.trim() || null,
+        notes: mistakeNotes.trim() || null
+      });
+      setSuccess("Mistake updated.");
+      closeModal();
+      await refreshAfterChange();
+    } catch (e: unknown) {
+      setErr(hrApiErrorMessage(e, "Unable to update mistake."));
+    } finally {
+      setSaveBusy(false);
+    }
+  }, [
+    sessionToken,
+    editingMistake,
+    mistakeDate,
+    mistakeJob,
+    mistakeDescription,
+    mistakeSeverity,
+    mistakePerson,
+    mistakeNotes,
+    refreshAfterChange
+  ]);
+
+  const deleteMistake = useCallback(
+    async (mistake: MistakeLogEntry) => {
+      if (!sessionToken || mistake.entryKind === "quick_count") return;
+      if (!window.confirm("Delete this mistake entry?")) return;
+      setErr(null);
+      try {
+        await apiDelete(`/api/hr/workforce/mistakes/${mistake.id}`, sessionToken);
+        setSuccess("Mistake deleted.");
+        await refreshAfterChange();
+      } catch (e: unknown) {
+        setErr(hrApiErrorMessage(e, "Unable to delete mistake."));
+      }
+    },
+    [sessionToken, refreshAfterChange]
+  );
+
+  const saveQuickCount = useCallback(
+    async (section: SectionRow) => {
+      if (!sessionToken) return;
+      const raw = quickCounts[section.sectionId] ?? "";
+      const count = Math.max(0, Math.round(Number(raw)));
+      if (!Number.isFinite(count)) {
+        setErr("Enter a valid count.");
+        return;
+      }
+      setQuickSaveBusy((prev) => ({ ...prev, [section.sectionId]: true }));
+      setErr(null);
+      try {
+        await apiPost(`/api/hr/workforce/sections/${section.sectionId}/quick-count`, sessionToken, {
+          week_start: scorecard?.weekStart ?? selectedWeekStart,
+          count
+        });
+        setSuccess(`${section.name}: count saved (${count}).`);
+        await refreshAfterChange();
+      } catch (e: unknown) {
+        setErr(hrApiErrorMessage(e, "Unable to save count."));
+      } finally {
+        setQuickSaveBusy((prev) => ({ ...prev, [section.sectionId]: false }));
+      }
+    },
+    [sessionToken, quickCounts, scorecard?.weekStart, selectedWeekStart, refreshAfterChange]
+  );
 
   const submitMetric = useCallback(async () => {
     if (!sessionToken || !activeSection) return;
@@ -305,7 +469,7 @@ export default function HrApp() {
       await apiPost(`/api/hr/workforce/sections/${activeSection.sectionId}/value`, sessionToken, body);
       setSuccess(`${activeSection.name} updated.`);
       closeModal();
-      void loadScorecard();
+      await refreshAfterChange();
     } catch (e: unknown) {
       setErr(hrApiErrorMessage(e, "Unable to save metric."));
     } finally {
@@ -322,7 +486,7 @@ export default function HrApp() {
     metricWeeklySf,
     metricDailySf,
     metricHours,
-    loadScorecard
+    refreshAfterChange
   ]);
 
   const generateReport = useCallback(async () => {
@@ -363,7 +527,19 @@ export default function HrApp() {
   }, [userDepartment, userEmail, userJobTitle, userRole]);
 
   const rows = scorecard?.rows ?? [];
+  const gradeRows = rows.filter((row) => !isMetricTotalSection(row));
+  const metricRows = rows.filter((row) => isMetricTotalSection(row));
   const weekOptions = scorecard?.weekOptions ?? [];
+
+  const selectedWeekLog = useMemo(() => {
+    const ws = scorecard?.weekStart ?? selectedWeekStart;
+    return mistakesLog.find((w) => w.weekStart === ws) ?? mistakesLog[0] ?? null;
+  }, [mistakesLog, scorecard?.weekStart, selectedWeekStart]);
+
+  const priorWeekLogs = useMemo(() => {
+    const ws = scorecard?.weekStart ?? selectedWeekStart;
+    return mistakesLog.filter((w) => w.weekStart !== ws);
+  }, [mistakesLog, scorecard?.weekStart, selectedWeekStart]);
 
   const menuItems: EliteosTopbarMenuItem[] = [
     {
@@ -390,6 +566,125 @@ export default function HrApp() {
       )
     }
   ];
+
+  const renderSectionCard = (row: SectionRow, variant: "grade" | "metric") => (
+    <article key={row.sectionId} className={`hr-section-card hr-section-card--${variant}`}>
+      <header className="hr-section-card-head">
+        <h2>{row.name}</h2>
+        <GradeChip grade={row.letterGrade} />
+      </header>
+      <dl className="hr-section-metrics">
+        <div>
+          <dt>Goal</dt>
+          <dd>{row.goalDisplay}</dd>
+        </div>
+        <div>
+          <dt>Actual</dt>
+          <dd>{row.actualDisplay}</dd>
+        </div>
+      </dl>
+
+      {variant === "grade" && isCountSection(row.metricKind) ? (
+        <div className="hr-quick-count">
+          <label className="hr-quick-count-label">
+            This week&apos;s count
+            <div className="hr-quick-count-row">
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={quickCounts[row.sectionId] ?? String(row.incidentCount ?? 0)}
+                onChange={(e) => setQuickCounts((prev) => ({ ...prev, [row.sectionId]: e.target.value }))}
+              />
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={Boolean(quickSaveBusy[row.sectionId]) || busy}
+                onClick={() => void saveQuickCount(row)}
+              >
+                {quickSaveBusy[row.sectionId] ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </label>
+        </div>
+      ) : null}
+
+      <footer className="hr-section-card-foot">
+        {variant === "grade" && isCountSection(row.metricKind) ? (
+          <button type="button" className="btn btn-primary btn-sm" onClick={() => openMistakeModal(row)}>
+            + Log Mistake
+          </button>
+        ) : null}
+        {variant === "grade" && row.metricKind === "hours" ? (
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => openMetricModal(row)}>
+            {metricActionLabel(row.metricKind)}
+          </button>
+        ) : null}
+        {variant === "metric" ? (
+          <button type="button" className="btn btn-primary btn-sm" onClick={() => openMetricModal(row)}>
+            {metricActionLabel(row.metricKind)}
+          </button>
+        ) : null}
+      </footer>
+    </article>
+  );
+
+  const renderMistakeRow = (mistake: MistakeLogEntry) => {
+    const isQuick = mistake.entryKind === "quick_count";
+    return (
+      <tr key={mistake.id} className={isQuick ? "hr-mistake-row hr-mistake-row--quick" : "hr-mistake-row"}>
+        <td>{formatDate(mistake.occurredAt)}</td>
+        <td>{mistake.sectionName ?? "—"}</td>
+        <td>{mistake.jobCustomer ?? "—"}</td>
+        <td>{mistake.description ?? "—"}</td>
+        <td>{mistake.severity ?? "—"}</td>
+        <td>{mistake.personInvolved ?? "—"}</td>
+        <td className="hr-mistake-actions">
+          {isQuick ? (
+            <span className="hr-mistake-tag">Quick count</span>
+          ) : (
+            <>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => openEditMistakeModal(mistake)}>
+                Edit
+              </button>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => void deleteMistake(mistake)}>
+                Delete
+              </button>
+            </>
+          )}
+        </td>
+      </tr>
+    );
+  };
+
+  const renderMistakeTable = (mistakes: MistakeLogEntry[]) => (
+    <div className="hr-mistakes-table-wrap">
+      <table className="hr-mistakes-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Section</th>
+            <th>Job / customer</th>
+            <th>Description</th>
+            <th>Severity</th>
+            <th>Person</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {mistakes.length ? (
+            mistakes.map(renderMistakeRow)
+          ) : (
+            <tr>
+              <td colSpan={7} className="hr-mistakes-empty">
+                No detailed mistakes logged for this week.
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
 
   return (
     <div className="shell">
@@ -447,16 +742,12 @@ export default function HrApp() {
               <div>
                 <p className="hero-eyebrow">HR Head · Operations</p>
                 <h1 className="hero-title">Weekly Operations Scorecard</h1>
-                <p className="hero-sub">Log section mistakes, update weekly metrics, and freeze the end-of-week report.</p>
+                <p className="hero-sub">Enter weekly counts and metrics, log detailed mistakes, and freeze the end-of-week report.</p>
               </div>
               <div className="hr-scorecard-controls">
                 <label className="field">
                   Week
-                  <select
-                    value={selectedWeekStart}
-                    onChange={(e) => setSelectedWeekStart(e.target.value)}
-                    disabled={busy}
-                  >
+                  <select value={selectedWeekStart} onChange={(e) => setSelectedWeekStart(e.target.value)} disabled={busy}>
                     {weekOptions.map((w) => (
                       <option key={w.weekStart} value={w.weekStart}>
                         {w.weekLabel}
@@ -502,69 +793,64 @@ export default function HrApp() {
               </section>
             ) : null}
 
-            <div className="hr-scorecard-grid">
-              {rows.map((row) => (
-                <article key={row.sectionId} className="hr-section-card">
-                  <header className="hr-section-card-head">
-                    <h2>{row.name}</h2>
-                    {row.letterGrade ? (
-                      <span className={`hr-grade-chip hr-grade-chip--${row.letterGrade.toLowerCase()}`}>{row.letterGrade}</span>
-                    ) : (
-                      <span className="hr-grade-chip hr-grade-chip--neutral">—</span>
-                    )}
-                  </header>
-                  <dl className="hr-section-metrics">
-                    <div>
-                      <dt>Goal</dt>
-                      <dd>{row.goalDisplay}</dd>
-                    </div>
-                    <div>
-                      <dt>Actual</dt>
-                      <dd>{row.actualDisplay}</dd>
-                    </div>
-                  </dl>
-                  {row.recentIncidents?.length ? (
-                    <ul className="hr-section-recent">
-                      {row.recentIncidents.slice(0, 4).map((inc) => (
-                        <li key={inc.id}>
-                          <strong>{formatDateTime(inc.occurredAt)}</strong>
-                          {inc.jobCustomer ? <span> · {inc.jobCustomer}</span> : null}
-                          {inc.description ? <p>{inc.description}</p> : null}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="hr-section-empty">No entries logged this week.</p>
-                  )}
-                  <footer className="hr-section-card-foot">
-                    {isCountSection(row.metricKind) ? (
-                      <button type="button" className="btn btn-primary btn-sm" onClick={() => openMistakeModal(row)}>
-                        + Log Mistake
-                      </button>
-                    ) : (
-                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => openMetricModal(row)}>
-                        {metricActionLabel(row.metricKind)}
-                      </button>
-                    )}
-                  </footer>
-                </article>
-              ))}
-            </div>
+            <section className="hr-scorecard-section">
+              <h2 className="hr-scorecard-section-title">Grades</h2>
+              <div className="hr-scorecard-grid">{gradeRows.map((row) => renderSectionCard(row, "grade"))}</div>
+            </section>
+
+            <section className="hr-scorecard-section">
+              <h2 className="hr-scorecard-section-title">Totals / Metrics</h2>
+              <div className="hr-scorecard-grid">{metricRows.map((row) => renderSectionCard(row, "metric"))}</div>
+            </section>
+
+            <section className="hr-mistakes-log">
+              <div className="hr-mistakes-log-head">
+                <h2 className="hr-scorecard-section-title">Mistakes Log</h2>
+                {logBusy ? <span className="hr-mistakes-log-meta">Updating…</span> : null}
+              </div>
+
+              <div className="hr-mistakes-week-block">
+                <h3>{selectedWeekLog?.weekLabel ?? scorecard?.weekLabel ?? "Selected week"}</h3>
+                {renderMistakeTable(selectedWeekLog?.mistakes ?? [])}
+              </div>
+
+              {priorWeekLogs.length ? (
+                <div className="hr-mistakes-prior">
+                  <button type="button" className="hr-mistakes-prior-toggle" onClick={() => setPriorWeeksOpen((v) => !v)}>
+                    {priorWeeksOpen ? "Hide previous weeks" : `Show previous weeks (${priorWeekLogs.length})`}
+                  </button>
+                  {priorWeeksOpen
+                    ? priorWeekLogs.map((week) => (
+                        <div key={week.weekStart} className="hr-mistakes-week-block hr-mistakes-week-block--prior">
+                          <h3>{week.weekLabel}</h3>
+                          {renderMistakeTable(week.mistakes)}
+                        </div>
+                      ))
+                    : null}
+                </div>
+              ) : null}
+            </section>
           </>
         )}
       </main>
 
-      {modalKind && activeSection ? (
+      {modalKind && (activeSection || editingMistake) ? (
         <div className="hr-modal-backdrop" onClick={closeModal} role="presentation">
           <div className="hr-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
             <header className="hr-modal-head">
-              <h2>{modalKind === "mistake" ? `Log mistake — ${activeSection.name}` : activeSection.name}</h2>
+              <h2>
+                {modalKind === "mistake"
+                  ? `Log mistake — ${activeSection?.name ?? ""}`
+                  : modalKind === "editMistake"
+                    ? "Edit mistake"
+                    : activeSection?.name ?? ""}
+              </h2>
               <button type="button" className="hr-modal-close" onClick={closeModal} aria-label="Close">
                 ×
               </button>
             </header>
 
-            {modalKind === "mistake" ? (
+            {modalKind === "mistake" || modalKind === "editMistake" ? (
               <div className="field-grid">
                 <label className="field">
                   Date
@@ -590,14 +876,16 @@ export default function HrApp() {
                   Person involved
                   <input value={mistakePerson} onChange={(e) => setMistakePerson(e.target.value)} placeholder="Optional" />
                 </label>
-                <label className="field hr-field-full">
-                  Notes
-                  <textarea rows={2} value={mistakeNotes} onChange={(e) => setMistakeNotes(e.target.value)} placeholder="Optional" />
-                </label>
+                {modalKind === "mistake" ? (
+                  <label className="field hr-field-full">
+                    Notes
+                    <textarea rows={2} value={mistakeNotes} onChange={(e) => setMistakeNotes(e.target.value)} placeholder="Optional" />
+                  </label>
+                ) : null}
               </div>
             ) : (
               <div className="field-grid">
-                {activeSection.metricKind === "days" ? (
+                {activeSection?.metricKind === "days" ? (
                   <>
                     <label className="field">
                       Median days
@@ -609,13 +897,13 @@ export default function HrApp() {
                     </label>
                   </>
                 ) : null}
-                {activeSection.metricKind === "currency" ? (
+                {activeSection?.metricKind === "currency" ? (
                   <label className="field hr-field-full">
                     Weekly quoting value (USD)
                     <input type="number" step="0.01" value={metricCurrency} onChange={(e) => setMetricCurrency(e.target.value)} />
                   </label>
                 ) : null}
-                {activeSection.metricKind === "production" ? (
+                {activeSection?.metricKind === "production" ? (
                   <>
                     <label className="field">
                       Weekly sqft
@@ -627,7 +915,7 @@ export default function HrApp() {
                     </label>
                   </>
                 ) : null}
-                {activeSection.metricKind === "hours" ? (
+                {activeSection?.metricKind === "hours" ? (
                   <label className="field">
                     Downtime hours
                     <input type="number" step="0.1" value={metricHours} onChange={(e) => setMetricHours(e.target.value)} />
@@ -644,7 +932,13 @@ export default function HrApp() {
                 type="button"
                 className="btn btn-primary"
                 disabled={saveBusy}
-                onClick={() => void (modalKind === "mistake" ? submitMistake() : submitMetric())}
+                onClick={() =>
+                  void (modalKind === "mistake"
+                    ? submitMistake()
+                    : modalKind === "editMistake"
+                      ? submitEditMistake()
+                      : submitMetric())
+                }
               >
                 {saveBusy ? "Saving…" : "Save"}
               </button>

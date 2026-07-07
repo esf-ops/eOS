@@ -211,3 +211,9 @@ export function mapSectionRow(section) {
     isActive: Boolean(section.is_active ?? section.isActive ?? true)
   };
 }
+
+/** Metric/total sections shown under Totals / Metrics (not count-based grade cards). */
+export function isMetricTotalSection(section) {
+  const kind = String(section?.metricKind ?? section?.metric_kind ?? "count");
+  return kind === "days" || kind === "currency" || kind === "production";
+}

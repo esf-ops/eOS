@@ -633,6 +633,144 @@ body {
   gap: 16px;
 }
 
+.hr-scorecard-section {
+  margin-bottom: 28px;
+}
+
+.hr-scorecard-section-title {
+  margin: 0 0 14px;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.hr-quick-count {
+  padding: 10px 12px;
+  border-radius: var(--r-sm);
+  background: var(--eos-surface-muted);
+}
+
+.hr-quick-count-label {
+  display: grid;
+  gap: 8px;
+  font-size: 0.78rem;
+  font-weight: 650;
+  color: var(--eos-ink-mid);
+}
+
+.hr-quick-count-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.hr-quick-count-row input {
+  width: 5rem;
+}
+
+.hr-mistakes-log {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--eos-line);
+}
+
+.hr-mistakes-log-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.hr-mistakes-log-meta {
+  font-size: 0.82rem;
+  color: var(--eos-ink-muted);
+}
+
+.hr-mistakes-week-block {
+  margin-bottom: 18px;
+}
+
+.hr-mistakes-week-block h3 {
+  margin: 0 0 10px;
+  font-size: 0.92rem;
+  color: var(--eos-ink-mid);
+}
+
+.hr-mistakes-week-block--prior h3 {
+  color: var(--eos-ink-muted);
+}
+
+.hr-mistakes-prior-toggle {
+  appearance: none;
+  border: 1px solid var(--eos-line);
+  background: var(--eos-surface);
+  border-radius: var(--r-sm);
+  padding: 8px 12px;
+  font: inherit;
+  font-size: 0.84rem;
+  cursor: pointer;
+  margin-bottom: 12px;
+}
+
+.hr-mistakes-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--eos-line);
+  border-radius: var(--r-lg);
+  background: #fff;
+}
+
+.hr-mistakes-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.hr-mistakes-table th,
+.hr-mistakes-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--eos-line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.hr-mistakes-table th {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--eos-ink-muted);
+  background: var(--eos-surface-muted);
+}
+
+.hr-mistakes-table tr:last-child td {
+  border-bottom: none;
+}
+
+.hr-mistakes-empty {
+  color: var(--eos-ink-muted);
+  text-align: center;
+}
+
+.hr-mistake-row--quick {
+  background: rgba(46, 105, 184, 0.06);
+}
+
+.hr-mistake-tag {
+  display: inline-flex;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  background: var(--eos-info-soft);
+  color: var(--eos-info);
+}
+
+.hr-mistake-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  white-space: nowrap;
+}
+
 .hr-section-card {
   display: flex;
   flex-direction: column;

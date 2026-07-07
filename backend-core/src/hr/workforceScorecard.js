@@ -10,9 +10,36 @@ import {
   formatSectionActualDisplay,
   formatWeekLabel,
   gradeTrend,
+  normalizeValuePayload,
   weekEndForWeekStart
 } from "./workforceGradeEngine.js";
-import { mapSectionRow } from "./workforceGradingSections.js";
+import { isMetricTotalSection, mapSectionRow } from "./workforceGradingSections.js";
+
+/**
+ * Weekly incident count for grading: max(detail mistakes, quick_count).
+ * @param {number} detailCount
+ * @param {object} [weekValue]
+ */
+export function effectiveIncidentCount(detailCount, weekValue = {}) {
+  const payload = normalizeValuePayload(weekValue.valuePayload);
+  const quickRaw = payload.quick_count;
+  const details = Math.max(0, Number(detailCount) || 0);
+  if (quickRaw != null && quickRaw !== "") {
+    const quick = Math.max(0, Math.round(Number(quickRaw)));
+    if (Number.isFinite(quick)) return Math.max(details, quick);
+  }
+  return details;
+}
+
+/**
+ * @param {object} [weekValue]
+ */
+export function readQuickCount(weekValue = {}) {
+  const payload = normalizeValuePayload(weekValue.valuePayload);
+  if (payload.quick_count == null || payload.quick_count === "") return null;
+  const n = Math.max(0, Math.round(Number(payload.quick_count)));
+  return Number.isFinite(n) ? n : null;
+}
 
 /**
  * @param {object} row
@@ -42,19 +69,23 @@ export function buildScorecardRows(sections, mistakes, weekValues, priorGrades =
 
   const rows = sections.map((section) => {
     const incidents = incidentsBySection.get(section.sectionId) ?? [];
-    const incidentCount = incidents.length;
+    const detailMistakeCount = incidents.length;
     const weekValue = weekValues.get(section.sectionId) ?? {};
+    const incidentCount = effectiveIncidentCount(detailMistakeCount, weekValue);
+    const quickCount = readQuickCount(weekValue);
     const letterGrade = computeSectionLetterGrade(section, incidentCount, weekValue);
     const priorGrade = priorGrades.get(section.sectionId) ?? null;
 
     return {
       ...section,
       incidentCount,
+      detailMistakeCount,
+      quickCount,
+      isMetricTotal: isMetricTotalSection(section),
       actualDisplay: formatSectionActualDisplay(section, incidentCount, weekValue),
       letterGrade,
       priorLetterGrade: priorGrade,
       trend: letterGrade ? gradeTrend(letterGrade, priorGrade) : "neutral",
-      recentIncidents: incidents.slice(0, 8).map(mapIncidentRow),
       weekValue
     };
   });
@@ -73,13 +104,38 @@ export function buildScorecardRows(sections, mistakes, weekValues, priorGrades =
 export function mapIncidentRow(m) {
   return {
     id: String(m.id),
+    entryKind: "detail",
     sectionId: String(m.section_id),
+    weekStart: m.week_start ?? null,
     occurredAt: m.occurred_at,
     severity: m.severity ?? "minor",
     jobCustomer: m.job_customer ?? null,
     personInvolved: m.person_involved ?? null,
     description: m.description ?? null,
-    categoryLabel: m.category_label ?? null
+    categoryLabel: m.category_label ?? null,
+    sectionName: m.section_name ?? m.sectionName ?? null
+  };
+}
+
+/**
+ * Synthetic log row when a section uses quick-count entry.
+ * @param {object} section
+ * @param {number} quickCount
+ * @param {string} weekStart
+ */
+export function buildQuickCountLogEntry(section, quickCount, weekStart) {
+  return {
+    id: `quick-count:${section.sectionId}:${weekStart}`,
+    entryKind: "quick_count",
+    sectionId: section.sectionId,
+    weekStart,
+    occurredAt: `${weekStart}T12:00:00.000Z`,
+    severity: null,
+    jobCustomer: null,
+    personInvolved: null,
+    description: `Quick count set to ${quickCount} for the week`,
+    categoryLabel: section.name,
+    sectionName: section.name
   };
 }
 
@@ -87,7 +143,20 @@ export function mapIncidentRow(m) {
  * @param {Array<object>} rows
  */
 export function buildScorecardReportText(rows) {
-  return rows.map((row) => formatScorecardReportLine(row, row)).join("\n");
+  const gradeRows = rows.filter((row) => !isMetricTotalSection(row));
+  const metricRows = rows.filter((row) => isMetricTotalSection(row));
+  const lines = ["Grades", ""];
+
+  for (const row of gradeRows) {
+    lines.push(formatScorecardReportLine(row, row));
+  }
+
+  lines.push("", "Totals / Metrics", "");
+  for (const row of metricRows) {
+    lines.push(formatScorecardReportLine(row, row));
+  }
+
+  return lines.join("\n");
 }
 
 /**
