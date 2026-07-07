@@ -21,6 +21,10 @@ import {
   resolveBlancoSinkFolderAssets,
 } from "./productCatalogBlancoSinkAssets";
 import { resolveHeroOnlySinkFolderAssets } from "./productCatalogHeroOnlySinkAssets";
+import { PRODUCT_CATALOG_FAUCET_OVERRIDES } from "./productCatalogFaucetOverrides";
+import {
+  resolveFaucetFolderAssets,
+} from "./productCatalogFaucetAssets";
 import {
   finishKeyFromLabel,
   type ProductCatalogAssetStatus,
@@ -248,9 +252,10 @@ const PRODUCT_CATALOG_ASSET_OVERRIDES: ProductCatalogAssetOverride[] = [
   },
 ];
 
-const OVERRIDE_BY_ID = new Map(
-  PRODUCT_CATALOG_ASSET_OVERRIDES.map((o) => [o.productId, o])
-);
+const OVERRIDE_BY_ID = new Map<string, ProductCatalogAssetOverride>([
+  ...PRODUCT_CATALOG_ASSET_OVERRIDES.map((o) => [o.productId, o] as const),
+  ...PRODUCT_CATALOG_FAUCET_OVERRIDES.map((o) => [o.productId, o] as const),
+]);
 
 export function getProductCatalogAssetOverride(productId: string): ProductCatalogAssetOverride | undefined {
   return OVERRIDE_BY_ID.get(productId);
@@ -325,7 +330,8 @@ export function mergeProductCatalogAssets(item: ProductCatalogItem): ProductCata
   const explicit = getProductCatalogAssetOverride(item.id);
   const folderAssets = explicit
     ? resolveBlancoSinkFolderAssets(item.id, item.category) ??
-      resolveHeroOnlySinkFolderAssets(item.id, item.category)
+      resolveHeroOnlySinkFolderAssets(item.id, item.category) ??
+      resolveFaucetFolderAssets(item.id, item.category, explicit)
     : null;
   if (!folderAssets && !explicit) return item;
 
@@ -399,3 +405,11 @@ export {
   isHeroOnlyCatalogSinkId,
   resolveHeroOnlySinkFolderAssets,
 } from "./productCatalogHeroOnlySinkAssets";
+export {
+  faucetHeroCandidates,
+  faucetPublicBase,
+  faucetSpecSheetUrl,
+  resolveFaucetFolderAssets,
+  usesFaucetFolderResolver,
+} from "./productCatalogFaucetAssets";
+export { PRODUCT_CATALOG_FAUCET_OVERRIDES } from "./productCatalogFaucetOverrides";

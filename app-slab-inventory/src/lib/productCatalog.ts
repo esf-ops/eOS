@@ -14,6 +14,7 @@ import {
   heroOnlySinkHeroCandidates,
   isHeroOnlyCatalogSinkId,
 } from "./productCatalogHeroOnlySinkAssets";
+import { faucetHeroCandidates } from "./productCatalogFaucetAssets";
 
 export type ProductCatalogCategory = "sink" | "sink_accessory" | "faucet" | "specialty_add_on";
 
@@ -230,6 +231,13 @@ export function getProductHeroImageCandidates(item: ProductCatalogItem): string[
   }
   if (isHeroOnlyCatalogSinkId(item.id, item.category)) {
     return heroOnlySinkHeroCandidates(item.id);
+  }
+  if (
+    item.category === "faucet" &&
+    (item.id.startsWith("faucet-delta-") || item.id.startsWith("faucet-moen-"))
+  ) {
+    const faucetUrls = faucetHeroCandidates(item);
+    if (faucetUrls.length) return faucetUrls;
   }
   const hero = productCatalogHeroImage(item);
   return hero ? [hero] : [];

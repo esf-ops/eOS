@@ -32,6 +32,8 @@
     "eos:audit:titans-today": "node backend-core/src/scripts/auditTitanTodayReadiness.js",
     "eos:audit:moraware-ui-coverage": "node backend-core/src/scripts/auditMorawareUICoverageMatrix.js",
     "eos:audit:product-catalog-assets": "node scripts/audit-product-catalog-assets.mjs",
+    "eos:import:product-catalog-faucet-assets": "node scripts/import-product-catalog-faucet-assets.mjs",
+    "eos:test:product-catalog-faucet-import": "node scripts/lib/productCatalogFaucetAssetImport.test.mjs",
     "eos:discover:moraware-expanded": "node backend-core/src/scripts/discoverMorawareExpandedCoverage.js",
     "eos:discover:moraware-machines": "node backend-core/src/scripts/discoverMorawareMachinesCalendar.js",
     "eos:discover:moraware-wsdl": "node backend-core/src/scripts/discoverMorawareWsdl.js",

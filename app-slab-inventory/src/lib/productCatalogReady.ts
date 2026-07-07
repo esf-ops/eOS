@@ -3,6 +3,7 @@
  */
 import { isHeroOnlyCatalogSinkId } from "./productCatalogHeroOnlySinkAssets";
 import { usesSinkFolderResolver } from "./productCatalogBlancoSinkAssets";
+import { usesFaucetFolderResolver } from "./productCatalogFaucetAssets";
 import { getProductCatalogAssetOverride } from "./productCatalogAssets";
 import {
   getProductHeroImageCandidates,
@@ -37,7 +38,8 @@ export function isProductCatalogItemReady(item: ProductCatalogItem): boolean {
 
   if (
     usesSinkFolderResolver(item.id, item.category) ||
-    isHeroOnlyCatalogSinkId(item.id, item.category)
+    isHeroOnlyCatalogSinkId(item.id, item.category) ||
+    usesFaucetFolderResolver(item.id, item.category)
   ) {
     return Boolean(getProductCatalogAssetOverride(item.id));
   }
