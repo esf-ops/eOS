@@ -11,7 +11,10 @@ import {
   formatWeekLabel,
   gradeTrend,
   normalizeValuePayload,
-  weekEndForWeekStart
+  shiftWeekStart,
+  todayIsoInTimezone,
+  weekEndForWeekStart,
+  weekStartForIsoDate
 } from "./workforceGradeEngine.js";
 import { isMetricTotalSection, mapSectionRow } from "./workforceGradingSections.js";
 
@@ -141,11 +144,15 @@ export function buildQuickCountLogEntry(section, quickCount, weekStart) {
 
 /**
  * @param {Array<object>} rows
+ * @param {{ weekLabel?: string, overallGrade?: string|null, mistakesSummary?: Array<object> }} [meta]
  */
-export function buildScorecardReportText(rows) {
+export function buildScorecardReportText(rows, meta = {}) {
   const gradeRows = rows.filter((row) => !isMetricTotalSection(row));
   const metricRows = rows.filter((row) => isMetricTotalSection(row));
-  const lines = ["Grades", ""];
+  const lines = [];
+
+  if (meta.weekLabel) lines.push(meta.weekLabel, "");
+  lines.push(`Overall Grade: ${meta.overallGrade ?? "—"}`, "", "Grades", "");
 
   for (const row of gradeRows) {
     lines.push(formatScorecardReportLine(row, row));
@@ -156,7 +163,154 @@ export function buildScorecardReportText(rows) {
     lines.push(formatScorecardReportLine(row, row));
   }
 
+  const mistakes = meta.mistakesSummary ?? [];
+  lines.push("", "Mistakes Log Summary", "");
+  if (!mistakes.length) {
+    lines.push("No detailed mistakes logged this week.");
+  } else {
+    for (const m of mistakes) {
+      const date = String(m.occurredAt ?? m.occurred_at ?? "").slice(0, 10);
+      lines.push(
+        `${date} · ${m.sectionName ?? m.categoryLabel ?? "—"} · ${m.jobCustomer ?? m.job_customer ?? "—"} · ${m.severity ?? "—"} · ${m.description ?? "—"}`
+      );
+    }
+  }
+
   return lines.join("\n");
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function reportGradeCell(grade) {
+  if (!grade) return "—";
+  const g = escapeHtml(grade);
+  return `<span class="hr-report-grade hr-report-grade--${g.toLowerCase()}">${g}</span>`;
+}
+
+function buildReportRowCards(sectionTitle, sectionRows) {
+  if (!sectionRows.length) {
+    return `<section class="hr-report-block"><h3>${escapeHtml(sectionTitle)}</h3><p class="hr-report-empty">No entries.</p></section>`;
+  }
+
+  const cards = sectionRows
+    .map((row) => {
+      const isCurrency = String(row.metricKind) === "currency";
+      const gradeLabel = isCurrency ? "Tracked" : row.letterGrade ?? "—";
+      const gradeHtml = isCurrency
+        ? `<span class="hr-report-status">${escapeHtml(gradeLabel)}</span>`
+        : reportGradeCell(row.letterGrade);
+      const goalNote = isCurrency ? `<p class="hr-report-note">Goal pending finalization</p>` : "";
+
+      return `<article class="hr-report-card">
+  <header class="hr-report-card-head">
+    <h4>${escapeHtml(row.name)}</h4>
+    ${gradeHtml}
+  </header>
+  <dl class="hr-report-card-metrics">
+    <div><dt>Actual</dt><dd>${escapeHtml(row.actualDisplay ?? "—")}</dd></div>
+    <div><dt>Goal</dt><dd>${escapeHtml(row.goalDisplay ?? "—")}</dd></div>
+    <div><dt>Grade</dt><dd>${escapeHtml(gradeLabel)}</dd></div>
+  </dl>
+  ${goalNote}
+</article>`;
+    })
+    .join("");
+
+  return `<section class="hr-report-block"><h3>${escapeHtml(sectionTitle)}</h3><div class="hr-report-card-grid">${cards}</div></section>`;
+}
+
+/**
+ * @param {Array<object>} rows
+ * @param {{ weekLabel?: string, overallGrade?: string|null, mistakesSummary?: Array<object> }} meta
+ */
+export function buildScorecardReportHtml(rows, meta = {}) {
+  const gradeRows = rows.filter((row) => !isMetricTotalSection(row));
+  const metricRows = rows.filter((row) => isMetricTotalSection(row));
+  const mistakes = meta.mistakesSummary ?? [];
+
+  const mistakeItems = mistakes.length
+    ? `<ul class="hr-report-mistake-list">${mistakes
+        .map((m) => {
+          const date = escapeHtml(String(m.occurredAt ?? m.occurred_at ?? "").slice(0, 10));
+          const section = escapeHtml(m.sectionName ?? m.categoryLabel ?? "—");
+          const desc = escapeHtml(m.description ?? "—");
+          const job = escapeHtml(m.jobCustomer ?? m.job_customer ?? "—");
+          const sev = escapeHtml(m.severity ?? "—");
+          return `<li><strong>${date}</strong> · ${section} · ${job} · ${sev}<span>${desc}</span></li>`;
+        })
+        .join("")}</ul>`
+    : `<p class="hr-report-empty">No detailed mistakes logged this week.</p>`;
+
+  return `<div class="hr-report-doc">
+  <header class="hr-report-doc-head">
+    <p class="hr-report-kicker">eliteOS · Weekly Operations Scorecard</p>
+    <h2>${escapeHtml(meta.weekLabel ?? "Weekly Report")}</h2>
+  </header>
+  <section class="hr-report-block hr-report-overall">
+    <h3>Overall Grade</h3>
+    <div class="hr-report-overall-grade">${reportGradeCell(meta.overallGrade ?? null)}</div>
+  </section>
+  ${buildReportRowCards("Grades", gradeRows)}
+  ${buildReportRowCards("Totals / Metrics", metricRows)}
+  <section class="hr-report-block">
+    <h3>Mistakes Log Summary</h3>
+    ${mistakeItems}
+  </section>
+</div>`;
+}
+
+/**
+ * Build week selector options anchored to the current week.
+ * @param {import("@supabase/supabase-js").SupabaseClient} db
+ * @param {string} organizationId
+ * @param {object} settings
+ * @param {(error: unknown) => boolean} isMissingTableError
+ */
+export async function buildScorecardWeekOptions(db, organizationId, settings, isMissingTableError) {
+  const tz = settings.timezone;
+  const weekStartDay = settings.week_start_day;
+  const currentWeekStart = weekStartForIsoDate(todayIsoInTimezone(new Date(), tz), weekStartDay);
+  const lastWeekStart = shiftWeekStart(currentWeekStart, -1, weekStartDay);
+
+  /** @type {Set<string>} */
+  const weekSet = new Set([currentWeekStart, lastWeekStart]);
+
+  try {
+    const results = await Promise.all([
+      db
+        .from("workforce_mistakes")
+        .select("week_start")
+        .eq("organization_id", organizationId)
+        .not("section_id", "is", null),
+      db.from("workforce_section_week_values").select("week_start").eq("organization_id", organizationId),
+      db.from("workforce_section_week_snapshots").select("week_start").eq("organization_id", organizationId)
+    ]);
+    for (const res of results) {
+      if (res.error) {
+        if (isMissingTableError(res.error)) continue;
+        throw res.error;
+      }
+      for (const row of res.data ?? []) {
+        if (row.week_start) weekSet.add(String(row.week_start));
+      }
+    }
+  } catch (e) {
+    if (!isMissingTableError(e)) throw e;
+  }
+
+  const sorted = [...weekSet].sort((a, b) => b.localeCompare(a));
+  const rest = sorted.filter((ws) => ws !== currentWeekStart);
+
+  return [currentWeekStart, ...rest].map((weekStart) => ({
+    ...scorecardWeekMeta(weekStart),
+    isCurrentWeek: weekStart === currentWeekStart
+  }));
 }
 
 /**
