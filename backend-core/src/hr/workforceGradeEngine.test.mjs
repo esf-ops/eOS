@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import {
   buildCategoryBreakdown,
   computeLetterGrade,
+  computeSectionCountGrade,
+  computeSectionDaysGrade,
+  computeSectionProductionGrade,
+  formatSectionActualDisplay,
   formatWeekLabel,
   gradeTrend,
   isManagerRole,
@@ -18,6 +22,28 @@ assert.equal(computeLetterGrade(2), "B");
 assert.equal(computeLetterGrade(4), "C");
 assert.equal(computeLetterGrade(8), "D");
 assert.equal(computeLetterGrade(11), "F");
+
+assert.equal(computeSectionCountGrade(0), "A");
+assert.equal(computeSectionCountGrade(1), "B");
+assert.equal(computeSectionCountGrade(2), "C");
+assert.equal(computeSectionCountGrade(5), "F");
+assert.equal(computeSectionCountGrade(13), "F");
+
+assert.equal(computeSectionDaysGrade(14, 14), "A");
+assert.equal(computeSectionDaysGrade(15, 14), "B");
+assert.equal(computeSectionDaysGrade(17, 14), "C");
+
+assert.equal(computeSectionProductionGrade(9250, 9250), "A");
+assert.equal(computeSectionProductionGrade(8801, 9250), "B");
+assert.equal(computeSectionProductionGrade(8000, 9250), "C");
+
+const productionSection = {
+  metricKind: "production",
+  goalNumeric: 9250,
+  gradingEnabled: true,
+  goalDisplay: "9,250sf weekly"
+};
+assert.ok(formatSectionActualDisplay(productionSection, 0, { actualNumeric: 8801 }).includes("8,801"));
 
 assert.equal(weekStartForIsoDate("2026-07-01"), "2026-06-29"); // Wed → Mon
 assert.equal(weekStartForIsoDate("2026-06-30"), "2026-06-29"); // Tue → Mon
