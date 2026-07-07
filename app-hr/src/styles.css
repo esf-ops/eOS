@@ -580,6 +580,219 @@ body {
   color: var(--eos-accent);
 }
 
+/* ----- Weekly Operations Scorecard ---------------------------------------- */
+
+.hr-scorecard-hero {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 24px;
+  margin-bottom: 16px;
+  border-radius: var(--r-xl);
+  border: 1px solid var(--eos-line);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(255, 255, 255, 0.88) 100%);
+  box-shadow: var(--sh-2);
+}
+
+.hr-scorecard-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-end;
+}
+
+.hr-overall-grade {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  padding: 12px 16px;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--eos-line);
+  background: var(--eos-surface);
+}
+
+.hr-overall-grade span {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--eos-ink-muted);
+}
+
+.hr-scorecard-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.hr-scorecard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+.hr-section-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--eos-line);
+  background: var(--eos-surface);
+  box-shadow: var(--sh-card);
+}
+
+.hr-section-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.hr-section-card-head h2 {
+  margin: 0;
+  font-size: 0.98rem;
+  line-height: 1.35;
+}
+
+.hr-section-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 0;
+}
+
+.hr-section-metrics dt {
+  margin: 0;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--eos-ink-muted);
+}
+
+.hr-section-metrics dd {
+  margin: 4px 0 0;
+  font-weight: 650;
+}
+
+.hr-section-recent {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+  font-size: 0.82rem;
+}
+
+.hr-section-recent li {
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: var(--eos-surface-muted);
+}
+
+.hr-section-recent p {
+  margin: 4px 0 0;
+  color: var(--eos-ink-muted);
+}
+
+.hr-section-empty {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--eos-ink-muted);
+}
+
+.hr-section-card-foot {
+  margin-top: auto;
+}
+
+.hr-report-panel {
+  margin-bottom: 20px;
+  padding: 16px;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--eos-line);
+  background: #fff;
+}
+
+.hr-report-title {
+  margin: 0 0 10px;
+  font-size: 1rem;
+}
+
+.hr-report-text {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.hr-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 1000;
+}
+
+.hr-modal {
+  width: min(560px, 100%);
+  max-height: 90vh;
+  overflow: auto;
+  padding: 20px;
+  border-radius: var(--r-xl);
+  background: #fff;
+  box-shadow: var(--sh-3);
+}
+
+.hr-modal-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.hr-modal-head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.hr-modal-close {
+  appearance: none;
+  border: none;
+  background: transparent;
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--eos-ink-muted);
+}
+
+.hr-modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+@media print {
+  .eliteos-topbar,
+  .hr-scorecard-actions,
+  .hr-section-card-foot,
+  .hr-modal-backdrop {
+    display: none !important;
+  }
+
+  .hr-report-panel {
+    border: none;
+    padding: 0;
+  }
+}
+
 @media (max-width: 768px) {
   .hr-hero-grid {
     grid-template-columns: 1fr;
@@ -588,5 +801,9 @@ body {
   .main {
     padding-left: 16px;
     padding-right: 16px;
+  }
+
+  .hr-scorecard-hero {
+    padding: 18px;
   }
 }

@@ -4,10 +4,6 @@ import { hrApiErrorMessage } from "./lib/hrRoles";
 import { getSupabase } from "./lib/supabase";
 import EliteosTopbar from "../../shared/eliteos-ui/EliteosTopbar";
 import type { EliteosTopbarMenuItem } from "../../shared/eliteos-ui/EliteosTopbar";
-import EosSectionCard from "../../shared/eliteos-ui/EosSectionCard";
-import EosPanelHead from "../../shared/eliteos-ui/EosPanelHead";
-import EosStatusPill from "../../shared/eliteos-ui/EosStatusPill";
-import EosMetricCard, { EosMetricGrid } from "../../shared/eliteos-ui/EosMetricCard";
 import EosAlertBanner from "../../shared/eliteos-ui/EosAlertBanner";
 
 const EOS_LOGO_URL =
@@ -15,51 +11,42 @@ const EOS_LOGO_URL =
 
 const DEFAULT_WORKSPACE_NAME = "Elite Stone Fabrication";
 
-type TabId = "dashboard" | "log" | "history";
+type WeekOption = { weekStart: string; weekEnd: string; weekLabel: string };
 
-type SectionGradeRow = {
+type IncidentRow = {
+  id: string;
+  occurredAt: string;
+  severity: string;
+  jobCustomer: string | null;
+  personInvolved: string | null;
+  description: string | null;
+};
+
+type SectionRow = {
   sectionId: string;
   name: string;
   goalDisplay: string;
-  goalNumeric: number | null;
   metricKind: string;
   gradingEnabled: boolean;
-  unitLabel: string | null;
   incidentCount: number;
   actualDisplay: string;
   letterGrade: string | null;
-  priorLetterGrade: string | null;
-  trend: "up" | "down" | "flat" | "neutral";
+  trend: string;
+  recentIncidents: IncidentRow[];
 };
 
-type DashboardPayload = {
+type ScorecardPayload = {
   ok?: boolean;
-  canManageCategories?: boolean;
-  gradingMode?: string;
   weekStart?: string;
-  weekEnd?: string;
   weekLabel?: string;
-  rows?: SectionGradeRow[];
-  schemaReady?: boolean;
+  weekOptions?: WeekOption[];
+  overallGrade?: string | null;
+  rows?: SectionRow[];
   warning?: string;
+  schemaReady?: boolean;
 };
 
-type Incident = {
-  id: string;
-  section_id: string;
-  category_label: string;
-  description: string | null;
-  occurred_at: string;
-};
-
-type Snapshot = {
-  week_start: string;
-  weekLabel?: string;
-  letter_grade: string | null;
-  incident_count: number;
-  actual_display: string | null;
-  goal_display: string;
-};
+type ModalKind = "mistake" | "metric" | null;
 
 function homeLauncherUrl(): string {
   const raw = String(import.meta.env.VITE_HEAD_URL_HOME ?? "").trim();
@@ -83,33 +70,8 @@ function userInitialsFor(name: string, email: string): string {
     if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   }
   const e = String(email || "").trim();
-  if (e) {
-    const local = e.includes("@") ? e.split("@")[0] : e;
-    return local.slice(0, 2).toUpperCase();
-  }
+  if (e) return e.includes("@") ? e.split("@")[0].slice(0, 2).toUpperCase() : e.slice(0, 2).toUpperCase();
   return "HR";
-}
-
-function gradePillTone(grade: string | null): "success" | "info" | "warn" | "neutral" {
-  switch (String(grade ?? "").toUpperCase()) {
-    case "A":
-      return "success";
-    case "B":
-      return "info";
-    case "C":
-    case "D":
-    case "F":
-      return "warn";
-    default:
-      return "neutral";
-  }
-}
-
-function trendLabel(trend: SectionGradeRow["trend"]): string {
-  if (trend === "up") return "↑ vs last week";
-  if (trend === "down") return "↓ vs last week";
-  if (trend === "flat") return "→ same as last week";
-  return "New week";
 }
 
 function formatDateTime(iso: string): string {
@@ -118,8 +80,16 @@ function formatDateTime(iso: string): string {
   return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
-function sectionNeedsManualValue(kind: string): boolean {
-  return kind === "days" || kind === "production" || kind === "currency" || kind === "hours";
+function isCountSection(kind: string): boolean {
+  return kind === "count";
+}
+
+function metricActionLabel(kind: string): string {
+  if (kind === "days") return "Update Lead Times";
+  if (kind === "currency") return "Update Quoting Value";
+  if (kind === "production") return "Update Production";
+  if (kind === "hours") return "Update Downtime";
+  return "Update Metric";
 }
 
 export default function HrApp() {
@@ -127,30 +97,39 @@ export default function HrApp() {
   const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState("");
   const [userMetaName, setUserMetaName] = useState("");
-  const [userRole, setUserRole] = useState("");
   const [userJobTitle, setUserJobTitle] = useState("");
   const [userDepartment, setUserDepartment] = useState("");
+  const [userRole, setUserRole] = useState("");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  const [tab, setTab] = useState<TabId>("dashboard");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [dashboard, setDashboard] = useState<DashboardPayload | null>(null);
-  const [historySectionId, setHistorySectionId] = useState("");
-  const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
-  const [weekIncidents, setWeekIncidents] = useState<Incident[]>([]);
-  const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [scorecard, setScorecard] = useState<ScorecardPayload | null>(null);
+  const [selectedWeekStart, setSelectedWeekStart] = useState("");
+  const [reportText, setReportText] = useState("");
+  const [reportBusy, setReportBusy] = useState(false);
 
-  const [logSectionId, setLogSectionId] = useState("");
-  const [logDescription, setLogDescription] = useState("");
-  const [logBusy, setLogBusy] = useState(false);
-  const [logSuccess, setLogSuccess] = useState<string | null>(null);
+  const [modalKind, setModalKind] = useState<ModalKind>(null);
+  const [activeSection, setActiveSection] = useState<SectionRow | null>(null);
+  const [saveBusy, setSaveBusy] = useState(false);
 
-  const [valueInput, setValueInput] = useState("");
-  const [valueBusy, setValueBusy] = useState(false);
+  const [mistakeDate, setMistakeDate] = useState("");
+  const [mistakeJob, setMistakeJob] = useState("");
+  const [mistakeDescription, setMistakeDescription] = useState("");
+  const [mistakeSeverity, setMistakeSeverity] = useState("minor");
+  const [mistakePerson, setMistakePerson] = useState("");
+  const [mistakeNotes, setMistakeNotes] = useState("");
+
+  const [metricMedian, setMetricMedian] = useState("");
+  const [metricAverage, setMetricAverage] = useState("");
+  const [metricCurrency, setMetricCurrency] = useState("");
+  const [metricWeeklySf, setMetricWeeklySf] = useState("");
+  const [metricDailySf, setMetricDailySf] = useState("");
+  const [metricHours, setMetricHours] = useState("");
 
   useEffect(() => {
     if (!supabase) return;
@@ -196,73 +175,26 @@ export default function HrApp() {
     };
   }, [sessionToken]);
 
-  const loadDashboard = useCallback(async () => {
+  const loadScorecard = useCallback(async () => {
     if (!sessionToken) return;
     setBusy(true);
     setErr(null);
     try {
-      const res = (await apiGet("/api/hr/workforce/dashboard", sessionToken)) as DashboardPayload;
-      setDashboard(res);
+      const weekQ = selectedWeekStart ? `?week_start=${encodeURIComponent(selectedWeekStart)}` : "";
+      const res = (await apiGet(`/api/hr/workforce/dashboard${weekQ}`, sessionToken)) as ScorecardPayload;
+      setScorecard(res);
+      if (!selectedWeekStart && res.weekStart) setSelectedWeekStart(res.weekStart);
     } catch (e: unknown) {
-      setErr(hrApiErrorMessage(e, "Unable to load HR workforce data."));
+      setErr(hrApiErrorMessage(e, "Unable to load weekly scorecard."));
     } finally {
       setBusy(false);
     }
-  }, [sessionToken]);
-
-  const loadHistory = useCallback(
-    async (sectionId: string) => {
-      if (!sessionToken || !sectionId) return;
-      try {
-        const res = (await apiGet(
-          `/api/hr/workforce/history?section_id=${encodeURIComponent(sectionId)}&weeks=12`,
-          sessionToken
-        )) as { snapshots?: Snapshot[] };
-        setSnapshots(res.snapshots ?? []);
-      } catch (e: unknown) {
-        setErr(hrApiErrorMessage(e, "Unable to load section history."));
-      }
-    },
-    [sessionToken]
-  );
-
-  const loadWeekIncidents = useCallback(
-    async (sectionId: string, weekStart?: string) => {
-      if (!sessionToken || !sectionId) return;
-      try {
-        const weekQ = weekStart ? `&week_start=${encodeURIComponent(weekStart)}` : "";
-        const res = (await apiGet(
-          `/api/hr/workforce/mistakes?section_id=${encodeURIComponent(sectionId)}${weekQ}`,
-          sessionToken
-        )) as { mistakes?: Incident[] };
-        setWeekIncidents(res.mistakes ?? []);
-      } catch {
-        setWeekIncidents([]);
-      }
-    },
-    [sessionToken]
-  );
+  }, [sessionToken, selectedWeekStart]);
 
   useEffect(() => {
     if (!sessionToken) return;
-    void loadDashboard();
-  }, [sessionToken, loadDashboard]);
-
-  const sections = dashboard?.rows ?? [];
-
-  useEffect(() => {
-    if (!historySectionId && sections[0]?.sectionId) {
-      setHistorySectionId(sections[0].sectionId);
-    }
-  }, [historySectionId, sections]);
-
-  useEffect(() => {
-    if (tab === "history" && historySectionId) void loadHistory(historySectionId);
-  }, [tab, historySectionId, loadHistory]);
-
-  useEffect(() => {
-    if (selectedSectionId) void loadWeekIncidents(selectedSectionId, dashboard?.weekStart);
-  }, [selectedSectionId, dashboard?.weekStart, loadWeekIncidents]);
+    void loadScorecard();
+  }, [sessionToken, loadScorecard]);
 
   const signIn = useCallback(async () => {
     setAuthError(null);
@@ -288,87 +220,150 @@ export default function HrApp() {
   const signOut = useCallback(async () => {
     if (supabase) await supabase.auth.signOut();
     setSessionToken(null);
-    setDashboard(null);
+    setScorecard(null);
   }, [supabase]);
 
-  const submitIncident = useCallback(async () => {
-    if (!sessionToken || !logSectionId) return;
-    setLogBusy(true);
-    setLogSuccess(null);
+  const openMistakeModal = (section: SectionRow) => {
+    setActiveSection(section);
+    setModalKind("mistake");
+    setMistakeDate(new Date().toISOString().slice(0, 10));
+    setMistakeJob("");
+    setMistakeDescription("");
+    setMistakeSeverity("minor");
+    setMistakePerson("");
+    setMistakeNotes("");
+  };
+
+  const openMetricModal = (section: SectionRow) => {
+    setActiveSection(section);
+    setModalKind("metric");
+    setMetricMedian("");
+    setMetricAverage("");
+    setMetricCurrency("");
+    setMetricWeeklySf("");
+    setMetricDailySf("");
+    setMetricHours("");
+  };
+
+  const closeModal = () => {
+    setModalKind(null);
+    setActiveSection(null);
+  };
+
+  const submitMistake = useCallback(async () => {
+    if (!sessionToken || !activeSection) return;
+    setSaveBusy(true);
     setErr(null);
     try {
       await apiPost("/api/hr/workforce/mistakes", sessionToken, {
-        section_id: logSectionId,
-        description: logDescription.trim() || null
+        section_id: activeSection.sectionId,
+        occurred_at: mistakeDate ? `${mistakeDate}T12:00:00.000Z` : undefined,
+        job_customer: mistakeJob.trim() || null,
+        description: mistakeDescription.trim() || null,
+        severity: mistakeSeverity,
+        person_involved: mistakePerson.trim() || null,
+        notes: mistakeNotes.trim() || null
       });
-      const sectionName = sections.find((s) => s.sectionId === logSectionId)?.name ?? "Section";
-      setLogSuccess(`Incident logged for ${sectionName}. Grade updated on dashboard.`);
-      setLogDescription("");
-      void loadDashboard();
-      if (selectedSectionId === logSectionId) {
-        void loadWeekIncidents(logSectionId, dashboard?.weekStart);
-      }
+      setSuccess(`Mistake logged for ${activeSection.name}.`);
+      closeModal();
+      void loadScorecard();
     } catch (e: unknown) {
-      setErr(hrApiErrorMessage(e, "Unable to log incident."));
+      setErr(hrApiErrorMessage(e, "Unable to log mistake."));
     } finally {
-      setLogBusy(false);
+      setSaveBusy(false);
     }
   }, [
     sessionToken,
-    logSectionId,
-    logDescription,
-    loadDashboard,
-    selectedSectionId,
-    loadWeekIncidents,
-    dashboard?.weekStart,
-    sections
+    activeSection,
+    mistakeDate,
+    mistakeJob,
+    mistakeDescription,
+    mistakeSeverity,
+    mistakePerson,
+    mistakeNotes,
+    loadScorecard
   ]);
 
-  const submitSectionValue = useCallback(async () => {
-    if (!sessionToken || !selectedSectionId || !valueInput.trim()) return;
-    setValueBusy(true);
+  const submitMetric = useCallback(async () => {
+    if (!sessionToken || !activeSection) return;
+    setSaveBusy(true);
     setErr(null);
     try {
-      await apiPost(`/api/hr/workforce/sections/${selectedSectionId}/value`, sessionToken, {
-        actual_numeric: Number(valueInput),
-        week_start: dashboard?.weekStart ?? undefined
-      });
-      setValueInput("");
-      void loadDashboard();
+      const body: Record<string, unknown> = { week_start: scorecard?.weekStart ?? selectedWeekStart };
+      const kind = activeSection.metricKind;
+      if (kind === "days") {
+        body.median_days = metricMedian;
+        body.average_days = metricAverage;
+      } else if (kind === "currency") {
+        body.currency = metricCurrency;
+      } else if (kind === "production") {
+        body.weekly_sf = metricWeeklySf;
+        body.daily_sf = metricDailySf || undefined;
+      } else if (kind === "hours") {
+        body.hours = metricHours;
+      }
+      await apiPost(`/api/hr/workforce/sections/${activeSection.sectionId}/value`, sessionToken, body);
+      setSuccess(`${activeSection.name} updated.`);
+      closeModal();
+      void loadScorecard();
     } catch (e: unknown) {
-      setErr(hrApiErrorMessage(e, "Unable to save section value."));
+      setErr(hrApiErrorMessage(e, "Unable to save metric."));
     } finally {
-      setValueBusy(false);
+      setSaveBusy(false);
     }
-  }, [sessionToken, selectedSectionId, valueInput, dashboard?.weekStart, loadDashboard]);
+  }, [
+    sessionToken,
+    activeSection,
+    scorecard?.weekStart,
+    selectedWeekStart,
+    metricMedian,
+    metricAverage,
+    metricCurrency,
+    metricWeeklySf,
+    metricDailySf,
+    metricHours,
+    loadScorecard
+  ]);
+
+  const generateReport = useCallback(async () => {
+    if (!sessionToken) return;
+    setReportBusy(true);
+    setErr(null);
+    setSuccess(null);
+    try {
+      const res = (await apiPost("/api/hr/workforce/report/generate", sessionToken, {
+        week_start: scorecard?.weekStart ?? selectedWeekStart
+      })) as { reportText?: string; overallGrade?: string | null };
+      setReportText(res.reportText ?? "");
+      setSuccess(`Weekly report frozen. Overall grade: ${res.overallGrade ?? "—"}`);
+    } catch (e: unknown) {
+      setErr(hrApiErrorMessage(e, "Unable to generate weekly report."));
+    } finally {
+      setReportBusy(false);
+    }
+  }, [sessionToken, scorecard?.weekStart, selectedWeekStart]);
+
+  const copyReport = useCallback(async () => {
+    if (!reportText) return;
+    try {
+      await navigator.clipboard.writeText(reportText);
+      setSuccess("Report copied to clipboard.");
+    } catch {
+      setErr("Unable to copy report.");
+    }
+  }, [reportText]);
 
   const userDisplayName = useMemo(
     () => userMetaName || deriveDisplayNameFromEmail(userEmail) || "Signed in",
     [userMetaName, userEmail]
   );
-  const userDisplayEmail = userEmail.trim();
-  const userDisplayInitials = useMemo(
-    () => userInitialsFor(userMetaName, userEmail),
-    [userMetaName, userEmail]
-  );
   const chipSubtitle = useMemo(() => {
     const roleTitle = (userJobTitle || userDepartment || userRole || "").trim();
-    if (roleTitle) return roleTitle.replace(/_/g, " ");
-    if (userDisplayEmail && userDisplayEmail.toLowerCase() !== userDisplayName.toLowerCase()) {
-      return userDisplayEmail;
-    }
-    return "";
-  }, [userDepartment, userDisplayEmail, userDisplayName, userJobTitle, userRole]);
+    return roleTitle ? roleTitle.replace(/_/g, " ") : userEmail.trim();
+  }, [userDepartment, userEmail, userJobTitle, userRole]);
 
-  const gradedSections = useMemo(
-    () => sections.filter((s) => s.gradingEnabled && s.letterGrade),
-    [sections]
-  );
-
-  const failingSections = useMemo(
-    () => gradedSections.filter((s) => s.letterGrade === "C" || s.letterGrade === "D" || s.letterGrade === "F"),
-    [gradedSections]
-  );
+  const rows = scorecard?.rows ?? [];
+  const weekOptions = scorecard?.weekOptions ?? [];
 
   const menuItems: EliteosTopbarMenuItem[] = [
     {
@@ -384,8 +379,8 @@ export default function HrApp() {
     },
     {
       label: "Refresh",
-      meta: "Reload grades",
-      onClick: () => void loadDashboard(),
+      meta: "Reload scorecard",
+      onClick: () => void loadScorecard(),
       disabled: busy,
       icon: (
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
@@ -396,14 +391,6 @@ export default function HrApp() {
     }
   ];
 
-  const tabs: { id: TabId; label: string }[] = [
-    { id: "dashboard", label: "Weekly grades" },
-    { id: "log", label: "Log incident" },
-    { id: "history", label: "History" }
-  ];
-
-  const selectedSection = sections.find((s) => s.sectionId === selectedSectionId) ?? null;
-
   return (
     <div className="shell">
       {sessionToken ? (
@@ -413,19 +400,14 @@ export default function HrApp() {
           logoSrc={EOS_LOGO_URL}
           homeHref="/"
           userName={userDisplayName}
-          userEmail={userDisplayEmail}
+          userEmail={userEmail.trim()}
           userSubtitle={chipSubtitle}
-          initials={userDisplayInitials}
+          initials={userInitialsFor(userMetaName, userEmail)}
           menuItems={menuItems}
           onSignOut={() => void signOut()}
         />
       ) : (
-        <EliteosTopbar
-          appName="HR"
-          organizationName={DEFAULT_WORKSPACE_NAME}
-          logoSrc={EOS_LOGO_URL}
-          homeHref="/"
-        />
+        <EliteosTopbar appName="HR" organizationName={DEFAULT_WORKSPACE_NAME} logoSrc={EOS_LOGO_URL} homeHref="/" />
       )}
 
       <main className="main" role="main">
@@ -433,20 +415,13 @@ export default function HrApp() {
           <div className="auth-panel auth-panel-standalone">
             <div className="auth-panel-header">
               <p className="auth-panel-eyebrow">eliteOS · HR Head</p>
-              <h1 className="auth-panel-title">Operational quality grading</h1>
-              <p className="auth-panel-sub">
-                Sign in with your eliteOS account. Grade operational sections weekly — not individual people.
-              </p>
+              <h1 className="auth-panel-title">Weekly Operations Scorecard</h1>
+              <p className="auth-panel-sub">Sign in to grade operational sections and generate weekly reports.</p>
             </div>
             <div className="field-grid">
               <label className="field">
                 Email
-                <input
-                  type="email"
-                  autoComplete="username"
-                  value={authEmail}
-                  onChange={(e) => setAuthEmail(e.target.value)}
-                />
+                <input type="email" autoComplete="username" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} />
               </label>
               <label className="field">
                 Password
@@ -468,274 +443,215 @@ export default function HrApp() {
           </div>
         ) : (
           <>
-            <section className="hr-hero">
-              <div className="hr-hero-aurora" aria-hidden />
-              <div className="hr-hero-grid hr-hero-grid--single">
-                <div>
-                  <p className="hero-eyebrow">Internal tool · HR Head</p>
-                  <h1 className="hero-title">Operational section grading</h1>
-                  <p className="hero-sub">
-                    Weekly letter grades by operational area — shop remakes, lead times, partner QC, and more.
-                    Log incidents by section; grades update immediately for count-based metrics.
-                  </p>
-                  {dashboard?.weekLabel ? (
-                    <p className="hr-week-label">
-                      Current week: <strong>{dashboard.weekLabel}</strong>
-                    </p>
-                  ) : null}
-                </div>
+            <section className="hr-scorecard-hero">
+              <div>
+                <p className="hero-eyebrow">HR Head · Operations</p>
+                <h1 className="hero-title">Weekly Operations Scorecard</h1>
+                <p className="hero-sub">Log section mistakes, update weekly metrics, and freeze the end-of-week report.</p>
               </div>
-            </section>
-
-            {dashboard?.warning ? <EosAlertBanner tone="warn">{dashboard.warning}</EosAlertBanner> : null}
-            {err ? <div className="banner banner-error">{err}</div> : null}
-
-            <nav className="hr-tabs" aria-label="HR sections">
-              {tabs.map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  className={`hr-tab${tab === t.id ? " hr-tab--active" : ""}`}
-                  onClick={() => setTab(t.id)}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </nav>
-
-            {tab === "dashboard" ? (
-              <>
-                <EosMetricGrid className="hr-summary-grid">
-                  <EosMetricCard
-                    label="Graded sections"
-                    value={String(gradedSections.length)}
-                    sub={`${sections.length} total operational areas`}
-                  />
-                  <EosMetricCard
-                    label="Below target"
-                    value={String(failingSections.length)}
-                    sub="C, D, or F this week"
-                    accent={failingSections.length > 0 ? "warn" : "default"}
-                  />
-                  <EosMetricCard label="Week resets" value="Mon" sub="New week starts each Monday" />
-                </EosMetricGrid>
-
-                <EosSectionCard className="hr-panel">
-                  <EosPanelHead
-                    title="Weekly section grades"
-                    subtitle="Live running score — log incidents by section to update count-based grades"
-                    status={busy ? "Loading…" : "Live"}
-                    statusTone="info"
-                  />
-                  <div className="hr-grade-table-wrap">
-                    <table className="hr-grade-table hr-grade-table--sections">
-                      <thead>
-                        <tr>
-                          <th>Section</th>
-                          <th>Actual</th>
-                          <th>Goal</th>
-                          <th>Grade</th>
-                          <th>Trend</th>
-                          <th />
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {sections.map((row) => (
-                          <tr
-                            key={row.sectionId}
-                            className={selectedSectionId === row.sectionId ? "is-selected" : ""}
-                          >
-                            <td>
-                              <div className="hr-employee-cell">
-                                <strong>{row.name}</strong>
-                                <span>{row.metricKind === "count" ? "Incident count" : row.metricKind}</span>
-                              </div>
-                            </td>
-                            <td>{row.actualDisplay}</td>
-                            <td>{row.goalDisplay}</td>
-                            <td>
-                              {row.letterGrade ? (
-                                <span className={`hr-grade-chip hr-grade-chip--${row.letterGrade.toLowerCase()}`}>
-                                  {row.letterGrade}
-                                </span>
-                              ) : (
-                                <span className="hr-grade-chip hr-grade-chip--neutral">—</span>
-                              )}
-                            </td>
-                            <td>
-                              {row.letterGrade ? (
-                                <EosStatusPill
-                                  tone={
-                                    row.trend === "up" ? "success" : row.trend === "down" ? "warn" : "neutral"
-                                  }
-                                >
-                                  {trendLabel(row.trend)}
-                                </EosStatusPill>
-                              ) : (
-                                <EosStatusPill tone="neutral">No grade</EosStatusPill>
-                              )}
-                            </td>
-                            <td>
-                              <button
-                                type="button"
-                                className="btn btn-secondary btn-sm"
-                                onClick={() =>
-                                  setSelectedSectionId(
-                                    selectedSectionId === row.sectionId ? null : row.sectionId
-                                  )
-                                }
-                              >
-                                {selectedSectionId === row.sectionId ? "Hide" : "Details"}
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  {selectedSection ? (
-                    <div className="hr-detail-panel">
-                      <EosPanelHead title={selectedSection.name} subtitle="This week's activity" />
-                      {sectionNeedsManualValue(selectedSection.metricKind) ? (
-                        <div className="hr-value-entry">
-                          <label className="field">
-                            Update weekly value
-                            <input
-                              type="number"
-                              step="any"
-                              value={valueInput}
-                              onChange={(e) => setValueInput(e.target.value)}
-                              placeholder={
-                                selectedSection.metricKind === "currency"
-                                  ? "799198"
-                                  : selectedSection.metricKind === "days"
-                                    ? "15"
-                                    : "8801"
-                              }
-                            />
-                          </label>
-                          <button
-                            type="button"
-                            className="btn btn-primary btn-sm"
-                            disabled={valueBusy || !valueInput.trim()}
-                            onClick={() => void submitSectionValue()}
-                          >
-                            {valueBusy ? "Saving…" : "Save value"}
-                          </button>
-                        </div>
-                      ) : null}
-                      {weekIncidents.length === 0 ? (
-                        <p className="hr-empty">
-                          {selectedSection.metricKind === "count"
-                            ? "No incidents logged this week."
-                            : "No incidents logged. Enter a weekly value above if needed."}
-                        </p>
-                      ) : (
-                        <ul className="hr-mistake-list">
-                          {weekIncidents.map((m) => (
-                            <li key={m.id}>
-                              <div className="hr-mistake-head">
-                                <EosStatusPill tone={gradePillTone("C")}>Incident</EosStatusPill>
-                                <time dateTime={m.occurred_at}>{formatDateTime(m.occurred_at)}</time>
-                              </div>
-                              {m.description ? <p className="hr-mistake-desc">{m.description}</p> : null}
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                  ) : null}
-                </EosSectionCard>
-              </>
-            ) : null}
-
-            {tab === "log" ? (
-              <EosSectionCard className="hr-panel">
-                <EosPanelHead
-                  title="Log an incident"
-                  subtitle="Select the operational section — no employee selection required"
-                />
-                {logSuccess ? <EosAlertBanner tone="success">{logSuccess}</EosAlertBanner> : null}
-                <div className="field-grid hr-log-grid">
-                  <label className="field hr-field-full">
-                    Section
-                    <select value={logSectionId} onChange={(e) => setLogSectionId(e.target.value)}>
-                      <option value="">Select section…</option>
-                      {sections.map((s) => (
-                        <option key={s.sectionId} value={s.sectionId}>
-                          {s.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="field hr-field-full">
-                    Notes
-                    <textarea
-                      rows={3}
-                      value={logDescription}
-                      onChange={(e) => setLogDescription(e.target.value)}
-                      placeholder="Optional details about the incident"
-                    />
-                  </label>
-                </div>
-                <div className="hr-action-row">
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    disabled={logBusy || !logSectionId}
-                    onClick={() => void submitIncident()}
+              <div className="hr-scorecard-controls">
+                <label className="field">
+                  Week
+                  <select
+                    value={selectedWeekStart}
+                    onChange={(e) => setSelectedWeekStart(e.target.value)}
+                    disabled={busy}
                   >
-                    {logBusy ? "Saving…" : "Log incident"}
-                  </button>
-                </div>
-              </EosSectionCard>
-            ) : null}
-
-            {tab === "history" ? (
-              <EosSectionCard className="hr-panel">
-                <EosPanelHead
-                  title="Section history"
-                  subtitle="Frozen weekly snapshots after each Monday reset"
-                />
-                <label className="field hr-history-select">
-                  Section
-                  <select value={historySectionId} onChange={(e) => setHistorySectionId(e.target.value)}>
-                    {sections.map((s) => (
-                      <option key={s.sectionId} value={s.sectionId}>
-                        {s.name}
+                    {weekOptions.map((w) => (
+                      <option key={w.weekStart} value={w.weekStart}>
+                        {w.weekLabel}
                       </option>
                     ))}
                   </select>
                 </label>
-                {snapshots.length === 0 ? (
-                  <p className="hr-empty">No closed weeks yet. Snapshots appear after each Monday reset.</p>
-                ) : (
-                  <div className="hr-history-grid">
-                    {snapshots.map((s) => (
-                      <div key={s.week_start} className="hr-history-card">
-                        <div className="hr-history-week">{s.weekLabel ?? s.week_start}</div>
-                        {s.letter_grade ? (
-                          <div
-                            className={`hr-grade-badge hr-grade-badge--sm hr-grade-badge--${s.letter_grade.toLowerCase()}`}
-                          >
-                            {s.letter_grade}
-                          </div>
-                        ) : (
-                          <div className="hr-grade-badge hr-grade-badge--sm hr-grade-badge--neutral">—</div>
-                        )}
-                        <div className="hr-history-meta">
-                          {s.actual_display ?? s.incident_count} · goal {s.goal_display}
-                        </div>
-                      </div>
-                    ))}
+                {scorecard?.overallGrade ? (
+                  <div className="hr-overall-grade">
+                    <span>Overall company grade</span>
+                    <strong className={`hr-grade-badge hr-grade-badge--sm hr-grade-badge--${scorecard.overallGrade.toLowerCase()}`}>
+                      {scorecard.overallGrade}
+                    </strong>
                   </div>
-                )}
-              </EosSectionCard>
+                ) : null}
+              </div>
+            </section>
+
+            {scorecard?.warning ? <EosAlertBanner tone="warn">{scorecard.warning}</EosAlertBanner> : null}
+            {err ? <div className="banner banner-error">{err}</div> : null}
+            {success ? <EosAlertBanner tone="success">{success}</EosAlertBanner> : null}
+
+            <div className="hr-scorecard-actions">
+              <button type="button" className="btn btn-primary" disabled={reportBusy || busy} onClick={() => void generateReport()}>
+                {reportBusy ? "Generating…" : "Generate Weekly Report"}
+              </button>
+              {reportText ? (
+                <>
+                  <button type="button" className="btn btn-secondary" onClick={() => void copyReport()}>
+                    Copy Report
+                  </button>
+                  <button type="button" className="btn btn-secondary" onClick={() => window.print()}>
+                    Print
+                  </button>
+                </>
+              ) : null}
+            </div>
+
+            {reportText ? (
+              <section className="hr-report-panel">
+                <h2 className="hr-report-title">Weekly report</h2>
+                <pre className="hr-report-text">{reportText}</pre>
+              </section>
             ) : null}
+
+            <div className="hr-scorecard-grid">
+              {rows.map((row) => (
+                <article key={row.sectionId} className="hr-section-card">
+                  <header className="hr-section-card-head">
+                    <h2>{row.name}</h2>
+                    {row.letterGrade ? (
+                      <span className={`hr-grade-chip hr-grade-chip--${row.letterGrade.toLowerCase()}`}>{row.letterGrade}</span>
+                    ) : (
+                      <span className="hr-grade-chip hr-grade-chip--neutral">—</span>
+                    )}
+                  </header>
+                  <dl className="hr-section-metrics">
+                    <div>
+                      <dt>Goal</dt>
+                      <dd>{row.goalDisplay}</dd>
+                    </div>
+                    <div>
+                      <dt>Actual</dt>
+                      <dd>{row.actualDisplay}</dd>
+                    </div>
+                  </dl>
+                  {row.recentIncidents?.length ? (
+                    <ul className="hr-section-recent">
+                      {row.recentIncidents.slice(0, 4).map((inc) => (
+                        <li key={inc.id}>
+                          <strong>{formatDateTime(inc.occurredAt)}</strong>
+                          {inc.jobCustomer ? <span> · {inc.jobCustomer}</span> : null}
+                          {inc.description ? <p>{inc.description}</p> : null}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="hr-section-empty">No entries logged this week.</p>
+                  )}
+                  <footer className="hr-section-card-foot">
+                    {isCountSection(row.metricKind) ? (
+                      <button type="button" className="btn btn-primary btn-sm" onClick={() => openMistakeModal(row)}>
+                        + Log Mistake
+                      </button>
+                    ) : (
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => openMetricModal(row)}>
+                        {metricActionLabel(row.metricKind)}
+                      </button>
+                    )}
+                  </footer>
+                </article>
+              ))}
+            </div>
           </>
         )}
       </main>
+
+      {modalKind && activeSection ? (
+        <div className="hr-modal-backdrop" onClick={closeModal} role="presentation">
+          <div className="hr-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+            <header className="hr-modal-head">
+              <h2>{modalKind === "mistake" ? `Log mistake — ${activeSection.name}` : activeSection.name}</h2>
+              <button type="button" className="hr-modal-close" onClick={closeModal} aria-label="Close">
+                ×
+              </button>
+            </header>
+
+            {modalKind === "mistake" ? (
+              <div className="field-grid">
+                <label className="field">
+                  Date
+                  <input type="date" value={mistakeDate} onChange={(e) => setMistakeDate(e.target.value)} />
+                </label>
+                <label className="field">
+                  Job / customer
+                  <input value={mistakeJob} onChange={(e) => setMistakeJob(e.target.value)} placeholder="Optional" />
+                </label>
+                <label className="field hr-field-full">
+                  Description
+                  <textarea rows={3} value={mistakeDescription} onChange={(e) => setMistakeDescription(e.target.value)} />
+                </label>
+                <label className="field">
+                  Severity
+                  <select value={mistakeSeverity} onChange={(e) => setMistakeSeverity(e.target.value)}>
+                    <option value="minor">Minor</option>
+                    <option value="moderate">Moderate</option>
+                    <option value="major">Major</option>
+                  </select>
+                </label>
+                <label className="field">
+                  Person involved
+                  <input value={mistakePerson} onChange={(e) => setMistakePerson(e.target.value)} placeholder="Optional" />
+                </label>
+                <label className="field hr-field-full">
+                  Notes
+                  <textarea rows={2} value={mistakeNotes} onChange={(e) => setMistakeNotes(e.target.value)} placeholder="Optional" />
+                </label>
+              </div>
+            ) : (
+              <div className="field-grid">
+                {activeSection.metricKind === "days" ? (
+                  <>
+                    <label className="field">
+                      Median days
+                      <input type="number" step="0.1" value={metricMedian} onChange={(e) => setMetricMedian(e.target.value)} />
+                    </label>
+                    <label className="field">
+                      Average days
+                      <input type="number" step="0.1" value={metricAverage} onChange={(e) => setMetricAverage(e.target.value)} />
+                    </label>
+                  </>
+                ) : null}
+                {activeSection.metricKind === "currency" ? (
+                  <label className="field hr-field-full">
+                    Weekly quoting value (USD)
+                    <input type="number" step="0.01" value={metricCurrency} onChange={(e) => setMetricCurrency(e.target.value)} />
+                  </label>
+                ) : null}
+                {activeSection.metricKind === "production" ? (
+                  <>
+                    <label className="field">
+                      Weekly sqft
+                      <input type="number" value={metricWeeklySf} onChange={(e) => setMetricWeeklySf(e.target.value)} />
+                    </label>
+                    <label className="field">
+                      Daily sqft
+                      <input type="number" value={metricDailySf} onChange={(e) => setMetricDailySf(e.target.value)} placeholder="Optional" />
+                    </label>
+                  </>
+                ) : null}
+                {activeSection.metricKind === "hours" ? (
+                  <label className="field">
+                    Downtime hours
+                    <input type="number" step="0.1" value={metricHours} onChange={(e) => setMetricHours(e.target.value)} />
+                  </label>
+                ) : null}
+              </div>
+            )}
+
+            <footer className="hr-modal-foot">
+              <button type="button" className="btn btn-secondary" onClick={closeModal}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={saveBusy}
+                onClick={() => void (modalKind === "mistake" ? submitMistake() : submitMetric())}
+              >
+                {saveBusy ? "Saving…" : "Save"}
+              </button>
+            </footer>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

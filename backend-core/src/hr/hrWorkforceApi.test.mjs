@@ -42,6 +42,7 @@ assert.ok(routes.has("GET /api/hr/workforce/dashboard"));
 assert.ok(routes.has("GET /api/hr/workforce/sections"));
 assert.ok(routes.has("POST /api/hr/workforce/mistakes"));
 assert.ok(routes.has("POST /api/hr/workforce/sections/:id/value"));
+assert.ok(routes.has("POST /api/hr/workforce/report/generate"));
 assert.ok(routes.has("POST /api/hr/workforce/categories"));
 
 // Dashboard / employees use isWorkforceManager for canManageCategories only — must not throw
