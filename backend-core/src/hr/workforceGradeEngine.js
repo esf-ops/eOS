@@ -13,7 +13,7 @@ export const DEFAULT_GRADE_THRESHOLDS = Object.freeze([
   { grade: "D", maxMistakes: 10 }
 ]);
 
-/** Stricter thresholds for zero-goal incident counts (matches weekly ops grading). */
+/** @deprecated Use computeZeroGoalCountGrade for ops scorecard count sections. */
 export const SECTION_ZERO_GOAL_THRESHOLDS = Object.freeze([
   { grade: "A", maxMistakes: 0 },
   { grade: "B", maxMistakes: 1 },
@@ -21,114 +21,210 @@ export const SECTION_ZERO_GOAL_THRESHOLDS = Object.freeze([
 ]);
 
 /**
+ * Goal-0 count sections: 0=A, 1-2=C, 3+=F
  * @param {number} incidentCount
- * @param {Array<{ grade: string, maxMistakes: number }>} [thresholds]
  */
+export function computeZeroGoalCountGrade(incidentCount) {
+  const count = Math.max(0, Number(incidentCount) || 0);
+  if (count === 0) return "A";
+  if (count <= 2) return "C";
+  return "F";
+}
+
+/** @deprecated */
 export function computeSectionCountGrade(incidentCount, thresholds = SECTION_ZERO_GOAL_THRESHOLDS) {
   return computeLetterGrade(incidentCount, thresholds);
 }
 
 /**
- * Grade days metric where lower is better (goal = max acceptable days).
- * @param {number|null|undefined} actualDays
- * @param {number|null|undefined} goalDays
+ * Template/Install lead times — median days: <=14=A, 15-16=C, 17+=F
+ * @param {number|null|undefined} medianDays
  */
+export function computeLeadTimeMedianGrade(medianDays) {
+  const median = Number(medianDays);
+  if (!Number.isFinite(median)) return null;
+  if (median <= 14) return "A";
+  if (median <= 16) return "C";
+  return "F";
+}
+
+/**
+ * Production weekly SF: >=9250=A, 8750-9249=B, below 8750=F
+ * @param {number|null|undefined} weeklySf
+ */
+export function computeProductionWeeklyGrade(weeklySf) {
+  const weekly = Number(weeklySf);
+  if (!Number.isFinite(weekly)) return null;
+  if (weekly >= 9250) return "A";
+  if (weekly >= 8750) return "B";
+  return "F";
+}
+
+/**
+ * Downtime hours: 0=A, 1-4=C, 5+=F
+ * @param {number|null|undefined} hours
+ */
+export function computeDowntimeHoursGrade(hours) {
+  const h = Number(hours);
+  if (!Number.isFinite(h)) return null;
+  if (h === 0) return "A";
+  if (h <= 4) return "C";
+  return "F";
+}
+
+/** @deprecated */
 export function computeSectionDaysGrade(actualDays, goalDays) {
-  const actual = Number(actualDays);
-  const goal = Number(goalDays);
-  if (!Number.isFinite(actual) || !Number.isFinite(goal)) return null;
-  if (actual <= goal) return "A";
-  if (actual <= goal + 1) return "B";
-  if (actual <= goal + 3) return "C";
-  return "F";
+  return computeLeadTimeMedianGrade(actualDays);
 }
 
-/**
- * Grade production metric where higher is better (goal = weekly SF target).
- * @param {number|null|undefined} actualSf
- * @param {number|null|undefined} goalSf
- */
+/** @deprecated */
 export function computeSectionProductionGrade(actualSf, goalSf) {
-  const actual = Number(actualSf);
-  const goal = Number(goalSf);
-  if (!Number.isFinite(actual) || !Number.isFinite(goal) || goal <= 0) return null;
-  const pct = actual / goal;
-  if (pct >= 1) return "A";
-  if (pct >= 0.95) return "B";
-  if (pct >= 0.85) return "C";
-  return "F";
+  void goalSf;
+  return computeProductionWeeklyGrade(actualSf);
+}
+
+/** @deprecated */
+export function computeSectionHoursGrade(actualHours, goalHours = 0) {
+  void goalHours;
+  return computeDowntimeHoursGrade(actualHours);
 }
 
 /**
- * Grade hours/downtime where lower is better.
- * @param {number|null|undefined} actualHours
- * @param {number|null|undefined} goalHours
+ * @typedef {object} SectionWeekValue
+ * @property {number|null} [actualNumeric]
+ * @property {string|null} [actualDisplay]
+ * @property {Record<string, unknown>} [valuePayload]
  */
-export function computeSectionHoursGrade(actualHours, goalHours = 0) {
-  return computeSectionCountGrade(actualHours, SECTION_ZERO_GOAL_THRESHOLDS);
+
+/**
+ * @param {Record<string, unknown>|null|undefined} raw
+ */
+export function normalizeValuePayload(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  return raw;
 }
 
 /**
  * @param {object} section
  * @param {number} incidentCount
- * @param {{ actualNumeric?: number|null, actualDisplay?: string|null }} [weekValue]
+ * @param {SectionWeekValue} [weekValue]
  */
 export function computeSectionLetterGrade(section, incidentCount, weekValue = {}) {
   if (!section?.gradingEnabled) return null;
 
   const kind = String(section.metricKind ?? "count");
-  const goal = section.goalNumeric;
+  const payload = normalizeValuePayload(weekValue.valuePayload);
 
   if (kind === "count") {
-    return computeSectionCountGrade(incidentCount);
+    return computeZeroGoalCountGrade(incidentCount);
   }
-
-  const actualNumeric = weekValue.actualNumeric;
 
   if (kind === "days") {
-    return computeSectionDaysGrade(actualNumeric, goal);
+    const median = payload.median_days ?? weekValue.actualNumeric;
+    return computeLeadTimeMedianGrade(median);
   }
   if (kind === "production") {
-    return computeSectionProductionGrade(actualNumeric, goal);
+    const weekly = payload.weekly_sf ?? weekValue.actualNumeric;
+    return computeProductionWeeklyGrade(weekly);
   }
   if (kind === "hours") {
-    const hours = actualNumeric != null ? actualNumeric : incidentCount;
-    return computeSectionHoursGrade(hours, goal ?? 0);
+    const hours = payload.hours ?? weekValue.actualNumeric ?? incidentCount;
+    return computeDowntimeHoursGrade(hours);
   }
   if (kind === "currency") {
     return null;
   }
 
-  return computeSectionCountGrade(incidentCount);
+  return computeZeroGoalCountGrade(incidentCount);
+}
+
+function formatNumber(n) {
+  return Number(n).toLocaleString("en-US");
+}
+
+function formatCurrency(n) {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number(n));
 }
 
 /**
  * @param {object} section
  * @param {number} incidentCount
- * @param {{ actualNumeric?: number|null, actualDisplay?: string|null }} [weekValue]
+ * @param {SectionWeekValue} [weekValue]
  */
 export function formatSectionActualDisplay(section, incidentCount, weekValue = {}) {
   if (weekValue.actualDisplay) return String(weekValue.actualDisplay);
 
   const kind = String(section.metricKind ?? "count");
-  const numeric = weekValue.actualNumeric;
+  const payload = normalizeValuePayload(weekValue.valuePayload);
 
-  if (kind === "currency" && numeric != null) {
-    return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(numeric);
+  if (kind === "currency") {
+    const amount = payload.currency ?? weekValue.actualNumeric;
+    if (amount != null) return formatCurrency(amount);
+    return "—";
   }
-  if (kind === "production" && numeric != null) {
-    const daily = Math.round(numeric / 5);
-    return `${numeric.toLocaleString()}sf weekly / ${daily.toLocaleString()}sf daily`;
+
+  if (kind === "days") {
+    const median = payload.median_days;
+    const average = payload.average_days;
+    if (median != null && average != null) {
+      return `${median} days median/${average} days average`;
+    }
+    if (median != null) return `${median} days median`;
+    if (weekValue.actualNumeric != null) return `${weekValue.actualNumeric} days`;
+    return "—";
   }
-  if (kind === "days" && numeric != null) {
-    return `${numeric} days`;
+
+  if (kind === "production") {
+    const weekly = payload.weekly_sf ?? weekValue.actualNumeric;
+    const daily = payload.daily_sf ?? (weekly != null ? Math.round(Number(weekly) / 5) : null);
+    if (weekly != null && daily != null) {
+      return `${formatNumber(weekly)}sf weekly/${formatNumber(daily)}sf daily`;
+    }
+    return "—";
   }
+
   if (kind === "hours") {
-    const hrs = numeric != null ? numeric : incidentCount;
-    return `${hrs}hrs`;
+    const hours = payload.hours ?? weekValue.actualNumeric ?? incidentCount;
+    return `${hours}hrs`;
   }
 
   return String(Math.max(0, incidentCount));
+}
+
+/**
+ * @param {object} section
+ * @param {object} row
+ */
+export function formatScorecardReportLine(section, row) {
+  const name = String(section.name ?? row.name ?? "");
+  const actual = String(row.actualDisplay ?? "—");
+  const goal = String(section.goalDisplay ?? row.goalDisplay ?? "0");
+
+  if (String(section.metricKind ?? row.metricKind) === "currency") {
+    return `${name} = ${actual} *The goal for this number is yet to be finalized.`;
+  }
+
+  const grade = row.letterGrade ?? "—";
+  return `${name} = ${actual} *Goal = ${goal} Grade = ${grade}`;
+}
+
+/**
+ * Compute overall company grade as average of graded section letter scores.
+ * @param {Array<{ letterGrade?: string|null, gradingEnabled?: boolean }>} rows
+ */
+export function computeOverallCompanyGrade(rows) {
+  const order = { A: 4, B: 3, C: 2, D: 1, F: 0 };
+  const graded = (rows ?? []).filter((r) => r.letterGrade && r.gradingEnabled !== false);
+  if (!graded.length) return null;
+
+  const avg =
+    graded.reduce((sum, r) => sum + (order[String(r.letterGrade).toUpperCase()] ?? 0), 0) / graded.length;
+
+  if (avg >= 3.5) return "A";
+  if (avg >= 2.5) return "B";
+  if (avg >= 1.5) return "C";
+  if (avg >= 0.5) return "D";
+  return "F";
 }
 
 export const DEFAULT_SEVERITY_WEIGHTS = Object.freeze({
@@ -182,6 +278,16 @@ export function weekEndForWeekStart(weekStartIso) {
   const d = new Date(`${weekStartIso}T12:00:00`);
   d.setDate(d.getDate() + 6);
   return d.toISOString().slice(0, 10);
+}
+
+/**
+ * @param {string} weekStartIso YYYY-MM-DD
+ * @param {number} [weekStartDay]
+ */
+export function shiftWeekStart(weekStartIso, weekOffset, weekStartDay = DEFAULT_WEEK_START_DAY) {
+  const d = new Date(`${weekStartIso}T12:00:00`);
+  d.setDate(d.getDate() + weekOffset * 7);
+  return weekStartForIsoDate(d.toISOString().slice(0, 10), weekStartDay);
 }
 
 /**
@@ -250,7 +356,6 @@ export function gradeTone(grade) {
     case "B":
       return "info";
     case "C":
-      return "warn";
     case "D":
     case "F":
       return "warn";
@@ -272,4 +377,20 @@ export function gradeTrend(current, prior) {
   if (c > p) return "up";
   if (c < p) return "down";
   return "flat";
+}
+
+/**
+ * @param {string|null|undefined} weekStart
+ * @param {string} timezone
+ * @param {number} weekStartDay
+ */
+export function listRecentWeekStarts(weekStart, timezone, weekStartDay, count = 8) {
+  const base =
+    weekStart ||
+    weekStartForIsoDate(todayIsoInTimezone(new Date(), timezone), weekStartDay);
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    out.push(shiftWeekStart(base, -i, weekStartDay));
+  }
+  return out;
 }

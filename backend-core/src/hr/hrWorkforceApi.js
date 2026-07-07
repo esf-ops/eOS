@@ -20,12 +20,21 @@ import {
   formatWeekLabel,
   gradeTrend,
   isWorkforceManager,
+  listRecentWeekStarts,
   sumWeightedMistakes,
   todayIsoInTimezone,
   weekEndForWeekStart,
   weekStartForIsoDate
 } from "./workforceGradeEngine.js";
 import { ensureDefaultGradingSections, mapSectionRow } from "./workforceGradingSections.js";
+import {
+  buildMetricValueFromBody,
+  buildScorecardReportText,
+  buildScorecardRows,
+  mapWeekValueRow,
+  scorecardWeekMeta,
+  upsertWeekSnapshots
+} from "./workforceScorecard.js";
 import { parseWorkforceEmployeeKey } from "./workforceRoster.js";
 import {
   ensureTestRosterMembers,
@@ -193,27 +202,122 @@ async function loadGradingSections(db, organizationId) {
  */
 async function loadSectionWeekValues(db, organizationId, weekStart) {
   try {
-    const { data, error } = await db
+    let res = await db
       .from("workforce_section_week_values")
-      .select("section_id, actual_numeric, actual_display")
+      .select("section_id, actual_numeric, actual_display, value_payload")
       .eq("organization_id", organizationId)
       .eq("week_start", weekStart);
-    if (error) {
-      if (isMissingTableError(error)) return new Map();
-      throw error;
+    if (res.error) {
+      const msg = String(res.error.message ?? "").toLowerCase();
+      if (msg.includes("value_payload")) {
+        res = await db
+          .from("workforce_section_week_values")
+          .select("section_id, actual_numeric, actual_display")
+          .eq("organization_id", organizationId)
+          .eq("week_start", weekStart);
+      }
+    }
+    if (res.error) {
+      if (isMissingTableError(res.error)) return new Map();
+      throw res.error;
     }
     const map = new Map();
-    for (const row of data ?? []) {
-      map.set(String(row.section_id), {
-        actualNumeric: row.actual_numeric != null ? Number(row.actual_numeric) : null,
-        actualDisplay: row.actual_display ?? null
-      });
+    for (const row of res.data ?? []) {
+      map.set(String(row.section_id), mapWeekValueRow(row));
     }
     return map;
   } catch (e) {
     if (isMissingTableError(e)) return new Map();
     throw e;
   }
+}
+
+/**
+ * @param {import("express").Request} req
+ * @param {object} settings
+ */
+function resolveRequestedWeekStart(req, settings) {
+  const tz = settings.timezone;
+  const weekStartDay = settings.week_start_day;
+  const param = pickStr(req.query?.week_start ?? req.query?.weekStart ?? req.body?.week_start ?? req.body?.weekStart);
+  if (param) return weekStartForIsoDate(param, weekStartDay);
+  return weekStartForIsoDate(todayIsoInTimezone(new Date(), tz), weekStartDay);
+}
+
+/**
+ * @param {import("@supabase/supabase-js").SupabaseClient} db
+ * @param {string} organizationId
+ * @param {string} weekStart
+ * @param {object} settings
+ */
+async function loadScorecardPayload(db, organizationId, weekStart, settings) {
+  const sections = await loadGradingSections(db, organizationId);
+  if (!sections.length) {
+    return { sections, rows: [], overallGrade: null, mistakes: [], weekValues: new Map() };
+  }
+
+  const fullSelect =
+    "id, section_id, severity, category_label, occurred_at, description, job_customer, person_involved";
+  const basicSelect = "id, section_id, severity, category_label, occurred_at, description";
+
+  let mistakeData = [];
+  let mistakeRes = await db
+    .from("workforce_mistakes")
+    .select(fullSelect)
+    .eq("organization_id", organizationId)
+    .eq("week_start", weekStart)
+    .not("section_id", "is", null)
+    .order("occurred_at", { ascending: false });
+
+  if (mistakeRes.error) {
+    const msg = String(mistakeRes.error.message ?? "").toLowerCase();
+    if (msg.includes("job_customer") || msg.includes("person_involved")) {
+      mistakeRes = await db
+        .from("workforce_mistakes")
+        .select(basicSelect)
+        .eq("organization_id", organizationId)
+        .eq("week_start", weekStart)
+        .not("section_id", "is", null)
+        .order("occurred_at", { ascending: false });
+    }
+  }
+
+  if (mistakeRes.error && !isMissingTableError(mistakeRes.error)) throw mistakeRes.error;
+  mistakeData = mistakeRes.error ? [] : mistakeRes.data ?? [];
+
+  const weekValues = await loadSectionWeekValues(db, organizationId, weekStart);
+
+  const priorWeekStart = (() => {
+    const d = new Date(`${weekStart}T12:00:00`);
+    d.setDate(d.getDate() - 7);
+    return weekStartForIsoDate(d.toISOString().slice(0, 10), settings.week_start_day);
+  })();
+
+  const { data: priorSnapshots } = await db
+    .from("workforce_section_week_snapshots")
+    .select("section_id, letter_grade")
+    .eq("organization_id", organizationId)
+    .eq("week_start", priorWeekStart);
+
+  const priorGrades = new Map();
+  for (const s of priorSnapshots ?? []) {
+    priorGrades.set(String(s.section_id), s.letter_grade);
+  }
+
+  const { rows, overallGrade } = buildScorecardRows(
+    sections,
+    mistakeData,
+    weekValues,
+    priorGrades
+  );
+
+  return {
+    sections,
+    rows,
+    overallGrade,
+    mistakes: mistakeData,
+    weekValues
+  };
 }
 
 /**
@@ -241,7 +345,7 @@ async function closePastSectionSnapshots(db, organizationId, settings) {
         .not("section_id", "is", null),
       db
         .from("workforce_section_week_values")
-        .select("section_id, week_start, actual_numeric, actual_display")
+        .select("section_id, week_start, actual_numeric, actual_display, value_payload")
         .eq("organization_id", organizationId)
         .lt("week_start", currentWeekStart)
     ]);
@@ -288,10 +392,7 @@ async function closePastSectionSnapshots(db, organizationId, settings) {
     const incidentCount = countByKey.get(key) ?? 0;
     const rawValue = valueByKey.get(key);
     const weekValue = rawValue
-      ? {
-          actualNumeric: rawValue.actual_numeric != null ? Number(rawValue.actual_numeric) : null,
-          actualDisplay: rawValue.actual_display ?? null
-        }
+      ? mapWeekValueRow(rawValue)
       : {};
     const letterGrade = computeSectionLetterGrade(section, incidentCount, weekValue);
     const actualDisplay = formatSectionActualDisplay(section, incidentCount, weekValue);
@@ -416,70 +517,27 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
       const sectionSeed = await ensureDefaultGradingSections(db(), organizationId, isMissingTableError);
       await closePastSectionSnapshots(db(), organizationId, settings);
 
-      const tz = settings.timezone;
-      const weekStartDay = settings.week_start_day;
-      const currentWeekStart = weekStartForIsoDate(todayIsoInTimezone(new Date(), tz), weekStartDay);
-      const currentWeekEnd = weekEndForWeekStart(currentWeekStart);
+      const weekStart = resolveRequestedWeekStart(req, settings);
+      const { weekEnd, weekLabel } = scorecardWeekMeta(weekStart);
+      const weekOptions = listRecentWeekStarts(weekStart, settings.timezone, settings.week_start_day, 8).map(
+        (ws) => scorecardWeekMeta(ws)
+      );
 
-      const sections = await loadGradingSections(db(), organizationId);
-      if (!sections.length) {
-        return res.json({
-          ok: true,
-          canManageCategories,
-          gradingMode: "sections",
-          weekStart: currentWeekStart,
-          weekEnd: currentWeekEnd,
-          weekLabel: formatWeekLabel(currentWeekStart, currentWeekEnd),
-          rows: [],
-          schemaReady: sectionSeed.schemaReady,
-          warning: sectionSeed.schemaReady
-            ? null
-            : "Apply eliteos_workforce_quality_sections_v1.sql to enable section grading."
-        });
-      }
-
-      let currentMistakes = [];
+      let payload;
       try {
-        const { data, error } = await db()
-          .from("workforce_mistakes")
-          .select("id, section_id, severity, category_label, occurred_at, description")
-          .eq("organization_id", organizationId)
-          .eq("week_start", currentWeekStart)
-          .not("section_id", "is", null);
-        if (error) {
-          if (isMissingTableError(error)) {
-            return res.json({
-              ok: true,
-              canManageCategories,
-              gradingMode: "sections",
-              weekStart: currentWeekStart,
-              weekEnd: currentWeekEnd,
-              weekLabel: formatWeekLabel(currentWeekStart, currentWeekEnd),
-              rows: sections.map((s) => ({
-                ...s,
-                incidentCount: 0,
-                actualDisplay: formatSectionActualDisplay(s, 0),
-                letterGrade: s.gradingEnabled ? computeSectionLetterGrade(s, 0) : null,
-                priorLetterGrade: null,
-                trend: "neutral"
-              })),
-              schemaReady: false,
-              warning: "Apply workforce quality SQL migrations to persist section incidents."
-            });
-          }
-          throw error;
-        }
-        currentMistakes = data ?? [];
+        payload = await loadScorecardPayload(db(), organizationId, weekStart, settings);
       } catch (e) {
         if (isMissingTableError(e)) {
           return res.json({
             ok: true,
             canManageCategories,
-            gradingMode: "sections",
-            weekStart: currentWeekStart,
-            weekEnd: currentWeekEnd,
-            weekLabel: formatWeekLabel(currentWeekStart, currentWeekEnd),
+            gradingMode: "scorecard",
+            weekStart,
+            weekEnd,
+            weekLabel,
+            weekOptions,
             rows: [],
+            overallGrade: null,
             schemaReady: false,
             warning: "Apply workforce quality SQL migrations to enable section grading."
           });
@@ -487,72 +545,35 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
         throw e;
       }
 
-      const weekValues = await loadSectionWeekValues(db(), organizationId, currentWeekStart);
-
-      /** @type {Map<string, object[]>} */
-      const incidentsBySection = new Map();
-      for (const m of currentMistakes) {
-        const sid = String(m.section_id);
-        if (!incidentsBySection.has(sid)) incidentsBySection.set(sid, []);
-        incidentsBySection.get(sid).push(m);
+      if (!payload.sections.length) {
+        return res.json({
+          ok: true,
+          canManageCategories,
+          gradingMode: "scorecard",
+          weekStart,
+          weekEnd,
+          weekLabel,
+          weekOptions,
+          rows: [],
+          overallGrade: null,
+          schemaReady: sectionSeed.schemaReady,
+          warning: sectionSeed.schemaReady
+            ? null
+            : "Apply eliteos_workforce_quality_sections_v1.sql to enable section grading."
+        });
       }
-
-      const priorWeekStart = weekStartForIsoDate(
-        (() => {
-          const d = new Date(`${currentWeekStart}T12:00:00`);
-          d.setDate(d.getDate() - 7);
-          return d.toISOString().slice(0, 10);
-        })(),
-        weekStartDay
-      );
-
-      let priorSnapshots = [];
-      const { data: snapData, error: snapErr } = await db()
-        .from("workforce_section_week_snapshots")
-        .select("section_id, letter_grade")
-        .eq("organization_id", organizationId)
-        .eq("week_start", priorWeekStart);
-      if (!snapErr) priorSnapshots = snapData ?? [];
-
-      const priorBySection = new Map();
-      for (const s of priorSnapshots) {
-        priorBySection.set(String(s.section_id), s.letter_grade);
-      }
-
-      const rows = sections.map((section) => {
-        const incidents = incidentsBySection.get(section.sectionId) ?? [];
-        const incidentCount = incidents.length;
-        const weekValue = weekValues.get(section.sectionId) ?? {};
-        const letterGrade = computeSectionLetterGrade(section, incidentCount, weekValue);
-        const priorGrade = priorBySection.get(section.sectionId) ?? null;
-        return {
-          ...section,
-          incidentCount,
-          actualDisplay: formatSectionActualDisplay(section, incidentCount, weekValue),
-          letterGrade,
-          priorLetterGrade: priorGrade,
-          trend: letterGrade ? gradeTrend(letterGrade, priorGrade) : "neutral",
-          recentIncidents: incidents.slice(0, 5)
-        };
-      });
-
-      rows.sort((a, b) => {
-        const gradeOrder = { F: 0, D: 1, C: 2, B: 3, A: 4 };
-        const ga = a.letterGrade ? (gradeOrder[a.letterGrade] ?? -1) : 99;
-        const gb = b.letterGrade ? (gradeOrder[b.letterGrade] ?? -1) : 99;
-        if (ga !== gb) return ga - gb;
-        return (b.incidentCount ?? 0) - (a.incidentCount ?? 0);
-      });
 
       res.json({
         ok: true,
         canManageCategories,
-        gradingMode: "sections",
+        gradingMode: "scorecard",
         schemaReady: sectionSeed.schemaReady,
-        weekStart: currentWeekStart,
-        weekEnd: currentWeekEnd,
-        weekLabel: formatWeekLabel(currentWeekStart, currentWeekEnd),
-        rows
+        weekStart,
+        weekEnd,
+        weekLabel,
+        weekOptions,
+        overallGrade: payload.overallGrade,
+        rows: payload.rows
       });
     } catch (e) {
       respondServerError(res, e, HR_CLIENT_ERRORS.load);
@@ -577,7 +598,7 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
       let q = db()
         .from("workforce_mistakes")
         .select(
-          "id, section_id, logged_by_user_id, category_id, category_label, severity, description, occurred_at, week_start, created_at"
+          "id, section_id, logged_by_user_id, category_id, category_label, severity, description, job_customer, person_involved, occurred_at, week_start, created_at"
         )
         .eq("organization_id", organizationId)
         .eq("week_start", weekStart)
@@ -612,11 +633,22 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
 
       const body = req.body ?? {};
       const sectionId = pickStr(body.section_id ?? body.sectionId);
-      const description = pickStr(body.description) || null;
+      const severity = pickStr(body.severity) || "minor";
+      const jobCustomer = pickStr(body.job_customer ?? body.jobCustomer) || null;
+      const personInvolved = pickStr(body.person_involved ?? body.personInvolved) || null;
+      const notes = pickStr(body.notes) || null;
+      let description = pickStr(body.description) || null;
       const occurredAtRaw = pickStr(body.occurred_at ?? body.occurredAt);
+      const employeeRef = parseEmployeeRefFromBody(body);
 
       if (!sectionId) {
         return res.status(400).json({ ok: false, error: "section_id is required." });
+      }
+      if (!["minor", "moderate", "major"].includes(severity)) {
+        return res.status(400).json({ ok: false, error: "severity must be minor, moderate, or major." });
+      }
+      if (notes) {
+        description = description ? `${description}\n\nNotes: ${notes}` : `Notes: ${notes}`;
       }
 
       const settings = await loadGradeSettings(db(), organizationId);
@@ -657,13 +689,29 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
         logged_by_user_id: String(user.id),
         category_id: null,
         category_label: section.name,
-        severity: "minor",
+        severity,
+        job_customer: jobCustomer,
+        person_involved: personInvolved,
         description,
         occurred_at: occurredAt.toISOString(),
         week_start: weekStart
       };
 
-      const { data, error } = await db().from("workforce_mistakes").insert(row).select("*").single();
+      if (employeeRef) {
+        const cols = workforceRefToDbColumns(employeeRef);
+        Object.assign(row, cols);
+      }
+
+      let insertResult = await db().from("workforce_mistakes").insert(row).select("*").single();
+      if (insertResult.error) {
+        const msg = String(insertResult.error.message ?? "").toLowerCase();
+        if (msg.includes("job_customer") || msg.includes("person_involved")) {
+          delete row.job_customer;
+          delete row.person_involved;
+          insertResult = await db().from("workforce_mistakes").insert(row).select("*").single();
+        }
+      }
+      const { data, error } = insertResult;
       if (error) {
         if (isMissingTableError(error)) {
           return res.status(503).json({
@@ -760,8 +808,6 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
 
       const sectionId = pickStr(req.params?.id);
       const body = req.body ?? {};
-      const actualNumericRaw = body.actual_numeric ?? body.actualNumeric;
-      const actualDisplay = pickStr(body.actual_display ?? body.actualDisplay) || null;
       const weekStartParam = pickStr(body.week_start ?? body.weekStart);
 
       if (!sectionId) {
@@ -776,42 +822,44 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
 
       const { data: section, error: sectionErr } = await db()
         .from("workforce_grading_sections")
-        .select("id, name, metric_kind, goal_numeric, goal_display, grading_enabled, unit_label")
+        .select("id, name, metric_kind, goal_numeric, goal_display, grading_enabled, unit_label, sort_order")
         .eq("organization_id", organizationId)
         .eq("id", sectionId)
         .maybeSingle();
       if (sectionErr) throw sectionErr;
       if (!section) return res.status(404).json({ ok: false, error: "Section not found." });
 
-      const actualNumeric =
-        actualNumericRaw != null && actualNumericRaw !== "" ? Number(actualNumericRaw) : null;
-      if (actualNumericRaw != null && actualNumericRaw !== "" && !Number.isFinite(actualNumeric)) {
-        return res.status(400).json({ ok: false, error: "actual_numeric must be a number." });
-      }
-
       const mapped = mapSectionRow(section);
-      const display =
-        actualDisplay ||
-        formatSectionActualDisplay(mapped, 0, {
-          actualNumeric,
-          actualDisplay: null
-        });
+      const { payload, actualNumeric, actualDisplay } = buildMetricValueFromBody(mapped, body);
 
       const row = {
         organization_id: organizationId,
         section_id: sectionId,
         week_start: weekStart,
         actual_numeric: actualNumeric,
-        actual_display: display,
+        actual_display: actualDisplay,
+        value_payload: payload,
         logged_by_user_id: String(user.id),
         updated_at: new Date().toISOString()
       };
 
-      const { data, error } = await db()
+      let upsertResult = await db()
         .from("workforce_section_week_values")
         .upsert(row, { onConflict: "organization_id,section_id,week_start" })
         .select("*")
         .single();
+      if (upsertResult.error) {
+        const msg = String(upsertResult.error.message ?? "").toLowerCase();
+        if (msg.includes("value_payload")) {
+          delete row.value_payload;
+          upsertResult = await db()
+            .from("workforce_section_week_values")
+            .upsert(row, { onConflict: "organization_id,section_id,week_start" })
+            .select("*")
+            .single();
+        }
+      }
+      const { data, error } = upsertResult;
       if (error) {
         if (isMissingTableError(error)) {
           return res.status(503).json({
@@ -823,6 +871,56 @@ export function attachHrWorkforceRoutes(app, { requireAuth, requireHeadAccess, g
       }
 
       res.json({ ok: true, value: data });
+    } catch (e) {
+      respondServerError(res, e, HR_CLIENT_ERRORS.save);
+    }
+  });
+
+  app.post("/api/hr/workforce/report/generate", ...guard, jsonParser, async (req, res) => {
+    try {
+      jsonNoStore(res);
+      const user = req.user;
+      const organizationId = await orgId(req);
+      if (!organizationId) return res.status(400).json({ ok: false, error: "Organization context required." });
+
+      const settings = await loadGradeSettings(db(), organizationId);
+      await ensureDefaultGradingSections(db(), organizationId, isMissingTableError);
+      const weekStart = resolveRequestedWeekStart(req, settings);
+      const { weekEnd, weekLabel } = scorecardWeekMeta(weekStart);
+
+      const payload = await loadScorecardPayload(db(), organizationId, weekStart, settings);
+      if (!payload.rows.length) {
+        return res.status(400).json({ ok: false, error: "No grading sections configured for this organization." });
+      }
+
+      await upsertWeekSnapshots(db(), organizationId, weekStart, payload.rows);
+      const reportText = buildScorecardReportText(payload.rows);
+
+      await logAction({
+        user,
+        head: HR_HEAD_SLUG,
+        actionType: "workforce_weekly_report_generated",
+        entityType: "workforce_section_week_snapshots",
+        entityId: weekStart,
+        entityLabel: weekLabel,
+        metadata: {
+          week_start: weekStart,
+          overall_grade: payload.overallGrade,
+          section_count: payload.rows.length
+        },
+        req
+      });
+
+      res.json({
+        ok: true,
+        frozen: true,
+        weekStart,
+        weekEnd,
+        weekLabel,
+        overallGrade: payload.overallGrade,
+        reportText,
+        rows: payload.rows
+      });
     } catch (e) {
       respondServerError(res, e, HR_CLIENT_ERRORS.save);
     }
