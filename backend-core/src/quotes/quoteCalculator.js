@@ -87,14 +87,16 @@ export const PROTOTYPE_VANITY_TIER_THRESHOLD_SQFT = 35;
  * Fallback specialty edge rate per linear foot ($/LF).
  * Mirrors `specialty_edge_per_lf` in `pricingConfigResolver.fallbackAddonCatalogByCode()`.
  * Will be overridden by `quote_addon_catalog` DB row when Pricing Admin is wired in.
+ * Used for legacy rooms without structured `edgeMode`.
  */
 export const SPECIALTY_EDGE_RATE_PER_LF = 15;
 
 /**
- * Upgraded edge profile names that incur a $/LF charge.
+ * Legacy upgraded edge profile names (old model) that incur a $/LF charge.
  * Must mirror `UPGRADED_EDGE_PROFILES` in `app-quote/src/lib/prototypeQuoteMath.ts`.
  * NOTE: "Dupont" is no longer a selectable option in the UI (removed 2026) but is retained
  * here so legacy quotes that already have it stored are still billed correctly.
+ * Used only when `room.edgeMode` is absent.
  */
 const UPGRADED_EDGE_PROFILE_NAMES = new Set([
   "Full Bullnose",
@@ -105,10 +107,26 @@ const UPGRADED_EDGE_PROFILE_NAMES = new Set([
 ]);
 
 /**
+ * v2 upgraded edge profile names.
+ * Must mirror `UPGRADED_EDGE_PROFILES_V2` in `app-quote/src/lib/prototypeQuoteMath.ts`.
+ */
+const UPGRADED_EDGE_PROFILE_NAMES_V2 = new Set(["Small Ogee", "Crescent", "Knife"]);
+
+/** v2 mitered edge rates by height key. */
+const MITER_RATES_V2 = { "2-3in": 65, "4in": 70, "5in": 75, "6in": 80 };
+
+/** v2 build-up rate per SF. */
+const BUILDUP_RATE_PER_SQFT_V2 = 20;
+
+/** v2 upgraded edge $/LF - wholesale. */
+const UPGRADED_EDGE_RATE_WHOLESALE_V2 = 15;
+
+/** v2 upgraded edge $/LF - direct/retail. */
+const UPGRADED_EDGE_RATE_DIRECT_V2 = 25;
+
+/**
  * Resolve the specialty edge $/LF rate from pricing rules, falling back to the constant.
- * Returns `{ rate, rateSource }` so the snapshot can record where the rate came from.
- * - rateSource "pricing_rules": rate found in `quote_pricing_rules` (Pricing Admin controls it).
- * - rateSource "fallback": no DB rule found; using SPECIALTY_EDGE_RATE_PER_LF constant.
+ * Used for legacy rooms (no edgeMode). v2 rooms use hardcoded rates above.
  * @param {ReadonlyArray<Record<string, unknown>>} rules
  * @returns {{ rate: number, rateSource: "pricing_rules" | "fallback" }}
  */
@@ -123,42 +141,157 @@ function resolveEdgeRateFromRules(rules) {
 }
 
 /**
- * Calculate upgraded edge charges per room.
- * Standard edges: $0. Upgraded edges with LF > 0: lf × rate.
- * Upgraded edges with LF = 0 emit a warning and are not priced.
+ * Calculate edge charges per room, supporting both v2 structured model and legacy fallback.
  * @param {ReadonlyArray<Record<string, unknown>>} rooms
  * @param {ReadonlyArray<Record<string, unknown>>} rules
+ * @param {"wholesale"|"direct"} pricingMode
  */
-function calculateRoomUpgradedEdges(rooms, rules) {
-  const { rate, rateSource } = resolveEdgeRateFromRules(rules);
+function calculateRoomUpgradedEdges(rooms, rules, pricingMode) {
+  const { rate: legacyRate, rateSource } = resolveEdgeRateFromRules(rules);
   /** @type {Array<Record<string, unknown>>} */
   const lines = [];
   /** @type {string[]} */
   const warnings = [];
   let total = 0;
+  let hasManual = false;
+
   for (const room of rooms || []) {
-    const profile = String(room.edgeProfile ?? room.edge_profile ?? "").trim();
-    if (!profile || !UPGRADED_EDGE_PROFILE_NAMES.has(profile)) continue;
-    const lf = Number(room.upgradedEdgeLf ?? room.upgraded_edge_lf ?? 0) || 0;
     const roomName = String(room.name || room.room_name || "Room").trim();
-    if (lf <= 0) {
-      warnings.push(
-        `Room "${roomName}": upgraded edge "${profile}" selected but linear feet not entered — edge charge omitted.`
-      );
-      continue;
+    const edgeMode = room.edgeMode ? String(room.edgeMode).trim() : null;
+
+    if (edgeMode) {
+      if (edgeMode === "included") continue;
+
+      if (edgeMode === "upgraded") {
+        const profile = String(room.edgeProfileV2 ?? "").trim();
+        const lf = Number(room.edgeLinearFeet ?? 0) || 0;
+        if (!profile) {
+          warnings.push(`Room "${roomName}": upgraded edge selected but no profile chosen.`);
+          continue;
+        }
+        if (lf <= 0) {
+          warnings.push(`Room "${roomName}": upgraded edge "${profile}" — linear feet not entered, charge omitted.`);
+          continue;
+        }
+        const rate = pricingMode === "direct" ? UPGRADED_EDGE_RATE_DIRECT_V2 : UPGRADED_EDGE_RATE_WHOLESALE_V2;
+        const lineSubtotal = round2(lf * rate);
+        total += lineSubtotal;
+        lines.push({
+          item_code: "specialty_edge_per_lf",
+          item_name: `${profile} edge — ${roomName}`,
+          room_name: roomName,
+          quantity: lf,
+          unit_price: rate,
+          unit_type: "per_lf",
+          category: "edge",
+          edge_mode: "upgraded",
+          line_subtotal: lineSubtotal
+        });
+        continue;
+      }
+
+      if (edgeMode === "mitered") {
+        const heightKey = String(room.miterHeight ?? "").trim();
+        const lf = Number(room.edgeLinearFeet ?? 0) || 0;
+        const miterRate = MITER_RATES_V2[heightKey];
+        if (!heightKey || miterRate == null) {
+          warnings.push(`Room "${roomName}": mitered edge — miter height not selected, charge omitted.`);
+          continue;
+        }
+        if (lf <= 0) {
+          warnings.push(`Room "${roomName}": mitered edge (${heightKey}) — linear feet not entered, charge omitted.`);
+          continue;
+        }
+        const miterSubtotal = round2(lf * miterRate);
+        total += miterSubtotal;
+        const heightDisplay = heightKey === "2-3in" ? `2"-3"` : `${heightKey.replace("in", `"`)}`;
+        lines.push({
+          item_code: "mitered_edge_per_lf",
+          item_name: `${heightDisplay} mitered edge — ${roomName}`,
+          room_name: roomName,
+          quantity: lf,
+          unit_price: miterRate,
+          unit_type: "per_lf",
+          category: "edge",
+          edge_mode: "mitered",
+          miter_height: heightKey,
+          line_subtotal: miterSubtotal
+        });
+        if (room.buildUpRequired) {
+          const bSqft = Number(room.buildUpSqft ?? 0) || 0;
+          if (bSqft > 0) {
+            const buSubtotal = round2(bSqft * BUILDUP_RATE_PER_SQFT_V2);
+            total += buSubtotal;
+            lines.push({
+              item_code: "edge_buildup_per_sqft",
+              item_name: `Build-up labor — ${roomName}`,
+              room_name: roomName,
+              quantity: bSqft,
+              unit_price: BUILDUP_RATE_PER_SQFT_V2,
+              unit_type: "per_sqft",
+              category: "edge",
+              edge_mode: "buildup",
+              line_subtotal: buSubtotal
+            });
+          }
+        }
+        continue;
+      }
+
+      if (edgeMode === "manual") {
+        const manualAmt = Math.max(0, Number(room.manualEdgeAmount ?? 0) || 0);
+        const reason = String(room.manualEdgeReason ?? "").trim();
+        const customerLabel = String(room.manualEdgeCustomerLabel ?? "").trim() || "Custom edge profile";
+        if (!reason) {
+          warnings.push(`Room "${roomName}": manual edge price requires an internal reason.`);
+        }
+        if (manualAmt > 0) {
+          hasManual = true;
+          total += manualAmt;
+          lines.push({
+            item_code: "manual_edge_price",
+            item_name: `${customerLabel} — ${roomName}`,
+            room_name: roomName,
+            quantity: 1,
+            unit_price: manualAmt,
+            unit_type: "each",
+            category: "edge",
+            edge_mode: "manual",
+            internal_reason: reason || null,
+            line_subtotal: manualAmt
+          });
+        }
+        continue;
+      }
+
+      warnings.push(`Room "${roomName}": unknown edge mode "${edgeMode}" — edge charge omitted.`);
+    } else {
+      // Legacy fallback
+      const profile = String(room.edgeProfile ?? room.edge_profile ?? "").trim();
+      if (!profile || !UPGRADED_EDGE_PROFILE_NAMES.has(profile)) continue;
+      const lf = Number(room.upgradedEdgeLf ?? room.upgraded_edge_lf ?? 0) || 0;
+      if (lf <= 0) {
+        warnings.push(
+          `Room "${roomName}": upgraded edge "${profile}" selected but linear feet not entered — edge charge omitted.`
+        );
+        continue;
+      }
+      const lineSubtotal = round2(lf * legacyRate);
+      total += lineSubtotal;
+      lines.push({
+        item_code: "specialty_edge_per_lf",
+        item_name: `${profile} edge — ${roomName}`,
+        room_name: roomName,
+        quantity: lf,
+        unit_price: legacyRate,
+        unit_type: "per_lf",
+        category: "edge",
+        edge_mode: "legacy",
+        line_subtotal: lineSubtotal
+      });
     }
-    const lineSubtotal = round2(lf * rate);
-    total += lineSubtotal;
-    lines.push({
-      item_code: "specialty_edge_per_lf",
-      item_name: `${profile} edge — ${roomName}`,
-      room_name: roomName,
-      quantity: lf,
-      unit_price: rate,
-      line_subtotal: lineSubtotal
-    });
   }
-  return { total: round2(total), lines, warnings, rate, rateSource };
+  return { total: round2(total), lines, warnings, rate: legacyRate, rateSource, hasManual };
 }
 
 /** Future: how quote measurements were produced (AI, layout, manual, …). */
@@ -835,7 +968,7 @@ function sumRoomsWholesale(input, rules) {
     });
   }
   const addOnPart = calculateAddOns({ addOns: input.addOns || {} }, rules);
-  const upgradedEdgePart = calculateRoomUpgradedEdges(input.rooms, rules);
+  const upgradedEdgePart = calculateRoomUpgradedEdges(input.rooms, rules, input.internalMaterialBasis ?? "wholesale");
   let useTaxAmount = 0;
   let countertopMaterialUseTaxAmount = 0;
   let backsplashMaterialUseTaxAmount = 0;
@@ -1333,7 +1466,9 @@ export async function calculateQuote(rawInput, pricingContext = {}) {
         rate_per_lf: detail.upgradedEdgePart.rate,
         rate_source: detail.upgradedEdgePart.rateSource,
         total: detail.upgradedEdgePart.total,
-        room_count: detail.upgradedEdgePart.lines.length
+        room_count: detail.upgradedEdgePart.lines.length,
+        has_manual: detail.upgradedEdgePart.hasManual ?? false,
+        pricing_basis: input.internalMaterialBasis ?? "wholesale"
       };
     }
     if (detail.kind === "rooms" && Array.isArray(detail.roomMeasurementSummaries)) {
@@ -1478,8 +1613,12 @@ function buildLineItems(detail, input, totals, pricingMode = "", publicMult = 1)
         item_name: ln.item_name,
         room_name: ln.room_name,
         quantity: ln.quantity,
-        unit_type: "per_lf",
+        unit_type: ln.unit_type ?? "per_lf",
         unit_price: ln.unit_price,
+        edge_mode: ln.edge_mode ?? null,
+        // internal_reason is stored only on manual edge lines — must not appear in customer-facing output
+        internal_reason: ln.internal_reason ?? null,
+        miter_height: ln.miter_height ?? null,
         line_subtotal: round2(ln.line_subtotal)
       });
     }

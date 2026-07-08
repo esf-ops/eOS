@@ -639,6 +639,179 @@ if (snap7.rate_source !== "pricing_rules") {
   throw new Error(`EDGE-7: rate_source must be "pricing_rules" when rule provided, got "${snap7.rate_source}"`);
 }
 
+// ── v2 edge pricing tests ────────────────────────────────────────────────────
+
+// EDGE-V2-1: included v2 profile → $0
+const edgeV2Included = await calculateQuote(
+  {
+    ...edgeBase,
+    rooms: [{
+      name: "Kitchen",
+      materialGroup: "Group Promo",
+      countertopSqft: 10,
+      backsplashSqft: 0,
+      edgeMode: "included",
+      edgeProfileV2: "Large Ogee",
+      edgeLinearFeet: 10
+    }]
+  },
+  {}
+);
+assertNear("EDGE-V2-1 included Large Ogee: no edge charge", edgeV2Included.totals.retail, internalMaterialTotal(10, 0, wRate));
+
+// EDGE-V2-2: upgraded Small Ogee wholesale → LF × $15
+const edgeV2SmallOgeeWS = await calculateQuote(
+  {
+    ...edgeBase,
+    rooms: [{
+      name: "Kitchen",
+      materialGroup: "Group Promo",
+      countertopSqft: 10,
+      backsplashSqft: 0,
+      edgeMode: "upgraded",
+      edgeProfileV2: "Small Ogee",
+      edgeLinearFeet: 12
+    }]
+  },
+  {}
+);
+const expectedV2UpgWS = 12 * 15;
+assertNear("EDGE-V2-2 Small Ogee wholesale: 12 LF × $15", edgeV2SmallOgeeWS.totals.retail, internalMaterialTotal(10, 0, wRate) + expectedV2UpgWS);
+const edgeLineV2 = (edgeV2SmallOgeeWS.lineItems || []).find((l) => l.category === "edge");
+if (!edgeLineV2) throw new Error("EDGE-V2-2: edge line item missing");
+assertNear("EDGE-V2-2 edge line subtotal", edgeLineV2.line_subtotal, expectedV2UpgWS);
+
+// EDGE-V2-3: upgraded Crescent direct → LF × $25
+const edgeV2CrescentDirect = await calculateQuote(
+  {
+    ...edgeBase,
+    internalMaterialBasis: "direct",
+    rooms: [{
+      name: "Kitchen",
+      materialGroup: "Group Promo",
+      countertopSqft: 10,
+      backsplashSqft: 0,
+      edgeMode: "upgraded",
+      edgeProfileV2: "Crescent",
+      edgeLinearFeet: 8
+    }]
+  },
+  {}
+);
+const expectedV2UpgDirect = 8 * 25;
+assertNear("EDGE-V2-3 Crescent direct: 8 LF × $25", edgeV2CrescentDirect.totals.retail, internalMaterialTotal(10, 0, dRatePromo) + expectedV2UpgDirect);
+
+// EDGE-V2-4: mitered 4" → LF × $70
+const edgeV2Miter4 = await calculateQuote(
+  {
+    ...edgeBase,
+    rooms: [{
+      name: "Island",
+      materialGroup: "Group Promo",
+      countertopSqft: 10,
+      backsplashSqft: 0,
+      edgeMode: "mitered",
+      miterHeight: "4in",
+      edgeLinearFeet: 10
+    }]
+  },
+  {}
+);
+assertNear("EDGE-V2-4 mitered 4in 10 LF × $70", edgeV2Miter4.totals.retail, internalMaterialTotal(10, 0, wRate) + 10 * 70);
+
+// EDGE-V2-5: mitered 2-3" → LF × $65
+const edgeV2Miter23 = await calculateQuote(
+  {
+    ...edgeBase,
+    rooms: [{
+      name: "Island",
+      materialGroup: "Group Promo",
+      countertopSqft: 10,
+      backsplashSqft: 0,
+      edgeMode: "mitered",
+      miterHeight: "2-3in",
+      edgeLinearFeet: 6
+    }]
+  },
+  {}
+);
+assertNear("EDGE-V2-5 mitered 2-3in 6 LF × $65", edgeV2Miter23.totals.retail, internalMaterialTotal(10, 0, wRate) + 6 * 65);
+
+// EDGE-V2-6: build-up adds SF × $20
+const edgeV2BuildUp = await calculateQuote(
+  {
+    ...edgeBase,
+    rooms: [{
+      name: "Island",
+      materialGroup: "Group Promo",
+      countertopSqft: 10,
+      backsplashSqft: 0,
+      edgeMode: "mitered",
+      miterHeight: "5in",
+      edgeLinearFeet: 5,
+      buildUpRequired: true,
+      buildUpSqft: 8
+    }]
+  },
+  {}
+);
+const expectedMiter5 = 5 * 75;
+const expectedBuildUp = 8 * 20;
+assertNear("EDGE-V2-6 mitered 5in + build-up", edgeV2BuildUp.totals.retail, internalMaterialTotal(10, 0, wRate) + expectedMiter5 + expectedBuildUp);
+const buLine = (edgeV2BuildUp.lineItems || []).find((l) => l.item_code === "edge_buildup_per_sqft");
+if (!buLine) throw new Error("EDGE-V2-6: build-up line item missing");
+assertNear("EDGE-V2-6 build-up subtotal", buLine.line_subtotal, expectedBuildUp);
+
+// EDGE-V2-7: build-up disabled → no build-up charge
+const edgeV2NoBuildUp = await calculateQuote(
+  {
+    ...edgeBase,
+    rooms: [{
+      name: "Island",
+      materialGroup: "Group Promo",
+      countertopSqft: 10,
+      backsplashSqft: 0,
+      edgeMode: "mitered",
+      miterHeight: "5in",
+      edgeLinearFeet: 5,
+      buildUpRequired: false,
+      buildUpSqft: 8
+    }]
+  },
+  {}
+);
+assertNear("EDGE-V2-7 build-up disabled → no extra charge", edgeV2NoBuildUp.totals.retail, internalMaterialTotal(10, 0, wRate) + expectedMiter5);
+
+// EDGE-V2-8: manual edge price
+const edgeV2Manual = await calculateQuote(
+  {
+    ...edgeBase,
+    rooms: [{
+      name: "Kitchen",
+      materialGroup: "Group Promo",
+      countertopSqft: 10,
+      backsplashSqft: 0,
+      edgeMode: "manual",
+      manualEdgeAmount: 250,
+      manualEdgeReason: "Special profile from local supplier",
+      manualEdgeCustomerLabel: "Custom edge profile"
+    }]
+  },
+  {}
+);
+assertNear("EDGE-V2-8 manual edge amount included", edgeV2Manual.totals.retail, internalMaterialTotal(10, 0, wRate) + 250);
+const manualLine = (edgeV2Manual.lineItems || []).find((l) => l.item_code === "manual_edge_price");
+if (!manualLine) throw new Error("EDGE-V2-8: manual edge line item missing");
+if (manualLine.internal_reason !== "Special profile from local supplier") {
+  throw new Error(`EDGE-V2-8: internal_reason must be stored in line item, got "${manualLine.internal_reason}"`);
+}
+if (manualLine.item_name.includes("Special profile")) {
+  throw new Error("EDGE-V2-8: item_name must use customer-safe label, not internal_reason");
+}
+const snapV2Manual = edgeV2Manual.snapshot?.internal_estimate_math?.upgraded_edge_pricing;
+if (!snapV2Manual) throw new Error("EDGE-V2-8: snapshot must include upgraded_edge_pricing");
+if (!snapV2Manual.has_manual) throw new Error("EDGE-V2-8: snapshot must record has_manual=true");
+
 // ── Internal Estimate material use tax (2% counter + backsplash) ─────────────
 
 const taxPolicy = resolveInternalEstimateMaterialTaxPolicy();

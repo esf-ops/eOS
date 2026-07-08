@@ -23,6 +23,8 @@ import {
   serializeRoomsForApi,
   serializeVanitiesForApi,
   UPGRADED_EDGE_PROFILES,
+  computeLocalEdgeTotalV2,
+  LEGACY_AMBIGUOUS_EDGE_PROFILES,
   INTERNAL_ESTIMATE_ELITE_100_PROGRAM,
   normalizeInternalEstimateRoomDrafts
 } from "@quote-lib/prototypeQuoteMath";
@@ -1970,14 +1972,38 @@ export default function InternalEstimateApp() {
     if (colorTbd) {
       warnings.push("Color marked TBD — confirm before Sent/Sold when you have a selection.");
     }
-    const edgeMissingLf = roomDrafts.filter(
-      (r) =>
+    // v2: check for upgraded/mitered rooms missing LF
+    const edgeMissingLf = roomDrafts.filter((r) => {
+      if (r.edgeMode === "upgraded" || r.edgeMode === "mitered") {
+        return !(r.edgeLinearFeet && r.edgeLinearFeet > 0);
+      }
+      // Legacy fallback check
+      return (
         UPGRADED_EDGE_PROFILES.includes(r.edgeProfile as (typeof UPGRADED_EDGE_PROFILES)[number]) &&
         !(r.upgradedEdgeLf && r.upgradedEdgeLf > 0)
-    );
+      );
+    });
     if (edgeMissingLf.length > 0) {
       warnings.push(
-        `${edgeMissingLf.length} room${edgeMissingLf.length > 1 ? "s" : ""} have an upgraded edge selected but no linear feet entered — edge charge will not be calculated.`
+        `${edgeMissingLf.length} room${edgeMissingLf.length > 1 ? "s" : ""} have an upgraded or mitered edge selected but no linear feet entered — edge charge will not be calculated.`
+      );
+    }
+    // v2: check for manual edge rooms missing reason
+    const edgeManualMissingReason = roomDrafts.filter(
+      (r) => r.edgeMode === "manual" && !(r.manualEdgeReason?.trim())
+    );
+    if (edgeManualMissingReason.length > 0) {
+      warnings.push(
+        `${edgeManualMissingReason.length} room${edgeManualMissingReason.length > 1 ? "s" : ""} have manual edge pricing but no internal reason entered.`
+      );
+    }
+    // Legacy ambiguous profiles — prompt migration
+    const edgeLegacyAmbiguous = roomDrafts.filter(
+      (r) => !r.edgeMode && r.edgeProfile && LEGACY_AMBIGUOUS_EDGE_PROFILES.has(r.edgeProfile)
+    );
+    if (edgeLegacyAmbiguous.length > 0) {
+      warnings.push(
+        `${edgeLegacyAmbiguous.length} room${edgeLegacyAmbiguous.length > 1 ? "s" : ""} use legacy edge profiles (${edgeLegacyAmbiguous.map((r) => r.edgeProfile).join(", ")}) — update edge to the new structured model.`
       );
     }
     const score = Math.max(0, Math.min(100, 100 - missing.length * 14));
@@ -2047,11 +2073,14 @@ export default function InternalEstimateApp() {
 
   const backendHint = config.backendBaseUrl;
 
-  /** Local preview of upgraded edge charge — added to partRetail so sticky total matches backend. */
-  const liveUpgradedEdgeTotal = useMemo(
-    () => computeLocalUpgradedEdgeTotal(roomDrafts).total,
-    [roomDrafts]
+  /** Local preview of edge charge — uses v2 structured model with legacy fallback. */
+  const liveEdgeResult = useMemo(
+    () => computeLocalEdgeTotalV2(roomDrafts, internalPricingMode),
+    [roomDrafts, internalPricingMode]
   );
+  const liveUpgradedEdgeTotal = liveEdgeResult.total;
+  const liveEdgeHasManual = liveEdgeResult.hasManual;
+  const liveEdgeHasLegacyAmbiguous = liveEdgeResult.hasLegacyAmbiguous;
 
   const partRetail = round2((liveEstimate.retail ?? 0) + liveUpgradedEdgeTotal);
   const partSqft = liveEstimate.estimated_sqft;
@@ -4298,7 +4327,19 @@ export default function InternalEstimateApp() {
                   </div>
                   {stickyLiveRollup.upgradedEdge > 0 ? (
                     <div className="summary-row ie-summary-row-compact">
-                      <span>Edge upgrades</span>
+                      <span>
+                        Edge / profile charges
+                        {liveEdgeHasManual ? (
+                          <span className="ie-badge ie-badge-warning" title="Manual edge pricing applied — verify with estimator">
+                            {" "}Manual
+                          </span>
+                        ) : null}
+                        {liveEdgeHasLegacyAmbiguous ? (
+                          <span className="ie-badge ie-badge-caution" title="Legacy edge profile — update to new model recommended">
+                            {" "}Legacy
+                          </span>
+                        ) : null}
+                      </span>
                       <strong>${stickyLiveRollup.upgradedEdge.toFixed(2)}</strong>
                     </div>
                   ) : null}

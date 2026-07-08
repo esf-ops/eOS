@@ -185,13 +185,34 @@ export type RoomDraft = {
   /**
    * Edge profile selection for this room/area. Standard edges are included in fabrication;
    * upgraded edges are charged per linear foot by the backend calculator.
+   * Preserved for legacy quote compatibility; new quotes use `edgeMode`.
    */
   edgeProfile?: string;
   /**
-   * Linear feet of upgraded edge for this room. Required (> 0) when edgeProfile is an upgraded
-   * profile; ignored for standard edges. The backend calculator applies the $/LF rate.
+   * Linear feet of upgraded edge for this room. Preserved for legacy quote compatibility;
+   * new structured quotes use `edgeLinearFeet`.
    */
   upgradedEdgeLf?: number;
+
+  // ── Structured edge pricing (v2, 2026) ──────────────────────────────────────
+  /** Pricing mode for this room's edge. When absent, falls back to legacy `edgeProfile` logic. */
+  edgeMode?: "included" | "upgraded" | "mitered" | "manual";
+  /** Edge profile name for display (included and upgraded modes). */
+  edgeProfileV2?: string;
+  /** Linear feet of edge for upgraded and mitered modes. */
+  edgeLinearFeet?: number;
+  /** Miter height selection, required when edgeMode is "mitered". */
+  miterHeight?: "2-3in" | "4in" | "5in" | "6in";
+  /** Whether fabrication build-up is required (mitered mode only). */
+  buildUpRequired?: boolean;
+  /** Square footage of build-up material (mitered mode, when buildUpRequired is true). */
+  buildUpSqft?: number;
+  /** Manual edge dollar amount (manual mode only). */
+  manualEdgeAmount?: number;
+  /** Required internal reason for manual edge pricing. NOT shown on customer-facing output. */
+  manualEdgeReason?: string;
+  /** Customer-safe label for manual edge line (defaults to "Custom edge profile" if omitted). */
+  manualEdgeCustomerLabel?: string;
   vanity: {
     size: string;
     source: VanitySource;

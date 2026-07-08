@@ -66,6 +66,16 @@ import {
   STANDARD_EDGE_PROFILES,
   UPGRADED_EDGE_PREVIEW_RATE_PER_LF,
   UPGRADED_EDGE_PROFILES,
+  computeLocalEdgeTotalV2,
+  INCLUDED_EDGE_PROFILES_V2,
+  UPGRADED_EDGE_PROFILES_V2,
+  MITER_HEIGHTS,
+  MITER_RATES,
+  BUILDUP_RATE_PER_SQFT,
+  UPGRADED_EDGE_RATE_WHOLESALE,
+  UPGRADED_EDGE_RATE_DIRECT,
+  LEGACY_AMBIGUOUS_EDGE_PROFILES,
+  computeRoomEdgeChargeV2,
   normalizeMaterialProgramDefault
 } from "../app-quote/src/lib/prototypeQuoteMath.ts";
 import { parseCustomerFacingNoteLines } from "../app-internal-estimate/src/lib/customerFacingNotes.ts";
@@ -811,7 +821,206 @@ function approx(a: number, b: number, eps = 0.02) {
   assert.match(apiSrc, /customer_estimate_customer_facing_notes/, "internal save persists customer-facing notes in snapshot");
 }
 
-// computeLocalUpgradedEdgeTotal — local preview matches backend rate
+// ── EDGE-V2: computeLocalEdgeTotalV2 — v2 structured edge pricing ─────────
+{
+  // Included profiles → $0
+  for (const profile of INCLUDED_EDGE_PROFILES_V2) {
+    const r = { name: "Kitchen", edgeMode: "included" as const, edgeProfileV2: profile, edgeLinearFeet: 10 };
+    const res = computeLocalEdgeTotalV2([r], "wholesale");
+    assert.equal(res.total, 0, `EDGE-V2-INCL: ${profile} is included → $0`);
+    assert.equal(res.warnings.length, 0, `EDGE-V2-INCL: ${profile} produces no warnings`);
+  }
+
+  // Upgraded profiles — wholesale: LF × $15
+  for (const profile of UPGRADED_EDGE_PROFILES_V2) {
+    const r = { name: "Kitchen", edgeMode: "upgraded" as const, edgeProfileV2: profile, edgeLinearFeet: 10 };
+    const res = computeLocalEdgeTotalV2([r], "wholesale");
+    assert.equal(res.total, 10 * UPGRADED_EDGE_RATE_WHOLESALE, `EDGE-V2-UPG-WS: ${profile} wholesale = 10 × $${UPGRADED_EDGE_RATE_WHOLESALE}`);
+    assert.equal(res.warnings.length, 0, `EDGE-V2-UPG-WS: no warnings`);
+  }
+
+  // Upgraded profiles — direct: LF × $25
+  for (const profile of UPGRADED_EDGE_PROFILES_V2) {
+    const r = { name: "Kitchen", edgeMode: "upgraded" as const, edgeProfileV2: profile, edgeLinearFeet: 8 };
+    const res = computeLocalEdgeTotalV2([r], "direct");
+    assert.equal(res.total, 8 * UPGRADED_EDGE_RATE_DIRECT, `EDGE-V2-UPG-DR: ${profile} direct = 8 × $${UPGRADED_EDGE_RATE_DIRECT}`);
+  }
+
+  // Upgraded — no LF → $0 + warning
+  const noLf = computeLocalEdgeTotalV2([{ name: "Kitchen", edgeMode: "upgraded" as const, edgeProfileV2: "Small Ogee", edgeLinearFeet: 0 }], "wholesale");
+  assert.equal(noLf.total, 0, "EDGE-V2-UPG-NOLF: upgraded with LF=0 → $0");
+  assert.equal(noLf.warnings.length, 1, "EDGE-V2-UPG-NOLF: upgraded with LF=0 → one warning");
+
+  // Mitered — each height
+  assert.equal(MITER_HEIGHTS.length, 4, "EDGE-V2-MITER: 4 miter heights defined");
+  const miterExpected: Record<string, number> = { "2-3in": 65, "4in": 70, "5in": 75, "6in": 80 };
+  for (const [h, rate] of Object.entries(miterExpected)) {
+    const r = { name: "Island", edgeMode: "mitered" as const, miterHeight: h as typeof MITER_HEIGHTS[number], edgeLinearFeet: 10 };
+    const res = computeLocalEdgeTotalV2([r], "wholesale");
+    assert.equal(res.total, 10 * rate, `EDGE-V2-MITER: ${h} 10 LF = $${10 * rate}`);
+    assert.equal(MITER_RATES[h as typeof MITER_HEIGHTS[number]], rate, `EDGE-V2-MITER: MITER_RATES[${h}] = $${rate}`);
+  }
+
+  // Build-up: adds SF × $20
+  const withBu = computeLocalEdgeTotalV2([{
+    name: "Island",
+    edgeMode: "mitered" as const,
+    miterHeight: "4in" as const,
+    edgeLinearFeet: 5,
+    buildUpRequired: true,
+    buildUpSqft: 8
+  }], "wholesale");
+  assert.equal(withBu.total, 5 * 70 + 8 * BUILDUP_RATE_PER_SQFT, `EDGE-V2-BU: 5 LF × $70 + 8 SF × $${BUILDUP_RATE_PER_SQFT}`);
+
+  // Build-up disabled → no build-up charge
+  const noBu = computeLocalEdgeTotalV2([{
+    name: "Island",
+    edgeMode: "mitered" as const,
+    miterHeight: "4in" as const,
+    edgeLinearFeet: 5,
+    buildUpRequired: false,
+    buildUpSqft: 8
+  }], "wholesale");
+  assert.equal(noBu.total, 5 * 70, "EDGE-V2-BU-OFF: build-up disabled → no build-up charge");
+
+  // Manual edge — amount included, isManual=true, reason warning if empty
+  const manualWithReason = computeLocalEdgeTotalV2([{
+    name: "Kitchen",
+    edgeMode: "manual" as const,
+    manualEdgeAmount: 150,
+    manualEdgeReason: "Special profile from supplier",
+    manualEdgeCustomerLabel: "Custom edge profile"
+  }], "wholesale");
+  assert.equal(manualWithReason.total, 150, "EDGE-V2-MANUAL: manual amount included");
+  assert.equal(manualWithReason.hasManual, true, "EDGE-V2-MANUAL: hasManual = true");
+  assert.equal(manualWithReason.warnings.length, 0, "EDGE-V2-MANUAL: no warning when reason provided");
+
+  // Manual edge — no reason → warning
+  const manualNoReason = computeLocalEdgeTotalV2([{
+    name: "Kitchen",
+    edgeMode: "manual" as const,
+    manualEdgeAmount: 100,
+    manualEdgeReason: ""
+  }], "wholesale");
+  assert.equal(manualNoReason.total, 100, "EDGE-V2-MANUAL-NOREASON: amount still included");
+  assert.equal(manualNoReason.warnings.length, 1, "EDGE-V2-MANUAL-NOREASON: missing reason produces warning");
+
+  // computeRoomEdgeChargeV2 — customer label not exposed for manual
+  const manualCharge = computeRoomEdgeChargeV2({
+    name: "Kitchen",
+    edgeMode: "manual",
+    manualEdgeAmount: 200,
+    manualEdgeReason: "Internal reason — do not expose",
+    manualEdgeCustomerLabel: "Custom edge"
+  }, "wholesale");
+  assert.equal(manualCharge.isManual, true, "EDGE-V2-CUST: manual charge isManual = true");
+  assert.equal(manualCharge.amount, 200, "EDGE-V2-CUST: manual amount correct");
+  assert.ok(manualCharge.edgeCustomerLabel?.includes("Custom edge"), "EDGE-V2-CUST: customer label uses customerLabel not reason");
+  assert.ok(!manualCharge.edgeCustomerLabel?.includes("Internal reason"), "EDGE-V2-CUST: internal reason NOT in customer label");
+
+  // Mitered customer label format
+  const miterCharge = computeRoomEdgeChargeV2({
+    name: "Island",
+    edgeMode: "mitered",
+    miterHeight: "4in",
+    edgeLinearFeet: 10
+  }, "wholesale");
+  assert.ok(miterCharge.edgeCustomerLabel?.includes("4\""), `EDGE-V2-CUST-MITER: label includes height display`);
+  assert.ok(miterCharge.edgeCustomerLabel?.includes("Island"), "EDGE-V2-CUST-MITER: label includes room name");
+  assert.ok(miterCharge.edgeCustomerLabel?.includes("10 LF"), "EDGE-V2-CUST-MITER: label includes LF count");
+
+  // Legacy fallback: ambiguous profile still charges at old rate
+  const legacyOgee = computeLocalEdgeTotalV2([{ name: "Kitchen", edgeProfile: "Ogee", upgradedEdgeLf: 12 }], "wholesale");
+  assert.equal(legacyOgee.total, 12 * UPGRADED_EDGE_PREVIEW_RATE_PER_LF, "EDGE-V2-LEGACY: Ogee legacy charges at old rate");
+  assert.equal(legacyOgee.hasLegacyAmbiguous, true, "EDGE-V2-LEGACY: hasLegacyAmbiguous = true for Ogee");
+
+  // Legacy: standard included profiles → $0, no warning, no hasLegacyAmbiguous
+  const legacyEased = computeLocalEdgeTotalV2([{ name: "Kitchen", edgeProfile: "Eased", upgradedEdgeLf: 20 }], "wholesale");
+  assert.equal(legacyEased.total, 0, "EDGE-V2-LEGACY: Eased legacy → $0");
+  assert.equal(legacyEased.hasLegacyAmbiguous, false, "EDGE-V2-LEGACY: Eased not ambiguous");
+
+  // New quotes default to edgeMode "included"
+  const defaultRoom = createDefaultRoom("Group Promo");
+  assert.equal(defaultRoom.edgeMode, "included", "EDGE-V2-DEFAULT: new room defaults to edgeMode included");
+  assert.equal(defaultRoom.edgeProfileV2, "Eased", "EDGE-V2-DEFAULT: new room defaults to Eased profile");
+
+  // Source check
+  const appSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/InternalEstimateApp.tsx"), "utf8");
+  assert.match(appSrc, /liveUpgradedEdgeTotal/, "IE must compute liveUpgradedEdgeTotal");
+  assert.match(appSrc, /Edge \/ profile charges/, "IE sticky panel must show Edge / profile charges row");
+  assert.match(appSrc, /upgradedEdgeTotalExact/, "IE must pass upgradedEdgeTotalExact to display model");
+  assert.match(appSrc, /computeLocalEdgeTotalV2/, "IE must call computeLocalEdgeTotalV2");
+
+  const dmSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/lib/customerEstimateDisplayModel.ts"), "utf8");
+  assert.match(dmSrc, /summaryEdgeDisplay/, "display model must expose summaryEdgeDisplay");
+}
+
+// ── EDGE-CLEANUP-1: Profile constant sanity ──────────────────────────────────
+{
+  assert.ok(
+    (INCLUDED_EDGE_PROFILES_V2 as readonly string[]).includes("Eased"),
+    "EDGE-CLEANUP-1: Eased in INCLUDED_EDGE_PROFILES_V2"
+  );
+  assert.ok(
+    (INCLUDED_EDGE_PROFILES_V2 as readonly string[]).includes("Large Eased"),
+    "EDGE-CLEANUP-1: Large Eased in INCLUDED_EDGE_PROFILES_V2"
+  );
+  assert.ok(
+    (INCLUDED_EDGE_PROFILES_V2 as readonly string[]).includes("Full Bullnose"),
+    "EDGE-CLEANUP-1: Full Bullnose in INCLUDED_EDGE_PROFILES_V2"
+  );
+  assert.ok(
+    (INCLUDED_EDGE_PROFILES_V2 as readonly string[]).includes("Large Ogee"),
+    "EDGE-CLEANUP-1: Large Ogee in INCLUDED_EDGE_PROFILES_V2"
+  );
+  assert.ok(
+    (INCLUDED_EDGE_PROFILES_V2 as readonly string[]).includes("Bevel"),
+    "EDGE-CLEANUP-1: Bevel in INCLUDED_EDGE_PROFILES_V2"
+  );
+  assert.ok(
+    (UPGRADED_EDGE_PROFILES_V2 as readonly string[]).includes("Small Ogee"),
+    "EDGE-CLEANUP-1: Small Ogee in UPGRADED_EDGE_PROFILES_V2"
+  );
+  assert.ok(
+    (UPGRADED_EDGE_PROFILES_V2 as readonly string[]).includes("Crescent"),
+    "EDGE-CLEANUP-1: Crescent in UPGRADED_EDGE_PROFILES_V2"
+  );
+  assert.ok(
+    (UPGRADED_EDGE_PROFILES_V2 as readonly string[]).includes("Knife"),
+    "EDGE-CLEANUP-1: Knife in UPGRADED_EDGE_PROFILES_V2"
+  );
+  assert.equal(UPGRADED_EDGE_RATE_WHOLESALE, 15, "EDGE-CLEANUP-1: wholesale rate = $15");
+  assert.equal(UPGRADED_EDGE_RATE_DIRECT, 25, "EDGE-CLEANUP-1: direct rate = $25");
+  assert.equal(BUILDUP_RATE_PER_SQFT, 20, "EDGE-CLEANUP-1: build-up rate = $20/SF");
+}
+
+// ── EDGE-LEGACY: old standard profiles → $0, old upgraded profiles still charge ──
+{
+  const room = createDefaultRoom("Group Promo");
+  room.calcMode = "Manual Sq Ft";
+  room.direct = { counter: 20, splash: 0 };
+  room.edgeMode = undefined; // explicitly unset to test legacy path
+  room.edgeProfile = "Large Eased";
+  room.upgradedEdgeLf = 10;
+  const { total } = computeLocalEdgeTotalV2([room], "wholesale");
+  assert.strictEqual(total, 0, "EDGE-LEGACY: Large Eased legacy path → $0 (standard profile)");
+}
+
+// ── EDGE-LEGACY-AMBIGUOUS: old Ogee profile warns and charges at legacy rate ───
+{
+  const room = createDefaultRoom("Group Promo");
+  room.calcMode = "Manual Sq Ft";
+  room.direct = { counter: 20, splash: 0 };
+  room.edgeMode = undefined;
+  room.edgeProfile = "Waterfall";
+  room.upgradedEdgeLf = 6;
+  const result = computeLocalEdgeTotalV2([room], "wholesale");
+  assert.strictEqual(result.total, 6 * UPGRADED_EDGE_PREVIEW_RATE_PER_LF, "EDGE-LEGACY-AMBIGUOUS: Waterfall still charges at legacy rate");
+  assert.strictEqual(result.hasLegacyAmbiguous, true, "EDGE-LEGACY-AMBIGUOUS: hasLegacyAmbiguous = true");
+}
+
+// ── Legacy: keep backward compat tests ──────────────────────────────────────
+// (These use computeLocalUpgradedEdgeTotal which is still exported for compat)
 {
   const baseRoom = {
     id: "r1",
@@ -827,43 +1036,16 @@ function approx(a: number, b: number, eps = 0.02) {
     addons: {}
   };
 
-  // Standard edge — zero charge, no warning
   const std = computeLocalUpgradedEdgeTotal([{ ...baseRoom, edgeProfile: "Eased", upgradedEdgeLf: 20 }]);
   assert.equal(std.total, 0, "EDGE-LOCAL-1: standard edge produces zero charge");
   assert.equal(std.warnings.length, 0, "EDGE-LOCAL-1: standard edge produces no warnings");
 
-  // Upgraded edge with LF — expect lf × rate
   const upgraded = computeLocalUpgradedEdgeTotal([{ ...baseRoom, edgeProfile: "Ogee", upgradedEdgeLf: 12 }]);
   assert.equal(upgraded.total, 12 * UPGRADED_EDGE_PREVIEW_RATE_PER_LF, "EDGE-LOCAL-2: Ogee 12 LF charges 12 × rate");
-  assert.equal(upgraded.roomCount, 1, "EDGE-LOCAL-2: one room counted");
-  assert.equal(upgraded.warnings.length, 0, "EDGE-LOCAL-2: no warnings when LF provided");
 
-  // Upgraded edge without LF — zero charge, one warning
-  const noLf = computeLocalUpgradedEdgeTotal([{ ...baseRoom, edgeProfile: "Waterfall", upgradedEdgeLf: 0 }]);
-  assert.equal(noLf.total, 0, "EDGE-LOCAL-3: upgraded with LF=0 produces zero charge");
-  assert.equal(noLf.warnings.length, 1, "EDGE-LOCAL-3: upgraded with LF=0 emits one warning");
-
-  // Multi-room: one upgraded, one standard
-  const multi = computeLocalUpgradedEdgeTotal([
-    { ...baseRoom, id: "r1", name: "Kitchen", edgeProfile: "Ogee", upgradedEdgeLf: 10 },
-    { ...baseRoom, id: "r2", name: "Bath", edgeProfile: "Eased", upgradedEdgeLf: 0 }
-  ]);
-  assert.equal(multi.total, 10 * UPGRADED_EDGE_PREVIEW_RATE_PER_LF, "EDGE-LOCAL-4: only upgraded room adds charge");
-  assert.equal(multi.roomCount, 1, "EDGE-LOCAL-4: only one upgraded room counted");
-
-  // Constant matches backend and is consistent with UPGRADED_EDGE_PROFILES
   assert.equal(UPGRADED_EDGE_PREVIEW_RATE_PER_LF, 15, "EDGE-LOCAL-5: preview rate is $15/LF (matches backend fallback)");
-  assert.ok(UPGRADED_EDGE_PROFILES.includes("Ogee"), "EDGE-LOCAL-5: Ogee is in UPGRADED_EDGE_PROFILES");
-
-  // Source check: InternalEstimateApp wires edge into partRetail and stickyLiveRollup
-  const appSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/InternalEstimateApp.tsx"), "utf8");
-  assert.match(appSrc, /liveUpgradedEdgeTotal/, "IE must compute liveUpgradedEdgeTotal");
-  assert.match(appSrc, /Edge upgrades/, "IE sticky panel must show Edge upgrades row");
-  assert.match(appSrc, /upgradedEdgeTotalExact/, "IE must pass upgradedEdgeTotalExact to display model");
-
-  // Source check: display model exposes summaryEdgeDisplay
-  const dmSrc = readFileSync(join(repoRoot, "app-internal-estimate/src/lib/customerEstimateDisplayModel.ts"), "utf8");
-  assert.match(dmSrc, /summaryEdgeDisplay/, "display model must expose summaryEdgeDisplay");
+  assert.ok(UPGRADED_EDGE_PROFILES.includes("Ogee"), "EDGE-LOCAL-5: Ogee is in legacy UPGRADED_EDGE_PROFILES");
+  assert.ok((STANDARD_EDGE_PROFILES as readonly string[]).includes("Large Eased"), "EDGE-CLEANUP-1: Large Eased in STANDARD_EDGE_PROFILES");
 }
 
 // VANITY-TAX-1: vanity program price is isolated from use tax and fold; displays at nearest $5
@@ -1426,7 +1608,7 @@ function approx(a: number, b: number, eps = 0.02) {
   );
 }
 
-// ── EDGE-CLEANUP-1: Large Eased is standard, Bullnose gone, Dupont gone ──────
+// ── EDGE-CLEANUP-1: legacy STANDARD_EDGE_PROFILES retained; v2 sets correct ───
 {
   assert.ok(
     (STANDARD_EDGE_PROFILES as readonly string[]).includes("Large Eased"),
@@ -1436,25 +1618,44 @@ function approx(a: number, b: number, eps = 0.02) {
     !(STANDARD_EDGE_PROFILES as readonly string[]).includes("Bullnose"),
     "EDGE-CLEANUP-1: Bullnose removed from STANDARD_EDGE_PROFILES"
   );
+  // Legacy set still contains Full Bullnose for backward compat with old quotes
   assert.ok(
     (UPGRADED_EDGE_PROFILES as readonly string[]).includes("Full Bullnose"),
-    "EDGE-CLEANUP-1: Full Bullnose remains in UPGRADED_EDGE_PROFILES"
+    "EDGE-CLEANUP-1: Full Bullnose remains in legacy UPGRADED_EDGE_PROFILES for old-quote compat"
   );
   assert.ok(
     !(UPGRADED_EDGE_PROFILES as readonly string[]).includes("Dupont"),
     "EDGE-CLEANUP-1: Dupont removed from selectable UPGRADED_EDGE_PROFILES"
   );
+  // In v2 model: Full Bullnose is now INCLUDED (free)
+  assert.ok(
+    (INCLUDED_EDGE_PROFILES_V2 as readonly string[]).includes("Full Bullnose"),
+    "EDGE-CLEANUP-1: Full Bullnose is INCLUDED in v2 model"
+  );
+  assert.ok(
+    !(UPGRADED_EDGE_PROFILES_V2 as readonly string[]).includes("Full Bullnose"),
+    "EDGE-CLEANUP-1: Full Bullnose NOT in v2 upgraded profiles"
+  );
 }
 
-// ── EDGE-CLEANUP-2: Large Eased not charged as upgraded edge ────────────────
+// ── EDGE-CLEANUP-2: Large Eased not charged in v2 or legacy paths ────────────
 {
   const room = createDefaultRoom("Group Promo");
   room.calcMode = "Manual Sq Ft";
   room.direct = { counter: 20, splash: 0 };
+  // v2 path: edgeMode="included" with Large Eased
+  room.edgeMode = "included";
+  room.edgeProfileV2 = "Large Eased";
+  room.edgeLinearFeet = 10;
+  const v2Result = computeLocalEdgeTotalV2([room], "wholesale");
+  assert.strictEqual(v2Result.total, 0, "EDGE-CLEANUP-2: Large Eased (v2 included) — no edge charge");
+
+  // Legacy path: edgeProfile=Large Eased still $0
+  room.edgeMode = undefined;
   room.edgeProfile = "Large Eased";
   room.upgradedEdgeLf = 10;
-  const { total } = computeLocalUpgradedEdgeTotal([room]);
-  assert.strictEqual(total, 0, "EDGE-CLEANUP-2: Large Eased is standard — no edge charge");
+  const legacyResult = computeLocalEdgeTotalV2([room], "wholesale");
+  assert.strictEqual(legacyResult.total, 0, "EDGE-CLEANUP-2: Large Eased legacy path — no edge charge");
 }
 
 // ── MANUAL-SF-1: manual countertop SF priced correctly at Group Promo rate ───

@@ -236,7 +236,7 @@ function buildSyntheticDisplayModel(fixture) {
     });
   }
   if (summaryEdgeDisplay > 0) {
-    estimateSummaryRows.push({ key: "edge_upgrades", label: "Edge upgrades", displayAmount: summaryEdgeDisplay });
+    estimateSummaryRows.push({ key: "edge_upgrades", label: "Edge / profile charges", displayAmount: summaryEdgeDisplay });
   }
   for (const ln of fixture.customLines || []) {
     const displayAmount = roundCustomerDisplay(ln.lineTotal);
@@ -680,7 +680,7 @@ assertEqual(
     "utf8"
   );
   assert(displayModelSrc.includes("summaryEdgeDisplay"), "customerEstimateDisplayModel must compute summaryEdgeDisplay");
-  assert(displayModelSrc.includes("Edge upgrades"), "customerEstimateDisplayModel must label row 'Edge upgrades'");
+  assert(displayModelSrc.includes("Edge / profile charges"), "customerEstimateDisplayModel must label row 'Edge / profile charges'");
   assert(displayModelSrc.includes("upgradedEdgeTotalExact"), "customerEstimateDisplayModel must accept upgradedEdgeTotalExact param");
 
   const appSrc = readFileSync(
@@ -688,8 +688,8 @@ assertEqual(
     "utf8"
   );
   assert(appSrc.includes("liveUpgradedEdgeTotal"), "InternalEstimateApp must compute liveUpgradedEdgeTotal");
-  assert(appSrc.includes("Edge upgrades"), "InternalEstimateApp sticky panel must show 'Edge upgrades' row");
-  assert(appSrc.includes("computeLocalUpgradedEdgeTotal"), "InternalEstimateApp must call computeLocalUpgradedEdgeTotal");
+  assert(appSrc.includes("Edge / profile charges"), "InternalEstimateApp sticky panel must show 'Edge / profile charges' row");
+  assert(appSrc.includes("computeLocalEdgeTotalV2"), "InternalEstimateApp must call computeLocalEdgeTotalV2");
 
   // EDGE-DISPLAY-4: room-level edge addon appears in addonLines and reconciles with finalRounded
   //
@@ -752,9 +752,9 @@ assertEqual(
     join(__dirname, "../../../app-quote/src/lib/prototypeQuoteMath.ts"),
     "utf8"
   );
-  assert(quoteMathSrc.includes("edge upgrade"), "prototypeQuoteMath must add 'edge upgrade' addon label per room");
-  assert(quoteMathSrc.includes("UPGRADED_EDGE_PREVIEW_RATE_PER_LF"), "prototypeQuoteMath must use UPGRADED_EDGE_PREVIEW_RATE_PER_LF in room breakdown");
-  assert(quoteMathSrc.includes("UPGRADED_EDGE_PROFILE_SET"), "prototypeQuoteMath must check UPGRADED_EDGE_PROFILE_SET in room breakdown");
+  assert(quoteMathSrc.includes("edgeCustomerLabel"), "prototypeQuoteMath must use edgeCustomerLabel for per-room edge addon label");
+  assert(quoteMathSrc.includes("computeRoomEdgeChargeV2"), "prototypeQuoteMath must call computeRoomEdgeChargeV2 in room breakdown");
+  assert(quoteMathSrc.includes("UPGRADED_EDGE_PROFILE_SET"), "prototypeQuoteMath must still reference UPGRADED_EDGE_PROFILE_SET for legacy fallback");
 }
 
 // 11. VANITY-ISOLATION: vanity program price must not be inflated by fold or room rounding

@@ -293,7 +293,7 @@ function buildEstimateSummaryRows(params: {
   }
 
   if (params.summaryEdgeDisplay > 0) {
-    rows.push({ key: "edge_upgrades", label: "Edge upgrades", displayAmount: params.summaryEdgeDisplay });
+    rows.push({ key: "edge_upgrades", label: "Edge / profile charges", displayAmount: params.summaryEdgeDisplay });
   }
   // Old instructional text that was the preset default — must not print as a customer-facing note.
   const PLACEHOLDER_DESCRIPTIONS = new Set([

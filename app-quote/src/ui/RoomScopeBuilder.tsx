@@ -39,6 +39,12 @@ import {
   roomEditorDomId,
   STANDARD_EDGE_PROFILES,
   UPGRADED_EDGE_PROFILES,
+  INCLUDED_EDGE_PROFILES_V2,
+  UPGRADED_EDGE_PROFILES_V2,
+  MITER_HEIGHTS,
+  MITER_RATES,
+  BUILDUP_RATE_PER_SQFT,
+  LEGACY_AMBIGUOUS_EDGE_PROFILES,
   VANITY_PRICING
 } from "../lib/prototypeQuoteMath";
 import { VANITY_PROGRAM_2026_RATES, VANITY_PROGRAM_YEAR } from "../lib/vanityProgram2026";
@@ -1046,72 +1052,319 @@ export default function RoomScopeBuilder({
             ) : null}
 
             <div className="room-edge-section">
-              <div className="grid3 room-edge-grid">
-                <label>
-                  Edge profile
-                  <select
-                    value={room.edgeProfile ?? DEFAULT_EDGE_PROFILE}
-                    onChange={(e) => {
-                      const next = e.target.value;
-                      const isUpgraded = UPGRADED_EDGE_PROFILES.includes(next as (typeof UPGRADED_EDGE_PROFILES)[number]);
-                      onRoomsChange(
-                        updateRoom(rooms, room.id, {
-                          edgeProfile: next,
-                          upgradedEdgeLf: isUpgraded ? (room.upgradedEdgeLf ?? 0) : 0
-                        })
-                      );
-                    }}
-                  >
-                    <optgroup label="Standard (included)">
-                      {STANDARD_EDGE_PROFILES.map((ep) => (
-                        <option key={ep} value={ep}>
-                          {ep}
-                        </option>
-                      ))}
-                    </optgroup>
-                    <optgroup label="Upgraded (charged by LF)">
-                      {UPGRADED_EDGE_PROFILES.map((ep) => (
-                        <option key={ep} value={ep}>
-                          {ep}
-                        </option>
-                      ))}
-                    </optgroup>
-                    {/* Show legacy edge value as read-only option so restored quotes don't lose their data */}
-                    {room.edgeProfile &&
-                      !(STANDARD_EDGE_PROFILES as readonly string[]).includes(room.edgeProfile) &&
-                      !(UPGRADED_EDGE_PROFILES as readonly string[]).includes(room.edgeProfile) ? (
-                      <optgroup label="Legacy (update recommended)">
-                        <option value={room.edgeProfile}>{room.edgeProfile} (legacy)</option>
-                      </optgroup>
-                    ) : null}
-                  </select>
-                </label>
-                {UPGRADED_EDGE_PROFILES.includes(room.edgeProfile as (typeof UPGRADED_EDGE_PROFILES)[number]) && (
-                  <label>
-                    Upgraded edge linear feet
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.5"
-                      value={room.upgradedEdgeLf ?? ""}
-                      placeholder="0"
-                      onChange={(e) =>
+              {/* ── Structured edge UI (v2) ─────────────────────────────────────── */}
+              {room.edgeMode ? (
+                <div className="room-edge-v2">
+                  <div className="grid3 room-edge-grid">
+                    <label>
+                      Edge type
+                      <select
+                        value={room.edgeMode}
+                        onChange={(e) => {
+                          const next = e.target.value as RoomDraft["edgeMode"];
+                          onRoomsChange(
+                            updateRoom(rooms, room.id, {
+                              edgeMode: next,
+                              edgeProfileV2: next === "included" || next === "upgraded" ? (room.edgeProfileV2 ?? "") : undefined,
+                              edgeLinearFeet: next === "upgraded" || next === "mitered" ? (room.edgeLinearFeet ?? 0) : undefined,
+                              miterHeight: next === "mitered" ? (room.miterHeight ?? "4in") : undefined,
+                              buildUpRequired: next === "mitered" ? (room.buildUpRequired ?? false) : undefined,
+                              buildUpSqft: next === "mitered" ? (room.buildUpSqft ?? 0) : undefined,
+                              manualEdgeAmount: next === "manual" ? (room.manualEdgeAmount ?? 0) : undefined,
+                              manualEdgeReason: next === "manual" ? (room.manualEdgeReason ?? "") : undefined,
+                              manualEdgeCustomerLabel: next === "manual" ? (room.manualEdgeCustomerLabel ?? "") : undefined
+                            })
+                          );
+                        }}
+                      >
+                        <option value="included">Included (no charge)</option>
+                        <option value="upgraded">Upgraded (charged by LF)</option>
+                        <option value="mitered">Mitered (charged by LF)</option>
+                        <option value="manual">Manual price</option>
+                      </select>
+                    </label>
+
+                    {/* Included — profile name only */}
+                    {room.edgeMode === "included" && (
+                      <label>
+                        Edge profile
+                        <select
+                          value={room.edgeProfileV2 ?? "Eased"}
+                          onChange={(e) =>
+                            onRoomsChange(updateRoom(rooms, room.id, { edgeProfileV2: e.target.value }))
+                          }
+                        >
+                          {INCLUDED_EDGE_PROFILES_V2.map((p) => (
+                            <option key={p} value={p}>{p}</option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+
+                    {/* Upgraded — profile + LF */}
+                    {room.edgeMode === "upgraded" && (
+                      <>
+                        <label>
+                          Edge profile
+                          <select
+                            value={room.edgeProfileV2 ?? ""}
+                            onChange={(e) =>
+                              onRoomsChange(updateRoom(rooms, room.id, { edgeProfileV2: e.target.value }))
+                            }
+                          >
+                            <option value="">— select —</option>
+                            {UPGRADED_EDGE_PROFILES_V2.map((p) => (
+                              <option key={p} value={p}>{p}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <label>
+                          Linear feet
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.5"
+                            value={room.edgeLinearFeet ?? ""}
+                            placeholder="0"
+                            onChange={(e) =>
+                              onRoomsChange(
+                                updateRoom(rooms, room.id, { edgeLinearFeet: Math.max(0, Number(e.target.value) || 0) })
+                              )
+                            }
+                          />
+                        </label>
+                      </>
+                    )}
+
+                    {/* Mitered — height + LF */}
+                    {room.edgeMode === "mitered" && (
+                      <>
+                        <label>
+                          Miter height
+                          <select
+                            value={room.miterHeight ?? "4in"}
+                            onChange={(e) =>
+                              onRoomsChange(updateRoom(rooms, room.id, { miterHeight: e.target.value as RoomDraft["miterHeight"] }))
+                            }
+                          >
+                            {MITER_HEIGHTS.map((h) => (
+                              <option key={h} value={h}>
+                                {h === "2-3in" ? `2"-3" mitered` : `${h.replace("in", `"`)}" mitered`}
+                                {` — $${MITER_RATES[h]}/LF`}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label>
+                          Linear feet
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.5"
+                            value={room.edgeLinearFeet ?? ""}
+                            placeholder="0"
+                            onChange={(e) =>
+                              onRoomsChange(
+                                updateRoom(rooms, room.id, { edgeLinearFeet: Math.max(0, Number(e.target.value) || 0) })
+                              )
+                            }
+                          />
+                        </label>
+                      </>
+                    )}
+
+                    {/* Manual — amount + reason */}
+                    {room.edgeMode === "manual" && (
+                      <>
+                        <label>
+                          Edge amount ($)
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={room.manualEdgeAmount ?? ""}
+                            placeholder="0"
+                            onChange={(e) =>
+                              onRoomsChange(
+                                updateRoom(rooms, room.id, { manualEdgeAmount: Math.max(0, Number(e.target.value) || 0) })
+                              )
+                            }
+                          />
+                        </label>
+                        <label>
+                          Customer-safe label
+                          <input
+                            type="text"
+                            value={room.manualEdgeCustomerLabel ?? ""}
+                            placeholder="Custom edge profile"
+                            onChange={(e) =>
+                              onRoomsChange(updateRoom(rooms, room.id, { manualEdgeCustomerLabel: e.target.value }))
+                            }
+                          />
+                        </label>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Build-up row (mitered only) */}
+                  {room.edgeMode === "mitered" && (
+                    <div className="room-edge-buildup">
+                      <label className="ie-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={!!room.buildUpRequired}
+                          onChange={(e) =>
+                            onRoomsChange(updateRoom(rooms, room.id, { buildUpRequired: e.target.checked }))
+                          }
+                        />
+                        {" "}Build-up required ($20/SF)
+                      </label>
+                      {room.buildUpRequired && (
+                        <label style={{ marginLeft: 16 }}>
+                          Build-up SF
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.5"
+                            value={room.buildUpSqft ?? ""}
+                            placeholder="0"
+                            onChange={(e) =>
+                              onRoomsChange(
+                                updateRoom(rooms, room.id, { buildUpSqft: Math.max(0, Number(e.target.value) || 0) })
+                              )
+                            }
+                          />
+                        </label>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Manual reason (internal only — not shown on customer PDF) */}
+                  {room.edgeMode === "manual" && (
+                    <div className="room-edge-manual-reason">
+                      <p className="ie-badge ie-badge-warning" style={{ marginBottom: 4 }}>
+                        Manual edge price — internal use only. Reason required and will not appear on customer PDF.
+                      </p>
+                      <label>
+                        Internal reason (required)
+                        <input
+                          type="text"
+                          value={room.manualEdgeReason ?? ""}
+                          placeholder="Enter reason for manual pricing…"
+                          className={!room.manualEdgeReason?.trim() ? "ie-input-warning" : ""}
+                          onChange={(e) =>
+                            onRoomsChange(updateRoom(rooms, room.id, { manualEdgeReason: e.target.value }))
+                          }
+                        />
+                      </label>
+                      {!room.manualEdgeReason?.trim() && (
+                        <p className="muted small" style={{ color: "var(--eos-warning, #b45309)", marginTop: 2 }}>
+                          Internal reason is required for manual edge pricing.
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Warnings */}
+                  {(room.edgeMode === "upgraded" && !(room.edgeLinearFeet && room.edgeLinearFeet > 0)) ? (
+                    <p className="muted small" style={{ marginTop: 4 }}>
+                      <strong>Enter linear feet — upgraded edge will not be priced without LF.</strong>
+                    </p>
+                  ) : null}
+                  {(room.edgeMode === "mitered" && !(room.edgeLinearFeet && room.edgeLinearFeet > 0)) ? (
+                    <p className="muted small" style={{ marginTop: 4 }}>
+                      <strong>Enter linear feet — mitered edge will not be priced without LF.</strong>
+                    </p>
+                  ) : null}
+                </div>
+              ) : (
+                /* ── Legacy edge UI (old quotes without edgeMode) ────────────── */
+                <div className="room-edge-legacy">
+                  {LEGACY_AMBIGUOUS_EDGE_PROFILES.has(room.edgeProfile ?? "") && (
+                    <p className="ie-badge ie-badge-caution" style={{ marginBottom: 6 }}>
+                      Legacy edge profile — using old pricing rules. Update to new structured edge model.
+                    </p>
+                  )}
+                  <div className="grid3 room-edge-grid">
+                    <label>
+                      Edge profile
+                      <select
+                        value={room.edgeProfile ?? DEFAULT_EDGE_PROFILE}
+                        onChange={(e) => {
+                          const next = e.target.value;
+                          const isUpgraded = UPGRADED_EDGE_PROFILES.includes(next as (typeof UPGRADED_EDGE_PROFILES)[number]);
+                          onRoomsChange(
+                            updateRoom(rooms, room.id, {
+                              edgeProfile: next,
+                              upgradedEdgeLf: isUpgraded ? (room.upgradedEdgeLf ?? 0) : 0
+                            })
+                          );
+                        }}
+                      >
+                        <optgroup label="Standard (included)">
+                          {STANDARD_EDGE_PROFILES.map((ep) => (
+                            <option key={ep} value={ep}>{ep}</option>
+                          ))}
+                        </optgroup>
+                        <optgroup label="Upgraded (charged by LF)">
+                          {UPGRADED_EDGE_PROFILES.map((ep) => (
+                            <option key={ep} value={ep}>{ep}</option>
+                          ))}
+                        </optgroup>
+                        {room.edgeProfile &&
+                          !(STANDARD_EDGE_PROFILES as readonly string[]).includes(room.edgeProfile) &&
+                          !(UPGRADED_EDGE_PROFILES as readonly string[]).includes(room.edgeProfile) ? (
+                          <optgroup label="Legacy (update recommended)">
+                            <option value={room.edgeProfile}>{room.edgeProfile} (legacy)</option>
+                          </optgroup>
+                        ) : null}
+                      </select>
+                    </label>
+                    {UPGRADED_EDGE_PROFILES.includes(room.edgeProfile as (typeof UPGRADED_EDGE_PROFILES)[number]) && (
+                      <label>
+                        Upgraded edge linear feet
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.5"
+                          value={room.upgradedEdgeLf ?? ""}
+                          placeholder="0"
+                          onChange={(e) =>
+                            onRoomsChange(
+                              updateRoom(rooms, room.id, { upgradedEdgeLf: Math.max(0, Number(e.target.value) || 0) })
+                            )
+                          }
+                        />
+                      </label>
+                    )}
+                  </div>
+                  {UPGRADED_EDGE_PROFILES.includes(room.edgeProfile as (typeof UPGRADED_EDGE_PROFILES)[number]) && (
+                    <p className="muted small" style={{ marginTop: 4 }}>
+                      {!(room.upgradedEdgeLf && room.upgradedEdgeLf > 0) ? (
+                        <strong>Enter linear feet — upgraded edge will not be priced without LF.</strong>
+                      ) : (
+                        <>Rate applied by backend calculator.</>
+                      )}
+                    </p>
+                  )}
+                  <p className="muted small" style={{ marginTop: 6 }}>
+                    <button
+                      type="button"
+                      className="ie-text-btn"
+                      onClick={() =>
                         onRoomsChange(
-                          updateRoom(rooms, room.id, { upgradedEdgeLf: Math.max(0, Number(e.target.value) || 0) })
+                          updateRoom(rooms, room.id, {
+                            edgeMode: "included",
+                            edgeProfileV2: "Eased",
+                            edgeLinearFeet: 0
+                          })
                         )
                       }
-                    />
-                  </label>
-                )}
-              </div>
-              {UPGRADED_EDGE_PROFILES.includes(room.edgeProfile as (typeof UPGRADED_EDGE_PROFILES)[number]) && (
-                <p className="muted small" style={{ marginTop: 4 }}>
-                  {!(room.upgradedEdgeLf && room.upgradedEdgeLf > 0) ? (
-                    <strong>Enter linear feet — upgraded edge will not be priced without LF.</strong>
-                  ) : (
-                    <>Rate applied by backend calculator.</>
-                  )}
-                </p>
+                    >
+                      Switch to new edge model →
+                    </button>
+                  </p>
+                </div>
               )}
             </div>
 
