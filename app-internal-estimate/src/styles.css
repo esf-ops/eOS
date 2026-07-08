@@ -4247,6 +4247,34 @@ textarea:focus {
   background: var(--eos-surface);
 }
 
+/* Text cursor / caret guardrail — Mac + Windows (Chrome, Edge).
+   No caret-color was set globally; on some Windows builds the default caret
+   can blend into light field backgrounds. Explicit cursor + caret-color keeps
+   the I-beam and blinking insertion caret visible without changing layout. */
+.page-internal-estimate input:not([disabled]):not([readonly]):not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="file"]):not([type="hidden"]):not([type="range"]):not([type="color"]),
+.page-internal-estimate textarea:not([disabled]):not([readonly]) {
+  cursor: text;
+  caret-color: var(--eos-ink, currentColor);
+}
+
+.page-internal-estimate select:not([disabled]) {
+  cursor: pointer;
+}
+
+/* Modal — same guardrail when overlays render form fields outside .page-internal-estimate descendants */
+.ie-modal-overlay input:not([disabled]):not([readonly]):not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="file"]):not([type="hidden"]):not([type="range"]):not([type="color"]),
+.ie-modal-overlay textarea:not([disabled]):not([readonly]),
+.ie-takeoff-modal input:not([disabled]):not([readonly]):not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="file"]):not([type="hidden"]):not([type="range"]):not([type="color"]),
+.ie-takeoff-modal textarea:not([disabled]):not([readonly]) {
+  cursor: text;
+  caret-color: var(--eos-ink, currentColor);
+}
+
+.ie-modal-overlay select:not([disabled]),
+.ie-takeoff-modal select:not([disabled]) {
+  cursor: pointer;
+}
+
 /* Modal — glass backdrop + refined card */
 .ie-modal-overlay {
   background: rgba(11, 26, 51, 0.45);
