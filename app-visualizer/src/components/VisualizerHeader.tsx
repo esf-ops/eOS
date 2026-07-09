@@ -1,4 +1,4 @@
-import { PRODUCT_NAME } from "../lib/config";
+import { POWERED_BY, PRODUCT_NAME } from "../lib/config";
 
 export function VisualizerHeader() {
   return (
@@ -21,7 +21,10 @@ export function VisualizerHeader() {
             />
           </svg>
         </span>
-        <span className="viz-brand-name">{PRODUCT_NAME}</span>
+        <span className="viz-brand-text">
+          <span className="viz-brand-name">{PRODUCT_NAME}</span>
+          <span className="viz-brand-sub">{POWERED_BY}</span>
+        </span>
       </div>
     </header>
   );

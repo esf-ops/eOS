@@ -152,11 +152,25 @@ body {
   box-shadow: 0 8px 22px var(--accent-glow), inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }
 
+.viz-brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+
 .viz-brand-name {
   font-size: 1.12rem;
   font-weight: 700;
   letter-spacing: -0.02em;
   color: var(--ink);
+}
+
+.viz-brand-sub {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
 }
 
 /* ── Step indicator ────────────────────────────────────────── */
@@ -610,53 +624,111 @@ body {
 .viz-selected-info strong { display: block; font-size: 0.92rem; }
 .viz-selected-info span { font-size: 0.8rem; color: var(--ink-muted); }
 
-/* ── Preview experience ────────────────────────────────────── */
+/* ── Preview experience (centered immersive stage) ─────────── */
 .viz-preview {
-  display: grid;
-  grid-template-columns: minmax(0, 2.1fr) minmax(320px, 1fr);
-  gap: 22px;
-  align-items: start;
-}
-
-.viz-preview-stage { min-width: 0; }
-
-.viz-preview-reveal { animation: viz-reveal 0.6s cubic-bezier(0.22, 1, 0.36, 1) both; }
-
-@keyframes viz-reveal {
-  from { opacity: 0; transform: scale(0.985); }
-  to { opacity: 1; transform: scale(1); }
-}
-
-.viz-preview-panel {
-  position: sticky;
-  top: 16px;
+  position: relative;
+  width: min(88vw, 1600px);
+  margin-left: 50%;
+  transform: translateX(-50%);
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 24px;
+  align-items: center;
+  gap: 20px;
+}
+
+.viz-preview-stage {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.viz-preview-reveal {
+  width: 100%;
+  animation: viz-reveal 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes viz-reveal {
+  from { opacity: 0; transform: scale(0.97) translateY(10px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.viz-stage-frame {
+  position: relative;
+  width: 100%;
   border-radius: var(--radius-xl);
+  filter: drop-shadow(0 40px 90px rgba(20, 24, 31, 0.22));
+}
+
+.viz-stage-badge {
+  position: absolute;
+  z-index: 6;
+  top: 16px;
+  left: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 650;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(12px);
+  animation: viz-badge-in 0.7s 0.15s ease both;
+}
+
+.viz-stage-badge-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--gold);
+  box-shadow: 0 0 0 3px rgba(176, 131, 65, 0.2);
+}
+
+.viz-stage-badge-material { color: var(--accent-2); }
+
+@keyframes viz-badge-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.viz-actionbar-wrap {
+  width: 100%;
+  max-width: 760px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  animation: viz-actionbar-in 0.6s 0.1s ease both;
+}
+
+@keyframes viz-actionbar-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.viz-actionbar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px;
+  border-radius: 999px;
   background: var(--surface);
   border: 1px solid var(--line);
   box-shadow: var(--shadow-glass);
   backdrop-filter: blur(16px);
 }
 
-.viz-preview-panel .viz-panel-head h2 {
-  margin: 6px 0 0;
-  font-size: 1.4rem;
-}
-
-.viz-preview-material {
-  margin: 10px 0 0;
-  font-size: 1rem;
-  font-weight: 650;
-  color: var(--accent-2);
-}
-
-.viz-preview-actions { display: flex; flex-direction: column; gap: 10px; }
+.viz-actionbar .viz-btn { border-radius: 999px; }
 
 .viz-disclaimer {
-  margin: 4px 0 0;
+  margin: 0;
+  max-width: 44rem;
+  text-align: center;
   font-size: 0.78rem;
   line-height: 1.5;
   color: var(--ink-muted);
@@ -666,7 +738,7 @@ body {
 .viz-ba {
   position: relative;
   width: 100%;
-  max-height: 82vh;
+  max-height: 78vh;
   margin: 0 auto;
   overflow: hidden;
   border-radius: var(--radius-xl);
@@ -750,7 +822,7 @@ body {
 .viz-loading-frame {
   position: relative;
   width: 100%;
-  max-height: 82vh;
+  max-height: 78vh;
   overflow: hidden;
   border-radius: var(--radius-xl);
   background: #0e1116;
@@ -761,7 +833,7 @@ body {
 .viz-loading-image {
   display: block;
   width: 100%;
-  max-height: 82vh;
+  max-height: 78vh;
   object-fit: contain;
   filter: saturate(0.85) brightness(0.7);
 }
@@ -915,18 +987,18 @@ body {
 
 /* ── Responsive ────────────────────────────────────────────── */
 @media (max-width: 960px) {
-  .viz-studio,
-  .viz-preview {
+  .viz-studio {
     grid-template-columns: 1fr;
   }
 
-  .viz-studio-panel,
-  .viz-preview-panel {
+  .viz-studio-panel {
     position: static;
   }
 
   .viz-room-image { max-height: 52vh; }
   .viz-swatch-grid { max-height: none; }
+
+  .viz-preview { width: 92vw; }
 }
 
 @media (max-width: 620px) {
@@ -945,9 +1017,21 @@ body {
   .viz-room-image,
   .viz-ba,
   .viz-loading-frame,
-  .viz-loading-image { max-height: 60vh; }
+  .viz-loading-image { max-height: 62vh; }
 
   .viz-ba-handle { width: 46px; height: 46px; }
+
+  .viz-preview { width: 94vw; }
+
+  .viz-actionbar {
+    width: 100%;
+    border-radius: var(--radius-lg);
+    flex-direction: column;
+  }
+
+  .viz-actionbar .viz-btn { width: 100%; }
+
+  .viz-stage-badge { font-size: 0.72rem; padding: 6px 11px; top: 12px; left: 12px; }
 }
 
 /* ── Reduced motion ────────────────────────────────────────── */

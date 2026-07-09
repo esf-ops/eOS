@@ -30,53 +30,46 @@ export function PreviewExperience({
           <LoadingPreview roomPreview={roomPreview} />
         ) : (
           <div className="viz-preview-reveal">
-            <BeforeAfterSlider beforeSrc={roomPreview} afterSrc={renderedImage} />
+            <div className="viz-stage-frame">
+              <span className="viz-stage-badge">
+                <span className="viz-stage-badge-dot" aria-hidden />
+                Concept preview
+                {materialName ? <span className="viz-stage-badge-material"> · {materialName}</span> : null}
+              </span>
+              <BeforeAfterSlider beforeSrc={roomPreview} afterSrc={renderedImage} />
+            </div>
           </div>
         )}
       </div>
 
-      <aside className="viz-preview-panel">
-        <div className="viz-panel-head">
-          <p className="viz-eyebrow">Concept preview</p>
-          <h2>Preview your new countertop</h2>
-          {materialName ? <p className="viz-preview-material">{materialName}</p> : null}
-        </div>
+      {!loading ? (
+        <div className="viz-actionbar-wrap">
+          {error ? (
+            <div className="viz-alert viz-alert-error" role="alert">
+              {error}
+            </div>
+          ) : null}
 
-        {error ? (
-          <div className="viz-alert viz-alert-error" role="alert">
-            {error}
+          <div className="viz-actionbar">
+            <button
+              type="button"
+              className="viz-btn viz-btn-primary"
+              onClick={onDownload}
+              disabled={!renderedImage}
+            >
+              Download result
+            </button>
+            <button type="button" className="viz-btn viz-btn-secondary" onClick={onTryAnotherColor}>
+              Try another color
+            </button>
+            <button type="button" className="viz-btn viz-btn-ghost" onClick={onUploadAnotherPhoto}>
+              Upload another photo
+            </button>
           </div>
-        ) : null}
 
-        <div className="viz-preview-actions">
-          <button
-            type="button"
-            className="viz-btn viz-btn-primary viz-btn-block"
-            onClick={onDownload}
-            disabled={loading || !renderedImage}
-          >
-            Download result
-          </button>
-          <button
-            type="button"
-            className="viz-btn viz-btn-secondary viz-btn-block"
-            onClick={onTryAnotherColor}
-            disabled={loading}
-          >
-            Try another color
-          </button>
-          <button
-            type="button"
-            className="viz-btn viz-btn-ghost viz-btn-block"
-            onClick={onUploadAnotherPhoto}
-            disabled={loading}
-          >
-            Upload another photo
-          </button>
+          <p className="viz-disclaimer">{VISUALIZER_DISCLAIMER}</p>
         </div>
-
-        <p className="viz-disclaimer">{VISUALIZER_DISCLAIMER}</p>
-      </aside>
+      ) : null}
     </section>
   );
 }

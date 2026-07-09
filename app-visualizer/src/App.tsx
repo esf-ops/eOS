@@ -68,12 +68,12 @@ export function App() {
         setUsesElite100Assets(usesElite);
         setFallbackStaticOnly(Boolean(payload.meta?.fallbackStaticOnly) || !merged.length);
         if (!merged.length) {
-          console.warn("[slabOS Visualizer] Using local fallback catalog; API returned no textures.");
+          console.warn("[Elite Stone Visualizer] Using local fallback catalog; API returned no textures.");
         }
         if (list[0]) setMaterialId(list[0].id);
       })
       .catch(() => {
-        console.warn("[slabOS Visualizer] Texture API unavailable; using local fallback catalog.");
+        console.warn("[Elite Stone Visualizer] Texture API unavailable; using local fallback catalog.");
         setTextures(localCatalog.textures);
         setUsesElite100Assets(false);
         setFallbackStaticOnly(true);
