@@ -615,6 +615,13 @@ function computeComparisonGroupComponentsExact(
       backsplashTotal = 0;
       fhbTotal = 0;
     }
+  } else {
+    // Non-selected groups: silently fold in the same internal-only adjustment so all comparison
+    // totals are apples-to-apples with the selected group. This is never exposed as a named line.
+    const foldExact = round2(room.internalFoldExact ?? 0);
+    if (foldExact !== 0) {
+      counterTotal = round2(counterTotal + foldExact);
+    }
   }
 
   return {

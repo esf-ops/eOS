@@ -2882,4 +2882,321 @@ function buildOocPdfFixture(
   }
 }
 
+// ─── COMPARISON-INTERNAL-FOLD tests ──────────────────────────────────────────
+// Hidden/internal-only labor fees must be included in optional comparison totals.
+
+// COMPARISON-INTERNAL-FOLD-1: direct quote — room-assigned hidden fee included in all comparison groups
+{
+  const kitchen = createDefaultRoom("Group F");
+  kitchen.name = "Kitchen";
+  kitchen.calcMode = "Manual Sq Ft";
+  kitchen.direct = { counter: 40, splash: 0 };
+  kitchen.customerComparisonGroups = ["Group Promo"];
+
+  const { rooms: measured } = calculateAllRoomDrafts(
+    [kitchen],
+    "New Construction",
+    "direct",
+    0,
+    INTERNAL_ESTIMATE_MEASURE_OPTIONS
+  );
+  measured[0].extras = 200;
+  measured[0].addons = [{ label: "Sink Cutout", total: 200 }];
+
+  // $300 hidden labor fee assigned to Kitchen; $200 customer-facing add-on
+  const hiddenLaborLine = {
+    lineKey: "hidden-labor-001",
+    name: "Delivery & Setup Labor",
+    quantity: 1,
+    unitPrice: 300,
+    customerFacing: false,
+    roomName: "Kitchen",
+    category: "Labor"
+  };
+  const customerAddOnLine = {
+    lineKey: "customer-addon-001",
+    name: "Undermount Sink Cutout",
+    quantity: 1,
+    unitPrice: 200,
+    customerFacing: true,
+    roomName: "Kitchen",
+    category: "Add-ons"
+  };
+
+  const roomBd = buildCustomerRoomAreaCostBreakdown({
+    roomDrafts: [kitchen],
+    measuredRooms: measured,
+    materialBasis: "direct",
+    measureOptions: INTERNAL_ESTIMATE_MEASURE_OPTIONS,
+    customLines: [hiddenLaborLine, customerAddOnLine]
+  });
+
+  // Room's internalFoldExact must equal the hidden labor amount
+  assert.equal(
+    roomBd.rooms[0].internalFoldExact,
+    300,
+    "COMPARISON-INTERNAL-FOLD-1: room.internalFoldExact must be $300"
+  );
+
+  // materialAmountExact absorbs the fold
+  assert.ok(
+    roomBd.rooms[0].materialAmountExact >= 300,
+    "COMPARISON-INTERNAL-FOLD-1: materialAmountExact absorbs hidden fold"
+  );
+
+  // Build display model with Group F selected and Promo as comparison
+  const selectedBd = buildSelectedMaterialBreakdown([kitchen], "direct", {
+    internalMaterialUseTax: true,
+    chargeableCounterCeil: true,
+    materialProgramDefault: INTERNAL_ESTIMATE_ELITE_100_PROGRAM
+  });
+  const { internalOnlyAdjustDollars } = splitInternalEstimateCustomLines({
+    customLineRows: [hiddenLaborLine, customerAddOnLine].map((l) => ({
+      id: l.lineKey,
+      name: l.name,
+      description: "",
+      qty: String(l.quantity),
+      unitPrice: String(l.unitPrice),
+      customerFacing: l.customerFacing,
+      roomId: "",
+      roomName: l.roomName,
+      category: l.category
+    })),
+    roomDrafts: [{ id: kitchen.id, name: kitchen.name }]
+  });
+  assert.equal(internalOnlyAdjustDollars, 300, "COMPARISON-INTERNAL-FOLD-1: internalOnlyAdjustDollars must be $300");
+
+  const allGroupRates = buildInternalEstimateGroupComparison({
+    countertopSqft: 40,
+    backsplashSqft: 0,
+    roomFixedDollars: 200,
+    customLineDollars: 200 + 300,
+    basis: "direct",
+    internalMaterialUseTax: true
+  });
+
+  const visibleCustomerLines = [
+    {
+      lineKey: customerAddOnLine.lineKey,
+      name: customerAddOnLine.name,
+      description: "",
+      qty: 1,
+      lineTotal: 200
+    }
+  ];
+
+  const displayModel = buildCustomerEstimateDisplayModel({
+    selectedBreakdown: selectedBd,
+    measuredRooms: measured,
+    visibleCustomerLines,
+    internalMaterialFoldDollars: internalOnlyAdjustDollars,
+    roomAreaBreakdown: roomBd,
+    allGroupComparisonRates: allGroupRates,
+    internalMaterialUseTax: true
+  });
+
+  const summarySum = displayModel.estimateSummaryRows.reduce((s, r) => s + r.displayAmount, 0);
+  assert.equal(summarySum, displayModel.finalRounded, "COMPARISON-INTERNAL-FOLD-1: selected summary reconciles");
+
+  const ct = displayModel.roomComparisonTable;
+  assert.ok(ct, "COMPARISON-INTERNAL-FOLD-1: comparison table present");
+  const roomBlock = ct!.roomBlocks[0];
+  assert.ok(roomBlock, "COMPARISON-INTERNAL-FOLD-1: kitchen comparison block present");
+
+  // Promo block must include the hidden $300 fold
+  const promoBlock = roomBlock.groupBlocks.find((g) => g.group === "Group Promo");
+  assert.ok(promoBlock, "COMPARISON-INTERNAL-FOLD-1: Group Promo block present");
+
+  const promoMaterial = promoBlock!.countertopDisplay + promoBlock!.backsplashDisplay + promoBlock!.fhbDisplay;
+  assert.ok(
+    promoMaterial >= 300,
+    `COMPARISON-INTERNAL-FOLD-1: Promo material portion includes hidden $300 fold (got ${promoMaterial})`
+  );
+
+  // Hidden label must NOT appear on customer-facing extra lines
+  const allExtraLabels = promoBlock!.extraLines.map((l) => l.label);
+  assert.ok(
+    !allExtraLabels.some((label) => /delivery.*setup.*labor/i.test(label)),
+    "COMPARISON-INTERNAL-FOLD-1: hidden labor label must NOT appear in comparison extraLines"
+  );
+
+  // comparison row parts must sum to roomTotalDisplay
+  assert.equal(
+    comparisonGroupDisplayedPartsSum(promoBlock!),
+    promoBlock!.roomTotalDisplay,
+    "COMPARISON-INTERNAL-FOLD-1: Promo comparison rows reconcile"
+  );
+
+  // no double-counting: customer add-on still appears as named extra line
+  const sinkCutoutLine = promoBlock!.extraLines.find((l) => /undermount sink cutout/i.test(l.label));
+  assert.ok(sinkCutoutLine, "COMPARISON-INTERNAL-FOLD-1: customer-facing add-on still appears in Promo extras");
+  assert.equal(sinkCutoutLine!.displayAmount, 200, "COMPARISON-INTERNAL-FOLD-1: customer add-on amount correct");
+}
+
+// COMPARISON-INTERNAL-FOLD-2: unassigned (project-level) hidden fee distributed proportionally to all rooms
+{
+  const kitchen = createDefaultRoom("Group F");
+  kitchen.name = "Kitchen";
+  kitchen.calcMode = "Manual Sq Ft";
+  kitchen.direct = { counter: 30, splash: 0 };
+  kitchen.customerComparisonGroups = ["Group Promo"];
+
+  const bath = createDefaultRoom("Group F");
+  bath.name = "Bath";
+  bath.calcMode = "Manual Sq Ft";
+  bath.direct = { counter: 10, splash: 0 };
+  bath.customerComparisonGroups = ["Group Promo"];
+
+  const { rooms: measured } = calculateAllRoomDrafts(
+    [kitchen, bath],
+    "New Construction",
+    "direct",
+    0,
+    INTERNAL_ESTIMATE_MEASURE_OPTIONS
+  );
+
+  // $200 unassigned hidden fee (no roomName)
+  const hiddenUnassigned = {
+    lineKey: "hidden-unassigned-001",
+    name: "Internal Fuel Surcharge",
+    quantity: 1,
+    unitPrice: 200,
+    customerFacing: false,
+    roomName: "",
+    category: "Labor"
+  };
+
+  const roomBd = buildCustomerRoomAreaCostBreakdown({
+    roomDrafts: [kitchen, bath],
+    measuredRooms: measured,
+    materialBasis: "direct",
+    measureOptions: INTERNAL_ESTIMATE_MEASURE_OPTIONS,
+    customLines: [hiddenUnassigned]
+  });
+
+  // Fold must be distributed across both rooms; total fold must equal $200
+  const totalFold = roomBd.rooms.reduce((s, r) => s + r.internalFoldExact, 0);
+  assert.ok(
+    Math.abs(totalFold - 200) <= 0.02,
+    `COMPARISON-INTERNAL-FOLD-2: total internalFoldExact across rooms must be $200 (got ${totalFold})`
+  );
+
+  // Each room must have received a non-zero fold share
+  assert.ok(roomBd.rooms[0].internalFoldExact > 0, "COMPARISON-INTERNAL-FOLD-2: Kitchen received fold share");
+  assert.ok(roomBd.rooms[1].internalFoldExact > 0, "COMPARISON-INTERNAL-FOLD-2: Bath received fold share");
+
+  // Build display and check comparison totals
+  const selectedBd = buildSelectedMaterialBreakdown([kitchen, bath], "direct", {
+    internalMaterialUseTax: true,
+    chargeableCounterCeil: true,
+    materialProgramDefault: INTERNAL_ESTIMATE_ELITE_100_PROGRAM
+  });
+  const allGroupRates = buildInternalEstimateGroupComparison({
+    countertopSqft: 40,
+    backsplashSqft: 0,
+    roomFixedDollars: 0,
+    customLineDollars: 200,
+    basis: "direct",
+    internalMaterialUseTax: true
+  });
+
+  const displayModel = buildCustomerEstimateDisplayModel({
+    selectedBreakdown: selectedBd,
+    measuredRooms: measured,
+    visibleCustomerLines: [],
+    internalMaterialFoldDollars: 200,
+    roomAreaBreakdown: roomBd,
+    allGroupComparisonRates: allGroupRates,
+    internalMaterialUseTax: true
+  });
+
+  const ct = displayModel.roomComparisonTable;
+  assert.ok(ct, "COMPARISON-INTERNAL-FOLD-2: comparison table present");
+
+  for (const roomBlock of ct!.roomBlocks) {
+    const promoBlock = roomBlock.groupBlocks.find((g) => g.group === "Group Promo");
+    assert.ok(promoBlock, `COMPARISON-INTERNAL-FOLD-2: Promo block for ${roomBlock.roomDisplayName}`);
+    // Promo material portion includes the room's fold share
+    const promoMaterial = promoBlock!.countertopDisplay + promoBlock!.backsplashDisplay + promoBlock!.fhbDisplay;
+    const roomRow = roomBd.rooms.find((r) => r.displayName === roomBlock.roomDisplayName)!;
+    assert.ok(
+      promoMaterial >= roomRow.internalFoldExact,
+      `COMPARISON-INTERNAL-FOLD-2: ${roomBlock.roomDisplayName} Promo material includes fold`
+    );
+    assert.equal(
+      comparisonGroupDisplayedPartsSum(promoBlock!),
+      promoBlock!.roomTotalDisplay,
+      `COMPARISON-INTERNAL-FOLD-2: ${roomBlock.roomDisplayName} Promo comparison rows reconcile`
+    );
+    // hidden label not exposed
+    assert.ok(
+      !promoBlock!.extraLines.some((l) => /fuel surcharge/i.test(l.label)),
+      `COMPARISON-INTERNAL-FOLD-2: hidden label not in ${roomBlock.roomDisplayName} Promo extraLines`
+    );
+  }
+}
+
+// COMPARISON-INTERNAL-FOLD-3: zero fold — behavior unchanged when no internal-only lines
+{
+  const kitchen = createDefaultRoom("Group D");
+  kitchen.name = "Kitchen";
+  kitchen.calcMode = "Manual Sq Ft";
+  kitchen.direct = { counter: 25, splash: 0 };
+  kitchen.customerComparisonGroups = ["Group A", "Group B"];
+
+  const { rooms: measured } = calculateAllRoomDrafts(
+    [kitchen],
+    "New Construction",
+    "wholesale",
+    0,
+    INTERNAL_ESTIMATE_MEASURE_OPTIONS
+  );
+
+  const roomBd = buildCustomerRoomAreaCostBreakdown({
+    roomDrafts: [kitchen],
+    measuredRooms: measured,
+    materialBasis: "wholesale",
+    measureOptions: INTERNAL_ESTIMATE_MEASURE_OPTIONS,
+    customLines: []
+  });
+
+  assert.equal(roomBd.rooms[0].internalFoldExact, 0, "COMPARISON-INTERNAL-FOLD-3: internalFoldExact is 0 when no hidden fees");
+
+  const selectedBd = buildSelectedMaterialBreakdown([kitchen], "wholesale", {
+    internalMaterialUseTax: true,
+    chargeableCounterCeil: true,
+    materialProgramDefault: INTERNAL_ESTIMATE_ELITE_100_PROGRAM
+  });
+  const allGroupRates = buildInternalEstimateGroupComparison({
+    countertopSqft: 25,
+    backsplashSqft: 0,
+    roomFixedDollars: 0,
+    customLineDollars: 0,
+    basis: "wholesale",
+    internalMaterialUseTax: true
+  });
+
+  const displayModel = buildCustomerEstimateDisplayModel({
+    selectedBreakdown: selectedBd,
+    measuredRooms: measured,
+    visibleCustomerLines: [],
+    internalMaterialFoldDollars: 0,
+    roomAreaBreakdown: roomBd,
+    allGroupComparisonRates: allGroupRates,
+    internalMaterialUseTax: true
+  });
+
+  const ct = displayModel.roomComparisonTable;
+  assert.ok(ct, "COMPARISON-INTERNAL-FOLD-3: comparison table present");
+  const roomBlock = ct!.roomBlocks[0];
+  assert.ok(roomBlock, "COMPARISON-INTERNAL-FOLD-3: kitchen comparison block present");
+  for (const block of roomBlock.groupBlocks) {
+    assert.equal(
+      comparisonGroupDisplayedPartsSum(block),
+      block.roomTotalDisplay,
+      `COMPARISON-INTERNAL-FOLD-3: ${block.group} comparison rows reconcile with zero fold`
+    );
+  }
+}
+
 console.log("verify-internal-estimate-beta-fixes: OK");

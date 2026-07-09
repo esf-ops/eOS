@@ -1685,6 +1685,12 @@ export type CustomerRoomAreaCostRow = {
   backsplashFhbSf: number;
   /** Stone + backsplash + use tax on countertop for this area (excludes room add-ons). */
   materialAmountExact: number;
+  /**
+   * Amount of internal-only (non-customer-facing) custom line fold absorbed into `materialAmountExact`.
+   * Used to apply the same fold to comparison group columns so all comparison totals are apples-to-apples.
+   * Never exposed on customer-facing output — silently added to each comparison group room total.
+   */
+  internalFoldExact: number;
   addons: CustomerRoomAreaCostAddon[];
   customerCustomLines: CustomerRoomAreaCostCustomLine[];
   roomTotalExact: number;
@@ -1910,6 +1916,7 @@ export function buildCustomerRoomAreaCostBreakdown(params: {
       addons,
       customerCustomLines: [],
       roomTotalExact: 0,
+      internalFoldExact: 0,
       fixedDisplayTotal,
       customerNote: String(draft?.customerNote ?? "").trim(),
       customerComparisonGroups: draft?.customerComparisonGroups?.length ? [...draft.customerComparisonGroups] : undefined,
@@ -1933,6 +1940,7 @@ export function buildCustomerRoomAreaCostBreakdown(params: {
     if (!line.customerFacing) {
       if (idx >= 0) {
         rows[idx].materialAmountExact = round2(rows[idx].materialAmountExact + amt);
+        rows[idx].internalFoldExact = round2(rows[idx].internalFoldExact + amt);
       } else {
         internalUnassignedPool.amount = round2(internalUnassignedPool.amount + amt);
       }
@@ -1954,6 +1962,7 @@ export function buildCustomerRoomAreaCostBreakdown(params: {
     const parts = distributeAmountByWeights(internalUnassignedPool.amount, weights);
     for (let i = 0; i < rows.length; i++) {
       rows[i].materialAmountExact = round2(rows[i].materialAmountExact + (parts[i] ?? 0));
+      rows[i].internalFoldExact = round2(rows[i].internalFoldExact + (parts[i] ?? 0));
     }
   }
 
