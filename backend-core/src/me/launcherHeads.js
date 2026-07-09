@@ -182,8 +182,8 @@ export const HEAD_LAUNCHER_CATALOG = [
   },
   {
     slug: "visualizer",
-    label: "Countertop Visualizer",
-    description: "Upload a kitchen photo and preview Elite 100 countertop materials with AI concept rendering.",
+    label: "slabOS Visualizer",
+    description: "Upload a kitchen photo and preview countertop materials with AI concept rendering.",
     category: "Revenue",
     href: "/visualizer",
     roleNote:

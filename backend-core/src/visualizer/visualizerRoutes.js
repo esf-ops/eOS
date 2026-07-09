@@ -15,7 +15,7 @@
 import express from "express";
 import { parseMultipartForm } from "../slabsmith/multipartParse.mjs";
 import { readSafeRenderConfig } from "./visualizerRenderProvider.mjs";
-import { listDemoTexturesForApi } from "./visualizerTextureCatalog.mjs";
+import { listTexturesForApi } from "./visualizerTextureCatalog.mjs";
 import { executeVisualizerRender } from "./visualizerRenderService.mjs";
 import { VISUALIZER_DISCLAIMER } from "./visualizerPrompt.mjs";
 
@@ -43,7 +43,8 @@ export function attachVisualizerRoutes(app, { requireAuth, headAccess }) {
 
   app.get("/api/visualizer/textures", ...guard, (_req, res) => {
     try {
-      return res.json({ ok: true, textures: listDemoTexturesForApi(), disclaimer: VISUALIZER_DISCLAIMER });
+      const { textures, meta } = listTexturesForApi();
+      return res.json({ ok: true, textures, meta, disclaimer: VISUALIZER_DISCLAIMER });
     } catch (e) {
       return res.status(500).json({ ok: false, error: String(e?.message ?? e) });
     }

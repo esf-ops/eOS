@@ -1,19 +1,20 @@
-# Countertop Visualizer (Standalone MVP)
+# Countertop Visualizer — slabOS Visualizer Head
 
-Standalone **eliteOS Countertop Visualizer** head. Upload a kitchen photo, pick a demo Elite 100 texture, and receive an **AI concept render** from `backend-core` at `/api/visualizer/*`.
+Standalone **slabOS Visualizer** head for eliteOS. Upload a kitchen photo, browse countertop materials, and receive an **AI concept render** from `backend-core` at `/api/visualizer/*`.
 
 > **Concept visualization only.** Not an estimate, measurement, layout, inventory reservation, or production drawing.
 
-This head is **isolated** from slab inventory operations, quotes, pricing, and AI Takeoff job tables.
+Isolated from slab inventory operations, quotes, pricing, and AI Takeoff job tables.
 
 ## Architecture
 
 | Layer | Location |
 |-------|----------|
 | Frontend | `app-visualizer/` (Vite + React, port **5190**) |
-| Backend routes | `backend-core/src/visualizer/` → `/api/visualizer/*` |
-| Demo textures | `app-visualizer/public/material-textures/elite100/` (static pilot JPGs) |
-| Provider pattern | Mirrors AI Takeoff env factory (`VISUALIZER_RENDER_*`) — **not** `/api/takeoff/*` |
+| Texture catalog | `app-visualizer/catalog/visualizer-textures.json` |
+| Static assets | `app-visualizer/public/material-textures/` |
+| Backend | `backend-core/src/visualizer/` → `/api/visualizer/*` |
+| Head slug | `visualizer` (unchanged — matches existing head access grants) |
 
 ## Requirements
 

@@ -1,19 +1,36 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BeforeAfterSlider } from "./components/BeforeAfterSlider";
+import { MaterialPicker } from "./components/MaterialPicker";
+import { PreviewPanel, type RecentRender } from "./components/PreviewPanel";
+import { VisualizerHeader } from "./components/VisualizerHeader";
 import { VisualizerSampleGallery } from "./components/VisualizerSampleGallery";
 import {
   downloadDataUrl,
   fetchVisualizerConfig,
   fetchVisualizerTextures,
   renderVisualizer,
-  type VisualizerTexture,
+  VisualizerApiError,
+  type VisualizerConfig,
 } from "./lib/api";
 import { VISUALIZER_DISCLAIMER } from "./lib/config";
-import { listDemoTextures } from "./lib/demoTextures";
 import { VISUALIZER_SAMPLES } from "./lib/samples";
 import { getSupabase } from "./lib/supabase";
+import { buildLocalTextureCatalog, mergeApiTextures, type VisualizerTexture } from "./lib/textureCatalog";
 
-type Phase = "setup" | "loading" | "result";
+type WorkflowStep = 1 | 2 | 3;
+type Phase = "empty" | "ready" | "loading" | "result";
+
+const MAX_UPLOAD_MB_DEFAULT = 10;
+const ACCEPTED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+function friendlyError(err: unknown, maxUploadMb: number): string {
+  if (err instanceof VisualizerApiError) {
+    if (err.status === 413) return `Photo is too large. Maximum size is ${maxUploadMb} MB.`;
+    if (err.status === 503) return String(err.message);
+    if (err.status === 504) return "Render timed out. Please try again.";
+    return String(err.message);
+  }
+  return err instanceof Error ? err.message : "Something went wrong.";
+}
 
 export function App() {
   const [authToken, setAuthToken] = useState<string | null>(null);
@@ -22,75 +39,78 @@ export function App() {
   const [signInPassword, setSignInPassword] = useState("");
   const [authError, setAuthError] = useState<string | null>(null);
 
+  const [config, setConfig] = useState<VisualizerConfig | null>(null);
   const [textures, setTextures] = useState<VisualizerTexture[]>([]);
+  const [groups, setGroups] = useState<string[]>([]);
+  const [colorFamilies, setColorFamilies] = useState<string[]>([]);
+
   const [materialId, setMaterialId] = useState("");
   const [roomFile, setRoomFile] = useState<File | null>(null);
   const [roomPreview, setRoomPreview] = useState<string | null>(null);
   const [renderedImage, setRenderedImage] = useState<string | null>(null);
   const [materialName, setMaterialName] = useState<string | null>(null);
-  const [phase, setPhase] = useState<Phase>("setup");
+  const [phase, setPhase] = useState<Phase>("empty");
   const [error, setError] = useState<string | null>(null);
-  const [renderEnabled, setRenderEnabled] = useState<boolean | null>(null);
+  const [recentRenders, setRecentRenders] = useState<RecentRender[]>([]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const localTextures = useMemo(() => listDemoTextures(), []);
+  const localCatalog = useMemo(() => buildLocalTextureCatalog(), []);
+
+  const maxUploadMb = config?.maxUploadMb ?? MAX_UPLOAD_MB_DEFAULT;
+  const workflowStep: WorkflowStep = !roomPreview ? 1 : !materialId ? 2 : 3;
 
   useEffect(() => {
     const sb = getSupabase();
     if (!sb) return;
-
     void sb.auth.getSession().then(({ data }) => {
       setAuthToken(data.session?.access_token ?? null);
       setAuthEmail(data.session?.user?.email ?? null);
     });
-
     const { data: sub } = sb.auth.onAuthStateChange((_event, session) => {
       setAuthToken(session?.access_token ?? null);
       setAuthEmail(session?.user?.email ?? null);
     });
-
     return () => sub.subscription.unsubscribe();
   }, []);
 
   useEffect(() => {
     if (!authToken) return;
+
     void fetchVisualizerConfig(authToken)
-      .then((cfg) => setRenderEnabled(cfg.visualizerRenderEnabled))
-      .catch(() => setRenderEnabled(false));
+      .then(setConfig)
+      .catch(() => setConfig(null));
 
     void fetchVisualizerTextures(authToken)
-      .then((items) => {
-        setTextures(items);
-        const first = items.find((t) => t.hasImage) ?? items[0];
+      .then((payload) => {
+        const merged = mergeApiTextures(payload.textures);
+        setTextures(merged.length ? merged : localCatalog.textures);
+        setGroups(payload.meta?.groups?.length ? payload.meta.groups : localCatalog.meta.groups);
+        setColorFamilies(
+          payload.meta?.colorFamilies?.length ? payload.meta.colorFamilies : localCatalog.meta.colorFamilies,
+        );
+        const first = (merged.length ? merged : localCatalog.textures)[0];
         if (first) setMaterialId(first.id);
       })
       .catch(() => {
-        const fallback = localTextures.map((t) => ({
-          id: t.id,
-          name: t.colorName,
-          slug: t.slug,
-          thumbUrl: t.thumbUrl,
-          fullUrl: t.fullUrl,
-          hasImage: true,
-        }));
-        setTextures(fallback);
-        if (fallback[0]) setMaterialId(fallback[0].id);
+        setTextures(localCatalog.textures);
+        setGroups(localCatalog.meta.groups);
+        setColorFamilies(localCatalog.meta.colorFamilies);
+        if (localCatalog.textures[0]) setMaterialId(localCatalog.textures[0].id);
       });
-  }, [authToken, localTextures]);
+  }, [authToken, localCatalog]);
 
   useEffect(() => {
     if (!roomFile) {
       setRoomPreview(null);
+      setPhase("empty");
       return;
     }
     const url = URL.createObjectURL(roomFile);
     setRoomPreview(url);
     setRenderedImage(null);
-    setPhase("setup");
+    setPhase("ready");
     return () => URL.revokeObjectURL(url);
   }, [roomFile]);
-
-  const selectedTexture = textures.find((t) => t.id === materialId) ?? null;
 
   async function handleSignIn(event: React.FormEvent) {
     event.preventDefault();
@@ -111,11 +131,28 @@ export function App() {
     await getSupabase()?.auth.signOut();
     setRenderedImage(null);
     setRoomFile(null);
-    setPhase("setup");
+    setRecentRenders([]);
+    setPhase("empty");
+  }
+
+  function validateRoomFile(file: File): string | null {
+    const mime = file.type.toLowerCase();
+    if (mime && !ACCEPTED_TYPES.has(mime) && !mime.startsWith("image/")) {
+      return "Unsupported file type. Use JPEG, PNG, or WebP.";
+    }
+    if (file.size > maxUploadMb * 1024 * 1024) {
+      return `Photo is too large. Maximum size is ${maxUploadMb} MB.`;
+    }
+    return null;
   }
 
   function handleRoomFile(file: File | null) {
     if (!file) return;
+    const validationError = validateRoomFile(file);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
     setError(null);
     setRoomFile(file);
   }
@@ -133,8 +170,12 @@ export function App() {
     }
   }
 
-  async function handleVisualize() {
-    if (!authToken || !roomFile || !materialId) return;
+  async function handleGenerate() {
+    if (!authToken || !roomFile || !materialId || phase === "loading") return;
+    if (config && !config.visualizerRenderEnabled) {
+      setError("Visualizer render is disabled on the server.");
+      return;
+    }
     setPhase("loading");
     setError(null);
     try {
@@ -142,43 +183,63 @@ export function App() {
       setRenderedImage(result.renderedImage);
       setMaterialName(result.materialName);
       setPhase("result");
+      setRecentRenders((prev) => [
+        {
+          id: `${Date.now()}-${materialId}`,
+          materialId,
+          materialName: result.materialName,
+          renderedImage: result.renderedImage,
+          createdAt: Date.now(),
+        },
+        ...prev.filter((r) => r.materialId !== materialId).slice(0, 4),
+      ]);
     } catch (err: unknown) {
-      setPhase("setup");
-      setError(err instanceof Error ? err.message : "Render failed");
+      setPhase(roomPreview ? "ready" : "empty");
+      setError(friendlyError(err, maxUploadMb));
     }
   }
 
   function handleTryAnotherColor() {
     setRenderedImage(null);
-    setPhase("setup");
+    setPhase(roomPreview ? "ready" : "empty");
+    setError(null);
   }
 
   function handleUploadAnotherPhoto() {
     setRenderedImage(null);
     setRoomFile(null);
-    setPhase("setup");
+    setPhase("empty");
+    setError(null);
     fileInputRef.current?.click();
   }
 
   function handleDownload() {
     if (!renderedImage) return;
-    const slug = materialId || "visualizer";
-    downloadDataUrl(renderedImage, `eliteos-visualizer-${slug}.png`);
+    downloadDataUrl(renderedImage, `slabos-visualizer-${materialId || "result"}.png`);
   }
 
-  const canVisualize = Boolean(authToken && roomFile && materialId && phase !== "loading");
+  function handleSelectRecent(item: RecentRender) {
+    setRenderedImage(item.renderedImage);
+    setMaterialName(item.materialName);
+    setMaterialId(item.materialId);
+    setPhase("result");
+  }
+
+  const canGenerate = Boolean(
+    authToken && roomFile && materialId && phase !== "loading" && config?.visualizerRenderEnabled !== false,
+  );
 
   if (!authToken) {
     return (
-      <div className="app auth-screen">
-        <header className="header">
-          <p className="eyebrow">eliteOS · Standalone MVP</p>
-          <h1>Countertop Visualizer</h1>
-        </header>
+      <div className="app-shell auth-screen">
+        <div className="auth-brand">
+          <p className="vz-eyebrow">slabOS · eliteOS</p>
+          <h1 className="vz-title">slabOS Visualizer</h1>
+        </div>
         <div className="disclaimer">{VISUALIZER_DISCLAIMER}</div>
-        <form className="auth-card panel" onSubmit={handleSignIn}>
+        <form className="panel auth-card" onSubmit={handleSignIn}>
           <h2>Sign in</h2>
-          <p className="hint">Visualizer routes require authentication and visualizer head access.</p>
+          <p className="hint">Requires visualizer head access on your account.</p>
           <label>
             Email
             <input type="email" value={signInEmail} onChange={(e) => setSignInEmail(e.target.value)} required />
@@ -187,120 +248,107 @@ export function App() {
             Password
             <input type="password" value={signInPassword} onChange={(e) => setSignInPassword(e.target.value)} required />
           </label>
-          {authError ? <p className="error">{authError}</p> : null}
-          <button type="submit" className="primary">Sign in</button>
+          {authError ? <p className="alert alert-error">{authError}</p> : null}
+          <button type="submit" className="btn btn-primary">Sign in</button>
         </form>
       </div>
     );
   }
 
   return (
-    <div className="app">
-      <header className="header">
-        <div>
-          <p className="eyebrow">eliteOS · Standalone MVP</p>
-          <h1>Countertop Visualizer</h1>
-          <p className="subtitle">AI concept render via backend-core · {authEmail}</p>
-        </div>
-        <button type="button" className="secondary" onClick={() => void handleSignOut()}>Sign out</button>
-      </header>
+    <div className="app-shell">
+      <VisualizerHeader email={authEmail} config={config} onSignOut={() => void handleSignOut()} />
 
-      <div className="disclaimer" role="note">{VISUALIZER_DISCLAIMER}</div>
+      <div className="disclaimer">{VISUALIZER_DISCLAIMER}</div>
 
-      {renderEnabled === false ? (
-        <div className="banner banner-warn">
-          Visualizer render is disabled on the server. Set <code>VISUALIZER_RENDER_ENABLED=1</code> and configure a provider API key.
+      {config && !config.visualizerRenderEnabled ? (
+        <div className="alert alert-warn">
+          Render provider is disabled. Set <code>VISUALIZER_RENDER_ENABLED=1</code> on backend-core.
         </div>
       ) : null}
 
-      <main className="layout">
-        <section className="panel controls">
-          <h2>1. Room photo</h2>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/jpeg,image/png,image/webp,image/*"
-            className="sr-only"
-            onChange={(e) => handleRoomFile(e.target.files?.[0] ?? null)}
-          />
-          <div className="row">
-            <button type="button" className="primary" onClick={() => fileInputRef.current?.click()}>
-              Upload photo
-            </button>
-          </div>
-          <VisualizerSampleGallery
-            samples={VISUALIZER_SAMPLES}
-            onSelectSample={(s) => void handleSampleSelect(s)}
-            disabled={phase === "loading"}
-          />
+      <div className="workflow-steps" aria-label="Workflow progress">
+        <div className={`workflow-step${workflowStep >= 1 ? " active" : ""}${workflowStep > 1 ? " done" : ""}`}>
+          <span className="step-num">1</span> Room photo
+        </div>
+        <div className={`workflow-step${workflowStep >= 2 ? " active" : ""}${workflowStep > 2 ? " done" : ""}`}>
+          <span className="step-num">2</span> Material
+        </div>
+        <div className={`workflow-step${workflowStep >= 3 ? " active" : ""}`}>
+          <span className="step-num">3</span> Generate
+        </div>
+      </div>
 
-          <h2>2. Countertop material</h2>
-          <div className="texture-grid">
-            {textures.map((texture) => (
-              <button
-                key={texture.id}
-                type="button"
-                className={`texture-card${materialId === texture.id ? " selected" : ""}`}
-                onClick={() => setMaterialId(texture.id)}
-                disabled={phase === "loading"}
-              >
-                <img src={texture.thumbUrl} alt={texture.name} loading="lazy" />
-                <span>{texture.name}</span>
-              </button>
-            ))}
+      <main className="workspace">
+        <section className="panel workflow-panel">
+          <div className="panel-head">
+            <h2>Workflow</h2>
+            <p className="panel-sub">{textures.length} materials available</p>
           </div>
 
-          <div className="row actions">
+          <div className="workflow-block">
+            <h3>1. Upload or choose room photo</h3>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/*"
+              className="sr-only"
+              onChange={(e) => handleRoomFile(e.target.files?.[0] ?? null)}
+            />
             <button
               type="button"
-              className="primary visualize-btn"
-              disabled={!canVisualize}
-              onClick={() => void handleVisualize()}
+              className="btn btn-primary"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={phase === "loading"}
             >
-              {phase === "loading" ? "Visualizing…" : "Visualize"}
+              Upload photo
             </button>
+            <VisualizerSampleGallery
+              samples={VISUALIZER_SAMPLES}
+              onSelectSample={(s) => void handleSampleSelect(s)}
+              disabled={phase === "loading"}
+            />
           </div>
 
-          {error ? <p className="error">{error}</p> : null}
+          <div className="workflow-block">
+            <h3>2. Choose countertop material</h3>
+            <MaterialPicker
+              textures={textures}
+              groups={groups}
+              colorFamilies={colorFamilies}
+              selectedId={materialId}
+              onSelect={setMaterialId}
+              disabled={phase === "loading"}
+            />
+          </div>
+
+          <div className="workflow-block">
+            <h3>3. Generate visualization</h3>
+            <button
+              type="button"
+              className="btn btn-primary btn-lg"
+              disabled={!canGenerate}
+              onClick={() => void handleGenerate()}
+            >
+              {phase === "loading" ? "Generating…" : "Generate visualization"}
+            </button>
+            {!roomFile ? <p className="hint">Upload a room photo first.</p> : null}
+            {roomFile && !materialId ? <p className="hint">Select a countertop material.</p> : null}
+          </div>
         </section>
 
-        <section className="panel results">
-          <h2>Preview</h2>
-          {phase === "loading" ? (
-            <div className="placeholder loading-state">
-              <div className="spinner" aria-hidden />
-              <p>Generating concept visualization…</p>
-            </div>
-          ) : phase === "result" && roomPreview && renderedImage ? (
-            <>
-              {materialName ? <p className="result-meta">Material: {materialName}</p> : null}
-              <BeforeAfterSlider beforeSrc={roomPreview} afterSrc={renderedImage} />
-              <div className="disclaimer inline-disclaimer">{VISUALIZER_DISCLAIMER}</div>
-              <div className="row actions">
-                <button type="button" className="secondary" onClick={handleTryAnotherColor}>
-                  Try another color
-                </button>
-                <button type="button" className="secondary" onClick={handleUploadAnotherPhoto}>
-                  Upload another photo
-                </button>
-                <button type="button" className="primary" onClick={handleDownload}>
-                  Download result
-                </button>
-              </div>
-            </>
-          ) : roomPreview ? (
-            <div className="single-preview">
-              <img src={roomPreview} alt="Uploaded room" />
-              <p className="hint">Choose a material and click Visualize.</p>
-            </div>
-          ) : (
-            <div className="placeholder">Upload a kitchen photo or pick a sample to begin.</div>
-          )}
-
-          {selectedTexture && phase !== "result" ? (
-            <p className="hint selected-material">Selected: {selectedTexture.name}</p>
-          ) : null}
-        </section>
+        <PreviewPanel
+          phase={phase}
+          roomPreview={roomPreview}
+          renderedImage={renderedImage}
+          materialName={materialName}
+          error={error}
+          recentRenders={recentRenders}
+          onSelectRecent={handleSelectRecent}
+          onTryAnotherColor={handleTryAnotherColor}
+          onUploadAnotherPhoto={handleUploadAnotherPhoto}
+          onDownload={handleDownload}
+        />
       </main>
     </div>
   );

@@ -1,4 +1,5 @@
 import { backendBaseUrl } from "./config";
+import type { TextureCatalogMeta } from "./textureCatalog";
 
 export class VisualizerApiError extends Error {
   status: number;
@@ -48,11 +49,24 @@ export type VisualizerConfig = {
 
 export type VisualizerTexture = {
   id: string;
-  name: string;
   slug: string;
+  name: string;
+  displayName: string;
+  group: string | null;
+  colorFamily: string | null;
+  finish: string | null;
+  sourceLabel: string | null;
   thumbUrl: string;
   fullUrl: string;
   hasImage: boolean;
+  active: boolean;
+};
+
+export type VisualizerTexturesResponse = {
+  ok: boolean;
+  textures: VisualizerTexture[];
+  meta: TextureCatalogMeta;
+  disclaimer: string;
 };
 
 export type VisualizerRenderResult = {
@@ -76,15 +90,14 @@ export async function fetchVisualizerConfig(token: string): Promise<VisualizerCo
   )) as VisualizerConfig;
 }
 
-export async function fetchVisualizerTextures(token: string): Promise<VisualizerTexture[]> {
+export async function fetchVisualizerTextures(token: string): Promise<VisualizerTexturesResponse> {
   const t = token.trim();
   if (!t) throw new VisualizerApiError("Sign in required", 401, null);
-  const data = (await parseResponse(
+  return (await parseResponse(
     await fetch(joinUrl("/api/visualizer/textures"), {
       headers: { authorization: `Bearer ${t}` },
     }),
-  )) as { textures: VisualizerTexture[] };
-  return data.textures ?? [];
+  )) as VisualizerTexturesResponse;
 }
 
 export async function renderVisualizer(params: {
