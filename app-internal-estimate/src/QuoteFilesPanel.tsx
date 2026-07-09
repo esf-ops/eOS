@@ -8,7 +8,7 @@
  *     The frontend never receives or stores a storage_path.
  *   - organizationId is derived server-side from auth context — never sent by the client.
  *
- * Upload flow:
+ * Upload flow (per file — runs sequentially for batch):
  *   1. POST /api/quote-files/upload-intent → { signedUploadUrl, quoteFileId, ... }
  *   2. PUT file bytes directly to signedUploadUrl (Supabase Storage signed URL, no auth header).
  *   3. POST /api/quote-files/confirm-upload → logs 'uploaded' event once bytes are confirmed.
@@ -20,32 +20,27 @@
  * Archive flow:
  *   POST /api/quote-files/archive → sets status = 'archived'; removes from normal lists.
  *
+ * Drag-and-drop:
+ *   - Drop zone wraps the upload area when quoteId is present.
+ *   - Dropping files triggers immediate sequential batch upload.
+ *   - A document-level dragover/drop listener prevents accidental browser navigation.
+ *   - dragCounterRef tracks nested dragenter/dragleave events to avoid flicker.
+ *
  * Hard boundaries: no quote math, no pricing, no AI calls, no Moraware, no Monday.
  */
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { apiGetJson, apiPostJson } from "@quote-lib/api";
-
-// ── Constants ─────────────────────────────────────────────────────────────────
-
-const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB — mirrors backend
-
-const FILE_ROLES: { value: string; label: string }[] = [
-  { value: "cabinet_plan",      label: "Cabinet plan" },
-  { value: "measurement_plan",  label: "Measurement plan" },
-  { value: "signed_quote",      label: "Signed quote" },
-  { value: "customer_pdf",      label: "Customer PDF" },
-  { value: "shop_drawing",      label: "Shop drawing" },
-  { value: "photo",             label: "Photo" },
-  { value: "spec",              label: "Spec sheet" },
-  { value: "contract",          label: "Contract" },
-  { value: "other",             label: "Other" },
-];
-
-const VISIBILITY_OPTIONS: { value: string; label: string }[] = [
-  { value: "internal", label: "Internal only" },
-  { value: "partner",  label: "Partner-visible" },
-  { value: "customer", label: "Customer-visible" },
-];
+import {
+  MAX_FILE_SIZE_BYTES,
+  FILE_ROLES,
+  FILE_ACCEPT,
+  VISIBILITY_OPTIONS,
+  formatBytes,
+  formatDate,
+  roleLabelFor,
+  validateFileForUpload,
+  buildBatchSummaryMessage,
+} from "./lib/quoteFilePanelHelpers";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -59,6 +54,15 @@ interface QuoteFile {
   status: string;
   createdAt: string;
 }
+
+/** Per-file status tracked during a batch upload run. */
+type BatchItem = {
+  /** Stable local key for React list rendering. */
+  localId: string;
+  file: File;
+  status: "pending" | "uploading" | "done" | "error";
+  msg: string | null;
+};
 
 type UploadStatus = "idle" | "uploading" | "success" | "error";
 
@@ -94,27 +98,55 @@ function roleLabelFor(role: string): string {
   return FILE_ROLES.find((r) => r.value === role)?.label ?? role;
 }
 
+let _localIdCounter = 0;
+function nextLocalId(): string {
+  return `batch-${++_localIdCounter}`;
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function QuoteFilesPanel({ quoteId, getToken }: QuoteFilesPanelProps) {
   // ── State ─────────────────────────────────────────────────────────────────
-  const [files, setFiles]           = useState<QuoteFile[]>([]);
+  const [files, setFiles]             = useState<QuoteFile[]>([]);
   const [listLoading, setListLoading] = useState(false);
-  const [listError, setListError]   = useState<string | null>(null);
+  const [listError, setListError]     = useState<string | null>(null);
 
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [fileRole, setFileRole]     = useState("cabinet_plan");
-  const [visibility, setVisibility] = useState("internal");
+  /** Files chosen via browse picker, waiting for the "Upload" button click. */
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [fileRole, setFileRole]         = useState("cabinet_plan");
+  const [visibility, setVisibility]     = useState("internal");
+
+  /** Overall upload session status. */
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>("idle");
-  const [uploadMsg, setUploadMsg]   = useState<string | null>(null);
+  /** Overall summary message shown below the upload button. */
+  const [uploadMsg, setUploadMsg]       = useState<string | null>(null);
+  /** Per-file status rows shown during/after a batch run. */
+  const [batchItems, setBatchItems]     = useState<BatchItem[]>([]);
 
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
-  const [archivingId, setArchivingId] = useState<string | null>(null);
+  const [archivingId, setArchivingId]   = useState<string | null>(null);
   const [archiveError, setArchiveError] = useState<string | null>(null);
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
+
+  const fileInputRef  = useRef<HTMLInputElement>(null);
+  /** Tracks nested dragenter/dragleave calls to avoid false dragleave events. */
+  const dragCounterRef = useRef(0);
+
+  // ── Prevent accidental browser navigation on file drop ────────────────────
+
+  useEffect(() => {
+    const onDragOver = (e: DragEvent) => e.preventDefault();
+    const onDrop     = (e: DragEvent) => e.preventDefault();
+    document.addEventListener("dragover", onDragOver);
+    document.addEventListener("drop", onDrop);
+    return () => {
+      document.removeEventListener("dragover", onDragOver);
+      document.removeEventListener("drop", onDrop);
+    };
+  }, []);
 
   // ── Load file list ────────────────────────────────────────────────────────
 
@@ -150,25 +182,15 @@ export function QuoteFilesPanel({ quoteId, getToken }: QuoteFilesPanelProps) {
     }
   }, [quoteId, loadFiles]);
 
-  // ── Upload ────────────────────────────────────────────────────────────────
+  // ── Core batch upload ─────────────────────────────────────────────────────
 
-  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0] ?? null;
-    setSelectedFile(f);
-    // Reset previous upload status when a new file is chosen.
-    setUploadStatus("idle");
-    setUploadMsg(null);
-  }, []);
-
-  const handleUpload = useCallback(async () => {
-    if (!quoteId || !selectedFile) return;
-
-    // Client-side size guard (backend enforces too, but fast feedback is better UX).
-    if (selectedFile.size > MAX_FILE_SIZE_BYTES) {
-      setUploadStatus("error");
-      setUploadMsg(`File is too large (${formatBytes(selectedFile.size)}). Maximum is 50 MB.`);
-      return;
-    }
+  /**
+   * Upload files sequentially one at a time (backend accepts one per request).
+   * Tracks per-file status in batchItems. Continues even if individual files fail.
+   * Does NOT modify existing quote pricing or any saved quote fields.
+   */
+  const uploadFiles = useCallback(async (filesToUpload: File[]) => {
+    if (!quoteId || filesToUpload.length === 0) return;
 
     const token = await getToken();
     if (!token) {
@@ -177,63 +199,170 @@ export function QuoteFilesPanel({ quoteId, getToken }: QuoteFilesPanelProps) {
       return;
     }
 
+    // Build initial batch items
+    const items: BatchItem[] = filesToUpload.map((file) => ({
+      localId: nextLocalId(),
+      file,
+      status: "pending",
+      msg: null,
+    }));
+    setBatchItems(items);
+    setPendingFiles([]);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+
+    const label = filesToUpload.length === 1 ? "Uploading file…" : `Uploading ${filesToUpload.length} files…`;
     setUploadStatus("uploading");
-    setUploadMsg("Creating upload intent…");
+    setUploadMsg(label);
     setDownloadError(null);
 
-    try {
-      // Step 1 — Backend creates the quote_files row + signed upload URL.
-      const intent = await apiPostJson("/api/quote-files/upload-intent", token, {
-        quoteId,
-        originalFilename: selectedFile.name,
-        mimeType: selectedFile.type || null,
-        fileSizeBytes: selectedFile.size,
-        fileRole,
-        visibility,
-        // organizationId intentionally omitted — backend derives from auth session.
-      }) as {
-        ok: boolean;
-        quoteFileId: string;
-        signedUploadUrl: string;
-        expiresAt: string;
-        safeFilename: string;
-      };
+    let successCount = 0;
+    let failCount = 0;
 
-      setUploadMsg("Uploading file to storage…");
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const file = item.file;
 
-      // Step 2 — PUT file bytes directly to the signed storage URL.
-      // The token is embedded in the signed URL; no Authorization header is needed here.
-      const uploadRes = await fetch(intent.signedUploadUrl, {
-        method: "PUT",
-        headers: { "content-type": selectedFile.type || "application/octet-stream" },
-        body: selectedFile,
-      });
-
-      if (!uploadRes.ok) {
-        let detail = `HTTP ${uploadRes.status}`;
-        try { detail = await uploadRes.text() || detail; } catch { /* ignore */ }
-        throw new Error(`Storage upload failed: ${detail.slice(0, 120)}`);
+      // Client-side validation (size, name).
+      const validationError = validateFileForUpload(file);
+      if (validationError) {
+        items[i] = { ...item, status: "error", msg: validationError };
+        setBatchItems([...items]);
+        failCount++;
+        continue;
       }
+      items[i] = { ...item, status: "uploading", msg: "Uploading…" };
+      setBatchItems([...items]);
 
-      // Step 3 — Confirm upload: log 'uploaded' event now that bytes are in storage.
-      setUploadMsg("Confirming upload…");
-      await apiPostJson("/api/quote-files/confirm-upload", token, {
-        quoteFileId: intent.quoteFileId,
-      });
+      try {
+        // Step 1 — Backend creates the quote_files row + signed upload URL.
+        const intent = await apiPostJson("/api/quote-files/upload-intent", token, {
+          quoteId,
+          originalFilename: file.name,
+          mimeType: file.type || null,
+          fileSizeBytes: file.size,
+          fileRole,
+          visibility,
+          // organizationId intentionally omitted — backend derives from auth session.
+        }) as {
+          ok: boolean;
+          quoteFileId: string;
+          signedUploadUrl: string;
+          expiresAt: string;
+          safeFilename: string;
+        };
 
-      setUploadStatus("success");
-      setUploadMsg("File uploaded successfully.");
-      setSelectedFile(null);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+        // Step 2 — PUT file bytes directly to the signed storage URL.
+        // The token is embedded in the signed URL; no Authorization header is needed here.
+        const uploadRes = await fetch(intent.signedUploadUrl, {
+          method: "PUT",
+          headers: { "content-type": file.type || "application/octet-stream" },
+          body: file,
+        });
 
-      // Step 4 — Refresh file list.
-      await loadFiles();
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Upload failed. Please try again.";
-      setUploadStatus("error");
-      setUploadMsg(msg);
+        if (!uploadRes.ok) {
+          let detail = `HTTP ${uploadRes.status}`;
+          try { detail = await uploadRes.text() || detail; } catch { /* ignore */ }
+          throw new Error(`Storage upload failed: ${detail.slice(0, 120)}`);
+        }
+
+        // Step 3 — Confirm upload: log 'uploaded' event now that bytes are in storage.
+        await apiPostJson("/api/quote-files/confirm-upload", token, {
+          quoteFileId: intent.quoteFileId,
+        });
+
+        items[i] = { ...item, status: "done", msg: "Uploaded" };
+        setBatchItems([...items]);
+        successCount++;
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : "Upload failed.";
+        items[i] = { ...item, status: "error", msg };
+        setBatchItems([...items]);
+        failCount++;
+      }
     }
-  }, [quoteId, selectedFile, fileRole, visibility, getToken, loadFiles]);
+
+    // Overall summary
+    const summary = buildBatchSummaryMessage(filesToUpload.length, successCount, failCount);
+    setUploadStatus(summary.status);
+    setUploadMsg(summary.msg);
+
+    // Refresh file list if at least one succeeded.
+    if (successCount > 0) {
+      await loadFiles();
+    }
+  }, [quoteId, fileRole, visibility, getToken, loadFiles]);
+
+  // ── Browse (file input) ───────────────────────────────────────────────────
+
+  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = Array.from(e.target.files ?? []);
+    setPendingFiles(selected);
+    // Clear previous results when a new selection is made.
+    setUploadStatus("idle");
+    setUploadMsg(null);
+    setBatchItems([]);
+  }, []);
+
+  /** Called by the "Upload file(s)" button for browsed files. */
+  const handleUpload = useCallback(() => {
+    void uploadFiles(pendingFiles);
+  }, [pendingFiles, uploadFiles]);
+
+  // ── Drag-and-drop ─────────────────────────────────────────────────────────
+
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current++;
+    if (Array.from(e.dataTransfer.types).includes("Files")) {
+      setIsDragOver(true);
+    }
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "copy";
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current = Math.max(0, dragCounterRef.current - 1);
+    if (dragCounterRef.current === 0) {
+      setIsDragOver(false);
+    }
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current = 0;
+    setIsDragOver(false);
+    if (!quoteId || uploadStatus === "uploading") return;
+    const dropped = Array.from(e.dataTransfer.files);
+    if (dropped.length === 0) return;
+    void uploadFiles(dropped);
+  }, [quoteId, uploadStatus, uploadFiles]);
+
+  // ── Derived state ─────────────────────────────────────────────────────────
+
+  const isBusy = uploadStatus === "uploading";
+  const canUpload = Boolean(quoteId) && pendingFiles.length > 0 && !isBusy;
+
+  const pendingLabel =
+    pendingFiles.length === 0
+      ? "No file chosen"
+      : pendingFiles.length === 1
+        ? pendingFiles[0].name
+        : `${pendingFiles.length} files selected`;
+
+  const uploadButtonLabel =
+    isBusy
+      ? (pendingFiles.length > 1 ? "Uploading…" : "Uploading…")
+      : pendingFiles.length > 1
+        ? `Upload ${pendingFiles.length} files`
+        : "Upload file";
 
   // ── Download ──────────────────────────────────────────────────────────────
 
@@ -288,9 +417,6 @@ export function QuoteFilesPanel({ quoteId, getToken }: QuoteFilesPanelProps) {
 
   // ── Render ────────────────────────────────────────────────────────────────
 
-  const isBusy = uploadStatus === "uploading";
-  const canUpload = Boolean(quoteId) && Boolean(selectedFile) && !isBusy;
-
   return (
     <section className="card" id="sec-quote-files" aria-labelledby="quote-files-heading">
       <div className="ie-section-head">
@@ -307,110 +433,198 @@ export function QuoteFilesPanel({ quoteId, getToken }: QuoteFilesPanelProps) {
         </p>
       ) : (
         <>
-          {/* ── Upload form ──────────────────────────────────────────────── */}
+          {/* ── Drop zone wrapper ────────────────────────────────────────── */}
           <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr auto auto",
-              gap: 8,
-              alignItems: "end",
-              marginBottom: 12,
-            }}
+            style={{ position: "relative" }}
+            onDragEnter={handleDragEnter}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
           >
-            {/* Hidden native file input — triggered by button */}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="application/pdf,image/*,.doc,.docx,.txt"
-              style={{ display: "none" }}
-              onChange={handleFileChange}
-              disabled={isBusy}
-            />
-
-            {/* File picker button */}
-            <div>
-              <label className="muted small" style={{ display: "block", marginBottom: 4 }}>
-                File
-              </label>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <button
-                  type="button"
-                  className="btn secondary btn-sm"
-                  disabled={isBusy}
-                  onClick={() => fileInputRef.current?.click()}
+            {/* Drag-over overlay */}
+            {isDragOver && (
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  zIndex: 10,
+                  background: "rgba(37, 99, 235, 0.06)",
+                  border: "2px dashed var(--color-primary, #2563eb)",
+                  borderRadius: 8,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  pointerEvents: "none",
+                }}
+                aria-hidden="true"
+              >
+                <span
+                  style={{
+                    fontWeight: 600,
+                    color: "var(--color-primary, #2563eb)",
+                    fontSize: "0.95rem",
+                    background: "var(--color-bg, #fff)",
+                    padding: "6px 14px",
+                    borderRadius: 6,
+                  }}
                 >
-                  Choose file
-                </button>
-                <span className="muted small" style={{ wordBreak: "break-all" }}>
-                  {selectedFile ? selectedFile.name : "No file chosen"}
+                  Drop files to attach to quote
                 </span>
+              </div>
+            )}
+
+            {/* ── Upload form ──────────────────────────────────────────────── */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr auto auto",
+                gap: 8,
+                alignItems: "end",
+                marginBottom: 12,
+              }}
+            >
+              {/* Hidden native file input — triggered by button. multiple allows batch selection. */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept={FILE_ACCEPT}
+                multiple
+                style={{ display: "none" }}
+                onChange={handleFileChange}
+                disabled={isBusy}
+              />
+
+              {/* File picker button */}
+              <div>
+                <label className="muted small" style={{ display: "block", marginBottom: 4 }}>
+                  File
+                </label>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <button
+                    type="button"
+                    className="btn secondary btn-sm"
+                    disabled={isBusy}
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    Choose file
+                  </button>
+                  <span className="muted small" style={{ wordBreak: "break-all" }}>
+                    {pendingLabel}
+                  </span>
+                </div>
+                <p className="muted small" style={{ marginTop: 4, marginBottom: 0 }}>
+                  Or drag files here to upload
+                </p>
+              </div>
+
+              {/* Role selector */}
+              <div>
+                <label className="muted small" style={{ display: "block", marginBottom: 4 }}>
+                  File role
+                </label>
+                <select
+                  value={fileRole}
+                  onChange={(e) => setFileRole(e.target.value)}
+                  disabled={isBusy}
+                  style={{ minWidth: 150 }}
+                >
+                  {FILE_ROLES.map((r) => (
+                    <option key={r.value} value={r.value}>{r.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Visibility selector */}
+              <div>
+                <label className="muted small" style={{ display: "block", marginBottom: 4 }}>
+                  Visibility
+                </label>
+                <select
+                  value={visibility}
+                  onChange={(e) => setVisibility(e.target.value)}
+                  disabled={isBusy}
+                >
+                  {VISIBILITY_OPTIONS.map((v) => (
+                    <option key={v.value} value={v.value}>{v.label}</option>
+                  ))}
+                </select>
               </div>
             </div>
 
-            {/* Role selector */}
-            <div>
-              <label className="muted small" style={{ display: "block", marginBottom: 4 }}>
-                File role
-              </label>
-              <select
-                value={fileRole}
-                onChange={(e) => setFileRole(e.target.value)}
-                disabled={isBusy}
-                style={{ minWidth: 150 }}
+            {/* Upload button */}
+            <div style={{ marginBottom: 10 }}>
+              <button
+                type="button"
+                className="btn primary btn-sm"
+                disabled={!canUpload}
+                onClick={handleUpload}
               >
-                {FILE_ROLES.map((r) => (
-                  <option key={r.value} value={r.value}>{r.label}</option>
-                ))}
-              </select>
+                {uploadButtonLabel}
+              </button>
             </div>
 
-            {/* Visibility selector */}
-            <div>
-              <label className="muted small" style={{ display: "block", marginBottom: 4 }}>
-                Visibility
-              </label>
-              <select
-                value={visibility}
-                onChange={(e) => setVisibility(e.target.value)}
-                disabled={isBusy}
+            {/* Overall upload status message */}
+            {uploadMsg ? (
+              <p
+                className="muted small"
+                role="status"
+                aria-live="polite"
+                style={{
+                  marginBottom: batchItems.length > 0 ? 6 : 10,
+                  color:
+                    uploadStatus === "error"   ? "var(--color-error, #b91c1c)" :
+                    uploadStatus === "success" ? "var(--color-success, #16a34a)" :
+                    undefined,
+                }}
               >
-                {VISIBILITY_OPTIONS.map((v) => (
-                  <option key={v.value} value={v.value}>{v.label}</option>
+                {uploadStatus === "success" ? "✓ " : uploadStatus === "error" ? "✗ " : ""}
+                {uploadMsg}
+              </p>
+            ) : null}
+
+            {/* Per-file status during / after batch upload */}
+            {batchItems.length > 0 && (
+              <div
+                role="list"
+                aria-label="Upload status per file"
+                style={{ marginBottom: 12, fontSize: "0.83rem" }}
+              >
+                {batchItems.map((item) => (
+                  <div
+                    key={item.localId}
+                    role="listitem"
+                    style={{
+                      display: "flex",
+                      alignItems: "baseline",
+                      gap: 6,
+                      padding: "2px 0",
+                      color:
+                        item.status === "error"
+                          ? "var(--color-error, #b91c1c)"
+                          : item.status === "done"
+                            ? "var(--color-success, #16a34a)"
+                            : undefined,
+                    }}
+                  >
+                    <span aria-hidden="true">
+                      {item.status === "done"      ? "✓"
+                       : item.status === "error"   ? "✗"
+                       : item.status === "uploading" ? "⏳"
+                       : "·"}
+                    </span>
+                    <span style={{ wordBreak: "break-all", flex: 1 }}>
+                      {item.file.name}
+                    </span>
+                    {item.msg ? (
+                      <span className="muted small" style={{ whiteSpace: "nowrap" }}>
+                        {item.msg}
+                      </span>
+                    ) : null}
+                  </div>
                 ))}
-              </select>
-            </div>
+              </div>
+            )}
           </div>
-
-          {/* Upload button */}
-          <div style={{ marginBottom: 10 }}>
-            <button
-              type="button"
-              className="btn primary btn-sm"
-              disabled={!canUpload}
-              onClick={() => void handleUpload()}
-            >
-              {isBusy ? "Uploading…" : "Upload file"}
-            </button>
-          </div>
-
-          {/* Upload status message */}
-          {uploadMsg ? (
-            <p
-              className="muted small"
-              role="status"
-              aria-live="polite"
-              style={{
-                marginBottom: 10,
-                color:
-                  uploadStatus === "error"   ? "var(--color-error, #b91c1c)" :
-                  uploadStatus === "success" ? "var(--color-success, #16a34a)" :
-                  undefined,
-              }}
-            >
-              {uploadStatus === "success" ? "✓ " : uploadStatus === "error" ? "✗ " : ""}
-              {uploadMsg}
-            </p>
-          ) : null}
 
           {/* ── File list ────────────────────────────────────────────────── */}
           {listLoading ? (
