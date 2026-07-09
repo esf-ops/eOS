@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" role="img" aria-label="Dark cabinet kitchen sample">
+  <defs>
+    <linearGradient id="darkcab" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#334155"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+    <linearGradient id="counter3" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#78716c"/>
+      <stop offset="100%" stop-color="#57534e"/>
+    </linearGradient>
+  </defs>
+  <rect width="1600" height="1000" fill="#0f172a"/>
+  <rect x="0" y="710" width="1600" height="290" fill="#1e293b"/>
+  <rect x="70" y="170" width="1460" height="630" rx="4" fill="url(#darkcab)" stroke="#475569" stroke-width="3"/>
+  <rect x="110" y="510" width="1380" height="32" fill="#64748b" opacity="0.4"/>
+  <rect x="70" y="565" width="1460" height="50" fill="url(#counter3)"/>
+  <rect x="250" y="230" width="350" height="250" fill="#38bdf8" opacity="0.15"/>
+  <rect x="850" y="230" width="550" height="250" fill="#38bdf8" opacity="0.12"/>
+  <circle cx="1400" cy="130" r="90" fill="#fef08a" opacity="0.35"/>
+  <text x="70" y="90" fill="#94a3b8" font-family="system-ui,sans-serif" font-size="28" font-weight="600">Dark cabinet kitchen</text>
+</svg>

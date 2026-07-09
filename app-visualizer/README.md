@@ -1,112 +1,99 @@
-# Countertop Visualizer (Local MVP)
+# Countertop Visualizer (Standalone MVP)
 
-Standalone local countertop concept visualizer. Uses **Vite + React** for the UI and a **FastAPI + OpenCV** render engine on the local filesystem. No database, Supabase, quote workflow, or cloud AI APIs.
+Standalone **eliteOS Countertop Visualizer** head. Upload a kitchen photo, pick a demo Elite 100 texture, and receive an **AI concept render** from `backend-core` at `/api/visualizer/*`.
 
 > **Concept visualization only.** Not an estimate, measurement, layout, inventory reservation, or production drawing.
 
+This head is **isolated** from slab inventory operations, quotes, pricing, and AI Takeoff job tables.
+
+## Architecture
+
+| Layer | Location |
+|-------|----------|
+| Frontend | `app-visualizer/` (Vite + React, port **5190**) |
+| Backend routes | `backend-core/src/visualizer/` → `/api/visualizer/*` |
+| Demo textures | `app-visualizer/public/material-textures/elite100/` (static pilot JPGs) |
+| Provider pattern | Mirrors AI Takeoff env factory (`VISUALIZER_RENDER_*`) — **not** `/api/takeoff/*` |
+
 ## Requirements
 
-- Python 3.9+
 - Node.js 18+
+- Running **backend-core** (port **3001**)
+- Supabase auth env on the frontend
+- Visualizer head access for the signed-in user (`visualizer` slug)
+- Server env: `VISUALIZER_RENDER_ENABLED=1` + provider API key
 
-## Setup
+## Backend env (`backend-core/.env`)
 
 ```bash
-cd app-visualizer
+VISUALIZER_RENDER_ENABLED=1
+VISUALIZER_RENDER_PROVIDER=gemini   # or openai
+VISUALIZER_RENDER_MODEL=gemini-2.0-flash-preview-image-generation
+VISUALIZER_MAX_UPLOAD_MB=10
+GEMINI_API_KEY=...                  # when provider=gemini
+# OPENAI_API_KEY=...                # when provider=openai
+HEAD_URL_VISUALIZER=http://localhost:5190
+```
 
-# Python render API
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+## Frontend env (`app-visualizer/.env.local`)
 
-# Generate sample kitchen + slab textures
-python render/generate_samples.py
-
-# Frontend
-npm install
+```bash
+VITE_BACKEND_URL=http://localhost:3001
+VITE_SUPABASE_URL=...
+VITE_SUPABASE_ANON_KEY=...
 ```
 
 ## Run locally
 
-Terminal 1 — render API (port **8190**):
+Terminal 1 — backend-core:
 
 ```bash
-cd app-visualizer
-source .venv/bin/activate
-uvicorn render.api:app --reload --host 127.0.0.1 --port 8190
+cd backend-core
+npm start   # or node src/server.js — port 3001
 ```
 
-Terminal 2 — frontend (port **5190**):
+Terminal 2 — visualizer head:
 
 ```bash
 cd app-visualizer
+npm install
 npm run dev
 ```
 
-Open http://localhost:5190
-
-1. Upload a kitchen photo (or use the sample)
-2. Pick a local slab material
-3. Click four countertop corners on the photo
-4. Click **Render visualization** to see before/after
-
-Outputs are written to `outputs/`; uploads to `uploads/`.
-
-## CLI
-
-```bash
-cd app-visualizer
-source .venv/bin/activate
-
-python render/visualize.py \
-  --kitchen samples/kitchen.jpg \
-  --slab slabs/sample.jpg \
-  --points "80,418 1200,418 1240,518 40,518" \
-  --output outputs/result.jpg
-```
-
-Point order: top-left → top-right → bottom-right → bottom-left (image pixel coordinates).
+Open http://localhost:5190, sign in, upload a photo, pick a material, click **Visualize**.
 
 ## API
 
-### `POST /api/render`
+### `GET /api/visualizer/config`
+
+Safe provider config (no secrets). Requires auth + `visualizer` head access.
+
+### `GET /api/visualizer/textures`
+
+Static demo texture manifest. Does **not** call `/api/slab-inventory/*`.
+
+### `POST /api/visualizer/render`
 
 `multipart/form-data`:
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `kitchen_image` | yes | Kitchen photo file |
-| `points` | yes | JSON `[[x,y],...]` (4 points) or `"x1,y1 x2,y2 x3,y3 x4,y4"` |
-| `slab_id` | one of | Catalog id matching a file in `slabs/` |
-| `slab_image` | one of | Custom slab texture upload |
+| `roomImage` | yes | Kitchen/bath photo |
+| `materialId` | one of | Demo texture id from catalog |
+| `materialImage` | one of | Optional custom texture upload |
+| `userInstruction` | no | Extra prompt hint |
 
-Response includes `output_url` (saved under `outputs/`).
+Returns `renderedImage` as a data URL plus disclaimer. **No DB writes.**
 
-### `GET /api/slabs`
+## Tests
 
-Lists slab textures from `slabs/`.
-
-## Render pipeline
-
-1. Load kitchen photo and slab texture
-2. Tile slab texture to cover the quad
-3. Perspective-warp tiled texture into the 4-point polygon (OpenCV)
-4. Build polygon mask
-5. Preserve original photo luminance (shadows/highlights) via LAB channel blend
-6. Composite and save JPEG locally
-
-## Folder layout
-
-```
-app-visualizer/
-  render/           # Python engine + FastAPI + CLI
-  src/              # React frontend
-  samples/          # Sample kitchen images
-  slabs/            # Local slab texture catalog
-  uploads/          # Uploaded kitchen photos (runtime)
-  outputs/          # Render results (runtime)
+```bash
+node backend-core/src/visualizer/visualizerRoutes.test.mjs
+npm run build --prefix app-visualizer
+node --check backend-core/src/visualizer/visualizerRoutes.js
+node --check backend-core/src/server.js
 ```
 
-## Isolation
+## Legacy local Python engine
 
-This MVP is intentionally isolated from eliteOS quote, pricing, inventory, Moraware, QuickBooks, Monday, and AI takeoff systems. No shared database tables or Supabase storage.
+The `render/` folder contains an earlier OpenCV prototype (local FastAPI). The MVP uses **backend-core provider render** instead. It is kept for reference only.

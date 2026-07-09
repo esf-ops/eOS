@@ -30,6 +30,7 @@ import { buildMeHeadsPayload } from "./me/launcherHeads.js";
 import { buildTitansTodayPayload, parseTitansTodayQuery } from "./titans/titansToday.js";
 import { attachSalesHeadRoutes } from "./sales/salesHead.js";
 import { attachMorawareSyncRoutes } from "./moraware/morawareSyncApi.js";
+import { attachVisualizerRoutes } from "./visualizer/visualizerRoutes.js";
 
 function requiredEnv(name) {
   const v = String(process.env[name] ?? "").trim();
@@ -76,6 +77,7 @@ const headAccessExecutive   = requireHeadAccess("executive",   { getSupabase: su
 const headAccessBrainHealth = requireHeadAccess("brain_health", { getSupabase: supabaseServerClient });
 const headAccessSystemAdmin = requireHeadAccess("system_admin", { getSupabase: supabaseServerClient });
 const headAccessAiTakeoff   = requireHeadAccess("ai_takeoff",   { getSupabase: supabaseServerClient });
+const headAccessVisualizer  = requireHeadAccess("visualizer",  { getSupabase: supabaseServerClient });
 
 function cronSecretOrNull() {
   const s = String(process.env.EOS_CRON_SECRET ?? "").trim();
@@ -1199,6 +1201,11 @@ attachTakeoffWorkspaceRoutes(app, {
   requireAuth,
   getSupabase:  supabaseServerClient,
   headAccess:   headAccessAiTakeoff,
+});
+
+attachVisualizerRoutes(app, {
+  requireAuth,
+  headAccess: headAccessVisualizer,
 });
 
 attachSlabInventoryRoutes(app, {

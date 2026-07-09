@@ -26,7 +26,8 @@ export const EOS_HEAD_SLUGS = Object.freeze([
   "dealer_resources",
   "ai_takeoff",   // v5.9: AI Takeoff Lab — internal preview head
   "slab_inventory", // Slab Inventory Head v1 — read-only internal slab browser (SlabCloud cache)
-  "custom_quote" // Custom Quote Tool — ESF-only off-program material quotes
+  "custom_quote", // Custom Quote Tool — ESF-only off-program material quotes
+  "visualizer" // Countertop Visualizer MVP — concept-only AI render (standalone head)
 ]);
 
 const _headSet = new Set(EOS_HEAD_SLUGS);

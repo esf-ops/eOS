@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" role="img" aria-label="Modern white kitchen sample">
+  <defs>
+    <linearGradient id="wall" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f8fafc"/>
+      <stop offset="100%" stop-color="#e2e8f0"/>
+    </linearGradient>
+    <linearGradient id="counter" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#cbd5e1"/>
+      <stop offset="100%" stop-color="#94a3b8"/>
+    </linearGradient>
+  </defs>
+  <rect width="1600" height="1000" fill="url(#wall)"/>
+  <rect x="0" y="720" width="1600" height="280" fill="#d1d5db"/>
+  <rect x="80" y="180" width="520" height="620" rx="4" fill="#ffffff" stroke="#e2e8f0" stroke-width="3"/>
+  <rect x="620" y="180" width="900" height="620" rx="4" fill="#ffffff" stroke="#e2e8f0" stroke-width="3"/>
+  <rect x="120" y="520" width="440" height="28" fill="#f1f5f9"/>
+  <rect x="660" y="520" width="820" height="28" fill="#f1f5f9"/>
+  <rect x="80" y="560" width="1440" height="48" fill="url(#counter)"/>
+  <rect x="700" y="240" width="740" height="240" fill="#87ceeb" opacity="0.35"/>
+  <rect x="140" y="240" width="180" height="240" fill="#87ceeb" opacity="0.25"/>
+  <circle cx="1350" cy="120" r="80" fill="#fef3c7" opacity="0.8"/>
+  <text x="80" y="80" fill="#64748b" font-family="system-ui,sans-serif" font-size="28" font-weight="600">Modern white kitchen</text>
+</svg>

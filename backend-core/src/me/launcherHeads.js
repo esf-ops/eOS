@@ -179,6 +179,15 @@ export const HEAD_LAUNCHER_CATALOG = [
     href: "/slab-inventory",
     roleNote:
       "Read-only v1 — reads the normalized SlabCloud cache; no holds, allocation, or writeback. Price group shown is the imported source value, not slabOS pricing authority. Backend APIs still require slab_inventory head access per request."
+  },
+  {
+    slug: "visualizer",
+    label: "Countertop Visualizer",
+    description: "Upload a kitchen photo and preview Elite 100 countertop materials with AI concept rendering.",
+    category: "Revenue",
+    href: "/visualizer",
+    roleNote:
+      "Concept visualization only — not an estimate, measurement, layout, inventory reservation, or production drawing. Does not write to quotes or inventory."
   }
 ];
 
@@ -236,8 +245,8 @@ function defaultSlugSet(role, userKind) {
 
   const base = new Set(["brain_health"]);
   const roleHints = {
-    sales: ["sales", "quote", "quote_library", "custom_quote", "reports"],
-    estimator: ["quote", "quote_library", "custom_quote", "reports"],
+    sales: ["sales", "quote", "quote_library", "custom_quote", "visualizer", "reports"],
+    estimator: ["quote", "quote_library", "custom_quote", "visualizer", "reports"],
     accounting: ["finance", "reports", "pricing_admin"],
     production: ["production", "shop_tv", "reports"],
     shop_tv: ["shop_tv"],

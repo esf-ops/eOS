@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" role="img" aria-label="Island kitchen sample">
+  <defs>
+    <linearGradient id="islandcab" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f1f5f9"/>
+      <stop offset="100%" stop-color="#cbd5e1"/>
+    </linearGradient>
+    <linearGradient id="islandtop" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#a8a29e"/>
+      <stop offset="100%" stop-color="#78716c"/>
+    </linearGradient>
+  </defs>
+  <rect width="1600" height="1000" fill="#e2e8f0"/>
+  <rect x="0" y="730" width="1600" height="270" fill="#cbd5e1"/>
+  <rect x="50" y="150" width="500" height="580" rx="4" fill="url(#islandcab)" stroke="#94a3b8" stroke-width="3"/>
+  <rect x="1050" y="150" width="500" height="580" rx="4" fill="url(#islandcab)" stroke="#94a3b8" stroke-width="3"/>
+  <rect x="50" y="530" width="500" height="44" fill="url(#islandtop)"/>
+  <rect x="1050" y="530" width="500" height="44" fill="url(#islandtop)"/>
+  <rect x="520" y="420" width="560" height="320" rx="8" fill="url(#islandcab)" stroke="#64748b" stroke-width="4"/>
+  <rect x="520" y="400" width="560" height="48" fill="url(#islandtop)"/>
+  <rect x="600" y="200" width="400" height="180" fill="#7dd3fc" opacity="0.25"/>
+  <circle cx="200" cy="90" r="75" fill="#fef9c3" opacity="0.85"/>
+  <text x="50" y="80" fill="#475569" font-family="system-ui,sans-serif" font-size="28" font-weight="600">Island kitchen</text>
+</svg>
