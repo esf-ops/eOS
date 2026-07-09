@@ -72,10 +72,11 @@ export function UploadExperience({
             <path d="M12 16V4m0 0L8 8m4-4l4 4M4 20h16" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </div>
-        <p className="viz-dropzone-title">Drag &amp; drop your kitchen photo</p>
-        <p className="viz-dropzone-sub">or browse from your device</p>
+        <p className="viz-dropzone-title">Upload a kitchen photo</p>
+        <p className="viz-dropzone-sub">Choose from your camera roll or files</p>
         <span className="viz-btn viz-btn-primary viz-dropzone-cta">Choose photo</span>
         <p className="viz-dropzone-note">JPG or PNG · up to {maxUploadMb} MB</p>
+        <p className="viz-dropzone-hint-desktop">or drag and drop</p>
       </div>
 
       <div className="viz-demo-row">

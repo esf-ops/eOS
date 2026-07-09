@@ -11,12 +11,21 @@
   --line: rgba(20, 24, 31, 0.09);
   --line-strong: rgba(20, 24, 31, 0.16);
 
-  --accent: #1b3a5b;
-  --accent-2: #24567f;
-  --accent-hover: #142c46;
-  --accent-soft: rgba(27, 58, 91, 0.08);
-  --accent-glow: rgba(36, 86, 127, 0.28);
+  --elite-red: #b91c1c;
+  --elite-red-dark: #7f1d1d;
+  --elite-red-soft: rgba(185, 28, 28, 0.10);
+  --elite-red-ring: rgba(185, 28, 28, 0.28);
+  --elite-red-border: rgba(185, 28, 28, 0.22);
+
+  --accent: var(--elite-red-dark);
+  --accent-2: var(--elite-red);
+  --accent-hover: #661515;
+  --accent-soft: var(--elite-red-soft);
+  --accent-glow: var(--elite-red-ring);
   --gold: #b08341;
+
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
 
   --radius-xl: 26px;
   --radius-lg: 20px;
@@ -37,7 +46,13 @@
   text-rendering: optimizeLegibility;
 }
 
-* { box-sizing: border-box; }
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+/* Do not set overflow-x on html/body: it forces overflow-y to compute as
+   "auto", which can make the root element behave as its own scroll
+   container in some engines and break position:sticky for descendants.
+   Horizontal overflow is already prevented by .viz-shell / .viz-preview
+   sizing, verified via automated checks at 375-430px widths. */
 
 body {
   margin: 0;
@@ -46,12 +61,14 @@ body {
 }
 
 /* ── App shell ─────────────────────────────────────────────── */
+/* No overflow-x here: setting it would force overflow-y to compute as
+   "auto", turning .viz-app into an unintended scroll container and
+   breaking position:sticky for descendants (e.g. the mobile CTA bar). */
 .viz-app {
   position: relative;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  overflow-x: hidden;
 }
 
 .viz-shell {
@@ -89,7 +106,7 @@ body {
   height: 46vw;
   top: -14vw;
   right: -10vw;
-  background: radial-gradient(circle at 30% 30%, rgba(36, 86, 127, 0.42), transparent 65%);
+  background: radial-gradient(circle at 30% 30%, rgba(20, 24, 31, 0.12), transparent 65%);
 }
 
 .viz-bg-orb-2 {
@@ -97,7 +114,7 @@ body {
   height: 40vw;
   bottom: -16vw;
   left: -12vw;
-  background: radial-gradient(circle at 50% 50%, rgba(176, 131, 65, 0.28), transparent 62%);
+  background: radial-gradient(circle at 50% 50%, rgba(176, 131, 65, 0.22), transparent 62%);
   animation-delay: -7s;
 }
 
@@ -106,7 +123,7 @@ body {
   height: 32vw;
   top: 34%;
   left: 40%;
-  background: radial-gradient(circle at 50% 50%, rgba(27, 58, 91, 0.18), transparent 60%);
+  background: radial-gradient(circle at 50% 50%, rgba(185, 28, 28, 0.12), transparent 60%);
   animation-delay: -13s;
 }
 
@@ -130,7 +147,7 @@ body {
   width: 100%;
   max-width: 1280px;
   margin: 0 auto;
-  padding: 20px clamp(16px, 4vw, 44px) 4px;
+  padding: calc(20px + var(--safe-top)) clamp(16px, 4vw, 44px) 4px;
   display: flex;
   align-items: center;
 }
@@ -303,7 +320,7 @@ body {
 .viz-dropzone.is-dragging {
   border-color: var(--accent-2);
   border-style: solid;
-  background: linear-gradient(180deg, rgba(36, 86, 127, 0.08), var(--surface));
+  background: linear-gradient(180deg, var(--elite-red-soft), var(--surface));
   transform: scale(1.01);
 }
 
@@ -337,6 +354,17 @@ body {
   margin: 12px 0 0;
   font-size: 0.8rem;
   color: var(--ink-muted);
+}
+
+.viz-dropzone-hint-desktop {
+  display: none;
+  margin: 10px 0 0;
+  font-size: 0.78rem;
+  color: var(--ink-muted);
+}
+
+@media (min-width: 769px) {
+  .viz-dropzone-hint-desktop { display: block; }
 }
 
 .viz-demo-row {
@@ -392,7 +420,8 @@ body {
   align-items: start;
 }
 
-.viz-studio-stage { min-width: 0; }
+.viz-studio-stage,
+.viz-studio-panel { min-width: 0; }
 
 .viz-room-frame {
   position: relative;
@@ -464,10 +493,12 @@ body {
 
 .viz-search {
   width: 100%;
+  min-height: 46px;
   padding: 12px 14px 12px 38px;
   border-radius: 12px;
   border: 1px solid var(--line);
   font: inherit;
+  font-size: 16px;
   background: rgba(255, 255, 255, 0.85);
   transition: border-color 0.18s ease, box-shadow 0.18s ease;
 }
@@ -481,7 +512,10 @@ body {
 .viz-chips { display: flex; flex-wrap: wrap; gap: 7px; }
 
 .viz-chip {
-  padding: 7px 13px;
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  padding: 7px 14px;
   border-radius: 999px;
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.7);
@@ -490,10 +524,12 @@ body {
   font-weight: 600;
   color: var(--ink-soft);
   cursor: pointer;
+  white-space: nowrap;
   transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease, transform 0.16s ease;
 }
 
 .viz-chip:hover:not(:disabled) { border-color: var(--line-strong); transform: translateY(-1px); }
+.viz-chip:active:not(:disabled) { transform: translateY(0) scale(0.97); }
 .viz-chip-muted { font-weight: 500; }
 
 .viz-chip.is-active {
@@ -555,6 +591,8 @@ body {
   background: var(--surface-solid);
 }
 
+.viz-swatch:active:not(:disabled) { transform: translateY(0) scale(0.98); }
+
 .viz-swatch.is-selected {
   border-color: var(--accent-2);
   background: var(--surface-solid);
@@ -610,7 +648,7 @@ body {
   padding: 11px 13px;
   border-radius: var(--radius-md);
   background: var(--accent-soft);
-  border: 1px solid rgba(36, 86, 127, 0.18);
+  border: 1px solid var(--elite-red-border);
 }
 
 .viz-selected img {
@@ -746,6 +784,7 @@ body {
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
+  -webkit-touch-callout: none;
   background: #0e1116;
   box-shadow: var(--shadow-lg);
   border: 1px solid var(--line);
@@ -761,6 +800,9 @@ body {
   height: 100%;
   object-fit: cover;
   pointer-events: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .viz-ba-before { z-index: 2; }
@@ -954,14 +996,14 @@ body {
   font-size: 0.9rem;
 }
 
-.viz-alert-error { background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; }
+.viz-alert-error { background: #fef2f2; border: 1px solid #fecaca; color: var(--elite-red); }
 .viz-alert-warn { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; }
 
 /* ── Footer ────────────────────────────────────────────────── */
 .viz-footer {
   position: relative;
   z-index: 1;
-  padding: 22px 20px 30px;
+  padding: 22px 20px calc(30px + var(--safe-bottom));
   text-align: center;
 }
 
@@ -986,9 +1028,9 @@ body {
 }
 
 /* ── Responsive ────────────────────────────────────────────── */
-@media (max-width: 960px) {
+@media (max-width: 1024px) {
   .viz-studio {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .viz-studio-panel {
@@ -1001,27 +1043,63 @@ body {
   .viz-preview { width: 92vw; }
 }
 
-@media (max-width: 620px) {
-  .viz-shell { padding: 6px 14px 32px; gap: 16px; }
-  .viz-topbar { padding: 16px 14px 2px; }
+@media (max-width: 768px) {
+  .viz-shell { padding: 6px 16px calc(28px + var(--safe-bottom)); gap: 16px; }
+  .viz-topbar { padding: calc(16px + var(--safe-top)) 16px 2px; }
 
+  /* Filter chips scroll horizontally instead of wrapping into a tall block. */
+  .viz-chips {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+    margin: 0 -2px;
+  }
+
+  .viz-chips::-webkit-scrollbar { display: none; }
+  .viz-chip { flex: 0 0 auto; }
+
+  /* Near-sticky filter bar so search/filters stay reachable while scrolling swatches. */
+  .viz-picker-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    margin: 0 -22px;
+    padding: calc(8px + var(--safe-top)) 22px 8px;
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(14px);
+  }
+
+  /* Sticky Generate CTA on the material step, safe-area aware. */
+  .viz-panel-cta {
+    position: sticky;
+    bottom: 0;
+    z-index: 20;
+    margin: 4px -22px -22px;
+    padding: 14px 22px calc(14px + var(--safe-bottom));
+    background: linear-gradient(180deg, rgba(244, 242, 239, 0) 0%, var(--surface-solid) 32%);
+  }
+}
+
+@media (max-width: 620px) {
   .viz-step-label { display: none; }
   .viz-step { gap: 0; }
   .viz-steps { gap: 4px; padding: 8px 12px; }
 
-  .viz-dropzone { min-height: 260px; padding: 30px 18px; }
+  .viz-dropzone { min-height: 240px; padding: 28px 18px; }
   .viz-hero-title { font-size: clamp(1.7rem, 8vw, 2.2rem); }
 
-  .viz-swatch-grid { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
+  .viz-swatch-grid { grid-template-columns: repeat(2, 1fr); }
 
   .viz-room-image,
   .viz-ba,
   .viz-loading-frame,
-  .viz-loading-image { max-height: 62vh; }
+  .viz-loading-image { max-height: 64vh; }
 
   .viz-ba-handle { width: 46px; height: 46px; }
 
-  .viz-preview { width: 94vw; }
+  .viz-preview { width: 95vw; }
 
   .viz-actionbar {
     width: 100%;
@@ -1031,7 +1109,59 @@ body {
 
   .viz-actionbar .viz-btn { width: 100%; }
 
-  .viz-stage-badge { font-size: 0.72rem; padding: 6px 11px; top: 12px; left: 12px; }
+  .viz-stage-badge {
+    font-size: 0.72rem;
+    padding: 6px 11px;
+    top: 12px;
+    left: 12px;
+    max-width: calc(100% - 24px);
+    overflow: hidden;
+  }
+
+  .viz-stage-badge-material {
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: bottom;
+  }
+}
+
+@media (max-width: 430px) {
+  .viz-shell { padding-left: 14px; padding-right: 14px; }
+  .viz-topbar { padding-left: 14px; padding-right: 14px; }
+
+  .viz-hero-title { font-size: clamp(1.55rem, 8.5vw, 2rem); }
+  .viz-hero-sub { font-size: 0.92rem; }
+
+  .viz-dropzone { min-height: 220px; padding: 24px 16px; }
+  .viz-dropzone-title { font-size: 1.05rem; }
+
+  .viz-studio-panel { padding: 18px; }
+  .viz-picker-toolbar { margin: 0 -18px; padding-left: 18px; padding-right: 18px; }
+  .viz-panel-cta { margin: 4px -18px -18px; padding-left: 18px; padding-right: 18px; }
+
+  .viz-swatch-grid { gap: 9px; }
+  .viz-swatch-name { font-size: 0.82rem; }
+
+  .viz-actionbar-wrap { padding: 0 4px; }
+  .viz-btn { padding: 12px 16px; }
+
+  .viz-demo-row { gap: 8px; }
+  .viz-demo-chip { font-size: 0.78rem; }
+}
+
+@media (max-width: 375px) {
+  .viz-hero-title { font-size: clamp(1.4rem, 9vw, 1.85rem); }
+  .viz-preview { width: 96vw; }
+  .viz-room-image,
+  .viz-ba,
+  .viz-loading-frame,
+  .viz-loading-image { max-height: 58vh; }
+
+  .viz-stage-badge { font-size: 0.68rem; padding: 5px 10px; }
+  .viz-ba-tag { font-size: 0.64rem; padding: 5px 11px; }
 }
 
 /* ── Reduced motion ────────────────────────────────────────── */
