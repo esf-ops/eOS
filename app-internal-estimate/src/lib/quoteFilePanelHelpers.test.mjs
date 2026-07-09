@@ -20,6 +20,8 @@ import {
   roleLabelFor,
   validateFileForUpload,
   buildBatchSummaryMessage,
+  mimeTypeToFileTag,
+  mimeTypeToCategory,
 } from "./quoteFilePanelHelpers.ts";
 
 // ── formatBytes ───────────────────────────────────────────────────────────────
@@ -125,5 +127,29 @@ assert.ok(VISIBILITY_OPTIONS.some((v) => v.value === "customer"), "VISIBILITY_OP
 assert.ok(FILE_ACCEPT.includes("application/pdf"), "FILE_ACCEPT includes PDF");
 assert.ok(FILE_ACCEPT.includes("image/*"), "FILE_ACCEPT includes images");
 assert.ok(FILE_ACCEPT.includes(".docx"), "FILE_ACCEPT includes .docx");
+
+// ── mimeTypeToFileTag ─────────────────────────────────────────────────────────
+
+assert.equal(mimeTypeToFileTag("application/pdf"), "PDF", "mimeTypeToFileTag: pdf");
+assert.equal(mimeTypeToFileTag("image/jpeg"), "IMG", "mimeTypeToFileTag: jpeg");
+assert.equal(mimeTypeToFileTag("image/png"), "IMG", "mimeTypeToFileTag: png");
+assert.equal(
+  mimeTypeToFileTag("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+  "DOC",
+  "mimeTypeToFileTag: docx"
+);
+assert.equal(mimeTypeToFileTag("application/msword"), "DOC", "mimeTypeToFileTag: doc");
+assert.equal(mimeTypeToFileTag("text/plain"), "TXT", "mimeTypeToFileTag: txt");
+assert.equal(mimeTypeToFileTag(null), "FILE", "mimeTypeToFileTag: null");
+assert.equal(mimeTypeToFileTag("application/octet-stream"), "FILE", "mimeTypeToFileTag: unknown");
+
+// ── mimeTypeToCategory ────────────────────────────────────────────────────────
+
+assert.equal(mimeTypeToCategory("application/pdf"), "pdf", "mimeTypeToCategory: pdf");
+assert.equal(mimeTypeToCategory("image/webp"), "image", "mimeTypeToCategory: image");
+assert.equal(mimeTypeToCategory("application/msword"), "doc", "mimeTypeToCategory: doc");
+assert.equal(mimeTypeToCategory("text/plain"), "text", "mimeTypeToCategory: text");
+assert.equal(mimeTypeToCategory(null), "other", "mimeTypeToCategory: null");
+assert.equal(mimeTypeToCategory("video/mp4"), "other", "mimeTypeToCategory: video → other");
 
 console.log("quoteFilePanelHelpers: all tests passed");

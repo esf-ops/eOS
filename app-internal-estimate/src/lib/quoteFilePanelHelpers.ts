@@ -26,6 +26,27 @@ export const VISIBILITY_OPTIONS: { value: string; label: string }[] = [
 /** Accepted MIME types for the file input accept attribute — must match backend ALLOWED_MIME_TYPES. */
 export const FILE_ACCEPT = "application/pdf,image/*,.doc,.docx,.txt";
 
+export function mimeTypeToFileTag(mimeType: string | null): string {
+  if (!mimeType) return "FILE";
+  if (mimeType === "application/pdf") return "PDF";
+  if (mimeType.startsWith("image/")) return "IMG";
+  if (mimeType.includes("wordprocessingml") || mimeType === "application/msword") return "DOC";
+  if (mimeType === "text/plain") return "TXT";
+  return "FILE";
+}
+
+export type FileMimeCategory = "pdf" | "image" | "doc" | "text" | "other";
+
+export function mimeTypeToCategory(mimeType: string | null): FileMimeCategory {
+  if (!mimeType) return "other";
+  if (mimeType === "application/pdf") return "pdf";
+  if (mimeType.startsWith("image/")) return "image";
+  if (mimeType.includes("wordprocessingml") || mimeType === "application/msword") return "doc";
+  if (mimeType === "text/plain") return "text";
+  return "other";
+}
+
+
 export function formatBytes(bytes: number | null | undefined): string {
   if (bytes == null || bytes < 0) return "—";
   if (bytes < 1024) return `${bytes} B`;

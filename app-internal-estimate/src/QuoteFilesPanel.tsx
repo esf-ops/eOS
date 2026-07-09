@@ -21,8 +21,7 @@
  *   POST /api/quote-files/archive → sets status = 'archived'; removes from normal lists.
  *
  * Drag-and-drop:
- *   - Drop zone wraps the upload area when quoteId is present.
- *   - Dropping files triggers immediate sequential batch upload.
+ *   - Drop zone is a distinct visual target. Dropping files triggers immediate sequential upload.
  *   - A document-level dragover/drop listener prevents accidental browser navigation.
  *   - dragCounterRef tracks nested dragenter/dragleave events to avoid flicker.
  *
@@ -40,6 +39,8 @@ import {
   roleLabelFor,
   validateFileForUpload,
   buildBatchSummaryMessage,
+  mimeTypeToFileTag,
+  mimeTypeToCategory,
 } from "./lib/quoteFilePanelHelpers";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -73,34 +74,36 @@ export interface QuoteFilesPanelProps {
   getToken: () => Promise<string | null>;
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function formatBytes(bytes: number | null | undefined): string {
-  if (bytes == null || bytes < 0) return "—";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function formatDate(iso: string): string {
-  try {
-    return new Date(iso).toLocaleDateString(undefined, {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    });
-  } catch {
-    return iso;
-  }
-}
-
-function roleLabelFor(role: string): string {
-  return FILE_ROLES.find((r) => r.value === role)?.label ?? role;
-}
+// ── Local helpers ─────────────────────────────────────────────────────────────
 
 let _localIdCounter = 0;
 function nextLocalId(): string {
   return `batch-${++_localIdCounter}`;
+}
+
+/** Max pending files to show by name before collapsing to "+N more". */
+const PENDING_SHOW_MAX = 5;
+
+// ── Inline SVG upload icon ────────────────────────────────────────────────────
+
+function UploadIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <path
+        d="M10 13V4M10 4L7 7M10 4L13 7"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M3 14v1a2 2 0 002 2h10a2 2 0 002-2v-1"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -118,7 +121,7 @@ export function QuoteFilesPanel({ quoteId, getToken }: QuoteFilesPanelProps) {
 
   /** Overall upload session status. */
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>("idle");
-  /** Overall summary message shown below the upload button. */
+  /** Overall summary message shown in the batch panel. */
   const [uploadMsg, setUploadMsg]       = useState<string | null>(null);
   /** Per-file status rows shown during/after a batch run. */
   const [batchItems, setBatchItems]     = useState<BatchItem[]>([]);
@@ -131,7 +134,7 @@ export function QuoteFilesPanel({ quoteId, getToken }: QuoteFilesPanelProps) {
 
   const [isDragOver, setIsDragOver] = useState(false);
 
-  const fileInputRef  = useRef<HTMLInputElement>(null);
+  const fileInputRef   = useRef<HTMLInputElement>(null);
   /** Tracks nested dragenter/dragleave calls to avoid false dragleave events. */
   const dragCounterRef = useRef(0);
 
@@ -230,6 +233,7 @@ export function QuoteFilesPanel({ quoteId, getToken }: QuoteFilesPanelProps) {
         failCount++;
         continue;
       }
+
       items[i] = { ...item, status: "uploading", msg: "Uploading…" };
       setBatchItems([...items]);
 
@@ -303,6 +307,15 @@ export function QuoteFilesPanel({ quoteId, getToken }: QuoteFilesPanelProps) {
     setBatchItems([]);
   }, []);
 
+  /** Clear pending file selection without uploading. */
+  const clearPending = useCallback(() => {
+    setPendingFiles([]);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    setUploadStatus("idle");
+    setUploadMsg(null);
+    setBatchItems([]);
+  }, []);
+
   /** Called by the "Upload file(s)" button for browsed files. */
   const handleUpload = useCallback(() => {
     void uploadFiles(pendingFiles);
@@ -344,25 +357,6 @@ export function QuoteFilesPanel({ quoteId, getToken }: QuoteFilesPanelProps) {
     if (dropped.length === 0) return;
     void uploadFiles(dropped);
   }, [quoteId, uploadStatus, uploadFiles]);
-
-  // ── Derived state ─────────────────────────────────────────────────────────
-
-  const isBusy = uploadStatus === "uploading";
-  const canUpload = Boolean(quoteId) && pendingFiles.length > 0 && !isBusy;
-
-  const pendingLabel =
-    pendingFiles.length === 0
-      ? "No file chosen"
-      : pendingFiles.length === 1
-        ? pendingFiles[0].name
-        : `${pendingFiles.length} files selected`;
-
-  const uploadButtonLabel =
-    isBusy
-      ? (pendingFiles.length > 1 ? "Uploading…" : "Uploading…")
-      : pendingFiles.length > 1
-        ? `Upload ${pendingFiles.length} files`
-        : "Upload file";
 
   // ── Download ──────────────────────────────────────────────────────────────
 
@@ -415,6 +409,29 @@ export function QuoteFilesPanel({ quoteId, getToken }: QuoteFilesPanelProps) {
     }
   }, [getToken, loadFiles]);
 
+  // ── Derived state ─────────────────────────────────────────────────────────
+
+  const isBusy     = uploadStatus === "uploading";
+  const canUpload  = Boolean(quoteId) && pendingFiles.length > 0 && !isBusy;
+  const hasBatch   = uploadMsg !== null || batchItems.length > 0;
+
+  const uploadButtonLabel = isBusy
+    ? "Uploading…"
+    : pendingFiles.length > 1
+      ? `Upload ${pendingFiles.length} files`
+      : "Upload file";
+
+  // For the pending list: show first PENDING_SHOW_MAX by name, then "+N more"
+  const shownPending  = pendingFiles.slice(0, PENDING_SHOW_MAX);
+  const hiddenPending = pendingFiles.length - shownPending.length;
+
+  // Drop zone CSS class
+  const dropZoneClass = [
+    "qfp-drop-zone",
+    isDragOver ? "is-drag-over" : "",
+    isBusy     ? "is-busy"     : "",
+  ].filter(Boolean).join(" ");
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
@@ -422,124 +439,40 @@ export function QuoteFilesPanel({ quoteId, getToken }: QuoteFilesPanelProps) {
       <div className="ie-section-head">
         <h2 className="ie-section-title" id="quote-files-heading">Quote Files</h2>
         <p className="ie-section-meta">
-          Upload cabinet plans, measurement plans, photos, specs, signed approvals, or other files connected to this estimate.
+          Upload cabinet plans, measurement plans, specs, photos, signed approvals, or supporting documents.
+          <span className="qfp-accept-hint">PDF, images, Word, and text files · up to 50 MB each</span>
         </p>
       </div>
 
       {/* ── Gate: not saved yet ─────────────────────────────────────────── */}
       {!quoteId ? (
-        <p className="muted small" style={{ marginTop: 8 }}>
-          Save this estimate before uploading files.
-        </p>
+        <div className="qfp-unsaved-gate" role="note">
+          <span className="qfp-unsaved-icon" aria-hidden="true">📎</span>
+          <span>Save this estimate before uploading files.</span>
+        </div>
       ) : (
         <>
-          {/* ── Drop zone wrapper ────────────────────────────────────────── */}
-          <div
-            style={{ position: "relative" }}
-            onDragEnter={handleDragEnter}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-          >
-            {/* Drag-over overlay */}
-            {isDragOver && (
-              <div
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  zIndex: 10,
-                  background: "rgba(37, 99, 235, 0.06)",
-                  border: "2px dashed var(--color-primary, #2563eb)",
-                  borderRadius: 8,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  pointerEvents: "none",
-                }}
-                aria-hidden="true"
-              >
-                <span
-                  style={{
-                    fontWeight: 600,
-                    color: "var(--color-primary, #2563eb)",
-                    fontSize: "0.95rem",
-                    background: "var(--color-bg, #fff)",
-                    padding: "6px 14px",
-                    borderRadius: 6,
-                  }}
-                >
-                  Drop files to attach to quote
-                </span>
-              </div>
-            )}
-
-            {/* ── Upload form ──────────────────────────────────────────────── */}
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr auto auto",
-                gap: 8,
-                alignItems: "end",
-                marginBottom: 12,
-              }}
-            >
-              {/* Hidden native file input — triggered by button. multiple allows batch selection. */}
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept={FILE_ACCEPT}
-                multiple
-                style={{ display: "none" }}
-                onChange={handleFileChange}
-                disabled={isBusy}
-              />
-
-              {/* File picker button */}
-              <div>
-                <label className="muted small" style={{ display: "block", marginBottom: 4 }}>
-                  File
-                </label>
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <button
-                    type="button"
-                    className="btn secondary btn-sm"
-                    disabled={isBusy}
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    Choose file
-                  </button>
-                  <span className="muted small" style={{ wordBreak: "break-all" }}>
-                    {pendingLabel}
-                  </span>
-                </div>
-                <p className="muted small" style={{ marginTop: 4, marginBottom: 0 }}>
-                  Or drag files here to upload
-                </p>
-              </div>
-
-              {/* Role selector */}
-              <div>
-                <label className="muted small" style={{ display: "block", marginBottom: 4 }}>
-                  File role
-                </label>
+          {/* ── Upload settings row (role + visibility) ──────────────────── */}
+          <div className="qfp-settings-row">
+            <span className="qfp-settings-label">Default upload settings</span>
+            <div className="qfp-settings-controls">
+              <div className="qfp-settings-field">
+                <label htmlFor="qfp-role-select" className="qfp-field-label">File role</label>
                 <select
+                  id="qfp-role-select"
                   value={fileRole}
                   onChange={(e) => setFileRole(e.target.value)}
                   disabled={isBusy}
-                  style={{ minWidth: 150 }}
                 >
                   {FILE_ROLES.map((r) => (
                     <option key={r.value} value={r.value}>{r.label}</option>
                   ))}
                 </select>
               </div>
-
-              {/* Visibility selector */}
-              <div>
-                <label className="muted small" style={{ display: "block", marginBottom: 4 }}>
-                  Visibility
-                </label>
+              <div className="qfp-settings-field">
+                <label htmlFor="qfp-vis-select" className="qfp-field-label">Visibility</label>
                 <select
+                  id="qfp-vis-select"
                   value={visibility}
                   onChange={(e) => setVisibility(e.target.value)}
                   disabled={isBusy}
@@ -550,173 +483,208 @@ export function QuoteFilesPanel({ quoteId, getToken }: QuoteFilesPanelProps) {
                 </select>
               </div>
             </div>
+          </div>
 
-            {/* Upload button */}
-            <div style={{ marginBottom: 10 }}>
-              <button
-                type="button"
-                className="btn primary btn-sm"
-                disabled={!canUpload}
-                onClick={handleUpload}
-              >
-                {uploadButtonLabel}
-              </button>
-            </div>
+          {/* Hidden native file input — triggered programmatically */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={FILE_ACCEPT}
+            multiple
+            style={{ display: "none" }}
+            onChange={handleFileChange}
+            disabled={isBusy}
+          />
 
-            {/* Overall upload status message */}
-            {uploadMsg ? (
-              <p
-                className="muted small"
-                role="status"
-                aria-live="polite"
-                style={{
-                  marginBottom: batchItems.length > 0 ? 6 : 10,
-                  color:
-                    uploadStatus === "error"   ? "var(--color-error, #b91c1c)" :
-                    uploadStatus === "success" ? "var(--color-success, #16a34a)" :
-                    undefined,
-                }}
-              >
-                {uploadStatus === "success" ? "✓ " : uploadStatus === "error" ? "✗ " : ""}
-                {uploadMsg}
-              </p>
-            ) : null}
-
-            {/* Per-file status during / after batch upload */}
-            {batchItems.length > 0 && (
-              <div
-                role="list"
-                aria-label="Upload status per file"
-                style={{ marginBottom: 12, fontSize: "0.83rem" }}
-              >
-                {batchItems.map((item) => (
-                  <div
-                    key={item.localId}
-                    role="listitem"
-                    style={{
-                      display: "flex",
-                      alignItems: "baseline",
-                      gap: 6,
-                      padding: "2px 0",
-                      color:
-                        item.status === "error"
-                          ? "var(--color-error, #b91c1c)"
-                          : item.status === "done"
-                            ? "var(--color-success, #16a34a)"
-                            : undefined,
-                    }}
-                  >
-                    <span aria-hidden="true">
-                      {item.status === "done"      ? "✓"
-                       : item.status === "error"   ? "✗"
-                       : item.status === "uploading" ? "⏳"
-                       : "·"}
-                    </span>
-                    <span style={{ wordBreak: "break-all", flex: 1 }}>
-                      {item.file.name}
-                    </span>
-                    {item.msg ? (
-                      <span className="muted small" style={{ whiteSpace: "nowrap" }}>
-                        {item.msg}
-                      </span>
-                    ) : null}
-                  </div>
-                ))}
+          {/* ── Drop zone ────────────────────────────────────────────────── */}
+          <div
+            className={dropZoneClass}
+            onDragEnter={handleDragEnter}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            aria-label="File drop zone"
+          >
+            {isDragOver ? (
+              /* Drag-over state */
+              <div className="qfp-dz-drag-content" aria-live="polite">
+                <div className="qfp-dz-drag-arrow" aria-hidden="true">↓</div>
+                <p className="qfp-dz-drag-text">Drop files to attach to quote</p>
               </div>
+            ) : pendingFiles.length > 0 ? (
+              /* Files selected via browse — awaiting upload click */
+              <div className="qfp-dz-pending">
+                <p className="qfp-dz-pending-header">
+                  {pendingFiles.length === 1
+                    ? "1 file selected"
+                    : `${pendingFiles.length} files selected`}
+                </p>
+                <ul className="qfp-dz-pending-list" aria-label="Selected files">
+                  {shownPending.map((f, i) => (
+                    <li key={i} className="qfp-dz-pending-item">
+                      <span className="qfp-dz-pending-item-name" title={f.name}>{f.name}</span>
+                      <span className="qfp-dz-pending-item-size">{formatBytes(f.size)}</span>
+                    </li>
+                  ))}
+                </ul>
+                {hiddenPending > 0 && (
+                  <p className="qfp-dz-pending-more">+{hiddenPending} more file{hiddenPending !== 1 ? "s" : ""}</p>
+                )}
+                <div className="qfp-dz-pending-actions">
+                  <button
+                    type="button"
+                    className="btn primary btn-sm"
+                    disabled={!canUpload}
+                    onClick={handleUpload}
+                  >
+                    {uploadButtonLabel}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn secondary btn-sm"
+                    disabled={isBusy}
+                    onClick={clearPending}
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* Idle state */
+              <>
+                <div className="qfp-dz-icon">
+                  <UploadIcon />
+                </div>
+                <p className="qfp-dz-main">Drag files here</p>
+                <p className="qfp-dz-sub">
+                  or{" "}
+                  <button
+                    type="button"
+                    className="btn primary btn-sm"
+                    disabled={isBusy}
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    Choose files
+                  </button>
+                </p>
+                <p className="qfp-dz-hint">PDF, images, Word, and text files · up to 50 MB each</p>
+              </>
             )}
           </div>
 
-          {/* ── File list ────────────────────────────────────────────────── */}
+          {/* ── Batch upload status panel ─────────────────────────────────── */}
+          {hasBatch && (
+            <div className="qfp-batch-panel" role="status" aria-live="polite">
+              {uploadMsg && (
+                <p className={[
+                  "qfp-batch-summary",
+                  uploadStatus === "success" ? "is-success" : "",
+                  uploadStatus === "error"   ? "is-error"   : "",
+                ].filter(Boolean).join(" ")}>
+                  {uploadStatus === "success" ? "✓ " : uploadStatus === "error" ? "✗ " : ""}
+                  {uploadMsg}
+                </p>
+              )}
+              {batchItems.length > 0 && (
+                <ul className="qfp-batch-list" aria-label="Upload status per file">
+                  {batchItems.map((item) => (
+                    <li key={item.localId} className={`qfp-batch-item is-${item.status}`}>
+                      <span className="qfp-batch-icon" aria-hidden="true">
+                        {item.status === "done"      ? "✓"
+                         : item.status === "error"   ? "✗"
+                         : item.status === "uploading" ? "↑"
+                         : "·"}
+                      </span>
+                      <span className="qfp-batch-name">{item.file.name}</span>
+                      {item.msg ? (
+                        <span className="qfp-batch-msg" title={item.msg}>{item.msg}</span>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
+          {/* ── Uploaded file list ────────────────────────────────────────── */}
           {listLoading ? (
             <p className="muted small">Loading files…</p>
           ) : listError ? (
-            <p className="muted small" style={{ color: "var(--color-error, #b91c1c)" }}>
-              {listError}
+            <div className="qfp-list-error">
+              <span>✗ {listError}</span>
               <button
                 type="button"
                 className="btn secondary btn-sm"
-                style={{ marginLeft: 8 }}
                 onClick={() => void loadFiles()}
               >
                 Retry
               </button>
-            </p>
+            </div>
           ) : files.length === 0 ? (
-            <p className="muted small">No files attached yet.</p>
+            <div className="qfp-empty-state">
+              <p className="qfp-empty-primary">No files attached yet.</p>
+              <p className="qfp-empty-secondary">
+                Upload cabinet plans, photos, specs, or approvals for this quote.
+              </p>
+            </div>
           ) : (
-            <div style={{ marginTop: 4 }}>
+            <div>
               {downloadError ? (
-                <p className="muted small" style={{ color: "var(--color-error, #b91c1c)", marginBottom: 8 }}>
-                  ✗ {downloadError}
-                </p>
+                <div className="qfp-list-error">✗ {downloadError}</div>
               ) : null}
               {archiveError ? (
-                <p className="muted small" style={{ color: "var(--color-error, #b91c1c)", marginBottom: 8 }}>
-                  ✗ {archiveError}
-                </p>
+                <div className="qfp-list-error">✗ {archiveError}</div>
               ) : null}
-              <table
-                style={{
-                  width: "100%",
-                  borderCollapse: "collapse",
-                  fontSize: "0.85rem",
-                }}
-              >
-                <thead>
-                  <tr style={{ textAlign: "left", borderBottom: "1px solid var(--color-border, #e5e7eb)" }}>
-                    <th style={{ padding: "4px 8px 4px 0", fontWeight: 600 }}>File</th>
-                    <th style={{ padding: "4px 8px", fontWeight: 600 }}>Role</th>
-                    <th style={{ padding: "4px 8px", fontWeight: 600 }}>Size</th>
-                    <th style={{ padding: "4px 8px", fontWeight: 600 }}>Added</th>
-                    <th style={{ padding: "4px 8px", fontWeight: 600 }}>Visibility</th>
-                    <th style={{ padding: "4px 8px", fontWeight: 600 }}></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {files.map((f) => (
-                    <tr
-                      key={f.id}
-                      style={{ borderBottom: "1px solid var(--color-border, #f3f4f6)" }}
+
+              <p className="qfp-files-heading">
+                {files.length === 1 ? "1 attached file" : `${files.length} attached files`}
+              </p>
+              <div className="qfp-file-list">
+                {files.map((f) => (
+                  <div key={f.id} className="qfp-file-row">
+                    <div
+                      className={`qfp-file-icon qfp-file-icon--${mimeTypeToCategory(f.mimeType)}`}
+                      aria-hidden="true"
                     >
-                      <td style={{ padding: "6px 8px 6px 0", wordBreak: "break-all", maxWidth: 220 }}>
+                      {mimeTypeToFileTag(f.mimeType)}
+                    </div>
+                    <div className="qfp-file-info">
+                      <div className="qfp-file-name" title={f.originalFilename}>
                         {f.originalFilename}
-                      </td>
-                      <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>
+                      </div>
+                      <div className="qfp-file-meta">
                         {roleLabelFor(f.fileRole)}
-                      </td>
-                      <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>
+                        {" · "}
                         {formatBytes(f.fileSizeBytes)}
-                      </td>
-                      <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>
+                        {" · "}
                         {formatDate(f.createdAt)}
-                      </td>
-                      <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>
-                        <span className="muted small">{f.visibility}</span>
-                      </td>
-                      <td style={{ padding: "6px 8px", whiteSpace: "nowrap", display: "flex", gap: 6 }}>
-                        <button
-                          type="button"
-                          className="btn secondary btn-sm"
-                          disabled={downloadingId === f.id || archivingId === f.id}
-                          onClick={() => void handleDownload(f.id)}
-                        >
-                          {downloadingId === f.id ? "Loading…" : "Download"}
-                        </button>
-                        <button
-                          type="button"
-                          className="btn secondary btn-sm"
-                          disabled={archivingId === f.id || downloadingId === f.id}
-                          onClick={() => void handleArchive(f.id, f.originalFilename)}
-                          title="Archive this file (not permanently deleted)"
-                          style={{ color: "var(--color-error, #b91c1c)" }}
-                        >
-                          {archivingId === f.id ? "Removing…" : "Remove"}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                        {" · "}
+                        {f.visibility}
+                      </div>
+                    </div>
+                    <div className="qfp-file-actions">
+                      <button
+                        type="button"
+                        className="btn secondary btn-sm"
+                        disabled={downloadingId === f.id || archivingId === f.id}
+                        onClick={() => void handleDownload(f.id)}
+                      >
+                        {downloadingId === f.id ? "Loading…" : "Download"}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn secondary btn-sm"
+                        disabled={archivingId === f.id || downloadingId === f.id}
+                        onClick={() => void handleArchive(f.id, f.originalFilename)}
+                        title="Archive this file (not permanently deleted)"
+                        style={{ color: "var(--color-error, #b91c1c)" }}
+                      >
+                        {archivingId === f.id ? "Removing…" : "Remove"}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </>

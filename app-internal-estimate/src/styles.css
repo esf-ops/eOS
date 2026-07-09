@@ -8553,3 +8553,345 @@ body {
 
 /* Takeoff beta/modal/feedback base styles: shared/eliteos-ui/primitives.css + takeoffWorkflow.css */
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   Quote Files Panel (qfp-*)
+   All styles are scoped with the qfp- prefix. No shared-class side-effects.
+───────────────────────────────────────────────────────────────────────────── */
+
+/* Unsaved gate notice */
+.qfp-unsaved-gate {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  margin-top: 4px;
+  border-radius: 8px;
+  background: var(--color-surface-2, #f9fafb);
+  border: 1px solid var(--color-border, #e5e7eb);
+  font-size: 0.85rem;
+  color: var(--color-muted, #6b7280);
+}
+.qfp-unsaved-icon {
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+/* Default upload settings row (role + visibility above the drop zone) */
+.qfp-settings-row {
+  display: flex;
+  align-items: center;
+  gap: 10px 16px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.qfp-settings-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-muted, #6b7280);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  padding-right: 2px;
+}
+.qfp-settings-controls {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.qfp-settings-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.qfp-field-label {
+  font-size: 0.80rem;
+  color: var(--color-muted, #6b7280);
+  white-space: nowrap;
+}
+
+/* Drop zone */
+.qfp-drop-zone {
+  border: 1.5px dashed var(--color-border, #d1d5db);
+  border-radius: 10px;
+  background: var(--color-surface-2, #f9fafb);
+  padding: 24px 20px;
+  text-align: center;
+  transition: border-color 0.12s ease, background 0.12s ease;
+  position: relative;
+  margin-bottom: 14px;
+  outline: none;
+}
+.qfp-drop-zone.is-drag-over {
+  border-color: var(--color-primary, #2563eb);
+  border-width: 2px;
+  background: rgba(37, 99, 235, 0.04);
+}
+.qfp-drop-zone.is-busy {
+  opacity: 0.72;
+  pointer-events: none;
+}
+
+/* Drop zone — idle state */
+.qfp-dz-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--color-border, #e5e7eb);
+  color: var(--color-muted, #6b7280);
+  margin-bottom: 10px;
+}
+.qfp-dz-icon svg {
+  width: 20px;
+  height: 20px;
+}
+.qfp-dz-main {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--color-text, #111827);
+  margin: 0 0 4px;
+}
+.qfp-dz-sub {
+  font-size: 0.82rem;
+  color: var(--color-muted, #6b7280);
+  margin: 0 0 12px;
+}
+.qfp-dz-browse-btn {
+  /* inline-styled button that looks like a primary small button */
+}
+.qfp-dz-hint {
+  font-size: 0.75rem;
+  color: var(--color-muted, #9ca3af);
+  margin: 8px 0 0;
+}
+
+/* Drop zone — drag-over state */
+.qfp-dz-drag-content {
+  padding: 16px 0 12px;
+}
+.qfp-dz-drag-arrow {
+  font-size: 1.6rem;
+  color: var(--color-primary, #2563eb);
+  margin-bottom: 8px;
+}
+.qfp-dz-drag-text {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--color-primary, #2563eb);
+  margin: 0;
+}
+
+/* Drop zone — pending (files selected, awaiting upload click) */
+.qfp-dz-pending {
+  text-align: left;
+}
+.qfp-dz-pending-header {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text, #111827);
+  margin: 0 0 8px;
+}
+.qfp-dz-pending-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.qfp-dz-pending-item {
+  font-size: 0.82rem;
+  color: var(--color-muted, #374151);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.qfp-dz-pending-item-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.qfp-dz-pending-item-size {
+  color: var(--color-muted, #9ca3af);
+  flex-shrink: 0;
+  font-size: 0.78rem;
+}
+.qfp-dz-pending-more {
+  font-size: 0.78rem;
+  color: var(--color-muted, #9ca3af);
+  margin-bottom: 12px;
+}
+.qfp-dz-pending-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* Batch upload status panel */
+.qfp-batch-panel {
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--color-surface-2, #f9fafb);
+  border: 1px solid var(--color-border, #e5e7eb);
+}
+.qfp-batch-summary {
+  font-size: 0.83rem;
+  font-weight: 600;
+  margin: 0 0 6px;
+  color: var(--color-text, #374151);
+}
+.qfp-batch-summary:last-child { margin-bottom: 0; }
+.qfp-batch-summary.is-success { color: var(--color-success, #16a34a); }
+.qfp-batch-summary.is-error   { color: var(--color-error, #b91c1c); }
+.qfp-batch-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.qfp-batch-item {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-size: 0.81rem;
+  padding: 2px 0;
+  color: var(--color-text, #374151);
+}
+.qfp-batch-item.is-done    { color: var(--color-success, #16a34a); }
+.qfp-batch-item.is-error   { color: var(--color-error, #b91c1c); }
+.qfp-batch-item.is-pending { color: var(--color-muted, #9ca3af); }
+.qfp-batch-icon {
+  flex-shrink: 0;
+  width: 14px;
+  text-align: center;
+  font-size: 0.78rem;
+}
+.qfp-batch-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.qfp-batch-msg {
+  flex-shrink: 0;
+  font-size: 0.76rem;
+  color: inherit;
+  opacity: 0.85;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Uploaded file list */
+.qfp-files-heading {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-muted, #6b7280);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin: 0 0 8px;
+}
+.qfp-file-list {
+  display: flex;
+  flex-direction: column;
+}
+.qfp-file-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--color-border, #f3f4f6);
+}
+.qfp-file-row:last-child {
+  border-bottom: none;
+}
+.qfp-file-icon {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.qfp-file-icon--pdf   { background: #fee2e2; color: #dc2626; }
+.qfp-file-icon--image { background: #dbeafe; color: #2563eb; }
+.qfp-file-icon--doc   { background: #ede9fe; color: #7c3aed; }
+.qfp-file-icon--text  { background: #f3f4f6; color: #6b7280; }
+.qfp-file-icon--other { background: #f3f4f6; color: #6b7280; }
+.qfp-file-info {
+  flex: 1;
+  min-width: 0;
+}
+.qfp-file-name {
+  font-size: 0.86rem;
+  font-weight: 500;
+  color: var(--color-text, #111827);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.qfp-file-meta {
+  font-size: 0.76rem;
+  color: var(--color-muted, #6b7280);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.qfp-file-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* List-level errors (download / archive) */
+.qfp-list-error {
+  font-size: 0.82rem;
+  color: var(--color-error, #b91c1c);
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Empty state */
+.qfp-empty-state {
+  padding: 20px 0 6px;
+  text-align: center;
+}
+.qfp-empty-primary {
+  font-size: 0.87rem;
+  font-weight: 500;
+  color: var(--color-muted, #374151);
+  margin: 0 0 4px;
+}
+.qfp-empty-secondary {
+  font-size: 0.78rem;
+  color: var(--color-muted, #9ca3af);
+  margin: 0;
+}
+
+/* Accept hint inline with section meta */
+.qfp-accept-hint {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--color-muted, #9ca3af);
+  margin-top: 2px;
+}
