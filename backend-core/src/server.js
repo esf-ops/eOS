@@ -31,6 +31,7 @@ import { buildTitansTodayPayload, parseTitansTodayQuery } from "./titans/titansT
 import { attachSalesHeadRoutes } from "./sales/salesHead.js";
 import { attachMorawareSyncRoutes } from "./moraware/morawareSyncApi.js";
 import { attachVisualizerRoutes } from "./visualizer/visualizerRoutes.js";
+import { attachPublicVisualizerRoutes } from "./visualizer/publicVisualizerRoutes.js";
 
 function requiredEnv(name) {
   const v = String(process.env[name] ?? "").trim();
@@ -445,8 +446,10 @@ const fixedEliteOsOrigins = [
   "https://system.eliteosfab.com",
   "https://org.eliteosfab.com",
   "https://org-directory.eliteosfab.com",
+  "https://visualizer.eliteosfab.com",
   "http://localhost:5177",
-  "http://localhost:5185"
+  "http://localhost:5185",
+  "http://localhost:5190"
 ];
 
 /** Localhost origins are development-only; exclude in production to reduce attack surface. */
@@ -1206,6 +1209,10 @@ attachTakeoffWorkspaceRoutes(app, {
 attachVisualizerRoutes(app, {
   requireAuth,
   headAccess: headAccessVisualizer,
+});
+
+attachPublicVisualizerRoutes(app, {
+  getSupabase: supabaseServerClient,
 });
 
 attachSlabInventoryRoutes(app, {
