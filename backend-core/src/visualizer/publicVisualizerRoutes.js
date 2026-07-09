@@ -55,7 +55,24 @@ export function attachPublicVisualizerRoutes(app, opts = {}) {
       return res.json({ ok: true, ...payload, disclaimer: VISUALIZER_DISCLAIMER });
     } catch (e) {
       console.warn("[public-visualizer/textures] failed:", e?.message || String(e));
-      return res.status(500).json({ ok: false, error: String(e?.message ?? e) });
+      return res.json({
+        ok: true,
+        textures: [],
+        meta: {
+          finalCount: 0,
+          staticCount: 0,
+          elite100AssetCount: 0,
+          elite100VisualAssetCount: 0,
+          usesElite100Assets: false,
+          fallbackStaticOnly: true,
+          warning: String(e?.message ?? e),
+          collections: [],
+          colorFamilies: [],
+          skippedAssets: {},
+        },
+        staticFallbackCount: 0,
+        disclaimer: VISUALIZER_DISCLAIMER,
+      });
     }
   });
 

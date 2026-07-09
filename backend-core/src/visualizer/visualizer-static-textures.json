@@ -1,0 +1,138 @@
+{
+  "version": 1,
+  "sourceNote": "Backend-owned Elite 100 static fallback for public visualizer. Real Elite materials only — no demo placeholders.",
+  "textures": [
+    {
+      "id": "carrara-royale",
+      "slug": "carrara-royale",
+      "displayName": "Carrara Royale",
+      "collection": "Elite 100 Collection",
+      "colorFamily": "White",
+      "patternType": "veined",
+      "thumbUrl": "/material-textures/elite100/thumb/carrara-royale.jpg",
+      "fullUrl": "/material-textures/elite100/full/carrara-royale.jpg",
+      "active": true,
+      "sortOrder": 10
+    },
+    {
+      "id": "carrara-classic",
+      "slug": "carrara-classic",
+      "displayName": "Carrara Classic",
+      "collection": "Elite 100 Collection",
+      "colorFamily": "White",
+      "patternType": "veined",
+      "thumbUrl": "/material-textures/elite100/thumb/carrara-classic.jpg",
+      "fullUrl": "/material-textures/elite100/full/carrara-classic.jpg",
+      "active": true,
+      "sortOrder": 20
+    },
+    {
+      "id": "bianco-carrara",
+      "slug": "bianco-carrara",
+      "displayName": "Bianco Carrara",
+      "collection": "Elite 100 Collection",
+      "colorFamily": "White",
+      "patternType": "veined",
+      "thumbUrl": "/material-textures/elite100/thumb/bianco-carrara.jpg",
+      "fullUrl": "/material-textures/elite100/full/bianco-carrara.jpg",
+      "active": true,
+      "sortOrder": 30
+    },
+    {
+      "id": "white-dove",
+      "slug": "white-dove",
+      "displayName": "White Dove",
+      "collection": "Elite 100 Collection",
+      "colorFamily": "White",
+      "patternType": "solid",
+      "thumbUrl": "/material-textures/elite100/thumb/white-dove.jpg",
+      "fullUrl": "/material-textures/elite100/full/white-dove.jpg",
+      "active": true,
+      "sortOrder": 40
+    },
+    {
+      "id": "silver-pearl-polished",
+      "slug": "silver-pearl-polished",
+      "displayName": "Silver Pearl",
+      "collection": "Elite 100 Collection",
+      "colorFamily": "White",
+      "patternType": "solid",
+      "thumbUrl": "/material-textures/elite100/thumb/silver-pearl-polished.jpg",
+      "fullUrl": "/material-textures/elite100/full/silver-pearl-polished.jpg",
+      "active": true,
+      "sortOrder": 50
+    },
+    {
+      "id": "bayshore-sand",
+      "slug": "bayshore-sand",
+      "displayName": "Bayshore Sand",
+      "collection": "Elite 100 Collection",
+      "colorFamily": "Beige",
+      "patternType": "solid",
+      "thumbUrl": "/material-textures/elite100/thumb/bayshore-sand.jpg",
+      "fullUrl": "/material-textures/elite100/full/bayshore-sand.jpg",
+      "active": true,
+      "sortOrder": 60
+    },
+    {
+      "id": "antique-gray",
+      "slug": "antique-gray",
+      "displayName": "Antique Gray",
+      "collection": "Elite 100 Collection",
+      "colorFamily": "Gray",
+      "patternType": "solid",
+      "thumbUrl": "/material-textures/elite100/thumb/antique-gray.jpg",
+      "fullUrl": "/material-textures/elite100/full/antique-gray.jpg",
+      "active": true,
+      "sortOrder": 70
+    },
+    {
+      "id": "classic-gray",
+      "slug": "classic-gray",
+      "displayName": "Classic Grey",
+      "collection": "Elite 100 Collection",
+      "colorFamily": "Gray",
+      "patternType": "solid",
+      "thumbUrl": "/material-textures/elite100/thumb/classic-gray.jpg",
+      "fullUrl": "/material-textures/elite100/full/classic-gray.jpg",
+      "active": true,
+      "sortOrder": 80
+    },
+    {
+      "id": "sicilia",
+      "slug": "sicilia",
+      "displayName": "Sicilia",
+      "collection": "Elite 100 Collection",
+      "colorFamily": "Gray",
+      "patternType": "veined",
+      "thumbUrl": "/material-textures/elite100/thumb/sicilia.jpg",
+      "fullUrl": "/material-textures/elite100/full/sicilia.jpg",
+      "active": true,
+      "sortOrder": 90
+    },
+    {
+      "id": "suede-brown-polished",
+      "slug": "suede-brown-polished",
+      "displayName": "Suede Brown",
+      "collection": "Elite 100 Collection",
+      "colorFamily": "Brown",
+      "patternType": "solid",
+      "thumbUrl": "/material-textures/elite100/thumb/suede-brown-polished.jpg",
+      "fullUrl": "/material-textures/elite100/full/suede-brown-polished.jpg",
+      "active": true,
+      "sortOrder": 100
+    },
+    {
+      "id": "india-black-pearl-polished",
+      "slug": "india-black-pearl-polished",
+      "displayName": "India Black Pearl",
+      "collection": "Elite 100 Collection",
+      "colorFamily": "Black",
+      "patternType": "solid",
+      "thumbUrl": "/material-textures/elite100/thumb/india-black-pearl-polished.jpg",
+      "fullUrl": "/material-textures/elite100/full/india-black-pearl-polished.jpg",
+      "active": true,
+      "sortOrder": 110
+    }
+  ]
+}

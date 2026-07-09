@@ -1,22 +1,17 @@
 /**
- * Public visualizer texture service — static JSON + optional Elite 100 DB assets.
+ * Public visualizer texture service — backend static JSON + optional Elite 100 DB assets.
  * Read-only Supabase queries. No slab inventory route coupling.
+ * Never reads app-visualizer/catalog at runtime.
  */
 import {
   buildElite100PublicTextures,
+  findForbiddenPublicFields,
   normalizeColorNameKey,
-  STATIC_COLLECTION_LABEL,
 } from "./elite100VisualAssetTextures.mjs";
 import { readPublicVisualizerAssetConfig } from "./publicVisualizerConfig.mjs";
-import {
-  findCatalogTexture,
-  listTexturesForApi,
-  loadCatalogEntries,
-  loadTextureBytes,
-  textureFileStatus,
-} from "./visualizerTextureCatalog.mjs";
+import { listBackendStaticPublicTextures } from "./publicVisualizerStaticCatalog.mjs";
 
-/** @type {Map<string, { displayName: string, fullUrl: string, thumbUrl: string, source: string, localRelativePath?: string|null }>} */
+/** @type {Map<string, { displayName: string, fullUrl: string, thumbUrl: string, source: string }>} */
 let materialRegistry = new Map();
 
 /** @type {number} */
@@ -116,29 +111,6 @@ export async function fetchElite100CatalogAndAssets(supabase, organizationId) {
 }
 
 /**
- * @param {object} entry
- */
-function mapStaticPublicTexture(entry) {
-  const status = textureFileStatus(entry);
-  const thumbUrl = `/material-textures/${entry.thumbPath}`;
-  const fullUrl = `/material-textures/${entry.fullPath}`;
-  if (!status.hasImage) return null;
-
-  return {
-    id: entry.id,
-    slug: entry.slug,
-    displayName: entry.displayName,
-    collection: entry.group ?? STATIC_COLLECTION_LABEL,
-    colorFamily: entry.colorFamily ?? null,
-    patternType: entry.patternType ?? null,
-    thumbUrl: status.hasThumb ? thumbUrl : fullUrl,
-    fullUrl,
-    source: "static",
-    _localRelativePath: entry.fullPath,
-  };
-}
-
-/**
  * @param {Array<object>} staticTextures
  * @param {Array<object>} eliteTextures
  */
@@ -149,15 +121,13 @@ export function mergePublicVisualizerTextures(staticTextures, eliteTextures) {
 
   const merged = [];
   for (const row of eliteTextures) {
-    const { _localRelativePath: _drop, ...pub } = row;
-    merged.push(pub);
+    merged.push({ ...row });
   }
 
   for (const row of staticTextures) {
     const nameKey = normalizeColorNameKey(row.displayName);
     if (nameKey && eliteNames.has(nameKey)) continue;
-    const { _localRelativePath: _drop, ...pub } = row;
-    merged.push(pub);
+    merged.push({ ...row });
   }
 
   merged.sort((a, b) =>
@@ -181,7 +151,6 @@ function rebuildMaterialRegistry(textures) {
       fullUrl: String(t.fullUrl),
       thumbUrl: String(t.thumbUrl ?? t.fullUrl),
       source: String(t.source ?? "static"),
-      localRelativePath: t._localRelativePath ?? null,
     });
   }
   materialRegistry = next;
@@ -189,63 +158,98 @@ function rebuildMaterialRegistry(textures) {
 }
 
 /**
+ * @param {string|null|undefined} warning
+ * @param {string|null|undefined} extra
+ * @returns {string|null}
+ */
+function joinWarnings(warning, extra) {
+  const parts = [warning, extra].map((w) => String(w ?? "").trim()).filter(Boolean);
+  return parts.length ? parts.join("; ") : null;
+}
+
+/**
  * @param {{ getSupabase?: () => import("@supabase/supabase-js").SupabaseClient|null, forceRefresh?: boolean }} [opts]
  */
 export async function listPublicVisualizerTextures(opts = {}) {
-  const assetCfg = readPublicVisualizerAssetConfig();
-  const staticListed = listTexturesForApi();
-  const staticRows = loadCatalogEntries()
-    .map(mapStaticPublicTexture)
-    .filter(Boolean);
+  try {
+    const assetCfg = readPublicVisualizerAssetConfig();
+    const staticLoaded = listBackendStaticPublicTextures();
+    const staticRows = staticLoaded.textures;
 
-  /** @type {Array<object>} */
-  let eliteRows = [];
-  /** @type {Record<string, number>} */
-  let skipped = {};
-  let elite100Warning = null;
+    /** @type {Array<object>} */
+    let eliteRows = [];
+    /** @type {Record<string, number>} */
+    let skipped = {};
+    let elite100Warning = null;
 
-  if (assetCfg.useElite100Assets && assetCfg.organizationId && opts.getSupabase) {
-    const supabase = opts.getSupabase();
-    const fetched = await fetchElite100CatalogAndAssets(supabase, assetCfg.organizationId);
-    if (fetched.warning) {
-      elite100Warning = fetched.errorMessage
-        ? `${fetched.warning}: ${fetched.errorMessage}`
-        : fetched.warning;
+    if (assetCfg.useElite100Assets && assetCfg.organizationId && opts.getSupabase) {
+      const supabase = opts.getSupabase();
+      const fetched = await fetchElite100CatalogAndAssets(supabase, assetCfg.organizationId);
+      if (fetched.warning) {
+        elite100Warning = fetched.errorMessage
+          ? `${fetched.warning}: ${fetched.errorMessage}`
+          : fetched.warning;
+      }
+      const built = buildElite100PublicTextures(fetched.catalogItems, fetched.assets);
+      eliteRows = built.textures;
+      skipped = built.skipped;
+    } else if (assetCfg.useElite100Assets && !assetCfg.organizationId) {
+      elite100Warning = "PUBLIC_VISUALIZER_ORGANIZATION_ID not configured";
     }
-    const built = buildElite100PublicTextures(fetched.catalogItems, fetched.assets);
-    eliteRows = built.textures;
-    skipped = built.skipped;
-  } else if (assetCfg.useElite100Assets && !assetCfg.organizationId) {
-    elite100Warning = "PUBLIC_VISUALIZER_ORGANIZATION_ID not configured";
+
+    const merged = mergePublicVisualizerTextures(staticRows, eliteRows);
+    rebuildMaterialRegistry(merged);
+
+    const colorFamilies = [...new Set(merged.map((t) => t.colorFamily).filter(Boolean))].sort();
+    const collections = [...new Set(merged.map((t) => t.collection).filter(Boolean))].sort();
+
+    const elite100Count = merged.filter((t) => t.source === "elite100_visual_asset").length;
+    const staticCount = merged.filter((t) => t.source === "static").length;
+    const finalCount = merged.length;
+
+    const warning = joinWarnings(staticLoaded.warning, elite100Warning);
+
+    return {
+      textures: merged,
+      meta: {
+        totalListed: finalCount,
+        totalAvailable: finalCount,
+        finalCount,
+        staticCount,
+        elite100AssetCount: elite100Count,
+        elite100VisualAssetCount: elite100Count,
+        usesElite100Assets: assetCfg.useElite100Assets && elite100Count > 0,
+        collections,
+        colorFamilies,
+        skippedAssets: skipped,
+        warning,
+        fallbackStaticOnly: elite100Count === 0,
+        groups: collections,
+      },
+      staticFallbackCount: staticLoaded.catalogEntryCount,
+    };
+  } catch (err) {
+    console.warn("[public-visualizer/textures] list failed:", err?.message || String(err));
+    return {
+      textures: [],
+      meta: {
+        totalListed: 0,
+        totalAvailable: 0,
+        finalCount: 0,
+        staticCount: 0,
+        elite100AssetCount: 0,
+        elite100VisualAssetCount: 0,
+        usesElite100Assets: false,
+        collections: [],
+        colorFamilies: [],
+        skippedAssets: {},
+        warning: `texture_list_failed: ${String(err?.message ?? err)}`,
+        fallbackStaticOnly: true,
+        groups: [],
+      },
+      staticFallbackCount: 0,
+    };
   }
-
-  const mergedInternal = mergePublicVisualizerTextures(staticRows, eliteRows);
-  rebuildMaterialRegistry(mergedInternal);
-
-  const textures = mergedInternal.map(({ _localRelativePath: _l, ...rest }) => rest);
-  const colorFamilies = [...new Set(textures.map((t) => t.colorFamily).filter(Boolean))].sort();
-  const collections = [...new Set(textures.map((t) => t.collection).filter(Boolean))].sort();
-
-  const elite100Count = textures.filter((t) => t.source === "elite100_visual_asset").length;
-  const staticCount = textures.filter((t) => t.source === "static").length;
-
-  return {
-    textures,
-    meta: {
-      totalListed: textures.length,
-      totalAvailable: textures.length,
-      staticCount,
-      elite100VisualAssetCount: elite100Count,
-      usesElite100Assets: assetCfg.useElite100Assets && elite100Count > 0,
-      collections,
-      colorFamilies,
-      skippedAssets: skipped,
-      warning: elite100Warning,
-      fallbackStaticOnly: elite100Count === 0,
-      groups: collections,
-    },
-    staticFallbackCount: staticListed.textures.length,
-  };
 }
 
 /**
@@ -301,42 +305,25 @@ export async function loadPublicMaterialBytes(materialId, opts = {}) {
   await ensureMaterialRegistry(opts);
 
   const reg = materialRegistry.get(id);
-  if (reg) {
-    if (reg.localRelativePath) {
-      try {
-        const loaded = loadTextureBytes(id);
-        return {
-          buffer: loaded.buffer,
-          mimeType: loaded.mimeType,
-          materialName: loaded.materialName,
-        };
-      } catch {
-        /* fall through to remote */
-      }
-    }
-    const remote = await fetchRemoteTextureBytes(reg.fullUrl);
-    return {
-      buffer: remote.buffer,
-      mimeType: remote.mimeType,
-      materialName: reg.displayName,
-    };
+  if (!reg) {
+    throw Object.assign(new Error(`Unknown material: ${id}`), { statusCode: 400, code: "UNKNOWN_MATERIAL" });
   }
 
-  const staticEntry = findCatalogTexture(id);
-  if (staticEntry) {
-    const loaded = loadTextureBytes(id);
-    return {
-      buffer: loaded.buffer,
-      mimeType: loaded.mimeType,
-      materialName: loaded.materialName,
-    };
-  }
-
-  throw Object.assign(new Error(`Unknown material: ${id}`), { statusCode: 400, code: "UNKNOWN_MATERIAL" });
+  const remote = await fetchRemoteTextureBytes(reg.fullUrl);
+  return {
+    buffer: remote.buffer,
+    mimeType: remote.mimeType,
+    materialName: reg.displayName,
+  };
 }
 
 /** Test helper */
 export function resetPublicMaterialRegistryForTests() {
   materialRegistry = new Map();
   registryBuiltAtMs = 0;
+}
+
+/** Test helper — scan payload for forbidden public fields. */
+export function scanPublicTexturePayload(payload) {
+  return findForbiddenPublicFields(payload);
 }

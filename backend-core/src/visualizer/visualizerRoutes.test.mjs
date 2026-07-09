@@ -24,9 +24,17 @@ import {
   skipReasonForAsset,
 } from "./elite100VisualAssetTextures.mjs";
 import {
+  DEMO_TEXTURE_SLUGS,
+  isDemoTextureEntry,
+  listBackendStaticPublicTextures,
+  loadBackendStaticCatalogEntries,
+  BACKEND_STATIC_CATALOG_PATH,
+} from "./publicVisualizerStaticCatalog.mjs";
+import {
   listPublicVisualizerTextures,
   mergePublicVisualizerTextures,
   resetPublicMaterialRegistryForTests,
+  scanPublicTexturePayload,
 } from "./publicVisualizerTextureService.mjs";
 
 console.log("\nvisualizerRoutes.test.mjs\n");
@@ -210,12 +218,39 @@ console.log("ok: elite100 visual asset filter/dedupe");
 
 resetPublicMaterialRegistryForTests();
 const staticOnly = await listPublicVisualizerTextures({ getSupabase: () => null });
-assert.equal(staticOnly.meta.staticCount, 14);
+assert.equal(staticOnly.meta.staticCount, 11);
+assert.equal(staticOnly.meta.finalCount, 11);
+assert.equal(staticOnly.meta.elite100AssetCount, 0);
 assert.equal(staticOnly.meta.elite100VisualAssetCount, 0);
 assert.equal(staticOnly.meta.fallbackStaticOnly, true);
-assert.equal(staticOnly.textures.length, 14);
+assert.equal(staticOnly.textures.length, 11);
 assert.ok(staticOnly.textures.every((t) => t.source === "static"));
-console.log("ok: static fallback textures");
+assert.equal(staticOnly.textures.some((t) => t.slug === "warm-quartz"), false);
+assert.equal(staticOnly.textures.some((t) => t.slug === "storm-gray"), false);
+assert.equal(staticOnly.textures.some((t) => t.slug === "charcoal-vein"), false);
+const staticForbidden = scanPublicTexturePayload(staticOnly);
+assert.equal(staticForbidden.length, 0, `forbidden fields leaked: ${staticForbidden.join(", ")}`);
+console.log("ok: backend static fallback textures");
+
+const backendEntries = loadBackendStaticCatalogEntries();
+assert.equal(backendEntries.length, 11);
+assert.ok(BACKEND_STATIC_CATALOG_PATH.includes("visualizer-static-textures.json"));
+assert.ok(!backendEntries.some((e) => isDemoTextureEntry(e)));
+for (const slug of DEMO_TEXTURE_SLUGS) {
+  assert.equal(backendEntries.some((e) => e.slug === slug), false, `demo slug ${slug} should be excluded`);
+}
+console.log("ok: backend-owned catalog path (no demo materials)");
+
+const missingCatalog = listBackendStaticPublicTextures({
+  catalogPath: "/tmp/visualizer-static-textures-missing-test.json",
+});
+assert.equal(missingCatalog.textures.length, 0);
+assert.equal(missingCatalog.warning, "static_catalog_missing");
+resetPublicMaterialRegistryForTests();
+const resilientList = await listPublicVisualizerTextures({ getSupabase: () => null });
+assert.ok(Array.isArray(resilientList.textures));
+assert.equal(typeof resilientList.meta.finalCount, "number");
+console.log("ok: public texture list is resilient");
 
 const merged = mergePublicVisualizerTextures(
   [{ id: "carrara-royale", displayName: "Carrara Royale", source: "static", fullUrl: "/a.jpg", thumbUrl: "/a.jpg", slug: "carrara-royale", collection: "Preview Collection", colorFamily: "White", patternType: "veined" }],
