@@ -35,15 +35,13 @@ async function parseResponse(res: Response): Promise<unknown> {
   return json;
 }
 
-export type VisualizerConfig = {
+export type PublicVisualizerConfig = {
   ok: boolean;
-  visualizerRenderEnabled: boolean;
-  activeProvider: string;
-  model: string;
+  publicVisualizerEnabled: boolean;
+  renderEnabled: boolean;
   maxUploadMb: number;
-  hasGeminiKey: boolean;
-  hasOpenAiKey: boolean;
-  supportedProviders: string[];
+  maxRendersPerIpPerHour: number;
+  providerLabel: string | null;
   disclaimer: string;
 };
 
@@ -52,20 +50,30 @@ export type VisualizerTexture = {
   slug: string;
   name: string;
   displayName: string;
+  collection?: string | null;
   group: string | null;
   colorFamily: string | null;
+  patternType?: "veined" | "solid" | "speckled" | null;
   finish: string | null;
-  sourceLabel: string | null;
   thumbUrl: string;
   fullUrl: string;
   hasImage: boolean;
   active: boolean;
+  source?: "static" | "elite100_visual_asset";
 };
 
 export type VisualizerTexturesResponse = {
   ok: boolean;
   textures: VisualizerTexture[];
-  meta: TextureCatalogMeta;
+  meta: TextureCatalogMeta & {
+    staticCount?: number;
+    elite100VisualAssetCount?: number;
+    usesElite100Assets?: boolean;
+    fallbackStaticOnly?: boolean;
+    warning?: string | null;
+    collections?: string[];
+    skippedAssets?: Record<string, number>;
+  };
   disclaimer: string;
 };
 
@@ -80,35 +88,21 @@ export type VisualizerRenderResult = {
   disclaimer: string;
 };
 
-export async function fetchVisualizerConfig(token: string): Promise<VisualizerConfig> {
-  const t = token.trim();
-  if (!t) throw new VisualizerApiError("Sign in required", 401, null);
-  return (await parseResponse(
-    await fetch(joinUrl("/api/visualizer/config"), {
-      headers: { authorization: `Bearer ${t}` },
-    }),
-  )) as VisualizerConfig;
+export async function fetchPublicVisualizerConfig(): Promise<PublicVisualizerConfig> {
+  return (await parseResponse(await fetch(joinUrl("/api/public-visualizer/config")))) as PublicVisualizerConfig;
 }
 
-export async function fetchVisualizerTextures(token: string): Promise<VisualizerTexturesResponse> {
-  const t = token.trim();
-  if (!t) throw new VisualizerApiError("Sign in required", 401, null);
+export async function fetchPublicVisualizerTextures(): Promise<VisualizerTexturesResponse> {
   return (await parseResponse(
-    await fetch(joinUrl("/api/visualizer/textures"), {
-      headers: { authorization: `Bearer ${t}` },
-    }),
+    await fetch(joinUrl("/api/public-visualizer/textures")),
   )) as VisualizerTexturesResponse;
 }
 
-export async function renderVisualizer(params: {
-  token: string;
+export async function renderPublicVisualizer(params: {
   roomFile: File;
   materialId: string;
   userInstruction?: string;
 }): Promise<VisualizerRenderResult> {
-  const t = params.token.trim();
-  if (!t) throw new VisualizerApiError("Sign in required", 401, null);
-
   const form = new FormData();
   form.append("roomImage", params.roomFile);
   form.append("materialId", params.materialId);
@@ -117,9 +111,8 @@ export async function renderVisualizer(params: {
   }
 
   return (await parseResponse(
-    await fetch(joinUrl("/api/visualizer/render"), {
+    await fetch(joinUrl("/api/public-visualizer/render"), {
       method: "POST",
-      headers: { authorization: `Bearer ${t}` },
       body: form,
     }),
   )) as VisualizerRenderResult;

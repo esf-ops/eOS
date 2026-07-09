@@ -1,7 +1,7 @@
 /** Shared prompt text for countertop concept visualization renders. */
 
 export const VISUALIZER_DISCLAIMER =
-  "Concept visualization only. Not an estimate, measurement, layout, inventory reservation, or production drawing.";
+  "Concept visualization only. Final material appearance, layout, seams, and pricing may vary.";
 
 export const VISUALIZER_CORE_INSTRUCTION =
   "Replace only the countertops with the selected material/texture. Preserve cabinets, walls, floors, sink, faucet, appliances, lighting, shadows, camera angle, and room layout. Do not change anything except the countertop surfaces. Return a concept visualization only.";

@@ -6,8 +6,8 @@ export type TextureCatalogEntry = {
   displayName: string;
   group: string;
   colorFamily: string;
+  patternType?: "veined" | "solid" | "speckled";
   finish?: string;
-  sourceLabel: string;
   thumbPath: string;
   fullPath: string;
   active: boolean;
@@ -19,14 +19,16 @@ export type VisualizerTexture = {
   slug: string;
   name: string;
   displayName: string;
+  collection?: string | null;
   group: string | null;
   colorFamily: string | null;
+  patternType: "veined" | "solid" | "speckled" | null;
   finish: string | null;
-  sourceLabel: string | null;
   thumbUrl: string;
   fullUrl: string;
   hasImage: boolean;
   active: boolean;
+  source?: "static" | "elite100_visual_asset";
 };
 
 export type TextureCatalogMeta = {
@@ -34,6 +36,7 @@ export type TextureCatalogMeta = {
   totalAvailable: number;
   groups: string[];
   colorFamilies: string[];
+  patternTypes: string[];
 };
 
 const PUBLIC_PREFIX = "/material-textures/";
@@ -57,8 +60,8 @@ export function catalogEntriesToTextures(entries: TextureCatalogEntry[]): Visual
     displayName: entry.displayName,
     group: entry.group ?? null,
     colorFamily: entry.colorFamily ?? null,
+    patternType: entry.patternType ?? null,
     finish: entry.finish ?? null,
-    sourceLabel: entry.sourceLabel ?? null,
     thumbUrl: toPublicUrl(entry.thumbPath),
     fullUrl: toPublicUrl(entry.fullPath),
     hasImage: true,
@@ -71,6 +74,7 @@ export function buildLocalTextureCatalog(): { textures: VisualizerTexture[]; met
   const textures = catalogEntriesToTextures(entries);
   const groups = [...new Set(textures.map((t) => t.group).filter(Boolean))] as string[];
   const colorFamilies = [...new Set(textures.map((t) => t.colorFamily).filter(Boolean))] as string[];
+  const patternTypes = [...new Set(textures.map((t) => t.patternType).filter(Boolean))] as string[];
   return {
     textures,
     meta: {
@@ -78,33 +82,57 @@ export function buildLocalTextureCatalog(): { textures: VisualizerTexture[]; met
       totalAvailable: textures.length,
       groups: groups.sort(),
       colorFamilies: colorFamilies.sort(),
+      patternTypes: patternTypes.sort(),
     },
   };
 }
 
-export function findTexture(id: string, textures: VisualizerTexture[]): VisualizerTexture | undefined {
-  const key = id.trim();
-  return textures.find((t) => t.id === key || t.slug === key);
-}
-
 export type TextureFilterState = {
   search: string;
-  group: string;
   colorFamily: string;
+  patternType: string;
 };
+
+export const COLOR_FILTER_OPTIONS = ["White", "Beige", "Gray", "Black", "Brown"] as const;
+export const PATTERN_FILTER_OPTIONS = [
+  { value: "veined", label: "Veined" },
+  { value: "solid", label: "Solid / quiet" },
+] as const;
 
 export function filterTextures(textures: VisualizerTexture[], filters: TextureFilterState): VisualizerTexture[] {
   const q = filters.search.trim().toLowerCase();
   return textures.filter((t) => {
     if (!t.hasImage || !t.thumbUrl || !t.fullUrl) return false;
-    if (filters.group && filters.group !== "all" && t.group !== filters.group) return false;
-    if (filters.colorFamily && filters.colorFamily !== "all" && t.colorFamily !== filters.colorFamily) return false;
+    if (filters.colorFamily && filters.colorFamily !== "all" && t.colorFamily !== filters.colorFamily) {
+      return false;
+    }
+    if (filters.patternType && filters.patternType !== "all" && t.patternType !== filters.patternType) {
+      return false;
+    }
     if (!q) return true;
-    const hay = `${t.displayName} ${t.group ?? ""} ${t.colorFamily ?? ""} ${t.finish ?? ""}`.toLowerCase();
+    const hay = `${t.displayName} ${t.colorFamily ?? ""} ${t.patternType ?? ""} ${t.finish ?? ""}`.toLowerCase();
     return hay.includes(q);
   });
 }
 
 export function mergeApiTextures(apiTextures: VisualizerTexture[]): VisualizerTexture[] {
-  return apiTextures.filter((t) => t.active !== false && t.hasImage && t.thumbUrl && t.fullUrl);
+  const localById = new Map(buildLocalTextureCatalog().textures.map((t) => [t.id, t]));
+  return apiTextures
+    .filter((t) => t.active !== false && t.hasImage !== false && t.thumbUrl && t.fullUrl)
+    .map((t) => ({
+      id: t.id,
+      slug: t.slug,
+      name: t.name ?? t.displayName,
+      displayName: t.displayName,
+      collection: t.collection ?? t.group ?? null,
+      group: t.group ?? t.collection ?? null,
+      colorFamily: t.colorFamily ?? localById.get(t.id)?.colorFamily ?? null,
+      patternType: t.patternType ?? localById.get(t.id)?.patternType ?? null,
+      finish: t.finish ?? localById.get(t.id)?.finish ?? null,
+      thumbUrl: t.thumbUrl,
+      fullUrl: t.fullUrl,
+      hasImage: true,
+      active: true,
+      source: t.source,
+    }));
 }

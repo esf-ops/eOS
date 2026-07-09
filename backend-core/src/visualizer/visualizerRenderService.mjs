@@ -5,6 +5,8 @@
 import { findCatalogTexture, loadTextureBytes } from "./visualizerTextureCatalog.mjs";
 import { VISUALIZER_DISCLAIMER } from "./visualizerPrompt.mjs";
 import { readRenderConfig, runVisualizerRender } from "./visualizerRenderProvider.mjs";
+import { readPublicRenderConfig } from "./publicVisualizerConfig.mjs";
+import { loadPublicMaterialBytes } from "./publicVisualizerTextureService.mjs";
 
 const SUPPORTED_ROOM_MIME = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp"]);
 
@@ -27,29 +29,47 @@ function formatUploadLimit(bytes) {
  *   materialFile?: { buffer: Buffer, mimeType: string, filename: string }|null,
  *   userInstruction?: string|null,
  * }} input
+ * @param {{ channel?: "internal"|"public", getSupabase?: () => import("@supabase/supabase-js").SupabaseClient|null }} [options]
  */
-export async function executeVisualizerRender(input) {
-  const cfg = readRenderConfig();
-  if (!cfg.enabled) {
-    throw Object.assign(
-      new Error("Visualizer render is disabled on the server. Set VISUALIZER_RENDER_ENABLED=1."),
-      { statusCode: 503, code: "RENDER_DISABLED" },
-    );
+export async function executeVisualizerRender(input, options = {}) {
+  const channel = options.channel === "public" ? "public" : "internal";
+  const internalCfg = readRenderConfig();
+  const cfg =
+    channel === "public"
+      ? readPublicRenderConfig()
+      : {
+          publicSurfaceEnabled: true,
+          renderEnabled: internalCfg.enabled,
+          maxUploadBytes: internalCfg.maxUploadBytes,
+          providerName: internalCfg.providerName,
+          modelName: internalCfg.modelName,
+          apiKey: internalCfg.apiKey,
+        };
+
+  if (channel === "public" && !cfg.publicSurfaceEnabled) {
+    throw Object.assign(new Error("Public visualizer is temporarily unavailable."), {
+      statusCode: 503,
+      code: "PUBLIC_DISABLED",
+    });
+  }
+
+  if (!cfg.renderEnabled) {
+    const msg =
+      channel === "public"
+        ? "Concept rendering is temporarily unavailable. Please try again later."
+        : "Visualizer render is disabled on the server. Set VISUALIZER_RENDER_ENABLED=1.";
+    throw Object.assign(new Error(msg), { statusCode: 503, code: "RENDER_DISABLED" });
   }
 
   if (!cfg.apiKey) {
-    const provider = cfg.providerName;
     throw Object.assign(
-      new Error(
-        provider === "openai"
-          ? "OPENAI_API_KEY is not configured for visualizer render."
-          : "GEMINI_API_KEY is not configured for visualizer render.",
-      ),
+      new Error("Render service is not configured. Please try again later."),
       { statusCode: 503, code: "MISSING_API_KEY" },
     );
   }
 
   const roomBuffer = input.roomFile?.buffer;
+  const maxUploadBytes = cfg.maxUploadBytes;
   if (!roomBuffer?.length) {
     throw Object.assign(new Error("Upload a room photo before generating."), { statusCode: 400, code: "MISSING_ROOM" });
   }
@@ -87,14 +107,24 @@ export async function executeVisualizerRender(input) {
         code: "MISSING_MATERIAL",
       });
     }
-    const catalogEntry = findCatalogTexture(materialId);
-    if (!catalogEntry) {
-      throw Object.assign(new Error(`Unknown material: ${materialId}`), { statusCode: 400, code: "UNKNOWN_MATERIAL" });
+
+    if (channel === "public") {
+      const loaded = await loadPublicMaterialBytes(materialId, {
+        getSupabase: options.getSupabase,
+      });
+      materialBuffer = loaded.buffer;
+      materialMimeType = loaded.mimeType;
+      materialName = loaded.materialName;
+    } else {
+      const catalogEntry = findCatalogTexture(materialId);
+      if (!catalogEntry) {
+        throw Object.assign(new Error(`Unknown material: ${materialId}`), { statusCode: 400, code: "UNKNOWN_MATERIAL" });
+      }
+      const loaded = loadTextureBytes(materialId);
+      materialBuffer = loaded.buffer;
+      materialMimeType = loaded.mimeType;
+      materialName = loaded.materialName;
     }
-    const loaded = loadTextureBytes(materialId);
-    materialBuffer = loaded.buffer;
-    materialMimeType = loaded.mimeType;
-    materialName = loaded.materialName;
   }
 
   let result;
