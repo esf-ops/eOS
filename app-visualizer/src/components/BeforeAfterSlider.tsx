@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 
 type BeforeAfterSliderProps = {
   beforeSrc: string;
@@ -14,9 +21,7 @@ export function BeforeAfterSlider({ beforeSrc, afterSrc, enabled = true }: Befor
 
   useEffect(() => {
     const img = new Image();
-    img.onload = () => {
-      setSize({ width: img.naturalWidth, height: img.naturalHeight });
-    };
+    img.onload = () => setSize({ width: img.naturalWidth, height: img.naturalHeight });
     img.src = beforeSrc;
   }, [beforeSrc]);
 
@@ -41,38 +46,58 @@ export function BeforeAfterSlider({ beforeSrc, afterSrc, enabled = true }: Befor
 
   const onPointerUp = (event: ReactPointerEvent) => {
     dragging.current = false;
-    event.currentTarget.releasePointerCapture(event.pointerId);
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      /* pointer already released */
+    }
+  };
+
+  const onKeyDown = (event: ReactKeyboardEvent) => {
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      setPosition((p) => Math.max(2, p - 2));
+    } else if (event.key === "ArrowRight") {
+      event.preventDefault();
+      setPosition((p) => Math.min(98, p + 2));
+    }
   };
 
   if (!enabled || !beforeSrc || !afterSrc) return null;
 
-  const aspectRatio = size.width > 0 && size.height > 0 ? `${size.width} / ${size.height}` : undefined;
+  const aspectRatio = size.width > 0 && size.height > 0 ? `${size.width} / ${size.height}` : "16 / 10";
 
   return (
     <div
       ref={containerRef}
-      className="pv-ba-slider"
-      style={{ aspectRatio, width: "100%", maxHeight: "72vh" }}
+      className="viz-ba"
+      style={{ aspectRatio }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
+      onKeyDown={onKeyDown}
       role="slider"
-      aria-label="Before and after comparison"
+      tabIndex={0}
+      aria-label="Before and after comparison. Use arrow keys to compare."
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={Math.round(position)}
     >
-      <div className="pv-ba-layer pv-ba-after">
-        <img src={afterSrc} alt="After visualization" draggable={false} />
+      <div className="viz-ba-layer viz-ba-after">
+        <img src={afterSrc} alt="After — with new countertop" draggable={false} />
+        <span className="viz-ba-tag viz-ba-tag-after">After</span>
       </div>
-      <div className="pv-ba-layer pv-ba-before" style={{ clipPath: `inset(0 ${100 - position}% 0 0)` }}>
-        <img src={beforeSrc} alt="Before visualization" draggable={false} />
+      <div className="viz-ba-layer viz-ba-before" style={{ clipPath: `inset(0 ${100 - position}% 0 0)` }}>
+        <img src={beforeSrc} alt="Before — your original photo" draggable={false} />
+        <span className="viz-ba-tag viz-ba-tag-before">Before</span>
       </div>
-      <div className="pv-ba-handle" style={{ left: `${position}%` }}>
-        <span className="pv-ba-handle-grip" aria-hidden />
-        <span className="pv-ba-handle-label pv-ba-label-before">Before</span>
-        <span className="pv-ba-handle-label pv-ba-label-after">After</span>
+      <div className="viz-ba-divider" style={{ left: `${position}%` }}>
+        <span className="viz-ba-handle" aria-hidden>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <path d="m10 8-4 4 4 4M14 8l4 4-4 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </span>
       </div>
     </div>
   );

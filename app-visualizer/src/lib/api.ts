@@ -66,7 +66,9 @@ export type VisualizerTexturesResponse = {
   ok: boolean;
   textures: VisualizerTexture[];
   meta: TextureCatalogMeta & {
+    finalCount?: number;
     staticCount?: number;
+    elite100AssetCount?: number;
     elite100VisualAssetCount?: number;
     usesElite100Assets?: boolean;
     fallbackStaticOnly?: boolean;

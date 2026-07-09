@@ -68,19 +68,6 @@
       "sortOrder": 50
     },
     {
-      "id": "warm-quartz",
-      "slug": "warm-quartz",
-      "displayName": "Warm Quartz",
-      "group": "Preview Collection",
-      "colorFamily": "Beige",
-      "patternType": "solid",
-      "finish": "Polished",
-      "thumbPath": "demo/thumb/warm-quartz.jpg",
-      "fullPath": "demo/full/warm-quartz.jpg",
-      "active": true,
-      "sortOrder": 55
-    },
-    {
       "id": "bayshore-sand",
       "slug": "bayshore-sand",
       "displayName": "Bayshore Sand",
@@ -133,19 +120,6 @@
       "sortOrder": 90
     },
     {
-      "id": "storm-gray",
-      "slug": "storm-gray",
-      "displayName": "Storm Gray",
-      "group": "Preview Collection",
-      "colorFamily": "Gray",
-      "patternType": "veined",
-      "finish": "Polished",
-      "thumbPath": "demo/thumb/storm-gray.jpg",
-      "fullPath": "demo/full/storm-gray.jpg",
-      "active": true,
-      "sortOrder": 95
-    },
-    {
       "id": "suede-brown-polished",
       "slug": "suede-brown-polished",
       "displayName": "Suede Brown",
@@ -170,19 +144,6 @@
       "fullPath": "elite100/full/india-black-pearl-polished.jpg",
       "active": true,
       "sortOrder": 110
-    },
-    {
-      "id": "charcoal-vein",
-      "slug": "charcoal-vein",
-      "displayName": "Charcoal Vein",
-      "group": "Preview Collection",
-      "colorFamily": "Black",
-      "patternType": "veined",
-      "finish": "Polished",
-      "thumbPath": "demo/thumb/charcoal-vein.jpg",
-      "fullPath": "demo/full/charcoal-vein.jpg",
-      "active": true,
-      "sortOrder": 120
     }
   ]
 }

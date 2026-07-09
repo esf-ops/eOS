@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MaterialStep } from "./components/MaterialStep";
-import { PhotoUploadStep } from "./components/PhotoUploadStep";
-import { PreviewStep } from "./components/PreviewStep";
+import { MaterialStudio } from "./components/MaterialStudio";
+import { PreviewExperience } from "./components/PreviewExperience";
+import { UploadExperience } from "./components/UploadExperience";
+import { VisualizerBackground } from "./components/VisualizerBackground";
 import { VisualizerHeader } from "./components/VisualizerHeader";
 import { WizardStepIndicator } from "./components/WizardStepIndicator";
 import {
@@ -12,6 +13,7 @@ import {
   VisualizerApiError,
   type PublicVisualizerConfig,
 } from "./lib/api";
+import { VISUALIZER_DISCLAIMER } from "./lib/config";
 import { buildLocalTextureCatalog, mergeApiTextures, type VisualizerTexture } from "./lib/textureCatalog";
 import { DEMO_ROOMS } from "./lib/samples";
 
@@ -35,6 +37,7 @@ export function App() {
   const [config, setConfig] = useState<PublicVisualizerConfig | null>(null);
   const [textures, setTextures] = useState<VisualizerTexture[]>([]);
   const [usesElite100Assets, setUsesElite100Assets] = useState(false);
+  const [fallbackStaticOnly, setFallbackStaticOnly] = useState(false);
 
   const [wizardStep, setWizardStep] = useState<WizardStep>(1);
   const [materialId, setMaterialId] = useState("");
@@ -61,12 +64,19 @@ export function App() {
         const merged = mergeApiTextures(payload.textures);
         const list = merged.length ? merged : localCatalog.textures;
         setTextures(list);
-        setUsesElite100Assets(Boolean(payload.meta?.usesElite100Assets));
+        const usesElite = Boolean(payload.meta?.usesElite100Assets);
+        setUsesElite100Assets(usesElite);
+        setFallbackStaticOnly(Boolean(payload.meta?.fallbackStaticOnly) || !merged.length);
+        if (!merged.length) {
+          console.warn("[slabOS Visualizer] Using local fallback catalog; API returned no textures.");
+        }
         if (list[0]) setMaterialId(list[0].id);
       })
       .catch(() => {
+        console.warn("[slabOS Visualizer] Texture API unavailable; using local fallback catalog.");
         setTextures(localCatalog.textures);
         setUsesElite100Assets(false);
+        setFallbackStaticOnly(true);
         if (localCatalog.textures[0]) setMaterialId(localCatalog.textures[0].id);
       });
   }, [localCatalog]);
@@ -170,73 +180,78 @@ export function App() {
   }
 
   const canGenerate = Boolean(roomFile && materialId && config?.renderEnabled !== false);
+  const showTopError = error && wizardStep !== 3;
 
   return (
-    <div className="wizard-shell">
+    <div className="viz-app">
+      <VisualizerBackground />
       <VisualizerHeader />
 
-      {config && !config.publicVisualizerEnabled ? (
-        <div className="alert alert-warn">The visualizer is temporarily unavailable. Please check back soon.</div>
-      ) : null}
-
-      {config && config.publicVisualizerEnabled && !config.renderEnabled ? (
-        <div className="alert alert-warn">
-          Preview generation is temporarily unavailable. You can still upload a photo and browse colors.
-        </div>
-      ) : null}
-
-      <WizardStepIndicator currentStep={wizardStep} />
-
-      {error && wizardStep !== 3 ? (
-        <div className="alert alert-error" role="alert">
-          {error}
-        </div>
-      ) : null}
-
-      <main className="wizard-main">
-        {wizardStep === 1 ? (
-          <PhotoUploadStep
-            maxUploadMb={maxUploadMb}
-            disabled={generating}
-            onFileSelected={acceptRoomFile}
-            onDemoRoomSelected={(room) => void handleDemoRoom(room)}
-            fileInputRef={fileInputRef}
-          />
+      <div className="viz-shell">
+        {config && !config.publicVisualizerEnabled ? (
+          <div className="viz-alert viz-alert-warn">
+            The visualizer is temporarily unavailable. Please check back soon.
+          </div>
         ) : null}
 
-        {wizardStep === 2 && roomPreview ? (
-          <MaterialStep
-            roomPreview={roomPreview}
-            textures={textures}
-            textureCount={textureCount}
-            usesElite100Assets={usesElite100Assets}
-            selectedId={materialId}
-            onSelect={setMaterialId}
-            onGenerate={() => void handleGenerate()}
-            onChangePhoto={handleChangePhoto}
-            generating={generating}
-            canGenerate={canGenerate}
-          />
+        {config && config.publicVisualizerEnabled && !config.renderEnabled ? (
+          <div className="viz-alert viz-alert-warn">
+            Preview generation is temporarily unavailable. You can still upload a photo and browse colors.
+          </div>
         ) : null}
 
-        {wizardStep === 3 && roomPreview ? (
-          <PreviewStep
-            roomPreview={roomPreview}
-            renderedImage={renderedImage ?? roomPreview}
-            materialName={materialName}
-            loading={generating}
-            error={error}
-            onTryAnotherColor={handleTryAnotherColor}
-            onUploadAnotherPhoto={handleUploadAnotherPhoto}
-            onDownload={handleDownload}
-          />
-        ) : null}
-      </main>
+        <WizardStepIndicator currentStep={wizardStep} />
 
-      <footer className="site-footer">
-        <p>
-          Concept visualization only. Final material appearance, layout, seams, and pricing may vary.
-        </p>
+        {showTopError ? (
+          <div className="viz-alert viz-alert-error" role="alert">
+            {error}
+          </div>
+        ) : null}
+
+        <main className="viz-stage" key={wizardStep}>
+          {wizardStep === 1 ? (
+            <UploadExperience
+              maxUploadMb={maxUploadMb}
+              disabled={generating}
+              onFileSelected={acceptRoomFile}
+              onDemoRoomSelected={(room) => void handleDemoRoom(room)}
+              fileInputRef={fileInputRef}
+            />
+          ) : null}
+
+          {wizardStep === 2 && roomPreview ? (
+            <MaterialStudio
+              roomPreview={roomPreview}
+              textures={textures}
+              textureCount={textureCount}
+              usesElite100Assets={usesElite100Assets}
+              fallbackStaticOnly={fallbackStaticOnly}
+              selectedId={materialId}
+              onSelect={setMaterialId}
+              onGenerate={() => void handleGenerate()}
+              onChangePhoto={handleChangePhoto}
+              generating={generating}
+              canGenerate={canGenerate}
+            />
+          ) : null}
+
+          {wizardStep === 3 && roomPreview ? (
+            <PreviewExperience
+              roomPreview={roomPreview}
+              renderedImage={renderedImage ?? roomPreview}
+              materialName={materialName}
+              loading={generating}
+              error={error}
+              onTryAnotherColor={handleTryAnotherColor}
+              onUploadAnotherPhoto={handleUploadAnotherPhoto}
+              onDownload={handleDownload}
+            />
+          ) : null}
+        </main>
+      </div>
+
+      <footer className="viz-footer">
+        <p>{VISUALIZER_DISCLAIMER}</p>
       </footer>
     </div>
   );
