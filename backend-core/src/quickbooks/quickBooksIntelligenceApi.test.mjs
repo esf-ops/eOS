@@ -235,7 +235,7 @@ describe("quickBooksIntelligenceApi helpers", () => {
     assert.equal(parsed.maxRows, 100);
   });
 
-  it("maps 57014 to a friendly timeout error without sensitive details", () => {
+  it("maps bare 57014 to sample_preview timeout without sensitive details", () => {
     const err = new Error("RAW_DB_ERROR SENTINEL_NAME canceling statement due to statement timeout");
     // @ts-ignore
     err.code = "57014";
@@ -243,12 +243,49 @@ describe("quickBooksIntelligenceApi helpers", () => {
     assert.equal(mapped.status, 504);
     assert.equal(mapped.body.ok, false);
     assert.equal(mapped.body.code, "57014");
-    assert.match(String(mapped.body.error), /timed out/i);
+    assert.equal(mapped.body.mode, "sample_preview");
+    assert.match(String(mapped.body.error), /sample_preview timed out/i);
     assert.deepEqual(mapped.body.recommended, { max_rows: 50, page_size: 50 });
     const serialized = JSON.stringify(mapped.body);
     assert.equal(serialized.includes("SENTINEL_NAME"), false);
     assert.equal(serialized.includes("raw_payload"), false);
     assert.equal(serialized.includes("canceling statement"), false);
+  });
+
+  it("maps aggregate 57014 without sample fallback or recommended sample sizes", () => {
+    const err = new Error("QuickBooks full aggregate timed out");
+    // @ts-ignore
+    err.code = "57014";
+    // @ts-ignore
+    err.aggregateTimeout = true;
+    // @ts-ignore
+    err.mode = "full_aggregate";
+    // @ts-ignore
+    err.attempted_mode = "auto";
+    // @ts-ignore
+    err.aggregate_attempted = true;
+    // @ts-ignore
+    err.aggregate_available = true;
+    // @ts-ignore
+    err.fallback_used = false;
+    // @ts-ignore
+    err.fallback_reason = null;
+    const mapped = mapQuickBooksIntelligenceError(err);
+    assert.equal(mapped.status, 504);
+    assert.equal(mapped.body.error, "QuickBooks full aggregate timed out");
+    assert.equal(mapped.body.code, "57014");
+    assert.equal(mapped.body.mode, "full_aggregate");
+    assert.equal(mapped.body.aggregate_attempted, true);
+    assert.equal(mapped.body.fallback_used, false);
+    assert.equal(mapped.body.fallback_reason, null);
+    assert.equal("recommended" in mapped.body, false);
+    assert.equal(JSON.stringify(mapped.body).includes("raw_payload"), false);
+  });
+
+  it("defaults missing mode to auto", () => {
+    const parsed = parseIntelligenceQuery({}, new Date("2026-07-10T12:00:00.000Z"));
+    assert.equal(parsed.mode, "auto");
+    assert.equal(parsed.preferAggregate, true);
   });
 
   it("builds sanitized API response without raw_payload", () => {
@@ -258,6 +295,10 @@ describe("quickBooksIntelligenceApi helpers", () => {
     });
     assert.equal(body.ok, true);
     assert.equal(body.organization_id, ORG);
+    assert.equal(body.mode, "sample_preview");
+    assert.equal(body.attempted_mode, "sample_preview");
+    assert.equal(typeof body.aggregate_attempted, "boolean");
+    assert.equal(typeof body.fallback_used, "boolean");
     assert.ok(body.ar_summary);
     assert.ok(body.revenue_summary);
     assert.ok(body.payment_summary);
@@ -269,6 +310,48 @@ describe("quickBooksIntelligenceApi helpers", () => {
     assert.equal(body.metadata.page_size, 50);
     assertNoRawPayload(body);
     assert.equal(JSON.stringify(body).includes("raw_payload"), false);
+  });
+
+  it("includes full_aggregate diagnostics on success response", () => {
+    const body = buildQuickBooksIntelligenceApiResponse(
+      fakeSnapshot({
+        mode: "full_aggregate",
+        is_sample_limited: false,
+        attempted_mode: "auto",
+        aggregate_attempted: true,
+        aggregate_available: true,
+        fallback_used: false,
+        fallback_reason: null,
+        period: {
+          preset: "ytd",
+          date_from: "2026-01-01",
+          date_to: "2026-07-10",
+          as_of: "2026-07-10",
+          sort: "risk_desc",
+          year: 2026,
+          is_partial: false,
+          is_sample_limited: false,
+          max_rows: null,
+          page_size: null,
+        },
+        load_meta: {
+          mode: "full_aggregate",
+          is_sample_limited: false,
+          page_size: null,
+          include_invoice_lines: false,
+          staging_row_counts: { invoices: 1000 },
+        },
+      }),
+    );
+    assert.equal(body.mode, "full_aggregate");
+    assert.equal(body.is_sample_limited, false);
+    assert.equal(body.attempted_mode, "auto");
+    assert.equal(body.aggregate_attempted, true);
+    assert.equal(body.aggregate_available, true);
+    assert.equal(body.fallback_used, false);
+    assert.equal(body.fallback_reason, null);
+    assert.equal(body.metadata.mode, "full_aggregate");
+    assertNoRawPayload(body);
   });
 
   it("rejects snapshot that still carries raw_payload", () => {
@@ -437,7 +520,7 @@ describe("quickBooksIntelligenceApi route auth + handler", () => {
     assertNoRawPayload(res.body);
   });
 
-  it("returns friendly 57014 timeout payload from handler", async () => {
+  it("returns friendly sample 57014 timeout payload from handler", async () => {
     const handlers = createQuickBooksIntelligenceHandlers({
       getSupabase: () => ({}),
       env: {},
@@ -445,6 +528,8 @@ describe("quickBooksIntelligenceApi route auth + handler", () => {
         const err = new Error("RAW_DB_ERROR SENTINEL_NAME canceling statement due to statement timeout");
         // @ts-ignore
         err.code = "57014";
+        // @ts-ignore
+        err.mode = "sample_preview";
         throw err;
       },
     });
@@ -467,11 +552,63 @@ describe("quickBooksIntelligenceApi route auth + handler", () => {
     assert.equal(res.statusCode, 504);
     assert.equal(res.body.ok, false);
     assert.equal(res.body.code, "57014");
+    assert.equal(res.body.mode, "sample_preview");
     assert.deepEqual(res.body.recommended, { max_rows: 50, page_size: 50 });
     const serialized = JSON.stringify(res.body);
     assert.equal(serialized.includes("SENTINEL_NAME"), false);
     assert.equal(serialized.includes("raw_payload"), false);
     assert.equal(serialized.includes("canceling statement"), false);
+  });
+
+  it("returns aggregate 57014 diagnostics without sample fallback", async () => {
+    const handlers = createQuickBooksIntelligenceHandlers({
+      getSupabase: () => ({}),
+      env: {},
+      loadExecutiveSnapshot: async () => {
+        const err = new Error("QuickBooks full aggregate timed out");
+        // @ts-ignore
+        err.code = "57014";
+        // @ts-ignore
+        err.aggregateTimeout = true;
+        // @ts-ignore
+        err.attempted_mode = "auto";
+        // @ts-ignore
+        err.mode = "full_aggregate";
+        // @ts-ignore
+        err.aggregate_attempted = true;
+        // @ts-ignore
+        err.aggregate_available = true;
+        // @ts-ignore
+        err.fallback_used = false;
+        // @ts-ignore
+        err.fallback_reason = null;
+        throw err;
+      },
+    });
+    const res = {
+      statusCode: 200,
+      body: null,
+      status(c) {
+        this.statusCode = c;
+        return this;
+      },
+      json(b) {
+        this.body = b;
+        return this;
+      },
+    };
+    await handlers.getExecutiveSnapshot(
+      { query: { mode: "auto", preset: "ytd" }, user: { id: "u1", organization_id: ORG } },
+      res,
+    );
+    assert.equal(res.statusCode, 504);
+    assert.equal(res.body.error, "QuickBooks full aggregate timed out");
+    assert.equal(res.body.mode, "full_aggregate");
+    assert.equal(res.body.aggregate_attempted, true);
+    assert.equal(res.body.fallback_used, false);
+    assert.equal(res.body.fallback_reason, null);
+    assert.equal("recommended" in res.body, false);
+    assert.equal(JSON.stringify(res.body).includes("raw_payload"), false);
   });
 
   it("handler returns 400 when organization_id missing", async () => {

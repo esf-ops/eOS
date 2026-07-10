@@ -45,14 +45,23 @@ function formatIntelligenceLoadError(e: unknown): string {
     const rec = body as {
       code?: string;
       error?: string;
+      mode?: string;
+      aggregate_attempted?: boolean;
+      fallback_used?: boolean;
       recommended?: { max_rows?: number; page_size?: number };
     };
     if (rec.code === "57014") {
+      const isAggregateTimeout =
+        rec.mode === "full_aggregate" ||
+        (rec.aggregate_attempted === true && rec.fallback_used === false);
+      if (isAggregateTimeout) {
+        return "Full-period aggregate timed out. The SQL aggregate exists but needs optimization/indexing.";
+      }
       const maxRows = rec.recommended?.max_rows ?? 50;
       const pageSize = rec.recommended?.page_size ?? 50;
       const base =
         rec.error ||
-        "QuickBooks intelligence snapshot timed out while reading staging data.";
+        "QuickBooks sample_preview timed out while reading staging data.";
       return `${base} Recommended: max_rows=${maxRows}&page_size=${pageSize}.`;
     }
   }

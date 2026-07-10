@@ -2,7 +2,8 @@
  * quickBooksIntelligenceService — Phase 4B/4F/4G executive intelligence snapshot.
  *
  * Prefers Phase 4G DB-side aggregates (full_aggregate). Falls back to Phase 4F
- * sample-limited in-memory aggregates when the RPC is missing.
+ * sample-limited in-memory aggregates only when the RPC is missing/unavailable.
+ * Aggregate statement timeouts (57014) do NOT fall back to sample_preview.
  *
  * Never returns raw_payload. No AI. No QuickBooks writeback. Backend-only.
  */
@@ -26,8 +27,99 @@ export { flattenInsightList };
  */
 function shouldFallbackToSample(err) {
   if (!err || typeof err !== "object") return false;
+  if (/** @type {{ aggregateTimeout?: boolean }} */ (err).aggregateTimeout === true) return false;
+  const code = String(/** @type {{ code?: unknown }} */ (err).code ?? "");
+  if (code === "57014") return false;
   if (/** @type {{ missingRpc?: boolean }} */ (err).missingRpc) return true;
   return isMissingAggregateRpcError(err);
+}
+
+/**
+ * @param {string} attemptedMode
+ * @param {{
+ *   aggregateAttempted?: boolean,
+ *   aggregateAvailable?: boolean|null,
+ *   fallbackUsed?: boolean,
+ *   fallbackReason?: string|null,
+ * }} [extra]
+ */
+function sampleDiagnostics(attemptedMode, extra = {}) {
+  return {
+    attempted_mode: attemptedMode,
+    mode: "sample_preview",
+    aggregate_attempted: extra.aggregateAttempted === true,
+    aggregate_available: extra.aggregateAvailable ?? null,
+    fallback_used: extra.fallbackUsed === true,
+    fallback_reason: extra.fallbackReason ?? null,
+  };
+}
+
+/**
+ * Ensure aggregate failures carry safe diagnostic fields for the API mapper.
+ *
+ * @param {unknown} err
+ * @param {string} attemptedMode
+ * @returns {Error}
+ */
+function annotateAggregateFailure(err, attemptedMode) {
+  const base =
+    err instanceof Error
+      ? err
+      : new Error("QuickBooks intelligence aggregate query failed");
+  const e = /** @type {Error & Record<string, unknown>} */ (base);
+  const code = e.code != null ? String(e.code) : null;
+  const timedOut =
+    e.aggregateTimeout === true ||
+    code === "57014" ||
+    String(e.message ?? "")
+      .toLowerCase()
+      .includes("statement timeout");
+
+  e.attempted_mode = attemptedMode;
+  e.mode = "full_aggregate";
+  e.aggregate_attempted = true;
+  e.aggregate_available = e.missingRpc === true ? false : true;
+  e.fallback_used = false;
+  e.fallback_reason = e.missingRpc === true ? "aggregate_rpc_unavailable" : null;
+  if (timedOut) {
+    e.aggregateTimeout = true;
+    e.code = "57014";
+    e.message = "QuickBooks full aggregate timed out";
+  }
+  return e;
+}
+
+/**
+ * Tag sample_preview staging load failures (especially 57014).
+ *
+ * @param {unknown} err
+ * @param {ReturnType<typeof sampleDiagnostics>} diag
+ * @returns {Error}
+ */
+function annotateSampleFailure(err, diag) {
+  const base =
+    err instanceof Error
+      ? err
+      : new Error("QuickBooks intelligence sample preview failed");
+  const e = /** @type {Error & Record<string, unknown>} */ (base);
+  const code = e.code != null ? String(e.code) : null;
+  const timedOut =
+    code === "57014" ||
+    String(e.message ?? "")
+      .toLowerCase()
+      .includes("statement timeout");
+
+  e.attempted_mode = diag.attempted_mode;
+  e.mode = "sample_preview";
+  e.aggregate_attempted = diag.aggregate_attempted;
+  e.aggregate_available = diag.aggregate_available;
+  e.fallback_used = diag.fallback_used;
+  e.fallback_reason = diag.fallback_reason;
+  if (timedOut) {
+    e.code = "57014";
+    e.message = "QuickBooks sample_preview timed out while reading staging data";
+  }
+  return e;
 }
 
 /**
@@ -77,9 +169,12 @@ export async function loadExecutiveIntelligenceSnapshot(repository, organization
   );
 
   const modeRaw = String(opts.mode ?? "auto").trim().toLowerCase();
-  const mode =
-    modeRaw === "full_aggregate" || modeRaw === "sample_preview" ? modeRaw : "auto";
-  const preferAggregate = opts.preferAggregate !== false && mode !== "sample_preview";
+  const attemptedMode =
+    modeRaw === "full_aggregate" || modeRaw === "sample_preview" || modeRaw === "auto"
+      ? modeRaw
+      : "auto";
+  const preferAggregate =
+    opts.preferAggregate !== false && attemptedMode !== "sample_preview";
 
   let aggregateLoader = null;
   if (typeof repository.loadExecutiveAggregate === "function") {
@@ -91,18 +186,35 @@ export async function loadExecutiveIntelligenceSnapshot(repository, organization
     aggregateLoader = aggRepo.loadExecutiveAggregate.bind(aggRepo);
   }
 
+  /** @type {ReturnType<typeof sampleDiagnostics>|null} */
+  let fallbackDiag = null;
+
   if (preferAggregate && aggregateLoader) {
     try {
       const aggregate = await aggregateLoader(organizationId, period, { topN: 10 });
-      const snapshot = shapeFullAggregateSnapshot(aggregate, period, organizationId);
+      const snapshot = shapeFullAggregateSnapshot(aggregate, period, organizationId, {
+        attempted_mode: attemptedMode,
+      });
       assertNoRawPayload(snapshot, "executive_intelligence_snapshot");
       return snapshot;
     } catch (err) {
-      if (mode === "full_aggregate" || !shouldFallbackToSample(err)) {
-        throw err;
+      if (attemptedMode === "full_aggregate" || !shouldFallbackToSample(err)) {
+        throw annotateAggregateFailure(err, attemptedMode);
       }
-      // Fall through to sample preview.
+      fallbackDiag = sampleDiagnostics(attemptedMode, {
+        aggregateAttempted: true,
+        aggregateAvailable: false,
+        fallbackUsed: true,
+        fallbackReason: "aggregate_rpc_unavailable",
+      });
     }
+  } else if (attemptedMode === "sample_preview") {
+    fallbackDiag = sampleDiagnostics(attemptedMode, {
+      aggregateAttempted: false,
+      aggregateAvailable: null,
+      fallbackUsed: false,
+      fallbackReason: null,
+    });
   }
 
   if (typeof repository.loadOrgCurrentDataset !== "function") {
@@ -111,12 +223,26 @@ export async function loadExecutiveIntelligenceSnapshot(repository, organization
     );
   }
 
-  const datasetWithMeta = await repository.loadOrgCurrentDataset(organizationId, {
-    asOfDate: period.as_of,
-    pageSize: opts.pageSize,
-    maxRows: opts.maxRows,
-    includeInvoiceLines: opts.includeInvoiceLines === true,
-  });
+  const diagForSample =
+    fallbackDiag ??
+    sampleDiagnostics(attemptedMode, {
+      aggregateAttempted: false,
+      aggregateAvailable: null,
+      fallbackUsed: false,
+      fallbackReason: null,
+    });
+
+  let datasetWithMeta;
+  try {
+    datasetWithMeta = await repository.loadOrgCurrentDataset(organizationId, {
+      asOfDate: period.as_of,
+      pageSize: opts.pageSize,
+      maxRows: opts.maxRows,
+      includeInvoiceLines: opts.includeInvoiceLines === true,
+    });
+  } catch (err) {
+    throw annotateSampleFailure(err, diagForSample);
+  }
 
   const {
     load_meta: loadMeta,
@@ -147,22 +273,23 @@ export async function loadExecutiveIntelligenceSnapshot(repository, organization
     }),
   });
 
+  const diag = diagForSample;
+
   const snapshot = {
     organization_id: organizationId,
     as_of_date: period.as_of,
     generated_at: new Date().toISOString(),
-    mode: "sample_preview",
+    ...diag,
     is_sample_limited: true,
     load_meta: {
       ...(loadMeta ?? {}),
-      mode: "sample_preview",
-      is_sample_limited: true,
+      ...diag,
       invoice_line_fact_count: Array.isArray(invoiceLines) ? invoiceLines.length : 0,
       period: {
         ...periodScoped.period,
         is_sample_limited: true,
       },
-      aggregate_fallback_reason: "aggregate_rpc_unavailable_or_disabled",
+      aggregate_fallback_reason: diag.fallback_reason,
     },
     period: {
       ...periodScoped.period,

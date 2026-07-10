@@ -155,6 +155,34 @@ export function parseIntelligenceQuery(query = {}, now = new Date()) {
 }
 
 /**
+ * Safe diagnostic fields from an error object (no PII / secrets).
+ *
+ * @param {unknown} err
+ * @returns {Record<string, unknown>}
+ */
+export function extractIntelligenceErrorDiagnostics(err) {
+  if (!err || typeof err !== "object") {
+    return {
+      attempted_mode: null,
+      mode: null,
+      aggregate_attempted: null,
+      aggregate_available: null,
+      fallback_used: null,
+      fallback_reason: null,
+    };
+  }
+  const e = /** @type {Record<string, unknown>} */ (err);
+  return {
+    attempted_mode: e.attempted_mode ?? null,
+    mode: e.mode ?? null,
+    aggregate_attempted: typeof e.aggregate_attempted === "boolean" ? e.aggregate_attempted : null,
+    aggregate_available: typeof e.aggregate_available === "boolean" ? e.aggregate_available : null,
+    fallback_used: typeof e.fallback_used === "boolean" ? e.fallback_used : null,
+    fallback_reason: e.fallback_reason ?? null,
+  };
+}
+
+/**
  * Map loader/repository errors to a safe API response (no DB text / PII).
  *
  * @param {unknown} err
@@ -166,14 +194,44 @@ export function mapQuickBooksIntelligenceError(err) {
       ? String(err.code)
       : null;
 
+  const diagnostics = extractIntelligenceErrorDiagnostics(err);
+  const isAggregateTimeout =
+    err &&
+    typeof err === "object" &&
+    (/** @type {{ aggregateTimeout?: boolean }} */ (err).aggregateTimeout === true ||
+      diagnostics.mode === "full_aggregate");
+
   if (code === "57014") {
+    if (isAggregateTimeout) {
+      return {
+        status: 504,
+        body: {
+          ok: false,
+          error: "QuickBooks full aggregate timed out",
+          code: "57014",
+          attempted_mode: diagnostics.attempted_mode ?? "auto",
+          mode: "full_aggregate",
+          aggregate_attempted: true,
+          aggregate_available: diagnostics.aggregate_available ?? true,
+          fallback_used: false,
+          fallback_reason: null,
+        },
+      };
+    }
+
     return {
       status: 504,
       body: {
         ok: false,
         error:
-          "QuickBooks intelligence snapshot timed out while reading staging data. Retry with a smaller sample.",
+          "QuickBooks sample_preview timed out while reading staging data. Retry with a smaller sample.",
         code: "57014",
+        attempted_mode: diagnostics.attempted_mode ?? "sample_preview",
+        mode: "sample_preview",
+        aggregate_attempted: diagnostics.aggregate_attempted,
+        aggregate_available: diagnostics.aggregate_available,
+        fallback_used: diagnostics.fallback_used,
+        fallback_reason: diagnostics.fallback_reason,
         recommended: {
           max_rows: QB_INTELLIGENCE_TIMEOUT_RECOMMENDED_MAX_ROWS,
           page_size: QB_INTELLIGENCE_TIMEOUT_RECOMMENDED_PAGE_SIZE,
@@ -188,6 +246,7 @@ export function mapQuickBooksIntelligenceError(err) {
       ok: false,
       error: "QuickBooks intelligence snapshot failed",
       ...(code ? { code } : {}),
+      ...diagnostics,
     },
   };
 }
@@ -218,12 +277,49 @@ export function buildQuickBooksIntelligenceApiResponse(snapshot, requestMeta = {
     mode === "sample_preview" ||
     Boolean(period?.is_sample_limited);
 
+  const attemptedMode =
+    snapshot.attempted_mode ?? snapshot.load_meta?.attempted_mode ?? mode;
+  const aggregateAttempted =
+    typeof snapshot.aggregate_attempted === "boolean"
+      ? snapshot.aggregate_attempted
+      : typeof snapshot.load_meta?.aggregate_attempted === "boolean"
+        ? snapshot.load_meta.aggregate_attempted
+        : mode === "full_aggregate";
+  const aggregateAvailable =
+    typeof snapshot.aggregate_available === "boolean"
+      ? snapshot.aggregate_available
+      : typeof snapshot.load_meta?.aggregate_available === "boolean"
+        ? snapshot.load_meta.aggregate_available
+        : mode === "full_aggregate"
+          ? true
+          : null;
+  const fallbackUsed =
+    typeof snapshot.fallback_used === "boolean"
+      ? snapshot.fallback_used
+      : typeof snapshot.load_meta?.fallback_used === "boolean"
+        ? snapshot.load_meta.fallback_used
+        : Boolean(snapshot.load_meta?.aggregate_fallback_reason);
+  const fallbackReason =
+    snapshot.fallback_reason ??
+    snapshot.load_meta?.fallback_reason ??
+    snapshot.load_meta?.aggregate_fallback_reason ??
+    null;
+
+  const diagnostics = {
+    attempted_mode: attemptedMode,
+    mode,
+    aggregate_attempted: aggregateAttempted,
+    aggregate_available: aggregateAvailable,
+    fallback_used: fallbackUsed,
+    fallback_reason: fallbackReason,
+  };
+
   const body = {
     ok: true,
     organization_id: snapshot.organization_id,
     generated_at: snapshot.generated_at,
     as_of_date: snapshot.as_of_date,
-    mode,
+    ...diagnostics,
     is_sample_limited: isSampleLimited,
     period,
     metadata: {
@@ -241,8 +337,8 @@ export function buildQuickBooksIntelligenceApiResponse(snapshot, requestMeta = {
       sort: period?.sort ?? null,
       is_partial: Boolean(period?.is_partial ?? isSampleLimited),
       is_sample_limited: isSampleLimited,
-      mode,
-      aggregate_fallback_reason: snapshot.load_meta?.aggregate_fallback_reason ?? null,
+      ...diagnostics,
+      aggregate_fallback_reason: fallbackReason,
     },
     invoice_summary: snapshot.invoice_summary ?? null,
     payment_summary_period: snapshot.payment_summary_period ?? null,

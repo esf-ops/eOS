@@ -151,11 +151,21 @@ describe("createQuickBooksIntelligenceAggregateRepository", () => {
     const period = resolveIntelligencePeriod({ year: 2026 }, NOW);
     const data = await repo.loadExecutiveAggregate(ORG, period, { topN: 10 });
     assert.equal(rpcArgs.name, QB_INTELLIGENCE_AGGREGATE_RPC);
+    assert.equal(rpcArgs.name, "qb_intelligence_executive_aggregate");
     assert.equal(rpcArgs.args.p_organization_id, ORG);
     assert.equal(rpcArgs.args.p_date_from, "2026-01-01");
     assert.equal(rpcArgs.args.p_date_to, "2026-07-10");
     assert.equal(rpcArgs.args.p_as_of, "2026-07-10");
+    assert.equal(rpcArgs.args.p_sort, "risk_desc");
     assert.equal(rpcArgs.args.p_top_n, 10);
+    assert.deepEqual(Object.keys(rpcArgs.args).sort(), [
+      "p_as_of",
+      "p_date_from",
+      "p_date_to",
+      "p_organization_id",
+      "p_sort",
+      "p_top_n",
+    ]);
     assert.equal(data.is_sample_limited, false);
     assertNoRawPayload(data);
   });
@@ -174,7 +184,33 @@ describe("createQuickBooksIntelligenceAggregateRepository", () => {
       () => repo.loadExecutiveAggregate(ORG, period),
       (err) => {
         assert.equal(err.missingRpc, true);
+        assert.equal(err.fallback_reason, "aggregate_rpc_unavailable");
         assert.equal(String(err.message).includes("raw_payload"), false);
+        return true;
+      },
+    );
+  });
+
+  it("marks aggregate timeout without missingRpc", async () => {
+    const repo = createQuickBooksIntelligenceAggregateRepository({
+      getSupabase: () => ({
+        rpc: async () => ({
+          data: null,
+          error: { code: "57014", message: "canceling statement due to statement timeout SENTINEL" },
+        }),
+      }),
+    });
+    const period = resolveIntelligencePeriod({ preset: "ytd" }, NOW);
+    await assert.rejects(
+      () => repo.loadExecutiveAggregate(ORG, period),
+      (err) => {
+        assert.equal(err.aggregateTimeout, true);
+        assert.equal(err.missingRpc, false);
+        assert.equal(err.code, "57014");
+        assert.equal(err.message, "QuickBooks full aggregate timed out");
+        assert.equal(err.fallback_used, false);
+        assert.equal(err.fallback_reason, null);
+        assert.equal(String(err.message).includes("SENTINEL"), false);
         return true;
       },
     );
@@ -196,6 +232,11 @@ describe("loadExecutiveIntelligenceSnapshot aggregate preference", () => {
     );
     assert.equal(snapshot.mode, "full_aggregate");
     assert.equal(snapshot.is_sample_limited, false);
+    assert.equal(snapshot.attempted_mode, "auto");
+    assert.equal(snapshot.aggregate_attempted, true);
+    assert.equal(snapshot.aggregate_available, true);
+    assert.equal(snapshot.fallback_used, false);
+    assert.equal(snapshot.fallback_reason, null);
     assert.equal(snapshot.period.date_from, period.date_from);
     assertNoRawPayload(snapshot);
   });
@@ -240,7 +281,47 @@ describe("loadExecutiveIntelligenceSnapshot aggregate preference", () => {
     );
     assert.equal(snapshot.mode, "sample_preview");
     assert.equal(snapshot.is_sample_limited, true);
-    assert.equal(snapshot.load_meta.aggregate_fallback_reason, "aggregate_rpc_unavailable_or_disabled");
+    assert.equal(snapshot.attempted_mode, "auto");
+    assert.equal(snapshot.aggregate_attempted, true);
+    assert.equal(snapshot.aggregate_available, false);
+    assert.equal(snapshot.fallback_used, true);
+    assert.equal(snapshot.fallback_reason, "aggregate_rpc_unavailable");
+    assert.equal(snapshot.load_meta.aggregate_fallback_reason, "aggregate_rpc_unavailable");
     assertNoRawPayload(snapshot);
+  });
+
+  it("does not fall back to sample_preview on aggregate 57014", async () => {
+    let sampleCalled = false;
+    await assert.rejects(
+      () =>
+        loadExecutiveIntelligenceSnapshot(
+          {
+            loadExecutiveAggregate: async () => {
+              const err = new Error("canceling statement due to statement timeout");
+              // @ts-ignore
+              err.code = "57014";
+              // @ts-ignore
+              err.aggregateTimeout = true;
+              throw err;
+            },
+            loadOrgCurrentDataset: async () => {
+              sampleCalled = true;
+              throw new Error("sample path should not run");
+            },
+          },
+          ORG,
+          { now: NOW, mode: "auto" },
+        ),
+      (err) => {
+        assert.equal(sampleCalled, false);
+        assert.equal(err.code, "57014");
+        assert.equal(err.mode, "full_aggregate");
+        assert.equal(err.aggregate_attempted, true);
+        assert.equal(err.fallback_used, false);
+        assert.equal(err.fallback_reason, null);
+        assert.equal(err.message, "QuickBooks full aggregate timed out");
+        return true;
+      },
+    );
   });
 });

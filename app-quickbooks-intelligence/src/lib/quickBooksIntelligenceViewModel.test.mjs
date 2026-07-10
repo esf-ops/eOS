@@ -206,6 +206,18 @@ describe("quickBooksIntelligenceViewModel safety", () => {
     assert.equal(QB_INTEL_DEFAULT_PAGE_SIZE, 100);
   });
 
+  it("explicitly includes mode=auto on the executive request", () => {
+    const path = buildQuickBooksIntelligenceEndpoint({
+      preset: "ytd",
+      sort: "risk_desc",
+      mode: "auto",
+    });
+    assert.equal(
+      path,
+      `${QB_INTEL_ENDPOINT}?preset=ytd&sort=risk_desc&mode=auto`,
+    );
+  });
+
   it("includes sample bounds only when forcing sample preview", () => {
     const path = buildQuickBooksIntelligenceEndpoint({ mode: "sample_preview" });
     assert.match(path, /mode=sample_preview/);

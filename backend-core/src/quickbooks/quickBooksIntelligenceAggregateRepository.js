@@ -32,30 +32,76 @@ export function isMissingAggregateRpcError(err) {
     return true;
   }
   if (blob.includes("qb_intelligence_executive_aggregate") && blob.includes("not find")) return true;
+  if (blob.includes("schema cache") && blob.includes("qb_intelligence_executive_aggregate")) return true;
   return false;
 }
 
 /**
+ * Detect Postgres statement timeout (57014) on aggregate path.
+ *
  * @param {unknown} err
- * @returns {Error & { code?: string, missingRpc?: boolean }}
+ * @returns {boolean}
+ */
+export function isAggregateTimeoutError(err) {
+  if (!err || typeof err !== "object") return false;
+  if (/** @type {{ aggregateTimeout?: boolean }} */ (err).aggregateTimeout === true) return true;
+  const code = String(/** @type {{ code?: unknown }} */ (err).code ?? "");
+  if (code === "57014") return true;
+  const message = String(/** @type {{ message?: unknown }} */ (err).message ?? "").toLowerCase();
+  return message.includes("statement timeout") || message.includes("canceling statement due to statement timeout");
+}
+
+/**
+ * @param {unknown} err
+ * @returns {Error & {
+ *   code?: string,
+ *   missingRpc?: boolean,
+ *   aggregateTimeout?: boolean,
+ *   mode?: string,
+ *   aggregate_attempted?: boolean,
+ *   aggregate_available?: boolean,
+ *   fallback_used?: boolean,
+ *   fallback_reason?: string|null,
+ * }}
  */
 export function sanitizeAggregateRepositoryError(err) {
   const missing = isMissingAggregateRpcError(err);
+  const timedOut = !missing && isAggregateTimeoutError(err);
   const code =
     err && typeof err === "object" && "code" in err && err.code != null
       ? String(err.code)
       : missing
         ? "PGRST202"
-        : "QB_AGGREGATE_ERROR";
-  const e = /** @type {Error & { code?: string, missingRpc?: boolean }} */ (
+        : timedOut
+          ? "57014"
+          : "QB_AGGREGATE_ERROR";
+
+  const e = /** @type {Error & {
+    code?: string,
+    missingRpc?: boolean,
+    aggregateTimeout?: boolean,
+    mode?: string,
+    aggregate_attempted?: boolean,
+    aggregate_available?: boolean,
+    fallback_used?: boolean,
+    fallback_reason?: string|null,
+  }} */ (
     new Error(
       missing
         ? "QuickBooks intelligence aggregate RPC is not installed"
-        : "QuickBooks intelligence aggregate query failed",
+        : timedOut
+          ? "QuickBooks full aggregate timed out"
+          : "QuickBooks intelligence aggregate query failed",
     )
   );
   e.code = code;
   e.missingRpc = missing;
+  e.aggregateTimeout = timedOut;
+  e.mode = "full_aggregate";
+  e.aggregate_attempted = true;
+  e.aggregate_available = !missing;
+  e.fallback_used = false;
+  e.fallback_reason = missing ? "aggregate_rpc_unavailable" : null;
   return e;
 }
 
@@ -154,14 +200,23 @@ export function buildAggregatePriorityInsights(aggregate, limit = 10) {
  * @param {object} period
  * @param {string} organizationId
  */
-export function shapeFullAggregateSnapshot(aggregate, period, organizationId) {
+export function shapeFullAggregateSnapshot(aggregate, period, organizationId, diagnostics = {}) {
   const insightBits = buildAggregatePriorityInsights(aggregate, 10);
+  const diag = {
+    attempted_mode: diagnostics.attempted_mode ?? "auto",
+    mode: "full_aggregate",
+    aggregate_attempted: true,
+    aggregate_available: true,
+    fallback_used: false,
+    fallback_reason: null,
+  };
   const snapshot = {
     organization_id: organizationId,
     as_of_date: aggregate.as_of_date ?? period.as_of,
     generated_at: new Date().toISOString(),
     mode: "full_aggregate",
     is_sample_limited: false,
+    ...diag,
     load_meta: {
       mode: "full_aggregate",
       is_sample_limited: false,
@@ -169,6 +224,7 @@ export function shapeFullAggregateSnapshot(aggregate, period, organizationId) {
       page_size: null,
       max_rows: null,
       include_invoice_lines: false,
+      ...diag,
       period: {
         ...period,
         is_partial: false,
