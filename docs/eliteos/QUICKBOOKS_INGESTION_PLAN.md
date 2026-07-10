@@ -65,68 +65,140 @@ decodes and strips UTF-8/UTF-16LE/UTF-16BE BOMs (and stray leading control chara
 before parsing, so the reader/preview tool tolerates this without any changes needed
 on the Windows VM connector.
 
-**Current archive status — extraction counts confirmed, but archive is NOT staging-ready.**
+**Current archive status — materialized and staging-ready.**
 
-The archived export at `~/eliteos-local-archive/quickbooks-20260701/full-success`
-(run ID `20260701-185251-3b5132b7`) proves the connector's entity coverage and
-self-reported record counts (262,654 across 14 entity types, 0 errors). However, every
-batch file contains only a C# anonymous-object `.ToString()` string rather than actual
-record bodies. For example, `customers/batch-001.json` (192 bytes, claiming 100 records)
-contains:
+The validated materialized export at `~/eliteos-local-archive/quickbooks-20260710/full-materialized`
+(run ID `20260710-130918-512b1dca`, QBXML 16.0) is the Phase 2 source of truth:
 
-```
-"{ entityType = customers, batchNumber = 1, recordCount = 100, records = System.Collections.Generic.List`1[...] }"
-```
+- Manifest valid: true
+- Manifest record count: 263,461 across 14 entity types, 0 errors
+- All manifest-backed discovered counts match
+- `selfReportedOnlyFileCount=0` for all entities
+- `unreadableFileCount=0`, `unrecognizedShapeFileCount=0`
+- `invoice-lines` folder exists separately (expected — not in manifest by design)
 
-The `records` field holds the .NET type name, not the serialized records. The actual
-customer, invoice, and financial data was never written to disk. **This archive cannot
-feed Phase 2 staging.** The preview tool now correctly identifies this condition:
-`selfReportedOnlyFileCount > 0` for every entity, with a per-entity warning
-`[entity] N batch file(s) contain only a self-reported count, not materialized records
-(connector serialization bug: record bodies were not serialized to disk) — not ingest-ready`.
-
-**Root cause (connector-side, not yet fixed):**
-`quickbooks-sdk-connector/Normalization/JsonSerializationHelper.cs`'s `WriteValue`
-switch has no case for a plain C# anonymous object. The payload passed by
-`IteratorQueryRunner.WriteJson`/`RunSingleQuery` (`new { entityType, batchNumber,
-recordCount, records }`) does not match `IDictionary<string, object>`, `IDictionary`,
-or `IEnumerable`, so it falls through to
-`default: writer.WriteStringValue(Convert.ToString(value))` and the object's `.ToString()`
-representation is written as a JSON string instead of a real JSON object.
-
-**Required connector fix before Phase 2:** Change the payload type passed to
-`WriteIndentedJson` from an anonymous type to `IDictionary<string, object>`, e.g.:
-
-```csharp
-WriteIndentedJson(filePath, new Dictionary<string, object>
-{
-    ["entityType"] = entityType,
-    ["batchNumber"] = batchNumber,
-    ["recordCount"] = records.Count,
-    ["records"] = records,
-});
-```
-
-After fixing and re-running, verify one batch file is a real JSON object (not a
-192-byte string) before proceeding to Phase 2. The Phase 1 preview tool will
-automatically show `selfReportedOnlyFileCount=0` and no not-ingest-ready warnings once
-the connector serializer is corrected.
+The serialization bug from the 2026-07-01 archive is fixed. The connector now writes
+real materialized JSON objects (via `Dictionary<string, object>` payloads) and the
+`verify-batch-json.ps1` gate on the VM confirms the output shape before each full
+extract. Phase 2 staging design is ready to apply once the Phase 3 import endpoint
+is built and tested with fake data.
 
 **Never commit real QuickBooks export data.** `quickbooks-sdk-connector/exports/` and
 `quickbooks-sdk-connector/logs/` are git-ignored. Test fixtures for the reader/summary
 modules use small, obviously fake data only (e.g. `Fake Test Customer`, `FAKE-customers-1-0`)
 — never real customer, invoice, or financial data.
 
+## Phase 2 — Staging Schema (design complete; not yet applied)
+
+### Status
+
+Design complete as of 2026-07-10.  Migration draft and staging row builder are in the
+repo.  **Do not apply the migration until Phase 3 (import endpoint) is ready and a
+full round-trip integration test with fake data has passed.**
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `backend-core/supabase/eliteos_quickbooks_staging_v1.sql` | Migration draft (not applied) |
+| `backend-core/src/quickbooks/quickBooksStaging.js` | Staging row builder / field extractor |
+| `backend-core/src/quickbooks/quickBooksStaging.test.mjs` | 47 tests using fake QB-shaped data |
+
+### Staging tables
+
+| Entity folder | QB record type | Table | Conflict key |
+|---|---|---|---|
+| company | CompanyRet (singleton) | `brain_quickbooks_company` | `(organization_id)` |
+| customers | CustomerRet | `brain_quickbooks_customers` | `(organization_id, qb_list_id)` |
+| items | Item\*Ret | `brain_quickbooks_items` | `(organization_id, qb_list_id)` |
+| vendors | VendorRet | `brain_quickbooks_vendors` | `(organization_id, qb_list_id)` |
+| accounts | AccountRet | `brain_quickbooks_accounts` | `(organization_id, qb_list_id)` |
+| classes | ClassRet | `brain_quickbooks_classes` | `(organization_id, qb_list_id)` |
+| sales-reps | SalesRepRet | `brain_quickbooks_sales_reps` | `(organization_id, qb_list_id)` |
+| terms | StandardTermsRet / DateDrivenTermsRet | `brain_quickbooks_terms` | `(organization_id, qb_list_id, term_type)` |
+| invoices | InvoiceRet | `brain_quickbooks_invoices` | `(organization_id, qb_txn_id)` |
+| invoice-lines | derived from InvoiceRet | `brain_quickbooks_invoice_lines` | `(organization_id, qb_txn_id, qb_txn_line_id)` |
+| payments | ReceivePaymentRet | `brain_quickbooks_payments` | `(organization_id, qb_txn_id)` |
+| bills | BillRet | `brain_quickbooks_bills` | `(organization_id, qb_txn_id)` |
+| purchase-orders | PurchaseOrderRet | `brain_quickbooks_purchase_orders` | `(organization_id, qb_txn_id)` |
+| estimates | EstimateRet | `brain_quickbooks_estimates` | `(organization_id, qb_txn_id)` |
+| sales-orders | SalesOrderRet | `brain_quickbooks_sales_orders` | `(organization_id, qb_txn_id)` |
+
+Audit tables: `qb_sync_runs`, `qb_sync_errors`, `qb_data_quality_findings`.
+
+### Column conventions
+
+**List entities** (customers, vendors, items, accounts, classes, sales-reps, terms):
+- `qb_list_id` — QuickBooks `ListID` (opaque identifier, not a name or PII)
+- `qb_edit_sequence` — QuickBooks `EditSequence` (monotonically increasing version string)
+- `time_created` / `time_modified` — from QB `TimeCreated` / `TimeModified`
+- `is_active` — from QB `IsActive` (boolean)
+- `account_type` (accounts only) — QB `AccountType` label (e.g. "Income", "COGS")
+- `item_type` (items only) — QB item variant (e.g. "ItemInventoryRet")
+- `term_type` (terms only) — "standard" | "date-driven"
+
+**Transaction entities** (invoices, payments, bills, purchase-orders, estimates, sales-orders):
+- `qb_txn_id` — QuickBooks `TxnID` (opaque identifier)
+- `qb_edit_sequence` — same as above
+- `txn_date` — QB `TxnDate` (date only, `date` column type)
+- `time_created` / `time_modified` — from QB timestamps
+- `qb_customer_list_id` — `CustomerRef.ListID` (opaque FK-like reference; invoices, payments, estimates, sales-orders)
+- `qb_vendor_list_id` — `VendorRef.ListID` (opaque FK-like reference; bills, purchase-orders)
+
+**Invoice lines** (derived):
+- `qb_txn_id` — parent invoice `TxnID`
+- `qb_txn_line_id` — line's own `TxnLineID` (null when absent; `line_seq_number` is fallback)
+- `txn_date` — inherited from parent invoice
+- `qb_item_list_id` — `ItemRef.ListID` (opaque)
+- `line_type` — e.g. "InvoiceLineRet" / "InvoiceLineGroupRet"
+
+**All tables**: `organization_id`, `sync_run_id` (FK to `qb_sync_runs`), `source_system`,
+`raw_payload` (full normalized Ret JSON), `first_seen_at`, `last_seen_at`, `created_at`, `updated_at`.
+
+### Privacy rules
+
+Named columns hold only opaque QB identifiers, version numbers, dates, boolean flags,
+and type discriminators.  Customer names, vendor names, addresses, phone numbers, email
+addresses, invoice reference numbers, dollar amounts, quantities, memo text, and item
+descriptions are stored **only** in `raw_payload` — never in named columns, never
+logged, never returned directly to the browser.  `raw_payload` is accessed only by
+backend-core service-role code.
+
+### Idempotency / upsert strategy
+
+1. Import code calls `buildStagingRow(entityFolderName, record, { organizationId, syncRunId })`.
+2. Before upserting, compare `incoming.qb_edit_sequence` with the stored value via
+   `detectEditSequenceChange(incoming, stored)`.
+3. If `"unchanged"`: update only `sync_run_id`, `last_seen_at`, `updated_at` (skip `raw_payload`).
+4. If `"changed"` or `"unknown"`: upsert full row including `raw_payload`.
+5. Conflict target comes from `getStagingUpsertConfig(entityFolderName).conflictColumns`.
+6. `invoice-lines` conflict key is `(organization_id, qb_txn_id, qb_txn_line_id)`;
+   when `qb_txn_line_id` is null (some legacy line types), fall back to `line_seq_number`
+   comparison in application code (the null-nullable unique constraint allows duplicates —
+   Phase 3 must handle this explicitly).
+
+### RLS and security
+
+- RLS enabled on all 15 staging tables + 3 audit tables.
+- `service_role` bypass policy on each table (backend-core writes only).
+- No `anon` or `authenticated` grants — these tables are never queried by browser clients.
+- `organization_id` on every row; no hardcoded org-specific values; sentinel
+  `'00000000-0000-0000-0000-000000000000'` used when org is not yet known (matches
+  Moraware precedent).
+
+### Applying the migration (when ready)
+
+```bash
+# Verify a full round-trip test with fake data first.
+# Then apply in Supabase SQL editor:
+#   backend-core/supabase/eliteos_quickbooks_staging_v1.sql
+# Confirm tables exist and RLS is enabled:
+# select tablename, rowsecurity from pg_tables
+# where tablename like '%quickbooks%' or tablename like 'qb_%'
+# order by tablename;
+```
+
 ## Future Phases
-
-### Phase 2 — Staging Schema
-
-Design organization-scoped Supabase staging tables for raw QuickBooks payloads,
-mirroring the Moraware `brain_moraware_*` pattern (e.g. `brain_quickbooks_customers`,
-`brain_quickbooks_invoices`, `brain_quickbooks_invoice_lines`, etc.), each with
-`organization_id`, a `sync_run_id` foreign key, and raw JSON payload storage. No
-normalized/business-logic tables yet — staging mirrors QuickBooks Ret elements as
-closely as practical.
 
 ### Phase 3 — backend-core Import Endpoint
 
@@ -134,10 +206,9 @@ Add a protected internal import endpoint (`POST /api/internal/quickbooks-sync/im
 shared-secret auth via header, same pattern as
 `POST /api/internal/moraware-sync/import`) that accepts batches produced by the
 Windows VM connector (or a future uploader script) and writes them into Phase 2
-staging tables. Chunked payloads for large entities (invoices, bills, sales orders)
-following the Moraware chunked-import precedent. Sync run metadata (`runId`,
-`startedAt`, `completedAt`, per-entity counts, errors) recorded per import, similar to
-`moraware_sync_runs`.
+staging tables using `buildStagingRow` + `getStagingUpsertConfig`. Chunked payloads
+for large entities (invoices, bills, sales orders, invoice-lines) following the Moraware
+chunked-import precedent. Sync run metadata recorded in `qb_sync_runs`.
 
 ### Phase 4 — Admin Review UI
 
