@@ -155,7 +155,13 @@ create table if not exists public.qb_data_quality_findings (
   metadata           jsonb       not null default '{}'::jsonb,
   detected_at        timestamptz not null default now(),
   resolved_at        timestamptz,
-  unique (sync_run_id, finding_type, entity_type, entity_source_id)
+  -- NULLS NOT DISTINCT (Postgres 15+) is intentional: entity_source_id is nullable for
+  -- entity-level findings (not tied to a single record) and sync_run_id can become null
+  -- if its run row is deleted. With the default NULLS DISTINCT, two entity-level findings
+  -- with a null entity_source_id would NOT collide, so ON CONFLICT would never match and
+  -- re-running an import would duplicate them. NULLS NOT DISTINCT treats nulls as equal so
+  -- entity-level findings remain idempotent on re-import.
+  unique nulls not distinct (sync_run_id, finding_type, entity_type, entity_source_id)
 );
 
 alter table public.qb_data_quality_findings enable row level security;

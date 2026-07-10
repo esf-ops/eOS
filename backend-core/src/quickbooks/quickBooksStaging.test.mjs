@@ -404,6 +404,24 @@ console.log("ok: all QB_LIST_ENTITY_FOLDERS map to 'list'; all QB_TXN_ENTITY_FOL
 }
 
 {
+  // B1: null/non-object records must fail closed for every kind, never throw.
+  // terms/items/accounts previously threw (they read record._termType etc. before
+  // validation); company previously returned ok:true with raw_payload:null.
+  for (const folder of ["company", "terms", "items", "accounts", "customers", "invoices", "invoice-lines"]) {
+    for (const badRecord of [null, undefined, "a string", 42, ["array"]]) {
+      let result;
+      assert.doesNotThrow(() => {
+        result = buildStagingRow(folder, badRecord, FAKE_CTX);
+      }, `buildStagingRow("${folder}", ${JSON.stringify(badRecord)}) must not throw`);
+      assert.ok(!result.ok, `buildStagingRow("${folder}", ${JSON.stringify(badRecord)}) must fail closed`);
+      assert.equal(result.reason, "record is not a plain object");
+      assert.equal(result.entityFolderName, folder);
+    }
+  }
+  console.log("ok: buildStagingRow rejects null/non-object records for every kind, no throw (B1)");
+}
+
+{
   // Unknown entity folder -> ok: false, no throw. (org validation happens first,
   // so a valid org must be supplied to reach the unknown-folder branch.)
   const result = buildStagingRow("unknown-entity", fakeListRecord(), FAKE_CTX);
@@ -558,6 +576,23 @@ console.log("ok: all QB_LIST_ENTITY_FOLDERS map to 'list'; all QB_TXN_ENTITY_FOL
   console.log("ok: buildStagingBatch handles non-array records input safely");
 }
 
+{
+  // B1: a null element in an items batch (which reads record._itemType) must be
+  // isolated as a failure, not throw, and the valid item must still build.
+  const validFakeItem = fakeListRecord({ ListID: "FAKE-ITEM-OK", _itemType: "ItemInventoryRet" });
+  let out;
+  assert.doesNotThrow(() => {
+    out = buildStagingBatch("items", [null, validFakeItem], FAKE_CTX);
+  }, "buildStagingBatch must not throw on a null items element");
+  assert.equal(out.rows.length, 1);
+  assert.equal(out.rows[0].qb_list_id, "FAKE-ITEM-OK");
+  assert.equal(out.rows[0].item_type, "ItemInventoryRet");
+  assert.equal(out.failures.length, 1);
+  assert.equal(out.failures[0].index, 0);
+  assert.equal(out.failures[0].reason, "record is not a plain object");
+  console.log("ok: buildStagingBatch isolates a null items element and still builds the valid row (B1)");
+}
+
 // ── getStagingUpsertConfig ─────────────────────────────────────────────────
 
 {
@@ -686,6 +721,24 @@ console.log("ok: all QB_LIST_ENTITY_FOLDERS map to 'list'; all QB_TXN_ENTITY_FOL
     assert.deepEqual(QB_STAGING_UNIQUE_KEYS[folder], key, `unexpected unique key for "${folder}"`);
   }
   console.log("ok: QB_STAGING_UNIQUE_KEYS matches the intended SQL unique constraints for every folder");
+}
+
+{
+  // Invariant: a conflict-key column must never also be in updateColumns. Updating a
+  // column that is part of the ON CONFLICT target is a footgun (it can move the row's
+  // identity mid-upsert) and Postgres would reject some forms of it. Assert no overlap
+  // for every folder.
+  for (const folder of Object.keys(QB_STAGING_UNIQUE_KEYS)) {
+    const cfg = getStagingUpsertConfig(folder);
+    assert.ok(cfg !== null, `no config for "${folder}"`);
+    const overlap = cfg.conflictColumns.filter((c) => cfg.updateColumns.includes(c));
+    assert.deepEqual(
+      overlap,
+      [],
+      `conflictColumns and updateColumns overlap for "${folder}": ${overlap.join(", ")}`
+    );
+  }
+  console.log("ok: getStagingUpsertConfig conflictColumns and updateColumns never overlap for any folder");
 }
 
 // ── detectEditSequenceChange ───────────────────────────────────────────────

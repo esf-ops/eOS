@@ -334,6 +334,14 @@ export function buildStagingRow(entityFolderName, record, ctx = {}) {
     return { ok: false, reason: `no staging table mapped for entity folder "${entityFolderName}"`, entityFolderName };
   }
 
+  // Validate the record shape up front — before any entity-specific field access.
+  // Guards against (a) a TypeError when terms/items/accounts read record._termType /
+  // record._itemType / record.AccountType, and (b) a company row with raw_payload null
+  // that would violate the raw_payload NOT NULL constraint at insert time.
+  if (!record || typeof record !== "object" || Array.isArray(record)) {
+    return { ok: false, reason: "record is not a plain object", entityFolderName };
+  }
+
   const base = {
     organization_id: organizationId,
     sync_run_id:     syncRunId ?? null,

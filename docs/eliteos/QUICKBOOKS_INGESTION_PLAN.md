@@ -126,6 +126,11 @@ full round-trip integration test with fake data has passed.**
 
 Audit tables: `qb_sync_runs`, `qb_sync_errors`, `qb_data_quality_findings`.
 
+`qb_data_quality_findings` uses a `unique nulls not distinct (...)` key (Postgres 15+) so
+entity-level findings — where `entity_source_id` is null — stay idempotent on re-import.
+With the default `NULLS DISTINCT`, two null-`entity_source_id` findings would never collide
+and `ON CONFLICT` would duplicate them on every re-run.
+
 ### Column conventions
 
 **List entities** (customers, vendors, items, accounts, classes, sales-reps, terms):
