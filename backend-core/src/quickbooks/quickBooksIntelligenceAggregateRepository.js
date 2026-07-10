@@ -1,16 +1,42 @@
 /**
- * quickBooksIntelligenceAggregateRepository — Phase 4G DB-side aggregate reads.
+ * quickBooksIntelligenceAggregateRepository — Phase 4G.2 DB-side aggregate reads.
  *
- * Calls qb_intelligence_executive_aggregate via an injected Supabase client.
+ * Prefers parallel section RPCs (each gets its own statement-timeout budget),
+ * falls back to the orchestrator RPC, then lets the service fall back to sample
+ * when RPCs are missing.
+ *
  * Never returns raw_payload. No AI. No connector dependency.
  */
 
 import { assertNoRawPayload } from "./quickBooksIntelligenceFacts.js";
 
+/** Orchestrator RPC (v1 name retained; v2 SQL replaces the body). */
 export const QB_INTELLIGENCE_AGGREGATE_RPC = "qb_intelligence_executive_aggregate";
 
 export const QB_INTELLIGENCE_AGGREGATE_TOP_N_DEFAULT = 10;
 export const QB_INTELLIGENCE_AGGREGATE_TOP_N_MAX = 25;
+
+/** Section RPCs introduced in Phase 4G.2. */
+export const QB_INTELLIGENCE_SECTION_RPCS = Object.freeze({
+  staging_counts: "qb_intelligence_staging_counts",
+  invoice_summary: "qb_intelligence_invoice_summary",
+  payment_summary: "qb_intelligence_payment_summary",
+  estimate_summary: "qb_intelligence_estimate_summary",
+  sales_order_summary: "qb_intelligence_sales_order_summary",
+  ar_aging: "qb_intelligence_ar_aging",
+  monthly_trend: "qb_intelligence_monthly_trend",
+  top_customers: "qb_intelligence_top_customers",
+  top_open_ar: "qb_intelligence_top_open_ar",
+  top_payment_customers: "qb_intelligence_top_payment_customers",
+  top_estimate_leakage: "qb_intelligence_top_estimate_leakage",
+});
+
+/** Core sections required for mode=full_aggregate. */
+export const QB_INTELLIGENCE_CORE_SECTIONS = Object.freeze([
+  "invoice_summary",
+  "payment_summary",
+  "ar_aging",
+]);
 
 /**
  * Detect PostgREST / Postgres "function missing" style errors for fallback.
@@ -28,11 +54,10 @@ export function isMissingAggregateRpcError(err) {
 
   if (code === "PGRST202" || code === "42883") return true;
   if (blob.includes("could not find the function")) return true;
-  if (blob.includes("function public.qb_intelligence_executive_aggregate") && blob.includes("does not exist")) {
+  if (blob.includes("qb_intelligence_") && (blob.includes("does not exist") || blob.includes("not find"))) {
     return true;
   }
-  if (blob.includes("qb_intelligence_executive_aggregate") && blob.includes("not find")) return true;
-  if (blob.includes("schema cache") && blob.includes("qb_intelligence_executive_aggregate")) return true;
+  if (blob.includes("schema cache") && blob.includes("qb_intelligence_")) return true;
   return false;
 }
 
@@ -62,6 +87,7 @@ export function isAggregateTimeoutError(err) {
  *   aggregate_available?: boolean,
  *   fallback_used?: boolean,
  *   fallback_reason?: string|null,
+ *   failed_sections?: string[],
  * }}
  */
 export function sanitizeAggregateRepositoryError(err) {
@@ -85,6 +111,7 @@ export function sanitizeAggregateRepositoryError(err) {
     aggregate_available?: boolean,
     fallback_used?: boolean,
     fallback_reason?: string|null,
+    failed_sections?: string[],
   }} */ (
     new Error(
       missing
@@ -102,6 +129,11 @@ export function sanitizeAggregateRepositoryError(err) {
   e.aggregate_available = !missing;
   e.fallback_used = false;
   e.fallback_reason = missing ? "aggregate_rpc_unavailable" : null;
+  if (err && typeof err === "object" && Array.isArray(/** @type {{ failed_sections?: unknown }} */ (err).failed_sections)) {
+    e.failed_sections = /** @type {string[]} */ (
+      /** @type {{ failed_sections: string[] }} */ (err).failed_sections
+    );
+  }
   return e;
 }
 
@@ -199,9 +231,20 @@ export function buildAggregatePriorityInsights(aggregate, limit = 10) {
  * @param {object} aggregate
  * @param {object} period
  * @param {string} organizationId
+ * @param {object} [diagnostics]
  */
 export function shapeFullAggregateSnapshot(aggregate, period, organizationId, diagnostics = {}) {
   const insightBits = buildAggregatePriorityInsights(aggregate, 10);
+  const sectionStatus = aggregate.section_status ?? diagnostics.section_status ?? null;
+  const failedSections = Array.isArray(aggregate.failed_sections)
+    ? aggregate.failed_sections
+    : Array.isArray(diagnostics.failed_sections)
+      ? diagnostics.failed_sections
+      : [];
+  const isSectionPartial =
+    aggregate.is_section_partial === true ||
+    diagnostics.is_section_partial === true ||
+    failedSections.length > 0;
   const diag = {
     attempted_mode: diagnostics.attempted_mode ?? "auto",
     mode: "full_aggregate",
@@ -209,6 +252,10 @@ export function shapeFullAggregateSnapshot(aggregate, period, organizationId, di
     aggregate_available: true,
     fallback_used: false,
     fallback_reason: null,
+    aggregate_version: aggregate.aggregate_version ?? diagnostics.aggregate_version ?? "v2",
+    is_section_partial: isSectionPartial,
+    failed_sections: failedSections,
+    section_status: sectionStatus,
   };
   const snapshot = {
     organization_id: organizationId,
@@ -227,7 +274,7 @@ export function shapeFullAggregateSnapshot(aggregate, period, organizationId, di
       ...diag,
       period: {
         ...period,
-        is_partial: false,
+        is_partial: isSectionPartial,
         is_sample_limited: false,
         max_rows: null,
         page_size: null,
@@ -235,7 +282,7 @@ export function shapeFullAggregateSnapshot(aggregate, period, organizationId, di
     },
     period: {
       ...period,
-      is_partial: false,
+      is_partial: isSectionPartial,
       is_sample_limited: false,
       max_rows: null,
       page_size: null,
@@ -304,16 +351,254 @@ export function shapeFullAggregateSnapshot(aggregate, period, organizationId, di
 }
 
 /**
+ * @param {import("@supabase/supabase-js").SupabaseClient} supabase
+ * @param {string} rpcName
+ * @param {Record<string, unknown>} args
+ */
+async function callRpc(supabase, rpcName, args) {
+  const { data, error } = await supabase.rpc(rpcName, args);
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Classify a settled section result into safe status (no PII / raw DB text).
+ *
+ * @param {PromiseSettledResult<unknown>} settled
+ * @returns {{ ok: boolean, status: "ok"|"missing"|"timeout"|"error", code?: string|null }}
+ */
+export function classifySectionResult(settled) {
+  if (settled.status === "fulfilled") {
+    return { ok: true, status: "ok", code: null };
+  }
+  const err = settled.reason;
+  if (isMissingAggregateRpcError(err)) {
+    return { ok: false, status: "missing", code: "PGRST202" };
+  }
+  if (isAggregateTimeoutError(err)) {
+    return { ok: false, status: "timeout", code: "57014" };
+  }
+  const code =
+    err && typeof err === "object" && "code" in err && err.code != null
+      ? String(err.code)
+      : "QB_SECTION_ERROR";
+  return { ok: false, status: "error", code };
+}
+
+/**
  * @param {{
  *   getSupabase: () => import("@supabase/supabase-js").SupabaseClient,
  *   rpcName?: string,
+ *   preferSectionRpcs?: boolean,
  * }} deps
  */
 export function createQuickBooksIntelligenceAggregateRepository(deps) {
   if (!deps || typeof deps.getSupabase !== "function") {
     throw new Error("createQuickBooksIntelligenceAggregateRepository: getSupabase is required");
   }
-  const rpcName = deps.rpcName || QB_INTELLIGENCE_AGGREGATE_RPC;
+  const orchestratorRpc = deps.rpcName || QB_INTELLIGENCE_AGGREGATE_RPC;
+  const preferSectionRpcs = deps.preferSectionRpcs !== false;
+
+  /**
+   * Load via parallel section RPCs (Phase 4G.2).
+   *
+   * @param {string} organizationId
+   * @param {{ date_from: string, date_to: string, as_of: string, sort?: string }} period
+   * @param {number} topN
+   */
+  async function loadViaSectionRpcs(organizationId, period, topN) {
+    const supabase = deps.getSupabase();
+    const baseArgs = {
+      p_organization_id: organizationId,
+      p_date_from: period.date_from,
+      p_date_to: period.date_to,
+    };
+    const sort = period.sort ?? "risk_desc";
+    const asOf = period.as_of;
+
+    /** @type {Array<{ key: string, rpc: string, args: Record<string, unknown>, core: boolean }>} */
+    const jobs = [
+      {
+        key: "staging_counts",
+        rpc: QB_INTELLIGENCE_SECTION_RPCS.staging_counts,
+        args: { p_organization_id: organizationId },
+        core: false,
+      },
+      {
+        key: "invoice_summary",
+        rpc: QB_INTELLIGENCE_SECTION_RPCS.invoice_summary,
+        args: { ...baseArgs },
+        core: true,
+      },
+      {
+        key: "payment_summary",
+        rpc: QB_INTELLIGENCE_SECTION_RPCS.payment_summary,
+        args: { ...baseArgs },
+        core: true,
+      },
+      {
+        key: "estimate_summary",
+        rpc: QB_INTELLIGENCE_SECTION_RPCS.estimate_summary,
+        args: { ...baseArgs },
+        core: false,
+      },
+      {
+        key: "sales_order_summary",
+        rpc: QB_INTELLIGENCE_SECTION_RPCS.sales_order_summary,
+        args: { ...baseArgs },
+        core: false,
+      },
+      {
+        key: "ar_aging",
+        rpc: QB_INTELLIGENCE_SECTION_RPCS.ar_aging,
+        args: { p_organization_id: organizationId, p_as_of: asOf },
+        core: true,
+      },
+      {
+        key: "monthly_trend",
+        rpc: QB_INTELLIGENCE_SECTION_RPCS.monthly_trend,
+        args: { ...baseArgs },
+        core: false,
+      },
+      {
+        key: "top_customers",
+        rpc: QB_INTELLIGENCE_SECTION_RPCS.top_customers,
+        args: { ...baseArgs, p_sort: sort, p_top_n: topN },
+        core: false,
+      },
+      {
+        key: "top_open_ar",
+        rpc: QB_INTELLIGENCE_SECTION_RPCS.top_open_ar,
+        args: { p_organization_id: organizationId, p_top_n: topN },
+        core: false,
+      },
+      {
+        key: "top_payment_customers",
+        rpc: QB_INTELLIGENCE_SECTION_RPCS.top_payment_customers,
+        args: { ...baseArgs, p_sort: sort, p_top_n: topN },
+        core: false,
+      },
+      {
+        key: "top_estimate_leakage",
+        rpc: QB_INTELLIGENCE_SECTION_RPCS.top_estimate_leakage,
+        args: {
+          ...baseArgs,
+          p_as_of: asOf,
+          p_sort: sort,
+          p_top_n: topN,
+        },
+        core: false,
+      },
+    ];
+
+    const settled = await Promise.allSettled(
+      jobs.map((job) => callRpc(supabase, job.rpc, job.args)),
+    );
+
+    /** @type {Record<string, { ok: boolean, status: string, code?: string|null }>} */
+    const sectionStatus = {};
+    /** @type {string[]} */
+    const failedSections = [];
+    /** @type {string[]} */
+    const missingSections = [];
+    /** @type {string[]} */
+    const timedOutSections = [];
+    /** @type {Record<string, unknown>} */
+    const values = {};
+
+    for (let i = 0; i < jobs.length; i += 1) {
+      const job = jobs[i];
+      const result = classifySectionResult(settled[i]);
+      sectionStatus[job.key] = result;
+      if (result.ok) {
+        values[job.key] = /** @type {PromiseFulfilledResult<unknown>} */ (settled[i]).value;
+      } else {
+        failedSections.push(job.key);
+        if (result.status === "missing") missingSections.push(job.key);
+        if (result.status === "timeout") timedOutSections.push(job.key);
+      }
+    }
+
+    // If every section is missing, treat as v2 not installed → caller may try orchestrator.
+    if (missingSections.length === jobs.length) {
+      const err = sanitizeAggregateRepositoryError({
+        code: "PGRST202",
+        message: "Could not find the function",
+      });
+      err.failed_sections = failedSections;
+      throw err;
+    }
+
+    const coreFailed = QB_INTELLIGENCE_CORE_SECTIONS.filter((k) => !sectionStatus[k]?.ok);
+    if (coreFailed.length > 0) {
+      const coreTimedOut = coreFailed.some((k) => sectionStatus[k]?.status === "timeout");
+      const coreMissing = coreFailed.every((k) => sectionStatus[k]?.status === "missing");
+      if (coreMissing && missingSections.length === jobs.length) {
+        // unreachable — handled above
+      }
+      const err = sanitizeAggregateRepositoryError({
+        code: coreTimedOut ? "57014" : coreMissing ? "PGRST202" : "QB_AGGREGATE_ERROR",
+        message: coreTimedOut
+          ? "QuickBooks full aggregate timed out"
+          : coreMissing
+            ? "Could not find the function"
+            : "QuickBooks intelligence aggregate query failed",
+      });
+      err.failed_sections = coreFailed;
+      throw err;
+    }
+
+    return {
+      ok: true,
+      mode: "full_aggregate",
+      aggregate_version: "v2_sections",
+      is_sample_limited: false,
+      is_section_partial: failedSections.length > 0,
+      failed_sections: failedSections,
+      section_status: sectionStatus,
+      organization_id: organizationId,
+      as_of_date: asOf,
+      staging_row_counts: values.staging_counts ?? null,
+      invoice_summary: values.invoice_summary ?? null,
+      payment_summary_period: values.payment_summary ?? null,
+      estimate_summary: values.estimate_summary ?? null,
+      sales_order_summary: values.sales_order_summary ?? null,
+      ar_summary: values.ar_aging ?? null,
+      monthly_trend: values.monthly_trend ?? [],
+      top_lists: {
+        top_customers_by_revenue: values.top_customers ?? [],
+        top_open_ar_customers: values.top_open_ar ?? [],
+        top_payment_customers: values.top_payment_customers ?? [],
+        top_estimate_leakage: values.top_estimate_leakage ?? [],
+      },
+    };
+  }
+
+  /**
+   * @param {string} organizationId
+   * @param {{ date_from: string, date_to: string, as_of: string, sort?: string }} period
+   * @param {number} topN
+   */
+  async function loadViaOrchestrator(organizationId, period, topN) {
+    const supabase = deps.getSupabase();
+    const data = await callRpc(supabase, orchestratorRpc, {
+      p_organization_id: organizationId,
+      p_date_from: period.date_from,
+      p_date_to: period.date_to,
+      p_as_of: period.as_of,
+      p_sort: period.sort ?? "risk_desc",
+      p_top_n: topN,
+    });
+    if (!data || typeof data !== "object") {
+      throw sanitizeAggregateRepositoryError(new Error("empty aggregate payload"));
+    }
+    return {
+      ...data,
+      aggregate_version: data.aggregate_version ?? "orchestrator",
+      is_section_partial: false,
+      failed_sections: [],
+    };
+  }
 
   return {
     /**
@@ -333,25 +618,33 @@ export function createQuickBooksIntelligenceAggregateRepository(deps) {
         Math.max(1, Number.isFinite(topNRaw) ? Math.floor(topNRaw) : QB_INTELLIGENCE_AGGREGATE_TOP_N_DEFAULT),
       );
 
-      const supabase = deps.getSupabase();
-      const { data, error } = await supabase.rpc(rpcName, {
-        p_organization_id: organizationId,
-        p_date_from: period.date_from,
-        p_date_to: period.date_to,
-        p_as_of: period.as_of,
-        p_sort: period.sort ?? "risk_desc",
-        p_top_n: topN,
-      });
-
-      if (error) {
-        throw sanitizeAggregateRepositoryError(error);
+      if (preferSectionRpcs) {
+        try {
+          const assembled = await loadViaSectionRpcs(organizationId, period, topN);
+          assertNoRawPayload(assembled, "qb_intelligence_section_rpcs");
+          return assembled;
+        } catch (err) {
+          // Missing section RPCs → try orchestrator (v1 or v2 single RPC).
+          if (isMissingAggregateRpcError(err)) {
+            try {
+              const data = await loadViaOrchestrator(organizationId, period, topN);
+              assertNoRawPayload(data, "qb_intelligence_executive_aggregate_rpc");
+              return data;
+            } catch (orchErr) {
+              throw sanitizeAggregateRepositoryError(orchErr);
+            }
+          }
+          throw sanitizeAggregateRepositoryError(err);
+        }
       }
-      if (!data || typeof data !== "object") {
-        throw sanitizeAggregateRepositoryError(new Error("empty aggregate payload"));
-      }
 
-      assertNoRawPayload(data, "qb_intelligence_executive_aggregate_rpc");
-      return data;
+      try {
+        const data = await loadViaOrchestrator(organizationId, period, topN);
+        assertNoRawPayload(data, "qb_intelligence_executive_aggregate_rpc");
+        return data;
+      } catch (err) {
+        throw sanitizeAggregateRepositoryError(err);
+      }
     },
   };
 }

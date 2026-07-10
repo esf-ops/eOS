@@ -305,6 +305,20 @@ export function buildQuickBooksIntelligenceApiResponse(snapshot, requestMeta = {
     snapshot.load_meta?.aggregate_fallback_reason ??
     null;
 
+  const failedSections = Array.isArray(snapshot.failed_sections)
+    ? snapshot.failed_sections
+    : Array.isArray(snapshot.load_meta?.failed_sections)
+      ? snapshot.load_meta.failed_sections
+      : [];
+  const isSectionPartial =
+    snapshot.is_section_partial === true ||
+    snapshot.load_meta?.is_section_partial === true ||
+    failedSections.length > 0;
+  const sectionStatus =
+    snapshot.section_status ?? snapshot.load_meta?.section_status ?? null;
+  const aggregateVersion =
+    snapshot.aggregate_version ?? snapshot.load_meta?.aggregate_version ?? null;
+
   const diagnostics = {
     attempted_mode: attemptedMode,
     mode,
@@ -312,6 +326,10 @@ export function buildQuickBooksIntelligenceApiResponse(snapshot, requestMeta = {
     aggregate_available: aggregateAvailable,
     fallback_used: fallbackUsed,
     fallback_reason: fallbackReason,
+    aggregate_version: aggregateVersion,
+    is_section_partial: isSectionPartial,
+    failed_sections: failedSections,
+    section_status: sectionStatus,
   };
 
   const body = {
@@ -335,7 +353,7 @@ export function buildQuickBooksIntelligenceApiResponse(snapshot, requestMeta = {
       date_from: period?.date_from ?? null,
       date_to: period?.date_to ?? null,
       sort: period?.sort ?? null,
-      is_partial: Boolean(period?.is_partial ?? isSampleLimited),
+      is_partial: Boolean(period?.is_partial || isSampleLimited || isSectionPartial),
       is_sample_limited: isSampleLimited,
       ...diagnostics,
       aggregate_fallback_reason: fallbackReason,

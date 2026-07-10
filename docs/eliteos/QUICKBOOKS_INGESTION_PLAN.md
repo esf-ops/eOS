@@ -13,20 +13,21 @@ This mirrors the pattern already used for Moraware (`docs/eliteos/moraware-sync-
 
 `External system → local read-only extract → normalized staging → organization-scoped facts → heads`
 
-## Current Phase: Phase 4G — Full-period DB-side aggregates
+## Current Phase: Phase 4G.2 — Aggregate performance optimization
 
-**Latest delivered:** Phase 4G SQL RPC + backend preference for **full_aggregate**
-mode. The head defaults to `mode=auto` (try DB aggregates first). Sample preview
-remains as fallback when the RPC is not installed.
+**Latest delivered:** Phase 4G.2 denormalized `intel_*` columns + split section RPCs
+so full-period aggregate mode can finish without Postgres `57014` timeouts.
+Backend prefers **parallel section RPCs**, falls back to the orchestrator RPC, then
+to sample preview only when RPCs are missing.
 
-**Also in place:** Phase 1–3C staging; Phase 4A–4F facts/read/period UI.
+**Also in place:** Phase 1–3C staging; Phase 4A–4G facts/read/period UI + v1 RPC.
 
-**What does NOT exist yet (by design for 4G):**
+**What does NOT exist yet (by design for 4G.2):**
 
 - No AI summarization.
 - No browser access to `brain_quickbooks_*` / `raw_payload`.
 - No writeback to QuickBooks.
-- Migration is **not** auto-applied — must be run manually in Supabase SQL editor.
+- Migrations are **not** auto-applied — must be run manually in Supabase SQL editor.
 
 ## Phase 1 — Local Export Preview
 
@@ -803,6 +804,90 @@ staging tables.
 API metadata, head endpoint defaults to `mode=auto` without `max_rows`.
 
 **Tests:** `quickBooksIntelligenceAggregateRepository.test.mjs` + `qb:test`.
+
+### Phase 4G.2 — Aggregate performance optimization (implemented; migration manual)
+
+**Status:** Code + SQL migration ready. **Not applied live automatically.**
+
+**Problem:** Phase 4G v1 RPC `qb_intelligence_executive_aggregate` was installed and
+called correctly (`aggregate_attempted: true`, `fallback_used: false`) but timed out
+in production (`code: 57014`, `error: "QuickBooks full aggregate timed out"`).
+
+**Root cause:** v1 extracted `TotalAmount`, `BalanceRemaining`, `DueDate`,
+`IsFullyInvoiced`, and `LinkedTxn` from `raw_payload` JSON on every aggregate scan.
+That is correct functionally but too slow for the full staged org dataset.
+
+**v2 approach:**
+
+1. STORED generated `intel_*` columns on invoices/payments/estimates/sales_orders
+   (amounts, due date, linked flag, opaque sales-rep list id only — never names/memos).
+2. Indexes on org + txn date / open balance / unlinked estimates.
+3. Split into section RPCs; keep `qb_intelligence_executive_aggregate` as orchestrator.
+4. Backend calls **multiple smaller section RPCs in parallel** (each gets its own
+   statement-timeout budget), assembles the snapshot, and can return partial optional
+   sections without falling back to sample mode.
+
+**Migration file:**
+`backend-core/supabase/eliteos_quickbooks_intelligence_aggregates_v2.sql`
+
+**Manual Supabase SQL editor steps:**
+
+1. Open the eliteOS Supabase project → SQL editor.
+2. Paste the full contents of `eliteos_quickbooks_intelligence_aggregates_v2.sql`.
+3. Run once (helpers/RPCs are `CREATE OR REPLACE`; columns/indexes are guarded /
+   `IF NOT EXISTS`). Adding STORED generated columns rewrites the affected tables —
+   expect a one-time pause proportional to staging row count (~tens of thousands is fine).
+4. Do **not** use `CREATE INDEX CONCURRENTLY` inside the SQL editor transaction; this
+   migration uses non-concurrent `CREATE INDEX IF NOT EXISTS` for editor safety.
+5. Smoke-check (replace org uuid; safe counts/totals only — do not select `raw_payload`):
+
+```sql
+-- Confirm intel_* columns exist
+select column_name
+from information_schema.columns
+where table_schema = 'public'
+  and table_name = 'brain_quickbooks_invoices'
+  and column_name like 'intel_%'
+order by column_name;
+
+-- Section RPC smoke (should return quickly)
+select public.qb_intelligence_invoice_summary(
+  '<org-uuid>'::uuid, '2026-01-01'::date, current_date
+);
+select public.qb_intelligence_payment_summary(
+  '<org-uuid>'::uuid, '2026-01-01'::date, current_date
+);
+select public.qb_intelligence_ar_aging('<org-uuid>'::uuid, current_date);
+
+-- Orchestrator smoke
+select public.qb_intelligence_executive_aggregate(
+  '<org-uuid>'::uuid, '2026-01-01'::date, current_date, current_date, 'risk_desc', 10
+);
+```
+
+6. Redeploy **backend-core** (and the QuickBooks Intelligence head for partial-section UI).
+
+**API / backend behavior:**
+
+- Default `mode=auto`: try parallel section RPCs → if all section RPCs missing, try
+  orchestrator → if still missing, fall back to `sample_preview`.
+- Core sections required for `full_aggregate`: invoice summary, payment summary, AR aging.
+- Optional section failures → `full_aggregate` with `is_section_partial: true` and
+  safe `failed_sections` / `section_status` (no PII, no `raw_payload`).
+- Core section `57014` → **no sample fallback**; return full-aggregate timeout diagnostics.
+
+**UI:**
+
+- Full aggregate → full-period banner.
+- Partial optional sections → calm partial-data warning (still not sample mode).
+- Sample fallback banner only when `mode=sample_preview`.
+- Aggregate timeout → “Full-period aggregate timed out… needs optimization/indexing.”
+
+**Modules:** `quickBooksIntelligenceAggregateRepository.js` (section RPC assembly),
+service/API diagnostics, head partial banner.
+
+**Tests:** section RPC arg assertions, partial optional timeout, core 57014 no sample
+fallback, missing v2 → orchestrator → sample chain.
 
 ### Phase 5 — Scheduled Connector Upload with Scoped Token
 

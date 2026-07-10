@@ -223,8 +223,18 @@ export function QuickBooksIntelligenceView({
         </div>
       ) : null}
 
+      {model.isSectionPartial && !model.isSampleLimited ? (
+        <div className="qb-intel-banner qb-intel-banner-warn" data-testid="qb-intel-section-partial">
+          Some optional aggregate sections did not load. Core period totals are still shown.
+        </div>
+      ) : null}
+
       <div
-        className={`qb-intel-banner ${model.isSampleLimited ? "qb-intel-banner-info" : "qb-intel-banner-good"}`}
+        className={`qb-intel-banner ${
+          model.isSampleLimited || model.isSectionPartial
+            ? "qb-intel-banner-info"
+            : "qb-intel-banner-good"
+        }`}
         data-testid="qb-intel-mode-note"
         data-mode={model.mode}
       >

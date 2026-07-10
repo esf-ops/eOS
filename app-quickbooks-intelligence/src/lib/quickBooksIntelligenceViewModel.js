@@ -70,6 +70,10 @@ export const QB_INTEL_DEFAULT_MODE = "auto";
 export const QB_INTEL_FULL_AGGREGATE_NOTE =
   "Full-period aggregate — totals cover the selected date range across QuickBooks staging.";
 
+/** Visible note when some optional aggregate sections failed. */
+export const QB_INTEL_PARTIAL_SECTIONS_NOTE =
+  "Partial aggregate — core totals loaded, but some optional sections timed out or were unavailable.";
+
 /** Visible note for sample-limited fallback. */
 export const QB_INTEL_SAMPLE_PREVIEW_NOTE =
   "Sample-limited preview — aggregate RPC unavailable or forced sample mode. Totals are directional.";
@@ -332,13 +336,26 @@ export function buildIntelligenceViewModel(snapshot) {
     meta.is_sample_limited === true ||
     period.is_sample_limited === true ||
     mode === "sample_preview";
+  const failedSections = Array.isArray(snapshot.failed_sections)
+    ? snapshot.failed_sections
+    : Array.isArray(meta.failed_sections)
+      ? meta.failed_sections
+      : [];
+  const isSectionPartial =
+    !isSampleLimited &&
+    (snapshot.is_section_partial === true ||
+      meta.is_section_partial === true ||
+      failedSections.length > 0);
   const isPartial =
-    isSampleLimited &&
-    (Boolean(period.is_partial ?? meta.is_partial) ||
-      (maxRows != null && Number.isFinite(maxRows) && maxRows > 0));
+    (isSampleLimited &&
+      (Boolean(period.is_partial ?? meta.is_partial) ||
+        (maxRows != null && Number.isFinite(maxRows) && maxRows > 0))) ||
+    isSectionPartial;
   const modeNote =
     mode === "full_aggregate" && !isSampleLimited
-      ? QB_INTEL_FULL_AGGREGATE_NOTE
+      ? isSectionPartial
+        ? QB_INTEL_PARTIAL_SECTIONS_NOTE
+        : QB_INTEL_FULL_AGGREGATE_NOTE
       : QB_INTEL_SAMPLE_PREVIEW_NOTE;
 
   const dateFrom = period.date_from || meta.date_from || "—";
@@ -570,6 +587,8 @@ export function buildIntelligenceViewModel(snapshot) {
     mode,
     modeNote,
     isSampleLimited,
+    isSectionPartial,
+    failedSections,
     pageSize: meta.page_size == null ? "—" : formatCount(meta.page_size),
     maxRows: maxRows == null ? "full org" : formatCount(maxRows),
     isPartial,

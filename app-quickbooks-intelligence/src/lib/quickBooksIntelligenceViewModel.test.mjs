@@ -11,6 +11,7 @@ import {
   QB_INTEL_DEFAULT_PAGE_SIZE,
   QB_INTEL_ENDPOINT,
   QB_INTEL_FULL_AGGREGATE_NOTE,
+  QB_INTEL_PARTIAL_SECTIONS_NOTE,
   QB_INTEL_SAMPLE_PREVIEW_NOTE,
   assertSafeIntelligenceSnapshot,
   buildQuickBooksIntelligenceEndpoint,
@@ -337,6 +338,29 @@ describe("resolveIntelligenceViewState", () => {
     assert.match(html, /Sample-limited preview/);
     assert.match(html, new RegExp(QB_INTEL_SAMPLE_PREVIEW_NOTE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     assert.equal(html.includes("capped at 250"), false);
+  });
+
+  it("shows partial-section note for full_aggregate with failed optional sections", () => {
+    const snap = fakeSnapshot();
+    snap.mode = "full_aggregate";
+    snap.is_sample_limited = false;
+    snap.is_section_partial = true;
+    snap.failed_sections = ["monthly_trend"];
+    snap.metadata.is_sample_limited = false;
+    snap.metadata.is_section_partial = true;
+    snap.metadata.failed_sections = ["monthly_trend"];
+    const state = resolveIntelligenceViewState({
+      loading: false,
+      error: "",
+      statusCode: 200,
+      data: snap,
+    });
+    assert.equal(state.model.isSectionPartial, true);
+    assert.equal(state.model.isSampleLimited, false);
+    assert.equal(state.model.modeNote, QB_INTEL_PARTIAL_SECTIONS_NOTE);
+    const html = renderIntelligenceStateMarkup(state);
+    assert.match(html, /Partial aggregate/);
+    assert.equal(html.includes("raw_payload"), false);
   });
 
   it("rejects dirty snapshot during resolve", () => {
