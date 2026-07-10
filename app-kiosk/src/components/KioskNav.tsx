@@ -1,5 +1,6 @@
 import { KIOSK_SECTIONS, type KioskSection } from "../lib/kioskConfig";
 import type { KioskSectionId } from "../lib/kioskConfig";
+import { KioskCardMediaRotator } from "./KioskCardMediaRotator";
 
 type NavSectionId = Exclude<KioskSectionId, "home">;
 
@@ -7,27 +8,68 @@ interface KioskNavProps {
   onNavigate: (section: NavSectionId) => void;
 }
 
+// ── Asset lists ─────────────────────────────────────────────────────────────
+// All assets are static files copied into app-kiosk/public — no API calls.
+
 /**
- * Real stone texture thumbnails copied from app-visualizer/public into
- * app-kiosk/public/stone — displayed as an overlapping swatch strip in the
- * Elite 100 card. No API call; these are static local assets.
+ * Real stone texture thumbnails from app-visualizer/public/material-textures/elite100/thumb/
+ * Ordered light→dark→warm→cool for visual variety across the strip.
  */
 const STONE_SWATCHES = [
-  { src: "/stone/white-dove.jpg",                 label: "White Dove" },
-  { src: "/stone/carrara-royale.jpg",             label: "Carrara Royale" },
-  { src: "/stone/bianco-carrara.jpg",             label: "Bianco Carrara" },
-  { src: "/stone/classic-gray.jpg",               label: "Classic Gray" },
-  { src: "/stone/suede-brown-polished.jpg",       label: "Suede Brown" },
-  { src: "/stone/india-black-pearl-polished.jpg", label: "India Black Pearl" },
+  "/stone/white-dove.jpg",
+  "/stone/bianco-carrara.jpg",
+  "/stone/carrara-royale.jpg",
+  "/stone/classic-gray.jpg",
+  "/stone/suede-brown-polished.jpg",
+  "/stone/india-black-pearl-polished.jpg",
 ];
 
+/**
+ * "Installed" sink-in-countertop photos from app-slab-inventory public product-catalog sinks.
+ * These show real products in context - no prices, IDs, or counts.
+ */
+const CATALOG_IMAGES = [
+  "/catalog/sink-a.jpg",
+  "/catalog/sink-b.jpg",
+  "/catalog/sink-c.jpg",
+  "/catalog/sink-d.jpg",
+];
+
+/**
+ * Elite 100 stone thumbnails reused as slab/remnant stand-ins.
+ * Ordered for dramatic contrast: black → gray → beige → white → warm.
+ * No inventory counts, slab IDs, pricing, or internal metadata exposed.
+ */
+const SLAB_IMAGES = [
+  "/stone/india-black-pearl-polished.jpg",
+  "/stone/classic-gray.jpg",
+  "/stone/antique-gray.jpg",
+  "/stone/bayshore-sand.jpg",
+  "/stone/sicilia.jpg",
+  "/stone/silver-pearl-polished.jpg",
+  "/stone/carrara-classic.jpg",
+  "/stone/white-dove.jpg",
+];
+
+/**
+ * Kitchen demo-room photos from app-visualizer/public/demo-rooms/
+ * Public-safe: they ship with the visualizer app already.
+ */
+const ROOM_IMAGES = [
+  "/rooms/classic-kitchen.jpg",
+  "/rooms/modern-kitchen.jpg",
+];
+
+// ── Card artwork ─────────────────────────────────────────────────────────────
+
+/** Static stone swatch strip for Elite 100 card — no cycling needed. */
 function StoneSwatchStrip() {
   return (
     <div className="kiosk-card-art kiosk-card-art--stone" aria-hidden>
-      {STONE_SWATCHES.map((s) => (
+      {STONE_SWATCHES.map((src) => (
         <img
-          key={s.src}
-          src={s.src}
+          key={src}
+          src={src}
           alt=""
           className="kiosk-stone-swatch"
           loading="eager"
@@ -42,38 +84,49 @@ function CardArt({ accent }: { accent: KioskSection["accent"] }) {
   if (accent === "stone") {
     return <StoneSwatchStrip />;
   }
+
   if (accent === "catalog") {
     return (
-      <div className="kiosk-card-art kiosk-card-art--catalog" aria-hidden>
-        <svg viewBox="0 0 120 80" fill="none" preserveAspectRatio="xMidYMid meet">
-          <rect x="14" y="40" width="44" height="26" rx="8" stroke="currentColor" strokeWidth="2.4" />
-          <path d="M22 40c0-9 6-15 14-15s14 6 14 15" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
-          <path d="M78 20v26" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
-          <path d="M78 20c9 0 16 5 16 12h-16" stroke="currentColor" strokeWidth="2.4" strokeLinejoin="round" />
-          <rect x="72" y="56" width="12" height="10" rx="2" stroke="currentColor" strokeWidth="2.4" />
-        </svg>
+      <div className="kiosk-card-art kiosk-card-art--photo kiosk-card-art--catalog" aria-hidden>
+        <KioskCardMediaRotator
+          images={CATALOG_IMAGES}
+          intervalMs={5000}
+          objectPosition="center 40%"
+          label="Sink and faucet preview"
+        />
       </div>
     );
   }
+
   if (accent === "inventory") {
     return (
-      <div className="kiosk-card-art kiosk-card-art--inventory" aria-hidden>
-        <span className="slab slab-1" />
-        <span className="slab slab-2" />
-        <span className="slab slab-3" />
+      <div className="kiosk-card-art kiosk-card-art--photo kiosk-card-art--inventory" aria-hidden>
+        <KioskCardMediaRotator
+          images={SLAB_IMAGES}
+          intervalMs={4000}
+          objectPosition="center"
+          label="Stone slab preview"
+        />
       </div>
     );
   }
+
+  // "visualizer"
   return (
-    <div className="kiosk-card-art kiosk-card-art--visualizer" aria-hidden>
-      <svg viewBox="0 0 120 80" fill="none" preserveAspectRatio="xMidYMid meet">
-        <rect x="16" y="16" width="88" height="48" rx="10" stroke="currentColor" strokeWidth="2.4" />
-        <path d="M16 50l22-18 18 14 14-12 34 24" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-        <circle cx="46" cy="32" r="6" stroke="currentColor" strokeWidth="2.4" />
-      </svg>
+    <div className="kiosk-card-art kiosk-card-art--photo kiosk-card-art--visualizer" aria-hidden>
+      <KioskCardMediaRotator
+        images={ROOM_IMAGES}
+        intervalMs={6000}
+        objectPosition="center 55%"
+        label="Kitchen room preview"
+      />
+      {/* Small "Visualize" accent badge */}
+      <span className="kiosk-card-art-badge" aria-hidden>Visualize</span>
     </div>
   );
 }
+
+// ── Nav grid ─────────────────────────────────────────────────────────────────
 
 export function KioskNav({ onNavigate }: KioskNavProps) {
   return (

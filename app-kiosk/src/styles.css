@@ -501,37 +501,84 @@ body {
   border-right: none;
 }
 
-.kiosk-card-art--catalog,
-.kiosk-card-art--visualizer {
-  display: grid;
-  place-items: center;
-  color: var(--elite-red-dark);
-  background: linear-gradient(150deg, #ffffff, var(--stone-100));
+/* Photo-based card art — shared base for catalog / inventory / visualizer */
+.kiosk-card-art--photo {
+  position: relative;
+  overflow: hidden;
+  background: #1a1c20; /* dark fallback while images load */
 }
 
-.kiosk-card-art--catalog svg,
-.kiosk-card-art--visualizer svg {
-  width: 62%;
-  height: 62%;
-  opacity: 0.85;
+/* Rotator images: stacked, crossfade via opacity */
+.kiosk-rotator-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 0.8s ease;
+  pointer-events: none; /* touch/click passes through to card button */
+  will-change: opacity;
 }
 
-.kiosk-card-art--inventory {
-  display: flex;
-  align-items: flex-end;
-  gap: 10px;
-  padding: 14px 18px;
-  background: linear-gradient(150deg, #ffffff, var(--stone-100));
+.kiosk-rotator-img--active {
+  opacity: 1;
 }
 
-.kiosk-card-art--inventory .slab {
-  flex: 1;
-  border-radius: 6px 6px 3px 3px;
-  box-shadow: inset 0 0 0 1px rgba(20, 24, 33, 0.08);
+/* Gradient veil: bottom-up fade so card label text is always legible */
+.kiosk-rotator-veil {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to top,
+    rgba(10, 10, 12, 0.52) 0%,
+    rgba(10, 10, 12, 0.12) 55%,
+    transparent 100%
+  );
+  pointer-events: none;
 }
-.kiosk-card-art--inventory .slab-1 { height: 70%; background: linear-gradient(180deg, #efece7, #cfc8bd); }
-.kiosk-card-art--inventory .slab-2 { height: 92%; background: linear-gradient(180deg, #d7dade, #9aa0a6); }
-.kiosk-card-art--inventory .slab-3 { height: 58%; background: linear-gradient(180deg, #e7d8c4, #c2a982); }
+
+/* "Visualize" accent badge on visualizer card */
+.kiosk-card-art-badge {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  padding: 4px 10px;
+  border-radius: 100px;
+  background: var(--elite-red);
+  color: #fff;
+  font-size: clamp(0.68rem, 0.75vw, 0.82rem);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  pointer-events: none;
+  box-shadow: 0 4px 14px rgba(185, 28, 28, 0.42);
+}
+
+/* Per-section tint layers for brand identity on top of photos */
+.kiosk-card-art--catalog::after,
+.kiosk-card-art--inventory::after,
+.kiosk-card-art--visualizer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.kiosk-card-art--catalog::after {
+  /* Very subtle warm overlay keeps catalog photos on-brand */
+  background: rgba(176, 131, 65, 0.06);
+}
+
+.kiosk-card-art--inventory::after {
+  /* Neutral — let the stone speak */
+  background: rgba(20, 24, 33, 0.04);
+}
+
+.kiosk-card-art--visualizer::after {
+  /* Very subtle red tint nods to the brand */
+  background: rgba(185, 28, 28, 0.05);
+}
 
 /* ── Footer utility row ───────────────────────────────────────────────── */
 .kiosk-footer {
@@ -1091,4 +1138,7 @@ body {
   /* Keep slideshow visible even when transitions are disabled */
   .kiosk-slide { opacity: 1; transform: none; transition: none !important; }
   .kiosk-slide-dot { transition: none !important; }
+  /* Rotator: show first image instantly, disable crossfade animation */
+  .kiosk-rotator-img { transition: none !important; }
+  .kiosk-rotator-img--active { opacity: 1; }
 }
