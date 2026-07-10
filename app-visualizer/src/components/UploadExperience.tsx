@@ -37,14 +37,19 @@ export function UploadExperience({
         <p className="viz-hero-sub">{HERO_SUPPORTING}</p>
       </div>
 
+      {/* Accept a broad image/* set so iOS shows the full photo library.
+          HEIC/HEIF files selected here are decoded and normalized to JPEG by
+          imageNormalize.ts before any upload — the backend only ever sees JPEG. */}
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/jpeg,image/png,image/webp"
+        accept="image/*,image/heic,image/heif"
         className="sr-only"
         onChange={(e) => {
           const file = e.target.files?.[0];
           if (file) onFileSelected(file);
+          // Reset value so re-selecting the same file still fires onChange.
+          e.target.value = "";
         }}
       />
 
@@ -75,7 +80,7 @@ export function UploadExperience({
         <p className="viz-dropzone-title">Upload a kitchen photo</p>
         <p className="viz-dropzone-sub">Choose from your camera roll or files</p>
         <span className="viz-btn viz-btn-primary viz-dropzone-cta">Choose photo</span>
-        <p className="viz-dropzone-note">JPG or PNG · up to {maxUploadMb} MB</p>
+        <p className="viz-dropzone-note">JPG, PNG, or any photo · up to {maxUploadMb} MB</p>
         <p className="viz-dropzone-hint-desktop">or drag and drop</p>
       </div>
 

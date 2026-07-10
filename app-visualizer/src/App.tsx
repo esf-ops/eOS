@@ -14,13 +14,13 @@ import {
   type PublicVisualizerConfig,
 } from "./lib/api";
 import { VISUALIZER_DISCLAIMER } from "./lib/config";
+import { normalizeRoomImage } from "./lib/imageNormalize";
 import { buildLocalTextureCatalog, mergeApiTextures, type VisualizerTexture } from "./lib/textureCatalog";
 import { DEMO_ROOMS } from "./lib/samples";
 
 type WizardStep = 1 | 2 | 3;
 
 const MAX_UPLOAD_MB_DEFAULT = 10;
-const ACCEPTED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 function friendlyError(err: unknown, maxUploadMb: number): string {
   if (err instanceof VisualizerApiError) {
@@ -28,6 +28,13 @@ function friendlyError(err: unknown, maxUploadMb: number): string {
     if (err.status === 429) return String(err.message);
     if (err.status === 503) return String(err.message);
     if (err.status === 504) return "Preview timed out. Please try again.";
+    // 502 typically means the provider returned no image (e.g. text-only response).
+    if (err.status === 502) {
+      return (
+        "We couldn't generate an image preview from that photo. " +
+        "Please try another photo with the surface clearly visible."
+      );
+    }
     return String(err.message);
   }
   return err instanceof Error ? err.message : "Something went wrong. Please try again.";
@@ -91,27 +98,37 @@ export function App() {
     return () => URL.revokeObjectURL(url);
   }, [roomFile]);
 
-  function validateRoomFile(file: File): string | null {
-    const mime = file.type.toLowerCase();
-    if (mime && !ACCEPTED_TYPES.has(mime) && !mime.startsWith("image/")) {
-      return "Please use a JPG or PNG photo.";
-    }
-    if (file.size > maxUploadMb * 1024 * 1024) {
-      return `Photo is too large. Maximum size is ${maxUploadMb} MB.`;
-    }
-    return null;
-  }
-
-  function acceptRoomFile(file: File) {
-    const validationError = validateRoomFile(file);
-    if (validationError) {
-      setError(validationError);
-      return;
-    }
+  // Shared normalizing entry point for camera capture, gallery upload, drag-drop,
+  // and demo rooms. Decodes the file on a canvas, resizes to ≤ 1800 px, and
+  // re-exports as JPEG — stripping EXIF and normalising colour space before any
+  // validation or upload happens. Both paths (camera + file picker) funnel here
+  // so there is no divergence.
+  async function acceptRoomFile(file: File) {
     setError(null);
     setRenderedImage(null);
     setMaterialName(null);
-    setRoomFile(file);
+
+    let normalized: File;
+    try {
+      const result = await normalizeRoomImage(file);
+      normalized = result.file;
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "We couldn't read that image. Please try another photo or take a new picture.",
+      );
+      return;
+    }
+
+    // Size check against the normalized file (should always be safe after
+    // normalization, but guard anyway to give a clear message if somehow large).
+    if (normalized.size > maxUploadMb * 1024 * 1024) {
+      setError(`Photo is too large after processing. Maximum size is ${maxUploadMb} MB.`);
+      return;
+    }
+
+    setRoomFile(normalized);
     setWizardStep(2);
   }
 
@@ -121,7 +138,9 @@ export function App() {
       const res = await fetch(room.imageUrl);
       if (!res.ok) throw new Error("Failed to load demo room");
       const blob = await res.blob();
-      acceptRoomFile(new File([blob], `${room.id}.jpg`, { type: blob.type || "image/jpeg" }));
+      // Demo rooms are already small JPEGs from our CDN — normalizeRoomImage
+      // handles them the same way as any other file (no-op resize if ≤ 1800 px).
+      await acceptRoomFile(new File([blob], `${room.id}.jpg`, { type: blob.type || "image/jpeg" }));
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to load demo room");
     }
