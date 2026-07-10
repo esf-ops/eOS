@@ -13,16 +13,15 @@ This mirrors the pattern already used for Moraware (`docs/eliteos/moraware-sync-
 
 `External system → local read-only extract → normalized staging → organization-scoped facts → heads`
 
-## Current Phase: Phase 4G.3 — Incremental intel_* migration + chunked backfill
+## Current Phase: Phase 4G.4 — Backfill progress markers + amount extraction
 
-**Latest delivered:** Phase 4G.3 replaces the heavy v2 one-shot migration with nullable
-`intel_*` columns, chunked backfill RPCs, and section RPCs that never read
-`raw_payload` on executive aggregate paths. Backend calls **section RPCs only**
-(no slow orchestrator fallback).
+**Latest delivered:** Phase 4G.4 fixes stuck invoice backfill by processing rows via
+`intel_backfilled_at` markers (not nullable amount fields) and broadening invoice
+total amount extraction (`TotalAmount` → `Subtotal` → `Amount`).
 
-**Also in place:** Phase 1–3C staging; Phase 4A–4G facts/read/period UI.
+**Also in place:** Phase 1–3C staging; Phase 4A–4G.3 facts/section RPCs/backfill.
 
-**What does NOT exist yet (by design for 4G.3):**
+**What does NOT exist yet (by design for 4G.4):**
 
 - No AI summarization.
 - No browser access to `brain_quickbooks_*` / `raw_payload`.
@@ -981,6 +980,62 @@ Call the executive API with `mode=auto` and confirm response includes:
 **Modules:** `eliteos_quickbooks_intelligence_aggregates_v3.sql`,
 `quickBooksIntelligenceAggregateRepository.js`,
 `backfillQuickBooksIntelligence.mjs`.
+
+### Phase 4G.4 — Backfill progress markers + invoice amount extraction (manual)
+
+**Status:** Code + SQL migration ready. **Not applied live automatically.**
+
+**Problem:** v3 invoice backfill reprocessed the same chunk forever:
+
+- `updated=100 remaining=45900` every round → `QB_BACKFILL_MAX_ROUNDS`
+- Supabase showed `txn_date`/`due_date`/`open_amount`/`customer` filled for 100 rows
+  but `total_amount_filled=0`
+
+**Root cause:** eligibility used `intel_total_amount IS NULL`. When TotalAmount
+extraction failed, rows stayed eligible and were selected again by `ORDER BY id`.
+
+**v4 fix:**
+
+1. Add `intel_backfilled_at` + `intel_backfill_version` markers.
+2. Select/update only `intel_backfilled_at IS NULL`; always set the marker.
+3. Broader total extraction: `TotalAmount` → `Subtotal` → `Amount` → `AppliedAmount`
+   (plus `$` / comma tolerant money parsing).
+4. Backfill CLI stops early on no-progress (`QB_BACKFILL_NO_PROGRESS`) and points at v4.
+
+**Migration file:**
+`backend-core/supabase/eliteos_quickbooks_intelligence_aggregates_v4_backfill_progress.sql`
+
+**Manual steps:**
+
+1. Apply v4 SQL in Supabase SQL editor (paste full file → run once).
+2. Smoke extraction (safe literals only):
+
+```sql
+select public.qb_intel_extract_total_amount('{"TotalAmount":"12.34"}'::jsonb);
+select public.qb_intel_extract_total_amount('{"Subtotal":{"#text":"9.50"}}'::jsonb);
+select public.qb_intel_extract_total_amount('{"Amount":"$1,000.00"}'::jsonb);
+```
+
+3. Re-run backfill:
+
+```bash
+QB_IMPORT_ORGANIZATION_ID=<org-uuid> \
+SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
+npm run qb:backfill:intelligence
+```
+
+4. Confirm progress (remaining must drop; markers set even if some amounts stay null):
+
+```sql
+select
+  count(*) filter (where intel_backfilled_at is null) as remaining,
+  count(*) filter (where intel_total_amount is not null) as total_amount_filled,
+  count(*) filter (where intel_backfilled_at is not null) as marked
+from public.brain_quickbooks_invoices;
+```
+
+**Note:** Rows are processed by **marker**, not by non-null intel amount fields.
+A row with null `intel_total_amount` is still marked processed and will not loop.
 
 ### Phase 5 — Scheduled Connector Upload with Scoped Token
 
