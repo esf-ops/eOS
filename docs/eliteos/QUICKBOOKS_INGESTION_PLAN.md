@@ -13,9 +13,26 @@ This mirrors the pattern already used for Moraware (`docs/eliteos/moraware-sync-
 
 `External system → local read-only extract → normalized staging → organization-scoped facts → heads`
 
-## Current Phase: Phase 1 — Local Export Preview Only
+## Current Phase: Phase 4A — Intelligence Read Layer (post-staging import)
 
-**What exists today:**
+**Latest delivered:** Phase 4A backend-core read models + deterministic insights over
+org-scoped staging facts (no UI, no AI, no writeback). See **Phase 4A** below.
+
+**Also in place:** Phase 1 local export preview; Phase 2 staging schema draft;
+Phase 2B dry-run; Phase 3A–3C staging import (orchestrator + fake/Supabase repos + CLI).
+
+**What does NOT exist yet (by design for 4A):**
+
+- No HTTP routes exposing QuickBooks intelligence yet.
+- No Admin / frontend UI for QuickBooks AR or revenue.
+- No AI summarization over QuickBooks facts.
+- No browser access to `brain_quickbooks_*` or `raw_payload`.
+- No writeback to QuickBooks.
+- No Supabase credentials on the Windows VM.
+
+## Phase 1 — Local Export Preview
+
+**What exists:**
 
 - `quickbooks-sdk-connector/` (C#, `.NET 4.8`, late-bound COM) runs on the Windows
   Server VM that has QuickBooks Desktop SDK access. It performs **read-only** QBXML
@@ -29,17 +46,6 @@ This mirrors the pattern already used for Moraware (`docs/eliteos/moraware-sync-
   emails, phone numbers, amounts, or memo text are read into the summary output.
 - `backend-core/src/scripts/previewQuickBooksExport.mjs` is a local CLI that prints
   that summary for a given export folder path.
-
-**What does NOT exist yet (by design):**
-
-- No Supabase writes of any kind from the QuickBooks pipeline.
-- No staging tables, migrations, or Brain schema for QuickBooks data.
-- No backend-core HTTP import endpoint for QuickBooks data.
-- No admin review UI for QuickBooks data.
-- No scheduled/automatic upload from the Windows VM to Supabase.
-- No service-role Supabase keys, and no Supabase credentials of any kind, on the
-  Windows VM.
-- No writeback to QuickBooks (the connector and this pipeline are read-only, full stop).
 
 **Running the Phase 1 preview:**
 
@@ -511,12 +517,52 @@ Wire the orchestrator + Supabase repository behind a protected internal route
 (`POST /api/internal/quickbooks-sync/import`, shared-secret header, same pattern as
 `POST /api/internal/moraware-sync/import`) for scheduled/remote imports.
 
-### Phase 4 — Admin Review UI
+### Phase 4A — QuickBooks Intelligence Read Layer (backend-core)
+
+**Status:** Implemented as pure backend-core modules. No frontend UI. No AI. No
+QuickBooks writeback. No browser access to `brain_quickbooks_*` staging tables.
+
+**Why:** Staging import stores financial amounts and relationship details inside
+`raw_payload`. Heads must never query those tables directly. backend-core owns all
+reads: extract typed facts server-side, aggregate safely, emit opaque-ID insights.
+
+**Current-row rule:** Prefer **organization-wide current rows**, not a single
+`sync_run_id`. Staging unique keys already keep one row per natural key
+(`organization_id` + `qb_list_id` / `qb_txn_id` / invoice-line key). Idempotent
+reruns rewrite `sync_run_id` on upserted rows; filtering to “latest run only”
+would drop entities not touched in that run and is unsafe while a second import
+may still be in flight. Readers load by `organization_id` and treat `sync_run_id`
+as provenance only.
+
+**Modules (backend-core/src/quickbooks/):**
+
+| Module | Role |
+|--------|------|
+| `quickBooksIntelligenceFacts.js` | Extract typed facts from staging rows (amounts/dates/opaque IDs from named columns + `raw_payload`). Never returns `raw_payload`, names, addresses, memos, or RefNumber. |
+| `quickBooksIntelligenceDataset.js` | Org-scope + natural-key dedupe → sanitized fact dataset. In-memory source for tests / future DI. No Supabase client in this phase. |
+| `quickBooksIntelligenceRead.js` | Deterministic aggregates: customer revenue, invoice aging/AR, payment history, estimate/SO/invoice flow, sales-rep summary, customer activity trend. |
+| `quickBooksIntelligenceInsights.js` | Deterministic insights: overdue AR risks, slow-paying customers, high-value customers, dormant customers, estimate-to-invoice leakage, unpaid invoice risk. |
+| `quickBooksIntelligence.test.mjs` | Fake sentinel data only; asserts no `raw_payload` / sentinel PII leakage. |
+
+**Consumer contract:**
+
+- Outputs identify customers/txns/reps by `qb_list_id` / `qb_txn_id` only.
+- Aggregate totals and aging buckets may include amounts (typed numbers) for
+  internal intelligence — never dump staging `raw_payload` to API clients.
+- Wire future HTTP routes through backend-core only (service role / server auth);
+  never grant `anon`/`authenticated` SELECT on staging tables.
+
+**Out of scope for 4A:** Supabase read repository, HTTP routes, Admin UI, AI
+summaries, prepared-facts tables, connector changes, schema changes.
+
+**Tests:** `npm run qb:test` includes `quickBooksIntelligence.test.mjs`.
+
+### Phase 4B — Admin Review UI (future)
 
 System Admin (or a dedicated QuickBooks Admin panel) surfaces sync health, per-entity
 row counts, data-quality findings, and recent errors — read-only, admin-gated, no raw
-financial data dumped to the browser beyond what's already visible in QuickBooks
-Admin's own UI conventions (see Moraware Admin v1 for the UX precedent).
+`raw_payload` dumped to the browser. Intelligence read models from Phase 4A are the
+intended source for AR/revenue summaries (not direct staging queries).
 
 ### Phase 5 — Scheduled Connector Upload with Scoped Token
 
