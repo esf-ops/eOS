@@ -128,52 +128,73 @@ export const QB_STAGING_UNIQUE_KEYS = Object.freeze({
 // date/timestamp columns are convenience/index columns, not the source of truth.
 
 /**
- * Safe QB boolean — QB SDK serializes booleans as "true"/"false" strings.
- * Returns a JavaScript boolean, or null if the input is absent/unrecognized.
+ * Unwrap a QuickBooks scalar element. The connector serializes every scalar QBXML
+ * element as an object `{ "@elementName": "<Tag>", "#text": "<value>" }`, so a field
+ * like `ListID` arrives as `{ "@elementName": "ListID", "#text": "80000001-..." }`
+ * rather than a bare string. This returns the inner `#text` value for that shape and
+ * passes bare scalars (already-unwrapped strings/numbers/booleans) through unchanged.
+ *
+ * @param {unknown} value
+ * @returns {unknown}
+ */
+export function unwrapQbScalar(value) {
+  if (value && typeof value === "object" && !Array.isArray(value) && "#text" in value) {
+    return value["#text"];
+  }
+  return value;
+}
+
+/**
+ * Safe QB boolean — QB SDK serializes booleans as "true"/"false" strings (possibly
+ * wrapped as a `#text` scalar). Returns a JS boolean, or null if absent/unrecognized.
  *
  * @param {unknown} value
  * @returns {boolean|null}
  */
 export function parseQbBoolean(value) {
-  if (typeof value === "boolean") return value;
-  if (value === "true") return true;
-  if (value === "false") return false;
+  const v = unwrapQbScalar(value);
+  if (typeof v === "boolean") return v;
+  if (v === "true") return true;
+  if (v === "false") return false;
   return null;
 }
 
 /**
- * Safe QB date — QB SDK serializes dates as "YYYY-MM-DD".
+ * Safe QB date — QB SDK serializes dates as "YYYY-MM-DD" (possibly `#text`-wrapped).
  * Returns the string unchanged if it matches; null otherwise. Never throws.
  *
  * @param {unknown} value
  * @returns {string|null}
  */
 export function parseQbDate(value) {
-  if (!value || typeof value !== "string") return null;
-  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
+  const v = unwrapQbScalar(value);
+  if (!v || typeof v !== "string") return null;
+  return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null;
 }
 
 /**
- * Safe QB timestamp — QB SDK serializes timestamps as ISO 8601 strings.
- * Accepts "YYYY-MM-DDTHH:MM:SS" with optional offset/Z suffix.
+ * Safe QB timestamp — QB SDK serializes timestamps as ISO 8601 strings (possibly
+ * `#text`-wrapped). Accepts "YYYY-MM-DDTHH:MM:SS" with optional offset/Z suffix.
  * Returns the string unchanged if it looks valid; null otherwise. Never throws.
  *
  * @param {unknown} value
  * @returns {string|null}
  */
 export function parseQbTimestamp(value) {
-  if (!value || typeof value !== "string") return null;
-  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value) ? value : null;
+  const v = unwrapQbScalar(value);
+  if (!v || typeof v !== "string") return null;
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(v) ? v : null;
 }
 
 /**
- * Safe QB string ID — accepts only non-empty strings.
+ * Safe QB string ID — unwraps a `#text` scalar, then accepts only non-empty strings.
  *
  * @param {unknown} value
  * @returns {string|null}
  */
 function parseQbId(value) {
-  return typeof value === "string" && value.trim().length > 0 ? value : null;
+  const v = unwrapQbScalar(value);
+  return typeof v === "string" && v.trim().length > 0 ? v : null;
 }
 
 // ── Field extractors ───────────────────────────────────────────────────────
@@ -294,7 +315,7 @@ export function extractInvoiceLineFields(line, parentTxnId, parentTxnDate, lineI
     line_seq_number: lineIndex,
     txn_date:        parseQbDate(parentTxnDate),
     qb_item_list_id: parseQbId(line.ItemRef?.ListID),
-    line_type:       parseQbId(line._lineType) ?? null,
+    line_type:       parseQbId(line._lineType) ?? parseQbId(line["@elementName"]) ?? null,
   };
 }
 
@@ -358,13 +379,17 @@ export function buildStagingRow(entityFolderName, record, ctx = {}) {
 
   if (kind === "list") {
     const opts = {};
+    // The connector tags each record's QBXML element name in "@elementName"
+    // (e.g. "ItemInventoryRet", "DateDrivenTermsRet"); prefer an explicit synthetic
+    // override when present, else derive the discriminator from "@elementName".
+    const elementName = parseQbId(record["@elementName"]);
     if (entityFolderName === "terms") {
-      // Distinguish StandardTermsRet vs DateDrivenTermsRet via a _termType field
-      // the connector is expected to add during normalization, or fall back to "standard".
-      opts.termType = parseQbId(record._termType) ?? "standard";
+      opts.termType =
+        parseQbId(record._termType) ??
+        (elementName === "DateDrivenTermsRet" ? "date-driven" : "standard");
     }
     if (entityFolderName === "items") {
-      opts.itemType = parseQbId(record._itemType) ?? null;
+      opts.itemType = parseQbId(record._itemType) ?? elementName ?? null;
     }
     if (entityFolderName === "accounts") {
       opts.accountType = parseQbId(record.AccountType) ?? null;
@@ -440,6 +465,90 @@ export function buildStagingBatch(entityFolderName, records, ctx) {
   }
 
   return { rows, tableName, failures };
+}
+
+/**
+ * Normalize a QBXML repeating element to an array. The connector serializes a repeating
+ * child as an array when there are 2+, as a single object when there is exactly 1, and
+ * omits it entirely when there are 0. Returns [] for null/undefined.
+ *
+ * @param {unknown} value
+ * @returns {unknown[]}
+ */
+function normalizeToArray(value) {
+  if (value == null) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+/**
+ * Collect a parent invoice's nested line elements in document order. Includes both
+ * `InvoiceLineRet` and `InvoiceLineGroupRet` (group lines appended after plain lines).
+ *
+ * @param {object} invoiceRecord
+ * @returns {unknown[]}
+ */
+function collectInvoiceLineElements(invoiceRecord) {
+  return [
+    ...normalizeToArray(invoiceRecord.InvoiceLineRet),
+    ...normalizeToArray(invoiceRecord.InvoiceLineGroupRet),
+  ];
+}
+
+/**
+ * Derive invoice-line staging rows from a single invoice record's nested line elements.
+ *
+ * This is the authoritative source of invoice lines: the standalone `invoice-lines` export
+ * folder is a lossy flattening that drops parent linkage and ordering, whereas each invoice
+ * record's nested `InvoiceLineRet` carries both. `line_seq_number` is assigned from the
+ * 0-BASED position of the line within the parent invoice's combined line list — stable for a
+ * given export, so re-imports match on the (organization_id, qb_txn_id, line_seq_number) key.
+ *
+ * Fails closed (whole-invoice failure) when organizationId or the parent TxnID is missing.
+ * Individual malformed line elements are isolated as per-line failures. Never logs record
+ * content. raw_payload holds the original line element only (no injected parent fields).
+ *
+ * @param {object} invoiceRecord - A single normalized InvoiceRet record.
+ * @param {StagingContext} ctx
+ * @returns {{ rows: object[], failures: Array<{ index: number, reason: string }>, parentTxnId: string|null }}
+ */
+export function buildInvoiceLineRowsFromInvoiceRecord(invoiceRecord, ctx = {}) {
+  const { organizationId, syncRunId } = ctx;
+  const rows = [];
+  const failures = [];
+
+  if (typeof organizationId !== "string" || organizationId.trim().length === 0) {
+    return { rows, failures: [{ index: -1, reason: "organizationId is required" }], parentTxnId: null };
+  }
+
+  if (!invoiceRecord || typeof invoiceRecord !== "object" || Array.isArray(invoiceRecord)) {
+    return { rows, failures: [{ index: -1, reason: "invoice record is not a plain object" }], parentTxnId: null };
+  }
+
+  const parentTxnId = parseQbId(invoiceRecord.TxnID);
+  if (!parentTxnId) {
+    return { rows, failures: [{ index: -1, reason: "parent invoice TxnID is missing or empty" }], parentTxnId: null };
+  }
+
+  const parentTxnDate = invoiceRecord.TxnDate ?? null;
+  const lineElements = collectInvoiceLineElements(invoiceRecord);
+
+  for (let i = 0; i < lineElements.length; i++) {
+    const extracted = extractInvoiceLineFields(lineElements[i], parentTxnId, parentTxnDate, i);
+    if (!extracted.valid) {
+      failures.push({ index: i, reason: extracted.reason });
+      continue;
+    }
+    const { valid: _valid, ...lineFields } = extracted;
+    rows.push({
+      organization_id: organizationId,
+      sync_run_id:     syncRunId ?? null,
+      source_system:   "quickbooks",
+      raw_payload:     lineElements[i],
+      ...lineFields,
+    });
+  }
+
+  return { rows, failures, parentTxnId };
 }
 
 // ── Upsert configuration ───────────────────────────────────────────────────

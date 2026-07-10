@@ -415,6 +415,46 @@ const KNOWN_RECORDS_KEYS = Object.freeze(["records", "Records"]);
 const IGNORED_ARRAY_KEYS = new Set(["errors", "Errors", "warnings", "Warnings", "attempts", "Attempts"]);
 
 /**
+ * Extract the materialized records ARRAY from a QuickBooks batch JSON payload.
+ *
+ * Unlike `extractRecordCountFromBatchJson` (Phase 1, counts only), this returns the
+ * actual record objects so the Phase 2B staging dry-run can build staging rows from
+ * them. It only succeeds for *materialized* object/array shapes — top-level array,
+ * `{ records: [...] }`, `{ Records: [...] }`, or a single obvious array property.
+ * String-wrapped / C# anonymous-object / XML payloads (the not-ingest-ready shapes)
+ * return `ok: false` with an empty array, because the dry-run gates those out before
+ * ever building rows.
+ *
+ * Callers must never log or print the returned records — they may contain PII.
+ *
+ * @param {unknown} data
+ * @returns {{ ok: boolean, records: unknown[], shape: string }}
+ */
+export function extractRecordsFromBatchJson(data) {
+  if (Array.isArray(data)) {
+    return { ok: true, records: data, shape: "top-level-array" };
+  }
+
+  if (data && typeof data === "object") {
+    for (const key of KNOWN_RECORDS_KEYS) {
+      if (Array.isArray(data[key])) {
+        return { ok: true, records: data[key], shape: `object.${key}` };
+      }
+    }
+
+    const arrayProps = Object.entries(data).filter(
+      ([key, value]) => Array.isArray(value) && !IGNORED_ARRAY_KEYS.has(key)
+    );
+    if (arrayProps.length === 1) {
+      const [key, value] = arrayProps[0];
+      return { ok: true, records: value, shape: `object.${key} (fallback)` };
+    }
+  }
+
+  return { ok: false, records: [], shape: "unmaterialized-or-unknown" };
+}
+
+/**
  * Extract a record count from a QuickBooks batch JSON payload, tolerating the
  * connector's known shapes plus a best-effort fallback for unrecognized ones.
  * Never returns or logs the underlying record values.

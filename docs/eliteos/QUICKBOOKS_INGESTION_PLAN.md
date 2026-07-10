@@ -220,6 +220,56 @@ backend-core service-role code.
 # order by tablename;
 ```
 
+## Phase 2B — Local Staging Import Dry Run (implemented; no writes)
+
+`backend-core/src/scripts/dryRunQuickBooksStagingImport.mjs` (script `qb:staging:dry-run`)
+reads a materialized export, reuses the Phase 1 reader/summary for validation, then builds
+Phase 2 staging rows **in memory** to prove the export would import cleanly. It performs
+**no** Supabase writes, imports **no** Supabase client, makes **no** network calls, reads
+**no** service-role env vars, and prints **only** safe counts/metadata (never records or
+`raw_payload`).
+
+```bash
+npm run qb:staging:dry-run -- /path/to/export-folder
+```
+
+**Invoice lines are derived from invoices, not from the standalone folder.** The connector's
+standalone `invoice-lines` folder is a lossy flattening whose records carry no parent invoice
+`TxnID` and no line sequence, so they cannot form the idempotent key
+`(organization_id, qb_txn_id, line_seq_number)`. Instead, the dry-run derives invoice-line
+rows from each invoice record's nested `InvoiceLineRet`
+(`buildInvoiceLineRowsFromInvoiceRecord`), where the parent `TxnID` is present and the
+**0-based array position** of each line within its invoice provides a stable
+`line_seq_number`. The standalone `invoice-lines` folder is kept only as an informational
+count cross-check.
+
+**Fail-closed gates (DRY RUN FAIL before building rows):** manifest invalid;
+`selfReportedOnlyFileCount > 0`; `unreadableFileCount > 0`; `unrecognizedShapeFileCount > 0`;
+or a manifest-backed entity's record count ≠ its discovered count. The standalone
+`invoice-lines` folder is fully exempt from block gates (it is a cross-check, not a source),
+and its absence/mismatch never blocks the run — a count mismatch versus the derived total
+raises a **warning + data-quality finding** only. After building, **any** per-record build
+failure fails the run, including a derived invoice line that fails closed (missing parent
+`TxnID`). Exit code `0` = PASS, `1` = FAIL.
+
+**Record-shape note:** the connector serializes each scalar QBXML element as
+`{ "@elementName": "<Tag>", "#text": "<value>" }`. The staging builder unwraps `#text`
+(`unwrapQbScalar`) and derives `item_type` / `term_type` / `line_type` from `@elementName`
+when no synthetic discriminator is present. Without this unwrap the staging mapping would
+not match real exports.
+
+**Dry-run result against the validated `quickbooks-20260710/full-materialized` archive:**
+
+- 13 primary entities build cleanly — **263,461 staging rows, exactly matching the manifest
+  record count** — with 0 failures.
+- `invoice-lines` **derived from invoices**: **356,969 rows, 0 failures**, and the standalone
+  `invoice-lines` folder count (356,969) **matches** the derived total exactly (cross-check).
+- Total rows that would be upserted: **620,430**, 0 failures, 0 data-quality findings.
+- Overall result: **DRY RUN PASS**.
+
+The export is staging-ready. Migration remains draft-only; apply it only after Phase 3
+(import endpoint) is built and a full round-trip has run on fake data.
+
 ## Future Phases
 
 ### Phase 3 — backend-core Import Endpoint

@@ -11,6 +11,7 @@
 import assert from "node:assert/strict";
 
 import {
+  buildInvoiceLineRowsFromInvoiceRecord,
   buildStagingBatch,
   buildStagingRow,
   classifyQbEntityKind,
@@ -26,6 +27,7 @@ import {
   QB_STAGING_UNIQUE_KEYS,
   QB_TXN_ENTITY_FOLDERS,
   STAGING_TABLE_BY_FOLDER,
+  unwrapQbScalar,
 } from "./quickBooksStaging.js";
 
 // ── Fake QB record factories ───────────────────────────────────────────────
@@ -68,6 +70,90 @@ function fakeInvoiceLineRecord(overrides = {}) {
 const FAKE_ORG_ID   = "00000000-0000-0000-0000-000000000001";
 const FAKE_RUN_ID   = "00000000-0000-0000-0000-000000000002";
 const FAKE_CTX      = { organizationId: FAKE_ORG_ID, syncRunId: FAKE_RUN_ID };
+
+// ── unwrapQbScalar: connector wraps scalars as { "@elementName", "#text" } ────
+
+assert.equal(unwrapQbScalar({ "@elementName": "ListID", "#text": "FAKE-1" }), "FAKE-1", "unwraps #text");
+assert.equal(unwrapQbScalar("bare"), "bare", "passes bare string through");
+assert.equal(unwrapQbScalar(true), true, "passes bare boolean through");
+assert.equal(unwrapQbScalar(null), null, "passes null through");
+assert.deepEqual(unwrapQbScalar({ ListID: "x" }), { ListID: "x" }, "non-#text object passes through unchanged");
+console.log("ok: unwrapQbScalar unwraps #text scalars and passes bare values through");
+
+// ── Parsers unwrap #text-wrapped scalars (real connector shape) ──────────────
+{
+  assert.equal(parseQbBoolean({ "@elementName": "IsActive", "#text": "true" }), true);
+  assert.equal(parseQbDate({ "@elementName": "TxnDate", "#text": "2026-01-15" }), "2026-01-15");
+  assert.equal(parseQbTimestamp({ "@elementName": "TimeModified", "#text": "2026-01-15T00:00:00" }), "2026-01-15T00:00:00");
+  console.log("ok: parseQbBoolean/parseQbDate/parseQbTimestamp unwrap #text scalars");
+}
+
+// ── extractListEntityFields builds from the real #text-wrapped record shape ───
+{
+  const wrappedCustomer = {
+    "@elementName": "CustomerRet",
+    ListID: { "@elementName": "ListID", "#text": "FAKE-WRAP-1" },
+    EditSequence: { "@elementName": "EditSequence", "#text": "5" },
+    TimeCreated: { "@elementName": "TimeCreated", "#text": "2020-01-01T00:00:00" },
+    TimeModified: { "@elementName": "TimeModified", "#text": "2026-01-01T00:00:00" },
+    IsActive: { "@elementName": "IsActive", "#text": "true" },
+    FullName: { "@elementName": "FullName", "#text": "DO NOT EXTRACT" },
+  };
+  const result = extractListEntityFields(wrappedCustomer);
+  assert.ok(result.valid, `wrapped record should build: ${result.reason}`);
+  assert.equal(result.qb_list_id, "FAKE-WRAP-1");
+  assert.equal(result.qb_edit_sequence, "5");
+  assert.equal(result.time_modified, "2026-01-01T00:00:00");
+  assert.equal(result.is_active, true);
+  assert.doesNotMatch(JSON.stringify(result), /DO NOT EXTRACT/);
+  console.log("ok: extractListEntityFields builds correctly from #text-wrapped scalars, no PII leak");
+}
+
+// ── @elementName drives item_type / term_type when no synthetic override ──────
+{
+  const wrappedItem = {
+    "@elementName": "ItemInventoryRet",
+    ListID: { "@elementName": "ListID", "#text": "FAKE-ITEM-W1" },
+  };
+  const itemResult = buildStagingRow("items", wrappedItem, FAKE_CTX);
+  assert.ok(itemResult.ok, `items build failed: ${itemResult.reason}`);
+  assert.equal(itemResult.row.item_type, "ItemInventoryRet", "item_type derived from @elementName");
+
+  const wrappedTerm = {
+    "@elementName": "DateDrivenTermsRet",
+    ListID: { "@elementName": "ListID", "#text": "FAKE-TERM-W1" },
+  };
+  const termResult = buildStagingRow("terms", wrappedTerm, FAKE_CTX);
+  assert.ok(termResult.ok, `terms build failed: ${termResult.reason}`);
+  assert.equal(termResult.row.term_type, "date-driven", "term_type derived from @elementName");
+
+  const wrappedStdTerm = {
+    "@elementName": "StandardTermsRet",
+    ListID: { "@elementName": "ListID", "#text": "FAKE-TERM-W2" },
+  };
+  assert.equal(buildStagingRow("terms", wrappedStdTerm, FAKE_CTX).row.term_type, "standard");
+  console.log("ok: item_type/term_type derive from @elementName when no synthetic override");
+}
+
+// ── Transaction record with #text-wrapped scalars + nested ref ───────────────
+{
+  const wrappedInvoice = {
+    "@elementName": "InvoiceRet",
+    TxnID: { "@elementName": "TxnID", "#text": "FAKE-TXN-W1" },
+    EditSequence: { "@elementName": "EditSequence", "#text": "7" },
+    TxnDate: { "@elementName": "TxnDate", "#text": "2026-01-15" },
+    TimeModified: { "@elementName": "TimeModified", "#text": "2026-06-01T00:00:00" },
+    CustomerRef: { ListID: { "@elementName": "ListID", "#text": "FAKE-CUST-W1" }, FullName: { "@elementName": "FullName", "#text": "DO NOT EXTRACT" } },
+  };
+  const result = buildStagingRow("invoices", wrappedInvoice, FAKE_CTX);
+  assert.ok(result.ok, `invoice build failed: ${result.reason}`);
+  assert.equal(result.row.qb_txn_id, "FAKE-TXN-W1");
+  assert.equal(result.row.txn_date, "2026-01-15");
+  assert.equal(result.row.qb_customer_list_id, "FAKE-CUST-W1", "customer ref ListID unwrapped from nested #text");
+  const { raw_payload, ...named } = result.row;
+  assert.doesNotMatch(JSON.stringify(named), /DO NOT EXTRACT/);
+  console.log("ok: transaction record with #text scalars + nested ref builds, no PII in named columns");
+}
 
 // ── parseQbBoolean ─────────────────────────────────────────────────────────
 
@@ -526,6 +612,78 @@ console.log("ok: all QB_LIST_ENTITY_FOLDERS map to 'list'; all QB_TXN_ENTITY_FOL
   assert.ok(result.ok);
   assert.equal(result.row.account_type, "Income");
   console.log("ok: buildStagingRow sets account_type from AccountType for accounts entity");
+}
+
+// ── buildInvoiceLineRowsFromInvoiceRecord: derive lines from an invoice record ─
+
+{
+  // Invoice with a nested InvoiceLineRet ARRAY -> one staging row per line, 0-based seq.
+  const invoice = {
+    "@elementName": "InvoiceRet",
+    TxnID: { "@elementName": "TxnID", "#text": "FAKE-INV-A" },
+    TxnDate: { "@elementName": "TxnDate", "#text": "2026-01-15" },
+    InvoiceLineRet: [
+      { "@elementName": "InvoiceLineRet", TxnLineID: { "@elementName": "TxnLineID", "#text": "L1" }, ItemRef: { ListID: { "@elementName": "ListID", "#text": "FAKE-ITEM-1" } }, Amount: { "#text": "DO NOT EXTRACT" } },
+      { "@elementName": "InvoiceLineRet", TxnLineID: { "@elementName": "TxnLineID", "#text": "L2" }, ItemRef: { ListID: { "@elementName": "ListID", "#text": "FAKE-ITEM-2" } } },
+    ],
+  };
+  const { rows, failures, parentTxnId } = buildInvoiceLineRowsFromInvoiceRecord(invoice, FAKE_CTX);
+  assert.equal(failures.length, 0);
+  assert.equal(parentTxnId, "FAKE-INV-A");
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].qb_txn_id, "FAKE-INV-A");
+  assert.equal(rows[0].line_seq_number, 0, "first line is 0-based seq 0");
+  assert.equal(rows[1].line_seq_number, 1, "second line is seq 1");
+  assert.equal(rows[0].qb_txn_line_id, "L1");
+  assert.equal(rows[0].txn_date, "2026-01-15", "line inherits parent TxnDate");
+  assert.equal(rows[0].qb_item_list_id, "FAKE-ITEM-1");
+  // raw_payload is the line element; named columns carry no PII.
+  const { raw_payload, ...named } = rows[0];
+  assert.doesNotMatch(JSON.stringify(named), /DO NOT EXTRACT/);
+  console.log("ok: buildInvoiceLineRowsFromInvoiceRecord derives rows from a nested line ARRAY (0-based seq)");
+}
+
+{
+  // Invoice with a SINGLE InvoiceLineRet object -> exactly one line row.
+  const invoice = {
+    TxnID: { "@elementName": "TxnID", "#text": "FAKE-INV-B" },
+    TxnDate: { "@elementName": "TxnDate", "#text": "2026-02-01" },
+    InvoiceLineRet: { "@elementName": "InvoiceLineRet", TxnLineID: { "@elementName": "TxnLineID", "#text": "L9" }, ItemRef: { ListID: { "@elementName": "ListID", "#text": "FAKE-ITEM-9" } } },
+  };
+  const { rows, failures } = buildInvoiceLineRowsFromInvoiceRecord(invoice, FAKE_CTX);
+  assert.equal(failures.length, 0);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].line_seq_number, 0);
+  assert.equal(rows[0].qb_txn_line_id, "L9");
+  console.log("ok: buildInvoiceLineRowsFromInvoiceRecord handles a single InvoiceLineRet object");
+}
+
+{
+  // Invoice with no lines -> zero rows, zero failures (not an error).
+  const invoice = { TxnID: { "@elementName": "TxnID", "#text": "FAKE-INV-C" } };
+  const { rows, failures } = buildInvoiceLineRowsFromInvoiceRecord(invoice, FAKE_CTX);
+  assert.equal(rows.length, 0);
+  assert.equal(failures.length, 0);
+  console.log("ok: buildInvoiceLineRowsFromInvoiceRecord returns no rows for an invoice with no lines");
+}
+
+{
+  // Missing parent TxnID -> whole-invoice failure, no throw, no rows.
+  const invoice = { InvoiceLineRet: [{ ItemRef: { ListID: "x" } }] };
+  const { rows, failures } = buildInvoiceLineRowsFromInvoiceRecord(invoice, FAKE_CTX);
+  assert.equal(rows.length, 0);
+  assert.equal(failures.length, 1);
+  assert.match(failures[0].reason, /parent invoice TxnID/);
+  console.log("ok: buildInvoiceLineRowsFromInvoiceRecord fails closed on missing parent TxnID");
+}
+
+{
+  // Missing organizationId -> fail closed.
+  const invoice = { TxnID: "FAKE-INV-D", InvoiceLineRet: [{}] };
+  const { failures } = buildInvoiceLineRowsFromInvoiceRecord(invoice, { organizationId: "" });
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0].reason, "organizationId is required");
+  console.log("ok: buildInvoiceLineRowsFromInvoiceRecord fails closed on missing organizationId");
 }
 
 // ── Idempotency: same record input produces identical staging row ───────────
