@@ -10,6 +10,7 @@
  */
 
 import { assertNoRawPayload } from "./quickBooksIntelligenceFacts.js";
+import { createQuickBooksIntelligenceAggregateRepository } from "./quickBooksIntelligenceAggregateRepository.js";
 import { createQuickBooksIntelligenceSupabaseRepository } from "./quickBooksIntelligenceSupabaseRepository.js";
 import { loadExecutiveIntelligenceSnapshot } from "./quickBooksIntelligenceService.js";
 import { resolveIntelligencePeriod } from "./quickBooksIntelligencePeriod.js";
@@ -126,6 +127,16 @@ export function parseIntelligenceQuery(query = {}, now = new Date()) {
     now,
   );
 
+  const modeRaw = String(query.mode ?? "auto").trim().toLowerCase();
+  const mode =
+    modeRaw === "full_aggregate" || modeRaw === "sample_preview" ? modeRaw : "auto";
+
+  // Sample bounds only matter for sample_preview / aggregate fallback.
+  const forceSample =
+    mode === "sample_preview" ||
+    query.force_sample === "1" ||
+    query.force_sample === "true";
+
   return {
     asOfDate: period.as_of,
     pageSize,
@@ -138,6 +149,8 @@ export function parseIntelligenceQuery(query = {}, now = new Date()) {
     dateTo: period.date_to,
     sort: period.sort,
     period,
+    mode: forceSample ? "sample_preview" : mode,
+    preferAggregate: !forceSample && mode !== "sample_preview",
   };
 }
 
@@ -196,19 +209,29 @@ export function buildQuickBooksIntelligenceApiResponse(snapshot, requestMeta = {
     null;
   const maxRows = requestMeta.maxRows ?? null;
   const period = snapshot.period ?? requestMeta.period ?? null;
+  const mode =
+    snapshot.mode ??
+    snapshot.load_meta?.mode ??
+    (snapshot.is_sample_limited === false ? "full_aggregate" : "sample_preview");
+  const isSampleLimited =
+    snapshot.is_sample_limited === true ||
+    mode === "sample_preview" ||
+    Boolean(period?.is_sample_limited);
 
   const body = {
     ok: true,
     organization_id: snapshot.organization_id,
     generated_at: snapshot.generated_at,
     as_of_date: snapshot.as_of_date,
+    mode,
+    is_sample_limited: isSampleLimited,
     period,
     metadata: {
       organization_id: snapshot.organization_id,
       generated_at: snapshot.generated_at,
       as_of_date: snapshot.as_of_date,
-      page_size: pageSize,
-      max_rows: maxRows,
+      page_size: isSampleLimited ? pageSize : null,
+      max_rows: isSampleLimited ? maxRows : null,
       include_invoice_lines: Boolean(snapshot.load_meta?.include_invoice_lines),
       staging_row_counts: snapshot.load_meta?.staging_row_counts ?? null,
       insight_list_count: Array.isArray(snapshot.insight_list) ? snapshot.insight_list.length : 0,
@@ -216,7 +239,10 @@ export function buildQuickBooksIntelligenceApiResponse(snapshot, requestMeta = {
       date_from: period?.date_from ?? null,
       date_to: period?.date_to ?? null,
       sort: period?.sort ?? null,
-      is_partial: Boolean(period?.is_partial ?? (maxRows != null && maxRows > 0)),
+      is_partial: Boolean(period?.is_partial ?? isSampleLimited),
+      is_sample_limited: isSampleLimited,
+      mode,
+      aggregate_fallback_reason: snapshot.load_meta?.aggregate_fallback_reason ?? null,
     },
     invoice_summary: snapshot.invoice_summary ?? null,
     payment_summary_period: snapshot.payment_summary_period ?? null,
@@ -276,10 +302,17 @@ export function createQuickBooksIntelligenceHandlers(deps) {
         }
 
         const parsed = parseIntelligenceQuery(req.query ?? {});
-        const repository = createRepository({
+        const stagingRepo = createRepository({
           getSupabase: deps.getSupabase,
           pageSize: parsed.pageSize,
         });
+        const aggregateRepo = createQuickBooksIntelligenceAggregateRepository({
+          getSupabase: deps.getSupabase,
+        });
+        const repository = {
+          loadOrgCurrentDataset: stagingRepo.loadOrgCurrentDataset.bind(stagingRepo),
+          loadExecutiveAggregate: aggregateRepo.loadExecutiveAggregate.bind(aggregateRepo),
+        };
 
         const snapshot = await loadSnapshot(repository, organizationId, {
           asOfDate: parsed.asOfDate,
@@ -292,11 +325,14 @@ export function createQuickBooksIntelligenceHandlers(deps) {
           dateFrom: parsed.dateFrom,
           dateTo: parsed.dateTo,
           sort: parsed.sort,
+          mode: parsed.mode,
+          preferAggregate: parsed.preferAggregate,
+          getSupabase: deps.getSupabase,
         });
 
         const body = buildQuickBooksIntelligenceApiResponse(snapshot, {
-          maxRows: parsed.maxRows,
-          pageSize: parsed.pageSize,
+          maxRows: snapshot.is_sample_limited ? parsed.maxRows : null,
+          pageSize: snapshot.is_sample_limited ? parsed.pageSize : null,
           period: snapshot.period ?? parsed.period,
         });
 

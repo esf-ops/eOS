@@ -1,14 +1,19 @@
 /**
- * quickBooksIntelligenceService — Phase 4B/4F executive intelligence snapshot.
+ * quickBooksIntelligenceService — Phase 4B/4F/4G executive intelligence snapshot.
  *
- * Loads org-scoped staging facts via an injected intelligence repository
- * and builds Phase 4F date-scoped aggregates (+ backward-compatible keys).
+ * Prefers Phase 4G DB-side aggregates (full_aggregate). Falls back to Phase 4F
+ * sample-limited in-memory aggregates when the RPC is missing.
  *
  * Never returns raw_payload. No AI. No QuickBooks writeback. Backend-only.
  */
 
 import { assertNoRawPayload } from "./quickBooksIntelligenceFacts.js";
 import { flattenInsightList } from "./quickBooksIntelligenceInsights.js";
+import {
+  createQuickBooksIntelligenceAggregateRepository,
+  isMissingAggregateRpcError,
+  shapeFullAggregateSnapshot,
+} from "./quickBooksIntelligenceAggregateRepository.js";
 import { buildPeriodScopedIntelligence } from "./quickBooksIntelligencePeriodAggregates.js";
 import { resolveIntelligencePeriod } from "./quickBooksIntelligencePeriod.js";
 import { buildSalesRepSummary } from "./quickBooksIntelligenceRead.js";
@@ -16,10 +21,21 @@ import { buildSalesRepSummary } from "./quickBooksIntelligenceRead.js";
 export { flattenInsightList };
 
 /**
+ * @param {unknown} err
+ * @returns {boolean}
+ */
+function shouldFallbackToSample(err) {
+  if (!err || typeof err !== "object") return false;
+  if (/** @type {{ missingRpc?: boolean }} */ (err).missingRpc) return true;
+  return isMissingAggregateRpcError(err);
+}
+
+/**
  * Build an executive intelligence snapshot for one organization.
  *
  * @param {{
- *   loadOrgCurrentDataset: (organizationId: string, opts?: object) => Promise<object>,
+ *   loadOrgCurrentDataset?: (organizationId: string, opts?: object) => Promise<object>,
+ *   loadExecutiveAggregate?: (organizationId: string, period: object, opts?: object) => Promise<object>,
  * }} repository
  * @param {string} organizationId
  * @param {{
@@ -35,11 +51,14 @@ export { flattenInsightList };
  *   dateTo?: string|null,
  *   sort?: string|null,
  *   now?: Date,
+ *   mode?: "auto"|"full_aggregate"|"sample_preview",
+ *   preferAggregate?: boolean,
+ *   getSupabase?: () => import("@supabase/supabase-js").SupabaseClient,
  * }} [opts]
  */
 export async function loadExecutiveIntelligenceSnapshot(repository, organizationId, opts = {}) {
-  if (!repository || typeof repository.loadOrgCurrentDataset !== "function") {
-    throw new Error("loadExecutiveIntelligenceSnapshot: repository.loadOrgCurrentDataset is required");
+  if (!repository || typeof repository !== "object") {
+    throw new Error("loadExecutiveIntelligenceSnapshot: repository is required");
   }
   if (typeof organizationId !== "string" || !organizationId.trim()) {
     throw new Error("organizationId is required");
@@ -56,6 +75,41 @@ export async function loadExecutiveIntelligenceSnapshot(repository, organization
     },
     opts.now instanceof Date ? opts.now : new Date(),
   );
+
+  const modeRaw = String(opts.mode ?? "auto").trim().toLowerCase();
+  const mode =
+    modeRaw === "full_aggregate" || modeRaw === "sample_preview" ? modeRaw : "auto";
+  const preferAggregate = opts.preferAggregate !== false && mode !== "sample_preview";
+
+  let aggregateLoader = null;
+  if (typeof repository.loadExecutiveAggregate === "function") {
+    aggregateLoader = repository.loadExecutiveAggregate.bind(repository);
+  } else if (preferAggregate && typeof opts.getSupabase === "function") {
+    const aggRepo = createQuickBooksIntelligenceAggregateRepository({
+      getSupabase: opts.getSupabase,
+    });
+    aggregateLoader = aggRepo.loadExecutiveAggregate.bind(aggRepo);
+  }
+
+  if (preferAggregate && aggregateLoader) {
+    try {
+      const aggregate = await aggregateLoader(organizationId, period, { topN: 10 });
+      const snapshot = shapeFullAggregateSnapshot(aggregate, period, organizationId);
+      assertNoRawPayload(snapshot, "executive_intelligence_snapshot");
+      return snapshot;
+    } catch (err) {
+      if (mode === "full_aggregate" || !shouldFallbackToSample(err)) {
+        throw err;
+      }
+      // Fall through to sample preview.
+    }
+  }
+
+  if (typeof repository.loadOrgCurrentDataset !== "function") {
+    throw new Error(
+      "loadExecutiveIntelligenceSnapshot: sample fallback requires repository.loadOrgCurrentDataset",
+    );
+  }
 
   const datasetWithMeta = await repository.loadOrgCurrentDataset(organizationId, {
     asOfDate: period.as_of,
@@ -97,12 +151,23 @@ export async function loadExecutiveIntelligenceSnapshot(repository, organization
     organization_id: organizationId,
     as_of_date: period.as_of,
     generated_at: new Date().toISOString(),
+    mode: "sample_preview",
+    is_sample_limited: true,
     load_meta: {
       ...(loadMeta ?? {}),
+      mode: "sample_preview",
+      is_sample_limited: true,
       invoice_line_fact_count: Array.isArray(invoiceLines) ? invoiceLines.length : 0,
-      period: periodScoped.period,
+      period: {
+        ...periodScoped.period,
+        is_sample_limited: true,
+      },
+      aggregate_fallback_reason: "aggregate_rpc_unavailable_or_disabled",
     },
-    period: periodScoped.period,
+    period: {
+      ...periodScoped.period,
+      is_sample_limited: true,
+    },
     invoice_summary: periodScoped.invoice_summary,
     payment_summary_period: periodScoped.payment_summary_period,
     estimate_summary: periodScoped.estimate_summary,
@@ -110,7 +175,6 @@ export async function loadExecutiveIntelligenceSnapshot(repository, organization
     monthly_trend: periodScoped.monthly_trend,
     top_lists: periodScoped.top_lists,
     insight_groups: periodScoped.insight_groups,
-    // Backward-compatible Phase 4D keys (now period-scoped).
     ar_summary: periodScoped.ar_summary,
     revenue_summary: periodScoped.revenue_summary,
     payment_summary: periodScoped.payment_summary,
@@ -128,9 +192,10 @@ export async function loadExecutiveIntelligenceSnapshot(repository, organization
 /**
  * Convenience factory: repository + snapshot helper bound together.
  *
- * @param {ReturnType<import("./quickBooksIntelligenceSupabaseRepository.js").createQuickBooksIntelligenceSupabaseRepository>} repository
+ * @param {object} repository
+ * @param {{ getSupabase?: () => import("@supabase/supabase-js").SupabaseClient }} [deps]
  */
-export function createQuickBooksIntelligenceService(repository) {
+export function createQuickBooksIntelligenceService(repository, deps = {}) {
   return {
     repository,
     /**
@@ -138,7 +203,10 @@ export function createQuickBooksIntelligenceService(repository) {
      * @param {object} [opts]
      */
     loadExecutiveSnapshot(organizationId, opts = {}) {
-      return loadExecutiveIntelligenceSnapshot(repository, organizationId, opts);
+      return loadExecutiveIntelligenceSnapshot(repository, organizationId, {
+        ...opts,
+        getSupabase: opts.getSupabase ?? deps.getSupabase,
+      });
     },
   };
 }

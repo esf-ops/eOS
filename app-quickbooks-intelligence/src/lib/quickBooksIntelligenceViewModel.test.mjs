@@ -10,7 +10,8 @@ import {
   QB_INTEL_DEFAULT_MAX_ROWS,
   QB_INTEL_DEFAULT_PAGE_SIZE,
   QB_INTEL_ENDPOINT,
-  QB_INTEL_PREVIEW_NOTE,
+  QB_INTEL_FULL_AGGREGATE_NOTE,
+  QB_INTEL_SAMPLE_PREVIEW_NOTE,
   assertSafeIntelligenceSnapshot,
   buildQuickBooksIntelligenceEndpoint,
   findForbiddenKeys,
@@ -31,12 +32,15 @@ function fakeSnapshot(overrides = {}) {
       organization_id: ORG,
       generated_at: "2026-07-10T19:00:00.000Z",
       as_of_date: "2026-07-10",
-      page_size: 500,
+      page_size: null,
       max_rows: null,
       preset: "ytd",
       date_from: "2026-01-01",
       date_to: "2026-07-10",
       sort: "risk_desc",
+      is_partial: false,
+      is_sample_limited: false,
+      mode: "full_aggregate",
       include_invoice_lines: false,
       staging_row_counts: {
         customers: 2,
@@ -57,7 +61,10 @@ function fakeSnapshot(overrides = {}) {
       sort: "risk_desc",
       year: 2026,
       is_partial: false,
+      is_sample_limited: false,
     },
+    mode: "full_aggregate",
+    is_sample_limited: false,
     invoice_summary: {
       invoice_count: 3,
       billed_total: 6800,
@@ -191,12 +198,19 @@ describe("quickBooksIntelligenceViewModel safety", () => {
   it("builds bounded executive endpoint by default", () => {
     const path = buildQuickBooksIntelligenceEndpoint();
     assert.ok(path.startsWith(`${QB_INTEL_ENDPOINT}?`));
-    assert.match(path, new RegExp(`max_rows=${QB_INTEL_DEFAULT_MAX_ROWS}`));
-    assert.match(path, new RegExp(`page_size=${QB_INTEL_DEFAULT_PAGE_SIZE}`));
     assert.match(path, /preset=ytd/);
     assert.match(path, /sort=risk_desc/);
+    assert.match(path, /mode=auto/);
+    assert.equal(path.includes("max_rows="), false);
     assert.equal(QB_INTEL_DEFAULT_MAX_ROWS, 250);
     assert.equal(QB_INTEL_DEFAULT_PAGE_SIZE, 100);
+  });
+
+  it("includes sample bounds only when forcing sample preview", () => {
+    const path = buildQuickBooksIntelligenceEndpoint({ mode: "sample_preview" });
+    assert.match(path, /mode=sample_preview/);
+    assert.match(path, new RegExp(`max_rows=${QB_INTEL_DEFAULT_MAX_ROWS}`));
+    assert.match(path, new RegExp(`page_size=${QB_INTEL_DEFAULT_PAGE_SIZE}`));
   });
 
   it("accepts a clean fake snapshot", () => {
@@ -278,10 +292,11 @@ describe("resolveIntelligenceViewState", () => {
     assert.match(html, /generated_at=/);
     assert.match(html, /period=/);
     assert.match(html, /YTD/);
+    assert.match(html, /mode=full_aggregate/);
     assert.match(html, /max_rows=full org/);
-    assert.match(html, /page_size=500/);
     assert.match(html, /sample_limited=no/);
-    assert.match(html, new RegExp(QB_INTEL_PREVIEW_NOTE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(html, new RegExp(QB_INTEL_FULL_AGGREGATE_NOTE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.equal(html.includes("capped at 250"), false);
     assert.equal(html.includes("raw_payload"), false);
     assert.equal((html.match(/estimate_to_invoice_leakage/g) || []).length <= 5, true);
     assert.equal(html.includes("SENTINEL"), false);
@@ -291,7 +306,12 @@ describe("resolveIntelligenceViewState", () => {
 
   it("partial state when max_rows is set", () => {
     const snap = fakeSnapshot();
+    snap.mode = "sample_preview";
+    snap.is_sample_limited = true;
     snap.metadata.max_rows = 50;
+    snap.metadata.is_sample_limited = true;
+    snap.period.is_sample_limited = true;
+    snap.period.is_partial = true;
     const state = resolveIntelligenceViewState({
       loading: false,
       error: "",
@@ -302,8 +322,9 @@ describe("resolveIntelligenceViewState", () => {
     const html = renderIntelligenceStateMarkup(state);
     assert.match(html, /data-state="partial"/);
     assert.match(html, /sample_limited=yes/);
-    assert.match(html, /Partial sample/);
-    assert.match(html, new RegExp(QB_INTEL_PREVIEW_NOTE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(html, /Sample-limited preview/);
+    assert.match(html, new RegExp(QB_INTEL_SAMPLE_PREVIEW_NOTE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.equal(html.includes("capped at 250"), false);
   });
 
   it("rejects dirty snapshot during resolve", () => {

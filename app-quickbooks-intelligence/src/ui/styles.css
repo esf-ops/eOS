@@ -290,6 +290,12 @@ code {
   color: var(--eos-muted, #64748b);
 }
 
+.qb-intel-banner-good {
+  border-color: #86efac;
+  background: #f0fdf4;
+  color: #166534;
+}
+
 .qb-intel-controls {
   display: flex;
   flex-wrap: wrap;

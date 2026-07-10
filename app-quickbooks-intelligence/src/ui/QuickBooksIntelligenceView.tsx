@@ -4,7 +4,6 @@ import {
   QB_INTEL_DEFAULT_PRESET,
   QB_INTEL_DEFAULT_SORT,
   QB_INTEL_PRESET_OPTIONS,
-  QB_INTEL_PREVIEW_NOTE,
   QB_INTEL_SORT_OPTIONS,
   assertSafeIntelligenceSnapshot,
   buildIntelligenceViewModel,
@@ -207,15 +206,20 @@ export function QuickBooksIntelligenceView({
         <span className="muted">As of {model.asOfDate}</span>
       </div>
 
-      {state.kind === "partial" ? (
+      {model.isSampleLimited ? (
         <div className="qb-intel-banner qb-intel-banner-warn" data-testid="qb-intel-partial">
-          Sample-limited snapshot: capped at {model.maxRows} rows per staging entity (page size{" "}
-          {model.pageSize}). Totals are directional until Phase 4G full-scale aggregates.
+          Sample-limited preview
+          {model.maxRows !== "full org" ? `: capped at ${model.maxRows} rows per staging entity` : ""}.
+          Totals are directional until the aggregate RPC is applied.
         </div>
       ) : null}
 
-      <div className="qb-intel-banner qb-intel-banner-info" data-testid="qb-intel-preview-note">
-        {QB_INTEL_PREVIEW_NOTE}
+      <div
+        className={`qb-intel-banner ${model.isSampleLimited ? "qb-intel-banner-info" : "qb-intel-banner-good"}`}
+        data-testid="qb-intel-mode-note"
+        data-mode={model.mode}
+      >
+        {model.modeNote}
       </div>
 
       <section className="qb-intel-section" data-section="executive">

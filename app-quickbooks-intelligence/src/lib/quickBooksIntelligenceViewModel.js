@@ -49,13 +49,12 @@
 export const QB_INTEL_ENDPOINT = "/api/admin/quickbooks/intelligence/executive";
 
 /**
- * Head default sample size for the executive preview.
- * Uses 250 (not 500) after production statement timeouts (57014) on unbounded loads.
- * Phase 4G will replace sample loads with DB-side aggregates.
+ * Head default sample size for sample_preview fallback only.
+ * Phase 4G prefers full_aggregate (no max_rows) when the RPC is installed.
  */
 export const QB_INTEL_DEFAULT_MAX_ROWS = 250;
 
-/** Head default page size for staging reads. */
+/** Head default page size for sample_preview fallback. */
 export const QB_INTEL_DEFAULT_PAGE_SIZE = 100;
 
 /** Default period preset (current year-to-date). */
@@ -64,9 +63,19 @@ export const QB_INTEL_DEFAULT_PRESET = "ytd";
 /** Default list sort for risk-oriented sections. */
 export const QB_INTEL_DEFAULT_SORT = "risk_desc";
 
-/** Visible note for the bounded executive preview (no AI). */
-export const QB_INTEL_PREVIEW_NOTE =
-  "Snapshot is currently optimized for fast executive preview. Full-scale aggregates are coming next.";
+/** Default API mode: try DB aggregates, fall back to sample preview. */
+export const QB_INTEL_DEFAULT_MODE = "auto";
+
+/** Visible note for full-period aggregate mode. */
+export const QB_INTEL_FULL_AGGREGATE_NOTE =
+  "Full-period aggregate — totals cover the selected date range across QuickBooks staging.";
+
+/** Visible note for sample-limited fallback. */
+export const QB_INTEL_SAMPLE_PREVIEW_NOTE =
+  "Sample-limited preview — aggregate RPC unavailable or forced sample mode. Totals are directional.";
+
+/** @deprecated Use QB_INTEL_SAMPLE_PREVIEW_NOTE / QB_INTEL_FULL_AGGREGATE_NOTE */
+export const QB_INTEL_PREVIEW_NOTE = QB_INTEL_SAMPLE_PREVIEW_NOTE;
 
 export const QB_INTEL_PRESET_OPTIONS = Object.freeze([
   { value: "ytd", label: "Year to date" },
@@ -83,7 +92,9 @@ export const QB_INTEL_SORT_OPTIONS = Object.freeze([
 ]);
 
 /**
- * Build the executive intelligence path with bounded + period query params.
+ * Build the executive intelligence path.
+ * Defaults to mode=auto (prefer full_aggregate). Sample bounds are only sent
+ * when explicitly forcing sample_preview.
  *
  * @param {{
  *   maxRows?: number,
@@ -94,28 +105,42 @@ export const QB_INTEL_SORT_OPTIONS = Object.freeze([
  *   dateTo?: string,
  *   sort?: string,
  *   asOfDate?: string,
+ *   mode?: string,
+ *   forceSample?: boolean,
  * }} [opts]
  * @returns {string}
  */
 export function buildQuickBooksIntelligenceEndpoint(opts = {}) {
-  const maxRows =
-    Number.isFinite(Number(opts.maxRows)) && Number(opts.maxRows) > 0
-      ? Math.floor(Number(opts.maxRows))
-      : QB_INTEL_DEFAULT_MAX_ROWS;
-  const pageSize =
-    Number.isFinite(Number(opts.pageSize)) && Number(opts.pageSize) > 0
-      ? Math.floor(Number(opts.pageSize))
-      : QB_INTEL_DEFAULT_PAGE_SIZE;
+  const modeRaw = String(opts.mode ?? QB_INTEL_DEFAULT_MODE).trim().toLowerCase();
+  const mode =
+    modeRaw === "full_aggregate" || modeRaw === "sample_preview" || modeRaw === "auto"
+      ? modeRaw
+      : QB_INTEL_DEFAULT_MODE;
+  const forceSample = opts.forceSample === true || mode === "sample_preview";
+
   const params = new URLSearchParams({
-    max_rows: String(maxRows),
-    page_size: String(pageSize),
     preset: String(opts.preset ?? QB_INTEL_DEFAULT_PRESET),
     sort: String(opts.sort ?? QB_INTEL_DEFAULT_SORT),
+    mode: forceSample ? "sample_preview" : mode,
   });
   if (opts.year != null && String(opts.year).trim()) params.set("year", String(opts.year));
   if (opts.dateFrom) params.set("date_from", String(opts.dateFrom));
   if (opts.dateTo) params.set("date_to", String(opts.dateTo));
   if (opts.asOfDate) params.set("as_of_date", String(opts.asOfDate));
+
+  if (forceSample) {
+    const maxRows =
+      Number.isFinite(Number(opts.maxRows)) && Number(opts.maxRows) > 0
+        ? Math.floor(Number(opts.maxRows))
+        : QB_INTEL_DEFAULT_MAX_ROWS;
+    const pageSize =
+      Number.isFinite(Number(opts.pageSize)) && Number(opts.pageSize) > 0
+        ? Math.floor(Number(opts.pageSize))
+        : QB_INTEL_DEFAULT_PAGE_SIZE;
+    params.set("max_rows", String(maxRows));
+    params.set("page_size", String(pageSize));
+  }
+
   return `${QB_INTEL_ENDPOINT}?${params.toString()}`;
 }
 
@@ -296,9 +321,25 @@ export function buildIntelligenceViewModel(snapshot) {
   const staging = meta.staging_row_counts ?? {};
   const stagingTotal = Object.values(staging).reduce((s, n) => s + (Number(n) || 0), 0);
   const maxRows = meta.max_rows == null ? null : Number(meta.max_rows);
+  const mode =
+    snapshot.mode ||
+    meta.mode ||
+    (snapshot.is_sample_limited === false || meta.is_sample_limited === false
+      ? "full_aggregate"
+      : "sample_preview");
+  const isSampleLimited =
+    snapshot.is_sample_limited === true ||
+    meta.is_sample_limited === true ||
+    period.is_sample_limited === true ||
+    mode === "sample_preview";
   const isPartial =
-    Boolean(period.is_partial ?? meta.is_partial) ||
-    (maxRows != null && Number.isFinite(maxRows) && maxRows > 0);
+    isSampleLimited &&
+    (Boolean(period.is_partial ?? meta.is_partial) ||
+      (maxRows != null && Number.isFinite(maxRows) && maxRows > 0));
+  const modeNote =
+    mode === "full_aggregate" && !isSampleLimited
+      ? QB_INTEL_FULL_AGGREGATE_NOTE
+      : QB_INTEL_SAMPLE_PREVIEW_NOTE;
 
   const dateFrom = period.date_from || meta.date_from || "—";
   const dateTo = period.date_to || meta.date_to || "—";
@@ -526,6 +567,9 @@ export function buildIntelligenceViewModel(snapshot) {
     sort,
     dateFrom,
     dateTo,
+    mode,
+    modeNote,
+    isSampleLimited,
     pageSize: meta.page_size == null ? "—" : formatCount(meta.page_size),
     maxRows: maxRows == null ? "full org" : formatCount(maxRows),
     isPartial,
@@ -641,11 +685,12 @@ export function renderIntelligenceStateMarkup(state) {
         `<li data-insight="${escapeHtml(row.insight)}" data-severity="${escapeHtml(row.severity)}">${escapeHtml(row.insightLabel)} · ${escapeHtml(row.summary)}</li>`,
     )
     .join("");
-  const meta = `generated_at=${escapeHtml(model.generatedAt)}; period=${escapeHtml(model.periodLabel)}; max_rows=${escapeHtml(model.maxRows)}; page_size=${escapeHtml(model.pageSize)}`;
+  const meta = `generated_at=${escapeHtml(model.generatedAt)}; period=${escapeHtml(model.periodLabel)}; mode=${escapeHtml(model.mode)}; max_rows=${escapeHtml(model.maxRows)}; page_size=${escapeHtml(model.pageSize)}`;
   const partialBanner =
-    state.kind === "partial"
-      ? `<div data-testid="qb-intel-partial">Partial sample: results are limited to ${escapeHtml(model.maxRows)} rows per staging entity.</div>`
+    state.kind === "partial" || model.isSampleLimited
+      ? `<div data-testid="qb-intel-partial">Sample-limited preview${model.maxRows !== "full org" ? `: capped at ${escapeHtml(model.maxRows)} rows` : ""}.</div>`
       : "";
+  const modeBanner = `<div data-testid="qb-intel-mode-note">${escapeHtml(model.modeNote)}</div>`;
   const insightGroups = (model.insightGroupRows ?? [])
     .map(
       (g) =>
@@ -653,9 +698,9 @@ export function renderIntelligenceStateMarkup(state) {
     )
     .join("");
   return [
-    `<div class="qb-intel" data-state="${escapeHtml(state.kind)}">`,
+    `<div class="qb-intel" data-state="${escapeHtml(state.kind)}" data-mode="${escapeHtml(model.mode)}">`,
     `<div data-testid="qb-intel-period">${escapeHtml(model.periodLabel)}</div>`,
-    `<div data-testid="qb-intel-preview-note">${escapeHtml(QB_INTEL_PREVIEW_NOTE)}</div>`,
+    modeBanner,
     partialBanner,
     `<section data-section="executive">${model.executiveCards.map((c) => c.id).join(",")}</section>`,
     `<section data-section="cash">${model.topPayments.length}</section>`,
@@ -664,7 +709,7 @@ export function renderIntelligenceStateMarkup(state) {
     `<section data-section="flow">${model.flowCards.map((c) => c.id).join(",")}</section>`,
     `<section data-section="activity">${model.activityMonths.length}</section>`,
     `<section data-section="insights"><ul>${insights}</ul>${insightGroups}</section>`,
-    `<section data-section="metadata">${meta}; sample_limited=${state.kind === "partial" ? "yes" : "no"}</section>`,
+    `<section data-section="metadata">${meta}; sample_limited=${model.isSampleLimited ? "yes" : "no"}</section>`,
     `</div>`,
   ].join("");
 }

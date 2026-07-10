@@ -43,9 +43,12 @@ function fakeSnapshot(overrides = {}) {
       sort: "risk_desc",
       year: 2026,
       is_partial: true,
+      is_sample_limited: true,
       max_rows: 50,
       page_size: 50,
     },
+    mode: "sample_preview",
+    is_sample_limited: true,
     load_meta: {
       page_size: 50,
       include_invoice_lines: false,

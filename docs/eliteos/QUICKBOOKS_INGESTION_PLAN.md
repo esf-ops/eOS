@@ -13,21 +13,20 @@ This mirrors the pattern already used for Moraware (`docs/eliteos/moraware-sync-
 
 `External system → local read-only extract → normalized staging → organization-scoped facts → heads`
 
-## Current Phase: Phase 4F — Date-scoped QuickBooks Intelligence
+## Current Phase: Phase 4G — Full-period DB-side aggregates
 
-**Latest delivered:** Phase 4F date-scoped executive aggregates on the standalone
-QuickBooks Intelligence head. Default period is **current year-to-date**. Insights
-are capped/grouped. Loads remain **sample-limited** (`max_rows`) until Phase 4G.
+**Latest delivered:** Phase 4G SQL RPC + backend preference for **full_aggregate**
+mode. The head defaults to `mode=auto` (try DB aggregates first). Sample preview
+remains as fallback when the RPC is not installed.
 
-**Also in place:** Phase 1–3C staging import; Phase 4A–4E read/insight/repo/API/UI/head.
+**Also in place:** Phase 1–3C staging; Phase 4A–4F facts/read/period UI.
 
-**What does NOT exist yet (by design for 4F):**
+**What does NOT exist yet (by design for 4G):**
 
-- No AI summarization over QuickBooks facts.
-- No browser access to `brain_quickbooks_*` or `raw_payload`.
+- No AI summarization.
+- No browser access to `brain_quickbooks_*` / `raw_payload`.
 - No writeback to QuickBooks.
-- No full-org DB-side aggregates (see Phase 4G) — live API is still sample-limited.
-- No Supabase credentials on the Windows VM.
+- Migration is **not** auto-applied — must be run manually in Supabase SQL editor.
 
 ## Phase 1 — Local Export Preview
 
@@ -767,14 +766,43 @@ SQL aggregate. Treat totals as directional when `is_partial` / `max_rows` is set
 
 **Tests:** `quickBooksIntelligencePeriod.test.mjs` + existing `qb:test` / head tests.
 
-### Phase 4G — Scalable full-org QuickBooks aggregates (future)
+### Phase 4G — Scalable full-org QuickBooks aggregates (implemented; migration manual)
 
-Replace “load staging rows into memory then aggregate” with **SQL / prepared read
-models** (org-scoped rollups, aging buckets, revenue concentration, payment behavior)
-so the executive snapshot can cover the full organization without `max_rows` sampling
-or statement timeouts / Vercel memory pressure. Prefer date-indexed analytics tables
-or views. Keep opaque IDs only; still no `raw_payload` in API responses; still no AI
-in the first cut of 4G.
+**Status:** Code + SQL migration ready. **Not applied live automatically.**
+
+**Why this replaces sample-limited preview:** Phase 4F filtered an in-memory sample
+(`max_rows=250`) after loading staging rows into the app runtime. That avoided
+timeouts but understated YTD totals. Phase 4G runs date filters + aggregates in
+Postgres via `qb_intelligence_executive_aggregate`, so Vercel never loads the full
+staging tables.
+
+**Migration file:**
+`backend-core/supabase/eliteos_quickbooks_intelligence_aggregates_v1.sql`
+
+**Manual Supabase SQL editor steps:**
+
+1. Open the eliteOS Supabase project → SQL editor.
+2. Paste the full contents of `eliteos_quickbooks_intelligence_aggregates_v1.sql`.
+3. Run once (helpers + RPC are `CREATE OR REPLACE`; indexes are `IF NOT EXISTS`).
+4. Confirm with:
+   `select public.qb_intelligence_executive_aggregate('<org-uuid>'::uuid, '2026-01-01'::date, current_date, current_date, 'risk_desc', 10);`
+5. Redeploy **backend-core** (and the QuickBooks Intelligence head if not already on 4F/4G UI).
+
+**API behavior:**
+
+- Default `mode=auto`: try full aggregate RPC → on missing RPC (`PGRST202` / not installed) fall back to Phase 4F `sample_preview`.
+- Response includes `mode: "full_aggregate"|"sample_preview"` and `is_sample_limited`.
+- Amounts/dates are extracted from `raw_payload` **inside SQL only**; API never returns `raw_payload`.
+
+**UI:**
+
+- Full aggregate → “Full-period aggregate” banner (no capped-at-250 warning).
+- Fallback → “Sample-limited preview” banner.
+
+**Modules:** `quickBooksIntelligenceAggregateRepository.js`, service mode switch,
+API metadata, head endpoint defaults to `mode=auto` without `max_rows`.
+
+**Tests:** `quickBooksIntelligenceAggregateRepository.test.mjs` + `qb:test`.
 
 ### Phase 5 — Scheduled Connector Upload with Scoped Token
 
