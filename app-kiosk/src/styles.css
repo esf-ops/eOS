@@ -209,6 +209,35 @@ body {
   gap: 14px;
 }
 
+/* ESF logo — used in KioskTopBar */
+.kiosk-esf-logo {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.kiosk-esf-logo img {
+  display: block;
+  height: clamp(34px, 3.2vh, 52px);
+  width: auto;
+  object-fit: contain;
+  /* PNG has transparent BG; force dark rendering on light kiosk surface */
+  filter: brightness(0.92) contrast(1.08);
+}
+
+/* Larger logo variant used on the home page (no section title crowding space) */
+.kiosk-esf-logo--large img {
+  height: clamp(42px, 4vh, 66px);
+}
+
+/* Text fallback shown only if PNG fails to load */
+.kiosk-esf-logo-fallback {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Retained for section-page usage (Back/frame buttons reference this) */
 .kiosk-brand-mark {
   display: grid;
   place-items: center;
@@ -220,12 +249,6 @@ body {
   box-shadow: 0 12px 30px rgba(185, 28, 28, 0.32);
 }
 
-.kiosk-brand-text {
-  display: flex;
-  flex-direction: column;
-  line-height: 1.1;
-}
-
 .kiosk-brand-name {
   font-weight: 700;
   font-size: clamp(1.1rem, 1.4vw, 1.7rem);
@@ -234,11 +257,14 @@ body {
 }
 
 .kiosk-brand-sub {
-  font-size: clamp(0.72rem, 0.85vw, 0.95rem);
+  display: block;
+  font-size: clamp(0.68rem, 0.8vw, 0.9rem);
   font-weight: 500;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--ink-muted);
+  margin-top: 4px;
+  white-space: nowrap;
 }
 
 .kiosk-topbar-section {
@@ -309,15 +335,6 @@ body {
 
 .kiosk-home-intro {
   max-width: 34ch;
-}
-
-.kiosk-home-eyebrow {
-  margin: 0 0 18px;
-  font-size: clamp(0.85rem, 1vw, 1.15rem);
-  font-weight: 600;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  color: var(--elite-red);
 }
 
 .kiosk-home-headline {
@@ -463,18 +480,26 @@ body {
   overflow: hidden;
 }
 
+/* Real stone texture swatches — Elite 100 card */
 .kiosk-card-art--stone {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  display: flex;
+  flex-direction: row;
 }
 
-.kiosk-card-art--stone .swatch {
+.kiosk-stone-swatch {
+  flex: 1 1 0;
+  min-width: 0;
   height: 100%;
+  object-fit: cover;
+  object-position: center;
+  display: block;
+  /* Subtle gap between swatches */
+  border-right: 2px solid rgba(255, 255, 255, 0.18);
 }
-.kiosk-card-art--stone .swatch-1 { background: linear-gradient(135deg, #f6f4f1, #e7e3dc); }
-.kiosk-card-art--stone .swatch-2 { background: linear-gradient(135deg, #d9d4cc, #b9b2a6); }
-.kiosk-card-art--stone .swatch-3 { background: linear-gradient(135deg, #6f7378, #3f4247); }
-.kiosk-card-art--stone .swatch-4 { background: linear-gradient(135deg, #2a2c31, #131519); }
+
+.kiosk-stone-swatch:last-child {
+  border-right: none;
+}
 
 .kiosk-card-art--catalog,
 .kiosk-card-art--visualizer {
@@ -954,6 +979,99 @@ body {
   .kiosk-home-btn { min-height: 56px; }
 }
 
+/* ── Home slideshow ───────────────────────────────────────────────────── */
+.kiosk-slideshow {
+  margin-top: clamp(22px, 2.8vh, 44px);
+}
+
+.kiosk-slide {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: clamp(16px, 2vh, 26px) clamp(18px, 2vw, 30px);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  border: 1.5px solid var(--line-strong);
+  box-shadow: var(--shadow-glass);
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+  transition: opacity 0.4s ease, transform 0.4s ease, background 0.2s;
+  opacity: 0;
+  transform: translateY(6px);
+  /* Glass highlight */
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.kiosk-slide--visible {
+  opacity: 1;
+  transform: none;
+}
+
+.kiosk-slide:active {
+  background: var(--surface-strong);
+}
+
+.kiosk-slide-eyebrow {
+  display: block;
+  font-size: clamp(0.72rem, 0.82vw, 0.9rem);
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--elite-red);
+}
+
+.kiosk-slide-headline {
+  display: block;
+  font-family: var(--font-display);
+  font-size: clamp(1.25rem, 1.7vw, 2rem);
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.1;
+}
+
+.kiosk-slide-body {
+  display: block;
+  font-size: clamp(0.88rem, 1vw, 1.15rem);
+  color: var(--ink-soft);
+  line-height: 1.45;
+}
+
+.kiosk-slide-cue {
+  display: block;
+  margin-top: 6px;
+  font-size: clamp(0.78rem, 0.9vw, 0.95rem);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--elite-red);
+}
+
+/* Progress dots */
+.kiosk-slide-dots {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+  padding-left: 2px;
+}
+
+.kiosk-slide-dot {
+  width: 28px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line-strong);
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  transition: background 0.25s, width 0.25s;
+  min-height: 0; /* override global touch target for these tiny affordances */
+}
+
+.kiosk-slide-dot--active {
+  width: 44px;
+  background: var(--elite-red);
+}
+
 /* ── Motion preferences ───────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
   .kiosk-view,
@@ -970,4 +1088,7 @@ body {
     animation: none !important;
   }
   .kiosk-view { opacity: 1; transform: none; }
+  /* Keep slideshow visible even when transitions are disabled */
+  .kiosk-slide { opacity: 1; transform: none; transition: none !important; }
+  .kiosk-slide-dot { transition: none !important; }
 }

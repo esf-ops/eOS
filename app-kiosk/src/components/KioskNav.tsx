@@ -7,17 +7,40 @@ interface KioskNavProps {
   onNavigate: (section: NavSectionId) => void;
 }
 
-/** Abstract, image-free artwork per section — pure CSS/SVG, safe & lightweight. */
+/**
+ * Real stone texture thumbnails copied from app-visualizer/public into
+ * app-kiosk/public/stone — displayed as an overlapping swatch strip in the
+ * Elite 100 card. No API call; these are static local assets.
+ */
+const STONE_SWATCHES = [
+  { src: "/stone/white-dove.jpg",                 label: "White Dove" },
+  { src: "/stone/carrara-royale.jpg",             label: "Carrara Royale" },
+  { src: "/stone/bianco-carrara.jpg",             label: "Bianco Carrara" },
+  { src: "/stone/classic-gray.jpg",               label: "Classic Gray" },
+  { src: "/stone/suede-brown-polished.jpg",       label: "Suede Brown" },
+  { src: "/stone/india-black-pearl-polished.jpg", label: "India Black Pearl" },
+];
+
+function StoneSwatchStrip() {
+  return (
+    <div className="kiosk-card-art kiosk-card-art--stone" aria-hidden>
+      {STONE_SWATCHES.map((s) => (
+        <img
+          key={s.src}
+          src={s.src}
+          alt=""
+          className="kiosk-stone-swatch"
+          loading="eager"
+          draggable={false}
+        />
+      ))}
+    </div>
+  );
+}
+
 function CardArt({ accent }: { accent: KioskSection["accent"] }) {
   if (accent === "stone") {
-    return (
-      <div className="kiosk-card-art kiosk-card-art--stone" aria-hidden>
-        <span className="swatch swatch-1" />
-        <span className="swatch swatch-2" />
-        <span className="swatch swatch-3" />
-        <span className="swatch swatch-4" />
-      </div>
-    );
+    return <StoneSwatchStrip />;
   }
   if (accent === "catalog") {
     return (
