@@ -38,6 +38,7 @@ import { extractRecordsFromBatchJson, readQuickBooksJsonFile } from "../quickboo
 import {
   buildInvoiceLineRowsFromInvoiceRecord,
   buildStagingBatch,
+  buildStagingRow,
   classifyQbEntityKind,
 } from "../quickbooks/quickBooksStaging.js";
 
@@ -146,6 +147,79 @@ async function readEntityRecordBatches(exportFolderPath, folder) {
 }
 
 /**
+ * Build a map of manifest entity type -> declared RecordCount (safe integers only).
+ *
+ * @param {object|null} manifest
+ * @returns {Record<string, number>}
+ */
+function manifestEntityCounts(manifest) {
+  const counts = {};
+  const entities = Array.isArray(manifest?.Entities) ? manifest.Entities : [];
+  for (const entity of entities) {
+    if (entity && typeof entity.EntityType === "string" && typeof entity.RecordCount === "number") {
+      counts[entity.EntityType] = entity.RecordCount;
+    }
+  }
+  return counts;
+}
+
+/**
+ * Build the company staging entry from the root `company.json` file (the connector writes
+ * company as a root file, not an entity folder). Fails closed when the manifest declares a
+ * company entity but the file is missing/unreadable/unmaterialized/empty, or when it does
+ * not yield exactly the manifest-declared number of company records. Never logs record
+ * content. Returns null only when company is neither in the manifest nor present on disk.
+ *
+ * @param {string} exportFolderPath
+ * @param {boolean} companyInManifest
+ * @param {StagingContext} ctx
+ * @returns {Promise<{ sourceRecordCount: number, stagingRowCount: number, failureCount: number, failureReasons: Record<string, number> }|null>}
+ */
+async function buildCompanyEntityReport(exportFolderPath, companyInManifest, ctx) {
+  const companyPath = path.join(exportFolderPath, "company.json");
+  const readResult = await readQuickBooksJsonFile(companyPath);
+
+  let sourceRecordCount = 0;
+  let stagingRowCount = 0;
+  let failureCount = 0;
+  const failureReasons = {};
+  const bump = (reason) => {
+    failureReasons[reason] = (failureReasons[reason] ?? 0) + 1;
+  };
+
+  if (!readResult.ok) {
+    if (!companyInManifest) return null; // no company anywhere — nothing to report
+    bump("company.json missing or unreadable");
+    return { sourceRecordCount: 0, stagingRowCount: 0, failureCount: 1, failureReasons };
+  }
+
+  const { ok, records } = extractRecordsFromBatchJson(readResult.data);
+  if (!ok) {
+    bump("company.json records not materialized");
+    return { sourceRecordCount: 0, stagingRowCount: 0, failureCount: 1, failureReasons };
+  }
+
+  sourceRecordCount = records.length;
+  if (records.length === 0) {
+    if (!companyInManifest) return null;
+    bump("company.json has no records");
+    return { sourceRecordCount: 0, stagingRowCount: 0, failureCount: 1, failureReasons };
+  }
+
+  for (const record of records) {
+    const result = buildStagingRow("company", record, ctx);
+    if (result.ok) {
+      stagingRowCount += 1;
+    } else {
+      failureCount += 1;
+      bump(result.reason);
+    }
+  }
+
+  return { sourceRecordCount, stagingRowCount, failureCount, failureReasons };
+}
+
+/**
  * Build the dry-run report for a materialized export folder. Pure with respect to the
  * filesystem (reads only) — never writes, never networks, never prints. The CLI layer
  * formats and prints the returned report.
@@ -184,15 +258,28 @@ export async function buildDryRunReport(exportFolderPath, options = {}) {
   }
 
   const ctx = { organizationId, syncRunId: null, qbXmlVersion };
+  const manifest = readResult.manifestResult?.manifest ?? null;
+  const manifestCounts = manifestEntityCounts(manifest);
   const perEntity = {};
   const dataQualityFindingCounts = {};
   const warnings = [];
+  const failReasons = [];
   let totalStagingRows = 0;
   let totalFailures = 0;
 
   const bumpFinding = (type) => {
     dataQualityFindingCounts[type] = (dataQualityFindingCounts[type] ?? 0) + 1;
   };
+
+  // Company is a root file (company.json), not an entity folder — stage it first so it is
+  // never silently omitted (it is a manifest entity with a brain_quickbooks_company table).
+  const companyInManifest = Object.prototype.hasOwnProperty.call(manifestCounts, "company");
+  const companyEntity = await buildCompanyEntityReport(exportFolderPath, companyInManifest, ctx);
+  if (companyEntity) {
+    perEntity.company = companyEntity;
+    totalStagingRows += companyEntity.stagingRowCount;
+    totalFailures += companyEntity.failureCount;
+  }
 
   // Accumulators for invoice lines DERIVED from invoice records (the authoritative source).
   const derivedLines = {
@@ -303,7 +390,21 @@ export async function buildDryRunReport(exportFolderPath, options = {}) {
     );
   }
 
-  const ok = totalFailures === 0;
+  // Manifest-total reconciliation: every manifest entity (including company) must be
+  // represented by built staging rows. Derived invoice-lines are excluded because they are
+  // not a manifest entity. Any delta means a manifest entity was skipped or under-built.
+  const manifestTotal = Object.values(manifestCounts).reduce((sum, n) => sum + n, 0);
+  const builtPrimaryTotal = Object.entries(perEntity)
+    .filter(([folder]) => folder !== "invoice-lines")
+    .reduce((sum, [, entity]) => sum + entity.stagingRowCount, 0);
+  if (manifestTotal !== builtPrimaryTotal) {
+    failReasons.push(
+      `manifest-total reconciliation failed: manifest entity total (${manifestTotal}) != ` +
+        `built primary staging rows (${builtPrimaryTotal}); a manifest entity may be unstaged`
+    );
+  }
+
+  const ok = totalFailures === 0 && failReasons.length === 0;
 
   return {
     ok,
@@ -313,9 +414,13 @@ export async function buildDryRunReport(exportFolderPath, options = {}) {
     runId,
     qbXmlVersion,
     blockReasons: [],
+    failReasons,
     perEntity,
     dataQualityFindingCounts,
     warnings,
+    manifestTotal,
+    builtPrimaryTotal,
+    derivedInvoiceLineCount: derivedLines.stagingRowCount,
     totalStagingRows,
     totalFailures,
     result: ok ? "DRY RUN PASS" : "DRY RUN FAIL",
@@ -381,6 +486,22 @@ export function buildDryRunReportLines(report) {
     for (const warning of report.warnings) {
       lines.push(`  - ${warning}`);
     }
+  }
+
+  if ((report.failReasons ?? []).length > 0) {
+    lines.push("", "Fail reasons:");
+    for (const reason of report.failReasons) {
+      lines.push(`  - ${reason}`);
+    }
+  }
+
+  if (typeof report.manifestTotal === "number") {
+    lines.push(
+      "",
+      `Manifest entity total (incl. company): ${report.manifestTotal}`,
+      `Built primary staging rows (excl. derived invoice-lines): ${report.builtPrimaryTotal}`,
+      `Derived invoice-line rows: ${report.derivedInvoiceLineCount}`
+    );
   }
 
   lines.push(

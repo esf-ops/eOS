@@ -88,16 +88,39 @@ function fakeStandaloneLine(i) {
   return { "@elementName": "InvoiceLineRet", TxnLineID: `FAKE-STANDALONE-LINE-${i}`, ItemRef: { ListID: `FAKE-ITEM-${i}` } };
 }
 
+/** A fake CompanyRet record (company is a singleton root file, not a folder). */
+function fakeCompanyRecord(overrides = {}) {
+  return {
+    "@elementName": "CompanyRet",
+    CompanyName: "FAKE_COMPANY",
+    LegalCompanyName: "FAKE_LEGAL_CO",
+    ...overrides,
+  };
+}
+
+/** Write a root company.json (batch-shaped: { entityType, recordCount, records }). */
+async function writeCompanyJson(dir, records) {
+  await writeJson(path.join(dir, "company.json"), { entityType: "company", recordCount: records.length, records });
+}
+
 /**
  * Build a minimal valid materialized export.
  * Invoice lines live NESTED inside invoices (authoritative). The standalone
  * invoice-lines folder is written with a matching count as an informational cross-check.
  */
-async function writeCleanExport(dir, { customerCount = 2, invoiceCount = 2, linesPerInvoice = 2 } = {}) {
+async function writeCleanExport(dir, { customerCount = 2, invoiceCount = 2, linesPerInvoice = 2, includeCompany = false } = {}) {
   const customers = Array.from({ length: customerCount }, (_, i) => fakeCustomer(i + 1));
   const invoices = Array.from({ length: invoiceCount }, (_, i) => fakeInvoice(i + 1, { linesPerInvoice }));
   const derivedLineTotal = invoiceCount * linesPerInvoice;
   const standaloneLines = Array.from({ length: derivedLineTotal }, (_, i) => fakeStandaloneLine(i + 1));
+
+  const entities = [
+    { EntityType: "customers", BatchCount: 1, RecordCount: customerCount, Errors: [] },
+    { EntityType: "invoices", BatchCount: 1, RecordCount: invoiceCount, Errors: [] },
+  ];
+  if (includeCompany) {
+    entities.unshift({ EntityType: "company", BatchCount: 1, RecordCount: 1, Errors: [] });
+  }
 
   await writeJson(path.join(dir, "manifest.json"), {
     RunId: "20260710-130918-fake",
@@ -106,13 +129,13 @@ async function writeCleanExport(dir, { customerCount = 2, invoiceCount = 2, line
     QbXmlVersion: "16.0",
     CompanyFile: "(currently open company file)",
     ExportDirectory: dir,
-    Entities: [
-      { EntityType: "customers", BatchCount: 1, RecordCount: customerCount, Errors: [] },
-      { EntityType: "invoices", BatchCount: 1, RecordCount: invoiceCount, Errors: [] },
-    ],
+    Entities: entities,
     Errors: [],
   });
 
+  if (includeCompany) {
+    await writeCompanyJson(dir, [fakeCompanyRecord()]);
+  }
   await writeJson(path.join(dir, "customers", "batch-001.json"), fakeListBatch("customers", 1, customers));
   await writeJson(path.join(dir, "invoices", "batch-001.json"), fakeListBatch("invoices", 1, invoices));
   // Standalone invoice-lines folder: informational cross-check only, NOT the staging source.
@@ -316,6 +339,128 @@ async function writeCleanExport(dir, { customerCount = 2, invoiceCount = 2, line
   console.log("ok: standalone vs derived invoice-lines mismatch -> safe warning + finding (not a fail)");
 }
 
+// ── Test 4d: company (root company.json) is staged and counted ───────────────
+{
+  const dir = await makeTempExportFolder();
+  await writeCleanExport(dir, { customerCount: 2, invoiceCount: 1, linesPerInvoice: 2, includeCompany: true });
+
+  const report = await buildDryRunReport(dir, { organizationId: FAKE_ORG_ID });
+
+  assert.ok(report.perEntity.company, "company must appear in the per-entity report");
+  assert.equal(report.perEntity.company.sourceRecordCount, 1);
+  assert.equal(report.perEntity.company.stagingRowCount, 1);
+  assert.equal(report.perEntity.company.failureCount, 0);
+  // manifest total = company(1)+customers(2)+invoices(1) = 4; built primary must equal it.
+  assert.equal(report.manifestTotal, 4);
+  assert.equal(report.builtPrimaryTotal, 4);
+  assert.equal(report.derivedInvoiceLineCount, 2);
+  assert.equal(report.ok, true);
+  assert.equal(report.result, "DRY RUN PASS");
+  // customers(2)+invoices(1)+company(1)+derived lines(2) = 6
+  assert.equal(report.totalStagingRows, 6);
+
+  await fs.rm(dir, { recursive: true, force: true });
+  console.log("ok: company staged from root company.json and included in counts (DRY RUN PASS)");
+}
+
+// ── Test 4e: manifest declares company but company.json is missing -> FAIL ────
+{
+  const dir = await makeTempExportFolder();
+  await writeJson(path.join(dir, "manifest.json"), {
+    RunId: "20260710-fake-nocompanyfile",
+    StartedAt: "2026-07-10T00:00:00Z",
+    CompletedAt: "2026-07-10T01:00:00Z",
+    QbXmlVersion: "16.0",
+    CompanyFile: "(currently open company file)",
+    ExportDirectory: dir,
+    Entities: [
+      { EntityType: "company", BatchCount: 1, RecordCount: 1, Errors: [] },
+      { EntityType: "customers", BatchCount: 1, RecordCount: 1, Errors: [] },
+    ],
+    Errors: [],
+  });
+  await writeJson(path.join(dir, "customers", "batch-001.json"), fakeListBatch("customers", 1, [fakeCustomer(1)]));
+  // No company.json written.
+
+  const report = await buildDryRunReport(dir, { organizationId: FAKE_ORG_ID });
+
+  assert.ok(report.perEntity.company, "company entry present even when file missing");
+  assert.equal(report.perEntity.company.stagingRowCount, 0);
+  assert.equal(report.perEntity.company.failureCount, 1);
+  assert.ok(report.perEntity.company.failureReasons["company.json missing or unreadable"] >= 1);
+  assert.equal(report.ok, false);
+  assert.equal(report.result, "DRY RUN FAIL");
+
+  await fs.rm(dir, { recursive: true, force: true });
+  console.log("ok: manifest company + missing company.json -> DRY RUN FAIL (not silently ignored)");
+}
+
+// ── Test 4f: manifest declares company but company.json has empty records -> FAIL ─
+{
+  const dir = await makeTempExportFolder();
+  await writeJson(path.join(dir, "manifest.json"), {
+    RunId: "20260710-fake-emptycompany",
+    StartedAt: "2026-07-10T00:00:00Z",
+    CompletedAt: "2026-07-10T01:00:00Z",
+    QbXmlVersion: "16.0",
+    CompanyFile: "(currently open company file)",
+    ExportDirectory: dir,
+    Entities: [
+      { EntityType: "company", BatchCount: 1, RecordCount: 1, Errors: [] },
+      { EntityType: "customers", BatchCount: 1, RecordCount: 1, Errors: [] },
+    ],
+    Errors: [],
+  });
+  await writeJson(path.join(dir, "customers", "batch-001.json"), fakeListBatch("customers", 1, [fakeCustomer(1)]));
+  await writeCompanyJson(dir, []); // empty records array
+
+  const report = await buildDryRunReport(dir, { organizationId: FAKE_ORG_ID });
+
+  assert.equal(report.perEntity.company.stagingRowCount, 0);
+  assert.equal(report.perEntity.company.failureCount, 1);
+  assert.ok(report.perEntity.company.failureReasons["company.json has no records"] >= 1);
+  assert.equal(report.ok, false);
+  assert.equal(report.result, "DRY RUN FAIL");
+
+  await fs.rm(dir, { recursive: true, force: true });
+  console.log("ok: manifest company + empty company.json records -> DRY RUN FAIL");
+}
+
+// ── Test 4g: manifest-total reconciliation catches a skipped manifest entity ──
+{
+  const dir = await makeTempExportFolder();
+  // Manifest declares customers(3) + a bogus "widgets"(5) that has no folder/data and is
+  // never staged. Reconciliation must catch the 5 unstaged rows even though no gate trips.
+  await writeJson(path.join(dir, "manifest.json"), {
+    RunId: "20260710-fake-recon",
+    StartedAt: "2026-07-10T00:00:00Z",
+    CompletedAt: "2026-07-10T01:00:00Z",
+    QbXmlVersion: "16.0",
+    CompanyFile: "(currently open company file)",
+    ExportDirectory: dir,
+    Entities: [
+      { EntityType: "customers", BatchCount: 1, RecordCount: 3, Errors: [] },
+      { EntityType: "widgets", BatchCount: 1, RecordCount: 5, Errors: [] },
+    ],
+    Errors: [],
+  });
+  await writeJson(path.join(dir, "customers", "batch-001.json"), fakeListBatch("customers", 1, [fakeCustomer(1), fakeCustomer(2), fakeCustomer(3)]));
+
+  const report = await buildDryRunReport(dir, { organizationId: FAKE_ORG_ID });
+
+  assert.equal(report.manifestTotal, 8, "manifest total sums all entities incl. widgets");
+  assert.equal(report.builtPrimaryTotal, 3, "only customers were staged");
+  assert.ok(
+    report.failReasons.some((r) => /manifest-total reconciliation failed/.test(r)),
+    "reconciliation must flag the skipped manifest entity"
+  );
+  assert.equal(report.ok, false);
+  assert.equal(report.result, "DRY RUN FAIL");
+
+  await fs.rm(dir, { recursive: true, force: true });
+  console.log("ok: manifest-total reconciliation catches a skipped manifest entity (DRY RUN FAIL)");
+}
+
 // ── Test 5: output never contains PII sentinel values ───────────────────────
 {
   const dir = await makeTempExportFolder();
@@ -331,6 +476,7 @@ async function writeCleanExport(dir, { customerCount = 2, invoiceCount = 2, line
     Memo: "SENTINEL_PII_MEMO",
     TotalAmount: "SENTINEL_PII_AMOUNT",
   });
+  const piiCompany = fakeCompanyRecord({ CompanyName: "SENTINEL_PII_COMPANY_NAME", Email: "SENTINEL_PII_EMAIL" });
   await writeJson(path.join(dir, "manifest.json"), {
     RunId: "20260710-fake-pii",
     StartedAt: "2026-07-10T00:00:00Z",
@@ -339,11 +485,13 @@ async function writeCleanExport(dir, { customerCount = 2, invoiceCount = 2, line
     CompanyFile: "(currently open company file)",
     ExportDirectory: dir,
     Entities: [
+      { EntityType: "company", BatchCount: 1, RecordCount: 1, Errors: [] },
       { EntityType: "customers", BatchCount: 1, RecordCount: 1, Errors: [] },
       { EntityType: "invoices", BatchCount: 1, RecordCount: 1, Errors: [] },
     ],
     Errors: [],
   });
+  await writeCompanyJson(dir, [piiCompany]);
   await writeJson(path.join(dir, "customers", "batch-001.json"), fakeListBatch("customers", 1, [piiCustomer]));
   await writeJson(path.join(dir, "invoices", "batch-001.json"), fakeListBatch("invoices", 1, [piiInvoice]));
 

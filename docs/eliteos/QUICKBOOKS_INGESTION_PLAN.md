@@ -233,6 +233,19 @@ Phase 2 staging rows **in memory** to prove the export would import cleanly. It 
 npm run qb:staging:dry-run -- /path/to/export-folder
 ```
 
+**Company is staged from the root `company.json`.** Company is a manifest entity (RecordCount 1)
+written as a root file, not an entity folder. The dry-run reads `company.json`, builds the row
+via `buildStagingRow("company", record, ctx)` (with `qb_xml_version` sourced from
+`ctx.qbXmlVersion`), and counts it. If the manifest declares `company` but `company.json` is
+missing/unreadable/unmaterialized/empty, the dry-run **fails closed** — company is never
+silently skipped.
+
+**Manifest-total reconciliation.** After building, the dry-run asserts
+`sum(manifest entity RecordCounts, incl. company) === sum(built primary staging rows, excl.
+derived invoice-lines)`. Any delta becomes a fail reason (`DRY RUN FAIL`), so a future manifest
+entity that is not staged is caught automatically. Derived invoice-lines are excluded because
+they are not a manifest entity.
+
 **Invoice lines are derived from invoices, not from the standalone folder.** The connector's
 standalone `invoice-lines` folder is a lossy flattening whose records carry no parent invoice
 `TxnID` and no line sequence, so they cannot form the idempotent key
@@ -242,6 +255,11 @@ rows from each invoice record's nested `InvoiceLineRet`
 **0-based array position** of each line within its invoice provides a stable
 `line_seq_number`. The standalone `invoice-lines` folder is kept only as an informational
 count cross-check.
+
+**Line-ordering assumption (F2).** `line_seq_number` is derived from the 0-based document
+order of lines within each invoice. This assumes QBXML returns invoice lines in stable
+document order across extracts. Phase 3 should use `qb_txn_line_id` where available for
+reconciliation / change detection, while keeping `line_seq_number` as the idempotent key.
 
 **Fail-closed gates (DRY RUN FAIL before building rows):** manifest invalid;
 `selfReportedOnlyFileCount > 0`; `unreadableFileCount > 0`; `unrecognizedShapeFileCount > 0`;
@@ -260,11 +278,12 @@ not match real exports.
 
 **Dry-run result against the validated `quickbooks-20260710/full-materialized` archive:**
 
-- 13 primary entities build cleanly — **263,461 staging rows, exactly matching the manifest
-  record count** — with 0 failures.
+- All 14 manifest entities build cleanly — `company` (1) + the 13 folder entities — for a
+  **manifest entity total of 263,462**, exactly matching the built primary staging rows
+  (reconciliation passes).
 - `invoice-lines` **derived from invoices**: **356,969 rows, 0 failures**, and the standalone
   `invoice-lines` folder count (356,969) **matches** the derived total exactly (cross-check).
-- Total rows that would be upserted: **620,430**, 0 failures, 0 data-quality findings.
+- Total rows that would be upserted: **620,431**, 0 failures, 0 data-quality findings.
 - Overall result: **DRY RUN PASS**.
 
 The export is staging-ready. Migration remains draft-only; apply it only after Phase 3
