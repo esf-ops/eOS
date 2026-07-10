@@ -15,10 +15,27 @@ interface KioskSectionFrameProps {
   onNavigate: (section: NavSectionId) => void;
 }
 
-/** How long to wait for an embedded frame before offering a fallback. */
-const FRAME_TIMEOUT_MS = 6500;
+/** How long to wait for an embedded frame before surfacing the fallback. */
+const FRAME_TIMEOUT_MS = 8000;
+
+/** Dev-only diagnostics — stripped from production builds by Vite. */
+const DEV = import.meta.env.DEV === true;
 
 type Mode = "landing" | "embedded";
+
+/**
+ * Sections with kind "iframe-or-hero" and a configured URL embed immediately —
+ * no click required. Handoff sections (Visualizer) and URL-less sections always
+ * start on the hero launchpad.
+ *
+ * FIX: previous code always defaulted to "landing", requiring a button click
+ * even when a URL was fully configured via env vars.
+ */
+function initialMode(section: KioskSection): Mode {
+  return section.kind === "iframe-or-hero" && section.url.trim().length > 0
+    ? "embedded"
+    : "landing";
+}
 
 export function KioskSectionFrame({
   section,
@@ -26,19 +43,35 @@ export function KioskSectionFrame({
   onHome,
 }: KioskSectionFrameProps) {
   const hasUrl = section.url.trim().length > 0;
-  const [mode, setMode] = useState<Mode>("landing");
+  const [mode, setMode] = useState<Mode>(() => initialMode(section));
   const [frameLoaded, setFrameLoaded] = useState(false);
   const [frameTimedOut, setFrameTimedOut] = useState(false);
   const timeoutRef = useRef<number | undefined>(undefined);
 
-  // Reset local state whenever the section changes.
+  // On section navigation: reset state and auto-advance to embedded when URL is present.
   useEffect(() => {
-    setMode("landing");
+    const next = initialMode(section);
+    setMode(next);
     setFrameLoaded(false);
     setFrameTimedOut(false);
+
+    if (DEV) {
+      const urlOrigin = (() => {
+        if (!section.url) return "(none)";
+        try { return new URL(section.url).origin; } catch { return section.url; }
+      })();
+      console.log("[kiosk/section]", {
+        id: section.id,
+        hasUrl,
+        urlOrigin,
+        startingMode: next,
+      });
+    }
+    // section.id is the correct dep: re-run only when a different section is shown.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [section.id]);
 
-  // Arm a fallback timer while an embedded frame is loading.
+  // Arm the timeout fallback while a frame is loading.
   useEffect(() => {
     if (mode !== "embedded" || frameLoaded) return;
     timeoutRef.current = window.setTimeout(
@@ -77,13 +110,23 @@ export function KioskSectionFrame({
 
             {frameTimedOut && !frameLoaded ? (
               <div className="kiosk-frame-fallback" role="alert">
-                <h3>This experience is taking a moment.</h3>
+                <h3>This is taking longer than expected.</h3>
                 <p>
-                  If it doesn’t appear, an Elite Stone associate can help you open{" "}
-                  <strong>{section.title}</strong>.
+                  The page may be blocked from embedding. You can open{" "}
+                  <strong>{section.title}</strong> directly.
                 </p>
                 <div className="kiosk-frame-fallback-actions">
-                  <button type="button" className="kiosk-btn kiosk-btn--primary" onClick={openEmbedded}>
+                  {hasUrl ? (
+                    <a
+                      href={section.url}
+                      className="kiosk-btn kiosk-btn--primary"
+                      target="_top"
+                      rel="noopener"
+                    >
+                      Open full screen
+                    </a>
+                  ) : null}
+                  <button type="button" className="kiosk-btn kiosk-btn--ghost" onClick={openEmbedded}>
                     Try again
                   </button>
                   <button type="button" className="kiosk-btn kiosk-btn--ghost" onClick={() => setMode("landing")}>
@@ -103,7 +146,7 @@ export function KioskSectionFrame({
               title={section.title}
               onLoad={() => setFrameLoaded(true)}
               referrerPolicy="no-referrer"
-              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-pointer-lock"
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation allow-pointer-lock"
             />
 
             <button type="button" className="kiosk-frame-back" onClick={() => setMode("landing")}>
@@ -118,7 +161,7 @@ export function KioskSectionFrame({
             section={section}
             onPrimary={openEmbedded}
             primaryLabel={section.actionLabel}
-            note="A larger screen isn’t ideal for uploading a room photo — using your phone is easier."
+            note="A larger screen isn't ideal for uploading a room photo — using your phone is easier."
           >
             <KioskQrPanel
               url={visualizerHandoffUrl}
@@ -127,6 +170,7 @@ export function KioskSectionFrame({
             />
           </KioskSectionHero>
         ) : (
+          // URL-less hero launchpad (section not yet configured).
           <KioskSectionHero
             section={section}
             onPrimary={hasUrl ? openEmbedded : undefined}
