@@ -13,16 +13,16 @@ This mirrors the pattern already used for Moraware (`docs/eliteos/moraware-sync-
 
 `External system → local read-only extract → normalized staging → organization-scoped facts → heads`
 
-## Current Phase: Phase 4G.2 — Aggregate performance optimization
+## Current Phase: Phase 4G.3 — Incremental intel_* migration + chunked backfill
 
-**Latest delivered:** Phase 4G.2 denormalized `intel_*` columns + split section RPCs
-so full-period aggregate mode can finish without Postgres `57014` timeouts.
-Backend prefers **parallel section RPCs**, falls back to the orchestrator RPC, then
-to sample preview only when RPCs are missing.
+**Latest delivered:** Phase 4G.3 replaces the heavy v2 one-shot migration with nullable
+`intel_*` columns, chunked backfill RPCs, and section RPCs that never read
+`raw_payload` on executive aggregate paths. Backend calls **section RPCs only**
+(no slow orchestrator fallback).
 
-**Also in place:** Phase 1–3C staging; Phase 4A–4G facts/read/period UI + v1 RPC.
+**Also in place:** Phase 1–3C staging; Phase 4A–4G facts/read/period UI.
 
-**What does NOT exist yet (by design for 4G.2):**
+**What does NOT exist yet (by design for 4G.3):**
 
 - No AI summarization.
 - No browser access to `brain_quickbooks_*` / `raw_payload`.
@@ -888,6 +888,99 @@ service/API diagnostics, head partial banner.
 
 **Tests:** section RPC arg assertions, partial optional timeout, core 57014 no sample
 fallback, missing v2 → orchestrator → sample chain.
+
+### Phase 4G.3 — Incremental migration + chunked backfill (implemented; manual)
+
+**Status:** Code + SQL migration ready. **Not applied live automatically.**
+
+**Why v3:** Phase 4G.2’s STORED generated `intel_*` columns rewrote large staging
+tables and **timed out in the Supabase SQL editor**. After the failed apply,
+`pg_proc` still only had `qb_intelligence_executive_aggregate` (slow raw_payload
+scans). Section RPCs were never created, so production kept timing out.
+
+**v3 approach (SQL-editor safe):**
+
+1. Add **nullable** `intel_*` columns with `ADD COLUMN IF NOT EXISTS` (no table rewrite).
+2. Create helpers, section RPCs, and chunked backfill RPCs (DDL only — fast).
+3. Create indexes `IF NOT EXISTS` (non-CONCURRENTLY for editor safety).
+4. Operators run backfill in chunks until `remaining=0`.
+5. Backend calls **section RPCs only** — never falls back to the slow orchestrator.
+6. Section RPCs read `intel_*` only — **no `raw_payload` on executive reads**.
+
+**Migration file:**
+`backend-core/supabase/eliteos_quickbooks_intelligence_aggregates_v3.sql`
+
+**Manual steps:**
+
+**Step A — Apply v3 schema/functions**
+
+1. Open eliteOS Supabase → SQL editor.
+2. Paste full contents of `eliteos_quickbooks_intelligence_aggregates_v3.sql`.
+3. Run once. This should complete quickly (nullable columns + function DDL).
+4. Confirm section RPCs exist:
+
+```sql
+select proname
+from pg_proc
+where pronamespace = 'public'::regnamespace
+  and proname like 'qb_intelligence_%'
+order by 1;
+```
+
+Expect: `qb_intelligence_invoice_summary`, `qb_intelligence_payment_summary`,
+`qb_intelligence_ar_aging`, backfill_* functions, etc.
+
+**Step B — Chunked backfill**
+
+Option 1 — Node script (recommended):
+
+```bash
+QB_IMPORT_ORGANIZATION_ID=<org-uuid> \
+SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
+npm run qb:backfill:intelligence
+```
+
+Optional: `QB_INTEL_BACKFILL_LIMIT=5000` (max 20000).
+
+Option 2 — SQL editor (repeat each until `remaining` is 0):
+
+```sql
+select public.qb_intelligence_backfill_invoices(5000);
+select public.qb_intelligence_backfill_payments(5000);
+select public.qb_intelligence_backfill_estimates(5000);
+select public.qb_intelligence_backfill_sales_orders(5000);
+```
+
+Backfill returns safe counts only: `{ ok, entity, updated, remaining, limit }`.
+
+**Step C — Smoke-check section RPCs**
+
+```sql
+select public.qb_intelligence_invoice_summary(
+  '<org-uuid>'::uuid, '2026-01-01'::date, current_date);
+select public.qb_intelligence_payment_summary(
+  '<org-uuid>'::uuid, '2026-01-01'::date, current_date);
+select public.qb_intelligence_ar_aging('<org-uuid>'::uuid, current_date);
+```
+
+**Step D — Redeploy backend-core + QuickBooks Intelligence head**
+
+**Step E — Verify full_aggregate mode**
+
+Call the executive API with `mode=auto` and confirm response includes:
+`mode: "full_aggregate"`, `aggregate_version: "v3_sections"`,
+`aggregate_attempted: true`, `fallback_used: false`.
+
+**Backend behavior (4G.3):**
+
+- Parallel section RPCs only.
+- Missing section RPCs → clear diagnostic `section_rpcs_unavailable` (no slow
+  orchestrator). `mode=auto` may still sample-fallback; `mode=full_aggregate` fails closed.
+- Core section timeout → full aggregate `57014` (no sample fallback).
+
+**Modules:** `eliteos_quickbooks_intelligence_aggregates_v3.sql`,
+`quickBooksIntelligenceAggregateRepository.js`,
+`backfillQuickBooksIntelligence.mjs`.
 
 ### Phase 5 — Scheduled Connector Upload with Scoped Token
 

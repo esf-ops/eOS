@@ -80,7 +80,7 @@ function annotateAggregateFailure(err, attemptedMode) {
   e.aggregate_attempted = true;
   e.aggregate_available = e.missingRpc === true ? false : true;
   e.fallback_used = false;
-  e.fallback_reason = e.missingRpc === true ? "aggregate_rpc_unavailable" : null;
+  e.fallback_reason = e.missingRpc === true ? "section_rpcs_unavailable" : null;
   if (timedOut) {
     e.aggregateTimeout = true;
     e.code = "57014";
@@ -205,7 +205,7 @@ export async function loadExecutiveIntelligenceSnapshot(repository, organization
         aggregateAttempted: true,
         aggregateAvailable: false,
         fallbackUsed: true,
-        fallbackReason: "aggregate_rpc_unavailable",
+        fallbackReason: "section_rpcs_unavailable",
       });
     }
   } else if (attemptedMode === "sample_preview") {

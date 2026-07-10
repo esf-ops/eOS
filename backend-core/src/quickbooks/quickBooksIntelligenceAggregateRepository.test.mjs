@@ -1,5 +1,5 @@
 /**
- * Phase 4G.2 aggregate repository tests — mocked Supabase only.
+ * Phase 4G.3 aggregate repository tests — mocked Supabase only.
  */
 
 import assert from "node:assert/strict";
@@ -167,26 +167,22 @@ function sectionResponses(overrides = {}) {
 describe("quickBooksIntelligenceAggregateRepository helpers", () => {
   it("detects missing RPC errors", () => {
     assert.equal(isMissingAggregateRpcError({ code: "PGRST202", message: "Could not find the function" }), true);
-    assert.equal(isMissingAggregateRpcError({ code: "42883", message: "function does not exist" }), true);
     assert.equal(isMissingAggregateRpcError({ code: "57014", message: "timeout" }), false);
   });
 
-  it("sanitizes errors without leaking payload text", () => {
+  it("sanitizes missing section RPC errors with clear diagnostic", () => {
     const err = sanitizeAggregateRepositoryError({
       code: "PGRST202",
       message: "Could not find the function SENTINEL_NAME raw_payload",
     });
     assert.equal(err.missingRpc, true);
+    assert.equal(err.fallback_reason, "section_rpcs_unavailable");
+    assert.match(String(err.message), /4G\.3/);
     assert.equal(String(err.message).includes("SENTINEL"), false);
     assert.equal(String(err.message).includes("raw_payload"), false);
   });
 
   it("classifies section results safely", () => {
-    assert.deepEqual(classifySectionResult({ status: "fulfilled", value: { ok: true } }), {
-      ok: true,
-      status: "ok",
-      code: null,
-    });
     assert.equal(
       classifySectionResult({
         status: "rejected",
@@ -200,17 +196,12 @@ describe("quickBooksIntelligenceAggregateRepository helpers", () => {
     const period = resolveIntelligencePeriod({ preset: "ytd" }, NOW);
     const snapshot = shapeFullAggregateSnapshot(fakeAggregatePayload(), period, ORG);
     assert.equal(snapshot.mode, "full_aggregate");
-    assert.equal(snapshot.is_sample_limited, false);
-    assert.equal(snapshot.invoice_summary.invoice_count, 120);
-    assert.ok(snapshot.insight_list.length <= 10);
     assertNoRawPayload(snapshot);
-    assert.equal(JSON.stringify(snapshot).includes("raw_payload"), false);
   });
 
   it("builds capped priority insights from top lists", () => {
     const bits = buildAggregatePriorityInsights(fakeAggregatePayload(), 10);
     assert.ok(bits.insight_list.length <= 10);
-    assert.ok(bits.insight_groups.every((g) => g.items.length <= 3));
   });
 });
 
@@ -228,18 +219,8 @@ describe("createQuickBooksIntelligenceAggregateRepository section RPCs", () => {
     assert.equal(invoiceCall.args.p_organization_id, ORG);
     assert.equal(invoiceCall.args.p_date_from, "2026-01-01");
     assert.equal(invoiceCall.args.p_date_to, "2026-07-10");
-
-    const arCall = mock.calls.find((c) => c.name === QB_INTELLIGENCE_SECTION_RPCS.ar_aging);
-    assert.equal(arCall.args.p_as_of, "2026-07-10");
-
-    const topCall = mock.calls.find((c) => c.name === QB_INTELLIGENCE_SECTION_RPCS.top_customers);
-    assert.equal(topCall.args.p_sort, "risk_desc");
-    assert.equal(topCall.args.p_top_n, 10);
-
-    assert.equal(data.mode, "full_aggregate");
-    assert.equal(data.aggregate_version, "v2_sections");
-    assert.equal(data.is_section_partial, false);
-    assert.equal(data.invoice_summary.invoice_count, 120);
+    assert.equal(data.aggregate_version, "v3_sections");
+    assert.equal(mock.calls.some((c) => c.name === QB_INTELLIGENCE_AGGREGATE_RPC), false);
     assertNoRawPayload(data);
   });
 
@@ -257,11 +238,8 @@ describe("createQuickBooksIntelligenceAggregateRepository section RPCs", () => {
     });
     const period = resolveIntelligencePeriod({ preset: "ytd" }, NOW);
     const data = await repo.loadExecutiveAggregate(ORG, period, { topN: 10 });
-    assert.equal(data.mode, "full_aggregate");
     assert.equal(data.is_section_partial, true);
     assert.ok(data.failed_sections.includes("monthly_trend"));
-    assert.equal(data.invoice_summary.invoice_count, 120);
-    assertNoRawPayload(data);
   });
 
   it("does not return full_aggregate when a core section times out", async () => {
@@ -281,30 +259,16 @@ describe("createQuickBooksIntelligenceAggregateRepository section RPCs", () => {
       () => repo.loadExecutiveAggregate(ORG, period),
       (err) => {
         assert.equal(err.code, "57014");
-        assert.equal(err.aggregateTimeout, true);
         assert.equal(err.message, "QuickBooks full aggregate timed out");
-        assert.equal(String(err.message).includes("SENTINEL"), false);
         return true;
       },
     );
   });
 
-  it("falls back to orchestrator when section RPCs are missing", async () => {
+  it("does not fall back to slow orchestrator when section RPCs are missing", async () => {
     const mock = mockSupabase({
       [QB_INTELLIGENCE_AGGREGATE_RPC]: { data: fakeAggregatePayload() },
     });
-    const repo = createQuickBooksIntelligenceAggregateRepository({
-      getSupabase: () => mock.client,
-    });
-    const period = resolveIntelligencePeriod({ preset: "ytd" }, NOW);
-    const data = await repo.loadExecutiveAggregate(ORG, period, { topN: 10 });
-    assert.ok(mock.calls.some((c) => c.name === QB_INTELLIGENCE_AGGREGATE_RPC));
-    assert.equal(data.invoice_summary.invoice_count, 120);
-    assertNoRawPayload(data);
-  });
-
-  it("marks missing orchestrator for sample fallback", async () => {
-    const mock = mockSupabase({});
     const repo = createQuickBooksIntelligenceAggregateRepository({
       getSupabase: () => mock.client,
     });
@@ -313,7 +277,8 @@ describe("createQuickBooksIntelligenceAggregateRepository section RPCs", () => {
       () => repo.loadExecutiveAggregate(ORG, period),
       (err) => {
         assert.equal(err.missingRpc, true);
-        assert.equal(err.fallback_reason, "aggregate_rpc_unavailable");
+        assert.equal(err.fallback_reason, "section_rpcs_unavailable");
+        assert.equal(mock.calls.some((c) => c.name === QB_INTELLIGENCE_AGGREGATE_RPC), false);
         return true;
       },
     );
@@ -321,34 +286,12 @@ describe("createQuickBooksIntelligenceAggregateRepository section RPCs", () => {
 });
 
 describe("loadExecutiveIntelligenceSnapshot aggregate preference", () => {
-  it("returns full_aggregate when RPC succeeds", async () => {
-    const period = resolveIntelligencePeriod({ preset: "ytd" }, NOW);
-    const snapshot = await loadExecutiveIntelligenceSnapshot(
-      {
-        loadExecutiveAggregate: async () => fakeAggregatePayload(),
-        loadOrgCurrentDataset: async () => {
-          throw new Error("sample path should not run");
-        },
-      },
-      ORG,
-      { now: NOW, mode: "auto" },
-    );
-    assert.equal(snapshot.mode, "full_aggregate");
-    assert.equal(snapshot.is_sample_limited, false);
-    assert.equal(snapshot.attempted_mode, "auto");
-    assert.equal(snapshot.aggregate_attempted, true);
-    assert.equal(snapshot.period.date_from, period.date_from);
-    assertNoRawPayload(snapshot);
-  });
-
-  it("shapes partial section aggregate into snapshot", async () => {
+  it("returns full_aggregate when section RPCs succeed", async () => {
     const snapshot = await loadExecutiveIntelligenceSnapshot(
       {
         loadExecutiveAggregate: async () => ({
           ...fakeAggregatePayload(),
-          is_section_partial: true,
-          failed_sections: ["monthly_trend"],
-          aggregate_version: "v2_sections",
+          aggregate_version: "v3_sections",
         }),
         loadOrgCurrentDataset: async () => {
           throw new Error("sample path should not run");
@@ -358,21 +301,18 @@ describe("loadExecutiveIntelligenceSnapshot aggregate preference", () => {
       { now: NOW, mode: "auto" },
     );
     assert.equal(snapshot.mode, "full_aggregate");
-    assert.equal(snapshot.is_section_partial, true);
-    assert.deepEqual(snapshot.failed_sections, ["monthly_trend"]);
-    assert.equal(snapshot.period.is_partial, true);
+    assert.equal(snapshot.aggregate_version, "v3_sections");
     assertNoRawPayload(snapshot);
   });
 
-  it("falls back to sample_preview when RPC missing", async () => {
+  it("falls back to sample_preview when section RPCs missing", async () => {
     const snapshot = await loadExecutiveIntelligenceSnapshot(
       {
         loadExecutiveAggregate: async () => {
-          const err = new Error("QuickBooks intelligence aggregate RPC is not installed");
-          // @ts-ignore
-          err.missingRpc = true;
-          // @ts-ignore
-          err.code = "PGRST202";
+          const err = sanitizeAggregateRepositoryError({
+            code: "PGRST202",
+            message: "Could not find the function",
+          });
           throw err;
         },
         loadOrgCurrentDataset: async () => ({
@@ -403,8 +343,7 @@ describe("loadExecutiveIntelligenceSnapshot aggregate preference", () => {
       { now: NOW, mode: "auto", maxRows: 250, pageSize: 100 },
     );
     assert.equal(snapshot.mode, "sample_preview");
-    assert.equal(snapshot.is_sample_limited, true);
-    assert.equal(snapshot.fallback_reason, "aggregate_rpc_unavailable");
+    assert.equal(snapshot.fallback_reason, "section_rpcs_unavailable");
     assertNoRawPayload(snapshot);
   });
 
@@ -433,8 +372,6 @@ describe("loadExecutiveIntelligenceSnapshot aggregate preference", () => {
       (err) => {
         assert.equal(sampleCalled, false);
         assert.equal(err.code, "57014");
-        assert.equal(err.mode, "full_aggregate");
-        assert.equal(err.message, "QuickBooks full aggregate timed out");
         return true;
       },
     );

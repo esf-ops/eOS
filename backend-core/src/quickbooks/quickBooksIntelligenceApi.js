@@ -244,9 +244,15 @@ export function mapQuickBooksIntelligenceError(err) {
     status: 500,
     body: {
       ok: false,
-      error: "QuickBooks intelligence snapshot failed",
+      error:
+        code === "PGRST202" || diagnostics.fallback_reason === "section_rpcs_unavailable"
+          ? "QuickBooks intelligence section RPCs are not installed. Apply Phase 4G.3 migration and run backfill."
+          : "QuickBooks intelligence snapshot failed",
       ...(code ? { code } : {}),
       ...diagnostics,
+      fallback_reason:
+        diagnostics.fallback_reason ??
+        (code === "PGRST202" ? "section_rpcs_unavailable" : null),
     },
   };
 }
