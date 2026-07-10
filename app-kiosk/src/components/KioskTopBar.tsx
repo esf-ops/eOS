@@ -3,8 +3,8 @@ import { BRAND } from "../lib/kioskConfig";
 interface KioskTopBarProps {
   /** Section title shown to the right of the brand. Omit on home. */
   sectionTitle?: string;
-  /** Home button handler. Omit to hide the button (e.g. already on home). */
-  onHome?: () => void;
+  // onHome intentionally removed — Home navigation is now in the bottom-left
+  // footer pill button (KioskFooter) rather than the top bar.
 }
 
 /**
@@ -40,8 +40,8 @@ function EsfLogo({ large }: { large?: boolean }) {
   );
 }
 
-export function KioskTopBar({ sectionTitle, onHome }: KioskTopBarProps) {
-  const isHome = !sectionTitle && !onHome;
+export function KioskTopBar({ sectionTitle }: KioskTopBarProps) {
+  const isHome = !sectionTitle;
 
   return (
     <header className="kiosk-topbar">
@@ -55,16 +55,6 @@ export function KioskTopBar({ sectionTitle, onHome }: KioskTopBarProps) {
           <span className="kiosk-topbar-divider" aria-hidden />
           <span className="kiosk-topbar-section-title">{sectionTitle}</span>
         </div>
-      ) : null}
-
-      {onHome ? (
-        <button type="button" className="kiosk-home-btn" onClick={onHome}>
-          <svg viewBox="0 0 24 24" fill="none" aria-hidden>
-            <path d="M4 11.5 12 5l8 6.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-            <path d="M6 10.5V19h12v-8.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          <span>Home</span>
-        </button>
       ) : null}
     </header>
   );

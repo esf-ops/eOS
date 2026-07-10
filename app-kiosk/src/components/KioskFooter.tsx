@@ -1,32 +1,42 @@
-import { BRAND } from "../lib/kioskConfig";
-
 interface KioskFooterProps {
-  showroomSlug: string;
-  /** When provided, renders an active Home button. Omit on the home page itself. */
+  /** When provided, renders the Home button. Omit on the home page itself. */
   onHome?: () => void;
 }
 
-/** Bottom utility row: optional home button, help line, showroom label. */
-export function KioskFooter({ showroomSlug, onHome }: KioskFooterProps) {
+/**
+ * Bottom utility row.
+ *
+ * On section pages: renders the Home pill button (same visual style as the
+ * former top-right Home button — white pill, home icon, Elite red accent).
+ * On the home page (onHome omitted): renders nothing.
+ *
+ * Removed: "Need help?" helper text, showroom slug label.
+ * These were unnecessary UI clutter on a 65-inch touchscreen kiosk.
+ */
+export function KioskFooter({ onHome }: KioskFooterProps) {
+  if (!onHome) return null;
+
   return (
-    <footer className="kiosk-footer">
-      {/* Left slot: Home button on section pages; empty spacer on home page
-          so the center help text stays visually centered. */}
-      <div className="kiosk-footer-left">
-        {onHome ? (
-          <button type="button" className="kiosk-footer-home" onClick={onHome}>
-            Home
-          </button>
-        ) : null}
-      </div>
-
-      <p className="kiosk-footer-help">{BRAND.helpLine}</p>
-
-      <div className="kiosk-footer-right">
-        <span className="kiosk-footer-slug">
-          {BRAND.fabricationName} · {showroomSlug}
-        </span>
-      </div>
+    <footer className="kiosk-footer kiosk-footer--section">
+      <button type="button" className="kiosk-home-btn kiosk-home-btn--footer" onClick={onHome}>
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden>
+          <path
+            d="M4 11.5 12 5l8 6.5"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M6 10.5V19h12v-8.5"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+        <span>Home</span>
+      </button>
     </footer>
   );
 }

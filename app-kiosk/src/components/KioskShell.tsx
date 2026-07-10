@@ -57,7 +57,7 @@ export function KioskShell({
             onNavigate={onNavigate}
           />
         ) : (
-          <KioskHome showroomSlug={showroomSlug} onNavigate={onNavigate} />
+          <KioskHome onNavigate={onNavigate} />
         )}
       </div>
 

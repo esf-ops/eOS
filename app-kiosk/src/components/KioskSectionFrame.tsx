@@ -96,7 +96,7 @@ export function KioskSectionFrame({
 
   return (
     <div className="kiosk-section">
-      <KioskTopBar sectionTitle={section.title} onHome={onHome} />
+      <KioskTopBar sectionTitle={section.title} />
 
       <div className="kiosk-section-body">
         {mode === "embedded" && hasUrl ? (
@@ -148,13 +148,6 @@ export function KioskSectionFrame({
               referrerPolicy="no-referrer"
               sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation allow-pointer-lock"
             />
-
-            <button type="button" className="kiosk-frame-back" onClick={() => setMode("landing")}>
-              <svg viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path d="M15 6l-6 6 6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              <span>Back</span>
-            </button>
           </div>
         ) : section.kind === "handoff" ? (
           <KioskSectionHero
@@ -179,7 +172,7 @@ export function KioskSectionFrame({
         )}
       </div>
 
-      <KioskFooter showroomSlug={showroomSlug} onHome={onHome} />
+      <KioskFooter onHome={onHome} />
     </div>
   );
 }
