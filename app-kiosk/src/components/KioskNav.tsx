@@ -25,35 +25,43 @@ const STONE_SWATCHES = [
 ];
 
 /**
- * Live Inventory card: premium/dramatic stones that read as "Group E/F" quality.
- * Ordered dark→warm→metallic→bold-white so adjacent swatches contrast strongly.
+ * Live Inventory card: full-bleed stone rotator.
+ * Leads with visually striking stones (not black) so the first impression
+ * communicates premium inventory. Bold veining and warm tones read as
+ * "real slabs" rather than "color chips" — distinct from the Elite 100 strip.
  * No inventory counts, slab IDs, pricing, or internal metadata exposed.
  */
-const PREMIUM_SLAB_SWATCHES = [
-  "/stone/india-black-pearl-polished.jpg",
-  "/stone/sicilia.jpg",
-  "/stone/suede-brown-polished.jpg",
-  "/stone/silver-pearl-polished.jpg",
-  "/stone/carrara-royale.jpg",
+const SLAB_IMAGES = [
+  "/stone/carrara-royale.jpg",      // bold white veining — immediately premium
+  "/stone/suede-brown-polished.jpg",// warm earthy luxury
+  "/stone/silver-pearl-polished.jpg",// elegant metallic
+  "/stone/sicilia.jpg",             // exotic and dramatic
+  "/stone/india-black-pearl-polished.jpg", // bold black — shown later in cycle
 ];
 
 /**
- * Product Catalog card: "installed" sink-in-countertop photos.
- * Split into two interleaved sets so the two collage panels crossfade
- * at different intervals — left and right sides never change simultaneously.
- * From app-slab-inventory/public/product-catalog/sinks/installed.jpg files.
+ * Product Catalog card: real Blanco product photography (hero shots).
+ * Left panel: sinks on neutral studio background — professional catalog feel.
+ * Right panel: faucet product shots on white — clear "accessories" read.
  * No prices, product IDs, or inventory data.
+ * Source: app-slab-inventory/public/product-catalog/
  */
-const CATALOG_LEFT = ["/catalog/sink-a.jpg", "/catalog/sink-c.jpg"];
-const CATALOG_RIGHT = ["/catalog/sink-b.jpg", "/catalog/sink-d.jpg"];
+const CATALOG_SINKS = [
+  "/catalog/sink-hero-a.jpg", // Precis 24" single bowl — clean studio shot
+  "/catalog/sink-hero-b.jpg", // Diamond 60/40 double bowl
+  "/catalog/sink-hero-c.jpg", // Precis 30" single bowl
+];
+const CATALOG_FAUCETS = [
+  "/catalog/faucet-black.png",     // matte black — bold accent finish
+  "/catalog/faucet-stainless.png", // stainless — classic finish
+];
 
 /**
- * Visualizer card: two different kitchen styles shown side-by-side.
- * This "split" composition reads immediately as "see it different ways."
- * From app-visualizer/public/demo-rooms/
+ * Visualizer card: single real kitchen photo, no split.
+ * classic-kitchen.jpg is real photography (1280x852) with visible countertops.
+ * One clean image reads more intentionally than a forced side-by-side split.
  */
-const ROOM_LEFT = "/rooms/classic-kitchen.jpg";
-const ROOM_RIGHT = "/rooms/modern-kitchen.jpg";
+const ROOM_IMAGES = ["/rooms/classic-kitchen.jpg"];
 
 // ── Card artwork ─────────────────────────────────────────────────────────────
 
@@ -76,51 +84,52 @@ function StoneSwatchStrip() {
 }
 
 /**
- * Live Inventory card: 5 premium dramatic stones shown as a swatch strip.
- * Immediately shows variety — no black rectangle, no waiting for rotation.
- * Dark, exotic, warm, metallic, bold-white stones communicate premium value.
+ * Live Inventory card: full-bleed stone rotator.
+ * One dramatic stone surface fills the entire card art area at a time —
+ * completely different visual language from the Elite 100 horizontal strip.
+ * Reads as "browse real slabs" rather than "browse color chips."
+ * Leads with high-contrast, visually striking stones; black appears later.
  */
-function PremiumSlabStrip() {
+function SlabInventoryRotator() {
   return (
-    <div className="kiosk-card-art kiosk-card-art--stone kiosk-card-art--premium-slabs" aria-hidden>
-      {PREMIUM_SLAB_SWATCHES.map((src) => (
-        <img
-          key={src}
-          src={src}
-          alt=""
-          className="kiosk-stone-swatch"
-          loading="eager"
-          draggable={false}
-        />
-      ))}
+    <div className="kiosk-card-art kiosk-card-art--photo kiosk-card-art--inventory" aria-hidden>
+      <KioskCardMediaRotator
+        images={SLAB_IMAGES}
+        intervalMs={5000}
+        objectPosition="center"
+        label="Premium stone slab"
+      />
     </div>
   );
 }
 
 /**
- * Product Catalog card: two sink-in-countertop photos shown simultaneously.
- * Left panel (60%) and right panel (40%) crossfade independently on different
- * intervals so both sides are never changing at the same time.
- * "Product variety at a glance" — readable from across the showroom.
+ * Product Catalog card: sink hero (left) + faucet product shot (right).
+ * Left panel: professional Blanco sink photography on neutral studio bg —
+ *   "object-fit: cover" crops to show the bowl face-on.
+ * Right panel: faucet PNG on white bg with "object-fit: contain" so the
+ *   full fixture silhouette is always visible, like a real catalog page.
+ * Two distinct product types visible simultaneously = "catalog" reads clearly.
  */
 function CatalogCollage() {
   return (
     <div className="kiosk-card-art kiosk-card-art--photo kiosk-card-art--catalog" aria-hidden>
       <div className="kiosk-collage-panel kiosk-collage-panel--wide">
         <KioskCardMediaRotator
-          images={CATALOG_LEFT}
+          images={CATALOG_SINKS}
           intervalMs={6000}
-          objectPosition="center 28%"
-          label="Sink preview left"
+          objectPosition="center 30%"
+          label="Sink product photo"
         />
       </div>
       <div className="kiosk-collage-divider" aria-hidden />
-      <div className="kiosk-collage-panel kiosk-collage-panel--narrow">
+      <div className="kiosk-collage-panel kiosk-collage-panel--narrow kiosk-collage-panel--product">
         <KioskCardMediaRotator
-          images={CATALOG_RIGHT}
-          intervalMs={8500}
-          objectPosition="center 32%"
-          label="Sink preview right"
+          images={CATALOG_FAUCETS}
+          intervalMs={9000}
+          objectFit="contain"
+          objectPosition="center"
+          label="Faucet product photo"
         />
       </div>
     </div>
@@ -128,29 +137,21 @@ function CatalogCollage() {
 }
 
 /**
- * Visualizer card: two kitchen rooms side by side.
- * The split composition reads immediately as "compare different styles" —
- * the core idea of the visualizer tool.
- * The red "Visualize" badge reinforces the interactive CTA.
+ * Visualizer card: single real kitchen photo, full-bleed.
+ * No split — one clean, premium kitchen read is more intentional than a
+ * forced side-by-side composition with mismatched styles.
+ * Crop at "center 38%" keeps countertops and island in frame.
+ * "Visualize" badge reinforces the interactive CTA.
  */
-function VisualizerRoomPair() {
+function VisualizerPhoto() {
   return (
     <div className="kiosk-card-art kiosk-card-art--photo kiosk-card-art--visualizer" aria-hidden>
-      <div className="kiosk-collage-panel">
-        <KioskCardMediaRotator
-          images={[ROOM_LEFT]}
-          objectPosition="center 38%"
-          label="Classic kitchen"
-        />
-      </div>
-      <div className="kiosk-collage-divider kiosk-collage-divider--vivid" aria-hidden />
-      <div className="kiosk-collage-panel">
-        <KioskCardMediaRotator
-          images={[ROOM_RIGHT]}
-          objectPosition="center 42%"
-          label="Modern kitchen"
-        />
-      </div>
+      <KioskCardMediaRotator
+        images={ROOM_IMAGES}
+        intervalMs={8000}
+        objectPosition="center 38%"
+        label="Kitchen showroom"
+      />
       <span className="kiosk-card-art-badge" aria-hidden>Visualize</span>
     </div>
   );
@@ -159,8 +160,8 @@ function VisualizerRoomPair() {
 function CardArt({ accent }: { accent: KioskSection["accent"] }) {
   if (accent === "stone") return <StoneSwatchStrip />;
   if (accent === "catalog") return <CatalogCollage />;
-  if (accent === "inventory") return <PremiumSlabStrip />;
-  return <VisualizerRoomPair />;
+  if (accent === "inventory") return <SlabInventoryRotator />;
+  return <VisualizerPhoto />;
 }
 
 // ── Nav grid ─────────────────────────────────────────────────────────────────

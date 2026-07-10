@@ -528,6 +528,10 @@ body {
 .kiosk-collage-panel--wide  { flex: 3; }
 .kiosk-collage-panel--narrow { flex: 2; }
 
+/* Faucet panel: white background so product PNGs (which have white BG)
+   blend seamlessly — creates a clean product-catalog-page feel. */
+.kiosk-collage-panel--product { background: #fff; }
+
 /* Thin vertical separator between panels */
 .kiosk-collage-divider {
   width: 2px;

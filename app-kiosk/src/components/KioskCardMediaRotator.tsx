@@ -6,6 +6,9 @@ interface KioskCardMediaRotatorProps {
   intervalMs?: number;
   /** CSS object-position for all images. Default "center". */
   objectPosition?: string;
+  /** CSS object-fit. Default "cover". Use "contain" for product shots on a
+   *  light background so the full product is always visible. */
+  objectFit?: "cover" | "contain";
   /** Optional label describing what the images show (used in alt). */
   label?: string;
 }
@@ -26,6 +29,7 @@ export function KioskCardMediaRotator({
   images,
   intervalMs = 5000,
   objectPosition = "center",
+  objectFit = "cover",
   label = "",
 }: KioskCardMediaRotatorProps) {
   const valid = images.filter(Boolean);
@@ -63,7 +67,7 @@ export function KioskCardMediaRotator({
           loading={i === 0 ? "eager" : "lazy"}
           draggable={false}
           className={`kiosk-rotator-img${i === activeIdx ? " kiosk-rotator-img--active" : ""}`}
-          style={{ objectPosition }}
+          style={{ objectPosition, objectFit }}
           onLoad={() => setLoadedSet((s) => new Set(s).add(i))}
           onError={(e) => {
             // Hide permanently broken images so they never flash.
