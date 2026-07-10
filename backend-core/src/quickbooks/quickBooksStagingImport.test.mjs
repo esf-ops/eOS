@@ -544,4 +544,38 @@ async function writeCleanExport(dir, { customerCount = 3, invoiceCount = 2, line
   console.log("ok (F1): mid-write throw preserves pre-throw errors/findings; run failed; safe message only");
 }
 
+// ── Test 16 (B1): createSyncRun failure fails closed (no throw, no writes) ───
+{
+  const dir = await makeTempExportFolder();
+  await writeCleanExport(dir, { customerCount: 1, invoiceCount: 1, linesPerInvoice: 1 });
+  const base = createInMemoryQuickBooksStagingRepository();
+  const dbErr = new Error("RAW_DB_CONNECT_ERROR should never leak");
+  dbErr.code = "ECONNREFUSED";
+  const failingRepo = {
+    ...base,
+    createSyncRun: async () => {
+      throw dbErr;
+    },
+  };
+
+  let result;
+  await assert.doesNotReject(async () => {
+    result = await importQuickBooksStaging(dir, { organizationId: FAKE_ORG_ID, repository: failingRepo });
+  }, "createSyncRun failure must not throw to the caller");
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.ok, false);
+  assert.equal(result.syncRunId, null, "no run id when the run could not be opened");
+  assert.ok(result.failReasons.some((r) => /aborted opening sync run \(ECONNREFUSED\)/.test(r)));
+  // No run created, no staging tables written, no error rows (there was no syncRunId yet).
+  assert.equal(base.getRuns().length, 0);
+  assert.equal(base.getTableNames().length, 0);
+  assert.equal(base.getErrors().length, 0);
+  // No raw DB error text leaks into the result.
+  assert.doesNotMatch(JSON.stringify(result), /RAW_DB_CONNECT_ERROR/);
+
+  await fs.rm(dir, { recursive: true, force: true });
+  console.log("ok (B1): createSyncRun failure returns failed result — no throw, no run, no writes, no leak");
+}
+
 console.log("\nAll quickBooksStagingImport tests passed.");

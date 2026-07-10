@@ -171,6 +171,7 @@ const repoFor = (mock) => createQuickBooksStagingSupabaseRepository({ getSupabas
   const run = [...mock.state.runs.values()][0];
   assert.equal(run.status, "success");
   assert.ok(run.finished_at, "run finalized with finished_at");
+  assert.ok(run.updated_at, "run updated_at advanced on finalize");
 
   // Conflict keys used per table match QB_STAGING_UNIQUE_KEYS exactly.
   const onConflictByTable = {};
@@ -340,6 +341,30 @@ const repoFor = (mock) => createQuickBooksStagingSupabaseRepository({ getSupabas
   assert.doesNotMatch(src, /(from|require\()\s*['"]@supabase/, "repo must not runtime-import @supabase (DI only)");
   assert.doesNotMatch(src, /process\.env/, "repo must not read env (no credentials)");
   console.log("ok: repo takes an injected client only — creates no client, reads no env (no VM creds)");
+}
+
+// ── Test 8 (B2): intra-chunk duplicate conflict keys are de-duped (last wins) ─
+{
+  const mock = createMockSupabase();
+  const repo = repoFor(mock);
+  const rows = [
+    { organization_id: FAKE_ORG_ID, qb_list_id: "DUP", raw_payload: { v: "FIRST" } },
+    { organization_id: FAKE_ORG_ID, qb_list_id: "DUP", raw_payload: { v: "LAST" } },
+    { organization_id: FAKE_ORG_ID, qb_list_id: "OTHER", raw_payload: { v: "X" } },
+  ];
+
+  let res;
+  await assert.doesNotReject(async () => {
+    res = await repo.upsertRows("brain_quickbooks_customers", rows, ["organization_id", "qb_list_id"], []);
+  });
+
+  // total reflects the ORIGINAL attempted input rows, not the de-duped write count.
+  assert.equal(res.total, 3);
+  const upsert = mock.state.upserts.find((u) => u.table === "brain_quickbooks_customers");
+  assert.equal(upsert.rows.length, 2, "duplicate conflict key collapsed; distinct key retained");
+  const dup = upsert.rows.find((r) => r.qb_list_id === "DUP");
+  assert.equal(dup.raw_payload.v, "LAST", "the last row wins for the duplicate conflict key");
+  console.log("ok (B2): intra-chunk duplicate conflict keys de-duped (last wins); total reflects input");
 }
 
 console.log("\nAll quickBooksStagingSupabaseRepository tests passed.");

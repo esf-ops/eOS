@@ -123,18 +123,26 @@ export async function importQuickBooksStaging(exportFolderPath, options = {}) {
     return failedShell({ runId, qbXmlVersion, blockReasons });
   }
 
-  // Gates passed — open an audit run, then write.
-  const { id: syncRunId } = await repository.createSyncRun({
-    organization_id: organizationId,
-    source_system: "quickbooks",
-    qb_run_id: runId,
-    qb_xml_version: qbXmlVersion,
-    mode,
-    status: "running",
-    import_group_id: importGroupId,
-    chunk_index: chunkIndex,
-    chunk_count: chunkCount,
-  });
+  // Gates passed — open an audit run, then write. Opening the run can itself throw against
+  // a real repository (transient DB error, etc.); fail closed with a safe reason and no
+  // error rows (there is no syncRunId yet) rather than throwing to the caller.
+  let syncRunId;
+  try {
+    ({ id: syncRunId } = await repository.createSyncRun({
+      organization_id: organizationId,
+      source_system: "quickbooks",
+      qb_run_id: runId,
+      qb_xml_version: qbXmlVersion,
+      mode,
+      status: "running",
+      import_group_id: importGroupId,
+      chunk_index: chunkIndex,
+      chunk_count: chunkCount,
+    }));
+  } catch (err) {
+    const safeMessage = `import aborted opening sync run (${err?.code ?? err?.name ?? "error"})`;
+    return failedShell({ runId, qbXmlVersion, failReasons: [safeMessage] });
+  }
 
   // Hoisted above the try so the catch can flush whatever was accumulated before a throw.
   const dataQualityFindingCounts = {};

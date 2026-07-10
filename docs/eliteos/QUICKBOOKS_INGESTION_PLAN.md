@@ -397,6 +397,27 @@ Implementation details:
   `error_message`, `entity_counts`, `metadata`). The migration adds `qb_sync_runs.error_message`.
 - **Sanitized errors:** thrown errors carry only an error `code` and a generic message (never
   raw DB text), so the orchestrator's error path produces a safe run `error_message`.
+- **Open-run fail-closed:** the orchestrator wraps `createSyncRun` in its own try/catch — if
+  opening the run throws (transient DB error, etc.), the import returns
+  `status:"failed"` with a safe reason (`import aborted opening sync run (<code>)`) and writes
+  nothing (no run, no rows, no error rows since there is no `syncRunId` yet). It never throws
+  to the caller.
+- **Intra-chunk de-dupe:** `upsertRows` de-duplicates each chunk by conflict key (last row
+  wins) before calling Supabase `.upsert()`, preventing Postgres `21000`
+  ("ON CONFLICT DO UPDATE cannot affect row a second time") when a chunk contains duplicate
+  conflict keys. The returned `total` still reflects the original attempted input row count.
+- **finalize advances updated_at:** `finalizeSyncRun` sets `qb_sync_runs.updated_at` (that
+  table has no touch-timestamps trigger), so the run row's `updated_at` reflects finalize time.
+
+**Operational notes:**
+
+- A run left in `status:"running"` after a hard process crash (kill/OOM between
+  `createSyncRun` and `finalizeSyncRun`) should be treated operationally as **failed/stale** —
+  this is inherent to a non-transactional multi-step import and is not auto-recovered.
+- The write-phase `catch` re-flush of accumulated errors/findings is **best-effort**; if a
+  partial audit insert had already succeeded before the throw, the re-flush can create
+  duplicate `qb_sync_errors` rows (that table has no unique key). Duplicates are acceptable
+  for diagnostics — dedupe at read time if needed.
 
 Tested with a **mocked Supabase client only** (`quickBooksStagingSupabaseRepository.test.mjs`):
 clean import upserts the expected tables/counts with correct conflict keys and finalizes the

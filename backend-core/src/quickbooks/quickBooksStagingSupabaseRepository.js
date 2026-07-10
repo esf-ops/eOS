@@ -117,12 +117,24 @@ export function createQuickBooksStagingSupabaseRepository(deps) {
       // preserved on conflict since they are not in the payload).
       const stampedRows = rows.map((row) => ({ ...row, last_seen_at: stamp, updated_at: stamp }));
 
+      // De-duplicate by conflict key (keep the LAST row for each key). Postgres raises
+      // 21000 ("cannot affect row a second time") if a single ON CONFLICT statement carries
+      // two rows with the same conflict key; de-duping here prevents that on any export with
+      // duplicate ids in one chunk. `total` still reflects the attempted input row count.
+      const byConflictKey = new Map();
+      for (const row of stampedRows) {
+        const key = conflictColumns.map((c) => `${c}=${row[c]}`).join("\u0000");
+        byConflictKey.set(key, row);
+      }
+      const dedupedRows = Array.from(byConflictKey.values());
+
       const { error } = await db
         .from(tableName)
-        .upsert(stampedRows, { onConflict: conflictColumns.join(",") });
+        .upsert(dedupedRows, { onConflict: conflictColumns.join(",") });
       if (error) throw toRepoError(error, `upsertRows(${tableName})`);
 
-      // inserted/updated are best-effort (see module doc); total is authoritative.
+      // inserted/updated are best-effort (see module doc); total is authoritative and
+      // reflects the ORIGINAL attempted input row count, not the de-duped write count.
       return { inserted: 0, updated: 0, total: rows.length };
     },
 
@@ -148,7 +160,9 @@ export function createQuickBooksStagingSupabaseRepository(deps) {
 
     async finalizeSyncRun(id, patch) {
       const db = getSupabase();
-      const update = {};
+      // qb_sync_runs has no touch-timestamps trigger (it lacks first_seen_at/last_seen_at),
+      // so advance updated_at here on finalize.
+      const update = { updated_at: new Date().toISOString() };
       // Only forward known, safe columns.
       for (const col of ["status", "finished_at", "error_count", "error_message", "entity_counts", "metadata"]) {
         if (patch[col] !== undefined) update[col] = patch[col];
