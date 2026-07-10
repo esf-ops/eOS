@@ -426,32 +426,59 @@ an upsert failure finalizes the run `failed` with a code-only message (no raw DB
 error/finding batch inserts happen; no PII reaches runs/updates/audit inserts/result; and the
 repo creates no client / reads no env (injection only).
 
-### Applying the migration + running the real import (Phase 3B — DO NOT RUN YET)
+## Phase 3C — Real Import CLI Wrapper (implemented; NOT YET RUN)
 
-The migration (`backend-core/supabase/eliteos_quickbooks_staging_v1.sql`, now including the
-`error_message` column and the `qb_staging_touch_timestamps` trigger) must be applied in the
-Supabase SQL editor **before** the first real import. The real import runs **inside
-backend-core** (where the service-role client lives), never on the VM. Exact command to wire
-and run later (not executed in this phase):
+`backend-core/src/scripts/importQuickBooksStaging.mjs` is the thin backend-core CLI that runs
+the real import: it validates env, lazily constructs the service-role Supabase client
+(`createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false,
+autoRefreshToken: false } })` via dynamic import), builds
+`createQuickBooksStagingSupabaseRepository({ getSupabase })`, and calls
+`importQuickBooksStaging(exportFolder, { organizationId, repository })`. It prints only safe
+counts/status (never records, `raw_payload`, PII, raw DB errors, or any env/secret value) and
+exits `0` on success, `1` on partial/failed/usage error. The core logic (`runImportCli`) is
+dependency-injectable and tested with mocked env + an injected repository — no real Supabase,
+no network, no credentials. It has **no** QuickBooks-connector/VM dependency.
+
+The QuickBooks VM only ever produces the local export; this CLI runs **inside backend-core**
+where the service-role client lives — the VM never holds Supabase credentials.
+
+### Exact operator sequence (run only when going live; NOT executed in these phases)
 
 ```bash
-# 1. Apply the migration once in the Supabase SQL editor:
-#    backend-core/supabase/eliteos_quickbooks_staging_v1.sql
-#
-# 2. Run the real staging import from backend-core (service role available server-side):
+# 1. Apply the migration ONCE in the Supabase SQL editor (includes error_message column +
+#    qb_staging_touch_timestamps trigger):
+#      backend-core/supabase/eliteos_quickbooks_staging_v1.sql
+#    Verify tables + RLS:
+#      select tablename, rowsecurity from pg_tables
+#      where tablename like '%quickbooks%' or tablename like 'qb_%' order by tablename;
+
+# 2. Dry-run the export first (local, read-only; must reach DRY RUN PASS, exit 0):
+npm run qb:staging:dry-run -- ~/eliteos-local-archive/quickbooks-20260710/full-materialized
+
+# 3. Run the real import from a backend-core environment (service role available server-side,
+#    NEVER on the QuickBooks VM):
 SUPABASE_URL=... \
 SUPABASE_SERVICE_ROLE_KEY=... \
 QB_IMPORT_ORGANIZATION_ID=<org-uuid> \
 QB_IMPORT_EXPORT_FOLDER=~/eliteos-local-archive/quickbooks-20260710/full-materialized \
-node backend-core/src/scripts/importQuickBooksStaging.mjs   # <- Phase 3B CLI wrapper (not yet built)
+node backend-core/src/scripts/importQuickBooksStaging.mjs
+#    Expect: Result: SUCCESS, Total staging rows: 620431 (company 1 + primary 263,462 +
+#    derived invoice-lines 356,969), Total skipped/failed: 0.
+
+# 4. Idempotent rerun verification: run the SAME command again. Expect Result: SUCCESS with
+#    identical totals and per-entity inserted=0 / updated=<row count> (upserts, no duplicate
+#    inserts). Confirm row counts are unchanged in Supabase, e.g.:
+#      select count(*) from public.brain_quickbooks_customers where organization_id = '<org-uuid>';
+#      select count(*) from public.brain_quickbooks_invoice_lines where organization_id = '<org-uuid>';
+#      select status, error_count, entity_counts from public.qb_sync_runs
+#      where organization_id = '<org-uuid>' order by imported_at desc limit 2;
 ```
 
-The Phase 3B CLI wrapper will: construct the service-role client, build
-`createQuickBooksStagingSupabaseRepository({ getSupabase })`, and call
-`importQuickBooksStaging(exportFolder, { organizationId, repository })`. It is a backend-core
-tool — the QuickBooks VM only ever produces the local export and never holds Supabase creds.
+Operational reminders: a run left `status:"running"` after a hard crash is failed/stale (not
+auto-recovered); a mid-write failure finalizes the run `failed` with a safe code-only message
+and best-effort-flushes accumulated errors/findings (which may duplicate `qb_sync_errors` rows).
 
-### Phase 3C — Protected Internal Endpoint
+### Phase 3D — Protected Internal Endpoint (future)
 
 Wire the orchestrator + Supabase repository behind a protected internal route
 (`POST /api/internal/quickbooks-sync/import`, shared-secret header, same pattern as
