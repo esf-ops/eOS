@@ -427,10 +427,42 @@ body {
   font-weight: 600;
   font-size: var(--fs-headline);
   line-height: 1.08;
-  /* Copperplate/Cinzel are already slightly wider-tracked by design;
-     a small positive offset looks intentional vs the cramped default. */
   letter-spacing: 0.025em;
   color: var(--ink);
+  /* position:relative enables the ::before readability mask below.
+     No transform, filter, or opacity — does not create a GPU compositing layer. */
+  position: relative;
+}
+
+/* Soft porcelain-to-transparent gradient that sits directly behind the
+   headline text, protecting legibility when the facility aerial is visible.
+   Scope: only the headline's bounding box + comfortable padding outward.
+   The mask does NOT extend to the subhead or the slideshow card below.
+
+   Sizing: left extends to cover the page left-margin (negative offset past
+   the element's left edge); right tapers to transparent before the card grid.
+   z-index: -1 keeps the gradient below the text on the same stacking plane. */
+.kiosk-home-headline::before {
+  content: "";
+  position: absolute;
+  /* Outward padding — vertical gives breathing room around ascenders/descenders */
+  top: -0.5em;
+  bottom: -0.4em;
+  /* Extend left past the page margin into the ambient background zone */
+  left: -80px;
+  /* Extend right slightly beyond the headline text column */
+  right: -2em;
+  background: linear-gradient(
+    90deg,
+    rgba(248, 247, 245, 0.94) 0%,
+    rgba(248, 247, 245, 0.88) 40%,
+    rgba(248, 247, 245, 0.55) 70%,
+    transparent 100%
+  );
+  /* Soft right edge so the fade reads as ambient, not a hard panel edge */
+  border-radius: 0 20px 20px 0;
+  z-index: -1;
+  pointer-events: none;
 }
 
 .kiosk-home-subhead {

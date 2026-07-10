@@ -4306,6 +4306,21 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
   display: none;
 }
 
+/* In kiosk mode the kiosk shell already provides branding (ESF logo + topbar).
+   The embedded Elite 100 header (logo, "Elite 100 Color Collection 2026",
+   subtitle) is redundant inside the presentation frame — hide it.
+   The carousel and all group content shift up naturally to fill the space.
+   Standalone public URL without ?kiosk=1 is unaffected. */
+.e100-public-kiosk .e100-public-header {
+  display: none;
+}
+
+/* Tighten the top padding of the main content area so there is no blank gap
+   where the header was. Default padding is generous (32px+); kiosk uses 8px. */
+.e100-public-kiosk .e100-public-main {
+  padding-top: 8px;
+}
+
 /* Public Elite 100 color lightbox (showroom-safe detail view) */
 .e100-public-lightbox-overlay {
   position: fixed;

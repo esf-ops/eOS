@@ -11,11 +11,19 @@ interface KioskNavProps {
 // Every card is fully static — no timers, rotators, or continuous animation.
 // All assets live in app-kiosk/public.
 
+// Six colors chosen for tonal and textural variety from the full Elite 100 set:
+//  bayshore-sand     — warm cream/sand (light-warm)
+//  carrara-classic   — classic white marble veining (light-cool)
+//  antique-gray      — antique gray (medium)
+//  silver-pearl-polished — metallic silver-gray (medium-polished)
+//  suede-brown-polished  — warm polished brown (medium-dark)
+//  india-black-pearl-polished — dramatic black (dark)
+// Intentionally avoids near-identical whites and the previous promo default set.
 const STONE_SWATCHES = [
-  "/stone/white-dove.jpg",
-  "/stone/bianco-carrara.jpg",
-  "/stone/carrara-royale.jpg",
-  "/stone/classic-gray.jpg",
+  "/stone/bayshore-sand.jpg",
+  "/stone/carrara-classic.jpg",
+  "/stone/antique-gray.jpg",
+  "/stone/silver-pearl-polished.jpg",
   "/stone/suede-brown-polished.jpg",
   "/stone/india-black-pearl-polished.jpg",
 ];
@@ -39,15 +47,17 @@ function StoneSwatchStrip() {
 }
 
 /**
- * Live Inventory card: single static premium slab surface.
- * Silver Pearl reads as real inventory — dramatic veining, polished finish.
+ * Live Inventory card: single static slab surface representing premium inventory.
+ * Sicilia is used as the closest available asset to Calacatta Viola in terms of
+ * exotic/dramatic character (Calacatta Viol/Viola is not present in the repo).
+ * Full-bleed crop reads as "real slab" rather than a color chip.
  * No animation, no rotation.
  */
 function SlabInventoryPhoto() {
   return (
     <div className="kiosk-card-art kiosk-card-art--photo kiosk-card-art--inventory" aria-hidden>
       <img
-        src="/stone/silver-pearl-polished.jpg"
+        src="/stone/sicilia.jpg"
         alt=""
         className="kiosk-static-img"
         loading="eager"
