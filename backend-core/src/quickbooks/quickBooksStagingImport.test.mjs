@@ -351,16 +351,128 @@ async function writeCleanExport(dir, { customerCount = 3, invoiceCount = 2, line
     path.join(HERE, "quickBooksExportReader.js"),
     path.join(HERE, "quickBooksExportSummary.js"),
     path.join(HERE, "quickBooksJsonFileReader.js"),
+    path.join(HERE, "quickBooksExportValidation.js"),
     path.join(SCRIPTS_DIR, "dryRunQuickBooksStagingImport.mjs"),
   ];
   for (const file of filesToScan) {
     const src = await fs.readFile(file, "utf8");
-    assert.doesNotMatch(src, /@supabase|supabase-js|createClient\s*\(/i, `${path.basename(file)} must not use Supabase`);
-    assert.doesNotMatch(src, /\bnode:https?\b|require\(['"]https?['"]\)/i, `${path.basename(file)} must not import http/https`);
-    assert.doesNotMatch(src, /SUPABASE_SERVICE_ROLE|SERVICE_ROLE_KEY/i, `${path.basename(file)} must not read service-role env`);
+    // Import/usage-oriented (does not flag documentation prose mentioning Supabase).
+    assert.doesNotMatch(src, /(from|require\()\s*['"]@supabase|createClient\s*\(/i, `${path.basename(file)} must not import/use the Supabase client`);
+    assert.doesNotMatch(src, /(from|require\()\s*['"]node:https?['"]|require\(['"]https?['"]\)/i, `${path.basename(file)} must not import http/https`);
+    assert.doesNotMatch(src, /process\.env\.[A-Z_]*SERVICE_ROLE/i, `${path.basename(file)} must not read service-role env`);
     assert.doesNotMatch(src, /\bfetch\s*\(/, `${path.basename(file)} must not call fetch()`);
   }
   console.log("ok: import path uses no Supabase client, no http/https, no service-role env, no fetch()");
+}
+
+// ── Test 11 (F1): a write-phase throw finalizes the run "failed", never stuck "running" ─
+{
+  const dir = await makeTempExportFolder();
+  await writeCleanExport(dir, { customerCount: 2, invoiceCount: 1, linesPerInvoice: 1 });
+  const base = createInMemoryQuickBooksStagingRepository();
+  let calls = 0;
+  // Throw on the 2nd upsert call (company is call 1, customers is call 2).
+  const throwingRepo = {
+    ...base,
+    upsertRows: async (...args) => {
+      calls += 1;
+      if (calls === 2) throw new Error("simulated db failure");
+      return base.upsertRows(...args);
+    },
+  };
+
+  let result;
+  await assert.doesNotReject(async () => {
+    result = await importQuickBooksStaging(dir, { organizationId: FAKE_ORG_ID, repository: throwingRepo });
+  }, "import must not throw; it finalizes the run failed and returns a failed result");
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.ok, false);
+  assert.ok(result.syncRunId, "the opened run id is returned");
+  assert.ok(result.failReasons.some((r) => /aborted during write phase/.test(r)));
+  // The run row must be finalized "failed" (not left "running") with finished_at set.
+  const run = base.getRuns()[0];
+  assert.equal(run.status, "failed");
+  assert.ok(run.finished_at, "finished_at set on failed finalize");
+  // Safe message only — no PII/record content (there is none here, but assert shape).
+  assert.doesNotMatch(JSON.stringify(base.getRuns()), /simulated db failure/, "raw error message not stored verbatim");
+
+  await fs.rm(dir, { recursive: true, force: true });
+  console.log("ok (F1): write-phase throw finalizes run 'failed' with safe message, no throw to caller");
+}
+
+// ── Test 12 (F3): derived invoice-line upserts are chunked ACROSS invoices ───
+{
+  const dir = await makeTempExportFolder();
+  // 10 invoices x 1 line = 10 derived lines; chunkSize 4 -> ceil(10/4)=3 line upsert calls,
+  // NOT 10 (which is what per-invoice upserting would produce).
+  const invoices = Array.from({ length: 10 }, (_, i) => fakeInvoice(i + 1, { linesPerInvoice: 1 }));
+  await writeJson(path.join(dir, "manifest.json"), {
+    RunId: "20260710-fake-chunk",
+    StartedAt: "2026-07-10T00:00:00Z",
+    CompletedAt: "2026-07-10T01:00:00Z",
+    QbXmlVersion: "16.0",
+    CompanyFile: "(currently open company file)",
+    ExportDirectory: dir,
+    Entities: [{ EntityType: "invoices", BatchCount: 1, RecordCount: 10, Errors: [] }],
+    Errors: [],
+  });
+  await writeJson(path.join(dir, "invoices", "batch-001.json"), fakeListBatch("invoices", 1, invoices));
+  await writeJson(path.join(dir, "invoice-lines", "batch-001.json"), fakeListBatch("invoice-lines", 1, Array.from({ length: 10 }, (_, i) => fakeStandaloneLine(i + 1))));
+  const repo = createInMemoryQuickBooksStagingRepository();
+
+  const result = await importQuickBooksStaging(dir, { organizationId: FAKE_ORG_ID, repository: repo, chunkSize: 4 });
+
+  assert.equal(repo.getTableCount("brain_quickbooks_invoice_lines"), 10, "all 10 derived lines staged");
+  assert.equal(repo.getUpsertCallCount("brain_quickbooks_invoice_lines"), 3, "chunked across invoices (3 calls), not once per invoice (10)");
+  assert.equal(result.status, "success");
+
+  await fs.rm(dir, { recursive: true, force: true });
+  console.log("ok (F3): derived invoice-line upserts are batched across invoices into chunkSize chunks");
+}
+
+// ── Test 13 (F4): chunk/resume metadata flows into the audit run ────────────
+{
+  const dir = await makeTempExportFolder();
+  await writeCleanExport(dir, { customerCount: 1, invoiceCount: 1, linesPerInvoice: 1 });
+  const repo = createInMemoryQuickBooksStagingRepository();
+
+  await importQuickBooksStaging(dir, {
+    organizationId: FAKE_ORG_ID,
+    repository: repo,
+    importGroupId: "group-xyz",
+    chunkIndex: 2,
+    chunkCount: 5,
+  });
+
+  const run = repo.getRuns()[0];
+  assert.equal(run.import_group_id, "group-xyz");
+  assert.equal(run.chunk_index, 2);
+  assert.equal(run.chunk_count, 5);
+  console.log("ok (F4): import options importGroupId/chunkIndex/chunkCount recorded on the run");
+}
+
+// ── Test 14 (F5): repeated import advances last_seen_at/updated_at in staging ─
+{
+  const dir = await makeTempExportFolder();
+  await writeCleanExport(dir, { customerCount: 1, invoiceCount: 1, linesPerInvoice: 1 });
+  const repo = createInMemoryQuickBooksStagingRepository();
+
+  await importQuickBooksStaging(dir, { organizationId: FAKE_ORG_ID, repository: repo });
+  const firstRow = { ...repo.getTableRows("brain_quickbooks_customers")[0] };
+
+  await importQuickBooksStaging(dir, { organizationId: FAKE_ORG_ID, repository: repo });
+  const secondRow = repo.getTableRows("brain_quickbooks_customers")[0];
+
+  assert.equal(repo.getTableCount("brain_quickbooks_customers"), 1, "still one row after re-import");
+  assert.equal(secondRow.first_seen_at, firstRow.first_seen_at, "first_seen_at preserved across re-import");
+  assert.ok(secondRow.last_seen_at > firstRow.last_seen_at, "last_seen_at advances on re-import");
+  assert.ok(secondRow.updated_at > firstRow.updated_at, "updated_at advances on re-import");
+  // Finalized run also carries finished_at.
+  assert.ok(repo.getRuns().every((r) => r.finished_at), "each run finalized with finished_at");
+
+  await fs.rm(dir, { recursive: true, force: true });
+  console.log("ok (F5): repeated import advances last_seen_at/updated_at; first_seen_at preserved");
 }
 
 console.log("\nAll quickBooksStagingImport tests passed.");

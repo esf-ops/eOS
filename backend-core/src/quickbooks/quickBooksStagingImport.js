@@ -37,7 +37,7 @@ import {
   computeBlockReasons,
   manifestEntityCounts,
   readEntityRecordBatches,
-} from "../scripts/dryRunQuickBooksStagingImport.mjs";
+} from "./quickBooksExportValidation.js";
 
 const DEFAULT_CHUNK_SIZE = 500;
 
@@ -76,7 +76,14 @@ async function upsertInChunks(repository, config, rows, chunkSize) {
  * @returns {Promise<object>} safe result (counts/IDs/reasons only)
  */
 export async function importQuickBooksStaging(exportFolderPath, options = {}) {
-  const { repository, chunkSize = DEFAULT_CHUNK_SIZE, mode = "manual-import" } = options;
+  const {
+    repository,
+    chunkSize = DEFAULT_CHUNK_SIZE,
+    mode = "manual-import",
+    importGroupId = null,
+    chunkIndex = null,
+    chunkCount = null,
+  } = options;
   const organizationId = options.organizationId;
 
   if (!repository) {
@@ -124,8 +131,12 @@ export async function importQuickBooksStaging(exportFolderPath, options = {}) {
     qb_xml_version: qbXmlVersion,
     mode,
     status: "running",
+    import_group_id: importGroupId,
+    chunk_index: chunkIndex,
+    chunk_count: chunkCount,
   });
 
+  try {
   const ctx = { organizationId, syncRunId, qbXmlVersion };
   const perEntity = {};
   const dataQualityFindingCounts = {};
@@ -202,7 +213,7 @@ export async function importQuickBooksStaging(exportFolderPath, options = {}) {
     }
   }
 
-  // ── Derived invoice-lines accumulator ──────────────────────────────────────
+  // ── Derived invoice-lines accumulator + cross-invoice upsert buffer ─────────
   const derivedLines = {
     source: "derived-from-invoices",
     sourceRecordCount: 0,
@@ -212,6 +223,16 @@ export async function importQuickBooksStaging(exportFolderPath, options = {}) {
     updated: 0,
     failureReasons: {},
   };
+  const lineCfg = getStagingUpsertConfig("invoice-lines");
+  const lineBuffer = [];
+  const flushLines = async (force) => {
+    while (lineBuffer.length > 0 && (force || lineBuffer.length >= chunkSize)) {
+      const chunk = lineBuffer.splice(0, chunkSize);
+      const r = await repository.upsertRows(lineCfg.tableName, chunk, lineCfg.conflictColumns, lineCfg.updateColumns);
+      derivedLines.inserted += r.inserted;
+      derivedLines.updated += r.updated;
+    }
+  };
 
   // ── Primary folder entities (skip standalone invoice-lines) ────────────────
   for (const folder of KNOWN_ENTITY_FOLDERS) {
@@ -219,7 +240,6 @@ export async function importQuickBooksStaging(exportFolderPath, options = {}) {
 
     const { batches, unreadable, unmaterialized } = await readEntityRecordBatches(exportFolderPath, folder);
     const cfg = getStagingUpsertConfig(folder);
-    const lineCfg = getStagingUpsertConfig("invoice-lines");
     const kind = classifyQbEntityKind(folder);
 
     let sourceRecordCount = 0;
@@ -249,20 +269,20 @@ export async function importQuickBooksStaging(exportFolderPath, options = {}) {
       failureCount += failures.length;
       for (const f of failures) bumpR(f.reason);
 
-      // Derive invoice lines from each invoice record.
+      // Derive invoice lines from each invoice record. Buffer successful line rows and
+      // flush in chunkSize batches ACROSS invoices (not one upsert per invoice).
       if (folder === "invoices") {
         for (const invoiceRecord of batch.records) {
           const { rows: lineRows, failures: lineFailures } = buildInvoiceLineRowsFromInvoiceRecord(invoiceRecord, ctx);
           derivedLines.sourceRecordCount += lineRows.length + lineFailures.length;
-          const lu = await upsertInChunks(repository, lineCfg, lineRows, chunkSize);
-          derivedLines.inserted += lu.inserted;
-          derivedLines.updated += lu.updated;
           derivedLines.stagingRowCount += lineRows.length;
           derivedLines.failureCount += lineFailures.length;
+          for (const lineRow of lineRows) lineBuffer.push(lineRow);
           for (const f of lineFailures) {
             derivedLines.failureReasons[f.reason] = (derivedLines.failureReasons[f.reason] ?? 0) + 1;
             pushError("invoice-lines", f.reason);
           }
+          await flushLines(false);
         }
       }
     }
@@ -280,6 +300,9 @@ export async function importQuickBooksStaging(exportFolderPath, options = {}) {
     totalStagingRows += stagingRowCount;
     totalFailures += failureCount;
   }
+
+  // Flush any remaining buffered invoice-line rows (final partial chunk).
+  await flushLines(true);
 
   // Record derived invoice-lines as its own entity + standalone cross-check.
   const standaloneLinesCount = summary.perEntity?.["invoice-lines"]?.discoveredRecordCount ?? null;
@@ -344,6 +367,7 @@ export async function importQuickBooksStaging(exportFolderPath, options = {}) {
 
   await repository.finalizeSyncRun(syncRunId, {
     status,
+    finished_at: new Date().toISOString(),
     error_count: totalFailures,
     entity_counts: entityCounts,
     metadata: { manifestTotal, builtPrimaryTotal, derivedInvoiceLineCount: derivedLines.stagingRowCount },
@@ -366,6 +390,21 @@ export async function importQuickBooksStaging(exportFolderPath, options = {}) {
     totalStagingRows,
     totalFailures,
   };
+  } catch (err) {
+    // A write-phase error must not leave the run stuck "running". Finalize it as failed
+    // with a SAFE message (never include record content), then return a failed result.
+    const safeMessage = `import aborted during write phase (${err?.code ?? err?.name ?? "error"})`;
+    try {
+      await repository.finalizeSyncRun(syncRunId, {
+        status: "failed",
+        finished_at: new Date().toISOString(),
+        error_message: safeMessage,
+      });
+    } catch {
+      // Swallow finalize errors — we still return a failed result below.
+    }
+    return failedShell({ runId, qbXmlVersion, syncRunId, failReasons: [safeMessage] });
+  }
 }
 
 /**

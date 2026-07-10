@@ -51,6 +51,26 @@
 
 create extension if not exists pgcrypto;
 
+-- Keep updated_at / last_seen_at current on every write. The Phase 3A import
+-- orchestrator's repository also stamps these, but this trigger is the authoritative,
+-- implementation-independent guarantee for the Supabase-backed (Phase 3B) path so that
+-- `updated_at`/`last_seen_at` advance on every INSERT and ON CONFLICT UPDATE regardless
+-- of whether the payload carried them.
+create or replace function public.qb_staging_touch_timestamps()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at := now();
+  new.last_seen_at := now();
+  if tg_op = 'INSERT' then
+    if new.first_seen_at is null then new.first_seen_at := now(); end if;
+    if new.created_at is null then new.created_at := now(); end if;
+  end if;
+  return new;
+end;
+$$;
+
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Sync run audit
@@ -825,6 +845,27 @@ create index if not exists idx_qb_sales_orders_org_modified
 create index if not exists idx_qb_sync_runs_import_group
   on public.qb_sync_runs (import_group_id)
   where import_group_id is not null;
+
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- updated_at / last_seen_at triggers (Postgres 15+: create or replace trigger)
+-- ─────────────────────────────────────────────────────────────────────────────
+
+create or replace trigger trg_qb_company_touch      before insert or update on public.brain_quickbooks_company        for each row execute function public.qb_staging_touch_timestamps();
+create or replace trigger trg_qb_customers_touch     before insert or update on public.brain_quickbooks_customers      for each row execute function public.qb_staging_touch_timestamps();
+create or replace trigger trg_qb_items_touch         before insert or update on public.brain_quickbooks_items          for each row execute function public.qb_staging_touch_timestamps();
+create or replace trigger trg_qb_vendors_touch       before insert or update on public.brain_quickbooks_vendors        for each row execute function public.qb_staging_touch_timestamps();
+create or replace trigger trg_qb_accounts_touch      before insert or update on public.brain_quickbooks_accounts       for each row execute function public.qb_staging_touch_timestamps();
+create or replace trigger trg_qb_classes_touch       before insert or update on public.brain_quickbooks_classes        for each row execute function public.qb_staging_touch_timestamps();
+create or replace trigger trg_qb_sales_reps_touch    before insert or update on public.brain_quickbooks_sales_reps     for each row execute function public.qb_staging_touch_timestamps();
+create or replace trigger trg_qb_terms_touch         before insert or update on public.brain_quickbooks_terms          for each row execute function public.qb_staging_touch_timestamps();
+create or replace trigger trg_qb_invoices_touch      before insert or update on public.brain_quickbooks_invoices       for each row execute function public.qb_staging_touch_timestamps();
+create or replace trigger trg_qb_invoice_lines_touch before insert or update on public.brain_quickbooks_invoice_lines  for each row execute function public.qb_staging_touch_timestamps();
+create or replace trigger trg_qb_payments_touch      before insert or update on public.brain_quickbooks_payments       for each row execute function public.qb_staging_touch_timestamps();
+create or replace trigger trg_qb_bills_touch         before insert or update on public.brain_quickbooks_bills          for each row execute function public.qb_staging_touch_timestamps();
+create or replace trigger trg_qb_po_touch            before insert or update on public.brain_quickbooks_purchase_orders for each row execute function public.qb_staging_touch_timestamps();
+create or replace trigger trg_qb_estimates_touch     before insert or update on public.brain_quickbooks_estimates      for each row execute function public.qb_staging_touch_timestamps();
+create or replace trigger trg_qb_sales_orders_touch  before insert or update on public.brain_quickbooks_sales_orders   for each row execute function public.qb_staging_touch_timestamps();
 
 
 -- ─────────────────────────────────────────────────────────────────────────────

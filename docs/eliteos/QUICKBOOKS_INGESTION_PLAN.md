@@ -300,24 +300,46 @@ writes through an injected **repository boundary**
 this phase is the in-memory fake (`createInMemoryQuickBooksStagingRepository`). There is
 **no Supabase client, no service-role env, and no network** anywhere in this path.
 
+Shared validation/reading helpers (`computeBlockReasons`, `readEntityRecordBatches`,
+`manifestEntityCounts`) live in the library module
+`backend-core/src/quickbooks/quickBooksExportValidation.js`; both the dry-run script and
+the import orchestrator import from there (core ingestion never depends on a `scripts/` CLI
+file).
+
 Behaviour:
 
 - **Fail-closed before writes:** if any dry-run gate trips (manifest invalid, self-reported,
   unreadable, unrecognized, or a manifest-backed count mismatch), the import returns
   `status: "failed"` and performs **zero** repository interaction — no audit run, no rows.
+- **Error-path finalization:** the entire write phase runs inside a `try/catch`; if any
+  repository call throws mid-import, the run is finalized `status: "failed"` (with a safe,
+  sanitized message — never record content) instead of being left stuck `running`.
 - **On pass:** opens an audit run (`createSyncRun`), then builds and **chunk-upserts**
   (default 500/chunk) company (root `company.json`), all primary manifest folder entities,
   and invoice-lines **derived from invoices** — each via its `getStagingUpsertConfig` conflict
-  key, so the fake repo dedupes exactly as `ON CONFLICT (...) DO UPDATE` would.
+  key, so the fake repo dedupes exactly as `ON CONFLICT (...) DO UPDATE` would. Derived
+  invoice-line rows are buffered and flushed in `chunkSize` batches **across invoices**, not
+  one upsert per invoice.
 - **Idempotent:** re-running the same export updates rows in place (no duplicate inserts).
+  The repository stamps `last_seen_at`/`updated_at` on every upsert (insert and update),
+  preserving `first_seen_at`/`created_at`; a migration trigger
+  (`qb_staging_touch_timestamps`) provides the same guarantee for the Phase 3B DB path.
 - **Per-record isolation:** malformed/null records are recorded as safe `qb_sync_errors`
   rows and skipped; the rest still import. Any failures (or a reconciliation mismatch) mark
   the run `partial`; a fully clean import is `success`.
-- **Audit + findings:** run status/counts finalized in the run row; data-quality findings
-  recorded as counts only.
+- **Audit + findings:** run status/counts/`finished_at` finalized in the run row; optional
+  `importGroupId`/`chunkIndex`/`chunkCount` (for Phase 3B resumable chunked imports) are
+  recorded on the run; data-quality findings recorded as counts only.
+- **Best-effort counts:** `upsertRows` returns `{ inserted, updated, total }`; `total` is
+  authoritative for control flow, while `inserted`/`updated` are best-effort (a real Supabase
+  upsert may return them as `0`). The orchestrator uses them only for reporting.
 - **Endpoint shape:** `buildImportResponse(result)` returns the safe HTTP contract a future
   protected internal route (`POST /api/internal/quickbooks-sync/import`) will emit
   (`200` success / `207` partial / `422` failed) — counts, IDs, and reasons only.
+
+**Phase 3B note:** the record readers here load an entire entity folder into memory; the
+Supabase-backed implementation must stream/chunk **reads** as well as writes for the full
+export.
 
 Tests (`quickBooksStagingImport.test.mjs`, fake data only) prove: clean import writes the
 expected rows; repeated import is idempotent by conflict key; gate failures abort before any
