@@ -4,6 +4,7 @@ import { ApiError, apiFetch } from "../lib/api";
 import { fetchSchemaHealth, SCHEMA_HEALTH_PATH, type SchemaHealthResp } from "../lib/schemaHealth";
 import { supabase } from "../lib/supabase";
 import MorawareAdmin from "./MorawareAdmin";
+import QuickBooksIntelligenceAdmin from "./QuickBooksIntelligenceAdmin";
 import SalesAccountMappingAdmin from "./SalesAccountMappingAdmin";
 import IdentityResolutionReadiness from "./IdentityResolutionReadiness";
 import QuotePricingAdminView from "./QuotePricingAdminView";
@@ -104,6 +105,7 @@ type MainNavView =
   | "diagnostics"
   | "sales_mapping"
   | "moraware"
+  | "quickbooks"
   | "identity_resolution";
 
 /** Visible near credential actions — admins never observe other users’ secrets. */
@@ -1605,6 +1607,17 @@ export default function App() {
           </button>
           <button
             type="button"
+            className={`nav-pill ${activeView === "quickbooks" ? "nav-pill-active" : ""}`}
+            onClick={() => {
+              setSelectedId(null);
+              setDetail(null);
+              setActiveView("quickbooks");
+            }}
+          >
+            QuickBooks
+          </button>
+          <button
+            type="button"
             className={`nav-pill ${activeView === "identity_resolution" ? "nav-pill-active" : ""}`}
             onClick={() => {
               setSelectedId(null);
@@ -1629,6 +1642,8 @@ export default function App() {
               <SalesAccountMappingAdmin token={sessionToken} />
             ) : activeView === "moraware" ? (
               <MorawareAdmin token={sessionToken} />
+            ) : activeView === "quickbooks" ? (
+              <QuickBooksIntelligenceAdmin token={sessionToken} />
             ) : activeView === "identity_resolution" ? (
               <IdentityResolutionReadiness token={sessionToken} />
             ) : activeView === "people" ? (

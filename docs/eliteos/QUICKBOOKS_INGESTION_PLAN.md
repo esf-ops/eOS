@@ -13,20 +13,19 @@ This mirrors the pattern already used for Moraware (`docs/eliteos/moraware-sync-
 
 `External system → local read-only extract → normalized staging → organization-scoped facts → heads`
 
-## Current Phase: Phase 4C — Intelligence Admin API + Safe Smoke
+## Current Phase: Phase 4D — QuickBooks Intelligence Admin UI
 
-**Latest delivered:** Phase 4C admin API route + safe live smoke script for QuickBooks
-executive intelligence (mocked tests; live smoke only when a human runs it with env set).
+**Latest delivered:** Phase 4D System Admin QuickBooks Intelligence page (leadership
+read of Phase 4C executive snapshot). No AI. No raw_payload. Opaque IDs only.
 
-**Also in place:** Phase 1–3C staging import; Phase 4A read/insight layer; Phase 4B
-Supabase read repository + executive snapshot service.
+**Also in place:** Phase 1–3C staging import; Phase 4A–4C read/insight/repo/API/smoke.
 
-**What does NOT exist yet (by design for 4C):**
+**What does NOT exist yet (by design for 4D):**
 
-- No Admin / frontend UI for QuickBooks AR or revenue (API only).
 - No AI summarization over QuickBooks facts.
 - No browser access to `brain_quickbooks_*` or `raw_payload`.
 - No writeback to QuickBooks.
+- No dedicated standalone QuickBooks head app (lives inside System Admin for now).
 - No Supabase credentials on the Windows VM.
 
 ## Phase 1 — Local Export Preview
@@ -640,17 +639,54 @@ node backend-core/src/scripts/smokeQuickBooksIntelligence.mjs
 Smoke output never prints names, addresses, memos, invoice numbers, amounts,
 `raw_payload`, or secret values — only section presence and safe counts.
 
-**Out of scope for 4C:** Frontend Admin UI, AI summaries, connector/schema changes,
-full-org production load tuning beyond pagination/`max_rows`.
+**Out of scope for 4C:** Frontend Admin UI (delivered in 4D), AI summaries,
+connector/schema changes, full-org production load tuning beyond pagination/`max_rows`.
 
 **Tests:** `npm run qb:test` includes `quickBooksIntelligenceApi.test.mjs`.
 
-### Phase 4D — Admin Review UI (future)
+### Phase 4D — QuickBooks Intelligence Admin UI (System Admin)
 
-System Admin (or a dedicated QuickBooks Admin panel) surfaces sync health, per-entity
-row counts, data-quality findings, and recent errors — read-only, admin-gated, no raw
-`raw_payload` dumped to the browser. The Phase 4C executive intelligence API is the
-intended source for AR/revenue summaries (not direct staging queries).
+**Status:** Implemented inside **`app-system-admin`** as a nav view (**QuickBooks**).
+
+**Surface:** System Admin → QuickBooks pill → `QuickBooksIntelligenceAdmin`.
+
+**Data source:** `GET /api/admin/quickbooks/intelligence/executive` (Phase 4C). Same
+auth gate as the API (admin + `system_admin` head). Frontend never queries staging
+tables and never renders `raw_payload`, addresses, memos, or customer/vendor names.
+
+**UI sections:**
+
+- Executive summary cards (open/overdue AR, revenue customers, payments, estimates, insights)
+- AR risk aging buckets
+- Revenue concentration (top opaque customer IDs)
+- Payment behavior (avg days-to-pay where linked)
+- Estimate → sales order → invoice flow
+- Sales rep summary (opaque rep IDs)
+- Customer activity trend (monthly bars)
+- Deterministic insight list (severity-ranked)
+- Snapshot metadata (`generated_at`, `page_size`, `max_rows`, staging counts)
+
+**Modules:**
+
+| Module | Role |
+|--------|------|
+| `app-system-admin/src/ui/QuickBooksIntelligenceAdmin.tsx` | Fetch + presentational intelligence page |
+| `app-system-admin/src/lib/quickBooksIntelligenceViewModel.js` | Safe view-model / state machine / markup helper |
+| `app-system-admin/src/lib/quickBooksIntelligenceViewModel.test.mjs` | Fake-snapshot tests (loading/error/unauthorized/ready/partial; no raw_payload) |
+
+**States handled:** loading, unauthorized (401/403), error, empty, partial (`max_rows`
+set), ready.
+
+**Out of scope for 4D:** AI narrative, dedicated QuickBooks head app, sync-health
+explorer tables, connector/schema changes.
+
+**Tests:** `npm run test --prefix app-system-admin`
+
+### Phase 4E — Sync health / Admin review expansion (future)
+
+Optional follow-on: sync-run health, per-entity row counts, and data-quality findings
+alongside the intelligence page — still admin-gated, still no `raw_payload` in the
+browser.
 
 ### Phase 5 — Scheduled Connector Upload with Scoped Token
 

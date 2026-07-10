@@ -161,7 +161,7 @@ Status is **conceptual** unless a separate tracker says otherwise. Use the label
 - Finance Head  
 - Job Costing Head  
 - Payroll Prep / Workforce Cost Head  
-- QuickBooks / Accounting Integration Head  
+- QuickBooks / Accounting Integration Head — **Phase 4D intelligence UI** ships inside **System Admin** (`QuickBooks` nav → `GET /api/admin/quickbooks/intelligence/executive`); dedicated finance/accounting head remains future.
 - Invoice / Payment Status Head  
 
 ### HR / Workforce
