@@ -103,7 +103,7 @@ export const KIOSK_SECTIONS: KioskSection[] = [
     id: "elite100",
     slug: "elite100",
     title: "Elite 100",
-    cardCopy: "Browse our premium showroom color collection.",
+    cardCopy: "Browse our showroom color collection.",
     heroCopy:
       "Discover the Elite 100 — our curated collection of premium showroom colors, from soft neutrals to dramatic statement stone.",
     actionLabel: "Browse Elite 100",
