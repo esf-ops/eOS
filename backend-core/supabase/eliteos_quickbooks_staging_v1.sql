@@ -96,6 +96,9 @@ create table if not exists public.qb_sync_runs (
   -- Per-entity row accounting: { "customers": { "manifest": N, "imported": N, "skipped": N, "errors": N } }
   entity_counts      jsonb       not null default '{}'::jsonb,
   error_count        integer     not null default 0,
+  -- Safe, sanitized failure summary (never raw record/DB detail). Set by the orchestrator's
+  -- error path when a run is finalized "failed".
+  error_message      text,
   -- Chunked/resumable import metadata (Phase 3). NULL for single-shot imports.
   -- A chunked import shares one import_group_id across all chunk rows; each chunk row
   -- records its own chunk_index (0-based) and the total chunk_count. A resume re-posts

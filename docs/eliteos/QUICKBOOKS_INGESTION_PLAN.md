@@ -369,15 +369,72 @@ Supabase/http/service-role/fetch.
 
 ## Future Phases
 
-### Phase 3B — Supabase-backed Repository + Protected Endpoint
+## Phase 3B — Supabase-backed Repository (implemented; not yet run against real data)
 
-Add a service-role-backed implementation of the `QuickBooksStagingRepository` interface
-(constructed only inside backend-core, never on the VM) and wire it behind a protected
-internal route (`POST /api/internal/quickbooks-sync/import`, shared-secret header, same
-pattern as `POST /api/internal/moraware-sync/import`). The orchestrator, chunking, gates,
-idempotency, and response shape from Phase 3A carry over unchanged — only the repository
-implementation swaps from the in-memory fake to Supabase. Apply
-`eliteos_quickbooks_staging_v1.sql` before enabling this route.
+`backend-core/src/quickbooks/quickBooksStagingSupabaseRepository.js` implements the
+`QuickBooksStagingRepository` interface against a Supabase **service-role** client. It is
+**pure logic over an injected client** (`createQuickBooksStagingSupabaseRepository({ getSupabase })`,
+same DI pattern as slabsmith/moraware) — it constructs no client, reads no env, and holds no
+credentials, so it can never run on the QuickBooks VM. The Phase 3A orchestrator, chunking,
+gates, idempotency, audit, and response shape are unchanged; only the repository swaps from
+the in-memory fake to Supabase.
+
+Implementation details:
+
+- **createSyncRun** supports resumable chunk semantics: for chunked runs (`chunk_index` set)
+  it select-then-inserts to upsert-or-return-existing on `(organization_id, qb_run_id,
+  chunk_index)` (the migration's partial unique index cannot be targeted by supabase-js
+  `onConflict`), and re-fetches on a `23505` race. Non-chunked runs always insert (audit history).
+- **upsertRows** uses each entity's conflict key as `onConflict` (from the orchestrator's
+  `getStagingUpsertConfig`), stamps `last_seen_at`/`updated_at` on every payload, and omits
+  `first_seen_at`/`created_at` (DB default on insert, preserved on conflict). Returns
+  `{ inserted: 0, updated: 0, total }` — `total` is authoritative; inserted/updated are
+  best-effort (a Postgres upsert can't cheaply distinguish them). The `qb_staging_touch_timestamps`
+  trigger is the redundant DB-level guarantee for the timestamps.
+- **recordErrors / recordFindings** batch-insert into `qb_sync_errors` /
+  `qb_data_quality_findings` (500/batch).
+- **finalizeSyncRun** updates only safe columns (`status`, `finished_at`, `error_count`,
+  `error_message`, `entity_counts`, `metadata`). The migration adds `qb_sync_runs.error_message`.
+- **Sanitized errors:** thrown errors carry only an error `code` and a generic message (never
+  raw DB text), so the orchestrator's error path produces a safe run `error_message`.
+
+Tested with a **mocked Supabase client only** (`quickBooksStagingSupabaseRepository.test.mjs`):
+clean import upserts the expected tables/counts with correct conflict keys and finalizes the
+run `success`; timestamps are stamped correctly; chunk resume returns the existing run;
+an upsert failure finalizes the run `failed` with a code-only message (no raw DB text);
+error/finding batch inserts happen; no PII reaches runs/updates/audit inserts/result; and the
+repo creates no client / reads no env (injection only).
+
+### Applying the migration + running the real import (Phase 3B — DO NOT RUN YET)
+
+The migration (`backend-core/supabase/eliteos_quickbooks_staging_v1.sql`, now including the
+`error_message` column and the `qb_staging_touch_timestamps` trigger) must be applied in the
+Supabase SQL editor **before** the first real import. The real import runs **inside
+backend-core** (where the service-role client lives), never on the VM. Exact command to wire
+and run later (not executed in this phase):
+
+```bash
+# 1. Apply the migration once in the Supabase SQL editor:
+#    backend-core/supabase/eliteos_quickbooks_staging_v1.sql
+#
+# 2. Run the real staging import from backend-core (service role available server-side):
+SUPABASE_URL=... \
+SUPABASE_SERVICE_ROLE_KEY=... \
+QB_IMPORT_ORGANIZATION_ID=<org-uuid> \
+QB_IMPORT_EXPORT_FOLDER=~/eliteos-local-archive/quickbooks-20260710/full-materialized \
+node backend-core/src/scripts/importQuickBooksStaging.mjs   # <- Phase 3B CLI wrapper (not yet built)
+```
+
+The Phase 3B CLI wrapper will: construct the service-role client, build
+`createQuickBooksStagingSupabaseRepository({ getSupabase })`, and call
+`importQuickBooksStaging(exportFolder, { organizationId, repository })`. It is a backend-core
+tool — the QuickBooks VM only ever produces the local export and never holds Supabase creds.
+
+### Phase 3C — Protected Internal Endpoint
+
+Wire the orchestrator + Supabase repository behind a protected internal route
+(`POST /api/internal/quickbooks-sync/import`, shared-secret header, same pattern as
+`POST /api/internal/moraware-sync/import`) for scheduled/remote imports.
 
 ### Phase 4 — Admin Review UI
 
