@@ -1,0 +1,25 @@
+{
+  "name": "app-kiosk",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "slabOS / Elite Stone public showroom kiosk presentation (Arreya-embeddable, full-screen, no login).",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^4.7.0",
+    "qrcode": "^1.5.4",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "vite": "^7.1.4"
+  },
+  "devDependencies": {
+    "@types/qrcode": "^1.5.5",
+    "@types/react": "^19.1.11",
+    "@types/react-dom": "^19.1.7",
+    "typescript": "^5.9.2"
+  }
+}
