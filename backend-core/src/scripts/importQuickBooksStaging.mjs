@@ -48,6 +48,7 @@ export function formatImportResultLines(result, ctx) {
     "EliteOS QuickBooks staging import (backend-core, service-role)",
     `Export folder: ${ctx.exportFolderPath}`,
     `Organization: ${ctx.organizationId}`,
+    `Chunk size: ${ctx.chunkSize == null ? "default" : ctx.chunkSize}`,
     `Run ID: ${result.runId ?? "(none)"}`,
     `Sync run ID: ${result.syncRunId ?? "(none)"}`,
     `QBXML version: ${result.qbXmlVersion ?? "(none)"}`,
@@ -95,6 +96,25 @@ export function formatImportResultLines(result, ctx) {
 }
 
 /**
+ * Parse the optional QB_IMPORT_CHUNK_SIZE env value.
+ * Absent/blank -> use the orchestrator default (returns chunkSize null). Present must be a
+ * positive integer, else it is a usage error.
+ *
+ * @param {string|undefined} raw
+ * @returns {{ ok: true, chunkSize: number|null } | { ok: false }}
+ */
+export function parseChunkSizeEnv(raw) {
+  if (raw === undefined || raw === null || String(raw).trim() === "") {
+    return { ok: true, chunkSize: null }; // default behavior
+  }
+  const text = String(raw).trim();
+  if (!/^\d+$/.test(text)) return { ok: false };
+  const n = Number(text);
+  if (!Number.isInteger(n) || n <= 0) return { ok: false };
+  return { ok: true, chunkSize: n };
+}
+
+/**
  * Run the import CLI logic. Dependency-injectable so tests never construct a real Supabase
  * client. Returns { exitCode, lines, result } and never throws.
  *
@@ -118,6 +138,16 @@ export async function runImportCli(deps = {}) {
     return { exitCode: 1, lines: [`Missing required env: ${missing.join(", ")}`], result: null };
   }
 
+  const chunkParse = parseChunkSizeEnv(env.QB_IMPORT_CHUNK_SIZE);
+  if (!chunkParse.ok) {
+    return {
+      exitCode: 1,
+      lines: ["Invalid QB_IMPORT_CHUNK_SIZE: must be a positive integer (e.g. 25 or 50)"],
+      result: null,
+    };
+  }
+  const chunkSize = chunkParse.chunkSize; // null => orchestrator default
+
   if (typeof getSupabase !== "function") {
     return { exitCode: 1, lines: ["Internal error: Supabase client factory unavailable"], result: null };
   }
@@ -126,9 +156,12 @@ export async function runImportCli(deps = {}) {
   const exportFolderPath = path.resolve(String(env.QB_IMPORT_EXPORT_FOLDER).trim());
   const repository = createRepository({ getSupabase });
 
+  const importOptions = { organizationId, repository };
+  if (chunkSize != null) importOptions.chunkSize = chunkSize;
+
   let result;
   try {
-    result = await importFn(exportFolderPath, { organizationId, repository });
+    result = await importFn(exportFolderPath, importOptions);
   } catch (err) {
     // The orchestrator is designed not to throw; this is defensive. Never leak raw text.
     return {
@@ -138,7 +171,7 @@ export async function runImportCli(deps = {}) {
     };
   }
 
-  const lines = formatImportResultLines(result, { organizationId, exportFolderPath });
+  const lines = formatImportResultLines(result, { organizationId, exportFolderPath, chunkSize });
   const exitCode = result.status === "success" ? 0 : 1;
   return { exitCode, lines, result };
 }

@@ -464,6 +464,19 @@ QB_IMPORT_EXPORT_FOLDER=~/eliteos-local-archive/quickbooks-20260710/full-materia
 node backend-core/src/scripts/importQuickBooksStaging.mjs
 #    Expect: Result: SUCCESS, Total staging rows: 620431 (company 1 + primary 263,462 +
 #    derived invoice-lines 356,969), Total skipped/failed: 0.
+#
+#    LARGE-IMPORT TUNING: the default upsert chunk size (500) can trigger a Supabase
+#    statement timeout (Postgres error code 57014) on the biggest tables (invoices,
+#    estimates, invoice-lines). If that happens, set a smaller chunk size and rerun:
+#      QB_IMPORT_CHUNK_SIZE=50   # or 25 if 50 still times out
+#    QB_IMPORT_CHUNK_SIZE must be a positive integer; an invalid value fails fast with a
+#    usage error and writes nothing. The chosen chunk size is printed in the CLI output
+#    ("Chunk size: 50"); when unset it prints "Chunk size: default".
+#    Example rerun after a 57014 timeout:
+#      QB_IMPORT_CHUNK_SIZE=50 SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
+#      QB_IMPORT_ORGANIZATION_ID=<org-uuid> \
+#      QB_IMPORT_EXPORT_FOLDER=~/eliteos-local-archive/quickbooks-20260710/full-materialized \
+#      node backend-core/src/scripts/importQuickBooksStaging.mjs
 
 # 4. Idempotent rerun verification: run the SAME command again. Expect Result: SUCCESS with
 #    identical totals and per-entity inserted=0 / updated=<row count> (upserts, no duplicate
@@ -477,6 +490,20 @@ node backend-core/src/scripts/importQuickBooksStaging.mjs
 Operational reminders: a run left `status:"running"` after a hard crash is failed/stale (not
 auto-recovered); a mid-write failure finalizes the run `failed` with a safe code-only message
 and best-effort-flushes accumulated errors/findings (which may duplicate `qb_sync_errors` rows).
+
+**Recovering from a partial import / Supabase 57014 timeout:**
+
+- **Reruns are idempotent.** Every staging table upserts on its QuickBooks conflict key
+  (`organization_id, qb_list_id` for lists; `organization_id, qb_txn_id` for transactions;
+  `organization_id, qb_txn_id, line_seq_number` for invoice-lines; `organization_id` for
+  company). Re-running the import after a partial/timed-out run does **not** duplicate rows —
+  it updates the already-written rows in place and inserts the missing ones.
+- **Lower the chunk size** with `QB_IMPORT_CHUNK_SIZE=50` (or `25`) and rerun. Smaller upsert
+  statements avoid the statement timeout (57014) on the large tables.
+- **Failed partial runs can stay for audit.** The prior partial `qb_sync_runs` row (and any
+  `qb_sync_errors`) can be left in place as an audit trail; they do not block a rerun. A
+  successful rerun writes a fresh run and updates each row's `sync_run_id` to the new run,
+  so the latest run reflects current provenance.
 
 ### Phase 3D — Protected Internal Endpoint (future)
 

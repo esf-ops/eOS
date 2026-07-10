@@ -13,7 +13,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { runImportCli, formatImportResultLines } from "./importQuickBooksStaging.mjs";
+import { runImportCli, formatImportResultLines, parseChunkSizeEnv } from "./importQuickBooksStaging.mjs";
 import { createInMemoryQuickBooksStagingRepository } from "../quickbooks/quickBooksStagingRepository.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -118,6 +118,7 @@ async function writeCleanExport(dir, { pii = false } = {}) {
   assert.match(text, /Total staging rows: 5/); // company1 + customers1 + invoices1 + derived lines2
   assert.match(text, /company: source=1 staged=1/);
   assert.match(text, /invoice-lines: source=2 staged=2 failed=0 .*\[derived-from-invoices\]/);
+  assert.match(text, /Chunk size: default/, "default chunk size shown when env unset");
   // No PII, no secret anywhere in the printed output.
   assert.doesNotMatch(text, /SENTINEL_PII/, "no PII in CLI output");
   assert.doesNotMatch(text, new RegExp(SECRET_SENTINEL), "no service-role secret in CLI output");
@@ -211,6 +212,91 @@ async function writeCleanExport(dir, { pii = false } = {}) {
   assert.doesNotMatch(src, /(^|\n)\s*import\s+[^\n]*['"]@supabase/, "no static @supabase import");
   assert.match(src, /await import\(["']@supabase\/supabase-js["']\)/, "client built via lazy dynamic import");
   console.log("ok: CLI has no connector/VM dependency and no static @supabase import");
+}
+
+// ── Test 8: valid QB_IMPORT_CHUNK_SIZE is passed to importQuickBooksStaging ──
+{
+  const dir = await makeTempExportFolder();
+  await writeCleanExport(dir);
+  let captured = null;
+  const out = await runImportCli({
+    env: fakeEnv(dir, { QB_IMPORT_CHUNK_SIZE: "25" }),
+    getSupabase: dummyGetSupabase,
+    createRepository: () => createInMemoryQuickBooksStagingRepository(),
+    importQuickBooksStaging: async (folder, opts) => {
+      captured = opts;
+      return { status: "success", runId: "r", syncRunId: "s", perEntity: {}, warnings: [], failReasons: [], blockReasons: [], manifestTotal: 0, builtPrimaryTotal: 0, derivedInvoiceLineCount: 0, totalStagingRows: 0, totalFailures: 0 };
+    },
+  });
+  assert.equal(out.exitCode, 0);
+  assert.equal(captured.chunkSize, 25, "chunkSize passed through to the orchestrator");
+  assert.match(out.lines.join("\n"), /Chunk size: 25/);
+
+  await fs.rm(dir, { recursive: true, force: true });
+  console.log("ok: valid QB_IMPORT_CHUNK_SIZE is validated and passed to importQuickBooksStaging");
+}
+
+// ── Test 9: missing QB_IMPORT_CHUNK_SIZE uses default (not passed) ───────────
+{
+  const dir = await makeTempExportFolder();
+  await writeCleanExport(dir);
+  let captured = null;
+  const out = await runImportCli({
+    env: fakeEnv(dir), // no QB_IMPORT_CHUNK_SIZE
+    getSupabase: dummyGetSupabase,
+    createRepository: () => createInMemoryQuickBooksStagingRepository(),
+    importQuickBooksStaging: async (folder, opts) => {
+      captured = opts;
+      return { status: "success", runId: "r", syncRunId: "s", perEntity: {}, warnings: [], failReasons: [], blockReasons: [], manifestTotal: 0, builtPrimaryTotal: 0, derivedInvoiceLineCount: 0, totalStagingRows: 0, totalFailures: 0 };
+    },
+  });
+  assert.equal(out.exitCode, 0);
+  assert.ok(!("chunkSize" in captured), "chunkSize not passed when env unset (orchestrator default applies)");
+  assert.match(out.lines.join("\n"), /Chunk size: default/);
+
+  await fs.rm(dir, { recursive: true, force: true });
+  console.log("ok: missing QB_IMPORT_CHUNK_SIZE uses orchestrator default");
+}
+
+// ── Test 10: invalid QB_IMPORT_CHUNK_SIZE fails safely (exit 1) ──────────────
+{
+  const dir = await makeTempExportFolder();
+  await writeCleanExport(dir);
+  for (const bad of ["abc", "0", "-5", "2.5", "25.0", "1e3", " ", "50x"]) {
+    let importCalled = false;
+    const out = await runImportCli({
+      env: fakeEnv(dir, { QB_IMPORT_CHUNK_SIZE: bad }),
+      getSupabase: dummyGetSupabase,
+      createRepository: () => createInMemoryQuickBooksStagingRepository(),
+      importQuickBooksStaging: async () => { importCalled = true; return { status: "success" }; },
+    });
+    // " " trims to empty -> treated as unset (default), so it must SUCCEED, not fail.
+    if (bad.trim() === "") {
+      assert.equal(out.exitCode, 0, `blank chunk size "${bad}" should be treated as default`);
+      continue;
+    }
+    assert.equal(out.exitCode, 1, `invalid chunk size "${bad}" must exit 1`);
+    assert.match(out.lines.join("\n"), /Invalid QB_IMPORT_CHUNK_SIZE/);
+    assert.equal(importCalled, false, "orchestrator not called on invalid chunk size");
+    assert.doesNotMatch(out.lines.join("\n"), new RegExp(SECRET_SENTINEL), "no secret leak on error");
+  }
+
+  await fs.rm(dir, { recursive: true, force: true });
+  console.log("ok: invalid QB_IMPORT_CHUNK_SIZE fails safely (exit 1, no import, no secret leak)");
+}
+
+// ── Test 11: parseChunkSizeEnv unit ─────────────────────────────────────────
+{
+  assert.deepEqual(parseChunkSizeEnv(undefined), { ok: true, chunkSize: null });
+  assert.deepEqual(parseChunkSizeEnv(""), { ok: true, chunkSize: null });
+  assert.deepEqual(parseChunkSizeEnv("  "), { ok: true, chunkSize: null });
+  assert.deepEqual(parseChunkSizeEnv("25"), { ok: true, chunkSize: 25 });
+  assert.deepEqual(parseChunkSizeEnv(" 50 "), { ok: true, chunkSize: 50 });
+  assert.equal(parseChunkSizeEnv("0").ok, false);
+  assert.equal(parseChunkSizeEnv("-1").ok, false);
+  assert.equal(parseChunkSizeEnv("2.5").ok, false);
+  assert.equal(parseChunkSizeEnv("abc").ok, false);
+  console.log("ok: parseChunkSizeEnv accepts positive integers, treats blank as default, rejects the rest");
 }
 
 console.log("\nAll importQuickBooksStaging CLI tests passed.");
