@@ -42,5 +42,7 @@ assert(isKnownHeadSlug("custom_quote"), "custom_quote is a known head slug");
 assert(!isDealerSafeHeadSlug("custom_quote"), "custom_quote must not be dealer-safe");
 assert(isKnownHeadSlug("install_dashboard"), "install_dashboard is a known head slug");
 assert(!isDealerSafeHeadSlug("install_dashboard"), "install_dashboard must not be dealer-safe");
+assert(isKnownHeadSlug("quickbooks_intelligence"), "quickbooks_intelligence is a known head slug");
+assert(!isDealerSafeHeadSlug("quickbooks_intelligence"), "quickbooks_intelligence must not be dealer-safe");
 
 console.log("testHeadAccess: constant checks OK.");

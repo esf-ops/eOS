@@ -1,11 +1,12 @@
 /**
- * quickBooksIntelligenceApi — Phase 4C admin API for QuickBooks executive intelligence.
+ * quickBooksIntelligenceApi — Phase 4C/4D admin API for QuickBooks executive intelligence.
  *
- * Mounts GET /api/admin/quickbooks/intelligence/executive behind auth + admin role +
- * system_admin head access (same stack as Moraware Admin). Calls Phase 4B
+ * Mounts GET /api/admin/quickbooks/intelligence/executive behind auth + allowed finance
+ * roles + quickbooks_intelligence head access. Calls Phase 4B
  * loadExecutiveIntelligenceSnapshot. Never returns raw_payload.
  *
  * Backend-only. No QuickBooks writeback. No connector dependency.
+ * System Admin assigns head access; it does not host this UI (standalone head).
  */
 
 import { assertNoRawPayload } from "./quickBooksIntelligenceFacts.js";
@@ -14,6 +15,18 @@ import { loadExecutiveIntelligenceSnapshot } from "./quickBooksIntelligenceServi
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** Roles allowed to call QuickBooks Intelligence APIs (still require head access). */
+export const QB_INTELLIGENCE_ALLOWED_ROLES = Object.freeze([
+  "admin",
+  "super_admin",
+  "executive",
+  "finance",
+  "accounting",
+]);
+
+/** Head slug for requireHeadAccess / launcher / user_head_access. */
+export const QB_INTELLIGENCE_HEAD_SLUG = "quickbooks_intelligence";
 
 /** Server-side ceiling for optional max_rows query (smoke/testing). */
 export const QB_INTELLIGENCE_API_MAX_ROWS_CEILING = 5000;
@@ -228,8 +241,8 @@ export function attachQuickBooksIntelligenceRoutes(app, deps) {
 
   const stack = [
     requireAuth(),
-    requireRole(["admin"]),
-    requireHeadAccess("system_admin", { getSupabase }),
+    requireRole([...QB_INTELLIGENCE_ALLOWED_ROLES]),
+    requireHeadAccess(QB_INTELLIGENCE_HEAD_SLUG, { getSupabase }),
   ];
   const handlers = createQuickBooksIntelligenceHandlers(deps);
 

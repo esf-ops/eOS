@@ -13,10 +13,11 @@ This mirrors the pattern already used for Moraware (`docs/eliteos/moraware-sync-
 
 `External system → local read-only extract → normalized staging → organization-scoped facts → heads`
 
-## Current Phase: Phase 4D — QuickBooks Intelligence Admin UI
+## Current Phase: Phase 4D — QuickBooks Intelligence Head (standalone)
 
-**Latest delivered:** Phase 4D System Admin QuickBooks Intelligence page (leadership
-read of Phase 4C executive snapshot). No AI. No raw_payload. Opaque IDs only.
+**Latest delivered:** Phase 4D as a **standalone eliteOS head**
+(`app-quickbooks-intelligence`, slug `quickbooks_intelligence`) — leadership read of
+the Phase 4C executive snapshot. No AI. No raw_payload. Opaque IDs only.
 
 **Also in place:** Phase 1–3C staging import; Phase 4A–4C read/insight/repo/API/smoke.
 
@@ -25,7 +26,7 @@ read of Phase 4C executive snapshot). No AI. No raw_payload. Opaque IDs only.
 - No AI summarization over QuickBooks facts.
 - No browser access to `brain_quickbooks_*` or `raw_payload`.
 - No writeback to QuickBooks.
-- No dedicated standalone QuickBooks head app (lives inside System Admin for now).
+- No QuickBooks Intelligence tab inside System Admin (access/governance only).
 - No Supabase credentials on the Windows VM.
 
 ## Phase 1 — Local Export Preview
@@ -600,11 +601,11 @@ promotion, connector/schema changes.
 
 **Route:** `GET /api/admin/quickbooks/intelligence/executive`
 
-Auth stack (same pattern as Moraware Admin):
+Auth stack (dedicated QuickBooks Intelligence head — not System Admin):
 
 1. `requireAuth()`
-2. `requireRole(["admin"])`
-3. `requireHeadAccess("system_admin")`
+2. `requireRole(["admin", "super_admin", "executive", "finance", "accounting"])`
+3. `requireHeadAccess("quickbooks_intelligence")`
 
 **Behavior:**
 
@@ -644,15 +645,18 @@ connector/schema changes, full-org production load tuning beyond pagination/`max
 
 **Tests:** `npm run qb:test` includes `quickBooksIntelligenceApi.test.mjs`.
 
-### Phase 4D — QuickBooks Intelligence Admin UI (System Admin)
+### Phase 4D — QuickBooks Intelligence Head (standalone)
 
-**Status:** Implemented inside **`app-system-admin`** as a nav view (**QuickBooks**).
+**Status:** Implemented as standalone head **`app-quickbooks-intelligence/`**
+(slug **`quickbooks_intelligence`**). System Admin no longer hosts this UI — it only
+assigns `user_head_access` / roles.
 
-**Surface:** System Admin → QuickBooks pill → `QuickBooksIntelligenceAdmin`.
+**Surface:** Home Launcher → QuickBooks Intelligence → executive snapshot page.
 
-**Data source:** `GET /api/admin/quickbooks/intelligence/executive` (Phase 4C). Same
-auth gate as the API (admin + `system_admin` head). Frontend never queries staging
-tables and never renders `raw_payload`, addresses, memos, or customer/vendor names.
+**Data source:** `GET /api/admin/quickbooks/intelligence/executive` (Phase 4C). Auth:
+allowed finance roles + `quickbooks_intelligence` head access. Frontend never queries
+staging tables and never renders `raw_payload`, addresses, memos, or customer/vendor
+names.
 
 **UI sections:**
 
@@ -670,17 +674,40 @@ tables and never renders `raw_payload`, addresses, memos, or customer/vendor nam
 
 | Module | Role |
 |--------|------|
-| `app-system-admin/src/ui/QuickBooksIntelligenceAdmin.tsx` | Fetch + presentational intelligence page |
-| `app-system-admin/src/lib/quickBooksIntelligenceViewModel.js` | Safe view-model / state machine / markup helper |
-| `app-system-admin/src/lib/quickBooksIntelligenceViewModel.test.mjs` | Fake-snapshot tests (loading/error/unauthorized/ready/partial; no raw_payload) |
+| `app-quickbooks-intelligence/src/ui/App.tsx` | Auth shell + EliteosTopbar + role gate |
+| `app-quickbooks-intelligence/src/ui/QuickBooksIntelligenceView.tsx` | Fetch + presentational intelligence page |
+| `app-quickbooks-intelligence/src/lib/quickBooksIntelligenceViewModel.js` | Safe view-model / state machine / markup helper |
+| `app-quickbooks-intelligence/src/lib/*.test.mjs` | Fake-snapshot + UI safety tests (no raw_payload) |
+
+**Registration (code):**
+
+- `EOS_HEAD_SLUGS` includes `quickbooks_intelligence`
+- Launcher catalog row (category **Finance & supply**)
+- `HEAD_URL_QUICKBOOKS_INTELLIGENCE` → `/api/me/heads` URL + CORS origin
+- Role defaults: `finance` / `accounting` include the slug; `admin` / `super_admin` /
+  `executive` see full catalog
+
+**Manual setup (do not apply automatically):**
+
+1. Deploy `app-quickbooks-intelligence` and set Brain env
+   `HEAD_URL_QUICKBOOKS_INTELLIGENCE` (e.g. `https://qb.eliteosfab.com` or chosen host).
+2. App env: `VITE_BACKEND_URL`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`,
+   `VITE_HOME_URL`.
+3. Users without role-default grants need an explicit row:
+   `insert into public.user_head_access (user_id, head_slug) values ('<auth_user_id>', 'quickbooks_intelligence');`
+   (Admins/executives already see the catalog; finance/accounting get the slug via
+   role hints when no explicit `user_head_access` rows override defaults.)
 
 **States handled:** loading, unauthorized (401/403), error, empty, partial (`max_rows`
 set), ready.
 
-**Out of scope for 4D:** AI narrative, dedicated QuickBooks head app, sync-health
-explorer tables, connector/schema changes.
+**Out of scope for 4D:** AI narrative, sync-health explorer tables, connector/schema
+changes, System Admin embedding.
 
-**Tests:** `npm run test --prefix app-system-admin`
+**Tests:** `npm run test --prefix app-quickbooks-intelligence`;
+`npm run build --prefix app-quickbooks-intelligence`;
+`npm run test --prefix app-system-admin` (asserts QuickBooks tab removed);
+`npm run qb:test` (API auth uses `quickbooks_intelligence`).
 
 ### Phase 4E — Sync health / Admin review expansion (future)
 

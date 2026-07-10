@@ -198,6 +198,27 @@ describe("quickBooksIntelligenceApi helpers", () => {
 });
 
 describe("quickBooksIntelligenceApi route auth + handler", () => {
+  it("wires quickbooks_intelligence head slug and allowed roles", () => {
+    const app = createFakeApp();
+    let headSlug = null;
+    let roles = null;
+    attachQuickBooksIntelligenceRoutes(app, {
+      requireAuth: () => (_req, res, next) => next(),
+      requireRole: (allowed) => {
+        roles = allowed;
+        return (_req, res, next) => next();
+      },
+      requireHeadAccess: (slug) => {
+        headSlug = slug;
+        return (_req, res, next) => next();
+      },
+      getSupabase: () => ({}),
+      loadExecutiveSnapshot: async () => fakeSnapshot(),
+    });
+    assert.equal(headSlug, "quickbooks_intelligence");
+    assert.deepEqual(roles, ["admin", "super_admin", "executive", "finance", "accounting"]);
+  });
+
   it("blocks unauthorized requests before handler", async () => {
     const app = createFakeApp();
     attachQuickBooksIntelligenceRoutes(app, {
@@ -217,7 +238,7 @@ describe("quickBooksIntelligenceApi route auth + handler", () => {
     assert.equal(res.body.ok, false);
   });
 
-  it("blocks non-admin role", async () => {
+  it("blocks disallowed role", async () => {
     const app = createFakeApp();
     attachQuickBooksIntelligenceRoutes(app, {
       requireAuth: () => (_req, res, next) => next(),
@@ -234,7 +255,7 @@ describe("quickBooksIntelligenceApi route auth + handler", () => {
     assert.equal(res.statusCode, 403);
   });
 
-  it("blocks missing system_admin head access", async () => {
+  it("blocks missing quickbooks_intelligence head access", async () => {
     const app = createFakeApp();
     attachQuickBooksIntelligenceRoutes(app, {
       requireAuth: () => (_req, res, next) => next(),

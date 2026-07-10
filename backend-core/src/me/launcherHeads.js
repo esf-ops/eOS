@@ -143,6 +143,16 @@ export const HEAD_LAUNCHER_CATALOG = [
     href: "/finance"
   },
   {
+    slug: "quickbooks_intelligence",
+    label: "eliteOS QuickBooks Intelligence",
+    description:
+      "AR risk, revenue concentration, payment behavior, estimate conversion, and deterministic finance insights from QuickBooks staging (read-only).",
+    category: "Finance & supply",
+    href: "/quickbooks-intelligence",
+    roleNote:
+      "Requires quickbooks_intelligence head access. Roles: admin, super_admin, executive, finance, accounting. System Admin assigns access — it does not host this page. No raw_payload or customer/vendor PII in the UI."
+  },
+  {
     slug: "reports",
     label: "eliteOS Reports Head",
     description: "Curated BI and exports.",
@@ -247,12 +257,12 @@ function defaultSlugSet(role, userKind) {
   const roleHints = {
     sales: ["sales", "quote", "quote_library", "custom_quote", "visualizer", "reports"],
     estimator: ["quote", "quote_library", "custom_quote", "visualizer", "reports"],
-    accounting: ["finance", "reports", "pricing_admin"],
+    accounting: ["finance", "reports", "pricing_admin", "quickbooks_intelligence"],
     production: ["production", "shop_tv", "reports"],
     shop_tv: ["shop_tv"],
     installer: ["install_dashboard", "install"],
     purchasing: ["purchasing"],
-    finance: ["finance", "reports", "pricing_admin"],
+    finance: ["finance", "reports", "pricing_admin", "quickbooks_intelligence"],
     dealer_admin: ["partner_quote", "dealer_resources", "quote"],
     dealer_user: ["partner_quote", "dealer_resources", "quote"],
     viewer: [],

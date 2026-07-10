@@ -1444,3 +1444,16 @@
 | **Deploy** | Set `HEAD_URL_HR` on backend-core (e.g. `https://hr.eliteosfab.com`). Grant `hr` head access to managers and employees who should see grades. |
 | **Impacted files/docs** | `app-hr/`, `backend-core/src/hr/`, `backend-core/src/server.js`, `backend-core/src/me/launcherHeads.js`, root `package.json`, this entry. |
 | **Revisit trigger** | Auto-detected mistakes from takeoff/QC; severity-weighted grading in UI; employee acknowledgment workflow; configurable grade thresholds admin UI. |
+
+### 99. QuickBooks Intelligence Head — standalone (Phase 4D refactor, 2026-07-10)
+
+| Field | Value |
+|-------|--------|
+| **Date** | 2026-07-10 |
+| **Decision** | Phase 4D QuickBooks Intelligence is a **standalone protected head** (`app-quickbooks-intelligence`, slug **`quickbooks_intelligence`**), not a System Admin nav tab. System Admin remains identity/access/governance only. The head calls existing `GET /api/admin/quickbooks/intelligence/executive` (no schema/connector/import changes, no AI). |
+| **Auth** | `requireAuth()` + `requireRole(["admin","super_admin","executive","finance","accounting"])` + `requireHeadAccess("quickbooks_intelligence")`. Admins/super_admins still bypass head-access checks per existing middleware. Finance/accounting get the slug via launcher role hints; others need explicit `user_head_access` when not in full-catalog roles. |
+| **Security** | Backend-only reads of `brain_quickbooks_*`. UI never renders `raw_payload`, addresses, memos, or customer/vendor PII. No service-role keys in the browser. |
+| **Registration** | `EOS_HEAD_SLUGS`, launcher catalog (Finance & supply), `HEAD_URL_QUICKBOOKS_INTELLIGENCE` in `headDeploymentUrls.js`, root `eos:build:quickbooks-intelligence`. |
+| **Manual setup** | Set `HEAD_URL_QUICKBOOKS_INTELLIGENCE` on Brain; deploy app with `VITE_*` env; grant `user_head_access` where role defaults do not apply. **Do not** apply DB migrations for this head. |
+| **Impacted files/docs** | `app-quickbooks-intelligence/`, `app-system-admin/` (QB tab removed), `quickBooksIntelligenceApi.js`, `eosGovernanceConstants.js`, `launcherHeads.js`, `headDeploymentUrls.js`, `QUICKBOOKS_INGESTION_PLAN.md`, `eliteOS-master-head-map.md`, `SYSTEM_BLUEPRINT.md`, this entry. |
+| **Revisit trigger** | Dedicated sync-health Admin surface; AI narrative layer; rename API path off `/api/admin/quickbooks/*` if product wants non-admin URL branding. |

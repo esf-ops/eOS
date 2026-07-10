@@ -375,7 +375,7 @@ export function QuickBooksIntelligenceView({
   );
 }
 
-export default function QuickBooksIntelligenceAdmin({ token }: { token: string }) {
+export default function QuickBooksIntelligencePage({ token }: { token: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [statusCode, setStatusCode] = useState<number | null>(null);

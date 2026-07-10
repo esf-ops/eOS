@@ -161,7 +161,8 @@ Status is **conceptual** unless a separate tracker says otherwise. Use the label
 - Finance Head  
 - Job Costing Head  
 - Payroll Prep / Workforce Cost Head  
-- QuickBooks / Accounting Integration Head — **Phase 4D intelligence UI** ships inside **System Admin** (`QuickBooks` nav → `GET /api/admin/quickbooks/intelligence/executive`); dedicated finance/accounting head remains future.
+- **QuickBooks Intelligence Head** (`app-quickbooks-intelligence/`, slug **`quickbooks_intelligence`**, env **`HEAD_URL_QUICKBOOKS_INTELLIGENCE`**) — Phase 4D read-only AR/revenue/payment/estimate-flow insights via `GET /api/admin/quickbooks/intelligence/executive`. Roles: admin, super_admin, executive, finance, accounting + head access. **System Admin** assigns access only — it does **not** host this page. No AI, no `raw_payload`, no writeback.  
+- QuickBooks / Accounting Integration Head — connector/import/sync-health surfaces (future; distinct from Intelligence Head).  
 - Invoice / Payment Status Head  
 
 ### HR / Workforce
