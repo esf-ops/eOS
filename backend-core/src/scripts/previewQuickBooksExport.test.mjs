@@ -3,9 +3,11 @@
  * Run: node backend-core/src/scripts/previewQuickBooksExport.test.mjs
  */
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { readQuickBooksExport } from "../quickbooks/quickBooksExportReader.js";
 import { buildQuickBooksExportSummary } from "../quickbooks/quickBooksExportSummary.js";
@@ -214,6 +216,57 @@ function captureConsoleLog(fn) {
   const fullOutput = printedLines.join("\n");
   assert.doesNotMatch(fullOutput, /FAKE-sales-orders/); // no raw record IDs ever printed
   console.log("ok: full read+summary+print pipeline produces a correctly spaced per-entity line");
+}
+
+// ── CLI subprocess test: exercise the real entrypoint via child_process ───────
+// Spawns the actual CLI script as a child process (not an imported function), so
+// it proves the emitted stdout bytes — not just in-process string values — have
+// the correct spacing.  Uses production-matching counts: 312 files / 31127 records
+// (311 files × 100 records + 1 file × 27 records) for sales-orders only, so the
+// assert covers exactly the token pair that appeared fused in the real CLI output.
+{
+  const testDir = await makeTempExportFolder();
+
+  await writeJson(path.join(testDir, "manifest.json"), {
+    RunId: "fake-subprocess-run",
+    StartedAt: "2026-07-10T00:00:00Z",
+    CompletedAt: "2026-07-10T01:00:00Z",
+    QbXmlVersion: "16.0",
+    CompanyFile: "(currently open company file)",
+    ExportDirectory: testDir,
+    Entities: [{ EntityType: "sales-orders", BatchCount: 312, RecordCount: 31127, Errors: [] }],
+    Errors: [],
+  });
+
+  // 311 batch files × 100 records + 1 batch file × 27 records = 312 files, 31127 records.
+  for (let i = 1; i <= 311; i++) {
+    const batchNum = String(i).padStart(3, "0");
+    await writeJson(
+      path.join(testDir, "sales-orders", `batch-${batchNum}.json`),
+      fakeBatchFile("sales-orders", i, 100)
+    );
+  }
+  await writeJson(
+    path.join(testDir, "sales-orders", "batch-312.json"),
+    fakeBatchFile("sales-orders", 312, 27)
+  );
+
+  const scriptPath = fileURLToPath(new URL("./previewQuickBooksExport.mjs", import.meta.url));
+  const stdout = execFileSync(process.execPath, [scriptPath, testDir], { encoding: "utf8" });
+
+  const salesOrdersLine = stdout.split("\n").find((line) => line.includes("sales-orders:"));
+  assert.ok(salesOrdersLine, "expected CLI stdout to include a sales-orders: line");
+
+  // The critical assertion: the emitted stdout byte sequence must contain a space
+  // between discoveredJsonFileCount=312 and discoveredRecordCount=31127.
+  assert.match(salesOrdersLine, /discoveredJsonFileCount=312 discoveredRecordCount=31127/);
+  assert.doesNotMatch(salesOrdersLine, /discoveredJsonFileCount=312discoveredRecordCount/);
+
+  // Safety: no raw record identifiers must appear in stdout.
+  assert.doesNotMatch(stdout, /FAKE-sales-orders-\d/);
+
+  await fs.rm(testDir, { recursive: true, force: true });
+  console.log("ok: CLI subprocess stdout has correctly spaced sales-orders line with exact production counts (312/31127)");
 }
 
 console.log("\nAll previewQuickBooksExport formatting tests passed.");

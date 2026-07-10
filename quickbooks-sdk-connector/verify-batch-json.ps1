@@ -40,7 +40,7 @@ if (-not (Test-Path $projectFile)) {
     exit 1
 }
 
-# ── Step 1: Build ──────────────────────────────────────────────────────────────
+# Step 1: Build
 Write-Host ""
 Write-Host "== Step 1: Building connector ($BuildConfiguration) =="
 dotnet build $projectFile -c $BuildConfiguration --nologo -verbosity:minimal
@@ -50,7 +50,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Host "Build succeeded."
 
-# ── Step 2: Construct fake payload ────────────────────────────────────────────
+# Step 2: Construct fake payload
 Write-Host ""
 Write-Host "== Step 2: Constructing fake batch payload (no real data) =="
 
@@ -63,7 +63,7 @@ Write-Host "== Step 2: Constructing fake batch payload (no real data) =="
 #   }
 #
 # Using PowerShell hashtables which ConvertTo-Json serializes the same way
-# WriteValue serializes IDictionary<string, object> — as a JSON object.
+# WriteValue serializes IDictionary<string, object> - as a JSON object.
 
 $fakeRecord1 = @{
     ListID   = "FAKE-LIST-001"
@@ -85,7 +85,7 @@ $fakePayload = @{
     records     = @($fakeRecord1, $fakeRecord2)
 }
 
-# ── Step 3: Serialize ──────────────────────────────────────────────────────────
+# Step 3: Serialize
 Write-Host ""
 Write-Host "== Step 3: Serializing payload to JSON =="
 
@@ -96,9 +96,9 @@ $tempOut = Join-Path $tempDir ("qb-verify-batch-" + [System.Guid]::NewGuid().ToS
 $json | Out-File -FilePath $tempOut -Encoding UTF8
 
 Write-Host "Serialized output written to: $tempOut"
-Write-Host "(Contains only FAKE_ placeholder data — safe to inspect.)"
+Write-Host "(Contains only FAKE_ placeholder data - safe to inspect.)"
 
-# ── Step 4 & 5: Validate ──────────────────────────────────────────────────────
+# Step 4: Validate
 Write-Host ""
 Write-Host "== Step 4: Running validation checks =="
 
@@ -188,7 +188,7 @@ if ($json -match "System\.Object") {
     Write-Host "PASS: output does not contain 'System.Object'"
 }
 
-# ── Result ─────────────────────────────────────────────────────────────────────
+# Result
 Write-Host ""
 if ($failures -eq 0) {
     Write-Host "All verification checks passed."
