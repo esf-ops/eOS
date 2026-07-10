@@ -475,4 +475,73 @@ async function writeCleanExport(dir, { customerCount = 3, invoiceCount = 2, line
   console.log("ok (F5): repeated import advances last_seen_at/updated_at; first_seen_at preserved");
 }
 
+// ── Test 15 (F1): pre-throw errors/findings are preserved on a mid-write failure ─
+{
+  const dir = await makeTempExportFolder();
+  // company is in manifest but company.json is MISSING -> one company error accumulated.
+  // customers are valid but omit EditSequence -> missing_edit_sequence findings accumulated,
+  // both BEFORE the customers upsert (which we make throw).
+  await writeJson(path.join(dir, "manifest.json"), {
+    RunId: "20260710-fake-auditflush",
+    StartedAt: "2026-07-10T00:00:00Z",
+    CompletedAt: "2026-07-10T01:00:00Z",
+    QbXmlVersion: "16.0",
+    CompanyFile: "(currently open company file)",
+    ExportDirectory: dir,
+    Entities: [
+      { EntityType: "company", BatchCount: 1, RecordCount: 1, Errors: [] },
+      { EntityType: "customers", BatchCount: 1, RecordCount: 2, Errors: [] },
+    ],
+    Errors: [],
+  });
+  // No company.json written (accumulates a company error).
+  const customersNoEditSeq = [
+    { ListID: "FAKE-CUST-1", IsActive: "true", FullName: "SENTINEL_PII_NAME" }, // no EditSequence
+    { ListID: "FAKE-CUST-2", IsActive: "true" },
+  ];
+  await writeJson(path.join(dir, "customers", "batch-001.json"), fakeListBatch("customers", 1, customersNoEditSeq));
+
+  const base = createInMemoryQuickBooksStagingRepository();
+  const throwingRepo = {
+    ...base,
+    upsertRows: async (tableName, ...rest) => {
+      if (tableName === "brain_quickbooks_customers") {
+        throw new Error("RAW_DB_ERROR_TEXT should never surface");
+      }
+      return base.upsertRows(tableName, ...rest);
+    },
+  };
+
+  let result;
+  await assert.doesNotReject(async () => {
+    result = await importQuickBooksStaging(dir, { organizationId: FAKE_ORG_ID, repository: throwingRepo });
+  });
+
+  // Run finalized failed with finished_at + error_count from the accumulated errors.
+  const run = base.getRuns()[0];
+  assert.equal(result.status, "failed");
+  assert.equal(run.status, "failed");
+  assert.ok(run.finished_at, "finished_at set on failed finalize");
+  assert.ok(run.error_count >= 1, "error_count reflects accumulated errors");
+
+  // Pre-throw errors were flushed to the repo (the company error).
+  const errors = base.getErrors();
+  assert.ok(errors.some((e) => e.entity_type === "company" && /company\.json missing or unreadable/.test(e.message)),
+    "pre-throw company error was recorded");
+
+  // Pre-throw findings were flushed (missing_edit_sequence from the customer rows).
+  const findings = base.getFindings();
+  assert.ok(findings.some((f) => f.finding_type === "missing_edit_sequence"),
+    "pre-throw data-quality findings were recorded");
+
+  // Safe message only: no raw thrown text, no PII sentinel, anywhere operator-visible.
+  assert.equal(run.error_message, "import aborted during write phase (Error)");
+  const auditBlob = JSON.stringify({ result, runs: base.getRuns(), errors, findings });
+  assert.doesNotMatch(auditBlob, /RAW_DB_ERROR_TEXT/, "raw thrown error text must not surface");
+  assert.doesNotMatch(auditBlob, /SENTINEL_PII/, "no PII in result/runs/errors/findings");
+
+  await fs.rm(dir, { recursive: true, force: true });
+  console.log("ok (F1): mid-write throw preserves pre-throw errors/findings; run failed; safe message only");
+}
+
 console.log("\nAll quickBooksStagingImport tests passed.");

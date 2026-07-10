@@ -313,7 +313,10 @@ Behaviour:
   `status: "failed"` and performs **zero** repository interaction — no audit run, no rows.
 - **Error-path finalization:** the entire write phase runs inside a `try/catch`; if any
   repository call throws mid-import, the run is finalized `status: "failed"` (with a safe,
-  sanitized message — never record content) instead of being left stuck `running`.
+  sanitized message — never record content) instead of being left stuck `running`. Errors
+  and data-quality findings accumulated **before** the throw are best-effort flushed
+  (`errorRows`/`dataQualityFindingCounts` are hoisted above the `try`) so a failed run still
+  has a diagnosable audit trail; `error_count` reflects the accumulated errors.
 - **On pass:** opens an audit run (`createSyncRun`), then builds and **chunk-upserts**
   (default 500/chunk) company (root `company.json`), all primary manifest folder entities,
   and invoice-lines **derived from invoices** — each via its `getStagingUpsertConfig` conflict
@@ -337,9 +340,25 @@ Behaviour:
   protected internal route (`POST /api/internal/quickbooks-sync/import`) will emit
   (`200` success / `207` partial / `422` failed) — counts, IDs, and reasons only.
 
-**Phase 3B note:** the record readers here load an entire entity folder into memory; the
-Supabase-backed implementation must stream/chunk **reads** as well as writes for the full
-export.
+**Phase 3B notes / carry-overs:**
+
+- **Stream reads and errors, not just writes.** The record readers load an entire entity
+  folder into memory, and `errorRows` accumulate in memory for the whole run. The
+  Supabase-backed implementation must stream/chunk **reads** and **batch error/finding
+  writes** as well as row writes for the full export.
+- **Resumable run creation.** `createSyncRun` currently always INSERTs. With the migration's
+  partial unique index `uq_qb_sync_runs_org_run_chunk (organization_id, qb_run_id,
+  chunk_index) WHERE chunk_index IS NOT NULL`, a chunked **resume** that re-posts the same
+  `(organization_id, qb_run_id, chunk_index)` would violate that index. Phase 3B must make
+  `createSyncRun` upsert-or-return-existing on that key (or add a `resumeRun`/`getExistingRun`
+  method). Single-shot Phase 3A imports (`chunk_index = null`) are unaffected.
+- **DO UPDATE SET scope.** The fake repository updates only `updateColumns` on conflict; a
+  real `supabase-js .upsert()` updates every column present in the row payload. With the
+  current payloads the outcome is identical (`first_seen_at`/`created_at` are never in the
+  payload, so both preserve them; `updated_at`/`last_seen_at` are handled by the
+  `qb_staging_touch_timestamps` trigger). The Supabase repository should either scope its
+  `DO UPDATE SET` to `updateColumns` (raw SQL/RPC) or document that upserting all payload
+  columns is equivalent because the payload never carries insert-only timestamp columns.
 
 Tests (`quickBooksStagingImport.test.mjs`, fake data only) prove: clean import writes the
 expected rows; repeated import is idempotent by conflict key; gate failures abort before any

@@ -136,15 +136,9 @@ export async function importQuickBooksStaging(exportFolderPath, options = {}) {
     chunk_count: chunkCount,
   });
 
-  try {
-  const ctx = { organizationId, syncRunId, qbXmlVersion };
-  const perEntity = {};
+  // Hoisted above the try so the catch can flush whatever was accumulated before a throw.
   const dataQualityFindingCounts = {};
-  const warnings = [];
-  const failReasons = [];
   const errorRows = [];
-  let totalStagingRows = 0;
-  let totalFailures = 0;
 
   const bumpFinding = (type) => {
     dataQualityFindingCounts[type] = (dataQualityFindingCounts[type] ?? 0) + 1;
@@ -159,6 +153,25 @@ export async function importQuickBooksStaging(exportFolderPath, options = {}) {
       message: reason, // safe: builder reasons never contain record content
     });
   };
+  // Build the finding rows (counts only, no record content) from accumulated counts.
+  const buildFindingRows = () =>
+    Object.entries(dataQualityFindingCounts).map(([findingType, count]) => ({
+      organization_id: organizationId,
+      sync_run_id: syncRunId,
+      finding_type: findingType,
+      severity: "warning",
+      entity_type: findingType === "invoice_lines_standalone_vs_derived_mismatch" ? "invoice-lines" : "multiple",
+      message: `${findingType} (count=${count})`,
+      metadata: { count },
+    }));
+
+  try {
+  const ctx = { organizationId, syncRunId, qbXmlVersion };
+  const perEntity = {};
+  const warnings = [];
+  const failReasons = [];
+  let totalStagingRows = 0;
+  let totalFailures = 0;
 
   // ── Company (root company.json) ────────────────────────────────────────────
   const companyInManifest = Object.prototype.hasOwnProperty.call(manifestCounts, "company");
@@ -340,15 +353,7 @@ export async function importQuickBooksStaging(exportFolderPath, options = {}) {
   }
 
   // ── Findings + audit finalize ──────────────────────────────────────────────
-  const findingRows = Object.entries(dataQualityFindingCounts).map(([findingType, count]) => ({
-    organization_id: organizationId,
-    sync_run_id: syncRunId,
-    finding_type: findingType,
-    severity: "warning",
-    entity_type: findingType === "invoice_lines_standalone_vs_derived_mismatch" ? "invoice-lines" : "multiple",
-    message: `${findingType} (count=${count})`,
-    metadata: { count },
-  }));
+  const findingRows = buildFindingRows();
   if (findingRows.length > 0) await repository.recordFindings(findingRows);
   if (errorRows.length > 0) await repository.recordErrors(errorRows);
 
@@ -391,18 +396,34 @@ export async function importQuickBooksStaging(exportFolderPath, options = {}) {
     totalFailures,
   };
   } catch (err) {
-    // A write-phase error must not leave the run stuck "running". Finalize it as failed
-    // with a SAFE message (never include record content), then return a failed result.
+    // A write-phase error must not leave the run stuck "running", and per-record errors/
+    // findings accumulated before the throw must not be lost. Use a SAFE message only
+    // (never err.message, which could carry DB/raw details), best-effort flush the audit
+    // rows, then finalize the run failed. All audit writes here are best-effort.
     const safeMessage = `import aborted during write phase (${err?.code ?? err?.name ?? "error"})`;
+
+    try {
+      if (errorRows.length > 0) await repository.recordErrors(errorRows);
+    } catch {
+      // Swallow — audit flush is best-effort.
+    }
+    try {
+      const findingRows = buildFindingRows();
+      if (findingRows.length > 0) await repository.recordFindings(findingRows);
+    } catch {
+      // Swallow — audit flush is best-effort.
+    }
     try {
       await repository.finalizeSyncRun(syncRunId, {
         status: "failed",
         finished_at: new Date().toISOString(),
+        error_count: errorRows.length,
         error_message: safeMessage,
       });
     } catch {
       // Swallow finalize errors — we still return a failed result below.
     }
+
     return failedShell({ runId, qbXmlVersion, syncRunId, failReasons: [safeMessage] });
   }
 }
