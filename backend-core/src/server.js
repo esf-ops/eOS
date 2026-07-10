@@ -16,6 +16,7 @@ import { attachMorawareAdminRoutes } from "./admin/morawareAdmin.js";
 import { attachOrgDirectoryRoutes } from "./orgDirectory/orgDirectoryApi.js";
 import { attachSalesAccountMappingAdminRoutes } from "./admin/salesAccountMappingAdmin.js";
 import { attachIdentityResolutionAdminRoutes } from "./admin/identityResolutionAdmin.js";
+import { attachQuickBooksIntelligenceRoutes } from "./quickbooks/quickBooksIntelligenceApi.js";
 import { attachQuoteRoutes } from "./quotes/quoteRoutes.js";
 import { attachQuoteFileRoutes } from "./files/quoteFileRoutes.js";
 import { attachTakeoffWorkspaceRoutes } from "./takeoff/takeoffWorkspaceRoutes.js";
@@ -1174,6 +1175,13 @@ attachMorawareAdminRoutes(app, {
   getSupabase: supabaseServerClient
 });
 
+attachQuickBooksIntelligenceRoutes(app, {
+  requireAuth,
+  requireRole,
+  requireHeadAccess,
+  getSupabase: supabaseServerClient
+});
+
 attachOrgDirectoryRoutes(app, {
   requireAuth,
   requireRole,
@@ -1729,6 +1737,7 @@ if (shouldStartLocalHttpServer()) {
     console.log("- GET  /api/internal/moraware-sync/group-health");
     console.log("- GET /api/moraware-sync/status");
     console.log("- GET /api/admin/moraware/health (and mirror explorer, data-quality, prepared-facts)");
+    console.log("- GET /api/admin/quickbooks/intelligence/executive");
     console.log("- GET /api/executive/summary");
     console.log("- GET /api/executive/salesperson-performance");
     console.log("- GET /api/executive/account-performance");

@@ -13,19 +13,17 @@ This mirrors the pattern already used for Moraware (`docs/eliteos/moraware-sync-
 
 `External system → local read-only extract → normalized staging → organization-scoped facts → heads`
 
-## Current Phase: Phase 4B — Intelligence Supabase Read Repository
+## Current Phase: Phase 4C — Intelligence Admin API + Safe Smoke
 
-**Latest delivered:** Phase 4B backend-core Supabase read repository + executive
-intelligence snapshot service over org-scoped staging rows (mocked tests only; no
-UI, no AI, no writeback). See **Phase 4B** below.
+**Latest delivered:** Phase 4C admin API route + safe live smoke script for QuickBooks
+executive intelligence (mocked tests; live smoke only when a human runs it with env set).
 
-**Also in place:** Phase 1 local export preview; Phase 2 staging schema draft;
-Phase 2B dry-run; Phase 3A–3C staging import; Phase 4A pure read/insight layer.
+**Also in place:** Phase 1–3C staging import; Phase 4A read/insight layer; Phase 4B
+Supabase read repository + executive snapshot service.
 
-**What does NOT exist yet (by design for 4B):**
+**What does NOT exist yet (by design for 4C):**
 
-- No HTTP routes exposing QuickBooks intelligence yet.
-- No Admin / frontend UI for QuickBooks AR or revenue.
+- No Admin / frontend UI for QuickBooks AR or revenue (API only).
 - No AI summarization over QuickBooks facts.
 - No browser access to `brain_quickbooks_*` or `raw_payload`.
 - No writeback to QuickBooks.
@@ -592,16 +590,66 @@ named columns only); opt in with `includeRawPayload` / `includeLineRawPayload`.
 - Public outputs pass `assertNoRawPayload`.
 - Chunked `.range()` reads avoid large single-statement timeouts.
 
-**Out of scope for 4B:** HTTP routes, Admin UI, AI, prepared-facts promotion,
-connector/schema changes.
+**Out of scope for 4B:** HTTP routes (delivered in 4C), Admin UI, AI, prepared-facts
+promotion, connector/schema changes.
 
 **Tests:** `npm run qb:test` includes `quickBooksIntelligenceSupabaseRepository.test.mjs`.
 
-### Phase 4C — Admin Review UI (future)
+### Phase 4C — QuickBooks Intelligence Admin API + Safe Smoke
+
+**Status:** Implemented. Backend-only admin route + optional live smoke CLI.
+
+**Route:** `GET /api/admin/quickbooks/intelligence/executive`
+
+Auth stack (same pattern as Moraware Admin):
+
+1. `requireAuth()`
+2. `requireRole(["admin"])`
+3. `requireHeadAccess("system_admin")`
+
+**Behavior:**
+
+- Resolves `organization_id` from query → user profile → `QB_IMPORT_ORGANIZATION_ID`.
+- Calls Phase 4B `loadExecutiveIntelligenceSnapshot` via injected Supabase DI.
+- Response includes AR / revenue / payment / estimate-SO-invoice flow / sales-rep /
+  activity trend / insights / `insight_list`, plus metadata (`organization_id`,
+  `generated_at`, `page_size`, `max_rows`, staging row counts).
+- Never returns `raw_payload`. Errors return a generic message (+ optional safe code).
+
+**Optional query params:** `organization_id`, `as_of_date`, `page_size`, `max_rows`
+(ceiling 5000), `include_invoice_lines`, `insight_list_limit`.
+
+**Modules:**
+
+| Module | Role |
+|--------|------|
+| `quickBooksIntelligenceApi.js` | Route attach + response shaping + org/query helpers |
+| `smokeQuickBooksIntelligence.mjs` | Human-run live smoke; conservative `maxRows` (default 50); prints counts/booleans only |
+| `quickBooksIntelligenceApi.test.mjs` | Auth gates, sanitized response, smoke env/PII safety |
+
+**Smoke (do not run in CI without env):**
+
+```bash
+npm run qb:smoke:intelligence
+# or
+QB_IMPORT_ORGANIZATION_ID=<org-uuid> \
+SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
+node backend-core/src/scripts/smokeQuickBooksIntelligence.mjs
+```
+
+Smoke output never prints names, addresses, memos, invoice numbers, amounts,
+`raw_payload`, or secret values — only section presence and safe counts.
+
+**Out of scope for 4C:** Frontend Admin UI, AI summaries, connector/schema changes,
+full-org production load tuning beyond pagination/`max_rows`.
+
+**Tests:** `npm run qb:test` includes `quickBooksIntelligenceApi.test.mjs`.
+
+### Phase 4D — Admin Review UI (future)
 
 System Admin (or a dedicated QuickBooks Admin panel) surfaces sync health, per-entity
 row counts, data-quality findings, and recent errors — read-only, admin-gated, no raw
-`raw_payload` dumped to the browser. Intelligence snapshots from Phase 4B are the
+`raw_payload` dumped to the browser. The Phase 4C executive intelligence API is the
 intended source for AR/revenue summaries (not direct staging queries).
 
 ### Phase 5 — Scheduled Connector Upload with Scoped Token
