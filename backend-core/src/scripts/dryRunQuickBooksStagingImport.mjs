@@ -106,12 +106,13 @@ export function computeBlockReasons(summary) {
 /**
  * Read all materialized records for one entity folder, batch file by batch file.
  * Never retains file content beyond the returned arrays; callers must not log records.
+ * Exported so the Phase 3A import orchestrator reuses the exact same reader.
  *
  * @param {string} exportFolderPath
  * @param {string} folder
  * @returns {Promise<{ batches: Array<{ fileName: string, records: unknown[] }>, unreadable: number, unmaterialized: number }>}
  */
-async function readEntityRecordBatches(exportFolderPath, folder) {
+export async function readEntityRecordBatches(exportFolderPath, folder) {
   const folderPath = path.join(exportFolderPath, folder);
   let entries;
   try {
@@ -148,11 +149,12 @@ async function readEntityRecordBatches(exportFolderPath, folder) {
 
 /**
  * Build a map of manifest entity type -> declared RecordCount (safe integers only).
+ * Exported so the Phase 3A import orchestrator reuses the same reconciliation basis.
  *
  * @param {object|null} manifest
  * @returns {Record<string, number>}
  */
-function manifestEntityCounts(manifest) {
+export function manifestEntityCounts(manifest) {
   const counts = {};
   const entities = Array.isArray(manifest?.Entities) ? manifest.Entities : [];
   for (const entity of entities) {

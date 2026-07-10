@@ -289,17 +289,54 @@ not match real exports.
 The export is staging-ready. Migration remains draft-only; apply it only after Phase 3
 (import endpoint) is built and a full round-trip has run on fake data.
 
+## Phase 3A — Import Orchestrator against a Fake Repository (implemented; no writes)
+
+`backend-core/src/quickbooks/quickBooksStagingImport.js` orchestrates a full staging import
+by **reusing** the Phase 2B dry-run validation (`computeBlockReasons`,
+`readEntityRecordBatches`, `manifestEntityCounts`) and the Phase 2 staging-row builders
+(`buildStagingRow`, `buildInvoiceLineRowsFromInvoiceRecord`, `getStagingUpsertConfig`). It
+writes through an injected **repository boundary**
+(`backend-core/src/quickbooks/quickBooksStagingRepository.js`); the only implementation in
+this phase is the in-memory fake (`createInMemoryQuickBooksStagingRepository`). There is
+**no Supabase client, no service-role env, and no network** anywhere in this path.
+
+Behaviour:
+
+- **Fail-closed before writes:** if any dry-run gate trips (manifest invalid, self-reported,
+  unreadable, unrecognized, or a manifest-backed count mismatch), the import returns
+  `status: "failed"` and performs **zero** repository interaction — no audit run, no rows.
+- **On pass:** opens an audit run (`createSyncRun`), then builds and **chunk-upserts**
+  (default 500/chunk) company (root `company.json`), all primary manifest folder entities,
+  and invoice-lines **derived from invoices** — each via its `getStagingUpsertConfig` conflict
+  key, so the fake repo dedupes exactly as `ON CONFLICT (...) DO UPDATE` would.
+- **Idempotent:** re-running the same export updates rows in place (no duplicate inserts).
+- **Per-record isolation:** malformed/null records are recorded as safe `qb_sync_errors`
+  rows and skipped; the rest still import. Any failures (or a reconciliation mismatch) mark
+  the run `partial`; a fully clean import is `success`.
+- **Audit + findings:** run status/counts finalized in the run row; data-quality findings
+  recorded as counts only.
+- **Endpoint shape:** `buildImportResponse(result)` returns the safe HTTP contract a future
+  protected internal route (`POST /api/internal/quickbooks-sync/import`) will emit
+  (`200` success / `207` partial / `422` failed) — counts, IDs, and reasons only.
+
+Tests (`quickBooksStagingImport.test.mjs`, fake data only) prove: clean import writes the
+expected rows; repeated import is idempotent by conflict key; gate failures abort before any
+writes; per-record malformed data is isolated; invoice-lines are derived from invoices;
+company is imported; audit run status is correct; no PII sentinels leak into the
+result/response/errors/findings/run metadata; and the import path imports no
+Supabase/http/service-role/fetch.
+
 ## Future Phases
 
-### Phase 3 — backend-core Import Endpoint
+### Phase 3B — Supabase-backed Repository + Protected Endpoint
 
-Add a protected internal import endpoint (`POST /api/internal/quickbooks-sync/import`,
-shared-secret auth via header, same pattern as
-`POST /api/internal/moraware-sync/import`) that accepts batches produced by the
-Windows VM connector (or a future uploader script) and writes them into Phase 2
-staging tables using `buildStagingRow` + `getStagingUpsertConfig`. Chunked payloads
-for large entities (invoices, bills, sales orders, invoice-lines) following the Moraware
-chunked-import precedent. Sync run metadata recorded in `qb_sync_runs`.
+Add a service-role-backed implementation of the `QuickBooksStagingRepository` interface
+(constructed only inside backend-core, never on the VM) and wire it behind a protected
+internal route (`POST /api/internal/quickbooks-sync/import`, shared-secret header, same
+pattern as `POST /api/internal/moraware-sync/import`). The orchestrator, chunking, gates,
+idempotency, and response shape from Phase 3A carry over unchanged — only the repository
+implementation swaps from the in-memory fake to Supabase. Apply
+`eliteos_quickbooks_staging_v1.sql` before enabling this route.
 
 ### Phase 4 — Admin Review UI
 
