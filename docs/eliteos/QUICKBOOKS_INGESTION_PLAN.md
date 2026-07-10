@@ -117,7 +117,7 @@ full round-trip integration test with fake data has passed.**
 | sales-reps | SalesRepRet | `brain_quickbooks_sales_reps` | `(organization_id, qb_list_id)` |
 | terms | StandardTermsRet / DateDrivenTermsRet | `brain_quickbooks_terms` | `(organization_id, qb_list_id, term_type)` |
 | invoices | InvoiceRet | `brain_quickbooks_invoices` | `(organization_id, qb_txn_id)` |
-| invoice-lines | derived from InvoiceRet | `brain_quickbooks_invoice_lines` | `(organization_id, qb_txn_id, qb_txn_line_id)` |
+| invoice-lines | derived from InvoiceRet | `brain_quickbooks_invoice_lines` | `(organization_id, qb_txn_id, line_seq_number)` |
 | payments | ReceivePaymentRet | `brain_quickbooks_payments` | `(organization_id, qb_txn_id)` |
 | bills | BillRet | `brain_quickbooks_bills` | `(organization_id, qb_txn_id)` |
 | purchase-orders | PurchaseOrderRet | `brain_quickbooks_purchase_orders` | `(organization_id, qb_txn_id)` |
@@ -147,13 +147,22 @@ Audit tables: `qb_sync_runs`, `qb_sync_errors`, `qb_data_quality_findings`.
 
 **Invoice lines** (derived):
 - `qb_txn_id` — parent invoice `TxnID`
-- `qb_txn_line_id` — line's own `TxnLineID` (null when absent; `line_seq_number` is fallback)
+- `line_seq_number` — **NOT NULL** 0-based position of the line within the parent invoice; the idempotency key component
+- `qb_txn_line_id` — line's own `TxnLineID`, a **nullable attribute only** (never part of the unique key — see idempotency note below)
 - `txn_date` — inherited from parent invoice
 - `qb_item_list_id` — `ItemRef.ListID` (opaque)
 - `line_type` — e.g. "InvoiceLineRet" / "InvoiceLineGroupRet"
 
 **All tables**: `organization_id`, `sync_run_id` (FK to `qb_sync_runs`), `source_system`,
 `raw_payload` (full normalized Ret JSON), `first_seen_at`, `last_seen_at`, `created_at`, `updated_at`.
+
+**`qb_sync_runs` chunk/resume metadata** (nullable; for future chunked/resumable Phase 3 imports):
+- `import_group_id` — shared across all chunk rows of one chunked import
+- `chunk_index` — 0-based index of this chunk (`check chunk_index is null or >= 0`)
+- `chunk_count` — total chunk count for the group (`check chunk_count is null or > 0`)
+- A partial unique index `(organization_id, qb_run_id, chunk_index) where chunk_index is not null`
+  makes chunk-run inserts idempotent; resume re-posts only the failed `chunk_index` values under
+  the same `import_group_id`. These are single-shot `NULL` for non-chunked imports.
 
 ### Privacy rules
 
@@ -166,25 +175,33 @@ backend-core service-role code.
 
 ### Idempotency / upsert strategy
 
-1. Import code calls `buildStagingRow(entityFolderName, record, { organizationId, syncRunId })`.
+1. Import code calls `buildStagingRow(entityFolderName, record, { organizationId, syncRunId, qbXmlVersion })`.
+   `organizationId` is **required and validated** — a missing/blank org fails closed with
+   `{ ok: false, reason: "organizationId is required" }`; no sentinel org is ever silently substituted.
 2. Before upserting, compare `incoming.qb_edit_sequence` with the stored value via
    `detectEditSequenceChange(incoming, stored)`.
 3. If `"unchanged"`: update only `sync_run_id`, `last_seen_at`, `updated_at` (skip `raw_payload`).
 4. If `"changed"` or `"unknown"`: upsert full row including `raw_payload`.
-5. Conflict target comes from `getStagingUpsertConfig(entityFolderName).conflictColumns`.
-6. `invoice-lines` conflict key is `(organization_id, qb_txn_id, qb_txn_line_id)`;
-   when `qb_txn_line_id` is null (some legacy line types), fall back to `line_seq_number`
-   comparison in application code (the null-nullable unique constraint allows duplicates —
-   Phase 3 must handle this explicitly).
+5. Conflict target comes from `getStagingUpsertConfig(entityFolderName).conflictColumns`, which is
+   driven by the exported `QB_STAGING_UNIQUE_KEYS` map — the single source of truth kept in lockstep
+   with the SQL `unique (...)` constraints so JS and SQL cannot drift.
+6. `invoice-lines` conflict key is `(organization_id, qb_txn_id, line_seq_number)`. `line_seq_number`
+   is always a non-null 0-based line position, so re-imports match on conflict and never duplicate.
+   `qb_txn_line_id` is a nullable attribute only — it is **not** part of the key, because Postgres
+   treats NULLs as distinct in a unique constraint, which would defeat `ON CONFLICT` idempotency.
+   The staging builder fails closed if no stable `line_seq_number` can be determined.
 
 ### RLS and security
 
 - RLS enabled on all 15 staging tables + 3 audit tables.
-- `service_role` bypass policy on each table (backend-core writes only).
-- No `anon` or `authenticated` grants — these tables are never queried by browser clients.
-- `organization_id` on every row; no hardcoded org-specific values; sentinel
-  `'00000000-0000-0000-0000-000000000000'` used when org is not yet known (matches
-  Moraware precedent).
+- Backend access is via the Supabase **service role**, which bypasses RLS entirely — so the
+  `service_role` "bypass" policies are documentation of intent, **not** the mechanism that grants
+  access. Access control is: use the service role only in backend-core (never in browser clients).
+- Every table additionally `revoke all ... from anon, authenticated`, so the tables are unreachable
+  via the Data API even if RLS were ever disabled.
+- `organization_id` on every row; no hardcoded org-specific values. The zero-UUID sentinel is only a
+  column default (matches Moraware precedent); the staging builder never substitutes it — a real
+  `organizationId` must be passed explicitly.
 
 ### Applying the migration (when ready)
 

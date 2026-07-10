@@ -23,6 +23,7 @@ import {
   parseQbDate,
   parseQbTimestamp,
   QB_LIST_ENTITY_FOLDERS,
+  QB_STAGING_UNIQUE_KEYS,
   QB_TXN_ENTITY_FOLDERS,
   STAGING_TABLE_BY_FOLDER,
 } from "./quickBooksStaging.js";
@@ -290,7 +291,8 @@ console.log("ok: all QB_LIST_ENTITY_FOLDERS map to 'list'; all QB_TXN_ENTITY_FOL
 }
 
 {
-  // Line with no TxnLineID (fallback to line_seq_number only).
+  // Line with no TxnLineID: qb_txn_line_id is null (nullable attribute), but the
+  // idempotency key line_seq_number is still a stable non-null integer.
   const result = extractInvoiceLineFields(
     { ItemRef: { ListID: "FAKE-LIST-ITEM-002" } },
     "FAKE-TXN-INV-002",
@@ -298,9 +300,9 @@ console.log("ok: all QB_LIST_ENTITY_FOLDERS map to 'list'; all QB_TXN_ENTITY_FOL
     3
   );
   assert.ok(result.valid);
-  assert.equal(result.qb_txn_line_id,  null, "absent TxnLineID -> null");
-  assert.equal(result.line_seq_number, 3);
-  console.log("ok: extractInvoiceLineFields handles missing TxnLineID gracefully");
+  assert.equal(result.qb_txn_line_id,  null, "absent TxnLineID -> null attribute");
+  assert.equal(result.line_seq_number, 3, "line_seq_number remains a stable non-null key");
+  console.log("ok: extractInvoiceLineFields keeps a non-null line_seq_number when TxnLineID is absent");
 }
 
 {
@@ -308,6 +310,16 @@ console.log("ok: all QB_LIST_ENTITY_FOLDERS map to 'list'; all QB_TXN_ENTITY_FOL
   const result = extractInvoiceLineFields(fakeInvoiceLineRecord(), null, "2026-01-15", 0);
   assert.ok(!result.valid);
   console.log("ok: extractInvoiceLineFields rejects missing parentTxnId");
+}
+
+{
+  // No determinable line index -> fail closed (never emit a null idempotency key).
+  for (const badIndex of [null, undefined, -1, 1.5, "0"]) {
+    const result = extractInvoiceLineFields(fakeInvoiceLineRecord(), "FAKE-TXN-INV-004", "2026-01-15", badIndex);
+    assert.ok(!result.valid, `lineIndex ${String(badIndex)} must fail closed`);
+    assert.match(result.reason, /line_seq_number/);
+  }
+  console.log("ok: extractInvoiceLineFields fails closed when no valid line index can be determined");
 }
 
 {
@@ -350,7 +362,50 @@ console.log("ok: all QB_LIST_ENTITY_FOLDERS map to 'list'; all QB_TXN_ENTITY_FOL
 }
 
 {
-  // Unknown entity folder -> ok: false, no throw.
+  // Company row: qb_xml_version sourced from ctx, not the record body.
+  const companyRecord = { CompanyName: "DO NOT EXTRACT", raw: "stuff" };
+  const result = buildStagingRow("company", companyRecord, { ...FAKE_CTX, qbXmlVersion: "16.0" });
+  assert.ok(result.ok, `company staging failed: ${result.reason}`);
+  assert.equal(result.tableName, "brain_quickbooks_company");
+  assert.equal(result.row.organization_id, FAKE_ORG_ID);
+  assert.equal(result.row.qb_xml_version, "16.0", "qb_xml_version comes from ctx.qbXmlVersion");
+  assert.deepEqual(result.row.raw_payload, companyRecord);
+  // Named columns must not leak the company name.
+  const { raw_payload, ...named } = result.row;
+  assert.doesNotMatch(JSON.stringify(named), /DO NOT EXTRACT/);
+  console.log("ok: buildStagingRow builds a company row with qb_xml_version from ctx");
+}
+
+{
+  // Company row without ctx.qbXmlVersion -> qb_xml_version null (not read from record).
+  const result = buildStagingRow("company", { QBXMLMsgsRs: { "@version": "SHOULD_NOT_BE_USED" } }, FAKE_CTX);
+  assert.ok(result.ok);
+  assert.equal(result.row.qb_xml_version, null, "qb_xml_version is never sourced from the record body");
+  console.log("ok: buildStagingRow company qb_xml_version is null when ctx omits it (never from record)");
+}
+
+{
+  // Missing organizationId -> fail closed, no sentinel substitution.
+  for (const badOrg of [undefined, null, "", "   ", 123]) {
+    const result = buildStagingRow("customers", fakeListRecord(), { organizationId: badOrg, syncRunId: FAKE_RUN_ID });
+    assert.ok(!result.ok, `organizationId ${String(badOrg)} must fail closed`);
+    assert.equal(result.reason, "organizationId is required");
+    assert.equal(result.entityFolderName, "customers");
+  }
+  console.log("ok: buildStagingRow fails closed on missing/blank organizationId (no sentinel default)");
+}
+
+{
+  // No ctx at all -> fail closed, no throw.
+  const result = buildStagingRow("customers", fakeListRecord());
+  assert.ok(!result.ok);
+  assert.equal(result.reason, "organizationId is required");
+  console.log("ok: buildStagingRow fails closed when ctx is omitted entirely");
+}
+
+{
+  // Unknown entity folder -> ok: false, no throw. (org validation happens first,
+  // so a valid org must be supplied to reach the unknown-folder branch.)
   const result = buildStagingRow("unknown-entity", fakeListRecord(), FAKE_CTX);
   assert.ok(!result.ok);
   assert.ok(typeof result.reason === "string");
@@ -393,6 +448,39 @@ console.log("ok: all QB_LIST_ENTITY_FOLDERS map to 'list'; all QB_TXN_ENTITY_FOL
   assert.equal(result.row.txn_date,       "2026-04-01");
   assert.equal(result.row.line_seq_number, 5);
   console.log("ok: buildStagingRow handles invoice-lines entity kind");
+}
+
+{
+  // invoice-lines with a null TxnLineID but a valid _lineIndex: still stageable,
+  // line_seq_number is the stable non-null conflict key.
+  const lineRecord = {
+    InvoiceTxnID: "FAKE-TXN-INV-LINE-002",
+    InvoiceTxnDate: "2026-05-01",
+    ItemRef: { ListID: "FAKE-LIST-ITEM-011" },
+    _lineIndex: 0,
+    _lineType: "InvoiceLineRet",
+  };
+  const result = buildStagingRow("invoice-lines", lineRecord, FAKE_CTX);
+  assert.ok(result.ok, `invoice-lines staging failed: ${result.reason}`);
+  assert.equal(result.row.qb_txn_line_id, null, "null TxnLineID kept as nullable attribute");
+  assert.equal(result.row.line_seq_number, 0, "line_seq_number is the non-null conflict key");
+  console.log("ok: buildStagingRow keeps line_seq_number as the conflict key when TxnLineID is null");
+}
+
+{
+  // invoice-lines with NO determinable line index -> fail closed (never a null key).
+  const lineRecord = {
+    InvoiceTxnID: "FAKE-TXN-INV-LINE-003",
+    InvoiceTxnDate: "2026-06-01",
+    TxnLineID: "FAKE-LINE-X003",
+    ItemRef: { ListID: "FAKE-LIST-ITEM-012" },
+    _lineType: "InvoiceLineRet",
+    // no _lineIndex
+  };
+  const result = buildStagingRow("invoice-lines", lineRecord, FAKE_CTX);
+  assert.ok(!result.ok, "invoice-line with no line index must fail closed");
+  assert.match(result.reason, /line_seq_number/);
+  console.log("ok: buildStagingRow fails closed for invoice-line with no determinable line_seq_number");
 }
 
 {
@@ -512,8 +600,12 @@ console.log("ok: all QB_LIST_ENTITY_FOLDERS map to 'list'; all QB_TXN_ENTITY_FOL
 {
   const cfg = getStagingUpsertConfig("invoice-lines");
   assert.ok(cfg !== null);
-  assert.deepEqual(cfg.conflictColumns, ["organization_id", "qb_txn_id", "qb_txn_line_id"]);
-  console.log("ok: getStagingUpsertConfig uses three-column conflict key for invoice-lines");
+  // Idempotency key uses line_seq_number (always non-null), NOT qb_txn_line_id (nullable).
+  assert.deepEqual(cfg.conflictColumns, ["organization_id", "qb_txn_id", "line_seq_number"]);
+  assert.ok(!cfg.conflictColumns.includes("qb_txn_line_id"), "nullable qb_txn_line_id must not be in the conflict key");
+  // qb_txn_line_id is still refreshed as a nullable attribute on conflict.
+  assert.ok(cfg.updateColumns.includes("qb_txn_line_id"));
+  console.log("ok: getStagingUpsertConfig invoice-lines keys on line_seq_number, not qb_txn_line_id");
 }
 
 {
@@ -544,6 +636,56 @@ console.log("ok: all QB_LIST_ENTITY_FOLDERS map to 'list'; all QB_TXN_ENTITY_FOL
     assert.ok(cfg.updateColumns.includes("last_seen_at"), `${folder} must update last_seen_at on conflict`);
   }
   console.log("ok: getStagingUpsertConfig is defined for all 15 entity folders");
+}
+
+// ── QB_STAGING_UNIQUE_KEYS is the single source of truth for conflict columns ─
+
+{
+  // Every folder in the table map must have a unique-key entry, and vice versa.
+  const tableFolders = Object.keys(STAGING_TABLE_BY_FOLDER).sort();
+  const keyFolders = Object.keys(QB_STAGING_UNIQUE_KEYS).sort();
+  assert.deepEqual(keyFolders, tableFolders, "QB_STAGING_UNIQUE_KEYS must cover exactly the mapped folders");
+  console.log("ok: QB_STAGING_UNIQUE_KEYS covers exactly the same folders as STAGING_TABLE_BY_FOLDER");
+}
+
+{
+  // getStagingUpsertConfig.conflictColumns MUST be driven by QB_STAGING_UNIQUE_KEYS
+  // (not independently hardcoded) so JS and SQL cannot drift.
+  for (const folder of Object.keys(QB_STAGING_UNIQUE_KEYS)) {
+    const cfg = getStagingUpsertConfig(folder);
+    assert.ok(cfg !== null, `no config for "${folder}"`);
+    assert.deepEqual(
+      cfg.conflictColumns,
+      QB_STAGING_UNIQUE_KEYS[folder],
+      `conflictColumns for "${folder}" must equal QB_STAGING_UNIQUE_KEYS`
+    );
+  }
+  console.log("ok: getStagingUpsertConfig conflictColumns are driven by QB_STAGING_UNIQUE_KEYS for every folder");
+}
+
+{
+  // Explicit expected keys, so drift from the intended SQL constraints is caught.
+  const expectedKeys = {
+    company:          ["organization_id"],
+    customers:        ["organization_id", "qb_list_id"],
+    items:            ["organization_id", "qb_list_id"],
+    vendors:          ["organization_id", "qb_list_id"],
+    accounts:         ["organization_id", "qb_list_id"],
+    classes:          ["organization_id", "qb_list_id"],
+    "sales-reps":     ["organization_id", "qb_list_id"],
+    terms:            ["organization_id", "qb_list_id", "term_type"],
+    invoices:         ["organization_id", "qb_txn_id"],
+    "invoice-lines":  ["organization_id", "qb_txn_id", "line_seq_number"],
+    payments:         ["organization_id", "qb_txn_id"],
+    bills:            ["organization_id", "qb_txn_id"],
+    "purchase-orders":["organization_id", "qb_txn_id"],
+    estimates:        ["organization_id", "qb_txn_id"],
+    "sales-orders":   ["organization_id", "qb_txn_id"],
+  };
+  for (const [folder, key] of Object.entries(expectedKeys)) {
+    assert.deepEqual(QB_STAGING_UNIQUE_KEYS[folder], key, `unexpected unique key for "${folder}"`);
+  }
+  console.log("ok: QB_STAGING_UNIQUE_KEYS matches the intended SQL unique constraints for every folder");
 }
 
 // ── detectEditSequenceChange ───────────────────────────────────────────────

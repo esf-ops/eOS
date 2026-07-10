@@ -7,8 +7,8 @@
  * backend-core/supabase/eliteos_quickbooks_staging_v1.sql.
  *
  * DOES NOT write to Supabase — that belongs in the Phase 3 import endpoint.
- * Call buildStagingRow() / buildInvoiceLineStagingRows() to produce plain objects
- * ready for upsert; the caller decides when and where to persist them.
+ * Call buildStagingRow() / buildStagingBatch() to produce plain objects ready for
+ * upsert; the caller decides when and where to persist them.
  *
  * Privacy rules (enforced here, not just in the DB schema):
  *   - Only opaque QB identifiers (ListID, TxnID, TxnLineID), monotonic version
@@ -89,7 +89,43 @@ export const STAGING_TABLE_BY_FOLDER = Object.freeze({
   "sales-orders":   "brain_quickbooks_sales_orders",
 });
 
+/**
+ * Single source of truth for each staging table's upsert conflict key.
+ *
+ * These MUST stay identical to the `unique (...)` constraints declared in
+ * backend-core/supabase/eliteos_quickbooks_staging_v1.sql — if they drift, the
+ * Phase 3 `ON CONFLICT` upsert fails at runtime.  `getStagingUpsertConfig`
+ * consumes this map rather than re-declaring conflict columns, and the test suite
+ * asserts each folder's expected key here.
+ *
+ * Note invoice-lines keys on `line_seq_number` (always non-null), NOT
+ * `qb_txn_line_id` (nullable) — Postgres treats NULLs as distinct in a unique
+ * constraint, so a nullable column cannot provide idempotent ON CONFLICT matching.
+ */
+export const QB_STAGING_UNIQUE_KEYS = Object.freeze({
+  company:          ["organization_id"],
+  customers:        ["organization_id", "qb_list_id"],
+  items:            ["organization_id", "qb_list_id"],
+  vendors:          ["organization_id", "qb_list_id"],
+  accounts:         ["organization_id", "qb_list_id"],
+  classes:          ["organization_id", "qb_list_id"],
+  "sales-reps":     ["organization_id", "qb_list_id"],
+  terms:            ["organization_id", "qb_list_id", "term_type"],
+  invoices:         ["organization_id", "qb_txn_id"],
+  "invoice-lines":  ["organization_id", "qb_txn_id", "line_seq_number"],
+  payments:         ["organization_id", "qb_txn_id"],
+  bills:            ["organization_id", "qb_txn_id"],
+  "purchase-orders":["organization_id", "qb_txn_id"],
+  estimates:        ["organization_id", "qb_txn_id"],
+  "sales-orders":   ["organization_id", "qb_txn_id"],
+});
+
 // ── Safe field parsers ─────────────────────────────────────────────────────
+//
+// NOTE: parseQbDate / parseQbTimestamp validate SHAPE only (regex), not calendar
+// reality — e.g. "2026-13-99" passes the shape check.  This is acceptable for
+// staging because raw_payload always holds the authoritative record; the named
+// date/timestamp columns are convenience/index columns, not the source of truth.
 
 /**
  * Safe QB boolean — QB SDK serializes booleans as "true"/"false" strings.
@@ -226,9 +262,14 @@ export function extractTxnEntityFields(record) {
  * Extract staging columns from a single QuickBooks invoice line record.
  * Lines are child records of invoices; their parentage is supplied separately.
  *
+ * `line_seq_number` is the idempotency key component (see QB_STAGING_UNIQUE_KEYS),
+ * so it must always be a non-null integer.  `qb_txn_line_id` is kept as a nullable
+ * attribute only.  If no stable sequence number can be determined this fails closed
+ * rather than emitting a null key that would break ON CONFLICT idempotency.
+ *
  * @param {object} line - A single line record from the invoice-lines batch.
  * @param {string} parentTxnId - TxnID of the parent invoice.
- * @param {date|null} parentTxnDate - TxnDate of the parent invoice (inherited).
+ * @param {string|null} parentTxnDate - TxnDate of the parent invoice (inherited).
  * @param {number} lineIndex - Zero-based position of this line within the parent invoice.
  * @returns {ExtractionResult}
  */
@@ -242,11 +283,15 @@ export function extractInvoiceLineFields(line, parentTxnId, parentTxnDate, lineI
     return { valid: false, reason: "parentTxnId is missing or empty" };
   }
 
+  if (typeof lineIndex !== "number" || !Number.isInteger(lineIndex) || lineIndex < 0) {
+    return { valid: false, reason: "line_seq_number could not be determined (missing/invalid line index)" };
+  }
+
   return {
     valid: true,
     qb_txn_id:       qbTxnId,
     qb_txn_line_id:  parseQbId(line.TxnLineID),
-    line_seq_number: typeof lineIndex === "number" && Number.isFinite(lineIndex) ? lineIndex : null,
+    line_seq_number: lineIndex,
     txn_date:        parseQbDate(parentTxnDate),
     qb_item_list_id: parseQbId(line.ItemRef?.ListID),
     line_type:       parseQbId(line._lineType) ?? null,
@@ -259,6 +304,7 @@ export function extractInvoiceLineFields(line, parentTxnId, parentTxnDate, lineI
  * @typedef {{
  *   organizationId: string,
  *   syncRunId: string|null,
+ *   qbXmlVersion?: string|null,
  * }} StagingContext
  */
 
@@ -267,17 +313,22 @@ export function extractInvoiceLineFields(line, parentTxnId, parentTxnDate, lineI
  * appropriate brain_quickbooks_* table.
  *
  * Does NOT write to Supabase.  The caller supplies organizationId and syncRunId,
- * which become the row's org-scoping and audit-trail columns.
+ * which become the row's org-scoping and audit-trail columns.  organizationId is
+ * required and validated — no sentinel/default org is ever silently substituted.
  *
  * @param {string} entityFolderName
  * @param {object} record - Normalized QB Ret record (from batch JSON).
  * @param {StagingContext} ctx
  * @returns {{ ok: true, row: object, tableName: string }|{ ok: false, reason: string, entityFolderName: string }}
  */
-export function buildStagingRow(entityFolderName, record, ctx) {
-  const { organizationId, syncRunId } = ctx;
+export function buildStagingRow(entityFolderName, record, ctx = {}) {
+  const { organizationId, syncRunId, qbXmlVersion } = ctx;
   const kind = classifyQbEntityKind(entityFolderName);
   const tableName = STAGING_TABLE_BY_FOLDER[entityFolderName];
+
+  if (typeof organizationId !== "string" || organizationId.trim().length === 0) {
+    return { ok: false, reason: "organizationId is required", entityFolderName };
+  }
 
   if (!tableName) {
     return { ok: false, reason: `no staging table mapped for entity folder "${entityFolderName}"`, entityFolderName };
@@ -291,7 +342,10 @@ export function buildStagingRow(entityFolderName, record, ctx) {
   };
 
   if (kind === "company") {
-    return { ok: true, tableName, row: { ...base, qb_xml_version: parseQbId(record?.QBXMLMsgsRs?.["@version"]) ?? null } };
+    // qb_xml_version is sourced from the sync run / manifest context, NOT from the
+    // record — a CompanyRet body has no QBXML envelope. qb_sync_runs.qb_xml_version
+    // is the authoritative copy; this is a convenience mirror only.
+    return { ok: true, tableName, row: { ...base, qb_xml_version: parseQbId(qbXmlVersion) ?? null } };
   }
 
   if (kind === "list") {
@@ -329,9 +383,12 @@ export function buildStagingRow(entityFolderName, record, ctx) {
 
   // invoice-lines: each record IS a line (the connector extracts them individually).
   if (kind === "invoice-lines") {
-    const parentTxnId   = parseQbId(record.InvoiceTxnID ?? record.TxnID);
-    const parentTxnDate = record.InvoiceTxnDate ?? record.TxnDate ?? null;
-    const lineIndex     = typeof record._lineIndex === "number" ? record._lineIndex : null;
+    const parentTxnId   = parseQbId(record?.InvoiceTxnID ?? record?.TxnID);
+    const parentTxnDate = record?.InvoiceTxnDate ?? record?.TxnDate ?? null;
+    // Prefer the connector-provided 0-based line index. line_seq_number must be
+    // non-null (idempotency key), so extractInvoiceLineFields fails closed when
+    // no valid index is present rather than emitting a null key.
+    const lineIndex     = typeof record?._lineIndex === "number" ? record._lineIndex : null;
 
     const extracted = extractInvoiceLineFields(record, parentTxnId, parentTxnDate, lineIndex);
     if (!extracted.valid) {
@@ -389,51 +446,47 @@ export function buildStagingBatch(entityFolderName, records, ctx) {
 
 /**
  * Return the Supabase upsert configuration for a given entity folder.
- * `conflictColumns` are the unique-constraint columns; `updateColumns` are the
- * columns to overwrite on conflict (raw_payload is always included so the latest
- * record body is preserved; qb_edit_sequence comparison happens in application
- * code before calling the upsert).
+ * `conflictColumns` are sourced from QB_STAGING_UNIQUE_KEYS (single source of
+ * truth, kept in lockstep with the SQL unique constraints).  `updateColumns` are
+ * the columns to overwrite on conflict (raw_payload is always included so the
+ * latest record body is preserved; qb_edit_sequence comparison happens in
+ * application code before calling the upsert).
  *
  * @param {string} entityFolderName
  * @returns {UpsertConfig|null}
  */
 export function getStagingUpsertConfig(entityFolderName) {
   const tableName = STAGING_TABLE_BY_FOLDER[entityFolderName];
-  if (!tableName) return null;
+  const conflictColumns = QB_STAGING_UNIQUE_KEYS[entityFolderName];
+  if (!tableName || !conflictColumns) return null;
 
   const kind = classifyQbEntityKind(entityFolderName);
-
   const alwaysUpdate = ["sync_run_id", "raw_payload", "last_seen_at", "updated_at"];
 
   if (kind === "company") {
     return {
       tableName,
-      conflictColumns: ["organization_id"],
+      conflictColumns,
       updateColumns: [...alwaysUpdate, "qb_xml_version"],
     };
   }
 
   if (kind === "list") {
-    const base = {
-      tableName,
-      updateColumns: [...alwaysUpdate, "qb_edit_sequence", "time_modified", "is_active"],
-    };
-    if (entityFolderName === "terms") {
-      return { ...base, conflictColumns: ["organization_id", "qb_list_id", "term_type"] };
-    }
+    const updateColumns = [...alwaysUpdate, "qb_edit_sequence", "time_modified", "is_active"];
     if (entityFolderName === "items") {
-      base.updateColumns.push("item_type");
+      updateColumns.push("item_type");
     }
     if (entityFolderName === "accounts") {
-      base.updateColumns.push("account_type");
+      updateColumns.push("account_type");
     }
-    return { ...base, conflictColumns: ["organization_id", "qb_list_id"] };
+    // term_type is part of the conflict key for terms, not an updatable column.
+    return { tableName, conflictColumns, updateColumns };
   }
 
   if (kind === "transaction") {
     return {
       tableName,
-      conflictColumns: ["organization_id", "qb_txn_id"],
+      conflictColumns,
       updateColumns:   [
         ...alwaysUpdate,
         "qb_edit_sequence",
@@ -452,8 +505,10 @@ export function getStagingUpsertConfig(entityFolderName) {
   if (kind === "invoice-lines") {
     return {
       tableName,
-      conflictColumns: ["organization_id", "qb_txn_id", "qb_txn_line_id"],
-      updateColumns:   [...alwaysUpdate, "txn_date", "qb_item_list_id", "line_type", "line_seq_number"],
+      conflictColumns,
+      // line_seq_number is part of the conflict key, not updated on conflict.
+      // qb_txn_line_id is a nullable attribute, refreshed on conflict.
+      updateColumns:   [...alwaysUpdate, "txn_date", "qb_item_list_id", "line_type", "qb_txn_line_id"],
     };
   }
 
