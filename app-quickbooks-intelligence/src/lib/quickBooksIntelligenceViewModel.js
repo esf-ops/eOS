@@ -35,6 +35,42 @@
 
 export const QB_INTEL_ENDPOINT = "/api/admin/quickbooks/intelligence/executive";
 
+/**
+ * Head default sample size for the executive preview.
+ * Uses 250 (not 500) after production statement timeouts (57014) on unbounded loads.
+ * Smoke validates at 50; Phase 4F will replace sample loads with scalable aggregates.
+ */
+export const QB_INTEL_DEFAULT_MAX_ROWS = 250;
+
+/** Head default page size for staging reads. */
+export const QB_INTEL_DEFAULT_PAGE_SIZE = 100;
+
+/** Visible note for the bounded executive preview (no AI). */
+export const QB_INTEL_PREVIEW_NOTE =
+  "Snapshot is currently optimized for fast executive preview. Full-scale aggregates are coming next.";
+
+/**
+ * Build the executive intelligence path with bounded query params.
+ *
+ * @param {{ maxRows?: number, pageSize?: number }} [opts]
+ * @returns {string}
+ */
+export function buildQuickBooksIntelligenceEndpoint(opts = {}) {
+  const maxRows =
+    Number.isFinite(Number(opts.maxRows)) && Number(opts.maxRows) > 0
+      ? Math.floor(Number(opts.maxRows))
+      : QB_INTEL_DEFAULT_MAX_ROWS;
+  const pageSize =
+    Number.isFinite(Number(opts.pageSize)) && Number(opts.pageSize) > 0
+      ? Math.floor(Number(opts.pageSize))
+      : QB_INTEL_DEFAULT_PAGE_SIZE;
+  const params = new URLSearchParams({
+    max_rows: String(maxRows),
+    page_size: String(pageSize),
+  });
+  return `${QB_INTEL_ENDPOINT}?${params.toString()}`;
+}
+
 /** Keys that must never appear in UI-bound data. */
 export const QB_INTEL_FORBIDDEN_KEYS = Object.freeze([
   "raw_payload",
@@ -155,7 +191,7 @@ export function resolveIntelligenceViewState(input) {
       kind: /** @type {const} */ ("unauthorized"),
       message:
         input.error ||
-        "Admin / system_admin access is required to view QuickBooks intelligence.",
+        "Admin / finance access with quickbooks_intelligence head access is required.",
     };
   }
   if (input.error) {
@@ -469,8 +505,14 @@ export function renderIntelligenceStateMarkup(state) {
     )
     .join("");
   const meta = `generated_at=${escapeHtml(model.generatedAt)}; max_rows=${escapeHtml(model.maxRows)}; page_size=${escapeHtml(model.pageSize)}`;
+  const partialBanner =
+    state.kind === "partial"
+      ? `<div data-testid="qb-intel-partial">Partial sample: results are limited to ${escapeHtml(model.maxRows)} rows per staging entity.</div>`
+      : "";
   return [
     `<div class="qb-intel" data-state="${escapeHtml(state.kind)}">`,
+    `<div data-testid="qb-intel-preview-note">${escapeHtml(QB_INTEL_PREVIEW_NOTE)}</div>`,
+    partialBanner,
     `<section data-section="executive">${model.executiveCards.map((c) => c.id).join(",")}</section>`,
     `<section data-section="ar-risk">${model.agingBuckets.map((b) => b.key).join(",")}</section>`,
     `<section data-section="revenue">${model.topRevenue.length}</section>`,
@@ -479,7 +521,7 @@ export function renderIntelligenceStateMarkup(state) {
     `<section data-section="sales-reps">${model.salesRepRows.length}</section>`,
     `<section data-section="activity">${model.activityMonths.length}</section>`,
     `<section data-section="insights"><ul>${insights}</ul></section>`,
-    `<section data-section="metadata">${meta}</section>`,
+    `<section data-section="metadata">${meta}; sample_limited=${state.kind === "partial" ? "yes" : "no"}</section>`,
     `</div>`,
   ].join("");
 }

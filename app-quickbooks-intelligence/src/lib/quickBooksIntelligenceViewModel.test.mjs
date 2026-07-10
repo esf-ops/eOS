@@ -7,7 +7,12 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  QB_INTEL_DEFAULT_MAX_ROWS,
+  QB_INTEL_DEFAULT_PAGE_SIZE,
+  QB_INTEL_ENDPOINT,
+  QB_INTEL_PREVIEW_NOTE,
   assertSafeIntelligenceSnapshot,
+  buildQuickBooksIntelligenceEndpoint,
   findForbiddenKeys,
   formatOpaqueId,
   renderIntelligenceStateMarkup,
@@ -138,6 +143,15 @@ function fakeSnapshot(overrides = {}) {
 }
 
 describe("quickBooksIntelligenceViewModel safety", () => {
+  it("builds bounded executive endpoint by default", () => {
+    const path = buildQuickBooksIntelligenceEndpoint();
+    assert.ok(path.startsWith(`${QB_INTEL_ENDPOINT}?`));
+    assert.match(path, new RegExp(`max_rows=${QB_INTEL_DEFAULT_MAX_ROWS}`));
+    assert.match(path, new RegExp(`page_size=${QB_INTEL_DEFAULT_PAGE_SIZE}`));
+    assert.equal(QB_INTEL_DEFAULT_MAX_ROWS, 250);
+    assert.equal(QB_INTEL_DEFAULT_PAGE_SIZE, 100);
+  });
+
   it("accepts a clean fake snapshot", () => {
     assert.doesNotThrow(() => assertSafeIntelligenceSnapshot(fakeSnapshot()));
     assert.deepEqual(findForbiddenKeys(fakeSnapshot()), []);
@@ -218,6 +232,8 @@ describe("resolveIntelligenceViewState", () => {
     assert.match(html, /generated_at=/);
     assert.match(html, /max_rows=full org/);
     assert.match(html, /page_size=500/);
+    assert.match(html, /sample_limited=no/);
+    assert.match(html, new RegExp(QB_INTEL_PREVIEW_NOTE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     assert.equal(html.includes("raw_payload"), false);
     assert.equal(html.includes("SENTINEL"), false);
     assert.equal(html.includes("BillAddress"), false);
@@ -234,7 +250,11 @@ describe("resolveIntelligenceViewState", () => {
       data: snap,
     });
     assert.equal(state.kind, "partial");
-    assert.match(renderIntelligenceStateMarkup(state), /data-state="partial"/);
+    const html = renderIntelligenceStateMarkup(state);
+    assert.match(html, /data-state="partial"/);
+    assert.match(html, /sample_limited=yes/);
+    assert.match(html, /Partial sample/);
+    assert.match(html, new RegExp(QB_INTEL_PREVIEW_NOTE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   });
 
   it("rejects dirty snapshot during resolve", () => {

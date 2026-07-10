@@ -284,6 +284,12 @@ code {
   color: var(--eos-warn);
 }
 
+.qb-intel-banner-info {
+  border-color: var(--eos-border);
+  background: var(--eos-surface);
+  color: var(--eos-muted, #64748b);
+}
+
 .qb-intel-section {
   margin-bottom: 16px;
 }

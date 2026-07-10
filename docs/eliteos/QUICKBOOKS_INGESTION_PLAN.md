@@ -13,11 +13,11 @@ This mirrors the pattern already used for Moraware (`docs/eliteos/moraware-sync-
 
 `External system → local read-only extract → normalized staging → organization-scoped facts → heads`
 
-## Current Phase: Phase 4D — QuickBooks Intelligence Head (standalone)
+## Current Phase: Phase 4D — QuickBooks Intelligence Head (bounded executive preview)
 
-**Latest delivered:** Phase 4D as a **standalone eliteOS head**
-(`app-quickbooks-intelligence`, slug `quickbooks_intelligence`) — leadership read of
-the Phase 4C executive snapshot. No AI. No raw_payload. Opaque IDs only.
+**Latest delivered:** Phase 4D standalone head with a **bounded executive preview**
+(`max_rows` / `page_size` defaults) so production loads avoid Postgres statement
+timeouts (`57014`). No AI. No raw_payload. Opaque IDs only.
 
 **Also in place:** Phase 1–3C staging import; Phase 4A–4C read/insight/repo/API/smoke.
 
@@ -26,6 +26,7 @@ the Phase 4C executive snapshot. No AI. No raw_payload. Opaque IDs only.
 - No AI summarization over QuickBooks facts.
 - No browser access to `brain_quickbooks_*` or `raw_payload`.
 - No writeback to QuickBooks.
+- No full-org in-memory aggregate (see Phase 4F).
 - No QuickBooks Intelligence tab inside System Admin (access/governance only).
 - No Supabase credentials on the Windows VM.
 
@@ -607,6 +608,10 @@ Auth stack (dedicated QuickBooks Intelligence head — not System Admin):
 2. `requireRole(["admin", "super_admin", "executive", "finance", "accounting"])`
 3. `requireHeadAccess("quickbooks_intelligence")`
 
+**Bounded defaults (production timeout hotfix):** omitted `max_rows` / `page_size`
+default to **500** / **100**; ceilings **2000** / **500**. Postgres `57014` maps to a
+safe `504` with recommended smaller sample params.
+
 **Behavior:**
 
 - Resolves `organization_id` from query → user profile → `QB_IMPORT_ORGANIZATION_ID`.
@@ -658,6 +663,17 @@ allowed finance roles + `quickbooks_intelligence` head access. Frontend never qu
 staging tables and never renders `raw_payload`, addresses, memos, or customer/vendor
 names.
 
+**Production timeout hotfix (bounded preview):** Unbounded executive loads hit Postgres
+`57014` on large staging tables. The deployed head requests
+`?max_rows=250&page_size=100` by default (250 chosen over 500 after live timeouts;
+smoke still validates at 50). The API also applies safe defaults when params are
+omitted (`max_rows=500`, `page_size=100`) and caps requests (`max_rows≤2000`,
+`page_size≤500`). Statement timeouts return a friendly `504` with
+`code: "57014"` and `recommended: { max_rows: 50, page_size: 50 }` — no DB text /
+PII. The UI shows a sample-limited banner plus:
+“Snapshot is currently optimized for fast executive preview. Full-scale aggregates
+are coming next.”
+
 **UI sections:**
 
 - Executive summary cards (open/overdue AR, revenue customers, payments, estimates, insights)
@@ -702,18 +718,26 @@ names.
 set), ready.
 
 **Out of scope for 4D:** AI narrative, sync-health explorer tables, connector/schema
-changes, System Admin embedding.
+changes, System Admin embedding, full-org scalable aggregates (Phase 4F).
 
 **Tests:** `npm run test --prefix app-quickbooks-intelligence`;
 `npm run build --prefix app-quickbooks-intelligence`;
 `npm run test --prefix app-system-admin` (asserts QuickBooks tab removed);
-`npm run qb:test` (API auth uses `quickbooks_intelligence`).
+`npm run qb:test` (API auth uses `quickbooks_intelligence`; bounded defaults + 57014 mapping).
 
 ### Phase 4E — Sync health / Admin review expansion (future)
 
 Optional follow-on: sync-run health, per-entity row counts, and data-quality findings
 alongside the intelligence page — still admin-gated, still no `raw_payload` in the
 browser.
+
+### Phase 4F — Scalable full-org QuickBooks aggregates (future)
+
+Replace “load staging rows into memory then aggregate” with **SQL / prepared read
+models** (org-scoped rollups, aging buckets, revenue concentration, payment behavior)
+so the executive snapshot can cover the full organization without `max_rows` sampling
+or statement timeouts. Keep opaque IDs only; still no `raw_payload` in API responses;
+still no AI in the first cut of 4F.
 
 ### Phase 5 — Scheduled Connector Upload with Scoped Token
 

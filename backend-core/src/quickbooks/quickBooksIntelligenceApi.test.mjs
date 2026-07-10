@@ -11,8 +11,13 @@ import {
   attachQuickBooksIntelligenceRoutes,
   buildQuickBooksIntelligenceApiResponse,
   createQuickBooksIntelligenceHandlers,
+  mapQuickBooksIntelligenceError,
   parseIntelligenceQuery,
   resolveQuickBooksOrganizationId,
+  QB_INTELLIGENCE_API_DEFAULT_MAX_ROWS,
+  QB_INTELLIGENCE_API_DEFAULT_PAGE_SIZE,
+  QB_INTELLIGENCE_API_MAX_ROWS_CEILING,
+  QB_INTELLIGENCE_API_PAGE_SIZE_CEILING,
 } from "./quickBooksIntelligenceApi.js";
 import {
   formatSmokeResultLines,
@@ -161,9 +166,40 @@ describe("quickBooksIntelligenceApi helpers", () => {
     });
     assert.equal(parsed.asOfDate, "2026-07-10");
     assert.equal(parsed.pageSize, 25);
-    assert.equal(parsed.maxRows, 5000);
+    assert.equal(parsed.maxRows, QB_INTELLIGENCE_API_MAX_ROWS_CEILING);
     assert.equal(parsed.includeInvoiceLines, true);
     assert.equal(parsed.insightListLimit, 10);
+  });
+
+  it("applies bounded defaults when max_rows and page_size are omitted", () => {
+    const parsed = parseIntelligenceQuery({});
+    assert.equal(parsed.maxRows, QB_INTELLIGENCE_API_DEFAULT_MAX_ROWS);
+    assert.equal(parsed.pageSize, QB_INTELLIGENCE_API_DEFAULT_PAGE_SIZE);
+    assert.equal(parsed.maxRows, 500);
+    assert.equal(parsed.pageSize, 100);
+  });
+
+  it("caps excessive page_size", () => {
+    const parsed = parseIntelligenceQuery({ page_size: "9999", max_rows: "100" });
+    assert.equal(parsed.pageSize, QB_INTELLIGENCE_API_PAGE_SIZE_CEILING);
+    assert.equal(parsed.pageSize, 500);
+    assert.equal(parsed.maxRows, 100);
+  });
+
+  it("maps 57014 to a friendly timeout error without sensitive details", () => {
+    const err = new Error("RAW_DB_ERROR SENTINEL_NAME canceling statement due to statement timeout");
+    // @ts-ignore
+    err.code = "57014";
+    const mapped = mapQuickBooksIntelligenceError(err);
+    assert.equal(mapped.status, 504);
+    assert.equal(mapped.body.ok, false);
+    assert.equal(mapped.body.code, "57014");
+    assert.match(String(mapped.body.error), /timed out/i);
+    assert.deepEqual(mapped.body.recommended, { max_rows: 50, page_size: 50 });
+    const serialized = JSON.stringify(mapped.body);
+    assert.equal(serialized.includes("SENTINEL_NAME"), false);
+    assert.equal(serialized.includes("raw_payload"), false);
+    assert.equal(serialized.includes("canceling statement"), false);
   });
 
   it("builds sanitized API response without raw_payload", () => {
@@ -316,6 +352,77 @@ describe("quickBooksIntelligenceApi route auth + handler", () => {
     assertNoRawPayload(res.body);
     assert.equal(JSON.stringify(res.body).includes("raw_payload"), false);
     assert.equal(JSON.stringify(res.body).includes(SECRET), false);
+  });
+
+  it("applies bounded defaults when query omits max_rows and page_size", async () => {
+    let loadedOpts = null;
+    const handlers = createQuickBooksIntelligenceHandlers({
+      getSupabase: () => ({}),
+      env: {},
+      loadExecutiveSnapshot: async (_repo, _org, opts) => {
+        loadedOpts = opts;
+        return fakeSnapshot();
+      },
+    });
+    const res = {
+      statusCode: 200,
+      body: null,
+      status(c) {
+        this.statusCode = c;
+        return this;
+      },
+      json(b) {
+        this.body = b;
+        return this;
+      },
+    };
+    await handlers.getExecutiveSnapshot(
+      { query: {}, user: { id: "u1", role: "admin", organization_id: ORG } },
+      res,
+    );
+    assert.equal(res.statusCode, 200);
+    assert.equal(loadedOpts.maxRows, QB_INTELLIGENCE_API_DEFAULT_MAX_ROWS);
+    assert.equal(loadedOpts.pageSize, QB_INTELLIGENCE_API_DEFAULT_PAGE_SIZE);
+    assert.equal(res.body.metadata.max_rows, 500);
+    assert.equal(res.body.metadata.page_size, 100);
+    assertNoRawPayload(res.body);
+  });
+
+  it("returns friendly 57014 timeout payload from handler", async () => {
+    const handlers = createQuickBooksIntelligenceHandlers({
+      getSupabase: () => ({}),
+      env: {},
+      loadExecutiveSnapshot: async () => {
+        const err = new Error("RAW_DB_ERROR SENTINEL_NAME canceling statement due to statement timeout");
+        // @ts-ignore
+        err.code = "57014";
+        throw err;
+      },
+    });
+    const res = {
+      statusCode: 200,
+      body: null,
+      status(c) {
+        this.statusCode = c;
+        return this;
+      },
+      json(b) {
+        this.body = b;
+        return this;
+      },
+    };
+    await handlers.getExecutiveSnapshot(
+      { query: { max_rows: "500" }, user: { id: "u1", organization_id: ORG } },
+      res,
+    );
+    assert.equal(res.statusCode, 504);
+    assert.equal(res.body.ok, false);
+    assert.equal(res.body.code, "57014");
+    assert.deepEqual(res.body.recommended, { max_rows: 50, page_size: 50 });
+    const serialized = JSON.stringify(res.body);
+    assert.equal(serialized.includes("SENTINEL_NAME"), false);
+    assert.equal(serialized.includes("raw_payload"), false);
+    assert.equal(serialized.includes("canceling statement"), false);
   });
 
   it("handler returns 400 when organization_id missing", async () => {

@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiError, apiFetch } from "../lib/api";
 import {
-  QB_INTEL_ENDPOINT,
+  QB_INTEL_PREVIEW_NOTE,
   assertSafeIntelligenceSnapshot,
   buildIntelligenceViewModel,
+  buildQuickBooksIntelligenceEndpoint,
   formatCount,
   formatMoney,
   resolveIntelligenceViewState,
@@ -37,6 +38,29 @@ function severityClass(severity: string) {
 function cardToneClass(tone: string) {
   if (tone === "warn") return "stat-card stat-card-warn";
   return "stat-card";
+}
+
+function formatIntelligenceLoadError(e: unknown): string {
+  if (!(e instanceof ApiError)) {
+    return String((e as Error)?.message ?? e);
+  }
+  const body = e.body;
+  if (body && typeof body === "object") {
+    const rec = body as {
+      code?: string;
+      error?: string;
+      recommended?: { max_rows?: number; page_size?: number };
+    };
+    if (rec.code === "57014") {
+      const maxRows = rec.recommended?.max_rows ?? 50;
+      const pageSize = rec.recommended?.page_size ?? 50;
+      const base =
+        rec.error ||
+        "QuickBooks intelligence snapshot timed out while reading staging data.";
+      return `${base} Recommended: max_rows=${maxRows}&page_size=${pageSize}.`;
+    }
+  }
+  return e.message;
 }
 
 export function QuickBooksIntelligenceView({
@@ -85,7 +109,8 @@ export function QuickBooksIntelligenceView({
           <strong>Access denied</strong>
           <p>{state.message}</p>
           <p className="muted" style={{ marginBottom: 0 }}>
-            This view requires an authenticated admin with system_admin head access.
+            This view requires an authenticated user with quickbooks_intelligence head access
+            (admin, executive, finance, or accounting).
           </p>
         </div>
       </div>
@@ -150,10 +175,15 @@ export function QuickBooksIntelligenceView({
 
       {state.kind === "partial" ? (
         <div className="qb-intel-banner qb-intel-banner-warn" data-testid="qb-intel-partial">
-          Partial sample: results are limited to {model.maxRows} rows per staging entity. Treat
-          totals as directional until a full-org refresh is run.
+          Sample-limited snapshot: results are capped at {model.maxRows} rows per staging entity
+          (page size {model.pageSize}). Treat totals as directional until full-scale aggregates
+          ship.
         </div>
       ) : null}
+
+      <div className="qb-intel-banner qb-intel-banner-info" data-testid="qb-intel-preview-note">
+        {QB_INTEL_PREVIEW_NOTE}
+      </div>
 
       <section className="qb-intel-section" data-section="executive">
         <h3>Executive summary</h3>
@@ -393,7 +423,8 @@ export default function QuickBooksIntelligencePage({ token }: { token: string })
     setError("");
     setStatusCode(null);
     try {
-      const json = (await apiFetch(QB_INTEL_ENDPOINT, { token })) as Snapshot;
+      const path = buildQuickBooksIntelligenceEndpoint();
+      const json = (await apiFetch(path, { token })) as Snapshot;
       assertSafeIntelligenceSnapshot(json);
       setData(json);
       setLoading(false);
@@ -402,7 +433,7 @@ export default function QuickBooksIntelligencePage({ token }: { token: string })
       setStatusCode(status);
       setData(null);
       setLoading(false);
-      setError(e instanceof ApiError ? e.message : String((e as Error)?.message ?? e));
+      setError(formatIntelligenceLoadError(e));
     }
   }, [token]);
 

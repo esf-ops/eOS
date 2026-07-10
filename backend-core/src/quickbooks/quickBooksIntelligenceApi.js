@@ -28,8 +28,27 @@ export const QB_INTELLIGENCE_ALLOWED_ROLES = Object.freeze([
 /** Head slug for requireHeadAccess / launcher / user_head_access. */
 export const QB_INTELLIGENCE_HEAD_SLUG = "quickbooks_intelligence";
 
-/** Server-side ceiling for optional max_rows query (smoke/testing). */
-export const QB_INTELLIGENCE_API_MAX_ROWS_CEILING = 5000;
+/**
+ * Default max_rows when the client omits the param.
+ * Bounded executive preview — full-org loads timed out (Postgres 57014) in production.
+ * Phase 4F should replace in-memory staging loads with scalable aggregate queries.
+ */
+export const QB_INTELLIGENCE_API_DEFAULT_MAX_ROWS = 500;
+
+/** Default page_size when the client omits the param. */
+export const QB_INTELLIGENCE_API_DEFAULT_PAGE_SIZE = 100;
+
+/** Hard ceiling for max_rows (clients cannot request more). */
+export const QB_INTELLIGENCE_API_MAX_ROWS_CEILING = 2000;
+
+/** Hard ceiling for page_size. */
+export const QB_INTELLIGENCE_API_PAGE_SIZE_CEILING = 500;
+
+/** Suggested smaller sample after a statement timeout (57014). */
+export const QB_INTELLIGENCE_TIMEOUT_RECOMMENDED_MAX_ROWS = 50;
+
+/** Suggested smaller page size after a statement timeout (57014). */
+export const QB_INTELLIGENCE_TIMEOUT_RECOMMENDED_PAGE_SIZE = 50;
 
 /** Default insight list cap for API responses. */
 export const QB_INTELLIGENCE_API_INSIGHT_LIST_LIMIT = 100;
@@ -60,13 +79,14 @@ export function resolveQuickBooksOrganizationId(req, env = process.env) {
 }
 
 /**
- * Parse optional intelligence query params (safe defaults).
+ * Parse intelligence query params with safe bounded defaults.
+ * Omitted max_rows / page_size are never unlimited (production timeout hotfix).
  *
  * @param {object} [query]
  * @returns {{
  *   asOfDate: string|null,
- *   pageSize: number|null,
- *   maxRows: number|null,
+ *   pageSize: number,
+ *   maxRows: number,
  *   includeInvoiceLines: boolean,
  *   insightListLimit: number,
  * }}
@@ -77,13 +97,15 @@ export function parseIntelligenceQuery(query = {}) {
 
   const pageSizeRaw = Number(query.page_size);
   const pageSize =
-    Number.isFinite(pageSizeRaw) && pageSizeRaw > 0 ? Math.floor(pageSizeRaw) : null;
+    Number.isFinite(pageSizeRaw) && pageSizeRaw > 0
+      ? Math.min(QB_INTELLIGENCE_API_PAGE_SIZE_CEILING, Math.floor(pageSizeRaw))
+      : QB_INTELLIGENCE_API_DEFAULT_PAGE_SIZE;
 
   const maxRowsRaw = Number(query.max_rows);
-  let maxRows = null;
-  if (Number.isFinite(maxRowsRaw) && maxRowsRaw > 0) {
-    maxRows = Math.min(QB_INTELLIGENCE_API_MAX_ROWS_CEILING, Math.floor(maxRowsRaw));
-  }
+  const maxRows =
+    Number.isFinite(maxRowsRaw) && maxRowsRaw > 0
+      ? Math.min(QB_INTELLIGENCE_API_MAX_ROWS_CEILING, Math.floor(maxRowsRaw))
+      : QB_INTELLIGENCE_API_DEFAULT_MAX_ROWS;
 
   const includeInvoiceLines =
     query.include_invoice_lines === "1" ||
@@ -97,6 +119,44 @@ export function parseIntelligenceQuery(query = {}) {
       : QB_INTELLIGENCE_API_INSIGHT_LIST_LIMIT;
 
   return { asOfDate, pageSize, maxRows, includeInvoiceLines, insightListLimit };
+}
+
+/**
+ * Map loader/repository errors to a safe API response (no DB text / PII).
+ *
+ * @param {unknown} err
+ * @returns {{ status: number, body: Record<string, unknown> }}
+ */
+export function mapQuickBooksIntelligenceError(err) {
+  const code =
+    err && typeof err === "object" && "code" in err && err.code != null
+      ? String(err.code)
+      : null;
+
+  if (code === "57014") {
+    return {
+      status: 504,
+      body: {
+        ok: false,
+        error:
+          "QuickBooks intelligence snapshot timed out while reading staging data. Retry with a smaller sample.",
+        code: "57014",
+        recommended: {
+          max_rows: QB_INTELLIGENCE_TIMEOUT_RECOMMENDED_MAX_ROWS,
+          page_size: QB_INTELLIGENCE_TIMEOUT_RECOMMENDED_PAGE_SIZE,
+        },
+      },
+    };
+  }
+
+  return {
+    status: 500,
+    body: {
+      ok: false,
+      error: "QuickBooks intelligence snapshot failed",
+      ...(code ? { code } : {}),
+    },
+  };
 }
 
 /**
@@ -184,12 +244,12 @@ export function createQuickBooksIntelligenceHandlers(deps) {
         const parsed = parseIntelligenceQuery(req.query ?? {});
         const repository = createRepository({
           getSupabase: deps.getSupabase,
-          ...(parsed.pageSize != null ? { pageSize: parsed.pageSize } : {}),
+          pageSize: parsed.pageSize,
         });
 
         const snapshot = await loadSnapshot(repository, organizationId, {
           asOfDate: parsed.asOfDate,
-          pageSize: parsed.pageSize ?? undefined,
+          pageSize: parsed.pageSize,
           maxRows: parsed.maxRows,
           includeInvoiceLines: parsed.includeInvoiceLines,
           insightListLimit: parsed.insightListLimit,
@@ -197,18 +257,14 @@ export function createQuickBooksIntelligenceHandlers(deps) {
 
         const body = buildQuickBooksIntelligenceApiResponse(snapshot, {
           maxRows: parsed.maxRows,
-          pageSize: parsed.pageSize ?? snapshot.load_meta?.page_size ?? null,
+          pageSize: parsed.pageSize,
         });
 
         return res.status(200).json(body);
       } catch (err) {
-        const code = err && typeof err === "object" && "code" in err ? String(err.code) : null;
         // Safe message only — never echo raw DB text / PII.
-        return res.status(500).json({
-          ok: false,
-          error: "QuickBooks intelligence snapshot failed",
-          ...(code ? { code } : {}),
-        });
+        const mapped = mapQuickBooksIntelligenceError(err);
+        return res.status(mapped.status).json(mapped.body);
       }
     },
   };

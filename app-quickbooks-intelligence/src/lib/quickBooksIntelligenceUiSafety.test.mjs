@@ -30,4 +30,9 @@ describe("quickbooks-intelligence UI safety", () => {
     assert.ok(appTsx.includes("accounting"));
     assert.ok(appTsx.includes("executive"));
   });
+
+  it("requests a bounded executive snapshot path", () => {
+    assert.ok(viewTsx.includes("buildQuickBooksIntelligenceEndpoint"));
+    assert.equal(viewTsx.includes("raw_payload"), false);
+  });
 });
