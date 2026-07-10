@@ -33,6 +33,10 @@ function fakeSnapshot(overrides = {}) {
       as_of_date: "2026-07-10",
       page_size: 500,
       max_rows: null,
+      preset: "ytd",
+      date_from: "2026-01-01",
+      date_to: "2026-07-10",
+      sort: "risk_desc",
       include_invoice_lines: false,
       staging_row_counts: {
         customers: 2,
@@ -45,6 +49,47 @@ function fakeSnapshot(overrides = {}) {
       },
       insight_list_count: 2,
     },
+    period: {
+      preset: "ytd",
+      date_from: "2026-01-01",
+      date_to: "2026-07-10",
+      as_of: "2026-07-10",
+      sort: "risk_desc",
+      year: 2026,
+      is_partial: false,
+    },
+    invoice_summary: {
+      invoice_count: 3,
+      billed_total: 6800,
+      open_total: 2500,
+      customer_count: 1,
+    },
+    payment_summary_period: {
+      payment_count: 1,
+      collected_total: 1000,
+      customer_count: 1,
+    },
+    estimate_summary: {
+      estimate_count: 2,
+      estimate_total: 4500,
+      linked_count: 1,
+      unlinked_count: 1,
+      conversion_rate: 50,
+    },
+    insight_groups: [
+      {
+        insight: "overdue_ar_risks",
+        count: 1,
+        items: [
+          {
+            insight: "overdue_ar_risks",
+            severity: "high",
+            qb_txn_id: "FAKE-INV-1",
+            summary: "overdue_ar days=56",
+          },
+        ],
+      },
+    ],
     ar_summary: {
       open_invoice_count: 2,
       open_balance_total: 3300,
@@ -148,6 +193,8 @@ describe("quickBooksIntelligenceViewModel safety", () => {
     assert.ok(path.startsWith(`${QB_INTEL_ENDPOINT}?`));
     assert.match(path, new RegExp(`max_rows=${QB_INTEL_DEFAULT_MAX_ROWS}`));
     assert.match(path, new RegExp(`page_size=${QB_INTEL_DEFAULT_PAGE_SIZE}`));
+    assert.match(path, /preset=ytd/);
+    assert.match(path, /sort=risk_desc/);
     assert.equal(QB_INTEL_DEFAULT_MAX_ROWS, 250);
     assert.equal(QB_INTEL_DEFAULT_PAGE_SIZE, 100);
   });
@@ -221,20 +268,22 @@ describe("resolveIntelligenceViewState", () => {
     assert.match(html, /data-section="executive"/);
     assert.match(html, /data-section="ar-risk"/);
     assert.match(html, /data-section="revenue"/);
-    assert.match(html, /data-section="payments"/);
+    assert.match(html, /data-section="cash"/);
     assert.match(html, /data-section="flow"/);
-    assert.match(html, /data-section="sales-reps"/);
     assert.match(html, /data-section="activity"/);
     assert.match(html, /data-section="insights"/);
     assert.match(html, /data-section="metadata"/);
     assert.match(html, /data-insight="overdue_ar_risks"/);
     assert.match(html, /Overdue AR/);
     assert.match(html, /generated_at=/);
+    assert.match(html, /period=/);
+    assert.match(html, /YTD/);
     assert.match(html, /max_rows=full org/);
     assert.match(html, /page_size=500/);
     assert.match(html, /sample_limited=no/);
     assert.match(html, new RegExp(QB_INTEL_PREVIEW_NOTE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     assert.equal(html.includes("raw_payload"), false);
+    assert.equal((html.match(/estimate_to_invoice_leakage/g) || []).length <= 5, true);
     assert.equal(html.includes("SENTINEL"), false);
     assert.equal(html.includes("BillAddress"), false);
     assert.equal(html.includes("Memo"), false);

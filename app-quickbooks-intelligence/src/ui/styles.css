@@ -290,6 +290,50 @@ code {
   color: var(--eos-muted, #64748b);
 }
 
+.qb-intel-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 14px;
+}
+
+.qb-intel-control {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--eos-muted, #64748b);
+}
+
+.qb-intel-control select {
+  min-width: 160px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--eos-border);
+  background: var(--eos-surface);
+  color: inherit;
+}
+
+.qb-intel-period-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: baseline;
+  margin-bottom: 14px;
+}
+
+.qb-intel-insight-groups {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.qb-intel-insight-group {
+  border-top: 1px solid var(--eos-border);
+  padding-top: 10px;
+}
+
 .qb-intel-section {
   margin-bottom: 16px;
 }

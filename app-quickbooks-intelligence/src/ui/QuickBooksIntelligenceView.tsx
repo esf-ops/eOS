@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiError, apiFetch } from "../lib/api";
 import {
+  QB_INTEL_DEFAULT_PRESET,
+  QB_INTEL_DEFAULT_SORT,
+  QB_INTEL_PRESET_OPTIONS,
   QB_INTEL_PREVIEW_NOTE,
+  QB_INTEL_SORT_OPTIONS,
   assertSafeIntelligenceSnapshot,
   buildIntelligenceViewModel,
   buildQuickBooksIntelligenceEndpoint,
@@ -15,15 +19,8 @@ type Snapshot = Record<string, unknown> & {
   organization_id?: string;
   generated_at?: string;
   as_of_date?: string;
+  period?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
-  ar_summary?: Record<string, unknown>;
-  revenue_summary?: Record<string, unknown>;
-  payment_summary?: Record<string, unknown>;
-  estimate_sales_order_invoice_flow?: Record<string, unknown>;
-  sales_rep_summary?: Record<string, unknown>;
-  customer_activity_trend?: Record<string, unknown>;
-  insights?: Record<string, unknown>;
-  insight_list?: Record<string, unknown>[];
 };
 
 type ViewModel = ReturnType<typeof buildIntelligenceViewModel>;
@@ -68,12 +65,20 @@ export function QuickBooksIntelligenceView({
   error,
   statusCode,
   data,
+  preset,
+  sort,
+  onPresetChange,
+  onSortChange,
   onRetry,
 }: {
   loading: boolean;
   error: string;
   statusCode: number | null;
   data: Snapshot | null;
+  preset: string;
+  sort: string;
+  onPresetChange?: (preset: string) => void;
+  onSortChange?: (sort: string) => void;
   onRetry?: () => void;
 }) {
   const state = resolveIntelligenceViewState({
@@ -83,6 +88,40 @@ export function QuickBooksIntelligenceView({
     data: data as never,
   });
 
+  const controls = (
+    <div className="qb-intel-controls" data-testid="qb-intel-controls">
+      <label className="qb-intel-control">
+        <span>Period</span>
+        <select
+          value={preset}
+          onChange={(e) => onPresetChange?.(e.target.value)}
+          disabled={loading}
+        >
+          {QB_INTEL_PRESET_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="qb-intel-control">
+        <span>Sort</span>
+        <select value={sort} onChange={(e) => onSortChange?.(e.target.value)} disabled={loading}>
+          {QB_INTEL_SORT_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      {onRetry ? (
+        <button type="button" className="btn" onClick={onRetry} disabled={loading}>
+          Refresh
+        </button>
+      ) : null}
+    </div>
+  );
+
   if (state.kind === "loading") {
     return (
       <div className="qb-intel qb-intel-loading" data-testid="qb-intel-loading">
@@ -90,6 +129,7 @@ export function QuickBooksIntelligenceView({
           <h2 style={{ marginTop: 0 }}>QuickBooks Intelligence</h2>
           <p className="muted">{state.message}</p>
         </div>
+        {controls}
         <div className="stat-grid qb-intel-skeleton">
           {[1, 2, 3, 4, 5, 6].map((i) => (
             <div key={i} className="stat-card stat-card-muted">
@@ -108,10 +148,6 @@ export function QuickBooksIntelligenceView({
         <div className="error-card">
           <strong>Access denied</strong>
           <p>{state.message}</p>
-          <p className="muted" style={{ marginBottom: 0 }}>
-            This view requires an authenticated user with quickbooks_intelligence head access
-            (admin, executive, finance, or accounting).
-          </p>
         </div>
       </div>
     );
@@ -120,6 +156,7 @@ export function QuickBooksIntelligenceView({
   if (state.kind === "error") {
     return (
       <div className="qb-intel qb-intel-error" data-testid="qb-intel-error">
+        {controls}
         <div className="error-card">
           <strong>Unable to load QuickBooks intelligence</strong>
           <p>{state.message}</p>
@@ -140,11 +177,7 @@ export function QuickBooksIntelligenceView({
           <h2 style={{ marginTop: 0 }}>QuickBooks Intelligence</h2>
           <p className="muted">{state.message}</p>
         </div>
-        {onRetry ? (
-          <button type="button" className="btn" onClick={onRetry}>
-            Refresh
-          </button>
-        ) : null}
+        {controls}
       </div>
     );
   }
@@ -161,23 +194,23 @@ export function QuickBooksIntelligenceView({
           <div>
             <h2 style={{ marginTop: 0, marginBottom: 6 }}>QuickBooks Intelligence</h2>
             <p className="muted" style={{ margin: 0 }}>
-              Leadership read of AR risk, revenue concentration, payment behavior, and estimate
-              conversion — opaque IDs only, no raw QuickBooks payloads.
+              Date-scoped leadership view — opaque IDs only, no raw QuickBooks payloads.
             </p>
           </div>
-          {onRetry ? (
-            <button type="button" className="btn" onClick={onRetry}>
-              Refresh
-            </button>
-          ) : null}
         </div>
+      </div>
+
+      {controls}
+
+      <div className="qb-intel-period-meta" data-testid="qb-intel-period">
+        <strong>{model.periodLabel}</strong>
+        <span className="muted">As of {model.asOfDate}</span>
       </div>
 
       {state.kind === "partial" ? (
         <div className="qb-intel-banner qb-intel-banner-warn" data-testid="qb-intel-partial">
-          Sample-limited snapshot: results are capped at {model.maxRows} rows per staging entity
-          (page size {model.pageSize}). Treat totals as directional until full-scale aggregates
-          ship.
+          Sample-limited snapshot: capped at {model.maxRows} rows per staging entity (page size{" "}
+          {model.pageSize}). Totals are directional until Phase 4G full-scale aggregates.
         </div>
       ) : null}
 
@@ -199,32 +232,35 @@ export function QuickBooksIntelligenceView({
       </section>
 
       <div className="qb-intel-grid">
-        <section className="admin-card qb-intel-section" data-section="ar-risk">
-          <h3>AR risk</h3>
-          <p className="muted qb-intel-section-lead">
-            Open and overdue receivables by aging bucket. Customer identities stay opaque.
-          </p>
-          <div className="qb-intel-aging">
-            {model.agingBuckets.map((b) => (
-              <div key={b.key} className="qb-intel-aging-row">
-                <div className="qb-intel-aging-label">{b.label}</div>
-                <div className="qb-intel-aging-meta">
-                  <span>{formatCount(b.invoice_count)} invoices</span>
-                  <strong>{formatMoney(b.balance_total)}</strong>
-                </div>
-              </div>
-            ))}
-          </div>
+        <section className="admin-card qb-intel-section" data-section="cash">
+          <h3>Cash collected</h3>
+          <p className="muted qb-intel-section-lead">Payments in the selected period (opaque IDs).</p>
+          {model.topPayments.length === 0 ? (
+            <p className="muted">No payments in this period.</p>
+          ) : (
+            <ul className="qb-intel-rank-list">
+              {model.topPayments.map((row) => (
+                <li key={row.label}>
+                  <div>
+                    <div className="qb-intel-entity">{row.label}</div>
+                    <div className="muted">
+                      {row.payments} payments · avg {row.avgDays} days · last {row.lastPayment}
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
 
         <section className="admin-card qb-intel-section" data-section="revenue">
-          <h3>Revenue concentration</h3>
-          <p className="muted qb-intel-section-lead">Top customers by billed total (opaque IDs).</p>
+          <h3>Invoiced revenue</h3>
+          <p className="muted qb-intel-section-lead">Top customers by period billed total.</p>
           {model.topRevenue.length === 0 ? (
-            <p className="muted">No invoice revenue in this snapshot.</p>
+            <p className="muted">No invoice revenue in this period.</p>
           ) : (
             <ul className="qb-intel-rank-list">
-              {model.topRevenue.map((row: ViewModel["topRevenue"][number]) => (
+              {model.topRevenue.map((row) => (
                 <li key={row.label}>
                   <span className="qb-intel-rank">#{row.rank}</span>
                   <div>
@@ -240,32 +276,41 @@ export function QuickBooksIntelligenceView({
           )}
         </section>
 
-        <section className="admin-card qb-intel-section" data-section="payments">
-          <h3>Payment behavior</h3>
+        <section className="admin-card qb-intel-section" data-section="ar-risk">
+          <h3>Open AR</h3>
           <p className="muted qb-intel-section-lead">
-            Recent payers with average days-to-pay when invoice links exist.
+            Aging as of {model.asOfDate}. Top open balances below.
           </p>
-          {model.topPayments.length === 0 ? (
-            <p className="muted">No payments in this snapshot.</p>
-          ) : (
-            <ul className="qb-intel-rank-list">
-              {model.topPayments.map((row: ViewModel["topPayments"][number]) => (
+          <div className="qb-intel-aging">
+            {model.agingBuckets.map((b) => (
+              <div key={b.key} className="qb-intel-aging-row">
+                <div className="qb-intel-aging-label">{b.label}</div>
+                <div className="qb-intel-aging-meta">
+                  <span>{formatCount(b.invoice_count)} invoices</span>
+                  <strong>{formatMoney(b.balance_total)}</strong>
+                </div>
+              </div>
+            ))}
+          </div>
+          {model.topOpenAr.length > 0 ? (
+            <ul className="qb-intel-rank-list" style={{ marginTop: 12 }}>
+              {model.topOpenAr.map((row) => (
                 <li key={row.label}>
+                  <span className="qb-intel-rank">#{row.rank}</span>
                   <div>
                     <div className="qb-intel-entity">{row.label}</div>
-                    <div className="muted">
-                      {row.payments} payments · avg {row.avgDays} days · last {row.lastPayment}
-                    </div>
+                    <div className="muted">{row.invoices} open invoices</div>
                   </div>
+                  <strong>{row.open}</strong>
                 </li>
               ))}
             </ul>
-          )}
+          ) : null}
         </section>
 
         <section className="admin-card qb-intel-section" data-section="flow">
-          <h3>Estimate → sales order → invoice</h3>
-          <p className="muted qb-intel-section-lead">Conversion coverage and unlinked leakage.</p>
+          <h3>Estimate conversion</h3>
+          <p className="muted qb-intel-section-lead">Period estimates / sales orders / invoices.</p>
           <div className="qb-intel-flow">
             {model.flowCards.map((card) => (
               <div key={card.id} className="qb-intel-flow-card">
@@ -277,57 +322,42 @@ export function QuickBooksIntelligenceView({
               </div>
             ))}
           </div>
-        </section>
-
-        <section className="admin-card qb-intel-section" data-section="sales-reps">
-          <h3>Sales rep summary</h3>
-          <p className="muted qb-intel-section-lead">
-            Where SalesRepRef is present on invoices. Unassigned invoices:{" "}
-            {model.unassignedRepInvoices}.
-          </p>
-          {model.salesRepRows.length === 0 ? (
-            <p className="muted">No sales-rep attribution in this snapshot.</p>
-          ) : (
-            <ul className="qb-intel-rank-list">
-              {model.salesRepRows.map((row: ViewModel["salesRepRows"][number]) => (
-                <li key={row.label}>
-                  <div>
-                    <div className="qb-intel-entity">
-                      {row.label}
-                      {row.known ? (
-                        <span className="pill pill-good qb-intel-inline-pill">known</span>
-                      ) : (
-                        <span className="pill pill-warn qb-intel-inline-pill">unlisted</span>
-                      )}
+          {model.topLeakage.length > 0 ? (
+            <>
+              <p className="muted qb-intel-section-lead" style={{ marginTop: 12 }}>
+                Top estimate leakage (capped)
+              </p>
+              <ul className="qb-intel-rank-list" data-testid="qb-intel-leakage-list">
+                {model.topLeakage.map((row) => (
+                  <li key={`${row.label}-${row.rank}`}>
+                    <span className="qb-intel-rank">#{row.rank}</span>
+                    <div>
+                      <div className="qb-intel-entity">{row.label}</div>
+                      <div className="muted">{row.date}</div>
                     </div>
-                    <div className="muted">
-                      {row.invoices} invoices · {row.customers} customers · open {row.open}
-                    </div>
-                  </div>
-                  <strong>{row.billed}</strong>
-                </li>
-              ))}
-            </ul>
-          )}
+                    <strong>{row.amount}</strong>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
         </section>
 
         <section className="admin-card qb-intel-section" data-section="activity">
-          <h3>Customer activity trend</h3>
-          <p className="muted qb-intel-section-lead">
-            Monthly invoice activity (last 12 months in snapshot).
-          </p>
+          <h3>Month-by-month trend</h3>
+          <p className="muted qb-intel-section-lead">Activity inside the selected period.</p>
           {model.activityMonths.length === 0 ? (
-            <p className="muted">No monthly activity in this snapshot.</p>
+            <p className="muted">No monthly activity in this period.</p>
           ) : (
             <ul className="qb-intel-trend">
-              {model.activityMonths.map((m: ViewModel["activityMonths"][number]) => (
+              {model.activityMonths.map((m) => (
                 <li key={m.month}>
                   <div className="qb-intel-trend-label">{m.month}</div>
                   <div className="qb-intel-trend-bar-track" aria-hidden="true">
                     <div className="qb-intel-trend-bar" style={{ width: `${m.barPct}%` }} />
                   </div>
                   <div className="qb-intel-trend-meta muted">
-                    {m.invoice_count} inv · {m.payment_count} pay · {m.active_customers} customers
+                    {m.invoice_count} inv · {m.payment_count} pay · {m.estimate_count ?? 0} est
                   </div>
                 </li>
               ))}
@@ -337,9 +367,9 @@ export function QuickBooksIntelligenceView({
       </div>
 
       <section className="admin-card qb-intel-section" data-section="insights">
-        <h3>Deterministic insights</h3>
+        <h3>Priority insights</h3>
         <p className="muted qb-intel-section-lead">
-          Rule-based signals only — no AI. Entities are opaque QuickBooks IDs.
+          Top signals only, grouped by type — no giant repeated lists.
         </p>
         <div className="qb-intel-insight-keys">
           {model.insightKeyCounts.map((k) => (
@@ -348,8 +378,29 @@ export function QuickBooksIntelligenceView({
             </span>
           ))}
         </div>
-        {model.insightRows.length === 0 ? (
-          <p className="muted">No insight items in this snapshot.</p>
+        {model.insightGroupRows.length > 0 ? (
+          <div className="qb-intel-insight-groups" data-testid="qb-intel-insight-groups">
+            {model.insightGroupRows.map((g) => (
+              <div key={g.key} className="qb-intel-insight-group" data-insight-group={g.key}>
+                <div className="qb-intel-entity">
+                  {g.label} <span className="muted">({formatCount(g.count)})</span>
+                </div>
+                <ul className="qb-intel-insight-list">
+                  {g.items.map((row) => (
+                    <li key={row.key}>
+                      <span className={`pill ${severityClass(row.severity)}`}>{row.severity}</span>
+                      <div>
+                        <div className="qb-intel-entity">{row.entity}</div>
+                        <div className="muted">{row.summary}</div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        ) : model.insightRows.length === 0 ? (
+          <p className="muted">No insight items in this period.</p>
         ) : (
           <ul className="qb-intel-insight-list" data-testid="qb-intel-insight-list">
             {model.insightRows.map((row) => (
@@ -367,12 +418,16 @@ export function QuickBooksIntelligenceView({
         )}
       </section>
 
-      <section className="qb-intel-meta" data-section="metadata" data-testid="qb-intel-metadata">
-        <h3>Snapshot status</h3>
+      <section className="admin-card qb-intel-section" data-section="metadata">
+        <h3>Snapshot metadata</h3>
         <div className="qb-intel-meta-grid">
           <div>
+            <div className="muted">Period</div>
+            <div>{model.periodLabel}</div>
+          </div>
+          <div>
             <div className="muted">Organization</div>
-            <div>{model.organizationId}</div>
+            <div className="mono">{model.organizationId}</div>
           </div>
           <div>
             <div className="muted">Generated</div>
@@ -410,6 +465,8 @@ export default function QuickBooksIntelligencePage({ token }: { token: string })
   const [error, setError] = useState("");
   const [statusCode, setStatusCode] = useState<number | null>(null);
   const [data, setData] = useState<Snapshot | null>(null);
+  const [preset, setPreset] = useState(QB_INTEL_DEFAULT_PRESET);
+  const [sort, setSort] = useState(QB_INTEL_DEFAULT_SORT);
 
   const load = useCallback(async () => {
     if (!token) {
@@ -423,7 +480,7 @@ export default function QuickBooksIntelligencePage({ token }: { token: string })
     setError("");
     setStatusCode(null);
     try {
-      const path = buildQuickBooksIntelligenceEndpoint();
+      const path = buildQuickBooksIntelligenceEndpoint({ preset, sort });
       const json = (await apiFetch(path, { token })) as Snapshot;
       assertSafeIntelligenceSnapshot(json);
       setData(json);
@@ -435,7 +492,7 @@ export default function QuickBooksIntelligencePage({ token }: { token: string })
       setLoading(false);
       setError(formatIntelligenceLoadError(e));
     }
-  }, [token]);
+  }, [token, preset, sort]);
 
   useEffect(() => {
     void load();
@@ -447,6 +504,10 @@ export default function QuickBooksIntelligencePage({ token }: { token: string })
       error={error}
       statusCode={statusCode}
       data={data}
+      preset={preset}
+      sort={sort}
+      onPresetChange={setPreset}
+      onSortChange={setSort}
       onRetry={() => void load()}
     />
   );

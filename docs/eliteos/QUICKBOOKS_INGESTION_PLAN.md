@@ -13,21 +13,20 @@ This mirrors the pattern already used for Moraware (`docs/eliteos/moraware-sync-
 
 `External system → local read-only extract → normalized staging → organization-scoped facts → heads`
 
-## Current Phase: Phase 4D — QuickBooks Intelligence Head (bounded executive preview)
+## Current Phase: Phase 4F — Date-scoped QuickBooks Intelligence
 
-**Latest delivered:** Phase 4D standalone head with a **bounded executive preview**
-(`max_rows` / `page_size` defaults) so production loads avoid Postgres statement
-timeouts (`57014`). No AI. No raw_payload. Opaque IDs only.
+**Latest delivered:** Phase 4F date-scoped executive aggregates on the standalone
+QuickBooks Intelligence head. Default period is **current year-to-date**. Insights
+are capped/grouped. Loads remain **sample-limited** (`max_rows`) until Phase 4G.
 
-**Also in place:** Phase 1–3C staging import; Phase 4A–4C read/insight/repo/API/smoke.
+**Also in place:** Phase 1–3C staging import; Phase 4A–4E read/insight/repo/API/UI/head.
 
-**What does NOT exist yet (by design for 4D):**
+**What does NOT exist yet (by design for 4F):**
 
 - No AI summarization over QuickBooks facts.
 - No browser access to `brain_quickbooks_*` or `raw_payload`.
 - No writeback to QuickBooks.
-- No full-org in-memory aggregate (see Phase 4F).
-- No QuickBooks Intelligence tab inside System Admin (access/governance only).
+- No full-org DB-side aggregates (see Phase 4G) — live API is still sample-limited.
 - No Supabase credentials on the Windows VM.
 
 ## Phase 1 — Local Export Preview
@@ -718,7 +717,7 @@ are coming next.”
 set), ready.
 
 **Out of scope for 4D:** AI narrative, sync-health explorer tables, connector/schema
-changes, System Admin embedding, full-org scalable aggregates (Phase 4F).
+changes, System Admin embedding, full-org scalable aggregates (Phase 4G).
 
 **Tests:** `npm run test --prefix app-quickbooks-intelligence`;
 `npm run build --prefix app-quickbooks-intelligence`;
@@ -731,13 +730,51 @@ Optional follow-on: sync-run health, per-entity row counts, and data-quality fin
 alongside the intelligence page — still admin-gated, still no `raw_payload` in the
 browser.
 
-### Phase 4F — Scalable full-org QuickBooks aggregates (future)
+### Phase 4F — Date-scoped aggregate intelligence (implemented)
+
+**Status:** Implemented on top of the bounded staging load path.
+
+**API params** (`GET /api/admin/quickbooks/intelligence/executive`):
+
+- `preset=ytd|current_year|last_90_days|last_12_months|previous_year|custom`
+- `year=YYYY`
+- `date_from` / `date_to` (YYYY-MM-DD)
+- `sort=newest|amount_desc|risk_desc`
+- Default: **current YTD**, sort `risk_desc`
+- Still bounded: `max_rows` / `page_size` defaults + ceilings (timeout hotfix)
+
+**Date basis:**
+
+- Invoices / revenue → invoice `txn_date`
+- Payments / cash → payment `txn_date`
+- Estimates / sales orders → their `txn_date`
+- AR aging → open balance / `due_date` as of `as_of`
+- Monthly trend → months inside the selected period
+
+**Response additions:** `period`, `invoice_summary`, `payment_summary_period`,
+`estimate_summary`, `sales_order_summary`, `monthly_trend`, `top_lists`,
+`insight_groups` (priority insights capped ~10; ≤3 items shown per group).
+
+**UI:** Period + sort controls; sections for executive summary, cash collected,
+invoiced revenue, open AR, estimate conversion, month-by-month trend, priority
+insights. Sample-limited banner retained.
+
+**Modules:** `quickBooksIntelligencePeriod.js`,
+`quickBooksIntelligencePeriodAggregates.js`, service/API/head updates.
+
+**Limitation:** Still filters an in-memory sample of staging rows — not a full-org
+SQL aggregate. Treat totals as directional when `is_partial` / `max_rows` is set.
+
+**Tests:** `quickBooksIntelligencePeriod.test.mjs` + existing `qb:test` / head tests.
+
+### Phase 4G — Scalable full-org QuickBooks aggregates (future)
 
 Replace “load staging rows into memory then aggregate” with **SQL / prepared read
 models** (org-scoped rollups, aging buckets, revenue concentration, payment behavior)
 so the executive snapshot can cover the full organization without `max_rows` sampling
-or statement timeouts. Keep opaque IDs only; still no `raw_payload` in API responses;
-still no AI in the first cut of 4F.
+or statement timeouts / Vercel memory pressure. Prefer date-indexed analytics tables
+or views. Keep opaque IDs only; still no `raw_payload` in API responses; still no AI
+in the first cut of 4G.
 
 ### Phase 5 — Scheduled Connector Upload with Scoped Token
 

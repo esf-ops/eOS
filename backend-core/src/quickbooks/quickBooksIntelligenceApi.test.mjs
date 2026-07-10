@@ -35,6 +35,17 @@ function fakeSnapshot(overrides = {}) {
     organization_id: ORG,
     as_of_date: "2026-07-10",
     generated_at: "2026-07-10T19:00:00.000Z",
+    period: {
+      preset: "ytd",
+      date_from: "2026-01-01",
+      date_to: "2026-07-10",
+      as_of: "2026-07-10",
+      sort: "risk_desc",
+      year: 2026,
+      is_partial: true,
+      max_rows: 50,
+      page_size: 50,
+    },
     load_meta: {
       page_size: 50,
       include_invoice_lines: false,
@@ -48,6 +59,38 @@ function fakeSnapshot(overrides = {}) {
         invoice_lines: 0,
       },
     },
+    invoice_summary: {
+      invoice_count: 3,
+      billed_total: 6000,
+      open_total: 3300,
+      customer_count: 1,
+    },
+    payment_summary_period: {
+      payment_count: 1,
+      collected_total: 1000,
+      customer_count: 0,
+    },
+    estimate_summary: {
+      estimate_count: 2,
+      estimate_total: 100,
+      linked_count: 0,
+      unlinked_count: 2,
+      conversion_rate: 0,
+    },
+    sales_order_summary: {
+      sales_order_count: 1,
+      sales_order_total: 50,
+      linked_count: 0,
+      unlinked_count: 1,
+    },
+    monthly_trend: [{ month: "2026-06", invoice_count: 1, invoice_total: 1000, payment_count: 0, payment_total: 0, estimate_count: 0, estimate_total: 0 }],
+    top_lists: {
+      top_customers_by_revenue: [],
+      top_open_ar_customers: [],
+      top_estimate_leakage: [],
+      top_payment_customers: [],
+    },
+    insight_groups: [],
     ar_summary: {
       asOfDate: "2026-07-10",
       open_invoice_count: 2,
@@ -163,20 +206,23 @@ describe("quickBooksIntelligenceApi helpers", () => {
       max_rows: "99999",
       include_invoice_lines: "true",
       insight_list_limit: "10",
-    });
+    }, new Date("2026-07-10T12:00:00.000Z"));
     assert.equal(parsed.asOfDate, "2026-07-10");
     assert.equal(parsed.pageSize, 25);
     assert.equal(parsed.maxRows, QB_INTELLIGENCE_API_MAX_ROWS_CEILING);
     assert.equal(parsed.includeInvoiceLines, true);
     assert.equal(parsed.insightListLimit, 10);
+    assert.equal(parsed.preset, "ytd");
+    assert.equal(parsed.dateFrom, "2026-01-01");
   });
 
   it("applies bounded defaults when max_rows and page_size are omitted", () => {
-    const parsed = parseIntelligenceQuery({});
+    const parsed = parseIntelligenceQuery({}, new Date("2026-07-10T12:00:00.000Z"));
     assert.equal(parsed.maxRows, QB_INTELLIGENCE_API_DEFAULT_MAX_ROWS);
     assert.equal(parsed.pageSize, QB_INTELLIGENCE_API_DEFAULT_PAGE_SIZE);
     assert.equal(parsed.maxRows, 500);
     assert.equal(parsed.pageSize, 100);
+    assert.equal(parsed.preset, "ytd");
   });
 
   it("caps excessive page_size", () => {

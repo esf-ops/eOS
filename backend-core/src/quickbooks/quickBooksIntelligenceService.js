@@ -1,110 +1,19 @@
 /**
- * quickBooksIntelligenceService — Phase 4B executive intelligence snapshot.
+ * quickBooksIntelligenceService — Phase 4B/4F executive intelligence snapshot.
  *
  * Loads org-scoped staging facts via an injected intelligence repository
- * (typically createQuickBooksIntelligenceSupabaseRepository) and runs Phase 4A
- * read models + deterministic insights.
+ * and builds Phase 4F date-scoped aggregates (+ backward-compatible keys).
  *
  * Never returns raw_payload. No AI. No QuickBooks writeback. Backend-only.
  */
 
 import { assertNoRawPayload } from "./quickBooksIntelligenceFacts.js";
-import { buildAllQuickBooksReadModels } from "./quickBooksIntelligenceRead.js";
-import { buildAllQuickBooksInsights } from "./quickBooksIntelligenceInsights.js";
+import { flattenInsightList } from "./quickBooksIntelligenceInsights.js";
+import { buildPeriodScopedIntelligence } from "./quickBooksIntelligencePeriodAggregates.js";
+import { resolveIntelligencePeriod } from "./quickBooksIntelligencePeriod.js";
+import { buildSalesRepSummary } from "./quickBooksIntelligenceRead.js";
 
-/**
- * Flatten deterministic insights into a single ranked list for executive views.
- *
- * @param {ReturnType<typeof buildAllQuickBooksInsights>} insights
- * @returns {Array<{
- *   insight: string,
- *   severity: string,
- *   qb_customer_list_id?: string|null,
- *   qb_txn_id?: string|null,
- *   summary: string,
- *   detail: object,
- * }>}
- */
-export function flattenInsightList(insights) {
-  /** @type {Array<{
-   *   insight: string,
-   *   severity: string,
-   *   qb_customer_list_id?: string|null,
-   *   qb_txn_id?: string|null,
-   *   summary: string,
-   *   detail: object,
-   * }>} */
-  const list = [];
-
-  for (const item of insights.overdue_ar_risks?.items ?? []) {
-    list.push({
-      insight: "overdue_ar_risks",
-      severity: item.severity,
-      qb_customer_list_id: item.qb_customer_list_id,
-      qb_txn_id: item.qb_txn_id,
-      summary: `overdue_ar days=${item.days_overdue}`,
-      detail: item,
-    });
-  }
-  for (const item of insights.slow_paying_customers?.items ?? []) {
-    list.push({
-      insight: "slow_paying_customers",
-      severity: "medium",
-      qb_customer_list_id: item.qb_customer_list_id,
-      summary: `slow_paying reason=${item.reason}`,
-      detail: item,
-    });
-  }
-  for (const item of insights.high_value_customers?.items ?? []) {
-    list.push({
-      insight: "high_value_customers",
-      severity: "info",
-      qb_customer_list_id: item.qb_customer_list_id,
-      summary: `high_value rank=${item.rank}`,
-      detail: item,
-    });
-  }
-  for (const item of insights.dormant_customers?.items ?? []) {
-    list.push({
-      insight: "dormant_customers",
-      severity: "low",
-      qb_customer_list_id: item.qb_customer_list_id,
-      summary: `dormant days_since=${item.days_since_activity ?? "unknown"}`,
-      detail: item,
-    });
-  }
-  for (const item of insights.estimate_to_invoice_leakage?.items ?? []) {
-    list.push({
-      insight: "estimate_to_invoice_leakage",
-      severity: "medium",
-      qb_customer_list_id: item.qb_customer_list_id,
-      qb_txn_id: item.qb_txn_id,
-      summary: `estimate_leakage reason=${item.reason}`,
-      detail: item,
-    });
-  }
-  for (const item of insights.unpaid_invoice_risk?.items ?? []) {
-    list.push({
-      insight: "unpaid_invoice_risk",
-      severity: item.is_overdue ? "high" : "medium",
-      qb_customer_list_id: item.qb_customer_list_id,
-      qb_txn_id: item.qb_txn_id,
-      summary: `unpaid_risk score=${item.risk_score}`,
-      detail: item,
-    });
-  }
-
-  const severityRank = { high: 0, medium: 1, low: 2, info: 3 };
-  list.sort(
-    (a, b) =>
-      (severityRank[a.severity] ?? 9) - (severityRank[b.severity] ?? 9) ||
-      a.insight.localeCompare(b.insight) ||
-      String(a.qb_txn_id ?? "").localeCompare(String(b.qb_txn_id ?? "")) ||
-      String(a.qb_customer_list_id ?? "").localeCompare(String(b.qb_customer_list_id ?? "")),
-  );
-
-  return list;
-}
+export { flattenInsightList };
 
 /**
  * Build an executive intelligence snapshot for one organization.
@@ -120,6 +29,12 @@ export function flattenInsightList(insights) {
  *   includeInvoiceLines?: boolean,
  *   insightOpts?: object,
  *   insightListLimit?: number,
+ *   preset?: string|null,
+ *   year?: string|number|null,
+ *   dateFrom?: string|null,
+ *   dateTo?: string|null,
+ *   sort?: string|null,
+ *   now?: Date,
  * }} [opts]
  */
 export async function loadExecutiveIntelligenceSnapshot(repository, organizationId, opts = {}) {
@@ -130,8 +45,20 @@ export async function loadExecutiveIntelligenceSnapshot(repository, organization
     throw new Error("organizationId is required");
   }
 
+  const period = resolveIntelligencePeriod(
+    {
+      preset: opts.preset,
+      year: opts.year,
+      date_from: opts.dateFrom,
+      date_to: opts.dateTo,
+      as_of_date: opts.asOfDate,
+      sort: opts.sort,
+    },
+    opts.now instanceof Date ? opts.now : new Date(),
+  );
+
   const datasetWithMeta = await repository.loadOrgCurrentDataset(organizationId, {
-    asOfDate: opts.asOfDate,
+    asOfDate: period.as_of,
     pageSize: opts.pageSize,
     maxRows: opts.maxRows,
     includeInvoiceLines: opts.includeInvoiceLines === true,
@@ -143,30 +70,55 @@ export async function loadExecutiveIntelligenceSnapshot(repository, organization
     ...dataset
   } = datasetWithMeta;
 
-  const readModels = buildAllQuickBooksReadModels(dataset);
-  const insights = buildAllQuickBooksInsights(dataset, opts.insightOpts ?? {});
+  const isPartial = opts.maxRows != null && Number(opts.maxRows) > 0;
   const insightListLimit =
     opts.insightListLimit == null
-      ? 100
-      : Math.max(1, Math.floor(Number(opts.insightListLimit) || 100));
-  const insightList = flattenInsightList(insights).slice(0, insightListLimit);
+      ? 10
+      : Math.max(1, Math.floor(Number(opts.insightListLimit) || 10));
+
+  const periodScoped = buildPeriodScopedIntelligence(dataset, period, {
+    isPartial,
+    maxRows: opts.maxRows ?? null,
+    pageSize: opts.pageSize ?? loadMeta?.page_size ?? null,
+    insightListLimit,
+    insightOpts: opts.insightOpts,
+  });
+
+  const salesRepSummary = buildSalesRepSummary({
+    ...dataset,
+    asOfDate: period.as_of,
+    invoices: dataset.invoices.filter((inv) => {
+      const d = inv.txn_date;
+      return typeof d === "string" && d >= period.date_from && d <= period.date_to;
+    }),
+  });
 
   const snapshot = {
     organization_id: organizationId,
-    as_of_date: dataset.asOfDate,
+    as_of_date: period.as_of,
     generated_at: new Date().toISOString(),
     load_meta: {
       ...(loadMeta ?? {}),
       invoice_line_fact_count: Array.isArray(invoiceLines) ? invoiceLines.length : 0,
+      period: periodScoped.period,
     },
-    ar_summary: readModels.invoice_aging,
-    revenue_summary: readModels.customer_revenue,
-    payment_summary: readModels.payment_history,
-    estimate_sales_order_invoice_flow: readModels.estimate_sales_order_invoice_flow,
-    sales_rep_summary: readModels.sales_rep_summary,
-    customer_activity_trend: readModels.customer_activity_trend,
-    insights,
-    insight_list: insightList,
+    period: periodScoped.period,
+    invoice_summary: periodScoped.invoice_summary,
+    payment_summary_period: periodScoped.payment_summary_period,
+    estimate_summary: periodScoped.estimate_summary,
+    sales_order_summary: periodScoped.sales_order_summary,
+    monthly_trend: periodScoped.monthly_trend,
+    top_lists: periodScoped.top_lists,
+    insight_groups: periodScoped.insight_groups,
+    // Backward-compatible Phase 4D keys (now period-scoped).
+    ar_summary: periodScoped.ar_summary,
+    revenue_summary: periodScoped.revenue_summary,
+    payment_summary: periodScoped.payment_summary,
+    estimate_sales_order_invoice_flow: periodScoped.estimate_sales_order_invoice_flow,
+    sales_rep_summary: salesRepSummary,
+    customer_activity_trend: periodScoped.customer_activity_trend,
+    insights: periodScoped.insights,
+    insight_list: periodScoped.insight_list,
   };
 
   assertNoRawPayload(snapshot, "executive_intelligence_snapshot");

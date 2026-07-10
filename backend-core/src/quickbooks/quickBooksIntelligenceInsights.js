@@ -397,3 +397,89 @@ export function buildAllQuickBooksInsights(dataset, opts = {}) {
     unpaid_invoice_risk: insightUnpaidInvoiceRisk(dataset, opts.unpaidInvoiceRisk),
   };
 }
+
+/**
+ * Flatten deterministic insights into a single ranked list for executive views.
+ *
+ * @param {ReturnType<typeof buildAllQuickBooksInsights>} insights
+ */
+export function flattenInsightList(insights) {
+  /** @type {Array<{
+   *   insight: string,
+   *   severity: string,
+   *   qb_customer_list_id?: string|null,
+   *   qb_txn_id?: string|null,
+   *   summary: string,
+   *   detail: object,
+   * }>} */
+  const list = [];
+
+  for (const item of insights.overdue_ar_risks?.items ?? []) {
+    list.push({
+      insight: "overdue_ar_risks",
+      severity: item.severity,
+      qb_customer_list_id: item.qb_customer_list_id,
+      qb_txn_id: item.qb_txn_id,
+      summary: `overdue_ar days=${item.days_overdue}`,
+      detail: item,
+    });
+  }
+  for (const item of insights.slow_paying_customers?.items ?? []) {
+    list.push({
+      insight: "slow_paying_customers",
+      severity: "medium",
+      qb_customer_list_id: item.qb_customer_list_id,
+      summary: `slow_paying reason=${item.reason}`,
+      detail: item,
+    });
+  }
+  for (const item of insights.high_value_customers?.items ?? []) {
+    list.push({
+      insight: "high_value_customers",
+      severity: "info",
+      qb_customer_list_id: item.qb_customer_list_id,
+      summary: `high_value rank=${item.rank}`,
+      detail: item,
+    });
+  }
+  for (const item of insights.dormant_customers?.items ?? []) {
+    list.push({
+      insight: "dormant_customers",
+      severity: "low",
+      qb_customer_list_id: item.qb_customer_list_id,
+      summary: `dormant days_since=${item.days_since_activity ?? "unknown"}`,
+      detail: item,
+    });
+  }
+  for (const item of insights.estimate_to_invoice_leakage?.items ?? []) {
+    list.push({
+      insight: "estimate_to_invoice_leakage",
+      severity: "medium",
+      qb_customer_list_id: item.qb_customer_list_id,
+      qb_txn_id: item.qb_txn_id,
+      summary: `estimate_leakage reason=${item.reason}`,
+      detail: item,
+    });
+  }
+  for (const item of insights.unpaid_invoice_risk?.items ?? []) {
+    list.push({
+      insight: "unpaid_invoice_risk",
+      severity: item.is_overdue ? "high" : "medium",
+      qb_customer_list_id: item.qb_customer_list_id,
+      qb_txn_id: item.qb_txn_id,
+      summary: `unpaid_risk score=${item.risk_score}`,
+      detail: item,
+    });
+  }
+
+  const severityRank = { high: 0, medium: 1, low: 2, info: 3 };
+  list.sort(
+    (a, b) =>
+      (severityRank[a.severity] ?? 9) - (severityRank[b.severity] ?? 9) ||
+      a.insight.localeCompare(b.insight) ||
+      String(a.qb_txn_id ?? "").localeCompare(String(b.qb_txn_id ?? "")) ||
+      String(a.qb_customer_list_id ?? "").localeCompare(String(b.qb_customer_list_id ?? "")),
+  );
+
+  return list;
+}

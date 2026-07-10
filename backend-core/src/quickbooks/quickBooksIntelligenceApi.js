@@ -12,6 +12,7 @@
 import { assertNoRawPayload } from "./quickBooksIntelligenceFacts.js";
 import { createQuickBooksIntelligenceSupabaseRepository } from "./quickBooksIntelligenceSupabaseRepository.js";
 import { loadExecutiveIntelligenceSnapshot } from "./quickBooksIntelligenceService.js";
+import { resolveIntelligencePeriod } from "./quickBooksIntelligencePeriod.js";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -31,7 +32,7 @@ export const QB_INTELLIGENCE_HEAD_SLUG = "quickbooks_intelligence";
 /**
  * Default max_rows when the client omits the param.
  * Bounded executive preview — full-org loads timed out (Postgres 57014) in production.
- * Phase 4F should replace in-memory staging loads with scalable aggregate queries.
+ * Phase 4G should replace in-memory staging loads with scalable aggregate queries.
  */
 export const QB_INTELLIGENCE_API_DEFAULT_MAX_ROWS = 500;
 
@@ -50,8 +51,8 @@ export const QB_INTELLIGENCE_TIMEOUT_RECOMMENDED_MAX_ROWS = 50;
 /** Suggested smaller page size after a statement timeout (57014). */
 export const QB_INTELLIGENCE_TIMEOUT_RECOMMENDED_PAGE_SIZE = 50;
 
-/** Default insight list cap for API responses. */
-export const QB_INTELLIGENCE_API_INSIGHT_LIST_LIMIT = 100;
+/** Default priority insight list cap (Phase 4F noise reduction). */
+export const QB_INTELLIGENCE_API_INSIGHT_LIST_LIMIT = 10;
 
 /**
  * @param {unknown} value
@@ -79,19 +80,14 @@ export function resolveQuickBooksOrganizationId(req, env = process.env) {
 }
 
 /**
- * Parse intelligence query params with safe bounded defaults.
+ * Parse intelligence query params with safe bounded defaults + Phase 4F period.
  * Omitted max_rows / page_size are never unlimited (production timeout hotfix).
+ * Default period is current year-to-date.
  *
  * @param {object} [query]
- * @returns {{
- *   asOfDate: string|null,
- *   pageSize: number,
- *   maxRows: number,
- *   includeInvoiceLines: boolean,
- *   insightListLimit: number,
- * }}
+ * @param {Date} [now]
  */
-export function parseIntelligenceQuery(query = {}) {
+export function parseIntelligenceQuery(query = {}, now = new Date()) {
   const asOfRaw = String(query.as_of_date ?? "").trim();
   const asOfDate = /^\d{4}-\d{2}-\d{2}$/.test(asOfRaw) ? asOfRaw : null;
 
@@ -115,10 +111,34 @@ export function parseIntelligenceQuery(query = {}) {
   const insightLimitRaw = Number(query.insight_list_limit);
   const insightListLimit =
     Number.isFinite(insightLimitRaw) && insightLimitRaw > 0
-      ? Math.min(500, Math.floor(insightLimitRaw))
+      ? Math.min(100, Math.floor(insightLimitRaw))
       : QB_INTELLIGENCE_API_INSIGHT_LIST_LIMIT;
 
-  return { asOfDate, pageSize, maxRows, includeInvoiceLines, insightListLimit };
+  const period = resolveIntelligencePeriod(
+    {
+      preset: query.preset,
+      year: query.year,
+      date_from: query.date_from,
+      date_to: query.date_to,
+      as_of_date: asOfDate,
+      sort: query.sort,
+    },
+    now,
+  );
+
+  return {
+    asOfDate: period.as_of,
+    pageSize,
+    maxRows,
+    includeInvoiceLines,
+    insightListLimit,
+    preset: period.preset,
+    year: period.year,
+    dateFrom: period.date_from,
+    dateTo: period.date_to,
+    sort: period.sort,
+    period,
+  };
 }
 
 /**
@@ -160,10 +180,10 @@ export function mapQuickBooksIntelligenceError(err) {
 }
 
 /**
- * Shape a Phase 4B snapshot into the Phase 4C API response contract.
+ * Shape a Phase 4B/4F snapshot into the API response contract.
  *
  * @param {object} snapshot
- * @param {{ maxRows?: number|null, pageSize?: number|null }} [requestMeta]
+ * @param {{ maxRows?: number|null, pageSize?: number|null, period?: object }} [requestMeta]
  */
 export function buildQuickBooksIntelligenceApiResponse(snapshot, requestMeta = {}) {
   if (!snapshot || typeof snapshot !== "object") {
@@ -175,12 +195,14 @@ export function buildQuickBooksIntelligenceApiResponse(snapshot, requestMeta = {
     snapshot.load_meta?.page_size ??
     null;
   const maxRows = requestMeta.maxRows ?? null;
+  const period = snapshot.period ?? requestMeta.period ?? null;
 
   const body = {
     ok: true,
     organization_id: snapshot.organization_id,
     generated_at: snapshot.generated_at,
     as_of_date: snapshot.as_of_date,
+    period,
     metadata: {
       organization_id: snapshot.organization_id,
       generated_at: snapshot.generated_at,
@@ -190,7 +212,19 @@ export function buildQuickBooksIntelligenceApiResponse(snapshot, requestMeta = {
       include_invoice_lines: Boolean(snapshot.load_meta?.include_invoice_lines),
       staging_row_counts: snapshot.load_meta?.staging_row_counts ?? null,
       insight_list_count: Array.isArray(snapshot.insight_list) ? snapshot.insight_list.length : 0,
+      preset: period?.preset ?? null,
+      date_from: period?.date_from ?? null,
+      date_to: period?.date_to ?? null,
+      sort: period?.sort ?? null,
+      is_partial: Boolean(period?.is_partial ?? (maxRows != null && maxRows > 0)),
     },
+    invoice_summary: snapshot.invoice_summary ?? null,
+    payment_summary_period: snapshot.payment_summary_period ?? null,
+    estimate_summary: snapshot.estimate_summary ?? null,
+    sales_order_summary: snapshot.sales_order_summary ?? null,
+    monthly_trend: snapshot.monthly_trend ?? null,
+    top_lists: snapshot.top_lists ?? null,
+    insight_groups: snapshot.insight_groups ?? null,
     ar_summary: snapshot.ar_summary,
     revenue_summary: snapshot.revenue_summary,
     payment_summary: snapshot.payment_summary,
@@ -253,11 +287,17 @@ export function createQuickBooksIntelligenceHandlers(deps) {
           maxRows: parsed.maxRows,
           includeInvoiceLines: parsed.includeInvoiceLines,
           insightListLimit: parsed.insightListLimit,
+          preset: parsed.preset,
+          year: parsed.year,
+          dateFrom: parsed.dateFrom,
+          dateTo: parsed.dateTo,
+          sort: parsed.sort,
         });
 
         const body = buildQuickBooksIntelligenceApiResponse(snapshot, {
           maxRows: parsed.maxRows,
           pageSize: parsed.pageSize,
+          period: snapshot.period ?? parsed.period,
         });
 
         return res.status(200).json(body);
