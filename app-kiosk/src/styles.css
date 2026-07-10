@@ -475,12 +475,16 @@ body {
 .kiosk-card-art {
   position: relative;
   z-index: 1;
-  height: clamp(84px, 12vh, 160px);
+  /* Increased from 12vh/160px → 16vh/200px so photos and swatches have
+     enough vertical space to be legible across a 65-inch showroom. */
+  height: clamp(110px, 16vh, 200px);
   border-radius: var(--radius-lg);
   overflow: hidden;
 }
 
-/* Real stone texture swatches — Elite 100 card */
+/* Stone swatch strip — Elite 100 card and Live Inventory premium slab strip.
+   .kiosk-card-art--premium-slabs is the inventory variant (same layout,
+   different stones: dramatic/dark/warm instead of light-to-dark tonal). */
 .kiosk-card-art--stone {
   display: flex;
   flex-direction: row;
@@ -501,11 +505,42 @@ body {
   border-right: none;
 }
 
-/* Photo-based card art — shared base for catalog / inventory / visualizer */
+/* Photo-based card art — shared base for catalog / visualizer.
+   display:flex enables the two-panel collage layout; rotator images inside
+   each .kiosk-collage-panel are position:absolute so they don't flex. */
 .kiosk-card-art--photo {
   position: relative;
   overflow: hidden;
   background: #1a1c20; /* dark fallback while images load */
+  display: flex;
+  flex-direction: row;
+}
+
+/* Two-panel collage helpers */
+.kiosk-collage-panel {
+  position: relative;
+  overflow: hidden;
+  height: 100%;
+  flex: 1;
+  min-width: 0;
+}
+
+.kiosk-collage-panel--wide  { flex: 3; }
+.kiosk-collage-panel--narrow { flex: 2; }
+
+/* Thin vertical separator between panels */
+.kiosk-collage-divider {
+  width: 2px;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.22);
+  z-index: 3;
+}
+
+/* Slightly brighter divider for the visualizer split — reinforces the
+   "before/after" split metaphor with a hint of Elite red glow */
+.kiosk-collage-divider--vivid {
+  background: rgba(255, 255, 255, 0.55);
+  box-shadow: 0 0 8px rgba(185, 28, 28, 0.35);
 }
 
 /* Rotator images: stacked, crossfade via opacity */

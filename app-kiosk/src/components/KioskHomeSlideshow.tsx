@@ -13,8 +13,8 @@ const SLIDES: Slide[] = [
   {
     id: "elite100",
     eyebrow: "Elite 100 Collection",
-    headline: "170+ premium colors",
-    body: "From soft marble whites to dramatic statement stones — curated exclusively for Elite Stone.",
+    headline: "100 curated colors",
+    body: "From soft marble whites to dramatic statement stones — our curated collection of 100 showroom colors.",
     accent: "stone",
   },
   {

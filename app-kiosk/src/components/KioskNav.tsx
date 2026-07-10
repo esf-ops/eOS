@@ -12,8 +12,8 @@ interface KioskNavProps {
 // All assets are static files copied into app-kiosk/public — no API calls.
 
 /**
- * Real stone texture thumbnails from app-visualizer/public/material-textures/elite100/thumb/
- * Ordered light→dark→warm→cool for visual variety across the strip.
+ * Elite 100 card: light→warm→dark strip — shows tonal range at a glance.
+ * From app-visualizer/public/material-textures/elite100/thumb/
  */
 const STONE_SWATCHES = [
   "/stone/white-dove.jpg",
@@ -25,42 +25,39 @@ const STONE_SWATCHES = [
 ];
 
 /**
- * "Installed" sink-in-countertop photos from app-slab-inventory public product-catalog sinks.
- * These show real products in context - no prices, IDs, or counts.
- */
-const CATALOG_IMAGES = [
-  "/catalog/sink-a.jpg",
-  "/catalog/sink-b.jpg",
-  "/catalog/sink-c.jpg",
-  "/catalog/sink-d.jpg",
-];
-
-/**
- * Premium Elite 100 stone thumbnails used as slab/remnant stand-ins.
- * Ordered to lead with the most dramatic, Group E/F-tier visuals first.
+ * Live Inventory card: premium/dramatic stones that read as "Group E/F" quality.
+ * Ordered dark→warm→metallic→bold-white so adjacent swatches contrast strongly.
  * No inventory counts, slab IDs, pricing, or internal metadata exposed.
  */
-const SLAB_IMAGES = [
-  "/stone/sicilia.jpg",
+const PREMIUM_SLAB_SWATCHES = [
   "/stone/india-black-pearl-polished.jpg",
+  "/stone/sicilia.jpg",
   "/stone/suede-brown-polished.jpg",
   "/stone/silver-pearl-polished.jpg",
   "/stone/carrara-royale.jpg",
-  "/stone/bianco-carrara.jpg",
 ];
 
 /**
- * Kitchen demo-room photos from app-visualizer/public/demo-rooms/
- * Public-safe: they ship with the visualizer app already.
+ * Product Catalog card: "installed" sink-in-countertop photos.
+ * Split into two interleaved sets so the two collage panels crossfade
+ * at different intervals — left and right sides never change simultaneously.
+ * From app-slab-inventory/public/product-catalog/sinks/installed.jpg files.
+ * No prices, product IDs, or inventory data.
  */
-const ROOM_IMAGES = [
-  "/rooms/classic-kitchen.jpg",
-  "/rooms/modern-kitchen.jpg",
-];
+const CATALOG_LEFT = ["/catalog/sink-a.jpg", "/catalog/sink-c.jpg"];
+const CATALOG_RIGHT = ["/catalog/sink-b.jpg", "/catalog/sink-d.jpg"];
+
+/**
+ * Visualizer card: two different kitchen styles shown side-by-side.
+ * This "split" composition reads immediately as "see it different ways."
+ * From app-visualizer/public/demo-rooms/
+ */
+const ROOM_LEFT = "/rooms/classic-kitchen.jpg";
+const ROOM_RIGHT = "/rooms/modern-kitchen.jpg";
 
 // ── Card artwork ─────────────────────────────────────────────────────────────
 
-/** Static stone swatch strip for Elite 100 card — no cycling needed. */
+/** Elite 100 card: 6 stone swatches in a horizontal strip. */
 function StoneSwatchStrip() {
   return (
     <div className="kiosk-card-art kiosk-card-art--stone" aria-hidden>
@@ -78,54 +75,92 @@ function StoneSwatchStrip() {
   );
 }
 
-function CardArt({ accent }: { accent: KioskSection["accent"] }) {
-  if (accent === "stone") {
-    return <StoneSwatchStrip />;
-  }
+/**
+ * Live Inventory card: 5 premium dramatic stones shown as a swatch strip.
+ * Immediately shows variety — no black rectangle, no waiting for rotation.
+ * Dark, exotic, warm, metallic, bold-white stones communicate premium value.
+ */
+function PremiumSlabStrip() {
+  return (
+    <div className="kiosk-card-art kiosk-card-art--stone kiosk-card-art--premium-slabs" aria-hidden>
+      {PREMIUM_SLAB_SWATCHES.map((src) => (
+        <img
+          key={src}
+          src={src}
+          alt=""
+          className="kiosk-stone-swatch"
+          loading="eager"
+          draggable={false}
+        />
+      ))}
+    </div>
+  );
+}
 
-  if (accent === "catalog") {
-    return (
-      <div className="kiosk-card-art kiosk-card-art--photo kiosk-card-art--catalog" aria-hidden>
+/**
+ * Product Catalog card: two sink-in-countertop photos shown simultaneously.
+ * Left panel (60%) and right panel (40%) crossfade independently on different
+ * intervals so both sides are never changing at the same time.
+ * "Product variety at a glance" — readable from across the showroom.
+ */
+function CatalogCollage() {
+  return (
+    <div className="kiosk-card-art kiosk-card-art--photo kiosk-card-art--catalog" aria-hidden>
+      <div className="kiosk-collage-panel kiosk-collage-panel--wide">
         <KioskCardMediaRotator
-          images={CATALOG_IMAGES}
-          intervalMs={5000}
-          // 30% focuses the crop on the countertop + sink bowl rather than the
-          // lower cabinet face. Sink installed shots are ~960x669 landscape.
-          objectPosition="center 30%"
-          label="Sink and faucet preview"
+          images={CATALOG_LEFT}
+          intervalMs={6000}
+          objectPosition="center 28%"
+          label="Sink preview left"
         />
       </div>
-    );
-  }
-
-  if (accent === "inventory") {
-    return (
-      <div className="kiosk-card-art kiosk-card-art--photo kiosk-card-art--inventory" aria-hidden>
+      <div className="kiosk-collage-divider" aria-hidden />
+      <div className="kiosk-collage-panel kiosk-collage-panel--narrow">
         <KioskCardMediaRotator
-          images={SLAB_IMAGES}
-          intervalMs={4500}
-          objectPosition="center"
-          label="Premium stone slab preview"
+          images={CATALOG_RIGHT}
+          intervalMs={8500}
+          objectPosition="center 32%"
+          label="Sink preview right"
         />
       </div>
-    );
-  }
+    </div>
+  );
+}
 
-  // "visualizer"
+/**
+ * Visualizer card: two kitchen rooms side by side.
+ * The split composition reads immediately as "compare different styles" —
+ * the core idea of the visualizer tool.
+ * The red "Visualize" badge reinforces the interactive CTA.
+ */
+function VisualizerRoomPair() {
   return (
     <div className="kiosk-card-art kiosk-card-art--photo kiosk-card-art--visualizer" aria-hidden>
-      <KioskCardMediaRotator
-        images={ROOM_IMAGES}
-        intervalMs={6000}
-        // 40% targets the counter/island level in a standard kitchen composition.
-        // Kitchen demo photos are 1280x720-852; countertop is in the upper-middle.
-        objectPosition="center 40%"
-        label="Kitchen room preview"
-      />
-      {/* Small "Visualize" accent badge */}
+      <div className="kiosk-collage-panel">
+        <KioskCardMediaRotator
+          images={[ROOM_LEFT]}
+          objectPosition="center 38%"
+          label="Classic kitchen"
+        />
+      </div>
+      <div className="kiosk-collage-divider kiosk-collage-divider--vivid" aria-hidden />
+      <div className="kiosk-collage-panel">
+        <KioskCardMediaRotator
+          images={[ROOM_RIGHT]}
+          objectPosition="center 42%"
+          label="Modern kitchen"
+        />
+      </div>
       <span className="kiosk-card-art-badge" aria-hidden>Visualize</span>
     </div>
   );
+}
+
+function CardArt({ accent }: { accent: KioskSection["accent"] }) {
+  if (accent === "stone") return <StoneSwatchStrip />;
+  if (accent === "catalog") return <CatalogCollage />;
+  if (accent === "inventory") return <PremiumSlabStrip />;
+  return <VisualizerRoomPair />;
 }
 
 // ── Nav grid ─────────────────────────────────────────────────────────────────
