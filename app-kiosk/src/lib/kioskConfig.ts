@@ -78,6 +78,18 @@ function envUrl(value: string | undefined): string {
   return String(value ?? "").trim();
 }
 
+/**
+ * Append ?kiosk=1 (or &kiosk=1) to a URL so that apps which support a kiosk
+ * display mode (e.g. the Elite 100 showroom) can detect they're embedded and
+ * apply kiosk-specific styling (larger touch targets, hidden scroll hints, etc.).
+ * Returns the URL unchanged if it is empty.
+ */
+function withKioskParam(url: string): string {
+  if (!url) return url;
+  const sep = url.includes("?") ? "&" : "?";
+  return `${url}${sep}kiosk=1`;
+}
+
 const VISUALIZER_URL =
   envUrl(import.meta.env.VITE_KIOSK_VISUALIZER_URL) ||
   "https://visualizer.eliteosfab.com";
@@ -96,8 +108,9 @@ export const KIOSK_SECTIONS: KioskSection[] = [
       "Discover the Elite 100 — our curated collection of premium showroom colors, from soft neutrals to dramatic statement stone.",
     actionLabel: "Browse Elite 100",
     kind: "iframe-or-hero",
-    // No hard-coded production URL: set VITE_KIOSK_ELITE100_URL to a public page.
-    url: envUrl(import.meta.env.VITE_KIOSK_ELITE100_URL),
+    // Appends ?kiosk=1 so the Elite 100 page activates its kiosk display mode
+    // (larger cards, hidden scroll-hint gradient, touch-optimised layout).
+    url: withKioskParam(envUrl(import.meta.env.VITE_KIOSK_ELITE100_URL)),
     accent: "stone",
   },
   {
@@ -109,8 +122,8 @@ export const KIOSK_SECTIONS: KioskSection[] = [
       "Explore sinks, faucets, and finishing accessories that complete your countertop — mix and match to design the perfect space.",
     actionLabel: "Open Product Catalog",
     kind: "iframe-or-hero",
-    // No hard-coded production URL: set VITE_KIOSK_PRODUCT_CATALOG_URL.
-    url: envUrl(import.meta.env.VITE_KIOSK_PRODUCT_CATALOG_URL),
+    // Appends ?kiosk=1 so the Product Catalog page activates its kiosk display mode.
+    url: withKioskParam(envUrl(import.meta.env.VITE_KIOSK_PRODUCT_CATALOG_URL)),
     accent: "catalog",
   },
   {

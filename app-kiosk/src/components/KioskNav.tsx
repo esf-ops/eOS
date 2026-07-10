@@ -36,19 +36,17 @@ const CATALOG_IMAGES = [
 ];
 
 /**
- * Elite 100 stone thumbnails reused as slab/remnant stand-ins.
- * Ordered for dramatic contrast: black → gray → beige → white → warm.
+ * Premium Elite 100 stone thumbnails used as slab/remnant stand-ins.
+ * Ordered to lead with the most dramatic, Group E/F-tier visuals first.
  * No inventory counts, slab IDs, pricing, or internal metadata exposed.
  */
 const SLAB_IMAGES = [
-  "/stone/india-black-pearl-polished.jpg",
-  "/stone/classic-gray.jpg",
-  "/stone/antique-gray.jpg",
-  "/stone/bayshore-sand.jpg",
   "/stone/sicilia.jpg",
+  "/stone/india-black-pearl-polished.jpg",
+  "/stone/suede-brown-polished.jpg",
   "/stone/silver-pearl-polished.jpg",
-  "/stone/carrara-classic.jpg",
-  "/stone/white-dove.jpg",
+  "/stone/carrara-royale.jpg",
+  "/stone/bianco-carrara.jpg",
 ];
 
 /**
@@ -91,7 +89,9 @@ function CardArt({ accent }: { accent: KioskSection["accent"] }) {
         <KioskCardMediaRotator
           images={CATALOG_IMAGES}
           intervalMs={5000}
-          objectPosition="center 40%"
+          // 30% focuses the crop on the countertop + sink bowl rather than the
+          // lower cabinet face. Sink installed shots are ~960x669 landscape.
+          objectPosition="center 30%"
           label="Sink and faucet preview"
         />
       </div>
@@ -103,9 +103,9 @@ function CardArt({ accent }: { accent: KioskSection["accent"] }) {
       <div className="kiosk-card-art kiosk-card-art--photo kiosk-card-art--inventory" aria-hidden>
         <KioskCardMediaRotator
           images={SLAB_IMAGES}
-          intervalMs={4000}
+          intervalMs={4500}
           objectPosition="center"
-          label="Stone slab preview"
+          label="Premium stone slab preview"
         />
       </div>
     );
@@ -117,7 +117,9 @@ function CardArt({ accent }: { accent: KioskSection["accent"] }) {
       <KioskCardMediaRotator
         images={ROOM_IMAGES}
         intervalMs={6000}
-        objectPosition="center 55%"
+        // 40% targets the counter/island level in a standard kitchen composition.
+        // Kitchen demo photos are 1280x720-852; countertop is in the upper-middle.
+        objectPosition="center 40%"
         label="Kitchen room preview"
       />
       {/* Small "Visualize" accent badge */}

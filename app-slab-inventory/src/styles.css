@@ -1137,18 +1137,18 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 .e100-rail-wrap {
   position: relative;
 }
-/* No left fade: at scroll=0 there is no off-screen content to the left, and a
-   left-edge mask visually covers the first card (Carrara Classic, etc.).
-   The right fade is the meaningful scroll hint — it signals more cards ahead. */
+/* Scroll hint: right-edge fade signals more cards ahead.
+   Changed from solid-60%-white to a true gradient so it reads as a fade rather
+   than an opaque block. Kiosk mode hides it entirely (handled below). */
 .e100-rail-wrap::after {
   content: "";
   position: absolute;
   top: 0; bottom: 24px;
   right: 0;
-  width: 56px;
+  width: 64px;
   z-index: 2;
   pointer-events: none;
-  background: linear-gradient(to left, #ffffff 60%, transparent);
+  background: linear-gradient(to left, rgba(255, 255, 255, 0.92) 0%, transparent 100%);
 }
 
 .e100-rail {
@@ -4298,6 +4298,12 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
 
 .e100-public-kiosk .e100-public-footer {
   font-size: 0.85rem;
+}
+
+/* In kiosk/Arreya mode the right-edge scroll hint is distracting;
+   the touch swipe gesture is the natural scroll affordance. */
+.e100-public-kiosk .e100-rail-wrap::after {
+  display: none;
 }
 
 /* Public Elite 100 color lightbox (showroom-safe detail view) */
