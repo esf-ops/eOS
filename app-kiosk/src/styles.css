@@ -48,6 +48,14 @@
   --font: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
   --font-display: "Fraunces", "Inter", Georgia, serif;
 
+  /* Hero headline: Copperplate engraved-capitals stack.
+     Priority: Copperplate (macOS/iOS) → Cinzel (ChromeOS, Google Fonts) →
+     Georgia (universal fallback). Apply only to the large hero heading —
+     body/card copy stays with --font for readability. */
+  --font-display-hero:
+    Copperplate, "Copperplate Gothic Light", "Copperplate Gothic",
+    Cinzel, "Trajan Pro", Georgia, serif;
+
   /* Animation timing — reference these instead of hardcoding easing strings */
   --ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
@@ -147,8 +155,11 @@ body {
   position: absolute;
   border-radius: 50%;
   filter: blur(80px);
-  opacity: 0.55;
-  animation: kiosk-float 24s ease-in-out infinite;
+  /* Reduced opacity — orbs are ambiance, not a feature.
+     0.40 (from 0.55) keeps the warmth without washing out card legibility. */
+  opacity: 0.40;
+  /* Slowed from 24s → 36s — calmer drift, lower GPU scheduling pressure. */
+  animation: kiosk-float 36s ease-in-out infinite;
 }
 
 .kiosk-bg-orb-1 {
@@ -447,11 +458,16 @@ body {
 
 .kiosk-home-headline {
   margin: 0;
-  font-family: var(--font-display);
+  /* Copperplate Gothic stack — engraved capitals that echo ESF branding.
+     On ChromeOS kiosks Cinzel (Google Font) provides the same classical feel.
+     Copperplate renders at mixed case natively; weight is best at 400–600. */
+  font-family: var(--font-display-hero);
   font-weight: 600;
   font-size: var(--fs-headline);
-  line-height: 1.02;
-  letter-spacing: -0.01em;
+  line-height: 1.08;
+  /* Copperplate/Cinzel are already slightly wider-tracked by design;
+     a small positive offset looks intentional vs the cramped default. */
+  letter-spacing: 0.025em;
   color: var(--ink);
 }
 
@@ -1173,15 +1189,29 @@ body {
 /* ── Home slideshow ───────────────────────────────────────────────────── */
 .kiosk-slideshow {
   margin-top: clamp(22px, 2.8vh, 44px);
+  /* Reserve height equal to the tallest possible slide + dots row.
+     This prevents the left column from shifting when slide content changes.
+     The actual slide button also has min-height below — both are needed
+     because the slides use position:static (normal flow), not absolute. */
+  min-height: clamp(210px, 28vh, 300px);
 }
 
 .kiosk-slide {
+  position: relative; /* contain ::before */
   display: flex;
   flex-direction: column;
   gap: 8px;
+  /* min-height stabilises the card height across all slides.
+     Different slides have different headline/body lengths; without a fixed
+     baseline the card collapses on short slides, causing the left column
+     to shift visibly.  Use the tallest expected slide as the floor. */
+  min-height: clamp(160px, 22vh, 240px);
   padding: clamp(16px, 2vh, 26px) clamp(18px, 2vw, 30px);
   border-radius: var(--radius-lg);
-  background: var(--surface);
+  /* backdrop-filter moved to ::before — same pattern as .kiosk-card.
+     Blur directly on this element would promote it to a GPU compositing layer
+     and rasterize all child text at texture resolution, causing blurry rendering. */
+  background: rgba(255, 255, 255, 0.88);
   border: 1.5px solid var(--line-strong);
   box-shadow: var(--shadow-glass);
   text-align: left;
@@ -1192,9 +1222,18 @@ body {
               background 0.2s;
   opacity: 0;
   transform: translateY(6px);
-  /* Glass highlight */
+}
+
+/* Frosted-glass blur on pseudo-element — keeps text in a normal non-composited layer */
+.kiosk-slide::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+  z-index: 0;
+  pointer-events: none;
 }
 
 .kiosk-slide--visible {
@@ -1203,7 +1242,18 @@ body {
 }
 
 .kiosk-slide:active {
-  background: var(--surface-strong);
+  background: rgba(248, 246, 244, 0.92);
+}
+
+/* All direct slide text children sit above the blur ::before (z-index:0).
+   position:relative + z-index:1 lifts them into the normal stacking order
+   above the positioned pseudo-element without creating a GPU layer. */
+.kiosk-slide-eyebrow,
+.kiosk-slide-headline,
+.kiosk-slide-body,
+.kiosk-slide-cue {
+  position: relative;
+  z-index: 1;
 }
 
 .kiosk-slide-eyebrow {
@@ -1229,6 +1279,9 @@ body {
   font-size: clamp(0.88rem, 1vw, 1.15rem);
   color: var(--ink-soft);
   line-height: 1.45;
+  /* Grow to fill available space so short body text doesn't collapse the card;
+     pushes the Explore cue toward the bottom regardless of headline length. */
+  flex: 1;
 }
 
 .kiosk-slide-cue {
@@ -1344,30 +1397,35 @@ body {
 
 /* ── Keyframes ──────────────────────────────────────────────────────────── */
 
-/* Stagger entrance — elements rise softly into place */
+/* Stagger entrance — elements rise into place.
+   Opacity is intentionally omitted: the parent .kiosk-view handles the overall
+   fade (0 → 1 over 0.6s), so children only need a translateY slide.
+   Without opacity in the keyframe + using fill-mode:backwards (not both/forwards),
+   Chrome can fully de-promote the element's compositing layer after the animation
+   ends, allowing text to render via the normal high-quality font pipeline. */
 @keyframes kiosk-reveal-up {
-  from { opacity: 0; transform: translateY(16px); }
-  to   { opacity: 1; transform: none; }
+  from { transform: translateY(16px); }
+  to   { transform: none; }
 }
 
-/* Topbar slides in from above */
+/* Topbar slides in from above — same opacity-free approach */
 @keyframes kiosk-reveal-down {
-  from { opacity: 0; transform: translateY(-14px); }
-  to   { opacity: 1; transform: none; }
+  from { transform: translateY(-14px); }
+  to   { transform: none; }
 }
 
-/* Ken Burns: slow cinematic zoom — one arc per image display period.
-   Pure scale (no translate) so object-position cropping is preserved
-   for every card type (stone, kitchen, sink). */
+/* Ken Burns: very subtle breathing zoom — keeps images alive without
+   cropping edges or stressing GPU on kiosk hardware.
+   2% total range over 10s is barely perceptible but removes the "static" feel.
+   (Previous 7% caused noticeable cropping and frame-rate cost on 1080p kiosks.) */
 @keyframes kiosk-ken-burns {
   0%   { transform: scale(1.0); }
-  100% { transform: scale(1.07); }
+  100% { transform: scale(1.02); }
 }
 
-/* Swatch sheen: light reflection traveling left-to-right.
-   Uses translateX so the GPU handles the move with zero paint cost.
-   The pause between sweeps is built into the keyframe: 80% of duration
-   spent off-screen to the right, so the sweep fires once every 10s. */
+/* Swatch sheen: subtle light reflection traveling left-to-right.
+   Fires once every ~14s (20% of 14s = 2.8s sweep, 80% off-screen).
+   Peak opacity reduced to 0.22 (from 0.36) — just a whisper of shine. */
 @keyframes kiosk-sheen {
   0%   { transform: translateX(-160%); }
   20%  { transform: translateX(160%); }
@@ -1384,44 +1442,49 @@ body {
 
 /* ── Home page entrance stagger ─────────────────────────────────────────── */
 /* Triggered when .kiosk-view gains .kiosk-view--in.
-   animation-fill-mode:both means elements start in the "from" state
-   before their delay fires — the parent's own opacity handles visibility,
-   so child starts invisible only while parent is also invisible. */
+   fill-mode:backwards: element is at the "from" (translateY) state during the
+   delay, so it holds its shifted position until the animation fires — no jump.
+   After the animation ends the fill is released and the element returns to its
+   normal CSS state (transform:none, opacity:1 by default).  This is the key
+   difference from fill-mode:both/forwards: Chrome removes the element from the
+   animation cascade and can de-promote its GPU compositing layer, restoring
+   sharp font rendering.  The parent .kiosk-view opacity handles the overall
+   fade so each child only animates transform, which is much cheaper. */
 
 .kiosk-view--in .kiosk-topbar {
-  animation: kiosk-reveal-down 0.7s var(--ease-spring) 0.08s both;
+  animation: kiosk-reveal-down 0.7s var(--ease-spring) 0.08s backwards;
 }
 
 .kiosk-view--in .kiosk-home-headline {
-  animation: kiosk-reveal-up 0.75s var(--ease-spring) 0.22s both;
+  animation: kiosk-reveal-up 0.75s var(--ease-spring) 0.22s backwards;
 }
 
 .kiosk-view--in .kiosk-home-subhead {
-  animation: kiosk-reveal-up 0.7s var(--ease-spring) 0.33s both;
+  animation: kiosk-reveal-up 0.7s var(--ease-spring) 0.33s backwards;
 }
 
 .kiosk-view--in .kiosk-slideshow {
-  animation: kiosk-reveal-up 0.7s var(--ease-spring) 0.45s both;
+  animation: kiosk-reveal-up 0.7s var(--ease-spring) 0.45s backwards;
 }
 
 /* Cards stagger in left-to-right, top-to-bottom (grid order) */
 .kiosk-view--in .kiosk-card:nth-child(1) {
-  animation: kiosk-reveal-up 0.8s var(--ease-spring) 0.16s both;
+  animation: kiosk-reveal-up 0.8s var(--ease-spring) 0.16s backwards;
 }
 .kiosk-view--in .kiosk-card:nth-child(2) {
-  animation: kiosk-reveal-up 0.8s var(--ease-spring) 0.25s both;
+  animation: kiosk-reveal-up 0.8s var(--ease-spring) 0.25s backwards;
 }
 .kiosk-view--in .kiosk-card:nth-child(3) {
-  animation: kiosk-reveal-up 0.8s var(--ease-spring) 0.34s both;
+  animation: kiosk-reveal-up 0.8s var(--ease-spring) 0.34s backwards;
 }
 .kiosk-view--in .kiosk-card:nth-child(4) {
-  animation: kiosk-reveal-up 0.8s var(--ease-spring) 0.43s both;
+  animation: kiosk-reveal-up 0.8s var(--ease-spring) 0.43s backwards;
 }
 
 /* ── Elite 100 swatch sheen ─────────────────────────────────────────────── */
-/* A soft light reflection glides across the swatch strip every 10s.
-   Works by moving a gradient overlay — no images or JS involved.
-   Position: absolute inside the already-positioned .kiosk-card-art parent. */
+/* A barely-visible light reflection glides across the swatch strip.
+   Peak brightness reduced to 0.20 (from 0.36) — just enough to feel
+   premium without drawing attention.  Interval extended to 14s. */
 .kiosk-card-art--stone::before {
   content: "";
   position: absolute;
@@ -1430,14 +1493,13 @@ body {
   background: linear-gradient(
     105deg,
     transparent 25%,
-    rgba(255, 255, 255, 0.26) 44%,
-    rgba(255, 255, 255, 0.36) 50%,
-    rgba(255, 255, 255, 0.26) 56%,
+    rgba(255, 255, 255, 0.14) 44%,
+    rgba(255, 255, 255, 0.20) 50%,
+    rgba(255, 255, 255, 0.14) 56%,
     transparent 75%
   );
   transform: translateX(-160%);
-  /* Delay 5s on load so first sweep doesn't happen immediately on entrance */
-  animation: kiosk-sheen 10s ease-in-out 5s infinite;
+  animation: kiosk-sheen 14s ease-in-out 5s infinite;
   pointer-events: none;
   z-index: 4;
 }
