@@ -185,6 +185,88 @@ body {
   animation-duration: 28s;
 }
 
+/* ── ESF facility aerial photo (home screen only) ──────────────────────── */
+
+/*
+ * The facility photo gives the home screen an authentic Elite Stone identity.
+ * It is shown only when data-view="home" (set by KioskShell) — section views
+ * revert to the clean ambient backdrop automatically.
+ *
+ * Design rationale:
+ *  - blur(1.5px) softens the 1024×576 source when scaled to 1920×1080 and
+ *    shifts the treatment from "photo behind text" to "environmental surface."
+ *  - The wash gradient is the primary readability mechanism: nearly opaque on
+ *    the left (headline column), semi-transparent toward the center so the
+ *    building is visible but not distracting near the card grid.
+ *  - The slow-zoom animation (3% over 30s) gives the backdrop a "breathing"
+ *    quality without perceptibly moving — disabled on prefers-reduced-motion.
+ *  - Opacity transitions on both photo and wash prevent a jarring snap when
+ *    navigating home from a section.
+ *
+ * Image: 1024×576 JPEG (exact 16:9), fills 1920×1080 with zero cropping.
+ * No WebP variant required at this resolution on kiosk hardware.
+ */
+.kiosk-bg-facility {
+  position: absolute;
+  /* Extend 5px beyond viewport so blur(1.5px) never shows a transparent edge */
+  inset: -5px;
+  background-image: url("/backgrounds/esf-facility-aerial.jpg");
+  background-size: cover;
+  background-position: center 40%;
+  background-repeat: no-repeat;
+  /* Softens upscale artifacts; shifts photo into "environmental" feel */
+  filter: blur(1.5px);
+  /* Very slow cinematic breathe — 3% zoom over 30s, barely perceptible */
+  animation: kiosk-bg-breathe 30s ease-in-out infinite alternate;
+  /* Hidden on section views; fades in when home is shown */
+  opacity: 0;
+  transition: opacity 1.1s ease;
+  will-change: opacity, transform;
+}
+
+/*
+ * Wash overlay — controls how much photo shows through to the content layer.
+ * Two gradients compose (first on top):
+ *   1. Soft vignette: darkens corners/edges with warm porcelain
+ *   2. Horizontal gradient: strong porcelain left (headline) → lighter right (cards)
+ * The result: building visible ~35–45% in the center-right, nearly hidden left.
+ */
+.kiosk-bg-facility-wash {
+  position: absolute;
+  inset: 0;
+  background:
+    /* Vignette: softens all four edges with warm porcelain */
+    radial-gradient(
+      ellipse 96% 82% at 54% 46%,
+      transparent 18%,
+      rgba(245, 243, 240, 0.20) 48%,
+      rgba(245, 243, 240, 0.52) 75%,
+      rgba(245, 243, 240, 0.75) 100%
+    ),
+    /* Horizontal wash: headline side near-opaque, card side breathes */
+    linear-gradient(
+      to right,
+      rgba(248, 247, 245, 0.97) 0%,
+      rgba(246, 244, 241, 0.88) 22%,
+      rgba(244, 242, 238, 0.60) 50%,
+      rgba(245, 243, 240, 0.74) 100%
+    );
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 1.1s ease;
+}
+
+/* Home view: reveal both photo and wash simultaneously */
+.kiosk-app[data-view="home"] .kiosk-bg-facility,
+.kiosk-app[data-view="home"] .kiosk-bg-facility-wash {
+  opacity: 1;
+}
+
+@keyframes kiosk-bg-breathe {
+  from { transform: scale(1.0); }
+  to   { transform: scale(1.03); }
+}
+
 /* Faint stone veining sweeping across the backdrop. */
 .kiosk-bg-veins {
   position: absolute;
@@ -1222,6 +1304,20 @@ body {
   .kiosk-rotator-img--active { opacity: 1; }
 
   /* ── New animation overrides (prefers-reduced-motion) ── */
+
+  /* Disable facility photo breathe animation; keep opacity fade (it's slow
+     enough to be non-vestibular, but disable just to be safe) */
+  .kiosk-bg-facility {
+    animation: none !important;
+    transition: none !important;
+  }
+  .kiosk-bg-facility-wash {
+    transition: none !important;
+  }
+  .kiosk-app[data-view="home"] .kiosk-bg-facility,
+  .kiosk-app[data-view="home"] .kiosk-bg-facility-wash {
+    opacity: 1;
+  }
 
   /* Disable all stagger entrance animations */
   .kiosk-topbar,
