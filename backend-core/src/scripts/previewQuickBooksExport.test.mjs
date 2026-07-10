@@ -42,14 +42,17 @@ function captureConsoleLog(fn) {
 }
 
 // ── formatEntitySummaryLine: fields are always separated by exactly one space ─
+// Uses production-matching counts (312 files, 31127 records) from the
+// 2026-07-10 full-materialized archive so the assertion covers the exact values
+// that appeared fused in the real CLI output (terminal line-wrap artefact).
 {
   const line = formatEntitySummaryLine("sales-orders", {
     inManifest: true,
     folderExists: true,
-    manifestBatchCount: 310,
-    manifestRecordCount: 30989,
-    discoveredJsonFileCount: 310,
-    discoveredRecordCount: 30989,
+    manifestBatchCount: 312,
+    manifestRecordCount: 31127,
+    discoveredJsonFileCount: 312,
+    discoveredRecordCount: 31127,
     manifestErrorCount: 0,
     unreadableFileCount: 0,
     unrecognizedShapeFileCount: 0,
@@ -58,11 +61,13 @@ function captureConsoleLog(fn) {
 
   assert.equal(
     line,
-    "  sales-orders: inManifest=true folderExists=true manifestBatchCount=310 manifestRecordCount=30989 " +
-      "discoveredJsonFileCount=310 discoveredRecordCount=30989 manifestErrorCount=0 unreadableFileCount=0 " +
+    "  sales-orders: inManifest=true folderExists=true manifestBatchCount=312 manifestRecordCount=31127 " +
+      "discoveredJsonFileCount=312 discoveredRecordCount=31127 manifestErrorCount=0 unreadableFileCount=0 " +
       "unrecognizedShapeFileCount=0 selfReportedOnlyFileCount=0"
   );
-  assert.match(line, /discoveredJsonFileCount=310 discoveredRecordCount=30989/);
+  // Specifically assert the space that appeared missing in the real terminal output.
+  assert.match(line, /discoveredJsonFileCount=312 discoveredRecordCount=31127/);
+  assert.doesNotMatch(line, /discoveredJsonFileCount=312discoveredRecordCount/);
   console.log("ok: formatEntitySummaryLine separates every field with exactly one space");
 }
 
@@ -90,6 +95,7 @@ function captureConsoleLog(fn) {
 // ── buildSummaryOutputLines: the sales-orders line in the real assembled output is correct ─
 // (this is the single source of truth `printSummary` logs from — no separate inline
 // template-literal path exists that could drift out of sync with formatEntitySummaryLine)
+// Production-matching counts (312/31127) from the 2026-07-10 full-materialized archive.
 {
   const fakeSummary = {
     exportFolderPath: "/fake/export/path",
@@ -99,17 +105,17 @@ function captureConsoleLog(fn) {
     startedAt: "2026-07-01T00:00:00Z",
     completedAt: "2026-07-01T01:00:00Z",
     totalEntityTypesInManifest: 1,
-    totalManifestRecordCount: 30989,
-    totalDiscoveredRecordCount: 30989,
+    totalManifestRecordCount: 31127,
+    totalDiscoveredRecordCount: 31127,
     manifestTopLevelErrorCount: 0,
     perEntity: {
       "sales-orders": {
         inManifest: true,
         folderExists: true,
-        manifestBatchCount: 310,
-        manifestRecordCount: 30989,
-        discoveredJsonFileCount: 310,
-        discoveredRecordCount: 30989,
+        manifestBatchCount: 312,
+        manifestRecordCount: 31127,
+        discoveredJsonFileCount: 312,
+        discoveredRecordCount: 31127,
         manifestErrorCount: 0,
         unreadableFileCount: 0,
         unrecognizedShapeFileCount: 0,
@@ -124,12 +130,16 @@ function captureConsoleLog(fn) {
   const lines = buildSummaryOutputLines(fakeSummary);
   const salesOrdersLine = lines.find((line) => line.includes("sales-orders:"));
   assert.ok(salesOrdersLine, "expected a sales-orders line in the assembled output");
-  assert.match(salesOrdersLine, /discoveredJsonFileCount=310 discoveredRecordCount=30989/);
-  assert.doesNotMatch(salesOrdersLine, /discoveredJsonFileCount=310discoveredRecordCount/);
+  assert.match(salesOrdersLine, /discoveredJsonFileCount=312 discoveredRecordCount=31127/);
+  assert.doesNotMatch(salesOrdersLine, /discoveredJsonFileCount=312discoveredRecordCount/);
   console.log("ok: buildSummaryOutputLines assembles a correctly spaced sales-orders line");
 }
 
 // ── printSummary: the actual console.log output (what the real CLI prints) is correct ─
+// Production-matching counts (312/31127) from the 2026-07-10 full-materialized archive.
+// This is the authoritative test: it captures what console.log actually emits and
+// asserts the exact string, including the space between discoveredJsonFileCount=312
+// and discoveredRecordCount=31127 that appeared absent in the real terminal output.
 {
   const fakeSummary = {
     exportFolderPath: "/fake/export/path",
@@ -139,17 +149,17 @@ function captureConsoleLog(fn) {
     startedAt: "2026-07-01T00:00:00Z",
     completedAt: "2026-07-01T01:00:00Z",
     totalEntityTypesInManifest: 1,
-    totalManifestRecordCount: 30989,
-    totalDiscoveredRecordCount: 30989,
+    totalManifestRecordCount: 31127,
+    totalDiscoveredRecordCount: 31127,
     manifestTopLevelErrorCount: 0,
     perEntity: {
       "sales-orders": {
         inManifest: true,
         folderExists: true,
-        manifestBatchCount: 310,
-        manifestRecordCount: 30989,
-        discoveredJsonFileCount: 310,
-        discoveredRecordCount: 30989,
+        manifestBatchCount: 312,
+        manifestRecordCount: 31127,
+        discoveredJsonFileCount: 312,
+        discoveredRecordCount: 31127,
         manifestErrorCount: 0,
         unreadableFileCount: 0,
         unrecognizedShapeFileCount: 0,
@@ -166,10 +176,13 @@ function captureConsoleLog(fn) {
   assert.ok(salesOrdersLine, "expected printSummary to have logged a sales-orders line");
   assert.equal(
     salesOrdersLine,
-    "  sales-orders: inManifest=true folderExists=true manifestBatchCount=310 manifestRecordCount=30989 " +
-      "discoveredJsonFileCount=310 discoveredRecordCount=30989 manifestErrorCount=0 unreadableFileCount=0 " +
+    "  sales-orders: inManifest=true folderExists=true manifestBatchCount=312 manifestRecordCount=31127 " +
+      "discoveredJsonFileCount=312 discoveredRecordCount=31127 manifestErrorCount=0 unreadableFileCount=0 " +
       "unrecognizedShapeFileCount=0 selfReportedOnlyFileCount=0"
   );
+  // Belt-and-suspenders: explicitly assert the space that appeared missing in real terminal output.
+  assert.match(salesOrdersLine, /discoveredJsonFileCount=312 discoveredRecordCount=31127/);
+  assert.doesNotMatch(salesOrdersLine, /discoveredJsonFileCount=312discoveredRecordCount/);
   console.log("ok: printSummary logs a correctly spaced sales-orders line (the actual CLI output path)");
 }
 
