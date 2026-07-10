@@ -13,15 +13,16 @@ This mirrors the pattern already used for Moraware (`docs/eliteos/moraware-sync-
 
 `External system → local read-only extract → normalized staging → organization-scoped facts → heads`
 
-## Current Phase: Phase 4A — Intelligence Read Layer (post-staging import)
+## Current Phase: Phase 4B — Intelligence Supabase Read Repository
 
-**Latest delivered:** Phase 4A backend-core read models + deterministic insights over
-org-scoped staging facts (no UI, no AI, no writeback). See **Phase 4A** below.
+**Latest delivered:** Phase 4B backend-core Supabase read repository + executive
+intelligence snapshot service over org-scoped staging rows (mocked tests only; no
+UI, no AI, no writeback). See **Phase 4B** below.
 
 **Also in place:** Phase 1 local export preview; Phase 2 staging schema draft;
-Phase 2B dry-run; Phase 3A–3C staging import (orchestrator + fake/Supabase repos + CLI).
+Phase 2B dry-run; Phase 3A–3C staging import; Phase 4A pure read/insight layer.
 
-**What does NOT exist yet (by design for 4A):**
+**What does NOT exist yet (by design for 4B):**
 
 - No HTTP routes exposing QuickBooks intelligence yet.
 - No Admin / frontend UI for QuickBooks AR or revenue.
@@ -538,7 +539,7 @@ as provenance only.
 
 | Module | Role |
 |--------|------|
-| `quickBooksIntelligenceFacts.js` | Extract typed facts from staging rows (amounts/dates/opaque IDs from named columns + `raw_payload`). Never returns `raw_payload`, names, addresses, memos, or RefNumber. |
+| `quickBooksIntelligenceFacts.js` | Extract typed facts from staging rows (amounts/dates/opaque IDs from named columns + `raw_payload`). Includes invoice-line opaque facts. Never returns `raw_payload`, names, addresses, memos, or RefNumber. |
 | `quickBooksIntelligenceDataset.js` | Org-scope + natural-key dedupe → sanitized fact dataset. In-memory source for tests / future DI. No Supabase client in this phase. |
 | `quickBooksIntelligenceRead.js` | Deterministic aggregates: customer revenue, invoice aging/AR, payment history, estimate/SO/invoice flow, sales-rep summary, customer activity trend. |
 | `quickBooksIntelligenceInsights.js` | Deterministic insights: overdue AR risks, slow-paying customers, high-value customers, dormant customers, estimate-to-invoice leakage, unpaid invoice risk. |
@@ -552,16 +553,55 @@ as provenance only.
 - Wire future HTTP routes through backend-core only (service role / server auth);
   never grant `anon`/`authenticated` SELECT on staging tables.
 
-**Out of scope for 4A:** Supabase read repository, HTTP routes, Admin UI, AI
-summaries, prepared-facts tables, connector changes, schema changes.
+**Out of scope for 4A:** Supabase read repository (delivered in 4B), HTTP routes,
+Admin UI, AI summaries, prepared-facts tables, connector changes, schema changes.
 
 **Tests:** `npm run qb:test` includes `quickBooksIntelligence.test.mjs`.
 
-### Phase 4B — Admin Review UI (future)
+### Phase 4B — QuickBooks Intelligence Supabase Read Repository
+
+**Status:** Implemented. Backend-only. Injected `getSupabase` DI (same pattern as
+Phase 3B staging write repo). No schema changes. No connector changes. No live
+import in tests.
+
+**Why:** Phase 4A is pure logic over in-memory staging-shaped rows. Production
+heads need a backend-core repository that page-reads `brain_quickbooks_*` for an
+`organization_id`, extracts facts server-side (including `raw_payload` where
+amounts live), and never returns `raw_payload` to API/front-end consumers.
+
+**Current-row rule (unchanged):** Query by `organization_id` only — **not** a
+single `sync_run_id`. Unique keys already keep one current row per natural key.
+
+**Modules:**
+
+| Module | Role |
+|--------|------|
+| `quickBooksIntelligenceSupabaseRepository.js` | Paginated org-scoped selects; `loadCustomers` / `loadInvoices` / `loadInvoiceLines` / `loadPayments` / `loadEstimates` / `loadSalesOrders` / `loadSalesReps`; `loadOrgCurrentDataset`. Default page size 500 (max 2000). Optional `maxRows`. |
+| `quickBooksIntelligenceService.js` | `loadExecutiveIntelligenceSnapshot` — AR, revenue, payment, estimate/SO/invoice flow, sales-rep, activity trend, insights + flattened `insight_list`. |
+| `quickBooksIntelligenceSupabaseRepository.test.mjs` | Mocked Supabase only; asserts org scope, pagination, no `raw_payload`/PII/secret leakage. |
+
+**Invoice lines:** Loaders exist. Executive snapshot omits invoice lines by default
+(`includeInvoiceLines: false`) because Phase 4A aggregates do not consume them and
+line tables are large (~350k+). Line selects omit `raw_payload` by default (opaque
+named columns only); opt in with `includeRawPayload` / `includeLineRawPayload`.
+
+**Safety:**
+
+- Repository never constructs a Supabase client or reads env.
+- Errors expose only a safe `code` + generic message.
+- Public outputs pass `assertNoRawPayload`.
+- Chunked `.range()` reads avoid large single-statement timeouts.
+
+**Out of scope for 4B:** HTTP routes, Admin UI, AI, prepared-facts promotion,
+connector/schema changes.
+
+**Tests:** `npm run qb:test` includes `quickBooksIntelligenceSupabaseRepository.test.mjs`.
+
+### Phase 4C — Admin Review UI (future)
 
 System Admin (or a dedicated QuickBooks Admin panel) surfaces sync health, per-entity
 row counts, data-quality findings, and recent errors — read-only, admin-gated, no raw
-`raw_payload` dumped to the browser. Intelligence read models from Phase 4A are the
+`raw_payload` dumped to the browser. Intelligence snapshots from Phase 4B are the
 intended source for AR/revenue summaries (not direct staging queries).
 
 ### Phase 5 — Scheduled Connector Upload with Scoped Token

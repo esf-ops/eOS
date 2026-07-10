@@ -286,6 +286,41 @@ export function extractSalesRepFact(stagingRow) {
 }
 
 /**
+ * @typedef {{
+ *   qb_txn_id: string,
+ *   line_seq_number: number,
+ *   qb_txn_line_id: string|null,
+ *   qb_item_list_id: string|null,
+ *   line_type: string|null,
+ *   txn_date: string|null,
+ * }} QbInvoiceLineFact
+ */
+
+/**
+ * Opaque invoice-line fact. Prefers named staging columns; does not surface
+ * descriptions, quantities, or amounts (those stay in raw_payload server-side).
+ *
+ * @param {object} stagingRow
+ * @returns {QbInvoiceLineFact|null}
+ */
+export function extractInvoiceLineFact(stagingRow) {
+  if (!stagingRow || typeof stagingRow !== "object") return null;
+  const qbTxnId = parseOpaqueId(stagingRow.qb_txn_id);
+  if (!qbTxnId) return null;
+  const seq = stagingRow.line_seq_number;
+  if (typeof seq !== "number" || !Number.isInteger(seq) || seq < 0) return null;
+  const payload = payloadOf(stagingRow);
+  return {
+    qb_txn_id: qbTxnId,
+    line_seq_number: seq,
+    qb_txn_line_id: parseOpaqueId(stagingRow.qb_txn_line_id) ?? parseOpaqueId(payload?.TxnLineID),
+    qb_item_list_id: parseOpaqueId(stagingRow.qb_item_list_id) ?? parseRefListId(payload?.ItemRef),
+    line_type: parseOpaqueId(stagingRow.line_type) ?? parseOpaqueId(payload?.["@elementName"]) ?? null,
+    txn_date: parseQbDate(stagingRow.txn_date) ?? parseQbDate(payload?.TxnDate),
+  };
+}
+
+/**
  * Assert a value suitable for frontend/API consumers never carries raw_payload.
  *
  * @param {unknown} value
