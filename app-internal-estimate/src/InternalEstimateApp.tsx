@@ -4599,29 +4599,6 @@ export default function InternalEstimateApp() {
             >
               Email estimate
             </button>
-            {/* Show a persistent inline reason whenever Print/Email are blocked. */}
-            {customerOutputBlockReason ? (
-              <>
-                <p className="ie-output-block-msg" role="status">
-                  {customerOutputBlockReason}
-                </p>
-                {/* Dirty-state sub-diagnostic — visible to estimators, not customer-facing. */}
-                {(revisionDirty || Boolean(revisionNoteDraft.trim())) &&
-                  (customerOutputBlockReason === "Save your changes before printing or emailing the estimate.") ? (
-                  <p className="ie-output-block-msg-detail" role="status">
-                    {revisionDirty && revisionNoteDraft.trim()
-                      ? "Quote has unsaved edits and a pending revision note."
-                      : revisionDirty
-                        ? "Quote has unsaved edits since the last save."
-                        : "A revision note is pending — save to include it."}
-                  </p>
-                ) : null}
-              </>
-            ) : customerOutputBlockMsg ? (
-              <p className="ie-output-block-msg" role="alert">
-                {customerOutputBlockMsg}
-              </p>
-            ) : null}
             {urlQuoteId ? (
               hydratedIsCurrentRevision === false ? (
                 <button
@@ -4667,6 +4644,30 @@ export default function InternalEstimateApp() {
             )}
           </div>
         </div>
+
+        {/* Warning strip — rendered as a compact row below the button row, not inside the cluster. */}
+        {(customerOutputBlockReason || customerOutputBlockMsg) ? (
+          <div className="ie-sticky-warn-row" role="status" aria-live="polite">
+            <div className="ie-sticky-warn-inner">
+              <span className="ie-sticky-warn-icon" aria-hidden>⚠</span>
+              <span className="ie-sticky-warn-text">
+                {customerOutputBlockReason || customerOutputBlockMsg}
+              </span>
+              {/* Dirty-state sub-diagnostic — visible to estimators, never customer-facing. */}
+              {customerOutputBlockReason === "Save your changes before printing or emailing the estimate." &&
+              (revisionDirty || Boolean(revisionNoteDraft.trim())) ? (
+                <span className="ie-sticky-warn-detail">
+                  {revisionDirty && revisionNoteDraft.trim()
+                    ? "Unsaved edits and a pending revision note."
+                    : revisionDirty
+                      ? "Unsaved edits since last save."
+                      : "Revision note pending — save to include it."}
+                </span>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
         {submitMsg ? (
           <p className={`ie-sticky-save-msg${submitDiagnostic ? " is-error" : " is-ok"}`} role="status">
             {submitMsg}
