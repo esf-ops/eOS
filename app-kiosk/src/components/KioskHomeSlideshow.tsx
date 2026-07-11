@@ -40,7 +40,7 @@ const SLIDES: Slide[] = [
   },
 ];
 
-const SLIDE_DURATION_MS = 5500;
+const SLIDE_DURATION_MS = 10_000; // 10 s per slide — readable on a kiosk screen
 const FADE_DURATION_MS = 450;
 
 function usePrefersReducedMotion(): boolean {
