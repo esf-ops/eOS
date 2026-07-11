@@ -1441,6 +1441,7 @@ export default function InternalEstimateApp() {
     if (!sessionToken) {
       runLocalFromDrafts();
       setBackendCalcOk(false);
+      setCalcError("Sign in to run a backend calculation. Showing local preview math — sign in and click Calculate again to verify line items.");
       setCalcBusy(false);
       return;
     }
@@ -1455,7 +1456,17 @@ export default function InternalEstimateApp() {
     }
     if (token !== sessionToken) setSessionToken(token);
 
-    const payload = buildCalcPayload();
+    // Build payload outside try so that any serialization error is caught and surfaced.
+    let payload: ReturnType<typeof buildCalcPayload>;
+    try {
+      payload = buildCalcPayload();
+    } catch (buildErr: unknown) {
+      const buildMsg = buildErr instanceof Error ? buildErr.message : "Could not prepare quote data for calculate.";
+      console.error("[internal-estimate] buildCalcPayload threw:", buildErr);
+      setCalcError(`Calculate setup failed: ${buildMsg.slice(0, 200)} — check room data and try again.`);
+      setCalcBusy(false);
+      return;
+    }
 
     try {
       const raw = (await apiPostJson("/api/internal-quotes/calculate", token, payload)) as Record<string, unknown>;
@@ -1467,6 +1478,15 @@ export default function InternalEstimateApp() {
         setCalcBusy(false);
         return;
       }
+      // Backend returned a non-ok response without throwing — surface the backend message.
+      const backendMsg =
+        typeof raw.message === "string" ? raw.message :
+        typeof raw.error   === "string" ? raw.error   : null;
+      setCalcError(
+        backendMsg
+          ? `Calculate returned an error: ${backendMsg.slice(0, 200)}`
+          : "Backend calculate returned an unexpected response — showing local preview. Try again or contact support."
+      );
       runLocalFromDrafts();
       setBackendCalcOk(false);
     } catch (e: unknown) {
@@ -1476,6 +1496,11 @@ export default function InternalEstimateApp() {
         if (e.status === 503 || installed || e.status === 0 || e.status >= 500) {
           runLocalFromDrafts();
           setBackendCalcOk(false);
+          setCalcError(
+            e.status === 503 || installed
+              ? "Backend calculate is temporarily unavailable — showing local preview. Try again in a moment."
+              : "Backend calculate failed (network or server error) — showing local preview. Check your connection and try again."
+          );
           setCalcBusy(false);
           return;
         }
@@ -1491,6 +1516,10 @@ export default function InternalEstimateApp() {
         setCalcBusy(false);
         return;
       }
+      // Unexpected non-API error (network, JSON parse, etc.)
+      const errMsg = e instanceof Error ? e.message : "Unexpected error during calculate.";
+      console.error("[internal-estimate] handleCalculate unexpected error:", e);
+      setCalcError(`Calculate error — showing local preview. (${errMsg.slice(0, 120)})`);
       runLocalFromDrafts();
       setBackendCalcOk(false);
     }
@@ -4566,7 +4595,12 @@ export default function InternalEstimateApp() {
             >
               Email estimate
             </button>
-            {customerOutputBlockMsg ? (
+            {/* Show a persistent inline reason whenever Print/Email are blocked. */}
+            {customerOutputBlockReason ? (
+              <p className="ie-output-block-msg" role="status">
+                {customerOutputBlockReason}
+              </p>
+            ) : customerOutputBlockMsg ? (
               <p className="ie-output-block-msg" role="alert">
                 {customerOutputBlockMsg}
               </p>
