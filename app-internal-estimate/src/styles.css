@@ -5177,6 +5177,18 @@ textarea:focus {
   border-radius: 6px;
 }
 
+.ie-output-block-msg-detail {
+  flex: 1 1 100%;
+  margin: 2px 0 0;
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  line-height: 1.3;
+  color: #78350f;
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  border-radius: 4px;
+}
+
 /* Save confirmation strip — sits below the main sticky row, full-width */
 .ie-sticky-save-msg {
   width: 100%;

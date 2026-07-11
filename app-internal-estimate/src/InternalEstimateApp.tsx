@@ -1375,6 +1375,10 @@ export default function InternalEstimateApp() {
         const hist = !isCurrent ? " · historical revision" : "";
         setHydratedDisplayRevision(`${qn}${revLab && !qn.includes(revLab) ? ` · ${revLab}` : ""}${hist}`);
       }
+      // The revision note was just persisted — clear the draft so the output gate
+      // ("Save your changes before printing/emailing") does not fire on a note that
+      // is no longer pending. A fresh note can be typed before the next save.
+      setRevisionNoteDraft("");
       setRevisionBaselineSig(computeRevisionBaselineSig());
     },
     [computeRevisionBaselineSig]
@@ -4597,9 +4601,22 @@ export default function InternalEstimateApp() {
             </button>
             {/* Show a persistent inline reason whenever Print/Email are blocked. */}
             {customerOutputBlockReason ? (
-              <p className="ie-output-block-msg" role="status">
-                {customerOutputBlockReason}
-              </p>
+              <>
+                <p className="ie-output-block-msg" role="status">
+                  {customerOutputBlockReason}
+                </p>
+                {/* Dirty-state sub-diagnostic — visible to estimators, not customer-facing. */}
+                {(revisionDirty || Boolean(revisionNoteDraft.trim())) &&
+                  (customerOutputBlockReason === "Save your changes before printing or emailing the estimate.") ? (
+                  <p className="ie-output-block-msg-detail" role="status">
+                    {revisionDirty && revisionNoteDraft.trim()
+                      ? "Quote has unsaved edits and a pending revision note."
+                      : revisionDirty
+                        ? "Quote has unsaved edits since the last save."
+                        : "A revision note is pending — save to include it."}
+                  </p>
+                ) : null}
+              </>
             ) : customerOutputBlockMsg ? (
               <p className="ie-output-block-msg" role="alert">
                 {customerOutputBlockMsg}
