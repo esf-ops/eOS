@@ -4482,173 +4482,535 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
   font-size: 0.95rem;
 }
 
-/* ── Public Cambria Showcase (vendor / Arreya kiosk) ─────────────────── */
+/* ── Public Cambria Showcase — full kiosk landing (not a white data page) ─ */
 
-.cambria-public-page .e100-public-header {
+body.cambria-kiosk-body {
+  margin: 0;
+  overflow: hidden;
+  background: #f5f3f0;
+}
+
+.cambria-kiosk {
+  --ck-ink: #141821;
+  --ck-ink-soft: #414855;
+  --ck-ink-muted: #79808c;
+  --ck-line: rgba(20, 24, 33, 0.09);
+  --ck-line-strong: rgba(20, 24, 33, 0.16);
+  --ck-red: #b91c1c;
+  --ck-surface: rgba(255, 255, 255, 0.86);
+  --ck-radius: 26px;
+  --ck-shadow: 0 24px 60px rgba(20, 24, 33, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  --ck-font-display:
+    Copperplate, "Copperplate Gothic Light", "Copperplate Gothic",
+    Cinzel, "Trajan Pro", Georgia, serif;
+  --ck-font-card: Fraunces, Georgia, serif;
+  --ck-fs-headline: clamp(2.4rem, 4.2vw, 5rem);
+  --ck-fs-sub: clamp(1.05rem, 1.4vw, 1.65rem);
+
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  color: var(--ck-ink);
+  font-family: Inter, "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.cambria-kiosk-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.cambria-kiosk-bg-facility {
+  position: absolute;
+  inset: -5px;
+  background-image: -webkit-image-set(
+    url("/backgrounds/esf-facility-aerial-2560.jpg") 1x,
+    url("/backgrounds/esf-facility-aerial-3840.jpg") 2x
+  );
+  background-image: image-set(
+    url("/backgrounds/esf-facility-aerial-2560.jpg") 1x,
+    url("/backgrounds/esf-facility-aerial-3840.jpg") 2x
+  );
+  background-size: cover;
+  background-position: center 40%;
+  filter: blur(0.6px);
+  opacity: 0;
+  transition: opacity 1s ease;
+  animation: cambria-kiosk-breathe 30s ease-in-out infinite alternate;
+}
+
+.cambria-kiosk--home .cambria-kiosk-bg-facility {
+  opacity: 1;
+}
+
+.cambria-kiosk-bg-wash {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 1s ease;
+  background: linear-gradient(
+    to right,
+    rgba(248, 247, 245, 0.92) 0%,
+    rgba(246, 244, 241, 0.78) 22%,
+    rgba(244, 242, 238, 0.4) 42%,
+    rgba(245, 243, 240, 0.1) 54%,
+    transparent 62%
+  );
+}
+
+.cambria-kiosk--home .cambria-kiosk-bg-wash {
+  opacity: 1;
+}
+
+.cambria-kiosk--detail .cambria-kiosk-bg-wash {
+  opacity: 1;
+  background: radial-gradient(120% 120% at 12% 0%, #ffffff 0%, #f5f3f0 46%, #e9eaed 100%);
+}
+
+.cambria-kiosk-bg-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.35;
+}
+
+.cambria-kiosk-bg-orb-1 {
+  width: 48vw;
+  height: 48vw;
+  top: -14vw;
+  right: -10vw;
+  background: radial-gradient(circle at 30% 30%, rgba(185, 28, 28, 0.14), transparent 62%);
+}
+
+.cambria-kiosk-bg-orb-2 {
+  width: 40vw;
+  height: 40vw;
+  bottom: -16vw;
+  left: -12vw;
+  background: radial-gradient(circle at 50% 50%, rgba(176, 131, 65, 0.16), transparent 60%);
+}
+
+.cambria-kiosk-bg-orb-3 {
+  width: 28vw;
+  height: 28vw;
+  top: 34%;
+  left: 42%;
+  background: radial-gradient(circle at 50% 50%, rgba(20, 24, 33, 0.07), transparent 66%);
+}
+
+.cambria-kiosk-bg-grain {
+  position: absolute;
+  inset: 0;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+@keyframes cambria-kiosk-breathe {
+  from { transform: scale(1); }
+  to { transform: scale(1.03); }
+}
+
+.cambria-kiosk-shell {
+  position: relative;
+  z-index: 1;
+  height: 100%;
   display: flex;
   flex-direction: column;
-  gap: clamp(14px, 2vw, 22px);
+  min-height: 0;
 }
 
-.cambria-public-tabs {
+.cambria-kiosk-topbar {
+  flex: none;
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  max-width: 1400px;
-  margin: 0 auto;
-  width: 100%;
-}
-
-.cambria-public-tab {
-  display: inline-flex;
   align-items: center;
-  gap: 10px;
-  min-height: 48px;
-  padding: 0 18px;
-  border-radius: 999px;
-  border: 1px solid var(--eos-line);
-  background: #fff;
-  color: var(--eos-ink);
-  font-size: clamp(0.95rem, 1.4vw, 1.1rem);
-  font-weight: 650;
-  cursor: pointer;
+  gap: clamp(16px, 2vw, 28px);
+  padding: clamp(18px, 2.2vh, 36px) clamp(24px, 3.4vw, 64px);
 }
 
-.cambria-public-tab.active {
-  border-color: var(--eos-navy);
-  background: var(--eos-navy);
-  color: #fff;
-}
-
-.cambria-public-tab-count {
-  display: inline-flex;
+.cambria-kiosk-brand {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  min-width: 1.6em;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: rgba(0, 0, 0, 0.08);
-  font-size: 0.85em;
+  gap: 14px;
+  min-width: 0;
+}
+
+.cambria-kiosk-logo img {
+  display: block;
+  height: clamp(34px, 3.2vh, 52px);
+  width: auto;
+  object-fit: contain;
+  filter: brightness(0.92) contrast(1.08);
+}
+
+.cambria-kiosk-logo--large img {
+  height: clamp(42px, 4vh, 66px);
+}
+
+.cambria-kiosk-logo-fallback {
   font-weight: 700;
+  font-size: 1.15rem;
+  color: var(--ck-ink);
 }
 
-.cambria-public-tab.active .cambria-public-tab-count {
-  background: rgba(255, 255, 255, 0.18);
+.cambria-kiosk-powered {
+  font-size: clamp(0.68rem, 0.8vw, 0.9rem);
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ck-ink-muted);
+  white-space: nowrap;
 }
 
-.e100-public-kiosk .cambria-public-tab {
+.cambria-kiosk-topbar-section {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+
+.cambria-kiosk-topbar-divider {
+  width: 1px;
+  height: 34px;
+  background: var(--ck-line-strong);
+}
+
+.cambria-kiosk-topbar-title {
+  font-family: var(--ck-font-card);
+  font-size: clamp(1.2rem, 1.8vw, 2rem);
+  font-weight: 600;
+}
+
+.cambria-kiosk-home-btn {
+  margin-left: auto;
   min-height: 56px;
   padding: 0 22px;
-  font-size: clamp(1.05rem, 1.7vw, 1.25rem);
+  border-radius: 999px;
+  border: 1px solid var(--ck-line-strong);
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--ck-ink);
+  font-size: clamp(0.95rem, 1.1vw, 1.15rem);
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 12px 28px rgba(20, 24, 33, 0.08);
 }
 
-.cambria-section-head {
-  margin-bottom: clamp(16px, 2vw, 24px);
+.cambria-kiosk-home-btn:active {
+  transform: scale(0.98);
 }
 
-.cambria-section-title {
-  margin: 0 0 6px;
-  font-size: clamp(1.2rem, 2.2vw, 1.65rem);
-  font-weight: 750;
-  letter-spacing: -0.02em;
+.cambria-kiosk-main {
+  flex: 1;
+  min-height: 0;
+  padding: 0 clamp(24px, 3.4vw, 64px) clamp(16px, 2vh, 28px);
 }
 
-.cambria-section-sub {
-  margin: 0;
-  color: var(--eos-ink-mid);
-  font-size: clamp(0.92rem, 1.4vw, 1.05rem);
-}
-
-.cambria-inv-grid {
+.cambria-kiosk-landing {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
-  gap: clamp(14px, 2vw, 22px);
+  grid-template-columns: minmax(280px, 0.9fr) 1.35fr;
+  align-items: center;
+  gap: clamp(28px, 4vw, 80px);
 }
 
-.e100-public-kiosk .cambria-inv-grid {
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+.cambria-kiosk-hero {
+  max-width: 34ch;
 }
 
-.cambria-inv-card {
+.cambria-kiosk-headline {
+  margin: 0;
+  font-family: var(--ck-font-display);
+  font-weight: 600;
+  font-size: var(--ck-fs-headline);
+  line-height: 1.08;
+  letter-spacing: 0.025em;
+  text-transform: uppercase;
+  color: var(--ck-ink);
+}
+
+.cambria-kiosk-subhead {
+  margin: clamp(16px, 2vh, 28px) 0 0;
+  font-size: var(--ck-fs-sub);
+  color: var(--ck-ink-soft);
+  line-height: 1.4;
+}
+
+.cambria-kiosk-footnote {
+  margin: clamp(20px, 2.4vh, 34px) 0 0;
+  font-size: clamp(0.9rem, 1vw, 1.15rem);
+  font-weight: 500;
+  color: var(--ck-ink-muted);
+}
+
+.cambria-kiosk-footnote::before {
+  content: "";
+  display: inline-block;
+  width: 34px;
+  height: 2px;
+  margin-right: 14px;
+  vertical-align: middle;
+  background: var(--ck-red);
+}
+
+.cambria-kiosk-card-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: clamp(18px, 1.6vw, 28px);
+  height: 100%;
+  max-height: min(72vh, 720px);
+}
+
+.cambria-kiosk-card {
+  position: relative;
   display: flex;
   flex-direction: column;
+  justify-content: space-between;
+  gap: clamp(14px, 1.6vh, 24px);
+  min-height: 0;
+  padding: clamp(20px, 1.8vw, 34px);
   text-align: left;
-  border: 1px solid var(--eos-line);
-  border-radius: 18px;
-  overflow: hidden;
-  background: #fff;
-  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.06);
+  border: 1px solid var(--ck-line);
+  border-radius: var(--ck-radius);
+  background: var(--ck-surface);
+  box-shadow: var(--ck-shadow);
   cursor: pointer;
-  padding: 0;
+  overflow: hidden;
   color: inherit;
-  transition: transform 0.18s ease, box-shadow 0.18s ease;
+  transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.24s ease, border-color 0.24s ease;
 }
 
-.cambria-inv-card:hover,
-.cambria-inv-card:focus-visible {
-  transform: translateY(-3px);
-  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.1);
+.cambria-kiosk-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  z-index: 0;
+  pointer-events: none;
+}
+
+.cambria-kiosk-card:hover,
+.cambria-kiosk-card:focus-visible {
+  transform: translateY(-6px);
+  border-color: rgba(185, 28, 28, 0.22);
+  box-shadow: 0 40px 90px rgba(20, 24, 33, 0.16);
   outline: none;
 }
 
-.cambria-inv-card-mat {
-  aspect-ratio: 4 / 3;
-  background: #e8edf3;
-  overflow: hidden;
+.cambria-kiosk-card:active {
+  transform: translateY(-2px) scale(0.988);
 }
 
-.cambria-inv-card-img {
+.cambria-kiosk-card-art {
+  position: relative;
+  z-index: 1;
+  height: clamp(140px, 22vh, 240px);
+  border-radius: 18px;
+  overflow: hidden;
+  background: #1a1c20;
+}
+
+.cambria-kiosk-card-art--swatches {
+  display: flex;
+  flex-direction: row;
+}
+
+.cambria-kiosk-swatch {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  object-fit: cover;
+  border-right: 2px solid rgba(255, 255, 255, 0.18);
+}
+
+.cambria-kiosk-swatch:last-child {
+  border-right: none;
+}
+
+.cambria-kiosk-card-photo {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
 }
 
-.cambria-inv-card-placeholder {
+.cambria-kiosk-card-body {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cambria-kiosk-card-title {
+  font-family: var(--ck-font-card);
+  font-size: clamp(1.55rem, 2vw, 2.45rem);
+  font-weight: 600;
+  line-height: 1.1;
+}
+
+.cambria-kiosk-card-copy {
+  font-size: clamp(0.95rem, 1.1vw, 1.25rem);
+  color: var(--ck-ink-soft);
+  line-height: 1.35;
+  max-width: 32ch;
+}
+
+.cambria-kiosk-loading {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  font-size: 1.15rem;
+  color: var(--ck-ink-muted);
+}
+
+.cambria-kiosk-detail {
+  overflow: auto;
+  padding-top: 8px;
+  padding-bottom: clamp(24px, 3vh, 48px);
+}
+
+.cambria-kiosk-detail-head {
+  margin-bottom: clamp(16px, 2vw, 28px);
+}
+
+.cambria-kiosk-detail-title {
+  margin: 0 0 6px;
+  font-family: var(--ck-font-card);
+  font-size: clamp(1.5rem, 2.4vw, 2.2rem);
+  font-weight: 600;
+}
+
+.cambria-kiosk-detail-sub {
+  margin: 0;
+  color: var(--ck-ink-soft);
+  font-size: clamp(1rem, 1.3vw, 1.2rem);
+}
+
+.cambria-kiosk-detail-sections {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(22px, 3vw, 36px);
+}
+
+.cambria-kiosk-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+  gap: clamp(16px, 2vw, 24px);
+}
+
+.cambria-kiosk-detail-card {
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+  border: 1px solid var(--ck-line);
+  border-radius: 20px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: var(--ck-shadow);
+  cursor: pointer;
+  padding: 0;
+  color: inherit;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.cambria-kiosk-detail-card:hover,
+.cambria-kiosk-detail-card:focus-visible {
+  transform: translateY(-4px);
+  outline: none;
+}
+
+.cambria-kiosk-detail-card-mat {
+  aspect-ratio: 4 / 3;
+  background: #e8edf3;
+  overflow: hidden;
+}
+
+.cambria-kiosk-detail-card-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.cambria-kiosk-detail-card-placeholder {
   width: 100%;
   height: 100%;
   display: grid;
   place-items: center;
   font-size: 1.6rem;
   font-weight: 750;
-  color: var(--eos-ink-muted);
+  color: var(--ck-ink-muted);
   background: linear-gradient(145deg, #eef2f7, #e2e8f0);
 }
 
-.cambria-inv-card-body {
-  padding: 14px 16px 16px;
+.cambria-kiosk-detail-card-body {
+  padding: 16px 18px 18px;
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
-.cambria-inv-card-name {
+.cambria-kiosk-detail-card-name {
   margin: 0;
-  font-size: clamp(1.05rem, 1.6vw, 1.25rem);
-  font-weight: 700;
-  line-height: 1.2;
+  font-family: var(--ck-font-card);
+  font-size: clamp(1.15rem, 1.7vw, 1.4rem);
+  font-weight: 600;
 }
 
-.cambria-inv-card-material,
-.cambria-inv-card-meta,
-.cambria-inv-card-thickness {
+.cambria-kiosk-detail-card-material,
+.cambria-kiosk-detail-card-thickness {
   margin: 0;
-  font-size: clamp(0.88rem, 1.2vw, 1rem);
-  color: var(--eos-ink-mid);
+  color: var(--ck-ink-soft);
+  font-size: clamp(0.92rem, 1.2vw, 1.05rem);
 }
 
-.cambria-inv-card-meta {
+.cambria-kiosk-detail-card-meta {
+  margin: 0;
   font-weight: 650;
-  color: var(--eos-ink);
+  color: var(--ck-ink);
+  font-size: clamp(0.95rem, 1.2vw, 1.1rem);
 }
 
-.e100-public-kiosk .cambria-inv-card-name {
-  font-size: clamp(1.2rem, 1.9vw, 1.45rem);
+@media (max-width: 980px), (max-aspect-ratio: 1 / 1) {
+  body.cambria-kiosk-body {
+    overflow: auto;
+  }
+  .cambria-kiosk {
+    height: auto;
+    min-height: 100vh;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+  .cambria-kiosk-landing {
+    grid-template-columns: 1fr;
+    align-content: start;
+    gap: 28px;
+    padding-bottom: 28px;
+  }
+  .cambria-kiosk-card-grid {
+    grid-template-columns: 1fr;
+    max-height: none;
+  }
+  .cambria-kiosk-topbar {
+    flex-wrap: wrap;
+  }
+  .cambria-kiosk-home-btn {
+    margin-left: 0;
+    width: 100%;
+  }
 }
 
-.e100-public-kiosk .cambria-inv-card-material,
-.e100-public-kiosk .cambria-inv-card-meta,
-.e100-public-kiosk .cambria-inv-card-thickness {
-  font-size: clamp(1rem, 1.4vw, 1.15rem);
+@media (prefers-reduced-motion: reduce) {
+  .cambria-kiosk-bg-facility {
+    animation: none !important;
+  }
+  .cambria-kiosk-card {
+    transition: none !important;
+  }
 }
 
