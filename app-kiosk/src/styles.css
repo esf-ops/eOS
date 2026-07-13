@@ -208,8 +208,8 @@ body {
  * revert to the clean ambient backdrop automatically.
  *
  * Design rationale:
- *  - blur(1.5px) shifts the treatment from "photo behind text" to
- *    "environmental surface" without hiding detail on the 2560/3840 assets.
+ *  - blur(0.6px) keeps a soft environmental feel while letting the 2560/3840
+ *    aerial read clearly at 1080p / 4K.
  *  - The wash is a full-height left-side porcelain band (no vertical vignette)
  *    so topbar, headline, subhead, and slideshow stay readable; it fades out
  *    before the card grid so the building remains visible on the right.
@@ -223,7 +223,7 @@ body {
  */
 .kiosk-bg-facility {
   position: absolute;
-  /* Extend 5px beyond viewport so blur(1.5px) never shows a transparent edge */
+  /* Extend beyond viewport so blur never shows a transparent edge */
   inset: -5px;
   background-image: -webkit-image-set(
     url("/backgrounds/esf-facility-aerial-2560.jpg") 1x,
@@ -236,8 +236,8 @@ body {
   background-size: cover;
   background-position: center 40%;
   background-repeat: no-repeat;
-  /* Soft environmental feel; high-res source no longer needs heavy soften */
-  filter: blur(1.5px);
+  /* Light soften only — high-res aerial should stay recognizable */
+  filter: blur(0.6px);
   /* Very slow cinematic breathe — 3% zoom over 30s, barely perceptible */
   animation: kiosk-bg-breathe 30s ease-in-out infinite alternate;
   /* Hidden on section views; fades in when home is shown */
@@ -250,16 +250,17 @@ body {
  * Wash overlay — full-height vertical band only (no radial / vertical fade).
  * Strong porcelain on the left protects headline column + slideshow; fades to
  * transparent before the card grid so the facility shows through on the right.
+ * Opacities tuned so the building peeks through without competing with hero text.
  */
 .kiosk-bg-facility-wash {
   position: absolute;
   inset: 0;
   background: linear-gradient(
     to right,
-    rgba(248, 247, 245, 0.97) 0%,
-    rgba(246, 244, 241, 0.86) 22%,
-    rgba(244, 242, 238, 0.47) 42%,
-    rgba(245, 243, 240, 0.12) 52%,
+    rgba(248, 247, 245, 0.90) 0%,
+    rgba(246, 244, 241, 0.76) 22%,
+    rgba(244, 242, 238, 0.36) 42%,
+    rgba(245, 243, 240, 0.08) 52%,
     transparent 58%
   );
   pointer-events: none;
@@ -679,9 +680,35 @@ body {
 .kiosk-collage-panel--wide  { flex: 3; }
 .kiosk-collage-panel--narrow { flex: 2; }
 
-/* Faucet panel: white background so product PNGs (which have white BG)
-   blend seamlessly — creates a clean product-catalog-page feel. */
+/* Product panels: white/studio so sink heroes + faucet PNGs read as catalog
+   shots rather than cropped lifestyle photos. */
 .kiosk-collage-panel--product { background: #fff; }
+
+/* Product Catalog: fit full product silhouettes (no Ken Burns crop/zoom).
+   Keep explicit width/height so absolute imgs fill the panel box; contain
+   then scales the product inside without cropping. Small inset avoids edge kiss. */
+.kiosk-card-art--catalog .kiosk-rotator-img {
+  top: 10px;
+  right: 10px;
+  bottom: 10px;
+  left: 10px;
+  width: calc(100% - 20px);
+  height: calc(100% - 20px);
+  object-fit: contain;
+}
+
+.kiosk-card-art--catalog .kiosk-rotator-img--active {
+  animation: none;
+}
+
+/* Soften the shared dark veil — catalog panels are white/clean product shots */
+.kiosk-card-art--catalog .kiosk-rotator-veil {
+  background: linear-gradient(
+    to top,
+    rgba(10, 10, 12, 0.06) 0%,
+    transparent 45%
+  );
+}
 
 /* Thin vertical separator between panels */
 .kiosk-collage-divider {

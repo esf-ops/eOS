@@ -105,20 +105,18 @@ function SlabInventoryRotator() {
 
 /**
  * Product Catalog card: sink hero (left) + faucet product shot (right).
- * Left panel: professional Blanco sink photography on neutral studio bg —
- *   "object-fit: cover" crops to show the bowl face-on.
- * Right panel: faucet PNG on white bg with "object-fit: contain" so the
- *   full fixture silhouette is always visible, like a real catalog page.
- * Two distinct product types visible simultaneously = "catalog" reads clearly.
+ * Both panels use object-fit: contain on white so full product silhouettes
+ * stay visible (no crop/zoom). Two product types side-by-side = "catalog."
  */
 function CatalogCollage() {
   return (
     <div className="kiosk-card-art kiosk-card-art--photo kiosk-card-art--catalog" aria-hidden>
-      <div className="kiosk-collage-panel kiosk-collage-panel--wide">
+      <div className="kiosk-collage-panel kiosk-collage-panel--wide kiosk-collage-panel--product">
         <KioskCardMediaRotator
           images={CATALOG_SINKS}
           intervalMs={6000}
-          objectPosition="center 30%"
+          objectFit="contain"
+          objectPosition="center"
           label="Sink product photo"
         />
       </div>
