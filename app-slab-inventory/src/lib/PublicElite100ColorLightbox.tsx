@@ -146,7 +146,7 @@ export function PublicElite100ColorLightbox({
               ) : (
                 <p className="e100-public-lightbox-avail muted">No current inventory on hand</p>
               )
-            ) : (
+            ) : variant === "cambria" ? null : (
               <p className="e100-public-lightbox-avail">Available through Elite Stone Fabrication</p>
             )}
           </div>

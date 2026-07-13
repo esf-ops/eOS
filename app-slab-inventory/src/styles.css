@@ -4875,6 +4875,10 @@ body.cambria-kiosk-body {
   transition: transform 0.45s ease;
 }
 
+.cambria-kiosk-card--visualizer .cambria-kiosk-card-hero-img {
+  object-position: center 42%;
+}
+
 .cambria-kiosk-card:hover .cambria-kiosk-card-hero-img,
 .cambria-kiosk-card:focus-visible .cambria-kiosk-card-hero-img {
   transform: scale(1.1);
@@ -5382,6 +5386,20 @@ body.cambria-kiosk-body {
   color: var(--cambria-gold-bright);
   font-size: clamp(0.95rem, 1.2vw, 1.1rem);
   letter-spacing: 0.01em;
+}
+
+.cambria-design-view .e100-rail-wrap::after,
+.cambria-kiosk .cambria-design-sections .e100-rail-wrap::after,
+.cambria-kiosk.cambria-theme .cambria-design-view .e100-rail-wrap::after {
+  display: none !important;
+  content: none !important;
+  background: none !important;
+}
+
+.cambria-design-view .e100-rail,
+.cambria-kiosk .cambria-design-sections .e100-rail {
+  padding-right: 12px;
+  scroll-padding-inline-end: 12px;
 }
 
 /* Designs carousel — floating premium tiles (Cambria only) */

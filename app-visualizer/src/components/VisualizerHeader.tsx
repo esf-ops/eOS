@@ -1,4 +1,5 @@
 import { POWERED_BY } from "../lib/config";
+import { resolveCambriaShowcaseReturnUrl } from "../lib/cambriaReturnUrl";
 
 type VisualizerHeaderProps = {
   productName?: string;
@@ -10,6 +11,10 @@ export function VisualizerHeader({
   productName = "Elite Stone Visualizer",
   cambriaMode = false,
 }: VisualizerHeaderProps) {
+  function handleBack() {
+    window.location.assign(resolveCambriaShowcaseReturnUrl());
+  }
+
   return (
     <header className="viz-topbar">
       <div className="viz-brand">
@@ -46,6 +51,12 @@ export function VisualizerHeader({
           </span>
         </span>
       </div>
+
+      {cambriaMode ? (
+        <button type="button" className="viz-cambria-back" onClick={handleBack}>
+          ← Back to Cambria Showcase
+        </button>
+      ) : null}
     </header>
   );
 }

@@ -11,7 +11,7 @@ import {
   type PublicCambriaShowroomPayload,
 } from "./lib/publicCambriaApi";
 import { isKioskOrArreyaMode } from "./lib/publicCambriaRoute";
-import { cambriaVisualizerUrl } from "./lib/cambriaVisualizerUrl";
+import { cambriaShowcaseReturnUrl, cambriaVisualizerUrl } from "./lib/cambriaVisualizerUrl";
 
 type CambriaView = "home" | "designs" | "inventory" | "visualizer";
 
@@ -24,7 +24,7 @@ const FALLBACK_SWATCHES = [
   "/material-textures/elite100/thumb/india-black-pearl-polished.jpg",
 ];
 
-const VISUALIZER_CARD_IMAGE = "/visualizer-samples/island-kitchen.svg";
+const VISUALIZER_CARD_IMAGE = "/backgrounds/cambria-visualizer-card-hero.jpg";
 const INVENTORY_FALLBACK_IMAGE = "/material-textures/elite100/thumb/india-black-pearl-polished.jpg";
 
 type InventoryKindFilter = "all" | "slabs" | "remnants";
@@ -353,6 +353,10 @@ export default function PublicCambriaPage() {
       cambriaVisualizerUrl({
         arreya: isKioskOrArreyaMode() || new URLSearchParams(window.location.search).get("arreya") === "1",
         kiosk: new URLSearchParams(window.location.search).get("kiosk") === "1",
+        returnUrl: cambriaShowcaseReturnUrl({
+          arreya: true,
+          kiosk: new URLSearchParams(window.location.search).get("kiosk") === "1",
+        }),
       }),
     [],
   );
@@ -636,7 +640,7 @@ export default function PublicCambriaPage() {
                       key={group.price_group}
                       group={group}
                       kiosk
-                      showInventoryMeta
+                      showInventoryMeta={false}
                       onOpenItem={setSelectedDesign}
                     />
                   ) : null
@@ -823,7 +827,7 @@ export default function PublicCambriaPage() {
         <PublicElite100ColorLightbox
           item={selectedDesign}
           kiosk
-          showInventoryCount
+          showInventoryCount={false}
           variant="cambria"
           onClose={() => setSelectedDesign(null)}
         />
