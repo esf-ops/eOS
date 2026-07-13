@@ -49,6 +49,12 @@ import {
   toPublicElite100ShowroomCard,
 } from "./elite100CardModel.js";
 import {
+  buildPublicCambriaShowroomPayload,
+  groupCambriaLiveInventoryCards,
+  isCambriaCatalogItem,
+  toPublicCambriaDesignCard,
+} from "./cambriaPublicShowroom.js";
+import {
   compactElite100MatchDebug,
   diagnoseElite100CatalogItem,
   groupInventoryByColorMaterial,
@@ -1612,6 +1618,194 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
     }
   });
 
+  // GET /api/public/cambria-showroom
+  //
+  // Public Cambria vendor/kiosk showcase: Cambria Designs (Elite 100 filtered) +
+  // Cambria Live Inventory. No auth. Inventory counts are intentionally included
+  // for this presentation; costs / rack / lot / supplier codes are never returned.
+  app.get("/api/public/cambria-showroom", async (req, res) => {
+    try {
+      jsonNoStore(res);
+      const organizationId = resolveOrgId();
+      if (!organizationId) {
+        return res.status(503).json({
+          ok: false,
+          error: "Cambria public showroom is not configured (SLABOS_ORGANIZATION_ID).",
+        });
+      }
+
+      const supabase = db();
+      const sourceFilter = resolveSourceFilter(req);
+
+      const { collection, catalogItemList, resolvedAliases } =
+        await loadElite100Deps(organizationId);
+
+      const cambriaCatalog = (catalogItemList ?? []).filter(isCambriaCatalogItem);
+
+      // Active inventory for both design counts and live inventory cards.
+      const scopeInv = (q) => scopeInventory(q, organizationId, sourceFilter);
+      const cambriaInventorySelect = [
+        ...COLOR_INVENTORY_SELECT_COLUMNS,
+        "distributor",
+      ].join(",");
+      const inventoryFetch = await fetchAllActiveInventoryRowsForScope(
+        supabase,
+        scopeInv,
+        cambriaInventorySelect
+      );
+      const invRows = inventoryFetch.rows ?? [];
+      if (inventoryFetch.fetch_warning) {
+        console.warn("[cambria-showroom]", inventoryFetch.fetch_warning);
+      }
+
+      let imgQ = supabase.from("slab_images").select(SLAB_IMAGE_SELECT_COLUMNS);
+      imgQ = scopeInventory(imgQ, organizationId, sourceFilter);
+      const { data: imgRows } = await imgQ;
+      const imageMap = buildImageMap(imgRows ?? [], sourceFilter);
+
+      // Designs: Elite 100 Cambria catalog cards with live inventory counts.
+      const elite100Map = buildElite100InventoryMap(
+        invRows,
+        cambriaCatalog,
+        resolvedAliases
+      );
+
+      for (const [, acc] of elite100Map.entries()) {
+        let verifiedCount = 0;
+        for (const invRow of acc.rows) {
+          if (lookupInventoryImage(imageMap, invRow, sourceFilter)?.image_status === "ok") {
+            verifiedCount += 1;
+          }
+        }
+        const repResult = chooseRepresentativeInventoryImage(acc.rows, imageMap, sourceFilter);
+        acc.verifiedPhotoCount = verifiedCount;
+        acc.repImage = repResult.representative_image_url;
+        acc.repThumbnail = repResult.representative_thumbnail_url;
+        acc.repSourceInventoryType = repResult.representative_image_source_inventory_type;
+        acc.repInventoryId = repResult.representative_image_inventory_id;
+      }
+
+      const catalogItemIds = cambriaCatalog.map((c) => c.id).filter(Boolean);
+      let visualAssetMap = new Map();
+      let visualAssetsByCatalogId = new Map();
+      if (catalogItemIds.length) {
+        try {
+          const { data: vaRows, error: vaErr } = await supabase
+            .from("slab_color_visual_assets")
+            .select(
+              "id,catalog_item_id,product_slug,texture_url_600,texture_url_1024,original_image_url,hero_url,asset_kind,review_status,is_primary,is_active,source_system,source_color_name,raw"
+            )
+            .eq("organization_id", organizationId)
+            .eq("is_active", true)
+            .in("catalog_item_id", catalogItemIds);
+          if (vaErr) {
+            if (!isMissingRelationError(vaErr)) throw vaErr;
+          } else {
+            visualAssetsByCatalogId = buildVisualAssetsByCatalogId(vaRows ?? []);
+            visualAssetMap = buildVisualAssetMap(vaRows ?? []);
+          }
+        } catch (e) {
+          console.warn("[cambria-showroom] Visual asset load error (non-fatal):", e?.message);
+        }
+      }
+
+      function sortItems(items) {
+        return [...items].sort((a, b) => {
+          const sa = a._sort_order ?? 9999;
+          const sb = b._sort_order ?? 9999;
+          if (sa !== sb) return sa - sb;
+          return String(a.color_name ?? "").localeCompare(String(b.color_name ?? ""), undefined, {
+            sensitivity: "base",
+          });
+        });
+      }
+
+      const groupsMap = new Map(COLOR_PROGRAM_PRICE_GROUP_ORDER.map((pg) => [pg, []]));
+
+      for (const item of cambriaCatalog) {
+        const pg = item.price_group;
+        if (!groupsMap.has(pg)) continue;
+
+        const acc = elite100Map.get(item.id) ?? {
+          slabCount: 0,
+          remnantCount: 0,
+          rows: [],
+          verifiedPhotoCount: 0,
+          repImage: null,
+          repThumbnail: null,
+          repSourceInventoryType: null,
+          repInventoryId: null,
+        };
+
+        const inventorySummary = summarizeElite100CurrentInventory(acc);
+        const referenceFields = buildElite100ReferenceImageFields(
+          visualAssetMap.get(item.id) ?? null
+        );
+        const currentInventoryImages = buildElite100CurrentInventoryImageFields({
+          representative_image_url: acc.repImage ?? null,
+          representative_thumbnail_url: acc.repThumbnail ?? null,
+          representative_image_source_inventory_type: acc.repSourceInventoryType ?? null,
+          representative_image_inventory_id: acc.repInventoryId ?? null,
+        });
+
+        const card = toPublicCambriaDesignCard({
+          catalog_item_id: item.id,
+          color_key: makeColorKey(item.color_name, item.material_name, item.price_group),
+          color_name: item.color_name,
+          material_name: item.material_name,
+          display_name: item.display_name,
+          price_group: pg,
+          ...inventorySummary,
+          ...referenceFields,
+          ...currentInventoryImages,
+          representative_image_url: acc.repImage ?? null,
+          representative_thumbnail_url: acc.repThumbnail ?? null,
+          representative_image_source_inventory_type: acc.repSourceInventoryType ?? null,
+          representative_image_inventory_id: acc.repInventoryId ?? null,
+          ...buildVisualAssetEnrichmentFields(visualAssetMap.get(item.id) ?? null),
+          program_status: "elite_100",
+          _sort_order: item.sort_order ?? 9999,
+        });
+        groupsMap.get(pg).push(card);
+
+        const variantAssets = listElite100FinishVariantAssets(
+          visualAssetsByCatalogId.get(item.id) ?? []
+        );
+        for (const variantAsset of variantAssets) {
+          groupsMap.get(pg).push(
+            toPublicCambriaDesignCard(buildElite100FinishVariantCard(card, variantAsset))
+          );
+        }
+      }
+
+      const designGroups = COLOR_PROGRAM_PRICE_GROUP_ORDER.map((pg) => ({
+        price_group: pg,
+        items: sortItems(groupsMap.get(pg) ?? []).map(({ _sort_order: _so, ...rest }) => rest),
+      })).filter((g) => g.items.length > 0);
+
+      const inventoryCards = groupCambriaLiveInventoryCards(
+        invRows,
+        imageMap,
+        lookupInventoryImage,
+        sourceFilter
+      );
+
+      return res.json(
+        buildPublicCambriaShowroomPayload({
+          collection,
+          designGroups,
+          inventoryCards,
+          price_group_order: [...COLOR_PROGRAM_PRICE_GROUP_ORDER],
+          ...(!collection
+            ? { note: "No active Elite 100 collection found; live Cambria inventory may still be listed." }
+            : {}),
+        })
+      );
+    } catch (e) {
+      res.status(500).json({ ok: false, error: String(e?.message || e) });
+    }
+  });
+
   // GET /api/slab-inventory/elite100-programs/:catalogItemId/inventory
   //
   // Returns physical slab and remnant rows for one Elite 100 catalog item.
@@ -1936,6 +2130,6 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
   });
 
   console.log(
-    "[slab-inventory-head] mounted GET /api/slab-inventory/summary, /filters, /slabs, /slabs/:id, /color-programs, /colors/:colorKey/inventory, /elite100-programs, /elite100-programs/:catalogItemId/inventory, /non-stock-programs, GET /api/public/elite100-showroom (read-only)"
+    "[slab-inventory-head] mounted GET /api/slab-inventory/summary, /filters, /slabs, /slabs/:id, /color-programs, /colors/:colorKey/inventory, /elite100-programs, /elite100-programs/:catalogItemId/inventory, /non-stock-programs, GET /api/public/elite100-showroom (read-only), GET /api/public/cambria-showroom (read-only)"
   );
 }

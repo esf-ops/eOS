@@ -3,9 +3,11 @@ import ReactDOM from "react-dom/client";
 import SlabInventoryApp from "./SlabInventoryApp";
 import PublicProductCatalogPage from "./PublicProductCatalogPage";
 import PublicElite100Page from "./PublicElite100Page";
+import PublicCambriaPage from "./PublicCambriaPage";
 import PublicFaucetsPage from "./PublicFaucetsPage";
 import { isPublicProductCatalogPath } from "./lib/publicProductCatalogRoute";
 import { isPublicElite100Path } from "./lib/publicElite100Route";
+import { isPublicCambriaPath } from "./lib/publicCambriaRoute";
 import { isPublicFaucetsPath } from "./lib/publicFaucetsRoute";
 import "./styles.css";
 
@@ -18,6 +20,9 @@ function AppRoot() {
   }
   if (isPublicElite100Path()) {
     return <PublicElite100Page />;
+  }
+  if (isPublicCambriaPath()) {
+    return <PublicCambriaPage />;
   }
   return <SlabInventoryApp />;
 }

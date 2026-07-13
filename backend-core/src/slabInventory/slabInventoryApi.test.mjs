@@ -769,6 +769,7 @@ import {
     assert.ok(paths.has(expected), `route ${expected} registered`);
   }
   assert.ok(allPaths.has("/api/public/elite100-showroom"), "public elite100 showroom route registered");
+  assert.ok(allPaths.has("/api/public/cambria-showroom"), "public cambria showroom route registered");
   console.log("ok: read-only route shape (GET only, 10 routes including Elite 100 + Non-Stock + public showroom)");
 }
 

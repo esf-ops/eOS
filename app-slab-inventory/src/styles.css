@@ -4482,3 +4482,173 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
   font-size: 0.95rem;
 }
 
+/* ── Public Cambria Showcase (vendor / Arreya kiosk) ─────────────────── */
+
+.cambria-public-page .e100-public-header {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(14px, 2vw, 22px);
+}
+
+.cambria-public-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  max-width: 1400px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.cambria-public-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 0 18px;
+  border-radius: 999px;
+  border: 1px solid var(--eos-line);
+  background: #fff;
+  color: var(--eos-ink);
+  font-size: clamp(0.95rem, 1.4vw, 1.1rem);
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.cambria-public-tab.active {
+  border-color: var(--eos-navy);
+  background: var(--eos-navy);
+  color: #fff;
+}
+
+.cambria-public-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.6em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.08);
+  font-size: 0.85em;
+  font-weight: 700;
+}
+
+.cambria-public-tab.active .cambria-public-tab-count {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.e100-public-kiosk .cambria-public-tab {
+  min-height: 56px;
+  padding: 0 22px;
+  font-size: clamp(1.05rem, 1.7vw, 1.25rem);
+}
+
+.cambria-section-head {
+  margin-bottom: clamp(16px, 2vw, 24px);
+}
+
+.cambria-section-title {
+  margin: 0 0 6px;
+  font-size: clamp(1.2rem, 2.2vw, 1.65rem);
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}
+
+.cambria-section-sub {
+  margin: 0;
+  color: var(--eos-ink-mid);
+  font-size: clamp(0.92rem, 1.4vw, 1.05rem);
+}
+
+.cambria-inv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+  gap: clamp(14px, 2vw, 22px);
+}
+
+.e100-public-kiosk .cambria-inv-grid {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+}
+
+.cambria-inv-card {
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+  border: 1px solid var(--eos-line);
+  border-radius: 18px;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.06);
+  cursor: pointer;
+  padding: 0;
+  color: inherit;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.cambria-inv-card:hover,
+.cambria-inv-card:focus-visible {
+  transform: translateY(-3px);
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.1);
+  outline: none;
+}
+
+.cambria-inv-card-mat {
+  aspect-ratio: 4 / 3;
+  background: #e8edf3;
+  overflow: hidden;
+}
+
+.cambria-inv-card-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.cambria-inv-card-placeholder {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  font-size: 1.6rem;
+  font-weight: 750;
+  color: var(--eos-ink-muted);
+  background: linear-gradient(145deg, #eef2f7, #e2e8f0);
+}
+
+.cambria-inv-card-body {
+  padding: 14px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cambria-inv-card-name {
+  margin: 0;
+  font-size: clamp(1.05rem, 1.6vw, 1.25rem);
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.cambria-inv-card-material,
+.cambria-inv-card-meta,
+.cambria-inv-card-thickness {
+  margin: 0;
+  font-size: clamp(0.88rem, 1.2vw, 1rem);
+  color: var(--eos-ink-mid);
+}
+
+.cambria-inv-card-meta {
+  font-weight: 650;
+  color: var(--eos-ink);
+}
+
+.e100-public-kiosk .cambria-inv-card-name {
+  font-size: clamp(1.2rem, 1.9vw, 1.45rem);
+}
+
+.e100-public-kiosk .cambria-inv-card-material,
+.e100-public-kiosk .cambria-inv-card-meta,
+.e100-public-kiosk .cambria-inv-card-thickness {
+  font-size: clamp(1rem, 1.4vw, 1.15rem);
+}
+

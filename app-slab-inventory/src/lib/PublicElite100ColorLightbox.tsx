@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
 import { lookupElite100Texture } from "./elite100TextureAssets";
-import { elite100CardImageSrcFull, type Elite100ShowroomItem } from "./elite100ShowroomTypes";
+import { currentlyAvailableLabel, elite100CardImageSrcFull, type Elite100ShowroomItem } from "./elite100ShowroomTypes";
 
 const MIN_SCALE = 1;
 const MAX_SCALE = 5;
@@ -18,16 +18,24 @@ type PublicElite100ColorLightboxProps = {
   item: Elite100ShowroomItem;
   kiosk?: boolean;
   onClose: () => void;
+  /**
+   * When true (Cambria vendor showcase), show live inventory counts.
+   * Homeowner Elite 100 public showroom keeps this false.
+   */
+  showInventoryCount?: boolean;
 };
 
-/** Public-safe color detail — image zoom only, no inventory counts or internal inventory modal. */
+/** Public-safe color detail — image zoom; inventory counts only when explicitly enabled. */
 export function PublicElite100ColorLightbox({
   item,
   kiosk = false,
   onClose,
+  showInventoryCount = false,
 }: PublicElite100ColorLightboxProps) {
   const texture = lookupElite100Texture(item.color_name, item.color_key);
   const imageSrc = texture?.fullUrl ?? elite100CardImageSrcFull(item);
+  const availableCount = item.current_inventory_count ?? item.total_inventory_count ?? 0;
+  const hasInventory = Boolean(item.has_inventory) && availableCount > 0;
 
   const [scale, setScale] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -125,7 +133,15 @@ export function PublicElite100ColorLightbox({
                 </>
               ) : null}
             </p>
-            <p className="e100-public-lightbox-avail">Available through Elite Stone Fabrication</p>
+            {showInventoryCount ? (
+              hasInventory ? (
+                <p className="e100-public-lightbox-avail">{currentlyAvailableLabel(availableCount)}</p>
+              ) : (
+                <p className="e100-public-lightbox-avail muted">No current inventory on hand</p>
+              )
+            ) : (
+              <p className="e100-public-lightbox-avail">Available through Elite Stone Fabrication</p>
+            )}
           </div>
           <div className="e100-public-lightbox-actions">
             <button type="button" className="e100-public-lightbox-zoom" onClick={() => zoomBy(-ZOOM_STEP)} aria-label="Zoom out">−</button>
