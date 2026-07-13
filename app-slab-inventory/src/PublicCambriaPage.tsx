@@ -24,7 +24,17 @@ const FALLBACK_SWATCHES = [
   "/material-textures/elite100/thumb/india-black-pearl-polished.jpg",
 ];
 
-const VISUALIZER_CARD_IMAGE = "/visualizer-samples/dark-cabinet-kitchen.svg";
+const VISUALIZER_CARD_IMAGE = "/visualizer-samples/island-kitchen.svg";
+const INVENTORY_FALLBACK_IMAGE = "/material-textures/elite100/thumb/india-black-pearl-polished.jpg";
+
+type InventoryKindFilter = "all" | "slabs" | "remnants";
+type InventorySort = "name" | "available";
+
+function normalizeThicknessLabel(value: string | null | undefined): string | null {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  return raw.replace(/\s+/g, " ");
+}
 
 function parseCambriaView(search: string): CambriaView {
   const view = new URLSearchParams(search).get("view");
@@ -255,6 +265,19 @@ export default function PublicCambriaPage() {
   const [selectedInventory, setSelectedInventory] = useState<PublicCambriaInventoryCard | null>(null);
   const [inventorySearchInput, setInventorySearchInput] = useState("");
   const [inventorySearch, setInventorySearch] = useState("");
+  const [inventoryKind, setInventoryKind] = useState<InventoryKindFilter>("all");
+  const [inventoryThickness, setInventoryThickness] = useState<string>("all");
+  const [inventoryPhotosOnly, setInventoryPhotosOnly] = useState(false);
+  const [inventorySort, setInventorySort] = useState<InventorySort>("available");
+
+  const resetInventoryFilters = useCallback(() => {
+    setInventorySearchInput("");
+    setInventorySearch("");
+    setInventoryKind("all");
+    setInventoryThickness("all");
+    setInventoryPhotosOnly(false);
+    setInventorySort("available");
+  }, []);
 
   const goTo = useCallback((next: CambriaView) => {
     writeCambriaView(next);
@@ -262,10 +285,9 @@ export default function PublicCambriaPage() {
     setSelectedDesign(null);
     setSelectedInventory(null);
     if (next !== "inventory") {
-      setInventorySearchInput("");
-      setInventorySearch("");
+      resetInventoryFilters();
     }
-  }, []);
+  }, [resetInventoryFilters]);
 
   useEffect(() => {
     ensureDisplayFonts();
@@ -344,10 +366,73 @@ export default function PublicCambriaPage() {
     window.location.assign(standaloneVisualizerUrl);
   }, [view, standaloneVisualizerUrl]);
 
-  const filteredInventory = useMemo(
-    () => inventoryItems.filter((item) => matchesInventorySearch(item, inventorySearch)),
-    [inventoryItems, inventorySearch],
-  );
+  const filteredInventory = useMemo(() => {
+    const list = inventoryItems.filter((item) => {
+      if (!matchesInventorySearch(item, inventorySearch)) return false;
+      if (inventoryKind === "slabs" && (item.slab_count ?? 0) <= 0) return false;
+      if (inventoryKind === "remnants" && (item.remnant_count ?? 0) <= 0) return false;
+      if (inventoryThickness !== "all") {
+        const t = normalizeThicknessLabel(item.thickness_nominal);
+        if (t !== inventoryThickness) return false;
+      }
+      if (inventoryPhotosOnly && !inventoryCardImageSrc(item)) return false;
+      return true;
+    });
+
+    const sorted = [...list];
+    if (inventorySort === "available") {
+      sorted.sort((a, b) => {
+        const diff = (b.total_inventory_count ?? 0) - (a.total_inventory_count ?? 0);
+        if (diff !== 0) return diff;
+        return String(a.color_name ?? "").localeCompare(String(b.color_name ?? ""), undefined, {
+          sensitivity: "base",
+        });
+      });
+    } else {
+      sorted.sort((a, b) =>
+        String(a.color_name ?? "").localeCompare(String(b.color_name ?? ""), undefined, {
+          sensitivity: "base",
+        }),
+      );
+    }
+    return sorted;
+  }, [
+    inventoryItems,
+    inventorySearch,
+    inventoryKind,
+    inventoryThickness,
+    inventoryPhotosOnly,
+    inventorySort,
+  ]);
+
+  const inventoryThicknessOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const item of inventoryItems) {
+      const t = normalizeThicknessLabel(item.thickness_nominal);
+      if (t) set.add(t);
+    }
+    return [...set].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+  }, [inventoryItems]);
+
+  const inventoryHeroImage = inventoryThumbs[0] || INVENTORY_FALLBACK_IMAGE;
+  const designHeroThumbs = useMemo(() => {
+    const base = designThumbs.slice(0, 6);
+    if (base.length === 0) return FALLBACK_SWATCHES.slice(0, 6);
+    if (base.length >= 6) return base;
+    const filled = [...base];
+    let i = 0;
+    while (filled.length < 6) {
+      filled.push(base[i % base.length]!);
+      i += 1;
+    }
+    return filled;
+  }, [designThumbs]);
+  const hasActiveInventoryFilters =
+    Boolean(inventorySearchInput.trim()) ||
+    inventoryKind !== "all" ||
+    inventoryThickness !== "all" ||
+    inventoryPhotosOnly ||
+    inventorySort !== "available";
 
   const rootClass = [
     "cambria-kiosk",
@@ -437,15 +522,26 @@ export default function PublicCambriaPage() {
             <nav className="cambria-kiosk-card-grid" aria-label="Cambria showcase categories">
               <button
                 type="button"
-                className="cambria-kiosk-card cambria-kiosk-card--designs"
+                className="cambria-kiosk-card cambria-kiosk-card--hero cambria-kiosk-card--designs"
                 onClick={() => goTo("designs")}
               >
-                <div className="cambria-kiosk-card-art cambria-kiosk-card-art--swatches" aria-hidden>
-                  {designThumbs.map((src) => (
-                    <img key={src} src={src} alt="" className="cambria-kiosk-swatch" loading="eager" draggable={false} />
-                  ))}
+                <div className="cambria-kiosk-card-media" aria-hidden>
+                  <div className="cambria-kiosk-card-collage">
+                    {designHeroThumbs.map((src, i) => (
+                      <img
+                        key={`${src}-${i}`}
+                        src={src}
+                        alt=""
+                        className={`cambria-kiosk-card-collage-tile cambria-kiosk-card-collage-tile--${i + 1}`}
+                        loading="eager"
+                        draggable={false}
+                      />
+                    ))}
+                  </div>
+                  <div className="cambria-kiosk-card-shade" />
                 </div>
                 <span className="cambria-kiosk-card-body">
+                  <span className="cambria-kiosk-card-eyebrow">Design library</span>
                   <span className="cambria-kiosk-card-title">Cambria Designs</span>
                   <span className="cambria-kiosk-card-copy">
                     Browse stocked Cambria colors
@@ -456,15 +552,28 @@ export default function PublicCambriaPage() {
 
               <button
                 type="button"
-                className="cambria-kiosk-card cambria-kiosk-card--inventory"
+                className="cambria-kiosk-card cambria-kiosk-card--hero cambria-kiosk-card--inventory"
                 onClick={() => goTo("inventory")}
               >
-                <div className="cambria-kiosk-card-art cambria-kiosk-card-art--photo" aria-hidden>
-                  {inventoryThumbs.slice(0, 1).map((src) => (
-                    <img key={src} src={src} alt="" className="cambria-kiosk-card-photo" loading="eager" draggable={false} />
-                  ))}
+                <div className="cambria-kiosk-card-media" aria-hidden>
+                  <img
+                    src={inventoryHeroImage}
+                    alt=""
+                    className="cambria-kiosk-card-hero-img"
+                    loading="eager"
+                    draggable={false}
+                  />
+                  {inventoryThumbs.length > 1 ? (
+                    <div className="cambria-kiosk-card-thumb-strip">
+                      {inventoryThumbs.slice(1, 4).map((src, i) => (
+                        <img key={`${src}-${i}`} src={src} alt="" loading="eager" draggable={false} />
+                      ))}
+                    </div>
+                  ) : null}
+                  <div className="cambria-kiosk-card-shade" />
                 </div>
                 <span className="cambria-kiosk-card-body">
+                  <span className="cambria-kiosk-card-eyebrow">On hand now</span>
                   <span className="cambria-kiosk-card-title">Live Cambria Inventory</span>
                   <span className="cambria-kiosk-card-copy">
                     View Cambria slabs and remnants on hand
@@ -475,28 +584,39 @@ export default function PublicCambriaPage() {
 
               <button
                 type="button"
-                className="cambria-kiosk-card cambria-kiosk-card--visualizer"
+                className="cambria-kiosk-card cambria-kiosk-card--hero cambria-kiosk-card--visualizer"
                 onClick={openStandaloneVisualizer}
               >
-                <div className="cambria-kiosk-card-art cambria-kiosk-card-art--photo" aria-hidden>
+                <div className="cambria-kiosk-card-media" aria-hidden>
                   <img
                     src={VISUALIZER_CARD_IMAGE}
                     alt=""
-                    className="cambria-kiosk-card-photo"
+                    className="cambria-kiosk-card-hero-img"
                     loading="eager"
                     draggable={false}
                   />
+                  {designHeroThumbs[0] ? (
+                    <img
+                      src={designHeroThumbs[0]}
+                      alt=""
+                      className="cambria-kiosk-card-visualizer-swatch"
+                      loading="eager"
+                      draggable={false}
+                    />
+                  ) : null}
+                  <div className="cambria-kiosk-card-shade" />
                   <span className="cambria-kiosk-card-badge">Visualize</span>
                 </div>
                 <span className="cambria-kiosk-card-body">
+                  <span className="cambria-kiosk-card-eyebrow">Room preview</span>
                   <span className="cambria-kiosk-card-title">Cambria Visualizer</span>
-                  <span className="cambria-kiosk-card-copy">Preview Cambria designs in a room scene.</span>
+                  <span className="cambria-kiosk-card-copy">Preview Cambria designs in a real room.</span>
                 </span>
               </button>
             </nav>
           </main>
         ) : view === "designs" ? (
-          <main className="cambria-kiosk-main cambria-kiosk-detail">
+          <main className="cambria-kiosk-main cambria-kiosk-detail cambria-design-view">
             <div className="cambria-kiosk-detail-head">
               <h2 className="cambria-kiosk-detail-title">Cambria Designs</h2>
               <p className="cambria-kiosk-detail-sub">
@@ -509,7 +629,7 @@ export default function PublicCambriaPage() {
                 <p className="empty-sub">{data?.note ?? "No Cambria catalog designs are configured."}</p>
               </div>
             ) : (
-              <div className="cambria-kiosk-detail-sections">
+              <div className="cambria-kiosk-detail-sections cambria-design-sections">
                 {designGroups.map((group) =>
                   group.items.length > 0 ? (
                     <Elite100ShowroomSection
@@ -525,7 +645,7 @@ export default function PublicCambriaPage() {
             )}
           </main>
         ) : view === "inventory" ? (
-          <main className="cambria-kiosk-main cambria-kiosk-detail">
+          <main className="cambria-kiosk-main cambria-kiosk-detail cambria-inventory-view">
             <div className="cambria-kiosk-detail-head cambria-kiosk-detail-head--inventory">
               <div>
                 <h2 className="cambria-kiosk-detail-title">Live Cambria Inventory</h2>
@@ -535,29 +655,125 @@ export default function PublicCambriaPage() {
                     : "Current Cambria stock at Elite Stone Fabrication"}
                 </p>
               </div>
-              <div className="cambria-kiosk-search">
-                <input
-                  type="search"
-                  className="cambria-kiosk-search-input"
-                  placeholder="Search color, material, or thickness…"
-                  value={inventorySearchInput}
-                  onChange={(e) => setInventorySearchInput(e.target.value)}
-                  aria-label="Search Cambria inventory"
-                />
-                {inventorySearchInput ? (
-                  <button
-                    type="button"
-                    className="cambria-kiosk-search-clear"
-                    onClick={() => {
-                      setInventorySearchInput("");
-                      setInventorySearch("");
-                    }}
-                  >
-                    Clear
-                  </button>
+            </div>
+
+            <div className="cambria-inventory-toolbar">
+              <label className="cambria-inventory-search">
+                <span className="cambria-inventory-search-label">Search inventory</span>
+                <span className="cambria-inventory-search-field">
+                  <svg className="cambria-inventory-search-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="1.8" />
+                    <path d="m20 20-3-3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                  </svg>
+                  <input
+                    type="search"
+                    className="cambria-inventory-search-input"
+                    placeholder="Search Cambria colors, material, or thickness…"
+                    value={inventorySearchInput}
+                    onChange={(e) => setInventorySearchInput(e.target.value)}
+                    aria-label="Search Cambria colors, material, or thickness"
+                  />
+                  {inventorySearchInput ? (
+                    <button
+                      type="button"
+                      className="cambria-inventory-search-clear"
+                      onClick={() => {
+                        setInventorySearchInput("");
+                        setInventorySearch("");
+                      }}
+                    >
+                      Clear
+                    </button>
+                  ) : null}
+                </span>
+              </label>
+
+              <div className="cambria-inventory-filters" role="group" aria-label="Inventory filters">
+                <div className="cambria-inventory-filter-row">
+                  <span className="cambria-inventory-filter-label">Availability</span>
+                  <div className="cambria-inventory-chips">
+                    {(
+                      [
+                        ["all", "All"],
+                        ["slabs", "Slabs"],
+                        ["remnants", "Remnants"],
+                      ] as const
+                    ).map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        className={`cambria-inventory-chip${inventoryKind === value ? " is-active" : ""}`}
+                        onClick={() => setInventoryKind(value)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {inventoryThicknessOptions.length > 0 ? (
+                  <div className="cambria-inventory-filter-row">
+                    <span className="cambria-inventory-filter-label">Thickness</span>
+                    <div className="cambria-inventory-chips">
+                      <button
+                        type="button"
+                        className={`cambria-inventory-chip${inventoryThickness === "all" ? " is-active" : ""}`}
+                        onClick={() => setInventoryThickness("all")}
+                      >
+                        All
+                      </button>
+                      {inventoryThicknessOptions.map((t) => (
+                        <button
+                          key={t}
+                          type="button"
+                          className={`cambria-inventory-chip${inventoryThickness === t ? " is-active" : ""}`}
+                          onClick={() => setInventoryThickness(t)}
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 ) : null}
+
+                <div className="cambria-inventory-filter-row">
+                  <span className="cambria-inventory-filter-label">More</span>
+                  <div className="cambria-inventory-chips">
+                    <button
+                      type="button"
+                      className={`cambria-inventory-chip${inventoryPhotosOnly ? " is-active" : ""}`}
+                      onClick={() => setInventoryPhotosOnly((v) => !v)}
+                    >
+                      With photos
+                    </button>
+                    <button
+                      type="button"
+                      className={`cambria-inventory-chip${inventorySort === "available" ? " is-active" : ""}`}
+                      onClick={() => setInventorySort("available")}
+                    >
+                      Most available
+                    </button>
+                    <button
+                      type="button"
+                      className={`cambria-inventory-chip${inventorySort === "name" ? " is-active" : ""}`}
+                      onClick={() => setInventorySort("name")}
+                    >
+                      A–Z
+                    </button>
+                    {hasActiveInventoryFilters ? (
+                      <button
+                        type="button"
+                        className="cambria-inventory-chip cambria-inventory-chip--reset"
+                        onClick={resetInventoryFilters}
+                      >
+                        Reset
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
               </div>
             </div>
+
             {inventoryItems.length === 0 ? (
               <div className="empty-state">
                 <p className="empty-title">No Cambria inventory on hand</p>
@@ -565,8 +781,8 @@ export default function PublicCambriaPage() {
               </div>
             ) : filteredInventory.length === 0 ? (
               <div className="empty-state">
-                <p className="empty-title">No Cambria inventory matches that search.</p>
-                <p className="empty-sub">Try another color name, material, or thickness.</p>
+                <p className="empty-title">No Cambria inventory matches those filters.</p>
+                <p className="empty-sub">Try clearing search or adjusting availability, thickness, or photo filters.</p>
               </div>
             ) : (
               <div className="cambria-kiosk-detail-grid">
