@@ -28,7 +28,7 @@ export type VisualizerTexture = {
   fullUrl: string;
   hasImage: boolean;
   active: boolean;
-  source?: "static" | "elite100_visual_asset";
+  source?: "static" | "elite100_visual_asset" | "cambria_visual_asset";
 };
 
 export type TextureCatalogMeta = {
