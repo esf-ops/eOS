@@ -208,28 +208,35 @@ body {
  * revert to the clean ambient backdrop automatically.
  *
  * Design rationale:
- *  - blur(1.5px) softens the 1024×576 source when scaled to 1920×1080 and
- *    shifts the treatment from "photo behind text" to "environmental surface."
- *  - The wash gradient is the primary readability mechanism: nearly opaque on
- *    the left (headline column), semi-transparent toward the center so the
- *    building is visible but not distracting near the card grid.
+ *  - blur(1.5px) shifts the treatment from "photo behind text" to
+ *    "environmental surface" without hiding detail on the 2560/3840 assets.
+ *  - The wash is a full-height left-side porcelain band (no vertical vignette)
+ *    so topbar, headline, subhead, and slideshow stay readable; it fades out
+ *    before the card grid so the building remains visible on the right.
  *  - The slow-zoom animation (3% over 30s) gives the backdrop a "breathing"
  *    quality without perceptibly moving — disabled on prefers-reduced-motion.
  *  - Opacity transitions on both photo and wash prevent a jarring snap when
  *    navigating home from a section.
  *
- * Image: 1024×576 JPEG (exact 16:9), fills 1920×1080 with zero cropping.
- * No WebP variant required at this resolution on kiosk hardware.
+ * Images: 2560×1440 (1x) and 3840×2160 (2x), both exact 16:9 from the
+ * DJI aerial source. Covers 1920×1080 / 4K without upscale pixelation.
  */
 .kiosk-bg-facility {
   position: absolute;
   /* Extend 5px beyond viewport so blur(1.5px) never shows a transparent edge */
   inset: -5px;
-  background-image: url("/backgrounds/esf-facility-aerial.jpg");
+  background-image: -webkit-image-set(
+    url("/backgrounds/esf-facility-aerial-2560.jpg") 1x,
+    url("/backgrounds/esf-facility-aerial-3840.jpg") 2x
+  );
+  background-image: image-set(
+    url("/backgrounds/esf-facility-aerial-2560.jpg") 1x,
+    url("/backgrounds/esf-facility-aerial-3840.jpg") 2x
+  );
   background-size: cover;
   background-position: center 40%;
   background-repeat: no-repeat;
-  /* Softens upscale artifacts; shifts photo into "environmental" feel */
+  /* Soft environmental feel; high-res source no longer needs heavy soften */
   filter: blur(1.5px);
   /* Very slow cinematic breathe — 3% zoom over 30s, barely perceptible */
   animation: kiosk-bg-breathe 30s ease-in-out infinite alternate;
@@ -240,33 +247,21 @@ body {
 }
 
 /*
- * Wash overlay — controls how much photo shows through to the content layer.
- * Two gradients compose (first on top):
- *   1. Soft vignette: darkens corners/edges with warm porcelain
- *   2. Horizontal gradient: strong porcelain left (headline) → lighter right (cards)
- * The result: building visible ~35–45% in the center-right, nearly hidden left.
+ * Wash overlay — full-height vertical band only (no radial / vertical fade).
+ * Strong porcelain on the left protects headline column + slideshow; fades to
+ * transparent before the card grid so the facility shows through on the right.
  */
 .kiosk-bg-facility-wash {
   position: absolute;
   inset: 0;
-  background:
-    /* Vignette: softens edges — reduced opacity so building breathes more */
-    radial-gradient(
-      ellipse 96% 82% at 54% 46%,
-      transparent 22%,
-      rgba(245, 243, 240, 0.12) 50%,
-      rgba(245, 243, 240, 0.38) 76%,
-      rgba(245, 243, 240, 0.60) 100%
-    ),
-    /* Horizontal wash: headline side remains near-opaque; card side is
-       lighter to let the facility building show through more clearly */
-    linear-gradient(
-      to right,
-      rgba(248, 247, 245, 0.97) 0%,
-      rgba(246, 244, 241, 0.86) 22%,
-      rgba(244, 242, 238, 0.47) 50%,
-      rgba(245, 243, 240, 0.62) 100%
-    );
+  background: linear-gradient(
+    to right,
+    rgba(248, 247, 245, 0.97) 0%,
+    rgba(246, 244, 241, 0.86) 22%,
+    rgba(244, 242, 238, 0.47) 42%,
+    rgba(245, 243, 240, 0.12) 52%,
+    transparent 58%
+  );
   pointer-events: none;
   opacity: 0;
   transition: opacity 1.1s ease;
