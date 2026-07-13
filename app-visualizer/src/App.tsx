@@ -22,7 +22,7 @@ import {
 } from "./lib/config";
 import { normalizeRoomImage } from "./lib/imageNormalize";
 import { buildLocalTextureCatalog, mergeApiTextures, type VisualizerTexture } from "./lib/textureCatalog";
-import { DEMO_ROOMS } from "./lib/samples";
+import { getVisualizerDemoRooms, type DemoRoom } from "./lib/samples";
 
 type WizardStep = 1 | 2 | 3;
 
@@ -48,6 +48,10 @@ function friendlyError(err: unknown, maxUploadMb: number): string {
 export function App() {
   const cambriaMode = useMemo(() => isCambriaVisualizerMode(), []);
   const copy = cambriaMode ? CAMBRIA_VISUALIZER_COPY : DEFAULT_VISUALIZER_COPY;
+  const demoRooms = useMemo(
+    () => getVisualizerDemoRooms(cambriaMode ? "cambria" : "default"),
+    [cambriaMode],
+  );
 
   const [config, setConfig] = useState<PublicVisualizerConfig | null>(null);
   const [textures, setTextures] = useState<VisualizerTexture[]>([]);
@@ -172,7 +176,7 @@ export function App() {
     setWizardStep(2);
   }
 
-  async function handleDemoRoom(room: (typeof DEMO_ROOMS)[number]) {
+  async function handleDemoRoom(room: DemoRoom) {
     setError(null);
     try {
       const res = await fetch(room.imageUrl);
@@ -291,6 +295,7 @@ export function App() {
                 eyebrow={copy.eyebrow}
                 heroHeadline={copy.heroHeadline}
                 heroSupporting={copy.heroSupporting}
+                demoRooms={demoRooms}
               />
             ) : null}
 

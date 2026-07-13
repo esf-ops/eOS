@@ -1,16 +1,18 @@
 import { useState } from "react";
 import { HERO_HEADLINE, HERO_SUPPORTING } from "../lib/config";
-import { DEMO_ROOMS } from "../lib/samples";
+import { DEMO_ROOMS, type DemoRoom } from "../lib/samples";
 
 type UploadExperienceProps = {
   maxUploadMb: number;
   disabled?: boolean;
   onFileSelected: (file: File) => void;
-  onDemoRoomSelected: (room: (typeof DEMO_ROOMS)[number]) => void;
+  onDemoRoomSelected: (room: DemoRoom) => void;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   eyebrow?: string;
   heroHeadline?: string;
   heroSupporting?: string;
+  /** Defaults to Elite Stone demo rooms; Cambria mode passes Cambria-only scenes. */
+  demoRooms?: DemoRoom[];
 };
 
 export function UploadExperience({
@@ -22,6 +24,7 @@ export function UploadExperience({
   eyebrow = "Elite 100 · Concept Preview",
   heroHeadline = HERO_HEADLINE,
   heroSupporting = HERO_SUPPORTING,
+  demoRooms = DEMO_ROOMS,
 }: UploadExperienceProps) {
   const [dragActive, setDragActive] = useState(false);
 
@@ -93,12 +96,13 @@ export function UploadExperience({
       <div className="viz-demo-row">
         <span className="viz-demo-label">No photo handy?</span>
         <div className="viz-demo-options">
-          {DEMO_ROOMS.map((room) => (
+          {demoRooms.map((room) => (
             <button
               key={room.id}
               type="button"
               className="viz-demo-chip"
               disabled={disabled}
+              title={room.subtitle || room.label}
               onClick={() => onDemoRoomSelected(room)}
             >
               <img src={room.imageUrl} alt="" loading="lazy" />
