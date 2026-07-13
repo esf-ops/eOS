@@ -106,6 +106,7 @@ export default function PublicElite100Page() {
                   key={group.price_group}
                   group={group}
                   kiosk={kiosk}
+                  showInventoryMeta={false}
                   onOpenItem={setSelected}
                 />
               ) : null

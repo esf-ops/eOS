@@ -185,6 +185,35 @@ export function summarizeElite100CurrentInventory(acc) {
 }
 
 /**
+ * Public Elite 100 showroom card — strip live inventory counts and inventory
+ * photo fields so homeowners/kiosk do not see current stock availability.
+ * Catalog reference / visual-asset image fields are retained.
+ * @param {Record<string, unknown>} card
+ */
+export function toPublicElite100ShowroomCard(card) {
+  if (!card || typeof card !== "object") return card;
+  const {
+    current_inventory_count: _cic,
+    total_inventory_count: _tic,
+    slab_count: _sc,
+    remnant_count: _rc,
+    verified_photo_count: _vpc,
+    has_inventory: _hi,
+    current_inventory_image_url: _ciu,
+    current_inventory_thumbnail_url: _ctu,
+    current_inventory_image_source_inventory_type: _cist,
+    current_inventory_image_inventory_id: _cii,
+    representative_image_url: _riu,
+    representative_thumbnail_url: _rtu,
+    representative_image_source_inventory_type: _rist,
+    representative_image_inventory_id: _rii,
+    match_debug: _md,
+    ...publicCard
+  } = card;
+  return publicCard;
+}
+
+/**
  * Columns fetched for Elite 100 inventory matching (active source rows only — same basis as All Inventory).
  */
 export const ELITE100_INVENTORY_MATCH_COLUMNS = Object.freeze([

@@ -1,4 +1,6 @@
-/** Shared Elite 100 carousel card shape (internal API + public showroom). */
+/** Shared Elite 100 carousel card shape (internal API + public showroom).
+ *  Inventory count fields are required on the protected Elite 100 tab response
+ *  and omitted from `/api/public/elite100-showroom`. */
 export type Elite100ShowroomItem = {
   catalog_item_id: string;
   color_key: string;
@@ -6,11 +8,12 @@ export type Elite100ShowroomItem = {
   material_name: string | null;
   display_name: string | null;
   price_group: string;
+  /** Live stock counts — protected Elite 100 only; omitted on public showroom. */
   current_inventory_count?: number;
-  total_inventory_count: number;
-  slab_count: number;
-  remnant_count: number;
-  verified_photo_count: number;
+  total_inventory_count?: number;
+  slab_count?: number;
+  remnant_count?: number;
+  verified_photo_count?: number;
   reference_image_url?: string | null;
   reference_image_url_full?: string | null;
   reference_image_url_1024?: string | null;
@@ -18,17 +21,17 @@ export type Elite100ShowroomItem = {
   reference_image_source?: string | null;
   current_inventory_image_url?: string | null;
   current_inventory_thumbnail_url?: string | null;
-  representative_image_url: string | null;
-  representative_thumbnail_url: string | null;
-  representative_image_source_inventory_type: string | null;
-  representative_image_inventory_id: string | null;
-  visual_asset_url: string | null;
-  visual_asset_url_600: string | null;
-  visual_asset_url_1024: string | null;
-  visual_asset_source: string | null;
-  visual_asset_kind: string | null;
-  visual_asset_review_status: string | null;
-  has_inventory: boolean;
+  representative_image_url?: string | null;
+  representative_thumbnail_url?: string | null;
+  representative_image_source_inventory_type?: string | null;
+  representative_image_inventory_id?: string | null;
+  visual_asset_url?: string | null;
+  visual_asset_url_600?: string | null;
+  visual_asset_url_1024?: string | null;
+  visual_asset_source?: string | null;
+  visual_asset_kind?: string | null;
+  visual_asset_review_status?: string | null;
+  has_inventory?: boolean;
   program_status: "elite_100";
   /** Dual-finish showroom variant (same catalog color, separate visual card). */
   is_finish_variant?: boolean;

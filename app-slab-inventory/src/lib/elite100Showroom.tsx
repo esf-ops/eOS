@@ -14,10 +14,13 @@ export function Elite100ShowroomSection({
   group,
   onOpenItem,
   kiosk = false,
+  showInventoryMeta = true,
 }: {
   group: Elite100ShowroomGroup;
   onOpenItem?: (item: Elite100ShowroomItem) => void;
   kiosk?: boolean;
+  /** When false (public/kiosk showroom), omit live inventory counts from cards. */
+  showInventoryMeta?: boolean;
 }) {
   const railRef = useRef<HTMLDivElement>(null);
   const scroll = (dir: -1 | 1) => {
@@ -52,7 +55,11 @@ export function Elite100ShowroomSection({
         <div className="e100-rail" ref={railRef} role="list" aria-label={`Group ${group.price_group} colors`}>
           {group.items.map((item) => (
             <div key={item.color_key} role="listitem">
-              <Elite100ShowroomCard item={item} onOpen={onOpenItem ? () => onOpenItem(item) : undefined} />
+              <Elite100ShowroomCard
+                item={item}
+                showInventoryMeta={showInventoryMeta}
+                onOpen={onOpenItem ? () => onOpenItem(item) : undefined}
+              />
             </div>
           ))}
         </div>
@@ -81,7 +88,10 @@ export function Elite100ShowroomCard({
       || item.visual_asset_url_600
       || null;
   const hasImage = Boolean(src) && !imgFailed;
-  const availableCount = item.current_inventory_count ?? item.total_inventory_count;
+  const availableCount = item.current_inventory_count ?? item.total_inventory_count ?? 0;
+  const slabCount = item.slab_count ?? 0;
+  const remnantCount = item.remnant_count ?? 0;
+  const hasInventory = Boolean(item.has_inventory) && availableCount > 0;
 
   const inner = (
     <>
@@ -113,15 +123,15 @@ export function Elite100ShowroomCard({
         <p className="cp-card-name">{item.color_name || "—"}</p>
         {item.material_name ? <p className="cp-card-material">{item.material_name}</p> : null}
         {showInventoryMeta ? (
-          item.has_inventory && availableCount > 0 ? (
+          hasInventory ? (
             <p className="cp-card-meta">
               <span>{currentlyAvailableLabel(availableCount)}</span>
-              {(item.slab_count > 0 || item.remnant_count > 0) ? (
+              {(slabCount > 0 || remnantCount > 0) ? (
                 <>
                   <span className="cp-dot" aria-hidden> · </span>
-                  {item.slab_count > 0 ? <span>{item.slab_count} slab{item.slab_count !== 1 ? "s" : ""}</span> : null}
-                  {item.slab_count > 0 && item.remnant_count > 0 ? <span className="cp-dot" aria-hidden> · </span> : null}
-                  {item.remnant_count > 0 ? <span>{item.remnant_count} remnant{item.remnant_count !== 1 ? "s" : ""}</span> : null}
+                  {slabCount > 0 ? <span>{slabCount} slab{slabCount !== 1 ? "s" : ""}</span> : null}
+                  {slabCount > 0 && remnantCount > 0 ? <span className="cp-dot" aria-hidden> · </span> : null}
+                  {remnantCount > 0 ? <span>{remnantCount} remnant{remnantCount !== 1 ? "s" : ""}</span> : null}
                 </>
               ) : null}
             </p>
@@ -137,12 +147,16 @@ export function Elite100ShowroomCard({
     return <article className="cp-card cp-card-static">{inner}</article>;
   }
 
+  const ariaLabel = showInventoryMeta
+    ? `${item.color_name ?? "Color"} · ${hasInventory ? currentlyAvailableLabel(availableCount) : "No current inventory"} — Open color`
+    : `${item.color_name ?? "Color"} — Open color`;
+
   return (
     <button
       type="button"
       className="cp-card"
       onClick={onOpen}
-      aria-label={`${item.color_name ?? "Color"} · ${item.has_inventory ? currentlyAvailableLabel(availableCount) : "No current inventory"} — Open color`}
+      aria-label={ariaLabel}
     >
       {inner}
     </button>

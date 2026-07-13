@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
 import { lookupElite100Texture } from "./elite100TextureAssets";
-import { currentlyAvailableLabel } from "./elite100ShowroomTypes";
 import { elite100CardImageSrcFull, type Elite100ShowroomItem } from "./elite100ShowroomTypes";
 
 const MIN_SCALE = 1;
@@ -21,7 +20,7 @@ type PublicElite100ColorLightboxProps = {
   onClose: () => void;
 };
 
-/** Public-safe color detail — image zoom only, no internal inventory modal. */
+/** Public-safe color detail — image zoom only, no inventory counts or internal inventory modal. */
 export function PublicElite100ColorLightbox({
   item,
   kiosk = false,
@@ -29,7 +28,6 @@ export function PublicElite100ColorLightbox({
 }: PublicElite100ColorLightboxProps) {
   const texture = lookupElite100Texture(item.color_name, item.color_key);
   const imageSrc = texture?.fullUrl ?? elite100CardImageSrcFull(item);
-  const availableCount = item.current_inventory_count ?? item.total_inventory_count;
 
   const [scale, setScale] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -127,11 +125,7 @@ export function PublicElite100ColorLightbox({
                 </>
               ) : null}
             </p>
-            {item.has_inventory && availableCount > 0 ? (
-              <p className="e100-public-lightbox-avail">{currentlyAvailableLabel(availableCount)}</p>
-            ) : (
-              <p className="e100-public-lightbox-avail muted">No current inventory</p>
-            )}
+            <p className="e100-public-lightbox-avail">Available through Elite Stone Fabrication</p>
           </div>
           <div className="e100-public-lightbox-actions">
             <button type="button" className="e100-public-lightbox-zoom" onClick={() => zoomBy(-ZOOM_STEP)} aria-label="Zoom out">−</button>

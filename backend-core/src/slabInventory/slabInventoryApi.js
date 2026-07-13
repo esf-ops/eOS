@@ -46,6 +46,7 @@ import {
   ELITE100_INVENTORY_MATCH_COLUMNS,
   listElite100FinishVariantAssets,
   summarizeElite100CurrentInventory,
+  toPublicElite100ShowroomCard,
 } from "./elite100CardModel.js";
 import {
   compactElite100MatchDebug,
@@ -84,6 +85,7 @@ export {
   isElite100FinishVariantAsset,
   listElite100FinishVariantAssets,
   summarizeElite100CurrentInventory,
+  toPublicElite100ShowroomCard,
 } from "./elite100CardModel.js";
 
 export {
@@ -1541,14 +1543,16 @@ export function attachSlabInventoryRoutes(app, { requireAuth, requireHeadAccess,
       const groups = COLOR_PROGRAM_PRICE_GROUP_ORDER.map((pg) => ({
         price_group: pg,
         items: sortItems(groupsMap.get(pg) ?? []).map(
-          ({ _sort_order: _so, ...rest }) => rest
+          ({ _sort_order: _so, ...rest }) =>
+            publicShowroom ? toPublicElite100ShowroomCard(rest) : rest
         ),
       }));
 
     return res.json({
       ok: true,
       installed: true,
-      active_inventory_source: sourceFilter.resolved,
+      // Public showroom: omit active_inventory_source — inventory is not part of the public product surface.
+      ...(publicShowroom ? {} : { active_inventory_source: sourceFilter.resolved }),
       collection: {
         collection_key: collection.collection_key,
         display_name: collection.display_name,
