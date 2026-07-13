@@ -13,6 +13,9 @@ type VisualizerEmptyStateProps = {
   onUploadClick: () => void;
   onFileSelect: (file: File) => void;
   onSelectSample: (sample: VisualizerSample) => void;
+  eyebrow?: string;
+  title?: string;
+  subtitle?: string;
 };
 
 export function VisualizerEmptyState({
@@ -24,6 +27,9 @@ export function VisualizerEmptyState({
   onUploadClick,
   onFileSelect,
   onSelectSample,
+  eyebrow = "Elite Stone Visualizer",
+  title = "Preview Elite 100 colors in a real kitchen",
+  subtitle = "Upload a kitchen photo or start from a sample space. Mark your countertop surfaces and explore stone options — entirely in your browser.",
 }: VisualizerEmptyStateProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -47,12 +53,9 @@ export function VisualizerEmptyState({
           }}
         />
         <div className="pv-dropzone-hero">
-          <p className="pv-eyebrow">Elite Stone Visualizer</p>
-          <h3 className="pv-dropzone-title">Preview Elite 100 colors in a real kitchen</h3>
-          <p className="pv-dropzone-sub">
-            Upload a kitchen photo or start from a sample space. Mark your countertop surfaces and
-            explore stone options — entirely in your browser.
-          </p>
+          <p className="pv-eyebrow">{eyebrow}</p>
+          <h3 className="pv-dropzone-title">{title}</h3>
+          <p className="pv-dropzone-sub">{subtitle}</p>
           <div className="pv-dropzone-actions">
             <button type="button" className="btn primary" onClick={onUploadClick}>
               Upload photo

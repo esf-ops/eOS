@@ -4932,23 +4932,20 @@ body.cambria-kiosk-body {
   cursor: pointer;
 }
 
-.cambria-kiosk-visualizer-panel {
-  min-height: min(70vh, 820px);
-  border: 1px solid var(--ck-line);
-  border-radius: 22px;
+.cambria-kiosk-visualizer {
   overflow: auto;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: var(--ck-shadow);
+  padding-top: 4px;
+  padding-bottom: clamp(20px, 3vh, 40px);
 }
 
-.cambria-kiosk-visualizer-panel .pv-page {
-  min-height: min(68vh, 800px);
+.cambria-kiosk-visualizer .pv-page {
+  /* Match protected Slab Inventory tab: full production visualizer chrome */
+  padding-top: 4px;
   background: transparent;
 }
 
-.cambria-kiosk-visualizer-panel .pv-eyebrow {
-  /* Keep ESF branding; avoid Elite 100 wording (already absent). */
-  letter-spacing: 0.14em;
+.cambria-kiosk-visualizer-empty {
+  margin-top: 48px;
 }
 
 .cambria-kiosk-detail-title {

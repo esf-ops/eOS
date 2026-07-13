@@ -45,7 +45,60 @@ export type PhotoVisualizerProps = {
   priceGroupOrder?: string[];
   loading?: boolean;
   error?: string | null;
+  /**
+   * Optional surface copy overrides. Defaults preserve Elite 100 production wording.
+   * Cambria kiosk passes Cambria-specific labels without changing layout/behavior.
+   */
+  copy?: VisualizerSurfaceCopy;
 };
+
+export type VisualizerSurfaceCopy = {
+  eyebrow?: string;
+  title?: string;
+  subtitle?: string;
+  colorsPanelTitle?: string;
+  emptyStateTitle?: string;
+  emptyStateSub?: string;
+  favoritesHint?: string;
+  textureLoadError?: string;
+  /** Prefix used on branded export footer (e.g. "Elite 100" or "Cambria"). */
+  exportBrandLabel?: string;
+};
+
+const DEFAULT_COPY: Required<VisualizerSurfaceCopy> = {
+  eyebrow: "Elite Stone Visualizer",
+  title: "Photo Visualizer",
+  subtitle:
+    "Upload a kitchen photo or start from a sample space. Preview Elite 100 colors on your countertops.",
+  colorsPanelTitle: "Elite 100 colors",
+  emptyStateTitle: "Preview Elite 100 colors in a real kitchen",
+  emptyStateSub:
+    "Upload a kitchen photo or start from a sample space. Mark your countertop surfaces and explore stone options — entirely in your browser.",
+  favoritesHint:
+    "Shortlist up to {n} Elite 100 colors for quick switching during a presentation.",
+  textureLoadError: "Some Elite 100 display textures could not be loaded.",
+  exportBrandLabel: "Elite 100",
+};
+
+/** Public Cambria kiosk copy — same UI, Cambria wording only. */
+export const CAMBRIA_VISUALIZER_COPY: VisualizerSurfaceCopy = {
+  eyebrow: "Elite Stone Visualizer",
+  title: "Cambria Visualizer",
+  subtitle:
+    "Upload a kitchen photo or start from a sample space. Preview Cambria designs in a real room.",
+  colorsPanelTitle: "Cambria designs",
+  emptyStateTitle: "Preview Cambria designs in a real kitchen",
+  emptyStateSub:
+    "Upload a kitchen photo or start from a sample space. Mark your countertop surfaces and explore Cambria options — entirely in your browser.",
+  favoritesHint:
+    "Shortlist up to {n} Cambria designs for quick switching during a presentation.",
+  textureLoadError: "Some Cambria display textures could not be loaded.",
+  exportBrandLabel: "Cambria",
+};
+
+function resolveCopy(copy?: VisualizerSurfaceCopy): Required<VisualizerSurfaceCopy> {
+  return { ...DEFAULT_COPY, ...(copy ?? {}) };
+}
 
 function textureUrlForSlug(textures: readonly Elite100VisualizerTexture[], slug: string): string | null {
   const asset = textures.find((t) => t.slug === slug);
@@ -69,7 +122,9 @@ export function PhotoVisualizer({
   priceGroupOrder = [],
   loading = false,
   error = null,
+  copy: copyProp,
 }: PhotoVisualizerProps) {
+  const copy = useMemo(() => resolveCopy(copyProp), [copyProp]);
   const textures = useMemo(
     () => buildElite100VisualizerTextures(groups, priceGroupOrder),
     [groups, priceGroupOrder],
@@ -286,10 +341,10 @@ export function PhotoVisualizer({
         else failed.push(slug);
       }
       setTextureImages(next);
-      if (failed.length) setTextureLoadError("Some Elite 100 display textures could not be loaded.");
+      if (failed.length) setTextureLoadError(copy.textureLoadError);
     });
     return () => { alive = false; };
-  }, [neededTextureSlugs, textures]);
+  }, [neededTextureSlugs, textures, copy.textureLoadError]);
 
   useEffect(() => {
     if (!photoImage || !workspaceRef.current) return;
@@ -450,8 +505,9 @@ export function PhotoVisualizer({
       colorName: selectedTexture?.colorName ?? null,
       materialName: selectedTexture?.materialName ?? null,
       priceGroup: selectedTexture?.priceGroup ?? null,
+      brandLabel: copy.exportBrandLabel,
     });
-  }, [photoImage, canCompare, masks, textureImages, exportMeta, selectedTexture]);
+  }, [photoImage, canCompare, masks, textureImages, exportMeta, selectedTexture, copy.exportBrandLabel]);
 
   const handleExportPlain = useCallback(() => {
     if (!photoImage || !canCompare) return;
@@ -478,11 +534,9 @@ export function PhotoVisualizer({
     <div className={`pv-page${presentationMode ? " presentation-mode" : ""}`}>
       <header className="pv-header">
         <div className="pv-header-text">
-          <p className="pv-eyebrow">Elite Stone Visualizer</p>
-          <h2 className="pv-title">Photo Visualizer</h2>
-          <p className="pv-sub">
-            Upload a kitchen photo or start from a sample space. Preview Elite 100 colors on your countertops.
-          </p>
+          <p className="pv-eyebrow">{copy.eyebrow}</p>
+          <h2 className="pv-title">{copy.title}</h2>
+          <p className="pv-sub">{copy.subtitle}</p>
         </div>
         <div className="pv-header-actions">
           <button
@@ -511,6 +565,9 @@ export function PhotoVisualizer({
               onUploadClick={() => fileInputRef.current?.click()}
               onFileSelect={(file) => void handleUpload(file)}
               onSelectSample={handleSelectSample}
+              eyebrow={copy.eyebrow}
+              title={copy.emptyStateTitle}
+              subtitle={copy.emptyStateSub}
             />
           ) : (
             <>
@@ -610,6 +667,7 @@ export function PhotoVisualizer({
               onToggleFavorite={toggleFavorite}
               onApplyFavorite={(slug) => applySettings({ textureSlug: slug })}
               canApply={Boolean(photoImage && masks.length > 0)}
+              hint={copy.favoritesHint.replace("{n}", String(MAX_FAVORITES))}
             />
 
             <section className="pv-panel">
@@ -647,7 +705,7 @@ export function PhotoVisualizer({
             </section>
 
             <section className="pv-panel">
-              <h3 className="pv-panel-title">Elite 100 colors</h3>
+              <h3 className="pv-panel-title">{copy.colorsPanelTitle}</h3>
               {selectedTexture ? (
                 <div className="pv-texture-selected">
                   <div className="pv-texture-selected-media">

@@ -11,7 +11,11 @@ import {
   type PublicCambriaShowroomPayload,
 } from "./lib/publicCambriaApi";
 import { isKioskOrArreyaMode } from "./lib/publicCambriaRoute";
-import { MaterialPhotoVisualizer } from "./MaterialPhotoVisualizer";
+import { MaterialPhotoVisualizer, CAMBRIA_VISUALIZER_COPY } from "./MaterialPhotoVisualizer";
+import {
+  countCambriaVisualizerTextures,
+  toCambriaVisualizerGroups,
+} from "./lib/cambriaVisualizerAdapter";
 
 type CambriaView = "home" | "designs" | "inventory" | "visualizer";
 
@@ -325,6 +329,14 @@ export default function PublicCambriaPage() {
   const designThumbs = useMemo(() => collectDesignThumbs(data), [data]);
   const inventoryThumbs = useMemo(() => collectInventoryThumbs(data), [data]);
   const designGroups = data?.designs?.groups ?? [];
+  const cambriaVisualizerGroups = useMemo(
+    () => toCambriaVisualizerGroups(designGroups),
+    [designGroups],
+  );
+  const cambriaVisualizerCount = useMemo(
+    () => countCambriaVisualizerTextures(cambriaVisualizerGroups),
+    [cambriaVisualizerGroups],
+  );
   const inventoryItems = data?.inventory?.items ?? [];
   const filteredInventory = useMemo(
     () => inventoryItems.filter((item) => matchesInventorySearch(item, inventorySearch)),
@@ -554,21 +566,23 @@ export default function PublicCambriaPage() {
             )}
           </main>
         ) : (
-          <main className="cambria-kiosk-main cambria-kiosk-detail cambria-kiosk-visualizer">
-            <div className="cambria-kiosk-detail-head">
-              <h2 className="cambria-kiosk-detail-title">Cambria Visualizer</h2>
-              <p className="cambria-kiosk-detail-sub">
-                Preview Cambria designs in a room scene · Cambria colors only
-              </p>
-            </div>
-            <div className="cambria-kiosk-visualizer-panel">
+          <main className="cambria-kiosk-main cambria-kiosk-visualizer">
+            {cambriaVisualizerCount === 0 && !busy ? (
+              <div className="empty-state cambria-kiosk-visualizer-empty">
+                <p className="empty-title">No Cambria textures available</p>
+                <p className="empty-sub">
+                  Cambria designs need display images before they can appear in the visualizer.
+                </p>
+              </div>
+            ) : (
               <MaterialPhotoVisualizer
-                groups={designGroups}
+                groups={cambriaVisualizerGroups}
                 priceGroupOrder={data?.price_group_order ?? []}
                 loading={busy && !data}
                 error={null}
+                copy={CAMBRIA_VISUALIZER_COPY}
               />
-            </div>
+            )}
           </main>
         )}
       </div>

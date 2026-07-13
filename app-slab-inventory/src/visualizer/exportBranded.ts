@@ -8,6 +8,8 @@ export type BrandedExportOptions = {
   materialName: string | null;
   priceGroup: string | null;
   includeBranding?: boolean;
+  /** Footer line prefix; defaults to Elite 100. Pass "Cambria" for Cambria kiosk. */
+  brandLabel?: string;
 };
 
 export function exportBrandedPreview(options: BrandedExportOptions): void {
@@ -18,6 +20,7 @@ export function exportBrandedPreview(options: BrandedExportOptions): void {
     materialName,
     priceGroup,
     includeBranding = true,
+    brandLabel = "Elite 100",
   } = options;
 
   const photo = scene.photo;
@@ -58,7 +61,7 @@ export function exportBrandedPreview(options: BrandedExportOptions): void {
     ctx.fillStyle = "rgba(255,255,255,0.88)";
 
     const detailLines = [
-      colorName ? `Elite 100 · ${colorName}` : "Elite 100 Visualizer",
+      colorName ? `${brandLabel} · ${colorName}` : `${brandLabel} Visualizer`,
       materialName ?? null,
       priceGroup ? `Group ${priceGroup}` : null,
       exportMeta.projectName ? `Project: ${exportMeta.projectName}` : null,

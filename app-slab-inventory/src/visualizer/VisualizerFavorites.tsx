@@ -7,6 +7,7 @@ type VisualizerFavoritesProps = {
   onToggleFavorite: (slug: string) => void;
   onApplyFavorite: (slug: string) => void;
   canApply: boolean;
+  hint?: string;
 };
 
 export function VisualizerFavorites({
@@ -16,16 +17,18 @@ export function VisualizerFavorites({
   onToggleFavorite,
   onApplyFavorite,
   canApply,
+  hint,
 }: VisualizerFavoritesProps) {
+  const hintText =
+    hint ??
+    `Shortlist up to ${maxFavorites} Elite 100 colors for quick switching during a presentation.`;
   return (
     <section className="pv-panel pv-panel-favorites">
       <div className="pv-panel-title-row">
         <h3 className="pv-panel-title">Favorites</h3>
         <span className="pv-fav-count">{favorites.length}/{maxFavorites}</span>
       </div>
-      <p className="pv-panel-hint">
-        Shortlist up to {maxFavorites} Elite 100 colors for quick switching during a presentation.
-      </p>
+      <p className="pv-panel-hint">{hintText}</p>
       {favorites.length === 0 ? (
         <p className="pv-panel-hint pv-fav-empty">
           Tap the heart on any color below to add it here.
