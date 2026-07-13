@@ -81,23 +81,33 @@ import {
   assert.equal(card.rack, undefined);
   assert.equal(card.cost, undefined);
   assert.equal(card.sample_inventory_ids, undefined);
+  assert.equal(card.image_url, "https://example.com/slab.jpg");
+  assert.equal(card.thumbnail_url, "https://example.com/slab_t.jpg");
   console.log("ok: toPublicCambriaInventoryCard sanitizes");
 }
 
 {
-  const imageMap = new Map();
-  const lookupImage = (row) => {
-    if (row.id === "1") {
-      return { image_status: "ok", image_url: "https://example.com/a.jpg", thumbnail_url: "https://example.com/a_t.jpg" };
-    }
-    return { image_status: "missing", image_url: null, thumbnail_url: null };
+  const imageMap = new Map([
+    [
+      "slab-1",
+      {
+        image_status: "ok",
+        image_url: "https://example.com/a.jpg",
+        thumbnail_url: "https://example.com/a_t.jpg",
+      },
+    ],
+  ]);
+  // Same signature as lookupInventoryImage(imageMap, inventoryRow, sourceFilter)
+  const lookupImage = (map, row) => {
+    const id = String(row?.external_slab_id ?? "");
+    return map.get(id) ?? null;
   };
   const cards = groupCambriaLiveInventoryCards(
     [
-      { id: "1", color_name: "Axbridge", material_name: "Cambria", source_inventory_type: "Slab", thickness_nominal: "3cm", is_active: true },
-      { id: "2", color_name: "Axbridge", material_name: "Cambria", source_inventory_type: "Remnant", thickness_nominal: "3cm", is_active: true },
-      { id: "3", color_name: "Other", material_name: "ESF", source_inventory_type: "Slab", is_active: true },
-      { id: "4", color_name: "Sold", material_name: "Cambria", source_inventory_type: "Slab", is_active: false },
+      { id: "1", external_slab_id: "slab-1", color_name: "Axbridge", material_name: "Cambria", source_inventory_type: "Slab", thickness_nominal: "3cm", is_active: true },
+      { id: "2", external_slab_id: "slab-2", color_name: "Axbridge", material_name: "Cambria", source_inventory_type: "Remnant", thickness_nominal: "3cm", is_active: true },
+      { id: "3", external_slab_id: "slab-3", color_name: "Other", material_name: "ESF", source_inventory_type: "Slab", is_active: true },
+      { id: "4", external_slab_id: "slab-4", color_name: "Sold", material_name: "Cambria", source_inventory_type: "Slab", is_active: false },
     ],
     imageMap,
     lookupImage,
@@ -109,7 +119,9 @@ import {
   assert.equal(cards[0].slab_count, 1);
   assert.equal(cards[0].remnant_count, 1);
   assert.equal(cards[0].representative_image_url, "https://example.com/a.jpg");
-  console.log("ok: groupCambriaLiveInventoryCards filters + groups");
+  assert.equal(cards[0].thumbnail_url, "https://example.com/a_t.jpg");
+  assert.equal(cards[0].image_url, "https://example.com/a.jpg");
+  console.log("ok: groupCambriaLiveInventoryCards filters + groups + images");
 }
 
 {

@@ -82,6 +82,9 @@ export function toPublicCambriaDesignCard(card) {
  */
 export function toPublicCambriaInventoryCard(card) {
   if (!card || typeof card !== "object") return card;
+  const imageUrl = card.representative_image_url ?? card.image_url ?? null;
+  const thumbUrl =
+    card.representative_thumbnail_url ?? card.thumbnail_url ?? imageUrl ?? null;
   return {
     color_key: card.color_key ?? null,
     color_name: card.color_name ?? null,
@@ -90,8 +93,11 @@ export function toPublicCambriaInventoryCard(card) {
     slab_count: Number(card.slab_count ?? 0),
     remnant_count: Number(card.remnant_count ?? 0),
     thickness_nominal: card.thickness_nominal ?? null,
-    representative_image_url: card.representative_image_url ?? null,
-    representative_thumbnail_url: card.representative_thumbnail_url ?? null,
+    representative_image_url: imageUrl,
+    representative_thumbnail_url: thumbUrl,
+    // Aliases matching protected live-inventory card fields (public-safe URLs only).
+    image_url: imageUrl,
+    thumbnail_url: thumbUrl,
   };
 }
 
@@ -102,7 +108,8 @@ export function toPublicCambriaInventoryCard(card) {
  *
  * @param {Array<Record<string, unknown>>} rows  Already Cambria-filtered active rows
  * @param {Map<string, Record<string, unknown>>} imageMap
- * @param {(row: Record<string, unknown>, map: Map<string, Record<string, unknown>>, filter: unknown) => { image_url?: string|null, thumbnail_url?: string|null, image_status?: string|null }|null} lookupImage
+ * @param {(imageMap: Map<string, Record<string, unknown>>, row: Record<string, unknown>, filter: unknown) => { image_url?: string|null, thumbnail_url?: string|null, image_status?: string|null }|null} lookupImage
+ *   Same argument order as lookupInventoryImage(imageMap, inventoryRow, sourceFilter).
  * @param {unknown} [sourceFilter]
  */
 export function groupCambriaLiveInventoryCards(rows, imageMap, lookupImage, sourceFilter = null) {
@@ -147,13 +154,28 @@ export function groupCambriaLiveInventoryCards(rows, imageMap, lookupImage, sour
   for (const [colorKey, g] of groups.entries()) {
     let repImage = null;
     let repThumbnail = null;
+    let foundOk = false;
     for (const invRow of g.inventoryRows) {
-      const img = typeof lookupImage === "function" ? lookupImage(invRow, imageMap, sourceFilter) : null;
-      if (img?.image_status === "ok") {
-        if (!repImage) {
-          repImage = img.image_url ?? null;
-          repThumbnail = img.thumbnail_url ?? null;
-        }
+      const img =
+        typeof lookupImage === "function"
+          ? lookupImage(imageMap, invRow, sourceFilter)
+          : null;
+      if (!img) continue;
+      const status = String(img.image_status ?? "").toLowerCase();
+      if (status === "missing" || status === "error") continue;
+      const full = img.image_url ?? null;
+      const thumb = img.thumbnail_url ?? img.image_url ?? null;
+      if (!full && !thumb) continue;
+      // Prefer verified "ok" images; keep first usable URL as fallback.
+      if (status === "ok") {
+        repImage = full || thumb;
+        repThumbnail = thumb || full;
+        foundOk = true;
+        break;
+      }
+      if (!foundOk && !repImage) {
+        repImage = full || thumb;
+        repThumbnail = thumb || full;
       }
     }
     const thicknesses = [...g.thicknesses].sort();
@@ -168,6 +190,8 @@ export function groupCambriaLiveInventoryCards(rows, imageMap, lookupImage, sour
         thickness_nominal: thicknesses.length === 1 ? thicknesses[0] : thicknesses.length > 1 ? thicknesses.join(" / ") : null,
         representative_image_url: repImage,
         representative_thumbnail_url: repThumbnail,
+        image_url: repImage,
+        thumbnail_url: repThumbnail,
       })
     );
   }

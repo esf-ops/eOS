@@ -4528,17 +4528,10 @@ body.cambria-kiosk-body {
 .cambria-kiosk-bg-facility {
   position: absolute;
   inset: -5px;
-  background-image: -webkit-image-set(
-    url("/backgrounds/esf-facility-aerial-2560.jpg") 1x,
-    url("/backgrounds/esf-facility-aerial-3840.jpg") 2x
-  );
-  background-image: image-set(
-    url("/backgrounds/esf-facility-aerial-2560.jpg") 1x,
-    url("/backgrounds/esf-facility-aerial-3840.jpg") 2x
-  );
+  background-image: url("/backgrounds/cambria-kiosk-background.png");
   background-size: cover;
   background-position: center 40%;
-  filter: blur(0.6px);
+  filter: blur(0.4px);
   opacity: 0;
   transition: opacity 1s ease;
   animation: cambria-kiosk-breathe 30s ease-in-out infinite alternate;
@@ -4757,8 +4750,8 @@ body.cambria-kiosk-body {
 
 .cambria-kiosk-card-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: clamp(18px, 1.6vw, 28px);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(14px, 1.4vw, 24px);
   height: 100%;
   max-height: min(72vh, 720px);
 }
@@ -4838,6 +4831,22 @@ body.cambria-kiosk-body {
   display: block;
 }
 
+.cambria-kiosk-card-badge {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 2;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: #b91c1c;
+  color: #fff;
+  font-size: clamp(0.68rem, 0.75vw, 0.82rem);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  box-shadow: 0 4px 14px rgba(185, 28, 28, 0.42);
+}
+
 .cambria-kiosk-card-body {
   position: relative;
   z-index: 1;
@@ -4848,7 +4857,7 @@ body.cambria-kiosk-body {
 
 .cambria-kiosk-card-title {
   font-family: var(--ck-font-card);
-  font-size: clamp(1.55rem, 2vw, 2.45rem);
+  font-size: clamp(1.35rem, 1.7vw, 2.1rem);
   font-weight: 600;
   line-height: 1.1;
 }
@@ -4876,6 +4885,70 @@ body.cambria-kiosk-body {
 
 .cambria-kiosk-detail-head {
   margin-bottom: clamp(16px, 2vw, 28px);
+}
+
+.cambria-kiosk-detail-head--inventory {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.cambria-kiosk-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 280px;
+  max-width: 520px;
+}
+
+.cambria-kiosk-search-input {
+  flex: 1;
+  min-height: 56px;
+  padding: 0 18px;
+  border-radius: 999px;
+  border: 1px solid var(--ck-line-strong);
+  background: rgba(255, 255, 255, 0.95);
+  font-size: clamp(1rem, 1.2vw, 1.15rem);
+  color: var(--ck-ink);
+  box-shadow: 0 10px 24px rgba(20, 24, 33, 0.06);
+}
+
+.cambria-kiosk-search-input:focus {
+  outline: 2px solid rgba(185, 28, 28, 0.28);
+  outline-offset: 1px;
+}
+
+.cambria-kiosk-search-clear {
+  min-height: 56px;
+  padding: 0 18px;
+  border-radius: 999px;
+  border: 1px solid var(--ck-line-strong);
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--ck-ink);
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cambria-kiosk-visualizer-panel {
+  min-height: min(70vh, 820px);
+  border: 1px solid var(--ck-line);
+  border-radius: 22px;
+  overflow: auto;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: var(--ck-shadow);
+}
+
+.cambria-kiosk-visualizer-panel .pv-page {
+  min-height: min(68vh, 800px);
+  background: transparent;
+}
+
+.cambria-kiosk-visualizer-panel .pv-eyebrow {
+  /* Keep ESF branding; avoid Elite 100 wording (already absent). */
+  letter-spacing: 0.14em;
 }
 
 .cambria-kiosk-detail-title {
@@ -4995,6 +5068,13 @@ body.cambria-kiosk-body {
   .cambria-kiosk-card-grid {
     grid-template-columns: 1fr;
     max-height: none;
+  }
+  .cambria-kiosk-detail-head--inventory {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .cambria-kiosk-search {
+    max-width: none;
   }
   .cambria-kiosk-topbar {
     flex-wrap: wrap;

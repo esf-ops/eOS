@@ -11,6 +11,9 @@ export type PublicCambriaInventoryCard = {
   thickness_nominal: string | null;
   representative_image_url: string | null;
   representative_thumbnail_url: string | null;
+  /** Aliases matching protected live-inventory card fields. */
+  image_url?: string | null;
+  thumbnail_url?: string | null;
 };
 
 export type PublicCambriaShowroomPayload = {

@@ -11,8 +11,9 @@ import {
   type PublicCambriaShowroomPayload,
 } from "./lib/publicCambriaApi";
 import { isKioskOrArreyaMode } from "./lib/publicCambriaRoute";
+import { MaterialPhotoVisualizer } from "./MaterialPhotoVisualizer";
 
-type CambriaView = "home" | "designs" | "inventory";
+type CambriaView = "home" | "designs" | "inventory" | "visualizer";
 
 const FALLBACK_SWATCHES = [
   "/material-textures/elite100/thumb/carrara-royale.jpg",
@@ -23,9 +24,11 @@ const FALLBACK_SWATCHES = [
   "/material-textures/elite100/thumb/india-black-pearl-polished.jpg",
 ];
 
+const VISUALIZER_CARD_IMAGE = "/visualizer-samples/dark-cabinet-kitchen.svg";
+
 function parseCambriaView(search: string): CambriaView {
   const view = new URLSearchParams(search).get("view");
-  if (view === "designs" || view === "inventory") return view;
+  if (view === "designs" || view === "inventory" || view === "visualizer") return view;
   return "home";
 }
 
@@ -47,6 +50,26 @@ function inventoryCountLabel(item: PublicCambriaInventoryCard): string {
   return parts.join(" · ");
 }
 
+function inventoryCardImageSrc(item: PublicCambriaInventoryCard): string | null {
+  return (
+    item.thumbnail_url ||
+    item.representative_thumbnail_url ||
+    item.image_url ||
+    item.representative_image_url ||
+    null
+  );
+}
+
+function inventoryLightboxImageSrc(item: PublicCambriaInventoryCard): string | null {
+  return (
+    item.image_url ||
+    item.representative_image_url ||
+    item.thumbnail_url ||
+    item.representative_thumbnail_url ||
+    null
+  );
+}
+
 function collectDesignThumbs(data: PublicCambriaShowroomPayload | null, limit = 6): string[] {
   const urls: string[] = [];
   for (const group of data?.designs?.groups ?? []) {
@@ -62,7 +85,7 @@ function collectDesignThumbs(data: PublicCambriaShowroomPayload | null, limit = 
 function collectInventoryThumbs(data: PublicCambriaShowroomPayload | null, limit = 4): string[] {
   const urls: string[] = [];
   for (const item of data?.inventory?.items ?? []) {
-    const src = item.representative_thumbnail_url || item.representative_image_url;
+    const src = inventoryCardImageSrc(item);
     if (src && !urls.includes(src)) urls.push(src);
     if (urls.length >= limit) return urls;
   }
@@ -73,6 +96,20 @@ function collectInventoryThumbs(data: PublicCambriaShowroomPayload | null, limit
         "/material-textures/elite100/thumb/india-black-pearl-polished.jpg",
         "/material-textures/elite100/thumb/suede-brown-polished.jpg",
       ];
+}
+
+function matchesInventorySearch(item: PublicCambriaInventoryCard, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  const haystack = [
+    item.color_name,
+    item.material_name,
+    item.thickness_nominal,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(q);
 }
 
 function ensureDisplayFonts() {
@@ -86,6 +123,13 @@ function ensureDisplayFonts() {
   document.head.appendChild(link);
 }
 
+function sectionTitleForView(view: CambriaView): string | null {
+  if (view === "designs") return "Cambria Designs";
+  if (view === "inventory") return "Live Cambria Inventory";
+  if (view === "visualizer") return "Cambria Visualizer";
+  return null;
+}
+
 function CambriaInventoryCard({
   item,
   onOpen,
@@ -94,7 +138,7 @@ function CambriaInventoryCard({
   onOpen: () => void;
 }) {
   const [imgFailed, setImgFailed] = useState(false);
-  const src = item.representative_thumbnail_url || item.representative_image_url;
+  const src = inventoryCardImageSrc(item);
   const hasImage = Boolean(src) && !imgFailed;
 
   return (
@@ -138,7 +182,7 @@ function CambriaInventoryLightbox({
   item: PublicCambriaInventoryCard;
   onClose: () => void;
 }) {
-  const src = item.representative_image_url || item.representative_thumbnail_url;
+  const src = inventoryLightboxImageSrc(item);
 
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -209,12 +253,18 @@ export default function PublicCambriaPage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedDesign, setSelectedDesign] = useState<Elite100ShowroomItem | null>(null);
   const [selectedInventory, setSelectedInventory] = useState<PublicCambriaInventoryCard | null>(null);
+  const [inventorySearchInput, setInventorySearchInput] = useState("");
+  const [inventorySearch, setInventorySearch] = useState("");
 
   const goTo = useCallback((next: CambriaView) => {
     writeCambriaView(next);
     setView(next);
     setSelectedDesign(null);
     setSelectedInventory(null);
+    if (next !== "inventory") {
+      setInventorySearchInput("");
+      setInventorySearch("");
+    }
   }, []);
 
   useEffect(() => {
@@ -238,7 +288,7 @@ export default function PublicCambriaPage() {
     }
     desc.setAttribute(
       "content",
-      "Cambria Showcase — live Cambria inventory and stocked designs at Elite Stone Fabrication.",
+      "Cambria Showcase — live Cambria inventory, stocked designs, and visualizer at Elite Stone Fabrication.",
     );
 
     return () => {
@@ -267,10 +317,19 @@ export default function PublicCambriaPage() {
     };
   }, []);
 
+  useEffect(() => {
+    const t = window.setTimeout(() => setInventorySearch(inventorySearchInput), 180);
+    return () => window.clearTimeout(t);
+  }, [inventorySearchInput]);
+
   const designThumbs = useMemo(() => collectDesignThumbs(data), [data]);
   const inventoryThumbs = useMemo(() => collectInventoryThumbs(data), [data]);
   const designGroups = data?.designs?.groups ?? [];
   const inventoryItems = data?.inventory?.items ?? [];
+  const filteredInventory = useMemo(
+    () => inventoryItems.filter((item) => matchesInventorySearch(item, inventorySearch)),
+    [inventoryItems, inventorySearch],
+  );
 
   const rootClass = [
     "cambria-kiosk",
@@ -279,6 +338,8 @@ export default function PublicCambriaPage() {
   ]
     .filter(Boolean)
     .join(" ");
+
+  const sectionTitle = sectionTitleForView(view);
 
   return (
     <div className={rootClass} data-view={view}>
@@ -312,12 +373,10 @@ export default function PublicCambriaPage() {
             <span className="cambria-kiosk-powered">Powered by slabOS</span>
           </div>
 
-          {view !== "home" ? (
+          {sectionTitle ? (
             <div className="cambria-kiosk-topbar-section">
               <span className="cambria-kiosk-topbar-divider" aria-hidden />
-              <span className="cambria-kiosk-topbar-title">
-                {view === "designs" ? "Cambria Designs" : "Live Cambria Inventory"}
-              </span>
+              <span className="cambria-kiosk-topbar-title">{sectionTitle}</span>
             </div>
           ) : null}
 
@@ -386,6 +445,27 @@ export default function PublicCambriaPage() {
                   </span>
                 </span>
               </button>
+
+              <button
+                type="button"
+                className="cambria-kiosk-card cambria-kiosk-card--visualizer"
+                onClick={() => goTo("visualizer")}
+              >
+                <div className="cambria-kiosk-card-art cambria-kiosk-card-art--photo" aria-hidden>
+                  <img
+                    src={VISUALIZER_CARD_IMAGE}
+                    alt=""
+                    className="cambria-kiosk-card-photo"
+                    loading="eager"
+                    draggable={false}
+                  />
+                  <span className="cambria-kiosk-card-badge">Visualize</span>
+                </div>
+                <span className="cambria-kiosk-card-body">
+                  <span className="cambria-kiosk-card-title">Cambria Visualizer</span>
+                  <span className="cambria-kiosk-card-copy">Preview Cambria designs in a room scene.</span>
+                </span>
+              </button>
             </nav>
           </main>
         ) : view === "designs" ? (
@@ -417,24 +497,53 @@ export default function PublicCambriaPage() {
               </div>
             )}
           </main>
-        ) : (
+        ) : view === "inventory" ? (
           <main className="cambria-kiosk-main cambria-kiosk-detail">
-            <div className="cambria-kiosk-detail-head">
-              <h2 className="cambria-kiosk-detail-title">Live Cambria Inventory</h2>
-              <p className="cambria-kiosk-detail-sub">
-                {data
-                  ? `${data.inventory.total_colors} color${data.inventory.total_colors === 1 ? "" : "s"} · ${data.inventory.total_pieces} piece${data.inventory.total_pieces === 1 ? "" : "s"} on hand`
-                  : "Current Cambria stock at Elite Stone Fabrication"}
-              </p>
+            <div className="cambria-kiosk-detail-head cambria-kiosk-detail-head--inventory">
+              <div>
+                <h2 className="cambria-kiosk-detail-title">Live Cambria Inventory</h2>
+                <p className="cambria-kiosk-detail-sub">
+                  {data
+                    ? `${data.inventory.total_colors} color${data.inventory.total_colors === 1 ? "" : "s"} · ${data.inventory.total_pieces} piece${data.inventory.total_pieces === 1 ? "" : "s"} on hand`
+                    : "Current Cambria stock at Elite Stone Fabrication"}
+                </p>
+              </div>
+              <div className="cambria-kiosk-search">
+                <input
+                  type="search"
+                  className="cambria-kiosk-search-input"
+                  placeholder="Search color, material, or thickness…"
+                  value={inventorySearchInput}
+                  onChange={(e) => setInventorySearchInput(e.target.value)}
+                  aria-label="Search Cambria inventory"
+                />
+                {inventorySearchInput ? (
+                  <button
+                    type="button"
+                    className="cambria-kiosk-search-clear"
+                    onClick={() => {
+                      setInventorySearchInput("");
+                      setInventorySearch("");
+                    }}
+                  >
+                    Clear
+                  </button>
+                ) : null}
+              </div>
             </div>
             {inventoryItems.length === 0 ? (
               <div className="empty-state">
                 <p className="empty-title">No Cambria inventory on hand</p>
                 <p className="empty-sub">Live inventory will appear here when Cambria slabs are active in slabOS.</p>
               </div>
+            ) : filteredInventory.length === 0 ? (
+              <div className="empty-state">
+                <p className="empty-title">No Cambria inventory matches that search.</p>
+                <p className="empty-sub">Try another color name, material, or thickness.</p>
+              </div>
             ) : (
               <div className="cambria-kiosk-detail-grid">
-                {inventoryItems.map((item, idx) => (
+                {filteredInventory.map((item, idx) => (
                   <CambriaInventoryCard
                     key={item.color_key || `${item.color_name ?? "color"}-${idx}`}
                     item={item}
@@ -443,6 +552,23 @@ export default function PublicCambriaPage() {
                 ))}
               </div>
             )}
+          </main>
+        ) : (
+          <main className="cambria-kiosk-main cambria-kiosk-detail cambria-kiosk-visualizer">
+            <div className="cambria-kiosk-detail-head">
+              <h2 className="cambria-kiosk-detail-title">Cambria Visualizer</h2>
+              <p className="cambria-kiosk-detail-sub">
+                Preview Cambria designs in a room scene · Cambria colors only
+              </p>
+            </div>
+            <div className="cambria-kiosk-visualizer-panel">
+              <MaterialPhotoVisualizer
+                groups={designGroups}
+                priceGroupOrder={data?.price_group_order ?? []}
+                loading={busy && !data}
+                error={null}
+              />
+            </div>
           </main>
         )}
       </div>
