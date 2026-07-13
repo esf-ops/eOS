@@ -8,6 +8,9 @@ type UploadExperienceProps = {
   onFileSelected: (file: File) => void;
   onDemoRoomSelected: (room: (typeof DEMO_ROOMS)[number]) => void;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
+  eyebrow?: string;
+  heroHeadline?: string;
+  heroSupporting?: string;
 };
 
 export function UploadExperience({
@@ -16,6 +19,9 @@ export function UploadExperience({
   onFileSelected,
   onDemoRoomSelected,
   fileInputRef,
+  eyebrow = "Elite 100 · Concept Preview",
+  heroHeadline = HERO_HEADLINE,
+  heroSupporting = HERO_SUPPORTING,
 }: UploadExperienceProps) {
   const [dragActive, setDragActive] = useState(false);
 
@@ -30,11 +36,11 @@ export function UploadExperience({
   return (
     <section className="viz-upload" aria-labelledby="viz-upload-title">
       <div className="viz-upload-intro">
-        <p className="viz-eyebrow">Elite 100 · Concept Preview</p>
+        <p className="viz-eyebrow">{eyebrow}</p>
         <h1 id="viz-upload-title" className="viz-hero-title">
-          {HERO_HEADLINE}
+          {heroHeadline}
         </h1>
-        <p className="viz-hero-sub">{HERO_SUPPORTING}</p>
+        <p className="viz-hero-sub">{heroSupporting}</p>
       </div>
 
       {/* Accept a broad image/* set so iOS shows the full photo library.

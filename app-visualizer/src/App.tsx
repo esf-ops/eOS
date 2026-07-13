@@ -13,7 +13,13 @@ import {
   VisualizerApiError,
   type PublicVisualizerConfig,
 } from "./lib/api";
-import { VISUALIZER_DISCLAIMER } from "./lib/config";
+import { isCambriaVisualizerMode } from "./lib/cambriaMode";
+import { fetchCambriaVisualizerTextures } from "./lib/cambriaTextures";
+import {
+  CAMBRIA_VISUALIZER_COPY,
+  DEFAULT_VISUALIZER_COPY,
+  VISUALIZER_DISCLAIMER,
+} from "./lib/config";
 import { normalizeRoomImage } from "./lib/imageNormalize";
 import { buildLocalTextureCatalog, mergeApiTextures, type VisualizerTexture } from "./lib/textureCatalog";
 import { DEMO_ROOMS } from "./lib/samples";
@@ -28,7 +34,6 @@ function friendlyError(err: unknown, maxUploadMb: number): string {
     if (err.status === 429) return String(err.message);
     if (err.status === 503) return String(err.message);
     if (err.status === 504) return "Preview timed out. Please try again.";
-    // 502 typically means the provider returned no image (e.g. text-only response).
     if (err.status === 502) {
       return (
         "We couldn't generate an image preview from that photo. " +
@@ -41,8 +46,12 @@ function friendlyError(err: unknown, maxUploadMb: number): string {
 }
 
 export function App() {
+  const cambriaMode = useMemo(() => isCambriaVisualizerMode(), []);
+  const copy = cambriaMode ? CAMBRIA_VISUALIZER_COPY : DEFAULT_VISUALIZER_COPY;
+
   const [config, setConfig] = useState<PublicVisualizerConfig | null>(null);
   const [textures, setTextures] = useState<VisualizerTexture[]>([]);
+  const [texturesLoading, setTexturesLoading] = useState(true);
   const [usesElite100Assets, setUsesElite100Assets] = useState(false);
   const [fallbackStaticOnly, setFallbackStaticOnly] = useState(false);
 
@@ -62,9 +71,44 @@ export function App() {
   const textureCount = textures.length;
 
   useEffect(() => {
+    if (!cambriaMode) return;
+    const prev = document.title;
+    document.title = "Cambria Visualizer";
+    return () => {
+      document.title = prev;
+    };
+  }, [cambriaMode]);
+
+  useEffect(() => {
     void fetchPublicVisualizerConfig()
       .then(setConfig)
       .catch(() => setConfig(null));
+
+    setTexturesLoading(true);
+
+    if (cambriaMode) {
+      // Cambria-only: public showroom designs. Never fall back to Elite 100 / local catalog.
+      void fetchCambriaVisualizerTextures()
+        .then((list) => {
+          setTextures(list);
+          setUsesElite100Assets(false);
+          setFallbackStaticOnly(false);
+          if (list[0]) setMaterialId(list[0].id);
+        })
+        .catch((err: unknown) => {
+          console.warn("[Cambria Visualizer] Failed to load Cambria textures:", err);
+          setTextures([]);
+          setUsesElite100Assets(false);
+          setFallbackStaticOnly(false);
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Cambria designs could not be loaded. Please try again.",
+          );
+        })
+        .finally(() => setTexturesLoading(false));
+      return;
+    }
 
     void fetchPublicVisualizerTextures()
       .then((payload) => {
@@ -85,8 +129,9 @@ export function App() {
         setUsesElite100Assets(false);
         setFallbackStaticOnly(true);
         if (localCatalog.textures[0]) setMaterialId(localCatalog.textures[0].id);
-      });
-  }, [localCatalog]);
+      })
+      .finally(() => setTexturesLoading(false));
+  }, [cambriaMode, localCatalog]);
 
   useEffect(() => {
     if (!roomFile) {
@@ -98,11 +143,6 @@ export function App() {
     return () => URL.revokeObjectURL(url);
   }, [roomFile]);
 
-  // Shared normalizing entry point for camera capture, gallery upload, drag-drop,
-  // and demo rooms. Decodes the file on a canvas, resizes to ≤ 1800 px, and
-  // re-exports as JPEG — stripping EXIF and normalising colour space before any
-  // validation or upload happens. Both paths (camera + file picker) funnel here
-  // so there is no divergence.
   async function acceptRoomFile(file: File) {
     setError(null);
     setRenderedImage(null);
@@ -121,8 +161,6 @@ export function App() {
       return;
     }
 
-    // Size check against the normalized file (should always be safe after
-    // normalization, but guard anyway to give a clear message if somehow large).
     if (normalized.size > maxUploadMb * 1024 * 1024) {
       setError(`Photo is too large after processing. Maximum size is ${maxUploadMb} MB.`);
       return;
@@ -138,8 +176,6 @@ export function App() {
       const res = await fetch(room.imageUrl);
       if (!res.ok) throw new Error("Failed to load demo room");
       const blob = await res.blob();
-      // Demo rooms are already small JPEGs from our CDN — normalizeRoomImage
-      // handles them the same way as any other file (no-op resize if ≤ 1800 px).
       await acceptRoomFile(new File([blob], `${room.id}.jpg`, { type: blob.type || "image/jpeg" }));
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to load demo room");
@@ -200,11 +236,13 @@ export function App() {
 
   const canGenerate = Boolean(roomFile && materialId && config?.renderEnabled !== false);
   const showTopError = error && wizardStep !== 3;
+  const showCambriaEmpty =
+    cambriaMode && !texturesLoading && textureCount === 0 && wizardStep === 1;
 
   return (
-    <div className="viz-app">
+    <div className={`viz-app${cambriaMode ? " viz-app--cambria" : ""}`}>
       <VisualizerBackground />
-      <VisualizerHeader />
+      <VisualizerHeader productName={copy.productName} />
 
       <div className="viz-shell">
         {config && !config.publicVisualizerEnabled ? (
@@ -221,52 +259,72 @@ export function App() {
 
         <WizardStepIndicator currentStep={wizardStep} />
 
-        {showTopError ? (
+        {showTopError && !showCambriaEmpty ? (
           <div className="viz-alert viz-alert-error" role="alert">
             {error}
           </div>
         ) : null}
 
-        <main className="viz-stage" key={wizardStep}>
-          {wizardStep === 1 ? (
-            <UploadExperience
-              maxUploadMb={maxUploadMb}
-              disabled={generating}
-              onFileSelected={acceptRoomFile}
-              onDemoRoomSelected={(room) => void handleDemoRoom(room)}
-              fileInputRef={fileInputRef}
-            />
-          ) : null}
+        {showCambriaEmpty ? (
+          <main className="viz-stage">
+            <section className="viz-upload" aria-labelledby="viz-empty-title">
+              <div className="viz-upload-intro">
+                <p className="viz-eyebrow">{copy.eyebrow}</p>
+                <h1 id="viz-empty-title" className="viz-hero-title">
+                  {copy.emptyTexturesTitle}
+                </h1>
+                <p className="viz-hero-sub">{copy.emptyTexturesSub}</p>
+              </div>
+            </section>
+          </main>
+        ) : (
+          <main className="viz-stage" key={wizardStep}>
+            {wizardStep === 1 ? (
+              <UploadExperience
+                maxUploadMb={maxUploadMb}
+                disabled={generating || texturesLoading || (cambriaMode && textureCount === 0)}
+                onFileSelected={acceptRoomFile}
+                onDemoRoomSelected={(room) => void handleDemoRoom(room)}
+                fileInputRef={fileInputRef}
+                eyebrow={copy.eyebrow}
+                heroHeadline={copy.heroHeadline}
+                heroSupporting={copy.heroSupporting}
+              />
+            ) : null}
 
-          {wizardStep === 2 && roomPreview ? (
-            <MaterialStudio
-              roomPreview={roomPreview}
-              textures={textures}
-              textureCount={textureCount}
-              usesElite100Assets={usesElite100Assets}
-              fallbackStaticOnly={fallbackStaticOnly}
-              selectedId={materialId}
-              onSelect={setMaterialId}
-              onGenerate={() => void handleGenerate()}
-              onChangePhoto={handleChangePhoto}
-              generating={generating}
-              canGenerate={canGenerate}
-            />
-          ) : null}
+            {wizardStep === 2 && roomPreview ? (
+              <MaterialStudio
+                roomPreview={roomPreview}
+                textures={textures}
+                textureCount={textureCount}
+                usesElite100Assets={usesElite100Assets}
+                fallbackStaticOnly={fallbackStaticOnly}
+                catalogLabel={copy.catalogLabel}
+                chooseColorTitle={copy.chooseColorTitle}
+                searchPlaceholder={copy.searchPlaceholder}
+                selectedId={materialId}
+                onSelect={setMaterialId}
+                onGenerate={() => void handleGenerate()}
+                onChangePhoto={handleChangePhoto}
+                generating={generating}
+                canGenerate={canGenerate}
+              />
+            ) : null}
 
-          {wizardStep === 3 && roomPreview ? (
-            <PreviewExperience
-              roomPreview={roomPreview}
-              renderedImage={renderedImage ?? roomPreview}
-              materialName={materialName}
-              loading={generating}
-              error={error}
-              onTryAnotherColor={handleTryAnotherColor}
-              onUploadAnotherPhoto={handleUploadAnotherPhoto}
-              onDownload={handleDownload}
-            />
-          ) : null}
-        </main>
+            {wizardStep === 3 && roomPreview ? (
+              <PreviewExperience
+                roomPreview={roomPreview}
+                renderedImage={renderedImage ?? roomPreview}
+                materialName={materialName}
+                loading={generating}
+                error={error}
+                onTryAnotherColor={handleTryAnotherColor}
+                onUploadAnotherPhoto={handleUploadAnotherPhoto}
+                onDownload={handleDownload}
+              />
+            ) : null}
+          </main>
+        )}
       </div>
 
       <footer className="viz-footer">

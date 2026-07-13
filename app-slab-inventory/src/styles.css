@@ -4932,20 +4932,44 @@ body.cambria-kiosk-body {
   cursor: pointer;
 }
 
-.cambria-kiosk-visualizer {
-  overflow: auto;
-  padding-top: 4px;
-  padding-bottom: clamp(20px, 3vh, 40px);
+.cambria-kiosk-visualizer-handoff {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 24px;
 }
 
-.cambria-kiosk-visualizer .pv-page {
-  /* Match protected Slab Inventory tab: full production visualizer chrome */
-  padding-top: 4px;
-  background: transparent;
+.cambria-kiosk-handoff {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  max-width: 520px;
 }
 
-.cambria-kiosk-visualizer-empty {
-  margin-top: 48px;
+.cambria-kiosk-handoff-btn {
+  appearance: none;
+  border: 0;
+  border-radius: 14px;
+  padding: 16px 28px;
+  font-size: 1.05rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  color: #fff;
+  background: linear-gradient(135deg, #1a2332 0%, #2c3a4f 100%);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.28);
+  cursor: pointer;
+}
+
+.cambria-kiosk-handoff-btn:hover {
+  filter: brightness(1.06);
+}
+
+.cambria-kiosk-handoff-url {
+  margin: 0;
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.72);
+  word-break: break-all;
 }
 
 .cambria-kiosk-detail-title {

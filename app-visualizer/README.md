@@ -8,6 +8,16 @@ Public customer-facing deployment at **https://visualizer.eliteosfab.com** — n
 
 Isolated from slab inventory operations, quotes, pricing, and AI Takeoff job tables.
 
+## Cambria mode
+
+Public Cambria-only visualizer (same UI, Cambria designs only):
+
+- **URL:** `https://visualizer.eliteosfab.com/cambria`
+- **Arreya/kiosk:** `https://visualizer.eliteosfab.com/cambria?arreya=1`
+- **Alt query:** `/?mode=cambria`
+
+Textures come from `GET /api/public/cambria-showroom` (`designs` only). Render uses material ids `cambria-<catalog_item_id>` resolved server-side from public-safe visual assets. No Elite 100 fallback.
+
 ## Architecture
 
 | Layer | Location |

@@ -1,6 +1,10 @@
-import { POWERED_BY, PRODUCT_NAME } from "../lib/config";
+import { POWERED_BY } from "../lib/config";
 
-export function VisualizerHeader() {
+type VisualizerHeaderProps = {
+  productName?: string;
+};
+
+export function VisualizerHeader({ productName = "Elite Stone Visualizer" }: VisualizerHeaderProps) {
   return (
     <header className="viz-topbar">
       <div className="viz-brand">
@@ -22,7 +26,7 @@ export function VisualizerHeader() {
           </svg>
         </span>
         <span className="viz-brand-text">
-          <span className="viz-brand-name">{PRODUCT_NAME}</span>
+          <span className="viz-brand-name">{productName}</span>
           <span className="viz-brand-sub">{POWERED_BY}</span>
         </span>
       </div>

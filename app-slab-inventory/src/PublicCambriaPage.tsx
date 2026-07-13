@@ -11,11 +11,7 @@ import {
   type PublicCambriaShowroomPayload,
 } from "./lib/publicCambriaApi";
 import { isKioskOrArreyaMode } from "./lib/publicCambriaRoute";
-import { MaterialPhotoVisualizer, CAMBRIA_VISUALIZER_COPY } from "./MaterialPhotoVisualizer";
-import {
-  countCambriaVisualizerTextures,
-  toCambriaVisualizerGroups,
-} from "./lib/cambriaVisualizerAdapter";
+import { cambriaVisualizerUrl } from "./lib/cambriaVisualizerUrl";
 
 type CambriaView = "home" | "designs" | "inventory" | "visualizer";
 
@@ -329,15 +325,25 @@ export default function PublicCambriaPage() {
   const designThumbs = useMemo(() => collectDesignThumbs(data), [data]);
   const inventoryThumbs = useMemo(() => collectInventoryThumbs(data), [data]);
   const designGroups = data?.designs?.groups ?? [];
-  const cambriaVisualizerGroups = useMemo(
-    () => toCambriaVisualizerGroups(designGroups),
-    [designGroups],
-  );
-  const cambriaVisualizerCount = useMemo(
-    () => countCambriaVisualizerTextures(cambriaVisualizerGroups),
-    [cambriaVisualizerGroups],
-  );
   const inventoryItems = data?.inventory?.items ?? [];
+  const standaloneVisualizerUrl = useMemo(
+    () =>
+      cambriaVisualizerUrl({
+        arreya: isKioskOrArreyaMode() || new URLSearchParams(window.location.search).get("arreya") === "1",
+        kiosk: new URLSearchParams(window.location.search).get("kiosk") === "1",
+      }),
+    [],
+  );
+
+  function openStandaloneVisualizer() {
+    window.location.assign(standaloneVisualizerUrl);
+  }
+
+  useEffect(() => {
+    if (view !== "visualizer") return;
+    window.location.assign(standaloneVisualizerUrl);
+  }, [view, standaloneVisualizerUrl]);
+
   const filteredInventory = useMemo(
     () => inventoryItems.filter((item) => matchesInventorySearch(item, inventorySearch)),
     [inventoryItems, inventorySearch],
@@ -461,7 +467,7 @@ export default function PublicCambriaPage() {
               <button
                 type="button"
                 className="cambria-kiosk-card cambria-kiosk-card--visualizer"
-                onClick={() => goTo("visualizer")}
+                onClick={openStandaloneVisualizer}
               >
                 <div className="cambria-kiosk-card-art cambria-kiosk-card-art--photo" aria-hidden>
                   <img
@@ -566,23 +572,24 @@ export default function PublicCambriaPage() {
             )}
           </main>
         ) : (
-          <main className="cambria-kiosk-main cambria-kiosk-visualizer">
-            {cambriaVisualizerCount === 0 && !busy ? (
-              <div className="empty-state cambria-kiosk-visualizer-empty">
-                <p className="empty-title">No Cambria textures available</p>
-                <p className="empty-sub">
-                  Cambria designs need display images before they can appear in the visualizer.
-                </p>
-              </div>
-            ) : (
-              <MaterialPhotoVisualizer
-                groups={cambriaVisualizerGroups}
-                priceGroupOrder={data?.price_group_order ?? []}
-                loading={busy && !data}
-                error={null}
-                copy={CAMBRIA_VISUALIZER_COPY}
-              />
-            )}
+          <main className="cambria-kiosk-main cambria-kiosk-detail cambria-kiosk-visualizer-handoff">
+            <div className="cambria-kiosk-detail-head">
+              <h2 className="cambria-kiosk-detail-title">Cambria Visualizer</h2>
+              <p className="cambria-kiosk-detail-sub">
+                Opens the standalone Cambria visualizer — same experience as visualizer.eliteosfab.com,
+                with Cambria designs only.
+              </p>
+            </div>
+            <div className="cambria-kiosk-handoff">
+              <button
+                type="button"
+                className="cambria-kiosk-handoff-btn"
+                onClick={openStandaloneVisualizer}
+              >
+                Open Cambria Visualizer
+              </button>
+              <p className="cambria-kiosk-handoff-url">{standaloneVisualizerUrl}</p>
+            </div>
           </main>
         )}
       </div>

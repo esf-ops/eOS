@@ -8,6 +8,7 @@ import {
   findForbiddenPublicFields,
   normalizeColorNameKey,
 } from "./elite100VisualAssetTextures.mjs";
+import { lookupCambriaPublicMaterial } from "./cambriaPublicVisualizerMaterials.mjs";
 import { readPublicVisualizerAssetConfig } from "./publicVisualizerConfig.mjs";
 import { listBackendStaticPublicTextures } from "./publicVisualizerStaticCatalog.mjs";
 
@@ -304,7 +305,22 @@ export async function loadPublicMaterialBytes(materialId, opts = {}) {
 
   await ensureMaterialRegistry(opts);
 
-  const reg = materialRegistry.get(id);
+  let reg = materialRegistry.get(id);
+  if (!reg) {
+    // Cambria mode materials (cambria-<catalog_item_id>) are not in the Elite 100
+    // list response — resolve on demand from public-safe visual assets only.
+    const cambria = await lookupCambriaPublicMaterial(id, opts);
+    if (cambria?.fullUrl) {
+      reg = {
+        displayName: cambria.displayName,
+        fullUrl: cambria.fullUrl,
+        thumbUrl: cambria.thumbUrl,
+        source: cambria.source,
+      };
+      materialRegistry.set(id, reg);
+    }
+  }
+
   if (!reg) {
     throw Object.assign(new Error(`Unknown material: ${id}`), { statusCode: 400, code: "UNKNOWN_MATERIAL" });
   }

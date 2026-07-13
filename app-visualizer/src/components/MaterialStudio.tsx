@@ -7,6 +7,10 @@ type MaterialStudioProps = {
   textureCount: number;
   usesElite100Assets?: boolean;
   fallbackStaticOnly?: boolean;
+  /** When set, overrides Elite 100 / fallback catalog labels (Cambria mode). */
+  catalogLabel?: string;
+  chooseColorTitle?: string;
+  searchPlaceholder?: string;
   selectedId: string;
   onSelect: (id: string) => void;
   onGenerate: () => void;
@@ -21,6 +25,9 @@ export function MaterialStudio({
   textureCount,
   usesElite100Assets = false,
   fallbackStaticOnly = false,
+  catalogLabel: catalogLabelProp,
+  chooseColorTitle = "Choose your color",
+  searchPlaceholder,
   selectedId,
   onSelect,
   onGenerate,
@@ -28,11 +35,13 @@ export function MaterialStudio({
   generating,
   canGenerate,
 }: MaterialStudioProps) {
-  const catalogLabel = usesElite100Assets
-    ? "Elite 100 preview colors"
-    : fallbackStaticOnly
-      ? "Available Elite preview colors"
-      : "Elite preview colors";
+  const catalogLabel =
+    catalogLabelProp ??
+    (usesElite100Assets
+      ? "Elite 100 preview colors"
+      : fallbackStaticOnly
+        ? "Available Elite preview colors"
+        : "Elite preview colors");
 
   return (
     <section className="viz-studio" aria-label="Choose your countertop color">
@@ -52,7 +61,7 @@ export function MaterialStudio({
 
       <aside className="viz-studio-panel">
         <div className="viz-panel-head">
-          <h2>Choose your color</h2>
+          <h2>{chooseColorTitle}</h2>
           <p>
             {catalogLabel} · {textureCount} options
           </p>
@@ -64,6 +73,7 @@ export function MaterialStudio({
           onSelect={onSelect}
           disabled={generating}
           totalCount={textureCount}
+          searchPlaceholder={searchPlaceholder}
         />
 
         <div className="viz-panel-cta">

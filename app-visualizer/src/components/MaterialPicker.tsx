@@ -13,6 +13,7 @@ type MaterialPickerProps = {
   onSelect: (id: string) => void;
   disabled?: boolean;
   totalCount: number;
+  searchPlaceholder?: string;
 };
 
 const INITIAL_FILTERS: TextureFilterState = {
@@ -34,6 +35,7 @@ export function MaterialPicker({
   onSelect,
   disabled = false,
   totalCount,
+  searchPlaceholder = "Search colors…",
 }: MaterialPickerProps) {
   const [filters, setFilters] = useState<TextureFilterState>(INITIAL_FILTERS);
 
@@ -61,11 +63,11 @@ export function MaterialPicker({
           <input
             type="search"
             className="viz-search"
-            placeholder="Search colors…"
+            placeholder={searchPlaceholder}
             value={filters.search}
             onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}
             disabled={disabled}
-            aria-label="Search colors"
+            aria-label={searchPlaceholder}
           />
         </div>
 
