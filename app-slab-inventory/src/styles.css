@@ -4875,10 +4875,6 @@ body.cambria-kiosk-body {
   transition: transform 0.45s ease;
 }
 
-.cambria-kiosk-card--visualizer .cambria-kiosk-card-hero-img {
-  object-position: center 42%;
-}
-
 .cambria-kiosk-card:hover .cambria-kiosk-card-hero-img,
 .cambria-kiosk-card:focus-visible .cambria-kiosk-card-hero-img {
   transform: scale(1.1);
@@ -4979,6 +4975,35 @@ body.cambria-kiosk-body {
     rgba(5, 5, 5, 0.94) 100%
   );
   pointer-events: none;
+}
+
+/* Visualizer card: lighter wash so the kitchen hero stays clearly visible */
+.cambria-kiosk-card--visualizer .cambria-kiosk-card-shade {
+  background: linear-gradient(
+    180deg,
+    rgba(5, 5, 5, 0.05) 0%,
+    rgba(5, 5, 5, 0.08) 42%,
+    rgba(5, 5, 5, 0.42) 72%,
+    rgba(5, 5, 5, 0.78) 100%
+  );
+}
+
+.cambria-kiosk-card--visualizer .cambria-kiosk-card-hero-img {
+  position: relative;
+  z-index: 0;
+  object-position: center 32%;
+  filter: none;
+  opacity: 1;
+}
+
+.cambria-kiosk-card--inventory .cambria-kiosk-card-shade {
+  background: linear-gradient(
+    180deg,
+    rgba(5, 5, 5, 0.08) 0%,
+    rgba(5, 5, 5, 0.14) 40%,
+    rgba(5, 5, 5, 0.58) 72%,
+    rgba(5, 5, 5, 0.88) 100%
+  );
 }
 
 .cambria-kiosk-card-badge {

@@ -92,20 +92,61 @@ function collectDesignThumbs(data: PublicCambriaShowroomPayload | null, limit = 
   return urls.length ? urls : FALLBACK_SWATCHES.slice(0, limit);
 }
 
-function collectInventoryThumbs(data: PublicCambriaShowroomPayload | null, limit = 4): string[] {
-  const urls: string[] = [];
-  for (const item of data?.inventory?.items ?? []) {
-    const src = inventoryCardImageSrc(item);
-    if (src && !urls.includes(src)) urls.push(src);
-    if (urls.length >= limit) return urls;
-  }
-  return urls.length
-    ? urls
-    : [
-        "/material-textures/elite100/thumb/sicilia.jpg",
-        "/material-textures/elite100/thumb/india-black-pearl-polished.jpg",
-        "/material-textures/elite100/thumb/suede-brown-polished.jpg",
+/** Prefer catalog/design texture fields over inventory slab photos for landing heroes. */
+function scoreCambriaDesignTextureUrl(url: string): number {
+  const u = url.toLowerCase();
+  if (/1024|hero|original|full/.test(u)) return 40;
+  if (/600|thumb|thumbnail|small/.test(u)) return 8;
+  return 20;
+}
+
+/**
+ * Best high-resolution Cambria design/catalog texture from the public designs payload.
+ * Never uses live-inventory slab photos.
+ */
+function getBestCambriaDesignTexture(
+  data: PublicCambriaShowroomPayload | null | undefined,
+): string | null {
+  let best: string | null = null;
+  let bestScore = -1;
+
+  for (const group of data?.designs?.groups ?? []) {
+    for (const item of group.items ?? []) {
+      const candidates = [
+        item.reference_image_url_full,
+        item.reference_image_url_1024,
+        item.reference_image_url,
+        item.visual_asset_url_1024,
+        item.visual_asset_url,
+        item.visual_asset_url_600,
+        item.reference_image_url_600,
       ];
+      for (const candidate of candidates) {
+        const url = String(candidate ?? "").trim();
+        if (!url || !/^https?:\/\//i.test(url) && !url.startsWith("/")) continue;
+        const score = scoreCambriaDesignTextureUrl(url);
+        if (score > bestScore) {
+          bestScore = score;
+          best = url;
+        }
+      }
+    }
+  }
+
+  return best;
+}
+
+function getCambriaLandingCardImages(data: PublicCambriaShowroomPayload | null) {
+  const designThumbs = collectDesignThumbs(data, 6);
+  const inventoryHero =
+    getBestCambriaDesignTexture(data) ||
+    designThumbs[0] ||
+    INVENTORY_FALLBACK_IMAGE;
+  return {
+    designThumbs,
+    inventoryHero,
+    visualizerHero: VISUALIZER_CARD_IMAGE,
+  };
 }
 
 function matchesInventorySearch(item: PublicCambriaInventoryCard, query: string): boolean {
@@ -344,8 +385,7 @@ export default function PublicCambriaPage() {
     return () => window.clearTimeout(t);
   }, [inventorySearchInput]);
 
-  const designThumbs = useMemo(() => collectDesignThumbs(data), [data]);
-  const inventoryThumbs = useMemo(() => collectInventoryThumbs(data), [data]);
+  const landingCardImages = useMemo(() => getCambriaLandingCardImages(data), [data]);
   const designGroups = data?.designs?.groups ?? [];
   const inventoryItems = data?.inventory?.items ?? [];
   const standaloneVisualizerUrl = useMemo(
@@ -418,9 +458,9 @@ export default function PublicCambriaPage() {
     return [...set].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
   }, [inventoryItems]);
 
-  const inventoryHeroImage = inventoryThumbs[0] || INVENTORY_FALLBACK_IMAGE;
+  const inventoryHeroImage = landingCardImages.inventoryHero;
   const designHeroThumbs = useMemo(() => {
-    const base = designThumbs.slice(0, 6);
+    const base = landingCardImages.designThumbs.slice(0, 6);
     if (base.length === 0) return FALLBACK_SWATCHES.slice(0, 6);
     if (base.length >= 6) return base;
     const filled = [...base];
@@ -430,7 +470,7 @@ export default function PublicCambriaPage() {
       i += 1;
     }
     return filled;
-  }, [designThumbs]);
+  }, [landingCardImages.designThumbs]);
   const hasActiveInventoryFilters =
     Boolean(inventorySearchInput.trim()) ||
     inventoryKind !== "all" ||
@@ -567,13 +607,6 @@ export default function PublicCambriaPage() {
                     loading="eager"
                     draggable={false}
                   />
-                  {inventoryThumbs.length > 1 ? (
-                    <div className="cambria-kiosk-card-thumb-strip">
-                      {inventoryThumbs.slice(1, 4).map((src, i) => (
-                        <img key={`${src}-${i}`} src={src} alt="" loading="eager" draggable={false} />
-                      ))}
-                    </div>
-                  ) : null}
                   <div className="cambria-kiosk-card-shade" />
                 </div>
                 <span className="cambria-kiosk-card-body">
@@ -593,21 +626,13 @@ export default function PublicCambriaPage() {
               >
                 <div className="cambria-kiosk-card-media" aria-hidden>
                   <img
-                    src={VISUALIZER_CARD_IMAGE}
+                    src={landingCardImages.visualizerHero}
                     alt=""
                     className="cambria-kiosk-card-hero-img"
                     loading="eager"
+                    decoding="async"
                     draggable={false}
                   />
-                  {designHeroThumbs[0] ? (
-                    <img
-                      src={designHeroThumbs[0]}
-                      alt=""
-                      className="cambria-kiosk-card-visualizer-swatch"
-                      loading="eager"
-                      draggable={false}
-                    />
-                  ) : null}
                   <div className="cambria-kiosk-card-shade" />
                   <span className="cambria-kiosk-card-badge">Visualize</span>
                 </div>
