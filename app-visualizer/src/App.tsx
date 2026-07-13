@@ -74,8 +74,10 @@ export function App() {
     if (!cambriaMode) return;
     const prev = document.title;
     document.title = "Cambria Visualizer";
+    document.body.classList.add("viz-cambria-body");
     return () => {
       document.title = prev;
+      document.body.classList.remove("viz-cambria-body");
     };
   }, [cambriaMode]);
 
@@ -240,9 +242,9 @@ export function App() {
     cambriaMode && !texturesLoading && textureCount === 0 && wizardStep === 1;
 
   return (
-    <div className={`viz-app${cambriaMode ? " viz-app--cambria" : ""}`}>
+    <div className={`viz-app${cambriaMode ? " viz-app--cambria visualizer-cambria-mode" : ""}`}>
       <VisualizerBackground />
-      <VisualizerHeader productName={copy.productName} />
+      <VisualizerHeader productName={copy.productName} cambriaMode={cambriaMode} />
 
       <div className="viz-shell">
         {config && !config.publicVisualizerEnabled ? (

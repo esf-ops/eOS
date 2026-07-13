@@ -199,7 +199,7 @@ function CambriaInventoryLightbox({
 
   return (
     <div
-      className="e100-public-lightbox-overlay e100-public-lightbox-kiosk"
+      className="e100-public-lightbox-overlay e100-public-lightbox-kiosk cambria-theme-lightbox"
       role="dialog"
       aria-modal="true"
       aria-label={`${item.color_name ?? "Cambria"} inventory`}
@@ -351,6 +351,7 @@ export default function PublicCambriaPage() {
 
   const rootClass = [
     "cambria-kiosk",
+    "cambria-theme",
     view === "home" ? "cambria-kiosk--home" : "cambria-kiosk--detail",
     kiosk ? "cambria-kiosk--arreya" : "",
   ]
@@ -373,22 +374,30 @@ export default function PublicCambriaPage() {
       <div className="cambria-kiosk-shell">
         <header className="cambria-kiosk-topbar">
           <div className="cambria-kiosk-brand">
-            <div className={`cambria-kiosk-logo${view === "home" ? " cambria-kiosk-logo--large" : ""}`}>
-              <img
-                src="/esf-logo.png"
-                alt="Elite Stone Fabrication"
-                draggable={false}
-                onError={(e) => {
-                  (e.currentTarget as HTMLImageElement).style.display = "none";
-                  const fallback = e.currentTarget.nextElementSibling;
-                  if (fallback) (fallback as HTMLElement).style.display = "flex";
-                }}
-              />
-              <span className="cambria-kiosk-logo-fallback" style={{ display: "none" }}>
-                Elite Stone Fabrication
-              </span>
+            <img
+              className={`cambria-kiosk-cambria-logo${view === "home" ? " cambria-kiosk-cambria-logo--large" : ""}`}
+              src="/brand/cambria-h-rev-rgb-cusa-nav.svg"
+              alt="Cambria"
+              draggable={false}
+            />
+            <div className="cambria-kiosk-host">
+              <div className={`cambria-kiosk-logo${view === "home" ? " cambria-kiosk-logo--large" : ""}`}>
+                <img
+                  src="/esf-logo.png"
+                  alt="Elite Stone Fabrication"
+                  draggable={false}
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).style.display = "none";
+                    const fallback = e.currentTarget.nextElementSibling;
+                    if (fallback) (fallback as HTMLElement).style.display = "flex";
+                  }}
+                />
+                <span className="cambria-kiosk-logo-fallback" style={{ display: "none" }}>
+                  Elite Stone Fabrication
+                </span>
+              </div>
+              <span className="cambria-kiosk-powered">Hosted by Elite Stone · Powered by slabOS</span>
             </div>
-            <span className="cambria-kiosk-powered">Powered by slabOS</span>
           </div>
 
           {sectionTitle ? (
@@ -599,6 +608,7 @@ export default function PublicCambriaPage() {
           item={selectedDesign}
           kiosk
           showInventoryCount
+          variant="cambria"
           onClose={() => setSelectedDesign(null)}
         />
       ) : null}

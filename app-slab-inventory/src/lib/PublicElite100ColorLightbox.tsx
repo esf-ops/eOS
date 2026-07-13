@@ -23,6 +23,8 @@ type PublicElite100ColorLightboxProps = {
    * Homeowner Elite 100 public showroom keeps this false.
    */
   showInventoryCount?: boolean;
+  /** Cambria kiosk — black/gold lightbox chrome (scoped; does not affect Elite 100). */
+  variant?: "default" | "cambria";
 };
 
 /** Public-safe color detail — image zoom; inventory counts only when explicitly enabled. */
@@ -31,6 +33,7 @@ export function PublicElite100ColorLightbox({
   kiosk = false,
   onClose,
   showInventoryCount = false,
+  variant = "default",
 }: PublicElite100ColorLightboxProps) {
   const texture = lookupElite100Texture(item.color_name, item.color_key);
   const imageSrc = texture?.fullUrl ?? elite100CardImageSrcFull(item);
@@ -105,7 +108,11 @@ export function PublicElite100ColorLightbox({
     }
   };
 
-  const rootClass = ["e100-public-lightbox-overlay", kiosk ? "e100-public-lightbox-kiosk" : ""]
+  const rootClass = [
+    "e100-public-lightbox-overlay",
+    kiosk ? "e100-public-lightbox-kiosk" : "",
+    variant === "cambria" ? "cambria-theme-lightbox" : "",
+  ]
     .filter(Boolean)
     .join(" ");
 
@@ -114,7 +121,7 @@ export function PublicElite100ColorLightbox({
       className={rootClass}
       role="dialog"
       aria-modal="true"
-      aria-label={`${item.color_name ?? "Elite 100 color"} detail`}
+      aria-label={`${item.color_name ?? (variant === "cambria" ? "Cambria design" : "Elite 100 color")} detail`}
       onClick={onClose}
     >
       <div className="e100-public-lightbox" onClick={(e) => e.stopPropagation()}>

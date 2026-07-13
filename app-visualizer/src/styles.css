@@ -1177,3 +1177,268 @@ body {
   .viz-bg-orb { animation: none; }
   .viz-loading-shimmer { animation: none; opacity: 0; }
 }
+
+/* ── Cambria mode only (scoped — normal visualizer unchanged) ─ */
+body.viz-cambria-body {
+  background: #050505;
+  color-scheme: dark;
+}
+
+.viz-app--cambria {
+  --cambria-black: #050505;
+  --cambria-charcoal: #111111;
+  --cambria-panel: rgba(8, 8, 8, 0.82);
+  --cambria-panel-solid: #111111;
+  --cambria-gold: #b9975b;
+  --cambria-gold-bright: #d6b36a;
+  --cambria-cream: #f7f2e8;
+  --cambria-muted: #c8c0b2;
+  --cambria-border: rgba(214, 179, 106, 0.35);
+
+  --porcelain: #0a0a0a;
+  --porcelain-2: #111111;
+  --surface: var(--cambria-panel);
+  --surface-solid: var(--cambria-panel-solid);
+  --ink: var(--cambria-cream);
+  --ink-soft: var(--cambria-muted);
+  --ink-muted: rgba(200, 192, 178, 0.72);
+  --line: var(--cambria-border);
+  --line-strong: rgba(214, 179, 106, 0.55);
+
+  --accent: #8f6f3a;
+  --accent-2: var(--cambria-gold);
+  --accent-hover: var(--cambria-gold-bright);
+  --accent-soft: rgba(185, 151, 91, 0.14);
+  --accent-glow: rgba(185, 151, 91, 0.35);
+  --gold: var(--cambria-gold-bright);
+
+  --shadow-md: 0 18px 44px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 40px 90px rgba(0, 0, 0, 0.55);
+  --shadow-glass: 0 24px 60px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(214, 179, 106, 0.12);
+
+  color: var(--ink);
+  background: linear-gradient(165deg, #050505 0%, #0c0c0c 55%, #111111 100%);
+}
+
+.viz-app--cambria .viz-bg-orb {
+  opacity: 0.35;
+  filter: blur(80px);
+}
+
+.viz-app--cambria .viz-bg-orb-1 {
+  background: radial-gradient(circle at 30% 30%, rgba(185, 151, 91, 0.28), transparent 62%);
+}
+
+.viz-app--cambria .viz-bg-orb-2 {
+  background: radial-gradient(circle at 50% 50%, rgba(214, 179, 106, 0.16), transparent 60%);
+}
+
+.viz-app--cambria .viz-bg-orb-3 {
+  background: radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.05), transparent 66%);
+}
+
+.viz-app--cambria .viz-cambria-logo {
+  display: block;
+  height: 28px;
+  width: auto;
+  object-fit: contain;
+}
+
+.viz-app--cambria .viz-brand-name {
+  color: var(--cambria-cream);
+}
+
+.viz-app--cambria .viz-brand-sub {
+  color: var(--cambria-muted);
+}
+
+.viz-app--cambria .viz-steps {
+  background: rgba(17, 17, 17, 0.88);
+  border: 1px solid var(--cambria-border);
+  box-shadow: var(--shadow-md);
+}
+
+.viz-app--cambria .viz-step {
+  color: var(--cambria-muted);
+}
+
+.viz-app--cambria .viz-step.is-active {
+  color: var(--cambria-cream);
+}
+
+.viz-app--cambria .viz-step.is-active .viz-step-badge {
+  background: linear-gradient(135deg, var(--cambria-gold), var(--cambria-gold-bright));
+  color: #0a0a0a;
+  border-color: transparent;
+  box-shadow: 0 6px 16px rgba(185, 151, 91, 0.4);
+}
+
+.viz-app--cambria .viz-step.is-complete .viz-step-badge {
+  background: rgba(185, 151, 91, 0.2);
+  color: var(--cambria-gold-bright);
+  border-color: var(--cambria-border);
+}
+
+.viz-app--cambria .viz-step-line {
+  background: rgba(214, 179, 106, 0.25);
+}
+
+.viz-app--cambria .viz-eyebrow {
+  color: var(--cambria-gold-bright);
+  letter-spacing: 0.16em;
+}
+
+.viz-app--cambria .viz-hero-title {
+  color: var(--cambria-cream);
+}
+
+.viz-app--cambria .viz-dropzone {
+  background: linear-gradient(165deg, rgba(22, 20, 16, 0.94), rgba(8, 8, 8, 0.9));
+  border: 1px dashed var(--cambria-border);
+  box-shadow: var(--shadow-glass);
+}
+
+.viz-app--cambria .viz-dropzone.is-dragging,
+.viz-app--cambria .viz-dropzone:hover {
+  border-color: var(--cambria-gold-bright);
+  background: linear-gradient(165deg, rgba(28, 24, 16, 0.96), rgba(10, 10, 10, 0.92));
+}
+
+.viz-app--cambria .viz-dropzone-icon {
+  color: var(--cambria-gold);
+}
+
+.viz-app--cambria .viz-btn-primary {
+  color: #0a0a0a;
+  background: linear-gradient(150deg, var(--cambria-gold-bright), var(--cambria-gold));
+  box-shadow: 0 12px 28px rgba(185, 151, 91, 0.38);
+}
+
+.viz-app--cambria .viz-btn-primary:hover:not(:disabled) {
+  box-shadow: 0 18px 36px rgba(185, 151, 91, 0.48);
+}
+
+.viz-app--cambria .viz-btn-secondary {
+  background: var(--cambria-panel-solid);
+  border-color: var(--cambria-border);
+  color: var(--cambria-cream);
+}
+
+.viz-app--cambria .viz-btn-secondary:hover:not(:disabled) {
+  border-color: var(--cambria-gold-bright);
+  color: var(--cambria-gold-bright);
+}
+
+.viz-app--cambria .viz-btn-ghost {
+  color: var(--cambria-muted);
+}
+
+.viz-app--cambria .viz-btn-ghost:hover:not(:disabled) {
+  background: rgba(214, 179, 106, 0.1);
+  color: var(--cambria-cream);
+}
+
+.viz-app--cambria .viz-btn-glass {
+  background: rgba(17, 17, 17, 0.88);
+  border: 1px solid var(--cambria-border);
+  color: var(--cambria-cream);
+}
+
+.viz-app--cambria .viz-demo-chip {
+  background: rgba(17, 17, 17, 0.9);
+  border: 1px solid var(--cambria-border);
+  color: var(--cambria-cream);
+}
+
+.viz-app--cambria .viz-demo-chip:hover:not(:disabled) {
+  border-color: var(--cambria-gold-bright);
+}
+
+.viz-app--cambria .viz-studio-panel,
+.viz-app--cambria .viz-room-frame {
+  background: linear-gradient(180deg, #161412 0%, #0e0e0e 100%);
+  border: 1px solid var(--cambria-border);
+  box-shadow: var(--shadow-lg);
+}
+
+.viz-app--cambria .viz-panel-head h2 {
+  color: var(--cambria-cream);
+}
+
+.viz-app--cambria .viz-panel-head p {
+  color: var(--cambria-muted);
+}
+
+.viz-app--cambria .viz-search {
+  background: #0a0a0a;
+  border-color: var(--cambria-border);
+  color: var(--cambria-cream);
+}
+
+.viz-app--cambria .viz-search:focus {
+  outline: 2px solid rgba(214, 179, 106, 0.5);
+  border-color: var(--cambria-gold-bright);
+}
+
+.viz-app--cambria .viz-chip {
+  background: #0a0a0a;
+  border-color: var(--cambria-border);
+  color: var(--cambria-muted);
+}
+
+.viz-app--cambria .viz-chip.is-active {
+  background: rgba(185, 151, 91, 0.18);
+  border-color: var(--cambria-gold-bright);
+  color: var(--cambria-gold-bright);
+}
+
+.viz-app--cambria .viz-swatch {
+  background: #0a0a0a;
+  border: 1px solid rgba(214, 179, 106, 0.22);
+  color: var(--cambria-cream);
+}
+
+.viz-app--cambria .viz-swatch.is-selected {
+  border-color: var(--cambria-gold-bright);
+  box-shadow: 0 0 0 2px rgba(214, 179, 106, 0.35);
+}
+
+.viz-app--cambria .viz-swatch-name {
+  color: var(--cambria-cream);
+}
+
+.viz-app--cambria .viz-selected {
+  background: rgba(185, 151, 91, 0.1);
+  border: 1px solid var(--cambria-border);
+}
+
+.viz-app--cambria .viz-stage-badge {
+  background: rgba(17, 17, 17, 0.9);
+  border: 1px solid var(--cambria-border);
+  color: var(--cambria-cream);
+}
+
+.viz-app--cambria .viz-stage-badge-dot {
+  background: var(--cambria-gold-bright);
+}
+
+.viz-app--cambria .viz-alert-warn {
+  background: rgba(40, 32, 16, 0.9);
+  border-color: var(--cambria-border);
+  color: var(--cambria-cream);
+}
+
+.viz-app--cambria .viz-alert-error {
+  background: rgba(40, 16, 16, 0.9);
+  border-color: rgba(214, 179, 106, 0.4);
+  color: var(--cambria-cream);
+}
+
+.viz-app--cambria .viz-footer {
+  color: var(--cambria-muted);
+  border-top: 1px solid rgba(214, 179, 106, 0.18);
+}
+
+.viz-app--cambria .viz-footer p {
+  color: var(--cambria-muted);
+}

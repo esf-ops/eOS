@@ -4482,24 +4482,37 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
   font-size: 0.95rem;
 }
 
-/* ── Public Cambria Showcase — full kiosk landing (not a white data page) ─ */
+/* ── Public Cambria Showcase — black & gold Cambria brand theme ─ */
 
 body.cambria-kiosk-body {
   margin: 0;
   overflow: hidden;
-  background: #f5f3f0;
+  background: #050505;
 }
 
 .cambria-kiosk {
-  --ck-ink: #141821;
-  --ck-ink-soft: #414855;
-  --ck-ink-muted: #79808c;
-  --ck-line: rgba(20, 24, 33, 0.09);
-  --ck-line-strong: rgba(20, 24, 33, 0.16);
-  --ck-red: #b91c1c;
-  --ck-surface: rgba(255, 255, 255, 0.86);
+  /* Cambria brand tokens (scoped — do not leak to other routes) */
+  --cambria-black: #050505;
+  --cambria-charcoal: #111111;
+  --cambria-panel: rgba(8, 8, 8, 0.78);
+  --cambria-panel-solid: #111111;
+  --cambria-gold: #b9975b;
+  --cambria-gold-bright: #d6b36a;
+  --cambria-cream: #f7f2e8;
+  --cambria-muted: #c8c0b2;
+  --cambria-border: rgba(214, 179, 106, 0.35);
+
+  --ck-ink: var(--cambria-cream);
+  --ck-ink-soft: var(--cambria-muted);
+  --ck-ink-muted: rgba(200, 192, 178, 0.72);
+  --ck-line: var(--cambria-border);
+  --ck-line-strong: rgba(214, 179, 106, 0.55);
+  --ck-accent: var(--cambria-gold);
+  --ck-accent-bright: var(--cambria-gold-bright);
+  --ck-surface: var(--cambria-panel);
+  --ck-surface-cream: rgba(247, 242, 232, 0.96);
   --ck-radius: 26px;
-  --ck-shadow: 0 24px 60px rgba(20, 24, 33, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  --ck-shadow: 0 28px 70px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(214, 179, 106, 0.12);
   --ck-font-display:
     Copperplate, "Copperplate Gothic Light", "Copperplate Gothic",
     Cinzel, "Trajan Pro", Georgia, serif;
@@ -4513,6 +4526,7 @@ body.cambria-kiosk-body {
   height: 100dvh;
   overflow: hidden;
   color: var(--ck-ink);
+  background: var(--cambria-black);
   font-family: Inter, "Segoe UI", system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
@@ -4523,6 +4537,7 @@ body.cambria-kiosk-body {
   z-index: 0;
   pointer-events: none;
   overflow: hidden;
+  background: var(--cambria-black);
 }
 
 .cambria-kiosk-bg-facility {
@@ -4531,7 +4546,7 @@ body.cambria-kiosk-body {
   background-image: url("/backgrounds/cambria-kiosk-background.png");
   background-size: cover;
   background-position: center 40%;
-  filter: blur(0.4px);
+  filter: blur(0.4px) brightness(0.55) saturate(0.85);
   opacity: 0;
   transition: opacity 1s ease;
   animation: cambria-kiosk-breathe 30s ease-in-out infinite alternate;
@@ -4548,11 +4563,11 @@ body.cambria-kiosk-body {
   transition: opacity 1s ease;
   background: linear-gradient(
     to right,
-    rgba(248, 247, 245, 0.92) 0%,
-    rgba(246, 244, 241, 0.78) 22%,
-    rgba(244, 242, 238, 0.4) 42%,
-    rgba(245, 243, 240, 0.1) 54%,
-    transparent 62%
+    rgba(5, 5, 5, 0.94) 0%,
+    rgba(5, 5, 5, 0.82) 28%,
+    rgba(5, 5, 5, 0.45) 52%,
+    rgba(5, 5, 5, 0.18) 68%,
+    transparent 82%
   );
 }
 
@@ -4562,14 +4577,21 @@ body.cambria-kiosk-body {
 
 .cambria-kiosk--detail .cambria-kiosk-bg-wash {
   opacity: 1;
-  background: radial-gradient(120% 120% at 12% 0%, #ffffff 0%, #f5f3f0 46%, #e9eaed 100%);
+  background:
+    radial-gradient(120% 90% at 8% 0%, rgba(185, 151, 91, 0.14) 0%, transparent 42%),
+    linear-gradient(160deg, #050505 0%, #0c0c0c 48%, #111111 100%);
+}
+
+.cambria-kiosk--detail .cambria-kiosk-bg-facility {
+  opacity: 0.22;
+  filter: blur(1.2px) brightness(0.35) saturate(0.7);
 }
 
 .cambria-kiosk-bg-orb {
   position: absolute;
   border-radius: 50%;
   filter: blur(80px);
-  opacity: 0.35;
+  opacity: 0.45;
 }
 
 .cambria-kiosk-bg-orb-1 {
@@ -4577,7 +4599,7 @@ body.cambria-kiosk-body {
   height: 48vw;
   top: -14vw;
   right: -10vw;
-  background: radial-gradient(circle at 30% 30%, rgba(185, 28, 28, 0.14), transparent 62%);
+  background: radial-gradient(circle at 30% 30%, rgba(185, 151, 91, 0.22), transparent 62%);
 }
 
 .cambria-kiosk-bg-orb-2 {
@@ -4585,7 +4607,7 @@ body.cambria-kiosk-body {
   height: 40vw;
   bottom: -16vw;
   left: -12vw;
-  background: radial-gradient(circle at 50% 50%, rgba(176, 131, 65, 0.16), transparent 60%);
+  background: radial-gradient(circle at 50% 50%, rgba(214, 179, 106, 0.14), transparent 60%);
 }
 
 .cambria-kiosk-bg-orb-3 {
@@ -4593,13 +4615,13 @@ body.cambria-kiosk-body {
   height: 28vw;
   top: 34%;
   left: 42%;
-  background: radial-gradient(circle at 50% 50%, rgba(20, 24, 33, 0.07), transparent 66%);
+  background: radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.04), transparent 66%);
 }
 
 .cambria-kiosk-bg-grain {
   position: absolute;
   inset: 0;
-  opacity: 0.035;
+  opacity: 0.05;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
@@ -4628,32 +4650,52 @@ body.cambria-kiosk-body {
 .cambria-kiosk-brand {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: clamp(16px, 2vw, 28px);
   min-width: 0;
+}
+
+.cambria-kiosk-cambria-logo {
+  display: block;
+  height: clamp(28px, 2.8vh, 42px);
+  width: auto;
+  object-fit: contain;
+}
+
+.cambria-kiosk-cambria-logo--large {
+  height: clamp(34px, 3.6vh, 52px);
+}
+
+.cambria-kiosk-host {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding-left: clamp(14px, 1.6vw, 22px);
+  border-left: 1px solid var(--cambria-border);
 }
 
 .cambria-kiosk-logo img {
   display: block;
-  height: clamp(34px, 3.2vh, 52px);
+  height: clamp(26px, 2.4vh, 38px);
   width: auto;
   object-fit: contain;
-  filter: brightness(0.92) contrast(1.08);
+  filter: brightness(1.15) contrast(1.05);
 }
 
 .cambria-kiosk-logo--large img {
-  height: clamp(42px, 4vh, 66px);
+  height: clamp(30px, 2.8vh, 44px);
 }
 
 .cambria-kiosk-logo-fallback {
   font-weight: 700;
-  font-size: 1.15rem;
+  font-size: 0.95rem;
   color: var(--ck-ink);
 }
 
 .cambria-kiosk-powered {
-  font-size: clamp(0.68rem, 0.8vw, 0.9rem);
+  font-size: clamp(0.62rem, 0.72vw, 0.78rem);
   font-weight: 500;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--ck-ink-muted);
   white-space: nowrap;
@@ -4676,6 +4718,7 @@ body.cambria-kiosk-body {
   font-family: var(--ck-font-card);
   font-size: clamp(1.2rem, 1.8vw, 2rem);
   font-weight: 600;
+  color: var(--cambria-cream);
 }
 
 .cambria-kiosk-home-btn {
@@ -4683,13 +4726,21 @@ body.cambria-kiosk-body {
   min-height: 56px;
   padding: 0 22px;
   border-radius: 999px;
-  border: 1px solid var(--ck-line-strong);
-  background: rgba(255, 255, 255, 0.92);
-  color: var(--ck-ink);
+  border: 1px solid var(--cambria-border);
+  background: rgba(17, 17, 17, 0.92);
+  color: var(--cambria-cream);
   font-size: clamp(0.95rem, 1.1vw, 1.15rem);
   font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 12px 28px rgba(20, 24, 33, 0.08);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+  transition: border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.cambria-kiosk-home-btn:hover,
+.cambria-kiosk-home-btn:focus-visible {
+  border-color: var(--cambria-gold-bright);
+  color: var(--cambria-gold-bright);
+  outline: none;
 }
 
 .cambria-kiosk-home-btn:active {
@@ -4721,7 +4772,8 @@ body.cambria-kiosk-body {
   line-height: 1.08;
   letter-spacing: 0.025em;
   text-transform: uppercase;
-  color: var(--ck-ink);
+  color: var(--cambria-cream);
+  text-shadow: 0 2px 24px rgba(0, 0, 0, 0.45);
 }
 
 .cambria-kiosk-subhead {
@@ -4745,7 +4797,7 @@ body.cambria-kiosk-body {
   height: 2px;
   margin-right: 14px;
   vertical-align: middle;
-  background: var(--ck-red);
+  background: linear-gradient(90deg, var(--cambria-gold), var(--cambria-gold-bright));
 }
 
 .cambria-kiosk-card-grid {
@@ -4765,13 +4817,13 @@ body.cambria-kiosk-body {
   min-height: 0;
   padding: clamp(20px, 1.8vw, 34px);
   text-align: left;
-  border: 1px solid var(--ck-line);
+  border: 1px solid var(--cambria-border);
   border-radius: var(--ck-radius);
-  background: var(--ck-surface);
+  background: linear-gradient(165deg, rgba(20, 18, 14, 0.92) 0%, rgba(8, 8, 8, 0.88) 100%);
   box-shadow: var(--ck-shadow);
   cursor: pointer;
   overflow: hidden;
-  color: inherit;
+  color: var(--cambria-cream);
   transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.24s ease, border-color 0.24s ease;
 }
 
@@ -4780,17 +4832,31 @@ body.cambria-kiosk-body {
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   z-index: 0;
+  pointer-events: none;
+}
+
+.cambria-kiosk-card::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 18px;
+  right: 18px;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, var(--cambria-gold), transparent);
+  opacity: 0.75;
+  z-index: 2;
   pointer-events: none;
 }
 
 .cambria-kiosk-card:hover,
 .cambria-kiosk-card:focus-visible {
   transform: translateY(-6px);
-  border-color: rgba(185, 28, 28, 0.22);
-  box-shadow: 0 40px 90px rgba(20, 24, 33, 0.16);
+  border-color: var(--cambria-gold-bright);
+  box-shadow: 0 40px 90px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(214, 179, 106, 0.25);
   outline: none;
 }
 
@@ -4804,7 +4870,8 @@ body.cambria-kiosk-body {
   height: clamp(140px, 22vh, 240px);
   border-radius: 18px;
   overflow: hidden;
-  background: #1a1c20;
+  background: #0a0a0a;
+  border: 1px solid rgba(214, 179, 106, 0.18);
 }
 
 .cambria-kiosk-card-art--swatches {
@@ -4817,7 +4884,7 @@ body.cambria-kiosk-body {
   min-width: 0;
   height: 100%;
   object-fit: cover;
-  border-right: 2px solid rgba(255, 255, 255, 0.18);
+  border-right: 2px solid rgba(5, 5, 5, 0.45);
 }
 
 .cambria-kiosk-swatch:last-child {
@@ -4838,13 +4905,13 @@ body.cambria-kiosk-body {
   z-index: 2;
   padding: 5px 11px;
   border-radius: 999px;
-  background: #b91c1c;
-  color: #fff;
+  background: linear-gradient(135deg, var(--cambria-gold), var(--cambria-gold-bright));
+  color: #0a0a0a;
   font-size: clamp(0.68rem, 0.75vw, 0.82rem);
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  box-shadow: 0 4px 14px rgba(185, 28, 28, 0.42);
+  box-shadow: 0 4px 14px rgba(185, 151, 91, 0.45);
 }
 
 .cambria-kiosk-card-body {
@@ -4860,6 +4927,7 @@ body.cambria-kiosk-body {
   font-size: clamp(1.35rem, 1.7vw, 2.1rem);
   font-weight: 600;
   line-height: 1.1;
+  color: var(--cambria-cream);
 }
 
 .cambria-kiosk-card-copy {
@@ -4908,28 +4976,39 @@ body.cambria-kiosk-body {
   min-height: 56px;
   padding: 0 18px;
   border-radius: 999px;
-  border: 1px solid var(--ck-line-strong);
-  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid var(--cambria-border);
+  background: rgba(17, 17, 17, 0.92);
   font-size: clamp(1rem, 1.2vw, 1.15rem);
-  color: var(--ck-ink);
-  box-shadow: 0 10px 24px rgba(20, 24, 33, 0.06);
+  color: var(--cambria-cream);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+}
+
+.cambria-kiosk-search-input::placeholder {
+  color: rgba(200, 192, 178, 0.55);
 }
 
 .cambria-kiosk-search-input:focus {
-  outline: 2px solid rgba(185, 28, 28, 0.28);
+  outline: 2px solid rgba(214, 179, 106, 0.55);
   outline-offset: 1px;
+  border-color: var(--cambria-gold-bright);
 }
 
 .cambria-kiosk-search-clear {
   min-height: 56px;
   padding: 0 18px;
   border-radius: 999px;
-  border: 1px solid var(--ck-line-strong);
-  background: rgba(255, 255, 255, 0.92);
-  color: var(--ck-ink);
+  border: 1px solid var(--cambria-border);
+  background: rgba(17, 17, 17, 0.92);
+  color: var(--cambria-cream);
   font-size: 1rem;
   font-weight: 600;
   cursor: pointer;
+  transition: border-color 0.2s ease, color 0.2s ease;
+}
+
+.cambria-kiosk-search-clear:hover {
+  border-color: var(--cambria-gold-bright);
+  color: var(--cambria-gold-bright);
 }
 
 .cambria-kiosk-visualizer-handoff {
@@ -4949,15 +5028,15 @@ body.cambria-kiosk-body {
 
 .cambria-kiosk-handoff-btn {
   appearance: none;
-  border: 0;
+  border: 1px solid var(--cambria-border);
   border-radius: 14px;
   padding: 16px 28px;
   font-size: 1.05rem;
   font-weight: 650;
   letter-spacing: 0.01em;
-  color: #fff;
-  background: linear-gradient(135deg, #1a2332 0%, #2c3a4f 100%);
-  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.28);
+  color: #0a0a0a;
+  background: linear-gradient(135deg, var(--cambria-gold) 0%, var(--cambria-gold-bright) 100%);
+  box-shadow: 0 12px 32px rgba(185, 151, 91, 0.35);
   cursor: pointer;
 }
 
@@ -4968,7 +5047,7 @@ body.cambria-kiosk-body {
 .cambria-kiosk-handoff-url {
   margin: 0;
   font-size: 0.85rem;
-  color: rgba(255, 255, 255, 0.72);
+  color: var(--ck-ink-muted);
   word-break: break-all;
 }
 
@@ -4977,6 +5056,7 @@ body.cambria-kiosk-body {
   font-family: var(--ck-font-card);
   font-size: clamp(1.5rem, 2.4vw, 2.2rem);
   font-weight: 600;
+  color: var(--cambria-cream);
 }
 
 .cambria-kiosk-detail-sub {
@@ -5001,27 +5081,29 @@ body.cambria-kiosk-body {
   display: flex;
   flex-direction: column;
   text-align: left;
-  border: 1px solid var(--ck-line);
+  border: 1px solid var(--cambria-border);
   border-radius: 20px;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.92);
+  background: linear-gradient(180deg, #161412 0%, #0e0e0e 100%);
   box-shadow: var(--ck-shadow);
   cursor: pointer;
   padding: 0;
-  color: inherit;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  color: var(--cambria-cream);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
 }
 
 .cambria-kiosk-detail-card:hover,
 .cambria-kiosk-detail-card:focus-visible {
   transform: translateY(-4px);
+  border-color: var(--cambria-gold-bright);
   outline: none;
 }
 
 .cambria-kiosk-detail-card-mat {
   aspect-ratio: 4 / 3;
-  background: #e8edf3;
+  background: #0a0a0a;
   overflow: hidden;
+  border-bottom: 1px solid rgba(214, 179, 106, 0.18);
 }
 
 .cambria-kiosk-detail-card-img {
@@ -5038,8 +5120,8 @@ body.cambria-kiosk-body {
   place-items: center;
   font-size: 1.6rem;
   font-weight: 750;
-  color: var(--ck-ink-muted);
-  background: linear-gradient(145deg, #eef2f7, #e2e8f0);
+  color: var(--cambria-gold);
+  background: linear-gradient(145deg, #1a1612, #0e0e0e);
 }
 
 .cambria-kiosk-detail-card-body {
@@ -5047,6 +5129,7 @@ body.cambria-kiosk-body {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  background: rgba(247, 242, 232, 0.04);
 }
 
 .cambria-kiosk-detail-card-name {
@@ -5054,6 +5137,7 @@ body.cambria-kiosk-body {
   font-family: var(--ck-font-card);
   font-size: clamp(1.15rem, 1.7vw, 1.4rem);
   font-weight: 600;
+  color: var(--cambria-cream);
 }
 
 .cambria-kiosk-detail-card-material,
@@ -5064,10 +5148,156 @@ body.cambria-kiosk-body {
 }
 
 .cambria-kiosk-detail-card-meta {
-  margin: 0;
+  margin: 6px 0 0;
   font-weight: 650;
-  color: var(--ck-ink);
+  color: var(--cambria-gold-bright);
   font-size: clamp(0.95rem, 1.2vw, 1.1rem);
+  letter-spacing: 0.01em;
+}
+
+/* Designs carousel — scoped under Cambria kiosk only */
+.cambria-kiosk .e100-section {
+  background: transparent;
+}
+
+.cambria-kiosk .e100-section-title,
+.cambria-kiosk .e100-section-count {
+  color: var(--cambria-cream);
+}
+
+.cambria-kiosk .e100-group-badge {
+  background: linear-gradient(135deg, var(--cambria-gold), var(--cambria-gold-bright));
+  color: #0a0a0a;
+  border: none;
+  box-shadow: 0 4px 12px rgba(185, 151, 91, 0.35);
+}
+
+.cambria-kiosk .e100-group-badge.promo {
+  background: linear-gradient(135deg, #c9a46a, #e0c48a);
+}
+
+.cambria-kiosk .e100-scroll-btn {
+  border-color: var(--cambria-border);
+  background: rgba(17, 17, 17, 0.9);
+  color: var(--cambria-cream);
+}
+
+.cambria-kiosk .e100-scroll-btn:hover {
+  border-color: var(--cambria-gold-bright);
+  color: var(--cambria-gold-bright);
+}
+
+.cambria-kiosk .cp-card,
+.cambria-kiosk .cp-card-static {
+  background: linear-gradient(180deg, #161412 0%, #0e0e0e 100%);
+  border: 1px solid var(--cambria-border);
+  box-shadow: var(--ck-shadow);
+  color: var(--cambria-cream);
+}
+
+.cambria-kiosk .cp-card:hover,
+.cambria-kiosk .cp-card:focus-visible {
+  border-color: var(--cambria-gold-bright);
+  transform: translateY(-3px);
+}
+
+.cambria-kiosk .cp-card-name {
+  color: var(--cambria-cream);
+  font-family: var(--ck-font-card);
+}
+
+.cambria-kiosk .cp-card-material,
+.cambria-kiosk .cp-card-meta,
+.cambria-kiosk .cp-card-no-inv-text {
+  color: var(--ck-ink-soft);
+}
+
+.cambria-kiosk .cp-card-meta {
+  color: var(--cambria-gold-bright);
+  font-weight: 650;
+}
+
+.cambria-kiosk .cp-card-mat {
+  background: #0a0a0a;
+  border-bottom: 1px solid rgba(214, 179, 106, 0.16);
+}
+
+.cambria-kiosk .empty-state {
+  background: rgba(17, 17, 17, 0.72);
+  border: 1px solid var(--cambria-border);
+  border-radius: 20px;
+  padding: 28px;
+  color: var(--cambria-cream);
+}
+
+.cambria-kiosk .empty-title {
+  color: var(--cambria-cream);
+}
+
+.cambria-kiosk .empty-sub {
+  color: var(--ck-ink-soft);
+}
+
+.cambria-kiosk .banner.banner-error {
+  background: rgba(40, 20, 16, 0.9);
+  border: 1px solid rgba(214, 179, 106, 0.4);
+  color: var(--cambria-cream);
+}
+
+/* Cambria lightbox (design + inventory) — scoped class only */
+.cambria-theme-lightbox.e100-public-lightbox-overlay {
+  background: rgba(5, 5, 5, 0.88);
+  backdrop-filter: blur(10px);
+}
+
+.cambria-theme-lightbox .e100-public-lightbox {
+  background: linear-gradient(180deg, #161412 0%, #0c0c0c 100%);
+  border: 1px solid var(--cambria-border, rgba(214, 179, 106, 0.35));
+  box-shadow: 0 40px 100px rgba(0, 0, 0, 0.65);
+  color: #f7f2e8;
+}
+
+.cambria-theme-lightbox .e100-public-lightbox-title {
+  color: #f7f2e8;
+  font-family: Fraunces, Georgia, serif;
+}
+
+.cambria-theme-lightbox .e100-public-lightbox-meta,
+.cambria-theme-lightbox .e100-public-lightbox-avail,
+.cambria-theme-lightbox .e100-public-lightbox-foot {
+  color: #c8c0b2;
+}
+
+.cambria-theme-lightbox .e100-public-lightbox-avail {
+  color: #d6b36a;
+  font-weight: 650;
+}
+
+.cambria-theme-lightbox .e100-public-lightbox-avail.muted {
+  color: #c8c0b2;
+  font-weight: 500;
+}
+
+.cambria-theme-lightbox .e100-group-badge {
+  background: linear-gradient(135deg, #b9975b, #d6b36a);
+  color: #0a0a0a;
+}
+
+.cambria-theme-lightbox .e100-public-lightbox-close,
+.cambria-theme-lightbox .e100-public-lightbox-zoom {
+  border-color: rgba(214, 179, 106, 0.35);
+  background: #111111;
+  color: #f7f2e8;
+}
+
+.cambria-theme-lightbox .e100-public-lightbox-close:hover,
+.cambria-theme-lightbox .e100-public-lightbox-zoom:hover {
+  border-color: #d6b36a;
+  color: #d6b36a;
+}
+
+.cambria-theme-lightbox .e100-public-lightbox-viewport {
+  background: #050505;
 }
 
 @media (max-width: 980px), (max-aspect-ratio: 1 / 1) {
@@ -5103,6 +5333,9 @@ body.cambria-kiosk-body {
   .cambria-kiosk-home-btn {
     margin-left: 0;
     width: 100%;
+  }
+  .cambria-kiosk-powered {
+    white-space: normal;
   }
 }
 
