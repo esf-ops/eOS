@@ -1,12 +1,13 @@
 /**
- * IndexedDB persistence for lab-imported cases, attachment blobs, and classification.
+ * IndexedDB persistence for lab-imported cases, attachment blobs, classification, and takeoff.
  * Never used as source for built-in fixtures. Never touches network / Supabase.
  *
  * v1 → v2 adds classification runs, reviewed snapshots, audit events, case overlays.
+ * v2 → v3 adds takeoffRuns, takeoffAuditEvents, takeoffCaseOverlays.
  */
 
 const DB_NAME = "quote-intake-lab-v1";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE_CASES = "cases";
 const STORE_ATTACHMENTS = "attachments";
 const STORE_DEDUPE = "dedupe";
@@ -14,6 +15,9 @@ const STORE_RUNS = "classificationRuns";
 const STORE_SNAPSHOTS = "reviewedSnapshots";
 const STORE_AUDIT = "auditEvents";
 const STORE_OVERLAYS = "caseOverlays";
+const STORE_TAKEOFF_RUNS = "takeoffRuns";
+const STORE_TAKEOFF_AUDIT = "takeoffAuditEvents";
+const STORE_TAKEOFF_OVERLAYS = "takeoffCaseOverlays";
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -52,6 +56,19 @@ function openDb() {
         }
         if (!db.objectStoreNames.contains(STORE_OVERLAYS)) {
           db.createObjectStore(STORE_OVERLAYS, { keyPath: "caseId" });
+        }
+      }
+      if (oldVersion < 3) {
+        if (!db.objectStoreNames.contains(STORE_TAKEOFF_RUNS)) {
+          const takeoffRuns = db.createObjectStore(STORE_TAKEOFF_RUNS, { keyPath: "id" });
+          takeoffRuns.createIndex("byCase", "caseId", { unique: false });
+        }
+        if (!db.objectStoreNames.contains(STORE_TAKEOFF_AUDIT)) {
+          const takeoffAudit = db.createObjectStore(STORE_TAKEOFF_AUDIT, { keyPath: "id" });
+          takeoffAudit.createIndex("byCase", "caseId", { unique: false });
+        }
+        if (!db.objectStoreNames.contains(STORE_TAKEOFF_OVERLAYS)) {
+          db.createObjectStore(STORE_TAKEOFF_OVERLAYS, { keyPath: "caseId" });
         }
       }
     };
@@ -275,25 +292,135 @@ export class IdbLabStore {
     return (rows ?? []).sort((a, b) => String(b.at).localeCompare(String(a.at)));
   }
 
+  // ── Phase 4B.1 takeoff persistence ─────────────────────────────────────────
+
+  /**
+   * Persist an immutable takeoff run. Rejects if the run id already exists.
+   * @param {object} run
+   */
+  async saveTakeoffRun(run) {
+    await this.ready();
+    const cleaned = stripTakeoffRunBytes(run);
+    const tx = this._db.transaction(STORE_TAKEOFF_RUNS, "readwrite");
+    const store = tx.objectStore(STORE_TAKEOFF_RUNS);
+    const existing = await reqToPromise(store.get(cleaned.id));
+    if (existing) {
+      await txDone(tx);
+      const err = new Error("Takeoff run is immutable and already persisted.");
+      err.code = "TAKEOFF_RUN_IMMUTABLE";
+      throw err;
+    }
+    store.put(JSON.parse(JSON.stringify(cleaned)));
+    await txDone(tx);
+  }
+
+  async getTakeoffRun(runId) {
+    await this.ready();
+    const tx = this._db.transaction(STORE_TAKEOFF_RUNS, "readonly");
+    const row = await reqToPromise(tx.objectStore(STORE_TAKEOFF_RUNS).get(runId));
+    await txDone(tx);
+    return row ?? null;
+  }
+
+  async listTakeoffRuns(caseId) {
+    await this.ready();
+    const tx = this._db.transaction(STORE_TAKEOFF_RUNS, "readonly");
+    const rows = await reqToPromise(tx.objectStore(STORE_TAKEOFF_RUNS).index("byCase").getAll(caseId));
+    await txDone(tx);
+    return (rows ?? []).sort(compareTakeoffRunsNewestFirst);
+  }
+
+  async getLatestTakeoffRun(caseId) {
+    const list = await this.listTakeoffRuns(caseId);
+    return list[0] ?? null;
+  }
+
+  async appendTakeoffAuditEvent(event) {
+    await this.ready();
+    const tx = this._db.transaction(STORE_TAKEOFF_AUDIT, "readwrite");
+    tx.objectStore(STORE_TAKEOFF_AUDIT).put(JSON.parse(JSON.stringify(event)));
+    await txDone(tx);
+  }
+
+  async listTakeoffAuditEvents(caseId) {
+    await this.ready();
+    const tx = this._db.transaction(STORE_TAKEOFF_AUDIT, "readonly");
+    const rows = await reqToPromise(
+      tx.objectStore(STORE_TAKEOFF_AUDIT).index("byCase").getAll(caseId)
+    );
+    await txDone(tx);
+    return (rows ?? []).sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  }
+
+  async getTakeoffOverlay(caseId) {
+    await this.ready();
+    const tx = this._db.transaction(STORE_TAKEOFF_OVERLAYS, "readonly");
+    const row = await reqToPromise(tx.objectStore(STORE_TAKEOFF_OVERLAYS).get(caseId));
+    await txDone(tx);
+    return row ?? null;
+  }
+
+  async listTakeoffOverlays() {
+    await this.ready();
+    const tx = this._db.transaction(STORE_TAKEOFF_OVERLAYS, "readonly");
+    const rows = await reqToPromise(tx.objectStore(STORE_TAKEOFF_OVERLAYS).getAll());
+    await txDone(tx);
+    return rows ?? [];
+  }
+
+  async setTakeoffOverlay(caseId, patch) {
+    await this.ready();
+    const tx = this._db.transaction(STORE_TAKEOFF_OVERLAYS, "readwrite");
+    const store = tx.objectStore(STORE_TAKEOFF_OVERLAYS);
+    const existing = (await reqToPromise(store.get(caseId))) ?? { caseId };
+    const next = { ...existing, ...patch, caseId };
+    store.put(next);
+    await txDone(tx);
+    return next;
+  }
+
   async clearImported() {
     await this.ready();
     const imported = await this.listImportedCases();
     const importedIds = new Set(imported.map((c) => c.id));
 
     const readTx = this._db.transaction(
-      [STORE_RUNS, STORE_SNAPSHOTS, STORE_AUDIT, STORE_OVERLAYS],
+      [
+        STORE_RUNS,
+        STORE_SNAPSHOTS,
+        STORE_AUDIT,
+        STORE_OVERLAYS,
+        STORE_TAKEOFF_RUNS,
+        STORE_TAKEOFF_AUDIT,
+        STORE_TAKEOFF_OVERLAYS
+      ],
       "readonly"
     );
-    const [runs, snaps, audits, overlays] = await Promise.all([
-      reqToPromise(readTx.objectStore(STORE_RUNS).getAll()),
-      reqToPromise(readTx.objectStore(STORE_SNAPSHOTS).getAll()),
-      reqToPromise(readTx.objectStore(STORE_AUDIT).getAll()),
-      reqToPromise(readTx.objectStore(STORE_OVERLAYS).getAll())
-    ]);
+    const [runs, snaps, audits, overlays, takeoffRuns, takeoffAudits, takeoffOverlays] =
+      await Promise.all([
+        reqToPromise(readTx.objectStore(STORE_RUNS).getAll()),
+        reqToPromise(readTx.objectStore(STORE_SNAPSHOTS).getAll()),
+        reqToPromise(readTx.objectStore(STORE_AUDIT).getAll()),
+        reqToPromise(readTx.objectStore(STORE_OVERLAYS).getAll()),
+        reqToPromise(readTx.objectStore(STORE_TAKEOFF_RUNS).getAll()),
+        reqToPromise(readTx.objectStore(STORE_TAKEOFF_AUDIT).getAll()),
+        reqToPromise(readTx.objectStore(STORE_TAKEOFF_OVERLAYS).getAll())
+      ]);
     await txDone(readTx);
 
     const writeTx = this._db.transaction(
-      [STORE_CASES, STORE_ATTACHMENTS, STORE_DEDUPE, STORE_RUNS, STORE_SNAPSHOTS, STORE_AUDIT, STORE_OVERLAYS],
+      [
+        STORE_CASES,
+        STORE_ATTACHMENTS,
+        STORE_DEDUPE,
+        STORE_RUNS,
+        STORE_SNAPSHOTS,
+        STORE_AUDIT,
+        STORE_OVERLAYS,
+        STORE_TAKEOFF_RUNS,
+        STORE_TAKEOFF_AUDIT,
+        STORE_TAKEOFF_OVERLAYS
+      ],
       "readwrite"
     );
     writeTx.objectStore(STORE_CASES).clear();
@@ -311,8 +438,29 @@ export class IdbLabStore {
     for (const o of overlays ?? []) {
       if (importedIds.has(o.caseId)) writeTx.objectStore(STORE_OVERLAYS).delete(o.caseId);
     }
+    for (const r of takeoffRuns ?? []) {
+      if (importedIds.has(r.caseId)) writeTx.objectStore(STORE_TAKEOFF_RUNS).delete(r.id);
+    }
+    for (const a of takeoffAudits ?? []) {
+      if (importedIds.has(a.caseId)) writeTx.objectStore(STORE_TAKEOFF_AUDIT).delete(a.id);
+    }
+    for (const o of takeoffOverlays ?? []) {
+      if (importedIds.has(o.caseId)) writeTx.objectStore(STORE_TAKEOFF_OVERLAYS).delete(o.caseId);
+    }
     await txDone(writeTx);
   }
+}
+
+/** Never persist attachment bytes on takeoff runs. */
+function stripTakeoffRunBytes(run) {
+  const clone = JSON.parse(JSON.stringify(run ?? {}));
+  if (clone.attachmentBytes != null) delete clone.attachmentBytes;
+  if (clone.bytes != null) delete clone.bytes;
+  if (clone.attachment && typeof clone.attachment === "object") {
+    delete clone.attachment.bytes;
+    delete clone.attachment.attachmentBytes;
+  }
+  return clone;
 }
 
 function stripBytes(caseRow) {
@@ -323,6 +471,14 @@ function stripBytes(caseRow) {
       return rest;
     })
   };
+}
+
+function compareTakeoffRunsNewestFirst(a, b) {
+  const ta = String(b.completedAt ?? b.startedAt ?? "");
+  const tb = String(a.completedAt ?? a.startedAt ?? "");
+  const cmp = ta.localeCompare(tb);
+  if (cmp !== 0) return cmp;
+  return String(b.id).localeCompare(String(a.id));
 }
 
 let _singleton = null;

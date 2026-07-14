@@ -15,3 +15,4 @@ export {
   buildSimulatedGeometry
 } from "./simulatedScenarios.mjs";
 export { SimulatedTakeoffAdapter, getSimulatedTakeoffAdapter } from "./simulatedTakeoffAdapter.mjs";
+export { TakeoffService } from "./takeoffService.mjs";

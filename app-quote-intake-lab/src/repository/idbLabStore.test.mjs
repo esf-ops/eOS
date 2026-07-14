@@ -47,7 +47,7 @@ describe("IdbLabStore", () => {
     assert.equal(await store.getCase("qil-imp-test-1"), null);
   });
 
-  it("migrates to v2 stores for classification runs and keeps fixture overlays on clear", async () => {
+  it("migrates to v2/v3 stores and keeps fixture overlays/takeoff on clear", async () => {
     const fixtureCaseId = "qil-case-fixture-overlay";
     await store.setCaseOverlay(fixtureCaseId, { status: "qil_intake_review", nextAction: "test" });
     await store.saveClassificationRun({
@@ -58,6 +58,16 @@ describe("IdbLabStore", () => {
       humanReviewState: "unreviewed",
       result: { intent: "new_quote_request" }
     });
+    await store.saveTakeoffRun({
+      id: "qil-toff-fixture-keep",
+      caseId: fixtureCaseId,
+      startedAt: "2026-07-14T16:02:00.000Z",
+      labTakeoffStatus: "qil_takeoff_review",
+      rooms: [],
+      warnings: [],
+      calculation: {}
+    });
+    await store.setTakeoffOverlay(fixtureCaseId, { latestTakeoffRunId: "qil-toff-fixture-keep" });
 
     const caseRow = {
       id: "qil-imp-test-cls",
@@ -78,11 +88,23 @@ describe("IdbLabStore", () => {
       result: { intent: "not_quote_related" }
     });
     await store.setCaseOverlay("qil-imp-test-cls", { status: "qil_not_quote" });
+    await store.saveTakeoffRun({
+      id: "qil-toff-imp-1",
+      caseId: "qil-imp-test-cls",
+      startedAt: "2026-07-14T16:03:00.000Z",
+      labTakeoffStatus: "qil_takeoff_failed",
+      rooms: [],
+      warnings: [],
+      calculation: {}
+    });
 
     await store.clearImported();
     assert.equal(await store.countImported(), 0);
     assert.equal((await store.listClassificationRuns("qil-imp-test-cls")).length, 0);
     assert.equal((await store.listClassificationRuns(fixtureCaseId)).length, 1);
     assert.equal((await store.getOverlay(fixtureCaseId))?.status, "qil_intake_review");
+    assert.equal((await store.listTakeoffRuns("qil-imp-test-cls")).length, 0);
+    assert.equal((await store.listTakeoffRuns(fixtureCaseId)).length, 1);
+    assert.equal((await store.getTakeoffOverlay(fixtureCaseId))?.latestTakeoffRunId, "qil-toff-fixture-keep");
   });
 });

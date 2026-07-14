@@ -17,6 +17,12 @@ export class MemoryLabStore {
     this.snapshots = new Map();
     /** @type {Map<string, any>} */
     this.audit = new Map();
+    /** @type {Map<string, any>} */
+    this.takeoffRuns = new Map();
+    /** @type {Map<string, any>} */
+    this.takeoffAudit = new Map();
+    /** @type {Map<string, any>} */
+    this.takeoffOverlays = new Map();
   }
 
   async ready() {
@@ -137,6 +143,56 @@ export class MemoryLabStore {
       .sort((a, b) => String(b.at).localeCompare(String(a.at)));
   }
 
+  async saveTakeoffRun(run) {
+    const cleaned = stripTakeoffRunBytes(run);
+    if (this.takeoffRuns.has(cleaned.id)) {
+      const err = new Error("Takeoff run is immutable and already persisted.");
+      err.code = "TAKEOFF_RUN_IMMUTABLE";
+      throw err;
+    }
+    this.takeoffRuns.set(cleaned.id, clone(cleaned));
+  }
+
+  async getTakeoffRun(runId) {
+    return this.takeoffRuns.get(runId) ?? null;
+  }
+
+  async listTakeoffRuns(caseId) {
+    return [...this.takeoffRuns.values()]
+      .filter((r) => r.caseId === caseId)
+      .sort(compareTakeoffRunsNewestFirst);
+  }
+
+  async getLatestTakeoffRun(caseId) {
+    const list = await this.listTakeoffRuns(caseId);
+    return list[0] ?? null;
+  }
+
+  async appendTakeoffAuditEvent(event) {
+    this.takeoffAudit.set(event.id, clone(event));
+  }
+
+  async listTakeoffAuditEvents(caseId) {
+    return [...this.takeoffAudit.values()]
+      .filter((a) => a.caseId === caseId)
+      .sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  }
+
+  async getTakeoffOverlay(caseId) {
+    return this.takeoffOverlays.get(caseId) ?? null;
+  }
+
+  async listTakeoffOverlays() {
+    return [...this.takeoffOverlays.values()];
+  }
+
+  async setTakeoffOverlay(caseId, patch) {
+    const existing = this.takeoffOverlays.get(caseId) ?? { caseId };
+    const next = { ...existing, ...patch, caseId };
+    this.takeoffOverlays.set(caseId, next);
+    return next;
+  }
+
   async clearImported() {
     const importedIds = new Set(this.cases.keys());
     this.cases.clear();
@@ -152,7 +208,25 @@ export class MemoryLabStore {
       if (importedIds.has(ev.caseId)) this.audit.delete(id);
     }
     for (const caseId of importedIds) this.overlays.delete(caseId);
+    for (const [id, run] of [...this.takeoffRuns.entries()]) {
+      if (importedIds.has(run.caseId)) this.takeoffRuns.delete(id);
+    }
+    for (const [id, ev] of [...this.takeoffAudit.entries()]) {
+      if (importedIds.has(ev.caseId)) this.takeoffAudit.delete(id);
+    }
+    for (const caseId of importedIds) this.takeoffOverlays.delete(caseId);
   }
+}
+
+function stripTakeoffRunBytes(run) {
+  const cloneRun = clone(run ?? {});
+  if (cloneRun.attachmentBytes != null) delete cloneRun.attachmentBytes;
+  if (cloneRun.bytes != null) delete cloneRun.bytes;
+  if (cloneRun.attachment && typeof cloneRun.attachment === "object") {
+    delete cloneRun.attachment.bytes;
+    delete cloneRun.attachment.attachmentBytes;
+  }
+  return cloneRun;
 }
 
 function stripBytes(caseRow) {
@@ -167,4 +241,12 @@ function stripBytes(caseRow) {
 
 function clone(v) {
   return JSON.parse(JSON.stringify(v));
+}
+
+function compareTakeoffRunsNewestFirst(a, b) {
+  const ta = String(b.completedAt ?? b.startedAt ?? "");
+  const tb = String(a.completedAt ?? a.startedAt ?? "");
+  const cmp = ta.localeCompare(tb);
+  if (cmp !== 0) return cmp;
+  return String(b.id).localeCompare(String(a.id));
 }

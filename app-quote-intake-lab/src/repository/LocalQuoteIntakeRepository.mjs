@@ -1,5 +1,7 @@
 import { ClassificationService } from "../classification/classificationService.mjs";
 import { getSimulatedIntakeIntelligenceProvider } from "../classification/simulatedProvider.mjs";
+import { TakeoffService } from "../takeoff/takeoffService.mjs";
+import { getSimulatedTakeoffAdapter } from "../takeoff/simulatedTakeoffAdapter.mjs";
 import { inboundEmailAdapter } from "../inbound/inboundEmailAdapter.mjs";
 import { caseFromInboundMessage } from "../inbound/caseFromInbound.mjs";
 import { formatTurnaround } from "../domain/age.mjs";
@@ -14,11 +16,18 @@ import { getIdbLabStore } from "./idbLabStore.mjs";
 
 /**
  * Composite repository: built-in fixtures + locally imported cases (IndexedDB / memory)
- * + classification overlays / runs.
+ * + classification overlays / runs + takeoff overlays / runs.
  */
 export class LocalQuoteIntakeRepository {
   /**
-   * @param {{ store?: any, fixtureCases?: any[], asOfMode?: "wall"|"fixture", provider?: any, liveProvider?: any }} [opts]
+   * @param {{
+   *   store?: any,
+   *   fixtureCases?: any[],
+   *   asOfMode?: "wall"|"fixture",
+   *   provider?: any,
+   *   liveProvider?: any,
+   *   takeoffAdapter?: any
+   * }} [opts]
    */
   constructor(opts = {}) {
     this._store = opts.store ?? getIdbLabStore();
@@ -30,6 +39,10 @@ export class LocalQuoteIntakeRepository {
       store: this._store,
       provider: this._provider,
       liveProvider: opts.liveProvider
+    });
+    this._takeoff = new TakeoffService({
+      store: this._store,
+      takeoffAdapter: opts.takeoffAdapter ?? getSimulatedTakeoffAdapter()
     });
     this._ready = null;
   }
@@ -49,9 +62,15 @@ export class LocalQuoteIntakeRepository {
     await this.ready();
     const imported = await this._store.listImportedCases();
     const overlays = await this._store.listOverlays();
+    const takeoffOverlays = (await this._store.listTakeoffOverlays?.()) ?? [];
     const byId = new Map(overlays.map((o) => [o.caseId, o]));
-    const mergedImported = imported.map((c) => applyOverlay(c, byId.get(c.id)));
-    const mergedFixtures = this._fixtureCases.map((c) => applyOverlay(c, byId.get(c.id)));
+    const takeoffById = new Map(takeoffOverlays.map((o) => [o.caseId, o]));
+    const mergedImported = imported.map((c) =>
+      applyTakeoffOverlay(applyOverlay(c, byId.get(c.id)), takeoffById.get(c.id))
+    );
+    const mergedFixtures = this._fixtureCases.map((c) =>
+      applyTakeoffOverlay(applyOverlay(c, byId.get(c.id)), takeoffById.get(c.id))
+    );
     return [...mergedImported, ...mergedFixtures];
   }
 
@@ -69,12 +88,17 @@ export class LocalQuoteIntakeRepository {
     await this.ready();
     const local = await this._store.getCase(id);
     const overlay = await this._store.getOverlay(id);
+    const takeoffOverlay = (await this._store.getTakeoffOverlay?.(id)) ?? null;
     if (local) {
-      return this._hydrateProvenance(enrichCase(applyOverlay(local, overlay), this.getAsOf()));
+      return this._hydrateProvenance(
+        enrichCase(applyTakeoffOverlay(applyOverlay(local, overlay), takeoffOverlay), this.getAsOf())
+      );
     }
     const fixture = this._fixtureCases.find((c) => c.id === id);
     return fixture
-      ? this._hydrateProvenance(enrichCase(applyOverlay(fixture, overlay), this.getAsOf()))
+      ? this._hydrateProvenance(
+          enrichCase(applyTakeoffOverlay(applyOverlay(fixture, overlay), takeoffOverlay), this.getAsOf())
+        )
       : null;
   }
 
@@ -221,6 +245,43 @@ export class LocalQuoteIntakeRepository {
     await this.ready();
     return this._store.getLatestAcceptedSnapshot(caseId);
   }
+
+  async runTakeoff(caseId, opts = {}) {
+    const caseRow = await this.getCase(caseId);
+    if (!caseRow) {
+      const err = new Error("Case not found");
+      err.code = "CASE_NOT_FOUND";
+      throw err;
+    }
+    const raw = { ...caseRow };
+    delete raw.elapsedTurnaroundLabel;
+    return this._takeoff.runTakeoff(caseId, { ...opts, caseRow: raw });
+  }
+
+  async listTakeoffRuns(caseId) {
+    await this.ready();
+    return this._store.listTakeoffRuns(caseId);
+  }
+
+  async getTakeoffRun(runId) {
+    await this.ready();
+    return this._store.getTakeoffRun(runId);
+  }
+
+  async getLatestTakeoffRun(caseId) {
+    await this.ready();
+    return this._store.getLatestTakeoffRun(caseId);
+  }
+
+  async getTakeoffOverlay(caseId) {
+    await this.ready();
+    return this._store.getTakeoffOverlay(caseId);
+  }
+
+  async listTakeoffAuditEvents(caseId) {
+    await this.ready();
+    return this._store.listTakeoffAuditEvents(caseId);
+  }
 }
 
 const OVERLAY_KEYS = [
@@ -244,6 +305,22 @@ const OVERLAY_KEYS = [
   "classificationReviewState"
 ];
 
+const TAKEOFF_OVERLAY_KEYS = [
+  "statedSquareFootage",
+  "measuredCountertopSquareFootage",
+  "measuredBacksplashSquareFootage",
+  "measuredFullHeightBacksplashSquareFootage",
+  "measuredCombinedSquareFootage",
+  "providerProposedSquareFootage",
+  "takeoffVariance",
+  "takeoffSinkCutoutCount",
+  "latestTakeoffRunId",
+  "latestTakeoffState",
+  "takeoffProviderMode",
+  "takeoffWarningCounts",
+  "takeoffUpdatedAt"
+];
+
 function applyOverlay(caseRow, overlay) {
   if (!overlay) return caseRow;
   const next = { ...caseRow };
@@ -252,6 +329,15 @@ function applyOverlay(caseRow, overlay) {
   }
   if (Array.isArray(overlay.extraEvents) && overlay.extraEvents.length) {
     next.events = [...(caseRow.events ?? []), ...overlay.extraEvents];
+  }
+  return next;
+}
+
+function applyTakeoffOverlay(caseRow, takeoffOverlay) {
+  if (!takeoffOverlay) return caseRow;
+  const next = { ...caseRow };
+  for (const key of TAKEOFF_OVERLAY_KEYS) {
+    if (takeoffOverlay[key] !== undefined) next[key] = takeoffOverlay[key];
   }
   return next;
 }

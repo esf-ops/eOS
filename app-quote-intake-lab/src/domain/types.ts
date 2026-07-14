@@ -108,6 +108,25 @@ export type QuoteIntakeCase = {
   /** Phase 3.1.1 provenance overlay — never inferred from confidence alone. */
   classificationProviderMode?: "simulated" | "live" | string | null;
   classificationReviewState?: "unreviewed" | "corrected" | "accepted" | "superseded" | string | null;
+  /** Phase 4B.1 takeoff overlay — measured SF never overwrites email stated SF. */
+  statedSquareFootage?: number | null;
+  measuredCountertopSquareFootage?: number | null;
+  measuredBacksplashSquareFootage?: number | null;
+  measuredFullHeightBacksplashSquareFootage?: number | null;
+  measuredCombinedSquareFootage?: number | null;
+  providerProposedSquareFootage?: number | null;
+  takeoffVariance?: number | null;
+  takeoffSinkCutoutCount?: number | null;
+  latestTakeoffRunId?: string | null;
+  latestTakeoffState?: string | null;
+  takeoffProviderMode?: string | null;
+  takeoffWarningCounts?: {
+    informational: number;
+    estimator_review: number;
+    approval_blocking: number;
+    total: number;
+  } | null;
+  takeoffUpdatedAt?: string | null;
 };
 
 export type QuoteIntakeStatusCounts = {
@@ -159,4 +178,18 @@ export interface QuoteIntakeRepository {
   listClassificationRuns?: (caseId: string) => Promise<unknown[]>;
   getClassificationRun?: (runId: string) => Promise<unknown>;
   getAcceptedSnapshot?: (caseId: string) => Promise<unknown>;
+  runTakeoff?: (
+    caseId: string,
+    opts?: {
+      selectedAttachmentId: string;
+      actorLabel?: string;
+      scenarioId?: string;
+      transmissionAcknowledgmentPlaceholder?: boolean;
+    }
+  ) => Promise<unknown>;
+  listTakeoffRuns?: (caseId: string) => Promise<unknown[]>;
+  getTakeoffRun?: (runId: string) => Promise<unknown>;
+  getLatestTakeoffRun?: (caseId: string) => Promise<unknown>;
+  getTakeoffOverlay?: (caseId: string) => Promise<unknown>;
+  listTakeoffAuditEvents?: (caseId: string) => Promise<unknown[]>;
 }
