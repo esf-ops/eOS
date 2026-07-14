@@ -1585,6 +1585,7 @@ body {
     overflow-x: hidden;
     overflow-y: auto;
     overscroll-behavior: auto;
+    background: #f7f5f2;
   }
 
   .kiosk-app {
@@ -1615,29 +1616,46 @@ body {
     transform: none;
   }
 
+  /* Clean porcelain page — desktop glass/orb/vein composition is for 65". */
   .kiosk-bg {
     position: fixed;
     inset: 0;
     width: 100%;
     height: 100%;
+    background: #f7f5f2;
   }
 
-  /* Stronger full-bleed wash — landscape left-band wash no longer covers
-     stacked content below the fold. */
+  /* Kill ambient desktop layers that read as diagonal dark/white shards. */
+  .kiosk-bg-orb,
+  .kiosk-bg-orb-1,
+  .kiosk-bg-orb-2,
+  .kiosk-bg-orb-3,
+  .kiosk-bg-orb-4,
+  .kiosk-bg-veins,
+  .kiosk-bg-grain {
+    display: none !important;
+    opacity: 0 !important;
+    animation: none !important;
+  }
+
+  /* Facility stays as a soft watermark only — no cinematic breathe/diagonals. */
   .kiosk-bg-facility {
-    animation: none;
-    filter: blur(1.2px) brightness(1.05);
-    background-position: center 30%;
+    animation: none !important;
+    filter: none;
+    background-position: center 28%;
+    opacity: 0 !important;
+  }
+
+  .kiosk-app[data-view="home"] .kiosk-bg-facility {
+    opacity: 0.14 !important;
   }
 
   .kiosk-bg-facility-wash {
-    background: linear-gradient(
-      to bottom,
-      rgba(248, 247, 245, 0.94) 0%,
-      rgba(246, 244, 241, 0.88) 35%,
-      rgba(245, 243, 240, 0.82) 70%,
-      rgba(245, 243, 240, 0.78) 100%
-    );
+    background: rgba(247, 245, 242, 0.92);
+  }
+
+  .kiosk-app[data-view="home"] .kiosk-bg-facility-wash {
+    opacity: 1;
   }
 
   .kiosk-topbar {
@@ -1706,15 +1724,18 @@ body {
     font-size: var(--fs-headline);
     line-height: 1.05;
     letter-spacing: 0.02em;
+    color: var(--ink);
   }
 
   .kiosk-home-subhead {
     margin-top: 14px;
     max-width: none;
+    color: var(--ink-soft);
   }
 
   .kiosk-home-footnote {
     margin-top: 16px;
+    color: var(--ink-muted);
   }
 
   .kiosk-slideshow {
@@ -1728,14 +1749,33 @@ body {
     width: 100%;
     min-height: 168px;
     padding: 18px 18px;
+    background: #ffffff;
+    border: 1px solid rgba(20, 24, 33, 0.1);
+    box-shadow: 0 8px 24px rgba(20, 24, 33, 0.06);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  /* No frosted-glass blur under slide text on mobile. */
+  .kiosk-slide::before {
+    display: none !important;
+    content: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  .kiosk-slide:active {
+    background: #faf9f7;
   }
 
   .kiosk-slide-headline {
     font-size: clamp(1.2rem, 5.2vw, 1.55rem);
+    color: var(--ink);
   }
 
   .kiosk-slide-body {
     font-size: 0.95rem;
+    color: var(--ink-soft);
   }
 
   .kiosk-cards {
@@ -1754,32 +1794,111 @@ body {
     min-height: 0;
     padding: 18px 18px 20px;
     gap: 14px;
+    background: #ffffff;
+    border: 1px solid rgba(20, 24, 33, 0.1);
+    box-shadow: 0 10px 28px rgba(20, 24, 33, 0.07);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  /* Disable desktop glass blur + diagonal highlight shard on mobile cards. */
+  .kiosk-card::before,
+  .kiosk-card::after {
+    display: none !important;
+    content: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background: none !important;
+    opacity: 0 !important;
   }
 
   .kiosk-card:hover {
     transform: none;
+    box-shadow: 0 10px 28px rgba(20, 24, 33, 0.07);
   }
 
   .kiosk-card:active {
     transform: scale(0.99);
   }
 
+  .kiosk-card-body {
+    opacity: 1;
+    filter: none;
+  }
+
   .kiosk-card-title {
     font-size: clamp(1.35rem, 5.5vw, 1.7rem);
+    color: var(--ink);
   }
 
   .kiosk-card-copy {
     font-size: 0.98rem;
     max-width: none;
+    color: var(--ink-soft);
   }
 
   .kiosk-card-art {
     width: 100%;
-    height: clamp(120px, 28vw, 160px);
+    height: clamp(132px, 32vw, 172px);
+    background: #ffffff;
+  }
+
+  /* Desktop workshop dark fallback (#1a1c20) becomes black bars on phone. */
+  .kiosk-card-art--photo,
+  .kiosk-card-art--catalog,
+  .kiosk-card-art--inventory,
+  .kiosk-card-art--visualizer,
+  .kiosk-collage-panel,
+  .kiosk-collage-panel--product {
+    background: #ffffff !important;
+  }
+
+  .kiosk-card-art--catalog::after,
+  .kiosk-card-art--inventory::after,
+  .kiosk-card-art--visualizer::after {
+    display: none !important;
+    content: none !important;
+    background: none !important;
+  }
+
+  /* Stone sheen sweep is a large diagonal highlight — off on mobile. */
+  .kiosk-card-art--stone::before {
+    display: none !important;
+    content: none !important;
+    animation: none !important;
+  }
+
+  .kiosk-rotator-veil,
+  .kiosk-card-art--catalog .kiosk-rotator-veil {
+    display: none !important;
+    opacity: 0 !important;
+    background: none !important;
+  }
+
+  .kiosk-rotator-img {
+    opacity: 0;
+    animation: none !important;
+    filter: none !important;
+  }
+
+  .kiosk-rotator-img--active {
+    opacity: 1 !important;
+    animation: none !important;
+    filter: none !important;
+  }
+
+  .kiosk-card-art--catalog .kiosk-rotator-img--active {
+    animation: none !important;
+  }
+
+  .kiosk-collage-divider,
+  .kiosk-collage-divider--vivid {
+    background: rgba(20, 24, 33, 0.08);
+    box-shadow: none;
   }
 
   .kiosk-card-cue {
-    opacity: 0.55;
+    opacity: 0.7;
     width: 44px;
     height: 44px;
     right: 16px;
@@ -1811,10 +1930,25 @@ body {
     padding: 22px 18px;
     gap: 20px;
     overflow: visible;
+    background: #ffffff;
+    border: 1px solid rgba(20, 24, 33, 0.1);
+    box-shadow: 0 10px 28px rgba(20, 24, 33, 0.07);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
 
   .kiosk-hero-main {
     max-width: none;
+  }
+
+  .kiosk-hero-title,
+  .kiosk-topbar-section-title {
+    color: var(--ink);
+  }
+
+  .kiosk-hero-copy,
+  .kiosk-hero-note {
+    color: var(--ink-soft);
   }
 
   .kiosk-frame-wrap {
