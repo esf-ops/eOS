@@ -689,6 +689,37 @@ export const QUOTE_INTAKE_FIXTURE_CASES = Object.freeze([
   })
 ]);
 
+/**
+ * Lab takeoff (Phase 4B+) requires plan MIME + sizeBytes + SHA-256 metadata.
+ * Fixtures never store attachment bytes — hashes are synthetic only.
+ */
+function withPlanAttachmentMetadata(caseRow) {
+  const attachments = (caseRow.attachments ?? []).map((att, index) => {
+    const mime = String(att.contentType ?? "").toLowerCase();
+    const planLike =
+      mime === "application/pdf" ||
+      mime === "image/jpeg" ||
+      mime === "image/png" ||
+      mime === "image/webp";
+    if (!planLike) return att;
+    if (att.contentHash && Number(att.sizeBytes) > 0) return att;
+    // Deterministic pseudo-hash from attachment id (not a real file digest).
+    const seed = String(att.id || `${caseRow.id}-${index}`);
+    let h = "";
+    for (let i = 0; i < 64; i++) {
+      h += ((seed.charCodeAt(i % seed.length) + i * 17) % 16).toString(16);
+    }
+    return {
+      ...att,
+      sizeBytes: att.sizeBytes ?? 2048 + index * 64,
+      contentHash: att.contentHash ?? h,
+      source: att.source ?? "synthetic_fixture",
+      localOnly: att.localOnly ?? true
+    };
+  });
+  return { ...caseRow, attachments };
+}
+
 export function getFixtureCases() {
-  return QUOTE_INTAKE_FIXTURE_CASES;
+  return QUOTE_INTAKE_FIXTURE_CASES.map(withPlanAttachmentMetadata);
 }

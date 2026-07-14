@@ -11,6 +11,7 @@ import {
 } from "../utils/format";
 import ClassificationWorkspace from "./classification/ClassificationWorkspace";
 import DisabledFutureActions from "./DisabledFutureActions";
+import TakeoffCaseEntry from "./takeoff/TakeoffCaseEntry";
 
 type Props = {
   caseItem: QuoteIntakeCase | null;
@@ -19,6 +20,7 @@ type Props = {
   repo?: QuoteIntakeRepository;
   actorLabel?: string;
   onCaseMutated?: () => void;
+  onOpenTakeoffReview?: (caseId: string) => void;
 };
 
 function CloseIcon() {
@@ -45,7 +47,8 @@ export default function CaseDetailPanel({
   onDownloadAttachment,
   repo,
   actorLabel = "Lab Estimator (fixture)",
-  onCaseMutated
+  onCaseMutated,
+  onOpenTakeoffReview
 }: Props) {
   if (!caseItem) return null;
 
@@ -198,6 +201,14 @@ export default function CaseDetailPanel({
             repo={repo}
             actorLabel={actorLabel}
             onCaseMutated={onCaseMutated ?? (() => undefined)}
+          />
+        ) : null}
+
+        {repo && onOpenTakeoffReview ? (
+          <TakeoffCaseEntry
+            caseItem={c}
+            repo={repo}
+            onOpenTakeoffReview={() => onOpenTakeoffReview(c.id)}
           />
         ) : null}
 

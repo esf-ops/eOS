@@ -8,6 +8,7 @@ import QueueFilters from "./components/QueueFilters";
 import QueueSummaryHeader from "./components/QueueSummaryHeader";
 import QueueTable from "./components/QueueTable";
 import ImportEmailModal from "./components/import/ImportEmailModal";
+import TakeoffReviewWorkspace from "./components/takeoff/TakeoffReviewWorkspace";
 import type { QuoteIntakeAttachment, QuoteIntakeCase, QuoteIntakeFilter, QuoteIntakeStatusCounts } from "./domain/types";
 import { FIXTURE_IDENTITY, resolveLabIdentity, type LabIdentity } from "./lib/identity";
 import { getLocalQuoteIntakeRepository } from "./repository/LocalQuoteIntakeRepository.mjs";
@@ -45,6 +46,8 @@ export default function QuoteIntakeLabApp() {
   const [loading, setLoading] = useState(true);
   const [importOpen, setImportOpen] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
+  const [takeoffCaseId, setTakeoffCaseId] = useState<string | null>(null);
+  const [takeoffCase, setTakeoffCase] = useState<QuoteIntakeCase | null>(null);
 
   const refresh = useCallback(() => setReloadToken((n) => n + 1), []);
 
@@ -105,16 +108,31 @@ export default function QuoteIntakeLabApp() {
   }, [repo, selectedId, reloadToken]);
 
   useEffect(() => {
-    if (!selectedId && !importOpen) return;
+    let cancelled = false;
+    if (!takeoffCaseId) {
+      setTakeoffCase(null);
+      return;
+    }
+    repo.getCase(takeoffCaseId).then((c: QuoteIntakeCase | null) => {
+      if (!cancelled) setTakeoffCase(c);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [repo, takeoffCaseId, reloadToken]);
+
+  useEffect(() => {
+    if (!selectedId && !importOpen && !takeoffCaseId) return;
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") {
         if (importOpen) setImportOpen(false);
+        else if (takeoffCaseId) setTakeoffCaseId(null);
         else setSelectedId(null);
       }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedId, importOpen]);
+  }, [selectedId, importOpen, takeoffCaseId]);
 
   async function downloadAttachment(caseId: string, attachment: QuoteIntakeAttachment) {
     const bytes = await repo.getAttachmentBytes(caseId, attachment.id);
@@ -149,7 +167,8 @@ export default function QuoteIntakeLabApp() {
     }
   ];
 
-  const detailOpen = Boolean(selectedId && selected);
+  const detailOpen = Boolean(selectedId && selected && !takeoffCaseId);
+  const takeoffOpen = Boolean(takeoffCaseId && takeoffCase);
 
   return (
     <div className="qil-app">
@@ -163,70 +182,94 @@ export default function QuoteIntakeLabApp() {
         userSubtitle={identity.subtitle}
         initials={identity.initials}
         menuItems={menuItems}
-        statusSlot={<span className="qil-topbar-lab-chip">Fixture + local imports only</span>}
+        statusSlot={
+          <span className="qil-topbar-lab-chip">
+            {takeoffOpen ? "LAB · simulated takeoff" : "Fixture + local imports only"}
+          </span>
+        }
       />
 
-      <IsolationBanner />
+      <IsolationBanner variant={takeoffOpen ? "takeoff" : "default"} />
 
-      <main className={`qil-main${detailOpen ? " has-detail" : ""}`}>
-        <section className="qil-queue" aria-label="Estimator queue">
-          <div className="qil-queue-chrome">
-            <QueueSummaryHeader
-              counts={counts}
-              activeBucket={filter.summaryBucket ?? ""}
-              onSelectBucket={(bucket) => setFilter((f) => ({ ...f, summaryBucket: bucket || undefined }))}
-              importedCount={importedCount}
-              onImportClick={() => setImportOpen(true)}
-              toolbar={
-                <LabDataControls
-                  importedCount={importedCount}
-                  onClearImported={async () => {
-                    await repo.clearImported();
-                    setSelectedId(null);
-                    refresh();
-                  }}
-                />
-              }
-            />
+      {takeoffOpen && takeoffCase ? (
+        <main className="qil-main qil-main-takeoff">
+          <TakeoffReviewWorkspace
+            caseItem={takeoffCase}
+            repo={repo}
+            actorLabel={identity.displayName}
+            onBackToQueue={() => {
+              setTakeoffCaseId(null);
+              refresh();
+            }}
+            onCaseMutated={refresh}
+          />
+        </main>
+      ) : (
+        <main className={`qil-main${detailOpen ? " has-detail" : ""}`}>
+          <section className="qil-queue" aria-label="Estimator queue">
+            <div className="qil-queue-chrome">
+              <QueueSummaryHeader
+                counts={counts}
+                activeBucket={filter.summaryBucket ?? ""}
+                onSelectBucket={(bucket) => setFilter((f) => ({ ...f, summaryBucket: bucket || undefined }))}
+                importedCount={importedCount}
+                onImportClick={() => setImportOpen(true)}
+                toolbar={
+                  <LabDataControls
+                    importedCount={importedCount}
+                    onClearImported={async () => {
+                      await repo.clearImported();
+                      setSelectedId(null);
+                      setTakeoffCaseId(null);
+                      refresh();
+                    }}
+                  />
+                }
+              />
 
-            <QueueFilters
-              filter={filter}
-              salespeople={salespeople}
-              estimators={estimators}
-              onChange={(next) => setFilter(next)}
-            />
+              <QueueFilters
+                filter={filter}
+                salespeople={salespeople}
+                estimators={estimators}
+                onChange={(next) => setFilter(next)}
+              />
 
-            {loading ? <div className="qil-loading">Loading lab queue…</div> : null}
-          </div>
+              {loading ? <div className="qil-loading">Loading lab queue…</div> : null}
+            </div>
 
-          <div className="qil-queue-body">
-            <QueueTable
-              cases={cases}
-              selectedId={selectedId}
-              onSelect={(id) => setSelectedId((prev) => (prev === id ? null : id))}
-            />
-          </div>
-        </section>
+            <div className="qil-queue-body">
+              <QueueTable
+                cases={cases}
+                selectedId={selectedId}
+                onSelect={(id) => setSelectedId((prev) => (prev === id ? null : id))}
+              />
+            </div>
+          </section>
 
-        {detailOpen ? (
-          <>
-            <button
-              type="button"
-              className="qil-detail-backdrop"
-              aria-label="Close case detail"
-              onClick={() => setSelectedId(null)}
-            />
-            <CaseDetailPanel
-              caseItem={selected}
-              onClose={() => setSelectedId(null)}
-              onDownloadAttachment={downloadAttachment}
-              repo={repo}
-              actorLabel={identity.displayName}
-              onCaseMutated={refresh}
-            />
-          </>
-        ) : null}
-      </main>
+          {detailOpen ? (
+            <>
+              <button
+                type="button"
+                className="qil-detail-backdrop"
+                aria-label="Close case detail"
+                onClick={() => setSelectedId(null)}
+              />
+              <CaseDetailPanel
+                caseItem={selected}
+                onClose={() => setSelectedId(null)}
+                onDownloadAttachment={downloadAttachment}
+                repo={repo}
+                actorLabel={identity.displayName}
+                onCaseMutated={refresh}
+                onOpenTakeoffReview={(caseId) => {
+                  setTakeoffCaseId(caseId);
+                  setSelectedId(null);
+                }}
+              />
+            </>
+          ) : null}
+        </main>
+      )}
 
       <ImportEmailModal
         open={importOpen}

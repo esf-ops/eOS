@@ -1,8 +1,6 @@
 const ACTIONS = [
-  { id: "classify", label: "Run AI classification", phase: "Phase 3" },
-  { id: "takeoff", label: "Run takeoff", phase: "Phase 4" },
   { id: "missing", label: "Request missing information", phase: "Phase 7" },
-  { id: "review-takeoff", label: "Review takeoff", phase: "Phase 4–5" },
+  { id: "accept-takeoff", label: "Accept takeoff snapshot", phase: "Phase 4B.3" },
   { id: "approve", label: "Approve lab quote", phase: "Phase 8" },
   { id: "promote", label: "Promote to Quote Library", phase: "Phase 10" },
   { id: "send", label: "Send response", phase: "Phase 8–9" }

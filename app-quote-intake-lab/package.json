@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --test src/domain/quoteIntakeDomain.test.mjs src/repository/fixtureQuoteIntakeRepository.test.mjs src/fixtures/quoteIntakeCases.guards.test.mjs src/inbound/inboundPhase2.test.mjs src/repository/idbLabStore.test.mjs src/classification/classificationPhase3.test.mjs src/classification/phase311Provenance.test.mjs src/takeoff/phase4b0.test.mjs src/takeoff/phase4b1.test.mjs server/phase31.test.mjs",
+    "test": "node --test src/domain/quoteIntakeDomain.test.mjs src/repository/fixtureQuoteIntakeRepository.test.mjs src/fixtures/quoteIntakeCases.guards.test.mjs src/inbound/inboundPhase2.test.mjs src/repository/idbLabStore.test.mjs src/classification/classificationPhase3.test.mjs src/classification/phase311Provenance.test.mjs src/takeoff/phase4b0.test.mjs src/takeoff/phase4b1.test.mjs src/takeoff/phase4b2.test.mjs server/phase31.test.mjs",
     "live-server": "node server/index.mjs",
     "live-smoke": "node server/smoke.mjs"
   },

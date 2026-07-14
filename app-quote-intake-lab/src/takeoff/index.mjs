@@ -16,3 +16,23 @@ export {
 } from "./simulatedScenarios.mjs";
 export { SimulatedTakeoffAdapter, getSimulatedTakeoffAdapter } from "./simulatedTakeoffAdapter.mjs";
 export { TakeoffService } from "./takeoffService.mjs";
+export {
+  evaluateTakeoffEligibility,
+  isSupportedPlanAttachment,
+  listSupportedPlanAttachments,
+  groupWarningsBySeverity,
+  warningRequiredAction
+} from "./takeoffEligibility.mjs";
+export {
+  DEFAULT_SIMULATED_SCENARIO_ID,
+  listSimulatedScenarioOptions,
+  scenarioLabel
+} from "./scenarioCatalog.mjs";
+export {
+  TAKEOFF_PROVENANCE,
+  formatTakeoffSf,
+  labelTakeoffStatus,
+  runProvenanceNote,
+  containsForbiddenPricingLabels,
+  sfDifference
+} from "./takeoffDisplay.mjs";
