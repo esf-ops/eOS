@@ -3,6 +3,8 @@
 export type QuoteIntakeStatus =
   | "qil_received"
   | "qil_classifying"
+  | "qil_intake_review"
+  | "qil_manual_review"
   | "qil_not_quote"
   | "qil_not_elite_100"
   | "qil_processing_attachments"
@@ -100,6 +102,12 @@ export type QuoteIntakeCase = {
   relatedCaseId?: string;
   elapsedTurnaroundLabel?: string;
   importMeta?: QuoteIntakeImportMeta;
+  /** Phase 3 classification pointer fields (merged from overlay when present). */
+  latestClassificationRunId?: string | null;
+  acceptedSnapshotId?: string | null;
+  /** Phase 3.1.1 provenance overlay — never inferred from confidence alone. */
+  classificationProviderMode?: "simulated" | "live" | string | null;
+  classificationReviewState?: "unreviewed" | "corrected" | "accepted" | "superseded" | string | null;
 };
 
 export type QuoteIntakeStatusCounts = {
@@ -137,4 +145,18 @@ export interface QuoteIntakeRepository {
   confirmImport?: (message: unknown) => Promise<unknown>;
   getAttachmentBytes?: (caseId: string, attachmentId: string) => Promise<Uint8Array | null>;
   clearImported?: () => Promise<void>;
+  runClassification?: (
+    caseId: string,
+    opts?: { actorLabel?: string; providerMode?: "simulated" | "live" | string }
+  ) => Promise<unknown>;
+  applyClassificationCorrections?: (
+    caseId: string,
+    runId: string,
+    corrections: unknown[],
+    opts?: unknown
+  ) => Promise<unknown>;
+  acceptClassification?: (caseId: string, runId: string, opts?: unknown) => Promise<unknown>;
+  listClassificationRuns?: (caseId: string) => Promise<unknown[]>;
+  getClassificationRun?: (runId: string) => Promise<unknown>;
+  getAcceptedSnapshot?: (caseId: string) => Promise<unknown>;
 }

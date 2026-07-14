@@ -1,19 +1,24 @@
-import type { QuoteIntakeAttachment, QuoteIntakeCase } from "../domain/types";
+import type { QuoteIntakeAttachment, QuoteIntakeCase, QuoteIntakeRepository } from "../domain/types";
+import { caseValueProvenance, provenanceLabel } from "../classification/provenance.mjs";
 import {
   caseTitle,
-  formatConfidence,
+  formatConfidenceForCase,
   formatReceived,
-  formatSf,
+  formatSfForCase,
   labelPriority,
   labelStatus,
   missingFieldLabel
 } from "../utils/format";
+import ClassificationWorkspace from "./classification/ClassificationWorkspace";
 import DisabledFutureActions from "./DisabledFutureActions";
 
 type Props = {
   caseItem: QuoteIntakeCase | null;
   onClose: () => void;
   onDownloadAttachment?: (caseId: string, attachment: QuoteIntakeAttachment) => Promise<void>;
+  repo?: QuoteIntakeRepository;
+  actorLabel?: string;
+  onCaseMutated?: () => void;
 };
 
 function CloseIcon() {
@@ -34,7 +39,14 @@ function isSafePreviewType(contentType: string) {
   return t.startsWith("image/") || t === "application/pdf";
 }
 
-export default function CaseDetailPanel({ caseItem, onClose, onDownloadAttachment }: Props) {
+export default function CaseDetailPanel({
+  caseItem,
+  onClose,
+  onDownloadAttachment,
+  repo,
+  actorLabel = "Lab Estimator (fixture)",
+  onCaseMutated
+}: Props) {
   if (!caseItem) return null;
 
   const c = caseItem;
@@ -180,11 +192,20 @@ export default function CaseDetailPanel({ caseItem, onClose, onDownloadAttachmen
           </ul>
         </section>
 
+        {repo ? (
+          <ClassificationWorkspace
+            caseItem={c}
+            repo={repo}
+            actorLabel={actorLabel}
+            onCaseMutated={onCaseMutated ?? (() => undefined)}
+          />
+        ) : null}
+
         <section className="qil-detail-block">
-          <h3>Extracted requirements</h3>
-          {imported ? (
+          <h3>Case field summary</h3>
+          {imported && !c.latestClassificationRunId ? (
             <p className="qil-cell-meta" style={{ marginBottom: "0.55rem" }}>
-              Phase 2 does not extract business fields — values below stay unknown until Phase 3+.
+              Run simulated classification above to populate extracted fields. Unknown stays unknown until evidence exists.
             </p>
           ) : null}
           <dl className="qil-dl qil-dl-grid">
@@ -205,11 +226,11 @@ export default function CaseDetailPanel({ caseItem, onClose, onDownloadAttachmen
               <dd>{c.resolvedPriceGroup ?? "Unresolved"}</dd>
             </div>
             <div>
-              <dt>Proposed SF*</dt>
-              <dd>{formatSf(c.proposedSquareFootage)}</dd>
+              <dt>Proposed SF</dt>
+              <dd>{formatSfForCase(c)}</dd>
             </div>
             <div>
-              <dt>Sink cutouts*</dt>
+              <dt>Sink cutouts</dt>
               <dd>{c.sinkCutoutCount ?? "—"}</dd>
             </div>
             <div>
@@ -246,8 +267,12 @@ export default function CaseDetailPanel({ caseItem, onClose, onDownloadAttachmen
               <dd>{c.takeoffState}</dd>
             </div>
             <div>
-              <dt>AI confidence*</dt>
-              <dd>{formatConfidence(c.aiConfidence)}</dd>
+              <dt>AI confidence</dt>
+              <dd>{formatConfidenceForCase(c)}</dd>
+            </div>
+            <div>
+              <dt>Value provenance</dt>
+              <dd>{provenanceLabel(caseValueProvenance(c))}</dd>
             </div>
             <div>
               <dt>Quote preview state</dt>

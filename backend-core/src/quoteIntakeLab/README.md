@@ -23,5 +23,10 @@ When an approved later phase mounts the API:
 |------|---------|
 | `README.md` | This note |
 | `phase1Boundary.mjs` | Documents Phase 1 boundary helpers / future attach signature (no Express attach) |
+| `phase31LiveBoundary.mjs` | Phase 3.1 note: live Gemini host is `app-quote-intake-lab/server` (loopback), not Brain |
+
+## Phase 3.1 live AI
+
+Live classification runs on an isolated lab server under `app-quote-intake-lab/server/` (`npm run live-server`). It is **not** registered in `server.js`.
 
 Do not write production tables from this module.

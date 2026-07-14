@@ -1,0 +1,35 @@
+Message-ID: <quote-with-fields-001@example.com>
+Date: Mon, 14 Jul 2026 12:00:00 +0000
+From: Avery Nguyen <avery.nguyen@example.com>
+To: sales@example.com
+Subject: Need an Elite 100 estimate for Maple Court
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="QILBOUND1"
+
+--QILBOUND1
+Content-Type: text/plain; charset="utf-8"
+
+Hello —
+
+Customer: Northbridge Homes
+Project: Maple Court Kitchen
+Address: 120 Maple Court, Sampletown, ST 00000
+Color: Calacatta Mira
+Edge: eased edge
+Sinks: 2 sink cutouts
+Backsplash: 4" backsplash
+Total SF: 48.5
+Phone: 555-010-2000
+
+Please send an Elite 100 estimate.
+Synthetic lab fixture only.
+
+--QILBOUND1
+Content-Type: application/pdf
+Content-Disposition: attachment; filename="kitchen-plan.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjAKJcKlwrHDqwoKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIK
+Pj4KZW5kb2JqCg==
+
+--QILBOUND1--

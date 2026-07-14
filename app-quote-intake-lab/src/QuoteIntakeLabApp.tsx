@@ -220,6 +220,9 @@ export default function QuoteIntakeLabApp() {
               caseItem={selected}
               onClose={() => setSelectedId(null)}
               onDownloadAttachment={downloadAttachment}
+              repo={repo}
+              actorLabel={identity.displayName}
+              onCaseMutated={refresh}
             />
           </>
         ) : null}

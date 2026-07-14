@@ -34,7 +34,7 @@ export default function QueueSummaryHeader({
         <div>
           <h1>Estimator queue</h1>
           <p>
-            {`${counts.total} cases (${importedCount} local imports + fixtures) · asterisks mark simulated values · imports stay in this browser`}
+            {`${counts.total} cases (${importedCount} local imports + fixtures) · asterisks mark fixture-simulated values only · imports stay in this browser`}
           </p>
         </div>
         <div className="qil-summary-actions">

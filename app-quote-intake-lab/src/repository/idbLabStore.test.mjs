@@ -46,4 +46,43 @@ describe("IdbLabStore", () => {
     assert.equal(await store.countImported(), 0);
     assert.equal(await store.getCase("qil-imp-test-1"), null);
   });
+
+  it("migrates to v2 stores for classification runs and keeps fixture overlays on clear", async () => {
+    const fixtureCaseId = "qil-case-fixture-overlay";
+    await store.setCaseOverlay(fixtureCaseId, { status: "qil_intake_review", nextAction: "test" });
+    await store.saveClassificationRun({
+      id: "qil-run-fixture-1",
+      caseId: fixtureCaseId,
+      providerMode: "simulated",
+      startedAt: "2026-07-14T16:00:00.000Z",
+      humanReviewState: "unreviewed",
+      result: { intent: "new_quote_request" }
+    });
+
+    const caseRow = {
+      id: "qil-imp-test-cls",
+      status: "qil_received",
+      dataSource: "imported",
+      receivedAt: "2026-07-14T16:00:00.000Z",
+      attachments: [],
+      importMeta: { dedupeKey: "mid:test-idb-cls@example.com" },
+      events: []
+    };
+    await store.saveImportedCase({ caseRow, attachmentBlobs: [] });
+    await store.saveClassificationRun({
+      id: "qil-run-imp-1",
+      caseId: "qil-imp-test-cls",
+      providerMode: "simulated",
+      startedAt: "2026-07-14T16:01:00.000Z",
+      humanReviewState: "unreviewed",
+      result: { intent: "not_quote_related" }
+    });
+    await store.setCaseOverlay("qil-imp-test-cls", { status: "qil_not_quote" });
+
+    await store.clearImported();
+    assert.equal(await store.countImported(), 0);
+    assert.equal((await store.listClassificationRuns("qil-imp-test-cls")).length, 0);
+    assert.equal((await store.listClassificationRuns(fixtureCaseId)).length, 1);
+    assert.equal((await store.getOverlay(fixtureCaseId))?.status, "qil_intake_review");
+  });
 });

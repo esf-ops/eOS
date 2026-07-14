@@ -1,3 +1,5 @@
+import { ClassificationService } from "../classification/classificationService.mjs";
+import { getSimulatedIntakeIntelligenceProvider } from "../classification/simulatedProvider.mjs";
 import { inboundEmailAdapter } from "../inbound/inboundEmailAdapter.mjs";
 import { caseFromInboundMessage } from "../inbound/caseFromInbound.mjs";
 import { formatTurnaround } from "../domain/age.mjs";
@@ -11,17 +13,24 @@ import { getFixtureCases, FIXTURE_AS_OF } from "../fixtures/quoteIntakeCases.mjs
 import { getIdbLabStore } from "./idbLabStore.mjs";
 
 /**
- * Composite repository: built-in fixtures + locally imported cases (IndexedDB / memory).
+ * Composite repository: built-in fixtures + locally imported cases (IndexedDB / memory)
+ * + classification overlays / runs.
  */
 export class LocalQuoteIntakeRepository {
   /**
-   * @param {{ store?: any, fixtureCases?: any[], asOfMode?: "wall"|"fixture" }} [opts]
+   * @param {{ store?: any, fixtureCases?: any[], asOfMode?: "wall"|"fixture", provider?: any, liveProvider?: any }} [opts]
    */
   constructor(opts = {}) {
     this._store = opts.store ?? getIdbLabStore();
     this._fixtureCases = opts.fixtureCases ?? getFixtureCases();
     this._asOfMode = opts.asOfMode ?? "wall";
     this._adapter = opts.adapter ?? inboundEmailAdapter;
+    this._provider = opts.provider ?? getSimulatedIntakeIntelligenceProvider();
+    this._classification = new ClassificationService({
+      store: this._store,
+      provider: this._provider,
+      liveProvider: opts.liveProvider
+    });
     this._ready = null;
   }
 
@@ -39,21 +48,52 @@ export class LocalQuoteIntakeRepository {
   async _allRaw() {
     await this.ready();
     const imported = await this._store.listImportedCases();
-    return [...imported, ...this._fixtureCases];
+    const overlays = await this._store.listOverlays();
+    const byId = new Map(overlays.map((o) => [o.caseId, o]));
+    const mergedImported = imported.map((c) => applyOverlay(c, byId.get(c.id)));
+    const mergedFixtures = this._fixtureCases.map((c) => applyOverlay(c, byId.get(c.id)));
+    return [...mergedImported, ...mergedFixtures];
   }
 
   async listCases(filter = {}) {
     const asOf = this.getAsOf();
     const filtered = filterQuoteIntakeCases(await this._allRaw(), filter, asOf);
-    return filtered.map((c) => enrichCase(c, asOf));
+    const enriched = [];
+    for (const c of filtered) {
+      enriched.push(await this._hydrateProvenance(enrichCase(c, asOf)));
+    }
+    return enriched;
   }
 
   async getCase(id) {
     await this.ready();
     const local = await this._store.getCase(id);
-    if (local) return enrichCase(local, this.getAsOf());
+    const overlay = await this._store.getOverlay(id);
+    if (local) {
+      return this._hydrateProvenance(enrichCase(applyOverlay(local, overlay), this.getAsOf()));
+    }
     const fixture = this._fixtureCases.find((c) => c.id === id);
-    return fixture ? enrichCase(fixture, this.getAsOf()) : null;
+    return fixture
+      ? this._hydrateProvenance(enrichCase(applyOverlay(fixture, overlay), this.getAsOf()))
+      : null;
+  }
+
+  /**
+   * Backfill provenance from the latest run when overlays predate Phase 3.1.1.
+   * Presentation-only — does not change classification results.
+   */
+  async _hydrateProvenance(caseRow) {
+    if (!caseRow?.latestClassificationRunId) return caseRow;
+    if (caseRow.classificationProviderMode != null && caseRow.classificationReviewState != null) {
+      return caseRow;
+    }
+    const run = await this._store.getClassificationRun?.(caseRow.latestClassificationRunId);
+    if (!run) return caseRow;
+    return {
+      ...caseRow,
+      classificationProviderMode: caseRow.classificationProviderMode ?? run.providerMode ?? null,
+      classificationReviewState: caseRow.classificationReviewState ?? run.humanReviewState ?? null
+    };
   }
 
   async getStatusCounts(filter = {}) {
@@ -75,10 +115,6 @@ export class LocalQuoteIntakeRepository {
     return this._store.countImported();
   }
 
-  /**
-   * Preview-only: normalize source, check dedupe, do not persist.
-   * @param {{ kind: "eml_upload"|"manual_paste", bytes?: Uint8Array, filename?: string, input?: any, importActor?: string }} source
-   */
   async previewImport(source) {
     const message = await this._adapter.ingest(source);
     await this.ready();
@@ -95,10 +131,6 @@ export class LocalQuoteIntakeRepository {
     };
   }
 
-  /**
-   * Confirm import after preview. Idempotent — duplicates return existing case.
-   * @param {import("../inbound/inboundTypes.mjs").InboundMessage} message
-   */
   async confirmImport(message) {
     await this.ready();
     const existingId = await this._store.findCaseIdByDedupeKey(message.dedupeKey);
@@ -149,11 +181,79 @@ export class LocalQuoteIntakeRepository {
     return this._store.getAttachmentBytes(caseId, attachmentId);
   }
 
-  /** Remove locally imported cases + blobs. Fixtures untouched. */
   async clearImported() {
     await this.ready();
     await this._store.clearImported();
   }
+
+  async runClassification(caseId, opts = {}) {
+    const caseRow = await this.getCase(caseId);
+    if (!caseRow) {
+      const err = new Error("Case not found");
+      err.code = "CASE_NOT_FOUND";
+      throw err;
+    }
+    // Strip enrichments — service needs durable fields
+    const raw = { ...caseRow };
+    delete raw.elapsedTurnaroundLabel;
+    return this._classification.runClassification(raw, opts);
+  }
+
+  async applyClassificationCorrections(caseId, runId, corrections, opts = {}) {
+    return this._classification.applyCorrections(caseId, runId, corrections, opts);
+  }
+
+  async acceptClassification(caseId, runId, opts = {}) {
+    return this._classification.acceptClassification(caseId, runId, opts);
+  }
+
+  async listClassificationRuns(caseId) {
+    await this.ready();
+    return this._store.listClassificationRuns(caseId);
+  }
+
+  async getClassificationRun(runId) {
+    await this.ready();
+    return this._store.getClassificationRun(runId);
+  }
+
+  async getAcceptedSnapshot(caseId) {
+    await this.ready();
+    return this._store.getLatestAcceptedSnapshot(caseId);
+  }
+}
+
+const OVERLAY_KEYS = [
+  "status",
+  "updatedAt",
+  "latestClassificationRunId",
+  "acceptedSnapshotId",
+  "aiConfidence",
+  "missingInformation",
+  "requestedColor",
+  "proposedSquareFootage",
+  "sinkCutoutCount",
+  "edgeProfile",
+  "backsplashScope",
+  "customerAccount",
+  "projectName",
+  "projectAddress",
+  "resolvedPriceGroup",
+  "nextAction",
+  "classificationProviderMode",
+  "classificationReviewState"
+];
+
+function applyOverlay(caseRow, overlay) {
+  if (!overlay) return caseRow;
+  const next = { ...caseRow };
+  for (const key of OVERLAY_KEYS) {
+    if (overlay[key] !== undefined) next[key] = overlay[key];
+  }
+  if (Array.isArray(overlay.extraEvents) && overlay.extraEvents.length) {
+    next.events = [...(caseRow.events ?? []), ...overlay.extraEvents];
+  }
+  return next;
 }
 
 function enrichCase(c, asOf) {

@@ -1,0 +1,11 @@
+Message-ID: <non-quote-schedule-001@example.com>
+Date: Mon, 14 Jul 2026 11:00:00 +0000
+From: Riley Chen <riley.chen@example.com>
+To: service@example.com
+Subject: Confirm Thursday service appointment
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Hello — please confirm our scheduled service call on Thursday morning.
+This is a synthetic lab fixture only (service appointment confirmation).

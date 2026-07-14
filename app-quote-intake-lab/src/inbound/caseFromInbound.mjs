@@ -84,7 +84,7 @@ export async function caseFromInboundMessage(message, opts = {}) {
         summary: `Imported ${message.sourceType} email into lab (local only).`
       }
     ],
-    nextAction: "Await classification (Phase 3)"
+    nextAction: "Run simulated classification"
   };
 
   return caseRow;

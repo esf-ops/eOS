@@ -2,7 +2,7 @@ import type { QuoteIntakeCase } from "../domain/types";
 import {
   caseTitle,
   formatReceived,
-  formatSf,
+  formatSfForCase,
   labelPriority,
   labelStatus,
   missingFieldLabel
@@ -46,7 +46,7 @@ export default function QueueTable({ cases, selectedId, onSelect }: Props) {
             <th scope="col">Salesperson</th>
             <th scope="col">Received / age</th>
             <th scope="col">Color / group</th>
-            <th scope="col">SF*</th>
+            <th scope="col">SF</th>
             <th scope="col">Status</th>
             <th scope="col">Missing info</th>
             <th scope="col">Priority</th>
@@ -95,7 +95,7 @@ export default function QueueTable({ cases, selectedId, onSelect }: Props) {
                   <div className="qil-cell-meta qil-cell-clip">{c.resolvedPriceGroup ?? "Unresolved"}</div>
                 </td>
                 <td>
-                  <div className="qil-cell-primary">{formatSf(c.proposedSquareFootage)}</div>
+                  <div className="qil-cell-primary">{formatSfForCase(c)}</div>
                 </td>
                 <td>
                   <span className={`qil-pill qil-pill-status status-${c.status}`}>{labelStatus(c.status)}</span>

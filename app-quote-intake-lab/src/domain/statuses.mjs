@@ -6,6 +6,8 @@
 export const QUOTE_INTAKE_STATUSES = Object.freeze([
   "qil_received",
   "qil_classifying",
+  "qil_intake_review",
+  "qil_manual_review",
   "qil_not_quote",
   "qil_not_elite_100",
   "qil_processing_attachments",
@@ -23,6 +25,8 @@ export const QUOTE_INTAKE_STATUSES = Object.freeze([
 export const STATUS_LABELS = Object.freeze({
   qil_received: "Received",
   qil_classifying: "Classifying",
+  qil_intake_review: "Intake review",
+  qil_manual_review: "Manual review",
   qil_not_quote: "Not a quote",
   qil_not_elite_100: "Not Elite 100",
   qil_processing_attachments: "Processing attachments",
@@ -51,9 +55,15 @@ export const SUMMARY_BUCKETS = Object.freeze([
 const BUCKET_STATUSES = Object.freeze({
   new: ["qil_received"],
   processing: ["qil_classifying", "qil_processing_attachments", "qil_takeoff_processing"],
-  ready_for_review: ["qil_ready_for_review"],
+  ready_for_review: ["qil_ready_for_review", "qil_intake_review"],
   missing_information: ["qil_needs_information"],
-  manual_review: ["qil_needs_manual_takeoff", "qil_failed", "qil_not_elite_100", "qil_not_quote"],
+  manual_review: [
+    "qil_needs_manual_takeoff",
+    "qil_manual_review",
+    "qil_failed",
+    "qil_not_elite_100",
+    "qil_not_quote"
+  ],
   approved_ready: ["qil_approved_lab_quote", "qil_ready_to_send_lab", "qil_in_review"],
   sent_simulated: ["qil_sent_simulated"]
 });
