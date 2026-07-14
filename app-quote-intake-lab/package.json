@@ -8,10 +8,11 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --test src/domain/quoteIntakeDomain.test.mjs src/repository/fixtureQuoteIntakeRepository.test.mjs src/fixtures/quoteIntakeCases.guards.test.mjs"
+    "test": "node --test src/domain/quoteIntakeDomain.test.mjs src/repository/fixtureQuoteIntakeRepository.test.mjs src/fixtures/quoteIntakeCases.guards.test.mjs src/inbound/inboundPhase2.test.mjs src/repository/idbLabStore.test.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.7.0",
+    "postal-mime": "^2.7.5",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "vite": "^7.1.4"
@@ -20,6 +21,7 @@
     "@types/node": "^22.19.1",
     "@types/react": "^19.1.11",
     "@types/react-dom": "^19.1.7",
+    "fake-indexeddb": "^6.2.5",
     "typescript": "^5.9.2"
   }
 }

@@ -1,0 +1,20 @@
+Message-ID: <with-image-005@example.com>
+Date: Mon, 14 Jul 2026 13:30:00 +0000
+From: Jamie Brooks <jamie.brooks@example.com>
+To: sales@example.com
+Subject: Kitchen photo attached (fixture)
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="BOUNDIMG"
+
+--BOUNDIMG
+Content-Type: text/plain; charset="utf-8"
+
+Photo attached for context (1x1 PNG fixture).
+
+--BOUNDIMG
+Content-Type: image/png; name="kitchen-photo.png"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="kitchen-photo.png"
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==
+--BOUNDIMG--

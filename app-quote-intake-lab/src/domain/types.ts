@@ -1,4 +1,4 @@
-/** Lab-owned domain types for Quote Intake Lab (Phase 1 fixtures). */
+/** Lab-owned domain types for Quote Intake Lab. */
 
 export type QuoteIntakeStatus =
   | "qil_received"
@@ -22,8 +22,11 @@ export type QuoteIntakeAttachment = {
   id: string;
   filename: string;
   contentType: string;
-  /** Phase 1 fixtures are always simulated. */
+  /** Phase 1 fixtures are simulated; Phase 2 imports are local-only. */
   simulated: boolean;
+  sizeBytes?: number;
+  contentHash?: string;
+  localOnly?: boolean;
 };
 
 export type QuoteIntakeEvent = {
@@ -35,6 +38,30 @@ export type QuoteIntakeEvent = {
   summary: string;
   before?: unknown;
   after?: unknown;
+};
+
+export type QuoteIntakeImportMeta = {
+  sourceType: "manual_eml" | "manual_paste";
+  dedupeKey: string;
+  dedupeStrategy: "message_id" | "content_hash";
+  messageId: string | null;
+  messageContentHash: string;
+  parserWarnings: string[];
+  rawSourcePreserved: boolean;
+  originalFilename: string | null;
+  textBody: string;
+  to: Array<{ name: string | null; email: string }>;
+  cc: Array<{ name: string | null; email: string }>;
+  replyTo: { name: string | null; email: string } | null;
+  thread: {
+    conversationId: string | null;
+    inReplyTo: string | null;
+    references: string[];
+    threadKey: string;
+  };
+  importTimestamp: string;
+  importActor: string;
+  htmlPresent: boolean;
 };
 
 export type QuoteIntakeCase = {
@@ -56,25 +83,23 @@ export type QuoteIntakeCase = {
   attachments: readonly QuoteIntakeAttachment[];
   requestedColor: string | null;
   resolvedPriceGroup: string | null;
-  /** Simulated proposed sf — not from production takeoff. */
   proposedSquareFootage: number | null;
   sinkCutoutCount: number | null;
   edgeProfile: string | null;
   backsplashScope: string | null;
   missingInformation: readonly string[];
-  /** Placeholder 0–1; simulated only. */
   aiConfidence: number | null;
   takeoffState: string;
   quotePreviewState: string;
   unreadActivityCount: number;
   internalNotes: string;
-  dataSource: "fixture";
+  dataSource: "fixture" | "imported";
   simulatedLabels: readonly string[];
   events: readonly QuoteIntakeEvent[];
   nextAction?: string;
   relatedCaseId?: string;
-  /** Computed by repository using fixture asOf clock. */
   elapsedTurnaroundLabel?: string;
+  importMeta?: QuoteIntakeImportMeta;
 };
 
 export type QuoteIntakeStatusCounts = {
@@ -99,17 +124,17 @@ export type QuoteIntakeFilter = {
   summaryBucket?: string;
 };
 
-/**
- * Future data-provider boundary. Phase 1 uses FixtureQuoteIntakeRepository only.
- * A later ApiQuoteIntakeRepository can implement the same shape against
- * /api/quote-intake-lab/* once routes are mounted.
- */
 export interface QuoteIntakeRepository {
   listCases(filter?: QuoteIntakeFilter): Promise<QuoteIntakeCase[]>;
   getCase(id: string): Promise<QuoteIntakeCase | null>;
   getStatusCounts(filter?: QuoteIntakeFilter): Promise<QuoteIntakeStatusCounts>;
   listSalespeople(): Promise<string[]>;
   listEstimators(): Promise<string[]>;
-  /** ISO timestamp used for deterministic age calculations. */
   getAsOf(): string;
+  ready?: () => Promise<unknown>;
+  countImported?: () => Promise<number>;
+  previewImport?: (source: unknown) => Promise<unknown>;
+  confirmImport?: (message: unknown) => Promise<unknown>;
+  getAttachmentBytes?: (caseId: string, attachmentId: string) => Promise<Uint8Array | null>;
+  clearImported?: () => Promise<void>;
 }

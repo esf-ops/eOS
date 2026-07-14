@@ -1,0 +1,20 @@
+Message-ID: <multipart-alt-003@example.com>
+Date: Mon, 14 Jul 2026 12:00:00 +0000
+From: Riley Chen <riley.chen@example.com>
+To: sales@example.com, estimates@example.com
+Cc: casey.morgan@example.com
+Reply-To: riley.chen@example.com
+Subject: Multipart alternative kitchen request (fixture)
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="BOUNDALT"
+
+--BOUNDALT
+Content-Type: text/plain; charset="utf-8"
+
+Plain version: please quote Soft Mist vanity tops.
+
+--BOUNDALT
+Content-Type: text/html; charset="utf-8"
+
+<html><body><p>HTML version: please quote <i>Soft Mist</i> vanity tops.</p></body></html>
+--BOUNDALT--

@@ -73,7 +73,10 @@ export default function QueueTable({ cases, selectedId, onSelect }: Props) {
                 aria-selected={selected}
               >
                 <td>
-                  <div className="qil-cell-primary">{caseTitle(c)}</div>
+                  <div className="qil-cell-primary">
+                    {caseTitle(c)}
+                    {c.dataSource === "imported" ? <span className="qil-source-pill">Imported</span> : null}
+                  </div>
                   <div className="qil-cell-meta">{c.id}</div>
                 </td>
                 <td>

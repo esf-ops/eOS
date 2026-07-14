@@ -1,4 +1,4 @@
-import type { QuoteIntakeCase } from "../domain/types";
+import type { QuoteIntakeAttachment, QuoteIntakeCase } from "../domain/types";
 import {
   caseTitle,
   formatConfidence,
@@ -13,6 +13,7 @@ import DisabledFutureActions from "./DisabledFutureActions";
 type Props = {
   caseItem: QuoteIntakeCase | null;
   onClose: () => void;
+  onDownloadAttachment?: (caseId: string, attachment: QuoteIntakeAttachment) => Promise<void>;
 };
 
 function CloseIcon() {
@@ -28,16 +29,26 @@ function CloseIcon() {
   );
 }
 
-export default function CaseDetailPanel({ caseItem, onClose }: Props) {
+function isSafePreviewType(contentType: string) {
+  const t = String(contentType || "").toLowerCase();
+  return t.startsWith("image/") || t === "application/pdf";
+}
+
+export default function CaseDetailPanel({ caseItem, onClose, onDownloadAttachment }: Props) {
   if (!caseItem) return null;
 
   const c = caseItem;
+  const imported = c.dataSource === "imported";
+  const meta = c.importMeta;
 
   return (
     <aside className="qil-detail" aria-label={`Case detail ${c.id}`}>
       <header className="qil-detail-header">
         <div className="qil-detail-header-text">
-          <p className="qil-eyebrow">{c.id}</p>
+          <p className="qil-eyebrow">
+            {c.id}
+            {imported ? <span className="qil-source-pill">Imported</span> : <span className="qil-source-pill is-fixture">Fixture</span>}
+          </p>
           <h2>{caseTitle(c)}</h2>
           <p className="qil-detail-sub">
             <span className={`qil-pill qil-pill-status status-${c.status}`}>{labelStatus(c.status)}</span>
@@ -70,6 +81,18 @@ export default function CaseDetailPanel({ caseItem, onClose }: Props) {
                 {c.senderName} &lt;{c.senderEmail}&gt;
               </dd>
             </div>
+            {meta?.to?.length ? (
+              <div>
+                <dt>To</dt>
+                <dd>{meta.to.map((a) => a.email).join(", ")}</dd>
+              </div>
+            ) : null}
+            {meta?.cc?.length ? (
+              <div>
+                <dt>CC</dt>
+                <dd>{meta.cc.map((a) => a.email).join(", ")}</dd>
+              </div>
+            ) : null}
             <div>
               <dt>Mailbox</dt>
               <dd>{c.recipientMailbox}</dd>
@@ -84,24 +107,74 @@ export default function CaseDetailPanel({ caseItem, onClose }: Props) {
                 {formatReceived(c.receivedAt)} · age {c.elapsedTurnaroundLabel}
               </dd>
             </div>
+            {meta ? (
+              <div>
+                <dt>Import source</dt>
+                <dd>
+                  {meta.sourceType}
+                  {meta.originalFilename ? ` · ${meta.originalFilename}` : ""}
+                  {meta.messageId ? ` · ${meta.messageId}` : " · no Message-ID"}
+                </dd>
+              </div>
+            ) : null}
             <div>
               <dt>Next action</dt>
-              <dd>{c.nextAction ?? "Inspect case and await Phase 2+ workflow"}</dd>
+              <dd>{c.nextAction ?? "Inspect case"}</dd>
             </div>
           </dl>
-          <blockquote className="qil-excerpt">{c.emailExcerpt}</blockquote>
+          {imported && meta?.textBody != null ? (
+            <pre className="qil-body-pre">{meta.textBody || "(empty body)"}</pre>
+          ) : (
+            <blockquote className="qil-excerpt">{c.emailExcerpt}</blockquote>
+          )}
+          {meta?.parserWarnings?.length ? (
+            <div className="qil-import-warnings compact">
+              <strong>Import warnings</strong>
+              <ul>
+                {meta.parserWarnings.map((w) => (
+                  <li key={w}>{w}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </section>
 
         <section className="qil-detail-block">
           <h3>Attachments</h3>
+          {imported ? (
+            <p className="qil-cell-meta" style={{ marginBottom: "0.5rem" }}>
+              Stored only in this browser (IndexedDB). Active content is not executed.
+            </p>
+          ) : null}
           <ul className="qil-attach-list">
             {c.attachments.map((a) => (
               <li key={a.id}>
                 <span>{a.filename}</span>
                 <small>
                   {a.contentType}
+                  {a.sizeBytes != null ? ` · ${a.sizeBytes} bytes` : ""}
+                  {a.contentHash ? ` · sha256:${a.contentHash.slice(0, 12)}…` : ""}
                   {a.simulated ? " · simulated" : ""}
+                  {a.localOnly ? " · local only" : ""}
                 </small>
+                {imported && onDownloadAttachment && isSafePreviewType(a.contentType) ? (
+                  <button
+                    type="button"
+                    className="qil-btn-ghost qil-att-btn"
+                    onClick={() => void onDownloadAttachment(c.id, a)}
+                  >
+                    Open local {a.contentType.startsWith("image/") ? "image" : "PDF"}
+                  </button>
+                ) : null}
+                {imported && onDownloadAttachment && !isSafePreviewType(a.contentType) ? (
+                  <button
+                    type="button"
+                    className="qil-btn-ghost qil-att-btn"
+                    onClick={() => void onDownloadAttachment(c.id, a)}
+                  >
+                    Download locally
+                  </button>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -109,6 +182,11 @@ export default function CaseDetailPanel({ caseItem, onClose }: Props) {
 
         <section className="qil-detail-block">
           <h3>Extracted requirements</h3>
+          {imported ? (
+            <p className="qil-cell-meta" style={{ marginBottom: "0.55rem" }}>
+              Phase 2 does not extract business fields — values below stay unknown until Phase 3+.
+            </p>
+          ) : null}
           <dl className="qil-dl qil-dl-grid">
             <div>
               <dt>Customer / account</dt>
@@ -154,7 +232,9 @@ export default function CaseDetailPanel({ caseItem, onClose }: Props) {
               ))}
             </ul>
           ) : (
-            <p className="qil-cell-meta">No missing fields flagged.</p>
+            <p className="qil-cell-meta">
+              {imported ? "No missing flags yet (classification not run)." : "No missing fields flagged."}
+            </p>
           )}
         </section>
 

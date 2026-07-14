@@ -1,0 +1,14 @@
+Message-ID: <unsafe-html-009@example.com>
+Date: Mon, 14 Jul 2026 15:00:00 +0000
+From: Pat Romero <pat.romero@example.com>
+To: estimates@example.com
+Subject: Potentially unsafe HTML (fixture)
+MIME-Version: 1.0
+Content-Type: text/html; charset="utf-8"
+
+<html><head><style>body{background:red}</style></head><body>
+<svg onload="alert(1)"></svg>
+<object data="javascript:alert(1)"></object>
+<a href="javascript:alert(1)">click</a>
+<p>Safe visible text for Elite 100 quote fixture.</p>
+</body></html>

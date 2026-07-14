@@ -1,0 +1,8 @@
+Date: Mon, 14 Jul 2026 14:30:00 +0000
+From: Drew Patel <drew.patel@example.com>
+To: estimates@example.com
+Subject: Missing Message-ID fallback hash (fixture)
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+
+This synthetic message intentionally omits Message-ID for dedupe hash tests.

@@ -1,0 +1,13 @@
+Message-ID: <multi-rcpt-006@example.com>
+In-Reply-To: <plain-text-001@example.com>
+References: <plain-text-001@example.com> <thread-root@example.com>
+Date: Mon, 14 Jul 2026 14:00:00 +0000
+From: "Blake Summers" <blake.summers@example.com>
+To: Jordan Blake <jordan.blake@example.com>, estimates@example.com
+Cc: Taylor Reed <taylor.reed@example.com>
+Reply-To: blake.summers@example.com
+Subject: RE: Elite 100 kitchen quote request (fixture)
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+
+Revision note: island depth changed. Synthetic fixture only.

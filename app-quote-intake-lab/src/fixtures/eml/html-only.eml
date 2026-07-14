@@ -1,0 +1,9 @@
+Message-ID: <html-only-002@example.com>
+Date: Mon, 14 Jul 2026 11:00:00 +0000
+From: Sam Ortiz <sam.ortiz@example.com>
+To: estimates@example.com
+Subject: HTML-only estimate request (fixture)
+MIME-Version: 1.0
+Content-Type: text/html; charset="utf-8"
+
+<html><body><script>alert('xss')</script><p>Please quote <b>Elite 100</b> for Harbor Lane.</p><img src="https://evil.example/x.png"></body></html>

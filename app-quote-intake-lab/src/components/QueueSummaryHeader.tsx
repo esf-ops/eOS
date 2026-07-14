@@ -1,9 +1,13 @@
+import type { ReactNode } from "react";
 import type { QuoteIntakeStatusCounts } from "../domain/types";
 
 type Props = {
   counts: QuoteIntakeStatusCounts;
   activeBucket: string;
   onSelectBucket: (bucket: string) => void;
+  importedCount?: number;
+  onImportClick?: () => void;
+  toolbar?: ReactNode;
 };
 
 const TILES: Array<{ key: keyof QuoteIntakeStatusCounts | "clear"; label: string; bucket: string }> = [
@@ -16,22 +20,37 @@ const TILES: Array<{ key: keyof QuoteIntakeStatusCounts | "clear"; label: string
   { key: "sent_simulated", label: "Simulated sent", bucket: "sent_simulated" }
 ];
 
-export default function QueueSummaryHeader({ counts, activeBucket, onSelectBucket }: Props) {
+export default function QueueSummaryHeader({
+  counts,
+  activeBucket,
+  onSelectBucket,
+  importedCount = 0,
+  onImportClick,
+  toolbar
+}: Props) {
   return (
     <section className="qil-summary" aria-label="Queue summary">
       <div className="qil-summary-head">
         <div>
           <h1>Estimator queue</h1>
           <p>
-            {counts.total} fixture cases · times calculated as of fixture clock · asterisks mark simulated values
+            {`${counts.total} cases (${importedCount} local imports + fixtures) · asterisks mark simulated values · imports stay in this browser`}
           </p>
         </div>
-        {activeBucket ? (
-          <button type="button" className="qil-btn-ghost" onClick={() => onSelectBucket("")}>
-            Clear summary filter
-          </button>
-        ) : null}
+        <div className="qil-summary-actions">
+          {onImportClick ? (
+            <button type="button" className="qil-btn-primary" onClick={onImportClick}>
+              Import email
+            </button>
+          ) : null}
+          {activeBucket ? (
+            <button type="button" className="qil-btn-ghost" onClick={() => onSelectBucket("")}>
+              Clear summary filter
+            </button>
+          ) : null}
+        </div>
       </div>
+      {toolbar}
       <div className="qil-summary-grid">
         {TILES.map((tile) => {
           const value = counts[tile.key as keyof QuoteIntakeStatusCounts] ?? 0;

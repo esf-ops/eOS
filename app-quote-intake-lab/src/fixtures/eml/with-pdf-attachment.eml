@@ -1,0 +1,20 @@
+Message-ID: <with-pdf-004@example.com>
+Date: Mon, 14 Jul 2026 13:00:00 +0000
+From: Morgan Ellis <morgan.ellis@example.com>
+To: estimates@example.com
+Subject: Plan PDF attached (fixture)
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="BOUNDPDF"
+
+--BOUNDPDF
+Content-Type: text/plain; charset="utf-8"
+
+Please see attached plan PDF (synthetic).
+
+--BOUNDPDF
+Content-Type: application/pdf; name="willow-park-plan.pdf"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="willow-park-plan.pdf"
+
+JVBERi0xLjEKMSAwIG9iajw8Pj5lbmRvYmoKdHJhaWxlcjw8Pj4KJSVFT0YK
+--BOUNDPDF--

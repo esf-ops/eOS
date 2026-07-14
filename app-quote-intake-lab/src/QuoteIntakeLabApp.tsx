@@ -1,14 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import EliteosTopbar from "../../shared/eliteos-ui/EliteosTopbar";
 import type { EliteosTopbarMenuItem } from "../../shared/eliteos-ui/EliteosTopbar";
 import CaseDetailPanel from "./components/CaseDetailPanel";
 import IsolationBanner from "./components/IsolationBanner";
+import LabDataControls from "./components/LabDataControls";
 import QueueFilters from "./components/QueueFilters";
 import QueueSummaryHeader from "./components/QueueSummaryHeader";
 import QueueTable from "./components/QueueTable";
-import type { QuoteIntakeCase, QuoteIntakeFilter, QuoteIntakeStatusCounts } from "./domain/types";
+import ImportEmailModal from "./components/import/ImportEmailModal";
+import type { QuoteIntakeAttachment, QuoteIntakeCase, QuoteIntakeFilter, QuoteIntakeStatusCounts } from "./domain/types";
 import { FIXTURE_IDENTITY, resolveLabIdentity, type LabIdentity } from "./lib/identity";
-import { getQuoteIntakeRepository } from "./repository/getQuoteIntakeRepository";
+import { getLocalQuoteIntakeRepository } from "./repository/LocalQuoteIntakeRepository.mjs";
 
 const EOS_LOGO_URL =
   "https://www.elitestonefabrication.com/wp-content/uploads/2021/09/cropped-ESF-Horizontal-Logo-500x150-px_09_09.png";
@@ -30,16 +32,21 @@ function homeHref(): string {
 }
 
 export default function QuoteIntakeLabApp() {
-  const repo = useMemo(() => getQuoteIntakeRepository(), []);
+  const repo = useMemo(() => getLocalQuoteIntakeRepository(), []);
   const [identity, setIdentity] = useState<LabIdentity>(FIXTURE_IDENTITY);
   const [filter, setFilter] = useState<QuoteIntakeFilter>({ missingInfo: "any" });
   const [cases, setCases] = useState<QuoteIntakeCase[]>([]);
   const [counts, setCounts] = useState<QuoteIntakeStatusCounts>(EMPTY_COUNTS);
   const [salespeople, setSalespeople] = useState<string[]>([]);
   const [estimators, setEstimators] = useState<string[]>([]);
+  const [importedCount, setImportedCount] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selected, setSelected] = useState<QuoteIntakeCase | null>(null);
   const [loading, setLoading] = useState(true);
+  const [importOpen, setImportOpen] = useState(false);
+  const [reloadToken, setReloadToken] = useState(0);
+
+  const refresh = useCallback(() => setReloadToken((n) => n + 1), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -55,7 +62,8 @@ export default function QuoteIntakeLabApp() {
     let cancelled = false;
     (async () => {
       setLoading(true);
-      const [list, statusCounts, sales, est] = await Promise.all([
+      await repo.ready();
+      const [list, statusCounts, sales, est, imported] = await Promise.all([
         repo.listCases(filter),
         repo.getStatusCounts({
           search: filter.search,
@@ -66,19 +74,21 @@ export default function QuoteIntakeLabApp() {
           missingInfo: filter.missingInfo
         }),
         repo.listSalespeople(),
-        repo.listEstimators()
+        repo.listEstimators(),
+        repo.countImported()
       ]);
       if (cancelled) return;
       setCases(list as QuoteIntakeCase[]);
       setCounts(statusCounts);
       setSalespeople(sales);
       setEstimators(est);
+      setImportedCount(imported);
       setLoading(false);
     })();
     return () => {
       cancelled = true;
     };
-  }, [repo, filter]);
+  }, [repo, filter, reloadToken]);
 
   useEffect(() => {
     let cancelled = false;
@@ -86,22 +96,45 @@ export default function QuoteIntakeLabApp() {
       setSelected(null);
       return;
     }
-    repo.getCase(selectedId).then((c) => {
-      if (!cancelled) setSelected(c as QuoteIntakeCase | null);
+    repo.getCase(selectedId).then((c: QuoteIntakeCase | null) => {
+      if (!cancelled) setSelected(c);
     });
     return () => {
       cancelled = true;
     };
-  }, [repo, selectedId]);
+  }, [repo, selectedId, reloadToken]);
 
   useEffect(() => {
-    if (!selectedId) return;
+    if (!selectedId && !importOpen) return;
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") setSelectedId(null);
+      if (e.key === "Escape") {
+        if (importOpen) setImportOpen(false);
+        else setSelectedId(null);
+      }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedId]);
+  }, [selectedId, importOpen]);
+
+  async function downloadAttachment(caseId: string, attachment: QuoteIntakeAttachment) {
+    const bytes = await repo.getAttachmentBytes(caseId, attachment.id);
+    if (!bytes) return;
+    const blob = new Blob([bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)], {
+      type: attachment.contentType || "application/octet-stream"
+    });
+    const url = URL.createObjectURL(blob);
+    try {
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = attachment.filename || "attachment.bin";
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } finally {
+      window.setTimeout(() => URL.revokeObjectURL(url), 2_000);
+    }
+  }
 
   const menuItems: EliteosTopbarMenuItem[] = [
     {
@@ -130,7 +163,7 @@ export default function QuoteIntakeLabApp() {
         userSubtitle={identity.subtitle}
         initials={identity.initials}
         menuItems={menuItems}
-        statusSlot={<span className="qil-topbar-lab-chip">Fixture data only</span>}
+        statusSlot={<span className="qil-topbar-lab-chip">Fixture + local imports only</span>}
       />
 
       <IsolationBanner />
@@ -142,6 +175,18 @@ export default function QuoteIntakeLabApp() {
               counts={counts}
               activeBucket={filter.summaryBucket ?? ""}
               onSelectBucket={(bucket) => setFilter((f) => ({ ...f, summaryBucket: bucket || undefined }))}
+              importedCount={importedCount}
+              onImportClick={() => setImportOpen(true)}
+              toolbar={
+                <LabDataControls
+                  importedCount={importedCount}
+                  onClearImported={async () => {
+                    await repo.clearImported();
+                    setSelectedId(null);
+                    refresh();
+                  }}
+                />
+              }
             />
 
             <QueueFilters
@@ -151,7 +196,7 @@ export default function QuoteIntakeLabApp() {
               onChange={(next) => setFilter(next)}
             />
 
-            {loading ? <div className="qil-loading">Loading fixture queue…</div> : null}
+            {loading ? <div className="qil-loading">Loading lab queue…</div> : null}
           </div>
 
           <div className="qil-queue-body">
@@ -171,10 +216,27 @@ export default function QuoteIntakeLabApp() {
               aria-label="Close case detail"
               onClick={() => setSelectedId(null)}
             />
-            <CaseDetailPanel caseItem={selected} onClose={() => setSelectedId(null)} />
+            <CaseDetailPanel
+              caseItem={selected}
+              onClose={() => setSelectedId(null)}
+              onDownloadAttachment={downloadAttachment}
+            />
           </>
         ) : null}
       </main>
+
+      <ImportEmailModal
+        open={importOpen}
+        repo={repo}
+        importActor={identity.displayName}
+        onClose={() => setImportOpen(false)}
+        onImported={() => refresh()}
+        onOpenCase={(caseId) => {
+          setSelectedId(caseId);
+          setImportOpen(false);
+          refresh();
+        }}
+      />
     </div>
   );
 }
