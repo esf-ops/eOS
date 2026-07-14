@@ -62,10 +62,27 @@ export function validateLabTakeoffRun(run) {
   }
 
   const evidenceIds = new Set();
+  const providerMode = run.provider?.mode;
   for (const ev of run.evidence ?? []) {
     claimId(ev.id, "evidence");
     evidenceIds.add(ev.id);
-    if (!String(ev.simulatedNote ?? "").toLowerCase().includes("simulated")) {
+    const note = String(ev.simulatedNote ?? "").toLowerCase();
+    if (providerMode === "live") {
+      if (!note.includes("live") && !note.includes("gemini")) {
+        warnings.push(
+          warn(
+            "EVIDENCE_NOT_LABELED_LIVE",
+            TAKEOFF_WARNING_SEVERITY.APPROVAL_BLOCKING,
+            `Evidence ${ev.id} must declare live lab evidence provenance.`,
+            true,
+            true,
+            null,
+            null,
+            "simulatedNote"
+          )
+        );
+      }
+    } else if (!note.includes("simulated")) {
       warnings.push(
         warn(
           "EVIDENCE_NOT_LABELED_SIMULATED",
@@ -79,7 +96,11 @@ export function validateLabTakeoffRun(run) {
         )
       );
     }
-    if (/gemini|human read|opened the (pdf|file)|ocr|visually inspected/i.test(String(ev.locationNote ?? ""))) {
+    // Simulated mode must not claim a live plan was read. Live mode may reference Gemini transport.
+    if (
+      providerMode !== "live" &&
+      /gemini|human read|opened the (pdf|file)|ocr|visually inspected/i.test(String(ev.locationNote ?? ""))
+    ) {
       warnings.push(
         warn(
           "FORBIDDEN_EVIDENCE_LANGUAGE",
@@ -337,12 +358,12 @@ export function validateLabTakeoffRun(run) {
     );
   }
 
-  if (run.provider?.mode !== "simulated") {
+  if (providerMode !== "simulated" && providerMode !== "live") {
     warnings.push(
       warn(
-        "PROVIDER_NOT_SIMULATED",
+        "PROVIDER_MODE_UNSUPPORTED",
         TAKEOFF_WARNING_SEVERITY.APPROVAL_BLOCKING,
-        "Phase 4B.0 requires provider.mode === simulated.",
+        "provider.mode must be simulated or live.",
         true,
         true
       )

@@ -15,6 +15,7 @@ export {
   buildSimulatedGeometry
 } from "./simulatedScenarios.mjs";
 export { SimulatedTakeoffAdapter, getSimulatedTakeoffAdapter } from "./simulatedTakeoffAdapter.mjs";
+export { LiveGeminiTakeoffAdapter, getLiveGeminiTakeoffAdapter } from "./liveGeminiTakeoffAdapter.mjs";
 export { TakeoffService } from "./takeoffService.mjs";
 export {
   evaluateTakeoffEligibility,

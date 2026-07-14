@@ -9,6 +9,10 @@ export const PROVIDER_MODE_SIMULATED = "simulated";
 export const PROVIDER_NAME_SIMULATED = "SimulatedTakeoffAdapter";
 export const PROVIDER_VERSION_SIMULATED = "sim-takeoff-1.0.0";
 
+export const PROVIDER_MODE_LIVE = "live";
+export const PROVIDER_NAME_LIVE = "LiveGeminiTakeoffAdapter";
+export const PROVIDER_VERSION_LIVE = "live-gemini-takeoff-1.0.0";
+
 export const SUPPORTED_PLAN_MIME_TYPES = Object.freeze([
   "application/pdf",
   "image/jpeg",

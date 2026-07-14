@@ -1,0 +1,73 @@
+{
+  "schemaVersion": "qil_synth_plan_ground_truth_v1",
+  "fixtureId": "qil-synth-kitchen-island-plan",
+  "filename": "qil-synth-kitchen-island-plan.pdf",
+  "mimeType": "application/pdf",
+  "contentHash": "0833ca1afd77665f24590158535e90b60b6e78d3e176de6a34a336d97deae9cb",
+  "sizeBytes": 2272,
+  "project": {
+    "name": "Synthetic Quote Intake Lab Fixture — Maple Court Kitchen",
+    "customer": "Example Homes LLC (synthetic)",
+    "address": "100 Example Way, Exampleville, EX 00000",
+    "synthetic": true,
+    "banner": "SYNTHETIC QUOTE INTAKE LAB FIXTURE — NOT A REAL CUSTOMER PLAN"
+  },
+  "pages": [
+    {
+      "pageNumber": 1,
+      "role": "plan"
+    }
+  ],
+  "rooms": [
+    {
+      "id": "qil-room-kitchen",
+      "name": "Kitchen",
+      "pieces": [
+        {
+          "id": "qil-piece-main-run",
+          "label": "Main run",
+          "lengthIn": 120,
+          "depthIn": 25.5,
+          "shape": "rect",
+          "pieceType": "counter",
+          "measuredSf": 21.25,
+          "cutouts": [
+            {
+              "type": "sink",
+              "label": "Undermount sink"
+            }
+          ]
+        },
+        {
+          "id": "qil-piece-island",
+          "label": "Island",
+          "lengthIn": 72,
+          "depthIn": 36,
+          "shape": "rect",
+          "pieceType": "counter",
+          "measuredSf": 18,
+          "cutouts": []
+        }
+      ],
+      "backsplash": {
+        "scope": "standard",
+        "linearIn": 120,
+        "heightIn": 4,
+        "measuredSf": 3.33
+      }
+    }
+  ],
+  "expected": {
+    "countertopSf": 39.25,
+    "backsplashSf": 3.33,
+    "combinedSf": 42.58,
+    "sinkCount": 1
+  },
+  "toleranceSf": 0.05,
+  "notes": [
+    "Fictional plan for Quote Intake Lab live takeoff foundation tests.",
+    "No real customer information.",
+    "Sink cutouts are count-only and must never be deducted from measured SF.",
+    "eliteOS deterministic calc is authoritative for measured SF."
+  ]
+}

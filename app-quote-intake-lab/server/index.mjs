@@ -1,5 +1,5 @@
 /**
- * Quote Intake Lab — isolated live intelligence server (Phase 3.1).
+ * Quote Intake Lab — isolated live intelligence server (Phase 3.1 + 4B.4A).
  *
  * Bind: 127.0.0.1 only
  * Default port: 5197
@@ -7,6 +7,11 @@
  * Does not start with the production Brain
  *
  * Start: npm run live-server   (from app-quote-intake-lab)
+ *
+ * Endpoints:
+ *   GET  /health
+ *   POST /classify  — text/metadata classification (no attachment bytes)
+ *   POST /takeoff   — live plan takeoff (explicit ack + bytes; independent limits)
  */
 
 import "./loadEnv.mjs";
@@ -16,9 +21,19 @@ import { createConcurrencyGate } from "./concurrency.mjs";
 import { runLiveClassificationPipeline } from "./classifyPipeline.mjs";
 import { sanitizeLiveClassificationRequest } from "./sanitizeLiveRequest.mjs";
 import { LIVE_PROVIDER_MODE, LIVE_PROVIDER_NAME, LIVE_PROVIDER_VERSION } from "./classifyPipeline.mjs";
+import {
+  sanitizeLiveTakeoffRequest,
+  takeoffRequestAuditMeta
+} from "./takeoff/sanitizeTakeoffRequest.mjs";
+import {
+  LIVE_TAKEOFF_PROVIDER_NAME,
+  LIVE_TAKEOFF_PROVIDER_VERSION,
+  runLiveTakeoffPipeline
+} from "./takeoff/takeoffPipeline.mjs";
 
 const config = readLabServerConfig();
-const gate = createConcurrencyGate(config.maxConcurrency);
+const classifyGate = createConcurrencyGate(config.maxConcurrency);
+const takeoffGate = createConcurrencyGate(config.takeoff.maxConcurrency);
 const LIVE_META = {
   provider: LIVE_PROVIDER_NAME,
   mode: LIVE_PROVIDER_MODE,
@@ -136,6 +151,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
+      // Classification keeps its own body limit (default 256 KB).
       const buf = await readBody(req, config.maxBodyBytes);
       let parsedBody;
       try {
@@ -147,7 +163,7 @@ const server = http.createServer(async (req, res) => {
 
       // Do not log body contents
       const request = sanitizeLiveClassificationRequest(parsedBody);
-      const outcome = await gate.run(() =>
+      const outcome = await classifyGate.run(() =>
         runLiveClassificationPipeline({ request, config })
       );
 
@@ -169,10 +185,59 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "POST" && url.pathname === "/takeoff") {
+      if (req.headers.origin && !originCheck.ok) {
+        withCors(403, { ok: false, code: "ORIGIN_DENIED", error: "Origin not allowed." });
+        return;
+      }
+      requireLabToken(req);
+      const ct = String(req.headers["content-type"] ?? "");
+      if (!ct.includes("application/json")) {
+        withCors(415, { ok: false, code: "UNSUPPORTED_MEDIA", error: "Content-Type must be application/json." });
+        return;
+      }
+
+      // Independent takeoff body limit — never use classification 256 KB limit.
+      const buf = await readBody(req, config.takeoff.maxBodyBytes);
+      let parsedBody;
+      try {
+        parsedBody = JSON.parse(buf.toString("utf8") || "{}");
+      } catch {
+        withCors(400, { ok: false, code: "BAD_JSON", error: "Invalid JSON body." });
+        return;
+      }
+
+      // Do not log body / base64 / bytes
+      const request = sanitizeLiveTakeoffRequest(parsedBody, {
+        maxAttachmentBytes: config.takeoff.maxAttachmentBytes,
+        maxPages: config.takeoff.maxPages
+      });
+      const outcome = await takeoffGate.run(() =>
+        runLiveTakeoffPipeline({ request, config })
+      );
+
+      // Strip contentBytes if any leaked; respond with TakeoffRun + safe meta only
+      const run = outcome.run;
+      withCors(200, {
+        ok: true,
+        startedAt: outcome.startedAt,
+        completedAt: outcome.completedAt,
+        run,
+        meta: {
+          provider: LIVE_TAKEOFF_PROVIDER_NAME,
+          mode: "live",
+          version: LIVE_TAKEOFF_PROVIDER_VERSION,
+          promptVersions: outcome.promptVersions,
+          audit: takeoffRequestAuditMeta(request)
+        }
+      });
+      return;
+    }
+
     withCors(404, { ok: false, code: "NOT_FOUND" });
   } catch (e) {
     const status = e?.statusCode && Number.isFinite(e.statusCode) ? e.statusCode : 500;
-    // Operational log only — message/code, never bodies or keys
+    // Operational log only — message/code, never bodies, keys, or attachment content
     console.error(`[qil-live] ${req.method} ${url.pathname} → ${status} ${e?.code ?? "ERROR"}: ${e?.message ?? e}`);
     withCors(status, {
       ok: false,
@@ -185,6 +250,6 @@ const server = http.createServer(async (req, res) => {
 server.listen(config.port, config.host, () => {
   const safe = readSafeLabServerConfig();
   console.log(
-    `[qil-live] listening on http://${safe.host}:${safe.port} · live=${safe.liveAiEnabled} · key=${safe.hasApiKey} · modelConfigured=${safe.modelConfigured}`
+    `[qil-live] listening on http://${safe.host}:${safe.port} · classify=${safe.liveAiEnabled} · takeoff=${safe.takeoff.liveEnabled} · key=${safe.hasApiKey} · classifyModel=${safe.modelConfigured} · takeoffModel=${safe.takeoff.modelConfigured}`
   );
 });

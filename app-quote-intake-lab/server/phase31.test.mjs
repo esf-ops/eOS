@@ -34,9 +34,14 @@ describe("Visualizer transport discovery boundary", () => {
     assert.match(b.liveHost, /app-quote-intake-lab\/server/);
   });
 
-  it("does not import visualizer gemini provider modules from lab server", () => {
+  it("does not import visualizer or production takeoff provider modules from lab server", () => {
     const indexSrc = readFileSync(join(__dirname, "index.mjs"), "utf8");
-    assert.doesNotMatch(indexSrc, /visualizer|geminiVisualizer|takeoff/i);
+    assert.doesNotMatch(
+      indexSrc,
+      /visualizer|geminiVisualizer|app-ai-takeoff|takeoffWorkspace|geminiTakeoffProvider/i
+    );
+    // Lab-owned /takeoff endpoint is allowed (Phase 4B.4A); production modules are not.
+    assert.match(indexSrc, /pathname === "\/takeoff"/);
     const clientSrc = readFileSync(join(__dirname, "geminiJsonClient.mjs"), "utf8");
     assert.match(clientSrc, /generativelanguage\.googleapis\.com/);
     assert.match(clientSrc, /NEVER log/);
