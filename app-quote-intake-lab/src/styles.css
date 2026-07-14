@@ -1,8 +1,12 @@
-/* Quote Intake Lab — bright white canvas, eliteOS tokens, no page-wide gradient blobs */
+/* Quote Intake Lab — Phase 1.1 operations workspace */
 
 :root {
   --qil-font: "IBM Plex Sans", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
   --qil-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --qil-meta: #4a5670;
+  --qil-selected-bg: #f3f5f8;
+  --qil-selected-accent: var(--eos-accent);
+  --qil-detail-width: min(400px, 34vw);
 }
 
 * {
@@ -13,7 +17,7 @@ html,
 body,
 #root {
   margin: 0;
-  min-height: 100%;
+  height: 100%;
 }
 
 body {
@@ -22,6 +26,7 @@ body {
   background: #ffffff;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  overflow: hidden;
 }
 
 button,
@@ -31,10 +36,11 @@ select {
 }
 
 .qil-app {
-  min-height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   background: #ffffff;
+  overflow: hidden;
 }
 
 .qil-topbar-lab-chip {
@@ -42,66 +48,73 @@ select {
   align-items: center;
   padding: 0.2rem 0.55rem;
   border-radius: 999px;
-  background: var(--eos-warn-soft);
-  border: 1px solid var(--eos-warn-border);
-  color: var(--eos-warn);
+  background: #fff6e8;
+  border: 1px solid rgba(180, 92, 12, 0.28);
+  color: #7a4a10;
   font-size: 0.72rem;
   font-weight: 650;
   letter-spacing: 0.02em;
 }
 
 .qil-isolation {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.65rem 1.25rem;
+  gap: 0.65rem;
+  padding: 0.45rem 1.15rem;
   border-bottom: 1px solid var(--eos-line);
-  background: #fbfcfe;
+  background: #f8fafc;
 }
 
 .qil-isolation-mark {
   flex: 0 0 auto;
-  font-size: 0.68rem;
+  font-size: 0.66rem;
   font-weight: 750;
   letter-spacing: 0.08em;
   color: var(--eos-accent);
-  border: 1px solid var(--eos-accent-border, var(--eos-danger-border));
-  background: var(--eos-accent-soft);
+  border: 1px solid rgba(163, 19, 47, 0.28);
+  background: rgba(163, 19, 47, 0.06);
   border-radius: 6px;
-  padding: 0.28rem 0.45rem;
+  padding: 0.22rem 0.42rem;
 }
 
 .qil-isolation-copy {
   display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.75rem;
   min-width: 0;
 }
 
 .qil-isolation-copy strong {
-  font-size: 0.86rem;
+  font-size: 0.82rem;
   color: var(--eos-ink);
 }
 
 .qil-isolation-copy span {
   font-size: 0.78rem;
-  color: var(--eos-ink-muted);
+  color: var(--qil-meta);
 }
 
 .qil-main {
-  flex: 1;
-  display: grid;
-  grid-template-columns: 1fr;
+  flex: 1 1 auto;
   min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  position: relative;
+  overflow: hidden;
 }
 
 .qil-main.has-detail {
-  grid-template-columns: minmax(0, 1fr) minmax(340px, 420px);
+  grid-template-columns: minmax(0, 1fr) var(--qil-detail-width);
 }
 
 .qil-queue {
-  padding: 1.1rem 1.25rem 2rem;
   min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   border-right: 1px solid transparent;
 }
 
@@ -109,31 +122,47 @@ select {
   border-right-color: var(--eos-line);
 }
 
+.qil-queue-chrome {
+  flex: 0 0 auto;
+  padding: 0.85rem 1.1rem 0.65rem;
+  background: #fff;
+  border-bottom: 1px solid var(--eos-line);
+  z-index: 2;
+}
+
+.qil-queue-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 0.65rem 1.1rem 1.25rem;
+  background: #fff;
+}
+
 .qil-summary-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
-  margin-bottom: 0.9rem;
+  margin-bottom: 0.7rem;
 }
 
 .qil-summary-head h1 {
   margin: 0;
-  font-size: 1.35rem;
+  font-size: 1.2rem;
   letter-spacing: -0.02em;
 }
 
 .qil-summary-head p {
-  margin: 0.25rem 0 0;
-  color: var(--eos-ink-muted);
-  font-size: 0.85rem;
+  margin: 0.2rem 0 0;
+  color: var(--qil-meta);
+  font-size: 0.82rem;
 }
 
 .qil-summary-grid {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 0.55rem;
-  margin-bottom: 1rem;
+  gap: 0.45rem;
+  margin-bottom: 0.75rem;
 }
 
 .qil-summary-tile {
@@ -141,7 +170,7 @@ select {
   border: 1px solid var(--eos-line);
   background: #fff;
   border-radius: var(--r-md);
-  padding: 0.7rem 0.65rem;
+  padding: 0.55rem 0.55rem;
   text-align: left;
   cursor: pointer;
   box-shadow: var(--sh-1);
@@ -159,7 +188,7 @@ select {
 
 .qil-summary-value {
   display: block;
-  font-size: 1.35rem;
+  font-size: 1.2rem;
   font-weight: 700;
   letter-spacing: -0.03em;
   color: var(--eos-ink);
@@ -168,32 +197,30 @@ select {
 
 .qil-summary-label {
   display: block;
-  margin-top: 0.25rem;
+  margin-top: 0.2rem;
   font-size: 0.72rem;
-  color: var(--eos-ink-muted);
+  color: var(--qil-meta);
   line-height: 1.25;
 }
 
 .qil-filters {
   display: grid;
-  grid-template-columns: 1.4fr repeat(6, minmax(0, 1fr));
-  gap: 0.55rem;
-  margin-bottom: 0.9rem;
+  grid-template-columns: 1.35fr repeat(6, minmax(0, 1fr));
+  gap: 0.45rem;
 }
 
 .qil-field {
   display: flex;
   flex-direction: column;
-  gap: 0.28rem;
+  gap: 0.22rem;
   min-width: 0;
 }
 
-.qil-field span {
-  font-size: 0.7rem;
+.qil-field-label {
+  font-size: 0.74rem;
   font-weight: 650;
-  color: var(--eos-ink-muted);
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
+  color: var(--qil-meta);
+  letter-spacing: 0.01em;
 }
 
 .qil-field input,
@@ -203,8 +230,9 @@ select {
   border-radius: var(--r-sm);
   background: #fff;
   color: var(--eos-ink);
-  padding: 0.48rem 0.55rem;
+  padding: 0.42rem 0.5rem;
   outline: none;
+  font-size: 0.84rem;
 }
 
 .qil-field input:focus,
@@ -216,17 +244,49 @@ select {
 .qil-table-wrap {
   border: 1px solid var(--eos-line);
   border-radius: var(--r-md);
-  overflow: auto;
   background: #fff;
   box-shadow: var(--sh-1);
+  /* Keep overflow visible so sticky thead can pin inside .qil-queue-body */
+  overflow: visible;
 }
 
 .qil-table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: separate;
   border-spacing: 0;
-  font-size: 0.82rem;
-  min-width: 1180px;
+  font-size: 0.8rem;
+}
+
+.qil-table .col-customer {
+  width: 16%;
+}
+.qil-table .col-sender {
+  width: 12%;
+}
+.qil-table .col-sales {
+  width: 10%;
+}
+.qil-table .col-received {
+  width: 10%;
+}
+.qil-table .col-color {
+  width: 11%;
+}
+.qil-table .col-sf {
+  width: 6%;
+}
+.qil-table .col-status {
+  width: 12%;
+}
+.qil-table .col-missing {
+  width: 11%;
+}
+.qil-table .col-priority {
+  width: 6%;
+}
+.qil-table .col-estimator {
+  width: 6%;
 }
 
 .qil-table th {
@@ -234,35 +294,39 @@ select {
   top: 0;
   z-index: 1;
   text-align: left;
-  font-size: 0.68rem;
+  font-size: 0.74rem;
   font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--eos-ink-muted);
-  background: #fafbfd;
+  letter-spacing: 0.01em;
+  color: var(--qil-meta);
+  background: #f7f8fb;
   border-bottom: 1px solid var(--eos-line);
-  padding: 0.65rem 0.7rem;
+  padding: 0.55rem 0.55rem;
   white-space: nowrap;
 }
 
 .qil-table td {
-  padding: 0.7rem;
+  padding: 0.55rem;
   border-bottom: 1px solid var(--eos-line);
   vertical-align: top;
   color: var(--eos-ink-soft);
+  overflow: hidden;
 }
 
 .qil-table tbody tr {
   cursor: pointer;
   transition: background var(--eos-dur-1) var(--eos-ease);
+  box-shadow: inset 3px 0 0 transparent;
 }
 
 .qil-table tbody tr:hover {
-  background: #fafbfd;
+  background: #f8fafc;
 }
 
 .qil-table tbody tr.is-selected {
-  background: var(--eos-accent-soft);
+  background: var(--qil-selected-bg);
+  box-shadow: inset 3px 0 0 var(--qil-selected-accent);
+  outline: 1px solid rgba(11, 26, 51, 0.08);
+  outline-offset: -1px;
 }
 
 .qil-table tbody tr:focus-visible {
@@ -273,23 +337,36 @@ select {
 .qil-cell-primary {
   color: var(--eos-ink);
   font-weight: 600;
+  line-height: 1.3;
 }
 
 .qil-cell-meta {
-  color: var(--eos-ink-muted);
-  font-size: 0.75rem;
-  margin-top: 0.12rem;
+  color: var(--qil-meta);
+  font-size: 0.74rem;
+  margin-top: 0.1rem;
+  line-height: 1.3;
+}
+
+.qil-cell-clip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  display: block;
 }
 
 .qil-pill {
   display: inline-flex;
   align-items: center;
+  max-width: 100%;
   border-radius: 999px;
-  padding: 0.15rem 0.5rem;
-  font-size: 0.72rem;
+  padding: 0.12rem 0.45rem;
+  font-size: 0.7rem;
   font-weight: 650;
   border: 1px solid transparent;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .qil-pill-status {
@@ -324,7 +401,9 @@ select {
   color: var(--eos-danger);
 }
 
-.status-qil_sent_simulated {
+.status-qil_sent_simulated,
+.status-qil_received,
+.status-qil_in_review {
   background: #eef2f8;
   border-color: var(--eos-line-strong);
   color: var(--eos-ink-mid);
@@ -344,16 +423,16 @@ select {
 }
 
 .qil-missing {
-  color: var(--eos-warn);
+  color: #8a5410;
   font-weight: 600;
-  font-size: 0.78rem;
+  font-size: 0.76rem;
 }
 
 .qil-footnote,
 .qil-loading {
-  margin: 0.65rem 0 0;
-  color: var(--eos-ink-muted);
-  font-size: 0.78rem;
+  margin: 0.55rem 0 0;
+  color: var(--qil-meta);
+  font-size: 0.76rem;
 }
 
 .qil-empty {
@@ -361,7 +440,7 @@ select {
   border-radius: var(--r-md);
   padding: 2rem 1.25rem;
   text-align: center;
-  color: var(--eos-ink-muted);
+  color: var(--qil-meta);
 }
 
 .qil-empty h2 {
@@ -376,7 +455,7 @@ select {
   background: #fff;
   color: var(--eos-ink-mid);
   border-radius: var(--r-sm);
-  padding: 0.4rem 0.7rem;
+  padding: 0.35rem 0.65rem;
   cursor: pointer;
   font-size: 0.8rem;
   font-weight: 600;
@@ -387,118 +466,154 @@ select {
   color: var(--eos-ink);
 }
 
+.qil-detail-backdrop {
+  display: none;
+}
+
 .qil-detail {
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  min-height: 0;
-  background: #fcfcfd;
+  background: #fbfcfd;
   border-left: 1px solid var(--eos-line);
-}
-
-.qil-detail-empty {
-  padding: 2rem 1.25rem;
-  color: var(--eos-ink-muted);
-}
-
-.qil-detail-empty h2 {
-  margin: 0 0 0.4rem;
-  color: var(--eos-ink);
+  overflow: hidden;
+  z-index: 3;
 }
 
 .qil-detail-header {
+  flex: 0 0 auto;
   display: flex;
   justify-content: space-between;
-  gap: 0.75rem;
-  padding: 1rem 1.1rem;
+  align-items: flex-start;
+  gap: 0.65rem;
+  padding: 0.8rem 0.9rem;
   border-bottom: 1px solid var(--eos-line);
   background: #fff;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.qil-detail-header-text {
+  min-width: 0;
 }
 
 .qil-detail-header h2 {
-  margin: 0.15rem 0 0.45rem;
-  font-size: 1.05rem;
+  margin: 0.12rem 0 0.4rem;
+  font-size: 0.98rem;
   letter-spacing: -0.02em;
+  line-height: 1.3;
 }
 
 .qil-eyebrow {
   margin: 0;
   font-family: var(--qil-mono);
   font-size: 0.72rem;
-  color: var(--eos-ink-muted);
+  color: var(--qil-meta);
 }
 
 .qil-detail-sub {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
+  gap: 0.35rem;
   align-items: center;
   margin: 0;
 }
 
+.qil-close-btn {
+  flex: 0 0 auto;
+  width: 2rem;
+  height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--eos-line-strong);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--eos-ink-mid);
+  cursor: pointer;
+  padding: 0;
+}
+
+.qil-close-btn:hover {
+  color: var(--eos-ink);
+  border-color: rgba(11, 26, 51, 0.28);
+  background: #f7f8fb;
+}
+
+.qil-close-btn:focus-visible {
+  outline: 2px solid var(--eos-accent-ring);
+  outline-offset: 2px;
+}
+
 .qil-detail-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
-  padding: 0.9rem 1.1rem 1.5rem;
+  padding: 0.75rem 0.9rem 1.25rem;
   display: flex;
   flex-direction: column;
-  gap: 0.9rem;
+  gap: 0.7rem;
 }
 
 .qil-detail-block {
   background: #fff;
   border: 1px solid var(--eos-line);
   border-radius: var(--r-md);
-  padding: 0.85rem 0.9rem;
+  padding: 0.75rem 0.8rem;
   box-shadow: var(--sh-1);
 }
 
 .qil-detail-block h3 {
-  margin: 0 0 0.65rem;
-  font-size: 0.82rem;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  color: var(--eos-ink-muted);
+  margin: 0 0 0.55rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--qil-meta);
 }
 
 .qil-detail-block p {
   margin: 0;
-  font-size: 0.88rem;
+  font-size: 0.86rem;
   line-height: 1.45;
 }
 
 .qil-dl {
   display: flex;
   flex-direction: column;
-  gap: 0.45rem;
+  gap: 0.4rem;
   margin: 0;
 }
 
 .qil-dl-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 0.55rem 0.75rem;
+  gap: 0.5rem 0.7rem;
 }
 
 .qil-dl dt {
-  font-size: 0.68rem;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: var(--eos-ink-muted);
-  font-weight: 700;
+  font-size: 0.72rem;
+  letter-spacing: 0.01em;
+  color: var(--qil-meta);
+  font-weight: 650;
 }
 
 .qil-dl dd {
-  margin: 0.12rem 0 0;
-  font-size: 0.86rem;
+  margin: 0.1rem 0 0;
+  font-size: 0.85rem;
   color: var(--eos-ink);
+  line-height: 1.35;
+  word-break: break-word;
 }
 
 .qil-excerpt {
-  margin: 0.75rem 0 0;
-  padding: 0.7rem 0.8rem;
+  margin: 0.7rem 0 0;
+  padding: 0.65rem 0.75rem;
   border-left: 3px solid var(--eos-line-strong);
-  background: #fafbfd;
+  background: #f7f8fb;
   color: var(--eos-ink-soft);
-  font-size: 0.86rem;
+  font-size: 0.84rem;
   line-height: 1.45;
 }
 
@@ -509,7 +624,7 @@ select {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: 0.35rem;
 }
 
 .qil-attach-list li,
@@ -517,29 +632,29 @@ select {
   display: flex;
   flex-direction: column;
   gap: 0.1rem;
-  padding: 0.45rem 0.55rem;
+  padding: 0.4rem 0.5rem;
   border: 1px solid var(--eos-line);
   border-radius: var(--r-sm);
   background: #fafbfd;
-  font-size: 0.84rem;
+  font-size: 0.82rem;
 }
 
 .qil-attach-list small {
-  color: var(--eos-ink-muted);
+  color: var(--qil-meta);
 }
 
 .qil-missing-list li {
   border-color: var(--eos-warn-border);
   background: var(--eos-warn-soft);
-  color: var(--eos-warn);
+  color: #8a5410;
   font-weight: 600;
 }
 
 .qil-chip-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.35rem;
-  margin-top: 0.7rem;
+  gap: 0.3rem;
+  margin-top: 0.6rem;
 }
 
 .qil-sim-chip {
@@ -549,7 +664,7 @@ select {
   background: #eef2f8;
   border: 1px solid var(--eos-line-strong);
   border-radius: 999px;
-  padding: 0.15rem 0.5rem;
+  padding: 0.12rem 0.45rem;
 }
 
 .qil-timeline {
@@ -558,80 +673,109 @@ select {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.65rem;
+  gap: 0.55rem;
 }
 
 .qil-timeline li {
   display: grid;
-  grid-template-columns: 7.5rem 1fr;
-  gap: 0.6rem;
+  grid-template-columns: 6.75rem 1fr;
+  gap: 0.5rem;
 }
 
 .qil-timeline-time {
-  font-size: 0.72rem;
-  color: var(--eos-ink-muted);
+  font-size: 0.7rem;
+  color: var(--qil-meta);
   font-family: var(--qil-mono);
 }
 
 .qil-timeline-body {
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
-  font-size: 0.84rem;
+  gap: 0.12rem;
+  font-size: 0.82rem;
 }
 
 .qil-timeline-body span {
-  color: var(--eos-ink-muted);
-  font-size: 0.75rem;
+  color: var(--qil-meta);
+  font-size: 0.74rem;
 }
 
-.qil-actions {
-  border: 1px dashed var(--eos-line-strong);
+.qil-actions-muted {
+  border: 1px dashed rgba(11, 26, 51, 0.14);
   border-radius: var(--r-md);
-  padding: 0.85rem 0.9rem;
-  background: #fff;
+  padding: 0.45rem 0.65rem;
+  background: #f6f7f9;
+  opacity: 0.88;
 }
 
-.qil-section-title h3 {
-  margin: 0;
-  font-size: 0.82rem;
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
-  color: var(--eos-ink-muted);
-}
-
-.qil-section-title p {
-  margin: 0.25rem 0 0.7rem;
+.qil-actions-details summary {
+  cursor: pointer;
   font-size: 0.78rem;
-  color: var(--eos-ink-muted);
+  font-weight: 650;
+  color: var(--qil-meta);
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.qil-actions-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.qil-actions-details summary::before {
+  content: "▸";
+  font-size: 0.7rem;
+  color: var(--eos-ink-faint);
+}
+
+.qil-actions-details[open] summary::before {
+  content: "▾";
+}
+
+.qil-actions-details summary span {
+  font-weight: 500;
+  color: var(--eos-ink-faint);
+}
+
+.qil-actions-help {
+  margin: 0.45rem 0 0.55rem;
+  font-size: 0.74rem;
+  color: var(--qil-meta);
 }
 
 .qil-actions-grid {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 0.4rem;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
 }
 
 .qil-action-btn {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 0.1rem;
+  gap: 0.08rem;
   width: 100%;
   text-align: left;
-  border: 1px solid var(--eos-line);
+  border: 1px solid rgba(11, 26, 51, 0.08);
   border-radius: var(--r-sm);
-  background: #f6f7fb;
-  color: var(--eos-ink-faint);
-  padding: 0.55rem 0.65rem;
+  background: #eef0f4;
+  color: #8a95a8;
+  padding: 0.4rem 0.5rem;
   cursor: not-allowed;
+  font-size: 0.74rem;
 }
 
 .qil-action-btn small {
-  font-size: 0.68rem;
+  font-size: 0.66rem;
+  color: #a0a9b8;
 }
 
 @media (max-width: 1280px) {
+  :root {
+    --qil-detail-width: min(380px, 36vw);
+  }
+
   .qil-summary-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
@@ -645,16 +789,53 @@ select {
   }
 }
 
-@media (max-width: 960px) {
-  .qil-main,
+/* Narrow desktop / tablet: keep queue primary; detail as drawer */
+@media (max-width: 1100px) {
   .qil-main.has-detail {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .qil-main.has-detail .qil-queue {
+    border-right-color: transparent;
+  }
+
+  .qil-detail-backdrop {
+    display: block;
+    position: absolute;
+    inset: 0;
+    border: 0;
+    padding: 0;
+    margin: 0;
+    background: rgba(11, 26, 51, 0.28);
+    z-index: 4;
+    cursor: pointer;
   }
 
   .qil-detail {
-    border-left: none;
-    border-top: 1px solid var(--eos-line);
-    max-height: 70vh;
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(440px, 92vw);
+    border-left: 1px solid var(--eos-line);
+    box-shadow: -8px 0 28px rgba(11, 26, 51, 0.12);
+    z-index: 5;
+  }
+}
+
+@media (max-width: 960px) {
+  body {
+    overflow: auto;
+  }
+
+  .qil-app {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+
+  .qil-main {
+    min-height: 70vh;
   }
 
   .qil-summary-grid {
@@ -663,5 +844,46 @@ select {
 
   .qil-filters {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .qil-queue-chrome {
+    padding: 0.75rem 0.85rem 0.55rem;
+  }
+
+  .qil-queue-body {
+    padding: 0.55rem 0.85rem 1rem;
+  }
+
+  .qil-table {
+    font-size: 0.76rem;
+  }
+
+  .qil-table th,
+  .qil-table td {
+    padding: 0.45rem 0.4rem;
+  }
+
+  /* At phone widths, hide low-priority columns to keep rows readable */
+  .qil-table .col-sales,
+  .qil-table .col-estimator,
+  .qil-table th:nth-child(3),
+  .qil-table td:nth-child(3),
+  .qil-table th:nth-child(10),
+  .qil-table td:nth-child(10) {
+    display: none;
+  }
+
+  .qil-detail {
+    width: 100%;
+    max-width: none;
+  }
+
+  .qil-actions-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .qil-timeline li {
+    grid-template-columns: 1fr;
+    gap: 0.15rem;
   }
 }

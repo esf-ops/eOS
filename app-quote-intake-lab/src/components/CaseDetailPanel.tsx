@@ -15,22 +15,28 @@ type Props = {
   onClose: () => void;
 };
 
+function CloseIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M4.2 4.2l7.6 7.6M11.8 4.2l-7.6 7.6"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 export default function CaseDetailPanel({ caseItem, onClose }: Props) {
-  if (!caseItem) {
-    return (
-      <aside className="qil-detail qil-detail-empty" aria-label="Case detail">
-        <h2>Select a case</h2>
-        <p>Choose a row in the queue to inspect the fixture email, extraction, and simulated takeoff summary.</p>
-      </aside>
-    );
-  }
+  if (!caseItem) return null;
 
   const c = caseItem;
 
   return (
     <aside className="qil-detail" aria-label={`Case detail ${c.id}`}>
       <header className="qil-detail-header">
-        <div>
+        <div className="qil-detail-header-text">
           <p className="qil-eyebrow">{c.id}</p>
           <h2>{caseTitle(c)}</h2>
           <p className="qil-detail-sub">
@@ -39,14 +45,20 @@ export default function CaseDetailPanel({ caseItem, onClose }: Props) {
             {c.relatedCaseId ? <span className="qil-cell-meta">Revision of {c.relatedCaseId}</span> : null}
           </p>
         </div>
-        <button type="button" className="qil-btn-ghost" onClick={onClose}>
-          Close
+        <button
+          type="button"
+          className="qil-close-btn"
+          onClick={onClose}
+          aria-label="Close case detail"
+          title="Close (Esc)"
+        >
+          <CloseIcon />
         </button>
       </header>
 
       <div className="qil-detail-scroll">
         <section className="qil-detail-block">
-          <h3>Original email</h3>
+          <h3>Original request</h3>
           <dl className="qil-dl">
             <div>
               <dt>Subject</dt>
@@ -72,12 +84,16 @@ export default function CaseDetailPanel({ caseItem, onClose }: Props) {
                 {formatReceived(c.receivedAt)} · age {c.elapsedTurnaroundLabel}
               </dd>
             </div>
+            <div>
+              <dt>Next action</dt>
+              <dd>{c.nextAction ?? "Inspect case and await Phase 2+ workflow"}</dd>
+            </div>
           </dl>
           <blockquote className="qil-excerpt">{c.emailExcerpt}</blockquote>
         </section>
 
         <section className="qil-detail-block">
-          <h3>Attachments (fixture names only)</h3>
+          <h3>Attachments</h3>
           <ul className="qil-attach-list">
             {c.attachments.map((a) => (
               <li key={a.id}>
@@ -92,7 +108,7 @@ export default function CaseDetailPanel({ caseItem, onClose }: Props) {
         </section>
 
         <section className="qil-detail-block">
-          <h3>Extracted quote requirements</h3>
+          <h3>Extracted requirements</h3>
           <dl className="qil-dl qil-dl-grid">
             <div>
               <dt>Customer / account</dt>
@@ -143,7 +159,7 @@ export default function CaseDetailPanel({ caseItem, onClose }: Props) {
         </section>
 
         <section className="qil-detail-block">
-          <h3>Simulated takeoff &amp; confidence</h3>
+          <h3>Takeoff / confidence</h3>
           <dl className="qil-dl qil-dl-grid">
             <div>
               <dt>Takeoff state</dt>
@@ -177,7 +193,7 @@ export default function CaseDetailPanel({ caseItem, onClose }: Props) {
         </section>
 
         <section className="qil-detail-block">
-          <h3>Activity / audit timeline</h3>
+          <h3>Audit timeline</h3>
           <ol className="qil-timeline">
             {[...c.events]
               .slice()

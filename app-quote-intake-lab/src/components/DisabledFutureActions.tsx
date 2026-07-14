@@ -10,19 +10,27 @@ const ACTIONS = [
 
 export default function DisabledFutureActions() {
   return (
-    <section className="qil-actions" aria-label="Future actions (disabled)">
-      <div className="qil-section-title">
-        <h3>Future actions</h3>
-        <p>Visible for workflow validation only — all disabled in Phase 1.</p>
-      </div>
-      <div className="qil-actions-grid">
-        {ACTIONS.map((action) => (
-          <button key={action.id} type="button" className="qil-action-btn" disabled title={`${action.phase} — not available`}>
-            <span>{action.label}</span>
-            <small>{action.phase} · disabled</small>
-          </button>
-        ))}
-      </div>
+    <section className="qil-actions qil-actions-muted" aria-label="Future actions (disabled placeholders)">
+      <details className="qil-actions-details">
+        <summary>
+          Future actions <span>(placeholders · disabled)</span>
+        </summary>
+        <p className="qil-actions-help">Workflow placeholders only. No production action is available in Phase 1.</p>
+        <div className="qil-actions-grid">
+          {ACTIONS.map((action) => (
+            <button
+              key={action.id}
+              type="button"
+              className="qil-action-btn"
+              disabled
+              title={`${action.phase} — not available`}
+            >
+              <span>{action.label}</span>
+              <small>{action.phase}</small>
+            </button>
+          ))}
+        </div>
+      </details>
     </section>
   );
 }

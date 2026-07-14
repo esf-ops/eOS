@@ -17,7 +17,7 @@ export default function QueueFilters({ filter, salespeople, estimators, onChange
   return (
     <section className="qil-filters" aria-label="Queue filters">
       <label className="qil-field qil-field-search">
-        <span>Search</span>
+        <span className="qil-field-label">Search</span>
         <input
           type="search"
           placeholder="Customer, project, sender, color…"
@@ -27,7 +27,7 @@ export default function QueueFilters({ filter, salespeople, estimators, onChange
       </label>
 
       <label className="qil-field">
-        <span>Status</span>
+        <span className="qil-field-label">Status</span>
         <select value={filter.status ?? ""} onChange={(e) => patch({ status: e.target.value })}>
           <option value="">All statuses</option>
           {QUOTE_INTAKE_STATUSES.map((s: string) => (
@@ -39,7 +39,7 @@ export default function QueueFilters({ filter, salespeople, estimators, onChange
       </label>
 
       <label className="qil-field">
-        <span>Priority</span>
+        <span className="qil-field-label">Priority</span>
         <select value={filter.priority ?? ""} onChange={(e) => patch({ priority: e.target.value })}>
           <option value="">All priorities</option>
           <option value="urgent">Urgent</option>
@@ -50,7 +50,7 @@ export default function QueueFilters({ filter, salespeople, estimators, onChange
       </label>
 
       <label className="qil-field">
-        <span>Salesperson</span>
+        <span className="qil-field-label">Salesperson</span>
         <select value={filter.salesperson ?? ""} onChange={(e) => patch({ salesperson: e.target.value })}>
           <option value="">All salespeople</option>
           {salespeople.map((s) => (
@@ -62,7 +62,7 @@ export default function QueueFilters({ filter, salespeople, estimators, onChange
       </label>
 
       <label className="qil-field">
-        <span>Estimator</span>
+        <span className="qil-field-label">Estimator</span>
         <select value={filter.estimator ?? ""} onChange={(e) => patch({ estimator: e.target.value })}>
           <option value="">All estimators</option>
           <option value="__unassigned__">Unassigned</option>
@@ -75,7 +75,7 @@ export default function QueueFilters({ filter, salespeople, estimators, onChange
       </label>
 
       <label className="qil-field">
-        <span>Age / turnaround</span>
+        <span className="qil-field-label">Age / turnaround</span>
         <select value={filter.ageBucket ?? ""} onChange={(e) => patch({ ageBucket: e.target.value })}>
           <option value="">Any age</option>
           {Object.entries(AGE_BUCKET_LABELS).map(([key, label]) => (
@@ -87,7 +87,7 @@ export default function QueueFilters({ filter, salespeople, estimators, onChange
       </label>
 
       <label className="qil-field">
-        <span>Missing information</span>
+        <span className="qil-field-label">Missing information</span>
         <select
           value={filter.missingInfo ?? "any"}
           onChange={(e) => patch({ missingInfo: e.target.value as QuoteIntakeFilter["missingInfo"] })}

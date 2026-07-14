@@ -27,19 +27,30 @@ export default function QueueTable({ cases, selectedId, onSelect }: Props) {
   return (
     <div className="qil-table-wrap">
       <table className="qil-table">
+        <colgroup>
+          <col className="col-customer" />
+          <col className="col-sender" />
+          <col className="col-sales" />
+          <col className="col-received" />
+          <col className="col-color" />
+          <col className="col-sf" />
+          <col className="col-status" />
+          <col className="col-missing" />
+          <col className="col-priority" />
+          <col className="col-estimator" />
+        </colgroup>
         <thead>
           <tr>
-            <th>Customer / project</th>
-            <th>Sender</th>
-            <th>Salesperson</th>
-            <th>Received / age</th>
-            <th>Color / group</th>
-            <th>SF*</th>
-            <th>Status</th>
-            <th>Missing</th>
-            <th>Priority</th>
-            <th>Estimator</th>
-            <th>Next action</th>
+            <th scope="col">Customer / project</th>
+            <th scope="col">Sender</th>
+            <th scope="col">Salesperson</th>
+            <th scope="col">Received / age</th>
+            <th scope="col">Color / group</th>
+            <th scope="col">SF*</th>
+            <th scope="col">Status</th>
+            <th scope="col">Missing info</th>
+            <th scope="col">Priority</th>
+            <th scope="col">Estimator</th>
           </tr>
         </thead>
         <tbody>
@@ -69,22 +80,26 @@ export default function QueueTable({ cases, selectedId, onSelect }: Props) {
                   <div className="qil-cell-primary">{c.senderName}</div>
                   <div className="qil-cell-meta">{c.senderEmail}</div>
                 </td>
-                <td>{c.assignedSalesperson}</td>
+                <td>
+                  <div className="qil-cell-clip">{c.assignedSalesperson}</div>
+                </td>
                 <td>
                   <div className="qil-cell-primary">{formatReceived(c.receivedAt)}</div>
                   <div className="qil-cell-meta">{c.elapsedTurnaroundLabel ?? "—"}</div>
                 </td>
                 <td>
-                  <div className="qil-cell-primary">{c.requestedColor ?? "—"}</div>
-                  <div className="qil-cell-meta">{c.resolvedPriceGroup ?? "Unresolved"}</div>
+                  <div className="qil-cell-primary qil-cell-clip">{c.requestedColor ?? "—"}</div>
+                  <div className="qil-cell-meta qil-cell-clip">{c.resolvedPriceGroup ?? "Unresolved"}</div>
                 </td>
-                <td>{formatSf(c.proposedSquareFootage)}</td>
+                <td>
+                  <div className="qil-cell-primary">{formatSf(c.proposedSquareFootage)}</div>
+                </td>
                 <td>
                   <span className={`qil-pill qil-pill-status status-${c.status}`}>{labelStatus(c.status)}</span>
                 </td>
                 <td>
                   {missing.length ? (
-                    <span className="qil-missing">
+                    <span className="qil-missing qil-cell-clip" title={c.missingInformation.map(missingFieldLabel).join(", ")}>
                       {missing.join(", ")}
                       {more > 0 ? ` +${more}` : ""}
                     </span>
@@ -97,8 +112,9 @@ export default function QueueTable({ cases, selectedId, onSelect }: Props) {
                     {labelPriority(c.priority)}
                   </span>
                 </td>
-                <td>{c.assignedEstimator ?? "Unassigned"}</td>
-                <td className="qil-cell-meta">{c.nextAction ?? "Inspect case"}</td>
+                <td>
+                  <div className="qil-cell-clip">{c.assignedEstimator ?? "Unassigned"}</div>
+                </td>
               </tr>
             );
           })}

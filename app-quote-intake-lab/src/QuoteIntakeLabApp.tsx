@@ -94,6 +94,15 @@ export default function QuoteIntakeLabApp() {
     };
   }, [repo, selectedId]);
 
+  useEffect(() => {
+    if (!selectedId) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setSelectedId(null);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selectedId]);
+
   const menuItems: EliteosTopbarMenuItem[] = [
     {
       label: "Home Launcher",
@@ -106,6 +115,8 @@ export default function QuoteIntakeLabApp() {
       disabled: true
     }
   ];
+
+  const detailOpen = Boolean(selectedId && selected);
 
   return (
     <div className="qil-app">
@@ -124,31 +135,45 @@ export default function QuoteIntakeLabApp() {
 
       <IsolationBanner />
 
-      <main className={`qil-main${selectedId ? " has-detail" : ""}`}>
-        <div className="qil-queue">
-          <QueueSummaryHeader
-            counts={counts}
-            activeBucket={filter.summaryBucket ?? ""}
-            onSelectBucket={(bucket) => setFilter((f) => ({ ...f, summaryBucket: bucket || undefined }))}
-          />
+      <main className={`qil-main${detailOpen ? " has-detail" : ""}`}>
+        <section className="qil-queue" aria-label="Estimator queue">
+          <div className="qil-queue-chrome">
+            <QueueSummaryHeader
+              counts={counts}
+              activeBucket={filter.summaryBucket ?? ""}
+              onSelectBucket={(bucket) => setFilter((f) => ({ ...f, summaryBucket: bucket || undefined }))}
+            />
 
-          <QueueFilters
-            filter={filter}
-            salespeople={salespeople}
-            estimators={estimators}
-            onChange={(next) => setFilter(next)}
-          />
+            <QueueFilters
+              filter={filter}
+              salespeople={salespeople}
+              estimators={estimators}
+              onChange={(next) => setFilter(next)}
+            />
 
-          {loading ? <div className="qil-loading">Loading fixture queue…</div> : null}
+            {loading ? <div className="qil-loading">Loading fixture queue…</div> : null}
+          </div>
 
-          <QueueTable
-            cases={cases}
-            selectedId={selectedId}
-            onSelect={(id) => setSelectedId((prev) => (prev === id ? null : id))}
-          />
-        </div>
+          <div className="qil-queue-body">
+            <QueueTable
+              cases={cases}
+              selectedId={selectedId}
+              onSelect={(id) => setSelectedId((prev) => (prev === id ? null : id))}
+            />
+          </div>
+        </section>
 
-        <CaseDetailPanel caseItem={selected} onClose={() => setSelectedId(null)} />
+        {detailOpen ? (
+          <>
+            <button
+              type="button"
+              className="qil-detail-backdrop"
+              aria-label="Close case detail"
+              onClick={() => setSelectedId(null)}
+            />
+            <CaseDetailPanel caseItem={selected} onClose={() => setSelectedId(null)} />
+          </>
+        ) : null}
       </main>
     </div>
   );
