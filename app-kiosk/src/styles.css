@@ -1550,3 +1550,352 @@ body {
   outline: 3px solid var(--elite-red-ring);
   outline-offset: 2px;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Mobile-only layout (phones + narrow tablets)
+   ---------------------------------------------------------------------------
+   Desktop / 65" landscape kiosk rules above are left unchanged.
+   Phones were inheriting a fixed landscape shell (100vw × 100dvh, overflow
+   hidden, flex:1 + min-height:0) which collapsed section iframes into tiny
+   thumbnails and clipped the home canvas. These queries switch to a normal
+   vertical document flow without touching 1920×1080 / 1366×768 / Arreya FS.
+   ═══════════════════════════════════════════════════════════════════════════ */
+@media (max-width: 768px) {
+  :root {
+    --fs-headline: clamp(40px, 13vw, 64px);
+    --fs-title: clamp(1.45rem, 6vw, 2rem);
+    --fs-sub: clamp(1rem, 3.8vw, 1.2rem);
+    --radius-2xl: 22px;
+    --radius-xl: 18px;
+    --radius-lg: 16px;
+  }
+
+  html,
+  body,
+  #root {
+    height: auto;
+    min-height: 100%;
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  body {
+    min-height: 100svh;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: auto;
+  }
+
+  .kiosk-app {
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+    min-height: 100svh;
+    overflow: visible;
+    overflow-x: hidden;
+    padding-top: calc(var(--safe-top));
+    padding-bottom: calc(var(--safe-bottom));
+  }
+
+  /* Drop entrance translate that can leave a clipped strip on iOS. */
+  .kiosk-view {
+    flex: none;
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    min-height: auto;
+    height: auto;
+    opacity: 1;
+    transform: none;
+  }
+
+  .kiosk-view--in {
+    opacity: 1;
+    transform: none;
+  }
+
+  .kiosk-bg {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
+
+  /* Stronger full-bleed wash — landscape left-band wash no longer covers
+     stacked content below the fold. */
+  .kiosk-bg-facility {
+    animation: none;
+    filter: blur(1.2px) brightness(1.05);
+    background-position: center 30%;
+  }
+
+  .kiosk-bg-facility-wash {
+    background: linear-gradient(
+      to bottom,
+      rgba(248, 247, 245, 0.94) 0%,
+      rgba(246, 244, 241, 0.88) 35%,
+      rgba(245, 243, 240, 0.82) 70%,
+      rgba(245, 243, 240, 0.78) 100%
+    );
+  }
+
+  .kiosk-topbar {
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px 16px;
+    padding: 14px 20px 8px;
+  }
+
+  .kiosk-esf-logo img {
+    height: 36px;
+    max-width: min(220px, 62vw);
+  }
+
+  .kiosk-esf-logo--large img {
+    height: 40px;
+    max-width: min(240px, 70vw);
+  }
+
+  .kiosk-brand-sub {
+    white-space: normal;
+  }
+
+  .kiosk-topbar-section {
+    flex: 1 1 auto;
+    width: 100%;
+  }
+
+  .kiosk-topbar-section-title {
+    font-size: clamp(1.15rem, 5vw, 1.45rem);
+    line-height: 1.15;
+  }
+
+  .kiosk-topbar-divider {
+    display: none;
+  }
+
+  .kiosk-home {
+    display: block;
+    flex: none;
+    min-height: auto;
+    width: 100%;
+  }
+
+  .kiosk-home-body {
+    display: flex;
+    flex-direction: column;
+    flex: none;
+    align-items: stretch;
+    align-content: start;
+    grid-template-columns: none;
+    width: 100%;
+    max-width: 100%;
+    min-height: auto;
+    height: auto;
+    gap: 22px;
+    padding: 12px 20px 28px;
+  }
+
+  .kiosk-home-intro {
+    max-width: none;
+    width: 100%;
+  }
+
+  .kiosk-home-headline {
+    font-size: var(--fs-headline);
+    line-height: 1.05;
+    letter-spacing: 0.02em;
+  }
+
+  .kiosk-home-subhead {
+    margin-top: 14px;
+    max-width: none;
+  }
+
+  .kiosk-home-footnote {
+    margin-top: 16px;
+  }
+
+  .kiosk-slideshow {
+    width: 100%;
+    max-width: 100%;
+    margin-top: 18px;
+    min-height: 0;
+  }
+
+  .kiosk-slide {
+    width: 100%;
+    min-height: 168px;
+    padding: 18px 18px;
+  }
+
+  .kiosk-slide-headline {
+    font-size: clamp(1.2rem, 5.2vw, 1.55rem);
+  }
+
+  .kiosk-slide-body {
+    font-size: 0.95rem;
+  }
+
+  .kiosk-cards {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+    max-height: none;
+    gap: 14px;
+  }
+
+  .kiosk-card {
+    width: 100%;
+    max-width: 100%;
+    min-height: 0;
+    padding: 18px 18px 20px;
+    gap: 14px;
+  }
+
+  .kiosk-card:hover {
+    transform: none;
+  }
+
+  .kiosk-card:active {
+    transform: scale(0.99);
+  }
+
+  .kiosk-card-title {
+    font-size: clamp(1.35rem, 5.5vw, 1.7rem);
+  }
+
+  .kiosk-card-copy {
+    font-size: 0.98rem;
+    max-width: none;
+  }
+
+  .kiosk-card-art {
+    width: 100%;
+    height: clamp(120px, 28vw, 160px);
+  }
+
+  .kiosk-card-cue {
+    opacity: 0.55;
+    width: 44px;
+    height: 44px;
+    right: 16px;
+    bottom: 16px;
+  }
+
+  /* ── Section + iframe frames ── */
+  .kiosk-section {
+    display: flex;
+    flex-direction: column;
+    flex: none;
+    width: 100%;
+    min-height: 100svh;
+    height: auto;
+  }
+
+  .kiosk-section-body {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    min-height: calc(100svh - 150px);
+    padding: 0 12px 12px;
+  }
+
+  .kiosk-hero {
+    grid-template-columns: 1fr;
+    width: 100%;
+    padding: 22px 18px;
+    gap: 20px;
+    overflow: visible;
+  }
+
+  .kiosk-hero-main {
+    max-width: none;
+  }
+
+  .kiosk-frame-wrap {
+    flex: 1 1 auto;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    min-height: calc(100svh - 150px);
+    height: calc(100svh - 150px);
+    border-radius: 16px;
+  }
+
+  .kiosk-frame {
+    width: 100%;
+    max-width: 100%;
+    height: 100%;
+    min-width: 0;
+    border: 0;
+  }
+
+  .kiosk-frame-loading,
+  .kiosk-frame-fallback {
+    padding: 24px 18px;
+  }
+
+  .kiosk-frame-fallback-actions {
+    flex-direction: column;
+    width: 100%;
+    max-width: 280px;
+  }
+
+  .kiosk-footer--section {
+    width: 100%;
+    padding: 10px 16px calc(12px + var(--safe-bottom));
+    justify-content: flex-start;
+  }
+
+  .kiosk-home-btn,
+  .kiosk-home-btn--footer {
+    min-height: 52px;
+    margin-left: 0;
+    padding: 0 20px;
+    font-size: 1rem;
+  }
+
+  .kiosk-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .kiosk-frame-fallback-actions .kiosk-btn {
+    width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .kiosk-topbar {
+    padding: 12px 16px 6px;
+  }
+
+  .kiosk-home-body {
+    padding: 10px 16px 24px;
+    gap: 18px;
+  }
+
+  .kiosk-home-headline {
+    font-size: clamp(36px, 12.5vw, 52px);
+  }
+
+  .kiosk-section-body {
+    padding: 0 10px 10px;
+    min-height: calc(100svh - 140px);
+  }
+
+  .kiosk-frame-wrap {
+    min-height: calc(100svh - 140px);
+    height: calc(100svh - 140px);
+    border-radius: 14px;
+  }
+
+  .kiosk-card-art {
+    height: 118px;
+  }
+}
