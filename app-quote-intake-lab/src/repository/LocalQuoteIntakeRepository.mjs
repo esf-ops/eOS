@@ -1,6 +1,7 @@
 import { ClassificationService } from "../classification/classificationService.mjs";
 import { getSimulatedIntakeIntelligenceProvider } from "../classification/simulatedProvider.mjs";
 import { TakeoffService } from "../takeoff/takeoffService.mjs";
+import { TakeoffCorrectionService } from "../takeoff/takeoffCorrectionService.mjs";
 import { getSimulatedTakeoffAdapter } from "../takeoff/simulatedTakeoffAdapter.mjs";
 import { inboundEmailAdapter } from "../inbound/inboundEmailAdapter.mjs";
 import { caseFromInboundMessage } from "../inbound/caseFromInbound.mjs";
@@ -44,6 +45,7 @@ export class LocalQuoteIntakeRepository {
       store: this._store,
       takeoffAdapter: opts.takeoffAdapter ?? getSimulatedTakeoffAdapter()
     });
+    this._corrections = new TakeoffCorrectionService({ store: this._store });
     this._ready = null;
   }
 
@@ -282,6 +284,59 @@ export class LocalQuoteIntakeRepository {
     await this.ready();
     return this._store.listTakeoffAuditEvents(caseId);
   }
+
+  async beginTakeoffCorrection(caseId, sourceRunId, opts = {}) {
+    await this.ready();
+    return this._corrections.beginCorrection(caseId, sourceRunId, opts);
+  }
+
+  async getTakeoffCorrectionDraft(caseId, sourceRunId) {
+    await this.ready();
+    return this._corrections.getDraft(caseId, sourceRunId);
+  }
+
+  async applyTakeoffCorrection(caseId, draftId, operation, opts = {}) {
+    await this.ready();
+    const caseRow = await this.getCase(caseId);
+    return this._corrections.applyOperation(caseId, draftId, operation, { ...opts, caseRow });
+  }
+
+  async saveTakeoffCorrectionDraft(caseId, draftId, opts = {}) {
+    await this.ready();
+    return this._corrections.saveDraft(caseId, draftId, opts);
+  }
+
+  async discardTakeoffCorrectionDraft(caseId, draftId, opts = {}) {
+    await this.ready();
+    return this._corrections.discardDraft(caseId, draftId, opts);
+  }
+
+  async evaluateTakeoffAcceptance(caseId, draftId, opts = {}) {
+    await this.ready();
+    const caseRow = await this.getCase(caseId);
+    return this._corrections.evaluateGate(caseId, draftId, { ...opts, caseRow });
+  }
+
+  async acceptReviewedTakeoff(caseId, draftId, opts = {}) {
+    await this.ready();
+    const caseRow = await this.getCase(caseId);
+    return this._corrections.acceptSnapshot(caseId, draftId, { ...opts, caseRow });
+  }
+
+  async createTakeoffRevision(caseId, opts = {}) {
+    await this.ready();
+    return this._corrections.createRevision(caseId, opts);
+  }
+
+  async listReviewedTakeoffSnapshots(caseId) {
+    await this.ready();
+    return this._corrections.listAcceptedSnapshots(caseId);
+  }
+
+  async getReviewedTakeoffSnapshot(snapshotId) {
+    await this.ready();
+    return this._corrections.getAcceptedSnapshot(snapshotId);
+  }
 }
 
 const OVERLAY_KEYS = [
@@ -318,7 +373,15 @@ const TAKEOFF_OVERLAY_KEYS = [
   "latestTakeoffState",
   "takeoffProviderMode",
   "takeoffWarningCounts",
-  "takeoffUpdatedAt"
+  "takeoffUpdatedAt",
+  "takeoffReviewState",
+  "latestCorrectionDraftId",
+  "latestReviewedTakeoffSnapshotId",
+  "reviewedMeasuredCountertopSquareFootage",
+  "reviewedMeasuredBacksplashSquareFootage",
+  "reviewedMeasuredFullHeightBacksplashSquareFootage",
+  "reviewedMeasuredCombinedSquareFootage",
+  "reviewedSinkCutoutCount"
 ];
 
 function applyOverlay(caseRow, overlay) {

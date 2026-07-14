@@ -23,6 +23,10 @@ export class MemoryLabStore {
     this.takeoffAudit = new Map();
     /** @type {Map<string, any>} */
     this.takeoffOverlays = new Map();
+    /** @type {Map<string, any>} */
+    this.takeoffCorrectionDrafts = new Map();
+    /** @type {Map<string, any>} */
+    this.reviewedTakeoffSnapshots = new Map();
   }
 
   async ready() {
@@ -193,6 +197,54 @@ export class MemoryLabStore {
     return next;
   }
 
+  // ── Phase 4B.3 correction drafts + reviewed takeoff snapshots ──────────────
+
+  async saveTakeoffCorrectionDraft(draft) {
+    this.takeoffCorrectionDrafts.set(draft.id, clone(draft));
+    return draft;
+  }
+
+  async getTakeoffCorrectionDraft(draftId) {
+    return this.takeoffCorrectionDrafts.get(draftId) ?? null;
+  }
+
+  async getTakeoffCorrectionDraftByRun(caseId, sourceRunId) {
+    return (
+      [...this.takeoffCorrectionDrafts.values()]
+        .filter((d) => d.caseId === caseId && d.sourceRunId === sourceRunId)
+        .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))[0] ?? null
+    );
+  }
+
+  async listTakeoffCorrectionDrafts(caseId) {
+    return [...this.takeoffCorrectionDrafts.values()]
+      .filter((d) => d.caseId === caseId)
+      .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+  }
+
+  async deleteTakeoffCorrectionDraft(draftId) {
+    this.takeoffCorrectionDrafts.delete(draftId);
+  }
+
+  async saveReviewedTakeoffSnapshot(snapshot) {
+    if (this.reviewedTakeoffSnapshots.has(snapshot.id)) {
+      const err = new Error("Reviewed takeoff snapshot is immutable and already persisted.");
+      err.code = "REVIEWED_TAKEOFF_IMMUTABLE";
+      throw err;
+    }
+    this.reviewedTakeoffSnapshots.set(snapshot.id, clone(snapshot));
+  }
+
+  async getReviewedTakeoffSnapshot(snapshotId) {
+    return this.reviewedTakeoffSnapshots.get(snapshotId) ?? null;
+  }
+
+  async listReviewedTakeoffSnapshots(caseId) {
+    return [...this.reviewedTakeoffSnapshots.values()]
+      .filter((s) => s.caseId === caseId)
+      .sort((a, b) => String(b.acceptedAt).localeCompare(String(a.acceptedAt)));
+  }
+
   async clearImported() {
     const importedIds = new Set(this.cases.keys());
     this.cases.clear();
@@ -215,6 +267,12 @@ export class MemoryLabStore {
       if (importedIds.has(ev.caseId)) this.takeoffAudit.delete(id);
     }
     for (const caseId of importedIds) this.takeoffOverlays.delete(caseId);
+    for (const [id, d] of [...this.takeoffCorrectionDrafts.entries()]) {
+      if (importedIds.has(d.caseId)) this.takeoffCorrectionDrafts.delete(id);
+    }
+    for (const [id, s] of [...this.reviewedTakeoffSnapshots.entries()]) {
+      if (importedIds.has(s.caseId)) this.reviewedTakeoffSnapshots.delete(id);
+    }
   }
 }
 

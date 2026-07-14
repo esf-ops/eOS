@@ -127,6 +127,15 @@ export type QuoteIntakeCase = {
     total: number;
   } | null;
   takeoffUpdatedAt?: string | null;
+  /** Phase 4B.3 correction / accepted reviewed takeoff pointers. */
+  takeoffReviewState?: string | null;
+  latestCorrectionDraftId?: string | null;
+  latestReviewedTakeoffSnapshotId?: string | null;
+  reviewedMeasuredCountertopSquareFootage?: number | null;
+  reviewedMeasuredBacksplashSquareFootage?: number | null;
+  reviewedMeasuredFullHeightBacksplashSquareFootage?: number | null;
+  reviewedMeasuredCombinedSquareFootage?: number | null;
+  reviewedSinkCutoutCount?: number | null;
 };
 
 export type QuoteIntakeStatusCounts = {
@@ -192,4 +201,35 @@ export interface QuoteIntakeRepository {
   getLatestTakeoffRun?: (caseId: string) => Promise<unknown>;
   getTakeoffOverlay?: (caseId: string) => Promise<unknown>;
   listTakeoffAuditEvents?: (caseId: string) => Promise<unknown[]>;
+  beginTakeoffCorrection?: (
+    caseId: string,
+    sourceRunId: string,
+    opts?: { actorLabel?: string }
+  ) => Promise<unknown>;
+  getTakeoffCorrectionDraft?: (caseId: string, sourceRunId: string) => Promise<unknown>;
+  applyTakeoffCorrection?: (
+    caseId: string,
+    draftId: string,
+    operation: unknown,
+    opts?: { actorLabel?: string }
+  ) => Promise<unknown>;
+  saveTakeoffCorrectionDraft?: (
+    caseId: string,
+    draftId: string,
+    opts?: { actorLabel?: string }
+  ) => Promise<unknown>;
+  discardTakeoffCorrectionDraft?: (
+    caseId: string,
+    draftId: string,
+    opts?: { actorLabel?: string }
+  ) => Promise<unknown>;
+  evaluateTakeoffAcceptance?: (caseId: string, draftId: string) => Promise<unknown>;
+  acceptReviewedTakeoff?: (
+    caseId: string,
+    draftId: string,
+    opts?: { actorLabel?: string; note?: string }
+  ) => Promise<unknown>;
+  createTakeoffRevision?: (caseId: string, opts?: { actorLabel?: string }) => Promise<unknown>;
+  listReviewedTakeoffSnapshots?: (caseId: string) => Promise<unknown[]>;
+  getReviewedTakeoffSnapshot?: (snapshotId: string) => Promise<unknown>;
 }

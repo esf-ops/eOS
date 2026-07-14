@@ -18,6 +18,7 @@ import {
   sfDifference
 } from "../../takeoff/takeoffDisplay.mjs";
 import { caseTitle, formatReceived } from "../../utils/format";
+import TakeoffCorrectionPanel from "./TakeoffCorrectionPanel";
 
 type TakeoffRun = {
   id: string;
@@ -115,6 +116,7 @@ export default function TakeoffReviewWorkspace({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedRooms, setExpandedRooms] = useState<Record<string, boolean>>({});
+  const [correctionMode, setCorrectionMode] = useState(false);
 
   const scenarios = useMemo(() => listSimulatedScenarioOptions(), []);
 
@@ -358,6 +360,19 @@ export default function TakeoffReviewWorkspace({
           </aside>
 
           <section className="qil-toff-pane qil-toff-pane-results" aria-label="Takeoff results">
+            {correctionMode && inspectRun ? (
+              <TakeoffCorrectionPanel
+                caseItem={caseItem}
+                repo={repo}
+                sourceRun={inspectRun}
+                actorLabel={actorLabel}
+                onExit={() => setCorrectionMode(false)}
+                onMutated={onCaseMutated}
+              />
+            ) : null}
+
+            {!correctionMode ? (
+            <>
             <section className="qil-toff-block">
               <h2>Run controls</h2>
               <label className="qil-toff-scenario">
@@ -602,14 +617,16 @@ export default function TakeoffReviewWorkspace({
                       ["estimator_review", "Estimator review", warningGroups.estimator_review],
                       ["informational", "Informational", warningGroups.informational]
                     ] as const
-                  ).map(([key, title, list]) => (
+                  ).map(([key, title, list]) =>
+                    !list.length ? (
+                      <p key={key} className="qil-cell-meta qil-toff-warn-empty">
+                        {title}: none
+                      </p>
+                    ) : (
                     <div key={key} className={`qil-toff-warn-group sev-${key}`}>
                       <h3>
                         {title} <span>({list.length})</span>
                       </h3>
-                      {!list.length ? (
-                        <p className="qil-cell-meta">None</p>
-                      ) : (
                         <ul className="qil-toff-warn-list">
                           {list.map((w, idx) => (
                             <li key={`${w.code}-${idx}`} className={`sev-${w.severity}`}>
@@ -641,10 +658,21 @@ export default function TakeoffReviewWorkspace({
                             </li>
                           ))}
                         </ul>
-                      )}
                     </div>
-                  ))}
+                    )
+                  )}
                 </section>
+
+                <div className="qil-toff-run-actions" style={{ marginBottom: "1rem" }}>
+                  <button
+                    type="button"
+                    className="qil-btn-primary"
+                    disabled={busy || inspectRun.labTakeoffStatus === "qil_takeoff_failed"}
+                    onClick={() => setCorrectionMode(true)}
+                  >
+                    Enter correction mode
+                  </button>
+                </div>
               </>
             ) : (
               <section className="qil-toff-block">
@@ -693,24 +721,14 @@ export default function TakeoffReviewWorkspace({
               )}
             </section>
 
-            <section className="qil-toff-block qil-toff-future" aria-label="Future takeoff actions (disabled)">
-              <h2>Correction / acceptance</h2>
-              <p className="qil-cell-meta">Phase 4B.3 boundary — actions disabled in this phase.</p>
-              <div className="qil-toff-future-actions">
-                <button type="button" disabled title="Phase 4B.3">
-                  Correct measurements
-                </button>
-                <button type="button" disabled title="Phase 4B.3">
-                  Accept takeoff snapshot
-                </button>
-                <button type="button" disabled title="Not in lab Phase 4B">
-                  Import to Internal Estimate
-                </button>
-                <button type="button" disabled title="Not in lab Phase 4B">
-                  Price / quote
-                </button>
-              </div>
+            <section className="qil-toff-block" aria-label="Downstream integration note">
+              <p className="qil-cell-meta qil-toff-downstream-note">
+                Downstream integrations are unavailable in the isolated lab. No Internal Estimate import, pricing,
+                or Quote Library actions.
+              </p>
             </section>
+            </>
+            ) : null}
           </section>
         </div>
       )}

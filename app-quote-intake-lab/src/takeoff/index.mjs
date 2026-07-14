@@ -36,3 +36,9 @@ export {
   containsForbiddenPricingLabels,
   sfDifference
 } from "./takeoffDisplay.mjs";
+export * from "./correctionTypes.mjs";
+export { buildReviewedProjection, applyReviewedDeterministicMeasurements, previewPieceSf } from "./reviewedProjection.mjs";
+export { evaluateTakeoffAcceptanceGate, warningKey } from "./approvalGate.mjs";
+export { TakeoffCorrectionService } from "./takeoffCorrectionService.mjs";
+export { computeReviewedFingerprint, hasMaterialCorrections } from "./reviewedFingerprint.mjs";
+export { reviewedSfProvenance } from "./takeoffDisplay.mjs";

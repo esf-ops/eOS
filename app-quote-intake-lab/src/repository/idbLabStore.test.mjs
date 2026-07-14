@@ -47,7 +47,7 @@ describe("IdbLabStore", () => {
     assert.equal(await store.getCase("qil-imp-test-1"), null);
   });
 
-  it("migrates to v2/v3 stores and keeps fixture overlays/takeoff on clear", async () => {
+  it("migrates to v2/v3/v4 stores and keeps fixture overlays/takeoff on clear", async () => {
     const fixtureCaseId = "qil-case-fixture-overlay";
     await store.setCaseOverlay(fixtureCaseId, { status: "qil_intake_review", nextAction: "test" });
     await store.saveClassificationRun({
@@ -68,6 +68,13 @@ describe("IdbLabStore", () => {
       calculation: {}
     });
     await store.setTakeoffOverlay(fixtureCaseId, { latestTakeoffRunId: "qil-toff-fixture-keep" });
+    await store.saveTakeoffCorrectionDraft({
+      id: "qil-toff-draft-fixture",
+      caseId: fixtureCaseId,
+      sourceRunId: "qil-toff-fixture-keep",
+      updatedAt: "2026-07-14T16:04:00.000Z",
+      operations: []
+    });
 
     const caseRow = {
       id: "qil-imp-test-cls",
@@ -106,5 +113,6 @@ describe("IdbLabStore", () => {
     assert.equal((await store.listTakeoffRuns("qil-imp-test-cls")).length, 0);
     assert.equal((await store.listTakeoffRuns(fixtureCaseId)).length, 1);
     assert.equal((await store.getTakeoffOverlay(fixtureCaseId))?.latestTakeoffRunId, "qil-toff-fixture-keep");
+    assert.equal((await store.listTakeoffCorrectionDrafts(fixtureCaseId)).length, 1);
   });
 });

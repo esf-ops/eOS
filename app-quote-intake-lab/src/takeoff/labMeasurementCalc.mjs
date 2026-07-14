@@ -43,6 +43,7 @@ export function toCalcTakeoffResult(rooms) {
             ...(meta.backsplashScope != null && { backsplashScope: meta.backsplashScope }),
             ...(meta.backsplashLinearIn != null && { backsplashLinearIn: meta.backsplashLinearIn }),
             ...(meta.backsplashHeightIn != null && { backsplashHeightIn: meta.backsplashHeightIn }),
+            ...(meta.backsplashManualSf != null && { backsplashManualSf: meta.backsplashManualSf }),
             ...(meta.cornerDeductions != null && { cornerDeductions: meta.cornerDeductions })
           }
         ]

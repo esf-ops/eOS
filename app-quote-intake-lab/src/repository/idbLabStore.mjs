@@ -4,10 +4,11 @@
  *
  * v1 → v2 adds classification runs, reviewed snapshots, audit events, case overlays.
  * v2 → v3 adds takeoffRuns, takeoffAuditEvents, takeoffCaseOverlays.
+ * v3 → v4 adds takeoffCorrectionDrafts, reviewedTakeoffSnapshots.
  */
 
 const DB_NAME = "quote-intake-lab-v1";
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const STORE_CASES = "cases";
 const STORE_ATTACHMENTS = "attachments";
 const STORE_DEDUPE = "dedupe";
@@ -18,6 +19,8 @@ const STORE_OVERLAYS = "caseOverlays";
 const STORE_TAKEOFF_RUNS = "takeoffRuns";
 const STORE_TAKEOFF_AUDIT = "takeoffAuditEvents";
 const STORE_TAKEOFF_OVERLAYS = "takeoffCaseOverlays";
+const STORE_TAKEOFF_DRAFTS = "takeoffCorrectionDrafts";
+const STORE_REVIEWED_TAKEOFF = "reviewedTakeoffSnapshots";
 
 function openDb() {
   return new Promise((resolve, reject) => {
@@ -69,6 +72,17 @@ function openDb() {
         }
         if (!db.objectStoreNames.contains(STORE_TAKEOFF_OVERLAYS)) {
           db.createObjectStore(STORE_TAKEOFF_OVERLAYS, { keyPath: "caseId" });
+        }
+      }
+      if (oldVersion < 4) {
+        if (!db.objectStoreNames.contains(STORE_TAKEOFF_DRAFTS)) {
+          const drafts = db.createObjectStore(STORE_TAKEOFF_DRAFTS, { keyPath: "id" });
+          drafts.createIndex("byCase", "caseId", { unique: false });
+          drafts.createIndex("byRun", "sourceRunId", { unique: false });
+        }
+        if (!db.objectStoreNames.contains(STORE_REVIEWED_TAKEOFF)) {
+          const reviewed = db.createObjectStore(STORE_REVIEWED_TAKEOFF, { keyPath: "id" });
+          reviewed.createIndex("byCase", "caseId", { unique: false });
         }
       }
     };
@@ -379,6 +393,77 @@ export class IdbLabStore {
     return next;
   }
 
+  // ── Phase 4B.3 correction drafts + reviewed takeoff snapshots ──────────────
+
+  async saveTakeoffCorrectionDraft(draft) {
+    await this.ready();
+    const tx = this._db.transaction(STORE_TAKEOFF_DRAFTS, "readwrite");
+    tx.objectStore(STORE_TAKEOFF_DRAFTS).put(JSON.parse(JSON.stringify(draft)));
+    await txDone(tx);
+    return draft;
+  }
+
+  async getTakeoffCorrectionDraft(draftId) {
+    await this.ready();
+    const tx = this._db.transaction(STORE_TAKEOFF_DRAFTS, "readonly");
+    const row = await reqToPromise(tx.objectStore(STORE_TAKEOFF_DRAFTS).get(draftId));
+    await txDone(tx);
+    return row ?? null;
+  }
+
+  async getTakeoffCorrectionDraftByRun(caseId, sourceRunId) {
+    const list = await this.listTakeoffCorrectionDrafts(caseId);
+    return list.find((d) => d.sourceRunId === sourceRunId) ?? null;
+  }
+
+  async listTakeoffCorrectionDrafts(caseId) {
+    await this.ready();
+    const tx = this._db.transaction(STORE_TAKEOFF_DRAFTS, "readonly");
+    const rows = await reqToPromise(tx.objectStore(STORE_TAKEOFF_DRAFTS).index("byCase").getAll(caseId));
+    await txDone(tx);
+    return (rows ?? []).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+  }
+
+  async deleteTakeoffCorrectionDraft(draftId) {
+    await this.ready();
+    const tx = this._db.transaction(STORE_TAKEOFF_DRAFTS, "readwrite");
+    tx.objectStore(STORE_TAKEOFF_DRAFTS).delete(draftId);
+    await txDone(tx);
+  }
+
+  async saveReviewedTakeoffSnapshot(snapshot) {
+    await this.ready();
+    const tx = this._db.transaction(STORE_REVIEWED_TAKEOFF, "readwrite");
+    const store = tx.objectStore(STORE_REVIEWED_TAKEOFF);
+    const existing = await reqToPromise(store.get(snapshot.id));
+    if (existing) {
+      await txDone(tx);
+      const err = new Error("Reviewed takeoff snapshot is immutable and already persisted.");
+      err.code = "REVIEWED_TAKEOFF_IMMUTABLE";
+      throw err;
+    }
+    store.put(JSON.parse(JSON.stringify(snapshot)));
+    await txDone(tx);
+  }
+
+  async getReviewedTakeoffSnapshot(snapshotId) {
+    await this.ready();
+    const tx = this._db.transaction(STORE_REVIEWED_TAKEOFF, "readonly");
+    const row = await reqToPromise(tx.objectStore(STORE_REVIEWED_TAKEOFF).get(snapshotId));
+    await txDone(tx);
+    return row ?? null;
+  }
+
+  async listReviewedTakeoffSnapshots(caseId) {
+    await this.ready();
+    const tx = this._db.transaction(STORE_REVIEWED_TAKEOFF, "readonly");
+    const rows = await reqToPromise(
+      tx.objectStore(STORE_REVIEWED_TAKEOFF).index("byCase").getAll(caseId)
+    );
+    await txDone(tx);
+    return (rows ?? []).sort((a, b) => String(b.acceptedAt).localeCompare(String(a.acceptedAt)));
+  }
+
   async clearImported() {
     await this.ready();
     const imported = await this.listImportedCases();
@@ -392,20 +477,33 @@ export class IdbLabStore {
         STORE_OVERLAYS,
         STORE_TAKEOFF_RUNS,
         STORE_TAKEOFF_AUDIT,
-        STORE_TAKEOFF_OVERLAYS
+        STORE_TAKEOFF_OVERLAYS,
+        STORE_TAKEOFF_DRAFTS,
+        STORE_REVIEWED_TAKEOFF
       ],
       "readonly"
     );
-    const [runs, snaps, audits, overlays, takeoffRuns, takeoffAudits, takeoffOverlays] =
-      await Promise.all([
-        reqToPromise(readTx.objectStore(STORE_RUNS).getAll()),
-        reqToPromise(readTx.objectStore(STORE_SNAPSHOTS).getAll()),
-        reqToPromise(readTx.objectStore(STORE_AUDIT).getAll()),
-        reqToPromise(readTx.objectStore(STORE_OVERLAYS).getAll()),
-        reqToPromise(readTx.objectStore(STORE_TAKEOFF_RUNS).getAll()),
-        reqToPromise(readTx.objectStore(STORE_TAKEOFF_AUDIT).getAll()),
-        reqToPromise(readTx.objectStore(STORE_TAKEOFF_OVERLAYS).getAll())
-      ]);
+    const [
+      runs,
+      snaps,
+      audits,
+      overlays,
+      takeoffRuns,
+      takeoffAudits,
+      takeoffOverlays,
+      drafts,
+      reviewedTakeoff
+    ] = await Promise.all([
+      reqToPromise(readTx.objectStore(STORE_RUNS).getAll()),
+      reqToPromise(readTx.objectStore(STORE_SNAPSHOTS).getAll()),
+      reqToPromise(readTx.objectStore(STORE_AUDIT).getAll()),
+      reqToPromise(readTx.objectStore(STORE_OVERLAYS).getAll()),
+      reqToPromise(readTx.objectStore(STORE_TAKEOFF_RUNS).getAll()),
+      reqToPromise(readTx.objectStore(STORE_TAKEOFF_AUDIT).getAll()),
+      reqToPromise(readTx.objectStore(STORE_TAKEOFF_OVERLAYS).getAll()),
+      reqToPromise(readTx.objectStore(STORE_TAKEOFF_DRAFTS).getAll()),
+      reqToPromise(readTx.objectStore(STORE_REVIEWED_TAKEOFF).getAll())
+    ]);
     await txDone(readTx);
 
     const writeTx = this._db.transaction(
@@ -419,7 +517,9 @@ export class IdbLabStore {
         STORE_OVERLAYS,
         STORE_TAKEOFF_RUNS,
         STORE_TAKEOFF_AUDIT,
-        STORE_TAKEOFF_OVERLAYS
+        STORE_TAKEOFF_OVERLAYS,
+        STORE_TAKEOFF_DRAFTS,
+        STORE_REVIEWED_TAKEOFF
       ],
       "readwrite"
     );
@@ -446,6 +546,12 @@ export class IdbLabStore {
     }
     for (const o of takeoffOverlays ?? []) {
       if (importedIds.has(o.caseId)) writeTx.objectStore(STORE_TAKEOFF_OVERLAYS).delete(o.caseId);
+    }
+    for (const d of drafts ?? []) {
+      if (importedIds.has(d.caseId)) writeTx.objectStore(STORE_TAKEOFF_DRAFTS).delete(d.id);
+    }
+    for (const s of reviewedTakeoff ?? []) {
+      if (importedIds.has(s.caseId)) writeTx.objectStore(STORE_REVIEWED_TAKEOFF).delete(s.id);
     }
     await txDone(writeTx);
   }

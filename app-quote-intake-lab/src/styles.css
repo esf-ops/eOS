@@ -2055,3 +2055,175 @@ select {
     gap: 0.55rem;
   }
 }
+
+/* Phase 4B.3 correction mode */
+.qil-toff-warn-empty {
+  margin: 0.25rem 0;
+}
+
+.qil-toff-downstream-note {
+  margin: 0.75rem 0 0;
+  padding: 0.55rem 0.65rem;
+  border: 1px dashed var(--eos-line);
+  border-radius: var(--r-sm);
+  background: #f8fafc;
+}
+
+.qil-toff-correction {
+  margin-bottom: 1rem;
+}
+
+.qil-toff-correction-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.qil-toff-correction-head h2 {
+  margin: 0;
+}
+
+.qil-toff-correction-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.qil-toff-draft-chip {
+  display: inline-flex;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  background: #eef1f6;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.qil-toff-draft-chip.is-dirty {
+  background: #fff6e8;
+  color: #7a4a10;
+}
+
+.qil-toff-compare-correction article.is-primary-reviewed {
+  border-color: rgba(163, 19, 47, 0.35);
+  background: #fff8f9;
+}
+
+.qil-toff-blockers {
+  margin: 0.75rem 0;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid #d0a060;
+  border-radius: var(--r-sm);
+  background: #fff9ef;
+}
+
+.qil-toff-blockers ul {
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.82rem;
+}
+
+.qil-toff-inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.65rem;
+  align-items: end;
+  margin-top: 0.45rem;
+}
+
+.qil-toff-inline-form label {
+  display: grid;
+  gap: 0.2rem;
+  font-size: 0.75rem;
+  color: var(--qil-meta);
+}
+
+.qil-toff-inline-form input {
+  padding: 0.3rem 0.4rem;
+  border: 1px solid var(--eos-line);
+  border-radius: var(--r-sm);
+  font: inherit;
+  min-width: 5rem;
+}
+
+.qil-toff-corr-pieces,
+.qil-toff-corr-rooms,
+.qil-toff-corr-warns {
+  list-style: none;
+  margin: 0.45rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.qil-toff-corr-piece,
+.qil-toff-corr-rooms li,
+.qil-toff-corr-warns li {
+  padding: 0.55rem 0.6rem;
+  border: 1px solid var(--eos-line);
+  border-radius: var(--r-sm);
+  background: #fbfcfe;
+}
+
+.qil-toff-corr-piece .is-corrected {
+  color: var(--eos-ink);
+  font-weight: 600;
+}
+
+.qil-toff-corr-piece-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.4rem;
+}
+
+.qil-toff-corr-piece-actions button,
+.qil-toff-corr-rooms button,
+.qil-toff-corr-warns button {
+  appearance: none;
+  border: 1px solid var(--eos-line);
+  background: #fff;
+  border-radius: var(--r-sm);
+  padding: 0.25rem 0.45rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.qil-toff-add-piece {
+  margin-top: 0.85rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--eos-line);
+}
+
+.qil-toff-add-piece h4 {
+  margin: 0 0 0.35rem;
+  font-size: 0.82rem;
+}
+
+.qil-toff-accept-dialog {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 28, 40, 0.35);
+  display: grid;
+  place-items: center;
+  z-index: 40;
+}
+
+.qil-toff-accept-card {
+  width: min(28rem, calc(100vw - 2rem));
+  padding: 1rem 1.1rem;
+  background: #fff;
+  border-radius: var(--r-md);
+  border: 1px solid var(--eos-line);
+  box-shadow: var(--sh-2);
+}
+
+.qil-toff-snap-inspect {
+  margin-top: 0.55rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--eos-line);
+  border-radius: var(--r-sm);
+  background: #fff;
+  font-size: 0.82rem;
+}

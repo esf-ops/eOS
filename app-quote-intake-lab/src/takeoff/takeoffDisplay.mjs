@@ -20,13 +20,41 @@ export function formatTakeoffSf(value, digits = 2) {
  */
 export const TAKEOFF_PROVENANCE = Object.freeze({
   EMAIL_STATED: "Email-stated",
-  SIMULATED_PROVIDER: "Simulated provider proposal",
+  SIMULATED_PROVIDER: "Simulated provider",
   DETERMINISTIC: "eliteOS deterministic calculation",
+  ORIGINAL_DETERMINISTIC: "Original deterministic",
+  HUMAN_CORRECTED: "Human corrected",
+  HUMAN_REVIEWED: "Human reviewed",
+  DRAFT_REVIEWED: "Draft reviewed",
+  ACCEPTED_REVIEWED: "Accepted reviewed",
+  UNCHANGED_FROM_ORIGINAL: "Unchanged from original deterministic result",
+  UNACCEPTED_DRAFT: "Unaccepted draft",
+  ACCEPTED_SNAPSHOT: "Accepted snapshot",
   UNREVIEWED: "Unreviewed",
   SIMULATED_TAKEOFF: "Simulated takeoff",
   AUDIT: "Persisted audit event",
   CLASSIFICATION: "Email classification"
 });
+
+/**
+ * Provenance chips for correction summary (draft vs accepted).
+ */
+export function reviewedSfProvenance({ accepted, material }) {
+  if (accepted) {
+    return {
+      title: "Accepted reviewed SF",
+      chips: material
+        ? [TAKEOFF_PROVENANCE.ACCEPTED_REVIEWED, TAKEOFF_PROVENANCE.HUMAN_REVIEWED, TAKEOFF_PROVENANCE.HUMAN_CORRECTED]
+        : [TAKEOFF_PROVENANCE.ACCEPTED_REVIEWED, TAKEOFF_PROVENANCE.HUMAN_REVIEWED]
+    };
+  }
+  return {
+    title: "Draft reviewed SF",
+    chips: material
+      ? [TAKEOFF_PROVENANCE.UNACCEPTED_DRAFT, TAKEOFF_PROVENANCE.HUMAN_CORRECTED]
+      : [TAKEOFF_PROVENANCE.UNACCEPTED_DRAFT, TAKEOFF_PROVENANCE.UNCHANGED_FROM_ORIGINAL]
+  };
+}
 
 /**
  * @param {object|null|undefined} run
