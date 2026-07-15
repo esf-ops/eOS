@@ -20,6 +20,10 @@ import {
 import { createQuoteIntakeRepository } from "./quoteIntakeRepositoryFactory.mjs";
 import { QUOTE_INTAKE_API_PREFIX, AUTOMATION_PATH } from "./quoteIntakeTypes.mjs";
 import { createFakeProductionTakeoffAdapter } from "./productionTakeoffAdapter.mjs";
+import {
+  importQuoteIntakeMailboxMessages,
+  previewQuoteIntakeMailbox
+} from "./quoteIntakeMailboxService.mjs";
 
 export { QUOTE_INTAKE_API_PREFIX };
 export { isQuoteIntakeApiEnabled, readSafeQuoteIntakeConfig } from "./quoteIntakeConfig.mjs";
@@ -48,7 +52,9 @@ export function attachQuoteIntakeRoutes(app, deps) {
     resolveOrganizationId,
     takeoffAdapter = createFakeProductionTakeoffAdapter(),
     jsonParser = defaultJsonParser,
-    env = process.env
+    env = process.env,
+    graphClient = null,
+    graphFetchImpl = null
   } = deps;
 
   if (!isQuoteIntakeApiEnabled(env)) {
@@ -135,7 +141,7 @@ export function attachQuoteIntakeRoutes(app, deps) {
     jsonNoStore(res);
     res.status(200).json({
       ok: true,
-      phase: "6P.2",
+      phase: "6P.4",
       repositoryMode,
       takeoffAdapter: takeoffAdapter?.name ?? "none"
     });
@@ -300,6 +306,89 @@ export function attachQuoteIntakeRoutes(app, deps) {
       });
     }
   });
+
+  function graphErrorStatus(e) {
+    const code = String(e?.code ?? "");
+    if (code === "graph_disabled") return 404;
+    if (code === "graph_throttled") return 429;
+    if (code === "graph_timeout") return 504;
+    if (code === "graph_forbidden") return Number(e?.statusCode) === 400 ? 400 : 403;
+    if (code === "message_not_found") return 404;
+    if (code === "attachment_too_large") return 413;
+    if (Number(e?.statusCode) >= 400 && Number(e?.statusCode) < 600) return Number(e.statusCode);
+    return 503;
+  }
+
+  function safeGraphError(e) {
+    const code = String(e?.code ?? "graph_unavailable");
+    const messages = {
+      graph_disabled: "Mailbox sync is not enabled",
+      graph_not_configured: "Mailbox sync is not configured",
+      graph_token_failed: "Mailbox authentication failed",
+      graph_forbidden: "Mailbox access denied",
+      graph_throttled: "Mailbox provider is busy — try again later",
+      graph_timeout: "Mailbox request timed out",
+      graph_unavailable: "Mailbox temporarily unavailable",
+      graph_invalid_response: "Mailbox returned an invalid response",
+      message_not_found: "Message not found",
+      attachment_unsupported: "Attachment type is not supported",
+      attachment_too_large: "Attachment exceeds size limits",
+      attachment_hash_failed: "Attachment validation failed",
+      duplicate: "Message already imported",
+      import_failed: "Unable to import mailbox messages"
+    };
+    return { ok: false, error: messages[code] || "Mailbox request failed", code };
+  }
+
+  app.post(
+    `${QUOTE_INTAKE_API_PREFIX}/mailbox/preview`,
+    ...stack,
+    jsonParser,
+    async (req, res) => {
+      jsonNoStore(res);
+      try {
+        const organizationId = await orgIdFor(req);
+        const preview = await previewQuoteIntakeMailbox({
+          env,
+          organizationId,
+          actorUserId: req.user?.id ?? null,
+          repository,
+          graphClient,
+          fetchImpl: graphFetchImpl,
+          body: req.body
+        });
+        res.status(200).json({ ok: true, ...preview });
+      } catch (e) {
+        console.error("[quote-intake] mailbox preview failed", e?.code || "error");
+        res.status(graphErrorStatus(e)).json(safeGraphError(e));
+      }
+    }
+  );
+
+  app.post(
+    `${QUOTE_INTAKE_API_PREFIX}/mailbox/import`,
+    ...stack,
+    jsonParser,
+    async (req, res) => {
+      jsonNoStore(res);
+      try {
+        const organizationId = await orgIdFor(req);
+        const imported = await importQuoteIntakeMailboxMessages({
+          env,
+          organizationId,
+          actorUserId: req.user?.id ?? null,
+          repository,
+          graphClient,
+          fetchImpl: graphFetchImpl,
+          body: req.body
+        });
+        res.status(200).json({ ok: true, ...imported });
+      } catch (e) {
+        console.error("[quote-intake] mailbox import failed", e?.code || "error");
+        res.status(graphErrorStatus(e)).json(safeGraphError(e));
+      }
+    }
+  );
 
   return { mounted: true, prefix: QUOTE_INTAKE_API_PREFIX, repositoryMode };
 }

@@ -32,7 +32,7 @@ import { sanitizeQuoteIntakeAuditMetadata } from "./quoteIntakeAuditSanitize.mjs
  * @typedef {Object} QuoteIntakeSourceMessageMeta
  * @property {string} [internetMessageId]
  * @property {string} [contentHash]
- * @property {string} [graphMessageIdHash]
+ * @property {string} [graphImmutableMessageId]
  * @property {string} [fromAddressHash]
  */
 
@@ -141,12 +141,74 @@ export class InMemoryQuoteIntakeRepository {
   }
 
   /**
+   * @param {string} organizationId
+   * @param {{ internetMessageId?: string|null, graphMessageId?: string|null, contentHash?: string|null }} keys
+   */
+  findCaseBySourceKeys(organizationId, keys) {
+    const org = normOrg(organizationId);
+    const rows = [...this.cases.values()].filter((c) => c.organizationId === org);
+    if (keys?.internetMessageId) {
+      const hit = rows.find(
+        (c) => c.sourceMessage?.internetMessageId === String(keys.internetMessageId).trim()
+      );
+      if (hit) return structuredClone(hit);
+    }
+    if (keys?.graphMessageId) {
+      const gid = String(keys.graphMessageId).trim();
+      const hit = rows.find((c) => c.sourceMessage?.graphImmutableMessageId === gid);
+      if (hit) return structuredClone(hit);
+    }
+    if (keys?.contentHash) {
+      const ch = String(keys.contentHash).trim();
+      const hit = rows.find(
+        (c) => !c.sourceMessage?.internetMessageId && c.sourceMessage?.contentHash === ch
+      );
+      if (hit) return structuredClone(hit);
+    }
+    return null;
+  }
+
+  /**
+   * @param {{
+   *   organizationId: string,
+   *   intakeCaseId: string,
+   *   eventType: string,
+   *   actorType?: string,
+   *   actorUserId?: string|null,
+   *   metadata?: Record<string, unknown>
+   * }} event
+   */
+  appendAuditEvent(event) {
+    const organizationId = normOrg(event.organizationId);
+    const intakeCaseId = String(event.intakeCaseId ?? "").trim();
+    if (!this.getCase(organizationId, intakeCaseId)) {
+      const err = new Error("Case not found");
+      err.code = "case_not_found";
+      err.statusCode = 404;
+      throw err;
+    }
+    this.#appendAudit({
+      organizationId,
+      intakeCaseId,
+      eventType: String(event.eventType ?? "event").slice(0, 120),
+      actorType: event.actorType === "user" ? AUDIT_ACTOR_TYPE.USER : AUDIT_ACTOR_TYPE.SYSTEM,
+      actorUserId: event.actorUserId ? String(event.actorUserId) : null,
+      metadata: event.metadata ?? {}
+    });
+  }
+
+  /**
    * @param {{
    *   organizationId: string,
    *   createdByUserId?: string|null,
    *   status?: string,
+   *   sourceType?: string,
+   *   mailboxIdentity?: string|null,
+   *   receivedAt?: string|null,
+   *   subjectHash?: string|null,
+   *   bodyCharCount?: number|null,
    *   sourceMessage?: QuoteIntakeSourceMessageMeta,
-   *   attachments?: Array<{ sha256: string, mimeType?: string, sizeBytes?: number, safeFilename?: string }>
+   *   attachments?: Array<{ sha256: string, mimeType?: string, sizeBytes?: number, safeFilename?: string, sourceAttachmentId?: string }>
    * }} input
    */
   createCase(input) {
@@ -154,9 +216,22 @@ export class InMemoryQuoteIntakeRepository {
     const sourceMessage = {
       internetMessageId: String(input.sourceMessage?.internetMessageId ?? "").trim() || undefined,
       contentHash: String(input.sourceMessage?.contentHash ?? "").trim() || undefined,
-      graphMessageIdHash: String(input.sourceMessage?.graphMessageIdHash ?? "").trim() || undefined,
+      graphImmutableMessageId: String(input.sourceMessage?.graphImmutableMessageId ?? "").trim() || undefined,
       fromAddressHash: String(input.sourceMessage?.fromAddressHash ?? "").trim() || undefined
     };
+
+    if (sourceMessage.graphImmutableMessageId) {
+      const byGraph = this.findCaseBySourceKeys(organizationId, {
+        graphMessageId: sourceMessage.graphImmutableMessageId
+      });
+      if (byGraph) {
+        const err = new Error("Duplicate graph message for organization");
+        err.code = "duplicate_message";
+        err.statusCode = 409;
+        err.existingCaseId = byGraph.id;
+        throw err;
+      }
+    }
 
     if (sourceMessage.internetMessageId) {
       const key = `${organizationId}|${sourceMessage.internetMessageId}`;
@@ -186,6 +261,12 @@ export class InMemoryQuoteIntakeRepository {
       ? input.status
       : QUOTE_INTAKE_CASE_STATUS.RECEIVED;
 
+    const sourceType = ["api", "manual", "graph_mailbox", "fixture"].includes(
+      String(input.sourceType ?? "")
+    )
+      ? String(input.sourceType)
+      : "api";
+
     /** @type {Map<string, QuoteIntakeAttachmentMeta>} */
     const bySha = new Map();
     for (const a of input.attachments ?? []) {
@@ -202,7 +283,10 @@ export class InMemoryQuoteIntakeRepository {
           sha256,
           mimeType: a.mimeType ? String(a.mimeType).slice(0, 128) : undefined,
           sizeBytes: Number.isFinite(Number(a.sizeBytes)) ? Number(a.sizeBytes) : undefined,
-          safeFilename: a.safeFilename ? String(a.safeFilename).slice(0, 200) : undefined
+          safeFilename: a.safeFilename ? String(a.safeFilename).slice(0, 200) : undefined,
+          sourceAttachmentId: a.sourceAttachmentId
+            ? String(a.sourceAttachmentId).slice(0, 512)
+            : undefined
         });
       }
     }
@@ -214,6 +298,14 @@ export class InMemoryQuoteIntakeRepository {
       id: randomUUID(),
       organizationId,
       status,
+      sourceType,
+      mailboxIdentity: input.mailboxIdentity ? String(input.mailboxIdentity).slice(0, 320) : null,
+      receivedAt: input.receivedAt ? String(input.receivedAt) : null,
+      subjectHash: input.subjectHash ? String(input.subjectHash).slice(0, 128) : null,
+      bodyCharCount:
+        input.bodyCharCount != null && Number.isFinite(Number(input.bodyCharCount))
+          ? Number(input.bodyCharCount)
+          : null,
       sourceMessage,
       attachments,
       createdAt: ts,
@@ -238,7 +330,8 @@ export class InMemoryQuoteIntakeRepository {
         status: row.status,
         attachmentCount: attachments.length,
         hasInternetMessageId: Boolean(sourceMessage.internetMessageId),
-        hasContentHash: Boolean(sourceMessage.contentHash)
+        hasContentHash: Boolean(sourceMessage.contentHash),
+        sourceType
       }
     });
 

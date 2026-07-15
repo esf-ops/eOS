@@ -297,15 +297,31 @@ async function assertRepoParity(repo) {
   assert.ok(!sql.includes("references public.quote_takeoff_jobs"));
   assert.ok(!/create table[^;]*quote_headers/i.test(sql));
   assert.ok(sql.includes("No changes to quote_headers"));
+  assert.ok(sql.includes("graph_immutable_message_id"));
+  assert.equal(sql.includes("graph_message_id_hash"), false);
+  assert.ok(/char_length\(graph_immutable_message_id\) between 1 and 2048/.test(sql));
   console.log("ok: migration contains RLS, dedupe indexes, no takeoff FK");
 }
 
 // ── Package boundary ────────────────────────────────────────────────────────
 {
+  // Phase 6P.4+ Graph connector files may reference graph.microsoft.com / login.microsoftonline.com.
+  // They remain banned from Takeoff/IE/pricing/delivery/Gemini couplings.
+  const graphAllowed = new Set([
+    "quoteIntakeGraphConfig.mjs",
+    "quoteIntakeGraphToken.mjs",
+    "quoteIntakeGraphClient.mjs",
+    "quoteIntakeGraphNormalize.mjs",
+    "quoteIntakeMailboxService.mjs",
+    "fakeQuoteIntakeGraph.mjs"
+  ]);
   const files = readdirSync(__dirname).filter(
-    (f) => (f.endsWith(".mjs") || f.endsWith(".js")) && !f.includes(".test.")
+    (f) =>
+      (f.endsWith(".mjs") || f.endsWith(".js")) &&
+      !f.includes(".test.") &&
+      !f.startsWith("scripts")
   );
-  const forbidden = [
+  const forbiddenAlways = [
     "internalQuoteTakeoffImport",
     "import-from-takeoff",
     "geminiTakeoffProvider",
@@ -318,17 +334,21 @@ async function assertRepoParity(repo) {
     "quotePersist",
     "quoteCalculator",
     "quoteDelivery",
-    "emailClient",
-    "microsoft",
-    "graph.microsoft"
+    "emailClient"
   ];
+  const forbiddenNonGraph = ["graph.microsoft.com", "login.microsoftonline.com"];
   for (const file of files) {
     const src = readFileSync(join(__dirname, file), "utf8");
-    for (const needle of forbidden) {
+    for (const needle of forbiddenAlways) {
       assert.equal(src.includes(needle), false, `${file} must not reference ${needle}`);
     }
+    if (!graphAllowed.has(file)) {
+      for (const needle of forbiddenNonGraph) {
+        assert.equal(src.includes(needle), false, `${file} must not reference ${needle}`);
+      }
+    }
   }
-  console.log("ok: no Graph/Gemini/Takeoff provider/IE/pricing/delivery deps");
+  console.log("ok: no Takeoff provider/IE/pricing/delivery deps (Graph limited to 6P.4 modules)");
 }
 
 // ── Security audit regressions (6P.2 closeout) ──────────────────────────────

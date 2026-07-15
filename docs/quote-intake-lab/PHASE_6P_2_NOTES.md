@@ -59,7 +59,7 @@
 
 ### `quote_intake_cases`
 
-`id`, `organization_id`, `status` (qil_*), `source_type`, `mailbox_identity`, `graph_message_id_hash`, `internet_message_id`, `content_hash`, `from_address_hash`, `received_at`, `subject_hash`, `body_char_count` (no raw subject/body), `classification_state`, `priority`, `assigned_estimator_user_id`, `created_by_user_id`, `updated_by_user_id`, `lifecycle_state`, `created_at`, `updated_at`
+`id`, `organization_id`, `status` (qil_*), `source_type`, `mailbox_identity`, `graph_immutable_message_id`, `internet_message_id`, `content_hash`, `from_address_hash`, `received_at`, `subject_hash`, `body_char_count` (no raw subject/body), `classification_state`, `priority`, `assigned_estimator_user_id`, `created_by_user_id`, `updated_by_user_id`, `lifecycle_state`, `created_at`, `updated_at`
 
 ### `quote_intake_attachments`
 

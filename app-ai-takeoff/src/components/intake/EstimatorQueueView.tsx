@@ -32,6 +32,7 @@ import type {
 } from "../../lib/quoteIntakeTypes";
 import { EMPTY_QUEUE_FILTER } from "../../lib/quoteIntakeTypes";
 import EstimatorQueueCaseDetail from "./EstimatorQueueCaseDetail";
+import MailboxSyncModal from "./MailboxSyncModal";
 
 type QuoteIntakeApiClient = ReturnType<typeof createQuoteIntakeApiClient>;
 
@@ -81,6 +82,7 @@ export default function EstimatorQueueView({
   const [loadState, setLoadState] = useState<LoadState>({ kind: "idle" });
   const [filter, setFilter] = useState<QuoteIntakeQueueFilter>(EMPTY_QUEUE_FILTER);
   const [refreshTick, setRefreshTick] = useState(0);
+  const [mailboxSyncOpen, setMailboxSyncOpen] = useState(false);
 
   const [detailCase, setDetailCase] = useState<QuoteIntakeCaseDto | null>(null);
   const [auditEvents, setAuditEvents] = useState<QuoteIntakeAuditEventDto[]>([]);
@@ -222,6 +224,16 @@ export default function EstimatorQueueView({
           </p>
         </div>
         <div className="eq-header-actions">
+          {loadState.kind === "ready" && loadState.config?.mailboxSyncEnabled ? (
+            <button
+              type="button"
+              className="eq-btn-secondary"
+              onClick={() => setMailboxSyncOpen(true)}
+              disabled={!authToken}
+            >
+              Sync mailbox
+            </button>
+          ) : null}
           <button
             type="button"
             className="eq-btn-primary"
@@ -232,6 +244,21 @@ export default function EstimatorQueueView({
           </button>
         </div>
       </header>
+
+      {mailboxSyncOpen && authToken ? (
+        <MailboxSyncModal
+          open={mailboxSyncOpen}
+          authToken={authToken}
+          apiClient={client}
+          mailboxDisplay={
+            loadState.kind === "ready"
+              ? (loadState.config?.mailboxDisplay as string | null | undefined) ?? null
+              : null
+          }
+          onClose={() => setMailboxSyncOpen(false)}
+          onImported={() => setRefreshTick((n) => n + 1)}
+        />
+      ) : null}
 
       {loadState.kind === "loading" || loadState.kind === "idle" ? (
         <div className="eq-state" role="status">

@@ -1,9 +1,10 @@
 /**
- * Quote Intake — Phase 6P.1/6P.2 safe config + feature flags.
+ * Quote Intake — Phase 6P.1/6P.2/6P.4 safe config + feature flags.
  * Off-by-default. Never exposes secrets.
  */
 
 import { readQuoteIntakeRepositoryMode } from "./quoteIntakeRepositoryFactory.mjs";
+import { readSafeQuoteIntakeGraphConfig } from "./quoteIntakeGraphConfig.mjs";
 
 /** Env: set exactly "1" to enable API registration and handlers. */
 export const QUOTE_INTAKE_API_ENABLED_ENV = "QUOTE_INTAKE_API_ENABLED";
@@ -32,7 +33,7 @@ export function readQuoteIntakePilotEmails(env = process.env) {
 }
 
 /**
- * Client-safe config. Never includes secrets, tokens, mailbox addresses with credentials, etc.
+ * Client-safe config. Never includes secrets, tokens, or tenant IDs.
  * @param {NodeJS.ProcessEnv} [env]
  */
 export function readSafeQuoteIntakeConfig(env = process.env) {
@@ -42,12 +43,17 @@ export function readSafeQuoteIntakeConfig(env = process.env) {
   } catch {
     repositoryMode = "misconfigured";
   }
+  const graph = readSafeQuoteIntakeGraphConfig(env);
   return Object.freeze({
-    phase: "6P.2",
+    phase: "6P.4",
     quoteIntakeApiEnabled: isQuoteIntakeApiEnabled(env),
     repositoryMode,
-    graphEnabled: false,
-    mailboxSyncEnabled: false,
+    graphEnabled: graph.graphEnabled,
+    mailboxSyncEnabled: graph.mailboxSyncEnabled,
+    graphConfigured: graph.graphConfigured,
+    graphPreviewLimit: graph.previewLimit,
+    graphImportLimit: graph.importLimit,
+    mailboxDisplay: graph.mailboxDisplay,
     automaticTakeoffEnabled: false,
     takeoffInvocationEnabled: false,
     realPlanTransmissionEnabled: false,

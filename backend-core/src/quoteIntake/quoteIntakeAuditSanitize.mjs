@@ -48,7 +48,21 @@ export const PROHIBITED_AUDIT_METADATA_KEYS = Object.freeze([
   "providerPayload",
   "provider_payload",
   "rawEmail",
-  "raw_email"
+  "raw_email",
+  "contentBytes",
+  "content_bytes",
+  "nextLink",
+  "odata.nextlink",
+  "@odata.nextlink",
+  "graphUrl",
+  "graph_url",
+  "attachmentUrl",
+  "attachment_url",
+  "clientSecret",
+  "client_secret",
+  "bearer",
+  "authorizationHeader",
+  "authorization_header"
 ]);
 
 const PROHIBITED_SET = new Set(PROHIBITED_AUDIT_METADATA_KEYS.map((k) => k.toLowerCase()));

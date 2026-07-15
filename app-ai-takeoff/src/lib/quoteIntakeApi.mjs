@@ -81,7 +81,20 @@ export function createQuoteIntakeApiClient(deps = {}) {
     ((path, init) => defaultFetch(path, init, deps.readEnv));
 
   async function get(path, token) {
+    assertQuoteIntakePathAllowed(path);
     return fetchImpl(path, { headers: authHeaders(token) });
+  }
+
+  async function post(path, token, body) {
+    assertQuoteIntakePathAllowed(path);
+    return fetchImpl(path, {
+      method: "POST",
+      headers: {
+        ...authHeaders(token),
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(body ?? {})
+    });
   }
 
   return {
@@ -122,6 +135,27 @@ export function createQuoteIntakeApiClient(deps = {}) {
       throwIfNotOk(res, "Unable to load takeoff links");
       const body = /** @type {{ links?: unknown[] }} */ (res.json);
       return Array.isArray(body?.links) ? body.links : [];
+    },
+
+    /** Explicit human-triggered Graph preview — never called automatically. */
+    async previewMailbox(token) {
+      const res = await post(`${QUOTE_INTAKE_API_PREFIX}/mailbox/preview`, token, {});
+      throwIfNotOk(res, "Unable to preview mailbox");
+      return /** @type {Record<string, unknown>} */ (res.json) ?? {};
+    },
+
+    /**
+     * Explicit confirmed import of refetch'd messages.
+     * @param {string} token
+     * @param {{ messageIds: string[], confirm: true }} body
+     */
+    async importMailboxMessages(token, body) {
+      const res = await post(`${QUOTE_INTAKE_API_PREFIX}/mailbox/import`, token, {
+        messageIds: body?.messageIds ?? [],
+        confirm: body?.confirm === true
+      });
+      throwIfNotOk(res, "Unable to import mailbox messages");
+      return /** @type {Record<string, unknown>} */ (res.json) ?? {};
     }
   };
 }
@@ -159,7 +193,9 @@ export function classifyQuoteIntakeError(err) {
 export const QUOTE_INTAKE_ALLOWED_PATH_PREFIXES = [
   `${QUOTE_INTAKE_API_PREFIX}/config`,
   `${QUOTE_INTAKE_API_PREFIX}/health`,
-  `${QUOTE_INTAKE_API_PREFIX}/cases`
+  `${QUOTE_INTAKE_API_PREFIX}/cases`,
+  `${QUOTE_INTAKE_API_PREFIX}/mailbox/preview`,
+  `${QUOTE_INTAKE_API_PREFIX}/mailbox/import`
 ];
 
 export function assertQuoteIntakePathAllowed(path) {

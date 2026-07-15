@@ -3,7 +3,7 @@
 export type QuoteIntakeSourceMessageDto = {
   internetMessageId?: string;
   contentHash?: string;
-  graphMessageIdHash?: string;
+  graphImmutableMessageId?: string;
   fromAddressHash?: string;
 };
 
@@ -92,6 +92,10 @@ export type QuoteIntakeSafeConfig = {
   repositoryMode?: string;
   graphEnabled?: boolean;
   mailboxSyncEnabled?: boolean;
+  graphConfigured?: boolean;
+  graphPreviewLimit?: number;
+  graphImportLimit?: number;
+  mailboxDisplay?: string | null;
   automaticTakeoffEnabled?: boolean;
   takeoffInvocationEnabled?: boolean;
   realPlanTransmissionEnabled?: boolean;

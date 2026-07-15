@@ -86,7 +86,13 @@ create table if not exists public.quote_intake_cases (
   source_type text not null default 'api'
     check (source_type in ('api', 'manual', 'graph_mailbox', 'fixture')),
   mailbox_identity text,
-  graph_message_id_hash text,
+  -- Opaque Microsoft Graph ImmutableId (IdType=ImmutableId), not a content hash.
+  -- text supports long opaque IDs; length bounded for safety.
+  graph_immutable_message_id text
+    check (
+      graph_immutable_message_id is null
+      or char_length(graph_immutable_message_id) between 1 and 2048
+    ),
   internet_message_id text,
   content_hash text,
   from_address_hash text,

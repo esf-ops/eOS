@@ -58,10 +58,15 @@ function mapCaseRow(row, attachments = []) {
     id: row.id,
     organizationId: row.organization_id,
     status: row.status,
+    sourceType: row.source_type || undefined,
+    mailboxIdentity: row.mailbox_identity || null,
+    receivedAt: row.received_at || null,
+    subjectHash: row.subject_hash || null,
+    bodyCharCount: row.body_char_count == null ? null : Number(row.body_char_count),
     sourceMessage: {
       internetMessageId: row.internet_message_id || undefined,
       contentHash: row.content_hash || undefined,
-      graphMessageIdHash: row.graph_message_id_hash || undefined,
+      graphImmutableMessageId: row.graph_immutable_message_id || undefined,
       fromAddressHash: row.from_address_hash || undefined
     },
     attachments: attachments.map((a) => ({
@@ -69,7 +74,8 @@ function mapCaseRow(row, attachments = []) {
       sha256: a.sha256,
       mimeType: a.mime_type || undefined,
       sizeBytes: a.size_bytes == null ? undefined : Number(a.size_bytes),
-      safeFilename: a.safe_filename || undefined
+      safeFilename: a.safe_filename || undefined,
+      sourceAttachmentId: a.source_attachment_id || undefined
     })),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -171,7 +177,9 @@ export class SupabaseQuoteIntakeRepository {
   async #loadAttachments(organizationId, caseId) {
     const { data, error } = await this.db()
       .from("quote_intake_attachments")
-      .select("id,sha256,mime_type,size_bytes,safe_filename,intake_case_id,organization_id")
+      .select(
+        "id,sha256,mime_type,size_bytes,safe_filename,source_attachment_id,intake_case_id,organization_id"
+      )
       .eq("organization_id", organizationId)
       .eq("intake_case_id", caseId);
     if (error) throw toRepoError(error, "loadAttachments");
@@ -193,7 +201,81 @@ export class SupabaseQuoteIntakeRepository {
     if (error) throw toRepoError(error, "appendAudit");
   }
 
+  async appendAuditEvent(event) {
+    const organizationId = normOrg(event.organizationId);
+    const intakeCaseId = String(event.intakeCaseId ?? "").trim();
+    if (!(await this.getCase(organizationId, intakeCaseId))) {
+      const err = new Error("Case not found");
+      err.code = "case_not_found";
+      err.statusCode = 404;
+      throw err;
+    }
+    await this.#appendAudit({
+      organizationId,
+      intakeCaseId,
+      eventType: String(event.eventType ?? "event").slice(0, 120),
+      actorType: event.actorType === "user" ? AUDIT_ACTOR_TYPE.USER : AUDIT_ACTOR_TYPE.SYSTEM,
+      actorUserId: event.actorUserId ? String(event.actorUserId) : null,
+      metadata: event.metadata ?? {}
+    });
+  }
+
+  async findCaseBySourceKeys(organizationId, keys) {
+    const org = normOrg(organizationId);
+    if (keys?.internetMessageId) {
+      const { data, error } = await this.db()
+        .from("quote_intake_cases")
+        .select("*")
+        .eq("organization_id", org)
+        .eq("internet_message_id", String(keys.internetMessageId).trim())
+        .maybeSingle();
+      if (error) throw toRepoError(error, "findByInternetMessageId");
+      if (data) {
+        const attachments = await this.#loadAttachments(org, data.id);
+        return mapCaseRow(data, attachments);
+      }
+    }
+    if (keys?.graphMessageId) {
+      const { data, error } = await this.db()
+        .from("quote_intake_cases")
+        .select("*")
+        .eq("organization_id", org)
+        .eq("graph_immutable_message_id", String(keys.graphMessageId).trim())
+        .maybeSingle();
+      if (error) throw toRepoError(error, "findByGraphMessageId");
+      if (data) {
+        const attachments = await this.#loadAttachments(org, data.id);
+        return mapCaseRow(data, attachments);
+      }
+    }
+    if (keys?.contentHash) {
+      const { data, error } = await this.db()
+        .from("quote_intake_cases")
+        .select("*")
+        .eq("organization_id", org)
+        .eq("content_hash", String(keys.contentHash).trim());
+      if (error) throw toRepoError(error, "findByContentHash");
+      const match = (data ?? []).find((row) => !String(row.internet_message_id ?? "").trim());
+      if (match) {
+        const attachments = await this.#loadAttachments(org, match.id);
+        return mapCaseRow(match, attachments);
+      }
+    }
+    return null;
+  }
+
   async #findExistingByDedupe(organizationId, sourceMessage) {
+    // Graph ImmutableId linkage (stored in graph_immutable_message_id).
+    if (sourceMessage.graphImmutableMessageId) {
+      const { data, error } = await this.db()
+        .from("quote_intake_cases")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .eq("graph_immutable_message_id", sourceMessage.graphImmutableMessageId)
+        .maybeSingle();
+      if (error) throw toRepoError(error, "dedupeLookupGraphId");
+      if (data) return data;
+    }
     // Primary: internetMessageId when present (authoritative).
     if (sourceMessage.internetMessageId) {
       const { data, error } = await this.db()
@@ -235,13 +317,14 @@ export class SupabaseQuoteIntakeRepository {
     const sourceMessage = {
       internetMessageId: String(input.sourceMessage?.internetMessageId ?? "").trim() || null,
       contentHash: String(input.sourceMessage?.contentHash ?? "").trim() || null,
-      graphMessageIdHash: String(input.sourceMessage?.graphMessageIdHash ?? "").trim() || null,
+      graphImmutableMessageId: String(input.sourceMessage?.graphImmutableMessageId ?? "").trim() || null,
       fromAddressHash: String(input.sourceMessage?.fromAddressHash ?? "").trim() || null
     };
 
     const existing = await this.#findExistingByDedupe(organizationId, {
       internetMessageId: sourceMessage.internetMessageId || undefined,
-      contentHash: sourceMessage.contentHash || undefined
+      contentHash: sourceMessage.contentHash || undefined,
+      graphImmutableMessageId: sourceMessage.graphImmutableMessageId || undefined
     });
     if (existing) {
       const err = new Error("Duplicate message for organization");
@@ -255,6 +338,12 @@ export class SupabaseQuoteIntakeRepository {
       input.status && isQuoteIntakeCaseStatus(input.status)
         ? input.status
         : QUOTE_INTAKE_CASE_STATUS.RECEIVED;
+
+    const sourceType = ["api", "manual", "graph_mailbox", "fixture"].includes(
+      String(input.sourceType ?? "")
+    )
+      ? String(input.sourceType)
+      : "api";
 
     /** @type {Map<string, object>} */
     const attachmentBySha = new Map();
@@ -271,7 +360,10 @@ export class SupabaseQuoteIntakeRepository {
           sha256,
           mime_type: a.mimeType ? String(a.mimeType).slice(0, 128) : null,
           size_bytes: Number.isFinite(Number(a.sizeBytes)) ? Number(a.sizeBytes) : null,
-          safe_filename: a.safeFilename ? String(a.safeFilename).slice(0, 200) : null
+          safe_filename: a.safeFilename ? String(a.safeFilename).slice(0, 200) : null,
+          source_attachment_id: a.sourceAttachmentId
+            ? String(a.sourceAttachmentId).slice(0, 512)
+            : null
         });
       }
     }
@@ -279,10 +371,17 @@ export class SupabaseQuoteIntakeRepository {
     const insertRow = {
       organization_id: organizationId,
       status,
-      source_type: "api",
+      source_type: sourceType,
+      mailbox_identity: input.mailboxIdentity ? String(input.mailboxIdentity).slice(0, 320) : null,
+      received_at: input.receivedAt ? String(input.receivedAt) : null,
+      subject_hash: input.subjectHash ? String(input.subjectHash).slice(0, 128) : null,
+      body_char_count:
+        input.bodyCharCount != null && Number.isFinite(Number(input.bodyCharCount))
+          ? Number(input.bodyCharCount)
+          : null,
       internet_message_id: sourceMessage.internetMessageId,
       content_hash: sourceMessage.contentHash,
-      graph_message_id_hash: sourceMessage.graphMessageIdHash,
+      graph_immutable_message_id: sourceMessage.graphImmutableMessageId,
       from_address_hash: sourceMessage.fromAddressHash,
       created_by_user_id: input.createdByUserId ? String(input.createdByUserId) : null
     };
@@ -297,7 +396,8 @@ export class SupabaseQuoteIntakeRepository {
       if (isUniqueViolation(caseError)) {
         const raced = await this.#findExistingByDedupe(organizationId, {
           internetMessageId: sourceMessage.internetMessageId || undefined,
-          contentHash: sourceMessage.contentHash || undefined
+          contentHash: sourceMessage.contentHash || undefined,
+          graphImmutableMessageId: sourceMessage.graphImmutableMessageId || undefined
         });
         const err = new Error("Duplicate message for organization");
         err.code = "duplicate_message";
@@ -331,7 +431,8 @@ export class SupabaseQuoteIntakeRepository {
         status,
         attachmentCount: attachmentRows.length,
         hasInternetMessageId: Boolean(sourceMessage.internetMessageId),
-        hasContentHash: Boolean(sourceMessage.contentHash)
+        hasContentHash: Boolean(sourceMessage.contentHash),
+        sourceType
       }
     });
 
