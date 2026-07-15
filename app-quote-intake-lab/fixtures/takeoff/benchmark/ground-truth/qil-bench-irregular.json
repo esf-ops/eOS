@@ -1,0 +1,63 @@
+{
+  "schemaVersion": "qil_bench_ground_truth_v1",
+  "fixtureId": "qil-bench-irregular",
+  "version": "1.0.0",
+  "filename": "qil-bench-irregular.pdf",
+  "mimeType": "application/pdf",
+  "contentHash": "20cf390b374a0eb81febd9c3e6772cf6db06c3517866e14d232abd09fdfbae2d",
+  "sizeBytes": 1505,
+  "project": {
+    "name": "Benchmark Fixture — Irregular Geometry",
+    "customer": "Example Irregular LLC (synthetic)",
+    "address": "8 Example Irregular Ct, Exampleville, EX 00008",
+    "synthetic": true,
+    "banner": "SYNTHETIC QUOTE INTAKE LAB FIXTURE — NOT A REAL CUSTOMER PLAN"
+  },
+  "pages": [
+    {
+      "pageNumber": 1,
+      "role": "plan"
+    }
+  ],
+  "rooms": [
+    {
+      "id": "qil-bench-ir-room-kitchen",
+      "name": "Kitchen",
+      "pieces": [
+        {
+          "id": "qil-bench-ir-piece-cove",
+          "label": "Counter with curved cove",
+          "lengthIn": 72,
+          "depthIn": 36,
+          "shape": "rect",
+          "pieceType": "counter",
+          "cutouts": []
+        }
+      ],
+      "backsplash": {
+        "scope": "no_stone",
+        "linearIn": null,
+        "heightIn": null
+      }
+    }
+  ],
+  "expected": {
+    "countertopSf": 18,
+    "backsplashSf": 0,
+    "fhbSf": 0,
+    "combinedSf": 18,
+    "sinkCount": 0,
+    "state": "qil_takeoff_manual_review",
+    "warningCodes": [
+      "UNSUPPORTED_GEOMETRY"
+    ],
+    "readyForReview": false
+  },
+  "toleranceSf": 0.05,
+  "notes": [
+    "Offline benchmark fixture — Curved cove — UNSUPPORTED_GEOMETRY approval_blocking → manual_review.",
+    "No real customer information.",
+    "Sink cutouts are count-only and must never be deducted from measured SF.",
+    "eliteOS deterministic calc is authoritative for measured SF."
+  ]
+}

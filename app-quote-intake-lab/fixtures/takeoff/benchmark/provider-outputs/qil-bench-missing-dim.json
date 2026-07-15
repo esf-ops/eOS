@@ -1,0 +1,101 @@
+{
+  "schemaVersion": "qil_bench_provider_output_v1",
+  "fixtureId": "qil-bench-missing-dim",
+  "version": "1.0.0",
+  "inventory": {
+    "pageCount": 1,
+    "pages": [
+      {
+        "pageNumber": 1,
+        "role": "plan",
+        "notes": [
+          "Benchmark fixture — missing depth"
+        ]
+      }
+    ],
+    "countertopContentPresent": true,
+    "dimensionsAppearReadable": false,
+    "roomLabelsVisible": [
+      "Kitchen"
+    ],
+    "confidence": "low",
+    "warnings": [
+      {
+        "code": "UNREADABLE_DIMENSION",
+        "severity": "estimator_review",
+        "message": "Depth dimension unreadable on main run."
+      }
+    ]
+  },
+  "evidence": {
+    "evidence": [
+      {
+        "id": "ev-md-l",
+        "pageNumber": 1,
+        "label": "Main run length",
+        "value": 90,
+        "unit": "in",
+        "confidence": "medium",
+        "locationNote": "Plan text label",
+        "bboxNorm": {
+          "x": 0.1,
+          "y": 0.2,
+          "w": 0.3,
+          "h": 0.05
+        }
+      }
+    ],
+    "warnings": [
+      {
+        "code": "MISSING_EVIDENCE",
+        "severity": "estimator_review",
+        "message": "Depth evidence not found."
+      }
+    ]
+  },
+  "geometry": {
+    "pages": [
+      {
+        "pageNumber": 1,
+        "role": "plan",
+        "notes": []
+      }
+    ],
+    "rooms": [
+      {
+        "id": "qil-bench-md-room-kitchen",
+        "name": "Kitchen",
+        "confidence": "low",
+        "sourcePages": [
+          1
+        ],
+        "backsplashScope": "no_stone",
+        "pieces": [
+          {
+            "id": "qil-bench-md-piece-main",
+            "label": "Main run",
+            "lengthIn": 90,
+            "depthIn": null,
+            "shape": "rect",
+            "pieceType": "counter",
+            "evidenceIds": [
+              "ev-md-l"
+            ],
+            "cutouts": [],
+            "notes": [
+              "Depth dimension unreadable on plan"
+            ],
+            "requiresEstimatorReview": true
+          }
+        ]
+      }
+    ],
+    "providerProposedTotals": null,
+    "confidence": "low",
+    "missingDimensions": [
+      "Main run depth unreadable — manual measurement required"
+    ],
+    "contradictions": [],
+    "warnings": []
+  }
+}

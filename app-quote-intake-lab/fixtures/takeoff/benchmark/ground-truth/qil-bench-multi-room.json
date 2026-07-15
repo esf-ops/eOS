@@ -1,0 +1,93 @@
+{
+  "schemaVersion": "qil_bench_ground_truth_v1",
+  "fixtureId": "qil-bench-multi-room",
+  "version": "1.0.0",
+  "filename": "qil-bench-multi-room.pdf",
+  "mimeType": "application/pdf",
+  "contentHash": "cb2b53c765436b254bdd186f95806dec81d8e59105b2a5b7ff5c7b09ed93e694",
+  "sizeBytes": 1769,
+  "project": {
+    "name": "Benchmark Fixture — Multi-Room Kitchen + Bath",
+    "customer": "Example Multi LLC (synthetic)",
+    "address": "4 Example Multi Dr, Exampleville, EX 00004",
+    "synthetic": true,
+    "banner": "SYNTHETIC QUOTE INTAKE LAB FIXTURE — NOT A REAL CUSTOMER PLAN"
+  },
+  "pages": [
+    {
+      "pageNumber": 1,
+      "role": "plan"
+    }
+  ],
+  "rooms": [
+    {
+      "id": "qil-bench-mr-room-kitchen",
+      "name": "Kitchen",
+      "pieces": [
+        {
+          "id": "qil-bench-mr-piece-k-main",
+          "label": "Main run",
+          "lengthIn": 120,
+          "depthIn": 25.5,
+          "shape": "rect",
+          "pieceType": "counter",
+          "cutouts": [
+            {
+              "type": "sink",
+              "label": "Undermount sink"
+            }
+          ]
+        }
+      ],
+      "backsplash": {
+        "scope": "no_stone",
+        "linearIn": null,
+        "heightIn": null
+      }
+    },
+    {
+      "id": "qil-bench-mr-room-bath",
+      "name": "Bath",
+      "pieces": [
+        {
+          "id": "qil-bench-mr-piece-b-vanity",
+          "label": "Vanity",
+          "lengthIn": 60,
+          "depthIn": 22,
+          "shape": "rect",
+          "pieceType": "counter",
+          "cutouts": [
+            {
+              "type": "sink",
+              "label": "Undermount sink"
+            }
+          ]
+        }
+      ],
+      "backsplash": {
+        "scope": "no_stone",
+        "linearIn": null,
+        "heightIn": null
+      }
+    }
+  ],
+  "expected": {
+    "countertopSf": 30.42,
+    "backsplashSf": 0,
+    "fhbSf": 0,
+    "combinedSf": 30.42,
+    "sinkCount": 2,
+    "state": "qil_takeoff_review",
+    "warningCodes": [
+      "PROVIDER_TOTALS_NON_AUTHORITATIVE"
+    ],
+    "readyForReview": true
+  },
+  "toleranceSf": 0.05,
+  "notes": [
+    "Offline benchmark fixture — Kitchen + Bath vanity. Two rooms, two sinks, no backsplash.",
+    "No real customer information.",
+    "Sink cutouts are count-only and must never be deducted from measured SF.",
+    "eliteOS deterministic calc is authoritative for measured SF."
+  ]
+}

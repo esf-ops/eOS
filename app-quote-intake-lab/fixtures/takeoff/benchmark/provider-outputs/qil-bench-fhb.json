@@ -1,0 +1,151 @@
+{
+  "schemaVersion": "qil_bench_provider_output_v1",
+  "fixtureId": "qil-bench-fhb",
+  "version": "1.0.0",
+  "inventory": {
+    "pageCount": 1,
+    "pages": [
+      {
+        "pageNumber": 1,
+        "role": "plan",
+        "notes": [
+          "Benchmark fixture — FHB"
+        ]
+      }
+    ],
+    "countertopContentPresent": true,
+    "dimensionsAppearReadable": true,
+    "roomLabelsVisible": [
+      "Kitchen"
+    ],
+    "confidence": "high",
+    "warnings": []
+  },
+  "evidence": {
+    "evidence": [
+      {
+        "id": "ev-fhb-ct-l",
+        "pageNumber": 1,
+        "label": "Counter length",
+        "value": 60,
+        "unit": "in",
+        "confidence": "high",
+        "locationNote": "Plan text label",
+        "bboxNorm": {
+          "x": 0.1,
+          "y": 0.2,
+          "w": 0.3,
+          "h": 0.05
+        }
+      },
+      {
+        "id": "ev-fhb-ct-d",
+        "pageNumber": 1,
+        "label": "Counter depth",
+        "value": 25.5,
+        "unit": "in",
+        "confidence": "high",
+        "locationNote": "Plan text label",
+        "bboxNorm": {
+          "x": 0.1,
+          "y": 0.25,
+          "w": 0.3,
+          "h": 0.05
+        }
+      },
+      {
+        "id": "ev-fhb-fhb-l",
+        "pageNumber": 1,
+        "label": "FHB panel length",
+        "value": 60,
+        "unit": "in",
+        "confidence": "high",
+        "locationNote": "Plan text label",
+        "bboxNorm": {
+          "x": 0.5,
+          "y": 0.2,
+          "w": 0.3,
+          "h": 0.05
+        }
+      },
+      {
+        "id": "ev-fhb-fhb-d",
+        "pageNumber": 1,
+        "label": "FHB panel height",
+        "value": 48,
+        "unit": "in",
+        "confidence": "high",
+        "locationNote": "Plan text label",
+        "bboxNorm": {
+          "x": 0.5,
+          "y": 0.25,
+          "w": 0.3,
+          "h": 0.05
+        }
+      }
+    ],
+    "warnings": []
+  },
+  "geometry": {
+    "pages": [
+      {
+        "pageNumber": 1,
+        "role": "plan",
+        "notes": []
+      }
+    ],
+    "rooms": [
+      {
+        "id": "qil-bench-fhb-room-kitchen",
+        "name": "Kitchen",
+        "confidence": "high",
+        "sourcePages": [
+          1
+        ],
+        "backsplashScope": "no_stone",
+        "pieces": [
+          {
+            "id": "qil-bench-fhb-piece-counter",
+            "label": "Counter",
+            "lengthIn": 60,
+            "depthIn": 25.5,
+            "shape": "rect",
+            "pieceType": "counter",
+            "evidenceIds": [
+              "ev-fhb-ct-l",
+              "ev-fhb-ct-d"
+            ],
+            "cutouts": [],
+            "notes": [],
+            "requiresEstimatorReview": false
+          },
+          {
+            "id": "qil-bench-fhb-piece-fhb",
+            "label": "Full-height backsplash panel",
+            "lengthIn": 60,
+            "depthIn": 48,
+            "shape": "rect",
+            "pieceType": "fhb",
+            "evidenceIds": [
+              "ev-fhb-fhb-l",
+              "ev-fhb-fhb-d"
+            ],
+            "cutouts": [],
+            "notes": [],
+            "requiresEstimatorReview": false
+          }
+        ]
+      }
+    ],
+    "providerProposedTotals": {
+      "countertopSf": 10.63,
+      "backsplashSf": 0,
+      "combinedSf": 30.63,
+      "nonAuthoritative": true
+    },
+    "confidence": "high",
+    "missingDimensions": [],
+    "contradictions": [],
+    "warnings": []
+  }
+}

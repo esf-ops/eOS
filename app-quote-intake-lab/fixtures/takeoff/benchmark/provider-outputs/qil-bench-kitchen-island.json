@@ -1,0 +1,189 @@
+{
+  "schemaVersion": "qil_bench_provider_output_v1",
+  "fixtureId": "qil-bench-kitchen-island",
+  "version": "1.0.0",
+  "inventory": {
+    "pageCount": 1,
+    "pages": [
+      {
+        "pageNumber": 1,
+        "role": "plan",
+        "notes": [
+          "Synthetic kitchen plan"
+        ]
+      }
+    ],
+    "countertopContentPresent": true,
+    "dimensionsAppearReadable": true,
+    "roomLabelsVisible": [
+      "Kitchen"
+    ],
+    "confidence": "high",
+    "warnings": []
+  },
+  "evidence": {
+    "evidence": [
+      {
+        "id": "ev-ki-main-l",
+        "pageNumber": 1,
+        "label": "Main run length",
+        "value": 120,
+        "unit": "in",
+        "confidence": "high",
+        "locationNote": "Plan text label",
+        "bboxNorm": {
+          "x": 0.1,
+          "y": 0.2,
+          "w": 0.4,
+          "h": 0.05
+        }
+      },
+      {
+        "id": "ev-ki-main-d",
+        "pageNumber": 1,
+        "label": "Main run depth",
+        "value": 25.5,
+        "unit": "in",
+        "confidence": "high",
+        "locationNote": "Plan text label",
+        "bboxNorm": {
+          "x": 0.1,
+          "y": 0.25,
+          "w": 0.3,
+          "h": 0.05
+        }
+      },
+      {
+        "id": "ev-ki-island-l",
+        "pageNumber": 1,
+        "label": "Island length",
+        "value": 72,
+        "unit": "in",
+        "confidence": "high",
+        "locationNote": "Plan text label",
+        "bboxNorm": {
+          "x": 0.1,
+          "y": 0.4,
+          "w": 0.3,
+          "h": 0.05
+        }
+      },
+      {
+        "id": "ev-ki-island-d",
+        "pageNumber": 1,
+        "label": "Island depth",
+        "value": 36,
+        "unit": "in",
+        "confidence": "high",
+        "locationNote": "Plan text label",
+        "bboxNorm": {
+          "x": 0.1,
+          "y": 0.45,
+          "w": 0.3,
+          "h": 0.05
+        }
+      },
+      {
+        "id": "ev-ki-splash-h",
+        "pageNumber": 1,
+        "label": "Backsplash height",
+        "value": 4,
+        "unit": "in",
+        "confidence": "high",
+        "locationNote": "Fixture annotation",
+        "bboxNorm": {
+          "x": 0.1,
+          "y": 0.55,
+          "w": 0.2,
+          "h": 0.04
+        }
+      },
+      {
+        "id": "ev-ki-sink",
+        "pageNumber": 1,
+        "label": "Sink cutout",
+        "value": 1,
+        "unit": "count",
+        "confidence": "high",
+        "locationNote": "Fixture annotation",
+        "bboxNorm": {
+          "x": 0.3,
+          "y": 0.22,
+          "w": 0.1,
+          "h": 0.04
+        }
+      }
+    ],
+    "warnings": []
+  },
+  "geometry": {
+    "pages": [
+      {
+        "pageNumber": 1,
+        "role": "plan",
+        "notes": []
+      }
+    ],
+    "rooms": [
+      {
+        "id": "qil-room-kitchen",
+        "name": "Kitchen",
+        "confidence": "high",
+        "sourcePages": [
+          1
+        ],
+        "backsplashScope": "standard",
+        "backsplashLinearIn": 120,
+        "backsplashHeightIn": 4,
+        "pieces": [
+          {
+            "id": "qil-piece-main-run",
+            "label": "Main run",
+            "lengthIn": 120,
+            "depthIn": 25.5,
+            "shape": "rect",
+            "pieceType": "counter",
+            "evidenceIds": [
+              "ev-ki-main-l",
+              "ev-ki-main-d",
+              "ev-ki-sink"
+            ],
+            "cutouts": [
+              {
+                "type": "sink",
+                "label": "Undermount sink"
+              }
+            ],
+            "notes": [],
+            "requiresEstimatorReview": false
+          },
+          {
+            "id": "qil-piece-island",
+            "label": "Island",
+            "lengthIn": 72,
+            "depthIn": 36,
+            "shape": "rect",
+            "pieceType": "counter",
+            "evidenceIds": [
+              "ev-ki-island-l",
+              "ev-ki-island-d"
+            ],
+            "cutouts": [],
+            "notes": [],
+            "requiresEstimatorReview": false
+          }
+        ]
+      }
+    ],
+    "providerProposedTotals": {
+      "countertopSf": 39.25,
+      "backsplashSf": 3.33,
+      "combinedSf": 42.58,
+      "nonAuthoritative": true
+    },
+    "confidence": "high",
+    "missingDimensions": [],
+    "contradictions": [],
+    "warnings": []
+  }
+}

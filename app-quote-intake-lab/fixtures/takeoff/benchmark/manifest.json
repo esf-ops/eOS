@@ -1,0 +1,95 @@
+{
+  "schemaVersion": "qil_bench_manifest_v1",
+  "generatedAt": "2026-07-15T15:33:06.637Z",
+  "fixtureCount": 8,
+  "fixtures": [
+    {
+      "fixtureId": "qil-bench-straight",
+      "version": "1.0.0",
+      "filename": "qil-bench-straight.pdf",
+      "contentHash": "85548a59b49ee2dcea30d6136e1513fa1c48532adc5855d765ff9176f9ca045c",
+      "sizeBytes": 1556,
+      "expectedState": "qil_takeoff_review",
+      "readyForReview": true,
+      "groundTruthPath": "ground-truth/qil-bench-straight.json",
+      "providerOutputPath": "provider-outputs/qil-bench-straight.json"
+    },
+    {
+      "fixtureId": "qil-bench-l-shape",
+      "version": "1.0.0",
+      "filename": "qil-bench-l-shape.pdf",
+      "contentHash": "e40aa408b1026cfa1bc48945cd6273ebfb4094bad5fa693e9226f677416e869a",
+      "sizeBytes": 1825,
+      "expectedState": "qil_takeoff_review",
+      "readyForReview": true,
+      "groundTruthPath": "ground-truth/qil-bench-l-shape.json",
+      "providerOutputPath": "provider-outputs/qil-bench-l-shape.json"
+    },
+    {
+      "fixtureId": "qil-bench-kitchen-island",
+      "version": "1.0.0",
+      "filename": "qil-bench-kitchen-island.pdf",
+      "contentHash": "0833ca1afd77665f24590158535e90b60b6e78d3e176de6a34a336d97deae9cb",
+      "sizeBytes": 2272,
+      "expectedState": "qil_takeoff_review",
+      "readyForReview": true,
+      "groundTruthPath": "ground-truth/qil-bench-kitchen-island.json",
+      "providerOutputPath": "provider-outputs/qil-bench-kitchen-island.json"
+    },
+    {
+      "fixtureId": "qil-bench-multi-room",
+      "version": "1.0.0",
+      "filename": "qil-bench-multi-room.pdf",
+      "contentHash": "cb2b53c765436b254bdd186f95806dec81d8e59105b2a5b7ff5c7b09ed93e694",
+      "sizeBytes": 1769,
+      "expectedState": "qil_takeoff_review",
+      "readyForReview": true,
+      "groundTruthPath": "ground-truth/qil-bench-multi-room.json",
+      "providerOutputPath": "provider-outputs/qil-bench-multi-room.json"
+    },
+    {
+      "fixtureId": "qil-bench-fhb",
+      "version": "1.0.0",
+      "filename": "qil-bench-fhb.pdf",
+      "contentHash": "4638dc3d4c69f72b363dec090769ec3672a7bbd6f56d37f2512c8decef98391e",
+      "sizeBytes": 1759,
+      "expectedState": "qil_takeoff_review",
+      "readyForReview": true,
+      "groundTruthPath": "ground-truth/qil-bench-fhb.json",
+      "providerOutputPath": "provider-outputs/qil-bench-fhb.json"
+    },
+    {
+      "fixtureId": "qil-bench-missing-dim",
+      "version": "1.0.0",
+      "filename": "qil-bench-missing-dim.pdf",
+      "contentHash": "2c2ef3effe054bf88ee8aa6e0c8c2ef90b032c91f1e58d37050038f3fdf73a3b",
+      "sizeBytes": 1384,
+      "expectedState": "qil_takeoff_manual_review",
+      "readyForReview": false,
+      "groundTruthPath": "ground-truth/qil-bench-missing-dim.json",
+      "providerOutputPath": "provider-outputs/qil-bench-missing-dim.json"
+    },
+    {
+      "fixtureId": "qil-bench-conflict",
+      "version": "1.0.0",
+      "filename": "qil-bench-conflict.pdf",
+      "contentHash": "8859e556ce5089fd16ff45fc0663c30c6d4ccd9e3809923d2b2fe5cf446c5413",
+      "sizeBytes": 1644,
+      "expectedState": "qil_takeoff_manual_review",
+      "readyForReview": false,
+      "groundTruthPath": "ground-truth/qil-bench-conflict.json",
+      "providerOutputPath": "provider-outputs/qil-bench-conflict.json"
+    },
+    {
+      "fixtureId": "qil-bench-irregular",
+      "version": "1.0.0",
+      "filename": "qil-bench-irregular.pdf",
+      "contentHash": "20cf390b374a0eb81febd9c3e6772cf6db06c3517866e14d232abd09fdfbae2d",
+      "sizeBytes": 1505,
+      "expectedState": "qil_takeoff_manual_review",
+      "readyForReview": false,
+      "groundTruthPath": "ground-truth/qil-bench-irregular.json",
+      "providerOutputPath": "provider-outputs/qil-bench-irregular.json"
+    }
+  ]
+}

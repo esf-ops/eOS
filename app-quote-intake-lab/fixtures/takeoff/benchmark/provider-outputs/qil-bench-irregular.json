@@ -1,0 +1,115 @@
+{
+  "schemaVersion": "qil_bench_provider_output_v1",
+  "fixtureId": "qil-bench-irregular",
+  "version": "1.0.0",
+  "inventory": {
+    "pageCount": 1,
+    "pages": [
+      {
+        "pageNumber": 1,
+        "role": "plan",
+        "notes": [
+          "Benchmark fixture — irregular geometry"
+        ]
+      }
+    ],
+    "countertopContentPresent": true,
+    "dimensionsAppearReadable": true,
+    "roomLabelsVisible": [
+      "Kitchen"
+    ],
+    "confidence": "low",
+    "warnings": []
+  },
+  "evidence": {
+    "evidence": [
+      {
+        "id": "ev-ir-l",
+        "pageNumber": 1,
+        "label": "Counter approx length",
+        "value": 72,
+        "unit": "in",
+        "confidence": "low",
+        "locationNote": "Plan text label",
+        "bboxNorm": {
+          "x": 0.1,
+          "y": 0.2,
+          "w": 0.3,
+          "h": 0.05
+        }
+      },
+      {
+        "id": "ev-ir-d",
+        "pageNumber": 1,
+        "label": "Counter approx depth",
+        "value": 36,
+        "unit": "in",
+        "confidence": "low",
+        "locationNote": "Plan text label",
+        "bboxNorm": {
+          "x": 0.1,
+          "y": 0.25,
+          "w": 0.3,
+          "h": 0.05
+        }
+      }
+    ],
+    "warnings": [
+      {
+        "code": "IRREGULAR_GEOMETRY",
+        "severity": "estimator_review",
+        "message": "Curved cove shape may not be accurately represented by rectangular dimensions."
+      }
+    ]
+  },
+  "geometry": {
+    "pages": [
+      {
+        "pageNumber": 1,
+        "role": "plan",
+        "notes": []
+      }
+    ],
+    "rooms": [
+      {
+        "id": "qil-bench-ir-room-kitchen",
+        "name": "Kitchen",
+        "confidence": "low",
+        "sourcePages": [
+          1
+        ],
+        "backsplashScope": "no_stone",
+        "pieces": [
+          {
+            "id": "qil-bench-ir-piece-cove",
+            "label": "Counter with curved cove",
+            "lengthIn": 72,
+            "depthIn": 36,
+            "shape": "rect",
+            "pieceType": "counter",
+            "evidenceIds": [
+              "ev-ir-l",
+              "ev-ir-d"
+            ],
+            "cutouts": [],
+            "notes": [
+              "Irregular curved cove — unsupported geometry; manual takeoff required"
+            ],
+            "requiresEstimatorReview": true
+          }
+        ]
+      }
+    ],
+    "providerProposedTotals": null,
+    "confidence": "low",
+    "missingDimensions": [],
+    "contradictions": [],
+    "warnings": [
+      {
+        "code": "UNSUPPORTED_GEOMETRY",
+        "severity": "approval_blocking",
+        "message": "Irregular geometry (curved cove) requires manual takeoff — automated measurement not authoritative."
+      }
+    ]
+  }
+}

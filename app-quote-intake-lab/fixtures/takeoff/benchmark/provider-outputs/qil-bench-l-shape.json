@@ -1,0 +1,151 @@
+{
+  "schemaVersion": "qil_bench_provider_output_v1",
+  "fixtureId": "qil-bench-l-shape",
+  "version": "1.0.0",
+  "inventory": {
+    "pageCount": 1,
+    "pages": [
+      {
+        "pageNumber": 1,
+        "role": "plan",
+        "notes": [
+          "Benchmark fixture — L-shape"
+        ]
+      }
+    ],
+    "countertopContentPresent": true,
+    "dimensionsAppearReadable": true,
+    "roomLabelsVisible": [
+      "Kitchen"
+    ],
+    "confidence": "high",
+    "warnings": []
+  },
+  "evidence": {
+    "evidence": [
+      {
+        "id": "ev-ls-la-l",
+        "pageNumber": 1,
+        "label": "Leg A length",
+        "value": 96,
+        "unit": "in",
+        "confidence": "high",
+        "locationNote": "Plan text label",
+        "bboxNorm": {
+          "x": 0.1,
+          "y": 0.2,
+          "w": 0.3,
+          "h": 0.05
+        }
+      },
+      {
+        "id": "ev-ls-la-d",
+        "pageNumber": 1,
+        "label": "Leg A depth",
+        "value": 25.5,
+        "unit": "in",
+        "confidence": "high",
+        "locationNote": "Plan text label",
+        "bboxNorm": {
+          "x": 0.1,
+          "y": 0.25,
+          "w": 0.3,
+          "h": 0.05
+        }
+      },
+      {
+        "id": "ev-ls-lb-l",
+        "pageNumber": 1,
+        "label": "Leg B length",
+        "value": 84,
+        "unit": "in",
+        "confidence": "high",
+        "locationNote": "Plan text label",
+        "bboxNorm": {
+          "x": 0.5,
+          "y": 0.2,
+          "w": 0.3,
+          "h": 0.05
+        }
+      },
+      {
+        "id": "ev-ls-lb-d",
+        "pageNumber": 1,
+        "label": "Leg B depth",
+        "value": 25.5,
+        "unit": "in",
+        "confidence": "high",
+        "locationNote": "Plan text label",
+        "bboxNorm": {
+          "x": 0.5,
+          "y": 0.25,
+          "w": 0.3,
+          "h": 0.05
+        }
+      }
+    ],
+    "warnings": []
+  },
+  "geometry": {
+    "pages": [
+      {
+        "pageNumber": 1,
+        "role": "plan",
+        "notes": []
+      }
+    ],
+    "rooms": [
+      {
+        "id": "qil-bench-ls-room-kitchen",
+        "name": "Kitchen",
+        "confidence": "high",
+        "sourcePages": [
+          1
+        ],
+        "backsplashScope": "no_stone",
+        "pieces": [
+          {
+            "id": "qil-bench-ls-piece-leg-a",
+            "label": "Leg A",
+            "lengthIn": 96,
+            "depthIn": 25.5,
+            "shape": "rect",
+            "pieceType": "counter",
+            "evidenceIds": [
+              "ev-ls-la-l",
+              "ev-ls-la-d"
+            ],
+            "cutouts": [],
+            "notes": [],
+            "requiresEstimatorReview": false
+          },
+          {
+            "id": "qil-bench-ls-piece-leg-b",
+            "label": "Leg B",
+            "lengthIn": 84,
+            "depthIn": 25.5,
+            "shape": "rect",
+            "pieceType": "counter",
+            "evidenceIds": [
+              "ev-ls-lb-l",
+              "ev-ls-lb-d"
+            ],
+            "cutouts": [],
+            "notes": [],
+            "requiresEstimatorReview": false
+          }
+        ]
+      }
+    ],
+    "providerProposedTotals": {
+      "countertopSf": 31.88,
+      "backsplashSf": 0,
+      "combinedSf": 31.88,
+      "nonAuthoritative": true
+    },
+    "confidence": "high",
+    "missingDimensions": [],
+    "contradictions": [],
+    "warnings": []
+  }
+}

@@ -1,0 +1,77 @@
+{
+  "schemaVersion": "qil_bench_ground_truth_v1",
+  "fixtureId": "qil-bench-kitchen-island",
+  "version": "1.0.0",
+  "filename": "qil-bench-kitchen-island.pdf",
+  "mimeType": "application/pdf",
+  "contentHash": "0833ca1afd77665f24590158535e90b60b6e78d3e176de6a34a336d97deae9cb",
+  "sizeBytes": 2272,
+  "project": {
+    "name": "Synthetic Quote Intake Lab Fixture — Maple Court Kitchen",
+    "customer": "Example Homes LLC (synthetic)",
+    "address": "100 Example Way, Exampleville, EX 00000",
+    "synthetic": true,
+    "banner": "SYNTHETIC QUOTE INTAKE LAB FIXTURE — NOT A REAL CUSTOMER PLAN"
+  },
+  "pages": [
+    {
+      "pageNumber": 1,
+      "role": "plan"
+    }
+  ],
+  "rooms": [
+    {
+      "id": "qil-room-kitchen",
+      "name": "Kitchen",
+      "pieces": [
+        {
+          "id": "qil-piece-main-run",
+          "label": "Main run",
+          "lengthIn": 120,
+          "depthIn": 25.5,
+          "shape": "rect",
+          "pieceType": "counter",
+          "cutouts": [
+            {
+              "type": "sink",
+              "label": "Undermount sink"
+            }
+          ]
+        },
+        {
+          "id": "qil-piece-island",
+          "label": "Island",
+          "lengthIn": 72,
+          "depthIn": 36,
+          "shape": "rect",
+          "pieceType": "counter",
+          "cutouts": []
+        }
+      ],
+      "backsplash": {
+        "scope": "standard",
+        "linearIn": 120,
+        "heightIn": 4
+      }
+    }
+  ],
+  "expected": {
+    "countertopSf": 39.25,
+    "backsplashSf": 3.33,
+    "fhbSf": 0,
+    "combinedSf": 42.58,
+    "sinkCount": 1,
+    "state": "qil_takeoff_review",
+    "warningCodes": [
+      "PROVIDER_TOTALS_NON_AUTHORITATIVE"
+    ],
+    "readyForReview": true
+  },
+  "toleranceSf": 0.05,
+  "notes": [
+    "Offline benchmark fixture — Reuses verified qil-synth-kitchen-island-plan.pdf bytes. Hash must match 0833ca1…",
+    "No real customer information.",
+    "Sink cutouts are count-only and must never be deducted from measured SF.",
+    "eliteOS deterministic calc is authoritative for measured SF."
+  ]
+}

@@ -1,0 +1,205 @@
+{
+  "schemaVersion": "qil_bench_provider_output_v1",
+  "fixtureId": "qil-bench-multi-room",
+  "version": "1.0.0",
+  "inventory": {
+    "pageCount": 1,
+    "pages": [
+      {
+        "pageNumber": 1,
+        "role": "plan",
+        "notes": [
+          "Benchmark fixture — multi-room"
+        ]
+      }
+    ],
+    "countertopContentPresent": true,
+    "dimensionsAppearReadable": true,
+    "roomLabelsVisible": [
+      "Kitchen",
+      "Bath"
+    ],
+    "confidence": "high",
+    "warnings": []
+  },
+  "evidence": {
+    "evidence": [
+      {
+        "id": "ev-mr-k-l",
+        "pageNumber": 1,
+        "label": "Kitchen main run length",
+        "value": 120,
+        "unit": "in",
+        "confidence": "high",
+        "locationNote": "Plan text label",
+        "bboxNorm": {
+          "x": 0.1,
+          "y": 0.15,
+          "w": 0.3,
+          "h": 0.05
+        }
+      },
+      {
+        "id": "ev-mr-k-d",
+        "pageNumber": 1,
+        "label": "Kitchen main run depth",
+        "value": 25.5,
+        "unit": "in",
+        "confidence": "high",
+        "locationNote": "Plan text label",
+        "bboxNorm": {
+          "x": 0.1,
+          "y": 0.2,
+          "w": 0.3,
+          "h": 0.05
+        }
+      },
+      {
+        "id": "ev-mr-k-sink",
+        "pageNumber": 1,
+        "label": "Kitchen sink cutout",
+        "value": 1,
+        "unit": "count",
+        "confidence": "high",
+        "locationNote": "Fixture annotation",
+        "bboxNorm": {
+          "x": 0.3,
+          "y": 0.18,
+          "w": 0.1,
+          "h": 0.04
+        }
+      },
+      {
+        "id": "ev-mr-b-l",
+        "pageNumber": 1,
+        "label": "Bath vanity length",
+        "value": 60,
+        "unit": "in",
+        "confidence": "high",
+        "locationNote": "Plan text label",
+        "bboxNorm": {
+          "x": 0.6,
+          "y": 0.15,
+          "w": 0.3,
+          "h": 0.05
+        }
+      },
+      {
+        "id": "ev-mr-b-d",
+        "pageNumber": 1,
+        "label": "Bath vanity depth",
+        "value": 22,
+        "unit": "in",
+        "confidence": "high",
+        "locationNote": "Plan text label",
+        "bboxNorm": {
+          "x": 0.6,
+          "y": 0.2,
+          "w": 0.3,
+          "h": 0.05
+        }
+      },
+      {
+        "id": "ev-mr-b-sink",
+        "pageNumber": 1,
+        "label": "Bath sink cutout",
+        "value": 1,
+        "unit": "count",
+        "confidence": "high",
+        "locationNote": "Fixture annotation",
+        "bboxNorm": {
+          "x": 0.75,
+          "y": 0.18,
+          "w": 0.1,
+          "h": 0.04
+        }
+      }
+    ],
+    "warnings": []
+  },
+  "geometry": {
+    "pages": [
+      {
+        "pageNumber": 1,
+        "role": "plan",
+        "notes": []
+      }
+    ],
+    "rooms": [
+      {
+        "id": "qil-bench-mr-room-kitchen",
+        "name": "Kitchen",
+        "confidence": "high",
+        "sourcePages": [
+          1
+        ],
+        "backsplashScope": "no_stone",
+        "pieces": [
+          {
+            "id": "qil-bench-mr-piece-k-main",
+            "label": "Main run",
+            "lengthIn": 120,
+            "depthIn": 25.5,
+            "shape": "rect",
+            "pieceType": "counter",
+            "evidenceIds": [
+              "ev-mr-k-l",
+              "ev-mr-k-d",
+              "ev-mr-k-sink"
+            ],
+            "cutouts": [
+              {
+                "type": "sink",
+                "label": "Undermount sink"
+              }
+            ],
+            "notes": [],
+            "requiresEstimatorReview": false
+          }
+        ]
+      },
+      {
+        "id": "qil-bench-mr-room-bath",
+        "name": "Bath",
+        "confidence": "high",
+        "sourcePages": [
+          1
+        ],
+        "backsplashScope": "no_stone",
+        "pieces": [
+          {
+            "id": "qil-bench-mr-piece-b-vanity",
+            "label": "Vanity",
+            "lengthIn": 60,
+            "depthIn": 22,
+            "shape": "rect",
+            "pieceType": "counter",
+            "evidenceIds": [
+              "ev-mr-b-l",
+              "ev-mr-b-d",
+              "ev-mr-b-sink"
+            ],
+            "cutouts": [
+              {
+                "type": "sink",
+                "label": "Undermount sink"
+              }
+            ],
+            "notes": [],
+            "requiresEstimatorReview": false
+          }
+        ]
+      }
+    ],
+    "providerProposedTotals": {
+      "countertopSf": 30.42,
+      "backsplashSf": 0,
+      "combinedSf": 30.42,
+      "nonAuthoritative": true
+    },
+    "confidence": "high",
+    "missingDimensions": [],
+    "contradictions": [],
+    "warnings": []
+  }
+}

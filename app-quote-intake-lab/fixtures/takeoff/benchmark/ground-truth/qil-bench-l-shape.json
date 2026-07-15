@@ -1,0 +1,73 @@
+{
+  "schemaVersion": "qil_bench_ground_truth_v1",
+  "fixtureId": "qil-bench-l-shape",
+  "version": "1.0.0",
+  "filename": "qil-bench-l-shape.pdf",
+  "mimeType": "application/pdf",
+  "contentHash": "e40aa408b1026cfa1bc48945cd6273ebfb4094bad5fa693e9226f677416e869a",
+  "sizeBytes": 1825,
+  "project": {
+    "name": "Benchmark Fixture — L-Shape Kitchen",
+    "customer": "Example L-Shape LLC (synthetic)",
+    "address": "2 Example Corner Blvd, Exampleville, EX 00002",
+    "synthetic": true,
+    "banner": "SYNTHETIC QUOTE INTAKE LAB FIXTURE — NOT A REAL CUSTOMER PLAN"
+  },
+  "pages": [
+    {
+      "pageNumber": 1,
+      "role": "plan"
+    }
+  ],
+  "rooms": [
+    {
+      "id": "qil-bench-ls-room-kitchen",
+      "name": "Kitchen",
+      "pieces": [
+        {
+          "id": "qil-bench-ls-piece-leg-a",
+          "label": "Leg A",
+          "lengthIn": 96,
+          "depthIn": 25.5,
+          "shape": "rect",
+          "pieceType": "counter",
+          "cutouts": []
+        },
+        {
+          "id": "qil-bench-ls-piece-leg-b",
+          "label": "Leg B",
+          "lengthIn": 84,
+          "depthIn": 25.5,
+          "shape": "rect",
+          "pieceType": "counter",
+          "cutouts": []
+        }
+      ],
+      "backsplash": {
+        "scope": "no_stone",
+        "linearIn": null,
+        "heightIn": null
+      }
+    }
+  ],
+  "expected": {
+    "countertopSf": 31.88,
+    "backsplashSf": 0,
+    "fhbSf": 0,
+    "combinedSf": 31.88,
+    "sinkCount": 0,
+    "state": "qil_takeoff_review",
+    "warningCodes": [
+      "PROVIDER_TOTALS_NON_AUTHORITATIVE"
+    ],
+    "readyForReview": true,
+    "forbiddenCountertopSf": 56
+  },
+  "toleranceSf": 0.05,
+  "notes": [
+    "Offline benchmark fixture — L-shaped kitchen as two distinct pieces. Combined SF must not equal bounding box 56.00 SF.",
+    "No real customer information.",
+    "Sink cutouts are count-only and must never be deducted from measured SF.",
+    "eliteOS deterministic calc is authoritative for measured SF."
+  ]
+}

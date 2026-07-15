@@ -1,0 +1,72 @@
+{
+  "schemaVersion": "qil_bench_ground_truth_v1",
+  "fixtureId": "qil-bench-fhb",
+  "version": "1.0.0",
+  "filename": "qil-bench-fhb.pdf",
+  "mimeType": "application/pdf",
+  "contentHash": "4638dc3d4c69f72b363dec090769ec3672a7bbd6f56d37f2512c8decef98391e",
+  "sizeBytes": 1759,
+  "project": {
+    "name": "Benchmark Fixture — FHB Kitchen",
+    "customer": "Example FHB LLC (synthetic)",
+    "address": "5 Example FHB Rd, Exampleville, EX 00005",
+    "synthetic": true,
+    "banner": "SYNTHETIC QUOTE INTAKE LAB FIXTURE — NOT A REAL CUSTOMER PLAN"
+  },
+  "pages": [
+    {
+      "pageNumber": 1,
+      "role": "plan"
+    }
+  ],
+  "rooms": [
+    {
+      "id": "qil-bench-fhb-room-kitchen",
+      "name": "Kitchen",
+      "pieces": [
+        {
+          "id": "qil-bench-fhb-piece-counter",
+          "label": "Counter",
+          "lengthIn": 60,
+          "depthIn": 25.5,
+          "shape": "rect",
+          "pieceType": "counter",
+          "cutouts": []
+        },
+        {
+          "id": "qil-bench-fhb-piece-fhb",
+          "label": "Full-height backsplash panel",
+          "lengthIn": 60,
+          "depthIn": 48,
+          "shape": "rect",
+          "pieceType": "fhb",
+          "cutouts": []
+        }
+      ],
+      "backsplash": {
+        "scope": "no_stone",
+        "linearIn": null,
+        "heightIn": null
+      }
+    }
+  ],
+  "expected": {
+    "countertopSf": 10.63,
+    "backsplashSf": 0,
+    "fhbSf": 20,
+    "combinedSf": 30.63,
+    "sinkCount": 0,
+    "state": "qil_takeoff_review",
+    "warningCodes": [
+      "PROVIDER_TOTALS_NON_AUTHORITATIVE"
+    ],
+    "readyForReview": true
+  },
+  "toleranceSf": 0.05,
+  "notes": [
+    "Offline benchmark fixture — Counter piece + FHB piece. FHB goes to measuredFhbSf; standard backsplash is 0.",
+    "No real customer information.",
+    "Sink cutouts are count-only and must never be deducted from measured SF.",
+    "eliteOS deterministic calc is authoritative for measured SF."
+  ]
+}

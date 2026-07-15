@@ -1,0 +1,123 @@
+{
+  "schemaVersion": "qil_bench_provider_output_v1",
+  "fixtureId": "qil-bench-conflict",
+  "version": "1.0.0",
+  "inventory": {
+    "pageCount": 1,
+    "pages": [
+      {
+        "pageNumber": 1,
+        "role": "plan",
+        "notes": [
+          "Benchmark fixture — conflicting total"
+        ]
+      }
+    ],
+    "countertopContentPresent": true,
+    "dimensionsAppearReadable": true,
+    "roomLabelsVisible": [
+      "Kitchen"
+    ],
+    "confidence": "medium",
+    "warnings": []
+  },
+  "evidence": {
+    "evidence": [
+      {
+        "id": "ev-cf-l",
+        "pageNumber": 1,
+        "label": "Main run length",
+        "value": 100,
+        "unit": "in",
+        "confidence": "high",
+        "locationNote": "Plan text label",
+        "bboxNorm": {
+          "x": 0.1,
+          "y": 0.2,
+          "w": 0.3,
+          "h": 0.05
+        }
+      },
+      {
+        "id": "ev-cf-d",
+        "pageNumber": 1,
+        "label": "Main run depth",
+        "value": 25.5,
+        "unit": "in",
+        "confidence": "high",
+        "locationNote": "Plan text label",
+        "bboxNorm": {
+          "x": 0.1,
+          "y": 0.25,
+          "w": 0.3,
+          "h": 0.05
+        }
+      },
+      {
+        "id": "ev-cf-total",
+        "pageNumber": 1,
+        "label": "Plan written total",
+        "value": 50,
+        "unit": "SF",
+        "confidence": "high",
+        "locationNote": "Fixture annotation — written total",
+        "bboxNorm": {
+          "x": 0.5,
+          "y": 0.4,
+          "w": 0.3,
+          "h": 0.05
+        }
+      }
+    ],
+    "warnings": []
+  },
+  "geometry": {
+    "pages": [
+      {
+        "pageNumber": 1,
+        "role": "plan",
+        "notes": []
+      }
+    ],
+    "rooms": [
+      {
+        "id": "qil-bench-cf-room-kitchen",
+        "name": "Kitchen",
+        "confidence": "medium",
+        "sourcePages": [
+          1
+        ],
+        "backsplashScope": "no_stone",
+        "pieces": [
+          {
+            "id": "qil-bench-cf-piece-main",
+            "label": "Main run",
+            "lengthIn": 100,
+            "depthIn": 25.5,
+            "shape": "rect",
+            "pieceType": "counter",
+            "evidenceIds": [
+              "ev-cf-l",
+              "ev-cf-d"
+            ],
+            "cutouts": [],
+            "notes": [],
+            "requiresEstimatorReview": false
+          }
+        ]
+      }
+    ],
+    "providerProposedTotals": {
+      "countertopSf": 50,
+      "backsplashSf": 0,
+      "combinedSf": 50,
+      "nonAuthoritative": true
+    },
+    "confidence": "medium",
+    "missingDimensions": [],
+    "contradictions": [
+      "Labeled plan total 50 SF conflicts with dimension-derived 17.71 SF"
+    ],
+    "warnings": []
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "schemaVersion": "qil_bench_ground_truth_v1",
+  "fixtureId": "qil-bench-straight",
+  "version": "1.0.0",
+  "filename": "qil-bench-straight.pdf",
+  "mimeType": "application/pdf",
+  "contentHash": "85548a59b49ee2dcea30d6136e1513fa1c48532adc5855d765ff9176f9ca045c",
+  "sizeBytes": 1556,
+  "project": {
+    "name": "Benchmark Fixture — Straight Run Kitchen",
+    "customer": "Example Straight LLC (synthetic)",
+    "address": "1 Example Straight Ave, Exampleville, EX 00001",
+    "synthetic": true,
+    "banner": "SYNTHETIC QUOTE INTAKE LAB FIXTURE — NOT A REAL CUSTOMER PLAN"
+  },
+  "pages": [
+    {
+      "pageNumber": 1,
+      "role": "plan"
+    }
+  ],
+  "rooms": [
+    {
+      "id": "qil-bench-s1-room-kitchen",
+      "name": "Kitchen",
+      "pieces": [
+        {
+          "id": "qil-bench-s1-piece-main",
+          "label": "Main run",
+          "lengthIn": 120,
+          "depthIn": 25.5,
+          "shape": "rect",
+          "pieceType": "counter",
+          "cutouts": [
+            {
+              "type": "sink",
+              "label": "Undermount sink"
+            }
+          ]
+        }
+      ],
+      "backsplash": {
+        "scope": "no_stone",
+        "linearIn": null,
+        "heightIn": null
+      }
+    }
+  ],
+  "expected": {
+    "countertopSf": 21.25,
+    "backsplashSf": 0,
+    "fhbSf": 0,
+    "combinedSf": 21.25,
+    "sinkCount": 1,
+    "state": "qil_takeoff_review",
+    "warningCodes": [
+      "PROVIDER_TOTALS_NON_AUTHORITATIVE"
+    ],
+    "readyForReview": true
+  },
+  "toleranceSf": 0.05,
+  "notes": [
+    "Offline benchmark fixture — Straight single-piece countertop with one sink, no stone backsplash.",
+    "No real customer information.",
+    "Sink cutouts are count-only and must never be deducted from measured SF.",
+    "eliteOS deterministic calc is authoritative for measured SF."
+  ]
+}

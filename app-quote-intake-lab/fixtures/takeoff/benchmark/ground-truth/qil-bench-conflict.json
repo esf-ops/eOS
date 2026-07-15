@@ -1,0 +1,63 @@
+{
+  "schemaVersion": "qil_bench_ground_truth_v1",
+  "fixtureId": "qil-bench-conflict",
+  "version": "1.0.0",
+  "filename": "qil-bench-conflict.pdf",
+  "mimeType": "application/pdf",
+  "contentHash": "8859e556ce5089fd16ff45fc0663c30c6d4ccd9e3809923d2b2fe5cf446c5413",
+  "sizeBytes": 1644,
+  "project": {
+    "name": "Benchmark Fixture — Conflicting Stated Total",
+    "customer": "Example Conflict LLC (synthetic)",
+    "address": "7 Example Conflict Ave, Exampleville, EX 00007",
+    "synthetic": true,
+    "banner": "SYNTHETIC QUOTE INTAKE LAB FIXTURE — NOT A REAL CUSTOMER PLAN"
+  },
+  "pages": [
+    {
+      "pageNumber": 1,
+      "role": "plan"
+    }
+  ],
+  "rooms": [
+    {
+      "id": "qil-bench-cf-room-kitchen",
+      "name": "Kitchen",
+      "pieces": [
+        {
+          "id": "qil-bench-cf-piece-main",
+          "label": "Main run",
+          "lengthIn": 100,
+          "depthIn": 25.5,
+          "shape": "rect",
+          "pieceType": "counter",
+          "cutouts": []
+        }
+      ],
+      "backsplash": {
+        "scope": "no_stone",
+        "linearIn": null,
+        "heightIn": null
+      }
+    }
+  ],
+  "expected": {
+    "countertopSf": 17.71,
+    "backsplashSf": 0,
+    "fhbSf": 0,
+    "combinedSf": 17.71,
+    "sinkCount": 0,
+    "state": "qil_takeoff_manual_review",
+    "warningCodes": [
+      "CONFLICTING_DIMENSION"
+    ],
+    "readyForReview": false
+  },
+  "toleranceSf": 0.05,
+  "notes": [
+    "Offline benchmark fixture — 100×25.5 = 17.71 CT SF; provider stated total 50 SF is false. CONFLICTING_DIMENSION → manual_review.",
+    "No real customer information.",
+    "Sink cutouts are count-only and must never be deducted from measured SF.",
+    "eliteOS deterministic calc is authoritative for measured SF."
+  ]
+}

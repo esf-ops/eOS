@@ -1,0 +1,63 @@
+{
+  "schemaVersion": "qil_bench_ground_truth_v1",
+  "fixtureId": "qil-bench-missing-dim",
+  "version": "1.0.0",
+  "filename": "qil-bench-missing-dim.pdf",
+  "mimeType": "application/pdf",
+  "contentHash": "2c2ef3effe054bf88ee8aa6e0c8c2ef90b032c91f1e58d37050038f3fdf73a3b",
+  "sizeBytes": 1384,
+  "project": {
+    "name": "Benchmark Fixture — Missing Dimension",
+    "customer": "Example Missing LLC (synthetic)",
+    "address": "6 Example Missing St, Exampleville, EX 00006",
+    "synthetic": true,
+    "banner": "SYNTHETIC QUOTE INTAKE LAB FIXTURE — NOT A REAL CUSTOMER PLAN"
+  },
+  "pages": [
+    {
+      "pageNumber": 1,
+      "role": "plan"
+    }
+  ],
+  "rooms": [
+    {
+      "id": "qil-bench-md-room-kitchen",
+      "name": "Kitchen",
+      "pieces": [
+        {
+          "id": "qil-bench-md-piece-main",
+          "label": "Main run",
+          "lengthIn": 90,
+          "depthIn": null,
+          "shape": "rect",
+          "pieceType": "counter",
+          "cutouts": []
+        }
+      ],
+      "backsplash": {
+        "scope": "no_stone",
+        "linearIn": null,
+        "heightIn": null
+      }
+    }
+  ],
+  "expected": {
+    "countertopSf": 0,
+    "backsplashSf": 0,
+    "fhbSf": 0,
+    "combinedSf": 0,
+    "sinkCount": 0,
+    "state": "qil_takeoff_manual_review",
+    "warningCodes": [
+      "MISSING_DIMENSION"
+    ],
+    "readyForReview": false
+  },
+  "toleranceSf": 0.05,
+  "notes": [
+    "Offline benchmark fixture — Piece with length 90 but depth null/omitted. MISSING_DIMENSION approval_blocking → manual_review.",
+    "No real customer information.",
+    "Sink cutouts are count-only and must never be deducted from measured SF.",
+    "eliteOS deterministic calc is authoritative for measured SF."
+  ]
+}
